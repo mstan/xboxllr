@@ -120,11 +120,60 @@ bool UnicornFloor::setup_flat_segments(uint32_t gdt_addr) {
     return true;
 }
 
+void UnicornFloor::on_io(IoInCb in_cb, IoOutCb out_cb) {
+    io_in_cb_ = std::move(in_cb);
+    io_out_cb_ = std::move(out_cb);
+    uc_engine* uc = reinterpret_cast<uc_engine*>(uc_);
+    // UC_HOOK_INSN with a specific x86 instruction id (IN/OUT). Registered once, when the
+    // servicing callbacks are installed.
+    if (!hook_in_) {
+        uc_hook h = 0;
+        uc_hook_add(uc, &h, UC_HOOK_INSN, reinterpret_cast<void*>(&UnicornFloor::in_trampoline),
+                    this, 1, 0, UC_X86_INS_IN);
+        hook_in_ = from_hook(h);
+    }
+    if (!hook_out_) {
+        uc_hook h = 0;
+        uc_hook_add(uc, &h, UC_HOOK_INSN, reinterpret_cast<void*>(&UnicornFloor::out_trampoline),
+                    this, 1, 0, UC_X86_INS_OUT);
+        hook_out_ = from_hook(h);
+    }
+}
+
+bool UnicornFloor::map_mmio(uint32_t addr, size_t size, MmioReadCb r, MmioWriteCb w) {
+    uc_engine* uc = reinterpret_cast<uc_engine*>(uc_);
+    auto region = std::make_unique<MmioRegion>();
+    region->self = this;
+    region->base = addr;
+    region->r = std::move(r);
+    region->w = std::move(w);
+    MmioRegion* raw = region.get();
+    uc_err e = uc_mmio_map(uc, addr, size, &UnicornFloor::mmio_read_trampoline, raw,
+                           &UnicornFloor::mmio_write_trampoline, raw);
+    if (e != UC_ERR_OK) return false;
+    mmio_regions_.push_back(std::move(region));
+    return true;
+}
+
+void UnicornFloor::request_stop(std::string reason) {
+    stop_reason_ = std::move(reason);
+    uc_emu_stop(reinterpret_cast<uc_engine*>(uc_));
+}
+
 uint64_t UnicornFloor::run(uint32_t start_eip, uint64_t max_insns, std::string& err) {
     uc_engine* uc = reinterpret_cast<uc_engine*>(uc_);
     const uint64_t before = seq_;
+    stop_reason_.clear();
     uc_err e = uc_emu_start(uc, start_eip, 0, /*timeout=*/0, /*count=*/max_insns);
-    if (e != UC_ERR_OK) {
+    if (!stop_reason_.empty()) {
+        // A device/servicing callback requested a loud stop; its reason wins over Unicorn's
+        // generic "stopped" code.
+        X86Regs r = get_regs();
+        char buf[320];
+        std::snprintf(buf, sizeof(buf), "%s (eip=0x%08x, after %llu insns)", stop_reason_.c_str(),
+                      r.eip, static_cast<unsigned long long>(seq_ - before));
+        err = buf;
+    } else if (e != UC_ERR_OK) {
         X86Regs r = get_regs();
         char buf[256];
         std::snprintf(buf, sizeof(buf), "unicorn fault: %s (eip=0x%08x, after %llu insns)",
@@ -151,6 +200,31 @@ void UnicornFloor::mem_trampoline(uc_struct*, int type, uint64_t addr, int size,
     ev.size = static_cast<uint8_t>(size);
     ev.value = static_cast<uint64_t>(value);
     if (self->mem_cb_) self->mem_cb_(ev);
+}
+
+uint32_t UnicornFloor::in_trampoline(uc_struct*, uint32_t port, int size, void* user) {
+    auto* self = static_cast<UnicornFloor*>(user);
+    return self->io_in_cb_ ? self->io_in_cb_(static_cast<uint16_t>(port), size) : 0;
+}
+
+void UnicornFloor::out_trampoline(uc_struct*, uint32_t port, int size, uint32_t value,
+                                  void* user) {
+    auto* self = static_cast<UnicornFloor*>(user);
+    if (self->io_out_cb_) self->io_out_cb_(static_cast<uint16_t>(port), size, value);
+}
+
+uint64_t UnicornFloor::mmio_read_trampoline(uc_struct*, uint64_t offset, unsigned size,
+                                            void* user) {
+    auto* reg = static_cast<MmioRegion*>(user);
+    return reg->r ? reg->r(reg->base + static_cast<uint32_t>(offset), static_cast<int>(size)) : 0;
+}
+
+void UnicornFloor::mmio_write_trampoline(uc_struct*, uint64_t offset, unsigned size,
+                                         uint64_t value, void* user) {
+    auto* reg = static_cast<MmioRegion*>(user);
+    if (reg->w)
+        reg->w(reg->base + static_cast<uint32_t>(offset), static_cast<int>(size),
+               static_cast<uint32_t>(value));
 }
 
 // Silence unused-parameter warnings for the hook handles we retain for lifetime clarity.

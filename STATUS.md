@@ -3,6 +3,47 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-07-16 — A2c→A2e: 2BL boots end-to-end; the REAL KERNEL runs to HAL init
+
+The I/O fabric turned the 2BL from an 8086-instruction dead-end into a full firmware boot: it
+now runs the entire 2BL and **jumps into the real kernel, which executes ~16.24M instructions
+of early/HAL init** before stopping at the first unmodelled device. Concretely, the 2BL:
+SMC PIC challenge/handshake → MCPX ROM-overlay disable (LPC cfg 0x80) → SHA-1 hash (implicit
+pass, real flash mapped) → RC4 decrypt → **LZX decompress of the kernel (~16M insns)** → jump
+to kernel entry at 0x80010000. The kernel then read its own PCI identity (LPC rev 0xB2, PM BAR
+0x8001), poked ACPI GPIO, and stopped at `out 0x2e` — the **LPC47M157 SuperIO** config probe.
+
+- **CPU floor gained an I/O fabric** (`src/cpu/unicorn_floor.*`, `include/xlle/cpu_floor.hpp`):
+  `on_io` via UC_HOOK_INSN (IN/OUT), `map_mmio` via `uc_mmio_map`, and `request_stop` so a
+  device can halt the machine loudly. New `IoEvent`; MMIO events reuse `MemEvent`.
+- **Device fabric in the machine** (`src/machine/{io_device,mmio_device}.hpp`, `machine.*`):
+  port-I/O + MMIO dispatch by range, **loud fault-stop on any unhandled port/addr** (never a
+  silent no-op), each access fed to an always-on ring. `FaultFn` lets a device request the
+  stop with exact context.
+- **Devices modelled** (all harvested from xemu, verified vs source):
+  - **AMD756 SMBus** (`smbus.*`) at I/O 0xC000 + **SMC (PIC16LC)** at addr 0x10 — the challenge
+    reads 0x1c–0x1f = 0x52/72/ea/46, handshake completes.
+  - **PCI config** (`pci.*`): 0xCF8/0xCFC mechanism + the 10 bus-0 functions with real
+    identities; LPC PM BAR pre-set to 0x8001 (retail path), SMBus BAR to 0xC001. LPC cfg-0x80
+    bit1 = MCPX ROM-overlay disable (no-op: flash always mapped, overlay is M9).
+  - **NV2A shell** (`nv2a.*`): 16 MB aperture, engine-block map; PMC_BOOT_0=0x02A000A3 (matches
+    silicon), PBUS PCI mirror, PSTRAPS. Value read at PSTRAPS is discarded by the 2BL.
+  - **ACPI/PM** (`pm.*`) behind the LPC I/O BAR at 0x8000: PM1/GPE/GPIO + a **monotonic PM
+    timer stand-in** (kernel stall/calibration loops progress; real 3.375 MHz cadence TBD).
+- **Value policy for NV2A/PM** (documented in the headers): registers the boot reads are
+  modelled with faithful values (hardware capture where available, else xemu); unmodelled
+  registers inside a real block return xemu's default (0) **and are logged** (a debt to replace
+  with hardware truth via the oracle); aperture holes fault loudly. xemu boots the same retail
+  2BL with these defaults, so they are boot-correct witnesses.
+- **Verified:** `ctest` still 3/3 (~0.1 s, no regression). `xlle --boot <flash> --run2bl <bldr>
+  --max-insns 200000000` reaches kernel HAL init in ~16.24M insns, final eip 0x800357b8,
+  fault-stop at `out 0x2e` (SuperIO).
+- **Open / next (A2e):** LPC47M157 SuperIO (config-port device), then the functional
+  interrupt/timer stack the kernel needs — **i8259 PIC (0x20/0xA0), i8254 PIT (0x40), mc146818
+  RTC (0x70)** and interrupt delivery into Unicorn. Also to confirm against the oracle when the
+  console is next on: PM BAR = 0x8001 for this v1.1 board (v1.1 also has a PMBASE alias at LPC
+  cfg 0x84), and the real PSTRAPS / PM-timer rate.
+
 ## 2026-07-16 — FATX HDD image built + verified; xemu still deferred
 
 - **`machine/xbox-hdd.img` (8GB FATX) BUILT and independently VERIFIED** (pyfatx): C: has

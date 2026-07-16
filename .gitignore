@@ -1,5 +1,7 @@
 # Copyrighted / per-console secret bytes — NEVER commit. See docs/INPUTS.md.
-machine/
+# NOTE: anchored to the repo root so it only ignores a top-level machine/ dump dir and does
+# NOT swallow the src/machine/ device sources (an unanchored `machine/` matched both).
+/machine/
 *.bin
 *.raw
 flash*.bin

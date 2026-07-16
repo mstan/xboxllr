@@ -153,11 +153,14 @@ int main(int argc, char** argv) {
     bool serve = false, window = false;
     const char* boot_flash = nullptr;
     const char* run2bl = nullptr;
+    uint64_t max_insns = 128ull * 1000 * 1000;  // 2BL kernel LZX decompress needs tens of M
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--serve")) serve = true;
         else if (!std::strcmp(argv[i], "--window")) window = true;
         else if (!std::strcmp(argv[i], "--boot") && i + 1 < argc) boot_flash = argv[++i];
         else if (!std::strcmp(argv[i], "--run2bl") && i + 1 < argc) run2bl = argv[++i];
+        else if (!std::strcmp(argv[i], "--max-insns") && i + 1 < argc)
+            max_insns = std::strtoull(argv[++i], nullptr, 0);
     }
 
     // --boot <flash.bin>: stand up the machine (RAM + flash) and smoke-test the map.
@@ -187,28 +190,52 @@ int main(int argc, char** argv) {
                 std::fprintf(stderr, "[2bl] load failed: %s\n", run2bl);
                 return 1;
             }
-            std::vector<uint32_t> trace;
-            mach.cpu().on_retired([&](const RetiredInsn& e) {
-                trace.push_back(e.eip);
-                if (trace.size() > 16) trace.erase(trace.begin());
+            // Stand up the I/O fabric (PCI host, SMBus+SMC, NV2A) the 2BL platform-init drives.
+            mach.init_devices();
+            std::vector<IoEvent> io_log;
+            mach.on_io_event([&](const IoEvent& e) {
+                io_log.push_back(e);
+                if (io_log.size() > 64) io_log.erase(io_log.begin());
             });
+            std::vector<MemEvent> mmio_log;
+            mach.on_mmio_event([&](const MemEvent& e) {
+                mmio_log.push_back(e);
+                if (mmio_log.size() > 64) mmio_log.erase(mmio_log.begin());
+            });
+            // Keep the last 16 PCs in a fixed circular buffer (cheap on the per-insn hot path;
+            // this fires for every one of the tens of millions of decompression instructions).
+            uint32_t trace[16] = {0};
+            uint64_t trace_n = 0;
+            mach.cpu().on_retired([&](const RetiredInsn& e) { trace[trace_n++ & 15] = e.eip; });
             X86Regs r{};
             r.eip = 0x901ee;
             r.esp = 0x00400000;  // scratch stack in RAM (2BL sets its own later)
             r.eflags = 0x2;
             mach.cpu().set_regs(r);
             mach.cpu().setup_flat_segments(0x1000);  // MCPX handoff GDT (code=0x08, data=0x10)
-            std::printf("[2bl] entering decrypted 2BL at 0x901ee ...\n");
+            std::printf("[2bl] entering decrypted 2BL at 0x901ee (budget %llu insns) ...\n",
+                        (unsigned long long)max_insns);
             std::string err2;
-            uint64_t n = mach.run(0x901ee, 2000000, err2);
+            uint64_t n = mach.run(0x901ee, max_insns, err2);
             X86Regs f = mach.cpu().get_regs();
             std::printf("[2bl] retired %llu instructions; final eip=0x%08x eax=0x%08x ecx=0x%08x\n",
                         (unsigned long long)n, f.eip, f.eax, f.ecx);
             if (!err2.empty()) std::printf("[2bl] STOPPED: %s\n", err2.c_str());
             else std::printf("[2bl] ran to instruction budget without fault\n");
             std::printf("[2bl] last PCs:");
-            for (uint32_t pc : trace) std::printf(" %05x", pc);
+            uint64_t first = trace_n > 16 ? trace_n - 16 : 0;
+            for (uint64_t i = first; i < trace_n; ++i) std::printf(" %05x", trace[i & 15]);
             std::printf("\n");
+            std::printf("[2bl] MCPX ROM overlay disabled by firmware: %s\n",
+                        mach.pci() && mach.pci()->mcpx_rom_disabled() ? "yes" : "no");
+            std::printf("[2bl] last %zu I/O ops:\n", io_log.size());
+            for (const auto& e : io_log)
+                std::printf("      %-3s port=0x%04x size=%u value=0x%08x\n", e.out ? "OUT" : "IN",
+                            e.port, e.size, e.value);
+            std::printf("[2bl] last %zu MMIO ops:\n", mmio_log.size());
+            for (const auto& e : mmio_log)
+                std::printf("      %-3s addr=0x%08x size=%u value=0x%08x\n",
+                            e.write ? "WR" : "RD", e.addr, e.size, e.value);
             return err2.empty() ? 0 : 2;
         }
         std::printf("[machine] harness OK. NEXT: MCPX X-code repro + 2BL RC4-decrypt to boot.\n");

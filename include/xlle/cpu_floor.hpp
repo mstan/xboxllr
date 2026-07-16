@@ -35,6 +35,13 @@ struct MemEvent {
     uint8_t  size;   // access width in bytes
     uint64_t value;
 };
+struct IoEvent {
+    uint64_t seq;
+    uint8_t  out;    // 0 = in (port read), 1 = out (port write)
+    uint16_t port;
+    uint8_t  size;   // access width in bytes (1/2/4)
+    uint32_t value;  // value written (out) or returned (in)
+};
 
 // Wide / control registers addressed by name for typed read/write. Added as the fixture
 // corpus reaches x87/SSE and the control bits needed to enable them (PRINCIPLES §5: scope
@@ -45,6 +52,18 @@ enum class XReg { CR0, CR4, MXCSR, XMM0, XMM1, XMM2, ST0, ST1, MM0 };
 // the floor knowing about ring types.
 using RetiredCb = std::function<void(const RetiredInsn&)>;
 using MemCb     = std::function<void(const MemEvent&)>;
+
+// I/O-port servicing. Unlike memory, port space is not backed by RAM — the floor cannot
+// answer an `in` on its own, so `IoInCb` IS the functional read path (its return value is
+// what the guest reads), and `IoOutCb` is the functional write path. The platform routes
+// these to device models and fault-stops loudly on an unhandled port (PRINCIPLES §3).
+using IoInCb  = std::function<uint32_t(uint16_t port, int size)>;
+using IoOutCb = std::function<void(uint16_t port, int size, uint32_t value)>;
+
+// Memory-mapped I/O servicing for a device region (e.g. NV2A at 0xFD000000). Same contract:
+// the callbacks ARE the functional path; the region is not backed by RAM.
+using MmioReadCb  = std::function<uint32_t(uint32_t addr, int size)>;
+using MmioWriteCb = std::function<void(uint32_t addr, int size, uint32_t value)>;
 
 class CpuFloor {
 public:
@@ -72,6 +91,18 @@ public:
     // Instrumentation. Installed once; fired for every retired instruction / memory access.
     virtual void on_retired(RetiredCb cb) = 0;
     virtual void on_mem(MemCb cb) = 0;
+
+    // Install the I/O-port servicing callbacks (see IoInCb/IoOutCb). Installed once.
+    virtual void on_io(IoInCb in_cb, IoOutCb out_cb) = 0;
+
+    // Register a device MMIO region; reads/writes in [addr, addr+size) route to the callbacks
+    // instead of RAM. Returns false if the region could not be mapped.
+    virtual bool map_mmio(uint32_t addr, size_t size, MmioReadCb r, MmioWriteCb w) = 0;
+
+    // Request a loud fault-stop from within a device/servicing callback: emulation halts and
+    // `reason` is surfaced by run()'s `err`. This is how a device reports "unimplemented"
+    // (PRINCIPLES §3: a halt records the exact context, never a silent default).
+    virtual void request_stop(std::string reason) = 0;
 
     // Execute up to `max_insns` instructions starting at the current EIP. Returns the
     // number actually retired. `err` is set to a human-readable reason on fault-stop

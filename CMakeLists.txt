@@ -56,7 +56,12 @@ target_include_directories(xlle_cpu PRIVATE ${unicorn_SOURCE_DIR}/include)
 target_link_libraries(xlle_cpu PUBLIC unicorn)
 
 # --- machine model (memory map + devices around the CPU floor) ---
-add_library(xlle_machine STATIC src/machine/machine.cpp)
+add_library(xlle_machine STATIC
+  src/machine/machine.cpp
+  src/machine/pci.cpp
+  src/machine/smbus.cpp
+  src/machine/nv2a.cpp
+  src/machine/pm.cpp)
 target_include_directories(xlle_machine PUBLIC ${XLLE_INCLUDES})
 target_link_libraries(xlle_machine PUBLIC xlle_cpu)
 
