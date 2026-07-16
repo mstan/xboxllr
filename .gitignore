@@ -1,0 +1,32 @@
+# Copyrighted / per-console secret bytes — NEVER commit. See docs/INPUTS.md.
+machine/
+*.bin
+*.raw
+flash*.bin
+mcpx*.bin
+eeprom*.bin
+bios/
+hdd*.img
+hdd*.raw
+kernel*.img
+*.xbe
+*.xiso
+*.iso
+disc/
+
+# Build + generated (evidence, not authority)
+build/
+out/
+generated/
+*.blockpack
+traces/
+cosim-logs/
+*.jsonl
+
+# External reference / harvest checkouts (kept out of tree; live in the workspace parent)
+xemu/
+Cxbx-Reloaded/
+xboxrecomp-ref/
+cromwell/
+unicorn/
+refs/
