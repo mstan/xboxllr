@@ -65,6 +65,10 @@ public:
     virtual bool read_reg(XReg r, void* buf, size_t n) = 0;
     virtual bool write_reg(XReg r, const void* buf, size_t n) = 0;
 
+    // Install a standard flat protected-mode GDT (code=0x08, data=0x10) at gdt_addr and
+    // load GDTR + segment registers — reproduces the MCPX->2BL handoff environment.
+    virtual bool setup_flat_segments(uint32_t gdt_addr) = 0;
+
     // Instrumentation. Installed once; fired for every retired instruction / memory access.
     virtual void on_retired(RetiredCb cb) = 0;
     virtual void on_mem(MemCb cb) = 0;

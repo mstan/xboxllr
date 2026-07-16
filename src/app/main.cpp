@@ -152,10 +152,12 @@ std::string dump_mem(size_t n) {
 int main(int argc, char** argv) {
     bool serve = false, window = false;
     const char* boot_flash = nullptr;
+    const char* run2bl = nullptr;
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--serve")) serve = true;
         else if (!std::strcmp(argv[i], "--window")) window = true;
         else if (!std::strcmp(argv[i], "--boot") && i + 1 < argc) boot_flash = argv[++i];
+        else if (!std::strcmp(argv[i], "--run2bl") && i + 1 < argc) run2bl = argv[++i];
     }
 
     // --boot <flash.bin>: stand up the machine (RAM + flash) and smoke-test the map.
@@ -177,6 +179,38 @@ int main(int argc, char** argv) {
                     hdr[6], hdr[7]);
         std::printf("[machine] reset @0xFFFFFFF0: %02x %02x %02x %02x (expect eb c6 = jmp short)\n",
                     rst[0], rst[1], rst[2], rst[3]);
+        if (run2bl) {
+            // Load the decrypted 2BL at its RAM base (0x90000, entry 0x901ee) and run it.
+            // MCPX handoff state approximated (protected mode, flat segs, a scratch stack);
+            // the prologue is CR0/CR3/MTRR setup with no stack use, so this suffices to start.
+            if (!mach.load_blob(0x90000, run2bl)) {
+                std::fprintf(stderr, "[2bl] load failed: %s\n", run2bl);
+                return 1;
+            }
+            std::vector<uint32_t> trace;
+            mach.cpu().on_retired([&](const RetiredInsn& e) {
+                trace.push_back(e.eip);
+                if (trace.size() > 16) trace.erase(trace.begin());
+            });
+            X86Regs r{};
+            r.eip = 0x901ee;
+            r.esp = 0x00400000;  // scratch stack in RAM (2BL sets its own later)
+            r.eflags = 0x2;
+            mach.cpu().set_regs(r);
+            mach.cpu().setup_flat_segments(0x1000);  // MCPX handoff GDT (code=0x08, data=0x10)
+            std::printf("[2bl] entering decrypted 2BL at 0x901ee ...\n");
+            std::string err2;
+            uint64_t n = mach.run(0x901ee, 2000000, err2);
+            X86Regs f = mach.cpu().get_regs();
+            std::printf("[2bl] retired %llu instructions; final eip=0x%08x eax=0x%08x ecx=0x%08x\n",
+                        (unsigned long long)n, f.eip, f.eax, f.ecx);
+            if (!err2.empty()) std::printf("[2bl] STOPPED: %s\n", err2.c_str());
+            else std::printf("[2bl] ran to instruction budget without fault\n");
+            std::printf("[2bl] last PCs:");
+            for (uint32_t pc : trace) std::printf(" %05x", pc);
+            std::printf("\n");
+            return err2.empty() ? 0 : 2;
+        }
         std::printf("[machine] harness OK. NEXT: MCPX X-code repro + 2BL RC4-decrypt to boot.\n");
         return 0;
     }

@@ -100,6 +100,26 @@ bool UnicornFloor::write_reg(XReg r, const void* buf, size_t) {
            UC_ERR_OK;
 }
 
+bool UnicornFloor::setup_flat_segments(uint32_t gdt_addr) {
+    uc_engine* uc = reinterpret_cast<uc_engine*>(uc_);
+    // 3 descriptors: null, flat 32-bit code (0x08), flat 32-bit data (0x10).
+    uint64_t gdt[3] = {
+        0x0000000000000000ull,
+        0x00CF9A000000FFFFull,  // base 0, limit 4GB, code exec/read, G=1 D=1
+        0x00CF92000000FFFFull,  // base 0, limit 4GB, data read/write, G=1 B=1
+    };
+    if (uc_mem_write(uc, gdt_addr, gdt, sizeof(gdt)) != UC_ERR_OK) return false;
+    uc_x86_mmr gdtr{};
+    gdtr.base = gdt_addr;
+    gdtr.limit = sizeof(gdt) - 1;
+    if (uc_reg_write(uc, UC_X86_REG_GDTR, &gdtr) != UC_ERR_OK) return false;
+    int cs = 0x08, ds = 0x10;
+    uc_reg_write(uc, UC_X86_REG_CS, &cs);
+    for (int r : {UC_X86_REG_DS, UC_X86_REG_ES, UC_X86_REG_SS, UC_X86_REG_FS, UC_X86_REG_GS})
+        uc_reg_write(uc, r, &ds);
+    return true;
+}
+
 uint64_t UnicornFloor::run(uint32_t start_eip, uint64_t max_insns, std::string& err) {
     uc_engine* uc = reinterpret_cast<uc_engine*>(uc_);
     const uint64_t before = seq_;
