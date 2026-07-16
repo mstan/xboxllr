@@ -30,7 +30,7 @@
 extern struct netif *g_pnetif;
 
 #define AGENT_PORT 4380
-#define AGENT_VER  "xlle-agent v0.1"
+#define AGENT_VER  "xlle-agent v0.2"
 #define MAX_RW     4096
 
 static void send_str(int fd, const char *s) { send(fd, s, (int)strlen(s), 0); }
@@ -56,6 +56,34 @@ static void bytes_to_hex(const uint8_t *in, int n, char *out) {
     static const char *H = "0123456789abcdef";
     for (int i = 0; i < n; i++) { out[2*i] = H[in[i] >> 4]; out[2*i+1] = H[in[i] & 0xF]; }
     out[2*n] = 0;
+}
+
+// Fault-guard (v0.2): is [a, a+len) safe to read? RAM is validated per-page via the kernel;
+// the NV2A/MCPX MMIO block and the flash mirrors (minus the top 512B that hung v0.1) are
+// whitelisted as memory-mapped. Everything else is refused rather than faulting the agent.
+static int addr_readable(uint32_t a, uint32_t len) {
+    uint32_t end = a + len;
+    if (end < a) return 0;                                  // wrap
+    if (a >= 0xFD000000 && end <= 0xFE000000) return 1;     // NV2A + MCPX MMIO
+    if (a >= 0xFF000000 && end <= 0xFFFFFE00) return 1;     // flash mirrors (exclude top 512B)
+    if (end <= 0x08000000) {                                // RAM window
+        for (uint32_t p = a & ~0xFFFu; p < end; p += 0x1000)
+            if (!MmIsAddressValid((PVOID)(uintptr_t)p)) return 0;
+        return 1;
+    }
+    return 0;
+}
+// Writes: RAM (validated) and NV2A registers only. NEVER flash — a stray write could brick it.
+static int addr_writable(uint32_t a, uint32_t len) {
+    uint32_t end = a + len;
+    if (end < a) return 0;
+    if (a >= 0xFD000000 && end <= 0xFE000000) return 1;     // NV2A registers (register probing)
+    if (end <= 0x08000000) {
+        for (uint32_t p = a & ~0xFFFu; p < end; p += 0x1000)
+            if (!MmIsAddressValid((PVOID)(uintptr_t)p)) return 0;
+        return 1;
+    }
+    return 0;
 }
 
 // Read one \n-terminated line (returns length without newline, or <=0 on close/error).
@@ -100,24 +128,39 @@ static void handle_client(int fd) {
                      XboxKrnlVersion.Build, XboxKrnlVersion.Qfe,
                      (unsigned)KeTickCount, AGENT_PORT);
             send_str(fd, hex);
+        } else if (!strncmp(line, "RB ", 3)) {
+            uint32_t addr = 0, len = 0;                 // binary bulk read (efficient dumps)
+            if (sscanf(line + 3, "%x %u", &addr, &len) == 2 && len > 0 && len <= (1u << 20) &&
+                addr_readable(addr, len)) {
+                snprintf(hex, sizeof(hex), "OK %u\n", len);
+                send_str(fd, hex);
+                uint32_t sent = 0;                      // stream raw bytes straight from memory
+                while (sent < len) {
+                    int chunk = (len - sent > 8192) ? 8192 : (int)(len - sent);
+                    int w = send(fd, (const char *)(uintptr_t)(addr + sent), chunk, 0);
+                    if (w <= 0) break;
+                    sent += (uint32_t)w;
+                }
+            } else send_str(fd, "ERR bad/unsafe addr\n");
         } else if (!strncmp(line, "R ", 2)) {
             uint32_t addr = 0; int len = 0;
-            if (sscanf(line + 2, "%x %d", &addr, &len) == 2 && len > 0 && len <= MAX_RW) {
-                memcpy(rw, (const void *)addr, len);   // direct guest-memory read
+            if (sscanf(line + 2, "%x %d", &addr, &len) == 2 && len > 0 && len <= MAX_RW &&
+                addr_readable(addr, (uint32_t)len)) {
+                memcpy(rw, (const void *)(uintptr_t)addr, len);   // guarded read
                 bytes_to_hex(rw, len, hex);
                 send_str(fd, "OK "); send_str(fd, hex); send_str(fd, "\n");
             } else {
-                send_str(fd, "ERR bad args\n");
+                send_str(fd, "ERR bad/unsafe addr\n");
             }
         } else if (!strncmp(line, "W ", 2)) {
             uint32_t addr = 0; char hbytes[400];
             if (sscanf(line + 2, "%x %399s", &addr, hbytes) == 2) {
                 int nb = hex_to_bytes(hbytes, rw, MAX_RW);
-                if (nb > 0) {
-                    memcpy((void *)addr, rw, nb);       // direct guest-memory write
+                if (nb > 0 && addr_writable(addr, (uint32_t)nb)) {
+                    memcpy((void *)(uintptr_t)addr, rw, nb);   // guarded write (RAM/NV2A only)
                     snprintf(hex, sizeof(hex), "OK %d\n", nb);
                     send_str(fd, hex);
-                } else send_str(fd, "ERR bad hex\n");
+                } else send_str(fd, "ERR bad hex / unsafe addr\n");
             } else send_str(fd, "ERR bad args\n");
         } else if (!strncmp(line, "EXEC ", 5)) {
             int len = atoi(line + 5);
@@ -169,7 +212,7 @@ int main(void) {
     }
     listen(ls, 2);
     debugPrint("xlle-agent listening on tcp/%d\n", AGENT_PORT);
-    debugPrint("(commands: PING INFO R W EXEC L DASH QUIT)\n");
+    debugPrint("(commands: PING INFO R RB W EXEC L DASH QUIT)\n");
 
     for (;;) {
         int fd = accept(ls, NULL, NULL);
