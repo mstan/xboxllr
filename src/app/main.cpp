@@ -77,6 +77,7 @@ bool run_fixture(const Fixture& f) {
         return false;
     }
     uf.set_regs(f.init);
+    for (const auto& rb : f.ext_init) uf.write_reg(rb.reg, rb.bytes.data(), rb.bytes.size());
 
     std::string err;
     uint64_t n = uf.run(kCodeBase, f.insns, err);
@@ -97,6 +98,26 @@ bool run_fixture(const Fixture& f) {
             std::snprintf(b, sizeof(b), " mem[0x%x]=0x%08x(exp 0x%08x)", f.mem_addr, v,
                           f.mem_expect);
             diff += b;
+            ok = false;
+        }
+    }
+
+    for (const auto& rb : f.ext_check) {
+        // Read into a max-width (XMM = 16B) buffer so Unicorn can never overflow us,
+        // whatever size it writes for a given register; compare only the expected span.
+        uint8_t raw[16] = {0};
+        if (!uf.read_reg(rb.reg, raw, sizeof(raw))) {
+            diff += " ext-reg-read-failed";
+            ok = false;
+            continue;
+        }
+        std::vector<uint8_t> got_b(raw, raw + rb.bytes.size());
+        if (got_b != rb.bytes) {
+            diff += " ext-reg";
+            char h[8];
+            diff += "(got ";
+            for (auto x : got_b) { std::snprintf(h, sizeof(h), "%02x", x); diff += h; }
+            diff += ")";
             ok = false;
         }
     }

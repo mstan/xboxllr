@@ -30,6 +30,12 @@ enum : uint32_t {
     R_EIP = 1u << 8,
 };
 
+// Byte-level value of a wide/control register (for SSE/x87/CR setup + checks).
+struct RegBytes {
+    XReg reg;
+    std::vector<uint8_t> bytes;  // little-endian, as the hardware stores it
+};
+
 struct Fixture {
     const char* name;
     std::vector<uint8_t> code;  // loaded at kCodeBase
@@ -43,6 +49,11 @@ struct Fixture {
     bool has_mem = false;
     uint32_t mem_addr = 0;
     uint32_t mem_expect = 0;
+
+    // Wide/control registers written before run (e.g. CR4.OSFXSR, initial XMM/ST) and
+    // checked after (independently-derived expected bytes — not echoed from the engine).
+    std::vector<RegBytes> ext_init;
+    std::vector<RegBytes> ext_check;
 };
 
 // Fixed layout for the spike's toy machine.

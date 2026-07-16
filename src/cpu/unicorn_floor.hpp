@@ -20,6 +20,9 @@ public:
     void set_regs(const X86Regs& r) override;
     X86Regs get_regs() override;
 
+    bool read_reg(XReg r, void* buf, size_t n) override;
+    bool write_reg(XReg r, const void* buf, size_t n) override;
+
     void on_retired(RetiredCb cb) override { retired_cb_ = std::move(cb); }
     void on_mem(MemCb cb) override { mem_cb_ = std::move(cb); }
 

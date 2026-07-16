@@ -73,6 +73,33 @@ X86Regs UnicornFloor::get_regs() {
     return r;
 }
 
+static int xreg_to_uc(XReg r) {
+    switch (r) {
+        case XReg::CR0: return UC_X86_REG_CR0;
+        case XReg::CR4: return UC_X86_REG_CR4;
+        case XReg::MXCSR: return UC_X86_REG_MXCSR;
+        case XReg::XMM0: return UC_X86_REG_XMM0;
+        case XReg::XMM1: return UC_X86_REG_XMM1;
+        case XReg::XMM2: return UC_X86_REG_XMM2;
+        case XReg::ST0: return UC_X86_REG_ST0;
+        case XReg::ST1: return UC_X86_REG_ST1;
+        case XReg::MM0: return UC_X86_REG_MM0;
+    }
+    return -1;
+}
+
+bool UnicornFloor::read_reg(XReg r, void* buf, size_t) {
+    int id = xreg_to_uc(r);
+    if (id < 0) return false;
+    return uc_reg_read(reinterpret_cast<uc_engine*>(uc_), id, buf) == UC_ERR_OK;
+}
+bool UnicornFloor::write_reg(XReg r, const void* buf, size_t) {
+    int id = xreg_to_uc(r);
+    if (id < 0) return false;
+    return uc_reg_write(reinterpret_cast<uc_engine*>(uc_), id, const_cast<void*>(buf)) ==
+           UC_ERR_OK;
+}
+
 uint64_t UnicornFloor::run(uint32_t start_eip, uint64_t max_insns, std::string& err) {
     uc_engine* uc = reinterpret_cast<uc_engine*>(uc_);
     const uint64_t before = seq_;

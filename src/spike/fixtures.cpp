@@ -73,6 +73,79 @@ const std::vector<Fixture>& corpus() {
             f.has_mem = true; f.mem_addr = kDataBase; f.mem_expect = 0xDEADBEEF;
             v.push_back(f);
         }
+
+        // --- flag provenance & control flow ---
+        // and eax, 0x0F0F  — AND clears CF/OF; AF is UNDEFINED (excluded from the mask)
+        {
+            X86Regs init{}; init.eax = 0xFFFF; init.eflags = 0x2;
+            X86Regs exp{}; exp.eax = 0x0F0F; exp.eip = kCodeBase + 5; exp.eflags = F_PF;
+            v.push_back(mk("and_eax_imm", {0x25, 0x0F, 0x0F, 0x00, 0x00}, init, 1, exp,
+                          R_EAX | R_EIP, ALL6 & ~F_AF));
+        }
+        // shl eax, 1  (0x40000000 -> 0x80000000) — OF = MSB^CF = 1; AF UNDEFINED (excluded)
+        {
+            X86Regs init{}; init.eax = 0x40000000; init.eflags = 0x2;
+            X86Regs exp{}; exp.eax = 0x80000000; exp.eip = kCodeBase + 2;
+            exp.eflags = F_OF | F_SF | F_PF;
+            v.push_back(mk("shl_eax_1", {0xD1, 0xE0}, init, 1, exp, R_EAX | R_EIP, ALL6 & ~F_AF));
+        }
+        // mul ebx  (0x10000 * 0x10000 = 0x1_00000000) — only CF/OF defined; SF/ZF/AF/PF UNDEF
+        {
+            X86Regs init{}; init.eax = 0x10000; init.ebx = 0x10000; init.eflags = 0x2;
+            X86Regs exp{}; exp.eax = 0; exp.edx = 1; exp.eip = kCodeBase + 2;
+            exp.eflags = F_CF | F_OF;
+            v.push_back(mk("mul_ebx", {0xF7, 0xE3}, init, 1, exp, R_EAX | R_EDX | R_EIP,
+                          F_CF | F_OF));
+        }
+        // cmp eax,eax ; je +5 (taken) — flags drive control flow; the mov is skipped
+        {
+            X86Regs init{}; init.eax = 0x1234; init.eflags = 0x2;
+            X86Regs exp{}; exp.eax = 0x1234; exp.eip = kCodeBase + 9; exp.eflags = F_ZF | F_PF;
+            v.push_back(mk("cmp_je_taken",
+                          {0x39, 0xC0, 0x74, 0x05, 0xB8, 0xEF, 0xBE, 0xAD, 0xDE}, init, 2, exp,
+                          R_EAX | R_EIP, ALL6));
+        }
+        // push eax ; pop ebx — stack + mem ring (a write then a read)
+        {
+            X86Regs init{}; init.eax = 0xCAFE; init.esp = 0x2800; init.eflags = 0x2;
+            X86Regs exp{}; exp.ebx = 0xCAFE; exp.esp = 0x2800; exp.eip = kCodeBase + 2;
+            v.push_back(mk("push_pop", {0x50, 0x5B}, init, 2, exp, R_EBX | R_ESP | R_EIP, 0));
+        }
+        // --- SSE: addps xmm0,xmm1  ({1,1,1,1}+{2,2,2,2}={3,3,3,3}) ---
+        {
+            X86Regs init{}; init.eflags = 0x2;
+            X86Regs exp{}; exp.eip = kCodeBase + 3;
+            Fixture f = mk("sse_addps", {0x0F, 0x58, 0xC1}, init, 1, exp, R_EIP, 0);
+            f.ext_init = {
+                {XReg::CR0, {0x11, 0x00, 0x00, 0x00}},   // PE|ET, EM=TS=0
+                {XReg::CR4, {0x00, 0x06, 0x00, 0x00}},   // OSFXSR|OSXMMEXCPT
+                {XReg::XMM0, {0,0,0x80,0x3F, 0,0,0x80,0x3F, 0,0,0x80,0x3F, 0,0,0x80,0x3F}},  // 1.0f
+                {XReg::XMM1, {0,0,0,0x40, 0,0,0,0x40, 0,0,0,0x40, 0,0,0,0x40}},              // 2.0f
+            };
+            f.ext_check = {
+                {XReg::XMM0, {0,0,0x40,0x40, 0,0,0x40,0x40, 0,0,0x40,0x40, 0,0,0x40,0x40}},  // 3.0f
+            };
+            v.push_back(f);
+        }
+        // --- x87: FLD1 -> ST0 = 1.0 (80-bit extended: mantissa 0x8..0, exp 0x3FFF) ---
+        {
+            X86Regs init{}; init.eflags = 0x2;
+            X86Regs exp{}; exp.eip = kCodeBase + 2;
+            Fixture f = mk("x87_fld1", {0xD9, 0xE8}, init, 1, exp, R_EIP, 0);
+            f.ext_init = {{XReg::CR0, {0x11, 0x00, 0x00, 0x00}}};  // EM=0
+            f.ext_check = {{XReg::ST0, {0,0,0,0,0,0,0,0x80, 0xFF,0x3F}}};  // 1.0
+            v.push_back(f);
+        }
+        // --- x87: FLD1; FLD1; FADDP -> ST0 = 2.0 (exp 0x4000) ---
+        {
+            X86Regs init{}; init.eflags = 0x2;
+            X86Regs exp{}; exp.eip = kCodeBase + 6;
+            Fixture f = mk("x87_fadd_2", {0xD9, 0xE8, 0xD9, 0xE8, 0xDE, 0xC1}, init, 3, exp,
+                           R_EIP, 0);
+            f.ext_init = {{XReg::CR0, {0x11, 0x00, 0x00, 0x00}}};
+            f.ext_check = {{XReg::ST0, {0,0,0,0,0,0,0,0x80, 0x00,0x40}}};  // 2.0
+            v.push_back(f);
+        }
         return v;
     }();
     return c;

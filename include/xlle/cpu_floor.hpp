@@ -36,6 +36,11 @@ struct MemEvent {
     uint64_t value;
 };
 
+// Wide / control registers addressed by name for typed read/write. Added as the fixture
+// corpus reaches x87/SSE and the control bits needed to enable them (PRINCIPLES §5: scope
+// by trace — the fixtures are that trace).
+enum class XReg { CR0, CR4, MXCSR, XMM0, XMM1, XMM2, ST0, ST1, MM0 };
+
 // Callbacks fired by the floor as it executes, so the platform can feed its rings without
 // the floor knowing about ring types.
 using RetiredCb = std::function<void(const RetiredInsn&)>;
@@ -54,6 +59,11 @@ public:
 
     virtual void set_regs(const X86Regs& r) = 0;
     virtual X86Regs get_regs() = 0;
+
+    // Typed access to wide/control registers (n bytes: CR*/MXCSR=4, ST*/MM*=10/8, XMM*=16).
+    // Returns false if the register is unsupported by this floor.
+    virtual bool read_reg(XReg r, void* buf, size_t n) = 0;
+    virtual bool write_reg(XReg r, const void* buf, size_t n) = 0;
 
     // Instrumentation. Installed once; fired for every retired instruction / memory access.
     virtual void on_retired(RetiredCb cb) = 0;
