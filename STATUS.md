@@ -3,6 +3,19 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-07-16 — FATX HDD image built + verified; xemu still deferred
+
+- **`machine/xbox-hdd.img` (8GB FATX) BUILT and independently VERIFIED** (pyfatx): C: has
+  `xboxdash.xbe` + `xboxdashdata` + Audio/Xbox.xtf; E: has TDATA/UDATA. A xemu-loadable HDD
+  image with the real dashboard + saves. (Built via a subagent whose text reports were
+  unreliable, but the filesystem check confirms the real content.)
+- **xemu**: WSL build hangs in meson configure (deferred). Docker route attempted — Docker
+  Desktop won't reach "running" without maintainer interaction (first-run prompt/login), so
+  the container build is paused on the maintainer. Not critical (xemu boot-validation needs
+  MCPX anyway).
+- **A1/A2 inputs now in hand**: EEPROM ✅, validated flash ✅, **HDD image ✅**, hardware
+  profile ✅. Only real remaining gate: MCPX (deferred; authentic-cold-boot only).
+
 ## 2026-07-16 — Flash VALIDATED; HDD pulled; NV2A expanded; xemu blocked
 
 Ran tasks 1-3 (console access serialized). Results:
