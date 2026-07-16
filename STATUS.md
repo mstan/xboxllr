@@ -3,6 +3,25 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-07-16 — Console onboarded over FTP; identified; EEPROM secured
+
+- **Console found and reachable:** `192.168.4.81` on the LAN (XBFileZilla / XBMC). FTP
+  read/write authorized by maintainer (no deletes).
+- **Identified: Xbox v1.1**, kernel **1.0.4983.6**, 64 MB, NTSC / XBE region 01 (NA),
+  Seagate ST310014A HDD, Samsung SDG-605B DVD, genuine MS MAC OUI `00-0D-3A`. Softmod
+  (MediaCenter via `evoxdash.xbe`) — runs stock **retail** BIOS.
+- **Firmware pinned:** v1.1 board → **MCPX v1.0** (matches xemu's recommended profile).
+- **Secured into `machine/`** (git-ignored): `eeprom.bin` (256B, sha1
+  eb2a1e82…; keys redacted from any output), the ConfigMagic info text, `hardware.json`
+  (provenance-tagged), and the original MS dashboard exe `hdd/C/xboxdash.xbe` (Arc 1 target).
+- **Still needed for A1/A2:**
+  - `mcpx.bin` (standard **MCPX v1.0** — per-revision, not per-console) and a BIOS image
+    (retail 4983 and/or an xemu-compatible one like Complex 4627). ConfigMagic can't dump
+    BIOS; needs a flash tool or a standard image (maintainer owns the firmware).
+  - A bootable HDD image: recommend selective FTP rebuild (`C:` + `E:\TDATA` + `E:\UDATA`)
+    into a FATX image, vs. a physical raw dump.
+  - nxdk homebrew probe channel (hardware oracle).
+
 ## 2026-07-16 — Arc 1 / A0 (Foundations) COMPLETE and verified
 
 The A0 deliverable is met: the host runs and the CPU floor executes IA-32 instruction

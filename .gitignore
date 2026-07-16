@@ -23,6 +23,12 @@ traces/
 cosim-logs/
 *.jsonl
 
+# nxdk build artifacts (agent/ builds in-tree)
+*.obj
+*.lib
+*.exe
+agent/bin/
+
 # External reference / harvest checkouts (kept out of tree; live in the workspace parent)
 xemu/
 Cxbx-Reloaded/
