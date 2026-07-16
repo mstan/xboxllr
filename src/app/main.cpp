@@ -13,6 +13,7 @@
 
 #include "cpu/unicorn_floor.hpp"
 #include "host/sdl_shell.hpp"
+#include "machine/machine.hpp"
 #include "obs/debug_server.hpp"
 #include "spike/fixtures.hpp"
 #include "xlle/jsonl.hpp"
@@ -150,9 +151,34 @@ std::string dump_mem(size_t n) {
 
 int main(int argc, char** argv) {
     bool serve = false, window = false;
+    const char* boot_flash = nullptr;
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--serve")) serve = true;
         else if (!std::strcmp(argv[i], "--window")) window = true;
+        else if (!std::strcmp(argv[i], "--boot") && i + 1 < argc) boot_flash = argv[++i];
+    }
+
+    // --boot <flash.bin>: stand up the machine (RAM + flash) and smoke-test the map.
+    if (boot_flash) {
+        XboxMachine mach;
+        if (!mach.ok()) { std::fprintf(stderr, "[machine] unicorn init failed\n"); return 1; }
+        if (!mach.init_ram()) { std::fprintf(stderr, "[machine] RAM map failed\n"); return 1; }
+        if (!mach.load_flash(boot_flash)) {
+            std::fprintf(stderr, "[machine] flash load failed: %s\n", boot_flash);
+            return 1;
+        }
+        std::printf("[machine] 64MB RAM @0x0 + flash (%zu bytes, mirrored to 0xFFFFFFFF) mapped\n",
+                    mach.flash_size());
+        uint8_t hdr[8] = {0}, rst[4] = {0};
+        mach.read(0xFF000000, hdr, 8);
+        mach.read(0xFFFFFFF0, rst, 4);
+        std::printf("[machine] flash @0xFF000000: %02x%02x%02x%02x%02x%02x%02x%02x "
+                    "(NV2A-ptr header)\n", hdr[0], hdr[1], hdr[2], hdr[3], hdr[4], hdr[5],
+                    hdr[6], hdr[7]);
+        std::printf("[machine] reset @0xFFFFFFF0: %02x %02x %02x %02x (expect eb c6 = jmp short)\n",
+                    rst[0], rst[1], rst[2], rst[3]);
+        std::printf("[machine] harness OK. NEXT: MCPX X-code repro + 2BL RC4-decrypt to boot.\n");
+        return 0;
     }
 
     DebugServer dbg;

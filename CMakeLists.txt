@@ -55,6 +55,11 @@ target_include_directories(xlle_cpu PUBLIC ${XLLE_INCLUDES})
 target_include_directories(xlle_cpu PRIVATE ${unicorn_SOURCE_DIR}/include)
 target_link_libraries(xlle_cpu PUBLIC unicorn)
 
+# --- machine model (memory map + devices around the CPU floor) ---
+add_library(xlle_machine STATIC src/machine/machine.cpp)
+target_include_directories(xlle_machine PUBLIC ${XLLE_INCLUDES})
+target_link_libraries(xlle_machine PUBLIC xlle_cpu)
+
 # --- fixture corpus ---
 add_library(xlle_spike STATIC src/spike/fixtures.cpp)
 target_include_directories(xlle_spike PUBLIC ${XLLE_INCLUDES})
@@ -70,7 +75,7 @@ endif()
 # --- A0 app ---
 add_executable(xlle src/app/main.cpp)
 target_include_directories(xlle PRIVATE ${XLLE_INCLUDES})
-target_link_libraries(xlle PRIVATE xlle_obs xlle_cpu xlle_spike xlle_host)
+target_link_libraries(xlle PRIVATE xlle_obs xlle_cpu xlle_machine xlle_spike xlle_host)
 
 # Put SDL3.dll next to the exe so `xlle --window` runs without a manual PATH.
 if(XLLE_WITH_SDL)
