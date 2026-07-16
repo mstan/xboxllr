@@ -3,6 +3,24 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-07-16 — Flash VALIDATED; HDD pulled; NV2A expanded; xemu blocked
+
+Ran tasks 1-3 (console access serialized). Results:
+- **Flash BIOS VALIDATED** (structural, high confidence): offline analysis + local spot-check
+  confirm `machine/flash-dump-ff000000.bin` is a genuine, complete, correctly-ordered 256KB
+  retail-4983 flash — NV2A-ptr header (0xFF000009, LSB bit), MCPX table @0x70, 2BL @0x39E00,
+  FBL @0x3D400, x86 GDT + reset jmp @0x3FFF0, all at documented offsets. **This is our
+  `flash.bin`** (only open item: hash cross-check vs a reference DB that 403'd bots).
+- **HDD files PULLED**: `C:` + `E:\TDATA` + `E:\UDATA` via FTP → `machine/hdd/` (2895 files,
+  1020MB, 0 errors); MS dashboard (`xboxdash.xbe` + `xboxdashdata`) captured. NEXT: pack into
+  a FATX HDD image.
+- **NV2A expanded snapshot**: PCI `10DE:02A0`, rev A3, ~233MHz core, framebuffer @0x03EB4000,
+  engine/PLL/PFIFO registers (`machine/probes/hw-2026-07-16.md`). Agent stayed healthy.
+- **xemu build BLOCKED**: needs WSL sudo `apt` deps (meson/ninja/glib/pixman/SDL2/…). Not
+  urgent — full boot-validation is gated on MCPX anyway (deferred).
+- Agent handed back to MediaCenter (DASH); relaunch `xlle-agent` for future hardware work
+  (v0.3 with HDD file-read planned so no MediaCenter/agent swap is needed).
+
 ## 2026-07-16 — Agent v0.2 (crash-guarded); flash dumped; NV2A characterized
 
 - **v0.1 hung the console** on a read of the top-of-memory MCPX region (no fault guard);
