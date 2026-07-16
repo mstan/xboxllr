@@ -3,6 +3,37 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-07-16 — HARDWARE ORACLE LIVE: agent running, real CPU characterized
+
+The "hook Claude to a real Xbox" endgame is working. `xlle-agent` launched on the console;
+PC drives it hands-off over tcp/4380. Verified end-to-end:
+- `PING`/`INFO` OK; read `kernel 1.0.4983.6` from live memory (matches EEPROM); read the
+  agent's own XBE header (`XBEH`) out of guest RAM over the network.
+- **Arbitrary code execution proven**: pushed x86 payloads that ran on the real CPU (a
+  constant-return, then live `CPUID`).
+- **CPU characterized from silicon** (see `machine/hardware.json` `cpu_measured`):
+  GenuineIntel, sig **0x068A** = family 6/model 8/stepping 10 (PIII Coppermine); features
+  fpu/tsc/msr/cx8/cmov/mmx/fxsr/**sse**; **no SSE2/SSE3** — confirms DESIGN §1 from hardware.
+- **Flag-provenance cross-checked vs silicon**: `xor` → defined bits match, AF=0; `mul` →
+  CF/OF defined match, undefined ZF/PF/SF/AF captured. The CPU floor's policy is consistent
+  with real hardware; the oracle resolves exactly our undefined-flag questions.
+
+This is the independent ground-truth oracle (PRINCIPLES §8) the whole plan leans on — now
+operational. Launch is one manual step per session (this build's XBMC HTTP API can't
+RunXBE); everything after is hands-off.
+
+## 2026-07-16 — Hardware-control agent built & deployed (ready to launch)
+
+- **nxdk toolchain working** in WSL Ubuntu (clang-18 + `llvm-*-18` symlinked to unversioned
+  names, no sudo; build via `../build-nxdk.sh` + `MSYS_NO_PATHCONV=1`). hello sample + agent
+  both build clean to `bin/default.xbe`.
+- **`xlle-agent` v0.1 built and deployed** to the console at `E:\Apps\xlle-agent\default.xbe`
+  (487 KB). TCP control server (tcp/4380): PING/INFO, guest-memory R/W, EXEC arbitrary
+  payload, XBE launch, DASH-to-dashboard. Driver: `tools/xbox_agent.py`.
+- **Not yet launched** — launching takes over the console screen; awaiting maintainer's go
+  (they launch `xlle-agent` from MediaCenter, or I attempt XBMC HTTP `ExecBuiltIn(RunXBE)`).
+  Once up, PC connects to `:4380` and drives it hands-off — the hardware-oracle tier is live.
+
 ## 2026-07-16 — Console onboarded over FTP; identified; EEPROM secured
 
 - **Console found and reachable:** `192.168.4.81` on the LAN (XBFileZilla / XBMC). FTP
