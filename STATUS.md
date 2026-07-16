@@ -3,6 +3,21 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-07-16 — Agent v0.2 (crash-guarded); flash dumped; NV2A characterized
+
+- **v0.1 hung the console** on a read of the top-of-memory MCPX region (no fault guard);
+  required a maintainer power-cycle. **v0.2** guards reads (MmIsAddressValid + MMIO/flash
+  range whitelist, top-512B excluded), writes limited to RAM/NV2A. Verified: the fatal
+  address now returns ERR, agent survives. Auto-redeployed on reboot; relaunched by maintainer.
+- **Flash BIOS dumped by the agent itself** (256KB @0xFF000000 → `machine/flash-dump-ff000000.bin`,
+  sha1 02798c98…) — so `flash.bin` won't need to come from the maintainer. **Pending
+  validation** vs a known-good retail-4983 image / xemu boot before use (careful posture).
+- **NV2A characterized from silicon**: chip rev A3 (`PMC_BOOT_0=0x02A000A3`); GPU core clock
+  **≈233 MHz** (NVPLL decode — matches known spec); engine-enable / PFB / PTIMER / PLL
+  values captured (`machine/probes/hw-2026-07-16.md`).
+- **MCPX secret ROM confirmed not readable** from a running console (masked after boot) —
+  stays a known per-revision image, deferred (only needed for authentic cold boot).
+
 ## 2026-07-16 — HARDWARE ORACLE LIVE: agent running, real CPU characterized
 
 The "hook Claude to a real Xbox" endgame is working. `xlle-agent` launched on the console;
