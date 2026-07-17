@@ -202,11 +202,29 @@ int main(int argc, char** argv) {
                 mmio_log.push_back(e);
                 if (mmio_log.size() > 64) mmio_log.erase(mmio_log.begin());
             });
-            // Keep the last 16 PCs in a fixed circular buffer (cheap on the per-insn hot path;
+            // Keep the last 64 PCs in a fixed circular buffer (cheap on the per-insn hot path;
             // this fires for every one of the tens of millions of decompression instructions).
-            uint32_t trace[16] = {0};
+            uint32_t trace[64] = {0};
             uint64_t trace_n = 0;
-            mach.cpu().on_retired([&](const RetiredInsn& e) { trace[trace_n++ & 15] = e.eip; });
+            // Snapshot the PC history at each transition INTO the idle loop, so the final snapshot
+            // shows the boot thread's last actions before it blocked and yielded to idle.
+            uint32_t pre_idle[64] = {0};
+            uint64_t pre_idle_n = 0;
+            bool was_idle = false;
+            auto in_idle = [](uint32_t pc) { return pc >= 0x8001e3ce && pc <= 0x8001e3ff; };
+            bool idle_latched = false;
+            mach.cpu().on_retired([&](const RetiredInsn& e) {
+                trace[trace_n++ & 63] = e.eip;
+                bool now_idle = in_idle(e.eip);
+                // Latch the FIRST entry into the idle loop — that's the boot thread's original
+                // block (it never runs again after this), so the history is its blocking path.
+                if (now_idle && !was_idle && !idle_latched) {
+                    for (int i = 0; i < 64; ++i) pre_idle[i] = trace[i];
+                    pre_idle_n = trace_n;
+                    idle_latched = true;
+                }
+                was_idle = now_idle;
+            });
             X86Regs r{};
             r.eip = 0x901ee;
             r.esp = 0x00400000;  // scratch stack in RAM (2BL sets its own later)
@@ -236,6 +254,28 @@ int main(int argc, char** argv) {
             std::printf("[2bl] last PCs:");
             uint64_t first = trace_n > 16 ? trace_n - 16 : 0;
             for (uint64_t i = first; i < trace_n; ++i) std::printf(" %05x", trace[i & 15]);
+            std::printf("\n");
+            std::printf("[2bl] regs: eax=%08x ebx=%08x ecx=%08x edx=%08x esi=%08x edi=%08x "
+                        "ebp=%08x esp=%08x\n", f.eax, f.ebx, f.ecx, f.edx, f.esi, f.edi, f.ebp,
+                        f.esp);
+            // Dump kernel scheduler state the idle loop watches (ebx≈PRCB, ebp≈DPC list head).
+            // Kernel VAs are identity-mapped 0x80000000->0x0, so physical = VA & 0x07FFFFFF.
+            auto kdump = [&](const char* tag, uint32_t va, int n) {
+                if (!(va & 0x80000000u)) return;
+                uint8_t buf[64] = {0};
+                if (n > 64) n = 64;
+                if (mach.read(va & 0x07FFFFFFu, buf, n)) {
+                    std::printf("[2bl] %s @%08x:", tag, va);
+                    for (int i = 0; i < n; ++i) std::printf(" %02x", buf[i]);
+                    std::printf("\n");
+                }
+            };
+            kdump("PRCB(ebx)", f.ebx, 64);
+            kdump("DPCq(ebp)", f.ebp, 16);
+            // The boot thread's last PCs before its final block-and-yield-to-idle.
+            std::printf("[2bl] pre-idle PCs (last real work before blocking):");
+            uint64_t pf = pre_idle_n > 64 ? pre_idle_n - 64 : 0;
+            for (uint64_t i = pf; i < pre_idle_n; ++i) std::printf(" %08x", pre_idle[i & 63]);
             std::printf("\n");
             std::printf("[2bl] MCPX ROM overlay disabled by firmware: %s\n",
                         mach.pci() && mach.pci()->mcpx_rom_disabled() ? "yes" : "no");
