@@ -111,6 +111,12 @@ public:
     // consults this before delivering an external IRQ.
     virtual bool interrupts_enabled() = 0;
 
+    // Tell the floor an external IRQ is waiting. While set, the floor stops execution at the
+    // first instruction boundary where IF is enabled, so the controller can deliver the IRQ in
+    // exactly the window the guest opened (e.g. the `sti; nop; cli` idle loop) instead of only
+    // at coarse chunk boundaries. Cleared by the controller once delivered.
+    virtual void set_irq_pending(bool pending) = 0;
+
     // Deliver an external hardware interrupt: synthesize the CPU's protected-mode interrupt-gate
     // entry for `vector` (read the IDT via IDTR, push EFLAGS/CS/EIP with no error code, clear IF
     // for an interrupt gate, load handler CS:EIP). Unicorn has no native IRQ facility, so this

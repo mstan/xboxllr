@@ -179,6 +179,30 @@ bool UnicornFloor::interrupts_enabled() {
     return (eflags & 0x200u) != 0;  // IF
 }
 
+bool UnicornFloor::translate(uint32_t linear, uint32_t& phys) {
+    uc_engine* uc = reinterpret_cast<uc_engine*>(uc_);
+    uint32_t cr0 = 0;
+    uc_reg_read(uc, UC_X86_REG_CR0, &cr0);
+    if (!(cr0 & 0x80000000u)) { phys = linear; return true; }  // paging off -> identity
+    uint32_t cr3 = 0;
+    uc_reg_read(uc, UC_X86_REG_CR3, &cr3);
+    uint32_t pde = 0;
+    if (uc_mem_read(uc, (cr3 & 0xFFFFF000u) + ((linear >> 22) << 2), &pde, 4) != UC_ERR_OK)
+        return false;
+    if (!(pde & 1)) return false;
+    if (pde & 0x80) {  // 4 MB large page
+        phys = (pde & 0xFFC00000u) | (linear & 0x003FFFFFu);
+        return true;
+    }
+    uint32_t pte = 0;
+    if (uc_mem_read(uc, (pde & 0xFFFFF000u) + (((linear >> 12) & 0x3FF) << 2), &pte, 4) !=
+        UC_ERR_OK)
+        return false;
+    if (!(pte & 1)) return false;
+    phys = (pte & 0xFFFFF000u) | (linear & 0xFFFu);
+    return true;
+}
+
 bool UnicornFloor::inject_interrupt(uint8_t vector, std::string& err) {
     // Replay a 32-bit protected-mode interrupt-gate entry (same privilege, no error code), the
     // sequence do_interrupt_protected() would run natively (see the interrupt-injection notes).
@@ -188,10 +212,10 @@ bool UnicornFloor::inject_interrupt(uint8_t vector, std::string& err) {
     uc_x86_mmr idtr{};
     uc_reg_read(uc, UC_X86_REG_IDTR, &idtr);
     if (static_cast<uint64_t>(vector) * 8 + 7 > idtr.limit) return false;  // gate not in IDT
-
+    uint32_t gate_phys = 0;
+    if (!translate(static_cast<uint32_t>(idtr.base) + vector * 8, gate_phys)) return false;
     uint8_t gate[8] = {0};
-    if (uc_mem_read(uc, idtr.base + static_cast<uint64_t>(vector) * 8, gate, 8) != UC_ERR_OK)
-        return false;
+    if (uc_mem_read(uc, gate_phys, gate, 8) != UC_ERR_OK) return false;
     uint8_t attr = gate[5];
     if (!(attr & 0x80)) return false;  // present bit clear -> nothing to deliver
     uint32_t handler = gate[0] | (gate[1] << 8) | (static_cast<uint32_t>(gate[6]) << 16) |
@@ -205,11 +229,18 @@ bool UnicornFloor::inject_interrupt(uint8_t vector, std::string& err) {
     uc_reg_read(uc, UC_X86_REG_EFLAGS, &eflags);
     uc_reg_read(uc, UC_X86_REG_CS, &cs);
 
-    // Push EFLAGS, CS, EIP (dwords). No error code for a hardware IRQ.
-    uint32_t frame[3] = {eflags, cs, eip};  // will land at [esp-4]=eflags, [esp-8]=cs, [esp-12]=eip
-    esp -= 4; if (uc_mem_write(uc, esp, &frame[0], 4) != UC_ERR_OK) { err = "irq push eflags"; return false; }
-    esp -= 4; if (uc_mem_write(uc, esp, &frame[1], 4) != UC_ERR_OK) { err = "irq push cs"; return false; }
-    esp -= 4; if (uc_mem_write(uc, esp, &frame[2], 4) != UC_ERR_OK) { err = "irq push eip"; return false; }
+    // Push EFLAGS, CS, EIP (dwords), no error code for a hardware IRQ. ESP is a linear address;
+    // translate each slot to physical for the write (assumes a flat SS, true for the kernel).
+    uint32_t frame[3] = {eflags, cs, eip};
+    const char* what[3] = {"irq push eflags", "irq push cs", "irq push eip"};
+    for (int i = 0; i < 3; ++i) {
+        esp -= 4;
+        uint32_t p = 0;
+        if (!translate(esp, p) || uc_mem_write(uc, p, &frame[i], 4) != UC_ERR_OK) {
+            err = what[i];
+            return false;
+        }
+    }
     uc_reg_write(uc, UC_X86_REG_ESP, &esp);
 
     uint32_t new_eflags = eflags & ~(0x100u | 0x20000u | 0x10000u | 0x4000u);  // TF,VM,RF,NT
@@ -257,10 +288,19 @@ uint64_t UnicornFloor::run(uint32_t start_eip, uint64_t max_insns, std::string& 
     return seq_ - before;
 }
 
-void UnicornFloor::code_trampoline(uc_struct*, uint64_t addr, uint32_t size, void* user) {
+void UnicornFloor::code_trampoline(uc_struct* uc, uint64_t addr, uint32_t size, void* user) {
     auto* self = static_cast<UnicornFloor*>(user);
     RetiredInsn ev{self->seq_++, static_cast<uint32_t>(addr), size};
     if (self->retired_cb_) self->retired_cb_(ev);
+
+    // If an IRQ is waiting, stop the moment the guest has interrupts enabled so the controller
+    // can deliver it at this boundary (before `addr` executes). This catches the narrow window
+    // the idle loop's `sti; nop; cli` opens each iteration — a coarse chunk boundary misses it.
+    if (self->irq_pending_) {
+        uint32_t eflags = 0;
+        uc_reg_read(reinterpret_cast<uc_engine*>(uc), UC_X86_REG_EFLAGS, &eflags);
+        if (eflags & 0x200u) uc_emu_stop(reinterpret_cast<uc_engine*>(uc));
+    }
 }
 
 void UnicornFloor::mem_trampoline(uc_struct*, int type, uint64_t addr, int size, int64_t value,

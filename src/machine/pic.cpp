@@ -124,6 +124,16 @@ void DualPic::raise(int isa_irq, bool level) {
 
 bool DualPic::intr_pending() const { return master_.get_irq() >= 0; }
 
+int DualPic::peek() const {
+    int m = master_.get_irq();
+    if (m < 0) return -1;
+    if (m == 2) {  // cascaded slave
+        int s = slave_.get_irq();
+        return (s >= 0) ? slave_.irq_base + s : slave_.irq_base + 7;
+    }
+    return master_.irq_base + m;
+}
+
 int DualPic::acknowledge() {
     int m = master_.get_irq();
     if (m < 0) return -1;

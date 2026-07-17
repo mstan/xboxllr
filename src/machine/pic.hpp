@@ -59,6 +59,10 @@ public:
     // A device raises/lowers an ISA IRQ line (0..15). 2 is the cascade (internal).
     void raise(int isa_irq, bool level);
 
+    // The vector the next INTA would deliver, WITHOUT side effects (so delivery can be confirmed
+    // before committing the ISR bookkeeping). -1 if none pending.
+    int peek() const;
+
     // INTA acknowledge: returns the vector to deliver for the highest-priority pending IRQ, or
     // -1 if none is pending. Performs the ISR/EOI bookkeeping a real INTA cycle would.
     int acknowledge();

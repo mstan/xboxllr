@@ -45,6 +45,10 @@ public:
     // Observability: fired for every serviced MMIO access (MemEvent-shaped; write flag reused).
     void on_mmio_event(std::function<void(const MemEvent&)> cb) { mmio_event_cb_ = std::move(cb); }
     PciHost* pci() { return pci_; }
+    uint64_t injected_interrupts() const { return injected_; }
+    uint64_t irq0_pulses() const { return irq0_pulses_; }
+    uint64_t pending_boundaries() const { return pending_boundaries_; }
+    DualPic* pic_dbg() { return pic_; }
 
 private:
     uint32_t io_in(uint16_t port, int size);
@@ -70,6 +74,9 @@ private:
     uint64_t io_seq_ = 0;
     uint64_t mmio_seq_ = 0;
     uint64_t total_insns_ = 0;  // retired-instruction clock feeding the PIT time base
+    uint64_t injected_ = 0;     // external interrupts actually delivered to the guest
+    uint64_t irq0_pulses_ = 0;  // PIT channel-0 period boundaries reached
+    uint64_t pending_boundaries_ = 0;  // chunk boundaries with an unmasked IRQ pending
 
     // Guest CPU clock estimate (Hz) mapping retired instructions -> PIT ticks. The Xbox CPU is
     // 733.33 MHz; combined with ~1 IPC this sets the tick cadence (calibratable).

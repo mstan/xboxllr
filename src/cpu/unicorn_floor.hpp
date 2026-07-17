@@ -35,7 +35,13 @@ public:
     bool map_mmio(uint32_t addr, size_t size, MmioReadCb r, MmioWriteCb w) override;
     void request_stop(std::string reason) override;
     bool interrupts_enabled() override;
+    void set_irq_pending(bool pending) override { irq_pending_ = pending; }
     bool inject_interrupt(uint8_t vector, std::string& err) override;
+
+    // Translate a guest linear address to physical via the guest page tables (32-bit paging;
+    // identity if paging is off). uc_mem_read/write operate on physical memory, so interrupt
+    // delivery must translate the IDT and stack addresses itself.
+    bool translate(uint32_t linear, uint32_t& phys);
 
     uint64_t run(uint32_t start_eip, uint64_t max_insns, std::string& err) override;
 
@@ -77,6 +83,7 @@ private:
     IoOutCb io_out_cb_;
     std::vector<std::unique_ptr<MmioRegion>> mmio_regions_;
     std::string stop_reason_;  // set by request_stop(); surfaced by run()
+    bool irq_pending_ = false;  // an external IRQ is waiting; stop when IF opens (see set_irq_pending)
     uint64_t seq_ = 0;  // global retirement/dispatch index feeding the rings
 };
 

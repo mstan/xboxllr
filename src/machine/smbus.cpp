@@ -46,6 +46,7 @@ bool XboxSmc::read_byte(uint8_t cmd, uint8_t& out) {
         case 0x1d: out = 0x72; return true;
         case 0x1e: out = 0xea; return true;
         case 0x1f: out = 0x46; return true;
+        case 0x04: out = 0x06; return true;  // AVPACK = COMPOSITE (agent read from silicon)
         case 0x1b: out = scratch_reg_; return true;  // SCRATCH
         case 0x0f: out = error_reg_; return true;     // ERROR_READ
         default: break;

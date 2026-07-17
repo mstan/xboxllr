@@ -239,6 +239,18 @@ int main(int argc, char** argv) {
             std::printf("\n");
             std::printf("[2bl] MCPX ROM overlay disabled by firmware: %s\n",
                         mach.pci() && mach.pci()->mcpx_rom_disabled() ? "yes" : "no");
+            std::printf("[2bl] IRQ0 pulses=%llu, pending-boundaries=%llu, delivered=%llu\n",
+                        (unsigned long long)mach.irq0_pulses(),
+                        (unsigned long long)mach.pending_boundaries(),
+                        (unsigned long long)mach.injected_interrupts());
+            if (mach.pic_dbg()) {
+                auto& m = mach.pic_dbg()->master();
+                auto& s = mach.pic_dbg()->slave();
+                std::printf("[2bl] PIC master: imr=0x%02x irr=0x%02x isr=0x%02x base=0x%02x "
+                            "init=%u | slave: imr=0x%02x irr=0x%02x base=0x%02x\n",
+                            m.imr, m.irr, m.isr, m.irq_base, m.init_state, s.imr, s.irr,
+                            s.irq_base);
+            }
             std::printf("[2bl] last %zu I/O ops:\n", io_log.size());
             for (const auto& e : io_log)
                 std::printf("      %-3s port=0x%04x size=%u value=0x%08x\n", e.out ? "OUT" : "IN",

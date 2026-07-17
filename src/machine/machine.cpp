@@ -86,7 +86,7 @@ void XboxMachine::init_devices() {
     auto pit = std::make_unique<Pit8254>();
     pit_ = pit.get();
     // Channel 0's period boundary pulses IRQ0 (a rising then falling edge on PIC line 0).
-    pit_->set_irq0([this]() { pic_->raise(0, true); pic_->raise(0, false); });
+    pit_->set_irq0([this]() { irq0_pulses_++; pic_->raise(0, true); pic_->raise(0, false); });
     io_devices_.push_back(std::move(pit));
 
     io_devices_.push_back(std::make_unique<Port61>());
@@ -193,6 +193,10 @@ uint64_t XboxMachine::run(uint32_t start, uint64_t max, std::string& err) {
     uint64_t done = 0;
     while (done < max) {
         uint64_t chunk = std::min(kChunk, max - done);
+        // Arm the floor to stop as soon as IF opens if an IRQ is already waiting (so we hit the
+        // guest's brief sti window). Otherwise the chunk runs to completion.
+        if (pic_ && pic_->intr_pending()) pending_boundaries_++;
+        cpu_->set_irq_pending(pic_ && pic_->intr_pending());
         std::string cerr;
         uint64_t n = cpu_->run(eip, chunk, cerr);
         done += n;
@@ -201,20 +205,22 @@ uint64_t XboxMachine::run(uint32_t start, uint64_t max, std::string& err) {
         if (pit_) pit_->set_time(total_insns_ * Pit8254::kPitFreq / kCpuHz);
         if (!cerr.empty()) { err = cerr; break; }  // device fault-stop wins
 
-        // Deliver one pending, unmasked external interrupt at this boundary.
+        // Deliver one pending, unmasked external interrupt at this boundary. Confirm the guest
+        // can take it (inject succeeds) BEFORE committing the PIC's ISR/ack bookkeeping — an
+        // ack without delivery would wedge the line in-service.
         if (pic_ && pic_->intr_pending() && cpu_->interrupts_enabled()) {
-            int vec = pic_->acknowledge();
+            int vec = pic_->peek();
             if (vec >= 0) {
                 std::string ierr;
-                if (!cpu_->inject_interrupt(static_cast<uint8_t>(vec), ierr) && !ierr.empty()) {
-                    err = ierr;
-                    break;
-                }
+                if (cpu_->inject_interrupt(static_cast<uint8_t>(vec), ierr)) {
+                    pic_->acknowledge();
+                    injected_++;
+                } else if (!ierr.empty()) { err = ierr; break; }
             }
         }
         eip = cpu_->get_regs().eip;
-        if (n == 0) break;  // no forward progress (e.g. a stop with nothing to deliver)
     }
+    cpu_->set_irq_pending(false);
     return done;
 }
 

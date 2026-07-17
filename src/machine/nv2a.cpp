@@ -41,10 +41,10 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
     uint32_t bo = 0;
     const Block* blk = find_block(rel, bo);
     if (!blk) {
-        char b[96];
-        std::snprintf(b, sizeof(b), "NV2A read of aperture hole 0x%08x (rel 0x%06x) — no block",
-                      addr, rel);
-        if (fault_) fault_(b);
+        // Undecoded space within the 16 MB aperture. The aperture is legitimately sparse; xemu
+        // returns 0 here (parent-region default) and boots the same kernel, so 0 is a
+        // boot-correct witness. Logged as a hardware-TODO, not faulted.
+        if (unmodeled_cb_) unmodeled_cb_(false, addr, rel, "hole", 0);
         return 0;
     }
 
@@ -82,12 +82,8 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
     uint32_t rel = addr - kBase;
     uint32_t bo = 0;
     const Block* blk = find_block(rel, bo);
-    if (!blk) {
-        char b[112];
-        std::snprintf(b, sizeof(b),
-                      "NV2A write 0x%08x to aperture hole 0x%08x (rel 0x%06x) — no block", value,
-                      addr, rel);
-        if (fault_) fault_(b);
+    if (!blk) {  // undecoded aperture space: accept + log (xemu ignores; see mmio_read)
+        if (unmodeled_cb_) unmodeled_cb_(true, addr, rel, "hole", value);
         return;
     }
     // No modelled write side effects yet; accept + log (xemu ignores unknown writes).

@@ -29,7 +29,17 @@ PciHost::PciHost(FaultFn fault) : fault_(std::move(fault)) {
     // Xbox bus 0 (identities verified vs xemu/hw/xbox/xbox_pci.c + xbox.c). Class codes are the
     // upper 16 bits (subclass<<8 | base class). I/O bases are the fixed real-hardware bases:
     // ACPI/PM at 0x8000 (LPC BAR0/off 0x10) and SMBus at 0xC000 (SMBus BAR1/off 0x14).
-    funcs_.push_back(mkfn(0x00, 0, "host-bridge", 0x02A5, 0x0600, 0xA1));
+    {
+        // Host bridge / NV2A northbridge memory controller. Config reg 0x84 is the RAM-size
+        // register: the real boot's X-codes program it (xc_pci_write 80000084 <top-of-RAM>),
+        // and the kernel reads it back to size physical memory. We inject the 2BL directly and
+        // never run the X-codes, so we must supply the value ourselves. Silicon (agent, 64MB
+        // retail v1.1) reads 0x03FFFFFF here; without it the kernel defaults to 128MB and walks
+        // the PFN database off the end of RAM. (0x07FFFFFF would be a 128MB devkit.)
+        PciFunction hb = mkfn(0x00, 0, "host-bridge", 0x02A5, 0x0600, 0xA1);
+        hb.set32(0x84, 0x03FFFFFF);
+        funcs_.push_back(hb);
+    }
     // LPC. This board is a v1.1: PM base lives in config reg 0x84 (=0x8001), and the reg-0x10
     // BAR is 0 (captured from silicon 2026-07-16: reg 0x10 -> 0, reg 0x84 -> 0x8001; reg 0x00
     // -> 0x01B210DE). The 2BL's `cmp [cfg 0x10], 0x8001` is a board-revision detector — v1.0
