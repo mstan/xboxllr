@@ -124,6 +124,10 @@ public:
     // false (delivering nothing) if the gate is absent/not-present. `err` is set on a hard error.
     virtual bool inject_interrupt(uint8_t vector, std::string& err) = 0;
 
+    // Translate a guest linear address to physical via the guest page tables (identity if
+    // paging is off). Useful for reading guest structures that live in non-identity mappings.
+    virtual bool translate(uint32_t linear, uint32_t& phys) = 0;
+
     // Execute up to `max_insns` instructions starting at the current EIP. Returns the
     // number actually retired. `err` is set to a human-readable reason on fault-stop
     // (PRINCIPLES §3: a halt records the exact context, never a silent default).

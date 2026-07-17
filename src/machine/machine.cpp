@@ -67,6 +67,7 @@ void XboxMachine::init_devices() {
 
     auto smbus = std::make_unique<Amd756Smbus>(0xC000, fault);
     smbus->add_slave(std::make_unique<XboxSmc>(fault));
+    Amd756Smbus* smbus_raw = smbus.get();
     io_devices_.push_back(std::move(smbus));
 
     // ACPI/PM controller behind the LPC I/O BAR at 0x8000 (kernel-init timing, GPIO, GPE).
@@ -82,6 +83,9 @@ void XboxMachine::init_devices() {
     auto pic = std::make_unique<DualPic>();
     pic_ = pic.get();
     io_devices_.push_back(std::move(pic));
+    // Route the SMBus completion interrupt (IRQ 11, silicon LPC cfg 0x64) to the PIC now that
+    // it exists — this unblocks the kernel's interrupt-driven HAL SMBus reads.
+    smbus_raw->set_irq([this](int irq, bool level) { pic_->raise(irq, level); }, 11);
 
     auto pit = std::make_unique<Pit8254>();
     pit_ = pit.get();

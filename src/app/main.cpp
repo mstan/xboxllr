@@ -272,6 +272,79 @@ int main(int argc, char** argv) {
             };
             kdump("PRCB(ebx)", f.ebx, 64);
             kdump("DPCq(ebp)", f.ebp, 16);
+            // Scan kernel RAM for KTHREAD dispatcher headers (Type=6, Size=0x44 -> "06 00 44 00")
+            // to enumerate every thread and its State (+0x2c) / Priority (+0x32). This tells us
+            // whether a phase-1/dashboard work thread exists besides the running idle thread.
+            {
+                const uint32_t base = 0x1000, len = 0x3FF0000;  // ~64 MB (all of RAM)
+                std::vector<uint8_t> km(len);
+                mach.read(base, km.data(), km.size());
+                std::printf("[2bl] KTHREAD scan (State 1=Ready 2=Running 5=Waiting):\n");
+                int found = 0;
+                uint32_t waiter = 0;
+                for (size_t o = 0; o + 0x60 < km.size(); o += 4) {
+                    // KTHREAD dispatcher header: Type byte = 6 (ThreadObject), Size byte = 0x44.
+                    if (km[o] == 0x06 && km[o + 2] == 0x44 && km[o + 1] == 0 && km[o + 3] == 0) {
+                        uint32_t va = 0x80000000u + base + static_cast<uint32_t>(o);
+                        uint8_t state = km[o + 0x2c];
+                        std::printf("[2bl]   KTHREAD=%08x State=%u Priority=%d WaitReason=%u\n", va,
+                                    state, static_cast<int8_t>(km[o + 0x32]), km[o + 0x57]);
+                        if (state == 5) waiter = va;  // Waiting
+                        if (++found >= 16) break;
+                    }
+                }
+                std::printf("[2bl] total KTHREADs found: %d\n", found);
+                // Follow the waiting thread's wait block to the object it blocks on.
+                if (waiter) {
+                    for (int r = 0; r < 128; r += 32) {  // raw KTHREAD dump for offset validation
+                        uint8_t b[32] = {0};
+                        mach.read((waiter + r) & 0x07FFFFFFu, b, 32);
+                        std::printf("[2bl]   KT+%02x:", r);
+                        for (int i = 0; i < 32; ++i) std::printf(" %02x", b[i]);
+                        std::printf("\n");
+                    }
+                    // The wait block lives on the thread's kernel stack (0xD0000000 region), a
+                    // non-identity mapping — translate through the page tables to read it.
+                    auto read_va = [&](uint32_t va, void* buf, size_t n) {
+                        uint32_t pa = 0;
+                        return mach.cpu().translate(va, pa) && mach.read(pa, buf, n);
+                    };
+                    uint32_t wbl = 0, obj = 0, nextwb = 0;
+                    mach.read((waiter + 0x58) & 0x07FFFFFFu, &wbl, 4);      // WaitBlockList
+                    if (wbl & 0x80000000u) {
+                        read_va(wbl + 0x0c, &obj, 4);     // KWAIT_BLOCK.Object (+0x08 is Thread)
+                        read_va(wbl + 0x10, &nextwb, 4);  // NextWaitBlock
+                    }
+                    std::printf("[2bl] waiter %08x WaitBlockList=%08x Object=%08x nextWB=%08x\n",
+                                waiter, wbl, obj, nextwb);
+                    // Dump the waiter's kernel stack (saved ESP = KernelStack @+0x24) as dwords,
+                    // to reconstruct its call chain — return addresses are kernel code pointers.
+                    uint32_t ksp = 0;
+                    mach.read((waiter + 0x24) & 0x07FFFFFFu, &ksp, 4);
+                    for (int r = 0; r < 0x120; r += 32) {
+                        uint8_t b[32] = {0};
+                        if (!read_va(ksp + r, b, 32)) break;
+                        std::printf("[2bl] stk %08x:", ksp + r);
+                        for (int i = 0; i < 32; i += 4)
+                            std::printf(" %02x%02x%02x%02x", b[i + 3], b[i + 2], b[i + 1], b[i]);
+                        std::printf("\n");
+                    }
+                    if (obj & 0x80000000u) {
+                        uint8_t hdr[16] = {0};
+                        read_va(obj, hdr, 16);
+                        int32_t sig = hdr[4] | (hdr[5] << 8) | (hdr[6] << 16) | (hdr[7] << 24);
+                        std::printf("[2bl] wait object %08x: Type=%u Size=%u SignalState=%d "
+                                    "(Type 6=Thread -> waiting for it to terminate)\n", obj,
+                                    hdr[0], hdr[2], sig);
+                        uint32_t po = 0, pi = 0, pp = 0;
+                        mach.cpu().translate(obj, po);
+                        mach.cpu().translate(0x8003d8f0, pi);
+                        mach.cpu().translate(0x80001bf8, pp);
+                        std::printf("[2bl] phys: waitobj=%08x idleThr(8003d8f0)=%08x "
+                                    "phase1(80001bf8)=%08x\n", po, pi, pp);
+                    }
+                }
+            }
             // The boot thread's last PCs before its final block-and-yield-to-idle.
             std::printf("[2bl] pre-idle PCs (last real work before blocking):");
             uint64_t pf = pre_idle_n > 64 ? pre_idle_n - 64 : 0;

@@ -26,6 +26,7 @@ enum {  // GLOBAL_STATUS bits
 enum {  // GLOBAL_ENABLE bits
     GE_CYC_TYPE_MASK = 7,
     GE_HOST_STC      = 1 << 3,
+    GE_HCYC_EN       = 1 << 4,  // raise the completion interrupt
     GE_ABORT         = 1 << 5,
 };
 enum {  // AMD756 protocol (cycle) types
@@ -46,7 +47,9 @@ bool XboxSmc::read_byte(uint8_t cmd, uint8_t& out) {
         case 0x1d: out = 0x72; return true;
         case 0x1e: out = 0xea; return true;
         case 0x1f: out = 0x46; return true;
+        case 0x01: out = version_[version_index_++ % 3]; return true;  // VER "P11" (cycles)
         case 0x04: out = 0x06; return true;  // AVPACK = COMPOSITE (agent read from silicon)
+        case 0x11: out = 0x00; return true;  // INTSTATUS: no SMC events pending at boot (clr-on-rd)
         case 0x1b: out = scratch_reg_; return true;  // SCRATCH
         case 0x0f: out = error_reg_; return true;     // ERROR_READ
         default: break;
@@ -69,16 +72,22 @@ bool XboxSmc::read_word(uint8_t cmd, uint16_t& out) {
 
 bool XboxSmc::write_byte(uint8_t cmd, uint8_t val) {
     switch (cmd) {
-        case 0x01: return true;               // VER: version-string index reset (no-op here)
-        case 0x0e: error_reg_ = val; return true;    // ERROR_WRITE
-        case 0x1b: scratch_reg_ = val; return true;  // SCRATCH
-        case 0x20: case 0x21: return true;    // challenge response (accepted, not verified)
-        default: break;
+        case 0x01: version_index_ = val; return true;   // VER: reset version-string read index
+        case 0x0e: error_reg_ = val; return true;       // ERROR_WRITE
+        case 0x1b: scratch_reg_ = val; return true;     // SCRATCH
+        case 0x02:  // POWER: reset/cycle/shutdown request — surface it loudly
+            if (val & 0xC1) {  // RESET(0x01)|CYCLE(0x40)|SHUTDOWN(0x80)
+                char b[96];
+                std::snprintf(b, sizeof(b), "SMC POWER write 0x%02x (reset/cycle/shutdown)", val);
+                if (fault_) fault_(b);
+            }
+            return true;
+        default:
+            // All other SMC registers drive physical outputs (LED 0x07/0x08, fan 0x05/0x06,
+            // tray 0x0c, interrupt enable/ack 0x1a/0x0d, challenge response 0x20/0x21, ...) with
+            // no guest-visible readback. Accept + ignore, as xemu does for unhandled writes.
+            return true;
     }
-    char b[128];
-    std::snprintf(b, sizeof(b), "SMC write 0x%02x to unmodeled register 0x%02x", val, cmd);
-    if (fault_) fault_(b);
-    return true;
 }
 
 bool XboxSmc::write_word(uint8_t cmd, uint16_t val) {
@@ -146,6 +155,17 @@ void Amd756Smbus::transaction() {
     stat_ |= okp ? GS_HCYC_STS : GS_PRERR_STS;
 }
 
+// Level-triggered completion interrupt: asserted while interrupts are enabled and a completion
+// or error status bit is set (xemu amd756: raise on GE_HCYC_EN + status after a transaction;
+// the ISR clears the status, which deasserts). Idempotent — only toggles on a real change.
+void Amd756Smbus::update_irq() {
+    bool level = (ctl_ & GE_HCYC_EN) && (stat_ & GS_CLEAR_STS);
+    if (irq_cb_ && level != irq_asserted_) {
+        irq_asserted_ = level;
+        irq_cb_(irq_num_, level);
+    }
+}
+
 uint32_t Amd756Smbus::io_read(uint16_t port, int size) {
     uint32_t val = 0;
     for (int i = 0; i < size; ++i) {
@@ -188,6 +208,7 @@ void Amd756Smbus::io_write(uint16_t port, int size, uint32_t value) {
             default: break;
         }
     }
+    update_irq();  // re-evaluate the completion IRQ after any status/enable change
 }
 
 }  // namespace xlle

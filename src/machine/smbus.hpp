@@ -5,6 +5,7 @@
 // xemu/hw/xbox/amd_smbus.c. Slaves hang off an internal I2C bus keyed by 7-bit address.
 #pragma once
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -51,6 +52,8 @@ private:
     FaultFn fault_;
     uint8_t scratch_reg_ = 0;
     uint8_t error_reg_ = 0;
+    uint8_t version_[3] = {0x50, 0x31, 0x31};  // "P11" (SMC/PIC version, read from silicon)
+    int version_index_ = 0;
 };
 
 // AMD756 SMBus host controller as a 16-port I/O device. Register offsets (from base):
@@ -62,6 +65,15 @@ public:
 
     void add_slave(std::unique_ptr<SmbusSlave> s) { slaves_.push_back(std::move(s)); }
 
+    // Wire the controller's completion interrupt (level-triggered). The kernel's HAL SMBus
+    // driver starts transactions with the interrupt-enable bit (GE_HCYC_EN) set and blocks on a
+    // completion event that this IRQ's ISR signals. The Xbox routes SMBus to IRQ 11 (silicon:
+    // LPC cfg 0x64 = 0x0b0c). Without this, kernel phase-1 hangs forever.
+    void set_irq(std::function<void(int irq, bool level)> cb, int irq_num) {
+        irq_cb_ = std::move(cb);
+        irq_num_ = irq_num;
+    }
+
     const char* name() const override { return "amd756-smbus"; }
     uint16_t io_base() const override { return base_; }
     uint16_t io_size() const override { return 16; }
@@ -70,11 +82,15 @@ public:
 
 private:
     void transaction();
+    void update_irq();
     SmbusSlave* find(uint8_t addr7);
 
     uint16_t base_;
     FaultFn fault_;
     std::vector<std::unique_ptr<SmbusSlave>> slaves_;
+    std::function<void(int, bool)> irq_cb_;
+    int irq_num_ = 11;
+    bool irq_asserted_ = false;
 
     // Controller state (matches xemu's AMD756SMBus fields).
     uint8_t stat_ = 0, ctl_ = 0, addr_ = 0, cmd_ = 0, data0_ = 0, data1_ = 0;

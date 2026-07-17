@@ -41,7 +41,7 @@ public:
     // Translate a guest linear address to physical via the guest page tables (32-bit paging;
     // identity if paging is off). uc_mem_read/write operate on physical memory, so interrupt
     // delivery must translate the IDT and stack addresses itself.
-    bool translate(uint32_t linear, uint32_t& phys);
+    bool translate(uint32_t linear, uint32_t& phys) override;
 
     uint64_t run(uint32_t start_eip, uint64_t max_insns, std::string& err) override;
 
