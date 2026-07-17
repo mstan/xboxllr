@@ -3,6 +3,29 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-07-16 — A2e: kernel phase-1 runs to completion (SMBus completion IRQ)
+
+The kernel now boots fully and runs **phase-1 device init to completion** — the phase-1 thread
+terminates normally (KTHREAD scan: 0x80001bf8 State=4). System then idles with no dashboard
+(that needs the boot device — next).
+
+Cracked the idle-loop block by walking the kernel scheduler/thread structures (layouts from
+nxdk's xboxkrnl.h): the phase-1 thread was blocked in KeWaitForSingleObject on a local
+notification event, set up by the HAL's **interrupt-driven SMBus read** (transaction started
+with GE_HCYC_EN → protocol 0x1a). Our AMD756 completed synchronously and never raised the
+completion IRQ → the ISR never signalled the event. Fix: AMD756 now raises a level-triggered
+completion interrupt on **IRQ 11** (silicon: LPC cfg 0x64=0x0b0c → SMBus IRQ 0x0b, SCI IRQ
+0x0c), deasserting when the ISR clears status. Wired through the PIC.
+
+- Modelled the SMC registers phase-1 reads, all silicon-confirmed: VER "P11" (reg 0x01, cycles
+  0x50 0x31 0x31), INTSTATUS 0 (0x11). SMC writes to output-control regs (LED 0x07/0x08, fan
+  0x05/0x06, tray, INTEN) now accept+ignore (xemu-style); POWER (0x02) stays a loud stop.
+- Observability added to --run2bl: KTHREAD scan (state/priority), wait-object + kernel-stack
+  walk using a new `CpuFloor::translate()` (32-bit page-table walk) to read the 0xD0000000
+  kernel-stack mapping.
+- **Next (A4):** IDE/ATA controller + attach `machine/xbox-hdd.img` (FATX) so the kernel mounts
+  the disk and launches `xboxdash.xbe`; then NV2A rendering to display it. ctest 3/3.
+
 ## 2026-07-16 — A2e: the real kernel is ALIVE and services timer interrupts
 
 The Xbox kernel now boots to a live, stable state and takes external interrupts. From reset the
