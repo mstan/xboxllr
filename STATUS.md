@@ -3,6 +3,20 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-07-16 — Repository checkpoint and Arc 1 burndown refreshed
+
+The complete framework history through the dashboard-XBE-load milestone is checkpointed for
+the private `mstan/xboxlle` upstream. No emulator changes were pending after `b30b358`; this
+checkpoint updates the maintained pickup/status/roadmap documents and records the remaining
+work without advancing the technical milestone.
+
+Arc 1 is at **A4 in progress**. A0 and A2 are complete. A1 has a working real-hardware agent
+but still owes deterministic xemu-TCG/cosim qualification; A3 runs on Unicorn's dynamic
+translator but still owes its page-versioning/invalidation proof. The A4 critical path is:
+characterize the AV-worker spin at 0x800570dc, start the mapped XBE's threads, produce the
+first software framebuffer, then replace the documented pushbuffer sink with the recorder
+and software rasterizer. A5 and Arc 2 have not started.
+
 ## 2026-07-16 — A4: kernel mounts the FATX HDD and LOADS the dashboard XBE
 
 The boot now crosses from "kernel idles with nothing to do" to "kernel mounts the boot

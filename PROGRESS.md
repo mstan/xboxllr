@@ -16,6 +16,21 @@ harvested from xemu, silicon-corrected against a live console. GPL-2.
   XboxBiosTool, fatx clones) and `machine/` (git-ignored copyrighted dumps: flash, decrypted
   2BL/kernel, eeprom.bin, 8GB FATX xbox-hdd.img with C:\xboxdash.xbe = XBMC softmod).
 - Phase: **Arc 1, A4** (boot device → dashboard). A2e complete. See docs/ROADMAP.md.
+- Private upstream: `https://github.com/mstan/xboxlle` (`origin`; branch `master`).
+
+## Arc 1 burndown
+
+- **Done:** A0 foundations; A2 live-kernel boot, phase-1 device init, FATX mount, and
+  dashboard XBE mapping.
+- **Partial / validation debt:** A1's real-hardware probe channel is live, but deterministic
+  xemu-TCG cosim remains deferred. A3 uses Unicorn's dynamic translator, but the planned
+  page-versioning proof is not complete.
+- **In progress:** A4. Storage is sufficient to load the XBE; the interrupt/display shells
+  reach the kernel AV worker's mode-set loop.
+- **Immediate burn-down path:** characterize 0x800570dc → start XBE threads → emit the
+  first software-rendered framebuffer → replace the pushbuffer sink with the recorder and
+  software rasterizer → add the A4 input/audio coverage exercised by the dashboard.
+- **Not started:** A5 end-to-end retail-dashboard navigation and Arc 2 game work.
 
 ## Where the boot stands RIGHT NOW
 

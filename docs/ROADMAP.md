@@ -12,6 +12,18 @@ machine-verifiable evidence that closed it.
 - Crucibles gate subsystem admission: a subsystem's conformance crucible passes **before** the
   milestone that first relies on it.
 
+## Burndown snapshot — 2026-07-16
+
+| Milestone | State | Evidence / remaining gate |
+| --- | --- | --- |
+| A0 | **DONE** | Unicorn floor, host shell, rings/JSONL/debug server; `ctest` 3/3. |
+| A1 | **PARTIAL / DEFERRED** | Real-console agent and hardware probes work; pinned deterministic xemu-TCG cosim is still owed. |
+| A2 | **DONE** | Retail 4983 kernel reaches executive/IO init, services IRQs, completes phase-1, mounts FATX, and maps the dashboard XBE. |
+| A3 | **PARTIAL** | Unicorn's dynamic translator is the normal tier; page versioning and SMC/decryption invalidation proof remain. |
+| A4 | **IN PROGRESS** | XBE is mapped. Unblock AV worker at 0x800570dc, start XBE threads, output the first framebuffer, then land the recorder/software rasterizer and exercised audio/input coverage. |
+| A5 | **NOT STARTED** | Requires A4 dashboard execution and rendering. |
+| Arc 2 | **NOT STARTED** | Explicitly out of current scope. |
+
 ---
 
 # ARC 1 — the real Xbox dashboard, fully navigable
@@ -29,6 +41,9 @@ hooks) vs a from-scratch checked interpreter; pick the floor on fidelity + hooka
 Reference clones (xemu, sp00nz/xboxrecomp) pulled read-only, out of tree.
 **Deliverable:** host runs; chosen CPU floor executes instruction fixtures under ring
 instrumentation, with **no Xbox devices attached**.
+
+**DONE 2026-07-16:** Unicorn 2.1.1 selected; fixtures, host shell, observability rings,
+JSONL/debug server, and the three-test suite pass.
 
 ## A1 — Oracle + hardware harness
 Pinned xemu-TCG reference behind a determinism gate (pinned commit, TCG-not-KVM, single vCPU,
@@ -56,6 +71,10 @@ Run the real machine, deferring only the crypto:
   context switch → executive/IO init.
 **Deliverable:** the real kernel reaches executive/IO-init with its own structures in real
 guest RAM; cosim/hardware-clean through each transition.
+
+**DONE 2026-07-16 (execution deliverable):** the retail kernel reaches executive/IO init,
+services timer/device interrupts, completes phase-1 device initialization, mounts the FATX
+HDD, and maps the dashboard XBE. The cross-engine A1 validation gate remains recorded debt.
 
 ## A3 — Fast tier online
 Page-versioned dynamic recompilation running as the normal execution tier (Unicorn's
