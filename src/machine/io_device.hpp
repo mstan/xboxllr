@@ -25,6 +25,13 @@ public:
     virtual uint16_t io_size() const = 0;
     virtual uint32_t io_read(uint16_t port, int size) = 0;
     virtual void io_write(uint16_t port, int size, uint32_t value) = 0;
+
+    // Does this device answer `port`? Defaults to the [io_base, io_base+io_size) window; a
+    // device spanning several disjoint ranges (e.g. the dual PIC's master/slave/ELCR ports)
+    // overrides this to claim all of them.
+    virtual bool owns(uint16_t port) const {
+        return port >= io_base() && port < static_cast<uint32_t>(io_base()) + io_size();
+    }
 };
 
 }  // namespace xlle

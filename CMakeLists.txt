@@ -61,7 +61,10 @@ add_library(xlle_machine STATIC
   src/machine/pci.cpp
   src/machine/smbus.cpp
   src/machine/nv2a.cpp
-  src/machine/pm.cpp)
+  src/machine/pm.cpp
+  src/machine/pic.cpp
+  src/machine/pit.cpp
+  src/machine/rtc.cpp)
 target_include_directories(xlle_machine PUBLIC ${XLLE_INCLUDES})
 target_link_libraries(xlle_machine PUBLIC xlle_cpu)
 

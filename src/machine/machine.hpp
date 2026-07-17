@@ -12,6 +12,8 @@
 #include "machine/mmio_device.hpp"
 #include "machine/nv2a.hpp"
 #include "machine/pci.hpp"
+#include "machine/pic.hpp"
+#include "machine/pit.hpp"
 #include "machine/pm.hpp"
 #include "machine/smbus.hpp"
 #include "xlle/cpu_floor.hpp"
@@ -54,16 +56,24 @@ private:
     MmioDevice* find_mmio(uint32_t addr);
 
     std::unique_ptr<CpuFloor> cpu_;
+    std::vector<uint8_t> ram_;  // 64 MB backing, mapped at 0x0 and aliased at 0x04000000
     size_t flash_size_ = 0;
     bool ram_ok_ = false, flash_ok_ = false;
 
-    std::vector<std::unique_ptr<IoPortDevice>> io_devices_;  // owns PCI host, SMBus, ...
+    std::vector<std::unique_ptr<IoPortDevice>> io_devices_;  // owns PCI host, SMBus, PIC, PIT...
     std::vector<std::unique_ptr<MmioDevice>> mmio_devices_;  // owns NV2A, ...
-    PciHost* pci_ = nullptr;                                 // non-owning convenience pointer
+    PciHost* pci_ = nullptr;                                 // non-owning convenience pointers
+    DualPic* pic_ = nullptr;
+    Pit8254* pit_ = nullptr;
     std::function<void(const IoEvent&)> io_event_cb_;
     std::function<void(const MemEvent&)> mmio_event_cb_;
     uint64_t io_seq_ = 0;
     uint64_t mmio_seq_ = 0;
+    uint64_t total_insns_ = 0;  // retired-instruction clock feeding the PIT time base
+
+    // Guest CPU clock estimate (Hz) mapping retired instructions -> PIT ticks. The Xbox CPU is
+    // 733.33 MHz; combined with ~1 IPC this sets the tick cadence (calibratable).
+    static constexpr uint64_t kCpuHz = 733333333ull;
 };
 
 }  // namespace xlle

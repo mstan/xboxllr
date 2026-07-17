@@ -222,6 +222,17 @@ int main(int argc, char** argv) {
                         (unsigned long long)n, f.eip, f.eax, f.ecx);
             if (!err2.empty()) std::printf("[2bl] STOPPED: %s\n", err2.c_str());
             else std::printf("[2bl] ran to instruction budget without fault\n");
+            // Dump kernel code bytes around the final EIP (virtual 0x8xxxxxxx -> physical
+            // & 0x07FFFFFF) so the faulting instruction can be disassembled off-line.
+            {
+                uint32_t peip = f.eip & 0x07FFFFFF;
+                uint8_t code[48] = {0};
+                if (peip >= 24 && mach.read(peip - 24, code, sizeof(code))) {
+                    std::printf("[2bl] code @0x%08x-0x%08x:", peip - 24, peip + 24);
+                    for (int i = 0; i < 48; ++i) std::printf(" %02x", code[i]);
+                    std::printf("\n      (EIP is the 25th byte above)\n");
+                }
+            }
             std::printf("[2bl] last PCs:");
             uint64_t first = trace_n > 16 ? trace_n - 16 : 0;
             for (uint64_t i = first; i < trace_n; ++i) std::printf(" %05x", trace[i & 15]);

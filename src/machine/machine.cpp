@@ -9,6 +9,8 @@
 
 #include "cpu/unicorn_floor.hpp"
 #include "machine/open_bus.hpp"
+#include "machine/port61.hpp"
+#include "machine/rtc.hpp"
 
 namespace xlle {
 
@@ -17,7 +19,13 @@ XboxMachine::XboxMachine() : cpu_(std::make_unique<UnicornFloor>()) {}
 bool XboxMachine::ok() const { return static_cast<UnicornFloor*>(cpu_.get())->ok(); }
 
 bool XboxMachine::init_ram() {
-    ram_ok_ = cpu_->map_mem(0x0, kRamSize);
+    ram_.assign(kRamSize, 0);
+    // Map the 64 MB backing at 0x0 and ALIAS it at 0x04000000-0x07FFFFFF: the 64 MB Xbox does
+    // not decode address bit 26, so the upper half mirrors RAM. The kernel's memory-size probe
+    // depends on this wraparound to detect 64 MB (without it, it detects 128 MB and walks the
+    // PFN database off the end of RAM).
+    ram_ok_ = cpu_->map_mem_ptr(0x0, kRamSize, ram_.data()) &&
+              cpu_->map_mem_ptr(kRamSize, kRamSize, ram_.data());
     return ram_ok_;
 }
 
@@ -69,6 +77,20 @@ void XboxMachine::init_devices() {
     // and must see "absent" (open bus), not a fault. (xemu's retail machine likewise omits it.)
     io_devices_.push_back(std::make_unique<OpenBus>(0x002E, 2, "superio-2e (absent)"));
     io_devices_.push_back(std::make_unique<OpenBus>(0x004E, 2, "superio-4e (absent)"));
+
+    // Interrupt/timer stack: PIC (master/slave/ELCR), PIT (system tick -> IRQ0), port 0x61.
+    auto pic = std::make_unique<DualPic>();
+    pic_ = pic.get();
+    io_devices_.push_back(std::move(pic));
+
+    auto pit = std::make_unique<Pit8254>();
+    pit_ = pit.get();
+    // Channel 0's period boundary pulses IRQ0 (a rising then falling edge on PIC line 0).
+    pit_->set_irq0([this]() { pic_->raise(0, true); pic_->raise(0, false); });
+    io_devices_.push_back(std::move(pit));
+
+    io_devices_.push_back(std::make_unique<Port61>());
+    io_devices_.push_back(std::make_unique<Mc146818Rtc>());
 
     // Route port I/O through the fabric.
     cpu_->on_io([this](uint16_t port, int size) { return io_in(port, size); },
@@ -125,10 +147,8 @@ void XboxMachine::mmio_write(uint32_t addr, int size, uint32_t value) {
 }
 
 IoPortDevice* XboxMachine::find_io(uint16_t port) {
-    for (auto& d : io_devices_) {
-        uint16_t base = d->io_base();
-        if (port >= base && port < static_cast<uint32_t>(base) + d->io_size()) return d.get();
-    }
+    for (auto& d : io_devices_)
+        if (d->owns(port)) return d.get();
     return nullptr;
 }
 
@@ -164,6 +184,38 @@ void XboxMachine::io_out(uint16_t port, int size, uint32_t value) {
 
 bool XboxMachine::read(uint32_t addr, void* buf, size_t n) { return cpu_->read_mem(addr, buf, n); }
 
-uint64_t XboxMachine::run(uint32_t s, uint64_t m, std::string& e) { return cpu_->run(s, m, e); }
+uint64_t XboxMachine::run(uint32_t start, uint64_t max, std::string& err) {
+    // Execute in short chunks so the interrupt controller can deliver external IRQs at clean
+    // instruction boundaries between chunks (Unicorn has no native IRQ path — see the CPU
+    // floor's inject_interrupt). The PIT clock advances with retired instructions.
+    constexpr uint64_t kChunk = 4096;
+    uint32_t eip = start;
+    uint64_t done = 0;
+    while (done < max) {
+        uint64_t chunk = std::min(kChunk, max - done);
+        std::string cerr;
+        uint64_t n = cpu_->run(eip, chunk, cerr);
+        done += n;
+        total_insns_ += n;
+
+        if (pit_) pit_->set_time(total_insns_ * Pit8254::kPitFreq / kCpuHz);
+        if (!cerr.empty()) { err = cerr; break; }  // device fault-stop wins
+
+        // Deliver one pending, unmasked external interrupt at this boundary.
+        if (pic_ && pic_->intr_pending() && cpu_->interrupts_enabled()) {
+            int vec = pic_->acknowledge();
+            if (vec >= 0) {
+                std::string ierr;
+                if (!cpu_->inject_interrupt(static_cast<uint8_t>(vec), ierr) && !ierr.empty()) {
+                    err = ierr;
+                    break;
+                }
+            }
+        }
+        eip = cpu_->get_regs().eip;
+        if (n == 0) break;  // no forward progress (e.g. a stop with nothing to deliver)
+    }
+    return done;
+}
 
 }  // namespace xlle

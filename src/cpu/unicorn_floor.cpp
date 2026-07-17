@@ -30,6 +30,14 @@ UnicornFloor::UnicornFloor() {
                 reinterpret_cast<void*>(&UnicornFloor::mem_trampoline), this, 1, 0);
     hook_code_ = from_hook(hc);
     hook_mem_ = from_hook(hm);
+
+    // Capture the address of any unmapped access so a fault-stop can name it (PRINCIPLES §3).
+    uc_hook hu = 0;
+    uc_hook_add(uc, &hu,
+                UC_HOOK_MEM_READ_UNMAPPED | UC_HOOK_MEM_WRITE_UNMAPPED |
+                    UC_HOOK_MEM_FETCH_UNMAPPED,
+                reinterpret_cast<void*>(&UnicornFloor::unmapped_trampoline), this, 1, 0);
+    hook_unmapped_ = from_hook(hu);
 }
 
 UnicornFloor::~UnicornFloor() {
@@ -38,6 +46,10 @@ UnicornFloor::~UnicornFloor() {
 
 bool UnicornFloor::map_mem(uint32_t addr, size_t size) {
     return uc_mem_map(reinterpret_cast<uc_engine*>(uc_), addr, size, UC_PROT_ALL) == UC_ERR_OK;
+}
+bool UnicornFloor::map_mem_ptr(uint32_t addr, size_t size, void* host) {
+    return uc_mem_map_ptr(reinterpret_cast<uc_engine*>(uc_), addr, size, UC_PROT_ALL, host) ==
+           UC_ERR_OK;
 }
 bool UnicornFloor::write_mem(uint32_t addr, const void* data, size_t size) {
     return uc_mem_write(reinterpret_cast<uc_engine*>(uc_), addr, data, size) == UC_ERR_OK;
@@ -160,10 +172,62 @@ void UnicornFloor::request_stop(std::string reason) {
     uc_emu_stop(reinterpret_cast<uc_engine*>(uc_));
 }
 
+bool UnicornFloor::interrupts_enabled() {
+    uc_engine* uc = reinterpret_cast<uc_engine*>(uc_);
+    uint32_t eflags = 0;
+    uc_reg_read(uc, UC_X86_REG_EFLAGS, &eflags);
+    return (eflags & 0x200u) != 0;  // IF
+}
+
+bool UnicornFloor::inject_interrupt(uint8_t vector, std::string& err) {
+    // Replay a 32-bit protected-mode interrupt-gate entry (same privilege, no error code), the
+    // sequence do_interrupt_protected() would run natively (see the interrupt-injection notes).
+    // Assumes a flat ring-0 SS (base 0) — true for the Xbox kernel's GDT.
+    uc_engine* uc = reinterpret_cast<uc_engine*>(uc_);
+
+    uc_x86_mmr idtr{};
+    uc_reg_read(uc, UC_X86_REG_IDTR, &idtr);
+    if (static_cast<uint64_t>(vector) * 8 + 7 > idtr.limit) return false;  // gate not in IDT
+
+    uint8_t gate[8] = {0};
+    if (uc_mem_read(uc, idtr.base + static_cast<uint64_t>(vector) * 8, gate, 8) != UC_ERR_OK)
+        return false;
+    uint8_t attr = gate[5];
+    if (!(attr & 0x80)) return false;  // present bit clear -> nothing to deliver
+    uint32_t handler = gate[0] | (gate[1] << 8) | (static_cast<uint32_t>(gate[6]) << 16) |
+                       (static_cast<uint32_t>(gate[7]) << 24);
+    uint16_t selector = gate[2] | (gate[3] << 8);
+    int type = attr & 0x0F;  // 0xE = interrupt gate, 0xF = trap gate
+
+    uint32_t eip = 0, esp = 0, eflags = 0, cs = 0;
+    uc_reg_read(uc, UC_X86_REG_EIP, &eip);
+    uc_reg_read(uc, UC_X86_REG_ESP, &esp);
+    uc_reg_read(uc, UC_X86_REG_EFLAGS, &eflags);
+    uc_reg_read(uc, UC_X86_REG_CS, &cs);
+
+    // Push EFLAGS, CS, EIP (dwords). No error code for a hardware IRQ.
+    uint32_t frame[3] = {eflags, cs, eip};  // will land at [esp-4]=eflags, [esp-8]=cs, [esp-12]=eip
+    esp -= 4; if (uc_mem_write(uc, esp, &frame[0], 4) != UC_ERR_OK) { err = "irq push eflags"; return false; }
+    esp -= 4; if (uc_mem_write(uc, esp, &frame[1], 4) != UC_ERR_OK) { err = "irq push cs"; return false; }
+    esp -= 4; if (uc_mem_write(uc, esp, &frame[2], 4) != UC_ERR_OK) { err = "irq push eip"; return false; }
+    uc_reg_write(uc, UC_X86_REG_ESP, &esp);
+
+    uint32_t new_eflags = eflags & ~(0x100u | 0x20000u | 0x10000u | 0x4000u);  // TF,VM,RF,NT
+    if ((type & 1) == 0) new_eflags &= ~0x200u;  // interrupt gate clears IF
+    uc_reg_write(uc, UC_X86_REG_EFLAGS, &new_eflags);
+
+    uint32_t new_cs = selector & ~3u;  // RPL forced to CPL0
+    uc_reg_write(uc, UC_X86_REG_CS, &new_cs);
+    uc_reg_write(uc, UC_X86_REG_EIP, &handler);
+    return true;
+}
+
 uint64_t UnicornFloor::run(uint32_t start_eip, uint64_t max_insns, std::string& err) {
     uc_engine* uc = reinterpret_cast<uc_engine*>(uc_);
     const uint64_t before = seq_;
     stop_reason_.clear();
+    last_fault_addr_ = 0;
+    last_fault_type_ = 0;
     uc_err e = uc_emu_start(uc, start_eip, 0, /*timeout=*/0, /*count=*/max_insns);
     if (!stop_reason_.empty()) {
         // A device/servicing callback requested a loud stop; its reason wins over Unicorn's
@@ -175,10 +239,19 @@ uint64_t UnicornFloor::run(uint32_t start_eip, uint64_t max_insns, std::string& 
         err = buf;
     } else if (e != UC_ERR_OK) {
         X86Regs r = get_regs();
-        char buf[256];
-        std::snprintf(buf, sizeof(buf), "unicorn fault: %s (eip=0x%08x, after %llu insns)",
-                      uc_strerror(e), r.eip,
-                      static_cast<unsigned long long>(seq_ - before));
+        char buf[320];
+        if (last_fault_addr_) {
+            const char* what = last_fault_type_ == UC_MEM_WRITE_UNMAPPED ? "write"
+                             : last_fault_type_ == UC_MEM_FETCH_UNMAPPED ? "fetch" : "read";
+            std::snprintf(buf, sizeof(buf),
+                          "unicorn fault: %s at unmapped %s addr=0x%08x (eip=0x%08x, after %llu "
+                          "insns)", uc_strerror(e), what, last_fault_addr_, r.eip,
+                          static_cast<unsigned long long>(seq_ - before));
+        } else {
+            std::snprintf(buf, sizeof(buf), "unicorn fault: %s (eip=0x%08x, after %llu insns)",
+                          uc_strerror(e), r.eip,
+                          static_cast<unsigned long long>(seq_ - before));
+        }
         err = buf;
     }
     return seq_ - before;
@@ -211,6 +284,14 @@ void UnicornFloor::out_trampoline(uc_struct*, uint32_t port, int size, uint32_t 
                                   void* user) {
     auto* self = static_cast<UnicornFloor*>(user);
     if (self->io_out_cb_) self->io_out_cb_(static_cast<uint16_t>(port), size, value);
+}
+
+bool UnicornFloor::unmapped_trampoline(uc_struct*, int type, uint64_t addr, int, int64_t,
+                                       void* user) {
+    auto* self = static_cast<UnicornFloor*>(user);
+    self->last_fault_addr_ = static_cast<uint32_t>(addr);
+    self->last_fault_type_ = type;
+    return false;  // do not resolve: let Unicorn take the fault (we only record it)
 }
 
 uint64_t UnicornFloor::mmio_read_trampoline(uc_struct*, uint64_t offset, unsigned size,

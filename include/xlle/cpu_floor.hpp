@@ -73,6 +73,9 @@ public:
 
     // Machine setup.
     virtual bool map_mem(uint32_t addr, size_t size) = 0;
+    // Map a caller-owned host buffer as guest RAM. Mapping the SAME buffer at two guest bases
+    // models address-line aliasing (the 64 MB Xbox mirrors 0x04000000-0x07FFFFFF onto 0x0).
+    virtual bool map_mem_ptr(uint32_t addr, size_t size, void* host) = 0;
     virtual bool write_mem(uint32_t addr, const void* data, size_t size) = 0;
     virtual bool read_mem(uint32_t addr, void* data, size_t size) = 0;
 
@@ -103,6 +106,17 @@ public:
     // `reason` is surfaced by run()'s `err`. This is how a device reports "unimplemented"
     // (PRINCIPLES §3: a halt records the exact context, never a silent default).
     virtual void request_stop(std::string reason) = 0;
+
+    // Are maskable interrupts currently enabled (EFLAGS.IF set)? The interrupt controller
+    // consults this before delivering an external IRQ.
+    virtual bool interrupts_enabled() = 0;
+
+    // Deliver an external hardware interrupt: synthesize the CPU's protected-mode interrupt-gate
+    // entry for `vector` (read the IDT via IDTR, push EFLAGS/CS/EIP with no error code, clear IF
+    // for an interrupt gate, load handler CS:EIP). Unicorn has no native IRQ facility, so this
+    // replays the microcode manually. Call only at an instruction boundary with IF set. Returns
+    // false (delivering nothing) if the gate is absent/not-present. `err` is set on a hard error.
+    virtual bool inject_interrupt(uint8_t vector, std::string& err) = 0;
 
     // Execute up to `max_insns` instructions starting at the current EIP. Returns the
     // number actually retired. `err` is set to a human-readable reason on fault-stop

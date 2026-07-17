@@ -18,6 +18,7 @@ public:
     const char* name() const override { return "unicorn"; }
 
     bool map_mem(uint32_t addr, size_t size) override;
+    bool map_mem_ptr(uint32_t addr, size_t size, void* host) override;
     bool write_mem(uint32_t addr, const void* data, size_t size) override;
     bool read_mem(uint32_t addr, void* data, size_t size) override;
 
@@ -33,6 +34,8 @@ public:
     void on_io(IoInCb in_cb, IoOutCb out_cb) override;
     bool map_mmio(uint32_t addr, size_t size, MmioReadCb r, MmioWriteCb w) override;
     void request_stop(std::string reason) override;
+    bool interrupts_enabled() override;
+    bool inject_interrupt(uint8_t vector, std::string& err) override;
 
     uint64_t run(uint32_t start_eip, uint64_t max_insns, std::string& err) override;
 
@@ -45,6 +48,8 @@ private:
                                void* user);
     static uint32_t in_trampoline(uc_struct*, uint32_t port, int size, void* user);
     static void out_trampoline(uc_struct*, uint32_t port, int size, uint32_t value, void* user);
+    static bool unmapped_trampoline(uc_struct*, int type, uint64_t addr, int size, int64_t value,
+                                    void* user);
 
     // One MMIO region + its callbacks. Held type-erased behind a small heap record whose
     // address is the user_data Unicorn hands back to the MMIO trampolines.
@@ -63,6 +68,9 @@ private:
     void* hook_mem_ = nullptr;
     void* hook_in_ = nullptr;
     void* hook_out_ = nullptr;
+    void* hook_unmapped_ = nullptr;
+    uint32_t last_fault_addr_ = 0;  // most recent unmapped-access address (for fault reporting)
+    int last_fault_type_ = 0;
     RetiredCb retired_cb_;
     MemCb mem_cb_;
     IoInCb io_in_cb_;
