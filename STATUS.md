@@ -3,6 +3,61 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-07-16 — A4: kernel mounts the FATX HDD and LOADS the dashboard XBE
+
+The boot now crosses from "kernel idles with nothing to do" to "kernel mounts the boot
+device, reads ~6.4 MB off the FATX image over bus-master DMA, and maps the dashboard XBE"
+(`LOAD symbols: xbmc.exe` — this softmod image's `xboxdash.xbe` is XBMC — plus 16 per-section
+load notifications through the kernel debug service). The XBE's entry threads have not
+started yet: the AV worker thread is still inside the kernel's display-mode bring-up
+(currently spinning at 0x800570dc), and phase-1 waits on it. That spin is the next target.
+
+New devices / CPU-floor capabilities (all harvested from xemu, silicon-corrected):
+- **IDE/ATA controller** (`src/machine/ide.*`): primary channel 0x1F0-0x1F7/0x3F6, bus-master
+  DMA at 0xFF60 (BAR4, silicon), drive 0 = FATX HDD image (reports ATA security LOCKED — the
+  retail kernel requires it, then SECURITY-UNLOCKs it), drive 1 = ATAPI DVD with no media
+  (TEST UNIT READY/REQUEST SENSE/INQUIRY/GESN/GET CONFIGURATION/MODE SENSE incl. the
+  ILLEGAL-REQUEST response to the Xbox auth page 0x3E — the xemu witness). Level-triggered
+  IRQ 14. Verified: 13,121 sectors read / 1 written, 419 completion IRQs, LBAs marching
+  through file data.
+- **EEPROM slave at SMBus 0x54** (`XboxEeprom`, backed by machine/eeprom.bin): its ABSENCE
+  was the silent phase-1 killer — the kernel retried word-reads, gave up, set an LED error
+  pattern and terminated without ever touching the disk. Guest writes stay in-memory.
+- **CX25871 TV encoder at SMBus 0x45** (`Cx25871`, register file): the AV worker programs it
+  via interrupt-driven SMBus; absent → STATUS_IO_DEVICE_ERROR retry-forever.
+- **Guest exception delivery** (`unicorn_floor.*`): Unicorn funnels ALL guest-raised vectors
+  (INT n, INT3, CPU exceptions) to UC_HOOK_INTR and has NO native IDT delivery — without a
+  hook, the kernel's first `int 0x2d` (DbgPrint) killed the machine with UC_ERR_EXCEPTION.
+  We now deliver through the guest IDT via the existing gate-entry machinery; error-code-class
+  vectors (#DF/#TS/#NP/#SS/#GP/#PF/#AC) fault-stop loudly until a real path needs them.
+  `CpuFloor::on_interrupt()` observer decodes the kernel debug services (DbgPrint text, image
+  load/unload names) into the boot log.
+- **PIC cascade fix** (`pic.*`): a slave IRQ latched while masked never surfaced when later
+  unmasked (master line 2 was only recomputed on raise/ack, not on IMR/EOI/ELCR writes).
+  This blocked ALL IDE completion IRQs. `update_cascade()` now runs after every register write.
+- **APU shell** (`apu.hpp`, 0xFE800000/512K): xemu register-file semantics + ISTS W1C,
+  FEMEMDATA magic write-through, XGSCNT counter, VP NV1BA0_PIO_FREE=0x80 (kernel spins on it).
+- **ACI/AC97 shell** (`aci.hpp`, 0xFEC00000/4K): NAM mixer (STAC9700 identity) + NABM bus
+  master with GLOB_STA codec-ready, per-stream CIV/LVI/SR/PICB/CR/BDBAR; stream RUN logged
+  (no audio engine — deliberate A4 scope).
+- **NV2A interrupt chain + frame clock** (`nv2a.*`): PCRTC VBLANK (bit0, W1C) aggregated into
+  PMC_INTR bit 24, gated by both INTR_EN regs, level IRQ 3; ~60 Hz frame clock derived from
+  retired instructions; PRMCIO 0x3DA input-status-1 retrace bit driven from sub-frame phase;
+  USER-block DMA_GET tracks DMA_PUT (**pushbuffer SINK — documented stand-in** until the A4
+  recorder/rasterizer); PFIFO RUNOUT/CACHE1 status read EMPTY. Kernel's VBLANK ISR verified
+  running every frame (mask → ack → re-enable).
+- Silicon captures folded into `pci.cpp` (agent EXEC reads, console live): IDE 00:09.0 full
+  config (rev 0xD4, prog-if 0x8A, cmd 0x0005, BAR4=0xFF61, 0x3C=0x01030000, timing regs
+  0x44-0x60), LPC 0x60=0x400/0x64=0x0B0C/0x68=0x31000/0x6C=0x0E065491 (dev-9 nibble 0xE =
+  IRQ 14), SMC TRAYSTATE=0x00 (closed; xemu's closed-empty is 0x40 — silicon wins). X-code
+  decode (XboxBiosTool) proved the init table never touches dev 9 — the kernel programs it.
+- `--hdd` / `--eeprom` flags + new diagnostics in `main.cpp`: per-thread instruction
+  attribution (KPCR 0x8003da3c CurrentThread poll), non-idle PC ring, every-waiter wait-block
+  walk, SMC/absent-slave/EEPROM write logs, IDE/NV2A counters, debug-service decode.
+
+**Next:** characterize the AV worker's spin at 0x800570dc (kernel display bring-up), then the
+XBE entry threads should start (KTHREAD count > 3). Then NV2A framebuffer output. ctest 3/3.
+
 ## 2026-07-16 — A2e: kernel phase-1 runs to completion (SMBus completion IRQ)
 
 The kernel now boots fully and runs **phase-1 device init to completion** — the phase-1 thread

@@ -8,6 +8,7 @@
 #pragma once
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <vector>
 
 #include "machine/io_device.hpp"
@@ -45,6 +46,13 @@ public:
     // Was the MCPX boot-ROM overlay disabled by firmware (LPC cfg 0x80 bit1)? Observability.
     bool mcpx_rom_disabled() const { return mcpx_rom_disabled_; }
 
+    // Devices whose I/O decode follows a BAR (e.g. the IDE bus master on 00:09.0 BAR4)
+    // subscribe here to observe config writes. Called after the bytes are stored.
+    using CfgWriteFn =
+        std::function<void(uint8_t bus, uint8_t dev, uint8_t fn, uint8_t reg, int size,
+                           uint32_t value)>;
+    void on_cfg_write(CfgWriteFn cb) { cfg_write_observers_.push_back(std::move(cb)); }
+
 private:
     PciFunction* find(uint8_t bus, uint8_t dev, uint8_t fn);
 
@@ -52,6 +60,7 @@ private:
     uint32_t config_addr_ = 0;
     bool mcpx_rom_disabled_ = false;
     std::vector<PciFunction> funcs_;
+    std::vector<CfgWriteFn> cfg_write_observers_;
 };
 
 }  // namespace xlle

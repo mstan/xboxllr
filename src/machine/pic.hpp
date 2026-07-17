@@ -74,6 +74,12 @@ public:
     Pic8259& slave() { return slave_; }
 
 private:
+    // Recompute the cascade: the slave's INT output drives master line 2. Must run after ANY
+    // slave state change — a raise, but also IMR/EOI/ELCR register writes (a request latched
+    // while masked asserts INT only when the kernel later unmasks it; qemu's pic_update_irq
+    // runs after every write and propagates through the cascade qemu_irq the same way).
+    void update_cascade() { master_.set_irq(2, slave_.get_irq() >= 0); }
+
     Pic8259 master_, slave_;
 };
 

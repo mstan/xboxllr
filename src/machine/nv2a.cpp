@@ -52,15 +52,38 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
     if (blk->off == 0x000000) {  // PMC
         switch (bo) {
             case 0x000: return 0x02A000A3;  // PMC_BOOT_0: NV2A, A03 (matches captured silicon)
-            case 0x100: return 0x00000000;  // PMC_INTR_0: no pending IRQs at cold boot
-            case 0x140: return 0x00000000;  // PMC_INTR_EN_0
+            case 0x100: return pmc_intr_status();  // PMC_INTR_0 (aggregates PCRTC, bit 24)
+            case 0x140: return pmc_intr_en_;       // PMC_INTR_EN_0
             default: break;
+        }
+    } else if (blk->off == 0x600000) {  // PCRTC
+        switch (bo) {
+            case 0x100: return pcrtc_intr_;     // NV_PCRTC_INTR_0 (bit0 VBLANK)
+            case 0x140: return pcrtc_intr_en_;  // NV_PCRTC_INTR_EN_0
+            default: break;
+        }
+    } else if (blk->off == 0x601000) {  // PRMCIO (VGA CRTC/attribute mirror)
+        // Input status 1 (0x3DA): bit3 = vertical retrace in progress, bit0 = blanking.
+        // Driven from the instruction-derived frame phase (last ~5% of each frame is the
+        // vertical blank), so the kernel's poll-for-retrace loops see a real cadence.
+        if (bo == 0x3DA) {
+            bool vblank = frame_phase_ >= 950;
+            return vblank ? 0x09u : 0x00u;
         }
     } else if (blk->off == 0x001000) {  // PBUS
         switch (bo) {
             case 0x800: return kPciNv0;  // NV_PBUS_PCI_NV_0
             case 0x804: return kPciNv1;  // NV_PBUS_PCI_NV_1
             case 0x808: return kPciNv2;  // NV_PBUS_PCI_NV_2
+            default: break;
+        }
+    } else if (blk->off == 0x002000) {  // PFIFO
+        switch (bo) {
+            // Consistent with the USER-block pushbuffer sink (commands consumed instantly):
+            // both the runout FIFO and CACHE1 always read EMPTY (LOW_MARK, xemu pfifo.c sets
+            // it whenever the cache drains). The kernel's wait-for-FIFO-idle loop needs this.
+            case 0x400: return 1u << 4;   // NV_PFIFO_RUNOUT_STATUS: empty
+            case 0x1214: return 1u << 4;  // NV_PFIFO_CACHE1_STATUS: empty
             default: break;
         }
     } else if (blk->off == 0x100000) {  // PFB
@@ -70,6 +93,25 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
         // Real strap value captured from silicon 2026-07-16 (agent read 0xFD101000). xemu
         // stubs this to 0; the 2BL discards it, but the kernel may consume it — use the truth.
         if (bo == 0x000) return 0x861D4401;
+    } else if (blk->off == 0x800000) {  // USER: per-channel PFIFO control (64 KB stride)
+        // Pushbuffer SINK (deliberate, documented A4 stand-in — NOT the final model): the
+        // kernel submits GPU commands by bumping DMA_PUT (+0x40) and polls DMA_GET (+0x44)
+        // until the GPU consumes them. There is no pushbuffer engine yet, so GET reads back
+        // as PUT: commands are treated as instantly consumed and are otherwise discarded.
+        // The A4 finish line replaces this with a pushbuffer recorder + software rasterizer.
+        if ((bo & 0xFFFF) == 0x44) {
+            uint32_t put_key = (rel & ~0xFFFFu) | 0x40;
+            auto it = user_regs_.find(put_key);
+            uint32_t put = it != user_regs_.end() ? it->second : 0;
+            if (pb_logged_ < 8) {
+                std::printf("[nv2a] USER ch%u DMA_GET read -> tracking DMA_PUT=0x%08x "
+                            "(pushbuffer sink)\n", (bo >> 16) & 0x1F, put);
+                ++pb_logged_;
+            }
+            return put;
+        }
+        auto it = user_regs_.find(rel);
+        if (it != user_regs_.end()) return it->second;
     }
 
     // Unmodelled register inside a real block: xemu-default 0, logged as a hardware-TODO.
@@ -86,9 +128,58 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
         if (unmodeled_cb_) unmodeled_cb_(true, addr, rel, "hole", value);
         return;
     }
+    // Interrupt plumbing (xemu nv2a.c/pcrtc.c): PMC_INTR_EN_0 gates the PCI line; PCRTC's
+    // pending register is write-1-clear, its enable register plain. Every change re-evaluates
+    // the level-triggered GPU IRQ.
+    if (blk->off == 0x000000 && bo == 0x140) {
+        pmc_intr_en_ = value;
+        update_irq();
+        return;
+    }
+    if (blk->off == 0x600000 && bo == 0x100) {
+        pcrtc_intr_ &= ~value;
+        update_irq();
+        return;
+    }
+    if (blk->off == 0x600000 && bo == 0x140) {
+        pcrtc_intr_en_ = value;
+        update_irq();
+        return;
+    }
+    // USER block: store channel-control writes so DMA_GET can track DMA_PUT (see mmio_read).
+    if (blk->off == 0x800000) {
+        user_regs_[rel] = value;
+        return;
+    }
     // No modelled write side effects yet; accept + log (xemu ignores unknown writes).
     if (unmodeled_cb_) unmodeled_cb_(true, addr, bo, blk->name, value);
     (void)size;
+}
+
+// NV_PMC_INTR_0 is computed from the engines' pending&enabled states (xemu nv2a.c
+// update_irq): PCRTC contributes bit 24. Other engines (PFIFO bit 8, PGRAPH bit 12) join
+// when they gain interrupt sources.
+uint32_t Nv2a::pmc_intr_status() const {
+    uint32_t v = 0;
+    if (pcrtc_intr_ & pcrtc_intr_en_) v |= 1u << 24;
+    return v;
+}
+
+void Nv2a::update_irq() {
+    bool level = (pmc_intr_en_ & 0x3) != 0 && pmc_intr_status() != 0;
+    if (irq_cb_ && level != irq_asserted_) {
+        irq_asserted_ = level;
+        irq_cb_(irq_num_, level);
+    }
+}
+
+void Nv2a::set_frame(uint64_t frame_no) {
+    if (frame_no > frame_no_) {
+        frame_no_ = frame_no;
+        vblanks_++;
+        pcrtc_intr_ |= 1u;  // NV_PCRTC_INTR_0_VBLANK latches every frame boundary
+        update_irq();
+    }
 }
 
 }  // namespace xlle

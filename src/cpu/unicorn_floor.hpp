@@ -31,6 +31,7 @@ public:
 
     void on_retired(RetiredCb cb) override { retired_cb_ = std::move(cb); }
     void on_mem(MemCb cb) override { mem_cb_ = std::move(cb); }
+    void on_interrupt(IntrCb cb) override { intr_cb_ = std::move(cb); }
     void on_io(IoInCb in_cb, IoOutCb out_cb) override;
     bool map_mmio(uint32_t addr, size_t size, MmioReadCb r, MmioWriteCb w) override;
     void request_stop(std::string reason) override;
@@ -56,6 +57,7 @@ private:
     static void out_trampoline(uc_struct*, uint32_t port, int size, uint32_t value, void* user);
     static bool unmapped_trampoline(uc_struct*, int type, uint64_t addr, int size, int64_t value,
                                     void* user);
+    static void intr_trampoline(uc_struct*, uint32_t intno, void* user);
 
     // One MMIO region + its callbacks. Held type-erased behind a small heap record whose
     // address is the user_data Unicorn hands back to the MMIO trampolines.
@@ -75,10 +77,12 @@ private:
     void* hook_in_ = nullptr;
     void* hook_out_ = nullptr;
     void* hook_unmapped_ = nullptr;
+    void* hook_intr_ = nullptr;
     uint32_t last_fault_addr_ = 0;  // most recent unmapped-access address (for fault reporting)
     int last_fault_type_ = 0;
     RetiredCb retired_cb_;
     MemCb mem_cb_;
+    IntrCb intr_cb_;
     IoInCb io_in_cb_;
     IoOutCb io_out_cb_;
     std::vector<std::unique_ptr<MmioRegion>> mmio_regions_;

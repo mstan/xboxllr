@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "machine/ide.hpp"
 #include "machine/io_device.hpp"
 #include "machine/mmio_device.hpp"
 #include "machine/nv2a.hpp"
@@ -33,6 +34,12 @@ public:
     bool load_flash(const std::string& path);     // map + mirror the flash image into the window
     bool load_blob(uint32_t addr, const std::string& path);  // load a raw blob into mapped RAM
     void init_devices();  // build the I/O fabric (PCI host, SMBus+SMC) and wire dispatch
+    // Attach the FATX HDD image to IDE drive 0 (call after init_devices). Without it the
+    // drive reports absent and the kernel cannot mount the boot device.
+    bool attach_hdd(const std::string& path);
+    // Attach the config EEPROM dump (256 bytes) as the SMBus slave at 0x54 (call after
+    // init_devices). The kernel HMAC-verifies it and derives the HDD key from it.
+    bool attach_eeprom(const std::string& path);
 
     bool read(uint32_t addr, void* buf, size_t n);
     uint64_t run(uint32_t start_eip, uint64_t max_insns, std::string& err);
@@ -45,6 +52,8 @@ public:
     // Observability: fired for every serviced MMIO access (MemEvent-shaped; write flag reused).
     void on_mmio_event(std::function<void(const MemEvent&)> cb) { mmio_event_cb_ = std::move(cb); }
     PciHost* pci() { return pci_; }
+    IdeController* ide() { return ide_; }
+    Nv2a* nv2a() { return nv2a_; }
     uint64_t injected_interrupts() const { return injected_; }
     uint64_t irq0_pulses() const { return irq0_pulses_; }
     uint64_t pending_boundaries() const { return pending_boundaries_; }
@@ -69,6 +78,9 @@ private:
     PciHost* pci_ = nullptr;                                 // non-owning convenience pointers
     DualPic* pic_ = nullptr;
     Pit8254* pit_ = nullptr;
+    IdeController* ide_ = nullptr;
+    Amd756Smbus* smbus_ = nullptr;
+    Nv2a* nv2a_ = nullptr;
     std::function<void(const IoEvent&)> io_event_cb_;
     std::function<void(const MemEvent&)> mmio_event_cb_;
     uint64_t io_seq_ = 0;

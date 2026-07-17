@@ -48,6 +48,9 @@ bool XboxSmc::read_byte(uint8_t cmd, uint8_t& out) {
         case 0x1e: out = 0xea; return true;
         case 0x1f: out = 0x46; return true;
         case 0x01: out = version_[version_index_++ % 3]; return true;  // VER "P11" (cycles)
+        case 0x03: out = 0x00; return true;  // TRAYSTATE: closed (agent read from silicon
+                                             // 2026-07-16, tray closed; xemu's closed-empty
+                                             // value is 0x40 — both boot, silicon wins)
         case 0x04: out = 0x06; return true;  // AVPACK = COMPOSITE (agent read from silicon)
         case 0x11: out = 0x00; return true;  // INTSTATUS: no SMC events pending at boot (clr-on-rd)
         case 0x1b: out = scratch_reg_; return true;  // SCRATCH
@@ -71,6 +74,9 @@ bool XboxSmc::read_word(uint8_t cmd, uint16_t& out) {
 }
 
 bool XboxSmc::write_byte(uint8_t cmd, uint8_t val) {
+    // Bring-up observability: SMC writes carry boot-state signals (LED override 0x07/0x08,
+    // ERROR_WRITE 0x0e boot error codes, tray 0x0c, interrupt enable 0x1a). Few at boot.
+    std::printf("[smc] write reg=0x%02x val=0x%02x\n", cmd, val);
     switch (cmd) {
         case 0x01: version_index_ = val; return true;   // VER: reset version-string read index
         case 0x0e: error_reg_ = val; return true;       // ERROR_WRITE
@@ -103,6 +109,24 @@ bool XboxSmc::receive_byte(uint8_t& out) {
     return true;
 }
 
+// --- XboxEeprom (config EEPROM), 7-bit address 0x54 ------------------------------------------
+bool XboxEeprom::write_byte(uint8_t cmd, uint8_t val) {
+    std::printf("[eeprom] write off=0x%02x val=0x%02x (in-memory only)\n", cmd, val);
+    offset_ = cmd;
+    data_[offset_ % data_.size()] = val;
+    offset_ = (offset_ + 1) % data_.size();
+    return true;
+}
+
+bool XboxEeprom::write_word(uint8_t cmd, uint16_t val) {
+    std::printf("[eeprom] write-word off=0x%02x val=0x%04x (in-memory only)\n", cmd, val);
+    offset_ = cmd;
+    data_[offset_ % data_.size()] = static_cast<uint8_t>(val);
+    data_[(offset_ + 1) % data_.size()] = static_cast<uint8_t>(val >> 8);
+    offset_ = (offset_ + 2) % data_.size();
+    return true;
+}
+
 // --- Amd756Smbus host controller ------------------------------------------------------------
 SmbusSlave* Amd756Smbus::find(uint8_t addr7) {
     for (auto& s : slaves_)
@@ -116,6 +140,12 @@ void Amd756Smbus::transaction() {
     const uint8_t addr7 = (addr_ >> 1) & 0x7f;
     SmbusSlave* s = find(addr7);
     if (!s) {  // absent slave: faithful bus error the firmware polls for (PRERR), not a fault
+        static int absent_logged = 0;
+        if (absent_logged < 32) {  // bring-up observability: who probes for what (EEPROM=0x54)
+            std::printf("[smbus] absent slave addr7=0x%02x prot=0x%02x cmd=0x%02x %s\n", addr7,
+                        prot, cmd_, read ? "rd" : "wr");
+            if (++absent_logged == 32) std::printf("[smbus] (absent-slave log capped)\n");
+        }
         stat_ |= GS_PRERR_STS;
         return;
     }

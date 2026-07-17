@@ -117,8 +117,7 @@ void DualPic::raise(int isa_irq, bool level) {
         master_.set_irq(isa_irq, level);
     } else {
         slave_.set_irq(isa_irq - 8, level);
-        // Cascade: the slave's INT drives master line 2 while the slave has a pending request.
-        master_.set_irq(2, slave_.get_irq() >= 0);
+        update_cascade();
     }
 }
 
@@ -142,8 +141,7 @@ int DualPic::acknowledge() {
         master_.ack(2);
         if (s >= 0) {
             slave_.ack(s);
-            // Re-evaluate the cascade line after acking the slave.
-            master_.set_irq(2, slave_.get_irq() >= 0);
+            update_cascade();  // re-evaluate after acking the slave
             return slave_.irq_base + s;
         }
         return slave_.irq_base + 7;  // spurious slave
@@ -175,6 +173,9 @@ void DualPic::io_write(uint16_t port, int, uint32_t value) {
         case 0x4D1: slave_.elcr = v; break;
         default: break;
     }
+    // Any register write (IMR unmask, EOI, ELCR) can change the slave's INT output — keep the
+    // cascade line coherent (a request latched while masked must surface on unmask).
+    update_cascade();
 }
 
 }  // namespace xlle

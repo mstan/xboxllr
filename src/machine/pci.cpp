@@ -47,6 +47,13 @@ PciHost::PciHost(FaultFn fault) : fault_(std::move(fault)) {
     {
         PciFunction lpc = mkfn(0x01, 0, "lpc", 0x01B2, 0x0601, 0xB2);
         lpc.set32(0x84, 0x00008001);
+        // IRQ-routing block, captured from the live console 2026-07-16: 0x64 = 0x0B0C
+        // (SMBus IRQ 11 / SCI IRQ 12 — re-confirmed), 0x6C = 0x0E065491 (contains the
+        // dev-9 IDE nibble 0xE = IRQ 14), plus neighbours 0x60/0x68 for completeness.
+        lpc.set32(0x60, 0x00000400);
+        lpc.set32(0x64, 0x00000B0C);
+        lpc.set32(0x68, 0x00031000);
+        lpc.set32(0x6C, 0x0E065491);
         funcs_.push_back(lpc);
     }
     funcs_.push_back(mkfn(0x01, 1, "smbus",       0x01B4, 0x0C05, 0xB1, 0x14, 0xC000));
@@ -55,7 +62,27 @@ PciHost::PciHost(FaultFn fault) : fault_(std::move(fault)) {
     funcs_.push_back(mkfn(0x04, 0, "nic",         0x01C3, 0x0200, 0xB1));
     funcs_.push_back(mkfn(0x05, 0, "apu",         0x01B0, 0x0401, 0xB1));
     funcs_.push_back(mkfn(0x06, 0, "aci",         0x01B1, 0x0401, 0xB1));
-    funcs_.push_back(mkfn(0x09, 0, "ide",         0x01BC, 0x0101, 0xB1));
+    // IDE (00:09.0). Captured from the live console 2026-07-16 (agent EXEC PCI reads): rev
+    // 0xD4, prog-if 0x8A (both channels legacy mode, bus-master capable), command 0x0005
+    // (I/O + bus master enabled), status 0x00B0, BAR0-3 = 0 (legacy decode), BAR4 = 0xFF61
+    // (bus-master base 0xFF60), 0x3C dword = 0x01030000 (no INTx line/pin: legacy IRQ 14),
+    // and the ATA timing registers 0x44-0x60. The init-table X-codes never touch dev 9
+    // (decoded 2026-07-16), so this is the kernel-visible state we boot into.
+    {
+        PciFunction ide = mkfn(0x09, 0, "ide", 0x01BC, 0x0101, 0xD4);
+        ide.cfg[0x09] = 0x8A;               // prog-if
+        ide.set16(0x04, 0x0005);            // command: I/O space + bus master
+        ide.set16(0x06, 0x00B0);            // status
+        ide.set32(0x20, 0x0000FF61);        // BAR4: bus-master I/O base 0xFF60
+        ide.set32(0x3C, 0x01030000);        // min_gnt/max_lat, no INTx
+        ide.set32(0x44, 0x00020001);
+        ide.set32(0x4C, 0x00000900);
+        ide.set32(0x50, 0x00000002);
+        ide.set32(0x58, 0x20202020);
+        ide.set32(0x5C, 0xFFFF00FF);
+        ide.set32(0x60, 0xC0C0C0C0);
+        funcs_.push_back(ide);
+    }
     funcs_.push_back(mkfn(0x1E, 0, "agp-bridge",  0x01B7, 0x0604, 0xA1));
 }
 
@@ -114,6 +141,7 @@ void PciHost::io_write(uint16_t port, int size, uint32_t value) {
     if (bus == 0 && dev == 1 && fn == 0 && reg <= 0x80 && (reg + size) > 0x80) {
         if (f->cfg[0x80] & 0x02) mcpx_rom_disabled_ = true;
     }
+    for (auto& cb : cfg_write_observers_) cb(bus, dev, fn, reg, size, value);
 }
 
 }  // namespace xlle

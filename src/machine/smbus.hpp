@@ -56,6 +56,86 @@ private:
     int version_index_ = 0;
 };
 
+// Conexant CX25871 video encoder, 7-bit address 0x45 (the v1.x boards' TV encoder; this
+// board confirmed Conexant via silicon AVPACK/probes). Semantics from xemu/hw/xbox/
+// smbus_cx25871.c: a 256-byte register file — writes store, reads return the stored value
+// (reset 0). The kernel's AV worker programs it over interrupt-driven SMBus during
+// AvSetDisplayMode; an absent encoder wedges the boot in an error-retry loop.
+class Cx25871 : public SmbusSlave {
+public:
+    const char* name() const override { return "cx25871"; }
+    uint8_t address() const override { return 0x45; }
+
+    bool read_byte(uint8_t cmd, uint8_t& out) override {
+        out = regs_[cmd];
+        return true;
+    }
+    bool read_word(uint8_t cmd, uint16_t& out) override {
+        out = static_cast<uint16_t>(regs_[cmd] | (regs_[static_cast<uint8_t>(cmd + 1)] << 8));
+        return true;
+    }
+    bool write_byte(uint8_t cmd, uint8_t val) override {
+        regs_[cmd] = val;
+        cmd_ = cmd;
+        return true;
+    }
+    bool write_word(uint8_t cmd, uint16_t val) override {
+        regs_[cmd] = static_cast<uint8_t>(val);
+        regs_[static_cast<uint8_t>(cmd + 1)] = static_cast<uint8_t>(val >> 8);
+        cmd_ = cmd;
+        return true;
+    }
+    bool receive_byte(uint8_t& out) override {
+        out = regs_[cmd_++];
+        return true;
+    }
+    bool quick(bool) override { return true; }
+
+private:
+    uint8_t regs_[256] = {0};
+    uint8_t cmd_ = 0;
+};
+
+// The Xbox configuration EEPROM (24C02-class, 256 bytes), 7-bit address 0x54. Semantics
+// follow xemu/hw/xbox/smbus_storage.c: a write latches the offset (and optionally stores
+// bytes); reads return data at the latched offset (word reads span two bytes). Backed by the
+// real console's dump (machine/eeprom.bin) — the kernel HMAC-verifies and RC4-decrypts it,
+// and derives the HDD-unlock key from it, so real bytes are required. Guest writes are kept
+// in-memory only (never persisted over the oracle artifact) and logged.
+class XboxEeprom : public SmbusSlave {
+public:
+    explicit XboxEeprom(std::vector<uint8_t> data) : data_(std::move(data)) {}
+    const char* name() const override { return "eeprom"; }
+    uint8_t address() const override { return 0x54; }
+
+    bool read_byte(uint8_t cmd, uint8_t& out) override {
+        offset_ = cmd;
+        out = data_[offset_ % data_.size()];
+        offset_ = (offset_ + 1) % data_.size();
+        return true;
+    }
+    bool read_word(uint8_t cmd, uint16_t& out) override {
+        offset_ = cmd;
+        uint8_t lo = data_[offset_ % data_.size()];
+        uint8_t hi = data_[(offset_ + 1) % data_.size()];
+        out = static_cast<uint16_t>(lo | (hi << 8));
+        offset_ = (offset_ + 2) % data_.size();
+        return true;
+    }
+    bool write_byte(uint8_t cmd, uint8_t val) override;
+    bool write_word(uint8_t cmd, uint16_t val) override;
+    bool receive_byte(uint8_t& out) override {
+        out = data_[offset_ % data_.size()];
+        offset_ = (offset_ + 1) % data_.size();
+        return true;
+    }
+    bool quick(bool) override { return true; }
+
+private:
+    std::vector<uint8_t> data_;
+    uint32_t offset_ = 0;
+};
+
 // AMD756 SMBus host controller as a 16-port I/O device. Register offsets (from base):
 //   0x0 GLOBAL_STATUS, 0x2 GLOBAL_ENABLE (protocol+start), 0x4 HOST_ADDRESS,
 //   0x6/0x7 HOST_DATA0/1, 0x8 HOST_COMMAND, 0x9 HOST_BLOCK_DATA.

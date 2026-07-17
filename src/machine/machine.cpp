@@ -8,6 +8,8 @@
 #include <vector>
 
 #include "cpu/unicorn_floor.hpp"
+#include "machine/aci.hpp"
+#include "machine/apu.hpp"
 #include "machine/open_bus.hpp"
 #include "machine/port61.hpp"
 #include "machine/rtc.hpp"
@@ -67,7 +69,9 @@ void XboxMachine::init_devices() {
 
     auto smbus = std::make_unique<Amd756Smbus>(0xC000, fault);
     smbus->add_slave(std::make_unique<XboxSmc>(fault));
+    smbus->add_slave(std::make_unique<Cx25871>());  // TV encoder (board is Conexant, silicon)
     Amd756Smbus* smbus_raw = smbus.get();
+    smbus_ = smbus_raw;
     io_devices_.push_back(std::move(smbus));
 
     // ACPI/PM controller behind the LPC I/O BAR at 0x8000 (kernel-init timing, GPIO, GPE).
@@ -95,6 +99,36 @@ void XboxMachine::init_devices() {
 
     io_devices_.push_back(std::make_unique<Port61>());
     io_devices_.push_back(std::make_unique<Mc146818Rtc>());
+    // Extended-CMOS index/data ports (0x72/0x73): not decoded by the MCPX RTC. The kernel
+    // pokes them during shutdown/century handling; xemu leaves them unmapped ISA space and
+    // boots this same retail kernel (writes discarded, reads float) — open bus, not a fault.
+    io_devices_.push_back(std::make_unique<OpenBus>(0x0072, 2, "cmos-ext (absent)"));
+
+    // IDE: primary channel (HDD master, ATAPI DVD slave) + bus master at BAR4 (0xFF60,
+    // silicon). Completion IRQ 14, level-triggered, same delivery shape as SMBus IRQ 11.
+    auto ide = std::make_unique<IdeController>(fault);
+    ide_ = ide.get();
+    ide_->set_irq([this](int irq, bool level) { pic_->raise(irq, level); }, 14);
+    ide_->set_dma_mem(
+        [this](uint32_t addr, void* buf, size_t n) { return cpu_->read_mem(addr, buf, n); },
+        [this](uint32_t addr, const void* buf, size_t n) {
+            return cpu_->write_mem(addr, buf, n);
+        });
+    io_devices_.push_back(std::move(ide));
+    // The bus-master decode follows BAR4 if the kernel reprograms it. A BAR sizing probe
+    // (all-ones write) is unmodeled in our config space — stop loudly so it gets modelled
+    // instead of silently corrupting the stored base.
+    pci_->on_cfg_write([this](uint8_t bus, uint8_t dev, uint8_t fn, uint8_t reg, int size,
+                              uint32_t value) {
+        if (bus != 0 || dev != 9 || fn != 0) return;
+        if (reg <= 0x20 && reg + size > 0x20) {
+            if (value == 0xFFFFFFFFu) {
+                cpu_->request_stop("IDE BAR4 sizing write (0xFFFFFFFF) — BAR sizing unmodeled");
+                return;
+            }
+            ide_->set_bm_base(static_cast<uint16_t>(value & 0xFFF0));
+        }
+    });
 
     // Route port I/O through the fabric.
     cpu_->on_io([this](uint16_t port, int size) { return io_in(port, size); },
@@ -103,11 +137,34 @@ void XboxMachine::init_devices() {
     // MMIO devices. NV2A occupies 0xFD000000 (16 MB). Register the region with the CPU floor
     // so accesses route to the device model instead of faulting as unmapped memory.
     auto nv2a = std::make_unique<Nv2a>(fault);
-    for (auto& d : mmio_devices_) (void)d;  // (kept explicit; list may grow with more devices)
+    nv2a_ = nv2a.get();
+    // GPU interrupt: Xbox routes the NV2A to ISA IRQ 3 (kernel unmasks it for VBLANK pacing).
+    nv2a_->set_irq([this](int irq, bool level) { pic_->raise(irq, level); }, 3);
     uint32_t nbase = nv2a->mmio_base();
     uint32_t nsize = nv2a->mmio_size();
     mmio_devices_.push_back(std::move(nv2a));
     cpu_->map_mmio(nbase, nsize,
+                   [this](uint32_t a, int s) { return mmio_read(a, s); },
+                   [this](uint32_t a, int s, uint32_t v) { mmio_write(a, s, v); });
+
+    // MCPX APU shell at 0xFE800000 (512 KB). Register-file semantics per xemu; see apu.hpp.
+    auto apu = std::make_unique<McpxApu>(fault);
+    apu->set_mem_write([this](uint32_t addr, const void* buf, size_t n) {
+        return cpu_->write_mem(addr, buf, n);
+    });
+    uint32_t abase = apu->mmio_base();
+    uint32_t asize = apu->mmio_size();
+    mmio_devices_.push_back(std::move(apu));
+    cpu_->map_mmio(abase, asize,
+                   [this](uint32_t a, int s) { return mmio_read(a, s); },
+                   [this](uint32_t a, int s, uint32_t v) { mmio_write(a, s, v); });
+
+    // MCPX ACI (AC97) shell at 0xFEC00000 (4 KB). See aci.hpp.
+    auto aci = std::make_unique<McpxAci>(fault);
+    uint32_t cbase = aci->mmio_base();
+    uint32_t csize = aci->mmio_size();
+    mmio_devices_.push_back(std::move(aci));
+    cpu_->map_mmio(cbase, csize,
                    [this](uint32_t a, int s) { return mmio_read(a, s); },
                    [this](uint32_t a, int s, uint32_t v) { mmio_write(a, s, v); });
 }
@@ -186,6 +243,21 @@ void XboxMachine::io_out(uint16_t port, int size, uint32_t value) {
         io_event_cb_(IoEvent{io_seq_++, 1, port, static_cast<uint8_t>(size), value});
 }
 
+bool XboxMachine::attach_hdd(const std::string& path) {
+    return ide_ && ide_->attach_hdd(path);
+}
+
+bool XboxMachine::attach_eeprom(const std::string& path) {
+    if (!smbus_) return false;
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return false;
+    std::vector<uint8_t> data((std::istreambuf_iterator<char>(f)),
+                              std::istreambuf_iterator<char>());
+    if (data.size() != 256) return false;  // 24C02: exactly 256 bytes
+    smbus_->add_slave(std::make_unique<XboxEeprom>(std::move(data)));
+    return true;
+}
+
 bool XboxMachine::read(uint32_t addr, void* buf, size_t n) { return cpu_->read_mem(addr, buf, n); }
 
 uint64_t XboxMachine::run(uint32_t start, uint64_t max, std::string& err) {
@@ -207,6 +279,13 @@ uint64_t XboxMachine::run(uint32_t start, uint64_t max, std::string& err) {
         total_insns_ += n;
 
         if (pit_) pit_->set_time(total_insns_ * Pit8254::kPitFreq / kCpuHz);
+        // Frame clock: ~60 Hz VBLANK derived from the same retired-instruction time base,
+        // plus the sub-frame phase for the VGA retrace status bit.
+        if (nv2a_) {
+            uint64_t t60 = total_insns_ * 60;
+            nv2a_->set_frame(t60 / kCpuHz);
+            nv2a_->set_frame_phase(static_cast<uint32_t>((t60 % kCpuHz) * 1000 / kCpuHz));
+        }
         if (!cerr.empty()) { err = cerr; break; }  // device fault-stop wins
 
         // Deliver one pending, unmasked external interrupt at this boundary. Confirm the guest

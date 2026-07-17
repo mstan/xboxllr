@@ -53,6 +53,11 @@ enum class XReg { CR0, CR4, MXCSR, XMM0, XMM1, XMM2, ST0, ST1, MM0 };
 using RetiredCb = std::function<void(const RetiredInsn&)>;
 using MemCb     = std::function<void(const MemEvent&)>;
 
+// Guest interrupt/exception observer: fired when the guest raises a vector internally
+// (software INT n, INT3, INTO, or a CPU exception) BEFORE it is delivered through the guest
+// IDT. Purely observational — delivery proceeds regardless.
+using IntrCb = std::function<void(uint32_t vector)>;
+
 // I/O-port servicing. Unlike memory, port space is not backed by RAM — the floor cannot
 // answer an `in` on its own, so `IoInCb` IS the functional read path (its return value is
 // what the guest reads), and `IoOutCb` is the functional write path. The platform routes
@@ -94,6 +99,8 @@ public:
     // Instrumentation. Installed once; fired for every retired instruction / memory access.
     virtual void on_retired(RetiredCb cb) = 0;
     virtual void on_mem(MemCb cb) = 0;
+    // Observer for guest-raised vectors (soft INT / CPU exception); see IntrCb.
+    virtual void on_interrupt(IntrCb cb) { (void)cb; }
 
     // Install the I/O-port servicing callbacks (see IoInCb/IoOutCb). Installed once.
     virtual void on_io(IoInCb in_cb, IoOutCb out_cb) = 0;

@@ -153,12 +153,16 @@ int main(int argc, char** argv) {
     bool serve = false, window = false;
     const char* boot_flash = nullptr;
     const char* run2bl = nullptr;
+    const char* hdd = nullptr;
+    const char* eeprom = nullptr;
     uint64_t max_insns = 128ull * 1000 * 1000;  // 2BL kernel LZX decompress needs tens of M
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--serve")) serve = true;
         else if (!std::strcmp(argv[i], "--window")) window = true;
         else if (!std::strcmp(argv[i], "--boot") && i + 1 < argc) boot_flash = argv[++i];
         else if (!std::strcmp(argv[i], "--run2bl") && i + 1 < argc) run2bl = argv[++i];
+        else if (!std::strcmp(argv[i], "--hdd") && i + 1 < argc) hdd = argv[++i];
+        else if (!std::strcmp(argv[i], "--eeprom") && i + 1 < argc) eeprom = argv[++i];
         else if (!std::strcmp(argv[i], "--max-insns") && i + 1 < argc)
             max_insns = std::strtoull(argv[++i], nullptr, 0);
     }
@@ -192,8 +196,31 @@ int main(int argc, char** argv) {
             }
             // Stand up the I/O fabric (PCI host, SMBus+SMC, NV2A) the 2BL platform-init drives.
             mach.init_devices();
+            if (hdd) {
+                if (!mach.attach_hdd(hdd)) {
+                    std::fprintf(stderr, "[hdd] attach failed: %s\n", hdd);
+                    return 1;
+                }
+                std::printf("[hdd] attached %s (IDE drive 0, security LOCKED)\n", hdd);
+            } else {
+                std::printf("[hdd] no --hdd image: IDE drive 0 reports absent\n");
+            }
+            if (eeprom) {
+                if (!mach.attach_eeprom(eeprom)) {
+                    std::fprintf(stderr, "[eeprom] attach failed (need 256-byte dump): %s\n",
+                                 eeprom);
+                    return 1;
+                }
+                std::printf("[eeprom] attached %s (SMBus 0x54)\n", eeprom);
+            } else {
+                std::printf("[eeprom] no --eeprom image: SMBus 0x54 reports absent\n");
+            }
             std::vector<IoEvent> io_log;
+            uint64_t ide_io_count = 0;  // any access to 0x1F0-0x1F7 / 0x3F6 / bus-master ports
             mach.on_io_event([&](const IoEvent& e) {
+                if ((e.port >= 0x1F0 && e.port <= 0x1F7) || e.port == 0x3F6 ||
+                    (e.port >= 0xFF60 && e.port <= 0xFF6F))
+                    ide_io_count++;
                 io_log.push_back(e);
                 if (io_log.size() > 64) io_log.erase(io_log.begin());
             });
@@ -213,8 +240,33 @@ int main(int argc, char** argv) {
             bool was_idle = false;
             auto in_idle = [](uint32_t pc) { return pc >= 0x8001e3ce && pc <= 0x8001e3ff; };
             bool idle_latched = false;
+            // Thread attribution (kernel 4983 layout): KPCR at 0x8003da3c, PrcbData.CurrentThread
+            // at KPCR+0x28, idle thread 0x8003d8f0. The pointer is polled every 64 insns (cheap);
+            // every retired PC is recorded to the non-idle ring while a non-idle thread is
+            // current, so we see exactly what phase-1 (or any worker) did last.
+            constexpr uint32_t kCurThreadPhys = 0x0003da64;
+            constexpr uint32_t kIdleThread = 0x8003d8f0;
+            uint32_t cur_thread = 0;
+            struct ThreadCount { uint32_t thread; uint64_t insns; };
+            std::vector<ThreadCount> thread_counts;
+            auto bump_thread = [&](uint32_t t, uint64_t n) {
+                for (auto& tc : thread_counts)
+                    if (tc.thread == t) { tc.insns += n; return; }
+                thread_counts.push_back({t, n});
+            };
+            std::vector<uint32_t> nonidle_ring(512, 0);
+            uint64_t nonidle_n = 0;
             mach.cpu().on_retired([&](const RetiredInsn& e) {
                 trace[trace_n++ & 63] = e.eip;
+                if ((trace_n & 63) == 0) {
+                    uint32_t t = 0;
+                    if (mach.read(kCurThreadPhys, &t, 4) && (t & 0x80000000u)) {
+                        cur_thread = t;
+                        bump_thread(t, 64);
+                    }
+                }
+                if (cur_thread && cur_thread != kIdleThread)
+                    nonidle_ring[nonidle_n++ & 511] = e.eip;
                 bool now_idle = in_idle(e.eip);
                 // Latch the FIRST entry into the idle loop — that's the boot thread's original
                 // block (it never runs again after this), so the history is its blocking path.
@@ -224,6 +276,68 @@ int main(int argc, char** argv) {
                     idle_latched = true;
                 }
                 was_idle = now_idle;
+            });
+            // Guest-vector observability: log every guest-raised vector (capped), and decode
+            // the kernel debug service (INT 0x2D, eax=1 -> DbgPrint with ecx=buffer) so the
+            // kernel's own diagnostics reach our console.
+            int vec_logged = 0;
+            auto read_va_str = [&](uint32_t va, char* out, size_t n) {
+                uint32_t pa = 0;
+                if (!mach.cpu().translate(va, pa) || !mach.read(pa, out, n - 1)) return false;
+                out[n - 1] = 0;
+                for (char* c = out; *c; ++c)
+                    if (*c < 0x20 || *c > 0x7e) *c = *c == '\n' ? ' ' : '.';
+                return true;
+            };
+            mach.cpu().on_interrupt([&](uint32_t vec) {
+                X86Regs ir = mach.cpu().get_regs();
+                if (vec == 0x2d) {
+                    // NT debug services: eax=1 print (ecx=buffer, edx=len), 2 prompt,
+                    // 3 load symbols (ecx=STRING image name, edx=info), 4 unload symbols.
+                    char msg[160] = {0};
+                    if (ir.eax == 1) {
+                        if (read_va_str(ir.ecx, msg, sizeof(msg)))
+                            std::printf("[dbg] DbgPrint: %s\n", msg);
+                        return;
+                    }
+                    if (ir.eax == 3 || ir.eax == 4) {
+                        // ecx -> ANSI_STRING {USHORT len; USHORT max; PCHAR buf}
+                        uint32_t pa = 0;
+                        uint8_t s[8] = {0};
+                        uint32_t buf_va = 0;
+                        uint16_t len = 0;
+                        if (mach.cpu().translate(ir.ecx, pa) && mach.read(pa, s, 8)) {
+                            len = static_cast<uint16_t>(s[0] | (s[1] << 8));
+                            buf_va = s[4] | (s[5] << 8) | (s[6] << 16) |
+                                     (static_cast<uint32_t>(s[7]) << 24);
+                        }
+                        if (buf_va && len && len < sizeof(msg) &&
+                            read_va_str(buf_va, msg, len + 1))
+                            std::printf("[dbg] %s symbols: %s\n",
+                                        ir.eax == 3 ? "LOAD" : "UNLOAD", msg);
+                        else
+                            std::printf("[dbg] %s symbols (name unreadable, ecx=0x%08x)\n",
+                                        ir.eax == 3 ? "LOAD" : "UNLOAD", ir.ecx);
+                        return;
+                    }
+                    static int svc_logged = 0;
+                    if (svc_logged < 16) {
+                        uint8_t raw[16] = {0};
+                        uint32_t pa = 0;
+                        if (mach.cpu().translate(ir.ecx, pa)) mach.read(pa, raw, 16);
+                        std::printf("[dbg] debug service eax=%u ecx=0x%08x edx=0x%08x "
+                                    "[ecx]=%02x%02x%02x%02x %02x%02x%02x%02x\n", ir.eax, ir.ecx,
+                                    ir.edx, raw[0], raw[1], raw[2], raw[3], raw[4], raw[5],
+                                    raw[6], raw[7]);
+                        ++svc_logged;
+                    }
+                    return;
+                }
+                if (vec_logged < 32) {
+                    std::printf("[dbg] guest vector 0x%02x raised at eip=0x%08x eax=0x%08x\n", vec,
+                                ir.eip, ir.eax);
+                    if (++vec_logged == 32) std::printf("[dbg] (vector log capped)\n");
+                }
             });
             X86Regs r{};
             r.eip = 0x901ee;
@@ -281,7 +395,7 @@ int main(int argc, char** argv) {
                 mach.read(base, km.data(), km.size());
                 std::printf("[2bl] KTHREAD scan (State 1=Ready 2=Running 5=Waiting):\n");
                 int found = 0;
-                uint32_t waiter = 0;
+                std::vector<uint32_t> waiters;
                 for (size_t o = 0; o + 0x60 < km.size(); o += 4) {
                     // KTHREAD dispatcher header: Type byte = 6 (ThreadObject), Size byte = 0x44.
                     if (km[o] == 0x06 && km[o + 2] == 0x44 && km[o + 1] == 0 && km[o + 3] == 0) {
@@ -289,13 +403,13 @@ int main(int argc, char** argv) {
                         uint8_t state = km[o + 0x2c];
                         std::printf("[2bl]   KTHREAD=%08x State=%u Priority=%d WaitReason=%u\n", va,
                                     state, static_cast<int8_t>(km[o + 0x32]), km[o + 0x57]);
-                        if (state == 5) waiter = va;  // Waiting
+                        if (state == 5) waiters.push_back(va);  // Waiting
                         if (++found >= 16) break;
                     }
                 }
                 std::printf("[2bl] total KTHREADs found: %d\n", found);
-                // Follow the waiting thread's wait block to the object it blocks on.
-                if (waiter) {
+                // Follow every waiting thread's wait block to the object it blocks on.
+                for (uint32_t waiter : waiters) {
                     for (int r = 0; r < 128; r += 32) {  // raw KTHREAD dump for offset validation
                         uint8_t b[32] = {0};
                         mach.read((waiter + r) & 0x07FFFFFFu, b, 32);
@@ -350,6 +464,28 @@ int main(int argc, char** argv) {
             uint64_t pf = pre_idle_n > 64 ? pre_idle_n - 64 : 0;
             for (uint64_t i = pf; i < pre_idle_n; ++i) std::printf(" %08x", pre_idle[i & 63]);
             std::printf("\n");
+            // Per-thread attribution + the non-idle threads' final instructions.
+            std::printf("[2bl] insns by thread (sampled/64):");
+            for (const auto& tc : thread_counts)
+                std::printf(" %08x=%llu", tc.thread, (unsigned long long)tc.insns);
+            std::printf("\n[2bl] last %llu non-idle PCs:",
+                        (unsigned long long)(nonidle_n < 96 ? nonidle_n : 96));
+            {
+                uint64_t nf = nonidle_n > 96 ? nonidle_n - 96 : 0;
+                for (uint64_t i = nf; i < nonidle_n; ++i)
+                    std::printf(" %08x", nonidle_ring[i & 511]);
+            }
+            std::printf("\n");
+            if (mach.nv2a())
+                std::printf("[2bl] NV2A: vblanks=%llu pmc_intr_en=0x%08x pcrtc_intr_en=0x%08x\n",
+                            (unsigned long long)mach.nv2a()->vblanks(),
+                            mach.nv2a()->pmc_intr_en(), mach.nv2a()->pcrtc_intr_en());
+            std::printf("[2bl] IDE: port accesses=%llu irqs=%llu sectors rd/wr=%llu/%llu "
+                        "bm_base=0x%04x\n", (unsigned long long)ide_io_count,
+                        (unsigned long long)(mach.ide() ? mach.ide()->irq_pulses() : 0),
+                        (unsigned long long)(mach.ide() ? mach.ide()->sectors_read() : 0),
+                        (unsigned long long)(mach.ide() ? mach.ide()->sectors_written() : 0),
+                        mach.ide() ? mach.ide()->bm_base() : 0);
             std::printf("[2bl] MCPX ROM overlay disabled by firmware: %s\n",
                         mach.pci() && mach.pci()->mcpx_rom_disabled() ? "yes" : "no");
             std::printf("[2bl] IRQ0 pulses=%llu, pending-boundaries=%llu, delivered=%llu\n",

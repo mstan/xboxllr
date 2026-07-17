@@ -8,6 +8,7 @@
 
 #include <unicorn/unicorn.h>
 
+#include <cstdio>
 #include <cstring>
 
 namespace xlle {
@@ -38,6 +39,14 @@ UnicornFloor::UnicornFloor() {
                     UC_HOOK_MEM_FETCH_UNMAPPED,
                 reinterpret_cast<void*>(&UnicornFloor::unmapped_trampoline), this, 1, 0);
     hook_unmapped_ = from_hook(hu);
+
+    // Guest-raised vectors (INT n / INT3 / CPU exceptions). Unicorn's patched cpu-exec removes
+    // QEMU's native IDT delivery entirely and funnels every vector to this hook (no hook ->
+    // UC_ERR_EXCEPTION). We put the architectural behavior back: deliver through the guest IDT.
+    uc_hook hi = 0;
+    uc_hook_add(uc, &hi, UC_HOOK_INTR, reinterpret_cast<void*>(&UnicornFloor::intr_trampoline),
+                this, 1, 0);
+    hook_intr_ = from_hook(hi);
 }
 
 UnicornFloor::~UnicornFloor() {
@@ -324,6 +333,37 @@ void UnicornFloor::out_trampoline(uc_struct*, uint32_t port, int size, uint32_t 
                                   void* user) {
     auto* self = static_cast<UnicornFloor*>(user);
     if (self->io_out_cb_) self->io_out_cb_(static_cast<uint16_t>(port), size, value);
+}
+
+void UnicornFloor::intr_trampoline(uc_struct*, uint32_t intno, void* user) {
+    auto* self = static_cast<UnicornFloor*>(user);
+    if (self->intr_cb_) self->intr_cb_(intno);
+
+    // Vectors whose architectural frame includes an error code (#DF, #TS, #NP, #SS, #GP,
+    // #PF, #AC). inject_interrupt() builds the no-error-code frame, and for #PF CR2 would
+    // also matter — deliver those only once a real boot path needs them (characterize first).
+    // Note: for software INTs Unicorn has already advanced EIP to the next instruction (the
+    // architecturally correct return address); for faults EIP stays at the faulting
+    // instruction, which is likewise what the frame should hold.
+    switch (intno) {
+        case 8: case 10: case 11: case 12: case 13: case 14: case 17: {
+            char b[96];
+            std::snprintf(b, sizeof(b),
+                          "guest CPU exception vector %u (error-code class) — delivery unmodeled",
+                          intno);
+            self->request_stop(b);
+            return;
+        }
+        default:
+            break;
+    }
+    std::string err;
+    if (!self->inject_interrupt(static_cast<uint8_t>(intno & 0xFF), err)) {
+        char b[128];
+        std::snprintf(b, sizeof(b), "guest vector %u: IDT delivery failed (%s)", intno,
+                      err.empty() ? "gate absent/invalid" : err.c_str());
+        self->request_stop(b);
+    }
 }
 
 bool UnicornFloor::unmapped_trampoline(uc_struct*, int type, uint64_t addr, int, int64_t,

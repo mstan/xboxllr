@@ -58,6 +58,7 @@ target_link_libraries(xlle_cpu PUBLIC unicorn)
 # --- machine model (memory map + devices around the CPU floor) ---
 add_library(xlle_machine STATIC
   src/machine/machine.cpp
+  src/machine/ide.cpp
   src/machine/pci.cpp
   src/machine/smbus.cpp
   src/machine/nv2a.cpp
