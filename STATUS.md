@@ -3,6 +3,36 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-07-16 — A2e: the real kernel is ALIVE and services timer interrupts
+
+The Xbox kernel now boots to a live, stable state and takes external interrupts. From reset the
+whole chain runs: 2BL (SMC challenge → ROM disable → SHA-1 → RC4 → LZX) → kernel entry
+0x80010000 → HAL init (SuperIO probe, PIC/PIT/RTC) → memory manager → executive/GPU init →
+**KiIdleLoop with working timer interrupts** (250/251 IRQ0 pulses delivered; PIC ends clean,
+irr/isr=0 — the clock ISR runs and EOIs).
+
+- **Interrupt/timer stack** (`pic.*`, `pit.*`, `rtc.*`, `port61.hpp`, `open_bus.hpp`): dual
+  i8259 (+ELCR, Xbox IRQ map, elcr_mask 0xFF), i8254 PIT (Xbox 1.125 MHz clock, ch0→IRQ0,
+  clocked from retired instructions), mc146818 RTC (century 0x7F, 0x55/0xAA CMOS signature).
+- **Manual IRQ delivery** (Unicorn has no native IRQ path): `inject_interrupt()` synthesizes the
+  protected-mode interrupt-gate entry (IDT via IDTR, push EFLAGS/CS/EIP, clear IF, load handler
+  CS:EIP). Three fixes made it work: (1) **page-table translation** — uc_mem_read/write bypass
+  the MMU, so the virtual IDT/stack addresses must be walked to physical (`translate()`; this
+  was the silent failure); (2) **IF-window delivery** — a code-hook stop fires the IRQ inside
+  the idle loop's `sti;nop;cli` window, not at coarse chunk boundaries; (3) **peek-then-ack** —
+  confirm inject succeeds before the PIC ack so a failed delivery can't wedge the line.
+- **Silicon-confirmed values folded in**: host-bridge cfg 0x84 = 0x03FFFFFF (64 MB size
+  register — the X-codes set this and we inject past them, so the kernel was defaulting to
+  128 MB and walking the PFN DB off the end of RAM); SMC AVPACK = 0x06 (composite); 64 MB RAM
+  aliasing (address bit 26 undecoded). All read from the live console via the agent.
+- **NV2A** undecoded-aperture accesses now return xemu-default 0 + log (the 16 MB aperture is
+  legitimately sparse) rather than faulting.
+
+**Next:** KiIdleLoop does not yet progress to launching the dashboard — the scheduler isn't
+switching to the phase-1 init thread (or it's blocked on a boot device we haven't provided:
+IDE/HDD). Investigate thread scheduling / DPC delivery / boot-device path. Then A4 (NV2A/APU/
+IDE/USB) toward the dashboard. ctest 3/3.
+
 ## 2026-07-16 — Oracle validation pass (console live): v1.1 PM config corrected; NV2A straps captured
 
 With `xlle-agent` up (192.168.4.81:4380, kernel 1.0.4983.6), captured ground truth that closed
