@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "cpu/unicorn_floor.hpp"
+#include "machine/open_bus.hpp"
 
 namespace xlle {
 
@@ -62,6 +63,12 @@ void XboxMachine::init_devices() {
 
     // ACPI/PM controller behind the LPC I/O BAR at 0x8000 (kernel-init timing, GPIO, GPE).
     io_devices_.push_back(std::make_unique<XboxPm>(fault));
+
+    // LPC47M157 SuperIO ports: PRESENT ON DEVKITS ONLY. On the retail console these float —
+    // silicon (agent) confirms 0x2e/0x2f/0x4e read 0xFF. The kernel's HAL probes for the chip
+    // and must see "absent" (open bus), not a fault. (xemu's retail machine likewise omits it.)
+    io_devices_.push_back(std::make_unique<OpenBus>(0x002E, 2, "superio-2e (absent)"));
+    io_devices_.push_back(std::make_unique<OpenBus>(0x004E, 2, "superio-4e (absent)"));
 
     // Route port I/O through the fabric.
     cpu_->on_io([this](uint16_t port, int size) { return io_in(port, size); },
