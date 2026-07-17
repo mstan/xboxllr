@@ -30,7 +30,15 @@ PciHost::PciHost(FaultFn fault) : fault_(std::move(fault)) {
     // upper 16 bits (subclass<<8 | base class). I/O bases are the fixed real-hardware bases:
     // ACPI/PM at 0x8000 (LPC BAR0/off 0x10) and SMBus at 0xC000 (SMBus BAR1/off 0x14).
     funcs_.push_back(mkfn(0x00, 0, "host-bridge", 0x02A5, 0x0600, 0xA1));
-    funcs_.push_back(mkfn(0x01, 0, "lpc",         0x01B2, 0x0601, 0xB2, 0x10, 0x8000));
+    // LPC. This board is a v1.1: PM base lives in config reg 0x84 (=0x8001), and the reg-0x10
+    // BAR is 0 (captured from silicon 2026-07-16: reg 0x10 -> 0, reg 0x84 -> 0x8001; reg 0x00
+    // -> 0x01B210DE). The 2BL's `cmp [cfg 0x10], 0x8001` is a board-revision detector — v1.0
+    // decodes PM via the BAR, v1.1 via reg 0x84 — so leaving the BAR 0 takes the v1.1 path.
+    {
+        PciFunction lpc = mkfn(0x01, 0, "lpc", 0x01B2, 0x0601, 0xB2);
+        lpc.set32(0x84, 0x00008001);
+        funcs_.push_back(lpc);
+    }
     funcs_.push_back(mkfn(0x01, 1, "smbus",       0x01B4, 0x0C05, 0xB1, 0x14, 0xC000));
     funcs_.push_back(mkfn(0x02, 0, "usb0",        0x01C2, 0x0C03, 0xB1));
     funcs_.push_back(mkfn(0x03, 0, "usb1",        0x01C2, 0x0C03, 0xB1));

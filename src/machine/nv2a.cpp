@@ -63,6 +63,13 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
             case 0x808: return kPciNv2;  // NV_PBUS_PCI_NV_2
             default: break;
         }
+    } else if (blk->off == 0x100000) {  // PFB
+        // Captured from silicon 2026-07-16 (agent read 0xFD100200).
+        if (bo == 0x200) return 0x03070003;  // NV_PFB_CFG0
+    } else if (blk->off == 0x101000) {  // PSTRAPS
+        // Real strap value captured from silicon 2026-07-16 (agent read 0xFD101000). xemu
+        // stubs this to 0; the 2BL discards it, but the kernel may consume it — use the truth.
+        if (bo == 0x000) return 0x861D4401;
     }
 
     // Unmodelled register inside a real block: xemu-default 0, logged as a hardware-TODO.

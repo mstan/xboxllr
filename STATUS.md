@@ -3,6 +3,23 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-07-16 — Oracle validation pass (console live): v1.1 PM config corrected; NV2A straps captured
+
+With `xlle-agent` up (192.168.4.81:4380, kernel 1.0.4983.6), captured ground truth that closed
+gaps and fixed a fidelity bug:
+- **This board is a v1.1** and PM is decoded differently than I'd modelled. Silicon: LPC
+  (00:01.0) cfg **reg 0x10 (BAR) = 0**, **reg 0x84 = 0x8001** (the v1.1 PMBASE alias),
+  reg 0x00 = 0x01B210DE. I had reg 0x10 = 0x8001 (the v1.0 BAR path). The 2BL's
+  `cmp [cfg 0x10], 0x8001` is a **board-revision detector** (v1.0 BAR-PM vs v1.1 reg-0x84-PM);
+  we were forcing the v1.0 path on a v1.1 board. Fixed `pci.cpp` to match silicon → boot now
+  takes the v1.1 path and still reaches the same SuperIO stop (16.24M insns), tests 3/3.
+- **NV2A straps from silicon** (replacing xemu stubs/defaults): **PSTRAPS 0xFD101000 =
+  0x861D4401** (xemu stubs this to 0; the 2BL discards it but the kernel may not), **PFB_CFG0
+  0xFD100200 = 0x03070003**. Both now returned by `nv2a.cpp`.
+- Agent read path re-confirmed byte-accurate (PMC_BOOT_0 = 0x02A000A3; RAM 0x10000 = "XBEH").
+- Console access kept strictly serialized (single command stream; fragile box). Read-only PCI
+  probes done via short cli/…/sti EXEC payloads.
+
 ## 2026-07-16 — A2c→A2e: 2BL boots end-to-end; the REAL KERNEL runs to HAL init
 
 The I/O fabric turned the 2BL from an 8086-instruction dead-end into a full firmware boot: it
