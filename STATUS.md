@@ -3,6 +3,30 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-07-17 — A4: PFIFO recorder and NV097 semaphore DMA unblock the AV fence
+
+The documented USER-block pushbuffer sink is gone. NV2A now has a synchronous PFIFO pusher
+and always-on 4K-method recorder, byte-addressable 1 MB PRAMIN, PFIFO register/channel state,
+RAMHT lookup, DMA-object address resolution, and guest-visible execution of the NV097
+semaphore context/offset/release methods. The machine wires PFIFO to unified guest memory, so
+`NV097_BACK_END_WRITE_SEMAPHORE_RELEASE` writes the requested value through the guest's DMA
+object instead of merely advancing DMA_GET. A focused `test_nv2a` covers the complete
+RAMHT → DMA object → pushbuffer → guest-RAM write path; the suite is now 4/4.
+
+This resolves the previous permanent AV-worker loop at 0x800570d4–0x800570dc. In a 500M
+instruction boot, PFIFO consumes 158,966 methods and performs 14 releases to physical
+0x03fb3000 (values 5 through 0x1f), allowing the worker to continue through the boot-animation
+command stream. A 5B run confirms the advance is stable and exposes the next real blocker:
+the same worker spins at 0x800637d3–0x800637da while bit 28 remains set in `[ecx+8]`
+(ECX 0xd0008488, physical 0x1488, value 0x10000041). The translated stack identifies the
+immediate return at 0x80066698 and parent frames at 0x80065d76, 0x80066381, 0x80066915, and
+0x80062ba7. Phase-1 still waits for AV completion and the XBE thread count remains three.
+
+**Next:** identify the missing GPU-visible completion that clears the kernel AV object's bit
+28, model it from NV2A behavior, and rerun until the mapped XBE's entry threads start. The
+recorder is landed; CP/method execution beyond semaphore release and the software rasterizer
+remain A4 work.
+
 ## 2026-07-16 — Repository checkpoint and Arc 1 burndown refreshed
 
 The complete framework history through the dashboard-XBE-load milestone is checkpointed for
