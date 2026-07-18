@@ -16,13 +16,17 @@
 //   * Writes to unmodelled registers are accepted+logged (a write carries no return value to
 //     get wrong; xemu likewise ignores unknown writes).
 #pragma once
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "machine/io_device.hpp"   // FaultFn
 #include "machine/mmio_device.hpp"
+#include "xlle/ring.hpp"
 
 namespace xlle {
 
@@ -31,7 +35,8 @@ public:
     static constexpr uint32_t kBase = 0xFD000000u;
     static constexpr uint32_t kSize = 0x01000000u;  // 16 MB
 
-    explicit Nv2a(FaultFn fault) : fault_(std::move(fault)) {}
+    explicit Nv2a(FaultFn fault)
+        : fault_(std::move(fault)), pramin_(0x100000, 0), methods_(4096) {}
 
     const char* name() const override { return "nv2a"; }
     uint32_t mmio_base() const override { return kBase; }
@@ -55,6 +60,24 @@ public:
         irq_cb_ = std::move(cb);
         irq_num_ = irq_num;
     }
+    void set_mem_access(std::function<bool(uint32_t, void*, size_t)> read,
+                        std::function<bool(uint32_t, const void*, size_t)> write) {
+        mem_read_ = std::move(read);
+        mem_write_ = std::move(write);
+    }
+
+    struct PushMethod {
+        uint64_t seq = 0;
+        uint8_t channel = 0;
+        uint8_t subchannel = 0;
+        uint16_t method = 0;
+        uint32_t parameter = 0;
+    };
+    uint64_t push_methods() const { return methods_.total(); }
+    uint64_t semaphore_writes() const { return semaphore_writes_; }
+    size_t recent_methods(size_t n, std::vector<PushMethod>& out) const {
+        return methods_.window(n, out);
+    }
     // Frame clock: the machine advances this from retired instructions (~60 Hz). Each new
     // frame latches VBLANK into PCRTC_INTR_0; PCRTC_INTR_EN_0 and PMC_INTR_EN_0 gate the
     // line (xemu nv2a update_irq / pcrtc.c). The kernel's AV code paces on this interrupt.
@@ -73,10 +96,34 @@ private:
     FaultFn fault_;
     std::function<void(bool, uint32_t, uint32_t, const char*, uint32_t)> unmodeled_cb_;
     // PFIFO USER channel registers (rel 0x800000+, 64 KB per channel; +0x40 DMA_PUT,
-    // +0x44 DMA_GET). Stored so DMA_GET can track DMA_PUT — see the pushbuffer-sink note
-    // in nv2a.cpp.
+    // +0x44 DMA_GET). The channel state below is the synchronous pusher/recorder state.
     std::unordered_map<uint32_t, uint32_t> user_regs_;
+    std::unordered_map<uint32_t, uint32_t> pfifo_regs_;
     int pb_logged_ = 0;
+
+    struct ChannelState {
+        uint32_t get = 0, put = 0;
+        uint32_t method = 0, method_count = 0;
+        uint32_t subroutine = 0;
+        uint8_t subchannel = 0;
+        bool non_incrementing = false;
+        bool subroutine_active = false;
+        bool get_initialized = false;
+    };
+    std::array<ChannelState, 32> channels_{};
+    std::vector<uint8_t> pramin_;
+    Ring<PushMethod> methods_;
+    std::function<bool(uint32_t, void*, size_t)> mem_read_;
+    std::function<bool(uint32_t, const void*, size_t)> mem_write_;
+    std::array<uint32_t, 8> semaphore_dma_{};
+    std::array<uint32_t, 8> semaphore_offset_{};
+    uint64_t semaphore_writes_ = 0;
+
+    void process_pushbuffer(uint8_t channel);
+    void dispatch_method(uint8_t channel, uint8_t subchannel, uint32_t method,
+                         uint32_t parameter);
+    bool ramht_instance(uint8_t channel, uint32_t handle, uint32_t& instance) const;
+    bool dma_object_address(uint32_t instance, uint32_t offset, uint32_t& address) const;
 
     // Interrupt state (PMC aggregation of PCRTC, xemu nv2a.c update_irq).
     void update_irq();

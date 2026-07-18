@@ -4,6 +4,7 @@
 // fixtures under ring instrumentation, with NO Xbox devices attached. This wires the
 // observability skeleton (rings + JSONL + TCP debug server) to the Unicorn CPU floor and
 // runs the fixture spike, fault-stopping loudly on any mismatch.
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -372,6 +373,42 @@ int main(int argc, char** argv) {
             std::printf("[2bl] regs: eax=%08x ebx=%08x ecx=%08x edx=%08x esi=%08x edi=%08x "
                         "ebp=%08x esp=%08x\n", f.eax, f.ebx, f.ecx, f.edx, f.esi, f.edi, f.ebp,
                         f.esp);
+            auto dump_va = [&](const char* tag, uint32_t va, int n) {
+                uint32_t pa = 0;
+                uint8_t buf[64] = {0};
+                if (n > 64) n = 64;
+                if (mach.cpu().translate(va, pa) && mach.read(pa, buf, n)) {
+                    std::printf("[2bl] %s VA=%08x PA=%08x:", tag, va, pa);
+                    for (int i = 0; i < n; ++i) std::printf(" %02x", buf[i]);
+                    std::printf("\n");
+                }
+            };
+            dump_va("[ecx]", f.ecx, 32);
+            dump_va("[esi]", f.esi, 32);
+            dump_va("[esp]", f.esp, 64);
+            dump_va("[ebp]", f.ebp, 64);
+            {
+                uint32_t stack[16] = {0};
+                uint32_t stack_pa = 0;
+                std::vector<uint32_t> dumped;
+                if (mach.cpu().translate(f.esp, stack_pa) &&
+                    mach.read(stack_pa, stack, sizeof(stack))) {
+                    for (uint32_t candidate : stack) {
+                        if (candidate < 0x80010000u || candidate >= 0x81000000u ||
+                            std::find(dumped.begin(), dumped.end(), candidate) != dumped.end())
+                            continue;
+                        uint32_t code_pa = 0;
+                        uint8_t code[48] = {0};
+                        if (!mach.cpu().translate(candidate - 24, code_pa) ||
+                            !mach.read(code_pa, code, sizeof(code)))
+                            continue;
+                        dumped.push_back(candidate);
+                        std::printf("[2bl] stack code @VA=%08x PA=%08x:", candidate, code_pa + 24);
+                        for (uint8_t byte : code) std::printf(" %02x", byte);
+                        std::printf("\n      (candidate return address is the 25th byte above)\n");
+                    }
+                }
+            }
             // Dump kernel scheduler state the idle loop watches (ebx≈PRCB, ebp≈DPC list head).
             // Kernel VAs are identity-mapped 0x80000000->0x0, so physical = VA & 0x07FFFFFF.
             auto kdump = [&](const char* tag, uint32_t va, int n) {
@@ -476,10 +513,24 @@ int main(int argc, char** argv) {
                     std::printf(" %08x", nonidle_ring[i & 511]);
             }
             std::printf("\n");
-            if (mach.nv2a())
+            if (mach.nv2a()) {
                 std::printf("[2bl] NV2A: vblanks=%llu pmc_intr_en=0x%08x pcrtc_intr_en=0x%08x\n",
                             (unsigned long long)mach.nv2a()->vblanks(),
                             mach.nv2a()->pmc_intr_en(), mach.nv2a()->pcrtc_intr_en());
+                std::printf("[2bl] NV2A PFIFO: methods=%llu semaphore-writes=%llu\n",
+                            (unsigned long long)mach.nv2a()->push_methods(),
+                            (unsigned long long)mach.nv2a()->semaphore_writes());
+                std::vector<Nv2a::PushMethod> recent;
+                mach.nv2a()->recent_methods(64, recent);
+                for (const auto& m : recent) {
+                    std::printf("[2bl]   PB #%llu ch%u/sub%u method=0x%04x param=0x%08x\n",
+                                (unsigned long long)m.seq, m.channel, m.subchannel, m.method,
+                                m.parameter);
+                }
+                uint32_t av_sync = 0;
+                if (mach.read(0x03FB3000, &av_sync, sizeof(av_sync)))
+                    std::printf("[2bl] AV sync RAM [0x03fb3000]=0x%08x\n", av_sync);
+            }
             std::printf("[2bl] IDE: port accesses=%llu irqs=%llu sectors rd/wr=%llu/%llu "
                         "bm_base=0x%04x\n", (unsigned long long)ide_io_count,
                         (unsigned long long)(mach.ide() ? mach.ide()->irq_pulses() : 0),

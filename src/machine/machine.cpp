@@ -138,6 +138,11 @@ void XboxMachine::init_devices() {
     // so accesses route to the device model instead of faulting as unmapped memory.
     auto nv2a = std::make_unique<Nv2a>(fault);
     nv2a_ = nv2a.get();
+    nv2a_->set_mem_access(
+        [this](uint32_t addr, void* buf, size_t n) { return cpu_->read_mem(addr, buf, n); },
+        [this](uint32_t addr, const void* buf, size_t n) {
+            return cpu_->write_mem(addr, buf, n);
+        });
     // GPU interrupt: Xbox routes the NV2A to ISA IRQ 3 (kernel unmasks it for VBLANK pacing).
     nv2a_->set_irq([this](int irq, bool level) { pic_->raise(irq, level); }, 3);
     uint32_t nbase = nv2a->mmio_base();

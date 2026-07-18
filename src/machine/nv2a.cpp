@@ -2,6 +2,7 @@
 #include "machine/nv2a.hpp"
 
 #include <cstdio>
+#include <cstring>
 
 namespace xlle {
 
@@ -79,13 +80,14 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
         }
     } else if (blk->off == 0x002000) {  // PFIFO
         switch (bo) {
-            // Consistent with the USER-block pushbuffer sink (commands consumed instantly):
-            // both the runout FIFO and CACHE1 always read EMPTY (LOW_MARK, xemu pfifo.c sets
-            // it whenever the cache drains). The kernel's wait-for-FIFO-idle loop needs this.
+            // The recorder consumes each kick synchronously, so both the runout FIFO and
+            // CACHE1 are empty whenever the CPU can observe them (LOW_MARK in xemu).
             case 0x400: return 1u << 4;   // NV_PFIFO_RUNOUT_STATUS: empty
             case 0x1214: return 1u << 4;  // NV_PFIFO_CACHE1_STATUS: empty
             default: break;
         }
+        auto it = pfifo_regs_.find(bo);
+        if (it != pfifo_regs_.end()) return it->second;
     } else if (blk->off == 0x100000) {  // PFB
         // Captured from silicon 2026-07-16 (agent read 0xFD100200).
         if (bo == 0x200) return 0x03070003;  // NV_PFB_CFG0
@@ -93,22 +95,26 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
         // Real strap value captured from silicon 2026-07-16 (agent read 0xFD101000). xemu
         // stubs this to 0; the 2BL discards it, but the kernel may consume it — use the truth.
         if (bo == 0x000) return 0x861D4401;
+    } else if (blk->off == 0x700000) {  // PRAMIN: object/RAMHT/RAMFC backing store
+        if (bo + static_cast<uint32_t>(size) <= pramin_.size()) {
+            uint32_t value = 0;
+            std::memcpy(&value, pramin_.data() + bo, size);
+            return value;
+        }
     } else if (blk->off == 0x800000) {  // USER: per-channel PFIFO control (64 KB stride)
-        // Pushbuffer SINK (deliberate, documented A4 stand-in — NOT the final model): the
-        // kernel submits GPU commands by bumping DMA_PUT (+0x40) and polls DMA_GET (+0x44)
-        // until the GPU consumes them. There is no pushbuffer engine yet, so GET reads back
-        // as PUT: commands are treated as instantly consumed and are otherwise discarded.
-        // The A4 finish line replaces this with a pushbuffer recorder + software rasterizer.
+        // The kernel submits commands by bumping DMA_PUT (+0x40) and polls DMA_GET (+0x44)
+        // until PFIFO consumes them. The recorder parses the stream synchronously, executes
+        // the guest-visible method subset, and leaves the rest in the always-on method ring.
         if ((bo & 0xFFFF) == 0x44) {
-            uint32_t put_key = (rel & ~0xFFFFu) | 0x40;
-            auto it = user_regs_.find(put_key);
-            uint32_t put = it != user_regs_.end() ? it->second : 0;
+            uint8_t channel = static_cast<uint8_t>((bo >> 16) & 0x1Fu);
+            const auto& ch = channels_[channel];
+            uint32_t get = ch.get_initialized ? ch.get : ch.put;
             if (pb_logged_ < 8) {
-                std::printf("[nv2a] USER ch%u DMA_GET read -> tracking DMA_PUT=0x%08x "
-                            "(pushbuffer sink)\n", (bo >> 16) & 0x1F, put);
+                std::printf("[nv2a] USER ch%u DMA_GET=0x%08x DMA_PUT=0x%08x "
+                            "(PFIFO recorder)\n", channel, get, ch.put);
                 ++pb_logged_;
             }
-            return put;
+            return get;
         }
         auto it = user_regs_.find(rel);
         if (it != user_regs_.end()) return it->second;
@@ -146,14 +152,193 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
         update_irq();
         return;
     }
-    // USER block: store channel-control writes so DMA_GET can track DMA_PUT (see mmio_read).
+    if (blk->off == 0x002000) {
+        pfifo_regs_[bo] = value;
+        uint8_t channel = static_cast<uint8_t>(pfifo_regs_[0x1204] & 0x1Fu);
+        if (bo == 0x1244) {
+            channels_[channel].get = value;
+            channels_[channel].get_initialized = true;
+        } else if (bo == 0x1240) {
+            channels_[channel].put = value;
+            if (channels_[channel].get_initialized) process_pushbuffer(channel);
+        }
+        return;
+    }
+    if (blk->off == 0x700000) {
+        if (bo + static_cast<uint32_t>(size) > pramin_.size()) {
+            fault_("NV2A PRAMIN write exceeds aperture");
+            return;
+        }
+        std::memcpy(pramin_.data() + bo, &value, size);
+        return;
+    }
+    // USER block: channel GET/PUT writes drive the synchronous PFIFO recorder.
     if (blk->off == 0x800000) {
         user_regs_[rel] = value;
+        uint8_t channel = static_cast<uint8_t>((bo >> 16) & 0x1Fu);
+        uint32_t reg = bo & 0xFFFF;
+        if (reg == 0x44) {
+            channels_[channel].get = value;
+            channels_[channel].get_initialized = true;
+        } else if (reg == 0x40) {
+            channels_[channel].put = value;
+            if (channels_[channel].get_initialized) process_pushbuffer(channel);
+        }
         return;
     }
     // No modelled write side effects yet; accept + log (xemu ignores unknown writes).
     if (unmodeled_cb_) unmodeled_cb_(true, addr, bo, blk->name, value);
     (void)size;
+}
+
+bool Nv2a::dma_object_address(uint32_t instance, uint32_t offset, uint32_t& address) const {
+    if (instance > pramin_.size() - 12) return false;
+    uint32_t flags = 0, limit = 0, frame = 0;
+    std::memcpy(&flags, pramin_.data() + instance, 4);
+    std::memcpy(&limit, pramin_.data() + instance + 4, 4);
+    std::memcpy(&frame, pramin_.data() + instance + 8, 4);
+    if (offset > limit) return false;
+    uint32_t adjust = (flags & 0xFFF00000u) >> 20;
+    address = (((frame & 0xFFFFF000u) | adjust) + offset) & 0x07FFFFFFu;
+    return true;
+}
+
+bool Nv2a::ramht_instance(uint8_t channel, uint32_t handle, uint32_t& instance) const {
+    auto it = pfifo_regs_.find(0x210);  // NV_PFIFO_RAMHT
+    uint32_t ramht = it != pfifo_regs_.end() ? it->second : 0;
+    uint32_t size = 1u << (((ramht & 0x00030000u) >> 16) + 12);
+    uint32_t bits = 0;
+    for (uint32_t n = size; n > 1; n >>= 1) ++bits;
+    --bits;
+    uint32_t hash = 0, h = handle;
+    while (h) {
+        hash ^= h & ((1u << bits) - 1u);
+        h >>= bits;
+    }
+    hash ^= static_cast<uint32_t>(channel) << (bits - 4);
+    uint32_t base = (ramht & 0x000001F0u) << 8;
+    uint32_t entry = base + hash * 8;
+    if (entry > pramin_.size() - 8) return false;
+    uint32_t entry_handle = 0, context = 0;
+    std::memcpy(&entry_handle, pramin_.data() + entry, 4);
+    std::memcpy(&context, pramin_.data() + entry + 4, 4);
+    uint8_t entry_channel = static_cast<uint8_t>((context >> 24) & 0x1Fu);
+    if (entry_handle != handle || !(context & 0x80000000u) || entry_channel != channel)
+        return false;
+    instance = (context & 0x0000FFFFu) << 4;
+    return true;
+}
+
+void Nv2a::dispatch_method(uint8_t channel, uint8_t subchannel, uint32_t method,
+                           uint32_t parameter) {
+    methods_.push(PushMethod{methods_.total(), channel, subchannel,
+                             static_cast<uint16_t>(method), parameter});
+
+    // NV097 semaphore methods. AvSetDisplayMode uses RELEASE as a GPU completion fence.
+    if (method == 0x01A4) {
+        uint32_t instance = 0;
+        if (!ramht_instance(channel, parameter, instance)) {
+            char why[128];
+            std::snprintf(why, sizeof(why),
+                          "NV2A RAMHT lookup failed: channel=%u handle=0x%08x", channel,
+                          parameter);
+            fault_(why);
+            return;
+        }
+        semaphore_dma_[subchannel] = instance;
+    } else if (method == 0x1D6C) {
+        semaphore_offset_[subchannel] = parameter;
+    } else if (method == 0x1D70) {
+        uint32_t address = 0;
+        if (!dma_object_address(semaphore_dma_[subchannel], semaphore_offset_[subchannel],
+                                address)) {
+            char why[160];
+            std::snprintf(why, sizeof(why),
+                          "NV2A semaphore DMA invalid: instance=0x%08x offset=0x%08x",
+                          semaphore_dma_[subchannel], semaphore_offset_[subchannel]);
+            fault_(why);
+            return;
+        }
+        if (!mem_write_ || !mem_write_(address, &parameter, sizeof(parameter))) {
+            char why[128];
+            std::snprintf(why, sizeof(why), "NV2A semaphore DMA write failed at 0x%08x",
+                          address);
+            fault_(why);
+            return;
+        }
+        ++semaphore_writes_;
+        if (semaphore_writes_ <= 16) {
+            std::printf("[nv2a] semaphore release ch%u/sub%u [0x%08x] <- 0x%08x\n",
+                        channel, subchannel, address, parameter);
+        }
+    }
+}
+
+void Nv2a::process_pushbuffer(uint8_t channel) {
+    auto& ch = channels_[channel];
+    if (!mem_read_) {
+        fault_("NV2A PFIFO has no unified-memory read callback");
+        return;
+    }
+
+    constexpr uint32_t kMaxWordsPerKick = 4u * 1024u * 1024u;
+    uint32_t words = 0;
+    while (ch.get != ch.put && words++ < kMaxWordsPerKick) {
+        uint32_t word = 0;
+        uint32_t fetch = ch.get & 0x07FFFFFFu;
+        if (!mem_read_(fetch, &word, sizeof(word))) {
+            char why[128];
+            std::snprintf(why, sizeof(why), "NV2A PFIFO read failed at 0x%08x", fetch);
+            fault_(why);
+            return;
+        }
+        ch.get += 4;
+
+        if (ch.method_count) {
+            dispatch_method(channel, ch.subchannel, ch.method, word);
+            if (!ch.non_incrementing) ch.method += 4;
+            --ch.method_count;
+            continue;
+        }
+
+        if ((word & 0xE0000003u) == 0x20000000u) {
+            ch.get = word & 0x1FFFFFFFu;                   // old jump
+        } else if ((word & 3u) == 1u) {
+            ch.get = word & 0xFFFFFFFCu;                   // jump
+        } else if ((word & 3u) == 2u) {
+            if (ch.subroutine_active) {
+                fault_("NV2A PFIFO nested CALL");
+                return;
+            }
+            ch.subroutine = ch.get;
+            ch.subroutine_active = true;
+            ch.get = word & 0xFFFFFFFCu;                   // call
+        } else if (word == 0x00020000u) {
+            if (!ch.subroutine_active) {
+                fault_("NV2A PFIFO RETURN without CALL");
+                return;
+            }
+            ch.get = ch.subroutine;
+            ch.subroutine_active = false;
+        } else if ((word & 0xE0030003u) == 0) {
+            ch.method = word & 0x1FFFu;
+            ch.subchannel = static_cast<uint8_t>((word >> 13) & 7u);
+            ch.method_count = (word >> 18) & 0x7FFu;
+            ch.non_incrementing = false;
+        } else if ((word & 0xE0030003u) == 0x40000000u) {
+            ch.method = word & 0x1FFFu;
+            ch.subchannel = static_cast<uint8_t>((word >> 13) & 7u);
+            ch.method_count = (word >> 18) & 0x7FFu;
+            ch.non_incrementing = true;
+        } else {
+            char why[128];
+            std::snprintf(why, sizeof(why),
+                          "NV2A PFIFO reserved command 0x%08x at 0x%08x", word, fetch);
+            fault_(why);
+            return;
+        }
+    }
+    if (words >= kMaxWordsPerKick) fault_("NV2A PFIFO command guard exhausted");
 }
 
 // NV_PMC_INTR_0 is computed from the engines' pending&enabled states (xemu nv2a.c

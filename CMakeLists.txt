@@ -103,5 +103,9 @@ add_executable(test_jsonl tests/test_jsonl.cpp)
 target_include_directories(test_jsonl PRIVATE ${XLLE_INCLUDES})
 add_test(NAME jsonl COMMAND test_jsonl)
 
+add_executable(test_nv2a tests/test_nv2a.cpp src/machine/nv2a.cpp)
+target_include_directories(test_nv2a PRIVATE ${XLLE_INCLUDES})
+add_test(NAME nv2a COMMAND test_nv2a)
+
 # The fixture spike is itself an acceptance test: all fixtures must pass (exit 0).
 add_test(NAME spike COMMAND xlle)
