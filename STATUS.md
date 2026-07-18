@@ -3,6 +3,26 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-07-17 — Investigation checkpoint: AV wait is an APU voice-idle completion
+
+The `0x800637d3–0x800637da` wait is now identified conclusively from the exact mapped retail
+kernel image. It is not another NV2A fence. The kernel writes `NV1BA0_PIO_VOICE_OFF`
+(0xFE820128) at 0x800665f5, marks the voice object asynchronous by setting bit 28 at
+0x80066632, and later waits for that bit. The only clearing path is the APU idle-voice
+completion routine at 0x800630be/0x8006327d.
+
+The hardware path, cross-checked against the local xemu APU implementation, is: VOICE_OFF
+clears the voice's ACTIVE bit; on the next ~5.333 ms APU frame, the voice processor emits
+`SE2FE_IDLE_VOICE` (method 0x8000). With FETFORCE1 bit 15 enabled (the kernel does this at
+0x800654fe), the front end publishes FECV + FEDECMETH/FEDECPARAM, traps FECTL with requested
+reason, raises ISTS.FET, and asserts the APU's routed IRQ 5. The kernel ISR chain
+0x8006728d → 0x80066e99 → 0x8006650d → 0x80065e26 → 0x80064d7d invokes the completion
+routine and clears bit 28.
+
+Our current APU is only a register-file shell: it returns VP PIO_FREE=0x80 but does not
+execute VOICE_OFF, advance APU frames, generate the idle-voice trap, or assert IRQ 5. That is
+the precise next implementation task. No speculative guest-RAM modification has been made.
+
 ## 2026-07-17 — A4: PFIFO recorder and NV097 semaphore DMA unblock the AV fence
 
 The documented USER-block pushbuffer sink is gone. NV2A now has a synchronous PFIFO pusher

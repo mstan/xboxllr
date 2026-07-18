@@ -53,12 +53,13 @@ The worker's wait has been peeled one layer at a time this session:
    DMA_GET=DMA_PUT sink discarded the kernel's NV097 semaphore releases. PFIFO now parses and
    records the stream, resolves RAMHT/DMA objects in PRAMIN, and writes semaphore values to
    unified guest RAM. Verified: 158,966 methods, 14 releases (5..0x1f), old loop exited.
-6. **NOW: spins at EIP 0x800637d3–0x800637da** waiting for bit 28 to clear in `[ecx+8]`.
-   ECX=ESI=0xd0008488 maps to physical 0x1488; the object's field is 0x10000041. A 5B run
-   does not advance, PFIFO remains at 158,966 methods/14 releases, and phase-1 still waits.
-   Stack: return 0x80066698, parent frames 0x80065d76 → 0x80066381 → 0x80066915 →
-   0x80062ba7. This is a kernel AV C++ object completion/teardown path; identify the GPU
-   completion that owns bit 28 before changing guest RAM.
+6. **NOW: the 0x800637d3–0x800637da wait is identified as missing APU voice-idle
+   completion.** ECX=ESI=0xd0008488 maps to physical 0x1488; field +8 is 0x10000041.
+   Kernel disassembly proves the producer and consumer: it writes APU VP VOICE_OFF at
+   0x800665f5, sets bit 28 at 0x80066632, and only clears it in the idle-voice completion at
+   0x800630be/0x8006327d. Hardware/xemu then emits SE2FE_IDLE_VOICE (0x8000) on an APU frame,
+   traps the front end, and raises APU IRQ 5. Our register-file APU has none of those side
+   effects. Implement that device path next; do not clear the guest object directly.
 
 ## How to build & run
 
@@ -94,7 +95,8 @@ stand-in is documented in the header of the device that carries it.
 Deliberate documented stand-ins currently in place (fine for boot, replaced later in A4):
 - NV2A PFIFO is a synchronous recorder with semaphore DMA execution; most recorded methods
   still have no CP/raster side effects, and there is no software rasterizer yet.
-- APU/ACI are register-level shells (no DSP, no audio engine); streams RUN is logged.
+- APU/ACI are register-level shells (no DSP/audio engine). APU VP PIO_FREE works, but the
+  now-load-bearing VOICE_OFF → timed idle-voice FE trap → IRQ 5 path is still missing.
 - PIT tick cadence approximated from retired instructions (1 IPC assumption).
 
 ## Hardware oracle (live console)
@@ -114,8 +116,9 @@ Driver: `python tools/xbox_agent.py --host 192.168.4.81 {ping|info|read|exec <fi
 - Idle thread KTHREAD 0x8003d8f0; phase-1 0x80001bf8 (aka 0xd0008bf8); AV worker 0x80001a98.
 - Idle loop 0x8001e3ce; clock ISR 0x80035630; IDT base 0x8003dcc0.
 - HAL SMBus interrupt-driven wait ~0x800176e9-0x8001783a; KeStallExecutionProcessor loop
-  0x80056ca8-0x80056cb9; resolved AV fence spin 0x800570dc; current AV completion spin
-  0x800637d3-0x800637da.
+  0x80056ca8-0x80056cb9; resolved AV fence spin 0x800570dc; current APU completion spin
+  0x800637d3-0x800637da. APU idle completion 0x800630be/0x8006327d; APU ISR 0x8006728d,
+  FET handler 0x80066e99.
 - KTHREAD offsets (nxdk xboxkrnl.h): State +0x2c, Priority +0x32, KernelStack +0x24,
   WaitBlockList +0x58; KWAIT_BLOCK: Thread +0x08, Object +0x0c, Next +0x10.
   States: 1=Ready 2=Running 4=Terminated 5=Waiting.
@@ -135,9 +138,10 @@ Driver: `python tools/xbox_agent.py --host 192.168.4.81 {ping|info|read|exec <fi
 
 ## Next steps (priority order)
 
-1. **Resolve the AV-worker completion spin at 0x800637d3–0x800637da.** Use the recorded final
-   method stream and translated stack chain to identify which NV2A completion clears bit 28
-   in the kernel object; model the device behavior, never a direct guest-RAM escape hatch.
+1. **Implement APU voice-idle completion.** Decode VP VOICE_OFF, update its guest voice state
+   and notifier, advance an APU frame every 5.333 ms, publish the SE2FE_IDLE_VOICE trap in
+   FECV/FEDECMETH/FEDECPARAM/FECTL/ISTS, and wire the level interrupt to routed IRQ 5. Add a
+   focused test for the complete method → timed trap → W1C/IRQ lifecycle.
 2. Repeat until phase-1 creates the XBE entry threads (KTHREAD count > 3; watch for user-space
    EIPs and new `[dbg]` traffic). XBMC will then start exercising kernel APIs broadly —
    expect new device faults (USB/OHCI at 0xFED00000/0xFED08000, NIC 0xFEF00000, more SMC).

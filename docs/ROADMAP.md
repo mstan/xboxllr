@@ -20,7 +20,7 @@ machine-verifiable evidence that closed it.
 | A1 | **PARTIAL / DEFERRED** | Real-console agent and hardware probes work; pinned deterministic xemu-TCG cosim is still owed. |
 | A2 | **DONE** | Retail 4983 kernel reaches executive/IO init, services IRQs, completes phase-1, mounts FATX, and maps the dashboard XBE. |
 | A3 | **PARTIAL** | Unicorn's dynamic translator is the normal tier; page versioning and SMC/decryption invalidation proof remain. |
-| A4 | **IN PROGRESS** | XBE is mapped; PFIFO recorder + semaphore DMA cleared 0x800570dc. Resolve the new AV completion wait at 0x800637d3, start XBE threads, then land method execution/software rasterization and exercised audio/input coverage. |
+| A4 | **IN PROGRESS** | XBE is mapped; PFIFO semaphore DMA cleared 0x800570dc. The 0x800637d3 wait is identified as missing APU VOICE_OFF → idle FE trap/IRQ 5 completion; implement it, start XBE threads, then continue raster/audio/input coverage. |
 | A5 | **NOT STARTED** | Requires A4 dashboard execution and rendering. |
 | Arc 2 | **NOT STARTED** | Explicitly out of current scope. |
 
