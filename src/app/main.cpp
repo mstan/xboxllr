@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -150,6 +151,29 @@ std::string dump_mem(size_t n) {
     return out;
 }
 
+uint64_t frame_hash(const std::vector<uint8_t>& rgba) {
+    uint64_t hash = 1469598103934665603ull;
+    for (uint8_t byte : rgba) {
+        hash ^= byte;
+        hash *= 1099511628211ull;
+    }
+    return hash;
+}
+
+bool write_frame_ppm(const char* path, const std::vector<uint8_t>& rgba,
+                     uint32_t width, uint32_t height) {
+    if (!path || rgba.size() != static_cast<size_t>(width) * height * 4) return false;
+    std::ofstream out(path, std::ios::binary);
+    if (!out) return false;
+    out << "P6\n" << width << ' ' << height << "\n255\n";
+    for (size_t i = 0; i < rgba.size(); i += 4) {
+        out.put(static_cast<char>(rgba[i + 0]));
+        out.put(static_cast<char>(rgba[i + 1]));
+        out.put(static_cast<char>(rgba[i + 2]));
+    }
+    return out.good();
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -158,6 +182,7 @@ int main(int argc, char** argv) {
     const char* run2bl = nullptr;
     const char* hdd = nullptr;
     const char* eeprom = nullptr;
+    const char* frame_dump = nullptr;
     uint64_t max_insns = 128ull * 1000 * 1000;  // 2BL kernel LZX decompress needs tens of M
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--serve")) serve = true;
@@ -166,6 +191,8 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(argv[i], "--run2bl") && i + 1 < argc) run2bl = argv[++i];
         else if (!std::strcmp(argv[i], "--hdd") && i + 1 < argc) hdd = argv[++i];
         else if (!std::strcmp(argv[i], "--eeprom") && i + 1 < argc) eeprom = argv[++i];
+        else if (!std::strcmp(argv[i], "--frame-dump") && i + 1 < argc)
+            frame_dump = argv[++i];
         else if (!std::strcmp(argv[i], "--max-insns") && i + 1 < argc)
             max_insns = std::strtoull(argv[++i], nullptr, 0);
     }
@@ -353,6 +380,13 @@ int main(int argc, char** argv) {
             std::string err2;
             uint64_t n = mach.run(0x901ee, max_insns, err2);
             X86Regs f = mach.cpu().get_regs();
+            Nv2a::ScanoutInfo scanout;
+            std::vector<uint8_t> frame_rgba;
+            std::string scanout_error;
+            const bool frame_available =
+                mach.nv2a() &&
+                mach.nv2a()->capture_scanout(frame_rgba, scanout, scanout_error);
+            bool frame_output_ok = true;
             std::printf("[2bl] retired %llu instructions; final eip=0x%08x eax=0x%08x ecx=0x%08x\n",
                         (unsigned long long)n, f.eip, f.eax, f.ecx);
             if (!err2.empty()) std::printf("[2bl] STOPPED: %s\n", err2.c_str());
@@ -529,6 +563,25 @@ int main(int argc, char** argv) {
                             (unsigned long long)mach.nv2a()->pgraph_read_increments(),
                             (unsigned long long)mach.nv2a()->pgraph_notifications(),
                             mach.nv2a()->pgraph_surface(), mach.nv2a()->waiting_for_flip());
+                if (frame_available) {
+                    std::printf("[2bl] NV2A scanout: start=%08x pitch=%u size=%ux%u bpp=%u "
+                                "writes/nonzero=%llu/%llu last-nonzero=%08x "
+                                "rgba-fnv64=%016llx\n",
+                                scanout.start, scanout.pitch, scanout.width, scanout.height,
+                                scanout.bits_per_pixel,
+                                (unsigned long long)mach.nv2a()->scanout_writes(),
+                                (unsigned long long)mach.nv2a()->scanout_nonzero_writes(),
+                                mach.nv2a()->last_nonzero_scanout_start(),
+                                (unsigned long long)frame_hash(frame_rgba));
+                } else {
+                    std::printf("[2bl] NV2A scanout unavailable: %s\n",
+                                scanout_error.c_str());
+                }
+                std::vector<uint32_t> scanout_starts;
+                mach.nv2a()->recent_scanout_starts(16, scanout_starts);
+                std::printf("[2bl] NV2A recent PCRTC_START:");
+                for (uint32_t start : scanout_starts) std::printf(" %08x", start);
+                std::printf("\n");
                 std::vector<Nv2a::PushMethod> recent;
                 mach.nv2a()->recent_methods(64, recent);
                 for (const auto& m : recent) {
@@ -618,7 +671,19 @@ int main(int argc, char** argv) {
             for (const auto& e : mmio_log)
                 std::printf("      %-3s addr=0x%08x size=%u value=0x%08x\n",
                             e.write ? "WR" : "RD", e.addr, e.size, e.value);
-            return err2.empty() ? 0 : 2;
+            if (frame_dump) {
+                frame_output_ok =
+                    frame_available &&
+                    write_frame_ppm(frame_dump, frame_rgba, scanout.width, scanout.height);
+                std::printf("[host] frame dump %s: %s\n", frame_dump,
+                            frame_output_ok ? "written" : "FAILED");
+            }
+            if (window && frame_available)
+                run_frame_window("xlle NV2A scanout", static_cast<int>(scanout.width),
+                                 static_cast<int>(scanout.height), frame_rgba.data(),
+                                 static_cast<size_t>(scanout.width) * 4);
+            if (!err2.empty()) return 2;
+            return frame_output_ok ? 0 : 3;
         }
         std::printf("[machine] harness OK. NEXT: MCPX X-code repro + 2BL RC4-decrypt to boot.\n");
         return 0;

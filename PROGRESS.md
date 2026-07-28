@@ -27,11 +27,11 @@ harvested from xemu, silicon-corrected against a live console. GPL-2.
   page-versioning proof is not complete.
 - **In progress:** A4. Storage loads the XBE; PFIFO semaphore DMA and timed APU voice
   completion clear the early AV waits; PGRAPH software notifications plus flip/vblank
-  completion finish the boot animation; and `xbmc.exe` initializes NVNet and passes its
-  first enabled transmit kick.
-- **Immediate burn-down path:** expose the next runtime dependency or emit the first
-  software-rendered framebuffer → extend OHCI into TD execution/XID input, NVNet into RX
-  and external transport, and the recorded NV2A subset into the rasterizer.
+  completion finish the boot animation; `xbmc.exe` initializes NVNet and transmits through
+  its descriptor engine; and the guest-programmed scanout can be dumped or presented.
+- **Immediate burn-down path:** execute the recorded NV097 surface/clear subset, then the
+  smallest dashboard draw subset → extend OHCI into TD execution/XID input → add NVNet RX
+  and external transport.
 - **Not started:** A5 end-to-end retail-dashboard navigation and Arc 2 game work.
 
 ## Where the boot stands RIGHT NOW
@@ -78,6 +78,11 @@ dependency chain peeled this session is:
     writeback, ring wrap, IDLE, TX status/IRQ, and an explicit headless packet sink. The
     dashboard's first kick finds an empty ring (zero VALID descriptors), then a 6.4B run
     reaches its budget fault-free in `KiIdleLoop`.
+13. first framebuffer readout → **fixed through scanout/presentation**. PCRTC_START, PRMCIO
+    CRTC pitch/depth, and PRAMDAC dimensions/format resolve a validated unified-memory
+    surface to RGBA; `--frame-dump` writes PPM and `--window` presents it through SDL3. At
+    6.4B the guest selects 720x480x32 at `0x03c8c000`, pitch 3072. The frame is black because
+    the recorded NV097 clear/draw stream still has no raster side effects.
 
 ## How to build & run
 
@@ -112,7 +117,8 @@ stand-in is documented in the header of the device that carries it.
 
 Deliberate documented stand-ins currently in place (fine for boot, replaced later in A4):
 - NV2A PFIFO is a synchronous recorder with semaphore DMA execution; most recorded methods
-  still have no CP/raster side effects, and there is no software rasterizer yet.
+  still have no CP/raster side effects. Guest-programmed framebuffer selection and host
+  readout/presentation work, but there is no software rasterizer yet.
 - APU has the load-bearing voice-list, VOICE_OFF, timed idle-voice FE trap, notifier, and IRQ
   lifecycle, but still no DSP/audio synthesis. ACI advances real PCM descriptors and IRQs
   headlessly but produces no host audio.
@@ -163,17 +169,16 @@ Driver: `python tools/xbox_agent.py --host 192.168.4.81 {ping|info|read|exec <fi
 
 ## Next steps (priority order)
 
-1. Continue beyond the 6.4B fault-free budget until the next loud dependency, or start the
-   first NV2A software framebuffer/readout path while the live dashboard is available.
-2. Extend OHCI when exercised: control/bulk TD execution first, then the Xbox XID controller
-   protocol and host input mapping.
-3. NV2A framebuffer: get the first frame out (PCRTC fb base +
-   PRAMDAC; software path). That is the A4 deliverable boundary.
-4. Add NVNet RX descriptor DMA and external packet transport when the guest or navigation
+1. Execute the dashboard's bound NV097 color-surface state and clear methods against the
+   correct DMA object, then implement the smallest exercised draw subset needed to turn the
+   validated black scanout into the first rendered dashboard frame.
+2. Extend OHCI: control/bulk TD execution first, then the Xbox XID controller protocol and
+   host input mapping.
+3. Add NVNet RX descriptor DMA and external packet transport when the guest or navigation
    path requires them.
-5. Longer term (A4 proper): extend the landed recorder into the required CP/method subset and
+4. Longer term (A4 proper): extend the landed recorder into the required CP/method subset and
    software rasterizer (docs/ROADMAP.md).
-6. Keep validating modeled values against the live console; reconfirm xemu-sourced defaults.
+5. Keep validating modeled values against the live console; reconfirm xemu-sourced defaults.
 
 ## Session hygiene
 

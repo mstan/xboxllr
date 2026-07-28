@@ -3,6 +3,33 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-07-28 — A4: guest-programmed scanout reaches a host frame
+
+The first faithful framebuffer readout path is landed. NV2A now models the PCRTC scanout
+start, PRMCIO VGA CRTC index/data registers used for pitch and depth, and PRAMDAC display
+extent/general-control registers. `capture_scanout` validates the resulting unified-memory
+range and converts the Xbox's 16-bit RGB565/X1R5G5B5 and 32-bit X8R8G8B8 layouts to RGBA.
+The CLI can dump a deterministic PPM with `--frame-dump` or present the captured frame in
+the SDL3 shell with `--window`. Focused coverage verifies padded-pitch RGB565 conversion,
+register readback, and scanout-address history.
+
+A 6.4B-instruction dashboard acceptance run reaches its budget without fault, with 36,388,327
+PFIFO methods, 486/486 flip completions, 1,932 PGRAPH notifications, and four KTHREADs. The
+guest ultimately programs a 720x480x32 scanout at physical `0x03c8c000`, pitch 3072; the
+captured frame hash is `43890243bf2df383`. It is uniformly black, which establishes the next
+boundary precisely: PCRTC/PRMCIO/PRAMDAC selection and host readout work, but the recorded
+NV097 clear/draw methods do not yet populate the selected color surface. The direct suite is
+9/9.
+
+An independent 8B ceiling run also remains fault-free and observes two completed guest NVNet
+packets (684 bytes total) through the headless TX sink. No new runtime fault appears beyond
+the prior 6.4B boundary.
+
+**Next:** execute the dashboard's recorded NV097 color-surface state and clear operations in
+unified memory, gated by the bound Kelvin object and DMA context, then extend toward the
+smallest exercised draw subset. OHCI TD/XID input and NVNet RX/transport remain later A4
+items in listed order.
+
 ## 2026-07-27 — A4: NVNet TX engine clears the dashboard's first kick
 
 NVNet now executes the xemu-witnessed transmit lifecycle: it reads packed 8-byte ring

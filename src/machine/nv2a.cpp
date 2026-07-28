@@ -61,6 +61,7 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
         switch (bo) {
             case 0x100: return pcrtc_intr_;     // NV_PCRTC_INTR_0 (bit0 VBLANK)
             case 0x140: return pcrtc_intr_en_;  // NV_PCRTC_INTR_EN_0
+            case 0x800: return pcrtc_start_;    // NV_PCRTC_START
             default: break;
         }
     } else if (blk->off == 0x601000) {  // PRMCIO (VGA CRTC/attribute mirror)
@@ -70,6 +71,15 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
         if (bo == 0x3DA) {
             bool vblank = frame_phase_ >= 950;
             return vblank ? 0x09u : 0x00u;
+        }
+        if (bo == 0x3D4) return crtc_index_;
+        if (bo == 0x3D5) return crtc_regs_[crtc_index_];
+    } else if (blk->off == 0x680000) {  // PRAMDAC
+        switch (bo & ~3u) {
+            case 0x600: return pramdac_general_control_;
+            case 0x800: return pramdac_fp_vdisplay_end_;
+            case 0x820: return pramdac_fp_hdisplay_end_;
+            default: break;
         }
     } else if (blk->off == 0x001000) {  // PBUS
         switch (bo) {
@@ -163,6 +173,41 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
         pcrtc_intr_en_ = value;
         update_irq();
         return;
+    }
+    if (blk->off == 0x600000 && bo == 0x800) {
+        pcrtc_start_ = value & 0x07ffffffu;
+        ++scanout_writes_;
+        if (pcrtc_start_) {
+            ++scanout_nonzero_writes_;
+            last_nonzero_scanout_start_ = pcrtc_start_;
+        }
+        scanout_starts_.push(pcrtc_start_);
+        return;
+    }
+    if (blk->off == 0x601000) {
+        if (bo == 0x3D4) {
+            crtc_index_ = static_cast<uint8_t>(value);
+            return;
+        }
+        if (bo == 0x3D5) {
+            crtc_regs_[crtc_index_] = static_cast<uint8_t>(value);
+            return;
+        }
+    }
+    if (blk->off == 0x680000) {
+        switch (bo) {
+            case 0x600:
+                pramdac_general_control_ = value;
+                return;
+            case 0x800:
+                pramdac_fp_vdisplay_end_ = value;
+                return;
+            case 0x820:
+                pramdac_fp_hdisplay_end_ = value;
+                return;
+            default:
+                break;
+        }
     }
     if (blk->off == 0x400000 && bo == 0x71C) {
         // NV_PGRAPH_INCREMENT_READ_3D is written by the kernel's vblank ISR. It retires
@@ -466,6 +511,95 @@ uint32_t Nv2a::pgraph_surface() const {
     return (static_cast<uint32_t>(flip_write_) << 20) |
            (static_cast<uint32_t>(flip_read_) << 24) |
            (static_cast<uint32_t>(flip_modulo_) << 28);
+}
+
+Nv2a::ScanoutInfo Nv2a::scanout_info() const {
+    ScanoutInfo info;
+    info.start = pcrtc_start_;
+    const uint32_t pitch_units =
+        crtc_regs_[0x13] |
+        (static_cast<uint32_t>(crtc_regs_[0x19] & 0xe0u) << 3) |
+        (static_cast<uint32_t>(crtc_regs_[0x25] & 0x20u) << 6);
+    info.pitch = pitch_units << 3;
+    info.width = pramdac_fp_hdisplay_end_ + 1;
+    info.height = pramdac_fp_vdisplay_end_ + 1;
+    const uint32_t depth = crtc_regs_[0x28] & 3u;
+    if (depth == 2)
+        info.bits_per_pixel = 16;
+    else if (depth == 3)
+        info.bits_per_pixel = 32;
+    return info;
+}
+
+bool Nv2a::capture_scanout(std::vector<uint8_t>& rgba, ScanoutInfo& info,
+                           std::string& error) const {
+    info = scanout_info();
+    if (!mem_read_) {
+        error = "NV2A scanout has no guest-memory reader";
+        return false;
+    }
+    if (!info.width || !info.height || info.width > 1920 || info.height > 1080) {
+        error = "NV2A scanout dimensions are unset or outside Xbox limits";
+        return false;
+    }
+    if (info.bits_per_pixel != 16 && info.bits_per_pixel != 32) {
+        error = "NV2A scanout pixel depth is not modeled";
+        return false;
+    }
+    const uint32_t bytes_per_pixel = info.bits_per_pixel / 8;
+    const uint64_t row_bytes = static_cast<uint64_t>(info.width) * bytes_per_pixel;
+    if (info.pitch < row_bytes) {
+        error = "NV2A scanout pitch is smaller than the visible row";
+        return false;
+    }
+    const uint64_t source_size =
+        static_cast<uint64_t>(info.pitch) * (info.height - 1) + row_bytes;
+    if (static_cast<uint64_t>(info.start) + source_size > 64ull * 1024 * 1024) {
+        error = "NV2A scanout exceeds unified RAM";
+        return false;
+    }
+
+    std::vector<uint8_t> source(static_cast<size_t>(source_size));
+    if (!mem_read_(info.start, source.data(), source.size())) {
+        error = "NV2A scanout guest-memory read failed";
+        return false;
+    }
+    rgba.resize(static_cast<size_t>(info.width) * info.height * 4);
+    for (uint32_t y = 0; y < info.height; ++y) {
+        for (uint32_t x = 0; x < info.width; ++x) {
+            const size_t source_offset =
+                static_cast<size_t>(y) * info.pitch + x * bytes_per_pixel;
+            const size_t dest_offset =
+                (static_cast<size_t>(y) * info.width + x) * 4;
+            if (bytes_per_pixel == 4) {
+                rgba[dest_offset + 0] = source[source_offset + 2];
+                rgba[dest_offset + 1] = source[source_offset + 1];
+                rgba[dest_offset + 2] = source[source_offset + 0];
+            } else {
+                uint16_t pixel = 0;
+                std::memcpy(&pixel, source.data() + source_offset, sizeof(pixel));
+                const bool rgb565 = (pramdac_general_control_ & (1u << 12)) != 0;
+                if (rgb565) {
+                    rgba[dest_offset + 0] =
+                        static_cast<uint8_t>(((pixel >> 11) & 0x1f) * 255 / 31);
+                    rgba[dest_offset + 1] =
+                        static_cast<uint8_t>(((pixel >> 5) & 0x3f) * 255 / 63);
+                    rgba[dest_offset + 2] =
+                        static_cast<uint8_t>((pixel & 0x1f) * 255 / 31);
+                } else {
+                    rgba[dest_offset + 0] =
+                        static_cast<uint8_t>(((pixel >> 10) & 0x1f) * 255 / 31);
+                    rgba[dest_offset + 1] =
+                        static_cast<uint8_t>(((pixel >> 5) & 0x1f) * 255 / 31);
+                    rgba[dest_offset + 2] =
+                        static_cast<uint8_t>((pixel & 0x1f) * 255 / 31);
+                }
+            }
+            rgba[dest_offset + 3] = 0xff;
+        }
+    }
+    error.clear();
+    return true;
 }
 
 // NV_PMC_INTR_0 is computed from the engines' pending&enabled states (xemu nv2a.c

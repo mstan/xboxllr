@@ -96,6 +96,23 @@ public:
     uint32_t pmc_intr_en() const { return pmc_intr_en_; }
     uint32_t pcrtc_intr_en() const { return pcrtc_intr_en_; }
 
+    struct ScanoutInfo {
+        uint32_t start = 0;
+        uint32_t pitch = 0;
+        uint32_t width = 0;
+        uint32_t height = 0;
+        uint32_t bits_per_pixel = 0;
+    };
+    ScanoutInfo scanout_info() const;
+    bool capture_scanout(std::vector<uint8_t>& rgba, ScanoutInfo& info,
+                         std::string& error) const;
+    uint64_t scanout_writes() const { return scanout_writes_; }
+    uint64_t scanout_nonzero_writes() const { return scanout_nonzero_writes_; }
+    uint32_t last_nonzero_scanout_start() const { return last_nonzero_scanout_start_; }
+    size_t recent_scanout_starts(size_t n, std::vector<uint32_t>& out) const {
+        return scanout_starts_.window(n, out);
+    }
+
 private:
     // Resolve an absolute NV2A address to its block; returns nullptr (a hole) if unmapped.
     static const Block* find_block(uint32_t rel_addr, uint32_t& block_rel);
@@ -142,6 +159,19 @@ private:
     uint32_t pgraph_nsource_ = 0;
     uint32_t pgraph_trapped_addr_ = 0;
     uint32_t pgraph_trapped_data_ = 0;
+
+    // Display/scanout state. PRMCIO is the memory-mapped VGA register alias; AvSetDisplayMode
+    // programs CRTC pitch/depth there, PRAMDAC display extents, then PCRTC_START.
+    std::array<uint8_t, 256> crtc_regs_{};
+    uint8_t crtc_index_ = 0;
+    uint32_t pcrtc_start_ = 0;
+    uint32_t pramdac_general_control_ = 0;
+    uint32_t pramdac_fp_vdisplay_end_ = 0;
+    uint32_t pramdac_fp_hdisplay_end_ = 0;
+    uint64_t scanout_writes_ = 0;
+    uint64_t scanout_nonzero_writes_ = 0;
+    uint32_t last_nonzero_scanout_start_ = 0;
+    Ring<uint32_t> scanout_starts_{64};
 
     void process_pushbuffer(uint8_t channel);
     bool pusher_enabled(uint8_t channel) const;
