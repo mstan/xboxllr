@@ -19,6 +19,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <string>
 #include <unordered_map>
@@ -75,6 +76,12 @@ public:
     };
     uint64_t push_methods() const { return methods_.total(); }
     uint64_t semaphore_writes() const { return semaphore_writes_; }
+    uint64_t flip_increments() const { return flip_increments_; }
+    uint64_t flip_stalls() const { return flip_stalls_; }
+    uint64_t pgraph_read_increments() const { return pgraph_read_increments_; }
+    uint64_t pgraph_notifications() const { return pgraph_notifications_; }
+    uint32_t pgraph_surface() const;
+    bool waiting_for_flip() const { return waiting_for_flip_; }
     size_t recent_methods(size_t n, std::vector<PushMethod>& out) const {
         return methods_.window(n, out);
     }
@@ -113,13 +120,30 @@ private:
     std::array<ChannelState, 32> channels_{};
     std::vector<uint8_t> pramin_;
     Ring<PushMethod> methods_;
+    std::deque<PushMethod> pull_queue_;
     std::function<bool(uint32_t, void*, size_t)> mem_read_;
     std::function<bool(uint32_t, const void*, size_t)> mem_write_;
     std::array<uint32_t, 8> semaphore_dma_{};
     std::array<uint32_t, 8> semaphore_offset_{};
     uint64_t semaphore_writes_ = 0;
+    uint8_t flip_read_ = 0;
+    uint8_t flip_write_ = 0;
+    uint8_t flip_modulo_ = 0;
+    bool waiting_for_flip_ = false;
+    bool waiting_for_nop_ = false;
+    bool pgraph_fifo_access_ = true;
+    uint64_t flip_increments_ = 0;
+    uint64_t flip_stalls_ = 0;
+    uint64_t pgraph_read_increments_ = 0;
+    uint64_t pgraph_notifications_ = 0;
+    uint32_t pgraph_intr_ = 0;
+    uint32_t pgraph_intr_en_ = 0;
+    uint32_t pgraph_nsource_ = 0;
+    uint32_t pgraph_trapped_addr_ = 0;
+    uint32_t pgraph_trapped_data_ = 0;
 
     void process_pushbuffer(uint8_t channel);
+    void drain_pull_queue();
     void dispatch_method(uint8_t channel, uint8_t subchannel, uint32_t method,
                          uint32_t parameter);
     bool ramht_instance(uint8_t channel, uint32_t handle, uint32_t& instance) const;

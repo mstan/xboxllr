@@ -14,6 +14,7 @@
 
 #include "cpu/unicorn_floor.hpp"
 #include "host/sdl_shell.hpp"
+#include "machine/aci.hpp"
 #include "machine/apu.hpp"
 #include "machine/machine.hpp"
 #include "obs/debug_server.hpp"
@@ -521,6 +522,13 @@ int main(int argc, char** argv) {
                 std::printf("[2bl] NV2A PFIFO: methods=%llu semaphore-writes=%llu\n",
                             (unsigned long long)mach.nv2a()->push_methods(),
                             (unsigned long long)mach.nv2a()->semaphore_writes());
+                std::printf("[2bl] NV2A flip: write-increments=%llu stalls=%llu "
+                            "read-increments=%llu notifications=%llu surface=%08x waiting=%u\n",
+                            (unsigned long long)mach.nv2a()->flip_increments(),
+                            (unsigned long long)mach.nv2a()->flip_stalls(),
+                            (unsigned long long)mach.nv2a()->pgraph_read_increments(),
+                            (unsigned long long)mach.nv2a()->pgraph_notifications(),
+                            mach.nv2a()->pgraph_surface(), mach.nv2a()->waiting_for_flip());
                 std::vector<Nv2a::PushMethod> recent;
                 mach.nv2a()->recent_methods(64, recent);
                 for (const auto& m : recent) {
@@ -554,6 +562,19 @@ int main(int argc, char** argv) {
                             (unsigned)mach.apu()->mmio_read(McpxApu::kBase + 0x2058, 4),
                             (unsigned)mach.apu()->mmio_read(McpxApu::kBase + 0x2064, 4),
                             (unsigned)mach.apu()->mmio_read(McpxApu::kBase + 0x2070, 4));
+            }
+            if (mach.aci()) {
+                std::printf("[2bl] ACI: completed=%llu GLOB_STA=%08x "
+                            "PCM CIV/LVI/SR=%08x PICB/PIV/CR=%08x\n",
+                            (unsigned long long)mach.aci()->completed_descriptors(),
+                            mach.aci()->mmio_read(McpxAci::kBase + 0x130, 4),
+                            mach.aci()->mmio_read(McpxAci::kBase + 0x114, 4),
+                            mach.aci()->mmio_read(McpxAci::kBase + 0x118, 4));
+            }
+            if (mach.ohci0()) {
+                std::printf("[2bl] OHCI0: frames=%llu control=%08x hcca=%08x\n",
+                            (unsigned long long)mach.ohci0()->frames(),
+                            mach.ohci0()->control(), mach.ohci0()->hcca());
             }
             std::printf("[2bl] IDE: port accesses=%llu irqs=%llu sectors rd/wr=%llu/%llu "
                         "bm_base=0x%04x\n", (unsigned long long)ide_io_count,

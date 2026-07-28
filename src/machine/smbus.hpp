@@ -52,6 +52,7 @@ private:
     FaultFn fault_;
     uint8_t scratch_reg_ = 0;
     uint8_t error_reg_ = 0;
+    uint8_t fan_speed_ = 50;  // SMC units are 0..50; fixed auto-mode telemetry for now.
     uint8_t version_[3] = {0x50, 0x31, 0x31};  // "P11" (SMC/PIC version, read from silicon)
     int version_index_ = 0;
 };

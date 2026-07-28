@@ -169,14 +169,38 @@ void XboxMachine::init_devices() {
                    [this](uint32_t a, int s) { return mmio_read(a, s); },
                    [this](uint32_t a, int s, uint32_t v) { mmio_write(a, s, v); });
 
-    // MCPX ACI (AC97) shell at 0xFEC00000 (4 KB). See aci.hpp.
+    // MCPX ACI (AC97) at 0xFEC00000, including headless PCM-out descriptor timing.
     auto aci = std::make_unique<McpxAci>(fault);
+    aci_ = aci.get();
+    aci_->set_mem_access(
+        [this](uint32_t addr, void* buf, size_t n) { return cpu_->read_mem(addr, buf, n); });
+    // LPC routing register 0x6e maps device 6 (ACI) INTA to ISA IRQ 6.
+    aci_->set_irq([this](int irq, bool level) { pic_->raise(irq, level); }, 6);
     uint32_t cbase = aci->mmio_base();
     uint32_t csize = aci->mmio_size();
     mmio_devices_.push_back(std::move(aci));
     cpu_->map_mmio(cbase, csize,
                    [this](uint32_t a, int s) { return mmio_read(a, s); },
                    [this](uint32_t a, int s, uint32_t v) { mmio_write(a, s, v); });
+
+    // Two standard four-port OHCI controllers. USB0 routes to IRQ1 and USB1 to IRQ9
+    // (xemu xbox_pci.c); no downstream devices are attached yet.
+    for (int index = 0; index < 2; ++index) {
+        const uint32_t base = index ? 0xFED08000u : 0xFED00000u;
+        auto ohci = std::make_unique<Ohci>(base, fault);
+        Ohci* raw = ohci.get();
+        raw->set_mem_write([this](uint32_t addr, const void* buf, size_t n) {
+            return cpu_->write_mem(addr, buf, n);
+        });
+        raw->set_irq([this](int irq, bool level) { pic_->raise(irq, level); },
+                     index ? 9 : 1);
+        if (index) ohci1_ = raw;
+        else ohci0_ = raw;
+        mmio_devices_.push_back(std::move(ohci));
+        cpu_->map_mmio(base, Ohci::kSize,
+                       [this](uint32_t a, int s) { return mmio_read(a, s); },
+                       [this](uint32_t a, int s, uint32_t v) { mmio_write(a, s, v); });
+    }
 }
 
 MmioDevice* XboxMachine::find_mmio(uint32_t addr) {
@@ -298,6 +322,11 @@ uint64_t XboxMachine::run(uint32_t start, uint64_t max, std::string& err) {
         }
         // APU setup-engine frame: 256 samples / 48 kHz = 5.333 ms (187.5 Hz).
         if (apu_) apu_->set_frame(total_insns_ * 375 / (kCpuHz * 2));
+        // AC'97 PCM output consumes the same 256-sample frames, without host audio output.
+        if (aci_) aci_->set_frame(total_insns_ * 375 / (kCpuHz * 2));
+        // USB OHCI start-of-frame cadence is 1 kHz.
+        if (ohci0_) ohci0_->set_frame(total_insns_ * 1000 / kCpuHz);
+        if (ohci1_) ohci1_->set_frame(total_insns_ * 1000 / kCpuHz);
         if (!cerr.empty()) { err = cerr; break; }  // device fault-stop wins
 
         // Deliver one pending, unmasked external interrupt at this boundary. Confirm the guest

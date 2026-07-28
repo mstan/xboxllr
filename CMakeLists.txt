@@ -62,6 +62,7 @@ add_library(xlle_machine STATIC
   src/machine/pci.cpp
   src/machine/smbus.cpp
   src/machine/nv2a.cpp
+  src/machine/ohci.cpp
   src/machine/pm.cpp
   src/machine/pic.cpp
   src/machine/pit.cpp
@@ -110,6 +111,18 @@ add_test(NAME nv2a COMMAND test_nv2a)
 add_executable(test_apu tests/test_apu.cpp)
 target_include_directories(test_apu PRIVATE ${XLLE_INCLUDES})
 add_test(NAME apu COMMAND test_apu)
+
+add_executable(test_aci tests/test_aci.cpp)
+target_include_directories(test_aci PRIVATE ${XLLE_INCLUDES})
+add_test(NAME aci COMMAND test_aci)
+
+add_executable(test_smc tests/test_smc.cpp src/machine/smbus.cpp)
+target_include_directories(test_smc PRIVATE ${XLLE_INCLUDES})
+add_test(NAME smc COMMAND test_smc)
+
+add_executable(test_ohci tests/test_ohci.cpp src/machine/ohci.cpp)
+target_include_directories(test_ohci PRIVATE ${XLLE_INCLUDES})
+add_test(NAME ohci COMMAND test_ohci)
 
 # The fixture spike is itself an acceptance test: all fixtures must pass (exit 0).
 add_test(NAME spike COMMAND xlle)

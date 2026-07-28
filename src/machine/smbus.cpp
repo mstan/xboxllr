@@ -53,6 +53,10 @@ bool XboxSmc::read_byte(uint8_t cmd, uint8_t& out) {
                                              // value is 0x40 — both boot, silicon wins)
         case 0x04: out = 0x06; return true;  // AVPACK = COMPOSITE (agent read from silicon)
         case 0x11: out = 0x00; return true;  // INTSTATUS: no SMC events pending at boot (clr-on-rd)
+        // POWER_FAN_READBACK. Cxbx identifies the 0..50 unit range; the prior HLE witness
+        // uses 50 as its stable automatic-mode reading. The live console probe is currently
+        // offline, so retain that provenance explicitly instead of presenting it as silicon.
+        case 0x10: out = fan_speed_; return true;
         case 0x1b: out = scratch_reg_; return true;  // SCRATCH
         case 0x0f: out = error_reg_; return true;     // ERROR_READ
         default: break;
@@ -80,6 +84,7 @@ bool XboxSmc::write_byte(uint8_t cmd, uint8_t val) {
     switch (cmd) {
         case 0x01: version_index_ = val; return true;   // VER: reset version-string read index
         case 0x0e: error_reg_ = val; return true;       // ERROR_WRITE
+        case 0x06: fan_speed_ = val > 50 ? 50 : val; return true;  // requested fan speed
         case 0x1b: scratch_reg_ = val; return true;     // SCRATCH
         case 0x02:  // POWER: reset/cycle/shutdown request — surface it loudly
             if (val & 0xC1) {  // RESET(0x01)|CYCLE(0x40)|SHUTDOWN(0x80)

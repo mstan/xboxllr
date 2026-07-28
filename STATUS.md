@@ -3,6 +3,42 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-07-27 — A4: boot animation completes and the dashboard XBE executes
+
+The AV/display pipeline now completes through the real interrupt path. NV2A executes the
+Kelvin flip read/write/modulo methods, queues puller work independently of DMA_GET, stalls on
+`FLIP_STALL`, and traps nonzero `NV097_NO_OPERATION` as a PGRAPH software-method
+notification. PGRAPH ERROR is aggregated into PMC IRQ 3; the retail kernel handles parameter
+0x304, records the pending flip, and its next PCRTC vblank writes `NV_PGRAPH_INCREMENT`.
+That advances READ_3D, resumes PFIFO, and executes the deferred semaphore release. A focused
+`test_nv2a` covers the notification/IRQ/FIFO-clear and flip-stall/vblank-resume lifecycles.
+
+This fixes the permanent two-buffer throttle without touching the kernel counters. In a 5B
+run the guest sustains 399 queued flips / 398 vblank completions, 1,838 PGRAPH notifications,
+36.3M methods, and no fault. At 6.089B the boot animation exits after 485/485 flip
+completions, the AV worker terminates, disk traffic resumes, and the dashboard creates a
+fourth KTHREAD and begins executing `xbmc.exe` user code.
+
+Two follow-on device floors are also landed:
+
+- AC'97 PCM output now consumes the guest's real descriptor ring at 48 kHz stereo cadence,
+  advances CIV/PIV/PICB, publishes BCIS/LVBCI/GLOB_STA, and drives routed level IRQ 6.
+  This was implemented and tested as a genuine missing device path, then conclusively ruled
+  out as the owner of the old AV counter.
+- SMC register 0x10 exposes fan-speed telemetry (0..50, existing HLE witness pending a live
+  silicon recapture), and both four-port MCPX OHCI controllers expose the standard reset
+  register set, disconnected powered root ports, 1 kHz HCCA frame writeback, and IRQ1/IRQ9.
+  Endpoint/TD execution and XID devices are not implemented yet.
+
+The 6.1B acceptance run reaches its instruction budget without fault at dashboard user EIP
+0x0011f09e, with four KTHREADs, OHCI0 operational (`control=0xbe`, HCCA 0x03fdd000), 12 USB
+frames, and continued FATX activity. The suite is 8/8. This is the first confirmed dashboard
+XBE-thread execution in xboxlle.
+
+**Next:** continue from the running XBE until the next loud dependency, then implement the
+required OHCI TD/XID or NIC path. In parallel with that burndown, turn the already-recorded
+NV2A stream into the first visible software framebuffer; no rasterizer exists yet.
+
 ## 2026-07-27 — A4: APU voice-idle completion clears the AV wait
 
 The load-bearing MCPX APU path is now implemented end to end. VP `SET_ANTECEDENT_VOICE`,

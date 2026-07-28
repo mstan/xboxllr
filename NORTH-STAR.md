@@ -20,25 +20,25 @@ proven against real hardware, with a game (Blinx) as the second arc.
 
 ## The ONE current goal
 
-**Arc 1 / A0 — Foundations.** Stand up the repo + doctrine, the host shell (SDL3), and the
-observability skeleton (always-on rings + TCP debug server + one JSONL schema), and run the
-**CPU-floor spike**: evaluate **Unicorn Engine** (embeddable QEMU x86 core with
-instrumentation hooks) as the CPU floor, with a from-scratch checked interpreter as the
-fallback. Deliverable: the host runs, the chosen CPU floor executes instruction fixtures
-under ring instrumentation, with **no Xbox devices attached.**
+**Arc 1 / A4 — running dashboard with visible output and input.** The real firmware and
+kernel boot, FATX loads `xbmc.exe`, the boot animation completes through guest-driven NV2A
+flip/vblank interrupts, and dashboard user code now executes. Finish the device paths the
+dashboard actually exercises, produce the first faithful software-rendered framebuffer, and
+make the dashboard controllable without replacing guest kernel or application logic.
 
 ## The ONE next milestone
 
-**Arc 1 / A1 — Oracle + hardware harness.** A pinned `xemu`-TCG reference behind a
-determinism gate, and an **nxdk homebrew probe agent on the real console**, all emitting the
-one JSONL schema — so the engine, xemu, and real hardware are directly comparable before any
-boot-differential work begins.
+**Sustain the dashboard XBE past hardware initialization and show its first frame.** Continue
+from the 6.1B fault-free user-code checkpoint, implement the first required OHCI TD/XID or
+NIC dependency, and convert the recorded NV2A stream into a visible framebuffer. Completion
+means a dashboard-produced frame is observable and the XBE remains alive under input-device
+enumeration.
 
 ## Not-yet (explicitly deferred, do not drift into these)
 
 - Blinx or any game (that is Arc 2).
-- Authentic retail secure boot / MCPX cold-boot crypto (a later faithfulness pass; Arc 1
-  uses the P0 development-parity BIOS).
+- Replacing the current 2BL injection boundary with authentic MCPX cold boot (a later
+  faithfulness pass).
 - HLE fast paths and enhancements (opt-in, and only after the faithful floor is proven).
 - Static x86→C export / "native port" artifacts (not this project — see `n64lle` vs
   `n64recomp`).

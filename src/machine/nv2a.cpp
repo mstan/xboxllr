@@ -91,6 +91,18 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
     } else if (blk->off == 0x100000) {  // PFB
         // Captured from silicon 2026-07-16 (agent read 0xFD100200).
         if (bo == 0x200) return 0x03070003;  // NV_PFB_CFG0
+    } else if (blk->off == 0x400000) {  // PGRAPH
+        switch (bo) {
+            case 0x100: return pgraph_intr_;
+            case 0x108: return pgraph_nsource_;
+            case 0x140: return pgraph_intr_en_;
+            case 0x704: return pgraph_trapped_addr_;
+            case 0x708: return pgraph_trapped_data_;
+            case 0x710: return pgraph_surface();
+            case 0x71C: return 0;  // NV_PGRAPH_INCREMENT (write-only)
+            case 0x720: return pgraph_fifo_access_ ? 1u : 0u;
+            default: break;
+        }
     } else if (blk->off == 0x101000) {  // PSTRAPS
         // Real strap value captured from silicon 2026-07-16 (agent read 0xFD101000). xemu
         // stubs this to 0; the 2BL discards it, but the kernel may consume it — use the truth.
@@ -150,6 +162,36 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
     if (blk->off == 0x600000 && bo == 0x140) {
         pcrtc_intr_en_ = value;
         update_irq();
+        return;
+    }
+    if (blk->off == 0x400000 && bo == 0x71C) {
+        // NV_PGRAPH_INCREMENT_READ_3D is written by the kernel's vblank ISR. It retires
+        // one displayed surface and wakes a PFIFO puller blocked in NV097_FLIP_STALL.
+        if ((value & 2u) && flip_modulo_) {
+            flip_read_ = static_cast<uint8_t>((flip_read_ + 1u) % flip_modulo_);
+            ++pgraph_read_increments_;
+            if (waiting_for_flip_ && flip_read_ != flip_write_) {
+                waiting_for_flip_ = false;
+                drain_pull_queue();
+            }
+        }
+        return;
+    }
+    if (blk->off == 0x400000 && bo == 0x100) {
+        pgraph_intr_ &= ~value;  // NV_PGRAPH_INTR is write-1-clear
+        if (!(pgraph_intr_ & (1u << 20))) waiting_for_nop_ = false;
+        update_irq();
+        drain_pull_queue();
+        return;
+    }
+    if (blk->off == 0x400000 && bo == 0x140) {
+        pgraph_intr_en_ = value;
+        update_irq();
+        return;
+    }
+    if (blk->off == 0x400000 && bo == 0x720) {
+        pgraph_fifo_access_ = (value & 1u) != 0;
+        if (pgraph_fifo_access_) drain_pull_queue();
         return;
     }
     if (blk->off == 0x002000) {
@@ -234,8 +276,41 @@ void Nv2a::dispatch_method(uint8_t channel, uint8_t subchannel, uint32_t method,
     methods_.push(PushMethod{methods_.total(), channel, subchannel,
                              static_cast<uint16_t>(method), parameter});
 
+    // NV097 flip queue. FLIP_INCREMENT_WRITE advances the producer modulo; FLIP_STALL
+    // blocks PFIFO only when the producer has caught the display/vblank consumer. The
+    // kernel advances READ_3D through NV_PGRAPH_INCREMENT in its vblank ISR.
+    if (method == 0x0100 && parameter != 0) {
+        // The Xbox kernel uses a nonzero NV097_NO_OPERATION as a software method call.
+        // NV2A traps it as a PGRAPH notification and holds the puller until the ISR clears
+        // ERROR. In particular parameter 0x304 schedules the vblank-side flip increment.
+        pgraph_trapped_addr_ = (static_cast<uint32_t>(channel) << 20) |
+                               (static_cast<uint32_t>(subchannel) << 16) | method;
+        pgraph_trapped_data_ = parameter;
+        pgraph_nsource_ = 1;
+        pgraph_intr_ |= 1u << 20;
+        waiting_for_nop_ = true;
+        ++pgraph_notifications_;
+        update_irq();
+    } else if (method == 0x0120) {
+        flip_read_ = static_cast<uint8_t>(parameter & 7u);
+    } else if (method == 0x0124) {
+        flip_write_ = static_cast<uint8_t>(parameter & 7u);
+    } else if (method == 0x0128) {
+        flip_modulo_ = static_cast<uint8_t>(parameter & 7u);
+    } else if (method == 0x012C) {
+        if (!flip_modulo_) {
+            fault_("NV2A FLIP_INCREMENT_WRITE with zero modulo");
+            return;
+        }
+        flip_write_ = static_cast<uint8_t>((flip_write_ + 1u) % flip_modulo_);
+        ++flip_increments_;
+    } else if (method == 0x0130) {
+        ++flip_stalls_;
+        if (flip_modulo_ && flip_read_ == flip_write_) {
+            waiting_for_flip_ = true;
+        }
     // NV097 semaphore methods. AvSetDisplayMode uses RELEASE as a GPU completion fence.
-    if (method == 0x01A4) {
+    } else if (method == 0x01A4) {
         uint32_t instance = 0;
         if (!ramht_instance(channel, parameter, instance)) {
             char why[128];
@@ -274,6 +349,15 @@ void Nv2a::dispatch_method(uint8_t channel, uint8_t subchannel, uint32_t method,
     }
 }
 
+void Nv2a::drain_pull_queue() {
+    while (!waiting_for_flip_ && !waiting_for_nop_ && pgraph_fifo_access_ &&
+           !pull_queue_.empty()) {
+        PushMethod m = pull_queue_.front();
+        pull_queue_.pop_front();
+        dispatch_method(m.channel, m.subchannel, m.method, m.parameter);
+    }
+}
+
 void Nv2a::process_pushbuffer(uint8_t channel) {
     auto& ch = channels_[channel];
     if (!mem_read_) {
@@ -295,7 +379,8 @@ void Nv2a::process_pushbuffer(uint8_t channel) {
         ch.get += 4;
 
         if (ch.method_count) {
-            dispatch_method(channel, ch.subchannel, ch.method, word);
+            pull_queue_.push_back(PushMethod{0, channel, ch.subchannel,
+                                             static_cast<uint16_t>(ch.method), word});
             if (!ch.non_incrementing) ch.method += 4;
             --ch.method_count;
             continue;
@@ -339,6 +424,13 @@ void Nv2a::process_pushbuffer(uint8_t channel) {
         }
     }
     if (words >= kMaxWordsPerKick) fault_("NV2A PFIFO command guard exhausted");
+    drain_pull_queue();
+}
+
+uint32_t Nv2a::pgraph_surface() const {
+    return (static_cast<uint32_t>(flip_write_) << 20) |
+           (static_cast<uint32_t>(flip_read_) << 24) |
+           (static_cast<uint32_t>(flip_modulo_) << 28);
 }
 
 // NV_PMC_INTR_0 is computed from the engines' pending&enabled states (xemu nv2a.c
@@ -346,6 +438,7 @@ void Nv2a::process_pushbuffer(uint8_t channel) {
 // when they gain interrupt sources.
 uint32_t Nv2a::pmc_intr_status() const {
     uint32_t v = 0;
+    if (pgraph_intr_ & pgraph_intr_en_) v |= 1u << 12;
     if (pcrtc_intr_ & pcrtc_intr_en_) v |= 1u << 24;
     return v;
 }

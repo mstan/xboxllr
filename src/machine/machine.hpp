@@ -12,6 +12,7 @@
 #include "machine/io_device.hpp"
 #include "machine/mmio_device.hpp"
 #include "machine/nv2a.hpp"
+#include "machine/ohci.hpp"
 #include "machine/pci.hpp"
 #include "machine/pic.hpp"
 #include "machine/pit.hpp"
@@ -22,6 +23,7 @@
 namespace xlle {
 
 class McpxApu;
+class McpxAci;
 
 class XboxMachine {
 public:
@@ -57,6 +59,8 @@ public:
     IdeController* ide() { return ide_; }
     Nv2a* nv2a() { return nv2a_; }
     McpxApu* apu() { return apu_; }
+    McpxAci* aci() { return aci_; }
+    Ohci* ohci0() { return ohci0_; }
     uint64_t injected_interrupts() const { return injected_; }
     uint64_t irq0_pulses() const { return irq0_pulses_; }
     uint64_t pending_boundaries() const { return pending_boundaries_; }
@@ -85,6 +89,9 @@ private:
     Amd756Smbus* smbus_ = nullptr;
     Nv2a* nv2a_ = nullptr;
     McpxApu* apu_ = nullptr;
+    McpxAci* aci_ = nullptr;
+    Ohci* ohci0_ = nullptr;
+    Ohci* ohci1_ = nullptr;
     std::function<void(const IoEvent&)> io_event_cb_;
     std::function<void(const MemEvent&)> mmio_event_cb_;
     uint64_t io_seq_ = 0;

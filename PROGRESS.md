@@ -25,12 +25,12 @@ harvested from xemu, silicon-corrected against a live console. GPL-2.
 - **Partial / validation debt:** A1's real-hardware probe channel is live, but deterministic
   xemu-TCG cosim remains deferred. A3 uses Unicorn's dynamic translator, but the planned
   page-versioning proof is not complete.
-- **In progress:** A4. Storage loads the XBE; PFIFO semaphore DMA clears the first GPU fence;
-  and the timed APU VOICE_OFF → idle trap → IRQ 5 completion clears the next AV wait.
-- **Immediate burn-down path:** characterize the new counter throttle at 0x80052f71 (ACI
-  stream completion/position is the leading candidate) → start XBE threads → emit the first
-  software-rendered framebuffer → execute the recorded method subset in a software
-  rasterizer → add the A4 input/audio coverage exercised by the dashboard.
+- **In progress:** A4. Storage loads the XBE; PFIFO semaphore DMA and timed APU voice
+  completion clear the early AV waits; and PGRAPH software notifications plus flip/vblank
+  completion finish the boot animation. `xbmc.exe` now has a live user thread.
+- **Immediate burn-down path:** continue the running XBE past the OHCI empty-bus floor →
+  implement the first required OHCI TD/XID or NIC path → emit the first software-rendered
+  framebuffer → extend the recorded method subset into the software rasterizer.
 - **Not started:** A5 end-to-end retail-dashboard navigation and Arc 2 game work.
 
 ## Where the boot stands RIGHT NOW
@@ -41,10 +41,8 @@ HAL/memory/executive init → phase-1 device init (interrupt-driven SMBus, EEPRO
 completions) → **dashboard XBE mapped** (`LOAD symbols: xbmc.exe` + 16 section notifications
 via kernel debug service int 0x2D).
 
-**The current blocker (next thing to fix):** the kernel's AV worker thread (KTHREAD
-0x80001a98) never finishes display-mode bring-up, so phase-1 (0x80001bf8, waiting on it)
-never starts the XBE's entry threads (KTHREAD count stays 3: phase-1, AV worker, idle).
-The worker's wait has been peeled one layer at a time this session:
+**Current frontier:** the AV/display worker now finishes, `xbmc.exe` creates a fourth KTHREAD,
+and dashboard user code executes. The dependency chain peeled this session is:
 
 1. spun on APU VP `NV1BA0_PIO_FREE` → fixed (returns 0x80, xemu semantics)
 2. spun on PFIFO idle → fixed (RUNOUT/CACHE1 status read EMPTY)
@@ -58,12 +56,15 @@ The worker's wait has been peeled one layer at a time this session:
    guest voice state/lists, the 187.5 Hz APU frame emits SE2FE_IDLE_VOICE, the FE trap and
    IEN/ISTS lifecycle drive IRQ 5, and FECTL release consumes the decoded trap. The retail
    kernel executes its real completion routine before freeing voice 64.
-7. **NOW:** the AV worker is throttled at caller 0x80052f71, repeatedly entering
-   KeStallExecutionProcessor (0x80056cb0–0x80056cb9) while
-   `[0x80061fe0] - [0x80061998] >= 2`. The 500M run is fault-free but KTHREAD count remains
-   three and phase-1 still waits for this worker. ACI streams 1 and 7 are RUN while the ACI
-   shell has no descriptor engine; prove whether ACI position/IRQ advancement owns either
-   counter before implementing it.
+7. the two-buffer throttle at 0x80052f71 → **fixed**. Nonzero NV097 NOPs now raise PGRAPH
+   software-method notifications; the kernel schedules the flip, vblank writes
+   NV_PGRAPH_INCREMENT, and PFIFO resumes the deferred semaphore. The counters advance only
+   through the guest's real ISR path.
+8. ACI descriptor completion was implemented and tested, but proved unrelated to the
+   throttle. It remains as functional headless PCM output with routed IRQ 6.
+9. after 485 completed flips the animation exits; SMC fan readback 0x10 and a standard
+   disconnected-bus OHCI floor carry the dashboard into user code. A 6.1B run is fault-free
+   at EIP 0x0011f09e with four KTHREADs and OHCI0 operational.
 
 ## How to build & run
 
@@ -74,7 +75,7 @@ cd /f/Projects/xboxlle/xboxlle
 cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ \
       -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_POLICY_VERSION_MINIMUM=3.5
 cmake --build build -j
-ctest --test-dir build                         # 5/5 (ring, jsonl, nv2a, apu, spike)
+ctest --test-dir build                         # 8/8 (ring, jsonl, nv2a, apu, aci, smc, ohci, spike)
 
 cd build
 ./xlle.exe --boot ../../machine/flash-dump-ff000000.bin \
@@ -100,8 +101,10 @@ Deliberate documented stand-ins currently in place (fine for boot, replaced late
 - NV2A PFIFO is a synchronous recorder with semaphore DMA execution; most recorded methods
   still have no CP/raster side effects, and there is no software rasterizer yet.
 - APU has the load-bearing voice-list, VOICE_OFF, timed idle-voice FE trap, notifier, and IRQ
-  lifecycle, but still no DSP/audio synthesis. ACI remains register-level only: RUN is
-  accepted, but descriptors, positions, completions, and audio output do not advance.
+  lifecycle, but still no DSP/audio synthesis. ACI advances real PCM descriptors and IRQs
+  headlessly but produces no host audio.
+- OHCI implements the standard register/frame/HCCA/IRQ floor with no attached devices.
+  Endpoint/TD execution and XID peripherals remain.
 - PIT tick cadence approximated from retired instructions (1 IPC assumption).
 
 ## Hardware oracle (live console)
@@ -121,10 +124,10 @@ Driver: `python tools/xbox_agent.py --host 192.168.4.81 {ping|info|read|exec <fi
 - Idle thread KTHREAD 0x8003d8f0; phase-1 0x80001bf8 (aka 0xd0008bf8); AV worker 0x80001a98.
 - Idle loop 0x8001e3ce; clock ISR 0x80035630; IDT base 0x8003dcc0.
 - HAL SMBus interrupt-driven wait ~0x800176e9-0x8001783a; KeStallExecutionProcessor loop
-  0x80056ca8-0x80056cb9; resolved AV fence spin 0x800570dc; current APU completion spin
-  0x800637d3-0x800637da. APU idle completion 0x800630be/0x8006327d; APU ISR 0x8006728d,
-  FET handler 0x80066e99. The APU wait is resolved; the current AV-worker throttle calls
-  KeStallExecutionProcessor at 0x80052f71 and compares counters at 0x80061998/0x80061fe0.
+  0x80056ca8-0x80056cb9; resolved AV fence spin 0x800570dc; resolved APU completion spin
+  0x800637d3-0x800637da; resolved flip throttle caller 0x80052f71 (counters
+  0x80061998/0x80061fe0). First observed dashboard user EIPs include 0x0046671d and
+  0x0011f09e.
 - KTHREAD offsets (nxdk xboxkrnl.h): State +0x2c, Priority +0x32, KernelStack +0x24,
   WaitBlockList +0x58; KWAIT_BLOCK: Thread +0x08, Object +0x0c, Next +0x10.
   States: 1=Ready 2=Running 4=Terminated 5=Waiting.
@@ -144,14 +147,11 @@ Driver: `python tools/xbox_agent.py --host 192.168.4.81 {ping|info|read|exec <fi
 
 ## Next steps (priority order)
 
-1. **Identify the 0x80052f71 counter producer.** Correlate 0x80061998/0x80061fe0 with the
-   running ACI streams and recent NV2A/APU activity; if it is AC'97 bus mastering, implement
-   descriptor consumption, CIV/PIV/PICB/SR, timing, and routed completion IRQs with a focused
-   test. Do not increment either kernel counter directly.
-2. Repeat until phase-1 creates the XBE entry threads (KTHREAD count > 3; watch for user-space
-   EIPs and new `[dbg]` traffic). XBMC will then start exercising kernel APIs broadly —
-   expect new device faults (USB/OHCI at 0xFED00000/0xFED08000, NIC 0xFEF00000, more SMC).
-3. NV2A framebuffer: once something writes pixels, get the first frame out (PCRTC fb base +
+1. Continue beyond the 6.1B fault-free XBE checkpoint until the next loud dependency.
+   Expect OHCI transfer descriptors/XID input, NIC at 0xFEF00000, or another SMC register.
+2. Extend OHCI only when exercised: control/bulk TD execution first, then the Xbox XID
+   controller protocol and host input mapping.
+3. NV2A framebuffer: get the first frame out (PCRTC fb base +
    PRAMDAC; software path). That is the A4 deliverable boundary.
 4. Longer term (A4 proper): extend the landed recorder into the required CP/method subset and
    software rasterizer (docs/ROADMAP.md).
