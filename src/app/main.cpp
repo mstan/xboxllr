@@ -577,12 +577,16 @@ int main(int argc, char** argv) {
                             mach.ohci0()->control(), mach.ohci0()->hcca());
             }
             if (mach.nvnet()) {
-                std::printf("[2bl] NVNet: link=%s MDIO rd/wr=%llu/%llu TX kicks=%llu "
+                std::printf("[2bl] NVNet: link=%s MDIO rd/wr=%llu/%llu "
+                            "TX kick/desc/pkt/bytes=%llu/%llu/%llu/%llu "
                             "IRQ status/mask=%08x/%08x TXRX=%08x\n",
                             mach.nvnet()->link_up() ? "up" : "down",
                             (unsigned long long)mach.nvnet()->mdio_reads(),
                             (unsigned long long)mach.nvnet()->mdio_writes(),
                             (unsigned long long)mach.nvnet()->tx_kicks(),
+                            (unsigned long long)mach.nvnet()->tx_descriptors(),
+                            (unsigned long long)mach.nvnet()->tx_packets(),
+                            (unsigned long long)mach.nvnet()->tx_bytes(),
                             mach.nvnet()->irq_status(), mach.nvnet()->irq_mask(),
                             mach.nvnet()->tx_rx_control());
             }

@@ -3,6 +3,30 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-07-27 — A4: NVNet TX engine clears the dashboard's first kick
+
+NVNet now executes the xemu-witnessed transmit lifecycle: it reads packed 8-byte ring
+descriptors from unified memory, assembles `length+1` fragments, bounds the hardware packet
+buffer, submits on LASTPACKET, clears VALID and error flags in guest memory, advances/wraps
+current and next pointers, maintains DMA IDLE, and publishes TX status through the existing
+W1C/IRQ4 aggregation. With no host network callback attached, completed packets are
+explicitly counted and discarded, matching a NIC queue with no connected backend rather
+than claiming external delivery. A packet callback is available for a future backend.
+
+`test_nvnet` covers a two-fragment packet, payload assembly, descriptor writeback, ring
+wrap, IDLE transition, TX IRQ assertion/acknowledgement, and the existing MDIO/link/reset
+floor. The full suite remains 9/9.
+
+The dashboard's first enabled kick at EIP 0x002d74a5 is an empty-ring initialization kick:
+the configured descriptor has no VALID bit, so hardware correctly performs no DMA or TX
+completion. The 6.4B acceptance run continues past it and reaches the instruction budget
+without fault at `KiIdleLoop` (0x8001e3ce), with four KTHREADs, NVNet IRQ mask 0x5f, and no
+regression in the 36,388,327-method / 486-flip GPU path.
+
+**Next:** resume with a longer runtime ceiling to expose the next loud dependency, or begin
+the first software framebuffer/readout path while the dashboard is live. NVNet RX DMA,
+external packet transport, OHCI TD/XID input, and rasterization remain A4 work.
+
 ## 2026-07-27 — A4: PFIFO DMA lifecycle and NVNet initialization complete
 
 The dashboard's PFIFO teardown/rebuild sequence is now modeled rather than consumed during

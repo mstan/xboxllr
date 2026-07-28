@@ -1,6 +1,7 @@
 // xlle — MCPX integrated Ethernet controller register/PHY floor.
 #include "machine/nvnet.hpp"
 
+#include <cstdio>
 #include <cstring>
 
 namespace xlle {
@@ -29,6 +30,8 @@ void NvNet::reset() {
     phy_[kMiiBmsr] = kBmsrAutoneg | kBmsrAutonegComplete | kBmsrLink;
     phy_[kMiiAnar] = kAnCapabilities;
     phy_[kMiiAnlpar] = kAnCapabilities;
+    tx_buffer_.fill(0);
+    tx_buffer_offset_ = 0;
     update_irq();
 }
 
@@ -72,6 +75,145 @@ void NvNet::reset_descriptor_pointers() {
     write_reg(kTxNextDesc, tx);
     write_reg(kRxCurrentDesc, rx);
     write_reg(kRxNextDesc, rx);
+    tx_buffer_offset_ = 0;
+}
+
+bool NvNet::load_descriptor(uint32_t address, RingDescriptor& descriptor) {
+    static_assert(sizeof(RingDescriptor) == 8, "NVNet ring descriptor layout");
+    if (!mem_read_) {
+        fault_("nvnet: TX descriptor DMA has no guest-memory reader");
+        return false;
+    }
+    if (!mem_read_(address, &descriptor, sizeof(descriptor))) {
+        char message[96];
+        std::snprintf(message, sizeof(message),
+                      "nvnet: TX descriptor DMA read failed at 0x%08x", address);
+        fault_(message);
+        return false;
+    }
+    return true;
+}
+
+bool NvNet::store_descriptor(uint32_t address, const RingDescriptor& descriptor) {
+    if (!mem_write_) {
+        fault_("nvnet: TX descriptor DMA has no guest-memory writer");
+        return false;
+    }
+    if (!mem_write_(address, &descriptor, sizeof(descriptor))) {
+        char message[96];
+        std::snprintf(message, sizeof(message),
+                      "nvnet: TX descriptor DMA write failed at 0x%08x", address);
+        fault_(message);
+        return false;
+    }
+    return true;
+}
+
+bool NvNet::next_tx_descriptor(uint32_t& address) {
+    const uint32_t base = read_reg(kTxRingAddress);
+    const uint32_t count = (read_reg(kRingSize) & 0xffffu) + 1u;
+    const uint64_t end = static_cast<uint64_t>(base) +
+                         static_cast<uint64_t>(count) * sizeof(RingDescriptor);
+    if (end > 0x100000000ull) {
+        fault_("nvnet: TX descriptor ring wraps physical address space");
+        return false;
+    }
+
+    address = read_reg(kTxNextDesc);
+    if (address < base ||
+        static_cast<uint64_t>(address) + sizeof(RingDescriptor) > end)
+        address = base;
+    write_reg(kTxCurrentDesc, address);
+    return true;
+}
+
+void NvNet::set_dma_idle(bool idle) {
+    uint32_t control = read_reg(kTxRxControl);
+    if (idle)
+        control |= kControlIdle;
+    else
+        control &= ~kControlIdle;
+    write_reg(kTxRxControl, control);
+}
+
+bool NvNet::transmit() {
+    const bool tx_enabled = (read_reg(kTransmitterControl) & kTxStart) != 0;
+    const bool dma_enabled = (read_reg(kTxRxControl) & kControlDmaDisable) == 0;
+    if (!tx_enabled || !dma_enabled || !link_up()) return true;
+
+    set_dma_idle(false);
+    const uint32_t base = read_reg(kTxRingAddress);
+    const uint32_t count = (read_reg(kRingSize) & 0xffffu) + 1u;
+    bool packet_sent = false;
+
+    for (uint32_t i = 0; i < count; ++i) {
+        uint32_t descriptor_address = 0;
+        if (!next_tx_descriptor(descriptor_address)) {
+            set_dma_idle(true);
+            return false;
+        }
+
+        RingDescriptor descriptor{};
+        if (!load_descriptor(descriptor_address, descriptor)) {
+            set_dma_idle(true);
+            return false;
+        }
+        if (!(descriptor.flags & kTxValid)) break;
+
+        const size_t length = static_cast<size_t>(descriptor.length) + 1;
+        if (length > tx_buffer_.size() - tx_buffer_offset_) {
+            fault_("nvnet: assembled TX packet exceeds the hardware buffer");
+            set_dma_idle(true);
+            return false;
+        }
+        if (!mem_read_(descriptor.buffer_address, tx_buffer_.data() + tx_buffer_offset_,
+                       length)) {
+            char message[96];
+            std::snprintf(message, sizeof(message),
+                          "nvnet: TX buffer DMA read failed at 0x%08x",
+                          descriptor.buffer_address);
+            fault_(message);
+            set_dma_idle(true);
+            return false;
+        }
+        tx_buffer_offset_ += length;
+        ++tx_descriptors_;
+
+        const bool last = (descriptor.flags & kTxLastPacket) != 0;
+        if (last) {
+            if (packet_sink_) packet_sink_(tx_buffer_.data(), tx_buffer_offset_);
+            ++tx_packets_;
+            tx_bytes_ += tx_buffer_offset_;
+            tx_buffer_offset_ = 0;
+            packet_sent = true;
+        }
+
+        descriptor.flags &=
+            ~(kTxValid | kTxRetryError | kTxDeferred | kTxCarrierLost |
+              kTxLateCollision | kTxUnderflow | kTxError);
+        if (!store_descriptor(descriptor_address, descriptor)) {
+            set_dma_idle(true);
+            return false;
+        }
+
+        const uint64_t next64 =
+            static_cast<uint64_t>(descriptor_address) + sizeof(RingDescriptor);
+        const uint64_t end = static_cast<uint64_t>(base) +
+                             static_cast<uint64_t>(count) * sizeof(RingDescriptor);
+        const uint32_t next =
+            next64 >= end ? base : static_cast<uint32_t>(next64);
+        write_reg(kTxNextDesc, next);
+
+        // xemu currently completes at most one packet per kick.
+        if (last) break;
+    }
+
+    set_dma_idle(true);
+    if (packet_sent) {
+        write_reg(kIrqStatus, read_reg(kIrqStatus) | kIrqTx);
+        update_irq();
+    }
+    return true;
 }
 
 void NvNet::mdio_transaction() {
@@ -126,10 +268,7 @@ void NvNet::mmio_write(uint32_t addr, int size, uint32_t value) {
 
         if (value & kControlKick) {
             ++tx_kicks_;
-            const bool tx_enabled = (read_reg(kTransmitterControl) & kTxStart) != 0;
-            const bool dma_enabled = (read_reg(kTxRxControl) & kControlDmaDisable) == 0;
-            if (tx_enabled && dma_enabled && link_up())
-                fault_("nvnet: enabled TX descriptor kick is not implemented");
+            transmit();
         }
         if (value & kControlReset) reset_descriptor_pointers();
         if (value & kControlClearIrq) {

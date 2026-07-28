@@ -27,11 +27,11 @@ harvested from xemu, silicon-corrected against a live console. GPL-2.
   page-versioning proof is not complete.
 - **In progress:** A4. Storage loads the XBE; PFIFO semaphore DMA and timed APU voice
   completion clear the early AV waits; PGRAPH software notifications plus flip/vblank
-  completion finish the boot animation; and `xbmc.exe` initializes NVNet through its first
-  enabled transmit kick.
-- **Immediate burn-down path:** implement the exercised NVNet TX descriptor DMA/completion
-  path and packet-backend policy → emit the first software-rendered framebuffer → extend
-  OHCI into TD execution/XID input and the recorded NV2A subset into the rasterizer.
+  completion finish the boot animation; and `xbmc.exe` initializes NVNet and passes its
+  first enabled transmit kick.
+- **Immediate burn-down path:** expose the next runtime dependency or emit the first
+  software-rendered framebuffer → extend OHCI into TD execution/XID input, NVNet into RX
+  and external transport, and the recorded NV2A subset into the rasterizer.
 - **Not started:** A5 end-to-end retail-dashboard navigation and Arc 2 game work.
 
 ## Where the boot stands RIGHT NOW
@@ -43,8 +43,8 @@ completions) → **dashboard XBE mapped** (`LOAD symbols: xbmc.exe` + 16 section
 via kernel debug service int 0x2D).
 
 **Current frontier:** the AV/display worker now finishes, `xbmc.exe` creates a fourth KTHREAD,
-and dashboard user code executes through NIC initialization. The dependency chain peeled
-this session is:
+and dashboard user code executes through NIC initialization and its first TX kick. The
+dependency chain peeled this session is:
 
 1. spun on APU VP `NV1BA0_PIO_FREE` → fixed (returns 0x80, xemu semantics)
 2. spun on PFIFO idle → fixed (RUNOUT/CACHE1 status read EMPTY)
@@ -74,6 +74,10 @@ this session is:
     strict register aperture, PHY/MDIO/link lifecycle, ring-pointer reset, W1C status, and
     IRQ4 aggregation. A 6.35B run completes 13 MDIO reads + one write and stops loudly on
     the first enabled TX descriptor kick at EIP 0x002d74a5.
+12. the enabled TX kick → **fixed** with descriptor DMA, multi-fragment assembly, guest
+    writeback, ring wrap, IDLE, TX status/IRQ, and an explicit headless packet sink. The
+    dashboard's first kick finds an empty ring (zero VALID descriptors), then a 6.4B run
+    reaches its budget fault-free in `KiIdleLoop`.
 
 ## How to build & run
 
@@ -114,8 +118,9 @@ Deliberate documented stand-ins currently in place (fine for boot, replaced late
   headlessly but produces no host audio.
 - OHCI implements the standard register/frame/HCCA/IRQ floor with no attached devices.
   Endpoint/TD execution and XID peripherals remain.
-- NVNet implements the register/PHY/MDIO/link/IRQ floor. Packet descriptor DMA and a host
-  network backend remain; an enabled TX kick is the current loud boundary.
+- NVNet implements the register/PHY/MDIO/link/IRQ floor and TX descriptor engine. With no
+  host callback, transmitted packets are explicitly counted and discarded. RX descriptor
+  DMA and external packet transport remain.
 - PIT tick cadence approximated from retired instructions (1 IPC assumption).
 
 ## Hardware oracle (live console)
@@ -158,16 +163,17 @@ Driver: `python tools/xbox_agent.py --host 192.168.4.81 {ping|info|read|exec <fi
 
 ## Next steps (priority order)
 
-1. Implement NVNet TX descriptor DMA, descriptor completion/status, and the exercised IRQ
-   path from the first enabled kick at EIP 0x002d74a5. Choose and document the headless
-   packet-backend policy rather than silently claiming delivery.
+1. Continue beyond the 6.4B fault-free budget until the next loud dependency, or start the
+   first NV2A software framebuffer/readout path while the live dashboard is available.
 2. Extend OHCI when exercised: control/bulk TD execution first, then the Xbox XID controller
    protocol and host input mapping.
 3. NV2A framebuffer: get the first frame out (PCRTC fb base +
    PRAMDAC; software path). That is the A4 deliverable boundary.
-4. Longer term (A4 proper): extend the landed recorder into the required CP/method subset and
+4. Add NVNet RX descriptor DMA and external packet transport when the guest or navigation
+   path requires them.
+5. Longer term (A4 proper): extend the landed recorder into the required CP/method subset and
    software rasterizer (docs/ROADMAP.md).
-5. Keep validating modeled values against the live console; reconfirm xemu-sourced defaults.
+6. Keep validating modeled values against the live console; reconfirm xemu-sourced defaults.
 
 ## Session hygiene
 

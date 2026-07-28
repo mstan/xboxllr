@@ -173,6 +173,11 @@ void XboxMachine::init_devices() {
     // to ISA IRQ4; MDIO is synchronous and the integrated PHY resides at address 1.
     auto nvnet = std::make_unique<NvNet>(fault);
     nvnet_ = nvnet.get();
+    nvnet_->set_mem_access(
+        [this](uint32_t addr, void* buf, size_t n) { return cpu_->read_mem(addr, buf, n); },
+        [this](uint32_t addr, const void* buf, size_t n) {
+            return cpu_->write_mem(addr, buf, n);
+        });
     nvnet_->set_irq([this](int irq, bool level) { pic_->raise(irq, level); }, 4);
     mmio_devices_.push_back(std::move(nvnet));
     cpu_->map_mmio(NvNet::kBase, NvNet::kSize,

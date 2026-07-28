@@ -1,13 +1,15 @@
 // xlle — MCPX integrated Ethernet controller register/PHY floor.
 //
 // This models the NVNet register file needed by the retail kernel and dashboard:
-// interrupt aggregation, descriptor-ring reset, and synchronous MII/MDIO transactions
-// against the integrated PHY at address 1. The PHY resets with link and autonegotiation
-// complete, matching xemu's boot witness. Packet descriptor DMA and a host network backend
-// are deliberately not implemented; an enabled transmit kick faults loudly at that boundary.
+// interrupt aggregation, descriptor-ring reset, synchronous MII/MDIO transactions against
+// the integrated PHY at address 1, and transmit descriptor DMA. The PHY resets with link and
+// autonegotiation complete, matching xemu's boot witness. When no host packet callback is
+// attached, completed TX packets are explicitly counted and discarded, matching a QEMU NIC
+// queue with no connected backend; receive DMA is left for the first exercised RX boundary.
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -39,11 +41,22 @@ public:
         irq_num_ = irq;
         update_irq();
     }
+    void set_mem_access(std::function<bool(uint32_t, void*, size_t)> read,
+                        std::function<bool(uint32_t, const void*, size_t)> write) {
+        mem_read_ = std::move(read);
+        mem_write_ = std::move(write);
+    }
+    void set_packet_sink(std::function<void(const uint8_t*, size_t)> fn) {
+        packet_sink_ = std::move(fn);
+    }
     void set_link(bool up);
 
     uint64_t mdio_reads() const { return mdio_reads_; }
     uint64_t mdio_writes() const { return mdio_writes_; }
     uint64_t tx_kicks() const { return tx_kicks_; }
+    uint64_t tx_descriptors() const { return tx_descriptors_; }
+    uint64_t tx_packets() const { return tx_packets_; }
+    uint64_t tx_bytes() const { return tx_bytes_; }
     bool link_up() const;
     uint32_t irq_status() const;
     uint32_t irq_mask() const;
@@ -55,6 +68,7 @@ private:
     static constexpr uint32_t kTransmitterControl = 0x084;
     static constexpr uint32_t kTxRingAddress = 0x100;
     static constexpr uint32_t kRxRingAddress = 0x104;
+    static constexpr uint32_t kRingSize = 0x108;
     static constexpr uint32_t kTxCurrentDesc = 0x11c;
     static constexpr uint32_t kRxCurrentDesc = 0x120;
     static constexpr uint32_t kSetupReg5 = 0x130;
@@ -67,6 +81,7 @@ private:
     static constexpr uint32_t kMdioData = 0x194;
 
     static constexpr uint32_t kIrqMiiEvent = 0x40;
+    static constexpr uint32_t kIrqTx = 0x10;
     static constexpr uint32_t kTxStart = 0x01;
     static constexpr uint32_t kControlKick = 0x01;
     static constexpr uint32_t kControlClearIrq = 0x02;
@@ -77,6 +92,21 @@ private:
     static constexpr uint32_t kAdapterLinkUp = 0x04;
     static constexpr uint32_t kMdioInUse = 0x8000;
     static constexpr uint32_t kMdioWrite = 0x0400;
+    static constexpr uint16_t kTxLastPacket = 1u << 0;
+    static constexpr uint16_t kTxRetryError = 1u << 3;
+    static constexpr uint16_t kTxDeferred = 1u << 10;
+    static constexpr uint16_t kTxCarrierLost = 1u << 11;
+    static constexpr uint16_t kTxLateCollision = 1u << 12;
+    static constexpr uint16_t kTxUnderflow = 1u << 13;
+    static constexpr uint16_t kTxError = 1u << 14;
+    static constexpr uint16_t kTxValid = 1u << 15;
+    static constexpr size_t kTxBufferSize = 1500 + 128;
+
+    struct RingDescriptor {
+        uint32_t buffer_address;
+        uint16_t length;
+        uint16_t flags;
+    };
 
     void reset();
     bool valid_access(uint32_t addr, int size, const char* operation);
@@ -85,6 +115,11 @@ private:
     uint32_t read_reg(uint32_t offset) const;
     void write_reg(uint32_t offset, uint32_t value);
     void reset_descriptor_pointers();
+    bool transmit();
+    bool load_descriptor(uint32_t address, RingDescriptor& descriptor);
+    bool store_descriptor(uint32_t address, const RingDescriptor& descriptor);
+    bool next_tx_descriptor(uint32_t& address);
+    void set_dma_idle(bool idle);
     void mdio_transaction();
     void update_irq();
 
@@ -92,11 +127,19 @@ private:
     std::array<uint8_t, kRegisterSize> regs_{};
     std::array<uint16_t, 32> phy_{};
     std::function<void(int, bool)> irq_fn_;
+    std::function<bool(uint32_t, void*, size_t)> mem_read_;
+    std::function<bool(uint32_t, const void*, size_t)> mem_write_;
+    std::function<void(const uint8_t*, size_t)> packet_sink_;
     int irq_num_ = 4;
     bool irq_level_ = false;
+    std::array<uint8_t, kTxBufferSize> tx_buffer_{};
+    size_t tx_buffer_offset_ = 0;
     uint64_t mdio_reads_ = 0;
     uint64_t mdio_writes_ = 0;
     uint64_t tx_kicks_ = 0;
+    uint64_t tx_descriptors_ = 0;
+    uint64_t tx_packets_ = 0;
+    uint64_t tx_bytes_ = 0;
 };
 
 }  // namespace xlle

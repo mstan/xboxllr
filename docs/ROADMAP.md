@@ -20,7 +20,7 @@ machine-verifiable evidence that closed it.
 | A1 | **PARTIAL / DEFERRED** | Real-console agent and hardware probes work; pinned deterministic xemu-TCG cosim is still owed. |
 | A2 | **DONE** | Retail 4983 kernel reaches executive/IO init, services IRQs, completes phase-1, mounts FATX, and maps the dashboard XBE. |
 | A3 | **PARTIAL** | Unicorn's dynamic translator is the normal tier; page versioning and SMC/decryption invalidation proof remain. |
-| A4 | **IN PROGRESS** | Boot animation and XBE launch complete; PFIFO rebuild/address/readback is modeled and NVNet initializes through its first TX descriptor kick. Next: NIC packet DMA, first software framebuffer, then OHCI TD/XID input and broader raster/audio coverage. |
+| A4 | **IN PROGRESS** | Boot animation and XBE launch complete; PFIFO rebuild/address/readback and NVNet TX descriptor DMA are modeled, and 6.4B instructions run fault-free. Next: first software framebuffer, then OHCI TD/XID input, NVNet RX/transport, and broader raster/audio coverage. |
 | A5 | **NOT STARTED** | Requires A4 dashboard execution and rendering. |
 | Arc 2 | **NOT STARTED** | Explicitly out of current scope. |
 

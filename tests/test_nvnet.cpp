@@ -1,5 +1,7 @@
 // xlle — focused NVNet reset, descriptor-pointer, MDIO, link, and IRQ lifecycle test.
+#include <array>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <utility>
 #include <vector>
@@ -56,6 +58,73 @@ int main() {
     nic.mmio_write(base + 0x180, 4, 8);
     nic.mmio_write(base + 0x000, 4, 0x40);
     CHECK(irq.size() == 2 && irq[1] == std::make_pair(4, false));
+    CHECK(fault.empty());
+
+    // Two TX fragments form one packet. Completion clears VALID/error flags, wraps the
+    // descriptor pointer, restores IDLE, and raises the masked TX interrupt.
+    nic.mmio_write(base + 0x004, 4, 0);
+    nic.set_link(true);
+    nic.mmio_write(base + 0x180, 4, 8);
+    nic.mmio_write(base + 0x000, 4, 0x40);
+    irq.clear();
+    CHECK(nic.link_up());
+    struct Descriptor {
+        uint32_t buffer;
+        uint16_t length;
+        uint16_t flags;
+    };
+    static_assert(sizeof(Descriptor) == 8, "test descriptor layout");
+    std::array<uint8_t, 0x4000> ram{};
+    std::vector<uint8_t> packet;
+    nic.set_mem_access(
+        [&](uint32_t addr, void* dst, size_t size) {
+            if (static_cast<uint64_t>(addr) + size > ram.size()) return false;
+            std::memcpy(dst, ram.data() + addr, size);
+            return true;
+        },
+        [&](uint32_t addr, const void* src, size_t size) {
+            if (static_cast<uint64_t>(addr) + size > ram.size()) return false;
+            std::memcpy(ram.data() + addr, src, size);
+            return true;
+        });
+    nic.set_packet_sink(
+        [&](const uint8_t* data, size_t size) { packet.assign(data, data + size); });
+    const Descriptor first{0x2000, 2, static_cast<uint16_t>(0x8000 | 0x4000)};
+    const Descriptor last{0x2010, 1, static_cast<uint16_t>(0x8000 | 0x2000 | 1)};
+    std::memcpy(ram.data() + 0x1000, &first, sizeof(first));
+    std::memcpy(ram.data() + 0x1008, &last, sizeof(last));
+    std::memcpy(ram.data() + 0x2000, "abc", 3);
+    std::memcpy(ram.data() + 0x2010, "de", 2);
+    nic.mmio_write(base + 0x100, 4, 0x1000);
+    nic.mmio_write(base + 0x108, 4, 1);       // two TX descriptors
+    nic.mmio_write(base + 0x144, 4, 0x10);    // reset ring pointers
+    nic.mmio_write(base + 0x084, 4, 1);       // transmitter start
+    nic.mmio_write(base + 0x004, 4, 0x10);    // TX IRQ mask
+    nic.mmio_write(base + 0x144, 4, 1);       // kick
+    Descriptor first_done{}, last_done{};
+    std::memcpy(&first_done, ram.data() + 0x1000, sizeof(first_done));
+    std::memcpy(&last_done, ram.data() + 0x1008, sizeof(last_done));
+    CHECK(packet == std::vector<uint8_t>({'a', 'b', 'c', 'd', 'e'}));
+    CHECK(first_done.flags == 0);
+    CHECK(last_done.flags == 1);
+    CHECK(nic.tx_kicks() == 1);
+    CHECK(nic.tx_descriptors() == 2);
+    CHECK(nic.tx_packets() == 1);
+    CHECK(nic.tx_bytes() == 5);
+    CHECK(nic.mmio_read(base + 0x11c, 4) == 0x1008);
+    CHECK(nic.mmio_read(base + 0x134, 4) == 0x1000);
+    CHECK(nic.tx_rx_control() == 9);
+    CHECK(nic.irq_status() == 0x10);
+    CHECK(irq.size() == 1 && irq[0] == std::make_pair(4, true));
+    nic.mmio_write(base + 0x000, 4, 0x10);
+    CHECK(irq.size() == 2 && irq[1] == std::make_pair(4, false));
+    nic.mmio_write(base + 0x144, 4, 1);  // empty-ring kick, as exercised by the dashboard
+    CHECK(nic.tx_kicks() == 2);
+    CHECK(nic.tx_descriptors() == 2);
+    CHECK(nic.tx_packets() == 1);
+    CHECK(nic.irq_status() == 0);
+    CHECK(nic.tx_rx_control() == 9);
+    CHECK(irq.size() == 2);
     CHECK(fault.empty());
 
     // The host mapping is page-padded, but hardware still decodes only 0x400 bytes.
