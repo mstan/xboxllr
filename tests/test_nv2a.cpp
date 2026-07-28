@@ -38,9 +38,13 @@ int main() {
     // RAMHT handle 0 resolves to PRAMIN DMA object @0x100, which maps unified RAM @0x3000.
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700000, 4, 0x00000000);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700004, 4, 0x80010010);
+    // Handle 1 binds a Kelvin graphics object at PRAMIN 0x200.
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700008, 4, 0x00000001);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x70000C, 4, 0x80010020);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700100, 4, 0x0000003D);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700104, 4, 0x00000FFF);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700108, 4, 0x00003000);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700200, 4, 0x00000097);
 
     // CACHE1's pusher DMA object maps zero-based GET/PUT offsets onto the pushbuffer at
     // physical 0x2000. This is distinct from the semaphore DMA object above.
@@ -49,11 +53,13 @@ int main() {
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700188, 4, 0x00002000);
 
     uint32_t pb = 0x2000;
-    put32(ram, pb + 0x00, (1u << 18) | 0x01A4u);
-    put32(ram, pb + 0x04, 0x00000000u);
-    put32(ram, pb + 0x08, (2u << 18) | 0x1D6Cu);
-    put32(ram, pb + 0x0C, 0x00000040u);
-    put32(ram, pb + 0x10, 0x12345678u);
+    put32(ram, pb + 0x00, (1u << 18) | 0x0000u);
+    put32(ram, pb + 0x04, 0x00000001u);
+    put32(ram, pb + 0x08, (1u << 18) | 0x01A4u);
+    put32(ram, pb + 0x0C, 0x00000000u);
+    put32(ram, pb + 0x10, (2u << 18) | 0x1D6Cu);
+    put32(ram, pb + 0x14, 0x00000040u);
+    put32(ram, pb + 0x18, 0x12345678u);
 
     // Enable channel 0's DMA pusher, initialize CACHE1_DMA_GET through PFIFO, then submit
     // zero-based offsets through USER DMA_PUT.
@@ -64,33 +70,33 @@ int main() {
     gpu.mmio_write(xlle::Nv2a::kBase + 0x003220, 4, 1);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x003250, 4, 1);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x003200, 4, 1);
-    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, 0x14);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, 0x1C);
 
     CHECK(fault.empty());
-    CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x800044, 4) == 0x14);
-    CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x003244, 4) == 0x14);
-    CHECK(gpu.push_methods() == 3);
+    CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x800044, 4) == 0x1C);
+    CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x003244, 4) == 0x1C);
+    CHECK(gpu.push_methods() == 4);
     CHECK(gpu.semaphore_writes() == 1);
     CHECK(get32(ram, 0x3040) == 0x12345678u);
 
     // A two-deep flip queue catches up (READ=0, WRITE=1, then increment WRITE -> 0), so
     // FLIP_STALL must hold the following semaphore until the vblank ISR increments READ.
-    put32(ram, pb + 0x14, (5u << 18) | 0x0120u);
-    put32(ram, pb + 0x18, 0);  // SET_FLIP_READ
-    put32(ram, pb + 0x1C, 1);  // SET_FLIP_WRITE
-    put32(ram, pb + 0x20, 2);  // SET_FLIP_MODULO
-    put32(ram, pb + 0x24, 0);  // FLIP_INCREMENT_WRITE
-    put32(ram, pb + 0x28, 0);  // FLIP_STALL
-    put32(ram, pb + 0x2C, (1u << 18) | 0x1D70u);
-    put32(ram, pb + 0x30, 0xCAFEBABEu);
-    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, 0x34);
+    put32(ram, pb + 0x1C, (5u << 18) | 0x0120u);
+    put32(ram, pb + 0x20, 0);  // SET_FLIP_READ
+    put32(ram, pb + 0x24, 1);  // SET_FLIP_WRITE
+    put32(ram, pb + 0x28, 2);  // SET_FLIP_MODULO
+    put32(ram, pb + 0x2C, 0);  // FLIP_INCREMENT_WRITE
+    put32(ram, pb + 0x30, 0);  // FLIP_STALL
+    put32(ram, pb + 0x34, (1u << 18) | 0x1D70u);
+    put32(ram, pb + 0x38, 0xCAFEBABEu);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, 0x3C);
 
     CHECK(fault.empty());
     CHECK(gpu.flip_increments() == 1);
     CHECK(gpu.flip_stalls() == 1);
     CHECK(gpu.waiting_for_flip());
-    CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x800044, 4) == 0x34);
-    CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x003244, 4) == 0x34);
+    CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x800044, 4) == 0x3C);
+    CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x003244, 4) == 0x3C);
     CHECK(gpu.semaphore_writes() == 1);
     CHECK(get32(ram, 0x3040) == 0x12345678u);
 
@@ -110,11 +116,11 @@ int main() {
     }, 3);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x000140, 4, 1);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x400140, 4, 1u << 20);
-    put32(ram, pb + 0x34, (1u << 18) | 0x0100u);
-    put32(ram, pb + 0x38, 0x00000304u);
-    put32(ram, pb + 0x3C, (1u << 18) | 0x1D70u);
-    put32(ram, pb + 0x40, 0x0BADF00Du);
-    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, 0x44);
+    put32(ram, pb + 0x3C, (1u << 18) | 0x0100u);
+    put32(ram, pb + 0x40, 0x00000304u);
+    put32(ram, pb + 0x44, (1u << 18) | 0x1D70u);
+    put32(ram, pb + 0x48, 0x0BADF00Du);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, 0x4C);
 
     CHECK(irq);
     CHECK(gpu.pgraph_notifications() == 1);
@@ -142,6 +148,60 @@ int main() {
     gpu.mmio_write(xlle::Nv2a::kBase + 0x003200, 4, 1);
     CHECK(fault.empty());
     CHECK(gpu.push_methods() == methods_before_reset);
+
+    // Kelvin pitch-surface clear: handle 2 maps a zero-based 64 KiB color DMA object.
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700010, 4, 0x00000002);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700014, 4, 0x80010030);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700018, 4, 0x00000003);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x70001C, 4, 0x80010040);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700300, 4, 0x0000003D);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700304, 4, 0x0000FFFF);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700308, 4, 0x00000000);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700400, 4, 0x0000003D);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700404, 4, 0x0000FFFF);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700408, 4, 0x00000000);
+    uint32_t cursor = 0;
+    auto emit = [&](uint32_t method, uint32_t parameter) {
+        put32(ram, pb + cursor, (1u << 18) | method);
+        put32(ram, pb + cursor + 4, parameter);
+        cursor += 8;
+    };
+    emit(0x0000, 1);       // bind Kelvin class 0x97
+    emit(0x0194, 2);       // color DMA object
+    emit(0x0198, 3);       // zeta DMA object
+    emit(0x0208, 0x0128);  // non-AA pitch A8R8G8B8 + Z24S8
+    emit(0x020C, 0x00100010);  // four color/zeta pixels per row
+    emit(0x0210, 0x5000);  // color offset
+    emit(0x0214, 0x6000);  // zeta offset
+    emit(0x1D90, 0xA1B2C3D4);
+    emit(0x1D8C, 0xABCDEF42);
+    emit(0x1D98, 0x00020001);  // x=1..2 inclusive
+    emit(0x1D9C, 0x00020001);  // y=1..2 inclusive
+    emit(0x1D94, 0x000000F0);  // clear RGBA
+    put32(ram, 0x5000, 0x11223344);
+    emit(0x1D90, 0xAABBCCDD);
+    emit(0x1D98, 0x00000000);
+    emit(0x1D9C, 0x00000000);
+    emit(0x1D94, 0x00000013);  // clear red + Z24 + stencil
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.color_clears() == 2);
+    CHECK(gpu.color_clear_pixels() == 5);
+    CHECK(gpu.last_color_clear_address() == 0x5000);
+    CHECK(gpu.zeta_clears() == 1);
+    CHECK(gpu.zeta_clear_pixels() == 1);
+    CHECK(gpu.last_zeta_clear_address() == 0x6000);
+    CHECK(gpu.method_count(0x1D94) == 2);
+    CHECK(gpu.class_method_count(0x97) == gpu.push_methods());
+    CHECK(gpu.class_method_count(0) == 0);
+    CHECK(get32(ram, 0x5000) == 0x11BB3344);
+    CHECK(get32(ram, 0x5010) == 0);
+    CHECK(get32(ram, 0x5014) == 0xA1B2C3D4);
+    CHECK(get32(ram, 0x5018) == 0xA1B2C3D4);
+    CHECK(get32(ram, 0x5024) == 0xA1B2C3D4);
+    CHECK(get32(ram, 0x5028) == 0xA1B2C3D4);
+    CHECK(get32(ram, 0x502C) == 0);
+    CHECK(get32(ram, 0x6000) == 0xABCDEF42);
 
     // AvSetDisplayMode's scanout path: VGA CRTC pitch/depth, PRAMDAC dimensions/format,
     // and PCRTC_START resolve unified-RAM RGB565 into deterministic RGBA output.

@@ -3,6 +3,34 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-07-28 — A4: Kelvin surface clears execute in unified memory
+
+PFIFO now resolves `SET_OBJECT` through RAMHT, caches each subchannel's PGRAPH object class,
+and gates 3D side effects to the bound Kelvin class 0x97. Object-taking color, zeta, and
+semaphore methods resolve their DMA handles before execution. The first software raster
+operation models NV097 color/zeta surface format, pitch, offset, clear rectangle, and clear
+values, including channel-masked 16/32-bit color writes and Z16/Z24S8 depth/stencil writes.
+Every rectangle is validated against pitch, DMA limit, the 27-bit Xbox VRAM aperture, and
+the machine's unified-memory callbacks before it is written.
+
+The 6.4B dashboard acceptance run remains fault-free with four KTHREADs and the same
+36,388,327 PFIFO methods / 486 completed flips. It executes 852 color clears covering
+488,515,072 pixels and 1,968 zeta clears covering 889,978,880 pixels. The selected
+720x480x32 target at `0x03c8c000` changes from zero-filled black to the guest's final clear
+value (uniform RGB 1,0,1), with RGBA hash `73feb194b7694383`. This is real guest-visible
+raster mutation, but not yet dashboard geometry.
+
+Focused coverage exercises Kelvin/RAMHT binding, independent color/zeta DMA translation,
+padded pitch, clipped rectangles, full and masked A8R8G8B8 color clears, and Z24S8 clears.
+The full direct suite is 9/9. A 500M method census identifies the next concrete rendering
+frontier: 53,684 `BEGIN_END` submissions, 1,424,796 `ARRAY_ELEMENT16`, 372
+`ARRAY_ELEMENT32`, 87 `DRAW_ARRAYS`, and 348 `INLINE_ARRAY`; 2,062,253 of 2,062,261
+methods belong to Kelvin, with only three each for 2D surfaces and image blit.
+
+**Next:** implement the indexed Kelvin vertex path first (`ARRAY_ELEMENT16` dominates),
+including exercised vertex-array fetch/format and primitive assembly, then rasterize the
+smallest observed triangle subset into the already-correct color/zeta surfaces.
+
 ## 2026-07-28 — A4: guest-programmed scanout reaches a host frame
 
 The first faithful framebuffer readout path is landed. NV2A now models the PCRTC scanout

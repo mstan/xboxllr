@@ -325,10 +325,244 @@ bool Nv2a::ramht_instance(uint8_t channel, uint32_t handle, uint32_t& instance) 
     return true;
 }
 
+bool Nv2a::resolve_object(uint8_t channel, uint32_t handle, uint32_t& instance) {
+    if (ramht_instance(channel, handle, instance)) return true;
+    char why[128];
+    std::snprintf(why, sizeof(why),
+                  "NV2A RAMHT lookup failed: channel=%u handle=0x%08x", channel, handle);
+    fault_(why);
+    return false;
+}
+
+bool Nv2a::bind_object(uint8_t channel, uint8_t subchannel, uint32_t handle) {
+    uint32_t instance = 0;
+    if (!resolve_object(channel, handle, instance)) return false;
+    if (instance > pramin_.size() - 4) {
+        char why[128];
+        std::snprintf(why, sizeof(why),
+                      "NV2A graphics object exceeds PRAMIN: instance=0x%08x", instance);
+        fault_(why);
+        return false;
+    }
+    uint32_t context = 0;
+    std::memcpy(&context, pramin_.data() + instance, 4);
+    object_instance_[subchannel] = instance;
+    object_class_[subchannel] = static_cast<uint8_t>(context & 0xFFu);
+    return true;
+}
+
+bool Nv2a::clear_surface_plane(uint32_t dma_instance, bool dma_bound,
+                               uint32_t surface_offset, uint32_t pitch,
+                               uint32_t bytes_per_pixel, uint32_t write_mask,
+                               uint32_t clear_value, const char* plane,
+                               uint32_t& first_address) {
+    const uint32_t xmin = clear_rect_horizontal_ & 0xFFFFu;
+    const uint32_t xmax = clear_rect_horizontal_ >> 16;
+    const uint32_t ymin = clear_rect_vertical_ & 0xFFFFu;
+    const uint32_t ymax = clear_rect_vertical_ >> 16;
+    if (!dma_bound || !pitch || xmax < xmin || ymax < ymin) {
+        char why[128];
+        std::snprintf(why, sizeof(why),
+                      "NV2A CLEAR_SURFACE %s has unbound DMA or invalid pitch/rectangle",
+                      plane);
+        fault_(why);
+        return false;
+    }
+    if ((bytes_per_pixel != 2 && bytes_per_pixel != 4) || !write_mask) {
+        char why[128];
+        std::snprintf(why, sizeof(why),
+                      "NV2A CLEAR_SURFACE %s has invalid pixel format/mask", plane);
+        fault_(why);
+        return false;
+    }
+    const uint64_t width = static_cast<uint64_t>(xmax) - xmin + 1;
+    const uint64_t height = static_cast<uint64_t>(ymax) - ymin + 1;
+    const uint64_t row_bytes = width * bytes_per_pixel;
+    const uint64_t x_bytes = static_cast<uint64_t>(xmin) * bytes_per_pixel;
+    if (x_bytes + row_bytes > pitch) {
+        char why[128];
+        std::snprintf(why, sizeof(why),
+                      "NV2A CLEAR_SURFACE %s rectangle exceeds pitch", plane);
+        fault_(why);
+        return false;
+    }
+
+    const uint64_t first_offset64 = static_cast<uint64_t>(surface_offset) +
+                                    static_cast<uint64_t>(ymin) * pitch + x_bytes;
+    const uint64_t last_offset64 = static_cast<uint64_t>(surface_offset) +
+                                   static_cast<uint64_t>(ymax) * pitch + x_bytes +
+                                   row_bytes - 1;
+    if (first_offset64 > UINT32_MAX || last_offset64 > UINT32_MAX) {
+        fault_("NV2A CLEAR_SURFACE offset overflows");
+        return false;
+    }
+    uint32_t last_address = 0;
+    if (!dma_object_address(dma_instance, static_cast<uint32_t>(first_offset64),
+                            first_address) ||
+        !dma_object_address(dma_instance, static_cast<uint32_t>(last_offset64),
+                            last_address) ||
+        last_address < first_address ||
+        static_cast<uint64_t>(last_address) - first_address !=
+            last_offset64 - first_offset64) {
+        char why[128];
+        std::snprintf(why, sizeof(why),
+                      "NV2A CLEAR_SURFACE %s DMA range is invalid", plane);
+        fault_(why);
+        return false;
+    }
+
+    std::vector<uint8_t> row(static_cast<size_t>(row_bytes));
+    const uint32_t pixel_mask = bytes_per_pixel == 2 ? 0xFFFFu : 0xFFFFFFFFu;
+    for (uint32_t y = ymin; y <= ymax; ++y) {
+        uint32_t address = first_address + (y - ymin) * pitch;
+        if (write_mask != pixel_mask) {
+            if (!mem_read_ || !mem_read_(address, row.data(), row.size())) {
+                char why[128];
+                std::snprintf(why, sizeof(why),
+                              "NV2A CLEAR_SURFACE %s DMA read failed at 0x%08x",
+                              plane, address);
+                fault_(why);
+                return false;
+            }
+        }
+        for (size_t x = 0; x < row.size(); x += bytes_per_pixel) {
+            uint32_t old_pixel = 0;
+            if (write_mask != pixel_mask)
+                std::memcpy(&old_pixel, row.data() + x, bytes_per_pixel);
+            const uint32_t pixel = (old_pixel & ~write_mask) |
+                                   (clear_value & write_mask);
+            std::memcpy(row.data() + x, &pixel, bytes_per_pixel);
+        }
+        if (!mem_write_ || !mem_write_(address, row.data(), row.size())) {
+            char why[128];
+            std::snprintf(why, sizeof(why),
+                          "NV2A CLEAR_SURFACE %s DMA write failed at 0x%08x",
+                          plane, address);
+            fault_(why);
+            return false;
+        }
+    }
+    return true;
+}
+
+bool Nv2a::clear_surface(uint32_t parameter) {
+    constexpr uint32_t kKnownMask = 0xF3u;
+    constexpr uint32_t kColorMask = 0xF0u;
+    if (parameter & ~kKnownMask) {
+        char why[128];
+        std::snprintf(why, sizeof(why),
+                      "NV2A CLEAR_SURFACE has unknown mask 0x%08x", parameter);
+        fault_(why);
+        return false;
+    }
+    if (!parameter) return true;
+
+    const uint32_t surface_type = (surface_format_ >> 8) & 0xFu;
+    const uint32_t anti_aliasing = (surface_format_ >> 12) & 0xFu;
+    if (surface_type != 1 || anti_aliasing != 0) {
+        fault_("NV2A CLEAR_SURFACE requires a non-antialiased pitch surface");
+        return false;
+    }
+
+    const uint32_t xmin = clear_rect_horizontal_ & 0xFFFFu;
+    const uint32_t xmax = clear_rect_horizontal_ >> 16;
+    const uint32_t ymin = clear_rect_vertical_ & 0xFFFFu;
+    const uint32_t ymax = clear_rect_vertical_ >> 16;
+    if (xmax < xmin || ymax < ymin) {
+        fault_("NV2A CLEAR_SURFACE has an inverted rectangle");
+        return false;
+    }
+    const uint64_t width = static_cast<uint64_t>(xmax) - xmin + 1;
+    const uint64_t height = static_cast<uint64_t>(ymax) - ymin + 1;
+
+    if (parameter & kColorMask) {
+        const uint32_t color_format = surface_format_ & 0xFu;
+        uint32_t bytes_per_pixel = 0, write_mask = 0;
+        switch (color_format) {
+        case 1:
+        case 2:
+            bytes_per_pixel = 2;
+            if (parameter & 0x10) write_mask |= 0x7C00u;
+            if (parameter & 0x20) write_mask |= 0x03E0u;
+            if (parameter & 0x40) write_mask |= 0x001Fu;
+            if (parameter & 0x80) write_mask |= 0x8000u;
+            break;
+        case 3:
+            bytes_per_pixel = 2;
+            if (parameter & 0x10) write_mask |= 0xF800u;
+            if (parameter & 0x20) write_mask |= 0x07E0u;
+            if (parameter & 0x40) write_mask |= 0x001Fu;
+            break;
+        case 4:
+        case 5:
+        case 6:
+        case 7:
+        case 8:
+            bytes_per_pixel = 4;
+            if (parameter & 0x10) write_mask |= 0x00FF0000u;
+            if (parameter & 0x20) write_mask |= 0x0000FF00u;
+            if (parameter & 0x40) write_mask |= 0x000000FFu;
+            if (parameter & 0x80) write_mask |= 0xFF000000u;
+            break;
+        default:
+            fault_("NV2A CLEAR_SURFACE has unsupported color format");
+            return false;
+        }
+        uint32_t first_address = 0;
+        if (!clear_surface_plane(color_dma_, color_dma_bound_, surface_color_offset_,
+                                 surface_pitch_ & 0xFFFFu, bytes_per_pixel, write_mask,
+                                 color_clear_value_, "color", first_address))
+            return false;
+        ++color_clears_;
+        color_clear_pixels_ += width * height;
+        last_color_clear_address_ = first_address;
+    }
+
+    if (parameter & 3u) {
+        const uint32_t zeta_format = (surface_format_ >> 4) & 0xFu;
+        uint32_t bytes_per_pixel = 0, write_mask = 0;
+        if (zeta_format == 1) {
+            bytes_per_pixel = 2;
+            if (parameter & 1u) write_mask = 0xFFFFu;
+            if (parameter & 2u) {
+                fault_("NV2A CLEAR_SURFACE stencil requested for Z16");
+                return false;
+            }
+        } else if (zeta_format == 2) {
+            bytes_per_pixel = 4;
+            if (parameter & 1u) write_mask |= 0xFFFFFF00u;
+            if (parameter & 2u) write_mask |= 0x000000FFu;
+        } else {
+            fault_("NV2A CLEAR_SURFACE has unsupported zeta format");
+            return false;
+        }
+        uint32_t first_address = 0;
+        if (!clear_surface_plane(zeta_dma_, zeta_dma_bound_, surface_zeta_offset_,
+                                 surface_pitch_ >> 16, bytes_per_pixel, write_mask,
+                                 zeta_clear_value_, "zeta", first_address))
+            return false;
+        ++zeta_clears_;
+        zeta_clear_pixels_ += width * height;
+        last_zeta_clear_address_ = first_address;
+    }
+    return true;
+}
+
 void Nv2a::dispatch_method(uint8_t channel, uint8_t subchannel, uint32_t method,
                            uint32_t parameter) {
     methods_.push(PushMethod{methods_.total(), channel, subchannel,
                              static_cast<uint16_t>(method), parameter});
+    if (method < 0x2000 && !(method & 3u)) ++method_counts_[method >> 2];
+
+    // PFIFO resolves SET_OBJECT through RAMHT, then PGRAPH caches the object's class for
+    // this subchannel. Only Kelvin (class 0x97) methods may mutate the 3D/scanout state.
+    if (method == 0) {
+        if (bind_object(channel, subchannel, parameter))
+            ++class_method_counts_[object_class_[subchannel]];
+        return;
+    }
+    ++class_method_counts_[object_class_[subchannel]];
+    if (object_class_[subchannel] != 0x97) return;
 
     // NV097 flip queue. FLIP_INCREMENT_WRITE advances the producer modulo; FLIP_STALL
     // blocks PFIFO only when the producer has caught the display/vblank consumer. The
@@ -363,18 +597,47 @@ void Nv2a::dispatch_method(uint8_t channel, uint8_t subchannel, uint32_t method,
         if (flip_modulo_ && flip_read_ == flip_write_) {
             waiting_for_flip_ = true;
         }
+    // NV097 object-taking methods arrive at PGRAPH as resolved PRAMIN instances.
+    } else if (method == 0x0194) {
+        uint32_t instance = 0;
+        if (resolve_object(channel, parameter, instance)) {
+            color_dma_ = instance;
+            color_dma_bound_ = true;
+        }
+    } else if (method == 0x0198) {
+        uint32_t instance = 0;
+        if (resolve_object(channel, parameter, instance)) {
+            zeta_dma_ = instance;
+            zeta_dma_bound_ = true;
+        }
+    // NV097 color-surface state and the first software raster operation.
+    } else if (method == 0x0200) {
+        surface_clip_horizontal_ = parameter;
+    } else if (method == 0x0204) {
+        surface_clip_vertical_ = parameter;
+    } else if (method == 0x0208) {
+        surface_format_ = parameter;
+    } else if (method == 0x020C) {
+        surface_pitch_ = parameter;
+    } else if (method == 0x0210) {
+        surface_color_offset_ = parameter;
+    } else if (method == 0x0214) {
+        surface_zeta_offset_ = parameter;
+    } else if (method == 0x1D8C) {
+        zeta_clear_value_ = parameter;
+    } else if (method == 0x1D90) {
+        color_clear_value_ = parameter;
+    } else if (method == 0x1D98) {
+        clear_rect_horizontal_ = parameter;
+    } else if (method == 0x1D9C) {
+        clear_rect_vertical_ = parameter;
+    } else if (method == 0x1D94) {
+        clear_surface(parameter);
     // NV097 semaphore methods. AvSetDisplayMode uses RELEASE as a GPU completion fence.
     } else if (method == 0x01A4) {
         uint32_t instance = 0;
-        if (!ramht_instance(channel, parameter, instance)) {
-            char why[128];
-            std::snprintf(why, sizeof(why),
-                          "NV2A RAMHT lookup failed: channel=%u handle=0x%08x", channel,
-                          parameter);
-            fault_(why);
-            return;
-        }
-        semaphore_dma_[subchannel] = instance;
+        if (resolve_object(channel, parameter, instance))
+            semaphore_dma_[subchannel] = instance;
     } else if (method == 0x1D6C) {
         semaphore_offset_[subchannel] = parameter;
     } else if (method == 0x1D70) {

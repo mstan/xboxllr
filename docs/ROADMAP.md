@@ -20,7 +20,7 @@ machine-verifiable evidence that closed it.
 | A1 | **PARTIAL / DEFERRED** | Real-console agent and hardware probes work; pinned deterministic xemu-TCG cosim is still owed. |
 | A2 | **DONE** | Retail 4983 kernel reaches executive/IO init, services IRQs, completes phase-1, mounts FATX, and maps the dashboard XBE. |
 | A3 | **PARTIAL** | Unicorn's dynamic translator is the normal tier; page versioning and SMC/decryption invalidation proof remain. |
-| A4 | **IN PROGRESS** | Boot animation/XBE launch, PFIFO, NVNet TX DMA, and guest-programmed 720x480 scanout/readout work; 8B instructions run fault-free. The captured target is black until recorded NV097 clears/draws gain raster side effects. Next: surface/clear execution, then the smallest dashboard draw subset, OHCI TD/XID input, and NVNet RX/transport. |
+| A4 | **IN PROGRESS** | Boot animation/XBE launch, PFIFO, NVNet TX DMA, 720x480 scanout/readout, and Kelvin color/Z/stencil clears work; 8B recorder-only and 6.4B clear-executing runs are fault-free. The final target contains the guest clear color but no geometry. Next: dominant indexed Kelvin vertex/triangle path, then OHCI TD/XID input and NVNet RX/transport. |
 | A5 | **NOT STARTED** | Requires A4 dashboard execution and rendering. |
 | Arc 2 | **NOT STARTED** | Explicitly out of current scope. |
 

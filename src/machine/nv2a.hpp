@@ -75,11 +75,23 @@ public:
         uint32_t parameter = 0;
     };
     uint64_t push_methods() const { return methods_.total(); }
+    uint64_t method_count(uint32_t method) const {
+        return (method < 0x2000 && !(method & 3u)) ? method_counts_[method >> 2] : 0;
+    }
+    uint64_t class_method_count(uint8_t object_class) const {
+        return class_method_counts_[object_class];
+    }
     uint64_t semaphore_writes() const { return semaphore_writes_; }
     uint64_t flip_increments() const { return flip_increments_; }
     uint64_t flip_stalls() const { return flip_stalls_; }
     uint64_t pgraph_read_increments() const { return pgraph_read_increments_; }
     uint64_t pgraph_notifications() const { return pgraph_notifications_; }
+    uint64_t color_clears() const { return color_clears_; }
+    uint64_t color_clear_pixels() const { return color_clear_pixels_; }
+    uint32_t last_color_clear_address() const { return last_color_clear_address_; }
+    uint64_t zeta_clears() const { return zeta_clears_; }
+    uint64_t zeta_clear_pixels() const { return zeta_clear_pixels_; }
+    uint32_t last_zeta_clear_address() const { return last_zeta_clear_address_; }
     uint32_t pgraph_surface() const;
     bool waiting_for_flip() const { return waiting_for_flip_; }
     size_t recent_methods(size_t n, std::vector<PushMethod>& out) const {
@@ -138,11 +150,15 @@ private:
     std::array<ChannelState, 32> channels_{};
     std::vector<uint8_t> pramin_;
     Ring<PushMethod> methods_;
+    std::array<uint64_t, 0x800> method_counts_{};
+    std::array<uint64_t, 256> class_method_counts_{};
     std::deque<PushMethod> pull_queue_;
     std::function<bool(uint32_t, void*, size_t)> mem_read_;
     std::function<bool(uint32_t, const void*, size_t)> mem_write_;
     std::array<uint32_t, 8> semaphore_dma_{};
     std::array<uint32_t, 8> semaphore_offset_{};
+    std::array<uint32_t, 8> object_instance_{};
+    std::array<uint8_t, 8> object_class_{};
     uint64_t semaphore_writes_ = 0;
     uint8_t flip_read_ = 0;
     uint8_t flip_write_ = 0;
@@ -159,6 +175,29 @@ private:
     uint32_t pgraph_nsource_ = 0;
     uint32_t pgraph_trapped_addr_ = 0;
     uint32_t pgraph_trapped_data_ = 0;
+
+    // Minimal Kelvin color-surface state. Object-taking methods hold resolved PRAMIN
+    // instances, matching the PFIFO puller's RAMHT translation before PGRAPH dispatch.
+    uint32_t color_dma_ = 0;
+    uint32_t zeta_dma_ = 0;
+    bool color_dma_bound_ = false;
+    bool zeta_dma_bound_ = false;
+    uint32_t surface_clip_horizontal_ = 0;
+    uint32_t surface_clip_vertical_ = 0;
+    uint32_t surface_format_ = 0;
+    uint32_t surface_pitch_ = 0;
+    uint32_t surface_color_offset_ = 0;
+    uint32_t surface_zeta_offset_ = 0;
+    uint32_t zeta_clear_value_ = 0;
+    uint32_t color_clear_value_ = 0;
+    uint32_t clear_rect_horizontal_ = 0;
+    uint32_t clear_rect_vertical_ = 0;
+    uint64_t color_clears_ = 0;
+    uint64_t color_clear_pixels_ = 0;
+    uint32_t last_color_clear_address_ = 0;
+    uint64_t zeta_clears_ = 0;
+    uint64_t zeta_clear_pixels_ = 0;
+    uint32_t last_zeta_clear_address_ = 0;
 
     // Display/scanout state. PRMCIO is the memory-mapped VGA register alias; AvSetDisplayMode
     // programs CRTC pitch/depth there, PRAMDAC display extents, then PCRTC_START.
@@ -178,6 +217,14 @@ private:
     void drain_pull_queue();
     void dispatch_method(uint8_t channel, uint8_t subchannel, uint32_t method,
                          uint32_t parameter);
+    bool bind_object(uint8_t channel, uint8_t subchannel, uint32_t handle);
+    bool resolve_object(uint8_t channel, uint32_t handle, uint32_t& instance);
+    bool clear_surface(uint32_t parameter);
+    bool clear_surface_plane(uint32_t dma_instance, bool dma_bound,
+                             uint32_t surface_offset, uint32_t pitch,
+                             uint32_t bytes_per_pixel, uint32_t write_mask,
+                             uint32_t clear_value, const char* plane,
+                             uint32_t& first_address);
     bool ramht_instance(uint8_t channel, uint32_t handle, uint32_t& instance) const;
     bool dma_object_address(uint32_t instance, uint32_t offset, uint32_t& address) const;
 

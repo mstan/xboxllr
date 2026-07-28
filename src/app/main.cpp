@@ -556,6 +556,28 @@ int main(int argc, char** argv) {
                 std::printf("[2bl] NV2A PFIFO: methods=%llu semaphore-writes=%llu\n",
                             (unsigned long long)mach.nv2a()->push_methods(),
                             (unsigned long long)mach.nv2a()->semaphore_writes());
+                std::printf("[2bl] NV2A draws: begin/end=%llu elem16/32=%llu/%llu "
+                            "arrays=%llu inline=%llu\n",
+                            (unsigned long long)mach.nv2a()->method_count(0x17FC),
+                            (unsigned long long)mach.nv2a()->method_count(0x1800),
+                            (unsigned long long)mach.nv2a()->method_count(0x1808),
+                            (unsigned long long)mach.nv2a()->method_count(0x1810),
+                            (unsigned long long)mach.nv2a()->method_count(0x1818));
+                std::printf("[2bl] NV2A classes: Kelvin97=%llu surfaces62=%llu "
+                            "blit9f=%llu pattern44=%llu unbound=%llu\n",
+                            (unsigned long long)mach.nv2a()->class_method_count(0x97),
+                            (unsigned long long)mach.nv2a()->class_method_count(0x62),
+                            (unsigned long long)mach.nv2a()->class_method_count(0x9F),
+                            (unsigned long long)mach.nv2a()->class_method_count(0x44),
+                            (unsigned long long)mach.nv2a()->class_method_count(0));
+                std::printf("[2bl] NV2A raster: color-clears/pixels=%llu/%llu "
+                            "last=%08x zeta-clears/pixels=%llu/%llu last=%08x\n",
+                            (unsigned long long)mach.nv2a()->color_clears(),
+                            (unsigned long long)mach.nv2a()->color_clear_pixels(),
+                            mach.nv2a()->last_color_clear_address(),
+                            (unsigned long long)mach.nv2a()->zeta_clears(),
+                            (unsigned long long)mach.nv2a()->zeta_clear_pixels(),
+                            mach.nv2a()->last_zeta_clear_address());
                 std::printf("[2bl] NV2A flip: write-increments=%llu stalls=%llu "
                             "read-increments=%llu notifications=%llu surface=%08x waiting=%u\n",
                             (unsigned long long)mach.nv2a()->flip_increments(),

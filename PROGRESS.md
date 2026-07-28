@@ -28,10 +28,11 @@ harvested from xemu, silicon-corrected against a live console. GPL-2.
 - **In progress:** A4. Storage loads the XBE; PFIFO semaphore DMA and timed APU voice
   completion clear the early AV waits; PGRAPH software notifications plus flip/vblank
   completion finish the boot animation; `xbmc.exe` initializes NVNet and transmits through
-  its descriptor engine; and the guest-programmed scanout can be dumped or presented.
-- **Immediate burn-down path:** execute the recorded NV097 surface/clear subset, then the
-  smallest dashboard draw subset → extend OHCI into TD execution/XID input → add NVNet RX
-  and external transport.
+  its descriptor engine; guest-programmed scanout can be dumped/presented; and Kelvin
+  color/depth/stencil clears now execute in unified memory.
+- **Immediate burn-down path:** implement the dominant indexed Kelvin draw path
+  (`ARRAY_ELEMENT16`) and its exercised vertex/raster state → extend OHCI into TD execution
+  and XID input → add NVNet RX and external transport.
 - **Not started:** A5 end-to-end retail-dashboard navigation and Arc 2 game work.
 
 ## Where the boot stands RIGHT NOW
@@ -83,6 +84,11 @@ dependency chain peeled this session is:
     surface to RGBA; `--frame-dump` writes PPM and `--window` presents it through SDL3. At
     6.4B the guest selects 720x480x32 at `0x03c8c000`, pitch 3072. The frame is black because
     the recorded NV097 clear/draw stream still has no raster side effects.
+14. first raster operation → **fixed through Kelvin surface clears**. RAMHT object/class
+    binding gates PGRAPH execution; color/zeta DMA contexts, pitch surfaces, masked color,
+    Z16, and Z24S8 clear semantics write validated unified-memory rectangles. At 6.4B, 852
+    color and 1,968 zeta clears execute fault-free; the final scanout contains the guest's
+    uniform RGB(1,0,1) clear. Geometry remains the next boundary.
 
 ## How to build & run
 
@@ -117,8 +123,9 @@ stand-in is documented in the header of the device that carries it.
 
 Deliberate documented stand-ins currently in place (fine for boot, replaced later in A4):
 - NV2A PFIFO is a synchronous recorder with semaphore DMA execution; most recorded methods
-  still have no CP/raster side effects. Guest-programmed framebuffer selection and host
-  readout/presentation work, but there is no software rasterizer yet.
+  still have no CP/raster side effects. Guest-programmed framebuffer selection, host
+  readout/presentation, and Kelvin pitch-surface clears work; vertex fetch, primitive
+  assembly, and triangle rasterization do not yet.
 - APU has the load-bearing voice-list, VOICE_OFF, timed idle-voice FE trap, notifier, and IRQ
   lifecycle, but still no DSP/audio synthesis. ACI advances real PCM descriptors and IRQs
   headlessly but produces no host audio.
@@ -169,9 +176,10 @@ Driver: `python tools/xbox_agent.py --host 192.168.4.81 {ping|info|read|exec <fi
 
 ## Next steps (priority order)
 
-1. Execute the dashboard's bound NV097 color-surface state and clear methods against the
-   correct DMA object, then implement the smallest exercised draw subset needed to turn the
-   validated black scanout into the first rendered dashboard frame.
+1. Implement the indexed Kelvin vertex path first: exercised vertex-array DMA/format state,
+   `BEGIN_END`, and `ARRAY_ELEMENT16` primitive assembly, followed by the smallest observed
+   triangle raster subset. The 500M census is 1,424,796 element16 versus 372 element32, 87
+   draw-arrays, and 348 inline-array submissions.
 2. Extend OHCI: control/bulk TD execution first, then the Xbox XID controller protocol and
    host input mapping.
 3. Add NVNet RX descriptor DMA and external packet transport when the guest or navigation
