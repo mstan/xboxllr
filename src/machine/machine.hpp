@@ -21,6 +21,8 @@
 
 namespace xlle {
 
+class McpxApu;
+
 class XboxMachine {
 public:
     static constexpr uint32_t kRamSize     = 64u * 1024 * 1024;  // 0x0400_0000
@@ -54,6 +56,7 @@ public:
     PciHost* pci() { return pci_; }
     IdeController* ide() { return ide_; }
     Nv2a* nv2a() { return nv2a_; }
+    McpxApu* apu() { return apu_; }
     uint64_t injected_interrupts() const { return injected_; }
     uint64_t irq0_pulses() const { return irq0_pulses_; }
     uint64_t pending_boundaries() const { return pending_boundaries_; }
@@ -81,6 +84,7 @@ private:
     IdeController* ide_ = nullptr;
     Amd756Smbus* smbus_ = nullptr;
     Nv2a* nv2a_ = nullptr;
+    McpxApu* apu_ = nullptr;
     std::function<void(const IoEvent&)> io_event_cb_;
     std::function<void(const MemEvent&)> mmio_event_cb_;
     uint64_t io_seq_ = 0;

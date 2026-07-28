@@ -12,15 +12,15 @@ machine-verifiable evidence that closed it.
 - Crucibles gate subsystem admission: a subsystem's conformance crucible passes **before** the
   milestone that first relies on it.
 
-## Burndown snapshot — 2026-07-17
+## Burndown snapshot — 2026-07-27
 
 | Milestone | State | Evidence / remaining gate |
 | --- | --- | --- |
-| A0 | **DONE** | Unicorn floor, host shell, rings/JSONL/debug server; suite now `ctest` 4/4. |
+| A0 | **DONE** | Unicorn floor, host shell, rings/JSONL/debug server; suite now `ctest` 5/5. |
 | A1 | **PARTIAL / DEFERRED** | Real-console agent and hardware probes work; pinned deterministic xemu-TCG cosim is still owed. |
 | A2 | **DONE** | Retail 4983 kernel reaches executive/IO init, services IRQs, completes phase-1, mounts FATX, and maps the dashboard XBE. |
 | A3 | **PARTIAL** | Unicorn's dynamic translator is the normal tier; page versioning and SMC/decryption invalidation proof remain. |
-| A4 | **IN PROGRESS** | XBE is mapped; PFIFO semaphore DMA cleared 0x800570dc. The 0x800637d3 wait is identified as missing APU VOICE_OFF → idle FE trap/IRQ 5 completion; implement it, start XBE threads, then continue raster/audio/input coverage. |
+| A4 | **IN PROGRESS** | XBE is mapped; PFIFO semaphore DMA and timed APU voice-idle IRQ completion cleared 0x800570dc and 0x800637d3. The AV worker now throttles at 0x80052f71; identify its counter producer (ACI is the leading candidate), start XBE threads, then continue raster/audio/input coverage. |
 | A5 | **NOT STARTED** | Requires A4 dashboard execution and rendering. |
 | Arc 2 | **NOT STARTED** | Explicitly out of current scope. |
 

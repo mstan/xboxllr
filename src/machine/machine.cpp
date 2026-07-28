@@ -152,11 +152,16 @@ void XboxMachine::init_devices() {
                    [this](uint32_t a, int s) { return mmio_read(a, s); },
                    [this](uint32_t a, int s, uint32_t v) { mmio_write(a, s, v); });
 
-    // MCPX APU shell at 0xFE800000 (512 KB). Register-file semantics per xemu; see apu.hpp.
+    // MCPX APU at 0xFE800000 (512 KB), including timed voice-idle completion.
     auto apu = std::make_unique<McpxApu>(fault);
-    apu->set_mem_write([this](uint32_t addr, const void* buf, size_t n) {
-        return cpu_->write_mem(addr, buf, n);
-    });
+    apu_ = apu.get();
+    apu_->set_mem_access(
+        [this](uint32_t addr, void* buf, size_t n) { return cpu_->read_mem(addr, buf, n); },
+        [this](uint32_t addr, const void* buf, size_t n) {
+            return cpu_->write_mem(addr, buf, n);
+        });
+    // MCPX PCI interrupt routing register 0x3c maps APU INTA to ISA IRQ 5.
+    apu_->set_irq([this](int irq, bool level) { pic_->raise(irq, level); }, 5);
     uint32_t abase = apu->mmio_base();
     uint32_t asize = apu->mmio_size();
     mmio_devices_.push_back(std::move(apu));
@@ -291,6 +296,8 @@ uint64_t XboxMachine::run(uint32_t start, uint64_t max, std::string& err) {
             nv2a_->set_frame(t60 / kCpuHz);
             nv2a_->set_frame_phase(static_cast<uint32_t>((t60 % kCpuHz) * 1000 / kCpuHz));
         }
+        // APU setup-engine frame: 256 samples / 48 kHz = 5.333 ms (187.5 Hz).
+        if (apu_) apu_->set_frame(total_insns_ * 375 / (kCpuHz * 2));
         if (!cerr.empty()) { err = cerr; break; }  // device fault-stop wins
 
         // Deliver one pending, unmasked external interrupt at this boundary. Confirm the guest

@@ -3,6 +3,31 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-07-27 — A4: APU voice-idle completion clears the AV wait
+
+The load-bearing MCPX APU path is now implemented end to end. VP `SET_ANTECEDENT_VOICE`,
+`VOICE_ON`, and `VOICE_OFF` maintain the guest-resident voice lists and ACTIVE state;
+VOICE_OFF posts the guest notifier; a retired-instruction-derived 187.5 Hz frame clock walks
+the 2D/3D/MP lists and emits `SE2FE_IDLE_VOICE`; FECV/FEDECMETH/FEDECPARAM/FECTL/ISTS expose
+the decoded trap; and the APU drives its routed level IRQ 5 through IEN/GINT aggregation.
+FECTL release consumes the requested trap reason so a level-IRQ retry cannot redispatch a
+stale voice handle after kernel teardown. A focused `test_apu` covers the complete
+VOICE_ON → VOICE_OFF → timed trap → W1C/release/IRQ lifecycle; the suite is now 5/5.
+
+This clears the permanent `0x800637d3–0x800637da` wait without modifying guest RAM
+speculatively. The retail kernel takes the exact ISR chain identified in the prior
+checkpoint, finds voice 64 while its manager entry is live, invokes the completion routine,
+and then legitimately frees the voice object. Clean acceptance runs reach both 200M and
+500M retired instructions without fault; the 500M run reports exactly one VOICE_OFF and one
+idle-voice trap.
+
+The XBE entry threads have not started yet: KTHREAD count remains three, phase-1 still waits
+on the AV worker, and that worker has advanced to a new counter-throttle loop whose call site
+is `0x80052f71` (inside `KeStallExecutionProcessor` at `0x80056cb0–0x80056cb9`). The loop
+waits while `[0x80061fe0] - [0x80061998] >= 2`. ACI streams 1 and 7 are RUN with no descriptor
+engine behind the current shell, making ACI completion/position advancement a leading
+candidate, but this next dependency is not yet proven.
+
 ## 2026-07-17 — Investigation checkpoint: AV wait is an APU voice-idle completion
 
 The `0x800637d3–0x800637da` wait is now identified conclusively from the exact mapped retail

@@ -107,5 +107,9 @@ add_executable(test_nv2a tests/test_nv2a.cpp src/machine/nv2a.cpp)
 target_include_directories(test_nv2a PRIVATE ${XLLE_INCLUDES})
 add_test(NAME nv2a COMMAND test_nv2a)
 
+add_executable(test_apu tests/test_apu.cpp)
+target_include_directories(test_apu PRIVATE ${XLLE_INCLUDES})
+add_test(NAME apu COMMAND test_apu)
+
 # The fixture spike is itself an acceptance test: all fixtures must pass (exit 0).
 add_test(NAME spike COMMAND xlle)

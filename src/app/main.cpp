@@ -14,6 +14,7 @@
 
 #include "cpu/unicorn_floor.hpp"
 #include "host/sdl_shell.hpp"
+#include "machine/apu.hpp"
 #include "machine/machine.hpp"
 #include "obs/debug_server.hpp"
 #include "spike/fixtures.hpp"
@@ -530,6 +531,29 @@ int main(int argc, char** argv) {
                 uint32_t av_sync = 0;
                 if (mach.read(0x03FB3000, &av_sync, sizeof(av_sync)))
                     std::printf("[2bl] AV sync RAM [0x03fb3000]=0x%08x\n", av_sync);
+            }
+            if (mach.apu()) {
+                std::printf("[2bl] APU: VOICE_OFF methods=%llu idle-voice traps=%llu\n",
+                            (unsigned long long)mach.apu()->voice_off_methods(),
+                            (unsigned long long)mach.apu()->idle_voice_traps());
+                std::printf("[2bl] APU regs: ISTS=%08x IEN=%08x FECTL=%08x FECV=%08x "
+                            "METH=%08x PARAM=%08x FORCE1=%08x SECTL=%08x VPV=%08x "
+                            "TOP=%04x/%04x/%04x CUR=%04x/%04x/%04x\n",
+                            mach.apu()->mmio_read(McpxApu::kBase + 0x1000, 4),
+                            mach.apu()->mmio_read(McpxApu::kBase + 0x1004, 4),
+                            mach.apu()->mmio_read(McpxApu::kBase + 0x1100, 4),
+                            mach.apu()->mmio_read(McpxApu::kBase + 0x1110, 4),
+                            mach.apu()->mmio_read(McpxApu::kBase + 0x1300, 4),
+                            mach.apu()->mmio_read(McpxApu::kBase + 0x1304, 4),
+                            mach.apu()->mmio_read(McpxApu::kBase + 0x1504, 4),
+                            mach.apu()->mmio_read(McpxApu::kBase + 0x2000, 4),
+                            mach.apu()->mmio_read(McpxApu::kBase + 0x202c, 4),
+                            (unsigned)mach.apu()->mmio_read(McpxApu::kBase + 0x2054, 4),
+                            (unsigned)mach.apu()->mmio_read(McpxApu::kBase + 0x2060, 4),
+                            (unsigned)mach.apu()->mmio_read(McpxApu::kBase + 0x206c, 4),
+                            (unsigned)mach.apu()->mmio_read(McpxApu::kBase + 0x2058, 4),
+                            (unsigned)mach.apu()->mmio_read(McpxApu::kBase + 0x2064, 4),
+                            (unsigned)mach.apu()->mmio_read(McpxApu::kBase + 0x2070, 4));
             }
             std::printf("[2bl] IDE: port accesses=%llu irqs=%llu sectors rd/wr=%llu/%llu "
                         "bm_base=0x%04x\n", (unsigned long long)ide_io_count,

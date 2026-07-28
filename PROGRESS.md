@@ -25,11 +25,12 @@ harvested from xemu, silicon-corrected against a live console. GPL-2.
 - **Partial / validation debt:** A1's real-hardware probe channel is live, but deterministic
   xemu-TCG cosim remains deferred. A3 uses Unicorn's dynamic translator, but the planned
   page-versioning proof is not complete.
-- **In progress:** A4. Storage loads the XBE, and the PFIFO recorder plus NV097 semaphore DMA
-  now carry the kernel AV worker through its first GPU fence and boot-animation stream.
-- **Immediate burn-down path:** resolve the AV completion wait at 0x800637d3 → start XBE
-  threads → emit the first software-rendered framebuffer → execute the recorded method subset
-  in a software rasterizer → add the A4 input/audio coverage exercised by the dashboard.
+- **In progress:** A4. Storage loads the XBE; PFIFO semaphore DMA clears the first GPU fence;
+  and the timed APU VOICE_OFF → idle trap → IRQ 5 completion clears the next AV wait.
+- **Immediate burn-down path:** characterize the new counter throttle at 0x80052f71 (ACI
+  stream completion/position is the leading candidate) → start XBE threads → emit the first
+  software-rendered framebuffer → execute the recorded method subset in a software
+  rasterizer → add the A4 input/audio coverage exercised by the dashboard.
 - **Not started:** A5 end-to-end retail-dashboard navigation and Arc 2 game work.
 
 ## Where the boot stands RIGHT NOW
@@ -53,13 +54,16 @@ The worker's wait has been peeled one layer at a time this session:
    DMA_GET=DMA_PUT sink discarded the kernel's NV097 semaphore releases. PFIFO now parses and
    records the stream, resolves RAMHT/DMA objects in PRAMIN, and writes semaphore values to
    unified guest RAM. Verified: 158,966 methods, 14 releases (5..0x1f), old loop exited.
-6. **NOW: the 0x800637d3–0x800637da wait is identified as missing APU voice-idle
-   completion.** ECX=ESI=0xd0008488 maps to physical 0x1488; field +8 is 0x10000041.
-   Kernel disassembly proves the producer and consumer: it writes APU VP VOICE_OFF at
-   0x800665f5, sets bit 28 at 0x80066632, and only clears it in the idle-voice completion at
-   0x800630be/0x8006327d. Hardware/xemu then emits SE2FE_IDLE_VOICE (0x8000) on an APU frame,
-   traps the front end, and raises APU IRQ 5. Our register-file APU has none of those side
-   effects. Implement that device path next; do not clear the guest object directly.
+6. the 0x800637d3–0x800637da APU voice-idle wait → **fixed**. VOICE_ON/OFF now maintain
+   guest voice state/lists, the 187.5 Hz APU frame emits SE2FE_IDLE_VOICE, the FE trap and
+   IEN/ISTS lifecycle drive IRQ 5, and FECTL release consumes the decoded trap. The retail
+   kernel executes its real completion routine before freeing voice 64.
+7. **NOW:** the AV worker is throttled at caller 0x80052f71, repeatedly entering
+   KeStallExecutionProcessor (0x80056cb0–0x80056cb9) while
+   `[0x80061fe0] - [0x80061998] >= 2`. The 500M run is fault-free but KTHREAD count remains
+   three and phase-1 still waits for this worker. ACI streams 1 and 7 are RUN while the ACI
+   shell has no descriptor engine; prove whether ACI position/IRQ advancement owns either
+   counter before implementing it.
 
 ## How to build & run
 
@@ -70,17 +74,17 @@ cd /f/Projects/xboxlle/xboxlle
 cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ \
       -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_POLICY_VERSION_MINIMUM=3.5
 cmake --build build -j
-ctest --test-dir build                         # 4/4 (ring, jsonl, nv2a, spike)
+ctest --test-dir build                         # 5/5 (ring, jsonl, nv2a, apu, spike)
 
 cd build
 ./xlle.exe --boot ../../machine/flash-dump-ff000000.bin \
            --run2bl ../../machine/bios-extract/bldr.bin \
            --hdd ../../machine/xbox-hdd.img \
            --eeprom ../../machine/eeprom.bin \
-           --max-insns 1500000000
+           --max-insns 500000000
 ```
 
-~1.5B insns ≈ 2 sim-seconds ≈ 10 min wall. The run prints rich diagnostics at the end:
+500M insns takes roughly 25–30 seconds on the current host. The run prints rich diagnostics:
 KTHREAD scan + every-waiter wait-block/stack walk, per-thread instruction attribution,
 non-idle PC ring, last-64 I/O + MMIO rings, IDE/NV2A/IRQ counters, code bytes around final
 EIP, and decoded kernel debug services (`[dbg] DbgPrint:`, `[dbg] LOAD symbols:`).
@@ -95,8 +99,9 @@ stand-in is documented in the header of the device that carries it.
 Deliberate documented stand-ins currently in place (fine for boot, replaced later in A4):
 - NV2A PFIFO is a synchronous recorder with semaphore DMA execution; most recorded methods
   still have no CP/raster side effects, and there is no software rasterizer yet.
-- APU/ACI are register-level shells (no DSP/audio engine). APU VP PIO_FREE works, but the
-  now-load-bearing VOICE_OFF → timed idle-voice FE trap → IRQ 5 path is still missing.
+- APU has the load-bearing voice-list, VOICE_OFF, timed idle-voice FE trap, notifier, and IRQ
+  lifecycle, but still no DSP/audio synthesis. ACI remains register-level only: RUN is
+  accepted, but descriptors, positions, completions, and audio output do not advance.
 - PIT tick cadence approximated from retired instructions (1 IPC assumption).
 
 ## Hardware oracle (live console)
@@ -118,7 +123,8 @@ Driver: `python tools/xbox_agent.py --host 192.168.4.81 {ping|info|read|exec <fi
 - HAL SMBus interrupt-driven wait ~0x800176e9-0x8001783a; KeStallExecutionProcessor loop
   0x80056ca8-0x80056cb9; resolved AV fence spin 0x800570dc; current APU completion spin
   0x800637d3-0x800637da. APU idle completion 0x800630be/0x8006327d; APU ISR 0x8006728d,
-  FET handler 0x80066e99.
+  FET handler 0x80066e99. The APU wait is resolved; the current AV-worker throttle calls
+  KeStallExecutionProcessor at 0x80052f71 and compares counters at 0x80061998/0x80061fe0.
 - KTHREAD offsets (nxdk xboxkrnl.h): State +0x2c, Priority +0x32, KernelStack +0x24,
   WaitBlockList +0x58; KWAIT_BLOCK: Thread +0x08, Object +0x0c, Next +0x10.
   States: 1=Ready 2=Running 4=Terminated 5=Waiting.
@@ -138,10 +144,10 @@ Driver: `python tools/xbox_agent.py --host 192.168.4.81 {ping|info|read|exec <fi
 
 ## Next steps (priority order)
 
-1. **Implement APU voice-idle completion.** Decode VP VOICE_OFF, update its guest voice state
-   and notifier, advance an APU frame every 5.333 ms, publish the SE2FE_IDLE_VOICE trap in
-   FECV/FEDECMETH/FEDECPARAM/FECTL/ISTS, and wire the level interrupt to routed IRQ 5. Add a
-   focused test for the complete method → timed trap → W1C/IRQ lifecycle.
+1. **Identify the 0x80052f71 counter producer.** Correlate 0x80061998/0x80061fe0 with the
+   running ACI streams and recent NV2A/APU activity; if it is AC'97 bus mastering, implement
+   descriptor consumption, CIV/PIV/PICB/SR, timing, and routed completion IRQs with a focused
+   test. Do not increment either kernel counter directly.
 2. Repeat until phase-1 creates the XBE entry threads (KTHREAD count > 3; watch for user-space
    EIPs and new `[dbg]` traffic). XBMC will then start exercising kernel APIs broadly —
    expect new device faults (USB/OHCI at 0xFED00000/0xFED08000, NIC 0xFEF00000, more SMC).
