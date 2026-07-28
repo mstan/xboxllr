@@ -110,6 +110,7 @@ private:
 
     struct ChannelState {
         uint32_t get = 0, put = 0;
+        uint32_t dma_instance = 0;
         uint32_t method = 0, method_count = 0;
         uint32_t subroutine = 0;
         uint8_t subchannel = 0;
@@ -143,6 +144,7 @@ private:
     uint32_t pgraph_trapped_data_ = 0;
 
     void process_pushbuffer(uint8_t channel);
+    bool pusher_enabled(uint8_t channel) const;
     void drain_pull_queue();
     void dispatch_method(uint8_t channel, uint8_t subchannel, uint32_t method,
                          uint32_t parameter);

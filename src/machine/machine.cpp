@@ -169,6 +169,16 @@ void XboxMachine::init_devices() {
                    [this](uint32_t a, int s) { return mmio_read(a, s); },
                    [this](uint32_t a, int s, uint32_t v) { mmio_write(a, s, v); });
 
+    // MCPX integrated Ethernet controller at 0xFEF00000. The kernel uses PCI INTA routed
+    // to ISA IRQ4; MDIO is synchronous and the integrated PHY resides at address 1.
+    auto nvnet = std::make_unique<NvNet>(fault);
+    nvnet_ = nvnet.get();
+    nvnet_->set_irq([this](int irq, bool level) { pic_->raise(irq, level); }, 4);
+    mmio_devices_.push_back(std::move(nvnet));
+    cpu_->map_mmio(NvNet::kBase, NvNet::kSize,
+                   [this](uint32_t a, int s) { return mmio_read(a, s); },
+                   [this](uint32_t a, int s, uint32_t v) { mmio_write(a, s, v); });
+
     // MCPX ACI (AC97) at 0xFEC00000, including headless PCM-out descriptor timing.
     auto aci = std::make_unique<McpxAci>(fault);
     aci_ = aci.get();

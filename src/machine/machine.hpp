@@ -12,6 +12,7 @@
 #include "machine/io_device.hpp"
 #include "machine/mmio_device.hpp"
 #include "machine/nv2a.hpp"
+#include "machine/nvnet.hpp"
 #include "machine/ohci.hpp"
 #include "machine/pci.hpp"
 #include "machine/pic.hpp"
@@ -58,6 +59,7 @@ public:
     PciHost* pci() { return pci_; }
     IdeController* ide() { return ide_; }
     Nv2a* nv2a() { return nv2a_; }
+    NvNet* nvnet() { return nvnet_; }
     McpxApu* apu() { return apu_; }
     McpxAci* aci() { return aci_; }
     Ohci* ohci0() { return ohci0_; }
@@ -88,6 +90,7 @@ private:
     IdeController* ide_ = nullptr;
     Amd756Smbus* smbus_ = nullptr;
     Nv2a* nv2a_ = nullptr;
+    NvNet* nvnet_ = nullptr;
     McpxApu* apu_ = nullptr;
     McpxAci* aci_ = nullptr;
     Ohci* ohci0_ = nullptr;

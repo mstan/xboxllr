@@ -3,6 +3,32 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-07-27 — A4: PFIFO DMA lifecycle and NVNet initialization complete
+
+The dashboard's PFIFO teardown/rebuild sequence is now modeled rather than consumed during
+its transient PUT-before-GET state. CACHE1 DMA instance selection is tracked per channel;
+the pusher runs only when PUSH0, PUSH1 DMA mode/channel, and DMA_PUSH access/status permit
+it; GET/PUT are offsets through the selected DMA object; and consumed GET is mirrored in
+both USER and PFIFO register views. `test_nv2a` covers the real gating, address translation,
+GET readback, and disabled-pusher PUT-before-GET regression.
+
+That clears the 6.11B command-guard stop and carries `xbmc.exe` through more render/flip and
+disk work to its first MCPX Ethernet dependency. A new NVNet floor maps the page containing
+the hardware's 0x400-byte aperture at 0xFEF00000 while rejecting padding accesses, preserves
+the xemu-witnessed register file, implements descriptor-pointer reset, synchronous MDIO
+transactions, PHY address 1/reset values/link transitions, W1C status, and routed IRQ4
+aggregation. Enabled packet DMA remains a deliberate loud boundary.
+
+The 6.35B acceptance run completes the dashboard NIC setup: 13 MDIO reads and one write,
+MAC/filter and TX/RX ring programming, and PHY link/autonegotiation detection. It stops at
+6,275,319,110 retired instructions on the first enabled TX descriptor kick at dashboard EIP
+0x002d74a5. GPU work remains healthy at 36,388,327 methods, 486/486 flips, 1,932 PGRAPH
+notifications, and 2,961 semaphore writes. The complete suite is 9/9.
+
+**Next:** implement the exercised NVNet TX descriptor DMA/completion path and packet-backend
+policy, then continue to the next dashboard dependency. Framebuffer/raster output and OHCI
+TD/XID input remain the larger A4 deliverables.
+
 ## 2026-07-27 — A4: boot animation completes and the dashboard XBE executes
 
 The AV/display pipeline now completes through the real interrupt path. NV2A executes the

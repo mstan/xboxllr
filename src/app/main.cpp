@@ -576,6 +576,16 @@ int main(int argc, char** argv) {
                             (unsigned long long)mach.ohci0()->frames(),
                             mach.ohci0()->control(), mach.ohci0()->hcca());
             }
+            if (mach.nvnet()) {
+                std::printf("[2bl] NVNet: link=%s MDIO rd/wr=%llu/%llu TX kicks=%llu "
+                            "IRQ status/mask=%08x/%08x TXRX=%08x\n",
+                            mach.nvnet()->link_up() ? "up" : "down",
+                            (unsigned long long)mach.nvnet()->mdio_reads(),
+                            (unsigned long long)mach.nvnet()->mdio_writes(),
+                            (unsigned long long)mach.nvnet()->tx_kicks(),
+                            mach.nvnet()->irq_status(), mach.nvnet()->irq_mask(),
+                            mach.nvnet()->tx_rx_control());
+            }
             std::printf("[2bl] IDE: port accesses=%llu irqs=%llu sectors rd/wr=%llu/%llu "
                         "bm_base=0x%04x\n", (unsigned long long)ide_io_count,
                         (unsigned long long)(mach.ide() ? mach.ide()->irq_pulses() : 0),

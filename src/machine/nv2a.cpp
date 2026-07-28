@@ -197,13 +197,19 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
     if (blk->off == 0x002000) {
         pfifo_regs_[bo] = value;
         uint8_t channel = static_cast<uint8_t>(pfifo_regs_[0x1204] & 0x1Fu);
-        if (bo == 0x1244) {
+        if (bo == 0x122C) {
+            channels_[channel].dma_instance = (value & 0xFFFFu) << 4;
+        } else if (bo == 0x1244) {
             channels_[channel].get = value;
             channels_[channel].get_initialized = true;
         } else if (bo == 0x1240) {
             channels_[channel].put = value;
-            if (channels_[channel].get_initialized) process_pushbuffer(channel);
         }
+        // PFIFO register writes also wake the hardware pusher, but it must remain quiescent
+        // while CACHE1_PUSH0 or CACHE1_DMA_PUSH access is disabled. The D3D runtime relies on
+        // that lifecycle when it clears PUT before GET while rebuilding a channel context.
+        if (channels_[channel].get_initialized && pusher_enabled(channel))
+            process_pushbuffer(channel);
         return;
     }
     if (blk->off == 0x700000) {
@@ -222,9 +228,12 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
         if (reg == 0x44) {
             channels_[channel].get = value;
             channels_[channel].get_initialized = true;
+            pfifo_regs_[0x1244] = value;
         } else if (reg == 0x40) {
             channels_[channel].put = value;
-            if (channels_[channel].get_initialized) process_pushbuffer(channel);
+            pfifo_regs_[0x1240] = value;
+            if (channels_[channel].get_initialized && pusher_enabled(channel))
+                process_pushbuffer(channel);
         }
         return;
     }
@@ -358,6 +367,19 @@ void Nv2a::drain_pull_queue() {
     }
 }
 
+bool Nv2a::pusher_enabled(uint8_t channel) const {
+    auto reg = [this](uint32_t off) {
+        auto it = pfifo_regs_.find(off);
+        return it == pfifo_regs_.end() ? 0u : it->second;
+    };
+    const uint32_t push0 = reg(0x1200);
+    const uint32_t push1 = reg(0x1204);
+    const uint32_t dma_push = reg(0x1220);
+    return (push0 & 1u) && (push1 & 0x100u) &&
+           ((push1 & 0x1Fu) == channel) && (dma_push & 1u) &&
+           !(dma_push & (1u << 12));
+}
+
 void Nv2a::process_pushbuffer(uint8_t channel) {
     auto& ch = channels_[channel];
     if (!mem_read_) {
@@ -369,7 +391,16 @@ void Nv2a::process_pushbuffer(uint8_t channel) {
     uint32_t words = 0;
     while (ch.get != ch.put && words++ < kMaxWordsPerKick) {
         uint32_t word = 0;
-        uint32_t fetch = ch.get & 0x07FFFFFFu;
+        uint32_t fetch = 0;
+        if (!dma_object_address(ch.dma_instance, ch.get, fetch)) {
+            char why[192];
+            std::snprintf(why, sizeof(why),
+                          "NV2A PFIFO DMA invalid: channel=%u instance=0x%08x "
+                          "GET=0x%08x PUT=0x%08x",
+                          channel, ch.dma_instance, ch.get, ch.put);
+            fault_(why);
+            return;
+        }
         if (!mem_read_(fetch, &word, sizeof(word))) {
             char why[128];
             std::snprintf(why, sizeof(why), "NV2A PFIFO read failed at 0x%08x", fetch);
@@ -423,6 +454,10 @@ void Nv2a::process_pushbuffer(uint8_t channel) {
             return;
         }
     }
+    // CACHE1_DMA_GET is the same hardware state exposed through the PFIFO register window
+    // and the current channel's USER window. The synchronous parser has completed by the
+    // time the CPU can read either aperture, so publish the consumed offset to both views.
+    pfifo_regs_[0x1244] = ch.get;
     if (words >= kMaxWordsPerKick) fault_("NV2A PFIFO command guard exhausted");
     drain_pull_queue();
 }

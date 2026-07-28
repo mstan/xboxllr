@@ -42,6 +42,12 @@ int main() {
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700104, 4, 0x00000FFF);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700108, 4, 0x00003000);
 
+    // CACHE1's pusher DMA object maps zero-based GET/PUT offsets onto the pushbuffer at
+    // physical 0x2000. This is distinct from the semaphore DMA object above.
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700180, 4, 0x0000003D);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700184, 4, 0x00000FFF);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700188, 4, 0x00002000);
+
     uint32_t pb = 0x2000;
     put32(ram, pb + 0x00, (1u << 18) | 0x01A4u);
     put32(ram, pb + 0x04, 0x00000000u);
@@ -49,12 +55,20 @@ int main() {
     put32(ram, pb + 0x0C, 0x00000040u);
     put32(ram, pb + 0x10, 0x12345678u);
 
-    // Kernel initializes CACHE1_DMA_GET through PFIFO, then submits through USER DMA_PUT.
-    gpu.mmio_write(xlle::Nv2a::kBase + 0x003244, 4, pb);
-    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, pb + 0x14);
+    // Enable channel 0's DMA pusher, initialize CACHE1_DMA_GET through PFIFO, then submit
+    // zero-based offsets through USER DMA_PUT.
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x002504, 4, 1);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x003204, 4, 0x100);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x00322C, 4, 0x18);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x003244, 4, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x003220, 4, 1);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x003250, 4, 1);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x003200, 4, 1);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, 0x14);
 
     CHECK(fault.empty());
-    CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x800044, 4) == pb + 0x14);
+    CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x800044, 4) == 0x14);
+    CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x003244, 4) == 0x14);
     CHECK(gpu.push_methods() == 3);
     CHECK(gpu.semaphore_writes() == 1);
     CHECK(get32(ram, 0x3040) == 0x12345678u);
@@ -69,13 +83,14 @@ int main() {
     put32(ram, pb + 0x28, 0);  // FLIP_STALL
     put32(ram, pb + 0x2C, (1u << 18) | 0x1D70u);
     put32(ram, pb + 0x30, 0xCAFEBABEu);
-    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, pb + 0x34);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, 0x34);
 
     CHECK(fault.empty());
     CHECK(gpu.flip_increments() == 1);
     CHECK(gpu.flip_stalls() == 1);
     CHECK(gpu.waiting_for_flip());
-    CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x800044, 4) == pb + 0x34);
+    CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x800044, 4) == 0x34);
+    CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x003244, 4) == 0x34);
     CHECK(gpu.semaphore_writes() == 1);
     CHECK(get32(ram, 0x3040) == 0x12345678u);
 
@@ -99,7 +114,7 @@ int main() {
     put32(ram, pb + 0x38, 0x00000304u);
     put32(ram, pb + 0x3C, (1u << 18) | 0x1D70u);
     put32(ram, pb + 0x40, 0x0BADF00Du);
-    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, pb + 0x44);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, 0x44);
 
     CHECK(irq);
     CHECK(gpu.pgraph_notifications() == 1);
@@ -115,6 +130,18 @@ int main() {
     gpu.mmio_write(xlle::Nv2a::kBase + 0x400720, 4, 1);
     CHECK(gpu.semaphore_writes() == 3);
     CHECK(get32(ram, 0x3040) == 0x0BADF00Du);
+
+    // The D3D runtime disables CACHE1_PUSH0 before rebuilding a channel. PUT is cleared
+    // before GET; that transient mismatch must not execute stale pushbuffer data.
+    const uint64_t methods_before_reset = gpu.push_methods();
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x003200, 4, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x003240, 4, 0);
+    CHECK(fault.empty());
+    CHECK(gpu.push_methods() == methods_before_reset);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x003244, 4, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x003200, 4, 1);
+    CHECK(fault.empty());
+    CHECK(gpu.push_methods() == methods_before_reset);
 
     std::printf(fails ? "test_nv2a: %d checks failed\n" : "test_nv2a: ok\n", fails);
     return fails ? 1 : 0;

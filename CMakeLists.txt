@@ -62,6 +62,7 @@ add_library(xlle_machine STATIC
   src/machine/pci.cpp
   src/machine/smbus.cpp
   src/machine/nv2a.cpp
+  src/machine/nvnet.cpp
   src/machine/ohci.cpp
   src/machine/pm.cpp
   src/machine/pic.cpp
@@ -123,6 +124,10 @@ add_test(NAME smc COMMAND test_smc)
 add_executable(test_ohci tests/test_ohci.cpp src/machine/ohci.cpp)
 target_include_directories(test_ohci PRIVATE ${XLLE_INCLUDES})
 add_test(NAME ohci COMMAND test_ohci)
+
+add_executable(test_nvnet tests/test_nvnet.cpp src/machine/nvnet.cpp)
+target_include_directories(test_nvnet PRIVATE ${XLLE_INCLUDES})
+add_test(NAME nvnet COMMAND test_nvnet)
 
 # The fixture spike is itself an acceptance test: all fixtures must pass (exit 0).
 add_test(NAME spike COMMAND xlle)
