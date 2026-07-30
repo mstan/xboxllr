@@ -27,6 +27,14 @@ FetchContent_Declare(unicorn
   GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(unicorn)
 
+# --- NV2A CPU vertex-shader interpreter (same pinned reference used by xemu) ---
+set(nv2a_vsh_cpu_UNIT_TEST OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(nv2a_vsh_cpu
+  GIT_REPOSITORY https://github.com/xemu-project/nv2a_vsh_cpu.git
+  # Source-identical reachable twin of xemu's 561fe80 pin (same parent/tree/message).
+  GIT_TAG 863fc0f50aa4027af113718d2a63e45ac3be7a42)
+FetchContent_MakeAvailable(nv2a_vsh_cpu)
+
 # --- SDL3 (borrowed host layer) ---
 if(XLLE_WITH_SDL)
   set(SDL_SHARED ON CACHE BOOL "" FORCE)
@@ -69,7 +77,7 @@ add_library(xlle_machine STATIC
   src/machine/pit.cpp
   src/machine/rtc.cpp)
 target_include_directories(xlle_machine PUBLIC ${XLLE_INCLUDES})
-target_link_libraries(xlle_machine PUBLIC xlle_cpu)
+target_link_libraries(xlle_machine PUBLIC xlle_cpu nv2a_vsh_emulator)
 
 # --- fixture corpus ---
 add_library(xlle_spike STATIC src/spike/fixtures.cpp)
@@ -107,6 +115,7 @@ add_test(NAME jsonl COMMAND test_jsonl)
 
 add_executable(test_nv2a tests/test_nv2a.cpp src/machine/nv2a.cpp)
 target_include_directories(test_nv2a PRIVATE ${XLLE_INCLUDES})
+target_link_libraries(test_nv2a PRIVATE nv2a_vsh_emulator)
 add_test(NAME nv2a COMMAND test_nv2a)
 
 add_executable(test_apu tests/test_apu.cpp)

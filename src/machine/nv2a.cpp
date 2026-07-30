@@ -6,6 +6,8 @@
 #include <cstdio>
 #include <cstring>
 
+#include "nv2a_vsh_emulator.h"
+
 namespace xlle {
 
 // Engine-block map (offsets/sizes from xemu nv2a.c blocktable). USER/PRAMIN sizes trimmed to
@@ -707,12 +709,72 @@ bool Nv2a::submit_vertex_batch() {
         return false;
     }
 
+    ++transform_mode_batches_[transform_execution_mode_ & 3u];
+    Nv2aVshProgram program{};
+    bool program_parsed = false;
+    if (transform_execution_mode_ == 2) {
+        const uint32_t slots =
+            static_cast<uint32_t>(transform_program_.size()) - transform_program_start_;
+        Nv2aVshParseResult result = nv2a_vsh_parse_program(
+            &program, transform_program_[transform_program_start_].data(), slots);
+        if (result != NV2AVPR_SUCCESS) {
+            char why[128];
+            std::snprintf(why, sizeof(why),
+                          "NV2A vertex program parse failed at slot %u: result=%u",
+                          transform_program_start_, static_cast<unsigned>(result));
+            fault_(why);
+            return false;
+        }
+        program_parsed = true;
+        transformed_batch_.clear();
+        transformed_batch_.reserve(vertex_indices_.size());
+    } else if (transform_execution_mode_ != 0) {
+        fault_("NV2A vertex batch uses unsupported transform execution mode");
+        return false;
+    }
+
     for (uint32_t index : vertex_indices_) {
         largest_vertex_index_ = std::max(largest_vertex_index_, index);
         for (uint32_t slot = 0; slot < vertex_attributes_.size(); ++slot) {
-            if (!fetch_vertex_attribute(slot, index)) return false;
+            if (!fetch_vertex_attribute(slot, index)) {
+                if (program_parsed) nv2a_vsh_program_destroy(&program);
+                return false;
+            }
+        }
+        if (program_parsed) {
+            Nv2aVshCPUFullExecutionState full_state;
+            Nv2aVshExecutionState execution =
+                nv2a_vsh_emu_initialize_full_execution_state(&full_state);
+            std::memcpy(full_state.context_regs, transform_constants_.data(),
+                        sizeof(full_state.context_regs));
+            for (uint32_t slot = 0; slot < vertex_attributes_.size(); ++slot) {
+                std::memcpy(&full_state.input_regs[slot * 4],
+                            vertex_attributes_[slot].value.data(), 4 * sizeof(float));
+            }
+            nv2a_vsh_emu_execute(&execution, &program);
+
+            TransformedVertex vertex;
+            std::memcpy(vertex.position.data(), &full_state.output_regs[0], 4 * sizeof(float));
+            std::memcpy(vertex.diffuse.data(), &full_state.output_regs[3 * 4],
+                        4 * sizeof(float));
+            std::memcpy(vertex.specular.data(), &full_state.output_regs[4 * 4],
+                        4 * sizeof(float));
+            for (uint32_t texture = 0; texture < 4; ++texture) {
+                std::memcpy(vertex.texture[texture].data(),
+                            &full_state.output_regs[(9 + texture) * 4],
+                            4 * sizeof(float));
+            }
+            transformed_batch_.push_back(vertex);
+            for (float component : vertex.position) {
+                uint32_t bits = 0;
+                std::memcpy(&bits, &component, sizeof(bits));
+                transform_output_hash_ ^= bits;
+                transform_output_hash_ *= 1099511628211ull;
+            }
+            ++transformed_vertices_;
         }
     }
+    if (program_parsed) nv2a_vsh_program_destroy(&program);
 
     const uint64_t n = vertex_indices_.size();
     uint64_t primitives = 0, triangles = 0;
@@ -854,6 +916,55 @@ void Nv2a::dispatch_method(uint8_t channel, uint8_t subchannel, uint32_t method,
         clear_rect_vertical_ = parameter;
     } else if (method == 0x1D94) {
         clear_surface(parameter);
+    // Kelvin viewport and Cheops programmable-transform state. Program/constant upload
+    // pointers advance after each complete four-word vector, matching xemu's PGRAPH model.
+    } else if (method >= 0x0A20 && method < 0x0A30) {
+        const uint32_t slot = (method - 0x0A20) / 4;
+        std::memcpy(&viewport_offset_[slot], &parameter, sizeof(parameter));
+        transform_constants_[0x3B][slot] = viewport_offset_[slot];
+    } else if (method >= 0x0AF0 && method < 0x0B00) {
+        const uint32_t slot = (method - 0x0AF0) / 4;
+        std::memcpy(&viewport_scale_[slot], &parameter, sizeof(parameter));
+        transform_constants_[0x3A][slot] = viewport_scale_[slot];
+    } else if (method >= 0x0B00 && method < 0x0B80) {
+        const uint32_t slot = (method - 0x0B00) / 4;
+        if (transform_program_load_ >= transform_program_.size()) {
+            fault_("NV2A transform program upload exceeds instruction memory");
+            return;
+        }
+        transform_program_[transform_program_load_][slot & 3u] = parameter;
+        ++transform_program_words_;
+        if ((slot & 3u) == 3) ++transform_program_load_;
+    } else if (method >= 0x0B80 && method < 0x0C00) {
+        const uint32_t slot = (method - 0x0B80) / 4;
+        if (transform_constant_load_ >= transform_constants_.size()) {
+            fault_("NV2A transform constant upload exceeds constant memory");
+            return;
+        }
+        std::memcpy(&transform_constants_[transform_constant_load_][slot & 3u],
+                    &parameter, sizeof(parameter));
+        ++transform_constant_words_;
+        if ((slot & 3u) == 3) ++transform_constant_load_;
+    } else if (method == 0x1E94) {
+        transform_execution_mode_ = static_cast<uint8_t>(parameter & 3u);
+    } else if (method == 0x1E9C) {
+        if (parameter >= transform_program_.size()) {
+            fault_("NV2A transform program load pointer is out of range");
+            return;
+        }
+        transform_program_load_ = static_cast<uint8_t>(parameter);
+    } else if (method == 0x1EA0) {
+        if (parameter >= transform_program_.size()) {
+            fault_("NV2A transform program start is out of range");
+            return;
+        }
+        transform_program_start_ = static_cast<uint8_t>(parameter);
+    } else if (method == 0x1EA4) {
+        if (parameter >= transform_constants_.size()) {
+            fault_("NV2A transform constant load pointer is out of range");
+            return;
+        }
+        transform_constant_load_ = static_cast<uint8_t>(parameter);
     // Kelvin array-fed vertex submission. ARRAY_ELEMENT16 is non-incrementing and packs two
     // indices per parameter; the pusher has already expanded non-incrementing method runs.
     } else if (method >= 0x1720 && method < 0x1760) {

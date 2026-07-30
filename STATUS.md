@@ -3,6 +3,36 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-07-30 — A4: programmable Kelvin vertex shaders execute on CPU
+
+Kelvin's programmable transform stage now executes instead of stopping at decoded inputs.
+The full 136-instruction Cheops program store, 192 float4 constants, program/constant load
+pointers, program start, execution mode, and viewport scale/offset aliases are modeled from
+the xemu PGRAPH contract. Array-fed attributes populate v0-v15 and execute through xemu's
+pinned public-domain NV2A CPU interpreter; oPos, diffuse/specular, and four texture outputs
+are retained per transformed batch for the upcoming raster stage. A deterministic FNV-64
+over oPos makes transform output observable.
+
+xemu's original `nv2a_vsh_cpu` pin (`561fe80`) is a duplicate commit whose tree no longer
+checks out from a fresh clone. The build uses reachable commit `863fc0f`, verified to have
+the identical parent, tree, and commit message. Dependency tests are disabled; xboxlle's
+focused NV2A test uploads a final `MOV oPos, v0` program and constants, submits mixed
+16/32-bit indices, and verifies all three vertices execute.
+
+The full 6.4B dashboard acceptance run is fault-free with four KTHREADs and the unchanged
+36,388,327 PFIFO methods, 486 completed flips, and final scanout hash
+`73feb194b7694383`. Of 436,456 indexed batches, 292,866 use programmable transforms and
+execute 35,477,464 vertices. The position-stream hash is `18b38c709acba547`; the guest
+uploads 418,640 program words and 5,683,368 constant words. The remaining 143,590 indexed
+batches use fixed-function transform mode and are deliberately counted but not yet
+executed. Raster writes likewise remain limited to the already-landed surface clears.
+The direct suite remains 9/9.
+
+**Next:** execute the exercised fixed-function transform subset, then consume retained
+screen-space outputs in triangle-list/strip/fan rasterization with the guest's viewport,
+color/zeta, cull, depth, and blend state. `INLINE_ARRAY`, OHCI TD/XID input, and NVNet
+RX/transport remain subsequent A4 work.
+
 ## 2026-07-30 — A4: indexed Kelvin vertex front-end executes
 
 The dominant array-fed Kelvin path now executes through primitive assembly. PGRAPH resolves

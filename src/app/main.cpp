@@ -605,6 +605,15 @@ int main(int argc, char** argv) {
                         std::printf(" %u=%llu", slot, (unsigned long long)count);
                 }
                 std::printf("\n");
+                std::printf("[2bl] NV2A transform: fixed/prog=%llu/%llu "
+                            "vertices=%llu program/constant-words=%llu/%llu "
+                            "position-fnv64=%016llx\n",
+                            (unsigned long long)mach.nv2a()->transform_mode_batches(0),
+                            (unsigned long long)mach.nv2a()->transform_mode_batches(2),
+                            (unsigned long long)mach.nv2a()->transformed_vertices(),
+                            (unsigned long long)mach.nv2a()->transform_program_words(),
+                            (unsigned long long)mach.nv2a()->transform_constant_words(),
+                            (unsigned long long)mach.nv2a()->transform_output_hash());
                 std::printf("[2bl] NV2A flip: write-increments=%llu stalls=%llu "
                             "read-increments=%llu notifications=%llu surface=%08x waiting=%u\n",
                             (unsigned long long)mach.nv2a()->flip_increments(),

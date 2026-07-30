@@ -107,6 +107,13 @@ public:
     uint64_t vertex_slot_fetches(uint32_t slot) const {
         return slot < vertex_slot_fetches_.size() ? vertex_slot_fetches_[slot] : 0;
     }
+    uint64_t transform_mode_batches(uint32_t mode) const {
+        return mode < transform_mode_batches_.size() ? transform_mode_batches_[mode] : 0;
+    }
+    uint64_t transformed_vertices() const { return transformed_vertices_; }
+    uint64_t transform_program_words() const { return transform_program_words_; }
+    uint64_t transform_constant_words() const { return transform_constant_words_; }
+    uint64_t transform_output_hash() const { return transform_output_hash_; }
     uint32_t pgraph_surface() const;
     bool waiting_for_flip() const { return waiting_for_flip_; }
     size_t recent_methods(size_t n, std::vector<PushMethod>& out) const {
@@ -244,6 +251,31 @@ private:
     std::array<uint64_t, 11> primitive_mode_counts_{};
     std::array<uint64_t, 7> vertex_format_fetches_{};
     std::array<uint64_t, 16> vertex_slot_fetches_{};
+
+    // NV2A Cheops transform state. Programmable vertex shaders consist of up to 136
+    // four-word instructions and address 192 float4 constants. The pinned xemu CPU
+    // interpreter executes these exact tokens; shader output oPos is already in Xbox
+    // screen space, which is the input contract for the software rasterizer.
+    std::array<std::array<uint32_t, 4>, 136> transform_program_{};
+    std::array<std::array<float, 4>, 192> transform_constants_{};
+    std::array<float, 4> viewport_offset_{};
+    std::array<float, 4> viewport_scale_{};
+    uint8_t transform_execution_mode_ = 0;
+    uint8_t transform_program_load_ = 0;
+    uint8_t transform_program_start_ = 0;
+    uint8_t transform_constant_load_ = 0;
+    uint64_t transform_program_words_ = 0;
+    uint64_t transform_constant_words_ = 0;
+    uint64_t transformed_vertices_ = 0;
+    uint64_t transform_output_hash_ = 1469598103934665603ull;
+    std::array<uint64_t, 4> transform_mode_batches_{};
+    struct TransformedVertex {
+        std::array<float, 4> position{};
+        std::array<float, 4> diffuse{};
+        std::array<float, 4> specular{};
+        std::array<std::array<float, 4>, 4> texture{};
+    };
+    std::vector<TransformedVertex> transformed_batch_;
 
     // Display/scanout state. PRMCIO is the memory-mapped VGA register alias; AvSetDisplayMode
     // programs CRTC pitch/depth there, PRAMDAC display extents, then PCRTC_START.

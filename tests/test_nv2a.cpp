@@ -219,6 +219,18 @@ int main() {
     emit(0x1760, 0x00000C32);  // float3, stride 12
     emit(0x172C, 0x80007100);  // diffuse slot 3, DMA B
     emit(0x176C, 0x00000440);  // UB_D3D4, stride 4
+    emit(0x1E9C, 0);       // transform program load pointer
+    emit(0x0B00, 0x00000000);  // MOV oPos, v0 (final)
+    emit(0x0B04, 0x0020001B);
+    emit(0x0B08, 0x0836106C);
+    emit(0x0B0C, 0x2070F801);
+    emit(0x1EA0, 0);       // transform program start
+    emit(0x1EA4, 0);       // transform constant load pointer
+    emit(0x0B80, 0x3f800000);
+    emit(0x0B84, 0x40000000);
+    emit(0x0B88, 0x40400000);
+    emit(0x0B8C, 0x40800000);
+    emit(0x1E94, 2);       // programmable transform mode
     emit(0x17FC, 5);       // triangles
     emit(0x1800, 0x00010000);  // indices 0, 1
     emit(0x1808, 2);       // index 2
@@ -236,6 +248,11 @@ int main() {
     CHECK(gpu.vertex_format_fetches(2) == 3);
     CHECK(gpu.vertex_slot_fetches(0) == 3);
     CHECK(gpu.vertex_slot_fetches(3) == 3);
+    CHECK(gpu.transform_mode_batches(2) == 1);
+    CHECK(gpu.transformed_vertices() == 3);
+    CHECK(gpu.transform_program_words() == 4);
+    CHECK(gpu.transform_constant_words() == 4);
+    CHECK(gpu.transform_output_hash() != 1469598103934665603ull);
 
     // AvSetDisplayMode's scanout path: VGA CRTC pitch/depth, PRAMDAC dimensions/format,
     // and PCRTC_START resolve unified-RAM RGB565 into deterministic RGBA output.
