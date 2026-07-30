@@ -578,6 +578,33 @@ int main(int argc, char** argv) {
                             (unsigned long long)mach.nv2a()->zeta_clears(),
                             (unsigned long long)mach.nv2a()->zeta_clear_pixels(),
                             mach.nv2a()->last_zeta_clear_address());
+                std::printf("[2bl] NV2A vertices: batches=%llu submitted=%llu "
+                            "attr-fetches=%llu primitives=%llu triangles=%llu max-index=%u\n",
+                            (unsigned long long)mach.nv2a()->vertex_batches(),
+                            (unsigned long long)mach.nv2a()->submitted_vertices(),
+                            (unsigned long long)mach.nv2a()->vertex_attribute_fetches(),
+                            (unsigned long long)mach.nv2a()->assembled_primitives(),
+                            (unsigned long long)mach.nv2a()->assembled_triangles(),
+                            mach.nv2a()->largest_vertex_index());
+                std::printf("[2bl] NV2A vertex modes:");
+                for (uint32_t mode = 1; mode <= 10; ++mode) {
+                    uint64_t count = mach.nv2a()->primitive_mode_count(mode);
+                    if (count)
+                        std::printf(" %u=%llu", mode, (unsigned long long)count);
+                }
+                std::printf(" formats:");
+                for (uint32_t format = 0; format <= 6; ++format) {
+                    uint64_t count = mach.nv2a()->vertex_format_fetches(format);
+                    if (count)
+                        std::printf(" %u=%llu", format, (unsigned long long)count);
+                }
+                std::printf(" slots:");
+                for (uint32_t slot = 0; slot < 16; ++slot) {
+                    uint64_t count = mach.nv2a()->vertex_slot_fetches(slot);
+                    if (count)
+                        std::printf(" %u=%llu", slot, (unsigned long long)count);
+                }
+                std::printf("\n");
                 std::printf("[2bl] NV2A flip: write-increments=%llu stalls=%llu "
                             "read-increments=%llu notifications=%llu surface=%08x waiting=%u\n",
                             (unsigned long long)mach.nv2a()->flip_increments(),

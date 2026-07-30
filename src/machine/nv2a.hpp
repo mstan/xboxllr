@@ -92,6 +92,21 @@ public:
     uint64_t zeta_clears() const { return zeta_clears_; }
     uint64_t zeta_clear_pixels() const { return zeta_clear_pixels_; }
     uint32_t last_zeta_clear_address() const { return last_zeta_clear_address_; }
+    uint64_t vertex_batches() const { return vertex_batches_; }
+    uint64_t submitted_vertices() const { return submitted_vertices_; }
+    uint64_t vertex_attribute_fetches() const { return vertex_attribute_fetches_; }
+    uint64_t assembled_primitives() const { return assembled_primitives_; }
+    uint64_t assembled_triangles() const { return assembled_triangles_; }
+    uint32_t largest_vertex_index() const { return largest_vertex_index_; }
+    uint64_t primitive_mode_count(uint32_t mode) const {
+        return mode < primitive_mode_counts_.size() ? primitive_mode_counts_[mode] : 0;
+    }
+    uint64_t vertex_format_fetches(uint32_t format) const {
+        return format < vertex_format_fetches_.size() ? vertex_format_fetches_[format] : 0;
+    }
+    uint64_t vertex_slot_fetches(uint32_t slot) const {
+        return slot < vertex_slot_fetches_.size() ? vertex_slot_fetches_[slot] : 0;
+    }
     uint32_t pgraph_surface() const;
     bool waiting_for_flip() const { return waiting_for_flip_; }
     size_t recent_methods(size_t n, std::vector<PushMethod>& out) const {
@@ -199,6 +214,37 @@ private:
     uint64_t zeta_clear_pixels_ = 0;
     uint32_t last_zeta_clear_address_ = 0;
 
+    // Kelvin's array-fed vertex path. The dashboard overwhelmingly submits ARRAY_ELEMENT16:
+    // each method contains two indices. Attribute offsets select vertex DMA A/B with bit 31;
+    // formats carry type/count/stride. At END we fetch every enabled attribute through its
+    // PRAMIN DMA object and assemble the selected primitive topology. This is deliberately
+    // kept separate from raster side effects until the exercised transform state is decoded.
+    struct VertexAttribute {
+        uint32_t offset = 0;
+        uint32_t stride = 0;
+        uint8_t format = 0;
+        uint8_t count = 0;
+        uint8_t element_size = 0;
+        bool dma_b = false;
+        std::array<float, 4> value{{0.0f, 0.0f, 0.0f, 1.0f}};
+    };
+    uint32_t vertex_dma_a_ = 0;
+    uint32_t vertex_dma_b_ = 0;
+    bool vertex_dma_a_bound_ = false;
+    bool vertex_dma_b_bound_ = false;
+    std::array<VertexAttribute, 16> vertex_attributes_{};
+    uint8_t primitive_mode_ = 0;
+    std::vector<uint32_t> vertex_indices_;
+    uint64_t vertex_batches_ = 0;
+    uint64_t submitted_vertices_ = 0;
+    uint64_t vertex_attribute_fetches_ = 0;
+    uint64_t assembled_primitives_ = 0;
+    uint64_t assembled_triangles_ = 0;
+    uint32_t largest_vertex_index_ = 0;
+    std::array<uint64_t, 11> primitive_mode_counts_{};
+    std::array<uint64_t, 7> vertex_format_fetches_{};
+    std::array<uint64_t, 16> vertex_slot_fetches_{};
+
     // Display/scanout state. PRMCIO is the memory-mapped VGA register alias; AvSetDisplayMode
     // programs CRTC pitch/depth there, PRAMDAC display extents, then PCRTC_START.
     std::array<uint8_t, 256> crtc_regs_{};
@@ -225,6 +271,9 @@ private:
                              uint32_t bytes_per_pixel, uint32_t write_mask,
                              uint32_t clear_value, const char* plane,
                              uint32_t& first_address);
+    bool set_vertex_array_format(uint32_t slot, uint32_t parameter);
+    bool submit_vertex_batch();
+    bool fetch_vertex_attribute(uint32_t slot, uint32_t index);
     bool ramht_instance(uint8_t channel, uint32_t handle, uint32_t& instance) const;
     bool dma_object_address(uint32_t instance, uint32_t offset, uint32_t& address) const;
 

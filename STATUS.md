@@ -3,6 +3,36 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-07-30 — A4: indexed Kelvin vertex front-end executes
+
+The dominant array-fed Kelvin path now executes through primitive assembly. PGRAPH resolves
+the two vertex DMA contexts through RAMHT/PRAMIN, tracks all 16 array offset/format slots,
+decodes Xbox vertex formats (UB_D3D, UB_OGL, S1, float, S32K, and packed CMP), and validates
+every fetched element against the DMA limit and unified-memory mapping. `BEGIN_END`,
+`ARRAY_ELEMENT16`, `ARRAY_ELEMENT32`, and `DRAW_ARRAYS` now build the guest's submitted
+index stream and account for all NV097 primitive topologies. Attribute fetches preserve the
+last element values as real PGRAPH state. No pixel mutation is claimed yet: transform/shader
+execution and triangle rasterization remain the next boundary.
+
+The full 6.4B dashboard acceptance run remains fault-free with four KTHREADs, 36,388,327
+PFIFO methods, 486 completed flips, and the unchanged final scanout hash
+`73feb194b7694383`. It executes 436,456 indexed batches containing 48,554,942 submitted
+vertices, performs 99,763,024 validated attribute fetches, and assembles 45,997,592
+triangles. The only exercised array format is float; the topology split is 74,117 triangle,
+194,873 triangle-strip, and 167,466 triangle-fan batches. Slot 0 is present for every vertex;
+slots 1/2/3 dominate the remaining traffic, followed by slot 4 and sparse slots 9/10.
+Maximum observed index is 2,049. The 485 remaining begin/end batches use `INLINE_ARRAY`,
+which is deliberately still recorder-only.
+
+Focused coverage exercises independent vertex DMA A/B selection, float3 and normalized
+UB_D3D attributes, mixed packed-16/32-bit indices, memory fetch, and triangle assembly. The
+direct suite remains 9/9.
+
+**Next:** decode and execute the dashboard's exercised transform-program/constant and
+viewport state, then rasterize the fetched triangle/strip/fan subset into the existing
+color/zeta pitch surfaces. Add `INLINE_ARRAY` after the dominant indexed path produces
+pixels; OHCI TD/XID input and NVNet RX/transport remain later A4 items.
+
 ## 2026-07-28 — A4: Kelvin surface clears execute in unified memory
 
 PFIFO now resolves `SET_OBJECT` through RAMHT, caches each subchannel's PGRAPH object class,

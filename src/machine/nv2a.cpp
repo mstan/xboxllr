@@ -1,6 +1,8 @@
 // xlle — NV2A MMIO register shell. See nv2a.hpp for the value policy.
 #include "machine/nv2a.hpp"
 
+#include <algorithm>
+#include <climits>
 #include <cstdio>
 #include <cstring>
 
@@ -548,6 +550,213 @@ bool Nv2a::clear_surface(uint32_t parameter) {
     return true;
 }
 
+bool Nv2a::set_vertex_array_format(uint32_t slot, uint32_t parameter) {
+    auto& attr = vertex_attributes_[slot];
+    attr.format = static_cast<uint8_t>(parameter & 0xFu);
+    attr.count = static_cast<uint8_t>((parameter >> 4) & 0xFu);
+    attr.stride = parameter >> 8;
+    if (!attr.count) {
+        attr.element_size = 0;
+        return true;
+    }
+    if (attr.count > 4) {
+        fault_("NV2A vertex array has more than four components");
+        return false;
+    }
+    switch (attr.format) {
+    case 0:  // UB_D3D
+        if (attr.count != 4) {
+            fault_("NV2A UB_D3D vertex array must have four components");
+            return false;
+        }
+        attr.element_size = 1;
+        break;
+    case 1:  // signed normalized 16-bit
+        attr.element_size = 2;
+        break;
+    case 2:  // float
+        attr.element_size = 4;
+        break;
+    case 4:  // UB_OGL
+        attr.element_size = 1;
+        break;
+    case 5:  // signed 16-bit, unnormalized
+        attr.element_size = 2;
+        break;
+    case 6:  // signed normalized packed 11/11/10
+        if (attr.count != 1) {
+            fault_("NV2A CMP vertex array must have one packed component");
+            return false;
+        }
+        attr.element_size = 4;
+        break;
+    default:
+        fault_("NV2A vertex array has an unsupported format");
+        return false;
+    }
+    return true;
+}
+
+bool Nv2a::fetch_vertex_attribute(uint32_t slot, uint32_t index) {
+    auto& attr = vertex_attributes_[slot];
+    if (!attr.count) return true;
+
+    const uint32_t dma_instance = attr.dma_b ? vertex_dma_b_ : vertex_dma_a_;
+    const bool dma_bound = attr.dma_b ? vertex_dma_b_bound_ : vertex_dma_a_bound_;
+    if (!dma_bound) {
+        char why[128];
+        std::snprintf(why, sizeof(why),
+                      "NV2A vertex attribute %u uses unbound DMA %c",
+                      slot, attr.dma_b ? 'B' : 'A');
+        fault_(why);
+        return false;
+    }
+
+    const uint64_t element_bytes =
+        static_cast<uint64_t>(attr.element_size) * attr.count;
+    const uint64_t offset64 = static_cast<uint64_t>(attr.offset) +
+                              static_cast<uint64_t>(attr.stride) * index;
+    if (!element_bytes || offset64 > UINT32_MAX ||
+        element_bytes - 1 > UINT32_MAX - offset64) {
+        fault_("NV2A vertex attribute offset overflows");
+        return false;
+    }
+    uint32_t first_address = 0, last_address = 0;
+    if (!dma_object_address(dma_instance, static_cast<uint32_t>(offset64),
+                            first_address) ||
+        !dma_object_address(dma_instance,
+                            static_cast<uint32_t>(offset64 + element_bytes - 1),
+                            last_address) ||
+        last_address < first_address ||
+        static_cast<uint64_t>(last_address) - first_address != element_bytes - 1) {
+        char why[160];
+        std::snprintf(why, sizeof(why),
+                      "NV2A vertex attribute %u index %u exceeds DMA range",
+                      slot, index);
+        fault_(why);
+        return false;
+    }
+
+    std::array<uint8_t, 16> data{};
+    if (!mem_read_ ||
+        !mem_read_(first_address, data.data(), static_cast<size_t>(element_bytes))) {
+        char why[160];
+        std::snprintf(why, sizeof(why),
+                      "NV2A vertex attribute %u DMA read failed at 0x%08x",
+                      slot, first_address);
+        fault_(why);
+        return false;
+    }
+
+    attr.value = {{0.0f, 0.0f, 0.0f, 1.0f}};
+    switch (attr.format) {
+    case 0:
+    case 4:
+        for (uint32_t i = 0; i < attr.count; ++i)
+            attr.value[i] = static_cast<float>(data[i]) / 255.0f;
+        break;
+    case 1:
+        for (uint32_t i = 0; i < attr.count; ++i) {
+            int16_t value = 0;
+            std::memcpy(&value, data.data() + i * 2, 2);
+            attr.value[i] = value == INT16_MIN
+                                ? -1.0f
+                                : static_cast<float>(value) / 32767.0f;
+        }
+        break;
+    case 2:
+        std::memcpy(attr.value.data(), data.data(),
+                    static_cast<size_t>(element_bytes));
+        break;
+    case 5:
+        for (uint32_t i = 0; i < attr.count; ++i) {
+            int16_t value = 0;
+            std::memcpy(&value, data.data() + i * 2, 2);
+            attr.value[i] = static_cast<float>(value);
+        }
+        break;
+    case 6: {
+        int32_t packed = 0;
+        std::memcpy(&packed, data.data(), 4);
+        int32_t x = packed & 0x7FF;
+        int32_t y = (packed >> 11) & 0x7FF;
+        int32_t z = (packed >> 22) & 0x3FF;
+        if (x & 0x400) x |= ~0x7FF;
+        if (y & 0x400) y |= ~0x7FF;
+        if (z & 0x200) z |= ~0x3FF;
+        attr.value[0] = x == -1024 ? -1.0f : static_cast<float>(x) / 1023.0f;
+        attr.value[1] = y == -1024 ? -1.0f : static_cast<float>(y) / 1023.0f;
+        attr.value[2] = z == -512 ? -1.0f : static_cast<float>(z) / 511.0f;
+        break;
+    }
+    default:
+        fault_("NV2A vertex attribute format changed after validation");
+        return false;
+    }
+
+    ++vertex_attribute_fetches_;
+    ++vertex_format_fetches_[attr.format];
+    ++vertex_slot_fetches_[slot];
+    return true;
+}
+
+bool Nv2a::submit_vertex_batch() {
+    if (vertex_indices_.empty()) return true;
+    if (primitive_mode_ == 0 || primitive_mode_ >= primitive_mode_counts_.size()) {
+        fault_("NV2A indexed vertices submitted outside a valid BEGIN/END");
+        return false;
+    }
+
+    for (uint32_t index : vertex_indices_) {
+        largest_vertex_index_ = std::max(largest_vertex_index_, index);
+        for (uint32_t slot = 0; slot < vertex_attributes_.size(); ++slot) {
+            if (!fetch_vertex_attribute(slot, index)) return false;
+        }
+    }
+
+    const uint64_t n = vertex_indices_.size();
+    uint64_t primitives = 0, triangles = 0;
+    switch (primitive_mode_) {
+    case 1:  // points
+        primitives = n;
+        break;
+    case 2:  // lines
+        primitives = n / 2;
+        break;
+    case 3:  // line loop
+        primitives = n >= 2 ? n : 0;
+        break;
+    case 4:  // line strip
+        primitives = n >= 2 ? n - 1 : 0;
+        break;
+    case 5:  // triangles
+        primitives = triangles = n / 3;
+        break;
+    case 6:  // triangle strip
+    case 7:  // triangle fan
+        primitives = triangles = n >= 3 ? n - 2 : 0;
+        break;
+    case 8:  // quads
+        primitives = n / 4;
+        triangles = primitives * 2;
+        break;
+    case 9:  // quad strip
+        primitives = n >= 4 ? (n - 2) / 2 : 0;
+        triangles = primitives * 2;
+        break;
+    case 10:  // polygon
+        primitives = n >= 3 ? 1 : 0;
+        triangles = n >= 3 ? n - 2 : 0;
+        break;
+    }
+    ++vertex_batches_;
+    submitted_vertices_ += n;
+    assembled_primitives_ += primitives;
+    assembled_triangles_ += triangles;
+    ++primitive_mode_counts_[primitive_mode_];
+    return true;
+}
+
 void Nv2a::dispatch_method(uint8_t channel, uint8_t subchannel, uint32_t method,
                            uint32_t parameter) {
     methods_.push(PushMethod{methods_.total(), channel, subchannel,
@@ -610,6 +819,18 @@ void Nv2a::dispatch_method(uint8_t channel, uint8_t subchannel, uint32_t method,
             zeta_dma_ = instance;
             zeta_dma_bound_ = true;
         }
+    } else if (method == 0x019C) {
+        uint32_t instance = 0;
+        if (resolve_object(channel, parameter, instance)) {
+            vertex_dma_a_ = instance;
+            vertex_dma_a_bound_ = true;
+        }
+    } else if (method == 0x01A0) {
+        uint32_t instance = 0;
+        if (resolve_object(channel, parameter, instance)) {
+            vertex_dma_b_ = instance;
+            vertex_dma_b_bound_ = true;
+        }
     // NV097 color-surface state and the first software raster operation.
     } else if (method == 0x0200) {
         surface_clip_horizontal_ = parameter;
@@ -633,6 +854,45 @@ void Nv2a::dispatch_method(uint8_t channel, uint8_t subchannel, uint32_t method,
         clear_rect_vertical_ = parameter;
     } else if (method == 0x1D94) {
         clear_surface(parameter);
+    // Kelvin array-fed vertex submission. ARRAY_ELEMENT16 is non-incrementing and packs two
+    // indices per parameter; the pusher has already expanded non-incrementing method runs.
+    } else if (method >= 0x1720 && method < 0x1760) {
+        const uint32_t slot = (method - 0x1720) / 4;
+        vertex_attributes_[slot].dma_b = (parameter & 0x80000000u) != 0;
+        vertex_attributes_[slot].offset = parameter & 0x7FFFFFFFu;
+    } else if (method >= 0x1760 && method < 0x17A0) {
+        set_vertex_array_format((method - 0x1760) / 4, parameter);
+    } else if (method == 0x17FC) {
+        if (parameter == 0) {
+            if (primitive_mode_ != 0) submit_vertex_batch();
+            primitive_mode_ = 0;
+            vertex_indices_.clear();
+        } else if (parameter <= 10 && primitive_mode_ == 0) {
+            primitive_mode_ = static_cast<uint8_t>(parameter);
+            vertex_indices_.clear();
+        }
+    } else if (method == 0x1800) {
+        if (vertex_indices_.size() > (1u << 24) - 2) {
+            fault_("NV2A indexed vertex batch exceeds safety bound");
+            return;
+        }
+        vertex_indices_.push_back(parameter & 0xFFFFu);
+        vertex_indices_.push_back(parameter >> 16);
+    } else if (method == 0x1808) {
+        if (vertex_indices_.size() >= (1u << 24)) {
+            fault_("NV2A indexed vertex batch exceeds safety bound");
+            return;
+        }
+        vertex_indices_.push_back(parameter);
+    } else if (method == 0x1810) {
+        const uint32_t start = parameter & 0x00FFFFFFu;
+        const uint32_t count = (parameter >> 24) + 1u;
+        if (vertex_indices_.size() > (1u << 24) - count) {
+            fault_("NV2A draw-array batch exceeds safety bound");
+            return;
+        }
+        for (uint32_t i = 0; i < count; ++i)
+            vertex_indices_.push_back(start + i);
     // NV097 semaphore methods. AvSetDisplayMode uses RELEASE as a GPU completion fence.
     } else if (method == 0x01A4) {
         uint32_t instance = 0;

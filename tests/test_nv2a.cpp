@@ -203,6 +203,40 @@ int main() {
     CHECK(get32(ram, 0x502C) == 0);
     CHECK(get32(ram, 0x6000) == 0xABCDEF42);
 
+    // Dominant dashboard draw path: vertex DMA A/B, array formats/offsets, BEGIN/END,
+    // packed 16-bit indices plus one 32-bit index, unified-memory fetch, and assembly.
+    const float positions[] = {
+        10.0f, 20.0f, 0.0f,
+        30.0f, 20.0f, 0.0f,
+        20.0f, 40.0f, 0.0f,
+    };
+    const uint32_t colors[] = {0xff0000ffu, 0xff00ff00u, 0xffff0000u};
+    std::memcpy(ram.data() + 0x7000, positions, sizeof(positions));
+    std::memcpy(ram.data() + 0x7100, colors, sizeof(colors));
+    emit(0x019C, 2);       // vertex DMA A
+    emit(0x01A0, 3);       // vertex DMA B
+    emit(0x1720, 0x00007000);  // position slot 0, DMA A
+    emit(0x1760, 0x00000C32);  // float3, stride 12
+    emit(0x172C, 0x80007100);  // diffuse slot 3, DMA B
+    emit(0x176C, 0x00000440);  // UB_D3D4, stride 4
+    emit(0x17FC, 5);       // triangles
+    emit(0x1800, 0x00010000);  // indices 0, 1
+    emit(0x1808, 2);       // index 2
+    emit(0x17FC, 0);       // END: fetch and assemble
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.vertex_batches() == 1);
+    CHECK(gpu.submitted_vertices() == 3);
+    CHECK(gpu.vertex_attribute_fetches() == 6);
+    CHECK(gpu.assembled_primitives() == 1);
+    CHECK(gpu.assembled_triangles() == 1);
+    CHECK(gpu.largest_vertex_index() == 2);
+    CHECK(gpu.primitive_mode_count(5) == 1);
+    CHECK(gpu.vertex_format_fetches(0) == 3);
+    CHECK(gpu.vertex_format_fetches(2) == 3);
+    CHECK(gpu.vertex_slot_fetches(0) == 3);
+    CHECK(gpu.vertex_slot_fetches(3) == 3);
+
     // AvSetDisplayMode's scanout path: VGA CRTC pitch/depth, PRAMDAC dimensions/format,
     // and PCRTC_START resolve unified-RAM RGB565 into deterministic RGBA output.
     auto crtc_write = [&](uint8_t index, uint8_t value) {

@@ -29,10 +29,10 @@ harvested from xemu, silicon-corrected against a live console. GPL-2.
   completion clear the early AV waits; PGRAPH software notifications plus flip/vblank
   completion finish the boot animation; `xbmc.exe` initializes NVNet and transmits through
   its descriptor engine; guest-programmed scanout can be dumped/presented; and Kelvin
-  color/depth/stencil clears now execute in unified memory.
-- **Immediate burn-down path:** implement the dominant indexed Kelvin draw path
-  (`ARRAY_ELEMENT16`) and its exercised vertex/raster state → extend OHCI into TD execution
-  and XID input → add NVNet RX and external transport.
+  color/depth/stencil clears plus indexed vertex DMA/fetch/primitive assembly now execute.
+- **Immediate burn-down path:** execute the exercised Kelvin transform program/constants and
+  rasterize the fetched triangle/strip/fan path → add `INLINE_ARRAY` → extend OHCI into TD
+  execution and XID input → add NVNet RX and external transport.
 - **Not started:** A5 end-to-end retail-dashboard navigation and Arc 2 game work.
 
 ## Where the boot stands RIGHT NOW
@@ -89,6 +89,12 @@ dependency chain peeled this session is:
     Z16, and Z24S8 clear semantics write validated unified-memory rectangles. At 6.4B, 852
     color and 1,968 zeta clears execute fault-free; the final scanout contains the guest's
     uniform RGB(1,0,1) clear. Geometry remains the next boundary.
+15. dominant indexed geometry front-end → **fixed through fetch and assembly**. Vertex DMA
+    A/B, all 16 array slots, six Xbox formats, `BEGIN_END`, `ARRAY_ELEMENT16/32`, and
+    `DRAW_ARRAYS` now validate and decode guest memory. At 6.4B, 436,456 batches submit
+    48,554,942 vertices, perform 99,763,024 float-attribute fetches, and assemble 45,997,592
+    triangles across triangle/list/strip/fan modes. Transform execution and raster writes
+    are the next boundary; 485 `INLINE_ARRAY` batches remain recorder-only.
 
 ## How to build & run
 
@@ -124,8 +130,8 @@ stand-in is documented in the header of the device that carries it.
 Deliberate documented stand-ins currently in place (fine for boot, replaced later in A4):
 - NV2A PFIFO is a synchronous recorder with semaphore DMA execution; most recorded methods
   still have no CP/raster side effects. Guest-programmed framebuffer selection, host
-  readout/presentation, and Kelvin pitch-surface clears work; vertex fetch, primitive
-  assembly, and triangle rasterization do not yet.
+  readout/presentation, Kelvin pitch-surface clears, and indexed vertex fetch/primitive
+  assembly work. Transform programs, inline arrays, and triangle rasterization do not yet.
 - APU has the load-bearing voice-list, VOICE_OFF, timed idle-voice FE trap, notifier, and IRQ
   lifecycle, but still no DSP/audio synthesis. ACI advances real PCM descriptors and IRQs
   headlessly but produces no host audio.
@@ -176,10 +182,10 @@ Driver: `python tools/xbox_agent.py --host 192.168.4.81 {ping|info|read|exec <fi
 
 ## Next steps (priority order)
 
-1. Implement the indexed Kelvin vertex path first: exercised vertex-array DMA/format state,
-   `BEGIN_END`, and `ARRAY_ELEMENT16` primitive assembly, followed by the smallest observed
-   triangle raster subset. The 500M census is 1,424,796 element16 versus 372 element32, 87
-   draw-arrays, and 348 inline-array submissions.
+1. The indexed Kelvin vertex-array DMA/format, `BEGIN_END`, and `ARRAY_ELEMENT16`
+   fetch/assembly path is landed. Next execute the exercised transform program/constants
+   and viewport state, then rasterize triangle-list/strip/fan output into the existing
+   color/zeta surfaces. Add the sparse `INLINE_ARRAY` path after indexed output works.
 2. Extend OHCI: control/bulk TD execution first, then the Xbox XID controller protocol and
    host input mapping.
 3. Add NVNet RX descriptor DMA and external packet transport when the guest or navigation

@@ -12,7 +12,7 @@ machine-verifiable evidence that closed it.
 - Crucibles gate subsystem admission: a subsystem's conformance crucible passes **before** the
   milestone that first relies on it.
 
-## Burndown snapshot — 2026-07-28
+## Burndown snapshot — 2026-07-30
 
 | Milestone | State | Evidence / remaining gate |
 | --- | --- | --- |
@@ -20,7 +20,7 @@ machine-verifiable evidence that closed it.
 | A1 | **PARTIAL / DEFERRED** | Real-console agent and hardware probes work; pinned deterministic xemu-TCG cosim is still owed. |
 | A2 | **DONE** | Retail 4983 kernel reaches executive/IO init, services IRQs, completes phase-1, mounts FATX, and maps the dashboard XBE. |
 | A3 | **PARTIAL** | Unicorn's dynamic translator is the normal tier; page versioning and SMC/decryption invalidation proof remain. |
-| A4 | **IN PROGRESS** | Boot animation/XBE launch, PFIFO, NVNet TX DMA, 720x480 scanout/readout, and Kelvin color/Z/stencil clears work; 8B recorder-only and 6.4B clear-executing runs are fault-free. The final target contains the guest clear color but no geometry. Next: dominant indexed Kelvin vertex/triangle path, then OHCI TD/XID input and NVNet RX/transport. |
+| A4 | **IN PROGRESS** | Boot animation/XBE launch, PFIFO, NVNet TX DMA, 720x480 scanout/readout, Kelvin color/Z/stencil clears, and indexed vertex DMA/fetch/primitive assembly work. A 6.4B run executes 436,456 indexed batches / 99,763,024 attribute fetches fault-free; the final target still contains only the guest clear color. Next: transform-program execution and triangle rasterization, then inline arrays, OHCI TD/XID input, and NVNet RX/transport. |
 | A5 | **NOT STARTED** | Requires A4 dashboard execution and rendering. |
 | Arc 2 | **NOT STARTED** | Explicitly out of current scope. |
 
