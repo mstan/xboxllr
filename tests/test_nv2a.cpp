@@ -1091,6 +1091,160 @@ int main() {
     CHECK(gpu.pitch_single_texture_output_hash() !=
           1469598103934665603ull);
 
+    // The leading multi-texture pitch state cube-remaps stages 0/1 into one
+    // 64x64 image. Their expanded-RGB dot drives alpha through
+    // 1-(1-max(dot,0))^2; RGB is the stage-4 c0 tint. GEQUAL-one alpha then
+    // gates SRC_ALPHA/ONE_MINUS_SRC_ALPHA blending and writable LEQUAL Z24;
+    // the programmed polygon-offset values remain disabled by raster state.
+    const float pitch_multi_positions[] = {
+        10.0f, 10.0f, 100.0f, 1.0f,
+        50.0f, 10.0f, 100.0f, 1.0f,
+        10.0f, 50.0f, 100.0f, 1.0f,
+    };
+    std::memcpy(ram.data() + 0x7000, pitch_multi_positions,
+                sizeof(pitch_multi_positions));
+    std::memcpy(ram.data() + 0x7500, texture1_coords,
+                sizeof(texture1_coords));
+    std::memcpy(ram.data() + 0x7600, texture2_coords,
+                sizeof(texture2_coords));
+    std::memset(ram.data() + 0xA0000, 0, 64 * 64 * 4);
+    for (uint32_t y : {16u, 17u})
+        for (uint32_t x : {16u, 17u})
+            put_rgb_texture(0xA0000, 64, 64, x, y, 0xFFFFFFFF);
+    for (uint32_t y : {48u, 49u})
+        for (uint32_t x : {48u, 49u})
+            put_rgb_texture(0xA0000, 64, 64, x, y, 0xFF959595);
+    for (uint32_t offset = 0; offset < 64 * 64 * 4; offset += 4) {
+        put32(ram, 0x20000 + offset, 0x80402010);
+        put32(ram, 0x60000 + offset, 0xFFFFFF5A);
+    }
+
+    emit(0x0200, 0x00400000);
+    emit(0x0204, 0x00400000);
+    emit(0x0208, 0x00000128);
+    emit(0x020C, 0x01000100);
+    emit(0x0210, 0x00020000);
+    emit(0x0214, 0x00060000);
+    emit(0x02C0, 0x003F0000);
+    emit(0x02E0, 0x003F0000);
+    emit(0x0300, 1);
+    emit(0x0304, 1);
+    emit(0x0308, 1);
+    emit(0x030C, 1);
+    emit(0x033C, 0x0206);
+    emit(0x0340, 1);
+    emit(0x0344, 0x0302);
+    emit(0x0348, 0x0303);
+    emit(0x0350, 0x8006);
+    emit(0x0354, 0x0203);
+    emit(0x0358, 0x01010101);
+    emit(0x035C, 1);
+    emit(0x0384, 0x40800000);
+    emit(0x0388, 0x41200000);
+    emit(0x1D78, 1);
+    emit(0x1720, 0x00007000);
+    emit(0x1744, 0x00007500);
+    emit(0x1748, 0x00007600);
+    emit(0x1784, 0x00001042);
+    emit(0x1788, 0x00001042);
+    for (uint32_t stage = 0; stage < 4; ++stage) {
+        const uint32_t base = 0x1B00 + stage * 0x40;
+        emit(base + 0x00, stage < 2 ? 0x000A0000 : 0);
+        emit(base + 0x04, stage < 2 ? 0x0661072E : 0);
+        emit(base + 0x08, stage < 2 ? 0x00030303 : 0);
+        emit(base + 0x0C, stage < 2 ? 0x4003FFC0 : 0);
+        emit(base + 0x10, stage == 0 ? 0x14000000 : 0);
+        emit(base + 0x14, stage < 2 ? 0x02022000 : 0);
+        emit(base + 0x1C, stage == 0 ? 0x050001E0 : 0);
+        emit(base + 0x20, 0);
+        emit(base + 0x24, 0);
+    }
+    emit(0x1E6C, 7);
+    emit(0x1E70, 0x00000063);
+    emit(0x1E74, 0);
+    emit(0x1E78, 0);
+    emit(0x1E60, 0x00011106);
+    const uint32_t pitch_multi_color_icw[] = {
+        0x48490000, 0x0C200000, 0x2D2D0000,
+        0x2CC10000, 0xCC20C120, 0x00000000,
+    };
+    const uint32_t pitch_multi_alpha_icw[] = {
+        0x00000000, 0x1C301010, 0x3D3D1010,
+        0x3CD11010, 0x00000000, 0xDCD11010,
+    };
+    const uint32_t pitch_multi_color_ocw[] = {
+        0x000820C0, 0x000000D0, 0x000000C0,
+        0x000000C0, 0x00000C00, 0x00000000,
+    };
+    const uint32_t pitch_multi_alpha_ocw[] = {
+        0x00000000, 0x000000D0, 0x000000C0,
+        0x000000C0, 0x00000000, 0x000000C0,
+    };
+    const uint32_t pitch_multi_factor0[] = {
+        0, 0, 0, 0xFF000000, 0xFF0D3308, 0xFFFFFFFF,
+    };
+    for (uint32_t stage = 0; stage < 6; ++stage) {
+        emit(0x0AC0 + stage * 4, pitch_multi_color_icw[stage]);
+        emit(0x0260 + stage * 4, pitch_multi_alpha_icw[stage]);
+        emit(0x1E40 + stage * 4, pitch_multi_color_ocw[stage]);
+        emit(0x0AA0 + stage * 4, pitch_multi_alpha_ocw[stage]);
+        emit(0x0A60 + stage * 4, pitch_multi_factor0[stage]);
+        emit(0x0A80 + stage * 4, 0);
+    }
+    emit(0x0288, 0x0000000C);
+    emit(0x028C, 0x00001C80);
+    emit(0x1E20, 0);
+    emit(0x1E24, 0);
+    emit(0x17FC, 6);
+    emit(0x1800, 0x00010000);
+    emit(0x1808, 2);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.pitch_multi_texture_batches() == 1);
+    CHECK(gpu.pitch_multi_texture_triangles() == 1);
+    CHECK(gpu.pitch_multi_texture_fragments() > 0);
+    CHECK(gpu.pitch_multi_texture_depth_passes() ==
+          gpu.pitch_multi_texture_alpha_passes());
+    CHECK(gpu.pitch_multi_texture_alpha_passes() ==
+          gpu.pitch_multi_texture_color_writes());
+    CHECK(gpu.pitch_multi_texture_color_writes() ==
+          gpu.pitch_multi_texture_depth_writes());
+    CHECK(gpu.pitch_multi_texture_samples() ==
+          gpu.pitch_multi_texture_depth_passes() * 2);
+    CHECK(get32(ram, 0x20000 + pitch_textured_inside) == 0xB1192E0Au);
+    CHECK(get32(ram, 0x60000 + pitch_textured_inside) == 0x0000645Au);
+    CHECK(gpu.last_pitch_multi_texture_raster_address() >= 0x20000);
+    CHECK(gpu.last_pitch_multi_texture_raster_address() < 0x24000);
+    CHECK(gpu.pitch_multi_texture_output_hash() !=
+          1469598103934665603ull);
+
+    const uint64_t pitch_multi_alpha =
+        gpu.pitch_multi_texture_alpha_passes();
+    const uint64_t pitch_multi_writes =
+        gpu.pitch_multi_texture_color_writes();
+    const uint64_t pitch_multi_samples =
+        gpu.pitch_multi_texture_samples();
+    for (uint32_t y : {48u, 49u})
+        for (uint32_t x : {48u, 49u})
+            put_rgb_texture(0xA0000, 64, 64, x, y, 0xFF000000);
+    emit(0x17FC, 6);
+    emit(0x1800, 0x00010000);
+    emit(0x1808, 2);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.pitch_multi_texture_batches() == 2);
+    CHECK(gpu.pitch_multi_texture_triangles() == 2);
+    CHECK(gpu.pitch_multi_texture_alpha_passes() == pitch_multi_alpha);
+    CHECK(gpu.pitch_multi_texture_color_writes() == pitch_multi_writes);
+    CHECK(gpu.pitch_multi_texture_depth_writes() == pitch_multi_writes);
+    CHECK(gpu.pitch_multi_texture_samples() > pitch_multi_samples);
+    CHECK(gpu.pitch_multi_texture_samples() ==
+          gpu.pitch_multi_texture_depth_passes() * 2);
+    CHECK(get32(ram, 0x20000 + pitch_textured_inside) == 0xB1192E0Au);
+    CHECK(get32(ram, 0x60000 + pitch_textured_inside) == 0x0000645Au);
+
     // Inline dashboard geometry uses a distinct linear color profile:
     // PROJECT2D texture * c0, alpha GEQUAL 1, then SRC_ALPHA/ONE ADD.
     // The ALWAYS depth state must neither read nor write the zeta plane.

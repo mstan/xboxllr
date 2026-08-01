@@ -3,6 +3,41 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-01 — A4: pitch two-cube alpha-blend family executes
+
+The leading retained `shader=0x63` state now executes its indexed triangle
+strips on the shared 1280x480 pitch A8R8G8B8/Z24S8 targets. Stages 0/1
+cube-remap distinct interpolated directions and bilinearly sample the same
+64x64 swizzled image. The six-stage combiner dots their expanded RGB values,
+turns the clamped positive result into alpha through
+`1-(1-dot)^2`, and supplies constant stage-4 RGB `0x0D3308`.
+GEQUAL-one alpha gates SRC_ALPHA/ONE_MINUS_SRC_ALPHA blending; passing LEQUAL
+fragments update color and Z24 while preserving stencil. Programmed polygon
+offset values remain inert because the corresponding enable bit is clear.
+
+Focused coverage verifies exact fractional-alpha output `0xB1192E0A` over a
+known destination, texture addressing/filtering, depth/stencil output, two
+samples per depth pass, and a second zero-alpha draw that samples but changes
+neither plane. The first long replay stopped fail-closed before writes because
+the depth-write boolean had been mistaken for the adjacent stencil mask in the
+census line. Exact state inspection corrected the gate to the witnessed TRUE
+encoding. All nine direct tests pass. The 500M smoke replay remains fault-free
+with empty stderr and reaches no instances; a 1B cross-boundary replay executes
+the complete family fault-free.
+
+The final 6.4B acceptance replay reaches budget fault-free with empty stderr.
+All 120 retained batches execute, rasterizing 11,411 front-facing strip
+triangles and 30,808 fragments. Of those, 18,094 pass depth and perform 36,188
+cube samples; 16,485 pass alpha and commit paired color/Z24 writes with
+deterministic hash `fbe1b6125ce84364`. Recorder-only volume falls from 4,263
+to 4,143 batches and from 963 to 962 states. Every prior raster hash and count
+is unchanged, as are transform `2824162d794cc5de`, inline
+`1567692d051ce1d8`, and final scanout `73feb194b7694383`.
+
+**Next:** decode the leading remaining 106-batch inline one-texture
+triangle-list state, then the three-texture `shader=0x63` variants and
+host-input plumbing.
+
 ## 2026-08-01 — A4: pitch single-texture fan family executes
 
 The leading remaining pitch draw state now executes instead of staying in the

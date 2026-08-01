@@ -722,6 +722,20 @@ int main(int argc, char** argv) {
                             (unsigned long long)mach.nv2a()->pitch_single_texture_samples(),
                             mach.nv2a()->last_pitch_single_texture_raster_address(),
                             (unsigned long long)mach.nv2a()->pitch_single_texture_output_hash());
+                std::printf("[2bl] NV2A pitch-multi: batches/tri/frags/depth/"
+                            "alpha/zwrite/cwrite/samples="
+                            "%llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu "
+                            "last=%08x hash=%016llx\n",
+                            (unsigned long long)mach.nv2a()->pitch_multi_texture_batches(),
+                            (unsigned long long)mach.nv2a()->pitch_multi_texture_triangles(),
+                            (unsigned long long)mach.nv2a()->pitch_multi_texture_fragments(),
+                            (unsigned long long)mach.nv2a()->pitch_multi_texture_depth_passes(),
+                            (unsigned long long)mach.nv2a()->pitch_multi_texture_alpha_passes(),
+                            (unsigned long long)mach.nv2a()->pitch_multi_texture_depth_writes(),
+                            (unsigned long long)mach.nv2a()->pitch_multi_texture_color_writes(),
+                            (unsigned long long)mach.nv2a()->pitch_multi_texture_samples(),
+                            mach.nv2a()->last_pitch_multi_texture_raster_address(),
+                            (unsigned long long)mach.nv2a()->pitch_multi_texture_output_hash());
                 std::printf("[2bl] NV2A inline-color: batches/tri/frags/alpha/"
                             "writes/samples=%llu/%llu/%llu/%llu/%llu/%llu "
                             "last=%08x hash=%016llx\n",
