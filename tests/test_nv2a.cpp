@@ -42,7 +42,7 @@ static uint32_t swizzled_pixel_index(uint32_t x, uint32_t y,
 int main() {
     std::string fault;
     xlle::Nv2a gpu([&](const std::string& why) { fault = why; });
-    std::vector<uint8_t> ram(0x100000, 0);
+    std::vector<uint8_t> ram(0x800000, 0);
     gpu.set_mem_access(
         [&](uint32_t addr, void* dst, size_t n) {
             if (addr + n > ram.size()) return false;
@@ -169,16 +169,16 @@ int main() {
     CHECK(fault.empty());
     CHECK(gpu.push_methods() == methods_before_reset);
 
-    // Kelvin pitch-surface clear: handle 2 maps a zero-based 64 KiB color DMA object.
+    // Kelvin resources share zero-based unified-memory DMA objects.
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700010, 4, 0x00000002);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700014, 4, 0x80010030);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700018, 4, 0x00000003);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x70001C, 4, 0x80010040);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700300, 4, 0x0000003D);
-    gpu.mmio_write(xlle::Nv2a::kBase + 0x700304, 4, 0x000FFFFF);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700304, 4, 0x007FFFFF);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700308, 4, 0x00000000);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700400, 4, 0x0000003D);
-    gpu.mmio_write(xlle::Nv2a::kBase + 0x700404, 4, 0x000FFFFF);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700404, 4, 0x007FFFFF);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700408, 4, 0x00000000);
     uint32_t cursor = 0;
     auto emit = [&](uint32_t method, uint32_t parameter) {
@@ -988,6 +988,108 @@ int main() {
     CHECK(gpu.projected_color_batches() == 3);
     CHECK(gpu.projected_color_writes() >
           projected_writes_before_inline);
+
+    // The next pitch family draws four-vertex fans with one PROJECT2D
+    // 1024x1024 texture. U/V use opaque-black CLAMP_TO_BORDER; sampling
+    // exactly at zero blends one in-range texel with three border texels.
+    const float pitch_single_positions[] = {
+        10.0f, 10.0f, 100.0f, 1.0f,
+        50.0f, 10.0f, 100.0f, 1.0f,
+        50.0f, 50.0f, 100.0f, 1.0f,
+        10.0f, 50.0f, 100.0f, 1.0f,
+    };
+    const uint32_t pitch_single_colors[] = {
+        0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF,
+    };
+    const float pitch_single_texcoords[] = {
+        0.0f, 0.0f, 0.0f, 1.0f,
+        0.0f, 0.0f, 0.0f, 1.0f,
+        0.0f, 0.0f, 0.0f, 1.0f,
+        0.0f, 0.0f, 0.0f, 1.0f,
+    };
+    std::memcpy(ram.data() + 0x7000, pitch_single_positions,
+                sizeof(pitch_single_positions));
+    std::memcpy(ram.data() + 0x7100, pitch_single_colors,
+                sizeof(pitch_single_colors));
+    std::memcpy(ram.data() + 0x7400, pitch_single_texcoords,
+                sizeof(pitch_single_texcoords));
+    std::memset(ram.data() + 0x100000, 0, 1024 * 1024 * 4);
+    put32(ram, 0x100000, 0xFF804020);
+    std::memset(ram.data() + 0x20000, 0, 64 * 64 * 4);
+    for (uint32_t offset = 0; offset < 64 * 64 * 4; offset += 4)
+        put32(ram, 0x60000 + offset, 0xFFFFFF5Au);
+
+    emit(0x0200, 0x00400000);
+    emit(0x0204, 0x00400000);
+    emit(0x0208, 0x00000128);
+    emit(0x020C, 0x01000100);
+    emit(0x0210, 0x00020000);
+    emit(0x0214, 0x00060000);
+    emit(0x02C0, 0x003F0000);
+    emit(0x02E0, 0x003F0000);
+    emit(0x0300, 0);
+    emit(0x0304, 1);
+    emit(0x0308, 1);
+    emit(0x030C, 1);
+    emit(0x033C, 0x0206);
+    emit(0x0340, 1);
+    emit(0x0344, 1);
+    emit(0x0348, 0);
+    emit(0x0350, 0x8006);
+    emit(0x0354, 0x0203);
+    emit(0x0358, 0x01010101);
+    emit(0x035C, 0);
+    emit(0x1D78, 1);
+    emit(0x1720, 0x00007000);
+    emit(0x172C, 0x80007100);
+    emit(0x1744, 0x00007400);
+    emit(0x1B00, 0x00100000);
+    emit(0x1B04, 0x0AA1062A);
+    emit(0x1B08, 0x00030404);
+    emit(0x1B0C, 0x4003FFC0);
+    emit(0x1B10, 0x14000000);
+    emit(0x1B14, 0x02022000);
+    emit(0x1B1C, 0x050001E0);
+    emit(0x1B20, 0);
+    emit(0x1B24, 0xFF000000);
+    emit(0x1B4C, 0);
+    emit(0x1B8C, 0);
+    emit(0x1BCC, 0);
+    emit(0x1E6C, 7);
+    emit(0x1E70, 0x00000001);
+    emit(0x1E74, 0);
+    emit(0x1E78, 0x00210000);
+    emit(0x1E60, 0x00000001);
+    emit(0x0AC0, 0x08200000);
+    emit(0x0260, 0x11200000);
+    emit(0x1E40, 0x00000C00);
+    emit(0x0AA0, 0x00000C00);
+    emit(0x0A60, 0xFFFFFFFF);
+    emit(0x0A80, 0xFFFFFFFF);
+    emit(0x0288, 0x0000000C);
+    emit(0x028C, 0x00001C80);
+    emit(0x1E20, 0);
+    emit(0x1E24, 0);
+    emit(0x17FC, 7);
+    emit(0x1800, 0x00010000);
+    emit(0x1800, 0x00030002);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.pitch_single_texture_batches() == 1);
+    CHECK(gpu.pitch_single_texture_triangles() == 2);
+    CHECK(gpu.pitch_single_texture_fragments() > 0);
+    CHECK(gpu.pitch_single_texture_depth_passes() ==
+          gpu.pitch_single_texture_writes());
+    CHECK(gpu.pitch_single_texture_samples() ==
+          gpu.pitch_single_texture_writes());
+    CHECK(gpu.pitch_single_texture_writes() > 0);
+    CHECK(get32(ram, 0x20000 + pitch_textured_inside) == 0xFF201008u);
+    CHECK(get32(ram, 0x60000 + pitch_textured_inside) == 0xFFFFFF5Au);
+    CHECK(gpu.last_pitch_single_texture_raster_address() >= 0x20000);
+    CHECK(gpu.last_pitch_single_texture_raster_address() < 0x24000);
+    CHECK(gpu.pitch_single_texture_output_hash() !=
+          1469598103934665603ull);
 
     // Inline dashboard geometry uses a distinct linear color profile:
     // PROJECT2D texture * c0, alpha GEQUAL 1, then SRC_ALPHA/ONE ADD.

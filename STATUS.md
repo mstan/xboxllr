@@ -3,6 +3,41 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-01 — A4: pitch single-texture fan family executes
+
+The leading remaining pitch draw state now executes instead of staying in the
+recorder. Its four-vertex triangle fans PROJECT2D-divide stage-0 coordinates
+and bilinearly sample the witnessed 1024x1024 swizzled A8R8G8B8 image. U/V
+CLAMP_TO_BORDER uses the programmed opaque-black border, while the exact
+one-stage combiner copies texture RGB and forces output alpha to one. ONE/ZERO
+blending therefore replaces pitch A8R8G8B8 color. The accompanying Z24S8
+surface is tested with LEQUAL but remains read-only, including stencil.
+
+The shared sampler now models repeat, clamp-to-edge, and border addressing
+explicitly. Focused coverage samples exactly at normalized zero, where bilinear
+filtering combines one `0xFF804020` texel with three opaque-black border texels
+to produce `0xFF201008`; it also proves two-triangle fan assembly, exact pitch
+placement, read-only passing depth/stencil, separate counters, and a
+deterministic output hash. All nine direct tests pass. The 500M smoke replay is
+fault-free with empty stderr and correctly reaches no instances of this later
+family.
+
+The final 6.4B acceptance replay reaches its instruction budget fault-free with
+empty stderr. It executes all 121 retained batches and 242 front-facing
+triangles, covers and passes 74,342,400 fragments, and performs 74,342,400
+samples and color-only writes with deterministic hash `e734e675e998af83`.
+Recorder-only volume falls from 4,384 to 4,263 batches. Every prior raster
+counter and hash remains unchanged, including depth `9424b7ed8661f321`,
+radial `b57945aef12a9289`, swizzled textured `537c8e788aaf4e83`,
+pitch textured `6ba31850c2d5eb56`, swizzled projected
+`117e65d4ec81492a`, pitch projected `4ebdb2f4475cd80c`, and inline
+`1567692d051ce1d8`. Transform and final scanout remain
+`2824162d794cc5de` and `73feb194b7694383`.
+
+**Next:** decode and execute the remaining multi-texture `shader=0x63`
+pitch family, then continue the low-frequency state census and host-input
+plumbing.
+
 ## 2026-08-01 — A4: pitch-projected textured family executes
 
 The remaining pitch-surface `0x10c61` family now reuses the validated

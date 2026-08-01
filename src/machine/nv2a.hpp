@@ -213,6 +213,30 @@ public:
     uint64_t pitch_projected_color_output_hash() const {
         return pitch_projected_color_output_hash_;
     }
+    uint64_t pitch_single_texture_batches() const {
+        return pitch_single_texture_batches_;
+    }
+    uint64_t pitch_single_texture_triangles() const {
+        return pitch_single_texture_triangles_;
+    }
+    uint64_t pitch_single_texture_fragments() const {
+        return pitch_single_texture_fragments_;
+    }
+    uint64_t pitch_single_texture_depth_passes() const {
+        return pitch_single_texture_depth_passes_;
+    }
+    uint64_t pitch_single_texture_writes() const {
+        return pitch_single_texture_writes_;
+    }
+    uint64_t pitch_single_texture_samples() const {
+        return pitch_single_texture_samples_;
+    }
+    uint32_t last_pitch_single_texture_raster_address() const {
+        return last_pitch_single_texture_raster_address_;
+    }
+    uint64_t pitch_single_texture_output_hash() const {
+        return pitch_single_texture_output_hash_;
+    }
     uint64_t inline_color_batches() const { return inline_color_batches_; }
     uint64_t inline_color_triangles() const { return inline_color_triangles_; }
     uint64_t inline_color_fragments() const { return inline_color_fragments_; }
@@ -526,6 +550,14 @@ private:
     uint64_t pitch_projected_texture_samples_ = 0;
     uint32_t last_pitch_projected_raster_address_ = 0;
     uint64_t pitch_projected_color_output_hash_ = 1469598103934665603ull;
+    uint64_t pitch_single_texture_batches_ = 0;
+    uint64_t pitch_single_texture_triangles_ = 0;
+    uint64_t pitch_single_texture_fragments_ = 0;
+    uint64_t pitch_single_texture_depth_passes_ = 0;
+    uint64_t pitch_single_texture_writes_ = 0;
+    uint64_t pitch_single_texture_samples_ = 0;
+    uint32_t last_pitch_single_texture_raster_address_ = 0;
+    uint64_t pitch_single_texture_output_hash_ = 1469598103934665603ull;
     uint64_t inline_color_batches_ = 0;
     uint64_t inline_color_triangles_ = 0;
     uint64_t inline_color_fragments_ = 0;
