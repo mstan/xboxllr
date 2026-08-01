@@ -1459,8 +1459,6 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         raster_state_[kRasterCombinerAlphaIcw0] == 0x14200000 &&
         raster_state_[kRasterCombinerColorOcw0] == 0x00000C00 &&
         raster_state_[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
-        raster_state_[kRasterCombinerFactor0_0] == 0xFFFFFFFF &&
-        raster_state_[kRasterCombinerFactor1_0] == 0xFFFFFFFF &&
         raster_state_[kRasterCombinerSpecularFog0] == 0x0000000C &&
         raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80 &&
         raster_state_[kRasterCombinerFinalFactor0] == 0 &&
@@ -1474,6 +1472,19 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         raster_state_[kRasterTextureImageRect0] == 0x050001E0 &&
         raster_state_[kRasterTexturePalette0] == 0 &&
         raster_state_[kRasterTextureBorderColor0] == 0xFF000000;
+    const bool inline_linear_blit_surface =
+        primitive_mode_ == 5 && surface_type == 1 &&
+        anti_aliasing == 0 && color_format == 8 && zeta_format == 2 &&
+        surface_pitch_ == 0x0A000A00 &&
+        surface_clip_horizontal_ == 0x02800000 &&
+        surface_clip_vertical_ == 0x01E00000 &&
+        enables == 0x0010u &&
+        raster_state_[kRasterControl0] == 0x00100001 &&
+        raster_state_[kRasterColorMask] == 0x01010101 &&
+        raster_state_[kRasterShadeMode] == 0x1D01 &&
+        raster_state_[kRasterFrontPolygonMode] == 0x1B02 &&
+        raster_state_[kRasterBackPolygonMode] == 0x1B02 &&
+        raster_state_[kRasterZMinMaxControl] == 1;
     const bool pitch_single_texture_combiner =
         raster_state_[kRasterTextureEnableMask] == 1 &&
         raster_state_[kRasterShaderStageProgram] == 0x00000001 &&
@@ -1535,7 +1546,8 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                pitch_three_texture_state) {
         profile = Profile::kPitchThreeTextureColor;
     } else if (inline_linear_blit_combiner &&
-               inline_linear_blit_texture) {
+               inline_linear_blit_texture &&
+               inline_linear_blit_surface) {
         profile = Profile::kInlineLinearBlitColor;
     } else if (pitch_single_texture_combiner) {
         profile = Profile::kPitchSingleTextureColor;
@@ -1621,22 +1633,11 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
             surface_clip_vertical_ != 0x01E00000 ||
             enables != 0x0010u ||
             raster_state_[kRasterControl0] != 0x00100001 ||
-            raster_state_[kRasterAlphaFunc] != 0x0206 ||
-            (raster_state_[kRasterAlphaRef] & 0xFFu) != 1 ||
-            raster_state_[kRasterBlendSrc] != 1 ||
-            raster_state_[kRasterBlendDst] != 0 ||
-            raster_state_[kRasterBlendEquation] != 0x8006 ||
-            raster_state_[kRasterDepthFunc] != 0x0203 ||
             raster_state_[kRasterColorMask] != 0x01010101 ||
-            raster_state_[kRasterDepthMask] != 1 ||
             raster_state_[kRasterShadeMode] != 0x1D01 ||
             raster_state_[kRasterFrontPolygonMode] != 0x1B02 ||
             raster_state_[kRasterBackPolygonMode] != 0x1B02 ||
-            raster_state_[kRasterCullFace] != 0x0405 ||
-            raster_state_[kRasterFrontFace] != 0x0900 ||
-            raster_state_[kRasterZMinMaxControl] != 1 ||
-            raster_state_[kRasterPolygonOffsetScale] != 0x80000000 ||
-            raster_state_[kRasterPolygonOffsetBias] != 0x80000000) {
+            raster_state_[kRasterZMinMaxControl] != 1) {
             fault_("NV2A inline linear-blit draw exceeds the witnessed raster subset");
             return false;
         }

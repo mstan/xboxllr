@@ -236,6 +236,15 @@ dependency chain peeled this session is:
     `a9f6884dc0abadf3`. Recorder-only volume falls from 4,037 to 1,933 batches and 961 to
     860 states. Independent hashes and final scanout remain stable; the later shared-target
     inline-additive hash rebaselines to `763144f45d489441`.
+32. disabled-state inline linear-blit variants → **fixed through semantic state matching**.
+    With only dither enabled on A8R8G8B8, programmed combiner constants, alpha/blend/depth/
+    cull functions, and polygon offsets are inert. The profile now keys on output-affecting
+    geometry, surface, texture, combiner, mask, shade, control, and clip state while focused
+    coverage proves captured `C4A0FF60` factors and SRC_ALPHA blend programming do not alter
+    output. At 6.4B, 62 additional batches across two states raise the combined profile to
+    168 triangles and 51,609,600 samples/writes with hash `3f1f5a430082ada4`.
+    Recorder-only volume falls from 1,933 to 1,871 batches and 860 to 858 states; every
+    independent raster, transform, downstream inline-additive, and scanout hash is stable.
 
 ## How to build & run
 
@@ -337,10 +346,10 @@ Driver: `python tools/xbox_agent.py --host 192.168.4.81 {ping|info|read|exec <fi
 
 ## Next steps (priority order)
 
-1. Broaden the linear inline-blit profile over the leading 47-batch variant's inert
-   combiner-factor constants, then decode the 42-batch `tex=5` pitch triangle-list
-   states and continue the remaining low-frequency Kelvin census. The indexed/inline
-   submission paths and every currently witnessed high-volume raster profile are landed.
+1. Decode the leading 42-batch `tex=5` pitch triangle-list states, including the
+   `shader=0xc01` projected/cube path and its combiner-only sibling, then continue the
+   remaining low-frequency Kelvin census. The indexed/inline submission paths and every
+   currently witnessed high-volume raster profile are landed.
 2. OHCI TD scheduling and the Xbox XID controller protocol are landed. Plumb host input
    mapping when dashboard navigation begins exercising endpoint 2.
 3. Exercise the landed NVNet UDP tunnel against a useful peer/bridge as navigation requires;

@@ -1530,6 +1530,26 @@ int main() {
     CHECK(get32(ram, 0x400000 + inline_blit_inside) == 0x80202000);
     CHECK(get32(ram, 0x60000) == 0xDEADBEEF);
 
+    // A later retained variant changes c0/c1, which this combiner never
+    // references, plus blend factors while blending is disabled. Both captured
+    // differences must leave output and coverage exact.
+    emit(0x0A60, 0xC4A0FF60);
+    emit(0x0A80, 0xC4A0FF60);
+    emit(0x0344, 0x0302);
+    emit(0x0348, 0x0303);
+    emit(0x17FC, 5);
+    emit(0x1800, 0x00010000);
+    emit(0x1808, 2);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.inline_linear_blit_batches() == 3);
+    CHECK(gpu.inline_linear_blit_triangles() == 3);
+    CHECK(gpu.inline_linear_blit_writes() ==
+          inline_blit_first_writes * 3);
+    CHECK(get32(ram, 0x400000 + inline_blit_inside) == 0x80202000);
+    CHECK(get32(ram, 0x60000) == 0xDEADBEEF);
+
     // Inline dashboard geometry uses a distinct linear color profile:
     // PROJECT2D texture * c0, alpha GEQUAL 1, then SRC_ALPHA/ONE ADD.
     // The ALWAYS depth state must neither read nor write the zeta plane.

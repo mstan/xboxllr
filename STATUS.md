@@ -3,6 +3,40 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-01 — A4: disabled-state inline blit variants execute
+
+The linear dashboard-blit profile now classifies state semantically rather than
+requiring exact values in registers whose features are disabled. With enable
+mask `0x10`, only dithering is active and remains inert for A8R8G8B8; combiner
+c0/c1, alpha-test configuration, blend factors/equation, depth
+function/write mask, cull orientation, and polygon-offset values cannot affect
+the draw. The profile continues to require its exact triangle-list geometry,
+640x480 pitch target, 1280x480 linear texture signature, combiner
+inputs/outputs, color mask, shade/polygon modes, control, and clip state.
+
+Focused coverage programs the captured `C4A0FF60` c0/c1 pair and
+SRC_ALPHA/ONE_MINUS_SRC_ALPHA blend factors while those paths are disabled,
+then verifies unchanged `0x80202000` bilinear output, coverage, depth
+isolation, and reversed-winding behavior. Two intermediate long replays proved
+why both sides of the semantic boundary matter: a combiner-only selector
+misclassified an earlier unrelated state at 4.021B, while an exact raster
+selector left the target variant recorder-only because of its inert blend
+programming. The final output-affecting predicate passes all nine direct tests
+and the 500M smoke fault-free with empty stderr.
+
+The final 6.4B acceptance replay reaches budget fault-free with empty stderr.
+It executes 62 additional batches across two retained states, bringing the
+combined inline-blit profile to 168 batches/triangles and 51,609,600
+fragments, writes, and samples with deterministic hash `3f1f5a430082ada4`.
+Recorder-only volume falls from 1,933 to 1,871 batches and from 860 to 858
+states. Every independent raster hash remains unchanged; pitch-three stays
+`a9f6884dc0abadf3`, inline additive stays `763144f45d489441`, transform stays
+`2824162d794cc5de`, and final scanout stays `73feb194b7694383`.
+
+**Next:** decode the leading 42-batch `tex=5` pitch triangle-list states,
+including the `shader=0xc01` projected/cube path and its combiner-only sibling,
+then continue the low-frequency census and host-input plumbing.
+
 ## 2026-08-01 — A4: dynamic three-texture pitch family executes
 
 The retained `tex=7`, `shader=0x63` pitch family now executes instead of
