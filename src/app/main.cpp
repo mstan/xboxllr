@@ -571,13 +571,22 @@ int main(int argc, char** argv) {
                             (unsigned long long)mach.nv2a()->class_method_count(0x44),
                             (unsigned long long)mach.nv2a()->class_method_count(0));
                 std::printf("[2bl] NV2A raster: color-clears/pixels=%llu/%llu "
-                            "last=%08x zeta-clears/pixels=%llu/%llu last=%08x\n",
+                            "last=%08x zeta-clears/pixels=%llu/%llu last=%08x "
+                            "depth-batches/tri/frags/pass/writes=%llu/%llu/%llu/%llu/%llu "
+                            "last=%08x hash=%016llx\n",
                             (unsigned long long)mach.nv2a()->color_clears(),
                             (unsigned long long)mach.nv2a()->color_clear_pixels(),
                             mach.nv2a()->last_color_clear_address(),
                             (unsigned long long)mach.nv2a()->zeta_clears(),
                             (unsigned long long)mach.nv2a()->zeta_clear_pixels(),
-                            mach.nv2a()->last_zeta_clear_address());
+                            mach.nv2a()->last_zeta_clear_address(),
+                            (unsigned long long)mach.nv2a()->depth_raster_batches(),
+                            (unsigned long long)mach.nv2a()->rasterized_triangles(),
+                            (unsigned long long)mach.nv2a()->rasterized_fragments(),
+                            (unsigned long long)mach.nv2a()->depth_test_passes(),
+                            (unsigned long long)mach.nv2a()->depth_writes(),
+                            mach.nv2a()->last_raster_address(),
+                            (unsigned long long)mach.nv2a()->raster_output_hash());
                 std::printf("[2bl] NV2A vertices: batches=%llu submitted=%llu "
                             "attr-fetches=%llu primitives=%llu triangles=%llu max-index=%u\n",
                             (unsigned long long)mach.nv2a()->vertex_batches(),
@@ -656,6 +665,102 @@ int main(int argc, char** argv) {
                     }
                 }
                 std::printf("\n");
+                std::vector<Nv2a::RasterStateSample> raster_samples;
+                mach.nv2a()->raster_state_samples(raster_samples);
+                std::sort(raster_samples.begin(), raster_samples.end(),
+                          [](const auto& a, const auto& b) {
+                              return a.batches > b.batches;
+                          });
+                std::printf("[2bl] NV2A raster states: unique=%zu\n",
+                            raster_samples.size());
+                const size_t raster_sample_limit =
+                    std::min<size_t>(raster_samples.size(), 16);
+                for (size_t sample_index = 0;
+                     sample_index < raster_sample_limit; ++sample_index) {
+                    const auto& sample = raster_samples[sample_index];
+                    const auto& state = sample.words;
+                    std::printf(
+                        "[2bl]   RS%zu batches=%llu en=%04x sfmt=%08x pitch=%08x "
+                        "clip=%08x/%08x win=%08x/%08x alpha=%x/%02x "
+                        "blend=%x/%x/%x depth=%x/%u masks=%08x/%08x "
+                        "cull=%x/%x tex=%x shader=%08x/%08x comb=%08x\n",
+                        sample_index,
+                        (unsigned long long)sample.batches,
+                        state[Nv2a::kRasterEnables],
+                        state[Nv2a::kRasterSurfaceFormat],
+                        state[Nv2a::kRasterSurfacePitch],
+                        state[Nv2a::kRasterSurfaceClipHorizontal],
+                        state[Nv2a::kRasterSurfaceClipVertical],
+                        state[Nv2a::kRasterWindowClipHorizontal],
+                        state[Nv2a::kRasterWindowClipVertical],
+                        state[Nv2a::kRasterAlphaFunc],
+                        state[Nv2a::kRasterAlphaRef] & 0xFFu,
+                        state[Nv2a::kRasterBlendSrc],
+                        state[Nv2a::kRasterBlendDst],
+                        state[Nv2a::kRasterBlendEquation],
+                        state[Nv2a::kRasterDepthFunc],
+                        state[Nv2a::kRasterDepthMask],
+                        state[Nv2a::kRasterColorMask],
+                        state[Nv2a::kRasterStencilWriteMask],
+                        state[Nv2a::kRasterCullFace],
+                        state[Nv2a::kRasterFrontFace],
+                        state[Nv2a::kRasterTextureEnableMask],
+                        state[Nv2a::kRasterShaderStageProgram],
+                        state[Nv2a::kRasterShaderOtherStageInput],
+                        state[Nv2a::kRasterCombinerControl]);
+                    std::printf(
+                        "[2bl]     ctrl=%08x shade=%x poly=%x/%x "
+                        "poffset=%08x/%08x zclip=%08x/%08x zctl=%08x "
+                        "stencil=%x/%02x/%08x ops=%x/%x/%x\n",
+                        state[Nv2a::kRasterControl0],
+                        state[Nv2a::kRasterShadeMode],
+                        state[Nv2a::kRasterFrontPolygonMode],
+                        state[Nv2a::kRasterBackPolygonMode],
+                        state[Nv2a::kRasterPolygonOffsetScale],
+                        state[Nv2a::kRasterPolygonOffsetBias],
+                        state[Nv2a::kRasterClipMin],
+                        state[Nv2a::kRasterClipMax],
+                        state[Nv2a::kRasterZMinMaxControl],
+                        state[Nv2a::kRasterStencilFunc],
+                        state[Nv2a::kRasterStencilRef] & 0xFFu,
+                        state[Nv2a::kRasterStencilFuncMask],
+                        state[Nv2a::kRasterStencilOpFail],
+                        state[Nv2a::kRasterStencilOpZFail],
+                        state[Nv2a::kRasterStencilOpZPass]);
+                    const uint32_t combiner_stages =
+                        std::min<uint32_t>(
+                            state[Nv2a::kRasterCombinerControl] & 0xFFu, 8);
+                    for (uint32_t stage = 0; stage < combiner_stages; ++stage) {
+                        std::printf(
+                            "[2bl]     C%u ci=%08x ai=%08x co=%08x ao=%08x "
+                            "f=%08x/%08x\n",
+                            stage,
+                            state[Nv2a::kRasterCombinerColorIcw0 + stage],
+                            state[Nv2a::kRasterCombinerAlphaIcw0 + stage],
+                            state[Nv2a::kRasterCombinerColorOcw0 + stage],
+                            state[Nv2a::kRasterCombinerAlphaOcw0 + stage],
+                            state[Nv2a::kRasterCombinerFactor0_0 + stage],
+                            state[Nv2a::kRasterCombinerFactor1_0 + stage]);
+                    }
+                    std::printf("[2bl]     final=%08x/%08x\n",
+                                state[Nv2a::kRasterCombinerSpecularFog0],
+                                state[Nv2a::kRasterCombinerSpecularFog1]);
+                    for (uint32_t stage = 0; stage < 4; ++stage) {
+                        if (!(state[Nv2a::kRasterTextureEnableMask] &
+                              (1u << stage)))
+                            continue;
+                        std::printf(
+                            "[2bl]     T%u fmt=%08x addr=%08x filter=%08x "
+                            "ctl0=%08x ctl1=%08x rect=%08x\n",
+                            stage,
+                            state[Nv2a::kRasterTextureFormat0 + stage],
+                            state[Nv2a::kRasterTextureAddress0 + stage],
+                            state[Nv2a::kRasterTextureFilter0 + stage],
+                            state[Nv2a::kRasterTextureControl0_0 + stage],
+                            state[Nv2a::kRasterTextureControl1_0 + stage],
+                            state[Nv2a::kRasterTextureImageRect0 + stage]);
+                    }
+                }
                 std::printf("[2bl] NV2A flip: write-increments=%llu stalls=%llu "
                             "read-increments=%llu notifications=%llu surface=%08x waiting=%u\n",
                             (unsigned long long)mach.nv2a()->flip_increments(),

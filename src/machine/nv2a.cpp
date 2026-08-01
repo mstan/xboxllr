@@ -727,6 +727,17 @@ bool Nv2a::submit_vertex_batch() {
         return false;
     }
 
+    auto raster_sample = std::find_if(
+        raster_state_samples_.begin(), raster_state_samples_.end(),
+        [&](const RasterStateSample& sample) {
+            return sample.words == raster_state_;
+        });
+    if (raster_sample == raster_state_samples_.end()) {
+        raster_state_samples_.push_back(RasterStateSample{raster_state_, 1});
+    } else {
+        ++raster_sample->batches;
+    }
+
     ++transform_mode_batches_[transform_execution_mode_ & 3u];
     if (transform_execution_mode_ == 0) {
         ++fixed_skin_batches_[fixed_skin_mode_];
@@ -817,6 +828,9 @@ bool Nv2a::submit_vertex_batch() {
             nv2a_vsh_emu_execute(&execution, &program);
 
             std::memcpy(vertex.position.data(), &full_state.output_regs[0], 4 * sizeof(float));
+            vertex.position[0] = round_screen_coordinate(vertex.position[0]);
+            vertex.position[1] = round_screen_coordinate(vertex.position[1]);
+            vertex.position[3] = clamp_away_zero_inf(vertex.position[3]);
             std::memcpy(vertex.diffuse.data(), &full_state.output_regs[3 * 4],
                         4 * sizeof(float));
             std::memcpy(vertex.specular.data(), &full_state.output_regs[4 * 4],
@@ -872,6 +886,7 @@ bool Nv2a::submit_vertex_batch() {
         }
     }
     if (program_parsed) nv2a_vsh_program_destroy(&program);
+    if (!rasterize_depth_only_batch()) return false;
 
     const uint64_t n = vertex_indices_.size();
     uint64_t primitives = 0, triangles = 0;
@@ -913,6 +928,275 @@ bool Nv2a::submit_vertex_batch() {
     assembled_primitives_ += primitives;
     assembled_triangles_ += triangles;
     ++primitive_mode_counts_[primitive_mode_];
+    return true;
+}
+
+bool Nv2a::rasterize_depth_only_batch() {
+    const uint32_t enables = raster_state_[kRasterEnables];
+    const uint32_t surface_type = (surface_format_ >> 8) & 0xFu;
+    const uint32_t anti_aliasing = (surface_format_ >> 12) & 0xFu;
+    const uint32_t zeta_format = (surface_format_ >> 4) & 0xFu;
+    const bool supported_primitive =
+        primitive_mode_ == 5 || primitive_mode_ == 6 || primitive_mode_ == 7;
+    const bool depth_only =
+        raster_state_[kRasterColorMask] == 0 &&
+        (enables & (1u << 3)) != 0 &&
+        raster_state_[kRasterDepthMask] != 0;
+    if (!depth_only || surface_type != 1 || anti_aliasing != 0 ||
+        zeta_format != 1 || !supported_primitive ||
+        raster_state_[kRasterTextureEnableMask] != 0) {
+        return true;
+    }
+
+    constexpr uint32_t kSupportedEnables = (1u << 2) | (1u << 3) | (1u << 13);
+    if ((enables & ~kSupportedEnables) != 0 ||
+        (enables & (1u << 2)) == 0 ||
+        raster_state_[kRasterDepthFunc] != 0x0203 ||
+        raster_state_[kRasterCullFace] != 0x0405 ||
+        raster_state_[kRasterFrontFace] != 0x0900 ||
+        raster_state_[kRasterFrontPolygonMode] != 0x1B02 ||
+        raster_state_[kRasterBackPolygonMode] != 0x1B02 ||
+        (raster_state_[kRasterControl0] & ((1u << 12) | (1u << 16))) != 0 ||
+        (raster_state_[kRasterZMinMaxControl] & 0xF0u) != 0) {
+        fault_("NV2A depth-only draw exceeds the witnessed raster subset");
+        return false;
+    }
+
+    const uint32_t clip_x = surface_clip_horizontal_ & 0xFFFFu;
+    const uint32_t clip_width = surface_clip_horizontal_ >> 16;
+    const uint32_t clip_y = surface_clip_vertical_ & 0xFFFFu;
+    const uint32_t clip_height = surface_clip_vertical_ >> 16;
+    const uint32_t pitch = surface_pitch_ >> 16;
+    if (!zeta_dma_bound_ || !clip_width || !clip_height || !pitch ||
+        static_cast<uint64_t>(clip_x + clip_width) * 2 > pitch) {
+        fault_("NV2A depth-only raster surface is invalid");
+        return false;
+    }
+
+    const uint32_t surface_height = clip_y + clip_height;
+    const uint64_t surface_bytes64 =
+        static_cast<uint64_t>(pitch) * surface_height;
+    const uint64_t last_offset64 =
+        static_cast<uint64_t>(surface_zeta_offset_) + surface_bytes64 - 1;
+    if (surface_bytes64 > SIZE_MAX || last_offset64 > UINT32_MAX) {
+        fault_("NV2A depth-only raster surface size overflows");
+        return false;
+    }
+    uint32_t surface_address = 0, last_address = 0;
+    if (!dma_object_address(zeta_dma_, surface_zeta_offset_, surface_address) ||
+        !dma_object_address(zeta_dma_, static_cast<uint32_t>(last_offset64),
+                            last_address) ||
+        last_address < surface_address ||
+        static_cast<uint64_t>(last_address) - surface_address + 1 !=
+            surface_bytes64) {
+        fault_("NV2A depth-only raster DMA range is invalid");
+        return false;
+    }
+
+    std::vector<uint8_t> depth_surface(static_cast<size_t>(surface_bytes64));
+    if (!mem_read_ ||
+        !mem_read_(surface_address, depth_surface.data(), depth_surface.size())) {
+        fault_("NV2A depth-only raster DMA read failed");
+        return false;
+    }
+
+    uint32_t xmin = clip_x;
+    uint32_t xmax = clip_x + clip_width - 1;
+    uint32_t ymin = clip_y;
+    uint32_t ymax = clip_y + clip_height - 1;
+    const uint32_t window_x = raster_state_[kRasterWindowClipHorizontal];
+    const uint32_t window_y = raster_state_[kRasterWindowClipVertical];
+    xmin = std::max(xmin, window_x & 0xFFFu);
+    xmax = std::min(xmax, (window_x >> 16) & 0xFFFu);
+    ymin = std::max(ymin, window_y & 0xFFFu);
+    ymax = std::min(ymax, (window_y >> 16) & 0xFFFu);
+    if (xmax < xmin || ymax < ymin) {
+        ++depth_raster_batches_;
+        return true;
+    }
+
+    float clip_min = 0.0f, clip_max = 0.0f;
+    std::memcpy(&clip_min, &raster_state_[kRasterClipMin], sizeof(clip_min));
+    std::memcpy(&clip_max, &raster_state_[kRasterClipMax], sizeof(clip_max));
+    float polygon_scale = 0.0f, polygon_bias = 0.0f;
+    if (enables & (1u << 13)) {
+        std::memcpy(&polygon_scale,
+                    &raster_state_[kRasterPolygonOffsetScale],
+                    sizeof(polygon_scale));
+        std::memcpy(&polygon_bias,
+                    &raster_state_[kRasterPolygonOffsetBias],
+                    sizeof(polygon_bias));
+    }
+
+    uint32_t dirty_ymin = surface_height;
+    uint32_t dirty_ymax = 0;
+    auto rasterize_triangle =
+        [&](const TransformedVertex& input_a,
+            const TransformedVertex& input_b,
+            const TransformedVertex& input_c) {
+            const TransformedVertex* a = &input_a;
+            const TransformedVertex* b = &input_b;
+            const TransformedVertex* c = &input_c;
+            for (const TransformedVertex* vertex : {a, b, c}) {
+                if (!std::isfinite(vertex->position[0]) ||
+                    !std::isfinite(vertex->position[1]) ||
+                    !std::isfinite(vertex->position[2])) {
+                    return;
+                }
+            }
+
+            auto fixed_xy = [](float value) -> int64_t {
+                return static_cast<int64_t>(std::llround(value * 16.0f));
+            };
+            int64_t ax = fixed_xy(a->position[0]);
+            int64_t ay = fixed_xy(a->position[1]);
+            int64_t bx = fixed_xy(b->position[0]);
+            int64_t by = fixed_xy(b->position[1]);
+            int64_t cx = fixed_xy(c->position[0]);
+            int64_t cy = fixed_xy(c->position[1]);
+            auto edge = [](int64_t x0, int64_t y0,
+                           int64_t x1, int64_t y1,
+                           int64_t px, int64_t py) -> int64_t {
+                return (x1 - x0) * (py - y0) -
+                       (y1 - y0) * (px - x0);
+            };
+            int64_t area = edge(ax, ay, bx, by, cx, cy);
+            if (area <= 0) return;  // CW is front-facing in Xbox screen space.
+
+            ++rasterized_triangles_;
+            const int32_t tri_xmin = std::max<int32_t>(
+                static_cast<int32_t>(xmin),
+                static_cast<int32_t>(std::ceil(
+                    (static_cast<double>(std::min({ax, bx, cx})) - 8.0) /
+                    16.0)));
+            const int32_t tri_xmax = std::min<int32_t>(
+                static_cast<int32_t>(xmax),
+                static_cast<int32_t>(std::floor(
+                    (static_cast<double>(std::max({ax, bx, cx})) - 8.0) /
+                    16.0)));
+            const int32_t tri_ymin = std::max<int32_t>(
+                static_cast<int32_t>(ymin),
+                static_cast<int32_t>(std::ceil(
+                    (static_cast<double>(std::min({ay, by, cy})) - 8.0) /
+                    16.0)));
+            const int32_t tri_ymax = std::min<int32_t>(
+                static_cast<int32_t>(ymax),
+                static_cast<int32_t>(std::floor(
+                    (static_cast<double>(std::max({ay, by, cy})) - 8.0) /
+                    16.0)));
+            if (tri_xmax < tri_xmin || tri_ymax < tri_ymin) return;
+
+            const auto top_left = [](int64_t x0, int64_t y0,
+                                     int64_t x1, int64_t y1) {
+                const int64_t dx = x1 - x0;
+                const int64_t dy = y1 - y0;
+                return dy < 0 || (dy == 0 && dx > 0);
+            };
+            const bool edge0_top_left = top_left(bx, by, cx, cy);
+            const bool edge1_top_left = top_left(cx, cy, ax, ay);
+            const bool edge2_top_left = top_left(ax, ay, bx, by);
+
+            const float x10 = static_cast<float>(bx - ax) / 16.0f;
+            const float y10 = static_cast<float>(by - ay) / 16.0f;
+            const float x20 = static_cast<float>(cx - ax) / 16.0f;
+            const float y20 = static_cast<float>(cy - ay) / 16.0f;
+            const float z10 = b->position[2] - a->position[2];
+            const float z20 = c->position[2] - a->position[2];
+            const float determinant = x10 * y20 - x20 * y10;
+            const float dzdx = (z10 * y20 - z20 * y10) / determinant;
+            const float dzdy = (z20 * x10 - z10 * x20) / determinant;
+            const float max_z_slope =
+                std::max(std::abs(dzdx), std::abs(dzdy));
+            const float inverse_area = 1.0f / static_cast<float>(area);
+
+            for (int32_t y = tri_ymin; y <= tri_ymax; ++y) {
+                const int64_t py = static_cast<int64_t>(y) * 16 + 8;
+                for (int32_t x = tri_xmin; x <= tri_xmax; ++x) {
+                    const int64_t px = static_cast<int64_t>(x) * 16 + 8;
+                    const int64_t w0 = edge(bx, by, cx, cy, px, py);
+                    const int64_t w1 = edge(cx, cy, ax, ay, px, py);
+                    const int64_t w2 = edge(ax, ay, bx, by, px, py);
+                    if (w0 < 0 || (w0 == 0 && !edge0_top_left) ||
+                        w1 < 0 || (w1 == 0 && !edge1_top_left) ||
+                        w2 < 0 || (w2 == 0 && !edge2_top_left)) {
+                        continue;
+                    }
+                    ++rasterized_fragments_;
+                    float depth =
+                        (static_cast<float>(w0) * a->position[2] +
+                         static_cast<float>(w1) * b->position[2] +
+                         static_cast<float>(w2) * c->position[2]) *
+                        inverse_area;
+                    depth += polygon_bias + polygon_scale * max_z_slope;
+                    if (!std::isfinite(depth) ||
+                        depth < clip_min || depth > clip_max) {
+                        continue;
+                    }
+                    const uint16_t incoming = static_cast<uint16_t>(
+                        std::floor(std::clamp(depth, 0.0f, 65535.0f)));
+                    const size_t offset =
+                        static_cast<size_t>(y) * pitch +
+                        static_cast<size_t>(x) * sizeof(uint16_t);
+                    uint16_t stored = 0;
+                    std::memcpy(&stored, depth_surface.data() + offset,
+                                sizeof(stored));
+                    if (incoming > stored) continue;  // LEQUAL
+                    ++depth_test_passes_;
+                    std::memcpy(depth_surface.data() + offset, &incoming,
+                                sizeof(incoming));
+                    ++depth_writes_;
+                    const uint32_t address =
+                        surface_address + static_cast<uint32_t>(offset);
+                    last_raster_address_ = address;
+                    for (uint32_t word : {address,
+                                          static_cast<uint32_t>(incoming)}) {
+                        raster_output_hash_ ^= word;
+                        raster_output_hash_ *= 1099511628211ull;
+                    }
+                    dirty_ymin = std::min(dirty_ymin,
+                                         static_cast<uint32_t>(y));
+                    dirty_ymax = std::max(dirty_ymax,
+                                         static_cast<uint32_t>(y));
+                }
+            }
+        };
+
+    const size_t vertex_count = transformed_batch_.size();
+    if (primitive_mode_ == 5) {
+        for (size_t i = 0; i + 2 < vertex_count; i += 3)
+            rasterize_triangle(transformed_batch_[i],
+                               transformed_batch_[i + 1],
+                               transformed_batch_[i + 2]);
+    } else if (primitive_mode_ == 6) {
+        for (size_t i = 2; i < vertex_count; ++i) {
+            if ((i & 1u) == 0)
+                rasterize_triangle(transformed_batch_[i - 2],
+                                   transformed_batch_[i - 1],
+                                   transformed_batch_[i]);
+            else
+                rasterize_triangle(transformed_batch_[i - 1],
+                                   transformed_batch_[i - 2],
+                                   transformed_batch_[i]);
+        }
+    } else {
+        for (size_t i = 2; i < vertex_count; ++i)
+            rasterize_triangle(transformed_batch_[0],
+                               transformed_batch_[i - 1],
+                               transformed_batch_[i]);
+    }
+
+    if (dirty_ymin < surface_height) {
+        const size_t first_offset = static_cast<size_t>(dirty_ymin) * pitch;
+        const size_t dirty_bytes =
+            static_cast<size_t>(dirty_ymax - dirty_ymin + 1) * pitch;
+        if (!mem_write_ ||
+            !mem_write_(surface_address + static_cast<uint32_t>(first_offset),
+                        depth_surface.data() + first_offset, dirty_bytes)) {
+            fault_("NV2A depth-only raster DMA write failed");
+            return false;
+        }
+    }
+    ++depth_raster_batches_;
     return true;
 }
 
@@ -993,12 +1277,16 @@ void Nv2a::dispatch_method(uint8_t channel, uint8_t subchannel, uint32_t method,
     // NV097 color-surface state and the first software raster operation.
     } else if (method == 0x0200) {
         surface_clip_horizontal_ = parameter;
+        raster_state_[kRasterSurfaceClipHorizontal] = parameter;
     } else if (method == 0x0204) {
         surface_clip_vertical_ = parameter;
+        raster_state_[kRasterSurfaceClipVertical] = parameter;
     } else if (method == 0x0208) {
         surface_format_ = parameter;
+        raster_state_[kRasterSurfaceFormat] = parameter;
     } else if (method == 0x020C) {
         surface_pitch_ = parameter;
+        raster_state_[kRasterSurfacePitch] = parameter;
     } else if (method == 0x0210) {
         surface_color_offset_ = parameter;
     } else if (method == 0x0214) {
@@ -1013,6 +1301,163 @@ void Nv2a::dispatch_method(uint8_t channel, uint8_t subchannel, uint32_t method,
         clear_rect_vertical_ = parameter;
     } else if (method == 0x1D94) {
         clear_surface(parameter);
+    // Raster state is sampled at each indexed batch. Enable bits are alpha,
+    // blend, cull, depth, dither, stencil, logic, point-params/smooth,
+    // line/poly smooth, and point/line/fill polygon offset respectively.
+    } else if (method >= 0x0260 && method < 0x0280) {
+        raster_state_[kRasterCombinerAlphaIcw0 +
+                      (method - 0x0260) / 4] = parameter;
+    } else if (method == 0x0288) {
+        raster_state_[kRasterCombinerSpecularFog0] = parameter;
+    } else if (method == 0x028C) {
+        raster_state_[kRasterCombinerSpecularFog1] = parameter;
+    } else if (method == 0x0290) {
+        raster_state_[kRasterControl0] = parameter;
+    } else if (method == 0x02C0) {
+        raster_state_[kRasterWindowClipHorizontal] = parameter;
+    } else if (method == 0x02E0) {
+        raster_state_[kRasterWindowClipVertical] = parameter;
+    } else if (method == 0x0300) {
+        raster_state_[kRasterEnables] =
+            (raster_state_[kRasterEnables] & ~(1u << 0)) |
+            ((parameter != 0) << 0);
+    } else if (method == 0x0304) {
+        raster_state_[kRasterEnables] =
+            (raster_state_[kRasterEnables] & ~(1u << 1)) |
+            ((parameter != 0) << 1);
+    } else if (method == 0x0308) {
+        raster_state_[kRasterEnables] =
+            (raster_state_[kRasterEnables] & ~(1u << 2)) |
+            ((parameter != 0) << 2);
+    } else if (method == 0x030C) {
+        raster_state_[kRasterEnables] =
+            (raster_state_[kRasterEnables] & ~(1u << 3)) |
+            ((parameter != 0) << 3);
+    } else if (method == 0x0310) {
+        raster_state_[kRasterEnables] =
+            (raster_state_[kRasterEnables] & ~(1u << 4)) |
+            ((parameter != 0) << 4);
+    } else if (method == 0x0318) {
+        raster_state_[kRasterEnables] =
+            (raster_state_[kRasterEnables] & ~(1u << 7)) |
+            ((parameter != 0) << 7);
+    } else if (method == 0x031C) {
+        raster_state_[kRasterEnables] =
+            (raster_state_[kRasterEnables] & ~(1u << 8)) |
+            ((parameter != 0) << 8);
+    } else if (method == 0x0320) {
+        raster_state_[kRasterEnables] =
+            (raster_state_[kRasterEnables] & ~(1u << 9)) |
+            ((parameter != 0) << 9);
+    } else if (method == 0x0324) {
+        raster_state_[kRasterEnables] =
+            (raster_state_[kRasterEnables] & ~(1u << 10)) |
+            ((parameter != 0) << 10);
+    } else if (method == 0x032C) {
+        raster_state_[kRasterEnables] =
+            (raster_state_[kRasterEnables] & ~(1u << 5)) |
+            ((parameter != 0) << 5);
+    } else if (method == 0x0330) {
+        raster_state_[kRasterEnables] =
+            (raster_state_[kRasterEnables] & ~(1u << 11)) |
+            ((parameter != 0) << 11);
+    } else if (method == 0x0334) {
+        raster_state_[kRasterEnables] =
+            (raster_state_[kRasterEnables] & ~(1u << 12)) |
+            ((parameter != 0) << 12);
+    } else if (method == 0x0338) {
+        raster_state_[kRasterEnables] =
+            (raster_state_[kRasterEnables] & ~(1u << 13)) |
+            ((parameter != 0) << 13);
+    } else if (method == 0x033C) {
+        raster_state_[kRasterAlphaFunc] = parameter;
+    } else if (method == 0x0340) {
+        raster_state_[kRasterAlphaRef] = parameter;
+    } else if (method == 0x0344) {
+        raster_state_[kRasterBlendSrc] = parameter;
+    } else if (method == 0x0348) {
+        raster_state_[kRasterBlendDst] = parameter;
+    } else if (method == 0x034C) {
+        raster_state_[kRasterBlendColor] = parameter;
+    } else if (method == 0x0350) {
+        raster_state_[kRasterBlendEquation] = parameter;
+    } else if (method == 0x0354) {
+        raster_state_[kRasterDepthFunc] = parameter;
+    } else if (method == 0x0358) {
+        raster_state_[kRasterColorMask] = parameter;
+    } else if (method == 0x035C) {
+        raster_state_[kRasterDepthMask] = parameter;
+    } else if (method == 0x0360) {
+        raster_state_[kRasterStencilWriteMask] = parameter;
+    } else if (method == 0x0364) {
+        raster_state_[kRasterStencilFunc] = parameter;
+    } else if (method == 0x0368) {
+        raster_state_[kRasterStencilRef] = parameter;
+    } else if (method == 0x036C) {
+        raster_state_[kRasterStencilFuncMask] = parameter;
+    } else if (method == 0x0370) {
+        raster_state_[kRasterStencilOpFail] = parameter;
+    } else if (method == 0x0374) {
+        raster_state_[kRasterStencilOpZFail] = parameter;
+    } else if (method == 0x0378) {
+        raster_state_[kRasterStencilOpZPass] = parameter;
+    } else if (method == 0x037C) {
+        raster_state_[kRasterShadeMode] = parameter;
+    } else if (method == 0x0384) {
+        raster_state_[kRasterPolygonOffsetScale] = parameter;
+    } else if (method == 0x0388) {
+        raster_state_[kRasterPolygonOffsetBias] = parameter;
+    } else if (method == 0x038C) {
+        raster_state_[kRasterFrontPolygonMode] = parameter;
+    } else if (method == 0x0390) {
+        raster_state_[kRasterBackPolygonMode] = parameter;
+    } else if (method == 0x0394) {
+        raster_state_[kRasterClipMin] = parameter;
+    } else if (method == 0x0398) {
+        raster_state_[kRasterClipMax] = parameter;
+    } else if (method == 0x039C) {
+        raster_state_[kRasterCullFace] = parameter;
+    } else if (method == 0x03A0) {
+        raster_state_[kRasterFrontFace] = parameter;
+    } else if (method == 0x17BC) {
+        raster_state_[kRasterEnables] =
+            (raster_state_[kRasterEnables] & ~(1u << 6)) |
+            ((parameter != 0) << 6);
+    } else if (method == 0x17C0) {
+        raster_state_[kRasterLogicOp] = parameter;
+    } else if (method == 0x1D78) {
+        raster_state_[kRasterZMinMaxControl] = parameter;
+    } else if (method >= 0x1E40 && method < 0x1E60) {
+        raster_state_[kRasterCombinerColorOcw0 +
+                      (method - 0x1E40) / 4] = parameter;
+    } else if (method == 0x1E60) {
+        raster_state_[kRasterCombinerControl] = parameter;
+    } else if (method == 0x1E70) {
+        raster_state_[kRasterShaderStageProgram] = parameter;
+    } else if (method == 0x1E74) {
+        raster_state_[kRasterDotRgbMapping] = parameter;
+    } else if (method == 0x1E78) {
+        raster_state_[kRasterShaderOtherStageInput] = parameter;
+    } else if (method >= 0x1B00 && method < 0x1C00) {
+        const uint32_t stage = (method - 0x1B00) / 0x40;
+        const uint32_t local = (method - 0x1B00) & 0x3Fu;
+        if (local == 0x04) {
+            raster_state_[kRasterTextureFormat0 + stage] = parameter;
+        } else if (local == 0x08) {
+            raster_state_[kRasterTextureAddress0 + stage] = parameter;
+        } else if (local == 0x0C) {
+            raster_state_[kRasterTextureControl0_0 + stage] = parameter;
+            const uint32_t enable = (parameter >> 30) & 1u;
+            raster_state_[kRasterTextureEnableMask] =
+                (raster_state_[kRasterTextureEnableMask] & ~(1u << stage)) |
+                (enable << stage);
+        } else if (local == 0x10) {
+            raster_state_[kRasterTextureControl1_0 + stage] = parameter;
+        } else if (local == 0x14) {
+            raster_state_[kRasterTextureFilter0 + stage] = parameter;
+        } else if (local == 0x1C) {
+            raster_state_[kRasterTextureImageRect0 + stage] = parameter;
+        }
     // Fixed-function vertex-state selectors. Their batch census gates which xemu equations
     // must execute before fixed-function output can be admitted to rasterization.
     } else if (method == 0x0294) {
@@ -1098,6 +1543,18 @@ void Nv2a::dispatch_method(uint8_t channel, uint8_t subchannel, uint32_t method,
         const uint32_t slot = (method - 0x0A20) / 4;
         std::memcpy(&viewport_offset_[slot], &parameter, sizeof(parameter));
         transform_constants_[0x3B][slot] = viewport_offset_[slot];
+    } else if (method >= 0x0A60 && method < 0x0A80) {
+        raster_state_[kRasterCombinerFactor0_0 +
+                      (method - 0x0A60) / 4] = parameter;
+    } else if (method >= 0x0A80 && method < 0x0AA0) {
+        raster_state_[kRasterCombinerFactor1_0 +
+                      (method - 0x0A80) / 4] = parameter;
+    } else if (method >= 0x0AA0 && method < 0x0AC0) {
+        raster_state_[kRasterCombinerAlphaOcw0 +
+                      (method - 0x0AA0) / 4] = parameter;
+    } else if (method >= 0x0AC0 && method < 0x0AE0) {
+        raster_state_[kRasterCombinerColorIcw0 +
+                      (method - 0x0AC0) / 4] = parameter;
     } else if (method >= 0x0AF0 && method < 0x0B00) {
         const uint32_t slot = (method - 0x0AF0) / 4;
         std::memcpy(&viewport_scale_[slot], &parameter, sizeof(parameter));

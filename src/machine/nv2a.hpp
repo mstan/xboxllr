@@ -92,6 +92,13 @@ public:
     uint64_t zeta_clears() const { return zeta_clears_; }
     uint64_t zeta_clear_pixels() const { return zeta_clear_pixels_; }
     uint32_t last_zeta_clear_address() const { return last_zeta_clear_address_; }
+    uint64_t depth_raster_batches() const { return depth_raster_batches_; }
+    uint64_t rasterized_triangles() const { return rasterized_triangles_; }
+    uint64_t rasterized_fragments() const { return rasterized_fragments_; }
+    uint64_t depth_test_passes() const { return depth_test_passes_; }
+    uint64_t depth_writes() const { return depth_writes_; }
+    uint32_t last_raster_address() const { return last_raster_address_; }
+    uint64_t raster_output_hash() const { return raster_output_hash_; }
     uint64_t vertex_batches() const { return vertex_batches_; }
     uint64_t submitted_vertices() const { return submitted_vertices_; }
     uint64_t vertex_attribute_fetches() const { return vertex_attribute_fetches_; }
@@ -148,6 +155,71 @@ public:
     uint64_t fixed_light_control_batches(uint32_t flags) const {
         return flags < fixed_light_control_batches_.size()
                    ? fixed_light_control_batches_[flags] : 0;
+    }
+    enum RasterStateWord : size_t {
+        kRasterEnables = 0,
+        kRasterSurfaceFormat,
+        kRasterSurfacePitch,
+        kRasterSurfaceClipHorizontal,
+        kRasterSurfaceClipVertical,
+        kRasterWindowClipHorizontal,
+        kRasterWindowClipVertical,
+        kRasterControl0,
+        kRasterAlphaFunc,
+        kRasterAlphaRef,
+        kRasterBlendSrc,
+        kRasterBlendDst,
+        kRasterBlendEquation,
+        kRasterBlendColor,
+        kRasterDepthFunc,
+        kRasterColorMask,
+        kRasterDepthMask,
+        kRasterStencilWriteMask,
+        kRasterStencilFunc,
+        kRasterStencilRef,
+        kRasterStencilFuncMask,
+        kRasterStencilOpFail,
+        kRasterStencilOpZFail,
+        kRasterStencilOpZPass,
+        kRasterShadeMode,
+        kRasterPolygonOffsetScale,
+        kRasterPolygonOffsetBias,
+        kRasterFrontPolygonMode,
+        kRasterBackPolygonMode,
+        kRasterClipMin,
+        kRasterClipMax,
+        kRasterCullFace,
+        kRasterFrontFace,
+        kRasterLogicOp,
+        kRasterZMinMaxControl,
+        kRasterShaderStageProgram,
+        kRasterShaderOtherStageInput,
+        kRasterCombinerControl,
+        kRasterDotRgbMapping,
+        kRasterTextureEnableMask,
+        kRasterTextureFormat0,
+        kRasterTextureAddress0 = kRasterTextureFormat0 + 4,
+        kRasterTextureFilter0 = kRasterTextureAddress0 + 4,
+        kRasterTextureControl0_0 = kRasterTextureFilter0 + 4,
+        kRasterTextureControl1_0 = kRasterTextureControl0_0 + 4,
+        kRasterTextureImageRect0 = kRasterTextureControl1_0 + 4,
+        kRasterCombinerAlphaIcw0 = kRasterTextureImageRect0 + 4,
+        kRasterCombinerColorIcw0 = kRasterCombinerAlphaIcw0 + 8,
+        kRasterCombinerAlphaOcw0 = kRasterCombinerColorIcw0 + 8,
+        kRasterCombinerColorOcw0 = kRasterCombinerAlphaOcw0 + 8,
+        kRasterCombinerFactor0_0 = kRasterCombinerColorOcw0 + 8,
+        kRasterCombinerFactor1_0 = kRasterCombinerFactor0_0 + 8,
+        kRasterCombinerSpecularFog0 = kRasterCombinerFactor1_0 + 8,
+        kRasterCombinerSpecularFog1,
+        kRasterStateWords,
+    };
+    struct RasterStateSample {
+        std::array<uint32_t, kRasterStateWords> words{};
+        uint64_t batches = 0;
+    };
+    size_t raster_state_samples(std::vector<RasterStateSample>& out) const {
+        out = raster_state_samples_;
+        return out.size();
     }
     uint32_t pgraph_surface() const;
     bool waiting_for_flip() const { return waiting_for_flip_; }
@@ -255,6 +327,13 @@ private:
     uint64_t zeta_clears_ = 0;
     uint64_t zeta_clear_pixels_ = 0;
     uint32_t last_zeta_clear_address_ = 0;
+    uint64_t depth_raster_batches_ = 0;
+    uint64_t rasterized_triangles_ = 0;
+    uint64_t rasterized_fragments_ = 0;
+    uint64_t depth_test_passes_ = 0;
+    uint64_t depth_writes_ = 0;
+    uint32_t last_raster_address_ = 0;
+    uint64_t raster_output_hash_ = 1469598103934665603ull;
 
     // Kelvin's array-fed vertex path. The dashboard overwhelmingly submits ARRAY_ELEMENT16:
     // each method contains two indices. Attribute offsets select vertex DMA A/B with bit 31;
@@ -327,6 +406,8 @@ private:
     std::array<uint64_t, 4> fixed_light_type_batches_{};
     std::array<uint64_t, 256> fixed_color_material_batches_{};
     std::array<uint64_t, 8> fixed_light_control_batches_{};
+    std::array<uint32_t, kRasterStateWords> raster_state_{};
+    std::vector<RasterStateSample> raster_state_samples_;
     struct TransformedVertex {
         std::array<float, 4> position{};
         std::array<float, 4> diffuse{};
@@ -363,6 +444,7 @@ private:
                              uint32_t& first_address);
     bool set_vertex_array_format(uint32_t slot, uint32_t parameter);
     bool submit_vertex_batch();
+    bool rasterize_depth_only_batch();
     bool fetch_vertex_attribute(uint32_t slot, uint32_t index);
     bool ramht_instance(uint8_t channel, uint32_t handle, uint32_t& instance) const;
     bool dma_object_address(uint32_t instance, uint32_t offset, uint32_t& address) const;

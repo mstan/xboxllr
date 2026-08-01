@@ -3,6 +3,35 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-07-31 — A4: pitch-Z16 triangle depth prepass executes
+
+The first retained-geometry raster path now mutates guest zeta memory. A draw-time census
+captures the exercised surface, clip, depth/cull/polygon, texture, shader-stage, and register
+combiner state for every indexed batch. The admitted profile is the dashboard's untextured
+pitch-surface Z16 depth prepass: triangle lists, strips, and fans use 4-bit fixed-coordinate
+coverage with the top-left rule, CW/back-face culling, screen-linear depth, polygon offset,
+clip-range rejection, LEQUAL testing, and little-endian D16 writes through the bound zeta
+DMA object. Any depth-only draw outside the witnessed profile fault-stops rather than
+silently taking an approximate path.
+
+Programmable oPos now receives the same Kelvin screen-coordinate rounding and signed W
+clamp as the fixed path before rasterization. Focused coverage draws a biased triangle into
+a 64x64 Z16 surface, checks the exact floored depth, and verifies reverse-winding culling.
+The direct suite remains 9/9.
+
+The full 6.4B dashboard acceptance run is fault-free. It executes 142,842 supported depth
+batches and 5,243,066 front-facing triangles, covers 476,615,766 fragments, and performs
+139,247,115 LEQUAL passes/writes. The deterministic raster-write FNV-64 is
+`9424b7ed8661f321`; all 48,554,942 vertices still execute and the corrected combined
+position hash is `b1bdfde660324e2e`. The final scanout hash remains
+`73feb194b7694383`, as expected: this checkpoint writes zeta only, while the dominant
+swizzled color pass remains recorder-only.
+
+**Next:** use the shared triangle coverage/depth foundation to execute the dominant
+untextured swizzled A8R8G8B8/Z24S8 radial-combiner pass, then add the exercised textured
+passes and `INLINE_ARRAY`. OHCI TD/XID input and NVNet RX/transport remain subsequent A4
+work.
+
 ## 2026-07-31 — A4: exercised fixed-function Kelvin transforms execute
 
 Kelvin's remaining indexed transform path now executes and retains the same screen-space

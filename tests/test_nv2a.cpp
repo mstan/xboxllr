@@ -344,6 +344,79 @@ int main() {
     CHECK(gpu.last_transformed_diffuse() == unlit_diffuse);
     CHECK(gpu.last_transformed_specular() == fixed_specular);
 
+    // First software triangle path: the dashboard's untextured pitch-Z16
+    // depth prepass with CW/back-face culling and LEQUAL writes.
+    const float depth_positions[] = {
+        10.0f, 20.0f, 100.75f,
+        30.0f, 20.0f, 100.75f,
+        20.0f, 40.0f, 100.75f,
+    };
+    std::memcpy(ram.data() + 0x7000, depth_positions,
+                sizeof(depth_positions));
+    std::memset(ram.data() + 0x8000, 0xFF, 128 * 64);
+    emit(0x0200, 0x00400000);  // x=0, width=64
+    emit(0x0204, 0x00400000);  // y=0, height=64
+    emit(0x0208, 0x00000113);  // pitch R5G6B5 + fixed Z16
+    emit(0x020C, 0x00800080);  // color/zeta pitch = 128
+    emit(0x0214, 0x00008000);  // zeta offset
+    emit(0x0290, 1);           // fixed Z, non-perspective
+    emit(0x02C0, 0x003F0000);  // window x=0..63
+    emit(0x02E0, 0x003F0000);  // window y=0..63
+    emit(0x0300, 0);           // alpha test disabled
+    emit(0x0304, 0);           // blending disabled
+    emit(0x0308, 1);           // culling enabled
+    emit(0x030C, 1);           // depth test enabled
+    emit(0x0310, 0);
+    emit(0x032C, 0);           // stencil test disabled
+    emit(0x0338, 1);           // polygon offset fill enabled
+    emit(0x0354, 0x0203);      // LEQUAL
+    emit(0x0358, 0);           // no color writes
+    emit(0x035C, 1);           // depth writes enabled
+    emit(0x037C, 0x1D01);      // smooth shading
+    emit(0x0384, 0x00000000);  // slope factor 0
+    emit(0x0388, 0x41200000);  // constant Z bias 10
+    emit(0x038C, 0x1B02);      // front fill
+    emit(0x0390, 0x1B02);      // back fill
+    emit(0x0394, 0x00000000);  // Z clip 0..65535
+    emit(0x0398, 0x477FFF00);
+    emit(0x039C, 0x0405);      // cull back
+    emit(0x03A0, 0x0900);      // CW front face
+    emit(0x1D78, 1);           // cull outside Z clip
+    emit(0x1E94, 2);           // programmable MOV oPos,v0
+    emit(0x17FC, 5);
+    emit(0x1800, 0x00010000);
+    emit(0x1808, 2);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.vertex_batches() == 4);
+    CHECK(gpu.depth_raster_batches() == 1);
+    CHECK(gpu.rasterized_triangles() == 1);
+    CHECK(gpu.rasterized_fragments() > 0);
+    CHECK(gpu.depth_test_passes() == gpu.depth_writes());
+    CHECK(gpu.depth_writes() > 0);
+    uint16_t inside_depth = 0, outside_depth = 0;
+    std::memcpy(&inside_depth, ram.data() + 0x8000 + 25 * 128 + 20 * 2, 2);
+    std::memcpy(&outside_depth, ram.data() + 0x8000 + 5 * 128 + 5 * 2, 2);
+    CHECK(inside_depth == 110);  // floor(100.75 + 10)
+    CHECK(outside_depth == 0xFFFF);
+    CHECK(gpu.last_raster_address() >= 0x8000);
+    CHECK(gpu.last_raster_address() < 0xA000);
+    CHECK(gpu.raster_output_hash() != 1469598103934665603ull);
+
+    const uint64_t front_writes = gpu.depth_writes();
+    emit(0x17FC, 5);
+    emit(0x1800, 0x00020000);  // reverse winding: 0, 2
+    emit(0x1808, 1);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.depth_raster_batches() == 2);
+    CHECK(gpu.rasterized_triangles() == 1);
+    CHECK(gpu.depth_writes() == front_writes);
+    std::memcpy(&inside_depth, ram.data() + 0x8000 + 25 * 128 + 20 * 2, 2);
+    CHECK(inside_depth == 110);
+
     // AvSetDisplayMode's scanout path: VGA CRTC pitch/depth, PRAMDAC dimensions/format,
     // and PCRTC_START resolve unified-RAM RGB565 into deterministic RGBA output.
     auto crtc_write = [&](uint8_t index, uint8_t value) {

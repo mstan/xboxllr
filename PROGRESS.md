@@ -30,9 +30,11 @@ harvested from xemu, silicon-corrected against a live console. GPL-2.
   completion finish the boot animation; `xbmc.exe` initializes NVNet and transmits through
   its descriptor engine; guest-programmed scanout can be dumped/presented; and Kelvin
   color/depth/stencil clears, indexed vertex DMA/fetch/assembly, and programmable vertex
-  shaders plus the exercised fixed-function transform subset now execute.
-- **Immediate burn-down path:** rasterize retained screen-space triangle/list/strip/fan
-  output into the guest's color/zeta surfaces → add `INLINE_ARRAY` →
+  shaders plus the exercised fixed-function transform subset now execute. The first
+  triangle raster profile writes the dashboard's pitch-Z16 depth prepass.
+- **Immediate burn-down path:** execute the dominant untextured swizzled
+  A8R8G8B8/Z24S8 radial-combiner pass → add the exercised textured passes and
+  `INLINE_ARRAY` →
   extend OHCI into TD execution and XID input → add NVNet RX and external transport.
 - **Not started:** A5 end-to-end retail-dashboard navigation and Arc 2 game work.
 
@@ -104,7 +106,13 @@ dependency chain peeled this session is:
     material, lighting, light-mask, texgen, and texture-matrix state are tracked. All 143,590
     fixed batches use skinning off, no active lights/texgen/texture matrices, and one of two
     implemented lit/unlit color paths. The full 48,554,942-vertex position hash is
-    `e7d742624c1f1793`. Pixel mutation still stops at clears.
+    `e7d742624c1f1793`.
+18. first triangle raster path → **fixed for the untextured pitch-Z16 depth prepass**.
+    Triangle lists/strips/fans use fixed-coordinate top-left coverage, culling, polygon
+    offset, clip rejection, and LEQUAL D16 writes through zeta DMA. At 6.4B, 142,842
+    batches rasterize 5,243,066 front-facing triangles and write 139,247,115 depth samples
+    with hash `9424b7ed8661f321`. Programmable screen postprocessing corrects the combined
+    48,554,942-vertex position hash to `b1bdfde660324e2e`; color draws remain the frontier.
 
 ## How to build & run
 
@@ -141,8 +149,9 @@ Deliberate documented stand-ins currently in place (fine for boot, replaced late
 - NV2A PFIFO is a synchronous recorder with semaphore DMA execution; most recorded methods
   still have no CP/raster side effects. Guest-programmed framebuffer selection, host
   readout/presentation, Kelvin pitch-surface clears, and indexed vertex fetch/primitive
-  assembly plus programmable and exercised fixed-function transforms work. Inline arrays
-  and triangle rasterization do not yet.
+  assembly plus programmable and exercised fixed-function transforms work. The witnessed
+  pitch-Z16 depth-only triangle profile rasterizes; color/textured draws and inline arrays
+  do not yet.
 - APU has the load-bearing voice-list, VOICE_OFF, timed idle-voice FE trap, notifier, and IRQ
   lifecycle, but still no DSP/audio synthesis. ACI advances real PCM descriptors and IRQs
   headlessly but produces no host audio.
@@ -193,9 +202,10 @@ Driver: `python tools/xbox_agent.py --host 192.168.4.81 {ping|info|read|exec <fi
 
 ## Next steps (priority order)
 
-1. The indexed Kelvin fetch/assembly and both exercised transform paths are landed. Next
-   rasterize retained screen-space triangle-list/strip/fan output into the existing
-   color/zeta surfaces. Add the sparse `INLINE_ARRAY` path after indexed output works.
+1. The indexed Kelvin paths and pitch-Z16 depth prepass are landed. Next execute the
+   dominant untextured swizzled A8R8G8B8/Z24S8 radial-combiner pass using the shared
+   coverage/depth foundation, then add the exercised textured passes and sparse
+   `INLINE_ARRAY` path.
 2. Extend OHCI: control/bulk TD execution first, then the Xbox XID controller protocol and
    host input mapping.
 3. Add NVNet RX descriptor DMA and external packet transport when the guest or navigation
