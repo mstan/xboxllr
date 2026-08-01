@@ -3,6 +3,34 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-07-31 — A4: exercised fixed-function Kelvin transforms execute
+
+Kelvin's remaining indexed transform path now executes and retains the same screen-space
+position, diffuse/specular, and four texture outputs as the programmable path. Fixed-function
+matrix uploads populate the shared Cheops XF context; the dashboard's skinning-off path
+multiplies position by the composite matrix, applies the signed NV2A W clamp and four-bit
+screen-coordinate truncation, and adds the viewport offset. Material emission/alpha, scene
+ambient, color-source/light-control selectors, lighting/specular enables, light mask,
+normalization, fog, texgen, and texture-matrix enables are tracked rather than assumed.
+
+The fault-driven census found exactly two exercised color states. The first 15,999 fixed
+batches use ambient/material lighting with separate specular; the remaining 127,591 disable
+lighting and specular and pass v3 diffuse through. Every fixed batch has skinning,
+normalization, fog, texgen, and texture matrices disabled, all eight lights off, and material
+source word zero. Any broader fixed-function state still fault-stops at its first batch.
+Focused coverage checks both color states, composite/viewport position math, W handling,
+screen rounding, retained outputs, and state counters.
+
+The full 6.4B dashboard acceptance run is fault-free and executes all 48,554,942 submitted
+vertices: 143,590 fixed-function batches plus 292,866 programmable batches. The combined
+position-stream FNV-64 is `e7d742624c1f1793`; vertex/primitive totals remain unchanged, as
+does the final scanout hash `73feb194b7694383` because triangle rasterization has not landed.
+The direct suite is 9/9.
+
+**Next:** consume retained screen-space output in triangle-list/strip/fan rasterization with
+the guest's color/zeta, cull, depth, and blend state, then add `INLINE_ARRAY`. OHCI TD/XID
+input and NVNet RX/transport remain subsequent A4 work.
+
 ## 2026-07-30 — A4: programmable Kelvin vertex shaders execute on CPU
 
 Kelvin's programmable transform stage now executes instead of stopping at decoded inputs.

@@ -1,4 +1,5 @@
 // xlle — focused PFIFO recorder / NV097 semaphore DMA test.
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -253,6 +254,95 @@ int main() {
     CHECK(gpu.transform_program_words() == 4);
     CHECK(gpu.transform_constant_words() == 4);
     CHECK(gpu.transform_output_hash() != 1469598103934665603ull);
+
+    // Exercised dashboard fixed-function subset: no skinning/lights/texgen,
+    // separate specular, composite transform, ambient/material color.
+    const float specular_values[] = {
+        0.1f, 0.2f, 0.3f, 0.125f,
+        0.2f, 0.3f, 0.4f, 0.125f,
+        0.3f, 0.4f, 0.5f, 0.125f,
+    };
+    std::memcpy(ram.data() + 0x7200, specular_values,
+                sizeof(specular_values));
+    emit(0x1730, 0x00007200);  // specular slot 4, DMA A
+    emit(0x1770, 0x00001042);  // float4, stride 16
+    emit(0x0294, 1);       // separate specular
+    emit(0x0298, 0);       // all color sources are material
+    emit(0x02A4, 0);       // fog disabled
+    emit(0x0314, 1);       // lighting enabled
+    emit(0x0328, 0);       // skinning disabled
+    emit(0x03A4, 0);       // normalization disabled
+    emit(0x03A8, 0x3F000000);  // material emission = (0.5, 1, 2)
+    emit(0x03AC, 0x3F800000);
+    emit(0x03B0, 0x40000000);
+    emit(0x03B4, 0x3E800000);  // material alpha = 0.25
+    emit(0x03B8, 1);       // specular enabled
+    emit(0x03BC, 0);       // all lights off
+    const uint32_t composite[] = {
+        0x40000000, 0, 0, 0,
+        0, 0x40400000, 0, 0,
+        0, 0, 0x3F800000, 0,
+        0, 0, 0, 0x40000000,
+    };
+    for (uint32_t i = 0; i < 16; ++i)
+        emit(0x0680 + i * 4, composite[i]);
+    emit(0x0A10, 0x3E4CCCCD);  // scene ambient = (0.2, 0.3, 0.4)
+    emit(0x0A14, 0x3E99999A);
+    emit(0x0A18, 0x3ECCCCCD);
+    emit(0x0A20, 0x3DCCCCCD);  // viewport offset = (0.1, -0.1)
+    emit(0x0A24, 0xBDCCCCCD);
+    emit(0x1E94, 0);       // fixed-function transform mode
+    emit(0x17FC, 5);
+    emit(0x1800, 0x00010000);
+    emit(0x1808, 2);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.vertex_batches() == 2);
+    CHECK(gpu.transform_mode_batches(0) == 1);
+    CHECK(gpu.fixed_skin_batches(0) == 1);
+    CHECK(gpu.fixed_lighting_batches() == 1);
+    CHECK(gpu.fixed_specular_batches() == 1);
+    CHECK(gpu.fixed_light_type_batches(0) == 8);
+    CHECK(gpu.fixed_color_material_batches(0) == 1);
+    CHECK(gpu.fixed_light_control_batches(1) == 1);
+    CHECK(gpu.transformed_vertices() == 6);
+    const auto fixed_position = gpu.last_transformed_position();
+    CHECK(fixed_position[0] == 20.0625f);
+    CHECK(fixed_position[1] == 59.875f);
+    CHECK(fixed_position[2] == 0.0f);
+    CHECK(fixed_position[3] == 2.0f);
+    const auto fixed_diffuse = gpu.last_transformed_diffuse();
+    CHECK(std::abs(fixed_diffuse[0] - 0.3f) < 0.000001f);
+    CHECK(std::abs(fixed_diffuse[1] - 0.6f) < 0.000001f);
+    CHECK(std::abs(fixed_diffuse[2] - 1.2f) < 0.000001f);
+    CHECK(fixed_diffuse[3] == 0.25f);
+    const std::array<float, 4> fixed_specular =
+        {0.0f, 0.0f, 0.0f, 1.0f};
+    CHECK(gpu.last_transformed_specular() == fixed_specular);
+
+    // The dashboard also briefly disables lighting/specular while retaining
+    // alpha-from-material-specular in LIGHT_CONTROL.
+    emit(0x0294, 0x00020001);
+    emit(0x0314, 0);
+    emit(0x03B8, 0);
+    emit(0x17FC, 5);
+    emit(0x1800, 0x00010000);
+    emit(0x1808, 2);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.vertex_batches() == 3);
+    CHECK(gpu.transform_mode_batches(0) == 2);
+    CHECK(gpu.fixed_lighting_batches() == 1);
+    CHECK(gpu.fixed_specular_batches() == 1);
+    CHECK(gpu.fixed_light_type_batches(0) == 16);
+    CHECK(gpu.fixed_light_control_batches(5) == 1);
+    CHECK(gpu.transformed_vertices() == 9);
+    const std::array<float, 4> unlit_diffuse =
+        {0.0f, 0.0f, 1.0f, 1.0f};
+    CHECK(gpu.last_transformed_diffuse() == unlit_diffuse);
+    CHECK(gpu.last_transformed_specular() == fixed_specular);
 
     // AvSetDisplayMode's scanout path: VGA CRTC pitch/depth, PRAMDAC dimensions/format,
     // and PCRTC_START resolve unified-RAM RGB565 into deterministic RGBA output.

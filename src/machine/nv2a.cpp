@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <climits>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
@@ -40,6 +41,23 @@ const Nv2a::Block* Nv2a::find_block(uint32_t rel, uint32_t& block_rel) {
 static constexpr uint32_t kPciNv0 = 0x02A0'10DEu;  // device<<16 | vendor
 static constexpr uint32_t kPciNv1 = 0x0000'0000u;  // command/status (decode off at reset)
 static constexpr uint32_t kPciNv2 = 0x0300'00A1u;  // class(0x030000)<<8 | revision(0xA1)
+
+// xemu's fixed-function shader clamps reciprocal divisors to NV2A's signed
+// [2^-64, 2^64] range, preserving the sign of zero, then truncates screen
+// coordinates to four fractional bits.
+static float clamp_away_zero_inf(float value) {
+    const float minimum = std::ldexp(1.0f, -64);
+    const float maximum = std::ldexp(1.0f, 64);
+    uint32_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    if (value > 0.0f || bits == 0)
+        return std::clamp(value, minimum, maximum);
+    return std::clamp(value, -maximum, -minimum);
+}
+
+static float round_screen_coordinate(float value) {
+    return std::trunc(value * 16.0f) / 16.0f;
+}
 
 uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
     uint32_t rel = addr - kBase;
@@ -710,8 +728,30 @@ bool Nv2a::submit_vertex_batch() {
     }
 
     ++transform_mode_batches_[transform_execution_mode_ & 3u];
+    if (transform_execution_mode_ == 0) {
+        ++fixed_skin_batches_[fixed_skin_mode_];
+        if (fixed_lighting_) ++fixed_lighting_batches_;
+        if (fixed_normalization_) ++fixed_normalization_batches_;
+        if (fixed_specular_) ++fixed_specular_batches_;
+        if (fixed_fog_) ++fixed_fog_batches_;
+        if (std::any_of(fixed_texture_matrix_enable_.begin(),
+                        fixed_texture_matrix_enable_.end(),
+                        [](bool enabled) { return enabled; }))
+            ++fixed_texture_matrix_batches_;
+        bool any_texgen = false;
+        for (const auto& stage : fixed_texgen_)
+            for (uint32_t mode : stage) any_texgen |= mode != 0;
+        if (any_texgen) ++fixed_texgen_batches_;
+        for (uint32_t light = 0; light < 8; ++light) {
+            const uint32_t type = (fixed_light_enable_mask_ >> (light * 2)) & 3u;
+            ++fixed_light_type_batches_[type];
+        }
+        ++fixed_color_material_batches_[fixed_color_material_];
+        ++fixed_light_control_batches_[fixed_light_control_];
+    }
     Nv2aVshProgram program{};
     bool program_parsed = false;
+    bool fixed_function = false;
     if (transform_execution_mode_ == 2) {
         const uint32_t slots =
             static_cast<uint32_t>(transform_program_.size()) - transform_program_start_;
@@ -726,12 +766,34 @@ bool Nv2a::submit_vertex_batch() {
             return false;
         }
         program_parsed = true;
-        transformed_batch_.clear();
-        transformed_batch_.reserve(vertex_indices_.size());
+    } else if (transform_execution_mode_ == 0) {
+        bool any_texture_matrix =
+            std::any_of(fixed_texture_matrix_enable_.begin(),
+                        fixed_texture_matrix_enable_.end(),
+                        [](bool enabled) { return enabled; });
+        bool any_texgen = false;
+        for (const auto& stage : fixed_texgen_)
+            for (uint32_t mode : stage) any_texgen |= mode != 0;
+        const bool ambient_lit_subset =
+            fixed_lighting_ && fixed_specular_ && fixed_light_control_ == 1;
+        const bool unlit_subset =
+            !fixed_lighting_ && !fixed_specular_ && fixed_light_control_ == 5;
+        if (fixed_skin_mode_ != 0 ||
+            (!ambient_lit_subset && !unlit_subset) ||
+            fixed_normalization_ || fixed_fog_ ||
+            any_texture_matrix || any_texgen ||
+            fixed_light_enable_mask_ != 0 ||
+            fixed_color_material_ != 0) {
+            fault_("NV2A fixed-function batch exceeds the witnessed transform subset");
+            return false;
+        }
+        fixed_function = true;
     } else if (transform_execution_mode_ != 0) {
         fault_("NV2A vertex batch uses unsupported transform execution mode");
         return false;
     }
+    transformed_batch_.clear();
+    transformed_batch_.reserve(vertex_indices_.size());
 
     for (uint32_t index : vertex_indices_) {
         largest_vertex_index_ = std::max(largest_vertex_index_, index);
@@ -741,6 +803,7 @@ bool Nv2a::submit_vertex_batch() {
                 return false;
             }
         }
+        TransformedVertex vertex;
         if (program_parsed) {
             Nv2aVshCPUFullExecutionState full_state;
             Nv2aVshExecutionState execution =
@@ -753,7 +816,6 @@ bool Nv2a::submit_vertex_batch() {
             }
             nv2a_vsh_emu_execute(&execution, &program);
 
-            TransformedVertex vertex;
             std::memcpy(vertex.position.data(), &full_state.output_regs[0], 4 * sizeof(float));
             std::memcpy(vertex.diffuse.data(), &full_state.output_regs[3 * 4],
                         4 * sizeof(float));
@@ -764,6 +826,41 @@ bool Nv2a::submit_vertex_batch() {
                             &full_state.output_regs[(9 + texture) * 4],
                             4 * sizeof(float));
             }
+        } else if (fixed_function) {
+            const auto& position = vertex_attributes_[0].value;
+            std::array<float, 4> clip{};
+            for (uint32_t component = 0; component < 4; ++component) {
+                for (uint32_t term = 0; term < 4; ++term)
+                    clip[component] +=
+                        position[term] * transform_constants_[component][term];
+            }
+            clip[3] = clamp_away_zero_inf(clip[3]);
+            vertex.position[0] = round_screen_coordinate(
+                clip[0] / clip[3] + transform_constants_[0x3B][0]);
+            vertex.position[1] = round_screen_coordinate(
+                clip[1] / clip[3] + transform_constants_[0x3B][1]);
+            vertex.position[2] = clip[2] / clip[3];
+            vertex.position[3] = clip[3];
+
+            if (fixed_lighting_) {
+                for (uint32_t component = 0; component < 3; ++component) {
+                    vertex.diffuse[component] =
+                        fixed_scene_ambient_[component] *
+                            fixed_material_emission_[component] +
+                        fixed_scene_ambient_[component];
+                }
+                vertex.diffuse[3] = fixed_material_alpha_;
+                vertex.specular = {0.0f, 0.0f, 0.0f,
+                                   (fixed_light_control_ & 4u)
+                                       ? vertex_attributes_[4].value[3] : 1.0f};
+            } else {
+                vertex.diffuse = vertex_attributes_[3].value;
+                vertex.specular = {0.0f, 0.0f, 0.0f, 1.0f};
+            }
+            for (uint32_t texture = 0; texture < 4; ++texture)
+                vertex.texture[texture] = vertex_attributes_[9 + texture].value;
+        }
+        if (program_parsed || fixed_function) {
             transformed_batch_.push_back(vertex);
             for (float component : vertex.position) {
                 uint32_t bits = 0;
@@ -916,6 +1013,85 @@ void Nv2a::dispatch_method(uint8_t channel, uint8_t subchannel, uint32_t method,
         clear_rect_vertical_ = parameter;
     } else if (method == 0x1D94) {
         clear_surface(parameter);
+    // Fixed-function vertex-state selectors. Their batch census gates which xemu equations
+    // must execute before fixed-function output can be admitted to rasterization.
+    } else if (method == 0x0294) {
+        fixed_light_control_ =
+            static_cast<uint8_t>((parameter & 1u) |
+                                 ((parameter >> 15) & 2u) |
+                                 ((parameter >> 15) & 4u));
+    } else if (method == 0x0298) {
+        fixed_color_material_ = static_cast<uint8_t>(parameter);
+    } else if (method == 0x02A4) {
+        fixed_fog_ = parameter != 0;
+    } else if (method == 0x0314) {
+        fixed_lighting_ = parameter != 0;
+    } else if (method == 0x0328) {
+        if (parameter > 6) {
+            fault_("NV2A fixed-function skin mode is invalid");
+            return;
+        }
+        fixed_skin_mode_ = static_cast<uint8_t>(parameter);
+    } else if (method == 0x03A4) {
+        fixed_normalization_ = parameter != 0;
+    } else if (method >= 0x03A8 && method < 0x03B4) {
+        const uint32_t component = (method - 0x03A8) / 4;
+        std::memcpy(&fixed_material_emission_[component],
+                    &parameter, sizeof(parameter));
+    } else if (method == 0x03B4) {
+        std::memcpy(&fixed_material_alpha_, &parameter, sizeof(parameter));
+    } else if (method == 0x03B8) {
+        fixed_specular_ = parameter != 0;
+    } else if (method == 0x03BC) {
+        fixed_light_enable_mask_ = static_cast<uint16_t>(parameter);
+    } else if (method >= 0x03C0 && method < 0x0400) {
+        const uint32_t stage = (method - 0x03C0) / 0x10;
+        const uint32_t component = ((method - 0x03C0) & 0xFu) / 4;
+        fixed_texgen_[stage][component] = parameter;
+    } else if (method >= 0x0420 && method < 0x0430) {
+        fixed_texture_matrix_enable_[(method - 0x0420) / 4] = parameter != 0;
+    // Fixed-function matrix uploads share Cheops constant memory. Matrices are
+    // interleaved exactly as the NV2A XF context lays them out.
+    } else if (method >= 0x0440 && method < 0x0480) {
+        const uint32_t slot = (method - 0x0440) / 4;
+        std::memcpy(&transform_constants_[0x04 + slot / 4][slot & 3u],
+                    &parameter, sizeof(parameter));
+    } else if (method >= 0x0480 && method < 0x0580) {
+        const uint32_t slot = (method - 0x0480) / 4;
+        const uint32_t matrix = slot / 16;
+        const uint32_t entry = slot & 15u;
+        std::memcpy(&transform_constants_[0x08 + matrix * 8 + entry / 4]
+                                         [entry & 3u],
+                    &parameter, sizeof(parameter));
+    } else if (method >= 0x0580 && method < 0x0680) {
+        const uint32_t slot = (method - 0x0580) / 4;
+        const uint32_t matrix = slot / 16;
+        const uint32_t entry = slot & 15u;
+        std::memcpy(&transform_constants_[0x0C + matrix * 8 + entry / 4]
+                                         [entry & 3u],
+                    &parameter, sizeof(parameter));
+    } else if (method >= 0x0680 && method < 0x06C0) {
+        const uint32_t slot = (method - 0x0680) / 4;
+        std::memcpy(&transform_constants_[slot / 4][slot & 3u],
+                    &parameter, sizeof(parameter));
+    } else if (method >= 0x06C0 && method < 0x07C0) {
+        const uint32_t slot = (method - 0x06C0) / 4;
+        const uint32_t texture = slot / 16;
+        const uint32_t entry = slot & 15u;
+        std::memcpy(&transform_constants_[0x44 + texture * 8 + entry / 4]
+                                         [entry & 3u],
+                    &parameter, sizeof(parameter));
+    } else if (method >= 0x0840 && method < 0x0940) {
+        const uint32_t slot = (method - 0x0840) / 4;
+        const uint32_t texture = slot / 16;
+        const uint32_t entry = slot & 15u;
+        std::memcpy(&transform_constants_[0x40 + texture * 8 + entry / 4]
+                                         [entry & 3u],
+                    &parameter, sizeof(parameter));
+    } else if (method >= 0x0A10 && method < 0x0A1C) {
+        const uint32_t component = (method - 0x0A10) / 4;
+        std::memcpy(&fixed_scene_ambient_[component],
+                    &parameter, sizeof(parameter));
     // Kelvin viewport and Cheops programmable-transform state. Program/constant upload
     // pointers advance after each complete four-word vector, matching xemu's PGRAPH model.
     } else if (method >= 0x0A20 && method < 0x0A30) {

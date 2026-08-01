@@ -114,6 +114,41 @@ public:
     uint64_t transform_program_words() const { return transform_program_words_; }
     uint64_t transform_constant_words() const { return transform_constant_words_; }
     uint64_t transform_output_hash() const { return transform_output_hash_; }
+    std::array<float, 4> last_transformed_position() const {
+        return transformed_batch_.empty()
+                   ? std::array<float, 4>{} : transformed_batch_.back().position;
+    }
+    std::array<float, 4> last_transformed_diffuse() const {
+        return transformed_batch_.empty()
+                   ? std::array<float, 4>{} : transformed_batch_.back().diffuse;
+    }
+    std::array<float, 4> last_transformed_specular() const {
+        return transformed_batch_.empty()
+                   ? std::array<float, 4>{} : transformed_batch_.back().specular;
+    }
+    uint64_t fixed_skin_batches(uint32_t mode) const {
+        return mode < fixed_skin_batches_.size() ? fixed_skin_batches_[mode] : 0;
+    }
+    uint64_t fixed_lighting_batches() const { return fixed_lighting_batches_; }
+    uint64_t fixed_normalization_batches() const { return fixed_normalization_batches_; }
+    uint64_t fixed_specular_batches() const { return fixed_specular_batches_; }
+    uint64_t fixed_fog_batches() const { return fixed_fog_batches_; }
+    uint64_t fixed_texture_matrix_batches() const {
+        return fixed_texture_matrix_batches_;
+    }
+    uint64_t fixed_texgen_batches() const { return fixed_texgen_batches_; }
+    uint64_t fixed_light_type_batches(uint32_t type) const {
+        return type < fixed_light_type_batches_.size()
+                   ? fixed_light_type_batches_[type] : 0;
+    }
+    uint64_t fixed_color_material_batches(uint32_t sources) const {
+        return sources < fixed_color_material_batches_.size()
+                   ? fixed_color_material_batches_[sources] : 0;
+    }
+    uint64_t fixed_light_control_batches(uint32_t flags) const {
+        return flags < fixed_light_control_batches_.size()
+                   ? fixed_light_control_batches_[flags] : 0;
+    }
     uint32_t pgraph_surface() const;
     bool waiting_for_flip() const { return waiting_for_flip_; }
     size_t recent_methods(size_t n, std::vector<PushMethod>& out) const {
@@ -269,6 +304,29 @@ private:
     uint64_t transformed_vertices_ = 0;
     uint64_t transform_output_hash_ = 1469598103934665603ull;
     std::array<uint64_t, 4> transform_mode_batches_{};
+    uint8_t fixed_skin_mode_ = 0;
+    bool fixed_lighting_ = false;
+    bool fixed_normalization_ = false;
+    bool fixed_specular_ = false;
+    bool fixed_fog_ = false;
+    uint8_t fixed_color_material_ = 0;
+    uint8_t fixed_light_control_ = 0;
+    uint16_t fixed_light_enable_mask_ = 0;
+    std::array<float, 3> fixed_scene_ambient_{};
+    std::array<float, 3> fixed_material_emission_{};
+    float fixed_material_alpha_ = 0.0f;
+    std::array<bool, 4> fixed_texture_matrix_enable_{};
+    std::array<std::array<uint32_t, 4>, 4> fixed_texgen_{};
+    std::array<uint64_t, 7> fixed_skin_batches_{};
+    uint64_t fixed_lighting_batches_ = 0;
+    uint64_t fixed_normalization_batches_ = 0;
+    uint64_t fixed_specular_batches_ = 0;
+    uint64_t fixed_fog_batches_ = 0;
+    uint64_t fixed_texture_matrix_batches_ = 0;
+    uint64_t fixed_texgen_batches_ = 0;
+    std::array<uint64_t, 4> fixed_light_type_batches_{};
+    std::array<uint64_t, 256> fixed_color_material_batches_{};
+    std::array<uint64_t, 8> fixed_light_control_batches_{};
     struct TransformedVertex {
         std::array<float, 4> position{};
         std::array<float, 4> diffuse{};

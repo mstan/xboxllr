@@ -614,6 +614,48 @@ int main(int argc, char** argv) {
                             (unsigned long long)mach.nv2a()->transform_program_words(),
                             (unsigned long long)mach.nv2a()->transform_constant_words(),
                             (unsigned long long)mach.nv2a()->transform_output_hash());
+                std::printf("[2bl] NV2A fixed-function: skin");
+                for (uint32_t mode = 0; mode <= 6; ++mode) {
+                    uint64_t count = mach.nv2a()->fixed_skin_batches(mode);
+                    if (count)
+                        std::printf(" %u=%llu", mode, (unsigned long long)count);
+                }
+                std::printf(" lighting/norm/spec/fog/texmat/texgen=%llu/%llu/%llu/%llu/%llu/%llu\n",
+                            (unsigned long long)mach.nv2a()->fixed_lighting_batches(),
+                            (unsigned long long)mach.nv2a()->fixed_normalization_batches(),
+                            (unsigned long long)mach.nv2a()->fixed_specular_batches(),
+                            (unsigned long long)mach.nv2a()->fixed_fog_batches(),
+                            (unsigned long long)mach.nv2a()->fixed_texture_matrix_batches(),
+                            (unsigned long long)mach.nv2a()->fixed_texgen_batches());
+                std::printf("[2bl] NV2A fixed lights off/inf/local/spot=%llu/%llu/%llu/%llu",
+                            (unsigned long long)mach.nv2a()->fixed_light_type_batches(0),
+                            (unsigned long long)mach.nv2a()->fixed_light_type_batches(1),
+                            (unsigned long long)mach.nv2a()->fixed_light_type_batches(2),
+                            (unsigned long long)mach.nv2a()->fixed_light_type_batches(3));
+                std::printf(" material=");
+                bool first_material = true;
+                for (uint32_t sources = 0; sources < 256; ++sources) {
+                    uint64_t count =
+                        mach.nv2a()->fixed_color_material_batches(sources);
+                    if (count) {
+                        std::printf("%s%02X:%llu", first_material ? "" : ",",
+                                    sources, (unsigned long long)count);
+                        first_material = false;
+                    }
+                }
+                std::printf(" lightctl=");
+                bool first_light_control = true;
+                for (uint32_t flags = 0; flags < 8; ++flags) {
+                    uint64_t count =
+                        mach.nv2a()->fixed_light_control_batches(flags);
+                    if (count) {
+                        std::printf("%s%u:%llu",
+                                    first_light_control ? "" : ",",
+                                    flags, (unsigned long long)count);
+                        first_light_control = false;
+                    }
+                }
+                std::printf("\n");
                 std::printf("[2bl] NV2A flip: write-increments=%llu stalls=%llu "
                             "read-increments=%llu notifications=%llu surface=%08x waiting=%u\n",
                             (unsigned long long)mach.nv2a()->flip_increments(),
