@@ -1031,6 +1031,7 @@ int main() {
     emit(0x0304, 1);
     emit(0x0308, 1);
     emit(0x030C, 1);
+    emit(0x0310, 0);
     emit(0x033C, 0x0206);
     emit(0x0340, 1);
     emit(0x0344, 1);
@@ -1131,6 +1132,7 @@ int main() {
     emit(0x0304, 1);
     emit(0x0308, 1);
     emit(0x030C, 1);
+    emit(0x0310, 0);
     emit(0x033C, 0x0206);
     emit(0x0340, 1);
     emit(0x0344, 0x0302);
@@ -1245,6 +1247,154 @@ int main() {
     CHECK(get32(ram, 0x20000 + pitch_textured_inside) == 0xB1192E0Au);
     CHECK(get32(ram, 0x60000 + pitch_textured_inside) == 0x0000645Au);
 
+    // The leading remaining inline state is a linear resolve: PROJECT2D
+    // coordinates in texels bilinearly sample a 1280x480 pitch texture into
+    // a 640x480 pitch target. RGB comes from t0 and alpha from v0; only
+    // dithering is enabled, which is inert for A8R8G8B8. Reversed winding
+    // verifies the witnessed disabled-cull state.
+    const float inline_blit_positions[] = {
+        10.0f, 10.0f, 100.0f, 1.0f,
+        50.0f, 10.0f, 100.0f, 1.0f,
+        10.0f, 50.0f, 100.0f, 1.0f,
+    };
+    const uint32_t inline_blit_colors[] = {
+        0x80000000, 0x80000000, 0x80000000,
+    };
+    const float inline_blit_texcoords[] = {
+        2.0f, 2.0f, 0.0f, 2.0f,
+        2.0f, 2.0f, 0.0f, 2.0f,
+        2.0f, 2.0f, 0.0f, 2.0f,
+    };
+    std::memcpy(ram.data() + 0x7000, inline_blit_positions,
+                sizeof(inline_blit_positions));
+    std::memcpy(ram.data() + 0x7100, inline_blit_colors,
+                sizeof(inline_blit_colors));
+    std::memcpy(ram.data() + 0x7400, inline_blit_texcoords,
+                sizeof(inline_blit_texcoords));
+    std::memset(ram.data() + 0x100000, 0, 0x1400 * 480);
+    put32(ram, 0x100000 + 0 * 0x1400 + 0 * 4, 0xFF000000);
+    put32(ram, 0x100000 + 0 * 0x1400 + 1 * 4, 0xFF400000);
+    put32(ram, 0x100000 + 1 * 0x1400 + 0 * 4, 0xFF004000);
+    put32(ram, 0x100000 + 1 * 0x1400 + 1 * 4, 0xFF404000);
+    std::memset(ram.data() + 0x400000, 0, 0x0A00 * 480);
+    put32(ram, 0x60000, 0xDEADBEEF);
+
+    emit(0x0200, 0x02800000);
+    emit(0x0204, 0x01E00000);
+    emit(0x0208, 0x00000128);
+    emit(0x020C, 0x0A000A00);
+    emit(0x0210, 0x00400000);
+    emit(0x0214, 0);
+    emit(0x02C0, 0x027F0000);
+    emit(0x02E0, 0x01DF0000);
+    emit(0x0300, 0);
+    emit(0x0304, 0);
+    emit(0x0308, 0);
+    emit(0x030C, 0);
+    emit(0x0310, 1);
+    emit(0x0318, 0);
+    emit(0x031C, 0);
+    emit(0x0320, 0);
+    emit(0x0324, 0);
+    emit(0x032C, 0);
+    emit(0x0330, 0);
+    emit(0x0334, 0);
+    emit(0x0338, 0);
+    emit(0x033C, 0x0206);
+    emit(0x0340, 1);
+    emit(0x0344, 1);
+    emit(0x0348, 0);
+    emit(0x0350, 0x8006);
+    emit(0x0354, 0x0203);
+    emit(0x0358, 0x01010101);
+    emit(0x035C, 1);
+    emit(0x0384, 0x80000000);
+    emit(0x0388, 0x80000000);
+    emit(0x038C, 0x1B02);
+    emit(0x0390, 0x1B02);
+    emit(0x0394, 0);
+    emit(0x0398, 0x4B7FFFFF);
+    emit(0x039C, 0x0405);
+    emit(0x03A0, 0x0900);
+    emit(0x17BC, 0);
+    emit(0x1D78, 1);
+    emit(0x1720, 0x00007000);
+    emit(0x172C, 0x80007100);
+    emit(0x1744, 0x00007400);
+    emit(0x1760, 0x00001042);
+    emit(0x176C, 0x00000440);
+    emit(0x1784, 0x00001042);
+    for (uint32_t stage = 0; stage < 4; ++stage) {
+        const uint32_t base = 0x1B00 + stage * 0x40;
+        emit(base + 0x00, stage == 0 ? 0x00100000 : 0);
+        emit(base + 0x04, stage == 0 ? 0x0001122A : 0);
+        emit(base + 0x08, stage == 0 ? 0x00030303 : 0);
+        emit(base + 0x0C, stage == 0 ? 0x4003FFC0 : 0);
+        emit(base + 0x10, stage == 0 ? 0x14000000 : 0);
+        emit(base + 0x14, stage == 0 ? 0x02022000 : 0);
+        emit(base + 0x1C, stage == 0 ? 0x050001E0 : 0);
+        emit(base + 0x20, 0);
+        emit(base + 0x24, stage == 0 ? 0xFF000000 : 0);
+    }
+    emit(0x1E6C, 7);
+    emit(0x1E70, 0x00000001);
+    emit(0x1E74, 0);
+    emit(0x1E78, 0x00210000);
+    emit(0x1E60, 0x00000001);
+    emit(0x0AC0, 0x08200000);
+    emit(0x0260, 0x14200000);
+    emit(0x1E40, 0x00000C00);
+    emit(0x0AA0, 0x00000C00);
+    emit(0x0A60, 0xFFFFFFFF);
+    emit(0x0A80, 0xFFFFFFFF);
+    emit(0x0288, 0x0000000C);
+    emit(0x028C, 0x00001C80);
+    emit(0x1E20, 0);
+    emit(0x1E24, 0);
+    emit(0x17FC, 5);
+    emit(0x1800, 0x00010000);
+    emit(0x1808, 2);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.inline_linear_blit_batches() == 1);
+    CHECK(gpu.inline_linear_blit_triangles() == 1);
+    CHECK(gpu.inline_linear_blit_fragments() > 0);
+    CHECK(gpu.inline_linear_blit_writes() ==
+          gpu.inline_linear_blit_fragments());
+    CHECK(gpu.inline_linear_blit_samples() ==
+          gpu.inline_linear_blit_writes());
+    const uint32_t inline_blit_inside = 20 * 0x0A00 + 20 * 4;
+    CHECK(get32(ram, 0x400000 + inline_blit_inside) == 0x80202000);
+    CHECK(get32(ram, 0x400000 + 5 * 0x0A00 + 5 * 4) == 0);
+    CHECK(get32(ram, 0x60000) == 0xDEADBEEF);
+    CHECK(gpu.last_inline_linear_blit_raster_address() >= 0x400000);
+    CHECK(gpu.last_inline_linear_blit_raster_address() < 0x52C000);
+    CHECK(gpu.inline_linear_blit_output_hash() !=
+          1469598103934665603ull);
+
+    const float inline_blit_reversed[] = {
+        10.0f, 10.0f, 100.0f, 1.0f,
+        10.0f, 50.0f, 100.0f, 1.0f,
+        50.0f, 10.0f, 100.0f, 1.0f,
+    };
+    const uint64_t inline_blit_first_writes =
+        gpu.inline_linear_blit_writes();
+    std::memcpy(ram.data() + 0x7000, inline_blit_reversed,
+                sizeof(inline_blit_reversed));
+    emit(0x17FC, 5);
+    emit(0x1800, 0x00010000);
+    emit(0x1808, 2);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.inline_linear_blit_batches() == 2);
+    CHECK(gpu.inline_linear_blit_triangles() == 2);
+    CHECK(gpu.inline_linear_blit_writes() ==
+          inline_blit_first_writes * 2);
+    CHECK(get32(ram, 0x400000 + inline_blit_inside) == 0x80202000);
+    CHECK(get32(ram, 0x60000) == 0xDEADBEEF);
+
     // Inline dashboard geometry uses a distinct linear color profile:
     // PROJECT2D texture * c0, alpha GEQUAL 1, then SRC_ALPHA/ONE ADD.
     // The ALWAYS depth state must neither read nor write the zeta plane.
@@ -1273,12 +1423,14 @@ int main() {
     emit(0x0208, 0x00000128);
     emit(0x020C, 0x01000100);
     emit(0x0210, 0x00020000);
+    emit(0x0214, 0x00060000);
     emit(0x02C0, 0x003F0000);
     emit(0x02E0, 0x003F0000);
     emit(0x0300, 1);
     emit(0x0304, 1);
     emit(0x0308, 1);
     emit(0x030C, 1);
+    emit(0x0310, 0);
     emit(0x033C, 0x0206);
     emit(0x0340, 1);
     emit(0x0344, 0x0302);

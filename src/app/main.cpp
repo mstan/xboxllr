@@ -736,6 +736,17 @@ int main(int argc, char** argv) {
                             (unsigned long long)mach.nv2a()->pitch_multi_texture_samples(),
                             mach.nv2a()->last_pitch_multi_texture_raster_address(),
                             (unsigned long long)mach.nv2a()->pitch_multi_texture_output_hash());
+                std::printf("[2bl] NV2A inline-blit: "
+                            "batches/tri/frags/writes/samples="
+                            "%llu/%llu/%llu/%llu/%llu "
+                            "last=%08x hash=%016llx\n",
+                            (unsigned long long)mach.nv2a()->inline_linear_blit_batches(),
+                            (unsigned long long)mach.nv2a()->inline_linear_blit_triangles(),
+                            (unsigned long long)mach.nv2a()->inline_linear_blit_fragments(),
+                            (unsigned long long)mach.nv2a()->inline_linear_blit_writes(),
+                            (unsigned long long)mach.nv2a()->inline_linear_blit_samples(),
+                            mach.nv2a()->last_inline_linear_blit_raster_address(),
+                            (unsigned long long)mach.nv2a()->inline_linear_blit_output_hash());
                 std::printf("[2bl] NV2A inline-color: batches/tri/frags/alpha/"
                             "writes/samples=%llu/%llu/%llu/%llu/%llu/%llu "
                             "last=%08x hash=%016llx\n",

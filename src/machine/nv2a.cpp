@@ -1201,6 +1201,7 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         kSwizzledProjectedColor,
         kPitchProjectedColor,
         kPitchMultiTextureColor,
+        kInlineLinearBlitColor,
         kPitchSingleTextureColor,
         kPitchAdditiveColor,
     };
@@ -1387,6 +1388,32 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                 pitch_multi_factor0[stage] &&
             raster_state_[kRasterCombinerFactor1_0 + stage] == 0;
     }
+    const bool inline_linear_blit_combiner =
+        raster_state_[kRasterTextureEnableMask] == 1 &&
+        raster_state_[kRasterShaderStageProgram] == 0x00000001 &&
+        raster_state_[kRasterShaderOtherStageInput] == 0x00210000 &&
+        raster_state_[kRasterDotRgbMapping] == 0 &&
+        raster_state_[kRasterShadowDepthFunc] == 7 &&
+        raster_state_[kRasterCombinerControl] == 0x00000001 &&
+        raster_state_[kRasterCombinerColorIcw0] == 0x08200000 &&
+        raster_state_[kRasterCombinerAlphaIcw0] == 0x14200000 &&
+        raster_state_[kRasterCombinerColorOcw0] == 0x00000C00 &&
+        raster_state_[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
+        raster_state_[kRasterCombinerFactor0_0] == 0xFFFFFFFF &&
+        raster_state_[kRasterCombinerFactor1_0] == 0xFFFFFFFF &&
+        raster_state_[kRasterCombinerSpecularFog0] == 0x0000000C &&
+        raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80 &&
+        raster_state_[kRasterCombinerFinalFactor0] == 0 &&
+        raster_state_[kRasterCombinerFinalFactor1] == 0;
+    const bool inline_linear_blit_texture =
+        raster_state_[kRasterTextureFormat0] == 0x0001122A &&
+        raster_state_[kRasterTextureAddress0] == 0x00030303 &&
+        raster_state_[kRasterTextureFilter0] == 0x02022000 &&
+        raster_state_[kRasterTextureControl0_0] == 0x4003FFC0 &&
+        raster_state_[kRasterTextureControl1_0] == 0x14000000 &&
+        raster_state_[kRasterTextureImageRect0] == 0x050001E0 &&
+        raster_state_[kRasterTexturePalette0] == 0 &&
+        raster_state_[kRasterTextureBorderColor0] == 0xFF000000;
     const bool pitch_single_texture_combiner =
         raster_state_[kRasterTextureEnableMask] == 1 &&
         raster_state_[kRasterShaderStageProgram] == 0x00000001 &&
@@ -1444,6 +1471,9 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         profile = Profile::kSwizzledProjectedColor;
     } else if (pitch_multi_texture_combiner) {
         profile = Profile::kPitchMultiTextureColor;
+    } else if (inline_linear_blit_combiner &&
+               inline_linear_blit_texture) {
+        profile = Profile::kInlineLinearBlitColor;
     } else if (pitch_single_texture_combiner) {
         profile = Profile::kPitchSingleTextureColor;
     } else if (pitch_additive_combiner) {
@@ -1491,6 +1521,33 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
             raster_state_[kRasterPolygonOffsetScale] != 0x40800000 ||
             raster_state_[kRasterPolygonOffsetBias] != 0x41200000) {
             fault_("NV2A pitch multi-texture draw exceeds the witnessed raster subset");
+            return false;
+        }
+    } else if (profile == Profile::kInlineLinearBlitColor) {
+        if (primitive_mode_ != 5 || surface_type != 1 ||
+            anti_aliasing != 0 || color_format != 8 || zeta_format != 2 ||
+            surface_pitch_ != 0x0A000A00 ||
+            surface_clip_horizontal_ != 0x02800000 ||
+            surface_clip_vertical_ != 0x01E00000 ||
+            enables != 0x0010u ||
+            raster_state_[kRasterControl0] != 0x00100001 ||
+            raster_state_[kRasterAlphaFunc] != 0x0206 ||
+            (raster_state_[kRasterAlphaRef] & 0xFFu) != 1 ||
+            raster_state_[kRasterBlendSrc] != 1 ||
+            raster_state_[kRasterBlendDst] != 0 ||
+            raster_state_[kRasterBlendEquation] != 0x8006 ||
+            raster_state_[kRasterDepthFunc] != 0x0203 ||
+            raster_state_[kRasterColorMask] != 0x01010101 ||
+            raster_state_[kRasterDepthMask] != 1 ||
+            raster_state_[kRasterShadeMode] != 0x1D01 ||
+            raster_state_[kRasterFrontPolygonMode] != 0x1B02 ||
+            raster_state_[kRasterBackPolygonMode] != 0x1B02 ||
+            raster_state_[kRasterCullFace] != 0x0405 ||
+            raster_state_[kRasterFrontFace] != 0x0900 ||
+            raster_state_[kRasterZMinMaxControl] != 1 ||
+            raster_state_[kRasterPolygonOffsetScale] != 0x80000000 ||
+            raster_state_[kRasterPolygonOffsetBias] != 0x80000000) {
+            fault_("NV2A inline linear-blit draw exceeds the witnessed raster subset");
             return false;
         }
     } else if (profile == Profile::kPitchSingleTextureColor) {
@@ -1642,6 +1699,7 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                profile == Profile::kPitchTexturedColor ||
                profile == Profile::kPitchProjectedColor ||
                profile == Profile::kPitchMultiTextureColor ||
+               profile == Profile::kInlineLinearBlitColor ||
                profile == Profile::kPitchSingleTextureColor) {
         pitch = surface_pitch_ & 0xFFFFu;
         surface_width = pitch / 4;
@@ -1679,7 +1737,9 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         }
     }
     const bool uses_depth_surface =
-        profile != Profile::kPitchAdditiveColor || inline_depth_test;
+        profile == Profile::kPitchAdditiveColor
+            ? inline_depth_test
+            : profile != Profile::kInlineLinearBlitColor;
     if ((uses_depth_surface && !depth_bytes64) ||
         depth_bytes64 > SIZE_MAX || color_bytes64 > SIZE_MAX) {
         fault_("NV2A raster surface size overflows");
@@ -1852,6 +1912,58 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
             }
             projected_texture_swizzle = std::make_unique<SwizzleLookup>(
                 projected_texture_width, projected_texture_height);
+        }
+    }
+    std::vector<uint8_t> linear_blit_texture_data;
+    uint32_t linear_blit_texture_width = 0;
+    uint32_t linear_blit_texture_height = 0;
+    uint32_t linear_blit_texture_pitch = 0;
+    if (profile == Profile::kInlineLinearBlitColor) {
+        const uint32_t format0 = raster_state_[kRasterTextureFormat0];
+        const uint32_t offset0 = raster_state_[kRasterTextureOffset0];
+        if (!inline_linear_blit_texture || (format0 & 3u) != 2u) {
+            fault_("NV2A inline linear-blit texture exceeds the witnessed subset");
+            return false;
+        }
+        linear_blit_texture_width =
+            raster_state_[kRasterTextureImageRect0] >> 16;
+        linear_blit_texture_height =
+            raster_state_[kRasterTextureImageRect0] & 0xFFFFu;
+        linear_blit_texture_pitch =
+            raster_state_[kRasterTextureControl1_0] >> 16;
+        const uint64_t linear_blit_texture_bytes64 =
+            static_cast<uint64_t>(linear_blit_texture_pitch) *
+            linear_blit_texture_height;
+        uint32_t linear_blit_texture_address = 0;
+        if (!linear_blit_texture_width ||
+            !linear_blit_texture_height ||
+            linear_blit_texture_pitch <
+                linear_blit_texture_width * sizeof(uint32_t) ||
+            linear_blit_texture_bytes64 > SIZE_MAX ||
+            !resolve_surface(texture_dma_b_, texture_dma_b_bound_, offset0,
+                             linear_blit_texture_bytes64,
+                             linear_blit_texture_address,
+                             "linear blit texture")) {
+            return false;
+        }
+        const uint64_t texture_end =
+            static_cast<uint64_t>(linear_blit_texture_address) +
+            linear_blit_texture_bytes64;
+        const uint64_t color_end =
+            static_cast<uint64_t>(color_address) + color_bytes64;
+        if (linear_blit_texture_address < color_end &&
+            color_address < texture_end) {
+            fault_("NV2A inline linear-blit source and target overlap");
+            return false;
+        }
+        linear_blit_texture_data.resize(
+            static_cast<size_t>(linear_blit_texture_bytes64));
+        if (!mem_read_ ||
+            !mem_read_(linear_blit_texture_address,
+                       linear_blit_texture_data.data(),
+                       linear_blit_texture_data.size())) {
+            fault_("NV2A inline linear-blit texture DMA read failed");
+            return false;
         }
     }
     std::vector<uint8_t> multi_texture_data;
@@ -2053,6 +2165,8 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
             ++pitch_projected_color_batches_;
         else if (profile == Profile::kPitchMultiTextureColor)
             ++pitch_multi_texture_batches_;
+        else if (profile == Profile::kInlineLinearBlitColor)
+            ++inline_linear_blit_batches_;
         else if (profile == Profile::kPitchSingleTextureColor)
             ++pitch_single_texture_batches_;
         else
@@ -2152,6 +2266,56 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
             }
             return true;
         };
+    auto sample_linear_texture =
+        [](const std::vector<uint8_t>& data,
+           uint32_t width, uint32_t height, uint32_t row_pitch,
+           float s, float t, std::array<float, 3>& color) {
+            if (!std::isfinite(s) || !std::isfinite(t) ||
+                !width || !height) {
+                return false;
+            }
+            s = std::clamp(s, 0.0f, static_cast<float>(width));
+            t = std::clamp(t, 0.0f, static_cast<float>(height));
+            const float texel_x = s - 0.5f;
+            const float texel_y = t - 0.5f;
+            const int32_t x0 =
+                static_cast<int32_t>(std::floor(texel_x));
+            const int32_t y0 =
+                static_cast<int32_t>(std::floor(texel_y));
+            const float fx = texel_x - static_cast<float>(x0);
+            const float fy = texel_y - static_cast<float>(y0);
+            auto texel = [&](int32_t x, int32_t y) {
+                const uint32_t clamped_x = static_cast<uint32_t>(
+                    std::clamp(x, 0, static_cast<int32_t>(width) - 1));
+                const uint32_t clamped_y = static_cast<uint32_t>(
+                    std::clamp(y, 0, static_cast<int32_t>(height) - 1));
+                const size_t offset =
+                    static_cast<size_t>(clamped_y) * row_pitch +
+                    static_cast<size_t>(clamped_x) * sizeof(uint32_t);
+                uint32_t pixel = 0;
+                std::memcpy(&pixel, data.data() + offset, sizeof(pixel));
+                return std::array<float, 3>{{
+                    static_cast<float>((pixel >> 16) & 0xFFu) / 255.0f,
+                    static_cast<float>((pixel >> 8) & 0xFFu) / 255.0f,
+                    static_cast<float>(pixel & 0xFFu) / 255.0f,
+                }};
+            };
+            const auto c00 = texel(x0, y0);
+            const auto c10 = texel(x0 + 1, y0);
+            const auto c01 = texel(x0, y0 + 1);
+            const auto c11 = texel(x0 + 1, y0 + 1);
+            for (size_t component = 0; component < 3; ++component) {
+                const float top =
+                    c00[component] +
+                    (c10[component] - c00[component]) * fx;
+                const float bottom =
+                    c01[component] +
+                    (c11[component] - c01[component]) * fx;
+                color[component] =
+                    top + (bottom - top) * fy;
+            }
+            return true;
+        };
     auto sample_cube_texture =
         [&](const std::vector<uint8_t>& data,
             const SwizzleLookup& swizzle,
@@ -2218,7 +2382,16 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                        (y1 - y0) * (px - x0);
             };
             int64_t area = edge(ax, ay, bx, by, cx, cy);
-            if (area <= 0) return;  // CW is front-facing in Xbox screen space.
+            if (area < 0 &&
+                profile == Profile::kInlineLinearBlitColor) {
+                std::swap(b, c);
+                std::swap(bx, cx);
+                std::swap(by, cy);
+                area = -area;  // Culling is disabled for this blit.
+            } else if (area <= 0) {
+                return;  // CW is front-facing in the witnessed culled states.
+            }
+            if (area == 0) return;
 
             if (profile == Profile::kPitchZ16Depth)
                 ++rasterized_triangles_;
@@ -2234,6 +2407,8 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                 ++pitch_projected_color_triangles_;
             else if (profile == Profile::kPitchMultiTextureColor)
                 ++pitch_multi_texture_triangles_;
+            else if (profile == Profile::kInlineLinearBlitColor)
+                ++inline_linear_blit_triangles_;
             else if (profile == Profile::kPitchSingleTextureColor)
                 ++pitch_single_texture_triangles_;
             else
@@ -2309,6 +2484,8 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                         ++pitch_projected_color_fragments_;
                     else if (profile == Profile::kPitchMultiTextureColor)
                         ++pitch_multi_texture_fragments_;
+                    else if (profile == Profile::kInlineLinearBlitColor)
+                        ++inline_linear_blit_fragments_;
                     else if (profile == Profile::kPitchSingleTextureColor)
                         ++pitch_single_texture_fragments_;
                     else
@@ -2350,6 +2527,112 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                              {address, static_cast<uint32_t>(incoming)}) {
                             raster_output_hash_ ^= word;
                             raster_output_hash_ *= 1099511628211ull;
+                        }
+                        continue;
+                    }
+                    if (profile == Profile::kInlineLinearBlitColor) {
+                        const size_t offset =
+                            static_cast<size_t>(y) * pitch +
+                            static_cast<size_t>(x) * sizeof(uint32_t);
+                        const double lambda0 =
+                            static_cast<double>(w0) /
+                            static_cast<double>(area);
+                        const double lambda1 =
+                            static_cast<double>(w1) /
+                            static_cast<double>(area);
+                        const double lambda2 =
+                            static_cast<double>(w2) /
+                            static_cast<double>(area);
+                        const double q0 = lambda0 / a->position[3];
+                        const double q1 = lambda1 / b->position[3];
+                        const double q2 = lambda2 / c->position[3];
+                        const double qsum = q0 + q1 + q2;
+                        if (!std::isfinite(qsum) || qsum == 0.0)
+                            continue;
+
+                        std::array<float, 3> coordinate{};
+                        for (size_t component :
+                             {size_t{0}, size_t{1}, size_t{3}}) {
+                            const double value =
+                                (q0 * a->texture[0][component] +
+                                 q1 * b->texture[0][component] +
+                                 q2 * c->texture[0][component]) / qsum;
+                            if (!std::isfinite(value)) {
+                                fault_(
+                                    "NV2A inline linear-blit varying is non-finite");
+                                raster_failed = true;
+                                return;
+                            }
+                            coordinate[component == 3 ? 2 : component] =
+                                static_cast<float>(value);
+                        }
+                        if (coordinate[2] == 0.0f) {
+                            fault_(
+                                "NV2A inline linear-blit texture W is zero");
+                            raster_failed = true;
+                            return;
+                        }
+                        std::array<float, 3> texture{};
+                        if (!sample_linear_texture(
+                                linear_blit_texture_data,
+                                linear_blit_texture_width,
+                                linear_blit_texture_height,
+                                linear_blit_texture_pitch,
+                                coordinate[0] / coordinate[2],
+                                coordinate[1] / coordinate[2],
+                                texture)) {
+                            fault_(
+                                "NV2A inline linear-blit projection is invalid");
+                            raster_failed = true;
+                            return;
+                        }
+                        ++inline_linear_blit_samples_;
+
+                        auto vertex_alpha =
+                            [](const TransformedVertex* vertex) {
+                                float value = vertex->diffuse[3];
+                                if (std::isnan(value)) value = 1.0f;
+                                return std::clamp(value, 0.0f, 1.0f);
+                            };
+                        const double interpolated_alpha =
+                            (q0 * vertex_alpha(a) +
+                             q1 * vertex_alpha(b) +
+                             q2 * vertex_alpha(c)) / qsum;
+                        if (!std::isfinite(interpolated_alpha)) {
+                            fault_(
+                                "NV2A inline linear-blit alpha is non-finite");
+                            raster_failed = true;
+                            return;
+                        }
+                        auto pack_unorm8 = [](float value) {
+                            return static_cast<uint32_t>(std::floor(
+                                std::clamp(value, 0.0f, 1.0f) *
+                                    255.0f +
+                                0.5f));
+                        };
+                        const uint32_t color =
+                            (pack_unorm8(
+                                 static_cast<float>(
+                                     interpolated_alpha)) << 24) |
+                            (pack_unorm8(texture[0]) << 16) |
+                            (pack_unorm8(texture[1]) << 8) |
+                            pack_unorm8(texture[2]);
+                        if (!color_surface.write32(offset, color)) {
+                            fault_(
+                                "NV2A inline linear-blit cache write failed");
+                            raster_failed = true;
+                            return;
+                        }
+                        ++inline_linear_blit_writes_;
+                        const uint32_t address =
+                            color_address +
+                            static_cast<uint32_t>(offset);
+                        last_inline_linear_blit_raster_address_ =
+                            address;
+                        for (uint32_t word : {address, color}) {
+                            inline_linear_blit_output_hash_ ^= word;
+                            inline_linear_blit_output_hash_ *=
+                                1099511628211ull;
                         }
                         continue;
                     }
@@ -3134,6 +3417,8 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         ++pitch_projected_color_batches_;
     else if (profile == Profile::kPitchMultiTextureColor)
         ++pitch_multi_texture_batches_;
+    else if (profile == Profile::kInlineLinearBlitColor)
+        ++inline_linear_blit_batches_;
     else if (profile == Profile::kPitchSingleTextureColor)
         ++pitch_single_texture_batches_;
     else

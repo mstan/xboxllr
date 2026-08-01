@@ -3,6 +3,44 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-01 — A4: inline linear dashboard blits execute
+
+The leading retained inline one-texture state now executes its 106 triangle-list
+draws instead of remaining recorder-only. Stage 0 PROJECT2D-divides
+perspective-correct coordinates expressed in texels, then bilinearly samples a
+1280x480 linear A8R8G8B8 source with its 5,120-byte row pitch and U/V
+CLAMP_TO_EDGE addressing. The one-stage combiner copies texture RGB and
+interpolated diffuse alpha to a 640x480 pitch A8R8G8B8 target. Culling, alpha,
+blend, and depth testing are disabled; the sole enabled dither bit is inert for
+the 32-bit target, and the zeta surface is neither resolved nor touched.
+
+Focused coverage verifies an exact four-texel bilinear result `0x80202000`,
+diffuse-alpha output, pitch placement, no depth access, deterministic counters
+and hash, and equal coverage for reversed winding. The first long replay
+executed all 106 decoded draws before stopping on the following draw, which
+shares the combiner but has different texture metadata. Profile selection now
+includes the witnessed format/address/filter/shape signature, leaving that
+distinct family safely recorder-only while keeping DMA offsets flexible. All
+nine direct tests pass, and the 500M smoke remains fault-free with empty
+stderr.
+
+The final 6.4B acceptance replay reaches budget fault-free with empty stderr.
+All 106 retained batches execute as 106 triangles, covering and writing
+32,563,200 fragments and performing 32,563,200 texture samples. The
+deterministic output hash is `a6fa8d7f361f0383`. Recorder-only volume falls
+from 4,143 to 4,037 batches and from 962 to 961 states. Every prior raster hash
+and count remains unchanged, including depth `9424b7ed8661f321`, radial
+`b57945aef12a9289`, swizzled/pitch textured
+`537c8e788aaf4e83`/`6ba31850c2d5eb56`, swizzled/pitch projected
+`117e65d4ec81492a`/`4ebdb2f4475cd80c`, pitch single
+`e734e675e998af83`, pitch multi `fbe1b6125ce84364`, and inline additive
+`1567692d051ce1d8`. Transform and final scanout remain
+`2824162d794cc5de` and `73feb194b7694383`.
+
+**Next:** decode the leading remaining 56-batch, three-texture
+`shader=0x63` triangle-strip state and its 48-batch factor variants, then
+continue the low-frequency census and host-input plumbing.
+
 ## 2026-08-01 — A4: pitch two-cube alpha-blend family executes
 
 The leading retained `shader=0x63` state now executes its indexed triangle
