@@ -598,6 +598,18 @@ int main(int argc, char** argv) {
                             (unsigned long long)mach.nv2a()->radial_color_writes(),
                             mach.nv2a()->last_color_raster_address(),
                             (unsigned long long)mach.nv2a()->radial_color_output_hash());
+                std::printf("[2bl] NV2A textured-color: batches/tri/frags/pass/"
+                            "zwrite/cwrite/samples=%llu/%llu/%llu/%llu/%llu/"
+                            "%llu/%llu last=%08x hash=%016llx\n",
+                            (unsigned long long)mach.nv2a()->textured_color_batches(),
+                            (unsigned long long)mach.nv2a()->textured_color_triangles(),
+                            (unsigned long long)mach.nv2a()->textured_color_fragments(),
+                            (unsigned long long)mach.nv2a()->textured_color_depth_passes(),
+                            (unsigned long long)mach.nv2a()->textured_color_depth_writes(),
+                            (unsigned long long)mach.nv2a()->textured_color_writes(),
+                            (unsigned long long)mach.nv2a()->texture_samples(),
+                            mach.nv2a()->last_textured_raster_address(),
+                            (unsigned long long)mach.nv2a()->textured_color_output_hash());
                 std::printf("[2bl] NV2A vertices: batches=%llu submitted=%llu "
                             "attr-fetches=%llu primitives=%llu triangles=%llu max-index=%u\n",
                             (unsigned long long)mach.nv2a()->vertex_batches(),
@@ -721,7 +733,7 @@ int main(int argc, char** argv) {
                         state[Nv2a::kRasterCombinerControl]);
                     std::printf(
                         "[2bl]     ctrl=%08x shade=%x poly=%x/%x "
-                        "poffset=%08x/%08x zclip=%08x/%08x zctl=%08x "
+                        "poffset=%08x/%08x zclip=%08x/%08x zctl=%08x shadow=%x "
                         "stencil=%x/%02x/%08x ops=%x/%x/%x\n",
                         state[Nv2a::kRasterControl0],
                         state[Nv2a::kRasterShadeMode],
@@ -732,6 +744,7 @@ int main(int argc, char** argv) {
                         state[Nv2a::kRasterClipMin],
                         state[Nv2a::kRasterClipMax],
                         state[Nv2a::kRasterZMinMaxControl],
+                        state[Nv2a::kRasterShadowDepthFunc],
                         state[Nv2a::kRasterStencilFunc],
                         state[Nv2a::kRasterStencilRef] & 0xFFu,
                         state[Nv2a::kRasterStencilFuncMask],
@@ -753,23 +766,34 @@ int main(int argc, char** argv) {
                             state[Nv2a::kRasterCombinerFactor0_0 + stage],
                             state[Nv2a::kRasterCombinerFactor1_0 + stage]);
                     }
-                    std::printf("[2bl]     final=%08x/%08x\n",
+                    std::printf("[2bl]     final=%08x/%08x factors=%08x/%08x\n",
                                 state[Nv2a::kRasterCombinerSpecularFog0],
-                                state[Nv2a::kRasterCombinerSpecularFog1]);
+                                state[Nv2a::kRasterCombinerSpecularFog1],
+                                state[Nv2a::kRasterCombinerFinalFactor0],
+                                state[Nv2a::kRasterCombinerFinalFactor1]);
+                    if (state[Nv2a::kRasterTextureEnableMask]) {
+                        std::printf("[2bl]     texture-dma=%08x/%08x\n",
+                                    state[Nv2a::kRasterTextureDmaA],
+                                    state[Nv2a::kRasterTextureDmaB]);
+                    }
                     for (uint32_t stage = 0; stage < 4; ++stage) {
                         if (!(state[Nv2a::kRasterTextureEnableMask] &
                               (1u << stage)))
                             continue;
                         std::printf(
-                            "[2bl]     T%u fmt=%08x addr=%08x filter=%08x "
-                            "ctl0=%08x ctl1=%08x rect=%08x\n",
+                            "[2bl]     T%u off=%08x fmt=%08x addr=%08x "
+                            "filter=%08x ctl0=%08x ctl1=%08x rect=%08x "
+                            "pal=%08x border=%08x\n",
                             stage,
+                            state[Nv2a::kRasterTextureOffset0 + stage],
                             state[Nv2a::kRasterTextureFormat0 + stage],
                             state[Nv2a::kRasterTextureAddress0 + stage],
                             state[Nv2a::kRasterTextureFilter0 + stage],
                             state[Nv2a::kRasterTextureControl0_0 + stage],
                             state[Nv2a::kRasterTextureControl1_0 + stage],
-                            state[Nv2a::kRasterTextureImageRect0 + stage]);
+                            state[Nv2a::kRasterTextureImageRect0 + stage],
+                            state[Nv2a::kRasterTexturePalette0 + stage],
+                            state[Nv2a::kRasterTextureBorderColor0 + stage]);
                     }
                 }
                 std::printf("[2bl] NV2A flip: write-increments=%llu stalls=%llu "

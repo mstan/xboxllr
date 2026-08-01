@@ -31,11 +31,11 @@ harvested from xemu, silicon-corrected against a live console. GPL-2.
   its descriptor engine; guest-programmed scanout can be dumped/presented; and Kelvin
   color/depth/stencil clears, indexed vertex DMA/fetch/assembly, and programmable vertex
   shaders plus the exercised fixed-function transform subset now execute. The first
-  triangle profiles write the dashboard's pitch-Z16 depth prepass and dominant untextured
-  swizzled A8R8G8B8/Z24S8 radial-combiner pass.
-- **Immediate burn-down path:** execute the next high-volume 256x256 swizzled profile
-  with four texture stages and its eight-stage register combiner → cover the remaining
-  textured passes and `INLINE_ARRAY` →
+  triangle profiles write the dashboard's pitch-Z16 depth prepass, dominant untextured
+  swizzled radial-combiner pass, and the next high-volume 256x256 textured
+  A8R8G8B8/Z24S8 pass.
+- **Immediate burn-down path:** cover the remaining lower-volume textured profiles
+  (starting with shader `0x10c61`) and `INLINE_ARRAY` →
   extend OHCI into TD execution and XID input → add NVNet RX and external transport.
 - **Not started:** A5 end-to-end retail-dashboard navigation and Arc 2 game work.
 
@@ -121,6 +121,16 @@ dependency chain peeled this session is:
     and commit 727,241,984 paired writes with hash `b57945aef12a9289`. Its last target is
     `0x02f8f00c`, not final scanout `0x03c8c000`; textured draws are the visible-frame
     frontier.
+20. next high-volume textured color profile → **fixed through two witnessed texture
+    fetches and its eight-stage combiner**. Texture DMA A/B, offsets, palettes, borders,
+    shadow compare, and final factors are retained in the draw census. Shader `0x10c60`
+    disables stage 0, cube-remaps stages 1/2 into one 64x64 or 128x128 swizzled
+    X8R8G8B8 image, samples them bilinearly with clamp-to-edge, and forces stage 3 to zero
+    through shadow-NEVER. At 6.4B, all 2,394 witnessed batches rasterize 30,198 triangles,
+    perform 3,494,536 samples, and commit 1,747,268 paired color/Z24 writes with hash
+    `5056d6d133b67168`. Earlier depth/radial hashes and final scanout hash remain unchanged;
+    the last textured target `0x0299f394` is also offscreen. The lower-volume `0x10c61`
+    profile and inline arrays are now the rendering frontier.
 
 ## How to build & run
 
@@ -141,7 +151,8 @@ cd build
            --max-insns 500000000
 ```
 
-500M insns takes roughly 40–45 seconds with the landed radial software raster path. The run
+500M insns takes roughly 50–55 seconds with the landed radial and textured software raster
+paths. The run
 prints rich diagnostics:
 KTHREAD scan + every-waiter wait-block/stack walk, per-thread instruction attribution,
 non-idle PC ring, last-64 I/O + MMIO rings, IDE/NV2A/IRQ counters, code bytes around final
@@ -159,8 +170,9 @@ Deliberate documented stand-ins currently in place (fine for boot, replaced late
   still have no CP/raster side effects. Guest-programmed framebuffer selection, host
   readout/presentation, Kelvin pitch-surface clears, and indexed vertex fetch/primitive
   assembly plus programmable and exercised fixed-function transforms work. The witnessed
-  pitch-Z16 depth-only and untextured swizzled radial-color triangle profiles rasterize;
-  other color/textured draws and inline arrays do not yet.
+  pitch-Z16 depth-only, untextured swizzled radial-color, and high-volume shader-`0x10c60`
+  textured triangle profiles rasterize; other color/textured draws and inline arrays do
+  not yet.
 - APU has the load-bearing voice-list, VOICE_OFF, timed idle-voice FE trap, notifier, and IRQ
   lifecycle, but still no DSP/audio synthesis. ACI advances real PCM descriptors and IRQs
   headlessly but produces no host audio.
@@ -211,10 +223,10 @@ Driver: `python tools/xbox_agent.py --host 192.168.4.81 {ping|info|read|exec <fi
 
 ## Next steps (priority order)
 
-1. The indexed Kelvin paths, pitch-Z16 depth prepass, and dominant untextured swizzled
-   radial-color pass are landed. Next execute the high-volume 256x256 swizzled
-   A8R8G8B8/Z24S8 profile with four texture stages and its eight-stage register combiner,
-   then cover the remaining textured passes and sparse `INLINE_ARRAY` path.
+1. The indexed Kelvin paths, pitch-Z16 depth prepass, dominant radial color, and
+   high-volume shader-`0x10c60` textured pass are landed. Next execute the lower-volume
+   shader-`0x10c61` profile, then cover the remaining textured passes and sparse
+   `INLINE_ARRAY` path.
 2. Extend OHCI: control/bulk TD execution first, then the Xbox XID controller protocol and
    host input mapping.
 3. Add NVNet RX descriptor DMA and external packet transport when the guest or navigation

@@ -16,11 +16,11 @@ machine-verifiable evidence that closed it.
 
 | Milestone | State | Evidence / remaining gate |
 | --- | --- | --- |
-| A0 | **DONE** | Unicorn floor, host shell, rings/JSONL/debug server; suite now `ctest` 5/5. |
+| A0 | **DONE** | Unicorn floor, host shell, rings/JSONL/debug server; direct suite now 9/9. |
 | A1 | **PARTIAL / DEFERRED** | Real-console agent and hardware probes work; pinned deterministic xemu-TCG cosim is still owed. |
 | A2 | **DONE** | Retail 4983 kernel reaches executive/IO init, services IRQs, completes phase-1, mounts FATX, and maps the dashboard XBE. |
 | A3 | **PARTIAL** | Unicorn's dynamic translator is the normal tier; page versioning and SMC/decryption invalidation proof remain. |
-| A4 | **IN PROGRESS** | Boot animation/XBE launch, PFIFO, NVNet TX DMA, 720x480 scanout/readout, Kelvin clears, indexed fetch/assembly, both exercised vertex-transform modes, the pitch-Z16 prepass, and dominant untextured swizzled radial-color pass work. A 6.4B run executes all 48,554,942 vertices plus 727,241,984 paired A8R8G8B8/Z24 writes fault-free; this pass is offscreen and final scanout remains the clear. Next: textured draws/inline arrays, OHCI TD/XID input, and NVNet RX/transport. |
+| A4 | **IN PROGRESS** | Boot animation/XBE launch, PFIFO, NVNet TX DMA, 720x480 scanout/readout, Kelvin clears, indexed fetch/assembly, both exercised vertex-transform modes, the pitch-Z16 prepass, dominant radial color, and the next high-volume textured swizzled pass work. A 6.4B run executes all 48,554,942 vertices, 727,241,984 radial paired writes, and 1,747,268 textured paired writes/3,494,536 bilinear samples fault-free. Both color passes remain offscreen and final scanout is still the clear. Next: remaining textured profiles/inline arrays, OHCI TD/XID input, and NVNet RX/transport. |
 | A5 | **NOT STARTED** | Requires A4 dashboard execution and rendering. |
 | Arc 2 | **NOT STARTED** | Explicitly out of current scope. |
 

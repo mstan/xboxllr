@@ -3,6 +3,38 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-07-31 — A4: high-volume swizzled textured color pass executes
+
+The next dominant 256x256 A8R8G8B8/Z24S8 profile now writes guest color and zeta memory.
+The draw census retains texture DMA A/B, all four offsets/palettes/borders, shadow compare,
+and final combiner factors. Its exact shader program disables stage 0, cube-remaps stages
+1 and 2 into the same swizzled X8R8G8B8 image, samples both with clamp-to-edge bilinear
+filtering, and resolves the stage-3 PROJECT3D shadow lookup to zero because its compare
+function is NEVER. Texture directions and diffuse remain perspective-correct while depth
+stays screen-linear. A draw-local texture snapshot plus precomputed Morton contributions
+keeps coherent sampling bounded.
+
+The witnessed eight-stage register combiner expands the two sampled blue channels, raises
+the positive stage-2 result to the 32nd power, applies its stage-6 RGB factors, modulates
+smooth diffuse, and scales by the final 63/255 factor before A8R8G8B8 packing. LEQUAL Z24
+writes preserve the existing stencil byte. Focused coverage verifies cube-to-2D remapping,
+four-texel bilinear filtering, Morton texture and target placement, exact packed color,
+stencil preservation, and a farther second draw rejected by depth. All nine direct tests
+pass.
+
+Both the 500M census gate and full 6.4B acceptance run are fault-free. All 2,394
+shader-`0x10c60` batches rasterize 30,198 front-facing triangles, cover 19,947,463
+fragments, perform 3,494,536 texture samples, and commit 1,747,268 paired color/Z24 writes
+with deterministic hash `5056d6d133b67168`. The earlier depth and radial hashes remain
+`9424b7ed8661f321` and `b57945aef12a9289`; all 48,554,942 vertices retain position hash
+`b1bdfde660324e2e`. The last textured write is `0x0299f394`, while final scanout remains
+`0x03c8c000` with unchanged hash `73feb194b7694383`, so this profile is another offscreen
+intermediate.
+
+**Next:** execute the lower-volume shader-`0x10c61` textured profile, then cover the
+remaining textured profiles and `INLINE_ARRAY`. OHCI TD/XID input and NVNet RX/transport
+remain subsequent A4 work.
+
 ## 2026-07-31 — A4: dominant swizzled radial color pass executes
 
 The dashboard's dominant untextured color profile now executes through guest color and zeta

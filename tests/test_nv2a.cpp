@@ -42,7 +42,7 @@ static uint32_t swizzled_pixel_index(uint32_t x, uint32_t y,
 int main() {
     std::string fault;
     xlle::Nv2a gpu([&](const std::string& why) { fault = why; });
-    std::vector<uint8_t> ram(0x20000, 0);
+    std::vector<uint8_t> ram(0x100000, 0);
     gpu.set_mem_access(
         [&](uint32_t addr, void* dst, size_t n) {
             if (addr + n > ram.size()) return false;
@@ -175,10 +175,10 @@ int main() {
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700018, 4, 0x00000003);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x70001C, 4, 0x80010040);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700300, 4, 0x0000003D);
-    gpu.mmio_write(xlle::Nv2a::kBase + 0x700304, 4, 0x0001FFFF);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700304, 4, 0x000FFFFF);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700308, 4, 0x00000000);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700400, 4, 0x0000003D);
-    gpu.mmio_write(xlle::Nv2a::kBase + 0x700404, 4, 0x0001FFFF);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700404, 4, 0x000FFFFF);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700408, 4, 0x00000000);
     uint32_t cursor = 0;
     auto emit = [&](uint32_t method, uint32_t parameter) {
@@ -575,6 +575,153 @@ int main() {
     CHECK(gpu.radial_color_writes() == radial_writes);
     CHECK(get32(ram, 0xA000 + inside_swizzled) == 0xFF512E10u);
     CHECK(get32(ram, 0xE000 + inside_swizzled) == 0x0000645Au);
+
+    // High-volume textured profile: stages 1 and 2 cube-remap distinct
+    // directions into the same clamp-to-edge, bilinear X8R8G8B8 image.
+    // The remaining enabled stages are NONE and shadow-NEVER, so they fetch
+    // nothing. Four deliberately different texels verify the Morton address
+    // and half-texel bilinear convention before the exact eight-stage combiner.
+    const uint32_t textured_colors[] = {
+        0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
+    };
+    const float texture1_coords[] = {
+        17.0f / 64.0f, 17.0f / 64.0f, 1.0f, 1.0f,
+        17.0f / 64.0f, 17.0f / 64.0f, 1.0f, 1.0f,
+        17.0f / 64.0f, 17.0f / 64.0f, 1.0f, 1.0f,
+    };
+    const float texture2_coords[] = {
+        49.0f / 64.0f, 49.0f / 64.0f, 1.0f, 1.0f,
+        49.0f / 64.0f, 49.0f / 64.0f, 1.0f, 1.0f,
+        49.0f / 64.0f, 49.0f / 64.0f, 1.0f, 1.0f,
+    };
+    std::memcpy(ram.data() + 0x7000, radial_positions,
+                sizeof(radial_positions));
+    std::memcpy(ram.data() + 0x7100, textured_colors,
+                sizeof(textured_colors));
+    std::memcpy(ram.data() + 0x7500, texture1_coords,
+                sizeof(texture1_coords));
+    std::memcpy(ram.data() + 0x7600, texture2_coords,
+                sizeof(texture2_coords));
+    std::memset(ram.data() + 0x20000, 0, 256 * 256 * 4);
+    for (uint32_t offset = 0; offset < 256 * 256 * 4; offset += 4)
+        put32(ram, 0x60000 + offset, 0xFFFFFF5Au);
+    std::memset(ram.data() + 0xA0000, 0, 64 * 64 * 4);
+    const auto put_texture = [&](uint32_t x, uint32_t y, uint8_t blue) {
+        put32(ram, 0xA0000 + swizzled_pixel_index(x, y, 64, 64) * 4,
+              0xFF000000u | blue);
+    };
+    put_texture(16, 16, 128);
+    put_texture(17, 16, 255);
+    put_texture(16, 17, 128);
+    put_texture(17, 17, 253);  // bilinear blue = 191
+    put_texture(48, 48, 255);
+    put_texture(49, 48, 255);
+    put_texture(48, 49, 255);
+    put_texture(49, 49, 255);
+
+    emit(0x0184, 2);           // texture DMA A
+    emit(0x0188, 3);           // texture DMA B
+    emit(0x0200, 0x01000000);  // 256x256 clip
+    emit(0x0204, 0x01000000);
+    emit(0x0208, 0x08080228);  // 256x256 swizzled A8R8G8B8 + Z24S8
+    emit(0x020C, 0x04000400);
+    emit(0x0210, 0x00020000);
+    emit(0x0214, 0x00060000);
+    emit(0x02C0, 0x00FF0000);
+    emit(0x02E0, 0x00FF0000);
+    emit(0x0300, 0);           // alpha test disabled
+    emit(0x0304, 0);           // blending disabled
+    emit(0x033C, 0x0207);      // ALWAYS, reference zero
+    emit(0x0340, 0);
+    emit(0x1E6C, 0);           // shadow compare NEVER
+    emit(0x1E70, 0x00010C60);  // NONE, CUBEMAP, CUBEMAP, PROJECT3D
+    emit(0x1E74, 0);
+    emit(0x1E78, 0);
+    emit(0x1E60, 0x00011108);
+
+    for (uint32_t stage = 0; stage < 4; ++stage) {
+        const uint32_t base = 0x1B00 + stage * 0x40;
+        emit(base + 0x00, stage == 1 || stage == 2 ? 0x000A0000 : 0);
+        emit(base + 0x04,
+             stage == 1 || stage == 2 ? 0x0661072E :
+             stage == 0 ? 0x0771062A : 0x0001302A);
+        emit(base + 0x08,
+             stage == 1 || stage == 2 ? 0x00030303 : 0);
+        emit(base + 0x0C, 0x4003FFC0);
+        emit(base + 0x14, 0x02022000);
+        emit(base + 0x20, 0);
+        emit(base + 0x24, stage == 3 ? 0xFFFFFFFF : 0);
+    }
+    const uint32_t textured_color_icw[] = {
+        0xC149C14A, 0x0D0D0000, 0xCDCD0000, 0xCDCD0000,
+        0xCDCD0000, 0xCDCD0000, 0xC10CC20D, 0xC40520C1,
+    };
+    const uint32_t textured_alpha_icw[] = {
+        0xD159D15A, 0, 0, 0, 0, 0, 0, 0,
+    };
+    const uint32_t textured_color_ocw[] = {
+        0x000C30CD, 0x000000D0, 0x000000D0, 0x000000D0,
+        0x000000D0, 0x000000D0, 0x000005CD, 0x00000C00,
+    };
+    const uint32_t textured_factor0[] = {
+        0xFF0000FF, 0, 0, 0, 0, 0, 0xFF072103, 0xFF000000,
+    };
+    const uint32_t textured_factor1[] = {
+        0, 0, 0, 0, 0, 0, 0xFF35FF1A, 0,
+    };
+    for (uint32_t stage = 0; stage < 8; ++stage) {
+        emit(0x0AC0 + stage * 4, textured_color_icw[stage]);
+        emit(0x0260 + stage * 4, textured_alpha_icw[stage]);
+        emit(0x1E40 + stage * 4, textured_color_ocw[stage]);
+        emit(0x0AA0 + stage * 4, 0);
+        emit(0x0A60 + stage * 4, textured_factor0[stage]);
+        emit(0x0A80 + stage * 4, textured_factor1[stage]);
+    }
+    emit(0x0288, 0x0C0B000F);
+    emit(0x028C, 0x0C011180);
+    emit(0x1E20, 0xFF3F3F3F);
+    emit(0x1E24, 0);
+    emit(0x172C, 0x80007100);
+    emit(0x1748, 0x00007500);  // texture 1, slot 10
+    emit(0x174C, 0x00007600);  // texture 2, slot 11
+    emit(0x1788, 0x00001042);
+    emit(0x178C, 0x00001042);
+    emit(0x17FC, 5);
+    emit(0x1800, 0x00010000);
+    emit(0x1808, 2);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.textured_color_batches() == 1);
+    CHECK(gpu.textured_color_triangles() == 1);
+    CHECK(gpu.textured_color_fragments() > 0);
+    CHECK(gpu.textured_color_depth_passes() ==
+          gpu.textured_color_depth_writes());
+    CHECK(gpu.textured_color_depth_writes() ==
+          gpu.textured_color_writes());
+    CHECK(gpu.texture_samples() == gpu.textured_color_writes() * 2);
+    CHECK(gpu.textured_color_writes() > 0);
+    const uint32_t textured_inside =
+        swizzled_pixel_index(20, 25, 256, 256) * 4;
+    CHECK(get32(ram, 0x20000 + textured_inside) == 0xFF0E4307u);
+    CHECK(get32(ram, 0x60000 + textured_inside) == 0x0000645Au);
+    CHECK(gpu.last_textured_raster_address() >= 0x20000);
+    CHECK(gpu.last_textured_raster_address() < 0x60000);
+    CHECK(gpu.textured_color_output_hash() != 1469598103934665603ull);
+
+    const uint64_t textured_writes = gpu.textured_color_writes();
+    std::memcpy(ram.data() + 0x7000, farther_positions,
+                sizeof(farther_positions));
+    emit(0x17FC, 5);
+    emit(0x1800, 0x00010000);
+    emit(0x1808, 2);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.textured_color_batches() == 2);
+    CHECK(gpu.textured_color_triangles() == 2);
+    CHECK(gpu.textured_color_writes() == textured_writes);
+    CHECK(get32(ram, 0x20000 + textured_inside) == 0xFF0E4307u);
 
     // AvSetDisplayMode's scanout path: VGA CRTC pitch/depth, PRAMDAC dimensions/format,
     // and PCRTC_START resolve unified-RAM RGB565 into deterministic RGBA output.
