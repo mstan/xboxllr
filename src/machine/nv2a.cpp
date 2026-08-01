@@ -11,6 +11,111 @@
 
 namespace xlle {
 
+namespace {
+
+// A draw must see memory written by earlier draws, clears, and the CPU, but reading an
+// entire multi-megabyte swizzled target for every small dashboard particle is needlessly
+// expensive. Keep coherence at the draw boundary while faulting pages in only when covered.
+class PagedRasterSurface {
+public:
+    using ReadFn = std::function<bool(uint32_t, void*, size_t)>;
+    using WriteFn = std::function<bool(uint32_t, const void*, size_t)>;
+
+    PagedRasterSurface(uint32_t address, size_t size,
+                       const ReadFn& read, const WriteFn& write)
+        : address_(address), size_(size), read_(read), write_(write),
+          pages_((size + kPageSize - 1) / kPageSize) {}
+
+    bool read16(size_t offset, uint16_t& value) {
+        return access(offset, value, false);
+    }
+    bool read32(size_t offset, uint32_t& value) {
+        return access(offset, value, false);
+    }
+    bool write16(size_t offset, uint16_t value) {
+        return access(offset, value, true);
+    }
+    bool write32(size_t offset, uint32_t value) {
+        return access(offset, value, true);
+    }
+
+    bool flush() {
+        if (!write_) return false;
+        for (size_t page_index = 0; page_index < pages_.size(); ++page_index) {
+            Page& page = pages_[page_index];
+            if (!page.dirty) continue;
+            const size_t page_offset = page_index * kPageSize;
+            if (!write_(address_ + static_cast<uint32_t>(page_offset),
+                        page.bytes.data(), page.bytes.size())) {
+                return false;
+            }
+            page.dirty = false;
+        }
+        return true;
+    }
+
+private:
+    static constexpr size_t kPageSize = 4096;
+    struct Page {
+        std::vector<uint8_t> bytes;
+        bool dirty = false;
+    };
+
+    template <typename T>
+    bool access(size_t offset, T& value, bool write) {
+        if (offset > size_ || sizeof(T) > size_ - offset) return false;
+        const size_t page_index = offset / kPageSize;
+        const size_t in_page = offset % kPageSize;
+        Page& page = pages_[page_index];
+        if (page.bytes.empty()) {
+            const size_t page_offset = page_index * kPageSize;
+            const size_t page_size = std::min(kPageSize, size_ - page_offset);
+            page.bytes.resize(page_size);
+            if (!read_ ||
+                !read_(address_ + static_cast<uint32_t>(page_offset),
+                       page.bytes.data(), page.bytes.size())) {
+                page.bytes.clear();
+                return false;
+            }
+        }
+        if (sizeof(T) > page.bytes.size() - in_page) return false;
+        if (write) {
+            std::memcpy(page.bytes.data() + in_page, &value, sizeof(T));
+            page.dirty = true;
+        } else {
+            std::memcpy(&value, page.bytes.data() + in_page, sizeof(T));
+        }
+        return true;
+    }
+
+    uint32_t address_;
+    size_t size_;
+    const ReadFn& read_;
+    const WriteFn& write_;
+    std::vector<Page> pages_;
+};
+
+uint32_t swizzled_pixel_index(uint32_t x, uint32_t y,
+                              uint32_t width, uint32_t height) {
+    uint32_t result = 0;
+    uint32_t output_bit = 1;
+    for (uint32_t input_bit = 1;
+         input_bit < width || input_bit < height;
+         input_bit <<= 1) {
+        if (input_bit < width) {
+            if (x & input_bit) result |= output_bit;
+            output_bit <<= 1;
+        }
+        if (input_bit < height) {
+            if (y & input_bit) result |= output_bit;
+            output_bit <<= 1;
+        }
+    }
+    return result;
+}
+
+}  // namespace
+
 // Engine-block map (offsets/sizes from xemu nv2a.c blocktable). USER/PRAMIN sizes trimmed to
 // what the aperture actually carves; a real access into them still resolves to the block name.
 static const Nv2a::Block kBlocks[] = {
@@ -886,7 +991,7 @@ bool Nv2a::submit_vertex_batch() {
         }
     }
     if (program_parsed) nv2a_vsh_program_destroy(&program);
-    if (!rasterize_depth_only_batch()) return false;
+    if (!rasterize_witnessed_batch()) return false;
 
     const uint64_t n = vertex_indices_.size();
     uint64_t primitives = 0, triangles = 0;
@@ -931,8 +1036,15 @@ bool Nv2a::submit_vertex_batch() {
     return true;
 }
 
-bool Nv2a::rasterize_depth_only_batch() {
+bool Nv2a::rasterize_witnessed_batch() {
+    enum class Profile {
+        kNone,
+        kPitchZ16Depth,
+        kSwizzledRadialColor,
+    };
+
     const uint32_t enables = raster_state_[kRasterEnables];
+    const uint32_t color_format = surface_format_ & 0xFu;
     const uint32_t surface_type = (surface_format_ >> 8) & 0xFu;
     const uint32_t anti_aliasing = (surface_format_ >> 12) & 0xFu;
     const uint32_t zeta_format = (surface_format_ >> 4) & 0xFu;
@@ -942,23 +1054,79 @@ bool Nv2a::rasterize_depth_only_batch() {
         raster_state_[kRasterColorMask] == 0 &&
         (enables & (1u << 3)) != 0 &&
         raster_state_[kRasterDepthMask] != 0;
-    if (!depth_only || surface_type != 1 || anti_aliasing != 0 ||
-        zeta_format != 1 || !supported_primitive ||
-        raster_state_[kRasterTextureEnableMask] != 0) {
+    const bool radial_combiner =
+        raster_state_[kRasterTextureEnableMask] == 0 &&
+        raster_state_[kRasterShaderStageProgram] == 0x00000004 &&
+        raster_state_[kRasterShaderOtherStageInput] == 0 &&
+        raster_state_[kRasterDotRgbMapping] == 0 &&
+        raster_state_[kRasterCombinerControl] == 0x00011103 &&
+        raster_state_[kRasterCombinerColorIcw0 + 0] == 0x48480000 &&
+        raster_state_[kRasterCombinerColorIcw0 + 1] == 0x2D2D0000 &&
+        raster_state_[kRasterCombinerColorIcw0 + 2] == 0xC4CD0000 &&
+        raster_state_[kRasterCombinerAlphaIcw0 + 0] == 0x00000000 &&
+        raster_state_[kRasterCombinerAlphaIcw0 + 1] == 0x3D3D1010 &&
+        raster_state_[kRasterCombinerAlphaIcw0 + 2] == 0xD4DD1010 &&
+        raster_state_[kRasterCombinerColorOcw0 + 0] == 0x000820D0 &&
+        raster_state_[kRasterCombinerColorOcw0 + 1] == 0x000000D0 &&
+        raster_state_[kRasterCombinerColorOcw0 + 2] == 0x000000C0 &&
+        raster_state_[kRasterCombinerAlphaOcw0 + 0] == 0x00000000 &&
+        raster_state_[kRasterCombinerAlphaOcw0 + 1] == 0x000000D0 &&
+        raster_state_[kRasterCombinerAlphaOcw0 + 2] == 0x000000C0 &&
+        raster_state_[kRasterCombinerFactor0_0 + 0] == 0 &&
+        raster_state_[kRasterCombinerFactor0_0 + 1] == 0 &&
+        raster_state_[kRasterCombinerFactor0_0 + 2] == 0 &&
+        raster_state_[kRasterCombinerFactor1_0 + 0] == 0 &&
+        raster_state_[kRasterCombinerFactor1_0 + 1] == 0 &&
+        raster_state_[kRasterCombinerFactor1_0 + 2] == 0 &&
+        raster_state_[kRasterCombinerSpecularFog0] == 0x0000000C &&
+        raster_state_[kRasterCombinerSpecularFog1] == 0x00002080;
+
+    Profile profile = Profile::kNone;
+    if (depth_only && surface_type == 1 && anti_aliasing == 0 &&
+        zeta_format == 1 && supported_primitive &&
+        raster_state_[kRasterTextureEnableMask] == 0) {
+        profile = Profile::kPitchZ16Depth;
+    } else if (radial_combiner) {
+        profile = Profile::kSwizzledRadialColor;
+    } else {
         return true;
     }
 
-    constexpr uint32_t kSupportedEnables = (1u << 2) | (1u << 3) | (1u << 13);
-    if ((enables & ~kSupportedEnables) != 0 ||
-        (enables & (1u << 2)) == 0 ||
-        raster_state_[kRasterDepthFunc] != 0x0203 ||
-        raster_state_[kRasterCullFace] != 0x0405 ||
-        raster_state_[kRasterFrontFace] != 0x0900 ||
-        raster_state_[kRasterFrontPolygonMode] != 0x1B02 ||
-        raster_state_[kRasterBackPolygonMode] != 0x1B02 ||
-        (raster_state_[kRasterControl0] & ((1u << 12) | (1u << 16))) != 0 ||
-        (raster_state_[kRasterZMinMaxControl] & 0xF0u) != 0) {
-        fault_("NV2A depth-only draw exceeds the witnessed raster subset");
+    if (profile == Profile::kPitchZ16Depth) {
+        constexpr uint32_t kSupportedEnables =
+            (1u << 2) | (1u << 3) | (1u << 13);
+        if ((enables & ~kSupportedEnables) != 0 ||
+            (enables & (1u << 2)) == 0 ||
+            raster_state_[kRasterDepthFunc] != 0x0203 ||
+            raster_state_[kRasterCullFace] != 0x0405 ||
+            raster_state_[kRasterFrontFace] != 0x0900 ||
+            raster_state_[kRasterFrontPolygonMode] != 0x1B02 ||
+            raster_state_[kRasterBackPolygonMode] != 0x1B02 ||
+            (raster_state_[kRasterControl0] &
+             ((1u << 12) | (1u << 16))) != 0 ||
+            (raster_state_[kRasterZMinMaxControl] & 0xF0u) != 0) {
+            fault_("NV2A depth-only draw exceeds the witnessed raster subset");
+            return false;
+        }
+    } else if (!supported_primitive || surface_type != 2 ||
+               anti_aliasing != 0 || color_format != 8 || zeta_format != 2 ||
+               enables != 0x000Fu ||
+               raster_state_[kRasterControl0] != 0x00100001 ||
+               raster_state_[kRasterAlphaFunc] != 0x0206 ||
+               (raster_state_[kRasterAlphaRef] & 0xFFu) != 1 ||
+               raster_state_[kRasterBlendSrc] != 1 ||
+               raster_state_[kRasterBlendDst] != 0 ||
+               raster_state_[kRasterBlendEquation] != 0x8006 ||
+               raster_state_[kRasterDepthFunc] != 0x0203 ||
+               raster_state_[kRasterColorMask] != 0x01010101 ||
+               raster_state_[kRasterDepthMask] != 1 ||
+               raster_state_[kRasterShadeMode] != 0x1D01 ||
+               raster_state_[kRasterFrontPolygonMode] != 0x1B02 ||
+               raster_state_[kRasterBackPolygonMode] != 0x1B02 ||
+               raster_state_[kRasterCullFace] != 0x0405 ||
+               raster_state_[kRasterFrontFace] != 0x0900 ||
+               raster_state_[kRasterZMinMaxControl] != 1) {
+        fault_("NV2A radial-color draw exceeds the witnessed raster subset");
         return false;
     }
 
@@ -966,39 +1134,108 @@ bool Nv2a::rasterize_depth_only_batch() {
     const uint32_t clip_width = surface_clip_horizontal_ >> 16;
     const uint32_t clip_y = surface_clip_vertical_ & 0xFFFFu;
     const uint32_t clip_height = surface_clip_vertical_ >> 16;
-    const uint32_t pitch = surface_pitch_ >> 16;
-    if (!zeta_dma_bound_ || !clip_width || !clip_height || !pitch ||
-        static_cast<uint64_t>(clip_x + clip_width) * 2 > pitch) {
-        fault_("NV2A depth-only raster surface is invalid");
+    if (!clip_width || !clip_height) {
+        fault_("NV2A raster surface has an empty clip");
         return false;
     }
 
-    const uint32_t surface_height = clip_y + clip_height;
-    const uint64_t surface_bytes64 =
-        static_cast<uint64_t>(pitch) * surface_height;
-    const uint64_t last_offset64 =
-        static_cast<uint64_t>(surface_zeta_offset_) + surface_bytes64 - 1;
-    if (surface_bytes64 > SIZE_MAX || last_offset64 > UINT32_MAX) {
-        fault_("NV2A depth-only raster surface size overflows");
-        return false;
+    uint32_t surface_width = 0;
+    uint32_t surface_height = 0;
+    uint32_t pitch = 0;
+    uint64_t depth_bytes64 = 0;
+    uint64_t color_bytes64 = 0;
+    if (profile == Profile::kPitchZ16Depth) {
+        pitch = surface_pitch_ >> 16;
+        surface_width = pitch / 2;
+        surface_height = clip_y + clip_height;
+        depth_bytes64 = static_cast<uint64_t>(pitch) * surface_height;
+        if (!pitch ||
+            static_cast<uint64_t>(clip_x + clip_width) * 2 > pitch) {
+            fault_("NV2A depth-only raster surface is invalid");
+            return false;
+        }
+    } else {
+        const uint32_t width_log2 = (surface_format_ >> 16) & 0xFFu;
+        const uint32_t height_log2 = surface_format_ >> 24;
+        if (width_log2 >= 16 || height_log2 >= 16) {
+            fault_("NV2A radial-color swizzled dimensions are invalid");
+            return false;
+        }
+        surface_width = 1u << width_log2;
+        surface_height = 1u << height_log2;
+        pitch = surface_width * 4;
+        depth_bytes64 = color_bytes64 =
+            static_cast<uint64_t>(surface_width) * surface_height * 4;
+        if (clip_x + clip_width > surface_width ||
+            clip_y + clip_height > surface_height ||
+            (surface_pitch_ & 0xFFFFu) != pitch ||
+            (surface_pitch_ >> 16) != pitch) {
+            fault_("NV2A radial-color swizzled surface is invalid");
+            return false;
+        }
     }
-    uint32_t surface_address = 0, last_address = 0;
-    if (!dma_object_address(zeta_dma_, surface_zeta_offset_, surface_address) ||
-        !dma_object_address(zeta_dma_, static_cast<uint32_t>(last_offset64),
-                            last_address) ||
-        last_address < surface_address ||
-        static_cast<uint64_t>(last_address) - surface_address + 1 !=
-            surface_bytes64) {
-        fault_("NV2A depth-only raster DMA range is invalid");
+    if (!depth_bytes64 || depth_bytes64 > SIZE_MAX ||
+        color_bytes64 > SIZE_MAX) {
+        fault_("NV2A raster surface size overflows");
         return false;
     }
 
-    std::vector<uint8_t> depth_surface(static_cast<size_t>(surface_bytes64));
-    if (!mem_read_ ||
-        !mem_read_(surface_address, depth_surface.data(), depth_surface.size())) {
-        fault_("NV2A depth-only raster DMA read failed");
+    auto resolve_surface =
+        [&](uint32_t dma, bool bound, uint32_t offset, uint64_t bytes,
+            uint32_t& address, const char* plane) {
+            if (!bound || !bytes ||
+                static_cast<uint64_t>(offset) + bytes - 1 > UINT32_MAX) {
+                char why[128];
+                std::snprintf(why, sizeof(why),
+                              "NV2A raster %s surface is unbound or overflows",
+                              plane);
+                fault_(why);
+                return false;
+            }
+            uint32_t last_address = 0;
+            const uint32_t last_offset =
+                offset + static_cast<uint32_t>(bytes - 1);
+            if (!dma_object_address(dma, offset, address) ||
+                !dma_object_address(dma, last_offset, last_address) ||
+                last_address < address ||
+                static_cast<uint64_t>(last_address) - address + 1 != bytes) {
+                char why[128];
+                std::snprintf(why, sizeof(why),
+                              "NV2A raster %s DMA range is invalid", plane);
+                fault_(why);
+                return false;
+            }
+            return true;
+        };
+
+    uint32_t depth_address = 0;
+    uint32_t color_address = 0;
+    if (!resolve_surface(zeta_dma_, zeta_dma_bound_, surface_zeta_offset_,
+                         depth_bytes64, depth_address, "zeta")) {
         return false;
     }
+    if (profile == Profile::kSwizzledRadialColor &&
+        !resolve_surface(color_dma_, color_dma_bound_, surface_color_offset_,
+                         color_bytes64, color_address, "color")) {
+        return false;
+    }
+    if (profile == Profile::kSwizzledRadialColor) {
+        const uint64_t color_end =
+            static_cast<uint64_t>(color_address) + color_bytes64;
+        const uint64_t depth_end =
+            static_cast<uint64_t>(depth_address) + depth_bytes64;
+        if (color_address < depth_end && depth_address < color_end) {
+            fault_("NV2A radial-color color and zeta surfaces overlap");
+            return false;
+        }
+    }
+
+    PagedRasterSurface depth_surface(
+        depth_address, static_cast<size_t>(depth_bytes64),
+        mem_read_, mem_write_);
+    PagedRasterSurface color_surface(
+        color_address, static_cast<size_t>(color_bytes64),
+        mem_read_, mem_write_);
 
     uint32_t xmin = clip_x;
     uint32_t xmax = clip_x + clip_width - 1;
@@ -1011,7 +1248,10 @@ bool Nv2a::rasterize_depth_only_batch() {
     ymin = std::max(ymin, window_y & 0xFFFu);
     ymax = std::min(ymax, (window_y >> 16) & 0xFFFu);
     if (xmax < xmin || ymax < ymin) {
-        ++depth_raster_batches_;
+        if (profile == Profile::kPitchZ16Depth)
+            ++depth_raster_batches_;
+        else
+            ++radial_color_batches_;
         return true;
     }
 
@@ -1028,12 +1268,12 @@ bool Nv2a::rasterize_depth_only_batch() {
                     sizeof(polygon_bias));
     }
 
-    uint32_t dirty_ymin = surface_height;
-    uint32_t dirty_ymax = 0;
+    bool raster_failed = false;
     auto rasterize_triangle =
         [&](const TransformedVertex& input_a,
             const TransformedVertex& input_b,
             const TransformedVertex& input_c) {
+            if (raster_failed) return;
             const TransformedVertex* a = &input_a;
             const TransformedVertex* b = &input_b;
             const TransformedVertex* c = &input_c;
@@ -1063,7 +1303,10 @@ bool Nv2a::rasterize_depth_only_batch() {
             int64_t area = edge(ax, ay, bx, by, cx, cy);
             if (area <= 0) return;  // CW is front-facing in Xbox screen space.
 
-            ++rasterized_triangles_;
+            if (profile == Profile::kPitchZ16Depth)
+                ++rasterized_triangles_;
+            else
+                ++radial_color_triangles_;
             const int32_t tri_xmin = std::max<int32_t>(
                 static_cast<int32_t>(xmin),
                 static_cast<int32_t>(std::ceil(
@@ -1121,7 +1364,10 @@ bool Nv2a::rasterize_depth_only_batch() {
                         w2 < 0 || (w2 == 0 && !edge2_top_left)) {
                         continue;
                     }
-                    ++rasterized_fragments_;
+                    if (profile == Profile::kPitchZ16Depth)
+                        ++rasterized_fragments_;
+                    else
+                        ++radial_color_fragments_;
                     float depth =
                         (static_cast<float>(w0) * a->position[2] +
                          static_cast<float>(w1) * b->position[2] +
@@ -1132,31 +1378,130 @@ bool Nv2a::rasterize_depth_only_batch() {
                         depth < clip_min || depth > clip_max) {
                         continue;
                     }
-                    const uint16_t incoming = static_cast<uint16_t>(
-                        std::floor(std::clamp(depth, 0.0f, 65535.0f)));
-                    const size_t offset =
-                        static_cast<size_t>(y) * pitch +
-                        static_cast<size_t>(x) * sizeof(uint16_t);
-                    uint16_t stored = 0;
-                    std::memcpy(&stored, depth_surface.data() + offset,
-                                sizeof(stored));
-                    if (incoming > stored) continue;  // LEQUAL
-                    ++depth_test_passes_;
-                    std::memcpy(depth_surface.data() + offset, &incoming,
-                                sizeof(incoming));
-                    ++depth_writes_;
-                    const uint32_t address =
-                        surface_address + static_cast<uint32_t>(offset);
-                    last_raster_address_ = address;
-                    for (uint32_t word : {address,
-                                          static_cast<uint32_t>(incoming)}) {
-                        raster_output_hash_ ^= word;
-                        raster_output_hash_ *= 1099511628211ull;
+                    if (profile == Profile::kPitchZ16Depth) {
+                        const uint16_t incoming = static_cast<uint16_t>(
+                            std::floor(std::clamp(depth, 0.0f, 65535.0f)));
+                        const size_t offset =
+                            static_cast<size_t>(y) * pitch +
+                            static_cast<size_t>(x) * sizeof(uint16_t);
+                        uint16_t stored = 0;
+                        if (!depth_surface.read16(offset, stored)) {
+                            fault_("NV2A depth-only raster DMA read failed");
+                            raster_failed = true;
+                            return;
+                        }
+                        if (incoming > stored) continue;  // LEQUAL
+                        ++depth_test_passes_;
+                        if (!depth_surface.write16(offset, incoming)) {
+                            fault_("NV2A depth-only raster cache write failed");
+                            raster_failed = true;
+                            return;
+                        }
+                        ++depth_writes_;
+                        const uint32_t address =
+                            depth_address + static_cast<uint32_t>(offset);
+                        last_raster_address_ = address;
+                        for (uint32_t word :
+                             {address, static_cast<uint32_t>(incoming)}) {
+                            raster_output_hash_ ^= word;
+                            raster_output_hash_ *= 1099511628211ull;
+                        }
+                        continue;
                     }
-                    dirty_ymin = std::min(dirty_ymin,
-                                         static_cast<uint32_t>(y));
-                    dirty_ymax = std::max(dirty_ymax,
-                                         static_cast<uint32_t>(y));
+
+                    const uint32_t pixel_index = swizzled_pixel_index(
+                        static_cast<uint32_t>(x), static_cast<uint32_t>(y),
+                        surface_width, surface_height);
+                    const size_t offset =
+                        static_cast<size_t>(pixel_index) * sizeof(uint32_t);
+                    const uint32_t incoming = static_cast<uint32_t>(
+                        std::floor(std::clamp(depth, 0.0f, 16777215.0f)));
+                    uint32_t stored_depth_stencil = 0;
+                    if (!depth_surface.read32(offset, stored_depth_stencil)) {
+                        fault_("NV2A radial-color zeta DMA read failed");
+                        raster_failed = true;
+                        return;
+                    }
+                    if (incoming > (stored_depth_stencil >> 8)) continue;
+                    ++radial_color_depth_passes_;
+
+                    const double lambda0 =
+                        static_cast<double>(w0) / static_cast<double>(area);
+                    const double lambda1 =
+                        static_cast<double>(w1) / static_cast<double>(area);
+                    const double lambda2 =
+                        static_cast<double>(w2) / static_cast<double>(area);
+                    const double q0 = lambda0 / a->position[3];
+                    const double q1 = lambda1 / b->position[3];
+                    const double q2 = lambda2 / c->position[3];
+                    const double qsum = q0 + q1 + q2;
+                    if (!std::isfinite(qsum) || qsum == 0.0) continue;
+
+                    std::array<float, 3> texture{};
+                    std::array<float, 3> diffuse{};
+                    for (size_t component = 0; component < 3; ++component) {
+                        const double t =
+                            (q0 * a->texture[0][component] +
+                             q1 * b->texture[0][component] +
+                             q2 * c->texture[0][component]) / qsum;
+                        auto vertex_diffuse =
+                            [component](const TransformedVertex* vertex) {
+                                float value = vertex->diffuse[component];
+                                if (std::isnan(value)) value = 1.0f;
+                                return std::clamp(value, 0.0f, 1.0f);
+                            };
+                        const double d =
+                            (q0 * vertex_diffuse(a) +
+                             q1 * vertex_diffuse(b) +
+                             q2 * vertex_diffuse(c)) / qsum;
+                        if (!std::isfinite(t) || !std::isfinite(d)) {
+                            fault_("NV2A radial-color varying is non-finite");
+                            raster_failed = true;
+                            return;
+                        }
+                        texture[component] = static_cast<float>(t);
+                        diffuse[component] = static_cast<float>(d);
+                    }
+
+                    float dot = 0.0f;
+                    for (float component : texture) {
+                        const float expanded =
+                            2.0f * std::max(component, 0.0f) - 1.0f;
+                        dot += expanded * expanded;
+                    }
+                    const float r1 = 1.0f - std::clamp(dot, -1.0f, 1.0f);
+                    const float radial = r1 * r1;
+                    auto pack_unorm8 = [](float value) {
+                        return static_cast<uint32_t>(std::floor(
+                            std::clamp(value, 0.0f, 1.0f) * 255.0f + 0.5f));
+                    };
+                    const uint32_t red = pack_unorm8(diffuse[0] * radial);
+                    const uint32_t green = pack_unorm8(diffuse[1] * radial);
+                    const uint32_t blue = pack_unorm8(diffuse[2] * radial);
+                    const uint32_t color =
+                        0xFF000000u | (red << 16) | (green << 8) | blue;
+                    const uint32_t depth_stencil =
+                        (incoming << 8) | (stored_depth_stencil & 0xFFu);
+
+                    if (!color_surface.write32(offset, color) ||
+                        !depth_surface.write32(offset, depth_stencil)) {
+                        fault_("NV2A radial-color raster cache write failed");
+                        raster_failed = true;
+                        return;
+                    }
+                    ++radial_color_writes_;
+                    ++radial_color_depth_writes_;
+                    const uint32_t color_pixel_address =
+                        color_address + static_cast<uint32_t>(offset);
+                    const uint32_t depth_pixel_address =
+                        depth_address + static_cast<uint32_t>(offset);
+                    last_color_raster_address_ = color_pixel_address;
+                    for (uint32_t word :
+                         {color_pixel_address, color,
+                          depth_pixel_address, depth_stencil}) {
+                        radial_color_output_hash_ ^= word;
+                        radial_color_output_hash_ *= 1099511628211ull;
+                    }
                 }
             }
         };
@@ -1185,18 +1530,20 @@ bool Nv2a::rasterize_depth_only_batch() {
                                transformed_batch_[i]);
     }
 
-    if (dirty_ymin < surface_height) {
-        const size_t first_offset = static_cast<size_t>(dirty_ymin) * pitch;
-        const size_t dirty_bytes =
-            static_cast<size_t>(dirty_ymax - dirty_ymin + 1) * pitch;
-        if (!mem_write_ ||
-            !mem_write_(surface_address + static_cast<uint32_t>(first_offset),
-                        depth_surface.data() + first_offset, dirty_bytes)) {
-            fault_("NV2A depth-only raster DMA write failed");
-            return false;
-        }
+    if (raster_failed) return false;
+    if (!depth_surface.flush()) {
+        fault_("NV2A raster zeta DMA write failed");
+        return false;
     }
-    ++depth_raster_batches_;
+    if (profile == Profile::kSwizzledRadialColor &&
+        !color_surface.flush()) {
+        fault_("NV2A radial-color DMA write failed");
+        return false;
+    }
+    if (profile == Profile::kPitchZ16Depth)
+        ++depth_raster_batches_;
+    else
+        ++radial_color_batches_;
     return true;
 }
 

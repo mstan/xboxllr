@@ -20,10 +20,29 @@ static uint32_t get32(const std::vector<uint8_t>& mem, uint32_t addr) {
     return value;
 }
 
+static uint32_t swizzled_pixel_index(uint32_t x, uint32_t y,
+                                     uint32_t width, uint32_t height) {
+    uint32_t result = 0;
+    uint32_t output_bit = 1;
+    for (uint32_t input_bit = 1;
+         input_bit < width || input_bit < height;
+         input_bit <<= 1) {
+        if (input_bit < width) {
+            if (x & input_bit) result |= output_bit;
+            output_bit <<= 1;
+        }
+        if (input_bit < height) {
+            if (y & input_bit) result |= output_bit;
+            output_bit <<= 1;
+        }
+    }
+    return result;
+}
+
 int main() {
     std::string fault;
     xlle::Nv2a gpu([&](const std::string& why) { fault = why; });
-    std::vector<uint8_t> ram(0x10000, 0);
+    std::vector<uint8_t> ram(0x20000, 0);
     gpu.set_mem_access(
         [&](uint32_t addr, void* dst, size_t n) {
             if (addr + n > ram.size()) return false;
@@ -156,10 +175,10 @@ int main() {
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700018, 4, 0x00000003);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x70001C, 4, 0x80010040);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700300, 4, 0x0000003D);
-    gpu.mmio_write(xlle::Nv2a::kBase + 0x700304, 4, 0x0000FFFF);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700304, 4, 0x0001FFFF);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700308, 4, 0x00000000);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700400, 4, 0x0000003D);
-    gpu.mmio_write(xlle::Nv2a::kBase + 0x700404, 4, 0x0000FFFF);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700404, 4, 0x0001FFFF);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700408, 4, 0x00000000);
     uint32_t cursor = 0;
     auto emit = [&](uint32_t method, uint32_t parameter) {
@@ -416,6 +435,146 @@ int main() {
     CHECK(gpu.depth_writes() == front_writes);
     std::memcpy(&inside_depth, ram.data() + 0x8000 + 25 * 128 + 20 * 2, 2);
     CHECK(inside_depth == 110);
+
+    // Dominant color profile: a swizzled A8R8G8B8/Z24S8 target and the
+    // dashboard's untextured three-stage radial register combiner. Different
+    // vertex W values make the expected diffuse interpolation perspective-correct.
+    const float radial_positions[] = {
+        10.0f, 20.0f, 100.0f, 1.0f,
+        60.0f, 40.0f, 200.0f, 2.0f,
+        80.0f, 160.0f, 400.0f, 4.0f,
+    };
+    const uint32_t radial_colors[] = {
+        0xff0000ffu, 0xff00ff00u, 0xffff0000u,
+    };
+    const float radial_texcoords[] = {
+        0.75f, 0.5f, 0.5f, 1.0f,
+        0.75f, 0.5f, 0.5f, 1.0f,
+        0.75f, 0.5f, 0.5f, 1.0f,
+    };
+    std::memcpy(ram.data() + 0x7000, radial_positions,
+                sizeof(radial_positions));
+    std::memcpy(ram.data() + 0x7100, radial_colors,
+                sizeof(radial_colors));
+    std::memcpy(ram.data() + 0x7400, radial_texcoords,
+                sizeof(radial_texcoords));
+    std::memset(ram.data() + 0xA000, 0, 64 * 64 * 4);
+    for (uint32_t offset = 0; offset < 64 * 64 * 4; offset += 4)
+        put32(ram, 0xE000 + offset, 0xFFFFFF5Au);
+
+    emit(0x0200, 0x00400000);
+    emit(0x0204, 0x00400000);
+    emit(0x0208, 0x06060228);  // 64x64 swizzled A8R8G8B8 + Z24S8
+    emit(0x020C, 0x01000100);
+    emit(0x0210, 0x0000A000);
+    emit(0x0214, 0x0000E000);
+    emit(0x0290, 0x00100001);  // fixed Z, preserve stencil
+    emit(0x02C0, 0x003F0000);
+    emit(0x02E0, 0x003F0000);
+    emit(0x0300, 1);           // alpha GEQUAL 1; final alpha is one
+    emit(0x0304, 1);           // blend ONE/ZERO ADD
+    emit(0x0308, 1);
+    emit(0x030C, 1);
+    emit(0x0310, 0);
+    emit(0x032C, 0);
+    emit(0x0330, 0);
+    emit(0x0334, 0);
+    emit(0x0338, 0);
+    emit(0x033C, 0x0206);
+    emit(0x0340, 1);
+    emit(0x0344, 1);
+    emit(0x0348, 0);
+    emit(0x0350, 0x8006);
+    emit(0x0354, 0x0203);
+    emit(0x0358, 0x01010101);
+    emit(0x035C, 1);
+    emit(0x037C, 0x1D01);
+    emit(0x038C, 0x1B02);
+    emit(0x0390, 0x1B02);
+    emit(0x0394, 0x00000000);
+    emit(0x0398, 0x4B7FFFFF);
+    emit(0x039C, 0x0405);
+    emit(0x03A0, 0x0900);
+    emit(0x1D78, 1);
+    emit(0x1E70, 0x00000004);  // stage 0 passthrough
+    emit(0x1E74, 0);
+    emit(0x1E78, 0);
+    emit(0x1E60, 0x00011103);
+    emit(0x0AC0, 0x48480000);
+    emit(0x0AC4, 0x2D2D0000);
+    emit(0x0AC8, 0xC4CD0000);
+    emit(0x0260, 0x00000000);
+    emit(0x0264, 0x3D3D1010);
+    emit(0x0268, 0xD4DD1010);
+    emit(0x1E40, 0x000820D0);
+    emit(0x1E44, 0x000000D0);
+    emit(0x1E48, 0x000000C0);
+    emit(0x0AA0, 0x00000000);
+    emit(0x0AA4, 0x000000D0);
+    emit(0x0AA8, 0x000000C0);
+    emit(0x0288, 0x0000000C);
+    emit(0x028C, 0x00002080);
+    emit(0x1720, 0x00007000);
+    emit(0x1760, 0x00001042);  // float4 position, stride 16
+    emit(0x172C, 0x80007100);
+    emit(0x176C, 0x00000440);
+    emit(0x1744, 0x00007400);  // texture 0, slot 9
+    emit(0x1784, 0x00001042);
+    const uint32_t identity[] = {
+        0x3F800000, 0, 0, 0,
+        0, 0x3F800000, 0, 0,
+        0, 0, 0x3F800000, 0,
+        0, 0, 0, 0x3F800000,
+    };
+    for (uint32_t i = 0; i < 16; ++i)
+        emit(0x0680 + i * 4, identity[i]);
+    emit(0x0A20, 0);
+    emit(0x0A24, 0);
+    emit(0x1E94, 0);
+    emit(0x17FC, 5);
+    emit(0x1800, 0x00010000);
+    emit(0x1808, 2);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.radial_color_batches() == 1);
+    CHECK(gpu.radial_color_triangles() == 1);
+    CHECK(gpu.radial_color_fragments() > 0);
+    CHECK(gpu.radial_color_depth_passes() ==
+          gpu.radial_color_depth_writes());
+    CHECK(gpu.radial_color_depth_writes() == gpu.radial_color_writes());
+    CHECK(gpu.radial_color_writes() > 0);
+    const uint32_t inside_swizzled =
+        swizzled_pixel_index(20, 25, 64, 64) * 4;
+    const uint32_t outside_swizzled =
+        swizzled_pixel_index(5, 5, 64, 64) * 4;
+    CHECK(get32(ram, 0xA000 + inside_swizzled) == 0xFF512E10u);
+    CHECK(get32(ram, 0xE000 + inside_swizzled) == 0x0000645Au);
+    CHECK(get32(ram, 0xA000 + outside_swizzled) == 0);
+    CHECK(get32(ram, 0xE000 + outside_swizzled) == 0xFFFFFF5Au);
+    CHECK(gpu.last_color_raster_address() >= 0xA000);
+    CHECK(gpu.last_color_raster_address() < 0xE000);
+    CHECK(gpu.radial_color_output_hash() != 1469598103934665603ull);
+
+    const uint64_t radial_writes = gpu.radial_color_writes();
+    float farther_positions[12];
+    std::memcpy(farther_positions, radial_positions, sizeof(farther_positions));
+    farther_positions[2] = 200.0f;
+    farther_positions[6] = 400.0f;
+    farther_positions[10] = 800.0f;
+    std::memcpy(ram.data() + 0x7000, farther_positions,
+                sizeof(farther_positions));
+    emit(0x17FC, 5);
+    emit(0x1800, 0x00010000);
+    emit(0x1808, 2);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.radial_color_batches() == 2);
+    CHECK(gpu.radial_color_triangles() == 2);
+    CHECK(gpu.radial_color_writes() == radial_writes);
+    CHECK(get32(ram, 0xA000 + inside_swizzled) == 0xFF512E10u);
+    CHECK(get32(ram, 0xE000 + inside_swizzled) == 0x0000645Au);
 
     // AvSetDisplayMode's scanout path: VGA CRTC pitch/depth, PRAMDAC dimensions/format,
     // and PCRTC_START resolve unified-RAM RGB565 into deterministic RGBA output.

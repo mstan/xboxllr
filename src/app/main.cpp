@@ -587,6 +587,17 @@ int main(int argc, char** argv) {
                             (unsigned long long)mach.nv2a()->depth_writes(),
                             mach.nv2a()->last_raster_address(),
                             (unsigned long long)mach.nv2a()->raster_output_hash());
+                std::printf("[2bl] NV2A radial-color: batches/tri/frags/pass/"
+                            "zwrite/cwrite=%llu/%llu/%llu/%llu/%llu/%llu "
+                            "last=%08x hash=%016llx\n",
+                            (unsigned long long)mach.nv2a()->radial_color_batches(),
+                            (unsigned long long)mach.nv2a()->radial_color_triangles(),
+                            (unsigned long long)mach.nv2a()->radial_color_fragments(),
+                            (unsigned long long)mach.nv2a()->radial_color_depth_passes(),
+                            (unsigned long long)mach.nv2a()->radial_color_depth_writes(),
+                            (unsigned long long)mach.nv2a()->radial_color_writes(),
+                            mach.nv2a()->last_color_raster_address(),
+                            (unsigned long long)mach.nv2a()->radial_color_output_hash());
                 std::printf("[2bl] NV2A vertices: batches=%llu submitted=%llu "
                             "attr-fetches=%llu primitives=%llu triangles=%llu max-index=%u\n",
                             (unsigned long long)mach.nv2a()->vertex_batches(),

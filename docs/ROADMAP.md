@@ -20,7 +20,7 @@ machine-verifiable evidence that closed it.
 | A1 | **PARTIAL / DEFERRED** | Real-console agent and hardware probes work; pinned deterministic xemu-TCG cosim is still owed. |
 | A2 | **DONE** | Retail 4983 kernel reaches executive/IO init, services IRQs, completes phase-1, mounts FATX, and maps the dashboard XBE. |
 | A3 | **PARTIAL** | Unicorn's dynamic translator is the normal tier; page versioning and SMC/decryption invalidation proof remain. |
-| A4 | **IN PROGRESS** | Boot animation/XBE launch, PFIFO, NVNet TX DMA, 720x480 scanout/readout, Kelvin clears, indexed fetch/assembly, both exercised vertex-transform modes, and the pitch-Z16 depth-only triangle prepass work. A 6.4B run executes all 48,554,942 indexed vertices and 139,247,115 depth writes fault-free. Color/textured triangle writes remain. Next: the dominant swizzled color pass, then textured draws/inline arrays, OHCI TD/XID input, and NVNet RX/transport. |
+| A4 | **IN PROGRESS** | Boot animation/XBE launch, PFIFO, NVNet TX DMA, 720x480 scanout/readout, Kelvin clears, indexed fetch/assembly, both exercised vertex-transform modes, the pitch-Z16 prepass, and dominant untextured swizzled radial-color pass work. A 6.4B run executes all 48,554,942 vertices plus 727,241,984 paired A8R8G8B8/Z24 writes fault-free; this pass is offscreen and final scanout remains the clear. Next: textured draws/inline arrays, OHCI TD/XID input, and NVNet RX/transport. |
 | A5 | **NOT STARTED** | Requires A4 dashboard execution and rendering. |
 | Arc 2 | **NOT STARTED** | Explicitly out of current scope. |
 

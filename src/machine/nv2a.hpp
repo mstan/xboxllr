@@ -99,6 +99,22 @@ public:
     uint64_t depth_writes() const { return depth_writes_; }
     uint32_t last_raster_address() const { return last_raster_address_; }
     uint64_t raster_output_hash() const { return raster_output_hash_; }
+    uint64_t radial_color_batches() const { return radial_color_batches_; }
+    uint64_t radial_color_triangles() const { return radial_color_triangles_; }
+    uint64_t radial_color_fragments() const { return radial_color_fragments_; }
+    uint64_t radial_color_depth_passes() const {
+        return radial_color_depth_passes_;
+    }
+    uint64_t radial_color_depth_writes() const {
+        return radial_color_depth_writes_;
+    }
+    uint64_t radial_color_writes() const { return radial_color_writes_; }
+    uint32_t last_color_raster_address() const {
+        return last_color_raster_address_;
+    }
+    uint64_t radial_color_output_hash() const {
+        return radial_color_output_hash_;
+    }
     uint64_t vertex_batches() const { return vertex_batches_; }
     uint64_t submitted_vertices() const { return submitted_vertices_; }
     uint64_t vertex_attribute_fetches() const { return vertex_attribute_fetches_; }
@@ -334,6 +350,14 @@ private:
     uint64_t depth_writes_ = 0;
     uint32_t last_raster_address_ = 0;
     uint64_t raster_output_hash_ = 1469598103934665603ull;
+    uint64_t radial_color_batches_ = 0;
+    uint64_t radial_color_triangles_ = 0;
+    uint64_t radial_color_fragments_ = 0;
+    uint64_t radial_color_depth_passes_ = 0;
+    uint64_t radial_color_depth_writes_ = 0;
+    uint64_t radial_color_writes_ = 0;
+    uint32_t last_color_raster_address_ = 0;
+    uint64_t radial_color_output_hash_ = 1469598103934665603ull;
 
     // Kelvin's array-fed vertex path. The dashboard overwhelmingly submits ARRAY_ELEMENT16:
     // each method contains two indices. Attribute offsets select vertex DMA A/B with bit 31;
@@ -444,7 +468,7 @@ private:
                              uint32_t& first_address);
     bool set_vertex_array_format(uint32_t slot, uint32_t parameter);
     bool submit_vertex_batch();
-    bool rasterize_depth_only_batch();
+    bool rasterize_witnessed_batch();
     bool fetch_vertex_attribute(uint32_t slot, uint32_t index);
     bool ramht_instance(uint8_t channel, uint32_t handle, uint32_t& instance) const;
     bool dma_object_address(uint32_t instance, uint32_t offset, uint32_t& address) const;

@@ -3,6 +3,38 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-07-31 — A4: dominant swizzled radial color pass executes
+
+The dashboard's dominant untextured color profile now executes through guest color and zeta
+memory. The existing list/strip/fan coverage core admits its 1024x512 swizzled
+A8R8G8B8/Z24S8 targets, resolves both DMA ranges, and accesses them in Xbox Morton order.
+Smooth diffuse and passthrough texture coordinates interpolate perspective-correctly; depth
+remains screen-linear. The exact three-stage register combiner computes
+`v0 * (1 - dot(expand(t0.rgb), expand(t0.rgb)))^2`, final alpha one passes GEQUAL 1,
+ONE/ZERO ADD replaces color, LEQUAL writes floored Z24, and the original stencil byte is
+preserved. Lazy 4 KiB draw-local pages retain memory coherence without rereading both full
+2 MiB targets for every particle batch. State outside this witnessed profile still
+fault-stops or remains recorder-only as appropriate.
+
+Focused coverage verifies unequal vertex W perspective correction, nontrivial radial
+attenuation, exact Morton placement, A8R8G8B8 packing, floored Z24, preserved stencil, and
+a farther second draw rejected by LEQUAL. The page-backed refactor leaves the prior
+pitch-Z16 depth hash unchanged, and the direct suite remains 9/9.
+
+The full 6.4B dashboard acceptance run is fault-free. It executes 155,372 radial-color
+batches and 7,293,635 front-facing triangles, covers 4,107,334,135 fragments, and commits
+727,241,984 paired color/Z24 writes with deterministic FNV-64
+`b57945aef12a9289`. The prior depth-prepass hash remains `9424b7ed8661f321`;
+all 48,554,942 vertices retain position hash `b1bdfde660324e2e`. The last radial color
+write is `0x02f8f00c`, while final scanout remains `0x03c8c000` with unchanged hash
+`73feb194b7694383`: this profile is an offscreen/intermediate pass, not yet the visible
+dashboard frame.
+
+**Next:** execute the next high-volume 256x256 swizzled A8R8G8B8/Z24S8 profile, including
+its four texture stages and eight-stage register combiner, then cover the remaining
+textured profiles and `INLINE_ARRAY`. OHCI TD/XID input and NVNet RX/transport remain
+subsequent A4 work.
+
 ## 2026-07-31 — A4: pitch-Z16 triangle depth prepass executes
 
 The first retained-geometry raster path now mutates guest zeta memory. A draw-time census
