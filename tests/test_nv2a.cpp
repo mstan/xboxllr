@@ -723,6 +723,62 @@ int main() {
     CHECK(gpu.textured_color_writes() == textured_writes);
     CHECK(get32(ram, 0x20000 + textured_inside) == 0xFF0E3F07u);
 
+    // The dominant pitch-surface sibling keeps the same cube samples and
+    // eight-stage combiner, but varies the stage-6 RGB weights and targets
+    // linear A8R8G8B8/Z24S8 buffers. Its enabled PROJECT3D Y16 shadow stage
+    // is output-inert because no combiner input references texture 3.
+    std::memcpy(ram.data() + 0x7000, radial_positions,
+                sizeof(radial_positions));
+    std::memset(ram.data() + 0x20000, 0, 64 * 64 * 4);
+    for (uint32_t offset = 0; offset < 64 * 64 * 4; offset += 4)
+        put32(ram, 0x60000 + offset, 0xFFFFFF5Au);
+    emit(0x0200, 0x00400000);  // 64x64 clip
+    emit(0x0204, 0x00400000);
+    emit(0x0208, 0x00000128);  // pitch A8R8G8B8 + Z24S8
+    emit(0x020C, 0x01000100);
+    emit(0x0210, 0x00020000);
+    emit(0x0214, 0x00060000);
+    emit(0x02C0, 0x003F0000);
+    emit(0x02E0, 0x003F0000);
+    emit(0x033C, 0x0206);      // GEQUAL, reference one
+    emit(0x0340, 1);
+    emit(0x035C, 0xFFFFFFFF);  // witnessed TRUE encoding
+    emit(0x1E6C, 4);           // GREATER shadow comparison
+    emit(0x1BC0, 0);
+    emit(0x1BC4, 0x0001302A);  // linear Y16 fixed
+    emit(0x1BC8, 0x00030404);
+    emit(0x1BCC, 0x4003FFC0);
+    emit(0x1BD0, 0x04000000);  // 1024-byte pitch
+    emit(0x1BD4, 0x02022000);
+    emit(0x1BDC, 0x02000200);  // 512x512 rectangle
+    emit(0x0A78, 0xFF0D3D06);  // witnessed dynamic stage-6 c0
+    emit(0x0A98, 0xFF61FF2F);  // witnessed dynamic stage-6 c1
+    emit(0x17FC, 5);
+    emit(0x1800, 0x00010000);
+    emit(0x1808, 2);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.pitch_textured_color_batches() == 1);
+    CHECK(gpu.pitch_textured_color_triangles() == 1);
+    CHECK(gpu.pitch_textured_color_fragments() > 0);
+    CHECK(gpu.pitch_textured_color_depth_passes() ==
+          gpu.pitch_textured_color_depth_writes());
+    CHECK(gpu.pitch_textured_color_depth_writes() ==
+          gpu.pitch_textured_color_writes());
+    CHECK(gpu.pitch_texture_samples() ==
+          gpu.pitch_textured_color_writes() * 2);
+    CHECK(gpu.pitch_textured_color_writes() > 0);
+    const uint32_t pitch_textured_inside = 25 * 256 + 20 * 4;
+    CHECK(get32(ram, 0x20000 + pitch_textured_inside) == 0xFF1A3F0Cu);
+    CHECK(get32(ram, 0x60000 + pitch_textured_inside) == 0x0000645Au);
+    CHECK(gpu.last_pitch_textured_raster_address() >= 0x20000);
+    CHECK(gpu.last_pitch_textured_raster_address() < 0x24000);
+    CHECK(gpu.pitch_textured_color_output_hash() !=
+          1469598103934665603ull);
+    CHECK(gpu.textured_color_batches() == 2);
+    CHECK(gpu.textured_color_writes() == textured_writes);
+
     // The lower-volume sibling projects stage 0 with repeat addressing, then
     // dots its expanded RGB against both cube-remapped samples. Coordinates
     // just above one wrap to the first four 128x128 texels; unequal W makes
@@ -736,6 +792,16 @@ int main() {
                 sizeof(radial_positions));
     std::memcpy(ram.data() + 0x7400, projected_texture0_coords,
                 sizeof(projected_texture0_coords));
+    emit(0x0200, 0x01000000);
+    emit(0x0204, 0x01000000);
+    emit(0x0208, 0x08080228);
+    emit(0x020C, 0x04000400);
+    emit(0x02C0, 0x00FF0000);
+    emit(0x02E0, 0x00FF0000);
+    emit(0x033C, 0x0207);
+    emit(0x0340, 0);
+    emit(0x035C, 1);
+    emit(0x1E6C, 0);
     std::memset(ram.data() + 0xA0000, 0, 64 * 64 * 4);
     std::memset(ram.data() + 0xB0000, 0, 128 * 128 * 4);
     const auto put_rgb_texture =

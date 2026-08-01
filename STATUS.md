@@ -3,6 +3,44 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-01 — A4: dominant pitch-textured color family executes
+
+The dashboard's dominant remaining indexed family now rasterizes its linear
+1280x480 A8R8G8B8/Z24S8 targets instead of remaining recorder-only. Shader
+`0x10c60` retains the already-validated cube-remapped, bilinear stage-1/2
+samples and eight-stage combiner, while stage-6 c0/c1 RGB weights vary between
+draw states. The enabled stage-3 PROJECT3D GREATER lookup uses a linear Y16
+shadow image, but no combiner input references texture 3; it is therefore
+output-inert and performs no guest-memory read. Pitch color/zeta addressing,
+LEQUAL Z24 writes, stencil preservation, GEQUAL-one alpha state, and both
+witnessed TRUE depth-mask encodings are handled separately from the existing
+swizzled profile.
+
+Focused coverage verifies an exact dynamically weighted pixel, pitch placement,
+depth/stencil output, two cube samples per write, distinct counters/hash, and
+no change to the swizzled sibling. The draw census now distinguishes executed
+from recorder-only batches and retains surface offsets plus vertex, inline, and
+primitive-mode totals. All nine direct tests pass. The 500M gate remains
+fault-free with empty stderr and all earlier hashes unchanged; this family
+begins after that boundary.
+
+The full 6.4B acceptance replay reaches budget fault-free with empty stderr. It
+executes 121,296 new pitch-textured batches and 4,464,588 front-facing
+triangles, covers 2,613,805,422 fragments, performs 833,192,036 cube samples,
+and commits 416,596,018 paired color/Z24 writes with deterministic hash
+`78a9682b85e41f92`. Recorder-only volume falls from 136,016 to 14,720 batches.
+Depth, radial, swizzled-textured, projected-textured, transform, and final
+scanout hashes remain `9424b7ed8661f321`, `b57945aef12a9289`,
+`537c8e788aaf4e83`, `117e65d4ec81492a`, `2824162d794cc5de`, and
+`73feb194b7694383`. The inline profile still commits exactly 15,123,585 writes,
+but its hash re-baselines to `610e9157ec10a027` because these earlier pitch
+writes now populate the shared additive-blend destination. Final scanout
+remains the guest clear.
+
+**Next:** execute the leading remaining pitch profiles, beginning with the
+projected-textured `0x10c61` family, then plumb host input into the landed XID
+controller.
+
 ## 2026-08-01 — A4: NVNet receives external Ethernet through retail RX DMA
 
 NVNet now implements the xemu-witnessed receive lifecycle alongside its existing transmit

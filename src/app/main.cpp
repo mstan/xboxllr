@@ -675,6 +675,18 @@ int main(int argc, char** argv) {
                             (unsigned long long)mach.nv2a()->texture_samples(),
                             mach.nv2a()->last_textured_raster_address(),
                             (unsigned long long)mach.nv2a()->textured_color_output_hash());
+                std::printf("[2bl] NV2A pitch-textured: batches/tri/frags/pass/"
+                            "zwrite/cwrite/samples=%llu/%llu/%llu/%llu/%llu/"
+                            "%llu/%llu last=%08x hash=%016llx\n",
+                            (unsigned long long)mach.nv2a()->pitch_textured_color_batches(),
+                            (unsigned long long)mach.nv2a()->pitch_textured_color_triangles(),
+                            (unsigned long long)mach.nv2a()->pitch_textured_color_fragments(),
+                            (unsigned long long)mach.nv2a()->pitch_textured_color_depth_passes(),
+                            (unsigned long long)mach.nv2a()->pitch_textured_color_depth_writes(),
+                            (unsigned long long)mach.nv2a()->pitch_textured_color_writes(),
+                            (unsigned long long)mach.nv2a()->pitch_texture_samples(),
+                            mach.nv2a()->last_pitch_textured_raster_address(),
+                            (unsigned long long)mach.nv2a()->pitch_textured_color_output_hash());
                 std::printf("[2bl] NV2A projected-color: batches/tri/frags/pass/"
                             "zwrite/cwrite/samples=%llu/%llu/%llu/%llu/%llu/"
                             "%llu/%llu last=%08x hash=%016llx\n",
@@ -786,26 +798,48 @@ int main(int argc, char** argv) {
                 mach.nv2a()->raster_state_samples(raster_samples);
                 std::sort(raster_samples.begin(), raster_samples.end(),
                           [](const auto& a, const auto& b) {
-                              return a.batches > b.batches;
+                              const uint64_t a_skipped =
+                                  a.batches - a.executed_batches;
+                              const uint64_t b_skipped =
+                                  b.batches - b.executed_batches;
+                              return a_skipped != b_skipped
+                                  ? a_skipped > b_skipped
+                                  : a.batches > b.batches;
                           });
-                std::printf("[2bl] NV2A raster states: unique=%zu\n",
-                            raster_samples.size());
+                size_t skipped_states = 0;
+                uint64_t skipped_batches = 0;
+                for (const auto& sample : raster_samples) {
+                    const uint64_t skipped =
+                        sample.batches - sample.executed_batches;
+                    if (skipped) ++skipped_states;
+                    skipped_batches += skipped;
+                }
+                std::printf("[2bl] NV2A raster states: unique=%zu "
+                            "recorder-only states/batches=%zu/%llu\n",
+                            raster_samples.size(), skipped_states,
+                            (unsigned long long)skipped_batches);
                 const size_t raster_sample_limit =
-                    std::min<size_t>(raster_samples.size(), 16);
+                    std::min<size_t>(skipped_states, 16);
                 for (size_t sample_index = 0;
                      sample_index < raster_sample_limit; ++sample_index) {
                     const auto& sample = raster_samples[sample_index];
                     const auto& state = sample.words;
                     std::printf(
-                        "[2bl]   RS%zu batches=%llu en=%04x sfmt=%08x pitch=%08x "
+                        "[2bl]   RS%zu batches/exec/skip=%llu/%llu/%llu "
+                        "en=%04x sfmt=%08x pitch=%08x surf=%08x/%08x "
                         "clip=%08x/%08x win=%08x/%08x alpha=%x/%02x "
                         "blend=%x/%x/%x depth=%x/%u masks=%08x/%08x "
                         "cull=%x/%x tex=%x shader=%08x/%08x comb=%08x\n",
                         sample_index,
                         (unsigned long long)sample.batches,
+                        (unsigned long long)sample.executed_batches,
+                        (unsigned long long)(
+                            sample.batches - sample.executed_batches),
                         state[Nv2a::kRasterEnables],
                         state[Nv2a::kRasterSurfaceFormat],
                         state[Nv2a::kRasterSurfacePitch],
+                        state[Nv2a::kRasterSurfaceColorOffset],
+                        state[Nv2a::kRasterSurfaceZetaOffset],
                         state[Nv2a::kRasterSurfaceClipHorizontal],
                         state[Nv2a::kRasterSurfaceClipVertical],
                         state[Nv2a::kRasterWindowClipHorizontal],
@@ -825,6 +859,21 @@ int main(int argc, char** argv) {
                         state[Nv2a::kRasterShaderStageProgram],
                         state[Nv2a::kRasterShaderOtherStageInput],
                         state[Nv2a::kRasterCombinerControl]);
+                    std::printf("[2bl]     geom vertices=%llu inline=%llu prim=",
+                                (unsigned long long)sample.vertices,
+                                (unsigned long long)sample.inline_batches);
+                    bool first_primitive = true;
+                    for (uint32_t mode = 1;
+                         mode < sample.primitive_batches.size(); ++mode) {
+                        if (sample.primitive_batches[mode]) {
+                            std::printf("%s%u:%llu",
+                                        first_primitive ? "" : ",", mode,
+                                        (unsigned long long)
+                                            sample.primitive_batches[mode]);
+                            first_primitive = false;
+                        }
+                    }
+                    std::printf("\n");
                     std::printf(
                         "[2bl]     ctrl=%08x shade=%x poly=%x/%x "
                         "poffset=%08x/%08x zclip=%08x/%08x zctl=%08x shadow=%x "

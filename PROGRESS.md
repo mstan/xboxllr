@@ -34,8 +34,8 @@ harvested from xemu, silicon-corrected against a live console. GPL-2.
   indexed and inline vertices now traverse the same programmable/fixed transforms. The
   landed triangle profiles write the dashboard's pitch-Z16 depth prepass, dominant
   untextured swizzled radial-combiner pass, and both witnessed indexed 256x256 textured
-  A8R8G8B8/Z24S8 passes, plus the inline path's pitch A8R8G8B8 projected-texture
-  additive-blend pass.
+  A8R8G8B8/Z24S8 passes, the dominant indexed 1280x480 pitch-textured pass, plus
+  the inline path's pitch A8R8G8B8 projected-texture additive-blend pass.
 - **Immediate burn-down path:** census and execute the remaining low-frequency draw states
   → plumb host input into the landed XID controller → drive end-to-end dashboard navigation.
 - **Not started:** A5 end-to-end retail-dashboard navigation and Arc 2 game work.
@@ -181,6 +181,15 @@ dependency chain peeled this session is:
     A UDP-backed 6.4B replay admits a queued 42-byte broadcast ARP frame through the retail
     driver's ring (`RX offer/desc/pkt/bytes=1/1/1/42`), clears the IRQ through the guest,
     reaches budget fault-free, and preserves every prior raster/scanout hash.
+26. dominant indexed pitch-textured family → **fixed through linear color/Z24 output**.
+    Shader `0x10c60` reuses the validated two cube samples and eight-stage combiner with
+    per-state stage-6 RGB weights; its enabled PROJECT3D Y16 shadow stage is output-inert
+    because texture 3 is not referenced by the combiner. At 6.4B, 121,296 batches
+    rasterize 4,464,588 triangles, perform 833,192,036 samples, and commit 416,596,018
+    paired pitch color/Z24 writes with hash `78a9682b85e41f92`. Recorder-only batches fall
+    from 136,016 to 14,720. Prior independent hashes and final scanout remain unchanged;
+    the shared-destination inline hash re-baselines to `610e9157ec10a027` with its write
+    count unchanged.
 
 ## How to build & run
 

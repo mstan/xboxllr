@@ -136,6 +136,33 @@ public:
     uint64_t textured_color_output_hash() const {
         return textured_color_output_hash_;
     }
+    uint64_t pitch_textured_color_batches() const {
+        return pitch_textured_color_batches_;
+    }
+    uint64_t pitch_textured_color_triangles() const {
+        return pitch_textured_color_triangles_;
+    }
+    uint64_t pitch_textured_color_fragments() const {
+        return pitch_textured_color_fragments_;
+    }
+    uint64_t pitch_textured_color_depth_passes() const {
+        return pitch_textured_color_depth_passes_;
+    }
+    uint64_t pitch_textured_color_depth_writes() const {
+        return pitch_textured_color_depth_writes_;
+    }
+    uint64_t pitch_textured_color_writes() const {
+        return pitch_textured_color_writes_;
+    }
+    uint64_t pitch_texture_samples() const {
+        return pitch_texture_samples_;
+    }
+    uint32_t last_pitch_textured_raster_address() const {
+        return last_pitch_textured_raster_address_;
+    }
+    uint64_t pitch_textured_color_output_hash() const {
+        return pitch_textured_color_output_hash_;
+    }
     uint64_t projected_color_batches() const { return projected_color_batches_; }
     uint64_t projected_color_triangles() const {
         return projected_color_triangles_;
@@ -240,6 +267,8 @@ public:
         kRasterEnables = 0,
         kRasterSurfaceFormat,
         kRasterSurfacePitch,
+        kRasterSurfaceColorOffset,
+        kRasterSurfaceZetaOffset,
         kRasterSurfaceClipHorizontal,
         kRasterSurfaceClipVertical,
         kRasterWindowClipHorizontal,
@@ -304,6 +333,10 @@ public:
     struct RasterStateSample {
         std::array<uint32_t, kRasterStateWords> words{};
         uint64_t batches = 0;
+        uint64_t executed_batches = 0;
+        uint64_t vertices = 0;
+        uint64_t inline_batches = 0;
+        std::array<uint64_t, 11> primitive_batches{};
     };
     size_t raster_state_samples(std::vector<RasterStateSample>& out) const {
         out = raster_state_samples_;
@@ -439,6 +472,15 @@ private:
     uint64_t texture_samples_ = 0;
     uint32_t last_textured_raster_address_ = 0;
     uint64_t textured_color_output_hash_ = 1469598103934665603ull;
+    uint64_t pitch_textured_color_batches_ = 0;
+    uint64_t pitch_textured_color_triangles_ = 0;
+    uint64_t pitch_textured_color_fragments_ = 0;
+    uint64_t pitch_textured_color_depth_passes_ = 0;
+    uint64_t pitch_textured_color_depth_writes_ = 0;
+    uint64_t pitch_textured_color_writes_ = 0;
+    uint64_t pitch_texture_samples_ = 0;
+    uint32_t last_pitch_textured_raster_address_ = 0;
+    uint64_t pitch_textured_color_output_hash_ = 1469598103934665603ull;
     uint64_t projected_color_batches_ = 0;
     uint64_t projected_color_triangles_ = 0;
     uint64_t projected_color_fragments_ = 0;
@@ -579,7 +621,7 @@ private:
     bool set_vertex_array_format(uint32_t slot, uint32_t parameter);
     bool decode_inline_array();
     bool submit_vertex_batch();
-    bool rasterize_witnessed_batch();
+    bool rasterize_witnessed_batch(bool& executed);
     bool fetch_vertex_attribute(uint32_t slot, uint32_t index);
     bool ramht_instance(uint8_t channel, uint32_t handle, uint32_t& instance) const;
     bool dma_object_address(uint32_t instance, uint32_t offset, uint32_t& address) const;
