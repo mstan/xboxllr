@@ -20,7 +20,7 @@ machine-verifiable evidence that closed it.
 | A1 | **PARTIAL / DEFERRED** | Real-console agent and hardware probes work; pinned deterministic xemu-TCG cosim is still owed. |
 | A2 | **DONE** | Retail 4983 kernel reaches executive/IO init, services IRQs, completes phase-1, mounts FATX, and maps the dashboard XBE. |
 | A3 | **PARTIAL** | Unicorn's dynamic translator is the normal tier; page versioning and SMC/decryption invalidation proof remain. |
-| A4 | **IN PROGRESS** | Boot animation/XBE launch, PFIFO, NVNet TX DMA, 720x480 scanout/readout, the witnessed Kelvin transform/raster profiles, and OHCI TD/XID Controller S execution work. A 6.4B run executes all 48,556,397 vertices and configures the controller at address 1 through ten OHCI TDs; an 8B run remains fault-free with every prior raster/scanout hash stable. Existing color profiles remain offscreen and final scanout is still the clear. Next: NVNet RX/transport, remaining low-frequency draw states, and host input plumbing. |
+| A4 | **IN PROGRESS** | Boot animation/XBE launch, PFIFO, NVNet TX/RX DMA plus an external UDP frame tunnel, 720x480 scanout/readout, the witnessed Kelvin transform/raster profiles, and OHCI TD/XID Controller S execution work. A UDP-backed 6.4B run carries a broadcast ARP frame through the retail RX ring while all prior raster/scanout hashes remain stable; the controller configures at address 1 through ten OHCI TDs. Existing color profiles remain offscreen and final scanout is still the clear. Next: remaining low-frequency draw states and host input plumbing. |
 | A5 | **NOT STARTED** | Requires A4 dashboard execution and rendering. |
 | Arc 2 | **NOT STARTED** | Explicitly out of current scope. |
 

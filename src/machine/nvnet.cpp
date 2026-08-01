@@ -81,13 +81,13 @@ void NvNet::reset_descriptor_pointers() {
 bool NvNet::load_descriptor(uint32_t address, RingDescriptor& descriptor) {
     static_assert(sizeof(RingDescriptor) == 8, "NVNet ring descriptor layout");
     if (!mem_read_) {
-        fault_("nvnet: TX descriptor DMA has no guest-memory reader");
+        fault_("nvnet: descriptor DMA has no guest-memory reader");
         return false;
     }
     if (!mem_read_(address, &descriptor, sizeof(descriptor))) {
         char message[96];
         std::snprintf(message, sizeof(message),
-                      "nvnet: TX descriptor DMA read failed at 0x%08x", address);
+                      "nvnet: descriptor DMA read failed at 0x%08x", address);
         fault_(message);
         return false;
     }
@@ -96,13 +96,13 @@ bool NvNet::load_descriptor(uint32_t address, RingDescriptor& descriptor) {
 
 bool NvNet::store_descriptor(uint32_t address, const RingDescriptor& descriptor) {
     if (!mem_write_) {
-        fault_("nvnet: TX descriptor DMA has no guest-memory writer");
+        fault_("nvnet: descriptor DMA has no guest-memory writer");
         return false;
     }
     if (!mem_write_(address, &descriptor, sizeof(descriptor))) {
         char message[96];
         std::snprintf(message, sizeof(message),
-                      "nvnet: TX descriptor DMA write failed at 0x%08x", address);
+                      "nvnet: descriptor DMA write failed at 0x%08x", address);
         fault_(message);
         return false;
     }
@@ -125,6 +125,154 @@ bool NvNet::next_tx_descriptor(uint32_t& address) {
         address = base;
     write_reg(kTxCurrentDesc, address);
     return true;
+}
+
+bool NvNet::next_rx_descriptor(uint32_t& address) {
+    const uint32_t base = read_reg(kRxRingAddress);
+    const uint32_t count = ((read_reg(kRingSize) >> 16) & 0xffffu) + 1u;
+    const uint64_t end = static_cast<uint64_t>(base) +
+                         static_cast<uint64_t>(count) * sizeof(RingDescriptor);
+    if (end > 0x100000000ull) {
+        fault_("nvnet: RX descriptor ring wraps physical address space");
+        return false;
+    }
+
+    address = read_reg(kRxNextDesc);
+    if (address < base ||
+        static_cast<uint64_t>(address) + sizeof(RingDescriptor) > end)
+        address = base;
+    write_reg(kRxCurrentDesc, address);
+    return true;
+}
+
+bool NvNet::receive_filter(const uint8_t* data, size_t size) const {
+    if (size < 6) return false;
+
+    bool broadcast = true;
+    for (size_t i = 0; i < 6; ++i) broadcast &= data[i] == 0xff;
+    if (broadcast) return true;
+
+    if (!(read_reg(kPacketFilter) & kPacketFilterMyAddress)) return true;
+
+    std::array<uint8_t, 8> address{};
+    std::array<uint8_t, 8> mask{};
+    const uint32_t multicast_a = read_reg(kMulticastAddressA);
+    const uint32_t multicast_b = read_reg(kMulticastAddressB);
+    const uint32_t multicast_mask_a = read_reg(kMulticastMaskA);
+    const uint32_t multicast_mask_b = read_reg(kMulticastMaskB);
+    std::memcpy(address.data(), &multicast_a, sizeof(multicast_a));
+    std::memcpy(address.data() + 4, &multicast_b, sizeof(multicast_b));
+    std::memcpy(mask.data(), &multicast_mask_a, sizeof(multicast_mask_a));
+    std::memcpy(mask.data() + 4, &multicast_mask_b, sizeof(multicast_mask_b));
+
+    bool multicast_is_broadcast = true;
+    for (size_t i = 0; i < 6; ++i) multicast_is_broadcast &= address[i] == 0xff;
+    if (!multicast_is_broadcast) {
+        bool multicast_match = true;
+        for (size_t i = 0; i < 6; ++i)
+            multicast_match &= (data[i] & mask[i]) == address[i];
+        if (multicast_match) return true;
+    }
+
+    const uint32_t mac_a = read_reg(kMacAddressA);
+    const uint32_t mac_b = read_reg(kMacAddressB);
+    std::memcpy(address.data(), &mac_a, sizeof(mac_a));
+    std::memcpy(address.data() + 4, &mac_b, sizeof(mac_b));
+    return std::memcmp(data, address.data(), 6) == 0;
+}
+
+bool NvNet::rx_ready() {
+    const bool rx_enabled = (read_reg(kReceiverControl) & kRxStart) != 0;
+    const bool dma_enabled = (read_reg(kTxRxControl) & kControlDmaDisable) == 0;
+    if (!rx_enabled || !dma_enabled || !link_up()) return false;
+
+    uint32_t descriptor_address = 0;
+    if (!next_rx_descriptor(descriptor_address)) return false;
+    RingDescriptor descriptor{};
+    if (!load_descriptor(descriptor_address, descriptor)) return false;
+    return (descriptor.flags & kRxAvailable) != 0;
+}
+
+NvNet::RxResult NvNet::receive_packet(const uint8_t* data, size_t size) {
+    ++rx_offers_;
+    if (!data && size != 0) {
+        fault_("nvnet: null RX packet data");
+        return RxResult::Fault;
+    }
+    if (size > kRxBufferSize) {
+        ++rx_oversized_;
+        return RxResult::Oversized;
+    }
+    if (!receive_filter(data, size)) {
+        ++rx_filtered_;
+        return RxResult::Filtered;
+    }
+
+    const bool rx_enabled = (read_reg(kReceiverControl) & kRxStart) != 0;
+    const bool dma_enabled = (read_reg(kTxRxControl) & kControlDmaDisable) == 0;
+    if (!rx_enabled || !dma_enabled || !link_up()) {
+        ++rx_not_ready_;
+        return RxResult::NotReady;
+    }
+
+    uint32_t descriptor_address = 0;
+    if (!next_rx_descriptor(descriptor_address)) return RxResult::Fault;
+    RingDescriptor descriptor{};
+    if (!load_descriptor(descriptor_address, descriptor)) return RxResult::Fault;
+    if (!(descriptor.flags & kRxAvailable)) {
+        ++rx_not_ready_;
+        return RxResult::NotReady;
+    }
+
+    const size_t capacity = static_cast<size_t>(descriptor.length) + 1;
+    if (size > capacity) {
+        char message[112];
+        std::snprintf(message, sizeof(message),
+                      "nvnet: RX packet size %zu exceeds descriptor capacity %zu",
+                      size, capacity);
+        fault_(message);
+        return RxResult::Fault;
+    }
+    if (!mem_write_) {
+        fault_("nvnet: RX buffer DMA has no guest-memory writer");
+        return RxResult::Fault;
+    }
+
+    set_dma_idle(false);
+    if (size != 0 && !mem_write_(descriptor.buffer_address, data, size)) {
+        char message[96];
+        std::snprintf(message, sizeof(message),
+                      "nvnet: RX buffer DMA write failed at 0x%08x",
+                      descriptor.buffer_address);
+        fault_(message);
+        set_dma_idle(true);
+        return RxResult::Fault;
+    }
+
+    descriptor.length = static_cast<uint16_t>(size);
+    descriptor.flags = kRxBit4 | kRxDescriptorValid;
+    if (!store_descriptor(descriptor_address, descriptor)) {
+        set_dma_idle(true);
+        return RxResult::Fault;
+    }
+
+    ++rx_descriptors_;
+    ++rx_packets_;
+    rx_bytes_ += size;
+
+    const uint32_t base = read_reg(kRxRingAddress);
+    const uint32_t count = ((read_reg(kRingSize) >> 16) & 0xffffu) + 1u;
+    const uint64_t end = static_cast<uint64_t>(base) +
+                         static_cast<uint64_t>(count) * sizeof(RingDescriptor);
+    const uint64_t next64 =
+        static_cast<uint64_t>(descriptor_address) + sizeof(RingDescriptor);
+    write_reg(kRxNextDesc,
+              next64 >= end ? base : static_cast<uint32_t>(next64));
+
+    set_dma_idle(true);
+    write_reg(kIrqStatus, read_reg(kIrqStatus) | kIrqRx);
+    update_irq();
+    return RxResult::Accepted;
 }
 
 void NvNet::set_dma_idle(bool idle) {

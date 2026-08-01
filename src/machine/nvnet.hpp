@@ -2,10 +2,10 @@
 //
 // This models the NVNet register file needed by the retail kernel and dashboard:
 // interrupt aggregation, descriptor-ring reset, synchronous MII/MDIO transactions against
-// the integrated PHY at address 1, and transmit descriptor DMA. The PHY resets with link and
-// autonegotiation complete, matching xemu's boot witness. When no host packet callback is
-// attached, completed TX packets are explicitly counted and discarded, matching a QEMU NIC
-// queue with no connected backend; receive DMA is left for the first exercised RX boundary.
+// the integrated PHY at address 1, and transmit/receive descriptor DMA. The PHY resets with
+// link and autonegotiation complete, matching xemu's boot witness. Completed TX packets are
+// explicitly counted even without a host sink; receive_packet() is the bounded ingress
+// boundary used by an optional host Ethernet transport.
 #pragma once
 
 #include <array>
@@ -22,6 +22,14 @@ namespace xlle {
 
 class NvNet : public MmioDevice {
 public:
+    enum class RxResult {
+        Accepted,
+        Filtered,
+        NotReady,
+        Oversized,
+        Fault,
+    };
+
     static constexpr uint32_t kBase = 0xfef00000u;
     // Unicorn requires page-sized MMIO mappings. Hardware decodes only the first 0x400
     // bytes; accesses in the page padding are rejected by valid_access().
@@ -49,6 +57,8 @@ public:
     void set_packet_sink(std::function<void(const uint8_t*, size_t)> fn) {
         packet_sink_ = std::move(fn);
     }
+    bool rx_ready();
+    RxResult receive_packet(const uint8_t* data, size_t size);
     void set_link(bool up);
 
     uint64_t mdio_reads() const { return mdio_reads_; }
@@ -57,10 +67,20 @@ public:
     uint64_t tx_descriptors() const { return tx_descriptors_; }
     uint64_t tx_packets() const { return tx_packets_; }
     uint64_t tx_bytes() const { return tx_bytes_; }
+    uint64_t rx_offers() const { return rx_offers_; }
+    uint64_t rx_descriptors() const { return rx_descriptors_; }
+    uint64_t rx_packets() const { return rx_packets_; }
+    uint64_t rx_bytes() const { return rx_bytes_; }
+    uint64_t rx_filtered() const { return rx_filtered_; }
+    uint64_t rx_oversized() const { return rx_oversized_; }
+    uint64_t rx_not_ready() const { return rx_not_ready_; }
     bool link_up() const;
     uint32_t irq_status() const;
     uint32_t irq_mask() const;
     uint32_t tx_rx_control() const;
+    uint32_t receiver_control() const { return read_reg(kReceiverControl); }
+    uint32_t rx_current_descriptor() const { return read_reg(kRxCurrentDesc); }
+    uint32_t rx_next_descriptor() const { return read_reg(kRxNextDesc); }
 
 private:
     static constexpr uint32_t kIrqStatus = 0x000;
@@ -82,7 +102,18 @@ private:
 
     static constexpr uint32_t kIrqMiiEvent = 0x40;
     static constexpr uint32_t kIrqTx = 0x10;
+    static constexpr uint32_t kIrqRx = 0x02;
     static constexpr uint32_t kTxStart = 0x01;
+    static constexpr uint32_t kReceiverControl = 0x094;
+    static constexpr uint32_t kRxStart = 0x01;
+    static constexpr uint32_t kPacketFilter = 0x08c;
+    static constexpr uint32_t kPacketFilterMyAddress = 0x20;
+    static constexpr uint32_t kMacAddressA = 0x0a8;
+    static constexpr uint32_t kMacAddressB = 0x0ac;
+    static constexpr uint32_t kMulticastAddressA = 0x0b0;
+    static constexpr uint32_t kMulticastAddressB = 0x0b4;
+    static constexpr uint32_t kMulticastMaskA = 0x0b8;
+    static constexpr uint32_t kMulticastMaskB = 0x0bc;
     static constexpr uint32_t kControlKick = 0x01;
     static constexpr uint32_t kControlClearIrq = 0x02;
     static constexpr uint32_t kControlDmaDisable = 0x04;
@@ -100,7 +131,11 @@ private:
     static constexpr uint16_t kTxUnderflow = 1u << 13;
     static constexpr uint16_t kTxError = 1u << 14;
     static constexpr uint16_t kTxValid = 1u << 15;
+    static constexpr uint16_t kRxDescriptorValid = 1u << 0;
+    static constexpr uint16_t kRxBit4 = 1u << 4;
+    static constexpr uint16_t kRxAvailable = 1u << 15;
     static constexpr size_t kTxBufferSize = 1500 + 128;
+    static constexpr size_t kRxBufferSize = 1500 + 128;
 
     struct RingDescriptor {
         uint32_t buffer_address;
@@ -119,6 +154,8 @@ private:
     bool load_descriptor(uint32_t address, RingDescriptor& descriptor);
     bool store_descriptor(uint32_t address, const RingDescriptor& descriptor);
     bool next_tx_descriptor(uint32_t& address);
+    bool next_rx_descriptor(uint32_t& address);
+    bool receive_filter(const uint8_t* data, size_t size) const;
     void set_dma_idle(bool idle);
     void mdio_transaction();
     void update_irq();
@@ -140,6 +177,13 @@ private:
     uint64_t tx_descriptors_ = 0;
     uint64_t tx_packets_ = 0;
     uint64_t tx_bytes_ = 0;
+    uint64_t rx_offers_ = 0;
+    uint64_t rx_descriptors_ = 0;
+    uint64_t rx_packets_ = 0;
+    uint64_t rx_bytes_ = 0;
+    uint64_t rx_filtered_ = 0;
+    uint64_t rx_oversized_ = 0;
+    uint64_t rx_not_ready_ = 0;
 };
 
 }  // namespace xlle

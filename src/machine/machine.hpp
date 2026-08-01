@@ -56,6 +56,9 @@ public:
     void on_io_event(std::function<void(const IoEvent&)> cb) { io_event_cb_ = std::move(cb); }
     // Observability: fired for every serviced MMIO access (MemEvent-shaped; write flag reused).
     void on_mmio_event(std::function<void(const MemEvent&)> cb) { mmio_event_cb_ = std::move(cb); }
+    // Optional host-service callback, paced at 1 kHz of guest time between CPU chunks.
+    // Used by nonblocking transports that must only touch guest memory on the emulation thread.
+    void on_host_poll(std::function<void()> cb) { host_poll_cb_ = std::move(cb); }
     PciHost* pci() { return pci_; }
     IdeController* ide() { return ide_; }
     Nv2a* nv2a() { return nv2a_; }
@@ -97,12 +100,14 @@ private:
     Ohci* ohci1_ = nullptr;
     std::function<void(const IoEvent&)> io_event_cb_;
     std::function<void(const MemEvent&)> mmio_event_cb_;
+    std::function<void()> host_poll_cb_;
     uint64_t io_seq_ = 0;
     uint64_t mmio_seq_ = 0;
     uint64_t total_insns_ = 0;  // retired-instruction clock feeding the PIT time base
     uint64_t injected_ = 0;     // external interrupts actually delivered to the guest
     uint64_t irq0_pulses_ = 0;  // PIT channel-0 period boundaries reached
     uint64_t pending_boundaries_ = 0;  // chunk boundaries with an unmasked IRQ pending
+    uint64_t host_poll_millisecond_ = UINT64_MAX;
 
     // Guest CPU clock estimate (Hz) mapping retired instructions -> PIT ticks. The Xbox CPU is
     // 733.33 MHz; combined with ~1 IPC this sets the tick cadence (calibratable).

@@ -321,6 +321,11 @@ uint64_t XboxMachine::run(uint32_t start, uint64_t max, std::string& err) {
     uint32_t eip = start;
     uint64_t done = 0;
     while (done < max) {
+        const uint64_t guest_millisecond = total_insns_ * 1000 / kCpuHz;
+        if (host_poll_cb_ && guest_millisecond != host_poll_millisecond_) {
+            host_poll_millisecond_ = guest_millisecond;
+            host_poll_cb_();
+        }
         uint64_t chunk = std::min(kChunk, max - done);
         // Arm the floor to stop as soon as IF opens if an IRQ is already waiting (so we hit the
         // guest's brief sti window). Otherwise the chunk runs to completion.

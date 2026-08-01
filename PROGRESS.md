@@ -36,8 +36,8 @@ harvested from xemu, silicon-corrected against a live console. GPL-2.
   untextured swizzled radial-combiner pass, and both witnessed indexed 256x256 textured
   A8R8G8B8/Z24S8 passes, plus the inline path's pitch A8R8G8B8 projected-texture
   additive-blend pass.
-- **Immediate burn-down path:** add NVNet RX and external transport → census and execute
-  the remaining low-frequency draw states → plumb host input into the landed XID controller.
+- **Immediate burn-down path:** census and execute the remaining low-frequency draw states
+  → plumb host input into the landed XID controller → drive end-to-end dashboard navigation.
 - **Not started:** A5 end-to-end retail-dashboard navigation and Arc 2 game work.
 
 ## Where the boot stands RIGHT NOW
@@ -171,6 +171,16 @@ dependency chain peeled this session is:
     an 8B replay remains fault-free with the same counts and all prior raster/scanout hashes
     unchanged. This dashboard boot window does not yet poll endpoint 2; host input plumbing
     remains.
+25. NVNet receive DMA and external packet transport → **fixed through retail ingress**.
+    RX checks the enabled/link/DMA gates, applies the witnessed broadcast/multicast/MAC
+    filter, consumes one AVAIL descriptor per frame, bounds and writes the guest buffer,
+    stores exact length plus flags `0x0011`, advances/wraps the high-half-sized RX ring,
+    restores IDLE, and raises RX IRQ `0x02`. An opt-in nonblocking UDP tunnel carries one
+    complete Ethernet frame per datagram and honors guest backpressure at a 1 kHz guest-time
+    poll. Focused coverage proves DMA, filtering, drops, wrap, IRQ, and a loopback datagram.
+    A UDP-backed 6.4B replay admits a queued 42-byte broadcast ARP frame through the retail
+    driver's ring (`RX offer/desc/pkt/bytes=1/1/1/42`), clears the IRQ through the guest,
+    reaches budget fault-free, and preserves every prior raster/scanout hash.
 
 ## How to build & run
 
@@ -190,6 +200,11 @@ cd build
            --eeprom ../../machine/eeprom.bin \
            --max-insns 500000000
 ```
+
+External Ethernet is opt-in. Add
+`--net-udp-bind <local-port> --net-udp-peer <host> <peer-port>` to carry one complete
+Ethernet frame per UDP datagram. This is a raw layer-2 tunnel, not NAT or an IP shim; pair
+it with another tunnel endpoint or a bridge that preserves Ethernet frames.
 
 500M insns takes roughly 50–55 seconds with the landed radial and textured software raster
 paths. The run
@@ -221,9 +236,10 @@ Deliberate documented stand-ins currently in place (fine for boot, replaced late
   XID descriptors, injectable input reports, and rumble output work. The retail dashboard
   enumerates and configures it; host gamepad mapping and an observed retail endpoint-2 poll
   remain. OHCI1 remains empty.
-- NVNet implements the register/PHY/MDIO/link/IRQ floor and TX descriptor engine. With no
-  host callback, transmitted packets are explicitly counted and discarded. RX descriptor
-  DMA and external packet transport remain.
+- NVNet implements the register/PHY/MDIO/link/IRQ floor plus TX and RX descriptor engines.
+  An opt-in nonblocking UDP layer-2 tunnel provides external packet transport; without it,
+  transmitted packets are explicitly counted and discarded. Higher-level NAT/bridging is
+  intentionally outside the device model.
 - PIT tick cadence approximated from retired instructions (1 IPC assumption).
 
 ## Hardware oracle (live console)
@@ -266,12 +282,12 @@ Driver: `python tools/xbox_agent.py --host 192.168.4.81 {ping|info|read|exec <fi
 
 ## Next steps (priority order)
 
-1. Indexed/inline Kelvin submission and every currently witnessed high-volume raster
-   profile are landed. Census and execute the remaining low-frequency draw states.
+1. Census and execute the remaining low-frequency Kelvin draw states; the indexed/inline
+   submission paths and every currently witnessed high-volume raster profile are landed.
 2. OHCI TD scheduling and the Xbox XID controller protocol are landed. Plumb host input
    mapping when dashboard navigation begins exercising endpoint 2.
-3. Add NVNet RX descriptor DMA and external packet transport when the guest or navigation
-   path requires them.
+3. Exercise the landed NVNet UDP tunnel against a useful peer/bridge as navigation requires;
+   RX descriptor DMA is proven through the retail driver.
 4. Longer term (A4 proper): extend the landed recorder into the required CP/method subset and
    software rasterizer (docs/ROADMAP.md).
 5. Keep validating modeled values against the live console; reconfirm xemu-sourced defaults.

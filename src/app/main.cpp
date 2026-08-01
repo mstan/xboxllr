@@ -5,15 +5,18 @@
 // observability skeleton (rings + JSONL + TCP debug server) to the Unicorn CPU floor and
 // runs the fixture spike, fault-stopping loudly on any mismatch.
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include "cpu/unicorn_floor.hpp"
+#include "host/ethernet_udp.hpp"
 #include "host/sdl_shell.hpp"
 #include "machine/aci.hpp"
 #include "machine/apu.hpp"
@@ -183,6 +186,9 @@ int main(int argc, char** argv) {
     const char* hdd = nullptr;
     const char* eeprom = nullptr;
     const char* frame_dump = nullptr;
+    const char* net_peer_host = nullptr;
+    uint64_t net_bind_port = 0;
+    uint64_t net_peer_port = 0;
     uint64_t max_insns = 128ull * 1000 * 1000;  // 2BL kernel LZX decompress needs tens of M
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--serve")) serve = true;
@@ -193,8 +199,25 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(argv[i], "--eeprom") && i + 1 < argc) eeprom = argv[++i];
         else if (!std::strcmp(argv[i], "--frame-dump") && i + 1 < argc)
             frame_dump = argv[++i];
+        else if (!std::strcmp(argv[i], "--net-udp-bind") && i + 1 < argc)
+            net_bind_port = std::strtoull(argv[++i], nullptr, 0);
+        else if (!std::strcmp(argv[i], "--net-udp-peer") && i + 2 < argc) {
+            net_peer_host = argv[++i];
+            net_peer_port = std::strtoull(argv[++i], nullptr, 0);
+        }
         else if (!std::strcmp(argv[i], "--max-insns") && i + 1 < argc)
             max_insns = std::strtoull(argv[++i], nullptr, 0);
+    }
+
+    const bool net_requested =
+        net_bind_port != 0 || net_peer_host != nullptr || net_peer_port != 0;
+    if (net_requested &&
+        (net_bind_port == 0 || net_bind_port > 65535 || !net_peer_host ||
+         net_peer_port == 0 || net_peer_port > 65535)) {
+        std::fprintf(stderr,
+                     "[net] use --net-udp-bind <1..65535> "
+                     "--net-udp-peer <host> <1..65535>\n");
+        return 1;
     }
 
     // --boot <flash.bin>: stand up the machine (RAM + flash) and smoke-test the map.
@@ -244,6 +267,48 @@ int main(int argc, char** argv) {
                 std::printf("[eeprom] attached %s (SMBus 0x54)\n", eeprom);
             } else {
                 std::printf("[eeprom] no --eeprom image: SMBus 0x54 reports absent\n");
+            }
+            std::unique_ptr<EthernetUdpTransport> net_transport;
+            std::array<uint8_t, 65536> net_frame{};
+            if (net_requested) {
+                net_transport = std::make_unique<EthernetUdpTransport>();
+                std::string net_error;
+                if (!net_transport->bind(static_cast<uint16_t>(net_bind_port), net_error) ||
+                    !net_transport->set_peer(
+                        net_peer_host, static_cast<uint16_t>(net_peer_port), net_error)) {
+                    std::fprintf(stderr, "[net] attach failed: %s\n", net_error.c_str());
+                    return 1;
+                }
+                std::printf("[net] UDP Ethernet bind=0.0.0.0:%u peer=%s:%u\n",
+                            static_cast<unsigned>(net_transport->local_port()),
+                            net_peer_host, static_cast<unsigned>(net_peer_port));
+                mach.nvnet()->set_packet_sink(
+                    [&](const uint8_t* data, size_t size) {
+                        std::string error;
+                        if (!net_transport->send(data, size, error))
+                            mach.cpu().request_stop("NVNet UDP transport: " + error);
+                    });
+                mach.on_host_poll([&]() {
+                    // Leave queued datagrams in the host socket until the guest has an
+                    // enabled RX engine and an AVAIL descriptor, matching NIC backpressure.
+                    for (unsigned packet = 0; packet < 32; ++packet) {
+                        if (!mach.nvnet()->rx_ready()) break;
+                        std::string error;
+                        const int size =
+                            net_transport->receive(net_frame.data(), net_frame.size(), error);
+                        if (size < 0) {
+                            mach.cpu().request_stop("NVNet UDP transport: " + error);
+                            break;
+                        }
+                        if (size == 0) break;
+                        const auto result =
+                            mach.nvnet()->receive_packet(net_frame.data(),
+                                                         static_cast<size_t>(size));
+                        if (result == NvNet::RxResult::Fault ||
+                            result == NvNet::RxResult::NotReady)
+                            break;
+                    }
+                });
             }
             std::vector<IoEvent> io_log;
             uint64_t ide_io_count = 0;  // any access to 0x1F0-0x1F7 / 0x3F6 / bus-master ports
@@ -915,7 +980,10 @@ int main(int argc, char** argv) {
             if (mach.nvnet()) {
                 std::printf("[2bl] NVNet: link=%s MDIO rd/wr=%llu/%llu "
                             "TX kick/desc/pkt/bytes=%llu/%llu/%llu/%llu "
-                            "IRQ status/mask=%08x/%08x TXRX=%08x\n",
+                            "RX offer/desc/pkt/bytes=%llu/%llu/%llu/%llu "
+                            "drop filter/oversize/not-ready=%llu/%llu/%llu "
+                            "IRQ status/mask=%08x/%08x TXRX/RXCTL=%08x/%08x "
+                            "RX current/next=%08x/%08x\n",
                             mach.nvnet()->link_up() ? "up" : "down",
                             (unsigned long long)mach.nvnet()->mdio_reads(),
                             (unsigned long long)mach.nvnet()->mdio_writes(),
@@ -923,8 +991,26 @@ int main(int argc, char** argv) {
                             (unsigned long long)mach.nvnet()->tx_descriptors(),
                             (unsigned long long)mach.nvnet()->tx_packets(),
                             (unsigned long long)mach.nvnet()->tx_bytes(),
+                            (unsigned long long)mach.nvnet()->rx_offers(),
+                            (unsigned long long)mach.nvnet()->rx_descriptors(),
+                            (unsigned long long)mach.nvnet()->rx_packets(),
+                            (unsigned long long)mach.nvnet()->rx_bytes(),
+                            (unsigned long long)mach.nvnet()->rx_filtered(),
+                            (unsigned long long)mach.nvnet()->rx_oversized(),
+                            (unsigned long long)mach.nvnet()->rx_not_ready(),
                             mach.nvnet()->irq_status(), mach.nvnet()->irq_mask(),
-                            mach.nvnet()->tx_rx_control());
+                            mach.nvnet()->tx_rx_control(),
+                            mach.nvnet()->receiver_control(),
+                            mach.nvnet()->rx_current_descriptor(),
+                            mach.nvnet()->rx_next_descriptor());
+                if (net_transport) {
+                    std::printf("[2bl] NVNet UDP: tx pkt/bytes=%llu/%llu "
+                                "rx pkt/bytes=%llu/%llu\n",
+                                (unsigned long long)net_transport->tx_packets(),
+                                (unsigned long long)net_transport->tx_bytes(),
+                                (unsigned long long)net_transport->rx_packets(),
+                                (unsigned long long)net_transport->rx_bytes());
+                }
             }
             std::printf("[2bl] IDE: port accesses=%llu irqs=%llu sectors rd/wr=%llu/%llu "
                         "bm_base=0x%04x\n", (unsigned long long)ide_io_count,

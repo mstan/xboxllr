@@ -3,6 +3,38 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-01 — A4: NVNet receives external Ethernet through retail RX DMA
+
+NVNet now implements the xemu-witnessed receive lifecycle alongside its existing transmit
+engine. An offered frame must pass receiver-enable, DMA-enable, link, and descriptor-AVAIL
+gates. Broadcast/multicast/MAC filtering matches the pinned reference. One complete frame
+is bounded by the hardware allocation and descriptor capacity, copied into guest memory,
+completed with its exact byte count and flags `0x0011`, advanced/wrapped through the RX
+ring whose count occupies `RING_SIZE[31:16]`, and published through RX status `0x02` and
+IRQ4 while the shared DMA-IDLE bit tracks the transfer.
+
+The host boundary is an opt-in nonblocking UDP layer-2 tunnel: each datagram is exactly one
+Ethernet frame. `--net-udp-bind <port> --net-udp-peer <host> <port>` selects it; without
+those flags the prior deterministic headless behavior is unchanged. A guest-time 1 kHz
+poll leaves datagrams queued in the host socket until the retail driver enables RX and
+provides a descriptor, and performs all guest-memory DMA on the emulation thread. Focused
+coverage verifies two-descriptor completion/wrap, exact payload/length/flags, IDLE, RX IRQ
+assert/ack, no-buffer backpressure, MYADDR filtering, oversized drops, counters, and a real
+loopback UDP datagram. All nine direct tests pass.
+
+The normal 6.4B acceptance replay remains fault-free with no ingress and all prior hashes
+unchanged. A second 6.4B run queues a 42-byte broadcast ARP frame through the CLI tunnel;
+the real dashboard driver enables RX, consumes it through guest descriptor
+`0x03c83808`, and completes with `RX offer/desc/pkt/bytes=1/1/1/42`. Final RX IRQ status is
+clear under mask `0x5f`, receiver control remains enabled, stderr is empty, and the run
+reaches budget without fault. Depth, radial, indexed-textured, projected-textured,
+inline-color, transform, and final scanout hashes remain `9424b7ed8661f321`,
+`b57945aef12a9289`, `537c8e788aaf4e83`, `117e65d4ec81492a`,
+`6363f356e93c6124`, `2824162d794cc5de`, and `73feb194b7694383`.
+
+**Next:** census and execute the remaining low-frequency draw states, then plumb host input
+into the landed XID controller for end-to-end dashboard navigation.
+
 ## 2026-08-01 — A4: OHCI executes TDs and enumerates an Xbox Controller S
 
 OHCI now executes the guest's periodic, control, and bulk endpoint-descriptor lists instead

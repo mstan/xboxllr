@@ -57,6 +57,13 @@ if(WIN32)
   target_link_libraries(xlle_obs PUBLIC ws2_32)
 endif()
 
+# --- opt-in host Ethernet transport ---
+add_library(xlle_net STATIC src/host/ethernet_udp.cpp)
+target_include_directories(xlle_net PUBLIC ${XLLE_INCLUDES})
+if(WIN32)
+  target_link_libraries(xlle_net PUBLIC ws2_32)
+endif()
+
 # --- CPU floor (Unicorn-backed) ---
 add_library(xlle_cpu STATIC src/cpu/unicorn_floor.cpp)
 target_include_directories(xlle_cpu PUBLIC ${XLLE_INCLUDES})
@@ -94,7 +101,7 @@ endif()
 # --- A0 app ---
 add_executable(xlle src/app/main.cpp)
 target_include_directories(xlle PRIVATE ${XLLE_INCLUDES})
-target_link_libraries(xlle PRIVATE xlle_obs xlle_cpu xlle_machine xlle_spike xlle_host)
+target_link_libraries(xlle PRIVATE xlle_obs xlle_cpu xlle_machine xlle_spike xlle_host xlle_net)
 
 # Put SDL3.dll next to the exe so `xlle --window` runs without a manual PATH.
 if(XLLE_WITH_SDL)
@@ -136,6 +143,7 @@ add_test(NAME ohci COMMAND test_ohci)
 
 add_executable(test_nvnet tests/test_nvnet.cpp src/machine/nvnet.cpp)
 target_include_directories(test_nvnet PRIVATE ${XLLE_INCLUDES})
+target_link_libraries(test_nvnet PRIVATE xlle_net)
 add_test(NAME nvnet COMMAND test_nvnet)
 
 # The fixture spike is itself an acceptance test: all fixtures must pass (exit 0).
