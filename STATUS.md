@@ -3,6 +3,37 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-07-31 — A4: inline pitch/additive color pass executes
+
+The dashboard's witnessed inline color profile now writes its pitch A8R8G8B8 target. The
+PROJECT2D path perspective-divides interpolated texture coordinates, clamp-linearly samples
+a 256x256 swizzled A8R8G8B8 texture through DMA B, and multiplies texture RGBA by the
+dynamic c0 constant in the one-stage combiner. GEQUAL 1 performs the witnessed rounded
+alpha test; SRC_ALPHA/ONE ADD blends and saturates all four components into the destination.
+
+The full replay exposed two later variants beyond the 500M census. PROJECT2D ignores P, so
+the exact witnessed P-address change from WRAP to CLAMP_TO_EDGE has identical sampling
+semantics. The opaque-black border is likewise inert because U/V remain CLAMP_TO_EDGE.
+More importantly, depth changes from ALWAYS to LESS while the depth mask remains zero.
+That path now reads pitch Z24S8, applies strict LESS, and never writes either depth or
+stencil. Focused coverage verifies the exact blended pixel, zero-alpha rejection, both P
+encodings, both border encodings, read-only LESS pass/reject, and unchanged Z24S8. The
+expanded 64 KiB test pushbuffer remains bounded below all test surfaces. All nine direct
+tests pass.
+
+The 500M gate executes 29 inline-color batches and 32,349 writes with hash
+`9ea53af177470d97`. The full 6.4B acceptance run is fault-free: 113 batches rasterize 226
+front-facing triangles and 43,083,242 fragments, perform 39,818,347 texture samples, pass
+alpha 38,224,887 times, and commit 15,123,585 additive color writes with deterministic
+hash `6363f356e93c6124`. The depth, radial, indexed textured, projected textured, transform,
+and final scanout hashes remain `9424b7ed8661f321`, `b57945aef12a9289`,
+`537c8e788aaf4e83`, `117e65d4ec81492a`, `2824162d794cc5de`, and
+`73feb194b7694383`. The last inline write `0x0387fb78` is offscreen from final scanout
+`0x03c8c000`.
+
+**Next:** extend OHCI into TD execution and XID input, then add NVNet RX/external transport
+and census the remaining low-frequency draw states.
+
 ## 2026-07-31 — A4: inline-array vertices execute
 
 The dashboard's remaining `NV097_INLINE_ARRAY` submissions now enter the same transform

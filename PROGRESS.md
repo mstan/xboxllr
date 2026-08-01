@@ -34,10 +34,10 @@ harvested from xemu, silicon-corrected against a live console. GPL-2.
   indexed and inline vertices now traverse the same programmable/fixed transforms. The
   landed triangle profiles write the dashboard's pitch-Z16 depth prepass, dominant
   untextured swizzled radial-combiner pass, and both witnessed indexed 256x256 textured
-  A8R8G8B8/Z24S8 passes.
-- **Immediate burn-down path:** execute the inline path's pitch A8R8G8B8, one-texture,
-  additive-blend profile →
-  extend OHCI into TD execution and XID input → add NVNet RX and external transport.
+  A8R8G8B8/Z24S8 passes, plus the inline path's pitch A8R8G8B8 projected-texture
+  additive-blend pass.
+- **Immediate burn-down path:** extend OHCI into TD execution and XID input → add NVNet RX
+  and external transport → census and execute the remaining low-frequency draw states.
 - **Not started:** A5 end-to-end retail-dashboard navigation and Arc 2 game work.
 
 ## Where the boot stands RIGHT NOW
@@ -147,8 +147,19 @@ dependency chain peeled this session is:
     2,910 attribute decodes, bringing totals to 436,941 batches, 48,556,397 vertices, and
     45,998,077 triangles with position hash `2824162d794cc5de`. Existing raster hashes and
     final scanout are unchanged. The inline states expose the next profile: pitch
-    A8R8G8B8, one projected texture, source-alpha/ONE additive blending, ALWAYS depth, and
-    no depth writes.
+    A8R8G8B8, one projected texture, source-alpha/ONE additive blending, initially ALWAYS
+    depth, and no depth writes.
+23. inline pitch/additive color profile → **fixed through projected sampling, alpha,
+    blending, and read-only depth**. PROJECT2D-divided coordinates bilinearly sample a
+    256x256 swizzled A8R8G8B8 texture with clamped U/V, the one-stage combiner multiplies
+    texture RGBA by c0, GEQUAL 1 rejects zero alpha, and SRC_ALPHA/ONE ADD saturates into the
+    pitch target. The later dashboard state switches the unused P address mode, supplies an
+    inert opaque border, and changes depth from ALWAYS to read-only Z24S8 LESS; both pass and
+    reject preserve depth and stencil. At 6.4B, 113 batches rasterize 226 triangles and
+    43,083,242 fragments, perform 39,818,347 texture samples, pass alpha 38,224,887 times,
+    and commit 15,123,585 color-only writes with hash `6363f356e93c6124`. Prior raster,
+    transform, and final scanout hashes remain unchanged; the last inline target
+    `0x0387fb78` is still offscreen from final scanout `0x03c8c000`.
 
 ## How to build & run
 

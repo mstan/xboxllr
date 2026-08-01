@@ -69,7 +69,7 @@ int main() {
     // CACHE1's pusher DMA object maps zero-based GET/PUT offsets onto the pushbuffer at
     // physical 0x2000. This is distinct from the semaphore DMA object above.
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700180, 4, 0x0000003D);
-    gpu.mmio_write(xlle::Nv2a::kBase + 0x700184, 4, 0x00000FFF);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700184, 4, 0x0000FFFF);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700188, 4, 0x00002000);
 
     uint32_t pb = 0x2000;
@@ -875,6 +875,161 @@ int main() {
     CHECK(gpu.projected_color_triangles() == 3);
     CHECK(gpu.projected_color_writes() > projected_writes_before_inline);
     CHECK(get32(ram, 0x20000 + textured_inside) == 0xFF0F3F07u);
+
+    // Inline dashboard geometry uses a distinct linear color profile:
+    // PROJECT2D texture * c0, alpha GEQUAL 1, then SRC_ALPHA/ONE ADD.
+    // The ALWAYS depth state must neither read nor write the zeta plane.
+    const float inline_color_positions[] = {
+        10.0f, 10.0f, 100.0f, 1.0f,
+        50.0f, 10.0f, 100.0f, 1.0f,
+        10.0f, 50.0f, 100.0f, 1.0f,
+    };
+    const float inline_color_texcoords[] = {
+        1.0f / 256.0f, 1.0f / 256.0f, 0.0f, 1.0f,
+        1.0f / 256.0f, 1.0f / 256.0f, 0.0f, 1.0f,
+        1.0f / 256.0f, 1.0f / 256.0f, 0.0f, 1.0f,
+    };
+    for (uint32_t offset = 0; offset < 64 * 64 * 4; offset += 4)
+        put32(ram, 0x20000 + offset, 0x10203040);
+    std::memset(ram.data() + 0xC0000, 0, 256 * 256 * 4);
+    put_rgb_texture(0xC0000, 256, 256, 0, 0, 0x80808080);
+    put_rgb_texture(0xC0000, 256, 256, 1, 0, 0x80808080);
+    put_rgb_texture(0xC0000, 256, 256, 0, 1, 0x80808080);
+    put_rgb_texture(0xC0000, 256, 256, 1, 1, 0x80808080);
+    const uint32_t zeta_before_inline_color =
+        get32(ram, 0x60000 + 20 * 256 + 20 * 4);
+
+    emit(0x0200, 0x00400000);
+    emit(0x0204, 0x00400000);
+    emit(0x0208, 0x00000128);
+    emit(0x020C, 0x01000100);
+    emit(0x0210, 0x00020000);
+    emit(0x02C0, 0x003F0000);
+    emit(0x02E0, 0x003F0000);
+    emit(0x0300, 1);
+    emit(0x0304, 1);
+    emit(0x0308, 1);
+    emit(0x030C, 1);
+    emit(0x033C, 0x0206);
+    emit(0x0340, 1);
+    emit(0x0344, 0x0302);
+    emit(0x0348, 1);
+    emit(0x0350, 0x8006);
+    emit(0x0354, 0x0207);
+    emit(0x0358, 0x01010101);
+    emit(0x035C, 0);
+    emit(0x0394, 0);
+    emit(0x0398, 0x4B7FFFFF);
+    emit(0x1D78, 1);
+    emit(0x1B00, 0x000C0000);
+    emit(0x1B04, 0x0888062A);
+    emit(0x1B08, 0x00010303);
+    emit(0x1B0C, 0x4003FFC0);
+    emit(0x1B10, 0x14000000);
+    emit(0x1B14, 0x02022000);
+    emit(0x1B20, 0);
+    emit(0x1B24, 0);
+    emit(0x1B4C, 0);
+    emit(0x1B8C, 0);
+    emit(0x1BCC, 0);
+    emit(0x1E70, 0x00000001);
+    emit(0x1E78, 0x00210000);
+    emit(0x1E60, 0x00000001);
+    emit(0x0AC0, 0x01080000);
+    emit(0x0260, 0x11180000);
+    emit(0x1E40, 0x00000C00);
+    emit(0x0AA0, 0x00000C00);
+    emit(0x0A60, 0x80808080);
+    emit(0x0A80, 0x80808080);
+    emit(0x0288, 0x0000000C);
+    emit(0x028C, 0x00001C80);
+    emit(0x1E20, 0);
+    emit(0x1E24, 0);
+
+    std::vector<uint32_t> inline_color_words(
+        3 * kInlineVertexBytes / sizeof(uint32_t), 0);
+    auto* inline_color_bytes =
+        reinterpret_cast<uint8_t*>(inline_color_words.data());
+    for (size_t vertex = 0; vertex < 3; ++vertex) {
+        const size_t offset = vertex * kInlineVertexBytes;
+        std::memcpy(inline_color_bytes + offset,
+                    inline_color_positions + vertex * 4, 4 * sizeof(float));
+        std::memcpy(inline_color_bytes + offset + 16,
+                    &textured_colors[vertex], sizeof(uint32_t));
+        const std::array<float, 4> inline_specular{{0, 0, 0, 1}};
+        std::memcpy(inline_color_bytes + offset + 20,
+                    inline_specular.data(), 4 * sizeof(float));
+        std::memcpy(inline_color_bytes + offset + 36,
+                    inline_color_texcoords + vertex * 4,
+                    4 * sizeof(float));
+        std::memcpy(inline_color_bytes + offset + 52,
+                    texture1_coords + vertex * 4, 4 * sizeof(float));
+        std::memcpy(inline_color_bytes + offset + 68,
+                    texture2_coords + vertex * 4, 4 * sizeof(float));
+    }
+    emit(0x17FC, 5);
+    for (uint32_t word : inline_color_words) emit(0x1818, word);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.inline_color_batches() == 1);
+    CHECK(gpu.inline_color_triangles() == 1);
+    CHECK(gpu.inline_color_fragments() > 0);
+    CHECK(gpu.inline_texture_samples() == gpu.inline_color_fragments());
+    CHECK(gpu.inline_color_alpha_passes() == gpu.inline_color_writes());
+    CHECK(gpu.inline_color_writes() > 0);
+    CHECK(get32(ram, 0x20000 + 20 * 256 + 20 * 4) == 0x20304050u);
+    CHECK(get32(ram, 0x20000 + 5 * 256 + 5 * 4) == 0x10203040u);
+    CHECK(get32(ram, 0x60000 + 20 * 256 + 20 * 4) ==
+          zeta_before_inline_color);
+    CHECK(gpu.last_inline_raster_address() >= 0x20000);
+    CHECK(gpu.last_inline_raster_address() < 0x24000);
+    CHECK(gpu.inline_color_output_hash() != 1469598103934665603ull);
+
+    const uint64_t inline_color_writes = gpu.inline_color_writes();
+    emit(0x1B08, 0x00030303);  // later dashboard variant: unused P clamps
+    emit(0x0A60, 0x00808080);  // zero final alpha: fail GEQUAL 1
+    emit(0x0A80, 0x00808080);
+    emit(0x17FC, 5);
+    for (uint32_t word : inline_color_words) emit(0x1818, word);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.inline_color_batches() == 2);
+    CHECK(gpu.inline_color_writes() == inline_color_writes);
+    CHECK(get32(ram, 0x20000 + 20 * 256 + 20 * 4) == 0x20304050u);
+
+    // A later inline pass enables read-only Z24S8 LESS testing. Passing and
+    // rejected fragments must leave both depth and stencil untouched.
+    for (uint32_t offset = 0; offset < 64 * 64 * 4; offset += 4)
+        put32(ram, 0x60000 + offset, (200u << 8) | 0x5Au);
+    emit(0x0A60, 0x80808080);
+    emit(0x0A80, 0x80808080);
+    emit(0x0354, 0x0202);
+    emit(0x1B24, 0xFF000000);  // inert with U/V CLAMP_TO_EDGE
+    emit(0x17FC, 5);
+    for (uint32_t word : inline_color_words) emit(0x1818, word);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.inline_color_batches() == 3);
+    CHECK(get32(ram, 0x20000 + 20 * 256 + 20 * 4) == 0x30405060u);
+    CHECK(get32(ram, 0x60000 + 20 * 256 + 20 * 4) ==
+          ((200u << 8) | 0x5Au));
+
+    for (uint32_t offset = 0; offset < 64 * 64 * 4; offset += 4)
+        put32(ram, 0x60000 + offset, (50u << 8) | 0x5Au);
+    const uint64_t inline_depth_reject_writes = gpu.inline_color_writes();
+    emit(0x17FC, 5);
+    for (uint32_t word : inline_color_words) emit(0x1818, word);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.inline_color_batches() == 4);
+    CHECK(gpu.inline_color_writes() == inline_depth_reject_writes);
+    CHECK(get32(ram, 0x20000 + 20 * 256 + 20 * 4) == 0x30405060u);
+    CHECK(get32(ram, 0x60000 + 20 * 256 + 20 * 4) ==
+          ((50u << 8) | 0x5Au));
 
     // AvSetDisplayMode's scanout path: VGA CRTC pitch/depth, PRAMDAC dimensions/format,
     // and PCRTC_START resolve unified-RAM RGB565 into deterministic RGBA output.

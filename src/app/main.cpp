@@ -622,6 +622,17 @@ int main(int argc, char** argv) {
                             (unsigned long long)mach.nv2a()->projected_texture_samples(),
                             mach.nv2a()->last_projected_raster_address(),
                             (unsigned long long)mach.nv2a()->projected_color_output_hash());
+                std::printf("[2bl] NV2A inline-color: batches/tri/frags/alpha/"
+                            "writes/samples=%llu/%llu/%llu/%llu/%llu/%llu "
+                            "last=%08x hash=%016llx\n",
+                            (unsigned long long)mach.nv2a()->inline_color_batches(),
+                            (unsigned long long)mach.nv2a()->inline_color_triangles(),
+                            (unsigned long long)mach.nv2a()->inline_color_fragments(),
+                            (unsigned long long)mach.nv2a()->inline_color_alpha_passes(),
+                            (unsigned long long)mach.nv2a()->inline_color_writes(),
+                            (unsigned long long)mach.nv2a()->inline_texture_samples(),
+                            mach.nv2a()->last_inline_raster_address(),
+                            (unsigned long long)mach.nv2a()->inline_color_output_hash());
                 std::printf("[2bl] NV2A vertices: batches=%llu submitted=%llu "
                             "attr-fetches=%llu primitives=%llu triangles=%llu max-index=%u\n",
                             (unsigned long long)mach.nv2a()->vertex_batches(),
