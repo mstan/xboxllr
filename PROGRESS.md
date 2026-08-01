@@ -32,10 +32,10 @@ harvested from xemu, silicon-corrected against a live console. GPL-2.
   color/depth/stencil clears, indexed vertex DMA/fetch/assembly, and programmable vertex
   shaders plus the exercised fixed-function transform subset now execute. The first
   triangle profiles write the dashboard's pitch-Z16 depth prepass, dominant untextured
-  swizzled radial-combiner pass, and the next high-volume 256x256 textured
-  A8R8G8B8/Z24S8 pass.
-- **Immediate burn-down path:** cover the remaining lower-volume textured profiles
-  (starting with shader `0x10c61`) and `INLINE_ARRAY` →
+  swizzled radial-combiner pass, and both witnessed indexed 256x256 textured
+  A8R8G8B8/Z24S8 passes.
+- **Immediate burn-down path:** execute the 485 sparse `INLINE_ARRAY` batches and census
+  any remaining low-frequency draw profiles →
   extend OHCI into TD execution and XID input → add NVNet RX and external transport.
 - **Not started:** A5 end-to-end retail-dashboard navigation and Arc 2 game work.
 
@@ -126,11 +126,18 @@ dependency chain peeled this session is:
     shadow compare, and final factors are retained in the draw census. Shader `0x10c60`
     disables stage 0, cube-remaps stages 1/2 into one 64x64 or 128x128 swizzled
     X8R8G8B8 image, samples them bilinearly with clamp-to-edge, and forces stage 3 to zero
-    through shadow-NEVER. At 6.4B, all 2,394 witnessed batches rasterize 30,198 triangles,
-    perform 3,494,536 samples, and commit 1,747,268 paired color/Z24 writes with hash
-    `5056d6d133b67168`. Earlier depth/radial hashes and final scanout hash remain unchanged;
-    the last textured target `0x0299f394` is also offscreen. The lower-volume `0x10c61`
-    profile and inline arrays are now the rendering frontier.
+    through shadow-NEVER. With the interleaved projected sibling also executing, all 2,394
+    witnessed batches rasterize 30,198 triangles, perform 1,434,732 samples, and commit
+    717,366 paired color/Z24 writes with hash `537c8e788aaf4e83`. This supersedes the
+    standalone checkpoint: the sibling's earlier depth writes correctly reject later
+    fragments, and the shared combiner now clamps its weighted intermediate exactly.
+21. lower-volume projected textured profile → **fixed through three bilinear samples and
+    the seven-stage dot-product combiner**. Shader `0x10c61` PROJECT2D-divides stage 0 by
+    interpolated W and repeat-samples a 128x128 swizzled A8R8G8B8 image; stages 1/2 retain
+    the cube-remapped shared X8 image and stage 3 remains shadow-NEVER. At 6.4B, 204 batches
+    rasterize 10,368 triangles, perform 2,044,719 samples, and commit 681,573 paired writes
+    with hash `117e65d4ec81492a`. Earlier depth/radial/transform hashes remain unchanged;
+    targets `0x0299f394` and `0x029a2980` are offscreen and final scanout stays the clear.
 
 ## How to build & run
 
@@ -170,9 +177,9 @@ Deliberate documented stand-ins currently in place (fine for boot, replaced late
   still have no CP/raster side effects. Guest-programmed framebuffer selection, host
   readout/presentation, Kelvin pitch-surface clears, and indexed vertex fetch/primitive
   assembly plus programmable and exercised fixed-function transforms work. The witnessed
-  pitch-Z16 depth-only, untextured swizzled radial-color, and high-volume shader-`0x10c60`
-  textured triangle profiles rasterize; other color/textured draws and inline arrays do
-  not yet.
+  pitch-Z16 depth-only, untextured swizzled radial-color, and both witnessed indexed
+  shader-`0x10c60`/`0x10c61` textured triangle profiles rasterize; other low-frequency
+  draws and inline arrays do not yet.
 - APU has the load-bearing voice-list, VOICE_OFF, timed idle-voice FE trap, notifier, and IRQ
   lifecycle, but still no DSP/audio synthesis. ACI advances real PCM descriptors and IRQs
   headlessly but produces no host audio.
@@ -223,10 +230,9 @@ Driver: `python tools/xbox_agent.py --host 192.168.4.81 {ping|info|read|exec <fi
 
 ## Next steps (priority order)
 
-1. The indexed Kelvin paths, pitch-Z16 depth prepass, dominant radial color, and
-   high-volume shader-`0x10c60` textured pass are landed. Next execute the lower-volume
-   shader-`0x10c61` profile, then cover the remaining textured passes and sparse
-   `INLINE_ARRAY` path.
+1. The indexed Kelvin paths, pitch-Z16 depth prepass, dominant radial color, and both
+   witnessed shader-`0x10c60`/`0x10c61` textured passes are landed. Next execute the
+   485 sparse `INLINE_ARRAY` batches and census any remaining low-frequency draw profiles.
 2. Extend OHCI: control/bulk TD execution first, then the Xbox XID controller protocol and
    host input mapping.
 3. Add NVNet RX descriptor DMA and external packet transport when the guest or navigation

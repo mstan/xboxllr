@@ -610,6 +610,18 @@ int main(int argc, char** argv) {
                             (unsigned long long)mach.nv2a()->texture_samples(),
                             mach.nv2a()->last_textured_raster_address(),
                             (unsigned long long)mach.nv2a()->textured_color_output_hash());
+                std::printf("[2bl] NV2A projected-color: batches/tri/frags/pass/"
+                            "zwrite/cwrite/samples=%llu/%llu/%llu/%llu/%llu/"
+                            "%llu/%llu last=%08x hash=%016llx\n",
+                            (unsigned long long)mach.nv2a()->projected_color_batches(),
+                            (unsigned long long)mach.nv2a()->projected_color_triangles(),
+                            (unsigned long long)mach.nv2a()->projected_color_fragments(),
+                            (unsigned long long)mach.nv2a()->projected_color_depth_passes(),
+                            (unsigned long long)mach.nv2a()->projected_color_depth_writes(),
+                            (unsigned long long)mach.nv2a()->projected_color_writes(),
+                            (unsigned long long)mach.nv2a()->projected_texture_samples(),
+                            mach.nv2a()->last_projected_raster_address(),
+                            (unsigned long long)mach.nv2a()->projected_color_output_hash());
                 std::printf("[2bl] NV2A vertices: batches=%llu submitted=%llu "
                             "attr-fetches=%llu primitives=%llu triangles=%llu max-index=%u\n",
                             (unsigned long long)mach.nv2a()->vertex_batches(),

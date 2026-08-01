@@ -1054,6 +1054,7 @@ bool Nv2a::rasterize_witnessed_batch() {
         kPitchZ16Depth,
         kSwizzledRadialColor,
         kSwizzledTexturedColor,
+        kSwizzledProjectedColor,
     };
 
     const uint32_t enables = raster_state_[kRasterEnables];
@@ -1135,6 +1136,48 @@ bool Nv2a::rasterize_witnessed_batch() {
             raster_state_[kRasterCombinerFactor1_0 + stage] ==
                 textured_factor1[stage];
     }
+    const std::array<uint32_t, 7> projected_color_icw{{
+        0x4849484A, 0x0D0D0000, 0xCDCD0000, 0xCDCD0000,
+        0xCDCD0000, 0xC10CC20D, 0xC40520C1,
+    }};
+    const std::array<uint32_t, 7> projected_alpha_icw{{
+        0x5859585A, 0, 0, 0, 0, 0, 0,
+    }};
+    const std::array<uint32_t, 7> projected_color_ocw{{
+        0x000C30CD, 0x000000D0, 0x000000D0, 0x000000D0,
+        0x000000D0, 0x000005CD, 0x00000C00,
+    }};
+    const std::array<uint32_t, 7> projected_factor0{{
+        0, 0, 0, 0, 0, 0xFF072103, 0xFF000000,
+    }};
+    const std::array<uint32_t, 7> projected_factor1{{
+        0, 0, 0, 0, 0, 0xFF35FF1A, 0,
+    }};
+    bool projected_combiner =
+        raster_state_[kRasterTextureEnableMask] == 0xFu &&
+        raster_state_[kRasterShaderStageProgram] == 0x00010C61 &&
+        raster_state_[kRasterShaderOtherStageInput] == 0 &&
+        raster_state_[kRasterDotRgbMapping] == 0 &&
+        raster_state_[kRasterShadowDepthFunc] == 0 &&
+        raster_state_[kRasterCombinerControl] == 0x00011107 &&
+        raster_state_[kRasterCombinerSpecularFog0] == 0x0C0B000F &&
+        raster_state_[kRasterCombinerSpecularFog1] == 0x0C011180 &&
+        raster_state_[kRasterCombinerFinalFactor0] == 0xFF3F3F3F &&
+        raster_state_[kRasterCombinerFinalFactor1] == 0;
+    for (size_t stage = 0; stage < 7 && projected_combiner; ++stage) {
+        projected_combiner =
+            raster_state_[kRasterCombinerColorIcw0 + stage] ==
+                projected_color_icw[stage] &&
+            raster_state_[kRasterCombinerAlphaIcw0 + stage] ==
+                projected_alpha_icw[stage] &&
+            raster_state_[kRasterCombinerColorOcw0 + stage] ==
+                projected_color_ocw[stage] &&
+            raster_state_[kRasterCombinerAlphaOcw0 + stage] == 0 &&
+            raster_state_[kRasterCombinerFactor0_0 + stage] ==
+                projected_factor0[stage] &&
+            raster_state_[kRasterCombinerFactor1_0 + stage] ==
+                projected_factor1[stage];
+    }
 
     Profile profile = Profile::kNone;
     if (depth_only && surface_type == 1 && anti_aliasing == 0 &&
@@ -1145,6 +1188,8 @@ bool Nv2a::rasterize_witnessed_batch() {
         profile = Profile::kSwizzledRadialColor;
     } else if (textured_combiner) {
         profile = Profile::kSwizzledTexturedColor;
+    } else if (projected_combiner) {
+        profile = Profile::kSwizzledProjectedColor;
     } else {
         return true;
     }
@@ -1188,7 +1233,8 @@ bool Nv2a::rasterize_witnessed_batch() {
             raster_state_[kRasterAlphaFunc] == 0x0206 &&
             (raster_state_[kRasterAlphaRef] & 0xFFu) == 1;
         const bool textured_state =
-            profile == Profile::kSwizzledTexturedColor &&
+            (profile == Profile::kSwizzledTexturedColor ||
+             profile == Profile::kSwizzledProjectedColor) &&
             enables == 0x000Cu &&
             raster_state_[kRasterAlphaFunc] == 0x0207 &&
             (raster_state_[kRasterAlphaRef] & 0xFFu) == 0;
@@ -1303,7 +1349,14 @@ bool Nv2a::rasterize_witnessed_batch() {
     std::unique_ptr<SwizzleLookup> texture_swizzle;
     uint32_t texture_width = 0;
     uint32_t texture_height = 0;
-    if (profile == Profile::kSwizzledTexturedColor) {
+    std::vector<uint8_t> projected_texture_data;
+    std::unique_ptr<SwizzleLookup> projected_texture_swizzle;
+    uint32_t projected_texture_width = 0;
+    uint32_t projected_texture_height = 0;
+    const bool sampled_color_profile =
+        profile == Profile::kSwizzledTexturedColor ||
+        profile == Profile::kSwizzledProjectedColor;
+    if (sampled_color_profile) {
         const uint32_t format1 = raster_state_[kRasterTextureFormat0 + 1];
         const uint32_t format2 = raster_state_[kRasterTextureFormat0 + 2];
         const uint32_t offset1 = raster_state_[kRasterTextureOffset0 + 1];
@@ -1343,6 +1396,48 @@ bool Nv2a::rasterize_witnessed_batch() {
         }
         texture_swizzle =
             std::make_unique<SwizzleLookup>(texture_width, texture_height);
+
+        if (profile == Profile::kSwizzledProjectedColor) {
+            const uint32_t format0 =
+                raster_state_[kRasterTextureFormat0 + 0];
+            const uint32_t offset0 =
+                raster_state_[kRasterTextureOffset0 + 0];
+            const bool witnessed_projected_texture =
+                format0 == 0x0771062A &&
+                raster_state_[kRasterTextureAddress0 + 0] == 0x00010101 &&
+                raster_state_[kRasterTextureFilter0 + 0] == 0x02022000 &&
+                raster_state_[kRasterTextureControl0_0 + 0] == 0x4003FFF0 &&
+                raster_state_[kRasterTextureControl1_0 + 0] == 0x14000000 &&
+                raster_state_[kRasterTexturePalette0 + 0] == 0 &&
+                raster_state_[kRasterTextureBorderColor0 + 0] == 0;
+            if (!witnessed_projected_texture || (format0 & 3u) != 2u) {
+                fault_("NV2A projected-color stage-0 texture exceeds the witnessed subset");
+                return false;
+            }
+            projected_texture_width = 1u << ((format0 >> 20) & 0xFu);
+            projected_texture_height = 1u << ((format0 >> 24) & 0xFu);
+            const uint64_t projected_texture_bytes64 =
+                static_cast<uint64_t>(projected_texture_width) *
+                projected_texture_height * 4;
+            uint32_t projected_texture_address = 0;
+            if (projected_texture_bytes64 > SIZE_MAX ||
+                !resolve_surface(texture_dma_b_, texture_dma_b_bound_, offset0,
+                                 projected_texture_bytes64,
+                                 projected_texture_address, "projected texture")) {
+                return false;
+            }
+            projected_texture_data.resize(
+                static_cast<size_t>(projected_texture_bytes64));
+            if (!mem_read_ ||
+                !mem_read_(projected_texture_address,
+                           projected_texture_data.data(),
+                           projected_texture_data.size())) {
+                fault_("NV2A projected-color texture DMA read failed");
+                return false;
+            }
+            projected_texture_swizzle = std::make_unique<SwizzleLookup>(
+                projected_texture_width, projected_texture_height);
+        }
     }
 
     PagedRasterSurface depth_surface(
@@ -1372,8 +1467,10 @@ bool Nv2a::rasterize_witnessed_batch() {
             ++depth_raster_batches_;
         else if (profile == Profile::kSwizzledRadialColor)
             ++radial_color_batches_;
-        else
+        else if (profile == Profile::kSwizzledTexturedColor)
             ++textured_color_batches_;
+        else
+            ++projected_color_batches_;
         return true;
     }
 
@@ -1390,6 +1487,62 @@ bool Nv2a::rasterize_witnessed_batch() {
                     sizeof(polygon_bias));
     }
 
+    auto sample_texture =
+        [](const std::vector<uint8_t>& data,
+           const SwizzleLookup& swizzle,
+           uint32_t width, uint32_t height,
+           float u, float v, bool repeat,
+           std::array<float, 3>& color) {
+            if (!std::isfinite(u) || !std::isfinite(v)) return false;
+            if (repeat) {
+                u -= std::floor(u);
+                v -= std::floor(v);
+            } else {
+                u = std::clamp(u, 0.0f, 1.0f);
+                v = std::clamp(v, 0.0f, 1.0f);
+            }
+            const float texel_x = u * static_cast<float>(width) - 0.5f;
+            const float texel_y = v * static_cast<float>(height) - 0.5f;
+            const int32_t x0 = static_cast<int32_t>(std::floor(texel_x));
+            const int32_t y0 = static_cast<int32_t>(std::floor(texel_y));
+            const float fx = texel_x - static_cast<float>(x0);
+            const float fy = texel_y - static_cast<float>(y0);
+            auto coordinate = [repeat](int32_t value, uint32_t size) {
+                if (!repeat) {
+                    return static_cast<uint32_t>(std::clamp(
+                        value, 0, static_cast<int32_t>(size) - 1));
+                }
+                const int32_t signed_size = static_cast<int32_t>(size);
+                int32_t wrapped = value % signed_size;
+                if (wrapped < 0) wrapped += signed_size;
+                return static_cast<uint32_t>(wrapped);
+            };
+            auto texel = [&](int32_t x, int32_t y) {
+                const size_t offset =
+                    static_cast<size_t>(swizzle.index(
+                        coordinate(x, width), coordinate(y, height))) *
+                    sizeof(uint32_t);
+                uint32_t pixel = 0;
+                std::memcpy(&pixel, data.data() + offset, sizeof(pixel));
+                return std::array<float, 3>{{
+                    static_cast<float>((pixel >> 16) & 0xFFu) / 255.0f,
+                    static_cast<float>((pixel >> 8) & 0xFFu) / 255.0f,
+                    static_cast<float>(pixel & 0xFFu) / 255.0f,
+                }};
+            };
+            const auto c00 = texel(x0, y0);
+            const auto c10 = texel(x0 + 1, y0);
+            const auto c01 = texel(x0, y0 + 1);
+            const auto c11 = texel(x0 + 1, y0 + 1);
+            for (size_t component = 0; component < 3; ++component) {
+                const float top =
+                    c00[component] + (c10[component] - c00[component]) * fx;
+                const float bottom =
+                    c01[component] + (c11[component] - c01[component]) * fx;
+                color[component] = top + (bottom - top) * fy;
+            }
+            return true;
+        };
     auto sample_cube_texture =
         [&](const std::array<float, 3>& direction,
             std::array<float, 3>& color) {
@@ -1415,41 +1568,9 @@ bool Nv2a::rasterize_witnessed_batch() {
             if (!std::isfinite(divisor) || divisor == 0.0f) return false;
             u /= divisor;
             v /= divisor;
-            if (!std::isfinite(u) || !std::isfinite(v)) return false;
-
-            const float texel_x = u * static_cast<float>(texture_width) - 0.5f;
-            const float texel_y = v * static_cast<float>(texture_height) - 0.5f;
-            const int32_t x0 = static_cast<int32_t>(std::floor(texel_x));
-            const int32_t y0 = static_cast<int32_t>(std::floor(texel_y));
-            const float fx = texel_x - static_cast<float>(x0);
-            const float fy = texel_y - static_cast<float>(y0);
-            auto texel = [&](int32_t x, int32_t y) {
-                x = std::clamp(x, 0, static_cast<int32_t>(texture_width) - 1);
-                y = std::clamp(y, 0, static_cast<int32_t>(texture_height) - 1);
-                const size_t offset =
-                    static_cast<size_t>(texture_swizzle->index(
-                        static_cast<uint32_t>(x), static_cast<uint32_t>(y))) *
-                    sizeof(uint32_t);
-                uint32_t pixel = 0;
-                std::memcpy(&pixel, texture_data.data() + offset, sizeof(pixel));
-                return std::array<float, 3>{{
-                    static_cast<float>((pixel >> 16) & 0xFFu) / 255.0f,
-                    static_cast<float>((pixel >> 8) & 0xFFu) / 255.0f,
-                    static_cast<float>(pixel & 0xFFu) / 255.0f,
-                }};
-            };
-            const auto c00 = texel(x0, y0);
-            const auto c10 = texel(x0 + 1, y0);
-            const auto c01 = texel(x0, y0 + 1);
-            const auto c11 = texel(x0 + 1, y0 + 1);
-            for (size_t component = 0; component < 3; ++component) {
-                const float top =
-                    c00[component] + (c10[component] - c00[component]) * fx;
-                const float bottom =
-                    c01[component] + (c11[component] - c01[component]) * fx;
-                color[component] = top + (bottom - top) * fy;
-            }
-            return true;
+            return sample_texture(texture_data, *texture_swizzle,
+                                  texture_width, texture_height,
+                                  u, v, false, color);
         };
 
     bool raster_failed = false;
@@ -1491,8 +1612,10 @@ bool Nv2a::rasterize_witnessed_batch() {
                 ++rasterized_triangles_;
             else if (profile == Profile::kSwizzledRadialColor)
                 ++radial_color_triangles_;
-            else
+            else if (profile == Profile::kSwizzledTexturedColor)
                 ++textured_color_triangles_;
+            else
+                ++projected_color_triangles_;
             const int32_t tri_xmin = std::max<int32_t>(
                 static_cast<int32_t>(xmin),
                 static_cast<int32_t>(std::ceil(
@@ -1554,8 +1677,10 @@ bool Nv2a::rasterize_witnessed_batch() {
                         ++rasterized_fragments_;
                     else if (profile == Profile::kSwizzledRadialColor)
                         ++radial_color_fragments_;
-                    else
+                    else if (profile == Profile::kSwizzledTexturedColor)
                         ++textured_color_fragments_;
+                    else
+                        ++projected_color_fragments_;
                     float depth =
                         (static_cast<float>(w0) * a->position[2] +
                          static_cast<float>(w1) * b->position[2] +
@@ -1612,8 +1737,10 @@ bool Nv2a::rasterize_witnessed_batch() {
                     if (incoming > (stored_depth_stencil >> 8)) continue;
                     if (profile == Profile::kSwizzledRadialColor)
                         ++radial_color_depth_passes_;
-                    else
+                    else if (profile == Profile::kSwizzledTexturedColor)
                         ++textured_color_depth_passes_;
+                    else
+                        ++projected_color_depth_passes_;
 
                     const double lambda0 =
                         static_cast<double>(w0) / static_cast<double>(area);
@@ -1701,12 +1828,71 @@ bool Nv2a::rasterize_witnessed_batch() {
                             raster_failed = true;
                             return;
                         }
-                        texture_samples_ += 2;
-                        const float r0 = std::clamp(
-                            2.0f * texture1[2] - 1.0f, -1.0f, 1.0f);
-                        float r1 = std::max(std::clamp(
-                            2.0f * texture2[2] - 1.0f, -1.0f, 1.0f), 0.0f);
-                        for (size_t stage = 0; stage < 5; ++stage) r1 *= r1;
+                        float r0 = 0.0f;
+                        float r1 = 0.0f;
+                        if (profile == Profile::kSwizzledTexturedColor) {
+                            texture_samples_ += 2;
+                            r0 = std::clamp(
+                                2.0f * texture1[2] - 1.0f, -1.0f, 1.0f);
+                            r1 = std::max(std::clamp(
+                                2.0f * texture2[2] - 1.0f, -1.0f, 1.0f),
+                                0.0f);
+                            for (size_t stage = 0; stage < 5; ++stage)
+                                r1 *= r1;
+                        } else {
+                            std::array<float, 3> projected_coordinate{};
+                            for (size_t component : {size_t{0}, size_t{1},
+                                                     size_t{3}}) {
+                                const double t0 =
+                                    (q0 * a->texture[0][component] +
+                                     q1 * b->texture[0][component] +
+                                     q2 * c->texture[0][component]) / qsum;
+                                if (!std::isfinite(t0)) {
+                                    fault_("NV2A projected-color varying is non-finite");
+                                    raster_failed = true;
+                                    return;
+                                }
+                                projected_coordinate[
+                                    component == 3 ? 2 : component] =
+                                    static_cast<float>(t0);
+                            }
+                            if (projected_coordinate[2] == 0.0f) {
+                                fault_("NV2A projected-color texture W is zero");
+                                raster_failed = true;
+                                return;
+                            }
+                            std::array<float, 3> texture0{};
+                            if (!sample_texture(
+                                    projected_texture_data,
+                                    *projected_texture_swizzle,
+                                    projected_texture_width,
+                                    projected_texture_height,
+                                    projected_coordinate[0] /
+                                        projected_coordinate[2],
+                                    projected_coordinate[1] /
+                                        projected_coordinate[2],
+                                    true, texture0)) {
+                                fault_("NV2A projected-color stage-0 projection is invalid");
+                                raster_failed = true;
+                                return;
+                            }
+                            projected_texture_samples_ += 3;
+                            for (size_t component = 0; component < 3; ++component) {
+                                const float expanded0 =
+                                    2.0f * texture0[component] - 1.0f;
+                                const float expanded1 =
+                                    2.0f * texture1[component] - 1.0f;
+                                const float expanded2 =
+                                    2.0f * texture2[component] - 1.0f;
+                                r0 += expanded0 * expanded1;
+                                r1 += expanded0 * expanded2;
+                            }
+                            r0 = std::clamp(r0, -1.0f, 1.0f);
+                            r1 = std::max(std::clamp(r1, -1.0f, 1.0f),
+                                          0.0f);
+                            for (size_t stage = 0; stage < 4; ++stage)
+                                r1 *= r1;
+                        }
                         constexpr std::array<float, 3> kWeight0{{
                             7.0f / 255.0f, 33.0f / 255.0f, 3.0f / 255.0f,
                         }};
@@ -1715,9 +1901,10 @@ bool Nv2a::rasterize_witnessed_batch() {
                         }};
                         const float positive_r0 = std::max(r0, 0.0f);
                         for (size_t component = 0; component < 3; ++component) {
-                            const float weighted =
+                            const float weighted = std::clamp(
                                 kWeight0[component] * positive_r0 +
-                                kWeight1[component] * r1;
+                                kWeight1[component] * r1,
+                                -1.0f, 1.0f);
                             output[component] =
                                 diffuse[component] * std::max(weighted, 0.0f) *
                                 (63.0f / 255.0f);
@@ -1755,7 +1942,7 @@ bool Nv2a::rasterize_witnessed_batch() {
                             radial_color_output_hash_ ^= word;
                             radial_color_output_hash_ *= 1099511628211ull;
                         }
-                    } else {
+                    } else if (profile == Profile::kSwizzledTexturedColor) {
                         ++textured_color_writes_;
                         ++textured_color_depth_writes_;
                         last_textured_raster_address_ = color_pixel_address;
@@ -1764,6 +1951,16 @@ bool Nv2a::rasterize_witnessed_batch() {
                               depth_pixel_address, depth_stencil}) {
                             textured_color_output_hash_ ^= word;
                             textured_color_output_hash_ *= 1099511628211ull;
+                        }
+                    } else {
+                        ++projected_color_writes_;
+                        ++projected_color_depth_writes_;
+                        last_projected_raster_address_ = color_pixel_address;
+                        for (uint32_t word :
+                             {color_pixel_address, color,
+                              depth_pixel_address, depth_stencil}) {
+                            projected_color_output_hash_ ^= word;
+                            projected_color_output_hash_ *= 1099511628211ull;
                         }
                     }
                 }
@@ -1807,8 +2004,10 @@ bool Nv2a::rasterize_witnessed_batch() {
         ++depth_raster_batches_;
     else if (profile == Profile::kSwizzledRadialColor)
         ++radial_color_batches_;
-    else
+    else if (profile == Profile::kSwizzledTexturedColor)
         ++textured_color_batches_;
+    else
+        ++projected_color_batches_;
     return true;
 }
 

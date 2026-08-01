@@ -3,6 +3,38 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-07-31 — A4: projected textured sibling executes
+
+The lower-volume shader-`0x10c61` profile now executes through all three effective texture
+reads and its seven-stage register combiner. Stage 0 PROJECT2D-divides perspective-correct
+texture coordinates by their interpolated W, repeat-addresses a 128x128 swizzled
+A8R8G8B8 image, and filters bilinearly. Stages 1/2 retain the cube-to-2D remap and
+clamp-linear X8R8G8B8 sampling used by the high-volume sibling; stage 3 still returns zero
+through shadow-NEVER. The first combiner stage dots expanded stage-0 RGB against stages 1
+and 2, the positive second result is raised to the 16th power, and the shared weighted
+diffuse/final-factor tail produces A8R8G8B8 while LEQUAL updates Z24 and preserves stencil.
+
+Reading xemu's generated combiner code exposed one correction to the prior sibling: every
+written mux/sum destination clamps to signed [-1,1]. The shared weighted intermediate now
+does so before diffuse modulation. Focused coverage verifies projective W division, repeat
+wrapping above one, four-texel Morton/bilinear sampling in all three images, the dot-product
+and clamped weighted result, exact color/Z24 packing, stencil preservation, and farther
+depth rejection. All nine direct tests pass.
+
+The 500M census gate and full 6.4B acceptance run are fault-free. All 204 projected-profile
+batches rasterize 10,368 front-facing triangles, cover 11,300,410 fragments, perform
+2,044,719 samples, and commit 681,573 paired color/Z24 writes with hash
+`117e65d4ec81492a`. Because these depth writes precede some high-volume sibling fragments,
+that profile now correctly commits 717,366 paired writes/1,434,732 samples with re-baselined
+hash `537c8e788aaf4e83`. The depth, radial, transform, and final scanout hashes remain
+`9424b7ed8661f321`, `b57945aef12a9289`, `b1bdfde660324e2e`, and
+`73feb194b7694383`. Last textured targets `0x0299f394`/`0x029a2980` remain offscreen from
+the final `0x03c8c000` scanout.
+
+**Next:** execute the 485 sparse `INLINE_ARRAY` batches and census any remaining
+low-frequency draw profiles. OHCI TD/XID input and NVNet RX/transport remain subsequent
+A4 work.
+
 ## 2026-07-31 — A4: high-volume swizzled textured color pass executes
 
 The next dominant 256x256 A8R8G8B8/Z24S8 profile now writes guest color and zeta memory.
@@ -22,18 +54,10 @@ four-texel bilinear filtering, Morton texture and target placement, exact packed
 stencil preservation, and a farther second draw rejected by depth. All nine direct tests
 pass.
 
-Both the 500M census gate and full 6.4B acceptance run are fault-free. All 2,394
-shader-`0x10c60` batches rasterize 30,198 front-facing triangles, cover 19,947,463
-fragments, perform 3,494,536 texture samples, and commit 1,747,268 paired color/Z24 writes
-with deterministic hash `5056d6d133b67168`. The earlier depth and radial hashes remain
-`9424b7ed8661f321` and `b57945aef12a9289`; all 48,554,942 vertices retain position hash
-`b1bdfde660324e2e`. The last textured write is `0x0299f394`, while final scanout remains
-`0x03c8c000` with unchanged hash `73feb194b7694383`, so this profile is another offscreen
-intermediate.
-
-**Next:** execute the lower-volume shader-`0x10c61` textured profile, then cover the
-remaining textured profiles and `INLINE_ARRAY`. OHCI TD/XID input and NVNet RX/transport
-remain subsequent A4 work.
+The standalone 6.4B checkpoint originally committed 1,747,268 writes with hash
+`5056d6d133b67168`. That evidence is superseded by the projected sibling milestone above:
+its interleaved depth writes reject later fragments, and the shared weighted intermediate
+now includes the hardware clamp recovered from xemu's generated combiner code.
 
 ## 2026-07-31 — A4: dominant swizzled radial color pass executes
 
