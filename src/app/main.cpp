@@ -699,6 +699,18 @@ int main(int argc, char** argv) {
                             (unsigned long long)mach.nv2a()->projected_texture_samples(),
                             mach.nv2a()->last_projected_raster_address(),
                             (unsigned long long)mach.nv2a()->projected_color_output_hash());
+                std::printf("[2bl] NV2A pitch-projected: batches/tri/frags/pass/"
+                            "zwrite/cwrite/samples=%llu/%llu/%llu/%llu/%llu/"
+                            "%llu/%llu last=%08x hash=%016llx\n",
+                            (unsigned long long)mach.nv2a()->pitch_projected_color_batches(),
+                            (unsigned long long)mach.nv2a()->pitch_projected_color_triangles(),
+                            (unsigned long long)mach.nv2a()->pitch_projected_color_fragments(),
+                            (unsigned long long)mach.nv2a()->pitch_projected_color_depth_passes(),
+                            (unsigned long long)mach.nv2a()->pitch_projected_color_depth_writes(),
+                            (unsigned long long)mach.nv2a()->pitch_projected_color_writes(),
+                            (unsigned long long)mach.nv2a()->pitch_projected_texture_samples(),
+                            mach.nv2a()->last_pitch_projected_raster_address(),
+                            (unsigned long long)mach.nv2a()->pitch_projected_color_output_hash());
                 std::printf("[2bl] NV2A inline-color: batches/tri/frags/alpha/"
                             "writes/samples=%llu/%llu/%llu/%llu/%llu/%llu "
                             "last=%08x hash=%016llx\n",

@@ -3,6 +3,45 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-01 — A4: pitch-projected textured family executes
+
+The remaining pitch-surface `0x10c61` family now reuses the validated
+three-sample projected-texture path while writing linear 1280x480
+A8R8G8B8/Z24S8 targets. Stage 0 PROJECT2D-divides by interpolated W and
+repeat-samples its 128x128 swizzled image; stages 1/2 cube-remap and bilinearly
+sample the shared image. Per-state stage-5 c0/c1 values supply the RGB weights.
+The enabled stage-3 PROJECT3D GREATER result remains combiner-unreferenced and
+output-inert. GEQUAL-one alpha, LEQUAL depth, the witnessed all-bits TRUE
+depth mask, pitch addressing, and stencil preservation match the preceding
+pitch-textured family but retain separate counters and hash.
+
+The first full replay exposed one later stage-0 border encoding. Exact fault
+diagnostics showed that only transparent versus opaque black changed while
+U/V/P remained REPEAT, so border sampling is unreachable. Focused coverage
+uses the opaque value and verifies the unchanged exact dynamically weighted
+pixel `0xFF1B3F0D`, pitch placement, Z24/stencil output, three samples per
+write, and isolation from the swizzled projected counters. All nine direct
+tests pass. The 500M gate remains fault-free with empty stderr and reaches no
+pitch-projected batches.
+
+The final 6.4B acceptance replay reaches budget fault-free with empty stderr.
+It executes 10,336 pitch-projected batches and 1,693,723 front-facing
+triangles, covers 949,449,673 fragments, performs 695,540,724 samples, and
+commits 231,846,908 paired color/Z24 writes with deterministic hash
+`4ebdb2f4475cd80c`. Recorder-only volume falls from 14,720 to 4,384 batches.
+Independent depth, radial, swizzled-textured, swizzled-projected, transform,
+and final scanout hashes remain `9424b7ed8661f321`, `b57945aef12a9289`,
+`537c8e788aaf4e83`, `117e65d4ec81492a`, `2824162d794cc5de`, and
+`73feb194b7694383`. Interleaved pitch-projected Z writes correctly reject
+later pitch-textured fragments, re-baselining that profile to 304,256,110
+writes/hash `6ba31850c2d5eb56`. The inline profile still commits exactly
+15,123,585 writes and re-baselines to `1567692d051ce1d8` because its shared
+destination contents change. Final scanout remains the guest clear.
+
+**Next:** execute the leading remaining pitch single-texture family
+(`shader=0x1`, 121 fan batches in the top retained state), then the multi-
+texture `0x63` family and host-input plumbing.
+
 ## 2026-08-01 — A4: dominant pitch-textured color family executes
 
 The dashboard's dominant remaining indexed family now rasterizes its linear

@@ -942,6 +942,53 @@ int main() {
     CHECK(gpu.projected_color_writes() > projected_writes_before_inline);
     CHECK(get32(ram, 0x20000 + textured_inside) == 0xFF0F3F07u);
 
+    // The pitch sibling reuses all three projected/cube samples but writes
+    // linear A8R8G8B8/Z24S8 and supplies per-state stage-5 RGB weights.
+    // Texture 3 remains output-inert under its GREATER shadow comparison.
+    std::memcpy(ram.data() + 0x7000, radial_positions,
+                sizeof(radial_positions));
+    std::memset(ram.data() + 0x20000, 0, 64 * 64 * 4);
+    for (uint32_t offset = 0; offset < 64 * 64 * 4; offset += 4)
+        put32(ram, 0x60000 + offset, 0xFFFFFF5Au);
+    emit(0x0200, 0x00400000);
+    emit(0x0204, 0x00400000);
+    emit(0x0208, 0x00000128);
+    emit(0x020C, 0x01000100);
+    emit(0x02C0, 0x003F0000);
+    emit(0x02E0, 0x003F0000);
+    emit(0x033C, 0x0206);
+    emit(0x0340, 1);
+    emit(0x035C, 0xFFFFFFFF);
+    emit(0x1E6C, 4);
+    emit(0x1B24, 0xFF000000);  // inert under REPEAT addressing
+    emit(0x0A74, 0xFF0D3D06);
+    emit(0x0A94, 0xFF61FF2F);
+    emit(0x17FC, 5);
+    emit(0x1800, 0x00010000);
+    emit(0x1808, 2);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.pitch_projected_color_batches() == 1);
+    CHECK(gpu.pitch_projected_color_triangles() == 1);
+    CHECK(gpu.pitch_projected_color_fragments() > 0);
+    CHECK(gpu.pitch_projected_color_depth_passes() ==
+          gpu.pitch_projected_color_depth_writes());
+    CHECK(gpu.pitch_projected_color_depth_writes() ==
+          gpu.pitch_projected_color_writes());
+    CHECK(gpu.pitch_projected_texture_samples() ==
+          gpu.pitch_projected_color_writes() * 3);
+    CHECK(gpu.pitch_projected_color_writes() > 0);
+    CHECK(get32(ram, 0x20000 + pitch_textured_inside) == 0xFF1B3F0Du);
+    CHECK(get32(ram, 0x60000 + pitch_textured_inside) == 0x0000645Au);
+    CHECK(gpu.last_pitch_projected_raster_address() >= 0x20000);
+    CHECK(gpu.last_pitch_projected_raster_address() < 0x24000);
+    CHECK(gpu.pitch_projected_color_output_hash() !=
+          1469598103934665603ull);
+    CHECK(gpu.projected_color_batches() == 3);
+    CHECK(gpu.projected_color_writes() >
+          projected_writes_before_inline);
+
     // Inline dashboard geometry uses a distinct linear color profile:
     // PROJECT2D texture * c0, alpha GEQUAL 1, then SRC_ALPHA/ONE ADD.
     // The ALWAYS depth state must neither read nor write the zeta plane.
