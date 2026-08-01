@@ -12,7 +12,7 @@ machine-verifiable evidence that closed it.
 - Crucibles gate subsystem admission: a subsystem's conformance crucible passes **before** the
   milestone that first relies on it.
 
-## Burndown snapshot — 2026-07-31
+## Burndown snapshot — 2026-08-01
 
 | Milestone | State | Evidence / remaining gate |
 | --- | --- | --- |
@@ -20,7 +20,7 @@ machine-verifiable evidence that closed it.
 | A1 | **PARTIAL / DEFERRED** | Real-console agent and hardware probes work; pinned deterministic xemu-TCG cosim is still owed. |
 | A2 | **DONE** | Retail 4983 kernel reaches executive/IO init, services IRQs, completes phase-1, mounts FATX, and maps the dashboard XBE. |
 | A3 | **PARTIAL** | Unicorn's dynamic translator is the normal tier; page versioning and SMC/decryption invalidation proof remain. |
-| A4 | **IN PROGRESS** | Boot animation/XBE launch, PFIFO, NVNet TX DMA, 720x480 scanout/readout, Kelvin clears, indexed and inline vertex submission, both exercised vertex-transform modes, the pitch-Z16 prepass, dominant radial color, both witnessed indexed textured profiles, and the inline pitch/additive profile work. A 6.4B run executes all 48,556,397 vertices, including all 485 inline batches; the additive subset commits 15,123,585 read-only-depth color writes, while prior hashes remain stable. Existing color profiles remain offscreen and final scanout is still the clear. Next: OHCI TD/XID input, NVNet RX/transport, and remaining low-frequency draw states. |
+| A4 | **IN PROGRESS** | Boot animation/XBE launch, PFIFO, NVNet TX DMA, 720x480 scanout/readout, the witnessed Kelvin transform/raster profiles, and OHCI TD/XID Controller S execution work. A 6.4B run executes all 48,556,397 vertices and configures the controller at address 1 through ten OHCI TDs; an 8B run remains fault-free with every prior raster/scanout hash stable. Existing color profiles remain offscreen and final scanout is still the clear. Next: NVNet RX/transport, remaining low-frequency draw states, and host input plumbing. |
 | A5 | **NOT STARTED** | Requires A4 dashboard execution and rendering. |
 | Arc 2 | **NOT STARTED** | Explicitly out of current scope. |
 

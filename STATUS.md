@@ -3,6 +3,37 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-01 — A4: OHCI executes TDs and enumerates an Xbox Controller S
+
+OHCI now executes the guest's periodic, control, and bulk endpoint-descriptor lists instead
+of stopping at the register/frame floor. The bounded scheduler reads ED/TD chains from guest
+memory, transfers one- and two-page buffers, maintains data toggles and condition codes,
+halts failed endpoints, retires TDs into the done list, writes the HCCA frame/done fields,
+honors delay interrupts, and raises the standard writeback/root-hub interrupt lifecycle.
+OHCI0 root port 1 attaches a deterministic full-speed Controller S; OHCI1 remains empty.
+
+The device implements the standard device/configuration/string requests used during
+enumeration, the XID descriptor and capabilities requests, and endpoint 2 interrupt IN/OUT.
+Its injectable state produces the exact 20-byte Controller S input report, while the 6-byte
+output report retains both rumble motor values. Focused coverage drives real guest-memory
+ED/TD chains through device-descriptor fetch, SET_ADDRESS, SET_CONFIGURATION, XID descriptor
+fetch, a bulk-scheduled input report, a periodic output report, HCCA done writeback, and IRQ
+acknowledgement. All nine direct tests pass.
+
+The 6.4B retail acceptance run is fault-free and performs five ED visits and ten TD
+executions/retirements across four control requests, leaving the device configured at
+address 1. An extended 8B replay also reaches budget without fault after 2,603 USB frames,
+with the same `eds/tds/retired/done=5/10/10/5` and `control=4` counts. This boot window does
+not poll endpoint 2 (`xid-in/xid-out=0/0`), so retail endpoint use is not claimed; the input
+and rumble paths are proven by the focused descriptor-chain test. The depth, radial,
+indexed-textured, projected-textured, inline-color, transform, and final scanout hashes
+remain `9424b7ed8661f321`, `b57945aef12a9289`, `537c8e788aaf4e83`,
+`117e65d4ec81492a`, `6363f356e93c6124`, `2824162d794cc5de`, and
+`73feb194b7694383`.
+
+**Next:** add NVNet RX descriptor DMA/external transport and census the remaining
+low-frequency draw states. Host gamepad plumbing remains for dashboard navigation.
+
 ## 2026-07-31 — A4: inline pitch/additive color pass executes
 
 The dashboard's witnessed inline color profile now writes its pitch A8R8G8B8 target. The

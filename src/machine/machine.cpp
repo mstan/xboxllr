@@ -198,15 +198,19 @@ void XboxMachine::init_devices() {
                    [this](uint32_t a, int s) { return mmio_read(a, s); },
                    [this](uint32_t a, int s, uint32_t v) { mmio_write(a, s, v); });
 
-    // Two standard four-port OHCI controllers. USB0 routes to IRQ1 and USB1 to IRQ9
-    // (xemu xbox_pci.c); no downstream devices are attached yet.
+    // Two standard four-port OHCI controllers. USB0 routes to IRQ1 and carries the
+    // deterministic Controller S; USB1 routes to IRQ9 and has no downstream device.
     for (int index = 0; index < 2; ++index) {
         const uint32_t base = index ? 0xFED08000u : 0xFED00000u;
         auto ohci = std::make_unique<Ohci>(base, fault);
         Ohci* raw = ohci.get();
-        raw->set_mem_write([this](uint32_t addr, const void* buf, size_t n) {
-            return cpu_->write_mem(addr, buf, n);
-        });
+        raw->set_mem_access(
+            [this](uint32_t addr, void* buf, size_t n) {
+                return cpu_->read_mem(addr, buf, n);
+            },
+            [this](uint32_t addr, const void* buf, size_t n) {
+                return cpu_->write_mem(addr, buf, n);
+            });
         raw->set_irq([this](int irq, bool level) { pic_->raise(irq, level); },
                      index ? 9 : 1);
         if (index) ohci1_ = raw;

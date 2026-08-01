@@ -894,9 +894,23 @@ int main(int argc, char** argv) {
                             mach.aci()->mmio_read(McpxAci::kBase + 0x118, 4));
             }
             if (mach.ohci0()) {
-                std::printf("[2bl] OHCI0: frames=%llu control=%08x hcca=%08x\n",
+                std::printf("[2bl] OHCI0: frames=%llu control=%08x hcca=%08x "
+                            "eds/tds/retired/done=%llu/%llu/%llu/%llu "
+                            "control/xid-in/xid-out=%llu/%llu/%llu "
+                            "addr/config=%u/%u rumble=%04x/%04x\n",
                             (unsigned long long)mach.ohci0()->frames(),
-                            mach.ohci0()->control(), mach.ohci0()->hcca());
+                            mach.ohci0()->control(), mach.ohci0()->hcca(),
+                            (unsigned long long)mach.ohci0()->processed_eds(),
+                            (unsigned long long)mach.ohci0()->processed_tds(),
+                            (unsigned long long)mach.ohci0()->retired_tds(),
+                            (unsigned long long)mach.ohci0()->done_writebacks(),
+                            (unsigned long long)mach.ohci0()->control_requests(),
+                            (unsigned long long)mach.ohci0()->xid_input_reports(),
+                            (unsigned long long)mach.ohci0()->xid_output_reports(),
+                            mach.ohci0()->xid_address(),
+                            mach.ohci0()->xid_configuration(),
+                            mach.ohci0()->xid_left_rumble(),
+                            mach.ohci0()->xid_right_rumble());
             }
             if (mach.nvnet()) {
                 std::printf("[2bl] NVNet: link=%s MDIO rd/wr=%llu/%llu "

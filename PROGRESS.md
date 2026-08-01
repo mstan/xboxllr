@@ -36,8 +36,8 @@ harvested from xemu, silicon-corrected against a live console. GPL-2.
   untextured swizzled radial-combiner pass, and both witnessed indexed 256x256 textured
   A8R8G8B8/Z24S8 passes, plus the inline path's pitch A8R8G8B8 projected-texture
   additive-blend pass.
-- **Immediate burn-down path:** extend OHCI into TD execution and XID input → add NVNet RX
-  and external transport → census and execute the remaining low-frequency draw states.
+- **Immediate burn-down path:** add NVNet RX and external transport → census and execute
+  the remaining low-frequency draw states → plumb host input into the landed XID controller.
 - **Not started:** A5 end-to-end retail-dashboard navigation and Arc 2 game work.
 
 ## Where the boot stands RIGHT NOW
@@ -160,6 +160,17 @@ dependency chain peeled this session is:
     and commit 15,123,585 color-only writes with hash `6363f356e93c6124`. Prior raster,
     transform, and final scanout hashes remain unchanged; the last inline target
     `0x0387fb78` is still offscreen from final scanout `0x03c8c000`.
+24. OHCI TD execution and Xbox Controller S → **fixed through enumeration and endpoint
+    I/O**. The scheduler walks periodic, control, and bulk ED lists; transfers bounded
+    one/two-page TD buffers; retires condition codes/toggles; writes HCCA done heads; and
+    raises the standard completion/root-hub interrupts. OHCI0 port 1 exposes a full-speed
+    Controller S with standard USB and XID descriptors, control requests, injectable
+    20-byte input reports, and 6-byte rumble output. Focused coverage verifies descriptor,
+    address/configuration, done-head, IRQ, exact input bytes, and rumble. A fault-free 6.4B
+    retail replay performs four control requests across 10 TDs and configures address 1;
+    an 8B replay remains fault-free with the same counts and all prior raster/scanout hashes
+    unchanged. This dashboard boot window does not yet poll endpoint 2; host input plumbing
+    remains.
 
 ## How to build & run
 
@@ -201,12 +212,15 @@ Deliberate documented stand-ins currently in place (fine for boot, replaced late
   assembly plus programmable and exercised fixed-function transforms work. The witnessed
   pitch-Z16 depth-only, untextured swizzled radial-color, and both witnessed indexed
   shader-`0x10c60`/`0x10c61` textured triangle profiles rasterize. Inline arrays execute
-  through transform/assembly; their pitch/additive color profile remains recorder-only.
+  through transform/assembly and their pitch/additive color profile writes guest color.
 - APU has the load-bearing voice-list, VOICE_OFF, timed idle-voice FE trap, notifier, and IRQ
   lifecycle, but still no DSP/audio synthesis. ACI advances real PCM descriptors and IRQs
   headlessly but produces no host audio.
-- OHCI implements the standard register/frame/HCCA/IRQ floor with no attached devices.
-  Endpoint/TD execution and XID peripherals remain.
+- OHCI0 attaches a deterministic Controller S on root port 1. Periodic/control/bulk ED
+  scheduling, TD buffer transfer/retirement, HCCA done writeback, standard enumeration,
+  XID descriptors, injectable input reports, and rumble output work. The retail dashboard
+  enumerates and configures it; host gamepad mapping and an observed retail endpoint-2 poll
+  remain. OHCI1 remains empty.
 - NVNet implements the register/PHY/MDIO/link/IRQ floor and TX descriptor engine. With no
   host callback, transmitted packets are explicitly counted and discarded. RX descriptor
   DMA and external packet transport remain.
@@ -252,11 +266,10 @@ Driver: `python tools/xbox_agent.py --host 192.168.4.81 {ping|info|read|exec <fi
 
 ## Next steps (priority order)
 
-1. Indexed and inline Kelvin submission, the pitch-Z16 depth prepass, dominant radial
-   color, and both shader-`0x10c60`/`0x10c61` textured passes are landed. Next execute the
-   inline path's pitch A8R8G8B8, one-texture, source-alpha/ONE additive profile.
-2. Extend OHCI: control/bulk TD execution first, then the Xbox XID controller protocol and
-   host input mapping.
+1. Indexed/inline Kelvin submission and every currently witnessed high-volume raster
+   profile are landed. Census and execute the remaining low-frequency draw states.
+2. OHCI TD scheduling and the Xbox XID controller protocol are landed. Plumb host input
+   mapping when dashboard navigation begins exercising endpoint 2.
 3. Add NVNet RX descriptor DMA and external packet transport when the guest or navigation
    path requires them.
 4. Longer term (A4 proper): extend the landed recorder into the required CP/method subset and
