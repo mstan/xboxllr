@@ -1201,6 +1201,7 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         kSwizzledProjectedColor,
         kPitchProjectedColor,
         kPitchMultiTextureColor,
+        kPitchThreeTextureColor,
         kInlineLinearBlitColor,
         kPitchSingleTextureColor,
         kPitchAdditiveColor,
@@ -1388,6 +1389,65 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                 pitch_multi_factor0[stage] &&
             raster_state_[kRasterCombinerFactor1_0 + stage] == 0;
     }
+    bool pitch_three_texture_combiner =
+        raster_state_[kRasterTextureEnableMask] == 7 &&
+        raster_state_[kRasterShaderStageProgram] == 0x00000063 &&
+        raster_state_[kRasterShaderOtherStageInput] == 0 &&
+        raster_state_[kRasterDotRgbMapping] == 0 &&
+        raster_state_[kRasterShadowDepthFunc] == 7 &&
+        raster_state_[kRasterCombinerControl] == 0x00011106 &&
+        raster_state_[kRasterCombinerSpecularFog0] == 0x0000000C &&
+        raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80 &&
+        raster_state_[kRasterCombinerFinalFactor0] == 0 &&
+        raster_state_[kRasterCombinerFinalFactor1] == 0;
+    for (size_t stage = 0;
+         stage < pitch_multi_color_icw.size() &&
+         pitch_three_texture_combiner;
+         ++stage) {
+        const uint32_t factor0 =
+            raster_state_[kRasterCombinerFactor0_0 + stage];
+        const bool witnessed_factor0 =
+            stage == 3 ? (factor0 & 0xFF000000u) == 0xFF000000u
+                       : factor0 == pitch_multi_factor0[stage];
+        pitch_three_texture_combiner =
+            raster_state_[kRasterCombinerColorIcw0 + stage] ==
+                pitch_multi_color_icw[stage] &&
+            raster_state_[kRasterCombinerAlphaIcw0 + stage] ==
+                pitch_multi_alpha_icw[stage] &&
+            raster_state_[kRasterCombinerColorOcw0 + stage] ==
+                pitch_multi_color_ocw[stage] &&
+            raster_state_[kRasterCombinerAlphaOcw0 + stage] ==
+                pitch_multi_alpha_ocw[stage] &&
+            witnessed_factor0 &&
+            raster_state_[kRasterCombinerFactor1_0 + stage] == 0;
+    }
+    const bool pitch_three_texture_state =
+        raster_state_[kRasterTextureFormat0] == 0x0661072E &&
+        raster_state_[kRasterTextureFormat0 + 1] == 0x0661072E &&
+        raster_state_[kRasterTextureFormat0 + 2] == 0x0771072E &&
+        raster_state_[kRasterTextureOffset0 + 1] ==
+            raster_state_[kRasterTextureOffset0] &&
+        raster_state_[kRasterTextureAddress0] == 0x00030303 &&
+        raster_state_[kRasterTextureAddress0 + 1] == 0x00030303 &&
+        raster_state_[kRasterTextureAddress0 + 2] == 0x00030303 &&
+        raster_state_[kRasterTextureFilter0] == 0x02022000 &&
+        raster_state_[kRasterTextureFilter0 + 1] == 0x02022000 &&
+        raster_state_[kRasterTextureFilter0 + 2] == 0x02022000 &&
+        raster_state_[kRasterTextureControl0_0] == 0x4003FFC0 &&
+        raster_state_[kRasterTextureControl0_0 + 1] == 0x4003FFC0 &&
+        raster_state_[kRasterTextureControl0_0 + 2] == 0x4003FFC0 &&
+        raster_state_[kRasterTextureControl1_0] == 0x14000000 &&
+        raster_state_[kRasterTextureControl1_0 + 1] == 0 &&
+        raster_state_[kRasterTextureControl1_0 + 2] == 0 &&
+        raster_state_[kRasterTextureImageRect0] == 0x050001E0 &&
+        raster_state_[kRasterTextureImageRect0 + 1] == 0 &&
+        raster_state_[kRasterTextureImageRect0 + 2] == 0 &&
+        raster_state_[kRasterTexturePalette0] == 0 &&
+        raster_state_[kRasterTexturePalette0 + 1] == 0 &&
+        raster_state_[kRasterTexturePalette0 + 2] == 0 &&
+        raster_state_[kRasterTextureBorderColor0] == 0 &&
+        raster_state_[kRasterTextureBorderColor0 + 1] == 0 &&
+        raster_state_[kRasterTextureBorderColor0 + 2] == 0;
     const bool inline_linear_blit_combiner =
         raster_state_[kRasterTextureEnableMask] == 1 &&
         raster_state_[kRasterShaderStageProgram] == 0x00000001 &&
@@ -1471,6 +1531,9 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         profile = Profile::kSwizzledProjectedColor;
     } else if (pitch_multi_texture_combiner) {
         profile = Profile::kPitchMultiTextureColor;
+    } else if (pitch_three_texture_combiner &&
+               pitch_three_texture_state) {
+        profile = Profile::kPitchThreeTextureColor;
     } else if (inline_linear_blit_combiner &&
                inline_linear_blit_texture) {
         profile = Profile::kInlineLinearBlitColor;
@@ -1521,6 +1584,33 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
             raster_state_[kRasterPolygonOffsetScale] != 0x40800000 ||
             raster_state_[kRasterPolygonOffsetBias] != 0x41200000) {
             fault_("NV2A pitch multi-texture draw exceeds the witnessed raster subset");
+            return false;
+        }
+    } else if (profile == Profile::kPitchThreeTextureColor) {
+        if (primitive_mode_ != 6 || surface_type != 1 ||
+            anti_aliasing != 0 || color_format != 8 || zeta_format != 2 ||
+            surface_pitch_ != 0x14001400 ||
+            surface_clip_horizontal_ != 0x05000000 ||
+            surface_clip_vertical_ != 0x01E00000 ||
+            enables != 0x000Eu ||
+            raster_state_[kRasterControl0] != 0x00100001 ||
+            raster_state_[kRasterAlphaFunc] != 0x0206 ||
+            (raster_state_[kRasterAlphaRef] & 0xFFu) != 1 ||
+            raster_state_[kRasterBlendSrc] != 0x0302 ||
+            raster_state_[kRasterBlendDst] != 0x0303 ||
+            raster_state_[kRasterBlendEquation] != 0x8006 ||
+            raster_state_[kRasterDepthFunc] != 0x0203 ||
+            raster_state_[kRasterColorMask] != 0x01010101 ||
+            raster_state_[kRasterDepthMask] != 1 ||
+            raster_state_[kRasterShadeMode] != 0x1D01 ||
+            raster_state_[kRasterFrontPolygonMode] != 0x1B02 ||
+            raster_state_[kRasterBackPolygonMode] != 0x1B02 ||
+            raster_state_[kRasterCullFace] != 0x0405 ||
+            raster_state_[kRasterFrontFace] != 0x0900 ||
+            raster_state_[kRasterZMinMaxControl] != 1 ||
+            raster_state_[kRasterPolygonOffsetScale] != 0x40800000 ||
+            raster_state_[kRasterPolygonOffsetBias] != 0x41200000) {
+            fault_("NV2A pitch three-texture draw exceeds the witnessed raster subset");
             return false;
         }
     } else if (profile == Profile::kInlineLinearBlitColor) {
@@ -1699,6 +1789,7 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                profile == Profile::kPitchTexturedColor ||
                profile == Profile::kPitchProjectedColor ||
                profile == Profile::kPitchMultiTextureColor ||
+               profile == Profile::kPitchThreeTextureColor ||
                profile == Profile::kInlineLinearBlitColor ||
                profile == Profile::kPitchSingleTextureColor) {
         pitch = surface_pitch_ & 0xFFFFu;
@@ -1709,6 +1800,7 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
             profile == Profile::kPitchTexturedColor ||
             profile == Profile::kPitchProjectedColor ||
             profile == Profile::kPitchMultiTextureColor ||
+            profile == Profile::kPitchThreeTextureColor ||
             profile == Profile::kPitchSingleTextureColor)
             depth_bytes64 = color_bytes64;
         if (!pitch || (surface_pitch_ >> 16) != pitch ||
@@ -1970,7 +2062,8 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
     std::unique_ptr<SwizzleLookup> multi_texture_swizzle;
     uint32_t multi_texture_width = 0;
     uint32_t multi_texture_height = 0;
-    if (profile == Profile::kPitchMultiTextureColor) {
+    if (profile == Profile::kPitchMultiTextureColor ||
+        profile == Profile::kPitchThreeTextureColor) {
         const uint32_t format0 = raster_state_[kRasterTextureFormat0];
         const uint32_t format1 = raster_state_[kRasterTextureFormat0 + 1];
         const uint32_t offset0 = raster_state_[kRasterTextureOffset0];
@@ -1992,8 +2085,11 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
             raster_state_[kRasterTexturePalette0 + 1] == 0 &&
             raster_state_[kRasterTextureBorderColor0] == 0 &&
             raster_state_[kRasterTextureBorderColor0 + 1] == 0;
-        if (!witnessed_multi_texture || (format0 & 3u) != 2u) {
-            fault_("NV2A pitch multi-texture state exceeds the witnessed subset");
+        if (!witnessed_multi_texture ||
+            (profile == Profile::kPitchThreeTextureColor &&
+             !pitch_three_texture_state) ||
+            (format0 & 3u) != 2u) {
+            fault_("NV2A pitch cube-pair state exceeds the witnessed subset");
             return false;
         }
         multi_texture_width = 1u << ((format0 >> 20) & 0xFu);
@@ -2013,7 +2109,7 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         if (!mem_read_ ||
             !mem_read_(multi_texture_address, multi_texture_data.data(),
                        multi_texture_data.size())) {
-            fault_("NV2A pitch multi-texture DMA read failed");
+            fault_("NV2A pitch cube-pair DMA read failed");
             return false;
         }
         multi_texture_swizzle = std::make_unique<SwizzleLookup>(
@@ -2165,6 +2261,8 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
             ++pitch_projected_color_batches_;
         else if (profile == Profile::kPitchMultiTextureColor)
             ++pitch_multi_texture_batches_;
+        else if (profile == Profile::kPitchThreeTextureColor)
+            ++pitch_three_texture_batches_;
         else if (profile == Profile::kInlineLinearBlitColor)
             ++inline_linear_blit_batches_;
         else if (profile == Profile::kPitchSingleTextureColor)
@@ -2407,6 +2505,8 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                 ++pitch_projected_color_triangles_;
             else if (profile == Profile::kPitchMultiTextureColor)
                 ++pitch_multi_texture_triangles_;
+            else if (profile == Profile::kPitchThreeTextureColor)
+                ++pitch_three_texture_triangles_;
             else if (profile == Profile::kInlineLinearBlitColor)
                 ++inline_linear_blit_triangles_;
             else if (profile == Profile::kPitchSingleTextureColor)
@@ -2484,6 +2584,8 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                         ++pitch_projected_color_fragments_;
                     else if (profile == Profile::kPitchMultiTextureColor)
                         ++pitch_multi_texture_fragments_;
+                    else if (profile == Profile::kPitchThreeTextureColor)
+                        ++pitch_three_texture_fragments_;
                     else if (profile == Profile::kInlineLinearBlitColor)
                         ++inline_linear_blit_fragments_;
                     else if (profile == Profile::kPitchSingleTextureColor)
@@ -2636,7 +2738,8 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                         }
                         continue;
                     }
-                    if (profile == Profile::kPitchMultiTextureColor) {
+                    if (profile == Profile::kPitchMultiTextureColor ||
+                        profile == Profile::kPitchThreeTextureColor) {
                         const size_t offset =
                             static_cast<size_t>(y) * pitch +
                             static_cast<size_t>(x) * sizeof(uint32_t);
@@ -2647,13 +2750,16 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                         if (!depth_surface.read32(
                                 offset, stored_depth_stencil)) {
                             fault_(
-                                "NV2A pitch multi-texture zeta DMA read failed");
+                                "NV2A pitch cube-pair zeta DMA read failed");
                             raster_failed = true;
                             return;
                         }
                         if (incoming > (stored_depth_stencil >> 8))
                             continue;  // LEQUAL
-                        ++pitch_multi_texture_depth_passes_;
+                        if (profile == Profile::kPitchMultiTextureColor)
+                            ++pitch_multi_texture_depth_passes_;
+                        else
+                            ++pitch_three_texture_depth_passes_;
 
                         const double lambda0 =
                             static_cast<double>(w0) /
@@ -2686,7 +2792,7 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                             if (!std::isfinite(t0) ||
                                 !std::isfinite(t1)) {
                                 fault_(
-                                    "NV2A pitch multi-texture varying is non-finite");
+                                    "NV2A pitch cube-pair varying is non-finite");
                                 raster_failed = true;
                                 return;
                             }
@@ -2710,11 +2816,14 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                                 multi_texture_height,
                                 direction1, texture1)) {
                             fault_(
-                                "NV2A pitch multi-texture cube remap is invalid");
+                                "NV2A pitch cube-pair remap is invalid");
                             raster_failed = true;
                             return;
                         }
-                        pitch_multi_texture_samples_ += 2;
+                        if (profile == Profile::kPitchMultiTextureColor)
+                            pitch_multi_texture_samples_ += 2;
+                        else
+                            pitch_three_texture_samples_ += 2;
 
                         float dot = 0.0f;
                         for (size_t component = 0; component < 3;
@@ -2732,22 +2841,46 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                         const float source_alpha =
                             1.0f - std::clamp(
                                 inverted * inverted, 0.0f, 1.0f);
-                        if (std::lround(source_alpha * 255.0f) < 1)
+                        if (profile == Profile::kPitchMultiTextureColor &&
+                            std::lround(source_alpha * 255.0f) < 1)
                             continue;  // GEQUAL alpha reference 1.
-                        ++pitch_multi_texture_alpha_passes_;
+                        if (profile == Profile::kPitchMultiTextureColor)
+                            ++pitch_multi_texture_alpha_passes_;
 
                         uint32_t destination_pixel = 0;
                         if (!color_surface.read32(
                                 offset, destination_pixel)) {
                             fault_(
-                                "NV2A pitch multi-texture color DMA read failed");
+                                "NV2A pitch cube-pair color DMA read failed");
                             raster_failed = true;
                             return;
                         }
+                        const uint32_t stage3_factor =
+                            raster_state_[kRasterCombinerFactor0_0 + 3];
+                        const uint32_t stage4_factor =
+                            raster_state_[kRasterCombinerFactor0_0 + 4];
+                        auto factor_component =
+                            [](uint32_t factor, uint32_t shift) {
+                                return static_cast<float>(
+                                           (factor >> shift) & 0xFFu) /
+                                       255.0f;
+                            };
                         const std::array<float, 4> source{{
-                            13.0f / 255.0f,
-                            51.0f / 255.0f,
-                            8.0f / 255.0f,
+                            std::clamp(
+                                factor_component(stage4_factor, 16) +
+                                    source_alpha *
+                                        factor_component(stage3_factor, 16),
+                                0.0f, 1.0f),
+                            std::clamp(
+                                factor_component(stage4_factor, 8) +
+                                    source_alpha *
+                                        factor_component(stage3_factor, 8),
+                                0.0f, 1.0f),
+                            std::clamp(
+                                factor_component(stage4_factor, 0) +
+                                    source_alpha *
+                                        factor_component(stage3_factor, 0),
+                                0.0f, 1.0f),
                             source_alpha,
                         }};
                         const std::array<float, 4> destination{{
@@ -2789,26 +2922,38 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                             !depth_surface.write32(
                                 offset, depth_stencil)) {
                             fault_(
-                                "NV2A pitch multi-texture cache write failed");
+                                "NV2A pitch cube-pair cache write failed");
                             raster_failed = true;
                             return;
                         }
-                        ++pitch_multi_texture_color_writes_;
-                        ++pitch_multi_texture_depth_writes_;
+                        if (profile == Profile::kPitchMultiTextureColor) {
+                            ++pitch_multi_texture_color_writes_;
+                            ++pitch_multi_texture_depth_writes_;
+                        } else {
+                            ++pitch_three_texture_color_writes_;
+                            ++pitch_three_texture_depth_writes_;
+                        }
                         const uint32_t color_pixel_address =
                             color_address +
                             static_cast<uint32_t>(offset);
                         const uint32_t depth_pixel_address =
                             depth_address +
                             static_cast<uint32_t>(offset);
-                        last_pitch_multi_texture_raster_address_ =
-                            color_pixel_address;
+                        if (profile == Profile::kPitchMultiTextureColor)
+                            last_pitch_multi_texture_raster_address_ =
+                                color_pixel_address;
+                        else
+                            last_pitch_three_texture_raster_address_ =
+                                color_pixel_address;
                         for (uint32_t word :
                              {color_pixel_address, color,
                               depth_pixel_address, depth_stencil}) {
-                            pitch_multi_texture_output_hash_ ^= word;
-                            pitch_multi_texture_output_hash_ *=
-                                1099511628211ull;
+                            uint64_t& output_hash =
+                                profile == Profile::kPitchMultiTextureColor
+                                    ? pitch_multi_texture_output_hash_
+                                    : pitch_three_texture_output_hash_;
+                            output_hash ^= word;
+                            output_hash *= 1099511628211ull;
                         }
                         continue;
                     }
@@ -3417,6 +3562,8 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         ++pitch_projected_color_batches_;
     else if (profile == Profile::kPitchMultiTextureColor)
         ++pitch_multi_texture_batches_;
+    else if (profile == Profile::kPitchThreeTextureColor)
+        ++pitch_three_texture_batches_;
     else if (profile == Profile::kInlineLinearBlitColor)
         ++inline_linear_blit_batches_;
     else if (profile == Profile::kPitchSingleTextureColor)

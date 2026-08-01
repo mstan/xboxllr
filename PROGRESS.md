@@ -36,8 +36,9 @@ harvested from xemu, silicon-corrected against a live console. GPL-2.
   untextured swizzled radial-combiner pass, and both witnessed indexed 256x256 textured
   A8R8G8B8/Z24S8 passes, the indexed 1280x480 pitch-textured and
   pitch-projected passes, the pitch single-texture fan and two-cube
-  alpha-blend passes, plus the inline path's pitch A8R8G8B8 projected-texture
-  additive-blend pass and linear 1280x480-to-640x480 dashboard blits.
+  alpha-blend and dynamic three-texture passes, plus the inline path's pitch
+  A8R8G8B8 projected-texture additive-blend pass and linear
+  1280x480-to-640x480 dashboard blits.
 - **Immediate burn-down path:** census and execute the remaining low-frequency draw states
   → plumb host input into the landed XID controller → drive end-to-end dashboard navigation.
 - **Not started:** A5 end-to-end retail-dashboard navigation and Arc 2 game work.
@@ -225,6 +226,16 @@ dependency chain peeled this session is:
     color writes with hash `a6fa8d7f361f0383`. Recorder-only batches fall from 4,143 to
     4,037 and retained states from 962 to 961 while every prior raster, transform, and
     scanout hash remains unchanged.
+31. dynamic three-texture pitch family → **fixed through factor-varying blended output**.
+    Shader `0x63` cube-remaps stages 0/1 into one 64x64 image while programmed stage 2
+    remains shader-inert. The expanded-RGB dot derives alpha; dynamic stage-3 c0 RGB
+    modulates that alpha and adds to fixed tint `0x0D3308` before SRC_ALPHA blending and
+    writable LEQUAL Z24S8. At 6.4B, the semantic profile covers 2,104 batches across 101
+    retained states, rasterizes 199,617 triangles and 512,754 fragments, and turns 6,400
+    depth passes into 12,800 samples plus 6,400 paired writes with hash
+    `a9f6884dc0abadf3`. Recorder-only volume falls from 4,037 to 1,933 batches and 961 to
+    860 states. Independent hashes and final scanout remain stable; the later shared-target
+    inline-additive hash rebaselines to `763144f45d489441`.
 
 ## How to build & run
 
@@ -326,10 +337,10 @@ Driver: `python tools/xbox_agent.py --host 192.168.4.81 {ping|info|read|exec <fi
 
 ## Next steps (priority order)
 
-1. Decode and execute the leading remaining 56-batch, three-texture `shader=0x63`
-   triangle-strip state, then its 48-batch combiner-factor variants and the remaining
-   low-frequency Kelvin census. The indexed/inline submission paths and every currently
-   witnessed high-volume raster profile are landed.
+1. Broaden the linear inline-blit profile over the leading 47-batch variant's inert
+   combiner-factor constants, then decode the 42-batch `tex=5` pitch triangle-list
+   states and continue the remaining low-frequency Kelvin census. The indexed/inline
+   submission paths and every currently witnessed high-volume raster profile are landed.
 2. OHCI TD scheduling and the Xbox XID controller protocol are landed. Plumb host input
    mapping when dashboard navigation begins exercising endpoint 2.
 3. Exercise the landed NVNet UDP tunnel against a useful peer/bridge as navigation requires;

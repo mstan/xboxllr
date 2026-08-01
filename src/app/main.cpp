@@ -736,6 +736,19 @@ int main(int argc, char** argv) {
                             (unsigned long long)mach.nv2a()->pitch_multi_texture_samples(),
                             mach.nv2a()->last_pitch_multi_texture_raster_address(),
                             (unsigned long long)mach.nv2a()->pitch_multi_texture_output_hash());
+                std::printf("[2bl] NV2A pitch-three: batches/tri/frags/depth/"
+                            "zwrite/cwrite/samples="
+                            "%llu/%llu/%llu/%llu/%llu/%llu/%llu "
+                            "last=%08x hash=%016llx\n",
+                            (unsigned long long)mach.nv2a()->pitch_three_texture_batches(),
+                            (unsigned long long)mach.nv2a()->pitch_three_texture_triangles(),
+                            (unsigned long long)mach.nv2a()->pitch_three_texture_fragments(),
+                            (unsigned long long)mach.nv2a()->pitch_three_texture_depth_passes(),
+                            (unsigned long long)mach.nv2a()->pitch_three_texture_depth_writes(),
+                            (unsigned long long)mach.nv2a()->pitch_three_texture_color_writes(),
+                            (unsigned long long)mach.nv2a()->pitch_three_texture_samples(),
+                            mach.nv2a()->last_pitch_three_texture_raster_address(),
+                            (unsigned long long)mach.nv2a()->pitch_three_texture_output_hash());
                 std::printf("[2bl] NV2A inline-blit: "
                             "batches/tri/frags/writes/samples="
                             "%llu/%llu/%llu/%llu/%llu "

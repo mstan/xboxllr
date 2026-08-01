@@ -267,6 +267,33 @@ public:
     uint64_t pitch_multi_texture_output_hash() const {
         return pitch_multi_texture_output_hash_;
     }
+    uint64_t pitch_three_texture_batches() const {
+        return pitch_three_texture_batches_;
+    }
+    uint64_t pitch_three_texture_triangles() const {
+        return pitch_three_texture_triangles_;
+    }
+    uint64_t pitch_three_texture_fragments() const {
+        return pitch_three_texture_fragments_;
+    }
+    uint64_t pitch_three_texture_depth_passes() const {
+        return pitch_three_texture_depth_passes_;
+    }
+    uint64_t pitch_three_texture_depth_writes() const {
+        return pitch_three_texture_depth_writes_;
+    }
+    uint64_t pitch_three_texture_color_writes() const {
+        return pitch_three_texture_color_writes_;
+    }
+    uint64_t pitch_three_texture_samples() const {
+        return pitch_three_texture_samples_;
+    }
+    uint32_t last_pitch_three_texture_raster_address() const {
+        return last_pitch_three_texture_raster_address_;
+    }
+    uint64_t pitch_three_texture_output_hash() const {
+        return pitch_three_texture_output_hash_;
+    }
     uint64_t inline_linear_blit_batches() const {
         return inline_linear_blit_batches_;
     }
@@ -619,6 +646,15 @@ private:
     uint64_t pitch_multi_texture_samples_ = 0;
     uint32_t last_pitch_multi_texture_raster_address_ = 0;
     uint64_t pitch_multi_texture_output_hash_ = 1469598103934665603ull;
+    uint64_t pitch_three_texture_batches_ = 0;
+    uint64_t pitch_three_texture_triangles_ = 0;
+    uint64_t pitch_three_texture_fragments_ = 0;
+    uint64_t pitch_three_texture_depth_passes_ = 0;
+    uint64_t pitch_three_texture_depth_writes_ = 0;
+    uint64_t pitch_three_texture_color_writes_ = 0;
+    uint64_t pitch_three_texture_samples_ = 0;
+    uint32_t last_pitch_three_texture_raster_address_ = 0;
+    uint64_t pitch_three_texture_output_hash_ = 1469598103934665603ull;
     uint64_t inline_linear_blit_batches_ = 0;
     uint64_t inline_linear_blit_triangles_ = 0;
     uint64_t inline_linear_blit_fragments_ = 0;

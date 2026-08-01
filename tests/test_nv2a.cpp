@@ -1247,6 +1247,141 @@ int main() {
     CHECK(get32(ram, 0x20000 + pitch_textured_inside) == 0xB1192E0Au);
     CHECK(get32(ram, 0x60000 + pitch_textured_inside) == 0x0000645Au);
 
+    // The remaining three-enabled-texture shader=0x63 states reuse the
+    // stage-0/1 cube pair; stage 2 is shader-inert. Alpha testing is disabled,
+    // and dynamic stage-3 c0 RGB adds source_alpha*c0 to the fixed stage-4
+    // tint before SRC_ALPHA/ONE_MINUS_SRC_ALPHA blending and writable LEQUAL
+    // Z24. Exercise the leading factor and one later retained variant.
+    constexpr uint32_t pitch_three_color = 0x280000;
+    constexpr uint32_t pitch_three_depth = 0x010000;
+    constexpr uint32_t pitch_three_texture = 0x600000;
+    constexpr uint32_t pitch_three_stride = 0x1400;
+    for (uint32_t y = 10; y < 50; ++y) {
+        for (uint32_t x = 10; x < 50; ++x) {
+            const uint32_t offset = y * pitch_three_stride + x * 4;
+            put32(ram, pitch_three_color + offset, 0x80402010);
+            put32(ram, pitch_three_depth + offset, 0xFFFFFF5A);
+        }
+    }
+    std::memset(ram.data() + pitch_three_texture, 0, 64 * 64 * 4);
+    for (uint32_t y : {16u, 17u})
+        for (uint32_t x : {16u, 17u})
+            put_rgb_texture(pitch_three_texture, 64, 64, x, y, 0xFFFFFFFF);
+    for (uint32_t y : {48u, 49u})
+        for (uint32_t x : {48u, 49u})
+            put_rgb_texture(pitch_three_texture, 64, 64, x, y, 0xFF959595);
+
+    emit(0x0200, 0x05000000);
+    emit(0x0204, 0x01E00000);
+    emit(0x0208, 0x00000128);
+    emit(0x020C, 0x14001400);
+    emit(0x0210, pitch_three_color);
+    emit(0x0214, pitch_three_depth);
+    emit(0x02C0, 0x04FF0000);
+    emit(0x02E0, 0x01DF0000);
+    emit(0x0300, 0);
+    emit(0x0304, 1);
+    emit(0x0308, 1);
+    emit(0x030C, 1);
+    emit(0x0310, 0);
+    emit(0x033C, 0x0206);
+    emit(0x0340, 1);
+    emit(0x0344, 0x0302);
+    emit(0x0348, 0x0303);
+    emit(0x0350, 0x8006);
+    emit(0x0354, 0x0203);
+    emit(0x0358, 0x01010101);
+    emit(0x035C, 1);
+    emit(0x0384, 0x40800000);
+    emit(0x0388, 0x41200000);
+    emit(0x1D78, 1);
+    emit(0x1720, 0x00007000);
+    emit(0x1744, 0x00007500);
+    emit(0x1748, 0x00007600);
+    emit(0x1784, 0x00001042);
+    emit(0x1788, 0x00001042);
+    for (uint32_t stage = 0; stage < 4; ++stage) {
+        const uint32_t base = 0x1B00 + stage * 0x40;
+        emit(base + 0x00,
+             stage < 2 ? pitch_three_texture
+                       : stage == 2 ? 0x007FF000 : 0);
+        emit(base + 0x04,
+             stage < 2 ? 0x0661072E
+                       : stage == 2 ? 0x0771072E : 0);
+        emit(base + 0x08, stage < 3 ? 0x00030303 : 0);
+        emit(base + 0x0C, stage < 3 ? 0x4003FFC0 : 0);
+        emit(base + 0x10, stage == 0 ? 0x14000000 : 0);
+        emit(base + 0x14, stage < 3 ? 0x02022000 : 0);
+        emit(base + 0x1C, stage == 0 ? 0x050001E0 : 0);
+        emit(base + 0x20, 0);
+        emit(base + 0x24, 0);
+    }
+    emit(0x1E6C, 7);
+    emit(0x1E70, 0x00000063);
+    emit(0x1E74, 0);
+    emit(0x1E78, 0);
+    emit(0x1E60, 0x00011106);
+    for (uint32_t stage = 0; stage < 6; ++stage) {
+        emit(0x0AC0 + stage * 4, pitch_multi_color_icw[stage]);
+        emit(0x0260 + stage * 4, pitch_multi_alpha_icw[stage]);
+        emit(0x1E40 + stage * 4, pitch_multi_color_ocw[stage]);
+        emit(0x0AA0 + stage * 4, pitch_multi_alpha_ocw[stage]);
+        emit(0x0A60 + stage * 4,
+             stage == 3 ? 0xFF000100 : pitch_multi_factor0[stage]);
+        emit(0x0A80 + stage * 4, 0);
+    }
+    emit(0x0288, 0x0000000C);
+    emit(0x028C, 0x00001C80);
+    emit(0x1E20, 0);
+    emit(0x1E24, 0);
+    emit(0x17FC, 6);
+    emit(0x1800, 0x00010000);
+    emit(0x1808, 2);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.pitch_three_texture_batches() == 1);
+    CHECK(gpu.pitch_three_texture_triangles() == 1);
+    CHECK(gpu.pitch_three_texture_fragments() > 0);
+    CHECK(gpu.pitch_three_texture_depth_passes() ==
+          gpu.pitch_three_texture_fragments());
+    CHECK(gpu.pitch_three_texture_color_writes() ==
+          gpu.pitch_three_texture_depth_passes());
+    CHECK(gpu.pitch_three_texture_depth_writes() ==
+          gpu.pitch_three_texture_color_writes());
+    CHECK(gpu.pitch_three_texture_samples() ==
+          gpu.pitch_three_texture_depth_passes() * 2);
+    const uint32_t pitch_three_inside =
+        20 * pitch_three_stride + 20 * 4;
+    CHECK(get32(ram, pitch_three_color + pitch_three_inside) ==
+          0xB1192F0Au);
+    CHECK(get32(ram, pitch_three_depth + pitch_three_inside) ==
+          0x0000645Au);
+    CHECK(gpu.last_pitch_three_texture_raster_address() >=
+          pitch_three_color);
+    CHECK(gpu.last_pitch_three_texture_raster_address() <
+          pitch_three_color + pitch_three_stride * 480);
+    CHECK(gpu.pitch_three_texture_output_hash() !=
+          1469598103934665603ull);
+    CHECK(gpu.pitch_multi_texture_batches() == 2);
+
+    put32(ram, pitch_three_color + pitch_three_inside, 0x80402010);
+    put32(ram, pitch_three_depth + pitch_three_inside, 0xFFFFFF5A);
+    emit(0x0A6C, 0xFF12480B);
+    emit(0x17FC, 6);
+    emit(0x1800, 0x00010000);
+    emit(0x1808, 2);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.pitch_three_texture_batches() == 2);
+    CHECK(gpu.pitch_three_texture_triangles() == 2);
+    CHECK(get32(ram, pitch_three_color + pitch_three_inside) ==
+          0xB1245710u);
+    CHECK(get32(ram, pitch_three_depth + pitch_three_inside) ==
+          0x0000645Au);
+    CHECK(gpu.pitch_multi_texture_batches() == 2);
+
     // The leading remaining inline state is a linear resolve: PROJECT2D
     // coordinates in texels bilinearly sample a 1280x480 pitch texture into
     // a 640x480 pitch target. RGB comes from t0 and alpha from v0; only

@@ -3,6 +3,43 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-01 — A4: dynamic three-texture pitch family executes
+
+The retained `tex=7`, `shader=0x63` pitch family now executes instead of
+remaining recorder-only. Stages 0/1 cube-remap distinct perspective-correct
+directions and bilinearly sample the same 64x64 swizzled image. Although stage
+2 is enabled and fully programmed, the shader does not fetch or reference it.
+The six-stage combiner derives
+`source_alpha = 1-(1-max(dot(expand(t0),expand(t1)),0))^2`, then forms RGB as
+the fixed `0x0D3308` tint plus `source_alpha` times the witnessed dynamic
+stage-3 c0 RGB. With alpha testing disabled, every LEQUAL pass performs
+SRC_ALPHA/ONE_MINUS_SRC_ALPHA blending and paired pitch A8R8G8B8/Z24S8
+writes while preserving stencil.
+
+Focused coverage verifies the leading `FF000100` factor's exact blended output
+`0xB1192F0A` and the later `FF12480B` variant's `0xB1245710`, two cube samples
+per depth pass, paired color/depth writes, stencil preservation, independent
+counters/hash, and no regression to the earlier two-texture profile. The stage
+2 offset deliberately points outside valid RAM, proving that the shader-inert
+texture is not fetched. All nine direct tests pass, and the 500M smoke reaches
+no instances fault-free with empty stderr.
+
+The final 6.4B acceptance replay reaches budget fault-free with empty stderr.
+The semantic dynamic-factor profile covers 2,104 batches across 101 retained
+states, rasterizing 199,617 front-facing strip triangles and 512,754
+fragments. Of those, 6,400 pass LEQUAL, perform 12,800 samples, and commit
+6,400 paired color/Z24 writes with deterministic hash `a9f6884dc0abadf3`.
+Recorder-only volume falls from 4,037 to 1,933 batches and from 961 to 860
+states. Independent raster hashes, inline-blit `a6fa8d7f361f0383`,
+transform `2824162d794cc5de`, and final scanout `73feb194b7694383` remain
+unchanged. The later shared-target inline-additive hash rebaselines from
+`1567692d051ce1d8` to `763144f45d489441` with its counts unchanged, as
+expected from the newly interleaved color/depth writes.
+
+**Next:** broaden the linear inline-blit profile over the leading 47-batch
+variant's inert combiner-factor constants, then decode the 42-batch `tex=5`
+pitch triangle-list states and continue host-input plumbing.
+
 ## 2026-08-01 — A4: inline linear dashboard blits execute
 
 The leading retained inline one-texture state now executes its 106 triangle-list
