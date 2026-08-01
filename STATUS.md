@@ -3,6 +3,36 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-07-31 — A4: inline-array vertices execute
+
+The dashboard's remaining `NV097_INLINE_ARRAY` submissions now enter the same transform
+and primitive pipeline as DMA/indexed geometry. The decoder derives a component-aligned
+interleaved stride from all 16 active array formats, accepts xemu's word-padded trailing
+bytes, decodes the six already-supported Xbox formats, and retains disabled attributes as
+current PGRAPH values. Inline payloads cannot mix with indexed elements in one batch and
+remain bounded by the same explicit safety limits. Enabled inline attributes update their
+last values after the draw, matching the normal array path without claiming DMA fetches.
+
+Focused coverage interleaves float4 position, packed UB_D3D color, an additional float4,
+and three texture vectors. It verifies 63 words become exactly three vertices/six
+attributes each, traverse the fixed transform, assemble a triangle, and reproduce the
+projected textured raster result with no vertex DMA reads. All nine direct tests pass.
+
+The 500M gate executes 29 dashboard inline batches; the full 6.4B acceptance run executes
+all 485 batches fault-free. Their 5,820 words decode into 1,455 vertices and 2,910
+attributes. Full totals become 436,941 vertex batches, 48,556,397 submitted/transformed
+vertices, and 45,998,077 triangles, with the expanded position-stream hash
+`2824162d794cc5de`. The depth, radial, two textured-profile, and final scanout hashes remain
+`9424b7ed8661f321`, `b57945aef12a9289`, `537c8e788aaf4e83`,
+`117e65d4ec81492a`, and `73feb194b7694383`.
+
+The new state census makes the next draw boundary concrete: inline triangles use a pitch
+A8R8G8B8 target, one projected 256x256 swizzled texture, source-alpha/ONE additive
+blending, ALWAYS depth with no Z writes, and a one-stage texture-times-constant combiner.
+
+**Next:** execute that inline pitch/additive color profile. OHCI TD/XID input and NVNet
+RX/transport remain subsequent A4 work.
+
 ## 2026-07-31 — A4: projected textured sibling executes
 
 The lower-volume shader-`0x10c61` profile now executes through all three effective texture

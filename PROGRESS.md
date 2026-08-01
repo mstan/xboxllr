@@ -31,11 +31,12 @@ harvested from xemu, silicon-corrected against a live console. GPL-2.
   its descriptor engine; guest-programmed scanout can be dumped/presented; and Kelvin
   color/depth/stencil clears, indexed vertex DMA/fetch/assembly, and programmable vertex
   shaders plus the exercised fixed-function transform subset now execute. The first
-  triangle profiles write the dashboard's pitch-Z16 depth prepass, dominant untextured
-  swizzled radial-combiner pass, and both witnessed indexed 256x256 textured
+  indexed and inline vertices now traverse the same programmable/fixed transforms. The
+  landed triangle profiles write the dashboard's pitch-Z16 depth prepass, dominant
+  untextured swizzled radial-combiner pass, and both witnessed indexed 256x256 textured
   A8R8G8B8/Z24S8 passes.
-- **Immediate burn-down path:** execute the 485 sparse `INLINE_ARRAY` batches and census
-  any remaining low-frequency draw profiles →
+- **Immediate burn-down path:** execute the inline path's pitch A8R8G8B8, one-texture,
+  additive-blend profile →
   extend OHCI into TD execution and XID input → add NVNet RX and external transport.
 - **Not started:** A5 end-to-end retail-dashboard navigation and Arc 2 game work.
 
@@ -138,6 +139,16 @@ dependency chain peeled this session is:
     rasterize 10,368 triangles, perform 2,044,719 samples, and commit 681,573 paired writes
     with hash `117e65d4ec81492a`. Earlier depth/radial/transform hashes remain unchanged;
     targets `0x0299f394` and `0x029a2980` are offscreen and final scanout stays the clear.
+22. sparse inline-array geometry → **fixed through interleaved decode, transform, and
+    primitive assembly**. `INLINE_ARRAY` derives component-aligned slot offsets from the
+    active array formats, decodes all six supported Xbox formats without DMA, preserves
+    disabled/last attribute values, and submits into the existing programmable/fixed
+    transform path. At 6.4B, all 485 batches consume 5,820 words into 1,455 vertices and
+    2,910 attribute decodes, bringing totals to 436,941 batches, 48,556,397 vertices, and
+    45,998,077 triangles with position hash `2824162d794cc5de`. Existing raster hashes and
+    final scanout are unchanged. The inline states expose the next profile: pitch
+    A8R8G8B8, one projected texture, source-alpha/ONE additive blending, ALWAYS depth, and
+    no depth writes.
 
 ## How to build & run
 
@@ -178,8 +189,8 @@ Deliberate documented stand-ins currently in place (fine for boot, replaced late
   readout/presentation, Kelvin pitch-surface clears, and indexed vertex fetch/primitive
   assembly plus programmable and exercised fixed-function transforms work. The witnessed
   pitch-Z16 depth-only, untextured swizzled radial-color, and both witnessed indexed
-  shader-`0x10c60`/`0x10c61` textured triangle profiles rasterize; other low-frequency
-  draws and inline arrays do not yet.
+  shader-`0x10c60`/`0x10c61` textured triangle profiles rasterize. Inline arrays execute
+  through transform/assembly; their pitch/additive color profile remains recorder-only.
 - APU has the load-bearing voice-list, VOICE_OFF, timed idle-voice FE trap, notifier, and IRQ
   lifecycle, but still no DSP/audio synthesis. ACI advances real PCM descriptors and IRQs
   headlessly but produces no host audio.
@@ -230,9 +241,9 @@ Driver: `python tools/xbox_agent.py --host 192.168.4.81 {ping|info|read|exec <fi
 
 ## Next steps (priority order)
 
-1. The indexed Kelvin paths, pitch-Z16 depth prepass, dominant radial color, and both
-   witnessed shader-`0x10c60`/`0x10c61` textured passes are landed. Next execute the
-   485 sparse `INLINE_ARRAY` batches and census any remaining low-frequency draw profiles.
+1. Indexed and inline Kelvin submission, the pitch-Z16 depth prepass, dominant radial
+   color, and both shader-`0x10c60`/`0x10c61` textured passes are landed. Next execute the
+   inline path's pitch A8R8G8B8, one-texture, source-alpha/ONE additive profile.
 2. Extend OHCI: control/bulk TD execution first, then the Xbox XID controller protocol and
    host input mapping.
 3. Add NVNet RX descriptor DMA and external packet transport when the guest or navigation

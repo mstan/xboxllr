@@ -833,6 +833,49 @@ int main() {
     CHECK(gpu.projected_color_writes() == projected_writes);
     CHECK(get32(ram, 0x20000 + textured_inside) == 0xFF0F3F07u);
 
+    // INLINE_ARRAY interleaves every enabled attribute in slot order using
+    // the programmed component formats, with no vertex DMA fetch. Reuse the
+    // projected profile so the decoded position/color/three texture vectors
+    // must traverse the existing transform and raster paths unchanged.
+    constexpr size_t kInlineVertexBytes = 84;
+    std::vector<uint32_t> inline_words(
+        3 * kInlineVertexBytes / sizeof(uint32_t), 0);
+    auto* inline_bytes = reinterpret_cast<uint8_t*>(inline_words.data());
+    for (size_t vertex = 0; vertex < 3; ++vertex) {
+        const size_t offset = vertex * kInlineVertexBytes;
+        std::memcpy(inline_bytes + offset,
+                    radial_positions + vertex * 4, 4 * sizeof(float));
+        std::memcpy(inline_bytes + offset + 16,
+                    &textured_colors[vertex], sizeof(uint32_t));
+        const std::array<float, 4> inline_specular{{0, 0, 0, 1}};
+        std::memcpy(inline_bytes + offset + 20,
+                    inline_specular.data(), 4 * sizeof(float));
+        std::memcpy(inline_bytes + offset + 36,
+                    projected_texture0_coords + vertex * 4,
+                    4 * sizeof(float));
+        std::memcpy(inline_bytes + offset + 52,
+                    texture1_coords + vertex * 4, 4 * sizeof(float));
+        std::memcpy(inline_bytes + offset + 68,
+                    texture2_coords + vertex * 4, 4 * sizeof(float));
+    }
+    const uint64_t vertices_before_inline = gpu.submitted_vertices();
+    const uint64_t projected_writes_before_inline =
+        gpu.projected_color_writes();
+    emit(0x17FC, 5);
+    for (uint32_t word : inline_words) emit(0x1818, word);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.inline_array_batches() == 1);
+    CHECK(gpu.inline_array_words() == inline_words.size());
+    CHECK(gpu.inline_array_vertices() == 3);
+    CHECK(gpu.inline_attribute_decodes() == 18);
+    CHECK(gpu.submitted_vertices() == vertices_before_inline + 3);
+    CHECK(gpu.projected_color_batches() == 3);
+    CHECK(gpu.projected_color_triangles() == 3);
+    CHECK(gpu.projected_color_writes() > projected_writes_before_inline);
+    CHECK(get32(ram, 0x20000 + textured_inside) == 0xFF0F3F07u);
+
     // AvSetDisplayMode's scanout path: VGA CRTC pitch/depth, PRAMDAC dimensions/format,
     // and PCRTC_START resolve unified-RAM RGB565 into deterministic RGBA output.
     auto crtc_write = [&](uint8_t index, uint8_t value) {

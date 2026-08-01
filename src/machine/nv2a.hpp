@@ -162,6 +162,12 @@ public:
     uint64_t vertex_batches() const { return vertex_batches_; }
     uint64_t submitted_vertices() const { return submitted_vertices_; }
     uint64_t vertex_attribute_fetches() const { return vertex_attribute_fetches_; }
+    uint64_t inline_array_batches() const { return inline_array_batches_; }
+    uint64_t inline_array_words() const { return inline_array_words_total_; }
+    uint64_t inline_array_vertices() const { return inline_array_vertices_total_; }
+    uint64_t inline_attribute_decodes() const {
+        return inline_attribute_decodes_;
+    }
     uint64_t assembled_primitives() const { return assembled_primitives_; }
     uint64_t assembled_triangles() const { return assembled_triangles_; }
     uint32_t largest_vertex_index() const { return largest_vertex_index_; }
@@ -454,9 +460,17 @@ private:
     std::array<VertexAttribute, 16> vertex_attributes_{};
     uint8_t primitive_mode_ = 0;
     std::vector<uint32_t> vertex_indices_;
+    using VertexInputs =
+        std::array<std::array<float, 4>, 16>;
+    std::vector<uint32_t> inline_array_words_;
+    std::vector<VertexInputs> inline_vertices_;
     uint64_t vertex_batches_ = 0;
     uint64_t submitted_vertices_ = 0;
     uint64_t vertex_attribute_fetches_ = 0;
+    uint64_t inline_array_batches_ = 0;
+    uint64_t inline_array_words_total_ = 0;
+    uint64_t inline_array_vertices_total_ = 0;
+    uint64_t inline_attribute_decodes_ = 0;
     uint64_t assembled_primitives_ = 0;
     uint64_t assembled_triangles_ = 0;
     uint32_t largest_vertex_index_ = 0;
@@ -541,6 +555,7 @@ private:
                              uint32_t clear_value, const char* plane,
                              uint32_t& first_address);
     bool set_vertex_array_format(uint32_t slot, uint32_t parameter);
+    bool decode_inline_array();
     bool submit_vertex_batch();
     bool rasterize_witnessed_batch();
     bool fetch_vertex_attribute(uint32_t slot, uint32_t index);

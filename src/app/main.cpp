@@ -630,6 +630,12 @@ int main(int argc, char** argv) {
                             (unsigned long long)mach.nv2a()->assembled_primitives(),
                             (unsigned long long)mach.nv2a()->assembled_triangles(),
                             mach.nv2a()->largest_vertex_index());
+                std::printf("[2bl] NV2A inline arrays: batches/words/vertices/"
+                            "attr-decodes=%llu/%llu/%llu/%llu\n",
+                            (unsigned long long)mach.nv2a()->inline_array_batches(),
+                            (unsigned long long)mach.nv2a()->inline_array_words(),
+                            (unsigned long long)mach.nv2a()->inline_array_vertices(),
+                            (unsigned long long)mach.nv2a()->inline_attribute_decodes());
                 std::printf("[2bl] NV2A vertex modes:");
                 for (uint32_t mode = 1; mode <= 10; ++mode) {
                     uint64_t count = mach.nv2a()->primitive_mode_count(mode);

@@ -837,12 +837,135 @@ bool Nv2a::fetch_vertex_attribute(uint32_t slot, uint32_t index) {
     return true;
 }
 
-bool Nv2a::submit_vertex_batch() {
-    if (vertex_indices_.empty()) return true;
-    if (primitive_mode_ == 0 || primitive_mode_ >= primitive_mode_counts_.size()) {
-        fault_("NV2A indexed vertices submitted outside a valid BEGIN/END");
+bool Nv2a::decode_inline_array() {
+    inline_vertices_.clear();
+    if (inline_array_words_.empty()) return true;
+
+    std::array<size_t, 16> offsets{};
+    size_t vertex_size = 0;
+    bool has_position = false;
+    for (size_t slot = 0; slot < vertex_attributes_.size(); ++slot) {
+        const auto& attr = vertex_attributes_[slot];
+        if (!attr.count) continue;
+        if (!attr.element_size) {
+            fault_("NV2A inline array has an invalid attribute size");
+            return false;
+        }
+        const size_t alignment = attr.element_size;
+        vertex_size = (vertex_size + alignment - 1) & ~(alignment - 1);
+        offsets[slot] = vertex_size;
+        const size_t bytes =
+            static_cast<size_t>(attr.element_size) * attr.count;
+        if (vertex_size > SIZE_MAX - bytes) {
+            fault_("NV2A inline array vertex layout overflows");
+            return false;
+        }
+        vertex_size += bytes;
+        vertex_size = (vertex_size + alignment - 1) & ~(alignment - 1);
+        if (slot == 0) has_position = true;
+    }
+    if (!has_position || !vertex_size) {
+        fault_("NV2A inline array has no position attribute");
         return false;
     }
+
+    const size_t total_bytes = inline_array_words_.size() * sizeof(uint32_t);
+    const size_t vertex_count = total_bytes / vertex_size;
+    if (!vertex_count || vertex_count >= (1u << 24)) {
+        fault_("NV2A inline array vertex count exceeds safety bound");
+        return false;
+    }
+    const auto* bytes =
+        reinterpret_cast<const uint8_t*>(inline_array_words_.data());
+    inline_vertices_.resize(vertex_count);
+    for (size_t vertex_index = 0; vertex_index < vertex_count;
+         ++vertex_index) {
+        auto& inputs = inline_vertices_[vertex_index];
+        for (size_t slot = 0; slot < vertex_attributes_.size(); ++slot) {
+            auto& attr = vertex_attributes_[slot];
+            inputs[slot] = attr.value;
+            if (!attr.count) continue;
+            const uint8_t* data =
+                bytes + vertex_index * vertex_size + offsets[slot];
+            auto& value = inputs[slot];
+            value = {{0.0f, 0.0f, 0.0f, 1.0f}};
+            switch (attr.format) {
+            case 0:
+            case 4:
+                for (uint32_t component = 0; component < attr.count;
+                     ++component) {
+                    value[component] =
+                        static_cast<float>(data[component]) / 255.0f;
+                }
+                break;
+            case 1:
+                for (uint32_t component = 0; component < attr.count;
+                     ++component) {
+                    int16_t element = 0;
+                    std::memcpy(&element, data + component * 2, 2);
+                    value[component] =
+                        element == INT16_MIN
+                            ? -1.0f
+                            : static_cast<float>(element) / 32767.0f;
+                }
+                break;
+            case 2:
+                std::memcpy(value.data(), data,
+                            static_cast<size_t>(attr.element_size) *
+                                attr.count);
+                break;
+            case 5:
+                for (uint32_t component = 0; component < attr.count;
+                     ++component) {
+                    int16_t element = 0;
+                    std::memcpy(&element, data + component * 2, 2);
+                    value[component] = static_cast<float>(element);
+                }
+                break;
+            case 6: {
+                int32_t packed = 0;
+                std::memcpy(&packed, data, sizeof(packed));
+                int32_t x = packed & 0x7FF;
+                int32_t y = (packed >> 11) & 0x7FF;
+                int32_t z = (packed >> 22) & 0x3FF;
+                if (x & 0x400) x |= ~0x7FF;
+                if (y & 0x400) y |= ~0x7FF;
+                if (z & 0x200) z |= ~0x3FF;
+                value[0] =
+                    x == -1024 ? -1.0f : static_cast<float>(x) / 1023.0f;
+                value[1] =
+                    y == -1024 ? -1.0f : static_cast<float>(y) / 1023.0f;
+                value[2] =
+                    z == -512 ? -1.0f : static_cast<float>(z) / 511.0f;
+                break;
+            }
+            default:
+                fault_("NV2A inline array format changed after validation");
+                inline_vertices_.clear();
+                return false;
+            }
+            ++inline_attribute_decodes_;
+        }
+    }
+    ++inline_array_batches_;
+    inline_array_words_total_ += inline_array_words_.size();
+    inline_array_vertices_total_ += vertex_count;
+    return true;
+}
+
+bool Nv2a::submit_vertex_batch() {
+    if (vertex_indices_.empty() && inline_vertices_.empty()) return true;
+    if (!vertex_indices_.empty() && !inline_vertices_.empty()) {
+        fault_("NV2A batch mixes indexed and inline-array vertices");
+        return false;
+    }
+    if (primitive_mode_ == 0 || primitive_mode_ >= primitive_mode_counts_.size()) {
+        fault_("NV2A vertices submitted outside a valid BEGIN/END");
+        return false;
+    }
+    const bool inline_array = !inline_vertices_.empty();
+    const size_t vertex_count =
+        inline_array ? inline_vertices_.size() : vertex_indices_.size();
 
     auto raster_sample = std::find_if(
         raster_state_samples_.begin(), raster_state_samples_.end(),
@@ -921,14 +1044,21 @@ bool Nv2a::submit_vertex_batch() {
         return false;
     }
     transformed_batch_.clear();
-    transformed_batch_.reserve(vertex_indices_.size());
+    transformed_batch_.reserve(vertex_count);
 
-    for (uint32_t index : vertex_indices_) {
-        largest_vertex_index_ = std::max(largest_vertex_index_, index);
-        for (uint32_t slot = 0; slot < vertex_attributes_.size(); ++slot) {
-            if (!fetch_vertex_attribute(slot, index)) {
-                if (program_parsed) nv2a_vsh_program_destroy(&program);
-                return false;
+    for (size_t vertex_index = 0; vertex_index < vertex_count; ++vertex_index) {
+        if (inline_array) {
+            for (uint32_t slot = 0; slot < vertex_attributes_.size(); ++slot)
+                vertex_attributes_[slot].value =
+                    inline_vertices_[vertex_index][slot];
+        } else {
+            const uint32_t index = vertex_indices_[vertex_index];
+            largest_vertex_index_ = std::max(largest_vertex_index_, index);
+            for (uint32_t slot = 0; slot < vertex_attributes_.size(); ++slot) {
+                if (!fetch_vertex_attribute(slot, index)) {
+                    if (program_parsed) nv2a_vsh_program_destroy(&program);
+                    return false;
+                }
             }
         }
         TransformedVertex vertex;
@@ -1005,7 +1135,7 @@ bool Nv2a::submit_vertex_batch() {
     if (program_parsed) nv2a_vsh_program_destroy(&program);
     if (!rasterize_witnessed_batch()) return false;
 
-    const uint64_t n = vertex_indices_.size();
+    const uint64_t n = vertex_count;
     uint64_t primitives = 0, triangles = 0;
     switch (primitive_mode_) {
     case 1:  // points
@@ -2445,12 +2575,19 @@ void Nv2a::dispatch_method(uint8_t channel, uint8_t subchannel, uint32_t method,
         set_vertex_array_format((method - 0x1760) / 4, parameter);
     } else if (method == 0x17FC) {
         if (parameter == 0) {
-            if (primitive_mode_ != 0) submit_vertex_batch();
+            if (primitive_mode_ != 0 &&
+                decode_inline_array()) {
+                submit_vertex_batch();
+            }
             primitive_mode_ = 0;
             vertex_indices_.clear();
+            inline_array_words_.clear();
+            inline_vertices_.clear();
         } else if (parameter <= 10 && primitive_mode_ == 0) {
             primitive_mode_ = static_cast<uint8_t>(parameter);
             vertex_indices_.clear();
+            inline_array_words_.clear();
+            inline_vertices_.clear();
         }
     } else if (method == 0x1800) {
         if (vertex_indices_.size() > (1u << 24) - 2) {
@@ -2474,6 +2611,16 @@ void Nv2a::dispatch_method(uint8_t channel, uint8_t subchannel, uint32_t method,
         }
         for (uint32_t i = 0; i < count; ++i)
             vertex_indices_.push_back(start + i);
+    } else if (method == 0x1818) {
+        if (primitive_mode_ == 0) {
+            fault_("NV2A inline-array data submitted outside BEGIN/END");
+            return;
+        }
+        if (inline_array_words_.size() >= (1u << 24)) {
+            fault_("NV2A inline-array payload exceeds safety bound");
+            return;
+        }
+        inline_array_words_.push_back(parameter);
     // NV097 semaphore methods. AvSetDisplayMode uses RELEASE as a GPU completion fence.
     } else if (method == 0x01A4) {
         uint32_t instance = 0;
