@@ -245,6 +245,18 @@ dependency chain peeled this session is:
     168 triangles and 51,609,600 samples/writes with hash `3f1f5a430082ada4`.
     Recorder-only volume falls from 1,933 to 1,871 batches and 860 to 858 states; every
     independent raster, transform, downstream inline-additive, and scanout hash is stable.
+33. front-culled tex5 pitch triangle lists → **fixed through projected and diffuse output**.
+    One exact raster envelope covers four retained 42-batch states. The projected signature
+    PROJECT2D-divides stage-0 coordinates and border-bilinearly samples the witnessed
+    16x128/256x256 swizzled A8R8G8B8 images; its programmed cube stage is output-inert and
+    unfetched. The shader-off sibling copies diffuse RGBA. Both cull FRONT winding, replace
+    pitch color, and perform writable LEQUAL Z24 while preserving stencil. At 6.4B, 168
+    batches rasterize 11,706 surviving triangles and 34,627,699 fragments; 10,316,807 depth
+    passes commit paired writes, 5,653,620 projected samples occur, and the profile hash is
+    `c1bde764442a20dd`. Recorder-only volume falls from 1,871 to 1,703 batches and 858 to
+    854 states. Earlier independent hashes plus transform/scanout remain stable; later
+    shared-target inline-blit and inline-additive outputs rebaseline to
+    `f055814e10fd11ef` and `979e32b12359dba4`.
 
 ## How to build & run
 
@@ -346,10 +358,10 @@ Driver: `python tools/xbox_agent.py --host 192.168.4.81 {ping|info|read|exec <fi
 
 ## Next steps (priority order)
 
-1. Decode the leading 42-batch `tex=5` pitch triangle-list states, including the
-   `shader=0xc01` projected/cube path and its combiner-only sibling, then continue the
-   remaining low-frequency Kelvin census. The indexed/inline submission paths and every
-   currently witnessed high-volume raster profile are landed.
+1. Decode the leading 41-batch `tex=7`, `shader=0xc61` four-vertex triangle-fan family,
+   then its 32-batch `shader=0x63` triangle-strip sibling and continue the remaining
+   low-frequency Kelvin census. The indexed/inline submission paths and every currently
+   witnessed high-volume raster profile are landed.
 2. OHCI TD scheduling and the Xbox XID controller protocol are landed. Plumb host input
    mapping when dashboard navigation begins exercising endpoint 2.
 3. Exercise the landed NVNet UDP tunnel against a useful peer/bridge as navigation requires;

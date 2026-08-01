@@ -3,6 +3,43 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-01 — A4: front-culled tex5 pitch draws execute
+
+The four leading retained `tex=5` pitch triangle-list states now execute through
+two exact pixel-source signatures under one shared raster envelope. The
+`shader=0xc01` path PROJECT2D-divides stage-0 coordinates and bilinearly samples
+either the witnessed 16x128 or 256x256 swizzled A8R8G8B8 image with
+CLAMP_TO_BORDER opaque black. Its programmed stage-2 cube is validated but has
+no route to color, alpha-test, or texture-kill, so it is not fetched. The
+shader-off sibling copies perspective-correct diffuse RGBA through its
+one-stage combiner. Both paths cull FRONT winding, replace pitch A8R8G8B8
+color, pass writable LEQUAL Z24, and preserve stencil; alpha testing and
+blending remain disabled.
+
+Focused coverage proves border-filtered projected output `0xFF201008`, direct
+D3DCOLOR output `0x80102040`, reversed-winding rejection, LEQUAL depth writes,
+stencil preservation, and exact sample/counter behavior. Deliberately invalid
+addresses for the output-inert cube and the shader-off texture prove that
+neither path performs an irrelevant guest-memory read. All nine direct
+executables pass. The 500M smoke reaches no instances fault-free with empty
+stderr.
+
+The final 6.4B acceptance replay reaches budget fault-free with empty stderr.
+It executes exactly 168 batches across the four retained states, rasterizing
+11,706 surviving triangles and 34,627,699 fragments. There are 10,316,807
+LEQUAL passes with paired color/Z24 writes and 5,653,620 stage-0 samples; the
+new profile hash is `c1bde764442a20dd`. Recorder-only volume falls from 1,871
+to 1,703 batches and from 858 to 854 states. Earlier independent raster hashes,
+transform `2824162d794cc5de`, and final scanout `73feb194b7694383` remain
+unchanged. Later shared-target profiles rebaseline as expected: inline blit
+keeps all counts and becomes `f055814e10fd11ef`; inline additive keeps its
+fragment/alpha/sample counts, commits 14,756,274 color writes, and becomes
+`979e32b12359dba4`.
+
+**Next:** decode the leading 41-batch `tex=7`, `shader=0xc61` four-vertex
+triangle-fan family, then its 32-batch `shader=0x63` triangle-strip sibling;
+continue the low-frequency census and host-input plumbing.
+
 ## 2026-08-01 — A4: disabled-state inline blit variants execute
 
 The linear dashboard-blit profile now classifies state semantically rather than

@@ -749,6 +749,19 @@ int main(int argc, char** argv) {
                             (unsigned long long)mach.nv2a()->pitch_three_texture_samples(),
                             mach.nv2a()->last_pitch_three_texture_raster_address(),
                             (unsigned long long)mach.nv2a()->pitch_three_texture_output_hash());
+                std::printf("[2bl] NV2A pitch-tex5: batches/tri/frags/depth/"
+                            "zwrite/cwrite/samples="
+                            "%llu/%llu/%llu/%llu/%llu/%llu/%llu "
+                            "last=%08x hash=%016llx\n",
+                            (unsigned long long)mach.nv2a()->pitch_tex5_batches(),
+                            (unsigned long long)mach.nv2a()->pitch_tex5_triangles(),
+                            (unsigned long long)mach.nv2a()->pitch_tex5_fragments(),
+                            (unsigned long long)mach.nv2a()->pitch_tex5_depth_passes(),
+                            (unsigned long long)mach.nv2a()->pitch_tex5_depth_writes(),
+                            (unsigned long long)mach.nv2a()->pitch_tex5_color_writes(),
+                            (unsigned long long)mach.nv2a()->pitch_tex5_samples(),
+                            mach.nv2a()->last_pitch_tex5_raster_address(),
+                            (unsigned long long)mach.nv2a()->pitch_tex5_output_hash());
                 std::printf("[2bl] NV2A inline-blit: "
                             "batches/tri/frags/writes/samples="
                             "%llu/%llu/%llu/%llu/%llu "
