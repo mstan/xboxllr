@@ -53,9 +53,16 @@ check against.
 
 ## Status
 
-**Planning.** No engine code yet. The plan was pressure-tested over two adversarial rounds
-with an external reviewer, then reshaped by maintainer direction (fork/harvest over
-from-scratch; arc structure). Awaiting final sign-off before Arc 1 / A0 begins.
+**Arc 1 / A4 — real firmware is producing visible LLE output.** The retail boot chain
+reaches the dashboard XBE through the modeled CPU and Xbox devices. The guest's PFIFO/PGRAPH
+stream now rasterizes into unified RAM, the retail kernel's flip queue drives PCRTC, and
+SDL3 presents the resulting scanout. A deterministic 500M-instruction capture visibly shows
+the early green Xbox boot-orb glow on the guest's 640x480 framebuffer—without a replacement
+kernel, D3D interception, or host-rendered substitute.
+
+The hardware floor is not complete: remaining low-frequency NV2A states, later boot/dashboard
+frames, host input plumbing, timing refinements, and broader device accuracy are still A4
+work. See `STATUS.md` for exact evidence and `PROGRESS.md` for the current burndown.
 
 ## Legal / distribution posture
 

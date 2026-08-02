@@ -22,17 +22,19 @@ proven against real hardware, with a game (Blinx) as the second arc.
 
 **Arc 1 / A4 — running dashboard with visible output and input.** The real firmware and
 kernel boot, FATX loads `xbmc.exe`, the boot animation completes through guest-driven NV2A
-flip/vblank interrupts, and dashboard user code now executes. Finish the device paths the
-dashboard actually exercises, produce the first faithful software-rendered framebuffer, and
-make the dashboard controllable without replacing guest kernel or application logic.
+flip/vblank interrupts, and dashboard user code now executes. The first faithful
+software-rendered boot frame is proven: PFIFO/PGRAPH writes the early green orb into unified
+RAM and the retail flip queue carries it through PCRTC to SDL3. Finish the remaining device
+and raster paths, later visible frames, and host input without replacing guest kernel or
+application logic.
 
 ## The ONE next milestone
 
-**Sustain the dashboard XBE past hardware initialization and show its first frame.** Continue
-from the 6.1B fault-free user-code checkpoint, implement the first required OHCI TD/XID or
-NIC dependency, and convert the recorded NV2A stream into a visible framebuffer. Completion
-means a dashboard-produced frame is observable and the XBE remains alive under input-device
-enumeration.
+**Show a recognizable later boot-logo/dashboard frame through the same LLE path.** Capture
+the animation before its 485th completed flip, execute any remaining output-affecting NV2A
+states exposed by that frame, and preserve the proven retail-kernel → PFIFO/PGRAPH → unified
+RAM → PCRTC chain. Completion means more than the first green glow is visible, with no HLE
+renderer or host framebuffer substitution; host input plumbing follows within A4.
 
 ## Not-yet (explicitly deferred, do not drift into these)
 

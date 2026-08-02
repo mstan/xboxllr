@@ -93,7 +93,8 @@ dependency chain peeled this session is:
     CRTC pitch/depth, and PRAMDAC dimensions/format resolve a validated unified-memory
     surface to RGBA; `--frame-dump` writes PPM and `--window` presents it through SDL3. At
     6.4B the guest selects 720x480x32 at `0x03c8c000`, pitch 3072. The frame is black because
-    the recorded NV097 clear/draw stream still has no raster side effects.
+    the recorded NV097 clear/draw stream still has no raster side effects. This is the
+    historical first-readout checkpoint; milestone 34 supersedes it with visible boot output.
 14. first raster operation → **fixed through Kelvin surface clears**. RAMHT object/class
     binding gates PGRAPH execution; color/zeta DMA contexts, pitch surfaces, masked color,
     Z16, and Z24S8 clear semantics write validated unified-memory rectangles. At 6.4B, 852
