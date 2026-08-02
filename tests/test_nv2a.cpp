@@ -222,6 +222,8 @@ int main() {
     CHECK(get32(ram, 0x5028) == 0xA1B2C3D4);
     CHECK(get32(ram, 0x502C) == 0);
     CHECK(get32(ram, 0x6000) == 0xABCDEF42);
+    CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x401A88, 4) == 0xABCDEF42);
+    CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x40186C, 4) == 0xAABBCCDD);
 
     // Dominant dashboard draw path: vertex DMA A/B, array formats/offsets, BEGIN/END,
     // packed 16-bit indices plus one 32-bit index, unified-memory fetch, and assembly.
@@ -1727,6 +1729,49 @@ int main() {
           inline_blit_first_writes * 3);
     CHECK(get32(ram, 0x400000 + inline_blit_inside) == 0x80202000);
     CHECK(get32(ram, 0x60000) == 0xDEADBEEF);
+
+    // CLAMP_TO_EDGE never samples the border color. The boot animation's
+    // otherwise-identical resolve uses transparent black instead.
+    emit(0x1B24, 0);
+    emit(0x17FC, 5);
+    emit(0x1800, 0x00010000);
+    emit(0x1808, 2);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.inline_linear_blit_batches() == 4);
+    CHECK(gpu.inline_linear_blit_triangles() == 4);
+    CHECK(gpu.inline_linear_blit_writes() ==
+          inline_blit_first_writes * 4);
+    CHECK(get32(ram, 0x400000 + inline_blit_inside) == 0x80202000);
+
+    // PROJECT2D ignores the P address mode; the boot resolve leaves it at WRAP.
+    emit(0x1B08, 0x00010303);
+    emit(0x17FC, 5);
+    emit(0x1800, 0x00010000);
+    emit(0x1808, 2);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.inline_linear_blit_batches() == 5);
+    CHECK(gpu.inline_linear_blit_triangles() == 5);
+    CHECK(gpu.inline_linear_blit_writes() ==
+          inline_blit_first_writes * 5);
+    CHECK(get32(ram, 0x400000 + inline_blit_inside) == 0x80202000);
+
+    // PROJECT2D also ignores the retained shadow-depth comparison function.
+    emit(0x1E6C, 0);
+    emit(0x17FC, 5);
+    emit(0x1800, 0x00010000);
+    emit(0x1808, 2);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.inline_linear_blit_batches() == 6);
+    CHECK(gpu.inline_linear_blit_triangles() == 6);
+    CHECK(gpu.inline_linear_blit_writes() ==
+          inline_blit_first_writes * 6);
+    CHECK(get32(ram, 0x400000 + inline_blit_inside) == 0x80202000);
 
     // Inline dashboard geometry uses a distinct linear color profile:
     // PROJECT2D texture * c0, alpha GEQUAL 1, then SRC_ALPHA/ONE ADD.

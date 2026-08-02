@@ -38,7 +38,9 @@ harvested from xemu, silicon-corrected against a live console. GPL-2.
   pitch-projected passes, the pitch single-texture fan and two-cube
   alpha-blend and dynamic three-texture passes, plus the inline path's pitch
   A8R8G8B8 projected-texture additive-blend pass and linear
-  1280x480-to-640x480 dashboard blits.
+  1280x480-to-640x480 dashboard blits. PGRAPH parameter shadows now carry the
+  retail flip queue's framebuffer address into PCRTC, so a 500M capture shows
+  the first guest-rendered green boot-orb glow through the full LLE scanout path.
 - **Immediate burn-down path:** census and execute the remaining low-frequency draw states
   → plumb host input into the landed XID controller → drive end-to-end dashboard navigation.
 - **Not started:** A5 end-to-end retail-dashboard navigation and Arc 2 game work.
@@ -257,6 +259,17 @@ dependency chain peeled this session is:
     854 states. Earlier independent hashes plus transform/scanout remain stable; later
     shared-target inline-blit and inline-additive outputs rebaseline to
     `f055814e10fd11ef` and `979e32b12359dba4`.
+
+34. boot-animation scanout → **fixed through the retail flip/resolve path**. Kelvin
+    method `0x1D8C` now shadows parameter A at PGRAPH `0x1A88` (and method
+    `0x1D90` shadows parameter B at `0x186C`), so the kernel's trapped-NOP
+    `0x304` handler queues framebuffer `0x032A4000` instead of zero. The inline
+    resolve accepts output-inert PROJECT2D P-axis, border-color, and shadow-depth
+    retained variants. At 500M, 29 full 640x480 resolves perform 8,908,800
+    samples/writes, PCRTC remains on `0x032A4000`, scanout hash is
+    `bee38a32a69372a1`, and the captured frame visibly contains the early green
+    boot-orb glow. This remains ROM/kernel/PFIFO/PGRAPH/RAM/PCRTC LLE with no
+    D3D interception or host framebuffer substitution.
 
 ## How to build & run
 

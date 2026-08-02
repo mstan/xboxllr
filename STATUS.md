@@ -3,6 +3,37 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-01 — A4: the LLE boot animation reaches real scanout
+
+The first visible Xbox BIOS frame now travels through the complete low-level path.
+Kelvin method `0x1D8C` already retained the guest's clear/parameter-A value, but
+PGRAPH MMIO did not expose its hardware shadow at `0x401A88`. The retail kernel's
+trapped-NOP `0x304` handler therefore read zero, queued zero as the next display
+address, and repeatedly wrote `PCRTC_START=0` even though the animation rendered
+elsewhere. PGRAPH now exposes parameter A/B at `0x1A88`/`0x186C`; the retail ISR
+consequently queues and displays the guest-selected `0x032A4000` surface.
+
+The boot resolve itself used three output-inert retained-state variants that the
+existing semantic inline-blit profile rejected: transparent-black versus
+opaque-black border color under U/V CLAMP_TO_EDGE, WRAP versus CLAMP on the
+unused P axis of PROJECT2D, and shadow compare 0 versus 7 when no shadow lookup
+is performed. Focused coverage proves all three variants retain identical
+bilinear output and exact coverage, and also proves the two method-to-PGRAPH
+parameter shadows.
+
+All nine direct tests pass. A clean 500M retail replay reaches budget with empty
+stderr, keeps PCRTC on `0x032A4000`, executes 29 full 640x480 resolves
+(8,908,800 fragments/writes/samples), and produces scanout hash
+`bee38a32a69372a1`. The captured 640x480 frame visibly contains the early green
+boot-orb glow. This is guest-generated rendering through ROM → retail kernel →
+PFIFO/PGRAPH → unified RAM → PCRTC; no D3D interception, HLE renderer, or host
+framebuffer substitution is involved. Recorder-only volume at this checkpoint
+falls from 58 to 29 batches.
+
+**Next:** capture a later boot-animation frame before the 485th flip, then
+continue the leading `tex=7`, `shader=0xc61` fan family and remaining
+low-frequency raster census.
+
 ## 2026-08-01 — A4: front-culled tex5 pitch draws execute
 
 The four leading retained `tex=5` pitch triangle-list states now execute through

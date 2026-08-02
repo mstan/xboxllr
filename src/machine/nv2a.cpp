@@ -250,6 +250,11 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
             case 0x710: return pgraph_surface();
             case 0x71C: return 0;  // NV_PGRAPH_INCREMENT (write-only)
             case 0x720: return pgraph_fifo_access_ ? 1u : 0u;
+            // Kelvin's clear-value methods also feed the two PGRAPH parameter shadows.
+            // The retail kernel reads PARAMETER_A after a trapped NOP 0x304 and queues it
+            // as the next PCRTC start address (the same hardware path documented by pbkit).
+            case 0x186C: return color_clear_value_;  // NV_PGRAPH_PARAMETER_B
+            case 0x1A88: return zeta_clear_value_;   // NV_PGRAPH_PARAMETER_A
             default: break;
         }
     } else if (blk->off == 0x101000) {  // PSTRAPS
@@ -1524,7 +1529,10 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         raster_state_[kRasterShaderStageProgram] == 0x00000001 &&
         raster_state_[kRasterShaderOtherStageInput] == 0x00210000 &&
         raster_state_[kRasterDotRgbMapping] == 0 &&
-        raster_state_[kRasterShadowDepthFunc] == 7 &&
+        // PROJECT2D does not perform shadow comparison; both retained values
+        // observed around the boot resolve are therefore equivalent.
+        (raster_state_[kRasterShadowDepthFunc] == 0 ||
+         raster_state_[kRasterShadowDepthFunc] == 7) &&
         raster_state_[kRasterCombinerControl] == 0x00000001 &&
         raster_state_[kRasterCombinerColorIcw0] == 0x08200000 &&
         raster_state_[kRasterCombinerAlphaIcw0] == 0x14200000 &&
@@ -1536,13 +1544,19 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         raster_state_[kRasterCombinerFinalFactor1] == 0;
     const bool inline_linear_blit_texture =
         raster_state_[kRasterTextureFormat0] == 0x0001122A &&
-        raster_state_[kRasterTextureAddress0] == 0x00030303 &&
+        // PROJECT2D consumes U/V only; the witnessed P-axis WRAP/CLAMP
+        // difference cannot affect this texture.
+        (raster_state_[kRasterTextureAddress0] == 0x00010303 ||
+         raster_state_[kRasterTextureAddress0] == 0x00030303) &&
         raster_state_[kRasterTextureFilter0] == 0x02022000 &&
         raster_state_[kRasterTextureControl0_0] == 0x4003FFC0 &&
         raster_state_[kRasterTextureControl1_0] == 0x14000000 &&
         raster_state_[kRasterTextureImageRect0] == 0x050001E0 &&
         raster_state_[kRasterTexturePalette0] == 0 &&
-        raster_state_[kRasterTextureBorderColor0] == 0xFF000000;
+        // The sampled U/V axes are CLAMP_TO_EDGE, so the two witnessed border
+        // colors are output-inert.
+        (raster_state_[kRasterTextureBorderColor0] == 0 ||
+         raster_state_[kRasterTextureBorderColor0] == 0xFF000000);
     const bool inline_linear_blit_surface =
         primitive_mode_ == 5 && surface_type == 1 &&
         anti_aliasing == 0 && color_format == 8 && zeta_format == 2 &&
