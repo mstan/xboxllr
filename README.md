@@ -28,8 +28,8 @@ real hardware). **Borrow** the host layer outright (SDL3, Vulkan/OpenGL — pure
 not faithfulness-critical). **Build ourselves** the parts that are the actual value: the
 deterministic machine wiring, the observability/cosim/hardware-conformance harness, the
 LLE-floor → opt-in-HLE framework, and the per-title packaging. Real **Xbox hardware** (via
-a homebrew probe agent) is the ground-truth oracle; xemu is a reference we harvest from and
-check against.
+the companion [`xboxlle-probe`](https://github.com/mstan/xboxlle-probe) homebrew agent) is
+the ground-truth oracle; xemu is a reference we harvest from and check against.
 
 ## The two arcs
 
@@ -38,6 +38,20 @@ check against.
   psxrecomp's BIOS shell.)
 - **Arc 2 — Blinx: The Time Sweeper**, the first game, on the proven Arc-1 platform, as its
   own per-title repo (`BlinxLLE`).
+
+## Companion hardware probe
+
+[`xboxlle-probe`](https://github.com/mstan/xboxlle-probe) is the independently built nxdk
+homebrew and host client used to collect ground truth from a physical original Xbox. It is
+kept as a separate repository because it does not participate in the emulator build and has
+its own hardware-safety, deployment, protocol, and AI-agent documentation.
+
+> [!CAUTION]
+> `xboxlle-probe` provides dangerous low-level hardware access. Incorrect use can crash,
+> corrupt, or brick a console. Read its warning and security documentation before using it.
+
+The original `agent/` and `tools/xbox_agent.py` files in this repository are retained as
+historical provenance. The standalone repository is the maintained, authoritative version.
 
 ## Where to read
 
@@ -50,6 +64,7 @@ check against.
 | The arc/milestone ladder | `docs/ROADMAP.md` |
 | What is true *right now* | `STATUS.md` |
 | What the maintainer must supply (BIOS/dumps/hardware) | `docs/INPUTS.md` |
+| How real-hardware measurements are collected | [`xboxlle-probe`](https://github.com/mstan/xboxlle-probe) |
 
 ## Status
 

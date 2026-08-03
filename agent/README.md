@@ -1,5 +1,11 @@
 # xlle-agent
 
+> [!IMPORTANT]
+> This directory is the historical prototype that proved real-Xbox probing worked. Active
+> development, current safety guardrails, human instructions, and AI-agent documentation now
+> live in [`xboxlle-probe`](https://github.com/mstan/xboxlle-probe). Do not treat this
+> prototype as the maintained or recommended version.
+
 A resident control/probe agent for the **real Xbox** — the hardware-oracle tier
 (PRINCIPLES §8, DESIGN §8). Once running on the console it hosts a TCP command server so the
 PC-side driver (`tools/xbox_agent.py`) can read/write guest memory, push and execute
