@@ -24,17 +24,19 @@ proven against real hardware, with a game (Blinx) as the second arc.
 kernel boot, FATX loads `xbmc.exe`, the boot animation completes through guest-driven NV2A
 flip/vblank interrupts, and dashboard user code now executes. The first faithful
 software-rendered boot frame is proven: PFIFO/PGRAPH writes the early green orb into unified
-RAM and the retail flip queue carries it through PCRTC to SDL3. Finish the remaining device
-and raster paths, later visible frames, and host input without replacing guest kernel or
-application logic.
+RAM and the retail flip queue carries it through PCRTC to SDL3. A live host-to-XID mapping
+now exists, but the observed dashboard run has not yet scheduled an endpoint poll. Finish
+the remaining output-affecting raster/device paths, reach a recognizable dashboard frame,
+and prove real menu input without replacing guest kernel or application logic.
 
 ## The ONE next milestone
 
-**Show a recognizable later boot-logo/dashboard frame through the same LLE path.** Capture
-the animation before its 485th completed flip, execute any remaining output-affecting NV2A
-states exposed by that frame, and preserve the proven retail-kernel → PFIFO/PGRAPH → unified
-RAM → PCRTC chain. Completion means more than the first green glow is visible, with no HLE
-renderer or host framebuffer substitution; host input plumbing follows within A4.
+**Show a recognizable dashboard frame and navigate its most basic menu through the same
+LLE path.** Execute the remaining output-affecting NV2A states, preserve the proven
+retail-kernel → PFIFO/PGRAPH → unified RAM → PCRTC chain, and make the guest schedule and
+consume real XID endpoint reports. Completion means a recognizable menu is visible and an
+observed D-pad/A/B action changes guest-owned menu state, with no HLE renderer, synthetic
+USB poll, or host framebuffer substitution.
 
 ## Not-yet (explicitly deferred, do not drift into these)
 

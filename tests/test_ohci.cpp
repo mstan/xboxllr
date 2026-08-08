@@ -186,6 +186,8 @@ int main() {
         };
 
     // Enumerate through ordinary control TD chains.
+    const uint64_t wdh_assertions_before = hc.wdh_assertions();
+    const uint64_t wdh_w1c_before = hc.wdh_w1c_acknowledgements();
     std::vector<uint8_t> response;
     submit_control(setup_packet(0x80, 0x06, 0x0100, 0, 64),
                    {}, 64, response, 0);
@@ -207,6 +209,66 @@ int main() {
     CHECK(response[4] == 1 && response[5] == 2);
     CHECK(response[6] == 20 && response[7] == 6);
     CHECK(hc.control_requests() == 4);
+    CHECK(hc.ep0_trace_count() == 4);
+    CHECK(hc.ep0_trace_dropped() == 0);
+    const auto& trace0 = hc.ep0_trace(0);
+    CHECK(trace0.address == 0 && trace0.request_type == 0x80 &&
+          trace0.request == 0x06 && trace0.value == 0x0100 &&
+          trace0.index == 0 && trace0.length == 64);
+    CHECK(trace0.outcome == xlle::Ohci::Ep0Outcome::kComplete &&
+          trace0.td_completions == 3 && trace0.last_condition_code == 0 &&
+          trace0.data_bytes == 18);
+    const auto& trace1 = hc.ep0_trace(1);
+    CHECK(trace1.address == 0 && trace1.request_type == 0x00 &&
+          trace1.request == 0x05 && trace1.value == 5 &&
+          trace1.length == 0);
+    CHECK(trace1.outcome == xlle::Ohci::Ep0Outcome::kComplete &&
+          trace1.td_completions == 2 && trace1.last_condition_code == 0 &&
+          trace1.data_bytes == 0);
+    const auto& trace2 = hc.ep0_trace(2);
+    CHECK(trace2.address == 5 && trace2.request_type == 0x00 &&
+          trace2.request == 0x09 && trace2.value == 1 &&
+          trace2.length == 0);
+    CHECK(trace2.outcome == xlle::Ohci::Ep0Outcome::kComplete &&
+          trace2.td_completions == 2 && trace2.last_condition_code == 0 &&
+          trace2.data_bytes == 0);
+    const auto& trace3 = hc.ep0_trace(3);
+    CHECK(trace3.address == 5 && trace3.request_type == 0xc1 &&
+          trace3.request == 0x06 && trace3.value == 0x4200 &&
+          trace3.index == 0 && trace3.length == 16);
+    CHECK(trace3.outcome == xlle::Ohci::Ep0Outcome::kComplete &&
+          trace3.td_completions == 3 && trace3.last_condition_code == 0 &&
+          trace3.data_bytes == 16);
+    CHECK(hc.wdh_assertions() == wdh_assertions_before + 4);
+    CHECK(hc.wdh_w1c_acknowledgements() == wdh_w1c_before + 3);
+    CHECK((hc.last_done_head() & 0xfffffff0u) != 0);
+    CHECK((hc.interrupt_status() & kIntrWd) != 0);
+    CHECK((hc.port_status(0) & 3u) == 3u);
+
+    // A completed trace must not remain associated with later endpoint-zero
+    // traffic. This deliberately submits a stray IN TD with no active control
+    // transfer; it stalls, but must not mutate the completed XID record.
+    const auto trace3_before_stray = hc.ep0_trace(3);
+    const uint32_t stray_ed = allocate(16);
+    const uint32_t stray_td = allocate(16);
+    const uint32_t stray_tail = allocate(16);
+    const uint32_t stray_buffer = allocate(1);
+    write_td(stray_td, kTdInitial | kTdIn | kTdR,
+             stray_buffer, stray_tail, stray_buffer);
+    write_ed(stray_ed, 5 | (64u << 16), stray_tail, stray_td, 0);
+    put32(ram, hcca + 0x84, 0);
+    hc.mmio_write(base + 0x0c, 4, 0xffffffffu);
+    hc.mmio_write(base + 0x20, 4, stray_ed);
+    hc.mmio_write(base + 0x08, 4, 1u << 1);
+    hc.mmio_write(base + 0x04, 4, 0x90);
+    hc.set_frame(++frame);
+    const auto& trace3_after_stray = hc.ep0_trace(3);
+    CHECK(trace3_after_stray.outcome == trace3_before_stray.outcome);
+    CHECK(trace3_after_stray.td_completions ==
+          trace3_before_stray.td_completions);
+    CHECK(trace3_after_stray.last_condition_code ==
+          trace3_before_stray.last_condition_code);
+    CHECK(trace3_after_stray.data_bytes == trace3_before_stray.data_bytes);
 
     // Exercise the bulk-list walker with a configured endpoint-2 IN report.
     xlle::Ohci::XidGamepadState state;
@@ -267,6 +329,15 @@ int main() {
     CHECK(hc.processed_eds() >= 7);
     CHECK(hc.processed_tds() == hc.retired_tds());
     CHECK(hc.done_writebacks() >= 6);
+
+    // The boot-facing diagnostic history is fixed-size: further valid EP0
+    // transfers execute normally but cannot grow the trace.
+    response.clear();
+    submit_control(setup_packet(0x80, 0x08, 0, 0, 1),
+                   {}, 1, response, 5);
+    CHECK(response.size() == 1 && response[0] == 1);
+    CHECK(hc.ep0_trace_count() == xlle::Ohci::kEp0TraceCapacity);
+    CHECK(hc.ep0_trace_dropped() == 1);
 
     hc.mmio_write(base + 0x08, 4, 1);  // HCR
     CHECK(hc.mmio_read(base + 0x04, 4) == 0);

@@ -59,6 +59,7 @@ void Ohci::reset() {
     control_response_.clear();
     control_output_.clear();
     control_response_offset_ = 0;
+    ep0_active_trace_ = -1;
     done_count_ = 7;
     if (xid_attached_) {
         regs_[21] = kPortCcs | kPortCsc | kPortPps;
@@ -103,6 +104,8 @@ void Ohci::write_reg(uint32_t index, uint32_t value) {
             if (regs_[2] & kStatusHcr) reset();
             return;
         case 3:  // HcInterruptStatus: W1C
+            if ((value & kIntrWd) && (regs_[3] & kIntrWd))
+                ++wdh_w1c_acknowledgements_;
             regs_[3] &= ~value;
             update_irq();
             return;
@@ -439,6 +442,58 @@ void Ohci::finish_control_transfer() {
     control_response_.clear();
     control_output_.clear();
     control_response_offset_ = 0;
+    if (ep0_active_trace_ >= 0) {
+        Ep0Trace& trace = ep0_trace_[static_cast<size_t>(ep0_active_trace_)];
+        if (trace.outcome == Ep0Outcome::kPending)
+            trace.outcome = Ep0Outcome::kComplete;
+    }
+}
+
+void Ohci::begin_ep0_trace(uint8_t address, const SetupPacket& setup,
+                           TransferResult result) {
+    if (ep0_active_trace_ >= 0) {
+        Ep0Trace& previous =
+            ep0_trace_[static_cast<size_t>(ep0_active_trace_)];
+        if (previous.outcome == Ep0Outcome::kPending)
+            previous.outcome = Ep0Outcome::kError;
+    }
+    ep0_active_trace_ = -1;
+    if (ep0_trace_count_ == ep0_trace_.size()) {
+        ++ep0_trace_dropped_;
+        return;
+    }
+    Ep0Trace& trace = ep0_trace_[ep0_trace_count_];
+    trace.address = address;
+    trace.request_type = setup.request_type;
+    trace.request = setup.request;
+    trace.value = setup.value;
+    trace.index = setup.index;
+    trace.length = setup.length;
+    trace.outcome = result == TransferResult::kStall
+                        ? Ep0Outcome::kStalled
+                        : Ep0Outcome::kPending;
+    trace.td_completions = 0;
+    trace.last_condition_code = 0;
+    trace.data_bytes = 0;
+    ep0_active_trace_ = static_cast<int>(ep0_trace_count_++);
+}
+
+void Ohci::record_ep0_td_completion(const EndpointDescriptor& ed,
+                                    uint32_t condition_code) {
+    if (ep0_active_trace_ < 0 || ((ed.flags >> 7) & 0xfu) != 0)
+        return;
+    Ep0Trace& trace = ep0_trace_[static_cast<size_t>(ep0_active_trace_)];
+    if ((ed.flags & 0x7fu) != trace.address) return;
+    if (trace.td_completions != 0xffu) ++trace.td_completions;
+    trace.last_condition_code = static_cast<uint8_t>(condition_code);
+    if (condition_code == kCcStall)
+        trace.outcome = Ep0Outcome::kStalled;
+    else if (condition_code != kCcNoError)
+        trace.outcome = Ep0Outcome::kError;
+    // A status stage marks the trace complete before retirement; stalls and
+    // transfer errors are terminal at the TD that reports them.
+    if (trace.outcome != Ep0Outcome::kPending)
+        ep0_active_trace_ = -1;
 }
 
 Ohci::TransferResult Ohci::device_transfer(
@@ -543,6 +598,7 @@ bool Ohci::retire_td(uint32_t ed_address, EndpointDescriptor& ed,
         !write_memory(ed_address + 8, &ed.head, sizeof(ed.head), "ED head")) {
         return false;
     }
+    record_ep0_td_completion(ed, condition_code);
     ++retired_tds_;
     return true;
 }
@@ -593,6 +649,11 @@ bool Ohci::process_td(uint32_t ed_address, EndpointDescriptor& ed,
     const auto result = device_transfer(
         static_cast<uint8_t>(ed.flags & 0x7fu), endpoint, direction,
         buffer.data(), packet_length, buffer.data(), packet_length, actual);
+    if (endpoint == 0 && direction == kDirectionSetup &&
+        result != TransferResult::kNak) {
+        begin_ep0_trace(static_cast<uint8_t>(ed.flags & 0x7fu),
+                        control_setup_, result);
+    }
     if (result == TransferResult::kNak) {
         endpoint_blocked = true;
         return true;
@@ -603,6 +664,13 @@ bool Ohci::process_td(uint32_t ed_address, EndpointDescriptor& ed,
     if (actual > packet_length) {
         fault_(std::string(name()) + ": XID returned more data than TD buffer");
         return false;
+    }
+    if (endpoint == 0 && direction != kDirectionSetup &&
+        ep0_active_trace_ >= 0) {
+        Ep0Trace& trace =
+            ep0_trace_[static_cast<size_t>(ep0_active_trace_)];
+        if ((ed.flags & 0x7fu) == trace.address)
+            trace.data_bytes += static_cast<uint32_t>(actual);
     }
     if (direction == kDirectionIn && actual &&
         !write_td_buffer(td, actual, buffer.data())) {
@@ -701,6 +769,8 @@ void Ohci::frame_step() {
         done_count_ = 7;
         regs_[3] |= kIntrWd;
         ++done_writebacks_;
+        ++wdh_assertions_;
+        last_done_head_ = done_writeback;
     } else if (done_count_ != 0 && done_count_ != 7) {
         --done_count_;
     }

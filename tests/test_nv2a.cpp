@@ -1366,7 +1366,6 @@ int main() {
     CHECK(gpu.pitch_three_texture_output_hash() !=
           1469598103934665603ull);
     CHECK(gpu.pitch_multi_texture_batches() == 2);
-
     put32(ram, pitch_three_color + pitch_three_inside, 0x80402010);
     put32(ram, pitch_three_depth + pitch_three_inside, 0xFFFFFF5A);
     emit(0x0A6C, 0xFF12480B);
@@ -1383,6 +1382,77 @@ int main() {
     CHECK(get32(ram, pitch_three_depth + pitch_three_inside) ==
           0x0000645Au);
     CHECK(gpu.pitch_multi_texture_batches() == 2);
+
+    // Establish the exact 32-batch boot factor with border zero, then rerun
+    // only the border as opaque black. Shader 0x63 cube sampling cannot consult
+    // the 2D border, so output and every unit of raster work must match.
+    put32(ram, pitch_three_color + pitch_three_inside, 0x80402010);
+    put32(ram, pitch_three_depth + pitch_three_inside, 0xFFFFFF5A);
+    emit(0x0A6C, 0xFF16590D);
+    const uint64_t before_border_fragments =
+        gpu.pitch_three_texture_fragments();
+    const uint64_t before_border_passes =
+        gpu.pitch_three_texture_depth_passes();
+    const uint64_t before_border_writes =
+        gpu.pitch_three_texture_color_writes();
+    const uint64_t before_border_samples =
+        gpu.pitch_three_texture_samples();
+    emit(0x17FC, 6);
+    emit(0x1800, 0x00010000);
+    emit(0x1808, 2);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.pitch_three_texture_batches() == 3);
+    CHECK(gpu.pitch_three_texture_triangles() == 3);
+    const uint64_t border_zero_fragments =
+        gpu.pitch_three_texture_fragments() - before_border_fragments;
+    const uint64_t border_zero_passes =
+        gpu.pitch_three_texture_depth_passes() - before_border_passes;
+    const uint64_t border_zero_writes =
+        gpu.pitch_three_texture_color_writes() - before_border_writes;
+    const uint64_t border_zero_samples =
+        gpu.pitch_three_texture_samples() - before_border_samples;
+    const uint32_t border_zero_color =
+        get32(ram, pitch_three_color + pitch_three_inside);
+    const uint32_t border_zero_depth =
+        get32(ram, pitch_three_depth + pitch_three_inside);
+
+    put32(ram, pitch_three_color + pitch_three_inside, 0x80402010);
+    put32(ram, pitch_three_depth + pitch_three_inside, 0xFFFFFF5A);
+    emit(0x1B24, 0xFF000000);
+    emit(0x17FC, 6);
+    emit(0x1800, 0x00010000);
+    emit(0x1808, 2);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.pitch_three_texture_batches() == 4);
+    CHECK(gpu.pitch_three_texture_triangles() == 4);
+    CHECK(gpu.pitch_three_texture_fragments() - before_border_fragments ==
+          border_zero_fragments * 2);
+    CHECK(gpu.pitch_three_texture_depth_passes() - before_border_passes ==
+          border_zero_passes * 2);
+    CHECK(gpu.pitch_three_texture_color_writes() - before_border_writes ==
+          border_zero_writes * 2);
+    CHECK(gpu.pitch_three_texture_samples() - before_border_samples ==
+          border_zero_samples * 2);
+    CHECK(get32(ram, pitch_three_color + pitch_three_inside) ==
+          border_zero_color);
+    CHECK(get32(ram, pitch_three_depth + pitch_three_inside) ==
+          border_zero_depth);
+
+    // Do not turn output-inertness into a broad wildcard: no other border value
+    // has been witnessed for this retained profile.
+    emit(0x1B24, 0xFF010203);
+    emit(0x17FC, 6);
+    emit(0x1800, 0x00010000);
+    emit(0x1808, 2);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.pitch_three_texture_batches() == 4);
+    CHECK(gpu.pitch_three_texture_triangles() == 4);
 
     // The leading tex=5 pitch family uses FRONT culling. Its projected path
     // bilinearly samples stage 0 and copies RGB with c0 alpha one while the
@@ -1929,6 +1999,150 @@ int main() {
     CHECK(get32(ram, 0x20000 + 20 * 256 + 20 * 4) == 0x30405060u);
     CHECK(get32(ram, 0x60000 + 20 * 256 + 20 * 4) ==
           ((50u << 8) | 0x5Au));
+
+    // The leading RS0 state from probe-reduced-diag-6.4b is a four-vertex
+    // fan.  Its one combiner modulates PROJECT2D t0 by C0 (A0/FF/40); t1/t2
+    // are enabled but do not feed that combiner.  Keep their captured state
+    // exact so a near miss faults rather than silently widening the profile.
+    constexpr uint32_t rs0_color = 0x00020000;
+    constexpr uint32_t rs0_depth = 0x00300000;
+    constexpr uint32_t rs0_texture = 0x001C0000;
+    constexpr uint32_t rs0_pitch = 0x1400;
+    std::memset(ram.data() + rs0_color, 0, rs0_pitch * 480);
+    for (uint32_t offset = 0; offset < rs0_pitch * 480; offset += 4)
+        put32(ram, rs0_depth + offset, 0x00FFFF00);
+    std::memset(ram.data() + rs0_texture, 0, 256 * 256 * 4);
+    for (uint32_t y = 0; y < 256; ++y)
+        for (uint32_t x = 0; x < 256; ++x)
+            put_rgb_texture(rs0_texture, 256, 256, x, y, 0xFF010203);
+    put_rgb_texture(rs0_texture, 256, 256, 0, 0, 0xFF804020);
+    const uint32_t rs0_inside = 20 * rs0_pitch + 20 * 4;
+    put32(ram, rs0_color + rs0_inside, 0x10203040);
+    const float rs0_positions[] = {
+        10, 10, 100, 1, 50, 10, 100, 1,
+        50, 50, 100, 1, 10, 50, 100, 1,
+    };
+    const float rs0_texcoords[] = {
+        -4.0f / 256, -4.0f / 256, 0, 1,
+        -4.0f / 256, -4.0f / 256, 0, 1,
+        -4.0f / 256, -4.0f / 256, 0, 1,
+        -4.0f / 256, -4.0f / 256, 0, 1,
+    };
+    std::vector<uint32_t> rs0_words(4 * kInlineVertexBytes / 4, 0);
+    auto* rs0_bytes = reinterpret_cast<uint8_t*>(rs0_words.data());
+    for (size_t vertex = 0; vertex < 4; ++vertex) {
+        const size_t offset = vertex * kInlineVertexBytes;
+        std::memcpy(rs0_bytes + offset, rs0_positions + vertex * 4, 16);
+        std::memcpy(rs0_bytes + offset + 36, rs0_texcoords + vertex * 4, 16);
+        std::memcpy(rs0_bytes + offset + 52, rs0_texcoords + vertex * 4, 16);
+        std::memcpy(rs0_bytes + offset + 68, rs0_texcoords + vertex * 4, 16);
+    }
+    emit(0x0200, 0x05000000); emit(0x0204, 0x01E00000);
+    emit(0x0208, 0x00000128); emit(0x020C, 0x14001400);
+    emit(0x0210, rs0_color); emit(0x0214, rs0_depth);
+    emit(0x02C0, 0x04FF0000); emit(0x02E0, 0x01DF0000);
+    emit(0x0300, 0); emit(0x0304, 1); emit(0x0308, 1); emit(0x030C, 1);
+    emit(0x0310, 0); emit(0x033C, 0x0206); emit(0x0340, 1);
+    emit(0x0344, 0x0302); emit(0x0348, 1); emit(0x0350, 0x8006);
+    emit(0x0354, 0x0203); emit(0x0358, 0x01010101); emit(0x035C, 0);
+    emit(0x0384, 0x40800000); emit(0x0388, 0x41200000);
+    emit(0x038C, 0x1B02); emit(0x0390, 0x1B02); emit(0x0394, 0);
+    emit(0x0398, 0x4B7FFFFF); emit(0x039C, 0x0405); emit(0x03A0, 0x0900);
+    emit(0x1D78, 1);
+    for (uint32_t stage = 0; stage < 4; ++stage) {
+        const uint32_t base = 0x1B00 + stage * 0x40;
+        const bool t0 = stage == 0, cube = stage == 1 || stage == 2;
+        emit(base, t0 ? rs0_texture : cube ? 0x00240000 : 0);
+        emit(base + 4, t0 ? 0x0888062A : cube ? 0x0771072E : 0);
+        emit(base + 8, t0 || cube ? 0x00030303 : 0);
+        emit(base + 12, t0 || cube ? 0x4003FFC0 : 0);
+        emit(base + 16, t0 ? 0x14000000 : 0);
+        emit(base + 20, t0 || cube ? 0x02022000 : 0);
+        emit(base + 28, t0 ? 0x050001E0 : 0); emit(base + 32, 0);
+        emit(base + 36, t0 ? 0xFF000000 : 0);
+    }
+    emit(0x1E6C, 7); emit(0x1E70, 0x00000C61); emit(0x1E74, 0);
+    emit(0x1E78, 0x00210000); emit(0x1E60, 1);
+    emit(0x0AC0, 0x08010000); emit(0x0260, 0x11200000);
+    emit(0x1E40, 0x00000C00); emit(0x0AA0, 0x00000C00);
+    emit(0x0A60, 0xFFA0FF40); emit(0x0A80, 0xFFA0FF40);
+    emit(0x0288, 0x0000000C); emit(0x028C, 0x00001C80);
+    emit(0x1E20, 0xFF3F3F3F); emit(0x1E24, 0);
+    emit(0x17FC, 7); for (uint32_t word : rs0_words) emit(0x1818, word);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.tex7_fan_batches() == 1);
+    CHECK(gpu.tex7_fan_triangles() == 2);
+    CHECK(gpu.tex7_fan_depth_passes() == gpu.tex7_fan_writes());
+    CHECK(gpu.tex7_fan_samples() == gpu.tex7_fan_writes());
+    CHECK(gpu.tex7_fan_output_hash() != UINT64_C(1469598103934665603));
+    CHECK(gpu.last_tex7_fan_raster_address() >= rs0_color);
+    CHECK(gpu.last_tex7_fan_raster_address() <
+          rs0_color + rs0_pitch * 480);
+    CHECK(get32(ram, rs0_color + rs0_inside) == 0xFF707048u);
+    CHECK(get32(ram, rs0_depth + rs0_inside) == 0x00FFFF00u);
+
+    // The later 30-batch state changes only the unused border register. With
+    // out-of-range coordinates and a distinct edge texel, identical output
+    // proves the exact 0x30303 address mode clamps rather than samples border.
+    const uint64_t rs0_first_fragments = gpu.tex7_fan_fragments();
+    const uint64_t rs0_first_passes = gpu.tex7_fan_depth_passes();
+    const uint64_t rs0_first_writes = gpu.tex7_fan_writes();
+    const uint64_t rs0_first_samples = gpu.tex7_fan_samples();
+    put32(ram, rs0_color + rs0_inside, 0x10203040);
+    emit(0x1B24, 0);
+    emit(0x17FC, 7);
+    for (uint32_t word : rs0_words) emit(0x1818, word);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.tex7_fan_batches() == 2);
+    CHECK(gpu.tex7_fan_triangles() == 4);
+    CHECK(gpu.tex7_fan_fragments() == rs0_first_fragments * 2);
+    CHECK(gpu.tex7_fan_depth_passes() == rs0_first_passes * 2);
+    CHECK(gpu.tex7_fan_writes() == rs0_first_writes * 2);
+    CHECK(gpu.tex7_fan_samples() == rs0_first_samples * 2);
+    CHECK(get32(ram, rs0_color + rs0_inside) == 0xFF707048u);
+    CHECK(get32(ram, rs0_depth + rs0_inside) == 0x00FFFF00u);
+
+    // No other border value has been witnessed for this exact profile.
+    emit(0x1B24, 0xFF010203);
+    emit(0x17FC, 7);
+    for (uint32_t word : rs0_words) emit(0x1818, word);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.tex7_fan_batches() == 2);
+    CHECK(gpu.tex7_fan_triangles() == 4);
+    emit(0x1B24, 0xFF000000);
+
+    // The witnessed cull state accepts clockwise fans only. Reversing all
+    // four vertices must neither touch color nor the read-only Z24S8 plane.
+    std::vector<uint32_t> rs0_reversed_words = rs0_words;
+    auto* rs0_reversed_bytes =
+        reinterpret_cast<uint8_t*>(rs0_reversed_words.data());
+    for (size_t vertex = 0; vertex < 4; ++vertex)
+        std::memcpy(rs0_reversed_bytes + vertex * kInlineVertexBytes,
+                    rs0_positions + (3 - vertex) * 4, 16);
+    const uint64_t rs0_writes = gpu.tex7_fan_writes();
+    emit(0x17FC, 7);
+    for (uint32_t word : rs0_reversed_words) emit(0x1818, word);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.tex7_fan_batches() == 3);
+    CHECK(gpu.tex7_fan_triangles() == 4);
+    CHECK(gpu.tex7_fan_writes() == rs0_writes);
+    CHECK(get32(ram, rs0_color + rs0_inside) == 0xFF707048u);
+    CHECK(get32(ram, rs0_depth + rs0_inside) == 0x00FFFF00u);
+
+    // Alpha testing is disabled in RS0; reject a near state rather than
+    // widening this recognized combiner profile.
+    emit(0x033C, 0x0207); emit(0x17FC, 7);
+    for (uint32_t word : rs0_words) emit(0x1818, word);
+    emit(0x17FC, 0); gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault == "NV2A tex7 fan draw exceeds the witnessed RS0 subset");
 
     // AvSetDisplayMode's scanout path: VGA CRTC pitch/depth, PRAMDAC dimensions/format,
     // and PCRTC_START resolve unified-RAM RGB565 into deterministic RGBA output.

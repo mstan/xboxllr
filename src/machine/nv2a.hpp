@@ -237,6 +237,16 @@ public:
     uint64_t pitch_single_texture_output_hash() const {
         return pitch_single_texture_output_hash_;
     }
+    uint64_t tex7_fan_batches() const { return tex7_fan_batches_; }
+    uint64_t tex7_fan_triangles() const { return tex7_fan_triangles_; }
+    uint64_t tex7_fan_fragments() const { return tex7_fan_fragments_; }
+    uint64_t tex7_fan_depth_passes() const { return tex7_fan_depth_passes_; }
+    uint64_t tex7_fan_writes() const { return tex7_fan_writes_; }
+    uint64_t tex7_fan_samples() const { return tex7_fan_samples_; }
+    uint32_t last_tex7_fan_raster_address() const {
+        return last_tex7_fan_raster_address_;
+    }
+    uint64_t tex7_fan_output_hash() const { return tex7_fan_output_hash_; }
     uint64_t pitch_multi_texture_batches() const {
         return pitch_multi_texture_batches_;
     }
@@ -655,6 +665,14 @@ private:
     uint64_t pitch_single_texture_samples_ = 0;
     uint32_t last_pitch_single_texture_raster_address_ = 0;
     uint64_t pitch_single_texture_output_hash_ = 1469598103934665603ull;
+    uint64_t tex7_fan_batches_ = 0;
+    uint64_t tex7_fan_triangles_ = 0;
+    uint64_t tex7_fan_fragments_ = 0;
+    uint64_t tex7_fan_depth_passes_ = 0;
+    uint64_t tex7_fan_writes_ = 0;
+    uint64_t tex7_fan_samples_ = 0;
+    uint32_t last_tex7_fan_raster_address_ = 0;
+    uint64_t tex7_fan_output_hash_ = 1469598103934665603ull;
     uint64_t pitch_multi_texture_batches_ = 0;
     uint64_t pitch_multi_texture_triangles_ = 0;
     uint64_t pitch_multi_texture_fragments_ = 0;

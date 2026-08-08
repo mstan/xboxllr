@@ -180,7 +180,8 @@ bool write_frame_ppm(const char* path, const std::vector<uint8_t>& rgba,
 }  // namespace
 
 int main(int argc, char** argv) {
-    bool serve = false, window = false;
+    bool serve = false, window = false, interactive = false;
+    bool reduced_retire_diag = false;
     const char* boot_flash = nullptr;
     const char* run2bl = nullptr;
     const char* hdd = nullptr;
@@ -193,6 +194,9 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--serve")) serve = true;
         else if (!std::strcmp(argv[i], "--window")) window = true;
+        else if (!std::strcmp(argv[i], "--interactive")) interactive = true;
+        else if (!std::strcmp(argv[i], "--reduced-retire-diag"))
+            reduced_retire_diag = true;
         else if (!std::strcmp(argv[i], "--boot") && i + 1 < argc) boot_flash = argv[++i];
         else if (!std::strcmp(argv[i], "--run2bl") && i + 1 < argc) run2bl = argv[++i];
         else if (!std::strcmp(argv[i], "--hdd") && i + 1 < argc) hdd = argv[++i];
@@ -268,8 +272,22 @@ int main(int argc, char** argv) {
             } else {
                 std::printf("[eeprom] no --eeprom image: SMBus 0x54 reports absent\n");
             }
+            // The existing frame viewer opens after execution, when it cannot feed the guest.
+            // Keep this opt-in SDL input window alive for the whole emulation run instead.
+            SdlKeyboardInput host_input;
+            if (interactive) {
+                if (!host_input.open("xboxlle input — arrows=D-pad, Z=A, X=B, Enter=Start, Backspace=Back"))
+                    return 1;
+                std::printf("[input] interactive Controller S: arrows=D-pad Z=A X=B "
+                            "Enter=Start Backspace=Back\n");
+            }
+
             std::unique_ptr<EthernetUdpTransport> net_transport;
             std::array<uint8_t, 65536> net_frame{};
+            // Reused by the throttled live presenter; avoid a full frame copy at every poll.
+            std::vector<uint8_t> live_rgba;
+            Nv2a::ScanoutInfo live_scanout;
+            std::string live_scanout_error;
             if (net_requested) {
                 net_transport = std::make_unique<EthernetUdpTransport>();
                 std::string net_error;
@@ -288,7 +306,29 @@ int main(int argc, char** argv) {
                         if (!net_transport->send(data, size, error))
                             mach.cpu().request_stop("NVNet UDP transport: " + error);
                     });
+            }
+            if (interactive || net_requested) {
                 mach.on_host_poll([&]() {
+                    // Host event processing is nonblocking and guest state changes only on this
+                    // emulation thread. XID endpoint 2 observes it on its next periodic TD.
+                    if (interactive) {
+                        host_input.poll();
+                        mach.ohci0()->set_xid_gamepad_state(host_input.state());
+                        if (host_input.quit_requested())
+                            mach.cpu().request_stop("host input window closed");
+                        // capture_scanout copies the complete guest surface, so keep it on a
+                        // host-wall-clock cadence rather than the 1 kHz guest poll cadence.
+                        if (host_input.frame_due() && mach.nv2a()) {
+                            if (mach.nv2a()->capture_scanout(
+                                    live_rgba, live_scanout, live_scanout_error)) {
+                                host_input.present_rgba(
+                                    live_rgba.data(), static_cast<int>(live_scanout.width),
+                                    static_cast<int>(live_scanout.height),
+                                    static_cast<size_t>(live_scanout.width) * 4);
+                            }
+                        }
+                    }
+                    if (!net_transport) return;
                     // Leave queued datagrams in the host socket until the guest has an
                     // enabled RX engine and an AVAIL descriptor, matching NIC backpressure.
                     for (unsigned packet = 0; packet < 32; ++packet) {
@@ -351,27 +391,35 @@ int main(int argc, char** argv) {
             };
             std::vector<uint32_t> nonidle_ring(512, 0);
             uint64_t nonidle_n = 0;
-            mach.cpu().on_retired([&](const RetiredInsn& e) {
-                trace[trace_n++ & 63] = e.eip;
-                if ((trace_n & 63) == 0) {
-                    uint32_t t = 0;
-                    if (mach.read(kCurThreadPhys, &t, 4) && (t & 0x80000000u)) {
-                        cur_thread = t;
-                        bump_thread(t, 64);
+            if (!reduced_retire_diag) {
+                mach.cpu().on_retired([&](const RetiredInsn& e) {
+                    trace[trace_n++ & 63] = e.eip;
+                    if ((trace_n & 63) == 0) {
+                        uint32_t t = 0;
+                        if (mach.read(kCurThreadPhys, &t, 4) &&
+                            (t & 0x80000000u)) {
+                            cur_thread = t;
+                            bump_thread(t, 64);
+                        }
                     }
-                }
-                if (cur_thread && cur_thread != kIdleThread)
-                    nonidle_ring[nonidle_n++ & 511] = e.eip;
-                bool now_idle = in_idle(e.eip);
-                // Latch the FIRST entry into the idle loop — that's the boot thread's original
-                // block (it never runs again after this), so the history is its blocking path.
-                if (now_idle && !was_idle && !idle_latched) {
-                    for (int i = 0; i < 64; ++i) pre_idle[i] = trace[i];
-                    pre_idle_n = trace_n;
-                    idle_latched = true;
-                }
-                was_idle = now_idle;
-            });
+                    if (cur_thread && cur_thread != kIdleThread)
+                        nonidle_ring[nonidle_n++ & 511] = e.eip;
+                    bool now_idle = in_idle(e.eip);
+                    // Latch the FIRST entry into the idle loop — that's the boot thread's
+                    // original block (it never runs again after this), so the history is
+                    // its blocking path.
+                    if (now_idle && !was_idle && !idle_latched) {
+                        for (int i = 0; i < 64; ++i) pre_idle[i] = trace[i];
+                        pre_idle_n = trace_n;
+                        idle_latched = true;
+                    }
+                    was_idle = now_idle;
+                });
+            } else {
+                std::printf(
+                    "[2bl] reduced retire diagnostics enabled; exact PC/thread "
+                    "history will be omitted\n");
+            }
             // Guest-vector observability: log every guest-raised vector (capped), and decode
             // the kernel debug service (INT 0x2D, eax=1 -> DbgPrint with ecx=buffer) so the
             // kernel's own diagnostics reach our console.
@@ -444,6 +492,7 @@ int main(int argc, char** argv) {
                         (unsigned long long)max_insns);
             std::string err2;
             uint64_t n = mach.run(0x901ee, max_insns, err2);
+            host_input.close();
             X86Regs f = mach.cpu().get_regs();
             Nv2a::ScanoutInfo scanout;
             std::vector<uint8_t> frame_rgba;
@@ -467,10 +516,13 @@ int main(int argc, char** argv) {
                     std::printf("\n      (EIP is the 25th byte above)\n");
                 }
             }
-            std::printf("[2bl] last PCs:");
-            uint64_t first = trace_n > 16 ? trace_n - 16 : 0;
-            for (uint64_t i = first; i < trace_n; ++i) std::printf(" %05x", trace[i & 15]);
-            std::printf("\n");
+            if (!reduced_retire_diag) {
+                std::printf("[2bl] last PCs:");
+                uint64_t first = trace_n > 16 ? trace_n - 16 : 0;
+                for (uint64_t i = first; i < trace_n; ++i)
+                    std::printf(" %05x", trace[i & 15]);
+                std::printf("\n");
+            }
             std::printf("[2bl] regs: eax=%08x ebx=%08x ecx=%08x edx=%08x esi=%08x edi=%08x "
                         "ebp=%08x esp=%08x\n", f.eax, f.ebx, f.ecx, f.edx, f.esi, f.edi, f.ebp,
                         f.esp);
@@ -598,22 +650,26 @@ int main(int argc, char** argv) {
                 }
             }
             // The boot thread's last PCs before its final block-and-yield-to-idle.
-            std::printf("[2bl] pre-idle PCs (last real work before blocking):");
-            uint64_t pf = pre_idle_n > 64 ? pre_idle_n - 64 : 0;
-            for (uint64_t i = pf; i < pre_idle_n; ++i) std::printf(" %08x", pre_idle[i & 63]);
-            std::printf("\n");
-            // Per-thread attribution + the non-idle threads' final instructions.
-            std::printf("[2bl] insns by thread (sampled/64):");
-            for (const auto& tc : thread_counts)
-                std::printf(" %08x=%llu", tc.thread, (unsigned long long)tc.insns);
-            std::printf("\n[2bl] last %llu non-idle PCs:",
-                        (unsigned long long)(nonidle_n < 96 ? nonidle_n : 96));
-            {
-                uint64_t nf = nonidle_n > 96 ? nonidle_n - 96 : 0;
-                for (uint64_t i = nf; i < nonidle_n; ++i)
-                    std::printf(" %08x", nonidle_ring[i & 511]);
+            if (!reduced_retire_diag) {
+                std::printf("[2bl] pre-idle PCs (last real work before blocking):");
+                uint64_t pf = pre_idle_n > 64 ? pre_idle_n - 64 : 0;
+                for (uint64_t i = pf; i < pre_idle_n; ++i)
+                    std::printf(" %08x", pre_idle[i & 63]);
+                std::printf("\n");
+                // Per-thread attribution + the non-idle threads' final instructions.
+                std::printf("[2bl] insns by thread (sampled/64):");
+                for (const auto& tc : thread_counts)
+                    std::printf(" %08x=%llu", tc.thread,
+                                (unsigned long long)tc.insns);
+                std::printf("\n[2bl] last %llu non-idle PCs:",
+                            (unsigned long long)(nonidle_n < 96 ? nonidle_n : 96));
+                {
+                    uint64_t nf = nonidle_n > 96 ? nonidle_n - 96 : 0;
+                    for (uint64_t i = nf; i < nonidle_n; ++i)
+                        std::printf(" %08x", nonidle_ring[i & 511]);
+                }
+                std::printf("\n");
             }
-            std::printf("\n");
             if (mach.nv2a()) {
                 std::printf("[2bl] NV2A: vblanks=%llu pmc_intr_en=0x%08x pcrtc_intr_en=0x%08x\n",
                             (unsigned long long)mach.nv2a()->vblanks(),
@@ -722,6 +778,17 @@ int main(int argc, char** argv) {
                             (unsigned long long)mach.nv2a()->pitch_single_texture_samples(),
                             mach.nv2a()->last_pitch_single_texture_raster_address(),
                             (unsigned long long)mach.nv2a()->pitch_single_texture_output_hash());
+                std::printf("[2bl] NV2A tex7-fan: batches/tri/frags/pass/"
+                            "cwrite/samples=%llu/%llu/%llu/%llu/%llu/%llu "
+                            "last=%08x hash=%016llx\n",
+                            (unsigned long long)mach.nv2a()->tex7_fan_batches(),
+                            (unsigned long long)mach.nv2a()->tex7_fan_triangles(),
+                            (unsigned long long)mach.nv2a()->tex7_fan_fragments(),
+                            (unsigned long long)mach.nv2a()->tex7_fan_depth_passes(),
+                            (unsigned long long)mach.nv2a()->tex7_fan_writes(),
+                            (unsigned long long)mach.nv2a()->tex7_fan_samples(),
+                            mach.nv2a()->last_tex7_fan_raster_address(),
+                            (unsigned long long)mach.nv2a()->tex7_fan_output_hash());
                 std::printf("[2bl] NV2A pitch-multi: batches/tri/frags/depth/"
                             "alpha/zwrite/cwrite/samples="
                             "%llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu "
@@ -1082,6 +1149,15 @@ int main(int argc, char** argv) {
                             mach.aci()->mmio_read(McpxAci::kBase + 0x118, 4));
             }
             if (mach.ohci0()) {
+                const uint32_t ohci_base = mach.ohci0()->mmio_base();
+                std::array<uint32_t, 32> periodic_heads{};
+                uint32_t periodic_nonzero = 0;
+                if (mach.ohci0()->hcca() &&
+                    mach.read(mach.ohci0()->hcca(), periodic_heads.data(),
+                              periodic_heads.size() * sizeof(uint32_t))) {
+                    for (uint32_t head : periodic_heads)
+                        periodic_nonzero += (head & ~0xFu) != 0;
+                }
                 std::printf("[2bl] OHCI0: frames=%llu control=%08x hcca=%08x "
                             "eds/tds/retired/done=%llu/%llu/%llu/%llu "
                             "control/xid-in/xid-out=%llu/%llu/%llu "
@@ -1099,6 +1175,47 @@ int main(int argc, char** argv) {
                             mach.ohci0()->xid_configuration(),
                             mach.ohci0()->xid_left_rumble(),
                             mach.ohci0()->xid_right_rumble());
+                std::printf(
+                    "[2bl] OHCI0 lists: command=%08x periodic-current=%08x "
+                    "control-head/current=%08x/%08x bulk-head/current=%08x/%08x "
+                    "periodic-slots=%u\n",
+                    mach.ohci0()->mmio_read(ohci_base + 0x08, 4),
+                    mach.ohci0()->mmio_read(ohci_base + 0x1C, 4),
+                    mach.ohci0()->mmio_read(ohci_base + 0x20, 4),
+                    mach.ohci0()->mmio_read(ohci_base + 0x24, 4),
+                    mach.ohci0()->mmio_read(ohci_base + 0x28, 4),
+                    mach.ohci0()->mmio_read(ohci_base + 0x2C, 4),
+                    periodic_nonzero);
+                std::printf(
+                    "[2bl] OHCI0 irq: status/enable=%08x/%08x done-head=%08x "
+                    "wdh-assert/w1c=%llu/%llu port0=%08x ep0-trace=%zu dropped=%llu\n",
+                    mach.ohci0()->interrupt_status(),
+                    mach.ohci0()->interrupt_enable(),
+                    mach.ohci0()->last_done_head(),
+                    (unsigned long long)mach.ohci0()->wdh_assertions(),
+                    (unsigned long long)mach.ohci0()->wdh_w1c_acknowledgements(),
+                    mach.ohci0()->port_status(0),
+                    mach.ohci0()->ep0_trace_count(),
+                    (unsigned long long)mach.ohci0()->ep0_trace_dropped());
+                auto ep0_outcome_name = [](Ohci::Ep0Outcome outcome) {
+                    switch (outcome) {
+                        case Ohci::Ep0Outcome::kPending: return "pending";
+                        case Ohci::Ep0Outcome::kComplete: return "complete";
+                        case Ohci::Ep0Outcome::kStalled: return "stall";
+                        case Ohci::Ep0Outcome::kError: return "error";
+                    }
+                    return "unknown";
+                };
+                for (size_t i = 0; i < mach.ohci0()->ep0_trace_count(); ++i) {
+                    const auto& trace = mach.ohci0()->ep0_trace(i);
+                    std::printf(
+                        "[2bl]   OHCI0 EP0[%zu] addr=%u setup=%02x/%02x "
+                        "value=%04x index=%04x len=%u outcome=%s td=%u cc=%u bytes=%u\n",
+                        i, trace.address, trace.request_type, trace.request,
+                        trace.value, trace.index, trace.length,
+                        ep0_outcome_name(trace.outcome), trace.td_completions,
+                        trace.last_condition_code, trace.data_bytes);
+                }
             }
             if (mach.nvnet()) {
                 std::printf("[2bl] NVNet: link=%s MDIO rd/wr=%llu/%llu "

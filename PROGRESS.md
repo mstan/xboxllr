@@ -40,9 +40,13 @@ harvested from xemu, silicon-corrected against a live console. GPL-2.
   A8R8G8B8 projected-texture additive-blend pass and linear
   1280x480-to-640x480 dashboard blits. PGRAPH parameter shadows now carry the
   retail flip queue's framebuffer address into PCRTC, so a 500M capture shows
-  the first guest-rendered green boot-orb glow through the full LLE scanout path.
-- **Immediate burn-down path:** census and execute the remaining low-frequency draw states
-  → plumb host input into the landed XID controller → drive end-to-end dashboard navigation.
+  the first guest-rendered green boot-orb glow through the full LLE scanout path. The next
+  41+30-batch tex7/C61 fan variants, a 32-batch shader-63 strip variant, and a live
+  keyboard-to-XID bridge are also landed, but a 6.4B final scanout is still black and the
+  guest has not scheduled endpoint-2 polls.
+- **Immediate burn-down path:** execute the next output-affecting draw families → reach a
+  recognizable dashboard frame → observe real XID endpoint polling → prove basic D-pad/A/B
+  menu navigation.
 - **Not started:** A5 end-to-end retail-dashboard navigation and Arc 2 game work.
 
 ## Where the boot stands RIGHT NOW
@@ -271,6 +275,27 @@ dependency chain peeled this session is:
     `bee38a32a69372a1`, and the captured frame visibly contains the early green
     boot-orb glow. This remains ROM/kernel/PFIFO/PGRAPH/RAM/PCRTC LLE with no
     D3D interception or host framebuffer substitution.
+35. late-replay iteration and interactive input → **improved, with visibility/input
+    blockers measured rather than hidden**. `--reduced-retire-diag` removes only exact
+    retired-PC/thread attribution from the unconditional code hook and is 7.3% faster at
+    500M with exact output/counter parity; full diagnostics remain the default. A narrow
+    tex7/C61 fan profile executes 41 formerly recorded batches at 6.4B, producing
+    1,951,345 samples/color writes with hash `d53095d432805a3b`. The selected 720x480
+    scanout is nevertheless still uniformly black. `--interactive` maps arrows, Z/X,
+    Enter, and Backspace into the Controller-S state and presents live scanout at a
+    throttled 30 Hz. Enumeration reaches address/configuration 1, but the guest leaves all
+    OHCI schedules empty and performs no endpoint-2 transfer. The plumbing is ready;
+    dashboard visibility, guest input polling, and menu navigation remain open.
+36. retained late-draw variants and passive USB binding evidence → **improved without
+    widening guest-visible behavior**. Exact border/factor gates execute a 32-batch
+    shader-63 strip state and a 30-batch C61 fan state through already-proven semantics.
+    Recorder-only volume falls from 678 states/1,345 batches to 676/1,283, while the final
+    scanout remains one-color black hash `73feb194b7694383`. A four-entry EP0 trace proves
+    the guest reads 8 device-descriptor bytes, sets address 1, requests 80 configuration
+    bytes but receives the complete 32-byte descriptor through an error path, then sets
+    configuration 1. It never requests the XID descriptor or publishes endpoint-2 work.
+    The descriptor matches local xemu/Cxbx references; exact short-packet condition-code
+    confirmation and hardware/reference comparison precede any semantic change.
 
 ## How to build & run
 
@@ -296,8 +321,8 @@ External Ethernet is opt-in. Add
 Ethernet frame per UDP datagram. This is a raw layer-2 tunnel, not NAT or an IP shim; pair
 it with another tunnel endpoint or a bridge that preserves Ethernet frames.
 
-500M insns takes roughly 50–55 seconds with the landed radial and textured software raster
-paths. The run
+For faster long replays, add `--reduced-retire-diag`; it preserves guest behavior and
+fault/raster diagnostics while omitting exact retired-PC/thread attribution. The run
 prints rich diagnostics:
 KTHREAD scan + every-waiter wait-block/stack walk, per-thread instruction attribution,
 non-idle PC ring, last-64 I/O + MMIO rings, IDE/NV2A/IRQ counters, code bytes around final
@@ -324,8 +349,8 @@ Deliberate documented stand-ins currently in place (fine for boot, replaced late
 - OHCI0 attaches a deterministic Controller S on root port 1. Periodic/control/bulk ED
   scheduling, TD buffer transfer/retirement, HCCA done writeback, standard enumeration,
   XID descriptors, injectable input reports, and rumble output work. The retail dashboard
-  enumerates and configures it; host gamepad mapping and an observed retail endpoint-2 poll
-  remain. OHCI1 remains empty.
+  enumerates and configures it. `--interactive` supplies live keyboard state, but an
+  observed retail endpoint-2 poll remains; OHCI1 remains empty.
 - NVNet implements the register/PHY/MDIO/link/IRQ floor plus TX and RX descriptor engines.
   An opt-in nonblocking UDP layer-2 tunnel provides external packet transport; without it,
   transmitted packets are explicitly counted and discarded. Higher-level NAT/bridging is
@@ -372,12 +397,13 @@ Driver: `python tools/xbox_agent.py --host 192.168.4.81 {ping|info|read|exec <fi
 
 ## Next steps (priority order)
 
-1. Decode the leading 41-batch `tex=7`, `shader=0xc61` four-vertex triangle-fan family,
-   then its 32-batch `shader=0x63` triangle-strip sibling and continue the remaining
-   low-frequency Kelvin census. The indexed/inline submission paths and every currently
-   witnessed high-volume raster profile are landed.
-2. OHCI TD scheduling and the Xbox XID controller protocol are landed. Plumb host input
-   mapping when dashboard navigation begins exercising endpoint 2.
+1. Decode the leading 26/25-batch `tex=f`, `shader=0x8421` fan states and continue the
+   remaining output-affecting Kelvin census until the selected scanout contains a
+   recognizable dashboard frame.
+2. The live keyboard-to-XID mapping and OHCI protocol are landed. Confirm the configuration
+   read's intermediate OHCI condition code and compare the short-packet sequence with a
+   real console or xemu before changing semantics; then prove a real endpoint-2 report
+   causes a D-pad/A/B menu-state change. Do not synthesize a guest poll.
 3. Exercise the landed NVNet UDP tunnel against a useful peer/bridge as navigation requires;
    RX descriptor DMA is proven through the retail driver.
 4. Longer term (A4 proper): extend the landed recorder into the required CP/method subset and

@@ -3,6 +3,70 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-08 — A4: faster late replays, live XID input, and one more fan family
+
+Long firmware replays may now opt into `--reduced-retire-diag`. The mode removes only the
+exact retired-PC/thread observer from the unconditional Unicorn code hook; instruction
+timing, device service, interrupt/IF boundaries, fault stops, raster diagnostics, and all
+guest-visible behavior remain active. On the same binary and 500M checkpoint it reduced
+wall time from 39.562 s to 36.670 s (7.3%) with identical final EIP, scanout hash, device
+counters, and raster hashes. The default retains full diagnostics. Two more invasive
+ideas—incremental stop-boundary stepping and dirty-page indexing—were rejected after exact
+output checks because each was slower. A separate Release build measured 39.763 s versus
+43.643 s for the RelWithDebInfo reduced-mode smoke (8.9%).
+
+The leading retained `tex=7`, `shader=0xc61` four-vertex triangle-fan family now executes
+through a deliberately narrow semantic profile. Stage 0 PROJECT2D-samples swizzled
+A8R8G8B8, modulates RGB by constant `FFA0FF40`, forces source alpha to one, and applies
+SRC_ALPHA/ONE additive blending after read-only LEQUAL Z24S8. Focused coverage proves exact
+modulated/blended output, depth/stencil preservation, reversed-winding rejection, and that
+near-but-different texture/combiner states remain recorder-only rather than being
+misclassified.
+
+A fault-free 6.4B Release replay executes 41 batches, 82 triangles, 3,414,998 fragments,
+1,951,345 depth passes/color writes/samples, last output address `0x037ea98c`, and profile
+hash `d53095d432805a3b`. Recorder-only volume falls from 679 states/1,386 batches to
+678/1,345. Final 720x480 scanout remains hash `73feb194b7694383` at `0x03c8c000` and is
+still uniformly black, so this is not a recognizable dashboard-frame claim.
+
+Two narrowly retained equivalents then remove another 62 recorder-only batches. The
+32-batch shader-`0x63` strip state reuses the existing three-texture cube-pair path only
+when opaque-black stage-0 border is paired with its exact witnessed `FF16590D` factor; a
+broader first attempt was rejected after it admitted 87 earlier draws and fault-stopped at
+4.143B. The 30-batch shader-`0xc61` fan changes only border zero versus opaque black while
+its exact address mode clamps to edge. Focused tests compare identical output and work under
+both borders using an out-of-range coordinate and a distinct edge texel, while rejecting a
+third border value.
+
+The final 6.4B combined replay executes the expected 32 and 30 batches. Three-texture totals
+rise to 2,136 batches/202,648 triangles/514,549 fragments/8,195 writes/16,390 samples with
+hash `3a169aabaaae6d78`; tex7-fan totals rise to 71/142/14,522,624/2,161,853 writes and
+samples with hash `1b30551ecdedb3a2`. Recorder-only volume falls to 676 states/1,283
+batches. The selected scanout remains the same one-color black
+`73feb194b7694383`, so neither result is presented as dashboard visibility.
+
+`--interactive` now opens the SDL window before emulation and maps keyboard arrows plus
+Z/X, Enter, and Backspace to a live Controller-S report at the existing 1 kHz guest-time
+poll. Presentation is throttled to 30 Hz wall time with a reusable scanout buffer, and
+window close requests a clean CPU stop. The same 6.4B replay shows successful USB address
+and configuration but no endpoint-2 traffic: all periodic/control/bulk heads and all HCCA
+periodic slots are empty after enumeration. Therefore host input delivery is implemented,
+but dashboard polling and even basic menu navigation are not yet proven.
+
+A new capped passive EP0 trace narrows that input blocker further. The guest performs only
+GET_DEVICE_DESCRIPTOR(8), SET_ADDRESS(1), GET_CONFIGURATION_DESCRIPTOR(80), and
+SET_CONFIGURATION(1); it never requests the XID `0x42` descriptor. The configuration read
+receives the complete 32-byte descriptor but traverses an error outcome, consistent with an
+OHCI DataUnderrun because the guest TD lacks the rounding bit. The descriptor bytes match
+the local xemu/Cxbx Controller-S references. Trace lifecycle/address association is covered
+without changing guest-visible scheduling; the next replay must preserve the intermediate
+condition code to confirm this hypothesis before any OHCI semantic change.
+
+**Next:** decode the leading 26/25-batch `tex=f`, `shader=0x8421` fan states and continue
+toward the selected scanout; confirm the configuration TD's exact intermediate condition
+code; then obtain hardware/xemu evidence before altering short-packet behavior. Only a real
+endpoint-2 report changing guest-owned menu state counts as D-pad/A/B navigation.
+
 ## 2026-08-01 — A4: the LLE boot animation reaches real scanout
 
 The first visible Xbox BIOS frame now travels through the complete low-level path.

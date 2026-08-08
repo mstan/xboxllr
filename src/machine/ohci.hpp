@@ -32,6 +32,29 @@ public:
         int16_t thumb_ry = 0;
     };
 
+    // Capped, passive trace of guest EP0 setup traffic.  This deliberately
+    // records only traffic the guest has already scheduled; it never creates
+    // endpoint work or changes transfer completion behavior.
+    enum class Ep0Outcome : uint8_t {
+        kPending,
+        kComplete,
+        kStalled,
+        kError,
+    };
+    struct Ep0Trace {
+        uint8_t address = 0;
+        uint8_t request_type = 0;
+        uint8_t request = 0;
+        uint16_t value = 0;
+        uint16_t index = 0;
+        uint16_t length = 0;
+        Ep0Outcome outcome = Ep0Outcome::kPending;
+        uint8_t td_completions = 0;
+        uint8_t last_condition_code = 0;
+        uint32_t data_bytes = 0;
+    };
+    static constexpr size_t kEp0TraceCapacity = 4;
+
     Ohci(uint32_t base, FaultFn fault) : base_(base), fault_(std::move(fault)) { reset(); }
 
     const char* name() const override { return base_ == 0xFED00000u ? "ohci0" : "ohci1"; }
@@ -70,6 +93,17 @@ public:
     uint16_t xid_right_rumble() const { return xid_right_rumble_; }
     uint8_t xid_address() const { return xid_address_; }
     uint8_t xid_configuration() const { return xid_configuration_; }
+    size_t ep0_trace_count() const { return ep0_trace_count_; }
+    uint64_t ep0_trace_dropped() const { return ep0_trace_dropped_; }
+    const Ep0Trace& ep0_trace(size_t index) const { return ep0_trace_[index]; }
+    uint64_t wdh_assertions() const { return wdh_assertions_; }
+    uint64_t wdh_w1c_acknowledgements() const { return wdh_w1c_acknowledgements_; }
+    uint32_t last_done_head() const { return last_done_head_; }
+    uint32_t interrupt_status() const { return regs_[3]; }
+    uint32_t interrupt_enable() const { return regs_[4]; }
+    uint32_t port_status(size_t port) const {
+        return port < 4 ? read_reg(static_cast<uint32_t>(21 + port)) : 0;
+    }
 
 private:
     struct EndpointDescriptor {
@@ -149,6 +183,10 @@ private:
     TransferResult handle_setup(const uint8_t* data, size_t size);
     TransferResult prepare_control_response(const SetupPacket& setup);
     void finish_control_transfer();
+    void begin_ep0_trace(uint8_t address, const SetupPacket& setup,
+                         TransferResult result);
+    void record_ep0_td_completion(const EndpointDescriptor& ed,
+                                  uint32_t condition_code);
     std::vector<uint8_t> xid_input_report() const;
     static std::vector<uint8_t> string_descriptor(const char* text);
     bool td_buffer_length(const TransferDescriptor& td, size_t& length) const;
@@ -192,6 +230,14 @@ private:
     std::vector<uint8_t> control_response_;
     size_t control_response_offset_ = 0;
     std::vector<uint8_t> control_output_;
+
+    std::array<Ep0Trace, kEp0TraceCapacity> ep0_trace_{};
+    size_t ep0_trace_count_ = 0;
+    uint64_t ep0_trace_dropped_ = 0;
+    int ep0_active_trace_ = -1;
+    uint64_t wdh_assertions_ = 0;
+    uint64_t wdh_w1c_acknowledgements_ = 0;
+    uint32_t last_done_head_ = 0;
 
     uint64_t processed_eds_ = 0;
     uint64_t processed_tds_ = 0;

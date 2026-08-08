@@ -18,6 +18,7 @@ disc/
 
 # Build + generated (evidence, not authority)
 build/
+build-release/
 out/
 generated/
 *.blockpack

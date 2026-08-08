@@ -42,6 +42,11 @@ cd build
 ctest --output-on-failure   # ring + jsonl unit tests + the spike acceptance test
 ```
 
+Long firmware replays may add `--reduced-retire-diag`. It omits only the boot
+command's exact PC-history and per-thread bookkeeping; guest instruction timing,
+interrupt-boundary handling, device diagnostics, raster hashes, and scanout capture
+remain enabled. The default keeps the full diagnostics.
+
 ## Debug server protocol (tcp/4370, loopback)
 
 Line-based; one JSON object per line in replies (JSONL).

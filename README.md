@@ -76,8 +76,17 @@ the early green Xbox boot-orb glow on the guest's 640x480 framebuffer—without 
 kernel, D3D interception, or host-rendered substitute.
 
 The hardware floor is not complete: remaining low-frequency NV2A states, later boot/dashboard
-frames, host input plumbing, timing refinements, and broader device accuracy are still A4
-work. See `STATUS.md` for exact evidence and `PROGRESS.md` for the current burndown.
+frames, observed guest XID polling/menu navigation, timing refinements, and broader device
+accuracy are still A4 work. See `STATUS.md` for exact evidence and `PROGRESS.md` for the
+current burndown.
+
+For the opt-in live Controller S keyboard path during an LLE replay, add `--interactive` to a
+`--boot ... --run2bl ...` invocation. It opens an SDL window before emulation and presents
+guest scanout at a host-wall-clock 30 Hz maximum; arrows map
+to the D-pad, `Z`/`X` to A/B, and Enter/Backspace to Start/Back. This feeds the modeled OHCI/XID
+endpoint 2 on the emulation thread. The retail replay has not yet been proven to poll endpoint 2
+at the dashboard menu: it configures the device but never requests the XID class descriptor
+or publishes an endpoint ED. This is input plumbing rather than a navigation-complete claim.
 
 ## Legal / distribution posture
 

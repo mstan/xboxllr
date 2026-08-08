@@ -91,7 +91,7 @@ add_library(xlle_spike STATIC src/spike/fixtures.cpp)
 target_include_directories(xlle_spike PUBLIC ${XLLE_INCLUDES})
 
 # --- host shell ---
-add_library(xlle_host STATIC src/host/sdl_shell.cpp)
+add_library(xlle_host STATIC src/host/sdl_shell.cpp src/host/xid_input.cpp)
 target_include_directories(xlle_host PUBLIC ${XLLE_INCLUDES})
 if(XLLE_WITH_SDL)
   target_compile_definitions(xlle_host PUBLIC XLLE_WITH_SDL)
@@ -140,6 +140,11 @@ add_test(NAME smc COMMAND test_smc)
 add_executable(test_ohci tests/test_ohci.cpp src/machine/ohci.cpp)
 target_include_directories(test_ohci PRIVATE ${XLLE_INCLUDES})
 add_test(NAME ohci COMMAND test_ohci)
+
+add_executable(test_xid_input tests/test_xid_input.cpp src/host/xid_input.cpp)
+target_include_directories(test_xid_input PRIVATE ${XLLE_INCLUDES})
+target_link_libraries(test_xid_input PRIVATE xlle_machine)
+add_test(NAME xid_input COMMAND test_xid_input)
 
 add_executable(test_nvnet tests/test_nvnet.cpp src/machine/nvnet.cpp)
 target_include_directories(test_nvnet PRIVATE ${XLLE_INCLUDES})
