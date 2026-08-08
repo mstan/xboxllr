@@ -24,13 +24,10 @@ UnicornFloor::UnicornFloor() {
     }
     uc_ = reinterpret_cast<uc_struct*>(uc);
 
-    uc_hook hc = 0, hm = 0;
+    uc_hook hc = 0;
     uc_hook_add(uc, &hc, UC_HOOK_CODE, reinterpret_cast<void*>(&UnicornFloor::code_trampoline),
                 this, 1, 0);
-    uc_hook_add(uc, &hm, UC_HOOK_MEM_READ | UC_HOOK_MEM_WRITE,
-                reinterpret_cast<void*>(&UnicornFloor::mem_trampoline), this, 1, 0);
     hook_code_ = from_hook(hc);
-    hook_mem_ = from_hook(hm);
 
     // Capture the address of any unmapped access so a fault-stop can name it (PRINCIPLES §3).
     uc_hook hu = 0;
@@ -65,6 +62,21 @@ bool UnicornFloor::write_mem(uint32_t addr, const void* data, size_t size) {
 }
 bool UnicornFloor::read_mem(uint32_t addr, void* data, size_t size) {
     return uc_mem_read(reinterpret_cast<uc_engine*>(uc_), addr, data, size) == UC_ERR_OK;
+}
+
+void UnicornFloor::on_mem(MemCb cb) {
+    mem_cb_ = std::move(cb);
+    if (!mem_cb_ || hook_mem_ || !uc_) return;
+
+    // Normal boot replay has no RAM observer. Avoid crossing the C callback boundary on every
+    // guest load/store unless a diagnostic client (currently the fixture runner) requests it.
+    // Once installed, retain the hook for the UnicornFloor lifetime just like the other hooks.
+    uc_hook h = 0;
+    if (uc_hook_add(reinterpret_cast<uc_engine*>(uc_), &h,
+                    UC_HOOK_MEM_READ | UC_HOOK_MEM_WRITE,
+                    reinterpret_cast<void*>(&UnicornFloor::mem_trampoline), this, 1, 0) ==
+        UC_ERR_OK)
+        hook_mem_ = from_hook(h);
 }
 
 void UnicornFloor::set_regs(const X86Regs& r) {
@@ -315,13 +327,14 @@ void UnicornFloor::code_trampoline(uc_struct* uc, uint64_t addr, uint32_t size, 
 void UnicornFloor::mem_trampoline(uc_struct*, int type, uint64_t addr, int size, int64_t value,
                                   void* user) {
     auto* self = static_cast<UnicornFloor*>(user);
+    if (!self->mem_cb_) return;
     MemEvent ev{};
     ev.seq = self->seq_;
     ev.write = (type == UC_MEM_WRITE) ? 1 : 0;
     ev.addr = static_cast<uint32_t>(addr);
     ev.size = static_cast<uint8_t>(size);
     ev.value = static_cast<uint64_t>(value);
-    if (self->mem_cb_) self->mem_cb_(ev);
+    self->mem_cb_(ev);
 }
 
 uint32_t UnicornFloor::in_trampoline(uc_struct*, uint32_t port, int size, void* user) {

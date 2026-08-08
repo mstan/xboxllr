@@ -71,8 +71,12 @@ public:
         uint64_t seq = 0;
         uint8_t channel = 0;
         uint8_t subchannel = 0;
+        uint8_t object_class = 0;
         uint16_t method = 0;
         uint32_t parameter = 0;
+        // Snapshot when PFIFO decoded this parameter, before deferred PGRAPH dispatch.
+        uint32_t parser_get = 0;
+        uint32_t parser_put = 0;
     };
     uint64_t push_methods() const { return methods_.total(); }
     uint64_t method_count(uint32_t method) const {
@@ -298,11 +302,50 @@ public:
     uint64_t pitch_three_texture_samples() const {
         return pitch_three_texture_samples_;
     }
+    uint64_t pitch_three_texture_zero_direction0() const {
+        return pitch_three_texture_zero_direction0_;
+    }
+    uint64_t pitch_three_texture_zero_direction1() const {
+        return pitch_three_texture_zero_direction1_;
+    }
+    uint64_t pitch_three_texture_rescale_direction0() const {
+        return pitch_three_texture_rescale_direction0_;
+    }
+    uint64_t pitch_three_texture_rescale_direction1() const {
+        return pitch_three_texture_rescale_direction1_;
+    }
+    uint64_t pitch_three_texture_xy_tie_direction0() const {
+        return pitch_three_texture_xy_tie_direction0_;
+    }
+    uint64_t pitch_three_texture_xy_tie_direction1() const {
+        return pitch_three_texture_xy_tie_direction1_;
+    }
+    uint32_t last_pitch_three_zero_factor3() const {
+        return last_pitch_three_zero_factor3_;
+    }
+    uint32_t last_pitch_three_rescale_factor3() const {
+        return last_pitch_three_rescale_factor3_;
+    }
+    uint32_t last_pitch_three_xy_tie_factor3() const {
+        return last_pitch_three_xy_tie_factor3_;
+    }
     uint32_t last_pitch_three_texture_raster_address() const {
         return last_pitch_three_texture_raster_address_;
     }
     uint64_t pitch_three_texture_output_hash() const {
         return pitch_three_texture_output_hash_;
+    }
+    uint64_t texf_projected_fan_batches() const { return texf_projected_fan_batches_; }
+    uint64_t texf_projected_fan_triangles() const { return texf_projected_fan_triangles_; }
+    uint64_t texf_projected_fan_fragments() const { return texf_projected_fan_fragments_; }
+    uint64_t texf_projected_fan_alpha_passes() const { return texf_projected_fan_alpha_passes_; }
+    uint64_t texf_projected_fan_writes() const { return texf_projected_fan_writes_; }
+    uint64_t texf_projected_fan_samples() const { return texf_projected_fan_samples_; }
+    uint32_t last_texf_projected_fan_raster_address() const {
+        return last_texf_projected_fan_raster_address_;
+    }
+    uint64_t texf_projected_fan_output_hash() const {
+        return texf_projected_fan_output_hash_;
     }
     uint64_t pitch_tex5_batches() const { return pitch_tex5_batches_; }
     uint64_t pitch_tex5_triangles() const { return pitch_tex5_triangles_; }
@@ -361,6 +404,9 @@ public:
     uint64_t vertex_batches() const { return vertex_batches_; }
     uint64_t submitted_vertices() const { return submitted_vertices_; }
     uint64_t vertex_attribute_fetches() const { return vertex_attribute_fetches_; }
+    uint64_t immediate_methods() const { return immediate_methods_; }
+    uint64_t immediate_vertices() const { return immediate_vertices_total_; }
+    uint64_t immediate_batches() const { return immediate_batches_; }
     uint64_t inline_array_batches() const { return inline_array_batches_; }
     uint64_t inline_array_words() const { return inline_array_words_total_; }
     uint64_t inline_array_vertices() const { return inline_array_vertices_total_; }
@@ -489,12 +535,55 @@ public:
         kRasterStateWords,
     };
     struct RasterStateSample {
+        struct ImmediateQuadTransformVariant {
+            uint8_t mode = 0;
+            uint8_t start = 0;
+            uint64_t program_hash = 0;
+            uint64_t constants_hash = 0;
+        };
+        static constexpr size_t kImmediateQuadTransformVariants = 4;
         std::array<uint32_t, kRasterStateWords> words{};
         uint64_t batches = 0;
         uint64_t executed_batches = 0;
         uint64_t vertices = 0;
         uint64_t inline_batches = 0;
         std::array<uint64_t, 11> primitive_batches{};
+        // Passive evidence for immediate mode-8 batches. The first batch's values are
+        // retained verbatim so future raster work can be based on replay data.
+        uint64_t immediate_quad_batches = 0;
+        uint32_t immediate_quad_min_vertices = 0;
+        uint32_t immediate_quad_max_vertices = 0;
+        uint64_t immediate_quad_nonmultiple_of_four = 0;
+        bool immediate_quad_first_captured = false;
+        std::array<std::array<float, 4>, 4> immediate_quad_decoded_input0{};
+        std::array<std::array<float, 4>, 4> immediate_quad_decoded_input3{};
+        std::array<std::array<float, 4>, 4> immediate_quad_decoded_input9{};
+        std::array<std::array<float, 4>, 4> immediate_quad_opos{};
+        std::array<std::array<float, 4>, 4> immediate_quad_od0{};
+        std::array<std::array<float, 4>, 4> immediate_quad_ot0{};
+        std::array<std::array<float, 4>, 4> immediate_quad_raster_opos{};
+        uint8_t immediate_quad_transform_mode = 0;
+        uint8_t immediate_quad_transform_start = 0;
+        uint64_t immediate_quad_program_hash = 0;
+        uint64_t immediate_quad_constants_hash = 0;
+        uint64_t immediate_quad_first_transform_batches = 0;
+        uint64_t immediate_quad_later_transform_batches = 0;
+        uint64_t immediate_quad_transform_variant_overflow_batches = 0;
+        uint8_t immediate_quad_transform_variant_count = 0;
+        std::array<ImmediateQuadTransformVariant,
+                   kImmediateQuadTransformVariants>
+            immediate_quad_transform_variants{};
+        bool immediate_quad_t0_dma_resolved = false;
+        bool immediate_quad_t0_probe_read = false;
+        uint32_t immediate_quad_t0_address = 0;
+        uint8_t immediate_quad_t0_probe_size = 0;
+        std::array<uint8_t, 16> immediate_quad_t0_probe{};
+        bool immediate_quad_palette_relevant = false;
+        bool immediate_quad_palette_dma_resolved = false;
+        bool immediate_quad_palette_probe_read = false;
+        uint32_t immediate_quad_palette_address = 0;
+        uint8_t immediate_quad_palette_probe_entries = 0;
+        std::array<uint32_t, 4> immediate_quad_palette_probe{};
     };
     size_t raster_state_samples(std::vector<RasterStateSample>& out) const {
         out = raster_state_samples_;
@@ -504,6 +593,40 @@ public:
     bool waiting_for_flip() const { return waiting_for_flip_; }
     size_t recent_methods(size_t n, std::vector<PushMethod>& out) const {
         return methods_.window(n, out);
+    }
+    // Opt-in diagnostic: after the first successful color clear to `color_base`, retain the
+    // 32 methods ending at the first subsequent Kelvin BEGIN_END(nonzero), then every decoded
+    // method through that same channel/subchannel's BEGIN_END(0), capped at 4096 records.
+    // This only observes the recorder; it never changes PFIFO/PGRAPH execution.
+    void arm_color_clear_trace(uint32_t color_base) {
+        clear_trace_target_ = color_base;
+        clear_trace_armed_ = true;
+        clear_trace_triggered_ = false;
+        clear_trace_begin_triggered_ = false;
+        clear_trace_complete_ = false;
+        clear_trace_truncated_ = false;
+        clear_trace_trigger_seq_ = 0;
+        clear_trace_begin_seq_ = 0;
+        clear_trace_pre_count_ = 0;
+        clear_trace_begin_channel_ = 0;
+        clear_trace_begin_subchannel_ = 0;
+        clear_trace_pre_methods_.clear();
+        clear_trace_methods_.clear();
+        clear_trace_methods_.reserve(kClearTraceMethodLimit);
+    }
+    bool color_clear_trace_triggered() const { return clear_trace_triggered_; }
+    bool color_clear_trace_begin_triggered() const {
+        return clear_trace_begin_triggered_;
+    }
+    bool color_clear_trace_complete() const { return clear_trace_complete_; }
+    bool color_clear_trace_truncated() const { return clear_trace_truncated_; }
+    uint32_t color_clear_trace_target() const { return clear_trace_target_; }
+    uint64_t color_clear_trace_trigger_seq() const { return clear_trace_trigger_seq_; }
+    uint64_t color_clear_trace_begin_seq() const { return clear_trace_begin_seq_; }
+    size_t color_clear_trace_pre_count() const { return clear_trace_pre_count_; }
+    size_t color_clear_trace(std::vector<PushMethod>& out) const {
+        out = clear_trace_methods_;
+        return out.size();
     }
     // Frame clock: the machine advances this from retired instructions (~60 Hz). Each new
     // frame latches VBLANK into PCRTC_INTR_0; PCRTC_INTR_EN_0 and PMC_INTR_EN_0 gate the
@@ -558,6 +681,21 @@ private:
     std::array<ChannelState, 32> channels_{};
     std::vector<uint8_t> pramin_;
     Ring<PushMethod> methods_;
+    static constexpr size_t kClearTracePreMethods = 32;
+    static constexpr size_t kClearTraceMethodLimit = 4096;
+    bool clear_trace_armed_ = false;
+    bool clear_trace_triggered_ = false;
+    bool clear_trace_begin_triggered_ = false;
+    bool clear_trace_complete_ = false;
+    bool clear_trace_truncated_ = false;
+    uint32_t clear_trace_target_ = 0;
+    uint64_t clear_trace_trigger_seq_ = 0;
+    uint64_t clear_trace_begin_seq_ = 0;
+    size_t clear_trace_pre_count_ = 0;
+    uint8_t clear_trace_begin_channel_ = 0;
+    uint8_t clear_trace_begin_subchannel_ = 0;
+    std::deque<PushMethod> clear_trace_pre_methods_;
+    std::vector<PushMethod> clear_trace_methods_;
     std::array<uint64_t, 0x800> method_counts_{};
     std::array<uint64_t, 256> class_method_counts_{};
     std::deque<PushMethod> pull_queue_;
@@ -690,8 +828,25 @@ private:
     uint64_t pitch_three_texture_depth_writes_ = 0;
     uint64_t pitch_three_texture_color_writes_ = 0;
     uint64_t pitch_three_texture_samples_ = 0;
+    uint64_t pitch_three_texture_zero_direction0_ = 0;
+    uint64_t pitch_three_texture_zero_direction1_ = 0;
+    uint64_t pitch_three_texture_rescale_direction0_ = 0;
+    uint64_t pitch_three_texture_rescale_direction1_ = 0;
+    uint64_t pitch_three_texture_xy_tie_direction0_ = 0;
+    uint64_t pitch_three_texture_xy_tie_direction1_ = 0;
+    uint32_t last_pitch_three_zero_factor3_ = 0;
+    uint32_t last_pitch_three_rescale_factor3_ = 0;
+    uint32_t last_pitch_three_xy_tie_factor3_ = 0;
     uint32_t last_pitch_three_texture_raster_address_ = 0;
     uint64_t pitch_three_texture_output_hash_ = 1469598103934665603ull;
+    uint64_t texf_projected_fan_batches_ = 0;
+    uint64_t texf_projected_fan_triangles_ = 0;
+    uint64_t texf_projected_fan_fragments_ = 0;
+    uint64_t texf_projected_fan_alpha_passes_ = 0;
+    uint64_t texf_projected_fan_writes_ = 0;
+    uint64_t texf_projected_fan_samples_ = 0;
+    uint32_t last_texf_projected_fan_raster_address_ = 0;
+    uint64_t texf_projected_fan_output_hash_ = 1469598103934665603ull;
     uint64_t pitch_tex5_batches_ = 0;
     uint64_t pitch_tex5_triangles_ = 0;
     uint64_t pitch_tex5_fragments_ = 0;
@@ -746,9 +901,16 @@ private:
         std::array<std::array<float, 4>, 16>;
     std::vector<uint32_t> inline_array_words_;
     std::vector<VertexInputs> inline_vertices_;
+    // Kelvin immediate-mode methods update the persistent attribute values above.  The
+    // witnessed legacy SET_VERTEX4F position W method snapshots all 16 values here; it is a
+    // third mutually exclusive submission source beside indexed arrays and NV097_INLINE_ARRAY.
+    std::vector<VertexInputs> immediate_vertices_;
     uint64_t vertex_batches_ = 0;
     uint64_t submitted_vertices_ = 0;
     uint64_t vertex_attribute_fetches_ = 0;
+    uint64_t immediate_methods_ = 0;
+    uint64_t immediate_vertices_total_ = 0;
+    uint64_t immediate_batches_ = 0;
     uint64_t inline_array_batches_ = 0;
     uint64_t inline_array_words_total_ = 0;
     uint64_t inline_array_vertices_total_ = 0;
@@ -826,8 +988,7 @@ private:
     void process_pushbuffer(uint8_t channel);
     bool pusher_enabled(uint8_t channel) const;
     void drain_pull_queue();
-    void dispatch_method(uint8_t channel, uint8_t subchannel, uint32_t method,
-                         uint32_t parameter);
+    void dispatch_method(PushMethod push);
     bool bind_object(uint8_t channel, uint8_t subchannel, uint32_t handle);
     bool resolve_object(uint8_t channel, uint32_t handle, uint32_t& instance);
     bool clear_surface(uint32_t parameter);
@@ -837,6 +998,7 @@ private:
                              uint32_t clear_value, const char* plane,
                              uint32_t& first_address);
     bool set_vertex_array_format(uint32_t slot, uint32_t parameter);
+    bool commit_immediate_vertex();
     bool decode_inline_array();
     bool submit_vertex_batch();
     bool rasterize_witnessed_batch(bool& executed);

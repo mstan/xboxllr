@@ -2,8 +2,9 @@
 
 A **faithful, LLE-first low-level emulation platform for the original Xbox** (2001,
 IA-32 "Coppermine" Pentium III + NV2A). It boots the **real** MCPX boot ROM, 2BL, and
-Microsoft kernel — no hand-written kernel, no HLE shell — and its first product is the
-**real Xbox dashboard, fully navigable**, running on that real firmware.
+Microsoft kernel — no hand-written kernel, no HLE shell. Its first product goal is the
+**real Xbox dashboard, fully navigable**, running on that real firmware; navigation is not
+yet demonstrated.
 
 It belongs to the recomp family (nesrecomp / psxrecomp / gbarecomp / gcnrecomp /
 n64lle) and inherits its doctrine: **LLE-first, run the real firmware, validate against
@@ -34,8 +35,8 @@ the ground-truth oracle; xemu is a reference we harvest from and check against.
 ## The two arcs
 
 - **Arc 1 — the real Xbox dashboard, fully navigable and functional**, booted LLE. The
-  platform's first product; no game involved. (Mirrors gcnrecomp's GameCube main menu and
-  psxrecomp's BIOS shell.)
+  platform's first product and current goal; no game involved. (Mirrors gcnrecomp's GameCube
+  main menu and psxrecomp's BIOS shell.)
 - **Arc 2 — Blinx: The Time Sweeper**, the first game, on the proven Arc-1 platform, as its
   own per-title repo (`BlinxLLE`).
 
@@ -68,17 +69,24 @@ historical provenance. The standalone repository is the maintained, authoritativ
 
 ## Status
 
-**Arc 1 / A4 — real firmware is producing visible LLE output.** The retail boot chain
-reaches the dashboard XBE through the modeled CPU and Xbox devices. The guest's PFIFO/PGRAPH
-stream now rasterizes into unified RAM, the retail kernel's flip queue drives PCRTC, and
-SDL3 presents the resulting scanout. A deterministic 500M-instruction capture visibly shows
-the early green Xbox boot-orb glow on the guest's 640x480 framebuffer—without a replacement
-kernel, D3D interception, or host-rendered substitute.
+**Arc 1 / A4 — real firmware is producing visible LLE boot output, not yet a dashboard
+menu.** The retail boot chain reaches the dashboard XBE through the modeled CPU and Xbox
+devices. The guest's PFIFO/PGRAPH stream rasterizes into unified RAM, the retail kernel's
+flip queue drives PCRTC, and SDL3 presents the resulting scanout. A deterministic 4.5B
+instruction replay reaches a recognizable Xbox X logo; this is guest-generated output with
+no replacement kernel, D3D interception, or host-rendered substitute. The later 4.75–6.0B
+window is black, 6.25B begins a mode transition with noisy lower scanlines, and the 6.4B
+endpoint is near-black 720x480 scanout at `0x03c8c000`, not a visible dashboard/menu.
 
 The hardware floor is not complete: remaining low-frequency NV2A states, later boot/dashboard
 frames, observed guest XID polling/menu navigation, timing refinements, and broader device
 accuracy are still A4 work. See `STATUS.md` for exact evidence and `PROGRESS.md` for the
 current burndown.
+
+An opt-in disconnected-link replay now reaches `evoxdash` and proves its first mode-8
+immediate quad stream. The modeled front end submits and assembles those vertices, but mode 8
+remains deliberately recorder-only while post-VSH and texture evidence is gathered. The late
+alternating buffers are still near-black; this is not a visible menu or navigation claim.
 
 For the opt-in live Controller S keyboard path during an LLE replay, add `--interactive` to a
 `--boot ... --run2bl ...` invocation. It opens an SDL window before emulation and presents
@@ -87,6 +95,20 @@ to the D-pad, `Z`/`X` to A/B, and Enter/Backspace to Start/Back. This feeds the 
 endpoint 2 on the emulation thread. The retail replay has not yet been proven to poll endpoint 2
 at the dashboard menu: it configures the device but never requests the XID class descriptor
 or publishes an endpoint ED. This is input plumbing rather than a navigation-complete claim.
+
+For reproducible visual checkpoints, `--frame-series <path-prefix> <instruction-interval>`
+writes scanouts at guest-instruction intervals. The interval is a positive integer of at least
+1,000,000 instructions; captures are named with their actual sampled instruction count.
+
+Two bounded diagnostics support late-boot investigation. `--net-disconnected` changes the
+modeled PHY link state before guest execution; it is an experimental pre-boot link transition,
+not a verified cold-reset cable-out model. It cannot be combined with a UDP Ethernet peer.
+`--pfifo-clear-trace <32-bit-color-address>` arms at the first successful clear whose first
+resolved pixel address matches the target. It then selects the first subsequent Kelvin BEGIN,
+retains the 32 decoded methods ending at that BEGIN, and records through its matching END with
+a hard cap of 4,096 records. Entries include the active object class and parser-time GET/PUT
+snapshots. The trace describes command order only; it does not by itself prove PGRAPH
+completion, notification, semaphore, or flip timing.
 
 ## Legal / distribution posture
 

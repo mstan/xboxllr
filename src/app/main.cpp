@@ -6,6 +6,8 @@
 // runs the fixture spike, fault-stopping loudly on any mismatch.
 #include <algorithm>
 #include <array>
+#include <cerrno>
+#include <cctype>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -32,6 +34,7 @@ namespace {
 
 Ring<RetiredInsn> g_retired(1u << 16);
 Ring<MemEvent> g_mem(1u << 16);
+constexpr uint64_t kMinFrameSeriesInterval = 1000000;
 
 uint32_t reg_field(const X86Regs& r, int i) {
     switch (i) {
@@ -182,12 +185,17 @@ bool write_frame_ppm(const char* path, const std::vector<uint8_t>& rgba,
 int main(int argc, char** argv) {
     bool serve = false, window = false, interactive = false;
     bool reduced_retire_diag = false;
+    bool net_disconnected = false;
+    bool pfifo_clear_trace = false;
+    uint32_t pfifo_clear_trace_target = 0;
     const char* boot_flash = nullptr;
     const char* run2bl = nullptr;
     const char* hdd = nullptr;
     const char* eeprom = nullptr;
     const char* frame_dump = nullptr;
+    const char* frame_series_prefix = nullptr;
     const char* net_peer_host = nullptr;
+    uint64_t frame_series_every = 0;
     uint64_t net_bind_port = 0;
     uint64_t net_peer_port = 0;
     uint64_t max_insns = 128ull * 1000 * 1000;  // 2BL kernel LZX decompress needs tens of M
@@ -197,12 +205,57 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(argv[i], "--interactive")) interactive = true;
         else if (!std::strcmp(argv[i], "--reduced-retire-diag"))
             reduced_retire_diag = true;
+        else if (!std::strcmp(argv[i], "--net-disconnected"))
+            net_disconnected = true;
+        else if (!std::strcmp(argv[i], "--pfifo-clear-trace")) {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr,
+                             "[host] use --pfifo-clear-trace <32-bit-color-base>\n");
+                return 1;
+            }
+            const char* address = argv[++i];
+            char* end = nullptr;
+            errno = 0;
+            const unsigned long long value = std::strtoull(address, &end, 0);
+            if (!address[0] || address[0] == '-' || address[0] == '+' ||
+                std::isspace(static_cast<unsigned char>(address[0])) || errno == ERANGE ||
+                !end || *end != '\0' || value > 0xFFFFFFFFull) {
+                std::fprintf(stderr,
+                             "[host] --pfifo-clear-trace needs a 32-bit address (for example 0x03c8c000)\n");
+                return 1;
+            }
+            pfifo_clear_trace = true;
+            pfifo_clear_trace_target = static_cast<uint32_t>(value);
+        }
         else if (!std::strcmp(argv[i], "--boot") && i + 1 < argc) boot_flash = argv[++i];
         else if (!std::strcmp(argv[i], "--run2bl") && i + 1 < argc) run2bl = argv[++i];
         else if (!std::strcmp(argv[i], "--hdd") && i + 1 < argc) hdd = argv[++i];
         else if (!std::strcmp(argv[i], "--eeprom") && i + 1 < argc) eeprom = argv[++i];
         else if (!std::strcmp(argv[i], "--frame-dump") && i + 1 < argc)
             frame_dump = argv[++i];
+        else if (!std::strcmp(argv[i], "--frame-series")) {
+            if (i + 2 >= argc) {
+                std::fprintf(
+                    stderr,
+                    "[host] use --frame-series <path-prefix> <instruction-interval>\n");
+                return 1;
+            }
+            frame_series_prefix = argv[++i];
+            const char* interval = argv[++i];
+            char* end = nullptr;
+            errno = 0;
+            frame_series_every = std::strtoull(interval, &end, 0);
+            if (!frame_series_prefix[0] || interval[0] == '-' ||
+                errno == ERANGE || !end || *end != '\0' ||
+                frame_series_every < kMinFrameSeriesInterval) {
+                std::fprintf(
+                    stderr,
+                    "[host] frame-series interval must be an integer >= %llu "
+                    "(sampled at guest 1 kHz)\n",
+                    static_cast<unsigned long long>(kMinFrameSeriesInterval));
+                return 1;
+            }
+        }
         else if (!std::strcmp(argv[i], "--net-udp-bind") && i + 1 < argc)
             net_bind_port = std::strtoull(argv[++i], nullptr, 0);
         else if (!std::strcmp(argv[i], "--net-udp-peer") && i + 2 < argc) {
@@ -215,12 +268,19 @@ int main(int argc, char** argv) {
 
     const bool net_requested =
         net_bind_port != 0 || net_peer_host != nullptr || net_peer_port != 0;
+    const bool frame_series_requested = frame_series_prefix != nullptr;
     if (net_requested &&
         (net_bind_port == 0 || net_bind_port > 65535 || !net_peer_host ||
          net_peer_port == 0 || net_peer_port > 65535)) {
         std::fprintf(stderr,
                      "[net] use --net-udp-bind <1..65535> "
                      "--net-udp-peer <host> <1..65535>\n");
+        return 1;
+    }
+    if (net_disconnected && net_requested) {
+        std::fprintf(
+            stderr,
+            "[net] --net-disconnected cannot be combined with a UDP Ethernet peer\n");
         return 1;
     }
 
@@ -253,6 +313,11 @@ int main(int argc, char** argv) {
             }
             // Stand up the I/O fabric (PCI host, SMBus+SMC, NV2A) the 2BL platform-init drives.
             mach.init_devices();
+            if (pfifo_clear_trace && mach.nv2a()) {
+                mach.nv2a()->arm_color_clear_trace(pfifo_clear_trace_target);
+                std::printf("[host] PFIFO clear trace armed for color base 0x%08x\n",
+                            pfifo_clear_trace_target);
+            }
             if (hdd) {
                 if (!mach.attach_hdd(hdd)) {
                     std::fprintf(stderr, "[hdd] attach failed: %s\n", hdd);
@@ -288,6 +353,47 @@ int main(int argc, char** argv) {
             std::vector<uint8_t> live_rgba;
             Nv2a::ScanoutInfo live_scanout;
             std::string live_scanout_error;
+            uint64_t next_frame_series_insn = frame_series_every;
+            bool frame_series_exhausted = false;
+            auto capture_frame_series = [&]() {
+                if (!frame_series_requested || frame_series_exhausted ||
+                    mach.total_insns() < next_frame_series_insn ||
+                    !mach.nv2a())
+                    return;
+
+                const uint64_t deadline = next_frame_series_insn;
+                const uint64_t sampled_at = mach.total_insns();
+                char path[1024];
+                std::snprintf(
+                    path, sizeof(path), "%s-%012llu.ppm",
+                    frame_series_prefix,
+                    static_cast<unsigned long long>(sampled_at));
+                live_scanout_error.clear();
+                const bool captured = mach.nv2a()->capture_scanout(
+                    live_rgba, live_scanout, live_scanout_error);
+                const bool written =
+                    captured &&
+                    write_frame_ppm(path, live_rgba,
+                                    live_scanout.width, live_scanout.height);
+                std::printf(
+                    "[host] frame-series deadline=%llu insns=%llu "
+                    "hash=%016llx %s: %s%s%s\n",
+                    static_cast<unsigned long long>(deadline),
+                    static_cast<unsigned long long>(sampled_at),
+                    static_cast<unsigned long long>(
+                        captured ? frame_hash(live_rgba) : 0),
+                    path, written ? "written" : "FAILED",
+                    live_scanout_error.empty() ? "" : " (",
+                    live_scanout_error.empty()
+                        ? ""
+                        : (live_scanout_error + ")").c_str());
+                if (UINT64_MAX - next_frame_series_insn <
+                    frame_series_every) {
+                    frame_series_exhausted = true;
+                } else {
+                    next_frame_series_insn += frame_series_every;
+                }
+            };
             if (net_requested) {
                 net_transport = std::make_unique<EthernetUdpTransport>();
                 std::string net_error;
@@ -306,8 +412,14 @@ int main(int argc, char** argv) {
                         if (!net_transport->send(data, size, error))
                             mach.cpu().request_stop("NVNet UDP transport: " + error);
                     });
+            } else if (net_disconnected) {
+                // The default link-up PHY remains the xemu boot witness. This opt-in
+                // experiment changes the modeled link state before guest execution.
+                // It is not yet evidence for exact cold-boot cable-out behavior.
+                mach.nvnet()->set_link(false);
+                std::printf("[net] Ethernet cable disconnected (opt-in)\n");
             }
-            if (interactive || net_requested) {
+            if (interactive || net_requested || frame_series_requested) {
                 mach.on_host_poll([&]() {
                     // Host event processing is nonblocking and guest state changes only on this
                     // emulation thread. XID endpoint 2 observes it on its next periodic TD.
@@ -328,6 +440,7 @@ int main(int argc, char** argv) {
                             }
                         }
                     }
+                    capture_frame_series();
                     if (!net_transport) return;
                     // Leave queued datagrams in the host socket until the guest has an
                     // enabled RX engine and an AVAIL descriptor, matching NIC backpressure.
@@ -492,6 +605,8 @@ int main(int argc, char** argv) {
                         (unsigned long long)max_insns);
             std::string err2;
             uint64_t n = mach.run(0x901ee, max_insns, err2);
+            // The run may cross its final series deadline after the last 1 kHz host poll.
+            capture_frame_series();
             host_input.close();
             X86Regs f = mach.cpu().get_regs();
             Nv2a::ScanoutInfo scanout;
@@ -804,9 +919,9 @@ int main(int argc, char** argv) {
                             mach.nv2a()->last_pitch_multi_texture_raster_address(),
                             (unsigned long long)mach.nv2a()->pitch_multi_texture_output_hash());
                 std::printf("[2bl] NV2A pitch-three: batches/tri/frags/depth/"
-                            "zwrite/cwrite/samples="
-                            "%llu/%llu/%llu/%llu/%llu/%llu/%llu "
-                            "last=%08x hash=%016llx\n",
+                            "zwrite/cwrite/samples/zero0/zero1/rescale0/rescale1/tie0/tie1="
+                            "%llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu "
+                            "last=%08x zero-factor3=%08x rescale-factor3=%08x tie-factor3=%08x hash=%016llx\n",
                             (unsigned long long)mach.nv2a()->pitch_three_texture_batches(),
                             (unsigned long long)mach.nv2a()->pitch_three_texture_triangles(),
                             (unsigned long long)mach.nv2a()->pitch_three_texture_fragments(),
@@ -814,7 +929,16 @@ int main(int argc, char** argv) {
                             (unsigned long long)mach.nv2a()->pitch_three_texture_depth_writes(),
                             (unsigned long long)mach.nv2a()->pitch_three_texture_color_writes(),
                             (unsigned long long)mach.nv2a()->pitch_three_texture_samples(),
+                            (unsigned long long)mach.nv2a()->pitch_three_texture_zero_direction0(),
+                            (unsigned long long)mach.nv2a()->pitch_three_texture_zero_direction1(),
+                            (unsigned long long)mach.nv2a()->pitch_three_texture_rescale_direction0(),
+                            (unsigned long long)mach.nv2a()->pitch_three_texture_rescale_direction1(),
+                            (unsigned long long)mach.nv2a()->pitch_three_texture_xy_tie_direction0(),
+                            (unsigned long long)mach.nv2a()->pitch_three_texture_xy_tie_direction1(),
                             mach.nv2a()->last_pitch_three_texture_raster_address(),
+                            mach.nv2a()->last_pitch_three_zero_factor3(),
+                            mach.nv2a()->last_pitch_three_rescale_factor3(),
+                            mach.nv2a()->last_pitch_three_xy_tie_factor3(),
                             (unsigned long long)mach.nv2a()->pitch_three_texture_output_hash());
                 std::printf("[2bl] NV2A pitch-tex5: batches/tri/frags/depth/"
                             "zwrite/cwrite/samples="
@@ -829,6 +953,17 @@ int main(int argc, char** argv) {
                             (unsigned long long)mach.nv2a()->pitch_tex5_samples(),
                             mach.nv2a()->last_pitch_tex5_raster_address(),
                             (unsigned long long)mach.nv2a()->pitch_tex5_output_hash());
+                std::printf("[2bl] NV2A tex=f fan: batches/tri/frags/alpha/"
+                            "writes/samples=%llu/%llu/%llu/%llu/%llu/%llu "
+                            "last=%08x hash=%016llx\n",
+                            (unsigned long long)mach.nv2a()->texf_projected_fan_batches(),
+                            (unsigned long long)mach.nv2a()->texf_projected_fan_triangles(),
+                            (unsigned long long)mach.nv2a()->texf_projected_fan_fragments(),
+                            (unsigned long long)mach.nv2a()->texf_projected_fan_alpha_passes(),
+                            (unsigned long long)mach.nv2a()->texf_projected_fan_writes(),
+                            (unsigned long long)mach.nv2a()->texf_projected_fan_samples(),
+                            mach.nv2a()->last_texf_projected_fan_raster_address(),
+                            (unsigned long long)mach.nv2a()->texf_projected_fan_output_hash());
                 std::printf("[2bl] NV2A inline-blit: "
                             "batches/tri/frags/writes/samples="
                             "%llu/%llu/%llu/%llu/%llu "
@@ -859,6 +994,11 @@ int main(int argc, char** argv) {
                             (unsigned long long)mach.nv2a()->assembled_primitives(),
                             (unsigned long long)mach.nv2a()->assembled_triangles(),
                             mach.nv2a()->largest_vertex_index());
+                std::printf("[2bl] NV2A immediate vertices: methods=%llu vertices=%llu "
+                            "batches=%llu\n",
+                            (unsigned long long)mach.nv2a()->immediate_methods(),
+                            (unsigned long long)mach.nv2a()->immediate_vertices(),
+                            (unsigned long long)mach.nv2a()->immediate_batches());
                 std::printf("[2bl] NV2A inline arrays: batches/words/vertices/"
                             "attr-decodes=%llu/%llu/%llu/%llu\n",
                             (unsigned long long)mach.nv2a()->inline_array_batches(),
@@ -959,6 +1099,92 @@ int main(int argc, char** argv) {
                             "recorder-only states/batches=%zu/%llu\n",
                             raster_samples.size(), skipped_states,
                             (unsigned long long)skipped_batches);
+                auto print_immediate_quad_evidence =
+                    [](const Nv2a::RasterStateSample& sample) {
+                    if (!sample.immediate_quad_batches) return;
+                    const bool literal_vsh =
+                        sample.immediate_quad_transform_mode == 2;
+                    const bool single_identity =
+                        sample.immediate_quad_transform_variant_count == 1 &&
+                        sample.immediate_quad_later_transform_batches == 0 &&
+                        sample.immediate_quad_transform_variant_overflow_batches == 0;
+                    std::printf(
+                        "[2bl]     immediate-quad batches=%llu vertices=%u..%u non4=%llu "
+                        "first-xf=%u/%u first-vsh-fnv-all=%016llx "
+                        "first-constants-fnv-all=%016llx identities=%s "
+                        "transform-variant-count(stored)=%u cap=%zu "
+                        "first-batches=%llu later-variant-batches=%llu overflow-new=%llu\n",
+                        (unsigned long long)sample.immediate_quad_batches,
+                        sample.immediate_quad_min_vertices,
+                        sample.immediate_quad_max_vertices,
+                        (unsigned long long)sample.immediate_quad_nonmultiple_of_four,
+                        sample.immediate_quad_transform_mode,
+                        sample.immediate_quad_transform_start,
+                        (unsigned long long)sample.immediate_quad_program_hash,
+                        (unsigned long long)sample.immediate_quad_constants_hash,
+                        single_identity ? "single" : "varied",
+                        sample.immediate_quad_transform_variant_count,
+                        Nv2a::RasterStateSample::kImmediateQuadTransformVariants,
+                        (unsigned long long)
+                            sample.immediate_quad_first_transform_batches,
+                        (unsigned long long)
+                            sample.immediate_quad_later_transform_batches,
+                        (unsigned long long)
+                            sample.immediate_quad_transform_variant_overflow_batches);
+                    if (!sample.immediate_quad_first_captured) return;
+                    auto print_float4 = [](const char* label,
+                                           const std::array<float, 4>& value) {
+                        uint32_t bits[4]{};
+                        std::memcpy(bits, value.data(), sizeof(bits));
+                        std::printf(" %s=%g[%08x]/%g[%08x]/%g[%08x]/%g[%08x]",
+                                    label, value[0], bits[0], value[1], bits[1],
+                                    value[2], bits[2], value[3], bits[3]);
+                    };
+                    for (size_t vertex = 0; vertex < 4; ++vertex) {
+                        std::printf("[2bl]       IQ%zu", vertex);
+                        print_float4("decoded-input0",
+                                     sample.immediate_quad_decoded_input0[vertex]);
+                        print_float4("decoded-input3",
+                                     sample.immediate_quad_decoded_input3[vertex]);
+                        print_float4("decoded-input9",
+                                     sample.immediate_quad_decoded_input9[vertex]);
+                        print_float4(literal_vsh ? "literal-oPos" : "derived-oPos",
+                                     sample.immediate_quad_opos[vertex]);
+                        print_float4(literal_vsh ? "literal-oD0" : "derived-oD0",
+                                     sample.immediate_quad_od0[vertex]);
+                        print_float4(literal_vsh ? "literal-oT0" : "derived-oT0",
+                                     sample.immediate_quad_ot0[vertex]);
+                        print_float4("raster-oPos",
+                                     sample.immediate_quad_raster_opos[vertex]);
+                        std::printf("\n");
+                    }
+                    std::printf(
+                        "[2bl]       IQ-T0 first-base-probe resolved=%u addr=%08x bytes=%u "
+                        "%02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x\n",
+                        sample.immediate_quad_t0_dma_resolved,
+                        sample.immediate_quad_t0_address,
+                        sample.immediate_quad_t0_probe_size,
+                        sample.immediate_quad_t0_probe[0], sample.immediate_quad_t0_probe[1],
+                        sample.immediate_quad_t0_probe[2], sample.immediate_quad_t0_probe[3],
+                        sample.immediate_quad_t0_probe[4], sample.immediate_quad_t0_probe[5],
+                        sample.immediate_quad_t0_probe[6], sample.immediate_quad_t0_probe[7],
+                        sample.immediate_quad_t0_probe[8], sample.immediate_quad_t0_probe[9],
+                        sample.immediate_quad_t0_probe[10], sample.immediate_quad_t0_probe[11],
+                        sample.immediate_quad_t0_probe[12], sample.immediate_quad_t0_probe[13],
+                        sample.immediate_quad_t0_probe[14], sample.immediate_quad_t0_probe[15]);
+                    if (sample.immediate_quad_palette_relevant) {
+                        std::printf(
+                            "[2bl]       IQ-pal first-base-probe resolved=%u addr=%08x entries=%u "
+                            "%08x/%08x/%08x/%08x\n",
+                            sample.immediate_quad_palette_dma_resolved,
+                            sample.immediate_quad_palette_address,
+                            sample.immediate_quad_palette_probe_entries,
+                            sample.immediate_quad_palette_probe[0],
+                            sample.immediate_quad_palette_probe[1],
+                            sample.immediate_quad_palette_probe[2],
+                            sample.immediate_quad_palette_probe[3]);
+                    }
+                };
                 const size_t raster_sample_limit =
                     std::min<size_t>(skipped_states, 16);
                 for (size_t sample_index = 0;
@@ -1080,6 +1306,28 @@ int main(int argc, char** argv) {
                             state[Nv2a::kRasterTextureBorderColor0 + stage]);
                     }
                 }
+                size_t immediate_state_index = 0;
+                for (const auto& sample : raster_samples) {
+                    if (!sample.immediate_quad_batches) continue;
+                    const auto& state = sample.words;
+                    std::printf(
+                        "[2bl]   IQRS%zu (all mode8 states) batches=%llu sfmt=%08x "
+                        "pitch=%08x surf=%08x/%08x clip=%08x/%08x T0=%08x/%08x "
+                        "dma=%08x/%08x\n",
+                        immediate_state_index++,
+                        (unsigned long long)sample.immediate_quad_batches,
+                        state[Nv2a::kRasterSurfaceFormat],
+                        state[Nv2a::kRasterSurfacePitch],
+                        state[Nv2a::kRasterSurfaceColorOffset],
+                        state[Nv2a::kRasterSurfaceZetaOffset],
+                        state[Nv2a::kRasterSurfaceClipHorizontal],
+                        state[Nv2a::kRasterSurfaceClipVertical],
+                        state[Nv2a::kRasterTextureOffset0],
+                        state[Nv2a::kRasterTextureFormat0],
+                        state[Nv2a::kRasterTextureDmaA],
+                        state[Nv2a::kRasterTextureDmaB]);
+                    print_immediate_quad_evidence(sample);
+                }
                 std::printf("[2bl] NV2A flip: write-increments=%llu stalls=%llu "
                             "read-increments=%llu notifications=%llu surface=%08x waiting=%u\n",
                             (unsigned long long)mach.nv2a()->flip_increments(),
@@ -1106,11 +1354,35 @@ int main(int argc, char** argv) {
                 std::printf("[2bl] NV2A recent PCRTC_START:");
                 for (uint32_t start : scanout_starts) std::printf(" %08x", start);
                 std::printf("\n");
+                if (pfifo_clear_trace) {
+                    std::vector<Nv2a::PushMethod> trace;
+                    mach.nv2a()->color_clear_trace(trace);
+                    std::printf("[2bl] PFIFO clear trace: target=%08x clear-triggered=%u "
+                                "begin-triggered=%u complete=%u truncated=%u "
+                                "clear-seq=%llu begin-seq=%llu pre=%zu captured=%zu\n",
+                                mach.nv2a()->color_clear_trace_target(),
+                                mach.nv2a()->color_clear_trace_triggered(),
+                                mach.nv2a()->color_clear_trace_begin_triggered(),
+                                mach.nv2a()->color_clear_trace_complete(),
+                                mach.nv2a()->color_clear_trace_truncated(),
+                                (unsigned long long)mach.nv2a()->color_clear_trace_trigger_seq(),
+                                (unsigned long long)mach.nv2a()->color_clear_trace_begin_seq(),
+                                mach.nv2a()->color_clear_trace_pre_count(), trace.size());
+                    for (const auto& m : trace) {
+                        std::printf("[2bl]   clear-trace PB #%llu ch%u/sub%u class=0x%02x "
+                                    "get=%08x put=%08x method=0x%04x param=0x%08x\n",
+                                    (unsigned long long)m.seq, m.channel, m.subchannel,
+                                    m.object_class, m.parser_get, m.parser_put,
+                                    m.method, m.parameter);
+                    }
+                }
                 std::vector<Nv2a::PushMethod> recent;
                 mach.nv2a()->recent_methods(64, recent);
                 for (const auto& m : recent) {
-                    std::printf("[2bl]   PB #%llu ch%u/sub%u method=0x%04x param=0x%08x\n",
-                                (unsigned long long)m.seq, m.channel, m.subchannel, m.method,
+                    std::printf("[2bl]   PB #%llu ch%u/sub%u class=0x%02x get=%08x put=%08x "
+                                "method=0x%04x param=0x%08x\n",
+                                (unsigned long long)m.seq, m.channel, m.subchannel,
+                                m.object_class, m.parser_get, m.parser_put, m.method,
                                 m.parameter);
                 }
                 uint32_t av_sync = 0;

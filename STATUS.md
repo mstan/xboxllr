@@ -3,6 +3,67 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-08 — A4: recognizable boot logo, bounded cube continuation, and a later visual frontier
+
+The normal-RAM Unicorn memory hook is now lazy: the normal retail replay does not install the
+load/store callback unless a diagnostic client requests it. A same-binary 500M comparison is
+approximately 33.5% faster with identical final PPM output. `--frame-series <path-prefix>
+<instruction-interval>` records periodic scanouts for replay analysis; it rejects intervals
+below 1,000,000 instructions and names each capture with the actual sample count.
+
+The frame series establishes a clearer visual chronology. At 4.5B instructions the guest
+produces a recognizable Xbox X logo. Frames from 4.75B through 6.0B are black; 6.25B begins a
+mode transition with noisy lower scanlines; and the fault-free 6.4B endpoint is a near-black
+720x480 scanout at `0x03c8c000`. This is not a visible dashboard/menu claim.
+
+Late-boot network experiments explain why simply extending that default replay did not reveal
+the menu. With link up, the dashboard reaches an XONLINE/XNET wait whose stock-XBE code uses
+a 90,000-tick timeout. Opt-in `--net-disconnected` instead changes the modeled PHY state before
+guest execution. The retail driver then completes its bounded 6,000 x 500 us autonegotiation
+polls and 1,000 x 500 us link polls; by 11.5B instructions it has launched `evoxdash.xbe` and
+the kernel scan finds eight threads. This is an experimental pre-boot link transition, not a
+hardware-verified cold-reset cable-out model or a validated UDP peer.
+
+The offline dashboard loop is active but still presents black. Between 9.5B and 11.5B it
+dispatches 773,613 PFIFO methods, performs 125 full 720x480 clears, advances 125 flip
+increments/stalls and 124 read increments, and alternates PCRTC between `0x03df4000` and
+`0x03c8c000`. A bounded `--pfifo-clear-trace 0x03df4000` proves the first matching clear
+succeeds, then observes semaphore/flip pacing and real shader/state setup. It also captures
+generic immediate 4UB attribute writes at methods `0x1950`, `0x195c`, and `0x1960`. Over the
+same interval there are 6,000 new BEGIN/END methods but no new indexed, draw-array,
+inline-array, submitted-vertex, or primitive counts.
+
+An extended passive trace now captures the first complete class-`0x97` draw after that clear:
+BEGIN mode 8 at PFIFO sequence 36,388,535; four vertices, each with generic 2F texture
+coordinates (`0x18c8/0x18cc`), generic 4UB diffuse color (`0x194c`), and a legacy 4F position
+commit (`0x1518` through `0x1524`); then END at sequence 36,388,564. All 61 records carry
+parser-time GET/PUT and class metadata, and the trace completes without truncation. This
+proves the missing modeled immediate-submission path and explains the zero vertex counts; it
+does not yet prove that the resulting mode-8 raster state is supported or visible. The final
+selected frame is still uniform near-black, so no dashboard menu or navigation is claimed.
+
+The witnessed front end is now implemented without enabling pixels. Generic 2F and 4UB
+methods update persistent attributes, while only the observed legacy `SET_VERTEX4F` W method
+commits a vertex. Sources cannot mix, mode 8 exits before raster-profile selection, and focused
+coverage reproduces the captured white textured quad exactly. The guarded 11.5B replay is
+fault-free and executes 232,662 immediate writes as 49,500 vertices in 3,000 batches
+(12,375 quads / 24,750 assembled triangles). Indexed/inline counters and every existing
+raster counter/hash remain unchanged. Pre-change, immediate-front-end, and guarded endpoint
+PPMs have identical SHA-256
+`0C9B6D850BF9A1B0D04FB310A2C15CEF78E123AD126CC6D8FD0DDF7CEE198AA1`.
+This is submission/transform/assembly progress, not visible dashboard rendering.
+
+The retained pitch-three cube path also has a deliberately bounded exact-X/Y-major continuation:
+only `|X| == |Y| > |Z|` in that retained profile selects the X face. Pitch-multi and all-axis
+ties retain their prior behavior. The 6.4B replay reports five direction-0 and zero direction-1
+tie events, with zero-vector and rescale counters both zero, and completes fault-free. This is a
+deterministic replay policy validated by focused tests, not a hardware-proven general cube-map
+tie rule.
+
+USB remains configured but not menu-ready: the final replay has no endpoint-2 IN polls and no
+guest-proven navigation. The next work remains output-affecting Kelvin state toward a visible
+dashboard, then observed endpoint polling and guest-owned D-pad/A/B state changes.
+
 ## 2026-08-08 — A4: faster late replays, live XID input, and one more fan family
 
 Long firmware replays may now opt into `--reduced-retire-diag`. The mode removes only the

@@ -51,6 +51,7 @@ public:
 
     CpuFloor& cpu() { return *cpu_; }
     size_t flash_size() const { return flash_size_; }
+    uint64_t total_insns() const { return total_insns_; }
 
     // Observability: fired for every serviced I/O-port access (see IoEvent). Installed once.
     void on_io_event(std::function<void(const IoEvent&)> cb) { io_event_cb_ = std::move(cb); }

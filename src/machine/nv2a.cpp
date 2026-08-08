@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <memory>
 
 #include "nv2a_vsh_emulator.h"
@@ -174,6 +175,16 @@ static float clamp_away_zero_inf(float value) {
 
 static float round_screen_coordinate(float value) {
     return std::trunc(value * 16.0f) / 16.0f;
+}
+
+static uint64_t fnv1a_bytes(const void* data, size_t size) {
+    const auto* bytes = static_cast<const uint8_t*>(data);
+    uint64_t hash = 1469598103934665603ull;
+    for (size_t index = 0; index < size; ++index) {
+        hash ^= bytes[index];
+        hash *= 1099511628211ull;
+    }
+    return hash;
 }
 
 uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
@@ -842,6 +853,22 @@ bool Nv2a::fetch_vertex_attribute(uint32_t slot, uint32_t index) {
     return true;
 }
 
+bool Nv2a::commit_immediate_vertex() {
+    if (primitive_mode_ == 0) {
+        fault_("NV2A immediate vertex submitted outside BEGIN/END");
+        return false;
+    }
+    if (immediate_vertices_.size() >= (1u << 24)) {
+        fault_("NV2A immediate vertex batch exceeds safety bound");
+        return false;
+    }
+    VertexInputs inputs{};
+    for (uint32_t slot = 0; slot < vertex_attributes_.size(); ++slot)
+        inputs[slot] = vertex_attributes_[slot].value;
+    immediate_vertices_.push_back(inputs);
+    return true;
+}
+
 bool Nv2a::decode_inline_array() {
     inline_vertices_.clear();
     if (inline_array_words_.empty()) return true;
@@ -959,18 +986,24 @@ bool Nv2a::decode_inline_array() {
 }
 
 bool Nv2a::submit_vertex_batch() {
-    if (vertex_indices_.empty() && inline_vertices_.empty()) return true;
-    if (!vertex_indices_.empty() && !inline_vertices_.empty()) {
-        fault_("NV2A batch mixes indexed and inline-array vertices");
+    const bool indexed = !vertex_indices_.empty();
+    const bool inline_array = !inline_vertices_.empty();
+    const bool immediate = !immediate_vertices_.empty();
+    const uint32_t sources = static_cast<uint32_t>(indexed) +
+                             static_cast<uint32_t>(inline_array) +
+                             static_cast<uint32_t>(immediate);
+    if (!sources) return true;
+    if (sources != 1) {
+        fault_("NV2A batch mixes indexed, inline-array, or immediate vertices");
         return false;
     }
     if (primitive_mode_ == 0 || primitive_mode_ >= primitive_mode_counts_.size()) {
         fault_("NV2A vertices submitted outside a valid BEGIN/END");
         return false;
     }
-    const bool inline_array = !inline_vertices_.empty();
-    const size_t vertex_count =
-        inline_array ? inline_vertices_.size() : vertex_indices_.size();
+    const size_t vertex_count = indexed ? vertex_indices_.size()
+                              : inline_array ? inline_vertices_.size()
+                                             : immediate_vertices_.size();
 
     auto raster_sample = std::find_if(
         raster_state_samples_.begin(), raster_state_samples_.end(),
@@ -991,6 +1024,86 @@ bool Nv2a::submit_vertex_batch() {
     tracked_raster_sample.vertices += vertex_count;
     tracked_raster_sample.inline_batches += inline_array ? 1 : 0;
     ++tracked_raster_sample.primitive_batches[primitive_mode_];
+    const bool immediate_quad = immediate && primitive_mode_ == 8;
+    bool capture_immediate_quad = false;
+    if (immediate_quad) {
+        const uint64_t program_hash = fnv1a_bytes(
+            transform_program_.data(), sizeof(transform_program_));
+        const uint64_t constants_hash = fnv1a_bytes(
+            transform_constants_.data(), sizeof(transform_constants_));
+        const RasterStateSample::ImmediateQuadTransformVariant identity{
+            transform_execution_mode_, transform_program_start_, program_hash, constants_hash};
+        ++tracked_raster_sample.immediate_quad_batches;
+        const uint32_t count = static_cast<uint32_t>(std::min<size_t>(
+            vertex_count, std::numeric_limits<uint32_t>::max()));
+        if (tracked_raster_sample.immediate_quad_batches == 1) {
+            tracked_raster_sample.immediate_quad_min_vertices = count;
+            tracked_raster_sample.immediate_quad_max_vertices = count;
+        } else {
+            tracked_raster_sample.immediate_quad_min_vertices = std::min(
+                tracked_raster_sample.immediate_quad_min_vertices, count);
+            tracked_raster_sample.immediate_quad_max_vertices = std::max(
+                tracked_raster_sample.immediate_quad_max_vertices, count);
+        }
+        if (vertex_count % 4 != 0)
+            ++tracked_raster_sample.immediate_quad_nonmultiple_of_four;
+        capture_immediate_quad =
+            !tracked_raster_sample.immediate_quad_first_captured;
+        if (capture_immediate_quad) {
+            tracked_raster_sample.immediate_quad_first_captured = true;
+            tracked_raster_sample.immediate_quad_transform_mode =
+                transform_execution_mode_;
+            tracked_raster_sample.immediate_quad_transform_start =
+                transform_program_start_;
+            tracked_raster_sample.immediate_quad_program_hash = program_hash;
+            tracked_raster_sample.immediate_quad_constants_hash = constants_hash;
+            tracked_raster_sample.immediate_quad_transform_variants[0] = identity;
+            tracked_raster_sample.immediate_quad_transform_variant_count = 1;
+            ++tracked_raster_sample.immediate_quad_first_transform_batches;
+            const size_t captured_vertices = std::min<size_t>(4, vertex_count);
+            for (size_t vertex = 0; vertex < captured_vertices; ++vertex) {
+                tracked_raster_sample.immediate_quad_decoded_input0[vertex] =
+                    immediate_vertices_[vertex][0];
+                tracked_raster_sample.immediate_quad_decoded_input3[vertex] =
+                    immediate_vertices_[vertex][3];
+                tracked_raster_sample.immediate_quad_decoded_input9[vertex] =
+                    immediate_vertices_[vertex][9];
+            }
+        } else {
+            const auto& first =
+                tracked_raster_sample.immediate_quad_transform_variants[0];
+            if (identity.mode == first.mode && identity.start == first.start &&
+                identity.program_hash == first.program_hash &&
+                identity.constants_hash == first.constants_hash) {
+                ++tracked_raster_sample.immediate_quad_first_transform_batches;
+            } else {
+                ++tracked_raster_sample.immediate_quad_later_transform_batches;
+                bool known = false;
+                for (uint8_t variant = 0;
+                     variant < tracked_raster_sample.immediate_quad_transform_variant_count;
+                     ++variant) {
+                    const auto& existing =
+                        tracked_raster_sample.immediate_quad_transform_variants[variant];
+                    known = existing.mode == identity.mode &&
+                            existing.start == identity.start &&
+                            existing.program_hash == identity.program_hash &&
+                            existing.constants_hash == identity.constants_hash;
+                    if (known) break;
+                }
+                if (!known) {
+                    if (tracked_raster_sample.immediate_quad_transform_variant_count <
+                        tracked_raster_sample.immediate_quad_transform_variants.size()) {
+                        tracked_raster_sample.immediate_quad_transform_variants[
+                            tracked_raster_sample.immediate_quad_transform_variant_count++] =
+                            identity;
+                    } else {
+                        ++tracked_raster_sample
+                              .immediate_quad_transform_variant_overflow_batches;
+                    }
+                }
+            }
+        }
+    }
 
     ++transform_mode_batches_[transform_execution_mode_ & 3u];
     if (transform_execution_mode_ == 0) {
@@ -1061,10 +1174,11 @@ bool Nv2a::submit_vertex_batch() {
     transformed_batch_.reserve(vertex_count);
 
     for (size_t vertex_index = 0; vertex_index < vertex_count; ++vertex_index) {
-        if (inline_array) {
+        if (inline_array || immediate) {
+            const auto& inputs = inline_array ? inline_vertices_[vertex_index]
+                                              : immediate_vertices_[vertex_index];
             for (uint32_t slot = 0; slot < vertex_attributes_.size(); ++slot)
-                vertex_attributes_[slot].value =
-                    inline_vertices_[vertex_index][slot];
+                vertex_attributes_[slot].value = inputs[slot];
         } else {
             const uint32_t index = vertex_indices_[vertex_index];
             largest_vertex_index_ = std::max(largest_vertex_index_, index);
@@ -1088,10 +1202,23 @@ bool Nv2a::submit_vertex_batch() {
             }
             nv2a_vsh_emu_execute(&execution, &program);
 
+            if (capture_immediate_quad && vertex_index < 4) {
+                auto& evidence = raster_state_samples_[raster_sample_index];
+                std::memcpy(evidence.immediate_quad_opos[vertex_index].data(),
+                            &full_state.output_regs[0], 4 * sizeof(float));
+                std::memcpy(evidence.immediate_quad_od0[vertex_index].data(),
+                            &full_state.output_regs[3 * 4], 4 * sizeof(float));
+                std::memcpy(evidence.immediate_quad_ot0[vertex_index].data(),
+                            &full_state.output_regs[9 * 4], 4 * sizeof(float));
+            }
+
             std::memcpy(vertex.position.data(), &full_state.output_regs[0], 4 * sizeof(float));
             vertex.position[0] = round_screen_coordinate(vertex.position[0]);
             vertex.position[1] = round_screen_coordinate(vertex.position[1]);
             vertex.position[3] = clamp_away_zero_inf(vertex.position[3]);
+            if (capture_immediate_quad && vertex_index < 4)
+                raster_state_samples_[raster_sample_index]
+                    .immediate_quad_raster_opos[vertex_index] = vertex.position;
             std::memcpy(vertex.diffuse.data(), &full_state.output_regs[3 * 4],
                         4 * sizeof(float));
             std::memcpy(vertex.specular.data(), &full_state.output_regs[4 * 4],
@@ -1147,6 +1274,81 @@ bool Nv2a::submit_vertex_batch() {
         }
     }
     if (program_parsed) nv2a_vsh_program_destroy(&program);
+    if (capture_immediate_quad) {
+        auto& evidence = raster_state_samples_[raster_sample_index];
+        if (!program_parsed) {
+            const size_t captured_vertices =
+                std::min<size_t>(4, transformed_batch_.size());
+            for (size_t vertex = 0; vertex < captured_vertices; ++vertex) {
+                evidence.immediate_quad_opos[vertex] = transformed_batch_[vertex].position;
+                evidence.immediate_quad_od0[vertex] = transformed_batch_[vertex].diffuse;
+                evidence.immediate_quad_ot0[vertex] = transformed_batch_[vertex].texture[0];
+                evidence.immediate_quad_raster_opos[vertex] =
+                    transformed_batch_[vertex].position;
+            }
+        }
+
+        const uint32_t texture_format =
+            raster_state_[kRasterTextureFormat0];
+        const bool texture_uses_dma_b = (texture_format & 2u) != 0;
+        const bool texture_dma_bound = texture_uses_dma_b
+            ? texture_dma_b_bound_ : texture_dma_a_bound_;
+        const uint32_t texture_dma = texture_uses_dma_b
+            ? texture_dma_b_ : texture_dma_a_;
+        const uint32_t texture_offset =
+            raster_state_[kRasterTextureOffset0];
+        constexpr size_t kProbeBytes = 16;
+        uint32_t texture_last = 0;
+        if (texture_dma_bound &&
+            texture_offset <= UINT32_MAX - (kProbeBytes - 1) &&
+            dma_object_address(texture_dma, texture_offset,
+                               evidence.immediate_quad_t0_address) &&
+            dma_object_address(texture_dma,
+                               texture_offset + static_cast<uint32_t>(kProbeBytes - 1),
+                               texture_last) &&
+            texture_last >= evidence.immediate_quad_t0_address &&
+            texture_last - evidence.immediate_quad_t0_address == kProbeBytes - 1) {
+            evidence.immediate_quad_t0_dma_resolved = true;
+            if (mem_read_ && mem_read_(evidence.immediate_quad_t0_address,
+                                      evidence.immediate_quad_t0_probe.data(),
+                                      kProbeBytes)) {
+                evidence.immediate_quad_t0_probe_read = true;
+                evidence.immediate_quad_t0_probe_size = kProbeBytes;
+            }
+        }
+
+        const uint32_t texture_color = (texture_format >> 8) & 0x7Fu;
+        evidence.immediate_quad_palette_relevant = texture_color == 0x0Bu;
+        if (evidence.immediate_quad_palette_relevant) {
+            const uint32_t palette = raster_state_[kRasterTexturePalette0];
+            const bool palette_uses_dma_b = (palette & 1u) != 0;
+            const bool palette_dma_bound = palette_uses_dma_b
+                ? texture_dma_b_bound_ : texture_dma_a_bound_;
+            const uint32_t palette_dma = palette_uses_dma_b
+                ? texture_dma_b_ : texture_dma_a_;
+            const uint32_t palette_offset = palette & ~0x3Fu;
+            constexpr size_t kPaletteProbeBytes = 4 * sizeof(uint32_t);
+            uint32_t palette_last = 0;
+            if (palette_dma_bound &&
+                palette_offset <= UINT32_MAX - (kPaletteProbeBytes - 1) &&
+                dma_object_address(palette_dma, palette_offset,
+                                   evidence.immediate_quad_palette_address) &&
+                dma_object_address(palette_dma,
+                                   palette_offset + static_cast<uint32_t>(kPaletteProbeBytes - 1),
+                                   palette_last) &&
+                palette_last >= evidence.immediate_quad_palette_address &&
+                palette_last - evidence.immediate_quad_palette_address ==
+                    kPaletteProbeBytes - 1) {
+                evidence.immediate_quad_palette_dma_resolved = true;
+                if (mem_read_ && mem_read_(evidence.immediate_quad_palette_address,
+                                          evidence.immediate_quad_palette_probe.data(),
+                                          kPaletteProbeBytes)) {
+                    evidence.immediate_quad_palette_probe_read = true;
+                    evidence.immediate_quad_palette_probe_entries = 4;
+                }
+            }
+        }
+    }
     bool raster_executed = false;
     if (!rasterize_witnessed_batch(raster_executed)) return false;
     if (raster_executed)
@@ -1189,6 +1391,10 @@ bool Nv2a::submit_vertex_batch() {
     }
     ++vertex_batches_;
     submitted_vertices_ += n;
+    if (immediate) {
+        ++immediate_batches_;
+        immediate_vertices_total_ += n;
+    }
     assembled_primitives_ += primitives;
     assembled_triangles_ += triangles;
     ++primitive_mode_counts_[primitive_mode_];
@@ -1212,6 +1418,7 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         kInlineLinearBlitColor,
         kPitchSingleTextureColor,
         kTex7FanColor,
+        kTexfProjectedFanColor,
         kPitchAdditiveColor,
     };
 
@@ -1222,6 +1429,9 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
     const uint32_t zeta_format = (surface_format_ >> 4) & 0xFu;
     const bool supported_primitive =
         primitive_mode_ == 5 || primitive_mode_ == 6 || primitive_mode_ == 7;
+    // Recorder-only primitive families still travel through transform/assembly, but must
+    // not enter a witnessed triangle-raster profile (or its validation path).
+    if (!supported_primitive) return true;
     const bool depth_only =
         raster_state_[kRasterColorMask] == 0 &&
         (enables & (1u << 3)) != 0 &&
@@ -1429,13 +1639,24 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
             witnessed_factor0 &&
             raster_state_[kRasterCombinerFactor1_0 + stage] == 0;
     }
-    // Shader 0x63 cube sampling never enters the 2D border path. Opaque black is retained
-    // by several later states, however, so admit it only with the exact stage-3 factor of
-    // the witnessed 32-batch family; all broader variants remain recorder-only.
+    // Shader 0x63 cube sampling never enters the 2D border path.  Opaque
+    // black is output-inert here, but it is admitted only for the finite
+    // captured set: prior FF16590D plus ten RS2/RS5-RS13 additions--never as
+    // a high-byte wildcard.
+    constexpr std::array<uint32_t, 11> kPitchThreeBlackBorderFactors{{
+        0xFF16590D, 0xFF175B0E, 0xFF1F7D13, 0xFF16580D, 0xFF18610F,
+        0xFF185F0E, 0xFF175C0E, 0xFF144F0C, 0xFF175D0E, 0xFF16570D,
+        0xFF18600E}};
+    const uint32_t pitch_three_factor3 =
+        raster_state_[kRasterCombinerFactor0_0 + 3];
+    const bool pitch_three_black_border_factor =
+        std::find(kPitchThreeBlackBorderFactors.begin(),
+                  kPitchThreeBlackBorderFactors.end(),
+                  pitch_three_factor3) != kPitchThreeBlackBorderFactors.end();
     const bool pitch_three_texture_border0 =
         raster_state_[kRasterTextureBorderColor0] == 0 ||
         (raster_state_[kRasterTextureBorderColor0] == 0xFF000000 &&
-         raster_state_[kRasterCombinerFactor0_0 + 3] == 0xFF16590D);
+         pitch_three_black_border_factor);
     const bool pitch_three_texture_state =
         raster_state_[kRasterTextureFormat0] == 0x0661072E &&
         raster_state_[kRasterTextureFormat0 + 1] == 0x0661072E &&
@@ -1656,6 +1877,85 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80 &&
         raster_state_[kRasterCombinerFinalFactor0] == 0 &&
         raster_state_[kRasterCombinerFinalFactor1] == 0;
+    // RS0/RS1 from probe-rs2-ohci-6.4b.  This intentionally names every
+    // register which affects the generated Xemu register-combiner program;
+    // adjacent shadow=0 states are a distinct, still-recorder-only family.
+    const std::array<uint32_t, 6> texf_ci{{0xD920DA20, 0xCD20DB20,
+                                            0xCDC10000, 0xC8CD0000,
+                                            0xCC20C120, 0}};
+    const std::array<uint32_t, 6> texf_ai{{0xD930DA30, 0xDD30DB30,
+                                            0xDDD11010, 0, 0, 0x30301010}};
+    const std::array<uint32_t, 6> texf_co{{0x00000D00, 0x00000D00,
+                                            0x000000D0, 0x000000C0,
+                                            0x00000C00, 0}};
+    const std::array<uint32_t, 6> texf_ao{{0x00000D00, 0x00000D00,
+                                            0x000000D0, 0, 0,
+                                            0x000000C0}};
+    const std::array<uint32_t, 6> texf_f0{{0, 0, 0xFF000000, 0, 0, 0}};
+    bool texf_projected_fan_combiner =
+        raster_state_[kRasterTextureEnableMask] == 0xF &&
+        raster_state_[kRasterShaderStageProgram] == 0x00008421 &&
+        raster_state_[kRasterShaderOtherStageInput] == 0 &&
+        raster_state_[kRasterDotRgbMapping] == 0 &&
+        raster_state_[kRasterShadowDepthFunc] == 7 &&
+        raster_state_[kRasterCombinerControl] == 0x00011106 &&
+        raster_state_[kRasterCombinerSpecularFog0] == 0x0000000C &&
+        raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80 &&
+        raster_state_[kRasterCombinerFinalFactor0] == 0 &&
+        raster_state_[kRasterCombinerFinalFactor1] == 0;
+    for (size_t stage = 0; stage < texf_ci.size() &&
+                           texf_projected_fan_combiner; ++stage) {
+        texf_projected_fan_combiner =
+            raster_state_[kRasterCombinerColorIcw0 + stage] == texf_ci[stage] &&
+            raster_state_[kRasterCombinerAlphaIcw0 + stage] == texf_ai[stage] &&
+            raster_state_[kRasterCombinerColorOcw0 + stage] == texf_co[stage] &&
+            raster_state_[kRasterCombinerAlphaOcw0 + stage] == texf_ao[stage] &&
+            raster_state_[kRasterCombinerFactor0_0 + stage] == texf_f0[stage] &&
+            raster_state_[kRasterCombinerFactor1_0 + stage] == 0;
+    }
+    const uint32_t texf_t0_offset = raster_state_[kRasterTextureOffset0];
+    const bool texf_projected_fan_textures =
+        (texf_t0_offset == 0x02E05000 || texf_t0_offset == 0x02C05000) &&
+        raster_state_[kRasterTextureFormat0] == 0x09A1062A &&
+        raster_state_[kRasterTextureAddress0] == 0x00030303 &&
+        raster_state_[kRasterTextureFilter0] == 0x02022000 &&
+        raster_state_[kRasterTextureControl0_0] == 0x4003FFC0 &&
+        raster_state_[kRasterTextureControl1_0] == 0x14000000 &&
+        raster_state_[kRasterTextureImageRect0] == 0x050001E0 &&
+        raster_state_[kRasterTexturePalette0] == 0 &&
+        raster_state_[kRasterTextureBorderColor0] == 0 &&
+        raster_state_[kRasterTextureOffset0 + 1] == 0x029F3000 &&
+        raster_state_[kRasterTextureOffset0 + 2] == 0x029E3000 &&
+        raster_state_[kRasterTextureOffset0 + 3] == 0x029D3000 &&
+        raster_state_[kRasterTextureFormat0 + 1] == 0x0881192A &&
+        raster_state_[kRasterTextureFormat0 + 2] == 0x0881192A &&
+        raster_state_[kRasterTextureFormat0 + 3] == 0x0881192A &&
+        raster_state_[kRasterTextureAddress0 + 1] == 0x00030101 &&
+        raster_state_[kRasterTextureAddress0 + 2] == 0x00030101 &&
+        raster_state_[kRasterTextureAddress0 + 3] == 0x00030101 &&
+        raster_state_[kRasterTextureFilter0 + 1] == 0x02022000 &&
+        raster_state_[kRasterTextureFilter0 + 2] == 0x02022000 &&
+        raster_state_[kRasterTextureFilter0 + 3] == 0x02022000 &&
+        raster_state_[kRasterTextureControl0_0 + 1] == 0x4003FFC0 &&
+        raster_state_[kRasterTextureControl0_0 + 2] == 0x4003FFC0 &&
+        raster_state_[kRasterTextureControl0_0 + 3] == 0x4003FFC0 &&
+        raster_state_[kRasterTextureControl1_0 + 1] == 0 &&
+        raster_state_[kRasterTextureControl1_0 + 2] == 0 &&
+        raster_state_[kRasterTextureControl1_0 + 3] == 0x04000000 &&
+        raster_state_[kRasterTextureImageRect0 + 1] == 0 &&
+        raster_state_[kRasterTextureImageRect0 + 2] == 0 &&
+        raster_state_[kRasterTextureImageRect0 + 3] == 0x02000200 &&
+        raster_state_[kRasterTexturePalette0 + 1] == 0 &&
+        raster_state_[kRasterTexturePalette0 + 2] == 0 &&
+        raster_state_[kRasterTexturePalette0 + 3] == 0 &&
+        raster_state_[kRasterTextureBorderColor0 + 1] == 0 &&
+        raster_state_[kRasterTextureBorderColor0 + 2] == 0 &&
+        raster_state_[kRasterTextureBorderColor0 + 3] == 0xFFFFFFFF;
+    const bool texf_projected_fan_bounds =
+        raster_state_[kRasterWindowClipHorizontal] == 0x04FF0000 &&
+        raster_state_[kRasterWindowClipVertical] == 0x01DF0000 &&
+        raster_state_[kRasterClipMin] == 0 &&
+        raster_state_[kRasterClipMax] == 0x4B7FFFFF;
 
     Profile profile = Profile::kNone;
     if (depth_only && surface_type == 1 && anti_aliasing == 0 &&
@@ -1698,6 +1998,10 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         profile = Profile::kPitchSingleTextureColor;
     } else if (tex7_fan_combiner && tex7_fan_texture_state) {
         profile = Profile::kTex7FanColor;
+    } else if (texf_projected_fan_combiner &&
+               texf_projected_fan_textures &&
+               texf_projected_fan_bounds) {
+        profile = Profile::kTexfProjectedFanColor;
     } else if (pitch_additive_combiner) {
         profile = Profile::kPitchAdditiveColor;
     } else {
@@ -1843,6 +2147,34 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
             fault_("NV2A tex7 fan draw exceeds the witnessed RS0 subset");
             return false;
         }
+    } else if (profile == Profile::kTexfProjectedFanColor) {
+        if (primitive_mode_ != 7 || surface_type != 1 || anti_aliasing != 0 ||
+            color_format != 8 || zeta_format != 2 ||
+            surface_pitch_ != 0x14001400 ||
+            surface_clip_horizontal_ != 0x05000000 ||
+            surface_clip_vertical_ != 0x01E00000 || enables != 0x000Fu ||
+            raster_state_[kRasterWindowClipHorizontal] != 0x04FF0000 ||
+            raster_state_[kRasterWindowClipVertical] != 0x01DF0000 ||
+            raster_state_[kRasterClipMin] != 0 ||
+            raster_state_[kRasterClipMax] != 0x4B7FFFFF ||
+            raster_state_[kRasterControl0] != 0x00100001 ||
+            raster_state_[kRasterAlphaFunc] != 0x0206 ||
+            (raster_state_[kRasterAlphaRef] & 0xFFu) != 1 ||
+            raster_state_[kRasterBlendSrc] != 0x0302 ||
+            raster_state_[kRasterBlendDst] != 1 ||
+            raster_state_[kRasterBlendEquation] != 0x8006 ||
+            raster_state_[kRasterDepthFunc] != 0x0207 ||
+            raster_state_[kRasterColorMask] != 0x01010101 ||
+            raster_state_[kRasterDepthMask] != 0 ||
+            raster_state_[kRasterShadeMode] != 0x1D01 ||
+            raster_state_[kRasterFrontPolygonMode] != 0x1B02 ||
+            raster_state_[kRasterBackPolygonMode] != 0x1B02 ||
+            raster_state_[kRasterCullFace] != 0x0405 ||
+            raster_state_[kRasterFrontFace] != 0x0900 ||
+            raster_state_[kRasterZMinMaxControl] != 1) {
+            fault_("NV2A tex=f projected fan draw exceeds RS0/RS1 subset");
+            return false;
+        }
     } else if (profile == Profile::kPitchAdditiveColor) {
         if (!supported_primitive || surface_type != 1 ||
             anti_aliasing != 0 || color_format != 8 || zeta_format != 2 ||
@@ -1977,7 +2309,8 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                profile == Profile::kPitchTex5DiffuseColor ||
                profile == Profile::kInlineLinearBlitColor ||
                profile == Profile::kPitchSingleTextureColor ||
-               profile == Profile::kTex7FanColor) {
+               profile == Profile::kTex7FanColor ||
+               profile == Profile::kTexfProjectedFanColor) {
         pitch = surface_pitch_ & 0xFFFFu;
         surface_width = pitch / 4;
         surface_height = clip_y + clip_height;
@@ -1990,7 +2323,8 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
             profile == Profile::kPitchTex5ProjectedColor ||
             profile == Profile::kPitchTex5DiffuseColor ||
             profile == Profile::kPitchSingleTextureColor ||
-            profile == Profile::kTex7FanColor)
+            profile == Profile::kTex7FanColor ||
+            profile == Profile::kTexfProjectedFanColor)
             depth_bytes64 = color_bytes64;
         if (!pitch || (surface_pitch_ >> 16) != pitch ||
             static_cast<uint64_t>(clip_x + clip_width) * 4 > pitch) {
@@ -2076,6 +2410,25 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         if (color_address < depth_end && depth_address < color_end) {
             fault_("NV2A color and zeta surfaces overlap");
             return false;
+        }
+    }
+
+    if (profile == Profile::kTexfProjectedFanColor) {
+        // Texture values cannot affect this exact combiner result, but its
+        // four enabled PROJECT2D images still require valid DMA-B ranges.
+        // Resolve their full format-derived extents without copying data.
+        for (size_t stage = 0; stage < 4; ++stage) {
+            const uint32_t format = raster_state_[kRasterTextureFormat0 + stage];
+            const uint32_t width = 1u << ((format >> 20) & 0xFu);
+            const uint32_t height = 1u << ((format >> 24) & 0xFu);
+            const uint64_t bytes = static_cast<uint64_t>(width) * height * 4;
+            uint32_t address = 0;
+            if (bytes > SIZE_MAX ||
+                !resolve_surface(texture_dma_b_, texture_dma_b_bound_,
+                                 raster_state_[kRasterTextureOffset0 + stage],
+                                 bytes, address, "tex=f texture")) {
+                return false;
+            }
         }
     }
 
@@ -2261,7 +2614,7 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
             raster_state_[kRasterTextureBorderColor0] == 0 ||
             (profile == Profile::kPitchThreeTextureColor &&
              raster_state_[kRasterTextureBorderColor0] == 0xFF000000 &&
-             raster_state_[kRasterCombinerFactor0_0 + 3] == 0xFF16590D);
+             pitch_three_black_border_factor);
         const bool witnessed_multi_texture =
             format0 == 0x0661072E && format1 == format0 &&
             offset1 == offset0 &&
@@ -2508,6 +2861,8 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
             ++pitch_single_texture_batches_;
         else if (profile == Profile::kTex7FanColor)
             ++tex7_fan_batches_;
+        else if (profile == Profile::kTexfProjectedFanColor)
+            ++texf_projected_fan_batches_;
         else
             ++inline_color_batches_;
         return true;
@@ -2660,14 +3015,44 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
             const SwizzleLookup& swizzle,
             uint32_t width, uint32_t height,
             const std::array<float, 3>& direction,
-            std::array<float, 3>& color) {
+            std::array<float, 3>& color,
+            uint64_t* zero_direction_counter = nullptr,
+            uint64_t* xy_tie_counter = nullptr) {
+            if (!std::isfinite(direction[0]) || !std::isfinite(direction[1]) ||
+                !std::isfinite(direction[2])) {
+                return false;
+            }
+            // The retained pitch-three profile reaches the exact zero vector.
+            // Apply its deterministic +Z-axis tie-break policy only when that
+            // caller explicitly opts in.
+            if (direction[0] == 0.0f && direction[1] == 0.0f &&
+                direction[2] == 0.0f) {
+                if (!zero_direction_counter) return false;
+                ++*zero_direction_counter;
+                last_pitch_three_zero_factor3_ =
+                    raster_state_[kRasterCombinerFactor0_0 + 3];
+                return sample_texture(data, swizzle, width, height,
+                                      0.0f, 0.0f,
+                                      TextureAddressMode::kClampToEdge, 0,
+                                      color, nullptr);
+            }
             const float abs_x = std::abs(direction[0]);
             const float abs_y = std::abs(direction[1]);
             const float abs_z = std::abs(direction[2]);
             float u = 0.0f;
             float v = 0.0f;
             float divisor = 0.0f;
-            if (abs_x > abs_y && abs_x > abs_z) {
+            // The retained pitch-three profile uses a first-major tie policy
+            // for exactly |X|==|Y|>|Z|. Other profiles retain the historical
+            // fallback.
+            if (abs_x == abs_y && abs_x > abs_z && xy_tie_counter) {
+                ++*xy_tie_counter;
+                last_pitch_three_xy_tie_factor3_ =
+                    raster_state_[kRasterCombinerFactor0_0 + 3];
+                divisor = abs_x;
+                u = direction[0] >= 0.0f ? -direction[2] : direction[2];
+                v = direction[1];
+            } else if (abs_x > abs_y && abs_x > abs_z) {
                 divisor = abs_x;
                 u = direction[0] >= 0.0f ? -direction[2] : direction[2];
                 v = direction[1];
@@ -2680,7 +3065,7 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                 u = direction[2] >= 0.0f ? direction[0] : -direction[0];
                 v = direction[1];
             }
-            if (!std::isfinite(divisor) || divisor == 0.0f) return false;
+            if (divisor == 0.0f) return false;
             u /= divisor;
             v /= divisor;
             return sample_texture(data, swizzle, width, height,
@@ -2762,6 +3147,8 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                 ++pitch_single_texture_triangles_;
             else if (profile == Profile::kTex7FanColor)
                 ++tex7_fan_triangles_;
+            else if (profile == Profile::kTexfProjectedFanColor)
+                ++texf_projected_fan_triangles_;
             else
                 ++inline_color_triangles_;
             const int32_t tri_xmin = std::max<int32_t>(
@@ -2845,6 +3232,8 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                         ++pitch_single_texture_fragments_;
                     else if (profile == Profile::kTex7FanColor)
                         ++tex7_fan_fragments_;
+                    else if (profile == Profile::kTexfProjectedFanColor)
+                        ++texf_projected_fan_fragments_;
                     else
                         ++inline_color_fragments_;
                     float depth =
@@ -3032,8 +3421,8 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                         if (!std::isfinite(qsum) || qsum == 0.0)
                             continue;
 
-                        std::array<float, 3> direction0{};
-                        std::array<float, 3> direction1{};
+                        std::array<double, 3> direction0_double{};
+                        std::array<double, 3> direction1_double{};
                         for (size_t component = 0; component < 3;
                              ++component) {
                             const double t0 =
@@ -3051,25 +3440,84 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                                 raster_failed = true;
                                 return;
                             }
-                            direction0[component] =
-                                static_cast<float>(t0);
-                            direction1[component] =
-                                static_cast<float>(t1);
+                            direction0_double[component] = t0;
+                            direction1_double[component] = t1;
                         }
+                        auto narrow_cube_direction =
+                            [&](const std::array<double, 3>& source,
+                                std::array<float, 3>& destination,
+                                uint64_t* rescale_counter) {
+                                const double max_abs = std::max(
+                                    {std::abs(source[0]), std::abs(source[1]),
+                                     std::abs(source[2])});
+                                const bool exceeds_float =
+                                    max_abs > std::numeric_limits<float>::max();
+                                bool all_float_zero = source[0] != 0.0 ||
+                                    source[1] != 0.0 || source[2] != 0.0;
+                                if (all_float_zero) {
+                                    all_float_zero =
+                                        static_cast<float>(source[0]) == 0.0f &&
+                                        static_cast<float>(source[1]) == 0.0f &&
+                                        static_cast<float>(source[2]) == 0.0f;
+                                }
+                                const bool rescale = rescale_counter &&
+                                    (exceeds_float || all_float_zero);
+                                const double scale = rescale ? max_abs : 1.0;
+                                if (rescale) {
+                                    ++*rescale_counter;
+                                    last_pitch_three_rescale_factor3_ =
+                                        raster_state_[kRasterCombinerFactor0_0 + 3];
+                                }
+                                for (size_t component = 0; component < 3;
+                                     ++component) {
+                                    destination[component] = static_cast<float>(
+                                        source[component] / scale);
+                                }
+                            };
+                        std::array<float, 3> direction0{};
+                        std::array<float, 3> direction1{};
+                        narrow_cube_direction(
+                            direction0_double, direction0,
+                            profile == Profile::kPitchThreeTextureColor
+                                ? &pitch_three_texture_rescale_direction0_
+                                : nullptr);
+                        narrow_cube_direction(
+                            direction1_double, direction1,
+                            profile == Profile::kPitchThreeTextureColor
+                                ? &pitch_three_texture_rescale_direction1_
+                                : nullptr);
                         std::array<float, 3> texture0{};
                         std::array<float, 3> texture1{};
+                        uint64_t* zero_direction0 =
+                            profile == Profile::kPitchThreeTextureColor
+                                ? &pitch_three_texture_zero_direction0_
+                                : nullptr;
+                        uint64_t* zero_direction1 =
+                            profile == Profile::kPitchThreeTextureColor
+                                ? &pitch_three_texture_zero_direction1_
+                                : nullptr;
+                        uint64_t* xy_tie_direction0 =
+                            profile == Profile::kPitchThreeTextureColor
+                                ? &pitch_three_texture_xy_tie_direction0_
+                                : nullptr;
+                        uint64_t* xy_tie_direction1 =
+                            profile == Profile::kPitchThreeTextureColor
+                                ? &pitch_three_texture_xy_tie_direction1_
+                                : nullptr;
                         if (!sample_cube_texture(
                                 multi_texture_data,
                                 *multi_texture_swizzle,
                                 multi_texture_width,
                                 multi_texture_height,
-                                direction0, texture0) ||
+                                direction0, texture0, zero_direction0,
+                                xy_tie_direction0) ||
                             !sample_cube_texture(
                                 multi_texture_data,
                                 *multi_texture_swizzle,
                                 multi_texture_width,
                                 multi_texture_height,
-                                direction1, texture1)) {
+                                direction1, texture1, zero_direction1,
+                                xy_tie_direction1)) {
                             fault_(
                                 "NV2A pitch cube-pair remap is invalid");
                             raster_failed = true;
@@ -3347,6 +3795,36 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                             pitch_tex5_output_hash_ ^= word;
                             pitch_tex5_output_hash_ *=
                                 1099511628211ull;
+                        }
+                        continue;
+                    }
+                    if (profile == Profile::kTexfProjectedFanColor) {
+                        const size_t offset = static_cast<size_t>(y) * pitch +
+                            static_cast<size_t>(x) * sizeof(uint32_t);
+                        // The exact captured six-stage combiner reduces to
+                        // R0.rgb=0 and R0.a=1 (Xemu psh.c register semantics).
+                        // All four PROJECT2D samples are therefore output-inert;
+                        // do not DMA-read or interpolate them just to reproduce
+                        // this black SRC_ALPHA/ONE coverage pass.
+                        ++texf_projected_fan_alpha_passes_;
+                        uint32_t destination = 0;
+                        if (!color_surface.read32(offset, destination)) {
+                            fault_("NV2A tex=f color DMA read failed");
+                            raster_failed = true;
+                            return;
+                        }
+                        const uint32_t color = destination | 0xFF000000u;
+                        if (!color_surface.write32(offset, color)) {
+                            fault_("NV2A tex=f color DMA write failed");
+                            raster_failed = true;
+                            return;
+                        }
+                        ++texf_projected_fan_writes_;
+                        const uint32_t address = color_address + static_cast<uint32_t>(offset);
+                        last_texf_projected_fan_raster_address_ = address;
+                        for (uint32_t word : {address, color}) {
+                            texf_projected_fan_output_hash_ ^= word;
+                            texf_projected_fan_output_hash_ *= 1099511628211ull;
                         }
                         continue;
                     }
@@ -4008,21 +4486,69 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         ++pitch_single_texture_batches_;
     else if (profile == Profile::kTex7FanColor)
         ++tex7_fan_batches_;
+    else if (profile == Profile::kTexfProjectedFanColor)
+        ++texf_projected_fan_batches_;
     else
         ++inline_color_batches_;
     return true;
 }
 
-void Nv2a::dispatch_method(uint8_t channel, uint8_t subchannel, uint32_t method,
-                           uint32_t parameter) {
-    methods_.push(PushMethod{methods_.total(), channel, subchannel,
-                             static_cast<uint16_t>(method), parameter});
+void Nv2a::dispatch_method(PushMethod push) {
+    const uint8_t channel = push.channel;
+    const uint8_t subchannel = push.subchannel;
+    const uint32_t method = push.method;
+    const uint32_t parameter = push.parameter;
+
+    // SET_OBJECT changes the class which owns this very method; every other method observes
+    // the class already bound on its subchannel.  GET/PUT were captured by the PFIFO parser
+    // when it decoded the parameter, before deferred PGRAPH dispatch.
+    bool object_bound = true;
+    if (method == 0) {
+        object_bound = bind_object(channel, subchannel, parameter);
+        push.object_class = object_class_[subchannel];
+    } else {
+        push.object_class = object_class_[subchannel];
+    }
+    push.seq = methods_.total();
+    methods_.push(push);
+
+    if (clear_trace_triggered_ && !clear_trace_begin_triggered_ &&
+        !clear_trace_truncated_) {
+        clear_trace_pre_methods_.push_back(push);
+        if (clear_trace_pre_methods_.size() > kClearTracePreMethods)
+            clear_trace_pre_methods_.pop_front();
+
+        if (push.object_class == 0x97 && method == 0x17FC && parameter != 0) {
+            clear_trace_begin_triggered_ = true;
+            clear_trace_begin_seq_ = push.seq;
+            clear_trace_begin_channel_ = channel;
+            clear_trace_begin_subchannel_ = subchannel;
+            clear_trace_methods_.assign(clear_trace_pre_methods_.begin(),
+                                        clear_trace_pre_methods_.end());
+            clear_trace_pre_count_ = clear_trace_methods_.size();
+            clear_trace_pre_methods_.clear();
+        }
+    } else if (clear_trace_begin_triggered_ && !clear_trace_complete_ &&
+               !clear_trace_truncated_) {
+        if (clear_trace_methods_.size() < kClearTraceMethodLimit)
+            clear_trace_methods_.push_back(push);
+
+        const bool matching_end =
+            push.object_class == 0x97 && channel == clear_trace_begin_channel_ &&
+            subchannel == clear_trace_begin_subchannel_ && method == 0x17FC &&
+            parameter == 0;
+        if (matching_end) {
+            clear_trace_complete_ = true;
+        } else if (clear_trace_methods_.size() == kClearTraceMethodLimit) {
+            clear_trace_truncated_ = true;
+        }
+    }
     if (method < 0x2000 && !(method & 3u)) ++method_counts_[method >> 2];
 
     // PFIFO resolves SET_OBJECT through RAMHT, then PGRAPH caches the object's class for
     // this subchannel. Only Kelvin (class 0x97) methods may mutate the 3D/scanout state.
     if (method == 0) {
-        if (bind_object(channel, subchannel, parameter))
+        if (object_bound)
             ++class_method_counts_[object_class_[subchannel]];
         return;
     }
@@ -4129,7 +4655,18 @@ void Nv2a::dispatch_method(uint8_t channel, uint8_t subchannel, uint32_t method,
     } else if (method == 0x1D9C) {
         clear_rect_vertical_ = parameter;
     } else if (method == 0x1D94) {
+        const uint64_t color_clears_before = color_clears_;
         clear_surface(parameter);
+        if (clear_trace_armed_ && color_clears_ != color_clears_before &&
+            last_color_clear_address_ == clear_trace_target_) {
+            // First matching successful clear wins.  Subsequent decoded methods feed the
+            // rolling pre-BEGIN window; the clear itself is intentionally not part of the
+            // selected draw window.
+            clear_trace_armed_ = false;
+            clear_trace_triggered_ = true;
+            clear_trace_trigger_seq_ = push.seq;
+            clear_trace_pre_methods_.clear();
+        }
     // Raster state is sampled at each indexed batch. Enable bits are alpha,
     // blend, cull, depth, dither, stencil, logic, point-params/smooth,
     // line/poly smooth, and point/line/fill polygon offset respectively.
@@ -4439,6 +4976,31 @@ void Nv2a::dispatch_method(uint8_t channel, uint8_t subchannel, uint32_t method,
             return;
         }
         transform_constant_load_ = static_cast<uint8_t>(parameter);
+    // The dashboard's immediate quad path uses generic texture/diffuse attributes and the
+    // legacy position stream.  These follow xemu's NV097 handlers: attributes persist until
+    // changed, while a completed position write snapshots one full 16-slot vertex.
+    } else if (method >= 0x1518 && method < 0x1528) {
+        const uint32_t component = (method - 0x1518) / 4;
+        std::memcpy(&vertex_attributes_[0].value[component], &parameter, sizeof(parameter));
+        ++immediate_methods_;
+        if (component == 3 && !commit_immediate_vertex()) return;
+    } else if (method >= 0x1880 && method < 0x1900) {
+        const uint32_t word = (method - 0x1880) / 4;
+        const uint32_t slot = word / 2;
+        const uint32_t component = word & 1u;
+        auto& value = vertex_attributes_[slot].value;
+        std::memcpy(&value[component], &parameter, sizeof(parameter));
+        value[2] = 0.0f;
+        value[3] = 1.0f;
+        ++immediate_methods_;
+    } else if (method >= 0x1940 && method < 0x1980) {
+        const uint32_t slot = (method - 0x1940) / 4;
+        auto& value = vertex_attributes_[slot].value;
+        value[0] = static_cast<float>(parameter & 0xFFu) / 255.0f;
+        value[1] = static_cast<float>((parameter >> 8) & 0xFFu) / 255.0f;
+        value[2] = static_cast<float>((parameter >> 16) & 0xFFu) / 255.0f;
+        value[3] = static_cast<float>((parameter >> 24) & 0xFFu) / 255.0f;
+        ++immediate_methods_;
     // Kelvin array-fed vertex submission. ARRAY_ELEMENT16 is non-incrementing and packs two
     // indices per parameter; the pusher has already expanded non-incrementing method runs.
     } else if (method >= 0x1720 && method < 0x1760) {
@@ -4457,11 +5019,13 @@ void Nv2a::dispatch_method(uint8_t channel, uint8_t subchannel, uint32_t method,
             vertex_indices_.clear();
             inline_array_words_.clear();
             inline_vertices_.clear();
+            immediate_vertices_.clear();
         } else if (parameter <= 10 && primitive_mode_ == 0) {
             primitive_mode_ = static_cast<uint8_t>(parameter);
             vertex_indices_.clear();
             inline_array_words_.clear();
             inline_vertices_.clear();
+            immediate_vertices_.clear();
         }
     } else if (method == 0x1800) {
         if (vertex_indices_.size() > (1u << 24) - 2) {
@@ -4533,7 +5097,7 @@ void Nv2a::drain_pull_queue() {
            !pull_queue_.empty()) {
         PushMethod m = pull_queue_.front();
         pull_queue_.pop_front();
-        dispatch_method(m.channel, m.subchannel, m.method, m.parameter);
+        dispatch_method(m);
     }
 }
 
@@ -4580,8 +5144,9 @@ void Nv2a::process_pushbuffer(uint8_t channel) {
         ch.get += 4;
 
         if (ch.method_count) {
-            pull_queue_.push_back(PushMethod{0, channel, ch.subchannel,
-                                             static_cast<uint16_t>(ch.method), word});
+            pull_queue_.push_back(PushMethod{0, channel, ch.subchannel, 0,
+                                             static_cast<uint16_t>(ch.method), word,
+                                             ch.get, ch.put});
             if (!ch.non_incrementing) ch.method += 4;
             --ch.method_count;
             continue;

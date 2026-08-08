@@ -42,11 +42,13 @@ harvested from xemu, silicon-corrected against a live console. GPL-2.
   retail flip queue's framebuffer address into PCRTC, so a 500M capture shows
   the first guest-rendered green boot-orb glow through the full LLE scanout path. The next
   41+30-batch tex7/C61 fan variants, a 32-batch shader-63 strip variant, and a live
-  keyboard-to-XID bridge are also landed, but a 6.4B final scanout is still black and the
-  guest has not scheduled endpoint-2 polls.
-- **Immediate burn-down path:** execute the next output-affecting draw families → reach a
-  recognizable dashboard frame → observe real XID endpoint polling → prove basic D-pad/A/B
-  menu navigation.
+  keyboard-to-XID bridge are also landed. A frame series now reaches a recognizable Xbox X logo
+  at 4.5B, but 4.75–6.0B is black and the 6.4B endpoint is near-black; the guest has not
+  scheduled endpoint-2 polls. An opt-in disconnected-link replay completes the retail PHY
+  timeout path and launches `evoxdash`; its alternating late buffers remain near-black.
+- **Immediate burn-down path:** execute the now-captured immediate-mode dashboard quad,
+  model only its witnessed raster state, turn the recognizable boot output into a visible
+  dashboard frame, observe real XID endpoint polling, and prove basic D-pad/A/B menu navigation.
 - **Not started:** A5 end-to-end retail-dashboard navigation and Arc 2 game work.
 
 ## Where the boot stands RIGHT NOW
@@ -296,6 +298,33 @@ dependency chain peeled this session is:
     configuration 1. It never requests the XID descriptor or publishes endpoint-2 work.
     The descriptor matches local xemu/Cxbx references; exact short-packet condition-code
     confirmation and hardware/reference comparison precede any semantic change.
+37. visual cadence, replay speed, and pitch-three tie observability → **measured and bounded**.
+    The normal-RAM Unicorn memory hook is lazy unless a diagnostic client requests it; on the
+    same binary at 500M it is about 33.5% faster with an identical final PPM. The new
+    `--frame-series <path-prefix> <instruction-interval>` interface enforces an interval of at
+    least 1,000,000 instructions and records actual sample counts in filenames. It shows a
+    recognizable Xbox X logo at 4.5B, black output from 4.75B through 6.0B, then a 6.25B mode
+    transition with noisy lower scanlines and a near-black 720x480 endpoint at `0x03c8c000`.
+    This is still not dashboard/menu visibility. The pitch-three sampler has a deliberately
+    narrow deterministic continuation for exact `|X|==|Y|>|Z|`: select X only for that retained
+    profile, while pitch-multi and all-axis ties keep legacy behavior. The 6.4B replay is
+    fault-free with tie direction0/direction1 = 5/0 and zero/rescale counters = 0/0; this is
+    not asserted as a hardware-proven general tie priority.
+38. offline dashboard lifecycle and first complete draw packet → **captured, next semantic
+    gap exact**. Link-up reaches the stock XONLINE/XNET 90,000-tick wait. Experimental
+    `--net-disconnected` follows the retail driver's bounded 6,000 x 500 us autonegotiation
+    and 1,000 x 500 us link polls; by 11.5B it launches `evoxdash` with eight kernel threads.
+    The late loop alternates `0x03df4000`/`0x03c8c000` scanout and performs 125 full-screen
+    clears/flips while remaining near-black. The bounded clear-to-draw trace proves the first
+    subsequent class-`0x97` packet is BEGIN mode 8, then four vertices using generic 2F
+    texture coordinates (`0x18c8/0x18cc`), generic 4UB diffuse (`0x194c`), and legacy 4F
+    position commits (`0x1518` through `0x1524`), followed by END. This explains the 6,000
+    new BEGIN/END writes with zero modeled vertex submissions. The witnessed front end now
+    executes 232,662 immediate writes as 49,500 vertices in 3,000 mode-8 batches
+    (12,375 quads / 24,750 triangles), with an early guard that leaves mode 8 recorder-only.
+    A guarded 11.5B replay is fault-free and produces a byte-identical endpoint PPM; all
+    established raster counters/hashes remain unchanged. Post-VSH/texture evidence for the
+    new 27 recorder states is the next boundary; the menu and navigation are still not visible.
 
 ## How to build & run
 
@@ -327,6 +356,20 @@ prints rich diagnostics:
 KTHREAD scan + every-waiter wait-block/stack walk, per-thread instruction attribution,
 non-idle PC ring, last-64 I/O + MMIO rings, IDE/NV2A/IRQ counters, code bytes around final
 EIP, and decoded kernel debug services (`[dbg] DbgPrint:`, `[dbg] LOAD symbols:`).
+
+For visual chronology, add `--frame-series <path-prefix> <instruction-interval>`. The interval
+must be an integer of at least 1,000,000 instructions; each PPM filename uses the actual guest
+instruction count at which it was sampled.
+
+For an offline-path experiment, add `--net-disconnected`. This changes the modeled PHY link
+state after device initialization and before guest execution, so it behaves as a pre-boot
+link transition rather than a verified cold-reset cable-out state; it is mutually exclusive
+with the UDP Ethernet peer. For a bounded decoded-command witness, add
+`--pfifo-clear-trace <32-bit-color-address>`. It arms at the first successful matching clear,
+then selects the first subsequent Kelvin BEGIN, retains the 32 methods ending there, and
+records through its matching END under a 4,096-record cap. Every entry includes object class
+and parser-time GET/PUT. It does not capture instruction time, semaphore/notification
+acknowledgement, or flip completion.
 
 ## The bring-up loop (how work proceeds)
 
@@ -397,9 +440,10 @@ Driver: `python tools/xbox_agent.py --host 192.168.4.81 {ping|info|read|exec <fi
 
 ## Next steps (priority order)
 
-1. Decode the leading 26/25-batch `tex=f`, `shader=0x8421` fan states and continue the
-   remaining output-affecting Kelvin census until the selected scanout contains a
-   recognizable dashboard frame.
+1. Use the passive mode-8 evidence census to characterize post-VSH positions/UVs, quad
+   grouping, texture/palette data, and the two observed menu-state families. Then implement
+   only one exact witnessed raster profile. Do not treat the alternating black
+   `0x03df4000`/`0x03c8c000` buffers as menu visibility.
 2. The live keyboard-to-XID mapping and OHCI protocol are landed. Confirm the configuration
    read's intermediate OHCI condition code and compare the short-packet sequence with a
    real console or xemu before changing semantics; then prove a real endpoint-2 report

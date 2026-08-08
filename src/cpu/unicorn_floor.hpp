@@ -30,7 +30,7 @@ public:
     bool setup_flat_segments(uint32_t gdt_addr) override;
 
     void on_retired(RetiredCb cb) override { retired_cb_ = std::move(cb); }
-    void on_mem(MemCb cb) override { mem_cb_ = std::move(cb); }
+    void on_mem(MemCb cb) override;
     void on_interrupt(IntrCb cb) override { intr_cb_ = std::move(cb); }
     void on_io(IoInCb in_cb, IoOutCb out_cb) override;
     bool map_mmio(uint32_t addr, size_t size, MmioReadCb r, MmioWriteCb w) override;

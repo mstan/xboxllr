@@ -2,6 +2,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -42,7 +43,7 @@ static uint32_t swizzled_pixel_index(uint32_t x, uint32_t y,
 int main() {
     std::string fault;
     xlle::Nv2a gpu([&](const std::string& why) { fault = why; });
-    std::vector<uint8_t> ram(0x800000, 0);
+    std::vector<uint8_t> ram(0x4000000, 0);
     gpu.set_mem_access(
         [&](uint32_t addr, void* dst, size_t n) {
             if (addr + n > ram.size()) return false;
@@ -175,10 +176,10 @@ int main() {
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700018, 4, 0x00000003);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x70001C, 4, 0x80010040);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700300, 4, 0x0000003D);
-    gpu.mmio_write(xlle::Nv2a::kBase + 0x700304, 4, 0x007FFFFF);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700304, 4, 0x03FFFFFF);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700308, 4, 0x00000000);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700400, 4, 0x0000003D);
-    gpu.mmio_write(xlle::Nv2a::kBase + 0x700404, 4, 0x007FFFFF);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700404, 4, 0x03FFFFFF);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700408, 4, 0x00000000);
     uint32_t cursor = 0;
     auto emit = [&](uint32_t method, uint32_t parameter) {
@@ -224,6 +225,72 @@ int main() {
     CHECK(get32(ram, 0x6000) == 0xABCDEF42);
     CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x401A88, 4) == 0xABCDEF42);
     CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x40186C, 4) == 0xAABBCCDD);
+
+    // The opt-in trace ignores a clear to another surface, then selects the first Kelvin
+    // BEGIN_END(nonzero) after a matching clear.  Its 32-record preamble ends at BEGIN and
+    // it closes only at that channel/subchannel's matching END.
+    gpu.arm_color_clear_trace(0x5000);
+    emit(0x0210, 0x5040);
+    emit(0x1D94, 0x000000F0);  // successful, but nonmatching color clear
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(!gpu.color_clear_trace_triggered());
+    std::vector<xlle::Nv2a::PushMethod> clear_trace;
+    CHECK(gpu.color_clear_trace(clear_trace) == 0);
+
+    emit(0x0210, 0x5000);
+    emit(0x1D94, 0x000000F0);  // first matching successful color clear
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.color_clear_trace_triggered());
+    CHECK(!gpu.color_clear_trace_begin_triggered());
+    CHECK(!gpu.color_clear_trace_complete());
+
+    // A BEGIN on another object class must not select the trace.
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700200, 4, 0x00000062);
+    emit(0x0000, 1);
+    emit(0x17FC, 5);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(!gpu.color_clear_trace_begin_triggered());
+
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700200, 4, 0x00000097);
+    emit(0x0000, 1);
+    for (uint32_t i = 0; i < 31; ++i)
+        emit(0x1E94, i);  // exactly 31 records before the selected BEGIN
+    emit(0x17FC, 5);
+    emit(0x1880, 0x3f800000);  // generic immediate attribute: trace it without committing
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.color_clear_trace_begin_triggered());
+    CHECK(gpu.color_clear_trace_complete());
+    CHECK(!gpu.color_clear_trace_truncated());
+    CHECK(gpu.color_clear_trace_pre_count() == 32);
+    CHECK(gpu.color_clear_trace(clear_trace) == 34);
+    CHECK(clear_trace.size() == 34);
+    CHECK(clear_trace.front().method == 0x1E94 && clear_trace.front().parameter == 0);
+    CHECK(clear_trace[30].method == 0x1E94 && clear_trace[30].parameter == 30);
+    CHECK(clear_trace[31].method == 0x17FC && clear_trace[31].parameter == 5);
+    CHECK(clear_trace[31].seq == gpu.color_clear_trace_begin_seq());
+    CHECK(clear_trace[32].method == 0x1880 && clear_trace[32].parameter == 0x3f800000);
+    CHECK(clear_trace.back().method == 0x17FC && clear_trace.back().parameter == 0);
+    CHECK(clear_trace.front().object_class == 0x97 &&
+          clear_trace.back().object_class == 0x97);
+    CHECK(clear_trace.front().parser_put == clear_trace.back().parser_put);
+    CHECK(clear_trace.front().parser_get < clear_trace.back().parser_get);
+
+    const uint64_t trigger_seq = gpu.color_clear_trace_trigger_seq();
+    const uint64_t begin_seq = gpu.color_clear_trace_begin_seq();
+    emit(0x1D94, 0x000000F0);  // matching again, but the completed trace must not retrigger
+    emit(0x17FC, 5);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.color_clear_trace_trigger_seq() == trigger_seq);
+    CHECK(gpu.color_clear_trace_begin_seq() == begin_seq);
+    CHECK(gpu.color_clear_trace(clear_trace) == 34);
 
     // Dominant dashboard draw path: vertex DMA A/B, array formats/offsets, BEGIN/END,
     // packed 16-bit indices plus one 32-bit index, unified-memory fetch, and assembly.
@@ -1249,6 +1316,87 @@ int main() {
     CHECK(get32(ram, 0x20000 + pitch_textured_inside) == 0xB1192E0Au);
     CHECK(get32(ram, 0x60000 + pitch_textured_inside) == 0x0000645Au);
 
+    // Pitch-multi retains the legacy Z path for the same X/Y tie.  Use an
+    // X/Y/Z-distinct texture and compare it with a one-sided Z-major draw.
+    for (uint32_t y = 0; y < 64; ++y) {
+        for (uint32_t x = 0; x < 64; ++x) {
+            put_rgb_texture(0xA0000, 64, 64, x, y,
+                            x < 32 ? 0xFF2060A0u
+                            : y < 32 ? 0xFF20A060u : 0xFFA02040u);
+            put32(ram, 0x20000 + y * 256 + x * 4, 0x80402010);
+            put32(ram, 0x60000 + y * 256 + x * 4, 0xFFFFFF5A);
+        }
+    }
+    const float pitch_multi_z_reference[12] = {
+        1, 1, 1.0001f, 1, 1, 1, 1.0001f, 1, 1, 1, 1.0001f, 1};
+    const float pitch_multi_xy_tie[12] = {
+        1, 1, .5f, 1, 1, 1, .5f, 1, 1, 1, .5f, 1};
+    std::memcpy(ram.data() + 0x7500, pitch_multi_z_reference,
+                sizeof(pitch_multi_z_reference));
+    std::memcpy(ram.data() + 0x7600, pitch_multi_z_reference,
+                sizeof(pitch_multi_z_reference));
+    const uint64_t pitch_multi_tie0 = gpu.pitch_three_texture_xy_tie_direction0();
+    const uint64_t pitch_multi_tie1 = gpu.pitch_three_texture_xy_tie_direction1();
+    emit(0x17FC, 6); emit(0x1800, 0x00010000); emit(0x1808, 2); emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    const uint32_t pitch_multi_z_color = get32(ram, 0x20000 + pitch_textured_inside);
+    std::memcpy(ram.data() + 0x7500, pitch_multi_xy_tie,
+                sizeof(pitch_multi_xy_tie));
+    std::memcpy(ram.data() + 0x7600, pitch_multi_xy_tie,
+                sizeof(pitch_multi_xy_tie));
+    for (uint32_t y = 0; y < 64; ++y)
+        for (uint32_t x = 0; x < 64; ++x) {
+            put32(ram, 0x20000 + y * 256 + x * 4, 0x80402010);
+            put32(ram, 0x60000 + y * 256 + x * 4, 0xFFFFFF5A);
+        }
+    emit(0x17FC, 6); emit(0x1800, 0x00010000); emit(0x1808, 2); emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(get32(ram, 0x20000 + pitch_textured_inside) == pitch_multi_z_color);
+    CHECK(gpu.pitch_three_texture_xy_tie_direction0() == pitch_multi_tie0);
+    CHECK(gpu.pitch_three_texture_xy_tie_direction1() == pitch_multi_tie1);
+
+    // The zero-vector tie-break is deliberately not shared with pitch-multi.
+    const float pitch_multi_zero_cube[12] = {};
+    std::memcpy(ram.data() + 0x7500, pitch_multi_zero_cube,
+                sizeof(pitch_multi_zero_cube));
+    std::memcpy(ram.data() + 0x7600, pitch_multi_zero_cube,
+                sizeof(pitch_multi_zero_cube));
+    emit(0x17FC, 6); emit(0x1800, 0x00010000); emit(0x1808, 2); emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault == "NV2A pitch cube-pair remap is invalid");
+    CHECK(gpu.pitch_multi_texture_batches() == 4);
+    fault.clear();
+    // Pitch-multi likewise retains its existing overflow fault behavior.
+    const float pitch_multi_overflow_positions[] = {
+        10, 10, 100, 1, 50, 10, 100, 1, -10, -50, -100, -1};
+    const float pitch_multi_huge = std::numeric_limits<float>::max();
+    const float pitch_multi_overflow_cube[12] = {
+        pitch_multi_huge * .25f, pitch_multi_huge * .125f,
+        pitch_multi_huge * .0625f, 1,
+        pitch_multi_huge * .5f, pitch_multi_huge * .25f,
+        pitch_multi_huge * .125f, 1,
+        pitch_multi_huge * .75f, pitch_multi_huge * .375f,
+        pitch_multi_huge * .1875f, 1};
+    std::memcpy(ram.data() + 0x7000, pitch_multi_overflow_positions,
+                sizeof(pitch_multi_overflow_positions));
+    std::memcpy(ram.data() + 0x7500, pitch_multi_overflow_cube,
+                sizeof(pitch_multi_overflow_cube));
+    std::memcpy(ram.data() + 0x7600, pitch_multi_overflow_cube,
+                sizeof(pitch_multi_overflow_cube));
+    emit(0x17FC, 6); emit(0x1800, 0x00010000); emit(0x1808, 2); emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault == "NV2A pitch cube-pair remap is invalid");
+    CHECK(gpu.pitch_multi_texture_batches() == 4);
+    fault.clear();
+    std::memcpy(ram.data() + 0x7000, pitch_multi_positions,
+                sizeof(pitch_multi_positions));
+    std::memcpy(ram.data() + 0x7500, texture1_coords,
+                sizeof(texture1_coords));
+    std::memcpy(ram.data() + 0x7600, texture2_coords,
+                sizeof(texture2_coords));
+
     // The remaining three-enabled-texture shader=0x63 states reuse the
     // stage-0/1 cube pair; stage 2 is shader-inert. Alpha testing is disabled,
     // and dynamic stage-3 c0 RGB adds source_alpha*c0 to the fixed stage-4
@@ -1365,7 +1513,7 @@ int main() {
           pitch_three_color + pitch_three_stride * 480);
     CHECK(gpu.pitch_three_texture_output_hash() !=
           1469598103934665603ull);
-    CHECK(gpu.pitch_multi_texture_batches() == 2);
+    CHECK(gpu.pitch_multi_texture_batches() == 4);
     put32(ram, pitch_three_color + pitch_three_inside, 0x80402010);
     put32(ram, pitch_three_depth + pitch_three_inside, 0xFFFFFF5A);
     emit(0x0A6C, 0xFF12480B);
@@ -1381,7 +1529,7 @@ int main() {
           0xB1245710u);
     CHECK(get32(ram, pitch_three_depth + pitch_three_inside) ==
           0x0000645Au);
-    CHECK(gpu.pitch_multi_texture_batches() == 2);
+    CHECK(gpu.pitch_multi_texture_batches() == 4);
 
     // Establish the exact 32-batch boot factor with border zero, then rerun
     // only the border as opaque black. Shader 0x63 cube sampling cannot consult
@@ -1453,6 +1601,287 @@ int main() {
     CHECK(fault.empty());
     CHECK(gpu.pitch_three_texture_batches() == 4);
     CHECK(gpu.pitch_three_texture_triangles() == 4);
+
+    // The black-border table is prior FF16590D plus ten captured RS2/RS5-RS13
+    // additions. Exercise every member, then adjacent and plausible unlisted
+    // values, so this cannot regress into a high-byte wildcard.
+    emit(0x1B24, 0xFF000000);
+    const uint32_t pitch_three_black_factors[] = {
+        0xFF16590D, 0xFF175B0E, 0xFF1F7D13, 0xFF16580D, 0xFF18610F,
+        0xFF185F0E, 0xFF175C0E, 0xFF144F0C, 0xFF175D0E, 0xFF16570D,
+        0xFF18600E};
+    for (uint32_t factor : pitch_three_black_factors) {
+        emit(0x0A6C, factor);
+        emit(0x17FC, 6); emit(0x1800, 0x00010000); emit(0x1808, 2); emit(0x17FC, 0);
+        gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+        CHECK(fault.empty());
+    }
+    CHECK(gpu.pitch_three_texture_batches() == 15);
+    emit(0x0A6C, 0xFF175B0F);
+    emit(0x17FC, 6); emit(0x1800, 0x00010000); emit(0x1808, 2); emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.last_pitch_three_zero_factor3() == 0);
+    CHECK(gpu.pitch_three_texture_batches() == 15);
+    emit(0x0A6C, 0xFF165A0D);
+    emit(0x17FC, 6); emit(0x1800, 0x00010000); emit(0x1808, 2); emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.pitch_three_texture_batches() == 15);
+    emit(0x1B24, 0);  // zero border remains admitted under the original state.
+    emit(0x17FC, 6); emit(0x1800, 0x00010000); emit(0x1808, 2); emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.pitch_three_texture_batches() == 16);
+
+    // The exact-zero policy is the deterministic +Z-axis tie-break. Compare
+    // it with explicit +Z and signed-zero inputs using an asymmetric origin.
+    put_rgb_texture(pitch_three_texture, 64, 64, 0, 0, 0xFF804020);
+    const float plus_z_cube_coordinates[12] = {
+        0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1};
+    const float zero_cube_coordinates[12] = {};
+    const float negative_zero_cube_coordinates[12] = {
+        -0.0f, -0.0f, -0.0f, 1, -0.0f, -0.0f, -0.0f, 1,
+        -0.0f, -0.0f, -0.0f, 1};
+    auto prepare_zero_cube_target = [&] {
+        for (uint32_t y = 10; y < 50; ++y) {
+            for (uint32_t x = 10; x < 50; ++x) {
+                const uint32_t offset = y * pitch_three_stride + x * 4;
+                put32(ram, pitch_three_color + offset, 0x80402010);
+                put32(ram, pitch_three_depth + offset, 0xFFFFFF5A);
+            }
+        }
+    };
+    emit(0x1B24, 0xFF000000); emit(0x0A6C, 0xFF175B0E);
+    std::memcpy(ram.data() + 0x7500, plus_z_cube_coordinates,
+                sizeof(plus_z_cube_coordinates));
+    std::memcpy(ram.data() + 0x7600, plus_z_cube_coordinates,
+                sizeof(plus_z_cube_coordinates));
+    prepare_zero_cube_target();
+    emit(0x17FC, 6); emit(0x1800, 0x00010000); emit(0x1808, 2); emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.last_pitch_three_zero_factor3() == 0);
+    const uint32_t plus_z_color = get32(ram, pitch_three_color + pitch_three_inside);
+    const uint32_t plus_z_depth = get32(ram, pitch_three_depth + pitch_three_inside);
+    const uint64_t zero_cube_passes = gpu.pitch_three_texture_depth_passes();
+    const uint64_t zero_cube_writes = gpu.pitch_three_texture_color_writes();
+    const uint64_t zero_cube_samples = gpu.pitch_three_texture_samples();
+    const uint64_t zero_cube_direction0 = gpu.pitch_three_texture_zero_direction0();
+    const uint64_t zero_cube_direction1 = gpu.pitch_three_texture_zero_direction1();
+    const uint64_t zero_cube_hash = gpu.pitch_three_texture_output_hash();
+    std::memcpy(ram.data() + 0x7500, zero_cube_coordinates,
+                sizeof(zero_cube_coordinates));
+    std::memcpy(ram.data() + 0x7600, zero_cube_coordinates,
+                sizeof(zero_cube_coordinates));
+    prepare_zero_cube_target();
+    emit(0x17FC, 6); emit(0x1800, 0x00010000); emit(0x1808, 2); emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    const uint64_t zero_cube_pass_delta =
+        gpu.pitch_three_texture_depth_passes() - zero_cube_passes;
+    CHECK(zero_cube_pass_delta > 0);
+    CHECK(gpu.pitch_three_texture_color_writes() - zero_cube_writes ==
+          zero_cube_pass_delta);
+    CHECK(gpu.pitch_three_texture_samples() - zero_cube_samples ==
+          zero_cube_pass_delta * 2);
+    CHECK(gpu.pitch_three_texture_zero_direction0() - zero_cube_direction0 ==
+          zero_cube_pass_delta);
+    CHECK(gpu.pitch_three_texture_zero_direction1() - zero_cube_direction1 ==
+          zero_cube_pass_delta);
+    CHECK(gpu.last_pitch_three_zero_factor3() == 0xFF175B0Eu);
+    CHECK(gpu.pitch_three_texture_output_hash() != zero_cube_hash);
+    CHECK(get32(ram, pitch_three_color + pitch_three_inside) == plus_z_color);
+    CHECK(get32(ram, pitch_three_depth + pitch_three_inside) == plus_z_depth);
+    std::memcpy(ram.data() + 0x7500, negative_zero_cube_coordinates,
+                sizeof(negative_zero_cube_coordinates));
+    std::memcpy(ram.data() + 0x7600, negative_zero_cube_coordinates,
+                sizeof(negative_zero_cube_coordinates));
+    prepare_zero_cube_target();
+    emit(0x17FC, 6); emit(0x1800, 0x00010000); emit(0x1808, 2); emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(get32(ram, pitch_three_color + pitch_three_inside) == plus_z_color);
+    CHECK(get32(ram, pitch_three_depth + pitch_three_inside) == plus_z_depth);
+
+    const uint64_t invalid_cube_batches = gpu.pitch_three_texture_batches();
+    float invalid_cube_coordinates[12] = {};
+    invalid_cube_coordinates[0] = std::numeric_limits<float>::quiet_NaN();
+    std::memcpy(ram.data() + 0x7500, invalid_cube_coordinates,
+                sizeof(invalid_cube_coordinates));
+    emit(0x17FC, 6); emit(0x1800, 0x00010000); emit(0x1808, 2); emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(!fault.empty());
+    CHECK(gpu.pitch_three_texture_batches() == invalid_cube_batches);
+    fault.clear();
+    invalid_cube_coordinates[0] = -std::numeric_limits<float>::infinity();
+    std::memcpy(ram.data() + 0x7500, invalid_cube_coordinates,
+                sizeof(invalid_cube_coordinates));
+    emit(0x17FC, 6); emit(0x1800, 0x00010000); emit(0x1808, 2); emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(!fault.empty());
+    CHECK(gpu.pitch_three_texture_batches() == invalid_cube_batches);
+    fault.clear();
+    invalid_cube_coordinates[0] = std::numeric_limits<float>::infinity();
+    std::memcpy(ram.data() + 0x7500, invalid_cube_coordinates,
+                sizeof(invalid_cube_coordinates));
+    emit(0x17FC, 6); emit(0x1800, 0x00010000); emit(0x1808, 2); emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(!fault.empty());
+    CHECK(gpu.pitch_three_texture_batches() == invalid_cube_batches);
+    fault.clear();
+
+    // A projective denominator near zero can make finite interpolated cube
+    // coordinates exceed float range. Pitch-three rescales the full vector,
+    // preserving cube direction and therefore matching an ordinary
+    // proportional reference vector at the same pixel.
+    const float rescale_positions[] = {
+        10, 10, 100, 1, 50, 10, 100, 1, -10, -50, -100, -1};
+    const float reference_cube_coordinates[12] = {
+        .25f, .125f, .0625f, 1,
+        .5f, .25f, .125f, 1,
+        .75f, .375f, .1875f, 1};
+    const float huge = std::numeric_limits<float>::max();
+    const float huge_cube_coordinates[12] = {
+        huge * .25f, huge * .125f, huge * .0625f, 1,
+        huge * .5f, huge * .25f, huge * .125f, 1,
+        huge * .75f, huge * .375f, huge * .1875f, 1};
+    std::memcpy(ram.data() + 0x7000, rescale_positions,
+                sizeof(rescale_positions));
+    std::memcpy(ram.data() + 0x7500, reference_cube_coordinates,
+                sizeof(reference_cube_coordinates));
+    std::memcpy(ram.data() + 0x7600, reference_cube_coordinates,
+                sizeof(reference_cube_coordinates));
+    prepare_zero_cube_target();
+    const uint64_t rescale0_before = gpu.pitch_three_texture_rescale_direction0();
+    const uint64_t rescale1_before = gpu.pitch_three_texture_rescale_direction1();
+    emit(0x17FC, 6); emit(0x1800, 0x00010000); emit(0x1808, 2); emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.pitch_three_texture_rescale_direction0() == rescale0_before);
+    CHECK(gpu.pitch_three_texture_rescale_direction1() == rescale1_before);
+    const uint32_t reference_cube_color =
+        get32(ram, pitch_three_color + pitch_three_inside);
+    std::memcpy(ram.data() + 0x7500, huge_cube_coordinates,
+                sizeof(huge_cube_coordinates));
+    std::memcpy(ram.data() + 0x7600, huge_cube_coordinates,
+                sizeof(huge_cube_coordinates));
+    prepare_zero_cube_target();
+    emit(0x17FC, 6); emit(0x1800, 0x00010000); emit(0x1808, 2); emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.pitch_three_texture_rescale_direction0() > rescale0_before);
+    CHECK(gpu.pitch_three_texture_rescale_direction1() > rescale1_before);
+    CHECK(gpu.last_pitch_three_rescale_factor3() == 0xFF175B0Eu);
+    CHECK(get32(ram, pitch_three_color + pitch_three_inside) ==
+          reference_cube_color);
+
+    // Exact X/Y major ties select X in pitch-three. The one-sided X-major
+    // reference shares the left-edge sample; the historical Z fallback would
+    // instead reach the distinct right edge.
+    for (uint32_t y = 0; y < 64; ++y) {
+        for (uint32_t x = 0; x < 64; ++x) {
+            put_rgb_texture(pitch_three_texture, 64, 64, x, y,
+                            x < 32 ? 0xFF2060A0u
+                            : y < 32 ? 0xFF20A060u : 0xFFA02040u);
+        }
+    }
+    const float x_major_reference[12] = {
+        1.0001f, 1, .25f, 1, 1.0001f, 1, .25f, 1,
+        1.0001f, 1, .25f, 1};
+    const float xy_major_tie[12] = {
+        1, 1, .25f, 1, 1, 1, .25f, 1, 1, 1, .25f, 1};
+    std::memcpy(ram.data() + 0x7500, x_major_reference,
+                sizeof(x_major_reference));
+    std::memcpy(ram.data() + 0x7600, x_major_reference,
+                sizeof(x_major_reference));
+    prepare_zero_cube_target();
+    const uint64_t tie_zero0 = gpu.pitch_three_texture_zero_direction0();
+    const uint64_t tie_zero1 = gpu.pitch_three_texture_zero_direction1();
+    const uint64_t tie_rescale0 = gpu.pitch_three_texture_rescale_direction0();
+    const uint64_t tie_rescale1 = gpu.pitch_three_texture_rescale_direction1();
+    const uint64_t tie0 = gpu.pitch_three_texture_xy_tie_direction0();
+    const uint64_t tie1 = gpu.pitch_three_texture_xy_tie_direction1();
+    emit(0x17FC, 6); emit(0x1800, 0x00010000); emit(0x1808, 2); emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.pitch_three_texture_xy_tie_direction0() == tie0);
+    CHECK(gpu.pitch_three_texture_xy_tie_direction1() == tie1);
+    const uint32_t x_major_color =
+        get32(ram, pitch_three_color + pitch_three_inside);
+    std::memcpy(ram.data() + 0x7500, xy_major_tie, sizeof(xy_major_tie));
+    std::memcpy(ram.data() + 0x7600, xy_major_tie, sizeof(xy_major_tie));
+    prepare_zero_cube_target();
+    emit(0x17FC, 6); emit(0x1800, 0x00010000); emit(0x1808, 2); emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(get32(ram, pitch_three_color + pitch_three_inside) == x_major_color);
+    CHECK(gpu.pitch_three_texture_xy_tie_direction0() > tie0);
+    CHECK(gpu.pitch_three_texture_xy_tie_direction1() > tie1);
+    CHECK(gpu.last_pitch_three_xy_tie_factor3() == 0xFF175B0Eu);
+    CHECK(gpu.pitch_three_texture_zero_direction0() == tie_zero0);
+    CHECK(gpu.pitch_three_texture_zero_direction1() == tie_zero1);
+    CHECK(gpu.pitch_three_texture_rescale_direction0() == tie_rescale0);
+    CHECK(gpu.pitch_three_texture_rescale_direction1() == tie_rescale1);
+
+    // Signed-X tie picks the normal -X mapping, rather than Y or legacy Z.
+    const float negative_x_reference[12] = {
+        -1.0001f, 1, .5f, 1, -1.0001f, 1, .5f, 1,
+        -1.0001f, 1, .5f, 1};
+    const float negative_x_tie[12] = {
+        -1, 1, .5f, 1, -1, 1, .5f, 1, -1, 1, .5f, 1};
+    std::memcpy(ram.data() + 0x7500, negative_x_reference,
+                sizeof(negative_x_reference));
+    std::memcpy(ram.data() + 0x7600, negative_x_reference,
+                sizeof(negative_x_reference));
+    prepare_zero_cube_target();
+    emit(0x17FC, 6); emit(0x1800, 0x00010000); emit(0x1808, 2); emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    const uint32_t negative_x_color =
+        get32(ram, pitch_three_color + pitch_three_inside);
+    const uint64_t negative_tie0 = gpu.pitch_three_texture_xy_tie_direction0();
+    const uint64_t negative_tie1 = gpu.pitch_three_texture_xy_tie_direction1();
+    std::memcpy(ram.data() + 0x7500, negative_x_tie,
+                sizeof(negative_x_tie));
+    std::memcpy(ram.data() + 0x7600, negative_x_tie,
+                sizeof(negative_x_tie));
+    prepare_zero_cube_target();
+    emit(0x17FC, 6); emit(0x1800, 0x00010000); emit(0x1808, 2); emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(get32(ram, pitch_three_color + pitch_three_inside) ==
+          negative_x_color);
+    CHECK(gpu.pitch_three_texture_xy_tie_direction0() > negative_tie0);
+    CHECK(gpu.pitch_three_texture_xy_tie_direction1() > negative_tie1);
+
+    // All-axis ties retain the legacy Z choice and therefore do not count as
+    // the narrower X/Y-major tie family.
+    const float z_major_reference[12] = {
+        1, 1, 1.0001f, 1, 1, 1, 1.0001f, 1, 1, 1, 1.0001f, 1};
+    const float all_axis_tie[12] = {
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
+    std::memcpy(ram.data() + 0x7500, z_major_reference,
+                sizeof(z_major_reference));
+    std::memcpy(ram.data() + 0x7600, z_major_reference,
+                sizeof(z_major_reference));
+    prepare_zero_cube_target();
+    emit(0x17FC, 6); emit(0x1800, 0x00010000); emit(0x1808, 2); emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    const uint32_t z_major_color =
+        get32(ram, pitch_three_color + pitch_three_inside);
+    const uint64_t all_axis_tie0 = gpu.pitch_three_texture_xy_tie_direction0();
+    const uint64_t all_axis_tie1 = gpu.pitch_three_texture_xy_tie_direction1();
+    std::memcpy(ram.data() + 0x7500, all_axis_tie, sizeof(all_axis_tie));
+    std::memcpy(ram.data() + 0x7600, all_axis_tie, sizeof(all_axis_tie));
+    prepare_zero_cube_target();
+    emit(0x17FC, 6); emit(0x1800, 0x00010000); emit(0x1808, 2); emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(get32(ram, pitch_three_color + pitch_three_inside) == z_major_color);
+    CHECK(gpu.pitch_three_texture_xy_tie_direction0() == all_axis_tie0);
+    CHECK(gpu.pitch_three_texture_xy_tie_direction1() == all_axis_tie1);
 
     // The leading tex=5 pitch family uses FRONT culling. Its projected path
     // bilinearly samples stage 0 and copies RGB with c0 alpha one while the
@@ -2144,6 +2573,118 @@ int main() {
     emit(0x17FC, 0); gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
     CHECK(fault == "NV2A tex7 fan draw exceeds the witnessed RS0 subset");
 
+    // RS0/RS1 in probe-rs2-ohci-6.4b: tex=F, shader 8421, four PROJECT2D
+    // stages and a six-stage combiner. Xemu's register-combiner semantics
+    // reduce this exact state to black RGB with alpha one, so the strict
+    // profile must only cover its alpha channel and leave Z24S8 untouched.
+    fault.clear();
+    put32(ram, rs0_color + rs0_inside, 0x12345678);
+    const uint32_t texf_zeta = get32(ram, rs0_depth + rs0_inside);
+    emit(0x033C, 0x0206); emit(0x0340, 1); emit(0x0354, 0x0207);
+    emit(0x0300, 1); emit(0x0304, 1); emit(0x0308, 1); emit(0x030C, 1);
+    for (uint32_t stage = 0; stage < 4; ++stage) {
+        const uint32_t base = 0x1B00 + stage * 0x40;
+        emit(base, stage == 0 ? 0x02C05000 : 0x029F3000 - (stage - 1) * 0x10000);
+        emit(base + 4, stage == 0 ? 0x09A1062A : 0x0881192A);
+        emit(base + 8, stage == 0 ? 0x00030303 : 0x00030101);
+        emit(base + 12, 0x4003FFC0);
+        emit(base + 16, stage == 0 ? 0x14000000 : stage == 3 ? 0x04000000 : 0);
+        emit(base + 20, 0x02022000);
+        emit(base + 28, stage == 0 ? 0x050001E0 : stage == 3 ? 0x02000200 : 0);
+        emit(base + 32, 0); emit(base + 36, stage == 3 ? 0xFFFFFFFF : 0);
+    }
+    const uint32_t texf_ci[] = {0xD920DA20,0xCD20DB20,0xCDC10000,0xC8CD0000,0xCC20C120,0};
+    const uint32_t texf_ai[] = {0xD930DA30,0xDD30DB30,0xDDD11010,0,0,0x30301010};
+    const uint32_t texf_co[] = {0x00000D00,0x00000D00,0x000000D0,0x000000C0,0x00000C00,0};
+    const uint32_t texf_ao[] = {0x00000D00,0x00000D00,0x000000D0,0,0,0x000000C0};
+    for (uint32_t stage = 0; stage < 6; ++stage) {
+        emit(0x0AC0 + stage * 4, texf_ci[stage]);
+        emit(0x0260 + stage * 4, texf_ai[stage]);
+        emit(0x1E40 + stage * 4, texf_co[stage]);
+        emit(0x0AA0 + stage * 4, texf_ao[stage]);
+        emit(0x0A60 + stage * 4, stage == 2 ? 0xFF000000 : 0);
+        emit(0x0A80 + stage * 4, 0);
+    }
+    emit(0x1E6C, 7); emit(0x1E70, 0x00008421); emit(0x1E74, 0);
+    emit(0x1E78, 0); emit(0x1E60, 0x00011106);
+    emit(0x0288, 0x0000000C); emit(0x028C, 0x00001C80);
+    emit(0x1E20, 0); emit(0x1E24, 0);
+    emit(0x17FC, 7); for (uint32_t word : rs0_words) emit(0x1818, word);
+    emit(0x17FC, 0); gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.texf_projected_fan_batches() == 1);
+    CHECK(gpu.texf_projected_fan_triangles() == 2);
+    CHECK(gpu.texf_projected_fan_writes() > 0);
+    CHECK(gpu.texf_projected_fan_samples() == 0); // statically output-inert.
+    CHECK(get32(ram, rs0_color + rs0_inside) == 0xFF345678u);
+    CHECK(get32(ram, rs0_depth + rs0_inside) == texf_zeta);
+    CHECK(gpu.texf_projected_fan_output_hash() != UINT64_C(1469598103934665603));
+
+    // Texture values are output-inert, but the enabled image ranges are not:
+    // a too-small DMA-B object must fail preflight before raster writes.
+    const uint64_t texf_writes = gpu.texf_projected_fan_writes();
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700404, 4, 0x007FFFFF);
+    emit(0x17FC, 7); for (uint32_t word : rs0_words) emit(0x1818, word);
+    emit(0x17FC, 0); gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault == "NV2A raster tex=f texture DMA range is invalid");
+    CHECK(gpu.texf_projected_fan_writes() == texf_writes);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700404, 4, 0x03FFFFFF);
+    fault.clear();
+
+    // Exact window and depth clip bounds are part of RS0/RS1 admission.
+    // Each near state remains recorder-only and cannot change counters or output.
+    const uint64_t texf_batches_before_clip = gpu.texf_projected_fan_batches();
+    const uint64_t texf_hash_before_clip = gpu.texf_projected_fan_output_hash();
+    emit(0x02C0, 0x04FE0000); emit(0x17FC, 7);
+    for (uint32_t word : rs0_words) emit(0x1818, word);
+    emit(0x17FC, 0); gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.texf_projected_fan_batches() == texf_batches_before_clip);
+    CHECK(gpu.texf_projected_fan_writes() == texf_writes);
+    CHECK(gpu.texf_projected_fan_output_hash() == texf_hash_before_clip);
+    emit(0x02C0, 0x04FF0000);
+    emit(0x02E0, 0x01DE0000); emit(0x17FC, 7);
+    for (uint32_t word : rs0_words) emit(0x1818, word);
+    emit(0x17FC, 0); gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.texf_projected_fan_batches() == texf_batches_before_clip);
+    CHECK(gpu.texf_projected_fan_writes() == texf_writes);
+    CHECK(gpu.texf_projected_fan_output_hash() == texf_hash_before_clip);
+    emit(0x02E0, 0x01DF0000);
+    emit(0x0394, 1); emit(0x17FC, 7);
+    for (uint32_t word : rs0_words) emit(0x1818, word);
+    emit(0x17FC, 0); gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.texf_projected_fan_batches() == texf_batches_before_clip);
+    CHECK(gpu.texf_projected_fan_writes() == texf_writes);
+    CHECK(gpu.texf_projected_fan_output_hash() == texf_hash_before_clip);
+    emit(0x0394, 0);
+    emit(0x0398, 0x4B7FFFFE); emit(0x17FC, 7);
+    for (uint32_t word : rs0_words) emit(0x1818, word);
+    emit(0x17FC, 0); gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.texf_projected_fan_batches() == texf_batches_before_clip);
+    CHECK(gpu.texf_projected_fan_writes() == texf_writes);
+    CHECK(gpu.texf_projected_fan_output_hash() == texf_hash_before_clip);
+    emit(0x0398, 0x4B7FFFFF);
+
+    // Nearby sampler offsets, shadow=0, and non-white T3 border remain
+    // recorder-only: none may widen this exact RS0/RS1 admission.
+    const uint64_t texf_batches = gpu.texf_projected_fan_batches();
+    emit(0x1B00 + 0x40, 0x029F4000); emit(0x17FC, 7);
+    for (uint32_t word : rs0_words) emit(0x1818, word);
+    emit(0x17FC, 0); gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty()); CHECK(gpu.texf_projected_fan_batches() == texf_batches);
+    emit(0x1B00 + 0x40, 0x029F3000);
+    emit(0x1E6C, 0); emit(0x17FC, 7);
+    for (uint32_t word : rs0_words) emit(0x1818, word);
+    emit(0x17FC, 0); gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty()); CHECK(gpu.texf_projected_fan_batches() == texf_batches);
+    emit(0x1E6C, 7); emit(0x1B00 + 3 * 0x40 + 36, 0); emit(0x17FC, 7);
+    for (uint32_t word : rs0_words) emit(0x1818, word);
+    emit(0x17FC, 0); gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty()); CHECK(gpu.texf_projected_fan_batches() == texf_batches);
+
     // AvSetDisplayMode's scanout path: VGA CRTC pitch/depth, PRAMDAC dimensions/format,
     // and PCRTC_START resolve unified-RAM RGB565 into deterministic RGBA output.
     auto crtc_write = [&](uint8_t index, uint8_t value) {
@@ -2178,6 +2719,432 @@ int main() {
     std::vector<uint32_t> starts;
     CHECK(gpu.recent_scanout_starts(4, starts) == 1);
     CHECK(starts.size() == 1 && starts[0] == 0x4000);
+
+    // The dashboard's first immediate draw is a Kelvin quad: generic texture slot 9 and
+    // diffuse slot 3 are persistent state, while legacy SET_VERTEX4F position W commits
+    // each vertex. Keep this fixture independent so existing absolute counters stay stable.
+    {
+        std::string immediate_fault;
+        xlle::Nv2a immediate_gpu(
+            [&](const std::string& why) { immediate_fault = why; });
+        std::vector<uint8_t> immediate_ram(0x10000, 0);
+        immediate_gpu.set_mem_access(
+            [&](uint32_t addr, void* dst, size_t n) {
+                if (addr > immediate_ram.size() || n > immediate_ram.size() - addr)
+                    return false;
+                std::memcpy(dst, immediate_ram.data() + addr, n);
+                return true;
+            },
+            [&](uint32_t addr, const void* src, size_t n) {
+                if (addr > immediate_ram.size() || n > immediate_ram.size() - addr)
+                    return false;
+                std::memcpy(immediate_ram.data() + addr, src, n);
+                return true;
+            });
+
+        // RAMHT handle 1 -> Kelvin object. Handles 2/3 are distinct texture DMA
+        // bases so the first-base evidence probe can prove A/B selection.
+        immediate_gpu.mmio_write(xlle::Nv2a::kBase + 0x700008, 4, 1);
+        immediate_gpu.mmio_write(xlle::Nv2a::kBase + 0x70000C, 4, 0x80010020);
+        immediate_gpu.mmio_write(xlle::Nv2a::kBase + 0x700010, 4, 2);
+        immediate_gpu.mmio_write(xlle::Nv2a::kBase + 0x700014, 4, 0x80010030);
+        immediate_gpu.mmio_write(xlle::Nv2a::kBase + 0x700018, 4, 3);
+        immediate_gpu.mmio_write(xlle::Nv2a::kBase + 0x70001C, 4, 0x80010040);
+        immediate_gpu.mmio_write(xlle::Nv2a::kBase + 0x700200, 4, 0x97);
+        immediate_gpu.mmio_write(xlle::Nv2a::kBase + 0x700300, 4, 0x3D);
+        immediate_gpu.mmio_write(xlle::Nv2a::kBase + 0x700304, 4, 0xFFFF);
+        immediate_gpu.mmio_write(xlle::Nv2a::kBase + 0x700308, 4, 0);
+        immediate_gpu.mmio_write(xlle::Nv2a::kBase + 0x700400, 4, 0x3D);
+        immediate_gpu.mmio_write(xlle::Nv2a::kBase + 0x700404, 4, 0xFFFF);
+        immediate_gpu.mmio_write(xlle::Nv2a::kBase + 0x700408, 4, 0x1000);
+        immediate_gpu.mmio_write(xlle::Nv2a::kBase + 0x700180, 4, 0x3D);
+        immediate_gpu.mmio_write(xlle::Nv2a::kBase + 0x700184, 4, 0xFFFF);
+        immediate_gpu.mmio_write(xlle::Nv2a::kBase + 0x700188, 4, 0x2000);
+        immediate_gpu.mmio_write(xlle::Nv2a::kBase + 0x002504, 4, 1);
+        immediate_gpu.mmio_write(xlle::Nv2a::kBase + 0x003204, 4, 0x100);
+        immediate_gpu.mmio_write(xlle::Nv2a::kBase + 0x00322C, 4, 0x18);
+        immediate_gpu.mmio_write(xlle::Nv2a::kBase + 0x003244, 4, 0);
+        immediate_gpu.mmio_write(xlle::Nv2a::kBase + 0x003220, 4, 1);
+        immediate_gpu.mmio_write(xlle::Nv2a::kBase + 0x003250, 4, 1);
+        immediate_gpu.mmio_write(xlle::Nv2a::kBase + 0x003200, 4, 1);
+
+        uint32_t immediate_cursor = 0;
+        constexpr uint32_t immediate_pb = 0x2000;
+        auto emit_immediate = [&](uint32_t method, uint32_t parameter) {
+            put32(immediate_ram, immediate_pb + immediate_cursor,
+                  (1u << 18) | method);
+            put32(immediate_ram, immediate_pb + immediate_cursor + 4, parameter);
+            immediate_cursor += 8;
+        };
+        auto kick_immediate = [&]() {
+            immediate_gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4,
+                                     immediate_cursor);
+        };
+        auto float_bits = [](float value) {
+            uint32_t bits = 0;
+            std::memcpy(&bits, &value, sizeof(bits));
+            return bits;
+        };
+        for (uint8_t value = 0; value < 16; ++value) {
+            immediate_ram[0xC000 + value] = static_cast<uint8_t>(0x20 + value);
+            immediate_ram[0xD000 + value] = static_cast<uint8_t>(0x40 + value);
+            immediate_ram[0xB000 + value] = static_cast<uint8_t>(0x80 + value);
+        }
+        put32(immediate_ram, 0xA040, 0x11223344);
+        put32(immediate_ram, 0xA044, 0x55667788);
+        put32(immediate_ram, 0xA048, 0x99AABBCC);
+        put32(immediate_ram, 0xA04C, 0xDDEEFF00);
+
+        emit_immediate(0x0000, 1);       // SET_OBJECT Kelvin
+        emit_immediate(0x0188, 3);       // texture DMA B for the captured T0 format
+        emit_immediate(0x1E9C, 0);       // MOV oPos, v0 (final)
+        emit_immediate(0x0B00, 0x00000000);
+        emit_immediate(0x0B04, 0x0020001B);
+        emit_immediate(0x0B08, 0x0836106C);
+        emit_immediate(0x0B0C, 0x2070F801);
+        emit_immediate(0x1EA0, 0);
+        emit_immediate(0x1E94, 2);       // programmable transform
+
+        // Establish the witnessed inline-color profile.  A mode-8 batch must bypass
+        // this otherwise recognizable raster state before profile validation or output.
+        emit_immediate(0x0200, 0x00400000);
+        emit_immediate(0x0204, 0x00400000);
+        emit_immediate(0x0208, 0x00000128);
+        emit_immediate(0x020C, 0x01000100);
+        emit_immediate(0x0210, 0x00020000);
+        emit_immediate(0x0214, 0x00060000);
+        emit_immediate(0x02C0, 0x003F0000);
+        emit_immediate(0x02E0, 0x003F0000);
+        emit_immediate(0x0300, 1);
+        emit_immediate(0x0304, 1);
+        emit_immediate(0x0308, 1);
+        emit_immediate(0x030C, 1);
+        emit_immediate(0x0310, 0);
+        emit_immediate(0x033C, 0x0206);
+        emit_immediate(0x0340, 1);
+        emit_immediate(0x0344, 0x0302);
+        emit_immediate(0x0348, 1);
+        emit_immediate(0x0350, 0x8006);
+        emit_immediate(0x0354, 0x0207);
+        emit_immediate(0x0358, 0x01010101);
+        emit_immediate(0x035C, 0);
+        emit_immediate(0x0394, 0);
+        emit_immediate(0x0398, 0x4B7FFFFF);
+        emit_immediate(0x1D78, 1);
+        emit_immediate(0x1B00, 0x0000C000);  // bounded T0 evidence probe
+        emit_immediate(0x1B04, 0x0888062A);
+        emit_immediate(0x1B08, 0x00010303);
+        emit_immediate(0x1B0C, 0x4003FFC0);
+        emit_immediate(0x1B10, 0x14000000);
+        emit_immediate(0x1B14, 0x02022000);
+        emit_immediate(0x1B20, 0);
+        emit_immediate(0x1B24, 0);
+        emit_immediate(0x1B4C, 0);
+        emit_immediate(0x1B8C, 0);
+        emit_immediate(0x1BCC, 0);
+        emit_immediate(0x1E70, 0x00000001);
+        emit_immediate(0x1E78, 0x00210000);
+        emit_immediate(0x1E60, 0x00000001);
+        emit_immediate(0x0AC0, 0x01080000);
+        emit_immediate(0x0260, 0x11180000);
+        emit_immediate(0x1E40, 0x00000C00);
+        emit_immediate(0x0AA0, 0x00000C00);
+        emit_immediate(0x0A60, 0x80808080);
+        emit_immediate(0x0A80, 0x80808080);
+        emit_immediate(0x0288, 0x0000000C);
+        emit_immediate(0x028C, 0x00001C80);
+        emit_immediate(0x1E20, 0);
+        emit_immediate(0x1E24, 0);
+
+        const uint64_t immediate_raster_hash = immediate_gpu.raster_output_hash();
+        const uint64_t immediate_color_clears = immediate_gpu.color_clears();
+        const uint64_t immediate_raster_triangles = immediate_gpu.rasterized_triangles();
+        const std::array<std::array<float, 4>, 4> quad{{
+            {{269.5f, 157.5f, 0.0f, 0.0f}}, {{449.5f, 157.5f, 0.0f, 0.0f}},
+            {{449.5f, 371.5f, 0.0f, 0.0f}}, {{269.5f, 371.5f, 0.0f, 0.0f}},
+        }};
+        const std::array<std::array<float, 2>, 4> quad_uv{{
+            {{0.0f, 0.0f}}, {{1.0f, 0.0f}}, {{1.0f, 1.0f}}, {{0.0f, 1.0f}},
+        }};
+        auto emit_position = [&](const std::array<float, 4>& position) {
+            emit_immediate(0x1518, float_bits(position[0]));
+            emit_immediate(0x151C, float_bits(position[1]));
+            emit_immediate(0x1520, float_bits(position[2]));
+            emit_immediate(0x1524, float_bits(position[3]));
+        };
+        emit_immediate(0x17FC, 8);       // quads
+        for (size_t vertex = 0; vertex < quad.size(); ++vertex) {
+            const auto& position = quad[vertex];
+            emit_immediate(0x18C8, float_bits(quad_uv[vertex][0]));  // attr9.x
+            emit_immediate(0x18CC, float_bits(quad_uv[vertex][1]));  // attr9.y
+            emit_immediate(0x194C, 0xFFFFFFFF);                     // attr3 diffuse
+            emit_immediate(0x1518, float_bits(position[0]));
+            emit_immediate(0x151C, float_bits(position[1]));
+            emit_immediate(0x1520, float_bits(position[2]));
+            emit_immediate(0x1524, float_bits(position[3]));  // position commit
+        }
+        emit_immediate(0x17FC, 0);
+        kick_immediate();
+        CHECK(immediate_fault.empty());
+        CHECK(immediate_gpu.immediate_methods() == 28);
+        CHECK(immediate_gpu.immediate_vertices() == 4);
+        CHECK(immediate_gpu.immediate_batches() == 1);
+        CHECK(immediate_gpu.vertex_batches() == 1);
+        CHECK(immediate_gpu.submitted_vertices() == 4);
+        CHECK(immediate_gpu.vertex_attribute_fetches() == 0);
+        CHECK(immediate_gpu.assembled_primitives() == 1);
+        CHECK(immediate_gpu.assembled_triangles() == 2);
+        CHECK(immediate_gpu.primitive_mode_count(8) == 1);
+        CHECK(immediate_gpu.color_clears() == immediate_color_clears);
+        CHECK(immediate_gpu.rasterized_triangles() == immediate_raster_triangles);
+        CHECK(immediate_gpu.raster_output_hash() == immediate_raster_hash);
+        std::vector<xlle::Nv2a::RasterStateSample> immediate_samples;
+        immediate_gpu.raster_state_samples(immediate_samples);
+        const xlle::Nv2a::RasterStateSample* immediate_sample = nullptr;
+        for (const auto& sample : immediate_samples) {
+            if (sample.immediate_quad_batches) {
+                immediate_sample = &sample;
+                break;
+            }
+        }
+        CHECK(immediate_sample != nullptr);
+        if (immediate_sample) {
+            CHECK(immediate_sample->immediate_quad_batches == 1);
+            CHECK(immediate_sample->immediate_quad_min_vertices == 4);
+            CHECK(immediate_sample->immediate_quad_max_vertices == 4);
+            CHECK(immediate_sample->immediate_quad_nonmultiple_of_four == 0);
+            CHECK(immediate_sample->immediate_quad_first_captured);
+            for (size_t vertex = 0; vertex < quad.size(); ++vertex) {
+                CHECK(immediate_sample->immediate_quad_decoded_input0[vertex] ==
+                      quad[vertex]);
+                CHECK(immediate_sample->immediate_quad_decoded_input3[vertex] ==
+                      (std::array<float, 4>{{1.0f, 1.0f, 1.0f, 1.0f}}));
+                CHECK(immediate_sample->immediate_quad_decoded_input9[vertex] ==
+                      (std::array<float, 4>{{quad_uv[vertex][0], quad_uv[vertex][1],
+                                              0.0f, 1.0f}}));
+                CHECK(immediate_sample->immediate_quad_opos[vertex] == quad[vertex]);
+                CHECK(immediate_sample->immediate_quad_od0[vertex] ==
+                      (std::array<float, 4>{}));
+                CHECK(immediate_sample->immediate_quad_ot0[vertex] ==
+                      (std::array<float, 4>{}));
+                CHECK(immediate_sample->immediate_quad_raster_opos[vertex][0] ==
+                      quad[vertex][0]);
+                CHECK(immediate_sample->immediate_quad_raster_opos[vertex][1] ==
+                      quad[vertex][1]);
+                CHECK(immediate_sample->immediate_quad_raster_opos[vertex][2] ==
+                      quad[vertex][2]);
+                // The VSH sees the exact submitted W=0; the local raster safety
+                // clamp is recorded separately and must not overwrite that evidence.
+                CHECK(immediate_sample->immediate_quad_decoded_input0[vertex][3] == 0.0f);
+                CHECK(immediate_sample->immediate_quad_opos[vertex][3] == 0.0f);
+                CHECK(immediate_sample->immediate_quad_raster_opos[vertex][3] > 0.0f);
+            }
+            CHECK(immediate_sample->immediate_quad_program_hash != 0);
+            CHECK(immediate_sample->immediate_quad_constants_hash != 0);
+            CHECK(immediate_sample->immediate_quad_transform_variant_count == 1);
+            CHECK(immediate_sample->immediate_quad_first_transform_batches == 1);
+            CHECK(immediate_sample->immediate_quad_later_transform_batches == 0);
+            CHECK(immediate_sample->immediate_quad_t0_dma_resolved);
+            CHECK(immediate_sample->immediate_quad_t0_probe_read);
+            CHECK(immediate_sample->immediate_quad_t0_probe_size == 16);
+            CHECK(immediate_sample->immediate_quad_t0_address == 0xD000);
+            CHECK(immediate_sample->immediate_quad_t0_probe[0] == 0x40);
+            CHECK(immediate_sample->immediate_quad_t0_probe[15] == 0x4F);
+            CHECK(!immediate_sample->immediate_quad_palette_relevant);
+        }
+
+        // The same state tracks variable mode-8 batch sizes without rasterizing.
+        emit_immediate(0x17FC, 8);
+        for (size_t vertex = 0; vertex < 8; ++vertex)
+            emit_position(quad[vertex % quad.size()]);
+        emit_immediate(0x17FC, 0);
+        kick_immediate();
+        emit_immediate(0x17FC, 8);
+        for (size_t vertex = 0; vertex < 3; ++vertex)
+            emit_position(quad[vertex]);
+        emit_immediate(0x17FC, 0);
+        kick_immediate();
+        CHECK(immediate_fault.empty());
+        immediate_gpu.raster_state_samples(immediate_samples);
+        immediate_sample = nullptr;
+        for (const auto& sample : immediate_samples) {
+            if (sample.immediate_quad_batches &&
+                !sample.immediate_quad_palette_relevant) {
+                immediate_sample = &sample;
+                break;
+            }
+        }
+        CHECK(immediate_sample != nullptr);
+        if (immediate_sample) {
+            CHECK(immediate_sample->immediate_quad_batches == 3);
+            CHECK(immediate_sample->immediate_quad_min_vertices == 3);
+            CHECK(immediate_sample->immediate_quad_max_vertices == 8);
+            CHECK(immediate_sample->immediate_quad_nonmultiple_of_four == 1);
+            CHECK(immediate_sample->immediate_quad_first_transform_batches == 3);
+            CHECK(immediate_sample->immediate_quad_later_transform_batches == 0);
+        }
+        CHECK(immediate_gpu.color_clears() == immediate_color_clears);
+        CHECK(immediate_gpu.rasterized_triangles() == immediate_raster_triangles);
+        CHECK(immediate_gpu.raster_output_hash() == immediate_raster_hash);
+
+        // Transform identity is independent of the raster-state key. Change an
+        // unused constant vector, submit the same mode-8 state, and retain both
+        // transform identities on that one raster-state sample.
+        emit_immediate(0x1EA4, 1);
+        emit_immediate(0x0B80, float_bits(42.0f));
+        emit_immediate(0x0B84, float_bits(0.0f));
+        emit_immediate(0x0B88, float_bits(0.0f));
+        emit_immediate(0x0B8C, float_bits(1.0f));
+        emit_immediate(0x17FC, 8);
+        for (const auto& position : quad) emit_position(position);
+        emit_immediate(0x17FC, 0);
+        kick_immediate();
+        CHECK(immediate_fault.empty());
+        immediate_gpu.raster_state_samples(immediate_samples);
+        immediate_sample = nullptr;
+        for (const auto& sample : immediate_samples) {
+            if (sample.immediate_quad_batches &&
+                !sample.immediate_quad_palette_relevant) {
+                immediate_sample = &sample;
+                break;
+            }
+        }
+        CHECK(immediate_sample != nullptr);
+        if (immediate_sample) {
+            CHECK(immediate_sample->immediate_quad_batches == 4);
+            CHECK(immediate_sample->immediate_quad_transform_variant_count == 2);
+            CHECK(immediate_sample->immediate_quad_first_transform_batches == 3);
+            CHECK(immediate_sample->immediate_quad_later_transform_batches == 1);
+            CHECK(immediate_sample->immediate_quad_transform_variant_overflow_batches == 0);
+        }
+
+        // I8 + palette is a separate passive probe: format bit clear selects DMA A,
+        // while the palette offset remains 64-byte aligned and also selects DMA A.
+        emit_immediate(0x0184, 2);
+        emit_immediate(0x1B00, 0x0000B000);
+        emit_immediate(0x1B04, 0x05710B29);
+        emit_immediate(0x1B20, 0x0000A040);
+        emit_immediate(0x1B0C, 0x4003FFC4);
+        emit_immediate(0x17FC, 8);
+        for (const auto& position : quad) emit_position(position);
+        emit_immediate(0x17FC, 0);
+        kick_immediate();
+        CHECK(immediate_fault.empty());
+        immediate_gpu.raster_state_samples(immediate_samples);
+        const xlle::Nv2a::RasterStateSample* palette_sample = nullptr;
+        for (const auto& sample : immediate_samples) {
+            if (sample.immediate_quad_palette_relevant) {
+                palette_sample = &sample;
+                break;
+            }
+        }
+        CHECK(palette_sample != nullptr);
+        if (palette_sample) {
+            CHECK(palette_sample->immediate_quad_t0_dma_resolved);
+            CHECK(palette_sample->immediate_quad_t0_probe_read);
+            CHECK(palette_sample->immediate_quad_t0_address == 0xB000);
+            CHECK(palette_sample->immediate_quad_t0_probe[0] == 0x80);
+            CHECK(palette_sample->immediate_quad_palette_relevant);
+            CHECK(palette_sample->immediate_quad_palette_dma_resolved);
+            CHECK(palette_sample->immediate_quad_palette_probe_read);
+            CHECK(palette_sample->immediate_quad_palette_address == 0xA040);
+            CHECK(palette_sample->immediate_quad_palette_probe_entries == 4);
+            CHECK(palette_sample->immediate_quad_palette_probe[0] == 0x11223344u);
+            CHECK(palette_sample->immediate_quad_palette_probe[1] == 0x55667788u);
+            CHECK(palette_sample->immediate_quad_palette_probe[2] == 0x99AABBCCu);
+            CHECK(palette_sample->immediate_quad_palette_probe[3] == 0xDDEEFF00u);
+        }
+        CHECK(immediate_gpu.color_clears() == immediate_color_clears);
+        CHECK(immediate_gpu.rasterized_triangles() == immediate_raster_triangles);
+        CHECK(immediate_gpu.raster_output_hash() == immediate_raster_hash);
+
+        const uint64_t immediate_methods_before_generic =
+            immediate_gpu.immediate_methods();
+        const uint64_t immediate_vertices_before_generic =
+            immediate_gpu.immediate_vertices();
+        const uint64_t immediate_batches_before_generic =
+            immediate_gpu.immediate_batches();
+        const uint64_t vertex_batches_before_generic = immediate_gpu.vertex_batches();
+
+        // Generic streams update persistent attributes but never commit a vertex in this
+        // witnessed path, even for slot 0. Only legacy SET_VERTEX4F's W method commits.
+        emit_immediate(0x17FC, 1);
+        emit_immediate(0x1880, float_bits(1.0f));
+        emit_immediate(0x1884, float_bits(2.0f));
+        emit_immediate(0x1940, 0xFF804000u);
+        emit_immediate(0x17FC, 0);
+        kick_immediate();
+        CHECK(immediate_fault.empty());
+        CHECK(immediate_gpu.immediate_methods() == immediate_methods_before_generic + 3);
+        CHECK(immediate_gpu.immediate_vertices() == immediate_vertices_before_generic);
+        CHECK(immediate_gpu.immediate_batches() == immediate_batches_before_generic);
+        CHECK(immediate_gpu.vertex_batches() == vertex_batches_before_generic);
+
+        // The generic conversions become visible only when the witnessed legacy position-W
+        // commit snapshots them; generic methods themselves still create no vertex.
+        emit_immediate(0x17FC, 1);
+        emit_immediate(0x1880, float_bits(5.0f));
+        emit_immediate(0x1884, float_bits(6.0f));
+        emit_immediate(0x1524, float_bits(1.0f));
+        emit_immediate(0x17FC, 0);
+        kick_immediate();
+        CHECK(immediate_fault.empty());
+        CHECK(immediate_gpu.immediate_vertices() == immediate_vertices_before_generic + 1);
+        CHECK(immediate_gpu.immediate_batches() == immediate_batches_before_generic + 1);
+        CHECK(immediate_gpu.last_transformed_position() ==
+              (std::array<float, 4>{{5.0f, 6.0f, 0.0f, 1.0f}}));
+
+        emit_immediate(0x17FC, 1);
+        emit_immediate(0x1940, 0xFF804000u);
+        emit_immediate(0x1524, float_bits(1.0f));
+        emit_immediate(0x17FC, 0);
+        kick_immediate();
+        CHECK(immediate_fault.empty());
+        CHECK(immediate_gpu.immediate_vertices() == immediate_vertices_before_generic + 2);
+        CHECK(immediate_gpu.immediate_batches() == immediate_batches_before_generic + 2);
+        const auto converted_position = immediate_gpu.last_transformed_position();
+        CHECK(converted_position[0] == 0.0f);
+        CHECK(converted_position[1] == 0.25f);  // screen coordinate is truncated to 1/16
+        CHECK(std::abs(converted_position[2] - 128.0f / 255.0f) < 0.000001f);
+        CHECK(converted_position[3] == 1.0f);
+
+        // Position completion is illegal without BEGIN, and immediate data cannot mix with
+        // indexed or NV097_INLINE_ARRAY sources in a single batch.
+        emit_immediate(0x1518, float_bits(1.0f));
+        emit_immediate(0x151C, float_bits(2.0f));
+        emit_immediate(0x1520, float_bits(3.0f));
+        emit_immediate(0x1524, float_bits(1.0f));
+        kick_immediate();
+        CHECK(immediate_fault == "NV2A immediate vertex submitted outside BEGIN/END");
+        immediate_fault.clear();
+
+        emit_immediate(0x17FC, 1);
+        emit_immediate(0x1518, float_bits(1.0f));
+        emit_immediate(0x151C, float_bits(2.0f));
+        emit_immediate(0x1520, float_bits(3.0f));
+        emit_immediate(0x1524, float_bits(1.0f));
+        emit_immediate(0x1808, 0);
+        emit_immediate(0x17FC, 0);
+        kick_immediate();
+        CHECK(immediate_fault ==
+              "NV2A batch mixes indexed, inline-array, or immediate vertices");
+        immediate_fault.clear();
+
+        emit_immediate(0x17FC, 1);
+        emit_immediate(0x1518, float_bits(1.0f));
+        emit_immediate(0x151C, float_bits(2.0f));
+        emit_immediate(0x1520, float_bits(3.0f));
+        emit_immediate(0x1524, float_bits(1.0f));
+        emit_immediate(0x1760, 0x00001042);  // float4 array attr0 for INLINE_ARRAY decode
+        emit_immediate(0x1818, float_bits(4.0f));
+        emit_immediate(0x1818, float_bits(5.0f));
+        emit_immediate(0x1818, float_bits(6.0f));
+        emit_immediate(0x1818, float_bits(1.0f));
+        emit_immediate(0x17FC, 0);
+        kick_immediate();
+        CHECK(immediate_fault ==
+              "NV2A batch mixes indexed, inline-array, or immediate vertices");
+    }
 
     std::printf(fails ? "test_nv2a: %d checks failed\n" : "test_nv2a: ok\n", fails);
     return fails ? 1 : 0;
