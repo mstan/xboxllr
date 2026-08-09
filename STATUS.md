@@ -3,6 +3,84 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-09 — A4: synthetic Down-then-A replay reaches a stable black frame; dashboard identified as XBMC
+
+Extending the Down-only proof below to a full Down-then-A sequence, at commit `ed399fe` all six
+focused tests pass (`test_xid_down_a_script`, `test_xid_script`, `test_ohci`,
+`test_ohci_synthetic_hub`, `test_xid_input`, `test_machine_config`), and a fresh 13B disconnected
+reduced-retire replay of the same test-only synthetic hub completes fault-free:
+
+```
+.\build-release\xlle.exe --boot ..\machine\flash-dump-ff000000.bin --run2bl ..\machine\bios-extract\bldr.bin --hdd ..\machine\xbox-hdd.img --eeprom ..\machine\eeprom.bin --net-disconnected --reduced-retire-diag --test-synthetic-controller-hub --test-synthetic-controller-hub-input-down-a --test-input-capture-prefix build\frame-synthetic-hub-down-a-rerun --max-insns 13000000000 --frame-dump build\frame-synthetic-hub-down-a-final-rerun-13b.ppm
+```
+
+`build/probe-synthetic-hub-down-a-rerun-13b.stdout.log` records the run to instruction budget
+("[2bl] ran to instruction budget without fault") in **264.3 s** (4m24s); its stderr companion
+(`.stderr.log`) is zero bytes. Final OHCI state: frames=9421 control=000000be hcca=03fdd000,
+eds/tds/retired/done=4238/1301/722/691, control/xid-in/xid-endpoint2/xid-out=23/665/664/0,
+addr/config=2/1, hub-addr/config/port1=1/1/00000003, rumble=0000/0000.
+
+The endpoint-2 sequence: pre-Down capture at instruction `10981668369` / count 320, hash
+`5994d8280fd524cd`; Down PRESS at count 320, RELEASE at count 325 (`11011003995`);
+selected-My-Files capture at count 330 / `11040335532`, hash `4c34c2704eb61e54` — matching the
+established Down-only 11.5B result below. The selection holds stable at the same hash through
+pre-a-stable, count 408 / `11497933715`. A PRESS occurs at count 408 (`analog[0]=0xff`,
+`buttons=0`), consumes reports 409-413, and RELEASEs at count 413 / `11527269295`. Post-A the
+capture hash changes to `73feb194b7694383` at count 418 / `11556600761`, and stays byte-identical
+through post-a-settled (count 496 / `12014203147`) and post-a-final-stable (count 574 /
+`12471801363`) to the 13B endpoint (count 664, aggregate 665, configured=1). The
+post-a-neutral, post-a-settled, post-a-final-stable, and 13B final PPMs are all byte-identical,
+SHA-256 `0C9B6D850BF9A1B0D04FB310A2C15CEF78E123AD126CC6D8FD0DDF7CEE198AA1`. Capture PPMs live at
+`build\frame-synthetic-hub-down-a-rerun-pre-down-a-010981668369.ppm`,
+`-selected-my-files-011040335532.ppm`, `-pre-a-stable-011497933715.ppm`,
+`-post-a-neutral-011556600761.ppm`, `-post-a-settled-012014203147.ppm`,
+`-post-a-final-stable-012471801363.ppm`, and
+`build\frame-synthetic-hub-down-a-final-rerun-13b.ppm`.
+
+Human-inspected PNG conversions show the pre-A frame is the dashboard main menu (mediacenter
+"home" skin: My Programs / My Files / My Pictures / My Music / My Videos / Weather / Settings)
+with My Files highlighted, and every post-A frame is **completely black**. The A press is
+delivered purely through guest-scheduled endpoint-2 TDs and causes a real dashboard state
+transition — XID stays configured with the guest still polling — but the target view renders
+black: the "incomplete/blank interface" outcome. This is stable (byte-identical through 13B) and
+fault-free; the exact NV2A-level cause of the black render is not yet identified.
+
+New identification: the third-party dashboard on the cloned HDD is XBMC (Xbox Media Center),
+installed as `C:\evoxdash.xbe` — confirmed by strings in the XBE and by
+`C:\XboxMediaCenter.xml` / `C:\XBMC\` on the image. The stock Microsoft `C:\xboxdash.xbe`
+(1,961,984 bytes) is intact alongside it. `machine\xbox-hdd-stockdash.img` is a byte copy of
+`xbox-hdd.img` with `C:/evoxdash.xbe` unlinked and rewritten with the stock `C:/xboxdash.xbe`
+bytes (1,961,984 bytes) via pyfatx in WSL, read-back verified; `xboxdash.xbe` itself and the
+original image are untouched. Its first boot is recorded below.
+
+## 2026-08-09 — A4: stock Microsoft dashboard boots fault-free but stalls on an incomplete black frame
+
+```
+.\build-release\xlle.exe --boot ..\machine\flash-dump-ff000000.bin --run2bl ..\machine\bios-extract\bldr.bin --hdd ..\machine\xbox-hdd-stockdash.img --eeprom ..\machine\eeprom.bin --net-disconnected --reduced-retire-diag --frame-series build\frame-stockdash-boot 500000000 --max-insns 11500000000 --frame-dump build\frame-stockdash-boot-final-11.5b.ppm
+```
+
+`build\probe-stockdash-boot-11.5b.stdout.log` / `.stderr.log` record exit 0 in **4m26s**, stderr
+zero bytes, "[2bl] ran to instruction budget without fault". This run uses the production
+direct-XID topology (no synthetic hub): OHCI logs `EP0 addr=1 GET_DESCRIPTOR(config) len=0x80`
+outcome=error cc=9, the same short-read behavior established elsewhere.
+
+The stock dashboard genuinely runs: scanout reconfigures to `640x480x32` pitch `2560` at
+`PCRTC_START 0x03978000` (XBMC's own boot was `720x480`). Frame-series hashes change at 6.5B
+(`0545e67084c18ffb`), change again at 9.5B (`b6f0b57a4922cd33`), then stay stable through the
+11.5B final frame (RGBA FNV64 `b6f0b57a4922cd33`). Human inspection: the 6.5B frame is black with
+garbage rows at the bottom; the 11.5B final frame is mostly black with several rows of colored
+garbage at the top. Neither is a recognizable dashboard.
+
+PGRAPH is doing heavy real work, not idling: vertex batches=449,050, submitted=99,134,424,
+triangles=62,857,508; pitch-textured batches=121,296 with 304,256,110 fragments
+passing/writing; transform fixed/programmable=147,299/301,751. Two suspects for the incomplete
+render: `"NV2A flip: write-increments=663 stalls=663 read-increments=662 notifications=2109
+surface=21100000 waiting=1"` with `PCRTC_START` pinned at `03978000`, and `"NV2A immediate
+vertices: methods=53427 vertices=0"` — 53,427 immediate-mode method writes producing zero decoded
+vertices. This supersedes the "in progress" phrasing above: the stock dashboard boots and renders
+fault-free through the full LLE path, but the visible output is an incomplete black frame: the
+exact NV2A blocker (flip stall vs. undecoded immediate vertices) is under investigation.
+
 ## 2026-08-09 — A4: synthetic Down pulse drives a stable dashboard selection transition
 
 Commits `f2d9d7e` and `6712f74` add the opt-in synthetic hub replay and deterministic input

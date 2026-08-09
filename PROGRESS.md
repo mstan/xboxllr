@@ -75,9 +75,25 @@ harvested from xemu, silicon-corrected against a live console. GPL-2.
   final, but broad panel/controller redraw makes the frames non-pixel-perfect. This demonstrates
   one visible synthetic D-pad selection transition only: real embedded-hub evidence is still blocked on
   `beads-xbox.1.5.8.1`, and submenu/A activation remains unproven.
-- **Immediate burn-down path:** continue the passive exact visual census, validate the
-  dashboard frame against a real-Xbox reference, and in parallel observe real XID endpoint
-  polling behind the Controller S embedded hub before proving basic D-pad/A/B menu navigation.
+  A follow-on 13B Down-then-A replay (commit `ed399fe`, milestone 46) now presses A after the
+  Down selection: XID stays configured and the guest keeps polling, but every post-A frame is
+  completely black through 13B (hash `73feb194b7694383`, byte-identical), so A activation is
+  guest-driven but its rendered target is not yet understood. The same session identifies the
+  cloned HDD's third-party dashboard as XBMC (`C:\evoxdash.xbe`), with the stock Microsoft
+  `C:\xboxdash.xbe` intact alongside it. The stock-dashboard variant image
+  (`machine\xbox-hdd-stockdash.img`, milestone 47) has now booted: black-frame rendering is
+  not unique to XBMC — the stock dashboard also boots fault-free through the
+  production direct-XID path (no synthetic hub) and stalls on its own incomplete black frame
+  (whether the two black frames share a cause is NOT yet established)
+  (garbage rows over black at 6.5B/11.5B, hash `b6f0b57a4922cd33` stable from 9.5B). PGRAPH is
+  doing heavy real work, so leading suspects are the stalled NV2A flip
+  (`write-increments=663 stalls=663`, `PCRTC_START` pinned at `03978000`) and undecoded
+  immediate vertices (`methods=53427 vertices=0`).
+- **Immediate burn-down path:** root-cause the NV2A flip-stall / undecoded-immediate-vertices
+  suspects behind the stock-dashboard black frame (milestone 47), continue the passive exact
+  visual census, validate the dashboard frame against a real-Xbox reference, and in parallel
+  observe real XID endpoint polling behind the Controller S embedded hub before proving basic
+  D-pad/A/B menu navigation.
 - **Not started:** A5 end-to-end retail-dashboard navigation and Arc 2 game work.
 
 ## Where the boot stands RIGHT NOW
@@ -485,6 +501,54 @@ dependency chain peeled this session is:
     342,914 changed pixels within `565x390+45+39`; visual inspection shows the complete blue/teal
     background/final controller-home composition. This makes no input or navigation claim: the
     Controller-S embedded hub still blocks guest polling.
+
+46. synthetic Down-then-A replay reaches 13B → **stable but black post-selection frame;
+    dashboard identified as XBMC**. The same test-only three-port synthetic hub carries a
+    scripted Down-then-A sequence through a fresh 13B disconnected reduced-retire replay
+    (commit `ed399fe`); all six focused tests pass (`test_xid_down_a_script`, `test_xid_script`,
+    `test_ohci`, `test_ohci_synthetic_hub`, `test_xid_input`, `test_machine_config`). The run is
+    fault-free in 264.3 s with an empty `build/probe-synthetic-hub-down-a-rerun-13b.stderr.log`;
+    final OHCI state is frames=9421, eds/tds/retired/done=4238/1301/722/691, xid-endpoint2=664,
+    hub-addr/config/port1=1/1/00000003. Endpoint-2 counts trace Down PRESS/RELEASE at 320/325
+    (matching the Down-only 11.5B proof above, hash `4c34c2704eb61e54` at count 330 and still at
+    count 408), then A PRESS/RELEASE at 408/413 (`analog[0]=0xff`). Post-A hash
+    `73feb194b7694383` is byte-identical from count 418 through the 13B endpoint (count 664);
+    the four post-A PPMs share SHA-256
+    `0C9B6D850BF9A1B0D04FB310A2C15CEF78E123AD126CC6D8FD0DDF7CEE198AA1`. Visual inspection shows
+    the pre-A frame is the dashboard main menu with My Files highlighted and every post-A frame
+    is completely black: a real, XID-configured, guest-scheduled state transition to a
+    not-yet-understood blank view. Separately, the cloned HDD's third-party dashboard is
+    identified as XBMC, installed at `C:\evoxdash.xbe` (confirmed by XBE strings and
+    `C:\XboxMediaCenter.xml`/`C:\XBMC\`); the stock Microsoft `C:\xboxdash.xbe` (1,961,984 bytes)
+    is intact alongside it. A stock-dashboard variant image
+    (`machine\xbox-hdd-stockdash.img`, `/evoxdash.xbe` swapped for stock bytes via pyfatx) is
+    built and its first boot is milestone 47. This remains test-only synthetic-hub evidence,
+    not retail topology: `beads-xbox.1.5.8.1` still blocks real Controller-S hub
+    descriptors/enumeration.
+
+47. stock-dashboard variant boot → **runs fault-free through the production direct-XID path,
+    but stalls on an incomplete black frame**. `machine\xbox-hdd-stockdash.img` is a byte copy
+    of `xbox-hdd.img` with `C:/evoxdash.xbe` unlinked and rewritten with the stock
+    `C:/xboxdash.xbe` bytes (1,961,984 bytes) via pyfatx in WSL, read-back verified; `xboxdash.xbe`
+    itself and the original image are untouched. An 11.5B disconnected reduced-retire replay
+    (`--frame-series build\frame-stockdash-boot 500000000`, `--frame-dump
+    build\frame-stockdash-boot-final-11.5b.ppm`) exits 0 in 4m26s with an empty
+    `build\probe-stockdash-boot-11.5b.stderr.log`; OHCI shows the production direct-XID topology
+    (no synthetic hub), `EP0 addr=1 GET_DESCRIPTOR(config) len=0x80` outcome=error cc=9, matching
+    the short-read behavior established elsewhere. The stock dashboard genuinely runs: scanout
+    reconfigures to 640x480x32 pitch 2560 at `PCRTC_START 0x03978000` (versus XBMC's 720x480).
+    Frame-series hashes change at 6.5B (`0545e67084c18ffb`) and 9.5B (`b6f0b57a4922cd33`), then
+    hold stable through the 11.5B final frame (`b6f0b57a4922cd33`). Human inspection: 6.5B is
+    black with garbage rows at the bottom, 11.5B final is mostly black with garbage rows at the
+    top — not a recognizable dashboard. PGRAPH does heavy real work (vertex batches=449,050,
+    submitted=99,134,424, triangles=62,857,508; pitch-textured batches=121,296,
+    304,256,110 fragments passing/writing; transform fixed/programmable=147,299/301,751), so
+    this is not a PGRAPH-idle stall. Two leading suspects: `NV2A flip: write-increments=663
+    stalls=663 read-increments=662 notifications=2109 surface=21100000 waiting=1` with
+    `PCRTC_START` pinned at `03978000`, and `NV2A immediate vertices: methods=53427 vertices=0`
+    (53,427 immediate-mode writes decoding zero vertices). This supersedes the prior "in
+    progress" phrasing: the stock dashboard is fault-free end to end, but the exact NV2A
+    blocker for the black frame remains open.
 
 ## How to build & run
 
