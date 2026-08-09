@@ -3,6 +3,37 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-08 — A4: indexed dashboard quads execute; controller topology blocker isolated
+
+The exact immediate mode-8 RS0/RS3 I8+palette family now executes as a second bounded
+dashboard profile. It accepts only the witnessed fixed pixel state and one four-vertex
+immediate quad while leaving post-VSH position, diffuse, and texture coordinates semantic
+inputs. Texture 0 resolves through DMA A as a swizzled 128x32 I8 image; each index selects a
+little-endian A8R8G8B8 palette entry before bilinear filtering, texture alpha-kill, the
+captured `T0 * V0` combiner, and source-alpha blending. Focused coverage proves rectangular
+high-X swizzle, palette-before-filtering and channel order, alpha kill, both alternating
+targets, state/shape rejection, and DMA-range failure before writes. Historical A4R4G4B4
+counters and hashes remain isolated and exact.
+
+The fault-free 11.5B disconnected-link replay executes all 875 I8 candidates with zero
+profile or raster rejections: 1,750 triangles, 4,567,500 fragments/samples, and 4,567,500
+alpha passes/color writes, hash `070a0f9ca1d32663`. Recorder-only work falls from 689
+states / 3,189 batches to 687 / 2,314. The existing A4 text profile remains exactly
+875 batches, 15,500 triangles, 1,731,000 samples, 558,625 writes, and hash
+`c4f12fa6ce7488b3`. This additional work does not alter the selected scanout: RGBA FNV64
+remains `a77da2bfc5887ee8`, and the PPM remains byte-identical at SHA-256
+`4198470101D5DCD66867C392A4B85DDF26C99C0C930E3CB1DCAE3B6E438BE535`. The earlier
+selection-highlight interpretation is therefore not visually established at this checkpoint.
+
+USB diagnostics now directly retain the terminal EP0 TD address/flags and post-retirement ED
+head. The retail configuration read proves `R=0`, 32/80 bytes, condition code 9, and a halted
+ED; a paired focused test proves `R=1` accepts the same short packet and completes status.
+Those semantics agree with local OHCI references and must not be weakened. The more
+fundamental fidelity error is topology: xboxlle currently exposes the XID directly at the
+OHCI root, while a real Controller S contains a three-port hub with XID on downstream port 1
+and memory-unit ports 2/3. Exact embedded-hub descriptors remain a real-hardware probe task;
+no endpoint-2 poll, menu-state transition, or navigation is claimed.
+
 ## 2026-08-08 — A4: exact immediate-mode dashboard text reaches retail scanout
 
 The first recognizable dashboard frame now renders through the retail LLE path. A deliberately

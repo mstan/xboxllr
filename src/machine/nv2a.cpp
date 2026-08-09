@@ -31,6 +31,9 @@ public:
     bool read16(size_t offset, uint16_t& value) {
         return access(offset, value, false);
     }
+    bool read8(size_t offset, uint8_t& value) {
+        return access(offset, value, false);
+    }
     bool read32(size_t offset, uint32_t& value) {
         return access(offset, value, false);
     }
@@ -1404,9 +1407,9 @@ bool Nv2a::submit_vertex_batch() {
 bool Nv2a::rasterize_witnessed_immediate_quad(bool& executed) {
     executed = false;
 
-    // The offline dashboard replay exposes two alternating instances of this exact
-    // state. They differ only in the color offset. Keep mode 8 recorder-only for every
-    // other state until its own texture/combiner behavior has been witnessed.
+    // The offline dashboard replay exposes two alternating A4 instances and two
+    // alternating I8/palette instances. Keep mode 8 recorder-only for every other
+    // state until its own texture/combiner behavior has been witnessed.
     const bool immediate_source =
         !immediate_vertices_.empty() &&
         immediate_vertices_.size() == transformed_batch_.size();
@@ -1414,9 +1417,12 @@ bool Nv2a::rasterize_witnessed_immediate_quad(bool& executed) {
     const uint32_t color_offset = surface_color_offset_;
     const bool witnessed_target =
         color_offset == 0x03DF4000 || color_offset == 0x03C8C000;
-    const bool source_shape =
+    const bool a4_source_shape =
         immediate_source && vertex_count >= 28 && vertex_count <= 44 &&
         (vertex_count & 3u) == 0;
+    // Like the A4 profile, this matches the captured pixel pipeline rather
+    // than freezing a particular selected-row's post-VSH varyings.
+    const bool i8_source_shape = immediate_source && vertex_count == 4;
     // Program/constants hashes are retained as provenance evidence, not as
     // raster semantics: once the VSH has produced oPos/oD0/oT0, the same
     // guest-visible pixel state must process those varyings identically.
@@ -1430,9 +1436,9 @@ bool Nv2a::rasterize_witnessed_immediate_quad(bool& executed) {
         surface_clip_vertical_ == 0x00D7009E &&
         raster_state_[kRasterWindowClipHorizontal] == 0x02D00000 &&
         raster_state_[kRasterWindowClipVertical] == 0x01E00000;
-    uint32_t raster_reject_mask = 0;
+    uint32_t a4_raster_reject_mask = 0;
     auto reject_raster = [&](size_t bit, bool matches) {
-        if (!matches) raster_reject_mask |= 1u << bit;
+        if (!matches) a4_raster_reject_mask |= 1u << bit;
     };
     reject_raster(0, raster_state_[kRasterEnables] == 0x00000007);
     reject_raster(1, raster_state_[kRasterControl0] == 0x00100001);
@@ -1459,7 +1465,33 @@ bool Nv2a::rasterize_witnessed_immediate_quad(bool& executed) {
     reject_raster(18, raster_state_[kRasterFrontFace] == 0x0900);
     reject_raster(19, raster_state_[kRasterZMinMaxControl] == 1);
     reject_raster(20, raster_state_[kRasterShadowDepthFunc] == 0);
-    const bool raster_state = raster_reject_mask == 0;
+    const bool a4_raster_state = a4_raster_reject_mask == 0;
+    uint32_t i8_raster_reject_mask = 0;
+    auto reject_i8_raster = [&](size_t bit, bool matches) {
+        if (!matches) i8_raster_reject_mask |= 1u << bit;
+    };
+    reject_i8_raster(0, raster_state_[kRasterEnables] == 0x00000006);
+    reject_i8_raster(1, raster_state_[kRasterControl0] == 0x00100001);
+    reject_i8_raster(2, raster_state_[kRasterAlphaFunc] == 0x0207);
+    reject_i8_raster(3, (raster_state_[kRasterAlphaRef] & 0xFFu) == 0);
+    reject_i8_raster(4, raster_state_[kRasterBlendSrc] == 0x0302);
+    reject_i8_raster(5, raster_state_[kRasterBlendDst] == 0x0303);
+    reject_i8_raster(6, raster_state_[kRasterBlendEquation] == 0x8006);
+    reject_i8_raster(7, raster_state_[kRasterDepthFunc] == 0x0203);
+    reject_i8_raster(8, raster_state_[kRasterColorMask] == 0x01010101);
+    reject_i8_raster(9, raster_state_[kRasterDepthMask] == 1);
+    reject_i8_raster(10, raster_state_[kRasterShadeMode] == 0x1D01);
+    reject_i8_raster(11, raster_state_[kRasterPolygonOffsetScale] == 0x80000000);
+    reject_i8_raster(12, raster_state_[kRasterPolygonOffsetBias] == 0x80000000);
+    reject_i8_raster(13, raster_state_[kRasterFrontPolygonMode] == 0x1B02);
+    reject_i8_raster(14, raster_state_[kRasterBackPolygonMode] == 0x1B02);
+    reject_i8_raster(15, raster_state_[kRasterClipMin] == 0);
+    reject_i8_raster(16, raster_state_[kRasterClipMax] == 0);
+    reject_i8_raster(17, raster_state_[kRasterCullFace] == 0x0405);
+    reject_i8_raster(18, raster_state_[kRasterFrontFace] == 0x0900);
+    reject_i8_raster(19, raster_state_[kRasterZMinMaxControl] == 1);
+    reject_i8_raster(20, raster_state_[kRasterShadowDepthFunc] == 0);
+    const bool i8_raster_state = i8_raster_reject_mask == 0;
     const bool stencil_state =
         raster_state_[kRasterStencilFunc] == 0x0207 &&
         raster_state_[kRasterStencilRef] == 0 &&
@@ -1467,7 +1499,7 @@ bool Nv2a::rasterize_witnessed_immediate_quad(bool& executed) {
         raster_state_[kRasterStencilOpFail] == 0x1E00 &&
         raster_state_[kRasterStencilOpZFail] == 0x1E00 &&
         raster_state_[kRasterStencilOpZPass] == 0x1E00;
-    const bool combiner_state =
+    const bool a4_combiner_state =
         raster_state_[kRasterTextureEnableMask] == 1 &&
         raster_state_[kRasterShaderStageProgram] == 1 &&
         raster_state_[kRasterShaderOtherStageInput] == 0 &&
@@ -1482,7 +1514,7 @@ bool Nv2a::rasterize_witnessed_immediate_quad(bool& executed) {
         raster_state_[kRasterCombinerSpecularFog1] == 0x00001C00 &&
         raster_state_[kRasterCombinerFinalFactor0] == 0x00DADADA &&
         raster_state_[kRasterCombinerFinalFactor1] == 0x00101010;
-    const bool texture_state =
+    const bool a4_texture_state =
         raster_state_[kRasterTextureOffset0] == 0x03C0C000 &&
         raster_state_[kRasterTextureFormat0] == 0x08810429 &&
         raster_state_[kRasterTextureAddress0] == 0x00010303 &&
@@ -1497,34 +1529,85 @@ bool Nv2a::rasterize_witnessed_immediate_quad(bool& executed) {
         raster_state_[kRasterAlphaFunc] == 0x0206 &&
         (raster_state_[kRasterAlphaRef] & 0xFFu) == 8 &&
         raster_state_[kRasterTextureFormat0] == 0x08810429;
+    const bool i8_combiner_state =
+        raster_state_[kRasterTextureEnableMask] == 1 &&
+        raster_state_[kRasterShaderStageProgram] == 1 &&
+        raster_state_[kRasterShaderOtherStageInput] == 0x00210000 &&
+        raster_state_[kRasterCombinerControl] == 1 &&
+        raster_state_[kRasterCombinerAlphaIcw0] == 0x18140000 &&
+        raster_state_[kRasterCombinerColorIcw0] == 0x08040000 &&
+        raster_state_[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
+        raster_state_[kRasterCombinerColorOcw0] == 0x00000C00 &&
+        raster_state_[kRasterCombinerFactor0_0] == 0xFFFFFFFF &&
+        raster_state_[kRasterCombinerFactor1_0] == 0xFFFFFFFF &&
+        raster_state_[kRasterCombinerSpecularFog0] == 0x0000000C &&
+        raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80 &&
+        raster_state_[kRasterCombinerFinalFactor0] == 0x00DADADA &&
+        raster_state_[kRasterCombinerFinalFactor1] == 0x00101010;
+    const bool i8_texture_state =
+        raster_state_[kRasterTextureOffset0] == 0x02DED480 &&
+        raster_state_[kRasterTextureFormat0] == 0x05710B29 &&
+        raster_state_[kRasterTextureAddress0] == 0x00010303 &&
+        raster_state_[kRasterTextureFilter0] == 0x02022000 &&
+        raster_state_[kRasterTextureControl0_0] == 0x4003FFC4 &&
+        raster_state_[kRasterTextureControl1_0] == 0x01C00000 &&
+        raster_state_[kRasterTextureImageRect0] == 0x00640011 &&
+        raster_state_[kRasterTexturePalette0] == 0x02DED080 &&
+        raster_state_[kRasterTextureBorderColor0] == 0;
     uint32_t reject_mask = 0;
-    if (!source_shape) reject_mask |= 1u << 0;
+    if (!a4_source_shape) reject_mask |= 1u << 0;
     if (!transform_state) reject_mask |= 1u << 1;
     if (!surface_state) reject_mask |= 1u << 2;
-    if (!raster_state) reject_mask |= 1u << 3;
+    if (!a4_raster_state) reject_mask |= 1u << 3;
     if (!stencil_state) reject_mask |= 1u << 4;
-    if (!combiner_state) reject_mask |= 1u << 5;
-    if (!texture_state) reject_mask |= 1u << 6;
+    if (!a4_combiner_state) reject_mask |= 1u << 5;
+    if (!a4_texture_state) reject_mask |= 1u << 6;
     if (rs12_candidate) {
         ++immediate_quad_rs12_candidates_;
         last_immediate_quad_rs12_reject_mask_ = reject_mask;
-        last_immediate_quad_rs12_raster_reject_mask_ = raster_reject_mask;
+        last_immediate_quad_rs12_raster_reject_mask_ = a4_raster_reject_mask;
     }
-    if (reject_mask) return true;
+    uint32_t i8_reject_mask = 0;
+    if (!i8_source_shape) i8_reject_mask |= 1u << 0;
+    if (!transform_state) i8_reject_mask |= 1u << 1;
+    if (!surface_state) i8_reject_mask |= 1u << 2;
+    if (!i8_raster_state) i8_reject_mask |= 1u << 3;
+    if (!stencil_state) i8_reject_mask |= 1u << 4;
+    if (!i8_combiner_state) i8_reject_mask |= 1u << 5;
+    if (!i8_texture_state) i8_reject_mask |= 1u << 6;
+    const bool i8_candidate =
+        immediate_source && witnessed_target && vertex_count == 4 &&
+        raster_state_[kRasterAlphaFunc] == 0x0207 &&
+        (raster_state_[kRasterAlphaRef] & 0xFFu) == 0 &&
+        raster_state_[kRasterTextureFormat0] == 0x05710B29;
+    if (i8_candidate) {
+        ++immediate_quad_i8_candidates_;
+        last_immediate_quad_i8_reject_mask_ = i8_reject_mask;
+        last_immediate_quad_i8_raster_reject_mask_ = i8_raster_reject_mask;
+    }
+    const bool i8_profile = i8_reject_mask == 0;
+    if (reject_mask && !i8_profile) return true;
 
     if (!color_dma_bound_ || !texture_dma_a_bound_) {
-        fault_("NV2A immediate-quad RS1/RS2 DMA objects are not witnessed");
+        fault_("NV2A immediate-quad DMA objects are not witnessed");
         return false;
     }
 
     constexpr uint32_t kSurfacePitch = 0x0C00;
     constexpr uint32_t kSurfaceHeight = 480;
-    constexpr uint32_t kTextureWidth = 256;
-    constexpr uint32_t kTextureHeight = 256;
+    constexpr uint32_t kA4TextureWidth = 256;
+    constexpr uint32_t kA4TextureHeight = 256;
+    constexpr uint32_t kI8TextureWidth = 128;
+    constexpr uint32_t kI8TextureHeight = 32;
+    const uint32_t texture_width =
+        i8_profile ? kI8TextureWidth : kA4TextureWidth;
+    const uint32_t texture_height =
+        i8_profile ? kI8TextureHeight : kA4TextureHeight;
     constexpr uint64_t kColorBytes =
         static_cast<uint64_t>(kSurfacePitch) * kSurfaceHeight;
-    constexpr uint64_t kTextureBytes =
-        static_cast<uint64_t>(kTextureWidth) * kTextureHeight * sizeof(uint16_t);
+    const uint64_t texture_bytes = i8_profile
+        ? static_cast<uint64_t>(texture_width) * texture_height
+        : static_cast<uint64_t>(texture_width) * texture_height * sizeof(uint16_t);
 
     auto resolve_range = [&](uint32_t dma, uint32_t offset, uint64_t bytes,
                              uint32_t& address, const char* name) {
@@ -1556,16 +1639,34 @@ bool Nv2a::rasterize_witnessed_immediate_quad(bool& executed) {
     if (!resolve_range(color_dma_, color_offset, kColorBytes,
                        color_address, "color") ||
         !resolve_range(texture_dma_a_,
-                       raster_state_[kRasterTextureOffset0], kTextureBytes,
-                       texture_address, "A4R4G4B4 texture")) {
+                       raster_state_[kRasterTextureOffset0], texture_bytes,
+                       texture_address, i8_profile ? "I8 texture" : "A4R4G4B4 texture")) {
+        return false;
+    }
+
+    uint32_t palette_address = 0;
+    if (i8_profile &&
+        !resolve_range(texture_dma_a_, raster_state_[kRasterTexturePalette0] & ~0x3Fu,
+                       256u * sizeof(uint32_t), palette_address, "I8 palette")) {
+        return false;
+    }
+    if (i8_profile &&
+        (palette_address > UINT32_MAX - 256u * sizeof(uint32_t) ||
+         texture_address != palette_address + 256u * sizeof(uint32_t))) {
+        fault_("NV2A immediate-quad I8 palette and texture are not contiguous");
         return false;
     }
 
     PagedRasterSurface color_surface(
         color_address, static_cast<size_t>(kColorBytes), mem_read_, mem_write_);
     PagedRasterSurface texture_surface(
-        texture_address, static_cast<size_t>(kTextureBytes), mem_read_, mem_write_);
-    SwizzleLookup texture_swizzle(kTextureWidth, kTextureHeight);
+        texture_address, static_cast<size_t>(texture_bytes), mem_read_, mem_write_);
+    std::unique_ptr<PagedRasterSurface> palette_surface;
+    if (i8_profile) {
+        palette_surface = std::make_unique<PagedRasterSurface>(
+            palette_address, 256u * sizeof(uint32_t), mem_read_, mem_write_);
+    }
+    SwizzleLookup texture_swizzle(texture_width, texture_height);
 
     const uint32_t clip_x = surface_clip_horizontal_ & 0xFFFFu;
     const uint32_t clip_width = surface_clip_horizontal_ >> 16;
@@ -1576,13 +1677,13 @@ bool Nv2a::rasterize_witnessed_immediate_quad(bool& executed) {
     const uint32_t ymin = clip_y;
     const uint32_t ymax = clip_y + clip_height - 1;
 
-    auto sample_a4r4g4b4 =
+    auto sample_texture =
         [&](float u, float v, std::array<float, 4>& color) {
             if (!std::isfinite(u) || !std::isfinite(v)) return false;
             u = std::clamp(u, 0.0f, 1.0f);
             v = std::clamp(v, 0.0f, 1.0f);
-            const float texel_x = u * kTextureWidth - 0.5f;
-            const float texel_y = v * kTextureHeight - 0.5f;
+            const float texel_x = u * texture_width - 0.5f;
+            const float texel_y = v * texture_height - 0.5f;
             const int32_t x0 = static_cast<int32_t>(std::floor(texel_x));
             const int32_t y0 = static_cast<int32_t>(std::floor(texel_y));
             const float fx = texel_x - static_cast<float>(x0);
@@ -1590,20 +1691,35 @@ bool Nv2a::rasterize_witnessed_immediate_quad(bool& executed) {
             auto texel = [&](int32_t x, int32_t y,
                              std::array<float, 4>& unpacked) {
                 const uint32_t sx = static_cast<uint32_t>(std::clamp(
-                    x, 0, static_cast<int32_t>(kTextureWidth) - 1));
+                    x, 0, static_cast<int32_t>(texture_width) - 1));
                 const uint32_t sy = static_cast<uint32_t>(std::clamp(
-                    y, 0, static_cast<int32_t>(kTextureHeight) - 1));
-                const size_t offset =
-                    static_cast<size_t>(texture_swizzle.index(sx, sy)) *
-                    sizeof(uint16_t);
-                uint16_t pixel = 0;
-                if (!texture_surface.read16(offset, pixel)) return false;
-                unpacked = {{
-                    static_cast<float>((pixel >> 8) & 0xFu) / 15.0f,
-                    static_cast<float>((pixel >> 4) & 0xFu) / 15.0f,
-                    static_cast<float>(pixel & 0xFu) / 15.0f,
-                    static_cast<float>((pixel >> 12) & 0xFu) / 15.0f,
-                }};
+                    y, 0, static_cast<int32_t>(texture_height) - 1));
+                const size_t swizzled = texture_swizzle.index(sx, sy);
+                if (i8_profile) {
+                    uint8_t index = 0;
+                    uint32_t pixel = 0;
+                    if (!texture_surface.read8(swizzled, index) ||
+                        !palette_surface->read32(
+                            static_cast<size_t>(index) * sizeof(pixel), pixel)) {
+                        return false;
+                    }
+                    unpacked = {{
+                        static_cast<float>((pixel >> 16) & 0xFFu) / 255.0f,
+                        static_cast<float>((pixel >> 8) & 0xFFu) / 255.0f,
+                        static_cast<float>(pixel & 0xFFu) / 255.0f,
+                        static_cast<float>((pixel >> 24) & 0xFFu) / 255.0f,
+                    }};
+                } else {
+                    uint16_t pixel = 0;
+                    if (!texture_surface.read16(swizzled * sizeof(pixel), pixel))
+                        return false;
+                    unpacked = {{
+                        static_cast<float>((pixel >> 8) & 0xFu) / 15.0f,
+                        static_cast<float>((pixel >> 4) & 0xFu) / 15.0f,
+                        static_cast<float>(pixel & 0xFu) / 15.0f,
+                        static_cast<float>((pixel >> 12) & 0xFu) / 15.0f,
+                    }};
+                }
                 return true;
             };
             std::array<float, 4> c00{}, c10{}, c01{}, c11{};
@@ -1650,7 +1766,10 @@ bool Nv2a::rasterize_witnessed_immediate_quad(bool& executed) {
             };
             const int64_t area = edge(ax, ay, bx, by, cx, cy);
             if (area <= 0) return;  // BACK culling with the witnessed CW front face.
-            ++immediate_quad_raster_triangles_;
+            if (i8_profile)
+                ++immediate_quad_i8_raster_triangles_;
+            else
+                ++immediate_quad_raster_triangles_;
 
             const int32_t tri_xmin = std::max<int32_t>(
                 static_cast<int32_t>(xmin),
@@ -1696,7 +1815,10 @@ bool Nv2a::rasterize_witnessed_immediate_quad(bool& executed) {
                         w2 < 0 || (w2 == 0 && !edge2_top_left)) {
                         continue;
                     }
-                    ++immediate_quad_raster_fragments_;
+                    if (i8_profile)
+                        ++immediate_quad_i8_raster_fragments_;
+                    else
+                        ++immediate_quad_raster_fragments_;
 
                     const double lambda0 =
                         static_cast<double>(w0) / static_cast<double>(area);
@@ -1723,13 +1845,21 @@ bool Nv2a::rasterize_witnessed_immediate_quad(bool& executed) {
                         return;
                     }
                     std::array<float, 4> source{};
-                    if (!sample_a4r4g4b4(static_cast<float>(u),
-                                         static_cast<float>(v), source)) {
-                        fault_("NV2A immediate-quad A4R4G4B4 sample failed");
+                    if (!sample_texture(static_cast<float>(u),
+                                        static_cast<float>(v), source)) {
+                        fault_(i8_profile ? "NV2A immediate-quad I8 palette sample failed"
+                                          : "NV2A immediate-quad A4R4G4B4 sample failed");
                         failed = true;
                         return;
                     }
-                    ++immediate_quad_texture_samples_;
+                    if (i8_profile)
+                        ++immediate_quad_i8_texture_samples_;
+                    else
+                        ++immediate_quad_texture_samples_;
+                    // RS0/RS3 have TEXCTL0.ALPHAKILLEN set. It operates on
+                    // the filtered palette sample, before the C0/final combiner
+                    // and before blending.
+                    if (i8_profile && source[3] == 0.0f) continue;
                     // C0 is T0 * V0 into R0 for both RGB and alpha; the final
                     // combiner selects R0. The captured dashboard shader emits
                     // white V0, but retain the actual combiner equation here.
@@ -1750,20 +1880,26 @@ bool Nv2a::rasterize_witnessed_immediate_quad(bool& executed) {
                                 std::max(static_cast<float>(diffuse), 0.0f),
                             0.0f, 1.0f);
                     }
-                    // Final RGB is C1 + mix(0, R0, C0): the captured final
-                    // constants are 16/255 and 218/255. Alpha selects R0.a.
-                    for (size_t component = 0; component < 3; ++component) {
-                        source[component] = std::clamp(
-                            (16.0f + 218.0f * source[component]) / 255.0f,
-                            0.0f, 1.0f);
+                    if (!i8_profile) {
+                        // A4 final RGB is C1 + mix(0, R0, C0): the captured
+                        // final constants are 16/255 and 218/255. Alpha selects R0.a.
+                        for (size_t component = 0; component < 3; ++component) {
+                            source[component] = std::clamp(
+                                (16.0f + 218.0f * source[component]) / 255.0f,
+                                0.0f, 1.0f);
+                        }
                     }
                     auto pack_unorm8 = [](float value) {
                         return static_cast<uint32_t>(std::floor(
                             std::clamp(value, 0.0f, 1.0f) * 255.0f + 0.5f));
                     };
                     const uint32_t source_alpha8 = pack_unorm8(source[3]);
-                    if (source_alpha8 < 8) continue;  // GEQUAL, reference 8.
-                    ++immediate_quad_raster_alpha_passes_;
+                    if (!i8_profile && source_alpha8 < 8)
+                        continue;  // A4 GEQUAL, reference 8.
+                    if (i8_profile)
+                        ++immediate_quad_i8_raster_alpha_passes_;
+                    else
+                        ++immediate_quad_raster_alpha_passes_;
 
                     const size_t offset =
                         static_cast<size_t>(y) * kSurfacePitch +
@@ -1799,13 +1935,24 @@ bool Nv2a::rasterize_witnessed_immediate_quad(bool& executed) {
                         failed = true;
                         return;
                     }
-                    ++immediate_quad_raster_writes_;
+                    if (i8_profile)
+                        ++immediate_quad_i8_raster_writes_;
+                    else
+                        ++immediate_quad_raster_writes_;
                     const uint32_t address =
                         color_address + static_cast<uint32_t>(offset);
-                    last_immediate_quad_raster_address_ = address;
+                    if (i8_profile)
+                        last_immediate_quad_i8_raster_address_ = address;
+                    else
+                        last_immediate_quad_raster_address_ = address;
                     for (uint32_t word : {address, color}) {
-                        immediate_quad_raster_output_hash_ ^= word;
-                        immediate_quad_raster_output_hash_ *= 1099511628211ull;
+                        if (i8_profile) {
+                            immediate_quad_i8_raster_output_hash_ ^= word;
+                            immediate_quad_i8_raster_output_hash_ *= 1099511628211ull;
+                        } else {
+                            immediate_quad_raster_output_hash_ ^= word;
+                            immediate_quad_raster_output_hash_ *= 1099511628211ull;
+                        }
                     }
                 }
             }
@@ -1826,7 +1973,10 @@ bool Nv2a::rasterize_witnessed_immediate_quad(bool& executed) {
         fault_("NV2A immediate-quad color DMA write failed");
         return false;
     }
-    ++immediate_quad_raster_batches_;
+    if (i8_profile)
+        ++immediate_quad_i8_raster_batches_;
+    else
+        ++immediate_quad_raster_batches_;
     executed = true;
     return true;
 }

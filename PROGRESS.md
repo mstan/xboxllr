@@ -47,10 +47,13 @@ harvested from xemu, silicon-corrected against a live console. GPL-2.
   scheduled endpoint-2 polls. An opt-in disconnected-link replay completes the retail PHY
   timeout path and launches `evoxdash`. Its dominant witnessed immediate-mode A4R4G4B4 quad
   family now renders the real main-menu labels into the alternating 720x480 buffers through
-  the retail PFIFO/PGRAPH/unified-RAM/PCRTC path.
+  the retail PFIFO/PGRAPH/unified-RAM/PCRTC path. The paired I8/palette row quad also executes
+  exactly, reducing the recorder-only census by another 875 batches, although its accepted
+  replay is byte-identical at scanout and therefore does not establish a visible selection
+  cue.
 - **Immediate burn-down path:** execute the remaining witnessed mode-8 visual families,
   validate the dashboard frame against a real-Xbox reference, observe real XID endpoint
-  polling, and prove basic D-pad/A/B menu navigation.
+  polling behind the Controller S embedded hub, and prove basic D-pad/A/B menu navigation.
 - **Not started:** A5 end-to-end retail-dashboard navigation and Arc 2 game work.
 
 ## Where the boot stands RIGHT NOW
@@ -340,6 +343,19 @@ dependency chain peeled this session is:
     This proves first menu visibility without HLE rendering or host framebuffer substitution,
     not complete graphics or interaction: other mode-8 families remain recorder-only and no
     endpoint-2 XID poll/menu-state transition has been observed.
+40. paired indexed dashboard quad family → **executed exactly, with no selected-scanout
+    difference**. The exact RS0/RS3 pixel state resolves a swizzled 128x32 I8 image and its
+    adjacent 256-entry A8R8G8B8 palette through DMA A, palette-expands before bilinear
+    filtering, applies texture alpha kill, and feeds the retained combiner/blend into either
+    alternating pitch target. The 11.5B replay executes 875/875 candidates with zero rejects:
+    1,750 triangles and 4,567,500 fragments/samples/writes, I8 hash `070a0f9ca1d32663`.
+    Recorder-only work drops to 687 states / 2,314 batches while every published A4 text
+    counter/hash remains exact. The final scanout and PPM are byte-identical to milestone 39,
+    so the former selected-row-highlight interpretation is not claimed. Separately, retained
+    OHCI terminal-TD evidence proves the direct-XID configuration short read used `R=0`,
+    returned 32/80 bytes with CC9, and halted its ED. Do not weaken that correct OHCI rule:
+    the device-tree fidelity gap is the missing Controller S embedded three-port hub ahead of
+    the XID child; exact hub descriptor bytes require the warned real-hardware probe workflow.
 
 ## How to build & run
 
@@ -350,7 +366,7 @@ cd /f/Projects/xboxlle/xboxlle
 cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ \
       -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_POLICY_VERSION_MINIMUM=3.5
 cmake --build build -j
-ctest --test-dir build                         # 9/9 (ring, jsonl, nv2a, apu, aci, smc, ohci, nvnet, spike)
+ctest --test-dir build                         # 10/10 (ring, jsonl, nv2a, apu, aci, smc, ohci, xid_input, nvnet, spike)
 
 cd build
 ./xlle.exe --boot ../../machine/flash-dump-ff000000.bin \
@@ -404,11 +420,13 @@ Deliberate documented stand-ins currently in place (fine for boot, replaced late
 - APU has the load-bearing voice-list, VOICE_OFF, timed idle-voice FE trap, notifier, and IRQ
   lifecycle, but still no DSP/audio synthesis. ACI advances real PCM descriptors and IRQs
   headlessly but produces no host audio.
-- OHCI0 attaches a deterministic Controller S on root port 1. Periodic/control/bulk ED
-  scheduling, TD buffer transfer/retirement, HCCA done writeback, standard enumeration,
-  XID descriptors, injectable input reports, and rumble output work. The retail dashboard
-  enumerates and configures it. `--interactive` supplies live keyboard state, but an
-  observed retail endpoint-2 poll remains; OHCI1 remains empty.
+- OHCI0 currently attaches a deterministic Controller S XID directly on root port 1.
+  Periodic/control/bulk ED scheduling, TD buffer transfer/retirement, HCCA done writeback,
+  standard enumeration, XID descriptors, injectable input reports, and rumble output work.
+  This flattened topology is not hardware-faithful: a real Controller S first exposes an
+  embedded three-port hub, with XID on downstream port 1 and memory units on ports 2/3.
+  `--interactive` supplies live keyboard state, but the retail guest never reaches an
+  endpoint-2 poll in the flattened model; OHCI1 remains empty.
 - NVNet implements the register/PHY/MDIO/link/IRQ floor plus TX and RX descriptor engines.
   An opt-in nonblocking UDP layer-2 tunnel provides external packet transport; without it,
   transmitted packets are explicitly counted and discarded. Higher-level NAT/bridging is
@@ -459,9 +477,10 @@ Driver: `python tools/xbox_agent.py --host 192.168.4.81 {ping|info|read|exec <fi
    visual families needed for dashboard fidelity. Preserve the bounded selector that produced
    the first recognizable menu frame, and compare output with a real-Xbox reference rather
    than generalizing from xemu's host renderer.
-2. The live keyboard-to-XID mapping and OHCI protocol are landed. Confirm the configuration
-   read's intermediate OHCI condition code and compare the short-packet sequence with a
-   real console or xemu before changing semantics; then prove a real endpoint-2 report
+2. The live keyboard-to-XID mapping and OHCI protocol are landed. The configuration read is
+   now directly proven as `R=0`, 32/80 bytes, CC9, with a halted ED; preserve those OHCI
+   semantics. Capture the real Controller S embedded-hub descriptors/topology on the v1.1
+   console, then model root → hub → downstream-port-1 XID and prove a real endpoint-2 report
    causes a D-pad/A/B menu-state change. Do not synthesize a guest poll.
 3. Exercise the landed NVNet UDP tunnel against a useful peer/bridge as navigation requires;
    RX descriptor DMA is proven through the retail driver.
