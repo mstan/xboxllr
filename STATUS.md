@@ -3,6 +3,33 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-08 — A4: main-panel background completes the controller home composition
+
+The exact IQRS5/IQRS10 four-immediate-vertex family now executes as a bounded main-panel
+mode-8 profile. It samples the witnessed 512x512 swizzled little-endian A8R8G8B8 texture
+through DMA A, with palette state deliberately passive, and applies the captured alpha-kill,
+combiner, final factors, and source-alpha blend state to the alternating pitch targets. The
+zero-final-factor IQRS16 lookalike remains excluded. Its telemetry and output hash are separate
+from every earlier immediate family.
+
+The accepted Release 11.5B disconnected reduced-retire replay is fault-free in **241.388 s**:
+`build/probe-mode8-main-panel-a8-executed-11.5b.stdout.log` records the run and
+`build/probe-mode8-main-panel-a8-executed-11.5b.stderr.log` is empty. The profile executes
+124/124 candidates with both reject masks zero: 124 batches, 248 triangles, 33,529,600 each of
+fragments and samples, 13,417,544 each of alpha passes and color writes, last address
+`03f37018`, and hash `74b351eb7eee0da3`. Earlier profile counters remain unchanged. The 3.759 s
+(1.58%) increase over the artwork replay is a single-run measurement subject to noise; both
+remain in the roughly four-minute band.
+
+The selected scanout has RGBA FNV64 `84f622fae4176b8d`. The PPM artifact
+`build/frame-mode8-main-panel-a8-executed-11.5b.ppm` has SHA-256
+`64FB065345EAA9F46B495B7C03E6F1DDFC252DFE87F528E176EDC53FC4B02DD2`; its PNG companion has
+SHA-256 `474537626177E7BD5E7A1F626456FFA83DED6BFD1AF6C7363FE3EAF0A04E3879`, and the diff
+image accompanies the stdout/stderr logs. Exact comparison against the artwork milestone finds
+100,710 changed pixels within `566x391+45+39`. Visual inspection now reveals the full controller
+background/main panel while retaining menu text and selection. This is not an input or
+navigation claim: the Controller-S embedded-hub topology still blocks guest endpoint polling.
+
 ## 2026-08-08 — A4: upper-left artwork completes the mediacenter-home composition
 
 The exact IQRS3/IQRS7 four-immediate-vertex upper-left artwork family now executes as a

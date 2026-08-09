@@ -4264,6 +4264,110 @@ int main() {
         CHECK(quad_gpu.immediate_quad_menu_i8_raster_batches() == before_artwork_menu_batches);
         CHECK(quad_gpu.immediate_quad_menu_i8_raster_writes() == before_artwork_menu_writes);
         CHECK(quad_gpu.immediate_quad_menu_i8_raster_output_hash() == before_artwork_menu_hash);
+
+        // IQRS5/IQRS10 direct 512x512 main-panel image. Palette state is
+        // intentionally stale/passive for A8R8G8B8.
+        quad_fault.clear();
+        const auto old_a4_batches = quad_gpu.immediate_quad_raster_batches();
+        const auto old_a4_writes = quad_gpu.immediate_quad_raster_writes();
+        const auto old_a4 = quad_gpu.immediate_quad_raster_output_hash();
+        const auto old_i8_batches = quad_gpu.immediate_quad_i8_raster_batches();
+        const auto old_i8_writes = quad_gpu.immediate_quad_i8_raster_writes();
+        const auto old_i8 = quad_gpu.immediate_quad_i8_raster_output_hash();
+        const auto old_a8_batches = quad_gpu.immediate_quad_a8_raster_batches();
+        const auto old_a8_writes = quad_gpu.immediate_quad_a8_raster_writes();
+        const auto old_a8 = quad_gpu.immediate_quad_a8_raster_output_hash();
+        const auto old_menu_batches = quad_gpu.immediate_quad_menu_i8_raster_batches();
+        const auto old_menu_writes = quad_gpu.immediate_quad_menu_i8_raster_writes();
+        const auto old_menu = quad_gpu.immediate_quad_menu_i8_raster_output_hash();
+        const auto old_art_batches = quad_gpu.immediate_quad_artwork_i8_raster_batches();
+        const auto old_art_writes = quad_gpu.immediate_quad_artwork_i8_raster_writes();
+        const auto old_art = quad_gpu.immediate_quad_artwork_i8_raster_output_hash();
+        constexpr uint32_t panel_texture_address = 0x00100080;
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x700048, 4, 9);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x70004C, 4, 0x800100A0);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x700A00, 4, 0x3D);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x700A04, 4, 0x07FFFFFF);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x700A08, 4, 0x04C04000);
+        emit_quad(0x0184, 9); emit_quad(0x0200, 0x02D00000); emit_quad(0x0204, 0x01E00000);
+        emit_quad(0x0210, 0x03DF4000); emit_quad(0x0344, 0x0302);
+        emit_quad(0x1B00, 0x034FC080); emit_quad(0x1B04, 0x09910629);
+        emit_quad(0x1B20, 0xDEADBEEF); emit_quad(0x0288, 0x0000000C);
+        emit_quad(0x028C, 0x00001C80); emit_quad(0x1E20, 0x00DADADA);
+        emit_quad(0x1E24, 0x00101010); emit_quad(0x0A60, 0xFFFFFFFF); emit_quad(0x0A80, 0xFFFFFFFF);
+        const std::array<std::array<float, 4>, 4> panel_quad{{
+            {{100.0f, 120.0f, 0.0f, 0.0f}}, {{260.0f, 120.0f, 1.0f, 0.0f}},
+            {{260.0f, 280.0f, 1.0f, 1.0f}}, {{100.0f, 280.0f, 0.0f, 1.0f}},
+        }};
+        auto submit_panel = [&](const auto& vertices, uint32_t diffuse = 0xFFFFFFFF) {
+            emit_quad(0x17FC, 8); emit_quad(0x194C, diffuse);
+            for (const auto& p : vertices) { emit_quad(0x1518, float_bits(p[0])); emit_quad(0x151C, float_bits(p[1])); emit_quad(0x1520, float_bits(p[2])); emit_quad(0x1524, float_bits(p[3])); }
+            emit_quad(0x17FC, 0); kick_quad();
+        };
+        auto panel_morton = [](uint32_t x, uint32_t y) {
+            uint32_t r = 0, bit = 0;
+            for (uint32_t in = 1; in < 512; in <<= 1) { r |= ((x & in) != 0) << bit++; r |= ((y & in) != 0) << bit++; }
+            return r;
+        };
+        CHECK(panel_texture_address + 512 * 512 * 4 <= quad_ram.size());
+        for (uint32_t i = 0; i < 512 * 512; ++i) put32(quad_ram, panel_texture_address + i * 4, 0);
+        const std::vector<uint8_t> panel_zero_before(quad_ram.begin() + color_address,
+                                                      quad_ram.begin() + color_address + color_bytes);
+        submit_panel(panel_quad);
+        CHECK(quad_fault.empty());
+        CHECK(quad_gpu.immediate_quad_main_panel_raster_batches() == 1);
+        CHECK(quad_gpu.immediate_quad_main_panel_raster_alpha_passes() == 0);
+        CHECK(quad_gpu.immediate_quad_main_panel_raster_writes() == 0);
+        CHECK(std::equal(panel_zero_before.begin(), panel_zero_before.end(),
+                         quad_ram.begin() + color_address));
+        for (uint32_t i = 0; i < 512 * 512; ++i) put32(quad_ram, panel_texture_address + i * 4, 0x80C81428);
+        put32(quad_ram, panel_texture_address + panel_morton(1, 1) * 4, 0x400A1EDC);
+        for (uint32_t y : {490u, 491u}) for (uint32_t x : {455u, 456u}) put32(quad_ram, panel_texture_address + panel_morton(x, y) * 4, 0xFF123456);
+        put32(quad_ram, color_address + 120 * 0x0C00 + 100 * 4, 0xFF204060);
+        put32(quad_ram, color_address + 273 * 0x0C00 + 242 * 4, 0);
+        submit_panel(panel_quad);
+        CHECK(quad_fault.empty());
+        CHECK(quad_gpu.immediate_quad_main_panel_raster_batches() == 2);
+        CHECK(quad_gpu.immediate_quad_main_panel_raster_triangles() == 4);
+        CHECK(quad_gpu.immediate_quad_main_panel_raster_writes() > 0);
+        CHECK(quad_gpu.immediate_quad_main_panel_texture_samples() > 0);
+        CHECK(quad_gpu.immediate_quad_main_panel_raster_output_hash() != 1469598103934665603ull);
+        CHECK(surface_pixel(color_address, 100, 120) == artwork_blend_expected(0.81f));
+        CHECK(surface_pixel(color_address, 242, 273) == 0xFF123456);
+        emit_quad(0x0210, 0x03C8C000); put32(quad_ram, rs2_color_address + 120 * 0x0C00 + 100 * 4, 0xFF204060); submit_panel(panel_quad);
+        CHECK(quad_fault.empty()); CHECK(quad_gpu.immediate_quad_main_panel_raster_batches() == 3);
+        CHECK(surface_pixel(rs2_color_address, 100, 120) == artwork_blend_expected(0.81f));
+        for (uint32_t i = 0; i < 512 * 512; ++i) put32(quad_ram, panel_texture_address + i * 4, 0xFF123456);
+        put32(quad_ram, rs2_color_address + 200 * 0x0C00 + 160 * 4, 0);
+        submit_panel(panel_quad, 0xFF808080);
+        CHECK(quad_fault.empty()); CHECK(quad_gpu.immediate_quad_main_panel_raster_batches() == 4);
+        CHECK(surface_pixel(rs2_color_address, 160, 200) == 0xFF091A2B);
+        auto panel_variant = panel_quad; panel_variant[0][2] = 0.02f; submit_panel(panel_variant);
+        CHECK(quad_gpu.immediate_quad_main_panel_raster_batches() == 5);
+        auto panel_five = std::array<std::array<float, 4>, 5>{}; for (size_t i = 0; i < 4; ++i) panel_five[i] = panel_quad[i]; submit_panel(panel_five);
+        CHECK(quad_gpu.immediate_quad_main_panel_raster_batches() == 5);
+        const auto panel_candidates = quad_gpu.immediate_quad_main_panel_candidates();
+        emit_quad(0x0200, 0x00B4010E); emit_quad(0x0204, 0x00D7009E); submit_panel(panel_quad);
+        CHECK(quad_gpu.immediate_quad_main_panel_raster_batches() == 5);
+        CHECK(quad_gpu.immediate_quad_main_panel_candidates() == panel_candidates + 1);
+        CHECK(quad_gpu.last_immediate_quad_main_panel_reject_mask() != 0);
+        emit_quad(0x0200, 0x02D00000); emit_quad(0x0204, 0x01E00000); emit_quad(0x1B04, 0x09910628); submit_panel(panel_quad);
+        CHECK(quad_gpu.immediate_quad_main_panel_raster_batches() == 5); emit_quad(0x1B04, 0x09910629);
+        emit_quad(0x1E20, 0); emit_quad(0x1E24, 0); submit_panel(panel_quad);
+        CHECK(quad_gpu.immediate_quad_main_panel_raster_batches() == 5); emit_quad(0x1E20, 0x00DADADA); emit_quad(0x1E24, 0x00101010);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x700050, 4, 10); quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x700054, 4, 0x800100B0);
+        const std::vector<uint8_t> panel_dma_before(quad_ram.begin() + rs2_color_address,
+                                                     quad_ram.begin() + rs2_color_address + color_bytes);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x700B00, 4, 0x3D); quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x700B04, 4, 0); quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x700B08, 4, 0x04C04000);
+        emit_quad(0x0184, 10); submit_panel(panel_quad);
+        CHECK(quad_fault == "NV2A immediate-quad main-panel A8R8G8B8 texture DMA range is invalid");
+        CHECK(quad_gpu.immediate_quad_main_panel_raster_batches() == 5);
+        CHECK(std::equal(panel_dma_before.begin(), panel_dma_before.end(), quad_ram.begin() + rs2_color_address));
+        CHECK(quad_gpu.immediate_quad_raster_batches() == old_a4_batches); CHECK(quad_gpu.immediate_quad_raster_writes() == old_a4_writes); CHECK(quad_gpu.immediate_quad_raster_output_hash() == old_a4);
+        CHECK(quad_gpu.immediate_quad_i8_raster_batches() == old_i8_batches); CHECK(quad_gpu.immediate_quad_i8_raster_writes() == old_i8_writes); CHECK(quad_gpu.immediate_quad_i8_raster_output_hash() == old_i8);
+        CHECK(quad_gpu.immediate_quad_a8_raster_batches() == old_a8_batches); CHECK(quad_gpu.immediate_quad_a8_raster_writes() == old_a8_writes); CHECK(quad_gpu.immediate_quad_a8_raster_output_hash() == old_a8);
+        CHECK(quad_gpu.immediate_quad_menu_i8_raster_batches() == old_menu_batches); CHECK(quad_gpu.immediate_quad_menu_i8_raster_writes() == old_menu_writes); CHECK(quad_gpu.immediate_quad_menu_i8_raster_output_hash() == old_menu);
+        CHECK(quad_gpu.immediate_quad_artwork_i8_raster_batches() == old_art_batches); CHECK(quad_gpu.immediate_quad_artwork_i8_raster_writes() == old_art_writes); CHECK(quad_gpu.immediate_quad_artwork_i8_raster_output_hash() == old_art);
     }
 
     std::printf(fails ? "test_nv2a: %d checks failed\n" : "test_nv2a: ok\n", fails);

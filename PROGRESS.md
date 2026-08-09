@@ -51,9 +51,10 @@ harvested from xemu, silicon-corrected against a live console. GPL-2.
   exactly. Its format-6 RS8/RS13 direct A8R8G8B8 sibling produces the visible default My
   Programs selection bar. The independently witnessed RS16/RS17 64x128 I8+palette family now
   adds the subtle dark menu-column panel/border around that list. IQRS3/IQRS7's 512x128
-  I8+palette artwork now adds coherent upper-left **mediacenter home** logo/art, leaving 681
-  states / 1,940 batches recorder-only. This is visual panel/default-row/artwork visibility,
-  not input-driven selection or navigation.
+  I8+palette artwork now adds coherent upper-left **mediacenter home** logo/art. IQRS5/IQRS10's
+  512x512 direct A8R8G8B8 image now reveals the full controller background/main panel, leaving
+  earlier counters intact. This is visual panel/default-row/artwork/background visibility, not
+  input-driven selection or navigation.
 - **Immediate burn-down path:** continue the passive exact visual census, validate the
   dashboard frame against a real-Xbox reference, and in parallel observe real XID endpoint
   polling behind the Controller S embedded hub before proving basic D-pad/A/B menu navigation.
@@ -421,6 +422,25 @@ dependency chain peeled this session is:
     while retaining the selection bar and panel. The +3.169 s (about 1.35%) single-run replay
     difference is subject to noise; both runs remain in the roughly four-minute band. This is
     not an input, navigation, or guest-owned selection claim.
+
+44. IQRS5/IQRS10 main-panel A8R8G8B8 family → **controller home background is visible**.
+    The exact four-immediate-vertex pair samples a 512x512 swizzled little-endian A8R8G8B8
+    texture through DMA A. Palette state is passive; the exact alpha-kill, combiner, nonzero
+    final factors, and source-alpha blend state write the alternating pitch targets, while the
+    zero-final-factor IQRS16 lookalike remains recorder-only. The fault-free Release 11.5B
+    disconnected reduced-retire replay completes in 241.388 s with empty
+    `build/probe-mode8-main-panel-a8-executed-11.5b.stderr.log`; its stdout companion records
+    124/124 candidates with zero reject masks, 124 batches, 248 triangles, 33,529,600
+    fragments/samples, 13,417,544 alpha passes/color writes, last `03f37018`, and hash
+    `74b351eb7eee0da3`. Earlier profile counters remain unchanged. The final scanout FNV64 is
+    `84f622fae4176b8d`; the PPM SHA-256 is
+    `64FB065345EAA9F46B495B7C03E6F1DDFC252DFE87F528E176EDC53FC4B02DD2`, and its PNG SHA-256 is
+    `474537626177E7BD5E7A1F626456FFA83DED6BFD1AF6C7363FE3EAF0A04E3879`.
+    Exact comparison against the artwork frame finds 100,710 changed pixels in
+    `566x391+45+39`; visual inspection reveals the full controller background/main panel while
+    retaining text and selection. The +3.759 s (1.58%) single-run change is subject to noise;
+    both runs remain in the roughly four-minute band. This does not establish input or
+    navigation: the Controller-S embedded-hub topology still blocks guest endpoint polling.
 
 ## How to build & run
 

@@ -566,6 +566,17 @@ public:
     uint32_t last_immediate_quad_artwork_i8_raster_reject_mask() const {
         return last_immediate_quad_artwork_i8_raster_reject_mask_;
     }
+    uint64_t immediate_quad_main_panel_raster_batches() const { return immediate_quad_main_panel_raster_batches_; }
+    uint64_t immediate_quad_main_panel_raster_triangles() const { return immediate_quad_main_panel_raster_triangles_; }
+    uint64_t immediate_quad_main_panel_raster_fragments() const { return immediate_quad_main_panel_raster_fragments_; }
+    uint64_t immediate_quad_main_panel_raster_alpha_passes() const { return immediate_quad_main_panel_raster_alpha_passes_; }
+    uint64_t immediate_quad_main_panel_raster_writes() const { return immediate_quad_main_panel_raster_writes_; }
+    uint64_t immediate_quad_main_panel_texture_samples() const { return immediate_quad_main_panel_texture_samples_; }
+    uint32_t last_immediate_quad_main_panel_raster_address() const { return last_immediate_quad_main_panel_raster_address_; }
+    uint64_t immediate_quad_main_panel_raster_output_hash() const { return immediate_quad_main_panel_raster_output_hash_; }
+    uint64_t immediate_quad_main_panel_candidates() const { return immediate_quad_main_panel_candidates_; }
+    uint32_t last_immediate_quad_main_panel_reject_mask() const { return last_immediate_quad_main_panel_reject_mask_; }
+    uint32_t last_immediate_quad_main_panel_raster_reject_mask() const { return last_immediate_quad_main_panel_raster_reject_mask_; }
     uint64_t vertex_batches() const { return vertex_batches_; }
     uint64_t submitted_vertices() const { return submitted_vertices_; }
     uint64_t vertex_attribute_fetches() const { return vertex_attribute_fetches_; }
@@ -1091,6 +1102,17 @@ private:
     uint64_t immediate_quad_artwork_i8_candidates_ = 0;
     uint32_t last_immediate_quad_artwork_i8_reject_mask_ = 0;
     uint32_t last_immediate_quad_artwork_i8_raster_reject_mask_ = 0;
+    uint64_t immediate_quad_main_panel_raster_batches_ = 0;
+    uint64_t immediate_quad_main_panel_raster_triangles_ = 0;
+    uint64_t immediate_quad_main_panel_raster_fragments_ = 0;
+    uint64_t immediate_quad_main_panel_raster_alpha_passes_ = 0;
+    uint64_t immediate_quad_main_panel_raster_writes_ = 0;
+    uint64_t immediate_quad_main_panel_texture_samples_ = 0;
+    uint32_t last_immediate_quad_main_panel_raster_address_ = 0;
+    uint64_t immediate_quad_main_panel_raster_output_hash_ = 1469598103934665603ull;
+    uint64_t immediate_quad_main_panel_candidates_ = 0;
+    uint32_t last_immediate_quad_main_panel_reject_mask_ = 0;
+    uint32_t last_immediate_quad_main_panel_raster_reject_mask_ = 0;
 
     // Kelvin's array-fed vertex path. The dashboard overwhelmingly submits ARRAY_ELEMENT16:
     // each method contains two indices. Attribute offsets select vertex DMA A/B with bit 31;
