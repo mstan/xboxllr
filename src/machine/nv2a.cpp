@@ -5992,10 +5992,13 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     //     multi-stage chains like 0x00008421, four independent PROJECT2D stages) is
     //     sampled exactly like kSwizzledTexturedColor/kPitchSingleTextureColor/
     //     kTex7FanColor's own textures -- format log2 width/height, SwizzleLookup
-    //     addressing, normalized 0..1 UV. Only the two COLOR codes (6, 7) already
-    //     cross-checked against those pinned profiles (both raw 32-bit ARGB8) are
-    //     accepted; texel format itself is decoupled from texture *mode* -- both are
-    //     independent register fields on real hardware.
+    //     addressing, normalized 0..1 UV. COLOR codes 6/7 (already cross-checked
+    //     against those pinned profiles, both raw 32-bit ARGB8) plus 0x19/SZ_A8 (a
+    //     swizzled 1-byte-per-texel alpha-only format, production-witnessed on the
+    //     menu scene's T1-T3: format word 0x0881192a) are accepted; texel format
+    //     itself is decoupled from texture *mode* -- both are independent register
+    //     fields on real hardware. Any other COLOR code (DXT-compressed or other
+    //     SZ_*/LU_* variants) stays a named kUnsupportedTextureFormat census.
     //   * CUBEMAP (mode==3, e.g. ShaderStageProgram==0x00000063's two active stages):
     //     sampled with the exact same major-axis direction-to-UV algorithm as
     //     kSwizzledTexturedColor/kSwizzledProjectedColor's own sample_cube_texture
@@ -6006,6 +6009,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         bool valid = false;
         bool linear = false;
         bool cubemap = false;
+        bool alpha8 = false;
         std::vector<uint8_t> data;
         uint32_t width = 0, height = 0, pitch = 0;
         std::unique_ptr<SwizzleLookup> swizzle;
@@ -6086,8 +6090,17 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             // hardware -- unmodeled here, and only safe to ignore once a real
             // multi-stage combiner is actually consuming those other textures too.
             const uint32_t format = raster_state_[kRasterTextureFormat0 + stage];
-            const uint32_t color_code = (format >> 8) & 0x3Fu;
-            if ((format & 3u) != 2u || (color_code != 6 && color_code != 7)) {
+            const uint32_t color_code = (format >> 8) & 0xFFu;
+            // Color codes 6/7 are the raw-ARGB8 (swizzled) codes cross-checked against
+            // the pinned profiles' own textures; 0x19 is NV097_SET_TEXTURE_FORMAT_
+            // COLOR_SZ_A8 (production-witnessed: T1-T3 of the menu scene's PROJECT2D
+            // texture chain, format word 0x0881192a) -- a swizzled, 1-byte-per-texel,
+            // alpha-only format (see sample_swizzled's alpha8 branch above). Anything
+            // else (DXT-compressed, other SZ_*/LU_* codes) stays a named census rather
+            // than a guess at a new pixel decode.
+            const bool alpha8 = color_code == 0x19;
+            if ((format & 3u) != 2u ||
+                (color_code != 6 && color_code != 7 && !alpha8)) {
                 record_generic_skip_detail(GenericSkipReason::kUnsupportedTextureFormat,
                                            format);
                 return true;
@@ -6110,8 +6123,9 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             }
             ts.width = 1u << ((format >> 20) & 0xFu);
             ts.height = 1u << ((format >> 24) & 0xFu);
+            const uint32_t bytes_per_texel = alpha8 ? 1u : 4u;
             const uint64_t bytes64 =
-                static_cast<uint64_t>(ts.width) * ts.height * 4;
+                static_cast<uint64_t>(ts.width) * ts.height * bytes_per_texel;
             uint32_t address = 0;
             if (bytes64 > SIZE_MAX ||
                 !resolve_surface(texture_dma_b_, texture_dma_b_bound_,
@@ -6131,6 +6145,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             ts.border = raster_state_[kRasterTextureBorderColor0 + stage];
             ts.linear = false;
             ts.cubemap = (stage_mode == 3);
+            ts.alpha8 = alpha8;
             ts.valid = true;
         } else {
             record_generic_skip_detail(
@@ -6200,13 +6215,25 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     // are private to rasterize_witnessed_batch -- so this is a faithful independent
     // copy of the same algorithm, the same duplication pattern this file already uses
     // between rasterize_witnessed_immediate_quad and rasterize_witnessed_batch).
+    // bytes_per_texel/alpha8 generalize this sampler beyond the original raw-ARGB8
+    // (4 bytes/texel) case to NV097_SET_TEXTURE_FORMAT color code 0x19 (SZ_A8): a
+    // swizzled, 1-byte-per-texel, alpha-only format -- per xemu's own
+    // kelvin_color_format_info_map/GL sampler-swizzle table, the single stored byte
+    // becomes the alpha channel while RGB reads back as white (1,1,1), matching
+    // NV097_SET_TEXTURE_FORMAT_COLOR_SZ_A8's GL_R8 + {ONE,ONE,ONE,RED} swizzle
+    // exactly (an independent expression of that same mapping, not copied code).
+    // The swizzle-index/Morton-tiling math itself (SwizzleLookup) is already
+    // element-size-agnostic -- only the per-texel byte offset stride and the raw
+    // bytes -> RGBA unpacking need to branch on format.
     auto sample_swizzled = [&unpack_argb8](
                                const std::vector<uint8_t>& data,
                                const SwizzleLookup& swizzle, uint32_t width,
                                uint32_t height, float u, float v,
                                TextureAddressMode mode_u, TextureAddressMode mode_v,
-                               uint32_t border_pixel, std::array<float, 4>& color) {
+                               uint32_t border_pixel, bool alpha8,
+                               std::array<float, 4>& color) {
         if (!std::isfinite(u) || !std::isfinite(v)) return false;
+        const size_t bytes_per_texel = alpha8 ? 1 : sizeof(uint32_t);
         auto wrap = [](float value, TextureAddressMode mode) {
             if (mode == TextureAddressMode::kRepeat) return value - std::floor(value);
             return std::clamp(value, 0.0f, 1.0f);
@@ -6242,7 +6269,12 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             const size_t offset =
                 static_cast<size_t>(swizzle.index(coordinate(x, width, mode_u),
                                                   coordinate(y, height, mode_v))) *
-                sizeof(uint32_t);
+                bytes_per_texel;
+            if (alpha8) {
+                const uint8_t a = data[offset];
+                return std::array<float, 4>{
+                    {1.0f, 1.0f, 1.0f, static_cast<float>(a) / 255.0f}};
+            }
             uint32_t pixel = 0;
             std::memcpy(&pixel, data.data() + offset, sizeof(pixel));
             return unpack_argb8(pixel);
@@ -6628,12 +6660,13 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                         sample_ok = sample_swizzled(
                             ts.data, *ts.swizzle, ts.width, ts.height, u / divisor,
                             v / divisor, TextureAddressMode::kClampToEdge,
-                            TextureAddressMode::kClampToEdge, ts.border, sampled);
+                            TextureAddressMode::kClampToEdge, ts.border, ts.alpha8,
+                            sampled);
                     } else {
                         sample_ok = sample_swizzled(
                             ts.data, *ts.swizzle, ts.width, ts.height, texcoord[0],
                             texcoord[1], ts.address_u, ts.address_v, ts.border,
-                            sampled);
+                            ts.alpha8, sampled);
                     }
                     if (!sample_ok) {
                         fault_("NV2A generic-combiner texture sample is invalid");
