@@ -1399,6 +1399,68 @@ int main(int argc, char** argv) {
                             (unsigned long long)mach.nv2a()->inline_texture_samples(),
                             mach.nv2a()->last_inline_raster_address(),
                             (unsigned long long)mach.nv2a()->inline_color_output_hash());
+                std::printf("[2bl] NV2A generic-combiner: "
+                            "batches/exec/tri/frags/depth-pass/writes/tex-samples="
+                            "%llu/%llu/%llu/%llu/%llu/%llu/%llu "
+                            "last=%08x hash=%016llx\n",
+                            (unsigned long long)mach.nv2a()->generic_combiner_batches(),
+                            (unsigned long long)mach.nv2a()->generic_combiner_executed_batches(),
+                            (unsigned long long)mach.nv2a()->generic_combiner_triangles(),
+                            (unsigned long long)mach.nv2a()->generic_combiner_fragments(),
+                            (unsigned long long)mach.nv2a()->generic_combiner_depth_passes(),
+                            (unsigned long long)mach.nv2a()->generic_combiner_writes(),
+                            (unsigned long long)mach.nv2a()->generic_combiner_texture_samples(),
+                            mach.nv2a()->last_generic_combiner_raster_address(),
+                            (unsigned long long)mach.nv2a()->generic_combiner_output_hash());
+                std::printf("[2bl] NV2A generic-combiner skip census:");
+                for (size_t reason = 0;
+                     reason < xlle::Nv2a::generic_skip_reason_count(); ++reason) {
+                    const uint64_t count = mach.nv2a()->generic_skip_reason_batches(reason);
+                    if (count) {
+                        std::printf(" %s=%llu",
+                                   xlle::Nv2a::generic_skip_reason_name(reason),
+                                   (unsigned long long)count);
+                    }
+                }
+                std::printf("\n");
+                for (size_t reason = 0;
+                     reason < xlle::Nv2a::generic_skip_reason_count(); ++reason) {
+                    std::vector<std::pair<uint64_t, uint64_t>> details;
+                    mach.nv2a()->generic_skip_detail_census(
+                        static_cast<xlle::Nv2a::GenericSkipReason>(reason), details);
+                    if (details.empty()) continue;
+                    std::sort(details.begin(), details.end(),
+                             [](const auto& a, const auto& b) {
+                                 return a.second > b.second;
+                             });
+                    std::printf("[2bl] NV2A generic-combiner skip detail %s:",
+                               xlle::Nv2a::generic_skip_reason_name(reason));
+                    const size_t detail_limit = std::min<size_t>(details.size(), 16);
+                    for (size_t i = 0; i < detail_limit; ++i) {
+                        std::printf(" %016llx:%llu",
+                                   (unsigned long long)details[i].first,
+                                   (unsigned long long)details[i].second);
+                    }
+                    std::printf("\n");
+                }
+                {
+                    std::vector<std::pair<uint64_t, uint64_t>> generic_fingerprints;
+                    mach.nv2a()->generic_combiner_fingerprint_census(generic_fingerprints);
+                    std::sort(generic_fingerprints.begin(), generic_fingerprints.end(),
+                             [](const auto& a, const auto& b) {
+                                 return a.second > b.second;
+                             });
+                    std::printf("[2bl] NV2A generic-combiner fingerprints: unique=%zu",
+                               generic_fingerprints.size());
+                    const size_t fp_limit =
+                        std::min<size_t>(generic_fingerprints.size(), 16);
+                    for (size_t i = 0; i < fp_limit; ++i) {
+                        std::printf(" %016llx:%llu",
+                                   (unsigned long long)generic_fingerprints[i].first,
+                                   (unsigned long long)generic_fingerprints[i].second);
+                    }
+                    std::printf("\n");
+                }
                 std::printf("[2bl] NV2A immediate-quad A4R4G4B4: "
                             "batches/tri/frags/alpha/writes/samples="
                             "%llu/%llu/%llu/%llu/%llu/%llu "

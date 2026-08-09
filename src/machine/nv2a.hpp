@@ -23,6 +23,7 @@
 #include <functional>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "machine/io_device.hpp"   // FaultFn
@@ -400,6 +401,111 @@ public:
     }
     uint64_t inline_color_output_hash() const {
         return inline_color_output_hash_;
+    }
+    // Generic register-combiner evaluator: rasterizes any witnessed raster
+    // state that does not match one of the hand-derived Profile fingerprints
+    // above, by decoding and evaluating the actual bound combiner state
+    // (stage ICW/OCW, factors, final combiner) instead of returning
+    // executed=false. See rasterize_generic_combiner_batch in nv2a.cpp for
+    // the supported subset and skip_reason names for what still falls back
+    // to recorder-only.
+    uint64_t generic_combiner_batches() const {
+        return generic_combiner_batches_;
+    }
+    uint64_t generic_combiner_executed_batches() const {
+        return generic_combiner_executed_batches_;
+    }
+    uint64_t generic_combiner_triangles() const {
+        return generic_combiner_triangles_;
+    }
+    uint64_t generic_combiner_fragments() const {
+        return generic_combiner_fragments_;
+    }
+    uint64_t generic_combiner_depth_passes() const {
+        return generic_combiner_depth_passes_;
+    }
+    uint64_t generic_combiner_writes() const {
+        return generic_combiner_writes_;
+    }
+    uint64_t generic_combiner_texture_samples() const {
+        return generic_combiner_texture_samples_;
+    }
+    uint32_t last_generic_combiner_raster_address() const {
+        return last_generic_combiner_raster_address_;
+    }
+    uint64_t generic_combiner_output_hash() const {
+        return generic_combiner_output_hash_;
+    }
+    size_t generic_combiner_fingerprint_census(
+        std::vector<std::pair<uint64_t, uint64_t>>& out) const {
+        out.assign(generic_combiner_fingerprints_.begin(),
+                   generic_combiner_fingerprints_.end());
+        return out.size();
+    }
+    enum class GenericSkipReason {
+        kUnsupportedSurface,
+        kUnsupportedPrimitive,
+        kStageCount,
+        kStageInput,
+        kOcwFeature,
+        kFinalCombiner,
+        kAlphaFunc,
+        kDepthFunc,
+        kBlendMode,
+        kTextureStage,
+        kUnsupportedColorFormat,
+        kUnsupportedShadeMode,
+        kUnsupportedPolygonMode,
+        kUnsupportedCullFace,
+        kUnsupportedFrontFace,
+        kUnsupportedZMinMax,
+        kUnsupportedControl0,
+        kUnsupportedColorMask,
+        kUnsupportedEnableBits,
+        kUnsupportedBlendEquation,
+        kUnsupportedTextureFormat,
+        kUnsupportedTextureWrap,
+        kUnsupportedTextureShaderProgram,
+        kCount,
+    };
+    static size_t generic_skip_reason_count() {
+        return static_cast<size_t>(GenericSkipReason::kCount);
+    }
+    static const char* generic_skip_reason_name(size_t index) {
+        static constexpr const char* kNames[] = {
+            "unsupported-surface",     "unsupported-primitive",
+            "stage-count",             "stage-input",
+            "ocw-feature",             "final-combiner",
+            "alpha-func",              "depth-func",
+            "blend-mode",              "texture-stage",
+            "unsupported-color-format","unsupported-shademode",
+            "unsupported-polygonmode", "unsupported-cullface",
+            "unsupported-frontface",   "unsupported-zminmax",
+            "unsupported-control0",    "unsupported-colormask",
+            "unsupported-enable-bits", "unsupported-blend-equation",
+            "unsupported-texture-format", "unsupported-texture-wrap",
+            "unsupported-texture-shader-program",
+        };
+        return index < (sizeof(kNames) / sizeof(kNames[0])) ? kNames[index]
+                                                             : "unknown";
+    }
+    uint64_t generic_skip_reason_batches(size_t index) const {
+        return index < generic_skip_reasons_.size()
+                   ? generic_skip_reasons_[index]
+                   : 0;
+    }
+    // Detail census for a skip reason: (register value or bitmask, count). Lets a
+    // "named reason" carry enough to act on next time (e.g. unsupported-color-format
+    // with detail=5 means "format 5 was requested and is not yet handled"), instead of
+    // a single opaque bucket per reason.
+    size_t generic_skip_detail_census(
+        GenericSkipReason reason,
+        std::vector<std::pair<uint64_t, uint64_t>>& out) const {
+        out.clear();
+        for (const auto& entry : generic_skip_details_) {
+            if (entry.reason == reason) out.push_back({entry.detail, entry.count});
+        }
+        return out.size();
     }
     uint64_t immediate_quad_raster_batches() const {
         return immediate_quad_raster_batches_;
@@ -1058,6 +1164,25 @@ private:
     uint64_t inline_texture_samples_ = 0;
     uint32_t last_inline_raster_address_ = 0;
     uint64_t inline_color_output_hash_ = 1469598103934665603ull;
+    uint64_t generic_combiner_batches_ = 0;
+    uint64_t generic_combiner_executed_batches_ = 0;
+    uint64_t generic_combiner_triangles_ = 0;
+    uint64_t generic_combiner_fragments_ = 0;
+    uint64_t generic_combiner_depth_passes_ = 0;
+    uint64_t generic_combiner_writes_ = 0;
+    uint64_t generic_combiner_texture_samples_ = 0;
+    uint32_t last_generic_combiner_raster_address_ = 0;
+    uint64_t generic_combiner_output_hash_ = 1469598103934665603ull;
+    std::vector<std::pair<uint64_t, uint64_t>> generic_combiner_fingerprints_;
+    std::array<uint64_t,
+              static_cast<size_t>(GenericSkipReason::kCount)>
+        generic_skip_reasons_{};
+    struct GenericSkipDetail {
+        GenericSkipReason reason;
+        uint64_t detail;
+        uint64_t count;
+    };
+    std::vector<GenericSkipDetail> generic_skip_details_;
     uint64_t immediate_quad_raster_batches_ = 0;
     uint64_t immediate_quad_raster_triangles_ = 0;
     uint64_t immediate_quad_raster_fragments_ = 0;
@@ -1267,6 +1392,9 @@ private:
     bool submit_vertex_batch();
     bool rasterize_witnessed_immediate_quad(bool& executed);
     bool rasterize_witnessed_batch(bool& executed);
+    bool rasterize_generic_combiner_batch(bool& executed);
+    void record_generic_skip(GenericSkipReason reason);
+    void record_generic_skip_detail(GenericSkipReason reason, uint64_t detail);
     bool fetch_vertex_attribute(uint32_t slot, uint32_t index);
     bool ramht_instance(uint8_t channel, uint32_t handle, uint32_t& instance) const;
     bool dma_object_address(uint32_t instance, uint32_t offset, uint32_t& address) const;

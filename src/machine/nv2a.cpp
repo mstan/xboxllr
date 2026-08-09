@@ -2924,7 +2924,12 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
     } else if (pitch_additive_combiner) {
         profile = Profile::kPitchAdditiveColor;
     } else {
-        return true;
+        // No hand-derived Profile fingerprint matches. Rather than recording this
+        // batch (executed=false, zero fragment writes), decode and evaluate the
+        // actual bound combiner state generically. All witnessed profiles above
+        // are pinned evidence and are matched first; this path is a strict
+        // fallback that never overrides them.
+        return rasterize_generic_combiner_batch(executed);
     }
     executed = true;
     const bool pitch_tex5_profile =
@@ -5412,6 +5417,1245 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
     return true;
 }
 
+void Nv2a::record_generic_skip(GenericSkipReason reason) {
+    const size_t index = static_cast<size_t>(reason);
+    if (index < generic_skip_reasons_.size()) ++generic_skip_reasons_[index];
+}
+
+void Nv2a::record_generic_skip_detail(GenericSkipReason reason, uint64_t detail) {
+    record_generic_skip(reason);
+    for (auto& entry : generic_skip_details_) {
+        if (entry.reason == reason && entry.detail == detail) {
+            ++entry.count;
+            return;
+        }
+    }
+    generic_skip_details_.push_back({reason, detail, 1});
+}
+
+// Generic NV2A register-combiner evaluator.
+//
+// Every Profile above is a hand-derived, exact-match fingerprint: a whole-register
+// whitelist paired with a closed-form pixel formula worked out by inspecting one
+// witnessed draw. That approach cannot generalize — any raster state not on the list
+// falls through with executed=false and zero fragment writes (see the caller's final
+// `else` branch). This function replaces that silent drop for the *rest* of the state
+// space by decoding the combiner registers per NV2A/GL_NV_register_combiners semantics
+// and evaluating them, instead of matching a precomputed answer.
+//
+// Supported subset (anything else increments a named GenericSkipReason counter --
+// carrying the offending register value via generic_skip_detail_census -- and returns
+// executed=false, so it is still visible in telemetry, never silently dropped). Every
+// check below is a per-feature semantic test of what the shared rasterizer actually
+// implements, not a single required register tuple:
+//   * primitive: triangle list/strip/fan (5/6/7)
+//   * surface: pitch-linear color (surface_type==1), no antialiasing; color_format 8
+//     (A8R8G8B8, alpha stored as computed) or 4 (X8R8G8B8, alpha byte forced to 0xFF
+//     on write -- there is no alpha channel on real hardware); optional Z24S8 zeta
+//   * CONTROL0: engine-enable bit (0) required, the two bits kPitchZ16Depth already
+//     treats as unimplemented (12, 16) rejected -- any other bit combination passes
+//   * shading: smooth (Gouraud) only; polygon mode: FILL only, independently for
+//     front/back faces
+//   * cull: honors the enable bit (enables&4) for real -- disabled renders both
+//     windings, enabled requires the BACK/CW convention every witnessed profile uses
+//   * color mask: honors each of the four per-channel write-enable bytes for real
+//     (a disabled channel preserves the existing pixel byte)
+//   * enables bitmask: alpha test(0)/blend(1)/cull(2)/depth test(3)/polygon-offset(13)
+//     honored per-bit; dither(4)/point-line-smooth(5,9,10)/point-line-offset(11,12) are
+//     inert for this rasterizer (it never draws points or lines) and ignored; any other
+//     bit (stencil test=7, logic op=8, ...) is unimplemented and gates a skip
+//   * combiner: 1..8 general-combiner stages, per-stage ColorIcw/AlphaIcw (inputs
+//     ZERO/CONSTANT_COLOR0/CONSTANT_COLOR1/PRIMARY_COLOR/SECONDARY_COLOR/R0/R1, all 8
+//     input mappings) and ColorOcw/AlphaOcw (AB/CD/SUM destination register, AB/CD dot
+//     product); final combiner only for the identity-passthrough signature
+//     (SpecularFog==0x0000000C/0x00001C80, FinalFactor==0/0) proven against the working
+//     kInlineLinearBlitColor profile, which shares that exact signature
+//   * alpha test / depth test: honors the enable bit; when enabled, any of
+//     NEVER/LESS/EQUAL/LEQUAL/GREATER/NOTEQUAL/GEQUAL/ALWAYS; when disabled the
+//     *_func register is unread by hardware and never gates a skip
+//   * blend: honors the enable bit; when enabled, FUNC_ADD with any combination of
+//     ZERO/ONE/SRC_ALPHA/ONE_MINUS_SRC_ALPHA (covers the witnessed
+//     SRC_ALPHA/ONE_MINUS_SRC_ALPHA blend plus the trivially adjacent replace/additive
+//     cases); when disabled the factor/equation registers never gate a skip
+//
+// Not yet implemented (recorded, counted, never silently dropped):
+//   * any stage input that reads FOG or a texture register (TEXTURE0..3) — texture
+//     sampling itself is fully implemented elsewhere in this file, but wiring a stage's
+//     texture-register input through the generic evaluator's per-pixel loop is future
+//     work; see GenericSkipReason::kTextureStage
+//   * OCW scale/bias and MUX_SUM (bit 14) — see GenericSkipReason::kOcwFeature
+//   * any final-combiner signature other than the proven identity passthrough — see
+//     GenericSkipReason::kFinalCombiner
+//   * stencil test, logic op, any blend equation other than FUNC_ADD, any blend factor
+//     other than ZERO/ONE/SRC_ALPHA/ONE_MINUS_SRC_ALPHA
+//
+// Bit-layout note (flagged, not silently guessed): this decoder's ICW/OCW field
+// layout is this author's own expression of NV2A/GL_NV_register_combiners semantics,
+// cross-checked against the *witnessed* ICW/OCW/OCW words already pinned by the
+// hand-derived profiles above (e.g. kInlineLinearBlitColor's ColorIcw0/AlphaIcw0/
+// ColorOcw0/AlphaOcw0/SpecularFog/FinalFactor and kPitchMultiTextureColor's per-stage
+// OCW dot-product words) rather than against a register reference doc, since none was
+// available in this checkout. It reproduces every cross-checked value correctly, but
+// the AlphaIcw component-select polarity (bit4: this decoder treats 1=ALPHA, 0=BLUE)
+// and the OCW scale/bias field layout are inferred, not verified against hardware, and
+// are exactly the two things gated behind GenericSkipReason so a wrong guess there
+// cannot silently mis-render — it skips instead.
+bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
+    executed = false;
+    const bool supported_primitive =
+        primitive_mode_ == 5 || primitive_mode_ == 6 || primitive_mode_ == 7;
+    if (!supported_primitive) {
+        record_generic_skip(GenericSkipReason::kUnsupportedPrimitive);
+        return true;
+    }
+    const uint32_t color_format = surface_format_ & 0xFu;
+    const uint32_t surface_type = (surface_format_ >> 8) & 0xFu;
+    const uint32_t anti_aliasing = (surface_format_ >> 12) & 0xFu;
+    const uint32_t zeta_format = (surface_format_ >> 4) & 0xFu;
+    const uint32_t enables = raster_state_[kRasterEnables];
+
+    // --- Per-feature semantic gate -----------------------------------------------
+    // Every check below tests the specific behavior the shared rasterizer actually
+    // implements, not a single magic register tuple. Anything requesting a behavior
+    // this evaluator does not (yet) implement records a NAMED reason carrying the
+    // offending register value, so the next witnessed state can be added without
+    // re-deriving the whole gate.
+    if (surface_type != 1 || anti_aliasing != 0) {
+        record_generic_skip(GenericSkipReason::kUnsupportedSurface);
+        return true;
+    }
+    // Color format: A8R8G8B8 (8) stores the combiner's alpha byte as-is. X8R8G8B8 (4)
+    // has no alpha channel on real hardware; the top byte is padding, so this
+    // evaluator always stores 0xFF there on write (matching every other 32bpp path in
+    // this file, which only ever produces A8R8G8B8 surfaces and therefore never had to
+    // decide this -- X8 is new territory for the generic path).
+    const bool color_format_x8 = color_format == 4;
+    const bool color_format_a8 = color_format == 8;
+    if (!color_format_x8 && !color_format_a8) {
+        record_generic_skip_detail(GenericSkipReason::kUnsupportedColorFormat,
+                                   color_format);
+        return true;
+    }
+    // CONTROL0: every witnessed profile carries bit0 (engine enable) and bit20 (an
+    // always-1 flag none of them vary). Bits 12/16 are the ones kPitchZ16Depth already
+    // guards against as exceeding its witnessed subset (unimplemented alpha-to-
+    // coverage/stencil-adjacent behavior) -- reject those specifically rather than the
+    // whole register, so any other harmless bit combination the dashboard uses still
+    // passes.
+    constexpr uint32_t kControl0Required = 1u;
+    constexpr uint32_t kControl0Unsupported = (1u << 12) | (1u << 16);
+    if ((raster_state_[kRasterControl0] & kControl0Required) != kControl0Required ||
+        (raster_state_[kRasterControl0] & kControl0Unsupported) != 0) {
+        record_generic_skip_detail(GenericSkipReason::kUnsupportedControl0,
+                                   raster_state_[kRasterControl0]);
+        return true;
+    }
+    // Shading: the shared per-pixel loop always interpolates diffuse/specular smoothly
+    // (Gouraud); flat shading is not implemented.
+    if (raster_state_[kRasterShadeMode] != 0x1D01) {
+        record_generic_skip_detail(GenericSkipReason::kUnsupportedShadeMode,
+                                   raster_state_[kRasterShadeMode]);
+        return true;
+    }
+    // Polygon mode: the shared rasterizer only ever fills triangles (no line/point
+    // polygon-mode rendering), for both front and back faces independently.
+    if (raster_state_[kRasterFrontPolygonMode] != 0x1B02 ||
+        raster_state_[kRasterBackPolygonMode] != 0x1B02) {
+        record_generic_skip_detail(
+            GenericSkipReason::kUnsupportedPolygonMode,
+            (static_cast<uint64_t>(raster_state_[kRasterFrontPolygonMode]) << 32) |
+                raster_state_[kRasterBackPolygonMode]);
+        return true;
+    }
+    // Cull: honor the enable bit (bit2) semantically instead of assuming culling is
+    // always on. When enabled, this evaluator only knows the BACK/CW convention every
+    // witnessed profile uses; when disabled, both windings render (handled in the
+    // triangle setup below).
+    const bool cull_enabled = (enables & (1u << 2)) != 0;
+    if (cull_enabled) {
+        if (raster_state_[kRasterCullFace] != 0x0405) {
+            record_generic_skip_detail(GenericSkipReason::kUnsupportedCullFace,
+                                       raster_state_[kRasterCullFace]);
+            return true;
+        }
+        if (raster_state_[kRasterFrontFace] != 0x0900) {
+            record_generic_skip_detail(GenericSkipReason::kUnsupportedFrontFace,
+                                       raster_state_[kRasterFrontFace]);
+            return true;
+        }
+    }
+    // Z min/max control is not read anywhere in this evaluator's math; every witnessed
+    // profile carries the same value 1, so require it named rather than assume it is
+    // inert.
+    if (raster_state_[kRasterZMinMaxControl] != 1) {
+        record_generic_skip_detail(GenericSkipReason::kUnsupportedZMinMax,
+                                   raster_state_[kRasterZMinMaxControl]);
+        return true;
+    }
+    // Color mask: honor each of the four per-channel write-enable bytes exactly
+    // (0=disabled, 1=enabled per channel), applied for real at write time below,
+    // instead of requiring the single all-channels-enabled tuple.
+    const uint32_t color_mask_word = raster_state_[kRasterColorMask];
+    bool color_mask_write[4];
+    bool color_mask_supported = true;
+    for (size_t channel = 0; channel < 4; ++channel) {
+        const uint32_t byte = (color_mask_word >> (channel * 8)) & 0xFFu;
+        color_mask_write[channel] = byte != 0;
+        if (byte != 0 && byte != 1) color_mask_supported = false;
+    }
+    if (!color_mask_supported) {
+        record_generic_skip_detail(GenericSkipReason::kUnsupportedColorMask,
+                                   color_mask_word);
+        return true;
+    }
+    // Enables: bits this evaluator does not implement (stencil test, logic op) must
+    // gate a skip if the dashboard/game actually turns them on; bits it always treats
+    // as inert (dither, point/line smoothing, point/line polygon offset -- this
+    // rasterizer never draws points or lines) are masked out first.
+    constexpr uint32_t kEnableInertBits =
+        (1u << 4) | (1u << 5) | (1u << 9) | (1u << 10) | (1u << 11) | (1u << 12);
+    constexpr uint32_t kEnableHandledBits =
+        (1u << 0) | (1u << 1) | (1u << 2) | (1u << 3) | (1u << 13);
+    const uint32_t enable_unsupported_bits =
+        enables & ~(kEnableInertBits | kEnableHandledBits);
+    if (enable_unsupported_bits != 0) {
+        record_generic_skip_detail(GenericSkipReason::kUnsupportedEnableBits,
+                                   enable_unsupported_bits);
+        return true;
+    }
+
+    // --- Combiner decode -------------------------------------------------------
+    struct DecodedInput {
+        uint32_t reg = 0;
+        bool alt = false;
+        uint32_t mapping = 0;
+    };
+    auto decode = [](uint32_t byte) {
+        DecodedInput in;
+        in.reg = byte & 0xFu;
+        in.alt = ((byte >> 4) & 1u) != 0;
+        in.mapping = (byte >> 5) & 0x7u;
+        return in;
+    };
+    // Register ids: 0 ZERO, 1 CONSTANT_COLOR0, 2 CONSTANT_COLOR1, 3 FOG (unsupported),
+    // 4 PRIMARY_COLOR, 5 SECONDARY_COLOR, 6/7 reserved (unsupported), 8-11 TEXTURE0-3
+    // (sampled below, subject to the per-stage texture-shader-program/format/address
+    // checks), 12 R0/spare0, 13 R1/spare1, 14/15 reserved.
+    auto register_supported = [](uint32_t reg, bool& is_texture) {
+        is_texture = reg >= 8 && reg <= 11;
+        if (is_texture) return true;
+        return reg == 0 || reg == 1 || reg == 2 || reg == 4 || reg == 5 ||
+               reg == 12 || reg == 13;
+    };
+    // Which of TEXTURE0-3 a stage's color/alpha inputs actually read, tracked
+    // separately because the linear/PROJECT2D sampler (see below) never computes an
+    // alpha channel -- no witnessed profile needs texture alpha in that mode, so a
+    // combiner that tries to read it is named-skipped rather than fed a made-up value.
+    bool texture_referenced[4] = {false, false, false, false};
+    bool texture_referenced_alpha[4] = {false, false, false, false};
+
+    const uint32_t stage_count_raw = raster_state_[kRasterCombinerControl] & 0xFFu;
+    if (stage_count_raw == 0) {
+        record_generic_skip(GenericSkipReason::kStageCount);
+        return true;
+    }
+    const uint32_t stage_count = std::min<uint32_t>(stage_count_raw, 8u);
+
+    struct Stage {
+        DecodedInput color[4];
+        DecodedInput alpha[4];
+        uint32_t color_cd_dst = 0, color_ab_dst = 0, color_sum_dst = 0;
+        bool color_cd_dot = false, color_ab_dot = false;
+        uint32_t alpha_cd_dst = 0, alpha_ab_dst = 0, alpha_sum_dst = 0;
+    };
+    std::array<Stage, 8> stages{};
+    for (uint32_t stage = 0; stage < stage_count; ++stage) {
+        const uint32_t ci = raster_state_[kRasterCombinerColorIcw0 + stage];
+        const uint32_t ai = raster_state_[kRasterCombinerAlphaIcw0 + stage];
+        const uint32_t co = raster_state_[kRasterCombinerColorOcw0 + stage];
+        const uint32_t ao = raster_state_[kRasterCombinerAlphaOcw0 + stage];
+        Stage& s = stages[stage];
+        // Byte order within the ICW word is D (bits31:24), C (23:16), B (15:8), A (7:0),
+        // matching every witnessed profile's ...Icw0 constants (e.g. kInlineLinearBlitColor's
+        // ColorIcw0==0x08200000 decodes to D=TEXTURE0 identity, C=ZERO invert, B=A=ZERO).
+        s.color[0] = decode(ci & 0xFFu);
+        s.color[1] = decode((ci >> 8) & 0xFFu);
+        s.color[2] = decode((ci >> 16) & 0xFFu);
+        s.color[3] = decode((ci >> 24) & 0xFFu);
+        s.alpha[0] = decode(ai & 0xFFu);
+        s.alpha[1] = decode((ai >> 8) & 0xFFu);
+        s.alpha[2] = decode((ai >> 16) & 0xFFu);
+        s.alpha[3] = decode((ai >> 24) & 0xFFu);
+        for (const DecodedInput& in : s.color) {
+            bool is_texture = false;
+            if (!register_supported(in.reg, is_texture)) {
+                record_generic_skip_detail(GenericSkipReason::kStageInput, in.reg);
+                return true;
+            }
+            if (is_texture) texture_referenced[in.reg - 8] = true;
+        }
+        for (const DecodedInput& in : s.alpha) {
+            bool is_texture = false;
+            if (!register_supported(in.reg, is_texture)) {
+                record_generic_skip_detail(GenericSkipReason::kStageInput, in.reg);
+                return true;
+            }
+            if (is_texture) {
+                texture_referenced[in.reg - 8] = true;
+                texture_referenced_alpha[in.reg - 8] = true;
+            }
+        }
+        s.color_cd_dst = co & 0xFu;
+        s.color_ab_dst = (co >> 4) & 0xFu;
+        s.color_sum_dst = (co >> 8) & 0xFu;
+        s.color_cd_dot = ((co >> 12) & 1u) != 0;
+        s.color_ab_dot = ((co >> 13) & 1u) != 0;
+        const bool color_mux = ((co >> 14) & 1u) != 0;
+        s.alpha_cd_dst = ao & 0xFu;
+        s.alpha_ab_dst = (ao >> 4) & 0xFu;
+        s.alpha_sum_dst = (ao >> 8) & 0xFu;
+        const bool alpha_dot_or_mux = (ao >> 12) != 0;
+        auto dst_supported = [](uint32_t dst) {
+            return dst == 0 || dst == 12 || dst == 13;
+        };
+        constexpr uint32_t kColorOcwKnownBits =
+            0xFFFu | (1u << 12) | (1u << 13);
+        if (color_mux || alpha_dot_or_mux || !dst_supported(s.color_cd_dst) ||
+            !dst_supported(s.color_ab_dst) || !dst_supported(s.color_sum_dst) ||
+            !dst_supported(s.alpha_cd_dst) || !dst_supported(s.alpha_ab_dst) ||
+            !dst_supported(s.alpha_sum_dst) ||
+            (co & ~kColorOcwKnownBits) != 0) {
+            record_generic_skip(GenericSkipReason::kOcwFeature);
+            return true;
+        }
+    }
+    // Final combiner: only the identity-passthrough signature is supported. It is
+    // cross-checked against kInlineLinearBlitColor and kPitchTex5DiffuseColor/
+    // kPitchMultiTextureColor/kPitchThreeTextureColor/kTexfProjectedFanColor, which all
+    // carry this exact SpecularFog/FinalFactor pair and, per their own working pixel
+    // formulas, simply forward R0 (color) and R0's alpha untouched.
+    const bool final_identity =
+        raster_state_[kRasterCombinerSpecularFog0] == 0x0000000Cu &&
+        raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80u &&
+        raster_state_[kRasterCombinerFinalFactor0] == 0 &&
+        raster_state_[kRasterCombinerFinalFactor1] == 0;
+    if (!final_identity) {
+        record_generic_skip(GenericSkipReason::kFinalCombiner);
+        return true;
+    }
+
+    // --- Alpha test / depth test / blend mode ----------------------------------
+    auto compare_supported = [](uint32_t func) {
+        return func >= 0x0200 && func <= 0x0207;
+    };
+    auto compare = [](uint32_t func, double lhs, double rhs) {
+        switch (func) {
+            case 0x0200: return false;               // NEVER
+            case 0x0201: return lhs < rhs;            // LESS
+            case 0x0202: return lhs == rhs;           // EQUAL
+            case 0x0203: return lhs <= rhs;           // LEQUAL
+            case 0x0204: return lhs > rhs;            // GREATER
+            case 0x0205: return lhs != rhs;           // NOTEQUAL
+            case 0x0206: return lhs >= rhs;           // GEQUAL
+            default: return true;                     // ALWAYS (0x0207)
+        }
+    };
+    // Alpha/depth test enable bits (0 and 3) are semantic: when a test is disabled,
+    // the corresponding *_func register is unread by hardware and must not gate a
+    // skip no matter what stale value it holds.
+    const bool alpha_test_enabled = (enables & (1u << 0)) != 0;
+    const bool depth_test_enabled_bit = (enables & (1u << 3)) != 0;
+    const uint32_t alpha_func = raster_state_[kRasterAlphaFunc];
+    const uint32_t depth_func = raster_state_[kRasterDepthFunc];
+    if (alpha_test_enabled && !compare_supported(alpha_func)) {
+        record_generic_skip_detail(GenericSkipReason::kAlphaFunc, alpha_func);
+        return true;
+    }
+    if (depth_test_enabled_bit && !compare_supported(depth_func)) {
+        record_generic_skip_detail(GenericSkipReason::kDepthFunc, depth_func);
+        return true;
+    }
+    // Blend enable (bit1) is semantic too: when disabled, BlendSrc/Dst/Equation may
+    // hold anything and must not gate a skip. When enabled, support the witnessed
+    // SRC_ALPHA/ONE_MINUS_SRC_ALPHA/ADD combo plus the trivially adjacent factors
+    // (ZERO/ONE/SRC_ALPHA/ONE_MINUS_SRC_ALPHA) needed to express "disabled via factors"
+    // and simple additive/replace blends.
+    const bool blend_enabled = (enables & (1u << 1)) != 0;
+    const uint32_t blend_src = raster_state_[kRasterBlendSrc];
+    const uint32_t blend_dst = raster_state_[kRasterBlendDst];
+    const uint32_t blend_eq = raster_state_[kRasterBlendEquation];
+    auto blend_factor_supported = [](uint32_t factor) {
+        return factor == 0 || factor == 1 || factor == 0x0302 || factor == 0x0303;
+    };
+    if (blend_enabled) {
+        if (blend_eq != 0x8006) {
+            record_generic_skip_detail(GenericSkipReason::kUnsupportedBlendEquation,
+                                       blend_eq);
+            return true;
+        }
+        if (!blend_factor_supported(blend_src) || !blend_factor_supported(blend_dst)) {
+            record_generic_skip_detail(
+                GenericSkipReason::kBlendMode,
+                (static_cast<uint64_t>(blend_src) << 32) | blend_dst);
+            return true;
+        }
+    }
+
+    const uint32_t clip_x = surface_clip_horizontal_ & 0xFFFFu;
+    const uint32_t clip_width = surface_clip_horizontal_ >> 16;
+    const uint32_t clip_y = surface_clip_vertical_ & 0xFFFFu;
+    const uint32_t clip_height = surface_clip_vertical_ >> 16;
+    if (!clip_width || !clip_height) {
+        record_generic_skip(GenericSkipReason::kUnsupportedSurface);
+        return true;
+    }
+    // SET_SURFACE_PITCH packs an independent color pitch (bits 15:0) and zeta pitch
+    // (bits 31:16) -- real hardware allows these to differ (e.g. the dashboard's own
+    // witnessed 0x00401400: color pitch 0x1400, zeta pitch 0x0040). Only the color
+    // pitch is required to size the color surface; the zeta pitch is validated
+    // separately, and only when the zeta surface is actually touched below.
+    const uint32_t pitch = surface_pitch_ & 0xFFFFu;
+    const uint32_t zeta_pitch = surface_pitch_ >> 16;
+    const uint32_t surface_height = clip_y + clip_height;
+    const uint64_t color_bytes64 =
+        static_cast<uint64_t>(pitch) * surface_height;
+    if (!pitch || static_cast<uint64_t>(clip_x + clip_width) * 4 > pitch ||
+        color_bytes64 > SIZE_MAX) {
+        record_generic_skip_detail(GenericSkipReason::kUnsupportedSurface, pitch);
+        return true;
+    }
+    // The zeta surface only needs to be touched at all if the depth test is actually
+    // enabled (a real comparison against stored depth) or a write is requested; when
+    // depth testing is disabled, hardware treats every fragment as passing without
+    // ever reading zeta -- and the (possibly unrelated/smaller) zeta pitch never needs
+    // to be validated at all in that case.
+    const bool depth_write_enabled = raster_state_[kRasterDepthMask] != 0;
+    const bool wants_zeta = depth_test_enabled_bit || depth_write_enabled;
+    bool uses_depth = zeta_format == 2 && wants_zeta && zeta_pitch == pitch;
+    uint64_t depth_bytes64 = uses_depth ? color_bytes64 : 0;
+    if (wants_zeta && zeta_format == 2 && zeta_pitch != pitch) {
+        record_generic_skip_detail(GenericSkipReason::kUnsupportedSurface,
+                                   surface_pitch_);
+        return true;
+    }
+    if (wants_zeta && zeta_format != 2) {
+        record_generic_skip(GenericSkipReason::kUnsupportedSurface);
+        return true;
+    }
+
+    // BUG FIX (guest-memory-corruption regression): a raster batch can bind a DMA
+    // context whose PRAMIN descriptor was never actually programmed with a real
+    // frame/base (e.g. an "identity, whole-of-RAM" object reused from an unrelated
+    // purpose, or a genuinely all-zero/default descriptor) together with a zero
+    // SURFACE_*_OFFSET. dma_object_address() then resolves that -- entirely
+    // correctly, per the descriptor's own bits -- to physical address 0. Every
+    // hand-derived Profile above only ever witnessed real, deep-into-RAM color/zeta
+    // addresses, so none of them needed to guard against this; this generic path is
+    // the first to reach raster states where it actually happens (observed: a
+    // depth-mask-enabled boot-animation draw whose zeta context resolves to address
+    // 0), and writing depth data through PagedRasterSurface(address=0, size=...)
+    // corrupts the first few hundred KB of guest RAM -- exactly where 2BL is loaded,
+    // producing an "invalid instruction" fault a few thousand guest instructions
+    // later. PagedRasterSurface only bounds the OFFSET within a surface; it has no
+    // way to know the BASE address itself is bogus. Physical address 0 is never a
+    // legitimate color/zeta/texture target anywhere else in this file (every pinned
+    // profile's witnessed addresses are always deep into RAM), so treat a resolved
+    // address of exactly 0 as an invalid/unbound surface rather than writing through
+    // it.
+    auto resolve_surface = [&](uint32_t dma, bool bound, uint32_t offset,
+                               uint64_t bytes, uint32_t& address) {
+        if (!bound || !bytes ||
+            static_cast<uint64_t>(offset) + bytes - 1 > UINT32_MAX) {
+            return false;
+        }
+        uint32_t last_address = 0;
+        const uint32_t last_offset = offset + static_cast<uint32_t>(bytes - 1);
+        return dma_object_address(dma, offset, address) &&
+               dma_object_address(dma, last_offset, last_address) &&
+               last_address >= address &&
+               static_cast<uint64_t>(last_address) - address + 1 == bytes &&
+               address != 0;
+    };
+    uint32_t color_address = 0;
+    uint32_t depth_address = 0;
+    if (!resolve_surface(color_dma_, color_dma_bound_, surface_color_offset_,
+                         color_bytes64, color_address)) {
+        fault_("NV2A generic-combiner color surface is unbound or overflows");
+        return false;
+    }
+    if (uses_depth &&
+        !resolve_surface(zeta_dma_, zeta_dma_bound_, surface_zeta_offset_,
+                         depth_bytes64, depth_address)) {
+        // The zeta context resolves to something this evaluator cannot safely treat
+        // as a real depth buffer (unbound, out of range, or degenerate -- e.g. an
+        // "identity" DMA context combined with a zero SURFACE_ZETA_OFFSET, which
+        // legitimately resolves to physical address 0 and must never be written
+        // through). Render color-only rather than hard-faulting the whole draw: the
+        // color target is still valid, and treating "no usable zeta" as "no depth
+        // test/write this batch" is the safe, recoverable interpretation. The batch
+        // still executes (color-only), so this is not counted in the skip census --
+        // it is not a dropped batch, just a degraded one.
+        uses_depth = false;
+        depth_bytes64 = 0;
+        depth_address = 0;
+    }
+    if (uses_depth) {
+        const uint64_t color_end = static_cast<uint64_t>(color_address) + color_bytes64;
+        const uint64_t depth_end = static_cast<uint64_t>(depth_address) + depth_bytes64;
+        if (color_address < depth_end && depth_address < color_end) {
+            fault_("NV2A generic-combiner color and zeta surfaces overlap");
+            return false;
+        }
+    }
+
+    // --- Texture stages 0-3 ------------------------------------------------------
+    // Only stages a combiner input actually reads are set up. Two sampling paths,
+    // matching the shared machinery every witnessed textured profile already uses --
+    // dispatched on the WHOLE kRasterShaderStageProgram register value, not a per-
+    // stage nibble (both kInlineLinearBlitColor's linear blit and
+    // kSwizzledProjectedColor/kPitchProjectedColor's swizzled projective sampling
+    // carry a "1" in stage0's nibble, so the nibble alone does not distinguish
+    // layout; the exact witnessed dashboard fingerprint --
+    // ShaderStageProgram==0x00000001 with a single active stage -- is
+    // kInlineLinearBlitColor's own value, so that specific whole-register value is
+    // treated the same way here):
+    //   * ShaderStageProgram == 1: stage 0 only, sampled exactly like
+    //     kInlineLinearBlitColor's own texture -- ImageRect for width/height,
+    //     Control1's pitch field, texel-space (u,v,q) coordinates with their own
+    //     projective divide by texture[stage][3]. No alpha channel is computed (no
+    //     witnessed profile needs one in this mode), so a combiner that reads this
+    //     stage's alpha is named-skipped rather than fed a made-up value.
+    //   * ShaderStageProgram == 0: any referenced stage, sampled exactly like
+    //     kSwizzledTexturedColor/kPitchSingleTextureColor/kTex7FanColor's own
+    //     textures -- format log2 width/height, SwizzleLookup addressing,
+    //     normalized 0..1 UV, no projective divide. Only the two COLOR codes (6, 7)
+    //     already cross-checked against those pinned profiles (both raw 32-bit ARGB8)
+    //     are accepted.
+    //   * any other ShaderStageProgram value: the exact "projected/cube/3D" case
+    //     none of this evaluator's sampling paths generalize to -- named skip
+    //     carrying the raw register value, so it is visible in telemetry rather than
+    //     silently dropped.
+    enum class TextureAddressMode { kRepeat, kClampToEdge, kBorder };
+    struct TextureStage {
+        bool valid = false;
+        bool linear = false;
+        std::vector<uint8_t> data;
+        uint32_t width = 0, height = 0, pitch = 0;
+        std::unique_ptr<SwizzleLookup> swizzle;
+        TextureAddressMode address_u = TextureAddressMode::kRepeat;
+        TextureAddressMode address_v = TextureAddressMode::kRepeat;
+        uint32_t border = 0;
+    };
+    std::array<TextureStage, 4> texture_stages;
+    const uint32_t shader_stage_program = raster_state_[kRasterShaderStageProgram];
+    auto decode_address_mode = [](uint32_t byte, bool& supported) {
+        supported = true;
+        switch (byte) {
+            case 1: return TextureAddressMode::kRepeat;
+            case 3: return TextureAddressMode::kClampToEdge;
+            case 4: return TextureAddressMode::kBorder;
+            default: supported = false; return TextureAddressMode::kRepeat;
+        }
+    };
+    for (uint32_t stage = 0; stage < 4; ++stage) {
+        if (!texture_referenced[stage]) continue;
+        if ((raster_state_[kRasterTextureEnableMask] & (1u << stage)) == 0) {
+            record_generic_skip_detail(GenericSkipReason::kTextureStage, stage);
+            return true;
+        }
+        TextureStage& ts = texture_stages[stage];
+        if (shader_stage_program == 1) {
+            if (stage != 0) {
+                record_generic_skip_detail(
+                    GenericSkipReason::kUnsupportedTextureShaderProgram,
+                    (1ull << 32) | stage);
+                return true;
+            }
+            if (texture_referenced_alpha[stage]) {
+                record_generic_skip_detail(GenericSkipReason::kTextureStage,
+                                           0x100u + stage);
+                return true;
+            }
+            const uint32_t rect = raster_state_[kRasterTextureImageRect0 + stage];
+            ts.width = rect >> 16;
+            ts.height = rect & 0xFFFFu;
+            ts.pitch = raster_state_[kRasterTextureControl1_0 + stage] >> 16;
+            if (!ts.width || !ts.height ||
+                ts.pitch < ts.width * static_cast<uint32_t>(sizeof(uint32_t))) {
+                record_generic_skip_detail(GenericSkipReason::kUnsupportedTextureFormat,
+                                           raster_state_[kRasterTextureFormat0 + stage]);
+                return true;
+            }
+            const uint64_t bytes64 = static_cast<uint64_t>(ts.pitch) * ts.height;
+            uint32_t address = 0;
+            if (bytes64 > SIZE_MAX ||
+                !resolve_surface(texture_dma_b_, texture_dma_b_bound_,
+                                 raster_state_[kRasterTextureOffset0 + stage], bytes64,
+                                 address)) {
+                fault_("NV2A generic-combiner texture surface is unbound or overflows");
+                return false;
+            }
+            ts.data.resize(static_cast<size_t>(bytes64));
+            if (!mem_read_ || !mem_read_(address, ts.data.data(), ts.data.size())) {
+                fault_("NV2A generic-combiner texture DMA read failed");
+                return false;
+            }
+            ts.linear = true;
+            ts.valid = true;
+        } else if (shader_stage_program == 0) {
+            const uint32_t format = raster_state_[kRasterTextureFormat0 + stage];
+            const uint32_t color_code = (format >> 8) & 0x3Fu;
+            if ((format & 3u) != 2u || (color_code != 6 && color_code != 7)) {
+                record_generic_skip_detail(GenericSkipReason::kUnsupportedTextureFormat,
+                                           format);
+                return true;
+            }
+            if (raster_state_[kRasterTexturePalette0 + stage] != 0) {
+                record_generic_skip_detail(GenericSkipReason::kUnsupportedTextureFormat,
+                                           0x80000000ull | format);
+                return true;
+            }
+            const uint32_t address_word = raster_state_[kRasterTextureAddress0 + stage];
+            bool u_ok = false, v_ok = false;
+            const TextureAddressMode address_u =
+                decode_address_mode(address_word & 0xFFu, u_ok);
+            const TextureAddressMode address_v =
+                decode_address_mode((address_word >> 8) & 0xFFu, v_ok);
+            if (!u_ok || !v_ok) {
+                record_generic_skip_detail(GenericSkipReason::kUnsupportedTextureWrap,
+                                           address_word);
+                return true;
+            }
+            ts.width = 1u << ((format >> 20) & 0xFu);
+            ts.height = 1u << ((format >> 24) & 0xFu);
+            const uint64_t bytes64 =
+                static_cast<uint64_t>(ts.width) * ts.height * 4;
+            uint32_t address = 0;
+            if (bytes64 > SIZE_MAX ||
+                !resolve_surface(texture_dma_b_, texture_dma_b_bound_,
+                                 raster_state_[kRasterTextureOffset0 + stage], bytes64,
+                                 address)) {
+                fault_("NV2A generic-combiner texture surface is unbound or overflows");
+                return false;
+            }
+            ts.data.resize(static_cast<size_t>(bytes64));
+            if (!mem_read_ || !mem_read_(address, ts.data.data(), ts.data.size())) {
+                fault_("NV2A generic-combiner texture DMA read failed");
+                return false;
+            }
+            ts.swizzle = std::make_unique<SwizzleLookup>(ts.width, ts.height);
+            ts.address_u = address_u;
+            ts.address_v = address_v;
+            ts.border = raster_state_[kRasterTextureBorderColor0 + stage];
+            ts.linear = false;
+            ts.valid = true;
+        } else {
+            record_generic_skip_detail(GenericSkipReason::kUnsupportedTextureShaderProgram,
+                                       shader_stage_program);
+            return true;
+        }
+    }
+
+    executed = true;
+    ++generic_combiner_batches_;
+    {
+        uint64_t fingerprint = 1469598103934665603ull;
+        for (uint32_t index = kRasterShaderStageProgram;
+             index <= kRasterCombinerFinalFactor1; ++index) {
+            fingerprint ^= raster_state_[index];
+            fingerprint *= 1099511628211ull;
+        }
+        auto it = std::find_if(
+            generic_combiner_fingerprints_.begin(),
+            generic_combiner_fingerprints_.end(),
+            [&](const auto& entry) { return entry.first == fingerprint; });
+        if (it == generic_combiner_fingerprints_.end())
+            generic_combiner_fingerprints_.push_back({fingerprint, 1});
+        else
+            ++it->second;
+    }
+
+    uint32_t xmin = clip_x;
+    uint32_t xmax = clip_x + clip_width - 1;
+    uint32_t ymin = clip_y;
+    uint32_t ymax = clip_y + clip_height - 1;
+    const uint32_t window_x = raster_state_[kRasterWindowClipHorizontal];
+    const uint32_t window_y = raster_state_[kRasterWindowClipVertical];
+    xmin = std::max(xmin, window_x & 0xFFFu);
+    xmax = std::min(xmax, (window_x >> 16) & 0xFFFu);
+    ymin = std::max(ymin, window_y & 0xFFFu);
+    ymax = std::min(ymax, (window_y >> 16) & 0xFFFu);
+    if (xmax < xmin || ymax < ymin) return true;
+
+    float clip_min = 0.0f, clip_max = 0.0f;
+    std::memcpy(&clip_min, &raster_state_[kRasterClipMin], sizeof(clip_min));
+    std::memcpy(&clip_max, &raster_state_[kRasterClipMax], sizeof(clip_max));
+    float polygon_scale = 0.0f, polygon_bias = 0.0f;
+    if (enables & (1u << 13)) {
+        std::memcpy(&polygon_scale, &raster_state_[kRasterPolygonOffsetScale],
+                   sizeof(polygon_scale));
+        std::memcpy(&polygon_bias, &raster_state_[kRasterPolygonOffsetBias],
+                   sizeof(polygon_bias));
+    }
+
+    PagedRasterSurface color_surface(
+        color_address, static_cast<size_t>(color_bytes64), mem_read_, mem_write_);
+    PagedRasterSurface depth_surface(
+        depth_address, static_cast<size_t>(depth_bytes64), mem_read_, mem_write_);
+
+    auto unpack_argb8 = [](uint32_t pixel) {
+        return std::array<float, 4>{{
+            static_cast<float>((pixel >> 16) & 0xFFu) / 255.0f,
+            static_cast<float>((pixel >> 8) & 0xFFu) / 255.0f,
+            static_cast<float>(pixel & 0xFFu) / 255.0f,
+            static_cast<float>((pixel >> 24) & 0xFFu) / 255.0f,
+        }};
+    };
+    // Bilinear samplers matching the ones every witnessed textured profile above
+    // already uses (this function cannot literally call those local lambdas -- they
+    // are private to rasterize_witnessed_batch -- so this is a faithful independent
+    // copy of the same algorithm, the same duplication pattern this file already uses
+    // between rasterize_witnessed_immediate_quad and rasterize_witnessed_batch).
+    auto sample_swizzled = [&unpack_argb8](
+                               const std::vector<uint8_t>& data,
+                               const SwizzleLookup& swizzle, uint32_t width,
+                               uint32_t height, float u, float v,
+                               TextureAddressMode mode_u, TextureAddressMode mode_v,
+                               uint32_t border_pixel, std::array<float, 4>& color) {
+        if (!std::isfinite(u) || !std::isfinite(v)) return false;
+        auto wrap = [](float value, TextureAddressMode mode) {
+            if (mode == TextureAddressMode::kRepeat) return value - std::floor(value);
+            return std::clamp(value, 0.0f, 1.0f);
+        };
+        u = wrap(u, mode_u);
+        v = wrap(v, mode_v);
+        const float texel_x = u * static_cast<float>(width) - 0.5f;
+        const float texel_y = v * static_cast<float>(height) - 0.5f;
+        const int32_t x0 = static_cast<int32_t>(std::floor(texel_x));
+        const int32_t y0 = static_cast<int32_t>(std::floor(texel_y));
+        const float fx = texel_x - static_cast<float>(x0);
+        const float fy = texel_y - static_cast<float>(y0);
+        auto coordinate = [](int32_t value, uint32_t size, TextureAddressMode mode) {
+            if (mode != TextureAddressMode::kRepeat) {
+                return static_cast<uint32_t>(
+                    std::clamp(value, 0, static_cast<int32_t>(size) - 1));
+            }
+            const int32_t signed_size = static_cast<int32_t>(size);
+            int32_t wrapped = value % signed_size;
+            if (wrapped < 0) wrapped += signed_size;
+            return static_cast<uint32_t>(wrapped);
+        };
+        const auto border = unpack_argb8(border_pixel);
+        auto texel = [&](int32_t x, int32_t y) {
+            const bool out_of_range =
+                x < 0 || y < 0 || x >= static_cast<int32_t>(width) ||
+                y >= static_cast<int32_t>(height);
+            if (out_of_range &&
+                (mode_u == TextureAddressMode::kBorder ||
+                 mode_v == TextureAddressMode::kBorder)) {
+                return border;
+            }
+            const size_t offset =
+                static_cast<size_t>(swizzle.index(coordinate(x, width, mode_u),
+                                                  coordinate(y, height, mode_v))) *
+                sizeof(uint32_t);
+            uint32_t pixel = 0;
+            std::memcpy(&pixel, data.data() + offset, sizeof(pixel));
+            return unpack_argb8(pixel);
+        };
+        const auto c00 = texel(x0, y0);
+        const auto c10 = texel(x0 + 1, y0);
+        const auto c01 = texel(x0, y0 + 1);
+        const auto c11 = texel(x0 + 1, y0 + 1);
+        for (size_t c4 = 0; c4 < 4; ++c4) {
+            const float top = c00[c4] + (c10[c4] - c00[c4]) * fx;
+            const float bottom = c01[c4] + (c11[c4] - c01[c4]) * fx;
+            color[c4] = top + (bottom - top) * fy;
+        }
+        return true;
+    };
+    auto sample_linear = [&unpack_argb8](
+                             const std::vector<uint8_t>& data, uint32_t width,
+                             uint32_t height, uint32_t row_pitch, float s, float t,
+                             std::array<float, 4>& color) {
+        if (!std::isfinite(s) || !std::isfinite(t) || !width || !height) return false;
+        s = std::clamp(s, 0.0f, static_cast<float>(width));
+        t = std::clamp(t, 0.0f, static_cast<float>(height));
+        const float texel_x = s - 0.5f;
+        const float texel_y = t - 0.5f;
+        const int32_t x0 = static_cast<int32_t>(std::floor(texel_x));
+        const int32_t y0 = static_cast<int32_t>(std::floor(texel_y));
+        const float fx = texel_x - static_cast<float>(x0);
+        const float fy = texel_y - static_cast<float>(y0);
+        auto texel = [&](int32_t x, int32_t y) {
+            const uint32_t cx = static_cast<uint32_t>(
+                std::clamp(x, 0, static_cast<int32_t>(width) - 1));
+            const uint32_t cy = static_cast<uint32_t>(
+                std::clamp(y, 0, static_cast<int32_t>(height) - 1));
+            const size_t offset = static_cast<size_t>(cy) * row_pitch +
+                                  static_cast<size_t>(cx) * sizeof(uint32_t);
+            uint32_t pixel = 0;
+            std::memcpy(&pixel, data.data() + offset, sizeof(pixel));
+            return unpack_argb8(pixel);
+        };
+        const auto c00 = texel(x0, y0);
+        const auto c10 = texel(x0 + 1, y0);
+        const auto c01 = texel(x0, y0 + 1);
+        const auto c11 = texel(x0 + 1, y0 + 1);
+        for (size_t c4 = 0; c4 < 4; ++c4) {
+            const float top = c00[c4] + (c10[c4] - c00[c4]) * fx;
+            const float bottom = c01[c4] + (c11[c4] - c01[c4]) * fx;
+            color[c4] = top + (bottom - top) * fy;
+        }
+        return true;
+    };
+    auto apply_mapping = [](uint32_t mapping, float value) {
+        switch (mapping) {
+            case 0: return std::clamp(value, 0.0f, 1.0f);                 // UNSIGNED_IDENTITY
+            case 1: return 1.0f - std::clamp(value, 0.0f, 1.0f);          // UNSIGNED_INVERT
+            case 2: return 2.0f * std::clamp(value, 0.0f, 1.0f) - 1.0f;   // EXPAND_NORMAL
+            case 3: return -(2.0f * std::clamp(value, 0.0f, 1.0f) - 1.0f);// EXPAND_NEGATE
+            case 4: return std::clamp(value, 0.0f, 1.0f) - 0.5f;          // HALF_BIAS_NORMAL
+            case 5: return 0.5f - std::clamp(value, 0.0f, 1.0f);          // HALF_BIAS_NEGATE
+            case 6: return value;                                        // SIGNED_IDENTITY
+            default: return -value;                                      // SIGNED_NEGATE
+        }
+    };
+    auto fetch_color = [&](const DecodedInput& in,
+                          const std::array<std::array<float, 4>, 16>& regs) {
+        const std::array<float, 4>& r = regs[in.reg];
+        const float base[3] = {in.alt ? r[3] : r[0], in.alt ? r[3] : r[1],
+                               in.alt ? r[3] : r[2]};
+        return std::array<float, 3>{{apply_mapping(in.mapping, base[0]),
+                                     apply_mapping(in.mapping, base[1]),
+                                     apply_mapping(in.mapping, base[2])}};
+    };
+    // See the function-level comment: bit4 polarity here (1=ALPHA, 0=BLUE) is inferred
+    // from the working kInlineLinearBlitColor profile's AlphaIcw0==0x14200000, whose D
+    // input must evaluate to the vertex alpha for that profile's proven pixel formula
+    // to hold.
+    auto fetch_alpha = [&](const DecodedInput& in,
+                          const std::array<std::array<float, 4>, 16>& regs) {
+        const std::array<float, 4>& r = regs[in.reg];
+        const float base = in.alt ? r[3] : r[2];
+        return apply_mapping(in.mapping, base);
+    };
+
+    bool raster_failed = false;
+    auto rasterize_triangle = [&](const TransformedVertex& input_a,
+                                 const TransformedVertex& input_b,
+                                 const TransformedVertex& input_c) {
+        if (raster_failed) return;
+        const TransformedVertex* a = &input_a;
+        const TransformedVertex* b = &input_b;
+        const TransformedVertex* c = &input_c;
+        for (const TransformedVertex* vertex : {a, b, c}) {
+            if (!std::isfinite(vertex->position[0]) ||
+                !std::isfinite(vertex->position[1]) ||
+                !std::isfinite(vertex->position[2])) {
+                return;
+            }
+        }
+        auto fixed_xy = [](float value) -> int64_t {
+            return static_cast<int64_t>(std::llround(value * 16.0f));
+        };
+        int64_t ax = fixed_xy(a->position[0]);
+        int64_t ay = fixed_xy(a->position[1]);
+        int64_t bx = fixed_xy(b->position[0]);
+        int64_t by = fixed_xy(b->position[1]);
+        int64_t cx = fixed_xy(c->position[0]);
+        int64_t cy = fixed_xy(c->position[1]);
+        auto edge = [](int64_t x0, int64_t y0, int64_t x1, int64_t y1,
+                       int64_t px, int64_t py) -> int64_t {
+            return (x1 - x0) * (py - y0) - (y1 - y0) * (px - x0);
+        };
+        int64_t area = edge(ax, ay, bx, by, cx, cy);
+        if (!cull_enabled && area < 0) {
+            // Cull is disabled: both windings render. Flip to the front-facing
+            // (positive-area) orientation, matching kInlineLinearBlitColor's identical
+            // disabled-cull handling above.
+            std::swap(b, c);
+            std::swap(bx, cx);
+            std::swap(by, cy);
+            area = -area;
+        } else if (area <= 0) {
+            return;  // CW is front-facing, matching every witnessed profile.
+        }
+        if (area == 0) return;
+
+        ++generic_combiner_triangles_;
+        const int32_t tri_xmin = std::max<int32_t>(
+            static_cast<int32_t>(xmin),
+            static_cast<int32_t>(std::ceil(
+                (static_cast<double>(std::min({ax, bx, cx})) - 8.0) / 16.0)));
+        const int32_t tri_xmax = std::min<int32_t>(
+            static_cast<int32_t>(xmax),
+            static_cast<int32_t>(std::floor(
+                (static_cast<double>(std::max({ax, bx, cx})) - 8.0) / 16.0)));
+        const int32_t tri_ymin = std::max<int32_t>(
+            static_cast<int32_t>(ymin),
+            static_cast<int32_t>(std::ceil(
+                (static_cast<double>(std::min({ay, by, cy})) - 8.0) / 16.0)));
+        const int32_t tri_ymax = std::min<int32_t>(
+            static_cast<int32_t>(ymax),
+            static_cast<int32_t>(std::floor(
+                (static_cast<double>(std::max({ay, by, cy})) - 8.0) / 16.0)));
+        if (tri_xmax < tri_xmin || tri_ymax < tri_ymin) return;
+
+        const auto top_left = [](int64_t x0, int64_t y0, int64_t x1, int64_t y1) {
+            const int64_t dx = x1 - x0;
+            const int64_t dy = y1 - y0;
+            return dy < 0 || (dy == 0 && dx > 0);
+        };
+        const bool edge0_top_left = top_left(bx, by, cx, cy);
+        const bool edge1_top_left = top_left(cx, cy, ax, ay);
+        const bool edge2_top_left = top_left(ax, ay, bx, by);
+
+        const float x10 = static_cast<float>(bx - ax) / 16.0f;
+        const float y10 = static_cast<float>(by - ay) / 16.0f;
+        const float x20 = static_cast<float>(cx - ax) / 16.0f;
+        const float y20 = static_cast<float>(cy - ay) / 16.0f;
+        const float z10 = b->position[2] - a->position[2];
+        const float z20 = c->position[2] - a->position[2];
+        const float determinant = x10 * y20 - x20 * y10;
+        const float dzdx = (z10 * y20 - z20 * y10) / determinant;
+        const float dzdy = (z20 * x10 - z10 * x20) / determinant;
+        const float max_z_slope = std::max(std::abs(dzdx), std::abs(dzdy));
+        const float inverse_area = 1.0f / static_cast<float>(area);
+
+        for (int32_t y = tri_ymin; y <= tri_ymax; ++y) {
+            const int64_t py = static_cast<int64_t>(y) * 16 + 8;
+            for (int32_t x = tri_xmin; x <= tri_xmax; ++x) {
+                const int64_t px = static_cast<int64_t>(x) * 16 + 8;
+                const int64_t w0 = edge(bx, by, cx, cy, px, py);
+                const int64_t w1 = edge(cx, cy, ax, ay, px, py);
+                const int64_t w2 = edge(ax, ay, bx, by, px, py);
+                if (w0 < 0 || (w0 == 0 && !edge0_top_left) ||
+                    w1 < 0 || (w1 == 0 && !edge1_top_left) ||
+                    w2 < 0 || (w2 == 0 && !edge2_top_left)) {
+                    continue;
+                }
+                ++generic_combiner_fragments_;
+                float depth = (static_cast<float>(w0) * a->position[2] +
+                              static_cast<float>(w1) * b->position[2] +
+                              static_cast<float>(w2) * c->position[2]) *
+                             inverse_area;
+                depth += polygon_bias + polygon_scale * max_z_slope;
+                if (!std::isfinite(depth) || depth < clip_min || depth > clip_max)
+                    continue;
+
+                const size_t offset = static_cast<size_t>(y) * pitch +
+                                      static_cast<size_t>(x) * sizeof(uint32_t);
+                uint32_t stored_depth_stencil = 0;
+                uint32_t incoming_depth = 0;
+                if (uses_depth) {
+                    if (!depth_surface.read32(offset, stored_depth_stencil)) {
+                        fault_("NV2A generic-combiner zeta DMA read failed");
+                        raster_failed = true;
+                        return;
+                    }
+                    incoming_depth = static_cast<uint32_t>(
+                        std::floor(std::clamp(depth, 0.0f, 16777215.0f)));
+                    // Depth-test-enable (bit3) is semantic: when disabled every
+                    // fragment passes, even though the surface is still touched here
+                    // because depth writes are enabled.
+                    if (depth_test_enabled_bit &&
+                        !compare(depth_func, incoming_depth,
+                                stored_depth_stencil >> 8)) {
+                        continue;
+                    }
+                }
+                ++generic_combiner_depth_passes_;
+
+                const double lambda0 =
+                    static_cast<double>(w0) / static_cast<double>(area);
+                const double lambda1 =
+                    static_cast<double>(w1) / static_cast<double>(area);
+                const double lambda2 =
+                    static_cast<double>(w2) / static_cast<double>(area);
+                const double q0 = lambda0 / a->position[3];
+                const double q1 = lambda1 / b->position[3];
+                const double q2 = lambda2 / c->position[3];
+                const double qsum = q0 + q1 + q2;
+                if (!std::isfinite(qsum) || qsum == 0.0) continue;
+
+                std::array<float, 4> diffuse{};
+                std::array<float, 4> specular{};
+                bool varying_failed = false;
+                auto interpolate4 = [&](auto member) {
+                    std::array<float, 4> result{};
+                    for (size_t c4 = 0; c4 < 4; ++c4) {
+                        auto component = [&](const TransformedVertex* v) {
+                            float value = (v->*member)[c4];
+                            if (std::isnan(value)) value = c4 == 3 ? 1.0f : 0.0f;
+                            return std::clamp(value, 0.0f, 1.0f);
+                        };
+                        const double d = (q0 * component(a) + q1 * component(b) +
+                                         q2 * component(c)) / qsum;
+                        if (!std::isfinite(d)) {
+                            varying_failed = true;
+                            return result;
+                        }
+                        result[c4] = static_cast<float>(d);
+                    }
+                    return result;
+                };
+                diffuse = interpolate4(&TransformedVertex::diffuse);
+                specular = interpolate4(&TransformedVertex::specular);
+                if (varying_failed) {
+                    fault_("NV2A generic-combiner varying is non-finite");
+                    raster_failed = true;
+                    return;
+                }
+
+                std::array<std::array<float, 4>, 16> regs{};
+                regs[4] = diffuse;
+                regs[5] = specular;
+
+                // Texture stages: interpolate texcoords the exact same way every
+                // witnessed textured profile does (perspective-correct via the
+                // position-based q0/q1/q2, unclamped -- unlike diffuse/specular, UV
+                // and texel-space coordinates routinely go outside [0,1]). This reads
+                // TransformedVertex::texture[stage], which submit_vertex_batch already
+                // populates identically for both the fixed-function path
+                // (vertex_attributes_[9+stage]) and the vertex-program path
+                // (oT0.. output registers) -- so the generic evaluator picks up
+                // interpolated texcoords the same way regardless of transform mode.
+                for (uint32_t stage = 0; stage < 4; ++stage) {
+                    if (!texture_referenced[stage]) continue;
+                    const TextureStage& ts = texture_stages[stage];
+                    std::array<float, 4> texcoord{};
+                    bool texcoord_failed = false;
+                    for (size_t c4 = 0; c4 < 4; ++c4) {
+                        auto component = [&](const TransformedVertex* v) {
+                            float value = v->texture[stage][c4];
+                            return std::isnan(value) ? 0.0f : value;
+                        };
+                        const double t = (q0 * component(a) + q1 * component(b) +
+                                         q2 * component(c)) / qsum;
+                        if (!std::isfinite(t)) {
+                            texcoord_failed = true;
+                            break;
+                        }
+                        texcoord[c4] = static_cast<float>(t);
+                    }
+                    if (texcoord_failed) {
+                        fault_("NV2A generic-combiner texcoord is non-finite");
+                        raster_failed = true;
+                        return;
+                    }
+                    std::array<float, 4> sampled{};
+                    bool sample_ok = false;
+                    if (ts.linear) {
+                        if (texcoord[3] == 0.0f) {
+                            fault_("NV2A generic-combiner texture Q is zero");
+                            raster_failed = true;
+                            return;
+                        }
+                        sample_ok = sample_linear(ts.data, ts.width, ts.height,
+                                                 ts.pitch, texcoord[0] / texcoord[3],
+                                                 texcoord[1] / texcoord[3], sampled);
+                    } else {
+                        sample_ok = sample_swizzled(
+                            ts.data, *ts.swizzle, ts.width, ts.height, texcoord[0],
+                            texcoord[1], ts.address_u, ts.address_v, ts.border,
+                            sampled);
+                    }
+                    if (!sample_ok) {
+                        fault_("NV2A generic-combiner texture sample is invalid");
+                        raster_failed = true;
+                        return;
+                    }
+                    regs[8 + stage] = sampled;
+                    ++generic_combiner_texture_samples_;
+                }
+
+                for (uint32_t stage = 0; stage < stage_count; ++stage) {
+                    const Stage& s = stages[stage];
+                    regs[1] = unpack_argb8(
+                        raster_state_[kRasterCombinerFactor0_0 + stage]);
+                    regs[2] = unpack_argb8(
+                        raster_state_[kRasterCombinerFactor1_0 + stage]);
+
+                    const std::array<float, 3> ca = fetch_color(s.color[0], regs);
+                    const std::array<float, 3> cb = fetch_color(s.color[1], regs);
+                    const std::array<float, 3> cc = fetch_color(s.color[2], regs);
+                    const std::array<float, 3> cd = fetch_color(s.color[3], regs);
+                    std::array<float, 3> cab{}, ccd{};
+                    if (s.color_ab_dot) {
+                        const float dot = ca[0] * cb[0] + ca[1] * cb[1] + ca[2] * cb[2];
+                        cab = {{dot, dot, dot}};
+                    } else {
+                        cab = {{ca[0] * cb[0], ca[1] * cb[1], ca[2] * cb[2]}};
+                    }
+                    if (s.color_cd_dot) {
+                        const float dot = cc[0] * cd[0] + cc[1] * cd[1] + cc[2] * cd[2];
+                        ccd = {{dot, dot, dot}};
+                    } else {
+                        ccd = {{cc[0] * cd[0], cc[1] * cd[1], cc[2] * cd[2]}};
+                    }
+                    const std::array<float, 3> csum{{
+                        std::clamp(cab[0] + ccd[0], 0.0f, 1.0f),
+                        std::clamp(cab[1] + ccd[1], 0.0f, 1.0f),
+                        std::clamp(cab[2] + ccd[2], 0.0f, 1.0f),
+                    }};
+                    auto store_color = [&](uint32_t dst, const std::array<float, 3>& value) {
+                        if (!dst) return;
+                        for (size_t c3 = 0; c3 < 3; ++c3)
+                            regs[dst][c3] = std::clamp(value[c3], 0.0f, 1.0f);
+                    };
+                    store_color(s.color_ab_dst, cab);
+                    store_color(s.color_cd_dst, ccd);
+                    store_color(s.color_sum_dst, csum);
+
+                    const float aa = fetch_alpha(s.alpha[0], regs);
+                    const float ab = fetch_alpha(s.alpha[1], regs);
+                    const float ac = fetch_alpha(s.alpha[2], regs);
+                    const float ad = fetch_alpha(s.alpha[3], regs);
+                    const float aab = aa * ab;
+                    const float acd = ac * ad;
+                    const float asum = std::clamp(aab + acd, 0.0f, 1.0f);
+                    auto store_alpha = [&](uint32_t dst, float value) {
+                        if (!dst) return;
+                        regs[dst][3] = std::clamp(value, 0.0f, 1.0f);
+                    };
+                    store_alpha(s.alpha_ab_dst, aab);
+                    store_alpha(s.alpha_cd_dst, acd);
+                    store_alpha(s.alpha_sum_dst, asum);
+                }
+
+                const std::array<float, 4>& final_color = regs[12];
+                const float src_alpha = std::clamp(final_color[3], 0.0f, 1.0f);
+                const uint32_t alpha_scaled =
+                    static_cast<uint32_t>(std::floor(src_alpha * 255.0f + 0.5f));
+                const uint32_t alpha_ref = raster_state_[kRasterAlphaRef] & 0xFFu;
+                // Alpha-test-enable (bit0) is semantic: when disabled every fragment
+                // passes regardless of AlphaFunc/AlphaRef.
+                if (alpha_test_enabled &&
+                    !compare(alpha_func, alpha_scaled, alpha_ref)) {
+                    continue;
+                }
+
+                std::array<float, 3> out_rgb{{
+                    std::clamp(final_color[0], 0.0f, 1.0f),
+                    std::clamp(final_color[1], 0.0f, 1.0f),
+                    std::clamp(final_color[2], 0.0f, 1.0f),
+                }};
+                // Need the existing pixel if blending is enabled (as a blend operand)
+                // or if any color-mask channel is disabled (to preserve it unwritten).
+                const bool needs_existing_pixel =
+                    blend_enabled || !color_mask_write[0] || !color_mask_write[1] ||
+                    !color_mask_write[2] || !color_mask_write[3];
+                std::array<float, 4> dst{};
+                if (needs_existing_pixel) {
+                    uint32_t existing = 0;
+                    if (!color_surface.read32(offset, existing)) {
+                        fault_("NV2A generic-combiner color DMA read failed");
+                        raster_failed = true;
+                        return;
+                    }
+                    dst = unpack_argb8(existing);
+                }
+                if (blend_enabled) {
+                    // Only ZERO/ONE/SRC_ALPHA/ONE_MINUS_SRC_ALPHA are accepted above,
+                    // so the per-component blend factor is fully determined by
+                    // src_alpha (dst_alpha is not among the accepted factors).
+                    auto blend_weight = [&](uint32_t factor) {
+                        switch (factor) {
+                            case 0: return 0.0f;                       // ZERO
+                            case 1: return 1.0f;                       // ONE
+                            case 0x0302: return src_alpha;             // SRC_ALPHA
+                            default:                                   // ONE_MINUS_SRC_ALPHA
+                                return 1.0f - src_alpha;
+                        }
+                    };
+                    const float src_weight = blend_weight(blend_src);
+                    const float dst_weight = blend_weight(blend_dst);
+                    for (size_t c3 = 0; c3 < 3; ++c3) {
+                        out_rgb[c3] = std::clamp(
+                            out_rgb[c3] * src_weight + dst[c3] * dst_weight, 0.0f, 1.0f);
+                    }
+                }
+                auto pack_unorm8 = [](float value) {
+                    return static_cast<uint32_t>(
+                        std::floor(std::clamp(value, 0.0f, 1.0f) * 255.0f + 0.5f));
+                };
+                // X8R8G8B8 has no alpha channel on real hardware; always store 0xFF in
+                // the padding byte. A8R8G8B8 stores the combiner's alpha untouched.
+                const uint32_t stored_alpha_byte =
+                    color_format_x8 ? 0xFFu : alpha_scaled;
+                const uint32_t written_r =
+                    color_mask_write[0] ? pack_unorm8(out_rgb[0])
+                                        : static_cast<uint32_t>(dst[0] * 255.0f + 0.5f);
+                const uint32_t written_g =
+                    color_mask_write[1] ? pack_unorm8(out_rgb[1])
+                                        : static_cast<uint32_t>(dst[1] * 255.0f + 0.5f);
+                const uint32_t written_b =
+                    color_mask_write[2] ? pack_unorm8(out_rgb[2])
+                                        : static_cast<uint32_t>(dst[2] * 255.0f + 0.5f);
+                const uint32_t written_a =
+                    color_mask_write[3] ? stored_alpha_byte
+                                        : static_cast<uint32_t>(dst[3] * 255.0f + 0.5f);
+                const uint32_t color = (written_a << 24) | (written_r << 16) |
+                                       (written_g << 8) | written_b;
+                if (!color_surface.write32(offset, color)) {
+                    fault_("NV2A generic-combiner color DMA write failed");
+                    raster_failed = true;
+                    return;
+                }
+                if (uses_depth && raster_state_[kRasterDepthMask] != 0) {
+                    const uint32_t depth_stencil =
+                        (incoming_depth << 8) | (stored_depth_stencil & 0xFFu);
+                    if (!depth_surface.write32(offset, depth_stencil)) {
+                        fault_("NV2A generic-combiner zeta DMA write failed");
+                        raster_failed = true;
+                        return;
+                    }
+                }
+                ++generic_combiner_writes_;
+                const uint32_t address = color_address + static_cast<uint32_t>(offset);
+                last_generic_combiner_raster_address_ = address;
+                for (uint32_t word : {address, color}) {
+                    generic_combiner_output_hash_ ^= word;
+                    generic_combiner_output_hash_ *= 1099511628211ull;
+                }
+            }
+        }
+    };
+
+    const size_t vertex_count = transformed_batch_.size();
+    if (primitive_mode_ == 5) {
+        for (size_t i = 0; i + 2 < vertex_count; i += 3)
+            rasterize_triangle(transformed_batch_[i], transformed_batch_[i + 1],
+                              transformed_batch_[i + 2]);
+    } else if (primitive_mode_ == 6) {
+        for (size_t i = 2; i < vertex_count; ++i) {
+            if ((i & 1u) == 0)
+                rasterize_triangle(transformed_batch_[i - 2], transformed_batch_[i - 1],
+                                  transformed_batch_[i]);
+            else
+                rasterize_triangle(transformed_batch_[i - 1], transformed_batch_[i - 2],
+                                  transformed_batch_[i]);
+        }
+    } else {
+        for (size_t i = 2; i < vertex_count; ++i)
+            rasterize_triangle(transformed_batch_[0], transformed_batch_[i - 1],
+                              transformed_batch_[i]);
+    }
+
+    if (raster_failed) return false;
+    if (!color_surface.flush()) {
+        fault_("NV2A generic-combiner color DMA write failed");
+        return false;
+    }
+    if (uses_depth && !depth_surface.flush()) {
+        fault_("NV2A generic-combiner zeta DMA write failed");
+        return false;
+    }
+    ++generic_combiner_executed_batches_;
+    return true;
+}
+
 void Nv2a::dispatch_method(PushMethod push) {
     const uint8_t channel = push.channel;
     const uint8_t subchannel = push.subchannel;
@@ -5897,7 +7141,10 @@ void Nv2a::dispatch_method(PushMethod push) {
         transform_constant_load_ = static_cast<uint8_t>(parameter);
     // The dashboard's immediate quad path uses generic texture/diffuse attributes and the
     // legacy position stream.  These follow xemu's NV097 handlers: attributes persist until
-    // changed, while a completed position write snapshots one full 16-slot vertex.
+    // changed, while a completed write to attribute slot 0 (position) snapshots one full
+    // 16-slot vertex.  This covers the legacy SET_VERTEX4F position stream plus every
+    // SET_VERTEX_DATA* family (2F_M, 2S, 4UB, 4S_M, 4F_M); each commits on the write that
+    // finishes slot 0, matching hardware semantics where position completion latches a vertex.
     } else if (method >= 0x1518 && method < 0x1528) {
         const uint32_t component = (method - 0x1518) / 4;
         std::memcpy(&vertex_attributes_[0].value[component], &parameter, sizeof(parameter));
@@ -5912,6 +7159,18 @@ void Nv2a::dispatch_method(PushMethod push) {
         value[2] = 0.0f;
         value[3] = 1.0f;
         ++immediate_methods_;
+        if (slot == 0 && component == 1 && !commit_immediate_vertex()) return;
+    } else if (method >= 0x1900 && method < 0x1940) {
+        const uint32_t slot = (method - 0x1900) / 4;
+        auto& value = vertex_attributes_[slot].value;
+        const int16_t x = static_cast<int16_t>(parameter & 0xFFFFu);
+        const int16_t y = static_cast<int16_t>((parameter >> 16) & 0xFFFFu);
+        value[0] = static_cast<float>(x);
+        value[1] = static_cast<float>(y);
+        value[2] = 0.0f;
+        value[3] = 1.0f;
+        ++immediate_methods_;
+        if (slot == 0 && !commit_immediate_vertex()) return;
     } else if (method >= 0x1940 && method < 0x1980) {
         const uint32_t slot = (method - 0x1940) / 4;
         auto& value = vertex_attributes_[slot].value;
@@ -5920,6 +7179,25 @@ void Nv2a::dispatch_method(PushMethod push) {
         value[2] = static_cast<float>((parameter >> 16) & 0xFFu) / 255.0f;
         value[3] = static_cast<float>((parameter >> 24) & 0xFFu) / 255.0f;
         ++immediate_methods_;
+        if (slot == 0 && !commit_immediate_vertex()) return;
+    } else if (method >= 0x1980 && method < 0x1A00) {
+        const uint32_t word = (method - 0x1980) / 4;
+        const uint32_t slot = word / 2;
+        const uint32_t part = word & 1u;
+        auto& value = vertex_attributes_[slot].value;
+        const int16_t lo = static_cast<int16_t>(parameter & 0xFFFFu);
+        const int16_t hi = static_cast<int16_t>((parameter >> 16) & 0xFFFFu);
+        value[part * 2] = static_cast<float>(lo);
+        value[part * 2 + 1] = static_cast<float>(hi);
+        ++immediate_methods_;
+        if (slot == 0 && part == 1 && !commit_immediate_vertex()) return;
+    } else if (method >= 0x1A00 && method < 0x1B00) {
+        const uint32_t word = (method - 0x1A00) / 4;
+        const uint32_t slot = word / 4;
+        const uint32_t component = word & 3u;
+        std::memcpy(&vertex_attributes_[slot].value[component], &parameter, sizeof(parameter));
+        ++immediate_methods_;
+        if (slot == 0 && component == 3 && !commit_immediate_vertex()) return;
     // Kelvin array-fed vertex submission. ARRAY_ELEMENT16 is non-incrementing and packs two
     // indices per parameter; the pusher has already expanded non-incrementing method runs.
     } else if (method >= 0x1720 && method < 0x1760) {

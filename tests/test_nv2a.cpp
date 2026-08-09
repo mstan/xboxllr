@@ -3061,48 +3061,54 @@ int main() {
 
         const uint64_t immediate_methods_before_generic =
             immediate_gpu.immediate_methods();
-        const uint64_t immediate_vertices_before_generic =
-            immediate_gpu.immediate_vertices();
-        const uint64_t immediate_batches_before_generic =
-            immediate_gpu.immediate_batches();
-        const uint64_t vertex_batches_before_generic = immediate_gpu.vertex_batches();
 
-        // Generic streams update persistent attributes but never commit a vertex in this
-        // witnessed path, even for slot 0. Only legacy SET_VERTEX4F's W method commits.
+        // Generic SET_VERTEX_DATA streams persist their attribute values like every
+        // other slot, but a write that completes attribute slot 0 (position) now
+        // commits a vertex exactly like the legacy SET_VERTEX4F family's W write
+        // always has -- matching real hardware, where position completion always
+        // latches a vertex regardless of which method family produced it.
+        uint64_t generic_verts0 = immediate_gpu.immediate_vertices();
+        uint64_t generic_batches0 = immediate_gpu.immediate_batches();
+        uint64_t generic_vbatches0 = immediate_gpu.vertex_batches();
         emit_immediate(0x17FC, 1);
-        emit_immediate(0x1880, float_bits(1.0f));
-        emit_immediate(0x1884, float_bits(2.0f));
-        emit_immediate(0x1940, 0xFF804000u);
+        emit_immediate(0x1880, float_bits(1.0f));  // slot0.x: no commit
+        emit_immediate(0x1884, float_bits(2.0f));  // slot0.y: commits (1,2,0,1)
+        emit_immediate(0x1940, 0xFF804000u);       // slot0 (UB): commits again
         emit_immediate(0x17FC, 0);
         kick_immediate();
         CHECK(immediate_fault.empty());
         CHECK(immediate_gpu.immediate_methods() == immediate_methods_before_generic + 3);
-        CHECK(immediate_gpu.immediate_vertices() == immediate_vertices_before_generic);
-        CHECK(immediate_gpu.immediate_batches() == immediate_batches_before_generic);
-        CHECK(immediate_gpu.vertex_batches() == vertex_batches_before_generic);
+        CHECK(immediate_gpu.immediate_vertices() == generic_verts0 + 2);
+        CHECK(immediate_gpu.immediate_batches() == generic_batches0 + 1);
+        CHECK(immediate_gpu.vertex_batches() == generic_vbatches0 + 1);
 
-        // The generic conversions become visible only when the witnessed legacy position-W
-        // commit snapshots them; generic methods themselves still create no vertex.
+        // A slot-0 completion commits with whatever the attribute currently holds; a
+        // following legacy position-W write commits again with the same value (only W
+        // changes, and W was already 1 from the SET_VERTEX_DATA2F_M write above).
+        generic_verts0 = immediate_gpu.immediate_vertices();
+        generic_batches0 = immediate_gpu.immediate_batches();
         emit_immediate(0x17FC, 1);
         emit_immediate(0x1880, float_bits(5.0f));
-        emit_immediate(0x1884, float_bits(6.0f));
-        emit_immediate(0x1524, float_bits(1.0f));
+        emit_immediate(0x1884, float_bits(6.0f));  // commits (5,6,0,1)
+        emit_immediate(0x1524, float_bits(1.0f));  // commits again, unchanged
         emit_immediate(0x17FC, 0);
         kick_immediate();
         CHECK(immediate_fault.empty());
-        CHECK(immediate_gpu.immediate_vertices() == immediate_vertices_before_generic + 1);
-        CHECK(immediate_gpu.immediate_batches() == immediate_batches_before_generic + 1);
+        CHECK(immediate_gpu.immediate_vertices() == generic_verts0 + 2);
+        CHECK(immediate_gpu.immediate_batches() == generic_batches0 + 1);
         CHECK(immediate_gpu.last_transformed_position() ==
               (std::array<float, 4>{{5.0f, 6.0f, 0.0f, 1.0f}}));
 
+        generic_verts0 = immediate_gpu.immediate_vertices();
+        generic_batches0 = immediate_gpu.immediate_batches();
         emit_immediate(0x17FC, 1);
-        emit_immediate(0x1940, 0xFF804000u);
-        emit_immediate(0x1524, float_bits(1.0f));
+        emit_immediate(0x1940, 0xFF804000u);       // slot0 (UB): commits
+        emit_immediate(0x1524, float_bits(1.0f));  // commits again, unchanged
         emit_immediate(0x17FC, 0);
         kick_immediate();
         CHECK(immediate_fault.empty());
-        CHECK(immediate_gpu.immediate_vertices() == immediate_vertices_before_generic + 2);
-        CHECK(immediate_gpu.immediate_batches() == immediate_batches_before_generic + 2);
+        CHECK(immediate_gpu.immediate_vertices() == generic_verts0 + 2);
+        CHECK(immediate_gpu.immediate_batches() == generic_batches0 + 1);
         const auto converted_position = immediate_gpu.last_transformed_position();
         CHECK(converted_position[0] == 0.0f);
         CHECK(converted_position[1] == 0.25f);  // screen coordinate is truncated to 1/16
@@ -4493,6 +4499,1489 @@ int main() {
         CHECK(quad_gpu.immediate_quad_menu_i8_raster_batches() == full_old_menu_batches); CHECK(quad_gpu.immediate_quad_menu_i8_raster_writes() == full_old_menu_writes); CHECK(quad_gpu.immediate_quad_menu_i8_raster_output_hash() == full_old_menu_hash);
         CHECK(quad_gpu.immediate_quad_artwork_i8_raster_batches() == full_old_art_batches); CHECK(quad_gpu.immediate_quad_artwork_i8_raster_writes() == full_old_art_writes); CHECK(quad_gpu.immediate_quad_artwork_i8_raster_output_hash() == full_old_art_hash);
         CHECK(quad_gpu.immediate_quad_main_panel_raster_batches() == full_old_panel_batches); CHECK(quad_gpu.immediate_quad_main_panel_raster_writes() == full_old_panel_writes); CHECK(quad_gpu.immediate_quad_main_panel_raster_output_hash() == full_old_panel_hash);
+    }
+
+    // Root-cause NV2A fix: SET_VERTEX_DATA2F_M/2S/4UB/4S_M/4F_M must commit an immediate
+    // vertex when their write completes attribute slot 0 (position), exactly like the
+    // legacy SET_VERTEX4F family already did. Before the fix, these methods only stored
+    // attribute values and never advanced immediate_vertices_, silently discarding all
+    // geometry submitted through them -- the exact path the stock dashboard uses to
+    // draw its menu. Exercise every family end to end: a non-zero attribute slot (9,
+    // texcoord0) must never commit, and the write completing slot 0 must commit and
+    // feed a real, rasterized triangle through the depth-only witnessed profile.
+    {
+        std::string fam_fault;
+        xlle::Nv2a fam_gpu([&](const std::string& why) { fam_fault = why; });
+        std::vector<uint8_t> fam_ram(0x20000, 0);
+        fam_gpu.set_mem_access(
+            [&](uint32_t addr, void* dst, size_t n) {
+                if (addr > fam_ram.size() || n > fam_ram.size() - addr) return false;
+                std::memcpy(dst, fam_ram.data() + addr, n);
+                return true;
+            },
+            [&](uint32_t addr, const void* src, size_t n) {
+                if (addr > fam_ram.size() || n > fam_ram.size() - addr) return false;
+                std::memcpy(fam_ram.data() + addr, src, n);
+                return true;
+            });
+
+        fam_gpu.mmio_write(xlle::Nv2a::kBase + 0x700008, 4, 1);
+        fam_gpu.mmio_write(xlle::Nv2a::kBase + 0x70000C, 4, 0x80010020);
+        fam_gpu.mmio_write(xlle::Nv2a::kBase + 0x700200, 4, 0x97);
+        fam_gpu.mmio_write(xlle::Nv2a::kBase + 0x700010, 4, 2);
+        fam_gpu.mmio_write(xlle::Nv2a::kBase + 0x700014, 4, 0x80010030);
+        fam_gpu.mmio_write(xlle::Nv2a::kBase + 0x700018, 4, 3);
+        fam_gpu.mmio_write(xlle::Nv2a::kBase + 0x70001C, 4, 0x80010040);
+        fam_gpu.mmio_write(xlle::Nv2a::kBase + 0x700300, 4, 0x3D);
+        fam_gpu.mmio_write(xlle::Nv2a::kBase + 0x700304, 4, 0x03FFFFFF);
+        fam_gpu.mmio_write(xlle::Nv2a::kBase + 0x700308, 4, 0x00000000);
+        fam_gpu.mmio_write(xlle::Nv2a::kBase + 0x700400, 4, 0x3D);
+        fam_gpu.mmio_write(xlle::Nv2a::kBase + 0x700404, 4, 0x03FFFFFF);
+        fam_gpu.mmio_write(xlle::Nv2a::kBase + 0x700408, 4, 0x00000000);
+        fam_gpu.mmio_write(xlle::Nv2a::kBase + 0x700180, 4, 0x3D);
+        fam_gpu.mmio_write(xlle::Nv2a::kBase + 0x700184, 4, 0xFFFF);
+        fam_gpu.mmio_write(xlle::Nv2a::kBase + 0x700188, 4, 0x2000);
+        fam_gpu.mmio_write(xlle::Nv2a::kBase + 0x002504, 4, 1);
+        fam_gpu.mmio_write(xlle::Nv2a::kBase + 0x003204, 4, 0x100);
+        fam_gpu.mmio_write(xlle::Nv2a::kBase + 0x00322C, 4, 0x18);
+        fam_gpu.mmio_write(xlle::Nv2a::kBase + 0x003244, 4, 0);
+        fam_gpu.mmio_write(xlle::Nv2a::kBase + 0x003220, 4, 1);
+        fam_gpu.mmio_write(xlle::Nv2a::kBase + 0x003250, 4, 1);
+        fam_gpu.mmio_write(xlle::Nv2a::kBase + 0x003200, 4, 1);
+
+        constexpr uint32_t fam_pb = 0x2000;
+        uint32_t fam_cursor = 0;
+        auto emit_fam = [&](uint32_t method, uint32_t parameter) {
+            put32(fam_ram, fam_pb + fam_cursor, (1u << 18) | method);
+            put32(fam_ram, fam_pb + fam_cursor + 4, parameter);
+            fam_cursor += 8;
+        };
+        auto kick_fam = [&]() {
+            fam_gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, fam_cursor);
+        };
+        auto fam_float_bits = [](float value) {
+            uint32_t bits = 0;
+            std::memcpy(&bits, &value, sizeof(bits));
+            return bits;
+        };
+        auto pack_s16 = [](int16_t lo, int16_t hi) {
+            return (static_cast<uint32_t>(static_cast<uint16_t>(hi)) << 16) |
+                   static_cast<uint32_t>(static_cast<uint16_t>(lo));
+        };
+        auto pack_ub4 = [](uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+            return static_cast<uint32_t>(r) | (static_cast<uint32_t>(g) << 8) |
+                   (static_cast<uint32_t>(b) << 16) | (static_cast<uint32_t>(a) << 24);
+        };
+
+        // Depth-only witnessed profile (the same subset the dashboard's fixed-function
+        // depth prepass above uses), reused here so every family's commit can be proven
+        // with a real rasterized triangle rather than just a raw method counter.
+        emit_fam(0x0000, 1);
+        emit_fam(0x0194, 2);  // color DMA object
+        emit_fam(0x0198, 3);  // zeta DMA object
+        emit_fam(0x0200, 0x00400000);
+        emit_fam(0x0204, 0x00400000);
+        emit_fam(0x0208, 0x00000113);
+        emit_fam(0x020C, 0x00800080);
+        emit_fam(0x0214, 0x00008000);
+        emit_fam(0x0290, 1);
+        emit_fam(0x02C0, 0x003F0000);
+        emit_fam(0x02E0, 0x003F0000);
+        emit_fam(0x0300, 0);
+        emit_fam(0x0304, 0);
+        emit_fam(0x0308, 1);
+        emit_fam(0x030C, 1);
+        emit_fam(0x0310, 0);
+        emit_fam(0x032C, 0);
+        emit_fam(0x0338, 1);
+        emit_fam(0x0354, 0x0203);
+        emit_fam(0x0358, 0);
+        emit_fam(0x035C, 1);
+        emit_fam(0x037C, 0x1D01);
+        emit_fam(0x0384, 0x00000000);
+        emit_fam(0x0388, 0x41200000);
+        emit_fam(0x038C, 0x1B02);
+        emit_fam(0x0390, 0x1B02);
+        emit_fam(0x0394, 0x00000000);
+        emit_fam(0x0398, 0x477FFF00);
+        emit_fam(0x039C, 0x0405);
+        emit_fam(0x03A0, 0x0900);
+        emit_fam(0x1D78, 1);
+        emit_fam(0x1E9C, 0);
+        emit_fam(0x0B00, 0x00000000);  // MOV oPos, v0 (final)
+        emit_fam(0x0B04, 0x0020001B);
+        emit_fam(0x0B08, 0x0836106C);
+        emit_fam(0x0B0C, 0x2070F801);
+        emit_fam(0x1EA0, 0);
+        emit_fam(0x1E94, 2);
+        kick_fam();
+        CHECK(fam_fault.empty());
+
+        auto reset_zeta = [&]() { std::memset(fam_ram.data() + 0x8000, 0xFF, 128 * 64); };
+
+        // Real pixel-scale positions, matching the winding/sign of the proven
+        // fixed-function depth-only draw above, for the families whose encoding
+        // carries full-range values.
+        const float px[3] = {10.0f, 30.0f, 20.0f};
+        const float py[3] = {20.0f, 20.0f, 40.0f};
+        const float pz = 100.75f;
+
+        struct FamilySnapshot {
+            uint64_t batches, verts, vbatches, prims, tris, rtris, rfrags, dwrites, methods;
+        };
+        auto snapshot = [&]() -> FamilySnapshot {
+            return {fam_gpu.immediate_batches(), fam_gpu.immediate_vertices(),
+                    fam_gpu.vertex_batches(),     fam_gpu.assembled_primitives(),
+                    fam_gpu.assembled_triangles(), fam_gpu.rasterized_triangles(),
+                    fam_gpu.rasterized_fragments(), fam_gpu.depth_writes(),
+                    fam_gpu.immediate_methods()};
+        };
+
+        // --- SET_VERTEX_DATA2F_M (0x1880-0x1900): 2 methods/vertex land on slot 0. ---
+        {
+            reset_zeta();
+            const FamilySnapshot s = snapshot();
+            emit_fam(0x17FC, 5);
+            for (int v = 0; v < 3; ++v) {
+                emit_fam(0x18C8, fam_float_bits(0.5f));   // texcoord0 (slot9).x: no commit
+                emit_fam(0x18CC, fam_float_bits(0.5f));   // texcoord0 (slot9).y: no commit
+                emit_fam(0x1880, fam_float_bits(px[v]));  // position (slot0).x: no commit
+                emit_fam(0x1884, fam_float_bits(py[v]));  // position (slot0).y: commits
+            }
+            emit_fam(0x17FC, 0);
+            kick_fam();
+            CHECK(fam_fault.empty());
+            CHECK(fam_gpu.immediate_methods() == s.methods + 12);
+            CHECK(fam_gpu.immediate_batches() == s.batches + 1);
+            CHECK(fam_gpu.immediate_vertices() == s.verts + 3);
+            CHECK(fam_gpu.vertex_batches() == s.vbatches + 1);
+            CHECK(fam_gpu.assembled_primitives() == s.prims + 1);
+            CHECK(fam_gpu.assembled_triangles() == s.tris + 1);
+            CHECK(fam_gpu.rasterized_triangles() == s.rtris + 1);
+            CHECK(fam_gpu.rasterized_fragments() > s.rfrags);
+            CHECK(fam_gpu.depth_writes() > s.dwrites);
+        }
+
+        // --- SET_VERTEX_DATA2S (0x1900-0x1940): 1 method/vertex lands on slot 0. ---
+        {
+            reset_zeta();
+            const FamilySnapshot s = snapshot();
+            emit_fam(0x17FC, 5);
+            for (int v = 0; v < 3; ++v) {
+                emit_fam(0x1924, pack_s16(1, 1));  // texcoord0 (slot9): no commit
+                emit_fam(0x1900,                   // position (slot0): commits
+                         pack_s16(static_cast<int16_t>(px[v]),
+                                  static_cast<int16_t>(py[v])));
+            }
+            emit_fam(0x17FC, 0);
+            kick_fam();
+            CHECK(fam_fault.empty());
+            CHECK(fam_gpu.immediate_methods() == s.methods + 6);
+            CHECK(fam_gpu.immediate_batches() == s.batches + 1);
+            CHECK(fam_gpu.immediate_vertices() == s.verts + 3);
+            CHECK(fam_gpu.vertex_batches() == s.vbatches + 1);
+            CHECK(fam_gpu.assembled_primitives() == s.prims + 1);
+            CHECK(fam_gpu.assembled_triangles() == s.tris + 1);
+            CHECK(fam_gpu.rasterized_triangles() == s.rtris + 1);
+            CHECK(fam_gpu.rasterized_fragments() > s.rfrags);
+            CHECK(fam_gpu.depth_writes() > s.dwrites);
+        }
+
+        // --- SET_VERTEX_DATA4UB (0x1940-0x1980): 1 method/vertex lands on slot 0.
+        // Its unorm-byte encoding only spans [0,1], so the resulting triangle is
+        // sub-pixel; assert the method/commit/assembly accounting plus that the
+        // rasterizer was actually reached (rather than fragment/depth-write counts,
+        // which a sub-pixel triangle can legitimately leave at zero). ---
+        {
+            reset_zeta();
+            const FamilySnapshot s = snapshot();
+            emit_fam(0x17FC, 5);
+            for (int v = 0; v < 3; ++v) {
+                emit_fam(0x1964, pack_ub4(10, 20, 30, 40));  // texcoord0 (slot9): no commit
+                const uint8_t bx = static_cast<uint8_t>(px[v] * 2.0f);
+                const uint8_t by = static_cast<uint8_t>(py[v] * 2.0f);
+                emit_fam(0x1940, pack_ub4(bx, by, 128, 255));  // position (slot0): commits
+            }
+            emit_fam(0x17FC, 0);
+            kick_fam();
+            CHECK(fam_fault.empty());
+            CHECK(fam_gpu.immediate_methods() == s.methods + 6);
+            CHECK(fam_gpu.immediate_batches() == s.batches + 1);
+            CHECK(fam_gpu.immediate_vertices() == s.verts + 3);
+            CHECK(fam_gpu.vertex_batches() == s.vbatches + 1);
+            CHECK(fam_gpu.assembled_primitives() == s.prims + 1);
+            CHECK(fam_gpu.assembled_triangles() == s.tris + 1);
+            CHECK(fam_gpu.rasterized_triangles() == s.rtris + 1);
+        }
+
+        // --- SET_VERTEX_DATA4S_M (0x1980-0x1A00): 2 methods/vertex land on slot 0;
+        // only the second (part 1, z/w) completes the vertex. ---
+        {
+            reset_zeta();
+            const FamilySnapshot s = snapshot();
+            emit_fam(0x17FC, 5);
+            for (int v = 0; v < 3; ++v) {
+                emit_fam(0x19C8, pack_s16(1, 1));  // texcoord0 (slot9) part 0: no commit
+                emit_fam(0x19CC, pack_s16(1, 1));  // texcoord0 (slot9) part 1: no commit
+                emit_fam(0x1980,                   // position (slot0) part 0 (x,y): no commit
+                         pack_s16(static_cast<int16_t>(px[v]),
+                                  static_cast<int16_t>(py[v])));
+                emit_fam(0x1984, pack_s16(static_cast<int16_t>(pz), 1));  // part 1 (z,w): commits
+            }
+            emit_fam(0x17FC, 0);
+            kick_fam();
+            CHECK(fam_fault.empty());
+            CHECK(fam_gpu.immediate_methods() == s.methods + 12);
+            CHECK(fam_gpu.immediate_batches() == s.batches + 1);
+            CHECK(fam_gpu.immediate_vertices() == s.verts + 3);
+            CHECK(fam_gpu.vertex_batches() == s.vbatches + 1);
+            CHECK(fam_gpu.assembled_primitives() == s.prims + 1);
+            CHECK(fam_gpu.assembled_triangles() == s.tris + 1);
+            CHECK(fam_gpu.rasterized_triangles() == s.rtris + 1);
+            CHECK(fam_gpu.rasterized_fragments() > s.rfrags);
+            CHECK(fam_gpu.depth_writes() > s.dwrites);
+        }
+
+        // --- SET_VERTEX_DATA4F_M (0x1A00-0x1B00): 4 methods/vertex land on slot 0;
+        // only the fourth (component 3, w) completes the vertex. ---
+        {
+            reset_zeta();
+            const FamilySnapshot s = snapshot();
+            emit_fam(0x17FC, 5);
+            for (int v = 0; v < 3; ++v) {
+                emit_fam(0x1A90, fam_float_bits(0.5f));    // texcoord0 (slot9).x: no commit
+                emit_fam(0x1A94, fam_float_bits(0.5f));    // texcoord0 (slot9).y: no commit
+                emit_fam(0x1A98, fam_float_bits(0.0f));    // texcoord0 (slot9).z: no commit
+                emit_fam(0x1A9C, fam_float_bits(1.0f));    // texcoord0 (slot9).w: no commit
+                emit_fam(0x1A00, fam_float_bits(px[v]));   // position (slot0).x: no commit
+                emit_fam(0x1A04, fam_float_bits(py[v]));   // position (slot0).y: no commit
+                emit_fam(0x1A08, fam_float_bits(pz));      // position (slot0).z: no commit
+                emit_fam(0x1A0C, fam_float_bits(1.0f));    // position (slot0).w: commits
+            }
+            emit_fam(0x17FC, 0);
+            kick_fam();
+            CHECK(fam_fault.empty());
+            CHECK(fam_gpu.immediate_methods() == s.methods + 24);
+            CHECK(fam_gpu.immediate_batches() == s.batches + 1);
+            CHECK(fam_gpu.immediate_vertices() == s.verts + 3);
+            CHECK(fam_gpu.vertex_batches() == s.vbatches + 1);
+            CHECK(fam_gpu.assembled_primitives() == s.prims + 1);
+            CHECK(fam_gpu.assembled_triangles() == s.tris + 1);
+            CHECK(fam_gpu.rasterized_triangles() == s.rtris + 1);
+            CHECK(fam_gpu.rasterized_fragments() > s.rfrags);
+            CHECK(fam_gpu.depth_writes() > s.dwrites);
+        }
+
+        // Writing only a non-zero slot (texcoord0/slot9) through any of the families
+        // must never commit: the method counter rises but no vertex, batch, or
+        // primitive is ever produced.
+        {
+            reset_zeta();
+            const FamilySnapshot s = snapshot();
+            emit_fam(0x17FC, 5);
+            for (int v = 0; v < 3; ++v) {
+                emit_fam(0x18C8, fam_float_bits(0.25f));  // texcoord0 (slot9).x
+                emit_fam(0x18CC, fam_float_bits(0.75f));  // texcoord0 (slot9).y
+            }
+            emit_fam(0x17FC, 0);
+            kick_fam();
+            CHECK(fam_fault.empty());
+            CHECK(fam_gpu.immediate_methods() == s.methods + 6);
+            CHECK(fam_gpu.immediate_batches() == s.batches);
+            CHECK(fam_gpu.immediate_vertices() == s.verts);
+            CHECK(fam_gpu.vertex_batches() == s.vbatches);
+            CHECK(fam_gpu.assembled_primitives() == s.prims);
+            CHECK(fam_gpu.assembled_triangles() == s.tris);
+            CHECK(fam_gpu.rasterized_triangles() == s.rtris);
+        }
+    }
+
+    // Generic NV2A register-combiner evaluator (rasterize_generic_combiner_batch).
+    // Every Profile above is an exact-match fingerprint; anything else used to fall
+    // through with executed=false and zero fragment writes. These tests exercise the
+    // decoder/evaluator that now replaces that silent drop for the states none of the
+    // profiles above claim.
+    {
+        std::string gc_fault;
+        xlle::Nv2a gc_gpu([&](const std::string& why) { gc_fault = why; });
+        std::vector<uint8_t> gc_ram(0x40000, 0);
+        gc_gpu.set_mem_access(
+            [&](uint32_t addr, void* dst, size_t n) {
+                if (addr > gc_ram.size() || n > gc_ram.size() - addr) return false;
+                std::memcpy(dst, gc_ram.data() + addr, n);
+                return true;
+            },
+            [&](uint32_t addr, const void* src, size_t n) {
+                if (addr > gc_ram.size() || n > gc_ram.size() - addr) return false;
+                std::memcpy(gc_ram.data() + addr, src, n);
+                return true;
+            });
+
+        gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x700008, 4, 1);
+        gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x70000C, 4, 0x80010020);
+        gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x700200, 4, 0x97);
+        gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x700010, 4, 2);
+        gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x700014, 4, 0x80010030);
+        gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x700018, 4, 3);
+        gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x70001C, 4, 0x80010040);
+        gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x700300, 4, 0x3D);
+        gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x700304, 4, 0x03FFFFFF);
+        gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x700308, 4, 0x00000000);
+        gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x700400, 4, 0x3D);
+        gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x700404, 4, 0x03FFFFFF);
+        gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x700408, 4, 0x00000000);
+        gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x700180, 4, 0x3D);
+        gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x700184, 4, 0xFFFF);
+        gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x700188, 4, 0x2000);
+        gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x002504, 4, 1);
+        gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x003204, 4, 0x100);
+        gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x00322C, 4, 0x18);
+        gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x003244, 4, 0);
+        gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x003220, 4, 1);
+        gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x003250, 4, 1);
+        gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x003200, 4, 1);
+
+        constexpr uint32_t gc_pb = 0x2000;
+        uint32_t gc_cursor = 0;
+        auto emit_gc = [&](uint32_t method, uint32_t parameter) {
+            put32(gc_ram, gc_pb + gc_cursor, (1u << 18) | method);
+            put32(gc_ram, gc_pb + gc_cursor + 4, parameter);
+            gc_cursor += 8;
+        };
+        auto kick_gc = [&]() {
+            gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, gc_cursor);
+        };
+        auto gc_float_bits = [](float value) {
+            uint32_t bits = 0;
+            std::memcpy(&bits, &value, sizeof(bits));
+            return bits;
+        };
+        auto gc_pack_ub4 = [](uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+            return static_cast<uint32_t>(r) | (static_cast<uint32_t>(g) << 8) |
+                   (static_cast<uint32_t>(b) << 16) | (static_cast<uint32_t>(a) << 24);
+        };
+        // Fixed-function unlit transform with an identity 4x4 matrix and zero viewport
+        // offset, so screen position == raw vertex position and diffuse == the raw
+        // SET_VERTEX_DATA4UB write (vertex_attributes_[3]), exactly like the proven
+        // radial-combiner/inline-linear-blit profiles' own transform setup above.
+        emit_gc(0x0000, 1);
+        emit_gc(0x0194, 2);
+        emit_gc(0x0198, 3);
+        const uint32_t gc_identity[] = {
+            0x3F800000, 0, 0, 0,
+            0, 0x3F800000, 0, 0,
+            0, 0, 0x3F800000, 0,
+            0, 0, 0, 0x3F800000,
+        };
+        for (uint32_t i = 0; i < 16; ++i) emit_gc(0x0680 + i * 4, gc_identity[i]);
+        emit_gc(0x0A20, 0);
+        emit_gc(0x0A24, 0);
+        emit_gc(0x0294, 0x00020001);  // LIGHT_CONTROL -> unlit_subset index 5
+        emit_gc(0x0314, 0);           // lighting disabled
+        emit_gc(0x03B8, 0);           // specular disabled
+        emit_gc(0x1E94, 0);           // fixed-function transform mode
+        kick_gc();
+        CHECK(gc_fault.empty());
+
+        auto submit_triangle = [&](float x0, float y0, float x1, float y1,
+                                   float x2, float y2, float z, float w,
+                                   uint32_t rgba) {
+            emit_gc(0x17FC, 5);
+            for (auto xy : {std::pair{x0, y0}, std::pair{x1, y1}, std::pair{x2, y2}}) {
+                emit_gc(0x1518, gc_float_bits(xy.first));
+                emit_gc(0x151C, gc_float_bits(xy.second));
+                emit_gc(0x1520, gc_float_bits(z));
+                emit_gc(0x194C, rgba);  // SET_VERTEX_DATA4UB slot3 (diffuse)
+                emit_gc(0x1524, gc_float_bits(w));  // completes slot0 -> commits
+            }
+            emit_gc(0x17FC, 0);
+            kick_gc();
+        };
+
+        // --- (a) Exact dashboard fingerprint: 1-stage combiner, shader=00000000/
+        // 00210000, comb=00000001, tex=0, textureless. Reproduces the raster-state
+        // that was silently recorder-only (executed=false, zero writes) before this
+        // evaluator existed; see build/probe-stockdash-vfix-11.5b.stdout.log RS0-RS7. ---
+        {
+            emit_gc(0x0200, 0x00400000);  // clip 64 wide, x=0
+            emit_gc(0x0204, 0x00400000);  // clip 64 tall, y=0
+            emit_gc(0x0208, 0x00000128);  // pitch A8R8G8B8 + Z24S8
+            emit_gc(0x020C, 0x01000100);  // pitch 256 (color and zeta)
+            emit_gc(0x0210, 0x00010000);  // color offset
+            emit_gc(0x0214, 0x00020000);  // zeta offset
+            emit_gc(0x0290, 0x00100001);  // control0
+            emit_gc(0x02C0, 0x003F0000);  // window horizontal
+            emit_gc(0x02E0, 0x003F0000);  // window vertical
+            emit_gc(0x033C, 0x0207);      // alpha ALWAYS
+            emit_gc(0x0340, 0);
+            emit_gc(0x0344, 0x0302);      // blend SRC_ALPHA
+            emit_gc(0x0348, 0x0303);      // blend ONE_MINUS_SRC_ALPHA
+            emit_gc(0x0350, 0x8006);      // FUNC_ADD
+            emit_gc(0x0354, 0x0203);      // depth LEQUAL
+            emit_gc(0x0358, 0x01010101);  // color mask
+            emit_gc(0x035C, 0);           // depth writes disabled (matches the log)
+            emit_gc(0x037C, 0x1D01);      // smooth shading
+            emit_gc(0x038C, 0x1B02);      // front fill
+            emit_gc(0x0390, 0x1B02);      // back fill
+            emit_gc(0x0394, 0);           // clip min
+            emit_gc(0x0398, 0x4B7FFFFF);  // clip max (16777215.0f)
+            emit_gc(0x039C, 0x0405);      // cull back
+            emit_gc(0x03A0, 0x0900);      // CW front
+            emit_gc(0x1D78, 1);           // zminmax control
+            emit_gc(0x1E70, 0);           // shader stage program
+            emit_gc(0x1E74, 0);           // dot-RGB mapping
+            emit_gc(0x1E78, 0x00210000);  // shader other-stage input
+            emit_gc(0x1E60, 0x00000001);  // combiner control: 1 stage
+            emit_gc(0x0AC0, 0x04200000);  // ColorIcw0: D=PRIMARY_COLOR identity, C=ZERO invert
+            emit_gc(0x0260, 0x14200000);  // AlphaIcw0: D=PRIMARY_COLOR.a identity, C=ZERO invert
+            emit_gc(0x1E40, 0x00000C00);  // ColorOcw0: SUM -> R0
+            emit_gc(0x0AA0, 0x00000C00);  // AlphaOcw0: SUM -> R0
+            emit_gc(0x0288, 0x0000000C);  // SpecularFog0: identity final combiner
+            emit_gc(0x028C, 0x00001C80);  // SpecularFog1: identity final combiner
+            emit_gc(0x1E20, 0);           // FinalFactor0
+            emit_gc(0x1E24, 0);           // FinalFactor1
+            for (uint32_t offset = 0; offset < 256u * 64u; offset += 4)
+                put32(gc_ram, 0x20000 + offset, 0xFFFFFFFFu);  // zeta: LEQUAL always passes
+            std::memset(gc_ram.data() + 0x10000, 0, 256 * 64);
+
+            const uint64_t before_generic_batches = gc_gpu.generic_combiner_batches();
+            const uint64_t before_generic_executed =
+                gc_gpu.generic_combiner_executed_batches();
+            const uint64_t before_generic_writes = gc_gpu.generic_combiner_writes();
+            submit_triangle(0.0f, 0.0f, 40.0f, 0.0f, 0.0f, 40.0f, 50.0f, 1.0f,
+                            gc_pack_ub4(0x11, 0x22, 0x33, 0xCC));
+            CHECK(gc_fault.empty());
+            CHECK(gc_gpu.generic_combiner_batches() == before_generic_batches + 1);
+            CHECK(gc_gpu.generic_combiner_executed_batches() ==
+                  before_generic_executed + 1);
+            CHECK(gc_gpu.generic_combiner_fragments() > 0);
+            CHECK(gc_gpu.generic_combiner_writes() > before_generic_writes);
+            const uint32_t gc_a_offset = 5 * 256 + 5 * 4;
+            CHECK(get32(gc_ram, 0x10000 + gc_a_offset) != 0);
+            CHECK(gc_gpu.last_generic_combiner_raster_address() >= 0x10000);
+            CHECK(gc_gpu.last_generic_combiner_raster_address() < 0x10000 + 256u * 64u);
+            CHECK(gc_gpu.generic_combiner_output_hash() != 1469598103934665603ull);
+            // Depth writes stayed off (DepthMask==0, matching the witnessed log).
+            CHECK(get32(gc_ram, 0x20000 + gc_a_offset) == 0xFFFFFFFFu);
+        }
+
+        // --- (b) Two-stage combiner: CONSTANT_COLOR0 (Factor0) modulated by
+        // UNSIGNED_INVERT, then multiplied by PRIMARY_COLOR (diffuse) in stage 1.
+        // Factor0 = 0x00404040 (R=G=B=0x40=64), diffuse = (R=0x80,G=0x60,B=0x40,A=0xFF).
+        // Stage 0: R0.rgb = UNSIGNED_INVERT(Factor0) = (255-64)/255 = 191/255 for all
+        // three channels (A = CONSTANT_COLOR0 invert, B = ZERO invert = 1, AB = A*B).
+        // R0.a = 1 (A = B = ZERO invert = 1, AB = 1).
+        // Stage 1: R0.rgb *= diffuse.rgb (componentwise), R0.a *= diffuse.a.
+        //   R = floor(191*128/255 + 0.5) = floor(96.3745) = 96 = 0x60
+        //   G = floor(191*96/255 + 0.5)  = floor(72.4059) = 72 = 0x48
+        //   B = floor(191*64/255 + 0.5)  = floor(48.4373) = 48 = 0x30
+        //   A = 1*1 = 1 -> 255 = 0xFF
+        // Final combiner is the same identity passthrough as (a), blend disabled
+        // (ONE/ZERO) and depth/alpha set to ALWAYS with depth writes off, so no zeta
+        // surface is needed at all: expected pixel is exactly 0xFF604830. ---
+        {
+            emit_gc(0x0200, 0x00400000);
+            emit_gc(0x0204, 0x00400000);
+            emit_gc(0x0208, 0x00000108);  // pitch A8R8G8B8, no zeta component
+            emit_gc(0x020C, 0x01000100);
+            emit_gc(0x0210, 0x00010000);
+            emit_gc(0x0290, 0x00100001);
+            emit_gc(0x02C0, 0x003F0000);
+            emit_gc(0x02E0, 0x003F0000);
+            emit_gc(0x033C, 0x0207);      // alpha ALWAYS
+            emit_gc(0x0340, 0);
+            emit_gc(0x0344, 1);           // blend ONE
+            emit_gc(0x0348, 0);           // blend ZERO (disabled)
+            emit_gc(0x0350, 0x8006);
+            emit_gc(0x0354, 0x0207);      // depth ALWAYS
+            emit_gc(0x0358, 0x01010101);
+            emit_gc(0x035C, 0);           // depth writes off -> uses_depth==false
+            emit_gc(0x037C, 0x1D01);
+            emit_gc(0x038C, 0x1B02);
+            emit_gc(0x0390, 0x1B02);
+            emit_gc(0x0394, 0);
+            emit_gc(0x0398, 0x4B7FFFFF);
+            emit_gc(0x039C, 0x0405);
+            emit_gc(0x03A0, 0x0900);
+            emit_gc(0x1D78, 1);
+            emit_gc(0x1E70, 0);
+            emit_gc(0x1E74, 0);
+            emit_gc(0x1E78, 0);
+            emit_gc(0x1E60, 0x00000002);  // combiner control: 2 stages
+            emit_gc(0x0AC0, 0x00002021);  // stage0 ColorIcw: A=C0 invert, B=ZERO invert
+            emit_gc(0x0260, 0x00002020);  // stage0 AlphaIcw: A=ZERO invert, B=ZERO invert
+            emit_gc(0x1E40, 0x000000C0);  // stage0 ColorOcw: AB -> R0
+            emit_gc(0x0AA0, 0x000000C0);  // stage0 AlphaOcw: AB -> R0
+            emit_gc(0x0AC4, 0x0000040C);  // stage1 ColorIcw: A=R0, B=PRIMARY_COLOR
+            emit_gc(0x0264, 0x0000141C);  // stage1 AlphaIcw: A=R0.a, B=PRIMARY_COLOR.a
+            emit_gc(0x1E44, 0x000000C0);  // stage1 ColorOcw: AB -> R0
+            emit_gc(0x0AA4, 0x000000C0);  // stage1 AlphaOcw: AB -> R0
+            emit_gc(0x0A60, 0x00404040);  // Factor0 (stage0): R=G=B=0x40
+            emit_gc(0x0288, 0x0000000C);
+            emit_gc(0x028C, 0x00001C80);
+            emit_gc(0x1E20, 0);
+            emit_gc(0x1E24, 0);
+            std::memset(gc_ram.data() + 0x10000, 0, 256 * 64);
+
+            submit_triangle(0.0f, 0.0f, 40.0f, 0.0f, 0.0f, 40.0f, 10.0f, 1.0f,
+                            gc_pack_ub4(0x80, 0x60, 0x40, 0xFF));
+            CHECK(gc_fault.empty());
+            const uint32_t gc_b_offset = 5 * 256 + 5 * 4;
+            CHECK(get32(gc_ram, 0x10000 + gc_b_offset) == 0xFF604830u);
+        }
+
+        // --- (c) Unsupported feature: same fingerprint as (a) but with a
+        // final-combiner signature this evaluator does not recognize (only the
+        // identity-passthrough SpecularFog/FinalFactor pair is supported). This
+        // must land in the kFinalCombiner skip-reason census, not silently drop:
+        // no fragment/color writes, executed stays false, and the skip counter
+        // advances by exactly one. ---
+        {
+            emit_gc(0x0200, 0x00400000);
+            emit_gc(0x0204, 0x00400000);
+            emit_gc(0x0208, 0x00000128);
+            emit_gc(0x020C, 0x01000100);
+            emit_gc(0x0210, 0x00010000);
+            emit_gc(0x0214, 0x00020000);
+            emit_gc(0x0290, 0x00100001);
+            emit_gc(0x02C0, 0x003F0000);
+            emit_gc(0x02E0, 0x003F0000);
+            emit_gc(0x033C, 0x0207);
+            emit_gc(0x0340, 0);
+            emit_gc(0x0344, 0x0302);
+            emit_gc(0x0348, 0x0303);
+            emit_gc(0x0350, 0x8006);
+            emit_gc(0x0354, 0x0203);
+            emit_gc(0x0358, 0x01010101);
+            emit_gc(0x035C, 0);
+            emit_gc(0x037C, 0x1D01);
+            emit_gc(0x038C, 0x1B02);
+            emit_gc(0x0390, 0x1B02);
+            emit_gc(0x0394, 0);
+            emit_gc(0x0398, 0x4B7FFFFF);
+            emit_gc(0x039C, 0x0405);
+            emit_gc(0x03A0, 0x0900);
+            emit_gc(0x1D78, 1);
+            emit_gc(0x1E70, 0);
+            emit_gc(0x1E74, 0);
+            emit_gc(0x1E78, 0x00210000);
+            emit_gc(0x1E60, 0x00000001);
+            emit_gc(0x0AC0, 0x04200000);
+            emit_gc(0x0260, 0x14200000);
+            emit_gc(0x1E40, 0x00000C00);
+            emit_gc(0x0AA0, 0x00000C00);
+            emit_gc(0x0288, 0x00000001);  // not the identity-passthrough signature
+            emit_gc(0x028C, 0x00001C80);
+            emit_gc(0x1E20, 0);
+            emit_gc(0x1E24, 0);
+            std::memset(gc_ram.data() + 0x10000, 0xAB, 256 * 64);
+            const std::vector<uint8_t> before_pixels(
+                gc_ram.begin() + 0x10000, gc_ram.begin() + 0x10000 + 256 * 64);
+
+            const size_t final_combiner_reason =
+                static_cast<size_t>(xlle::Nv2a::GenericSkipReason::kFinalCombiner);
+            const uint64_t before_skip =
+                gc_gpu.generic_skip_reason_batches(final_combiner_reason);
+            const uint64_t before_generic_batches = gc_gpu.generic_combiner_batches();
+            const uint64_t before_generic_executed =
+                gc_gpu.generic_combiner_executed_batches();
+            submit_triangle(0.0f, 0.0f, 40.0f, 0.0f, 0.0f, 40.0f, 50.0f, 1.0f,
+                            gc_pack_ub4(0x11, 0x22, 0x33, 0xCC));
+            CHECK(gc_fault.empty());
+            CHECK(gc_gpu.generic_skip_reason_batches(final_combiner_reason) ==
+                  before_skip + 1);
+            CHECK(gc_gpu.generic_combiner_batches() == before_generic_batches);
+            CHECK(gc_gpu.generic_combiner_executed_batches() ==
+                  before_generic_executed);
+            CHECK(std::equal(before_pixels.begin(), before_pixels.end(),
+                             gc_ram.begin() + 0x10000));
+        }
+
+        // --- (d) Exact witnessed stock-dashboard fingerprint (coordinator-supplied
+        // RS0-RS15 evidence): sfmt=00000124 (X8R8G8B8 color / Z24S8 zeta, pitch-linear,
+        // no AA -- color_format=4, not 8), en=00000016 (blend+cull+dither enabled;
+        // alpha test/depth test are OFF via their own enable bits, so AlphaFunc==0207
+        // and DepthFunc==0203 are hardware-unread), blend=302/303/8006, comb=00000001,
+        // shader=00000000/00210000, tex=0, surface color offset=03aa4000. Before the
+        // per-feature semantic gate, every one of these 12,106 witnessed batches hit
+        // kUnsupportedColorFormat (color_format 4 was never accepted). The witnessed
+        // pitch word 0x00401400 packs an internally-consistent color pitch (0x1400 ==
+        // 1280 * 4bpp, matching clip width 1280) with a zeta pitch (0x0040) that this
+        // evaluator never validates here because depth test/write are both disabled
+        // for this exact state, so hardware -- and this evaluator -- never touch zeta. ---
+        {
+            std::string d_fault;
+            xlle::Nv2a d_gpu([&](const std::string& why) { d_fault = why; });
+            std::vector<uint8_t> d_ram(0x04000000, 0);
+            d_gpu.set_mem_access(
+                [&](uint32_t addr, void* dst, size_t n) {
+                    if (addr > d_ram.size() || n > d_ram.size() - addr) return false;
+                    std::memcpy(dst, d_ram.data() + addr, n);
+                    return true;
+                },
+                [&](uint32_t addr, const void* src, size_t n) {
+                    if (addr > d_ram.size() || n > d_ram.size() - addr) return false;
+                    std::memcpy(d_ram.data() + addr, src, n);
+                    return true;
+                });
+            d_gpu.mmio_write(xlle::Nv2a::kBase + 0x700008, 4, 1);
+            d_gpu.mmio_write(xlle::Nv2a::kBase + 0x70000C, 4, 0x80010020);
+            d_gpu.mmio_write(xlle::Nv2a::kBase + 0x700200, 4, 0x97);
+            d_gpu.mmio_write(xlle::Nv2a::kBase + 0x700010, 4, 2);
+            d_gpu.mmio_write(xlle::Nv2a::kBase + 0x700014, 4, 0x80010030);
+            d_gpu.mmio_write(xlle::Nv2a::kBase + 0x700300, 4, 0x3D);
+            d_gpu.mmio_write(xlle::Nv2a::kBase + 0x700304, 4, 0x03FFFFFF);
+            d_gpu.mmio_write(xlle::Nv2a::kBase + 0x700308, 4, 0x00000000);
+            d_gpu.mmio_write(xlle::Nv2a::kBase + 0x700180, 4, 0x3D);
+            d_gpu.mmio_write(xlle::Nv2a::kBase + 0x700184, 4, 0xFFFF);
+            d_gpu.mmio_write(xlle::Nv2a::kBase + 0x700188, 4, 0x2000);
+            d_gpu.mmio_write(xlle::Nv2a::kBase + 0x002504, 4, 1);
+            d_gpu.mmio_write(xlle::Nv2a::kBase + 0x003204, 4, 0x100);
+            d_gpu.mmio_write(xlle::Nv2a::kBase + 0x00322C, 4, 0x18);
+            d_gpu.mmio_write(xlle::Nv2a::kBase + 0x003244, 4, 0);
+            d_gpu.mmio_write(xlle::Nv2a::kBase + 0x003220, 4, 1);
+            d_gpu.mmio_write(xlle::Nv2a::kBase + 0x003250, 4, 1);
+            d_gpu.mmio_write(xlle::Nv2a::kBase + 0x003200, 4, 1);
+
+            constexpr uint32_t d_pb = 0x2000;
+            uint32_t d_cursor = 0;
+            auto emit_d = [&](uint32_t method, uint32_t parameter) {
+                put32(d_ram, d_pb + d_cursor, (1u << 18) | method);
+                put32(d_ram, d_pb + d_cursor + 4, parameter);
+                d_cursor += 8;
+            };
+            auto kick_d = [&]() {
+                d_gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, d_cursor);
+            };
+            auto d_float_bits = [](float value) {
+                uint32_t bits = 0;
+                std::memcpy(&bits, &value, sizeof(bits));
+                return bits;
+            };
+            auto d_pack_ub4 = [](uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+                return static_cast<uint32_t>(r) | (static_cast<uint32_t>(g) << 8) |
+                       (static_cast<uint32_t>(b) << 16) | (static_cast<uint32_t>(a) << 24);
+            };
+
+            emit_d(0x0000, 1);
+            emit_d(0x0194, 2);
+            const uint32_t d_identity[] = {
+                0x3F800000, 0, 0, 0,
+                0, 0x3F800000, 0, 0,
+                0, 0, 0x3F800000, 0,
+                0, 0, 0, 0x3F800000,
+            };
+            for (uint32_t i = 0; i < 16; ++i) emit_d(0x0680 + i * 4, d_identity[i]);
+            emit_d(0x0A20, 0);
+            emit_d(0x0A24, 0);
+            emit_d(0x0294, 0x00020001);
+            emit_d(0x0314, 0);
+            emit_d(0x03B8, 0);
+            emit_d(0x1E94, 0);
+
+            emit_d(0x0200, 0x05000000);   // clip: width=1280, x=0
+            emit_d(0x0204, 0x03C00000);   // clip: height=960, y=0
+            emit_d(0x0208, 0x00000124);   // sfmt: X8R8G8B8 + Z24S8, pitch-linear, no AA
+            emit_d(0x020C, 0x00401400);   // pitch: color=0x1400, zeta=0x0040 (unused)
+            emit_d(0x0210, 0x03AA4000);   // color offset -- the witnessed surf address
+            emit_d(0x0290, 0x00100001);   // control0
+            emit_d(0x02C0, 0x04FF0000);   // window horizontal: 0..1279
+            emit_d(0x02E0, 0x03BF0000);   // window vertical: 0..959
+            emit_d(0x0300, 0);            // alpha test disabled (en bit0==0)
+            emit_d(0x0304, 1);            // blend enabled (en bit1)
+            emit_d(0x0308, 1);            // cull enabled (en bit2)
+            emit_d(0x030C, 0);            // depth test disabled (en bit3==0)
+            emit_d(0x0310, 1);            // dither enabled (inert here)
+            emit_d(0x033C, 0x0207);       // AlphaFunc ALWAYS (unread: test disabled)
+            emit_d(0x0340, 0);
+            emit_d(0x0344, 0x0302);       // blend SRC_ALPHA
+            emit_d(0x0348, 0x0303);       // blend ONE_MINUS_SRC_ALPHA
+            emit_d(0x0350, 0x8006);       // FUNC_ADD
+            emit_d(0x0354, 0x0203);       // DepthFunc LEQUAL (unread: test disabled)
+            emit_d(0x0358, 0x01010101);   // color mask: all channels enabled
+            emit_d(0x035C, 0);            // depth writes disabled
+            emit_d(0x037C, 0x1D01);       // smooth shading
+            emit_d(0x038C, 0x1B02);       // front fill
+            emit_d(0x0390, 0x1B02);       // back fill
+            emit_d(0x0394, 0);
+            emit_d(0x0398, 0x4B7FFFFF);
+            emit_d(0x039C, 0x0405);       // cull back
+            emit_d(0x03A0, 0x0900);       // CW front
+            emit_d(0x1D78, 1);
+            emit_d(0x1E70, 0);            // shader stage program
+            emit_d(0x1E74, 0);
+            emit_d(0x1E78, 0x00210000);   // shader other-stage input
+            emit_d(0x1E60, 0x00000001);   // combiner control: 1 stage
+            emit_d(0x0AC0, 0x04200000);   // ColorIcw0: D=PRIMARY_COLOR, C=ZERO invert
+            emit_d(0x0260, 0x14200000);   // AlphaIcw0: D=PRIMARY_COLOR.a, C=ZERO invert
+            emit_d(0x1E40, 0x00000C00);   // ColorOcw0: SUM -> R0
+            emit_d(0x0AA0, 0x00000C00);   // AlphaOcw0: SUM -> R0
+            emit_d(0x0288, 0x0000000C);   // SpecularFog0: identity final combiner
+            emit_d(0x028C, 0x00001C80);   // SpecularFog1: identity final combiner
+            emit_d(0x1E20, 0);
+            emit_d(0x1E24, 0);
+
+            auto submit_d_triangle = [&](float x0, float y0, float x1, float y1,
+                                        float x2, float y2, float z, float w,
+                                        uint32_t rgba) {
+                emit_d(0x17FC, 5);
+                for (auto xy : {std::pair{x0, y0}, std::pair{x1, y1}, std::pair{x2, y2}}) {
+                    emit_d(0x1518, d_float_bits(xy.first));
+                    emit_d(0x151C, d_float_bits(xy.second));
+                    emit_d(0x1520, d_float_bits(z));
+                    emit_d(0x194C, rgba);
+                    emit_d(0x1524, d_float_bits(w));
+                }
+                emit_d(0x17FC, 0);
+                kick_d();
+            };
+
+            submit_d_triangle(50.0f, 50.0f, 150.0f, 50.0f, 50.0f, 150.0f, 100.0f, 1.0f,
+                              d_pack_ub4(0x40, 0x60, 0x90, 0x80));
+            CHECK(d_fault.empty());
+            CHECK(d_gpu.generic_combiner_batches() == 1);
+            CHECK(d_gpu.generic_combiner_executed_batches() == 1);
+            CHECK(d_gpu.generic_combiner_fragments() > 0);
+            CHECK(d_gpu.generic_combiner_writes() > 0);
+            const uint32_t d_offset = 90u * 5120u + 90u * 4u;
+            CHECK(get32(d_ram, 0x03AA4000u + d_offset) != 0);
+            CHECK(d_gpu.last_generic_combiner_raster_address() >= 0x03AA4000u);
+            CHECK(d_gpu.last_generic_combiner_raster_address() <
+                  0x03AA4000u + 5120u * 960u);
+            // X8R8G8B8: the stored alpha byte is always forced to 0xFF, never the
+            // combiner's computed alpha (there is no alpha channel on real hardware).
+            CHECK((get32(d_ram, 0x03AA4000u + d_offset) >> 24) == 0xFFu);
+        }
+
+        // --- (e) TEXTURE0 modulated by diffuse (PROJECT2D/linear sampler,
+        // ShaderStageProgram==1, matching kInlineLinearBlitColor's own texture layout).
+        // Stage0: A=TEXTURE0 identity, B=PRIMARY_COLOR identity, AB=TEXTURE0*diffuse
+        // (componentwise) -> R0; alpha: A=PRIMARY_COLOR.a identity, B=ZERO invert=1,
+        // AB=diffuse.a*1=diffuse.a -> R0.a (texture alpha is never available in the
+        // linear sampling path, matching every witnessed profile's own AlphaIcw, which
+        // always substitutes PRIMARY_COLOR.a there instead of reading the texture).
+        // A 4x4 texture is sampled dead-center at texel (2,2) (s=2.5,t=2.5, q=1) so
+        // bilinear filtering reduces to that exact texel with no blending:
+        //   texel(2,2) = (R=0xC0,G=0xA0,B=0x80), diffuse = (R=0x30,G=0x50,B=0x70,A=0xFF)
+        //   R = floor(0xC0*0x30/255 + 0.5) = floor(36.14 + 0.5) = 36  = 0x24
+        //   G = floor(0xA0*0x50/255 + 0.5) = floor(50.20 + 0.5) = 50  = 0x32
+        //   B = floor(0x80*0x70/255 + 0.5) = floor(56.22 + 0.5) = 56  = 0x38
+        //   A = diffuse.a = 0xFF
+        // Expected pixel: 0xFF243238. Blend/alpha-test/depth-test/cull all disabled
+        // (enables==0) so this is a straight overwrite. ---
+        {
+            std::string e_fault;
+            xlle::Nv2a e_gpu([&](const std::string& why) { e_fault = why; });
+            std::vector<uint8_t> e_ram(0x40000, 0);
+            e_gpu.set_mem_access(
+                [&](uint32_t addr, void* dst, size_t n) {
+                    if (addr > e_ram.size() || n > e_ram.size() - addr) return false;
+                    std::memcpy(dst, e_ram.data() + addr, n);
+                    return true;
+                },
+                [&](uint32_t addr, const void* src, size_t n) {
+                    if (addr > e_ram.size() || n > e_ram.size() - addr) return false;
+                    std::memcpy(e_ram.data() + addr, src, n);
+                    return true;
+                });
+            e_gpu.mmio_write(xlle::Nv2a::kBase + 0x700008, 4, 1);
+            e_gpu.mmio_write(xlle::Nv2a::kBase + 0x70000C, 4, 0x80010020);
+            e_gpu.mmio_write(xlle::Nv2a::kBase + 0x700200, 4, 0x97);
+            e_gpu.mmio_write(xlle::Nv2a::kBase + 0x700010, 4, 2);
+            e_gpu.mmio_write(xlle::Nv2a::kBase + 0x700014, 4, 0x80010030);
+            e_gpu.mmio_write(xlle::Nv2a::kBase + 0x700300, 4, 0x3D);
+            e_gpu.mmio_write(xlle::Nv2a::kBase + 0x700304, 4, 0x03FFFFFF);
+            e_gpu.mmio_write(xlle::Nv2a::kBase + 0x700308, 4, 0x00000000);
+            // Handle 4: texture DMA B object at PRAMIN instance 0x50.
+            e_gpu.mmio_write(xlle::Nv2a::kBase + 0x700020, 4, 4);
+            e_gpu.mmio_write(xlle::Nv2a::kBase + 0x700024, 4, 0x80010050);
+            e_gpu.mmio_write(xlle::Nv2a::kBase + 0x700500, 4, 0x3D);
+            e_gpu.mmio_write(xlle::Nv2a::kBase + 0x700504, 4, 0x03FFFFFF);
+            e_gpu.mmio_write(xlle::Nv2a::kBase + 0x700508, 4, 0x00000000);
+            e_gpu.mmio_write(xlle::Nv2a::kBase + 0x700180, 4, 0x3D);
+            e_gpu.mmio_write(xlle::Nv2a::kBase + 0x700184, 4, 0xFFFF);
+            e_gpu.mmio_write(xlle::Nv2a::kBase + 0x700188, 4, 0x2000);
+            e_gpu.mmio_write(xlle::Nv2a::kBase + 0x002504, 4, 1);
+            e_gpu.mmio_write(xlle::Nv2a::kBase + 0x003204, 4, 0x100);
+            e_gpu.mmio_write(xlle::Nv2a::kBase + 0x00322C, 4, 0x18);
+            e_gpu.mmio_write(xlle::Nv2a::kBase + 0x003244, 4, 0);
+            e_gpu.mmio_write(xlle::Nv2a::kBase + 0x003220, 4, 1);
+            e_gpu.mmio_write(xlle::Nv2a::kBase + 0x003250, 4, 1);
+            e_gpu.mmio_write(xlle::Nv2a::kBase + 0x003200, 4, 1);
+
+            constexpr uint32_t e_pb = 0x2000;
+            uint32_t e_cursor = 0;
+            auto emit_e = [&](uint32_t method, uint32_t parameter) {
+                put32(e_ram, e_pb + e_cursor, (1u << 18) | method);
+                put32(e_ram, e_pb + e_cursor + 4, parameter);
+                e_cursor += 8;
+            };
+            auto kick_e = [&]() {
+                e_gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, e_cursor);
+            };
+            auto e_float_bits = [](float value) {
+                uint32_t bits = 0;
+                std::memcpy(&bits, &value, sizeof(bits));
+                return bits;
+            };
+            auto e_pack_ub4 = [](uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+                return static_cast<uint32_t>(r) | (static_cast<uint32_t>(g) << 8) |
+                       (static_cast<uint32_t>(b) << 16) | (static_cast<uint32_t>(a) << 24);
+            };
+
+            emit_e(0x0000, 1);
+            emit_e(0x0194, 2);
+            emit_e(0x0188, 4);  // texture DMA B
+            const uint32_t e_identity[] = {
+                0x3F800000, 0, 0, 0,
+                0, 0x3F800000, 0, 0,
+                0, 0, 0x3F800000, 0,
+                0, 0, 0, 0x3F800000,
+            };
+            for (uint32_t i = 0; i < 16; ++i) emit_e(0x0680 + i * 4, e_identity[i]);
+            emit_e(0x0A20, 0);
+            emit_e(0x0A24, 0);
+            emit_e(0x0294, 0x00020001);
+            emit_e(0x0314, 0);
+            emit_e(0x03B8, 0);
+            emit_e(0x1E94, 0);
+
+            // 4x4 A8R8G8B8 texture, all zero except texel(2,2).
+            std::vector<uint8_t> e_texture(4 * 4 * 4, 0);
+            put32(e_texture, (2u * 4u + 2u) * 4u, 0x11C0A080u);
+            std::memcpy(e_ram.data() + 0x20000, e_texture.data(), e_texture.size());
+
+            emit_e(0x0200, 0x00080000);   // clip: 8 wide, x=0
+            emit_e(0x0204, 0x00080000);   // clip: 8 tall, y=0
+            emit_e(0x0208, 0x00000108);   // A8R8G8B8, pitch-linear, no zeta
+            emit_e(0x020C, 0x00200020);   // pitch=32
+            emit_e(0x0210, 0x00010000);   // color offset
+            emit_e(0x0290, 0x00100001);   // control0
+            emit_e(0x02C0, 0x00070000);   // window horizontal 0..7
+            emit_e(0x02E0, 0x00070000);   // window vertical 0..7
+            emit_e(0x0300, 0);            // alpha test disabled
+            emit_e(0x0304, 0);            // blend disabled
+            emit_e(0x0308, 0);            // cull disabled
+            emit_e(0x030C, 0);            // depth test disabled
+            emit_e(0x033C, 0x0207);
+            emit_e(0x0340, 0);
+            emit_e(0x0344, 1);            // blend ONE
+            emit_e(0x0348, 0);            // blend ZERO
+            emit_e(0x0350, 0x8006);
+            emit_e(0x0354, 0x0207);       // depth ALWAYS
+            emit_e(0x0358, 0x01010101);
+            emit_e(0x035C, 0);
+            emit_e(0x037C, 0x1D01);
+            emit_e(0x038C, 0x1B02);
+            emit_e(0x0390, 0x1B02);
+            emit_e(0x0394, 0);
+            emit_e(0x0398, 0x4B7FFFFF);
+            emit_e(0x039C, 0x0405);
+            emit_e(0x03A0, 0x0900);
+            emit_e(0x1D78, 1);
+            emit_e(0x1E70, 1);            // ShaderStageProgram: PROJECT2D (stage0)
+            emit_e(0x1E74, 0);
+            emit_e(0x1E78, 0x00210000);
+            emit_e(0x1E60, 0x00000001);   // combiner control: 1 stage
+            emit_e(0x0AC0, 0x00000408);   // ColorIcw0: A=TEXTURE0, B=PRIMARY_COLOR
+            emit_e(0x0260, 0x00002014);   // AlphaIcw0: A=PRIMARY_COLOR.a, B=ZERO invert
+            emit_e(0x1E40, 0x000000C0);   // ColorOcw0: AB -> R0
+            emit_e(0x0AA0, 0x000000C0);   // AlphaOcw0: AB -> R0
+            emit_e(0x0288, 0x0000000C);
+            emit_e(0x028C, 0x00001C80);
+            emit_e(0x1E20, 0);
+            emit_e(0x1E24, 0);
+            // TEXTURE0 setup: 4x4 pitch-16 linear texture at 0x20000, enable stage0.
+            emit_e(0x1B00, 0x00020000);   // TextureOffset0
+            emit_e(0x1B04, 0);            // TextureFormat0 (unread by the linear path)
+            emit_e(0x1B08, 0);            // TextureAddress0 (unread by the linear path)
+            emit_e(0x1B0C, 0x40000000);   // TextureControl0_0: enable bit30
+            emit_e(0x1B10, 0x00100000);   // TextureControl1_0: pitch=16
+            emit_e(0x1B14, 0);
+            emit_e(0x1B1C, 0x00040004);   // TextureImageRect0: 4x4
+            emit_e(0x1B20, 0);
+            emit_e(0x1B24, 0);
+
+            emit_e(0x17FC, 5);
+            const float ex[3] = {0.0f, 8.0f, 0.0f};
+            const float ey[3] = {0.0f, 0.0f, 8.0f};
+            for (int v = 0; v < 3; ++v) {
+                emit_e(0x1A90, e_float_bits(2.5f));   // texcoord0.s (texel space)
+                emit_e(0x1A94, e_float_bits(2.5f));   // texcoord0.t
+                emit_e(0x1A98, e_float_bits(0.0f));   // texcoord0.r (unused)
+                emit_e(0x1A9C, e_float_bits(1.0f));   // texcoord0.q
+                emit_e(0x1518, e_float_bits(ex[v]));
+                emit_e(0x151C, e_float_bits(ey[v]));
+                emit_e(0x1520, e_float_bits(10.0f));
+                emit_e(0x194C, e_pack_ub4(0x30, 0x50, 0x70, 0xFF));  // diffuse
+                emit_e(0x1524, e_float_bits(1.0f));   // completes slot0 -> commits
+            }
+            emit_e(0x17FC, 0);
+            kick_e();
+            CHECK(e_fault.empty());
+            CHECK(e_gpu.generic_combiner_batches() == 1);
+            CHECK(e_gpu.generic_combiner_executed_batches() == 1);
+            CHECK(e_gpu.generic_combiner_texture_samples() > 0);
+            const uint32_t e_offset = 3u * 32u + 3u * 4u;
+            CHECK(get32(e_ram, 0x10000u + e_offset) == 0xFF243238u);
+        }
+
+        // --- (e2) Exact witnessed dashboard present fingerprint: the dashboard binds
+        // the front buffer as render target (surf=03978000) and samples the back
+        // buffer (T0 off=03aa4000) as TEXTURE0, ci=08200000/ai=14200000 (the same
+        // constants as kInlineLinearBlitColor: D=TEXTURE0 identity, C=ZERO invert ->
+        // R0=TEXTURE0 passthrough; alpha D=PRIMARY_COLOR.a -> R0.a=diffuse.a), comb=1,
+        // en=0010 (dither only; blend/alpha-test/depth-test all off), clip=02800000/
+        // 01e00000 (640x480). Sampled texel 0x224466AA unpacks to (R=0x44,G=0x66,
+        // B=0xAA); diffuse alpha is 0xFF, so the expected output is 0xFF4466AA. Known
+        // texel content at the sampled location proves the sample lands at the
+        // front-buffer address. ---
+        {
+            std::string e2_fault;
+            xlle::Nv2a e2_gpu([&](const std::string& why) { e2_fault = why; });
+            std::vector<uint8_t> e2_ram(0x04000000, 0);
+            e2_gpu.set_mem_access(
+                [&](uint32_t addr, void* dst, size_t n) {
+                    if (addr > e2_ram.size() || n > e2_ram.size() - addr) return false;
+                    std::memcpy(dst, e2_ram.data() + addr, n);
+                    return true;
+                },
+                [&](uint32_t addr, const void* src, size_t n) {
+                    if (addr > e2_ram.size() || n > e2_ram.size() - addr) return false;
+                    std::memcpy(e2_ram.data() + addr, src, n);
+                    return true;
+                });
+            e2_gpu.mmio_write(xlle::Nv2a::kBase + 0x700008, 4, 1);
+            e2_gpu.mmio_write(xlle::Nv2a::kBase + 0x70000C, 4, 0x80010020);
+            e2_gpu.mmio_write(xlle::Nv2a::kBase + 0x700200, 4, 0x97);
+            e2_gpu.mmio_write(xlle::Nv2a::kBase + 0x700010, 4, 2);
+            e2_gpu.mmio_write(xlle::Nv2a::kBase + 0x700014, 4, 0x80010030);
+            e2_gpu.mmio_write(xlle::Nv2a::kBase + 0x700300, 4, 0x3D);
+            e2_gpu.mmio_write(xlle::Nv2a::kBase + 0x700304, 4, 0x03FFFFFF);
+            e2_gpu.mmio_write(xlle::Nv2a::kBase + 0x700308, 4, 0x00000000);
+            e2_gpu.mmio_write(xlle::Nv2a::kBase + 0x700020, 4, 4);
+            e2_gpu.mmio_write(xlle::Nv2a::kBase + 0x700024, 4, 0x80010050);
+            e2_gpu.mmio_write(xlle::Nv2a::kBase + 0x700500, 4, 0x3D);
+            e2_gpu.mmio_write(xlle::Nv2a::kBase + 0x700504, 4, 0x03FFFFFF);
+            e2_gpu.mmio_write(xlle::Nv2a::kBase + 0x700508, 4, 0x00000000);
+            e2_gpu.mmio_write(xlle::Nv2a::kBase + 0x700180, 4, 0x3D);
+            e2_gpu.mmio_write(xlle::Nv2a::kBase + 0x700184, 4, 0xFFFF);
+            e2_gpu.mmio_write(xlle::Nv2a::kBase + 0x700188, 4, 0x2000);
+            e2_gpu.mmio_write(xlle::Nv2a::kBase + 0x002504, 4, 1);
+            e2_gpu.mmio_write(xlle::Nv2a::kBase + 0x003204, 4, 0x100);
+            e2_gpu.mmio_write(xlle::Nv2a::kBase + 0x00322C, 4, 0x18);
+            e2_gpu.mmio_write(xlle::Nv2a::kBase + 0x003244, 4, 0);
+            e2_gpu.mmio_write(xlle::Nv2a::kBase + 0x003220, 4, 1);
+            e2_gpu.mmio_write(xlle::Nv2a::kBase + 0x003250, 4, 1);
+            e2_gpu.mmio_write(xlle::Nv2a::kBase + 0x003200, 4, 1);
+
+            constexpr uint32_t e2_pb = 0x2000;
+            uint32_t e2_cursor = 0;
+            auto emit_e2 = [&](uint32_t method, uint32_t parameter) {
+                put32(e2_ram, e2_pb + e2_cursor, (1u << 18) | method);
+                put32(e2_ram, e2_pb + e2_cursor + 4, parameter);
+                e2_cursor += 8;
+            };
+            auto kick_e2 = [&]() {
+                e2_gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, e2_cursor);
+            };
+            auto e2_float_bits = [](float value) {
+                uint32_t bits = 0;
+                std::memcpy(&bits, &value, sizeof(bits));
+                return bits;
+            };
+            auto e2_pack_ub4 = [](uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+                return static_cast<uint32_t>(r) | (static_cast<uint32_t>(g) << 8) |
+                       (static_cast<uint32_t>(b) << 16) | (static_cast<uint32_t>(a) << 24);
+            };
+
+            emit_e2(0x0000, 1);
+            emit_e2(0x0194, 2);
+            emit_e2(0x0188, 4);
+            const uint32_t e2_identity[] = {
+                0x3F800000, 0, 0, 0,
+                0, 0x3F800000, 0, 0,
+                0, 0, 0x3F800000, 0,
+                0, 0, 0, 0x3F800000,
+            };
+            for (uint32_t i = 0; i < 16; ++i) emit_e2(0x0680 + i * 4, e2_identity[i]);
+            emit_e2(0x0A20, 0);
+            emit_e2(0x0A24, 0);
+            emit_e2(0x0294, 0x00020001);
+            emit_e2(0x0314, 0);
+            emit_e2(0x03B8, 0);
+            emit_e2(0x1E94, 0);
+
+            // 640x480 "back buffer" source texture at 0x03AA4000, pitch 2560 (640*4).
+            // Only the sampled texel needs a known value.
+            const uint32_t e2_back_buffer_pitch = 640u * 4u;
+            put32(e2_ram, 0x03AA4000u + 100u * e2_back_buffer_pitch + 100u * 4u,
+                  0x224466AAu);
+
+            emit_e2(0x0200, 0x02800000);   // clip: 640 wide, x=0
+            emit_e2(0x0204, 0x01E00000);   // clip: 480 tall, y=0
+            emit_e2(0x0208, 0x00000108);   // A8R8G8B8, pitch-linear, no zeta
+            emit_e2(0x020C, 0x0A000A00);   // color pitch 2560 (front buffer)
+            emit_e2(0x0210, 0x03978000);   // color offset -- the witnessed front-buffer
+            emit_e2(0x0290, 0x00100001);
+            emit_e2(0x02C0, 0x027F0000);
+            emit_e2(0x02E0, 0x01DF0000);
+            emit_e2(0x0300, 0);
+            emit_e2(0x0304, 0);            // blend disabled: en=0010 sets only bit4
+                                           // (dither); bit1 (blend enable) is off
+            emit_e2(0x0308, 0);
+            emit_e2(0x030C, 0);
+            emit_e2(0x0310, 1);            // dither (en bit4, inert)
+            emit_e2(0x033C, 0x0207);
+            emit_e2(0x0340, 0);
+            emit_e2(0x0344, 1);            // blend ONE
+            emit_e2(0x0348, 0);            // blend ZERO
+            emit_e2(0x0350, 0x8006);
+            emit_e2(0x0354, 0x0207);
+            emit_e2(0x0358, 0x01010101);
+            emit_e2(0x035C, 0);
+            emit_e2(0x037C, 0x1D01);
+            emit_e2(0x038C, 0x1B02);
+            emit_e2(0x0390, 0x1B02);
+            emit_e2(0x0394, 0);
+            emit_e2(0x0398, 0x4B7FFFFF);
+            emit_e2(0x039C, 0x0405);
+            emit_e2(0x03A0, 0x0900);
+            emit_e2(0x1D78, 1);
+            emit_e2(0x1E70, 1);
+            emit_e2(0x1E74, 0);
+            emit_e2(0x1E78, 0x00210000);
+            emit_e2(0x1E60, 0x00000001);
+            emit_e2(0x0AC0, 0x08200000);   // ColorIcw0: D=TEXTURE0 identity, C=ZERO invert
+            emit_e2(0x0260, 0x14200000);   // AlphaIcw0: D=PRIMARY_COLOR.a, C=ZERO invert
+            emit_e2(0x1E40, 0x00000C00);   // ColorOcw0: SUM -> R0
+            emit_e2(0x0AA0, 0x00000C00);   // AlphaOcw0: SUM -> R0
+            emit_e2(0x0288, 0x0000000C);
+            emit_e2(0x028C, 0x00001C80);
+            emit_e2(0x1E20, 0);
+            emit_e2(0x1E24, 0);
+            emit_e2(0x1B00, 0x03AA4000);   // TextureOffset0 -- samples the back buffer
+            emit_e2(0x1B04, 0);
+            emit_e2(0x1B08, 0);
+            emit_e2(0x1B0C, 0x40000000);
+            emit_e2(0x1B10, static_cast<uint32_t>(e2_back_buffer_pitch) << 16);
+            emit_e2(0x1B14, 0);
+            emit_e2(0x1B1C, (640u << 16) | 480u);
+            emit_e2(0x1B20, 0);
+            emit_e2(0x1B24, 0);
+
+            emit_e2(0x17FC, 5);
+            const float e2x[3] = {0.0f, 640.0f, 0.0f};
+            const float e2y[3] = {0.0f, 0.0f, 480.0f};
+            for (int v = 0; v < 3; ++v) {
+                emit_e2(0x1A90, e2_float_bits(100.5f));  // texel-space s
+                emit_e2(0x1A94, e2_float_bits(100.5f));  // texel-space t
+                emit_e2(0x1A98, e2_float_bits(0.0f));
+                emit_e2(0x1A9C, e2_float_bits(1.0f));
+                emit_e2(0x1518, e2_float_bits(e2x[v]));
+                emit_e2(0x151C, e2_float_bits(e2y[v]));
+                emit_e2(0x1520, e2_float_bits(10.0f));
+                emit_e2(0x194C, e2_pack_ub4(0, 0, 0, 0xFF));
+                emit_e2(0x1524, e2_float_bits(1.0f));
+            }
+            emit_e2(0x17FC, 0);
+            kick_e2();
+            CHECK(e2_fault.empty());
+            CHECK(e2_gpu.generic_combiner_batches() == 1);
+            CHECK(e2_gpu.generic_combiner_executed_batches() == 1);
+            CHECK(e2_gpu.generic_combiner_texture_samples() > 0);
+            const uint32_t e2_offset =
+                100u * 2560u + 100u * 4u;
+            CHECK(get32(e2_ram, 0x03978000u + e2_offset) == 0xFF4466AAu);
+            CHECK(e2_gpu.last_generic_combiner_raster_address() >= 0x03978000u);
+        }
+
+        // --- (f) Unsupported texture configuration: a swizzled 2D stage with a COLOR
+        // code (0x3D) this evaluator's whitelist does not recognize (only 6/7, both
+        // cross-checked raw-ARGB8 codes from the pinned profiles, are accepted) must
+        // land in the kUnsupportedTextureFormat census, never a silent drop. ---
+        {
+            std::string f_fault;
+            xlle::Nv2a f_gpu([&](const std::string& why) { f_fault = why; });
+            std::vector<uint8_t> f_ram(0x40000, 0);
+            f_gpu.set_mem_access(
+                [&](uint32_t addr, void* dst, size_t n) {
+                    if (addr > f_ram.size() || n > f_ram.size() - addr) return false;
+                    std::memcpy(dst, f_ram.data() + addr, n);
+                    return true;
+                },
+                [&](uint32_t addr, const void* src, size_t n) {
+                    if (addr > f_ram.size() || n > f_ram.size() - addr) return false;
+                    std::memcpy(f_ram.data() + addr, src, n);
+                    return true;
+                });
+            f_gpu.mmio_write(xlle::Nv2a::kBase + 0x700008, 4, 1);
+            f_gpu.mmio_write(xlle::Nv2a::kBase + 0x70000C, 4, 0x80010020);
+            f_gpu.mmio_write(xlle::Nv2a::kBase + 0x700200, 4, 0x97);
+            f_gpu.mmio_write(xlle::Nv2a::kBase + 0x700010, 4, 2);
+            f_gpu.mmio_write(xlle::Nv2a::kBase + 0x700014, 4, 0x80010030);
+            f_gpu.mmio_write(xlle::Nv2a::kBase + 0x700300, 4, 0x3D);
+            f_gpu.mmio_write(xlle::Nv2a::kBase + 0x700304, 4, 0x03FFFFFF);
+            f_gpu.mmio_write(xlle::Nv2a::kBase + 0x700308, 4, 0x00000000);
+            f_gpu.mmio_write(xlle::Nv2a::kBase + 0x700020, 4, 4);
+            f_gpu.mmio_write(xlle::Nv2a::kBase + 0x700024, 4, 0x80010050);
+            f_gpu.mmio_write(xlle::Nv2a::kBase + 0x700500, 4, 0x3D);
+            f_gpu.mmio_write(xlle::Nv2a::kBase + 0x700504, 4, 0x03FFFFFF);
+            f_gpu.mmio_write(xlle::Nv2a::kBase + 0x700508, 4, 0x00000000);
+            f_gpu.mmio_write(xlle::Nv2a::kBase + 0x700180, 4, 0x3D);
+            f_gpu.mmio_write(xlle::Nv2a::kBase + 0x700184, 4, 0xFFFF);
+            f_gpu.mmio_write(xlle::Nv2a::kBase + 0x700188, 4, 0x2000);
+            f_gpu.mmio_write(xlle::Nv2a::kBase + 0x002504, 4, 1);
+            f_gpu.mmio_write(xlle::Nv2a::kBase + 0x003204, 4, 0x100);
+            f_gpu.mmio_write(xlle::Nv2a::kBase + 0x00322C, 4, 0x18);
+            f_gpu.mmio_write(xlle::Nv2a::kBase + 0x003244, 4, 0);
+            f_gpu.mmio_write(xlle::Nv2a::kBase + 0x003220, 4, 1);
+            f_gpu.mmio_write(xlle::Nv2a::kBase + 0x003250, 4, 1);
+            f_gpu.mmio_write(xlle::Nv2a::kBase + 0x003200, 4, 1);
+
+            constexpr uint32_t f_pb = 0x2000;
+            uint32_t f_cursor = 0;
+            auto emit_f = [&](uint32_t method, uint32_t parameter) {
+                put32(f_ram, f_pb + f_cursor, (1u << 18) | method);
+                put32(f_ram, f_pb + f_cursor + 4, parameter);
+                f_cursor += 8;
+            };
+            auto kick_f = [&]() {
+                f_gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, f_cursor);
+            };
+            auto f_float_bits = [](float value) {
+                uint32_t bits = 0;
+                std::memcpy(&bits, &value, sizeof(bits));
+                return bits;
+            };
+            auto f_pack_ub4 = [](uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+                return static_cast<uint32_t>(r) | (static_cast<uint32_t>(g) << 8) |
+                       (static_cast<uint32_t>(b) << 16) | (static_cast<uint32_t>(a) << 24);
+            };
+
+            emit_f(0x0000, 1);
+            emit_f(0x0194, 2);
+            emit_f(0x0188, 4);
+            const uint32_t f_identity[] = {
+                0x3F800000, 0, 0, 0,
+                0, 0x3F800000, 0, 0,
+                0, 0, 0x3F800000, 0,
+                0, 0, 0, 0x3F800000,
+            };
+            for (uint32_t i = 0; i < 16; ++i) emit_f(0x0680 + i * 4, f_identity[i]);
+            emit_f(0x0A20, 0);
+            emit_f(0x0A24, 0);
+            emit_f(0x0294, 0x00020001);
+            emit_f(0x0314, 0);
+            emit_f(0x03B8, 0);
+            emit_f(0x1E94, 0);
+
+            std::memset(f_ram.data() + 0x20000, 0, 4 * 4 * 4);
+            std::memset(f_ram.data() + 0x10000, 0xAB, 8 * 32);
+
+            emit_f(0x0200, 0x00080000);
+            emit_f(0x0204, 0x00080000);
+            emit_f(0x0208, 0x00000108);
+            emit_f(0x020C, 0x00200020);
+            emit_f(0x0210, 0x00010000);
+            emit_f(0x0290, 0x00100001);
+            emit_f(0x02C0, 0x00070000);
+            emit_f(0x02E0, 0x00070000);
+            emit_f(0x0300, 0);
+            emit_f(0x0304, 0);
+            emit_f(0x0308, 0);
+            emit_f(0x030C, 0);
+            emit_f(0x033C, 0x0207);
+            emit_f(0x0340, 0);
+            emit_f(0x0344, 1);
+            emit_f(0x0348, 0);
+            emit_f(0x0350, 0x8006);
+            emit_f(0x0354, 0x0207);
+            emit_f(0x0358, 0x01010101);
+            emit_f(0x035C, 0);
+            emit_f(0x037C, 0x1D01);
+            emit_f(0x038C, 0x1B02);
+            emit_f(0x0390, 0x1B02);
+            emit_f(0x0394, 0);
+            emit_f(0x0398, 0x4B7FFFFF);
+            emit_f(0x039C, 0x0405);
+            emit_f(0x03A0, 0x0900);
+            emit_f(0x1D78, 1);
+            emit_f(0x1E70, 0);            // ShaderStageProgram 0 -> swizzled 2D path
+            emit_f(0x1E74, 0);
+            emit_f(0x1E78, 0x00210000);
+            emit_f(0x1E60, 0x00000001);
+            emit_f(0x0AC0, 0x00000408);   // ColorIcw0: A=TEXTURE0, B=PRIMARY_COLOR
+            emit_f(0x0260, 0x00002014);
+            emit_f(0x1E40, 0x000000C0);
+            emit_f(0x0AA0, 0x000000C0);
+            emit_f(0x0288, 0x0000000C);
+            emit_f(0x028C, 0x00001C80);
+            emit_f(0x1E20, 0);
+            emit_f(0x1E24, 0);
+            emit_f(0x1B00, 0x00020000);
+            // Format: dimension bits ==2 (swizzled) but COLOR code 0x3D -- not in the
+            // {6,7} whitelist this evaluator's swizzled sampler is cross-checked
+            // against, so this must be a named skip, not a guess at a new pixel decode.
+            emit_f(0x1B04, (2u << 20) | (2u << 24) | (0x3Du << 8) | 2u);
+            emit_f(0x1B08, 0x00030303);
+            emit_f(0x1B0C, 0x40000000);
+            emit_f(0x1B10, 0);
+            emit_f(0x1B14, 0);
+            emit_f(0x1B1C, 0);
+            emit_f(0x1B20, 0);
+            emit_f(0x1B24, 0);
+
+            const size_t unsupported_format_reason = static_cast<size_t>(
+                xlle::Nv2a::GenericSkipReason::kUnsupportedTextureFormat);
+            const uint64_t before_skip =
+                f_gpu.generic_skip_reason_batches(unsupported_format_reason);
+            const uint64_t before_batches = f_gpu.generic_combiner_batches();
+            const std::vector<uint8_t> before_pixels(
+                f_ram.begin() + 0x10000, f_ram.begin() + 0x10000 + 8 * 32);
+
+            emit_f(0x17FC, 5);
+            const float fx_pos[3] = {0.0f, 8.0f, 0.0f};
+            const float fy_pos[3] = {0.0f, 0.0f, 8.0f};
+            for (int v = 0; v < 3; ++v) {
+                emit_f(0x1A90, f_float_bits(0.5f));
+                emit_f(0x1A94, f_float_bits(0.5f));
+                emit_f(0x1A98, f_float_bits(0.0f));
+                emit_f(0x1A9C, f_float_bits(1.0f));
+                emit_f(0x1518, f_float_bits(fx_pos[v]));
+                emit_f(0x151C, f_float_bits(fy_pos[v]));
+                emit_f(0x1520, f_float_bits(10.0f));
+                emit_f(0x194C, f_pack_ub4(0x30, 0x50, 0x70, 0xFF));
+                emit_f(0x1524, f_float_bits(1.0f));
+            }
+            emit_f(0x17FC, 0);
+            kick_f();
+            CHECK(f_fault.empty());
+            CHECK(f_gpu.generic_skip_reason_batches(unsupported_format_reason) ==
+                  before_skip + 1);
+            CHECK(f_gpu.generic_combiner_batches() == before_batches);
+            CHECK(std::equal(before_pixels.begin(), before_pixels.end(),
+                             f_ram.begin() + 0x10000));
+        }
+
+        // --- (g) Regression test for the guest-memory-corruption bug: a textured
+        // generic-combiner batch whose triangle/clip extends far beyond the surface
+        // extent, AND whose zeta context is bound to a DMA object that was never
+        // actually programmed with a real frame/base (SET_CONTEXT_DMA_ZETA to a
+        // "class 0x3D, base 0, huge limit" identity object, with SURFACE_ZETA_OFFSET
+        // left at its default of 0) while DepthMask requests depth writes. Before the
+        // fix, dma_object_address() resolved this -- correctly, per the descriptor's
+        // own all-zero bits -- to physical address 0, and rasterize_generic_combiner_
+        // batch wrote depth data through PagedRasterSurface(address=0, ...), i.e.
+        // into the guest's low memory (where 2BL/kernel code lives on real boot).
+        // This must no longer happen: resolve_surface now rejects a resolved address
+        // of exactly 0, and the zeta failure now degrades to color-only rendering
+        // instead of either corrupting memory or hard-faulting the whole batch.
+        // A canary at guest address 0 (proxy for "the low memory a real boot depends
+        // on") and a canary immediately after the color surface's own extent must
+        // both survive untouched; only the color surface's own bytes may change. ---
+        {
+            std::string g_fault;
+            xlle::Nv2a g_gpu([&](const std::string& why) { g_fault = why; });
+            std::vector<uint8_t> g_ram(0x40000, 0);
+            g_gpu.set_mem_access(
+                [&](uint32_t addr, void* dst, size_t n) {
+                    if (addr > g_ram.size() || n > g_ram.size() - addr) return false;
+                    std::memcpy(dst, g_ram.data() + addr, n);
+                    return true;
+                },
+                [&](uint32_t addr, const void* src, size_t n) {
+                    if (addr > g_ram.size() || n > g_ram.size() - addr) return false;
+                    std::memcpy(g_ram.data() + addr, src, n);
+                    return true;
+                });
+            g_gpu.mmio_write(xlle::Nv2a::kBase + 0x700008, 4, 1);
+            g_gpu.mmio_write(xlle::Nv2a::kBase + 0x70000C, 4, 0x80010020);
+            g_gpu.mmio_write(xlle::Nv2a::kBase + 0x700200, 4, 0x97);
+            g_gpu.mmio_write(xlle::Nv2a::kBase + 0x700010, 4, 2);
+            g_gpu.mmio_write(xlle::Nv2a::kBase + 0x700014, 4, 0x80010030);
+            g_gpu.mmio_write(xlle::Nv2a::kBase + 0x700300, 4, 0x3D);
+            g_gpu.mmio_write(xlle::Nv2a::kBase + 0x700304, 4, 0x03FFFFFF);
+            g_gpu.mmio_write(xlle::Nv2a::kBase + 0x700308, 4, 0x00000000);
+            // Zeta context (handle 3): a "linear, whole-of-RAM, base 0" identity DMA
+            // object -- exactly the degenerate binding the real dashboard/XBMC boot
+            // animation hit. Combined with SURFACE_ZETA_OFFSET left at 0 (never
+            // programmed below), this resolves to physical address 0.
+            g_gpu.mmio_write(xlle::Nv2a::kBase + 0x700018, 4, 3);
+            g_gpu.mmio_write(xlle::Nv2a::kBase + 0x70001C, 4, 0x80010040);
+            g_gpu.mmio_write(xlle::Nv2a::kBase + 0x700400, 4, 0x3D);
+            g_gpu.mmio_write(xlle::Nv2a::kBase + 0x700404, 4, 0x03FFFFFF);
+            g_gpu.mmio_write(xlle::Nv2a::kBase + 0x700408, 4, 0x00000000);
+            // Texture DMA B (handle 4).
+            g_gpu.mmio_write(xlle::Nv2a::kBase + 0x700020, 4, 4);
+            g_gpu.mmio_write(xlle::Nv2a::kBase + 0x700024, 4, 0x80010050);
+            g_gpu.mmio_write(xlle::Nv2a::kBase + 0x700500, 4, 0x3D);
+            g_gpu.mmio_write(xlle::Nv2a::kBase + 0x700504, 4, 0x03FFFFFF);
+            g_gpu.mmio_write(xlle::Nv2a::kBase + 0x700508, 4, 0x00000000);
+            g_gpu.mmio_write(xlle::Nv2a::kBase + 0x700180, 4, 0x3D);
+            g_gpu.mmio_write(xlle::Nv2a::kBase + 0x700184, 4, 0xFFFF);
+            g_gpu.mmio_write(xlle::Nv2a::kBase + 0x700188, 4, 0x2000);
+            g_gpu.mmio_write(xlle::Nv2a::kBase + 0x002504, 4, 1);
+            g_gpu.mmio_write(xlle::Nv2a::kBase + 0x003204, 4, 0x100);
+            g_gpu.mmio_write(xlle::Nv2a::kBase + 0x00322C, 4, 0x18);
+            g_gpu.mmio_write(xlle::Nv2a::kBase + 0x003244, 4, 0);
+            g_gpu.mmio_write(xlle::Nv2a::kBase + 0x003220, 4, 1);
+            g_gpu.mmio_write(xlle::Nv2a::kBase + 0x003250, 4, 1);
+            g_gpu.mmio_write(xlle::Nv2a::kBase + 0x003200, 4, 1);
+
+            constexpr uint32_t g_pb = 0x2000;
+            uint32_t g_cursor = 0;
+            auto emit_g = [&](uint32_t method, uint32_t parameter) {
+                put32(g_ram, g_pb + g_cursor, (1u << 18) | method);
+                put32(g_ram, g_pb + g_cursor + 4, parameter);
+                g_cursor += 8;
+            };
+            auto kick_g = [&]() {
+                g_gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, g_cursor);
+            };
+            auto g_float_bits = [](float value) {
+                uint32_t bits = 0;
+                std::memcpy(&bits, &value, sizeof(bits));
+                return bits;
+            };
+            auto g_pack_ub4 = [](uint8_t r, uint8_t g2, uint8_t b, uint8_t a) {
+                return static_cast<uint32_t>(r) | (static_cast<uint32_t>(g2) << 8) |
+                       (static_cast<uint32_t>(b) << 16) | (static_cast<uint32_t>(a) << 24);
+            };
+
+            emit_g(0x0000, 1);
+            emit_g(0x0194, 2);
+            emit_g(0x0198, 3);  // zeta DMA -> the degenerate identity object
+            emit_g(0x0188, 4);  // texture DMA B
+            const uint32_t g_identity[] = {
+                0x3F800000, 0, 0, 0,
+                0, 0x3F800000, 0, 0,
+                0, 0, 0x3F800000, 0,
+                0, 0, 0, 0x3F800000,
+            };
+            for (uint32_t i = 0; i < 16; ++i) emit_g(0x0680 + i * 4, g_identity[i]);
+            emit_g(0x0A20, 0);
+            emit_g(0x0A24, 0);
+            emit_g(0x0294, 0x00020001);
+            emit_g(0x0314, 0);
+            emit_g(0x03B8, 0);
+            emit_g(0x1E94, 0);
+
+            // Small 4x4 A8R8G8B8 linear texture, all zero.
+            std::vector<uint8_t> g_texture(4 * 4 * 4, 0);
+            std::memcpy(g_ram.data() + 0x20000, g_texture.data(), g_texture.size());
+
+            // Canary immediately below address 0 doesn't exist; canary AT and around
+            // address 0 stands in for "the low memory a real 2BL/kernel depends on".
+            std::memset(g_ram.data(), 0xCC, 4096);
+            constexpr uint32_t kColorOffset = 0x10000;
+            constexpr uint32_t kColorPitch = 32;
+            constexpr uint32_t kColorHeight = 8;
+            constexpr uint32_t kColorBytes = kColorPitch * kColorHeight;
+            std::memset(g_ram.data() + kColorOffset, 0, kColorBytes);
+            std::memset(g_ram.data() + kColorOffset + kColorBytes, 0xDD, 4096);
+            const std::vector<uint8_t> g_low_canary_before(g_ram.begin(),
+                                                           g_ram.begin() + 4096);
+            const std::vector<uint8_t> g_high_canary_before(
+                g_ram.begin() + kColorOffset + kColorBytes,
+                g_ram.begin() + kColorOffset + kColorBytes + 4096);
+
+            emit_g(0x0200, (kColorPitch / 4) << 16);   // clip: 8 wide, x=0
+            emit_g(0x0204, kColorHeight << 16);        // clip: 8 tall, y=0
+            emit_g(0x0208, 0x00000128);                // A8R8G8B8 + Z24S8, pitch-linear
+            emit_g(0x0210, kColorOffset);               // color offset
+            // Zeta pitch matches color pitch so the uses_depth gate is reached (the
+            // point of this test is exercising the zeta-resolves-to-0 path, not the
+            // pitch-mismatch path already covered elsewhere).
+            emit_g(0x020C, (kColorPitch << 16) | kColorPitch);
+            // SURFACE_ZETA_OFFSET (0x0214) deliberately never emitted: stays at its
+            // default of 0, which is exactly what resolves to physical address 0
+            // through the degenerate identity zeta DMA object bound above.
+            emit_g(0x0290, 0x00100001);   // control0
+            emit_g(0x02C0, 0x00070000);   // window horizontal 0..7
+            emit_g(0x02E0, 0x00070000);   // window vertical 0..7
+            emit_g(0x0300, 0);            // alpha test disabled
+            emit_g(0x0304, 0);            // blend disabled
+            emit_g(0x0308, 0);            // cull disabled (so the huge triangle below
+                                          // still rasterizes regardless of winding)
+            emit_g(0x030C, 0);            // depth test disabled (en bit3==0)
+            emit_g(0x033C, 0x0207);
+            emit_g(0x0340, 0);
+            emit_g(0x0344, 1);            // blend ONE
+            emit_g(0x0348, 0);            // blend ZERO
+            emit_g(0x0350, 0x8006);
+            emit_g(0x0354, 0x0207);       // DepthFunc ALWAYS (unread: test disabled)
+            emit_g(0x0358, 0x01010101);
+            emit_g(0x035C, 1);            // DepthMask=1: depth WRITES requested --
+                                          // this is what reaches the zeta resolve
+            emit_g(0x037C, 0x1D01);
+            emit_g(0x038C, 0x1B02);
+            emit_g(0x0390, 0x1B02);
+            emit_g(0x0394, 0);
+            emit_g(0x0398, 0x4B7FFFFF);
+            emit_g(0x039C, 0x0405);
+            emit_g(0x03A0, 0x0900);
+            emit_g(0x1D78, 1);
+            emit_g(0x1E70, 1);            // ShaderStageProgram: PROJECT2D (stage0)
+            emit_g(0x1E74, 0);
+            emit_g(0x1E78, 0x00210000);
+            emit_g(0x1E60, 0x00000001);   // combiner control: 1 stage
+            emit_g(0x0AC0, 0x08200000);   // ColorIcw0: D=TEXTURE0 identity
+            emit_g(0x0260, 0x14200000);   // AlphaIcw0: D=PRIMARY_COLOR.a identity
+            emit_g(0x1E40, 0x00000C00);   // ColorOcw0: SUM -> R0
+            emit_g(0x0AA0, 0x00000C00);   // AlphaOcw0: SUM -> R0
+            emit_g(0x0288, 0x0000000C);
+            emit_g(0x028C, 0x00001C80);
+            emit_g(0x1E20, 0);
+            emit_g(0x1E24, 0);
+            emit_g(0x1B00, 0x00020000);   // TextureOffset0
+            emit_g(0x1B04, 0);
+            emit_g(0x1B08, 0);
+            emit_g(0x1B0C, 0x40000000);   // enable bit30
+            emit_g(0x1B10, 0x00100000);   // pitch=16
+            emit_g(0x1B14, 0);
+            emit_g(0x1B1C, 0x00040004);   // 4x4
+            emit_g(0x1B20, 0);
+            emit_g(0x1B24, 0);
+
+            emit_g(0x17FC, 5);
+            // Vertex positions extend far beyond the 8x8 clip in every direction --
+            // triangle-setup clamping (tri_xmin/xmax/ymin/ymax against the clip- and
+            // window-derived surface bounds) must still confine every write to the
+            // surface's own extent.
+            // Right triangle with hypotenuse x+y=1000: covers the whole 8x8 clip
+            // (every point there has x+y <= 14) while still extending far beyond it.
+            const float gx[3] = {-1000.0f, 2000.0f, -1000.0f};
+            const float gy[3] = {-1000.0f, -1000.0f, 2000.0f};
+            for (int v = 0; v < 3; ++v) {
+                emit_g(0x1A90, g_float_bits(0.5f));
+                emit_g(0x1A94, g_float_bits(0.5f));
+                emit_g(0x1A98, g_float_bits(0.0f));
+                emit_g(0x1A9C, g_float_bits(1.0f));
+                emit_g(0x1518, g_float_bits(gx[v]));
+                emit_g(0x151C, g_float_bits(gy[v]));
+                emit_g(0x1520, g_float_bits(10.0f));
+                emit_g(0x194C, g_pack_ub4(0x30, 0x50, 0x70, 0xFF));
+                emit_g(0x1524, g_float_bits(1.0f));
+            }
+            emit_g(0x17FC, 0);
+            kick_g();
+
+            CHECK(g_fault.empty());
+            // The batch still executes (color-only: the degenerate zeta must not
+            // abort the whole draw).
+            CHECK(g_gpu.generic_combiner_batches() == 1);
+            CHECK(g_gpu.generic_combiner_writes() > 0);
+            // Every write must land strictly inside [color_address, color_address +
+            // color_bytes64) -- i.e. within the canaries, never touching them.
+            CHECK(std::equal(g_low_canary_before.begin(), g_low_canary_before.end(),
+                             g_ram.begin()));
+            CHECK(std::equal(g_high_canary_before.begin(), g_high_canary_before.end(),
+                             g_ram.begin() + kColorOffset + kColorBytes));
+            // Physical address 0 in particular -- the exact corruption this
+            // regression produced -- must be untouched.
+            CHECK(get32(g_ram, 0) == 0xCCCCCCCCu);
+        }
     }
 
     std::printf(fails ? "test_nv2a: %d checks failed\n" : "test_nv2a: ok\n", fails);
