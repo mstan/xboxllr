@@ -662,6 +662,7 @@ Ohci::TransferResult Ohci::device_transfer(
         actual = std::min(report.size(), input_capacity);
         std::memcpy(input, report.data(), actual);
         ++xid_input_reports_;
+        ++xid_endpoint2_input_reports_;
         return TransferResult::kSuccess;
     }
     if (direction == kDirectionOut) {

@@ -103,6 +103,11 @@ public:
     uint64_t done_writebacks() const { return done_writebacks_; }
     uint64_t control_requests() const { return control_requests_; }
     uint64_t xid_input_reports() const { return xid_input_reports_; }
+    // Endpoint-2 IN reports only.  Keep xid_input_reports() as the historical
+    // aggregate, which also includes XID class GET_REPORT control requests.
+    uint64_t xid_endpoint2_input_reports() const {
+        return xid_endpoint2_input_reports_;
+    }
     uint64_t xid_output_reports() const { return xid_output_reports_; }
     uint16_t xid_left_rumble() const { return xid_left_rumble_; }
     uint16_t xid_right_rumble() const { return xid_right_rumble_; }
@@ -279,6 +284,7 @@ private:
     uint64_t done_writebacks_ = 0;
     uint64_t control_requests_ = 0;
     uint64_t xid_input_reports_ = 0;
+    uint64_t xid_endpoint2_input_reports_ = 0;
     uint64_t xid_output_reports_ = 0;
 };
 

@@ -20,6 +20,7 @@
 #include "cpu/unicorn_floor.hpp"
 #include "host/ethernet_udp.hpp"
 #include "host/sdl_shell.hpp"
+#include "host/xid_script.hpp"
 #include "machine/aci.hpp"
 #include "machine/apu.hpp"
 #include "machine/machine.hpp"
@@ -185,6 +186,7 @@ bool write_frame_ppm(const char* path, const std::vector<uint8_t>& rgba,
 int main(int argc, char** argv) {
     bool serve = false, window = false, interactive = false;
     bool test_synthetic_controller_hub = false;
+    bool test_synthetic_controller_hub_input_down = false;
     bool reduced_retire_diag = false;
     bool net_disconnected = false;
     bool pfifo_clear_trace = false;
@@ -195,6 +197,7 @@ int main(int argc, char** argv) {
     const char* eeprom = nullptr;
     const char* frame_dump = nullptr;
     const char* frame_series_prefix = nullptr;
+    const char* test_input_capture_prefix = nullptr;
     const char* net_peer_host = nullptr;
     uint64_t frame_series_every = 0;
     uint64_t net_bind_port = 0;
@@ -206,6 +209,8 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(argv[i], "--interactive")) interactive = true;
         else if (!std::strcmp(argv[i], "--test-synthetic-controller-hub"))
             test_synthetic_controller_hub = true;
+        else if (!std::strcmp(argv[i], "--test-synthetic-controller-hub-input-down"))
+            test_synthetic_controller_hub_input_down = true;
         else if (!std::strcmp(argv[i], "--reduced-retire-diag"))
             reduced_retire_diag = true;
         else if (!std::strcmp(argv[i], "--net-disconnected"))
@@ -236,6 +241,8 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(argv[i], "--eeprom") && i + 1 < argc) eeprom = argv[++i];
         else if (!std::strcmp(argv[i], "--frame-dump") && i + 1 < argc)
             frame_dump = argv[++i];
+        else if (!std::strcmp(argv[i], "--test-input-capture-prefix") && i + 1 < argc)
+            test_input_capture_prefix = argv[++i];
         else if (!std::strcmp(argv[i], "--frame-series")) {
             if (i + 2 >= argc) {
                 std::fprintf(
@@ -296,6 +303,33 @@ int main(int argc, char** argv) {
                      "--boot <flash.bin> and --run2bl <2bl.bin>\n");
         return 1;
     }
+    if (test_input_capture_prefix && !test_synthetic_controller_hub_input_down) {
+        std::fprintf(stderr,
+                     "[input] --test-input-capture-prefix is valid only with "
+                     "--test-synthetic-controller-hub-input-down\n");
+        return 1;
+    }
+    if (test_synthetic_controller_hub_input_down &&
+        (!test_synthetic_controller_hub || !boot_flash || !run2bl ||
+         !test_input_capture_prefix || !test_input_capture_prefix[0])) {
+        std::fprintf(stderr,
+                     "[input] --test-synthetic-controller-hub-input-down requires "
+                     "--test-synthetic-controller-hub, --boot <flash.bin>, and "
+                     "--run2bl <2bl.bin>, plus --test-input-capture-prefix <path>\n");
+        return 1;
+    }
+    if (test_synthetic_controller_hub_input_down && interactive) {
+        std::fprintf(stderr,
+                     "[input] --test-synthetic-controller-hub-input-down cannot be "
+                     "combined with --interactive\n");
+        return 1;
+    }
+    if (test_synthetic_controller_hub_input_down && net_requested) {
+        std::fprintf(stderr,
+                     "[input] --test-synthetic-controller-hub-input-down cannot be "
+                     "combined with live UDP Ethernet\n");
+        return 1;
+    }
 
     // --boot <flash.bin>: stand up the machine (RAM + flash) and smoke-test the map.
     if (boot_flash) {
@@ -334,6 +368,19 @@ int main(int argc, char** argv) {
             if (test_synthetic_controller_hub) {
                 std::printf("[input] TEST-ONLY synthetic Controller S hub topology enabled; "
                             "not retail evidence\n");
+            }
+            XidDownReportScript down_script;
+            if (test_synthetic_controller_hub_input_down) {
+                std::printf("[input] TEST-ONLY deterministic XID Down script armed: "
+                            "endpoint-2 threshold=%llu down=%llu neutral=%llu "
+                            "capture-prefix=%s; guest polls required\n",
+                            static_cast<unsigned long long>(
+                                XidDownReportScript::kMenuReadyEndpoint2Reports),
+                            static_cast<unsigned long long>(
+                                XidDownReportScript::kDownDeliveredReports),
+                            static_cast<unsigned long long>(
+                                XidDownReportScript::kNeutralDeliveredReports),
+                            test_input_capture_prefix);
             }
             if (pfifo_clear_trace && mach.nv2a()) {
                 mach.nv2a()->arm_color_clear_trace(pfifo_clear_trace_target);
@@ -416,6 +463,34 @@ int main(int argc, char** argv) {
                     next_frame_series_insn += frame_series_every;
                 }
             };
+            auto capture_test_input_frame = [&](const char* phase) {
+                std::vector<uint8_t> rgba;
+                Nv2a::ScanoutInfo scanout;
+                std::string error;
+                const uint64_t sampled_at = mach.total_insns();
+                char path[1024];
+                const int path_size = std::snprintf(
+                    path, sizeof(path), "%s-%s-%012llu.ppm",
+                    test_input_capture_prefix, phase,
+                    static_cast<unsigned long long>(sampled_at));
+                const bool path_ok = path_size > 0 &&
+                                     static_cast<size_t>(path_size) < sizeof(path);
+                const bool captured = path_ok && mach.nv2a() &&
+                    mach.nv2a()->capture_scanout(rgba, scanout, error);
+                const bool written = captured &&
+                    write_frame_ppm(path, rgba, scanout.width, scanout.height);
+                std::printf(
+                    "[input] TEST-ONLY %s capture insns=%llu endpoint2=%llu aggregate=%llu "
+                    "hash=%016llx %s: %s%s%s\n",
+                    phase, static_cast<unsigned long long>(sampled_at),
+                    static_cast<unsigned long long>(mach.ohci0()->xid_endpoint2_input_reports()),
+                    static_cast<unsigned long long>(mach.ohci0()->xid_input_reports()),
+                    static_cast<unsigned long long>(captured ? frame_hash(rgba) : 0),
+                    path_ok ? path : "<path-too-long>", written ? "written" : "FAILED",
+                    error.empty() ? "" : " (",
+                    error.empty() ? "" : (error + ")").c_str());
+                return written;
+            };
             if (net_requested) {
                 net_transport = std::make_unique<EthernetUdpTransport>();
                 std::string net_error;
@@ -441,10 +516,79 @@ int main(int argc, char** argv) {
                 mach.nvnet()->set_link(false);
                 std::printf("[net] Ethernet cable disconnected (opt-in)\n");
             }
-            if (interactive || net_requested || frame_series_requested) {
+            if (interactive || net_requested || frame_series_requested ||
+                test_synthetic_controller_hub_input_down) {
                 mach.on_host_poll([&]() {
                     // Host event processing is nonblocking and guest state changes only on this
                     // emulation thread. XID endpoint 2 observes it on its next periodic TD.
+                    if (test_synthetic_controller_hub_input_down) {
+                        const bool configured = mach.ohci0()->xid_configuration() == 1;
+                        const uint64_t endpoint2_reports =
+                            mach.ohci0()->xid_endpoint2_input_reports();
+                        if (down_script.will_press(configured, endpoint2_reports) &&
+                            !capture_test_input_frame("pre-down")) {
+                            down_script.capture_failed();
+                            std::printf(
+                                "[input] TEST-ONLY NOT-DELIVERED capture-failed "
+                                "insns=%llu endpoint2=%llu aggregate=%llu\n",
+                                static_cast<unsigned long long>(mach.total_insns()),
+                                static_cast<unsigned long long>(endpoint2_reports),
+                                static_cast<unsigned long long>(
+                                    mach.ohci0()->xid_input_reports()));
+                        }
+                        const auto transition =
+                            down_script.update(configured, endpoint2_reports);
+                        if (transition.pressed) {
+                            std::printf(
+                                "[input] TEST-ONLY Down PRESS insns=%llu endpoint2=%llu "
+                                "aggregate=%llu\n",
+                                static_cast<unsigned long long>(mach.total_insns()),
+                                static_cast<unsigned long long>(endpoint2_reports),
+                                static_cast<unsigned long long>(
+                                    mach.ohci0()->xid_input_reports()));
+                        }
+                        if (transition.released) {
+                            std::printf(
+                                "[input] TEST-ONLY Down RELEASE insns=%llu endpoint2=%llu "
+                                "aggregate=%llu\n",
+                                static_cast<unsigned long long>(mach.total_insns()),
+                                static_cast<unsigned long long>(endpoint2_reports),
+                                static_cast<unsigned long long>(
+                                    mach.ohci0()->xid_input_reports()));
+                        }
+                        if (transition.delivery_failed) {
+                            std::printf(
+                                "[input] TEST-ONLY NOT-DELIVERED deconfigured "
+                                "insns=%llu endpoint2=%llu aggregate=%llu\n",
+                                static_cast<unsigned long long>(mach.total_insns()),
+                                static_cast<unsigned long long>(endpoint2_reports),
+                                static_cast<unsigned long long>(
+                                    mach.ohci0()->xid_input_reports()));
+                        }
+                        if (transition.completed) {
+                            const bool captured = capture_test_input_frame("post-neutral");
+                            if (!captured) {
+                                down_script.capture_failed();
+                                std::printf(
+                                    "[input] TEST-ONLY NOT-DELIVERED post-capture-failed "
+                                    "insns=%llu endpoint2=%llu aggregate=%llu\n",
+                                    static_cast<unsigned long long>(mach.total_insns()),
+                                    static_cast<unsigned long long>(endpoint2_reports),
+                                    static_cast<unsigned long long>(
+                                        mach.ohci0()->xid_input_reports()));
+                            } else {
+                                std::printf(
+                                    "[input] TEST-ONLY Down COMPLETE insns=%llu endpoint2=%llu "
+                                    "aggregate=%llu post-capture=written\n",
+                                    static_cast<unsigned long long>(mach.total_insns()),
+                                    static_cast<unsigned long long>(endpoint2_reports),
+                                    static_cast<unsigned long long>(
+                                        mach.ohci0()->xid_input_reports()));
+                            }
+                        }
+                        mach.ohci0()->set_xid_gamepad_state(
+                            down_script.state());
+                    }
                     if (interactive) {
                         host_input.poll();
                         mach.ohci0()->set_xid_gamepad_state(host_input.state());
@@ -630,6 +774,20 @@ int main(int argc, char** argv) {
             // The run may cross its final series deadline after the last 1 kHz host poll.
             capture_frame_series();
             host_input.close();
+            if (test_synthetic_controller_hub_input_down) {
+                const bool complete =
+                    down_script.phase() == XidDownReportScript::Phase::kComplete;
+                std::printf(
+                    "[input] TEST-ONLY %s final-phase=%s insns=%llu endpoint2=%llu "
+                    "aggregate=%llu configured=%u\n",
+                    complete ? "COMPLETE" : "NOT-DELIVERED",
+                    XidDownReportScript::phase_name(down_script.phase()),
+                    static_cast<unsigned long long>(mach.total_insns()),
+                    static_cast<unsigned long long>(
+                        mach.ohci0()->xid_endpoint2_input_reports()),
+                    static_cast<unsigned long long>(mach.ohci0()->xid_input_reports()),
+                    mach.ohci0()->xid_configuration());
+            }
             X86Regs f = mach.cpu().get_regs();
             Nv2a::ScanoutInfo scanout;
             std::vector<uint8_t> frame_rgba;
@@ -1580,7 +1738,7 @@ int main(int argc, char** argv) {
                 }
                 std::printf("[2bl] OHCI0: frames=%llu control=%08x hcca=%08x "
                             "eds/tds/retired/done=%llu/%llu/%llu/%llu "
-                            "control/xid-in/xid-out=%llu/%llu/%llu "
+                            "control/xid-in/xid-endpoint2/xid-out=%llu/%llu/%llu/%llu "
                             "addr/config=%u/%u hub-addr/config/port1=%u/%u/%08x "
                             "rumble=%04x/%04x\n",
                             (unsigned long long)mach.ohci0()->frames(),
@@ -1591,6 +1749,7 @@ int main(int argc, char** argv) {
                             (unsigned long long)mach.ohci0()->done_writebacks(),
                             (unsigned long long)mach.ohci0()->control_requests(),
                             (unsigned long long)mach.ohci0()->xid_input_reports(),
+                            (unsigned long long)mach.ohci0()->xid_endpoint2_input_reports(),
                             (unsigned long long)mach.ohci0()->xid_output_reports(),
                             mach.ohci0()->xid_address(),
                             mach.ohci0()->xid_configuration(),

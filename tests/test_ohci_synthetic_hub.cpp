@@ -182,7 +182,8 @@ int main() {
     CHECK((get32(ram, xid_td) >> 28) == 0 && ram[xid_buffer + 0] == 0 &&
           ram[xid_buffer + 1] == 20 && ram[xid_buffer + 2] == 5 &&
           ram[xid_buffer + 3] == 0 && ram[xid_buffer + 4] == 0xff &&
-          ram[xid_buffer + 5] == 0xff && hc.xid_input_reports() == 1);
+          ram[xid_buffer + 5] == 0xff && hc.xid_input_reports() == 1 &&
+          hc.xid_endpoint2_input_reports() == 1);
 
     // A later downstream reset is independent of the configured hub and
     // returns the child to address zero for a new enumeration.

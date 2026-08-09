@@ -305,6 +305,7 @@ int main() {
     CHECK(ram[input_buffer + 12] == 0x22 &&
           ram[input_buffer + 13] == 0x11);
     CHECK(hc.xid_input_reports() == 1);
+    CHECK(hc.xid_endpoint2_input_reports() == 1);
 
     // Exercise the periodic HCCA list and endpoint-2 OUT rumble report.
     const uint32_t periodic_ed = allocate(16);
@@ -330,6 +331,16 @@ int main() {
     CHECK(hc.processed_eds() >= 7);
     CHECK(hc.processed_tds() == hc.retired_tds());
     CHECK(hc.done_writebacks() >= 6);
+
+    // XID class GET_REPORT contributes to the historical aggregate, but not
+    // to the endpoint-2-only counter used by deterministic input scripts.
+    const uint64_t aggregate_before_control_report = hc.xid_input_reports();
+    const uint64_t endpoint2_before_control_report = hc.xid_endpoint2_input_reports();
+    response.clear();
+    submit_control(setup_packet(0xa1, 0x01, 0x0100, 0, 20),
+                   {}, 20, response, 5);
+    CHECK(hc.xid_input_reports() == aggregate_before_control_report + 1);
+    CHECK(hc.xid_endpoint2_input_reports() == endpoint2_before_control_report);
 
     // The boot-facing diagnostic history is fixed-size: further valid EP0
     // transfers execute normally but cannot grow the trace.
