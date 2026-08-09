@@ -23,6 +23,14 @@ class Ohci : public MmioDevice {
 public:
     static constexpr uint32_t kSize = 0x1000;
 
+    // The default is the replay-observed, root-attached XID device.  The hub
+    // profile exists only for focused OHCI mechanics tests; its descriptor is
+    // deliberately synthetic and carries no claimed retail identity.
+    enum class UsbTopology : uint8_t {
+        kDirectXid,
+        kSyntheticControllerSHubForTest,
+    };
+
     struct XidGamepadState {
         uint16_t buttons = 0;
         std::array<uint8_t, 8> analog{};
@@ -58,7 +66,11 @@ public:
     };
     static constexpr size_t kEp0TraceCapacity = 4;
 
-    Ohci(uint32_t base, FaultFn fault) : base_(base), fault_(std::move(fault)) { reset(); }
+    Ohci(uint32_t base, FaultFn fault,
+         UsbTopology topology = UsbTopology::kDirectXid)
+        : base_(base), fault_(std::move(fault)), topology_(topology) {
+        reset();
+    }
 
     const char* name() const override { return base_ == 0xFED00000u ? "ohci0" : "ohci1"; }
     uint32_t mmio_base() const override { return base_; }
@@ -94,8 +106,17 @@ public:
     uint64_t xid_output_reports() const { return xid_output_reports_; }
     uint16_t xid_left_rumble() const { return xid_left_rumble_; }
     uint16_t xid_right_rumble() const { return xid_right_rumble_; }
-    uint8_t xid_address() const { return xid_address_; }
-    uint8_t xid_configuration() const { return xid_configuration_; }
+    uint8_t xid_address() const { return xid_device_.address; }
+    uint8_t xid_configuration() const { return xid_device_.configuration; }
+    uint8_t synthetic_hub_address() const { return hub_device_.address; }
+    uint8_t synthetic_hub_configuration() const {
+        return hub_device_.configuration;
+    }
+    uint32_t synthetic_hub_port_status(size_t port) const {
+        return port == 0 && topology_ == UsbTopology::kSyntheticControllerSHubForTest
+                   ? hub_port1_status_
+                   : 0;
+    }
     size_t ep0_trace_count() const { return ep0_trace_count_; }
     uint64_t ep0_trace_dropped() const { return ep0_trace_dropped_; }
     const Ep0Trace& ep0_trace(size_t index) const { return ep0_trace_[index]; }
@@ -127,6 +148,19 @@ private:
         uint16_t value;
         uint16_t index;
         uint16_t length;
+    };
+    struct UsbDeviceState {
+        uint8_t address = 0;
+        uint8_t pending_address = 0;
+        bool pending_address_valid = false;
+        uint8_t configuration = 0;
+        SetupPacket control_setup{};
+        bool control_active = false;
+        bool control_direction_in = false;
+        bool control_stalled = false;
+        std::vector<uint8_t> control_response;
+        size_t control_response_offset = 0;
+        std::vector<uint8_t> control_output;
     };
     enum class TransferResult {
         kSuccess,
@@ -183,9 +217,12 @@ private:
                                    const uint8_t* output, size_t output_size,
                                    uint8_t* input, size_t input_capacity,
                                    size_t& actual);
-    TransferResult handle_setup(const uint8_t* data, size_t size);
-    TransferResult prepare_control_response(const SetupPacket& setup);
-    void finish_control_transfer();
+    UsbDeviceState* resolve_device(uint8_t address);
+    TransferResult handle_setup(UsbDeviceState& device, bool is_hub,
+                                const uint8_t* data, size_t size);
+    TransferResult prepare_control_response(UsbDeviceState& device, bool is_hub,
+                                            const SetupPacket& setup);
+    void finish_control_transfer(UsbDeviceState& device, bool is_hub);
     void begin_ep0_trace(uint8_t address, const SetupPacket& setup,
                          TransferResult result);
     void record_ep0_td_completion(const EndpointDescriptor& ed,
@@ -219,21 +256,14 @@ private:
     uint64_t frames_ = 0;
     uint8_t done_count_ = 7;
 
+    UsbTopology topology_ = UsbTopology::kDirectXid;
     bool xid_attached_ = false;
-    uint8_t xid_address_ = 0;
-    uint8_t pending_xid_address_ = 0;
-    bool pending_address_valid_ = false;
-    uint8_t xid_configuration_ = 0;
     XidGamepadState xid_state_{};
     uint16_t xid_left_rumble_ = 0;
     uint16_t xid_right_rumble_ = 0;
-    SetupPacket control_setup_{};
-    bool control_active_ = false;
-    bool control_direction_in_ = false;
-    bool control_stalled_ = false;
-    std::vector<uint8_t> control_response_;
-    size_t control_response_offset_ = 0;
-    std::vector<uint8_t> control_output_;
+    uint32_t hub_port1_status_ = 0;
+    UsbDeviceState xid_device_{};
+    UsbDeviceState hub_device_{};
 
     std::array<Ep0Trace, kEp0TraceCapacity> ep0_trace_{};
     size_t ep0_trace_count_ = 0;

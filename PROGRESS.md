@@ -57,6 +57,14 @@ harvested from xemu, silicon-corrected against a live console. GPL-2.
   controller-home composition, with earlier counters still intact. This is visual
   panel/default-row/artwork/background visibility, not
   input-driven selection or navigation.
+- **Test-only input architecture milestone:** OHCI has a parameterized synthetic three-port
+  embedded-hub profile with zero identity fields, while the production/default replay remains
+  the unchanged direct-XID model. Focused unit flow proves separate hub/child address and
+  configuration, hub class/status, port-1 change/reset/enable and EP1 reporting, empty ports
+  2/3, and downstream XID vendor plus periodic D-pad/A/B TD delivery. Isolated Debug and
+  Release `test_ohci`, `test_ohci_synthetic_hub`, `test_xid_input`, and `xlle` fixture checks
+  passed. This neither proves retail topology nor navigation: exact hardware descriptors and
+  enumeration evidence remain blocked on `beads-xbox.1.5.8.1`.
 - **Immediate burn-down path:** continue the passive exact visual census, validate the
   dashboard frame against a real-Xbox reference, and in parallel observe real XID endpoint
   polling behind the Controller S embedded hub before proving basic D-pad/A/B menu navigation.

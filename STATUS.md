@@ -3,6 +3,21 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-09 — A4: parameterized synthetic Controller-S hub mechanics are unit-proven
+
+OHCI now has an explicitly **test-only** synthetic three-port embedded-hub profile: its
+descriptor has zero identity fields and is not a claimed retail descriptor. The production
+default remains the byte-identical replay-observed root-attached direct-XID model. Focused
+unit flow proves independent hub/child address and configuration state; hub class descriptor
+and status; port-1 connection/change/reset/enable plus EP1 change reporting; no devices on
+ports 2/3; and downstream XID standard/vendor enumeration with periodic D-pad/A/B delivery
+only after a guest TD. This is mechanics coverage only, not a replay or navigation claim.
+
+Isolated Debug and Release builds passed `test_ohci`, `test_ohci_synthetic_hub`,
+`test_xid_input`, and `xlle`'s 15 fixture checks. Exact real Controller-S hub descriptors,
+identity, and retail enumeration evidence remain blocked on `beads-xbox.1.5.8.1`; no synthetic
+result substitutes for that capture.
+
 ## 2026-08-08 — A4: full-screen background completes the controller-home composition
 
 The exact IQRS4/IQRS7 four-immediate-vertex family now executes as a separate bounded mode-8

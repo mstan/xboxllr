@@ -141,6 +141,10 @@ add_executable(test_ohci tests/test_ohci.cpp src/machine/ohci.cpp)
 target_include_directories(test_ohci PRIVATE ${XLLE_INCLUDES})
 add_test(NAME ohci COMMAND test_ohci)
 
+add_executable(test_ohci_synthetic_hub tests/test_ohci_synthetic_hub.cpp src/machine/ohci.cpp)
+target_include_directories(test_ohci_synthetic_hub PRIVATE ${XLLE_INCLUDES})
+add_test(NAME ohci_synthetic_hub COMMAND test_ohci_synthetic_hub)
+
 add_executable(test_xid_input tests/test_xid_input.cpp src/host/xid_input.cpp)
 target_include_directories(test_xid_input PRIVATE ${XLLE_INCLUDES})
 target_link_libraries(test_xid_input PRIVATE xlle_machine)

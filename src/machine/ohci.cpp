@@ -11,6 +11,11 @@ namespace {
 constexpr uint8_t kDirectionSetup = 0;
 constexpr uint8_t kDirectionOut = 1;
 constexpr uint8_t kDirectionIn = 2;
+constexpr uint32_t kHubPortConnection = 1u << 0;
+constexpr uint32_t kHubPortEnabled = 1u << 1;
+constexpr uint32_t kHubPortConnectionChange = 1u << 16;
+constexpr uint32_t kHubPortEnableChange = 1u << 17;
+constexpr uint32_t kHubPortResetChange = 1u << 20;
 
 constexpr std::array<uint8_t, 18> kDeviceDescriptor{{
     18, 0x01, 0x10, 0x01, 0x00, 0x00, 0x00, 0x40,
@@ -27,6 +32,21 @@ constexpr std::array<uint8_t, 32> kConfigurationDescriptor{{
 constexpr std::array<uint8_t, 16> kXidDescriptor{{
     0x10, 0x42, 0x00, 0x01, 0x01, 0x02, 20, 6,
     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+}};
+
+// Test fixture only.  Zero identity/string fields intentionally avoid
+// representing this as a captured Controller S embedded hub.
+constexpr std::array<uint8_t, 18> kSyntheticHubDeviceDescriptor{{
+    18, 0x01, 0x10, 0x01, 0x09, 0x00, 0x00, 0x08,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0, 0, 0, 1,
+}};
+constexpr std::array<uint8_t, 25> kSyntheticHubConfigurationDescriptor{{
+    9, 0x02, 25, 0, 1, 1, 0, 0x40, 0,
+    9, 0x04, 0, 0, 1, 0x09, 0x00, 0x00, 0,
+    7, 0x05, 0x81, 0x03, 1, 0, 12,
+}};
+constexpr std::array<uint8_t, 9> kSyntheticHubDescriptor{{
+    9, 0x29, 3, 0x02, 0, 0, 0, 0, 0xff,
 }};
 
 uint16_t read16(const uint8_t* data) {
@@ -50,15 +70,11 @@ void Ohci::reset() {
     regs_[18] = 0x1204;      // NOCP | NPS | four root ports
 
     xid_attached_ = base_ == 0xFED00000u;
-    xid_address_ = 0;
-    pending_xid_address_ = 0;
-    pending_address_valid_ = false;
-    xid_configuration_ = 0;
-    control_active_ = false;
-    control_stalled_ = false;
-    control_response_.clear();
-    control_output_.clear();
-    control_response_offset_ = 0;
+    xid_device_ = {};
+    hub_device_ = {};
+    hub_port1_status_ = topology_ == UsbTopology::kSyntheticControllerSHubForTest
+                            ? kHubPortConnection | kHubPortConnectionChange
+                            : 0;
     ep0_active_trace_ = -1;
     done_count_ = 7;
     if (xid_attached_) {
@@ -162,10 +178,11 @@ void Ohci::write_reg(uint32_t index, uint32_t value) {
             if ((value & kPortPrs) && (regs_[index] & kPortCcs)) {
                 regs_[index] &= ~kPortPrs;
                 regs_[index] |= kPortPes | kPortPrsc;
-                xid_address_ = 0;
-                xid_configuration_ = 0;
-                pending_address_valid_ = false;
-                control_active_ = false;
+                xid_device_ = {};
+                if (topology_ == UsbTopology::kSyntheticControllerSHubForTest) {
+                    hub_device_ = {};
+                    hub_port1_status_ = kHubPortConnection | kHubPortConnectionChange;
+                }
             }
             if (value & kPortPps) regs_[index] |= kPortPps;
             if (value & (1u << 9)) regs_[index] &= ~kPortPps;
@@ -311,51 +328,121 @@ std::vector<uint8_t> Ohci::xid_input_report() const {
     return report;
 }
 
-Ohci::TransferResult Ohci::prepare_control_response(const SetupPacket& setup) {
-    control_response_.clear();
-    control_output_.clear();
-    control_response_offset_ = 0;
-    control_stalled_ = false;
-    control_direction_in_ = (setup.request_type & 0x80u) != 0;
-    control_active_ = true;
+Ohci::UsbDeviceState* Ohci::resolve_device(uint8_t address) {
+    if (!xid_attached_ || !(regs_[21] & kPortCcs) || !(regs_[21] & kPortPes))
+        return nullptr;
+    if (topology_ == UsbTopology::kDirectXid)
+        return address == xid_device_.address ? &xid_device_ : nullptr;
+
+    if (address == hub_device_.address &&
+        (address != 0 || hub_device_.address == 0))
+        return &hub_device_;
+    if (address != 0 && address == xid_device_.address &&
+        (hub_port1_status_ & kHubPortEnabled))
+        return &xid_device_;
+    // Address zero belongs to the hub until its address transaction completes.
+    // Only then, and only after port 1 reset/enables the child, does it route
+    // to the child during that child's own enumeration.
+    if (address == 0 && hub_device_.address != 0 &&
+        xid_device_.address == 0 && (hub_port1_status_ & kHubPortEnabled))
+        return &xid_device_;
+    return nullptr;
+}
+
+Ohci::TransferResult Ohci::prepare_control_response(
+    UsbDeviceState& device, bool is_hub, const SetupPacket& setup) {
+    device.control_response.clear();
+    device.control_output.clear();
+    device.control_response_offset = 0;
+    device.control_stalled = false;
+    device.control_direction_in = (setup.request_type & 0x80u) != 0;
+    device.control_active = true;
     ++control_requests_;
 
     const uint8_t descriptor_type = static_cast<uint8_t>(setup.value >> 8);
     const uint8_t descriptor_index = static_cast<uint8_t>(setup.value);
-    if ((setup.request_type & 0x60u) == 0) {
+    if (is_hub && setup.request_type == 0xa0 && setup.request == 0x06 &&
+        setup.value == 0x2900) {
+        device.control_response.assign(kSyntheticHubDescriptor.begin(),
+                                       kSyntheticHubDescriptor.end());
+    } else if (is_hub && setup.request_type == 0xa0 &&
+               setup.request == 0x00) {
+        if (!device.control_direction_in) return TransferResult::kStall;
+        // Test-only synthetic hub: no hub-wide status/change conditions.
+        device.control_response = {0, 0, 0, 0};
+    } else if (is_hub && setup.request_type == 0xa3 &&
+               setup.request == 0x00 && setup.index >= 1 &&
+               setup.index <= 3) {
+        if (!device.control_direction_in) return TransferResult::kStall;
+        const uint32_t status = setup.index == 1 ? hub_port1_status_ : 0;
+        device.control_response = {
+            static_cast<uint8_t>(status), static_cast<uint8_t>(status >> 8),
+            static_cast<uint8_t>(status >> 16), static_cast<uint8_t>(status >> 24),
+        };
+    } else if (is_hub && setup.request_type == 0x23 &&
+               (setup.request == 0x01 || setup.request == 0x03)) {
+        if (device.control_direction_in || setup.index < 1 || setup.index > 3)
+            return TransferResult::kStall;
+        if (setup.request == 0x03 && setup.value == 4 && setup.index == 1) {
+            // A downstream reset starts a fresh child-address-zero phase.
+            xid_device_ = {};
+            hub_port1_status_ |= kHubPortConnection | kHubPortEnabled |
+                                kHubPortEnableChange | kHubPortResetChange;
+        } else if (setup.request == 0x01 && setup.index == 1) {
+            if (setup.value == 16)
+                hub_port1_status_ &= ~kHubPortConnectionChange;
+            else if (setup.value == 17)
+                hub_port1_status_ &= ~kHubPortEnableChange;
+            else if (setup.value == 20)
+                hub_port1_status_ &= ~kHubPortResetChange;
+            else
+                return TransferResult::kStall;
+        } else {
+            return TransferResult::kStall;
+        }
+    } else if ((setup.request_type & 0x60u) == 0) {
         switch (setup.request) {
             case 0x00:  // GET_STATUS
-                if (!control_direction_in_) return TransferResult::kStall;
-                control_response_ = {0, 0};
+                if (!device.control_direction_in) return TransferResult::kStall;
+                device.control_response = {0, 0};
                 break;
             case 0x01:  // CLEAR_FEATURE
             case 0x03:  // SET_FEATURE
-                if (control_direction_in_) return TransferResult::kStall;
+                if (device.control_direction_in) return TransferResult::kStall;
                 break;
             case 0x05:  // SET_ADDRESS
-                if (control_direction_in_ || setup.value > 127)
+                if (device.control_direction_in || setup.value > 127)
                     return TransferResult::kStall;
-                pending_xid_address_ = static_cast<uint8_t>(setup.value);
-                pending_address_valid_ = true;
+                device.pending_address = static_cast<uint8_t>(setup.value);
+                device.pending_address_valid = true;
                 break;
             case 0x06:  // GET_DESCRIPTOR
-                if (!control_direction_in_) return TransferResult::kStall;
+                if (!device.control_direction_in) return TransferResult::kStall;
                 if (descriptor_type == 0x01) {
-                    control_response_.assign(kDeviceDescriptor.begin(),
-                                             kDeviceDescriptor.end());
+                    if (is_hub)
+                        device.control_response.assign(kSyntheticHubDeviceDescriptor.begin(),
+                                                       kSyntheticHubDeviceDescriptor.end());
+                    else
+                        device.control_response.assign(kDeviceDescriptor.begin(),
+                                                       kDeviceDescriptor.end());
                 } else if (descriptor_type == 0x02) {
-                    control_response_.assign(kConfigurationDescriptor.begin(),
-                                             kConfigurationDescriptor.end());
+                    if (is_hub)
+                        device.control_response.assign(kSyntheticHubConfigurationDescriptor.begin(),
+                                                       kSyntheticHubConfigurationDescriptor.end());
+                    else
+                        device.control_response.assign(kConfigurationDescriptor.begin(),
+                                                       kConfigurationDescriptor.end());
                 } else if (descriptor_type == 0x03) {
+                    if (is_hub) return TransferResult::kStall;
                     if (descriptor_index == 0) {
-                        control_response_ = {4, 3, 0x09, 0x04};
+                        device.control_response = {4, 3, 0x09, 0x04};
                     } else if (descriptor_index == 1) {
-                        control_response_ = string_descriptor("Microsoft");
+                        device.control_response = string_descriptor("Microsoft");
                     } else if (descriptor_index == 2) {
-                        control_response_ =
+                        device.control_response =
                             string_descriptor("Controller S");
                     } else if (descriptor_index == 3) {
-                        control_response_ = string_descriptor("1");
+                        device.control_response = string_descriptor("1");
                     } else {
                         return TransferResult::kStall;
                     }
@@ -364,84 +451,85 @@ Ohci::TransferResult Ohci::prepare_control_response(const SetupPacket& setup) {
                 }
                 break;
             case 0x08:  // GET_CONFIGURATION
-                if (!control_direction_in_) return TransferResult::kStall;
-                control_response_ = {xid_configuration_};
+                if (!device.control_direction_in) return TransferResult::kStall;
+                device.control_response = {device.configuration};
                 break;
             case 0x09:  // SET_CONFIGURATION
-                if (control_direction_in_ || setup.value > 1)
+                if (device.control_direction_in || setup.value > 1)
                     return TransferResult::kStall;
-                xid_configuration_ = static_cast<uint8_t>(setup.value);
+                device.configuration = static_cast<uint8_t>(setup.value);
                 break;
             case 0x0a:  // GET_INTERFACE
-                if (!control_direction_in_) return TransferResult::kStall;
-                control_response_ = {0};
+                if (!device.control_direction_in) return TransferResult::kStall;
+                device.control_response = {0};
                 break;
             case 0x0b:  // SET_INTERFACE
-                if (control_direction_in_ || setup.value != 0)
+                if (device.control_direction_in || setup.value != 0)
                     return TransferResult::kStall;
                 break;
             default:
                 return TransferResult::kStall;
         }
-    } else if (setup.request_type == 0xc1 && setup.request == 0x06 &&
+    } else if (!is_hub && setup.request_type == 0xc1 && setup.request == 0x06 &&
                setup.value == 0x4200) {
-        control_response_.assign(kXidDescriptor.begin(), kXidDescriptor.end());
-    } else if (setup.request_type == 0xc1 && setup.request == 0x01) {
+        device.control_response.assign(kXidDescriptor.begin(), kXidDescriptor.end());
+    } else if (!is_hub && setup.request_type == 0xc1 && setup.request == 0x01) {
         if (setup.value == 0x0100) {
-            control_response_.assign(20, 0xff);
-            control_response_[0] = 0;
-            control_response_[1] = 20;
+            device.control_response.assign(20, 0xff);
+            device.control_response[0] = 0;
+            device.control_response[1] = 20;
         } else if (setup.value == 0x0200) {
-            control_response_.assign(6, 0xff);
-            control_response_[0] = 0;
-            control_response_[1] = 6;
+            device.control_response.assign(6, 0xff);
+            device.control_response[0] = 0;
+            device.control_response[1] = 6;
         } else {
             return TransferResult::kStall;
         }
-    } else if (setup.request_type == 0xa1 && setup.request == 0x01 &&
+    } else if (!is_hub && setup.request_type == 0xa1 && setup.request == 0x01 &&
                setup.value == 0x0100) {
-        control_response_ = xid_input_report();
+        device.control_response = xid_input_report();
         ++xid_input_reports_;
-    } else if (setup.request_type == 0x21 && setup.request == 0x09 &&
+    } else if (!is_hub && setup.request_type == 0x21 && setup.request == 0x09 &&
                setup.value == 0x0200) {
         if (setup.length != 6) return TransferResult::kStall;
     } else {
         return TransferResult::kStall;
     }
 
-    if (control_response_.size() > setup.length)
-        control_response_.resize(setup.length);
+    if (device.control_response.size() > setup.length)
+        device.control_response.resize(setup.length);
     return TransferResult::kSuccess;
 }
 
-Ohci::TransferResult Ohci::handle_setup(const uint8_t* data, size_t size) {
+Ohci::TransferResult Ohci::handle_setup(UsbDeviceState& device, bool is_hub,
+                                        const uint8_t* data, size_t size) {
     if (size != 8) return TransferResult::kStall;
-    control_setup_.request_type = data[0];
-    control_setup_.request = data[1];
-    control_setup_.value = read16(data + 2);
-    control_setup_.index = read16(data + 4);
-    control_setup_.length = read16(data + 6);
-    return prepare_control_response(control_setup_);
+    device.control_setup.request_type = data[0];
+    device.control_setup.request = data[1];
+    device.control_setup.value = read16(data + 2);
+    device.control_setup.index = read16(data + 4);
+    device.control_setup.length = read16(data + 6);
+    return prepare_control_response(device, is_hub, device.control_setup);
 }
 
-void Ohci::finish_control_transfer() {
-    if (pending_address_valid_) {
-        xid_address_ = pending_xid_address_;
-        pending_address_valid_ = false;
+void Ohci::finish_control_transfer(UsbDeviceState& device, bool is_hub) {
+    if (device.pending_address_valid) {
+        device.address = device.pending_address;
+        device.pending_address_valid = false;
     }
-    if (control_setup_.request_type == 0x21 &&
-        control_setup_.request == 0x09 &&
-        control_setup_.value == 0x0200 &&
-        control_output_.size() == 6) {
-        xid_left_rumble_ = read16(control_output_.data() + 2);
-        xid_right_rumble_ = read16(control_output_.data() + 4);
+    if (!is_hub && device.control_setup.request_type == 0x21 &&
+        device.control_setup.request == 0x09 &&
+        device.control_setup.value == 0x0200 &&
+        device.control_output.size() == 6) {
+        xid_left_rumble_ = read16(device.control_output.data() + 2);
+        xid_right_rumble_ = read16(device.control_output.data() + 4);
         ++xid_output_reports_;
     }
-    control_active_ = false;
-    control_stalled_ = false;
-    control_response_.clear();
-    control_output_.clear();
-    control_response_offset_ = 0;
+    device.control_active = false;
+    device.control_stalled = false;
+    device.control_response.clear();
+    device.control_output.clear();
+    device.control_response_offset = 0;
     if (ep0_active_trace_ >= 0) {
         Ep0Trace& trace = ep0_trace_[static_cast<size_t>(ep0_active_trace_)];
         if (trace.outcome == Ep0Outcome::kPending)
@@ -505,58 +593,69 @@ Ohci::TransferResult Ohci::device_transfer(
     const uint8_t* output, size_t output_size, uint8_t* input,
     size_t input_capacity, size_t& actual) {
     actual = 0;
-    if (!xid_attached_ ||
-        !(regs_[21] & kPortCcs) || !(regs_[21] & kPortPes) ||
-        address != xid_address_) {
-        return TransferResult::kNak;
-    }
+    UsbDeviceState* device = resolve_device(address);
+    if (!device) return TransferResult::kNak;
+    const bool is_hub = device == &hub_device_;
 
     if (endpoint == 0) {
         if (direction == kDirectionSetup) {
             actual = output_size;
-            return handle_setup(output, output_size);
+            return handle_setup(*device, is_hub, output, output_size);
         }
-        if (!control_active_ || control_stalled_)
+        if (!device->control_active || device->control_stalled)
             return TransferResult::kStall;
         if (direction == kDirectionIn) {
-            if (!control_direction_in_) {
+            if (!device->control_direction_in) {
                 if (output_size != 0 || input_capacity != 0)
                     return TransferResult::kStall;
-                finish_control_transfer();
+                finish_control_transfer(*device, is_hub);
                 return TransferResult::kSuccess;
             }
             const size_t remaining =
-                control_response_.size() - control_response_offset_;
+                device->control_response.size() - device->control_response_offset;
             actual = std::min(remaining, input_capacity);
             if (actual) {
                 std::memcpy(input,
-                            control_response_.data() + control_response_offset_,
+                            device->control_response.data() + device->control_response_offset,
                             actual);
-                control_response_offset_ += actual;
+                device->control_response_offset += actual;
             }
             return TransferResult::kSuccess;
         }
         if (direction == kDirectionOut) {
-            if (control_direction_in_) {
+            if (device->control_direction_in) {
                 if (output_size != 0) return TransferResult::kStall;
-                finish_control_transfer();
+                finish_control_transfer(*device, is_hub);
                 return TransferResult::kSuccess;
             }
-            if (control_setup_.length == 0) {
+            if (device->control_setup.length == 0) {
                 if (output_size != 0) return TransferResult::kStall;
                 return TransferResult::kSuccess;
             }
             const size_t remaining =
-                control_setup_.length - control_output_.size();
+                device->control_setup.length - device->control_output.size();
             actual = std::min(remaining, output_size);
-            control_output_.insert(control_output_.end(), output,
-                                   output + actual);
+            device->control_output.insert(device->control_output.end(), output,
+                                          output + actual);
             return TransferResult::kSuccess;
         }
         return TransferResult::kStall;
     }
 
-    if (!xid_configuration_ || endpoint != 2)
+    if (is_hub) {
+        if (!hub_device_.configuration || endpoint != 1 ||
+            direction != kDirectionIn)
+            return TransferResult::kStall;
+        if (!(hub_port1_status_ &
+              (kHubPortConnectionChange | kHubPortEnableChange |
+               kHubPortResetChange)))
+            return TransferResult::kNak;
+        if (!input_capacity) return TransferResult::kStall;
+        input[0] = 0x02;  // bitmap: downstream port 1 changed
+        actual = 1;
+        return TransferResult::kSuccess;
+    }
+    if (!xid_device_.configuration || endpoint != 2)
         return TransferResult::kStall;
     if (direction == kDirectionIn) {
         const auto report = xid_input_report();
@@ -655,8 +754,11 @@ bool Ohci::process_td(uint32_t ed_address, EndpointDescriptor& ed,
         buffer.data(), packet_length, buffer.data(), packet_length, actual);
     if (endpoint == 0 && direction == kDirectionSetup &&
         result != TransferResult::kNak) {
+        UsbDeviceState* device =
+            resolve_device(static_cast<uint8_t>(ed.flags & 0x7fu));
+        if (!device) return false;
         begin_ep0_trace(static_cast<uint8_t>(ed.flags & 0x7fu),
-                        control_setup_, result);
+                        device->control_setup, result);
     }
     if (result == TransferResult::kNak) {
         endpoint_blocked = true;
