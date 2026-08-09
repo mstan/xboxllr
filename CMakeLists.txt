@@ -154,6 +154,10 @@ add_executable(test_xid_script tests/test_xid_script.cpp)
 target_include_directories(test_xid_script PRIVATE ${XLLE_INCLUDES})
 add_test(NAME xid_script COMMAND test_xid_script)
 
+add_executable(test_xid_down_a_script tests/test_xid_down_a_script.cpp)
+target_include_directories(test_xid_down_a_script PRIVATE ${XLLE_INCLUDES})
+add_test(NAME xid_down_a_script COMMAND test_xid_down_a_script)
+
 add_executable(test_machine_config tests/test_machine_config.cpp)
 target_include_directories(test_machine_config PRIVATE ${XLLE_INCLUDES})
 target_link_libraries(test_machine_config PRIVATE xlle_machine)
