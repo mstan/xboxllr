@@ -5008,12 +5008,15 @@ int main() {
             emit_gc(0x1E74, 0);
             emit_gc(0x1E78, 0);
             emit_gc(0x1E60, 0x00000002);  // combiner control: 2 stages
-            emit_gc(0x0AC0, 0x00002021);  // stage0 ColorIcw: A=C0 invert, B=ZERO invert
-            emit_gc(0x0260, 0x00002020);  // stage0 AlphaIcw: A=ZERO invert, B=ZERO invert
+            // ICW byte order is A(bits31:24)/B(23:16)/C(15:8)/D(7:0) (matching xemu's
+            // parse_combiner_inputs() exactly); AB is the pair that actually reaches
+            // ab_dst below, so the meaningful inputs live in A/B, not C/D.
+            emit_gc(0x0AC0, 0x21200000);  // stage0 ColorIcw: A=C0 invert, B=ZERO invert
+            emit_gc(0x0260, 0x20200000);  // stage0 AlphaIcw: A=ZERO invert, B=ZERO invert
             emit_gc(0x1E40, 0x000000C0);  // stage0 ColorOcw: AB -> R0
             emit_gc(0x0AA0, 0x000000C0);  // stage0 AlphaOcw: AB -> R0
-            emit_gc(0x0AC4, 0x0000040C);  // stage1 ColorIcw: A=R0, B=PRIMARY_COLOR
-            emit_gc(0x0264, 0x0000141C);  // stage1 AlphaIcw: A=R0.a, B=PRIMARY_COLOR.a
+            emit_gc(0x0AC4, 0x0C040000);  // stage1 ColorIcw: A=R0, B=PRIMARY_COLOR
+            emit_gc(0x0264, 0x1C140000);  // stage1 AlphaIcw: A=R0.a, B=PRIMARY_COLOR.a
             emit_gc(0x1E44, 0x000000C0);  // stage1 ColorOcw: AB -> R0
             emit_gc(0x0AA4, 0x000000C0);  // stage1 AlphaOcw: AB -> R0
             emit_gc(0x0A60, 0x00404040);  // Factor0 (stage0): R=G=B=0x40
@@ -5030,12 +5033,18 @@ int main() {
             CHECK(get32(gc_ram, 0x10000 + gc_b_offset) == 0xFF604830u);
         }
 
-        // --- (c) Unsupported feature: same fingerprint as (a) but with a
-        // final-combiner signature this evaluator does not recognize (only the
-        // identity-passthrough SpecularFog/FinalFactor pair is supported). This
-        // must land in the kFinalCombiner skip-reason census, not silently drop:
-        // no fragment/color writes, executed stays false, and the skip counter
-        // advances by exactly one. ---
+        // --- (c) Unsupported feature: same fingerprint as (a), but the final
+        // combiner's D input references the FOG register (3) instead of R0. Per
+        // xemu's psh.c, FOG is a real register (pFog = vec4(fogColor.rgb,
+        // clamp(vtxFog,0,1))) that this evaluator does not implement -- no witnessed
+        // profile above implements fog either, and this evaluator has no FOG_COLOR
+        // latch or per-vertex fog coordinate. register_supported() already rejects
+        // register 3 unconditionally, so a final combiner that references it must
+        // land in the kFinalCombiner skip-reason census, not silently drop: no
+        // fragment/color writes, executed stays false, and the skip counter advances
+        // by exactly one. (NV097_SET_SPECULAR_FOG_FACTOR / FinalFactor0/1 is NOT fog
+        // by itself -- it is the final combiner's own CONSTANT_COLOR0/1 source, now
+        // implemented and exercised by test (k) below.) ---
         {
             emit_gc(0x0200, 0x00400000);
             emit_gc(0x0204, 0x00400000);
@@ -5070,8 +5079,8 @@ int main() {
             emit_gc(0x0260, 0x14200000);
             emit_gc(0x1E40, 0x00000C00);
             emit_gc(0x0AA0, 0x00000C00);
-            emit_gc(0x0288, 0x00000001);  // not the identity-passthrough signature
-            emit_gc(0x028C, 0x00001C80);
+            emit_gc(0x0288, 0x00000003);  // SpecularFogCW0: D=FOG (register 3, unsupported)
+            emit_gc(0x028C, 0x00001C80);  // SpecularFogCW1: G=R0.alpha (unused: skips first)
             emit_gc(0x1E20, 0);
             emit_gc(0x1E24, 0);
             std::memset(gc_ram.data() + 0x10000, 0xAB, 256 * 64);
@@ -5383,8 +5392,10 @@ int main() {
             emit_e(0x1E74, 0);
             emit_e(0x1E78, 0x00210000);
             emit_e(0x1E60, 0x00000001);   // combiner control: 1 stage
-            emit_e(0x0AC0, 0x00000408);   // ColorIcw0: A=TEXTURE0, B=PRIMARY_COLOR
-            emit_e(0x0260, 0x00002014);   // AlphaIcw0: A=PRIMARY_COLOR.a, B=ZERO invert
+            // ICW byte order is A(31:24)/B(23:16)/C(15:8)/D(7:0); AB reaches ab_dst
+            // below, so TEXTURE0/PRIMARY_COLOR must be A/B, not C/D.
+            emit_e(0x0AC0, 0x08040000);   // ColorIcw0: A=TEXTURE0, B=PRIMARY_COLOR
+            emit_e(0x0260, 0x14200000);   // AlphaIcw0: A=PRIMARY_COLOR.a, B=ZERO invert
             emit_e(0x1E40, 0x000000C0);   // ColorOcw0: AB -> R0
             emit_e(0x0AA0, 0x000000C0);   // AlphaOcw0: AB -> R0
             emit_e(0x0288, 0x0000000C);
@@ -5711,8 +5722,8 @@ int main() {
             emit_f(0x1E74, 0);
             emit_f(0x1E78, 0x00210000);
             emit_f(0x1E60, 0x00000001);
-            emit_f(0x0AC0, 0x00000408);   // ColorIcw0: A=TEXTURE0, B=PRIMARY_COLOR
-            emit_f(0x0260, 0x00002014);
+            emit_f(0x0AC0, 0x08040000);   // ColorIcw0: A=TEXTURE0, B=PRIMARY_COLOR
+            emit_f(0x0260, 0x14200000);
             emit_f(0x1E40, 0x000000C0);
             emit_f(0x0AA0, 0x000000C0);
             emit_f(0x0288, 0x0000000C);
@@ -5981,6 +5992,694 @@ int main() {
             // Physical address 0 in particular -- the exact corruption this
             // regression produced -- must be untouched.
             CHECK(get32(g_ram, 0) == 0xCCCCCCCCu);
+        }
+
+        // --- (h) Texture-alpha-modulated fingerprint: the exact witnessed dashboard
+        // menu-chrome combiner (RS0 of probe-stockdash-vfix5-11.5b.stdout.log):
+        // ci=04080000 (A=PRIMARY_COLOR identity, B=TEXTURE0 identity -> AB=diffuse*
+        // texture), ai=14180000 (A=PRIMARY_COLOR.a identity, B=TEXTURE0.a identity ->
+        // AB=diffuse.a*texture.a), co=ao=00000c00 (SUM -> R0), shader=00000001
+        // (PROJECT2D/linear). Before this increment, any AlphaIcw referencing
+        // TEXTURE0's alpha in the linear sampling path was named-skipped
+        // (kTextureStage detail 0x100) on the theory that the linear sampler had no
+        // real alpha channel; it does (sample_linear already unpacked all 4 bytes),
+        // so this must now execute with the texture's actual alpha byte, not a
+        // fallback. Texel = (R=0xC0,G=0xA0,B=0x80,A=0x40), diffuse=(0x30,0x50,0x70,0x80):
+        //   R = floor(0xC0*0x30/255 + 0.5) = 36  = 0x24
+        //   G = floor(0xA0*0x50/255 + 0.5) = 50  = 0x32
+        //   B = floor(0x80*0x70/255 + 0.5) = 56  = 0x38
+        //   A = floor(0x40*0x80/255 + 0.5) = floor(32.13+0.5) = 32 = 0x20
+        // Expected pixel (blend disabled): 0x20243238. ---
+        {
+            gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x700020, 4, 4);
+            gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x700024, 4, 0x80010050);
+            gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x700500, 4, 0x3D);
+            gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x700504, 4, 0x03FFFFFF);
+            gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x700508, 4, 0x00000000);
+            emit_gc(0x0188, 4);  // texture DMA B
+
+            emit_gc(0x0200, 0x00080000);
+            emit_gc(0x0204, 0x00080000);
+            emit_gc(0x0208, 0x00000108);
+            emit_gc(0x020C, 0x00200020);
+            emit_gc(0x0210, 0x00010000);
+            emit_gc(0x0290, 0x00100001);
+            emit_gc(0x02C0, 0x00070000);
+            emit_gc(0x02E0, 0x00070000);
+            emit_gc(0x0300, 0);
+            emit_gc(0x0304, 0);
+            emit_gc(0x0308, 0);
+            emit_gc(0x030C, 0);
+            emit_gc(0x033C, 0x0207);
+            emit_gc(0x0340, 0);
+            emit_gc(0x0344, 1);
+            emit_gc(0x0348, 0);
+            emit_gc(0x0350, 0x8006);
+            emit_gc(0x0354, 0x0207);
+            emit_gc(0x0358, 0x01010101);
+            emit_gc(0x035C, 0);
+            emit_gc(0x037C, 0x1D01);
+            emit_gc(0x038C, 0x1B02);
+            emit_gc(0x0390, 0x1B02);
+            emit_gc(0x0394, 0);
+            emit_gc(0x0398, 0x4B7FFFFF);
+            emit_gc(0x039C, 0x0405);
+            emit_gc(0x03A0, 0x0900);
+            emit_gc(0x1D78, 1);
+            emit_gc(0x1E70, 1);
+            emit_gc(0x1E74, 0);
+            emit_gc(0x1E78, 0x00210000);
+            emit_gc(0x1E60, 0x00000001);
+            emit_gc(0x0AC0, 0x04080000);  // ColorIcw0: A=PRIMARY, B=TEXTURE0
+            emit_gc(0x0260, 0x14180000);  // AlphaIcw0: A=PRIMARY.a, B=TEXTURE0.a
+            emit_gc(0x1E40, 0x00000C00);  // ColorOcw0: SUM -> R0
+            emit_gc(0x0AA0, 0x00000C00);  // AlphaOcw0: SUM -> R0
+            emit_gc(0x0288, 0x0000000C);
+            emit_gc(0x028C, 0x00001C80);
+            emit_gc(0x1E20, 0);
+            emit_gc(0x1E24, 0);
+            emit_gc(0x1B00, 0x00030000);   // TextureOffset0 (distinct scratch region)
+            emit_gc(0x1B04, 0);
+            emit_gc(0x1B08, 0);
+            emit_gc(0x1B0C, 0x40000000);
+            emit_gc(0x1B10, 0x00100000);   // pitch=16
+            emit_gc(0x1B14, 0);
+            emit_gc(0x1B1C, 0x00040004);   // 4x4
+            emit_gc(0x1B20, 0);
+            emit_gc(0x1B24, 0);
+
+            std::vector<uint8_t> h_texture(4 * 4 * 4, 0);
+            put32(h_texture, (2u * 4u + 2u) * 4u, 0x40C0A080u);
+            std::memcpy(gc_ram.data() + 0x30000, h_texture.data(), h_texture.size());
+            std::memset(gc_ram.data() + 0x10000, 0, 8 * 32);
+
+            const uint64_t before_h_samples = gc_gpu.generic_combiner_texture_samples();
+            emit_gc(0x17FC, 5);
+            for (auto xy : {std::pair{0.0f, 0.0f}, std::pair{8.0f, 0.0f},
+                            std::pair{0.0f, 8.0f}}) {
+                emit_gc(0x1A90, gc_float_bits(2.5f));
+                emit_gc(0x1A94, gc_float_bits(2.5f));
+                emit_gc(0x1A98, gc_float_bits(0.0f));
+                emit_gc(0x1A9C, gc_float_bits(1.0f));
+                emit_gc(0x1518, gc_float_bits(xy.first));
+                emit_gc(0x151C, gc_float_bits(xy.second));
+                emit_gc(0x1520, gc_float_bits(10.0f));
+                emit_gc(0x194C, gc_pack_ub4(0x30, 0x50, 0x70, 0x80));
+                emit_gc(0x1524, gc_float_bits(1.0f));
+            }
+            emit_gc(0x17FC, 0);
+            kick_gc();
+            CHECK(gc_fault.empty());
+            CHECK(gc_gpu.generic_combiner_texture_samples() > before_h_samples);
+            const uint32_t h_offset = 3u * 32u + 3u * 4u;
+            CHECK(get32(gc_ram, 0x10000u + h_offset) == 0x20243238u);
+        }
+
+        // --- (i) OCW SHIFTLEFTBY1: stage0 computes AB = C0*ONE (C0 identity, ZERO
+        // invert = 1), then the output scale/bias field (co bits[17:15] = 0x10 in the
+        // raw OCW word, i.e. NV097 SHIFTLEFTBY1) doubles it before the clamp to
+        // [-1,1] and the store to R0. C0 = (R=G=B=0x30=48); 48/255 doubled = 96/255
+        // exactly (no rounding ambiguity: 2*(48/255)*255 = 96 exactly). Final combiner
+        // is the identity pass-through (D=R0), so the expected pixel is
+        // 0xFF606060 (blend disabled, alpha forced to 0xFF via the AlphaOcw's own
+        // SUM path with ZERO/invert inputs, matching test (a)'s alpha derivation). ---
+        {
+            emit_gc(0x0200, 0x00080000);
+            emit_gc(0x0204, 0x00080000);
+            emit_gc(0x0208, 0x00000108);
+            emit_gc(0x020C, 0x00200020);
+            emit_gc(0x0210, 0x00010000);
+            emit_gc(0x0290, 0x00100001);
+            emit_gc(0x02C0, 0x00070000);
+            emit_gc(0x02E0, 0x00070000);
+            emit_gc(0x0300, 0);
+            emit_gc(0x0304, 0);
+            emit_gc(0x0308, 0);
+            emit_gc(0x030C, 0);
+            emit_gc(0x033C, 0x0207);
+            emit_gc(0x0340, 0);
+            emit_gc(0x0344, 1);
+            emit_gc(0x0348, 0);
+            emit_gc(0x0350, 0x8006);
+            emit_gc(0x0354, 0x0207);
+            emit_gc(0x0358, 0x01010101);
+            emit_gc(0x035C, 0);
+            emit_gc(0x037C, 0x1D01);
+            emit_gc(0x038C, 0x1B02);
+            emit_gc(0x0390, 0x1B02);
+            emit_gc(0x0394, 0);
+            emit_gc(0x0398, 0x4B7FFFFF);
+            emit_gc(0x039C, 0x0405);
+            emit_gc(0x03A0, 0x0900);
+            emit_gc(0x1D78, 1);
+            emit_gc(0x1E70, 0);
+            emit_gc(0x1E74, 0);
+            emit_gc(0x1E78, 0);
+            emit_gc(0x1E60, 0x00000001);   // 1 stage
+            emit_gc(0x0AC0, 0x01200000);   // ColorIcw0: A=C0 identity, B=ZERO invert
+            emit_gc(0x0260, 0x20200000);   // AlphaIcw0: A=ZERO invert, B=ZERO invert
+            emit_gc(0x1E40, 0x000100C0);   // ColorOcw0: AB -> R0 (0xC0), scale=SHIFTLEFTBY1 (0x10<<12=0x10000)
+            emit_gc(0x0AA0, 0x000000C0);   // AlphaOcw0: AB -> R0 (no scale)
+            emit_gc(0x0A60, 0x00303030);   // Factor0: R=G=B=0x30
+            emit_gc(0x0288, 0x0000000C);
+            emit_gc(0x028C, 0x00001C80);
+            emit_gc(0x1E20, 0);
+            emit_gc(0x1E24, 0);
+            std::memset(gc_ram.data() + 0x10000, 0, 8 * 32);
+
+            submit_triangle(0.0f, 0.0f, 8.0f, 0.0f, 0.0f, 8.0f, 10.0f, 1.0f,
+                            gc_pack_ub4(0, 0, 0, 0));
+            CHECK(gc_fault.empty());
+            const uint32_t i_offset = 3u * 32u + 3u * 4u;
+            CHECK(get32(gc_ram, 0x10000u + i_offset) == 0xFF606060u);
+        }
+
+        // --- (j) MUX_SUM: stage0's color output uses MUX (co bit14 set) instead of
+        // AB+CD. R0.alpha starts this pixel's evaluation at 0 (regs are zeroed per
+        // pixel), so with mux_on_msb (combiner control bit8) clear, the LSB-of-R0.alpha
+        // test selects AB (condition false since R0.a's LSB is 0). AB = C0(identity)*
+        // ZERO-invert(1) = C0 = (0x50,0x60,0x70). CD is deliberately a different,
+        // distinguishable value (C1(identity)*ONE) that must NOT be the one selected.
+        // Alpha SUM (plain, no mux on the alpha side) writes R0.a = 1 from the same
+        // ZERO-invert*ZERO-invert pattern as test (a). Expected pixel: 0xFF506070. ---
+        {
+            emit_gc(0x0200, 0x00080000);
+            emit_gc(0x0204, 0x00080000);
+            emit_gc(0x0208, 0x00000108);
+            emit_gc(0x020C, 0x00200020);
+            emit_gc(0x0210, 0x00010000);
+            emit_gc(0x0290, 0x00100001);
+            emit_gc(0x02C0, 0x00070000);
+            emit_gc(0x02E0, 0x00070000);
+            emit_gc(0x0300, 0);
+            emit_gc(0x0304, 0);
+            emit_gc(0x0308, 0);
+            emit_gc(0x030C, 0);
+            emit_gc(0x033C, 0x0207);
+            emit_gc(0x0340, 0);
+            emit_gc(0x0344, 1);
+            emit_gc(0x0348, 0);
+            emit_gc(0x0350, 0x8006);
+            emit_gc(0x0354, 0x0207);
+            emit_gc(0x0358, 0x01010101);
+            emit_gc(0x035C, 0);
+            emit_gc(0x037C, 0x1D01);
+            emit_gc(0x038C, 0x1B02);
+            emit_gc(0x0390, 0x1B02);
+            emit_gc(0x0394, 0);
+            emit_gc(0x0398, 0x4B7FFFFF);
+            emit_gc(0x039C, 0x0405);
+            emit_gc(0x03A0, 0x0900);
+            emit_gc(0x1D78, 1);
+            emit_gc(0x1E70, 0);
+            emit_gc(0x1E74, 0);
+            emit_gc(0x1E78, 0);
+            emit_gc(0x1E60, 0x00000001);   // mux_on_msb (bit8) clear -> LSB test
+            // ColorIcw0: A=C0 identity, B=ZERO invert, C=C1 identity, D=ZERO invert.
+            emit_gc(0x0AC0, 0x01200220);
+            emit_gc(0x0260, 0x20200000);   // AlphaIcw0: A=B=ZERO invert (SUM=1)
+            emit_gc(0x1E40, 0x00004C00);   // ColorOcw0: sum_dst=R0 (0xC00), MUX bit14 set (0x4000)
+            emit_gc(0x0AA0, 0x000000C0);   // AlphaOcw0: AB -> R0 (plain, no mux)
+            emit_gc(0x0A60, 0x00506070);   // Factor0 (C0): R=0x50,G=0x60,B=0x70
+            emit_gc(0x0A80, 0x00909090);   // Factor1 (C1): a distinguishable non-match
+            emit_gc(0x0288, 0x0000000C);
+            emit_gc(0x028C, 0x00001C80);
+            emit_gc(0x1E20, 0);
+            emit_gc(0x1E24, 0);
+            std::memset(gc_ram.data() + 0x10000, 0, 8 * 32);
+
+            submit_triangle(0.0f, 0.0f, 8.0f, 0.0f, 0.0f, 8.0f, 10.0f, 1.0f,
+                            gc_pack_ub4(0, 0, 0, 0));
+            CHECK(gc_fault.empty());
+            const uint32_t j_offset = 3u * 32u + 3u * 4u;
+            CHECK(get32(gc_ram, 0x10000u + j_offset) == 0xFF506070u);
+        }
+
+        // --- (k) Real final combiner: RGB = D + A*B + (1-A)*C, alpha = G (no longer
+        // only the identity passthrough). Stage0 leaves R0 = diffuse (same passthrough
+        // as test (a)). Final combiner: A=C1(identity, a mix factor), B=C0(identity),
+        // C=R0(identity, i.e. the stage's diffuse result), D=ZERO, G=R0.alpha.
+        // A=0.5 exactly (0x80/255=0.5019..., close enough won't hit an exact half --
+        // pick A=64/255 instead for an exact computation): with diffuse=(0x60,0x40,
+        // 0x20) and C0=(0xF0,0xF0,0xF0), A=64/255:
+        //   R = 0 + (64/255)*(0xF0/255) + (1-64/255)*(0x60/255)
+        // Computed precisely below in the assertion via the same formula, packed to
+        // an exact byte to avoid float/int rounding ambiguity in the test itself. ---
+        {
+            emit_gc(0x0200, 0x00080000);
+            emit_gc(0x0204, 0x00080000);
+            emit_gc(0x0208, 0x00000108);
+            emit_gc(0x020C, 0x00200020);
+            emit_gc(0x0210, 0x00010000);
+            emit_gc(0x0290, 0x00100001);
+            emit_gc(0x02C0, 0x00070000);
+            emit_gc(0x02E0, 0x00070000);
+            emit_gc(0x0300, 0);
+            emit_gc(0x0304, 0);
+            emit_gc(0x0308, 0);
+            emit_gc(0x030C, 0);
+            emit_gc(0x033C, 0x0207);
+            emit_gc(0x0340, 0);
+            emit_gc(0x0344, 1);
+            emit_gc(0x0348, 0);
+            emit_gc(0x0350, 0x8006);
+            emit_gc(0x0354, 0x0207);
+            emit_gc(0x0358, 0x01010101);
+            emit_gc(0x035C, 0);
+            emit_gc(0x037C, 0x1D01);
+            emit_gc(0x038C, 0x1B02);
+            emit_gc(0x0390, 0x1B02);
+            emit_gc(0x0394, 0);
+            emit_gc(0x0398, 0x4B7FFFFF);
+            emit_gc(0x039C, 0x0405);
+            emit_gc(0x03A0, 0x0900);
+            emit_gc(0x1D78, 1);
+            emit_gc(0x1E70, 0);
+            emit_gc(0x1E74, 0);
+            emit_gc(0x1E78, 0);
+            emit_gc(0x1E60, 0x00000001);
+            emit_gc(0x0AC0, 0x04200000);  // ColorIcw0: A=PRIMARY identity, B=ZERO invert
+            emit_gc(0x0260, 0x14200000);  // AlphaIcw0: A=PRIMARY.a identity, B=ZERO invert
+            emit_gc(0x1E40, 0x000000C0);  // ColorOcw0: AB -> R0
+            emit_gc(0x0AA0, 0x000000C0);  // AlphaOcw0: AB -> R0
+            // Final combiner: A=C1 identity, B=C0, C=R0, D=ZERO, G=R0.alpha.
+            emit_gc(0x0288, 0x02010C00);  // SpecularFogCW0: A=C1,B=C0,C=R0,D=ZERO
+            emit_gc(0x028C, 0x00001C00);  // SpecularFogCW1: E=0,F=0,G=R0.alpha,flags=0
+            // The final combiner's own CONSTANT_COLOR0/1 (registers 1/2) come from
+            // FinalFactor0/1 (NV097_SET_SPECULAR_FOG_FACTOR[0/1]), NOT the per-stage
+            // Factor0_0[stage]/Factor1_0[stage] array -- matching xemu's
+            // pgraph_glsl_set_psh_uniform_values() (final combiner is constant slot
+            // index 8, sourced from SPECFOGFACTOR0/1 instead of
+            // COMBINEFACTOR{0,1}+i).
+            emit_gc(0x1E20, 0x00F0F0F0);  // FinalFactor0 (C0 for the final combiner): 0xF0
+            emit_gc(0x1E24, 0x00404040);  // FinalFactor1 (C1 for the final combiner): 0x40
+            std::memset(gc_ram.data() + 0x10000, 0, 8 * 32);
+
+            submit_triangle(0.0f, 0.0f, 8.0f, 0.0f, 0.0f, 8.0f, 10.0f, 1.0f,
+                            gc_pack_ub4(0x60, 0x40, 0x20, 0xFF));
+            CHECK(gc_fault.empty());
+            const uint32_t k_offset = 3u * 32u + 3u * 4u;
+            const uint32_t k_pixel = get32(gc_ram, 0x10000u + k_offset);
+            auto expect_channel = [](uint8_t diffuse_channel) {
+                const float a = 64.0f / 255.0f;
+                const float b = 0xF0 / 255.0f;
+                const float c = diffuse_channel / 255.0f;
+                const float rgb = a * b + (1.0f - a) * c;
+                return static_cast<uint32_t>(std::floor(rgb * 255.0f + 0.5f));
+            };
+            const uint32_t expected_k =
+                0xFF000000u | (expect_channel(0x60) << 16) |
+                (expect_channel(0x40) << 8) | expect_channel(0x20);
+            CHECK(k_pixel == expected_k);
+        }
+
+        // --- (l) Cull GL_FRONT (0x0404): the mirror image of every other test's
+        // GL_BACK convention -- a front-facing (area>0, CW) triangle must now be
+        // culled (no writes), while the SAME triangle with reversed winding
+        // (back-facing) must render. ---
+        {
+            emit_gc(0x0200, 0x00080000);
+            emit_gc(0x0204, 0x00080000);
+            emit_gc(0x0208, 0x00000108);
+            emit_gc(0x020C, 0x00200020);
+            emit_gc(0x0210, 0x00010000);
+            emit_gc(0x0290, 0x00100001);
+            emit_gc(0x02C0, 0x00070000);
+            emit_gc(0x02E0, 0x00070000);
+            emit_gc(0x0300, 0);
+            emit_gc(0x0304, 0);
+            emit_gc(0x0308, 1);            // cull enabled
+            emit_gc(0x030C, 0);
+            emit_gc(0x033C, 0x0207);
+            emit_gc(0x0340, 0);
+            emit_gc(0x0344, 1);
+            emit_gc(0x0348, 0);
+            emit_gc(0x0350, 0x8006);
+            emit_gc(0x0354, 0x0207);
+            emit_gc(0x0358, 0x01010101);
+            emit_gc(0x035C, 0);
+            emit_gc(0x037C, 0x1D01);
+            emit_gc(0x038C, 0x1B02);
+            emit_gc(0x0390, 0x1B02);
+            emit_gc(0x0394, 0);
+            emit_gc(0x0398, 0x4B7FFFFF);
+            emit_gc(0x039C, 0x0404);       // GL_FRONT
+            emit_gc(0x03A0, 0x0900);
+            emit_gc(0x1D78, 1);
+            emit_gc(0x1E70, 0);
+            emit_gc(0x1E74, 0);
+            emit_gc(0x1E78, 0);
+            emit_gc(0x1E60, 0x00000001);
+            emit_gc(0x0AC0, 0x04200000);
+            emit_gc(0x0260, 0x14200000);
+            emit_gc(0x1E40, 0x00000C00);
+            emit_gc(0x0AA0, 0x00000C00);
+            emit_gc(0x0288, 0x0000000C);
+            emit_gc(0x028C, 0x00001C80);
+            emit_gc(0x1E20, 0);
+            emit_gc(0x1E24, 0);
+            std::memset(gc_ram.data() + 0x10000, 0, 8 * 32);
+
+            const uint64_t before_l_writes = gc_gpu.generic_combiner_writes();
+            // Front-facing (CW, area>0): must be culled -- no new writes.
+            submit_triangle(0.0f, 0.0f, 8.0f, 0.0f, 0.0f, 8.0f, 10.0f, 1.0f,
+                            gc_pack_ub4(0x10, 0x20, 0x30, 0xFF));
+            CHECK(gc_fault.empty());
+            CHECK(gc_gpu.generic_combiner_writes() == before_l_writes);
+            const uint32_t l_offset = 3u * 32u + 3u * 4u;
+            CHECK(get32(gc_ram, 0x10000u + l_offset) == 0);
+            // Back-facing (reversed winding, area<0): must render.
+            submit_triangle(0.0f, 0.0f, 0.0f, 8.0f, 8.0f, 0.0f, 10.0f, 1.0f,
+                            gc_pack_ub4(0x10, 0x20, 0x30, 0xFF));
+            CHECK(gc_fault.empty());
+            CHECK(gc_gpu.generic_combiner_writes() > before_l_writes);
+            CHECK(get32(gc_ram, 0x10000u + l_offset) == 0xFF102030u);
+        }
+
+        // --- (m) Zeta pitch/format mismatch degrades to color-only instead of
+        // dropping the whole batch: DepthMask=1 (depth writes requested) but the
+        // zeta pitch (0x0080) does not match the color pitch (0x0020), exactly the
+        // witnessed 0x00400a00-style mismatch (color pitch 0xa00, zeta pitch 0x40)
+        // that used to hit kUnsupportedSurface for the whole batch. Must still
+        // execute and write color; zeta is simply not touched. ---
+        {
+            emit_gc(0x0200, 0x00080000);
+            emit_gc(0x0204, 0x00080000);
+            emit_gc(0x0208, 0x00000128);   // A8R8G8B8 + Z24S8
+            emit_gc(0x020C, 0x00800020);   // color pitch=0x20, zeta pitch=0x80 (mismatch)
+            emit_gc(0x0210, 0x00010000);
+            emit_gc(0x0290, 0x00100001);
+            emit_gc(0x02C0, 0x00070000);
+            emit_gc(0x02E0, 0x00070000);
+            emit_gc(0x0300, 0);
+            emit_gc(0x0304, 0);
+            emit_gc(0x0308, 0);
+            emit_gc(0x030C, 0);            // depth test disabled
+            emit_gc(0x033C, 0x0207);
+            emit_gc(0x0340, 0);
+            emit_gc(0x0344, 1);
+            emit_gc(0x0348, 0);
+            emit_gc(0x0350, 0x8006);
+            emit_gc(0x0354, 0x0207);
+            emit_gc(0x0358, 0x01010101);
+            emit_gc(0x035C, 1);            // DepthMask=1: requests a depth write
+            emit_gc(0x037C, 0x1D01);
+            emit_gc(0x038C, 0x1B02);
+            emit_gc(0x0390, 0x1B02);
+            emit_gc(0x0394, 0);
+            emit_gc(0x0398, 0x4B7FFFFF);
+            emit_gc(0x039C, 0x0405);
+            emit_gc(0x03A0, 0x0900);
+            emit_gc(0x1D78, 1);
+            emit_gc(0x1E70, 0);
+            emit_gc(0x1E74, 0);
+            emit_gc(0x1E78, 0);
+            emit_gc(0x1E60, 0x00000001);
+            emit_gc(0x0AC0, 0x04200000);
+            emit_gc(0x0260, 0x14200000);
+            emit_gc(0x1E40, 0x00000C00);
+            emit_gc(0x0AA0, 0x00000C00);
+            emit_gc(0x0288, 0x0000000C);
+            emit_gc(0x028C, 0x00001C80);
+            emit_gc(0x1E20, 0);
+            emit_gc(0x1E24, 0);
+            std::memset(gc_ram.data() + 0x10000, 0, 8 * 32);
+
+            const uint64_t before_m_batches = gc_gpu.generic_combiner_batches();
+            submit_triangle(0.0f, 0.0f, 8.0f, 0.0f, 0.0f, 8.0f, 10.0f, 1.0f,
+                            gc_pack_ub4(0x40, 0x50, 0x60, 0xFF));
+            CHECK(gc_fault.empty());
+            CHECK(gc_gpu.generic_combiner_batches() == before_m_batches + 1);
+            const uint32_t m_offset = 3u * 32u + 3u * 4u;
+            CHECK(get32(gc_ram, 0x10000u + m_offset) == 0xFF405060u);
+        }
+
+        // --- (n) AB_BLUE_TO_ALPHA (ColorOcw bit19, the exact feature behind the
+        // dominant ocw-feature=447 detail 0x000820c0...): stage0 computes AB =
+        // C0*C1 -> R0.rgb, and because AB_BLUE_TO_ALPHA is set, R0's blue channel is
+        // ALSO copied into R0's alpha channel (the same already-clamped value, so the
+        // two bytes must match exactly). AlphaOcw discards all outputs (dst=0) so it
+        // cannot clobber the alpha byte AB_BLUE_TO_ALPHA just wrote. C0=(0xFF,0xFF,
+        // 0x80), C1=(0xFF,0xFF,0xFF) (identity 1.0): AB=C0*1=C0, so blue=alpha=0x80.
+        // Expected pixel: 0x80FFFF80. ---
+        {
+            emit_gc(0x0200, 0x00080000);
+            emit_gc(0x0204, 0x00080000);
+            emit_gc(0x0208, 0x00000108);
+            emit_gc(0x020C, 0x00200020);
+            emit_gc(0x0210, 0x00010000);
+            emit_gc(0x0290, 0x00100001);
+            emit_gc(0x02C0, 0x00070000);
+            emit_gc(0x02E0, 0x00070000);
+            emit_gc(0x0300, 0);
+            emit_gc(0x0304, 0);
+            emit_gc(0x0308, 0);
+            emit_gc(0x030C, 0);
+            emit_gc(0x033C, 0x0207);
+            emit_gc(0x0340, 0);
+            emit_gc(0x0344, 1);
+            emit_gc(0x0348, 0);
+            emit_gc(0x0350, 0x8006);
+            emit_gc(0x0354, 0x0207);
+            emit_gc(0x0358, 0x01010101);
+            emit_gc(0x035C, 0);
+            emit_gc(0x037C, 0x1D01);
+            emit_gc(0x038C, 0x1B02);
+            emit_gc(0x0390, 0x1B02);
+            emit_gc(0x0394, 0);
+            emit_gc(0x0398, 0x4B7FFFFF);
+            emit_gc(0x039C, 0x0405);
+            emit_gc(0x03A0, 0x0900);
+            emit_gc(0x1D78, 1);
+            emit_gc(0x1E70, 0);
+            emit_gc(0x1E74, 0);
+            emit_gc(0x1E78, 0);
+            emit_gc(0x1E60, 0x00000001);
+            emit_gc(0x0AC0, 0x01020000);   // ColorIcw0: A=C0 identity, B=C1 identity
+            emit_gc(0x0260, 0x00000000);   // AlphaIcw0: unused (discarded below)
+            emit_gc(0x1E40, 0x000800C0);   // ColorOcw0: AB -> R0, AB_BLUE_TO_ALPHA (bit19)
+            emit_gc(0x0AA0, 0x00000000);   // AlphaOcw0: all outputs discarded
+            emit_gc(0x0A60, 0x00FFFF80);   // Factor0 (C0): R=G=0xFF, B=0x80
+            emit_gc(0x0A80, 0xFFFFFFFF);   // Factor1 (C1): all 0xFF (identity 1.0)
+            emit_gc(0x0288, 0x0000000C);
+            emit_gc(0x028C, 0x00001C80);
+            emit_gc(0x1E20, 0);
+            emit_gc(0x1E24, 0);
+            std::memset(gc_ram.data() + 0x10000, 0, 8 * 32);
+
+            submit_triangle(0.0f, 0.0f, 8.0f, 0.0f, 0.0f, 8.0f, 10.0f, 1.0f,
+                            gc_pack_ub4(0, 0, 0, 0));
+            CHECK(gc_fault.empty());
+            const uint32_t n_offset = 3u * 32u + 3u * 4u;
+            CHECK(get32(gc_ram, 0x10000u + n_offset) == 0x80FFFF80u);
+        }
+
+        // --- (o) Texture-shader program 0x00000063 (CUBEMAP): the exact production
+        // ShaderStageProgram witnessed for the stock-dashboard menu scene's 6-stage
+        // combiners (comb=00011106). stage0 and stage1 both decode to CUBEMAP mode
+        // (0x63 & 0x1F == 3, (0x63 >> 5) & 0x1F == 3); TEXTURE0 is referenced only by
+        // stage0's ICW, so only that stage's texture is set up (stage1 is a plain R0
+        // passthrough that never touches a texture register). The interpolated
+        // texcoord (s=0.625, t=0.625, r=1.0) is a direction vector whose Z axis is
+        // strictly dominant (|z|=1.0 > |x|=|y|=0.625), so divisor=1.0, u=s=0.625
+        // (r>=0), v=t=0.625 -- landing exactly on texel(2,2) of a 4x4 swizzled texture
+        // (texel_x = 0.625*4-0.5 = 2.0 exactly, fx=0; same for y), so bilinear
+        // filtering reduces to that single texel with no blending. Stage0: AB =
+        // TEXTURE0 * invert(ZERO) = TEXTURE0 (color and alpha) -> R0. Stage1: AB =
+        // R0 * invert(ZERO) = R0 (identity passthrough). Final combiner is the same
+        // A=B=C=ZERO/D=R0/G=R0.alpha identity every other test above uses. Texel(2,2)
+        // = (R=0x60,G=0x40,B=0x20,A=0xFF) -- expected pixel: 0xFF604020 exactly (a
+        // pure cubemap-direction-and-swizzle-addressing correctness check, no
+        // combiner math involved). ---
+        {
+            gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x700020, 4, 4);
+            gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x700024, 4, 0x80010050);
+            gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x700500, 4, 0x3D);
+            gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x700504, 4, 0x03FFFFFF);
+            gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x700508, 4, 0x00000000);
+            emit_gc(0x0188, 4);  // texture DMA B
+
+            emit_gc(0x0200, 0x00080000);
+            emit_gc(0x0204, 0x00080000);
+            emit_gc(0x0208, 0x00000108);
+            emit_gc(0x020C, 0x00200020);
+            emit_gc(0x0210, 0x00010000);
+            emit_gc(0x0290, 0x00100001);
+            emit_gc(0x02C0, 0x00070000);
+            emit_gc(0x02E0, 0x00070000);
+            emit_gc(0x0300, 0);
+            emit_gc(0x0304, 0);
+            emit_gc(0x0308, 0);
+            emit_gc(0x030C, 0);
+            emit_gc(0x033C, 0x0207);
+            emit_gc(0x0340, 0);
+            emit_gc(0x0344, 1);
+            emit_gc(0x0348, 0);
+            emit_gc(0x0350, 0x8006);
+            emit_gc(0x0354, 0x0207);
+            emit_gc(0x0358, 0x01010101);
+            emit_gc(0x035C, 0);
+            emit_gc(0x037C, 0x1D01);
+            emit_gc(0x038C, 0x1B02);
+            emit_gc(0x0390, 0x1B02);
+            emit_gc(0x0394, 0);
+            emit_gc(0x0398, 0x4B7FFFFF);
+            emit_gc(0x039C, 0x0405);
+            emit_gc(0x03A0, 0x0900);
+            emit_gc(0x1D78, 1);
+            emit_gc(0x1E70, 0x00000063);  // ShaderStageProgram: exact production value
+            emit_gc(0x1E74, 0);
+            emit_gc(0x1E78, 0x00210000);
+            emit_gc(0x1E60, 0x00000002);   // combiner control: 2 stages
+            emit_gc(0x0AC0, 0x08200000);   // stage0 ColorIcw0: A=TEXTURE0, B=ZERO invert
+            emit_gc(0x0260, 0x18200000);   // stage0 AlphaIcw0: A=TEXTURE0.a, B=ZERO invert
+            emit_gc(0x1E40, 0x000000C0);   // stage0 ColorOcw0: AB -> R0
+            emit_gc(0x0AA0, 0x000000C0);   // stage0 AlphaOcw0: AB -> R0
+            emit_gc(0x0AC4, 0x0C200000);   // stage1 ColorIcw1: A=R0, B=ZERO invert
+            emit_gc(0x0264, 0x1C200000);   // stage1 AlphaIcw1: A=R0.a, B=ZERO invert
+            emit_gc(0x1E44, 0x000000C0);   // stage1 ColorOcw1: AB -> R0
+            emit_gc(0x0AA4, 0x000000C0);   // stage1 AlphaOcw1: AB -> R0
+            emit_gc(0x0288, 0x0000000C);   // SpecularFogCW0: A=B=C=ZERO, D=R0 identity
+            emit_gc(0x028C, 0x00001C80);   // SpecularFogCW1: G=R0.alpha identity
+            emit_gc(0x1E20, 0);
+            emit_gc(0x1E24, 0);
+            emit_gc(0x1B00, 0x00030000);   // TextureOffset0 (distinct scratch region)
+            emit_gc(0x1B04, 0x02200602);   // TextureFormat0: 4x4, dma=2, COLOR code 6
+            emit_gc(0x1B08, 0x00000303);   // TextureAddress0: U=V=CLAMP_TO_EDGE
+            emit_gc(0x1B0C, 0x40000000);   // TextureControl0_0: enable bit30
+            emit_gc(0x1B10, 0x00100000);   // TextureControl1_0: pitch=16
+            emit_gc(0x1B14, 0);
+            emit_gc(0x1B1C, 0x00040004);   // TextureImageRect0 (unread by this path)
+            emit_gc(0x1B20, 0);            // TexturePalette0: none
+            emit_gc(0x1B24, 0);            // TextureBorderColor0
+
+            std::vector<uint8_t> o_texture(4 * 4 * 4, 0);
+            put32(o_texture, 12u * 4u, 0xFF604020u);  // swizzle.index(2,2) == 12
+            std::memcpy(gc_ram.data() + 0x30000, o_texture.data(), o_texture.size());
+            std::memset(gc_ram.data() + 0x10000, 0, 8 * 32);
+
+            const uint64_t before_o_samples = gc_gpu.generic_combiner_texture_samples();
+            emit_gc(0x17FC, 5);
+            for (auto xy : {std::pair{0.0f, 0.0f}, std::pair{8.0f, 0.0f},
+                            std::pair{0.0f, 8.0f}}) {
+                emit_gc(0x1A90, gc_float_bits(0.625f));  // texcoord0.s
+                emit_gc(0x1A94, gc_float_bits(0.625f));  // texcoord0.t
+                emit_gc(0x1A98, gc_float_bits(1.0f));    // texcoord0.r
+                emit_gc(0x1A9C, gc_float_bits(1.0f));    // texcoord0.q
+                emit_gc(0x1518, gc_float_bits(xy.first));
+                emit_gc(0x151C, gc_float_bits(xy.second));
+                emit_gc(0x1520, gc_float_bits(10.0f));
+                emit_gc(0x194C, gc_pack_ub4(0, 0, 0, 0xFF));
+                emit_gc(0x1524, gc_float_bits(1.0f));
+            }
+            emit_gc(0x17FC, 0);
+            kick_gc();
+            CHECK(gc_fault.empty());
+            CHECK(gc_gpu.generic_combiner_texture_samples() > before_o_samples);
+            const uint32_t o_offset = 3u * 32u + 3u * 4u;
+            CHECK(get32(gc_ram, 0x10000u + o_offset) == 0xFF604020u);
+        }
+
+        // --- (p) Texture-shader program 0x00008421 (four independent PROJECT2D
+        // stages): the exact production ShaderStageProgram witnessed for the same
+        // stock-dashboard menu scene. Every stage decodes to PROJECT2D (mode 1):
+        // 0x8421 & 0x1F == 1, (0x8421 >> 5) & 0x1F == 1, (0x8421 >> 10) & 0x1F == 1,
+        // (0x8421 >> 15) & 0x1F == 1. TEXTURE0 is referenced only by stage0, so this
+        // exercises the general (non-linear, non-cubemap) swizzled-2D sampling branch
+        // -- the "else" arm that reads texcoord[0]/texcoord[1] directly as a normalized
+        // UV pair (no perspective divide), unlike PROJECT2D's own narrowly-proven
+        // linear special case (ShaderStageProgram==1, test (e) above). UV (0.625,
+        // 0.625) lands exactly on texel(2,2) of a 4x4 swizzled texture with fx=fy=0,
+        // same reasoning as test (o). Stage0: AB = TEXTURE0 * invert(ZERO) = TEXTURE0
+        // -> R0. Stage1: AB = R0 * invert(ZERO) = R0 (identity passthrough). Texel
+        // (2,2) = (R=0x50,G=0x30,B=0x10,A=0xFF) -- expected pixel: 0xFF503010. ---
+        {
+            gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x700020, 4, 4);
+            gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x700024, 4, 0x80010050);
+            gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x700500, 4, 0x3D);
+            gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x700504, 4, 0x03FFFFFF);
+            gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x700508, 4, 0x00000000);
+            emit_gc(0x0188, 4);  // texture DMA B
+
+            emit_gc(0x0200, 0x00080000);
+            emit_gc(0x0204, 0x00080000);
+            emit_gc(0x0208, 0x00000108);
+            emit_gc(0x020C, 0x00200020);
+            emit_gc(0x0210, 0x00010000);
+            emit_gc(0x0290, 0x00100001);
+            emit_gc(0x02C0, 0x00070000);
+            emit_gc(0x02E0, 0x00070000);
+            emit_gc(0x0300, 0);
+            emit_gc(0x0304, 0);
+            emit_gc(0x0308, 0);
+            emit_gc(0x030C, 0);
+            emit_gc(0x033C, 0x0207);
+            emit_gc(0x0340, 0);
+            emit_gc(0x0344, 1);
+            emit_gc(0x0348, 0);
+            emit_gc(0x0350, 0x8006);
+            emit_gc(0x0354, 0x0207);
+            emit_gc(0x0358, 0x01010101);
+            emit_gc(0x035C, 0);
+            emit_gc(0x037C, 0x1D01);
+            emit_gc(0x038C, 0x1B02);
+            emit_gc(0x0390, 0x1B02);
+            emit_gc(0x0394, 0);
+            emit_gc(0x0398, 0x4B7FFFFF);
+            emit_gc(0x039C, 0x0405);
+            emit_gc(0x03A0, 0x0900);
+            emit_gc(0x1D78, 1);
+            emit_gc(0x1E70, 0x00008421);  // ShaderStageProgram: exact production value
+            emit_gc(0x1E74, 0);
+            emit_gc(0x1E78, 0x00210000);
+            emit_gc(0x1E60, 0x00000002);   // combiner control: 2 stages
+            emit_gc(0x0AC0, 0x08200000);   // stage0 ColorIcw0: A=TEXTURE0, B=ZERO invert
+            emit_gc(0x0260, 0x18200000);   // stage0 AlphaIcw0: A=TEXTURE0.a, B=ZERO invert
+            emit_gc(0x1E40, 0x000000C0);   // stage0 ColorOcw0: AB -> R0
+            emit_gc(0x0AA0, 0x000000C0);   // stage0 AlphaOcw0: AB -> R0
+            emit_gc(0x0AC4, 0x0C200000);   // stage1 ColorIcw1: A=R0, B=ZERO invert
+            emit_gc(0x0264, 0x1C200000);   // stage1 AlphaIcw1: A=R0.a, B=ZERO invert
+            emit_gc(0x1E44, 0x000000C0);   // stage1 ColorOcw1: AB -> R0
+            emit_gc(0x0AA4, 0x000000C0);   // stage1 AlphaOcw1: AB -> R0
+            emit_gc(0x0288, 0x0000000C);   // SpecularFogCW0: A=B=C=ZERO, D=R0 identity
+            emit_gc(0x028C, 0x00001C80);   // SpecularFogCW1: G=R0.alpha identity
+            emit_gc(0x1E20, 0);
+            emit_gc(0x1E24, 0);
+            emit_gc(0x1B00, 0x00030000);   // TextureOffset0 (distinct scratch region)
+            emit_gc(0x1B04, 0x02200602);   // TextureFormat0: 4x4, dma=2, COLOR code 6
+            emit_gc(0x1B08, 0x00000303);   // TextureAddress0: U=V=CLAMP_TO_EDGE
+            emit_gc(0x1B0C, 0x40000000);   // TextureControl0_0: enable bit30
+            emit_gc(0x1B10, 0x00100000);   // TextureControl1_0: pitch=16
+            emit_gc(0x1B14, 0);
+            emit_gc(0x1B1C, 0x00040004);   // TextureImageRect0 (unread by this path)
+            emit_gc(0x1B20, 0);            // TexturePalette0: none
+            emit_gc(0x1B24, 0);            // TextureBorderColor0
+
+            std::vector<uint8_t> p_texture(4 * 4 * 4, 0);
+            put32(p_texture, 12u * 4u, 0xFF503010u);  // swizzle.index(2,2) == 12
+            std::memcpy(gc_ram.data() + 0x30000, p_texture.data(), p_texture.size());
+            std::memset(gc_ram.data() + 0x10000, 0, 8 * 32);
+
+            const uint64_t before_p_samples = gc_gpu.generic_combiner_texture_samples();
+            emit_gc(0x17FC, 5);
+            for (auto xy : {std::pair{0.0f, 0.0f}, std::pair{8.0f, 0.0f},
+                            std::pair{0.0f, 8.0f}}) {
+                emit_gc(0x1A90, gc_float_bits(0.625f));  // texcoord0.s (normalized UV)
+                emit_gc(0x1A94, gc_float_bits(0.625f));  // texcoord0.t
+                emit_gc(0x1A98, gc_float_bits(0.0f));    // texcoord0.r (unused)
+                emit_gc(0x1A9C, gc_float_bits(1.0f));    // texcoord0.q
+                emit_gc(0x1518, gc_float_bits(xy.first));
+                emit_gc(0x151C, gc_float_bits(xy.second));
+                emit_gc(0x1520, gc_float_bits(10.0f));
+                emit_gc(0x194C, gc_pack_ub4(0, 0, 0, 0xFF));
+                emit_gc(0x1524, gc_float_bits(1.0f));
+            }
+            emit_gc(0x17FC, 0);
+            kick_gc();
+            CHECK(gc_fault.empty());
+            CHECK(gc_gpu.generic_combiner_texture_samples() > before_p_samples);
+            const uint32_t p_offset = 3u * 32u + 3u * 4u;
+            CHECK(get32(gc_ram, 0x10000u + p_offset) == 0xFF503010u);
         }
     }
 

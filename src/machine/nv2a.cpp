@@ -5568,12 +5568,18 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         return true;
     }
     // Cull: honor the enable bit (bit2) semantically instead of assuming culling is
-    // always on. When enabled, this evaluator only knows the BACK/CW convention every
-    // witnessed profile uses; when disabled, both windings render (handled in the
+    // always on, and honor which face is being culled -- GL_BACK (0x0405, every other
+    // witnessed profile) or GL_FRONT (0x0404, trivially the mirror image: cull the
+    // opposite winding sign). When disabled, both windings render (handled in the
     // triangle setup below).
     const bool cull_enabled = (enables & (1u << 2)) != 0;
+    bool cull_front = false;
     if (cull_enabled) {
-        if (raster_state_[kRasterCullFace] != 0x0405) {
+        if (raster_state_[kRasterCullFace] == 0x0405) {
+            cull_front = false;
+        } else if (raster_state_[kRasterCullFace] == 0x0404) {
+            cull_front = true;
+        } else {
             record_generic_skip_detail(GenericSkipReason::kUnsupportedCullFace,
                                        raster_state_[kRasterCullFace]);
             return true;
@@ -5637,22 +5643,20 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         in.mapping = (byte >> 5) & 0x7u;
         return in;
     };
-    // Register ids: 0 ZERO, 1 CONSTANT_COLOR0, 2 CONSTANT_COLOR1, 3 FOG (unsupported),
-    // 4 PRIMARY_COLOR, 5 SECONDARY_COLOR, 6/7 reserved (unsupported), 8-11 TEXTURE0-3
-    // (sampled below, subject to the per-stage texture-shader-program/format/address
-    // checks), 12 R0/spare0, 13 R1/spare1, 14/15 reserved.
+    // Register ids match real NV2A/xemu PS_REGISTER exactly: 0 ZERO/DISCARD,
+    // 1 CONSTANT_COLOR0, 2 CONSTANT_COLOR1, 3 FOG (unsupported), 4 PRIMARY_COLOR,
+    // 5 SECONDARY_COLOR, 6/7 reserved (unsupported), 8-11 TEXTURE0-3 (sampled below,
+    // subject to the per-stage texture-shader-program/format/address checks),
+    // 12 R0/spare0, 13 R1/spare1, 14 V1R0_SUM (specular+R0, final-combiner flags),
+    // 15 EF_PROD (the final combiner's own E*F product).
     auto register_supported = [](uint32_t reg, bool& is_texture) {
         is_texture = reg >= 8 && reg <= 11;
         if (is_texture) return true;
         return reg == 0 || reg == 1 || reg == 2 || reg == 4 || reg == 5 ||
-               reg == 12 || reg == 13;
+               reg == 12 || reg == 13 || reg == 14 || reg == 15;
     };
-    // Which of TEXTURE0-3 a stage's color/alpha inputs actually read, tracked
-    // separately because the linear/PROJECT2D sampler (see below) never computes an
-    // alpha channel -- no witnessed profile needs texture alpha in that mode, so a
-    // combiner that tries to read it is named-skipped rather than fed a made-up value.
+    // Which of TEXTURE0-3 a stage's color/alpha inputs actually read.
     bool texture_referenced[4] = {false, false, false, false};
-    bool texture_referenced_alpha[4] = {false, false, false, false};
 
     const uint32_t stage_count_raw = raster_state_[kRasterCombinerControl] & 0xFFu;
     if (stage_count_raw == 0) {
@@ -5660,13 +5664,21 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         return true;
     }
     const uint32_t stage_count = std::min<uint32_t>(stage_count_raw, 8u);
+    // NV097_SET_COMBINER_CONTROL bit8 selects the MUX_SUM comparison: MSB of R0.alpha
+    // (bit set) vs LSB (bit clear) -- a single global flag shared by every stage's
+    // MUX_SUM output, matching xemu's PS_COMBINERCOUNT_MUX_MSB.
+    const bool mux_on_msb = ((raster_state_[kRasterCombinerControl] >> 8) & 1u) != 0;
 
     struct Stage {
         DecodedInput color[4];
         DecodedInput alpha[4];
         uint32_t color_cd_dst = 0, color_ab_dst = 0, color_sum_dst = 0;
-        bool color_cd_dot = false, color_ab_dot = false;
+        bool color_cd_dot = false, color_ab_dot = false, color_mux = false;
+        bool color_ab_blue_to_alpha = false, color_cd_blue_to_alpha = false;
+        uint32_t color_scale_bias = 0;
         uint32_t alpha_cd_dst = 0, alpha_ab_dst = 0, alpha_sum_dst = 0;
+        bool alpha_mux = false;
+        uint32_t alpha_scale_bias = 0;
     };
     std::array<Stage, 8> stages{};
     for (uint32_t stage = 0; stage < stage_count; ++stage) {
@@ -5675,17 +5687,18 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         const uint32_t co = raster_state_[kRasterCombinerColorOcw0 + stage];
         const uint32_t ao = raster_state_[kRasterCombinerAlphaOcw0 + stage];
         Stage& s = stages[stage];
-        // Byte order within the ICW word is D (bits31:24), C (23:16), B (15:8), A (7:0),
-        // matching every witnessed profile's ...Icw0 constants (e.g. kInlineLinearBlitColor's
-        // ColorIcw0==0x08200000 decodes to D=TEXTURE0 identity, C=ZERO invert, B=A=ZERO).
-        s.color[0] = decode(ci & 0xFFu);
-        s.color[1] = decode((ci >> 8) & 0xFFu);
-        s.color[2] = decode((ci >> 16) & 0xFFu);
-        s.color[3] = decode((ci >> 24) & 0xFFu);
-        s.alpha[0] = decode(ai & 0xFFu);
-        s.alpha[1] = decode((ai >> 8) & 0xFFu);
-        s.alpha[2] = decode((ai >> 16) & 0xFFu);
-        s.alpha[3] = decode((ai >> 24) & 0xFFu);
+        // Byte order within the ICW word is A (bits31:24), B (23:16), C (15:8),
+        // D (bits7:0) -- matching xemu's parse_combiner_inputs() exactly (cross-checked
+        // against nv2a_regs.h/psh.c, not guessed: this is this evaluator's own
+        // independent expression of that same, now-verified bit layout).
+        s.color[0] = decode((ci >> 24) & 0xFFu);
+        s.color[1] = decode((ci >> 16) & 0xFFu);
+        s.color[2] = decode((ci >> 8) & 0xFFu);
+        s.color[3] = decode(ci & 0xFFu);
+        s.alpha[0] = decode((ai >> 24) & 0xFFu);
+        s.alpha[1] = decode((ai >> 16) & 0xFFu);
+        s.alpha[2] = decode((ai >> 8) & 0xFFu);
+        s.alpha[3] = decode(ai & 0xFFu);
         for (const DecodedInput& in : s.color) {
             bool is_texture = false;
             if (!register_supported(in.reg, is_texture)) {
@@ -5700,49 +5713,105 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 record_generic_skip_detail(GenericSkipReason::kStageInput, in.reg);
                 return true;
             }
-            if (is_texture) {
-                texture_referenced[in.reg - 8] = true;
-                texture_referenced_alpha[in.reg - 8] = true;
-            }
+            if (is_texture) texture_referenced[in.reg - 8] = true;
         }
+        // OCW layout (matching xemu's parse_combiner_output()): bits[3:0]=cd dest,
+        // [7:4]=ab dest, [11:8]=muxsum dest, [12]=cd dot-product, [13]=ab dot-product,
+        // [14]=muxsum uses MUX (else AB+CD sum), [17:15]=output scale/bias
+        // (SHIFTLEFTBY1/2, SHIFTRIGHTBY1, BIAS_BY_NEGATIVE_ONE_HALF and the two
+        // combinations of shift+bias), [18]=CD blue-to-alpha, [19]=AB blue-to-alpha
+        // (the latter two are not implemented -- named census, not a silent drop).
         s.color_cd_dst = co & 0xFu;
         s.color_ab_dst = (co >> 4) & 0xFu;
         s.color_sum_dst = (co >> 8) & 0xFu;
-        s.color_cd_dot = ((co >> 12) & 1u) != 0;
-        s.color_ab_dot = ((co >> 13) & 1u) != 0;
-        const bool color_mux = ((co >> 14) & 1u) != 0;
+        const uint32_t color_flags = co >> 12;
+        s.color_cd_dot = (color_flags & 1u) != 0;
+        s.color_ab_dot = (color_flags & 2u) != 0;
+        s.color_mux = (color_flags & 4u) != 0;
+        s.color_scale_bias = color_flags & 0x38u;
+        // AB/CD_BLUE_TO_ALPHA ("RGB only" per the enum comment: xemu's add_stage_code
+        // only ever applies it for the is_alpha==false / color call, i.e. these bits
+        // are read from ColorOcw only -- the same two bit positions read from
+        // AlphaOcw are simply inert on real hardware, never gated below).
+        s.color_ab_blue_to_alpha = (color_flags & 0x80u) != 0;
+        s.color_cd_blue_to_alpha = (color_flags & 0x40u) != 0;
         s.alpha_cd_dst = ao & 0xFu;
         s.alpha_ab_dst = (ao >> 4) & 0xFu;
         s.alpha_sum_dst = (ao >> 8) & 0xFu;
-        const bool alpha_dot_or_mux = (ao >> 12) != 0;
+        const uint32_t alpha_flags = ao >> 12;
+        s.alpha_mux = (alpha_flags & 4u) != 0;
+        s.alpha_scale_bias = alpha_flags & 0x38u;
         auto dst_supported = [](uint32_t dst) {
             return dst == 0 || dst == 12 || dst == 13;
         };
-        constexpr uint32_t kColorOcwKnownBits =
-            0xFFFu | (1u << 12) | (1u << 13);
-        if (color_mux || alpha_dot_or_mux || !dst_supported(s.color_cd_dst) ||
-            !dst_supported(s.color_ab_dst) || !dst_supported(s.color_sum_dst) ||
-            !dst_supported(s.alpha_cd_dst) || !dst_supported(s.alpha_ab_dst) ||
-            !dst_supported(s.alpha_sum_dst) ||
-            (co & ~kColorOcwKnownBits) != 0) {
-            record_generic_skip(GenericSkipReason::kOcwFeature);
+        auto scale_bias_supported = [](uint32_t sb) {
+            return sb == 0x00 || sb == 0x08 || sb == 0x10 || sb == 0x18 ||
+                   sb == 0x20 || sb == 0x30;
+        };
+        if (!dst_supported(s.color_cd_dst) || !dst_supported(s.color_ab_dst) ||
+            !dst_supported(s.color_sum_dst) || !dst_supported(s.alpha_cd_dst) ||
+            !dst_supported(s.alpha_ab_dst) || !dst_supported(s.alpha_sum_dst) ||
+            !scale_bias_supported(s.color_scale_bias) ||
+            !scale_bias_supported(s.alpha_scale_bias)) {
+            record_generic_skip_detail(
+                GenericSkipReason::kOcwFeature,
+                (static_cast<uint64_t>(co) << 32) | ao);
             return true;
         }
     }
-    // Final combiner: only the identity-passthrough signature is supported. It is
-    // cross-checked against kInlineLinearBlitColor and kPitchTex5DiffuseColor/
-    // kPitchMultiTextureColor/kPitchThreeTextureColor/kTexfProjectedFanColor, which all
-    // carry this exact SpecularFog/FinalFactor pair and, per their own working pixel
-    // formulas, simply forward R0 (color) and R0's alpha untouched.
-    const bool final_identity =
-        raster_state_[kRasterCombinerSpecularFog0] == 0x0000000Cu &&
-        raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80u &&
-        raster_state_[kRasterCombinerFinalFactor0] == 0 &&
-        raster_state_[kRasterCombinerFinalFactor1] == 0;
-    if (!final_identity) {
-        record_generic_skip(GenericSkipReason::kFinalCombiner);
-        return true;
+    // Final combiner: RGB = D + A*B + (1-A)*C; Alpha = G (matching xemu's
+    // add_final_stage_code() exactly: fragColor.rgb = d + mix(c, b, a),
+    // fragColor.a = g, where mix(c,b,a) = c*(1-a) + b*a). A/B/C/D come from
+    // SpecularFogCW0 with the same 4-input byte layout as any stage ICW; E/F/G and
+    // the CLAMP_SUM/COMPLEMENT_V1/COMPLEMENT_R0 flags (used only if a register
+    // references V1R0_SUM) come from SpecularFogCW1: E=bits31:24, F=bits23:16,
+    // G=bits15:8, flags=bits7:0. When both words are zero the final combiner is
+    // absent and R0/R0.a simply pass through untouched (this is exactly the
+    // identity signature this evaluator originally only recognized by its exact
+    // SpecularFogCW/FinalFactor values -- that was this constant pair, decoded
+    // generically it turns out to mean A=B=C=0(ZERO), D=R0(identity), G=R0.alpha).
+    const uint32_t final_cw0 = raster_state_[kRasterCombinerSpecularFog0];
+    const uint32_t final_cw1 = raster_state_[kRasterCombinerSpecularFog1];
+    DecodedInput final_a = decode((final_cw0 >> 24) & 0xFFu);
+    DecodedInput final_b = decode((final_cw0 >> 16) & 0xFFu);
+    DecodedInput final_c = decode((final_cw0 >> 8) & 0xFFu);
+    DecodedInput final_d = decode(final_cw0 & 0xFFu);
+    DecodedInput final_e = decode((final_cw1 >> 24) & 0xFFu);
+    DecodedInput final_f = decode((final_cw1 >> 16) & 0xFFu);
+    DecodedInput final_g = decode((final_cw1 >> 8) & 0xFFu);
+    const uint32_t final_flags = final_cw1 & 0xFFu;
+    const bool final_clamp_sum = (final_flags & 0x80u) != 0;
+    const bool final_inv_v1 = (final_flags & 0x40u) != 0;
+    const bool final_inv_r0 = (final_flags & 0x20u) != 0;
+    const bool final_enabled = final_cw0 != 0 || final_cw1 != 0;
+    if (final_enabled) {
+        for (const DecodedInput* in :
+             {&final_a, &final_b, &final_c, &final_d, &final_e, &final_f, &final_g}) {
+            bool is_texture = false;
+            if (!register_supported(in->reg, is_texture)) {
+                record_generic_skip_detail(GenericSkipReason::kFinalCombiner,
+                                           (static_cast<uint64_t>(final_cw0) << 32) |
+                                               final_cw1);
+                return true;
+            }
+            if (is_texture) texture_referenced[in->reg - 8] = true;
+        }
     }
+    // NV097_SET_SPECULAR_FOG_FACTOR (FinalFactor0/1) is NOT a fog enable flag -- per
+    // xemu's pgraph_glsl_set_psh_uniform_values() (the final combiner is constant
+    // slot index 8: "if (i==8) constant[0]=SPECFOGFACTOR0; constant[1]=SPECFOGFACTOR1;
+    // else constant[]=COMBINEFACTOR{0,1}+i"), it is simply the CONSTANT_COLOR0/
+    // CONSTANT_COLOR1 value the FINAL combiner sees when any of A/B/C/D/E/F/G
+    // reference register 1 or 2 -- a completely different source from the per-stage
+    // Factor0_0[stage]/Factor1_0[stage] array used by ordinary stages. This is wired
+    // below (regs[1]/regs[2] are reloaded from FinalFactor0/1 right before evaluating
+    // the final combiner, once every stage that needed the per-stage constants is
+    // done with them) rather than treated as an unconditional "fog, unsupported" skip.
+    // True fog (register 3, FOG_COLOR + the per-vertex fog coordinate) is a separate,
+    // still-unimplemented register -- already gated by register_supported() above,
+    // which never allows reg==3 through, so a final combiner that genuinely
+    // references FOG still lands in the kFinalCombiner census, just for that reason
+    // specifically instead of a blanket nonzero-factor guess.
 
     // --- Alpha test / depth test / blend mode ----------------------------------
     auto compare_supported = [](uint32_t func) {
@@ -5829,19 +5898,19 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     // depth testing is disabled, hardware treats every fragment as passing without
     // ever reading zeta -- and the (possibly unrelated/smaller) zeta pitch never needs
     // to be validated at all in that case.
+    // A mismatched zeta pitch (e.g. the witnessed 0x00400a00: color pitch 0xa00/2560
+    // for a 640-wide surface, zeta pitch 0x0040/64 -- clearly not describing the same
+    // 640-wide zeta buffer) or a color_format that doesn't even carry a zeta component
+    // are both treated the same way as an unresolvable zeta DMA context below: degrade
+    // to color-only rendering rather than dropping the whole batch. Every witnessed
+    // profile above requires an exact pitch/format match because their fixed pixel
+    // formulas always read zeta; this evaluator's depth path is already conditioned on
+    // wants_zeta, so "can't use this zeta" and "don't want zeta" collapse to the same
+    // uses_depth=false outcome.
     const bool depth_write_enabled = raster_state_[kRasterDepthMask] != 0;
     const bool wants_zeta = depth_test_enabled_bit || depth_write_enabled;
     bool uses_depth = zeta_format == 2 && wants_zeta && zeta_pitch == pitch;
     uint64_t depth_bytes64 = uses_depth ? color_bytes64 : 0;
-    if (wants_zeta && zeta_format == 2 && zeta_pitch != pitch) {
-        record_generic_skip_detail(GenericSkipReason::kUnsupportedSurface,
-                                   surface_pitch_);
-        return true;
-    }
-    if (wants_zeta && zeta_format != 2) {
-        record_generic_skip(GenericSkipReason::kUnsupportedSurface);
-        return true;
-    }
 
     // BUG FIX (guest-memory-corruption regression): a raster batch can bind a DMA
     // context whose PRAMIN descriptor was never actually programmed with a real
@@ -5909,36 +5978,34 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     }
 
     // --- Texture stages 0-3 ------------------------------------------------------
-    // Only stages a combiner input actually reads are set up. Two sampling paths,
-    // matching the shared machinery every witnessed textured profile already uses --
-    // dispatched on the WHOLE kRasterShaderStageProgram register value, not a per-
-    // stage nibble (both kInlineLinearBlitColor's linear blit and
-    // kSwizzledProjectedColor/kPitchProjectedColor's swizzled projective sampling
-    // carry a "1" in stage0's nibble, so the nibble alone does not distinguish
-    // layout; the exact witnessed dashboard fingerprint --
-    // ShaderStageProgram==0x00000001 with a single active stage -- is
-    // kInlineLinearBlitColor's own value, so that specific whole-register value is
-    // treated the same way here):
-    //   * ShaderStageProgram == 1: stage 0 only, sampled exactly like
-    //     kInlineLinearBlitColor's own texture -- ImageRect for width/height,
-    //     Control1's pitch field, texel-space (u,v,q) coordinates with their own
-    //     projective divide by texture[stage][3]. No alpha channel is computed (no
-    //     witnessed profile needs one in this mode), so a combiner that reads this
-    //     stage's alpha is named-skipped rather than fed a made-up value.
-    //   * ShaderStageProgram == 0: any referenced stage, sampled exactly like
-    //     kSwizzledTexturedColor/kPitchSingleTextureColor/kTex7FanColor's own
-    //     textures -- format log2 width/height, SwizzleLookup addressing,
-    //     normalized 0..1 UV, no projective divide. Only the two COLOR codes (6, 7)
-    //     already cross-checked against those pinned profiles (both raw 32-bit ARGB8)
-    //     are accepted.
-    //   * any other ShaderStageProgram value: the exact "projected/cube/3D" case
-    //     none of this evaluator's sampling paths generalize to -- named skip
-    //     carrying the raw register value, so it is visible in telemetry rather than
-    //     silently dropped.
+    // Only stages a combiner input actually reads are set up. Per-stage texture mode
+    // is a real 5-bit field (matching xemu's pgraph_glsl_gen_psh() exactly:
+    // "ps.tex_modes[i] = (state->shader_stage_program >> (i*5)) & 0x1F", NOT a per-
+    // stage nibble as this evaluator originally guessed): mode 0 = NONE, 1 =
+    // PROJECT2D, 3 = CUBEMAP are the ones implemented below (cross-checked against
+    // psh_regs.h's PS_TEXTUREMODES enum); BUMPENVMAP/DOT_ST/DOT_STR/BRDF/PASSTHRU/
+    // CLIPPLANE/PROJECT3D and any other mode is a named census, not a guess.
+    //   * PROJECT2D (any stage, mode==1): the exact witnessed dashboard fingerprint
+    //     (ShaderStageProgram==0x00000001, a single active stage0) is
+    //     kInlineLinearBlitColor's own linear/pitch layout -- kept as that exact,
+    //     narrowly-proven special case. Every other PROJECT2D stage (including
+    //     multi-stage chains like 0x00008421, four independent PROJECT2D stages) is
+    //     sampled exactly like kSwizzledTexturedColor/kPitchSingleTextureColor/
+    //     kTex7FanColor's own textures -- format log2 width/height, SwizzleLookup
+    //     addressing, normalized 0..1 UV. Only the two COLOR codes (6, 7) already
+    //     cross-checked against those pinned profiles (both raw 32-bit ARGB8) are
+    //     accepted; texel format itself is decoupled from texture *mode* -- both are
+    //     independent register fields on real hardware.
+    //   * CUBEMAP (mode==3, e.g. ShaderStageProgram==0x00000063's two active stages):
+    //     sampled with the exact same major-axis direction-to-UV algorithm as
+    //     kSwizzledTexturedColor/kSwizzledProjectedColor's own sample_cube_texture
+    //     (a fresh independent copy, same reasoning as every other sampler here),
+    //     against the same swizzled 2D texture data/format whitelist as PROJECT2D.
     enum class TextureAddressMode { kRepeat, kClampToEdge, kBorder };
     struct TextureStage {
         bool valid = false;
         bool linear = false;
+        bool cubemap = false;
         std::vector<uint8_t> data;
         uint32_t width = 0, height = 0, pitch = 0;
         std::unique_ptr<SwizzleLookup> swizzle;
@@ -5963,17 +6030,13 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             record_generic_skip_detail(GenericSkipReason::kTextureStage, stage);
             return true;
         }
+        const uint32_t stage_mode = (shader_stage_program >> (stage * 5)) & 0x1Fu;
         TextureStage& ts = texture_stages[stage];
-        if (shader_stage_program == 1) {
+        if (shader_stage_program == 1 && stage_mode == 1) {
             if (stage != 0) {
                 record_generic_skip_detail(
                     GenericSkipReason::kUnsupportedTextureShaderProgram,
                     (1ull << 32) | stage);
-                return true;
-            }
-            if (texture_referenced_alpha[stage]) {
-                record_generic_skip_detail(GenericSkipReason::kTextureStage,
-                                           0x100u + stage);
                 return true;
             }
             const uint32_t rect = raster_state_[kRasterTextureImageRect0 + stage];
@@ -6002,7 +6065,26 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             }
             ts.linear = true;
             ts.valid = true;
-        } else if (shader_stage_program == 0) {
+        } else if (shader_stage_program == 0 ||
+                  (stage_count >= 2 && (stage_mode == 1 || stage_mode == 3))) {
+            // shader_stage_program==0 (every stage's mode is NONE/0x00) is the
+            // original narrowly-proven "ordinary swizzled 2D" special case (matches
+            // kSwizzledTexturedColor/kPitchSingleTextureColor/kTex7FanColor's own
+            // textures). The newer, fully general per-stage PROJECT2D/CUBEMAP decode
+            // is additionally restricted to stage_count>=2 (a real multi-stage
+            // combiner, matching the witnessed production evidence for both
+            // ShaderStageProgram==0x63 and ==0x8421, comb=00011106/6 stages) --
+            // NOT a single-general-combiner-stage program like tex7_fan's own
+            // ShaderStageProgram==0x00000C61 (comb=1). Single-stage combiners with a
+            // non-{0,1} whole-register value are exactly what the 15 hand-derived
+            // Profiles above already cover; letting this evaluator's simpler
+            // per-ICW-literal formula loose on that same narrow state produced a
+            // wrong (not hardware-matching) answer for tex7_fan's own unwitnessed-
+            // border-color test case, because a single referenced TEXTURE0 there
+            // does not account for whatever the texture-shader stage chain across
+            // stages 1-2 (both CUBEMAP) may or may not feed forward into it on real
+            // hardware -- unmodeled here, and only safe to ignore once a real
+            // multi-stage combiner is actually consuming those other textures too.
             const uint32_t format = raster_state_[kRasterTextureFormat0 + stage];
             const uint32_t color_code = (format >> 8) & 0x3Fu;
             if ((format & 3u) != 2u || (color_code != 6 && color_code != 7)) {
@@ -6048,10 +6130,12 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             ts.address_v = address_v;
             ts.border = raster_state_[kRasterTextureBorderColor0 + stage];
             ts.linear = false;
+            ts.cubemap = (stage_mode == 3);
             ts.valid = true;
         } else {
-            record_generic_skip_detail(GenericSkipReason::kUnsupportedTextureShaderProgram,
-                                       shader_stage_program);
+            record_generic_skip_detail(
+                GenericSkipReason::kUnsupportedTextureShaderProgram,
+                (static_cast<uint64_t>(stage_mode) << 8) | stage);
             return true;
         }
     }
@@ -6209,34 +6293,74 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         }
         return true;
     };
+    // Matches xemu's get_input_var() exactly (cross-checked against psh.c): only
+    // UNSIGNED_INVERT clamps its input to [0,1] before inverting; every other
+    // unsigned/half-bias mapping only floors at 0 (max(x,0)), so an intermediate
+    // register that legitimately holds a scaled value >1 (via an output
+    // SHIFTLEFTBY1/2 below) is not silently clipped back down by the next stage
+    // that reads it.
     auto apply_mapping = [](uint32_t mapping, float value) {
         switch (mapping) {
-            case 0: return std::clamp(value, 0.0f, 1.0f);                 // UNSIGNED_IDENTITY
+            case 0: return std::max(value, 0.0f);                         // UNSIGNED_IDENTITY
             case 1: return 1.0f - std::clamp(value, 0.0f, 1.0f);          // UNSIGNED_INVERT
-            case 2: return 2.0f * std::clamp(value, 0.0f, 1.0f) - 1.0f;   // EXPAND_NORMAL
-            case 3: return -(2.0f * std::clamp(value, 0.0f, 1.0f) - 1.0f);// EXPAND_NEGATE
-            case 4: return std::clamp(value, 0.0f, 1.0f) - 0.5f;          // HALF_BIAS_NORMAL
-            case 5: return 0.5f - std::clamp(value, 0.0f, 1.0f);          // HALF_BIAS_NEGATE
+            case 2: return 2.0f * std::max(value, 0.0f) - 1.0f;           // EXPAND_NORMAL
+            case 3: return -2.0f * std::max(value, 0.0f) + 1.0f;         // EXPAND_NEGATE
+            case 4: return std::max(value, 0.0f) - 0.5f;                  // HALF_BIAS_NORMAL
+            case 5: return -std::max(value, 0.0f) + 0.5f;                 // HALF_BIAS_NEGATE
             case 6: return value;                                        // SIGNED_IDENTITY
             default: return -value;                                      // SIGNED_NEGATE
         }
     };
+    // Registers 14 (V1R0_SUM) and 15 (EF_PROD) are not plain stored values -- they are
+    // computed on the fly from other registers, matching xemu's get_var(): V1R0_SUM is
+    // SECONDARY_COLOR (v1, regs[5]) + R0 (regs[12]) under the final combiner's own
+    // CLAMP_SUM/COMPLEMENT_V1/COMPLEMENT_R0 flags (a single global setting shared by
+    // every reader, per stage or final), and EF_PROD is the final combiner's own E*F
+    // product (E/F decoded from SpecularFogCW1's top two bytes).
+    auto get_register_value = [&](uint32_t reg,
+                                  const std::array<std::array<float, 4>, 16>& regs) {
+        if (reg == 14) {
+            std::array<float, 4> result{{0.0f, 0.0f, 0.0f, 0.0f}};
+            for (size_t c3 = 0; c3 < 3; ++c3) {
+                const float v1c = final_inv_v1 ? (1.0f - regs[5][c3]) : regs[5][c3];
+                const float r0c = final_inv_r0 ? (1.0f - regs[12][c3]) : regs[12][c3];
+                const float sum = v1c + r0c;
+                result[c3] = final_clamp_sum ? std::clamp(sum, 0.0f, 1.0f) : sum;
+            }
+            return result;
+        }
+        if (reg == 15) {
+            const std::array<float, 4> raw_e =
+                final_e.reg <= 13 ? regs[final_e.reg]
+                                  : std::array<float, 4>{{0, 0, 0, 0}};
+            const std::array<float, 4> raw_f =
+                final_f.reg <= 13 ? regs[final_f.reg]
+                                  : std::array<float, 4>{{0, 0, 0, 0}};
+            std::array<float, 4> result{{0.0f, 0.0f, 0.0f, 0.0f}};
+            for (size_t c3 = 0; c3 < 3; ++c3) {
+                const float ec = final_e.alt ? raw_e[3] : raw_e[c3];
+                const float fc = final_f.alt ? raw_f[3] : raw_f[c3];
+                result[c3] = apply_mapping(final_e.mapping, ec) *
+                            apply_mapping(final_f.mapping, fc);
+            }
+            return result;
+        }
+        return regs[reg];
+    };
     auto fetch_color = [&](const DecodedInput& in,
                           const std::array<std::array<float, 4>, 16>& regs) {
-        const std::array<float, 4>& r = regs[in.reg];
+        const std::array<float, 4> r = get_register_value(in.reg, regs);
         const float base[3] = {in.alt ? r[3] : r[0], in.alt ? r[3] : r[1],
                                in.alt ? r[3] : r[2]};
         return std::array<float, 3>{{apply_mapping(in.mapping, base[0]),
                                      apply_mapping(in.mapping, base[1]),
                                      apply_mapping(in.mapping, base[2])}};
     };
-    // See the function-level comment: bit4 polarity here (1=ALPHA, 0=BLUE) is inferred
-    // from the working kInlineLinearBlitColor profile's AlphaIcw0==0x14200000, whose D
-    // input must evaluate to the vertex alpha for that profile's proven pixel formula
-    // to hold.
+    // bit4 polarity here (1=ALPHA, 0=BLUE) matches xemu's get_input_var() PS_CHANNEL
+    // handling for the alpha portion exactly (cross-checked, not guessed).
     auto fetch_alpha = [&](const DecodedInput& in,
                           const std::array<std::array<float, 4>, 16>& regs) {
-        const std::array<float, 4>& r = regs[in.reg];
+        const std::array<float, 4> r = get_register_value(in.reg, regs);
         const float base = in.alt ? r[3] : r[2];
         return apply_mapping(in.mapping, base);
     };
@@ -6270,18 +6394,29 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             return (x1 - x0) * (py - y0) - (y1 - y0) * (px - x0);
         };
         int64_t area = edge(ax, ay, bx, by, cx, cy);
-        if (!cull_enabled && area < 0) {
-            // Cull is disabled: both windings render. Flip to the front-facing
-            // (positive-area) orientation, matching kInlineLinearBlitColor's identical
-            // disabled-cull handling above.
+        if (area == 0) return;
+        // area>0 is the front-facing (CW) winding, matching every witnessed profile.
+        // Cull disabled: both windings render (flip negative-area triangles to the
+        // front-facing orientation so the rest of the pipeline always sees area>0).
+        // Cull GL_BACK (0x0405): keep front-facing (area>0), reject area<0.
+        // Cull GL_FRONT (0x0404): the mirror image -- keep back-facing (area<0),
+        // reject area>0; flip so the rest of the pipeline still sees a positive area.
+        if (!cull_enabled) {
+            if (area < 0) {
+                std::swap(b, c);
+                std::swap(bx, cx);
+                std::swap(by, cy);
+                area = -area;
+            }
+        } else if (cull_front) {
+            if (area > 0) return;
             std::swap(b, c);
             std::swap(bx, cx);
             std::swap(by, cy);
             area = -area;
-        } else if (area <= 0) {
-            return;  // CW is front-facing, matching every witnessed profile.
+        } else if (area < 0) {
+            return;
         }
-        if (area == 0) return;
 
         ++generic_combiner_triangles_;
         const int32_t tri_xmin = std::max<int32_t>(
@@ -6455,6 +6590,45 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                         sample_ok = sample_linear(ts.data, ts.width, ts.height,
                                                  ts.pitch, texcoord[0] / texcoord[3],
                                                  texcoord[1] / texcoord[3], sampled);
+                    } else if (ts.cubemap) {
+                        // Same major-axis direction-to-UV algorithm as the pinned
+                        // profiles' own sample_cube_texture (fresh independent copy):
+                        // the interpolated texcoord.xyz is a direction vector, not a
+                        // normalized UV pair. Always CLAMP_TO_EDGE, matching every
+                        // pinned cubemap sample regardless of the texture's own
+                        // address register.
+                        // Strict '>' with a Z-axis fallback on any tie, matching
+                        // sample_cube_texture's own default (no-tie-break-counter)
+                        // path exactly -- using '>=' here previously picked a
+                        // different face than the pinned profiles do on an exact
+                        // tie, which is what the tex7_fan pinned test's own
+                        // unwitnessed-border-value case exposed.
+                        const float abs_x = std::abs(texcoord[0]);
+                        const float abs_y = std::abs(texcoord[1]);
+                        const float abs_z = std::abs(texcoord[2]);
+                        float u = 0.0f, v = 0.0f, divisor = 0.0f;
+                        if (abs_x > abs_y && abs_x > abs_z) {
+                            divisor = abs_x;
+                            u = texcoord[0] >= 0.0f ? -texcoord[2] : texcoord[2];
+                            v = texcoord[1];
+                        } else if (abs_y > abs_x && abs_y > abs_z) {
+                            divisor = abs_y;
+                            u = texcoord[0];
+                            v = texcoord[1] >= 0.0f ? -texcoord[2] : texcoord[2];
+                        } else {
+                            divisor = abs_z;
+                            u = texcoord[2] >= 0.0f ? texcoord[0] : -texcoord[0];
+                            v = texcoord[1];
+                        }
+                        if (divisor == 0.0f) {
+                            fault_("NV2A generic-combiner cubemap direction is zero");
+                            raster_failed = true;
+                            return;
+                        }
+                        sample_ok = sample_swizzled(
+                            ts.data, *ts.swizzle, ts.width, ts.height, u / divisor,
+                            v / divisor, TextureAddressMode::kClampToEdge,
+                            TextureAddressMode::kClampToEdge, ts.border, sampled);
                     } else {
                         sample_ok = sample_swizzled(
                             ts.data, *ts.swizzle, ts.width, ts.height, texcoord[0],
@@ -6470,6 +6644,21 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     ++generic_combiner_texture_samples_;
                 }
 
+                // Matches xemu's get_output(): the scale/bias op is applied to the
+                // AB/CD/SUM result BEFORE the final clamp to [-1,1] (real hardware
+                // range -- unlike the input side, general-combiner outputs are
+                // signed), and the SAME scale/bias value applies to AB, CD, and
+                // SUM/MUX alike (there is only one output-mapping field per stage).
+                auto apply_scale_bias = [](uint32_t sb, float value) {
+                    switch (sb) {
+                        case 0x00: return value;                       // IDENTITY
+                        case 0x08: return value - 0.5f;                // BIAS
+                        case 0x10: return value * 2.0f;                // SHIFTLEFTBY1
+                        case 0x18: return (value - 0.5f) * 2.0f;       // SHIFTLEFTBY1+BIAS
+                        case 0x20: return value * 4.0f;                // SHIFTLEFTBY2
+                        default: return value * 0.5f;                  // SHIFTRIGHTBY1 (0x30)
+                    }
+                };
                 for (uint32_t stage = 0; stage < stage_count; ++stage) {
                     const Stage& s = stages[stage];
                     regs[1] = unpack_argb8(
@@ -6494,19 +6683,38 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     } else {
                         ccd = {{cc[0] * cd[0], cc[1] * cd[1], cc[2] * cd[2]}};
                     }
-                    const std::array<float, 3> csum{{
-                        std::clamp(cab[0] + ccd[0], 0.0f, 1.0f),
-                        std::clamp(cab[1] + ccd[1], 0.0f, 1.0f),
-                        std::clamp(cab[2] + ccd[2], 0.0f, 1.0f),
-                    }};
-                    auto store_color = [&](uint32_t dst, const std::array<float, 3>& value) {
+                    // MUX_SUM: the third output is either AB+CD (plain sum) or a
+                    // select between CD (condition true) and AB (condition false)
+                    // based on R0.alpha's LSB/MSB, matching xemu's add_stage_code().
+                    const bool mux_condition =
+                        mux_on_msb ? (regs[12][3] >= 0.5f)
+                                  : ((static_cast<uint32_t>(std::floor(
+                                        regs[12][3] * 255.0f + 0.5f)) &
+                                     1u) != 0);
+                    std::array<float, 3> csum{};
+                    if (s.color_mux) {
+                        csum = mux_condition ? ccd : cab;
+                    } else {
+                        csum = {{cab[0] + ccd[0], cab[1] + ccd[1], cab[2] + ccd[2]}};
+                    }
+                    auto store_color = [&](uint32_t dst, const std::array<float, 3>& value,
+                                          bool blue_to_alpha) {
                         if (!dst) return;
-                        for (size_t c3 = 0; c3 < 3; ++c3)
-                            regs[dst][c3] = std::clamp(value[c3], 0.0f, 1.0f);
+                        for (size_t c3 = 0; c3 < 3; ++c3) {
+                            regs[dst][c3] = std::clamp(
+                                apply_scale_bias(s.color_scale_bias, value[c3]),
+                                -1.0f, 1.0f);
+                        }
+                        // AB/CD_BLUE_TO_ALPHA: the same (already scaled/biased/
+                        // clamped) blue channel also lands in this register's alpha
+                        // channel, matching xemu's add_stage_code() exactly. Never
+                        // applies to the SUM/MUX output (real hardware only wires
+                        // this from the dedicated AB/CD destinations).
+                        if (blue_to_alpha) regs[dst][3] = regs[dst][2];
                     };
-                    store_color(s.color_ab_dst, cab);
-                    store_color(s.color_cd_dst, ccd);
-                    store_color(s.color_sum_dst, csum);
+                    store_color(s.color_ab_dst, cab, s.color_ab_blue_to_alpha);
+                    store_color(s.color_cd_dst, ccd, s.color_cd_blue_to_alpha);
+                    store_color(s.color_sum_dst, csum, false);
 
                     const float aa = fetch_alpha(s.alpha[0], regs);
                     const float ab = fetch_alpha(s.alpha[1], regs);
@@ -6514,17 +6722,47 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     const float ad = fetch_alpha(s.alpha[3], regs);
                     const float aab = aa * ab;
                     const float acd = ac * ad;
-                    const float asum = std::clamp(aab + acd, 0.0f, 1.0f);
+                    const bool alpha_mux_condition =
+                        mux_on_msb ? (regs[12][3] >= 0.5f)
+                                  : ((static_cast<uint32_t>(std::floor(
+                                        regs[12][3] * 255.0f + 0.5f)) &
+                                     1u) != 0);
+                    const float asum =
+                        s.alpha_mux ? (alpha_mux_condition ? acd : aab) : (aab + acd);
                     auto store_alpha = [&](uint32_t dst, float value) {
                         if (!dst) return;
-                        regs[dst][3] = std::clamp(value, 0.0f, 1.0f);
+                        regs[dst][3] = std::clamp(
+                            apply_scale_bias(s.alpha_scale_bias, value), -1.0f, 1.0f);
                     };
                     store_alpha(s.alpha_ab_dst, aab);
                     store_alpha(s.alpha_cd_dst, acd);
                     store_alpha(s.alpha_sum_dst, asum);
                 }
 
-                const std::array<float, 4>& final_color = regs[12];
+                // Final combiner: RGB = D + A*B + (1-A)*C; Alpha = G. When absent
+                // (both SpecularFogCW words zero), R0/R0.a pass through untouched --
+                // which the generic A=B=C=ZERO, D=R0, G=R0.alpha decode already
+                // produces on its own, so no separate branch is needed.
+                std::array<float, 4> final_color;
+                if (final_enabled) {
+                    // The final combiner's own CONSTANT_COLOR0/1 (registers 1/2) come
+                    // from SPECFOGFACTOR0/1 (FinalFactor0/1), not the per-stage
+                    // Factor0_0[stage]/Factor1_0[stage] array -- reload them now that
+                    // every ordinary stage above is done reading regs[1]/regs[2].
+                    regs[1] = unpack_argb8(raster_state_[kRasterCombinerFinalFactor0]);
+                    regs[2] = unpack_argb8(raster_state_[kRasterCombinerFinalFactor1]);
+                    const std::array<float, 3> fa = fetch_color(final_a, regs);
+                    const std::array<float, 3> fb = fetch_color(final_b, regs);
+                    const std::array<float, 3> fc = fetch_color(final_c, regs);
+                    const std::array<float, 3> fd = fetch_color(final_d, regs);
+                    for (size_t c3 = 0; c3 < 3; ++c3) {
+                        final_color[c3] =
+                            fd[c3] + fa[c3] * fb[c3] + (1.0f - fa[c3]) * fc[c3];
+                    }
+                    final_color[3] = fetch_alpha(final_g, regs);
+                } else {
+                    final_color = regs[12];
+                }
                 const float src_alpha = std::clamp(final_color[3], 0.0f, 1.0f);
                 const uint32_t alpha_scaled =
                     static_cast<uint32_t>(std::floor(src_alpha * 255.0f + 0.5f));
