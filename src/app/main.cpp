@@ -1358,11 +1358,12 @@ int main(int argc, char** argv) {
                 for (const auto& sample : raster_samples) {
                     if (!sample.immediate_quad_batches) continue;
                     const auto& state = sample.words;
+                    const size_t iqrs_index = immediate_state_index++;
                     std::printf(
                         "[2bl]   IQRS%zu (all mode8 states) batches=%llu sfmt=%08x "
                         "pitch=%08x surf=%08x/%08x clip=%08x/%08x T0=%08x/%08x "
                         "dma=%08x/%08x\n",
-                        immediate_state_index++,
+                        iqrs_index,
                         (unsigned long long)sample.immediate_quad_batches,
                         state[Nv2a::kRasterSurfaceFormat],
                         state[Nv2a::kRasterSurfacePitch],
@@ -1374,6 +1375,23 @@ int main(int argc, char** argv) {
                         state[Nv2a::kRasterTextureFormat0],
                         state[Nv2a::kRasterTextureDmaA],
                         state[Nv2a::kRasterTextureDmaB]);
+                    // The capped RS listing above is useful for high-volume
+                    // recorder-only states, but it can omit an immediate
+                    // family whose exact pixel tuple is still unknown. Keep
+                    // every retained word here, keyed to the same IQRS index,
+                    // so a later profile can be grounded without changing
+                    // emulation or guessing omitted state.
+                    for (size_t word = 0; word < state.size(); word += 8) {
+                        std::printf("[2bl]     IQRS%zu state[%03zu..%03zu]=",
+                                    iqrs_index, word,
+                                    std::min(word + 7, state.size() - 1));
+                        for (size_t column = word;
+                             column < std::min(word + 8, state.size()); ++column) {
+                            std::printf("%s%08x", column == word ? "" : "/",
+                                        state[column]);
+                        }
+                        std::printf("\n");
+                    }
                     print_immediate_quad_evidence(sample);
                 }
                 std::printf("[2bl] NV2A flip: write-increments=%llu stalls=%llu "
