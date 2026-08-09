@@ -16,7 +16,10 @@
 
 namespace xlle {
 
-XboxMachine::XboxMachine() : cpu_(std::make_unique<UnicornFloor>()) {}
+XboxMachine::XboxMachine() : XboxMachine(Config{}) {}
+
+XboxMachine::XboxMachine(Config config)
+    : cpu_(std::make_unique<UnicornFloor>()), config_(config) {}
 
 bool XboxMachine::ok() const { return static_cast<UnicornFloor*>(cpu_.get())->ok(); }
 
@@ -202,7 +205,9 @@ void XboxMachine::init_devices() {
     // deterministic Controller S; USB1 routes to IRQ9 and has no downstream device.
     for (int index = 0; index < 2; ++index) {
         const uint32_t base = index ? 0xFED08000u : 0xFED00000u;
-        auto ohci = std::make_unique<Ohci>(base, fault);
+        const Ohci::UsbTopology topology =
+            index == 0 ? config_.ohci0_topology : Ohci::UsbTopology::kDirectXid;
+        auto ohci = std::make_unique<Ohci>(base, fault, topology);
         Ohci* raw = ohci.get();
         raw->set_mem_access(
             [this](uint32_t addr, void* buf, size_t n) {

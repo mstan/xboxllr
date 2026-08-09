@@ -184,6 +184,7 @@ bool write_frame_ppm(const char* path, const std::vector<uint8_t>& rgba,
 
 int main(int argc, char** argv) {
     bool serve = false, window = false, interactive = false;
+    bool test_synthetic_controller_hub = false;
     bool reduced_retire_diag = false;
     bool net_disconnected = false;
     bool pfifo_clear_trace = false;
@@ -203,6 +204,8 @@ int main(int argc, char** argv) {
         if (!std::strcmp(argv[i], "--serve")) serve = true;
         else if (!std::strcmp(argv[i], "--window")) window = true;
         else if (!std::strcmp(argv[i], "--interactive")) interactive = true;
+        else if (!std::strcmp(argv[i], "--test-synthetic-controller-hub"))
+            test_synthetic_controller_hub = true;
         else if (!std::strcmp(argv[i], "--reduced-retire-diag"))
             reduced_retire_diag = true;
         else if (!std::strcmp(argv[i], "--net-disconnected"))
@@ -264,6 +267,10 @@ int main(int argc, char** argv) {
         }
         else if (!std::strcmp(argv[i], "--max-insns") && i + 1 < argc)
             max_insns = std::strtoull(argv[++i], nullptr, 0);
+        else {
+            std::fprintf(stderr, "[host] unknown or incomplete option: %s\n", argv[i]);
+            return 1;
+        }
     }
 
     const bool net_requested =
@@ -283,10 +290,21 @@ int main(int argc, char** argv) {
             "[net] --net-disconnected cannot be combined with a UDP Ethernet peer\n");
         return 1;
     }
+    if (test_synthetic_controller_hub && (!boot_flash || !run2bl)) {
+        std::fprintf(stderr,
+                     "[input] --test-synthetic-controller-hub requires both "
+                     "--boot <flash.bin> and --run2bl <2bl.bin>\n");
+        return 1;
+    }
 
     // --boot <flash.bin>: stand up the machine (RAM + flash) and smoke-test the map.
     if (boot_flash) {
-        XboxMachine mach;
+        XboxMachine::Config machine_config;
+        if (test_synthetic_controller_hub) {
+            machine_config.ohci0_topology =
+                Ohci::UsbTopology::kSyntheticControllerSHubForTest;
+        }
+        XboxMachine mach(machine_config);
         if (!mach.ok()) { std::fprintf(stderr, "[machine] unicorn init failed\n"); return 1; }
         if (!mach.init_ram()) { std::fprintf(stderr, "[machine] RAM map failed\n"); return 1; }
         if (!mach.load_flash(boot_flash)) {
@@ -313,6 +331,10 @@ int main(int argc, char** argv) {
             }
             // Stand up the I/O fabric (PCI host, SMBus+SMC, NV2A) the 2BL platform-init drives.
             mach.init_devices();
+            if (test_synthetic_controller_hub) {
+                std::printf("[input] TEST-ONLY synthetic Controller S hub topology enabled; "
+                            "not retail evidence\n");
+            }
             if (pfifo_clear_trace && mach.nv2a()) {
                 mach.nv2a()->arm_color_clear_trace(pfifo_clear_trace_target);
                 std::printf("[host] PFIFO clear trace armed for color base 0x%08x\n",
@@ -1559,7 +1581,8 @@ int main(int argc, char** argv) {
                 std::printf("[2bl] OHCI0: frames=%llu control=%08x hcca=%08x "
                             "eds/tds/retired/done=%llu/%llu/%llu/%llu "
                             "control/xid-in/xid-out=%llu/%llu/%llu "
-                            "addr/config=%u/%u rumble=%04x/%04x\n",
+                            "addr/config=%u/%u hub-addr/config/port1=%u/%u/%08x "
+                            "rumble=%04x/%04x\n",
                             (unsigned long long)mach.ohci0()->frames(),
                             mach.ohci0()->control(), mach.ohci0()->hcca(),
                             (unsigned long long)mach.ohci0()->processed_eds(),
@@ -1571,6 +1594,9 @@ int main(int argc, char** argv) {
                             (unsigned long long)mach.ohci0()->xid_output_reports(),
                             mach.ohci0()->xid_address(),
                             mach.ohci0()->xid_configuration(),
+                            mach.ohci0()->synthetic_hub_address(),
+                            mach.ohci0()->synthetic_hub_configuration(),
+                            mach.ohci0()->synthetic_hub_port_status(0),
                             mach.ohci0()->xid_left_rumble(),
                             mach.ohci0()->xid_right_rumble());
                 std::printf(

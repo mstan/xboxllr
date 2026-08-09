@@ -64,7 +64,7 @@ public:
         uint32_t terminal_td_flags = 0;
         uint32_t ed_head_after = 0;
     };
-    static constexpr size_t kEp0TraceCapacity = 4;
+    static constexpr size_t kEp0TraceCapacity = 32;
 
     Ohci(uint32_t base, FaultFn fault,
          UsbTopology topology = UsbTopology::kDirectXid)

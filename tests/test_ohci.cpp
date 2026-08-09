@@ -333,10 +333,13 @@ int main() {
 
     // The boot-facing diagnostic history is fixed-size: further valid EP0
     // transfers execute normally but cannot grow the trace.
-    response.clear();
-    submit_control(setup_packet(0x80, 0x08, 0, 0, 1),
-                   {}, 1, response, 5);
-    CHECK(response.size() == 1 && response[0] == 1);
+    const size_t trace_before_fill = hc.ep0_trace_count();
+    for (size_t i = trace_before_fill; i <= xlle::Ohci::kEp0TraceCapacity; ++i) {
+        response.clear();
+        submit_control(setup_packet(0x80, 0x08, 0, 0, 1),
+                       {}, 1, response, 5);
+        CHECK(response.size() == 1 && response[0] == 1);
+    }
     CHECK(hc.ep0_trace_count() == xlle::Ohci::kEp0TraceCapacity);
     CHECK(hc.ep0_trace_dropped() == 1);
 

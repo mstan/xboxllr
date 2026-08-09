@@ -150,6 +150,11 @@ target_include_directories(test_xid_input PRIVATE ${XLLE_INCLUDES})
 target_link_libraries(test_xid_input PRIVATE xlle_machine)
 add_test(NAME xid_input COMMAND test_xid_input)
 
+add_executable(test_machine_config tests/test_machine_config.cpp)
+target_include_directories(test_machine_config PRIVATE ${XLLE_INCLUDES})
+target_link_libraries(test_machine_config PRIVATE xlle_machine)
+add_test(NAME machine_config COMMAND test_machine_config)
+
 add_executable(test_nvnet tests/test_nvnet.cpp src/machine/nvnet.cpp)
 target_include_directories(test_nvnet PRIVATE ${XLLE_INCLUDES})
 target_link_libraries(test_nvnet PRIVATE xlle_net)

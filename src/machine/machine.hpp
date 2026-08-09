@@ -32,7 +32,15 @@ public:
     static constexpr uint32_t kFlashBase    = 0xFF000000u;
     static constexpr uint32_t kFlashWindow  = 0x01000000u;       // 16MB, ends at 0xFFFFFFFF
 
+    struct Config {
+        // Production stays on the captured root-attached XID model.  The
+        // synthetic hub is an explicit, test-only opt-in selected before
+        // device construction.
+        Ohci::UsbTopology ohci0_topology = Ohci::UsbTopology::kDirectXid;
+    };
+
     XboxMachine();
+    explicit XboxMachine(Config config);
     bool ok() const;
 
     bool init_ram();                              // map 64 MB at 0x0
@@ -82,6 +90,7 @@ private:
     MmioDevice* find_mmio(uint32_t addr);
 
     std::unique_ptr<CpuFloor> cpu_;
+    const Config config_;
     std::vector<uint8_t> ram_;  // 64 MB backing, mapped at 0x0 and aliased at 0x04000000
     size_t flash_size_ = 0;
     bool ram_ok_ = false, flash_ok_ = false;
