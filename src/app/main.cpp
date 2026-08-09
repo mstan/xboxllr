@@ -1498,11 +1498,15 @@ int main(int argc, char** argv) {
                     const auto& trace = mach.ohci0()->ep0_trace(i);
                     std::printf(
                         "[2bl]   OHCI0 EP0[%zu] addr=%u setup=%02x/%02x "
-                        "value=%04x index=%04x len=%u outcome=%s td=%u cc=%u bytes=%u\n",
+                        "value=%04x index=%04x len=%u outcome=%s td=%u cc=%u bytes=%u "
+                        "terminal=%08x flags=%08x R=%u ed-head=%08x\n",
                         i, trace.address, trace.request_type, trace.request,
                         trace.value, trace.index, trace.length,
                         ep0_outcome_name(trace.outcome), trace.td_completions,
-                        trace.last_condition_code, trace.data_bytes);
+                        trace.last_condition_code, trace.data_bytes,
+                        trace.terminal_td_address, trace.terminal_td_flags,
+                        (trace.terminal_td_flags >> 18) & 1u,
+                        trace.ed_head_after);
                 }
             }
             if (mach.nvnet()) {

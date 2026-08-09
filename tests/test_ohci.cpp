@@ -1,4 +1,5 @@
 // xlle — focused OHCI register, TD, done-head, IRQ, and XID lifecycle test.
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <cstring>
@@ -338,6 +339,107 @@ int main() {
     CHECK(response.size() == 1 && response[0] == 1);
     CHECK(hc.ep0_trace_count() == xlle::Ohci::kEp0TraceCapacity);
     CHECK(hc.ep0_trace_dropped() == 1);
+
+    // A configuration descriptor shorter than the guest's IN TD is a normal
+    // USB short packet. OHCI accepts it only when TD.R is set; without R it
+    // retires the data TD with DataUnderrun and halts the ED before status.
+    struct ShortPacketResult {
+        std::string fault;
+        xlle::Ohci::Ep0Trace trace{};
+        uint32_t data_flags = 0;
+        uint32_t status_flags = 0;
+        uint32_t ed_head = 0;
+        std::array<uint8_t, 32> descriptor{};
+    };
+    auto run_configuration_short_packet = [&](bool rounding) {
+        ShortPacketResult result;
+        std::vector<uint8_t> memory(0x5000, 0);
+        xlle::Ohci probe(base, [&](const std::string& why) {
+            result.fault = why;
+        });
+        probe.set_mem_access(
+            [&](uint32_t addr, void* dst, size_t n) {
+                if (static_cast<uint64_t>(addr) + n > memory.size())
+                    return false;
+                std::memcpy(dst, memory.data() + addr, n);
+                return true;
+            },
+            [&](uint32_t addr, const void* src, size_t n) {
+                if (static_cast<uint64_t>(addr) + n > memory.size())
+                    return false;
+                std::memcpy(memory.data() + addr, src, n);
+                return true;
+            });
+
+        constexpr uint32_t probe_hcca = 0x1000;
+        constexpr uint32_t ed = 0x2000;
+        constexpr uint32_t setup_td = 0x2010;
+        constexpr uint32_t data_td = 0x2020;
+        constexpr uint32_t status_td = 0x2030;
+        constexpr uint32_t tail_td = 0x2040;
+        constexpr uint32_t setup_buffer = 0x2100;
+        constexpr uint32_t data_buffer = 0x2200;
+        const auto setup = setup_packet(0x80, 0x06, 0x0200, 0, 80);
+        std::memcpy(memory.data() + setup_buffer, setup.data(), setup.size());
+        put32(memory, setup_td + 0, kTdInitial);
+        put32(memory, setup_td + 4, setup_buffer);
+        put32(memory, setup_td + 8, data_td);
+        put32(memory, setup_td + 12, setup_buffer + 7);
+        put32(memory, data_td + 0,
+              kTdInitial | kTdIn | (rounding ? kTdR : 0));
+        put32(memory, data_td + 4, data_buffer);
+        put32(memory, data_td + 8, status_td);
+        put32(memory, data_td + 12, data_buffer + 79);
+        put32(memory, status_td + 0, kTdInitial | kTdOut);
+        put32(memory, status_td + 8, tail_td);
+        put32(memory, ed + 0, 64u << 16);
+        put32(memory, ed + 4, tail_td);
+        put32(memory, ed + 8, setup_td);
+
+        probe.mmio_write(base + 0x54, 4, 1u << 4);  // reset/enable port
+        probe.mmio_write(base + 0x18, 4, probe_hcca);
+        probe.mmio_write(base + 0x20, 4, ed);
+        probe.mmio_write(base + 0x08, 4, 1u << 1);
+        probe.mmio_write(base + 0x04, 4, 0x90);
+        probe.set_frame(1);
+
+        result.data_flags = get32(memory, data_td);
+        result.status_flags = get32(memory, status_td);
+        result.ed_head = get32(memory, ed + 8);
+        std::copy_n(memory.begin() + data_buffer, result.descriptor.size(),
+                    result.descriptor.begin());
+        if (probe.ep0_trace_count() == 1) result.trace = probe.ep0_trace(0);
+        return result;
+    };
+
+    const auto rejected_short = run_configuration_short_packet(false);
+    CHECK(rejected_short.fault.empty());
+    CHECK((rejected_short.data_flags >> 28) == 9);
+    CHECK((rejected_short.status_flags >> 28) == 15);
+    CHECK((rejected_short.ed_head & 1u) != 0);
+    CHECK((rejected_short.ed_head & 0xfffffff0u) == 0x2030u);
+    CHECK(rejected_short.descriptor[0] == 9 &&
+          rejected_short.descriptor[1] == 2 &&
+          rejected_short.descriptor[2] == 32);
+    CHECK(rejected_short.trace.outcome == xlle::Ohci::Ep0Outcome::kError);
+    CHECK(rejected_short.trace.td_completions == 2);
+    CHECK(rejected_short.trace.last_condition_code == 9);
+    CHECK(rejected_short.trace.data_bytes == 32);
+    CHECK(rejected_short.trace.terminal_td_address == 0x2020u);
+    CHECK((rejected_short.trace.terminal_td_flags >> 28) == 9);
+    CHECK(((rejected_short.trace.terminal_td_flags >> 18) & 1u) == 0);
+    CHECK(rejected_short.trace.ed_head_after == rejected_short.ed_head);
+
+    const auto accepted_short = run_configuration_short_packet(true);
+    CHECK(accepted_short.fault.empty());
+    CHECK((accepted_short.data_flags >> 28) == 0);
+    CHECK((accepted_short.status_flags >> 28) == 0);
+    CHECK((accepted_short.ed_head & 1u) == 0);
+    CHECK((accepted_short.ed_head & 0xfffffff0u) == 0x2040u);
+    CHECK(accepted_short.trace.outcome == xlle::Ohci::Ep0Outcome::kComplete);
+    CHECK(accepted_short.trace.td_completions == 3);
+    CHECK(accepted_short.trace.last_condition_code == 0);
+    CHECK(accepted_short.trace.data_bytes == 32);
 
     hc.mmio_write(base + 0x08, 4, 1);  // HCR
     CHECK(hc.mmio_read(base + 0x04, 4) == 0);

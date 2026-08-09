@@ -52,6 +52,9 @@ public:
         uint8_t td_completions = 0;
         uint8_t last_condition_code = 0;
         uint32_t data_bytes = 0;
+        uint32_t terminal_td_address = 0;
+        uint32_t terminal_td_flags = 0;
+        uint32_t ed_head_after = 0;
     };
     static constexpr size_t kEp0TraceCapacity = 4;
 
@@ -186,6 +189,7 @@ private:
     void begin_ep0_trace(uint8_t address, const SetupPacket& setup,
                          TransferResult result);
     void record_ep0_td_completion(const EndpointDescriptor& ed,
+                                  uint32_t td_address, uint32_t td_flags,
                                   uint32_t condition_code);
     std::vector<uint8_t> xid_input_report() const;
     static std::vector<uint8_t> string_descriptor(const char* text);

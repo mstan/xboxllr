@@ -479,6 +479,7 @@ void Ohci::begin_ep0_trace(uint8_t address, const SetupPacket& setup,
 }
 
 void Ohci::record_ep0_td_completion(const EndpointDescriptor& ed,
+                                    uint32_t td_address, uint32_t td_flags,
                                     uint32_t condition_code) {
     if (ep0_active_trace_ < 0 || ((ed.flags >> 7) & 0xfu) != 0)
         return;
@@ -486,6 +487,9 @@ void Ohci::record_ep0_td_completion(const EndpointDescriptor& ed,
     if ((ed.flags & 0x7fu) != trace.address) return;
     if (trace.td_completions != 0xffu) ++trace.td_completions;
     trace.last_condition_code = static_cast<uint8_t>(condition_code);
+    trace.terminal_td_address = td_address;
+    trace.terminal_td_flags = td_flags;
+    trace.ed_head_after = ed.head;
     if (condition_code == kCcStall)
         trace.outcome = Ep0Outcome::kStalled;
     else if (condition_code != kCcNoError)
@@ -598,7 +602,7 @@ bool Ohci::retire_td(uint32_t ed_address, EndpointDescriptor& ed,
         !write_memory(ed_address + 8, &ed.head, sizeof(ed.head), "ED head")) {
         return false;
     }
-    record_ep0_td_completion(ed, condition_code);
+    record_ep0_td_completion(ed, td_address, td.flags, condition_code);
     ++retired_tds_;
     return true;
 }
