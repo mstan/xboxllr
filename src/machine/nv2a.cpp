@@ -9,6 +9,7 @@
 #include <limits>
 #include <memory>
 
+#include "machine/perf_accounting.hpp"
 #include "nv2a_vsh_emulator.h"
 
 namespace xlle {
@@ -1353,7 +1354,12 @@ bool Nv2a::submit_vertex_batch() {
         }
     }
     bool raster_executed = false;
-    if (!rasterize_witnessed_batch(raster_executed)) return false;
+    bool raster_ok;
+    {
+        perf::ScopedAdd t(perf::g_ns_raster, perf::g_calls_raster);
+        raster_ok = rasterize_witnessed_batch(raster_executed);
+    }
+    if (!raster_ok) return false;
     if (raster_executed)
         ++raster_state_samples_[raster_sample_index].executed_batches;
 
@@ -2929,6 +2935,7 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         // actual bound combiner state generically. All witnessed profiles above
         // are pinned evidence and are matched first; this path is a strict
         // fallback that never overrides them.
+        perf::ScopedAdd t(perf::g_ns_raster_generic, perf::g_calls_raster_generic);
         return rasterize_generic_combiner_batch(executed);
     }
     executed = true;
@@ -4120,6 +4127,27 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                 std::max(std::abs(dzdx), std::abs(dzdy));
             const float inverse_area = 1.0f / static_cast<float>(area);
 
+            // Per-triangle hoist (beads-xbox.1.13 Phase 1): a/b/c->diffuse is a
+            // per-VERTEX value, invariant across every pixel this triangle
+            // rasterizes, but the per-pixel color path below used to re-run the
+            // isnan-fixup + clamp for all 3 vertices x 3 components on every single
+            // fragment (radial-color alone rasterizes ~4.7K fragments/triangle on
+            // the stock-dashboard probe). Precompute the fixed-up value once here;
+            // the per-pixel loop below reads the cached float instead of
+            // recomputing it. Bit-for-bit identical to the old inline computation
+            // (same isnan+clamp on the same vertex field, just hoisted out of the
+            // fragment loop), so this does not change rasterizer output.
+            std::array<std::array<float, 3>, 3> vertex_diffuse_clamped{};
+            for (size_t vtx = 0; vtx < 3; ++vtx) {
+                const TransformedVertex* vertex = vtx == 0 ? a : (vtx == 1 ? b : c);
+                for (size_t component = 0; component < 3; ++component) {
+                    float value = vertex->diffuse[component];
+                    if (std::isnan(value)) value = 1.0f;
+                    vertex_diffuse_clamped[vtx][component] =
+                        std::clamp(value, 0.0f, 1.0f);
+                }
+            }
+
             for (int32_t y = tri_ymin; y <= tri_ymax; ++y) {
                 const int64_t py = static_cast<int64_t>(y) * 16 + 8;
                 for (int32_t x = tri_xmin; x <= tri_xmax; ++x) {
@@ -5086,16 +5114,10 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
 
                     std::array<float, 3> diffuse{};
                     for (size_t component = 0; component < 3; ++component) {
-                        auto vertex_diffuse =
-                            [component](const TransformedVertex* vertex) {
-                                float value = vertex->diffuse[component];
-                                if (std::isnan(value)) value = 1.0f;
-                                return std::clamp(value, 0.0f, 1.0f);
-                            };
                         const double d =
-                            (q0 * vertex_diffuse(a) +
-                             q1 * vertex_diffuse(b) +
-                             q2 * vertex_diffuse(c)) / qsum;
+                            (q0 * vertex_diffuse_clamped[0][component] +
+                             q1 * vertex_diffuse_clamped[1][component] +
+                             q2 * vertex_diffuse_clamped[2][component]) / qsum;
                         if (!std::isfinite(d)) {
                             fault_("NV2A color varying is non-finite");
                             raster_failed = true;
@@ -7583,6 +7605,7 @@ bool Nv2a::pusher_enabled(uint8_t channel) const {
 }
 
 void Nv2a::process_pushbuffer(uint8_t channel) {
+    perf::ScopedAdd perf_t(perf::g_ns_nv2a_pushbuffer, perf::g_calls_nv2a_pushbuffer);
     auto& ch = channels_[channel];
     if (!mem_read_) {
         fault_("NV2A PFIFO has no unified-memory read callback");

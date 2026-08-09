@@ -24,6 +24,7 @@
 #include "machine/aci.hpp"
 #include "machine/apu.hpp"
 #include "machine/machine.hpp"
+#include "machine/perf_accounting.hpp"
 #include "obs/debug_server.hpp"
 #include "spike/fixtures.hpp"
 #include "xlle/jsonl.hpp"
@@ -189,6 +190,7 @@ int main(int argc, char** argv) {
     bool test_synthetic_controller_hub_input_down = false;
     bool test_synthetic_controller_hub_input_down_a = false;
     bool reduced_retire_diag = false;
+    bool perf_accounting = false;
     bool net_disconnected = false;
     bool pfifo_clear_trace = false;
     uint32_t pfifo_clear_trace_target = 0;
@@ -199,6 +201,7 @@ int main(int argc, char** argv) {
     const char* frame_dump = nullptr;
     const char* frame_series_prefix = nullptr;
     const char* test_input_capture_prefix = nullptr;
+    const char* test_input_script = nullptr;
     const char* net_peer_host = nullptr;
     uint64_t frame_series_every = 0;
     uint64_t net_bind_port = 0;
@@ -216,6 +219,8 @@ int main(int argc, char** argv) {
             test_synthetic_controller_hub_input_down_a = true;
         else if (!std::strcmp(argv[i], "--reduced-retire-diag"))
             reduced_retire_diag = true;
+        else if (!std::strcmp(argv[i], "--perf-accounting"))
+            perf_accounting = true;
         else if (!std::strcmp(argv[i], "--net-disconnected"))
             net_disconnected = true;
         else if (!std::strcmp(argv[i], "--pfifo-clear-trace")) {
@@ -246,6 +251,8 @@ int main(int argc, char** argv) {
             frame_dump = argv[++i];
         else if (!std::strcmp(argv[i], "--test-input-capture-prefix") && i + 1 < argc)
             test_input_capture_prefix = argv[++i];
+        else if (!std::strcmp(argv[i], "--test-input-script") && i + 1 < argc)
+            test_input_script = argv[++i];
         else if (!std::strcmp(argv[i], "--frame-series")) {
             if (i + 2 >= argc) {
                 std::fprintf(
@@ -307,10 +314,40 @@ int main(int argc, char** argv) {
         return 1;
     }
     if (test_input_capture_prefix && !test_synthetic_controller_hub_input_down &&
-        !test_synthetic_controller_hub_input_down_a) {
+        !test_synthetic_controller_hub_input_down_a && !test_input_script) {
         std::fprintf(stderr,
                      "[input] --test-input-capture-prefix is valid only with "
                      "a test-only synthetic Controller S input experiment\n");
+        return 1;
+    }
+    if (test_input_script &&
+        (test_synthetic_controller_hub_input_down ||
+         test_synthetic_controller_hub_input_down_a)) {
+        std::fprintf(stderr,
+                     "[input] --test-input-script cannot be combined with "
+                     "--test-synthetic-controller-hub-input-down(-a); choose one "
+                     "test-only synthetic Controller S input experiment\n");
+        return 1;
+    }
+    if (test_input_script &&
+        (!test_synthetic_controller_hub || !boot_flash || !run2bl ||
+         !test_input_capture_prefix || !test_input_capture_prefix[0])) {
+        std::fprintf(stderr,
+                     "[input] --test-input-script requires "
+                     "--test-synthetic-controller-hub, --boot <flash.bin>, and "
+                     "--run2bl <2bl.bin>, plus --test-input-capture-prefix <path>\n");
+        return 1;
+    }
+    if (test_input_script && interactive) {
+        std::fprintf(stderr,
+                     "[input] --test-input-script cannot be combined with "
+                     "--interactive\n");
+        return 1;
+    }
+    if (test_input_script && net_requested) {
+        std::fprintf(stderr,
+                     "[input] --test-input-script cannot be combined with "
+                     "live UDP Ethernet\n");
         return 1;
     }
     if (test_synthetic_controller_hub_input_down &&
@@ -403,6 +440,26 @@ int main(int argc, char** argv) {
             }
             XidDownReportScript down_script;
             XidDownThenAReportScript down_a_script;
+            GenericInputScript generic_script;
+            if (test_input_script) {
+                std::ifstream script_file(test_input_script);
+                if (!script_file.is_open()) {
+                    std::fprintf(stderr, "[input] --test-input-script: cannot open %s\n",
+                                 test_input_script);
+                    return 1;
+                }
+                std::vector<GenericInputScript::Event> events;
+                std::string script_error;
+                if (!GenericInputScript::parse(script_file, events, script_error)) {
+                    std::fprintf(stderr, "[input] --test-input-script %s: %s\n",
+                                 test_input_script, script_error.c_str());
+                    return 1;
+                }
+                std::printf("[input] TEST-ONLY generic input script armed: %s events=%zu "
+                            "capture-prefix=%s; guest polls required\n",
+                            test_input_script, events.size(), test_input_capture_prefix);
+                generic_script.reset(std::move(events));
+            }
             if (test_synthetic_controller_hub_input_down) {
                 std::printf("[input] TEST-ONLY deterministic XID Down script armed: "
                             "endpoint-2 threshold=%llu down=%llu neutral=%llu "
@@ -575,7 +632,7 @@ int main(int argc, char** argv) {
             }
             if (interactive || net_requested || frame_series_requested ||
                 test_synthetic_controller_hub_input_down ||
-                test_synthetic_controller_hub_input_down_a) {
+                test_synthetic_controller_hub_input_down_a || test_input_script) {
                 mach.on_host_poll([&]() {
                     // Host event processing is nonblocking and guest state changes only on this
                     // emulation thread. XID endpoint 2 observes it on its next periodic TD.
@@ -808,6 +865,47 @@ int main(int argc, char** argv) {
                             }
                         }
                         mach.ohci0()->set_xid_gamepad_state(down_a_script.state());
+                    } else if (test_input_script) {
+                        // Generalized delivery/capture plumbing: identical endpoint-2-
+                        // count-keyed model as the two branches above, but driven by
+                        // parsed script events instead of hardcoded phases.
+                        const uint64_t endpoint2_reports =
+                            mach.ohci0()->xid_endpoint2_input_reports();
+                        std::string capture_name;
+                        if (generic_script.will_capture(endpoint2_reports, capture_name) &&
+                            !capture_test_input_frame(capture_name.c_str())) {
+                            std::printf(
+                                "[input] TEST-ONLY NOT-DELIVERED %s-capture-failed "
+                                "insns=%llu endpoint2=%llu aggregate=%llu\n",
+                                capture_name.c_str(),
+                                static_cast<unsigned long long>(mach.total_insns()),
+                                static_cast<unsigned long long>(endpoint2_reports),
+                                static_cast<unsigned long long>(
+                                    mach.ohci0()->xid_input_reports()));
+                        }
+                        const auto transition = generic_script.update(endpoint2_reports);
+                        if (transition.advanced) {
+                            std::printf(
+                                "[input] TEST-ONLY script event %zu insns=%llu "
+                                "endpoint2=%llu aggregate=%llu buttons=%04x analog0=%02x\n",
+                                generic_script.index(),
+                                static_cast<unsigned long long>(mach.total_insns()),
+                                static_cast<unsigned long long>(endpoint2_reports),
+                                static_cast<unsigned long long>(
+                                    mach.ohci0()->xid_input_reports()),
+                                generic_script.state().buttons,
+                                generic_script.state().analog[0]);
+                        }
+                        if (transition.completed) {
+                            std::printf(
+                                "[input] TEST-ONLY generic script COMPLETE insns=%llu "
+                                "endpoint2=%llu aggregate=%llu\n",
+                                static_cast<unsigned long long>(mach.total_insns()),
+                                static_cast<unsigned long long>(endpoint2_reports),
+                                static_cast<unsigned long long>(
+                                    mach.ohci0()->xid_input_reports()));
+                        }
+                        mach.ohci0()->set_xid_gamepad_state(generic_script.state());
                     }
                     if (interactive) {
                         host_input.poll();
@@ -987,12 +1085,17 @@ int main(int argc, char** argv) {
             r.eflags = 0x2;
             mach.cpu().set_regs(r);
             mach.cpu().setup_flat_segments(0x1000);  // MCPX handoff GDT (code=0x08, data=0x10)
+            xlle::perf::g_enabled = perf_accounting;
             std::printf("[2bl] entering decrypted 2BL at 0x901ee (budget %llu insns) ...\n",
                         (unsigned long long)max_insns);
             std::string err2;
             uint64_t n = mach.run(0x901ee, max_insns, err2);
             // The run may cross its final series deadline after the last 1 kHz host poll.
             capture_frame_series();
+            {
+                const std::string perf_report = xlle::perf::format_report();
+                if (!perf_report.empty()) std::printf("%s\n", perf_report.c_str());
+            }
             host_input.close();
             if (test_synthetic_controller_hub_input_down) {
                 const bool complete =
@@ -1015,6 +1118,20 @@ int main(int argc, char** argv) {
                     "endpoint2=%llu aggregate=%llu configured=%u\n",
                     complete ? "COMPLETE" : "NOT-DELIVERED",
                     XidDownThenAReportScript::phase_name(down_a_script.phase()),
+                    static_cast<unsigned long long>(mach.total_insns()),
+                    static_cast<unsigned long long>(
+                        mach.ohci0()->xid_endpoint2_input_reports()),
+                    static_cast<unsigned long long>(mach.ohci0()->xid_input_reports()),
+                    mach.ohci0()->xid_configuration());
+            } else if (test_input_script) {
+                const bool complete =
+                    generic_script.phase() == GenericInputScript::Phase::kComplete;
+                std::printf(
+                    "[input] TEST-ONLY %s generic script final-phase=%s event=%zu insns=%llu "
+                    "endpoint2=%llu aggregate=%llu configured=%u\n",
+                    complete ? "COMPLETE" : "NOT-DELIVERED",
+                    GenericInputScript::phase_name(generic_script.phase()),
+                    generic_script.index(),
                     static_cast<unsigned long long>(mach.total_insns()),
                     static_cast<unsigned long long>(
                         mach.ohci0()->xid_endpoint2_input_reports()),

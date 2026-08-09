@@ -1,0 +1,46 @@
+# down-a.txt -- GenericInputScript reproduction of XidDownThenAReportScript's
+# own pinned delivery schedule (src/host/xid_script.hpp). This is not a new
+# navigation experiment: it exists to PROVE the general script mechanism
+# reproduces the pinned C++ class's exact endpoint-2-count-keyed behavior
+# (tests/test_xid_generic_script.cpp drives both side by side and asserts
+# identical state() at every endpoint-2 report count). The constants below
+# are exactly XidDownThenAReportScript::kMenuReadyEndpoint2Reports (320),
+# kDownDeliveredReports (5), kNeutralAfterDownReports (5),
+# kPreAEndpoint2Reports (408), kADeliveredReports (5),
+# kNeutralAfterAReports (5), kPostACaptureSettlingReports (78), and
+# kFinalNeutralReports (78) -- not a guess, read directly from that class.
+#
+# count  buttons  a0 a1 a2 a3 a4 a5 a6 a7  lx ly rx ry     [capture name]
+
+# Neutral until the menu is ready at report 320; "pre-down" captures the
+# neutral state immediately before Down engages (will_press_down() pre-check
+# in XidDownThenAReportScript's own host loop).
+320    0002     0  0  0  0  0  0  0  0     0  0  0  0     capture pre-down
+
+# Down held for kDownDeliveredReports=5 reports (320..324), then released.
++5     0000     0  0  0  0  0  0  0  0     0  0  0  0
+
+# Neutral held for kNeutralAfterDownReports=5 reports (325..329), then a
+# "selected" capture at 330 (state already neutral, unchanged).
++5     0000     0  0  0  0  0  0  0  0     0  0  0  0     capture selected
+
+# Wait (still neutral) until the absolute pre-A threshold of report 408;
+# "pre-a-stable" captures the still-neutral state right before A engages.
+# A is analog[0]=0xff (not a button bit), matching XidDownThenAReportScript's
+# own state(): buttons stays 0, analog[0] carries the A pressure byte.
+408    0000     0xff 0 0 0 0 0 0 0          0  0  0  0     capture pre-a-stable
+
+# A held for kADeliveredReports=5 reports (408..412), then released.
++5     0000     0  0  0  0  0  0  0  0     0  0  0  0
+
+# Neutral held for kNeutralAfterAReports=5 reports (413..417), then "post-a"
+# capture at 418 (state already neutral, unchanged).
++5     0000     0  0  0  0  0  0  0  0     0  0  0  0     capture post-a
+
+# Neutral held for kPostACaptureSettlingReports=78 reports (418..495), then
+# "settled" capture at 496 (state already neutral, unchanged).
++78    0000     0  0  0  0  0  0  0  0     0  0  0  0     capture settled
+
+# Neutral held for kFinalNeutralReports=78 more reports (496..573); the
+# script completes once report 574 is reached.
++78    0000     0  0  0  0  0  0  0  0     0  0  0  0

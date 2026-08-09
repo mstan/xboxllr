@@ -1,0 +1,28 @@
+# clock-explore.txt -- exploratory script for the stock dashboard's
+# CLOCK-SETTING screen (the "highlighted hour spinner" reached by the 20B
+# stockdash run). NOT calibrated against a real run -- every count below is a
+# GUESS and must be replaced once an actual --test-input-script run against
+# the 20B-instruction stockdash boot reports real endpoint-2 counts for this
+# screen. Do not treat these numbers as evidence of anything.
+#
+# Guess rationale: the coordinator's own report placed the late-stable
+# region of the 20B run at endpoint-2 count ~1200; XidDownThenAReportScript's
+# own pinned A-press phase (kADeliveredReports/kNeutralAfterAReports = 5
+# reports each) is reused verbatim as the hold/settle durations below, since
+# those ARE proven-good delivery widths on this same guest input path -- only
+# the absolute "when do we act" threshold (1200) is a guess.
+#
+# count  buttons  a0 a1 a2 a3 a4 a5 a6 a7  lx ly rx ry     [capture name]
+
+# GUESS: wait until endpoint-2 report ~1200 (the 20B run's late-stable
+# region) before touching the hour spinner. "pre-a" captures the untouched
+# screen using the state active immediately BEFORE this line (neutral,
+# since this is the very first event) -- the same line then presses A
+# (analog[0]=0xff) starting at this same count, exactly the same "capture
+# tied to a transition line" pattern down-a.txt uses for its own
+# "pre-a-stable" (see that file's comments for why one line can do both).
+1200   0000     0xff 0 0 0 0 0 0 0          0  0  0  0     capture pre-a
+
+# Release, same kNeutralAfterAReports=5 width, then capture the result.
++5     0000     0  0  0  0  0  0  0  0     0  0  0  0
++5     0000     0  0  0  0  0  0  0  0     0  0  0  0     capture post-a

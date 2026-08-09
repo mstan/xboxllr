@@ -11,6 +11,7 @@
 #include "machine/aci.hpp"
 #include "machine/apu.hpp"
 #include "machine/open_bus.hpp"
+#include "machine/perf_accounting.hpp"
 #include "machine/port61.hpp"
 #include "machine/rtc.hpp"
 
@@ -326,49 +327,58 @@ uint64_t XboxMachine::run(uint32_t start, uint64_t max, std::string& err) {
     uint32_t eip = start;
     uint64_t done = 0;
     while (done < max) {
-        const uint64_t guest_millisecond = total_insns_ * 1000 / kCpuHz;
-        if (host_poll_cb_ && guest_millisecond != host_poll_millisecond_) {
-            host_poll_millisecond_ = guest_millisecond;
-            host_poll_cb_();
+        {
+            perf::ScopedAdd perf_t(perf::g_ns_host_poll_devices, perf::g_calls_host_poll_devices);
+            const uint64_t guest_millisecond = total_insns_ * 1000 / kCpuHz;
+            if (host_poll_cb_ && guest_millisecond != host_poll_millisecond_) {
+                host_poll_millisecond_ = guest_millisecond;
+                host_poll_cb_();
+            }
+            // Arm the floor to stop as soon as IF opens if an IRQ is already waiting (so we hit
+            // the guest's brief sti window). Otherwise the chunk runs to completion.
+            if (pic_ && pic_->intr_pending()) pending_boundaries_++;
+            cpu_->set_irq_pending(pic_ && pic_->intr_pending());
         }
         uint64_t chunk = std::min(kChunk, max - done);
-        // Arm the floor to stop as soon as IF opens if an IRQ is already waiting (so we hit the
-        // guest's brief sti window). Otherwise the chunk runs to completion.
-        if (pic_ && pic_->intr_pending()) pending_boundaries_++;
-        cpu_->set_irq_pending(pic_ && pic_->intr_pending());
         std::string cerr;
         uint64_t n = cpu_->run(eip, chunk, cerr);
         done += n;
         total_insns_ += n;
 
-        if (pit_) pit_->set_time(total_insns_ * Pit8254::kPitFreq / kCpuHz);
-        // Frame clock: ~60 Hz VBLANK derived from the same retired-instruction time base,
-        // plus the sub-frame phase for the VGA retrace status bit.
-        if (nv2a_) {
-            uint64_t t60 = total_insns_ * 60;
-            nv2a_->set_frame(t60 / kCpuHz);
-            nv2a_->set_frame_phase(static_cast<uint32_t>((t60 % kCpuHz) * 1000 / kCpuHz));
+        {
+            perf::ScopedAdd perf_t(perf::g_ns_host_poll_devices, perf::g_calls_host_poll_devices);
+            if (pit_) pit_->set_time(total_insns_ * Pit8254::kPitFreq / kCpuHz);
+            // Frame clock: ~60 Hz VBLANK derived from the same retired-instruction time base,
+            // plus the sub-frame phase for the VGA retrace status bit.
+            if (nv2a_) {
+                uint64_t t60 = total_insns_ * 60;
+                nv2a_->set_frame(t60 / kCpuHz);
+                nv2a_->set_frame_phase(static_cast<uint32_t>((t60 % kCpuHz) * 1000 / kCpuHz));
+            }
+            // APU setup-engine frame: 256 samples / 48 kHz = 5.333 ms (187.5 Hz).
+            if (apu_) apu_->set_frame(total_insns_ * 375 / (kCpuHz * 2));
+            // AC'97 PCM output consumes the same 256-sample frames, without host audio output.
+            if (aci_) aci_->set_frame(total_insns_ * 375 / (kCpuHz * 2));
+            // USB OHCI start-of-frame cadence is 1 kHz.
+            if (ohci0_) ohci0_->set_frame(total_insns_ * 1000 / kCpuHz);
+            if (ohci1_) ohci1_->set_frame(total_insns_ * 1000 / kCpuHz);
         }
-        // APU setup-engine frame: 256 samples / 48 kHz = 5.333 ms (187.5 Hz).
-        if (apu_) apu_->set_frame(total_insns_ * 375 / (kCpuHz * 2));
-        // AC'97 PCM output consumes the same 256-sample frames, without host audio output.
-        if (aci_) aci_->set_frame(total_insns_ * 375 / (kCpuHz * 2));
-        // USB OHCI start-of-frame cadence is 1 kHz.
-        if (ohci0_) ohci0_->set_frame(total_insns_ * 1000 / kCpuHz);
-        if (ohci1_) ohci1_->set_frame(total_insns_ * 1000 / kCpuHz);
         if (!cerr.empty()) { err = cerr; break; }  // device fault-stop wins
 
         // Deliver one pending, unmasked external interrupt at this boundary. Confirm the guest
         // can take it (inject succeeds) BEFORE committing the PIC's ISR/ack bookkeeping — an
         // ack without delivery would wedge the line in-service.
-        if (pic_ && pic_->intr_pending() && cpu_->interrupts_enabled()) {
-            int vec = pic_->peek();
-            if (vec >= 0) {
-                std::string ierr;
-                if (cpu_->inject_interrupt(static_cast<uint8_t>(vec), ierr)) {
-                    pic_->acknowledge();
-                    injected_++;
-                } else if (!ierr.empty()) { err = ierr; break; }
+        {
+            perf::ScopedAdd perf_t(perf::g_ns_host_poll_devices, perf::g_calls_host_poll_devices);
+            if (pic_ && pic_->intr_pending() && cpu_->interrupts_enabled()) {
+                int vec = pic_->peek();
+                if (vec >= 0) {
+                    std::string ierr;
+                    if (cpu_->inject_interrupt(static_cast<uint8_t>(vec), ierr)) {
+                        pic_->acknowledge();
+                        injected_++;
+                    } else if (!ierr.empty()) { err = ierr; break; }
+                }
             }
         }
         eip = cpu_->get_regs().eip;

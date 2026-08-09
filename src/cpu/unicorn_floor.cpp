@@ -11,6 +11,8 @@
 #include <cstdio>
 #include <cstring>
 
+#include "machine/perf_accounting.hpp"
+
 namespace xlle {
 
 static uint64_t to_hook(void* p) { return reinterpret_cast<uint64_t>(p); }
@@ -280,7 +282,11 @@ uint64_t UnicornFloor::run(uint32_t start_eip, uint64_t max_insns, std::string& 
     stop_reason_.clear();
     last_fault_addr_ = 0;
     last_fault_type_ = 0;
-    uc_err e = uc_emu_start(uc, start_eip, 0, /*timeout=*/0, /*count=*/max_insns);
+    uc_err e;
+    {
+        perf::ScopedAdd t(perf::g_ns_cpu, perf::g_calls_cpu);
+        e = uc_emu_start(uc, start_eip, 0, /*timeout=*/0, /*count=*/max_insns);
+    }
     if (!stop_reason_.empty()) {
         // A device/servicing callback requested a loud stop; its reason wins over Unicorn's
         // generic "stopped" code.
