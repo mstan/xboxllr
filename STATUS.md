@@ -3,6 +3,27 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-09 — A4: synthetic Down pulse drives a stable dashboard selection transition
+
+Commits `f2d9d7e` and `6712f74` add the opt-in synthetic hub replay and deterministic input
+proof. The no-input synthetic 11.5B control run enumerates hub address/configuration `1/1`
+and child XID `2/1`, then records 408 endpoint-2 IN reports (409 historical aggregate reports).
+Its baseline PPM SHA-256 is
+`D936A993E5441E8D424E3406AE844BE2FA41A179C5F50C239B444009C6382C33`.
+
+The explicitly test-only Down run captures pre-input at instruction `10981668393` / endpoint-2
+count 320, presses then releases at `11011004028` / count 325, and completes the five-Down plus
+five-neutral report sequence at `11040335577` / count 330. Its post-input and final PPM SHA-256
+is `DBCFAD3AE1A8BF40A87C9E8C086E81ED1E9A9C7CA062D5A7B3747FEFE1F0B0F4`; final scanout FNV64 is
+`4c34c2704eb61e54`. Visual inspection shows the highlight move from **My Programs** to **My
+Files** and that it remains stable through the final frame. Broader panel/controller redraw
+means this is not a pixel-perfect frame comparison.
+
+This establishes a guest-visible transition consistent with one D-pad step through the synthetic
+test topology only.
+It is not real Controller-S hub evidence: `beads-xbox.1.5.8.1` remains open for exact hardware
+descriptors and enumeration. No submenu or A-button activation proof exists yet.
+
 ## 2026-08-09 — A4: parameterized synthetic Controller-S hub mechanics are unit-proven
 
 OHCI now has an explicitly **test-only** synthetic three-port embedded-hub profile: its

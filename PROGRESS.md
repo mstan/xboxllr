@@ -65,6 +65,16 @@ harvested from xemu, silicon-corrected against a live console. GPL-2.
   Release `test_ohci`, `test_ohci_synthetic_hub`, `test_xid_input`, and `xlle` fixture checks
   passed. This neither proves retail topology nor navigation: exact hardware descriptors and
   enumeration evidence remain blocked on `beads-xbox.1.5.8.1`.
+- **Synthetic navigation proof:** commits `f2d9d7e` + `6712f74` carry a no-input 11.5B control
+  (hub `1/1`, child XID `2/1`, 408 endpoint-2 / 409 aggregate reports; baseline PPM SHA-256
+  `D936A993E5441E8D424E3406AE844BE2FA41A179C5F50C239B444009C6382C33`) and an explicitly
+  test-only Down input run. It presses at `10981668393` / endpoint-2 320, releases at
+  `11011004028` / 325, and completes at `11040335577` / 330. The post/final PPM SHA-256 is
+  `DBCFAD3AE1A8BF40A87C9E8C086E81ED1E9A9C7CA062D5A7B3747FEFE1F0B0F4`; final scanout FNV64 is
+  `4c34c2704eb61e54`. The highlight moves **My Programs** -> **My Files** and remains stable to
+  final, but broad panel/controller redraw makes the frames non-pixel-perfect. This demonstrates
+  one visible synthetic D-pad selection transition only: real embedded-hub evidence is still blocked on
+  `beads-xbox.1.5.8.1`, and submenu/A activation remains unproven.
 - **Immediate burn-down path:** continue the passive exact visual census, validate the
   dashboard frame against a real-Xbox reference, and in parallel observe real XID endpoint
   polling behind the Controller S embedded hub before proving basic D-pad/A/B menu navigation.
