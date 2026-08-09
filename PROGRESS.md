@@ -45,10 +45,12 @@ harvested from xemu, silicon-corrected against a live console. GPL-2.
   keyboard-to-XID bridge are also landed. A frame series now reaches a recognizable Xbox X logo
   at 4.5B, but 4.75–6.0B is black and the 6.4B endpoint is near-black; the guest has not
   scheduled endpoint-2 polls. An opt-in disconnected-link replay completes the retail PHY
-  timeout path and launches `evoxdash`; its alternating late buffers remain near-black.
-- **Immediate burn-down path:** execute the now-captured immediate-mode dashboard quad,
-  model only its witnessed raster state, turn the recognizable boot output into a visible
-  dashboard frame, observe real XID endpoint polling, and prove basic D-pad/A/B menu navigation.
+  timeout path and launches `evoxdash`. Its dominant witnessed immediate-mode A4R4G4B4 quad
+  family now renders the real main-menu labels into the alternating 720x480 buffers through
+  the retail PFIFO/PGRAPH/unified-RAM/PCRTC path.
+- **Immediate burn-down path:** execute the remaining witnessed mode-8 visual families,
+  validate the dashboard frame against a real-Xbox reference, observe real XID endpoint
+  polling, and prove basic D-pad/A/B menu navigation.
 - **Not started:** A5 end-to-end retail-dashboard navigation and Arc 2 game work.
 
 ## Where the boot stands RIGHT NOW
@@ -325,6 +327,19 @@ dependency chain peeled this session is:
     A guarded 11.5B replay is fault-free and produces a byte-identical endpoint PPM; all
     established raster counters/hashes remain unchanged. Post-VSH/texture evidence for the
     new 27 recorder states is the next boundary; the menu and navigation are still not visible.
+39. first recognizable dashboard menu frame → **rendered through the retail LLE path**.
+    One exact output-state profile executes the witnessed immediate mode-8 A4R4G4B4 text
+    family: programmable VSH output feeds independent quads split as `(1,2,0)` and `(2,3,0)`,
+    a swizzled 256x256 atlas is bilinearly sampled, and the captured combiner, alpha test, and
+    source-alpha blend write the alternating `0x03df4000`/`0x03c8c000` targets. An 11.5B
+    disconnected-link replay executes 875 batches / 15,500 triangles / 1,731,000 fragments
+    and samples / 558,625 alpha passes and color writes with zero profile rejects. The final
+    720x480 scanout has RGBA FNV64 `a77da2bfc5887ee8` and PPM SHA-256
+    `4198470101D5DCD66867C392A4B85DDF26C99C0C930E3CB1DCAE3B6E438BE535`; visual inspection
+    shows My Programs, My Files, My Pictures, My Music, My Videos, Weather, and Settings.
+    This proves first menu visibility without HLE rendering or host framebuffer substitution,
+    not complete graphics or interaction: other mode-8 families remain recorder-only and no
+    endpoint-2 XID poll/menu-state transition has been observed.
 
 ## How to build & run
 
@@ -440,10 +455,10 @@ Driver: `python tools/xbox_agent.py --host 192.168.4.81 {ping|info|read|exec <fi
 
 ## Next steps (priority order)
 
-1. Use the passive mode-8 evidence census to characterize post-VSH positions/UVs, quad
-   grouping, texture/palette data, and the two observed menu-state families. Then implement
-   only one exact witnessed raster profile. Do not treat the alternating black
-   `0x03df4000`/`0x03c8c000` buffers as menu visibility.
+1. Continue the passive mode-8 evidence census and admit only the remaining exact witnessed
+   visual families needed for dashboard fidelity. Preserve the bounded selector that produced
+   the first recognizable menu frame, and compare output with a real-Xbox reference rather
+   than generalizing from xemu's host renderer.
 2. The live keyboard-to-XID mapping and OHCI protocol are landed. Confirm the configuration
    read's intermediate OHCI condition code and compare the short-packet sequence with a
    real console or xemu before changing semantics; then prove a real endpoint-2 report

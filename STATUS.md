@@ -3,6 +3,30 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-08 — A4: exact immediate-mode dashboard text reaches retail scanout
+
+The first recognizable dashboard frame now renders through the retail LLE path. A deliberately
+bounded mode-8 profile admits only the witnessed `evoxdash` A4R4G4B4 text family: immediate
+vertices traverse the existing programmable VSH, independent four-vertex quads split as
+`1,2,0` and `2,3,0`, texture 0 is bilinearly sampled from its swizzled 256x256 16-bit atlas,
+and the retained `T0 * V0`, final-combiner, alpha-test, and source-alpha blend state writes the
+alternating pitch A8R8G8B8 targets. Other mode-8 families remain recorder-only.
+
+The fault-free disconnected-link retail replay reaches the 11.5B instruction budget and
+executes all 875 selected candidates with zero admission rejections: 15,500 triangles,
+1,731,000 fragments/samples, and 558,625 alpha passes/color writes. Recorder-only work drops
+by exactly 875 batches. The final 720x480 scanout at `0x03c8c000` has RGBA FNV64
+`a77da2bfc5887ee8`; the PPM SHA-256 is
+`4198470101D5DCD66867C392A4B85DDF26C99C0C930E3CB1DCAE3B6E438BE535`. Visual inspection
+shows the real `evoxdash` main-menu labels: My Programs, My Files, My Pictures, My Music,
+My Videos, Weather, and Settings. No HLE renderer or host framebuffer substitution is used.
+
+This closes first menu visibility, not A4 rendering or interaction. The frame is intentionally
+sparse because the I8/palette and other A4R4G4B4 mode-8 families remain unexecuted. The retail
+run still records no endpoint-2 XID IN poll or guest-owned menu-state transition. Next: admit
+remaining visual families from captured state as needed, diagnose the configuration/endpoint
+scheduling boundary, and prove a real D-pad/A/B report changes the visible menu.
+
 ## 2026-08-08 — A4: recognizable boot logo, bounded cube continuation, and a later visual frontier
 
 The normal-RAM Unicorn memory hook is now lazy: the normal retail replay does not install the

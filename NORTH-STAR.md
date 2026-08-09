@@ -22,21 +22,21 @@ proven against real hardware, with a game (Blinx) as the second arc.
 
 **Arc 1 / A4 — running dashboard with visible output and input.** The real firmware and
 kernel boot, FATX loads `xbmc.exe`, the boot animation completes through guest-driven NV2A
-flip/vblank interrupts, and dashboard user code now executes. The first faithful
-software-rendered boot frame is proven: PFIFO/PGRAPH writes the early green orb into unified
-RAM and the retail flip queue carries it through PCRTC to SDL3. A live host-to-XID mapping
-now exists, but the observed dashboard run has not yet scheduled an endpoint poll. Finish
-the remaining output-affecting raster/device paths, reach a recognizable dashboard frame,
-and prove real menu input without replacing guest kernel or application logic.
+flip/vblank interrupts, and dashboard user code now executes. The first recognizable
+`evoxdash` main-menu frame is proven: PFIFO/PGRAPH renders its text atlas into unified RAM and
+the retail flip queue carries it through PCRTC to the captured 720x480 scanout. A live
+host-to-XID mapping exists, but the observed dashboard run has not yet scheduled an endpoint
+poll. Finish the remaining output-affecting raster/device paths and prove real menu input
+without replacing guest kernel or application logic.
 
 ## The ONE next milestone
 
-**Show a recognizable dashboard frame and navigate its most basic menu through the same
-LLE path.** Execute the remaining output-affecting NV2A states, preserve the proven
+**Navigate the visible dashboard's most basic menu through the same LLE path.** Execute the
+remaining output-affecting NV2A states needed for readable UI, preserve the proven
 retail-kernel → PFIFO/PGRAPH → unified RAM → PCRTC chain, and make the guest schedule and
-consume real XID endpoint reports. Completion means a recognizable menu is visible and an
-observed D-pad/A/B action changes guest-owned menu state, with no HLE renderer, synthetic
-USB poll, or host framebuffer substitution.
+consume real XID endpoint reports. Completion means an observed D-pad/A/B action changes
+guest-owned menu state, with no HLE renderer, synthetic USB poll, or host framebuffer
+substitution.
 
 ## Not-yet (explicitly deferred, do not drift into these)
 

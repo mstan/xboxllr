@@ -1401,8 +1401,440 @@ bool Nv2a::submit_vertex_batch() {
     return true;
 }
 
+bool Nv2a::rasterize_witnessed_immediate_quad(bool& executed) {
+    executed = false;
+
+    // The offline dashboard replay exposes two alternating instances of this exact
+    // state. They differ only in the color offset. Keep mode 8 recorder-only for every
+    // other state until its own texture/combiner behavior has been witnessed.
+    const bool immediate_source =
+        !immediate_vertices_.empty() &&
+        immediate_vertices_.size() == transformed_batch_.size();
+    const size_t vertex_count = transformed_batch_.size();
+    const uint32_t color_offset = surface_color_offset_;
+    const bool witnessed_target =
+        color_offset == 0x03DF4000 || color_offset == 0x03C8C000;
+    const bool source_shape =
+        immediate_source && vertex_count >= 28 && vertex_count <= 44 &&
+        (vertex_count & 3u) == 0;
+    // Program/constants hashes are retained as provenance evidence, not as
+    // raster semantics: once the VSH has produced oPos/oD0/oT0, the same
+    // guest-visible pixel state must process those varyings identically.
+    const bool transform_state =
+        transform_execution_mode_ == 2 && transform_program_start_ == 0;
+    const bool surface_state =
+        surface_format_ == 0x00000128 &&
+        surface_pitch_ == 0x00400C00 && witnessed_target &&
+        surface_zeta_offset_ == 0 &&
+        surface_clip_horizontal_ == 0x00B4010E &&
+        surface_clip_vertical_ == 0x00D7009E &&
+        raster_state_[kRasterWindowClipHorizontal] == 0x02D00000 &&
+        raster_state_[kRasterWindowClipVertical] == 0x01E00000;
+    uint32_t raster_reject_mask = 0;
+    auto reject_raster = [&](size_t bit, bool matches) {
+        if (!matches) raster_reject_mask |= 1u << bit;
+    };
+    reject_raster(0, raster_state_[kRasterEnables] == 0x00000007);
+    reject_raster(1, raster_state_[kRasterControl0] == 0x00100001);
+    reject_raster(2, raster_state_[kRasterAlphaFunc] == 0x0206);
+    // NV097_SET_ALPHA_REF is an 8-bit comparison value. Preserve the raw
+    // retained word in telemetry, but only its guest-visible low byte gates.
+    reject_raster(3, (raster_state_[kRasterAlphaRef] & 0xFFu) == 8);
+    reject_raster(4, raster_state_[kRasterBlendSrc] == 0x0302);
+    reject_raster(5, raster_state_[kRasterBlendDst] == 0x0303);
+    reject_raster(6, raster_state_[kRasterBlendEquation] == 0x8006);
+    reject_raster(7, raster_state_[kRasterDepthFunc] == 0x0203);
+    reject_raster(8, raster_state_[kRasterColorMask] == 0x01010101);
+    reject_raster(9, raster_state_[kRasterDepthMask] == 1);
+    reject_raster(10, raster_state_[kRasterShadeMode] == 0x1D01);
+    reject_raster(11,
+                  raster_state_[kRasterPolygonOffsetScale] == 0x80000000);
+    reject_raster(12,
+                  raster_state_[kRasterPolygonOffsetBias] == 0x80000000);
+    reject_raster(13, raster_state_[kRasterFrontPolygonMode] == 0x1B02);
+    reject_raster(14, raster_state_[kRasterBackPolygonMode] == 0x1B02);
+    reject_raster(15, raster_state_[kRasterClipMin] == 0);
+    reject_raster(16, raster_state_[kRasterClipMax] == 0);
+    reject_raster(17, raster_state_[kRasterCullFace] == 0x0405);
+    reject_raster(18, raster_state_[kRasterFrontFace] == 0x0900);
+    reject_raster(19, raster_state_[kRasterZMinMaxControl] == 1);
+    reject_raster(20, raster_state_[kRasterShadowDepthFunc] == 0);
+    const bool raster_state = raster_reject_mask == 0;
+    const bool stencil_state =
+        raster_state_[kRasterStencilFunc] == 0x0207 &&
+        raster_state_[kRasterStencilRef] == 0 &&
+        raster_state_[kRasterStencilFuncMask] == 0xFFFFFFFF &&
+        raster_state_[kRasterStencilOpFail] == 0x1E00 &&
+        raster_state_[kRasterStencilOpZFail] == 0x1E00 &&
+        raster_state_[kRasterStencilOpZPass] == 0x1E00;
+    const bool combiner_state =
+        raster_state_[kRasterTextureEnableMask] == 1 &&
+        raster_state_[kRasterShaderStageProgram] == 1 &&
+        raster_state_[kRasterShaderOtherStageInput] == 0 &&
+        raster_state_[kRasterCombinerControl] == 1 &&
+        raster_state_[kRasterCombinerAlphaIcw0] == 0x18140000 &&
+        raster_state_[kRasterCombinerColorIcw0] == 0x08040000 &&
+        raster_state_[kRasterCombinerAlphaOcw0] == 0x000000C0 &&
+        raster_state_[kRasterCombinerColorOcw0] == 0x000000C0 &&
+        raster_state_[kRasterCombinerFactor0_0] == 0 &&
+        raster_state_[kRasterCombinerFactor1_0] == 0 &&
+        raster_state_[kRasterCombinerSpecularFog0] == 0x010C0002 &&
+        raster_state_[kRasterCombinerSpecularFog1] == 0x00001C00 &&
+        raster_state_[kRasterCombinerFinalFactor0] == 0x00DADADA &&
+        raster_state_[kRasterCombinerFinalFactor1] == 0x00101010;
+    const bool texture_state =
+        raster_state_[kRasterTextureOffset0] == 0x03C0C000 &&
+        raster_state_[kRasterTextureFormat0] == 0x08810429 &&
+        raster_state_[kRasterTextureAddress0] == 0x00010303 &&
+        raster_state_[kRasterTextureFilter0] == 0x02022000 &&
+        raster_state_[kRasterTextureControl0_0] == 0x4003FFC0 &&
+        raster_state_[kRasterTextureControl1_0] == 0x01C00000 &&
+        raster_state_[kRasterTextureImageRect0] == 0x00640011 &&
+        raster_state_[kRasterTexturePalette0] == 0x02DED080 &&
+        raster_state_[kRasterTextureBorderColor0] == 0;
+    const bool rs12_candidate =
+        witnessed_target && vertex_count >= 28 && vertex_count <= 44 &&
+        raster_state_[kRasterAlphaFunc] == 0x0206 &&
+        (raster_state_[kRasterAlphaRef] & 0xFFu) == 8 &&
+        raster_state_[kRasterTextureFormat0] == 0x08810429;
+    uint32_t reject_mask = 0;
+    if (!source_shape) reject_mask |= 1u << 0;
+    if (!transform_state) reject_mask |= 1u << 1;
+    if (!surface_state) reject_mask |= 1u << 2;
+    if (!raster_state) reject_mask |= 1u << 3;
+    if (!stencil_state) reject_mask |= 1u << 4;
+    if (!combiner_state) reject_mask |= 1u << 5;
+    if (!texture_state) reject_mask |= 1u << 6;
+    if (rs12_candidate) {
+        ++immediate_quad_rs12_candidates_;
+        last_immediate_quad_rs12_reject_mask_ = reject_mask;
+        last_immediate_quad_rs12_raster_reject_mask_ = raster_reject_mask;
+    }
+    if (reject_mask) return true;
+
+    if (!color_dma_bound_ || !texture_dma_a_bound_) {
+        fault_("NV2A immediate-quad RS1/RS2 DMA objects are not witnessed");
+        return false;
+    }
+
+    constexpr uint32_t kSurfacePitch = 0x0C00;
+    constexpr uint32_t kSurfaceHeight = 480;
+    constexpr uint32_t kTextureWidth = 256;
+    constexpr uint32_t kTextureHeight = 256;
+    constexpr uint64_t kColorBytes =
+        static_cast<uint64_t>(kSurfacePitch) * kSurfaceHeight;
+    constexpr uint64_t kTextureBytes =
+        static_cast<uint64_t>(kTextureWidth) * kTextureHeight * sizeof(uint16_t);
+
+    auto resolve_range = [&](uint32_t dma, uint32_t offset, uint64_t bytes,
+                             uint32_t& address, const char* name) {
+        if (!bytes || static_cast<uint64_t>(offset) + bytes - 1 > UINT32_MAX) {
+            char why[128];
+            std::snprintf(why, sizeof(why),
+                          "NV2A immediate-quad %s range overflows", name);
+            fault_(why);
+            return false;
+        }
+        const uint32_t last_offset =
+            offset + static_cast<uint32_t>(bytes - 1);
+        uint32_t last_address = 0;
+        if (!dma_object_address(dma, offset, address) ||
+            !dma_object_address(dma, last_offset, last_address) ||
+            last_address < address ||
+            static_cast<uint64_t>(last_address) - address + 1 != bytes) {
+            char why[128];
+            std::snprintf(why, sizeof(why),
+                          "NV2A immediate-quad %s DMA range is invalid", name);
+            fault_(why);
+            return false;
+        }
+        return true;
+    };
+
+    uint32_t color_address = 0;
+    uint32_t texture_address = 0;
+    if (!resolve_range(color_dma_, color_offset, kColorBytes,
+                       color_address, "color") ||
+        !resolve_range(texture_dma_a_,
+                       raster_state_[kRasterTextureOffset0], kTextureBytes,
+                       texture_address, "A4R4G4B4 texture")) {
+        return false;
+    }
+
+    PagedRasterSurface color_surface(
+        color_address, static_cast<size_t>(kColorBytes), mem_read_, mem_write_);
+    PagedRasterSurface texture_surface(
+        texture_address, static_cast<size_t>(kTextureBytes), mem_read_, mem_write_);
+    SwizzleLookup texture_swizzle(kTextureWidth, kTextureHeight);
+
+    const uint32_t clip_x = surface_clip_horizontal_ & 0xFFFFu;
+    const uint32_t clip_width = surface_clip_horizontal_ >> 16;
+    const uint32_t clip_y = surface_clip_vertical_ & 0xFFFFu;
+    const uint32_t clip_height = surface_clip_vertical_ >> 16;
+    const uint32_t xmin = clip_x;
+    const uint32_t xmax = clip_x + clip_width - 1;
+    const uint32_t ymin = clip_y;
+    const uint32_t ymax = clip_y + clip_height - 1;
+
+    auto sample_a4r4g4b4 =
+        [&](float u, float v, std::array<float, 4>& color) {
+            if (!std::isfinite(u) || !std::isfinite(v)) return false;
+            u = std::clamp(u, 0.0f, 1.0f);
+            v = std::clamp(v, 0.0f, 1.0f);
+            const float texel_x = u * kTextureWidth - 0.5f;
+            const float texel_y = v * kTextureHeight - 0.5f;
+            const int32_t x0 = static_cast<int32_t>(std::floor(texel_x));
+            const int32_t y0 = static_cast<int32_t>(std::floor(texel_y));
+            const float fx = texel_x - static_cast<float>(x0);
+            const float fy = texel_y - static_cast<float>(y0);
+            auto texel = [&](int32_t x, int32_t y,
+                             std::array<float, 4>& unpacked) {
+                const uint32_t sx = static_cast<uint32_t>(std::clamp(
+                    x, 0, static_cast<int32_t>(kTextureWidth) - 1));
+                const uint32_t sy = static_cast<uint32_t>(std::clamp(
+                    y, 0, static_cast<int32_t>(kTextureHeight) - 1));
+                const size_t offset =
+                    static_cast<size_t>(texture_swizzle.index(sx, sy)) *
+                    sizeof(uint16_t);
+                uint16_t pixel = 0;
+                if (!texture_surface.read16(offset, pixel)) return false;
+                unpacked = {{
+                    static_cast<float>((pixel >> 8) & 0xFu) / 15.0f,
+                    static_cast<float>((pixel >> 4) & 0xFu) / 15.0f,
+                    static_cast<float>(pixel & 0xFu) / 15.0f,
+                    static_cast<float>((pixel >> 12) & 0xFu) / 15.0f,
+                }};
+                return true;
+            };
+            std::array<float, 4> c00{}, c10{}, c01{}, c11{};
+            if (!texel(x0, y0, c00) || !texel(x0 + 1, y0, c10) ||
+                !texel(x0, y0 + 1, c01) ||
+                !texel(x0 + 1, y0 + 1, c11)) {
+                return false;
+            }
+            for (size_t component = 0; component < color.size(); ++component) {
+                const float top =
+                    c00[component] + (c10[component] - c00[component]) * fx;
+                const float bottom =
+                    c01[component] + (c11[component] - c01[component]) * fx;
+                color[component] = top + (bottom - top) * fy;
+            }
+            return true;
+        };
+
+    bool failed = false;
+    auto rasterize_triangle =
+        [&](const TransformedVertex& a, const TransformedVertex& b,
+            const TransformedVertex& c) {
+            if (failed) return;
+            for (const TransformedVertex* vertex : {&a, &b, &c}) {
+                if (!std::isfinite(vertex->position[0]) ||
+                    !std::isfinite(vertex->position[1]) ||
+                    !std::isfinite(vertex->position[3])) {
+                    return;
+                }
+            }
+            auto fixed_xy = [](float value) {
+                return static_cast<int64_t>(std::llround(value * 16.0f));
+            };
+            const int64_t ax = fixed_xy(a.position[0]);
+            const int64_t ay = fixed_xy(a.position[1]);
+            const int64_t bx = fixed_xy(b.position[0]);
+            const int64_t by = fixed_xy(b.position[1]);
+            const int64_t cx = fixed_xy(c.position[0]);
+            const int64_t cy = fixed_xy(c.position[1]);
+            auto edge = [](int64_t x0, int64_t y0, int64_t x1, int64_t y1,
+                           int64_t px, int64_t py) {
+                return (x1 - x0) * (py - y0) -
+                       (y1 - y0) * (px - x0);
+            };
+            const int64_t area = edge(ax, ay, bx, by, cx, cy);
+            if (area <= 0) return;  // BACK culling with the witnessed CW front face.
+            ++immediate_quad_raster_triangles_;
+
+            const int32_t tri_xmin = std::max<int32_t>(
+                static_cast<int32_t>(xmin),
+                static_cast<int32_t>(std::ceil(
+                    (static_cast<double>(std::min({ax, bx, cx})) - 8.0) /
+                    16.0)));
+            const int32_t tri_xmax = std::min<int32_t>(
+                static_cast<int32_t>(xmax),
+                static_cast<int32_t>(std::floor(
+                    (static_cast<double>(std::max({ax, bx, cx})) - 8.0) /
+                    16.0)));
+            const int32_t tri_ymin = std::max<int32_t>(
+                static_cast<int32_t>(ymin),
+                static_cast<int32_t>(std::ceil(
+                    (static_cast<double>(std::min({ay, by, cy})) - 8.0) /
+                    16.0)));
+            const int32_t tri_ymax = std::min<int32_t>(
+                static_cast<int32_t>(ymax),
+                static_cast<int32_t>(std::floor(
+                    (static_cast<double>(std::max({ay, by, cy})) - 8.0) /
+                    16.0)));
+            if (tri_xmax < tri_xmin || tri_ymax < tri_ymin) return;
+
+            const auto top_left = [](int64_t x0, int64_t y0,
+                                     int64_t x1, int64_t y1) {
+                const int64_t dx = x1 - x0;
+                const int64_t dy = y1 - y0;
+                return dy < 0 || (dy == 0 && dx > 0);
+            };
+            const bool edge0_top_left = top_left(bx, by, cx, cy);
+            const bool edge1_top_left = top_left(cx, cy, ax, ay);
+            const bool edge2_top_left = top_left(ax, ay, bx, by);
+
+            for (int32_t y = tri_ymin; y <= tri_ymax; ++y) {
+                const int64_t py = static_cast<int64_t>(y) * 16 + 8;
+                for (int32_t x = tri_xmin; x <= tri_xmax; ++x) {
+                    const int64_t px = static_cast<int64_t>(x) * 16 + 8;
+                    const int64_t w0 = edge(bx, by, cx, cy, px, py);
+                    const int64_t w1 = edge(cx, cy, ax, ay, px, py);
+                    const int64_t w2 = edge(ax, ay, bx, by, px, py);
+                    if (w0 < 0 || (w0 == 0 && !edge0_top_left) ||
+                        w1 < 0 || (w1 == 0 && !edge1_top_left) ||
+                        w2 < 0 || (w2 == 0 && !edge2_top_left)) {
+                        continue;
+                    }
+                    ++immediate_quad_raster_fragments_;
+
+                    const double lambda0 =
+                        static_cast<double>(w0) / static_cast<double>(area);
+                    const double lambda1 =
+                        static_cast<double>(w1) / static_cast<double>(area);
+                    const double lambda2 =
+                        static_cast<double>(w2) / static_cast<double>(area);
+                    const double q0 = lambda0 / a.position[3];
+                    const double q1 = lambda1 / b.position[3];
+                    const double q2 = lambda2 / c.position[3];
+                    const double qsum = q0 + q1 + q2;
+                    if (!std::isfinite(qsum) || qsum == 0.0) continue;
+                    const double u =
+                        (q0 * a.texture[0][0] + q1 * b.texture[0][0] +
+                         q2 * c.texture[0][0]) /
+                        qsum;
+                    const double v =
+                        (q0 * a.texture[0][1] + q1 * b.texture[0][1] +
+                         q2 * c.texture[0][1]) /
+                        qsum;
+                    if (!std::isfinite(u) || !std::isfinite(v)) {
+                        fault_("NV2A immediate-quad texture varying is non-finite");
+                        failed = true;
+                        return;
+                    }
+                    std::array<float, 4> source{};
+                    if (!sample_a4r4g4b4(static_cast<float>(u),
+                                         static_cast<float>(v), source)) {
+                        fault_("NV2A immediate-quad A4R4G4B4 sample failed");
+                        failed = true;
+                        return;
+                    }
+                    ++immediate_quad_texture_samples_;
+                    // C0 is T0 * V0 into R0 for both RGB and alpha; the final
+                    // combiner selects R0. The captured dashboard shader emits
+                    // white V0, but retain the actual combiner equation here.
+                    for (size_t component = 0; component < source.size();
+                         ++component) {
+                        const double diffuse =
+                            (q0 * a.diffuse[component] +
+                             q1 * b.diffuse[component] +
+                             q2 * c.diffuse[component]) /
+                            qsum;
+                        if (!std::isfinite(diffuse)) {
+                            fault_("NV2A immediate-quad diffuse varying is non-finite");
+                            failed = true;
+                            return;
+                        }
+                        source[component] = std::clamp(
+                            source[component] *
+                                std::max(static_cast<float>(diffuse), 0.0f),
+                            0.0f, 1.0f);
+                    }
+                    // Final RGB is C1 + mix(0, R0, C0): the captured final
+                    // constants are 16/255 and 218/255. Alpha selects R0.a.
+                    for (size_t component = 0; component < 3; ++component) {
+                        source[component] = std::clamp(
+                            (16.0f + 218.0f * source[component]) / 255.0f,
+                            0.0f, 1.0f);
+                    }
+                    auto pack_unorm8 = [](float value) {
+                        return static_cast<uint32_t>(std::floor(
+                            std::clamp(value, 0.0f, 1.0f) * 255.0f + 0.5f));
+                    };
+                    const uint32_t source_alpha8 = pack_unorm8(source[3]);
+                    if (source_alpha8 < 8) continue;  // GEQUAL, reference 8.
+                    ++immediate_quad_raster_alpha_passes_;
+
+                    const size_t offset =
+                        static_cast<size_t>(y) * kSurfacePitch +
+                        static_cast<size_t>(x) * sizeof(uint32_t);
+                    uint32_t destination_pixel = 0;
+                    if (!color_surface.read32(offset, destination_pixel)) {
+                        fault_("NV2A immediate-quad color DMA read failed");
+                        failed = true;
+                        return;
+                    }
+                    const std::array<float, 4> destination{{
+                        static_cast<float>((destination_pixel >> 16) & 0xFFu) /
+                            255.0f,
+                        static_cast<float>((destination_pixel >> 8) & 0xFFu) /
+                            255.0f,
+                        static_cast<float>(destination_pixel & 0xFFu) / 255.0f,
+                        static_cast<float>((destination_pixel >> 24) & 0xFFu) /
+                            255.0f,
+                    }};
+                    const float inverse_alpha = 1.0f - source[3];
+                    std::array<uint32_t, 4> blended{};
+                    for (size_t component = 0; component < blended.size();
+                         ++component) {
+                        blended[component] = pack_unorm8(
+                            source[component] * source[3] +
+                            destination[component] * inverse_alpha);
+                    }
+                    const uint32_t color =
+                        (blended[3] << 24) | (blended[0] << 16) |
+                        (blended[1] << 8) | blended[2];
+                    if (!color_surface.write32(offset, color)) {
+                        fault_("NV2A immediate-quad color cache write failed");
+                        failed = true;
+                        return;
+                    }
+                    ++immediate_quad_raster_writes_;
+                    const uint32_t address =
+                        color_address + static_cast<uint32_t>(offset);
+                    last_immediate_quad_raster_address_ = address;
+                    for (uint32_t word : {address, color}) {
+                        immediate_quad_raster_output_hash_ ^= word;
+                        immediate_quad_raster_output_hash_ *= 1099511628211ull;
+                    }
+                }
+            }
+        };
+
+    // Kelvin QUADS uses two triangles per independent four-vertex group. This ordering
+    // matches the retained winding and preserves the diagonal interpolation edge.
+    for (size_t i = 0; i + 3 < vertex_count; i += 4) {
+        rasterize_triangle(transformed_batch_[i + 1],
+                           transformed_batch_[i + 2],
+                           transformed_batch_[i]);
+        rasterize_triangle(transformed_batch_[i + 2],
+                           transformed_batch_[i + 3],
+                           transformed_batch_[i]);
+    }
+    if (failed) return false;
+    if (!color_surface.flush()) {
+        fault_("NV2A immediate-quad color DMA write failed");
+        return false;
+    }
+    ++immediate_quad_raster_batches_;
+    executed = true;
+    return true;
+}
+
 bool Nv2a::rasterize_witnessed_batch(bool& executed) {
     executed = false;
+    if (primitive_mode_ == 8)
+        return rasterize_witnessed_immediate_quad(executed);
     enum class Profile {
         kNone,
         kPitchZ16Depth,

@@ -1,4 +1,5 @@
 // xlle — focused PFIFO recorder / NV097 semaphore DMA test.
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -3144,6 +3145,338 @@ int main() {
         kick_immediate();
         CHECK(immediate_fault ==
               "NV2A batch mixes indexed, inline-array, or immediate vertices");
+    }
+
+    // The first pixel-producing immediate profile is the exact dashboard RS1/RS2
+    // A4R4G4B4 family. Exercise the retained state independently from the passive
+    // front-end fixture above, including DMA wrapping, quad winding, alpha, and a
+    // nearby recorder-only state.
+    {
+        std::string quad_fault;
+        xlle::Nv2a quad_gpu([&](const std::string& why) { quad_fault = why; });
+        std::vector<uint8_t> quad_ram(0x400000, 0);
+        quad_gpu.set_mem_access(
+            [&](uint32_t addr, void* dst, size_t n) {
+                if (addr > quad_ram.size() || n > quad_ram.size() - addr)
+                    return false;
+                std::memcpy(dst, quad_ram.data() + addr, n);
+                return true;
+            },
+            [&](uint32_t addr, const void* src, size_t n) {
+                if (addr > quad_ram.size() || n > quad_ram.size() - addr)
+                    return false;
+                std::memcpy(quad_ram.data() + addr, src, n);
+                return true;
+            });
+
+        // RAMHT handle 1 -> Kelvin; handle 2 -> a 128 MiB DMA window. Its frame
+        // maps the retained high guest offsets into this compact test RAM without
+        // changing any command-stream-visible offset.
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x700008, 4, 1);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x70000C, 4, 0x80010020);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x700010, 4, 2);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x700014, 4, 0x80010030);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x700200, 4, 0x97);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x700300, 4, 0x3D);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x700304, 4, 0x07FFFFFF);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x700308, 4, 0x04414000);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x700180, 4, 0x3D);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x700184, 4, 0xFFFF);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x700188, 4, 0x2000);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x002504, 4, 1);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x003204, 4, 0x100);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x00322C, 4, 0x18);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x003244, 4, 0);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x003220, 4, 1);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x003250, 4, 1);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x003200, 4, 1);
+
+        constexpr uint32_t quad_pb = 0x2000;
+        uint32_t quad_cursor = 0;
+        auto emit_quad = [&](uint32_t method, uint32_t parameter) {
+            put32(quad_ram, quad_pb + quad_cursor, (1u << 18) | method);
+            put32(quad_ram, quad_pb + quad_cursor + 4, parameter);
+            quad_cursor += 8;
+        };
+        auto kick_quad = [&]() {
+            quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, quad_cursor);
+        };
+        auto float_bits = [](float value) {
+            uint32_t bits = 0;
+            std::memcpy(&bits, &value, sizeof(bits));
+            return bits;
+        };
+
+        constexpr uint32_t texture_address = 0x00020000;
+        constexpr uint32_t rs2_color_address = 0x000A0000;
+        constexpr uint32_t color_address = 0x00208000;
+        auto morton_index = [](uint32_t x, uint32_t y) {
+            uint32_t result = 0;
+            for (uint32_t bit = 0; bit < 8; ++bit) {
+                result |= ((x >> bit) & 1u) << (bit * 2);
+                result |= ((y >> bit) & 1u) << (bit * 2 + 1);
+            }
+            return result;
+        };
+        auto fill_quad_texture = [&](uint16_t alpha) {
+            for (uint32_t y = 0; y < 256; ++y) {
+                for (uint32_t x = 0; x < 256; ++x) {
+                    uint16_t rgb = 0;
+                    if (x < 128 && y < 128)
+                        rgb = 0x0F00;  // red
+                    else if (x >= 128 && y < 128)
+                        rgb = 0x00F0;  // green
+                    else if (x < 128)
+                        rgb = 0x000F;  // blue
+                    else
+                        rgb = 0x0FFF;  // white
+                    const uint16_t pixel =
+                        static_cast<uint16_t>((alpha << 12) | rgb);
+                    const size_t offset =
+                        static_cast<size_t>(morton_index(x, y)) *
+                        sizeof(pixel);
+                    std::memcpy(quad_ram.data() + texture_address + offset,
+                                &pixel, sizeof(pixel));
+                }
+            }
+        };
+        fill_quad_texture(0xF);
+
+        emit_quad(0x0000, 1);
+        emit_quad(0x0184, 2);
+        emit_quad(0x0188, 2);
+        emit_quad(0x0194, 2);
+        emit_quad(0x1E9C, 0);
+        emit_quad(0x0B00, 0x00000000);
+        emit_quad(0x0B04, 0x0020061B);
+        emit_quad(0x0B08, 0x0836106C);
+        emit_quad(0x0B0C, 0x2070F818);  // MOV oD0, v3
+        emit_quad(0x0B00, 0x00000000);
+        emit_quad(0x0B04, 0x002000BB);
+        emit_quad(0x0B08, 0x0836106C);
+        emit_quad(0x0B0C, 0x2070F848);  // MOV oT0, v0.zwzw
+        emit_quad(0x0B00, 0x00000000);
+        emit_quad(0x0B04, 0x0020001B);
+        emit_quad(0x0B08, 0x0836106C);
+        emit_quad(0x0B0C, 0x2070C801);  // MOV oPos.xy, v0 (final)
+        emit_quad(0x1EA0, 0);
+        emit_quad(0x1E94, 2);
+
+        emit_quad(0x0200, 0x00B4010E);
+        emit_quad(0x0204, 0x00D7009E);
+        emit_quad(0x0208, 0x00000128);
+        emit_quad(0x020C, 0x00400C00);
+        emit_quad(0x0210, 0x03DF4000);
+        emit_quad(0x0214, 0);
+        emit_quad(0x0290, 0x00100001);
+        emit_quad(0x02C0, 0x02D00000);
+        emit_quad(0x02E0, 0x01E00000);
+        emit_quad(0x0300, 1);
+        emit_quad(0x0304, 1);
+        emit_quad(0x0308, 1);
+        emit_quad(0x030C, 0);
+        emit_quad(0x033C, 0x0206);
+        emit_quad(0x0340, 8);
+        emit_quad(0x0344, 0x0302);
+        emit_quad(0x0348, 0x0303);
+        emit_quad(0x0350, 0x8006);
+        emit_quad(0x0354, 0x0203);
+        emit_quad(0x0358, 0x01010101);
+        emit_quad(0x035C, 1);
+        emit_quad(0x0360, 0xFFFFFFFF);
+        emit_quad(0x0364, 0x0207);
+        emit_quad(0x0368, 0);
+        emit_quad(0x036C, 0xFFFFFFFF);
+        emit_quad(0x0370, 0x1E00);
+        emit_quad(0x0374, 0x1E00);
+        emit_quad(0x0378, 0x1E00);
+        emit_quad(0x037C, 0x1D01);
+        emit_quad(0x0384, 0x80000000);
+        emit_quad(0x0388, 0x80000000);
+        emit_quad(0x038C, 0x1B02);
+        emit_quad(0x0390, 0x1B02);
+        emit_quad(0x0394, 0);
+        emit_quad(0x0398, 0);
+        emit_quad(0x039C, 0x0405);
+        emit_quad(0x03A0, 0x0900);
+        emit_quad(0x1D78, 1);
+
+        emit_quad(0x1E70, 1);
+        emit_quad(0x1E78, 0);
+        emit_quad(0x1E60, 1);
+        emit_quad(0x0260, 0x18140000);
+        emit_quad(0x0AC0, 0x08040000);
+        emit_quad(0x0AA0, 0x000000C0);
+        emit_quad(0x1E40, 0x000000C0);
+        emit_quad(0x0A60, 0);
+        emit_quad(0x0A80, 0);
+        emit_quad(0x0288, 0x010C0002);
+        emit_quad(0x028C, 0x00001C00);
+        emit_quad(0x1E20, 0x00DADADA);
+        emit_quad(0x1E24, 0x00101010);
+
+        emit_quad(0x1B00, 0x03C0C000);
+        emit_quad(0x1B04, 0x08810429);
+        emit_quad(0x1B08, 0x00010303);
+        emit_quad(0x1B0C, 0x4003FFC0);
+        emit_quad(0x1B10, 0x01C00000);
+        emit_quad(0x1B14, 0x02022000);
+        emit_quad(0x1B1C, 0x00640011);
+        emit_quad(0x1B20, 0x02DED080);
+        emit_quad(0x1B24, 0);
+
+        const std::array<std::array<float, 4>, 4> quad{{
+            {{279.0f, 184.0f, 0.25f, 0.75f}},
+            {{279.0f, 160.0f, 0.25f, 0.25f}},
+            {{295.0f, 160.0f, 0.75f, 0.25f}},
+            {{295.0f, 184.0f, 0.75f, 0.75f}},
+        }};
+        auto submit_seven_quads = [&]() {
+            emit_quad(0x17FC, 8);
+            emit_quad(0x194C, 0xFFFFFFFF);  // persistent v3 / oD0 white
+            for (size_t repeat = 0; repeat < 7; ++repeat) {
+                for (const auto& position : quad) {
+                    emit_quad(0x1518, float_bits(position[0]));
+                    emit_quad(0x151C, float_bits(position[1]));
+                    emit_quad(0x1520, float_bits(position[2]));
+                    emit_quad(0x1524, float_bits(position[3]));
+                }
+            }
+            emit_quad(0x17FC, 0);
+            kick_quad();
+        };
+
+        submit_seven_quads();
+        CHECK(quad_fault.empty());
+        CHECK(quad_gpu.immediate_quad_raster_batches() == 1);
+        CHECK(quad_gpu.immediate_quad_raster_triangles() == 14);
+        CHECK(quad_gpu.immediate_quad_raster_fragments() == 7 * 16 * 24);
+        CHECK(quad_gpu.immediate_quad_raster_alpha_passes() == 7 * 16 * 24);
+        CHECK(quad_gpu.immediate_quad_raster_writes() == 7 * 16 * 24);
+        CHECK(quad_gpu.immediate_quad_texture_samples() == 7 * 16 * 24);
+        CHECK(quad_gpu.rasterized_triangles() == 0);
+        auto surface_pixel = [&](uint32_t base, uint32_t x, uint32_t y) {
+            uint32_t pixel = 0;
+            std::memcpy(&pixel,
+                        quad_ram.data() + base + y * 0x0C00 + x * 4,
+                        sizeof(pixel));
+            return pixel;
+        };
+        CHECK(surface_pixel(color_address, 282, 163) == 0xFFEA1010);
+        CHECK(surface_pixel(color_address, 292, 163) == 0xFF10EA10);
+        CHECK(surface_pixel(color_address, 282, 180) == 0xFF1010EA);
+        CHECK(surface_pixel(color_address, 292, 180) == 0xFFEAEAEA);
+        CHECK(quad_gpu.last_immediate_quad_raster_address() ==
+              color_address + 183 * 0x0C00 + 294 * 4);
+        CHECK(quad_gpu.immediate_quad_raster_output_hash() !=
+              1469598103934665603ull);
+        std::vector<xlle::Nv2a::RasterStateSample> quad_samples;
+        quad_gpu.raster_state_samples(quad_samples);
+        CHECK(std::any_of(
+            quad_samples.begin(), quad_samples.end(),
+            [](const xlle::Nv2a::RasterStateSample& sample) {
+                return sample.immediate_quad_batches == 1 &&
+                       sample.executed_batches == 1;
+            }));
+
+        // A one-word state change remains recorder-only and must not touch the
+        // dedicated counters or target.
+        const size_t color_bytes = 0x0C00u * 480u;
+        const std::vector<uint8_t> before_rejected(
+            quad_ram.begin() + color_address,
+            quad_ram.begin() + color_address + color_bytes);
+        emit_quad(0x0340, 9);
+        submit_seven_quads();
+        CHECK(quad_fault.empty());
+        CHECK(quad_gpu.immediate_quad_raster_batches() == 1);
+        CHECK(quad_gpu.immediate_quad_raster_triangles() == 14);
+        CHECK(quad_gpu.immediate_quad_raster_writes() == 7 * 16 * 24);
+        CHECK(std::equal(before_rejected.begin(), before_rejected.end(),
+                         quad_ram.begin() + color_address));
+
+        // Restore RS1, make the same texture fully transparent, and prove that
+        // fragments/samples execute while GEQUAL rejects every color write.
+        emit_quad(0x0340, 8);
+        fill_quad_texture(0);
+        const std::vector<uint8_t> before_transparent(
+            quad_ram.begin() + color_address,
+            quad_ram.begin() + color_address + color_bytes);
+        submit_seven_quads();
+        CHECK(quad_fault.empty());
+        CHECK(quad_gpu.immediate_quad_raster_batches() == 2);
+        CHECK(quad_gpu.immediate_quad_raster_triangles() == 28);
+        CHECK(quad_gpu.immediate_quad_raster_fragments() == 2 * 7 * 16 * 24);
+        CHECK(quad_gpu.immediate_quad_texture_samples() == 2 * 7 * 16 * 24);
+        CHECK(quad_gpu.immediate_quad_raster_alpha_passes() == 7 * 16 * 24);
+        CHECK(quad_gpu.immediate_quad_raster_writes() == 7 * 16 * 24);
+        CHECK(std::equal(before_transparent.begin(), before_transparent.end(),
+                         quad_ram.begin() + color_address));
+
+        // RS2 differs only by the alternating color target. Restore opaque T0,
+        // switch the exact retained offset, and prove writes land exclusively in
+        // the second surface.
+        fill_quad_texture(0xF);
+        const std::vector<uint8_t> rs1_before_rs2(
+            quad_ram.begin() + color_address,
+            quad_ram.begin() + color_address + color_bytes);
+        emit_quad(0x0210, 0x03C8C000);
+        submit_seven_quads();
+        CHECK(quad_fault.empty());
+        CHECK(quad_gpu.immediate_quad_raster_batches() == 3);
+        CHECK(quad_gpu.immediate_quad_raster_triangles() == 42);
+        CHECK(quad_gpu.immediate_quad_raster_fragments() == 3 * 7 * 16 * 24);
+        CHECK(quad_gpu.immediate_quad_texture_samples() == 3 * 7 * 16 * 24);
+        CHECK(quad_gpu.immediate_quad_raster_alpha_passes() == 2 * 7 * 16 * 24);
+        CHECK(quad_gpu.immediate_quad_raster_writes() == 2 * 7 * 16 * 24);
+        CHECK(surface_pixel(rs2_color_address, 282, 163) == 0xFFEA1010);
+        CHECK(surface_pixel(rs2_color_address, 292, 180) == 0xFFEAEAEA);
+        CHECK(std::equal(rs1_before_rs2.begin(), rs1_before_rs2.end(),
+                         quad_ram.begin() + color_address));
+
+        // A half-alpha source over a nonzero destination exercises the retained
+        // SRC_ALPHA / ONE_MINUS_SRC_ALPHA blend instead of the opaque idempotent
+        // case above. Seven overlapping quads deliberately expose cache coherence
+        // between writes inside one batch.
+        fill_quad_texture(8);
+        for (uint32_t y = 160; y < 184; ++y) {
+            for (uint32_t x = 279; x < 295; ++x) {
+                put32(quad_ram, rs2_color_address + y * 0x0C00 + x * 4,
+                      0xFF204060);
+            }
+        }
+        auto blend_expected = []() {
+            std::array<uint32_t, 4> destination{{32, 64, 96, 255}};
+            const std::array<float, 4> source{{
+                234.0f / 255.0f, 16.0f / 255.0f,
+                16.0f / 255.0f, 8.0f / 15.0f,
+            }};
+            auto pack = [](float value) {
+                return static_cast<uint32_t>(std::floor(
+                    std::clamp(value, 0.0f, 1.0f) * 255.0f + 0.5f));
+            };
+            for (size_t draw = 0; draw < 7; ++draw) {
+                for (size_t component = 0; component < 4; ++component) {
+                    destination[component] = pack(
+                        source[component] * source[3] +
+                        (static_cast<float>(destination[component]) / 255.0f) *
+                            (1.0f - source[3]));
+                }
+            }
+            return (destination[3] << 24) | (destination[0] << 16) |
+                   (destination[1] << 8) | destination[2];
+        };
+        submit_seven_quads();
+        CHECK(quad_fault.empty());
+        CHECK(quad_gpu.immediate_quad_raster_batches() == 4);
+        CHECK(quad_gpu.immediate_quad_raster_triangles() == 56);
+        CHECK(quad_gpu.immediate_quad_raster_fragments() == 4 * 7 * 16 * 24);
+        CHECK(quad_gpu.immediate_quad_texture_samples() == 4 * 7 * 16 * 24);
+        CHECK(quad_gpu.immediate_quad_raster_alpha_passes() == 3 * 7 * 16 * 24);
+        CHECK(quad_gpu.immediate_quad_raster_writes() == 3 * 7 * 16 * 24);
+        CHECK(surface_pixel(rs2_color_address, 282, 163) == blend_expected());
+        CHECK(quad_gpu.immediate_quad_rs12_candidates() == 4);
+        CHECK(quad_gpu.last_immediate_quad_rs12_reject_mask() == 0);
+        CHECK(quad_gpu.last_immediate_quad_rs12_raster_reject_mask() == 0);
     }
 
     std::printf(fails ? "test_nv2a: %d checks failed\n" : "test_nv2a: ok\n", fails);
