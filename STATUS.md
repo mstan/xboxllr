@@ -3,6 +3,36 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-08 — A4: upper-left artwork completes the mediacenter-home composition
+
+The exact IQRS3/IQRS7 four-immediate-vertex upper-left artwork family now executes as a
+separate bounded mode-8 profile. It resolves the witnessed 512x128 swizzled I8 image at T0
+through DMA A, expands its immediately preceding little-endian A8R8G8B8 palette before
+bilinear filtering, and applies the shared captured alpha-kill, combiner, and source-alpha
+blend state to both alternating pitch targets. Telemetry and output hashing remain separate
+from the A4 text, row-I8, A8, and menu-I8 families.
+
+The accepted Release 11.5B disconnected reduced-retire replay is fault-free in **237.629 s**:
+`build/probe-mode8-artwork-i8-executed-11.5b.stdout.log` records the run and
+`build/probe-mode8-artwork-i8-executed-11.5b.stderr.log` is empty. The artwork profile executes
+125/125 candidates with reject mask `00` and raster reject `0`: 250 triangles, 4,915,500 each
+of fragments and samples, and 2,474,875 each of alpha passes and color writes; its hash is
+`54c2429a3605cc5f`. Recorder-only work is 681 states / 1,940 batches. Earlier profile
+telemetry and hashes remain unchanged: A4 `b719e98aa60676c3`, row-I8 `27545230ed7deda3`, A8
+`21933973698fca35`, and menu-I8 `ecbecc3b80917983`. The 3.169 s increase over the preceding
+run is about 1.35%; it is a single-run measurement and therefore subject to noise, while both
+remain in the roughly four-minute replay band.
+
+The selected scanout has RGBA FNV64 `825f3c20466439fb`; the artifact
+`build/frame-mode8-artwork-i8-executed-11.5b.ppm` has SHA-256
+`3CB536A60F20DDAA1D1FD592A7B4443E761C81C35BEDF7032929073CFD43FC08`; the matching image is
+`build/frame-mode8-artwork-i8-executed-11.5b.png`. Exact comparison against the prior panel
+frame finds 9,287 changed pixels within `338x102+45+39`. Visual inspection shows coherent
+**mediacenter home** upper-left logo/art while retaining the selection bar and menu panel.
+This is visual fidelity only; it does **not** establish input, navigation, or a guest-owned
+selection change. Next: continue the remaining exact visual census and independently close the
+Controller-S embedded-hub / endpoint-2 input-topology boundary.
+
 ## 2026-08-08 — A4: RS16/RS17 indexed menu column makes the list panel visible
 
 The exact RS16/RS17 four-immediate-vertex family now executes as its own bounded mode-8

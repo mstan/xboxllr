@@ -50,9 +50,10 @@ harvested from xemu, silicon-corrected against a live console. GPL-2.
   the retail PFIFO/PGRAPH/unified-RAM/PCRTC path. The paired I8/palette row quad also executes
   exactly. Its format-6 RS8/RS13 direct A8R8G8B8 sibling produces the visible default My
   Programs selection bar. The independently witnessed RS16/RS17 64x128 I8+palette family now
-  adds the subtle dark menu-column panel/border around that list, leaving 683 states / 2,065
-  batches recorder-only. This is visual panel/default-row visibility, not input-driven
-  selection or navigation.
+  adds the subtle dark menu-column panel/border around that list. IQRS3/IQRS7's 512x128
+  I8+palette artwork now adds coherent upper-left **mediacenter home** logo/art, leaving 681
+  states / 1,940 batches recorder-only. This is visual panel/default-row/artwork visibility,
+  not input-driven selection or navigation.
 - **Immediate burn-down path:** continue the passive exact visual census, validate the
   dashboard frame against a real-Xbox reference, and in parallel observe real XID endpoint
   polling behind the Controller S embedded hub before proving basic D-pad/A/B menu navigation.
@@ -400,6 +401,26 @@ dependency chain peeled this session is:
     `180x214+270+158`; visual inspection shows a coherent subtle dark menu-column panel/border
     around the list while retaining the blue selected row. This is visual fidelity only, not
     input, navigation, or a guest-owned selection change.
+
+43. IQRS3/IQRS7 upper-left artwork family → **mediacenter-home composition is visible**.
+    The exact four-immediate-vertex pair resolves a 512x128 swizzled I8 texture and its
+    immediately preceding little-endian A8R8G8B8 palette through DMA A, palette-expands before
+    bilinear filtering, and applies the shared alpha-kill, combiner, and source-alpha blend
+    state to both alternating pitch targets. The fault-free Release 11.5B disconnected
+    reduced-retire replay completes in 237.629 s with empty
+    `build/probe-mode8-artwork-i8-executed-11.5b.stderr.log`; its stdout companion records
+    125/125 candidates, reject `00` / raster reject `0`, 250 triangles, 4,915,500
+    fragments/samples, 2,474,875 alpha passes/color writes, and hash `54c2429a3605cc5f`.
+    Recorder-only work is 681 states / 1,940 batches. Earlier telemetry/hashes remain unchanged:
+    A4 `b719e98aa60676c3`, row-I8 `27545230ed7deda3`, A8 `21933973698fca35`, and menu-I8
+    `ecbecc3b80917983`. The final scanout FNV64 is `825f3c20466439fb`; the PPM
+    `build/frame-mode8-artwork-i8-executed-11.5b.ppm` hashes SHA-256
+    `3CB536A60F20DDAA1D1FD592A7B4443E761C81C35BEDF7032929073CFD43FC08`, with matching PNG.
+    Exact comparison against the prior panel frame finds 9,287 changed pixels in
+    `338x102+45+39`; visual inspection shows coherent mediacenter-home upper-left logo/art
+    while retaining the selection bar and panel. The +3.169 s (about 1.35%) single-run replay
+    difference is subject to noise; both runs remain in the roughly four-minute band. This is
+    not an input, navigation, or guest-owned selection claim.
 
 ## How to build & run
 
