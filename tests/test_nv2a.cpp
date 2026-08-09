@@ -3805,6 +3805,229 @@ int main() {
         CHECK(quad_gpu.immediate_quad_i8_raster_writes() == before_a8_i8_writes);
         CHECK(quad_gpu.immediate_quad_i8_raster_output_hash() == before_a8_i8_hash);
 
+        // RS16/RS17 are not the 128x32 I8 row family: format 0x0b is an
+        // independently witnessed 64x128 I8+A8R8G8B8-palette menu column.
+        // Map its captured offsets into a separate compact-RAM range.
+        const auto before_menu_a4_batches = quad_gpu.immediate_quad_raster_batches();
+        const auto before_menu_a4_writes = quad_gpu.immediate_quad_raster_writes();
+        const auto before_menu_a4_hash = quad_gpu.immediate_quad_raster_output_hash();
+        const auto before_menu_i8_batches = quad_gpu.immediate_quad_i8_raster_batches();
+        const auto before_menu_i8_writes = quad_gpu.immediate_quad_i8_raster_writes();
+        const auto before_menu_i8_hash = quad_gpu.immediate_quad_i8_raster_output_hash();
+        const auto before_menu_a8_batches = quad_gpu.immediate_quad_a8_raster_batches();
+        const auto before_menu_a8_writes = quad_gpu.immediate_quad_a8_raster_writes();
+        const auto before_menu_a8_hash = quad_gpu.immediate_quad_a8_raster_output_hash();
+        constexpr uint32_t menu_texture_address = 0x00200800;
+        constexpr uint32_t menu_palette_address = 0x00200400;
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x700028, 4, 5);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x70002C, 4, 0x80010060);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x700600, 4, 0x3D);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x700604, 4, 0x07FFFFFF);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x700608, 4, 0x04802000);
+        emit_quad(0x0184, 5);
+        emit_quad(0x0200, 0x02D00000);
+        emit_quad(0x0204, 0x01E00000);
+        emit_quad(0x0210, 0x03C8C000);
+        emit_quad(0x0344, 0x0302);
+        emit_quad(0x1B00, 0x039FE800);
+        emit_quad(0x1B04, 0x07610B29);
+        emit_quad(0x1B20, 0x039FE400);
+        emit_quad(0x0288, 0x0000000C);
+        emit_quad(0x028C, 0x00001C80);
+        emit_quad(0x1E20, 0x00DADADA);
+        emit_quad(0x1E24, 0x00101010);
+        emit_quad(0x0A60, 0xFFFFFFFF);
+        emit_quad(0x0A80, 0xFFFFFFFF);
+        const std::array<std::array<float, 4>, 4> menu_quad{{
+            {{270.0f, 158.0f, 0.0f, 0.0f}},
+            {{450.0f, 158.0f, 1.0f, 0.0f}},
+            {{450.0f, 372.0f, 1.0f, 1.0f}},
+            {{270.0f, 372.0f, 0.0f, 1.0f}},
+        }};
+        auto submit_menu_quad = [&](const auto& vertices, uint32_t diffuse = 0xFFFFFFFF) {
+            emit_quad(0x17FC, 8);
+            emit_quad(0x194C, diffuse);
+            for (const auto& position : vertices) {
+                emit_quad(0x1518, float_bits(position[0]));
+                emit_quad(0x151C, float_bits(position[1]));
+                emit_quad(0x1520, float_bits(position[2]));
+                emit_quad(0x1524, float_bits(position[3]));
+            }
+            emit_quad(0x17FC, 0);
+            kick_quad();
+        };
+        auto menu_morton = [](uint32_t x, uint32_t y) {
+            uint32_t result = 0;
+            uint32_t output_bit = 0;
+            for (uint32_t input_bit = 1; input_bit < 64 || input_bit < 128;
+                 input_bit <<= 1) {
+                if (input_bit < 64) {
+                    result |= ((x & input_bit) != 0) << output_bit;
+                    ++output_bit;
+                }
+                if (input_bit < 128) {
+                    result |= ((y & input_bit) != 0) << output_bit;
+                    ++output_bit;
+                }
+            }
+            return result;
+        };
+        std::fill(quad_ram.begin() + menu_texture_address,
+                  quad_ram.begin() + menu_texture_address + 64 * 128, 0);
+        for (uint32_t index = 0; index < 256; ++index)
+            put32(quad_ram, menu_palette_address + index * sizeof(uint32_t), 0);
+        const std::vector<uint8_t> menu_zero_alpha_before(
+            quad_ram.begin() + rs2_color_address,
+            quad_ram.begin() + rs2_color_address + color_bytes);
+        submit_menu_quad(menu_quad);
+        CHECK(quad_fault.empty());
+        CHECK(quad_gpu.immediate_quad_menu_i8_raster_batches() == 1);
+        CHECK(quad_gpu.immediate_quad_menu_i8_raster_alpha_passes() == 0);
+        CHECK(quad_gpu.immediate_quad_menu_i8_raster_writes() == 0);
+        CHECK(std::equal(menu_zero_alpha_before.begin(), menu_zero_alpha_before.end(),
+                         quad_ram.begin() + rs2_color_address));
+
+        // Index 1/2 must palette-expand before filtering. The chosen pixel
+        // has a 7/18 mix of the two colors, with non-opaque alpha exercising
+        // the captured source-alpha blend and little-endian AARRGGBB entries.
+        std::fill(quad_ram.begin() + menu_texture_address,
+                  quad_ram.begin() + menu_texture_address + 64 * 128, 1);
+        for (uint32_t y = 0; y < 128; ++y)
+            quad_ram[menu_texture_address + menu_morton(1, y)] = 2;
+        put32(quad_ram, menu_palette_address + sizeof(uint32_t), 0x80C81428);
+        put32(quad_ram, menu_palette_address + 2 * sizeof(uint32_t), 0x400A1EDC);
+        put32(quad_ram, menu_palette_address + 3 * sizeof(uint32_t), 0xFF123456);
+        for (uint32_t x = 0; x < 64; ++x) {
+            quad_ram[menu_texture_address + menu_morton(x, 99)] = 3;
+            quad_ram[menu_texture_address + menu_morton(x, 100)] = 3;
+        }
+        auto menu_blend_expected = []() {
+            const float mix = 7.0f / 18.0f;
+            const std::array<float, 4> p1{{200 / 255.0f, 20 / 255.0f,
+                                             40 / 255.0f, 128 / 255.0f}};
+            const std::array<float, 4> p2{{10 / 255.0f, 30 / 255.0f,
+                                            220 / 255.0f, 64 / 255.0f}};
+            std::array<float, 4> source{};
+            for (size_t c = 0; c < source.size(); ++c)
+                source[c] = p1[c] + (p2[c] - p1[c]) * mix;
+            const std::array<float, 4> destination{{32 / 255.0f, 64 / 255.0f,
+                                                      96 / 255.0f, 1.0f}};
+            auto pack = [](float value) {
+                return static_cast<uint32_t>(std::floor(
+                    std::clamp(value, 0.0f, 1.0f) * 255.0f + 0.5f));
+            };
+            std::array<uint32_t, 4> out{};
+            for (size_t c = 0; c < out.size(); ++c)
+                out[c] = pack(source[c] * source[3] +
+                              destination[c] * (1.0f - source[3]));
+            return (out[3] << 24) | (out[0] << 16) | (out[1] << 8) | out[2];
+        };
+        put32(quad_ram, rs2_color_address + 160 * 0x0C00 + 272 * 4,
+              0xFF204060);
+        put32(quad_ram, rs2_color_address + 325 * 0x0C00 + 360 * 4, 0);
+        submit_menu_quad(menu_quad);
+        CHECK(quad_fault.empty());
+        CHECK(quad_gpu.immediate_quad_menu_i8_raster_batches() == 2);
+        CHECK(surface_pixel(rs2_color_address, 272, 160) == menu_blend_expected());
+        CHECK(surface_pixel(rs2_color_address, 360, 325) == 0xFF123456);
+
+        // The alternate target and a non-white diffuse remain semantic inputs.
+        emit_quad(0x0210, 0x03DF4000);
+        put32(quad_ram, color_address + 160 * 0x0C00 + 272 * 4, 0xFF204060);
+        submit_menu_quad(menu_quad);
+        CHECK(quad_fault.empty());
+        CHECK(quad_gpu.immediate_quad_menu_i8_raster_batches() == 3);
+        CHECK(surface_pixel(color_address, 272, 160) == menu_blend_expected());
+        for (uint32_t index = 0; index < 64 * 128; ++index)
+            quad_ram[menu_texture_address + index] = 3;
+        put32(quad_ram, color_address + 200 * 0x0C00 + 300 * 4, 0);
+        submit_menu_quad(menu_quad, 0xFF808080);
+        CHECK(quad_fault.empty());
+        CHECK(quad_gpu.immediate_quad_menu_i8_raster_batches() == 4);
+        CHECK(surface_pixel(color_address, 300, 200) == 0xFF091A2B);
+
+        // Varyings stay dynamic, while source shape remains exactly four.
+        auto menu_variant = menu_quad;
+        menu_variant[0][2] = 0.02f;
+        submit_menu_quad(menu_variant);
+        CHECK(quad_fault.empty());
+        CHECK(quad_gpu.immediate_quad_menu_i8_raster_batches() == 5);
+        auto menu_five = std::array<std::array<float, 4>, 5>{};
+        for (size_t index = 0; index < menu_quad.size(); ++index)
+            menu_five[index] = menu_quad[index];
+        menu_five[4] = {{270.0f, 158.0f, 0.0f, 0.0f}};
+        submit_menu_quad(menu_five);
+        CHECK(quad_fault.empty());
+        CHECK(quad_gpu.immediate_quad_menu_i8_raster_batches() == 5);
+
+        // A narrow clip, wrong texture state, or the zero-final-factor one-off
+        // must stay outside the exact family. The latter is not even a profile
+        // candidate.
+        const auto menu_candidates = quad_gpu.immediate_quad_menu_i8_candidates();
+        emit_quad(0x0200, 0x00B4010E);
+        emit_quad(0x0204, 0x00D7009E);
+        submit_menu_quad(menu_quad);
+        CHECK(quad_fault.empty());
+        CHECK(quad_gpu.immediate_quad_menu_i8_raster_batches() == 5);
+        CHECK(quad_gpu.immediate_quad_menu_i8_candidates() == menu_candidates + 1);
+        CHECK(quad_gpu.last_immediate_quad_menu_i8_reject_mask() != 0);
+        emit_quad(0x0200, 0x02D00000);
+        emit_quad(0x0204, 0x01E00000);
+        emit_quad(0x1B04, 0x07610B28);
+        submit_menu_quad(menu_quad);
+        CHECK(quad_fault.empty());
+        CHECK(quad_gpu.immediate_quad_menu_i8_raster_batches() == 5);
+        CHECK(quad_gpu.immediate_quad_menu_i8_candidates() == menu_candidates + 1);
+        emit_quad(0x1B04, 0x07610B29);
+        emit_quad(0x1B20, 0x039FE440);
+        submit_menu_quad(menu_quad);
+        CHECK(quad_fault.empty());
+        CHECK(quad_gpu.immediate_quad_menu_i8_raster_batches() == 5);
+        CHECK(quad_gpu.immediate_quad_menu_i8_candidates() == menu_candidates + 2);
+        CHECK(quad_gpu.last_immediate_quad_menu_i8_reject_mask() != 0);
+        emit_quad(0x1B20, 0x039FE400);
+        emit_quad(0x1E20, 0);
+        emit_quad(0x1E24, 0);
+        submit_menu_quad(menu_quad);
+        CHECK(quad_fault.empty());
+        CHECK(quad_gpu.immediate_quad_menu_i8_raster_batches() == 5);
+        CHECK(quad_gpu.immediate_quad_menu_i8_candidates() == menu_candidates + 2);
+        emit_quad(0x1E20, 0x00DADADA);
+        emit_quad(0x1E24, 0x00101010);
+
+        // DMA preflight fails before color writes, then legacy I8 state is
+        // restored for its existing isolated rejection test below.
+        const std::vector<uint8_t> before_menu_dma_reject(
+            quad_ram.begin() + color_address,
+            quad_ram.begin() + color_address + color_bytes);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x700030, 4, 6);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x700034, 4, 0x80010070);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x700700, 4, 0x3D);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x700704, 4, 0);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x700708, 4, 0x04802000);
+        emit_quad(0x0184, 6);
+        submit_menu_quad(menu_quad);
+        CHECK(quad_fault == "NV2A immediate-quad menu I8 texture DMA range is invalid");
+        CHECK(quad_gpu.immediate_quad_menu_i8_raster_batches() == 5);
+        CHECK(std::equal(before_menu_dma_reject.begin(), before_menu_dma_reject.end(),
+                         quad_ram.begin() + color_address));
+        quad_fault.clear();
+        CHECK(quad_gpu.immediate_quad_raster_batches() == before_menu_a4_batches);
+        CHECK(quad_gpu.immediate_quad_raster_writes() == before_menu_a4_writes);
+        CHECK(quad_gpu.immediate_quad_raster_output_hash() == before_menu_a4_hash);
+        CHECK(quad_gpu.immediate_quad_i8_raster_batches() == before_menu_i8_batches);
+        CHECK(quad_gpu.immediate_quad_i8_raster_writes() == before_menu_i8_writes);
+        CHECK(quad_gpu.immediate_quad_i8_raster_output_hash() == before_menu_i8_hash);
+        CHECK(quad_gpu.immediate_quad_a8_raster_batches() == before_menu_a8_batches);
+        CHECK(quad_gpu.immediate_quad_a8_raster_writes() == before_menu_a8_writes);
+        CHECK(quad_gpu.immediate_quad_a8_raster_output_hash() == before_menu_a8_hash);
+        emit_quad(0x0184, 3);
+        emit_quad(0x0200, 0x00B4010E);
+        emit_quad(0x0204, 0x00D7009E);
+        emit_quad(0x1B00, kI8TextureOffset);
+        emit_quad(0x1B04, 0x05710B29);
+        emit_quad(0x1B20, 0x02DED080);
+
         // A DMA-A object with an undersized window fails the I8 texture range
         // before sampling or color-surface writes. The profile's pixel-state
         // candidate telemetry still records this as an otherwise exact attempt.

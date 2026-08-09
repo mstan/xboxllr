@@ -3,6 +3,36 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-08 — A4: RS16/RS17 indexed menu column makes the list panel visible
+
+The exact RS16/RS17 four-immediate-vertex family now executes as its own bounded mode-8
+profile. It resolves the independently witnessed 64x128 swizzled I8 texture at T0 through
+DMA A, expands its contiguous little-endian A8R8G8B8 palette before bilinear filtering, and
+uses the captured alpha-kill, combiner, and source-alpha blend state on either alternating
+pitch target. The full-state immediate diagnostic introduced in commit `1f6e7a7` correlated
+the retained state with each IQRS sample. The captured zero-final-factor lookalike is
+deliberately excluded; it remains recorder-only. Telemetry and output hashing remain separate
+from the A4 text, row-I8, and RS8/RS13 A8 families.
+
+The accepted Release 11.5B disconnected reduced-retire replay is fault-free in **234.460 s**:
+`build/probe-mode8-menu-i8-rs1617-executed-11.5b.stdout.log` records the run and
+`build/probe-mode8-menu-i8-rs1617-executed-11.5b.stderr.log` is empty. The menu profile
+executes 124/124 candidates with reject mask `00` and raster reject `0`: 124 batches, 248
+triangles, and 4,776,480 each of fragments, alpha passes, color writes, and samples; its hash
+is `ecbecc3b80917983`. Recorder-only work is 683 states / 2,065 batches. Earlier profile
+counts are unchanged, while destination interaction rebases their hashes to A4
+`b719e98aa60676c3`, row-I8 `27545230ed7deda3`, and A8 `21933973698fca35`.
+
+The selected scanout has RGBA FNV64 `5ddd492f7bb48be9`; the artifact
+`build/frame-mode8-menu-i8-rs1617-executed-11.5b.ppm` has SHA-256
+`7125D8EA84C6FD24A4A250094416F0EC6C2DCCFD1CE6882B4DF095877CDFA4B0`; the matching image is
+`build/frame-mode8-menu-i8-rs1617-executed-11.5b.png`. Exact comparison against the prior
+selected-row frame finds 32,398 changed pixels within `180x214+270+158`. Visual inspection
+shows a coherent, subtle dark menu-column panel/border around the list while retaining the
+blue selected row. This establishes visual panel visibility only; it does **not** establish
+input, navigation, or a guest-owned selection change. Next: the remaining exact visual census
+and, independently, the Controller-S embedded-hub / endpoint-2 input topology boundary.
+
 ## 2026-08-08 — A4: RS8/RS13 direct-color quads establish default selected-row visibility
 
 The exact RS8/RS13 four-immediate-vertex format-6 family now executes as a separate bounded

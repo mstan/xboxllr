@@ -48,14 +48,14 @@ harvested from xemu, silicon-corrected against a live console. GPL-2.
   timeout path and launches `evoxdash`. Its dominant witnessed immediate-mode A4R4G4B4 quad
   family now renders the real main-menu labels into the alternating 720x480 buffers through
   the retail PFIFO/PGRAPH/unified-RAM/PCRTC path. The paired I8/palette row quad also executes
-  exactly. Its format-6 RS8/RS13 direct A8R8G8B8 sibling now executes as well, producing the
-  visible default My Programs selection bar and reducing the recorder-only census to 685
-  states / 2,189 batches. This is default-row visibility, not input-driven selection or
-  navigation.
-- **Immediate burn-down path:** census the RS16/RS17 menu-column family as the next exact
-  visual boundary, validate the dashboard frame against a real-Xbox reference, and in parallel
-  observe real XID endpoint polling behind the Controller S embedded hub before proving basic
-  D-pad/A/B menu navigation.
+  exactly. Its format-6 RS8/RS13 direct A8R8G8B8 sibling produces the visible default My
+  Programs selection bar. The independently witnessed RS16/RS17 64x128 I8+palette family now
+  adds the subtle dark menu-column panel/border around that list, leaving 683 states / 2,065
+  batches recorder-only. This is visual panel/default-row visibility, not input-driven
+  selection or navigation.
+- **Immediate burn-down path:** continue the passive exact visual census, validate the
+  dashboard frame against a real-Xbox reference, and in parallel observe real XID endpoint
+  polling behind the Controller S embedded hub before proving basic D-pad/A/B menu navigation.
 - **Not started:** A5 end-to-end retail-dashboard navigation and Arc 2 game work.
 
 ## Where the boot stands RIGHT NOW
@@ -380,6 +380,26 @@ dependency chain peeled this session is:
     `180x29+270+158`. This proves default selected-row visibility only—not controller input,
     navigation, or a guest-owned state transition. Next: RS16/RS17 menu-column evidence or
     the Controller-S embedded-hub / endpoint-2 topology needed to prove input.
+
+42. RS16/RS17 indexed menu-column family → **panel visibility is rendered exactly**.
+    The exact four-immediate-vertex state samples a 64x128 swizzled I8 texture through DMA A,
+    expands its adjacent little-endian A8R8G8B8 palette before bilinear filtering, then applies
+    the captured alpha-kill, combiner, and source-alpha blend state to either alternating pitch
+    target. The full retained-state IQRS diagnostic landed in `1f6e7a7`; it distinguishes this
+    family from a captured zero-final-factor lookalike, which stays recorder-only. The Release
+    11.5B disconnected reduced-retire replay finishes fault-free in 234.460 s with empty
+    `build/probe-mode8-menu-i8-rs1617-executed-11.5b.stderr.log`; its stdout companion records
+    124/124 candidates, reject `00` / raster reject `0`, 124 batches, 248 triangles, and
+    4,776,480 fragments/alpha passes/color writes/samples, hash `ecbecc3b80917983`.
+    Recorder-only work is 683 states / 2,065 batches. Earlier profile counts are unchanged;
+    destination interactions rebase their hashes to A4 `b719e98aa60676c3`, row-I8
+    `27545230ed7deda3`, and A8 `21933973698fca35`. The final scanout FNV64 is
+    `5ddd492f7bb48be9`; `build/frame-mode8-menu-i8-rs1617-executed-11.5b.ppm` has SHA-256
+    `7125D8EA84C6FD24A4A250094416F0EC6C2DCCFD1CE6882B4DF095877CDFA4B0`, with matching PNG.
+    Exact comparison against the selected-row frame finds 32,398 changed pixels in
+    `180x214+270+158`; visual inspection shows a coherent subtle dark menu-column panel/border
+    around the list while retaining the blue selected row. This is visual fidelity only, not
+    input, navigation, or a guest-owned selection change.
 
 ## How to build & run
 
