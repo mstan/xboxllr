@@ -48,12 +48,14 @@ harvested from xemu, silicon-corrected against a live console. GPL-2.
   timeout path and launches `evoxdash`. Its dominant witnessed immediate-mode A4R4G4B4 quad
   family now renders the real main-menu labels into the alternating 720x480 buffers through
   the retail PFIFO/PGRAPH/unified-RAM/PCRTC path. The paired I8/palette row quad also executes
-  exactly, reducing the recorder-only census by another 875 batches, although its accepted
-  replay is byte-identical at scanout and therefore does not establish a visible selection
-  cue.
-- **Immediate burn-down path:** execute the remaining witnessed mode-8 visual families,
-  validate the dashboard frame against a real-Xbox reference, observe real XID endpoint
-  polling behind the Controller S embedded hub, and prove basic D-pad/A/B menu navigation.
+  exactly. Its format-6 RS8/RS13 direct A8R8G8B8 sibling now executes as well, producing the
+  visible default My Programs selection bar and reducing the recorder-only census to 685
+  states / 2,189 batches. This is default-row visibility, not input-driven selection or
+  navigation.
+- **Immediate burn-down path:** census the RS16/RS17 menu-column family as the next exact
+  visual boundary, validate the dashboard frame against a real-Xbox reference, and in parallel
+  observe real XID endpoint polling behind the Controller S embedded hub before proving basic
+  D-pad/A/B menu navigation.
 - **Not started:** A5 end-to-end retail-dashboard navigation and Arc 2 game work.
 
 ## Where the boot stands RIGHT NOW
@@ -356,6 +358,28 @@ dependency chain peeled this session is:
     returned 32/80 bytes with CC9, and halted its ED. Do not weaken that correct OHCI rule:
     the device-tree fidelity gap is the missing Controller S embedded three-port hub ahead of
     the XID child; exact hub descriptor bytes require the warned real-hardware probe workflow.
+
+41. RS8/RS13 format-6 immediate dashboard family → **default selected row is visible**.
+    The exact four-vertex direct-color sibling of RS0/RS3 samples a swizzled 128x32
+    little-endian A8R8G8B8 texture through DMA A, applies the captured alpha-kill,
+    combiner, and source-alpha blend state, and writes both alternating pitch targets.
+    Palette state stays passive for format 6; only indexed I8 admission requires it. A
+    Release 11.5B disconnected reduced-retire replay completes fault-free in 243.144 s
+    with empty `build/probe-mode8-a8-rs813-executed-11.5b.stderr.log`; its stdout companion
+    records 125/125 A8 candidates, reject `00` / raster reject `0`, 250 triangles, and
+    652,500 fragments/alpha passes/color writes/samples, hash `61d45aeeec495fe5`.
+    Recorder-only work is 685 states / 2,189 batches. I8 remains
+    875/1,750/4,567,500 with hash `070a0f9ca1d32663`; A4 remains
+    875/15,500/1,731,000/558,625, though its output hash becomes
+    `1cd0461e8bed58b3` because new destination contents participate in later blending.
+    The final scanout is FNV64 `52613982b9d8fdd9` and
+    `build/frame-mode8-a8-rs813-executed-11.5b.ppm` hashes SHA-256
+    `1A2FEAA99EB423F710B390D412ED520B014E397ECB359CDD64E96852C5C53817`.
+    Visual inspection and exact comparison against the prior accepted frame show a coherent
+    180x29 bar at x=270,y=158 behind My Programs: 4,725 pixels differ, exactly within
+    `180x29+270+158`. This proves default selected-row visibility only—not controller input,
+    navigation, or a guest-owned state transition. Next: RS16/RS17 menu-column evidence or
+    the Controller-S embedded-hub / endpoint-2 topology needed to prove input.
 
 ## How to build & run
 

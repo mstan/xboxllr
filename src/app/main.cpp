@@ -1018,6 +1018,22 @@ int main(int argc, char** argv) {
                             (unsigned long long)mach.nv2a()->immediate_quad_i8_candidates(),
                             mach.nv2a()->last_immediate_quad_i8_reject_mask(),
                             mach.nv2a()->last_immediate_quad_i8_raster_reject_mask());
+                std::printf("[2bl] NV2A immediate-quad A8R8G8B8: "
+                            "batches/tri/frags/alpha/writes/samples="
+                            "%llu/%llu/%llu/%llu/%llu/%llu "
+                            "last=%08x hash=%016llx candidates=%llu "
+                            "reject-mask=%02x raster-reject=%06x\n",
+                            (unsigned long long)mach.nv2a()->immediate_quad_a8_raster_batches(),
+                            (unsigned long long)mach.nv2a()->immediate_quad_a8_raster_triangles(),
+                            (unsigned long long)mach.nv2a()->immediate_quad_a8_raster_fragments(),
+                            (unsigned long long)mach.nv2a()->immediate_quad_a8_raster_alpha_passes(),
+                            (unsigned long long)mach.nv2a()->immediate_quad_a8_raster_writes(),
+                            (unsigned long long)mach.nv2a()->immediate_quad_a8_texture_samples(),
+                            mach.nv2a()->last_immediate_quad_a8_raster_address(),
+                            (unsigned long long)mach.nv2a()->immediate_quad_a8_raster_output_hash(),
+                            (unsigned long long)mach.nv2a()->immediate_quad_a8_candidates(),
+                            mach.nv2a()->last_immediate_quad_a8_reject_mask(),
+                            mach.nv2a()->last_immediate_quad_a8_raster_reject_mask());
                 std::printf("[2bl] NV2A vertices: batches=%llu submitted=%llu "
                             "attr-fetches=%llu primitives=%llu triangles=%llu max-index=%u\n",
                             (unsigned long long)mach.nv2a()->vertex_batches(),

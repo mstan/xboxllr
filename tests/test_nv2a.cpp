@@ -3659,6 +3659,152 @@ int main() {
         CHECK(quad_gpu.last_immediate_quad_i8_reject_mask() != 0);
         CHECK(quad_gpu.last_immediate_quad_i8_raster_reject_mask() != 0);
 
+        // RS8/RS13 retain the same four-immediate-vertex pixel pipeline but
+        // sample direct format-6 A8R8G8B8 texels.  Palette0 is stale state for
+        // this format: changing it must not turn a valid direct-color draw
+        // into the indexed profile or affect its result.
+        const auto before_a8_a4_batches = quad_gpu.immediate_quad_raster_batches();
+        const auto before_a8_a4_writes = quad_gpu.immediate_quad_raster_writes();
+        const auto before_a8_a4_hash = quad_gpu.immediate_quad_raster_output_hash();
+        const auto before_a8_i8_batches = quad_gpu.immediate_quad_i8_raster_batches();
+        const auto before_a8_i8_writes = quad_gpu.immediate_quad_i8_raster_writes();
+        const auto before_a8_i8_hash = quad_gpu.immediate_quad_i8_raster_output_hash();
+        constexpr uint32_t kA8TextureOffset = 0x02DEF080;
+        constexpr uint32_t kI8TextureOffset = 0x02DED480;
+        const uint32_t a8_texture_address =
+            i8_texture_address + (kA8TextureOffset - kI8TextureOffset);
+        CHECK(a8_texture_address + 128 * 32 * sizeof(uint32_t) <= quad_ram.size());
+        emit_quad(0x0184, 3);
+        emit_quad(0x0210, 0x03C8C000);
+        emit_quad(0x0344, 0x0302);
+        emit_quad(0x1B00, kA8TextureOffset);
+        emit_quad(0x1B04, 0x05710629);
+        emit_quad(0x1B20, 0xDEADBEEF);
+        std::fill(quad_ram.begin() + a8_texture_address,
+                  quad_ram.begin() + a8_texture_address +
+                      128 * 32 * sizeof(uint32_t),
+                  0);
+        const std::vector<uint8_t> a8_zero_alpha_before(
+            quad_ram.begin() + rs2_color_address,
+            quad_ram.begin() + rs2_color_address + color_bytes);
+        submit_i8_quad(i8_quad);
+        CHECK(quad_fault.empty());
+        CHECK(quad_gpu.immediate_quad_a8_raster_batches() == 1);
+        CHECK(quad_gpu.immediate_quad_a8_raster_alpha_passes() == 0);
+        CHECK(quad_gpu.immediate_quad_a8_raster_writes() == 0);
+        CHECK(std::equal(a8_zero_alpha_before.begin(), a8_zero_alpha_before.end(),
+                         quad_ram.begin() + rs2_color_address));
+
+        // Make the direct texels non-uniform.  The 272 sample verifies
+        // bilinear interpolation and partial alpha blending; the high-X tail
+        // catches a square-Morton interpretation of this 128x32 texture.
+        for (uint32_t index = 0; index < 128 * 32; ++index)
+            put32(quad_ram, a8_texture_address + index * sizeof(uint32_t),
+                  0x80C81428);
+        for (uint32_t y = 0; y < 32; ++y) {
+            put32(quad_ram,
+                  a8_texture_address + i8_morton(2, y) * sizeof(uint32_t),
+                  0x400A1EDC);
+            put32(quad_ram,
+                  a8_texture_address + i8_morton(66, y) * sizeof(uint32_t),
+                  0xFF123456);
+            put32(quad_ram,
+                  a8_texture_address + i8_morton(67, y) * sizeof(uint32_t),
+                  0xFF123456);
+        }
+        put32(quad_ram, rs2_color_address + 160 * 0x0C00 + 272 * 4,
+              0xFF204060);
+        put32(quad_ram, rs2_color_address + 160 * 0x0C00 + 364 * 4, 0);
+        submit_i8_quad(i8_quad);
+        CHECK(quad_fault.empty());
+        CHECK(quad_gpu.immediate_quad_a8_raster_batches() == 2);
+        CHECK(quad_gpu.immediate_quad_a8_raster_writes() > 0);
+        CHECK(surface_pixel(rs2_color_address, 272, 160) == i8_expected());
+        CHECK(surface_pixel(rs2_color_address, 364, 160) == 0xFF123456);
+
+        // RS8 is the alternating first target with the exact same texture
+        // state.  Keep Palette0 stale here as a second admission check.
+        emit_quad(0x0210, 0x03DF4000);
+        put32(quad_ram, color_address + 160 * 0x0C00 + 272 * 4,
+              0xFF204060);
+        submit_i8_quad(i8_quad);
+        CHECK(quad_fault.empty());
+        CHECK(quad_gpu.immediate_quad_a8_raster_batches() == 3);
+        CHECK(surface_pixel(color_address, 272, 160) == i8_expected());
+
+        // The profile admits the exact four-vertex immediate source, not a
+        // frozen post-VSH geometry tuple.  A small valid UV change executes;
+        // adding a fifth immediate vertex is recorder-only.
+        auto a8_variant = i8_quad;
+        a8_variant[0][2] = 0.02f;
+        submit_i8_quad(a8_variant);
+        CHECK(quad_fault.empty());
+        CHECK(quad_gpu.immediate_quad_a8_raster_batches() == 4);
+        const auto a8_before_fifth_batches =
+            quad_gpu.immediate_quad_a8_raster_batches();
+        auto a8_five = std::array<std::array<float, 4>, 5>{};
+        for (size_t index = 0; index < i8_quad.size(); ++index)
+            a8_five[index] = i8_quad[index];
+        a8_five[4] = {{270.0f, 158.0f, 0.0f, 0.0f}};
+        submit_i8_quad(a8_five);
+        CHECK(quad_fault.empty());
+        CHECK(quad_gpu.immediate_quad_a8_raster_batches() == a8_before_fifth_batches);
+        CHECK(quad_gpu.immediate_quad_a8_candidates() == 4);
+        CHECK(quad_gpu.last_immediate_quad_a8_reject_mask() == 0);
+
+        // A one-word blend mutation remains a recorder-only A8
+        // candidate.  It cannot change the separate A8 output accounting.
+        const auto a8_batches = quad_gpu.immediate_quad_a8_raster_batches();
+        const auto a8_writes = quad_gpu.immediate_quad_a8_raster_writes();
+        const auto a8_hash = quad_gpu.immediate_quad_a8_raster_output_hash();
+        emit_quad(0x0344, 0x0301);
+        submit_i8_quad(i8_quad);
+        CHECK(quad_fault.empty());
+        CHECK(quad_gpu.immediate_quad_a8_raster_batches() == a8_batches);
+        CHECK(quad_gpu.immediate_quad_a8_raster_writes() == a8_writes);
+        CHECK(quad_gpu.immediate_quad_a8_raster_output_hash() == a8_hash);
+        CHECK(quad_gpu.immediate_quad_a8_candidates() == 5);
+        CHECK(quad_gpu.last_immediate_quad_a8_reject_mask() != 0);
+        CHECK(quad_gpu.last_immediate_quad_a8_raster_reject_mask() != 0);
+
+        // An undersized direct-texture DMA window fails before sampling or
+        // writing the color target, just as the indexed path below does.
+        emit_quad(0x0344, 0x0302);
+        const std::vector<uint8_t> before_a8_dma_reject(
+            quad_ram.begin() + color_address,
+            quad_ram.begin() + color_address + color_bytes);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x700020, 4, 4);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x700024, 4, 0x80010050);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x700500, 4, 0x3D);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x700504, 4, 0);
+        quad_gpu.mmio_write(xlle::Nv2a::kBase + 0x700508, 4, 0x05313000);
+        emit_quad(0x0184, 4);
+        submit_i8_quad(i8_quad);
+        CHECK(quad_fault ==
+              "NV2A immediate-quad A8R8G8B8 texture DMA range is invalid");
+        CHECK(quad_gpu.immediate_quad_a8_raster_batches() == a8_batches);
+        CHECK(quad_gpu.immediate_quad_a8_raster_writes() == a8_writes);
+        CHECK(quad_gpu.immediate_quad_a8_raster_output_hash() == a8_hash);
+        CHECK(std::equal(before_a8_dma_reject.begin(), before_a8_dma_reject.end(),
+                         quad_ram.begin() + color_address));
+        CHECK(quad_gpu.immediate_quad_a8_candidates() == 6);
+        CHECK(quad_gpu.last_immediate_quad_a8_reject_mask() == 0);
+        quad_fault.clear();
+
+        // Restore the indexed state exactly; its own DMA rejection test is
+        // intentionally kept below so its historical counters/hashes remain
+        // independently comparable.
+        emit_quad(0x0184, 3);
+        emit_quad(0x1B00, kI8TextureOffset);
+        emit_quad(0x1B04, 0x05710B29);
+        emit_quad(0x1B20, 0x02DED080);
+        CHECK(quad_gpu.immediate_quad_raster_batches() == before_a8_a4_batches);
+        CHECK(quad_gpu.immediate_quad_raster_writes() == before_a8_a4_writes);
+        CHECK(quad_gpu.immediate_quad_raster_output_hash() == before_a8_a4_hash);
+        CHECK(quad_gpu.immediate_quad_i8_raster_batches() == before_a8_i8_batches);
+        CHECK(quad_gpu.immediate_quad_i8_raster_writes() == before_a8_i8_writes);
+        CHECK(quad_gpu.immediate_quad_i8_raster_output_hash() == before_a8_i8_hash);
+
         // A DMA-A object with an undersized window fails the I8 texture range
         // before sampling or color-surface writes. The profile's pixel-state
         // candidate telemetry still records this as an otherwise exact attempt.

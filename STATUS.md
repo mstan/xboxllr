@@ -3,6 +3,37 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-08 — A4: RS8/RS13 direct-color quads establish default selected-row visibility
+
+The exact RS8/RS13 four-immediate-vertex format-6 family now executes as a separate bounded
+mode-8 profile. It samples the witnessed swizzled 128x32 little-endian A8R8G8B8 image directly
+through DMA A, with the captured I8 sibling combiner, texture alpha kill, and source-alpha
+blend, into either alternating pitch target. `TEXPALETTE0` is retained as passive evidence but
+is deliberately not an A8 admission gate; it applies only to the indexed I8 path. Telemetry and
+hashing remain separate from the historical A4 and I8 families.
+
+The accepted Release 11.5B disconnected reduced-retire replay is fault-free in **243.144 s**:
+`build/probe-mode8-a8-rs813-executed-11.5b.stdout.log` records the run and
+`build/probe-mode8-a8-rs813-executed-11.5b.stderr.log` is empty. It admits and executes all 125/125 A8
+candidates with reject mask `00` and raster reject `0`: 250 triangles and 652,500 each of
+fragments, alpha passes, color writes, and samples; A8 hash `61d45aeeec495fe5`.
+Recorder-only work is 685 states / 2,189 batches. I8 remains 875 batches / 1,750 triangles /
+4,567,500 fragments, samples, alpha passes, and writes with hash `070a0f9ca1d32663`; A4
+remains 875 batches / 15,500 triangles / 1,731,000 fragments and samples / 558,625 alpha
+passes and writes. Its output hash is now `1cd0461e8bed58b3` because the newly rendered
+destination participates in later blending, rather than because its profile changed.
+
+The final selected scanout has RGBA FNV64 `52613982b9d8fdd9`; the artifact
+`build/frame-mode8-a8-rs813-executed-11.5b.ppm` has SHA-256
+`1A2FEAA99EB423F710B390D412ED520B014E397ECB359CDD64E96852C5C53817`; the matching image is
+`build/frame-mode8-a8-rs813-executed-11.5b.png`. Visual inspection proves a coherent 180x29
+selection bar at x=270, y=158 behind **My Programs**. Exact comparison with the preceding
+accepted frame finds 4,725 changed pixels and bounding box `180x29+270+158`. This establishes
+default selected-row visibility only; it does **not** establish controller input, menu
+navigation, or a guest-owned selection change.
+The next visual census target is the RS16/RS17 menu-column family, in parallel with the
+Controller-S embedded-hub / endpoint-2 input-topology boundary.
+
 ## 2026-08-08 — A4: indexed dashboard quads execute; controller topology blocker isolated
 
 The exact immediate mode-8 RS0/RS3 I8+palette family now executes as a second bounded
