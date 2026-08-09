@@ -53,7 +53,9 @@ harvested from xemu, silicon-corrected against a live console. GPL-2.
   adds the subtle dark menu-column panel/border around that list. IQRS3/IQRS7's 512x128
   I8+palette artwork now adds coherent upper-left **mediacenter home** logo/art. IQRS5/IQRS10's
   512x512 direct A8R8G8B8 image now reveals the full controller background/main panel, leaving
-  earlier counters intact. This is visual panel/default-row/artwork/background visibility, not
+  earlier counters intact. IQRS4/IQRS7's 1024x1024 direct A8R8G8B8 image completes the blue/teal
+  controller-home composition, with earlier counters still intact. This is visual
+  panel/default-row/artwork/background visibility, not
   input-driven selection or navigation.
 - **Immediate burn-down path:** continue the passive exact visual census, validate the
   dashboard frame against a real-Xbox reference, and in parallel observe real XID endpoint
@@ -441,6 +443,30 @@ dependency chain peeled this session is:
     retaining text and selection. The +3.759 s (1.58%) single-run change is subject to noise;
     both runs remain in the roughly four-minute band. This does not establish input or
     navigation: the Controller-S embedded-hub topology still blocks guest endpoint polling.
+
+45. IQRS4/IQRS7 full-screen A8R8G8B8 family → **controller-home composition is complete**.
+    The exact four-immediate-vertex pair samples a 1024x1024 swizzled little-endian A8R8G8B8
+    texture through DMA A, with stale palette state passive. The captured alpha-kill, combiner,
+    nonzero final factors, and source-alpha blend write either full-clip pitch target; the
+    zero-final-factor IQRS12 lookalike remains recorder-only. The accepted fresh rebuilt Release
+    11.5B disconnected reduced-retire replay completes fault-free in 266.058 s with empty
+    `build/probe-mode8-fullscreen-a8-executed-11.5b.stderr.log`; its stdout companion records
+    124/124 candidates, reject `00` / raster reject `0`, 124 batches, 248 triangles, and
+    42,854,400 fragments/alpha passes/color writes/samples, last `03f5bf38`, hash
+    `d595bb56f28eb6c3`. Earlier profile counts remain unchanged, though destination interactions
+    rebase downstream hashes. The stale-binary 288.861 s run is invalid evidence and is not
+    accepted. The valid +24.670 s (+10.22%) delta from the 241.388 s main-panel run is material
+    and the next optimization target; it is still one clean, no-concurrent-builds run and thus
+    subject to normal single-run noise.
+
+    The final scanout FNV64 is `5994d8280fd524cd`; the PPM
+    `build/frame-mode8-fullscreen-a8-executed-11.5b.ppm` has SHA-256
+    `D936A993E5441E8D424E3406AE844BE2FA41A179C5F50C239B444009C6382C33`, and its PNG has SHA-256
+    `21035B38E17B3C146C1E5E391FDA6BB0CC6956BC033457843B6F43D2300870DB`. The matching diff and
+    stdout/stderr logs live in `build/`. Exact comparison against the main-panel milestone finds
+    342,914 changed pixels within `565x390+45+39`; visual inspection shows the complete blue/teal
+    background/final controller-home composition. This makes no input or navigation claim: the
+    Controller-S embedded hub still blocks guest polling.
 
 ## How to build & run
 

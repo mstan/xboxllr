@@ -3,6 +3,36 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-08 — A4: full-screen background completes the controller-home composition
+
+The exact IQRS4/IQRS7 four-immediate-vertex family now executes as a separate bounded mode-8
+profile. It samples the witnessed 1024x1024 swizzled little-endian A8R8G8B8 image through DMA
+A, with stale palette state deliberately passive, and applies the captured alpha-kill,
+combiner, nonzero final factors, and source-alpha blend state to either full-clip pitch target.
+The zero-final-factor IQRS12 lookalike remains recorder-only. Telemetry and output hashing are
+separate from every earlier immediate family.
+
+The accepted **fresh rebuilt Release** 11.5B disconnected reduced-retire replay is fault-free
+in **266.058 s**: `build/probe-mode8-fullscreen-a8-executed-11.5b.stdout.log` records the run
+and its stderr companion is empty. The profile executes 124/124 candidates with reject mask
+`00` and raster reject `0`: 124 batches, 248 triangles, and 42,854,400 each of fragments,
+alpha passes, color writes, and samples; last address `03f5bf38`, hash
+`d595bb56f28eb6c3`. Earlier profile counts remain unchanged, although downstream destination
+interactions rebase their hashes. A discarded 288.861 s stale-binary run is invalid evidence
+and is not accepted. The valid run is +24.670 s (+10.22%) over the main-panel replay; this is a
+material next optimization target, while remaining a clean single-run measurement with no
+concurrent builds and normal noise caveat.
+
+The selected scanout has RGBA FNV64 `5994d8280fd524cd`. The PPM artifact
+`build/frame-mode8-fullscreen-a8-executed-11.5b.ppm` has SHA-256
+`D936A993E5441E8D424E3406AE844BE2FA41A179C5F50C239B444009C6382C33`; its PNG companion has
+SHA-256 `21035B38E17B3C146C1E5E391FDA6BB0CC6956BC033457843B6F43D2300870DB`. The corresponding
+diff image and stdout/stderr logs are retained in `build/`. Exact comparison against the
+main-panel milestone finds 342,914 changed pixels within `565x390+45+39`. Visual inspection
+shows the complete blue/teal background and final controller-home composition. This remains
+visual fidelity only: it does **not** establish input or navigation, and the Controller-S
+embedded hub still blocks guest polling.
+
 ## 2026-08-08 — A4: main-panel background completes the controller home composition
 
 The exact IQRS5/IQRS10 four-immediate-vertex family now executes as a bounded main-panel
