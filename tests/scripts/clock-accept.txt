@@ -1,0 +1,20 @@
+# clock-accept.txt -- calibrated stock-dashboard clock acceptance replay.
+#
+# With the finite 256-entry CACHE1 queue and class-0x44 pattern-color state,
+# the full clock UI is visible by 10.5B instructions. The same synthetic-hub
+# route has endpoint-2 report 120 at 10B and then polls every 8 ms, about
+# 5.8667M instructions/report. Report 220 is therefore approximately 10.59B,
+# after the captured full-clock checkpoint.
+#
+# count buttons a0 a1 a2 a3 a4 a5 a6 a7 lx ly rx ry [capture name]
+
+# Capture the untouched clock screen, then hold analog A for five delivered
+# reports (40 ms), matching the already proven Down-then-A delivery width.
+220  0000 0xff 0 0 0 0 0 0 0 0 0 0 0 capture clock-ready
++5   0000 0    0 0 0 0 0 0 0 0 0 0 0
++5   0000 0    0 0 0 0 0 0 0 0 0 0 0 capture post-a-40ms
+
+# One-second neutral checkpoints through the expected main-menu transition.
++125 0000 0 0 0 0 0 0 0 0 0 0 0 0 capture settle-1s
++125 0000 0 0 0 0 0 0 0 0 0 0 0 0 capture settle-2s
++125 0000 0 0 0 0 0 0 0 0 0 0 0 0 capture settle-3s

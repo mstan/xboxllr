@@ -345,6 +345,10 @@ uint64_t XboxMachine::run(uint32_t start, uint64_t max, std::string& err) {
         done += n;
         total_insns_ += n;
 
+        // A host/device safety stop can retire zero instructions. Surface it before
+        // advancing device clocks or allocating any optional diagnostic buffers.
+        if (!cerr.empty()) { err = cerr; break; }
+
         {
             perf::ScopedAdd perf_t(perf::g_ns_host_poll_devices, perf::g_calls_host_poll_devices);
             if (pit_) pit_->set_time(total_insns_ * Pit8254::kPitFreq / kCpuHz);
@@ -363,8 +367,6 @@ uint64_t XboxMachine::run(uint32_t start, uint64_t max, std::string& err) {
             if (ohci0_) ohci0_->set_frame(total_insns_ * 1000 / kCpuHz);
             if (ohci1_) ohci1_->set_frame(total_insns_ * 1000 / kCpuHz);
         }
-        if (!cerr.empty()) { err = cerr; break; }  // device fault-stop wins
-
         // Deliver one pending, unmasked external interrupt at this boundary. Confirm the guest
         // can take it (inject succeeds) BEFORE committing the PIC's ISR/ack bookkeeping — an
         // ack without delivery would wedge the line in-service.

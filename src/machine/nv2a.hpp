@@ -991,6 +991,9 @@ private:
     std::vector<PushMethod> clear_trace_methods_;
     std::array<uint64_t, 0x800> method_counts_{};
     std::array<uint64_t, 256> class_method_counts_{};
+    // CACHE1 exposes 0x800 bytes of interleaved METHOD/DATA storage at
+    // 0x1800..0x1fff: 0x800 / 8 = 256 method/data entries.
+    static constexpr size_t kPullQueueCapacity = 256;
     std::deque<PushMethod> pull_queue_;
     std::function<bool(uint32_t, void*, size_t)> mem_read_;
     std::function<bool(uint32_t, const void*, size_t)> mem_write_;
@@ -1014,6 +1017,7 @@ private:
     uint32_t pgraph_nsource_ = 0;
     uint32_t pgraph_trapped_addr_ = 0;
     uint32_t pgraph_trapped_data_ = 0;
+    uint32_t patt_color0_ = 0;
 
     // Minimal Kelvin color-surface state. Object-taking methods hold resolved PRAMIN
     // instances, matching the PFIFO puller's RAMHT translation before PGRAPH dispatch.
@@ -1377,6 +1381,7 @@ private:
     void process_pushbuffer(uint8_t channel);
     bool pusher_enabled(uint8_t channel) const;
     void drain_pull_queue();
+    void resume_pushbuffers();
     void dispatch_method(PushMethod push);
     bool bind_object(uint8_t channel, uint8_t subchannel, uint32_t handle);
     bool resolve_object(uint8_t channel, uint32_t handle, uint32_t& instance);

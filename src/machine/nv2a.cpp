@@ -27,7 +27,18 @@ public:
     PagedRasterSurface(uint32_t address, size_t size,
                        const ReadFn& read, const WriteFn& write)
         : address_(address), size_(size), read_(read), write_(write),
-          pages_((size + kPageSize - 1) / kPageSize) {}
+          pages_((size + kPageSize - 1) / kPageSize) {
+        perf::record_paged_surface(size_);
+    }
+
+    ~PagedRasterSurface() {
+        perf::release_paged_surface_bytes(resident_bytes_);
+    }
+
+    PagedRasterSurface(const PagedRasterSurface&) = delete;
+    PagedRasterSurface& operator=(const PagedRasterSurface&) = delete;
+    PagedRasterSurface(PagedRasterSurface&&) = delete;
+    PagedRasterSurface& operator=(PagedRasterSurface&&) = delete;
 
     bool read16(size_t offset, uint16_t& value) {
         return access(offset, value, false);
@@ -83,6 +94,8 @@ private:
                 page.bytes.clear();
                 return false;
             }
+            resident_bytes_ += page.bytes.size();
+            perf::record_paged_surface_page(page.bytes.size());
         }
         if (sizeof(T) > page.bytes.size() - in_page) return false;
         if (write) {
@@ -99,6 +112,7 @@ private:
     const ReadFn& read_;
     const WriteFn& write_;
     std::vector<Page> pages_;
+    size_t resident_bytes_ = 0;
 };
 
 class SwizzleLookup {
@@ -244,10 +258,11 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
         }
     } else if (blk->off == 0x002000) {  // PFIFO
         switch (bo) {
-            // The recorder consumes each kick synchronously, so both the runout FIFO and
-            // CACHE1 are empty whenever the CPU can observe them (LOW_MARK in xemu).
-            case 0x400: return 1u << 4;   // NV_PFIFO_RUNOUT_STATUS: empty
-            case 0x1214: return 1u << 4;  // NV_PFIFO_CACHE1_STATUS: empty
+            case 0x400:
+                return pull_queue_.empty() ? 1u << 4 : 0u;
+            case 0x1214:
+                return (pull_queue_.empty() ? 1u << 4 : 0u) |
+                       (pull_queue_.size() >= kPullQueueCapacity ? 1u << 8 : 0u);
             default: break;
         }
         auto it = pfifo_regs_.find(bo);
@@ -265,6 +280,7 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
             case 0x710: return pgraph_surface();
             case 0x71C: return 0;  // NV_PGRAPH_INCREMENT (write-only)
             case 0x720: return pgraph_fifo_access_ ? 1u : 0u;
+            case 0xB10: return patt_color0_;  // NV_PGRAPH_PATT_COLOR0
             // Kelvin's clear-value methods also feed the two PGRAPH parameter shadows.
             // The retail kernel reads PARAMETER_A after a trapped NOP 0x304 and queues it
             // as the next PCRTC start address (the same hardware path documented by pbkit).
@@ -376,7 +392,7 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
             ++pgraph_read_increments_;
             if (waiting_for_flip_ && flip_read_ != flip_write_) {
                 waiting_for_flip_ = false;
-                drain_pull_queue();
+                resume_pushbuffers();
             }
         }
         return;
@@ -385,7 +401,7 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
         pgraph_intr_ &= ~value;  // NV_PGRAPH_INTR is write-1-clear
         if (!(pgraph_intr_ & (1u << 20))) waiting_for_nop_ = false;
         update_irq();
-        drain_pull_queue();
+        resume_pushbuffers();
         return;
     }
     if (blk->off == 0x400000 && bo == 0x140) {
@@ -395,7 +411,7 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
     }
     if (blk->off == 0x400000 && bo == 0x720) {
         pgraph_fifo_access_ = (value & 1u) != 0;
-        if (pgraph_fifo_access_) drain_pull_queue();
+        if (pgraph_fifo_access_) resume_pushbuffers();
         return;
     }
     if (blk->off == 0x002000) {
@@ -6040,6 +6056,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         uint32_t border = 0;
     };
     std::array<TextureStage, 4> texture_stages;
+    size_t generic_texture_bytes_this_batch = 0;
     const uint32_t shader_stage_program = raster_state_[kRasterShaderStageProgram];
     auto decode_address_mode = [](uint32_t byte, bool& supported) {
         supported = true;
@@ -6089,6 +6106,9 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 fault_("NV2A generic-combiner texture DMA read failed");
                 return false;
             }
+            generic_texture_bytes_this_batch += ts.data.size();
+            perf::record_generic_texture_allocation(
+                ts.data.size(), generic_texture_bytes_this_batch);
             ts.linear = true;
             ts.valid = true;
         } else if (shader_stage_program == 0 ||
@@ -6161,6 +6181,9 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 fault_("NV2A generic-combiner texture DMA read failed");
                 return false;
             }
+            generic_texture_bytes_this_batch += ts.data.size();
+            perf::record_generic_texture_allocation(
+                ts.data.size(), generic_texture_bytes_this_batch);
             ts.swizzle = std::make_unique<SwizzleLookup>(ts.width, ts.height);
             ts.address_u = address_u;
             ts.address_v = address_v;
@@ -7002,13 +7025,20 @@ void Nv2a::dispatch_method(PushMethod push) {
     if (method < 0x2000 && !(method & 3u)) ++method_counts_[method >> 2];
 
     // PFIFO resolves SET_OBJECT through RAMHT, then PGRAPH caches the object's class for
-    // this subchannel. Only Kelvin (class 0x97) methods may mutate the 3D/scanout state.
+    // this subchannel.
     if (method == 0) {
         if (object_bound)
             ++class_method_counts_[object_class_[subchannel]];
         return;
     }
     ++class_method_counts_[object_class_[subchannel]];
+    // NV_CONTEXT_PATTERN (class 0x44) method NV044_SET_MONOCHROME_COLOR0 feeds the
+    // guest-readable PGRAPH pattern-color shadow. The stock dashboard polls this state
+    // while setting up its 2D context; modeling the register does not render 2D methods.
+    if (object_class_[subchannel] == 0x44) {
+        if (method == 0x0310) patt_color0_ = parameter;
+        return;
+    }
     if (object_class_[subchannel] != 0x97) return;
 
     // NV097 flip queue. FLIP_INCREMENT_WRITE advances the producer modulo; FLIP_STALL
@@ -7582,12 +7612,25 @@ void Nv2a::dispatch_method(PushMethod push) {
     }
 }
 
+void Nv2a::resume_pushbuffers() {
+    drain_pull_queue();
+    if (waiting_for_flip_ || waiting_for_nop_ || !pgraph_fifo_access_) return;
+    for (uint8_t channel = 0; channel < channels_.size(); ++channel) {
+        const ChannelState& ch = channels_[channel];
+        if (ch.get_initialized && ch.get != ch.put && pusher_enabled(channel)) {
+            process_pushbuffer(channel);
+            if (waiting_for_flip_ || waiting_for_nop_ || !pgraph_fifo_access_) return;
+        }
+    }
+}
+
 void Nv2a::drain_pull_queue() {
     while (!waiting_for_flip_ && !waiting_for_nop_ && pgraph_fifo_access_ &&
            !pull_queue_.empty()) {
-        PushMethod m = pull_queue_.front();
+        PushMethod push = pull_queue_.front();
         pull_queue_.pop_front();
-        dispatch_method(m);
+        perf::record_pfifo_queue_pop();
+        dispatch_method(push);
     }
 }
 
@@ -7607,6 +7650,9 @@ bool Nv2a::pusher_enabled(uint8_t channel) const {
 void Nv2a::process_pushbuffer(uint8_t channel) {
     perf::ScopedAdd perf_t(perf::g_ns_nv2a_pushbuffer, perf::g_calls_nv2a_pushbuffer);
     auto& ch = channels_[channel];
+    // CACHE1 is finite hardware storage, not an unbounded host command queue. The
+    // pusher may prefetch METHOD/DATA entries while PGRAPH is blocked, but stops at
+    // the 256-entry high-water mark and leaves later commands behind DMA_GET.
     if (!mem_read_) {
         fault_("NV2A PFIFO has no unified-memory read callback");
         return;
@@ -7614,7 +7660,8 @@ void Nv2a::process_pushbuffer(uint8_t channel) {
 
     constexpr uint32_t kMaxWordsPerKick = 4u * 1024u * 1024u;
     uint32_t words = 0;
-    while (ch.get != ch.put && words++ < kMaxWordsPerKick) {
+    while (ch.get != ch.put && pull_queue_.size() < kPullQueueCapacity &&
+           words++ < kMaxWordsPerKick) {
         uint32_t word = 0;
         uint32_t fetch = 0;
         if (!dma_object_address(ch.dma_instance, ch.get, fetch)) {
@@ -7635,11 +7682,13 @@ void Nv2a::process_pushbuffer(uint8_t channel) {
         ch.get += 4;
 
         if (ch.method_count) {
-            pull_queue_.push_back(PushMethod{0, channel, ch.subchannel, 0,
-                                             static_cast<uint16_t>(ch.method), word,
-                                             ch.get, ch.put});
+            pull_queue_.push_back(PushMethod{
+                0, channel, ch.subchannel, 0,
+                static_cast<uint16_t>(ch.method), word, ch.get, ch.put});
+            perf::record_pfifo_queue_push();
             if (!ch.non_incrementing) ch.method += 4;
             --ch.method_count;
+            drain_pull_queue();
             continue;
         }
 
@@ -7685,7 +7734,6 @@ void Nv2a::process_pushbuffer(uint8_t channel) {
     // time the CPU can read either aperture, so publish the consumed offset to both views.
     pfifo_regs_[0x1244] = ch.get;
     if (words >= kMaxWordsPerKick) fault_("NV2A PFIFO command guard exhausted");
-    drain_pull_queue();
 }
 
 uint32_t Nv2a::pgraph_surface() const {

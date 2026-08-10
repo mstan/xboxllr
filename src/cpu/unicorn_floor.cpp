@@ -5,6 +5,7 @@
 // adequate for the A0 fixture spike; precise retirement / restartable-fault boundaries are
 // a later contract we validate against hardware. This is called out, not papered over.
 #include "cpu/unicorn_floor.hpp"
+#include "cpu/unicorn_metrics.h"
 
 #include <unicorn/unicorn.h>
 
@@ -50,6 +51,12 @@ UnicornFloor::UnicornFloor() {
 
 UnicornFloor::~UnicornFloor() {
     if (uc_) uc_close(reinterpret_cast<uc_engine*>(uc_));
+}
+
+void UnicornFloor::hook_region_counts(uint64_t& code_regions,
+                                      uint64_t& count_regions) const {
+    xlle_unicorn_hook_region_counts(uc_, hook_code_, &code_regions,
+                                    &count_regions);
 }
 
 bool UnicornFloor::map_mem(uint32_t addr, size_t size) {
@@ -279,6 +286,19 @@ bool UnicornFloor::inject_interrupt(uint8_t vector, std::string& err) {
 uint64_t UnicornFloor::run(uint32_t start_eip, uint64_t max_insns, std::string& err) {
     uc_engine* uc = reinterpret_cast<uc_engine*>(uc_);
     const uint64_t before = seq_;
+    // request_stop() is also used by servicing callbacks between CPU chunks. In that
+    // case no uc_emu_start is active yet, so uc_emu_stop alone cannot do anything;
+    // preserve the pending reason and refuse to enter the next chunk. Stop requests
+    // are intentionally sticky because continuing after a device/host safety fault
+    // would violate the floor's loud-stop contract.
+    if (!stop_reason_.empty()) {
+        const X86Regs r = get_regs();
+        char buf[320];
+        std::snprintf(buf, sizeof(buf), "%s (eip=0x%08x, after 0 insns)",
+                      stop_reason_.c_str(), r.eip);
+        err = buf;
+        return 0;
+    }
     stop_reason_.clear();
     last_fault_addr_ = 0;
     last_fault_type_ = 0;

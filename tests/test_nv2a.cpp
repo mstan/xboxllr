@@ -127,6 +127,7 @@ int main() {
     CHECK(gpu.pgraph_read_increments() == 1);
     CHECK(gpu.semaphore_writes() == 2);
     CHECK(get32(ram, 0x3040) == 0xCAFEBABEu);
+    CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x800044, 4) == 0x3C);
     CHECK(gpu.pgraph_surface() == 0x21000000u);  // modulo=2, read=1, write=0
 
     // A nonzero NV097 NOP is the kernel's software-method notification. It raises PGRAPH
@@ -146,6 +147,7 @@ int main() {
 
     CHECK(irq);
     CHECK(gpu.pgraph_notifications() == 1);
+    CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x800044, 4) == 0x4C);
     CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x000100, 4) == (1u << 12));
     CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x400100, 4) == (1u << 20));
     CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x400708, 4) == 0x304u);
@@ -158,6 +160,7 @@ int main() {
     gpu.mmio_write(xlle::Nv2a::kBase + 0x400720, 4, 1);
     CHECK(gpu.semaphore_writes() == 3);
     CHECK(get32(ram, 0x3040) == 0x0BADF00Du);
+    CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x800044, 4) == 0x4C);
 
     // The D3D runtime disables CACHE1_PUSH0 before rebuilding a channel. PUT is cleared
     // before GET; that transient mismatch must not execute stale pushbuffer data.
@@ -170,6 +173,30 @@ int main() {
     gpu.mmio_write(xlle::Nv2a::kBase + 0x003200, 4, 1);
     CHECK(fault.empty());
     CHECK(gpu.push_methods() == methods_before_reset);
+
+    // NV_CONTEXT_PATTERN class 0x44 SET_MONOCHROME_COLOR0 updates the guest-readable
+    // NV_PGRAPH_PATT_COLOR0 shadow even though 2D rendering itself remains unimplemented.
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700200, 4, 0x00000044);
+    put32(ram, pb + 0x00, (1u << 18) | 0x0000u);
+    put32(ram, pb + 0x04, 0x00000001u);
+    put32(ram, pb + 0x08, (1u << 18) | 0x0310u);
+    put32(ram, pb + 0x0C, 0x89ABCDEFu);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, 0x10);
+    CHECK(fault.empty());
+    CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x400B10, 4) == 0x89ABCDEFu);
+    CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x800044, 4) == 0x10);
+
+    // Restore and rebind Kelvin for the remaining 3D tests.
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700200, 4, 0x00000097);
+    put32(ram, pb + 0x10, (1u << 18) | 0x0000u);
+    put32(ram, pb + 0x14, 0x00000001u);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, 0x18);
+    CHECK(fault.empty());
+    CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x800044, 4) == 0x18);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x003200, 4, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x003240, 4, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x003244, 4, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x003200, 4, 1);
 
     // Kelvin resources share zero-based unified-memory DMA objects.
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700010, 4, 0x00000002);
@@ -214,7 +241,9 @@ int main() {
     CHECK(gpu.zeta_clear_pixels() == 1);
     CHECK(gpu.last_zeta_clear_address() == 0x6000);
     CHECK(gpu.method_count(0x1D94) == 2);
-    CHECK(gpu.class_method_count(0x97) == gpu.push_methods());
+    CHECK(gpu.class_method_count(0x44) == 2);
+    CHECK(gpu.class_method_count(0x97) + gpu.class_method_count(0x44) ==
+          gpu.push_methods());
     CHECK(gpu.class_method_count(0) == 0);
     CHECK(get32(ram, 0x5000) == 0x11BB3344);
     CHECK(get32(ram, 0x5010) == 0);

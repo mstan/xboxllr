@@ -26,6 +26,7 @@ FetchContent_Declare(unicorn
   GIT_TAG 2.1.1
   GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(unicorn)
+target_sources(unicorn PRIVATE src/cpu/unicorn_metrics.c)
 
 # --- NV2A CPU vertex-shader interpreter (same pinned reference used by xemu) ---
 set(nv2a_vsh_cpu_UNIT_TEST OFF CACHE BOOL "" FORCE)
@@ -102,6 +103,9 @@ endif()
 add_executable(xlle src/app/main.cpp)
 target_include_directories(xlle PRIVATE ${XLLE_INCLUDES})
 target_link_libraries(xlle PRIVATE xlle_obs xlle_cpu xlle_machine xlle_spike xlle_host xlle_net)
+if(WIN32)
+  target_link_libraries(xlle PRIVATE psapi)
+endif()
 
 # Put SDL3.dll next to the exe so `xlle --window` runs without a manual PATH.
 if(XLLE_WITH_SDL)
@@ -168,6 +172,11 @@ add_executable(test_machine_config tests/test_machine_config.cpp)
 target_include_directories(test_machine_config PRIVATE ${XLLE_INCLUDES})
 target_link_libraries(test_machine_config PRIVATE xlle_machine)
 add_test(NAME machine_config COMMAND test_machine_config)
+
+add_executable(test_unicorn_floor tests/test_unicorn_floor.cpp)
+target_include_directories(test_unicorn_floor PRIVATE ${XLLE_INCLUDES})
+target_link_libraries(test_unicorn_floor PRIVATE xlle_cpu)
+add_test(NAME unicorn_floor COMMAND test_unicorn_floor)
 
 add_executable(test_nvnet tests/test_nvnet.cpp src/machine/nvnet.cpp)
 target_include_directories(test_nvnet PRIVATE ${XLLE_INCLUDES})

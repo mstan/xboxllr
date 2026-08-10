@@ -47,6 +47,8 @@ public:
     uint64_t run(uint32_t start_eip, uint64_t max_insns, std::string& err) override;
 
     bool ok() const { return uc_ != nullptr; }
+    void hook_region_counts(uint64_t& code_regions,
+                            uint64_t& count_regions) const;
 
 private:
     // C-ABI trampolines Unicorn calls; they recover `this` from user_data.

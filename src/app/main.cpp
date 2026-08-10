@@ -17,6 +17,12 @@
 #include <thread>
 #include <vector>
 
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <psapi.h>
+#endif
+
 #include "cpu/unicorn_floor.hpp"
 #include "host/ethernet_udp.hpp"
 #include "host/sdl_shell.hpp"
@@ -37,6 +43,112 @@ namespace {
 Ring<RetiredInsn> g_retired(1u << 16);
 Ring<MemEvent> g_mem(1u << 16);
 constexpr uint64_t kMinFrameSeriesInterval = 1000000;
+
+struct HostMemoryUsage {
+    uint64_t working_set = 0;
+    uint64_t private_commit = 0;
+};
+
+struct HostHeapUsage {
+    uint64_t allocated = 0;
+    uint64_t committed = 0;
+    uint64_t reserved = 0;
+    uint64_t heaps = 0;
+};
+
+#if defined(_WIN32)
+HANDLE g_host_memory_job = nullptr;
+#endif
+
+bool query_host_memory(HostMemoryUsage& usage) {
+#if defined(_WIN32)
+    PROCESS_MEMORY_COUNTERS_EX counters{};
+    counters.cb = sizeof(counters);
+    if (!GetProcessMemoryInfo(
+            GetCurrentProcess(),
+            reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&counters),
+            sizeof(counters))) {
+        return false;
+    }
+    usage.working_set = static_cast<uint64_t>(counters.WorkingSetSize);
+    usage.private_commit = static_cast<uint64_t>(counters.PrivateUsage);
+    return true;
+#else
+    (void)usage;
+    return false;
+#endif
+}
+
+bool query_host_heaps(HostHeapUsage& usage) {
+#if defined(_WIN32)
+    const DWORD count = GetProcessHeaps(0, nullptr);
+    if (!count) return false;
+    std::vector<HANDLE> heaps(count);
+    const DWORD returned = GetProcessHeaps(count, heaps.data());
+    if (!returned || returned > count) return false;
+    for (DWORD i = 0; i < returned; ++i) {
+        HEAP_SUMMARY summary{};
+        summary.cb = sizeof(summary);
+        if (!HeapSummary(heaps[i], 0, &summary)) return false;
+        usage.allocated += static_cast<uint64_t>(summary.cbAllocated);
+        usage.committed += static_cast<uint64_t>(summary.cbCommitted);
+        usage.reserved += static_cast<uint64_t>(summary.cbReserved);
+    }
+    usage.heaps = returned;
+    return true;
+#else
+    (void)usage;
+    return false;
+#endif
+}
+
+bool install_host_memory_limit(uint64_t bytes, std::string& error) {
+#if defined(_WIN32)
+    HostMemoryUsage usage;
+    if (!query_host_memory(usage)) {
+        error = "GetProcessMemoryInfo failed before installing memory limit";
+        return false;
+    }
+    if (usage.private_commit >= bytes) {
+        char buf[192];
+        std::snprintf(
+            buf, sizeof(buf),
+            "current private commit %llu MiB already meets/exceeds limit %llu MiB",
+            static_cast<unsigned long long>(usage.private_commit / (1024ull * 1024ull)),
+            static_cast<unsigned long long>(bytes / (1024ull * 1024ull)));
+        error = buf;
+        return false;
+    }
+    HANDLE job = CreateJobObjectW(nullptr, nullptr);
+    if (!job) {
+        error = "CreateJobObjectW failed with Windows error " +
+                std::to_string(GetLastError());
+        return false;
+    }
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_PROCESS_MEMORY;
+    limits.ProcessMemoryLimit = static_cast<SIZE_T>(bytes);
+    if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation,
+                                 &limits, sizeof(limits))) {
+        error = "SetInformationJobObject failed with Windows error " +
+                std::to_string(GetLastError());
+        CloseHandle(job);
+        return false;
+    }
+    if (!AssignProcessToJobObject(job, GetCurrentProcess())) {
+        error = "AssignProcessToJobObject failed with Windows error " +
+                std::to_string(GetLastError());
+        CloseHandle(job);
+        return false;
+    }
+    g_host_memory_job = job;  // Process-lifetime handle: keeps the hard limit active.
+    return true;
+#else
+    (void)bytes;
+    error = "host memory limits are unsupported on this platform";
+    return false;
+#endif
+}
 
 uint32_t reg_field(const X86Regs& r, int i) {
     switch (i) {
@@ -206,6 +318,7 @@ int main(int argc, char** argv) {
     uint64_t frame_series_every = 0;
     uint64_t net_bind_port = 0;
     uint64_t net_peer_port = 0;
+    uint64_t max_host_memory_mb = 0;
     uint64_t max_insns = 128ull * 1000 * 1000;  // 2BL kernel LZX decompress needs tens of M
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--serve")) serve = true;
@@ -284,6 +397,21 @@ int main(int argc, char** argv) {
         }
         else if (!std::strcmp(argv[i], "--max-insns") && i + 1 < argc)
             max_insns = std::strtoull(argv[++i], nullptr, 0);
+        else if (!std::strcmp(argv[i], "--max-host-memory-mb") &&
+                 i + 1 < argc) {
+            const char* limit = argv[++i];
+            char* end = nullptr;
+            errno = 0;
+            max_host_memory_mb = std::strtoull(limit, &end, 0);
+            if (!limit[0] || limit[0] == '-' || errno == ERANGE || !end ||
+                *end != '\0' || max_host_memory_mb == 0 ||
+                max_host_memory_mb > UINT64_MAX / (1024ull * 1024ull)) {
+                std::fprintf(
+                    stderr,
+                    "[host] --max-host-memory-mb needs a positive integer\n");
+                return 1;
+            }
+        }
         else {
             std::fprintf(stderr, "[host] unknown or incomplete option: %s\n", argv[i]);
             return 1;
@@ -398,6 +526,22 @@ int main(int argc, char** argv) {
                      "[input] --test-synthetic-controller-hub-input-down-a cannot be "
                      "combined with live UDP Ethernet\n");
         return 1;
+    }
+
+    const uint64_t max_host_memory_bytes =
+        max_host_memory_mb * 1024ull * 1024ull;
+    if (max_host_memory_bytes != 0) {
+        std::string memory_limit_error;
+        if (!install_host_memory_limit(max_host_memory_bytes,
+                                       memory_limit_error)) {
+            std::fprintf(stderr, "[host] memory limit unavailable: %s\n",
+                         memory_limit_error.c_str());
+            return 1;
+        }
+        std::printf(
+            "[host] hard process-memory limit armed: %llu MiB; "
+            "soft stop at 90%%\n",
+            static_cast<unsigned long long>(max_host_memory_mb));
     }
 
     // --boot <flash.bin>: stand up the machine (RAM + flash) and smoke-test the map.
@@ -538,6 +682,44 @@ int main(int argc, char** argv) {
             std::string live_scanout_error;
             uint64_t next_frame_series_insn = frame_series_every;
             bool frame_series_exhausted = false;
+            auto print_memory_diagnostics = [&]() {
+                if (!perf_accounting) return;
+                HostMemoryUsage process;
+                HostHeapUsage heaps;
+                const bool process_ok = query_host_memory(process);
+                const bool heaps_ok = query_host_heaps(heaps);
+                if (process_ok) {
+                    std::printf(
+                        "[host-memory] working-set=%llu private-commit=%llu",
+                        static_cast<unsigned long long>(process.working_set),
+                        static_cast<unsigned long long>(process.private_commit));
+                    if (heaps_ok) {
+                        std::printf(
+                            " heap-count=%llu heap-allocated=%llu "
+                            "heap-committed=%llu heap-reserved=%llu",
+                            static_cast<unsigned long long>(heaps.heaps),
+                            static_cast<unsigned long long>(heaps.allocated),
+                            static_cast<unsigned long long>(heaps.committed),
+                            static_cast<unsigned long long>(heaps.reserved));
+                    } else {
+                        std::printf(" heap-summary=unavailable");
+                    }
+                    std::printf("\n");
+                } else {
+                    std::printf("[host-memory] process-counters=unavailable\n");
+                }
+                auto* unicorn = dynamic_cast<UnicornFloor*>(&mach.cpu());
+                if (unicorn) {
+                    uint64_t code_regions = 0;
+                    uint64_t count_regions = 0;
+                    unicorn->hook_region_counts(code_regions, count_regions);
+                    std::printf(
+                        "[unicorn-memory] code-hook-regions=%llu "
+                        "count-hook-regions=%llu\n",
+                        static_cast<unsigned long long>(code_regions),
+                        static_cast<unsigned long long>(count_regions));
+                }
+            };
             auto capture_frame_series = [&]() {
                 if (!frame_series_requested || frame_series_exhausted ||
                     mach.total_insns() < next_frame_series_insn ||
@@ -560,9 +742,13 @@ int main(int argc, char** argv) {
                                     live_scanout.width, live_scanout.height);
                 std::printf(
                     "[host] frame-series deadline=%llu insns=%llu "
-                    "hash=%016llx %s: %s%s%s\n",
+                    "endpoint2=%llu hash=%016llx %s: %s%s%s\n",
                     static_cast<unsigned long long>(deadline),
                     static_cast<unsigned long long>(sampled_at),
+                    static_cast<unsigned long long>(
+                        mach.ohci0()
+                            ? mach.ohci0()->xid_endpoint2_input_reports()
+                            : 0),
                     static_cast<unsigned long long>(
                         captured ? frame_hash(live_rgba) : 0),
                     path, written ? "written" : "FAILED",
@@ -570,6 +756,15 @@ int main(int argc, char** argv) {
                     live_scanout_error.empty()
                         ? ""
                         : (live_scanout_error + ")").c_str());
+                const std::string memory_report =
+                    xlle::perf::format_memory_report();
+                if (!memory_report.empty())
+                    std::printf("%s\n", memory_report.c_str());
+                print_memory_diagnostics();
+                // Long stock-dashboard probes redirect stdout to a file. Flush each
+                // checkpoint so allocation growth is observable before a host-memory
+                // safety stop instead of being lost in the stdio buffer.
+                std::fflush(stdout);
                 if (UINT64_MAX - next_frame_series_insn <
                     frame_series_every) {
                     frame_series_exhausted = true;
@@ -630,12 +825,50 @@ int main(int argc, char** argv) {
                 mach.nvnet()->set_link(false);
                 std::printf("[net] Ethernet cable disconnected (opt-in)\n");
             }
+            const uint64_t soft_host_memory_stop_bytes =
+                max_host_memory_bytes - max_host_memory_bytes / 10;
+            auto next_host_memory_check = std::chrono::steady_clock::now();
             if (interactive || net_requested || frame_series_requested ||
+                max_host_memory_bytes != 0 ||
                 test_synthetic_controller_hub_input_down ||
                 test_synthetic_controller_hub_input_down_a || test_input_script) {
                 mach.on_host_poll([&]() {
                     // Host event processing is nonblocking and guest state changes only on this
                     // emulation thread. XID endpoint 2 observes it on its next periodic TD.
+                    if (max_host_memory_bytes != 0) {
+                        const auto now = std::chrono::steady_clock::now();
+                        if (now >= next_host_memory_check) {
+                            next_host_memory_check = now + std::chrono::milliseconds(250);
+                            HostMemoryUsage usage;
+                            if (!query_host_memory(usage)) {
+                                const char* reason =
+                                    "GetProcessMemoryInfo failed while enforcing "
+                                    "host memory limit";
+                                std::fprintf(stderr, "[host] SAFETY STOP: %s\n", reason);
+                                std::fflush(stderr);
+                                mach.cpu().request_stop(reason);
+                                return;
+                            }
+                            if (usage.working_set > soft_host_memory_stop_bytes ||
+                                usage.private_commit > soft_host_memory_stop_bytes) {
+                                char reason[192];
+                                std::snprintf(
+                                    reason, sizeof(reason),
+                                    "host memory reached soft limit: working-set=%llu MiB "
+                                    "private=%llu MiB hard-limit=%llu MiB",
+                                    static_cast<unsigned long long>(
+                                        usage.working_set / (1024ull * 1024ull)),
+                                    static_cast<unsigned long long>(
+                                        usage.private_commit / (1024ull * 1024ull)),
+                                    static_cast<unsigned long long>(
+                                        max_host_memory_mb));
+                                std::fprintf(stderr, "[host] SAFETY STOP: %s\n", reason);
+                                std::fflush(stderr);
+                                mach.cpu().request_stop(reason);
+                                return;
+                            }
+                        }
+                    }
                     if (test_synthetic_controller_hub_input_down) {
                         const bool configured = mach.ohci0()->xid_configuration() == 1;
                         const uint64_t endpoint2_reports =
@@ -1090,11 +1323,43 @@ int main(int argc, char** argv) {
                         (unsigned long long)max_insns);
             std::string err2;
             uint64_t n = mach.run(0x901ee, max_insns, err2);
+            const bool host_memory_safety_stop =
+                err2.find("host memory reached soft limit") != std::string::npos ||
+                err2.find("GetProcessMemoryInfo failed while enforcing host memory limit") !=
+                    std::string::npos;
+            if (host_memory_safety_stop) {
+                // Preserve the soft-to-hard-limit headroom. Full scanout, raster-state,
+                // scheduler, and stack diagnostics allocate temporary vectors and can turn
+                // a controlled memory stop into std::bad_alloc before teardown.
+                const std::string perf_report = xlle::perf::format_report();
+                if (!perf_report.empty()) std::printf("%s\n", perf_report.c_str());
+                const std::string memory_report = xlle::perf::format_memory_report();
+                if (!memory_report.empty()) std::printf("%s\n", memory_report.c_str());
+                print_memory_diagnostics();
+                host_input.close();
+                const X86Regs stopped = mach.cpu().get_regs();
+                std::printf(
+                    "[2bl] retired %llu instructions; final eip=0x%08x eax=0x%08x "
+                    "ecx=0x%08x\n",
+                    static_cast<unsigned long long>(n), stopped.eip, stopped.eax,
+                    stopped.ecx);
+                std::printf("[2bl] STOPPED: %s\n", err2.c_str());
+                std::printf(
+                    "[host] allocation-heavy final diagnostics skipped after memory "
+                    "safety stop\n");
+                std::fflush(stdout);
+                return 2;
+            }
             // The run may cross its final series deadline after the last 1 kHz host poll.
             capture_frame_series();
             {
                 const std::string perf_report = xlle::perf::format_report();
                 if (!perf_report.empty()) std::printf("%s\n", perf_report.c_str());
+                const std::string memory_report =
+                    xlle::perf::format_memory_report();
+                if (!memory_report.empty())
+                    std::printf("%s\n", memory_report.c_str());
+                print_memory_diagnostics();
             }
             host_input.close();
             if (test_synthetic_controller_hub_input_down) {
