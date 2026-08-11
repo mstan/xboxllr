@@ -6825,7 +6825,8 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         }
         const bool dashboard_project2d_state =
             dashboard_fullscreen_vertices && color_format_a8 && uses_depth &&
-            depth_test_enabled_bit && depth_func == 0x0207 &&
+            depth_test_enabled_bit &&
+            (depth_func == 0x0202 || depth_func == 0x0207) &&
             raster_state_[kRasterDepthMask] == 0 && alpha_test_enabled &&
             alpha_func == 0x0206 &&
             (raster_state_[kRasterAlphaRef] & 0xFFu) == 1 &&
@@ -6905,6 +6906,9 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 packet.fixture_blend_enabled = blend_enabled;
                 packet.fixture_blend_src = blend_src;
                 packet.fixture_blend_dst = blend_dst;
+                packet.fixture_depth_test_enabled = depth_func == 0x0202;
+                packet.fixture_depth_write_enabled = false;
+                packet.fixture_depth_func = depth_func;
                 packet.fixture_color_format_x8 = color_format_x8;
             }
         }

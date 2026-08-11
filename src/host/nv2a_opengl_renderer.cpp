@@ -103,9 +103,12 @@ constexpr unsigned int kGlFramebufferComplete = 0x8CD5;
 constexpr unsigned int kGlTexture2D = 0x0DE1;
 constexpr unsigned int kGlRgba8 = 0x8058;
 constexpr unsigned int kGlDepth24Stencil8 = 0x88F0;
+constexpr unsigned int kGlR32ui = 0x8236;
 constexpr unsigned int kGlRgba = 0x1908;
+constexpr unsigned int kGlRedInteger = 0x8D94;
 constexpr unsigned int kGlDepthStencil = 0x84F9;
 constexpr unsigned int kGlUnsignedByte = 0x1401;
+constexpr unsigned int kGlUnsignedInt = 0x1405;
 constexpr unsigned int kGlUnsignedInt248 = 0x84FA;
 constexpr unsigned int kGlFloat = 0x1406;
 constexpr unsigned int kGlTriangles = 0x0004;
@@ -563,12 +566,14 @@ noperspective out vec2 tex0_out;
 noperspective out vec2 tex1_out;
 noperspective out vec2 tex2_out;
 noperspective out vec2 tex3_out;
+flat out uint depth24_out;
 uniform vec2 surface_size;
 void main() {
     tex0_out = in_tex0.xy;
     tex1_out = in_tex1.xy;
     tex2_out = in_tex2.xy;
     tex3_out = in_tex3.xy;
+    depth24_out = uint(clamp(in_position.z, 0.0, 16777215.0));
     vec2 ndc = vec2(in_position.x / surface_size.x * 2.0 - 1.0,
                     1.0 - in_position.y / surface_size.y * 2.0);
     gl_Position = vec4(ndc, 0.0, 1.0);
@@ -580,10 +585,13 @@ noperspective in vec2 tex0_out;
 noperspective in vec2 tex1_out;
 noperspective in vec2 tex2_out;
 noperspective in vec2 tex3_out;
+flat in uint depth24_out;
 layout(std430, binding = 0) readonly buffer Texture0 { uint tex0_words[]; };
 layout(std430, binding = 1) readonly buffer Texture1 { uint tex1_words[]; };
 layout(std430, binding = 2) readonly buffer Texture2 { uint tex2_words[]; };
 layout(std430, binding = 3) readonly buffer Texture3 { uint tex3_words[]; };
+uniform usampler2D depth_words;
+uniform uint use_depth_equal;
 uniform uint factor_stage2;
 uniform uint factor_stage4;
 layout(location = 0) out vec4 out_color;
@@ -652,6 +660,10 @@ vec4 sample_a8(uint stage, vec2 uv) {
     return vec4(1.0, 1.0, 1.0, a);
 }
 void main() {
+    if (use_depth_equal != 0u) {
+        uint stored = texelFetch(depth_words, ivec2(gl_FragCoord.xy), 0).r >> 8;
+        if (stored != depth24_out) discard;
+    }
     vec4 t0 = sample_t0(tex0_out);
     vec4 t1 = sample_a8(1u, tex1_out);
     vec4 t2 = sample_a8(2u, tex2_out);
@@ -716,6 +728,8 @@ public:
                 if (surface.texture) delete_textures_(1, &surface.texture);
                 if (surface.depth_texture)
                     delete_textures_(1, &surface.depth_texture);
+                if (surface.depth_word_texture)
+                    delete_textures_(1, &surface.depth_word_texture);
             }
         }
         if (resident_source_texture_ && delete_textures_)
@@ -845,8 +859,14 @@ public:
             }
         }
         if (packet.fixture_depth_test_enabled || packet.fixture_depth_write_enabled) {
-            if (!texture_fixture || !packet.fixture_depth_test_enabled ||
-                packet.fixture_depth_func != 0x0203) {
+            const bool texture_depth_ok =
+                texture_fixture && packet.fixture_depth_test_enabled &&
+                packet.fixture_depth_func == 0x0203;
+            const bool dashboard_depth_ok =
+                dashboard_fixture && packet.fixture_depth_test_enabled &&
+                !packet.fixture_depth_write_enabled &&
+                packet.fixture_depth_func == 0x0202;
+            if (!texture_depth_ok && !dashboard_depth_ok) {
                 return false;
             }
             if (packet.depth_address == 0 || packet.depth_input.size() > size) {
@@ -1025,7 +1045,9 @@ public:
         }
         bind_framebuffer_(kGlFramebuffer, resident_fbo_);
         viewport_(0, 0, static_cast<int>(width), static_cast<int>(height));
-        if (packet.fixture_depth_test_enabled) {
+        const bool native_depth_test = packet.fixture_depth_test_enabled &&
+                                       !dashboard_fixture;
+        if (native_depth_test) {
             enable_(kGlDepthTest);
             depth_func_(gl_depth_func(packet.fixture_depth_func));
         } else {
@@ -1073,6 +1095,20 @@ public:
             uniform_1ui_(uniform_location_(program, "texture_passthrough"),
                          packet.fixture_texture_passthrough ? 1u : 0u);
         } else if (dashboard_fixture) {
+            if (packet.fixture_depth_test_enabled) {
+                if (!active_depth_resident_ ||
+                    !active_depth_resident_->depth_word_texture) {
+                    error = "OpenGL resident dashboard missing zeta-word texture";
+                    return false;
+                }
+                active_texture_(kGlTexture0 + 1);
+                bind_texture_(kGlTexture2D,
+                              active_depth_resident_->depth_word_texture);
+                uniform_1i_(uniform_location_(program, "depth_words"), 1);
+                uniform_1ui_(uniform_location_(program, "use_depth_equal"), 1u);
+            } else {
+                uniform_1ui_(uniform_location_(program, "use_depth_equal"), 0u);
+            }
             uniform_1ui_(uniform_location_(program, "factor_stage2"),
                          packet.fixture_factor0_stage2_argb);
             uniform_1ui_(uniform_location_(program, "factor_stage4"),
@@ -1611,6 +1647,7 @@ private:
         bool x8 = false;
         unsigned int texture = 0;
         unsigned int depth_texture = 0;
+        unsigned int depth_word_texture = 0;
         uint32_t address = 0;
         size_t size = 0;
         uint32_t pitch = 0;
@@ -1925,8 +1962,26 @@ private:
         } else {
             bind_texture_(kGlTexture2D, slot.depth_texture);
         }
+        if (!slot.depth_word_texture) {
+            gen_textures_(1, &slot.depth_word_texture);
+            if (!slot.depth_word_texture) {
+                error = "OpenGL resident zeta-word texture allocation failed";
+                return false;
+            }
+            bind_texture_(kGlTexture2D, slot.depth_word_texture);
+            tex_parameter_i_(kGlTexture2D, kGlTextureMinFilter, kGlNearest);
+            tex_parameter_i_(kGlTexture2D, kGlTextureMagFilter, kGlNearest);
+            tex_parameter_i_(kGlTexture2D, kGlTextureWrapS, kGlClampToEdge);
+            tex_parameter_i_(kGlTexture2D, kGlTextureWrapT, kGlClampToEdge);
+        }
         std::vector<uint32_t> gl_depth;
         guest_d24s8_to_gl(packet.depth_input, gl_depth, width, height);
+        bind_texture_(kGlTexture2D, slot.depth_word_texture);
+        pixel_store_i_(kGlUnpackAlignment, 4);
+        tex_image_2d_(kGlTexture2D, 0, kGlR32ui,
+                      static_cast<int>(width), static_cast<int>(height), 0,
+                      kGlRedInteger, kGlUnsignedInt, gl_depth.data());
+        bind_texture_(kGlTexture2D, slot.depth_texture);
         pixel_store_i_(kGlUnpackAlignment, 4);
         tex_image_2d_(kGlTexture2D, 0, kGlDepth24Stencil8,
                       static_cast<int>(width), static_cast<int>(height), 0,

@@ -5554,6 +5554,39 @@ int main() {
                 CHECK(dashboard_resolve.address == dashboard_packet.color_address);
                 CHECK(dashboard_resolve.data == dashboard_sync.color_output);
 
+                auto dashboard_depth_packet = dashboard_packet;
+                dashboard_depth_packet.color_address = 0x02800000;
+                dashboard_depth_packet.depth_address = 0x02A80000;
+                dashboard_depth_packet.color_input.assign(0x1400u * 480u, 0);
+                dashboard_depth_packet.depth_input.assign(0x1400u * 480u, 0);
+                fill_words(dashboard_depth_packet.depth_input, 0xFFFFFFFFu);
+                dashboard_depth_packet.fixture_depth_test_enabled = true;
+                dashboard_depth_packet.fixture_depth_write_enabled = false;
+                dashboard_depth_packet.fixture_depth_func = 0x0202;  // EQUAL.
+                CHECK(gl_renderer->supports_resident_generic_combiner(
+                    dashboard_depth_packet));
+                xlle::Nv2aGenericCombinerResult dashboard_depth_resident;
+                CHECK(gl_renderer->submit_resident_generic_combiner(
+                    dashboard_depth_packet, dashboard_depth_resident,
+                    dashboard_error));
+                if (!dashboard_error.empty())
+                    std::printf("OpenGL resident dashboard-depth error: %s\n",
+                                dashboard_error.c_str());
+                xlle::Nv2aResidentColorResolve dashboard_depth_resolve;
+                CHECK(gl_renderer->resolve_resident_color_surface(
+                    dashboard_depth_packet.color_address,
+                    dashboard_depth_packet.color_input.size(),
+                    dashboard_depth_resolve, dashboard_error));
+                CHECK(dashboard_depth_resolve.address ==
+                      dashboard_depth_packet.color_address);
+                CHECK(dashboard_depth_resolve.data == dashboard_sync.color_output);
+                xlle::Nv2aResidentDepthResolve dashboard_depth_zeta_resolve;
+                CHECK(gl_renderer->resolve_resident_depth_surface(
+                    dashboard_depth_packet.depth_address,
+                    dashboard_depth_packet.depth_input.size(),
+                    dashboard_depth_zeta_resolve, dashboard_error));
+                CHECK(dashboard_depth_zeta_resolve.data.empty());
+
                 xlle::Nv2aGenericCombinerPacket depth_packet;
                 depth_packet.compute_fixture =
                     xlle::Nv2aGenericCombinerPacket::ComputeFixture::
