@@ -73,7 +73,10 @@ struct Nv2aGenericCombinerPacket {
     uint32_t fixture_factor0_stage4_argb = 0;
     uint32_t fixture_blend_src = 0;
     uint32_t fixture_blend_dst = 0;
+    uint32_t fixture_depth_func = 0x0207;
     bool fixture_blend_enabled = false;
+    bool fixture_depth_test_enabled = false;
+    bool fixture_depth_write_enabled = false;
     bool fixture_texture_passthrough = false;
     bool fixture_color_format_x8 = false;
 };

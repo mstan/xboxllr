@@ -67,6 +67,8 @@ using GlViewport = void (*)(int, int, int, int);
 using GlScissor = void (*)(int, int, int, int);
 using GlEnable = void (*)(unsigned int);
 using GlDisable = void (*)(unsigned int);
+using GlDepthFunc = void (*)(unsigned int);
+using GlDepthMask = void (*)(unsigned char);
 using GlBlendFunc = void (*)(unsigned int, unsigned int);
 using GlBlendEquation = void (*)(unsigned int);
 using GlColorMask = void (*)(unsigned char, unsigned char, unsigned char, unsigned char);
@@ -96,15 +98,27 @@ constexpr unsigned int kGlShaderStorageBarrierBit = 0x2000;
 constexpr unsigned int kGlBufferUpdateBarrierBit = 0x0200;
 constexpr unsigned int kGlFramebuffer = 0x8D40;
 constexpr unsigned int kGlColorAttachment0 = 0x8CE0;
+constexpr unsigned int kGlDepthStencilAttachment = 0x821A;
 constexpr unsigned int kGlFramebufferComplete = 0x8CD5;
 constexpr unsigned int kGlTexture2D = 0x0DE1;
 constexpr unsigned int kGlRgba8 = 0x8058;
+constexpr unsigned int kGlDepth24Stencil8 = 0x88F0;
 constexpr unsigned int kGlRgba = 0x1908;
+constexpr unsigned int kGlDepthStencil = 0x84F9;
 constexpr unsigned int kGlUnsignedByte = 0x1401;
+constexpr unsigned int kGlUnsignedInt248 = 0x84FA;
 constexpr unsigned int kGlFloat = 0x1406;
 constexpr unsigned int kGlTriangles = 0x0004;
 constexpr unsigned int kGlBlend = 0x0BE2;
 constexpr unsigned int kGlDepthTest = 0x0B71;
+constexpr unsigned int kGlNever = 0x0200;
+constexpr unsigned int kGlLess = 0x0201;
+constexpr unsigned int kGlEqual = 0x0202;
+constexpr unsigned int kGlLequal = 0x0203;
+constexpr unsigned int kGlGreater = 0x0204;
+constexpr unsigned int kGlNotequal = 0x0205;
+constexpr unsigned int kGlGequal = 0x0206;
+constexpr unsigned int kGlAlways = 0x0207;
 constexpr unsigned int kGlScissorTest = 0x0C11;
 constexpr unsigned int kGlFuncAdd = 0x8006;
 constexpr unsigned int kGlZero = 0;
@@ -497,9 +511,10 @@ void main() {
     diffuse_over_w = in_diffuse * inv_w;
     tex0_over_w = in_tex0 * inv_w;
     inv_w_out = inv_w;
+    float z = clamp(in_position.z, 0.0, 16777215.0) / 16777215.0 * 2.0 - 1.0;
     vec2 ndc = vec2(in_position.x / surface_size.x * 2.0 - 1.0,
                     1.0 - in_position.y / surface_size.y * 2.0);
-    gl_Position = vec4(ndc, 0.0, 1.0);
+    gl_Position = vec4(ndc, z, 1.0);
 }
 )GLSL";
 
@@ -699,6 +714,8 @@ public:
         if (delete_textures_) {
             for (const auto& surface : resident_surfaces_) {
                 if (surface.texture) delete_textures_(1, &surface.texture);
+                if (surface.depth_texture)
+                    delete_textures_(1, &surface.depth_texture);
             }
         }
         if (resident_source_texture_ && delete_textures_)
@@ -776,6 +793,12 @@ public:
         return find_resident_surface(address, size, pitch, height, format) !=
                nullptr;
     }
+    bool has_resident_depth_surface(uint32_t address, size_t size, uint32_t pitch,
+                                    uint32_t height,
+                                    uint32_t format) const override {
+        return find_resident_depth_surface(address, size, pitch, height, format) !=
+               nullptr;
+    }
     bool requires_resident_target_switch_resolve() const override {
         return false;
     }
@@ -818,6 +841,15 @@ public:
             };
             if (!factor_supported(packet.fixture_blend_src) ||
                 !factor_supported(packet.fixture_blend_dst)) {
+                return false;
+            }
+        }
+        if (packet.fixture_depth_test_enabled || packet.fixture_depth_write_enabled) {
+            if (!texture_fixture || !packet.fixture_depth_test_enabled ||
+                packet.fixture_depth_func != 0x0203) {
+                return false;
+            }
+            if (packet.depth_address == 0 || packet.depth_input.size() > size) {
                 return false;
             }
         }
@@ -892,6 +924,11 @@ public:
             perf::ScopedAdd timer(perf::g_ns_renderer_resident_ensure,
                                   perf::g_calls_renderer_resident_ensure);
             if (!ensure_resident_surface(packet, width, height, size, error)) {
+                return false;
+            }
+            if (!active_resident_ ||
+                !ensure_resident_depth_surface(packet, *active_resident_, width,
+                                               height, size, error)) {
                 return false;
             }
         }
@@ -988,7 +1025,13 @@ public:
         }
         bind_framebuffer_(kGlFramebuffer, resident_fbo_);
         viewport_(0, 0, static_cast<int>(width), static_cast<int>(height));
-        disable_(kGlDepthTest);
+        if (packet.fixture_depth_test_enabled) {
+            enable_(kGlDepthTest);
+            depth_func_(gl_depth_func(packet.fixture_depth_func));
+        } else {
+            disable_(kGlDepthTest);
+        }
+        depth_mask_(packet.fixture_depth_write_enabled ? 1 : 0);
         enable_(kGlScissorTest);
         scissor_(static_cast<int>(packet.fixture_clip_x),
                  static_cast<int>(height - packet.fixture_clip_y -
@@ -1077,6 +1120,8 @@ public:
         disable_vertex_attrib_array_(1);
         disable_vertex_attrib_array_(0);
         color_mask_(1, 1, 1, 1);
+        depth_mask_(1);
+        disable_(kGlDepthTest);
         disable_(kGlBlend);
         disable_(kGlScissorTest);
         if (get_error_() != kGlNoError) {
@@ -1091,6 +1136,11 @@ public:
         if (active_resident_) {
             active_resident_->dirty = true;
             active_resident_ = nullptr;
+        }
+        if (active_depth_resident_) {
+            if (packet.fixture_depth_write_enabled)
+                active_depth_resident_->depth_dirty = true;
+            active_depth_resident_ = nullptr;
         }
         result.color_output.clear();
         result.depth_output.clear();
@@ -1152,6 +1202,55 @@ public:
         surface->dirty = false;
         return true;
     }
+    bool resolve_resident_depth_surface(uint32_t address, size_t size,
+                                        Nv2aResidentDepthResolve& resolve,
+                                        std::string& error) override {
+        resolve = {};
+        if (size == 0) return true;
+        ResidentSurface* surface = nullptr;
+        for (auto& candidate : resident_surfaces_) {
+            if (candidate.depth_dirty &&
+                resident_depth_overlaps(candidate, address, size)) {
+                surface = &candidate;
+                break;
+            }
+        }
+        if (!surface) return true;
+        SDL_Window* previous_window = SDL_GL_GetCurrentWindow();
+        SDL_GLContext previous_context = SDL_GL_GetCurrentContext();
+        if (!SDL_GL_MakeCurrent(window_, context_)) {
+            error = std::string("OpenGL resident depth resolve context lost: ") +
+                    SDL_GetError();
+            return false;
+        }
+        struct ContextRestore {
+            SDL_Window* previous_window;
+            SDL_GLContext previous_context;
+            SDL_Window* fallback_window;
+            ~ContextRestore() {
+                restore_previous_gl_context(previous_window, previous_context,
+                                            fallback_window);
+            }
+        } restore{previous_window, previous_context, window_};
+        std::vector<uint32_t> gl_depth(static_cast<size_t>(surface->width) *
+                                       surface->height);
+        bind_framebuffer_(kGlFramebuffer, resident_fbo_);
+        framebuffer_texture_2d_(kGlFramebuffer, kGlDepthStencilAttachment,
+                                kGlTexture2D, surface->depth_texture, 0);
+        pixel_store_i_(kGlPackAlignment, 4);
+        read_pixels_(0, 0, static_cast<int>(surface->width),
+                     static_cast<int>(surface->height), kGlDepthStencil,
+                     kGlUnsignedInt248, gl_depth.data());
+        if (get_error_() != kGlNoError) {
+            error = "OpenGL resident zeta readback failed";
+            return false;
+        }
+        resolve.address = surface->depth_address;
+        gl_d24s8_to_guest(gl_depth, resolve.data, surface->width,
+                          surface->height);
+        surface->depth_dirty = false;
+        return true;
+    }
     void invalidate_resident_color_surface(uint32_t address, size_t size) override {
         if (size == 0) return;
         for (auto& surface : resident_surfaces_) {
@@ -1159,6 +1258,16 @@ public:
                 surface.valid = false;
                 surface.dirty = false;
                 if (active_resident_ == &surface) active_resident_ = nullptr;
+            }
+        }
+    }
+    void invalidate_resident_depth_surface(uint32_t address, size_t size) override {
+        if (size == 0) return;
+        for (auto& surface : resident_surfaces_) {
+            if (resident_depth_overlaps(surface, address, size)) {
+                surface.depth_valid = false;
+                surface.depth_dirty = false;
+                if (active_depth_resident_ == &surface) active_depth_resident_ = nullptr;
             }
         }
     }
@@ -1469,6 +1578,8 @@ public:
                load_gl(scissor_, "glScissor") &&
                load_gl(enable_, "glEnable") &&
                load_gl(disable_, "glDisable") &&
+               load_gl(depth_func_, "glDepthFunc") &&
+               load_gl(depth_mask_, "glDepthMask") &&
                load_gl(blend_func_, "glBlendFunc") &&
                load_gl(blend_equation_, "glBlendEquation") &&
                load_gl(color_mask_, "glColorMask") &&
@@ -1495,14 +1606,22 @@ private:
     struct ResidentSurface {
         bool valid = false;
         bool dirty = false;
+        bool depth_valid = false;
+        bool depth_dirty = false;
         bool x8 = false;
         unsigned int texture = 0;
+        unsigned int depth_texture = 0;
         uint32_t address = 0;
         size_t size = 0;
         uint32_t pitch = 0;
         uint32_t width = 0;
         uint32_t height = 0;
         uint32_t format = 0;
+        uint32_t depth_address = 0;
+        size_t depth_size = 0;
+        uint32_t depth_pitch = 0;
+        uint32_t depth_height = 0;
+        uint32_t depth_format = 0;
     };
     struct CachedBuffer {
         unsigned int buffer = 0;
@@ -1543,12 +1662,39 @@ private:
         }
         return nullptr;
     }
+    ResidentSurface* find_resident_depth_surface(uint32_t address, size_t size,
+                                                 uint32_t pitch,
+                                                 uint32_t height,
+                                                 uint32_t format) {
+        for (auto& surface : resident_surfaces_) {
+            if (surface.depth_valid && surface.depth_address == address &&
+                surface.depth_size == size && surface.depth_pitch == pitch &&
+                surface.depth_height == height && surface.depth_format == format) {
+                return &surface;
+            }
+        }
+        return nullptr;
+    }
+    const ResidentSurface* find_resident_depth_surface(uint32_t address,
+                                                       size_t size,
+                                                       uint32_t pitch,
+                                                       uint32_t height,
+                                                       uint32_t format) const {
+        for (const auto& surface : resident_surfaces_) {
+            if (surface.depth_valid && surface.depth_address == address &&
+                surface.depth_size == size && surface.depth_pitch == pitch &&
+                surface.depth_height == height && surface.depth_format == format) {
+                return &surface;
+            }
+        }
+        return nullptr;
+    }
     ResidentSurface* find_reusable_resident_slot() {
         for (auto& surface : resident_surfaces_) {
-            if (!surface.valid) return &surface;
+            if (!surface.valid && !surface.depth_dirty) return &surface;
         }
         for (auto& surface : resident_surfaces_) {
-            if (!surface.dirty) return &surface;
+            if (!surface.dirty && !surface.depth_dirty) return &surface;
         }
         return nullptr;
     }
@@ -1560,12 +1706,32 @@ private:
         return surface.valid && address < resident_end &&
                surface.address < request_end;
     }
+    static bool resident_depth_overlaps(const ResidentSurface& surface,
+                                        uint32_t address, size_t size) {
+        const uint64_t request_end = static_cast<uint64_t>(address) + size;
+        const uint64_t resident_end =
+            static_cast<uint64_t>(surface.depth_address) + surface.depth_size;
+        return surface.depth_valid && address < resident_end &&
+               surface.depth_address < request_end;
+    }
     static unsigned int gl_blend_factor(uint32_t factor) {
         switch (factor) {
             case 0: return kGlZero;
             case 1: return kGlOne;
             case 0x0302: return kGlSrcAlpha;
             default: return kGlOneMinusSrcAlpha;
+        }
+    }
+    static unsigned int gl_depth_func(uint32_t func) {
+        switch (func) {
+            case 0x0200: return kGlNever;
+            case 0x0201: return kGlLess;
+            case 0x0202: return kGlEqual;
+            case 0x0203: return kGlLequal;
+            case 0x0204: return kGlGreater;
+            case 0x0205: return kGlNotequal;
+            case 0x0206: return kGlGequal;
+            default: return kGlAlways;
         }
     }
     static void guest_words_to_rgba(const std::vector<uint8_t>& guest,
@@ -1617,6 +1783,35 @@ private:
                 guest[guest_offset + 1] = rgba[gl_offset + 1];
                 guest[guest_offset + 2] = rgba[gl_offset + 0];
                 guest[guest_offset + 3] = x8 ? 0xff : rgba[gl_offset + 3];
+            }
+        }
+    }
+    static void guest_d24s8_to_gl(const std::vector<uint8_t>& guest,
+                                  std::vector<uint32_t>& gl, uint32_t width,
+                                  uint32_t height) {
+        gl.assign(static_cast<size_t>(width) * height, 0);
+        for (uint32_t y = 0; y < height; ++y) {
+            const uint32_t gl_y = height - 1u - y;
+            for (uint32_t x = 0; x < width; ++x) {
+                uint32_t word = 0;
+                const size_t guest_offset =
+                    (static_cast<size_t>(y) * width + x) * sizeof(uint32_t);
+                std::memcpy(&word, guest.data() + guest_offset, sizeof(word));
+                gl[static_cast<size_t>(gl_y) * width + x] = word;
+            }
+        }
+    }
+    static void gl_d24s8_to_guest(const std::vector<uint32_t>& gl,
+                                  std::vector<uint8_t>& guest, uint32_t width,
+                                  uint32_t height) {
+        guest.assign(static_cast<size_t>(width) * height * sizeof(uint32_t), 0);
+        for (uint32_t y = 0; y < height; ++y) {
+            const uint32_t gl_y = height - 1u - y;
+            for (uint32_t x = 0; x < width; ++x) {
+                const uint32_t word = gl[static_cast<size_t>(gl_y) * width + x];
+                const size_t guest_offset =
+                    (static_cast<size_t>(y) * width + x) * sizeof(uint32_t);
+                std::memcpy(guest.data() + guest_offset, &word, sizeof(word));
             }
         }
     }
@@ -1686,6 +1881,74 @@ private:
         slot->height = height;
         slot->format = packet.surface_format;
         active_resident_ = slot;
+        return true;
+    }
+    bool ensure_resident_depth_surface(const Nv2aGenericCombinerPacket& packet,
+                                       ResidentSurface& slot, uint32_t width,
+                                       uint32_t height, size_t size,
+                                       std::string& error) {
+        if (!packet.fixture_depth_test_enabled &&
+            !packet.fixture_depth_write_enabled) {
+            framebuffer_texture_2d_(kGlFramebuffer, kGlDepthStencilAttachment,
+                                    kGlTexture2D, 0, 0);
+            active_depth_resident_ = nullptr;
+            return true;
+        }
+        if (ResidentSurface* existing = find_resident_depth_surface(
+                packet.depth_address, size, packet.surface_pitch,
+                packet.surface_height, packet.surface_format)) {
+            framebuffer_texture_2d_(kGlFramebuffer, kGlDepthStencilAttachment,
+                                    kGlTexture2D, existing->depth_texture, 0);
+            if (check_framebuffer_status_(kGlFramebuffer) !=
+                kGlFramebufferComplete) {
+                error = "OpenGL resident color+zeta framebuffer is incomplete";
+                return false;
+            }
+            active_depth_resident_ = existing;
+            return true;
+        }
+        if (packet.depth_address == 0 || packet.depth_input.size() != size) {
+            error = "OpenGL resident draw missing initial zeta snapshot";
+            return false;
+        }
+        if (!slot.depth_texture) {
+            gen_textures_(1, &slot.depth_texture);
+            if (!slot.depth_texture) {
+                error = "OpenGL resident zeta texture allocation failed";
+                return false;
+            }
+            bind_texture_(kGlTexture2D, slot.depth_texture);
+            tex_parameter_i_(kGlTexture2D, kGlTextureMinFilter, kGlNearest);
+            tex_parameter_i_(kGlTexture2D, kGlTextureMagFilter, kGlNearest);
+            tex_parameter_i_(kGlTexture2D, kGlTextureWrapS, kGlClampToEdge);
+            tex_parameter_i_(kGlTexture2D, kGlTextureWrapT, kGlClampToEdge);
+        } else {
+            bind_texture_(kGlTexture2D, slot.depth_texture);
+        }
+        std::vector<uint32_t> gl_depth;
+        guest_d24s8_to_gl(packet.depth_input, gl_depth, width, height);
+        pixel_store_i_(kGlUnpackAlignment, 4);
+        tex_image_2d_(kGlTexture2D, 0, kGlDepth24Stencil8,
+                      static_cast<int>(width), static_cast<int>(height), 0,
+                      kGlDepthStencil, kGlUnsignedInt248, gl_depth.data());
+        slot.depth_valid = true;
+        slot.depth_dirty = false;
+        slot.depth_address = packet.depth_address;
+        slot.depth_size = size;
+        slot.depth_pitch = packet.surface_pitch;
+        slot.depth_height = packet.surface_height;
+        slot.depth_format = packet.surface_format;
+        framebuffer_texture_2d_(kGlFramebuffer, kGlDepthStencilAttachment,
+                                kGlTexture2D, slot.depth_texture, 0);
+        if (check_framebuffer_status_(kGlFramebuffer) != kGlFramebufferComplete) {
+            error = "OpenGL resident color+zeta framebuffer is incomplete";
+            return false;
+        }
+        if (get_error_() != kGlNoError) {
+            error = "OpenGL resident zeta upload failed";
+            return false;
+        }
+        active_depth_resident_ = &slot;
         return true;
     }
     bool compile_program(const char* source, const char* label,
@@ -1812,6 +2075,7 @@ private:
     static constexpr size_t kMaxResidentSurfaces = 8;
     std::array<ResidentSurface, kMaxResidentSurfaces> resident_surfaces_{};
     ResidentSurface* active_resident_ = nullptr;
+    ResidentSurface* active_depth_resident_ = nullptr;
     std::array<CachedBuffer, 4> dashboard_texture_cache_{};
     GlCreateShader create_shader_ = nullptr; GlShaderSource shader_source_ = nullptr;
     GlCompileShader compile_shader_ = nullptr; GlGetShaderiv get_shader_iv_ = nullptr;
@@ -1836,6 +2100,7 @@ private:
     GlCheckFramebufferStatus check_framebuffer_status_ = nullptr;
     GlDeleteFramebuffers delete_framebuffers_ = nullptr; GlViewport viewport_ = nullptr;
     GlScissor scissor_ = nullptr; GlEnable enable_ = nullptr; GlDisable disable_ = nullptr;
+    GlDepthFunc depth_func_ = nullptr; GlDepthMask depth_mask_ = nullptr;
     GlBlendFunc blend_func_ = nullptr; GlBlendEquation blend_equation_ = nullptr;
     GlColorMask color_mask_ = nullptr; GlGenVertexArrays gen_vertex_arrays_ = nullptr;
     GlBindVertexArray bind_vertex_array_ = nullptr;

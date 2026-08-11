@@ -5553,6 +5553,88 @@ int main() {
                     dashboard_error));
                 CHECK(dashboard_resolve.address == dashboard_packet.color_address);
                 CHECK(dashboard_resolve.data == dashboard_sync.color_output);
+
+                xlle::Nv2aGenericCombinerPacket depth_packet;
+                depth_packet.compute_fixture =
+                    xlle::Nv2aGenericCombinerPacket::ComputeFixture::
+                        kResidentTextureModulateTriangles;
+                depth_packet.primitive_mode = 5;
+                depth_packet.surface_format = 0x128;
+                depth_packet.surface_pitch = 0x14001400;
+                depth_packet.surface_height = 480;
+                depth_packet.color_address = 0x02000000;
+                depth_packet.depth_address = 0x02400000;
+                depth_packet.fixture_clip_x = 0;
+                depth_packet.fixture_clip_y = 0;
+                depth_packet.fixture_clip_width = 1280;
+                depth_packet.fixture_clip_height = 480;
+                depth_packet.fixture_texture_passthrough = true;
+                depth_packet.fixture_depth_test_enabled = true;
+                depth_packet.fixture_depth_write_enabled = true;
+                depth_packet.fixture_depth_func = 0x0203;  // LEQUAL.
+                const size_t depth_color_size = 0x1400u * 480u;
+                depth_packet.color_input.assign(depth_color_size, 0);
+                depth_packet.depth_input.assign(depth_color_size, 0);
+                fill_words(depth_packet.color_input, 0xFF010203);
+                fill_words(depth_packet.depth_input, (0x000200u << 8) | 0x5Au);
+                depth_packet.textures[0].referenced = true;
+                depth_packet.textures[0].layout =
+                    xlle::Nv2aGenericCombinerPacket::TextureLayout::kLinear;
+                depth_packet.textures[0].format =
+                    xlle::Nv2aGenericCombinerPacket::TextureFormat::kArgb8;
+                depth_packet.textures[0].mode =
+                    xlle::Nv2aGenericCombinerPacket::TextureMode::kProject2d;
+                depth_packet.textures[0].width = 1280;
+                depth_packet.textures[0].height = 960;
+                depth_packet.textures[0].pitch = 0x1400;
+                depth_packet.textures[0].input.assign(0x1400u * 960u, 0);
+                fill_words(depth_packet.textures[0].input, 0xFF336699);
+                depth_packet.vertices.resize(3);
+                const std::array<std::array<float, 2>, 3> depth_xy{{
+                    {{0.0f, 0.0f}},
+                    {{32.0f, 0.0f}},
+                    {{0.0f, 32.0f}},
+                }};
+                for (size_t vertex = 0; vertex < depth_packet.vertices.size();
+                     ++vertex) {
+                    depth_packet.vertices[vertex].position =
+                        {{depth_xy[vertex][0], depth_xy[vertex][1], 100.0f,
+                          1.0f}};
+                    depth_packet.vertices[vertex].diffuse =
+                        {{1.0f, 1.0f, 1.0f, 1.0f}};
+                    depth_packet.vertices[vertex].texture[0] =
+                        {{8.5f, 8.5f, 0.0f, 1.0f}};
+                }
+                CHECK(gl_renderer->supports_resident_generic_combiner(
+                    depth_packet));
+                xlle::Nv2aGenericCombinerResult depth_result;
+                std::string depth_error;
+                CHECK(gl_renderer->submit_resident_generic_combiner(
+                    depth_packet, depth_result, depth_error));
+                if (!depth_error.empty())
+                    std::printf("OpenGL resident zeta fixture error: %s\n",
+                                depth_error.c_str());
+                CHECK(gl_renderer->has_resident_depth_surface(
+                    depth_packet.depth_address, depth_packet.depth_input.size(),
+                    depth_packet.surface_pitch, depth_packet.surface_height,
+                    depth_packet.surface_format));
+                xlle::Nv2aResidentColorResolve depth_color_resolve;
+                CHECK(gl_renderer->resolve_resident_color_surface(
+                    depth_packet.color_address, depth_packet.color_input.size(),
+                    depth_color_resolve, depth_error));
+                xlle::Nv2aResidentDepthResolve depth_resolve;
+                CHECK(gl_renderer->resolve_resident_depth_surface(
+                    depth_packet.depth_address, depth_packet.depth_input.size(),
+                    depth_resolve, depth_error));
+                const uint32_t inside = 8u * 0x1400u + 8u * 4u;
+                const uint32_t outside = 48u * 0x1400u + 48u * 4u;
+                CHECK(get32(depth_color_resolve.data, inside) == 0xFF336699u);
+                CHECK(get32(depth_color_resolve.data, outside) == 0xFF010203u);
+                const uint32_t inside_depth = get32(depth_resolve.data, inside);
+                CHECK((inside_depth & 0xFFu) == 0x5Au);
+                CHECK((inside_depth >> 8) < 0x000200u);
+                CHECK(get32(depth_resolve.data, outside) ==
+                      ((0x000200u << 8) | 0x5Au));
                 gc_gpu.set_renderer(nullptr);
             } else {
                 std::printf("SKIP: OpenGL compute fixture unavailable: %s\n",

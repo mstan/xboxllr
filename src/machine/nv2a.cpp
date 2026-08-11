@@ -7113,6 +7113,9 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                      ((blend_src == 0x0302 || blend_src == 1) &&
                       (blend_dst == 0x0303 || blend_dst == 1 ||
                        blend_dst == 0)));
+                const bool texture_depth_supported =
+                    !uses_depth ||
+                    (depth_test_enabled_bit && depth_func == 0x0203);
                 const bool combiner_words_match =
                     raster_state_[kRasterCombinerColorIcw0] == 0x04080000 &&
                     raster_state_[kRasterCombinerAlphaIcw0] == 0x14180000 &&
@@ -7167,7 +7170,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     reject_reason = TextureReject::kVertexCount;
                 } else if (!only_texture0_input) {
                     reject_reason = TextureReject::kTextureInput;
-                } else if (uses_depth) {
+                } else if (!texture_depth_supported) {
                     reject_reason = TextureReject::kDepth;
                 } else if (color_mask_word != 0x01010101) {
                     reject_reason = TextureReject::kColorMask;
@@ -7409,6 +7412,11 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                         packet.fixture_blend_enabled = blend_enabled;
                         packet.fixture_blend_src = blend_src;
                         packet.fixture_blend_dst = blend_dst;
+                        packet.fixture_depth_test_enabled = depth_test_enabled_bit;
+                        packet.fixture_depth_write_enabled =
+                            depth_write_enabled && uses_depth;
+                        packet.fixture_depth_func =
+                            depth_test_enabled_bit ? depth_func : 0x0207u;
                         packet.fixture_color_format_x8 = color_format_x8;
                         packet.fixture_texture_passthrough =
                             passthrough_combiner_words_match;
@@ -7457,6 +7465,29 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 ++generic_combiner_resident_uploads_;
             } else {
                 ++generic_combiner_resident_reuses_;
+            }
+            if ((packet.fixture_depth_test_enabled ||
+                 packet.fixture_depth_write_enabled) &&
+                uses_depth) {
+                const size_t depth_size = static_cast<size_t>(depth_bytes64);
+                const bool depth_already_resident =
+                    renderer_->has_resident_depth_surface(
+                        depth_address, depth_size, surface_pitch_,
+                        surface_height, surface_format_);
+                if (!depth_already_resident) {
+                    if (!resolve_renderer_depth_overlap(
+                            depth_address, depth_size,
+                            "resident generic zeta upload")) {
+                        return false;
+                    }
+                    packet.depth_input.resize(depth_size);
+                    if (!mem_read_ ||
+                        !mem_read_(depth_address, packet.depth_input.data(),
+                                   packet.depth_input.size())) {
+                        fault_("NV2A resident generic zeta DMA read failed");
+                        return false;
+                    }
+                }
             }
             for (uint32_t stage = 0; stage < packet.textures.size(); ++stage) {
                 if (packet.textures[stage].referenced)
