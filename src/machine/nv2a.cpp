@@ -6486,6 +6486,154 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     raster_state_[kRasterCombinerFactor0_0 + 4];
             }
         }
+        if (packet.compute_fixture == Nv2aGenericCombinerPacket::ComputeFixture::kNone) {
+            const bool resident_primary_state =
+                (primitive_mode_ == 5 || primitive_mode_ == 6 || primitive_mode_ == 7) &&
+                transformed_batch_.size() >= 3 &&
+                transformed_batch_.size() <= 20000 &&
+                no_texture_inputs && !uses_depth && color_mask_word == 0x01010101 &&
+                (color_format_x8 || color_format_a8) && stage_count == 1 &&
+                (!alpha_test_enabled ||
+                 (alpha_func == 0x0207 &&
+                  (raster_state_[kRasterAlphaRef] & 0xFFu) == 0)) &&
+                (!blend_enabled || blend_eq == 0x8006) &&
+                (!blend_enabled ||
+                 ((blend_src == 0x0302 || blend_src == 1) &&
+                  (blend_dst == 0x0303 || blend_dst == 1 || blend_dst == 0))) &&
+                (raster_state_[kRasterShaderStageProgram] == 0 ||
+                 raster_state_[kRasterShaderStageProgram] == 1) &&
+                (raster_state_[kRasterShaderOtherStageInput] == 0 ||
+                 raster_state_[kRasterShaderOtherStageInput] == 0x00210000) &&
+                raster_state_[kRasterCombinerControl] == 1 &&
+                raster_state_[kRasterCombinerColorIcw0] == 0x04200000 &&
+                raster_state_[kRasterCombinerAlphaIcw0] == 0x14200000 &&
+                raster_state_[kRasterCombinerColorOcw0] == 0x00000C00 &&
+                raster_state_[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
+                raster_state_[kRasterCombinerSpecularFog0] == 0x0000000C &&
+                raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80;
+            if (resident_primary_state) {
+                auto fixed_xy = [](float value, int64_t& fixed) {
+                    if (!std::isfinite(value)) return false;
+                    const double rounded =
+                        std::llround(static_cast<double>(value) * 16.0);
+                    if (std::abs(rounded) > 1000000.0) return false;
+                    fixed = static_cast<int64_t>(rounded);
+                    return true;
+                };
+                auto finite_vertex = [](const Nv2aGenericCombinerVertex& vertex) {
+                    for (float value : vertex.position)
+                        if (!std::isfinite(value)) return false;
+                    if (vertex.position[3] == 0.0f) return false;
+                    for (float value : vertex.diffuse)
+                        if (!std::isfinite(value)) return false;
+                    return true;
+                };
+                std::vector<Nv2aGenericCombinerVertex> expanded;
+                expanded.reserve((packet.vertices.size() - 2) * 3);
+                auto append_triangle = [&](size_t ia, size_t ib, size_t ic) {
+                    const auto* a = &packet.vertices[ia];
+                    const auto* b = &packet.vertices[ib];
+                    const auto* c = &packet.vertices[ic];
+                    if (!finite_vertex(*a) || !finite_vertex(*b) || !finite_vertex(*c))
+                        return false;
+                    int64_t ax = 0, ay = 0, bx = 0, by = 0, cx = 0, cy = 0;
+                    if (!fixed_xy(a->position[0], ax) ||
+                        !fixed_xy(a->position[1], ay) ||
+                        !fixed_xy(b->position[0], bx) ||
+                        !fixed_xy(b->position[1], by) ||
+                        !fixed_xy(c->position[0], cx) ||
+                        !fixed_xy(c->position[1], cy)) {
+                        return false;
+                    }
+                    const int64_t area =
+                        (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+                    if (area == 0) return true;
+                    if (!cull_enabled) {
+                        if (area < 0) std::swap(b, c);
+                    } else if (cull_front) {
+                        if (area > 0) return true;
+                        std::swap(b, c);
+                    } else if (area < 0) {
+                        return true;
+                    }
+                    expanded.push_back(*a);
+                    expanded.push_back(*b);
+                    expanded.push_back(*c);
+                    return true;
+                };
+                bool expanded_ok = true;
+                if (primitive_mode_ == 5) {
+                    for (size_t i = 0; expanded_ok && i + 2 < packet.vertices.size();
+                         i += 3)
+                        expanded_ok = append_triangle(i, i + 1, i + 2);
+                } else if (primitive_mode_ == 6) {
+                    for (size_t i = 2; expanded_ok && i < packet.vertices.size(); ++i) {
+                        if ((i & 1u) == 0)
+                            expanded_ok = append_triangle(i - 2, i - 1, i);
+                        else
+                            expanded_ok = append_triangle(i - 1, i - 2, i);
+                    }
+                } else {
+                    for (size_t i = 2; expanded_ok && i < packet.vertices.size(); ++i)
+                        expanded_ok = append_triangle(0, i - 1, i);
+                }
+                if (expanded_ok && !expanded.empty()) {
+                    packet.vertices = std::move(expanded);
+                    packet.primitive_mode = 5;
+                    packet.compute_fixture = Nv2aGenericCombinerPacket::
+                        ComputeFixture::kResidentPrimaryColorTriangles;
+                    packet.fixture_clip_x = clip_x;
+                    packet.fixture_clip_y = clip_y;
+                    packet.fixture_clip_width = clip_width;
+                    packet.fixture_clip_height = clip_height;
+                    packet.fixture_blend_enabled = blend_enabled;
+                    packet.fixture_blend_src = blend_src;
+                    packet.fixture_blend_dst = blend_dst;
+                    packet.fixture_color_format_x8 = color_format_x8;
+                }
+            }
+        }
+        if (renderer_->supports_resident_generic_combiner(packet)) {
+            const size_t color_size = static_cast<size_t>(color_bytes64);
+            const bool already_resident = renderer_->has_resident_color_surface(
+                color_address, color_size, surface_pitch_, surface_height,
+                surface_format_);
+            if (!already_resident) {
+                if (!resolve_renderer_color_overlap(
+                        0, 64u * 1024u * 1024u,
+                        "resident generic target switch")) {
+                    return false;
+                }
+                if (!resolve_renderer_color_overlap(
+                        color_address, color_size,
+                        "resident generic color upload")) {
+                    return false;
+                }
+                packet.color_input.resize(color_size);
+                if (!mem_read_ ||
+                    !mem_read_(color_address, packet.color_input.data(),
+                               packet.color_input.size())) {
+                    fault_("NV2A resident generic color DMA read failed");
+                    return false;
+                }
+            }
+            Nv2aGenericCombinerResult result;
+            std::string renderer_error;
+            if (!renderer_->submit_resident_generic_combiner(packet, result,
+                                                             renderer_error)) {
+                fault_(renderer_error.empty()
+                           ? "NV2A resident generic-combiner submission failed"
+                           : renderer_error);
+                return false;
+            }
+            executed = true;
+            ++generic_combiner_accelerated_batches_;
+            generic_combiner_triangles_ += result.triangles;
+            generic_combiner_fragments_ += result.fragments;
+            generic_combiner_writes_ += result.writes;
+            ++generic_combiner_executed_batches_;
+            return true;
+        }
         if (renderer_->supports_generic_combiner(packet)) {
             if (!resolve_renderer_color_overlap(
                     color_address, static_cast<size_t>(color_bytes64),

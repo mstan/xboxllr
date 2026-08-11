@@ -26,7 +26,8 @@ struct Nv2aGenericCombinerPacket {
     enum class ComputeFixture : uint8_t {
         kNone,
         kUntexturedPrimaryTriangle,
-        kDashboardProject2dFan
+        kDashboardProject2dFan,
+        kResidentPrimaryColorTriangles
     };
     enum class TextureLayout : uint8_t { kLinear, kSwizzled };
     enum class TextureFormat : uint8_t { kArgb8, kA8 };
@@ -68,6 +69,10 @@ struct Nv2aGenericCombinerPacket {
     uint32_t fixture_source_argb = 0;
     uint32_t fixture_factor0_stage2_argb = 0;
     uint32_t fixture_factor0_stage4_argb = 0;
+    uint32_t fixture_blend_src = 0;
+    uint32_t fixture_blend_dst = 0;
+    bool fixture_blend_enabled = false;
+    bool fixture_color_format_x8 = false;
 };
 
 // A successful synchronous submission returns complete replacement images for the
@@ -117,6 +122,29 @@ public:
     virtual void invalidate_resident_color_surface(uint32_t address, size_t size) {
         (void)address;
         (void)size;
+    }
+    virtual bool has_resident_color_surface(
+        uint32_t address, size_t size, uint32_t pitch,
+        uint32_t height, uint32_t format) const {
+        (void)address;
+        (void)size;
+        (void)pitch;
+        (void)height;
+        (void)format;
+        return false;
+    }
+    virtual bool supports_resident_generic_combiner(
+        const Nv2aGenericCombinerPacket& descriptor) const {
+        (void)descriptor;
+        return false;
+    }
+    virtual bool submit_resident_generic_combiner(
+        const Nv2aGenericCombinerPacket& packet,
+        Nv2aGenericCombinerResult& result, std::string& error) {
+        (void)packet;
+        (void)result;
+        error = "resident generic-combiner submission is not supported";
+        return false;
     }
 };
 

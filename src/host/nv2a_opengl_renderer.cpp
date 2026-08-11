@@ -3,7 +3,12 @@
 #include <cstdio>
 #include <array>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <string>
 #include <utility>
+#include <vector>
 
 #if defined(XLLE_WITH_SDL)
 #include <SDL3/SDL.h>
@@ -31,6 +36,7 @@ using GlGetUniformLocation = int (*)(unsigned int, const char*);
 using GlUniform1i = void (*)(int, int);
 using GlUniform1ui = void (*)(int, unsigned int);
 using GlUniform2i = void (*)(int, int, int);
+using GlUniform2f = void (*)(int, float, float);
 using GlUniform4f = void (*)(int, float, float, float, float);
 using GlGenBuffers = void (*)(int, unsigned int*);
 using GlBindBuffer = void (*)(unsigned int, unsigned int);
@@ -40,16 +46,75 @@ using GlDispatchCompute = void (*)(unsigned int, unsigned int, unsigned int);
 using GlMemoryBarrier = void (*)(unsigned int);
 using GlGetBufferSubData = void (*)(unsigned int, std::ptrdiff_t, std::ptrdiff_t, void*);
 using GlDeleteBuffers = void (*)(int, const unsigned int*);
+using GlGenTextures = void (*)(int, unsigned int*);
+using GlBindTexture = void (*)(unsigned int, unsigned int);
+using GlTexImage2D = void (*)(unsigned int, int, int, int, int, int, unsigned int,
+                              unsigned int, const void*);
+using GlTexSubImage2D = void (*)(unsigned int, int, int, int, int, int,
+                                 unsigned int, unsigned int, const void*);
+using GlTexParameteri = void (*)(unsigned int, unsigned int, int);
+using GlDeleteTextures = void (*)(int, const unsigned int*);
+using GlGenFramebuffers = void (*)(int, unsigned int*);
+using GlBindFramebuffer = void (*)(unsigned int, unsigned int);
+using GlFramebufferTexture2D = void (*)(unsigned int, unsigned int, unsigned int,
+                                        unsigned int, int);
+using GlCheckFramebufferStatus = unsigned int (*)(unsigned int);
+using GlDeleteFramebuffers = void (*)(int, const unsigned int*);
+using GlViewport = void (*)(int, int, int, int);
+using GlScissor = void (*)(int, int, int, int);
+using GlEnable = void (*)(unsigned int);
+using GlDisable = void (*)(unsigned int);
+using GlBlendFunc = void (*)(unsigned int, unsigned int);
+using GlBlendEquation = void (*)(unsigned int);
+using GlColorMask = void (*)(unsigned char, unsigned char, unsigned char, unsigned char);
+using GlVertexAttribPointer = void (*)(unsigned int, int, unsigned int, unsigned char,
+                                       int, const void*);
+using GlEnableVertexAttribArray = void (*)(unsigned int);
+using GlDisableVertexAttribArray = void (*)(unsigned int);
+using GlGenVertexArrays = void (*)(int, unsigned int*);
+using GlBindVertexArray = void (*)(unsigned int);
+using GlDeleteVertexArrays = void (*)(int, const unsigned int*);
+using GlDrawArrays = void (*)(unsigned int, int, int);
+using GlReadPixels = void (*)(int, int, int, int, unsigned int, unsigned int, void*);
+using GlPixelStorei = void (*)(unsigned int, int);
 using GlGetError = unsigned int (*)();
 constexpr unsigned int kGlMajorVersion = 0x821B;
 constexpr unsigned int kGlMinorVersion = 0x821C;
 constexpr unsigned int kGlComputeShader = 0x91B9;
+constexpr unsigned int kGlVertexShader = 0x8B31;
+constexpr unsigned int kGlFragmentShader = 0x8B30;
 constexpr unsigned int kGlCompileStatus = 0x8B81;
 constexpr unsigned int kGlLinkStatus = 0x8B82;
 constexpr unsigned int kGlShaderStorageBuffer = 0x90D2;
+constexpr unsigned int kGlArrayBuffer = 0x8892;
 constexpr unsigned int kGlDynamicCopy = 0x88EA;
+constexpr unsigned int kGlDynamicDraw = 0x88E8;
 constexpr unsigned int kGlShaderStorageBarrierBit = 0x2000;
 constexpr unsigned int kGlBufferUpdateBarrierBit = 0x0200;
+constexpr unsigned int kGlFramebuffer = 0x8D40;
+constexpr unsigned int kGlColorAttachment0 = 0x8CE0;
+constexpr unsigned int kGlFramebufferComplete = 0x8CD5;
+constexpr unsigned int kGlTexture2D = 0x0DE1;
+constexpr unsigned int kGlRgba8 = 0x8058;
+constexpr unsigned int kGlRgba = 0x1908;
+constexpr unsigned int kGlUnsignedByte = 0x1401;
+constexpr unsigned int kGlFloat = 0x1406;
+constexpr unsigned int kGlTriangles = 0x0004;
+constexpr unsigned int kGlBlend = 0x0BE2;
+constexpr unsigned int kGlScissorTest = 0x0C11;
+constexpr unsigned int kGlFuncAdd = 0x8006;
+constexpr unsigned int kGlZero = 0;
+constexpr unsigned int kGlOne = 1;
+constexpr unsigned int kGlSrcAlpha = 0x0302;
+constexpr unsigned int kGlOneMinusSrcAlpha = 0x0303;
+constexpr unsigned int kGlTextureMinFilter = 0x2801;
+constexpr unsigned int kGlTextureMagFilter = 0x2800;
+constexpr unsigned int kGlNearest = 0x2600;
+constexpr unsigned int kGlTextureWrapS = 0x2802;
+constexpr unsigned int kGlTextureWrapT = 0x2803;
+constexpr unsigned int kGlClampToEdge = 0x812F;
+constexpr unsigned int kGlUnpackAlignment = 0x0CF5;
+constexpr unsigned int kGlPackAlignment = 0x0D05;
 constexpr unsigned int kGlNoError = 0;
 
 void restore_previous_gl_context(SDL_Window* previous_window,
@@ -248,6 +313,33 @@ void main() {
 }
 )GLSL";
 
+constexpr const char* kResidentPrimaryVertexSource = R"GLSL(#version 430 core
+layout(location = 0) in vec4 in_position;
+layout(location = 1) in vec4 in_diffuse;
+noperspective out vec4 diffuse_over_w;
+noperspective out float inv_w_out;
+uniform vec2 surface_size;
+void main() {
+    float inv_w = in_position.w == 0.0 ? 1.0 : 1.0 / in_position.w;
+    diffuse_over_w = in_diffuse * inv_w;
+    inv_w_out = inv_w;
+    vec2 ndc = vec2(in_position.x / surface_size.x * 2.0 - 1.0,
+                    1.0 - in_position.y / surface_size.y * 2.0);
+    gl_Position = vec4(ndc, 0.0, 1.0);
+}
+)GLSL";
+
+constexpr const char* kResidentPrimaryFragmentSource = R"GLSL(#version 430 core
+noperspective in vec4 diffuse_over_w;
+noperspective in float inv_w_out;
+layout(location = 0) out vec4 out_color;
+void main() {
+    vec4 diffuse = inv_w_out == 0.0 ? vec4(0.0, 0.0, 0.0, 1.0)
+                                    : diffuse_over_w / inv_w_out;
+    out_color = clamp(diffuse, 0.0, 1.0);
+}
+)GLSL";
+
 template <typename T>
 bool load_gl(T& destination, const char* name) {
     destination = reinterpret_cast<T>(SDL_GL_GetProcAddress(name));
@@ -257,9 +349,11 @@ bool load_gl(T& destination, const char* name) {
 class OpenGlNv2aRenderer final : public Nv2aRenderer {
 public:
     OpenGlNv2aRenderer(SDL_Window* window, SDL_GLContext context, bool owns_video,
-                       unsigned int fixture_program, unsigned int dashboard_program)
+                       unsigned int fixture_program, unsigned int dashboard_program,
+                       unsigned int resident_program)
         : window_(window), context_(context), owns_video_(owns_video),
-          fixture_program_(fixture_program), dashboard_program_(dashboard_program) {}
+          fixture_program_(fixture_program), dashboard_program_(dashboard_program),
+          resident_program_(resident_program) {}
     ~OpenGlNv2aRenderer() override {
         // Destruction can happen after an SDL presentation context was made
         // current; GL object deletion must be issued against this renderer's own
@@ -268,6 +362,14 @@ public:
         if (fixture_program_ && delete_program_) delete_program_(fixture_program_);
         if (dashboard_program_ && delete_program_)
             delete_program_(dashboard_program_);
+        if (resident_program_ && delete_program_) delete_program_(resident_program_);
+        if (resident_vbo_ && delete_buffers_) delete_buffers_(1, &resident_vbo_);
+        if (resident_vao_ && delete_vertex_arrays_)
+            delete_vertex_arrays_(1, &resident_vao_);
+        if (resident_fbo_ && delete_framebuffers_)
+            delete_framebuffers_(1, &resident_fbo_);
+        if (resident_texture_ && delete_textures_)
+            delete_textures_(1, &resident_texture_);
         if (context_) SDL_GL_DestroyContext(context_);
         if (window_) SDL_DestroyWindow(window_);
         if (owns_video_) SDL_QuitSubSystem(SDL_INIT_VIDEO);
@@ -312,6 +414,186 @@ public:
             }
         }
         return true;
+    }
+    bool has_resident_color_surface(uint32_t address, size_t size, uint32_t pitch,
+                                    uint32_t height,
+                                    uint32_t format) const override {
+        return resident_.valid && resident_.address == address &&
+               resident_.size == size && resident_.pitch == pitch &&
+               resident_.height == height && resident_.format == format;
+    }
+    bool supports_resident_generic_combiner(
+        const Nv2aGenericCombinerPacket& packet) const override {
+        if (packet.compute_fixture != Nv2aGenericCombinerPacket::ComputeFixture::
+                                          kResidentPrimaryColorTriangles) {
+            return false;
+        }
+        if (resident_program_ == 0 || packet.primitive_mode != 5 ||
+            packet.vertices.empty() || (packet.vertices.size() % 3) != 0 ||
+            packet.surface_pitch == 0 || packet.surface_height == 0 ||
+            packet.fixture_clip_width == 0 || packet.fixture_clip_height == 0) {
+            return false;
+        }
+        const uint32_t pitch = packet.surface_pitch & 0xffffu;
+        if (pitch == 0 || packet.fixture_clip_x + packet.fixture_clip_width > pitch / 4 ||
+            packet.fixture_clip_y + packet.fixture_clip_height > packet.surface_height) {
+            return false;
+        }
+        const size_t size = static_cast<size_t>(pitch) * packet.surface_height;
+        if (packet.fixture_blend_enabled) {
+            auto factor_supported = [](uint32_t factor) {
+                return factor == 0 || factor == 1 || factor == 0x0302 ||
+                       factor == 0x0303;
+            };
+            if (!factor_supported(packet.fixture_blend_src) ||
+                !factor_supported(packet.fixture_blend_dst)) {
+                return false;
+            }
+        }
+        return true;
+    }
+    bool submit_resident_generic_combiner(const Nv2aGenericCombinerPacket& packet,
+                                          Nv2aGenericCombinerResult& result,
+                                          std::string& error) override {
+        SDL_Window* previous_window = SDL_GL_GetCurrentWindow();
+        SDL_GLContext previous_context = SDL_GL_GetCurrentContext();
+        if (!SDL_GL_MakeCurrent(window_, context_)) {
+            error = std::string("OpenGL resident context lost: ") + SDL_GetError();
+            return false;
+        }
+        struct ContextRestore {
+            SDL_Window* previous_window;
+            SDL_GLContext previous_context;
+            SDL_Window* fallback_window;
+            ~ContextRestore() {
+                restore_previous_gl_context(previous_window, previous_context,
+                                            fallback_window);
+            }
+        } restore{previous_window, previous_context, window_};
+        const uint32_t pitch = packet.surface_pitch & 0xffffu;
+        const uint32_t width = pitch / 4;
+        const uint32_t height = packet.surface_height;
+        const size_t size = static_cast<size_t>(pitch) * height;
+        if (!ensure_resident_surface(packet, width, height, size, error)) {
+            return false;
+        }
+        struct GpuVertex {
+            float position[4];
+            float diffuse[4];
+        };
+        std::vector<GpuVertex> vertices;
+        vertices.reserve(packet.vertices.size());
+        for (const auto& vertex : packet.vertices) {
+            GpuVertex out{};
+            for (size_t i = 0; i < 4; ++i) {
+                out.position[i] = vertex.position[i];
+                out.diffuse[i] = vertex.diffuse[i];
+            }
+            vertices.push_back(out);
+        }
+        bind_framebuffer_(kGlFramebuffer, resident_fbo_);
+        viewport_(0, 0, static_cast<int>(width), static_cast<int>(height));
+        enable_(kGlScissorTest);
+        scissor_(static_cast<int>(packet.fixture_clip_x),
+                 static_cast<int>(height - packet.fixture_clip_y -
+                                  packet.fixture_clip_height),
+                 static_cast<int>(packet.fixture_clip_width),
+                 static_cast<int>(packet.fixture_clip_height));
+        if (packet.fixture_blend_enabled) {
+            enable_(kGlBlend);
+            blend_equation_(kGlFuncAdd);
+            blend_func_(gl_blend_factor(packet.fixture_blend_src),
+                        gl_blend_factor(packet.fixture_blend_dst));
+        } else {
+            disable_(kGlBlend);
+        }
+        color_mask_(1, 1, 1, packet.fixture_color_format_x8 ? 0 : 1);
+        if (!resident_vao_) gen_vertex_arrays_(1, &resident_vao_);
+        bind_vertex_array_(resident_vao_);
+        if (!resident_vbo_) gen_buffers_(1, &resident_vbo_);
+        bind_buffer_(kGlArrayBuffer, resident_vbo_);
+        buffer_data_(kGlArrayBuffer,
+                     static_cast<std::ptrdiff_t>(vertices.size() * sizeof(GpuVertex)),
+                     vertices.data(), kGlDynamicDraw);
+        use_program_(resident_program_);
+        uniform_2f_(uniform_location_(resident_program_, "surface_size"),
+                    static_cast<float>(width), static_cast<float>(height));
+        vertex_attrib_pointer_(0, 4, kGlFloat, 0, sizeof(GpuVertex),
+                               reinterpret_cast<const void*>(offsetof(GpuVertex, position)));
+        vertex_attrib_pointer_(1, 4, kGlFloat, 0, sizeof(GpuVertex),
+                               reinterpret_cast<const void*>(offsetof(GpuVertex, diffuse)));
+        enable_vertex_attrib_array_(0);
+        enable_vertex_attrib_array_(1);
+        draw_arrays_(kGlTriangles, 0, static_cast<int>(vertices.size()));
+        disable_vertex_attrib_array_(1);
+        disable_vertex_attrib_array_(0);
+        color_mask_(1, 1, 1, 1);
+        disable_(kGlBlend);
+        disable_(kGlScissorTest);
+        if (get_error_() != kGlNoError) {
+            error = "OpenGL resident primary draw failed";
+            return false;
+        }
+        resident_.dirty = true;
+        result.color_output.clear();
+        result.depth_output.clear();
+        result.triangles = vertices.size() / 3;
+        result.fragments = 0;
+        result.writes = 0;
+        return true;
+    }
+    bool resolve_resident_color_surface(uint32_t address, size_t size,
+                                        Nv2aResidentColorResolve& resolve,
+                                        std::string& error) override {
+        resolve = {};
+        if (!resident_.valid || !resident_.dirty || size == 0) return true;
+        const uint64_t request_end = static_cast<uint64_t>(address) + size;
+        const uint64_t resident_end =
+            static_cast<uint64_t>(resident_.address) + resident_.size;
+        if (address >= resident_end || resident_.address >= request_end) return true;
+        SDL_Window* previous_window = SDL_GL_GetCurrentWindow();
+        SDL_GLContext previous_context = SDL_GL_GetCurrentContext();
+        if (!SDL_GL_MakeCurrent(window_, context_)) {
+            error = std::string("OpenGL resident resolve context lost: ") +
+                    SDL_GetError();
+            return false;
+        }
+        struct ContextRestore {
+            SDL_Window* previous_window;
+            SDL_GLContext previous_context;
+            SDL_Window* fallback_window;
+            ~ContextRestore() {
+                restore_previous_gl_context(previous_window, previous_context,
+                                            fallback_window);
+            }
+        } restore{previous_window, previous_context, window_};
+        std::vector<uint8_t> rgba(static_cast<size_t>(resident_.width) *
+                                  resident_.height * 4u);
+        bind_framebuffer_(kGlFramebuffer, resident_fbo_);
+        pixel_store_i_(kGlPackAlignment, 1);
+        read_pixels_(0, 0, static_cast<int>(resident_.width),
+                     static_cast<int>(resident_.height), kGlRgba,
+                     kGlUnsignedByte, rgba.data());
+        if (get_error_() != kGlNoError) {
+            error = "OpenGL resident color readback failed";
+            return false;
+        }
+        resolve.address = resident_.address;
+        resolve.data.resize(resident_.size);
+        rgba_to_guest_words(rgba, resolve.data, resident_.width,
+                            resident_.height, resident_.x8);
+        resident_.dirty = false;
+        return true;
+    }
+    void invalidate_resident_color_surface(uint32_t address, size_t size) override {
+        if (!resident_.valid || size == 0) return;
+        const uint64_t request_end = static_cast<uint64_t>(address) + size;
+        const uint64_t resident_end =
+            static_cast<uint64_t>(resident_.address) + resident_.size;
+        if (address < resident_end && resident_.address < request_end) {
+            resident_.valid = false;
+            resident_.dirty = false;
+        }
     }
     bool submit_generic_combiner(const Nv2aGenericCombinerPacket& packet,
                                  Nv2aGenericCombinerResult& result,
@@ -488,6 +770,8 @@ public:
                load_gl(uniform_1i_, "glUniform1i") &&
                load_gl(uniform_1ui_, "glUniform1ui") &&
                load_gl(uniform_2i_, "glUniform2i") &&
+               load_gl(uniform_2f_, "glUniform2f") &&
+               load_gl(uniform_4f_, "glUniform4f") &&
                load_gl(gen_buffers_, "glGenBuffers") &&
                load_gl(bind_buffer_, "glBindBuffer") &&
                load_gl(buffer_data_, "glBufferData") &&
@@ -496,13 +780,152 @@ public:
                load_gl(memory_barrier_, "glMemoryBarrier") &&
                load_gl(get_buffer_sub_data_, "glGetBufferSubData") &&
                load_gl(delete_buffers_, "glDeleteBuffers") &&
+               load_gl(gen_textures_, "glGenTextures") &&
+               load_gl(bind_texture_, "glBindTexture") &&
+               load_gl(tex_image_2d_, "glTexImage2D") &&
+               load_gl(tex_sub_image_2d_, "glTexSubImage2D") &&
+               load_gl(tex_parameter_i_, "glTexParameteri") &&
+               load_gl(delete_textures_, "glDeleteTextures") &&
+               load_gl(gen_framebuffers_, "glGenFramebuffers") &&
+               load_gl(bind_framebuffer_, "glBindFramebuffer") &&
+               load_gl(framebuffer_texture_2d_, "glFramebufferTexture2D") &&
+               load_gl(check_framebuffer_status_, "glCheckFramebufferStatus") &&
+               load_gl(delete_framebuffers_, "glDeleteFramebuffers") &&
+               load_gl(viewport_, "glViewport") &&
+               load_gl(scissor_, "glScissor") &&
+               load_gl(enable_, "glEnable") &&
+               load_gl(disable_, "glDisable") &&
+               load_gl(blend_func_, "glBlendFunc") &&
+               load_gl(blend_equation_, "glBlendEquation") &&
+               load_gl(color_mask_, "glColorMask") &&
+               load_gl(gen_vertex_arrays_, "glGenVertexArrays") &&
+               load_gl(bind_vertex_array_, "glBindVertexArray") &&
+               load_gl(delete_vertex_arrays_, "glDeleteVertexArrays") &&
+               load_gl(vertex_attrib_pointer_, "glVertexAttribPointer") &&
+               load_gl(enable_vertex_attrib_array_, "glEnableVertexAttribArray") &&
+               load_gl(disable_vertex_attrib_array_, "glDisableVertexAttribArray") &&
+               load_gl(draw_arrays_, "glDrawArrays") &&
+               load_gl(read_pixels_, "glReadPixels") &&
+               load_gl(pixel_store_i_, "glPixelStorei") &&
                load_gl(get_error_, "glGetError"))) {
             error = "OpenGL 4.3 compute fixture is missing a required entry point";
             return false;
         }
-        return compile_fixture(error) && compile_dashboard(error);
+        return compile_fixture(error) && compile_dashboard(error) &&
+               compile_resident_primary(error);
     }
 private:
+    struct ResidentSurface {
+        bool valid = false;
+        bool dirty = false;
+        bool x8 = false;
+        uint32_t address = 0;
+        size_t size = 0;
+        uint32_t pitch = 0;
+        uint32_t width = 0;
+        uint32_t height = 0;
+        uint32_t format = 0;
+    };
+    static unsigned int gl_blend_factor(uint32_t factor) {
+        switch (factor) {
+            case 0: return kGlZero;
+            case 1: return kGlOne;
+            case 0x0302: return kGlSrcAlpha;
+            default: return kGlOneMinusSrcAlpha;
+        }
+    }
+    static void guest_words_to_rgba(const std::vector<uint8_t>& guest,
+                                    std::vector<uint8_t>& rgba, uint32_t width,
+                                    uint32_t height, bool x8) {
+        rgba.assign(static_cast<size_t>(width) * height * 4u, 0);
+        for (uint32_t y = 0; y < height; ++y) {
+            const uint32_t gl_y = height - 1u - y;
+            for (uint32_t x = 0; x < width; ++x) {
+                const size_t guest_offset = (static_cast<size_t>(y) * width + x) * 4u;
+                const size_t gl_offset =
+                    (static_cast<size_t>(gl_y) * width + x) * 4u;
+                rgba[gl_offset + 0] = guest[guest_offset + 2];
+                rgba[gl_offset + 1] = guest[guest_offset + 1];
+                rgba[gl_offset + 2] = guest[guest_offset + 0];
+                rgba[gl_offset + 3] = x8 ? 0xff : guest[guest_offset + 3];
+            }
+        }
+    }
+    static void rgba_to_guest_words(const std::vector<uint8_t>& rgba,
+                                    std::vector<uint8_t>& guest, uint32_t width,
+                                    uint32_t height, bool x8) {
+        guest.assign(static_cast<size_t>(width) * height * 4u, 0);
+        for (uint32_t y = 0; y < height; ++y) {
+            const uint32_t gl_y = height - 1u - y;
+            for (uint32_t x = 0; x < width; ++x) {
+                const size_t guest_offset = (static_cast<size_t>(y) * width + x) * 4u;
+                const size_t gl_offset =
+                    (static_cast<size_t>(gl_y) * width + x) * 4u;
+                guest[guest_offset + 0] = rgba[gl_offset + 2];
+                guest[guest_offset + 1] = rgba[gl_offset + 1];
+                guest[guest_offset + 2] = rgba[gl_offset + 0];
+                guest[guest_offset + 3] = x8 ? 0xff : rgba[gl_offset + 3];
+            }
+        }
+    }
+    bool ensure_resident_surface(const Nv2aGenericCombinerPacket& packet,
+                                 uint32_t width, uint32_t height, size_t size,
+                                 std::string& error) {
+        const bool same = resident_.valid &&
+                          resident_.address == packet.color_address &&
+                          resident_.size == size &&
+                          resident_.pitch == packet.surface_pitch &&
+                          resident_.height == packet.surface_height &&
+                          resident_.format == packet.surface_format;
+        if (same) return true;
+        if (resident_.valid && resident_.dirty) {
+            error = "OpenGL resident primary target switch without prior resolve";
+            return false;
+        }
+        if (packet.color_input.size() != size) {
+            error = "OpenGL resident primary draw missing initial color snapshot";
+            return false;
+        }
+        if (!resident_texture_) {
+            gen_textures_(1, &resident_texture_);
+            bind_texture_(kGlTexture2D, resident_texture_);
+            tex_parameter_i_(kGlTexture2D, kGlTextureMinFilter, kGlNearest);
+            tex_parameter_i_(kGlTexture2D, kGlTextureMagFilter, kGlNearest);
+            tex_parameter_i_(kGlTexture2D, kGlTextureWrapS, kGlClampToEdge);
+            tex_parameter_i_(kGlTexture2D, kGlTextureWrapT, kGlClampToEdge);
+        } else {
+            bind_texture_(kGlTexture2D, resident_texture_);
+        }
+        std::vector<uint8_t> rgba;
+        guest_words_to_rgba(packet.color_input, rgba, width, height,
+                            packet.fixture_color_format_x8);
+        pixel_store_i_(kGlUnpackAlignment, 1);
+        tex_image_2d_(kGlTexture2D, 0, kGlRgba8, static_cast<int>(width),
+                      static_cast<int>(height), 0, kGlRgba, kGlUnsignedByte,
+                      rgba.data());
+        if (!resident_fbo_) gen_framebuffers_(1, &resident_fbo_);
+        bind_framebuffer_(kGlFramebuffer, resident_fbo_);
+        framebuffer_texture_2d_(kGlFramebuffer, kGlColorAttachment0, kGlTexture2D,
+                                resident_texture_, 0);
+        if (check_framebuffer_status_(kGlFramebuffer) != kGlFramebufferComplete) {
+            error = "OpenGL resident color framebuffer is incomplete";
+            return false;
+        }
+        if (get_error_() != kGlNoError) {
+            error = "OpenGL resident color upload failed";
+            return false;
+        }
+        resident_.valid = true;
+        resident_.dirty = false;
+        resident_.x8 = packet.fixture_color_format_x8;
+        resident_.address = packet.color_address;
+        resident_.size = size;
+        resident_.pitch = packet.surface_pitch;
+        resident_.width = width;
+        resident_.height = height;
+        resident_.format = packet.surface_format;
+        return true;
+    }
     bool compile_program(const char* source, const char* label,
                          unsigned int& program, std::string& error) {
         const unsigned int shader = create_shader_(kGlComputeShader);
@@ -534,6 +957,52 @@ private:
         }
         return true;
     }
+    bool compile_graphics_program(const char* vertex_source,
+                                  const char* fragment_source,
+                                  const char* label, unsigned int& program,
+                                  std::string& error) {
+        const unsigned int vertex_shader = create_shader_(kGlVertexShader);
+        const unsigned int fragment_shader = create_shader_(kGlFragmentShader);
+        auto compile_one = [&](unsigned int shader, const char* source,
+                               const char* stage) {
+            shader_source_(shader, 1, &source, nullptr);
+            compile_shader_(shader);
+            int success = 0;
+            get_shader_iv_(shader, kGlCompileStatus, &success);
+            if (success) return true;
+            std::array<char, 1024> log{};
+            get_shader_log_(shader, static_cast<int>(log.size()), nullptr,
+                            log.data());
+            error = std::string("OpenGL ") + label + " " + stage +
+                    " compile failed: " + log.data();
+            return false;
+        };
+        if (!compile_one(vertex_shader, vertex_source, "vertex") ||
+            !compile_one(fragment_shader, fragment_source, "fragment")) {
+            delete_shader_(vertex_shader);
+            delete_shader_(fragment_shader);
+            return false;
+        }
+        program = create_program_();
+        attach_shader_(program, vertex_shader);
+        attach_shader_(program, fragment_shader);
+        link_program_(program);
+        delete_shader_(vertex_shader);
+        delete_shader_(fragment_shader);
+        int success = 0;
+        get_program_iv_(program, kGlLinkStatus, &success);
+        if (!success) {
+            std::array<char, 1024> log{};
+            get_program_log_(program, static_cast<int>(log.size()), nullptr,
+                             log.data());
+            error = std::string("OpenGL ") + label + " link failed: " +
+                    log.data();
+            delete_program_(program);
+            program = 0;
+            return false;
+        }
+        return true;
+    }
     bool compile_fixture(std::string& error) {
         return compile_program(kFixtureComputeSource, "fixture", fixture_program_, error);
     }
@@ -541,11 +1010,23 @@ private:
         return compile_program(kDashboardProject2dFanComputeSource, "dashboard",
                                dashboard_program_, error);
     }
+    bool compile_resident_primary(std::string& error) {
+        return compile_graphics_program(kResidentPrimaryVertexSource,
+                                        kResidentPrimaryFragmentSource,
+                                        "resident-primary", resident_program_,
+                                        error);
+    }
     SDL_Window* window_ = nullptr;
     SDL_GLContext context_ = nullptr;
     bool owns_video_ = false;
     unsigned int fixture_program_ = 0;
     unsigned int dashboard_program_ = 0;
+    unsigned int resident_program_ = 0;
+    unsigned int resident_texture_ = 0;
+    unsigned int resident_fbo_ = 0;
+    unsigned int resident_vbo_ = 0;
+    unsigned int resident_vao_ = 0;
+    ResidentSurface resident_;
     GlCreateShader create_shader_ = nullptr; GlShaderSource shader_source_ = nullptr;
     GlCompileShader compile_shader_ = nullptr; GlGetShaderiv get_shader_iv_ = nullptr;
     GlGetShaderInfoLog get_shader_log_ = nullptr; GlDeleteShader delete_shader_ = nullptr;
@@ -554,11 +1035,29 @@ private:
     GlGetProgramInfoLog get_program_log_ = nullptr; GlDeleteProgram delete_program_ = nullptr;
     GlUseProgram use_program_ = nullptr; GlGetUniformLocation uniform_location_ = nullptr;
     GlUniform1i uniform_1i_ = nullptr; GlUniform1ui uniform_1ui_ = nullptr;
-    GlUniform2i uniform_2i_ = nullptr; GlGenBuffers gen_buffers_ = nullptr;
+    GlUniform2i uniform_2i_ = nullptr; GlUniform2f uniform_2f_ = nullptr;
+    GlUniform4f uniform_4f_ = nullptr; GlGenBuffers gen_buffers_ = nullptr;
     GlBindBuffer bind_buffer_ = nullptr; GlBufferData buffer_data_ = nullptr;
     GlBindBufferBase bind_buffer_base_ = nullptr; GlDispatchCompute dispatch_compute_ = nullptr;
     GlMemoryBarrier memory_barrier_ = nullptr; GlGetBufferSubData get_buffer_sub_data_ = nullptr;
-    GlDeleteBuffers delete_buffers_ = nullptr; GlGetError get_error_ = nullptr;
+    GlDeleteBuffers delete_buffers_ = nullptr; GlGenTextures gen_textures_ = nullptr;
+    GlBindTexture bind_texture_ = nullptr; GlTexImage2D tex_image_2d_ = nullptr;
+    GlTexSubImage2D tex_sub_image_2d_ = nullptr; GlTexParameteri tex_parameter_i_ = nullptr;
+    GlDeleteTextures delete_textures_ = nullptr; GlGenFramebuffers gen_framebuffers_ = nullptr;
+    GlBindFramebuffer bind_framebuffer_ = nullptr;
+    GlFramebufferTexture2D framebuffer_texture_2d_ = nullptr;
+    GlCheckFramebufferStatus check_framebuffer_status_ = nullptr;
+    GlDeleteFramebuffers delete_framebuffers_ = nullptr; GlViewport viewport_ = nullptr;
+    GlScissor scissor_ = nullptr; GlEnable enable_ = nullptr; GlDisable disable_ = nullptr;
+    GlBlendFunc blend_func_ = nullptr; GlBlendEquation blend_equation_ = nullptr;
+    GlColorMask color_mask_ = nullptr; GlGenVertexArrays gen_vertex_arrays_ = nullptr;
+    GlBindVertexArray bind_vertex_array_ = nullptr;
+    GlDeleteVertexArrays delete_vertex_arrays_ = nullptr;
+    GlVertexAttribPointer vertex_attrib_pointer_ = nullptr;
+    GlEnableVertexAttribArray enable_vertex_attrib_array_ = nullptr;
+    GlDisableVertexAttribArray disable_vertex_attrib_array_ = nullptr;
+    GlDrawArrays draw_arrays_ = nullptr; GlReadPixels read_pixels_ = nullptr;
+    GlPixelStorei pixel_store_i_ = nullptr; GlGetError get_error_ = nullptr;
 };
 }  // namespace
 
@@ -608,7 +1107,7 @@ std::unique_ptr<Nv2aRenderer> create_nv2a_opengl_renderer(std::string& error) {
         return nullptr;
     }
     auto renderer =
-        std::make_unique<OpenGlNv2aRenderer>(window, context, owns_video, 0, 0);
+        std::make_unique<OpenGlNv2aRenderer>(window, context, owns_video, 0, 0, 0);
     if (!renderer->initialize(error)) return nullptr;
     restore_previous_gl_context(previous_window, previous_context, window);
     std::printf("[nv2a-renderer] opengl context ready: GL %d.%d; narrow compute fixtures enabled\n",

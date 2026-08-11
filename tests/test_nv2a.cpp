@@ -27,10 +27,17 @@ static uint32_t get32(const std::vector<uint8_t>& mem, uint32_t addr) {
 class FakeNv2aRenderer final : public xlle::Nv2aRenderer {
 public:
     bool supported = false;
+    bool resident_supported = false;
     mutable uint64_t support_queries = 0;
+    mutable uint64_t resident_support_queries = 0;
     uint64_t submits = 0;
+    uint64_t resident_submits = 0;
     uint32_t write_offset = 5 * 256 + 5 * 4;
     uint32_t write_value = 0xA1B2C3D4u;
+    uint32_t resident_resolve_address = 0;
+    std::vector<uint8_t> resident_resolve_data;
+    uint64_t resident_resolves = 0;
+    uint64_t resident_invalidates = 0;
     xlle::Nv2aGenericCombinerPacket last_packet;
     const char* name() const override { return "fake"; }
     bool supports_generic_combiner(
@@ -53,6 +60,55 @@ public:
         result.fragments = 1;
         result.writes = 1;
         return true;
+    }
+    bool supports_resident_generic_combiner(
+        const xlle::Nv2aGenericCombinerPacket& packet) const override {
+        ++resident_support_queries;
+        return resident_supported &&
+               packet.compute_fixture == xlle::Nv2aGenericCombinerPacket::
+                                             ComputeFixture::kResidentPrimaryColorTriangles;
+    }
+    bool submit_resident_generic_combiner(
+        const xlle::Nv2aGenericCombinerPacket& packet,
+        xlle::Nv2aGenericCombinerResult& result, std::string&) override {
+        ++resident_submits;
+        last_packet = packet;
+        result.triangles = packet.vertices.size() / 3;
+        result.fragments = 0;
+        result.writes = 0;
+        return true;
+    }
+    bool resolve_resident_color_surface(
+        uint32_t address, size_t size, xlle::Nv2aResidentColorResolve& resolve,
+        std::string&) override {
+        if (resident_resolve_data.empty()) {
+            resolve = {};
+            return true;
+        }
+        const uint64_t request_end = static_cast<uint64_t>(address) + size;
+        const uint64_t resident_end =
+            static_cast<uint64_t>(resident_resolve_address) +
+            resident_resolve_data.size();
+        if (address >= resident_end || resident_resolve_address >= request_end) {
+            resolve = {};
+            return true;
+        }
+        ++resident_resolves;
+        resolve.address = resident_resolve_address;
+        resolve.data = resident_resolve_data;
+        resident_resolve_data.clear();
+        return true;
+    }
+    void invalidate_resident_color_surface(uint32_t address, size_t size) override {
+        const uint64_t request_end = static_cast<uint64_t>(address) + size;
+        const uint64_t resident_end =
+            static_cast<uint64_t>(resident_resolve_address) +
+            resident_resolve_data.size();
+        if (!resident_resolve_data.empty() && address < resident_end &&
+            resident_resolve_address < request_end) {
+            ++resident_invalidates;
+            resident_resolve_data.clear();
+        }
     }
 };
 
@@ -2783,6 +2839,26 @@ int main() {
     std::vector<uint32_t> starts;
     CHECK(gpu.recent_scanout_starts(4, starts) == 1);
     CHECK(starts.size() == 1 && starts[0] == 0x4000);
+    {
+        FakeNv2aRenderer resident_fake;
+        resident_fake.resident_resolve_address = 0x4000;
+        resident_fake.resident_resolve_data.resize(sizeof(scanout_pixels));
+        const uint16_t resolved_pixels[] = {0xffff, 0x001f, 0, 0, 0x07e0, 0xf800};
+        std::memcpy(resident_fake.resident_resolve_data.data(), resolved_pixels,
+                    sizeof(resolved_pixels));
+        std::memset(ram.data() + 0x4000, 0, sizeof(scanout_pixels));
+        gpu.set_renderer(&resident_fake);
+        CHECK(gpu.capture_scanout(rgba, scanout, scanout_error));
+        gpu.set_renderer(nullptr);
+        CHECK(resident_fake.resident_resolves == 1);
+        const std::vector<uint8_t> expected_resolved_rgba = {
+            255, 255, 255, 255, 0, 0, 255, 255,
+            0, 255, 0, 255, 255, 0, 0, 255,
+        };
+        CHECK(rgba == expected_resolved_rgba);
+        CHECK(std::memcmp(ram.data() + 0x4000, resolved_pixels,
+                          sizeof(resolved_pixels)) == 0);
+    }
 
     // The dashboard's first immediate draw is a Kelvin quad: generic texture slot 9 and
     // diffuse slot 3 are persistent state, while legacy SET_VERTEX4F position W commits
@@ -4960,6 +5036,22 @@ int main() {
             emit_gc(0x17FC, 0);
             kick_gc();
         };
+        auto submit_two_triangles = [&](uint32_t rgba) {
+            const std::array<std::pair<float, float>, 6> xy{{
+                {0.0f, 0.0f}, {20.0f, 0.0f}, {0.0f, 20.0f},
+                {20.0f, 0.0f}, {20.0f, 20.0f}, {0.0f, 20.0f},
+            }};
+            emit_gc(0x17FC, 5);
+            for (auto point : xy) {
+                emit_gc(0x1518, gc_float_bits(point.first));
+                emit_gc(0x151C, gc_float_bits(point.second));
+                emit_gc(0x1520, gc_float_bits(50.0f));
+                emit_gc(0x194C, rgba);
+                emit_gc(0x1524, gc_float_bits(1.0f));
+            }
+            emit_gc(0x17FC, 0);
+            kick_gc();
+        };
 
         // --- (a) Exact dashboard fingerprint: 1-stage combiner, shader=00000000/
         // 00210000, comb=00000001, tex=0, textureless. Reproduces the raster-state
@@ -5131,6 +5223,26 @@ int main() {
             CHECK(gc_gpu.generic_combiner_accelerated_batches() == accelerated_before + 1);
             CHECK(gc_gpu.generic_combiner_batches() == software_before);
             CHECK(get32(gc_ram, 0x10000 + fake.write_offset) == fake.write_value);
+
+            fake.resident_supported = true;
+            emit_gc(0x1E20, 0x12345678);  // inert: final combiner passes R0 directly
+            emit_gc(0x1E24, 0x9ABCDEF0);
+            const uint64_t resident_accel_before =
+                gc_gpu.generic_combiner_accelerated_batches();
+            std::memset(gc_ram.data() + 0x10000, 0, 256 * 64);
+            submit_two_triangles(gc_pack_ub4(0x22, 0x44, 0x66, 0xCC));
+            CHECK(gc_fault.empty());
+            CHECK(fake.resident_support_queries > 0);
+            CHECK(fake.resident_submits == 1);
+            CHECK(fake.last_packet.compute_fixture ==
+                  xlle::Nv2aGenericCombinerPacket::ComputeFixture::
+                      kResidentPrimaryColorTriangles);
+            CHECK(fake.last_packet.vertices.size() == 6);
+            CHECK(fake.last_packet.color_input.size() == 256 * 64);
+            CHECK(gc_gpu.generic_combiner_accelerated_batches() ==
+                  resident_accel_before + 1);
+            emit_gc(0x1E20, 0);
+            emit_gc(0x1E24, 0);
             gc_gpu.set_renderer(nullptr);
         }
 
