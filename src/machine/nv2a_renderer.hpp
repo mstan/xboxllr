@@ -22,7 +22,11 @@ struct Nv2aGenericCombinerPacket {
     // replacement for the generic state vector: it gives a host backend the exact
     // coverage/output inputs it needs without teaching host code NV097 register
     // indices.  More general generic-combiner uniforms will extend this structure.
-    enum class ComputeFixture : uint8_t { kNone, kUntexturedPrimaryTriangle };
+    enum class ComputeFixture : uint8_t {
+        kNone,
+        kUntexturedPrimaryTriangle,
+        kDashboardProject2dFan
+    };
     enum class TextureLayout : uint8_t { kLinear, kSwizzled };
     enum class TextureFormat : uint8_t { kArgb8, kA8 };
     enum class TextureMode : uint8_t { kProject2d, kCubemap };
@@ -61,6 +65,8 @@ struct Nv2aGenericCombinerPacket {
     // blend contract here rather than reaching back into raster_state.
     std::array<int32_t, 6> fixture_xy_16{};
     uint32_t fixture_source_argb = 0;
+    uint32_t fixture_factor0_stage2_argb = 0;
+    uint32_t fixture_factor0_stage4_argb = 0;
 };
 
 // A successful synchronous submission returns complete replacement images for the

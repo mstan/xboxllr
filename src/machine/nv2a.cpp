@@ -6334,6 +6334,112 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     pack_component(diffuse[2]);
             }
         }
+        auto exact_fixed_xy = [](float value, int32_t expected) {
+            if (!std::isfinite(value)) return false;
+            const double fixed = std::round(static_cast<double>(value) * 16.0);
+            return fixed == static_cast<double>(expected);
+        };
+        const std::array<std::array<int32_t, 2>, 4> dashboard_xy{{
+            {{8, 7688}},
+            {{8, 8}},
+            {{20488, 8}},
+            {{20488, 7688}},
+        }};
+        bool dashboard_fullscreen_vertices =
+            primitive_mode_ == 7 && transformed_batch_.size() == 4;
+        for (size_t vertex = 0; dashboard_fullscreen_vertices && vertex < 4; ++vertex) {
+            const auto& position = transformed_batch_[vertex].position;
+            dashboard_fullscreen_vertices =
+                exact_fixed_xy(position[0], dashboard_xy[vertex][0]) &&
+                exact_fixed_xy(position[1], dashboard_xy[vertex][1]) &&
+                position[2] == 16777215.0f && position[3] == 1.0f;
+            for (uint32_t stage = 0; dashboard_fullscreen_vertices && stage < 4;
+                 ++stage) {
+                for (float component : transformed_batch_[vertex].texture[stage]) {
+                    if (!std::isfinite(component)) {
+                        dashboard_fullscreen_vertices = false;
+                        break;
+                    }
+                }
+            }
+        }
+        const bool dashboard_project2d_state =
+            dashboard_fullscreen_vertices && color_format_a8 && uses_depth &&
+            depth_test_enabled_bit && depth_func == 0x0207 &&
+            raster_state_[kRasterDepthMask] == 0 && alpha_test_enabled &&
+            alpha_func == 0x0206 &&
+            (raster_state_[kRasterAlphaRef] & 0xFFu) == 1 &&
+            blend_enabled && blend_src == 0x0302 && blend_dst == 1 &&
+            blend_eq == 0x8006 && cull_enabled && !cull_front &&
+            color_mask_word == 0x01010101 && clip_x == 0 && clip_y == 0 &&
+            clip_width == 1280 && clip_height == 480 && pitch == 0x1400 &&
+            surface_height == 480 && raster_state_[kRasterWindowClipHorizontal] ==
+                                        0x04ff0000 &&
+            raster_state_[kRasterWindowClipVertical] == 0x01df0000 &&
+            raster_state_[kRasterShaderStageProgram] == 0x00008421 &&
+            raster_state_[kRasterShaderOtherStageInput] == 0 &&
+            raster_state_[kRasterCombinerControl] == 0x00011106 &&
+            raster_state_[kRasterTextureEnableMask] == 0x0000000f &&
+            texture_stages[0].valid && texture_stages[1].valid &&
+            texture_stages[2].valid && texture_stages[3].valid &&
+            !texture_stages[0].linear && !texture_stages[0].cubemap &&
+            !texture_stages[0].alpha8 && texture_stages[0].width == 1024 &&
+            texture_stages[0].height == 512 && texture_stages[1].alpha8 &&
+            texture_stages[2].alpha8 && texture_stages[3].alpha8 &&
+            texture_stages[1].width == 256 && texture_stages[1].height == 256 &&
+            texture_stages[2].width == 256 && texture_stages[2].height == 256 &&
+            texture_stages[3].width == 256 && texture_stages[3].height == 256 &&
+            (raster_state_[kRasterTextureAddress0] == 0x00010303 ||
+             raster_state_[kRasterTextureAddress0] == 0x00030303) &&
+            raster_state_[kRasterTextureAddress0 + 1] == 0x00030101 &&
+            raster_state_[kRasterTextureAddress0 + 2] == 0x00030101 &&
+            raster_state_[kRasterTextureAddress0 + 3] == 0x00030101;
+        if (dashboard_project2d_state) {
+            const std::array<uint32_t, 6> alpha_icw{{
+                0xd930da30, 0xdd30db30, 0xddd11010, 0, 0, 0x30301010,
+            }};
+            const std::array<uint32_t, 6> color_icw{{
+                0xd920da20, 0xcd20db20, 0xcdc10000,
+                0xc8cd0000, 0xcc20c120, 0,
+            }};
+            const std::array<uint32_t, 6> alpha_ocw{{
+                0x00000d00, 0x00000d00, 0x000000d0, 0, 0, 0x000000c0,
+            }};
+            const std::array<uint32_t, 6> color_ocw{{
+                0x00000d00, 0x00000d00, 0x000000d0,
+                0x000000c0, 0x00000c00, 0,
+            }};
+            bool combiner_words_match = true;
+            for (uint32_t stage = 0; stage < 6; ++stage) {
+                combiner_words_match =
+                    combiner_words_match &&
+                    raster_state_[kRasterCombinerAlphaIcw0 + stage] ==
+                        alpha_icw[stage] &&
+                    raster_state_[kRasterCombinerColorIcw0 + stage] ==
+                        color_icw[stage] &&
+                    raster_state_[kRasterCombinerAlphaOcw0 + stage] ==
+                        alpha_ocw[stage] &&
+                    raster_state_[kRasterCombinerColorOcw0 + stage] ==
+                        color_ocw[stage] &&
+                    raster_state_[kRasterCombinerFactor1_0 + stage] == 0;
+            }
+            if (combiner_words_match &&
+                raster_state_[kRasterCombinerFactor0_0] == 0 &&
+                raster_state_[kRasterCombinerFactor0_0 + 1] == 0 &&
+                raster_state_[kRasterCombinerFactor0_0 + 3] == 0 &&
+                raster_state_[kRasterCombinerFactor0_0 + 5] == 0 &&
+                raster_state_[kRasterCombinerSpecularFog0] == 0x0000000c &&
+                raster_state_[kRasterCombinerSpecularFog1] == 0x00001c80 &&
+                raster_state_[kRasterCombinerFinalFactor0] == 0 &&
+                raster_state_[kRasterCombinerFinalFactor1] == 0) {
+                packet.compute_fixture =
+                    Nv2aGenericCombinerPacket::ComputeFixture::kDashboardProject2dFan;
+                packet.fixture_factor0_stage2_argb =
+                    raster_state_[kRasterCombinerFactor0_0 + 2];
+                packet.fixture_factor0_stage4_argb =
+                    raster_state_[kRasterCombinerFactor0_0 + 4];
+            }
+        }
         if (renderer_->supports_generic_combiner(packet)) {
             packet.color_input.resize(static_cast<size_t>(color_bytes64));
             if (!mem_read_ ||
