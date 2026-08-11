@@ -6361,13 +6361,13 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     const bool only_texture0_input =
         texture_referenced[0] && !texture_referenced[1] &&
         !texture_referenced[2] && !texture_referenced[3];
-    const bool texture0_linear_input =
-        only_texture0_input && texture_stages[0].valid && texture_stages[0].linear;
+    const bool texture0_input =
+        only_texture0_input && texture_stages[0].valid;
     auto writes_r0_from_ab_or_sum = [](uint32_t ocw) {
         return ocw == 0x000000C0 || ocw == 0x00000C00;
     };
     const bool texture0_modulate_primary =
-        texture0_linear_input && stage_count == 1 &&
+        texture0_input && stage_count == 1 &&
         (raster_state_[kRasterCombinerColorIcw0] == 0x08040000 ||
          raster_state_[kRasterCombinerColorIcw0] == 0x04080000) &&
         writes_r0_from_ab_or_sum(raster_state_[kRasterCombinerColorOcw0]) &&
@@ -6376,7 +6376,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         writes_r0_from_ab_or_sum(raster_state_[kRasterCombinerAlphaOcw0]) &&
         final_cw0 == 0x0000000C && final_cw1 == 0x00001C80;
     const bool texture0_passthrough =
-        texture0_linear_input && stage_count == 1 &&
+        texture0_input && stage_count == 1 &&
         raster_state_[kRasterCombinerColorIcw0] == 0x08200000 &&
         raster_state_[kRasterCombinerAlphaIcw0] == 0x14200000 &&
         writes_r0_from_ab_or_sum(raster_state_[kRasterCombinerColorOcw0]) &&
