@@ -21,6 +21,8 @@ build/
 build-release/
 out/
 generated/
+__pycache__/
+*.pyc
 *.blockpack
 traces/
 cosim-logs/
