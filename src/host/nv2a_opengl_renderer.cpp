@@ -696,8 +696,11 @@ public:
             delete_vertex_arrays_(1, &resident_vao_);
         if (resident_fbo_ && delete_framebuffers_)
             delete_framebuffers_(1, &resident_fbo_);
-        if (resident_texture_ && delete_textures_)
-            delete_textures_(1, &resident_texture_);
+        if (delete_textures_) {
+            for (const auto& surface : resident_surfaces_) {
+                if (surface.texture) delete_textures_(1, &surface.texture);
+            }
+        }
         if (resident_source_texture_ && delete_textures_)
             delete_textures_(1, &resident_source_texture_);
         if (context_) SDL_GL_DestroyContext(context_);
@@ -770,9 +773,11 @@ public:
     bool has_resident_color_surface(uint32_t address, size_t size, uint32_t pitch,
                                     uint32_t height,
                                     uint32_t format) const override {
-        return resident_.valid && resident_.address == address &&
-               resident_.size == size && resident_.pitch == pitch &&
-               resident_.height == height && resident_.format == format;
+        return find_resident_surface(address, size, pitch, height, format) !=
+               nullptr;
+    }
+    bool requires_resident_target_switch_resolve() const override {
+        return false;
     }
     bool supports_resident_generic_combiner(
         const Nv2aGenericCombinerPacket& packet) const override {
@@ -1083,7 +1088,10 @@ public:
             }
             return false;
         }
-        resident_.dirty = true;
+        if (active_resident_) {
+            active_resident_->dirty = true;
+            active_resident_ = nullptr;
+        }
         result.color_output.clear();
         result.depth_output.clear();
         result.triangles = vertices.size() / 3;
@@ -1095,11 +1103,15 @@ public:
                                         Nv2aResidentColorResolve& resolve,
                                         std::string& error) override {
         resolve = {};
-        if (!resident_.valid || !resident_.dirty || size == 0) return true;
-        const uint64_t request_end = static_cast<uint64_t>(address) + size;
-        const uint64_t resident_end =
-            static_cast<uint64_t>(resident_.address) + resident_.size;
-        if (address >= resident_end || resident_.address >= request_end) return true;
+        if (size == 0) return true;
+        ResidentSurface* surface = nullptr;
+        for (auto& candidate : resident_surfaces_) {
+            if (candidate.dirty && resident_overlaps(candidate, address, size)) {
+                surface = &candidate;
+                break;
+            }
+        }
+        if (!surface) return true;
         SDL_Window* previous_window = SDL_GL_GetCurrentWindow();
         SDL_GLContext previous_context = SDL_GL_GetCurrentContext();
         if (!SDL_GL_MakeCurrent(window_, context_)) {
@@ -1119,33 +1131,35 @@ public:
         {
             perf::ScopedAdd timer(perf::g_ns_renderer_resolve,
                                   perf::g_calls_renderer_resolve);
-            std::vector<uint8_t> rgba(static_cast<size_t>(resident_.width) *
-                                      resident_.height * 4u);
+            std::vector<uint8_t> rgba(static_cast<size_t>(surface->width) *
+                                      surface->height * 4u);
             bind_framebuffer_(kGlFramebuffer, resident_fbo_);
+            framebuffer_texture_2d_(kGlFramebuffer, kGlColorAttachment0,
+                                    kGlTexture2D, surface->texture, 0);
             pixel_store_i_(kGlPackAlignment, 1);
-            read_pixels_(0, 0, static_cast<int>(resident_.width),
-                         static_cast<int>(resident_.height), kGlRgba,
+            read_pixels_(0, 0, static_cast<int>(surface->width),
+                         static_cast<int>(surface->height), kGlRgba,
                          kGlUnsignedByte, rgba.data());
             if (get_error_() != kGlNoError) {
                 error = "OpenGL resident color readback failed";
                 return false;
             }
-            resolve.address = resident_.address;
-            resolve.data.resize(resident_.size);
-            rgba_to_guest_words(rgba, resolve.data, resident_.width,
-                                resident_.height, resident_.x8);
+            resolve.address = surface->address;
+            resolve.data.resize(surface->size);
+            rgba_to_guest_words(rgba, resolve.data, surface->width,
+                                surface->height, surface->x8);
         }
-        resident_.dirty = false;
+        surface->dirty = false;
         return true;
     }
     void invalidate_resident_color_surface(uint32_t address, size_t size) override {
-        if (!resident_.valid || size == 0) return;
-        const uint64_t request_end = static_cast<uint64_t>(address) + size;
-        const uint64_t resident_end =
-            static_cast<uint64_t>(resident_.address) + resident_.size;
-        if (address < resident_end && resident_.address < request_end) {
-            resident_.valid = false;
-            resident_.dirty = false;
+        if (size == 0) return;
+        for (auto& surface : resident_surfaces_) {
+            if (resident_overlaps(surface, address, size)) {
+                surface.valid = false;
+                surface.dirty = false;
+                if (active_resident_ == &surface) active_resident_ = nullptr;
+            }
         }
     }
     bool submit_generic_combiner(const Nv2aGenericCombinerPacket& packet,
@@ -1482,6 +1496,7 @@ private:
         bool valid = false;
         bool dirty = false;
         bool x8 = false;
+        unsigned int texture = 0;
         uint32_t address = 0;
         size_t size = 0;
         uint32_t pitch = 0;
@@ -1502,6 +1517,48 @@ private:
             hash *= 1099511628211ull;
         }
         return hash;
+    }
+    ResidentSurface* find_resident_surface(uint32_t address, size_t size,
+                                           uint32_t pitch, uint32_t height,
+                                           uint32_t format) {
+        for (auto& surface : resident_surfaces_) {
+            if (surface.valid && surface.address == address &&
+                surface.size == size && surface.pitch == pitch &&
+                surface.height == height && surface.format == format) {
+                return &surface;
+            }
+        }
+        return nullptr;
+    }
+    const ResidentSurface* find_resident_surface(uint32_t address, size_t size,
+                                                 uint32_t pitch,
+                                                 uint32_t height,
+                                                 uint32_t format) const {
+        for (const auto& surface : resident_surfaces_) {
+            if (surface.valid && surface.address == address &&
+                surface.size == size && surface.pitch == pitch &&
+                surface.height == height && surface.format == format) {
+                return &surface;
+            }
+        }
+        return nullptr;
+    }
+    ResidentSurface* find_reusable_resident_slot() {
+        for (auto& surface : resident_surfaces_) {
+            if (!surface.valid) return &surface;
+        }
+        for (auto& surface : resident_surfaces_) {
+            if (!surface.dirty) return &surface;
+        }
+        return nullptr;
+    }
+    static bool resident_overlaps(const ResidentSurface& surface, uint32_t address,
+                                  size_t size) {
+        const uint64_t request_end = static_cast<uint64_t>(address) + size;
+        const uint64_t resident_end =
+            static_cast<uint64_t>(surface.address) + surface.size;
+        return surface.valid && address < resident_end &&
+               surface.address < request_end;
     }
     static unsigned int gl_blend_factor(uint32_t factor) {
         switch (factor) {
@@ -1566,30 +1623,39 @@ private:
     bool ensure_resident_surface(const Nv2aGenericCombinerPacket& packet,
                                  uint32_t width, uint32_t height, size_t size,
                                  std::string& error) {
-        const bool same = resident_.valid &&
-                          resident_.address == packet.color_address &&
-                          resident_.size == size &&
-                          resident_.pitch == packet.surface_pitch &&
-                          resident_.height == packet.surface_height &&
-                          resident_.format == packet.surface_format;
-        if (same) return true;
-        if (resident_.valid && resident_.dirty) {
-            error = "OpenGL resident primary target switch without prior resolve";
-            return false;
+        if (ResidentSurface* existing = find_resident_surface(
+                packet.color_address, size, packet.surface_pitch,
+                packet.surface_height, packet.surface_format)) {
+            active_resident_ = existing;
+            bind_texture_(kGlTexture2D, existing->texture);
+            if (!resident_fbo_) gen_framebuffers_(1, &resident_fbo_);
+            bind_framebuffer_(kGlFramebuffer, resident_fbo_);
+            framebuffer_texture_2d_(kGlFramebuffer, kGlColorAttachment0,
+                                    kGlTexture2D, existing->texture, 0);
+            return true;
         }
         if (packet.color_input.size() != size) {
             error = "OpenGL resident primary draw missing initial color snapshot";
             return false;
         }
-        if (!resident_texture_) {
-            gen_textures_(1, &resident_texture_);
-            bind_texture_(kGlTexture2D, resident_texture_);
+        ResidentSurface* slot = find_reusable_resident_slot();
+        if (!slot) {
+            error = "OpenGL resident surface cache is full of dirty targets";
+            return false;
+        }
+        if (!slot->texture) {
+            gen_textures_(1, &slot->texture);
+            if (!slot->texture) {
+                error = "OpenGL resident color texture allocation failed";
+                return false;
+            }
+            bind_texture_(kGlTexture2D, slot->texture);
             tex_parameter_i_(kGlTexture2D, kGlTextureMinFilter, kGlNearest);
             tex_parameter_i_(kGlTexture2D, kGlTextureMagFilter, kGlNearest);
             tex_parameter_i_(kGlTexture2D, kGlTextureWrapS, kGlClampToEdge);
             tex_parameter_i_(kGlTexture2D, kGlTextureWrapT, kGlClampToEdge);
         } else {
-            bind_texture_(kGlTexture2D, resident_texture_);
+            bind_texture_(kGlTexture2D, slot->texture);
         }
         std::vector<uint8_t> rgba;
         guest_words_to_rgba(packet.color_input, rgba, width, height,
@@ -1601,7 +1667,7 @@ private:
         if (!resident_fbo_) gen_framebuffers_(1, &resident_fbo_);
         bind_framebuffer_(kGlFramebuffer, resident_fbo_);
         framebuffer_texture_2d_(kGlFramebuffer, kGlColorAttachment0, kGlTexture2D,
-                                resident_texture_, 0);
+                                slot->texture, 0);
         if (check_framebuffer_status_(kGlFramebuffer) != kGlFramebufferComplete) {
             error = "OpenGL resident color framebuffer is incomplete";
             return false;
@@ -1610,15 +1676,16 @@ private:
             error = "OpenGL resident color upload failed";
             return false;
         }
-        resident_.valid = true;
-        resident_.dirty = false;
-        resident_.x8 = packet.fixture_color_format_x8;
-        resident_.address = packet.color_address;
-        resident_.size = size;
-        resident_.pitch = packet.surface_pitch;
-        resident_.width = width;
-        resident_.height = height;
-        resident_.format = packet.surface_format;
+        slot->valid = true;
+        slot->dirty = false;
+        slot->x8 = packet.fixture_color_format_x8;
+        slot->address = packet.color_address;
+        slot->size = size;
+        slot->pitch = packet.surface_pitch;
+        slot->width = width;
+        slot->height = height;
+        slot->format = packet.surface_format;
+        active_resident_ = slot;
         return true;
     }
     bool compile_program(const char* source, const char* label,
@@ -1738,12 +1805,13 @@ private:
     unsigned int resident_program_ = 0;
     unsigned int resident_texture_modulate_program_ = 0;
     unsigned int resident_dashboard_program_ = 0;
-    unsigned int resident_texture_ = 0;
     unsigned int resident_source_texture_ = 0;
     unsigned int resident_fbo_ = 0;
     unsigned int resident_vbo_ = 0;
     unsigned int resident_vao_ = 0;
-    ResidentSurface resident_;
+    static constexpr size_t kMaxResidentSurfaces = 8;
+    std::array<ResidentSurface, kMaxResidentSurfaces> resident_surfaces_{};
+    ResidentSurface* active_resident_ = nullptr;
     std::array<CachedBuffer, 4> dashboard_texture_cache_{};
     GlCreateShader create_shader_ = nullptr; GlShaderSource shader_source_ = nullptr;
     GlCompileShader compile_shader_ = nullptr; GlGetShaderiv get_shader_iv_ = nullptr;

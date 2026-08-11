@@ -5379,6 +5379,48 @@ int main() {
                                  resident_primary_software.end(),
                                  gc_ram.begin() + 0x10000));
 
+                // Bounded multi-resident targets: switching render targets must
+                // not force an eager resolve, but later overlap/scanout resolves
+                // must still return the correct bytes for each dirty target.
+                emit_gc(0x0210, 0x00010000);
+                std::memset(gc_ram.data() + 0x10000, 0x5A, 256 * 64);
+                gc_gpu.set_renderer(nullptr);
+                submit_two_triangles(gc_pack_ub4(0x20, 0x40, 0x60, 0xCC));
+                CHECK(gc_fault.empty());
+                const std::vector<uint8_t> resident_multi_a(
+                    gc_ram.begin() + 0x10000,
+                    gc_ram.begin() + 0x10000 + 256 * 64);
+                emit_gc(0x0210, 0x00030000);
+                std::memset(gc_ram.data() + 0x30000, 0xA5, 256 * 64);
+                submit_two_triangles(gc_pack_ub4(0x60, 0x20, 0x40, 0x99));
+                CHECK(gc_fault.empty());
+                const std::vector<uint8_t> resident_multi_b(
+                    gc_ram.begin() + 0x30000,
+                    gc_ram.begin() + 0x30000 + 256 * 64);
+
+                emit_gc(0x0210, 0x00010000);
+                std::memset(gc_ram.data() + 0x10000, 0x5A, 256 * 64);
+                emit_gc(0x0210, 0x00030000);
+                std::memset(gc_ram.data() + 0x30000, 0xA5, 256 * 64);
+                gc_gpu.set_renderer(gl_renderer.get());
+                emit_gc(0x0210, 0x00010000);
+                submit_two_triangles(gc_pack_ub4(0x20, 0x40, 0x60, 0xCC));
+                CHECK(gc_fault.empty());
+                emit_gc(0x0210, 0x00030000);
+                submit_two_triangles(gc_pack_ub4(0x60, 0x20, 0x40, 0x99));
+                CHECK(gc_fault.empty());
+                gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x600800, 4, 0x10000);
+                CHECK(gc_gpu.capture_scanout(resident_rgba, resident_scanout,
+                                             resident_scanout_error));
+                CHECK(std::equal(resident_multi_a.begin(), resident_multi_a.end(),
+                                 gc_ram.begin() + 0x10000));
+                gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x600800, 4, 0x30000);
+                CHECK(gc_gpu.capture_scanout(resident_rgba, resident_scanout,
+                                             resident_scanout_error));
+                CHECK(std::equal(resident_multi_b.begin(), resident_multi_b.end(),
+                                 gc_ram.begin() + 0x30000));
+                emit_gc(0x0210, 0x00010000);
+
                 xlle::Nv2aGenericCombinerPacket dashboard_packet;
                 dashboard_packet.compute_fixture =
                     xlle::Nv2aGenericCombinerPacket::ComputeFixture::

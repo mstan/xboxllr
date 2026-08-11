@@ -136,6 +136,9 @@ public:
         (void)format;
         return false;
     }
+    virtual bool requires_resident_target_switch_resolve() const {
+        return true;
+    }
     virtual bool supports_resident_generic_combiner(
         const Nv2aGenericCombinerPacket& descriptor) const {
         (void)descriptor;

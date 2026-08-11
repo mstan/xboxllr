@@ -175,23 +175,28 @@ const Nv2a::Block* Nv2a::find_block(uint32_t rel, uint32_t& block_rel) {
 bool Nv2a::resolve_renderer_color_overlap(uint32_t address, size_t size,
                                           const char* context) {
     if (!renderer_ || size == 0) return true;
-    Nv2aResidentColorResolve resolve;
-    std::string error;
-    if (!renderer_->resolve_resident_color_surface(address, size, resolve, error)) {
-        fault_(error.empty() ? "NV2A resident color resolve failed" : error.c_str());
-        return false;
+    for (;;) {
+        Nv2aResidentColorResolve resolve;
+        std::string error;
+        if (!renderer_->resolve_resident_color_surface(address, size, resolve,
+                                                       error)) {
+            fault_(error.empty() ? "NV2A resident color resolve failed"
+                                 : error.c_str());
+            return false;
+        }
+        if (resolve.data.empty()) return true;
+        if (!mem_write_ ||
+            !mem_write_(resolve.address, resolve.data.data(),
+                        resolve.data.size())) {
+            char why[160];
+            std::snprintf(
+                why, sizeof(why),
+                "NV2A resident color resolve DMA write failed before %s",
+                context ? context : "memory access");
+            fault_(why);
+            return false;
+        }
     }
-    if (resolve.data.empty()) return true;
-    if (!mem_write_ ||
-        !mem_write_(resolve.address, resolve.data.data(), resolve.data.size())) {
-        char why[160];
-        std::snprintf(why, sizeof(why),
-                      "NV2A resident color resolve DMA write failed before %s",
-                      context ? context : "memory access");
-        fault_(why);
-        return false;
-    }
-    return true;
 }
 
 void Nv2a::invalidate_renderer_color_overlap(uint32_t address, size_t size) {
@@ -7385,10 +7390,12 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 surface_format_);
             if (!already_resident) {
                 ++generic_combiner_resident_target_switch_resolves_;
-                if (!resolve_renderer_color_overlap(
-                        0, 64u * 1024u * 1024u,
-                        "resident generic target switch")) {
-                    return false;
+                if (renderer_->requires_resident_target_switch_resolve()) {
+                    if (!resolve_renderer_color_overlap(
+                            0, 64u * 1024u * 1024u,
+                            "resident generic target switch")) {
+                        return false;
+                    }
                 }
                 if (!resolve_renderer_color_overlap(
                         color_address, color_size,
