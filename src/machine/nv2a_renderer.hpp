@@ -26,6 +26,7 @@ struct Nv2aGenericCombinerPacket {
     enum class ComputeFixture : uint8_t {
         kNone,
         kUntexturedPrimaryTriangle,
+        kTextureModulateTriangle,
         kDashboardProject2dFan,
         kResidentPrimaryColorTriangles
     };

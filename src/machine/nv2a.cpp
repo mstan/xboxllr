@@ -6739,6 +6739,74 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     record_generic_texture_modulate_reject(reject_reason);
                     texture_modulate_reject_this_batch = reject_reason;
                 }
+                const uint32_t texture_surface_width =
+                    (surface_pitch_ & 0xffffu) / 4u;
+                const bool texture_compute_surface_small =
+                    texture_surface_width > 0 && texture_surface_width <= 64 &&
+                    surface_height > 0 && surface_height <= 64;
+                const bool texture_compute_state =
+                    packet.compute_fixture ==
+                        Nv2aGenericCombinerPacket::ComputeFixture::kNone &&
+                    primitive_mode_ == 5 && transformed_batch_.size() == 3 &&
+                    texture_compute_surface_small && primitive_supported &&
+                    vertex_count_supported && only_texture0_input && !uses_depth &&
+                    !cull_enabled &&
+                    color_mask_word == 0x01010101 &&
+                    (color_format_x8 || color_format_a8) && stage_count == 1 &&
+                    alpha_supported && blend_supported &&
+                    raster_state_[kRasterShaderStageProgram] == 1 &&
+                    raster_state_[kRasterShaderOtherStageInput] == 0x00210000 &&
+                    combiner_words_match && texture_stages[0].valid &&
+                    texture_stages[0].linear && !texture_stages[0].alpha8 &&
+                    texture_stages[0].width > 0 && texture_stages[0].height > 0 &&
+                    texture_stages[0].pitch >= texture_stages[0].width * 4u;
+                if (texture_compute_state) {
+                    bool finite_vertices = true;
+                    std::array<std::array<int64_t, 2>, 3> fixed_xy{};
+                    for (const auto& vertex : packet.vertices) {
+                        for (float value : vertex.position)
+                            if (!std::isfinite(value)) finite_vertices = false;
+                        if (vertex.position[3] == 0.0f) finite_vertices = false;
+                        for (float value : vertex.diffuse)
+                            if (!std::isfinite(value)) finite_vertices = false;
+                        for (float value : vertex.texture[0])
+                            if (!std::isfinite(value)) finite_vertices = false;
+                    }
+                    for (size_t vertex = 0; finite_vertices && vertex < 3; ++vertex) {
+                        for (size_t component = 0; component < 2; ++component) {
+                            const double fixed = std::llround(
+                                static_cast<double>(
+                                    packet.vertices[vertex].position[component]) *
+                                16.0);
+                            if (std::abs(fixed) > 1000000.0) {
+                                finite_vertices = false;
+                                break;
+                            }
+                            fixed_xy[vertex][component] =
+                                static_cast<int64_t>(fixed);
+                        }
+                    }
+                    if (finite_vertices) {
+                        const int64_t area =
+                            (fixed_xy[1][0] - fixed_xy[0][0]) *
+                                (fixed_xy[2][1] - fixed_xy[0][1]) -
+                            (fixed_xy[1][1] - fixed_xy[0][1]) *
+                                (fixed_xy[2][0] - fixed_xy[0][0]);
+                        if (area <= 0) finite_vertices = false;
+                    }
+                    if (finite_vertices) {
+                        packet.compute_fixture = Nv2aGenericCombinerPacket::
+                            ComputeFixture::kTextureModulateTriangle;
+                        packet.fixture_clip_x = clip_x;
+                        packet.fixture_clip_y = clip_y;
+                        packet.fixture_clip_width = clip_width;
+                        packet.fixture_clip_height = clip_height;
+                        packet.fixture_blend_enabled = blend_enabled;
+                        packet.fixture_blend_src = blend_src;
+                        packet.fixture_blend_dst = blend_dst;
+                        packet.fixture_color_format_x8 = color_format_x8;
+                    }
+                }
             }
         }
         const bool resident_packet =
