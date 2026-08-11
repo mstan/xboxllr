@@ -5544,9 +5544,10 @@ void Nv2a::record_generic_texture_modulate_reject(
 // check below is a per-feature semantic test of what the shared rasterizer actually
 // implements, not a single required register tuple:
 //   * primitive: triangle list/strip/fan (5/6/7)
-//   * surface: pitch-linear color (surface_type==1), no antialiasing; color_format 8
-//     (A8R8G8B8, alpha stored as computed) or 4 (X8R8G8B8, alpha byte forced to 0xFF
-//     on write -- there is no alpha channel on real hardware); optional Z24S8 zeta
+//   * surface: pitch-linear (surface_type==1) or swizzled (surface_type==2) color,
+//     no antialiasing; color_format 8 (A8R8G8B8, alpha stored as computed) or 4
+//     (X8R8G8B8, alpha byte forced to 0xFF on write -- there is no alpha channel
+//     on real hardware); optional Z24S8 zeta
 //   * CONTROL0: engine-enable bit (0) required, the two bits kPitchZ16Depth already
 //     treats as unimplemented (12, 16) rejected -- any other bit combination passes
 //   * shading: smooth (Gouraud) only; polygon mode: FILL only, independently for
@@ -5628,7 +5629,9 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     // this evaluator does not (yet) implement records a NAMED reason carrying the
     // offending register value, so the next witnessed state can be added without
     // re-deriving the whole gate.
-    if (surface_type != 1 || anti_aliasing != 0) {
+    const bool surface_pitch_linear = surface_type == 1;
+    const bool surface_swizzled = surface_type == 2;
+    if ((!surface_pitch_linear && !surface_swizzled) || anti_aliasing != 0) {
         record_generic_skip(GenericSkipReason::kUnsupportedSurface);
         return true;
     }
@@ -5991,15 +5994,53 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     // witnessed 0x00401400: color pitch 0x1400, zeta pitch 0x0040). Only the color
     // pitch is required to size the color surface; the zeta pitch is validated
     // separately, and only when the zeta surface is actually touched below.
+    const bool depth_write_enabled = raster_state_[kRasterDepthMask] != 0;
+    const bool wants_zeta = depth_test_enabled_bit || depth_write_enabled;
     const uint32_t pitch = surface_pitch_ & 0xFFFFu;
     const uint32_t zeta_pitch = surface_pitch_ >> 16;
-    const uint32_t surface_height = clip_y + clip_height;
-    const uint64_t color_bytes64 =
-        static_cast<uint64_t>(pitch) * surface_height;
-    if (!pitch || static_cast<uint64_t>(clip_x + clip_width) * 4 > pitch ||
-        color_bytes64 > SIZE_MAX) {
-        record_generic_skip_detail(GenericSkipReason::kUnsupportedSurface, pitch);
-        return true;
+    uint32_t surface_width = clip_x + clip_width;
+    uint32_t surface_height = clip_y + clip_height;
+    uint64_t color_bytes64 = 0;
+    std::unique_ptr<SwizzleLookup> surface_swizzle;
+    if (surface_pitch_linear) {
+        color_bytes64 = static_cast<uint64_t>(pitch) * surface_height;
+        if (!pitch || static_cast<uint64_t>(surface_width) * 4 > pitch ||
+            color_bytes64 > SIZE_MAX) {
+            record_generic_skip_detail(GenericSkipReason::kUnsupportedSurface, pitch);
+            return true;
+        }
+    } else {
+        const uint32_t width_log2 = (surface_format_ >> 16) & 0xFFu;
+        const uint32_t height_log2 = (surface_format_ >> 24) & 0xFFu;
+        if (width_log2 >= 31 || height_log2 >= 31) {
+            record_generic_skip_detail(GenericSkipReason::kUnsupportedSurface,
+                                       surface_format_);
+            return true;
+        }
+        surface_width = 1u << width_log2;
+        surface_height = 1u << height_log2;
+        if (clip_x + clip_width > surface_width ||
+            clip_y + clip_height > surface_height) {
+            record_generic_skip_detail(GenericSkipReason::kUnsupportedSurface,
+                                       surface_format_);
+            return true;
+        }
+        const uint32_t expected_pitch = surface_width * sizeof(uint32_t);
+        if (pitch != expected_pitch ||
+            (wants_zeta && zeta_pitch != expected_pitch)) {
+            record_generic_skip_detail(GenericSkipReason::kUnsupportedSurface,
+                                       surface_pitch_);
+            return true;
+        }
+        color_bytes64 =
+            static_cast<uint64_t>(surface_width) * surface_height * sizeof(uint32_t);
+        if (color_bytes64 > SIZE_MAX) {
+            record_generic_skip_detail(GenericSkipReason::kUnsupportedSurface,
+                                       surface_format_);
+            return true;
+        }
+        surface_swizzle = std::make_unique<SwizzleLookup>(surface_width,
+                                                          surface_height);
     }
     // The zeta surface only needs to be touched at all if the depth test is actually
     // enabled (a real comparison against stored depth) or a write is requested; when
@@ -6015,9 +6056,8 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     // formulas always read zeta; this evaluator's depth path is already conditioned on
     // wants_zeta, so "can't use this zeta" and "don't want zeta" collapse to the same
     // uses_depth=false outcome.
-    const bool depth_write_enabled = raster_state_[kRasterDepthMask] != 0;
-    const bool wants_zeta = depth_test_enabled_bit || depth_write_enabled;
-    bool uses_depth = zeta_format == 2 && wants_zeta && zeta_pitch == pitch;
+    bool uses_depth = zeta_format == 2 && wants_zeta &&
+                      (surface_swizzled || zeta_pitch == pitch);
     uint64_t depth_bytes64 = uses_depth ? color_bytes64 : 0;
 
     // BUG FIX (guest-memory-corruption regression): a raster batch can bind a DMA
@@ -7437,8 +7477,12 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 if (!std::isfinite(depth) || depth < clip_min || depth > clip_max)
                     continue;
 
-                const size_t offset = static_cast<size_t>(y) * pitch +
-                                      static_cast<size_t>(x) * sizeof(uint32_t);
+                const size_t offset = surface_swizzled
+                    ? static_cast<size_t>(surface_swizzle->index(
+                          static_cast<uint32_t>(x),
+                          static_cast<uint32_t>(y))) * sizeof(uint32_t)
+                    : static_cast<size_t>(y) * pitch +
+                          static_cast<size_t>(x) * sizeof(uint32_t);
                 uint32_t stored_depth_stencil = 0;
                 uint32_t incoming_depth = 0;
                 if (uses_depth) {

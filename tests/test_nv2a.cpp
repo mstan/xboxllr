@@ -5163,6 +5163,69 @@ int main() {
             CHECK(get32(gc_ram, 0x20000 + gc_a_offset) == 0xFFFFFFFFu);
         }
 
+        // --- (a2) Same generic state on a swizzled A8R8G8B8/Z24S8 render target.
+        // The stock dashboard uses 1024x1024 swizzled offscreen surfaces
+        // (SET_SURFACE_FORMAT type=2); the generic evaluator must write color and
+        // read zeta through Morton offsets instead of y*pitch+x*4.
+        {
+            emit_gc(0x0200, 0x00400000);
+            emit_gc(0x0204, 0x00400000);
+            emit_gc(0x0208, 0x06060228);  // 64x64 swizzled A8R8G8B8 + Z24S8
+            emit_gc(0x020C, 0x01000100);  // witnessed swizzled pitch == width*4
+            emit_gc(0x0210, 0x00010000);
+            emit_gc(0x0214, 0x00020000);
+            emit_gc(0x0290, 0x00100001);
+            emit_gc(0x02C0, 0x003F0000);
+            emit_gc(0x02E0, 0x003F0000);
+            emit_gc(0x033C, 0x0207);
+            emit_gc(0x0340, 0);
+            emit_gc(0x0344, 0x0302);
+            emit_gc(0x0348, 0x0303);
+            emit_gc(0x0350, 0x8006);
+            emit_gc(0x0354, 0x0203);
+            emit_gc(0x0358, 0x01010101);
+            emit_gc(0x035C, 0);
+            emit_gc(0x037C, 0x1D01);
+            emit_gc(0x038C, 0x1B02);
+            emit_gc(0x0390, 0x1B02);
+            emit_gc(0x0394, 0);
+            emit_gc(0x0398, 0x4B7FFFFF);
+            emit_gc(0x039C, 0x0405);
+            emit_gc(0x03A0, 0x0900);
+            emit_gc(0x1D78, 1);
+            emit_gc(0x1E70, 0);
+            emit_gc(0x1E74, 0);
+            emit_gc(0x1E78, 0x00210000);
+            emit_gc(0x1E60, 0x00000001);
+            emit_gc(0x0AC0, 0x04200000);
+            emit_gc(0x0260, 0x14200000);
+            emit_gc(0x1E40, 0x00000C00);
+            emit_gc(0x0AA0, 0x00000C00);
+            emit_gc(0x0288, 0x0000000C);
+            emit_gc(0x028C, 0x00001C80);
+            emit_gc(0x1E20, 0);
+            emit_gc(0x1E24, 0);
+            std::memset(gc_ram.data() + 0x10000, 0, 64 * 64 * 4);
+            std::memset(gc_ram.data() + 0x20000, 0xFF, 64 * 64 * 4);
+
+            const uint32_t swizzled_inside =
+                swizzled_pixel_index(5, 20, 64, 64) * 4;
+            const uint32_t linear_inside = (20 * 64 + 5) * 4;
+            CHECK(get32(gc_ram, 0x10000 + swizzled_inside) == 0);
+            CHECK(get32(gc_ram, 0x10000 + linear_inside) == 0);
+            const uint64_t before_generic_executed =
+                gc_gpu.generic_combiner_executed_batches();
+            submit_triangle(0.0f, 0.0f, 40.0f, 0.0f, 0.0f, 40.0f, 50.0f, 1.0f,
+                            gc_pack_ub4(0x11, 0x22, 0x33, 0xCC));
+            CHECK(gc_fault.empty());
+            CHECK(gc_gpu.generic_combiner_executed_batches() ==
+                  before_generic_executed + 1);
+            CHECK(get32(gc_ram, 0x10000 + swizzled_inside) != 0);
+            CHECK(get32(gc_ram, 0x10000 + linear_inside) == 0);
+            emit_gc(0x0208, 0x00000128);  // restore pitch A8R8G8B8 + Z24S8
+            emit_gc(0x020C, 0x01000100);
+        }
+
         // The backend seam runs only after the generic validator has accepted this
         // witnessed state. Unsupported leaves the software result unchanged; a
         // supported backend bypasses software writes while receiving an owned packet.
