@@ -6417,6 +6417,10 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     bool texture_modulate_exact_this_batch = false;
     GenericTextureModulateRejectReason texture_modulate_reject_this_batch =
         GenericTextureModulateRejectReason::kCount;
+    bool resident_observed_this_batch = false;
+    bool resident_exact_this_batch = false;
+    GenericResidentRejectReason resident_reject_this_batch =
+        GenericResidentRejectReason::kCount;
     if (renderer_) {
         Nv2aGenericCombinerPacket packet;
         packet.primitive_mode = primitive_mode_;
@@ -6652,6 +6656,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             const bool resident_primary_observable =
                 raster_state_[kRasterCombinerControl] == 1 ||
                 resident_primary_combiner_words;
+            resident_observed_this_batch = resident_primary_observable;
             const bool resident_primitive_supported =
                 primitive_mode_ == 5 || primitive_mode_ == 6 || primitive_mode_ == 7;
             const bool resident_vertex_count_supported =
@@ -6777,11 +6782,14 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     packet.fixture_blend_dst = blend_dst;
                     packet.fixture_color_format_x8 = color_format_x8;
                     ++generic_combiner_resident_candidates_;
+                    resident_exact_this_batch = true;
                 } else if (resident_primary_observable) {
                     record_generic_resident_reject(ResidentReject::kVertexExpansion);
+                    resident_reject_this_batch = ResidentReject::kVertexExpansion;
                 }
             } else if (resident_primary_observable) {
                 record_generic_resident_reject(resident_reject_reason);
+                resident_reject_this_batch = resident_reject_reason;
             }
         }
         {
@@ -7241,6 +7249,20 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             generic_fingerprint_stats = &*it;
         }
         if (profile_generic_fingerprint) {
+            if (resident_observed_this_batch) {
+                ++generic_fingerprint_stats->resident_batches;
+                if (resident_exact_this_batch) {
+                    ++generic_fingerprint_stats->resident_exact_batches;
+                } else {
+                    const size_t reject_index =
+                        static_cast<size_t>(resident_reject_this_batch);
+                    if (reject_index <
+                        generic_fingerprint_stats->resident_reject_batches.size()) {
+                        ++generic_fingerprint_stats
+                              ->resident_reject_batches[reject_index];
+                    }
+                }
+            }
             if (texture_modulate_observed_this_batch) {
                 ++generic_fingerprint_stats->texture_modulate_batches;
                 if (texture_modulate_exact_this_batch) {

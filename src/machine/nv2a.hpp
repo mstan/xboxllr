@@ -637,6 +637,11 @@ public:
         std::array<uint64_t,
                   static_cast<size_t>(GenericTextureModulateRejectReason::kCount)>
             texture_modulate_reject_batches{};
+        uint64_t resident_batches = 0;
+        uint64_t resident_exact_batches = 0;
+        std::array<uint64_t,
+                  static_cast<size_t>(GenericResidentRejectReason::kCount)>
+            resident_reject_batches{};
         // Populated only while --perf-accounting is enabled. This links to the
         // immutable first full state in raster_state_samples_, keeping normal
         // replay overhead to one compact index rather than copying state here.

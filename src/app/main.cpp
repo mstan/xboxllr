@@ -1158,6 +1158,30 @@ int main(int argc, char** argv) {
                             any_texmod_reject = true;
                         }
                     }
+                    if (entry.resident_batches) {
+                        std::printf(":resident%llu",
+                                    static_cast<unsigned long long>(
+                                        entry.resident_batches));
+                        if (entry.resident_exact_batches) {
+                            std::printf("/exact%llu",
+                                        static_cast<unsigned long long>(
+                                            entry.resident_exact_batches));
+                        }
+                        bool any_resident_reject = false;
+                        for (size_t reason = 0;
+                             reason < Nv2a::generic_resident_reject_reason_count();
+                             ++reason) {
+                            const uint64_t count =
+                                entry.resident_reject_batches[reason];
+                            if (!count) continue;
+                            std::printf("%s%s:%llu",
+                                        any_resident_reject ? "," : "/reject=",
+                                        Nv2a::generic_resident_reject_reason_name(
+                                            reason),
+                                        static_cast<unsigned long long>(count));
+                            any_resident_reject = true;
+                        }
+                    }
                 }
                 std::printf("\n");
                 // Keep the compact top-12 line readable, but emit complete,
