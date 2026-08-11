@@ -5553,6 +5553,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     std::chrono::steady_clock::time_point generic_started_at;
     if (profile_generic_fingerprint)
         generic_started_at = std::chrono::steady_clock::now();
+    uint64_t generic_batch_bbox_pixels = 0;
     const bool supported_primitive =
         primitive_mode_ == 5 || primitive_mode_ == 6 || primitive_mode_ == 7;
     if (!supported_primitive) {
@@ -6423,6 +6424,17 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 generic_fingerprint_stats->primitive_mode = primitive_mode_;
                 generic_fingerprint_stats->min_vertices = vertex_count;
                 generic_fingerprint_stats->max_vertices = vertex_count;
+                generic_fingerprint_stats->first_vertices_recorded = true;
+                generic_fingerprint_stats->first_vertex_count =
+                    std::min<uint32_t>(vertex_count, 4);
+                for (uint32_t vertex = 0;
+                     vertex < generic_fingerprint_stats->first_vertex_count;
+                     ++vertex) {
+                    generic_fingerprint_stats->first_vertex_position[vertex] =
+                        transformed_batch_[vertex].position;
+                    generic_fingerprint_stats->first_vertex_texture[vertex] =
+                        transformed_batch_[vertex].texture;
+                }
             } else {
                 generic_fingerprint_stats->min_vertices = std::min(
                     generic_fingerprint_stats->min_vertices, vertex_count);
@@ -6440,6 +6452,15 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             generic_combiner_writes_ - generic_writes_before;
         generic_fingerprint_stats->wall_ns += static_cast<uint64_t>(
             std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count());
+        const uint64_t batch_fragments =
+            generic_combiner_fragments_ - generic_fragments_before;
+        generic_fingerprint_stats->bbox_pixels += generic_batch_bbox_pixels;
+        generic_fingerprint_stats->max_batch_fragments =
+            std::max(generic_fingerprint_stats->max_batch_fragments,
+                     batch_fragments);
+        generic_fingerprint_stats->max_batch_bbox_pixels =
+            std::max(generic_fingerprint_stats->max_batch_bbox_pixels,
+                     generic_batch_bbox_pixels);
     };
 
     uint32_t xmin = clip_x;
@@ -6739,6 +6760,21 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             static_cast<int32_t>(std::floor(
                 (static_cast<double>(std::max({ay, by, cy})) - 8.0) / 16.0)));
         if (tri_xmax < tri_xmin || tri_ymax < tri_ymin) return;
+        if (profile_generic_fingerprint && generic_fingerprint_stats) {
+            const uint64_t bbox_pixels =
+                static_cast<uint64_t>(tri_xmax - tri_xmin + 1) *
+                static_cast<uint64_t>(tri_ymax - tri_ymin + 1);
+            generic_batch_bbox_pixels += bbox_pixels;
+            if (!generic_fingerprint_stats->first_triangle_recorded) {
+                generic_fingerprint_stats->first_triangle_recorded = true;
+                generic_fingerprint_stats->first_triangle_xy_16 =
+                    {ax, ay, bx, by, cx, cy};
+                generic_fingerprint_stats->first_triangle_bounds =
+                    {tri_xmin, tri_ymin, tri_xmax, tri_ymax};
+                generic_fingerprint_stats->first_triangle_area_16 =
+                    static_cast<uint64_t>(area);
+            }
+        }
 
         const auto top_left = [](int64_t x0, int64_t y0, int64_t x1, int64_t y1) {
             const int64_t dx = x1 - x0;

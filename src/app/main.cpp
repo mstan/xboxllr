@@ -776,6 +776,15 @@ int main(int argc, char** argv) {
                                 static_cast<unsigned long long>(entry.fragments),
                                 static_cast<unsigned long long>(entry.writes),
                                 static_cast<unsigned long long>(entry.wall_ns));
+                    if (entry.bbox_pixels || entry.max_batch_fragments ||
+                        entry.max_batch_bbox_pixels) {
+                        std::printf("/bb%llu/maxf%llu/maxbb%llu",
+                                    static_cast<unsigned long long>(entry.bbox_pixels),
+                                    static_cast<unsigned long long>(
+                                        entry.max_batch_fragments),
+                                    static_cast<unsigned long long>(
+                                        entry.max_batch_bbox_pixels));
+                    }
                     if (entry.raster_state_sample_index != UINT32_MAX &&
                         mach.nv2a()->raster_state_sample_at(
                             entry.raster_state_sample_index, raster_exemplar)) {
@@ -815,6 +824,50 @@ int main(int argc, char** argv) {
                         std::printf("%08x", raster_exemplar.words[word]);
                     }
                     std::printf("\n");
+                    if (entry.first_triangle_recorded) {
+                        std::printf(
+                            "[perf-generic-geom] fp=%016llx full=%016llx "
+                            "xy16=%lld,%lld,%lld,%lld,%lld,%lld "
+                            "bbox=%d,%d,%d,%d area16=%llu maxf=%llu maxbb=%llu\n",
+                            static_cast<unsigned long long>(entry.fingerprint),
+                            static_cast<unsigned long long>(entry.full_state_hash),
+                            static_cast<long long>(entry.first_triangle_xy_16[0]),
+                            static_cast<long long>(entry.first_triangle_xy_16[1]),
+                            static_cast<long long>(entry.first_triangle_xy_16[2]),
+                            static_cast<long long>(entry.first_triangle_xy_16[3]),
+                            static_cast<long long>(entry.first_triangle_xy_16[4]),
+                            static_cast<long long>(entry.first_triangle_xy_16[5]),
+                            entry.first_triangle_bounds[0],
+                            entry.first_triangle_bounds[1],
+                            entry.first_triangle_bounds[2],
+                            entry.first_triangle_bounds[3],
+                            static_cast<unsigned long long>(
+                                entry.first_triangle_area_16),
+                            static_cast<unsigned long long>(
+                                entry.max_batch_fragments),
+                            static_cast<unsigned long long>(
+                                entry.max_batch_bbox_pixels));
+                    }
+                    if (entry.first_vertices_recorded) {
+                        std::printf(
+                            "[perf-generic-verts] fp=%016llx full=%016llx count=%u",
+                            static_cast<unsigned long long>(entry.fingerprint),
+                            static_cast<unsigned long long>(entry.full_state_hash),
+                            entry.first_vertex_count);
+                        for (uint32_t vertex = 0; vertex < entry.first_vertex_count;
+                             ++vertex) {
+                            const auto& p = entry.first_vertex_position[vertex];
+                            std::printf(" v%up=%.9g,%.9g,%.9g,%.9g",
+                                        vertex, p[0], p[1], p[2], p[3]);
+                            for (uint32_t stage = 0; stage < 4; ++stage) {
+                                const auto& t =
+                                    entry.first_vertex_texture[vertex][stage];
+                                std::printf(" t%u=%.9g,%.9g,%.9g,%.9g",
+                                            stage, t[0], t[1], t[2], t[3]);
+                            }
+                        }
+                        std::printf("\n");
+                    }
                 }
             };
             auto capture_frame_series = [&]() {

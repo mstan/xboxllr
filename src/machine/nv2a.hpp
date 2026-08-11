@@ -467,6 +467,9 @@ public:
         uint64_t fragments = 0;
         uint64_t writes = 0;
         uint64_t wall_ns = 0;
+        uint64_t bbox_pixels = 0;
+        uint64_t max_batch_fragments = 0;
+        uint64_t max_batch_bbox_pixels = 0;
         // Populated only while --perf-accounting is enabled. This links to the
         // immutable first full state in raster_state_samples_, keeping normal
         // replay overhead to one compact index rather than copying state here.
@@ -475,6 +478,14 @@ public:
         uint8_t primitive_mode = 0;
         uint32_t min_vertices = 0;
         uint32_t max_vertices = 0;
+        bool first_triangle_recorded = false;
+        std::array<int64_t, 6> first_triangle_xy_16{};
+        std::array<int32_t, 4> first_triangle_bounds{};
+        uint64_t first_triangle_area_16 = 0;
+        bool first_vertices_recorded = false;
+        uint32_t first_vertex_count = 0;
+        std::array<std::array<float, 4>, 4> first_vertex_position{};
+        std::array<std::array<std::array<float, 4>, 4>, 4> first_vertex_texture{};
     };
     size_t generic_combiner_fingerprint_perf_census(
         std::vector<GenericCombinerFingerprintStats>& out) const {

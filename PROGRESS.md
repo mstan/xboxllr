@@ -18,6 +18,20 @@ harvested from xemu, silicon-corrected against a live console. GPL-2.
 - Phase: **Arc 1, A4** (boot device → dashboard). A2e complete. See docs/ROADMAP.md.
 - Private upstream: `https://github.com/mstan/xboxlle` (`origin`; branch `master`).
 
+## Current operating note (2026-08-10)
+
+Matthew's active goal is now narrower and performance-bound: get the stock Microsoft
+dashboard into an SDL window that he can navigate and validate at **at least 10 presented fps**,
+with no visible rendering errors. Audio is secondary; "slow or absent" is acceptable before
+visual/input correctness. Keep host usage nominal: long emulator probes must use a hard
+`--max-host-memory-mb` cap, and avoid running expensive probes while the user needs the machine.
+Subagents are allowed when they reduce total spend or wall time; prefer Luna for bounded
+read-only/low-complexity work, Terra for difficult implementation or audits, and reserve Sol
+for orchestration/adversarial review or truly stuck work. Opt-in accelerated/HLE-style render
+paths are acceptable only when the software LLE fallback remains available and the expected
+faithfulness loss is nominal-to-none. Do not contact real Xbox hardware or push `xboxlle`
+commits without explicit current authorization.
+
 ## Arc 1 burndown
 
 - **Done:** A0 foundations; A2 live-kernel boot, phase-1 device init, FATX mount, and

@@ -50,6 +50,16 @@ constexpr unsigned int kGlShaderStorageBarrierBit = 0x2000;
 constexpr unsigned int kGlBufferUpdateBarrierBit = 0x0200;
 constexpr unsigned int kGlNoError = 0;
 
+void restore_previous_gl_context(SDL_Window* previous_window,
+                                 SDL_GLContext previous_context,
+                                 SDL_Window* fallback_window) {
+    if (previous_context) {
+        SDL_GL_MakeCurrent(previous_window, previous_context);
+    } else {
+        SDL_GL_MakeCurrent(fallback_window, nullptr);
+    }
+}
+
 // `color` begins as the owned guest surface snapshot.  The integer edge equations
 // and top-left rule deliberately mirror the software fixture, while the output
 // buffer/coverage dispatch shape are reusable when generic-combiner uniforms grow.
@@ -129,10 +139,21 @@ public:
     bool submit_generic_combiner(const Nv2aGenericCombinerPacket& packet,
                                  Nv2aGenericCombinerResult& result,
                                  std::string& error) override {
+        SDL_Window* previous_window = SDL_GL_GetCurrentWindow();
+        SDL_GLContext previous_context = SDL_GL_GetCurrentContext();
         if (!SDL_GL_MakeCurrent(window_, context_)) {
             error = std::string("OpenGL compute context lost: ") + SDL_GetError();
             return false;
         }
+        struct ContextRestore {
+            SDL_Window* previous_window;
+            SDL_GLContext previous_context;
+            SDL_Window* fallback_window;
+            ~ContextRestore() {
+                restore_previous_gl_context(previous_window, previous_context,
+                                            fallback_window);
+            }
+        } restore{previous_window, previous_context, window_};
         if (packet.color_input.size() % sizeof(uint32_t) != 0 ||
             packet.color_input.size() !=
                 static_cast<size_t>(packet.surface_pitch & 0xffffu) * packet.surface_height) {
@@ -291,6 +312,8 @@ std::unique_ptr<Nv2aRenderer> create_nv2a_opengl_renderer(std::string& error) {
     SDL_Window* window = SDL_CreateWindow("xlle NV2A OpenGL backend", 1, 1,
                                           SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN);
     SDL_GLContext context = window ? SDL_GL_CreateContext(window) : nullptr;
+    SDL_Window* previous_window = SDL_GL_GetCurrentWindow();
+    SDL_GLContext previous_context = SDL_GL_GetCurrentContext();
     if (!window || !context || !SDL_GL_MakeCurrent(window, context)) {
         error = std::string("OpenGL context creation failed: ") + SDL_GetError();
         if (context) SDL_GL_DestroyContext(context);
@@ -317,6 +340,7 @@ std::unique_ptr<Nv2aRenderer> create_nv2a_opengl_renderer(std::string& error) {
     }
     auto renderer = std::make_unique<OpenGlNv2aRenderer>(window, context, owns_video, 0);
     if (!renderer->initialize(error)) return nullptr;
+    restore_previous_gl_context(previous_window, previous_context, window);
     std::printf("[nv2a-renderer] opengl context ready: GL %d.%d; narrow compute fixture enabled\n",
                 major, minor);
     return renderer;
