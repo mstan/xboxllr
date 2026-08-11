@@ -7254,12 +7254,11 @@ int main() {
         // stock-dashboard menu scene. Every stage decodes to PROJECT2D (mode 1):
         // 0x8421 & 0x1F == 1, (0x8421 >> 5) & 0x1F == 1, (0x8421 >> 10) & 0x1F == 1,
         // (0x8421 >> 15) & 0x1F == 1. TEXTURE0 is referenced only by stage0, so this
-        // exercises the general (non-linear, non-cubemap) swizzled-2D sampling branch
-        // -- the "else" arm that reads texcoord[0]/texcoord[1] directly as a normalized
-        // UV pair (no perspective divide), unlike PROJECT2D's own narrowly-proven
-        // linear special case (ShaderStageProgram==1, test (e) above). UV (0.625,
-        // 0.625) lands exactly on texel(2,2) of a 4x4 swizzled texture with fx=fy=0,
-        // same reasoning as test (o). Stage0: AB = TEXTURE0 * invert(ZERO) = TEXTURE0
+        // exercises the general (non-linear, non-cubemap) swizzled-2D sampling branch.
+        // PROJECT2D still divides by texture W (matching textureProj(... pT.xyw)):
+        // STQ (1.25, 1.25, 2.0) becomes UV (0.625, 0.625), landing exactly on
+        // texel(2,2) of a 4x4 swizzled texture with fx=fy=0, same reasoning as
+        // test (o). Stage0: AB = TEXTURE0 * invert(ZERO) = TEXTURE0
         // -> R0. Stage1: AB = R0 * invert(ZERO) = R0 (identity passthrough). Texel
         // (2,2) = (R=0x50,G=0x30,B=0x10,A=0xFF) -- expected pixel: 0xFF503010. ---
         {
@@ -7333,10 +7332,10 @@ int main() {
             emit_gc(0x17FC, 5);
             for (auto xy : {std::pair{0.0f, 0.0f}, std::pair{8.0f, 0.0f},
                             std::pair{0.0f, 8.0f}}) {
-                emit_gc(0x1A90, gc_float_bits(0.625f));  // texcoord0.s (normalized UV)
-                emit_gc(0x1A94, gc_float_bits(0.625f));  // texcoord0.t
+                emit_gc(0x1A90, gc_float_bits(1.25f));   // texcoord0.s / q = 0.625
+                emit_gc(0x1A94, gc_float_bits(1.25f));   // texcoord0.t / q = 0.625
                 emit_gc(0x1A98, gc_float_bits(0.0f));    // texcoord0.r (unused)
-                emit_gc(0x1A9C, gc_float_bits(1.0f));    // texcoord0.q
+                emit_gc(0x1A9C, gc_float_bits(2.0f));    // texcoord0.q
                 emit_gc(0x1518, gc_float_bits(xy.first));
                 emit_gc(0x151C, gc_float_bits(xy.second));
                 emit_gc(0x1520, gc_float_bits(10.0f));
@@ -7360,7 +7359,9 @@ int main() {
         // alpha channel while RGB reads back as white (1,1,1) (GL_R8 with swizzle
         // {ONE,ONE,ONE,RED}). Same structure as test (p): stage0 samples TEXTURE0
         // (PROJECT2D, general swizzled branch, ShaderStageProgram=0x00008421),
-        // stage1 is an R0 passthrough. Texel(2,2)'s stored byte is 0x60, so TEXTURE0
+        // stage1 is an R0 passthrough. Use q=2 here too so the A8 path is pinned
+        // to PROJECT2D division rather than raw ST. Texel(2,2)'s stored byte is
+        // 0x60, so TEXTURE0
         // decodes to (R=1,G=1,B=1,A=0x60/255); stage0's AB = TEXTURE0 * invert(ZERO)
         // = TEXTURE0 -> R0 unchanged by stage1 or the identity final combiner.
         // Expected pixel: 0x60FFFFFF (A=0x60, R=G=B=0xFF). ---
@@ -7435,10 +7436,10 @@ int main() {
             emit_gc(0x17FC, 5);
             for (auto xy : {std::pair{0.0f, 0.0f}, std::pair{8.0f, 0.0f},
                             std::pair{0.0f, 8.0f}}) {
-                emit_gc(0x1A90, gc_float_bits(0.625f));  // texcoord0.s (normalized UV)
-                emit_gc(0x1A94, gc_float_bits(0.625f));  // texcoord0.t
+                emit_gc(0x1A90, gc_float_bits(1.25f));   // texcoord0.s / q = 0.625
+                emit_gc(0x1A94, gc_float_bits(1.25f));   // texcoord0.t / q = 0.625
                 emit_gc(0x1A98, gc_float_bits(0.0f));    // texcoord0.r (unused)
-                emit_gc(0x1A9C, gc_float_bits(1.0f));    // texcoord0.q
+                emit_gc(0x1A9C, gc_float_bits(2.0f));    // texcoord0.q
                 emit_gc(0x1518, gc_float_bits(xy.first));
                 emit_gc(0x151C, gc_float_bits(xy.second));
                 emit_gc(0x1520, gc_float_bits(10.0f));

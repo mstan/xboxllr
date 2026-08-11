@@ -6197,6 +6197,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     struct TextureStage {
         bool valid = false;
         bool linear = false;
+        bool project2d = false;
         bool cubemap = false;
         bool alpha8 = false;
         std::vector<uint8_t> data;
@@ -6236,6 +6237,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         TextureStage& ts = texture_stages[stage];
         const bool single_stage_project2d =
             shader_stage_program == 1 && stage_mode == 1 && stage == 0;
+        ts.project2d = stage_mode == 1;
         bool handled_linear_project2d = false;
         if (single_stage_project2d) {
             const uint32_t rect = raster_state_[kRasterTextureImageRect0 + stage];
@@ -7883,10 +7885,21 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                             TextureAddressMode::kClampToEdge, ts.border, ts.alpha8,
                             sampled);
                     } else {
+                        float u = texcoord[0];
+                        float v = texcoord[1];
+                        if (ts.project2d) {
+                            if (texcoord[3] == 0.0f) {
+                                fault_("NV2A generic-combiner PROJECT2D Q is zero");
+                                raster_failed = true;
+                                return;
+                            }
+                            u /= texcoord[3];
+                            v /= texcoord[3];
+                        }
                         sample_ok = sample_swizzled(
-                            ts.data, *ts.swizzle, ts.width, ts.height, texcoord[0],
-                            texcoord[1], ts.address_u, ts.address_v, ts.border,
-                            ts.alpha8, sampled);
+                            ts.data, *ts.swizzle, ts.width, ts.height, u, v,
+                            ts.address_u, ts.address_v, ts.border, ts.alpha8,
+                            sampled);
                     }
                     if (!sample_ok) {
                         fault_("NV2A generic-combiner texture sample is invalid");
