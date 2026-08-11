@@ -24,6 +24,12 @@ static uint32_t get32(const std::vector<uint8_t>& mem, uint32_t addr) {
     return value;
 }
 
+static void fill32(std::vector<uint8_t>& mem, uint32_t value) {
+    for (size_t offset = 0; offset + sizeof(value) <= mem.size();
+         offset += sizeof(value))
+        std::memcpy(mem.data() + offset, &value, sizeof(value));
+}
+
 class FakeNv2aRenderer final : public xlle::Nv2aRenderer {
 public:
     bool supported = false;
@@ -38,6 +44,10 @@ public:
     std::vector<uint8_t> resident_resolve_data;
     uint64_t resident_resolves = 0;
     uint64_t resident_invalidates = 0;
+    uint32_t resident_depth_resolve_address = 0;
+    std::vector<uint8_t> resident_depth_resolve_data;
+    uint64_t resident_depth_resolves = 0;
+    uint64_t resident_depth_invalidates = 0;
     xlle::Nv2aGenericCombinerPacket last_packet;
     const char* name() const override { return "fake"; }
     bool supports_generic_combiner(
@@ -108,6 +118,39 @@ public:
             resident_resolve_address < request_end) {
             ++resident_invalidates;
             resident_resolve_data.clear();
+        }
+    }
+    bool resolve_resident_depth_surface(
+        uint32_t address, size_t size, xlle::Nv2aResidentDepthResolve& resolve,
+        std::string&) override {
+        if (resident_depth_resolve_data.empty()) {
+            resolve = {};
+            return true;
+        }
+        const uint64_t request_end = static_cast<uint64_t>(address) + size;
+        const uint64_t resident_end =
+            static_cast<uint64_t>(resident_depth_resolve_address) +
+            resident_depth_resolve_data.size();
+        if (address >= resident_end ||
+            resident_depth_resolve_address >= request_end) {
+            resolve = {};
+            return true;
+        }
+        ++resident_depth_resolves;
+        resolve.address = resident_depth_resolve_address;
+        resolve.data = resident_depth_resolve_data;
+        resident_depth_resolve_data.clear();
+        return true;
+    }
+    void invalidate_resident_depth_surface(uint32_t address, size_t size) override {
+        const uint64_t request_end = static_cast<uint64_t>(address) + size;
+        const uint64_t resident_end =
+            static_cast<uint64_t>(resident_depth_resolve_address) +
+            resident_depth_resolve_data.size();
+        if (!resident_depth_resolve_data.empty() && address < resident_end &&
+            resident_depth_resolve_address < request_end) {
+            ++resident_depth_invalidates;
+            resident_depth_resolve_data.clear();
         }
     }
 };
@@ -5547,6 +5590,27 @@ int main() {
             CHECK(gc_gpu.generic_combiner_accelerated_batches() == accelerated_before + 1);
             CHECK(gc_gpu.generic_combiner_batches() == software_before);
             CHECK(get32(gc_ram, 0x10000 + fake.write_offset) == fake.write_value);
+
+            fake.resident_depth_resolve_address = 0x20000;
+            fake.resident_depth_resolve_data.assign(256 * 64, 0);
+            fill32(fake.resident_depth_resolve_data, 0xABCDEF12u);
+            emit_gc(0x0208, 0x00000128);
+            emit_gc(0x020C, 0x01000100);
+            emit_gc(0x0214, 0x00020000);
+            emit_gc(0x030C, 1);           // depth test enabled.
+            emit_gc(0x0354, 0x0207);      // depth ALWAYS, but zeta is still read.
+            emit_gc(0x035C, 0);           // depth writes off.
+            const uint64_t depth_resolves_before = fake.resident_depth_resolves;
+            submit_triangle(0.0f, 0.0f, 20.0f, 0.0f, 0.0f, 20.0f, 50.0f, 1.0f,
+                            gc_pack_ub4(0x11, 0x22, 0x33, 0xCC));
+            CHECK(gc_fault.empty());
+            CHECK(fake.resident_depth_resolves == depth_resolves_before + 1);
+            CHECK(fake.last_packet.depth_address == 0x20000);
+            CHECK(fake.last_packet.depth_input.size() == 256 * 64);
+            if (!fake.last_packet.depth_input.empty())
+                CHECK(get32(fake.last_packet.depth_input, 0) == 0xABCDEF12u);
+            emit_gc(0x030C, 0);
+            emit_gc(0x035C, 0);
 
             fake.resident_supported = true;
             emit_gc(0x1E20, 0x12345678);  // inert: final combiner passes R0 directly

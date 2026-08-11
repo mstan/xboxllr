@@ -204,6 +204,38 @@ void Nv2a::invalidate_renderer_color_overlap(uint32_t address, size_t size) {
         renderer_->invalidate_resident_color_surface(address, size);
 }
 
+bool Nv2a::resolve_renderer_depth_overlap(uint32_t address, size_t size,
+                                          const char* context) {
+    if (!renderer_ || size == 0) return true;
+    for (;;) {
+        Nv2aResidentDepthResolve resolve;
+        std::string error;
+        if (!renderer_->resolve_resident_depth_surface(address, size, resolve,
+                                                       error)) {
+            fault_(error.empty() ? "NV2A resident depth resolve failed"
+                                 : error.c_str());
+            return false;
+        }
+        if (resolve.data.empty()) return true;
+        if (!mem_write_ ||
+            !mem_write_(resolve.address, resolve.data.data(),
+                        resolve.data.size())) {
+            char why[160];
+            std::snprintf(
+                why, sizeof(why),
+                "NV2A resident depth resolve DMA write failed before %s",
+                context ? context : "memory access");
+            fault_(why);
+            return false;
+        }
+    }
+}
+
+void Nv2a::invalidate_renderer_depth_overlap(uint32_t address, size_t size) {
+    if (renderer_ && size != 0)
+        renderer_->invalidate_resident_depth_surface(address, size);
+}
+
 // PCI identity mirror exposed through PBUS (xemu pbus.c reads d->config). NV2A = 10DE:02A0,
 // class VGA (0x030000), revision 0xA1.
 static constexpr uint32_t kPciNv0 = 0x02A0'10DEu;  // device<<16 | vendor
@@ -619,7 +651,8 @@ bool Nv2a::clear_surface_plane(uint32_t dma_instance, bool dma_bound,
     }
     const size_t resolved_span =
         static_cast<size_t>(static_cast<uint64_t>(last_address) - first_address + 1);
-    if (!resolve_renderer_color_overlap(first_address, resolved_span, "CLEAR_SURFACE"))
+    if (!resolve_renderer_color_overlap(first_address, resolved_span, "CLEAR_SURFACE") ||
+        !resolve_renderer_depth_overlap(first_address, resolved_span, "CLEAR_SURFACE"))
         return false;
 
     std::vector<uint8_t> row(static_cast<size_t>(row_bytes));
@@ -654,6 +687,7 @@ bool Nv2a::clear_surface_plane(uint32_t dma_instance, bool dma_bound,
         }
     }
     invalidate_renderer_color_overlap(first_address, resolved_span);
+    invalidate_renderer_depth_overlap(first_address, resolved_span);
     return true;
 }
 
@@ -3357,6 +3391,8 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         profile == Profile::kPitchAdditiveColor
             ? inline_depth_test
             : profile != Profile::kInlineLinearBlitColor;
+    const bool writes_depth_surface =
+        uses_depth_surface && raster_state_[kRasterDepthMask] != 0;
     if ((uses_depth_surface && !depth_bytes64) ||
         depth_bytes64 > SIZE_MAX || color_bytes64 > SIZE_MAX) {
         fault_("NV2A raster surface size overflows");
@@ -3816,6 +3852,12 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
 
     if (!resolve_renderer_color_overlap(color_address, static_cast<size_t>(color_bytes64),
                                         "witnessed color surface")) {
+        return false;
+    }
+    if (uses_depth_surface &&
+        !resolve_renderer_depth_overlap(depth_address,
+                                        static_cast<size_t>(depth_bytes64),
+                                        "witnessed zeta surface")) {
         return false;
     }
     PagedRasterSurface depth_surface(
@@ -5485,6 +5527,9 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
     }
     if (color_profile)
         invalidate_renderer_color_overlap(color_address, static_cast<size_t>(color_bytes64));
+    if (writes_depth_surface)
+        invalidate_renderer_depth_overlap(depth_address,
+                                          static_cast<size_t>(depth_bytes64));
     if (color_profile && surface_write_debug_cb_) {
         SurfaceWriteDebugInfo info;
         info.kind = "witnessed";
@@ -7453,6 +7498,11 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 return false;
             }
             if (uses_depth) {
+                if (!resolve_renderer_depth_overlap(
+                        depth_address, static_cast<size_t>(depth_bytes64),
+                        "accelerated generic zeta snapshot")) {
+                    return false;
+                }
                 packet.depth_input.resize(static_cast<size_t>(depth_bytes64));
                 if (!mem_read_(depth_address, packet.depth_input.data(),
                                packet.depth_input.size())) {
@@ -7490,6 +7540,8 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 return false;
             }
             invalidate_renderer_color_overlap(color_address, result.color_output.size());
+            if (uses_depth)
+                invalidate_renderer_depth_overlap(depth_address, result.depth_output.size());
             executed = true;
             ++generic_combiner_accelerated_batches_;
             generic_combiner_triangles_ += result.triangles;
@@ -7639,6 +7691,13 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
 
     if (!resolve_renderer_color_overlap(color_address, static_cast<size_t>(color_bytes64),
                                         "software generic color surface")) {
+        record_generic_fingerprint_perf();
+        return false;
+    }
+    if (uses_depth &&
+        !resolve_renderer_depth_overlap(depth_address,
+                                        static_cast<size_t>(depth_bytes64),
+                                        "software generic zeta surface")) {
         record_generic_fingerprint_perf();
         return false;
     }
@@ -8433,6 +8492,9 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         record_generic_fingerprint_perf();
         return false;
     }
+    if (uses_depth && raster_state_[kRasterDepthMask] != 0)
+        invalidate_renderer_depth_overlap(depth_address,
+                                          static_cast<size_t>(depth_bytes64));
     if (generic_batch_debug_cb_) {
         GenericBatchDebugInfo info;
         info.batch = generic_batch_index;
@@ -8592,6 +8654,10 @@ bool Nv2a::execute_image_blit_srccopy() {
     if (!resolve_renderer_color_overlap(source_address, static_cast<size_t>(source_span64),
                                         "IMAGE_BLIT source") ||
         !resolve_renderer_color_overlap(dest_address, static_cast<size_t>(dest_span64),
+                                        "IMAGE_BLIT destination") ||
+        !resolve_renderer_depth_overlap(source_address, static_cast<size_t>(source_span64),
+                                        "IMAGE_BLIT source") ||
+        !resolve_renderer_depth_overlap(dest_address, static_cast<size_t>(dest_span64),
                                         "IMAGE_BLIT destination")) {
         return false;
     }
@@ -8615,6 +8681,7 @@ bool Nv2a::execute_image_blit_srccopy() {
         }
     }
     invalidate_renderer_color_overlap(dest_address, static_cast<size_t>(dest_span64));
+    invalidate_renderer_depth_overlap(dest_address, static_cast<size_t>(dest_span64));
     ++image_blit_copies_;
     image_blit_bytes_ += static_cast<uint64_t>(row_bytes) * image_blit_.height;
     last_image_blit_source_ = source_address;

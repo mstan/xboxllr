@@ -1195,6 +1195,9 @@ private:
     bool resolve_renderer_color_overlap(uint32_t address, size_t size,
                                         const char* context);
     void invalidate_renderer_color_overlap(uint32_t address, size_t size);
+    bool resolve_renderer_depth_overlap(uint32_t address, size_t size,
+                                        const char* context);
+    void invalidate_renderer_depth_overlap(uint32_t address, size_t size);
     bool execute_image_blit_srccopy();
 
     FaultFn fault_;

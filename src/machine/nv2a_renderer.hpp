@@ -96,6 +96,11 @@ struct Nv2aResidentColorResolve {
     std::vector<uint8_t> data;
 };
 
+struct Nv2aResidentDepthResolve {
+    uint32_t address = 0;
+    std::vector<uint8_t> data;
+};
+
 class Nv2aRenderer {
 public:
     virtual ~Nv2aRenderer() = default;
@@ -125,6 +130,29 @@ public:
     virtual void invalidate_resident_color_surface(uint32_t address, size_t size) {
         (void)address;
         (void)size;
+    }
+    virtual bool resolve_resident_depth_surface(
+        uint32_t address, size_t size, Nv2aResidentDepthResolve& resolve,
+        std::string& error) {
+        (void)address;
+        (void)size;
+        resolve = {};
+        error.clear();
+        return true;
+    }
+    virtual void invalidate_resident_depth_surface(uint32_t address, size_t size) {
+        (void)address;
+        (void)size;
+    }
+    virtual bool has_resident_depth_surface(
+        uint32_t address, size_t size, uint32_t pitch,
+        uint32_t height, uint32_t format) const {
+        (void)address;
+        (void)size;
+        (void)pitch;
+        (void)height;
+        (void)format;
+        return false;
     }
     virtual bool has_resident_color_surface(
         uint32_t address, size_t size, uint32_t pitch,
