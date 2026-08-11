@@ -5422,6 +5422,36 @@ int main() {
                                  resident_primary_software.end(),
                                  gc_ram.begin() + 0x10000));
 
+                // Stock-dashboard late-menu fade/overlay quads carry
+                // ShaderStageProgram=0x20 while the combiner reads no texture
+                // outputs.  That shader word is inert for this primary-color
+                // combiner; prove the new resident admission remains byte-identical
+                // to the software evaluator before allowing it in replay.
+                emit_gc(0x0210, 0x00034000);
+                gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x600800, 4, 0x34000);
+                emit_gc(0x1E70, 0x00000020);
+                emit_gc(0x1E78, 0x00210000);
+                std::memset(gc_ram.data() + 0x34000, 0x6B, 256 * 64);
+                gc_gpu.set_renderer(nullptr);
+                submit_two_triangles(gc_pack_ub4(0x00, 0x00, 0x00, 0x0F));
+                CHECK(gc_fault.empty());
+                const std::vector<uint8_t> resident_shader20_software(
+                    gc_ram.begin() + 0x34000,
+                    gc_ram.begin() + 0x34000 + 256 * 64);
+                std::memset(gc_ram.data() + 0x34000, 0x6B, 256 * 64);
+                gc_gpu.set_renderer(gl_renderer.get());
+                submit_two_triangles(gc_pack_ub4(0x00, 0x00, 0x00, 0x0F));
+                CHECK(gc_fault.empty());
+                CHECK(gc_gpu.capture_scanout(resident_rgba, resident_scanout,
+                                             resident_scanout_error));
+                CHECK(std::equal(resident_shader20_software.begin(),
+                                 resident_shader20_software.end(),
+                                 gc_ram.begin() + 0x34000));
+                emit_gc(0x0210, 0x00010000);
+                gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x600800, 4, 0x10000);
+                emit_gc(0x1E70, 0);
+                emit_gc(0x1E78, 0x00210000);
+
                 // Bounded multi-resident targets: switching render targets must
                 // not force an eager resolve, but later overlap/scanout resolves
                 // must still return the correct bytes for each dirty target.

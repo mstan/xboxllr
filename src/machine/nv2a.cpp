@@ -6941,7 +6941,9 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                   (blend_dst == 0x0303 || blend_dst == 1 || blend_dst == 0)));
             const bool resident_shader_supported =
                 raster_state_[kRasterShaderStageProgram] == 0 ||
-                raster_state_[kRasterShaderStageProgram] == 1;
+                raster_state_[kRasterShaderStageProgram] == 1 ||
+                (raster_state_[kRasterShaderStageProgram] == 0x20 &&
+                 no_texture_inputs);
             const bool resident_other_stage_supported =
                 raster_state_[kRasterShaderOtherStageInput] == 0 ||
                 raster_state_[kRasterShaderOtherStageInput] == 0x00210000;
