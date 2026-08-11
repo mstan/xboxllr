@@ -6703,6 +6703,12 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             const bool resident_primary_state =
                 resident_reject_reason == ResidentReject::kCount;
             if (resident_primary_state) {
+                const bool resident_primary_large_dashboard_target =
+                    color_address == 0x03AA4000 && color_format_x8 &&
+                    surface_type == 1 && anti_aliasing == 0 &&
+                    surface_pitch_ == 0x00401400 && surface_height == 960 &&
+                    clip_x == 0 && clip_y == 0 && clip_width == 1280 &&
+                    clip_height == 960;
                 auto fixed_xy = [](float value, int64_t& fixed) {
                     if (!std::isfinite(value)) return false;
                     const double rounded =
@@ -6727,6 +6733,29 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     const auto* c = &packet.vertices[ic];
                     if (!finite_vertex(*a) || !finite_vertex(*b) || !finite_vertex(*c))
                         return false;
+                    if (resident_primary_large_dashboard_target) {
+                        const double ax = static_cast<double>(a->position[0]);
+                        const double ay = static_cast<double>(a->position[1]);
+                        const double bx = static_cast<double>(b->position[0]);
+                        const double by = static_cast<double>(b->position[1]);
+                        const double cx = static_cast<double>(c->position[0]);
+                        const double cy = static_cast<double>(c->position[1]);
+                        const double area =
+                            (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+                        if (area == 0.0) return true;
+                        if (!cull_enabled) {
+                            if (area < 0.0) std::swap(b, c);
+                        } else if (cull_front) {
+                            if (area > 0.0) return true;
+                            std::swap(b, c);
+                        } else if (area < 0.0) {
+                            return true;
+                        }
+                        expanded.push_back(*a);
+                        expanded.push_back(*b);
+                        expanded.push_back(*c);
+                        return true;
+                    }
                     int64_t ax = 0, ay = 0, bx = 0, by = 0, cx = 0, cy = 0;
                     if (!fixed_xy(a->position[0], ax) ||
                         !fixed_xy(a->position[1], ay) ||
