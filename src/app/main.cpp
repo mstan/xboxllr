@@ -801,6 +801,31 @@ int main(int argc, char** argv) {
                             state[Nv2a::kRasterSurfaceColorOffset],
                             static_cast<unsigned long long>(entry.full_state_hash));
                     }
+                    if (entry.texture_modulate_batches) {
+                        std::printf(":texmod%llu",
+                                    static_cast<unsigned long long>(
+                                        entry.texture_modulate_batches));
+                        if (entry.texture_modulate_exact_batches) {
+                            std::printf("/exact%llu",
+                                        static_cast<unsigned long long>(
+                                            entry.texture_modulate_exact_batches));
+                        }
+                        bool any_texmod_reject = false;
+                        for (size_t reason = 0;
+                             reason <
+                             Nv2a::generic_texture_modulate_reject_reason_count();
+                             ++reason) {
+                            const uint64_t count =
+                                entry.texture_modulate_reject_batches[reason];
+                            if (!count) continue;
+                            std::printf("%s%s:%llu",
+                                        any_texmod_reject ? "," : "/reject=",
+                                        Nv2a::generic_texture_modulate_reject_reason_name(
+                                            reason),
+                                        static_cast<unsigned long long>(count));
+                            any_texmod_reject = true;
+                        }
+                    }
                 }
                 std::printf("\n");
                 // Keep the compact top-12 line readable, but emit complete,

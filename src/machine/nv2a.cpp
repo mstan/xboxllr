@@ -6273,6 +6273,10 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         }
     }
 
+    bool texture_modulate_observed_this_batch = false;
+    bool texture_modulate_exact_this_batch = false;
+    GenericTextureModulateRejectReason texture_modulate_reject_this_batch =
+        GenericTextureModulateRejectReason::kCount;
     if (renderer_) {
         Nv2aGenericCombinerPacket packet;
         packet.primitive_mode = primitive_mode_;
@@ -6653,6 +6657,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 raster_state_[kRasterCombinerControl] == 1;
             if (texture_modulate_observable) {
                 ++generic_combiner_texture_modulate_observed_;
+                texture_modulate_observed_this_batch = true;
                 const bool only_texture0_input =
                     texture_referenced[0] && !texture_referenced[1] &&
                     !texture_referenced[2] && !texture_referenced[3];
@@ -6729,8 +6734,10 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 }
                 if (reject_reason == TextureReject::kCount) {
                     ++generic_combiner_texture_modulate_exact_;
+                    texture_modulate_exact_this_batch = true;
                 } else {
                     record_generic_texture_modulate_reject(reject_reason);
+                    texture_modulate_reject_this_batch = reject_reason;
                 }
             }
         }
@@ -6873,6 +6880,21 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             generic_fingerprint_stats = &*it;
         }
         if (profile_generic_fingerprint) {
+            if (texture_modulate_observed_this_batch) {
+                ++generic_fingerprint_stats->texture_modulate_batches;
+                if (texture_modulate_exact_this_batch) {
+                    ++generic_fingerprint_stats->texture_modulate_exact_batches;
+                } else {
+                    const size_t reject_index =
+                        static_cast<size_t>(texture_modulate_reject_this_batch);
+                    if (reject_index <
+                        generic_fingerprint_stats
+                            ->texture_modulate_reject_batches.size()) {
+                        ++generic_fingerprint_stats
+                              ->texture_modulate_reject_batches[reject_index];
+                    }
+                }
+            }
             const uint32_t vertex_count = static_cast<uint32_t>(std::min<size_t>(
                 transformed_batch_.size(), std::numeric_limits<uint32_t>::max()));
             if (generic_fingerprint_stats->raster_state_sample_index == UINT32_MAX) {

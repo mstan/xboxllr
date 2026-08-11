@@ -588,6 +588,11 @@ public:
         uint64_t bbox_pixels = 0;
         uint64_t max_batch_fragments = 0;
         uint64_t max_batch_bbox_pixels = 0;
+        uint64_t texture_modulate_batches = 0;
+        uint64_t texture_modulate_exact_batches = 0;
+        std::array<uint64_t,
+                  static_cast<size_t>(GenericTextureModulateRejectReason::kCount)>
+            texture_modulate_reject_batches{};
         // Populated only while --perf-accounting is enabled. This links to the
         // immutable first full state in raster_state_samples_, keeping normal
         // replay overhead to one compact index rather than copying state here.
