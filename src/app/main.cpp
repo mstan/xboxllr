@@ -870,6 +870,40 @@ int main(int argc, char** argv) {
                     }
                 }
             };
+            auto print_resident_combiner_report = [&]() {
+                if (!mach.nv2a()) return;
+                const auto* nv2a = mach.nv2a();
+                std::printf(
+                    "[perf-resident] candidates=%llu supported=%llu "
+                    "uploads=%llu reuses=%llu target-switch-resolves=%llu "
+                    "submits=%llu rejects=",
+                    static_cast<unsigned long long>(
+                        nv2a->generic_combiner_resident_candidates()),
+                    static_cast<unsigned long long>(
+                        nv2a->generic_combiner_resident_supported()),
+                    static_cast<unsigned long long>(
+                        nv2a->generic_combiner_resident_uploads()),
+                    static_cast<unsigned long long>(
+                        nv2a->generic_combiner_resident_reuses()),
+                    static_cast<unsigned long long>(
+                        nv2a->generic_combiner_resident_target_switch_resolves()),
+                    static_cast<unsigned long long>(
+                        nv2a->generic_combiner_resident_submits()));
+                bool any_reject = false;
+                for (size_t i = 0;
+                     i < Nv2a::generic_resident_reject_reason_count(); ++i) {
+                    const uint64_t count =
+                        nv2a->generic_combiner_resident_reject_batches(i);
+                    if (!count) continue;
+                    if (any_reject) std::printf(",");
+                    std::printf("%s:%llu",
+                                Nv2a::generic_resident_reject_reason_name(i),
+                                static_cast<unsigned long long>(count));
+                    any_reject = true;
+                }
+                if (!any_reject) std::printf("none");
+                std::printf("\n");
+            };
             auto capture_frame_series = [&]() {
                 if (!frame_series_requested || frame_series_exhausted ||
                     mach.total_insns() < next_frame_series_insn ||
@@ -924,6 +958,7 @@ int main(int argc, char** argv) {
                 const std::string perf_report = xlle::perf::format_report();
                 if (!perf_report.empty()) std::printf("%s\n", perf_report.c_str());
                 print_generic_combiner_perf_report();
+                print_resident_combiner_report();
                 const std::string memory_report =
                     xlle::perf::format_memory_report();
                 if (!memory_report.empty())
@@ -1980,6 +2015,21 @@ int main(int argc, char** argv) {
                             (unsigned long long)mach.nv2a()->generic_combiner_resident_reuses(),
                             (unsigned long long)mach.nv2a()->generic_combiner_resident_target_switch_resolves(),
                             (unsigned long long)mach.nv2a()->generic_combiner_resident_submits());
+                std::printf("[2bl] NV2A generic-combiner resident rejects:");
+                bool any_resident_reject = false;
+                for (size_t reason = 0;
+                     reason < xlle::Nv2a::generic_resident_reject_reason_count();
+                     ++reason) {
+                    const uint64_t count =
+                        mach.nv2a()->generic_combiner_resident_reject_batches(reason);
+                    if (!count) continue;
+                    std::printf(" %s=%llu",
+                                xlle::Nv2a::generic_resident_reject_reason_name(reason),
+                                (unsigned long long)count);
+                    any_resident_reject = true;
+                }
+                if (!any_resident_reject) std::printf(" none");
+                std::printf("\n");
                 std::printf("[2bl] NV2A generic-combiner skip census:");
                 for (size_t reason = 0;
                      reason < xlle::Nv2a::generic_skip_reason_count(); ++reason) {

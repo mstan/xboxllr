@@ -442,6 +442,53 @@ public:
     uint64_t generic_combiner_resident_submits() const {
         return generic_combiner_resident_submits_;
     }
+    enum class GenericResidentRejectReason {
+        kNoRenderer,
+        kUnsupportedPrimitive,
+        kVertexCount,
+        kTextureInput,
+        kDepth,
+        kColorMask,
+        kColorFormat,
+        kStageCount,
+        kAlphaMode,
+        kBlendMode,
+        kShaderProgram,
+        kOtherStageInput,
+        kCombinerWords,
+        kVertexExpansion,
+        kBackendUnsupported,
+        kCount,
+    };
+    static size_t generic_resident_reject_reason_count() {
+        return static_cast<size_t>(GenericResidentRejectReason::kCount);
+    }
+    static const char* generic_resident_reject_reason_name(size_t index) {
+        static constexpr const char* kNames[] = {
+            "no-renderer",
+            "unsupported-primitive",
+            "vertex-count",
+            "texture-input",
+            "depth",
+            "color-mask",
+            "color-format",
+            "stage-count",
+            "alpha-mode",
+            "blend-mode",
+            "shader-program",
+            "other-stage-input",
+            "combiner-words",
+            "vertex-expansion",
+            "backend-unsupported",
+        };
+        return index < (sizeof(kNames) / sizeof(kNames[0])) ? kNames[index]
+                                                             : "unknown";
+    }
+    uint64_t generic_combiner_resident_reject_batches(size_t index) const {
+        return index < generic_combiner_resident_rejects_.size()
+                   ? generic_combiner_resident_rejects_[index]
+                   : 0;
+    }
     uint64_t generic_combiner_fallback_batches() const {
         return generic_combiner_fallback_batches_;
     }
@@ -1254,6 +1301,9 @@ private:
     uint64_t generic_combiner_resident_reuses_ = 0;
     uint64_t generic_combiner_resident_target_switch_resolves_ = 0;
     uint64_t generic_combiner_resident_submits_ = 0;
+    std::array<uint64_t,
+              static_cast<size_t>(GenericResidentRejectReason::kCount)>
+        generic_combiner_resident_rejects_{};
     uint64_t generic_combiner_fallback_batches_ = 0;
     uint64_t generic_combiner_triangles_ = 0;
     uint64_t generic_combiner_fragments_ = 0;
@@ -1487,6 +1537,7 @@ private:
     bool rasterize_generic_combiner_batch(bool& executed);
     void record_generic_skip(GenericSkipReason reason);
     void record_generic_skip_detail(GenericSkipReason reason, uint64_t detail);
+    void record_generic_resident_reject(GenericResidentRejectReason reason);
     bool fetch_vertex_attribute(uint32_t slot, uint32_t index);
     bool ramht_instance(uint8_t channel, uint32_t handle, uint32_t& instance) const;
     bool dma_object_address(uint32_t instance, uint32_t offset, uint32_t& address) const;

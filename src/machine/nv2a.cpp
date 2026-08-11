@@ -5510,6 +5510,12 @@ void Nv2a::record_generic_skip_detail(GenericSkipReason reason, uint64_t detail)
     generic_skip_details_.push_back({reason, detail, 1});
 }
 
+void Nv2a::record_generic_resident_reject(GenericResidentRejectReason reason) {
+    const size_t index = static_cast<size_t>(reason);
+    if (index < generic_combiner_resident_rejects_.size())
+        ++generic_combiner_resident_rejects_[index];
+}
+
 // Generic NV2A register-combiner evaluator.
 //
 // Every Profile above is a hand-derived, exact-match fingerprint: a whole-register
@@ -6487,23 +6493,8 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             }
         }
         if (packet.compute_fixture == Nv2aGenericCombinerPacket::ComputeFixture::kNone) {
-            const bool resident_primary_state =
-                (primitive_mode_ == 5 || primitive_mode_ == 6 || primitive_mode_ == 7) &&
-                transformed_batch_.size() >= 3 &&
-                transformed_batch_.size() <= 20000 &&
-                no_texture_inputs && !uses_depth && color_mask_word == 0x01010101 &&
-                (color_format_x8 || color_format_a8) && stage_count == 1 &&
-                (!alpha_test_enabled ||
-                 (alpha_func == 0x0207 &&
-                  (raster_state_[kRasterAlphaRef] & 0xFFu) == 0)) &&
-                (!blend_enabled || blend_eq == 0x8006) &&
-                (!blend_enabled ||
-                 ((blend_src == 0x0302 || blend_src == 1) &&
-                  (blend_dst == 0x0303 || blend_dst == 1 || blend_dst == 0))) &&
-                (raster_state_[kRasterShaderStageProgram] == 0 ||
-                 raster_state_[kRasterShaderStageProgram] == 1) &&
-                (raster_state_[kRasterShaderOtherStageInput] == 0 ||
-                 raster_state_[kRasterShaderOtherStageInput] == 0x00210000) &&
+            using ResidentReject = GenericResidentRejectReason;
+            const bool resident_primary_combiner_words =
                 raster_state_[kRasterCombinerControl] == 1 &&
                 raster_state_[kRasterCombinerColorIcw0] == 0x04200000 &&
                 raster_state_[kRasterCombinerAlphaIcw0] == 0x14200000 &&
@@ -6511,6 +6502,56 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 raster_state_[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
                 raster_state_[kRasterCombinerSpecularFog0] == 0x0000000C &&
                 raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80;
+            const bool resident_primary_observable =
+                raster_state_[kRasterCombinerControl] == 1 ||
+                resident_primary_combiner_words;
+            const bool resident_primitive_supported =
+                primitive_mode_ == 5 || primitive_mode_ == 6 || primitive_mode_ == 7;
+            const bool resident_vertex_count_supported =
+                transformed_batch_.size() >= 3 && transformed_batch_.size() <= 20000;
+            const bool resident_alpha_supported =
+                !alpha_test_enabled ||
+                (alpha_func == 0x0207 &&
+                 (raster_state_[kRasterAlphaRef] & 0xFFu) == 0);
+            const bool resident_blend_supported =
+                (!blend_enabled || blend_eq == 0x8006) &&
+                (!blend_enabled ||
+                 ((blend_src == 0x0302 || blend_src == 1) &&
+                  (blend_dst == 0x0303 || blend_dst == 1 || blend_dst == 0)));
+            const bool resident_shader_supported =
+                raster_state_[kRasterShaderStageProgram] == 0 ||
+                raster_state_[kRasterShaderStageProgram] == 1;
+            const bool resident_other_stage_supported =
+                raster_state_[kRasterShaderOtherStageInput] == 0 ||
+                raster_state_[kRasterShaderOtherStageInput] == 0x00210000;
+            ResidentReject resident_reject_reason = ResidentReject::kCount;
+            if (!resident_primitive_supported) {
+                resident_reject_reason = ResidentReject::kUnsupportedPrimitive;
+            } else if (!resident_vertex_count_supported) {
+                resident_reject_reason = ResidentReject::kVertexCount;
+            } else if (!no_texture_inputs) {
+                resident_reject_reason = ResidentReject::kTextureInput;
+            } else if (uses_depth) {
+                resident_reject_reason = ResidentReject::kDepth;
+            } else if (color_mask_word != 0x01010101) {
+                resident_reject_reason = ResidentReject::kColorMask;
+            } else if (!color_format_x8 && !color_format_a8) {
+                resident_reject_reason = ResidentReject::kColorFormat;
+            } else if (stage_count != 1) {
+                resident_reject_reason = ResidentReject::kStageCount;
+            } else if (!resident_alpha_supported) {
+                resident_reject_reason = ResidentReject::kAlphaMode;
+            } else if (!resident_blend_supported) {
+                resident_reject_reason = ResidentReject::kBlendMode;
+            } else if (!resident_shader_supported) {
+                resident_reject_reason = ResidentReject::kShaderProgram;
+            } else if (!resident_other_stage_supported) {
+                resident_reject_reason = ResidentReject::kOtherStageInput;
+            } else if (!resident_primary_combiner_words) {
+                resident_reject_reason = ResidentReject::kCombinerWords;
+            }
+            const bool resident_primary_state =
+                resident_reject_reason == ResidentReject::kCount;
             if (resident_primary_state) {
                 auto fixed_xy = [](float value, int64_t& fixed) {
                     if (!std::isfinite(value)) return false;
@@ -6591,9 +6632,16 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     packet.fixture_blend_dst = blend_dst;
                     packet.fixture_color_format_x8 = color_format_x8;
                     ++generic_combiner_resident_candidates_;
+                } else if (resident_primary_observable) {
+                    record_generic_resident_reject(ResidentReject::kVertexExpansion);
                 }
+            } else if (resident_primary_observable) {
+                record_generic_resident_reject(resident_reject_reason);
             }
         }
+        const bool resident_packet =
+            packet.compute_fixture == Nv2aGenericCombinerPacket::ComputeFixture::
+                                          kResidentPrimaryColorTriangles;
         if (renderer_->supports_resident_generic_combiner(packet)) {
             ++generic_combiner_resident_supported_;
             const size_t color_size = static_cast<size_t>(color_bytes64);
@@ -6640,6 +6688,9 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             generic_combiner_writes_ += result.writes;
             ++generic_combiner_executed_batches_;
             return true;
+        } else if (resident_packet) {
+            record_generic_resident_reject(
+                GenericResidentRejectReason::kBackendUnsupported);
         }
         if (renderer_->supports_generic_combiner(packet)) {
             if (!resolve_renderer_color_overlap(
