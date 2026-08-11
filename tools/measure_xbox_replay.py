@@ -55,6 +55,48 @@ PERF_RE = re.compile(
     r"\(n=(?P<host_poll_devices_n>\d+)\)"
 )
 
+PERF_RESIDENT_RE = re.compile(
+    r"^\[perf-resident\] "
+    r"candidates=(?P<candidates>\d+) "
+    r"supported=(?P<supported>\d+) "
+    r"uploads=(?P<uploads>\d+) "
+    r"reuses=(?P<reuses>\d+) "
+    r"target-switch-resolves=(?P<target_switch_resolves>\d+) "
+    r"submits=(?P<submits>\d+) "
+    r"rejects=(?P<rejects>.*)$"
+)
+
+PERF_TEXTURE_MODULATE_RE = re.compile(
+    r"^\[perf-texture-modulate\] "
+    r"observed=(?P<observed>\d+) "
+    r"exact=(?P<exact>\d+) "
+    r"rejects=(?P<rejects>.*)$"
+)
+
+HOST_MEMORY_RE = re.compile(
+    r"^\[host-memory\] "
+    r"working-set=(?P<working_set>\d+) "
+    r"private-commit=(?P<private_commit>\d+) "
+    r"heap-count=(?P<heap_count>\d+) "
+    r"heap-allocated=(?P<heap_allocated>\d+) "
+    r"heap-committed=(?P<heap_committed>\d+) "
+    r"heap-reserved=(?P<heap_reserved>\d+)"
+)
+
+PERF_RENDERER_RE = re.compile(
+    r"^\[perf-renderer\] "
+    r"resident-ensure-ns=(?P<resident_ensure_ns>\d+) "
+    r"\(n=(?P<resident_ensure_n>\d+)\) "
+    r"texture-stage-ns=(?P<texture_stage_ns>\d+) "
+    r"\(n=(?P<texture_stage_n>\d+)\) "
+    r"vertex-upload-ns=(?P<vertex_upload_ns>\d+) "
+    r"\(n=(?P<vertex_upload_n>\d+)\) "
+    r"draw-ns=(?P<draw_ns>\d+) "
+    r"\(n=(?P<draw_n>\d+)\) "
+    r"resolve-ns=(?P<resolve_ns>\d+) "
+    r"\(n=(?P<resolve_n>\d+)\)"
+)
+
 GENERIC_RE = re.compile(
     r"^\[2bl\] NV2A generic-combiner: "
     r"attempted/accelerated/fallback/software/exec/tri/frags/depth-pass/"
@@ -123,6 +165,7 @@ def parse_int_fields(match: re.Match[str]) -> dict[str, Any]:
             "last_nonzero",
             "rgba_fnv64",
             "eip",
+            "rejects",
         }:
             parsed[key] = value.lower()
         elif key == "effective_fps":
@@ -132,9 +175,38 @@ def parse_int_fields(match: re.Match[str]) -> dict[str, Any]:
     return parsed
 
 
+def parse_rejects(text: str) -> dict[str, int]:
+    if text == "none":
+        return {}
+    rejects: dict[str, int] = {}
+    for item in text.split(","):
+        if not item:
+            continue
+        name, sep, count = item.partition(":")
+        if not sep:
+            rejects[name] = 0
+            continue
+        try:
+            rejects[name] = int(count)
+        except ValueError:
+            rejects[name] = 0
+    return rejects
+
+
+def parse_counter_sample(match: re.Match[str]) -> dict[str, Any]:
+    parsed = parse_int_fields(match)
+    if "rejects" in parsed:
+        parsed["rejects"] = parse_rejects(match.group("rejects"))
+    return parsed
+
+
 def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
     frames: list[dict[str, Any]] = []
     perf_samples: list[dict[str, Any]] = []
+    resident_samples: list[dict[str, Any]] = []
+    texture_modulate_samples: list[dict[str, Any]] = []
+    host_memory_samples: list[dict[str, Any]] = []
+    renderer_samples: list[dict[str, Any]] = []
     generic: dict[str, Any] | None = None
     scanout: dict[str, Any] | None = None
     retired: dict[str, Any] | None = None
@@ -153,6 +225,14 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
             frames.append(parse_int_fields(match))
         elif match := PERF_RE.match(line):
             perf_samples.append(parse_int_fields(match))
+        elif match := PERF_RESIDENT_RE.match(line):
+            resident_samples.append(parse_counter_sample(match))
+        elif match := PERF_TEXTURE_MODULATE_RE.match(line):
+            texture_modulate_samples.append(parse_counter_sample(match))
+        elif match := HOST_MEMORY_RE.match(line):
+            host_memory_samples.append(parse_int_fields(match))
+        elif match := PERF_RENDERER_RE.match(line):
+            renderer_samples.append(parse_int_fields(match))
         elif match := GENERIC_RE.match(line):
             generic = parse_int_fields(match)
         elif match := SCANOUT_RE.match(line):
@@ -173,6 +253,16 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
         "final_frame": final_frame,
         "perf_samples": perf_samples,
         "final_perf": final_perf,
+        "resident_samples": resident_samples,
+        "final_resident": resident_samples[-1] if resident_samples else None,
+        "texture_modulate_samples": texture_modulate_samples,
+        "final_texture_modulate": (
+            texture_modulate_samples[-1] if texture_modulate_samples else None
+        ),
+        "host_memory_samples": host_memory_samples,
+        "final_host_memory": host_memory_samples[-1] if host_memory_samples else None,
+        "renderer_samples": renderer_samples,
+        "final_renderer": renderer_samples[-1] if renderer_samples else None,
         "generic_combiner": generic,
         "generic_fingerprints": generic_fingerprints,
         "scanout": scanout,

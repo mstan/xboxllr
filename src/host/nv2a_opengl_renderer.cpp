@@ -1,5 +1,7 @@
 #include "host/nv2a_opengl_renderer.hpp"
 
+#include "machine/perf_accounting.hpp"
+
 #include <cstdio>
 #include <array>
 #include <cmath>
@@ -507,6 +509,7 @@ noperspective in vec4 tex0_over_w;
 noperspective in float inv_w_out;
 uniform sampler2D texture0;
 uniform vec2 texture_size;
+uniform uint texture_passthrough;
 layout(location = 0) out vec4 out_color;
 vec4 fetch_repeat(ivec2 p) {
     ivec2 size = ivec2(texture_size);
@@ -530,7 +533,121 @@ void main() {
     vec4 texcoord = inv_w_out == 0.0 ? vec4(0.0, 0.0, 0.0, 1.0)
                                      : tex0_over_w / inv_w_out;
     vec4 texel = sample_repeat_bilinear(texcoord.xy);
-    out_color = clamp(diffuse * texel, 0.0, 1.0);
+    out_color = texture_passthrough != 0u ? clamp(texel, 0.0, 1.0)
+                                          : clamp(diffuse * texel, 0.0, 1.0);
+}
+)GLSL";
+
+constexpr const char* kResidentDashboardProject2dFanVertexSource = R"GLSL(#version 430 core
+layout(location = 0) in vec4 in_position;
+layout(location = 1) in vec4 in_tex0;
+layout(location = 2) in vec4 in_tex1;
+layout(location = 3) in vec4 in_tex2;
+layout(location = 4) in vec4 in_tex3;
+noperspective out vec2 tex0_out;
+noperspective out vec2 tex1_out;
+noperspective out vec2 tex2_out;
+noperspective out vec2 tex3_out;
+uniform vec2 surface_size;
+void main() {
+    tex0_out = in_tex0.xy;
+    tex1_out = in_tex1.xy;
+    tex2_out = in_tex2.xy;
+    tex3_out = in_tex3.xy;
+    vec2 ndc = vec2(in_position.x / surface_size.x * 2.0 - 1.0,
+                    1.0 - in_position.y / surface_size.y * 2.0);
+    gl_Position = vec4(ndc, 0.0, 1.0);
+}
+)GLSL";
+
+constexpr const char* kResidentDashboardProject2dFanFragmentSource = R"GLSL(#version 430 core
+noperspective in vec2 tex0_out;
+noperspective in vec2 tex1_out;
+noperspective in vec2 tex2_out;
+noperspective in vec2 tex3_out;
+layout(std430, binding = 0) readonly buffer Texture0 { uint tex0_words[]; };
+layout(std430, binding = 1) readonly buffer Texture1 { uint tex1_words[]; };
+layout(std430, binding = 2) readonly buffer Texture2 { uint tex2_words[]; };
+layout(std430, binding = 3) readonly buffer Texture3 { uint tex3_words[]; };
+uniform uint factor_stage2;
+uniform uint factor_stage4;
+layout(location = 0) out vec4 out_color;
+uint swizzle_index(uint x, uint y, uint width, uint height) {
+    uint result = 0u;
+    uint output_bit = 1u;
+    for (uint input_bit = 1u; input_bit < width || input_bit < height; input_bit <<= 1u) {
+        if (input_bit < width) {
+            if ((x & input_bit) != 0u) result |= output_bit;
+            output_bit <<= 1u;
+        }
+        if (input_bit < height) {
+            if ((y & input_bit) != 0u) result |= output_bit;
+            output_bit <<= 1u;
+        }
+    }
+    return result;
+}
+vec4 unpack_argb(uint word) {
+    return vec4(float((word >> 16u) & 255u), float((word >> 8u) & 255u),
+                float(word & 255u), float((word >> 24u) & 255u)) / 255.0;
+}
+int repeat_coord(int value, int size) {
+    int r = value % size;
+    return r < 0 ? r + size : r;
+}
+vec4 sample_t0(vec2 uv) {
+    float tx = clamp(uv.x, 0.0, 1.0) * 1024.0 - 0.5;
+    float ty = clamp(uv.y, 0.0, 1.0) * 512.0 - 0.5;
+    int x0 = int(floor(tx)); int y0 = int(floor(ty));
+    float fx = tx - float(x0); float fy = ty - float(y0);
+    vec4 accum = vec4(0.0);
+    for (int yy = 0; yy < 2; ++yy) {
+        for (int xx = 0; xx < 2; ++xx) {
+            int sx = clamp(x0 + xx, 0, 1023);
+            int sy = clamp(y0 + yy, 0, 511);
+            float wx = xx == 0 ? 1.0 - fx : fx;
+            float wy = yy == 0 ? 1.0 - fy : fy;
+            accum += unpack_argb(tex0_words[swizzle_index(uint(sx), uint(sy), 1024u, 512u)]) *
+                     (wx * wy);
+        }
+    }
+    return accum;
+}
+float read_a8(uint stage, uint index) {
+    uint word = stage == 1u ? tex1_words[index >> 2u] :
+                (stage == 2u ? tex2_words[index >> 2u] : tex3_words[index >> 2u]);
+    return float((word >> ((index & 3u) * 8u)) & 255u) / 255.0;
+}
+vec4 sample_a8(uint stage, vec2 uv) {
+    float tx = (uv.x - floor(uv.x)) * 256.0 - 0.5;
+    float ty = (uv.y - floor(uv.y)) * 256.0 - 0.5;
+    int x0 = int(floor(tx)); int y0 = int(floor(ty));
+    float fx = tx - float(x0); float fy = ty - float(y0);
+    float a = 0.0;
+    for (int yy = 0; yy < 2; ++yy) {
+        for (int xx = 0; xx < 2; ++xx) {
+            int sx = repeat_coord(x0 + xx, 256);
+            int sy = repeat_coord(y0 + yy, 256);
+            float wx = xx == 0 ? 1.0 - fx : fx;
+            float wy = yy == 0 ? 1.0 - fy : fy;
+            a += read_a8(stage, swizzle_index(uint(sx), uint(sy), 256u, 256u)) *
+                 (wx * wy);
+        }
+    }
+    return vec4(1.0, 1.0, 1.0, a);
+}
+void main() {
+    vec4 t0 = sample_t0(tex0_out);
+    vec4 t1 = sample_a8(1u, tex1_out);
+    vec4 t2 = sample_a8(2u, tex2_out);
+    vec4 t3 = sample_a8(3u, tex3_out);
+    float r1 = clamp(t1.a + t2.a, -1.0, 1.0);
+    r1 = clamp(r1 + t3.a, -1.0, 1.0);
+    vec4 f2 = unpack_argb(factor_stage2);
+    vec4 f4 = unpack_argb(factor_stage4);
+    vec3 r1rgb = clamp(vec3(r1) * f2.rgb, -1.0, 1.0);
+    vec3 src = clamp(t0.rgb * r1rgb + f4.rgb, 0.0, 1.0);
+    out_color = vec4(src, 1.0);
 }
 )GLSL";
 
@@ -547,13 +664,15 @@ public:
                        unsigned int texture_modulate_program,
                        unsigned int dashboard_program,
                        unsigned int resident_program,
-                       unsigned int resident_texture_modulate_program)
+                       unsigned int resident_texture_modulate_program,
+                       unsigned int resident_dashboard_program)
         : window_(window), context_(context), owns_video_(owns_video),
           fixture_program_(fixture_program),
           texture_modulate_program_(texture_modulate_program),
           dashboard_program_(dashboard_program),
           resident_program_(resident_program),
-          resident_texture_modulate_program_(resident_texture_modulate_program) {}
+          resident_texture_modulate_program_(resident_texture_modulate_program),
+          resident_dashboard_program_(resident_dashboard_program) {}
     ~OpenGlNv2aRenderer() override {
         // Destruction can happen after an SDL presentation context was made
         // current; GL object deletion must be issued against this renderer's own
@@ -567,6 +686,11 @@ public:
         if (resident_program_ && delete_program_) delete_program_(resident_program_);
         if (resident_texture_modulate_program_ && delete_program_)
             delete_program_(resident_texture_modulate_program_);
+        if (resident_dashboard_program_ && delete_program_)
+            delete_program_(resident_dashboard_program_);
+        for (const auto& cache : dashboard_texture_cache_) {
+            if (cache.buffer && delete_buffers_) delete_buffers_(1, &cache.buffer);
+        }
         if (resident_vbo_ && delete_buffers_) delete_buffers_(1, &resident_vbo_);
         if (resident_vao_ && delete_vertex_arrays_)
             delete_vertex_arrays_(1, &resident_vao_);
@@ -658,13 +782,20 @@ public:
         const bool texture_fixture =
             packet.compute_fixture == Nv2aGenericCombinerPacket::ComputeFixture::
                                           kResidentTextureModulateTriangles;
-        if (!primary_fixture && !texture_fixture) {
+        const bool dashboard_fixture =
+            packet.compute_fixture == Nv2aGenericCombinerPacket::ComputeFixture::
+                                          kDashboardProject2dFan;
+        if (!primary_fixture && !texture_fixture && !dashboard_fixture) {
             return false;
         }
         if ((primary_fixture && resident_program_ == 0) ||
             (texture_fixture && resident_texture_modulate_program_ == 0) ||
-            packet.primitive_mode != 5 ||
-            packet.vertices.empty() || (packet.vertices.size() % 3) != 0 ||
+            (dashboard_fixture && resident_dashboard_program_ == 0) ||
+            (!dashboard_fixture && packet.primitive_mode != 5) ||
+            (dashboard_fixture && packet.primitive_mode != 7) ||
+            packet.vertices.empty() ||
+            (!dashboard_fixture && (packet.vertices.size() % 3) != 0) ||
+            (dashboard_fixture && packet.vertices.size() != 4) ||
             packet.surface_pitch == 0 || packet.surface_height == 0 ||
             packet.fixture_clip_width == 0 || packet.fixture_clip_height == 0) {
             return false;
@@ -696,6 +827,38 @@ public:
                 return false;
             }
         }
+        if (dashboard_fixture) {
+            if (packet.surface_height != 480 || pitch != 0x1400 ||
+                packet.fixture_clip_x != 0 || packet.fixture_clip_y != 0 ||
+                packet.fixture_clip_width != 1280 ||
+                packet.fixture_clip_height != 480 ||
+                !packet.fixture_blend_enabled || packet.fixture_blend_src != 0x0302 ||
+                packet.fixture_blend_dst != 1 ||
+                !packet.textures[0].referenced ||
+                packet.textures[0].layout !=
+                    Nv2aGenericCombinerPacket::TextureLayout::kSwizzled ||
+                packet.textures[0].format !=
+                    Nv2aGenericCombinerPacket::TextureFormat::kArgb8 ||
+                packet.textures[0].mode !=
+                    Nv2aGenericCombinerPacket::TextureMode::kProject2d ||
+                packet.textures[0].width != 1024 ||
+                packet.textures[0].height != 512) {
+                return false;
+            }
+            for (size_t stage = 1; stage < 4; ++stage) {
+                const auto& texture = packet.textures[stage];
+                if (!texture.referenced ||
+                    texture.layout !=
+                        Nv2aGenericCombinerPacket::TextureLayout::kSwizzled ||
+                    texture.format !=
+                        Nv2aGenericCombinerPacket::TextureFormat::kA8 ||
+                    texture.mode !=
+                        Nv2aGenericCombinerPacket::TextureMode::kProject2d ||
+                    texture.width != 256 || texture.height != 256) {
+                    return false;
+                }
+            }
+        }
         return true;
     }
     bool submit_resident_generic_combiner(const Nv2aGenericCombinerPacket& packet,
@@ -720,29 +883,81 @@ public:
         const uint32_t width = pitch / 4;
         const uint32_t height = packet.surface_height;
         const size_t size = static_cast<size_t>(pitch) * height;
-        if (!ensure_resident_surface(packet, width, height, size, error)) {
-            return false;
+        {
+            perf::ScopedAdd timer(perf::g_ns_renderer_resident_ensure,
+                                  perf::g_calls_renderer_resident_ensure);
+            if (!ensure_resident_surface(packet, width, height, size, error)) {
+                return false;
+            }
         }
         const bool texture_fixture =
             packet.compute_fixture == Nv2aGenericCombinerPacket::ComputeFixture::
                                           kResidentTextureModulateTriangles;
+        const bool dashboard_fixture =
+            packet.compute_fixture == Nv2aGenericCombinerPacket::ComputeFixture::
+                                          kDashboardProject2dFan;
         struct GpuVertex {
             float position[4];
             float diffuse[4];
-            float tex0[4];
+            float tex[4][4];
         };
         std::vector<GpuVertex> vertices;
-        vertices.reserve(packet.vertices.size());
-        for (const auto& vertex : packet.vertices) {
+        vertices.reserve(dashboard_fixture ? 6u : packet.vertices.size());
+        auto append_vertex = [&](const Nv2aGenericCombinerVertex& vertex) {
             GpuVertex out{};
             for (size_t i = 0; i < 4; ++i) {
                 out.position[i] = vertex.position[i];
                 out.diffuse[i] = vertex.diffuse[i];
-                out.tex0[i] = vertex.texture[0][i];
+                for (size_t stage = 0; stage < 4; ++stage)
+                    out.tex[stage][i] = vertex.texture[stage][i];
             }
             vertices.push_back(out);
+        };
+        if (dashboard_fixture) {
+            append_vertex(packet.vertices[0]);
+            append_vertex(packet.vertices[1]);
+            append_vertex(packet.vertices[2]);
+            append_vertex(packet.vertices[0]);
+            append_vertex(packet.vertices[2]);
+            append_vertex(packet.vertices[3]);
+        } else {
+            for (const auto& vertex : packet.vertices) append_vertex(vertex);
         }
-        if (texture_fixture) {
+        if (dashboard_fixture) {
+            perf::ScopedAdd timer(perf::g_ns_renderer_texture_stage,
+                                  perf::g_calls_renderer_texture_stage);
+            for (size_t stage = 0; stage < 4; ++stage) {
+                const auto& texture = packet.textures[stage];
+                const size_t expected =
+                    texture.format == Nv2aGenericCombinerPacket::TextureFormat::kA8
+                        ? static_cast<size_t>(texture.width) * texture.height
+                        : static_cast<size_t>(texture.width) * texture.height *
+                              sizeof(uint32_t);
+                if (texture.input.size() != expected) {
+                    error = "OpenGL resident dashboard missing texture snapshot";
+                    return false;
+                }
+                auto& cache = dashboard_texture_cache_[stage];
+                if (!cache.buffer) gen_buffers_(1, &cache.buffer);
+                const uint64_t hash =
+                    fnv1a64(texture.input.data(), texture.input.size());
+                bind_buffer_(kGlShaderStorageBuffer, cache.buffer);
+                if (!cache.valid || cache.size != texture.input.size() ||
+                    cache.hash != hash) {
+                    buffer_data_(kGlShaderStorageBuffer,
+                                 static_cast<std::ptrdiff_t>(texture.input.size()),
+                                 texture.input.data(), kGlDynamicCopy);
+                    cache.valid = true;
+                    cache.size = texture.input.size();
+                    cache.hash = hash;
+                }
+                bind_buffer_base_(kGlShaderStorageBuffer,
+                                  static_cast<unsigned int>(stage),
+                                  cache.buffer);
+            }
+        } else if (texture_fixture) {
+            perf::ScopedAdd timer(perf::g_ns_renderer_texture_stage,
+                                  perf::g_calls_renderer_texture_stage);
             const auto& texture = packet.textures[0];
             const size_t expected =
                 static_cast<size_t>(texture.pitch) * texture.height;
@@ -788,11 +1003,17 @@ public:
         bind_vertex_array_(resident_vao_);
         if (!resident_vbo_) gen_buffers_(1, &resident_vbo_);
         bind_buffer_(kGlArrayBuffer, resident_vbo_);
-        buffer_data_(kGlArrayBuffer,
-                     static_cast<std::ptrdiff_t>(vertices.size() * sizeof(GpuVertex)),
-                     vertices.data(), kGlDynamicDraw);
-        const unsigned int program =
-            texture_fixture ? resident_texture_modulate_program_ : resident_program_;
+        {
+            perf::ScopedAdd timer(perf::g_ns_renderer_vertex_upload,
+                                  perf::g_calls_renderer_vertex_upload);
+            buffer_data_(kGlArrayBuffer,
+                         static_cast<std::ptrdiff_t>(
+                             vertices.size() * sizeof(GpuVertex)),
+                         vertices.data(), kGlDynamicDraw);
+        }
+        const unsigned int program = dashboard_fixture
+            ? resident_dashboard_program_
+            : (texture_fixture ? resident_texture_modulate_program_ : resident_program_);
         use_program_(program);
         uniform_2f_(uniform_location_(program, "surface_size"),
                     static_cast<float>(width), static_cast<float>(height));
@@ -801,29 +1022,65 @@ public:
             uniform_2f_(uniform_location_(program, "texture_size"),
                         static_cast<float>(packet.textures[0].width),
                         static_cast<float>(packet.textures[0].height));
+            uniform_1ui_(uniform_location_(program, "texture_passthrough"),
+                         packet.fixture_texture_passthrough ? 1u : 0u);
+        } else if (dashboard_fixture) {
+            uniform_1ui_(uniform_location_(program, "factor_stage2"),
+                         packet.fixture_factor0_stage2_argb);
+            uniform_1ui_(uniform_location_(program, "factor_stage4"),
+                         packet.fixture_factor0_stage4_argb);
         }
         vertex_attrib_pointer_(0, 4, kGlFloat, 0, sizeof(GpuVertex),
                                reinterpret_cast<const void*>(offsetof(GpuVertex, position)));
         vertex_attrib_pointer_(1, 4, kGlFloat, 0, sizeof(GpuVertex),
                                reinterpret_cast<const void*>(offsetof(GpuVertex, diffuse)));
-        if (texture_fixture) {
+        if (texture_fixture || dashboard_fixture) {
             vertex_attrib_pointer_(
                 2, 4, kGlFloat, 0, sizeof(GpuVertex),
-                reinterpret_cast<const void*>(offsetof(GpuVertex, tex0)));
+                reinterpret_cast<const void*>(offsetof(GpuVertex, tex[0])));
+        }
+        if (dashboard_fixture) {
+            vertex_attrib_pointer_(
+                3, 4, kGlFloat, 0, sizeof(GpuVertex),
+                reinterpret_cast<const void*>(offsetof(GpuVertex, tex[1])));
+            vertex_attrib_pointer_(
+                4, 4, kGlFloat, 0, sizeof(GpuVertex),
+                reinterpret_cast<const void*>(offsetof(GpuVertex, tex[2])));
+            vertex_attrib_pointer_(
+                5, 4, kGlFloat, 0, sizeof(GpuVertex),
+                reinterpret_cast<const void*>(offsetof(GpuVertex, tex[3])));
         }
         enable_vertex_attrib_array_(0);
         enable_vertex_attrib_array_(1);
-        if (texture_fixture) enable_vertex_attrib_array_(2);
-        draw_arrays_(kGlTriangles, 0, static_cast<int>(vertices.size()));
-        if (texture_fixture) disable_vertex_attrib_array_(2);
+        if (texture_fixture || dashboard_fixture) enable_vertex_attrib_array_(2);
+        if (dashboard_fixture) {
+            enable_vertex_attrib_array_(3);
+            enable_vertex_attrib_array_(4);
+            enable_vertex_attrib_array_(5);
+        }
+        {
+            perf::ScopedAdd timer(perf::g_ns_renderer_draw,
+                                  perf::g_calls_renderer_draw);
+            draw_arrays_(kGlTriangles, 0, static_cast<int>(vertices.size()));
+        }
+        if (dashboard_fixture) {
+            disable_vertex_attrib_array_(5);
+            disable_vertex_attrib_array_(4);
+            disable_vertex_attrib_array_(3);
+        }
+        if (texture_fixture || dashboard_fixture) disable_vertex_attrib_array_(2);
         disable_vertex_attrib_array_(1);
         disable_vertex_attrib_array_(0);
         color_mask_(1, 1, 1, 1);
         disable_(kGlBlend);
         disable_(kGlScissorTest);
         if (get_error_() != kGlNoError) {
-            error = texture_fixture ? "OpenGL resident texture-modulate draw failed"
-                                    : "OpenGL resident primary draw failed";
+            if (dashboard_fixture) {
+                error = "OpenGL resident dashboard draw failed";
+            } else {
+                error = texture_fixture ? "OpenGL resident texture-modulate draw failed"
+                                        : "OpenGL resident primary draw failed";
+            }
             return false;
         }
         resident_.dirty = true;
@@ -859,21 +1116,25 @@ public:
                                             fallback_window);
             }
         } restore{previous_window, previous_context, window_};
-        std::vector<uint8_t> rgba(static_cast<size_t>(resident_.width) *
-                                  resident_.height * 4u);
-        bind_framebuffer_(kGlFramebuffer, resident_fbo_);
-        pixel_store_i_(kGlPackAlignment, 1);
-        read_pixels_(0, 0, static_cast<int>(resident_.width),
-                     static_cast<int>(resident_.height), kGlRgba,
-                     kGlUnsignedByte, rgba.data());
-        if (get_error_() != kGlNoError) {
-            error = "OpenGL resident color readback failed";
-            return false;
+        {
+            perf::ScopedAdd timer(perf::g_ns_renderer_resolve,
+                                  perf::g_calls_renderer_resolve);
+            std::vector<uint8_t> rgba(static_cast<size_t>(resident_.width) *
+                                      resident_.height * 4u);
+            bind_framebuffer_(kGlFramebuffer, resident_fbo_);
+            pixel_store_i_(kGlPackAlignment, 1);
+            read_pixels_(0, 0, static_cast<int>(resident_.width),
+                         static_cast<int>(resident_.height), kGlRgba,
+                         kGlUnsignedByte, rgba.data());
+            if (get_error_() != kGlNoError) {
+                error = "OpenGL resident color readback failed";
+                return false;
+            }
+            resolve.address = resident_.address;
+            resolve.data.resize(resident_.size);
+            rgba_to_guest_words(rgba, resolve.data, resident_.width,
+                                resident_.height, resident_.x8);
         }
-        resolve.address = resident_.address;
-        resolve.data.resize(resident_.size);
-        rgba_to_guest_words(rgba, resolve.data, resident_.width,
-                            resident_.height, resident_.x8);
         resident_.dirty = false;
         return true;
     }
@@ -1213,7 +1474,8 @@ public:
         return compile_fixture(error) && compile_texture_modulate(error) &&
                compile_dashboard(error) &&
                compile_resident_primary(error) &&
-               compile_resident_texture_modulate(error);
+               compile_resident_texture_modulate(error) &&
+               compile_resident_dashboard(error);
     }
 private:
     struct ResidentSurface {
@@ -1227,6 +1489,20 @@ private:
         uint32_t height = 0;
         uint32_t format = 0;
     };
+    struct CachedBuffer {
+        unsigned int buffer = 0;
+        bool valid = false;
+        size_t size = 0;
+        uint64_t hash = 0;
+    };
+    static uint64_t fnv1a64(const uint8_t* data, size_t size) {
+        uint64_t hash = 1469598103934665603ull;
+        for (size_t i = 0; i < size; ++i) {
+            hash ^= data[i];
+            hash *= 1099511628211ull;
+        }
+        return hash;
+    }
     static unsigned int gl_blend_factor(uint32_t factor) {
         switch (factor) {
             case 0: return kGlZero;
@@ -1447,6 +1723,12 @@ private:
                                         resident_texture_modulate_program_,
                                         error);
     }
+    bool compile_resident_dashboard(std::string& error) {
+        return compile_graphics_program(kResidentDashboardProject2dFanVertexSource,
+                                        kResidentDashboardProject2dFanFragmentSource,
+                                        "resident-dashboard",
+                                        resident_dashboard_program_, error);
+    }
     SDL_Window* window_ = nullptr;
     SDL_GLContext context_ = nullptr;
     bool owns_video_ = false;
@@ -1455,12 +1737,14 @@ private:
     unsigned int dashboard_program_ = 0;
     unsigned int resident_program_ = 0;
     unsigned int resident_texture_modulate_program_ = 0;
+    unsigned int resident_dashboard_program_ = 0;
     unsigned int resident_texture_ = 0;
     unsigned int resident_source_texture_ = 0;
     unsigned int resident_fbo_ = 0;
     unsigned int resident_vbo_ = 0;
     unsigned int resident_vao_ = 0;
     ResidentSurface resident_;
+    std::array<CachedBuffer, 4> dashboard_texture_cache_{};
     GlCreateShader create_shader_ = nullptr; GlShaderSource shader_source_ = nullptr;
     GlCompileShader compile_shader_ = nullptr; GlGetShaderiv get_shader_iv_ = nullptr;
     GlGetShaderInfoLog get_shader_log_ = nullptr; GlDeleteShader delete_shader_ = nullptr;
@@ -1543,7 +1827,7 @@ std::unique_ptr<Nv2aRenderer> create_nv2a_opengl_renderer(std::string& error) {
     }
     auto renderer =
         std::make_unique<OpenGlNv2aRenderer>(window, context, owns_video, 0, 0, 0,
-                                             0, 0);
+                                             0, 0, 0);
     if (!renderer->initialize(error)) return nullptr;
     restore_previous_gl_context(previous_window, previous_context, window);
     std::printf("[nv2a-renderer] opengl context ready: GL %d.%d; narrow compute fixtures enabled\n",

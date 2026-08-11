@@ -5378,6 +5378,96 @@ int main() {
                 CHECK(std::equal(resident_primary_software.begin(),
                                  resident_primary_software.end(),
                                  gc_ram.begin() + 0x10000));
+
+                xlle::Nv2aGenericCombinerPacket dashboard_packet;
+                dashboard_packet.compute_fixture =
+                    xlle::Nv2aGenericCombinerPacket::ComputeFixture::
+                        kDashboardProject2dFan;
+                dashboard_packet.primitive_mode = 7;
+                dashboard_packet.surface_format = 0x128;
+                dashboard_packet.surface_pitch = 0x14001400;
+                dashboard_packet.surface_height = 480;
+                dashboard_packet.color_address = 0x03628000;
+                dashboard_packet.depth_address = 0x033D0000;
+                dashboard_packet.color_input.assign(0x1400u * 480u, 0);
+                dashboard_packet.depth_input.assign(0x1400u * 480u, 0x5A);
+                dashboard_packet.fixture_clip_x = 0;
+                dashboard_packet.fixture_clip_y = 0;
+                dashboard_packet.fixture_clip_width = 1280;
+                dashboard_packet.fixture_clip_height = 480;
+                dashboard_packet.fixture_blend_enabled = true;
+                dashboard_packet.fixture_blend_src = 0x0302;
+                dashboard_packet.fixture_blend_dst = 1;
+                dashboard_packet.fixture_color_format_x8 = false;
+                dashboard_packet.fixture_factor0_stage2_argb = 0xFFFFFFFF;
+                dashboard_packet.fixture_factor0_stage4_argb = 0;
+                dashboard_packet.vertices.resize(4);
+                const std::array<std::array<float, 2>, 4> dash_xy{{
+                    {{0.0f, 0.0f}},
+                    {{1280.0f, 0.0f}},
+                    {{1280.0f, 480.0f}},
+                    {{0.0f, 480.0f}},
+                }};
+                for (size_t vertex = 0; vertex < dashboard_packet.vertices.size();
+                     ++vertex) {
+                    dashboard_packet.vertices[vertex].position =
+                        {{dash_xy[vertex][0], dash_xy[vertex][1], 16777215.0f,
+                          1.0f}};
+                    for (size_t stage = 0; stage < 4; ++stage)
+                        dashboard_packet.vertices[vertex].texture[stage] =
+                            {{0.5f, 0.5f, 0.0f, 1.0f}};
+                }
+                auto fill_words = [](std::vector<uint8_t>& bytes,
+                                     uint32_t word) {
+                    for (size_t offset = 0; offset < bytes.size(); offset += 4)
+                        std::memcpy(bytes.data() + offset, &word, 4);
+                };
+                dashboard_packet.textures[0].referenced = true;
+                dashboard_packet.textures[0].layout =
+                    xlle::Nv2aGenericCombinerPacket::TextureLayout::kSwizzled;
+                dashboard_packet.textures[0].format =
+                    xlle::Nv2aGenericCombinerPacket::TextureFormat::kArgb8;
+                dashboard_packet.textures[0].mode =
+                    xlle::Nv2aGenericCombinerPacket::TextureMode::kProject2d;
+                dashboard_packet.textures[0].width = 1024;
+                dashboard_packet.textures[0].height = 512;
+                dashboard_packet.textures[0].input.assign(1024u * 512u * 4u, 0);
+                fill_words(dashboard_packet.textures[0].input, 0xFF102030);
+                for (size_t stage = 1; stage < 4; ++stage) {
+                    dashboard_packet.textures[stage].referenced = true;
+                    dashboard_packet.textures[stage].layout =
+                        xlle::Nv2aGenericCombinerPacket::TextureLayout::kSwizzled;
+                    dashboard_packet.textures[stage].format =
+                        xlle::Nv2aGenericCombinerPacket::TextureFormat::kA8;
+                    dashboard_packet.textures[stage].mode =
+                        xlle::Nv2aGenericCombinerPacket::TextureMode::kProject2d;
+                    dashboard_packet.textures[stage].width = 256;
+                    dashboard_packet.textures[stage].height = 256;
+                    dashboard_packet.textures[stage].input.assign(256u * 256u, 0xFF);
+                }
+                xlle::Nv2aGenericCombinerResult dashboard_sync;
+                std::string dashboard_error;
+                CHECK(gl_renderer->supports_generic_combiner(dashboard_packet));
+                CHECK(gl_renderer->submit_generic_combiner(
+                    dashboard_packet, dashboard_sync, dashboard_error));
+                if (!dashboard_error.empty())
+                    std::printf("OpenGL dashboard fixture error: %s\n",
+                                dashboard_error.c_str());
+                CHECK(gl_renderer->supports_resident_generic_combiner(
+                    dashboard_packet));
+                xlle::Nv2aGenericCombinerResult dashboard_resident;
+                CHECK(gl_renderer->submit_resident_generic_combiner(
+                    dashboard_packet, dashboard_resident, dashboard_error));
+                if (!dashboard_error.empty())
+                    std::printf("OpenGL resident dashboard error: %s\n",
+                                dashboard_error.c_str());
+                xlle::Nv2aResidentColorResolve dashboard_resolve;
+                CHECK(gl_renderer->resolve_resident_color_surface(
+                    dashboard_packet.color_address,
+                    dashboard_packet.color_input.size(), dashboard_resolve,
+                    dashboard_error));
+                CHECK(dashboard_resolve.address == dashboard_packet.color_address);
+                CHECK(dashboard_resolve.data == dashboard_sync.color_output);
                 gc_gpu.set_renderer(nullptr);
             } else {
                 std::printf("SKIP: OpenGL compute fixture unavailable: %s\n",

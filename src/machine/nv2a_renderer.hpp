@@ -74,6 +74,7 @@ struct Nv2aGenericCombinerPacket {
     uint32_t fixture_blend_src = 0;
     uint32_t fixture_blend_dst = 0;
     bool fixture_blend_enabled = false;
+    bool fixture_texture_passthrough = false;
     bool fixture_color_format_x8 = false;
 };
 

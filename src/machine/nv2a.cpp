@@ -6165,7 +6165,6 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             return false;
         }
     }
-
     // --- Texture stages 0-3 ------------------------------------------------------
     // Only stages a combiner input actually reads are set up. Per-stage texture mode
     // is a real 5-bit field (matching xemu's pgraph_glsl_gen_psh() exactly:
@@ -6849,6 +6848,14 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     raster_state_[kRasterCombinerFactor0_0 + 2];
                 packet.fixture_factor0_stage4_argb =
                     raster_state_[kRasterCombinerFactor0_0 + 4];
+                packet.fixture_clip_x = clip_x;
+                packet.fixture_clip_y = clip_y;
+                packet.fixture_clip_width = clip_width;
+                packet.fixture_clip_height = clip_height;
+                packet.fixture_blend_enabled = blend_enabled;
+                packet.fixture_blend_src = blend_src;
+                packet.fixture_blend_dst = blend_dst;
+                packet.fixture_color_format_x8 = color_format_x8;
             }
         }
         if (packet.compute_fixture == Nv2aGenericCombinerPacket::ComputeFixture::kNone) {
@@ -7063,10 +7070,25 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     raster_state_[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
                     raster_state_[kRasterCombinerSpecularFog0] == 0x0000000C &&
                     raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80;
-                const bool texture_registers_match =
+                const bool passthrough_combiner_words_match =
+                    raster_state_[kRasterCombinerColorIcw0] == 0x08200000 &&
+                    raster_state_[kRasterCombinerAlphaIcw0] == 0x14200000 &&
+                    raster_state_[kRasterCombinerColorOcw0] == 0x00000C00 &&
+                    raster_state_[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
+                    raster_state_[kRasterCombinerSpecularFog0] == 0x0000000C &&
+                    raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80;
+                const bool texture_modulate_registers_match =
                     raster_state_[kRasterTextureFormat0] == 0x08890E2A &&
                     raster_state_[kRasterTextureImageRect0] == 0x050003C0 &&
                     raster_state_[kRasterTextureControl1_0] == 0x14000000;
+                const bool passthrough_texture_registers_match =
+                    raster_state_[kRasterTextureFormat0] == 0x00011E29 &&
+                    raster_state_[kRasterTextureImageRect0] == 0x050003C0 &&
+                    raster_state_[kRasterTextureControl1_0] == 0x14000000;
+                const bool texture_registers_match =
+                    texture_modulate_registers_match ||
+                    (passthrough_combiner_words_match &&
+                     passthrough_texture_registers_match);
                 const bool texture_decoded_match =
                     texture_stages[0].valid && texture_stages[0].linear &&
                     !texture_stages[0].alpha8 && texture_stages[0].width == 1280 &&
@@ -7078,6 +7100,16 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     surface_pitch_ == 0x00401400 && surface_height == 960 &&
                     clip_x == 0 && clip_y == 0 && clip_width == 1280 &&
                     clip_height == 960;
+                const bool passthrough_front_surface_match =
+                    color_address == 0x03978000 && color_format_x8 &&
+                    surface_type == 1 && anti_aliasing == 0 &&
+                    surface_pitch_ == 0x00400A00 && surface_height == 480 &&
+                    clip_x == 0 && clip_y == 0 && clip_width == 640 &&
+                    clip_height == 480;
+                const bool resident_texture_target_match =
+                    (combiner_words_match && target_surface_match) ||
+                    (passthrough_combiner_words_match &&
+                     passthrough_front_surface_match);
                 TextureReject reject_reason = TextureReject::kCount;
                 if (!primitive_supported) {
                     reject_reason = TextureReject::kUnsupportedPrimitive;
@@ -7102,13 +7134,14 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 } else if (raster_state_[kRasterShaderOtherStageInput] !=
                            0x00210000) {
                     reject_reason = TextureReject::kOtherStageInput;
-                } else if (!combiner_words_match) {
+                } else if (!combiner_words_match &&
+                           !passthrough_combiner_words_match) {
                     reject_reason = TextureReject::kCombinerWords;
                 } else if (!texture_registers_match) {
                     reject_reason = TextureReject::kTexture0Registers;
                 } else if (!texture_decoded_match) {
                     reject_reason = TextureReject::kTexture0Decoded;
-                } else if (!target_surface_match) {
+                } else if (!resident_texture_target_match) {
                     reject_reason = TextureReject::kTargetSurface;
                 }
                 if (reject_reason == TextureReject::kCount) {
@@ -7327,6 +7360,8 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                         packet.fixture_blend_src = blend_src;
                         packet.fixture_blend_dst = blend_dst;
                         packet.fixture_color_format_x8 = color_format_x8;
+                        packet.fixture_texture_passthrough =
+                            passthrough_combiner_words_match;
                         ++generic_combiner_resident_candidates_;
                     } else {
                         record_generic_resident_reject(
@@ -7339,7 +7374,9 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             packet.compute_fixture == Nv2aGenericCombinerPacket::ComputeFixture::
                                           kResidentPrimaryColorTriangles ||
             packet.compute_fixture == Nv2aGenericCombinerPacket::ComputeFixture::
-                                          kResidentTextureModulateTriangles;
+                                          kResidentTextureModulateTriangles ||
+            packet.compute_fixture == Nv2aGenericCombinerPacket::ComputeFixture::
+                                          kDashboardProject2dFan;
         if (renderer_->supports_resident_generic_combiner(packet)) {
             ++generic_combiner_resident_supported_;
             const size_t color_size = static_cast<size_t>(color_bytes64);

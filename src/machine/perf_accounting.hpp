@@ -57,6 +57,20 @@ inline std::atomic<uint64_t> g_calls_nv2a_pushbuffer{0};
 inline std::atomic<uint64_t> g_calls_raster{0};
 inline std::atomic<uint64_t> g_calls_host_poll_devices{0};
 
+// Optional renderer-backend split for resident OpenGL paths. These are API-wall-time
+// buckets, not GPU timer-query results; they are meant to identify host staging and
+// synchronization pressure before attempting broader renderer changes.
+inline std::atomic<uint64_t> g_ns_renderer_resident_ensure{0};
+inline std::atomic<uint64_t> g_ns_renderer_texture_stage{0};
+inline std::atomic<uint64_t> g_ns_renderer_vertex_upload{0};
+inline std::atomic<uint64_t> g_ns_renderer_draw{0};
+inline std::atomic<uint64_t> g_ns_renderer_resolve{0};
+inline std::atomic<uint64_t> g_calls_renderer_resident_ensure{0};
+inline std::atomic<uint64_t> g_calls_renderer_texture_stage{0};
+inline std::atomic<uint64_t> g_calls_renderer_vertex_upload{0};
+inline std::atomic<uint64_t> g_calls_renderer_draw{0};
+inline std::atomic<uint64_t> g_calls_renderer_resolve{0};
+
 // Allocation-churn accounting for the late stock-dashboard scene. PagedRasterSurface
 // owns one small allocation per resident 4 KiB guest page, while the generic combiner
 // reloads referenced texture images into temporary vectors once per batch. These
@@ -206,6 +220,27 @@ inline std::string format_memory_report() {
         (unsigned long long)g_pfifo_queue_pushes.load(),
         (unsigned long long)g_pfifo_queue_entries_live.load(),
         (unsigned long long)g_pfifo_queue_entries_peak.load());
+    return std::string(buf);
+}
+
+inline std::string format_renderer_report() {
+    if (!g_enabled) return {};
+    char buf[512];
+    std::snprintf(
+        buf, sizeof(buf),
+        "[perf-renderer] resident-ensure-ns=%llu (n=%llu) "
+        "texture-stage-ns=%llu (n=%llu) vertex-upload-ns=%llu (n=%llu) "
+        "draw-ns=%llu (n=%llu) resolve-ns=%llu (n=%llu)",
+        (unsigned long long)g_ns_renderer_resident_ensure.load(),
+        (unsigned long long)g_calls_renderer_resident_ensure.load(),
+        (unsigned long long)g_ns_renderer_texture_stage.load(),
+        (unsigned long long)g_calls_renderer_texture_stage.load(),
+        (unsigned long long)g_ns_renderer_vertex_upload.load(),
+        (unsigned long long)g_calls_renderer_vertex_upload.load(),
+        (unsigned long long)g_ns_renderer_draw.load(),
+        (unsigned long long)g_calls_renderer_draw.load(),
+        (unsigned long long)g_ns_renderer_resolve.load(),
+        (unsigned long long)g_calls_renderer_resolve.load());
     return std::string(buf);
 }
 

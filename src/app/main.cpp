@@ -1386,6 +1386,10 @@ int main(int argc, char** argv) {
                     xlle::perf::format_memory_report();
                 if (!memory_report.empty())
                     std::printf("%s\n", memory_report.c_str());
+                const std::string renderer_report =
+                    xlle::perf::format_renderer_report();
+                if (!renderer_report.empty())
+                    std::printf("%s\n", renderer_report.c_str());
                 print_memory_diagnostics();
                 // Long stock-dashboard probes redirect stdout to a file. Flush each
                 // checkpoint so allocation growth is observable before a host-memory
@@ -1966,6 +1970,10 @@ int main(int argc, char** argv) {
                 print_generic_combiner_perf_report();
                 const std::string memory_report = xlle::perf::format_memory_report();
                 if (!memory_report.empty()) std::printf("%s\n", memory_report.c_str());
+                const std::string renderer_report =
+                    xlle::perf::format_renderer_report();
+                if (!renderer_report.empty())
+                    std::printf("%s\n", renderer_report.c_str());
                 print_memory_diagnostics();
                 host_input.close();
                 const X86Regs stopped = mach.cpu().get_regs();
@@ -1991,6 +1999,10 @@ int main(int argc, char** argv) {
                     xlle::perf::format_memory_report();
                 if (!memory_report.empty())
                     std::printf("%s\n", memory_report.c_str());
+                const std::string renderer_report =
+                    xlle::perf::format_renderer_report();
+                if (!renderer_report.empty())
+                    std::printf("%s\n", renderer_report.c_str());
                 print_memory_diagnostics();
             }
             host_input.close();
