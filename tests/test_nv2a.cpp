@@ -6457,18 +6457,29 @@ int main() {
                     put32(texture, (2u * 4u + 2u) * 4u, 0x40C0A080u);
                     std::memcpy(gc_ram.data() + 0x30000, texture.data(),
                                 texture.size());
+                    struct TexVertex {
+                        float x;
+                        float y;
+                        uint32_t diffuse;
+                    };
+                    const std::array<TexVertex, 6> vertices{{
+                        {0.0f, 0.0f, gc_pack_ub4(0x30, 0x50, 0x70, 0x80)},
+                        {8.0f, 0.0f, gc_pack_ub4(0x30, 0x50, 0x70, 0x80)},
+                        {0.0f, 8.0f, gc_pack_ub4(0x30, 0x50, 0x70, 0x80)},
+                        {2.0f, 2.0f, gc_pack_ub4(0x90, 0x20, 0x10, 0x40)},
+                        {7.0f, 2.0f, gc_pack_ub4(0x90, 0x20, 0x10, 0x40)},
+                        {2.0f, 7.0f, gc_pack_ub4(0x90, 0x20, 0x10, 0x40)},
+                    }};
                     emit_gc(0x17FC, 5);
-                    for (auto xy : {std::pair{0.0f, 0.0f},
-                                    std::pair{8.0f, 0.0f},
-                                    std::pair{0.0f, 8.0f}}) {
+                    for (const auto& vertex : vertices) {
                         emit_gc(0x1A90, gc_float_bits(2.5f));
                         emit_gc(0x1A94, gc_float_bits(2.5f));
                         emit_gc(0x1A98, gc_float_bits(0.0f));
                         emit_gc(0x1A9C, gc_float_bits(1.0f));
-                        emit_gc(0x1518, gc_float_bits(xy.first));
-                        emit_gc(0x151C, gc_float_bits(xy.second));
+                        emit_gc(0x1518, gc_float_bits(vertex.x));
+                        emit_gc(0x151C, gc_float_bits(vertex.y));
                         emit_gc(0x1520, gc_float_bits(10.0f));
-                        emit_gc(0x194C, gc_pack_ub4(0x30, 0x50, 0x70, 0x80));
+                        emit_gc(0x194C, vertex.diffuse);
                         emit_gc(0x1524, gc_float_bits(1.0f));
                     }
                     emit_gc(0x17FC, 0);

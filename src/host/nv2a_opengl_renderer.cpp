@@ -173,15 +173,14 @@ layout(local_size_x = 8, local_size_y = 8) in;
 layout(std430, binding = 0) buffer ColorSurface { uint color[]; };
 layout(std430, binding = 1) buffer VertexData { float vertex_data[]; };
 layout(std430, binding = 2) buffer Texture0 { uint tex0_words[]; };
+layout(std430, binding = 3) buffer VertexXY { int vertex_xy[]; };
 uniform int surface_width;
 uniform int surface_height;
 uniform int surface_pitch_words;
 uniform int texture_width;
 uniform int texture_height;
 uniform int texture_pitch_words;
-uniform ivec2 vertex_a;
-uniform ivec2 vertex_b;
-uniform ivec2 vertex_c;
+uniform int triangle_count;
 uniform ivec2 clip_origin;
 uniform ivec2 clip_extent;
 uniform uint blend_src;
@@ -211,6 +210,9 @@ vec4 vdiffuse(uint vertex) {
 }
 vec2 vtex(uint vertex) {
     return vec2(vdata(vertex, 4u), vdata(vertex, 5u));
+}
+ivec2 vxy(uint vertex) {
+    return ivec2(vertex_xy[vertex * 2u], vertex_xy[vertex * 2u + 1u]);
 }
 vec4 sample_linear_argb(vec2 uv) {
     float tx = uv.x - 0.5;
@@ -243,35 +245,46 @@ void main() {
         xy.x < clip_origin.x || xy.y < clip_origin.y ||
         xy.x >= clip_origin.x + clip_extent.x || xy.y >= clip_origin.y + clip_extent.y) return;
     ivec2 p = xy * 16 + ivec2(8);
-    int area = edge_value(vertex_a, vertex_b, vertex_c);
-    if (area <= 0) return;
-    int w0 = edge_value(vertex_b, vertex_c, p);
-    int w1 = edge_value(vertex_c, vertex_a, p);
-    int w2 = edge_value(vertex_a, vertex_b, p);
-    if (w0 < 0 || (w0 == 0 && !top_left(vertex_b, vertex_c)) ||
-        w1 < 0 || (w1 == 0 && !top_left(vertex_c, vertex_a)) ||
-        w2 < 0 || (w2 == 0 && !top_left(vertex_a, vertex_b))) return;
-    float l0 = float(w0) / float(area);
-    float l1 = float(w1) / float(area);
-    float l2 = float(w2) / float(area);
-    float inv_w0 = 1.0 / vdata(0u, 7u);
-    float inv_w1 = 1.0 / vdata(1u, 7u);
-    float inv_w2 = 1.0 / vdata(2u, 7u);
-    float q = l0 * inv_w0 + l1 * inv_w1 + l2 * inv_w2;
-    if (q == 0.0 || isnan(q) || isinf(q)) return;
-    vec4 diffuse = (vdiffuse(0u) * (l0 * inv_w0) +
-                    vdiffuse(1u) * (l1 * inv_w1) +
-                    vdiffuse(2u) * (l2 * inv_w2)) / q;
-    vec2 tex = (vtex(0u) * (l0 * inv_w0) + vtex(1u) * (l1 * inv_w1) +
-                vtex(2u) * (l2 * inv_w2)) / q;
-    vec4 src = clamp(diffuse, 0.0, 1.0) * sample_linear_argb(tex);
     uint offset = uint(xy.y * surface_pitch_words + xy.x);
-    vec4 dst = unpack_argb(color[offset]);
-    float sf = blend_factor(blend_src, src);
-    float df = blend_factor(blend_dst, src);
-    vec3 rgb = clamp(src.rgb * sf + dst.rgb * df, 0.0, 1.0);
-    float alpha = color_format_x8 != 0u ? 1.0 : src.a;
-    color[offset] = pack_argb(vec4(rgb, alpha));
+    vec4 current = unpack_argb(color[offset]);
+    bool covered = false;
+    for (int tri = 0; tri < triangle_count; ++tri) {
+        uint ia = uint(tri * 3);
+        uint ib = ia + 1u;
+        uint ic = ia + 2u;
+        ivec2 vertex_a = vxy(ia);
+        ivec2 vertex_b = vxy(ib);
+        ivec2 vertex_c = vxy(ic);
+        int area = edge_value(vertex_a, vertex_b, vertex_c);
+        if (area <= 0) continue;
+        int w0 = edge_value(vertex_b, vertex_c, p);
+        int w1 = edge_value(vertex_c, vertex_a, p);
+        int w2 = edge_value(vertex_a, vertex_b, p);
+        if (w0 < 0 || (w0 == 0 && !top_left(vertex_b, vertex_c)) ||
+            w1 < 0 || (w1 == 0 && !top_left(vertex_c, vertex_a)) ||
+            w2 < 0 || (w2 == 0 && !top_left(vertex_a, vertex_b))) continue;
+        float l0 = float(w0) / float(area);
+        float l1 = float(w1) / float(area);
+        float l2 = float(w2) / float(area);
+        float inv_w0 = 1.0 / vdata(ia, 7u);
+        float inv_w1 = 1.0 / vdata(ib, 7u);
+        float inv_w2 = 1.0 / vdata(ic, 7u);
+        float q = l0 * inv_w0 + l1 * inv_w1 + l2 * inv_w2;
+        if (q == 0.0 || isnan(q) || isinf(q)) continue;
+        vec4 diffuse = (vdiffuse(ia) * (l0 * inv_w0) +
+                        vdiffuse(ib) * (l1 * inv_w1) +
+                        vdiffuse(ic) * (l2 * inv_w2)) / q;
+        vec2 tex = (vtex(ia) * (l0 * inv_w0) + vtex(ib) * (l1 * inv_w1) +
+                    vtex(ic) * (l2 * inv_w2)) / q;
+        vec4 src = clamp(diffuse, 0.0, 1.0) * sample_linear_argb(tex);
+        float sf = blend_factor(blend_src, src);
+        float df = blend_factor(blend_dst, src);
+        vec3 rgb = clamp(src.rgb * sf + current.rgb * df, 0.0, 1.0);
+        float alpha = color_format_x8 != 0u ? 1.0 : src.a;
+        current = vec4(rgb, alpha);
+        covered = true;
+    }
+    if (covered) color[offset] = pack_argb(current);
 }
 )GLSL";
 
@@ -503,7 +516,8 @@ public:
         if (packet.compute_fixture ==
             Nv2aGenericCombinerPacket::ComputeFixture::kTextureModulateTriangle) {
             if (texture_modulate_program_ == 0 || packet.primitive_mode != 5 ||
-                packet.vertices.size() != 3 || !packet.depth_input.empty() ||
+                packet.vertices.empty() || (packet.vertices.size() % 3u) != 0 ||
+                !packet.depth_input.empty() ||
                 packet.surface_pitch == 0 || packet.surface_height == 0 ||
                 packet.fixture_clip_width == 0 || packet.fixture_clip_height == 0 ||
                 !packet.textures[0].referenced ||
@@ -760,7 +774,7 @@ public:
                 error = "OpenGL texture-modulate fixture received invalid surfaces";
                 return false;
             }
-            std::array<unsigned int, 3> buffers{};
+            std::array<unsigned int, 4> buffers{};
             gen_buffers_(static_cast<int>(buffers.size()), buffers.data());
             auto upload_buffer = [&](unsigned int binding, unsigned int buffer,
                                      const void* data, size_t size) {
@@ -769,8 +783,9 @@ public:
                              data, kGlDynamicCopy);
                 bind_buffer_base_(kGlShaderStorageBuffer, binding, buffer);
             };
-            std::vector<float> vertex_data(3u * 8u, 0.0f);
-            for (size_t vertex = 0; vertex < 3; ++vertex) {
+            std::vector<float> vertex_data(packet.vertices.size() * 8u, 0.0f);
+            std::vector<int32_t> xy_data(packet.vertices.size() * 2u, 0);
+            for (size_t vertex = 0; vertex < packet.vertices.size(); ++vertex) {
                 for (size_t component = 0; component < 4; ++component) {
                     vertex_data[vertex * 8u + component] =
                         packet.vertices[vertex].diffuse[component];
@@ -783,6 +798,12 @@ public:
                     packet.vertices[vertex].texture[0][2];
                 vertex_data[vertex * 8u + 7u] =
                     packet.vertices[vertex].position[3];
+                xy_data[vertex * 2u + 0u] = static_cast<int32_t>(std::lround(
+                    static_cast<double>(packet.vertices[vertex].position[0]) *
+                    16.0));
+                xy_data[vertex * 2u + 1u] = static_cast<int32_t>(std::lround(
+                    static_cast<double>(packet.vertices[vertex].position[1]) *
+                    16.0));
             }
             upload_buffer(0, buffers[0], packet.color_input.data(),
                           packet.color_input.size());
@@ -790,11 +811,8 @@ public:
                           vertex_data.size() * sizeof(float));
             upload_buffer(2, buffers[2], packet.textures[0].input.data(),
                           packet.textures[0].input.size());
-            auto fixed_xy = [&](size_t vertex, size_t component) {
-                return static_cast<int>(std::lround(
-                    static_cast<double>(packet.vertices[vertex].position[component]) *
-                    16.0));
-            };
+            upload_buffer(3, buffers[3], xy_data.data(),
+                          xy_data.size() * sizeof(int32_t));
             use_program_(texture_modulate_program_);
             uniform_1i_(uniform_location_(texture_modulate_program_, "surface_width"),
                         static_cast<int>((packet.surface_pitch & 0xffffu) / 4u));
@@ -810,12 +828,8 @@ public:
             uniform_1i_(uniform_location_(texture_modulate_program_,
                                           "texture_pitch_words"),
                         static_cast<int>(packet.textures[0].pitch / 4u));
-            uniform_2i_(uniform_location_(texture_modulate_program_, "vertex_a"),
-                        fixed_xy(0, 0), fixed_xy(0, 1));
-            uniform_2i_(uniform_location_(texture_modulate_program_, "vertex_b"),
-                        fixed_xy(1, 0), fixed_xy(1, 1));
-            uniform_2i_(uniform_location_(texture_modulate_program_, "vertex_c"),
-                        fixed_xy(2, 0), fixed_xy(2, 1));
+            uniform_1i_(uniform_location_(texture_modulate_program_, "triangle_count"),
+                        static_cast<int>(packet.vertices.size() / 3u));
             uniform_2i_(uniform_location_(texture_modulate_program_, "clip_origin"),
                         static_cast<int>(packet.fixture_clip_x),
                         static_cast<int>(packet.fixture_clip_y));

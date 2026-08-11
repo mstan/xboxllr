@@ -6747,7 +6747,8 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 const bool texture_compute_state =
                     packet.compute_fixture ==
                         Nv2aGenericCombinerPacket::ComputeFixture::kNone &&
-                    primitive_mode_ == 5 && transformed_batch_.size() == 3 &&
+                    primitive_mode_ == 5 && transformed_batch_.size() >= 3 &&
+                    (transformed_batch_.size() % 3u) == 0 &&
                     texture_compute_surface_small && primitive_supported &&
                     vertex_count_supported && only_texture0_input && !uses_depth &&
                     !cull_enabled &&
@@ -6762,7 +6763,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     texture_stages[0].pitch >= texture_stages[0].width * 4u;
                 if (texture_compute_state) {
                     bool finite_vertices = true;
-                    std::array<std::array<int64_t, 2>, 3> fixed_xy{};
+                    std::vector<std::array<int64_t, 2>> fixed_xy(packet.vertices.size());
                     for (const auto& vertex : packet.vertices) {
                         for (float value : vertex.position)
                             if (!std::isfinite(value)) finite_vertices = false;
@@ -6772,7 +6773,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                         for (float value : vertex.texture[0])
                             if (!std::isfinite(value)) finite_vertices = false;
                     }
-                    for (size_t vertex = 0; finite_vertices && vertex < 3; ++vertex) {
+                    for (size_t vertex = 0; finite_vertices && vertex < packet.vertices.size(); ++vertex) {
                         for (size_t component = 0; component < 2; ++component) {
                             const double fixed = std::llround(
                                 static_cast<double>(
@@ -6786,14 +6787,18 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                                 static_cast<int64_t>(fixed);
                         }
                     }
-                    if (finite_vertices) {
+                    bool any_positive_area = false;
+                    for (size_t vertex = 0; finite_vertices && vertex + 2 < fixed_xy.size();
+                         vertex += 3) {
                         const int64_t area =
-                            (fixed_xy[1][0] - fixed_xy[0][0]) *
-                                (fixed_xy[2][1] - fixed_xy[0][1]) -
-                            (fixed_xy[1][1] - fixed_xy[0][1]) *
-                                (fixed_xy[2][0] - fixed_xy[0][0]);
-                        if (area <= 0) finite_vertices = false;
+                            (fixed_xy[vertex + 1][0] - fixed_xy[vertex][0]) *
+                                (fixed_xy[vertex + 2][1] - fixed_xy[vertex][1]) -
+                            (fixed_xy[vertex + 1][1] - fixed_xy[vertex][1]) *
+                                (fixed_xy[vertex + 2][0] - fixed_xy[vertex][0]);
+                        if (area < 0) finite_vertices = false;
+                        if (area > 0) any_positive_area = true;
                     }
+                    if (!any_positive_area) finite_vertices = false;
                     if (finite_vertices) {
                         packet.compute_fixture = Nv2aGenericCombinerPacket::
                             ComputeFixture::kTextureModulateTriangle;
