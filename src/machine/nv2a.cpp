@@ -6358,6 +6358,30 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             return true;
         }
     }
+    const bool only_texture0_input =
+        texture_referenced[0] && !texture_referenced[1] &&
+        !texture_referenced[2] && !texture_referenced[3];
+    const bool texture0_linear_input =
+        only_texture0_input && texture_stages[0].valid && texture_stages[0].linear;
+    auto writes_r0_from_ab_or_sum = [](uint32_t ocw) {
+        return ocw == 0x000000C0 || ocw == 0x00000C00;
+    };
+    const bool texture0_modulate_primary =
+        texture0_linear_input && stage_count == 1 &&
+        (raster_state_[kRasterCombinerColorIcw0] == 0x08040000 ||
+         raster_state_[kRasterCombinerColorIcw0] == 0x04080000) &&
+        writes_r0_from_ab_or_sum(raster_state_[kRasterCombinerColorOcw0]) &&
+        (raster_state_[kRasterCombinerAlphaIcw0] == 0x14200000 ||
+         raster_state_[kRasterCombinerAlphaIcw0] == 0x14180000) &&
+        writes_r0_from_ab_or_sum(raster_state_[kRasterCombinerAlphaOcw0]) &&
+        final_cw0 == 0x0000000C && final_cw1 == 0x00001C80;
+    const bool texture0_passthrough =
+        texture0_linear_input && stage_count == 1 &&
+        raster_state_[kRasterCombinerColorIcw0] == 0x08200000 &&
+        raster_state_[kRasterCombinerAlphaIcw0] == 0x14200000 &&
+        writes_r0_from_ab_or_sum(raster_state_[kRasterCombinerColorOcw0]) &&
+        writes_r0_from_ab_or_sum(raster_state_[kRasterCombinerAlphaOcw0]) &&
+        final_cw0 == 0x0000000C && final_cw1 == 0x00001C80;
 
     bool texture_modulate_observed_this_batch = false;
     bool texture_modulate_exact_this_batch = false;
@@ -7688,7 +7712,8 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     ++generic_combiner_texture_samples_;
                 }
 
-                if (!primary_color_passthrough) {
+                if (!primary_color_passthrough && !texture0_modulate_primary &&
+                    !texture0_passthrough) {
                     // Matches xemu's get_output(): the scale/bias op is applied to the
                     // AB/CD/SUM result BEFORE the final clamp to [-1,1] (real hardware
                     // range -- unlike the input side, general-combiner outputs are
@@ -7798,6 +7823,18 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 std::array<float, 4> final_color;
                 if (primary_color_passthrough) {
                     final_color = diffuse;
+                } else if (texture0_modulate_primary) {
+                    const std::array<float, 4>& tex0 = regs[8];
+                    for (size_t c3 = 0; c3 < 3; ++c3)
+                        final_color[c3] = tex0[c3] * diffuse[c3];
+                    if (raster_state_[kRasterCombinerAlphaIcw0] == 0x14180000)
+                        final_color[3] = tex0[3] * diffuse[3];
+                    else
+                        final_color[3] = diffuse[3];
+                } else if (texture0_passthrough) {
+                    const std::array<float, 4>& tex0 = regs[8];
+                    for (size_t c3 = 0; c3 < 3; ++c3) final_color[c3] = tex0[c3];
+                    final_color[3] = diffuse[3];
                 } else if (final_enabled) {
                     // The final combiner's own CONSTANT_COLOR0/1 (registers 1/2) come
                     // from SPECFOGFACTOR0/1 (FinalFactor0/1), not the per-stage
