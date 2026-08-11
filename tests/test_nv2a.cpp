@@ -5229,6 +5229,10 @@ int main() {
             emit_gc(0x1E24, 0x9ABCDEF0);
             const uint64_t resident_accel_before =
                 gc_gpu.generic_combiner_accelerated_batches();
+            const uint64_t resident_candidates_before =
+                gc_gpu.generic_combiner_resident_candidates();
+            const uint64_t resident_supported_before =
+                gc_gpu.generic_combiner_resident_supported();
             std::memset(gc_ram.data() + 0x10000, 0, 256 * 64);
             submit_two_triangles(gc_pack_ub4(0x22, 0x44, 0x66, 0xCC));
             CHECK(gc_fault.empty());
@@ -5241,6 +5245,12 @@ int main() {
             CHECK(fake.last_packet.color_input.size() == 256 * 64);
             CHECK(gc_gpu.generic_combiner_accelerated_batches() ==
                   resident_accel_before + 1);
+            CHECK(gc_gpu.generic_combiner_resident_candidates() ==
+                  resident_candidates_before + 1);
+            CHECK(gc_gpu.generic_combiner_resident_supported() ==
+                  resident_supported_before + 1);
+            CHECK(gc_gpu.generic_combiner_resident_uploads() >= 1);
+            CHECK(gc_gpu.generic_combiner_resident_submits() >= 1);
             emit_gc(0x1E20, 0);
             emit_gc(0x1E24, 0);
             gc_gpu.set_renderer(nullptr);

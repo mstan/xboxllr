@@ -424,6 +424,24 @@ public:
     uint64_t generic_combiner_accelerated_batches() const {
         return generic_combiner_accelerated_batches_;
     }
+    uint64_t generic_combiner_resident_candidates() const {
+        return generic_combiner_resident_candidates_;
+    }
+    uint64_t generic_combiner_resident_supported() const {
+        return generic_combiner_resident_supported_;
+    }
+    uint64_t generic_combiner_resident_uploads() const {
+        return generic_combiner_resident_uploads_;
+    }
+    uint64_t generic_combiner_resident_reuses() const {
+        return generic_combiner_resident_reuses_;
+    }
+    uint64_t generic_combiner_resident_target_switch_resolves() const {
+        return generic_combiner_resident_target_switch_resolves_;
+    }
+    uint64_t generic_combiner_resident_submits() const {
+        return generic_combiner_resident_submits_;
+    }
     uint64_t generic_combiner_fallback_batches() const {
         return generic_combiner_fallback_batches_;
     }
@@ -1230,6 +1248,12 @@ private:
     uint64_t generic_combiner_attempted_batches_ = 0;
     uint64_t generic_combiner_executed_batches_ = 0;
     uint64_t generic_combiner_accelerated_batches_ = 0;
+    uint64_t generic_combiner_resident_candidates_ = 0;
+    uint64_t generic_combiner_resident_supported_ = 0;
+    uint64_t generic_combiner_resident_uploads_ = 0;
+    uint64_t generic_combiner_resident_reuses_ = 0;
+    uint64_t generic_combiner_resident_target_switch_resolves_ = 0;
+    uint64_t generic_combiner_resident_submits_ = 0;
     uint64_t generic_combiner_fallback_batches_ = 0;
     uint64_t generic_combiner_triangles_ = 0;
     uint64_t generic_combiner_fragments_ = 0;

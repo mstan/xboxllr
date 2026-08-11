@@ -1971,6 +1971,15 @@ int main(int argc, char** argv) {
                             (unsigned long long)mach.nv2a()->generic_combiner_texture_samples(),
                             mach.nv2a()->last_generic_combiner_raster_address(),
                             (unsigned long long)mach.nv2a()->generic_combiner_output_hash());
+                std::printf("[2bl] NV2A generic-combiner resident: "
+                            "candidates/supported/uploads/reuses/target-switch-resolves/submits="
+                            "%llu/%llu/%llu/%llu/%llu/%llu\n",
+                            (unsigned long long)mach.nv2a()->generic_combiner_resident_candidates(),
+                            (unsigned long long)mach.nv2a()->generic_combiner_resident_supported(),
+                            (unsigned long long)mach.nv2a()->generic_combiner_resident_uploads(),
+                            (unsigned long long)mach.nv2a()->generic_combiner_resident_reuses(),
+                            (unsigned long long)mach.nv2a()->generic_combiner_resident_target_switch_resolves(),
+                            (unsigned long long)mach.nv2a()->generic_combiner_resident_submits());
                 std::printf("[2bl] NV2A generic-combiner skip census:");
                 for (size_t reason = 0;
                      reason < xlle::Nv2a::generic_skip_reason_count(); ++reason) {

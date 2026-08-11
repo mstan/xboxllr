@@ -6590,15 +6590,18 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     packet.fixture_blend_src = blend_src;
                     packet.fixture_blend_dst = blend_dst;
                     packet.fixture_color_format_x8 = color_format_x8;
+                    ++generic_combiner_resident_candidates_;
                 }
             }
         }
         if (renderer_->supports_resident_generic_combiner(packet)) {
+            ++generic_combiner_resident_supported_;
             const size_t color_size = static_cast<size_t>(color_bytes64);
             const bool already_resident = renderer_->has_resident_color_surface(
                 color_address, color_size, surface_pitch_, surface_height,
                 surface_format_);
             if (!already_resident) {
+                ++generic_combiner_resident_target_switch_resolves_;
                 if (!resolve_renderer_color_overlap(
                         0, 64u * 1024u * 1024u,
                         "resident generic target switch")) {
@@ -6616,6 +6619,9 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     fault_("NV2A resident generic color DMA read failed");
                     return false;
                 }
+                ++generic_combiner_resident_uploads_;
+            } else {
+                ++generic_combiner_resident_reuses_;
             }
             Nv2aGenericCombinerResult result;
             std::string renderer_error;
@@ -6626,6 +6632,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                            : renderer_error);
                 return false;
             }
+            ++generic_combiner_resident_submits_;
             executed = true;
             ++generic_combiner_accelerated_batches_;
             generic_combiner_triangles_ += result.triangles;
