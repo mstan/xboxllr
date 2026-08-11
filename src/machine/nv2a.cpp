@@ -6220,12 +6220,165 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         }
     };
     auto resolve_texture_surface = [&](uint32_t format, uint32_t offset,
-                                       uint64_t bytes64, uint32_t& address) {
+                                        uint64_t bytes64, uint32_t& address) {
         const bool uses_dma_b = (format & 2u) != 0;
         return resolve_surface(uses_dma_b ? texture_dma_b_ : texture_dma_a_,
                                uses_dma_b ? texture_dma_b_bound_
-                                          : texture_dma_a_bound_,
+                                           : texture_dma_a_bound_,
                                offset, bytes64, address);
+    };
+    auto unpack_rgb565 = [](uint16_t value) {
+        const uint32_t r5 = (value >> 11) & 0x1Fu;
+        const uint32_t g6 = (value >> 5) & 0x3Fu;
+        const uint32_t b5 = value & 0x1Fu;
+        return std::array<uint8_t, 3>{{
+            static_cast<uint8_t>((r5 << 3) | (r5 >> 2)),
+            static_cast<uint8_t>((g6 << 2) | (g6 >> 4)),
+            static_cast<uint8_t>((b5 << 3) | (b5 >> 2)),
+        }};
+    };
+    auto decode_dxt23_argb = [&](const std::vector<uint8_t>& compressed,
+                                 uint32_t width, uint32_t height,
+                                 uint32_t compressed_pitch,
+                                 std::vector<uint8_t>& argb) {
+        if (!width || !height) return false;
+        const uint32_t block_cols = (width + 3u) / 4u;
+        const uint32_t block_rows = (height + 3u) / 4u;
+        const uint64_t min_pitch64 = static_cast<uint64_t>(block_cols) * 16u;
+        if (compressed_pitch < min_pitch64) return false;
+        const uint64_t required64 =
+            static_cast<uint64_t>(compressed_pitch) * block_rows;
+        const uint64_t output64 = static_cast<uint64_t>(width) * height * 4u;
+        if (required64 > compressed.size() || output64 > SIZE_MAX) return false;
+        argb.assign(static_cast<size_t>(output64), 0);
+        for (uint32_t by = 0; by < block_rows; ++by) {
+            for (uint32_t bx = 0; bx < block_cols; ++bx) {
+                const size_t block_offset =
+                    static_cast<size_t>(by) * compressed_pitch +
+                    static_cast<size_t>(bx) * 16u;
+                const uint8_t* block = compressed.data() + block_offset;
+                uint64_t alpha_bits = 0;
+                for (uint32_t byte = 0; byte < 8; ++byte)
+                    alpha_bits |= static_cast<uint64_t>(block[byte]) << (byte * 8);
+                const uint16_t c0 =
+                    static_cast<uint16_t>(block[8] | (block[9] << 8));
+                const uint16_t c1 =
+                    static_cast<uint16_t>(block[10] | (block[11] << 8));
+                std::array<std::array<uint8_t, 3>, 4> colors{};
+                colors[0] = unpack_rgb565(c0);
+                colors[1] = unpack_rgb565(c1);
+                for (uint32_t component = 0; component < 3; ++component) {
+                    colors[2][component] = static_cast<uint8_t>(
+                        (2u * colors[0][component] + colors[1][component] + 1u) / 3u);
+                    colors[3][component] = static_cast<uint8_t>(
+                        (colors[0][component] + 2u * colors[1][component] + 1u) / 3u);
+                }
+                const uint32_t color_bits =
+                    static_cast<uint32_t>(block[12]) |
+                    (static_cast<uint32_t>(block[13]) << 8) |
+                    (static_cast<uint32_t>(block[14]) << 16) |
+                    (static_cast<uint32_t>(block[15]) << 24);
+                for (uint32_t py = 0; py < 4; ++py) {
+                    const uint32_t y = by * 4u + py;
+                    if (y >= height) continue;
+                    for (uint32_t px = 0; px < 4; ++px) {
+                        const uint32_t x = bx * 4u + px;
+                        if (x >= width) continue;
+                        const uint32_t texel = py * 4u + px;
+                        const uint8_t alpha4 =
+                            static_cast<uint8_t>((alpha_bits >> (texel * 4u)) & 0xFu);
+                        const uint8_t alpha8 =
+                            static_cast<uint8_t>((alpha4 << 4) | alpha4);
+                        const uint32_t color_index =
+                            (color_bits >> (texel * 2u)) & 0x3u;
+                        const auto& rgb = colors[color_index];
+                        const size_t out =
+                            (static_cast<size_t>(y) * width + x) * 4u;
+                        argb[out + 0] = rgb[2];
+                        argb[out + 1] = rgb[1];
+                        argb[out + 2] = rgb[0];
+                        argb[out + 3] = alpha8;
+                    }
+                }
+            }
+        }
+        return true;
+    };
+    auto decode_dxt1_argb = [&](const std::vector<uint8_t>& compressed,
+                                uint32_t width, uint32_t height,
+                                uint32_t compressed_pitch,
+                                std::vector<uint8_t>& argb) {
+        if (!width || !height) return false;
+        const uint32_t block_cols = (width + 3u) / 4u;
+        const uint32_t block_rows = (height + 3u) / 4u;
+        const uint64_t min_pitch64 = static_cast<uint64_t>(block_cols) * 8u;
+        if (compressed_pitch < min_pitch64) return false;
+        const uint64_t required64 =
+            static_cast<uint64_t>(compressed_pitch) * block_rows;
+        const uint64_t output64 = static_cast<uint64_t>(width) * height * 4u;
+        if (required64 > compressed.size() || output64 > SIZE_MAX) return false;
+        argb.assign(static_cast<size_t>(output64), 0);
+        for (uint32_t by = 0; by < block_rows; ++by) {
+            for (uint32_t bx = 0; bx < block_cols; ++bx) {
+                const size_t block_offset =
+                    static_cast<size_t>(by) * compressed_pitch +
+                    static_cast<size_t>(bx) * 8u;
+                const uint8_t* block = compressed.data() + block_offset;
+                const uint16_t c0 =
+                    static_cast<uint16_t>(block[0] | (block[1] << 8));
+                const uint16_t c1 =
+                    static_cast<uint16_t>(block[2] | (block[3] << 8));
+                std::array<std::array<uint8_t, 4>, 4> colors{};
+                const auto rgb0 = unpack_rgb565(c0);
+                const auto rgb1 = unpack_rgb565(c1);
+                colors[0] = {{rgb0[0], rgb0[1], rgb0[2], 0xFF}};
+                colors[1] = {{rgb1[0], rgb1[1], rgb1[2], 0xFF}};
+                if (c0 > c1) {
+                    for (uint32_t component = 0; component < 3; ++component) {
+                        colors[2][component] = static_cast<uint8_t>(
+                            (2u * colors[0][component] + colors[1][component] + 1u) /
+                            3u);
+                        colors[3][component] = static_cast<uint8_t>(
+                            (colors[0][component] + 2u * colors[1][component] + 1u) /
+                            3u);
+                    }
+                    colors[2][3] = colors[3][3] = 0xFF;
+                } else {
+                    for (uint32_t component = 0; component < 3; ++component) {
+                        colors[2][component] = static_cast<uint8_t>(
+                            (static_cast<uint32_t>(colors[0][component]) +
+                             colors[1][component]) /
+                            2u);
+                    }
+                    colors[2][3] = 0xFF;
+                    colors[3] = {{0, 0, 0, 0}};
+                }
+                const uint32_t color_bits =
+                    static_cast<uint32_t>(block[4]) |
+                    (static_cast<uint32_t>(block[5]) << 8) |
+                    (static_cast<uint32_t>(block[6]) << 16) |
+                    (static_cast<uint32_t>(block[7]) << 24);
+                for (uint32_t py = 0; py < 4; ++py) {
+                    const uint32_t y = by * 4u + py;
+                    if (y >= height) continue;
+                    for (uint32_t px = 0; px < 4; ++px) {
+                        const uint32_t x = bx * 4u + px;
+                        if (x >= width) continue;
+                        const uint32_t texel = py * 4u + px;
+                        const uint32_t color_index =
+                            (color_bits >> (texel * 2u)) & 0x3u;
+                        const auto& rgba = colors[color_index];
+                        const size_t out =
+                            (static_cast<size_t>(y) * width + x) * 4u;
+                        argb[out + 0] = rgba[2];
+                        argb[out + 1] = rgba[1];
+                        argb[out + 2] = rgba[0];
+                        argb[out + 3] = rgba[3];
+                    }
+                }
+            }
+        }
+        return true;
     };
     for (uint32_t stage = 0; stage < 4; ++stage) {
         if (!texture_referenced[stage]) continue;
@@ -6240,30 +6393,76 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         ts.project2d = stage_mode == 1;
         bool handled_linear_project2d = false;
         if (single_stage_project2d) {
+            const uint32_t format = raster_state_[kRasterTextureFormat0 + stage];
+            const uint32_t color_code = (format >> 8) & 0xFFu;
+            const bool legacy_raw_linear = format == 0;
+            const bool dxt1_argb8 = color_code == 0x0Cu;
+            const bool dxt23_argb8 = color_code == 0x0Eu;
+            const bool compressed_argb8 = dxt1_argb8 || dxt23_argb8;
+            // The linear PROJECT2D path is also used for pitch render targets
+            // rebound as textures (e.g. the stock dashboard present path's
+            // format 0x00011e29). Those were already proven as raw pitch-linear
+            // words before compressed dashboard textures were encountered, so
+            // preserve that behavior for every non-DXT format and specialize
+            // only the compressed color codes witnessed in the dashboard.
+            const bool raw_argb8 = !compressed_argb8;
             const uint32_t rect = raster_state_[kRasterTextureImageRect0 + stage];
             ts.width = rect >> 16;
             ts.height = rect & 0xFFFFu;
             ts.pitch = raster_state_[kRasterTextureControl1_0 + stage] >> 16;
-            if (ts.width && ts.height &&
-                ts.pitch >= ts.width * static_cast<uint32_t>(sizeof(uint32_t))) {
-                const uint64_t bytes64 = static_cast<uint64_t>(ts.pitch) * ts.height;
+            if (ts.width && ts.height && (raw_argb8 || compressed_argb8)) {
+                const uint32_t min_pitch =
+                    raw_argb8 ? ts.width * static_cast<uint32_t>(sizeof(uint32_t))
+                              : ((ts.width + 3u) / 4u) *
+                                    (dxt1_argb8 ? 8u : 16u);
+                const uint32_t source_rows =
+                    compressed_argb8 ? ((ts.height + 3u) / 4u) : ts.height;
+                if (ts.pitch < min_pitch) {
+                    record_generic_skip_detail(
+                        GenericSkipReason::kUnsupportedTextureFormat, format);
+                    return true;
+                }
+                const uint64_t bytes64 =
+                    static_cast<uint64_t>(ts.pitch) * source_rows;
                 uint32_t address = 0;
                 if (bytes64 > SIZE_MAX ||
-                    !resolve_surface(texture_dma_b_, texture_dma_b_bound_,
-                                     raster_state_[kRasterTextureOffset0 + stage],
-                                     bytes64, address)) {
+                    !(legacy_raw_linear
+                          ? resolve_surface(texture_dma_b_, texture_dma_b_bound_,
+                                            raster_state_[kRasterTextureOffset0 + stage],
+                                            bytes64, address)
+                          : resolve_texture_surface(
+                                format,
+                                raster_state_[kRasterTextureOffset0 + stage],
+                                bytes64, address))) {
                     fault_("NV2A generic-combiner texture surface is unbound or overflows");
                     return false;
                 }
-                ts.data.resize(static_cast<size_t>(bytes64));
-                if (!resolve_renderer_color_overlap(address, ts.data.size(),
+                std::vector<uint8_t> source;
+                std::vector<uint8_t>* read_target = &ts.data;
+                if (compressed_argb8) read_target = &source;
+                read_target->resize(static_cast<size_t>(bytes64));
+                if (!resolve_renderer_color_overlap(address, read_target->size(),
                                                     "generic texture read")) {
                     return false;
                 }
-                if (!mem_read_ || !mem_read_(address, ts.data.data(), ts.data.size())) {
+                if (!mem_read_ ||
+                    !mem_read_(address, read_target->data(), read_target->size())) {
                     fault_("NV2A generic-combiner texture DMA read failed");
                     return false;
                 }
+                if (dxt1_argb8 &&
+                    !decode_dxt1_argb(source, ts.width, ts.height, ts.pitch, ts.data)) {
+                    record_generic_skip_detail(
+                        GenericSkipReason::kUnsupportedTextureFormat, format);
+                    return true;
+                }
+                if (dxt23_argb8 &&
+                    !decode_dxt23_argb(source, ts.width, ts.height, ts.pitch, ts.data)) {
+                    record_generic_skip_detail(
+                        GenericSkipReason::kUnsupportedTextureFormat, format);
+                    return true;
+                }
+                ts.pitch = ts.width * static_cast<uint32_t>(sizeof(uint32_t));
                 generic_texture_bytes_this_batch += ts.data.size();
                 perf::record_generic_texture_allocation(
                     ts.data.size(), generic_texture_bytes_this_batch);
@@ -7842,8 +8041,8 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                             return;
                         }
                         sample_ok = sample_linear(ts.data, ts.width, ts.height,
-                                                 ts.pitch, texcoord[0] / texcoord[3],
-                                                 texcoord[1] / texcoord[3], sampled);
+                                                  ts.pitch, texcoord[0] / texcoord[3],
+                                                  texcoord[1] / texcoord[3], sampled);
                     } else if (ts.cubemap) {
                         // Same major-axis direction-to-UV algorithm as the pinned
                         // profiles' own sample_cube_texture (fresh independent copy):

@@ -5345,6 +5345,40 @@ int main() {
                 CHECK(gc_gpu.generic_combiner_accelerated_batches() ==
                       accelerated_before + triangles.size());
                 gc_gpu.set_renderer(nullptr);
+
+                // The resident-primary OpenGL path keeps the target in a GL
+                // texture until an overlap/scanout resolve. Gate that real
+                // backend against the software evaluator too; the fake renderer
+                // below only proves the seam was called, not that pixels match.
+                auto crtc_write_gc = [&](uint8_t index, uint8_t value) {
+                    gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x6013D4, 1, index);
+                    gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x6013D5, 1, value);
+                };
+                crtc_write_gc(0x13, 32);  // pitch = 32 * 8 = 256 bytes
+                crtc_write_gc(0x28, 3);   // 32-bit scanout
+                gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x680800, 4, 63);
+                gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x680820, 4, 63);
+                gc_gpu.mmio_write(xlle::Nv2a::kBase + 0x600800, 4, 0x10000);
+                std::memset(gc_ram.data() + 0x10000, 0x5A, 256 * 64);
+                gc_gpu.set_renderer(nullptr);
+                submit_two_triangles(gc_pack_ub4(0x22, 0x44, 0x66, 0xCC));
+                CHECK(gc_fault.empty());
+                const std::vector<uint8_t> resident_primary_software(
+                    gc_ram.begin() + 0x10000,
+                    gc_ram.begin() + 0x10000 + 256 * 64);
+                std::memset(gc_ram.data() + 0x10000, 0x5A, 256 * 64);
+                gc_gpu.set_renderer(gl_renderer.get());
+                submit_two_triangles(gc_pack_ub4(0x22, 0x44, 0x66, 0xCC));
+                CHECK(gc_fault.empty());
+                xlle::Nv2a::ScanoutInfo resident_scanout;
+                std::vector<uint8_t> resident_rgba;
+                std::string resident_scanout_error;
+                CHECK(gc_gpu.capture_scanout(resident_rgba, resident_scanout,
+                                             resident_scanout_error));
+                CHECK(std::equal(resident_primary_software.begin(),
+                                 resident_primary_software.end(),
+                                 gc_ram.begin() + 0x10000));
+                gc_gpu.set_renderer(nullptr);
             } else {
                 std::printf("SKIP: OpenGL compute fixture unavailable: %s\n",
                             gl_error.c_str());
@@ -5884,6 +5918,77 @@ int main() {
             CHECK(e_gpu.generic_combiner_texture_samples() > 0);
             const uint32_t e_offset = 3u * 32u + 3u * 4u;
             CHECK(get32(e_ram, 0x10000u + e_offset) == 0xFF243238u);
+
+            // Same linear PROJECT2D path, but with the stock-dashboard-witnessed
+            // compressed color code 0x0e (L_DXT23_A8R8G8B8).  The block is all
+            // white RGB with explicit 4-bit alpha 0xA (=0xAA after expansion).
+            // AlphaIcw0 reads both PRIMARY.a and TEXTURE0.a, so a bad raw-ARGB
+            // interpretation of the compressed block changes this exact pixel.
+            std::array<uint8_t, 16> e_dxt23{};
+            for (uint32_t i = 0; i < 8; ++i) e_dxt23[i] = 0xAA;
+            e_dxt23[8] = 0xFF;
+            e_dxt23[9] = 0xFF;
+            e_dxt23[10] = 0x00;
+            e_dxt23[11] = 0x00;
+            std::memcpy(e_ram.data() + 0x20100, e_dxt23.data(), e_dxt23.size());
+            put32(e_ram, 0x10000u + e_offset, 0);
+            emit_e(0x0260, 0x14180000);   // AlphaIcw0: PRIMARY.a * TEXTURE0.a
+            emit_e(0x1B00, 0x00020100);   // TextureOffset0
+            emit_e(0x1B04, 0x00000E2A);   // COLOR_L_DXT23_A8R8G8B8, DMA-B
+            emit_e(0x1B10, 0x00100000);   // compressed row pitch=16 bytes
+            emit_e(0x1B1C, 0x00040004);   // TextureImageRect0: 4x4
+            emit_e(0x17FC, 5);
+            for (int v = 0; v < 3; ++v) {
+                emit_e(0x1A90, e_float_bits(2.5f));
+                emit_e(0x1A94, e_float_bits(2.5f));
+                emit_e(0x1A98, e_float_bits(0.0f));
+                emit_e(0x1A9C, e_float_bits(1.0f));
+                emit_e(0x1518, e_float_bits(ex[v]));
+                emit_e(0x151C, e_float_bits(ey[v]));
+                emit_e(0x1520, e_float_bits(10.0f));
+                emit_e(0x194C, e_pack_ub4(0x30, 0x50, 0x70, 0xFF));
+                emit_e(0x1524, e_float_bits(1.0f));
+            }
+            emit_e(0x17FC, 0);
+            kick_e();
+            CHECK(e_fault.empty());
+            CHECK(get32(e_ram, 0x10000u + e_offset) == 0xAA305070u);
+
+            // DXT1/A1 variant (color code 0x0c): selector 3 is transparent when
+            // color0 <= color1.  This verifies the other compressed dashboard format
+            // does not fall through to raw pitch-linear sampling.
+            std::array<uint8_t, 8> e_dxt1{};
+            e_dxt1[0] = 0x00;
+            e_dxt1[1] = 0x00;
+            e_dxt1[2] = 0xFF;
+            e_dxt1[3] = 0xFF;
+            e_dxt1[4] = 0xFF;
+            e_dxt1[5] = 0xFF;
+            e_dxt1[6] = 0xFF;
+            e_dxt1[7] = 0xFF;
+            std::memcpy(e_ram.data() + 0x20200, e_dxt1.data(), e_dxt1.size());
+            put32(e_ram, 0x10000u + e_offset, 0xDEADBEEFu);
+            emit_e(0x1B00, 0x00020200);
+            emit_e(0x1B04, 0x00000C2A);   // COLOR_L_DXT1_A1R5G5B5, DMA-B
+            emit_e(0x1B10, 0x00080000);   // compressed row pitch=8 bytes
+            emit_e(0x1B1C, 0x00040004);
+            emit_e(0x17FC, 5);
+            for (int v = 0; v < 3; ++v) {
+                emit_e(0x1A90, e_float_bits(2.5f));
+                emit_e(0x1A94, e_float_bits(2.5f));
+                emit_e(0x1A98, e_float_bits(0.0f));
+                emit_e(0x1A9C, e_float_bits(1.0f));
+                emit_e(0x1518, e_float_bits(ex[v]));
+                emit_e(0x151C, e_float_bits(ey[v]));
+                emit_e(0x1520, e_float_bits(10.0f));
+                emit_e(0x194C, e_pack_ub4(0x30, 0x50, 0x70, 0xFF));
+                emit_e(0x1524, e_float_bits(1.0f));
+            }
+            emit_e(0x17FC, 0);
+            kick_e();
+            CHECK(e_fault.empty());
+            const uint32_t e_dxt1_pixel = get32(e_ram, 0x10000u + e_offset);
+            CHECK(e_dxt1_pixel == 0x00000000u);
         }
 
         // --- (e2) Exact witnessed dashboard present fingerprint: the dashboard binds

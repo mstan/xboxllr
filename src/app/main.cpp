@@ -400,6 +400,7 @@ int main(int argc, char** argv) {
     uint64_t debug_nv2a_surface_snapshot_skip = 0;
     uint64_t debug_nv2a_surface_snapshot_count = 0;
     uint64_t debug_nv2a_surface_snapshot_interval = 1;
+    size_t perf_generic_top_limit = 12;
     uint64_t max_insns = 128ull * 1000 * 1000;  // 2BL kernel LZX decompress needs tens of M
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--serve")) serve = true;
@@ -415,6 +416,17 @@ int main(int argc, char** argv) {
             reduced_retire_diag = true;
         else if (!std::strcmp(argv[i], "--perf-accounting"))
             perf_accounting = true;
+        else if (!std::strcmp(argv[i], "--perf-generic-top") && i + 1 < argc) {
+            uint64_t parsed = 0;
+            if (!parse_u64_arg(argv[++i], parsed) || parsed == 0 ||
+                parsed > 1000) {
+                std::fprintf(
+                    stderr,
+                    "[host] --perf-generic-top needs an integer in 1..1000\n");
+                return 1;
+            }
+            perf_generic_top_limit = static_cast<size_t>(parsed);
+        }
         else if (!std::strcmp(argv[i], "--net-disconnected"))
             net_disconnected = true;
         else if (!std::strcmp(argv[i], "--nv2a-renderer")) {
@@ -1097,9 +1109,11 @@ int main(int argc, char** argv) {
                                   return a.fragments > b.fragments;
                               return a.batches > b.batches;
                           });
-                std::printf("[perf-generic] fingerprints=%zu top=", fingerprints.size());
+                std::printf("[perf-generic] fingerprints=%zu top%zu=",
+                            fingerprints.size(), perf_generic_top_limit);
                 Nv2a::RasterStateSample raster_exemplar;
-                const size_t limit = std::min<size_t>(fingerprints.size(), 12);
+                const size_t limit =
+                    std::min<size_t>(fingerprints.size(), perf_generic_top_limit);
                 for (size_t i = 0; i < limit; ++i) {
                     const auto& entry = fingerprints[i];
                     std::printf(" %016llx:b%llu/f%llu/w%llu/ns%llu",
@@ -1184,11 +1198,12 @@ int main(int argc, char** argv) {
                     }
                 }
                 std::printf("\n");
-                // Keep the compact top-12 line readable, but emit complete,
-                // machine-parseable exemplars for the twelve hottest states so a
+                // Keep the compact default top-12 line readable, but emit complete,
+                // machine-parseable exemplars for the requested hottest states so a
                 // later backend can reproduce a dominant dashboard envelope
                 // without another multi-billion-instruction replay.
-                const size_t state_limit = std::min<size_t>(fingerprints.size(), 12);
+                const size_t state_limit =
+                    std::min<size_t>(fingerprints.size(), perf_generic_top_limit);
                 for (size_t i = 0; i < state_limit; ++i) {
                     const auto& entry = fingerprints[i];
                     if (entry.raster_state_sample_index == UINT32_MAX ||
