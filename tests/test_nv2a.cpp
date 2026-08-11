@@ -2666,6 +2666,26 @@ int main() {
     CHECK(gpu.tex7_fan_triangles() == 4);
     emit(0x1B24, 0xFF000000);
 
+    // The stock dashboard witnesses the same RGB constant with several high-byte
+    // variants. This profile's RGB math uses only A0/FF/40 and its alpha path is
+    // driven by the sampled texture, so admit matching factor registers whose
+    // lower RGB bytes match the pinned constant.
+    uint64_t rs0_variant_high_byte_batches = gpu.tex7_fan_batches();
+    for (uint32_t factor : {0x00A0FF40u, 0x76A0FF40u}) {
+        put32(ram, rs0_color + rs0_inside, 0x10203040);
+        emit(0x0A60, factor);
+        emit(0x0A80, factor);
+        emit(0x17FC, 7);
+        for (uint32_t word : rs0_words) emit(0x1818, word);
+        emit(0x17FC, 0);
+        gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+        CHECK(fault.empty());
+        CHECK(gpu.tex7_fan_batches() == ++rs0_variant_high_byte_batches);
+        CHECK(get32(ram, rs0_color + rs0_inside) == 0xFF707048u);
+    }
+    emit(0x0A60, 0xFFA0FF40);
+    emit(0x0A80, 0xFFA0FF40);
+
     // The witnessed cull state accepts clockwise fans only. Reversing all
     // four vertices must neither touch color nor the read-only Z24S8 plane.
     std::vector<uint32_t> rs0_reversed_words = rs0_words;
@@ -2674,14 +2694,16 @@ int main() {
     for (size_t vertex = 0; vertex < 4; ++vertex)
         std::memcpy(rs0_reversed_bytes + vertex * kInlineVertexBytes,
                     rs0_positions + (3 - vertex) * 4, 16);
+    const uint64_t rs0_cull_batches = gpu.tex7_fan_batches();
+    const uint64_t rs0_cull_triangles = gpu.tex7_fan_triangles();
     const uint64_t rs0_writes = gpu.tex7_fan_writes();
     emit(0x17FC, 7);
     for (uint32_t word : rs0_reversed_words) emit(0x1818, word);
     emit(0x17FC, 0);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
     CHECK(fault.empty());
-    CHECK(gpu.tex7_fan_batches() == 3);
-    CHECK(gpu.tex7_fan_triangles() == 4);
+    CHECK(gpu.tex7_fan_batches() == rs0_cull_batches + 1);
+    CHECK(gpu.tex7_fan_triangles() == rs0_cull_triangles);
     CHECK(gpu.tex7_fan_writes() == rs0_writes);
     CHECK(get32(ram, rs0_color + rs0_inside) == 0xFF707048u);
     CHECK(get32(ram, rs0_depth + rs0_inside) == 0x00FFFF00u);

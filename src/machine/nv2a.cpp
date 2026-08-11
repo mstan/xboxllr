@@ -2792,6 +2792,12 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         raster_state_[kRasterCombinerFinalFactor1] == 0;
     // RS0 in probe-reduced-diag-6.4b: only t0 reaches R0; t1/t2 are
     // enabled cubemaps but their shader stages are unused by the one combiner.
+    const uint32_t tex7_factor0 = raster_state_[kRasterCombinerFactor0_0];
+    const uint32_t tex7_factor1 = raster_state_[kRasterCombinerFactor1_0];
+    const bool tex7_fan_factor_rgb =
+        tex7_factor0 == tex7_factor1 &&
+        (tex7_factor0 & 0x00FFFFFFu) == 0x00A0FF40u &&
+        (tex7_factor1 & 0x00FFFFFFu) == 0x00A0FF40u;
     const bool tex7_fan_combiner =
         raster_state_[kRasterTextureEnableMask] == 7 &&
         raster_state_[kRasterShaderStageProgram] == 0x00000C61 &&
@@ -2803,8 +2809,7 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         raster_state_[kRasterCombinerAlphaIcw0] == 0x11200000 &&
         raster_state_[kRasterCombinerColorOcw0] == 0x00000C00 &&
         raster_state_[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
-        raster_state_[kRasterCombinerFactor0_0] == 0xFFA0FF40 &&
-        raster_state_[kRasterCombinerFactor1_0] == 0xFFA0FF40 &&
+        tex7_fan_factor_rgb &&
         raster_state_[kRasterCombinerSpecularFog0] == 0x0000000C &&
         raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80 &&
         raster_state_[kRasterCombinerFinalFactor0] == 0xFF3F3F3F &&
