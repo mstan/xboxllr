@@ -214,23 +214,25 @@ vec2 vtex(uint vertex) {
 ivec2 vxy(uint vertex) {
     return ivec2(vertex_xy[vertex * 2u], vertex_xy[vertex * 2u + 1u]);
 }
+vec4 texel_argb(int x, int y) {
+    int sx = clamp(x, 0, texture_width - 1);
+    int sy = clamp(y, 0, texture_height - 1);
+    return unpack_argb(tex0_words[sy * texture_pitch_words + sx]);
+}
 vec4 sample_linear_argb(vec2 uv) {
-    float tx = uv.x - 0.5;
-    float ty = uv.y - 0.5;
+    float s = clamp(uv.x, 0.0, float(texture_width));
+    float t = clamp(uv.y, 0.0, float(texture_height));
+    float tx = s - 0.5;
+    float ty = t - 0.5;
     int x0 = int(floor(tx)); int y0 = int(floor(ty));
     float fx = tx - float(x0); float fy = ty - float(y0);
-    vec4 accum = vec4(0.0);
-    for (int yy = 0; yy < 2; ++yy) {
-        for (int xx = 0; xx < 2; ++xx) {
-            int sx = clamp(x0 + xx, 0, texture_width - 1);
-            int sy = clamp(y0 + yy, 0, texture_height - 1);
-            float wx = xx == 0 ? 1.0 - fx : fx;
-            float wy = yy == 0 ? 1.0 - fy : fy;
-            accum += unpack_argb(tex0_words[sy * texture_pitch_words + sx]) *
-                     (wx * wy);
-        }
-    }
-    return accum;
+    vec4 c00 = texel_argb(x0, y0);
+    vec4 c10 = texel_argb(x0 + 1, y0);
+    vec4 c01 = texel_argb(x0, y0 + 1);
+    vec4 c11 = texel_argb(x0 + 1, y0 + 1);
+    vec4 top = c00 + (c10 - c00) * fx;
+    vec4 bottom = c01 + (c11 - c01) * fx;
+    return top + (bottom - top) * fy;
 }
 float blend_factor(uint factor, vec4 src) {
     if (factor == 0u) return 0.0;
@@ -263,19 +265,34 @@ void main() {
         if (w0 < 0 || (w0 == 0 && !top_left(vertex_b, vertex_c)) ||
             w1 < 0 || (w1 == 0 && !top_left(vertex_c, vertex_a)) ||
             w2 < 0 || (w2 == 0 && !top_left(vertex_a, vertex_b))) continue;
-        float l0 = float(w0) / float(area);
-        float l1 = float(w1) / float(area);
-        float l2 = float(w2) / float(area);
-        float inv_w0 = 1.0 / vdata(ia, 7u);
-        float inv_w1 = 1.0 / vdata(ib, 7u);
-        float inv_w2 = 1.0 / vdata(ic, 7u);
-        float q = l0 * inv_w0 + l1 * inv_w1 + l2 * inv_w2;
+        double l0 = double(w0) / double(area);
+        double l1 = double(w1) / double(area);
+        double l2 = double(w2) / double(area);
+        double inv_w0 = 1.0 / double(vdata(ia, 7u));
+        double inv_w1 = 1.0 / double(vdata(ib, 7u));
+        double inv_w2 = 1.0 / double(vdata(ic, 7u));
+        double q = l0 * inv_w0 + l1 * inv_w1 + l2 * inv_w2;
         if (q == 0.0 || isnan(q) || isinf(q)) continue;
-        vec4 diffuse = (vdiffuse(ia) * (l0 * inv_w0) +
-                        vdiffuse(ib) * (l1 * inv_w1) +
-                        vdiffuse(ic) * (l2 * inv_w2)) / q;
-        vec2 tex = (vtex(ia) * (l0 * inv_w0) + vtex(ib) * (l1 * inv_w1) +
-                    vtex(ic) * (l2 * inv_w2)) / q;
+        vec4 diffuse = vec4(
+            float((double(vdiffuse(ia).r) * (l0 * inv_w0) +
+                   double(vdiffuse(ib).r) * (l1 * inv_w1) +
+                   double(vdiffuse(ic).r) * (l2 * inv_w2)) / q),
+            float((double(vdiffuse(ia).g) * (l0 * inv_w0) +
+                   double(vdiffuse(ib).g) * (l1 * inv_w1) +
+                   double(vdiffuse(ic).g) * (l2 * inv_w2)) / q),
+            float((double(vdiffuse(ia).b) * (l0 * inv_w0) +
+                   double(vdiffuse(ib).b) * (l1 * inv_w1) +
+                   double(vdiffuse(ic).b) * (l2 * inv_w2)) / q),
+            float((double(vdiffuse(ia).a) * (l0 * inv_w0) +
+                   double(vdiffuse(ib).a) * (l1 * inv_w1) +
+                   double(vdiffuse(ic).a) * (l2 * inv_w2)) / q));
+        vec2 tex = vec2(
+            float((double(vtex(ia).x) * (l0 * inv_w0) +
+                   double(vtex(ib).x) * (l1 * inv_w1) +
+                   double(vtex(ic).x) * (l2 * inv_w2)) / q),
+            float((double(vtex(ia).y) * (l0 * inv_w0) +
+                   double(vtex(ib).y) * (l1 * inv_w1) +
+                   double(vtex(ic).y) * (l2 * inv_w2)) / q));
         vec4 src = clamp(diffuse, 0.0, 1.0) * sample_linear_argb(tex);
         float sf = blend_factor(blend_src, src);
         float df = blend_factor(blend_dst, src);

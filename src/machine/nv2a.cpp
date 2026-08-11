@@ -6749,8 +6749,9 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                         Nv2aGenericCombinerPacket::ComputeFixture::kNone &&
                     primitive_mode_ == 5 && transformed_batch_.size() >= 3 &&
                     (transformed_batch_.size() % 3u) == 0 &&
-                    texture_compute_surface_small && primitive_supported &&
-                    vertex_count_supported && only_texture0_input && !uses_depth &&
+                    texture_compute_surface_small &&
+                    primitive_supported && vertex_count_supported &&
+                    only_texture0_input && !uses_depth &&
                     !cull_enabled &&
                     color_mask_word == 0x01010101 &&
                     (color_format_x8 || color_format_a8) && stage_count == 1 &&
@@ -6767,7 +6768,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     for (const auto& vertex : packet.vertices) {
                         for (float value : vertex.position)
                             if (!std::isfinite(value)) finite_vertices = false;
-                        if (vertex.position[3] == 0.0f) finite_vertices = false;
+                        if (vertex.position[3] != 1.0f) finite_vertices = false;
                         for (float value : vertex.diffuse)
                             if (!std::isfinite(value)) finite_vertices = false;
                         for (float value : vertex.texture[0])
@@ -6787,16 +6788,70 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                                 static_cast<int64_t>(fixed);
                         }
                     }
+                    auto edge_terms_fit_int32 =
+                        [](int64_t ax, int64_t ay, int64_t bx, int64_t by,
+                           int64_t px, int64_t py, int64_t& value) {
+                            const int64_t dx = bx - ax;
+                            const int64_t dy = by - ay;
+                            const int64_t pdy = py - ay;
+                            const int64_t pdx = px - ax;
+                            const int64_t term0 = dx * pdy;
+                            const int64_t term1 = dy * pdx;
+                            value = term0 - term1;
+                            return term0 >= INT32_MIN && term0 <= INT32_MAX &&
+                                   term1 >= INT32_MIN && term1 <= INT32_MAX &&
+                                   value >= INT32_MIN && value <= INT32_MAX;
+                        };
+                    const int64_t clip_min_x =
+                        static_cast<int64_t>(clip_x) * 16 + 8;
+                    const int64_t clip_min_y =
+                        static_cast<int64_t>(clip_y) * 16 + 8;
+                    const int64_t clip_max_x =
+                        static_cast<int64_t>(clip_x + clip_width - 1) * 16 + 8;
+                    const int64_t clip_max_y =
+                        static_cast<int64_t>(clip_y + clip_height - 1) * 16 + 8;
+                    const std::array<std::array<int64_t, 2>, 4> clip_corners{{
+                        {{clip_min_x, clip_min_y}},
+                        {{clip_max_x, clip_min_y}},
+                        {{clip_min_x, clip_max_y}},
+                        {{clip_max_x, clip_max_y}},
+                    }};
                     bool any_positive_area = false;
                     for (size_t vertex = 0; finite_vertices && vertex + 2 < fixed_xy.size();
                          vertex += 3) {
-                        const int64_t area =
-                            (fixed_xy[vertex + 1][0] - fixed_xy[vertex][0]) *
-                                (fixed_xy[vertex + 2][1] - fixed_xy[vertex][1]) -
-                            (fixed_xy[vertex + 1][1] - fixed_xy[vertex][1]) *
-                                (fixed_xy[vertex + 2][0] - fixed_xy[vertex][0]);
+                        int64_t area = 0;
+                        if (!edge_terms_fit_int32(
+                                fixed_xy[vertex][0], fixed_xy[vertex][1],
+                                fixed_xy[vertex + 1][0],
+                                fixed_xy[vertex + 1][1],
+                                fixed_xy[vertex + 2][0],
+                                fixed_xy[vertex + 2][1], area)) {
+                            finite_vertices = false;
+                            break;
+                        }
                         if (area < 0) finite_vertices = false;
                         if (area > 0) any_positive_area = true;
+                        for (const auto& corner : clip_corners) {
+                            int64_t edge = 0;
+                            finite_vertices =
+                                edge_terms_fit_int32(
+                                    fixed_xy[vertex + 1][0],
+                                    fixed_xy[vertex + 1][1],
+                                    fixed_xy[vertex + 2][0],
+                                    fixed_xy[vertex + 2][1], corner[0],
+                                    corner[1], edge) &&
+                                edge_terms_fit_int32(
+                                    fixed_xy[vertex + 2][0],
+                                    fixed_xy[vertex + 2][1],
+                                    fixed_xy[vertex][0], fixed_xy[vertex][1],
+                                    corner[0], corner[1], edge) &&
+                                edge_terms_fit_int32(
+                                    fixed_xy[vertex][0], fixed_xy[vertex][1],
+                                    fixed_xy[vertex + 1][0],
+                                    fixed_xy[vertex + 1][1], corner[0],
+                                    corner[1], edge);
+                            if (!finite_vertices) break;
+                        }
                     }
                     if (!any_positive_area) finite_vertices = false;
                     if (finite_vertices) {
