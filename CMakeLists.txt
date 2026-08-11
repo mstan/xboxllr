@@ -127,7 +127,7 @@ add_test(NAME jsonl COMMAND test_jsonl)
 
 add_executable(test_nv2a tests/test_nv2a.cpp src/machine/nv2a.cpp)
 target_include_directories(test_nv2a PRIVATE ${XLLE_INCLUDES})
-target_link_libraries(test_nv2a PRIVATE nv2a_vsh_emulator)
+target_link_libraries(test_nv2a PRIVATE nv2a_vsh_emulator xlle_host)
 add_test(NAME nv2a COMMAND test_nv2a)
 
 add_executable(test_apu tests/test_apu.cpp)

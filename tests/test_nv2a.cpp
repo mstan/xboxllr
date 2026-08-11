@@ -9,6 +9,7 @@
 
 #include "machine/nv2a.hpp"
 #include "machine/perf_accounting.hpp"
+#include "host/nv2a_opengl_renderer.hpp"
 
 static int fails = 0;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL: %s (line %d)\n", #c, __LINE__); ++fails; } } while (0)
@@ -5042,6 +5043,55 @@ int main() {
         // The backend seam runs only after the generic validator has accepted this
         // witnessed state. Unsupported leaves the software result unchanged; a
         // supported backend bypasses software writes while receiving an owned packet.
+        {
+            // The optional GL fixture is correctness-gated against the software
+            // generic rasterizer's complete color surface.  Hosts without a usable
+            // hidden GL 4.3 context skip this integration check; their normal
+            // software renderer remains the only path.
+            std::string gl_error;
+            auto gl_renderer = xlle::create_nv2a_opengl_renderer(gl_error);
+            if (gl_renderer) {
+                const uint64_t accelerated_before =
+                    gc_gpu.generic_combiner_accelerated_batches();
+                const std::array<std::array<float, 6>, 3> triangles{{
+                    {{0.0f, 0.0f, 40.0f, 0.0f, 0.0f, 40.0f}},
+                    {{0.25f, 0.25f, 39.75f, 0.25f, 0.25f, 39.75f}},
+                    {{-8.0f, -8.0f, 30.0f, 2.0f, 2.0f, 30.0f}},
+                }};
+                for (const auto& triangle : triangles) {
+                    // A nonzero backing surface proves both covered output and
+                    // untouched bytes survive the GPU round trip exactly. Fractional
+                    // and clipped cases additionally gate fixed-point coverage.
+                    std::memset(gc_ram.data() + 0x10000, 0x5A, 256 * 64);
+                    gc_gpu.set_renderer(nullptr);
+                    submit_triangle(triangle[0], triangle[1], triangle[2], triangle[3],
+                                    triangle[4], triangle[5], 50.0f, 1.0f,
+                                    gc_pack_ub4(0x11, 0x22, 0x33, 0xCC));
+                    CHECK(gc_fault.empty());
+                    const std::vector<uint8_t> software_color(
+                        gc_ram.begin() + 0x10000,
+                        gc_ram.begin() + 0x10000 + 256 * 64);
+                    std::memset(gc_ram.data() + 0x10000, 0x5A, 256 * 64);
+                    gc_gpu.set_renderer(gl_renderer.get());
+                    submit_triangle(triangle[0], triangle[1], triangle[2], triangle[3],
+                                    triangle[4], triangle[5], 50.0f, 1.0f,
+                                    gc_pack_ub4(0x11, 0x22, 0x33, 0xCC));
+                    if (!gc_fault.empty())
+                        std::printf("OpenGL compute fixture fault: %s\n",
+                                    gc_fault.c_str());
+                    CHECK(gc_fault.empty());
+                    CHECK(std::equal(software_color.begin(), software_color.end(),
+                                     gc_ram.begin() + 0x10000));
+                }
+                CHECK(gc_gpu.generic_combiner_accelerated_batches() ==
+                      accelerated_before + triangles.size());
+                gc_gpu.set_renderer(nullptr);
+            } else {
+                std::printf("SKIP: OpenGL compute fixture unavailable: %s\n",
+                            gl_error.c_str());
+            }
+        }
+
         {
             FakeNv2aRenderer fake;
             gc_gpu.set_renderer(&fake);

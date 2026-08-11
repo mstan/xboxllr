@@ -6247,6 +6247,91 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 raster_state_[kRasterTextureAddress0 + stage];
             destination.border_color = source.border;
         }
+        // First correctness fixture for the GL compute path.  Keep this predicate
+        // intentionally exact: the host shader implements just a uniformly coloured
+        // triangle and this one fully validated NV097 state.  Everything else stays
+        // on the software LLE rasterizer.  The decoded fields below keep GL code
+        // independent of this class's private raster-state numbering.
+        const auto same_diffuse = [](const TransformedVertex& lhs,
+                                     const TransformedVertex& rhs) {
+            return lhs.diffuse == rhs.diffuse;
+        };
+        const bool no_texture_inputs = !texture_referenced[0] &&
+                                       !texture_referenced[1] &&
+                                       !texture_referenced[2] &&
+                                       !texture_referenced[3];
+        const bool compute_fixture_state =
+            primitive_mode_ == 5 && transformed_batch_.size() == 3 &&
+            no_texture_inputs && !uses_depth && color_format_a8 &&
+            stage_count == 1 && (!cull_enabled || !cull_front) &&
+            (!alpha_test_enabled ||
+             (alpha_func == 0x0207 &&
+              (raster_state_[kRasterAlphaRef] & 0xFFu) == 0)) &&
+            !blend_enabled && color_mask_word == 0x01010101 &&
+            raster_state_[kRasterShaderStageProgram] == 0 &&
+            raster_state_[kRasterShaderOtherStageInput] == 0x00210000 &&
+            raster_state_[kRasterCombinerControl] == 1 &&
+            raster_state_[kRasterCombinerColorIcw0] == 0x04200000 &&
+            raster_state_[kRasterCombinerAlphaIcw0] == 0x14200000 &&
+            raster_state_[kRasterCombinerColorOcw0] == 0x00000C00 &&
+            raster_state_[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
+            raster_state_[kRasterCombinerSpecularFog0] == 0x0000000C &&
+            raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80 &&
+            raster_state_[kRasterCombinerFinalFactor0] == 0 &&
+            raster_state_[kRasterCombinerFinalFactor1] == 0 &&
+            same_diffuse(transformed_batch_[0], transformed_batch_[1]) &&
+            same_diffuse(transformed_batch_[0], transformed_batch_[2]);
+        if (compute_fixture_state) {
+            const auto& diffuse = transformed_batch_[0].diffuse;
+            auto pack_component = [](float value) {
+                return static_cast<uint32_t>(std::floor(
+                    std::clamp(value, 0.0f, 1.0f) * 255.0f + 0.5f));
+            };
+            bool positions_representable = true;
+            for (size_t vertex = 0; vertex < 3; ++vertex) {
+                for (size_t component = 0; component < 2; ++component) {
+                    const float position = transformed_batch_[vertex].position[component];
+                    const double fixed = std::round(static_cast<double>(position) * 16.0);
+                    if (!std::isfinite(position) ||
+                        fixed < static_cast<double>(INT32_MIN) ||
+                        fixed > static_cast<double>(INT32_MAX) ||
+                        std::abs(fixed) > 16384.0) {
+                        positions_representable = false;
+                        break;
+                    }
+                    packet.fixture_xy_16[vertex * 2 + component] =
+                        static_cast<int32_t>(fixed);
+                }
+                if (!positions_representable) break;
+            }
+            if (positions_representable) {
+                const int64_t abx = static_cast<int64_t>(packet.fixture_xy_16[2]) -
+                                    packet.fixture_xy_16[0];
+                const int64_t aby = static_cast<int64_t>(packet.fixture_xy_16[3]) -
+                                    packet.fixture_xy_16[1];
+                const int64_t acx = static_cast<int64_t>(packet.fixture_xy_16[4]) -
+                                    packet.fixture_xy_16[0];
+                const int64_t acy = static_cast<int64_t>(packet.fixture_xy_16[5]) -
+                                    packet.fixture_xy_16[1];
+                // The shader's signed 32-bit edge values are safe under the
+                // coordinate bound above. Only front-facing triangles belong to
+                // this first fixture; other winding is still software-rendered.
+                positions_representable = abx * acy - aby * acx > 0;
+            }
+            if (positions_representable) {
+                packet.compute_fixture =
+                    Nv2aGenericCombinerPacket::ComputeFixture::kUntexturedPrimaryTriangle;
+                packet.fixture_clip_x = clip_x;
+                packet.fixture_clip_y = clip_y;
+                packet.fixture_clip_width = clip_width;
+                packet.fixture_clip_height = clip_height;
+                packet.fixture_source_argb =
+                    (pack_component(diffuse[3]) << 24) |
+                    (pack_component(diffuse[0]) << 16) |
+                    (pack_component(diffuse[1]) << 8) |
+                    pack_component(diffuse[2]);
+            }
+        }
         if (renderer_->supports_generic_combiner(packet)) {
             packet.color_input.resize(static_cast<size_t>(color_bytes64));
             if (!mem_read_ ||
