@@ -8227,6 +8227,148 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     return true;
 }
 
+Nv2a::ClassMethodStat Nv2a::class_method_stat(uint8_t object_class,
+                                               uint32_t method) const {
+    if (method >= 0x2000 || (method & 3u)) return {};
+    size_t slot = 0;
+    if (object_class == 0x62) {
+        slot = 0;
+    } else if (object_class == 0x9F) {
+        slot = 1;
+    } else if (object_class == 0x44) {
+        slot = 2;
+    } else {
+        return {};
+    }
+    const size_t method_index = method >> 2;
+    ClassMethodStat stat;
+    stat.count = class2d_method_stats_[slot].counts[method_index];
+    stat.first_parameter = class2d_method_stats_[slot].first_parameters[method_index];
+    stat.last_parameter = class2d_method_stats_[slot].last_parameters[method_index];
+    return stat;
+}
+
+bool Nv2a::execute_image_blit_srccopy() {
+    if (image_blit_.operation != 3) return true;
+    if (!image_blit_.context_surfaces_bound ||
+        image_blit_.context_surfaces != context_surfaces_2d_.object_instance) {
+        fault_("NV2A IMAGE_BLIT SRCCOPY has unbound/mismatched CONTEXT_SURFACES_2D");
+        return false;
+    }
+    if (!context_surfaces_2d_.dma_source_bound ||
+        !context_surfaces_2d_.dma_dest_bound) {
+        fault_("NV2A IMAGE_BLIT SRCCOPY has unbound source/dest DMA");
+        return false;
+    }
+    uint32_t bytes_per_pixel = 0;
+    switch (context_surfaces_2d_.color_format) {
+    case 0x01: bytes_per_pixel = 1; break;  // LE_Y8
+    case 0x04: bytes_per_pixel = 2; break;  // LE_R5G6B5
+    case 0x0A: bytes_per_pixel = 4; break;  // LE_A8R8G8B8
+    default: {
+        char why[128];
+        std::snprintf(why, sizeof(why),
+                      "NV2A IMAGE_BLIT SRCCOPY unsupported color format 0x%08x",
+                      context_surfaces_2d_.color_format);
+        fault_(why);
+        return false;
+    }
+    }
+    if (image_blit_.width == 0 || image_blit_.height == 0) return true;
+    const uint64_t row_bytes64 =
+        static_cast<uint64_t>(image_blit_.width) * bytes_per_pixel;
+    if (row_bytes64 > std::numeric_limits<uint32_t>::max()) {
+        fault_("NV2A IMAGE_BLIT SRCCOPY row is too wide");
+        return false;
+    }
+    const uint32_t row_bytes = static_cast<uint32_t>(row_bytes64);
+    if (row_bytes > context_surfaces_2d_.source_pitch ||
+        row_bytes > context_surfaces_2d_.dest_pitch) {
+        fault_("NV2A IMAGE_BLIT SRCCOPY row exceeds source/dest pitch");
+        return false;
+    }
+    const uint64_t source_offset64 = static_cast<uint64_t>(
+        context_surfaces_2d_.source_offset) +
+        static_cast<uint64_t>(image_blit_.in_y) * context_surfaces_2d_.source_pitch +
+        static_cast<uint64_t>(image_blit_.in_x) * bytes_per_pixel;
+    const uint64_t dest_offset64 = static_cast<uint64_t>(
+        context_surfaces_2d_.dest_offset) +
+        static_cast<uint64_t>(image_blit_.out_y) * context_surfaces_2d_.dest_pitch +
+        static_cast<uint64_t>(image_blit_.out_x) * bytes_per_pixel;
+    const uint64_t source_span64 =
+        static_cast<uint64_t>(image_blit_.height - 1) *
+            context_surfaces_2d_.source_pitch + row_bytes;
+    const uint64_t dest_span64 =
+        static_cast<uint64_t>(image_blit_.height - 1) *
+            context_surfaces_2d_.dest_pitch + row_bytes;
+    if (source_offset64 > std::numeric_limits<uint32_t>::max() ||
+        dest_offset64 > std::numeric_limits<uint32_t>::max() ||
+        source_offset64 + source_span64 - 1 > std::numeric_limits<uint32_t>::max() ||
+        dest_offset64 + dest_span64 - 1 > std::numeric_limits<uint32_t>::max()) {
+        fault_("NV2A IMAGE_BLIT SRCCOPY offset range overflows");
+        return false;
+    }
+    uint32_t source_address = 0, source_last = 0;
+    uint32_t dest_address = 0, dest_last = 0;
+    if (!dma_object_address(context_surfaces_2d_.dma_source,
+                            static_cast<uint32_t>(source_offset64),
+                            source_address) ||
+        !dma_object_address(context_surfaces_2d_.dma_source,
+                            static_cast<uint32_t>(source_offset64 +
+                                                  source_span64 - 1),
+                            source_last) ||
+        !dma_object_address(context_surfaces_2d_.dma_dest,
+                            static_cast<uint32_t>(dest_offset64),
+                            dest_address) ||
+        !dma_object_address(context_surfaces_2d_.dma_dest,
+                            static_cast<uint32_t>(dest_offset64 +
+                                                  dest_span64 - 1),
+                            dest_last)) {
+        fault_("NV2A IMAGE_BLIT SRCCOPY DMA range is invalid");
+        return false;
+    }
+    if (source_last < source_address || dest_last < dest_address ||
+        static_cast<uint64_t>(source_last) - source_address != source_span64 - 1 ||
+        static_cast<uint64_t>(dest_last) - dest_address != dest_span64 - 1) {
+        fault_("NV2A IMAGE_BLIT SRCCOPY DMA range is non-contiguous");
+        return false;
+    }
+    if (!resolve_renderer_color_overlap(source_address, static_cast<size_t>(source_span64),
+                                        "IMAGE_BLIT source") ||
+        !resolve_renderer_color_overlap(dest_address, static_cast<size_t>(dest_span64),
+                                        "IMAGE_BLIT destination")) {
+        return false;
+    }
+    std::vector<uint8_t> row(row_bytes);
+    for (uint32_t y = 0; y < image_blit_.height; ++y) {
+        const uint32_t src = source_address + y * context_surfaces_2d_.source_pitch;
+        const uint32_t dst = dest_address + y * context_surfaces_2d_.dest_pitch;
+        if (!mem_read_ || !mem_read_(src, row.data(), row.size())) {
+            char why[128];
+            std::snprintf(why, sizeof(why),
+                          "NV2A IMAGE_BLIT SRCCOPY read failed at 0x%08x", src);
+            fault_(why);
+            return false;
+        }
+        if (!mem_write_ || !mem_write_(dst, row.data(), row.size())) {
+            char why[128];
+            std::snprintf(why, sizeof(why),
+                          "NV2A IMAGE_BLIT SRCCOPY write failed at 0x%08x", dst);
+            fault_(why);
+            return false;
+        }
+    }
+    invalidate_renderer_color_overlap(dest_address, static_cast<size_t>(dest_span64));
+    ++image_blit_copies_;
+    image_blit_bytes_ += static_cast<uint64_t>(row_bytes) * image_blit_.height;
+    last_image_blit_source_ = source_address;
+    last_image_blit_dest_ = dest_address;
+    last_image_blit_size_ =
+        (static_cast<uint32_t>(image_blit_.height) << 16) |
+        (static_cast<uint32_t>(image_blit_.width) & 0xFFFFu);
+    return true;
+}
+
 void Nv2a::dispatch_method(PushMethod push) {
     const uint8_t channel = push.channel;
     const uint8_t subchannel = push.subchannel;
@@ -8282,11 +8424,82 @@ void Nv2a::dispatch_method(PushMethod push) {
     // PFIFO resolves SET_OBJECT through RAMHT, then PGRAPH caches the object's class for
     // this subchannel.
     if (method == 0) {
-        if (object_bound)
+        if (object_bound) {
             ++class_method_counts_[object_class_[subchannel]];
+            if (object_class_[subchannel] == 0x62) {
+                context_surfaces_2d_.object_instance = object_instance_[subchannel];
+            } else if (object_class_[subchannel] == 0x9F) {
+                image_blit_.object_instance = object_instance_[subchannel];
+            }
+        }
         return;
     }
     ++class_method_counts_[object_class_[subchannel]];
+    if (method < 0x2000 && !(method & 3u)) {
+        size_t class2d_slot = class2d_method_stats_.size();
+        if (object_class_[subchannel] == 0x62) {
+            class2d_slot = 0;
+        } else if (object_class_[subchannel] == 0x9F) {
+            class2d_slot = 1;
+        } else if (object_class_[subchannel] == 0x44) {
+            class2d_slot = 2;
+        }
+        if (class2d_slot < class2d_method_stats_.size()) {
+            const size_t method_index = method >> 2;
+            auto& stats = class2d_method_stats_[class2d_slot];
+            if (stats.counts[method_index] == 0)
+                stats.first_parameters[method_index] = parameter;
+            ++stats.counts[method_index];
+            stats.last_parameters[method_index] = parameter;
+        }
+    }
+    if (object_class_[subchannel] == 0x62) {
+        if (method == 0x0184) {
+            uint32_t instance = 0;
+            if (resolve_object(channel, parameter, instance)) {
+                context_surfaces_2d_.dma_source = instance;
+                context_surfaces_2d_.dma_source_bound = true;
+            }
+        } else if (method == 0x0188) {
+            uint32_t instance = 0;
+            if (resolve_object(channel, parameter, instance)) {
+                context_surfaces_2d_.dma_dest = instance;
+                context_surfaces_2d_.dma_dest_bound = true;
+            }
+        } else if (method == 0x0300) {
+            context_surfaces_2d_.color_format = parameter;
+        } else if (method == 0x0304) {
+            context_surfaces_2d_.source_pitch = parameter & 0xFFFFu;
+            context_surfaces_2d_.dest_pitch = parameter >> 16;
+        } else if (method == 0x0308) {
+            context_surfaces_2d_.source_offset = parameter & 0x07FFFFFFu;
+        } else if (method == 0x030C) {
+            context_surfaces_2d_.dest_offset = parameter & 0x07FFFFFFu;
+        }
+        return;
+    }
+    if (object_class_[subchannel] == 0x9F) {
+        if (method == 0x019C) {
+            uint32_t instance = 0;
+            if (resolve_object(channel, parameter, instance)) {
+                image_blit_.context_surfaces = instance;
+                image_blit_.context_surfaces_bound = true;
+            }
+        } else if (method == 0x02FC) {
+            image_blit_.operation = parameter;
+        } else if (method == 0x0300) {
+            image_blit_.in_x = parameter & 0xFFFFu;
+            image_blit_.in_y = parameter >> 16;
+        } else if (method == 0x0304) {
+            image_blit_.out_x = parameter & 0xFFFFu;
+            image_blit_.out_y = parameter >> 16;
+        } else if (method == 0x0308) {
+            image_blit_.width = parameter & 0xFFFFu;
+            image_blit_.height = parameter >> 16;
+            execute_image_blit_srccopy();
+        }
+        return;
+    }
     // NV_CONTEXT_PATTERN (class 0x44) method NV044_SET_MONOCHROME_COLOR0 feeds the
     // guest-readable PGRAPH pattern-color shadow. The stock dashboard polls this state
     // while setting up its 2D context; modeling the register does not render 2D methods.

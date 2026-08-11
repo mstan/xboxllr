@@ -2218,6 +2218,32 @@ int main(int argc, char** argv) {
                             (unsigned long long)mach.nv2a()->class_method_count(0x9F),
                             (unsigned long long)mach.nv2a()->class_method_count(0x44),
                             (unsigned long long)mach.nv2a()->class_method_count(0));
+                auto print_2d_methods = [&](uint8_t object_class, const char* name) {
+                    bool any = false;
+                    for (uint32_t method = 0; method < 0x2000; method += 4) {
+                        auto stat = mach.nv2a()->class_method_stat(object_class, method);
+                        if (!stat.count) continue;
+                        if (!any) {
+                            std::printf("[2bl] NV2A %s methods:\n", name);
+                            any = true;
+                        }
+                        std::printf("[2bl]   class=0x%02x method=0x%04x count=%llu "
+                                    "first=0x%08x last=0x%08x\n",
+                                    object_class, method,
+                                    (unsigned long long)stat.count,
+                                    stat.first_parameter, stat.last_parameter);
+                    }
+                };
+                print_2d_methods(0x62, "class62");
+                print_2d_methods(0x9F, "class9f");
+                print_2d_methods(0x44, "class44");
+                std::printf("[2bl] NV2A image-blit: copies=%llu bytes=%llu "
+                            "last-src=%08x last-dst=%08x last-size=%08x\n",
+                            (unsigned long long)mach.nv2a()->image_blit_copies(),
+                            (unsigned long long)mach.nv2a()->image_blit_bytes(),
+                            mach.nv2a()->last_image_blit_source(),
+                            mach.nv2a()->last_image_blit_dest(),
+                            mach.nv2a()->last_image_blit_size());
                 std::printf("[2bl] NV2A raster: color-clears/pixels=%llu/%llu "
                             "last=%08x zeta-clears/pixels=%llu/%llu last=%08x "
                             "depth-batches/tri/frags/pass/writes=%llu/%llu/%llu/%llu/%llu "

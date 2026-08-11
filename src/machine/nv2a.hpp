@@ -133,6 +133,17 @@ public:
     uint64_t class_method_count(uint8_t object_class) const {
         return class_method_counts_[object_class];
     }
+    struct ClassMethodStat {
+        uint64_t count = 0;
+        uint32_t first_parameter = 0;
+        uint32_t last_parameter = 0;
+    };
+    ClassMethodStat class_method_stat(uint8_t object_class, uint32_t method) const;
+    uint64_t image_blit_copies() const { return image_blit_copies_; }
+    uint64_t image_blit_bytes() const { return image_blit_bytes_; }
+    uint32_t last_image_blit_source() const { return last_image_blit_source_; }
+    uint32_t last_image_blit_dest() const { return last_image_blit_dest_; }
+    uint32_t last_image_blit_size() const { return last_image_blit_size_; }
     uint64_t semaphore_writes() const { return semaphore_writes_; }
     uint64_t flip_increments() const { return flip_increments_; }
     uint64_t flip_stalls() const { return flip_stalls_; }
@@ -1184,6 +1195,7 @@ private:
     bool resolve_renderer_color_overlap(uint32_t address, size_t size,
                                         const char* context);
     void invalidate_renderer_color_overlap(uint32_t address, size_t size);
+    bool execute_image_blit_srccopy();
 
     FaultFn fault_;
     std::function<void(bool, uint32_t, uint32_t, const char*, uint32_t)> unmodeled_cb_;
@@ -1223,6 +1235,12 @@ private:
     std::vector<PushMethod> clear_trace_methods_;
     std::array<uint64_t, 0x800> method_counts_{};
     std::array<uint64_t, 256> class_method_counts_{};
+    struct ClassMethodStats {
+        std::array<uint64_t, 0x800> counts{};
+        std::array<uint32_t, 0x800> first_parameters{};
+        std::array<uint32_t, 0x800> last_parameters{};
+    };
+    std::array<ClassMethodStats, 3> class2d_method_stats_{};
     // CACHE1 exposes 0x800 bytes of interleaved METHOD/DATA storage at
     // 0x1800..0x1fff: 0x800 / 8 = 256 method/data entries.
     static constexpr size_t kPullQueueCapacity = 256;
@@ -1250,6 +1268,37 @@ private:
     uint32_t pgraph_trapped_addr_ = 0;
     uint32_t pgraph_trapped_data_ = 0;
     uint32_t patt_color0_ = 0;
+    struct ContextSurfaces2DState {
+        uint32_t object_instance = 0;
+        uint32_t dma_source = 0;
+        uint32_t dma_dest = 0;
+        bool dma_source_bound = false;
+        bool dma_dest_bound = false;
+        uint32_t color_format = 0;
+        uint32_t source_pitch = 0;
+        uint32_t dest_pitch = 0;
+        uint32_t source_offset = 0;
+        uint32_t dest_offset = 0;
+    };
+    ContextSurfaces2DState context_surfaces_2d_{};
+    struct ImageBlitState {
+        uint32_t object_instance = 0;
+        uint32_t context_surfaces = 0;
+        bool context_surfaces_bound = false;
+        uint32_t operation = 0;
+        uint32_t in_x = 0;
+        uint32_t in_y = 0;
+        uint32_t out_x = 0;
+        uint32_t out_y = 0;
+        uint32_t width = 0;
+        uint32_t height = 0;
+    };
+    ImageBlitState image_blit_{};
+    uint64_t image_blit_copies_ = 0;
+    uint64_t image_blit_bytes_ = 0;
+    uint32_t last_image_blit_source_ = 0;
+    uint32_t last_image_blit_dest_ = 0;
+    uint32_t last_image_blit_size_ = 0;
 
     // Minimal Kelvin color-surface state. Object-taking methods hold resolved PRAMIN
     // instances, matching the PFIFO puller's RAMHT translation before PGRAPH dispatch.

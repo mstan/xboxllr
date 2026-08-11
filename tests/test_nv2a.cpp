@@ -265,7 +265,7 @@ int main() {
     CHECK(gpu.push_methods() == methods_before_reset);
 
     // NV_CONTEXT_PATTERN class 0x44 SET_MONOCHROME_COLOR0 updates the guest-readable
-    // NV_PGRAPH_PATT_COLOR0 shadow even though 2D rendering itself remains unimplemented.
+    // NV_PGRAPH_PATT_COLOR0 shadow.
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700200, 4, 0x00000044);
     put32(ram, pb + 0x00, (1u << 18) | 0x0000u);
     put32(ram, pb + 0x04, 0x00000001u);
@@ -276,13 +276,70 @@ int main() {
     CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x400B10, 4) == 0x89ABCDEFu);
     CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x800044, 4) == 0x10);
 
+    // Narrow 2D IMAGE_BLIT SRCCOPY path used by the stock dashboard.
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700020, 4, 0x00000004);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700024, 4, 0x80010050);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700028, 4, 0x00000005);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x70002C, 4, 0x80010051);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700030, 4, 0x00000006);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700034, 4, 0x80010052);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700038, 4, 0x00000007);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x70003C, 4, 0x80010053);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700500, 4, 0x00000062);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700510, 4, 0x0000009F);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700520, 4, 0x0000003D);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700524, 4, 0x00000FFF);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700528, 4, 0x00010000);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700530, 4, 0x0000003D);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700534, 4, 0x00000FFF);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700538, 4, 0x00011000);
+    for (uint32_t y = 0; y < 4; ++y) {
+        for (uint32_t x = 0; x < 4; ++x) {
+            put32(ram, 0x10000 + y * 16 + x * 4,
+                  0xAA000000u | (y << 8) | x);
+            put32(ram, 0x11000 + y * 16 + x * 4, 0xCCCCCCCCu);
+        }
+    }
+    uint32_t cursor_2d = 0x10;
+    auto emit_2d = [&](uint32_t method, uint32_t parameter) {
+        put32(ram, pb + cursor_2d, (1u << 18) | method);
+        put32(ram, pb + cursor_2d + 4, parameter);
+        cursor_2d += 8;
+    };
+    emit_2d(0x0000, 4);       // bind CONTEXT_SURFACES_2D
+    emit_2d(0x0184, 6);       // source DMA
+    emit_2d(0x0188, 7);       // dest DMA
+    emit_2d(0x0300, 0x0A);    // LE_A8R8G8B8
+    emit_2d(0x0304, 0x00100010);
+    emit_2d(0x0308, 0);
+    emit_2d(0x030C, 0);
+    emit_2d(0x0000, 5);       // bind IMAGE_BLIT
+    emit_2d(0x019C, 4);       // context surfaces
+    emit_2d(0x02FC, 3);       // SRCCOPY
+    emit_2d(0x0300, 0x00010001);
+    emit_2d(0x0304, 0x00000002);
+    emit_2d(0x0308, 0x00020002);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor_2d);
+    CHECK(fault.empty());
+    CHECK(gpu.image_blit_copies() == 1);
+    CHECK(gpu.image_blit_bytes() == 16);
+    CHECK(gpu.last_image_blit_source() == 0x10014u);
+    CHECK(gpu.last_image_blit_dest() == 0x11008u);
+    CHECK(gpu.last_image_blit_size() == 0x00020002u);
+    CHECK(get32(ram, 0x11008) == get32(ram, 0x10014));
+    CHECK(get32(ram, 0x1100C) == get32(ram, 0x10018));
+    CHECK(get32(ram, 0x11018) == get32(ram, 0x10024));
+    CHECK(get32(ram, 0x1101C) == get32(ram, 0x10028));
+    CHECK(get32(ram, 0x11000) == 0xCCCCCCCCu);
+
     // Restore and rebind Kelvin for the remaining 3D tests.
     gpu.mmio_write(xlle::Nv2a::kBase + 0x700200, 4, 0x00000097);
-    put32(ram, pb + 0x10, (1u << 18) | 0x0000u);
-    put32(ram, pb + 0x14, 0x00000001u);
-    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, 0x18);
+    put32(ram, pb + cursor_2d, (1u << 18) | 0x0000u);
+    put32(ram, pb + cursor_2d + 4, 0x00000001u);
+    cursor_2d += 8;
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor_2d);
     CHECK(fault.empty());
-    CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x800044, 4) == 0x18);
+    CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x800044, 4) == cursor_2d);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x003200, 4, 0);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x003240, 4, 0);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x003244, 4, 0);
@@ -332,7 +389,8 @@ int main() {
     CHECK(gpu.last_zeta_clear_address() == 0x6000);
     CHECK(gpu.method_count(0x1D94) == 2);
     CHECK(gpu.class_method_count(0x44) == 2);
-    CHECK(gpu.class_method_count(0x97) + gpu.class_method_count(0x44) ==
+    CHECK(gpu.class_method_count(0x97) + gpu.class_method_count(0x44) +
+          gpu.class_method_count(0x62) + gpu.class_method_count(0x9F) ==
           gpu.push_methods());
     CHECK(gpu.class_method_count(0) == 0);
     CHECK(get32(ram, 0x5000) == 0x11BB3344);
