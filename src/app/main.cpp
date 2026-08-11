@@ -766,6 +766,7 @@ int main(int argc, char** argv) {
                               return a.batches > b.batches;
                           });
                 std::printf("[perf-generic] fingerprints=%zu top=", fingerprints.size());
+                Nv2a::RasterStateSample raster_exemplar;
                 const size_t limit = std::min<size_t>(fingerprints.size(), 12);
                 for (size_t i = 0; i < limit; ++i) {
                     const auto& entry = fingerprints[i];
@@ -775,8 +776,46 @@ int main(int argc, char** argv) {
                                 static_cast<unsigned long long>(entry.fragments),
                                 static_cast<unsigned long long>(entry.writes),
                                 static_cast<unsigned long long>(entry.wall_ns));
+                    if (entry.raster_state_sample_index != UINT32_MAX &&
+                        mach.nv2a()->raster_state_sample_at(
+                            entry.raster_state_sample_index, raster_exemplar)) {
+                        const auto& state = raster_exemplar.words;
+                        std::printf(
+                            ":prim%u/v%u-%u/en%08x/sfmt%08x/pitch%08x/sh%08x/comb%08x/surf%08x/full%016llx",
+                            static_cast<unsigned>(entry.primitive_mode),
+                            entry.min_vertices, entry.max_vertices,
+                            state[Nv2a::kRasterEnables],
+                            state[Nv2a::kRasterSurfaceFormat],
+                            state[Nv2a::kRasterSurfacePitch],
+                            state[Nv2a::kRasterShaderStageProgram],
+                            state[Nv2a::kRasterCombinerControl],
+                            state[Nv2a::kRasterSurfaceColorOffset],
+                            static_cast<unsigned long long>(entry.full_state_hash));
+                    }
                 }
                 std::printf("\n");
+                // Keep the compact top-12 line readable, but emit complete,
+                // machine-parseable exemplars for the four hottest states so a
+                // later backend can reproduce a dominant dashboard envelope
+                // without another multi-billion-instruction replay.
+                const size_t state_limit = std::min<size_t>(fingerprints.size(), 4);
+                for (size_t i = 0; i < state_limit; ++i) {
+                    const auto& entry = fingerprints[i];
+                    if (entry.raster_state_sample_index == UINT32_MAX ||
+                        !mach.nv2a()->raster_state_sample_at(
+                            entry.raster_state_sample_index, raster_exemplar))
+                        continue;
+                    std::printf(
+                        "[perf-generic-state] fp=%016llx full=%016llx words=%zu data=",
+                        static_cast<unsigned long long>(entry.fingerprint),
+                        static_cast<unsigned long long>(entry.full_state_hash),
+                        raster_exemplar.words.size());
+                    for (size_t word = 0; word < raster_exemplar.words.size(); ++word) {
+                        if (word) std::printf(",");
+                        std::printf("%08x", raster_exemplar.words[word]);
+                    }
+                    std::printf("\n");
+                }
             };
             auto capture_frame_series = [&]() {
                 if (!frame_series_requested || frame_series_exhausted ||

@@ -467,6 +467,14 @@ public:
         uint64_t fragments = 0;
         uint64_t writes = 0;
         uint64_t wall_ns = 0;
+        // Populated only while --perf-accounting is enabled. This links to the
+        // immutable first full state in raster_state_samples_, keeping normal
+        // replay overhead to one compact index rather than copying state here.
+        uint32_t raster_state_sample_index = UINT32_MAX;
+        uint64_t full_state_hash = 0;
+        uint8_t primitive_mode = 0;
+        uint32_t min_vertices = 0;
+        uint32_t max_vertices = 0;
     };
     size_t generic_combiner_fingerprint_perf_census(
         std::vector<GenericCombinerFingerprintStats>& out) const {
@@ -912,6 +920,11 @@ public:
     size_t raster_state_samples(std::vector<RasterStateSample>& out) const {
         out = raster_state_samples_;
         return out.size();
+    }
+    bool raster_state_sample_at(uint32_t index, RasterStateSample& out) const {
+        if (index >= raster_state_samples_.size()) return false;
+        out = raster_state_samples_[index];
+        return true;
     }
     uint32_t pgraph_surface() const;
     bool waiting_for_flip() const { return waiting_for_flip_; }
@@ -1392,6 +1405,7 @@ private:
     std::array<uint32_t, kRasterStateWords> raster_state_{};
     Nv2aRenderer* renderer_ = nullptr;  // owned by the host/application layer
     std::vector<RasterStateSample> raster_state_samples_;
+    uint32_t current_raster_state_sample_index_ = UINT32_MAX;
     struct TransformedVertex {
         std::array<float, 4> position{};
         std::array<float, 4> diffuse{};

@@ -5032,6 +5032,15 @@ int main() {
             CHECK(perf_census[0].fragments == gc_gpu.generic_combiner_fragments());
             CHECK(perf_census[0].writes == gc_gpu.generic_combiner_writes());
             CHECK(perf_census[0].wall_ns > 0);
+            CHECK(perf_census[0].raster_state_sample_index != UINT32_MAX);
+            CHECK(perf_census[0].full_state_hash != 0);
+            CHECK(perf_census[0].primitive_mode == 5);
+            CHECK(perf_census[0].min_vertices == 3);
+            CHECK(perf_census[0].max_vertices == 3);
+            xlle::Nv2a::RasterStateSample perf_exemplar;
+            CHECK(gc_gpu.raster_state_sample_at(
+                perf_census[0].raster_state_sample_index, perf_exemplar));
+            CHECK(perf_exemplar.words[xlle::Nv2a::kRasterSurfacePitch] == 0x01000100);
             std::vector<std::pair<uint64_t, uint64_t>> legacy_census;
             CHECK(gc_gpu.generic_combiner_fingerprint_census(legacy_census) == 1);
             CHECK(legacy_census[0].first == perf_census[0].fingerprint);

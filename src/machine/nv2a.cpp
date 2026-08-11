@@ -1041,6 +1041,7 @@ bool Nv2a::submit_vertex_batch() {
     }
     auto& tracked_raster_sample =
         raster_state_samples_[raster_sample_index];
+    current_raster_state_sample_index_ = static_cast<uint32_t>(raster_sample_index);
     tracked_raster_sample.vertices += vertex_count;
     tracked_raster_sample.inline_batches += inline_array ? 1 : 0;
     ++tracked_raster_sample.primitive_batches[primitive_mode_];
@@ -6402,11 +6403,32 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             generic_combiner_fingerprints_.end(),
             [&](const auto& entry) { return entry.fingerprint == fingerprint; });
         if (it == generic_combiner_fingerprints_.end()) {
-            generic_combiner_fingerprints_.push_back({fingerprint, 1, 0, 0, 0});
+            GenericCombinerFingerprintStats entry;
+            entry.fingerprint = fingerprint;
+            entry.batches = 1;
+            generic_combiner_fingerprints_.push_back(std::move(entry));
             generic_fingerprint_stats = &generic_combiner_fingerprints_.back();
         } else {
             ++it->batches;
             generic_fingerprint_stats = &*it;
+        }
+        if (profile_generic_fingerprint) {
+            const uint32_t vertex_count = static_cast<uint32_t>(std::min<size_t>(
+                transformed_batch_.size(), std::numeric_limits<uint32_t>::max()));
+            if (generic_fingerprint_stats->raster_state_sample_index == UINT32_MAX) {
+                generic_fingerprint_stats->raster_state_sample_index =
+                    current_raster_state_sample_index_;
+                generic_fingerprint_stats->full_state_hash =
+                    fnv1a_bytes(raster_state_.data(), sizeof(raster_state_));
+                generic_fingerprint_stats->primitive_mode = primitive_mode_;
+                generic_fingerprint_stats->min_vertices = vertex_count;
+                generic_fingerprint_stats->max_vertices = vertex_count;
+            } else {
+                generic_fingerprint_stats->min_vertices = std::min(
+                    generic_fingerprint_stats->min_vertices, vertex_count);
+                generic_fingerprint_stats->max_vertices = std::max(
+                    generic_fingerprint_stats->max_vertices, vertex_count);
+            }
         }
     }
     auto record_generic_fingerprint_perf = [&]() {
