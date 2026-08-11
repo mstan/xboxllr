@@ -723,6 +723,18 @@ bool Nv2a::clear_surface(uint32_t parameter) {
         ++color_clears_;
         color_clear_pixels_ += width * height;
         last_color_clear_address_ = first_address;
+        if (surface_write_debug_cb_ && bytes_per_pixel == 4) {
+            SurfaceWriteDebugInfo info;
+            info.kind = "clear-color";
+            info.sequence = color_clears_;
+            info.writes = width * height;
+            info.color_address = first_address;
+            info.pitch = surface_pitch_ & 0xFFFFu;
+            info.width = static_cast<uint32_t>(width);
+            info.height = static_cast<uint32_t>(height);
+            info.surface_format = surface_format_;
+            surface_write_debug_cb_(info);
+        }
     }
 
     if (parameter & 3u) {
@@ -5468,6 +5480,23 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
     }
     if (color_profile)
         invalidate_renderer_color_overlap(color_address, static_cast<size_t>(color_bytes64));
+    if (color_profile && surface_write_debug_cb_) {
+        SurfaceWriteDebugInfo info;
+        info.kind = "witnessed";
+        info.sequence = vertex_batches_;
+        info.color_address = color_address;
+        info.pitch = pitch;
+        info.width = pitch / 4u;
+        info.height = surface_height;
+        info.surface_format = surface_format_;
+        info.shader_stage_program = raster_state_[kRasterShaderStageProgram];
+        info.combiner_control = raster_state_[kRasterCombinerControl];
+        info.primitive_mode = primitive_mode_;
+        info.vertex_count = static_cast<uint32_t>(std::min<size_t>(
+            transformed_batch_.size(), std::numeric_limits<uint32_t>::max()));
+        info.profile = static_cast<uint32_t>(profile);
+        surface_write_debug_cb_(info);
+    }
     if (profile == Profile::kPitchZ16Depth)
         ++depth_raster_batches_;
     else if (profile == Profile::kSwizzledRadialColor)
@@ -5603,10 +5632,12 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     // counter snapshots and clock reads behind --perf-accounting: normal replays
     // retain the pre-profiling path's fingerprint-batch census cost only.
     const bool profile_generic_fingerprint = perf::g_enabled;
+    const bool capture_generic_deltas =
+        profile_generic_fingerprint || generic_batch_debug_cb_ || surface_write_debug_cb_;
     const uint64_t generic_fragments_before =
-        profile_generic_fingerprint ? generic_combiner_fragments_ : 0;
+        capture_generic_deltas ? generic_combiner_fragments_ : 0;
     const uint64_t generic_writes_before =
-        profile_generic_fingerprint ? generic_combiner_writes_ : 0;
+        capture_generic_deltas ? generic_combiner_writes_ : 0;
     std::chrono::steady_clock::time_point generic_started_at;
     if (profile_generic_fingerprint)
         generic_started_at = std::chrono::steady_clock::now();
@@ -7030,21 +7061,26 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     ++generic_combiner_fallback_batches_;
     executed = true;
     ++generic_combiner_batches_;
+    const uint64_t generic_batch_index = generic_combiner_batches_;
     GenericCombinerFingerprintStats* generic_fingerprint_stats = nullptr;
+    uint64_t generic_batch_fingerprint = 1469598103934665603ull;
+    uint64_t generic_batch_full_hash =
+        fnv1a_bytes(raster_state_.data(), sizeof(raster_state_));
     {
-        uint64_t fingerprint = 1469598103934665603ull;
         for (uint32_t index = kRasterShaderStageProgram;
              index <= kRasterCombinerFinalFactor1; ++index) {
-            fingerprint ^= raster_state_[index];
-            fingerprint *= 1099511628211ull;
+            generic_batch_fingerprint ^= raster_state_[index];
+            generic_batch_fingerprint *= 1099511628211ull;
         }
         auto it = std::find_if(
             generic_combiner_fingerprints_.begin(),
             generic_combiner_fingerprints_.end(),
-            [&](const auto& entry) { return entry.fingerprint == fingerprint; });
+            [&](const auto& entry) {
+                return entry.fingerprint == generic_batch_fingerprint;
+            });
         if (it == generic_combiner_fingerprints_.end()) {
             GenericCombinerFingerprintStats entry;
-            entry.fingerprint = fingerprint;
+            entry.fingerprint = generic_batch_fingerprint;
             entry.batches = 1;
             generic_combiner_fingerprints_.push_back(std::move(entry));
             generic_fingerprint_stats = &generic_combiner_fingerprints_.back();
@@ -7073,8 +7109,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             if (generic_fingerprint_stats->raster_state_sample_index == UINT32_MAX) {
                 generic_fingerprint_stats->raster_state_sample_index =
                     current_raster_state_sample_index_;
-                generic_fingerprint_stats->full_state_hash =
-                    fnv1a_bytes(raster_state_.data(), sizeof(raster_state_));
+                generic_fingerprint_stats->full_state_hash = generic_batch_full_hash;
                 generic_fingerprint_stats->primitive_mode = primitive_mode_;
                 generic_fingerprint_stats->min_vertices = vertex_count;
                 generic_fingerprint_stats->max_vertices = vertex_count;
@@ -7901,6 +7936,51 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         fault_("NV2A generic-combiner zeta DMA write failed");
         record_generic_fingerprint_perf();
         return false;
+    }
+    if (generic_batch_debug_cb_) {
+        GenericBatchDebugInfo info;
+        info.batch = generic_batch_index;
+        info.fragments = generic_combiner_fragments_ - generic_fragments_before;
+        info.writes = generic_combiner_writes_ - generic_writes_before;
+        info.fingerprint = generic_batch_fingerprint;
+        info.full_state_hash = generic_batch_full_hash;
+        info.color_address = color_address;
+        info.pitch = pitch;
+        info.width = pitch / 4u;
+        info.height = surface_height;
+        info.surface_format = surface_format_;
+        info.shader_stage_program = raster_state_[kRasterShaderStageProgram];
+        info.combiner_control = raster_state_[kRasterCombinerControl];
+        info.primitive_mode = primitive_mode_;
+        info.vertex_count = static_cast<uint32_t>(std::min<size_t>(
+            transformed_batch_.size(), std::numeric_limits<uint32_t>::max()));
+        info.texture_modulate_observed = texture_modulate_observed_this_batch;
+        info.texture_modulate_exact = texture_modulate_exact_this_batch;
+        info.texture_modulate_reject =
+            texture_modulate_reject_this_batch == GenericTextureModulateRejectReason::kCount
+                ? UINT32_MAX
+                : static_cast<uint32_t>(texture_modulate_reject_this_batch);
+        generic_batch_debug_cb_(info);
+    }
+    if (surface_write_debug_cb_) {
+        SurfaceWriteDebugInfo info;
+        info.kind = "generic";
+        info.sequence = generic_batch_index;
+        info.fragments = generic_combiner_fragments_ - generic_fragments_before;
+        info.writes = generic_combiner_writes_ - generic_writes_before;
+        info.fingerprint = generic_batch_fingerprint;
+        info.full_state_hash = generic_batch_full_hash;
+        info.color_address = color_address;
+        info.pitch = pitch;
+        info.width = pitch / 4u;
+        info.height = surface_height;
+        info.surface_format = surface_format_;
+        info.shader_stage_program = raster_state_[kRasterShaderStageProgram];
+        info.combiner_control = raster_state_[kRasterCombinerControl];
+        info.primitive_mode = primitive_mode_;
+        info.vertex_count = static_cast<uint32_t>(std::min<size_t>(
+            transformed_batch_.size(), std::numeric_limits<uint32_t>::max()));
+        surface_write_debug_cb_(info);
     }
     ++generic_combiner_executed_batches_;
     record_generic_fingerprint_perf();

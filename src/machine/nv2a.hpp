@@ -71,6 +71,50 @@ public:
         mem_write_ = std::move(write);
     }
 
+    struct GenericBatchDebugInfo {
+        uint64_t batch = 0;
+        uint64_t fragments = 0;
+        uint64_t writes = 0;
+        uint64_t fingerprint = 0;
+        uint64_t full_state_hash = 0;
+        uint32_t color_address = 0;
+        uint32_t pitch = 0;
+        uint32_t width = 0;
+        uint32_t height = 0;
+        uint32_t surface_format = 0;
+        uint32_t shader_stage_program = 0;
+        uint32_t combiner_control = 0;
+        uint32_t primitive_mode = 0;
+        uint32_t vertex_count = 0;
+        bool texture_modulate_observed = false;
+        bool texture_modulate_exact = false;
+        uint32_t texture_modulate_reject = 0;
+    };
+    void on_generic_batch_complete(std::function<void(const GenericBatchDebugInfo&)> cb) {
+        generic_batch_debug_cb_ = std::move(cb);
+    }
+    struct SurfaceWriteDebugInfo {
+        const char* kind = "";
+        uint64_t sequence = 0;
+        uint64_t fragments = 0;
+        uint64_t writes = 0;
+        uint64_t fingerprint = 0;
+        uint64_t full_state_hash = 0;
+        uint32_t color_address = 0;
+        uint32_t pitch = 0;
+        uint32_t width = 0;
+        uint32_t height = 0;
+        uint32_t surface_format = 0;
+        uint32_t shader_stage_program = 0;
+        uint32_t combiner_control = 0;
+        uint32_t primitive_mode = 0;
+        uint32_t vertex_count = 0;
+        uint32_t profile = 0;
+    };
+    void on_surface_write_complete(std::function<void(const SurfaceWriteDebugInfo&)> cb) {
+        surface_write_debug_cb_ = std::move(cb);
+    }
+
     struct PushMethod {
         uint64_t seq = 0;
         uint8_t channel = 0;
@@ -1555,6 +1599,8 @@ private:
     std::array<uint64_t, 8> fixed_light_control_batches_{};
     std::array<uint32_t, kRasterStateWords> raster_state_{};
     Nv2aRenderer* renderer_ = nullptr;  // owned by the host/application layer
+    std::function<void(const GenericBatchDebugInfo&)> generic_batch_debug_cb_;
+    std::function<void(const SurfaceWriteDebugInfo&)> surface_write_debug_cb_;
     std::vector<RasterStateSample> raster_state_samples_;
     uint32_t current_raster_state_sample_index_ = UINT32_MAX;
     struct TransformedVertex {

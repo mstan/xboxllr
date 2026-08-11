@@ -309,6 +309,18 @@ bool parse_u32_arg(const char* text, uint32_t& value) {
     return true;
 }
 
+bool parse_u64_arg(const char* text, uint64_t& value) {
+    if (!text || !text[0] || text[0] == '-' || text[0] == '+' ||
+        std::isspace(static_cast<unsigned char>(text[0])))
+        return false;
+    char* end = nullptr;
+    errno = 0;
+    const unsigned long long parsed = std::strtoull(text, &end, 0);
+    if (errno == ERANGE || !end || *end != '\0') return false;
+    value = static_cast<uint64_t>(parsed);
+    return true;
+}
+
 bool capture_argb32_surface(XboxMachine& mach, uint32_t address, uint32_t pitch,
                             uint32_t width, uint32_t height,
                             std::vector<uint8_t>& rgba, std::string& error) {
@@ -366,6 +378,8 @@ int main(int argc, char** argv) {
     const char* eeprom = nullptr;
     const char* frame_dump = nullptr;
     const char* debug_surface_dump = nullptr;
+    const char* debug_generic_surface_snapshot_prefix = nullptr;
+    const char* debug_nv2a_surface_snapshot_prefix = nullptr;
     const char* frame_series_prefix = nullptr;
     const char* test_input_capture_prefix = nullptr;
     const char* test_input_script = nullptr;
@@ -378,6 +392,14 @@ int main(int argc, char** argv) {
     uint32_t debug_surface_pitch = 0;
     uint32_t debug_surface_width = 0;
     uint32_t debug_surface_height = 0;
+    uint32_t debug_generic_surface_snapshot_address = 0;
+    uint64_t debug_generic_surface_snapshot_skip = 0;
+    uint64_t debug_generic_surface_snapshot_count = 0;
+    uint64_t debug_generic_surface_snapshot_interval = 1;
+    uint32_t debug_nv2a_surface_snapshot_address = 0;
+    uint64_t debug_nv2a_surface_snapshot_skip = 0;
+    uint64_t debug_nv2a_surface_snapshot_count = 0;
+    uint64_t debug_nv2a_surface_snapshot_interval = 1;
     uint64_t max_insns = 128ull * 1000 * 1000;  // 2BL kernel LZX decompress needs tens of M
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--serve")) serve = true;
@@ -451,6 +473,48 @@ int main(int argc, char** argv) {
                 std::fprintf(
                     stderr,
                     "[host] --debug-surface-dump expects path plus 32-bit addr/pitch/width/height\n");
+                return 1;
+            }
+        }
+        else if (!std::strcmp(argv[i], "--debug-generic-surface-snapshots")) {
+            if (i + 5 >= argc) {
+                std::fprintf(
+                    stderr,
+                    "[host] use --debug-generic-surface-snapshots <path-prefix> <addr> <skip> <count> <interval>\n");
+                return 1;
+            }
+            debug_generic_surface_snapshot_prefix = argv[++i];
+            if (!debug_generic_surface_snapshot_prefix[0] ||
+                !parse_u32_arg(argv[++i], debug_generic_surface_snapshot_address) ||
+                !parse_u64_arg(argv[++i], debug_generic_surface_snapshot_skip) ||
+                !parse_u64_arg(argv[++i], debug_generic_surface_snapshot_count) ||
+                !parse_u64_arg(argv[++i], debug_generic_surface_snapshot_interval) ||
+                debug_generic_surface_snapshot_count == 0 ||
+                debug_generic_surface_snapshot_interval == 0) {
+                std::fprintf(
+                    stderr,
+                    "[host] --debug-generic-surface-snapshots expects prefix, 32-bit addr, and positive count/interval\n");
+                return 1;
+            }
+        }
+        else if (!std::strcmp(argv[i], "--debug-nv2a-surface-snapshots")) {
+            if (i + 5 >= argc) {
+                std::fprintf(
+                    stderr,
+                    "[host] use --debug-nv2a-surface-snapshots <path-prefix> <addr> <skip> <count> <interval>\n");
+                return 1;
+            }
+            debug_nv2a_surface_snapshot_prefix = argv[++i];
+            if (!debug_nv2a_surface_snapshot_prefix[0] ||
+                !parse_u32_arg(argv[++i], debug_nv2a_surface_snapshot_address) ||
+                !parse_u64_arg(argv[++i], debug_nv2a_surface_snapshot_skip) ||
+                !parse_u64_arg(argv[++i], debug_nv2a_surface_snapshot_count) ||
+                !parse_u64_arg(argv[++i], debug_nv2a_surface_snapshot_interval) ||
+                debug_nv2a_surface_snapshot_count == 0 ||
+                debug_nv2a_surface_snapshot_interval == 0) {
+                std::fprintf(
+                    stderr,
+                    "[host] --debug-nv2a-surface-snapshots expects prefix, 32-bit addr, and positive count/interval\n");
                 return 1;
             }
         }
@@ -752,6 +816,198 @@ int main(int argc, char** argv) {
                 std::printf("[host] PFIFO clear trace armed for color base 0x%08x\n",
                             pfifo_clear_trace_target);
             }
+            if (debug_generic_surface_snapshot_prefix && mach.nv2a()) {
+                uint64_t matched_batches = 0;
+                uint64_t written_snapshots = 0;
+                bool snapshot_failure_logged = false;
+                mach.nv2a()->on_generic_batch_complete(
+                    [&, matched_batches, written_snapshots,
+                     snapshot_failure_logged](const Nv2a::GenericBatchDebugInfo& info)
+                        mutable {
+                            if (info.color_address !=
+                                debug_generic_surface_snapshot_address)
+                                return;
+                            ++matched_batches;
+                            const bool after_skip =
+                                matched_batches > debug_generic_surface_snapshot_skip;
+                            const bool on_interval =
+                                after_skip &&
+                                ((matched_batches -
+                                  debug_generic_surface_snapshot_skip - 1) %
+                                     debug_generic_surface_snapshot_interval ==
+                                 0);
+                            if (!on_interval ||
+                                written_snapshots >=
+                                    debug_generic_surface_snapshot_count) {
+                                return;
+                            }
+                            std::vector<uint8_t> surface_rgba;
+                            std::string surface_error;
+                            const bool captured = capture_argb32_surface(
+                                mach, info.color_address, info.pitch, info.width,
+                                info.height, surface_rgba, surface_error);
+                            char path[1024];
+                            const int path_len = std::snprintf(
+                                path, sizeof(path),
+                                "%s-match%06llu-batch%010llu.ppm",
+                                debug_generic_surface_snapshot_prefix,
+                                static_cast<unsigned long long>(matched_batches),
+                                static_cast<unsigned long long>(info.batch));
+                            const bool path_ok =
+                                path_len > 0 &&
+                                static_cast<size_t>(path_len) < sizeof(path);
+                            const bool written =
+                                captured && path_ok &&
+                                write_frame_ppm(path, surface_rgba, info.width,
+                                                info.height);
+                            if (written) {
+                                ++written_snapshots;
+                                std::printf(
+                                    "[debug-generic-surface] wrote %s target=%08x "
+                                    "match=%llu batch=%llu fp=%016llx full=%016llx "
+                                    "prim=%u verts=%u sfmt=%08x shader=%08x "
+                                    "comb=%08x frags=%llu writes=%llu texmod=%u "
+                                    "exact=%u reject=%u hash=%016llx\n",
+                                    path, info.color_address,
+                                    static_cast<unsigned long long>(matched_batches),
+                                    static_cast<unsigned long long>(info.batch),
+                                    static_cast<unsigned long long>(info.fingerprint),
+                                    static_cast<unsigned long long>(info.full_state_hash),
+                                    info.primitive_mode, info.vertex_count,
+                                    info.surface_format,
+                                    info.shader_stage_program,
+                                    info.combiner_control,
+                                    static_cast<unsigned long long>(info.fragments),
+                                    static_cast<unsigned long long>(info.writes),
+                                    info.texture_modulate_observed ? 1u : 0u,
+                                    info.texture_modulate_exact ? 1u : 0u,
+                                    info.texture_modulate_reject,
+                                    static_cast<unsigned long long>(
+                                        frame_hash(surface_rgba)));
+                            } else if (!snapshot_failure_logged) {
+                                snapshot_failure_logged = true;
+                                std::printf(
+                                    "[debug-generic-surface] FAILED target=%08x "
+                                    "match=%llu batch=%llu pitch=%u size=%ux%u%s%s%s\n",
+                                    info.color_address,
+                                    static_cast<unsigned long long>(matched_batches),
+                                    static_cast<unsigned long long>(info.batch),
+                                    info.pitch, info.width, info.height,
+                                    surface_error.empty() ? "" : " (",
+                                    surface_error.empty()
+                                        ? ""
+                                        : surface_error.c_str(),
+                                    surface_error.empty() ? "" : ")");
+                            }
+                        });
+                std::printf(
+                    "[host] generic surface snapshots armed: prefix=%s target=%08x "
+                    "skip=%llu count=%llu interval=%llu\n",
+                    debug_generic_surface_snapshot_prefix,
+                    debug_generic_surface_snapshot_address,
+                    static_cast<unsigned long long>(
+                        debug_generic_surface_snapshot_skip),
+                    static_cast<unsigned long long>(
+                        debug_generic_surface_snapshot_count),
+                    static_cast<unsigned long long>(
+                        debug_generic_surface_snapshot_interval));
+            }
+            if (debug_nv2a_surface_snapshot_prefix && mach.nv2a()) {
+                uint64_t matched_events = 0;
+                uint64_t written_snapshots = 0;
+                bool snapshot_failure_logged = false;
+                mach.nv2a()->on_surface_write_complete(
+                    [&, matched_events, written_snapshots,
+                     snapshot_failure_logged](const Nv2a::SurfaceWriteDebugInfo& info)
+                        mutable {
+                            if (info.color_address !=
+                                debug_nv2a_surface_snapshot_address)
+                                return;
+                            ++matched_events;
+                            const bool after_skip =
+                                matched_events > debug_nv2a_surface_snapshot_skip;
+                            const bool on_interval =
+                                after_skip &&
+                                ((matched_events -
+                                  debug_nv2a_surface_snapshot_skip - 1) %
+                                     debug_nv2a_surface_snapshot_interval ==
+                                 0);
+                            if (!on_interval ||
+                                written_snapshots >=
+                                    debug_nv2a_surface_snapshot_count) {
+                                return;
+                            }
+                            std::vector<uint8_t> surface_rgba;
+                            std::string surface_error;
+                            const bool captured = capture_argb32_surface(
+                                mach, info.color_address, info.pitch, info.width,
+                                info.height, surface_rgba, surface_error);
+                            char path[1024];
+                            const int path_len = std::snprintf(
+                                path, sizeof(path),
+                                "%s-event%06llu-%s-seq%010llu.ppm",
+                                debug_nv2a_surface_snapshot_prefix,
+                                static_cast<unsigned long long>(matched_events),
+                                info.kind,
+                                static_cast<unsigned long long>(info.sequence));
+                            const bool path_ok =
+                                path_len > 0 &&
+                                static_cast<size_t>(path_len) < sizeof(path);
+                            const bool written =
+                                captured && path_ok &&
+                                write_frame_ppm(path, surface_rgba, info.width,
+                                                info.height);
+                            if (written) {
+                                ++written_snapshots;
+                                std::printf(
+                                    "[debug-nv2a-surface] wrote %s kind=%s "
+                                    "target=%08x event=%llu seq=%llu profile=%u "
+                                    "fp=%016llx full=%016llx prim=%u verts=%u "
+                                    "sfmt=%08x shader=%08x comb=%08x "
+                                    "frags=%llu writes=%llu hash=%016llx\n",
+                                    path, info.kind, info.color_address,
+                                    static_cast<unsigned long long>(matched_events),
+                                    static_cast<unsigned long long>(info.sequence),
+                                    info.profile,
+                                    static_cast<unsigned long long>(info.fingerprint),
+                                    static_cast<unsigned long long>(info.full_state_hash),
+                                    info.primitive_mode, info.vertex_count,
+                                    info.surface_format,
+                                    info.shader_stage_program,
+                                    info.combiner_control,
+                                    static_cast<unsigned long long>(info.fragments),
+                                    static_cast<unsigned long long>(info.writes),
+                                    static_cast<unsigned long long>(
+                                        frame_hash(surface_rgba)));
+                            } else if (!snapshot_failure_logged) {
+                                snapshot_failure_logged = true;
+                                std::printf(
+                                    "[debug-nv2a-surface] FAILED kind=%s "
+                                    "target=%08x event=%llu seq=%llu pitch=%u "
+                                    "size=%ux%u%s%s%s\n",
+                                    info.kind, info.color_address,
+                                    static_cast<unsigned long long>(matched_events),
+                                    static_cast<unsigned long long>(info.sequence),
+                                    info.pitch, info.width, info.height,
+                                    surface_error.empty() ? "" : " (",
+                                    surface_error.empty()
+                                        ? ""
+                                        : surface_error.c_str(),
+                                    surface_error.empty() ? "" : ")");
+                            }
+                        });
+                std::printf(
+                    "[host] NV2A surface snapshots armed: prefix=%s target=%08x "
+                    "skip=%llu count=%llu interval=%llu\n",
+                    debug_nv2a_surface_snapshot_prefix,
+                    debug_nv2a_surface_snapshot_address,
+                    static_cast<unsigned long long>(
+                        debug_nv2a_surface_snapshot_skip),
+                    static_cast<unsigned long long>(
+                        debug_nv2a_surface_snapshot_count),
+                    static_cast<unsigned long long>(
+                        debug_nv2a_surface_snapshot_interval));
+            }
             if (hdd) {
                 if (!mach.attach_hdd(hdd)) {
                     std::fprintf(stderr, "[hdd] attach failed: %s\n", hdd);
@@ -905,10 +1161,10 @@ int main(int argc, char** argv) {
                 }
                 std::printf("\n");
                 // Keep the compact top-12 line readable, but emit complete,
-                // machine-parseable exemplars for the four hottest states so a
+                // machine-parseable exemplars for the twelve hottest states so a
                 // later backend can reproduce a dominant dashboard envelope
                 // without another multi-billion-instruction replay.
-                const size_t state_limit = std::min<size_t>(fingerprints.size(), 4);
+                const size_t state_limit = std::min<size_t>(fingerprints.size(), 12);
                 for (size_t i = 0; i < state_limit; ++i) {
                     const auto& entry = fingerprints[i];
                     if (entry.raster_state_sample_index == UINT32_MAX ||
