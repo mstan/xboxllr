@@ -489,6 +489,59 @@ public:
                    ? generic_combiner_resident_rejects_[index]
                    : 0;
     }
+    uint64_t generic_combiner_texture_modulate_observed() const {
+        return generic_combiner_texture_modulate_observed_;
+    }
+    uint64_t generic_combiner_texture_modulate_exact() const {
+        return generic_combiner_texture_modulate_exact_;
+    }
+    enum class GenericTextureModulateRejectReason {
+        kUnsupportedPrimitive,
+        kVertexCount,
+        kTextureInput,
+        kDepth,
+        kColorMask,
+        kColorFormat,
+        kStageCount,
+        kAlphaMode,
+        kBlendMode,
+        kShaderProgram,
+        kOtherStageInput,
+        kCombinerWords,
+        kTexture0Registers,
+        kTexture0Decoded,
+        kTargetSurface,
+        kCount,
+    };
+    static size_t generic_texture_modulate_reject_reason_count() {
+        return static_cast<size_t>(GenericTextureModulateRejectReason::kCount);
+    }
+    static const char* generic_texture_modulate_reject_reason_name(size_t index) {
+        static constexpr const char* kNames[] = {
+            "unsupported-primitive",
+            "vertex-count",
+            "texture-input",
+            "depth",
+            "color-mask",
+            "color-format",
+            "stage-count",
+            "alpha-mode",
+            "blend-mode",
+            "shader-program",
+            "other-stage-input",
+            "combiner-words",
+            "texture0-registers",
+            "texture0-decoded",
+            "target-surface",
+        };
+        return index < (sizeof(kNames) / sizeof(kNames[0])) ? kNames[index]
+                                                             : "unknown";
+    }
+    uint64_t generic_combiner_texture_modulate_reject_batches(size_t index) const {
+        return index < generic_combiner_texture_modulate_rejects_.size()
+                   ? generic_combiner_texture_modulate_rejects_[index]
+                   : 0;
+    }
     uint64_t generic_combiner_fallback_batches() const {
         return generic_combiner_fallback_batches_;
     }
@@ -1304,6 +1357,11 @@ private:
     std::array<uint64_t,
               static_cast<size_t>(GenericResidentRejectReason::kCount)>
         generic_combiner_resident_rejects_{};
+    uint64_t generic_combiner_texture_modulate_observed_ = 0;
+    uint64_t generic_combiner_texture_modulate_exact_ = 0;
+    std::array<uint64_t,
+              static_cast<size_t>(GenericTextureModulateRejectReason::kCount)>
+        generic_combiner_texture_modulate_rejects_{};
     uint64_t generic_combiner_fallback_batches_ = 0;
     uint64_t generic_combiner_triangles_ = 0;
     uint64_t generic_combiner_fragments_ = 0;
@@ -1538,6 +1596,8 @@ private:
     void record_generic_skip(GenericSkipReason reason);
     void record_generic_skip_detail(GenericSkipReason reason, uint64_t detail);
     void record_generic_resident_reject(GenericResidentRejectReason reason);
+    void record_generic_texture_modulate_reject(
+        GenericTextureModulateRejectReason reason);
     bool fetch_vertex_attribute(uint32_t slot, uint32_t index);
     bool ramht_instance(uint8_t channel, uint32_t handle, uint32_t& instance) const;
     bool dma_object_address(uint32_t instance, uint32_t offset, uint32_t& address) const;

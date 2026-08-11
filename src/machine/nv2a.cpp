@@ -5516,6 +5516,13 @@ void Nv2a::record_generic_resident_reject(GenericResidentRejectReason reason) {
         ++generic_combiner_resident_rejects_[index];
 }
 
+void Nv2a::record_generic_texture_modulate_reject(
+    GenericTextureModulateRejectReason reason) {
+    const size_t index = static_cast<size_t>(reason);
+    if (index < generic_combiner_texture_modulate_rejects_.size())
+        ++generic_combiner_texture_modulate_rejects_[index];
+}
+
 // Generic NV2A register-combiner evaluator.
 //
 // Every Profile above is a hand-derived, exact-match fingerprint: a whole-register
@@ -6637,6 +6644,94 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 }
             } else if (resident_primary_observable) {
                 record_generic_resident_reject(resident_reject_reason);
+            }
+        }
+        {
+            using TextureReject = GenericTextureModulateRejectReason;
+            const bool texture_modulate_observable =
+                raster_state_[kRasterShaderStageProgram] == 1 &&
+                raster_state_[kRasterCombinerControl] == 1;
+            if (texture_modulate_observable) {
+                ++generic_combiner_texture_modulate_observed_;
+                const bool only_texture0_input =
+                    texture_referenced[0] && !texture_referenced[1] &&
+                    !texture_referenced[2] && !texture_referenced[3];
+                const bool primitive_supported =
+                    primitive_mode_ == 5 || primitive_mode_ == 6 ||
+                    primitive_mode_ == 7;
+                const bool vertex_count_supported =
+                    transformed_batch_.size() >= 3 &&
+                    transformed_batch_.size() <= 20000;
+                const bool alpha_supported =
+                    !alpha_test_enabled ||
+                    (alpha_func == 0x0207 &&
+                     (raster_state_[kRasterAlphaRef] & 0xFFu) == 0);
+                const bool blend_supported =
+                    (!blend_enabled || blend_eq == 0x8006) &&
+                    (!blend_enabled ||
+                     ((blend_src == 0x0302 || blend_src == 1) &&
+                      (blend_dst == 0x0303 || blend_dst == 1 ||
+                       blend_dst == 0)));
+                const bool combiner_words_match =
+                    raster_state_[kRasterCombinerColorIcw0] == 0x04080000 &&
+                    raster_state_[kRasterCombinerAlphaIcw0] == 0x14180000 &&
+                    raster_state_[kRasterCombinerColorOcw0] == 0x00000C00 &&
+                    raster_state_[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
+                    raster_state_[kRasterCombinerSpecularFog0] == 0x0000000C &&
+                    raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80;
+                const bool texture_registers_match =
+                    raster_state_[kRasterTextureFormat0] == 0x08890E2A &&
+                    raster_state_[kRasterTextureImageRect0] == 0x050003C0 &&
+                    raster_state_[kRasterTextureControl1_0] == 0x14000000;
+                const bool texture_decoded_match =
+                    texture_stages[0].valid && texture_stages[0].linear &&
+                    !texture_stages[0].alpha8 && texture_stages[0].width == 1280 &&
+                    texture_stages[0].height == 960 &&
+                    texture_stages[0].pitch == 0x1400;
+                const bool target_surface_match =
+                    color_address == 0x03AA4000 && color_format_x8 &&
+                    surface_type == 1 && anti_aliasing == 0 &&
+                    surface_pitch_ == 0x00401400 && surface_height == 960 &&
+                    clip_x == 0 && clip_y == 0 && clip_width == 1280 &&
+                    clip_height == 960;
+                TextureReject reject_reason = TextureReject::kCount;
+                if (!primitive_supported) {
+                    reject_reason = TextureReject::kUnsupportedPrimitive;
+                } else if (!vertex_count_supported) {
+                    reject_reason = TextureReject::kVertexCount;
+                } else if (!only_texture0_input) {
+                    reject_reason = TextureReject::kTextureInput;
+                } else if (uses_depth) {
+                    reject_reason = TextureReject::kDepth;
+                } else if (color_mask_word != 0x01010101) {
+                    reject_reason = TextureReject::kColorMask;
+                } else if (!color_format_x8 && !color_format_a8) {
+                    reject_reason = TextureReject::kColorFormat;
+                } else if (stage_count != 1) {
+                    reject_reason = TextureReject::kStageCount;
+                } else if (!alpha_supported) {
+                    reject_reason = TextureReject::kAlphaMode;
+                } else if (!blend_supported) {
+                    reject_reason = TextureReject::kBlendMode;
+                } else if (raster_state_[kRasterShaderStageProgram] != 1) {
+                    reject_reason = TextureReject::kShaderProgram;
+                } else if (raster_state_[kRasterShaderOtherStageInput] !=
+                           0x00210000) {
+                    reject_reason = TextureReject::kOtherStageInput;
+                } else if (!combiner_words_match) {
+                    reject_reason = TextureReject::kCombinerWords;
+                } else if (!texture_registers_match) {
+                    reject_reason = TextureReject::kTexture0Registers;
+                } else if (!texture_decoded_match) {
+                    reject_reason = TextureReject::kTexture0Decoded;
+                } else if (!target_surface_match) {
+                    reject_reason = TextureReject::kTargetSurface;
+                }
+                if (reject_reason == TextureReject::kCount) {
+                    ++generic_combiner_texture_modulate_exact_;
+                } else {
+                    record_generic_texture_modulate_reject(reject_reason);
+                }
             }
         }
         const bool resident_packet =

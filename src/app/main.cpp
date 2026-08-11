@@ -903,6 +903,27 @@ int main(int argc, char** argv) {
                 }
                 if (!any_reject) std::printf("none");
                 std::printf("\n");
+                std::printf("[perf-texture-modulate] observed=%llu exact=%llu "
+                            "rejects=",
+                            static_cast<unsigned long long>(
+                                nv2a->generic_combiner_texture_modulate_observed()),
+                            static_cast<unsigned long long>(
+                                nv2a->generic_combiner_texture_modulate_exact()));
+                bool any_texture_reject = false;
+                for (size_t i = 0;
+                     i < Nv2a::generic_texture_modulate_reject_reason_count();
+                     ++i) {
+                    const uint64_t count =
+                        nv2a->generic_combiner_texture_modulate_reject_batches(i);
+                    if (!count) continue;
+                    if (any_texture_reject) std::printf(",");
+                    std::printf("%s:%llu",
+                                Nv2a::generic_texture_modulate_reject_reason_name(i),
+                                static_cast<unsigned long long>(count));
+                    any_texture_reject = true;
+                }
+                if (!any_texture_reject) std::printf("none");
+                std::printf("\n");
             };
             auto capture_frame_series = [&]() {
                 if (!frame_series_requested || frame_series_exhausted ||
@@ -2029,6 +2050,29 @@ int main(int argc, char** argv) {
                     any_resident_reject = true;
                 }
                 if (!any_resident_reject) std::printf(" none");
+                std::printf("\n");
+                std::printf("[2bl] NV2A generic-combiner texture-modulate: "
+                            "observed/exact=%llu/%llu rejects=",
+                            (unsigned long long)mach.nv2a()
+                                ->generic_combiner_texture_modulate_observed(),
+                            (unsigned long long)mach.nv2a()
+                                ->generic_combiner_texture_modulate_exact());
+                bool any_texture_modulate_reject = false;
+                for (size_t reason = 0;
+                     reason <
+                     xlle::Nv2a::generic_texture_modulate_reject_reason_count();
+                     ++reason) {
+                    const uint64_t count = mach.nv2a()
+                        ->generic_combiner_texture_modulate_reject_batches(reason);
+                    if (!count) continue;
+                    if (any_texture_modulate_reject) std::printf(",");
+                    std::printf("%s:%llu",
+                                xlle::Nv2a::
+                                    generic_texture_modulate_reject_reason_name(reason),
+                                (unsigned long long)count);
+                    any_texture_modulate_reject = true;
+                }
+                if (!any_texture_modulate_reject) std::printf("none");
                 std::printf("\n");
                 std::printf("[2bl] NV2A generic-combiner skip census:");
                 for (size_t reason = 0;
