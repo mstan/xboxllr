@@ -7324,6 +7324,10 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                      ++vertex) {
                     generic_fingerprint_stats->first_vertex_position[vertex] =
                         transformed_batch_[vertex].position;
+                    generic_fingerprint_stats->first_vertex_diffuse[vertex] =
+                        transformed_batch_[vertex].diffuse;
+                    generic_fingerprint_stats->first_vertex_specular[vertex] =
+                        transformed_batch_[vertex].specular;
                     generic_fingerprint_stats->first_vertex_texture[vertex] =
                         transformed_batch_[vertex].texture;
                 }

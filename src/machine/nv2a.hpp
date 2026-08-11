@@ -657,6 +657,8 @@ public:
         bool first_vertices_recorded = false;
         uint32_t first_vertex_count = 0;
         std::array<std::array<float, 4>, 4> first_vertex_position{};
+        std::array<std::array<float, 4>, 4> first_vertex_diffuse{};
+        std::array<std::array<float, 4>, 4> first_vertex_specular{};
         std::array<std::array<std::array<float, 4>, 4>, 4> first_vertex_texture{};
     };
     size_t generic_combiner_fingerprint_perf_census(

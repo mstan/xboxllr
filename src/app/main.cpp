@@ -1240,6 +1240,12 @@ int main(int argc, char** argv) {
                             const auto& p = entry.first_vertex_position[vertex];
                             std::printf(" v%up=%.9g,%.9g,%.9g,%.9g",
                                         vertex, p[0], p[1], p[2], p[3]);
+                            const auto& d = entry.first_vertex_diffuse[vertex];
+                            std::printf(" d=%.9g,%.9g,%.9g,%.9g", d[0], d[1],
+                                        d[2], d[3]);
+                            const auto& s = entry.first_vertex_specular[vertex];
+                            std::printf(" s=%.9g,%.9g,%.9g,%.9g", s[0], s[1],
+                                        s[2], s[3]);
                             for (uint32_t stage = 0; stage < 4; ++stage) {
                                 const auto& t =
                                     entry.first_vertex_texture[vertex][stage];
