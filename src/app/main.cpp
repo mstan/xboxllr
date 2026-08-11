@@ -10,6 +10,7 @@
 #include <cctype>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <memory>
@@ -295,6 +296,57 @@ bool write_frame_ppm(const char* path, const std::vector<uint8_t>& rgba,
     return out.good();
 }
 
+bool parse_u32_arg(const char* text, uint32_t& value) {
+    if (!text || !text[0] || text[0] == '-' || text[0] == '+' ||
+        std::isspace(static_cast<unsigned char>(text[0])))
+        return false;
+    char* end = nullptr;
+    errno = 0;
+    const unsigned long long parsed = std::strtoull(text, &end, 0);
+    if (errno == ERANGE || !end || *end != '\0' || parsed > 0xffffffffull)
+        return false;
+    value = static_cast<uint32_t>(parsed);
+    return true;
+}
+
+bool capture_argb32_surface(XboxMachine& mach, uint32_t address, uint32_t pitch,
+                            uint32_t width, uint32_t height,
+                            std::vector<uint8_t>& rgba, std::string& error) {
+    if (!width || !height || width > 2048 || height > 2048) {
+        error = "surface dimensions are unset or too large";
+        return false;
+    }
+    const uint64_t row_bytes = static_cast<uint64_t>(width) * 4ull;
+    if (pitch < row_bytes) {
+        error = "surface pitch is smaller than the visible row";
+        return false;
+    }
+    const uint64_t source_size =
+        static_cast<uint64_t>(pitch) * (height - 1) + row_bytes;
+    if (static_cast<uint64_t>(address) + source_size > 64ull * 1024ull * 1024ull) {
+        error = "surface exceeds unified RAM";
+        return false;
+    }
+    std::vector<uint8_t> source(static_cast<size_t>(source_size));
+    if (!mach.read(address, source.data(), source.size())) {
+        error = "surface guest-memory read failed";
+        return false;
+    }
+    rgba.resize(static_cast<size_t>(width) * height * 4ull);
+    for (uint32_t y = 0; y < height; ++y) {
+        for (uint32_t x = 0; x < width; ++x) {
+            const size_t source_offset = static_cast<size_t>(y) * pitch + x * 4u;
+            const size_t dest_offset = (static_cast<size_t>(y) * width + x) * 4u;
+            rgba[dest_offset + 0] = source[source_offset + 2];
+            rgba[dest_offset + 1] = source[source_offset + 1];
+            rgba[dest_offset + 2] = source[source_offset + 0];
+            rgba[dest_offset + 3] = 0xff;
+        }
+    }
+    error.clear();
+    return true;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -313,6 +365,7 @@ int main(int argc, char** argv) {
     const char* hdd = nullptr;
     const char* eeprom = nullptr;
     const char* frame_dump = nullptr;
+    const char* debug_surface_dump = nullptr;
     const char* frame_series_prefix = nullptr;
     const char* test_input_capture_prefix = nullptr;
     const char* test_input_script = nullptr;
@@ -321,6 +374,10 @@ int main(int argc, char** argv) {
     uint64_t net_bind_port = 0;
     uint64_t net_peer_port = 0;
     uint64_t max_host_memory_mb = 0;
+    uint32_t debug_surface_address = 0;
+    uint32_t debug_surface_pitch = 0;
+    uint32_t debug_surface_width = 0;
+    uint32_t debug_surface_height = 0;
     uint64_t max_insns = 128ull * 1000 * 1000;  // 2BL kernel LZX decompress needs tens of M
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--serve")) serve = true;
@@ -378,6 +435,25 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(argv[i], "--eeprom") && i + 1 < argc) eeprom = argv[++i];
         else if (!std::strcmp(argv[i], "--frame-dump") && i + 1 < argc)
             frame_dump = argv[++i];
+        else if (!std::strcmp(argv[i], "--debug-surface-dump")) {
+            if (i + 5 >= argc) {
+                std::fprintf(
+                    stderr,
+                    "[host] use --debug-surface-dump <path> <addr> <pitch> <width> <height>\n");
+                return 1;
+            }
+            debug_surface_dump = argv[++i];
+            if (!debug_surface_dump[0] ||
+                !parse_u32_arg(argv[++i], debug_surface_address) ||
+                !parse_u32_arg(argv[++i], debug_surface_pitch) ||
+                !parse_u32_arg(argv[++i], debug_surface_width) ||
+                !parse_u32_arg(argv[++i], debug_surface_height)) {
+                std::fprintf(
+                    stderr,
+                    "[host] --debug-surface-dump expects path plus 32-bit addr/pitch/width/height\n");
+                return 1;
+            }
+        }
         else if (!std::strcmp(argv[i], "--test-input-capture-prefix") && i + 1 < argc)
             test_input_capture_prefix = argv[++i];
         else if (!std::strcmp(argv[i], "--test-input-script") && i + 1 < argc)
@@ -2855,6 +2931,29 @@ int main(int argc, char** argv) {
                     write_frame_ppm(frame_dump, frame_rgba, scanout.width, scanout.height);
                 std::printf("[host] frame dump %s: %s\n", frame_dump,
                             frame_output_ok ? "written" : "FAILED");
+            }
+            if (debug_surface_dump) {
+                std::vector<uint8_t> surface_rgba;
+                std::string surface_error;
+                const bool surface_captured = capture_argb32_surface(
+                    mach, debug_surface_address, debug_surface_pitch,
+                    debug_surface_width, debug_surface_height, surface_rgba,
+                    surface_error);
+                const bool surface_written =
+                    surface_captured &&
+                    write_frame_ppm(debug_surface_dump, surface_rgba,
+                                    debug_surface_width, debug_surface_height);
+                frame_output_ok = frame_output_ok && surface_written;
+                std::printf("[host] debug surface dump %s addr=%08x pitch=%u "
+                            "size=%ux%u hash=%016llx: %s%s%s\n",
+                            debug_surface_dump, debug_surface_address,
+                            debug_surface_pitch, debug_surface_width,
+                            debug_surface_height,
+                            static_cast<unsigned long long>(
+                                surface_captured ? frame_hash(surface_rgba) : 0),
+                            surface_written ? "written" : "FAILED",
+                            surface_error.empty() ? "" : " (",
+                            surface_error.empty() ? "" : (surface_error + ")").c_str());
             }
             if (window && frame_available)
                 run_frame_window("xlle NV2A scanout", static_cast<int>(scanout.width),
