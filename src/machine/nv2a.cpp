@@ -5954,6 +5954,16 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     // which never allows reg==3 through, so a final combiner that genuinely
     // references FOG still lands in the kFinalCombiner census, just for that reason
     // specifically instead of a blanket nonzero-factor guess.
+    const bool no_texture_inputs =
+        !texture_referenced[0] && !texture_referenced[1] &&
+        !texture_referenced[2] && !texture_referenced[3];
+    const bool primary_color_passthrough =
+        no_texture_inputs && stage_count == 1 &&
+        raster_state_[kRasterCombinerColorIcw0] == 0x04200000 &&
+        raster_state_[kRasterCombinerAlphaIcw0] == 0x14200000 &&
+        raster_state_[kRasterCombinerColorOcw0] == 0x00000C00 &&
+        raster_state_[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
+        final_cw0 == 0x0000000C && final_cw1 == 0x00001C80;
 
     // --- Alpha test / depth test / blend mode ----------------------------------
     auto compare_supported = [](uint32_t func) {
@@ -6397,10 +6407,6 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                                      const TransformedVertex& rhs) {
             return lhs.diffuse == rhs.diffuse;
         };
-        const bool no_texture_inputs = !texture_referenced[0] &&
-                                       !texture_referenced[1] &&
-                                       !texture_referenced[2] &&
-                                       !texture_referenced[3];
         const bool compute_fixture_state =
             primitive_mode_ == 5 && transformed_batch_.size() == 3 &&
             no_texture_inputs && !uses_depth && color_format_a8 &&
@@ -7682,99 +7688,107 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     ++generic_combiner_texture_samples_;
                 }
 
-                // Matches xemu's get_output(): the scale/bias op is applied to the
-                // AB/CD/SUM result BEFORE the final clamp to [-1,1] (real hardware
-                // range -- unlike the input side, general-combiner outputs are
-                // signed), and the SAME scale/bias value applies to AB, CD, and
-                // SUM/MUX alike (there is only one output-mapping field per stage).
-                auto apply_scale_bias = [](uint32_t sb, float value) {
-                    switch (sb) {
-                        case 0x00: return value;                       // IDENTITY
-                        case 0x08: return value - 0.5f;                // BIAS
-                        case 0x10: return value * 2.0f;                // SHIFTLEFTBY1
-                        case 0x18: return (value - 0.5f) * 2.0f;       // SHIFTLEFTBY1+BIAS
-                        case 0x20: return value * 4.0f;                // SHIFTLEFTBY2
-                        default: return value * 0.5f;                  // SHIFTRIGHTBY1 (0x30)
-                    }
-                };
-                for (uint32_t stage = 0; stage < stage_count; ++stage) {
-                    const Stage& s = stages[stage];
-                    regs[1] = unpack_argb8(
-                        raster_state_[kRasterCombinerFactor0_0 + stage]);
-                    regs[2] = unpack_argb8(
-                        raster_state_[kRasterCombinerFactor1_0 + stage]);
-
-                    const std::array<float, 3> ca = fetch_color(s.color[0], regs);
-                    const std::array<float, 3> cb = fetch_color(s.color[1], regs);
-                    const std::array<float, 3> cc = fetch_color(s.color[2], regs);
-                    const std::array<float, 3> cd = fetch_color(s.color[3], regs);
-                    std::array<float, 3> cab{}, ccd{};
-                    if (s.color_ab_dot) {
-                        const float dot = ca[0] * cb[0] + ca[1] * cb[1] + ca[2] * cb[2];
-                        cab = {{dot, dot, dot}};
-                    } else {
-                        cab = {{ca[0] * cb[0], ca[1] * cb[1], ca[2] * cb[2]}};
-                    }
-                    if (s.color_cd_dot) {
-                        const float dot = cc[0] * cd[0] + cc[1] * cd[1] + cc[2] * cd[2];
-                        ccd = {{dot, dot, dot}};
-                    } else {
-                        ccd = {{cc[0] * cd[0], cc[1] * cd[1], cc[2] * cd[2]}};
-                    }
-                    // MUX_SUM: the third output is either AB+CD (plain sum) or a
-                    // select between CD (condition true) and AB (condition false)
-                    // based on R0.alpha's LSB/MSB, matching xemu's add_stage_code().
-                    const bool mux_condition =
-                        mux_on_msb ? (regs[12][3] >= 0.5f)
-                                  : ((static_cast<uint32_t>(std::floor(
-                                        regs[12][3] * 255.0f + 0.5f)) &
-                                     1u) != 0);
-                    std::array<float, 3> csum{};
-                    if (s.color_mux) {
-                        csum = mux_condition ? ccd : cab;
-                    } else {
-                        csum = {{cab[0] + ccd[0], cab[1] + ccd[1], cab[2] + ccd[2]}};
-                    }
-                    auto store_color = [&](uint32_t dst, const std::array<float, 3>& value,
-                                          bool blue_to_alpha) {
-                        if (!dst) return;
-                        for (size_t c3 = 0; c3 < 3; ++c3) {
-                            regs[dst][c3] = std::clamp(
-                                apply_scale_bias(s.color_scale_bias, value[c3]),
-                                -1.0f, 1.0f);
+                if (!primary_color_passthrough) {
+                    // Matches xemu's get_output(): the scale/bias op is applied to the
+                    // AB/CD/SUM result BEFORE the final clamp to [-1,1] (real hardware
+                    // range -- unlike the input side, general-combiner outputs are
+                    // signed), and the SAME scale/bias value applies to AB, CD, and
+                    // SUM/MUX alike (there is only one output-mapping field per stage).
+                    auto apply_scale_bias = [](uint32_t sb, float value) {
+                        switch (sb) {
+                            case 0x00: return value;                       // IDENTITY
+                            case 0x08: return value - 0.5f;                // BIAS
+                            case 0x10: return value * 2.0f;                // SHIFTLEFTBY1
+                            case 0x18: return (value - 0.5f) * 2.0f;       // SHIFTLEFTBY1+BIAS
+                            case 0x20: return value * 4.0f;                // SHIFTLEFTBY2
+                            default: return value * 0.5f;                  // SHIFTRIGHTBY1 (0x30)
                         }
-                        // AB/CD_BLUE_TO_ALPHA: the same (already scaled/biased/
-                        // clamped) blue channel also lands in this register's alpha
-                        // channel, matching xemu's add_stage_code() exactly. Never
-                        // applies to the SUM/MUX output (real hardware only wires
-                        // this from the dedicated AB/CD destinations).
-                        if (blue_to_alpha) regs[dst][3] = regs[dst][2];
                     };
-                    store_color(s.color_ab_dst, cab, s.color_ab_blue_to_alpha);
-                    store_color(s.color_cd_dst, ccd, s.color_cd_blue_to_alpha);
-                    store_color(s.color_sum_dst, csum, false);
+                    for (uint32_t stage = 0; stage < stage_count; ++stage) {
+                        const Stage& s = stages[stage];
+                        regs[1] = unpack_argb8(
+                            raster_state_[kRasterCombinerFactor0_0 + stage]);
+                        regs[2] = unpack_argb8(
+                            raster_state_[kRasterCombinerFactor1_0 + stage]);
 
-                    const float aa = fetch_alpha(s.alpha[0], regs);
-                    const float ab = fetch_alpha(s.alpha[1], regs);
-                    const float ac = fetch_alpha(s.alpha[2], regs);
-                    const float ad = fetch_alpha(s.alpha[3], regs);
-                    const float aab = aa * ab;
-                    const float acd = ac * ad;
-                    const bool alpha_mux_condition =
-                        mux_on_msb ? (regs[12][3] >= 0.5f)
-                                  : ((static_cast<uint32_t>(std::floor(
-                                        regs[12][3] * 255.0f + 0.5f)) &
-                                     1u) != 0);
-                    const float asum =
-                        s.alpha_mux ? (alpha_mux_condition ? acd : aab) : (aab + acd);
-                    auto store_alpha = [&](uint32_t dst, float value) {
-                        if (!dst) return;
-                        regs[dst][3] = std::clamp(
-                            apply_scale_bias(s.alpha_scale_bias, value), -1.0f, 1.0f);
-                    };
-                    store_alpha(s.alpha_ab_dst, aab);
-                    store_alpha(s.alpha_cd_dst, acd);
-                    store_alpha(s.alpha_sum_dst, asum);
+                        const std::array<float, 3> ca = fetch_color(s.color[0], regs);
+                        const std::array<float, 3> cb = fetch_color(s.color[1], regs);
+                        const std::array<float, 3> cc = fetch_color(s.color[2], regs);
+                        const std::array<float, 3> cd = fetch_color(s.color[3], regs);
+                        std::array<float, 3> cab{}, ccd{};
+                        if (s.color_ab_dot) {
+                            const float dot =
+                                ca[0] * cb[0] + ca[1] * cb[1] + ca[2] * cb[2];
+                            cab = {{dot, dot, dot}};
+                        } else {
+                            cab = {{ca[0] * cb[0], ca[1] * cb[1], ca[2] * cb[2]}};
+                        }
+                        if (s.color_cd_dot) {
+                            const float dot =
+                                cc[0] * cd[0] + cc[1] * cd[1] + cc[2] * cd[2];
+                            ccd = {{dot, dot, dot}};
+                        } else {
+                            ccd = {{cc[0] * cd[0], cc[1] * cd[1], cc[2] * cd[2]}};
+                        }
+                        // MUX_SUM: the third output is either AB+CD (plain sum) or a
+                        // select between CD (condition true) and AB (condition false)
+                        // based on R0.alpha's LSB/MSB, matching xemu's add_stage_code().
+                        const bool mux_condition =
+                            mux_on_msb ? (regs[12][3] >= 0.5f)
+                                      : ((static_cast<uint32_t>(std::floor(
+                                            regs[12][3] * 255.0f + 0.5f)) &
+                                         1u) != 0);
+                        std::array<float, 3> csum{};
+                        if (s.color_mux) {
+                            csum = mux_condition ? ccd : cab;
+                        } else {
+                            csum = {{cab[0] + ccd[0], cab[1] + ccd[1],
+                                     cab[2] + ccd[2]}};
+                        }
+                        auto store_color =
+                            [&](uint32_t dst, const std::array<float, 3>& value,
+                                bool blue_to_alpha) {
+                            if (!dst) return;
+                            for (size_t c3 = 0; c3 < 3; ++c3) {
+                                regs[dst][c3] = std::clamp(
+                                    apply_scale_bias(s.color_scale_bias, value[c3]),
+                                    -1.0f, 1.0f);
+                            }
+                            // AB/CD_BLUE_TO_ALPHA: the same (already scaled/biased/
+                            // clamped) blue channel also lands in this register's alpha
+                            // channel, matching xemu's add_stage_code() exactly. Never
+                            // applies to the SUM/MUX output (real hardware only wires
+                            // this from the dedicated AB/CD destinations).
+                            if (blue_to_alpha) regs[dst][3] = regs[dst][2];
+                        };
+                        store_color(s.color_ab_dst, cab, s.color_ab_blue_to_alpha);
+                        store_color(s.color_cd_dst, ccd, s.color_cd_blue_to_alpha);
+                        store_color(s.color_sum_dst, csum, false);
+
+                        const float aa = fetch_alpha(s.alpha[0], regs);
+                        const float ab = fetch_alpha(s.alpha[1], regs);
+                        const float ac = fetch_alpha(s.alpha[2], regs);
+                        const float ad = fetch_alpha(s.alpha[3], regs);
+                        const float aab = aa * ab;
+                        const float acd = ac * ad;
+                        const bool alpha_mux_condition =
+                            mux_on_msb ? (regs[12][3] >= 0.5f)
+                                      : ((static_cast<uint32_t>(std::floor(
+                                            regs[12][3] * 255.0f + 0.5f)) &
+                                         1u) != 0);
+                        const float asum =
+                            s.alpha_mux ? (alpha_mux_condition ? acd : aab)
+                                        : (aab + acd);
+                        auto store_alpha = [&](uint32_t dst, float value) {
+                            if (!dst) return;
+                            regs[dst][3] = std::clamp(
+                                apply_scale_bias(s.alpha_scale_bias, value), -1.0f,
+                                1.0f);
+                        };
+                        store_alpha(s.alpha_ab_dst, aab);
+                        store_alpha(s.alpha_cd_dst, acd);
+                        store_alpha(s.alpha_sum_dst, asum);
+                    }
                 }
 
                 // Final combiner: RGB = D + A*B + (1-A)*C; Alpha = G. When absent
@@ -7782,7 +7796,9 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 // which the generic A=B=C=ZERO, D=R0, G=R0.alpha decode already
                 // produces on its own, so no separate branch is needed.
                 std::array<float, 4> final_color;
-                if (final_enabled) {
+                if (primary_color_passthrough) {
+                    final_color = diffuse;
+                } else if (final_enabled) {
                     // The final combiner's own CONSTANT_COLOR0/1 (registers 1/2) come
                     // from SPECFOGFACTOR0/1 (FinalFactor0/1), not the per-stage
                     // Factor0_0[stage]/Factor1_0[stage] array -- reload them now that
