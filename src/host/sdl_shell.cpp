@@ -18,6 +18,7 @@ public:
     Uint64 last_frame_tick = 0;
     XidKeyboardMapper mapper;
     bool quit = false;
+    bool owns_video = false;
 };
 
 SdlKeyboardInput::SdlKeyboardInput() : impl_(std::make_unique<Impl>()) {}
@@ -25,8 +26,10 @@ SdlKeyboardInput::~SdlKeyboardInput() { close(); }
 
 bool SdlKeyboardInput::open(const char* title) {
     if (impl_->window) return true;
-    if (!SDL_Init(SDL_INIT_VIDEO)) {
+    impl_->owns_video = (SDL_WasInit(SDL_INIT_VIDEO) & SDL_INIT_VIDEO) == 0;
+    if (impl_->owns_video && !SDL_InitSubSystem(SDL_INIT_VIDEO)) {
         std::fprintf(stderr, "[input] SDL_Init failed: %s\n", SDL_GetError());
+        impl_->owns_video = false;
         return false;
     }
     impl_->window = SDL_CreateWindow(title, 640, 480, SDL_WINDOW_RESIZABLE);
@@ -37,7 +40,8 @@ bool SdlKeyboardInput::open(const char* title) {
         if (impl_->window) SDL_DestroyWindow(impl_->window);
         impl_->renderer = nullptr;
         impl_->window = nullptr;
-        SDL_Quit();
+        if (impl_->owns_video) SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        impl_->owns_video = false;
         return false;
     }
     return true;
@@ -109,7 +113,8 @@ void SdlKeyboardInput::close() {
     impl_->texture = nullptr;
     impl_->renderer = nullptr;
     impl_->window = nullptr;
-    SDL_Quit();
+    if (impl_->owns_video) SDL_QuitSubSystem(SDL_INIT_VIDEO);
+    impl_->owns_video = false;
 }
 
 static bool pump_window(SDL_Window* win, SDL_Renderer* renderer, SDL_Texture* texture,
@@ -133,7 +138,8 @@ static bool pump_window(SDL_Window* win, SDL_Renderer* renderer, SDL_Texture* te
 
 bool run_frame_window(const char* title, int w, int h, const uint8_t* rgba, size_t pitch) {
     if (!rgba || w <= 0 || h <= 0) return false;
-    if (!SDL_Init(SDL_INIT_VIDEO)) {
+    const bool owns_video = (SDL_WasInit(SDL_INIT_VIDEO) & SDL_INIT_VIDEO) == 0;
+    if (owns_video && !SDL_InitSubSystem(SDL_INIT_VIDEO)) {
         std::fprintf(stderr, "[host] SDL_Init failed: %s\n", SDL_GetError());
         return false;
     }
@@ -149,7 +155,7 @@ bool run_frame_window(const char* title, int w, int h, const uint8_t* rgba, size
         if (texture) SDL_DestroyTexture(texture);
         if (renderer) SDL_DestroyRenderer(renderer);
         if (win) SDL_DestroyWindow(win);
-        SDL_Quit();
+        if (owns_video) SDL_QuitSubSystem(SDL_INIT_VIDEO);
         return false;
     }
     SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_LINEAR);
@@ -157,19 +163,20 @@ bool run_frame_window(const char* title, int w, int h, const uint8_t* rgba, size
     SDL_DestroyTexture(texture);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(win);
-    SDL_Quit();
+    if (owns_video) SDL_QuitSubSystem(SDL_INIT_VIDEO);
     return true;
 }
 
 bool run_window(const char* title, int w, int h) {
-    if (!SDL_Init(SDL_INIT_VIDEO)) {
+    const bool owns_video = (SDL_WasInit(SDL_INIT_VIDEO) & SDL_INIT_VIDEO) == 0;
+    if (owns_video && !SDL_InitSubSystem(SDL_INIT_VIDEO)) {
         std::fprintf(stderr, "[host] SDL_Init failed: %s\n", SDL_GetError());
         return false;
     }
     SDL_Window* win = SDL_CreateWindow(title, w, h, 0);
     if (!win) {
         std::fprintf(stderr, "[host] SDL_CreateWindow failed: %s\n", SDL_GetError());
-        SDL_Quit();
+        if (owns_video) SDL_QuitSubSystem(SDL_INIT_VIDEO);
         return false;
     }
     std::printf("[host] window '%s' %dx%d up; close it or wait ~2s\n", title, w, h);
@@ -183,7 +190,7 @@ bool run_window(const char* title, int w, int h) {
         SDL_Delay(16);
     }
     SDL_DestroyWindow(win);
-    SDL_Quit();
+    if (owns_video) SDL_QuitSubSystem(SDL_INIT_VIDEO);
     return true;
 }
 }  // namespace xlle

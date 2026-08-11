@@ -5540,6 +5540,18 @@ void Nv2a::record_generic_skip_detail(GenericSkipReason reason, uint64_t detail)
 // cannot silently mis-render — it skips instead.
 bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     executed = false;
+    ++generic_combiner_attempted_batches_;
+    // This routine is reached only by the strict generic fallback. Keep all extra
+    // counter snapshots and clock reads behind --perf-accounting: normal replays
+    // retain the pre-profiling path's fingerprint-batch census cost only.
+    const bool profile_generic_fingerprint = perf::g_enabled;
+    const uint64_t generic_fragments_before =
+        profile_generic_fingerprint ? generic_combiner_fragments_ : 0;
+    const uint64_t generic_writes_before =
+        profile_generic_fingerprint ? generic_combiner_writes_ : 0;
+    std::chrono::steady_clock::time_point generic_started_at;
+    if (profile_generic_fingerprint)
+        generic_started_at = std::chrono::steady_clock::now();
     const bool supported_primitive =
         primitive_mode_ == 5 || primitive_mode_ == 6 || primitive_mode_ == 7;
     if (!supported_primitive) {
@@ -6200,8 +6212,99 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         }
     }
 
+    if (renderer_) {
+        Nv2aGenericCombinerPacket packet;
+        packet.primitive_mode = primitive_mode_;
+        packet.surface_format = surface_format_;
+        packet.surface_pitch = surface_pitch_;
+        packet.surface_height = surface_height;
+        packet.color_address = color_address;
+        packet.depth_address = depth_address;
+        packet.raster_state.assign(raster_state_.begin(), raster_state_.end());
+        packet.vertices.reserve(transformed_batch_.size());
+        for (const auto& vertex : transformed_batch_) {
+            packet.vertices.push_back(
+                {vertex.position, vertex.diffuse, vertex.specular, vertex.texture});
+        }
+        for (uint32_t stage = 0; stage < packet.textures.size(); ++stage) {
+            if (!texture_stages[stage].valid) continue;
+            auto& destination = packet.textures[stage];
+            const auto& source = texture_stages[stage];
+            destination.referenced = true;
+            destination.layout = source.linear
+                ? Nv2aGenericCombinerPacket::TextureLayout::kLinear
+                : Nv2aGenericCombinerPacket::TextureLayout::kSwizzled;
+            destination.format = source.alpha8
+                ? Nv2aGenericCombinerPacket::TextureFormat::kA8
+                : Nv2aGenericCombinerPacket::TextureFormat::kArgb8;
+            destination.mode = source.cubemap
+                ? Nv2aGenericCombinerPacket::TextureMode::kCubemap
+                : Nv2aGenericCombinerPacket::TextureMode::kProject2d;
+            destination.width = source.width;
+            destination.height = source.height;
+            destination.pitch = source.pitch;
+            destination.address_mode =
+                raster_state_[kRasterTextureAddress0 + stage];
+            destination.border_color = source.border;
+        }
+        if (renderer_->supports_generic_combiner(packet)) {
+            packet.color_input.resize(static_cast<size_t>(color_bytes64));
+            if (!mem_read_ ||
+                !mem_read_(color_address, packet.color_input.data(),
+                           packet.color_input.size())) {
+                fault_("NV2A accelerated color DMA read failed");
+                return false;
+            }
+            if (uses_depth) {
+                packet.depth_input.resize(static_cast<size_t>(depth_bytes64));
+                if (!mem_read_(depth_address, packet.depth_input.data(),
+                               packet.depth_input.size())) {
+                    fault_("NV2A accelerated zeta DMA read failed");
+                    return false;
+                }
+            }
+            for (uint32_t stage = 0; stage < packet.textures.size(); ++stage) {
+                if (packet.textures[stage].referenced)
+                    packet.textures[stage].input =
+                        std::move(texture_stages[stage].data);
+            }
+
+            Nv2aGenericCombinerResult result;
+            std::string renderer_error;
+            if (!renderer_->submit_generic_combiner(packet, result,
+                                                     renderer_error)) {
+                fault_(renderer_error.empty()
+                           ? "NV2A accelerated generic-combiner submission failed"
+                           : renderer_error);
+                return false;
+            }
+            if (result.color_output.size() != packet.color_input.size() ||
+                result.depth_output.size() != packet.depth_input.size()) {
+                fault_("NV2A accelerated generic-combiner returned invalid surface sizes");
+                return false;
+            }
+            if (!mem_write_ ||
+                !mem_write_(color_address, result.color_output.data(),
+                            result.color_output.size()) ||
+                (uses_depth &&
+                 !mem_write_(depth_address, result.depth_output.data(),
+                             result.depth_output.size()))) {
+                fault_("NV2A accelerated generic-combiner DMA write failed");
+                return false;
+            }
+            executed = true;
+            ++generic_combiner_accelerated_batches_;
+            generic_combiner_triangles_ += result.triangles;
+            generic_combiner_fragments_ += result.fragments;
+            generic_combiner_writes_ += result.writes;
+            ++generic_combiner_executed_batches_;
+            return true;
+        }
+    }
+    ++generic_combiner_fallback_batches_;
     executed = true;
     ++generic_combiner_batches_;
+    GenericCombinerFingerprintStats* generic_fingerprint_stats = nullptr;
     {
         uint64_t fingerprint = 1469598103934665603ull;
         for (uint32_t index = kRasterShaderStageProgram;
@@ -6212,12 +6315,25 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         auto it = std::find_if(
             generic_combiner_fingerprints_.begin(),
             generic_combiner_fingerprints_.end(),
-            [&](const auto& entry) { return entry.first == fingerprint; });
-        if (it == generic_combiner_fingerprints_.end())
-            generic_combiner_fingerprints_.push_back({fingerprint, 1});
-        else
-            ++it->second;
+            [&](const auto& entry) { return entry.fingerprint == fingerprint; });
+        if (it == generic_combiner_fingerprints_.end()) {
+            generic_combiner_fingerprints_.push_back({fingerprint, 1, 0, 0, 0});
+            generic_fingerprint_stats = &generic_combiner_fingerprints_.back();
+        } else {
+            ++it->batches;
+            generic_fingerprint_stats = &*it;
+        }
     }
+    auto record_generic_fingerprint_perf = [&]() {
+        if (!profile_generic_fingerprint) return;
+        const auto elapsed = std::chrono::steady_clock::now() - generic_started_at;
+        generic_fingerprint_stats->fragments +=
+            generic_combiner_fragments_ - generic_fragments_before;
+        generic_fingerprint_stats->writes +=
+            generic_combiner_writes_ - generic_writes_before;
+        generic_fingerprint_stats->wall_ns += static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count());
+    };
 
     uint32_t xmin = clip_x;
     uint32_t xmax = clip_x + clip_width - 1;
@@ -6229,7 +6345,10 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     xmax = std::min(xmax, (window_x >> 16) & 0xFFFu);
     ymin = std::max(ymin, window_y & 0xFFFu);
     ymax = std::min(ymax, (window_y >> 16) & 0xFFFu);
-    if (xmax < xmin || ymax < ymin) return true;
+    if (xmax < xmin || ymax < ymin) {
+        record_generic_fingerprint_perf();
+        return true;
+    }
 
     float clip_min = 0.0f, clip_max = 0.0f;
     std::memcpy(&clip_min, &raster_state_[kRasterClipMin], sizeof(clip_min));
@@ -6959,16 +7078,22 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                               transformed_batch_[i]);
     }
 
-    if (raster_failed) return false;
+    if (raster_failed) {
+        record_generic_fingerprint_perf();
+        return false;
+    }
     if (!color_surface.flush()) {
         fault_("NV2A generic-combiner color DMA write failed");
+        record_generic_fingerprint_perf();
         return false;
     }
     if (uses_depth && !depth_surface.flush()) {
         fault_("NV2A generic-combiner zeta DMA write failed");
+        record_generic_fingerprint_perf();
         return false;
     }
     ++generic_combiner_executed_batches_;
+    record_generic_fingerprint_perf();
     return true;
 }
 

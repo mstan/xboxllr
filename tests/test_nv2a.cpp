@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "machine/nv2a.hpp"
+#include "machine/perf_accounting.hpp"
 
 static int fails = 0;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL: %s (line %d)\n", #c, __LINE__); ++fails; } } while (0)
@@ -21,6 +22,38 @@ static uint32_t get32(const std::vector<uint8_t>& mem, uint32_t addr) {
     std::memcpy(&value, mem.data() + addr, 4);
     return value;
 }
+
+class FakeNv2aRenderer final : public xlle::Nv2aRenderer {
+public:
+    bool supported = false;
+    mutable uint64_t support_queries = 0;
+    uint64_t submits = 0;
+    uint32_t write_offset = 5 * 256 + 5 * 4;
+    uint32_t write_value = 0xA1B2C3D4u;
+    xlle::Nv2aGenericCombinerPacket last_packet;
+    const char* name() const override { return "fake"; }
+    bool supports_generic_combiner(
+        const xlle::Nv2aGenericCombinerPacket&) const override {
+        ++support_queries;
+        return supported;
+    }
+    bool submit_generic_combiner(
+        const xlle::Nv2aGenericCombinerPacket& packet,
+        xlle::Nv2aGenericCombinerResult& result, std::string&) override {
+        ++submits;
+        last_packet = packet;
+        result.color_output = packet.color_input;
+        result.depth_output = packet.depth_input;
+        if (write_offset + sizeof(write_value) > result.color_output.size())
+            return false;
+        std::memcpy(result.color_output.data() + write_offset, &write_value,
+                    sizeof(write_value));
+        result.triangles = 1;
+        result.fragments = 1;
+        result.writes = 1;
+        return true;
+    }
+};
 
 static uint32_t swizzled_pixel_index(uint32_t x, uint32_t y,
                                      uint32_t width, uint32_t height) {
@@ -4977,8 +5010,10 @@ int main() {
             const uint64_t before_generic_executed =
                 gc_gpu.generic_combiner_executed_batches();
             const uint64_t before_generic_writes = gc_gpu.generic_combiner_writes();
+            xlle::perf::g_enabled = true;
             submit_triangle(0.0f, 0.0f, 40.0f, 0.0f, 0.0f, 40.0f, 50.0f, 1.0f,
                             gc_pack_ub4(0x11, 0x22, 0x33, 0xCC));
+            xlle::perf::g_enabled = false;
             CHECK(gc_fault.empty());
             CHECK(gc_gpu.generic_combiner_batches() == before_generic_batches + 1);
             CHECK(gc_gpu.generic_combiner_executed_batches() ==
@@ -4990,8 +5025,54 @@ int main() {
             CHECK(gc_gpu.last_generic_combiner_raster_address() >= 0x10000);
             CHECK(gc_gpu.last_generic_combiner_raster_address() < 0x10000 + 256u * 64u);
             CHECK(gc_gpu.generic_combiner_output_hash() != 1469598103934665603ull);
+            std::vector<xlle::Nv2a::GenericCombinerFingerprintStats> perf_census;
+            CHECK(gc_gpu.generic_combiner_fingerprint_perf_census(perf_census) == 1);
+            CHECK(perf_census[0].batches == 1);
+            CHECK(perf_census[0].fragments == gc_gpu.generic_combiner_fragments());
+            CHECK(perf_census[0].writes == gc_gpu.generic_combiner_writes());
+            CHECK(perf_census[0].wall_ns > 0);
+            std::vector<std::pair<uint64_t, uint64_t>> legacy_census;
+            CHECK(gc_gpu.generic_combiner_fingerprint_census(legacy_census) == 1);
+            CHECK(legacy_census[0].first == perf_census[0].fingerprint);
+            CHECK(legacy_census[0].second == perf_census[0].batches);
             // Depth writes stayed off (DepthMask==0, matching the witnessed log).
             CHECK(get32(gc_ram, 0x20000 + gc_a_offset) == 0xFFFFFFFFu);
+        }
+
+        // The backend seam runs only after the generic validator has accepted this
+        // witnessed state. Unsupported leaves the software result unchanged; a
+        // supported backend bypasses software writes while receiving an owned packet.
+        {
+            FakeNv2aRenderer fake;
+            gc_gpu.set_renderer(&fake);
+            std::memset(gc_ram.data() + 0x10000, 0, 256 * 64);
+            const uint64_t writes_before = gc_gpu.generic_combiner_writes();
+            const uint64_t fallback_before = gc_gpu.generic_combiner_fallback_batches();
+            submit_triangle(0.0f, 0.0f, 20.0f, 0.0f, 0.0f, 20.0f, 50.0f, 1.0f,
+                            gc_pack_ub4(0x11, 0x22, 0x33, 0xCC));
+            CHECK(fake.support_queries == 1);
+            CHECK(fake.submits == 0);
+            CHECK(gc_gpu.generic_combiner_fallback_batches() == fallback_before + 1);
+            CHECK(gc_gpu.generic_combiner_writes() > writes_before);
+            CHECK(get32(gc_ram, 0x10000 + 5 * 256 + 5 * 4) != 0);
+
+            fake.supported = true;
+            std::memset(gc_ram.data() + 0x10000, 0, 256 * 64);
+            const uint64_t accelerated_before = gc_gpu.generic_combiner_accelerated_batches();
+            const uint64_t software_before = gc_gpu.generic_combiner_batches();
+            submit_triangle(0.0f, 0.0f, 20.0f, 0.0f, 0.0f, 20.0f, 50.0f, 1.0f,
+                            gc_pack_ub4(0x11, 0x22, 0x33, 0xCC));
+            CHECK(fake.support_queries == 2);
+            CHECK(fake.submits == 1);
+            CHECK(!fake.last_packet.vertices.empty());
+            CHECK(!fake.last_packet.raster_state.empty());
+            CHECK(fake.last_packet.color_address == 0x10000);
+            CHECK(fake.last_packet.surface_height == 64);
+            CHECK(fake.last_packet.color_input.size() == 256 * 64);
+            CHECK(gc_gpu.generic_combiner_accelerated_batches() == accelerated_before + 1);
+            CHECK(gc_gpu.generic_combiner_batches() == software_before);
+            CHECK(get32(gc_ram, 0x10000 + fake.write_offset) == fake.write_value);
+            gc_gpu.set_renderer(nullptr);
         }
 
         // --- (b) Two-stage combiner: CONSTANT_COLOR0 (Factor0) modulated by

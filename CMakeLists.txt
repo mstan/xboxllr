@@ -92,7 +92,8 @@ add_library(xlle_spike STATIC src/spike/fixtures.cpp)
 target_include_directories(xlle_spike PUBLIC ${XLLE_INCLUDES})
 
 # --- host shell ---
-add_library(xlle_host STATIC src/host/sdl_shell.cpp src/host/xid_input.cpp)
+add_library(xlle_host STATIC src/host/sdl_shell.cpp src/host/xid_input.cpp
+  src/host/nv2a_opengl_renderer.cpp)
 target_include_directories(xlle_host PUBLIC ${XLLE_INCLUDES})
 if(XLLE_WITH_SDL)
   target_compile_definitions(xlle_host PUBLIC XLLE_WITH_SDL)

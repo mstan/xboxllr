@@ -12,6 +12,7 @@
 #include "machine/io_device.hpp"
 #include "machine/mmio_device.hpp"
 #include "machine/nv2a.hpp"
+#include "machine/nv2a_renderer.hpp"
 #include "machine/nvnet.hpp"
 #include "machine/ohci.hpp"
 #include "machine/pci.hpp"
@@ -37,6 +38,8 @@ public:
         // synthetic hub is an explicit, test-only opt-in selected before
         // device construction.
         Ohci::UsbTopology ohci0_topology = Ohci::UsbTopology::kDirectXid;
+        // Non-owning: the host owns its backend and must outlive this machine.
+        Nv2aRenderer* nv2a_renderer = nullptr;
     };
 
     XboxMachine();

@@ -28,6 +28,7 @@
 
 #include "machine/io_device.hpp"   // FaultFn
 #include "machine/mmio_device.hpp"
+#include "machine/nv2a_renderer.hpp"
 #include "xlle/ring.hpp"
 
 namespace xlle {
@@ -37,8 +38,10 @@ public:
     static constexpr uint32_t kBase = 0xFD000000u;
     static constexpr uint32_t kSize = 0x01000000u;  // 16 MB
 
-    explicit Nv2a(FaultFn fault)
-        : fault_(std::move(fault)), pramin_(0x100000, 0), methods_(4096) {}
+    explicit Nv2a(FaultFn fault, Nv2aRenderer* renderer = nullptr)
+        : fault_(std::move(fault)), renderer_(renderer), pramin_(0x100000, 0), methods_(4096) {}
+
+    void set_renderer(Nv2aRenderer* renderer) { renderer_ = renderer; }
 
     const char* name() const override { return "nv2a"; }
     uint32_t mmio_base() const override { return kBase; }
@@ -412,8 +415,17 @@ public:
     uint64_t generic_combiner_batches() const {
         return generic_combiner_batches_;
     }
+    uint64_t generic_combiner_attempted_batches() const {
+        return generic_combiner_attempted_batches_;
+    }
     uint64_t generic_combiner_executed_batches() const {
         return generic_combiner_executed_batches_;
+    }
+    uint64_t generic_combiner_accelerated_batches() const {
+        return generic_combiner_accelerated_batches_;
+    }
+    uint64_t generic_combiner_fallback_batches() const {
+        return generic_combiner_fallback_batches_;
     }
     uint64_t generic_combiner_triangles() const {
         return generic_combiner_triangles_;
@@ -436,10 +448,29 @@ public:
     uint64_t generic_combiner_output_hash() const {
         return generic_combiner_output_hash_;
     }
+    // The legacy census is intentionally kept for existing diagnostics: each pair is
+    // (fingerprint, successful generic batch count).
     size_t generic_combiner_fingerprint_census(
         std::vector<std::pair<uint64_t, uint64_t>>& out) const {
-        out.assign(generic_combiner_fingerprints_.begin(),
-                   generic_combiner_fingerprints_.end());
+        out.clear();
+        out.reserve(generic_combiner_fingerprints_.size());
+        for (const auto& entry : generic_combiner_fingerprints_)
+            out.push_back({entry.fingerprint, entry.batches});
+        return out.size();
+    }
+    // Cumulative per-state attribution for --perf-accounting. Fragment/write/wall
+    // fields remain zero when accounting was disabled, avoiding profiler work during
+    // normal replays while preserving the legacy batch census above.
+    struct GenericCombinerFingerprintStats {
+        uint64_t fingerprint = 0;
+        uint64_t batches = 0;
+        uint64_t fragments = 0;
+        uint64_t writes = 0;
+        uint64_t wall_ns = 0;
+    };
+    size_t generic_combiner_fingerprint_perf_census(
+        std::vector<GenericCombinerFingerprintStats>& out) const {
+        out = generic_combiner_fingerprints_;
         return out.size();
     }
     enum class GenericSkipReason {
@@ -1169,7 +1200,10 @@ private:
     uint32_t last_inline_raster_address_ = 0;
     uint64_t inline_color_output_hash_ = 1469598103934665603ull;
     uint64_t generic_combiner_batches_ = 0;
+    uint64_t generic_combiner_attempted_batches_ = 0;
     uint64_t generic_combiner_executed_batches_ = 0;
+    uint64_t generic_combiner_accelerated_batches_ = 0;
+    uint64_t generic_combiner_fallback_batches_ = 0;
     uint64_t generic_combiner_triangles_ = 0;
     uint64_t generic_combiner_fragments_ = 0;
     uint64_t generic_combiner_depth_passes_ = 0;
@@ -1177,7 +1211,7 @@ private:
     uint64_t generic_combiner_texture_samples_ = 0;
     uint32_t last_generic_combiner_raster_address_ = 0;
     uint64_t generic_combiner_output_hash_ = 1469598103934665603ull;
-    std::vector<std::pair<uint64_t, uint64_t>> generic_combiner_fingerprints_;
+    std::vector<GenericCombinerFingerprintStats> generic_combiner_fingerprints_;
     std::array<uint64_t,
               static_cast<size_t>(GenericSkipReason::kCount)>
         generic_skip_reasons_{};
@@ -1356,6 +1390,7 @@ private:
     std::array<uint64_t, 256> fixed_color_material_batches_{};
     std::array<uint64_t, 8> fixed_light_control_batches_{};
     std::array<uint32_t, kRasterStateWords> raster_state_{};
+    Nv2aRenderer* renderer_ = nullptr;  // owned by the host/application layer
     std::vector<RasterStateSample> raster_state_samples_;
     struct TransformedVertex {
         std::array<float, 4> position{};

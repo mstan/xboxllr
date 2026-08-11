@@ -25,6 +25,7 @@
 
 #include "cpu/unicorn_floor.hpp"
 #include "host/ethernet_udp.hpp"
+#include "host/nv2a_opengl_renderer.hpp"
 #include "host/sdl_shell.hpp"
 #include "host/xid_script.hpp"
 #include "machine/aci.hpp"
@@ -305,6 +306,7 @@ int main(int argc, char** argv) {
     bool perf_accounting = false;
     bool net_disconnected = false;
     bool pfifo_clear_trace = false;
+    const char* nv2a_renderer_name = "software";
     uint32_t pfifo_clear_trace_target = 0;
     const char* boot_flash = nullptr;
     const char* run2bl = nullptr;
@@ -336,6 +338,20 @@ int main(int argc, char** argv) {
             perf_accounting = true;
         else if (!std::strcmp(argv[i], "--net-disconnected"))
             net_disconnected = true;
+        else if (!std::strcmp(argv[i], "--nv2a-renderer")) {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "[nv2a-renderer] use --nv2a-renderer software|opengl\n");
+                return 1;
+            }
+            nv2a_renderer_name = argv[++i];
+            if (std::strcmp(nv2a_renderer_name, "software") &&
+                std::strcmp(nv2a_renderer_name, "opengl")) {
+                std::fprintf(stderr,
+                             "[nv2a-renderer] invalid renderer '%s'; use software or opengl\n",
+                             nv2a_renderer_name);
+                return 1;
+            }
+        }
         else if (!std::strcmp(argv[i], "--pfifo-clear-trace")) {
             if (i + 1 >= argc) {
                 std::fprintf(stderr,
@@ -528,6 +544,20 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    std::unique_ptr<Nv2aRenderer> nv2a_renderer;
+    if (!std::strcmp(nv2a_renderer_name, "opengl")) {
+        std::string renderer_error;
+        nv2a_renderer = create_nv2a_opengl_renderer(renderer_error);
+        if (!nv2a_renderer) {
+            std::fprintf(stderr, "[nv2a-renderer] %s\n", renderer_error.c_str());
+            return 1;
+        }
+    }
+    std::printf("[nv2a-renderer] selected=%s generic-combiner=%s\n",
+                nv2a_renderer_name,
+                nv2a_renderer ? "accelerated when supported, otherwise software" :
+                                "software");
+
     const uint64_t max_host_memory_bytes =
         max_host_memory_mb * 1024ull * 1024ull;
     if (max_host_memory_bytes != 0) {
@@ -547,6 +577,7 @@ int main(int argc, char** argv) {
     // --boot <flash.bin>: stand up the machine (RAM + flash) and smoke-test the map.
     if (boot_flash) {
         XboxMachine::Config machine_config;
+        machine_config.nv2a_renderer = nv2a_renderer.get();
         if (test_synthetic_controller_hub) {
             machine_config.ohci0_topology =
                 Ohci::UsbTopology::kSyntheticControllerSHubForTest;
@@ -682,6 +713,9 @@ int main(int argc, char** argv) {
             std::string live_scanout_error;
             uint64_t next_frame_series_insn = frame_series_every;
             bool frame_series_exhausted = false;
+            auto frame_series_interval_start = std::chrono::steady_clock::now();
+            uint64_t frame_series_vblanks_start =
+                mach.nv2a() ? mach.nv2a()->vblanks() : 0;
             auto print_memory_diagnostics = [&]() {
                 if (!perf_accounting) return;
                 HostMemoryUsage process;
@@ -720,6 +754,30 @@ int main(int argc, char** argv) {
                         static_cast<unsigned long long>(count_regions));
                 }
             };
+            auto print_generic_combiner_perf_report = [&]() {
+                if (!xlle::perf::g_enabled || !mach.nv2a()) return;
+                std::vector<xlle::Nv2a::GenericCombinerFingerprintStats> fingerprints;
+                mach.nv2a()->generic_combiner_fingerprint_perf_census(fingerprints);
+                std::sort(fingerprints.begin(), fingerprints.end(),
+                          [](const auto& a, const auto& b) {
+                              if (a.wall_ns != b.wall_ns) return a.wall_ns > b.wall_ns;
+                              if (a.fragments != b.fragments)
+                                  return a.fragments > b.fragments;
+                              return a.batches > b.batches;
+                          });
+                std::printf("[perf-generic] fingerprints=%zu top=", fingerprints.size());
+                const size_t limit = std::min<size_t>(fingerprints.size(), 12);
+                for (size_t i = 0; i < limit; ++i) {
+                    const auto& entry = fingerprints[i];
+                    std::printf(" %016llx:b%llu/f%llu/w%llu/ns%llu",
+                                static_cast<unsigned long long>(entry.fingerprint),
+                                static_cast<unsigned long long>(entry.batches),
+                                static_cast<unsigned long long>(entry.fragments),
+                                static_cast<unsigned long long>(entry.writes),
+                                static_cast<unsigned long long>(entry.wall_ns));
+                }
+                std::printf("\n");
+            };
             auto capture_frame_series = [&]() {
                 if (!frame_series_requested || frame_series_exhausted ||
                     mach.total_insns() < next_frame_series_insn ||
@@ -728,6 +786,17 @@ int main(int argc, char** argv) {
 
                 const uint64_t deadline = next_frame_series_insn;
                 const uint64_t sampled_at = mach.total_insns();
+                const auto interval_end = std::chrono::steady_clock::now();
+                const uint64_t sampled_vblanks = mach.nv2a()->vblanks();
+                const uint64_t interval_ns = static_cast<uint64_t>(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        interval_end - frame_series_interval_start).count());
+                const uint64_t interval_vblanks =
+                    sampled_vblanks - frame_series_vblanks_start;
+                const double effective_fps = interval_ns
+                    ? static_cast<double>(interval_vblanks) * 1.0e9 /
+                          static_cast<double>(interval_ns)
+                    : 0.0;
                 char path[1024];
                 std::snprintf(
                     path, sizeof(path), "%s-%012llu.ppm",
@@ -742,13 +811,17 @@ int main(int argc, char** argv) {
                                     live_scanout.width, live_scanout.height);
                 std::printf(
                     "[host] frame-series deadline=%llu insns=%llu "
-                    "endpoint2=%llu hash=%016llx %s: %s%s%s\n",
+                    "endpoint2=%llu vblank-delta=%llu wall-ns=%llu "
+                    "effective-fps=%.3f hash=%016llx %s: %s%s%s\n",
                     static_cast<unsigned long long>(deadline),
                     static_cast<unsigned long long>(sampled_at),
                     static_cast<unsigned long long>(
                         mach.ohci0()
                             ? mach.ohci0()->xid_endpoint2_input_reports()
                             : 0),
+                    static_cast<unsigned long long>(interval_vblanks),
+                    static_cast<unsigned long long>(interval_ns),
+                    effective_fps,
                     static_cast<unsigned long long>(
                         captured ? frame_hash(live_rgba) : 0),
                     path, written ? "written" : "FAILED",
@@ -756,6 +829,9 @@ int main(int argc, char** argv) {
                     live_scanout_error.empty()
                         ? ""
                         : (live_scanout_error + ")").c_str());
+                const std::string perf_report = xlle::perf::format_report();
+                if (!perf_report.empty()) std::printf("%s\n", perf_report.c_str());
+                print_generic_combiner_perf_report();
                 const std::string memory_report =
                     xlle::perf::format_memory_report();
                 if (!memory_report.empty())
@@ -765,6 +841,10 @@ int main(int argc, char** argv) {
                 // checkpoint so allocation growth is observable before a host-memory
                 // safety stop instead of being lost in the stdio buffer.
                 std::fflush(stdout);
+                // Exclude diagnostic capture/write/sort time from the next interval;
+                // --frame-series is an observer, not part of normal SDL throughput.
+                frame_series_interval_start = std::chrono::steady_clock::now();
+                frame_series_vblanks_start = sampled_vblanks;
                 if (UINT64_MAX - next_frame_series_insn <
                     frame_series_every) {
                     frame_series_exhausted = true;
@@ -1333,6 +1413,7 @@ int main(int argc, char** argv) {
                 // a controlled memory stop into std::bad_alloc before teardown.
                 const std::string perf_report = xlle::perf::format_report();
                 if (!perf_report.empty()) std::printf("%s\n", perf_report.c_str());
+                print_generic_combiner_perf_report();
                 const std::string memory_report = xlle::perf::format_memory_report();
                 if (!memory_report.empty()) std::printf("%s\n", memory_report.c_str());
                 print_memory_diagnostics();
@@ -1355,6 +1436,7 @@ int main(int argc, char** argv) {
             {
                 const std::string perf_report = xlle::perf::format_report();
                 if (!perf_report.empty()) std::printf("%s\n", perf_report.c_str());
+                print_generic_combiner_perf_report();
                 const std::string memory_report =
                     xlle::perf::format_memory_report();
                 if (!memory_report.empty())
@@ -1782,9 +1864,12 @@ int main(int argc, char** argv) {
                             mach.nv2a()->last_inline_raster_address(),
                             (unsigned long long)mach.nv2a()->inline_color_output_hash());
                 std::printf("[2bl] NV2A generic-combiner: "
-                            "batches/exec/tri/frags/depth-pass/writes/tex-samples="
-                            "%llu/%llu/%llu/%llu/%llu/%llu/%llu "
+                            "attempted/accelerated/fallback/software/exec/tri/frags/depth-pass/writes/tex-samples="
+                            "%llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu "
                             "last=%08x hash=%016llx\n",
+                            (unsigned long long)mach.nv2a()->generic_combiner_attempted_batches(),
+                            (unsigned long long)mach.nv2a()->generic_combiner_accelerated_batches(),
+                            (unsigned long long)mach.nv2a()->generic_combiner_fallback_batches(),
                             (unsigned long long)mach.nv2a()->generic_combiner_batches(),
                             (unsigned long long)mach.nv2a()->generic_combiner_executed_batches(),
                             (unsigned long long)mach.nv2a()->generic_combiner_triangles(),

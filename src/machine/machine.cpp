@@ -140,7 +140,7 @@ void XboxMachine::init_devices() {
 
     // MMIO devices. NV2A occupies 0xFD000000 (16 MB). Register the region with the CPU floor
     // so accesses route to the device model instead of faulting as unmapped memory.
-    auto nv2a = std::make_unique<Nv2a>(fault);
+    auto nv2a = std::make_unique<Nv2a>(fault, config_.nv2a_renderer);
     nv2a_ = nv2a.get();
     nv2a_->set_mem_access(
         [this](uint32_t addr, void* buf, size_t n) { return cpu_->read_mem(addr, buf, n); },
