@@ -6382,6 +6382,36 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         writes_r0_from_ab_or_sum(raster_state_[kRasterCombinerColorOcw0]) &&
         writes_r0_from_ab_or_sum(raster_state_[kRasterCombinerAlphaOcw0]) &&
         final_cw0 == 0x0000000C && final_cw1 == 0x00001C80;
+    const std::array<uint32_t, 6> texf_black_color_icw{{
+        0xD920DA20, 0xCD20DB20, 0xCDC10000, 0xC8CD0000, 0xCC20C120, 0x00000000}};
+    const std::array<uint32_t, 6> texf_black_alpha_icw{{
+        0xD930DA30, 0xDD30DB30, 0xDDD11010, 0x00000000, 0x00000000, 0x30301010}};
+    const std::array<uint32_t, 6> texf_black_color_ocw{{
+        0x00000D00, 0x00000D00, 0x000000D0, 0x000000C0, 0x00000C00, 0x00000000}};
+    const std::array<uint32_t, 6> texf_black_alpha_ocw{{
+        0x00000D00, 0x00000D00, 0x000000D0, 0x00000000, 0x00000000, 0x000000C0}};
+    bool texf_projected_black_alpha_one =
+        shader_stage_program == 0x00008421 && stage_count == 6 &&
+        texture_referenced[0] && texture_referenced[1] &&
+        texture_referenced[2] && texture_referenced[3] &&
+        texture_stages[0].valid && texture_stages[1].valid &&
+        texture_stages[2].valid && texture_stages[3].valid &&
+        final_cw0 == 0x0000000C && final_cw1 == 0x00001C80;
+    for (uint32_t stage = 0; texf_projected_black_alpha_one && stage < 6;
+         ++stage) {
+        texf_projected_black_alpha_one =
+            raster_state_[kRasterCombinerColorIcw0 + stage] ==
+                texf_black_color_icw[stage] &&
+            raster_state_[kRasterCombinerAlphaIcw0 + stage] ==
+                texf_black_alpha_icw[stage] &&
+            raster_state_[kRasterCombinerColorOcw0 + stage] ==
+                texf_black_color_ocw[stage] &&
+            raster_state_[kRasterCombinerAlphaOcw0 + stage] ==
+                texf_black_alpha_ocw[stage] &&
+            raster_state_[kRasterCombinerFactor1_0 + stage] == 0 &&
+            raster_state_[kRasterCombinerFactor0_0 + stage] ==
+                (stage == 2 ? 0xFF000000u : 0u);
+    }
 
     bool texture_modulate_observed_this_batch = false;
     bool texture_modulate_exact_this_batch = false;
@@ -7646,6 +7676,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                         raster_failed = true;
                         return;
                     }
+                    if (texf_projected_black_alpha_one) continue;
                     std::array<float, 4> sampled{};
                     bool sample_ok = false;
                     if (ts.linear) {
@@ -7713,7 +7744,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 }
 
                 if (!primary_color_passthrough && !texture0_modulate_primary &&
-                    !texture0_passthrough) {
+                    !texture0_passthrough && !texf_projected_black_alpha_one) {
                     // Matches xemu's get_output(): the scale/bias op is applied to the
                     // AB/CD/SUM result BEFORE the final clamp to [-1,1] (real hardware
                     // range -- unlike the input side, general-combiner outputs are
@@ -7835,6 +7866,8 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     const std::array<float, 4>& tex0 = regs[8];
                     for (size_t c3 = 0; c3 < 3; ++c3) final_color[c3] = tex0[c3];
                     final_color[3] = diffuse[3];
+                } else if (texf_projected_black_alpha_one) {
+                    final_color = {{0.0f, 0.0f, 0.0f, 1.0f}};
                 } else if (final_enabled) {
                     // The final combiner's own CONSTANT_COLOR0/1 (registers 1/2) come
                     // from SPECFOGFACTOR0/1 (FinalFactor0/1), not the per-stage
