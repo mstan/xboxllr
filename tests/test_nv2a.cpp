@@ -5140,6 +5140,7 @@ int main() {
             CHECK(gc_gpu.last_generic_combiner_raster_address() >= 0x10000);
             CHECK(gc_gpu.last_generic_combiner_raster_address() < 0x10000 + 256u * 64u);
             CHECK(gc_gpu.generic_combiner_output_hash() != 1469598103934665603ull);
+            CHECK(get32(gc_ram, 0x10000 + gc_a_offset) == 0xCC112233u);
             std::vector<xlle::Nv2a::GenericCombinerFingerprintStats> perf_census;
             CHECK(gc_gpu.generic_combiner_fingerprint_perf_census(perf_census) == 1);
             CHECK(perf_census[0].batches == 1);
@@ -5161,6 +5162,20 @@ int main() {
             CHECK(legacy_census[0].second == perf_census[0].batches);
             // Depth writes stayed off (DepthMask==0, matching the witnessed log).
             CHECK(get32(gc_ram, 0x20000 + gc_a_offset) == 0xFFFFFFFFu);
+        }
+
+        // The same state with blend enabled must blend alpha as well as RGB. With
+        // SRC_ALPHA/ONE_MINUS_SRC_ALPHA over a zero destination, 0xCC alpha becomes
+        // round((0xCC/255)^2*255)=0xA3.
+        {
+            const uint32_t gc_blend_offset = 5 * 256 + 5 * 4;
+            std::memset(gc_ram.data() + 0x10000, 0, 256 * 64);
+            emit_gc(0x0304, 1);  // BLEND_ENABLE
+            submit_triangle(0.0f, 0.0f, 40.0f, 0.0f, 0.0f, 40.0f, 50.0f, 1.0f,
+                            gc_pack_ub4(0x11, 0x22, 0x33, 0xCC));
+            CHECK(gc_fault.empty());
+            CHECK(get32(gc_ram, 0x10000 + gc_blend_offset) == 0xA30E1B29u);
+            emit_gc(0x0304, 0);
         }
 
         // --- (a2) Same generic state on a swizzled A8R8G8B8/Z24S8 render target.
@@ -5220,7 +5235,7 @@ int main() {
             CHECK(gc_fault.empty());
             CHECK(gc_gpu.generic_combiner_executed_batches() ==
                   before_generic_executed + 1);
-            CHECK(get32(gc_ram, 0x10000 + swizzled_inside) != 0);
+            CHECK(get32(gc_ram, 0x10000 + swizzled_inside) == 0xCC112233u);
             CHECK(get32(gc_ram, 0x10000 + linear_inside) == 0);
             emit_gc(0x0208, 0x00000128);  // restore pitch A8R8G8B8 + Z24S8
             emit_gc(0x020C, 0x01000100);

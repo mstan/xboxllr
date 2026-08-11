@@ -7782,6 +7782,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     std::clamp(final_color[1], 0.0f, 1.0f),
                     std::clamp(final_color[2], 0.0f, 1.0f),
                 }};
+                float out_alpha = src_alpha;
                 // Need the existing pixel if blending is enabled (as a blend operand)
                 // or if any color-mask channel is disabled (to preserve it unwritten).
                 const bool needs_existing_pixel =
@@ -7816,15 +7817,17 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                         out_rgb[c3] = std::clamp(
                             out_rgb[c3] * src_weight + dst[c3] * dst_weight, 0.0f, 1.0f);
                     }
+                    out_alpha = std::clamp(
+                        src_alpha * src_weight + dst[3] * dst_weight, 0.0f, 1.0f);
                 }
                 auto pack_unorm8 = [](float value) {
                     return static_cast<uint32_t>(
                         std::floor(std::clamp(value, 0.0f, 1.0f) * 255.0f + 0.5f));
                 };
                 // X8R8G8B8 has no alpha channel on real hardware; always store 0xFF in
-                // the padding byte. A8R8G8B8 stores the combiner's alpha untouched.
+                // the padding byte. A8R8G8B8 stores the post-blend alpha.
                 const uint32_t stored_alpha_byte =
-                    color_format_x8 ? 0xFFu : alpha_scaled;
+                    color_format_x8 ? 0xFFu : pack_unorm8(out_alpha);
                 const uint32_t written_r =
                     color_mask_write[0] ? pack_unorm8(out_rgb[0])
                                         : static_cast<uint32_t>(dst[0] * 255.0f + 0.5f);
