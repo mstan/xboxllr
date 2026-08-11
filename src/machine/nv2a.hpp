@@ -996,7 +996,7 @@ public:
     };
     ScanoutInfo scanout_info() const;
     bool capture_scanout(std::vector<uint8_t>& rgba, ScanoutInfo& info,
-                         std::string& error) const;
+                         std::string& error);
     uint64_t scanout_writes() const { return scanout_writes_; }
     uint64_t scanout_nonzero_writes() const { return scanout_nonzero_writes_; }
     uint32_t last_nonzero_scanout_start() const { return last_nonzero_scanout_start_; }
@@ -1007,6 +1007,9 @@ public:
 private:
     // Resolve an absolute NV2A address to its block; returns nullptr (a hole) if unmapped.
     static const Block* find_block(uint32_t rel_addr, uint32_t& block_rel);
+    bool resolve_renderer_color_overlap(uint32_t address, size_t size,
+                                        const char* context);
+    void invalidate_renderer_color_overlap(uint32_t address, size_t size);
 
     FaultFn fault_;
     std::function<void(bool, uint32_t, uint32_t, const char*, uint32_t)> unmodeled_cb_;

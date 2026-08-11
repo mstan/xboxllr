@@ -172,6 +172,33 @@ const Nv2a::Block* Nv2a::find_block(uint32_t rel, uint32_t& block_rel) {
     return nullptr;
 }
 
+bool Nv2a::resolve_renderer_color_overlap(uint32_t address, size_t size,
+                                          const char* context) {
+    if (!renderer_ || size == 0) return true;
+    Nv2aResidentColorResolve resolve;
+    std::string error;
+    if (!renderer_->resolve_resident_color_surface(address, size, resolve, error)) {
+        fault_(error.empty() ? "NV2A resident color resolve failed" : error.c_str());
+        return false;
+    }
+    if (resolve.data.empty()) return true;
+    if (!mem_write_ ||
+        !mem_write_(resolve.address, resolve.data.data(), resolve.data.size())) {
+        char why[160];
+        std::snprintf(why, sizeof(why),
+                      "NV2A resident color resolve DMA write failed before %s",
+                      context ? context : "memory access");
+        fault_(why);
+        return false;
+    }
+    return true;
+}
+
+void Nv2a::invalidate_renderer_color_overlap(uint32_t address, size_t size) {
+    if (renderer_ && size != 0)
+        renderer_->invalidate_resident_color_surface(address, size);
+}
+
 // PCI identity mirror exposed through PBUS (xemu pbus.c reads d->config). NV2A = 10DE:02A0,
 // class VGA (0x030000), revision 0xA1.
 static constexpr uint32_t kPciNv0 = 0x02A0'10DEu;  // device<<16 | vendor
@@ -585,6 +612,10 @@ bool Nv2a::clear_surface_plane(uint32_t dma_instance, bool dma_bound,
         fault_(why);
         return false;
     }
+    const size_t resolved_span =
+        static_cast<size_t>(static_cast<uint64_t>(last_address) - first_address + 1);
+    if (!resolve_renderer_color_overlap(first_address, resolved_span, "CLEAR_SURFACE"))
+        return false;
 
     std::vector<uint8_t> row(static_cast<size_t>(row_bytes));
     const uint32_t pixel_mask = bytes_per_pixel == 2 ? 0xFFFFu : 0xFFFFFFFFu;
@@ -617,6 +648,7 @@ bool Nv2a::clear_surface_plane(uint32_t dma_instance, bool dma_bound,
             return false;
         }
     }
+    invalidate_renderer_color_overlap(first_address, resolved_span);
     return true;
 }
 
@@ -3760,6 +3792,10 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
             inline_texture_width, inline_texture_height);
     }
 
+    if (!resolve_renderer_color_overlap(color_address, static_cast<size_t>(color_bytes64),
+                                        "witnessed color surface")) {
+        return false;
+    }
     PagedRasterSurface depth_surface(
         depth_address, static_cast<size_t>(depth_bytes64),
         mem_read_, mem_write_);
@@ -5425,6 +5461,8 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         fault_("NV2A color DMA write failed");
         return false;
     }
+    if (color_profile)
+        invalidate_renderer_color_overlap(color_address, static_cast<size_t>(color_bytes64));
     if (profile == Profile::kPitchZ16Depth)
         ++depth_raster_batches_;
     else if (profile == Profile::kSwizzledRadialColor)
@@ -6116,6 +6154,10 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 return false;
             }
             ts.data.resize(static_cast<size_t>(bytes64));
+            if (!resolve_renderer_color_overlap(address, ts.data.size(),
+                                                "generic texture read")) {
+                return false;
+            }
             if (!mem_read_ || !mem_read_(address, ts.data.data(), ts.data.size())) {
                 fault_("NV2A generic-combiner texture DMA read failed");
                 return false;
@@ -6191,6 +6233,10 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 return false;
             }
             ts.data.resize(static_cast<size_t>(bytes64));
+            if (!resolve_renderer_color_overlap(address, ts.data.size(),
+                                                "generic texture read")) {
+                return false;
+            }
             if (!mem_read_ || !mem_read_(address, ts.data.data(), ts.data.size())) {
                 fault_("NV2A generic-combiner texture DMA read failed");
                 return false;
@@ -6441,6 +6487,11 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             }
         }
         if (renderer_->supports_generic_combiner(packet)) {
+            if (!resolve_renderer_color_overlap(
+                    color_address, static_cast<size_t>(color_bytes64),
+                    "accelerated generic color snapshot")) {
+                return false;
+            }
             packet.color_input.resize(static_cast<size_t>(color_bytes64));
             if (!mem_read_ ||
                 !mem_read_(color_address, packet.color_input.data(),
@@ -6485,6 +6536,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 fault_("NV2A accelerated generic-combiner DMA write failed");
                 return false;
             }
+            invalidate_renderer_color_overlap(color_address, result.color_output.size());
             executed = true;
             ++generic_combiner_accelerated_batches_;
             generic_combiner_triangles_ += result.triangles;
@@ -6595,6 +6647,11 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                    sizeof(polygon_bias));
     }
 
+    if (!resolve_renderer_color_overlap(color_address, static_cast<size_t>(color_bytes64),
+                                        "software generic color surface")) {
+        record_generic_fingerprint_perf();
+        return false;
+    }
     PagedRasterSurface color_surface(
         color_address, static_cast<size_t>(color_bytes64), mem_read_, mem_write_);
     PagedRasterSurface depth_surface(
@@ -7336,6 +7393,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         record_generic_fingerprint_perf();
         return false;
     }
+    invalidate_renderer_color_overlap(color_address, static_cast<size_t>(color_bytes64));
     if (uses_depth && !depth_surface.flush()) {
         fault_("NV2A generic-combiner zeta DMA write failed");
         record_generic_fingerprint_perf();
@@ -8135,7 +8193,7 @@ Nv2a::ScanoutInfo Nv2a::scanout_info() const {
 }
 
 bool Nv2a::capture_scanout(std::vector<uint8_t>& rgba, ScanoutInfo& info,
-                           std::string& error) const {
+                           std::string& error) {
     info = scanout_info();
     if (!mem_read_) {
         error = "NV2A scanout has no guest-memory reader";
@@ -8159,6 +8217,11 @@ bool Nv2a::capture_scanout(std::vector<uint8_t>& rgba, ScanoutInfo& info,
         static_cast<uint64_t>(info.pitch) * (info.height - 1) + row_bytes;
     if (static_cast<uint64_t>(info.start) + source_size > 64ull * 1024 * 1024) {
         error = "NV2A scanout exceeds unified RAM";
+        return false;
+    }
+    if (!resolve_renderer_color_overlap(info.start, static_cast<size_t>(source_size),
+                                        "scanout capture")) {
+        error = "NV2A scanout resident color resolve failed";
         return false;
     }
 

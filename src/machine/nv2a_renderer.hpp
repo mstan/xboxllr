@@ -2,6 +2,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -82,6 +83,11 @@ struct Nv2aGenericCombinerResult {
     uint64_t writes = 0;
 };
 
+struct Nv2aResidentColorResolve {
+    uint32_t address = 0;
+    std::vector<uint8_t> data;
+};
+
 class Nv2aRenderer {
 public:
     virtual ~Nv2aRenderer() = default;
@@ -95,6 +101,23 @@ public:
     virtual bool submit_generic_combiner(
         const Nv2aGenericCombinerPacket& packet,
         Nv2aGenericCombinerResult& result, std::string& error) = 0;
+    // Optional resident-surface protocol. The default implementation is inert and
+    // preserves the synchronous owned-snapshot contract above. A backend that keeps
+    // color data on the host GPU must make overlap queries resolve into complete
+    // guest-memory bytes before CPU/software/capture paths read or overwrite them.
+    virtual bool resolve_resident_color_surface(
+        uint32_t address, size_t size, Nv2aResidentColorResolve& resolve,
+        std::string& error) {
+        (void)address;
+        (void)size;
+        resolve = {};
+        error.clear();
+        return true;
+    }
+    virtual void invalidate_resident_color_surface(uint32_t address, size_t size) {
+        (void)address;
+        (void)size;
+    }
 };
 
 }  // namespace xlle
