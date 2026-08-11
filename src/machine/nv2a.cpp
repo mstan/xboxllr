@@ -6676,8 +6676,6 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 resident_reject_reason = ResidentReject::kUnsupportedPrimitive;
             } else if (!resident_vertex_count_supported) {
                 resident_reject_reason = ResidentReject::kVertexCount;
-            } else if (!no_texture_inputs) {
-                resident_reject_reason = ResidentReject::kTextureInput;
             } else if (uses_depth) {
                 resident_reject_reason = ResidentReject::kDepth;
             } else if (color_mask_word != 0x01010101) {
@@ -7003,11 +7001,100 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                         packet.fixture_color_format_x8 = color_format_x8;
                     }
                 }
+                const bool texture_resident_state =
+                    packet.compute_fixture ==
+                        Nv2aGenericCombinerPacket::ComputeFixture::kNone &&
+                    reject_reason == TextureReject::kCount &&
+                    texture_modulate_exact_this_batch;
+                if (texture_resident_state) {
+                    auto finite_vertex = [](const Nv2aGenericCombinerVertex& vertex) {
+                        for (float value : vertex.position)
+                            if (!std::isfinite(value)) return false;
+                        if (vertex.position[3] == 0.0f) return false;
+                        for (float value : vertex.diffuse)
+                            if (!std::isfinite(value)) return false;
+                        for (float value : vertex.texture[0])
+                            if (!std::isfinite(value)) return false;
+                        return true;
+                    };
+                    std::vector<Nv2aGenericCombinerVertex> expanded;
+                    expanded.reserve((packet.vertices.size() - 2) * 3);
+                    auto append_triangle = [&](size_t ia, size_t ib, size_t ic) {
+                        const Nv2aGenericCombinerVertex& a = packet.vertices[ia];
+                        const Nv2aGenericCombinerVertex& b = packet.vertices[ib];
+                        const Nv2aGenericCombinerVertex& c = packet.vertices[ic];
+                        if (!finite_vertex(a) || !finite_vertex(b) ||
+                            !finite_vertex(c)) {
+                            return false;
+                        }
+                        const double ax = static_cast<double>(a.position[0]);
+                        const double ay = static_cast<double>(a.position[1]);
+                        const double bx = static_cast<double>(b.position[0]);
+                        const double by = static_cast<double>(b.position[1]);
+                        const double cx = static_cast<double>(c.position[0]);
+                        const double cy = static_cast<double>(c.position[1]);
+                        const double area =
+                            (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+                        if (area == 0) return true;
+                        if (cull_enabled && cull_front && area > 0) return true;
+                        if (cull_enabled && !cull_front && area < 0) return true;
+                        if (!cull_enabled && area < 0) {
+                            expanded.push_back(a);
+                            expanded.push_back(c);
+                            expanded.push_back(b);
+                        } else if (cull_enabled && cull_front) {
+                            expanded.push_back(a);
+                            expanded.push_back(c);
+                            expanded.push_back(b);
+                        } else {
+                            expanded.push_back(a);
+                            expanded.push_back(b);
+                            expanded.push_back(c);
+                        }
+                        return true;
+                    };
+                    bool expanded_ok = true;
+                    if (primitive_mode_ == 5) {
+                        for (size_t i = 0; expanded_ok && i + 2 < packet.vertices.size();
+                             i += 3)
+                            expanded_ok = append_triangle(i, i + 1, i + 2);
+                    } else if (primitive_mode_ == 6) {
+                        for (size_t i = 2; expanded_ok && i < packet.vertices.size(); ++i) {
+                            if ((i & 1u) == 0)
+                                expanded_ok = append_triangle(i - 2, i - 1, i);
+                            else
+                                expanded_ok = append_triangle(i - 1, i - 2, i);
+                        }
+                    } else {
+                        for (size_t i = 2; expanded_ok && i < packet.vertices.size(); ++i)
+                            expanded_ok = append_triangle(0, i - 1, i);
+                    }
+                    if (expanded_ok && !expanded.empty()) {
+                        packet.vertices = std::move(expanded);
+                        packet.primitive_mode = 5;
+                        packet.compute_fixture = Nv2aGenericCombinerPacket::
+                            ComputeFixture::kResidentTextureModulateTriangles;
+                        packet.fixture_clip_x = clip_x;
+                        packet.fixture_clip_y = clip_y;
+                        packet.fixture_clip_width = clip_width;
+                        packet.fixture_clip_height = clip_height;
+                        packet.fixture_blend_enabled = blend_enabled;
+                        packet.fixture_blend_src = blend_src;
+                        packet.fixture_blend_dst = blend_dst;
+                        packet.fixture_color_format_x8 = color_format_x8;
+                        ++generic_combiner_resident_candidates_;
+                    } else {
+                        record_generic_resident_reject(
+                            GenericResidentRejectReason::kVertexExpansion);
+                    }
+                }
             }
         }
         const bool resident_packet =
             packet.compute_fixture == Nv2aGenericCombinerPacket::ComputeFixture::
-                                          kResidentPrimaryColorTriangles;
+                                          kResidentPrimaryColorTriangles ||
+            packet.compute_fixture == Nv2aGenericCombinerPacket::ComputeFixture::
+                                          kResidentTextureModulateTriangles;
         if (renderer_->supports_resident_generic_combiner(packet)) {
             ++generic_combiner_resident_supported_;
             const size_t color_size = static_cast<size_t>(color_bytes64);
@@ -7036,6 +7123,11 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 ++generic_combiner_resident_uploads_;
             } else {
                 ++generic_combiner_resident_reuses_;
+            }
+            for (uint32_t stage = 0; stage < packet.textures.size(); ++stage) {
+                if (packet.textures[stage].referenced)
+                    packet.textures[stage].input =
+                        std::move(texture_stages[stage].data);
             }
             Nv2aGenericCombinerResult result;
             std::string renderer_error;

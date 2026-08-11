@@ -54,6 +54,7 @@ using GlTexSubImage2D = void (*)(unsigned int, int, int, int, int, int,
                                  unsigned int, unsigned int, const void*);
 using GlTexParameteri = void (*)(unsigned int, unsigned int, int);
 using GlDeleteTextures = void (*)(int, const unsigned int*);
+using GlActiveTexture = void (*)(unsigned int);
 using GlGenFramebuffers = void (*)(int, unsigned int*);
 using GlBindFramebuffer = void (*)(unsigned int, unsigned int);
 using GlFramebufferTexture2D = void (*)(unsigned int, unsigned int, unsigned int,
@@ -101,6 +102,7 @@ constexpr unsigned int kGlUnsignedByte = 0x1401;
 constexpr unsigned int kGlFloat = 0x1406;
 constexpr unsigned int kGlTriangles = 0x0004;
 constexpr unsigned int kGlBlend = 0x0BE2;
+constexpr unsigned int kGlDepthTest = 0x0B71;
 constexpr unsigned int kGlScissorTest = 0x0C11;
 constexpr unsigned int kGlFuncAdd = 0x8006;
 constexpr unsigned int kGlZero = 0;
@@ -110,9 +112,12 @@ constexpr unsigned int kGlOneMinusSrcAlpha = 0x0303;
 constexpr unsigned int kGlTextureMinFilter = 0x2801;
 constexpr unsigned int kGlTextureMagFilter = 0x2800;
 constexpr unsigned int kGlNearest = 0x2600;
+constexpr unsigned int kGlLinear = 0x2601;
 constexpr unsigned int kGlTextureWrapS = 0x2802;
 constexpr unsigned int kGlTextureWrapT = 0x2803;
 constexpr unsigned int kGlClampToEdge = 0x812F;
+constexpr unsigned int kGlRepeat = 0x2901;
+constexpr unsigned int kGlTexture0 = 0x84C0;
 constexpr unsigned int kGlUnpackAlignment = 0x0CF5;
 constexpr unsigned int kGlPackAlignment = 0x0D05;
 constexpr unsigned int kGlNoError = 0;
@@ -477,6 +482,58 @@ void main() {
 }
 )GLSL";
 
+constexpr const char* kResidentTextureModulateVertexSource = R"GLSL(#version 430 core
+layout(location = 0) in vec4 in_position;
+layout(location = 1) in vec4 in_diffuse;
+layout(location = 2) in vec4 in_tex0;
+noperspective out vec4 diffuse_over_w;
+noperspective out vec4 tex0_over_w;
+noperspective out float inv_w_out;
+uniform vec2 surface_size;
+void main() {
+    float inv_w = in_position.w == 0.0 ? 1.0 : 1.0 / in_position.w;
+    diffuse_over_w = in_diffuse * inv_w;
+    tex0_over_w = in_tex0 * inv_w;
+    inv_w_out = inv_w;
+    vec2 ndc = vec2(in_position.x / surface_size.x * 2.0 - 1.0,
+                    1.0 - in_position.y / surface_size.y * 2.0);
+    gl_Position = vec4(ndc, 0.0, 1.0);
+}
+)GLSL";
+
+constexpr const char* kResidentTextureModulateFragmentSource = R"GLSL(#version 430 core
+noperspective in vec4 diffuse_over_w;
+noperspective in vec4 tex0_over_w;
+noperspective in float inv_w_out;
+uniform sampler2D texture0;
+uniform vec2 texture_size;
+layout(location = 0) out vec4 out_color;
+vec4 fetch_repeat(ivec2 p) {
+    ivec2 size = ivec2(texture_size);
+    ivec2 q = ivec2((p.x % size.x + size.x) % size.x,
+                    (p.y % size.y + size.y) % size.y);
+    return texelFetch(texture0, q, 0);
+}
+vec4 sample_repeat_bilinear(vec2 texcoord) {
+    vec2 p = texcoord - vec2(0.5, 0.5);
+    ivec2 base = ivec2(floor(p));
+    vec2 f = p - vec2(base);
+    vec4 c00 = fetch_repeat(base);
+    vec4 c10 = fetch_repeat(base + ivec2(1, 0));
+    vec4 c01 = fetch_repeat(base + ivec2(0, 1));
+    vec4 c11 = fetch_repeat(base + ivec2(1, 1));
+    return mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);
+}
+void main() {
+    vec4 diffuse = inv_w_out == 0.0 ? vec4(0.0, 0.0, 0.0, 1.0)
+                                    : diffuse_over_w / inv_w_out;
+    vec4 texcoord = inv_w_out == 0.0 ? vec4(0.0, 0.0, 0.0, 1.0)
+                                     : tex0_over_w / inv_w_out;
+    vec4 texel = sample_repeat_bilinear(texcoord.xy);
+    out_color = clamp(diffuse * texel, 0.0, 1.0);
+}
+)GLSL";
+
 template <typename T>
 bool load_gl(T& destination, const char* name) {
     destination = reinterpret_cast<T>(SDL_GL_GetProcAddress(name));
@@ -489,12 +546,14 @@ public:
                        unsigned int fixture_program,
                        unsigned int texture_modulate_program,
                        unsigned int dashboard_program,
-                       unsigned int resident_program)
+                       unsigned int resident_program,
+                       unsigned int resident_texture_modulate_program)
         : window_(window), context_(context), owns_video_(owns_video),
           fixture_program_(fixture_program),
           texture_modulate_program_(texture_modulate_program),
           dashboard_program_(dashboard_program),
-          resident_program_(resident_program) {}
+          resident_program_(resident_program),
+          resident_texture_modulate_program_(resident_texture_modulate_program) {}
     ~OpenGlNv2aRenderer() override {
         // Destruction can happen after an SDL presentation context was made
         // current; GL object deletion must be issued against this renderer's own
@@ -506,6 +565,8 @@ public:
         if (dashboard_program_ && delete_program_)
             delete_program_(dashboard_program_);
         if (resident_program_ && delete_program_) delete_program_(resident_program_);
+        if (resident_texture_modulate_program_ && delete_program_)
+            delete_program_(resident_texture_modulate_program_);
         if (resident_vbo_ && delete_buffers_) delete_buffers_(1, &resident_vbo_);
         if (resident_vao_ && delete_vertex_arrays_)
             delete_vertex_arrays_(1, &resident_vao_);
@@ -513,6 +574,8 @@ public:
             delete_framebuffers_(1, &resident_fbo_);
         if (resident_texture_ && delete_textures_)
             delete_textures_(1, &resident_texture_);
+        if (resident_source_texture_ && delete_textures_)
+            delete_textures_(1, &resident_source_texture_);
         if (context_) SDL_GL_DestroyContext(context_);
         if (window_) SDL_DestroyWindow(window_);
         if (owns_video_) SDL_QuitSubSystem(SDL_INIT_VIDEO);
@@ -589,11 +652,18 @@ public:
     }
     bool supports_resident_generic_combiner(
         const Nv2aGenericCombinerPacket& packet) const override {
-        if (packet.compute_fixture != Nv2aGenericCombinerPacket::ComputeFixture::
-                                          kResidentPrimaryColorTriangles) {
+        const bool primary_fixture =
+            packet.compute_fixture == Nv2aGenericCombinerPacket::ComputeFixture::
+                                          kResidentPrimaryColorTriangles;
+        const bool texture_fixture =
+            packet.compute_fixture == Nv2aGenericCombinerPacket::ComputeFixture::
+                                          kResidentTextureModulateTriangles;
+        if (!primary_fixture && !texture_fixture) {
             return false;
         }
-        if (resident_program_ == 0 || packet.primitive_mode != 5 ||
+        if ((primary_fixture && resident_program_ == 0) ||
+            (texture_fixture && resident_texture_modulate_program_ == 0) ||
+            packet.primitive_mode != 5 ||
             packet.vertices.empty() || (packet.vertices.size() % 3) != 0 ||
             packet.surface_pitch == 0 || packet.surface_height == 0 ||
             packet.fixture_clip_width == 0 || packet.fixture_clip_height == 0) {
@@ -612,6 +682,17 @@ public:
             };
             if (!factor_supported(packet.fixture_blend_src) ||
                 !factor_supported(packet.fixture_blend_dst)) {
+                return false;
+            }
+        }
+        if (texture_fixture) {
+            const auto& texture = packet.textures[0];
+            if (!texture.referenced ||
+                texture.layout != Nv2aGenericCombinerPacket::TextureLayout::kLinear ||
+                texture.format != Nv2aGenericCombinerPacket::TextureFormat::kArgb8 ||
+                texture.width != 1280 || texture.height != 960 ||
+                texture.pitch != 0x1400 || texture.mode !=
+                    Nv2aGenericCombinerPacket::TextureMode::kProject2d) {
                 return false;
             }
         }
@@ -642,9 +723,13 @@ public:
         if (!ensure_resident_surface(packet, width, height, size, error)) {
             return false;
         }
+        const bool texture_fixture =
+            packet.compute_fixture == Nv2aGenericCombinerPacket::ComputeFixture::
+                                          kResidentTextureModulateTriangles;
         struct GpuVertex {
             float position[4];
             float diffuse[4];
+            float tex0[4];
         };
         std::vector<GpuVertex> vertices;
         vertices.reserve(packet.vertices.size());
@@ -653,11 +738,37 @@ public:
             for (size_t i = 0; i < 4; ++i) {
                 out.position[i] = vertex.position[i];
                 out.diffuse[i] = vertex.diffuse[i];
+                out.tex0[i] = vertex.texture[0][i];
             }
             vertices.push_back(out);
         }
+        if (texture_fixture) {
+            const auto& texture = packet.textures[0];
+            const size_t expected =
+                static_cast<size_t>(texture.pitch) * texture.height;
+            if (texture.input.size() != expected) {
+                error = "OpenGL resident texture-modulate missing source texture snapshot";
+                return false;
+            }
+            if (!resident_source_texture_) gen_textures_(1, &resident_source_texture_);
+            active_texture_(kGlTexture0);
+            bind_texture_(kGlTexture2D, resident_source_texture_);
+            tex_parameter_i_(kGlTexture2D, kGlTextureMinFilter, kGlNearest);
+            tex_parameter_i_(kGlTexture2D, kGlTextureMagFilter, kGlNearest);
+            tex_parameter_i_(kGlTexture2D, kGlTextureWrapS, kGlRepeat);
+            tex_parameter_i_(kGlTexture2D, kGlTextureWrapT, kGlRepeat);
+            std::vector<uint8_t> rgba;
+            guest_words_to_rgba_unflipped(texture.input, rgba, texture.width,
+                                          texture.height, false);
+            pixel_store_i_(kGlUnpackAlignment, 1);
+            tex_image_2d_(kGlTexture2D, 0, kGlRgba8,
+                          static_cast<int>(texture.width),
+                          static_cast<int>(texture.height), 0, kGlRgba,
+                          kGlUnsignedByte, rgba.data());
+        }
         bind_framebuffer_(kGlFramebuffer, resident_fbo_);
         viewport_(0, 0, static_cast<int>(width), static_cast<int>(height));
+        disable_(kGlDepthTest);
         enable_(kGlScissorTest);
         scissor_(static_cast<int>(packet.fixture_clip_x),
                  static_cast<int>(height - packet.fixture_clip_y -
@@ -680,23 +791,39 @@ public:
         buffer_data_(kGlArrayBuffer,
                      static_cast<std::ptrdiff_t>(vertices.size() * sizeof(GpuVertex)),
                      vertices.data(), kGlDynamicDraw);
-        use_program_(resident_program_);
-        uniform_2f_(uniform_location_(resident_program_, "surface_size"),
+        const unsigned int program =
+            texture_fixture ? resident_texture_modulate_program_ : resident_program_;
+        use_program_(program);
+        uniform_2f_(uniform_location_(program, "surface_size"),
                     static_cast<float>(width), static_cast<float>(height));
+        if (texture_fixture) {
+            uniform_1i_(uniform_location_(program, "texture0"), 0);
+            uniform_2f_(uniform_location_(program, "texture_size"),
+                        static_cast<float>(packet.textures[0].width),
+                        static_cast<float>(packet.textures[0].height));
+        }
         vertex_attrib_pointer_(0, 4, kGlFloat, 0, sizeof(GpuVertex),
                                reinterpret_cast<const void*>(offsetof(GpuVertex, position)));
         vertex_attrib_pointer_(1, 4, kGlFloat, 0, sizeof(GpuVertex),
                                reinterpret_cast<const void*>(offsetof(GpuVertex, diffuse)));
+        if (texture_fixture) {
+            vertex_attrib_pointer_(
+                2, 4, kGlFloat, 0, sizeof(GpuVertex),
+                reinterpret_cast<const void*>(offsetof(GpuVertex, tex0)));
+        }
         enable_vertex_attrib_array_(0);
         enable_vertex_attrib_array_(1);
+        if (texture_fixture) enable_vertex_attrib_array_(2);
         draw_arrays_(kGlTriangles, 0, static_cast<int>(vertices.size()));
+        if (texture_fixture) disable_vertex_attrib_array_(2);
         disable_vertex_attrib_array_(1);
         disable_vertex_attrib_array_(0);
         color_mask_(1, 1, 1, 1);
         disable_(kGlBlend);
         disable_(kGlScissorTest);
         if (get_error_() != kGlNoError) {
-            error = "OpenGL resident primary draw failed";
+            error = texture_fixture ? "OpenGL resident texture-modulate draw failed"
+                                    : "OpenGL resident primary draw failed";
             return false;
         }
         resident_.dirty = true;
@@ -1057,6 +1184,7 @@ public:
                load_gl(tex_sub_image_2d_, "glTexSubImage2D") &&
                load_gl(tex_parameter_i_, "glTexParameteri") &&
                load_gl(delete_textures_, "glDeleteTextures") &&
+               load_gl(active_texture_, "glActiveTexture") &&
                load_gl(gen_framebuffers_, "glGenFramebuffers") &&
                load_gl(bind_framebuffer_, "glBindFramebuffer") &&
                load_gl(framebuffer_texture_2d_, "glFramebufferTexture2D") &&
@@ -1084,7 +1212,8 @@ public:
         }
         return compile_fixture(error) && compile_texture_modulate(error) &&
                compile_dashboard(error) &&
-               compile_resident_primary(error);
+               compile_resident_primary(error) &&
+               compile_resident_texture_modulate(error);
     }
 private:
     struct ResidentSurface {
@@ -1116,6 +1245,24 @@ private:
                 const size_t guest_offset = (static_cast<size_t>(y) * width + x) * 4u;
                 const size_t gl_offset =
                     (static_cast<size_t>(gl_y) * width + x) * 4u;
+                rgba[gl_offset + 0] = guest[guest_offset + 2];
+                rgba[gl_offset + 1] = guest[guest_offset + 1];
+                rgba[gl_offset + 2] = guest[guest_offset + 0];
+                rgba[gl_offset + 3] = x8 ? 0xff : guest[guest_offset + 3];
+            }
+        }
+    }
+    static void guest_words_to_rgba_unflipped(const std::vector<uint8_t>& guest,
+                                              std::vector<uint8_t>& rgba,
+                                              uint32_t width, uint32_t height,
+                                              bool x8) {
+        rgba.assign(static_cast<size_t>(width) * height * 4u, 0);
+        for (uint32_t y = 0; y < height; ++y) {
+            for (uint32_t x = 0; x < width; ++x) {
+                const size_t guest_offset =
+                    (static_cast<size_t>(y) * width + x) * 4u;
+                const size_t gl_offset =
+                    (static_cast<size_t>(y) * width + x) * 4u;
                 rgba[gl_offset + 0] = guest[guest_offset + 2];
                 rgba[gl_offset + 1] = guest[guest_offset + 1];
                 rgba[gl_offset + 2] = guest[guest_offset + 0];
@@ -1293,6 +1440,13 @@ private:
                                         "resident-primary", resident_program_,
                                         error);
     }
+    bool compile_resident_texture_modulate(std::string& error) {
+        return compile_graphics_program(kResidentTextureModulateVertexSource,
+                                        kResidentTextureModulateFragmentSource,
+                                        "resident-texture-modulate",
+                                        resident_texture_modulate_program_,
+                                        error);
+    }
     SDL_Window* window_ = nullptr;
     SDL_GLContext context_ = nullptr;
     bool owns_video_ = false;
@@ -1300,7 +1454,9 @@ private:
     unsigned int texture_modulate_program_ = 0;
     unsigned int dashboard_program_ = 0;
     unsigned int resident_program_ = 0;
+    unsigned int resident_texture_modulate_program_ = 0;
     unsigned int resident_texture_ = 0;
+    unsigned int resident_source_texture_ = 0;
     unsigned int resident_fbo_ = 0;
     unsigned int resident_vbo_ = 0;
     unsigned int resident_vao_ = 0;
@@ -1321,7 +1477,8 @@ private:
     GlDeleteBuffers delete_buffers_ = nullptr; GlGenTextures gen_textures_ = nullptr;
     GlBindTexture bind_texture_ = nullptr; GlTexImage2D tex_image_2d_ = nullptr;
     GlTexSubImage2D tex_sub_image_2d_ = nullptr; GlTexParameteri tex_parameter_i_ = nullptr;
-    GlDeleteTextures delete_textures_ = nullptr; GlGenFramebuffers gen_framebuffers_ = nullptr;
+    GlDeleteTextures delete_textures_ = nullptr; GlActiveTexture active_texture_ = nullptr;
+    GlGenFramebuffers gen_framebuffers_ = nullptr;
     GlBindFramebuffer bind_framebuffer_ = nullptr;
     GlFramebufferTexture2D framebuffer_texture_2d_ = nullptr;
     GlCheckFramebufferStatus check_framebuffer_status_ = nullptr;
@@ -1386,7 +1543,7 @@ std::unique_ptr<Nv2aRenderer> create_nv2a_opengl_renderer(std::string& error) {
     }
     auto renderer =
         std::make_unique<OpenGlNv2aRenderer>(window, context, owns_video, 0, 0, 0,
-                                             0);
+                                             0, 0);
     if (!renderer->initialize(error)) return nullptr;
     restore_previous_gl_context(previous_window, previous_context, window);
     std::printf("[nv2a-renderer] opengl context ready: GL %d.%d; narrow compute fixtures enabled\n",

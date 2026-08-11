@@ -28,7 +28,8 @@ struct Nv2aGenericCombinerPacket {
         kUntexturedPrimaryTriangle,
         kTextureModulateTriangle,
         kDashboardProject2dFan,
-        kResidentPrimaryColorTriangles
+        kResidentPrimaryColorTriangles,
+        kResidentTextureModulateTriangles
     };
     enum class TextureLayout : uint8_t { kLinear, kSwizzled };
     enum class TextureFormat : uint8_t { kArgb8, kA8 };
