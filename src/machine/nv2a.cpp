@@ -6218,6 +6218,14 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             default: supported = false; return TextureAddressMode::kRepeat;
         }
     };
+    auto resolve_texture_surface = [&](uint32_t format, uint32_t offset,
+                                       uint64_t bytes64, uint32_t& address) {
+        const bool uses_dma_b = (format & 2u) != 0;
+        return resolve_surface(uses_dma_b ? texture_dma_b_ : texture_dma_a_,
+                               uses_dma_b ? texture_dma_b_bound_
+                                          : texture_dma_a_bound_,
+                               offset, bytes64, address);
+    };
     for (uint32_t stage = 0; stage < 4; ++stage) {
         if (!texture_referenced[stage]) continue;
         if ((raster_state_[kRasterTextureEnableMask] & (1u << stage)) == 0) {
@@ -6226,47 +6234,45 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         }
         const uint32_t stage_mode = (shader_stage_program >> (stage * 5)) & 0x1Fu;
         TextureStage& ts = texture_stages[stage];
-        if (shader_stage_program == 1 && stage_mode == 1) {
-            if (stage != 0) {
-                record_generic_skip_detail(
-                    GenericSkipReason::kUnsupportedTextureShaderProgram,
-                    (1ull << 32) | stage);
-                return true;
-            }
+        const bool single_stage_project2d =
+            shader_stage_program == 1 && stage_mode == 1 && stage == 0;
+        bool handled_linear_project2d = false;
+        if (single_stage_project2d) {
             const uint32_t rect = raster_state_[kRasterTextureImageRect0 + stage];
             ts.width = rect >> 16;
             ts.height = rect & 0xFFFFu;
             ts.pitch = raster_state_[kRasterTextureControl1_0 + stage] >> 16;
-            if (!ts.width || !ts.height ||
-                ts.pitch < ts.width * static_cast<uint32_t>(sizeof(uint32_t))) {
-                record_generic_skip_detail(GenericSkipReason::kUnsupportedTextureFormat,
-                                           raster_state_[kRasterTextureFormat0 + stage]);
-                return true;
+            if (ts.width && ts.height &&
+                ts.pitch >= ts.width * static_cast<uint32_t>(sizeof(uint32_t))) {
+                const uint64_t bytes64 = static_cast<uint64_t>(ts.pitch) * ts.height;
+                uint32_t address = 0;
+                if (bytes64 > SIZE_MAX ||
+                    !resolve_surface(texture_dma_b_, texture_dma_b_bound_,
+                                     raster_state_[kRasterTextureOffset0 + stage],
+                                     bytes64, address)) {
+                    fault_("NV2A generic-combiner texture surface is unbound or overflows");
+                    return false;
+                }
+                ts.data.resize(static_cast<size_t>(bytes64));
+                if (!resolve_renderer_color_overlap(address, ts.data.size(),
+                                                    "generic texture read")) {
+                    return false;
+                }
+                if (!mem_read_ || !mem_read_(address, ts.data.data(), ts.data.size())) {
+                    fault_("NV2A generic-combiner texture DMA read failed");
+                    return false;
+                }
+                generic_texture_bytes_this_batch += ts.data.size();
+                perf::record_generic_texture_allocation(
+                    ts.data.size(), generic_texture_bytes_this_batch);
+                ts.linear = true;
+                ts.valid = true;
+                handled_linear_project2d = true;
             }
-            const uint64_t bytes64 = static_cast<uint64_t>(ts.pitch) * ts.height;
-            uint32_t address = 0;
-            if (bytes64 > SIZE_MAX ||
-                !resolve_surface(texture_dma_b_, texture_dma_b_bound_,
-                                 raster_state_[kRasterTextureOffset0 + stage], bytes64,
-                                 address)) {
-                fault_("NV2A generic-combiner texture surface is unbound or overflows");
-                return false;
-            }
-            ts.data.resize(static_cast<size_t>(bytes64));
-            if (!resolve_renderer_color_overlap(address, ts.data.size(),
-                                                "generic texture read")) {
-                return false;
-            }
-            if (!mem_read_ || !mem_read_(address, ts.data.data(), ts.data.size())) {
-                fault_("NV2A generic-combiner texture DMA read failed");
-                return false;
-            }
-            generic_texture_bytes_this_batch += ts.data.size();
-            perf::record_generic_texture_allocation(
-                ts.data.size(), generic_texture_bytes_this_batch);
-            ts.linear = true;
-            ts.valid = true;
-        } else if (shader_stage_program == 0 ||
+        }
+        if (handled_linear_project2d) {
+            continue;
+        } else if (shader_stage_program == 0 || single_stage_project2d ||
                   (stage_count >= 2 && (stage_mode == 1 || stage_mode == 3))) {
             // shader_stage_program==0 (every stage's mode is NONE/0x00) is the
             // original narrowly-proven "ordinary swizzled 2D" special case (matches
@@ -6296,7 +6302,8 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             // else (DXT-compressed, other SZ_*/LU_* codes) stays a named census rather
             // than a guess at a new pixel decode.
             const bool alpha8 = color_code == 0x19;
-            if ((format & 3u) != 2u ||
+            const uint32_t dma_selector = format & 3u;
+            if ((dma_selector != 1u && dma_selector != 2u) ||
                 (color_code != 6 && color_code != 7 && !alpha8)) {
                 record_generic_skip_detail(GenericSkipReason::kUnsupportedTextureFormat,
                                            format);
@@ -6325,9 +6332,9 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 static_cast<uint64_t>(ts.width) * ts.height * bytes_per_texel;
             uint32_t address = 0;
             if (bytes64 > SIZE_MAX ||
-                !resolve_surface(texture_dma_b_, texture_dma_b_bound_,
-                                 raster_state_[kRasterTextureOffset0 + stage], bytes64,
-                                 address)) {
+                !resolve_texture_surface(
+                    format, raster_state_[kRasterTextureOffset0 + stage], bytes64,
+                    address)) {
                 fault_("NV2A generic-combiner texture surface is unbound or overflows");
                 return false;
             }
