@@ -597,6 +597,7 @@ int main(int argc, char** argv) {
     uint64_t debug_nv2a_surface_event_after_insns = 0;
     size_t perf_generic_top_limit = 12;
     uint64_t max_insns = 128ull * 1000 * 1000;  // 2BL kernel LZX decompress needs tens of M
+    uint64_t machine_chunk_insns = 4096;
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--serve")) serve = true;
         else if (!std::strcmp(argv[i], "--window")) window = true;
@@ -842,6 +843,16 @@ int main(int argc, char** argv) {
         }
         else if (!std::strcmp(argv[i], "--max-insns") && i + 1 < argc)
             max_insns = std::strtoull(argv[++i], nullptr, 0);
+        else if (!std::strcmp(argv[i], "--machine-chunk-insns") &&
+                 i + 1 < argc) {
+            if (!parse_u64_arg(argv[++i], machine_chunk_insns) ||
+                machine_chunk_insns == 0) {
+                std::fprintf(
+                    stderr,
+                    "[host] --machine-chunk-insns needs a positive integer\n");
+                return 1;
+            }
+        }
         else if (!std::strcmp(argv[i], "--max-host-memory-mb") &&
                  i + 1 < argc) {
             const char* limit = argv[++i];
@@ -1007,9 +1018,15 @@ int main(int argc, char** argv) {
     if (boot_flash) {
         XboxMachine::Config machine_config;
         machine_config.nv2a_renderer = nv2a_renderer.get();
+        machine_config.cpu_chunk_insns = machine_chunk_insns;
         if (test_synthetic_controller_hub) {
             machine_config.ohci0_topology =
                 Ohci::UsbTopology::kSyntheticControllerSHubForTest;
+        }
+        if (machine_chunk_insns != 4096) {
+            std::printf(
+                "[machine] cpu chunk override: %llu instructions (default 4096)\n",
+                static_cast<unsigned long long>(machine_chunk_insns));
         }
         XboxMachine mach(machine_config);
         if (!mach.ok()) { std::fprintf(stderr, "[machine] unicorn init failed\n"); return 1; }

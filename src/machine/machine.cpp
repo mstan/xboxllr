@@ -20,7 +20,9 @@ namespace xlle {
 XboxMachine::XboxMachine() : XboxMachine(Config{}) {}
 
 XboxMachine::XboxMachine(Config config)
-    : cpu_(std::make_unique<UnicornFloor>()), config_(config) {}
+    : cpu_(std::make_unique<UnicornFloor>()),
+      config_(config),
+      cpu_chunk_insns_(std::max<uint64_t>(1, config.cpu_chunk_insns)) {}
 
 bool XboxMachine::ok() const { return static_cast<UnicornFloor*>(cpu_.get())->ok(); }
 
@@ -331,7 +333,6 @@ uint64_t XboxMachine::run(uint32_t start, uint64_t max, std::string& err) {
     // Execute in short chunks so the interrupt controller can deliver external IRQs at clean
     // instruction boundaries between chunks (Unicorn has no native IRQ path — see the CPU
     // floor's inject_interrupt). The PIT clock advances with retired instructions.
-    constexpr uint64_t kChunk = 4096;
     uint32_t eip = start;
     uint64_t done = 0;
     while (done < max) {
@@ -347,7 +348,7 @@ uint64_t XboxMachine::run(uint32_t start, uint64_t max, std::string& err) {
             if (pic_ && pic_->intr_pending()) pending_boundaries_++;
             cpu_->set_irq_pending(pic_ && pic_->intr_pending());
         }
-        uint64_t chunk = std::min(kChunk, max - done);
+        uint64_t chunk = std::min(cpu_chunk_insns_, max - done);
         std::string cerr;
         uint64_t n = cpu_->run(eip, chunk, cerr);
         done += n;

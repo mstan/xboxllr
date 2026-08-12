@@ -40,6 +40,9 @@ public:
         Ohci::UsbTopology ohci0_topology = Ohci::UsbTopology::kDirectXid;
         // Non-owning: the host owns its backend and must outlive this machine.
         Nv2aRenderer* nv2a_renderer = nullptr;
+        // CPU execution slice size. 4096 is the conservative LLE floor used by
+        // existing gates; larger values are an explicit speed/iteration knob.
+        uint64_t cpu_chunk_insns = 4096;
     };
 
     XboxMachine();
@@ -121,6 +124,7 @@ private:
     uint64_t irq0_pulses_ = 0;  // PIT channel-0 period boundaries reached
     uint64_t pending_boundaries_ = 0;  // chunk boundaries with an unmasked IRQ pending
     uint64_t host_poll_millisecond_ = UINT64_MAX;
+    uint64_t cpu_chunk_insns_ = 4096;
 
     // Guest CPU clock estimate (Hz) mapping retired instructions -> PIT ticks. The Xbox CPU is
     // 733.33 MHz; combined with ~1 IPC this sets the tick cadence (calibratable).
