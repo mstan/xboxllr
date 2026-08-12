@@ -14,6 +14,9 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 option(XLLE_WITH_SDL "Build the SDL3 host shell" ON)
+option(XLLE_NATIVE_OPTIMIZATIONS
+  "Build local host-native optimized binaries (-march=native on x86_64 GNU/Clang)"
+  ON)
 
 include(FetchContent)
 
@@ -86,6 +89,11 @@ add_library(xlle_machine STATIC
   src/machine/rtc.cpp)
 target_include_directories(xlle_machine PUBLIC ${XLLE_INCLUDES})
 target_link_libraries(xlle_machine PUBLIC xlle_cpu nv2a_vsh_emulator)
+if(XLLE_NATIVE_OPTIMIZATIONS AND
+   CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND
+   CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
+  target_compile_options(xlle_machine PRIVATE -march=native)
+endif()
 
 # --- fixture corpus ---
 add_library(xlle_spike STATIC src/spike/fixtures.cpp)
@@ -128,6 +136,11 @@ add_test(NAME jsonl COMMAND test_jsonl)
 add_executable(test_nv2a tests/test_nv2a.cpp src/machine/nv2a.cpp)
 target_include_directories(test_nv2a PRIVATE ${XLLE_INCLUDES})
 target_link_libraries(test_nv2a PRIVATE nv2a_vsh_emulator xlle_host)
+if(XLLE_NATIVE_OPTIMIZATIONS AND
+   CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND
+   CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
+  target_compile_options(test_nv2a PRIVATE -march=native)
+endif()
 add_test(NAME nv2a COMMAND test_nv2a)
 
 add_executable(test_apu tests/test_apu.cpp)
