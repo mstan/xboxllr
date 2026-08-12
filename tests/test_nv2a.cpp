@@ -1,8 +1,11 @@
 // xlle — focused PFIFO recorder / NV097 semaphore DMA test.
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
+#include <fstream>
 #include <limits>
 #include <string>
 #include <vector>
@@ -8134,6 +8137,458 @@ int main() {
             CHECK(gc_gpu.generic_combiner_texture_samples() > before_q_samples);
             const uint32_t q_offset = 3u * 32u + 3u * 4u;
             CHECK(get32(gc_ram, 0x10000u + q_offset) == 0x60FFFFFFu);
+        }
+    }
+
+    if (std::getenv("XLLE_HOTPACKET_PROBE")) {
+        const char* path = "build/generic-hotpacket-fp6751-v2-12b.xgp";
+        std::ifstream in(path, std::ios::binary);
+        if (!in) {
+            std::printf("SKIP: hotpacket probe missing %s\n", path);
+        } else {
+            auto read_bytes = [&](void* data, size_t size) {
+                in.read(reinterpret_cast<char*>(data),
+                        static_cast<std::streamsize>(size));
+                return in.good();
+            };
+            auto read_u8 = [&]() {
+                uint8_t v = 0;
+                CHECK(read_bytes(&v, sizeof(v)));
+                return v;
+            };
+            auto read_u32 = [&]() {
+                uint32_t v = 0;
+                CHECK(read_bytes(&v, sizeof(v)));
+                return v;
+            };
+            auto read_u64 = [&]() {
+                uint64_t v = 0;
+                CHECK(read_bytes(&v, sizeof(v)));
+                return v;
+            };
+            auto read_i32 = [&]() {
+                int32_t v = 0;
+                CHECK(read_bytes(&v, sizeof(v)));
+                return v;
+            };
+            auto read_float = [&]() {
+                float v = 0.0f;
+                CHECK(read_bytes(&v, sizeof(v)));
+                return v;
+            };
+            auto read_vec = [&]() {
+                std::vector<uint8_t> data;
+                const uint64_t size = read_u64();
+                CHECK(size <= 64ull * 1024ull * 1024ull);
+                data.resize(static_cast<size_t>(size));
+                CHECK(read_bytes(data.data(), data.size()));
+                return data;
+            };
+            char magic[8]{};
+            CHECK(read_bytes(magic, sizeof(magic)));
+            const uint32_t version = read_u32();
+            CHECK(std::memcmp(magic, "XLLEGPB2", 8) == 0);
+            CHECK(version == 2);
+            const uint64_t candidate = read_u64();
+            const uint64_t fingerprint = read_u64();
+            const uint64_t full_hash = read_u64();
+            for (size_t i = 0; i < 11; ++i) (void)read_u32();
+
+            xlle::Nv2aGenericCombinerPacket packet;
+            packet.primitive_mode = read_u8();
+            packet.surface_format = read_u32();
+            packet.surface_pitch = read_u32();
+            packet.surface_height = read_u32();
+            packet.color_address = read_u32();
+            packet.depth_address = read_u32();
+            packet.compute_fixture =
+                static_cast<xlle::Nv2aGenericCombinerPacket::ComputeFixture>(
+                    read_u8());
+            packet.fixture_clip_x = read_u32();
+            packet.fixture_clip_y = read_u32();
+            packet.fixture_clip_width = read_u32();
+            packet.fixture_clip_height = read_u32();
+            for (int32_t& value : packet.fixture_xy_16) value = read_i32();
+            packet.fixture_source_argb = read_u32();
+            packet.fixture_constant_argb = read_u32();
+            packet.fixture_factor0_stage2_argb = read_u32();
+            packet.fixture_factor0_stage4_argb = read_u32();
+            packet.fixture_blend_src = read_u32();
+            packet.fixture_blend_dst = read_u32();
+            packet.fixture_depth_func = read_u32();
+            packet.fixture_blend_enabled = read_u8() != 0;
+            packet.fixture_depth_test_enabled = read_u8() != 0;
+            packet.fixture_depth_write_enabled = read_u8() != 0;
+            packet.fixture_texture_passthrough = read_u8() != 0;
+            packet.fixture_texture_constant_color_alpha = read_u8() != 0;
+            packet.fixture_color_format_x8 = read_u8() != 0;
+
+            const uint64_t vertex_count = read_u64();
+            CHECK(vertex_count <= 20000);
+            packet.vertices.resize(static_cast<size_t>(vertex_count));
+            for (auto& vertex : packet.vertices) {
+                for (float& value : vertex.position) value = read_float();
+                for (float& value : vertex.diffuse) value = read_float();
+                for (float& value : vertex.specular) value = read_float();
+                for (auto& tex : vertex.texture)
+                    for (float& value : tex) value = read_float();
+            }
+            const uint64_t raster_words = read_u64();
+            CHECK(raster_words == xlle::Nv2a::kRasterStateWords);
+            packet.raster_state.resize(static_cast<size_t>(raster_words));
+            CHECK(read_bytes(packet.raster_state.data(),
+                             packet.raster_state.size() * sizeof(uint32_t)));
+            for (auto& texture : packet.textures) {
+                texture.referenced = read_u8() != 0;
+                texture.layout =
+                    static_cast<xlle::Nv2aGenericCombinerPacket::TextureLayout>(
+                        read_u8());
+                texture.format =
+                    static_cast<xlle::Nv2aGenericCombinerPacket::TextureFormat>(
+                        read_u8());
+                texture.mode =
+                    static_cast<xlle::Nv2aGenericCombinerPacket::TextureMode>(
+                        read_u8());
+                texture.width = read_u32();
+                texture.height = read_u32();
+                texture.pitch = read_u32();
+                texture.address_mode = read_u32();
+                texture.border_color = read_u32();
+                texture.input = read_vec();
+            }
+            packet.color_input = read_vec();
+            packet.depth_input = read_vec();
+            const std::vector<uint8_t> expected_color = read_vec();
+            const std::vector<uint8_t> expected_depth = read_vec();
+            CHECK(expected_depth.empty());
+            CHECK(in.peek() == std::ifstream::traits_type::eof());
+
+            xlle::Nv2aGenericCombinerPacket resident = packet;
+            resident.compute_fixture = xlle::Nv2aGenericCombinerPacket::
+                ComputeFixture::kResidentTextureModulateTriangles;
+            resident.fixture_clip_x = 0;
+            resident.fixture_clip_y = 0;
+            resident.fixture_clip_width = 1280;
+            resident.fixture_clip_height = 960;
+            resident.fixture_blend_enabled =
+                (resident.raster_state[xlle::Nv2a::kRasterEnables] & (1u << 1)) != 0;
+            resident.fixture_blend_src =
+                resident.raster_state[xlle::Nv2a::kRasterBlendSrc];
+            resident.fixture_blend_dst =
+                resident.raster_state[xlle::Nv2a::kRasterBlendDst];
+            resident.fixture_depth_test_enabled = false;
+            resident.fixture_depth_write_enabled = false;
+            resident.fixture_depth_func = 0x0207;
+            resident.fixture_color_format_x8 = true;
+            resident.fixture_texture_passthrough = false;
+
+            const bool cull_enabled =
+                (resident.raster_state[xlle::Nv2a::kRasterEnables] & (1u << 2)) != 0;
+            const bool cull_front =
+                resident.raster_state[xlle::Nv2a::kRasterCullFace] == 0x0404;
+            std::vector<xlle::Nv2aGenericCombinerVertex> safe;
+            size_t behind = 0, mixed = 0, degenerate = 0, clipped_out = 0;
+            size_t clipped_triangles = 0;
+            safe.reserve(resident.vertices.size());
+            auto finite_vertex = [](const xlle::Nv2aGenericCombinerVertex& v) {
+                for (float value : v.position)
+                    if (!std::isfinite(value)) return false;
+                if (v.position[3] == 0.0f) return false;
+                for (float value : v.diffuse)
+                    if (!std::isfinite(value)) return false;
+                for (float value : v.texture[0])
+                    if (!std::isfinite(value)) return false;
+                return true;
+            };
+            auto append_oriented_triangle =
+                [&](const xlle::Nv2aGenericCombinerVertex& input_a,
+                    const xlle::Nv2aGenericCombinerVertex& input_b,
+                    const xlle::Nv2aGenericCombinerVertex& input_c) {
+                    const auto* a = &input_a;
+                    const auto* b = &input_b;
+                    const auto* c = &input_c;
+                    const double ax = a->position[0], ay = a->position[1];
+                    const double bx = b->position[0], by = b->position[1];
+                    const double cx = c->position[0], cy = c->position[1];
+                    const double area = (bx - ax) * (cy - ay) -
+                                        (by - ay) * (cx - ax);
+                    if (area == 0.0) {
+                        ++degenerate;
+                        return false;
+                    }
+                    if (cull_enabled && cull_front && area > 0.0) return false;
+                    if (cull_enabled && !cull_front && area < 0.0) return false;
+                    if (!cull_enabled && area < 0.0) {
+                        safe.push_back(*a);
+                        safe.push_back(*c);
+                        safe.push_back(*b);
+                    } else if (cull_enabled && cull_front) {
+                        safe.push_back(*a);
+                        safe.push_back(*c);
+                        safe.push_back(*b);
+                    } else {
+                        safe.push_back(*a);
+                        safe.push_back(*b);
+                        safe.push_back(*c);
+                    }
+                    return true;
+                };
+            constexpr float kMinPositiveW = 1.0e-6f;
+            constexpr float kClipTolerance = 1.0e-4f;
+            const float surface_w = 1280.0f;
+            const float surface_h = 960.0f;
+            struct ClipVertex {
+                xlle::Nv2aGenericCombinerVertex vertex;
+                float clip_x = 0.0f;
+                float clip_y = 0.0f;
+                float clip_w = 0.0f;
+            };
+            auto make_clip_vertex =
+                [&](const xlle::Nv2aGenericCombinerVertex& vertex) {
+                    ClipVertex out{};
+                    out.vertex = vertex;
+                    out.clip_w = vertex.position[3];
+                    out.clip_x =
+                        (2.0f * vertex.position[0] / surface_w - 1.0f) *
+                        out.clip_w;
+                    out.clip_y =
+                        (2.0f * vertex.position[1] / surface_h - 1.0f) *
+                        out.clip_w;
+                    return out;
+                };
+            auto lerp_clip_vertex = [](const ClipVertex& v0,
+                                       const ClipVertex& v1, float t) {
+                ClipVertex out{};
+                out.clip_x = v0.clip_x + (v1.clip_x - v0.clip_x) * t;
+                out.clip_y = v0.clip_y + (v1.clip_y - v0.clip_y) * t;
+                out.clip_w = v0.clip_w + (v1.clip_w - v0.clip_w) * t;
+                out.vertex = v0.vertex;
+                for (size_t component = 0; component < 3; ++component) {
+                    out.vertex.position[component] =
+                        v0.vertex.position[component] +
+                        (v1.vertex.position[component] -
+                         v0.vertex.position[component]) *
+                            t;
+                }
+                out.vertex.position[3] = out.clip_w;
+                for (size_t component = 0; component < 4; ++component) {
+                    out.vertex.diffuse[component] =
+                        v0.vertex.diffuse[component] +
+                        (v1.vertex.diffuse[component] -
+                         v0.vertex.diffuse[component]) *
+                            t;
+                    out.vertex.specular[component] =
+                        v0.vertex.specular[component] +
+                        (v1.vertex.specular[component] -
+                         v0.vertex.specular[component]) *
+                            t;
+                    for (size_t stage = 0; stage < 4; ++stage) {
+                        out.vertex.texture[stage][component] =
+                            v0.vertex.texture[stage][component] +
+                            (v1.vertex.texture[stage][component] -
+                             v0.vertex.texture[stage][component]) *
+                                t;
+                    }
+                }
+                return out;
+            };
+            auto append_clipped_triangle =
+                [&](const xlle::Nv2aGenericCombinerVertex& a,
+                    const xlle::Nv2aGenericCombinerVertex& b,
+                    const xlle::Nv2aGenericCombinerVertex& c) {
+                    std::vector<ClipVertex> clip_polygon{
+                        make_clip_vertex(a), make_clip_vertex(b),
+                        make_clip_vertex(c)};
+                    auto clip_plane = [&](auto plane_value) {
+                        if (clip_polygon.empty()) return;
+                        std::vector<ClipVertex> output;
+                        output.reserve(clip_polygon.size() + 1);
+                        ClipVertex prev = clip_polygon.back();
+                        float prev_value = plane_value(prev);
+                        bool prev_inside = prev_value >= 0.0f;
+                        for (const ClipVertex& cur : clip_polygon) {
+                            const float cur_value = plane_value(cur);
+                            const bool cur_inside = cur_value >= 0.0f;
+                            if (cur_inside != prev_inside) {
+                                const float denom = prev_value - cur_value;
+                                const float t =
+                                    denom == 0.0f ? 0.0f : prev_value / denom;
+                                output.push_back(
+                                    lerp_clip_vertex(prev, cur, t));
+                            }
+                            if (cur_inside) output.push_back(cur);
+                            prev = cur;
+                            prev_value = cur_value;
+                            prev_inside = cur_inside;
+                        }
+                        clip_polygon = std::move(output);
+                    };
+                    const bool needs_clip =
+                        std::any_of(clip_polygon.begin(), clip_polygon.end(),
+                                    [](const ClipVertex& vertex) {
+                                        return vertex.clip_w < kMinPositiveW ||
+                                               vertex.clip_x <
+                                                   -vertex.clip_w -
+                                                       kClipTolerance ||
+                                               vertex.clip_x >
+                                                   vertex.clip_w +
+                                                       kClipTolerance ||
+                                               vertex.clip_y <
+                                                   -vertex.clip_w -
+                                                       kClipTolerance ||
+                                               vertex.clip_y >
+                                                   vertex.clip_w +
+                                                       kClipTolerance;
+                                    });
+                    if (needs_clip) {
+                        clip_plane([](const ClipVertex& vertex) {
+                            return vertex.clip_w - kMinPositiveW;
+                        });
+                        clip_plane([](const ClipVertex& vertex) {
+                            return vertex.clip_x + vertex.clip_w;
+                        });
+                        clip_plane([](const ClipVertex& vertex) {
+                            return vertex.clip_w - vertex.clip_x;
+                        });
+                        clip_plane([](const ClipVertex& vertex) {
+                            return vertex.clip_y + vertex.clip_w;
+                        });
+                        clip_plane([](const ClipVertex& vertex) {
+                            return vertex.clip_w - vertex.clip_y;
+                        });
+                    }
+                    if (clip_polygon.size() < 3) {
+                        ++clipped_out;
+                        return;
+                    }
+                    std::vector<xlle::Nv2aGenericCombinerVertex> clipped;
+                    clipped.reserve(clip_polygon.size());
+                    for (ClipVertex& vertex : clip_polygon) {
+                        if (vertex.clip_w <= 0.0f) {
+                            ++clipped_out;
+                            return;
+                        }
+                        vertex.vertex.position[0] =
+                            (vertex.clip_x / vertex.clip_w + 1.0f) *
+                            surface_w * 0.5f;
+                        vertex.vertex.position[1] =
+                            (vertex.clip_y / vertex.clip_w + 1.0f) *
+                            surface_h * 0.5f;
+                        vertex.vertex.position[3] = vertex.clip_w;
+                        clipped.push_back(vertex.vertex);
+                    }
+                    for (size_t j = 1; j + 1 < clipped.size(); ++j) {
+                        if (append_oriented_triangle(clipped[0], clipped[j],
+                                                     clipped[j + 1])) {
+                            ++clipped_triangles;
+                        }
+                    }
+                };
+            for (size_t i = 0; i + 2 < resident.vertices.size(); i += 3) {
+                const auto* a = &resident.vertices[i + 0];
+                const auto* b = &resident.vertices[i + 1];
+                const auto* c = &resident.vertices[i + 2];
+                CHECK(finite_vertex(*a) && finite_vertex(*b) &&
+                      finite_vertex(*c));
+                const bool all_behind =
+                    a->position[3] < 0.0f && b->position[3] < 0.0f &&
+                    c->position[3] < 0.0f;
+                if (all_behind) {
+                    ++behind;
+                    append_clipped_triangle(*a, *b, *c);
+                    continue;
+                }
+                const bool crosses =
+                    a->position[3] < 0.0f || b->position[3] < 0.0f ||
+                    c->position[3] < 0.0f;
+                if (crosses) {
+                    ++mixed;
+                    append_clipped_triangle(*a, *b, *c);
+                    continue;
+                }
+                append_clipped_triangle(*a, *b, *c);
+            }
+            resident.vertices = std::move(safe);
+            resident.primitive_mode = 5;
+            CHECK(!resident.vertices.empty());
+
+            std::string gl_error;
+            auto gl_renderer = xlle::create_nv2a_opengl_renderer(gl_error);
+            if (!gl_renderer) {
+                std::printf("SKIP: hotpacket OpenGL probe unavailable: %s\n",
+                            gl_error.c_str());
+            } else {
+                CHECK(gl_renderer->supports_resident_generic_combiner(resident));
+                xlle::Nv2aGenericCombinerResult result;
+                CHECK(gl_renderer->submit_resident_generic_combiner(
+                    resident, result, gl_error));
+                if (!gl_error.empty())
+                    std::printf("hotpacket resident error: %s\n",
+                                gl_error.c_str());
+                xlle::Nv2aResidentColorResolve resolve;
+                CHECK(gl_renderer->resolve_resident_color_surface(
+                    resident.color_address, resident.color_input.size(),
+                    resolve, gl_error));
+                CHECK(resolve.data.size() == expected_color.size());
+                size_t mismatches = 0;
+                std::array<size_t, 4> channel_mismatches{};
+                size_t beyond_one_lsb = 0;
+                int max_abs_delta = 0;
+                size_t pixel_mismatches = 0;
+                size_t first_mismatch = expected_color.size();
+                const size_t compare_size =
+                    std::min(resolve.data.size(), expected_color.size());
+                for (size_t i = 0; i < compare_size; ++i) {
+                    if (resolve.data[i] != expected_color[i]) {
+                        if (first_mismatch == expected_color.size())
+                            first_mismatch = i;
+                        ++mismatches;
+                        ++channel_mismatches[i & 3u];
+                        const int delta =
+                            static_cast<int>(resolve.data[i]) -
+                            static_cast<int>(expected_color[i]);
+                        const int abs_delta = std::abs(delta);
+                        if (abs_delta > 1) ++beyond_one_lsb;
+                        max_abs_delta = std::max(max_abs_delta, abs_delta);
+                    }
+                    if ((i & 3u) == 3u) {
+                        const size_t pixel = i - 3u;
+                        if (resolve.data[pixel + 0] != expected_color[pixel + 0] ||
+                            resolve.data[pixel + 1] != expected_color[pixel + 1] ||
+                            resolve.data[pixel + 2] != expected_color[pixel + 2] ||
+                            resolve.data[pixel + 3] != expected_color[pixel + 3]) {
+                            ++pixel_mismatches;
+                        }
+                    }
+                }
+                uint32_t got_word = 0;
+                uint32_t expected_word = 0;
+                if (first_mismatch < compare_size) {
+                    const size_t first_word = first_mismatch & ~size_t{3};
+                    std::memcpy(&got_word, resolve.data.data() + first_word,
+                                sizeof(got_word));
+                    std::memcpy(&expected_word,
+                                expected_color.data() + first_word,
+                                sizeof(expected_word));
+                }
+                std::printf(
+                    "hotpacket probe fp=%016llx full=%016llx candidate=%llu "
+                    "safe_tris=%zu behind=%zu mixed=%zu degenerate=%zu "
+                    "clipped_out=%zu clipped_tris=%zu mismatches=%zu "
+                    "pixels=%zu ch=%zu/%zu/%zu/%zu gt1=%zu maxd=%d first=%zu "
+                    "got=%08x expected=%08x\n",
+                    static_cast<unsigned long long>(fingerprint),
+                    static_cast<unsigned long long>(full_hash),
+                    static_cast<unsigned long long>(candidate),
+                    resident.vertices.size() / 3, behind, mixed, degenerate,
+                    clipped_out, clipped_triangles, mismatches, pixel_mismatches,
+                    channel_mismatches[0], channel_mismatches[1],
+                    channel_mismatches[2], channel_mismatches[3],
+                    beyond_one_lsb, max_abs_delta, first_mismatch, got_word,
+                    expected_word);
+                if (std::getenv("XLLE_HOTPACKET_PROBE_REQUIRE_EXACT"))
+                    CHECK(mismatches == 0);
+            }
         }
     }
 
