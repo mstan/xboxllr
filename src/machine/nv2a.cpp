@@ -5751,6 +5751,9 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     if (profile_generic_fingerprint)
         generic_started_at = std::chrono::steady_clock::now();
     uint64_t generic_batch_bbox_pixels = 0;
+    uint64_t generic_batch_texture_setup_ns = 0;
+    uint64_t generic_batch_software_raster_ns = 0;
+    uint64_t generic_batch_flush_ns = 0;
     const bool supported_primitive =
         primitive_mode_ == 5 || primitive_mode_ == 6 || primitive_mode_ == 7;
     if (!supported_primitive) {
@@ -6514,6 +6517,9 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         }
         return true;
     };
+    std::chrono::steady_clock::time_point generic_texture_setup_started_at;
+    if (profile_generic_fingerprint)
+        generic_texture_setup_started_at = std::chrono::steady_clock::now();
     {
         perf::ScopedAdd texture_setup_timer(
             perf::g_ns_generic_texture_setup,
@@ -6721,6 +6727,13 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             return true;
         }
         }
+    }
+    if (profile_generic_fingerprint) {
+        generic_batch_texture_setup_ns = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() -
+                generic_texture_setup_started_at)
+                .count());
     }
     const bool only_texture0_input =
         texture_referenced[0] && !texture_referenced[1] &&
@@ -8102,6 +8115,11 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             generic_combiner_writes_ - generic_writes_before;
         generic_fingerprint_stats->wall_ns += static_cast<uint64_t>(
             std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count());
+        generic_fingerprint_stats->texture_setup_ns +=
+            generic_batch_texture_setup_ns;
+        generic_fingerprint_stats->software_raster_ns +=
+            generic_batch_software_raster_ns;
+        generic_fingerprint_stats->flush_ns += generic_batch_flush_ns;
         const uint64_t batch_fragments =
             generic_combiner_fragments_ - generic_fragments_before;
         generic_fingerprint_stats->bbox_pixels += generic_batch_bbox_pixels;
@@ -9214,6 +9232,9 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         }
     };
 
+    std::chrono::steady_clock::time_point generic_software_raster_started_at;
+    if (profile_generic_fingerprint)
+        generic_software_raster_started_at = std::chrono::steady_clock::now();
     {
         perf::ScopedAdd software_raster_timer(
             perf::g_ns_generic_software_raster,
@@ -9242,11 +9263,21 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                                   transformed_batch_[i]);
         }
     }
+    if (profile_generic_fingerprint) {
+        generic_batch_software_raster_ns = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() -
+                generic_software_raster_started_at)
+                .count());
+    }
 
     if (raster_failed) {
         record_generic_fingerprint_perf();
         return false;
     }
+    std::chrono::steady_clock::time_point generic_flush_started_at;
+    if (profile_generic_fingerprint)
+        generic_flush_started_at = std::chrono::steady_clock::now();
     {
         perf::ScopedAdd flush_timer(perf::g_ns_generic_flush,
                                     perf::g_calls_generic_flush);
@@ -9262,6 +9293,12 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             record_generic_fingerprint_perf();
             return false;
         }
+    }
+    if (profile_generic_fingerprint) {
+        generic_batch_flush_ns = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - generic_flush_started_at)
+                .count());
     }
     if (uses_depth && raster_state_[kRasterDepthMask] != 0)
         invalidate_renderer_depth_overlap(depth_address,

@@ -690,6 +690,9 @@ public:
         uint64_t fragments = 0;
         uint64_t writes = 0;
         uint64_t wall_ns = 0;
+        uint64_t texture_setup_ns = 0;
+        uint64_t software_raster_ns = 0;
+        uint64_t flush_ns = 0;
         uint64_t bbox_pixels = 0;
         uint64_t max_batch_fragments = 0;
         uint64_t max_batch_bbox_pixels = 0;

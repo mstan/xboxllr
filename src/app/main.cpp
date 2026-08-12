@@ -1746,6 +1746,9 @@ int main(int argc, char** argv) {
                     uint64_t fragments = 0;
                     uint64_t writes = 0;
                     uint64_t wall_ns = 0;
+                    uint64_t texture_setup_ns = 0;
+                    uint64_t software_raster_ns = 0;
+                    uint64_t flush_ns = 0;
                     uint64_t bbox_pixels = 0;
                     uint32_t min_vertices = UINT32_MAX;
                     uint32_t max_vertices = 0;
@@ -1796,6 +1799,9 @@ int main(int argc, char** argv) {
                     family->fragments += entry.fragments;
                     family->writes += entry.writes;
                     family->wall_ns += entry.wall_ns;
+                    family->texture_setup_ns += entry.texture_setup_ns;
+                    family->software_raster_ns += entry.software_raster_ns;
+                    family->flush_ns += entry.flush_ns;
                     family->bbox_pixels += entry.bbox_pixels;
                     family->min_vertices =
                         std::min(family->min_vertices, entry.min_vertices);
@@ -1838,7 +1844,7 @@ int main(int argc, char** argv) {
                     std::printf(
                         " surf%08x/sfmt%08x/pitch%08x/prim%u/en%08x/sh%08x/comb%08x"
                         "/tf%08x,%08x,%08x,%08x:fp%llu/b%llu/f%llu/w%llu/ns%llu"
-                        "/bb%llu/v%u-%u",
+                        "/bb%llu/setup%llu/soft%llu/flush%llu/v%u-%u",
                         key.surface_color, key.surface_format, key.surface_pitch,
                         static_cast<unsigned>(key.primitive), key.enables,
                         key.shader, key.combiner, key.texture_format[0],
@@ -1850,6 +1856,9 @@ int main(int argc, char** argv) {
                         static_cast<unsigned long long>(family.writes),
                         static_cast<unsigned long long>(family.wall_ns),
                         static_cast<unsigned long long>(family.bbox_pixels),
+                        static_cast<unsigned long long>(family.texture_setup_ns),
+                        static_cast<unsigned long long>(family.software_raster_ns),
+                        static_cast<unsigned long long>(family.flush_ns),
                         family.min_vertices == UINT32_MAX ? 0 : family.min_vertices,
                         family.max_vertices);
                     if (family.texture_modulate_batches) {

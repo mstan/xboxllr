@@ -293,6 +293,8 @@ GENERIC_FAMILY_ITEM_RE = re.compile(
     r"(?P<texture_format2>[0-9a-f]+),(?P<texture_format3>[0-9a-f]+):"
     r"fp(?P<fingerprints>\d+)/b(?P<batches>\d+)/f(?P<frags>\d+)/"
     r"w(?P<writes>\d+)/ns(?P<ns>\d+)/bb(?P<bbox_pixels>\d+)/"
+    r"(?:setup(?P<texture_setup_ns>\d+)/soft(?P<software_raster_ns>\d+)/"
+    r"flush(?P<flush_ns>\d+)/)?"
     r"v(?P<min_vertices>\d+)-(?P<max_vertices>\d+)(?P<detail>.*)$"
 )
 
@@ -367,6 +369,9 @@ def parse_generic_family_perf(match: re.Match[str]) -> dict[str, Any]:
                     "writes": int(groups["writes"]),
                     "ns": int(groups["ns"]),
                     "bbox_pixels": int(groups["bbox_pixels"]),
+                    "texture_setup_ns": int(groups["texture_setup_ns"] or 0),
+                    "software_raster_ns": int(groups["software_raster_ns"] or 0),
+                    "flush_ns": int(groups["flush_ns"] or 0),
                     "min_vertices": int(groups["min_vertices"]),
                     "max_vertices": int(groups["max_vertices"]),
                     "detail": groups["detail"].lstrip("/"),
