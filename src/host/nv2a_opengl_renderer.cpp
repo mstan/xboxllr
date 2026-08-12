@@ -256,6 +256,9 @@ vec4 vdiffuse(uint vertex) {
 vec2 vtex(uint vertex) {
     return vec2(vdata(vertex, 4u), vdata(vertex, 5u));
 }
+float vtexq(uint vertex) {
+    return vdata(vertex, 6u);
+}
 ivec2 vxy(uint vertex) {
     return ivec2(vertex_xy[vertex * 2u], vertex_xy[vertex * 2u + 1u]);
 }
@@ -263,8 +266,10 @@ vec4 texel_argb(int x, int y) {
     int sx = x;
     int sy = y;
     if (texture_repeat != 0u) {
-        sx = (sx % texture_width + texture_width) % texture_width;
-        sy = (sy % texture_height + texture_height) % texture_height;
+        if (sx < 0) sx = texture_width - 1;
+        if (sx >= texture_width) sx = 0;
+        if (sy < 0) sy = texture_height - 1;
+        if (sy >= texture_height) sy = 0;
     } else {
         sx = clamp(sx, 0, texture_width - 1);
         sy = clamp(sy, 0, texture_height - 1);
@@ -366,6 +371,11 @@ void main() {
             float((double(vtex(ia).y) * (l0 * inv_w0) +
                    double(vtex(ib).y) * (l1 * inv_w1) +
                    double(vtex(ic).y) * (l2 * inv_w2)) / q));
+        float tex_q = float((double(vtexq(ia)) * (l0 * inv_w0) +
+                             double(vtexq(ib)) * (l1 * inv_w1) +
+                             double(vtexq(ic)) * (l2 * inv_w2)) / q);
+        if (tex_q == 0.0) continue;
+        tex /= tex_q;
         vec4 texel = sample_linear_argb(tex);
         vec4 src = clamp(diffuse, 0.0, 1.0) * texel;
         if (texture_constant_color_alpha != 0u) {
@@ -1502,7 +1512,7 @@ public:
                 vertex_data[vertex * 8u + 5u] =
                     packet.vertices[vertex].texture[0][1];
                 vertex_data[vertex * 8u + 6u] =
-                    packet.vertices[vertex].texture[0][2];
+                    packet.vertices[vertex].texture[0][3];
                 vertex_data[vertex * 8u + 7u] =
                     packet.vertices[vertex].position[3];
                 xy_data[vertex * 2u + 0u] = static_cast<int32_t>(

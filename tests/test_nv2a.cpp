@@ -6,6 +6,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <fstream>
+#include <functional>
 #include <limits>
 #include <string>
 #include <vector>
@@ -8392,10 +8393,15 @@ int main() {
                 }
                 return out;
             };
-            auto append_clipped_triangle =
+            std::function<void(const xlle::Nv2aGenericCombinerVertex&,
+                               const xlle::Nv2aGenericCombinerVertex&,
+                               const xlle::Nv2aGenericCombinerVertex&, int)>
+                append_clipped_triangle;
+            append_clipped_triangle =
                 [&](const xlle::Nv2aGenericCombinerVertex& a,
                     const xlle::Nv2aGenericCombinerVertex& b,
-                    const xlle::Nv2aGenericCombinerVertex& c) {
+                    const xlle::Nv2aGenericCombinerVertex& c, int depth) {
+                    CHECK(depth < 8);
                     std::vector<ClipVertex> clip_polygon{
                         make_clip_vertex(a), make_clip_vertex(b),
                         make_clip_vertex(c)};
@@ -8456,33 +8462,37 @@ int main() {
                         clip_plane([](const ClipVertex& vertex) {
                             return vertex.clip_w - vertex.clip_y;
                         });
-                    }
-                    if (clip_polygon.size() < 3) {
-                        ++clipped_out;
-                        return;
-                    }
-                    std::vector<xlle::Nv2aGenericCombinerVertex> clipped;
-                    clipped.reserve(clip_polygon.size());
-                    for (ClipVertex& vertex : clip_polygon) {
-                        if (vertex.clip_w <= 0.0f) {
+                        if (clip_polygon.size() < 3) {
                             ++clipped_out;
                             return;
                         }
-                        vertex.vertex.position[0] =
-                            (vertex.clip_x / vertex.clip_w + 1.0f) *
-                            surface_w * 0.5f;
-                        vertex.vertex.position[1] =
-                            (vertex.clip_y / vertex.clip_w + 1.0f) *
-                            surface_h * 0.5f;
-                        vertex.vertex.position[3] = vertex.clip_w;
-                        clipped.push_back(vertex.vertex);
-                    }
-                    for (size_t j = 1; j + 1 < clipped.size(); ++j) {
-                        if (append_oriented_triangle(clipped[0], clipped[j],
-                                                     clipped[j + 1])) {
-                            ++clipped_triangles;
+                        std::vector<xlle::Nv2aGenericCombinerVertex> clipped;
+                        clipped.reserve(clip_polygon.size());
+                        for (ClipVertex& vertex : clip_polygon) {
+                            if (vertex.clip_w <= 0.0f) {
+                                ++clipped_out;
+                                return;
+                            }
+                            vertex.vertex.position[0] =
+                                (vertex.clip_x / vertex.clip_w + 1.0f) *
+                                surface_w * 0.5f;
+                            vertex.vertex.position[1] =
+                                (vertex.clip_y / vertex.clip_w + 1.0f) *
+                                surface_h * 0.5f;
+                            vertex.vertex.position[3] = vertex.clip_w;
+                            clipped.push_back(vertex.vertex);
                         }
+                        for (size_t j = 1; j + 1 < clipped.size(); ++j) {
+                            const size_t before = safe.size();
+                            append_clipped_triangle(clipped[0], clipped[j],
+                                                    clipped[j + 1], depth + 1);
+                            if (safe.size() > before) {
+                                ++clipped_triangles;
+                            }
+                        }
+                        return;
                     }
+                    append_oriented_triangle(a, b, c);
                 };
             for (size_t i = 0; i + 2 < resident.vertices.size(); i += 3) {
                 const auto* a = &resident.vertices[i + 0];
@@ -8495,7 +8505,7 @@ int main() {
                     c->position[3] < 0.0f;
                 if (all_behind) {
                     ++behind;
-                    append_clipped_triangle(*a, *b, *c);
+                    append_clipped_triangle(*a, *b, *c, 0);
                     continue;
                 }
                 const bool crosses =
@@ -8503,14 +8513,40 @@ int main() {
                     c->position[3] < 0.0f;
                 if (crosses) {
                     ++mixed;
-                    append_clipped_triangle(*a, *b, *c);
+                    append_clipped_triangle(*a, *b, *c, 0);
                     continue;
                 }
-                append_clipped_triangle(*a, *b, *c);
+                append_clipped_triangle(*a, *b, *c, 0);
             }
             resident.vertices = std::move(safe);
             resident.primitive_mode = 5;
             CHECK(!resident.vertices.empty());
+            if (const char* dump_path =
+                    std::getenv("XLLE_HOTPACKET_PROBE_DUMP_VERTICES")) {
+                std::ofstream out(dump_path, std::ios::binary);
+                CHECK(out.good());
+                const uint64_t vertex_total =
+                    static_cast<uint64_t>(resident.vertices.size());
+                out.write(reinterpret_cast<const char*>(&vertex_total),
+                          static_cast<std::streamsize>(sizeof(vertex_total)));
+                for (const auto& vertex : resident.vertices) {
+                    out.write(reinterpret_cast<const char*>(vertex.position.data()),
+                              static_cast<std::streamsize>(
+                                  vertex.position.size() * sizeof(float)));
+                    out.write(reinterpret_cast<const char*>(vertex.diffuse.data()),
+                              static_cast<std::streamsize>(
+                                  vertex.diffuse.size() * sizeof(float)));
+                    out.write(reinterpret_cast<const char*>(vertex.specular.data()),
+                              static_cast<std::streamsize>(
+                                  vertex.specular.size() * sizeof(float)));
+                    for (const auto& texcoord : vertex.texture) {
+                        out.write(reinterpret_cast<const char*>(texcoord.data()),
+                                  static_cast<std::streamsize>(
+                                      texcoord.size() * sizeof(float)));
+                    }
+                }
+                CHECK(out.good());
+            }
 
             std::string gl_error;
             auto gl_renderer = xlle::create_nv2a_opengl_renderer(gl_error);
