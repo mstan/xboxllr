@@ -119,10 +119,15 @@ public:
         uint32_t primitive_mode = 0;
         uint32_t vertex_count = 0;
     };
+    struct GenericPacketSnapshot {
+        Nv2aGenericCombinerPacket packet;
+        std::vector<uint8_t> color_output;
+        std::vector<uint8_t> depth_output;
+    };
     void on_generic_packet_snapshot(
         std::function<bool(const GenericPacketDebugInfo&)> filter,
         std::function<bool(const GenericPacketDebugInfo&,
-                           const Nv2aGenericCombinerPacket&)> cb) {
+                           const GenericPacketSnapshot&)> cb) {
         generic_packet_snapshot_filter_cb_ = std::move(filter);
         generic_packet_snapshot_cb_ = std::move(cb);
     }
@@ -1715,7 +1720,7 @@ private:
     std::function<bool(const GenericPacketDebugInfo&)>
         generic_packet_snapshot_filter_cb_;
     std::function<bool(const GenericPacketDebugInfo&,
-                       const Nv2aGenericCombinerPacket&)>
+                       const GenericPacketSnapshot&)>
         generic_packet_snapshot_cb_;
     std::function<void(const SurfaceWriteDebugInfo&)> surface_write_debug_cb_;
     std::vector<RasterStateSample> raster_state_samples_;

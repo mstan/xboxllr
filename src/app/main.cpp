@@ -400,8 +400,9 @@ bool dump_guest_memory(XboxMachine& mach, const char* path, uint32_t address,
 
 bool write_generic_packet_dump(const char* path,
                                const Nv2a::GenericPacketDebugInfo& info,
-                               const Nv2aGenericCombinerPacket& packet,
+                               const Nv2a::GenericPacketSnapshot& snapshot,
                                std::string& error) {
+    const Nv2aGenericCombinerPacket& packet = snapshot.packet;
     if (!path || !path[0]) {
         error = "empty output path";
         return false;
@@ -451,8 +452,8 @@ bool write_generic_packet_dump(const char* path,
         return true;
     };
 
-    const char magic[8] = {'X', 'L', 'L', 'E', 'G', 'P', 'B', '1'};
-    if (!write_bytes(magic, sizeof(magic)) || !write_u32(1) ||
+    const char magic[8] = {'X', 'L', 'L', 'E', 'G', 'P', 'B', '2'};
+    if (!write_bytes(magic, sizeof(magic)) || !write_u32(2) ||
         !write_u64(info.candidate) || !write_u64(info.fingerprint) ||
         !write_u64(info.full_state_hash) || !write_u32(info.color_address) ||
         !write_u32(info.depth_address) || !write_u32(info.pitch) ||
@@ -526,7 +527,8 @@ bool write_generic_packet_dump(const char* path,
             return false;
         }
     }
-    if (!write_vec(packet.color_input) || !write_vec(packet.depth_input)) {
+    if (!write_vec(packet.color_input) || !write_vec(packet.depth_input) ||
+        !write_vec(snapshot.color_output) || !write_vec(snapshot.depth_output)) {
         error = "surface snapshot write failed";
         return false;
     }
@@ -1220,18 +1222,19 @@ int main(int argc, char** argv) {
                                debug_generic_packet_dump_skip;
                     },
                     [=](const Nv2a::GenericPacketDebugInfo& info,
-                        const Nv2aGenericCombinerPacket& packet) mutable {
+                        const Nv2a::GenericPacketSnapshot& snapshot) mutable {
+                        const Nv2aGenericCombinerPacket& packet = snapshot.packet;
                         std::string error;
                         const bool ok = write_generic_packet_dump(
-                            debug_generic_packet_dump, info, packet, error);
+                            debug_generic_packet_dump, info, snapshot, error);
                         if (ok) {
                             *wrote_packet = true;
                             std::printf(
                                 "[debug-generic-packet] wrote %s candidate=%llu "
                                 "match=%llu fp=%016llx full=%016llx target=%08x "
                                 "prim=%u verts=%u sfmt=%08x shader=%08x "
-                                "comb=%08x textures=%u color_bytes=%llu "
-                                "depth_bytes=%llu\n",
+                                "comb=%08x textures=%u color_in=%llu "
+                                "depth_in=%llu color_out=%llu depth_out=%llu\n",
                                 debug_generic_packet_dump,
                                 static_cast<unsigned long long>(info.candidate),
                                 static_cast<unsigned long long>(*matched_packets),
@@ -1251,7 +1254,11 @@ int main(int argc, char** argv) {
                                 static_cast<unsigned long long>(
                                     packet.color_input.size()),
                                 static_cast<unsigned long long>(
-                                    packet.depth_input.size()));
+                                    packet.depth_input.size()),
+                                static_cast<unsigned long long>(
+                                    snapshot.color_output.size()),
+                                static_cast<unsigned long long>(
+                                    snapshot.depth_output.size()));
                         } else {
                             std::printf(
                                 "[debug-generic-packet] FAILED %s candidate=%llu "
