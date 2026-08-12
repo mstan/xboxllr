@@ -59,6 +59,19 @@ def generic_entry_key(entry: Mapping[str, Any]) -> tuple[str, str]:
     return (str(entry.get("fp", "")), str(entry.get("full", "")))
 
 
+def generic_family_key(entry: Mapping[str, Any]) -> tuple[Any, ...]:
+    return (
+        entry.get("surface"),
+        entry.get("surface_format"),
+        entry.get("pitch"),
+        entry.get("primitive"),
+        entry.get("enables"),
+        entry.get("shader"),
+        entry.get("combiner"),
+        tuple(entry.get("texture_format", [])),
+    )
+
+
 def generic_top_delta(
     current: Mapping[str, Any] | None,
     previous: Mapping[str, Any] | None,
@@ -95,6 +108,41 @@ def generic_top_delta(
     return ",".join(parts)
 
 
+def generic_family_delta(
+    current: Mapping[str, Any] | None,
+    previous: Mapping[str, Any] | None,
+    limit: int = 3,
+) -> str:
+    if not current:
+        return "-"
+    previous_by_key = {
+        generic_family_key(entry): entry
+        for entry in previous.get("top", [])  # type: ignore[union-attr]
+    } if previous else {}
+    deltas: list[tuple[int, Mapping[str, Any], int, int]] = []
+    for entry in current.get("top", []):
+        if "surface" not in entry:
+            continue
+        old = previous_by_key.get(generic_family_key(entry), {})
+        ns_delta = int(entry.get("ns", 0)) - int(old.get("ns", 0))
+        frags_delta = int(entry.get("frags", 0)) - int(old.get("frags", 0))
+        batches_delta = int(entry.get("batches", 0)) - int(old.get("batches", 0))
+        if ns_delta <= 0 and frags_delta <= 0 and batches_delta <= 0:
+            continue
+        deltas.append((ns_delta, entry, frags_delta, batches_delta))
+    if not deltas:
+        return "-"
+    deltas.sort(reverse=True, key=lambda item: item[0])
+    parts = []
+    for ns_delta, entry, frags_delta, batches_delta in deltas[:limit]:
+        parts.append(
+            f"{entry.get('surface')}/sh{entry.get('shader')}/c{entry.get('combiner')}"
+            f"/en{entry.get('enables')}:b{batches_delta}/"
+            f"f{frags_delta / 1_000_000:.2f}M/{ns_to_s(ns_delta)}"
+        )
+    return ",".join(parts)
+
+
 def summarize(path: pathlib.Path) -> None:
     report = json.loads(path.read_text())
     parsed = report.get("parsed", {})
@@ -104,6 +152,7 @@ def summarize(path: pathlib.Path) -> None:
     resident = parsed.get("resident_samples", [])
     memory = parsed.get("host_memory_samples", [])
     generic_perf = parsed.get("generic_perf_samples", [])
+    generic_family = parsed.get("generic_family_samples", [])
     final_frame = parsed.get("final_frame", {})
     final_mem = parsed.get("final_host_memory", {})
 
@@ -123,12 +172,14 @@ def summarize(path: pathlib.Path) -> None:
     print("  interval deltas:")
     previous_perf = previous_renderer = previous_resident = previous_memory = None
     previous_generic_perf = None
+    previous_generic_family = None
     for index, frame in enumerate(frames):
         p = sample_for_deadline(perf, index)
         r = sample_for_deadline(renderer, index)
         rs = sample_for_deadline(resident, index)
         m = sample_for_deadline(memory, index)
         gp = sample_for_deadline(generic_perf, index)
+        gf = sample_for_deadline(generic_family, index)
         pd = delta_dict(p, previous_perf) if p else {}
         rd = delta_dict(r, previous_renderer) if r else {}
         rsd = delta_dict(rs, previous_resident) if rs else {}
@@ -145,7 +196,9 @@ def summarize(path: pathlib.Path) -> None:
         previous_resident = rs or previous_resident
         previous_memory = m or previous_memory
         generic_delta = generic_top_delta(gp, previous_generic_perf)
+        family_delta = generic_family_delta(gf, previous_generic_family)
         previous_generic_perf = gp or previous_generic_perf
+        previous_generic_family = gf or previous_generic_family
         print(
             "   "
             f"{frame.get('deadline', '-') / 1_000_000_000:.1f}B "
@@ -162,7 +215,8 @@ def summarize(path: pathlib.Path) -> None:
             f"dirty={dirty_pct} "
             f"resolveMP={rd.get('resolve_pixels', 0) / 1_000_000:.1f} "
             f"texMB={md.get('generic_texture_bytes', 0) / BYTES_PER_MIB:.1f} "
-            f"genTop={generic_delta}"
+            f"genTop={generic_delta} "
+            f"famTop={family_delta}"
         )
 
 

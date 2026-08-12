@@ -1321,6 +1321,140 @@ int main(int argc, char** argv) {
                     }
                 }
                 std::printf("\n");
+                struct GenericFamilyKey {
+                    uint32_t enables = 0;
+                    uint32_t surface_format = 0;
+                    uint32_t surface_pitch = 0;
+                    uint32_t surface_color = 0;
+                    uint32_t shader = 0;
+                    uint32_t combiner = 0;
+                    uint8_t primitive = 0;
+                    std::array<uint32_t, 4> texture_format{};
+                    bool operator==(const GenericFamilyKey& other) const {
+                        return enables == other.enables &&
+                               surface_format == other.surface_format &&
+                               surface_pitch == other.surface_pitch &&
+                               surface_color == other.surface_color &&
+                               shader == other.shader &&
+                               combiner == other.combiner &&
+                               primitive == other.primitive &&
+                               texture_format == other.texture_format;
+                    }
+                };
+                struct GenericFamilyStats {
+                    GenericFamilyKey key;
+                    uint64_t fingerprints = 0;
+                    uint64_t batches = 0;
+                    uint64_t fragments = 0;
+                    uint64_t writes = 0;
+                    uint64_t wall_ns = 0;
+                    uint64_t bbox_pixels = 0;
+                    uint32_t min_vertices = UINT32_MAX;
+                    uint32_t max_vertices = 0;
+                    uint64_t texture_modulate_batches = 0;
+                    uint64_t texture_modulate_exact_batches = 0;
+                    uint64_t resident_batches = 0;
+                    uint64_t resident_exact_batches = 0;
+                };
+                std::vector<GenericFamilyStats> families;
+                for (const auto& entry : fingerprints) {
+                    if (entry.raster_state_sample_index == UINT32_MAX ||
+                        !mach.nv2a()->raster_state_sample_at(
+                            entry.raster_state_sample_index, raster_exemplar))
+                        continue;
+                    const auto& state = raster_exemplar.words;
+                    GenericFamilyKey key;
+                    key.enables = state[Nv2a::kRasterEnables];
+                    key.surface_format = state[Nv2a::kRasterSurfaceFormat];
+                    key.surface_pitch = state[Nv2a::kRasterSurfacePitch];
+                    key.surface_color = state[Nv2a::kRasterSurfaceColorOffset];
+                    key.shader = state[Nv2a::kRasterShaderStageProgram];
+                    key.combiner = state[Nv2a::kRasterCombinerControl];
+                    key.primitive = entry.primitive_mode;
+                    for (size_t stage = 0; stage < key.texture_format.size();
+                         ++stage) {
+                        key.texture_format[stage] =
+                            state[Nv2a::kRasterTextureFormat0 + stage];
+                    }
+                    auto family = std::find_if(
+                        families.begin(), families.end(),
+                        [&](const auto& candidate) { return candidate.key == key; });
+                    if (family == families.end()) {
+                        GenericFamilyStats stats;
+                        stats.key = key;
+                        families.push_back(stats);
+                        family = families.end() - 1;
+                    }
+                    ++family->fingerprints;
+                    family->batches += entry.batches;
+                    family->fragments += entry.fragments;
+                    family->writes += entry.writes;
+                    family->wall_ns += entry.wall_ns;
+                    family->bbox_pixels += entry.bbox_pixels;
+                    family->min_vertices =
+                        std::min(family->min_vertices, entry.min_vertices);
+                    family->max_vertices =
+                        std::max(family->max_vertices, entry.max_vertices);
+                    family->texture_modulate_batches +=
+                        entry.texture_modulate_batches;
+                    family->texture_modulate_exact_batches +=
+                        entry.texture_modulate_exact_batches;
+                    family->resident_batches += entry.resident_batches;
+                    family->resident_exact_batches += entry.resident_exact_batches;
+                }
+                std::sort(families.begin(), families.end(),
+                          [](const auto& a, const auto& b) {
+                              if (a.wall_ns != b.wall_ns) return a.wall_ns > b.wall_ns;
+                              if (a.fragments != b.fragments)
+                                  return a.fragments > b.fragments;
+                              return a.batches > b.batches;
+                          });
+                std::printf("[perf-generic-family] families=%zu top%zu=",
+                            families.size(), perf_generic_top_limit);
+                const size_t family_limit =
+                    std::min<size_t>(families.size(), perf_generic_top_limit);
+                for (size_t i = 0; i < family_limit; ++i) {
+                    const auto& family = families[i];
+                    const auto& key = family.key;
+                    std::printf(
+                        " surf%08x/sfmt%08x/pitch%08x/prim%u/en%08x/sh%08x/comb%08x"
+                        "/tf%08x,%08x,%08x,%08x:fp%llu/b%llu/f%llu/w%llu/ns%llu"
+                        "/bb%llu/v%u-%u",
+                        key.surface_color, key.surface_format, key.surface_pitch,
+                        static_cast<unsigned>(key.primitive), key.enables,
+                        key.shader, key.combiner, key.texture_format[0],
+                        key.texture_format[1], key.texture_format[2],
+                        key.texture_format[3],
+                        static_cast<unsigned long long>(family.fingerprints),
+                        static_cast<unsigned long long>(family.batches),
+                        static_cast<unsigned long long>(family.fragments),
+                        static_cast<unsigned long long>(family.writes),
+                        static_cast<unsigned long long>(family.wall_ns),
+                        static_cast<unsigned long long>(family.bbox_pixels),
+                        family.min_vertices == UINT32_MAX ? 0 : family.min_vertices,
+                        family.max_vertices);
+                    if (family.texture_modulate_batches) {
+                        std::printf("/texmod%llu",
+                                    static_cast<unsigned long long>(
+                                        family.texture_modulate_batches));
+                        if (family.texture_modulate_exact_batches) {
+                            std::printf("/exact%llu",
+                                        static_cast<unsigned long long>(
+                                            family.texture_modulate_exact_batches));
+                        }
+                    }
+                    if (family.resident_batches) {
+                        std::printf("/resident%llu",
+                                    static_cast<unsigned long long>(
+                                        family.resident_batches));
+                        if (family.resident_exact_batches) {
+                            std::printf("/exact%llu",
+                                        static_cast<unsigned long long>(
+                                            family.resident_exact_batches));
+                        }
+                    }
+                }
+                std::printf("\n");
                 // Keep the compact default top-12 line readable, but emit complete,
                 // machine-parseable exemplars for the requested hottest states so a
                 // later backend can reproduce a dominant dashboard envelope

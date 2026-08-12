@@ -125,6 +125,11 @@ PERF_GENERIC_RE = re.compile(
     r"top(?P<top_n>\d+)=(?P<top>.*)$"
 )
 
+PERF_GENERIC_FAMILY_RE = re.compile(
+    r"^\[perf-generic-family\] families=(?P<families>\d+) "
+    r"top(?P<top_n>\d+)=(?P<top>.*)$"
+)
+
 GENERIC_RE = re.compile(
     r"^\[2bl\] NV2A generic-combiner: "
     r"attempted/accelerated/fallback/software/exec/tri/frags/depth-pass/"
@@ -261,6 +266,18 @@ GENERIC_PERF_ITEM_RE = re.compile(
     r"full(?P<full>[0-9a-f]+)(?P<detail>.*)$"
 )
 
+GENERIC_FAMILY_ITEM_RE = re.compile(
+    r"^surf(?P<surface>[0-9a-f]+)/sfmt(?P<surface_format>[0-9a-f]+)/"
+    r"pitch(?P<pitch>[0-9a-f]+)/prim(?P<primitive>\d+)/"
+    r"en(?P<enables>[0-9a-f]+)/sh(?P<shader>[0-9a-f]+)/"
+    r"comb(?P<combiner>[0-9a-f]+)/"
+    r"tf(?P<texture_format0>[0-9a-f]+),(?P<texture_format1>[0-9a-f]+),"
+    r"(?P<texture_format2>[0-9a-f]+),(?P<texture_format3>[0-9a-f]+):"
+    r"fp(?P<fingerprints>\d+)/b(?P<batches>\d+)/f(?P<frags>\d+)/"
+    r"w(?P<writes>\d+)/ns(?P<ns>\d+)/bb(?P<bbox_pixels>\d+)/"
+    r"v(?P<min_vertices>\d+)-(?P<max_vertices>\d+)(?P<detail>.*)$"
+)
+
 
 def parse_generic_perf(match: re.Match[str]) -> dict[str, Any]:
     entries: list[dict[str, Any]] = []
@@ -301,6 +318,49 @@ def parse_generic_perf(match: re.Match[str]) -> dict[str, Any]:
     }
 
 
+def parse_generic_family_perf(match: re.Match[str]) -> dict[str, Any]:
+    entries: list[dict[str, Any]] = []
+    top_text = match.group("top").strip()
+    if top_text:
+        for item in top_text.split():
+            item_match = GENERIC_FAMILY_ITEM_RE.match(item)
+            if not item_match:
+                entries.append({"raw": item})
+                continue
+            groups = item_match.groupdict()
+            entries.append(
+                {
+                    "surface": groups["surface"],
+                    "surface_format": groups["surface_format"],
+                    "pitch": groups["pitch"],
+                    "primitive": int(groups["primitive"]),
+                    "enables": groups["enables"],
+                    "shader": groups["shader"],
+                    "combiner": groups["combiner"],
+                    "texture_format": [
+                        groups["texture_format0"],
+                        groups["texture_format1"],
+                        groups["texture_format2"],
+                        groups["texture_format3"],
+                    ],
+                    "fingerprints": int(groups["fingerprints"]),
+                    "batches": int(groups["batches"]),
+                    "frags": int(groups["frags"]),
+                    "writes": int(groups["writes"]),
+                    "ns": int(groups["ns"]),
+                    "bbox_pixels": int(groups["bbox_pixels"]),
+                    "min_vertices": int(groups["min_vertices"]),
+                    "max_vertices": int(groups["max_vertices"]),
+                    "detail": groups["detail"].lstrip("/"),
+                }
+            )
+    return {
+        "families": int(match.group("families")),
+        "top_n": int(match.group("top_n")),
+        "top": entries,
+    }
+
+
 def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
     frames: list[dict[str, Any]] = []
     perf_samples: list[dict[str, Any]] = []
@@ -311,6 +371,7 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
     perf_memory_samples: list[dict[str, Any]] = []
     witnessed_profile_samples: list[list[dict[str, Any]]] = []
     generic_perf_samples: list[dict[str, Any]] = []
+    generic_family_samples: list[dict[str, Any]] = []
     generic: dict[str, Any] | None = None
     scanout: dict[str, Any] | None = None
     retired: dict[str, Any] | None = None
@@ -343,6 +404,8 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
             witnessed_profile_samples.append(parse_witnessed_profiles(match.group("top")))
         elif match := PERF_GENERIC_RE.match(line):
             generic_perf_samples.append(parse_generic_perf(match))
+        elif match := PERF_GENERIC_FAMILY_RE.match(line):
+            generic_family_samples.append(parse_generic_family_perf(match))
         elif match := GENERIC_RE.match(line):
             generic = parse_int_fields(match)
         elif match := SCANOUT_RE.match(line):
@@ -381,6 +444,10 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
         ),
         "generic_perf_samples": generic_perf_samples,
         "final_generic_perf": generic_perf_samples[-1] if generic_perf_samples else None,
+        "generic_family_samples": generic_family_samples,
+        "final_generic_family": (
+            generic_family_samples[-1] if generic_family_samples else None
+        ),
         "generic_combiner": generic,
         "generic_fingerprints": generic_fingerprints,
         "scanout": scanout,
