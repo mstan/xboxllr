@@ -6,7 +6,7 @@ param(
     [int] $MaxHostMemoryMb = 768,
     [int] $GenericTop = 64,
     [string] $InputScript = 'tests\scripts\clock-accept.txt',
-    [string] $ExpectedFinalSha = '16270cbff17566e6876954f983535de9f95523524c00cde7a48513172b2f6606',
+    [string] $ExpectedFinalSha = '876b58c2d0e6c63fec917c73dcc43a7d09983baf1da2b5b2176fa73a1b44da6d',
     [string] $BaselineReport = '',
     [double] $MinFinalFpsGainPct = 0.0,
     [double] $MaxFocusWallRegressionPct = -1.0,
@@ -20,6 +20,27 @@ $ErrorActionPreference = 'Stop'
 $repo = Resolve-Path (Join-Path $PSScriptRoot '..')
 Push-Location $repo
 try {
+    $cachePath = Join-Path $repo 'build-release\CMakeCache.txt'
+    if (-not (Test-Path -LiteralPath $cachePath)) {
+        throw "missing build-release CMake cache; configure Release build first"
+    }
+    $cache = Get-Content -LiteralPath $cachePath
+    $requiredCacheLines = @(
+        'CMAKE_BUILD_TYPE:STRING=Release',
+        'CMAKE_C_FLAGS_RELEASE:STRING=-O3 -DNDEBUG',
+        'CMAKE_CXX_FLAGS_RELEASE:STRING=-O3 -DNDEBUG',
+        'XLLE_NATIVE_OPTIMIZATIONS:BOOL=ON'
+    )
+    foreach ($required in $requiredCacheLines) {
+        if (-not ($cache -contains $required)) {
+            throw "refusing replay with non-optimized build cache; missing '$required'"
+        }
+    }
+    if ($cache -contains 'XLLE_LTO_OPTIMIZATIONS:BOOL=ON' -or
+        $cache -contains 'XLLE_LTO_OPTIMIZATIONS:UNINITIALIZED=ON') {
+        throw "refusing replay with XLLE_LTO_OPTIMIZATIONS=ON; broad LTO is not a valid baseline"
+    }
+
     if ($Build) {
         cmake --build build-release --target xlle test_nv2a --config Release
         if ($LASTEXITCODE -ne 0) {
