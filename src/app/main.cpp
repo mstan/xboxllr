@@ -411,6 +411,7 @@ int main(int argc, char** argv) {
     uint64_t debug_nv2a_surface_event_skip = 0;
     uint64_t debug_nv2a_surface_event_count = 0;
     uint64_t debug_nv2a_surface_event_interval = 1;
+    uint64_t debug_nv2a_surface_event_after_insns = 0;
     size_t perf_generic_top_limit = 12;
     uint64_t max_insns = 128ull * 1000 * 1000;  // 2BL kernel LZX decompress needs tens of M
     for (int i = 1; i < argc; ++i) {
@@ -558,6 +559,16 @@ int main(int argc, char** argv) {
                 std::fprintf(
                     stderr,
                     "[host] --debug-nv2a-surface-events expects 32-bit addr and positive count/interval\n");
+                return 1;
+            }
+        }
+        else if (!std::strcmp(argv[i], "--debug-nv2a-surface-events-after-insns") &&
+                 i + 1 < argc) {
+            if (!parse_u64_arg(argv[++i], debug_nv2a_surface_event_after_insns)) {
+                std::fprintf(
+                    stderr,
+                    "[host] --debug-nv2a-surface-events-after-insns expects "
+                    "an unsigned instruction count\n");
                 return 1;
             }
         }
@@ -975,6 +986,10 @@ int main(int argc, char** argv) {
                                     debug_nv2a_surface_event_address;
                             if (!snapshot_target && !event_target)
                                 return;
+                            if (event_target &&
+                                mach.total_insns() <
+                                    debug_nv2a_surface_event_after_insns)
+                                return;
                             ++matched_events;
                             if (event_target) {
                                 const bool event_after_skip =
@@ -991,7 +1006,8 @@ int main(int argc, char** argv) {
                                     ++logged_events;
                                     std::printf(
                                         "[debug-nv2a-surface-event] kind=%s "
-                                        "target=%08x event=%llu seq=%llu profile=%u "
+                                        "target=%08x event=%llu insns=%llu "
+                                        "seq=%llu profile=%u "
                                         "fp=%016llx full=%016llx prim=%u verts=%u "
                                         "sfmt=%08x shader=%08x comb=%08x "
                                         "alpha=%x/%02x blend=%x/%x/%x "
@@ -999,6 +1015,8 @@ int main(int argc, char** argv) {
                                         "frags=%llu writes=%llu\n",
                                         info.kind, info.color_address,
                                         static_cast<unsigned long long>(matched_events),
+                                        static_cast<unsigned long long>(
+                                            mach.total_insns()),
                                         static_cast<unsigned long long>(info.sequence),
                                         info.profile,
                                         static_cast<unsigned long long>(info.fingerprint),
@@ -1134,14 +1152,16 @@ int main(int argc, char** argv) {
             if (debug_nv2a_surface_events && mach.nv2a()) {
                 std::printf(
                     "[host] NV2A surface events armed: target=%08x skip=%llu "
-                    "count=%llu interval=%llu\n",
+                    "count=%llu interval=%llu after-insns=%llu\n",
                     debug_nv2a_surface_event_address,
                     static_cast<unsigned long long>(
                         debug_nv2a_surface_event_skip),
                     static_cast<unsigned long long>(
                         debug_nv2a_surface_event_count),
                     static_cast<unsigned long long>(
-                        debug_nv2a_surface_event_interval));
+                        debug_nv2a_surface_event_interval),
+                    static_cast<unsigned long long>(
+                        debug_nv2a_surface_event_after_insns));
             }
             if (hdd) {
                 if (!mach.attach_hdd(hdd)) {
