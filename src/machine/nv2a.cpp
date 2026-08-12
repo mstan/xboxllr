@@ -7520,6 +7520,40 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     reject_reason == TextureReject::kCount &&
                     texture_modulate_exact_this_batch;
                 if (texture_resident_state) {
+                    auto triangle_crosses_w_plane = [&](size_t ia, size_t ib,
+                                                        size_t ic) {
+                        const auto& a = packet.vertices[ia];
+                        const auto& b = packet.vertices[ib];
+                        const auto& c = packet.vertices[ic];
+                        const bool any_behind =
+                            a.position[3] < 0.0f || b.position[3] < 0.0f ||
+                            c.position[3] < 0.0f;
+                        const bool all_behind =
+                            a.position[3] < 0.0f && b.position[3] < 0.0f &&
+                            c.position[3] < 0.0f;
+                        return any_behind && !all_behind;
+                    };
+                    bool mixed_w_triangle = false;
+                    if (primitive_mode_ == 5) {
+                        for (size_t i = 0; !mixed_w_triangle &&
+                             i + 2 < packet.vertices.size(); i += 3) {
+                            mixed_w_triangle =
+                                triangle_crosses_w_plane(i, i + 1, i + 2);
+                        }
+                    } else if (primitive_mode_ == 6) {
+                        for (size_t i = 2; !mixed_w_triangle &&
+                             i < packet.vertices.size(); ++i) {
+                            mixed_w_triangle = ((i & 1u) == 0)
+                                ? triangle_crosses_w_plane(i - 2, i - 1, i)
+                                : triangle_crosses_w_plane(i - 1, i - 2, i);
+                        }
+                    } else {
+                        for (size_t i = 2; !mixed_w_triangle &&
+                             i < packet.vertices.size(); ++i) {
+                            mixed_w_triangle =
+                                triangle_crosses_w_plane(0, i - 1, i);
+                        }
+                    }
                     auto finite_vertex = [](const Nv2aGenericCombinerVertex& vertex) {
                         for (float value : vertex.position)
                             if (!std::isfinite(value)) return false;
@@ -7531,7 +7565,6 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                         return true;
                     };
                     std::vector<Nv2aGenericCombinerVertex> expanded;
-                    expanded.reserve((packet.vertices.size() - 2) * 3);
                     auto append_triangle = [&](size_t ia, size_t ib, size_t ic) {
                         const Nv2aGenericCombinerVertex& a = packet.vertices[ia];
                         const Nv2aGenericCombinerVertex& b = packet.vertices[ib];
@@ -7574,8 +7607,11 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                         }
                         return true;
                     };
-                    bool expanded_ok = true;
-                    if (primitive_mode_ == 5) {
+                    bool expanded_ok = !mixed_w_triangle;
+                    if (expanded_ok) {
+                        expanded.reserve((packet.vertices.size() - 2) * 3);
+                    }
+                    if (expanded_ok && primitive_mode_ == 5) {
                         for (size_t i = 0; expanded_ok && i + 2 < packet.vertices.size();
                              i += 3)
                             expanded_ok = append_triangle(i, i + 1, i + 2);
