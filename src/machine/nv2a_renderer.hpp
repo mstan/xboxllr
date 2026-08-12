@@ -29,6 +29,7 @@ struct Nv2aGenericCombinerPacket {
         kTextureModulateTriangle,
         kDashboardProject2dFan,
         kResidentPrimaryColorTriangles,
+        kResidentConstantColorTriangles,
         kResidentTextureModulateTriangles
     };
     enum class TextureLayout : uint8_t { kLinear, kSwizzled };
@@ -69,6 +70,7 @@ struct Nv2aGenericCombinerPacket {
     // blend contract here rather than reaching back into raster_state.
     std::array<int32_t, 6> fixture_xy_16{};
     uint32_t fixture_source_argb = 0;
+    uint32_t fixture_constant_argb = 0;
     uint32_t fixture_factor0_stage2_argb = 0;
     uint32_t fixture_factor0_stage4_argb = 0;
     uint32_t fixture_blend_src = 0;

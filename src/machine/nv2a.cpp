@@ -6966,9 +6966,27 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 raster_state_[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
                 raster_state_[kRasterCombinerSpecularFog0] == 0x0000000C &&
                 raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80;
+            const bool resident_constant_color_target =
+                color_address == 0x03AA4000 && color_format_x8 &&
+                surface_type == 1 && anti_aliasing == 0 &&
+                surface_pitch_ == 0x00401400 && surface_height == 960 &&
+                clip_x == 0 && clip_y == 0 && clip_width == 1280 &&
+                clip_height == 960;
+            const bool resident_constant_color_combiner_words =
+                resident_constant_color_target && no_texture_inputs &&
+                raster_state_[kRasterCombinerControl] == 1 &&
+                raster_state_[kRasterShaderStageProgram] == 0 &&
+                raster_state_[kRasterTextureEnableMask] == 0 &&
+                raster_state_[kRasterCombinerColorIcw0] == 0x01200000 &&
+                raster_state_[kRasterCombinerAlphaIcw0] == 0x14110000 &&
+                raster_state_[kRasterCombinerColorOcw0] == 0x00000C00 &&
+                raster_state_[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
+                raster_state_[kRasterCombinerSpecularFog0] == 0x0000000C &&
+                raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80;
             const bool resident_primary_observable =
                 raster_state_[kRasterCombinerControl] == 1 ||
-                resident_primary_combiner_words;
+                resident_primary_combiner_words ||
+                resident_constant_color_combiner_words;
             resident_observed_this_batch = resident_primary_observable;
             const bool resident_primitive_supported =
                 primitive_mode_ == 5 || primitive_mode_ == 6 || primitive_mode_ == 7;
@@ -7012,7 +7030,8 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 resident_reject_reason = ResidentReject::kShaderProgram;
             } else if (!resident_other_stage_supported) {
                 resident_reject_reason = ResidentReject::kOtherStageInput;
-            } else if (!resident_primary_combiner_words) {
+            } else if (!resident_primary_combiner_words &&
+                       !resident_constant_color_combiner_words) {
                 resident_reject_reason = ResidentReject::kCombinerWords;
             }
             const bool resident_primary_state =
@@ -7117,6 +7136,12 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     packet.primitive_mode = 5;
                     packet.compute_fixture = Nv2aGenericCombinerPacket::
                         ComputeFixture::kResidentPrimaryColorTriangles;
+                    if (resident_constant_color_combiner_words) {
+                        packet.compute_fixture = Nv2aGenericCombinerPacket::
+                            ComputeFixture::kResidentConstantColorTriangles;
+                        packet.fixture_constant_argb =
+                            raster_state_[kRasterCombinerFactor0_0];
+                    }
                     packet.fixture_clip_x = effective_clip_x;
                     packet.fixture_clip_y = effective_clip_y;
                     packet.fixture_clip_width = effective_clip_width;
@@ -7481,6 +7506,8 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         const bool resident_packet =
             packet.compute_fixture == Nv2aGenericCombinerPacket::ComputeFixture::
                                           kResidentPrimaryColorTriangles ||
+            packet.compute_fixture == Nv2aGenericCombinerPacket::ComputeFixture::
+                                          kResidentConstantColorTriangles ||
             packet.compute_fixture == Nv2aGenericCombinerPacket::ComputeFixture::
                                           kResidentTextureModulateTriangles ||
             packet.compute_fixture == Nv2aGenericCombinerPacket::ComputeFixture::

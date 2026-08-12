@@ -493,11 +493,24 @@ void main() {
 constexpr const char* kResidentPrimaryFragmentSource = R"GLSL(#version 430 core
 noperspective in vec4 diffuse_over_w;
 noperspective in float inv_w_out;
+uniform uint primary_mode;
+uniform uint constant_argb;
 layout(location = 0) out vec4 out_color;
+vec4 unpack_argb(uint word) {
+    return vec4(float((word >> 16) & 255u) / 255.0,
+                float((word >> 8) & 255u) / 255.0,
+                float(word & 255u) / 255.0,
+                float((word >> 24) & 255u) / 255.0);
+}
 void main() {
     vec4 diffuse = inv_w_out == 0.0 ? vec4(0.0, 0.0, 0.0, 1.0)
                                     : diffuse_over_w / inv_w_out;
-    out_color = clamp(diffuse, 0.0, 1.0);
+    if (primary_mode == 1u) {
+        vec4 constant = unpack_argb(constant_argb);
+        out_color = clamp(vec4(constant.rgb, diffuse.a * constant.a), 0.0, 1.0);
+    } else {
+        out_color = clamp(diffuse, 0.0, 1.0);
+    }
 }
 )GLSL";
 
@@ -821,16 +834,20 @@ public:
         const bool primary_fixture =
             packet.compute_fixture == Nv2aGenericCombinerPacket::ComputeFixture::
                                           kResidentPrimaryColorTriangles;
+        const bool constant_fixture =
+            packet.compute_fixture == Nv2aGenericCombinerPacket::ComputeFixture::
+                                          kResidentConstantColorTriangles;
         const bool texture_fixture =
             packet.compute_fixture == Nv2aGenericCombinerPacket::ComputeFixture::
                                           kResidentTextureModulateTriangles;
         const bool dashboard_fixture =
             packet.compute_fixture == Nv2aGenericCombinerPacket::ComputeFixture::
                                           kDashboardProject2dFan;
-        if (!primary_fixture && !texture_fixture && !dashboard_fixture) {
+        if (!primary_fixture && !constant_fixture && !texture_fixture &&
+            !dashboard_fixture) {
             return false;
         }
-        if ((primary_fixture && resident_program_ == 0) ||
+        if (((primary_fixture || constant_fixture) && resident_program_ == 0) ||
             (texture_fixture && resident_texture_modulate_program_ == 0) ||
             (dashboard_fixture && resident_dashboard_program_ == 0) ||
             (!dashboard_fixture && packet.primitive_mode != 5) ||
@@ -940,6 +957,12 @@ public:
         const uint32_t width = pitch / 4;
         const uint32_t height = packet.surface_height;
         const size_t size = static_cast<size_t>(pitch) * height;
+        const bool primary_fixture =
+            packet.compute_fixture == Nv2aGenericCombinerPacket::ComputeFixture::
+                                          kResidentPrimaryColorTriangles;
+        const bool constant_fixture =
+            packet.compute_fixture == Nv2aGenericCombinerPacket::ComputeFixture::
+                                          kResidentConstantColorTriangles;
         {
             perf::ScopedAdd timer(perf::g_ns_renderer_resident_ensure,
                                   perf::g_calls_renderer_resident_ensure);
@@ -1087,6 +1110,12 @@ public:
         use_program_(program);
         uniform_2f_(uniform_location_(program, "surface_size"),
                     static_cast<float>(width), static_cast<float>(height));
+        if (primary_fixture || constant_fixture) {
+            uniform_1ui_(uniform_location_(program, "primary_mode"),
+                         constant_fixture ? 1u : 0u);
+            uniform_1ui_(uniform_location_(program, "constant_argb"),
+                         packet.fixture_constant_argb);
+        }
         if (texture_fixture) {
             uniform_1i_(uniform_location_(program, "texture0"), 0);
             uniform_2f_(uniform_location_(program, "texture_size"),
