@@ -6735,6 +6735,11 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             raster_state_[kRasterCombinerFactor0_0 + stage] ==
                 (stage == 2 ? 0xFF000000u : 0u);
     }
+    const bool needs_general_combiner =
+        !primary_color_passthrough && !texture0_modulate_primary &&
+        !texture0_passthrough && !texf_projected_black_alpha_one;
+    const bool needs_diffuse = !texf_projected_black_alpha_one;
+    const bool needs_specular = needs_general_combiner;
 
     bool texture_modulate_observed_this_batch = false;
     bool texture_modulate_exact_this_batch = false;
@@ -8545,8 +8550,10 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     }
                     return result;
                 };
-                diffuse = interpolate4(&TransformedVertex::diffuse);
-                specular = interpolate4(&TransformedVertex::specular);
+                if (needs_diffuse)
+                    diffuse = interpolate4(&TransformedVertex::diffuse);
+                if (!varying_failed && needs_specular)
+                    specular = interpolate4(&TransformedVertex::specular);
                 if (varying_failed) {
                     fault_("NV2A generic-combiner varying is non-finite");
                     raster_failed = true;
@@ -8554,8 +8561,8 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 }
 
                 std::array<std::array<float, 4>, 16> regs{};
-                regs[4] = diffuse;
-                regs[5] = specular;
+                if (needs_diffuse) regs[4] = diffuse;
+                if (needs_specular) regs[5] = specular;
 
                 // Texture stages: interpolate texcoords the exact same way every
                 // witnessed textured profile does (perspective-correct via the
@@ -8669,8 +8676,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     ++generic_combiner_texture_samples_;
                 }
 
-                if (!primary_color_passthrough && !texture0_modulate_primary &&
-                    !texture0_passthrough && !texf_projected_black_alpha_one) {
+                if (needs_general_combiner) {
                     // Matches xemu's get_output(): the scale/bias op is applied to the
                     // AB/CD/SUM result BEFORE the final clamp to [-1,1] (real hardware
                     // range -- unlike the input side, general-combiner outputs are
