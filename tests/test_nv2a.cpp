@@ -5164,13 +5164,32 @@ int main() {
                 {0.0f, 0.0f}, {20.0f, 0.0f}, {0.0f, 20.0f},
                 {20.0f, 0.0f}, {20.0f, 20.0f}, {0.0f, 20.0f},
             }};
+            auto submit_with_w = [&](float w) {
+                emit_gc(0x17FC, 5);
+                for (auto point : xy) {
+                    emit_gc(0x1518, gc_float_bits(point.first));
+                    emit_gc(0x151C, gc_float_bits(point.second));
+                    emit_gc(0x1520, gc_float_bits(50.0f));
+                    emit_gc(0x194C, rgba);
+                    emit_gc(0x1524, gc_float_bits(w));
+                }
+                emit_gc(0x17FC, 0);
+                kick_gc();
+            };
+            submit_with_w(1.0f);
+        };
+        auto submit_two_triangles_with_w = [&](uint32_t rgba, float w) {
+            const std::array<std::pair<float, float>, 6> xy{{
+                {0.0f, 0.0f}, {20.0f, 0.0f}, {0.0f, 20.0f},
+                {20.0f, 0.0f}, {20.0f, 20.0f}, {0.0f, 20.0f},
+            }};
             emit_gc(0x17FC, 5);
             for (auto point : xy) {
                 emit_gc(0x1518, gc_float_bits(point.first));
                 emit_gc(0x151C, gc_float_bits(point.second));
                 emit_gc(0x1520, gc_float_bits(50.0f));
                 emit_gc(0x194C, rgba);
-                emit_gc(0x1524, gc_float_bits(1.0f));
+                emit_gc(0x1524, gc_float_bits(w));
             }
             emit_gc(0x17FC, 0);
             kick_gc();
@@ -5420,6 +5439,32 @@ int main() {
                                              resident_scanout_error));
                 CHECK(std::equal(resident_primary_software.begin(),
                                  resident_primary_software.end(),
+                                 gc_ram.begin() + 0x10000));
+
+                // Dashboard menu overlays can arrive with negative homogeneous W.
+                // Those are behind the clip volume; the software clipper must not
+                // draw them, and the resident OpenGL path must preserve W in
+                // gl_Position so host clipping rejects them too.
+                std::memset(gc_ram.data() + 0x10000, 0x7C, 256 * 64);
+                gc_gpu.set_renderer(nullptr);
+                submit_two_triangles_with_w(gc_pack_ub4(0xFF, 0x00, 0x00, 0xFF),
+                                            -1.0f);
+                CHECK(gc_fault.empty());
+                const std::vector<uint8_t> resident_negative_w_software(
+                    gc_ram.begin() + 0x10000,
+                    gc_ram.begin() + 0x10000 + 256 * 64);
+                CHECK(std::all_of(resident_negative_w_software.begin(),
+                                  resident_negative_w_software.end(),
+                                  [](uint8_t byte) { return byte == 0x7C; }));
+                std::memset(gc_ram.data() + 0x10000, 0x7C, 256 * 64);
+                gc_gpu.set_renderer(gl_renderer.get());
+                submit_two_triangles_with_w(gc_pack_ub4(0xFF, 0x00, 0x00, 0xFF),
+                                            -1.0f);
+                CHECK(gc_fault.empty());
+                CHECK(gc_gpu.capture_scanout(resident_rgba, resident_scanout,
+                                             resident_scanout_error));
+                CHECK(std::equal(resident_negative_w_software.begin(),
+                                 resident_negative_w_software.end(),
                                  gc_ram.begin() + 0x10000));
 
                 // Stock-dashboard late-menu fade/overlay quads carry

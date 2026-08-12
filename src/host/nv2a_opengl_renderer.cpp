@@ -514,7 +514,7 @@ void main() {
     inv_w_out = inv_w;
     vec2 ndc = vec2(in_position.x / surface_size.x * 2.0 - 1.0,
                     1.0 - in_position.y / surface_size.y * 2.0);
-    gl_Position = vec4(ndc, 0.0, 1.0);
+    gl_Position = vec4(ndc * in_position.w, 0.0, in_position.w);
 }
 )GLSL";
 
@@ -548,7 +548,7 @@ uniform vec2 surface_size;
 void main() {
     vec2 ndc = vec2(in_position.x / surface_size.x * 2.0 - 1.0,
                     1.0 - in_position.y / surface_size.y * 2.0);
-    gl_Position = vec4(ndc, 0.0, 1.0);
+    gl_Position = vec4(ndc * in_position.w, 0.0, in_position.w);
 }
 )GLSL";
 
@@ -575,7 +575,7 @@ void main() {
     float z = clamp(in_position.z, 0.0, 16777215.0) / 16777215.0 * 2.0 - 1.0;
     vec2 ndc = vec2(in_position.x / surface_size.x * 2.0 - 1.0,
                     1.0 - in_position.y / surface_size.y * 2.0);
-    gl_Position = vec4(ndc, z, 1.0);
+    gl_Position = vec4(ndc * in_position.w, z * in_position.w, in_position.w);
 }
 )GLSL";
 
@@ -634,7 +634,7 @@ void main() {
     depth24_out = uint(clamp(in_position.z, 0.0, 16777215.0));
     vec2 ndc = vec2(in_position.x / surface_size.x * 2.0 - 1.0,
                     1.0 - in_position.y / surface_size.y * 2.0);
-    gl_Position = vec4(ndc, 0.0, 1.0);
+    gl_Position = vec4(ndc * in_position.w, 0.0, in_position.w);
 }
 )GLSL";
 

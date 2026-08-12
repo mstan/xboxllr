@@ -6973,6 +6973,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 packet.fixture_color_format_x8 = color_format_x8;
             }
         }
+        bool resident_noop_batch = false;
         if (packet.compute_fixture == Nv2aGenericCombinerPacket::ComputeFixture::kNone) {
             using ResidentReject = GenericResidentRejectReason;
             const bool resident_primary_combiner_words =
@@ -7084,6 +7085,14 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     const auto* c = &packet.vertices[ic];
                     if (!finite_vertex(*a) || !finite_vertex(*b) || !finite_vertex(*c))
                         return false;
+                    const bool all_behind_w =
+                        a->position[3] < 0.0f && b->position[3] < 0.0f &&
+                        c->position[3] < 0.0f;
+                    if (all_behind_w) return true;
+                    const bool crosses_w_plane =
+                        a->position[3] < 0.0f || b->position[3] < 0.0f ||
+                        c->position[3] < 0.0f;
+                    if (crosses_w_plane) return false;
                     if (resident_primary_large_dashboard_target) {
                         const double ax = static_cast<double>(a->position[0]);
                         const double ay = static_cast<double>(a->position[1]);
@@ -7167,6 +7176,10 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     packet.fixture_blend_src = blend_src;
                     packet.fixture_blend_dst = blend_dst;
                     packet.fixture_color_format_x8 = color_format_x8;
+                    ++generic_combiner_resident_candidates_;
+                    resident_exact_this_batch = true;
+                } else if (expanded_ok && expanded.empty()) {
+                    resident_noop_batch = true;
                     ++generic_combiner_resident_candidates_;
                     resident_exact_this_batch = true;
                 } else if (resident_primary_observable) {
@@ -7474,6 +7487,14 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                             !finite_vertex(c)) {
                             return false;
                         }
+                        const bool all_behind_w =
+                            a.position[3] < 0.0f && b.position[3] < 0.0f &&
+                            c.position[3] < 0.0f;
+                        if (all_behind_w) return true;
+                        const bool crosses_w_plane =
+                            a.position[3] < 0.0f || b.position[3] < 0.0f ||
+                            c.position[3] < 0.0f;
+                        if (crosses_w_plane) return false;
                         const double ax = static_cast<double>(a.position[0]);
                         const double ay = static_cast<double>(a.position[1]);
                         const double bx = static_cast<double>(b.position[0]);
@@ -7537,6 +7558,9 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                         packet.fixture_texture_passthrough =
                             passthrough_combiner_words_match;
                         ++generic_combiner_resident_candidates_;
+                    } else if (expanded_ok && expanded.empty()) {
+                        resident_noop_batch = true;
+                        ++generic_combiner_resident_candidates_;
                     } else {
                         record_generic_resident_reject(
                             GenericResidentRejectReason::kVertexExpansion);
@@ -7572,6 +7596,41 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     info.debug_tex0[index] = vertices[index].texture[0];
                 }
             };
+        if (resident_noop_batch) {
+            executed = true;
+            ++generic_combiner_accelerated_batches_;
+            if (surface_write_debug_cb_) {
+                SurfaceWriteDebugInfo info;
+                info.kind = "resident-generic-noop";
+                info.sequence = generic_combiner_batches_;
+                info.fingerprint = debug_batch_fingerprint;
+                info.full_state_hash = debug_batch_full_hash;
+                info.color_address = color_address;
+                info.pitch = pitch;
+                info.width = pitch / 4u;
+                info.height = surface_height;
+                info.surface_format = surface_format_;
+                info.shader_stage_program =
+                    raster_state_[kRasterShaderStageProgram];
+                info.combiner_control = raster_state_[kRasterCombinerControl];
+                info.alpha_func = raster_state_[kRasterAlphaFunc];
+                info.alpha_ref = raster_state_[kRasterAlphaRef] & 0xFFu;
+                info.blend_src = raster_state_[kRasterBlendSrc];
+                info.blend_dst = raster_state_[kRasterBlendDst];
+                info.blend_equation = raster_state_[kRasterBlendEquation];
+                info.depth_func = raster_state_[kRasterDepthFunc];
+                info.depth_mask = raster_state_[kRasterDepthMask];
+                info.texture_enable_mask = raster_state_[kRasterTextureEnableMask];
+                info.primitive_mode = primitive_mode_;
+                info.vertex_count = static_cast<uint32_t>(std::min<size_t>(
+                    transformed_batch_.size(),
+                    std::numeric_limits<uint32_t>::max()));
+                fill_surface_write_vertex_debug(info, packet.vertices);
+                surface_write_debug_cb_(info);
+            }
+            ++generic_combiner_executed_batches_;
+            return true;
+        }
         if (renderer_->supports_resident_generic_combiner(packet)) {
             ++generic_combiner_resident_supported_;
             const size_t color_size = static_cast<size_t>(color_bytes64);
@@ -8154,9 +8213,12 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     };
 
     bool raster_failed = false;
-    auto rasterize_triangle = [&](const TransformedVertex& input_a,
-                                 const TransformedVertex& input_b,
-                                 const TransformedVertex& input_c) {
+    std::function<void(const TransformedVertex&, const TransformedVertex&,
+                       const TransformedVertex&)>
+        rasterize_triangle;
+    rasterize_triangle = [&](const TransformedVertex& input_a,
+                             const TransformedVertex& input_b,
+                             const TransformedVertex& input_c) {
         if (raster_failed) return;
         const TransformedVertex* a = &input_a;
         const TransformedVertex* b = &input_b;
@@ -8167,6 +8229,122 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 !std::isfinite(vertex->position[2])) {
                 return;
             }
+        }
+        constexpr float kMinPositiveW = 1.0e-6f;
+        const float surface_w = static_cast<float>((surface_pitch_ & 0xffffu) / 4u);
+        const float surface_h = static_cast<float>(surface_height);
+        struct ClipVertex {
+            TransformedVertex vertex;
+            float clip_x = 0.0f;
+            float clip_y = 0.0f;
+            float clip_w = 0.0f;
+        };
+        auto make_clip_vertex = [&](const TransformedVertex& vertex) {
+            ClipVertex out{};
+            out.vertex = vertex;
+            out.clip_w = vertex.position[3];
+            out.clip_x = (2.0f * vertex.position[0] / surface_w - 1.0f) *
+                         out.clip_w;
+            out.clip_y = (2.0f * vertex.position[1] / surface_h - 1.0f) *
+                         out.clip_w;
+            return out;
+        };
+        auto lerp_clip_vertex = [](const ClipVertex& v0, const ClipVertex& v1,
+                                   float t) {
+            ClipVertex out{};
+            out.clip_x = v0.clip_x + (v1.clip_x - v0.clip_x) * t;
+            out.clip_y = v0.clip_y + (v1.clip_y - v0.clip_y) * t;
+            out.clip_w = v0.clip_w + (v1.clip_w - v0.clip_w) * t;
+            out.vertex.position[2] =
+                v0.vertex.position[2] +
+                (v1.vertex.position[2] - v0.vertex.position[2]) * t;
+            out.vertex.position[3] = out.clip_w;
+            for (size_t component = 0; component < 4; ++component) {
+                out.vertex.diffuse[component] =
+                    v0.vertex.diffuse[component] +
+                    (v1.vertex.diffuse[component] -
+                     v0.vertex.diffuse[component]) *
+                        t;
+                out.vertex.specular[component] =
+                    v0.vertex.specular[component] +
+                    (v1.vertex.specular[component] -
+                     v0.vertex.specular[component]) *
+                        t;
+                for (size_t stage = 0; stage < 4; ++stage) {
+                    out.vertex.texture[stage][component] =
+                        v0.vertex.texture[stage][component] +
+                        (v1.vertex.texture[stage][component] -
+                         v0.vertex.texture[stage][component]) *
+                            t;
+                }
+            }
+            return out;
+        };
+        std::vector<ClipVertex> clip_polygon{
+            make_clip_vertex(*a), make_clip_vertex(*b), make_clip_vertex(*c)};
+        auto clip_plane = [&](auto plane_value) {
+            if (clip_polygon.empty()) return;
+            std::vector<ClipVertex> output;
+            output.reserve(clip_polygon.size() + 1);
+            ClipVertex prev = clip_polygon.back();
+            float prev_value = plane_value(prev);
+            bool prev_inside = prev_value >= 0.0f;
+            for (const ClipVertex& cur : clip_polygon) {
+                const float cur_value = plane_value(cur);
+                const bool cur_inside = cur_value >= 0.0f;
+                if (cur_inside != prev_inside) {
+                    const float denom = prev_value - cur_value;
+                    const float t = denom == 0.0f ? 0.0f : prev_value / denom;
+                    output.push_back(lerp_clip_vertex(prev, cur, t));
+                }
+                if (cur_inside) output.push_back(cur);
+                prev = cur;
+                prev_value = cur_value;
+                prev_inside = cur_inside;
+            }
+            clip_polygon = std::move(output);
+        };
+        constexpr float kClipTolerance = 1.0e-4f;
+        const bool needs_clip =
+            std::any_of(clip_polygon.begin(), clip_polygon.end(),
+                        [](const ClipVertex& vertex) {
+                            return vertex.clip_w < kMinPositiveW ||
+                                   vertex.clip_x < -vertex.clip_w - kClipTolerance ||
+                                   vertex.clip_x > vertex.clip_w + kClipTolerance ||
+                                   vertex.clip_y < -vertex.clip_w - kClipTolerance ||
+                                   vertex.clip_y > vertex.clip_w + kClipTolerance;
+                        });
+        if (needs_clip) {
+            clip_plane([](const ClipVertex& vertex) {
+                return vertex.clip_w - kMinPositiveW;
+            });
+            clip_plane([](const ClipVertex& vertex) {
+                return vertex.clip_x + vertex.clip_w;
+            });
+            clip_plane([](const ClipVertex& vertex) {
+                return vertex.clip_w - vertex.clip_x;
+            });
+            clip_plane([](const ClipVertex& vertex) {
+                return vertex.clip_y + vertex.clip_w;
+            });
+            clip_plane([](const ClipVertex& vertex) {
+                return vertex.clip_w - vertex.clip_y;
+            });
+            if (clip_polygon.size() < 3) return;
+            std::vector<TransformedVertex> clipped;
+            clipped.reserve(clip_polygon.size());
+            for (ClipVertex& vertex : clip_polygon) {
+                if (vertex.clip_w <= 0.0f) return;
+                vertex.vertex.position[0] =
+                    (vertex.clip_x / vertex.clip_w + 1.0f) * surface_w * 0.5f;
+                vertex.vertex.position[1] =
+                    (vertex.clip_y / vertex.clip_w + 1.0f) * surface_h * 0.5f;
+                vertex.vertex.position[3] = vertex.clip_w;
+                clipped.push_back(vertex.vertex);
+            }
+            for (size_t i = 1; i + 1 < clipped.size(); ++i)
+                rasterize_triangle(clipped[0], clipped[i], clipped[i + 1]);
+            return;
         }
         auto fixed_xy = [](float value) -> int64_t {
             return static_cast<int64_t>(std::llround(value * 16.0f));
