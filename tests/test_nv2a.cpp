@@ -6084,6 +6084,61 @@ int main() {
             // X8R8G8B8: the stored alpha byte is always forced to 0xFF, never the
             // combiner's computed alpha (there is no alpha channel on real hardware).
             CHECK((get32(d_ram, 0x03AA4000u + d_offset) >> 24) == 0xFFu);
+
+            // The resident OpenGL path actively accelerates this large dashboard
+            // overlay family.  Gate the exact X8/blended state against the software
+            // evaluator, not only the smaller A8/no-blend seam fixture above.
+            constexpr uint32_t d_color_addr = 0x03AA4000u;
+            constexpr size_t d_color_size = 5120u * 960u;
+            auto capture_d_overlay = [&](xlle::Nv2aRenderer* renderer,
+                                         uint8_t fill) {
+                std::memset(d_ram.data() + d_color_addr, fill, d_color_size);
+                d_gpu.set_renderer(renderer);
+                submit_d_triangle(50.0f, 50.0f, 150.0f, 50.0f, 50.0f, 150.0f,
+                                  100.0f, 1.0f,
+                                  d_pack_ub4(0x40, 0x60, 0x90, 0x80));
+                CHECK(d_fault.empty());
+                if (renderer) {
+                    CHECK(d_gpu.debug_resolve_color_surface(d_color_addr,
+                                                           d_color_size,
+                                                           "test-resident-d"));
+                }
+                return std::vector<uint8_t>(
+                    d_ram.begin() + d_color_addr,
+                    d_ram.begin() + d_color_addr + d_color_size);
+            };
+            const std::vector<uint8_t> d_software =
+                capture_d_overlay(nullptr, 0x5A);
+            std::string d_gl_error;
+            auto d_gl_renderer = xlle::create_nv2a_opengl_renderer(d_gl_error);
+            if (d_gl_renderer) {
+                const uint64_t accelerated_before =
+                    d_gpu.generic_combiner_accelerated_batches();
+                const std::vector<uint8_t> d_gl =
+                    capture_d_overlay(d_gl_renderer.get(), 0x5A);
+                if (!std::equal(d_software.begin(), d_software.end(),
+                                d_gl.begin())) {
+                    const auto mismatch =
+                        std::mismatch(d_software.begin(), d_software.end(),
+                                      d_gl.begin());
+                    const size_t byte_index =
+                        static_cast<size_t>(mismatch.first - d_software.begin());
+                    const uint32_t pixel_index =
+                        static_cast<uint32_t>(byte_index / 4u);
+                    const uint32_t pixel_byte = pixel_index * 4u;
+                    std::printf("resident dashboard overlay mismatch byte=%zu "
+                                "pixel=(%u,%u) sw=%08x gl=%08x\n",
+                                byte_index, pixel_index % 1280u,
+                                pixel_index / 1280u,
+                                get32(d_software, pixel_byte),
+                                get32(d_gl, pixel_byte));
+                }
+                CHECK(std::equal(d_software.begin(), d_software.end(),
+                                 d_gl.begin()));
+                CHECK(d_gpu.generic_combiner_accelerated_batches() ==
+                      accelerated_before + 1);
+            }
+            d_gpu.set_renderer(nullptr);
         }
 
         // --- (e) TEXTURE0 modulated by diffuse (PROJECT2D/linear sampler,

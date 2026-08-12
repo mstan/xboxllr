@@ -542,6 +542,23 @@ void main() {
 }
 )GLSL";
 
+constexpr const char* kResidentAlphaVertexSource = R"GLSL(#version 430 core
+layout(location = 0) in vec4 in_position;
+uniform vec2 surface_size;
+void main() {
+    vec2 ndc = vec2(in_position.x / surface_size.x * 2.0 - 1.0,
+                    1.0 - in_position.y / surface_size.y * 2.0);
+    gl_Position = vec4(ndc, 0.0, 1.0);
+}
+)GLSL";
+
+constexpr const char* kResidentAlphaFragmentSource = R"GLSL(#version 430 core
+layout(location = 0) out vec4 out_color;
+void main() {
+    out_color = vec4(0.0, 0.0, 0.0, 1.0);
+}
+)GLSL";
+
 constexpr const char* kResidentTextureModulateVertexSource = R"GLSL(#version 430 core
 layout(location = 0) in vec4 in_position;
 layout(location = 1) in vec4 in_diffuse;
@@ -732,6 +749,7 @@ public:
                        unsigned int texture_modulate_program,
                        unsigned int dashboard_program,
                        unsigned int resident_program,
+                       unsigned int resident_alpha_program,
                        unsigned int resident_texture_modulate_program,
                        unsigned int resident_dashboard_program)
         : window_(window), context_(context), owns_video_(owns_video),
@@ -739,6 +757,7 @@ public:
           texture_modulate_program_(texture_modulate_program),
           dashboard_program_(dashboard_program),
           resident_program_(resident_program),
+          resident_alpha_program_(resident_alpha_program),
           resident_texture_modulate_program_(resident_texture_modulate_program),
           resident_dashboard_program_(resident_dashboard_program) {}
     ~OpenGlNv2aRenderer() override {
@@ -752,6 +771,8 @@ public:
         if (dashboard_program_ && delete_program_)
             delete_program_(dashboard_program_);
         if (resident_program_ && delete_program_) delete_program_(resident_program_);
+        if (resident_alpha_program_ && delete_program_)
+            delete_program_(resident_alpha_program_);
         if (resident_texture_modulate_program_ && delete_program_)
             delete_program_(resident_texture_modulate_program_);
         if (resident_dashboard_program_ && delete_program_)
@@ -1209,6 +1230,19 @@ public:
             perf::ScopedAdd timer(perf::g_ns_renderer_draw,
                                   perf::g_calls_renderer_draw);
             draw_arrays_(kGlTriangles, 0, static_cast<int>(vertices.size()));
+            if (packet.fixture_color_format_x8 &&
+                !packet.fixture_depth_test_enabled &&
+                !packet.fixture_depth_write_enabled) {
+                disable_(kGlBlend);
+                color_mask_(0, 0, 0, 1);
+                use_program_(resident_alpha_program_);
+                uniform_2f_(uniform_location_(resident_alpha_program_,
+                                              "surface_size"),
+                            static_cast<float>(width),
+                            static_cast<float>(height));
+                draw_arrays_(kGlTriangles, 0, static_cast<int>(vertices.size()));
+                color_mask_(1, 1, 1, 0);
+            }
         }
         if (dashboard_fixture) {
             disable_vertex_attrib_array_(5);
@@ -1724,6 +1758,7 @@ public:
         return compile_fixture(error) && compile_texture_modulate(error) &&
                compile_dashboard(error) &&
                compile_resident_primary(error) &&
+               compile_resident_alpha(error) &&
                compile_resident_texture_modulate(error) &&
                compile_resident_dashboard(error);
     }
@@ -1873,7 +1908,7 @@ private:
                 rgba[gl_offset + 0] = guest[guest_offset + 2];
                 rgba[gl_offset + 1] = guest[guest_offset + 1];
                 rgba[gl_offset + 2] = guest[guest_offset + 0];
-                rgba[gl_offset + 3] = x8 ? 0xff : guest[guest_offset + 3];
+                rgba[gl_offset + 3] = guest[guest_offset + 3];
             }
         }
     }
@@ -1891,7 +1926,7 @@ private:
                 rgba[gl_offset + 0] = guest[guest_offset + 2];
                 rgba[gl_offset + 1] = guest[guest_offset + 1];
                 rgba[gl_offset + 2] = guest[guest_offset + 0];
-                rgba[gl_offset + 3] = x8 ? 0xff : guest[guest_offset + 3];
+                rgba[gl_offset + 3] = guest[guest_offset + 3];
             }
         }
     }
@@ -1908,7 +1943,7 @@ private:
                 guest[guest_offset + 0] = rgba[gl_offset + 2];
                 guest[guest_offset + 1] = rgba[gl_offset + 1];
                 guest[guest_offset + 2] = rgba[gl_offset + 0];
-                guest[guest_offset + 3] = x8 ? 0xff : rgba[gl_offset + 3];
+                guest[guest_offset + 3] = rgba[gl_offset + 3];
             }
         }
     }
@@ -2190,6 +2225,12 @@ private:
                                         "resident-primary", resident_program_,
                                         error);
     }
+    bool compile_resident_alpha(std::string& error) {
+        return compile_graphics_program(kResidentAlphaVertexSource,
+                                        kResidentAlphaFragmentSource,
+                                        "resident-alpha", resident_alpha_program_,
+                                        error);
+    }
     bool compile_resident_texture_modulate(std::string& error) {
         return compile_graphics_program(kResidentTextureModulateVertexSource,
                                         kResidentTextureModulateFragmentSource,
@@ -2210,6 +2251,7 @@ private:
     unsigned int texture_modulate_program_ = 0;
     unsigned int dashboard_program_ = 0;
     unsigned int resident_program_ = 0;
+    unsigned int resident_alpha_program_ = 0;
     unsigned int resident_texture_modulate_program_ = 0;
     unsigned int resident_dashboard_program_ = 0;
     unsigned int resident_source_texture_ = 0;
@@ -2304,7 +2346,7 @@ std::unique_ptr<Nv2aRenderer> create_nv2a_opengl_renderer(std::string& error) {
     }
     auto renderer =
         std::make_unique<OpenGlNv2aRenderer>(window, context, owns_video, 0, 0, 0,
-                                             0, 0, 0);
+                                             0, 0, 0, 0);
     if (!renderer->initialize(error)) return nullptr;
     restore_previous_gl_context(previous_window, previous_context, window);
     std::printf("[nv2a-renderer] opengl context ready: GL %d.%d; narrow compute fixtures enabled\n",
