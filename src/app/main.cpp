@@ -365,6 +365,39 @@ bool capture_argb32_surface(XboxMachine& mach, uint32_t address, uint32_t pitch,
     return true;
 }
 
+bool dump_guest_memory(XboxMachine& mach, const char* path, uint32_t address,
+                       uint64_t size, std::string& error) {
+    if (!path || !path[0] || size == 0 || size > 64ull * 1024ull * 1024ull ||
+        static_cast<uint64_t>(address) + size > 64ull * 1024ull * 1024ull) {
+        error = "memory dump range is empty or exceeds unified RAM";
+        return false;
+    }
+    if (mach.nv2a() &&
+        !mach.nv2a()->debug_resolve_color_surface(
+            address, static_cast<size_t>(size), "debug memory dump")) {
+        error = "resident surface resolve failed";
+        return false;
+    }
+    std::vector<uint8_t> data(static_cast<size_t>(size));
+    if (!mach.read(address, data.data(), data.size())) {
+        error = "guest-memory read failed";
+        return false;
+    }
+    std::ofstream out(path, std::ios::binary);
+    if (!out) {
+        error = "output open failed";
+        return false;
+    }
+    out.write(reinterpret_cast<const char*>(data.data()),
+              static_cast<std::streamsize>(data.size()));
+    if (!out.good()) {
+        error = "output write failed";
+        return false;
+    }
+    error.clear();
+    return true;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -384,6 +417,7 @@ int main(int argc, char** argv) {
     const char* eeprom = nullptr;
     const char* frame_dump = nullptr;
     const char* debug_surface_dump = nullptr;
+    const char* debug_memory_dump = nullptr;
     const char* debug_generic_surface_snapshot_prefix = nullptr;
     const char* debug_nv2a_surface_snapshot_prefix = nullptr;
     bool debug_nv2a_surface_events = false;
@@ -399,6 +433,8 @@ int main(int argc, char** argv) {
     uint32_t debug_surface_pitch = 0;
     uint32_t debug_surface_width = 0;
     uint32_t debug_surface_height = 0;
+    uint32_t debug_memory_address = 0;
+    uint64_t debug_memory_size = 0;
     uint32_t debug_generic_surface_snapshot_address = 0;
     uint64_t debug_generic_surface_snapshot_skip = 0;
     uint64_t debug_generic_surface_snapshot_count = 0;
@@ -498,6 +534,27 @@ int main(int argc, char** argv) {
                 std::fprintf(
                     stderr,
                     "[host] --debug-surface-dump expects path plus 32-bit addr/pitch/width/height\n");
+                return 1;
+            }
+        }
+        else if (!std::strcmp(argv[i], "--debug-memory-dump")) {
+            if (i + 3 >= argc) {
+                std::fprintf(
+                    stderr,
+                    "[host] use --debug-memory-dump <path> <addr> <size>\n");
+                return 1;
+            }
+            debug_memory_dump = argv[++i];
+            if (!debug_memory_dump[0] ||
+                !parse_u32_arg(argv[++i], debug_memory_address) ||
+                !parse_u64_arg(argv[++i], debug_memory_size) ||
+                debug_memory_size == 0 ||
+                static_cast<uint64_t>(debug_memory_address) +
+                        debug_memory_size >
+                    64ull * 1024ull * 1024ull) {
+                std::fprintf(
+                    stderr,
+                    "[host] --debug-memory-dump expects path, 32-bit addr, and positive in-RAM size\n");
                 return 1;
             }
         }
@@ -3629,6 +3686,20 @@ int main(int argc, char** argv) {
                             surface_written ? "written" : "FAILED",
                             surface_error.empty() ? "" : " (",
                             surface_error.empty() ? "" : (surface_error + ")").c_str());
+            }
+            if (debug_memory_dump) {
+                std::string memory_error;
+                const bool memory_written = dump_guest_memory(
+                    mach, debug_memory_dump, debug_memory_address,
+                    debug_memory_size, memory_error);
+                frame_output_ok = frame_output_ok && memory_written;
+                std::printf("[host] debug memory dump %s addr=%08x size=%llu: "
+                            "%s%s%s\n",
+                            debug_memory_dump, debug_memory_address,
+                            static_cast<unsigned long long>(debug_memory_size),
+                            memory_written ? "written" : "FAILED",
+                            memory_error.empty() ? "" : " (",
+                            memory_error.empty() ? "" : (memory_error + ")").c_str());
             }
             if (window && frame_available)
                 run_frame_window("xlle NV2A scanout", static_cast<int>(scanout.width),
