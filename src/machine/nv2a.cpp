@@ -7558,12 +7558,24 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                         packet.fixture_texture_passthrough =
                             passthrough_combiner_words_match;
                         ++generic_combiner_resident_candidates_;
+                        resident_observed_this_batch = true;
+                        resident_exact_this_batch = true;
+                        resident_reject_this_batch =
+                            GenericResidentRejectReason::kCount;
                     } else if (expanded_ok && expanded.empty()) {
                         resident_noop_batch = true;
                         ++generic_combiner_resident_candidates_;
+                        resident_observed_this_batch = true;
+                        resident_exact_this_batch = true;
+                        resident_reject_this_batch =
+                            GenericResidentRejectReason::kCount;
                     } else {
                         record_generic_resident_reject(
                             GenericResidentRejectReason::kVertexExpansion);
+                        resident_observed_this_batch = true;
+                        resident_exact_this_batch = false;
+                        resident_reject_this_batch =
+                            GenericResidentRejectReason::kVertexExpansion;
                     }
                 }
             }
@@ -7741,6 +7753,10 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         } else if (resident_packet) {
             record_generic_resident_reject(
                 GenericResidentRejectReason::kBackendUnsupported);
+            resident_observed_this_batch = true;
+            resident_exact_this_batch = false;
+            resident_reject_this_batch =
+                GenericResidentRejectReason::kBackendUnsupported;
         }
         if (renderer_->supports_generic_combiner(packet)) {
             if (!resolve_renderer_color_overlap(

@@ -1481,8 +1481,16 @@ int main(int argc, char** argv) {
                     uint32_t max_vertices = 0;
                     uint64_t texture_modulate_batches = 0;
                     uint64_t texture_modulate_exact_batches = 0;
+                    std::array<uint64_t,
+                               static_cast<size_t>(
+                                   Nv2a::GenericTextureModulateRejectReason::kCount)>
+                        texture_modulate_reject_batches{};
                     uint64_t resident_batches = 0;
                     uint64_t resident_exact_batches = 0;
+                    std::array<uint64_t,
+                               static_cast<size_t>(
+                                   Nv2a::GenericResidentRejectReason::kCount)>
+                        resident_reject_batches{};
                 };
                 std::vector<GenericFamilyStats> families;
                 for (const auto& entry : fingerprints) {
@@ -1527,8 +1535,21 @@ int main(int argc, char** argv) {
                         entry.texture_modulate_batches;
                     family->texture_modulate_exact_batches +=
                         entry.texture_modulate_exact_batches;
+                    for (size_t reason = 0;
+                         reason <
+                         Nv2a::generic_texture_modulate_reject_reason_count();
+                         ++reason) {
+                        family->texture_modulate_reject_batches[reason] +=
+                            entry.texture_modulate_reject_batches[reason];
+                    }
                     family->resident_batches += entry.resident_batches;
                     family->resident_exact_batches += entry.resident_exact_batches;
+                    for (size_t reason = 0;
+                         reason < Nv2a::generic_resident_reject_reason_count();
+                         ++reason) {
+                        family->resident_reject_batches[reason] +=
+                            entry.resident_reject_batches[reason];
+                    }
                 }
                 std::sort(families.begin(), families.end(),
                           [](const auto& a, const auto& b) {
@@ -1570,6 +1591,21 @@ int main(int argc, char** argv) {
                                         static_cast<unsigned long long>(
                                             family.texture_modulate_exact_batches));
                         }
+                        bool any_texmod_reject = false;
+                        for (size_t reason = 0;
+                             reason <
+                             Nv2a::generic_texture_modulate_reject_reason_count();
+                             ++reason) {
+                            const uint64_t count =
+                                family.texture_modulate_reject_batches[reason];
+                            if (!count) continue;
+                            std::printf("%s%s:%llu",
+                                        any_texmod_reject ? "," : "/reject=",
+                                        Nv2a::generic_texture_modulate_reject_reason_name(
+                                            reason),
+                                        static_cast<unsigned long long>(count));
+                            any_texmod_reject = true;
+                        }
                     }
                     if (family.resident_batches) {
                         std::printf("/resident%llu",
@@ -1579,6 +1615,20 @@ int main(int argc, char** argv) {
                             std::printf("/exact%llu",
                                         static_cast<unsigned long long>(
                                             family.resident_exact_batches));
+                        }
+                        bool any_resident_reject = false;
+                        for (size_t reason = 0;
+                             reason < Nv2a::generic_resident_reject_reason_count();
+                             ++reason) {
+                            const uint64_t count =
+                                family.resident_reject_batches[reason];
+                            if (!count) continue;
+                            std::printf("%s%s:%llu",
+                                        any_resident_reject ? "," : "/reject=",
+                                        Nv2a::generic_resident_reject_reason_name(
+                                            reason),
+                                        static_cast<unsigned long long>(count));
+                            any_resident_reject = true;
                         }
                     }
                 }
