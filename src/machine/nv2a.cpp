@@ -3881,10 +3881,10 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
     }
     PagedRasterSurface depth_surface(
         depth_address, static_cast<size_t>(depth_bytes64),
-        mem_read_, mem_write_);
+        mem_read_, mem_write_, mem_direct_);
     PagedRasterSurface color_surface(
         color_address, static_cast<size_t>(color_bytes64),
-        mem_read_, mem_write_);
+        mem_read_, mem_write_, mem_direct_);
     std::unique_ptr<SwizzleLookup> surface_swizzle;
     if (profile == Profile::kSwizzledRadialColor ||
         profile == Profile::kSwizzledTexturedColor ||
