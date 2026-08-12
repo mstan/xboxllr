@@ -1084,6 +1084,9 @@ public:
         kRasterCombinerFinalFactor1,
         kRasterStateWords,
     };
+    uint32_t debug_raster_state_word(RasterStateWord word) const {
+        return word < kRasterStateWords ? raster_state_[word] : 0;
+    }
     struct RasterStateSample {
         struct ImmediateQuadTransformVariant {
             uint8_t mode = 0;

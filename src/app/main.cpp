@@ -1024,6 +1024,9 @@ int main(int argc, char** argv) {
                                         "sfmt=%08x shader=%08x comb=%08x "
                                         "alpha=%x/%02x blend=%x/%x/%x "
                                         "depth=%x/%x texen=%x "
+                                        "ci0=%08x ai0=%08x co0=%08x ao0=%08x "
+                                        "f0_0=%08x f1_0=%08x final=%08x/%08x "
+                                        "tex0=%08x/%08x/%08x/%08x/%08x "
                                         "frags=%llu writes=%llu\n",
                                         info.kind, info.color_address,
                                         static_cast<unsigned long long>(matched_events),
@@ -1042,6 +1045,32 @@ int main(int argc, char** argv) {
                                         info.blend_src, info.blend_dst,
                                         info.blend_equation, info.depth_func,
                                         info.depth_mask, info.texture_enable_mask,
+                                        mach.nv2a()->debug_raster_state_word(
+                                            Nv2a::kRasterCombinerColorIcw0),
+                                        mach.nv2a()->debug_raster_state_word(
+                                            Nv2a::kRasterCombinerAlphaIcw0),
+                                        mach.nv2a()->debug_raster_state_word(
+                                            Nv2a::kRasterCombinerColorOcw0),
+                                        mach.nv2a()->debug_raster_state_word(
+                                            Nv2a::kRasterCombinerAlphaOcw0),
+                                        mach.nv2a()->debug_raster_state_word(
+                                            Nv2a::kRasterCombinerFactor0_0),
+                                        mach.nv2a()->debug_raster_state_word(
+                                            Nv2a::kRasterCombinerFactor1_0),
+                                        mach.nv2a()->debug_raster_state_word(
+                                            Nv2a::kRasterCombinerSpecularFog0),
+                                        mach.nv2a()->debug_raster_state_word(
+                                            Nv2a::kRasterCombinerSpecularFog1),
+                                        mach.nv2a()->debug_raster_state_word(
+                                            Nv2a::kRasterTextureOffset0),
+                                        mach.nv2a()->debug_raster_state_word(
+                                            Nv2a::kRasterTextureFormat0),
+                                        mach.nv2a()->debug_raster_state_word(
+                                            Nv2a::kRasterTextureImageRect0),
+                                        mach.nv2a()->debug_raster_state_word(
+                                            Nv2a::kRasterTextureAddress0),
+                                        mach.nv2a()->debug_raster_state_word(
+                                            Nv2a::kRasterTextureControl0_0),
                                         static_cast<unsigned long long>(info.fragments),
                                         static_cast<unsigned long long>(info.writes));
                                     for (uint32_t vertex = 0;
