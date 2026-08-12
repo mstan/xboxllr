@@ -8472,6 +8472,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         std::array<std::array<float, 4>, 3> diffuse_values{};
         std::array<std::array<float, 4>, 3> specular_values{};
         std::array<std::array<std::array<float, 4>, 3>, 4> texture_values{};
+        std::array<uint8_t, 4> texture_component_masks{};
         auto sanitize_color_component = [](float value, size_t component) {
             if (std::isnan(value)) value = component == 3 ? 1.0f : 0.0f;
             return std::clamp(value, 0.0f, 1.0f);
@@ -8498,14 +8499,26 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         }
         for (uint32_t stage = 0; stage < 4; ++stage) {
             if (!texture_referenced[stage]) continue;
+            const TextureStage& ts = texture_stages[stage];
+            uint8_t component_mask = ts.cubemap
+                ? 0x07u
+                : static_cast<uint8_t>((ts.project2d || ts.linear) ? 0x0Bu : 0x03u);
             for (size_t vertex = 0; vertex < triangle_vertices.size(); ++vertex) {
                 for (size_t component = 0; component < 4; ++component) {
                     const float value =
                         triangle_vertices[vertex]->texture[stage][component];
                     texture_values[stage][vertex][component] =
                         std::isnan(value) ? 0.0f : value;
+                    // Preserve the old generic fault behavior for infinities in
+                    // otherwise-unused texture coordinates: NaN sanitized to zero
+                    // before, but +/-Inf made the interpolation non-finite.
+                    if ((component_mask & (1u << component)) == 0 &&
+                        !std::isfinite(value) && !std::isnan(value)) {
+                        component_mask |= static_cast<uint8_t>(1u << component);
+                    }
                 }
             }
+            texture_component_masks[stage] = component_mask;
         }
 
         for (int32_t y = tri_ymin; y <= tri_ymax; ++y) {
@@ -8615,6 +8628,8 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     std::array<float, 4> texcoord{};
                     bool texcoord_failed = false;
                     for (size_t c4 = 0; c4 < 4; ++c4) {
+                        if ((texture_component_masks[stage] & (1u << c4)) == 0)
+                            continue;
                         const double t = (q0 * texture_values[stage][0][c4] +
                                          q1 * texture_values[stage][1][c4] +
                                          q2 * texture_values[stage][2][c4]) /
