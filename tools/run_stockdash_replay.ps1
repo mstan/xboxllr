@@ -13,6 +13,7 @@ param(
     [double] $MaxFocusWallRegressionPct = -1.0,
     [switch] $Build,
     [switch] $Force,
+    [switch] $NoPerfAccounting,
     [switch] $NoParse
 )
 
@@ -84,12 +85,17 @@ try {
         '--test-input-capture-prefix', $prefix,
         '--max-host-memory-mb', "$MaxHostMemoryMb",
         '--machine-chunk-insns', "$MachineChunkInsns",
-        '--perf-accounting',
-        '--perf-generic-top', "$GenericTop",
         '--frame-series', $prefix, "$FrameInterval",
         '--max-insns', "$MaxInsns",
         '--frame-dump', $finalPpm
     )
+    if (-not $NoPerfAccounting) {
+        $commandArgs = @(
+            $commandArgs[0..($commandArgs.Count - 5)] +
+            @('--perf-accounting', '--perf-generic-top', "$GenericTop") +
+            $commandArgs[($commandArgs.Count - 4)..($commandArgs.Count - 1)]
+        )
+    }
 
     $quotedArgs = $commandArgs | ForEach-Object {
         if ($_ -match '[\s"]') {

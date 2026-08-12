@@ -156,8 +156,8 @@ def summarize(path: pathlib.Path) -> None:
     generic_family = parsed.get("generic_family_samples", [])
     generic_split = parsed.get("generic_split_samples", [])
     final_frame = parsed.get("final_frame", {})
-    final_mem = parsed.get("final_host_memory", {})
-    final_unicorn = parsed.get("final_unicorn_memory", {})
+    final_mem = parsed.get("final_host_memory") or {}
+    final_unicorn = parsed.get("final_unicorn_memory") or {}
 
     print(path)
     print(
