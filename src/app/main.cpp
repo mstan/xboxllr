@@ -407,6 +407,7 @@ int main(int argc, char** argv) {
     uint64_t debug_nv2a_surface_snapshot_skip = 0;
     uint64_t debug_nv2a_surface_snapshot_count = 0;
     uint64_t debug_nv2a_surface_snapshot_interval = 1;
+    uint64_t debug_nv2a_surface_snapshot_min_writes = 0;
     uint32_t debug_nv2a_surface_event_address = 0;
     uint64_t debug_nv2a_surface_event_skip = 0;
     uint64_t debug_nv2a_surface_event_count = 0;
@@ -539,6 +540,17 @@ int main(int argc, char** argv) {
                 std::fprintf(
                     stderr,
                     "[host] --debug-nv2a-surface-snapshots expects prefix, 32-bit addr, and positive count/interval\n");
+                return 1;
+            }
+        }
+        else if (!std::strcmp(argv[i], "--debug-nv2a-surface-snapshots-min-writes") &&
+                 i + 1 < argc) {
+            if (!parse_u64_arg(argv[++i],
+                               debug_nv2a_surface_snapshot_min_writes)) {
+                std::fprintf(
+                    stderr,
+                    "[host] --debug-nv2a-surface-snapshots-min-writes expects "
+                    "an unsigned write count\n");
                 return 1;
             }
         }
@@ -1059,6 +1071,10 @@ int main(int argc, char** argv) {
                                 }
                             }
                             if (!snapshot_target) return;
+                            if (info.writes <
+                                debug_nv2a_surface_snapshot_min_writes) {
+                                return;
+                            }
                             const bool after_skip =
                                 matched_events > debug_nv2a_surface_snapshot_skip;
                             const bool on_interval =
@@ -1139,7 +1155,7 @@ int main(int argc, char** argv) {
                         });
                 std::printf(
                     "[host] NV2A surface snapshots armed: prefix=%s target=%08x "
-                    "skip=%llu count=%llu interval=%llu\n",
+                    "skip=%llu count=%llu interval=%llu min-writes=%llu\n",
                     debug_nv2a_surface_snapshot_prefix,
                     debug_nv2a_surface_snapshot_address,
                     static_cast<unsigned long long>(
@@ -1147,7 +1163,9 @@ int main(int argc, char** argv) {
                     static_cast<unsigned long long>(
                         debug_nv2a_surface_snapshot_count),
                     static_cast<unsigned long long>(
-                        debug_nv2a_surface_snapshot_interval));
+                        debug_nv2a_surface_snapshot_interval),
+                    static_cast<unsigned long long>(
+                        debug_nv2a_surface_snapshot_min_writes));
             }
             if (debug_nv2a_surface_events && mach.nv2a()) {
                 std::printf(
