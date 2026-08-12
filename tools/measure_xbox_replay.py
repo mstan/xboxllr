@@ -83,6 +83,12 @@ HOST_MEMORY_RE = re.compile(
     r"heap-reserved=(?P<heap_reserved>\d+)"
 )
 
+UNICORN_MEMORY_RE = re.compile(
+    r"^\[unicorn-memory\] "
+    r"code-hook-regions=(?P<code_hook_regions>\d+) "
+    r"count-hook-regions=(?P<count_hook_regions>\d+)"
+)
+
 PERF_RENDERER_RE = re.compile(
     r"^\[perf-renderer\] "
     r"resident-ensure-ns=(?P<resident_ensure_ns>\d+) "
@@ -367,6 +373,7 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
     resident_samples: list[dict[str, Any]] = []
     texture_modulate_samples: list[dict[str, Any]] = []
     host_memory_samples: list[dict[str, Any]] = []
+    unicorn_memory_samples: list[dict[str, Any]] = []
     renderer_samples: list[dict[str, Any]] = []
     perf_memory_samples: list[dict[str, Any]] = []
     witnessed_profile_samples: list[list[dict[str, Any]]] = []
@@ -396,6 +403,8 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
             texture_modulate_samples.append(parse_counter_sample(match))
         elif match := HOST_MEMORY_RE.match(line):
             host_memory_samples.append(parse_int_fields(match))
+        elif match := UNICORN_MEMORY_RE.match(line):
+            unicorn_memory_samples.append(parse_int_fields(match))
         elif match := PERF_RENDERER_RE.match(line):
             renderer_samples.append(parse_int_fields(match))
         elif match := PERF_MEMORY_RE.match(line):
@@ -434,6 +443,10 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
         ),
         "host_memory_samples": host_memory_samples,
         "final_host_memory": host_memory_samples[-1] if host_memory_samples else None,
+        "unicorn_memory_samples": unicorn_memory_samples,
+        "final_unicorn_memory": (
+            unicorn_memory_samples[-1] if unicorn_memory_samples else None
+        ),
         "renderer_samples": renderer_samples,
         "final_renderer": renderer_samples[-1] if renderer_samples else None,
         "perf_memory_samples": perf_memory_samples,

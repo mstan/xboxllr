@@ -151,10 +151,12 @@ def summarize(path: pathlib.Path) -> None:
     renderer = parsed.get("renderer_samples", [])
     resident = parsed.get("resident_samples", [])
     memory = parsed.get("host_memory_samples", [])
+    unicorn_memory = parsed.get("unicorn_memory_samples", [])
     generic_perf = parsed.get("generic_perf_samples", [])
     generic_family = parsed.get("generic_family_samples", [])
     final_frame = parsed.get("final_frame", {})
     final_mem = parsed.get("final_host_memory", {})
+    final_unicorn = parsed.get("final_unicorn_memory", {})
 
     print(path)
     print(
@@ -163,7 +165,8 @@ def summarize(path: pathlib.Path) -> None:
         f"fps={final_frame.get('effective_fps', '-')} "
         f"frame={final_frame.get('hash', '-')} "
         f"private={mib(final_mem.get('private_commit'))} "
-        f"ws={mib(final_mem.get('working_set'))}"
+        f"ws={mib(final_mem.get('working_set'))} "
+        f"ucode={final_unicorn.get('code_hook_regions', '-')}"
     )
     if not frames:
         print("  no frame-series samples")
@@ -173,17 +176,20 @@ def summarize(path: pathlib.Path) -> None:
     previous_perf = previous_renderer = previous_resident = previous_memory = None
     previous_generic_perf = None
     previous_generic_family = None
+    previous_unicorn_memory = None
     for index, frame in enumerate(frames):
         p = sample_for_deadline(perf, index)
         r = sample_for_deadline(renderer, index)
         rs = sample_for_deadline(resident, index)
         m = sample_for_deadline(memory, index)
+        ucm = sample_for_deadline(unicorn_memory, index)
         gp = sample_for_deadline(generic_perf, index)
         gf = sample_for_deadline(generic_family, index)
         pd = delta_dict(p, previous_perf) if p else {}
         rd = delta_dict(r, previous_renderer) if r else {}
         rsd = delta_dict(rs, previous_resident) if rs else {}
         md = delta_dict(m, previous_memory) if m else {}
+        ucmd = delta_dict(ucm, previous_unicorn_memory) if ucm else {}
         dirty_clip = rd.get("dirty_clip_pixels", 0)
         dirty_surface = rd.get("dirty_surface_pixels", 0)
         dirty_pct = (
@@ -195,6 +201,7 @@ def summarize(path: pathlib.Path) -> None:
         previous_renderer = r or previous_renderer
         previous_resident = rs or previous_resident
         previous_memory = m or previous_memory
+        previous_unicorn_memory = ucm or previous_unicorn_memory
         generic_delta = generic_top_delta(gp, previous_generic_perf)
         family_delta = generic_family_delta(gf, previous_generic_family)
         previous_generic_perf = gp or previous_generic_perf
@@ -214,6 +221,7 @@ def summarize(path: pathlib.Path) -> None:
             f"submits={rsd.get('submits', '-')} "
             f"dirty={dirty_pct} "
             f"resolveMP={rd.get('resolve_pixels', 0) / 1_000_000:.1f} "
+            f"ucode+={ucmd.get('code_hook_regions', '-')} "
             f"texMB={md.get('generic_texture_bytes', 0) / BYTES_PER_MIB:.1f} "
             f"genTop={generic_delta} "
             f"famTop={family_delta}"

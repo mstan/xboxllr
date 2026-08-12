@@ -82,6 +82,7 @@ def focus_sums(report: Mapping[str, Any], focus_last: int) -> dict[str, float]:
     perf = parsed.get("perf_samples", [])
     renderer = parsed.get("renderer_samples", [])
     resident = parsed.get("resident_samples", [])
+    unicorn_memory = parsed.get("unicorn_memory_samples", [])
     if not all(isinstance(x, list) for x in (frames, perf, renderer, resident)):
         return {}
     out = {
@@ -92,6 +93,7 @@ def focus_sums(report: Mapping[str, Any], focus_last: int) -> dict[str, float]:
         "resident_ensure_ns": 0.0,
         "uploads": 0.0,
         "submits": 0.0,
+        "code_hook_regions": 0.0,
     }
     for index in frame_indices(report, focus_last):
         previous = index - 1 if index else None
@@ -106,6 +108,10 @@ def focus_sums(report: Mapping[str, Any], focus_last: int) -> dict[str, float]:
         out["resident_ensure_ns"] += sample_delta(renderer, index, previous, "resident_ensure_ns")
         out["uploads"] += sample_delta(resident, index, previous, "uploads")
         out["submits"] += sample_delta(resident, index, previous, "submits")
+        if isinstance(unicorn_memory, list):
+            out["code_hook_regions"] += sample_delta(
+                unicorn_memory, index, previous, "code_hook_regions"
+            )
     return out
 
 
@@ -173,6 +179,12 @@ def main() -> int:
             print_focus_delta(key, base_focus[key], cand_focus[key])
         print_focus_delta("uploads", base_focus["uploads"], cand_focus["uploads"], False)
         print_focus_delta("submits", base_focus["submits"], cand_focus["submits"], False)
+        print_focus_delta(
+            "code_hook_regions",
+            base_focus["code_hook_regions"],
+            cand_focus["code_hook_regions"],
+            False,
+        )
 
         if args.max_focus_wall_regression_pct is not None and base_focus["wall_ns"]:
             regression = 100.0 * (cand_focus["wall_ns"] - base_focus["wall_ns"]) / base_focus["wall_ns"]
