@@ -1171,6 +1171,11 @@ public:
         }
         if (active_resident_) {
             active_resident_->dirty = true;
+            perf::record_renderer_dirty_area(
+                static_cast<uint64_t>(packet.fixture_clip_width) *
+                    packet.fixture_clip_height,
+                static_cast<uint64_t>(active_resident_->width) *
+                    active_resident_->height);
             active_resident_ = nullptr;
         }
         if (active_depth_resident_) {
@@ -1226,6 +1231,8 @@ public:
             read_pixels_(0, 0, static_cast<int>(surface->width),
                          static_cast<int>(surface->height), kGlRgba,
                          kGlUnsignedByte, rgba.data());
+            perf::record_renderer_resolve_pixels(
+                static_cast<uint64_t>(surface->width) * surface->height);
             if (get_error_() != kGlNoError) {
                 error = "OpenGL resident color readback failed";
                 return false;

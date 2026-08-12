@@ -90,6 +90,13 @@ def summarize(path: pathlib.Path) -> None:
         rd = delta_dict(r, previous_renderer) if r else {}
         rsd = delta_dict(rs, previous_resident) if rs else {}
         md = delta_dict(m, previous_memory) if m else {}
+        dirty_clip = rd.get("dirty_clip_pixels", 0)
+        dirty_surface = rd.get("dirty_surface_pixels", 0)
+        dirty_pct = (
+            f"{(100.0 * dirty_clip / dirty_surface):.1f}%"
+            if dirty_surface
+            else "-"
+        )
         previous_perf = p or previous_perf
         previous_renderer = r or previous_renderer
         previous_resident = rs or previous_resident
@@ -107,6 +114,8 @@ def summarize(path: pathlib.Path) -> None:
             f"ensure={ns_to_s(rd.get('resident_ensure_ns'))} "
             f"uploads={rsd.get('uploads', '-')} "
             f"submits={rsd.get('submits', '-')} "
+            f"dirty={dirty_pct} "
+            f"resolveMP={rd.get('resolve_pixels', 0) / 1_000_000:.1f} "
             f"texMB={md.get('generic_texture_bytes', 0) / BYTES_PER_MIB:.1f}"
         )
 

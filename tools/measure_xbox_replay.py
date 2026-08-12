@@ -95,6 +95,9 @@ PERF_RENDERER_RE = re.compile(
     r"\(n=(?P<draw_n>\d+)\) "
     r"resolve-ns=(?P<resolve_ns>\d+) "
     r"\(n=(?P<resolve_n>\d+)\)"
+    r"(?: dirty-clip-pixels=(?P<dirty_clip_pixels>\d+) "
+    r"dirty-surface-pixels=(?P<dirty_surface_pixels>\d+) "
+    r"resolve-pixels=(?P<resolve_pixels>\d+))?"
 )
 
 PERF_MEMORY_RE = re.compile(

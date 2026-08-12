@@ -72,6 +72,9 @@ inline std::atomic<uint64_t> g_calls_renderer_texture_stage{0};
 inline std::atomic<uint64_t> g_calls_renderer_vertex_upload{0};
 inline std::atomic<uint64_t> g_calls_renderer_draw{0};
 inline std::atomic<uint64_t> g_calls_renderer_resolve{0};
+inline std::atomic<uint64_t> g_renderer_dirty_clip_pixels{0};
+inline std::atomic<uint64_t> g_renderer_dirty_surface_pixels{0};
+inline std::atomic<uint64_t> g_renderer_resolve_pixels{0};
 
 inline constexpr size_t kWitnessedProfileCount = 16;
 inline constexpr std::array<const char*, kWitnessedProfileCount> kWitnessedProfileNames{{
@@ -161,6 +164,19 @@ inline void record_generic_texture_allocation(size_t bytes,
                                               std::memory_order_relaxed);
     update_peak(g_generic_texture_batch_bytes_peak,
                 static_cast<uint64_t>(batch_bytes_live));
+}
+
+inline void record_renderer_dirty_area(uint64_t clip_pixels,
+                                       uint64_t surface_pixels) {
+    if (!g_enabled) return;
+    g_renderer_dirty_clip_pixels.fetch_add(clip_pixels, std::memory_order_relaxed);
+    g_renderer_dirty_surface_pixels.fetch_add(surface_pixels,
+                                              std::memory_order_relaxed);
+}
+
+inline void record_renderer_resolve_pixels(uint64_t pixels) {
+    if (!g_enabled) return;
+    g_renderer_resolve_pixels.fetch_add(pixels, std::memory_order_relaxed);
 }
 
 inline void record_pfifo_queue_push() {
@@ -263,12 +279,14 @@ inline std::string format_memory_report() {
 
 inline std::string format_renderer_report() {
     if (!g_enabled) return {};
-    char buf[512];
+    char buf[768];
     std::snprintf(
         buf, sizeof(buf),
         "[perf-renderer] resident-ensure-ns=%llu (n=%llu) "
         "texture-stage-ns=%llu (n=%llu) vertex-upload-ns=%llu (n=%llu) "
-        "draw-ns=%llu (n=%llu) resolve-ns=%llu (n=%llu)",
+        "draw-ns=%llu (n=%llu) resolve-ns=%llu (n=%llu) "
+        "dirty-clip-pixels=%llu dirty-surface-pixels=%llu "
+        "resolve-pixels=%llu",
         (unsigned long long)g_ns_renderer_resident_ensure.load(),
         (unsigned long long)g_calls_renderer_resident_ensure.load(),
         (unsigned long long)g_ns_renderer_texture_stage.load(),
@@ -278,7 +296,10 @@ inline std::string format_renderer_report() {
         (unsigned long long)g_ns_renderer_draw.load(),
         (unsigned long long)g_calls_renderer_draw.load(),
         (unsigned long long)g_ns_renderer_resolve.load(),
-        (unsigned long long)g_calls_renderer_resolve.load());
+        (unsigned long long)g_calls_renderer_resolve.load(),
+        (unsigned long long)g_renderer_dirty_clip_pixels.load(),
+        (unsigned long long)g_renderer_dirty_surface_pixels.load(),
+        (unsigned long long)g_renderer_resolve_pixels.load());
     return std::string(buf);
 }
 
