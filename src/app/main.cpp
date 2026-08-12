@@ -1825,6 +1825,10 @@ int main(int argc, char** argv) {
                     xlle::perf::format_memory_report();
                 if (!memory_report.empty())
                     std::printf("%s\n", memory_report.c_str());
+                const std::string generic_split_report =
+                    xlle::perf::format_generic_split_report();
+                if (!generic_split_report.empty())
+                    std::printf("%s\n", generic_split_report.c_str());
                 const std::string renderer_report =
                     xlle::perf::format_renderer_report();
                 if (!renderer_report.empty())
@@ -2413,6 +2417,10 @@ int main(int argc, char** argv) {
                     std::printf("%s\n", witnessed_profile_report.c_str());
                 const std::string memory_report = xlle::perf::format_memory_report();
                 if (!memory_report.empty()) std::printf("%s\n", memory_report.c_str());
+                const std::string generic_split_report =
+                    xlle::perf::format_generic_split_report();
+                if (!generic_split_report.empty())
+                    std::printf("%s\n", generic_split_report.c_str());
                 const std::string renderer_report =
                     xlle::perf::format_renderer_report();
                 if (!renderer_report.empty())
@@ -2446,6 +2454,10 @@ int main(int argc, char** argv) {
                     xlle::perf::format_memory_report();
                 if (!memory_report.empty())
                     std::printf("%s\n", memory_report.c_str());
+                const std::string generic_split_report =
+                    xlle::perf::format_generic_split_report();
+                if (!generic_split_report.empty())
+                    std::printf("%s\n", generic_split_report.c_str());
                 const std::string renderer_report =
                     xlle::perf::format_renderer_report();
                 if (!renderer_report.empty())

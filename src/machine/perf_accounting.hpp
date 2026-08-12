@@ -53,6 +53,12 @@ inline std::atomic<uint64_t> g_ns_host_poll_devices{0};
 // raster_witnessed = g_ns_raster - g_ns_raster_generic.
 inline std::atomic<uint64_t> g_ns_raster_generic{0};
 inline std::atomic<uint64_t> g_calls_raster_generic{0};
+inline std::atomic<uint64_t> g_ns_generic_texture_setup{0};
+inline std::atomic<uint64_t> g_ns_generic_software_raster{0};
+inline std::atomic<uint64_t> g_ns_generic_flush{0};
+inline std::atomic<uint64_t> g_calls_generic_texture_setup{0};
+inline std::atomic<uint64_t> g_calls_generic_software_raster{0};
+inline std::atomic<uint64_t> g_calls_generic_flush{0};
 
 inline std::atomic<uint64_t> g_calls_cpu{0};
 inline std::atomic<uint64_t> g_calls_nv2a_pushbuffer{0};
@@ -274,6 +280,22 @@ inline std::string format_memory_report() {
         (unsigned long long)g_pfifo_queue_pushes.load(),
         (unsigned long long)g_pfifo_queue_entries_live.load(),
         (unsigned long long)g_pfifo_queue_entries_peak.load());
+    return std::string(buf);
+}
+
+inline std::string format_generic_split_report() {
+    if (!g_enabled) return {};
+    char buf[512];
+    std::snprintf(
+        buf, sizeof(buf),
+        "[perf-generic-split] texture-setup-ns=%llu (n=%llu) "
+        "software-raster-ns=%llu (n=%llu) flush-ns=%llu (n=%llu)",
+        (unsigned long long)g_ns_generic_texture_setup.load(),
+        (unsigned long long)g_calls_generic_texture_setup.load(),
+        (unsigned long long)g_ns_generic_software_raster.load(),
+        (unsigned long long)g_calls_generic_software_raster.load(),
+        (unsigned long long)g_ns_generic_flush.load(),
+        (unsigned long long)g_calls_generic_flush.load());
     return std::string(buf);
 }
 

@@ -154,6 +154,7 @@ def summarize(path: pathlib.Path) -> None:
     unicorn_memory = parsed.get("unicorn_memory_samples", [])
     generic_perf = parsed.get("generic_perf_samples", [])
     generic_family = parsed.get("generic_family_samples", [])
+    generic_split = parsed.get("generic_split_samples", [])
     final_frame = parsed.get("final_frame", {})
     final_mem = parsed.get("final_host_memory", {})
     final_unicorn = parsed.get("final_unicorn_memory", {})
@@ -176,6 +177,7 @@ def summarize(path: pathlib.Path) -> None:
     previous_perf = previous_renderer = previous_resident = previous_memory = None
     previous_generic_perf = None
     previous_generic_family = None
+    previous_generic_split = None
     previous_unicorn_memory = None
     for index, frame in enumerate(frames):
         p = sample_for_deadline(perf, index)
@@ -185,11 +187,13 @@ def summarize(path: pathlib.Path) -> None:
         ucm = sample_for_deadline(unicorn_memory, index)
         gp = sample_for_deadline(generic_perf, index)
         gf = sample_for_deadline(generic_family, index)
+        gs = sample_for_deadline(generic_split, index)
         pd = delta_dict(p, previous_perf) if p else {}
         rd = delta_dict(r, previous_renderer) if r else {}
         rsd = delta_dict(rs, previous_resident) if rs else {}
         md = delta_dict(m, previous_memory) if m else {}
         ucmd = delta_dict(ucm, previous_unicorn_memory) if ucm else {}
+        gsd = delta_dict(gs, previous_generic_split) if gs else {}
         dirty_clip = rd.get("dirty_clip_pixels", 0)
         dirty_surface = rd.get("dirty_surface_pixels", 0)
         dirty_pct = (
@@ -202,6 +206,7 @@ def summarize(path: pathlib.Path) -> None:
         previous_resident = rs or previous_resident
         previous_memory = m or previous_memory
         previous_unicorn_memory = ucm or previous_unicorn_memory
+        previous_generic_split = gs or previous_generic_split
         generic_delta = generic_top_delta(gp, previous_generic_perf)
         family_delta = generic_family_delta(gf, previous_generic_family)
         previous_generic_perf = gp or previous_generic_perf
@@ -215,6 +220,9 @@ def summarize(path: pathlib.Path) -> None:
             f"push={ns_to_s(pd.get('nv2a_pushbuffer_ns'))} "
             f"rast={ns_to_s(pd.get('raster_ns'))} "
             f"gen={ns_to_s(pd.get('raster_generic_ns'))} "
+            f"gsetup={ns_to_s(gsd.get('texture_setup_ns'))} "
+            f"gsoft={ns_to_s(gsd.get('software_raster_ns'))} "
+            f"gflush={ns_to_s(gsd.get('flush_ns'))} "
             f"resolv={ns_to_s(rd.get('resolve_ns'))} "
             f"ensure={ns_to_s(rd.get('resident_ensure_ns'))} "
             f"uploads={rsd.get('uploads', '-')} "

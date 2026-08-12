@@ -124,6 +124,16 @@ PERF_MEMORY_RE = re.compile(
     r"pfifo-queue-entries-peak=(?P<pfifo_queue_entries_peak>\d+)"
 )
 
+PERF_GENERIC_SPLIT_RE = re.compile(
+    r"^\[perf-generic-split\] "
+    r"texture-setup-ns=(?P<texture_setup_ns>\d+) "
+    r"\(n=(?P<texture_setup_n>\d+)\) "
+    r"software-raster-ns=(?P<software_raster_ns>\d+) "
+    r"\(n=(?P<software_raster_n>\d+)\) "
+    r"flush-ns=(?P<flush_ns>\d+) "
+    r"\(n=(?P<flush_n>\d+)\)"
+)
+
 PERF_WITNESSED_PROFILE_RE = re.compile(r"^\[perf-witnessed-profile\] top=(?P<top>.*)$")
 
 PERF_GENERIC_RE = re.compile(
@@ -376,6 +386,7 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
     unicorn_memory_samples: list[dict[str, Any]] = []
     renderer_samples: list[dict[str, Any]] = []
     perf_memory_samples: list[dict[str, Any]] = []
+    generic_split_samples: list[dict[str, Any]] = []
     witnessed_profile_samples: list[list[dict[str, Any]]] = []
     generic_perf_samples: list[dict[str, Any]] = []
     generic_family_samples: list[dict[str, Any]] = []
@@ -409,6 +420,8 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
             renderer_samples.append(parse_int_fields(match))
         elif match := PERF_MEMORY_RE.match(line):
             perf_memory_samples.append(parse_int_fields(match))
+        elif match := PERF_GENERIC_SPLIT_RE.match(line):
+            generic_split_samples.append(parse_int_fields(match))
         elif match := PERF_WITNESSED_PROFILE_RE.match(line):
             witnessed_profile_samples.append(parse_witnessed_profiles(match.group("top")))
         elif match := PERF_GENERIC_RE.match(line):
@@ -451,6 +464,10 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
         "final_renderer": renderer_samples[-1] if renderer_samples else None,
         "perf_memory_samples": perf_memory_samples,
         "final_perf_memory": perf_memory_samples[-1] if perf_memory_samples else None,
+        "generic_split_samples": generic_split_samples,
+        "final_generic_split": (
+            generic_split_samples[-1] if generic_split_samples else None
+        ),
         "witnessed_profile_samples": witnessed_profile_samples,
         "final_witnessed_profiles": (
             witnessed_profile_samples[-1] if witnessed_profile_samples else None

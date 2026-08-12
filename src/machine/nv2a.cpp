@@ -6473,7 +6473,11 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         }
         return true;
     };
-    for (uint32_t stage = 0; stage < 4; ++stage) {
+    {
+        perf::ScopedAdd texture_setup_timer(
+            perf::g_ns_generic_texture_setup,
+            perf::g_calls_generic_texture_setup);
+        for (uint32_t stage = 0; stage < 4; ++stage) {
         if (!texture_referenced[stage]) continue;
         if ((raster_state_[kRasterTextureEnableMask] & (1u << stage)) == 0) {
             record_generic_skip_detail(GenericSkipReason::kTextureStage, stage);
@@ -6674,6 +6678,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 GenericSkipReason::kUnsupportedTextureShaderProgram,
                 (static_cast<uint64_t>(stage_mode) << 8) | stage);
             return true;
+        }
         }
     }
     const bool only_texture0_input =
@@ -8905,40 +8910,54 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         }
     };
 
-    const size_t vertex_count = transformed_batch_.size();
-    if (primitive_mode_ == 5) {
-        for (size_t i = 0; i + 2 < vertex_count; i += 3)
-            rasterize_triangle(transformed_batch_[i], transformed_batch_[i + 1],
-                              transformed_batch_[i + 2]);
-    } else if (primitive_mode_ == 6) {
-        for (size_t i = 2; i < vertex_count; ++i) {
-            if ((i & 1u) == 0)
-                rasterize_triangle(transformed_batch_[i - 2], transformed_batch_[i - 1],
-                                  transformed_batch_[i]);
-            else
-                rasterize_triangle(transformed_batch_[i - 1], transformed_batch_[i - 2],
+    {
+        perf::ScopedAdd software_raster_timer(
+            perf::g_ns_generic_software_raster,
+            perf::g_calls_generic_software_raster);
+        const size_t vertex_count = transformed_batch_.size();
+        if (primitive_mode_ == 5) {
+            for (size_t i = 0; i + 2 < vertex_count; i += 3)
+                rasterize_triangle(transformed_batch_[i],
+                                  transformed_batch_[i + 1],
+                                  transformed_batch_[i + 2]);
+        } else if (primitive_mode_ == 6) {
+            for (size_t i = 2; i < vertex_count; ++i) {
+                if ((i & 1u) == 0)
+                    rasterize_triangle(transformed_batch_[i - 2],
+                                      transformed_batch_[i - 1],
+                                      transformed_batch_[i]);
+                else
+                    rasterize_triangle(transformed_batch_[i - 1],
+                                      transformed_batch_[i - 2],
+                                      transformed_batch_[i]);
+            }
+        } else {
+            for (size_t i = 2; i < vertex_count; ++i)
+                rasterize_triangle(transformed_batch_[0],
+                                  transformed_batch_[i - 1],
                                   transformed_batch_[i]);
         }
-    } else {
-        for (size_t i = 2; i < vertex_count; ++i)
-            rasterize_triangle(transformed_batch_[0], transformed_batch_[i - 1],
-                              transformed_batch_[i]);
     }
 
     if (raster_failed) {
         record_generic_fingerprint_perf();
         return false;
     }
-    if (!color_surface.flush()) {
-        fault_("NV2A generic-combiner color DMA write failed");
-        record_generic_fingerprint_perf();
-        return false;
-    }
-    invalidate_renderer_color_overlap(color_address, static_cast<size_t>(color_bytes64));
-    if (uses_depth && !depth_surface.flush()) {
-        fault_("NV2A generic-combiner zeta DMA write failed");
-        record_generic_fingerprint_perf();
-        return false;
+    {
+        perf::ScopedAdd flush_timer(perf::g_ns_generic_flush,
+                                    perf::g_calls_generic_flush);
+        if (!color_surface.flush()) {
+            fault_("NV2A generic-combiner color DMA write failed");
+            record_generic_fingerprint_perf();
+            return false;
+        }
+        invalidate_renderer_color_overlap(color_address,
+                                          static_cast<size_t>(color_bytes64));
+        if (uses_depth && !depth_surface.flush()) {
+            fault_("NV2A generic-combiner zeta DMA write failed");
+            record_generic_fingerprint_perf();
+            return false;
+        }
     }
     if (uses_depth && raster_state_[kRasterDepthMask] != 0)
         invalidate_renderer_depth_overlap(depth_address,
