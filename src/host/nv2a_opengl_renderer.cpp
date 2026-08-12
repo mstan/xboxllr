@@ -376,7 +376,7 @@ void main() {
         float df = blend_factor(blend_dst, src);
         vec3 rgb = clamp(src.rgb * sf + current.rgb * df, 0.0, 1.0);
         float alpha = color_format_x8 != 0u ? 1.0 : src.a;
-        current = vec4(rgb, alpha);
+        current = unpack_argb(pack_argb(vec4(rgb, alpha)));
         covered = true;
     }
     if (covered) color[offset] = pack_argb(current);
@@ -1505,12 +1505,10 @@ public:
                     packet.vertices[vertex].texture[0][2];
                 vertex_data[vertex * 8u + 7u] =
                     packet.vertices[vertex].position[3];
-                xy_data[vertex * 2u + 0u] = static_cast<int32_t>(std::lround(
-                    static_cast<double>(packet.vertices[vertex].position[0]) *
-                    16.0));
-                xy_data[vertex * 2u + 1u] = static_cast<int32_t>(std::lround(
-                    static_cast<double>(packet.vertices[vertex].position[1]) *
-                    16.0));
+                xy_data[vertex * 2u + 0u] = static_cast<int32_t>(
+                    std::llround(packet.vertices[vertex].position[0] * 16.0f));
+                xy_data[vertex * 2u + 1u] = static_cast<int32_t>(
+                    std::llround(packet.vertices[vertex].position[1] * 16.0f));
             }
             upload_buffer(0, buffers[0], packet.color_input.data(),
                           packet.color_input.size());

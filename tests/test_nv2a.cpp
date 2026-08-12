@@ -8282,7 +8282,6 @@ int main() {
             resident.fixture_color_format_x8 = true;
             resident.fixture_texture_passthrough = false;
 
-            const auto original_vertices = resident.vertices;
             const bool cull_enabled =
                 (resident.raster_state[xlle::Nv2a::kRasterEnables] & (1u << 2)) != 0;
             const bool cull_front =
@@ -8526,7 +8525,6 @@ int main() {
                 if (compute_probe) {
                     resident.compute_fixture = xlle::Nv2aGenericCombinerPacket::
                         ComputeFixture::kTextureModulateTriangle;
-                    resident.vertices = original_vertices;
                     CHECK(gl_renderer->supports_generic_combiner(resident));
                     CHECK(gl_renderer->submit_generic_combiner(
                         resident, result, gl_error));
@@ -8550,6 +8548,9 @@ int main() {
                 CHECK(actual_color.size() == expected_color.size());
                 size_t mismatches = 0;
                 std::array<size_t, 4> channel_mismatches{};
+                std::array<size_t, 4> positive_deltas{};
+                std::array<size_t, 4> negative_deltas{};
+                std::array<size_t, 4> one_lsb_deltas{};
                 size_t beyond_one_lsb = 0;
                 int max_abs_delta = 0;
                 size_t pixel_mismatches = 0;
@@ -8567,6 +8568,9 @@ int main() {
                             static_cast<int>(expected_color[i]);
                         const int abs_delta = std::abs(delta);
                         if (abs_delta > 1) ++beyond_one_lsb;
+                        if (abs_delta == 1) ++one_lsb_deltas[i & 3u];
+                        if (delta > 0) ++positive_deltas[i & 3u];
+                        if (delta < 0) ++negative_deltas[i & 3u];
                         max_abs_delta = std::max(max_abs_delta, abs_delta);
                     }
                     if ((i & 3u) == 3u) {
@@ -8594,7 +8598,8 @@ int main() {
                     "safe_tris=%zu behind=%zu mixed=%zu degenerate=%zu "
                     "clipped_out=%zu clipped_tris=%zu mismatches=%zu "
                     "pixels=%zu ch=%zu/%zu/%zu/%zu gt1=%zu maxd=%d first=%zu "
-                    "got=%08x expected=%08x\n",
+                    "got=%08x expected=%08x pos=%zu/%zu/%zu/%zu "
+                    "neg=%zu/%zu/%zu/%zu one=%zu/%zu/%zu/%zu\n",
                     static_cast<unsigned long long>(fingerprint),
                     static_cast<unsigned long long>(full_hash),
                     static_cast<unsigned long long>(candidate),
@@ -8603,7 +8608,11 @@ int main() {
                     channel_mismatches[0], channel_mismatches[1],
                     channel_mismatches[2], channel_mismatches[3],
                     beyond_one_lsb, max_abs_delta, first_mismatch, got_word,
-                    expected_word);
+                    expected_word, positive_deltas[0], positive_deltas[1],
+                    positive_deltas[2], positive_deltas[3], negative_deltas[0],
+                    negative_deltas[1], negative_deltas[2], negative_deltas[3],
+                    one_lsb_deltas[0], one_lsb_deltas[1], one_lsb_deltas[2],
+                    one_lsb_deltas[3]);
                 if (std::getenv("XLLE_HOTPACKET_PROBE_REQUIRE_EXACT"))
                     CHECK(mismatches == 0);
             }
