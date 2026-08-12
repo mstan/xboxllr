@@ -6434,6 +6434,55 @@ int main() {
             CHECK(e_fault.empty());
             const uint32_t e_dxt1_pixel = get32(e_ram, 0x10000u + e_offset);
             CHECK(e_dxt1_pixel == 0x00000000u);
+
+            // The stock dashboard also emits a one-stage TEXTURE0/CONSTANT0
+            // variant whose combiner alpha is statically zero. With GEQUAL 1
+            // alpha test enabled, no covered fragment can write; keep this as a
+            // batch-level no-op instead of sampling/rasterizing every pixel.
+            put32(e_ram, 0x10000u + e_offset, 0xCAFEBABEu);
+            const uint64_t e_zero_alpha_batches =
+                e_gpu.generic_combiner_batches();
+            const uint64_t e_zero_alpha_executed =
+                e_gpu.generic_combiner_executed_batches();
+            const uint64_t e_zero_alpha_fragments =
+                e_gpu.generic_combiner_fragments();
+            const uint64_t e_zero_alpha_samples =
+                e_gpu.generic_combiner_texture_samples();
+            const uint64_t e_zero_alpha_writes =
+                e_gpu.generic_combiner_writes();
+            emit_e(0x0300, 1);            // alpha test enabled
+            emit_e(0x033C, 0x0206);       // GEQUAL
+            emit_e(0x0340, 1);            // ref 1
+            emit_e(0x0AC0, 0x08010000);   // ColorIcw0: TEXTURE0 * CONSTANT0
+            emit_e(0x0260, 0x11200000);   // AlphaIcw0: CONSTANT0.a * !ZERO
+            emit_e(0x1E40, 0x00000C00);   // ColorOcw0: SUM -> R0
+            emit_e(0x0AA0, 0x00000C00);   // AlphaOcw0: SUM -> R0
+            emit_e(0x0A60, 0x00A0FF40);   // CONSTANT0 alpha = 0
+            emit_e(0x0A80, 0x00A0FF40);
+            emit_e(0x17FC, 5);
+            for (int v = 0; v < 3; ++v) {
+                emit_e(0x1A90, e_float_bits(2.5f));
+                emit_e(0x1A94, e_float_bits(2.5f));
+                emit_e(0x1A98, e_float_bits(0.0f));
+                emit_e(0x1A9C, e_float_bits(1.0f));
+                emit_e(0x1518, e_float_bits(ex[v]));
+                emit_e(0x151C, e_float_bits(ey[v]));
+                emit_e(0x1520, e_float_bits(10.0f));
+                emit_e(0x194C, e_pack_ub4(0x30, 0x50, 0x70, 0xFF));
+                emit_e(0x1524, e_float_bits(1.0f));
+            }
+            emit_e(0x17FC, 0);
+            kick_e();
+            CHECK(e_fault.empty());
+            CHECK(e_gpu.generic_combiner_batches() == e_zero_alpha_batches + 1);
+            CHECK(e_gpu.generic_combiner_executed_batches() ==
+                  e_zero_alpha_executed + 1);
+            CHECK(e_gpu.generic_combiner_fragments() ==
+                  e_zero_alpha_fragments);
+            CHECK(e_gpu.generic_combiner_texture_samples() ==
+                  e_zero_alpha_samples);
+            CHECK(e_gpu.generic_combiner_writes() == e_zero_alpha_writes);
+            CHECK(get32(e_ram, 0x10000u + e_offset) == 0xCAFEBABEu);
         }
 
         // --- (e2) Exact witnessed dashboard present fingerprint: the dashboard binds

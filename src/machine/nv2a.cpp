@@ -6065,6 +6065,14 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     const bool depth_test_enabled_bit = (enables & (1u << 3)) != 0;
     const uint32_t alpha_func = raster_state_[kRasterAlphaFunc];
     const uint32_t depth_func = raster_state_[kRasterDepthFunc];
+    const uint32_t alpha_ref = raster_state_[kRasterAlphaRef] & 0xFFu;
+    const bool zero_alpha_gequal_noop =
+        alpha_test_enabled && alpha_func == 0x0206 && alpha_ref != 0 &&
+        stage_count == 1 &&
+        raster_state_[kRasterCombinerAlphaIcw0] == 0x11200000 &&
+        raster_state_[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
+        ((raster_state_[kRasterCombinerFactor0_0] >> 24) & 0xFFu) == 0 &&
+        final_cw0 == 0x0000000C && final_cw1 == 0x00001C80;
     if (alpha_test_enabled && !compare_supported(alpha_func)) {
         record_generic_skip_detail(GenericSkipReason::kAlphaFunc, alpha_func);
         return true;
@@ -8042,6 +8050,68 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     uint32_t ymin = effective_clip_y;
     uint32_t ymax = effective_ymax;
     if (!effective_clip_valid) {
+        record_generic_fingerprint_perf();
+        return true;
+    }
+    if (zero_alpha_gequal_noop) {
+        if (generic_batch_debug_cb_) {
+            GenericBatchDebugInfo info;
+            info.batch = generic_batch_index;
+            info.fingerprint = generic_batch_fingerprint;
+            info.full_state_hash = generic_batch_full_hash;
+            info.color_address = color_address;
+            info.pitch = pitch;
+            info.width = pitch / 4u;
+            info.height = surface_height;
+            info.surface_format = surface_format_;
+            info.shader_stage_program = raster_state_[kRasterShaderStageProgram];
+            info.combiner_control = raster_state_[kRasterCombinerControl];
+            info.alpha_func = raster_state_[kRasterAlphaFunc];
+            info.alpha_ref = alpha_ref;
+            info.blend_src = raster_state_[kRasterBlendSrc];
+            info.blend_dst = raster_state_[kRasterBlendDst];
+            info.blend_equation = raster_state_[kRasterBlendEquation];
+            info.depth_func = raster_state_[kRasterDepthFunc];
+            info.depth_mask = raster_state_[kRasterDepthMask];
+            info.texture_enable_mask = raster_state_[kRasterTextureEnableMask];
+            info.primitive_mode = primitive_mode_;
+            info.vertex_count = static_cast<uint32_t>(std::min<size_t>(
+                transformed_batch_.size(), std::numeric_limits<uint32_t>::max()));
+            info.texture_modulate_observed = texture_modulate_observed_this_batch;
+            info.texture_modulate_exact = texture_modulate_exact_this_batch;
+            info.texture_modulate_reject =
+                texture_modulate_reject_this_batch == GenericTextureModulateRejectReason::kCount
+                    ? UINT32_MAX
+                    : static_cast<uint32_t>(texture_modulate_reject_this_batch);
+            generic_batch_debug_cb_(info);
+        }
+        if (surface_write_debug_cb_) {
+            SurfaceWriteDebugInfo info;
+            info.kind = "generic-alpha-noop";
+            info.sequence = generic_batch_index;
+            info.fingerprint = generic_batch_fingerprint;
+            info.full_state_hash = generic_batch_full_hash;
+            info.color_address = color_address;
+            info.pitch = pitch;
+            info.width = pitch / 4u;
+            info.height = surface_height;
+            info.surface_format = surface_format_;
+            info.shader_stage_program = raster_state_[kRasterShaderStageProgram];
+            info.combiner_control = raster_state_[kRasterCombinerControl];
+            info.alpha_func = raster_state_[kRasterAlphaFunc];
+            info.alpha_ref = alpha_ref;
+            info.blend_src = raster_state_[kRasterBlendSrc];
+            info.blend_dst = raster_state_[kRasterBlendDst];
+            info.blend_equation = raster_state_[kRasterBlendEquation];
+            info.depth_func = raster_state_[kRasterDepthFunc];
+            info.depth_mask = raster_state_[kRasterDepthMask];
+            info.texture_enable_mask = raster_state_[kRasterTextureEnableMask];
+            info.primitive_mode = primitive_mode_;
+            info.vertex_count = static_cast<uint32_t>(std::min<size_t>(
+                transformed_batch_.size(), std::numeric_limits<uint32_t>::max()));
+            surface_write_debug_cb_(info);
+        }
+        ++generic_combiner_executed_batches_;
         record_generic_fingerprint_perf();
         return true;
     }
