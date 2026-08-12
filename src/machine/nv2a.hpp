@@ -84,6 +84,14 @@ public:
         uint32_t surface_format = 0;
         uint32_t shader_stage_program = 0;
         uint32_t combiner_control = 0;
+        uint32_t alpha_func = 0;
+        uint32_t alpha_ref = 0;
+        uint32_t blend_src = 0;
+        uint32_t blend_dst = 0;
+        uint32_t blend_equation = 0;
+        uint32_t depth_func = 0;
+        uint32_t depth_mask = 0;
+        uint32_t texture_enable_mask = 0;
         uint32_t primitive_mode = 0;
         uint32_t vertex_count = 0;
         bool texture_modulate_observed = false;
@@ -107,9 +115,21 @@ public:
         uint32_t surface_format = 0;
         uint32_t shader_stage_program = 0;
         uint32_t combiner_control = 0;
+        uint32_t alpha_func = 0;
+        uint32_t alpha_ref = 0;
+        uint32_t blend_src = 0;
+        uint32_t blend_dst = 0;
+        uint32_t blend_equation = 0;
+        uint32_t depth_func = 0;
+        uint32_t depth_mask = 0;
+        uint32_t texture_enable_mask = 0;
         uint32_t primitive_mode = 0;
         uint32_t vertex_count = 0;
         uint32_t profile = 0;
+        uint32_t debug_vertex_count = 0;
+        std::array<std::array<float, 4>, 4> debug_position{};
+        std::array<std::array<float, 4>, 4> debug_diffuse{};
+        std::array<std::array<float, 4>, 4> debug_tex0{};
     };
     void on_surface_write_complete(std::function<void(const SurfaceWriteDebugInfo&)> cb) {
         surface_write_debug_cb_ = std::move(cb);
@@ -1182,6 +1202,10 @@ public:
     ScanoutInfo scanout_info() const;
     bool capture_scanout(std::vector<uint8_t>& rgba, ScanoutInfo& info,
                          std::string& error);
+    bool debug_resolve_color_surface(uint32_t address, size_t size,
+                                     const char* context) {
+        return resolve_renderer_color_overlap(address, size, context);
+    }
     uint64_t scanout_writes() const { return scanout_writes_; }
     uint64_t scanout_nonzero_writes() const { return scanout_nonzero_writes_; }
     uint32_t last_nonzero_scanout_start() const { return last_nonzero_scanout_start_; }

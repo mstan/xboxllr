@@ -5541,6 +5541,14 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         info.surface_format = surface_format_;
         info.shader_stage_program = raster_state_[kRasterShaderStageProgram];
         info.combiner_control = raster_state_[kRasterCombinerControl];
+        info.alpha_func = raster_state_[kRasterAlphaFunc];
+        info.alpha_ref = raster_state_[kRasterAlphaRef] & 0xFFu;
+        info.blend_src = raster_state_[kRasterBlendSrc];
+        info.blend_dst = raster_state_[kRasterBlendDst];
+        info.blend_equation = raster_state_[kRasterBlendEquation];
+        info.depth_func = raster_state_[kRasterDepthFunc];
+        info.depth_mask = raster_state_[kRasterDepthMask];
+        info.texture_enable_mask = raster_state_[kRasterTextureEnableMask];
         info.primitive_mode = primitive_mode_;
         info.vertex_count = static_cast<uint32_t>(std::min<size_t>(
             transformed_batch_.size(), std::numeric_limits<uint32_t>::max()));
@@ -6215,6 +6223,24 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             return false;
         }
     }
+    uint32_t effective_xmin = clip_x;
+    uint32_t effective_xmax = clip_x + clip_width - 1;
+    uint32_t effective_ymin = clip_y;
+    uint32_t effective_ymax = clip_y + clip_height - 1;
+    const uint32_t window_x = raster_state_[kRasterWindowClipHorizontal];
+    const uint32_t window_y = raster_state_[kRasterWindowClipVertical];
+    effective_xmin = std::max(effective_xmin, window_x & 0xFFFu);
+    effective_xmax = std::min(effective_xmax, (window_x >> 16) & 0xFFFu);
+    effective_ymin = std::max(effective_ymin, window_y & 0xFFFu);
+    effective_ymax = std::min(effective_ymax, (window_y >> 16) & 0xFFFu);
+    const bool effective_clip_valid =
+        effective_xmax >= effective_xmin && effective_ymax >= effective_ymin;
+    const uint32_t effective_clip_x = effective_clip_valid ? effective_xmin : 0;
+    const uint32_t effective_clip_y = effective_clip_valid ? effective_ymin : 0;
+    const uint32_t effective_clip_width =
+        effective_clip_valid ? (effective_xmax - effective_xmin + 1u) : 0;
+    const uint32_t effective_clip_height =
+        effective_clip_valid ? (effective_ymax - effective_ymin + 1u) : 0;
     // --- Texture stages 0-3 ------------------------------------------------------
     // Only stages a combiner input actually reads are set up. Per-stage texture mode
     // is a real 5-bit field (matching xemu's pgraph_glsl_gen_psh() exactly:
@@ -6678,7 +6704,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     bool resident_exact_this_batch = false;
     GenericResidentRejectReason resident_reject_this_batch =
         GenericResidentRejectReason::kCount;
-    if (renderer_) {
+    if (renderer_ && effective_clip_valid) {
         Nv2aGenericCombinerPacket packet;
         packet.primitive_mode = primitive_mode_;
         packet.surface_format = surface_format_;
@@ -6783,10 +6809,10 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             if (positions_representable) {
                 packet.compute_fixture =
                     Nv2aGenericCombinerPacket::ComputeFixture::kUntexturedPrimaryTriangle;
-                packet.fixture_clip_x = clip_x;
-                packet.fixture_clip_y = clip_y;
-                packet.fixture_clip_width = clip_width;
-                packet.fixture_clip_height = clip_height;
+                packet.fixture_clip_x = effective_clip_x;
+                packet.fixture_clip_y = effective_clip_y;
+                packet.fixture_clip_width = effective_clip_width;
+                packet.fixture_clip_height = effective_clip_height;
                 packet.fixture_source_argb =
                     (pack_component(diffuse[3]) << 24) |
                     (pack_component(diffuse[0]) << 16) |
@@ -6899,10 +6925,10 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     raster_state_[kRasterCombinerFactor0_0 + 2];
                 packet.fixture_factor0_stage4_argb =
                     raster_state_[kRasterCombinerFactor0_0 + 4];
-                packet.fixture_clip_x = clip_x;
-                packet.fixture_clip_y = clip_y;
-                packet.fixture_clip_width = clip_width;
-                packet.fixture_clip_height = clip_height;
+                packet.fixture_clip_x = effective_clip_x;
+                packet.fixture_clip_y = effective_clip_y;
+                packet.fixture_clip_width = effective_clip_width;
+                packet.fixture_clip_height = effective_clip_height;
                 packet.fixture_blend_enabled = blend_enabled;
                 packet.fixture_blend_src = blend_src;
                 packet.fixture_blend_dst = blend_dst;
@@ -7073,10 +7099,10 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     packet.primitive_mode = 5;
                     packet.compute_fixture = Nv2aGenericCombinerPacket::
                         ComputeFixture::kResidentPrimaryColorTriangles;
-                    packet.fixture_clip_x = clip_x;
-                    packet.fixture_clip_y = clip_y;
-                    packet.fixture_clip_width = clip_width;
-                    packet.fixture_clip_height = clip_height;
+                    packet.fixture_clip_x = effective_clip_x;
+                    packet.fixture_clip_y = effective_clip_y;
+                    packet.fixture_clip_width = effective_clip_width;
+                    packet.fixture_clip_height = effective_clip_height;
                     packet.fixture_blend_enabled = blend_enabled;
                     packet.fixture_blend_src = blend_src;
                     packet.fixture_blend_dst = blend_dst;
@@ -7328,10 +7354,10 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     if (finite_vertices) {
                         packet.compute_fixture = Nv2aGenericCombinerPacket::
                             ComputeFixture::kTextureModulateTriangle;
-                        packet.fixture_clip_x = clip_x;
-                        packet.fixture_clip_y = clip_y;
-                        packet.fixture_clip_width = clip_width;
-                        packet.fixture_clip_height = clip_height;
+                        packet.fixture_clip_x = effective_clip_x;
+                        packet.fixture_clip_y = effective_clip_y;
+                        packet.fixture_clip_width = effective_clip_width;
+                        packet.fixture_clip_height = effective_clip_height;
                         packet.fixture_blend_enabled = blend_enabled;
                         packet.fixture_blend_src = blend_src;
                         packet.fixture_blend_dst = blend_dst;
@@ -7411,10 +7437,10 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                         packet.primitive_mode = 5;
                         packet.compute_fixture = Nv2aGenericCombinerPacket::
                             ComputeFixture::kResidentTextureModulateTriangles;
-                        packet.fixture_clip_x = clip_x;
-                        packet.fixture_clip_y = clip_y;
-                        packet.fixture_clip_width = clip_width;
-                        packet.fixture_clip_height = clip_height;
+                        packet.fixture_clip_x = effective_clip_x;
+                        packet.fixture_clip_y = effective_clip_y;
+                        packet.fixture_clip_width = effective_clip_width;
+                        packet.fixture_clip_height = effective_clip_height;
                         packet.fixture_blend_enabled = blend_enabled;
                         packet.fixture_blend_src = blend_src;
                         packet.fixture_blend_dst = blend_dst;
@@ -7441,6 +7467,25 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                                           kResidentTextureModulateTriangles ||
             packet.compute_fixture == Nv2aGenericCombinerPacket::ComputeFixture::
                                           kDashboardProject2dFan;
+        uint64_t debug_batch_fingerprint = 1469598103934665603ull;
+        for (uint32_t index = kRasterShaderStageProgram;
+             index <= kRasterCombinerFinalFactor1; ++index) {
+            debug_batch_fingerprint ^= raster_state_[index];
+            debug_batch_fingerprint *= 1099511628211ull;
+        }
+        const uint64_t debug_batch_full_hash =
+            fnv1a_bytes(raster_state_.data(), sizeof(raster_state_));
+        auto fill_surface_write_vertex_debug =
+            [](SurfaceWriteDebugInfo& info,
+               const std::vector<Nv2aGenericCombinerVertex>& vertices) {
+                info.debug_vertex_count = static_cast<uint32_t>(
+                    std::min<size_t>(vertices.size(), info.debug_position.size()));
+                for (uint32_t index = 0; index < info.debug_vertex_count; ++index) {
+                    info.debug_position[index] = vertices[index].position;
+                    info.debug_diffuse[index] = vertices[index].diffuse;
+                    info.debug_tex0[index] = vertices[index].texture[0];
+                }
+            };
         if (renderer_->supports_resident_generic_combiner(packet)) {
             ++generic_combiner_resident_supported_;
             const size_t color_size = static_cast<size_t>(color_bytes64);
@@ -7515,6 +7560,37 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             generic_combiner_triangles_ += result.triangles;
             generic_combiner_fragments_ += result.fragments;
             generic_combiner_writes_ += result.writes;
+            if (surface_write_debug_cb_) {
+                SurfaceWriteDebugInfo info;
+                info.kind = "resident-generic";
+                info.sequence = generic_combiner_batches_;
+                info.fragments = result.fragments;
+                info.writes = result.writes;
+                info.fingerprint = debug_batch_fingerprint;
+                info.full_state_hash = debug_batch_full_hash;
+                info.color_address = color_address;
+                info.pitch = pitch;
+                info.width = pitch / 4u;
+                info.height = surface_height;
+                info.surface_format = surface_format_;
+                info.shader_stage_program =
+                    raster_state_[kRasterShaderStageProgram];
+                info.combiner_control = raster_state_[kRasterCombinerControl];
+                info.alpha_func = raster_state_[kRasterAlphaFunc];
+                info.alpha_ref = raster_state_[kRasterAlphaRef] & 0xFFu;
+                info.blend_src = raster_state_[kRasterBlendSrc];
+                info.blend_dst = raster_state_[kRasterBlendDst];
+                info.blend_equation = raster_state_[kRasterBlendEquation];
+                info.depth_func = raster_state_[kRasterDepthFunc];
+                info.depth_mask = raster_state_[kRasterDepthMask];
+                info.texture_enable_mask = raster_state_[kRasterTextureEnableMask];
+                info.primitive_mode = primitive_mode_;
+                info.vertex_count = static_cast<uint32_t>(std::min<size_t>(
+                    transformed_batch_.size(),
+                    std::numeric_limits<uint32_t>::max()));
+                fill_surface_write_vertex_debug(info, packet.vertices);
+                surface_write_debug_cb_(info);
+            }
             ++generic_combiner_executed_batches_;
             return true;
         } else if (resident_packet) {
@@ -7584,6 +7660,37 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             generic_combiner_triangles_ += result.triangles;
             generic_combiner_fragments_ += result.fragments;
             generic_combiner_writes_ += result.writes;
+            if (surface_write_debug_cb_) {
+                SurfaceWriteDebugInfo info;
+                info.kind = "accelerated-generic";
+                info.sequence = generic_combiner_batches_;
+                info.fragments = result.fragments;
+                info.writes = result.writes;
+                info.fingerprint = debug_batch_fingerprint;
+                info.full_state_hash = debug_batch_full_hash;
+                info.color_address = color_address;
+                info.pitch = pitch;
+                info.width = pitch / 4u;
+                info.height = surface_height;
+                info.surface_format = surface_format_;
+                info.shader_stage_program =
+                    raster_state_[kRasterShaderStageProgram];
+                info.combiner_control = raster_state_[kRasterCombinerControl];
+                info.alpha_func = raster_state_[kRasterAlphaFunc];
+                info.alpha_ref = raster_state_[kRasterAlphaRef] & 0xFFu;
+                info.blend_src = raster_state_[kRasterBlendSrc];
+                info.blend_dst = raster_state_[kRasterBlendDst];
+                info.blend_equation = raster_state_[kRasterBlendEquation];
+                info.depth_func = raster_state_[kRasterDepthFunc];
+                info.depth_mask = raster_state_[kRasterDepthMask];
+                info.texture_enable_mask = raster_state_[kRasterTextureEnableMask];
+                info.primitive_mode = primitive_mode_;
+                info.vertex_count = static_cast<uint32_t>(std::min<size_t>(
+                    transformed_batch_.size(),
+                    std::numeric_limits<uint32_t>::max()));
+                fill_surface_write_vertex_debug(info, packet.vertices);
+                surface_write_debug_cb_(info);
+            }
             ++generic_combiner_executed_batches_;
             return true;
         }
@@ -7700,17 +7807,11 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                      generic_batch_bbox_pixels);
     };
 
-    uint32_t xmin = clip_x;
-    uint32_t xmax = clip_x + clip_width - 1;
-    uint32_t ymin = clip_y;
-    uint32_t ymax = clip_y + clip_height - 1;
-    const uint32_t window_x = raster_state_[kRasterWindowClipHorizontal];
-    const uint32_t window_y = raster_state_[kRasterWindowClipVertical];
-    xmin = std::max(xmin, window_x & 0xFFFu);
-    xmax = std::min(xmax, (window_x >> 16) & 0xFFFu);
-    ymin = std::max(ymin, window_y & 0xFFFu);
-    ymax = std::min(ymax, (window_y >> 16) & 0xFFFu);
-    if (xmax < xmin || ymax < ymin) {
+    uint32_t xmin = effective_clip_x;
+    uint32_t xmax = effective_xmax;
+    uint32_t ymin = effective_clip_y;
+    uint32_t ymax = effective_ymax;
+    if (!effective_clip_valid) {
         record_generic_fingerprint_perf();
         return true;
     }
@@ -8546,6 +8647,14 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         info.surface_format = surface_format_;
         info.shader_stage_program = raster_state_[kRasterShaderStageProgram];
         info.combiner_control = raster_state_[kRasterCombinerControl];
+        info.alpha_func = raster_state_[kRasterAlphaFunc];
+        info.alpha_ref = raster_state_[kRasterAlphaRef] & 0xFFu;
+        info.blend_src = raster_state_[kRasterBlendSrc];
+        info.blend_dst = raster_state_[kRasterBlendDst];
+        info.blend_equation = raster_state_[kRasterBlendEquation];
+        info.depth_func = raster_state_[kRasterDepthFunc];
+        info.depth_mask = raster_state_[kRasterDepthMask];
+        info.texture_enable_mask = raster_state_[kRasterTextureEnableMask];
         info.primitive_mode = primitive_mode_;
         info.vertex_count = static_cast<uint32_t>(std::min<size_t>(
             transformed_batch_.size(), std::numeric_limits<uint32_t>::max()));
@@ -8572,6 +8681,14 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         info.surface_format = surface_format_;
         info.shader_stage_program = raster_state_[kRasterShaderStageProgram];
         info.combiner_control = raster_state_[kRasterCombinerControl];
+        info.alpha_func = raster_state_[kRasterAlphaFunc];
+        info.alpha_ref = raster_state_[kRasterAlphaRef] & 0xFFu;
+        info.blend_src = raster_state_[kRasterBlendSrc];
+        info.blend_dst = raster_state_[kRasterBlendDst];
+        info.blend_equation = raster_state_[kRasterBlendEquation];
+        info.depth_func = raster_state_[kRasterDepthFunc];
+        info.depth_mask = raster_state_[kRasterDepthMask];
+        info.texture_enable_mask = raster_state_[kRasterTextureEnableMask];
         info.primitive_mode = primitive_mode_;
         info.vertex_count = static_cast<uint32_t>(std::min<size_t>(
             transformed_batch_.size(), std::numeric_limits<uint32_t>::max()));

@@ -339,6 +339,12 @@ bool capture_argb32_surface(XboxMachine& mach, uint32_t address, uint32_t pitch,
         error = "surface exceeds unified RAM";
         return false;
     }
+    if (mach.nv2a() &&
+        !mach.nv2a()->debug_resolve_color_surface(
+            address, static_cast<size_t>(source_size), "debug surface capture")) {
+        error = "resident surface resolve failed";
+        return false;
+    }
     std::vector<uint8_t> source(static_cast<size_t>(source_size));
     if (!mach.read(address, source.data(), source.size())) {
         error = "surface guest-memory read failed";
@@ -380,6 +386,7 @@ int main(int argc, char** argv) {
     const char* debug_surface_dump = nullptr;
     const char* debug_generic_surface_snapshot_prefix = nullptr;
     const char* debug_nv2a_surface_snapshot_prefix = nullptr;
+    bool debug_nv2a_surface_events = false;
     const char* frame_series_prefix = nullptr;
     const char* test_input_capture_prefix = nullptr;
     const char* test_input_script = nullptr;
@@ -400,6 +407,10 @@ int main(int argc, char** argv) {
     uint64_t debug_nv2a_surface_snapshot_skip = 0;
     uint64_t debug_nv2a_surface_snapshot_count = 0;
     uint64_t debug_nv2a_surface_snapshot_interval = 1;
+    uint32_t debug_nv2a_surface_event_address = 0;
+    uint64_t debug_nv2a_surface_event_skip = 0;
+    uint64_t debug_nv2a_surface_event_count = 0;
+    uint64_t debug_nv2a_surface_event_interval = 1;
     size_t perf_generic_top_limit = 12;
     uint64_t max_insns = 128ull * 1000 * 1000;  // 2BL kernel LZX decompress needs tens of M
     for (int i = 1; i < argc; ++i) {
@@ -527,6 +538,26 @@ int main(int argc, char** argv) {
                 std::fprintf(
                     stderr,
                     "[host] --debug-nv2a-surface-snapshots expects prefix, 32-bit addr, and positive count/interval\n");
+                return 1;
+            }
+        }
+        else if (!std::strcmp(argv[i], "--debug-nv2a-surface-events")) {
+            if (i + 4 >= argc) {
+                std::fprintf(
+                    stderr,
+                    "[host] use --debug-nv2a-surface-events <addr> <skip> <count> <interval>\n");
+                return 1;
+            }
+            debug_nv2a_surface_events = true;
+            if (!parse_u32_arg(argv[++i], debug_nv2a_surface_event_address) ||
+                !parse_u64_arg(argv[++i], debug_nv2a_surface_event_skip) ||
+                !parse_u64_arg(argv[++i], debug_nv2a_surface_event_count) ||
+                !parse_u64_arg(argv[++i], debug_nv2a_surface_event_interval) ||
+                debug_nv2a_surface_event_count == 0 ||
+                debug_nv2a_surface_event_interval == 0) {
+                std::fprintf(
+                    stderr,
+                    "[host] --debug-nv2a-surface-events expects 32-bit addr and positive count/interval\n");
                 return 1;
             }
         }
@@ -924,18 +955,92 @@ int main(int argc, char** argv) {
                     static_cast<unsigned long long>(
                         debug_generic_surface_snapshot_interval));
             }
-            if (debug_nv2a_surface_snapshot_prefix && mach.nv2a()) {
+            if ((debug_nv2a_surface_snapshot_prefix || debug_nv2a_surface_events) &&
+                mach.nv2a()) {
                 uint64_t matched_events = 0;
                 uint64_t written_snapshots = 0;
+                uint64_t logged_events = 0;
                 bool snapshot_failure_logged = false;
                 mach.nv2a()->on_surface_write_complete(
-                    [&, matched_events, written_snapshots,
+                    [&, matched_events, written_snapshots, logged_events,
                      snapshot_failure_logged](const Nv2a::SurfaceWriteDebugInfo& info)
                         mutable {
-                            if (info.color_address !=
-                                debug_nv2a_surface_snapshot_address)
+                            const bool snapshot_target =
+                                debug_nv2a_surface_snapshot_prefix &&
+                                info.color_address ==
+                                    debug_nv2a_surface_snapshot_address;
+                            const bool event_target =
+                                debug_nv2a_surface_events &&
+                                info.color_address ==
+                                    debug_nv2a_surface_event_address;
+                            if (!snapshot_target && !event_target)
                                 return;
                             ++matched_events;
+                            if (event_target) {
+                                const bool event_after_skip =
+                                    matched_events > debug_nv2a_surface_event_skip;
+                                const bool event_on_interval =
+                                    event_after_skip &&
+                                    ((matched_events -
+                                      debug_nv2a_surface_event_skip - 1) %
+                                         debug_nv2a_surface_event_interval ==
+                                     0);
+                                if (event_on_interval &&
+                                    logged_events <
+                                        debug_nv2a_surface_event_count) {
+                                    ++logged_events;
+                                    std::printf(
+                                        "[debug-nv2a-surface-event] kind=%s "
+                                        "target=%08x event=%llu seq=%llu profile=%u "
+                                        "fp=%016llx full=%016llx prim=%u verts=%u "
+                                        "sfmt=%08x shader=%08x comb=%08x "
+                                        "alpha=%x/%02x blend=%x/%x/%x "
+                                        "depth=%x/%x texen=%x "
+                                        "frags=%llu writes=%llu\n",
+                                        info.kind, info.color_address,
+                                        static_cast<unsigned long long>(matched_events),
+                                        static_cast<unsigned long long>(info.sequence),
+                                        info.profile,
+                                        static_cast<unsigned long long>(info.fingerprint),
+                                        static_cast<unsigned long long>(
+                                            info.full_state_hash),
+                                        info.primitive_mode, info.vertex_count,
+                                        info.surface_format,
+                                        info.shader_stage_program,
+                                        info.combiner_control,
+                                        info.alpha_func, info.alpha_ref,
+                                        info.blend_src, info.blend_dst,
+                                        info.blend_equation, info.depth_func,
+                                        info.depth_mask, info.texture_enable_mask,
+                                        static_cast<unsigned long long>(info.fragments),
+                                        static_cast<unsigned long long>(info.writes));
+                                    for (uint32_t vertex = 0;
+                                         vertex < info.debug_vertex_count; ++vertex) {
+                                        std::printf(
+                                            "[debug-nv2a-surface-event-vertex] "
+                                            "event=%llu v=%u "
+                                            "pos=%g,%g,%g,%g "
+                                            "diff=%g,%g,%g,%g "
+                                            "tex0=%g,%g,%g,%g\n",
+                                            static_cast<unsigned long long>(
+                                                matched_events),
+                                            vertex,
+                                            info.debug_position[vertex][0],
+                                            info.debug_position[vertex][1],
+                                            info.debug_position[vertex][2],
+                                            info.debug_position[vertex][3],
+                                            info.debug_diffuse[vertex][0],
+                                            info.debug_diffuse[vertex][1],
+                                            info.debug_diffuse[vertex][2],
+                                            info.debug_diffuse[vertex][3],
+                                            info.debug_tex0[vertex][0],
+                                            info.debug_tex0[vertex][1],
+                                            info.debug_tex0[vertex][2],
+                                            info.debug_tex0[vertex][3]);
+                                    }
+                                }
+                            }
+                            if (!snapshot_target) return;
                             const bool after_skip =
                                 matched_events > debug_nv2a_surface_snapshot_skip;
                             const bool on_interval =
@@ -976,6 +1081,8 @@ int main(int argc, char** argv) {
                                     "target=%08x event=%llu seq=%llu profile=%u "
                                     "fp=%016llx full=%016llx prim=%u verts=%u "
                                     "sfmt=%08x shader=%08x comb=%08x "
+                                    "alpha=%x/%02x blend=%x/%x/%x "
+                                    "depth=%x/%x texen=%x "
                                     "frags=%llu writes=%llu hash=%016llx\n",
                                     path, info.kind, info.color_address,
                                     static_cast<unsigned long long>(matched_events),
@@ -987,6 +1094,10 @@ int main(int argc, char** argv) {
                                     info.surface_format,
                                     info.shader_stage_program,
                                     info.combiner_control,
+                                    info.alpha_func, info.alpha_ref,
+                                    info.blend_src, info.blend_dst,
+                                    info.blend_equation, info.depth_func,
+                                    info.depth_mask, info.texture_enable_mask,
                                     static_cast<unsigned long long>(info.fragments),
                                     static_cast<unsigned long long>(info.writes),
                                     static_cast<unsigned long long>(
@@ -1019,6 +1130,18 @@ int main(int argc, char** argv) {
                         debug_nv2a_surface_snapshot_count),
                     static_cast<unsigned long long>(
                         debug_nv2a_surface_snapshot_interval));
+            }
+            if (debug_nv2a_surface_events && mach.nv2a()) {
+                std::printf(
+                    "[host] NV2A surface events armed: target=%08x skip=%llu "
+                    "count=%llu interval=%llu\n",
+                    debug_nv2a_surface_event_address,
+                    static_cast<unsigned long long>(
+                        debug_nv2a_surface_event_skip),
+                    static_cast<unsigned long long>(
+                        debug_nv2a_surface_event_count),
+                    static_cast<unsigned long long>(
+                        debug_nv2a_surface_event_interval));
             }
             if (hdd) {
                 if (!mach.attach_hdd(hdd)) {
