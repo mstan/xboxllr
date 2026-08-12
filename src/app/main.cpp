@@ -398,6 +398,146 @@ bool dump_guest_memory(XboxMachine& mach, const char* path, uint32_t address,
     return true;
 }
 
+bool write_generic_packet_dump(const char* path,
+                               const Nv2a::GenericPacketDebugInfo& info,
+                               const Nv2aGenericCombinerPacket& packet,
+                               std::string& error) {
+    if (!path || !path[0]) {
+        error = "empty output path";
+        return false;
+    }
+    std::ofstream out(path, std::ios::binary);
+    if (!out) {
+        error = "output open failed";
+        return false;
+    }
+    auto write_bytes = [&](const void* data, size_t size) {
+        if (size == 0) return true;
+        out.write(reinterpret_cast<const char*>(data),
+                  static_cast<std::streamsize>(size));
+        return out.good();
+    };
+    auto write_u8 = [&](uint8_t value) { return write_bytes(&value, sizeof(value)); };
+    auto write_u32 = [&](uint32_t value) {
+        return write_bytes(&value, sizeof(value));
+    };
+    auto write_u64 = [&](uint64_t value) {
+        return write_bytes(&value, sizeof(value));
+    };
+    auto write_i32 = [&](int32_t value) {
+        return write_bytes(&value, sizeof(value));
+    };
+    auto write_float = [&](float value) {
+        return write_bytes(&value, sizeof(value));
+    };
+    auto write_vec = [&](const std::vector<uint8_t>& bytes) {
+        return write_u64(static_cast<uint64_t>(bytes.size())) &&
+               write_bytes(bytes.data(), bytes.size());
+    };
+    auto write_float4 = [&](const std::array<float, 4>& values) {
+        for (float value : values) {
+            if (!write_float(value)) return false;
+        }
+        return true;
+    };
+    auto write_vertex = [&](const Nv2aGenericCombinerVertex& vertex) {
+        if (!write_float4(vertex.position) || !write_float4(vertex.diffuse) ||
+            !write_float4(vertex.specular)) {
+            return false;
+        }
+        for (const auto& tex : vertex.texture) {
+            if (!write_float4(tex)) return false;
+        }
+        return true;
+    };
+
+    const char magic[8] = {'X', 'L', 'L', 'E', 'G', 'P', 'B', '1'};
+    if (!write_bytes(magic, sizeof(magic)) || !write_u32(1) ||
+        !write_u64(info.candidate) || !write_u64(info.fingerprint) ||
+        !write_u64(info.full_state_hash) || !write_u32(info.color_address) ||
+        !write_u32(info.depth_address) || !write_u32(info.pitch) ||
+        !write_u32(info.width) || !write_u32(info.height) ||
+        !write_u32(info.surface_format) ||
+        !write_u32(info.shader_stage_program) ||
+        !write_u32(info.combiner_control) ||
+        !write_u32(info.texture_enable_mask) ||
+        !write_u32(info.primitive_mode) || !write_u32(info.vertex_count)) {
+        error = "debug metadata write failed";
+        return false;
+    }
+    if (!write_u8(packet.primitive_mode) ||
+        !write_u32(packet.surface_format) ||
+        !write_u32(packet.surface_pitch) ||
+        !write_u32(packet.surface_height) ||
+        !write_u32(packet.color_address) ||
+        !write_u32(packet.depth_address) ||
+        !write_u8(static_cast<uint8_t>(packet.compute_fixture)) ||
+        !write_u32(packet.fixture_clip_x) ||
+        !write_u32(packet.fixture_clip_y) ||
+        !write_u32(packet.fixture_clip_width) ||
+        !write_u32(packet.fixture_clip_height)) {
+        error = "packet header write failed";
+        return false;
+    }
+    for (int32_t value : packet.fixture_xy_16) {
+        if (!write_i32(value)) {
+            error = "fixture xy write failed";
+            return false;
+        }
+    }
+    if (!write_u32(packet.fixture_source_argb) ||
+        !write_u32(packet.fixture_constant_argb) ||
+        !write_u32(packet.fixture_factor0_stage2_argb) ||
+        !write_u32(packet.fixture_factor0_stage4_argb) ||
+        !write_u32(packet.fixture_blend_src) ||
+        !write_u32(packet.fixture_blend_dst) ||
+        !write_u32(packet.fixture_depth_func) ||
+        !write_u8(packet.fixture_blend_enabled ? 1 : 0) ||
+        !write_u8(packet.fixture_depth_test_enabled ? 1 : 0) ||
+        !write_u8(packet.fixture_depth_write_enabled ? 1 : 0) ||
+        !write_u8(packet.fixture_texture_passthrough ? 1 : 0) ||
+        !write_u8(packet.fixture_texture_constant_color_alpha ? 1 : 0) ||
+        !write_u8(packet.fixture_color_format_x8 ? 1 : 0) ||
+        !write_u64(static_cast<uint64_t>(packet.vertices.size()))) {
+        error = "fixture fields write failed";
+        return false;
+    }
+    for (const auto& vertex : packet.vertices) {
+        if (!write_vertex(vertex)) {
+            error = "vertex write failed";
+            return false;
+        }
+    }
+    if (!write_u64(static_cast<uint64_t>(packet.raster_state.size())) ||
+        !write_bytes(packet.raster_state.data(),
+                     packet.raster_state.size() * sizeof(uint32_t))) {
+        error = "raster-state write failed";
+        return false;
+    }
+    for (const auto& texture : packet.textures) {
+        if (!write_u8(texture.referenced ? 1 : 0) ||
+            !write_u8(static_cast<uint8_t>(texture.layout)) ||
+            !write_u8(static_cast<uint8_t>(texture.format)) ||
+            !write_u8(static_cast<uint8_t>(texture.mode)) ||
+            !write_u32(texture.width) || !write_u32(texture.height) ||
+            !write_u32(texture.pitch) || !write_u32(texture.address_mode) ||
+            !write_u32(texture.border_color) || !write_vec(texture.input)) {
+            error = "texture write failed";
+            return false;
+        }
+    }
+    if (!write_vec(packet.color_input) || !write_vec(packet.depth_input)) {
+        error = "surface snapshot write failed";
+        return false;
+    }
+    if (!out.good()) {
+        error = "output write failed";
+        return false;
+    }
+    error.clear();
+    return true;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -419,6 +559,7 @@ int main(int argc, char** argv) {
     const char* debug_surface_dump = nullptr;
     const char* debug_memory_dump = nullptr;
     const char* debug_generic_surface_snapshot_prefix = nullptr;
+    const char* debug_generic_packet_dump = nullptr;
     const char* debug_nv2a_surface_snapshot_prefix = nullptr;
     bool debug_nv2a_surface_events = false;
     const char* frame_series_prefix = nullptr;
@@ -439,6 +580,9 @@ int main(int argc, char** argv) {
     uint64_t debug_generic_surface_snapshot_skip = 0;
     uint64_t debug_generic_surface_snapshot_count = 0;
     uint64_t debug_generic_surface_snapshot_interval = 1;
+    uint64_t debug_generic_packet_dump_fingerprint = 0;
+    uint64_t debug_generic_packet_dump_full_hash = 0;
+    uint64_t debug_generic_packet_dump_skip = 0;
     uint32_t debug_nv2a_surface_snapshot_address = 0;
     uint64_t debug_nv2a_surface_snapshot_skip = 0;
     uint64_t debug_nv2a_surface_snapshot_count = 0;
@@ -576,6 +720,26 @@ int main(int argc, char** argv) {
                 std::fprintf(
                     stderr,
                     "[host] --debug-generic-surface-snapshots expects prefix, 32-bit addr, and positive count/interval\n");
+                return 1;
+            }
+        }
+        else if (!std::strcmp(argv[i], "--debug-generic-packet-dump")) {
+            if (i + 4 >= argc) {
+                std::fprintf(
+                    stderr,
+                    "[host] use --debug-generic-packet-dump <path> <fingerprint-or-0> <full-hash-or-0> <skip>\n");
+                return 1;
+            }
+            debug_generic_packet_dump = argv[++i];
+            if (!debug_generic_packet_dump[0] ||
+                !parse_u64_arg(argv[++i],
+                               debug_generic_packet_dump_fingerprint) ||
+                !parse_u64_arg(argv[++i],
+                               debug_generic_packet_dump_full_hash) ||
+                !parse_u64_arg(argv[++i], debug_generic_packet_dump_skip)) {
+                std::fprintf(
+                    stderr,
+                    "[host] --debug-generic-packet-dump expects path, two 64-bit hash filters (0=wildcard), and skip count\n");
                 return 1;
             }
         }
@@ -1034,6 +1198,85 @@ int main(int argc, char** argv) {
                         debug_generic_surface_snapshot_count),
                     static_cast<unsigned long long>(
                         debug_generic_surface_snapshot_interval));
+            }
+            if (debug_generic_packet_dump && mach.nv2a()) {
+                auto matched_packets = std::make_shared<uint64_t>(0);
+                auto wrote_packet = std::make_shared<bool>(false);
+                mach.nv2a()->on_generic_packet_snapshot(
+                    [=](const Nv2a::GenericPacketDebugInfo& info) mutable {
+                        if (*wrote_packet) return false;
+                        if (debug_generic_packet_dump_fingerprint != 0 &&
+                            info.fingerprint !=
+                                debug_generic_packet_dump_fingerprint) {
+                            return false;
+                        }
+                        if (debug_generic_packet_dump_full_hash != 0 &&
+                            info.full_state_hash !=
+                                debug_generic_packet_dump_full_hash) {
+                            return false;
+                        }
+                        ++(*matched_packets);
+                        return *matched_packets >
+                               debug_generic_packet_dump_skip;
+                    },
+                    [=](const Nv2a::GenericPacketDebugInfo& info,
+                        const Nv2aGenericCombinerPacket& packet) mutable {
+                        std::string error;
+                        const bool ok = write_generic_packet_dump(
+                            debug_generic_packet_dump, info, packet, error);
+                        if (ok) {
+                            *wrote_packet = true;
+                            std::printf(
+                                "[debug-generic-packet] wrote %s candidate=%llu "
+                                "match=%llu fp=%016llx full=%016llx target=%08x "
+                                "prim=%u verts=%u sfmt=%08x shader=%08x "
+                                "comb=%08x textures=%u color_bytes=%llu "
+                                "depth_bytes=%llu\n",
+                                debug_generic_packet_dump,
+                                static_cast<unsigned long long>(info.candidate),
+                                static_cast<unsigned long long>(*matched_packets),
+                                static_cast<unsigned long long>(info.fingerprint),
+                                static_cast<unsigned long long>(
+                                    info.full_state_hash),
+                                info.color_address, info.primitive_mode,
+                                info.vertex_count, info.surface_format,
+                                info.shader_stage_program, info.combiner_control,
+                                static_cast<unsigned>(
+                                    std::count_if(
+                                        packet.textures.begin(),
+                                        packet.textures.end(),
+                                        [](const auto& texture) {
+                                            return texture.referenced;
+                                        })),
+                                static_cast<unsigned long long>(
+                                    packet.color_input.size()),
+                                static_cast<unsigned long long>(
+                                    packet.depth_input.size()));
+                        } else {
+                            std::printf(
+                                "[debug-generic-packet] FAILED %s candidate=%llu "
+                                "fp=%016llx full=%016llx%s%s%s\n",
+                                debug_generic_packet_dump,
+                                static_cast<unsigned long long>(info.candidate),
+                                static_cast<unsigned long long>(info.fingerprint),
+                                static_cast<unsigned long long>(
+                                    info.full_state_hash),
+                                error.empty() ? "" : " (",
+                                error.empty() ? "" : error.c_str(),
+                                error.empty() ? "" : ")");
+                        }
+                        return ok;
+                    });
+                std::printf(
+                    "[host] generic packet dump armed: path=%s fp=%016llx "
+                    "full=%016llx skip=%llu\n",
+                    debug_generic_packet_dump,
+                    static_cast<unsigned long long>(
+                        debug_generic_packet_dump_fingerprint),
+                    static_cast<unsigned long long>(
+                        debug_generic_packet_dump_full_hash),
+                    static_cast<unsigned long long>(
+                        debug_generic_packet_dump_skip));
             }
             if ((debug_nv2a_surface_snapshot_prefix || debug_nv2a_surface_events) &&
                 mach.nv2a()) {

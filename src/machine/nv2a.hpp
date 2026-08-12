@@ -103,6 +103,29 @@ public:
     void on_generic_batch_complete(std::function<void(const GenericBatchDebugInfo&)> cb) {
         generic_batch_debug_cb_ = std::move(cb);
     }
+    struct GenericPacketDebugInfo {
+        uint64_t candidate = 0;
+        uint64_t fingerprint = 0;
+        uint64_t full_state_hash = 0;
+        uint32_t color_address = 0;
+        uint32_t depth_address = 0;
+        uint32_t pitch = 0;
+        uint32_t width = 0;
+        uint32_t height = 0;
+        uint32_t surface_format = 0;
+        uint32_t shader_stage_program = 0;
+        uint32_t combiner_control = 0;
+        uint32_t texture_enable_mask = 0;
+        uint32_t primitive_mode = 0;
+        uint32_t vertex_count = 0;
+    };
+    void on_generic_packet_snapshot(
+        std::function<bool(const GenericPacketDebugInfo&)> filter,
+        std::function<bool(const GenericPacketDebugInfo&,
+                           const Nv2aGenericCombinerPacket&)> cb) {
+        generic_packet_snapshot_filter_cb_ = std::move(filter);
+        generic_packet_snapshot_cb_ = std::move(cb);
+    }
     struct SurfaceWriteDebugInfo {
         const char* kind = "";
         uint64_t sequence = 0;
@@ -1689,6 +1712,11 @@ private:
     std::array<uint32_t, kRasterStateWords> raster_state_{};
     Nv2aRenderer* renderer_ = nullptr;  // owned by the host/application layer
     std::function<void(const GenericBatchDebugInfo&)> generic_batch_debug_cb_;
+    std::function<bool(const GenericPacketDebugInfo&)>
+        generic_packet_snapshot_filter_cb_;
+    std::function<bool(const GenericPacketDebugInfo&,
+                       const Nv2aGenericCombinerPacket&)>
+        generic_packet_snapshot_cb_;
     std::function<void(const SurfaceWriteDebugInfo&)> surface_write_debug_cb_;
     std::vector<RasterStateSample> raster_state_samples_;
     uint32_t current_raster_state_sample_index_ = UINT32_MAX;

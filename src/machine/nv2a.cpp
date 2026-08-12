@@ -7618,6 +7618,63 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     info.debug_tex0[index] = vertices[index].texture[0];
                 }
             };
+        if (generic_packet_snapshot_filter_cb_ &&
+            generic_packet_snapshot_cb_) {
+            GenericPacketDebugInfo info;
+            info.candidate = generic_combiner_attempted_batches_;
+            info.fingerprint = debug_batch_fingerprint;
+            info.full_state_hash = debug_batch_full_hash;
+            info.color_address = color_address;
+            info.depth_address = depth_address;
+            info.pitch = pitch;
+            info.width = pitch / 4u;
+            info.height = surface_height;
+            info.surface_format = surface_format_;
+            info.shader_stage_program = raster_state_[kRasterShaderStageProgram];
+            info.combiner_control = raster_state_[kRasterCombinerControl];
+            info.texture_enable_mask = raster_state_[kRasterTextureEnableMask];
+            info.primitive_mode = primitive_mode_;
+            info.vertex_count = static_cast<uint32_t>(std::min<size_t>(
+                transformed_batch_.size(), std::numeric_limits<uint32_t>::max()));
+            if (generic_packet_snapshot_filter_cb_(info)) {
+                Nv2aGenericCombinerPacket snapshot = packet;
+                if (!resolve_renderer_color_overlap(
+                        color_address, static_cast<size_t>(color_bytes64),
+                        "debug generic packet color snapshot")) {
+                    return false;
+                }
+                snapshot.color_input.resize(static_cast<size_t>(color_bytes64));
+                if (!mem_read_ ||
+                    !mem_read_(color_address, snapshot.color_input.data(),
+                               snapshot.color_input.size())) {
+                    fault_("NV2A debug generic packet color DMA read failed");
+                    return false;
+                }
+                if (uses_depth) {
+                    if (!resolve_renderer_depth_overlap(
+                            depth_address, static_cast<size_t>(depth_bytes64),
+                            "debug generic packet zeta snapshot")) {
+                        return false;
+                    }
+                    snapshot.depth_input.resize(static_cast<size_t>(depth_bytes64));
+                    if (!mem_read_ ||
+                        !mem_read_(depth_address, snapshot.depth_input.data(),
+                                   snapshot.depth_input.size())) {
+                        fault_("NV2A debug generic packet zeta DMA read failed");
+                        return false;
+                    }
+                }
+                for (uint32_t stage = 0; stage < snapshot.textures.size(); ++stage) {
+                    if (snapshot.textures[stage].referenced)
+                        snapshot.textures[stage].input =
+                            texture_stages[stage].data;
+                }
+                if (!generic_packet_snapshot_cb_(info, snapshot)) {
+                    fault_("NV2A debug generic packet snapshot callback failed");
+                    return false;
+                }
+            }
+        }
         if (resident_noop_batch) {
             executed = true;
             ++generic_combiner_accelerated_batches_;
