@@ -60,6 +60,7 @@ public:
     bool write32(size_t offset, uint32_t value) {
         return access(offset, value, true);
     }
+    uint8_t* direct_data() const { return direct_base_; }
 
     bool flush() {
         if (direct_base_) return true;
@@ -3885,6 +3886,29 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
     PagedRasterSurface color_surface(
         color_address, static_cast<size_t>(color_bytes64),
         mem_read_, mem_write_, mem_direct_);
+    uint8_t* const depth_direct = depth_surface.direct_data();
+    uint8_t* const color_direct = color_surface.direct_data();
+    auto read_depth32 = [&](size_t offset, uint32_t& value) {
+        if (depth_direct) {
+            std::memcpy(&value, depth_direct + offset, sizeof(value));
+            return true;
+        }
+        return depth_surface.read32(offset, value);
+    };
+    auto write_depth32 = [&](size_t offset, uint32_t value) {
+        if (depth_direct) {
+            std::memcpy(depth_direct + offset, &value, sizeof(value));
+            return true;
+        }
+        return depth_surface.write32(offset, value);
+    };
+    auto write_color32 = [&](size_t offset, uint32_t value) {
+        if (color_direct) {
+            std::memcpy(color_direct + offset, &value, sizeof(value));
+            return true;
+        }
+        return color_surface.write32(offset, value);
+    };
     std::unique_ptr<SwizzleLookup> surface_swizzle;
     if (profile == Profile::kSwizzledRadialColor ||
         profile == Profile::kSwizzledTexturedColor ||
@@ -5219,7 +5243,7 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                     const uint32_t incoming = static_cast<uint32_t>(
                         std::floor(std::clamp(depth, 0.0f, 16777215.0f)));
                     uint32_t stored_depth_stencil = 0;
-                    if (!depth_surface.read32(offset, stored_depth_stencil)) {
+                    if (!read_depth32(offset, stored_depth_stencil)) {
                         fault_("NV2A color zeta DMA read failed");
                         raster_failed = true;
                         return;
@@ -5442,8 +5466,8 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                     const uint32_t depth_stencil =
                         (incoming << 8) | (stored_depth_stencil & 0xFFu);
 
-                    if (!color_surface.write32(offset, color) ||
-                        !depth_surface.write32(offset, depth_stencil)) {
+                    if (!write_color32(offset, color) ||
+                        !write_depth32(offset, depth_stencil)) {
                         fault_("NV2A color raster cache write failed");
                         raster_failed = true;
                         return;

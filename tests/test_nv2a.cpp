@@ -192,6 +192,10 @@ int main() {
             if (addr + n > ram.size()) return false;
             std::memcpy(ram.data() + addr, src, n);
             return true;
+        },
+        [&](uint32_t addr, size_t n) -> uint8_t* {
+            if (addr + n > ram.size()) return nullptr;
+            return ram.data() + addr;
         });
 
     // RAMHT handle 0 resolves to PRAMIN DMA object @0x100, which maps unified RAM @0x3000.
