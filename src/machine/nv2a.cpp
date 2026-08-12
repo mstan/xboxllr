@@ -3059,6 +3059,9 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         return rasterize_generic_combiner_batch(executed);
     }
     executed = true;
+    perf::ScopedAdd witnessed_profile_timer(
+        perf::g_ns_witnessed_profile[static_cast<size_t>(profile)],
+        perf::g_calls_witnessed_profile[static_cast<size_t>(profile)]);
     const bool pitch_tex5_profile =
         profile == Profile::kPitchTex5ProjectedColor ||
         profile == Profile::kPitchTex5DiffuseColor;

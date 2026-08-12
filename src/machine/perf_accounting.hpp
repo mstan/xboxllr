@@ -29,6 +29,8 @@
 //                         This bucket IS disjoint from the other three.
 #pragma once
 #include <atomic>
+#include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -70,6 +72,30 @@ inline std::atomic<uint64_t> g_calls_renderer_texture_stage{0};
 inline std::atomic<uint64_t> g_calls_renderer_vertex_upload{0};
 inline std::atomic<uint64_t> g_calls_renderer_draw{0};
 inline std::atomic<uint64_t> g_calls_renderer_resolve{0};
+
+inline constexpr size_t kWitnessedProfileCount = 16;
+inline constexpr std::array<const char*, kWitnessedProfileCount> kWitnessedProfileNames{{
+    "none",
+    "pitch-z16-depth",
+    "swizzled-radial-color",
+    "swizzled-textured-color",
+    "pitch-textured-color",
+    "swizzled-projected-color",
+    "pitch-projected-color",
+    "pitch-multi-texture-color",
+    "pitch-three-texture-color",
+    "pitch-tex5-projected-color",
+    "pitch-tex5-diffuse-color",
+    "inline-linear-blit-color",
+    "pitch-single-texture-color",
+    "tex7-fan-color",
+    "texf-projected-fan-color",
+    "pitch-additive-color",
+}};
+inline std::array<std::atomic<uint64_t>, kWitnessedProfileCount>
+    g_ns_witnessed_profile{};
+inline std::array<std::atomic<uint64_t>, kWitnessedProfileCount>
+    g_calls_witnessed_profile{};
 
 // Allocation-churn accounting for the late stock-dashboard scene. PagedRasterSurface
 // owns one small allocation per resident 4 KiB guest page, while the generic combiner
@@ -254,6 +280,37 @@ inline std::string format_renderer_report() {
         (unsigned long long)g_ns_renderer_resolve.load(),
         (unsigned long long)g_calls_renderer_resolve.load());
     return std::string(buf);
+}
+
+inline std::string format_witnessed_profile_report() {
+    if (!g_enabled) return {};
+    std::string out = "[perf-witnessed-profile] top=";
+    struct Entry {
+        uint64_t ns = 0;
+        uint64_t calls = 0;
+        size_t index = 0;
+    };
+    std::array<Entry, kWitnessedProfileCount> entries{};
+    for (size_t index = 0; index < kWitnessedProfileCount; ++index) {
+        entries[index] = {g_ns_witnessed_profile[index].load(),
+                          g_calls_witnessed_profile[index].load(), index};
+    }
+    std::sort(entries.begin(), entries.end(),
+              [](const Entry& a, const Entry& b) { return a.ns > b.ns; });
+    bool any = false;
+    for (const Entry& entry : entries) {
+        if (entry.ns == 0 && entry.calls == 0) continue;
+        if (any) out += " ";
+        char buf[160];
+        std::snprintf(buf, sizeof(buf), "%s:ns%llu/n%llu",
+                      kWitnessedProfileNames[entry.index],
+                      (unsigned long long)entry.ns,
+                      (unsigned long long)entry.calls);
+        out += buf;
+        any = true;
+    }
+    if (!any) out += "none";
+    return out;
 }
 
 }  // namespace xlle::perf

@@ -1504,6 +1504,10 @@ int main(int argc, char** argv) {
                 const std::string perf_report = xlle::perf::format_report();
                 if (!perf_report.empty()) std::printf("%s\n", perf_report.c_str());
                 print_generic_combiner_perf_report();
+                const std::string witnessed_profile_report =
+                    xlle::perf::format_witnessed_profile_report();
+                if (!witnessed_profile_report.empty())
+                    std::printf("%s\n", witnessed_profile_report.c_str());
                 print_resident_combiner_report();
                 const std::string memory_report =
                     xlle::perf::format_memory_report();
@@ -2091,6 +2095,10 @@ int main(int argc, char** argv) {
                 const std::string perf_report = xlle::perf::format_report();
                 if (!perf_report.empty()) std::printf("%s\n", perf_report.c_str());
                 print_generic_combiner_perf_report();
+                const std::string witnessed_profile_report =
+                    xlle::perf::format_witnessed_profile_report();
+                if (!witnessed_profile_report.empty())
+                    std::printf("%s\n", witnessed_profile_report.c_str());
                 const std::string memory_report = xlle::perf::format_memory_report();
                 if (!memory_report.empty()) std::printf("%s\n", memory_report.c_str());
                 const std::string renderer_report =
@@ -2118,6 +2126,10 @@ int main(int argc, char** argv) {
                 const std::string perf_report = xlle::perf::format_report();
                 if (!perf_report.empty()) std::printf("%s\n", perf_report.c_str());
                 print_generic_combiner_perf_report();
+                const std::string witnessed_profile_report =
+                    xlle::perf::format_witnessed_profile_report();
+                if (!witnessed_profile_report.empty())
+                    std::printf("%s\n", witnessed_profile_report.c_str());
                 const std::string memory_report =
                     xlle::perf::format_memory_report();
                 if (!memory_report.empty())

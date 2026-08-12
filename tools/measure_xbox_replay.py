@@ -115,6 +115,8 @@ PERF_MEMORY_RE = re.compile(
     r"pfifo-queue-entries-peak=(?P<pfifo_queue_entries_peak>\d+)"
 )
 
+PERF_WITNESSED_PROFILE_RE = re.compile(r"^\[perf-witnessed-profile\] top=(?P<top>.*)$")
+
 GENERIC_RE = re.compile(
     r"^\[2bl\] NV2A generic-combiner: "
     r"attempted/accelerated/fallback/software/exec/tri/frags/depth-pass/"
@@ -221,6 +223,24 @@ def parse_counter_sample(match: re.Match[str]) -> dict[str, Any]:
     return parsed
 
 
+def parse_witnessed_profiles(text: str) -> list[dict[str, Any]]:
+    if text == "none":
+        return []
+    profiles: list[dict[str, Any]] = []
+    for item in text.split():
+        match = re.match(r"^(?P<name>[^:]+):ns(?P<ns>\d+)/n(?P<calls>\d+)$", item)
+        if not match:
+            continue
+        profiles.append(
+            {
+                "name": match.group("name"),
+                "ns": int(match.group("ns")),
+                "calls": int(match.group("calls")),
+            }
+        )
+    return profiles
+
+
 def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
     frames: list[dict[str, Any]] = []
     perf_samples: list[dict[str, Any]] = []
@@ -229,6 +249,7 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
     host_memory_samples: list[dict[str, Any]] = []
     renderer_samples: list[dict[str, Any]] = []
     perf_memory_samples: list[dict[str, Any]] = []
+    witnessed_profile_samples: list[list[dict[str, Any]]] = []
     generic: dict[str, Any] | None = None
     scanout: dict[str, Any] | None = None
     retired: dict[str, Any] | None = None
@@ -257,6 +278,8 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
             renderer_samples.append(parse_int_fields(match))
         elif match := PERF_MEMORY_RE.match(line):
             perf_memory_samples.append(parse_int_fields(match))
+        elif match := PERF_WITNESSED_PROFILE_RE.match(line):
+            witnessed_profile_samples.append(parse_witnessed_profiles(match.group("top")))
         elif match := GENERIC_RE.match(line):
             generic = parse_int_fields(match)
         elif match := SCANOUT_RE.match(line):
@@ -289,6 +312,10 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
         "final_renderer": renderer_samples[-1] if renderer_samples else None,
         "perf_memory_samples": perf_memory_samples,
         "final_perf_memory": perf_memory_samples[-1] if perf_memory_samples else None,
+        "witnessed_profile_samples": witnessed_profile_samples,
+        "final_witnessed_profiles": (
+            witnessed_profile_samples[-1] if witnessed_profile_samples else None
+        ),
         "generic_combiner": generic,
         "generic_fingerprints": generic_fingerprints,
         "scanout": scanout,
