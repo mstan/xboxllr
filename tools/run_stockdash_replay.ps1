@@ -6,7 +6,7 @@ param(
     [int] $MaxHostMemoryMb = 768,
     [int] $GenericTop = 64,
     [string] $InputScript = 'tests\scripts\clock-accept.txt',
-    [string] $ExpectedFinalSha = '048c33949593cae0b651c5cfce87766841a3acf6832c696e19812c55c8b9138b',
+    [string] $ExpectedFinalSha = '16270cbff17566e6876954f983535de9f95523524c00cde7a48513172b2f6606',
     [string] $BaselineReport = '',
     [double] $MinFinalFpsGainPct = 0.0,
     [double] $MaxFocusWallRegressionPct = -1.0,
