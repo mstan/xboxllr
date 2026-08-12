@@ -8546,6 +8546,14 @@ int main() {
                     actual_color = std::move(resolve.data);
                 }
                 CHECK(actual_color.size() == expected_color.size());
+                if (const char* dump_path =
+                        std::getenv("XLLE_HOTPACKET_PROBE_DUMP_ACTUAL")) {
+                    std::ofstream out(dump_path, std::ios::binary);
+                    CHECK(out.good());
+                    out.write(reinterpret_cast<const char*>(actual_color.data()),
+                              static_cast<std::streamsize>(actual_color.size()));
+                    CHECK(out.good());
+                }
                 size_t mismatches = 0;
                 std::array<size_t, 4> channel_mismatches{};
                 std::array<size_t, 4> positive_deltas{};
@@ -8555,6 +8563,12 @@ int main() {
                 int max_abs_delta = 0;
                 size_t pixel_mismatches = 0;
                 size_t first_mismatch = expected_color.size();
+                const uint32_t probe_width =
+                    (resident.surface_pitch & 0xffffu) / sizeof(uint32_t);
+                uint32_t min_mismatch_x = UINT32_MAX;
+                uint32_t min_mismatch_y = UINT32_MAX;
+                uint32_t max_mismatch_x = 0;
+                uint32_t max_mismatch_y = 0;
                 const size_t compare_size =
                     std::min(actual_color.size(), expected_color.size());
                 for (size_t i = 0; i < compare_size; ++i) {
@@ -8572,6 +8586,16 @@ int main() {
                         if (delta > 0) ++positive_deltas[i & 3u];
                         if (delta < 0) ++negative_deltas[i & 3u];
                         max_abs_delta = std::max(max_abs_delta, abs_delta);
+                        if (probe_width != 0) {
+                            const uint32_t pixel =
+                                static_cast<uint32_t>(i / sizeof(uint32_t));
+                            const uint32_t x = pixel % probe_width;
+                            const uint32_t y = pixel / probe_width;
+                            min_mismatch_x = std::min(min_mismatch_x, x);
+                            min_mismatch_y = std::min(min_mismatch_y, y);
+                            max_mismatch_x = std::max(max_mismatch_x, x);
+                            max_mismatch_y = std::max(max_mismatch_y, y);
+                        }
                     }
                     if ((i & 3u) == 3u) {
                         const size_t pixel = i - 3u;
@@ -8597,7 +8621,8 @@ int main() {
                     "hotpacket probe fp=%016llx full=%016llx candidate=%llu "
                     "safe_tris=%zu behind=%zu mixed=%zu degenerate=%zu "
                     "clipped_out=%zu clipped_tris=%zu mismatches=%zu "
-                    "pixels=%zu ch=%zu/%zu/%zu/%zu gt1=%zu maxd=%d first=%zu "
+                    "pixels=%zu bbox=%u,%u..%u,%u "
+                    "ch=%zu/%zu/%zu/%zu gt1=%zu maxd=%d first=%zu "
                     "got=%08x expected=%08x pos=%zu/%zu/%zu/%zu "
                     "neg=%zu/%zu/%zu/%zu one=%zu/%zu/%zu/%zu\n",
                     static_cast<unsigned long long>(fingerprint),
@@ -8605,6 +8630,9 @@ int main() {
                     static_cast<unsigned long long>(candidate),
                     resident.vertices.size() / 3, behind, mixed, degenerate,
                     clipped_out, clipped_triangles, mismatches, pixel_mismatches,
+                    min_mismatch_x == UINT32_MAX ? 0 : min_mismatch_x,
+                    min_mismatch_y == UINT32_MAX ? 0 : min_mismatch_y,
+                    max_mismatch_x, max_mismatch_y,
                     channel_mismatches[0], channel_mismatches[1],
                     channel_mismatches[2], channel_mismatches[3],
                     beyond_one_lsb, max_abs_delta, first_mismatch, got_word,
