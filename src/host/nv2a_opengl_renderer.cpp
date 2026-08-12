@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <cstdlib>
 #include <string>
 #include <utility>
 #include <vector>
@@ -205,6 +206,7 @@ uniform int texture_width;
 uniform int texture_height;
 uniform int texture_pitch_words;
 uniform uint texture_swizzled;
+uniform uint texture_repeat;
 uniform uint texture_constant_color_alpha;
 uniform uint constant_argb;
 uniform int triangle_count;
@@ -213,8 +215,9 @@ uniform ivec2 clip_extent;
 uniform uint blend_src;
 uniform uint blend_dst;
 uniform uint color_format_x8;
-int edge_value(ivec2 p0, ivec2 p1, ivec2 p) {
-    return (p1.x - p0.x) * (p.y - p0.y) - (p1.y - p0.y) * (p.x - p0.x);
+double edge_value(ivec2 p0, ivec2 p1, ivec2 p) {
+    return double(p1.x - p0.x) * double(p.y - p0.y) -
+           double(p1.y - p0.y) * double(p.x - p0.x);
 }
 bool top_left(ivec2 p0, ivec2 p1) {
     int dx = p1.x - p0.x; int dy = p1.y - p0.y;
@@ -257,8 +260,15 @@ ivec2 vxy(uint vertex) {
     return ivec2(vertex_xy[vertex * 2u], vertex_xy[vertex * 2u + 1u]);
 }
 vec4 texel_argb(int x, int y) {
-    int sx = clamp(x, 0, texture_width - 1);
-    int sy = clamp(y, 0, texture_height - 1);
+    int sx = x;
+    int sy = y;
+    if (texture_repeat != 0u) {
+        sx = (sx % texture_width + texture_width) % texture_width;
+        sy = (sy % texture_height + texture_height) % texture_height;
+    } else {
+        sx = clamp(sx, 0, texture_width - 1);
+        sy = clamp(sy, 0, texture_height - 1);
+    }
     uint index = texture_swizzled != 0u
         ? swizzle_index(uint(sx), uint(sy), uint(texture_width), uint(texture_height))
         : uint(sy * texture_pitch_words + sx);
@@ -267,8 +277,15 @@ vec4 texel_argb(int x, int y) {
 vec4 sample_linear_argb(vec2 uv) {
     float raw_s = texture_swizzled != 0u ? uv.x * float(texture_width) : uv.x;
     float raw_t = texture_swizzled != 0u ? uv.y * float(texture_height) : uv.y;
-    float s = clamp(raw_s, 0.0, float(texture_width));
-    float t = clamp(raw_t, 0.0, float(texture_height));
+    float s = raw_s;
+    float t = raw_t;
+    if (texture_repeat != 0u) {
+        s = s - floor(s / float(texture_width)) * float(texture_width);
+        t = t - floor(t / float(texture_height)) * float(texture_height);
+    } else {
+        s = clamp(s, 0.0, float(texture_width));
+        t = clamp(t, 0.0, float(texture_height));
+    }
     float tx = s - 0.5;
     float ty = t - 0.5;
     int x0 = int(floor(tx)); int y0 = int(floor(ty));
@@ -304,17 +321,26 @@ void main() {
         ivec2 vertex_a = vxy(ia);
         ivec2 vertex_b = vxy(ib);
         ivec2 vertex_c = vxy(ic);
-        int area = edge_value(vertex_a, vertex_b, vertex_c);
-        if (area <= 0) continue;
-        int w0 = edge_value(vertex_b, vertex_c, p);
-        int w1 = edge_value(vertex_c, vertex_a, p);
-        int w2 = edge_value(vertex_a, vertex_b, p);
+        double area = edge_value(vertex_a, vertex_b, vertex_c);
+        if (area == 0) continue;
+        if (area < 0) {
+            ivec2 tmp = vertex_b;
+            vertex_b = vertex_c;
+            vertex_c = tmp;
+            uint tmp_index = ib;
+            ib = ic;
+            ic = tmp_index;
+            area = -area;
+        }
+        double w0 = edge_value(vertex_b, vertex_c, p);
+        double w1 = edge_value(vertex_c, vertex_a, p);
+        double w2 = edge_value(vertex_a, vertex_b, p);
         if (w0 < 0 || (w0 == 0 && !top_left(vertex_b, vertex_c)) ||
             w1 < 0 || (w1 == 0 && !top_left(vertex_c, vertex_a)) ||
             w2 < 0 || (w2 == 0 && !top_left(vertex_a, vertex_b))) continue;
-        double l0 = double(w0) / double(area);
-        double l1 = double(w1) / double(area);
-        double l2 = double(w2) / double(area);
+        double l0 = w0 / area;
+        double l1 = w1 / area;
+        double l2 = w2 / area;
         double inv_w0 = 1.0 / double(vdata(ia, 7u));
         double inv_w1 = 1.0 / double(vdata(ib, 7u));
         double inv_w2 = 1.0 / double(vdata(ic, 7u));
@@ -835,8 +861,12 @@ public:
                 return false;
             }
             if (linear_texture && packet.textures[0].pitch == 0) return false;
+            const bool large_diagnostic =
+                std::getenv("XLLE_LARGE_TEXTURE_COMPUTE_FIXTURE") != nullptr;
             const uint32_t width = (packet.surface_pitch & 0xffffu) / 4u;
-            return width > 0 && width <= 64 && packet.surface_height <= 64 &&
+            return width > 0 &&
+                   (large_diagnostic ||
+                    (width <= 64 && packet.surface_height <= 64)) &&
                    packet.fixture_clip_x + packet.fixture_clip_width <= width &&
                    packet.fixture_clip_y + packet.fixture_clip_height <=
                        packet.surface_height;
@@ -1510,6 +1540,13 @@ public:
             uniform_1ui_(uniform_location_(texture_modulate_program_,
                                            "texture_swizzled"),
                          texture_swizzled ? 1u : 0u);
+            const uint32_t texture_address = packet.textures[0].address_mode;
+            const bool texture_repeat =
+                (texture_address & 0xffu) == 1u &&
+                ((texture_address >> 8) & 0xffu) == 1u;
+            uniform_1ui_(uniform_location_(texture_modulate_program_,
+                                           "texture_repeat"),
+                         texture_repeat ? 1u : 0u);
             uniform_1ui_(uniform_location_(texture_modulate_program_,
                                            "texture_constant_color_alpha"),
                          packet.fixture_texture_constant_color_alpha ? 1u : 0u);

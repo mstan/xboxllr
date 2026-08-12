@@ -11,6 +11,7 @@ param(
     [string] $BaselineReport = '',
     [double] $MinFinalFpsGainPct = 0.0,
     [double] $MaxFocusWallRegressionPct = -1.0,
+    [string[]] $ExtraXlleArgs = @(),
     [switch] $Build,
     [switch] $Force,
     [switch] $NoPerfAccounting,
@@ -95,6 +96,9 @@ try {
             @('--perf-accounting', '--perf-generic-top', "$GenericTop") +
             $commandArgs[($commandArgs.Count - 4)..($commandArgs.Count - 1)]
         )
+    }
+    if ($ExtraXlleArgs.Count) {
+        $commandArgs += $ExtraXlleArgs
     }
 
     $quotedArgs = $commandArgs | ForEach-Object {

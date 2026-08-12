@@ -8,6 +8,7 @@
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <optional>
 
 #include "machine/perf_accounting.hpp"
 #include "nv2a_vsh_emulator.h"
@@ -10092,6 +10093,15 @@ void Nv2a::resume_pushbuffers() {
 }
 
 void Nv2a::drain_pull_queue() {
+    if (waiting_for_flip_ || waiting_for_nop_ || !pgraph_fifo_access_ ||
+        pull_queue_.empty()) {
+        return;
+    }
+    std::optional<perf::ScopedAdd> perf_t;
+    if (perf::g_pull_drain_enabled) {
+        perf_t.emplace(perf::g_ns_nv2a_pull_drain,
+                       perf::g_calls_nv2a_pull_drain);
+    }
     while (!waiting_for_flip_ && !waiting_for_nop_ && pgraph_fifo_access_ &&
            !pull_queue_.empty()) {
         PushMethod push = pull_queue_.front();

@@ -88,6 +88,7 @@ def focus_sums(report: Mapping[str, Any], focus_last: int) -> dict[str, float]:
     out = {
         "wall_ns": 0.0,
         "cpu_ns": 0.0,
+        "nv2a_pull_drain_ns": 0.0,
         "raster_generic_ns": 0.0,
         "resolve_ns": 0.0,
         "resident_ensure_ns": 0.0,
@@ -103,6 +104,9 @@ def focus_sums(report: Mapping[str, Any], focus_last: int) -> dict[str, float]:
             if isinstance(value, (int, float)):
                 out["wall_ns"] += float(value)
         out["cpu_ns"] += sample_delta(perf, index, previous, "cpu_ns")
+        out["nv2a_pull_drain_ns"] += sample_delta(
+            perf, index, previous, "nv2a_pull_drain_ns"
+        )
         out["raster_generic_ns"] += sample_delta(perf, index, previous, "raster_generic_ns")
         out["resolve_ns"] += sample_delta(renderer, index, previous, "resolve_ns")
         out["resident_ensure_ns"] += sample_delta(renderer, index, previous, "resident_ensure_ns")
@@ -172,6 +176,7 @@ def main() -> int:
         for key in (
             "wall_ns",
             "cpu_ns",
+            "nv2a_pull_drain_ns",
             "raster_generic_ns",
             "resolve_ns",
             "resident_ensure_ns",

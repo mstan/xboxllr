@@ -8282,6 +8282,7 @@ int main() {
             resident.fixture_color_format_x8 = true;
             resident.fixture_texture_passthrough = false;
 
+            const auto original_vertices = resident.vertices;
             const bool cull_enabled =
                 (resident.raster_state[xlle::Nv2a::kRasterEnables] & (1u << 2)) != 0;
             const bool cull_front =
@@ -8518,18 +8519,35 @@ int main() {
                 std::printf("SKIP: hotpacket OpenGL probe unavailable: %s\n",
                             gl_error.c_str());
             } else {
-                CHECK(gl_renderer->supports_resident_generic_combiner(resident));
                 xlle::Nv2aGenericCombinerResult result;
-                CHECK(gl_renderer->submit_resident_generic_combiner(
-                    resident, result, gl_error));
-                if (!gl_error.empty())
-                    std::printf("hotpacket resident error: %s\n",
-                                gl_error.c_str());
-                xlle::Nv2aResidentColorResolve resolve;
-                CHECK(gl_renderer->resolve_resident_color_surface(
-                    resident.color_address, resident.color_input.size(),
-                    resolve, gl_error));
-                CHECK(resolve.data.size() == expected_color.size());
+                std::vector<uint8_t> actual_color;
+                const bool compute_probe =
+                    std::getenv("XLLE_HOTPACKET_PROBE_COMPUTE") != nullptr;
+                if (compute_probe) {
+                    resident.compute_fixture = xlle::Nv2aGenericCombinerPacket::
+                        ComputeFixture::kTextureModulateTriangle;
+                    resident.vertices = original_vertices;
+                    CHECK(gl_renderer->supports_generic_combiner(resident));
+                    CHECK(gl_renderer->submit_generic_combiner(
+                        resident, result, gl_error));
+                    if (!gl_error.empty())
+                        std::printf("hotpacket compute error: %s\n",
+                                    gl_error.c_str());
+                    actual_color = result.color_output;
+                } else {
+                    CHECK(gl_renderer->supports_resident_generic_combiner(resident));
+                    CHECK(gl_renderer->submit_resident_generic_combiner(
+                        resident, result, gl_error));
+                    if (!gl_error.empty())
+                        std::printf("hotpacket resident error: %s\n",
+                                    gl_error.c_str());
+                    xlle::Nv2aResidentColorResolve resolve;
+                    CHECK(gl_renderer->resolve_resident_color_surface(
+                        resident.color_address, resident.color_input.size(),
+                        resolve, gl_error));
+                    actual_color = std::move(resolve.data);
+                }
+                CHECK(actual_color.size() == expected_color.size());
                 size_t mismatches = 0;
                 std::array<size_t, 4> channel_mismatches{};
                 size_t beyond_one_lsb = 0;
@@ -8537,15 +8555,15 @@ int main() {
                 size_t pixel_mismatches = 0;
                 size_t first_mismatch = expected_color.size();
                 const size_t compare_size =
-                    std::min(resolve.data.size(), expected_color.size());
+                    std::min(actual_color.size(), expected_color.size());
                 for (size_t i = 0; i < compare_size; ++i) {
-                    if (resolve.data[i] != expected_color[i]) {
+                    if (actual_color[i] != expected_color[i]) {
                         if (first_mismatch == expected_color.size())
                             first_mismatch = i;
                         ++mismatches;
                         ++channel_mismatches[i & 3u];
                         const int delta =
-                            static_cast<int>(resolve.data[i]) -
+                            static_cast<int>(actual_color[i]) -
                             static_cast<int>(expected_color[i]);
                         const int abs_delta = std::abs(delta);
                         if (abs_delta > 1) ++beyond_one_lsb;
@@ -8553,10 +8571,10 @@ int main() {
                     }
                     if ((i & 3u) == 3u) {
                         const size_t pixel = i - 3u;
-                        if (resolve.data[pixel + 0] != expected_color[pixel + 0] ||
-                            resolve.data[pixel + 1] != expected_color[pixel + 1] ||
-                            resolve.data[pixel + 2] != expected_color[pixel + 2] ||
-                            resolve.data[pixel + 3] != expected_color[pixel + 3]) {
+                        if (actual_color[pixel + 0] != expected_color[pixel + 0] ||
+                            actual_color[pixel + 1] != expected_color[pixel + 1] ||
+                            actual_color[pixel + 2] != expected_color[pixel + 2] ||
+                            actual_color[pixel + 3] != expected_color[pixel + 3]) {
                             ++pixel_mismatches;
                         }
                     }
@@ -8565,7 +8583,7 @@ int main() {
                 uint32_t expected_word = 0;
                 if (first_mismatch < compare_size) {
                     const size_t first_word = first_mismatch & ~size_t{3};
-                    std::memcpy(&got_word, resolve.data.data() + first_word,
+                    std::memcpy(&got_word, actual_color.data() + first_word,
                                 sizeof(got_word));
                     std::memcpy(&expected_word,
                                 expected_color.data() + first_word,

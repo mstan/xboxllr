@@ -48,6 +48,8 @@ PERF_RE = re.compile(
     r"nv2a_pushbuffer_ns=(?P<nv2a_pushbuffer_ns>\d+) "
     r"\(n=(?P<nv2a_pushbuffer_n>\d+)\) "
     r"raster_ns=(?P<raster_ns>\d+) \(n=(?P<raster_n>\d+)\) "
+    r"(?:nv2a_pull_drain_ns=(?P<nv2a_pull_drain_ns>\d+) "
+    r"\(n=(?P<nv2a_pull_drain_n>\d+)\) )?"
     r"raster_witnessed_ns=(?P<raster_witnessed_ns>\d+) "
     r"raster_generic_ns=(?P<raster_generic_ns>\d+) "
     r"\(n=(?P<raster_generic_n>\d+)\) "

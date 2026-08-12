@@ -218,6 +218,7 @@ def summarize(path: pathlib.Path) -> None:
             f"wall={ns_to_s(frame.get('wall_ns'))} "
             f"cpu={ns_to_s(pd.get('cpu_ns'))} "
             f"push={ns_to_s(pd.get('nv2a_pushbuffer_ns'))} "
+            f"drain={ns_to_s(pd.get('nv2a_pull_drain_ns'))} "
             f"rast={ns_to_s(pd.get('raster_ns'))} "
             f"gen={ns_to_s(pd.get('raster_generic_ns'))} "
             f"gsetup={ns_to_s(gsd.get('texture_setup_ns'))} "

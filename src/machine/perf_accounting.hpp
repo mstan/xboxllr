@@ -41,9 +41,11 @@ namespace xlle::perf {
 
 // Set once from --perf-accounting before the replay starts; never toggled mid-run.
 inline bool g_enabled = false;
+inline bool g_pull_drain_enabled = false;
 
 inline std::atomic<uint64_t> g_ns_cpu{0};
 inline std::atomic<uint64_t> g_ns_nv2a_pushbuffer{0};
+inline std::atomic<uint64_t> g_ns_nv2a_pull_drain{0};
 inline std::atomic<uint64_t> g_ns_raster{0};
 inline std::atomic<uint64_t> g_ns_host_poll_devices{0};
 // Split of g_ns_raster (beads-xbox.1.13 Phase 1 attribution): g_ns_raster_generic is
@@ -62,6 +64,7 @@ inline std::atomic<uint64_t> g_calls_generic_flush{0};
 
 inline std::atomic<uint64_t> g_calls_cpu{0};
 inline std::atomic<uint64_t> g_calls_nv2a_pushbuffer{0};
+inline std::atomic<uint64_t> g_calls_nv2a_pull_drain{0};
 inline std::atomic<uint64_t> g_calls_raster{0};
 inline std::atomic<uint64_t> g_calls_host_poll_devices{0};
 
@@ -235,7 +238,8 @@ inline std::string format_report() {
         raster_ns >= raster_generic_ns ? raster_ns - raster_generic_ns : 0;
     std::snprintf(buf, sizeof(buf),
         "[perf] cpu_ns=%llu (n=%llu) nv2a_pushbuffer_ns=%llu (n=%llu) raster_ns=%llu "
-        "(n=%llu) raster_witnessed_ns=%llu raster_generic_ns=%llu (n=%llu) "
+        "(n=%llu) nv2a_pull_drain_ns=%llu (n=%llu) "
+        "raster_witnessed_ns=%llu raster_generic_ns=%llu (n=%llu) "
         "host_poll_devices_ns=%llu (n=%llu) "
         "-- note: nv2a_pushbuffer and raster can overlap cpu and each other, but raster "
         "can also run outside process_pushbuffer; "
@@ -246,6 +250,8 @@ inline std::string format_report() {
         (unsigned long long)g_ns_nv2a_pushbuffer.load(),
         (unsigned long long)g_calls_nv2a_pushbuffer.load(),
         (unsigned long long)raster_ns, (unsigned long long)g_calls_raster.load(),
+        (unsigned long long)g_ns_nv2a_pull_drain.load(),
+        (unsigned long long)g_calls_nv2a_pull_drain.load(),
         (unsigned long long)raster_witnessed_ns,
         (unsigned long long)raster_generic_ns,
         (unsigned long long)g_calls_raster_generic.load(),

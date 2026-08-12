@@ -549,6 +549,7 @@ int main(int argc, char** argv) {
     bool test_synthetic_controller_hub_input_down_a = false;
     bool reduced_retire_diag = false;
     bool perf_accounting = false;
+    bool perf_pull_drain = false;
     bool net_disconnected = false;
     bool pfifo_clear_trace = false;
     const char* nv2a_renderer_name = "software";
@@ -612,6 +613,8 @@ int main(int argc, char** argv) {
             reduced_retire_diag = true;
         else if (!std::strcmp(argv[i], "--perf-accounting"))
             perf_accounting = true;
+        else if (!std::strcmp(argv[i], "--perf-pull-drain"))
+            perf_pull_drain = true;
         else if (!std::strcmp(argv[i], "--perf-generic-top") && i + 1 < argc) {
             uint64_t parsed = 0;
             if (!parse_u64_arg(argv[++i], parsed) || parsed == 0 ||
@@ -2663,6 +2666,8 @@ int main(int argc, char** argv) {
             mach.cpu().set_regs(r);
             mach.cpu().setup_flat_segments(0x1000);  // MCPX handoff GDT (code=0x08, data=0x10)
             xlle::perf::g_enabled = perf_accounting;
+            xlle::perf::g_pull_drain_enabled =
+                perf_accounting && perf_pull_drain;
             std::printf("[2bl] entering decrypted 2BL at 0x901ee (budget %llu insns) ...\n",
                         (unsigned long long)max_insns);
             std::string err2;
