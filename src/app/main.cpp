@@ -1079,11 +1079,11 @@ int main(int argc, char** argv) {
                                         "seq=%llu profile=%u "
                                         "fp=%016llx full=%016llx prim=%u verts=%u "
                                         "sfmt=%08x shader=%08x comb=%08x "
-                                        "alpha=%x/%02x blend=%x/%x/%x "
+                                        "en=%08x alpha=%x/%02x blend=%x/%x/%x "
                                         "depth=%x/%x texen=%x "
                                         "ci0=%08x ai0=%08x co0=%08x ao0=%08x "
                                         "f0_0=%08x f1_0=%08x final=%08x/%08x "
-                                        "tex0=%08x/%08x/%08x/%08x/%08x "
+                                        "tex0=%08x/%08x/%08x/%08x/%08x/%08x "
                                         "frags=%llu writes=%llu\n",
                                         info.kind, info.color_address,
                                         static_cast<unsigned long long>(matched_events),
@@ -1098,6 +1098,8 @@ int main(int argc, char** argv) {
                                         info.surface_format,
                                         info.shader_stage_program,
                                         info.combiner_control,
+                                        mach.nv2a()->debug_raster_state_word(
+                                            Nv2a::kRasterEnables),
                                         info.alpha_func, info.alpha_ref,
                                         info.blend_src, info.blend_dst,
                                         info.blend_equation, info.depth_func,
@@ -1128,6 +1130,8 @@ int main(int argc, char** argv) {
                                             Nv2a::kRasterTextureAddress0),
                                         mach.nv2a()->debug_raster_state_word(
                                             Nv2a::kRasterTextureControl0_0),
+                                        mach.nv2a()->debug_raster_state_word(
+                                            Nv2a::kRasterTextureControl1_0),
                                         static_cast<unsigned long long>(info.fragments),
                                         static_cast<unsigned long long>(info.writes));
                                     for (uint32_t vertex = 0;

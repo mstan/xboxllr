@@ -6988,6 +6988,45 @@ int main() {
             CHECK(gc_gpu.generic_combiner_texture_samples() > before_h_samples);
             const uint32_t h_offset = 3u * 32u + 3u * 4u;
             CHECK(get32(gc_ram, 0x10000u + h_offset) == 0x20243238u);
+
+            // The same pitch-linear PROJECT2D path must honor TextureAddress0
+            // when the dashboard uses a real nonzero wrap word.  Old behavior
+            // always clamped, so a negative texel-space V coordinate sampled row
+            // 0 instead of repeating to row 3.
+            std::vector<uint8_t> h_repeat_texture(4 * 4 * 4, 0);
+            put32(h_repeat_texture, (0u * 4u + 2u) * 4u, 0xFFB0C0D0u);
+            put32(h_repeat_texture, (3u * 4u + 2u) * 4u, 0xFF102030u);
+            std::memcpy(gc_ram.data() + 0x30300, h_repeat_texture.data(),
+                        h_repeat_texture.size());
+            put32(gc_ram, 0x10000u + h_offset, 0);
+            emit_gc(0x0AC0, 0x04080000);
+            emit_gc(0x0260, 0x14180000);
+            emit_gc(0x1B00, 0x00030300);
+            emit_gc(0x1B04, 0);
+            emit_gc(0x1B08, 0x00010101);   // repeat U/V
+            emit_gc(0x1B10, 0x00100000);
+            emit_gc(0x1B1C, 0x00040004);
+            const uint64_t before_h_repeat_samples =
+                gc_gpu.generic_combiner_texture_samples();
+            emit_gc(0x17FC, 5);
+            for (auto xy : {std::pair{0.0f, 0.0f}, std::pair{8.0f, 0.0f},
+                            std::pair{0.0f, 8.0f}}) {
+                emit_gc(0x1A90, gc_float_bits(2.5f));
+                emit_gc(0x1A94, gc_float_bits(-0.5f));
+                emit_gc(0x1A98, gc_float_bits(0.0f));
+                emit_gc(0x1A9C, gc_float_bits(1.0f));
+                emit_gc(0x1518, gc_float_bits(xy.first));
+                emit_gc(0x151C, gc_float_bits(xy.second));
+                emit_gc(0x1520, gc_float_bits(10.0f));
+                emit_gc(0x194C, gc_pack_ub4(0xFF, 0xFF, 0xFF, 0xFF));
+                emit_gc(0x1524, gc_float_bits(1.0f));
+            }
+            emit_gc(0x17FC, 0);
+            kick_gc();
+            CHECK(gc_fault.empty());
+            CHECK(gc_gpu.generic_combiner_texture_samples() >
+                  before_h_repeat_samples);
+            CHECK(get32(gc_ram, 0x10000u + h_offset) == 0xFF102030u);
         }
 
         // --- (h2) Single-stage PROJECT2D can also be a swizzled texture selected

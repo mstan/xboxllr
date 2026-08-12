@@ -6504,6 +6504,20 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             ts.height = rect & 0xFFFFu;
             ts.pitch = raster_state_[kRasterTextureControl1_0 + stage] >> 16;
             if (ts.width && ts.height && (raw_argb8 || compressed_argb8)) {
+                const uint32_t address_word =
+                    raster_state_[kRasterTextureAddress0 + stage];
+                bool u_ok = true, v_ok = true;
+                TextureAddressMode address_u = TextureAddressMode::kClampToEdge;
+                TextureAddressMode address_v = TextureAddressMode::kClampToEdge;
+                if (address_word != 0) {
+                    address_u = decode_address_mode(address_word & 0xFFu, u_ok);
+                    address_v = decode_address_mode((address_word >> 8) & 0xFFu, v_ok);
+                }
+                if (!u_ok || !v_ok) {
+                    record_generic_skip_detail(GenericSkipReason::kUnsupportedTextureWrap,
+                                               address_word);
+                    return true;
+                }
                 const uint32_t min_pitch =
                     raw_argb8 ? ts.width * static_cast<uint32_t>(sizeof(uint32_t))
                               : ((ts.width + 3u) / 4u) *
@@ -6556,6 +6570,9 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     return true;
                 }
                 ts.pitch = ts.width * static_cast<uint32_t>(sizeof(uint32_t));
+                ts.address_u = address_u;
+                ts.address_v = address_v;
+                ts.border = raster_state_[kRasterTextureBorderColor0 + stage];
                 generic_texture_bytes_this_batch += ts.data.size();
                 perf::record_generic_texture_allocation(
                     ts.data.size(), generic_texture_bytes_this_batch);
@@ -8005,21 +8022,48 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     auto sample_linear = [&unpack_argb8](
                              const std::vector<uint8_t>& data, uint32_t width,
                              uint32_t height, uint32_t row_pitch, float s, float t,
-                             std::array<float, 4>& color) {
+                             TextureAddressMode mode_u, TextureAddressMode mode_v,
+                             uint32_t border_pixel, std::array<float, 4>& color) {
         if (!std::isfinite(s) || !std::isfinite(t) || !width || !height) return false;
-        s = std::clamp(s, 0.0f, static_cast<float>(width));
-        t = std::clamp(t, 0.0f, static_cast<float>(height));
+        const auto wrap_texel_space = [](float value, uint32_t size,
+                                         TextureAddressMode mode) {
+            if (mode == TextureAddressMode::kClampToEdge) {
+                return std::clamp(value, 0.0f, static_cast<float>(size));
+            }
+            if (mode == TextureAddressMode::kRepeat) {
+                const float extent = static_cast<float>(size);
+                return value - std::floor(value / extent) * extent;
+            }
+            return value;
+        };
+        s = wrap_texel_space(s, width, mode_u);
+        t = wrap_texel_space(t, height, mode_v);
         const float texel_x = s - 0.5f;
         const float texel_y = t - 0.5f;
         const int32_t x0 = static_cast<int32_t>(std::floor(texel_x));
         const int32_t y0 = static_cast<int32_t>(std::floor(texel_y));
         const float fx = texel_x - static_cast<float>(x0);
         const float fy = texel_y - static_cast<float>(y0);
+        const auto border = unpack_argb8(border_pixel);
+        auto coordinate = [](int32_t value, uint32_t size, TextureAddressMode mode) {
+            if (mode == TextureAddressMode::kRepeat) {
+                const int32_t signed_size = static_cast<int32_t>(size);
+                int32_t wrapped = value % signed_size;
+                if (wrapped < 0) wrapped += signed_size;
+                return static_cast<uint32_t>(wrapped);
+            }
+            return static_cast<uint32_t>(
+                std::clamp(value, 0, static_cast<int32_t>(size) - 1));
+        };
         auto texel = [&](int32_t x, int32_t y) {
-            const uint32_t cx = static_cast<uint32_t>(
-                std::clamp(x, 0, static_cast<int32_t>(width) - 1));
-            const uint32_t cy = static_cast<uint32_t>(
-                std::clamp(y, 0, static_cast<int32_t>(height) - 1));
+            if ((mode_u == TextureAddressMode::kBorder &&
+                 (x < 0 || x >= static_cast<int32_t>(width))) ||
+                (mode_v == TextureAddressMode::kBorder &&
+                 (y < 0 || y >= static_cast<int32_t>(height)))) {
+                return border;
+            }
+            const uint32_t cx = coordinate(x, width, mode_u);
+            const uint32_t cy = coordinate(y, height, mode_v);
             const size_t offset = static_cast<size_t>(cy) * row_pitch +
                                   static_cast<size_t>(cx) * sizeof(uint32_t);
             uint32_t pixel = 0;
@@ -8351,9 +8395,11 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                             raster_failed = true;
                             return;
                         }
-                        sample_ok = sample_linear(ts.data, ts.width, ts.height,
-                                                  ts.pitch, texcoord[0] / texcoord[3],
-                                                  texcoord[1] / texcoord[3], sampled);
+                        sample_ok = sample_linear(
+                            ts.data, ts.width, ts.height, ts.pitch,
+                            texcoord[0] / texcoord[3],
+                            texcoord[1] / texcoord[3], ts.address_u, ts.address_v,
+                            ts.border, sampled);
                     } else if (ts.cubemap) {
                         // Same major-axis direction-to-UV algorithm as the pinned
                         // profiles' own sample_cube_texture (fresh independent copy):
