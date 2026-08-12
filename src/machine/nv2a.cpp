@@ -7198,6 +7198,13 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     raster_state_[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
                     raster_state_[kRasterCombinerSpecularFog0] == 0x0000000C &&
                     raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80;
+                const bool constant_color_alpha_combiner_words_match =
+                    raster_state_[kRasterCombinerColorIcw0] == 0x01200000 &&
+                    raster_state_[kRasterCombinerAlphaIcw0] == 0x18110000 &&
+                    raster_state_[kRasterCombinerColorOcw0] == 0x00000C00 &&
+                    raster_state_[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
+                    raster_state_[kRasterCombinerSpecularFog0] == 0x0000000C &&
+                    raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80;
                 const bool passthrough_combiner_words_match =
                     raster_state_[kRasterCombinerColorIcw0] == 0x08200000 &&
                     raster_state_[kRasterCombinerAlphaIcw0] == 0x14200000 &&
@@ -7263,6 +7270,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                            0x00210000) {
                     reject_reason = TextureReject::kOtherStageInput;
                 } else if (!combiner_words_match &&
+                           !constant_color_alpha_combiner_words_match &&
                            !passthrough_combiner_words_match) {
                     reject_reason = TextureReject::kCombinerWords;
                 } else if (!texture_registers_match) {
@@ -7298,10 +7306,20 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     alpha_supported && blend_supported &&
                     raster_state_[kRasterShaderStageProgram] == 1 &&
                     raster_state_[kRasterShaderOtherStageInput] == 0x00210000 &&
-                    combiner_words_match && texture_stages[0].valid &&
-                    texture_stages[0].linear && !texture_stages[0].alpha8 &&
+                    (combiner_words_match ||
+                     constant_color_alpha_combiner_words_match) &&
+                    texture_stages[0].valid && !texture_stages[0].alpha8 &&
+                    (texture_stages[0].linear ||
+                     (texture_stages[0].address_u ==
+                          TextureAddressMode::kClampToEdge &&
+                      texture_stages[0].address_v ==
+                          TextureAddressMode::kClampToEdge)) &&
                     texture_stages[0].width > 0 && texture_stages[0].height > 0 &&
-                    texture_stages[0].pitch >= texture_stages[0].width * 4u;
+                    (texture_stages[0].linear
+                         ? texture_stages[0].pitch >= texture_stages[0].width * 4u
+                         : texture_stages[0].data.size() ==
+                               static_cast<size_t>(texture_stages[0].width) *
+                                   texture_stages[0].height * 4u);
                 if (texture_compute_state) {
                     bool finite_vertices = true;
                     std::vector<std::array<int64_t, 2>> fixed_xy(packet.vertices.size());
@@ -7405,6 +7423,12 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                         packet.fixture_blend_src = blend_src;
                         packet.fixture_blend_dst = blend_dst;
                         packet.fixture_color_format_x8 = color_format_x8;
+                        packet.fixture_texture_constant_color_alpha =
+                            constant_color_alpha_combiner_words_match;
+                        if (constant_color_alpha_combiner_words_match) {
+                            packet.fixture_constant_argb =
+                                raster_state_[kRasterCombinerFactor0_0];
+                        }
                     }
                 }
                 const bool texture_resident_state =

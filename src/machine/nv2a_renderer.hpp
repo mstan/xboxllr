@@ -80,6 +80,7 @@ struct Nv2aGenericCombinerPacket {
     bool fixture_depth_test_enabled = false;
     bool fixture_depth_write_enabled = false;
     bool fixture_texture_passthrough = false;
+    bool fixture_texture_constant_color_alpha = false;
     bool fixture_color_format_x8 = false;
 };
 

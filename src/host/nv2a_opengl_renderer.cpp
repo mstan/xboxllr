@@ -204,6 +204,9 @@ uniform int surface_pitch_words;
 uniform int texture_width;
 uniform int texture_height;
 uniform int texture_pitch_words;
+uniform uint texture_swizzled;
+uniform uint texture_constant_color_alpha;
+uniform uint constant_argb;
 uniform int triangle_count;
 uniform ivec2 clip_origin;
 uniform ivec2 clip_extent;
@@ -220,6 +223,21 @@ bool top_left(ivec2 p0, ivec2 p1) {
 vec4 unpack_argb(uint word) {
     return vec4(float((word >> 16u) & 255u), float((word >> 8u) & 255u),
                 float(word & 255u), float((word >> 24u) & 255u)) / 255.0;
+}
+uint swizzle_index(uint x, uint y, uint width, uint height) {
+    uint result = 0u;
+    uint output_bit = 1u;
+    for (uint input_bit = 1u; input_bit < width || input_bit < height; input_bit <<= 1u) {
+        if (input_bit < width) {
+            if ((x & input_bit) != 0u) result |= output_bit;
+            output_bit <<= 1u;
+        }
+        if (input_bit < height) {
+            if ((y & input_bit) != 0u) result |= output_bit;
+            output_bit <<= 1u;
+        }
+    }
+    return result;
 }
 uint pack_argb(vec4 value) {
     uvec4 v = uvec4(floor(clamp(value, 0.0, 1.0) * 255.0 + 0.5));
@@ -241,11 +259,16 @@ ivec2 vxy(uint vertex) {
 vec4 texel_argb(int x, int y) {
     int sx = clamp(x, 0, texture_width - 1);
     int sy = clamp(y, 0, texture_height - 1);
-    return unpack_argb(tex0_words[sy * texture_pitch_words + sx]);
+    uint index = texture_swizzled != 0u
+        ? swizzle_index(uint(sx), uint(sy), uint(texture_width), uint(texture_height))
+        : uint(sy * texture_pitch_words + sx);
+    return unpack_argb(tex0_words[index]);
 }
 vec4 sample_linear_argb(vec2 uv) {
-    float s = clamp(uv.x, 0.0, float(texture_width));
-    float t = clamp(uv.y, 0.0, float(texture_height));
+    float raw_s = texture_swizzled != 0u ? uv.x * float(texture_width) : uv.x;
+    float raw_t = texture_swizzled != 0u ? uv.y * float(texture_height) : uv.y;
+    float s = clamp(raw_s, 0.0, float(texture_width));
+    float t = clamp(raw_t, 0.0, float(texture_height));
     float tx = s - 0.5;
     float ty = t - 0.5;
     int x0 = int(floor(tx)); int y0 = int(floor(ty));
@@ -317,7 +340,12 @@ void main() {
             float((double(vtex(ia).y) * (l0 * inv_w0) +
                    double(vtex(ib).y) * (l1 * inv_w1) +
                    double(vtex(ic).y) * (l2 * inv_w2)) / q));
-        vec4 src = clamp(diffuse, 0.0, 1.0) * sample_linear_argb(tex);
+        vec4 texel = sample_linear_argb(tex);
+        vec4 src = clamp(diffuse, 0.0, 1.0) * texel;
+        if (texture_constant_color_alpha != 0u) {
+            vec4 constant = unpack_argb(constant_argb);
+            src = vec4(constant.rgb, texel.a * constant.a);
+        }
         float sf = blend_factor(blend_src, src);
         float df = blend_factor(blend_dst, src);
         vec3 rgb = clamp(src.rgb * sf + current.rgb * df, 0.0, 1.0);
@@ -772,14 +800,20 @@ public:
                 packet.surface_pitch == 0 || packet.surface_height == 0 ||
                 packet.fixture_clip_width == 0 || packet.fixture_clip_height == 0 ||
                 !packet.textures[0].referenced ||
-                packet.textures[0].layout !=
-                    Nv2aGenericCombinerPacket::TextureLayout::kLinear ||
                 packet.textures[0].format !=
                     Nv2aGenericCombinerPacket::TextureFormat::kArgb8 ||
-                packet.textures[0].width == 0 || packet.textures[0].height == 0 ||
-                packet.textures[0].pitch == 0) {
+                packet.textures[0].width == 0 || packet.textures[0].height == 0) {
                 return false;
             }
+            const bool linear_texture =
+                packet.textures[0].layout ==
+                Nv2aGenericCombinerPacket::TextureLayout::kLinear;
+            if (!linear_texture &&
+                packet.textures[0].layout !=
+                    Nv2aGenericCombinerPacket::TextureLayout::kSwizzled) {
+                return false;
+            }
+            if (linear_texture && packet.textures[0].pitch == 0) return false;
             const uint32_t width = (packet.surface_pitch & 0xffffu) / 4u;
             return width > 0 && width <= 64 && packet.surface_height <= 64 &&
                    packet.fixture_clip_x + packet.fixture_clip_width <= width &&
@@ -1367,11 +1401,20 @@ public:
                 packet.color_input.size() !=
                     static_cast<size_t>(packet.surface_pitch & 0xffffu) *
                         packet.surface_height ||
-                packet.textures[0].input.size() % sizeof(uint32_t) != 0 ||
-                packet.textures[0].input.size() <
-                    static_cast<size_t>(packet.textures[0].pitch) *
-                        packet.textures[0].height) {
+                packet.textures[0].input.size() % sizeof(uint32_t) != 0) {
                 error = "OpenGL texture-modulate fixture received invalid surfaces";
+                return false;
+            }
+            const bool texture_swizzled =
+                packet.textures[0].layout ==
+                Nv2aGenericCombinerPacket::TextureLayout::kSwizzled;
+            const size_t expected_texture_size = texture_swizzled
+                ? static_cast<size_t>(packet.textures[0].width) *
+                      packet.textures[0].height * sizeof(uint32_t)
+                : static_cast<size_t>(packet.textures[0].pitch) *
+                      packet.textures[0].height;
+            if (packet.textures[0].input.size() < expected_texture_size) {
+                error = "OpenGL texture-modulate fixture received invalid texture";
                 return false;
             }
             std::array<unsigned int, 4> buffers{};
@@ -1427,7 +1470,17 @@ public:
                         static_cast<int>(packet.textures[0].height));
             uniform_1i_(uniform_location_(texture_modulate_program_,
                                           "texture_pitch_words"),
-                        static_cast<int>(packet.textures[0].pitch / 4u));
+                        static_cast<int>(texture_swizzled
+                                             ? packet.textures[0].width
+                                             : packet.textures[0].pitch / 4u));
+            uniform_1ui_(uniform_location_(texture_modulate_program_,
+                                           "texture_swizzled"),
+                         texture_swizzled ? 1u : 0u);
+            uniform_1ui_(uniform_location_(texture_modulate_program_,
+                                           "texture_constant_color_alpha"),
+                         packet.fixture_texture_constant_color_alpha ? 1u : 0u);
+            uniform_1ui_(uniform_location_(texture_modulate_program_, "constant_argb"),
+                         packet.fixture_constant_argb);
             uniform_1i_(uniform_location_(texture_modulate_program_, "triangle_count"),
                         static_cast<int>(packet.vertices.size() / 3u));
             uniform_2i_(uniform_location_(texture_modulate_program_, "clip_origin"),

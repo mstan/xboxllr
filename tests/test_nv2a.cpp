@@ -7203,6 +7203,103 @@ int main() {
                                  gc_ram.begin() + 0x10000));
                 CHECK(gc_gpu.generic_combiner_accelerated_batches() ==
                       accelerated_before + 1);
+
+                auto submit_swizzled_constant_alpha_triangle = [&]() {
+                    emit_gc(0x0184, 4);  // texture DMA A
+                    emit_gc(0x0200, 0x00080000);
+                    emit_gc(0x0204, 0x00080000);
+                    emit_gc(0x0208, 0x00000108);
+                    emit_gc(0x020C, 0x00200020);
+                    emit_gc(0x0210, 0x00010000);
+                    emit_gc(0x0290, 0x00100001);
+                    emit_gc(0x02C0, 0x00070000);
+                    emit_gc(0x02E0, 0x00070000);
+                    emit_gc(0x0300, 0);
+                    emit_gc(0x0304, 0);
+                    emit_gc(0x0308, 0);
+                    emit_gc(0x030C, 0);
+                    emit_gc(0x033C, 0x0207);
+                    emit_gc(0x0340, 0);
+                    emit_gc(0x0344, 1);
+                    emit_gc(0x0348, 0);
+                    emit_gc(0x0350, 0x8006);
+                    emit_gc(0x0354, 0x0207);
+                    emit_gc(0x0358, 0x01010101);
+                    emit_gc(0x035C, 0);
+                    emit_gc(0x037C, 0x1D01);
+                    emit_gc(0x038C, 0x1B02);
+                    emit_gc(0x0390, 0x1B02);
+                    emit_gc(0x0394, 0);
+                    emit_gc(0x0398, 0x4B7FFFFF);
+                    emit_gc(0x039C, 0x0405);
+                    emit_gc(0x03A0, 0x0900);
+                    emit_gc(0x1D78, 1);
+                    emit_gc(0x1E70, 1);
+                    emit_gc(0x1E74, 0);
+                    emit_gc(0x1E78, 0x00210000);
+                    emit_gc(0x1E60, 0x00000001);
+                    emit_gc(0x0AC0, 0x01200000);  // RGB = Factor0.
+                    emit_gc(0x0260, 0x18110000);  // A = Texture0.a * Factor0.a.
+                    emit_gc(0x1E40, 0x00000C00);
+                    emit_gc(0x0AA0, 0x00000C00);
+                    emit_gc(0x0A60, 0x80405060);  // Factor0: A=0x80, RGB=0x405060.
+                    emit_gc(0x0288, 0x0000000C);
+                    emit_gc(0x028C, 0x00001C80);
+                    emit_gc(0x1E20, 0);
+                    emit_gc(0x1E24, 0);
+                    emit_gc(0x1B00, 0x00030000);
+                    emit_gc(0x1B04, 0x02200629);  // 4x4 swizzled ARGB8, DMA-A.
+                    emit_gc(0x1B08, 0x00030303);  // clamp.
+                    emit_gc(0x1B0C, 0x40000000);
+                    emit_gc(0x1B10, 0);
+                    emit_gc(0x1B14, 0);
+                    emit_gc(0x1B1C, 0);
+                    emit_gc(0x1B20, 0);
+                    emit_gc(0x1B24, 0);
+                    std::vector<uint8_t> texture(4 * 4 * 4, 0);
+                    put32(texture, 12u * 4u, 0x40C0A080u);  // swizzle.index(2,2)
+                    std::memcpy(gc_ram.data() + 0x30000, texture.data(),
+                                texture.size());
+                    emit_gc(0x17FC, 5);
+                    for (auto xy : {std::pair{0.0f, 0.0f},
+                                    std::pair{8.0f, 0.0f},
+                                    std::pair{0.0f, 8.0f}}) {
+                        emit_gc(0x1A90, gc_float_bits(0.625f));
+                        emit_gc(0x1A94, gc_float_bits(0.625f));
+                        emit_gc(0x1A98, gc_float_bits(0.0f));
+                        emit_gc(0x1A9C, gc_float_bits(1.0f));
+                        emit_gc(0x1518, gc_float_bits(xy.first));
+                        emit_gc(0x151C, gc_float_bits(xy.second));
+                        emit_gc(0x1520, gc_float_bits(10.0f));
+                        emit_gc(0x194C, gc_pack_ub4(0x20, 0x20, 0x20, 0xFF));
+                        emit_gc(0x1524, gc_float_bits(1.0f));
+                    }
+                    emit_gc(0x17FC, 0);
+                    kick_gc();
+                };
+                std::memset(gc_ram.data() + 0x10000, 0x5A, 8 * 32);
+                gc_gpu.set_renderer(nullptr);
+                submit_swizzled_constant_alpha_triangle();
+                CHECK(gc_fault.empty());
+                const std::vector<uint8_t> swizzled_constant_software(
+                    gc_ram.begin() + 0x10000,
+                    gc_ram.begin() + 0x10000 + 8 * 32);
+                CHECK(get32(gc_ram, 0x10000u + 3u * 32u + 3u * 4u) ==
+                      0x20405060u);
+                std::memset(gc_ram.data() + 0x10000, 0x5A, 8 * 32);
+                const uint64_t swizzled_constant_accel_before =
+                    gc_gpu.generic_combiner_accelerated_batches();
+                gc_gpu.set_renderer(gl_renderer.get());
+                submit_swizzled_constant_alpha_triangle();
+                if (!gc_fault.empty())
+                    std::printf("OpenGL swizzled constant-alpha fixture fault: %s\n",
+                                gc_fault.c_str());
+                CHECK(gc_fault.empty());
+                CHECK(std::equal(swizzled_constant_software.begin(),
+                                 swizzled_constant_software.end(),
+                                 gc_ram.begin() + 0x10000));
+                CHECK(gc_gpu.generic_combiner_accelerated_batches() ==
+                      swizzled_constant_accel_before + 1);
                 gc_gpu.set_renderer(nullptr);
             } else {
                 std::printf("SKIP: OpenGL texture-modulate fixture unavailable: %s\n",
