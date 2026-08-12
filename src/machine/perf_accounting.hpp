@@ -77,6 +77,8 @@ inline std::atomic<uint64_t> g_calls_renderer_resolve{0};
 // counters distinguish a genuinely large live raster working set from a small live set
 // whose enormous cumulative allocation churn is retained by the host allocator.
 inline std::atomic<uint64_t> g_paged_surface_instances{0};
+inline std::atomic<uint64_t> g_paged_surface_direct_instances{0};
+inline std::atomic<uint64_t> g_paged_surface_direct_bytes{0};
 inline std::atomic<uint64_t> g_paged_surface_pages_loaded{0};
 inline std::atomic<uint64_t> g_paged_surface_bytes_loaded{0};
 inline std::atomic<uint64_t> g_paged_surface_bytes_live{0};
@@ -100,6 +102,13 @@ inline void record_paged_surface(size_t logical_bytes) {
     g_paged_surface_instances.fetch_add(1, std::memory_order_relaxed);
     update_peak(g_paged_surface_logical_bytes_peak,
                 static_cast<uint64_t>(logical_bytes));
+}
+
+inline void record_paged_surface_direct(size_t logical_bytes) {
+    if (!g_enabled) return;
+    g_paged_surface_direct_instances.fetch_add(1, std::memory_order_relaxed);
+    g_paged_surface_direct_bytes.fetch_add(static_cast<uint64_t>(logical_bytes),
+                                           std::memory_order_relaxed);
 }
 
 inline void record_paged_surface_page(size_t bytes) {
@@ -199,16 +208,19 @@ inline std::string format_report() {
 
 inline std::string format_memory_report() {
     if (!g_enabled) return {};
-    char buf[768];
+    char buf[1024];
     std::snprintf(
         buf, sizeof(buf),
-        "[perf-memory] paged-surface-creations=%llu pages-loaded=%llu "
+        "[perf-memory] paged-surface-creations=%llu direct-surfaces=%llu "
+        "direct-surface-bytes=%llu pages-loaded=%llu "
         "page-payload-bytes-cumulative=%llu page-payload-bytes-live=%llu "
         "page-payload-bytes-peak=%llu logical-surface-bytes-peak=%llu "
         "generic-texture-allocations=%llu generic-texture-bytes=%llu "
         "generic-texture-batch-peak=%llu pfifo-queue-pushes=%llu "
         "pfifo-queue-entries-live=%llu pfifo-queue-entries-peak=%llu",
         (unsigned long long)g_paged_surface_instances.load(),
+        (unsigned long long)g_paged_surface_direct_instances.load(),
+        (unsigned long long)g_paged_surface_direct_bytes.load(),
         (unsigned long long)g_paged_surface_pages_loaded.load(),
         (unsigned long long)g_paged_surface_bytes_loaded.load(),
         (unsigned long long)g_paged_surface_bytes_live.load(),

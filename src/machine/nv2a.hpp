@@ -66,9 +66,11 @@ public:
         irq_num_ = irq_num;
     }
     void set_mem_access(std::function<bool(uint32_t, void*, size_t)> read,
-                        std::function<bool(uint32_t, const void*, size_t)> write) {
+                        std::function<bool(uint32_t, const void*, size_t)> write,
+                        std::function<uint8_t*(uint32_t, size_t)> direct = {}) {
         mem_read_ = std::move(read);
         mem_write_ = std::move(write);
+        mem_direct_ = std::move(direct);
     }
 
     struct GenericBatchDebugInfo {
@@ -1274,6 +1276,7 @@ private:
     std::deque<PushMethod> pull_queue_;
     std::function<bool(uint32_t, void*, size_t)> mem_read_;
     std::function<bool(uint32_t, const void*, size_t)> mem_write_;
+    std::function<uint8_t*(uint32_t, size_t)> mem_direct_;
     std::array<uint32_t, 8> semaphore_dma_{};
     std::array<uint32_t, 8> semaphore_offset_{};
     std::array<uint32_t, 8> object_instance_{};

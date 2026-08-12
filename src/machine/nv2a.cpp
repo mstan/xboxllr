@@ -23,12 +23,16 @@ class PagedRasterSurface {
 public:
     using ReadFn = std::function<bool(uint32_t, void*, size_t)>;
     using WriteFn = std::function<bool(uint32_t, const void*, size_t)>;
+    using DirectFn = std::function<uint8_t*(uint32_t, size_t)>;
 
     PagedRasterSurface(uint32_t address, size_t size,
-                       const ReadFn& read, const WriteFn& write)
+                       const ReadFn& read, const WriteFn& write,
+                       const DirectFn& direct = DirectFn{})
         : address_(address), size_(size), read_(read), write_(write),
-          pages_((size + kPageSize - 1) / kPageSize) {
+          direct_(direct), direct_base_(direct_ ? direct_(address, size) : nullptr),
+          pages_(direct_base_ ? 0 : (size + kPageSize - 1) / kPageSize) {
         perf::record_paged_surface(size_);
+        if (direct_base_) perf::record_paged_surface_direct(size_);
     }
 
     ~PagedRasterSurface() {
@@ -57,6 +61,7 @@ public:
     }
 
     bool flush() {
+        if (direct_base_) return true;
         if (!write_) return false;
         for (size_t page_index = 0; page_index < pages_.size(); ++page_index) {
             Page& page = pages_[page_index];
@@ -81,6 +86,14 @@ private:
     template <typename T>
     bool access(size_t offset, T& value, bool write) {
         if (offset > size_ || sizeof(T) > size_ - offset) return false;
+        if (direct_base_) {
+            if (write) {
+                std::memcpy(direct_base_ + offset, &value, sizeof(T));
+            } else {
+                std::memcpy(&value, direct_base_ + offset, sizeof(T));
+            }
+            return true;
+        }
         const size_t page_index = offset / kPageSize;
         const size_t in_page = offset % kPageSize;
         Page& page = pages_[page_index];
@@ -111,6 +124,8 @@ private:
     size_t size_;
     const ReadFn& read_;
     const WriteFn& write_;
+    const DirectFn& direct_;
+    uint8_t* direct_base_ = nullptr;
     std::vector<Page> pages_;
     size_t resident_bytes_ = 0;
 };
@@ -7840,7 +7855,8 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         return false;
     }
     PagedRasterSurface color_surface(
-        color_address, static_cast<size_t>(color_bytes64), mem_read_, mem_write_);
+        color_address, static_cast<size_t>(color_bytes64), mem_read_, mem_write_,
+        mem_direct_);
     PagedRasterSurface depth_surface(
         depth_address, static_cast<size_t>(depth_bytes64), mem_read_, mem_write_);
 

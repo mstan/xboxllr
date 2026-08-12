@@ -146,6 +146,14 @@ void XboxMachine::init_devices() {
         [this](uint32_t addr, void* buf, size_t n) { return cpu_->read_mem(addr, buf, n); },
         [this](uint32_t addr, const void* buf, size_t n) {
             return cpu_->write_mem(addr, buf, n);
+        },
+        [this](uint32_t addr, size_t n) -> uint8_t* {
+            const uint64_t end = static_cast<uint64_t>(addr) + n;
+            if (end <= kRamSize) return ram_.data() + addr;
+            if (addr >= kRamSize && end <= static_cast<uint64_t>(kRamSize) * 2u) {
+                return ram_.data() + (addr - kRamSize);
+            }
+            return nullptr;
         });
     // GPU interrupt: Xbox routes the NV2A to ISA IRQ 3 (kernel unmasks it for VBLANK pacing).
     nv2a_->set_irq([this](int irq, bool level) { pic_->raise(irq, level); }, 3);
