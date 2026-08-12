@@ -7,6 +7,9 @@ param(
     [int] $GenericTop = 64,
     [string] $InputScript = 'tests\scripts\clock-accept.txt',
     [string] $ExpectedFinalSha = '048c33949593cae0b651c5cfce87766841a3acf6832c696e19812c55c8b9138b',
+    [string] $BaselineReport = '',
+    [double] $MinFinalFpsGainPct = 0.0,
+    [double] $MaxFocusWallRegressionPct = -1.0,
     [switch] $Build,
     [switch] $Force,
     [switch] $NoParse
@@ -104,6 +107,24 @@ try {
         & py -3 tools\summarize_xbox_report.py $report
         if ($LASTEXITCODE -ne 0) {
             throw "summary failed with exit code $LASTEXITCODE"
+        }
+        if ($BaselineReport) {
+            $compareArgs = @(
+                'tools\compare_xbox_reports.py',
+                $BaselineReport,
+                $report,
+                '--require-same-final-sha'
+            )
+            if ($MinFinalFpsGainPct -gt 0.0) {
+                $compareArgs += @('--min-final-fps-gain-pct', "$MinFinalFpsGainPct")
+            }
+            if ($MaxFocusWallRegressionPct -ge 0.0) {
+                $compareArgs += @('--max-focus-wall-regression-pct', "$MaxFocusWallRegressionPct")
+            }
+            & py -3 @compareArgs
+            if ($LASTEXITCODE -ne 0) {
+                throw "replay comparison checks failed with exit code $LASTEXITCODE"
+            }
         }
     }
 }
