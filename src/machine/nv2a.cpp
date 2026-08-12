@@ -8464,6 +8464,18 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         const float dzdy = (z20 * x10 - z10 * x20) / determinant;
         const float max_z_slope = std::max(std::abs(dzdx), std::abs(dzdy));
         const float inverse_area = 1.0f / static_cast<float>(area);
+        const bool constant_depth =
+            a->position[2] == b->position[2] &&
+            a->position[2] == c->position[2];
+        const float constant_depth_value =
+            a->position[2] + polygon_bias + polygon_scale * max_z_slope;
+        const bool constant_depth_passes =
+            constant_depth && std::isfinite(constant_depth_value) &&
+            constant_depth_value >= clip_min && constant_depth_value <= clip_max;
+        const uint32_t constant_incoming_depth = constant_depth_passes
+            ? static_cast<uint32_t>(std::floor(
+                  std::clamp(constant_depth_value, 0.0f, 16777215.0f)))
+            : 0u;
         const bool depth_read_required =
             uses_depth &&
             ((raster_state_[kRasterDepthMask] != 0) ||
@@ -8534,13 +8546,20 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     continue;
                 }
                 ++generic_combiner_fragments_;
-                float depth = (static_cast<float>(w0) * a->position[2] +
-                              static_cast<float>(w1) * b->position[2] +
-                              static_cast<float>(w2) * c->position[2]) *
-                             inverse_area;
-                depth += polygon_bias + polygon_scale * max_z_slope;
-                if (!std::isfinite(depth) || depth < clip_min || depth > clip_max)
-                    continue;
+                uint32_t incoming_depth = constant_incoming_depth;
+                if (constant_depth) {
+                    if (!constant_depth_passes) continue;
+                } else {
+                    float depth = (static_cast<float>(w0) * a->position[2] +
+                                  static_cast<float>(w1) * b->position[2] +
+                                  static_cast<float>(w2) * c->position[2]) *
+                                 inverse_area;
+                    depth += polygon_bias + polygon_scale * max_z_slope;
+                    if (!std::isfinite(depth) || depth < clip_min || depth > clip_max)
+                        continue;
+                    incoming_depth = static_cast<uint32_t>(
+                        std::floor(std::clamp(depth, 0.0f, 16777215.0f)));
+                }
 
                 const size_t offset = surface_swizzled
                     ? static_cast<size_t>(surface_swizzle->index(
@@ -8549,15 +8568,12 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     : static_cast<size_t>(y) * pitch +
                           static_cast<size_t>(x) * sizeof(uint32_t);
                 uint32_t stored_depth_stencil = 0;
-                uint32_t incoming_depth = 0;
                 if (depth_read_required) {
                     if (!depth_surface.read32(offset, stored_depth_stencil)) {
                         fault_("NV2A generic-combiner zeta DMA read failed");
                         raster_failed = true;
                         return;
                     }
-                    incoming_depth = static_cast<uint32_t>(
-                        std::floor(std::clamp(depth, 0.0f, 16777215.0f)));
                     // Depth-test-enable (bit3) is semantic: when disabled every
                     // fragment passes, even though the surface is still touched here
                     // because depth writes are enabled.
