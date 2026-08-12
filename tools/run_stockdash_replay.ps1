@@ -4,6 +4,7 @@ param(
     [UInt64] $MaxInsns = 12000000000,
     [UInt64] $FrameInterval = 500000000,
     [int] $MaxHostMemoryMb = 768,
+    [int] $GenericTop = 64,
     [string] $InputScript = 'tests\scripts\clock-accept.txt',
     [string] $ExpectedFinalSha = '048c33949593cae0b651c5cfce87766841a3acf6832c696e19812c55c8b9138b',
     [switch] $Build,
@@ -58,6 +59,7 @@ try {
         '--test-input-capture-prefix', $prefix,
         '--max-host-memory-mb', "$MaxHostMemoryMb",
         '--perf-accounting',
+        '--perf-generic-top', "$GenericTop",
         '--frame-series', $prefix, "$FrameInterval",
         '--max-insns', "$MaxInsns",
         '--frame-dump', $finalPpm

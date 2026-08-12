@@ -120,6 +120,11 @@ PERF_MEMORY_RE = re.compile(
 
 PERF_WITNESSED_PROFILE_RE = re.compile(r"^\[perf-witnessed-profile\] top=(?P<top>.*)$")
 
+PERF_GENERIC_RE = re.compile(
+    r"^\[perf-generic\] fingerprints=(?P<fingerprints>\d+) "
+    r"top(?P<top_n>\d+)=(?P<top>.*)$"
+)
+
 GENERIC_RE = re.compile(
     r"^\[2bl\] NV2A generic-combiner: "
     r"attempted/accelerated/fallback/software/exec/tri/frags/depth-pass/"
@@ -244,6 +249,58 @@ def parse_witnessed_profiles(text: str) -> list[dict[str, Any]]:
     return profiles
 
 
+GENERIC_PERF_ITEM_RE = re.compile(
+    r"^(?P<fp>[0-9a-f]+):"
+    r"b(?P<batches>\d+)/f(?P<frags>\d+)/w(?P<writes>\d+)/"
+    r"ns(?P<ns>\d+)/bb(?P<bbox_pixels>\d+)/"
+    r"maxf(?P<max_frags>\d+)/maxbb(?P<max_bbox_pixels>\d+):"
+    r"prim(?P<primitive>\d+)/v(?P<min_vertices>\d+)-(?P<max_vertices>\d+)/"
+    r"en(?P<enables>[0-9a-f]+)/sfmt(?P<surface_format>[0-9a-f]+)/"
+    r"pitch(?P<pitch>[0-9a-f]+)/sh(?P<shader>[0-9a-f]+)/"
+    r"comb(?P<combiner>[0-9a-f]+)/surf(?P<surface>[0-9a-f]+)/"
+    r"full(?P<full>[0-9a-f]+)(?P<detail>.*)$"
+)
+
+
+def parse_generic_perf(match: re.Match[str]) -> dict[str, Any]:
+    entries: list[dict[str, Any]] = []
+    top_text = match.group("top").strip()
+    if top_text:
+        for item in top_text.split():
+            item_match = GENERIC_PERF_ITEM_RE.match(item)
+            if not item_match:
+                entries.append({"raw": item})
+                continue
+            groups = item_match.groupdict()
+            parsed = {
+                "fp": groups["fp"],
+                "full": groups["full"],
+                "batches": int(groups["batches"]),
+                "frags": int(groups["frags"]),
+                "writes": int(groups["writes"]),
+                "ns": int(groups["ns"]),
+                "bbox_pixels": int(groups["bbox_pixels"]),
+                "max_frags": int(groups["max_frags"]),
+                "max_bbox_pixels": int(groups["max_bbox_pixels"]),
+                "primitive": int(groups["primitive"]),
+                "min_vertices": int(groups["min_vertices"]),
+                "max_vertices": int(groups["max_vertices"]),
+                "enables": groups["enables"],
+                "surface_format": groups["surface_format"],
+                "pitch": groups["pitch"],
+                "shader": groups["shader"],
+                "combiner": groups["combiner"],
+                "surface": groups["surface"],
+                "detail": groups["detail"].lstrip(":"),
+            }
+            entries.append(parsed)
+    return {
+        "fingerprints": int(match.group("fingerprints")),
+        "top_n": int(match.group("top_n")),
+        "top": entries,
+    }
+
+
 def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
     frames: list[dict[str, Any]] = []
     perf_samples: list[dict[str, Any]] = []
@@ -253,6 +310,7 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
     renderer_samples: list[dict[str, Any]] = []
     perf_memory_samples: list[dict[str, Any]] = []
     witnessed_profile_samples: list[list[dict[str, Any]]] = []
+    generic_perf_samples: list[dict[str, Any]] = []
     generic: dict[str, Any] | None = None
     scanout: dict[str, Any] | None = None
     retired: dict[str, Any] | None = None
@@ -283,6 +341,8 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
             perf_memory_samples.append(parse_int_fields(match))
         elif match := PERF_WITNESSED_PROFILE_RE.match(line):
             witnessed_profile_samples.append(parse_witnessed_profiles(match.group("top")))
+        elif match := PERF_GENERIC_RE.match(line):
+            generic_perf_samples.append(parse_generic_perf(match))
         elif match := GENERIC_RE.match(line):
             generic = parse_int_fields(match)
         elif match := SCANOUT_RE.match(line):
@@ -319,6 +379,8 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
         "final_witnessed_profiles": (
             witnessed_profile_samples[-1] if witnessed_profile_samples else None
         ),
+        "generic_perf_samples": generic_perf_samples,
+        "final_generic_perf": generic_perf_samples[-1] if generic_perf_samples else None,
         "generic_combiner": generic,
         "generic_fingerprints": generic_fingerprints,
         "scanout": scanout,
