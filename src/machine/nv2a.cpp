@@ -8459,6 +8459,10 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         const float dzdy = (z20 * x10 - z10 * x20) / determinant;
         const float max_z_slope = std::max(std::abs(dzdx), std::abs(dzdy));
         const float inverse_area = 1.0f / static_cast<float>(area);
+        const bool depth_read_required =
+            uses_depth &&
+            ((raster_state_[kRasterDepthMask] != 0) ||
+             (depth_test_enabled_bit && depth_func != 0x0207));
 
         for (int32_t y = tri_ymin; y <= tri_ymax; ++y) {
             const int64_t py = static_cast<int64_t>(y) * 16 + 8;
@@ -8489,7 +8493,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                           static_cast<size_t>(x) * sizeof(uint32_t);
                 uint32_t stored_depth_stencil = 0;
                 uint32_t incoming_depth = 0;
-                if (uses_depth) {
+                if (depth_read_required) {
                     if (!depth_surface.read32(offset, stored_depth_stencil)) {
                         fault_("NV2A generic-combiner zeta DMA read failed");
                         raster_failed = true;
