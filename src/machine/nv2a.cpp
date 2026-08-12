@@ -8129,6 +8129,38 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         const int32_t y0 = static_cast<int32_t>(std::floor(texel_y));
         const float fx = texel_x - static_cast<float>(x0);
         const float fy = texel_y - static_cast<float>(y0);
+        if (mode_u != TextureAddressMode::kBorder &&
+            mode_v != TextureAddressMode::kBorder) {
+            auto coordinate_fast = [](int32_t value, uint32_t size,
+                                      TextureAddressMode mode) {
+                if (mode == TextureAddressMode::kRepeat) {
+                    if (value < 0) return size - 1;
+                    if (value >= static_cast<int32_t>(size)) return 0u;
+                    return static_cast<uint32_t>(value);
+                }
+                return static_cast<uint32_t>(
+                    std::clamp(value, 0, static_cast<int32_t>(size) - 1));
+            };
+            auto texel = [&](int32_t x, int32_t y) {
+                const uint32_t cx = coordinate_fast(x, width, mode_u);
+                const uint32_t cy = coordinate_fast(y, height, mode_v);
+                const size_t offset = static_cast<size_t>(cy) * row_pitch +
+                                      static_cast<size_t>(cx) * sizeof(uint32_t);
+                uint32_t pixel = 0;
+                std::memcpy(&pixel, data.data() + offset, sizeof(pixel));
+                return unpack_argb8(pixel);
+            };
+            const auto c00 = texel(x0, y0);
+            const auto c10 = texel(x0 + 1, y0);
+            const auto c01 = texel(x0, y0 + 1);
+            const auto c11 = texel(x0 + 1, y0 + 1);
+            for (size_t c4 = 0; c4 < 4; ++c4) {
+                const float top = c00[c4] + (c10[c4] - c00[c4]) * fx;
+                const float bottom = c01[c4] + (c11[c4] - c01[c4]) * fx;
+                color[c4] = top + (bottom - top) * fy;
+            }
+            return true;
+        }
         const auto border = unpack_argb8(border_pixel);
         auto coordinate = [](int32_t value, uint32_t size, TextureAddressMode mode) {
             if (mode == TextureAddressMode::kRepeat) {
