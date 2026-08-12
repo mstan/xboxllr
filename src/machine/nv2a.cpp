@@ -4286,6 +4286,14 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
             const float max_z_slope =
                 std::max(std::abs(dzdx), std::abs(dzdy));
             const float inverse_area = 1.0f / static_cast<float>(area);
+            const double inverse_area_double =
+                1.0 / static_cast<double>(area);
+            const double inverse_position_w0 =
+                1.0 / static_cast<double>(a->position[3]);
+            const double inverse_position_w1 =
+                1.0 / static_cast<double>(b->position[3]);
+            const double inverse_position_w2 =
+                1.0 / static_cast<double>(c->position[3]);
 
             // Per-triangle hoist (beads-xbox.1.13 Phase 1): a/b/c->diffuse is a
             // per-VERTEX value, invariant across every pixel this triangle
@@ -5261,14 +5269,14 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                         ++projected_color_depth_passes_;
 
                     const double lambda0 =
-                        static_cast<double>(w0) / static_cast<double>(area);
+                        static_cast<double>(w0) * inverse_area_double;
                     const double lambda1 =
-                        static_cast<double>(w1) / static_cast<double>(area);
+                        static_cast<double>(w1) * inverse_area_double;
                     const double lambda2 =
-                        static_cast<double>(w2) / static_cast<double>(area);
-                    const double q0 = lambda0 / a->position[3];
-                    const double q1 = lambda1 / b->position[3];
-                    const double q2 = lambda2 / c->position[3];
+                        static_cast<double>(w2) * inverse_area_double;
+                    const double q0 = lambda0 * inverse_position_w0;
+                    const double q1 = lambda1 * inverse_position_w1;
+                    const double q2 = lambda2 * inverse_position_w2;
                     const double qsum = q0 + q1 + q2;
                     if (!std::isfinite(qsum) || qsum == 0.0) continue;
 
