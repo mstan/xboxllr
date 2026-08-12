@@ -8468,6 +8468,45 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             uses_depth &&
             ((raster_state_[kRasterDepthMask] != 0) ||
              (depth_test_enabled_bit && depth_func != 0x0207));
+        const std::array<const TransformedVertex*, 3> triangle_vertices{{a, b, c}};
+        std::array<std::array<float, 4>, 3> diffuse_values{};
+        std::array<std::array<float, 4>, 3> specular_values{};
+        std::array<std::array<std::array<float, 4>, 3>, 4> texture_values{};
+        auto sanitize_color_component = [](float value, size_t component) {
+            if (std::isnan(value)) value = component == 3 ? 1.0f : 0.0f;
+            return std::clamp(value, 0.0f, 1.0f);
+        };
+        if (needs_diffuse) {
+            for (size_t vertex = 0; vertex < triangle_vertices.size(); ++vertex) {
+                for (size_t component = 0; component < 4; ++component) {
+                    diffuse_values[vertex][component] =
+                        sanitize_color_component(
+                            triangle_vertices[vertex]->diffuse[component],
+                            component);
+                }
+            }
+        }
+        if (needs_specular) {
+            for (size_t vertex = 0; vertex < triangle_vertices.size(); ++vertex) {
+                for (size_t component = 0; component < 4; ++component) {
+                    specular_values[vertex][component] =
+                        sanitize_color_component(
+                            triangle_vertices[vertex]->specular[component],
+                            component);
+                }
+            }
+        }
+        for (uint32_t stage = 0; stage < 4; ++stage) {
+            if (!texture_referenced[stage]) continue;
+            for (size_t vertex = 0; vertex < triangle_vertices.size(); ++vertex) {
+                for (size_t component = 0; component < 4; ++component) {
+                    const float value =
+                        triangle_vertices[vertex]->texture[stage][component];
+                    texture_values[stage][vertex][component] =
+                        std::isnan(value) ? 0.0f : value;
+                }
+            }
+        }
 
         for (int32_t y = tri_ymin; y <= tri_ymax; ++y) {
             const int64_t py = static_cast<int64_t>(y) * 16 + 8;
@@ -8532,16 +8571,13 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 std::array<float, 4> diffuse{};
                 std::array<float, 4> specular{};
                 bool varying_failed = false;
-                auto interpolate4 = [&](auto member) {
+                auto interpolate4 =
+                    [&](const std::array<std::array<float, 4>, 3>& values) {
                     std::array<float, 4> result{};
                     for (size_t c4 = 0; c4 < 4; ++c4) {
-                        auto component = [&](const TransformedVertex* v) {
-                            float value = (v->*member)[c4];
-                            if (std::isnan(value)) value = c4 == 3 ? 1.0f : 0.0f;
-                            return std::clamp(value, 0.0f, 1.0f);
-                        };
-                        const double d = (q0 * component(a) + q1 * component(b) +
-                                         q2 * component(c)) / qsum;
+                        const double d = (q0 * values[0][c4] +
+                                         q1 * values[1][c4] +
+                                         q2 * values[2][c4]) / qsum;
                         if (!std::isfinite(d)) {
                             varying_failed = true;
                             return result;
@@ -8551,9 +8587,9 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     return result;
                 };
                 if (needs_diffuse)
-                    diffuse = interpolate4(&TransformedVertex::diffuse);
+                    diffuse = interpolate4(diffuse_values);
                 if (!varying_failed && needs_specular)
-                    specular = interpolate4(&TransformedVertex::specular);
+                    specular = interpolate4(specular_values);
                 if (varying_failed) {
                     fault_("NV2A generic-combiner varying is non-finite");
                     raster_failed = true;
@@ -8579,12 +8615,10 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     std::array<float, 4> texcoord{};
                     bool texcoord_failed = false;
                     for (size_t c4 = 0; c4 < 4; ++c4) {
-                        auto component = [&](const TransformedVertex* v) {
-                            float value = v->texture[stage][c4];
-                            return std::isnan(value) ? 0.0f : value;
-                        };
-                        const double t = (q0 * component(a) + q1 * component(b) +
-                                         q2 * component(c)) / qsum;
+                        const double t = (q0 * texture_values[stage][0][c4] +
+                                         q1 * texture_values[stage][1][c4] +
+                                         q2 * texture_values[stage][2][c4]) /
+                                        qsum;
                         if (!std::isfinite(t)) {
                             texcoord_failed = true;
                             break;
