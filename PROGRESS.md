@@ -35,9 +35,10 @@ commits without explicit current authorization.
 ## Current optimization cursor (2026-08-13)
 
 Active Beads issue: `beads-xbox.1.13` (`Performance: reach interactive-navigable stock
-dashboard (>=10 fps sustained)`). Current retained code is pushed at `fa60570`
-(`Track generic combiner read dependencies`) on `origin/master`; the latest experiment was
-rejected and reverted.
+dashboard (>=10 fps sustained)`). Current retained code on `origin/master` includes the direct
+vertex-fetch optimization plus disabled perf-timer guards for the default no-accounting path.
+The latest rejected experiment was direct PFIFO command-word fetch via `mem_direct_`; it was
+exact but slower on the 1B smoke and was reverted.
 
 Correctness status: the exact OpenGL/resident baseline for the stock dashboard 12B replay is
 `build/resident-resolve-bgra-v1-12b.report.json`. It exits cleanly with empty stderr and final
@@ -82,6 +83,20 @@ when available, after the same DMA-object start/end validation, and falls back t
 `61.490s -> 57.376s` (`-6.69%`), CPU `-6.70%`, dispatch `-7.84%`, submit `-8.05%`, and vertex
 transform `-14.33%`. The absolute FPS reported with heavier accounting is still only `2.376`, so
 the >=10 fps goal remains open.
+
+Retained default-path cleanup: disabled perf-accounting timers are now guarded at the hottest
+CPU, host-poll, NV2A dispatch/pushbuffer, submit/transform, and raster timing scopes, so normal
+interactive and `-NoPerfAccounting` replays do not construct no-op `ScopedAdd` timers. Validation:
+all `build-release/test*.exe` passed; no-accounting 1B smoke
+`build/disabled-timer-guards-noperf-smoke-1b.report.json` was exact/empty stderr and improved
+final-four wall against the clean direct-fetch no-accounting smoke by `25.617s -> 23.549s`
+(`-8.07%`), final FPS `2.673 -> 2.777`; full no-accounting 12B
+`build/disabled-timer-guards-noperf-v1-12b.report.json` was exact/empty stderr with final SHA
+`876b58c2...` and final FPS `2.482`; perf-accounting 1B smoke
+`build/disabled-timer-guards-perf-smoke-1b.report.json` remained exact/empty stderr and still
+emitted parseable CPU/host/NV2A split counters. Rejected adjacent experiment:
+`build/direct-pfifo-fetch-smoke-1b.report.json` was exact but regressed final FPS
+`2.845 -> 2.819` and final-four wall by `+3.81%`, so source was reverted.
 
 ## Arc 1 burndown
 

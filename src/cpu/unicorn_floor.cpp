@@ -303,8 +303,10 @@ uint64_t UnicornFloor::run(uint32_t start_eip, uint64_t max_insns, std::string& 
     last_fault_addr_ = 0;
     last_fault_type_ = 0;
     uc_err e;
-    {
+    if (perf::g_enabled) {
         perf::ScopedAdd t(perf::g_ns_cpu, perf::g_calls_cpu);
+        e = uc_emu_start(uc, start_eip, 0, /*timeout=*/0, /*count=*/max_insns);
+    } else {
         e = uc_emu_start(uc, start_eip, 0, /*timeout=*/0, /*count=*/max_insns);
     }
     if (!stop_reason_.empty()) {

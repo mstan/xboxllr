@@ -1115,8 +1115,11 @@ bool Nv2a::decode_inline_array() {
 }
 
 bool Nv2a::submit_vertex_batch() {
-    perf::ScopedAdd submit_timer(perf::g_ns_nv2a_submit_vertex,
-                                 perf::g_calls_nv2a_submit_vertex);
+    std::optional<perf::ScopedAdd> submit_timer;
+    if (perf::g_enabled) {
+        submit_timer.emplace(perf::g_ns_nv2a_submit_vertex,
+                             perf::g_calls_nv2a_submit_vertex);
+    }
     const bool indexed = !vertex_indices_.empty();
     const bool inline_array = !inline_vertices_.empty();
     const bool immediate = !immediate_vertices_.empty();
@@ -1316,8 +1319,11 @@ bool Nv2a::submit_vertex_batch() {
     };
 
     {
-        perf::ScopedAdd transform_timer(perf::g_ns_nv2a_vertex_transform,
-                                        perf::g_calls_nv2a_vertex_transform);
+        std::optional<perf::ScopedAdd> transform_timer;
+        if (perf::g_enabled) {
+            transform_timer.emplace(perf::g_ns_nv2a_vertex_transform,
+                                    perf::g_calls_nv2a_vertex_transform);
+        }
         for (size_t vertex_index = 0; vertex_index < vertex_count; ++vertex_index) {
             if (inline_array || immediate) {
                 const auto& inputs = inline_array ? inline_vertices_[vertex_index]
@@ -1494,7 +1500,8 @@ bool Nv2a::submit_vertex_batch() {
     bool raster_executed = false;
     bool raster_ok;
     {
-        perf::ScopedAdd t(perf::g_ns_raster, perf::g_calls_raster);
+        std::optional<perf::ScopedAdd> t;
+        if (perf::g_enabled) t.emplace(perf::g_ns_raster, perf::g_calls_raster);
         raster_ok = rasterize_witnessed_batch(raster_executed);
     }
     if (!raster_ok) return false;
@@ -3078,13 +3085,19 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         // actual bound combiner state generically. All witnessed profiles above
         // are pinned evidence and are matched first; this path is a strict
         // fallback that never overrides them.
-        perf::ScopedAdd t(perf::g_ns_raster_generic, perf::g_calls_raster_generic);
+        std::optional<perf::ScopedAdd> t;
+        if (perf::g_enabled) {
+            t.emplace(perf::g_ns_raster_generic, perf::g_calls_raster_generic);
+        }
         return rasterize_generic_combiner_batch(executed);
     }
     executed = true;
-    perf::ScopedAdd witnessed_profile_timer(
-        perf::g_ns_witnessed_profile[static_cast<size_t>(profile)],
-        perf::g_calls_witnessed_profile[static_cast<size_t>(profile)]);
+    std::optional<perf::ScopedAdd> witnessed_profile_timer;
+    if (perf::g_enabled) {
+        witnessed_profile_timer.emplace(
+            perf::g_ns_witnessed_profile[static_cast<size_t>(profile)],
+            perf::g_calls_witnessed_profile[static_cast<size_t>(profile)]);
+    }
     const bool pitch_tex5_profile =
         profile == Profile::kPitchTex5ProjectedColor ||
         profile == Profile::kPitchTex5DiffuseColor;
@@ -6546,9 +6559,11 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     if (profile_generic_fingerprint)
         generic_texture_setup_started_at = std::chrono::steady_clock::now();
     {
-        perf::ScopedAdd texture_setup_timer(
-            perf::g_ns_generic_texture_setup,
-            perf::g_calls_generic_texture_setup);
+        std::optional<perf::ScopedAdd> texture_setup_timer;
+        if (perf::g_enabled) {
+            texture_setup_timer.emplace(perf::g_ns_generic_texture_setup,
+                                        perf::g_calls_generic_texture_setup);
+        }
         for (uint32_t stage = 0; stage < 4; ++stage) {
         if (!texture_referenced[stage]) continue;
         if ((raster_state_[kRasterTextureEnableMask] & (1u << stage)) == 0) {
@@ -9267,9 +9282,11 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     if (profile_generic_fingerprint)
         generic_software_raster_started_at = std::chrono::steady_clock::now();
     {
-        perf::ScopedAdd software_raster_timer(
-            perf::g_ns_generic_software_raster,
-            perf::g_calls_generic_software_raster);
+        std::optional<perf::ScopedAdd> software_raster_timer;
+        if (perf::g_enabled) {
+            software_raster_timer.emplace(perf::g_ns_generic_software_raster,
+                                          perf::g_calls_generic_software_raster);
+        }
         const size_t vertex_count = transformed_batch_.size();
         if (primitive_mode_ == 5) {
             for (size_t i = 0; i + 2 < vertex_count; i += 3)
@@ -9310,8 +9327,11 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     if (profile_generic_fingerprint)
         generic_flush_started_at = std::chrono::steady_clock::now();
     {
-        perf::ScopedAdd flush_timer(perf::g_ns_generic_flush,
-                                    perf::g_calls_generic_flush);
+        std::optional<perf::ScopedAdd> flush_timer;
+        if (perf::g_enabled) {
+            flush_timer.emplace(perf::g_ns_generic_flush,
+                                perf::g_calls_generic_flush);
+        }
         if (!color_surface.flush()) {
             fault_("NV2A generic-combiner color DMA write failed");
             record_generic_fingerprint_perf();
@@ -10313,9 +10333,13 @@ void Nv2a::drain_pull_queue() {
         PushMethod push = pull_queue_.front();
         pull_queue_.pop_front();
         perf::record_pfifo_queue_pop();
-        perf::ScopedAdd dispatch_timer(perf::g_ns_nv2a_dispatch_method,
-                                       perf::g_calls_nv2a_dispatch_method);
-        dispatch_method(push);
+        if (perf::g_enabled) {
+            perf::ScopedAdd dispatch_timer(perf::g_ns_nv2a_dispatch_method,
+                                           perf::g_calls_nv2a_dispatch_method);
+            dispatch_method(push);
+        } else {
+            dispatch_method(push);
+        }
     }
 }
 
@@ -10333,7 +10357,11 @@ bool Nv2a::pusher_enabled(uint8_t channel) const {
 }
 
 void Nv2a::process_pushbuffer(uint8_t channel) {
-    perf::ScopedAdd perf_t(perf::g_ns_nv2a_pushbuffer, perf::g_calls_nv2a_pushbuffer);
+    std::optional<perf::ScopedAdd> perf_t;
+    if (perf::g_enabled) {
+        perf_t.emplace(perf::g_ns_nv2a_pushbuffer,
+                       perf::g_calls_nv2a_pushbuffer);
+    }
     auto& ch = channels_[channel];
     // CACHE1 is finite hardware storage, not an unbounded host command queue. The
     // pusher may prefetch METHOD/DATA entries while PGRAPH is blocked, but stops at

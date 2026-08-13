@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <fstream>
 #include <iterator>
+#include <optional>
 #include <vector>
 
 #include "cpu/unicorn_floor.hpp"
@@ -337,7 +338,11 @@ uint64_t XboxMachine::run(uint32_t start, uint64_t max, std::string& err) {
     uint64_t done = 0;
     while (done < max) {
         {
-            perf::ScopedAdd perf_t(perf::g_ns_host_poll_devices, perf::g_calls_host_poll_devices);
+            std::optional<perf::ScopedAdd> perf_t;
+            if (perf::g_enabled) {
+                perf_t.emplace(perf::g_ns_host_poll_devices,
+                               perf::g_calls_host_poll_devices);
+            }
             const uint64_t guest_millisecond = total_insns_ * 1000 / kCpuHz;
             if (host_poll_cb_ && guest_millisecond != host_poll_millisecond_) {
                 host_poll_millisecond_ = guest_millisecond;
@@ -359,7 +364,11 @@ uint64_t XboxMachine::run(uint32_t start, uint64_t max, std::string& err) {
         if (!cerr.empty()) { err = cerr; break; }
 
         {
-            perf::ScopedAdd perf_t(perf::g_ns_host_poll_devices, perf::g_calls_host_poll_devices);
+            std::optional<perf::ScopedAdd> perf_t;
+            if (perf::g_enabled) {
+                perf_t.emplace(perf::g_ns_host_poll_devices,
+                               perf::g_calls_host_poll_devices);
+            }
             if (pit_) pit_->set_time(total_insns_ * Pit8254::kPitFreq / kCpuHz);
             // Frame clock: ~60 Hz VBLANK derived from the same retired-instruction time base,
             // plus the sub-frame phase for the VGA retrace status bit.
@@ -380,7 +389,11 @@ uint64_t XboxMachine::run(uint32_t start, uint64_t max, std::string& err) {
         // can take it (inject succeeds) BEFORE committing the PIC's ISR/ack bookkeeping — an
         // ack without delivery would wedge the line in-service.
         {
-            perf::ScopedAdd perf_t(perf::g_ns_host_poll_devices, perf::g_calls_host_poll_devices);
+            std::optional<perf::ScopedAdd> perf_t;
+            if (perf::g_enabled) {
+                perf_t.emplace(perf::g_ns_host_poll_devices,
+                               perf::g_calls_host_poll_devices);
+            }
             if (pic_ && pic_->intr_pending() && cpu_->interrupts_enabled()) {
                 int vec = pic_->peek();
                 if (vec >= 0) {
