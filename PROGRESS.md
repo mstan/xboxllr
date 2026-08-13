@@ -78,6 +78,14 @@ SHA `876b58c2...`; against `build/vsh-context-direct-perf-v2-12b.report.json`, f
 the next large target to generic raster/setup plus exact resident admission. Temporary counter
 source was reverted.
 
+Latest rejected probe: resident exact compute for mixed-W texture-modulate. It wrote exact compute
+shader results directly into the OpenGL resident color texture, avoiding full-surface CPU
+readback/writeback, and stayed exact at both 1B and 12B. It was still slower at 12B:
+`build/resident-texture-compute-noperf-v1-12b.report.json` regressed final FPS `3.095 -> 2.565`
+and final-four wall `43.786s -> 49.581s` (`+13.24%`). Source was reverted and the retained
+baseline rebuilt. Do not retry this all-triangles-per-pixel resident compute shape without
+tiling/binning or a comparable reduction in per-pixel triangle search/upload work.
+
 Latest rejected experiment: widening the texture-modulate resident OpenGL path by CPU-clipping
 mixed-W triangles was exact at the 1B no-accounting smoke and slightly faster in that short gate,
 but the full 12B no-accounting replay changed the final SHA from `876b58c2...` to

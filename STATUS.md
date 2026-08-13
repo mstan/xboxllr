@@ -3,6 +3,27 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-13 - Rejected resident exact-compute texture path
+
+Tested a resident exact-compute variant for the mixed-W texture-modulate dashboard family. The
+prototype kept the exact compute shader's software edge/blend semantics but wrote directly into
+the OpenGL resident color texture, avoiding the earlier full-surface CPU readback/writeback path.
+
+Validation was correct but performance was worse. Release `xlle`/`test_nv2a` built cleanly,
+`test_nv2a` passed, and `git diff --check` was clean. The 1B no-accounting stock smoke
+`build/resident-texture-compute-noperf-smoke-1b.report.json` was exact/empty stderr with final
+SHA `a6087ec5...`, but slightly slower than the retained cache baseline (`2.841 -> 2.814` FPS,
+final-four wall `+0.49%`). The full 12B no-accounting replay
+`build/resident-texture-compute-noperf-v1-12b.report.json` was also exact/empty stderr with final
+SHA `876b58c2...`, but regressed final FPS `3.095 -> 2.565` and final-four wall
+`43.786s -> 49.581s` (`+13.24%`). Source was reverted and the retained baseline was rebuilt.
+
+Conclusion: exact resident compute avoids the CPU surface round trip, but the current dispatch
+shape still has each pixel loop over the expanded triangle list and increases resident uploads
+(`725 -> 826`) in the 12B run. Do not revive this shape without tiling/binning or another way to
+avoid all-triangles-per-pixel work. Current best remains commit `6c12bb3` plus documentation
+commits, final FPS `3.095`.
+
 ## 2026-08-13 - Post-transform cache diagnostics shift the next target to exact resident/generic raster work
 
 Temporary perf-only counters on the retained batch-local post-transform cache show the cache is
