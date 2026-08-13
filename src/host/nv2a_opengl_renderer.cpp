@@ -119,6 +119,7 @@ constexpr unsigned int kGlUnsignedInt = 0x1405;
 constexpr unsigned int kGlUnsignedInt248 = 0x84FA;
 constexpr unsigned int kGlFloat = 0x1406;
 constexpr unsigned int kGlWriteOnly = 0x88B9;
+constexpr unsigned int kGlReadWrite = 0x88BA;
 constexpr unsigned int kGlTriangles = 0x0004;
 constexpr unsigned int kGlBlend = 0x0BE2;
 constexpr unsigned int kGlDepthTest = 0x0B71;
@@ -551,6 +552,51 @@ void main() {
     if (xy.x >= 256u || xy.y >= 4u) return;
     uvec4 bytes = pattern(xy.x, xy.y);
     imageStore(output_image, ivec2(xy), vec4(bytes) / 255.0);
+}
+)GLSL";
+
+constexpr const char* kRgba8ImageLoadBlendProbeSource = R"GLSL(#version 430 core
+layout(local_size_x = 16, local_size_y = 1) in;
+layout(rgba8, binding = 0) uniform image2D surface_image;
+uvec4 source_pattern(uint x, uint y) {
+    return uvec4(255u - x, (x * 29u + y * 7u) & 255u,
+                 (x * 11u + 17u + y * 13u) & 255u,
+                 (x * 53u + y * 31u) & 255u);
+}
+uint blend_factor_byte(uint factor, uint src_alpha) {
+    if (factor == 0u) return 0u;
+    if (factor == 1u) return 255u;
+    if (factor == 0x0302u) return src_alpha;
+    return 255u - src_alpha;
+}
+uint blend_channel(uint src, uint dst, uint src_factor, uint dst_factor) {
+    return (src * src_factor + dst * dst_factor + 127u) / 255u;
+}
+uint blend_src(uint y) {
+    if (y == 1u || y == 2u || y == 5u || y == 6u) return 0x0302u;
+    return 1u;
+}
+uint blend_dst(uint y) {
+    if (y == 1u || y == 5u) return 0x0303u;
+    if (y == 2u || y == 6u) return 1u;
+    return 0u;
+}
+void main() {
+    uvec2 xy = gl_GlobalInvocationID.xy;
+    if (xy.x >= 256u || xy.y >= 8u) return;
+    uvec4 dst = uvec4(floor(clamp(imageLoad(surface_image, ivec2(xy)), 0.0, 1.0) *
+                            255.0 + 0.5));
+    uvec4 src = source_pattern(xy.x, xy.y);
+    uint sf = blend_factor_byte(blend_src(xy.y), src.a);
+    uint df = blend_factor_byte(blend_dst(xy.y), src.a);
+    uvec3 rgb = uvec3(blend_channel(src.r, dst.r, sf, df),
+                      blend_channel(src.g, dst.g, sf, df),
+                      blend_channel(src.b, dst.b, sf, df));
+    bool x8 = xy.y >= 4u;
+    bool blend_enabled = xy.y == 1u || xy.y == 2u || xy.y == 5u || xy.y == 6u;
+    uint alpha = x8 ? 255u : (blend_enabled ? blend_channel(src.a, dst.a, sf, df)
+                                            : src.a);
+    imageStore(surface_image, ivec2(xy), vec4(uvec4(rgb, alpha)) / 255.0);
 }
 )GLSL";
 
@@ -1189,6 +1235,165 @@ public:
                                 why, sizeof(why),
                                 "OpenGL RGBA8 image-store probe mismatch at %u,%u "
                                 "channel %zu: got=%u expected=%u",
+                                x, y, channel,
+                                static_cast<unsigned>(actual[offset + channel]),
+                                static_cast<unsigned>(expected[channel]));
+                            error = why;
+                            ok = false;
+                            break;
+                        }
+                    }
+                    if (!ok) break;
+                }
+                if (!ok) break;
+            }
+        }
+        if (fbo && delete_framebuffers_) delete_framebuffers_(1, &fbo);
+        if (texture && delete_textures_) delete_textures_(1, &texture);
+        if (program && delete_program_) delete_program_(program);
+        if (ok) error.clear();
+        return ok;
+    }
+    bool debug_probe_rgba8_image_load_blend(std::string& error) override {
+        SDL_Window* previous_window = SDL_GL_GetCurrentWindow();
+        SDL_GLContext previous_context = SDL_GL_GetCurrentContext();
+        if (!SDL_GL_MakeCurrent(window_, context_)) {
+            error = std::string("OpenGL RGBA8 image-load/blend probe context lost: ") +
+                    SDL_GetError();
+            return false;
+        }
+        struct ContextRestore {
+            SDL_Window* previous_window;
+            SDL_GLContext previous_context;
+            SDL_Window* fallback_window;
+            ~ContextRestore() {
+                restore_previous_gl_context(previous_window, previous_context,
+                                            fallback_window);
+            }
+        } restore{previous_window, previous_context, window_};
+
+        unsigned int program = 0;
+        if (!compile_program(kRgba8ImageLoadBlendProbeSource,
+                             "rgba8-image-load-blend", program, error)) {
+            return false;
+        }
+        auto initial_pattern = [](uint32_t x, uint32_t y) {
+            return std::array<uint8_t, 4>{
+                static_cast<uint8_t>(x),
+                static_cast<uint8_t>((x * 73u + y * 5u) & 255u),
+                static_cast<uint8_t>((x * 151u + y * 3u) & 255u),
+                static_cast<uint8_t>((x * 197u + y * 19u) & 255u)};
+        };
+        auto source_pattern = [](uint32_t x, uint32_t y) {
+            return std::array<uint8_t, 4>{
+                static_cast<uint8_t>(255u - x),
+                static_cast<uint8_t>((x * 29u + y * 7u) & 255u),
+                static_cast<uint8_t>((x * 11u + 17u + y * 13u) & 255u),
+                static_cast<uint8_t>((x * 53u + y * 31u) & 255u)};
+        };
+        auto pack_unorm8 = [](float value) {
+            return static_cast<uint8_t>(std::floor(
+                std::clamp(value, 0.0f, 1.0f) * 255.0f + 0.5f));
+        };
+        auto blend_factor = [](uint32_t factor, float src_alpha) {
+            switch (factor) {
+                case 0: return 0.0f;
+                case 1: return 1.0f;
+                case 0x0302: return src_alpha;
+                default: return 1.0f - src_alpha;
+            }
+        };
+        auto blend_src = [](uint32_t y) {
+            return (y == 1u || y == 2u || y == 5u || y == 6u) ? 0x0302u : 1u;
+        };
+        auto blend_dst = [](uint32_t y) {
+            if (y == 1u || y == 5u) return 0x0303u;
+            if (y == 2u || y == 6u) return 1u;
+            return 0u;
+        };
+        auto expected_pattern = [&](uint32_t x, uint32_t y) {
+            const auto dst_bytes = initial_pattern(x, y);
+            const auto src_bytes = source_pattern(x, y);
+            std::array<float, 4> dst{};
+            std::array<float, 4> src{};
+            for (size_t c = 0; c < 4; ++c) {
+                dst[c] = static_cast<float>(dst_bytes[c]) / 255.0f;
+                src[c] = static_cast<float>(src_bytes[c]) / 255.0f;
+            }
+            const float src_alpha = std::clamp(src[3], 0.0f, 1.0f);
+            const float sf = blend_factor(blend_src(y), src_alpha);
+            const float df = blend_factor(blend_dst(y), src_alpha);
+            std::array<uint8_t, 4> out{};
+            for (size_t c = 0; c < 3; ++c)
+                out[c] = pack_unorm8(src[c] * sf + dst[c] * df);
+            const bool x8 = y >= 4u;
+            const bool blend_enabled =
+                y == 1u || y == 2u || y == 5u || y == 6u;
+            const float alpha = x8
+                ? 1.0f
+                : (blend_enabled ? std::clamp(src[3] * sf + dst[3] * df, 0.0f, 1.0f)
+                                 : src[3]);
+            out[3] = pack_unorm8(alpha);
+            return out;
+        };
+
+        std::vector<uint8_t> initial(256u * 8u * 4u, 0);
+        for (uint32_t y = 0; y < 8u; ++y) {
+            for (uint32_t x = 0; x < 256u; ++x) {
+                const auto bytes = initial_pattern(x, y);
+                const size_t offset = (static_cast<size_t>(y) * 256u + x) * 4u;
+                for (size_t channel = 0; channel < 4u; ++channel)
+                    initial[offset + channel] = bytes[channel];
+            }
+        }
+
+        unsigned int texture = 0;
+        gen_textures_(1, &texture);
+        bind_texture_(kGlTexture2D, texture);
+        tex_parameter_i_(kGlTexture2D, kGlTextureMinFilter, kGlNearest);
+        tex_parameter_i_(kGlTexture2D, kGlTextureMagFilter, kGlNearest);
+        tex_parameter_i_(kGlTexture2D, kGlTextureWrapS, kGlClampToEdge);
+        tex_parameter_i_(kGlTexture2D, kGlTextureWrapT, kGlClampToEdge);
+        pixel_store_i_(kGlUnpackAlignment, 1);
+        tex_image_2d_(kGlTexture2D, 0, kGlRgba8, 256, 8, 0, kGlRgba,
+                      kGlUnsignedByte, initial.data());
+        bind_image_texture_(0, texture, 0, 0, 0, kGlReadWrite, kGlRgba8);
+        use_program_(program);
+        dispatch_compute_(16, 8, 1);
+        memory_barrier_(kGlShaderImageAccessBarrierBit | kGlFramebufferBarrierBit);
+
+        unsigned int fbo = 0;
+        gen_framebuffers_(1, &fbo);
+        bind_framebuffer_(kGlFramebuffer, fbo);
+        framebuffer_texture_2d_(kGlFramebuffer, kGlColorAttachment0, kGlTexture2D,
+                                texture, 0);
+        bool ok = true;
+        if (check_framebuffer_status_(kGlFramebuffer) != kGlFramebufferComplete) {
+            error = "OpenGL RGBA8 image-load/blend probe framebuffer is incomplete";
+            ok = false;
+        }
+        std::vector<uint8_t> actual(256u * 8u * 4u, 0);
+        if (ok) {
+            pixel_store_i_(kGlPackAlignment, 1);
+            read_pixels_(0, 0, 256, 8, kGlRgba, kGlUnsignedByte, actual.data());
+            if (get_error_() != kGlNoError) {
+                error = "OpenGL RGBA8 image-load/blend probe readback failed";
+                ok = false;
+            }
+        }
+        if (ok) {
+            for (uint32_t y = 0; y < 8u; ++y) {
+                for (uint32_t x = 0; x < 256u; ++x) {
+                    const auto expected = expected_pattern(x, y);
+                    const size_t offset =
+                        (static_cast<size_t>(y) * 256u + x) * 4u;
+                    for (size_t channel = 0; channel < 4u; ++channel) {
+                        if (actual[offset + channel] != expected[channel]) {
+                            char why[224];
+                            std::snprintf(
+                                why, sizeof(why),
+                                "OpenGL RGBA8 image-load/blend probe mismatch "
+                                "at %u,%u channel %zu: got=%u expected=%u",
                                 x, y, channel,
                                 static_cast<unsigned>(actual[offset + channel]),
                                 static_cast<unsigned>(expected[channel]));

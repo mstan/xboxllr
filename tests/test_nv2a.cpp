@@ -8224,6 +8224,23 @@ int main() {
         }
     }
 
+    if (std::getenv("XLLE_RGBA8_IMAGE_LOAD_BLEND_PROBE")) {
+        std::string gl_error;
+        auto gl_renderer = xlle::create_nv2a_opengl_renderer(gl_error);
+        if (!gl_renderer) {
+            std::printf("SKIP: RGBA8 image-load/blend probe unavailable: %s\n",
+                        gl_error.c_str());
+        } else {
+            const bool exact =
+                gl_renderer->debug_probe_rgba8_image_load_blend(gl_error);
+            if (!exact)
+                std::printf("RGBA8 image-load/blend probe failed: %s\n",
+                            gl_error.c_str());
+            CHECK(exact);
+            if (exact) std::printf("RGBA8 image-load/blend probe exact\n");
+        }
+    }
+
     if (std::getenv("XLLE_HOTPACKET_PROBE")) {
         const char* path = std::getenv("XLLE_HOTPACKET_PROBE_PATH");
         if (!path || !path[0])

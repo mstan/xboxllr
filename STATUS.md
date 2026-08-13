@@ -3,6 +3,23 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-13 - RGBA8 image-load/blend exactness needs byte-domain math
+
+Added an env-gated OpenGL diagnostic `XLLE_RGBA8_IMAGE_LOAD_BLEND_PROBE=1` in `test_nv2a` through
+`Nv2aRenderer::debug_probe_rgba8_image_load_blend()`. The first float-blend form was not exact:
+even with `precise` ordering it hit a one-byte `SRC_ALPHA/ONE_MINUS_SRC_ALPHA` mismatch
+(`got=194 expected=195` at probe pixel `8,1` channel `0`). The retained version canonicalizes
+`imageLoad(RGBA8)` back to bytes, applies the supported blend factors in byte/integer form
+(`ZERO`, `ONE`, `SRC_ALPHA`, `ONE_MINUS_SRC_ALPHA`), stores `vec4(byte)/255.0`, and compares
+readback bytes against the CPU reference for replace/blend and X8/A8 alpha cases.
+
+Validation: Release `xlle`/`test_nv2a` build passed, normal `test_nv2a` passed,
+`XLLE_RGBA8_IMAGE_STORE_PROBE=1 build-release/test_nv2a.exe` passed, and
+`XLLE_RGBA8_IMAGE_LOAD_BLEND_PROBE=1 build-release/test_nv2a.exe` prints
+`RGBA8 image-load/blend probe exact` and passes. This keeps the resident-primary compute route
+alive, but only with explicit byte canonicalization and byte-domain blend math; plain normalized
+float blending is not admissible.
+
 ## 2026-08-13 - RGBA8 compute image-store byte exactness proven
 
 Added an env-gated OpenGL diagnostic `XLLE_RGBA8_IMAGE_STORE_PROBE=1` in `test_nv2a` through

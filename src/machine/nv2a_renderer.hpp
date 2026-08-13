@@ -190,6 +190,10 @@ public:
         error = "RGBA8 image-store probe is not supported";
         return false;
     }
+    virtual bool debug_probe_rgba8_image_load_blend(std::string& error) {
+        error = "RGBA8 image-load/blend probe is not supported";
+        return false;
+    }
 };
 
 }  // namespace xlle
