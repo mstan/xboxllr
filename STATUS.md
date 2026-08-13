@@ -3,6 +3,23 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-13 - Rejected narrow primary exact-compute tile-bin route
+
+Prototyped a more constrained version of the rejected broad primary tile-bin path: only the
+captured top full-state `fp=420f0b01c73c2c93/full=be372882a4961758`, behind
+`XLLE_PRIMARY_BE372_COMPUTE_TILE_BINS=1`, using a non-resident primary exact-compute enum plus
+the same flat 16x16 tile-list dispatch shape retained for texture compute. Focused packet replay
+for `build/generic-hotpacket-primary-be372-v1.xgp` remained exact (`0` mismatches), and the 1B
+smoke `build/primary-be372-tilebins-smoke-1b.report.json` stayed exact/empty stderr.
+
+The full 12B no-accounting replay
+`build/primary-be372-tilebins-v1-12b.report.json` also stayed exact/empty stderr with final SHA
+`876b58c2...`, but regressed versus the gated texture tile-bin baseline:
+final FPS `3.876 -> 3.703`, final-four wall `37.216s -> 39.876s` (`+7.15%`). Source was
+reverted. Conclusion: even full-state-specific exact primary compute still loses to the CPU
+software path because full-surface snapshot/readback and setup dominate the saved primary work.
+Primary acceleration still needs resident exactness, not another round-trip compute variant.
+
 ## 2026-08-13 - Captured top primary sub-state packet
 
 Captured the hottest final-window primary-color sub-state from

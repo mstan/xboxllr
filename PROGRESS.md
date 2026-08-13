@@ -34,6 +34,16 @@ commits without explicit current authorization.
 
 ## Current optimization cursor (2026-08-13)
 
+Latest rejected probe: a narrow exact-compute route for only the captured top primary full-state
+`fp=420f0b01c73c2c93/full=be372882a4961758`, gated by
+`XLLE_PRIMARY_BE372_COMPUTE_TILE_BINS=1`. Packet replay stayed exact (`0` mismatches), the 1B
+smoke stayed exact/empty stderr, and the full 12B no-accounting replay
+`build/primary-be372-tilebins-v1-12b.report.json` stayed exact with final SHA `876b58c2...`, but
+regressed versus `build/texture-compute-tilebins-flat-v1-12b.report.json`: final FPS
+`3.876 -> 3.703`, final-four wall `37.216s -> 39.876s` (`+7.15%`). Source was reverted. This
+rules out "just make primary exact compute narrower" as a useful route; primary needs resident
+exactness or a different work-removal strategy.
+
 Latest packet-level finding: captured the top final-window primary-color full-state
 `fp=420f0b01c73c2c93/full=be372882a4961758` into
 `build/generic-hotpacket-primary-be372-v1.xgp`. The capture replay stayed exact/empty stderr
