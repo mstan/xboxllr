@@ -3,6 +3,29 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-13 - Vertex-reuse census proves a high-value VSH cache target
+
+Ran a temporary, compile-time-only vertex-reuse census in a separate diagnostic build
+(`build-vertex-reuse4`, now ignored as generated output). The source-side census hooks were
+reverted after the run; retained changes are parser/summarizer support for `[perf-vertex-reuse]`
+plus documentation.
+
+The exact 12B diagnostic report `build/vertex-reuse-census-perf-v1-12b.report.json` exits cleanly
+with empty stderr and final SHA-256
+`876b58c2d0e6c63fec917c73dcc43a7d09983baf1da2b5b2176fa73a1b44da6d`. It answers the main Fable
+question: the hot late VSH program `eaad51274b6cda50` has substantial indexed reuse. In the final
+late intervals it processes about `22.12M` vertices per 0.5B interval; a 24-entry LRU
+post-transform-style cache would hit about `14.71M` of them (`66.5%`), while exact duplicate
+indices inside batches account for about `16.29M` (`73.6%`). Max indexed batch size observed for
+that program is `14328` vertices.
+
+Implication: implement a correctness-first, bounded post-transform cache for indexed programmable
+batches before writing a VSH JIT. The first production attempt should key at least on program
+bytes/hash, transform constant version, vertex DMA/attribute descriptor state, and vertex index,
+with invalidation on relevant transform/attribute/DMA writes and interpreter fallback on any key
+uncertainty. This is a larger lever than scalar VSH interpreter micro-tweaks and directly targets
+the dominant late transform work.
+
 ## 2026-08-13 - Replay variance summarizer added for optimization gates
 
 Added `tools/summarize_xbox_report_set.py`, a post-processing helper that summarizes repeated

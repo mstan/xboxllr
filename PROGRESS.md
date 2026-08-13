@@ -134,6 +134,17 @@ as `tools/compare_xbox_reports.py`. A quick check across the exact 12B perf base
 census reports shows final-four wall CV about `0.84%`, but `generic_other~` and resident-ensure
 are much noisier; do not treat one-run 2-6% movement in those derived buckets as decisive.
 
+Vertex-reuse census result: a temporary `XLLE_VERTEX_REUSE_CENSUS` diagnostic build was run and
+then reverted from source. Retained tooling parses and summarizes `[perf-vertex-reuse]` reports.
+The exact 12B report `build/vertex-reuse-census-perf-v1-12b.report.json` proves the dominant late
+VSH program `eaad51274b6cda50` has a large post-transform-cache ceiling: in the final intervals,
+it processes about `22.12M` vertices per 0.5B, a 24-entry LRU index cache would hit about
+`14.71M` (`66.5%`), and exact duplicate indices inside batches total about `16.29M` (`73.6%`).
+Max batch size for that program is `14328`. Next implementation should be a correctness-first
+bounded post-transform cache for indexed programmable batches, keyed on program bytes/hash,
+transform constant version, vertex DMA/attribute descriptor state, and index, with conservative
+invalidation/fallback. This should be attempted before a VSH JIT.
+
 One-time Fable critique result: stop treating scalar micro-tweaks as the main path. Before the
 next architecture bet, establish clearer exclusive-time/unit-cost accounting and target a larger
 exact bucket. Fable specifically called out measurement noise/code-layout effects around 2-6%

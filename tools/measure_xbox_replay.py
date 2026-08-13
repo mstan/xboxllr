@@ -152,6 +152,8 @@ PERF_NV2A_SPLIT_RE = re.compile(
 
 PERF_VSH_PROGRAM_RE = re.compile(r"^\[perf-vsh-program\] top=(?P<top>.*)$")
 
+PERF_VERTEX_REUSE_RE = re.compile(r"^\[perf-vertex-reuse\] top=(?P<top>.*)$")
+
 PERF_WITNESSED_PROFILE_RE = re.compile(r"^\[perf-witnessed-profile\] top=(?P<top>.*)$")
 
 PERF_GENERIC_RE = re.compile(
@@ -311,7 +313,7 @@ def parse_vsh_programs(text: str) -> list[dict[str, Any]]:
     programs: list[dict[str, Any]] = []
     for item in text.split():
         fields = item.split("/")
-        if len(fields) < 6:
+        if len(fields) < 5:
             programs.append({"raw": item})
             continue
         hash_text, sep, batches_text = fields[0].partition(":")
@@ -357,6 +359,35 @@ def parse_vsh_programs(text: str) -> list[dict[str, Any]]:
                         )
                         break
             programs.append(program)
+        except ValueError:
+            programs.append({"raw": item})
+    return programs
+
+
+def parse_vertex_reuse_programs(text: str) -> list[dict[str, Any]]:
+    if text == "none":
+        return []
+    programs: list[dict[str, Any]] = []
+    for item in text.split():
+        fields = item.split("/")
+        if len(fields) < 5:
+            programs.append({"raw": item})
+            continue
+        hash_text, sep, batches_text = fields[0].partition(":")
+        if not sep:
+            programs.append({"raw": item})
+            continue
+        try:
+            programs.append(
+                {
+                    "hash": hash_text.lower(),
+                    "batches": int(batches_text.removeprefix("b")),
+                    "vertices": int(fields[1].removeprefix("v")),
+                    "lru24_hits": int(fields[2].removeprefix("lru24")),
+                    "exact_duplicate_vertices": int(fields[3].removeprefix("dup")),
+                    "max_vertices_per_batch": int(fields[4].removeprefix("maxv")),
+                }
+            )
         except ValueError:
             programs.append({"raw": item})
     return programs
@@ -494,6 +525,7 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
     generic_split_samples: list[dict[str, Any]] = []
     nv2a_split_samples: list[dict[str, Any]] = []
     vsh_program_samples: list[list[dict[str, Any]]] = []
+    vertex_reuse_samples: list[list[dict[str, Any]]] = []
     witnessed_profile_samples: list[list[dict[str, Any]]] = []
     generic_perf_samples: list[dict[str, Any]] = []
     generic_family_samples: list[dict[str, Any]] = []
@@ -537,6 +569,10 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
             nv2a_split_samples.append(parse_int_fields(match))
         elif match := PERF_VSH_PROGRAM_RE.match(line):
             vsh_program_samples.append(parse_vsh_programs(match.group("top")))
+        elif match := PERF_VERTEX_REUSE_RE.match(line):
+            vertex_reuse_samples.append(
+                parse_vertex_reuse_programs(match.group("top"))
+            )
         elif match := PERF_WITNESSED_PROFILE_RE.match(line):
             witnessed_profile_samples.append(parse_witnessed_profiles(match.group("top")))
         elif match := PERF_GENERIC_RE.match(line):
@@ -592,6 +628,10 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
         "final_nv2a_split": nv2a_split_samples[-1] if nv2a_split_samples else None,
         "vsh_program_samples": vsh_program_samples,
         "final_vsh_programs": vsh_program_samples[-1] if vsh_program_samples else None,
+        "vertex_reuse_samples": vertex_reuse_samples,
+        "final_vertex_reuse": (
+            vertex_reuse_samples[-1] if vertex_reuse_samples else None
+        ),
         "witnessed_profile_samples": witnessed_profile_samples,
         "final_witnessed_profiles": (
             witnessed_profile_samples[-1] if witnessed_profile_samples else None

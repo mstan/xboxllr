@@ -19,6 +19,7 @@ disc/
 # Build + generated (evidence, not authority)
 build/
 build-release/
+build-*/
 out/
 generated/
 __pycache__/
