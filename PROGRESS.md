@@ -34,6 +34,15 @@ commits without explicit current authorization.
 
 ## Current optimization cursor (2026-08-13)
 
+Latest rejected probe: decoded the captured `shader=0x21`, `combiner=3` two-texture packet
+`build/generic-hotpacket-shader21-comb3-c0e-v1.xgp` and tested a narrow CPU-side shortcut behind
+`XLLE_SHADER21_COMB3_FAST=1`. The algebra was exact (`rgb = clamp(tex0 + tex1)`,
+`alpha = tex0.a * tex1.a`), and the 12B replay
+`build/shader21-comb3-fast-v1-12b.report.json` stayed exact/empty stderr with final SHA
+`876b58c2...`, but it regressed versus the gated texture tile-bin baseline: final FPS
+`3.876 -> 3.415`, final-four wall `37.216s -> 39.882s` (`+7.16%`). Source was reverted. Do not
+retry this CPU shortcut shape unless it also removes meaningful texture setup/raster-loop work.
+
 Latest native-resident exactness diagnostic: a temporary test-only comparison on
 `build/generic-hotpacket-primary-be372-v1.xgp` disabled blending in both resident primary and
 exact primary compute. Resident still differed from exact compute by one LSB in `125,068`

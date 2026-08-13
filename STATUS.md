@@ -3,6 +3,23 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-13 - Rejected shader21 two-texture combiner shortcut
+
+Decoded the captured `shader=0x21`, `combiner=3` packet
+`build/generic-hotpacket-shader21-comb3-c0e-v1.xgp`. The witnessed state uses two swizzled
+ARGB8 PROJECT2D textures and the combiner algebra reduces to `rgb = clamp(tex0 + tex1)` with
+`alpha = tex0.a * tex1.a` before the existing SRC_ALPHA/ONE_MINUS_SRC_ALPHA blend.
+
+Prototyped a very narrow CPU-side shortcut behind `XLLE_SHADER21_COMB3_FAST=1`, alongside the
+retained `XLLE_TEXTURE_COMPUTE_TILE_BINS=1` path. Validation was exact: 1B smoke
+`build/shader21-comb3-fast-smoke-1b.report.json` stayed exact/empty stderr with final SHA
+`a6087ec5...`, and full 12B replay `build/shader21-comb3-fast-v1-12b.report.json` stayed
+exact/empty stderr with final SHA `876b58c2...`. Performance regressed versus the gated texture
+tile-bin baseline: final FPS `3.876 -> 3.415`, final-four wall `37.216s -> 39.882s`
+(`+7.16%`). Source was reverted. Conclusion: skipping the generic combiner interpreter here does
+not remove enough work to overcome code-shape/cache effects; do not retry this CPU shortcut
+shape without removing texture setup/raster loop work as well.
+
 ## 2026-08-13 - Native resident primary mismatch is not blend-only
 
 Ran a temporary hotpacket diagnostic on `build/generic-hotpacket-primary-be372-v1.xgp` comparing
