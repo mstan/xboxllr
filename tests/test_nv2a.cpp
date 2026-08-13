@@ -8195,7 +8195,9 @@ int main() {
     }
 
     if (std::getenv("XLLE_HOTPACKET_PROBE")) {
-        const char* path = "build/generic-hotpacket-fp6751-v2-12b.xgp";
+        const char* path = std::getenv("XLLE_HOTPACKET_PROBE_PATH");
+        if (!path || !path[0])
+            path = "build/generic-hotpacket-fp6751-v2-12b.xgp";
         std::ifstream in(path, std::ios::binary);
         if (!in) {
             std::printf("SKIP: hotpacket probe missing %s\n", path);
@@ -8318,8 +8320,20 @@ int main() {
             CHECK(in.peek() == std::ifstream::traits_type::eof());
 
             xlle::Nv2aGenericCombinerPacket resident = packet;
-            resident.compute_fixture = xlle::Nv2aGenericCombinerPacket::
-                ComputeFixture::kResidentTextureModulateTriangles;
+            const char* requested_resident_fixture =
+                std::getenv("XLLE_HOTPACKET_PROBE_RESIDENT_FIXTURE");
+            const bool primary_resident_probe =
+                requested_resident_fixture &&
+                std::strcmp(requested_resident_fixture, "primary") == 0;
+            const bool texture_resident_probe =
+                !requested_resident_fixture ||
+                std::strcmp(requested_resident_fixture, "texture") == 0;
+            CHECK(primary_resident_probe || texture_resident_probe);
+            resident.compute_fixture = primary_resident_probe
+                ? xlle::Nv2aGenericCombinerPacket::ComputeFixture::
+                      kResidentPrimaryColorTriangles
+                : xlle::Nv2aGenericCombinerPacket::ComputeFixture::
+                      kResidentTextureModulateTriangles;
             resident.fixture_clip_x = 0;
             resident.fixture_clip_y = 0;
             resident.fixture_clip_width = 1280;
@@ -8612,6 +8626,7 @@ int main() {
                 const bool compute_probe =
                     std::getenv("XLLE_HOTPACKET_PROBE_COMPUTE") != nullptr;
                 if (compute_probe) {
+                    CHECK(texture_resident_probe);
                     resident.compute_fixture = xlle::Nv2aGenericCombinerPacket::
                         ComputeFixture::kTextureModulateTriangle;
                     CHECK(gl_renderer->supports_generic_combiner(resident));
@@ -8707,13 +8722,15 @@ int main() {
                                 sizeof(expected_word));
                 }
                 std::printf(
-                    "hotpacket probe fp=%016llx full=%016llx candidate=%llu "
+                    "hotpacket probe path=%s fixture=%s fp=%016llx "
+                    "full=%016llx candidate=%llu "
                     "safe_tris=%zu behind=%zu mixed=%zu degenerate=%zu "
                     "clipped_out=%zu clipped_tris=%zu mismatches=%zu "
                     "pixels=%zu bbox=%u,%u..%u,%u "
                     "ch=%zu/%zu/%zu/%zu gt1=%zu maxd=%d first=%zu "
                     "got=%08x expected=%08x pos=%zu/%zu/%zu/%zu "
                     "neg=%zu/%zu/%zu/%zu one=%zu/%zu/%zu/%zu\n",
+                    path, primary_resident_probe ? "primary" : "texture",
                     static_cast<unsigned long long>(fingerprint),
                     static_cast<unsigned long long>(full_hash),
                     static_cast<unsigned long long>(candidate),
