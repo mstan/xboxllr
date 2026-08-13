@@ -112,6 +112,16 @@ no-accounting stock smoke, but regressed final FPS `2.841 -> 2.414` and final-fo
 run was spent. This confirms the full-surface compute round trip is too costly even without
 texture upload/sampling.
 
+Final-window target breakdown from
+`build/posttransform-cache-direct256-perf-v1-12b.report.json`: summing the final four
+`generic-family` top lists gives `vertex-expansion` about `30.0s` of top-family time
+(`25.6s` software raster), `combiner-words` about `11.0s`, and no-detail generic families about
+`4.5s`. The largest concrete buckets are texture-modulate shader-1 `texfmt=08890e2a` on
+`03aa4000` (`~19.7s`, `~433.8M` fragments) and untextured shader-0 primary on the same target
+state (`~6.3s`, `~284.0M` fragments). Since native resident graphics is non-exact and exact
+compute round trips regress, the next retainable route likely needs coherent resident exactness
+or a CPU-side software-raster reduction that removes work without adding per-pixel branch/setup.
+
 Latest rejected experiment: gated `XLLE_Q_RECIP_HOIST=1` was exact at 1B and 12B, but slower
 against the retained baseline: final FPS `2.552 -> 2.448`, final-four wall `+3.80%`,
 CPU `+3.26%`, generic raster `+4.07%`, resolve `+23.24%`. Source was reverted. Also rejected:

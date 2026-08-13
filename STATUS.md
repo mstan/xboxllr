@@ -45,6 +45,13 @@ exact, and the 1B no-accounting stock smoke stayed exact/empty stderr with final
 `24.405s -> 26.975s` (`+10.53%`) against the retained cache baseline. Source was reverted and no
 12B run was spent.
 
+Final-window family aggregation from `build/posttransform-cache-direct256-perf-v1-12b.report.json`
+shows the remaining software-raster problem is still dominated by `vertex-expansion` rejects:
+about `30.0s` across the final-four top-family lists. The largest actionable groups are
+texture-modulate shader-1 `texfmt=08890e2a` on `03aa4000` (`~19.7s`, `~433.8M` fragments) and
+untextured shader-0 primary on the same surface/texture state (`~6.3s`, `~284.0M` fragments).
+`combiner-words` rejects total about `11.0s`, and no-detail generic families about `4.5s`.
+
 ## 2026-08-13 - Retained batch-local post-transform cache lifts late stock dashboard to 3.095 fps
 
 Implemented a conservative NV2A post-transform cache for indexed programmable vertex batches.
