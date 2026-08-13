@@ -186,6 +186,10 @@ public:
         error = "resident generic-combiner submission is not supported";
         return false;
     }
+    virtual bool debug_probe_rgba8_image_store(std::string& error) {
+        error = "RGBA8 image-store probe is not supported";
+        return false;
+    }
 };
 
 }  // namespace xlle

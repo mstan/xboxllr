@@ -3,6 +3,22 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-13 - RGBA8 compute image-store byte exactness proven
+
+Added an env-gated OpenGL diagnostic `XLLE_RGBA8_IMAGE_STORE_PROBE=1` in `test_nv2a` through
+`Nv2aRenderer::debug_probe_rgba8_image_store()`. The probe compiles a tiny GL 4.3 compute shader,
+writes a 256x4 grid of representative RGBA byte patterns into an `RGBA8` texture with
+`imageStore(vec4(byte)/255.0)`, attaches the texture to an FBO, reads it back as `GL_RGBA`, and
+compares every channel byte-for-byte.
+
+Validation: Release `xlle`/`test_nv2a` build passed, normal `test_nv2a` passed,
+`XLLE_RGBA8_IMAGE_STORE_PROBE=1 build-release/test_nv2a.exe` prints
+`RGBA8 image-store probe exact` and passes, all `build-release/test*.exe` pass, and
+`git diff --check` is clean. This does not yet accelerate the dashboard, but it removes one
+uncertainty from the resident-primary exact-compute route: explicit byte/255 compute stores into
+`RGBA8` can be exact on this host. Next resident-primary work still needs image-load/blend
+equivalence and tile-binned resident dispatch before replay admission.
+
 ## 2026-08-13 - Resident-primary exact compute needs integer resident storage
 
 Feasibility pass on a possible resident exact-compute route for the hot primary-color
@@ -11,16 +27,14 @@ and write its exact result directly into the resident OpenGL target, avoiding th
 compute path's full-surface CPU readback/writeback cost.
 
 The current renderer seam does not have a safe small implementation of that shape. The resident
-color target is an `RGBA8` texture populated through normalized GL upload/draw/readback paths.
-Writing exact compute output into that texture with `imageStore` would re-enter normalized
-`RGBA8` conversion semantics, the same class of GL conversion/interpolation behavior already
-proven one-LSB non-exact for resident primary before blending. The alternative SSBO/PBO path can
-avoid CPU readback, but it cannot read an already-resident dirty color target without resolving
-the texture back to CPU or maintaining a parallel integer color buffer. Therefore a useful
-resident-primary exact path needs an integer resident color representation (for example an
-R32UI/ARGB-word companion surface with explicit synchronization to presentation/native draws) or
-a packet-proven `RGBA8` image-store exactness result before replay admission. No source change was
-retained.
+color target is an `RGBA8` texture populated through normalized GL upload/draw/readback paths, so
+the route first needed packet-independent proof that explicit byte/255 compute stores to `RGBA8`
+are byte-exact. That store-side proof was added in the later `RGBA8 image-store` diagnostic above.
+The remaining unresolved parts are reading/blending an already-resident dirty color target without
+CPU resolve and then matching the exact primary-compute shader's operation ordering. If image-load
+and blend also prove exact, resident-primary compute can use the existing `RGBA8` target; otherwise
+it needs an integer resident color representation such as an R32UI/ARGB-word companion surface.
+No production source change was retained by this feasibility pass.
 
 ## 2026-08-13 - Rejected source-hashed DXT decode cache
 

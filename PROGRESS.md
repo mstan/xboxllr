@@ -34,15 +34,23 @@ commits without explicit current authorization.
 
 ## Current optimization cursor (2026-08-13)
 
+Latest retained diagnostic: `XLLE_RGBA8_IMAGE_STORE_PROBE=1` in `test_nv2a` now proves GL 4.3
+compute `imageStore` into an `RGBA8` texture is byte-exact on this host for representative RGBA
+byte patterns produced as `vec4(byte)/255.0` and read back through an FBO as `GL_RGBA`. Validation:
+Release build, normal `test_nv2a`, env-gated probe, all `build-release/test*.exe`, and
+`git diff --check` pass. This does not speed up the dashboard yet, but it weakens the prior
+resident-primary blocker: exact compute stores to the resident `RGBA8` target are plausible if the
+shader writes explicit byte/255 values. Next proof needed before replay admission is image-load +
+blend equivalence and then tile-binned resident-primary dispatch.
+
 Latest feasibility finding: resident exact compute for the hot primary-color
-`vertex-expansion` family is not a small renderer patch. Reusing the exact primary compute shader
-against the resident `RGBA8` texture would require normalized `imageStore`/texture conversion,
-which is the same class of GL path already proven one-LSB non-exact for resident primary before
-blending. An SSBO/PBO upload path could avoid CPU readback but cannot consume an already-resident
-dirty color target without resolving it or maintaining a parallel integer color buffer. Next useful
-primary-resident work should be an integer resident color representation (for example an
-R32UI/ARGB-word companion surface synchronized with presentation/native draws) or a hotpacket
-proof that `RGBA8` image stores are byte-exact. No source change retained.
+`vertex-expansion` family is not a small renderer patch. The store side is now proven by the
+`RGBA8 image-store` diagnostic above, but the production route still has to prove image-load +
+blend equivalence against the exact primary compute path and add tile-binned dispatch. An SSBO/PBO
+upload path could avoid CPU readback but cannot consume an already-resident dirty color target
+without resolving it or maintaining a parallel integer color buffer. If RGBA8 image-load/blend is
+not exact, the useful path is still an integer resident color representation such as an
+R32UI/ARGB-word companion surface synchronized with presentation/native draws.
 
 Latest rejected probe: source-hashed DXT decode cache behind `XLLE_GENERIC_DXT_DECODE_CACHE=1`,
 combined with `XLLE_TEXTURE_COMPUTE_TILE_BINS=1`. It reread compressed guest bytes every batch and

@@ -59,6 +59,8 @@ using GlTexSubImage2D = void (*)(unsigned int, int, int, int, int, int,
 using GlTexParameteri = void (*)(unsigned int, unsigned int, int);
 using GlDeleteTextures = void (*)(int, const unsigned int*);
 using GlActiveTexture = void (*)(unsigned int);
+using GlBindImageTexture = void (*)(unsigned int, unsigned int, int, unsigned char,
+                                    int, unsigned int, unsigned int);
 using GlGenFramebuffers = void (*)(int, unsigned int*);
 using GlBindFramebuffer = void (*)(unsigned int, unsigned int);
 using GlFramebufferTexture2D = void (*)(unsigned int, unsigned int, unsigned int,
@@ -98,6 +100,8 @@ constexpr unsigned int kGlDynamicCopy = 0x88EA;
 constexpr unsigned int kGlDynamicDraw = 0x88E8;
 constexpr unsigned int kGlShaderStorageBarrierBit = 0x2000;
 constexpr unsigned int kGlBufferUpdateBarrierBit = 0x0200;
+constexpr unsigned int kGlShaderImageAccessBarrierBit = 0x0020;
+constexpr unsigned int kGlFramebufferBarrierBit = 0x0400;
 constexpr unsigned int kGlFramebuffer = 0x8D40;
 constexpr unsigned int kGlColorAttachment0 = 0x8CE0;
 constexpr unsigned int kGlDepthStencilAttachment = 0x821A;
@@ -114,6 +118,7 @@ constexpr unsigned int kGlUnsignedByte = 0x1401;
 constexpr unsigned int kGlUnsignedInt = 0x1405;
 constexpr unsigned int kGlUnsignedInt248 = 0x84FA;
 constexpr unsigned int kGlFloat = 0x1406;
+constexpr unsigned int kGlWriteOnly = 0x88B9;
 constexpr unsigned int kGlTriangles = 0x0004;
 constexpr unsigned int kGlBlend = 0x0BE2;
 constexpr unsigned int kGlDepthTest = 0x0B71;
@@ -529,6 +534,23 @@ void main() {
         covered = true;
     }
     if (covered) color[offset] = pack_argb(current);
+}
+)GLSL";
+
+constexpr const char* kRgba8ImageStoreProbeSource = R"GLSL(#version 430 core
+layout(local_size_x = 16, local_size_y = 1) in;
+layout(rgba8, binding = 0) writeonly uniform image2D output_image;
+uvec4 pattern(uint x, uint y) {
+    if (y == 0u) return uvec4(x, (x * 73u) & 255u, (x * 151u) & 255u, (x * 197u) & 255u);
+    if (y == 1u) return uvec4(x, 0u, 0u, 255u);
+    if (y == 2u) return uvec4(0u, x, 255u - x, 255u);
+    return uvec4(255u, 255u - x, x, x);
+}
+void main() {
+    uvec2 xy = gl_GlobalInvocationID.xy;
+    if (xy.x >= 256u || xy.y >= 4u) return;
+    uvec4 bytes = pattern(xy.x, xy.y);
+    imageStore(output_image, ivec2(xy), vec4(bytes) / 255.0);
 }
 )GLSL";
 
@@ -1081,6 +1103,110 @@ public:
             }
         }
         return true;
+    }
+    bool debug_probe_rgba8_image_store(std::string& error) override {
+        SDL_Window* previous_window = SDL_GL_GetCurrentWindow();
+        SDL_GLContext previous_context = SDL_GL_GetCurrentContext();
+        if (!SDL_GL_MakeCurrent(window_, context_)) {
+            error = std::string("OpenGL RGBA8 image-store probe context lost: ") +
+                    SDL_GetError();
+            return false;
+        }
+        struct ContextRestore {
+            SDL_Window* previous_window;
+            SDL_GLContext previous_context;
+            SDL_Window* fallback_window;
+            ~ContextRestore() {
+                restore_previous_gl_context(previous_window, previous_context,
+                                            fallback_window);
+            }
+        } restore{previous_window, previous_context, window_};
+
+        unsigned int program = 0;
+        if (!compile_program(kRgba8ImageStoreProbeSource, "rgba8-image-store",
+                             program, error)) {
+            return false;
+        }
+        unsigned int texture = 0;
+        gen_textures_(1, &texture);
+        bind_texture_(kGlTexture2D, texture);
+        tex_parameter_i_(kGlTexture2D, kGlTextureMinFilter, kGlNearest);
+        tex_parameter_i_(kGlTexture2D, kGlTextureMagFilter, kGlNearest);
+        tex_parameter_i_(kGlTexture2D, kGlTextureWrapS, kGlClampToEdge);
+        tex_parameter_i_(kGlTexture2D, kGlTextureWrapT, kGlClampToEdge);
+        tex_image_2d_(kGlTexture2D, 0, kGlRgba8, 256, 4, 0, kGlRgba,
+                      kGlUnsignedByte, nullptr);
+        bind_image_texture_(0, texture, 0, 0, 0, kGlWriteOnly, kGlRgba8);
+        use_program_(program);
+        dispatch_compute_(16, 4, 1);
+        memory_barrier_(kGlShaderImageAccessBarrierBit | kGlFramebufferBarrierBit);
+
+        unsigned int fbo = 0;
+        gen_framebuffers_(1, &fbo);
+        bind_framebuffer_(kGlFramebuffer, fbo);
+        framebuffer_texture_2d_(kGlFramebuffer, kGlColorAttachment0, kGlTexture2D,
+                                texture, 0);
+        bool ok = true;
+        if (check_framebuffer_status_(kGlFramebuffer) != kGlFramebufferComplete) {
+            error = "OpenGL RGBA8 image-store probe framebuffer is incomplete";
+            ok = false;
+        }
+        std::vector<uint8_t> actual(256u * 4u * 4u, 0);
+        if (ok) {
+            pixel_store_i_(kGlPackAlignment, 1);
+            read_pixels_(0, 0, 256, 4, kGlRgba, kGlUnsignedByte, actual.data());
+            if (get_error_() != kGlNoError) {
+                error = "OpenGL RGBA8 image-store probe readback failed";
+                ok = false;
+            }
+        }
+        if (ok) {
+            for (uint32_t y = 0; y < 4u; ++y) {
+                for (uint32_t x = 0; x < 256u; ++x) {
+                    std::array<uint8_t, 4> expected{};
+                    if (y == 0u) {
+                        expected = {
+                            static_cast<uint8_t>(x),
+                            static_cast<uint8_t>((x * 73u) & 255u),
+                            static_cast<uint8_t>((x * 151u) & 255u),
+                            static_cast<uint8_t>((x * 197u) & 255u)};
+                    } else if (y == 1u) {
+                        expected = {static_cast<uint8_t>(x), 0, 0, 255};
+                    } else if (y == 2u) {
+                        expected = {0, static_cast<uint8_t>(x),
+                                    static_cast<uint8_t>(255u - x), 255};
+                    } else {
+                        expected = {255, static_cast<uint8_t>(255u - x),
+                                    static_cast<uint8_t>(x),
+                                    static_cast<uint8_t>(x)};
+                    }
+                    const size_t offset =
+                        (static_cast<size_t>(y) * 256u + x) * 4u;
+                    for (size_t channel = 0; channel < 4; ++channel) {
+                        if (actual[offset + channel] != expected[channel]) {
+                            char why[192];
+                            std::snprintf(
+                                why, sizeof(why),
+                                "OpenGL RGBA8 image-store probe mismatch at %u,%u "
+                                "channel %zu: got=%u expected=%u",
+                                x, y, channel,
+                                static_cast<unsigned>(actual[offset + channel]),
+                                static_cast<unsigned>(expected[channel]));
+                            error = why;
+                            ok = false;
+                            break;
+                        }
+                    }
+                    if (!ok) break;
+                }
+                if (!ok) break;
+            }
+        }
+        if (fbo && delete_framebuffers_) delete_framebuffers_(1, &fbo);
+        if (texture && delete_textures_) delete_textures_(1, &texture);
+        if (program && delete_program_) delete_program_(program);
+        if (ok) error.clear();
+        return ok;
     }
     bool has_resident_color_surface(uint32_t address, size_t size, uint32_t pitch,
                                     uint32_t height,
@@ -2146,6 +2272,7 @@ public:
                load_gl(tex_parameter_i_, "glTexParameteri") &&
                load_gl(delete_textures_, "glDeleteTextures") &&
                load_gl(active_texture_, "glActiveTexture") &&
+               load_gl(bind_image_texture_, "glBindImageTexture") &&
                load_gl(gen_framebuffers_, "glGenFramebuffers") &&
                load_gl(bind_framebuffer_, "glBindFramebuffer") &&
                load_gl(framebuffer_texture_2d_, "glFramebufferTexture2D") &&
@@ -2703,6 +2830,7 @@ private:
     GlBindTexture bind_texture_ = nullptr; GlTexImage2D tex_image_2d_ = nullptr;
     GlTexSubImage2D tex_sub_image_2d_ = nullptr; GlTexParameteri tex_parameter_i_ = nullptr;
     GlDeleteTextures delete_textures_ = nullptr; GlActiveTexture active_texture_ = nullptr;
+    GlBindImageTexture bind_image_texture_ = nullptr;
     GlGenFramebuffers gen_framebuffers_ = nullptr;
     GlBindFramebuffer bind_framebuffer_ = nullptr;
     GlFramebufferTexture2D framebuffer_texture_2d_ = nullptr;
