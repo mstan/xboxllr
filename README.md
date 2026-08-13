@@ -6,18 +6,11 @@ Microsoft kernel — no hand-written kernel, no HLE shell. Its first product goa
 **real Xbox dashboard, fully navigable**, running on that real firmware; navigation is not
 yet demonstrated.
 
-It belongs to the recomp family (nesrecomp / psxrecomp / gbarecomp / gcnrecomp /
-n64lle) and inherits its doctrine: **LLE-first, run the real firmware, validate against
+It belongs to the recomp family (nesrecomp / psxrecomp / gbarecomp / gcnlle ) and inherits its doctrine: **LLE-first, run the real firmware, validate against
 ground truth, always-on ring buffers, no faked state, no stubs, artifacts are evidence
-not authority.** Like its closest sibling **`n64lle`**, it takes the *low-level-emulation*
-name rather than "recomp" on purpose: the Xbox guest is x86-on-x86-64, so this is a
+not authority.** The Xbox guest is x86-on-x86-64, so this is a
 **dynamic execution platform** (a CPU floor + JIT + harvested device models), **not** a
 guest→C static recompiler. That distinction is why it is `xboxlle`, not `xboxrecomp`.
-
-It is a from-scratch successor to `../xboxrecomp` (v1), whose HLE kernel (119 hand-written
-thunks) failed the same way the PSX predecessors did: faked kernel state drifted from
-real RAM → "thousands of swaps, black framebuffer, never a title screen." v1's own
-`ARCHITECTURE-REVIEW.md` is this project's founding rationale.
 
 ## Strategy in one paragraph
 
