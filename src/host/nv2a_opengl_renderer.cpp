@@ -106,6 +106,7 @@ constexpr unsigned int kGlRgba8 = 0x8058;
 constexpr unsigned int kGlDepth24Stencil8 = 0x88F0;
 constexpr unsigned int kGlR32ui = 0x8236;
 constexpr unsigned int kGlRgba = 0x1908;
+constexpr unsigned int kGlBgra = 0x80E1;
 constexpr unsigned int kGlRedInteger = 0x8D94;
 constexpr unsigned int kGlDepthStencil = 0x84F9;
 constexpr unsigned int kGlUnsignedByte = 0x1401;
@@ -1359,15 +1360,15 @@ public:
         {
             perf::ScopedAdd timer(perf::g_ns_renderer_resolve,
                                   perf::g_calls_renderer_resolve);
-            std::vector<uint8_t> rgba(static_cast<size_t>(surface->width) *
+            std::vector<uint8_t> bgra(static_cast<size_t>(surface->width) *
                                       surface->height * 4u);
             bind_framebuffer_(kGlFramebuffer, resident_fbo_);
             framebuffer_texture_2d_(kGlFramebuffer, kGlColorAttachment0,
                                     kGlTexture2D, surface->texture, 0);
             pixel_store_i_(kGlPackAlignment, 1);
             read_pixels_(0, 0, static_cast<int>(surface->width),
-                         static_cast<int>(surface->height), kGlRgba,
-                         kGlUnsignedByte, rgba.data());
+                         static_cast<int>(surface->height), kGlBgra,
+                         kGlUnsignedByte, bgra.data());
             perf::record_renderer_resolve_pixels(
                 static_cast<uint64_t>(surface->width) * surface->height);
             if (get_error_() != kGlNoError) {
@@ -1376,8 +1377,13 @@ public:
             }
             resolve.address = surface->address;
             resolve.data.resize(surface->size);
-            rgba_to_guest_words(rgba, resolve.data, surface->width,
-                                surface->height, surface->x8);
+            const size_t row_bytes = static_cast<size_t>(surface->width) * 4u;
+            for (uint32_t y = 0; y < surface->height; ++y) {
+                const uint32_t gl_y = surface->height - 1u - y;
+                std::memcpy(resolve.data.data() + static_cast<size_t>(y) * row_bytes,
+                            bgra.data() + static_cast<size_t>(gl_y) * row_bytes,
+                            row_bytes);
+            }
         }
         surface->dirty = false;
         return true;
