@@ -3,6 +3,25 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-13 - Stock dashboard performance cursor: exact but still below 10 fps
+
+Current pushed head is `fdf5563` on `origin/master`. Retained emulator behavior includes direct
+vertex fetch, disabled perf-timer guards, reduced default-path NV2A diagnostic telemetry, and
+immutable-context VSH execution. The best retained no-accounting stock-dashboard 12B replay is
+`build/vsh-context-direct-noperf-v1-12b.report.json`: exact/empty stderr, final SHA-256
+`876b58c2d0e6c63fec917c73dcc43a7d09983baf1da2b5b2176fa73a1b44da6d`, final FPS `2.635`, and
+final-four wall `49.967s`. This remains well short of the >=10 fps goal.
+
+The refreshed perf-accounting 12B report `build/vsh-context-direct-perf-v2-12b.report.json`
+shows the main remaining costs in the final-four window are generic software raster (`11.490s`),
+generic renderer/setup/other overhead (`gother~8.185s` plus setup), and vertex transform
+(`13.800s`). Derived self-time estimates make parent dispatch/submit wrappers non-primary
+targets (`dispatch_self~1.751s`, `subself~0.518s`).
+
+Rejected follow-up probes after `95fe3ab`: direct pitch-linear generic surface reads/writes,
+CPU-side texture0-modulate-primary specialization, and reduced-path resident/texture-modulate
+counter gating. Each was exact at the 1B smoke gate but slower, so source was reverted.
+
 ## 2026-08-09 — A4: synthetic Down-then-A replay reaches a stable black frame; dashboard identified as XBMC
 
 Extending the Down-only proof below to a full Down-then-A sequence, at commit `ed399fe` all six

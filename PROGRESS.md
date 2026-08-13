@@ -35,11 +35,13 @@ commits without explicit current authorization.
 ## Current optimization cursor (2026-08-13)
 
 Active Beads issue: `beads-xbox.1.13` (`Performance: reach interactive-navigable stock
-dashboard (>=10 fps sustained)`). Current retained code on `origin/master` is commit `95fe3ab`
-and includes direct vertex fetch, disabled perf-timer guards, reduced default-path NV2A
-diagnostic telemetry, and immutable-context VSH execution. The latest rejected experiment was
-direct pitch-linear generic color reads/writes through the already-validated surface pointer;
-it was exact but slower on the 1B smoke and was reverted.
+dashboard (>=10 fps sustained)`). Current pushed head on `origin/master` is commit `fdf5563`;
+the retained emulator behavior is from `95fe3ab` plus tooling/status updates. It includes direct
+vertex fetch, disabled perf-timer guards, reduced default-path NV2A diagnostic telemetry, and
+immutable-context VSH execution. The latest rejected experiment was a reduced-path guard around
+the remaining resident/texture-modulate diagnostic counters; it was exact on the 1B no-accounting
+smoke but slower (`2.955 -> 2.912` final FPS, final-four wall `22.659s -> 23.016s`, `+1.58%`) and
+was reverted.
 
 Correctness status: the exact OpenGL/resident baseline for the stock dashboard 12B replay is
 `build/resident-resolve-bgra-v1-12b.report.json`. It exits cleanly with empty stderr and final
@@ -67,7 +69,10 @@ CPU `+3.26%`, generic raster `+4.07%`, resolve `+23.24%`. Source was reverted. A
 a CPU-side `texture0_modulate_primary` fast branch that skipped generic register scaffolding and
 reused the same texture sampler/blend/write path. It was exact on the 1B no-accounting smoke
 but regressed final FPS `2.955 -> 2.772` and final-four wall `22.659s -> 24.284s` (`+7.17%`);
-source was reverted.
+source was reverted. Also rejected: guarding the last resident/texture-modulate diagnostic
+counters in the reduced no-accounting path. It removed those counters from reduced reports and
+kept the 1B frame SHA exact (`a6087ec5...`), but regressed final-four wall by `+1.58%`; source
+was reverted.
 
 One-time Fable critique result: stop treating scalar micro-tweaks as the main path. Before the
 next architecture bet, establish clearer self-time/unit-cost accounting and target a larger exact
