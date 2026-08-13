@@ -3,6 +3,26 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-13 - Rejected additive-X8 software blend fast path
+
+Ran a current 1024-entry-cache perf-accounting replay for fresh attribution:
+`build/posttransform-cache-direct1024-perf-v1-12b.report.json` is exact/empty stderr with final
+SHA `876b58c2...`. The accounting run itself is not comparable to the no-accounting retained gate
+and was slower than the older 256-entry perf run, but the bottleneck shape is unchanged: the final
+window remains dominated by generic software raster/setup. In the last interval, generic raster was
+`8.587s` of `16.495s` wall, with software raster `5.072s`, generic other `2.994s`, texture setup
+`0.521s`, and vertex transform `1.492s`. The hottest families remained the X8 `03aa4000`
+texture-modulate and primary-color vertex-expansion rejects.
+
+Tested a narrow X8 `SRC_ALPHA + ONE` software blend fast path that skipped destination unpack and
+color-mask handling for the measured hot blend mode. Validation: Release `xlle`/`test_nv2a` built,
+`test_nv2a` passed, `git diff --check` passed, and the 1B no-accounting smoke
+`build/x8-srcalpha-one-fast-noperf-smoke-1b.report.json` stayed exact/empty stderr with final SHA
+`a6087ec5...`. Performance regressed against the retained 1024-entry baseline:
+final FPS `2.987 -> 2.906`, final-four wall `22.399s -> 23.288s` (`+3.97%`). Source was reverted
+and the retained baseline was rebuilt. Do not retry this per-pixel blend specialization shape
+without eliminating more surrounding work.
+
 ## 2026-08-13 - Rejected batch-cache admission threshold changes
 
 Tested adjacent admission thresholds for the retained 1024-entry batch-local post-transform

@@ -88,6 +88,15 @@ Latest rejected threshold probes: raising the 1024-entry cache admission thresho
 at 1B but regressed final FPS `2.987 -> 2.628` and final-four wall `22.399s -> 24.300s`
 (`+8.49%`) against the retained threshold-64 smoke. Source was restored to `>=64` and rebuilt.
 
+Latest perf/accounting refresh and rejected software-raster probe: current 1024-entry perf replay
+`build/posttransform-cache-direct1024-perf-v1-12b.report.json` was exact/empty stderr with final
+SHA `876b58c2...`; attribution still points at generic software raster/setup in the final window.
+The last interval had generic raster `8.587s` of `16.495s` wall, with software raster `5.072s`,
+generic other `2.994s`, texture setup `0.521s`, and vertex transform `1.492s`. A narrow X8
+`SRC_ALPHA + ONE` blend fast path stayed exact at 1B but regressed final FPS `2.987 -> 2.906` and
+final-four wall `22.399s -> 23.288s` (`+3.97%`), so it was reverted and the retained baseline
+rebuilt.
+
 Latest rejected probe: resident exact compute for mixed-W texture-modulate. It wrote exact compute
 shader results directly into the OpenGL resident color texture, avoiding full-surface CPU
 readback/writeback, and stayed exact at both 1B and 12B. It was still slower at 12B:
