@@ -1107,6 +1107,8 @@ bool Nv2a::decode_inline_array() {
 }
 
 bool Nv2a::submit_vertex_batch() {
+    perf::ScopedAdd submit_timer(perf::g_ns_nv2a_submit_vertex,
+                                 perf::g_calls_nv2a_submit_vertex);
     const bool indexed = !vertex_indices_.empty();
     const bool inline_array = !inline_vertices_.empty();
     const bool immediate = !immediate_vertices_.empty();
@@ -1295,104 +1297,114 @@ bool Nv2a::submit_vertex_batch() {
     transformed_batch_.clear();
     transformed_batch_.reserve(vertex_count);
 
-    for (size_t vertex_index = 0; vertex_index < vertex_count; ++vertex_index) {
-        if (inline_array || immediate) {
-            const auto& inputs = inline_array ? inline_vertices_[vertex_index]
-                                              : immediate_vertices_[vertex_index];
-            for (uint32_t slot = 0; slot < vertex_attributes_.size(); ++slot)
-                vertex_attributes_[slot].value = inputs[slot];
-        } else {
-            const uint32_t index = vertex_indices_[vertex_index];
-            largest_vertex_index_ = std::max(largest_vertex_index_, index);
-            for (uint32_t slot = 0; slot < vertex_attributes_.size(); ++slot) {
-                if (!fetch_vertex_attribute(slot, index)) {
-                    if (program_parsed) nv2a_vsh_program_destroy(&program);
-                    return false;
-                }
-            }
+    auto record_transformed_vertex_stats = [&](const TransformedVertex& vertex) {
+        for (float component : vertex.position) {
+            uint32_t bits = 0;
+            std::memcpy(&bits, &component, sizeof(bits));
+            transform_output_hash_ ^= bits;
+            transform_output_hash_ *= 1099511628211ull;
         }
-        TransformedVertex vertex;
-        if (program_parsed) {
-            Nv2aVshCPUFullExecutionState full_state;
-            Nv2aVshExecutionState execution =
-                nv2a_vsh_emu_initialize_full_execution_state(&full_state);
-            std::memcpy(full_state.context_regs, transform_constants_.data(),
-                        sizeof(full_state.context_regs));
-            for (uint32_t slot = 0; slot < vertex_attributes_.size(); ++slot) {
-                std::memcpy(&full_state.input_regs[slot * 4],
-                            vertex_attributes_[slot].value.data(), 4 * sizeof(float));
-            }
-            nv2a_vsh_emu_execute(&execution, &program);
+        ++transformed_vertices_;
+    };
 
-            if (capture_immediate_quad && vertex_index < 4) {
-                auto& evidence = raster_state_samples_[raster_sample_index];
-                std::memcpy(evidence.immediate_quad_opos[vertex_index].data(),
-                            &full_state.output_regs[0], 4 * sizeof(float));
-                std::memcpy(evidence.immediate_quad_od0[vertex_index].data(),
-                            &full_state.output_regs[3 * 4], 4 * sizeof(float));
-                std::memcpy(evidence.immediate_quad_ot0[vertex_index].data(),
-                            &full_state.output_regs[9 * 4], 4 * sizeof(float));
-            }
-
-            std::memcpy(vertex.position.data(), &full_state.output_regs[0], 4 * sizeof(float));
-            vertex.position[0] = round_screen_coordinate(vertex.position[0]);
-            vertex.position[1] = round_screen_coordinate(vertex.position[1]);
-            vertex.position[3] = clamp_away_zero_inf(vertex.position[3]);
-            if (capture_immediate_quad && vertex_index < 4)
-                raster_state_samples_[raster_sample_index]
-                    .immediate_quad_raster_opos[vertex_index] = vertex.position;
-            std::memcpy(vertex.diffuse.data(), &full_state.output_regs[3 * 4],
-                        4 * sizeof(float));
-            std::memcpy(vertex.specular.data(), &full_state.output_regs[4 * 4],
-                        4 * sizeof(float));
-            for (uint32_t texture = 0; texture < 4; ++texture) {
-                std::memcpy(vertex.texture[texture].data(),
-                            &full_state.output_regs[(9 + texture) * 4],
-                            4 * sizeof(float));
-            }
-        } else if (fixed_function) {
-            const auto& position = vertex_attributes_[0].value;
-            std::array<float, 4> clip{};
-            for (uint32_t component = 0; component < 4; ++component) {
-                for (uint32_t term = 0; term < 4; ++term)
-                    clip[component] +=
-                        position[term] * transform_constants_[component][term];
-            }
-            clip[3] = clamp_away_zero_inf(clip[3]);
-            vertex.position[0] = round_screen_coordinate(
-                clip[0] / clip[3] + transform_constants_[0x3B][0]);
-            vertex.position[1] = round_screen_coordinate(
-                clip[1] / clip[3] + transform_constants_[0x3B][1]);
-            vertex.position[2] = clip[2] / clip[3];
-            vertex.position[3] = clip[3];
-
-            if (fixed_lighting_) {
-                for (uint32_t component = 0; component < 3; ++component) {
-                    vertex.diffuse[component] =
-                        fixed_scene_ambient_[component] *
-                            fixed_material_emission_[component] +
-                        fixed_scene_ambient_[component];
-                }
-                vertex.diffuse[3] = fixed_material_alpha_;
-                vertex.specular = {0.0f, 0.0f, 0.0f,
-                                   (fixed_light_control_ & 4u)
-                                       ? vertex_attributes_[4].value[3] : 1.0f};
+    {
+        perf::ScopedAdd transform_timer(perf::g_ns_nv2a_vertex_transform,
+                                        perf::g_calls_nv2a_vertex_transform);
+        for (size_t vertex_index = 0; vertex_index < vertex_count; ++vertex_index) {
+            if (inline_array || immediate) {
+                const auto& inputs = inline_array ? inline_vertices_[vertex_index]
+                                                  : immediate_vertices_[vertex_index];
+                for (uint32_t slot = 0; slot < vertex_attributes_.size(); ++slot)
+                    vertex_attributes_[slot].value = inputs[slot];
             } else {
-                vertex.diffuse = vertex_attributes_[3].value;
-                vertex.specular = {0.0f, 0.0f, 0.0f, 1.0f};
+                const uint32_t index = vertex_indices_[vertex_index];
+                largest_vertex_index_ = std::max(largest_vertex_index_, index);
+                for (uint32_t slot = 0; slot < vertex_attributes_.size(); ++slot) {
+                    if (!fetch_vertex_attribute(slot, index)) {
+                        if (program_parsed) nv2a_vsh_program_destroy(&program);
+                        return false;
+                    }
+                }
             }
-            for (uint32_t texture = 0; texture < 4; ++texture)
-                vertex.texture[texture] = vertex_attributes_[9 + texture].value;
-        }
-        if (program_parsed || fixed_function) {
-            transformed_batch_.push_back(vertex);
-            for (float component : vertex.position) {
-                uint32_t bits = 0;
-                std::memcpy(&bits, &component, sizeof(bits));
-                transform_output_hash_ ^= bits;
-                transform_output_hash_ *= 1099511628211ull;
+            TransformedVertex vertex;
+            if (program_parsed) {
+                Nv2aVshCPUFullExecutionState full_state;
+                Nv2aVshExecutionState execution =
+                    nv2a_vsh_emu_initialize_full_execution_state(&full_state);
+                std::memcpy(full_state.context_regs, transform_constants_.data(),
+                            sizeof(full_state.context_regs));
+                for (uint32_t slot = 0; slot < vertex_attributes_.size(); ++slot) {
+                    std::memcpy(&full_state.input_regs[slot * 4],
+                                vertex_attributes_[slot].value.data(),
+                                4 * sizeof(float));
+                }
+                nv2a_vsh_emu_execute(&execution, &program);
+
+                if (capture_immediate_quad && vertex_index < 4) {
+                    auto& evidence = raster_state_samples_[raster_sample_index];
+                    std::memcpy(evidence.immediate_quad_opos[vertex_index].data(),
+                                &full_state.output_regs[0], 4 * sizeof(float));
+                    std::memcpy(evidence.immediate_quad_od0[vertex_index].data(),
+                                &full_state.output_regs[3 * 4], 4 * sizeof(float));
+                    std::memcpy(evidence.immediate_quad_ot0[vertex_index].data(),
+                                &full_state.output_regs[9 * 4], 4 * sizeof(float));
+                }
+
+                std::memcpy(vertex.position.data(), &full_state.output_regs[0],
+                            4 * sizeof(float));
+                vertex.position[0] = round_screen_coordinate(vertex.position[0]);
+                vertex.position[1] = round_screen_coordinate(vertex.position[1]);
+                vertex.position[3] = clamp_away_zero_inf(vertex.position[3]);
+                if (capture_immediate_quad && vertex_index < 4)
+                    raster_state_samples_[raster_sample_index]
+                        .immediate_quad_raster_opos[vertex_index] = vertex.position;
+                std::memcpy(vertex.diffuse.data(), &full_state.output_regs[3 * 4],
+                            4 * sizeof(float));
+                std::memcpy(vertex.specular.data(), &full_state.output_regs[4 * 4],
+                            4 * sizeof(float));
+                for (uint32_t texture = 0; texture < 4; ++texture) {
+                    std::memcpy(vertex.texture[texture].data(),
+                                &full_state.output_regs[(9 + texture) * 4],
+                                4 * sizeof(float));
+                }
+            } else if (fixed_function) {
+                const auto& position = vertex_attributes_[0].value;
+                std::array<float, 4> clip{};
+                for (uint32_t component = 0; component < 4; ++component) {
+                    for (uint32_t term = 0; term < 4; ++term)
+                        clip[component] +=
+                            position[term] * transform_constants_[component][term];
+                }
+                clip[3] = clamp_away_zero_inf(clip[3]);
+                vertex.position[0] = round_screen_coordinate(
+                    clip[0] / clip[3] + transform_constants_[0x3B][0]);
+                vertex.position[1] = round_screen_coordinate(
+                    clip[1] / clip[3] + transform_constants_[0x3B][1]);
+                vertex.position[2] = clip[2] / clip[3];
+                vertex.position[3] = clip[3];
+
+                if (fixed_lighting_) {
+                    for (uint32_t component = 0; component < 3; ++component) {
+                        vertex.diffuse[component] =
+                            fixed_scene_ambient_[component] *
+                                fixed_material_emission_[component] +
+                            fixed_scene_ambient_[component];
+                    }
+                    vertex.diffuse[3] = fixed_material_alpha_;
+                    vertex.specular = {0.0f, 0.0f, 0.0f,
+                                       (fixed_light_control_ & 4u)
+                                           ? vertex_attributes_[4].value[3] : 1.0f};
+                } else {
+                    vertex.diffuse = vertex_attributes_[3].value;
+                    vertex.specular = {0.0f, 0.0f, 0.0f, 1.0f};
+                }
+                for (uint32_t texture = 0; texture < 4; ++texture)
+                    vertex.texture[texture] = vertex_attributes_[9 + texture].value;
             }
-            ++transformed_vertices_;
+            if (program_parsed || fixed_function) {
+                transformed_batch_.push_back(vertex);
+                record_transformed_vertex_stats(vertex);
+            }
         }
     }
     if (program_parsed) nv2a_vsh_program_destroy(&program);
@@ -10293,6 +10305,8 @@ void Nv2a::drain_pull_queue() {
         PushMethod push = pull_queue_.front();
         pull_queue_.pop_front();
         perf::record_pfifo_queue_pop();
+        perf::ScopedAdd dispatch_timer(perf::g_ns_nv2a_dispatch_method,
+                                       perf::g_calls_nv2a_dispatch_method);
         dispatch_method(push);
     }
 }

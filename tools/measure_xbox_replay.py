@@ -140,6 +140,16 @@ PERF_GENERIC_SPLIT_RE = re.compile(
     r"\(n=(?P<flush_n>\d+)\)"
 )
 
+PERF_NV2A_SPLIT_RE = re.compile(
+    r"^\[perf-nv2a-split\] "
+    r"dispatch-method-ns=(?P<dispatch_method_ns>\d+) "
+    r"\(n=(?P<dispatch_method_n>\d+)\) "
+    r"submit-vertex-ns=(?P<submit_vertex_ns>\d+) "
+    r"\(n=(?P<submit_vertex_n>\d+)\) "
+    r"vertex-transform-ns=(?P<vertex_transform_ns>\d+) "
+    r"\(n=(?P<vertex_transform_n>\d+)\)"
+)
+
 PERF_WITNESSED_PROFILE_RE = re.compile(r"^\[perf-witnessed-profile\] top=(?P<top>.*)$")
 
 PERF_GENERIC_RE = re.compile(
@@ -423,6 +433,7 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
     renderer_resolve_context_samples: list[dict[str, dict[str, int]]] = []
     perf_memory_samples: list[dict[str, Any]] = []
     generic_split_samples: list[dict[str, Any]] = []
+    nv2a_split_samples: list[dict[str, Any]] = []
     witnessed_profile_samples: list[list[dict[str, Any]]] = []
     generic_perf_samples: list[dict[str, Any]] = []
     generic_family_samples: list[dict[str, Any]] = []
@@ -462,6 +473,8 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
             perf_memory_samples.append(parse_int_fields(match))
         elif match := PERF_GENERIC_SPLIT_RE.match(line):
             generic_split_samples.append(parse_int_fields(match))
+        elif match := PERF_NV2A_SPLIT_RE.match(line):
+            nv2a_split_samples.append(parse_int_fields(match))
         elif match := PERF_WITNESSED_PROFILE_RE.match(line):
             witnessed_profile_samples.append(parse_witnessed_profiles(match.group("top")))
         elif match := PERF_GENERIC_RE.match(line):
@@ -513,6 +526,8 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
         "final_generic_split": (
             generic_split_samples[-1] if generic_split_samples else None
         ),
+        "nv2a_split_samples": nv2a_split_samples,
+        "final_nv2a_split": nv2a_split_samples[-1] if nv2a_split_samples else None,
         "witnessed_profile_samples": witnessed_profile_samples,
         "final_witnessed_profiles": (
             witnessed_profile_samples[-1] if witnessed_profile_samples else None

@@ -47,6 +47,9 @@ inline bool g_pull_drain_enabled = false;
 inline std::atomic<uint64_t> g_ns_cpu{0};
 inline std::atomic<uint64_t> g_ns_nv2a_pushbuffer{0};
 inline std::atomic<uint64_t> g_ns_nv2a_pull_drain{0};
+inline std::atomic<uint64_t> g_ns_nv2a_dispatch_method{0};
+inline std::atomic<uint64_t> g_ns_nv2a_submit_vertex{0};
+inline std::atomic<uint64_t> g_ns_nv2a_vertex_transform{0};
 inline std::atomic<uint64_t> g_ns_raster{0};
 inline std::atomic<uint64_t> g_ns_host_poll_devices{0};
 // Split of g_ns_raster (beads-xbox.1.13 Phase 1 attribution): g_ns_raster_generic is
@@ -66,6 +69,9 @@ inline std::atomic<uint64_t> g_calls_generic_flush{0};
 inline std::atomic<uint64_t> g_calls_cpu{0};
 inline std::atomic<uint64_t> g_calls_nv2a_pushbuffer{0};
 inline std::atomic<uint64_t> g_calls_nv2a_pull_drain{0};
+inline std::atomic<uint64_t> g_calls_nv2a_dispatch_method{0};
+inline std::atomic<uint64_t> g_calls_nv2a_submit_vertex{0};
+inline std::atomic<uint64_t> g_calls_nv2a_vertex_transform{0};
 inline std::atomic<uint64_t> g_calls_raster{0};
 inline std::atomic<uint64_t> g_calls_host_poll_devices{0};
 
@@ -348,6 +354,22 @@ inline std::string format_generic_split_report() {
         (unsigned long long)g_calls_generic_software_raster.load(),
         (unsigned long long)g_ns_generic_flush.load(),
         (unsigned long long)g_calls_generic_flush.load());
+    return std::string(buf);
+}
+
+inline std::string format_nv2a_split_report() {
+    if (!g_enabled) return {};
+    char buf[512];
+    std::snprintf(
+        buf, sizeof(buf),
+        "[perf-nv2a-split] dispatch-method-ns=%llu (n=%llu) "
+        "submit-vertex-ns=%llu (n=%llu) vertex-transform-ns=%llu (n=%llu)",
+        (unsigned long long)g_ns_nv2a_dispatch_method.load(),
+        (unsigned long long)g_calls_nv2a_dispatch_method.load(),
+        (unsigned long long)g_ns_nv2a_submit_vertex.load(),
+        (unsigned long long)g_calls_nv2a_submit_vertex.load(),
+        (unsigned long long)g_ns_nv2a_vertex_transform.load(),
+        (unsigned long long)g_calls_nv2a_vertex_transform.load());
     return std::string(buf);
 }
 

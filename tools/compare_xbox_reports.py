@@ -83,6 +83,7 @@ def focus_sums(report: Mapping[str, Any], focus_last: int) -> dict[str, float]:
     renderer = parsed.get("renderer_samples", [])
     resident = parsed.get("resident_samples", [])
     unicorn_memory = parsed.get("unicorn_memory_samples", [])
+    nv2a_split = parsed.get("nv2a_split_samples", [])
     if not all(isinstance(x, list) for x in (frames, perf, renderer, resident)):
         return {}
     out = {
@@ -90,6 +91,9 @@ def focus_sums(report: Mapping[str, Any], focus_last: int) -> dict[str, float]:
         "cpu_ns": 0.0,
         "nv2a_pull_drain_ns": 0.0,
         "raster_generic_ns": 0.0,
+        "dispatch_method_ns": 0.0,
+        "submit_vertex_ns": 0.0,
+        "vertex_transform_ns": 0.0,
         "resolve_ns": 0.0,
         "resident_ensure_ns": 0.0,
         "uploads": 0.0,
@@ -108,6 +112,15 @@ def focus_sums(report: Mapping[str, Any], focus_last: int) -> dict[str, float]:
             perf, index, previous, "nv2a_pull_drain_ns"
         )
         out["raster_generic_ns"] += sample_delta(perf, index, previous, "raster_generic_ns")
+        out["dispatch_method_ns"] += sample_delta(
+            nv2a_split, index, previous, "dispatch_method_ns"
+        )
+        out["submit_vertex_ns"] += sample_delta(
+            nv2a_split, index, previous, "submit_vertex_ns"
+        )
+        out["vertex_transform_ns"] += sample_delta(
+            nv2a_split, index, previous, "vertex_transform_ns"
+        )
         out["resolve_ns"] += sample_delta(renderer, index, previous, "resolve_ns")
         out["resident_ensure_ns"] += sample_delta(renderer, index, previous, "resident_ensure_ns")
         out["uploads"] += sample_delta(resident, index, previous, "uploads")
@@ -178,6 +191,9 @@ def main() -> int:
             "cpu_ns",
             "nv2a_pull_drain_ns",
             "raster_generic_ns",
+            "dispatch_method_ns",
+            "submit_vertex_ns",
+            "vertex_transform_ns",
             "resolve_ns",
             "resident_ensure_ns",
         ):

@@ -63,6 +63,16 @@ tile/row threading, SIMD, and family-keyed combiner specialization for the hot
 packets on this host; exact compute remains plausible only if it operates on coherent resident
 color storage with old-color reads and no full CPU snapshot/readback.
 
+Continuation finding: `perf-nv2a-split` now breaks out method dispatch, vertex submission, and
+vertex fetch/transform. The exact 12B diagnostic `build/nv2a-split-v1-12b.report.json` shows the
+late dashboard is not only fragment-bound: final-four instrumented counters were
+`dispatch_method=43.072s`, `submit_vertex=41.342s`, and `vertex_transform=19.180s` alongside
+`raster_generic=21.696s`. Whole-run final diagnostics show 455,812 vertex batches,
+128,040,827 transformed vertices, and 261,153,958 attribute fetches. A conservative exact
+`XLLE_VERTEX_TRANSFORM_CACHE=1` prototype was rejected: it stayed hash-exact at 12B but hit only
+1,849 times versus 453,270 misses and regressed against the retained baseline. Do not revive that
+range-hash cache shape without a stronger repeated-batch key.
+
 ## Arc 1 burndown
 
 - **Done:** A0 foundations; A2 live-kernel boot, phase-1 device init, FATX mount, and

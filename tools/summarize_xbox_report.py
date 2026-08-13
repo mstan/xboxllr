@@ -219,6 +219,7 @@ def summarize(path: pathlib.Path) -> None:
     generic_perf = parsed.get("generic_perf_samples", [])
     generic_family = parsed.get("generic_family_samples", [])
     generic_split = parsed.get("generic_split_samples", [])
+    nv2a_split = parsed.get("nv2a_split_samples", [])
     final_frame = parsed.get("final_frame", {})
     final_mem = parsed.get("final_host_memory") or {}
     final_unicorn = parsed.get("final_unicorn_memory") or {}
@@ -243,6 +244,7 @@ def summarize(path: pathlib.Path) -> None:
     previous_generic_perf = None
     previous_generic_family = None
     previous_generic_split = None
+    previous_nv2a_split = None
     previous_unicorn_memory = None
     for index, frame in enumerate(frames):
         p = sample_for_deadline(perf, index)
@@ -254,12 +256,14 @@ def summarize(path: pathlib.Path) -> None:
         gp = sample_for_deadline(generic_perf, index)
         gf = sample_for_deadline(generic_family, index)
         gs = sample_for_deadline(generic_split, index)
+        ns = sample_for_deadline(nv2a_split, index)
         pd = delta_dict(p, previous_perf) if p else {}
         rd = delta_dict(r, previous_renderer) if r else {}
         rsd = delta_dict(rs, previous_resident) if rs else {}
         md = delta_dict(m, previous_memory) if m else {}
         ucmd = delta_dict(ucm, previous_unicorn_memory) if ucm else {}
         gsd = delta_dict(gs, previous_generic_split) if gs else {}
+        nsd = delta_dict(ns, previous_nv2a_split) if ns else {}
         dirty_clip = rd.get("dirty_clip_pixels", 0)
         dirty_surface = rd.get("dirty_surface_pixels", 0)
         dirty_pct = (
@@ -273,6 +277,7 @@ def summarize(path: pathlib.Path) -> None:
         previous_memory = m or previous_memory
         previous_unicorn_memory = ucm or previous_unicorn_memory
         previous_generic_split = gs or previous_generic_split
+        previous_nv2a_split = ns or previous_nv2a_split
         generic_delta = generic_top_delta(gp, previous_generic_perf)
         family_delta = generic_family_delta(gf, previous_generic_family)
         resolve_delta = resolve_context_delta(rc, previous_renderer_resolve_context)
@@ -292,6 +297,9 @@ def summarize(path: pathlib.Path) -> None:
             f"gsetup={ns_to_s(gsd.get('texture_setup_ns'))} "
             f"gsoft={ns_to_s(gsd.get('software_raster_ns'))} "
             f"gflush={ns_to_s(gsd.get('flush_ns'))} "
+            f"dispatch={ns_to_s(nsd.get('dispatch_method_ns'))} "
+            f"submit={ns_to_s(nsd.get('submit_vertex_ns'))} "
+            f"xform={ns_to_s(nsd.get('vertex_transform_ns'))} "
             f"resolv={ns_to_s(rd.get('resolve_ns'))} "
             f"ensure={ns_to_s(rd.get('resident_ensure_ns'))} "
             f"uploads={rsd.get('uploads', '-')} "
