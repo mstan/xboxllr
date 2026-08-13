@@ -3,6 +3,25 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-13 - Resident-primary exact compute needs integer resident storage
+
+Feasibility pass on a possible resident exact-compute route for the hot primary-color
+`vertex-expansion` family. The tempting shape is to reuse `kPrimaryColorTriangleComputeSource`
+and write its exact result directly into the resident OpenGL target, avoiding the non-resident
+compute path's full-surface CPU readback/writeback cost.
+
+The current renderer seam does not have a safe small implementation of that shape. The resident
+color target is an `RGBA8` texture populated through normalized GL upload/draw/readback paths.
+Writing exact compute output into that texture with `imageStore` would re-enter normalized
+`RGBA8` conversion semantics, the same class of GL conversion/interpolation behavior already
+proven one-LSB non-exact for resident primary before blending. The alternative SSBO/PBO path can
+avoid CPU readback, but it cannot read an already-resident dirty color target without resolving
+the texture back to CPU or maintaining a parallel integer color buffer. Therefore a useful
+resident-primary exact path needs an integer resident color representation (for example an
+R32UI/ARGB-word companion surface with explicit synchronization to presentation/native draws) or
+a packet-proven `RGBA8` image-store exactness result before replay admission. No source change was
+retained.
+
 ## 2026-08-13 - Rejected source-hashed DXT decode cache
 
 Prototyped a gated generic-combiner DXT decode cache behind `XLLE_GENERIC_DXT_DECODE_CACHE=1`,

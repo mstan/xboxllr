@@ -34,6 +34,16 @@ commits without explicit current authorization.
 
 ## Current optimization cursor (2026-08-13)
 
+Latest feasibility finding: resident exact compute for the hot primary-color
+`vertex-expansion` family is not a small renderer patch. Reusing the exact primary compute shader
+against the resident `RGBA8` texture would require normalized `imageStore`/texture conversion,
+which is the same class of GL path already proven one-LSB non-exact for resident primary before
+blending. An SSBO/PBO upload path could avoid CPU readback but cannot consume an already-resident
+dirty color target without resolving it or maintaining a parallel integer color buffer. Next useful
+primary-resident work should be an integer resident color representation (for example an
+R32UI/ARGB-word companion surface synchronized with presentation/native draws) or a hotpacket
+proof that `RGBA8` image stores are byte-exact. No source change retained.
+
 Latest rejected probe: source-hashed DXT decode cache behind `XLLE_GENERIC_DXT_DECODE_CACHE=1`,
 combined with `XLLE_TEXTURE_COMPUTE_TILE_BINS=1`. It reread compressed guest bytes every batch and
 keyed decoded ARGB output by DXT type/dimensions/pitch/source FNV hash. The 1B smoke
