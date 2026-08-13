@@ -32,6 +32,37 @@ paths are acceptable only when the software LLE fallback remains available and t
 faithfulness loss is nominal-to-none. Do not contact real Xbox hardware or push `xboxlle`
 commits without explicit current authorization.
 
+## Current optimization cursor (2026-08-13)
+
+Active Beads issue: `beads-xbox.1.13` (`Performance: reach interactive-navigable stock
+dashboard (>=10 fps sustained)`). Current retained code is pushed at `fa60570`
+(`Track generic combiner read dependencies`) on `origin/master`; the latest experiment was
+rejected and reverted.
+
+Correctness status: the exact OpenGL/resident baseline for the stock dashboard 12B replay is
+`build/resident-resolve-bgra-v1-12b.report.json`. It exits cleanly with empty stderr and final
+PPM SHA-256 `876b58c2d0e6c63fec917c73dcc43a7d09983baf1da2b5b2176fa73a1b44da6d`.
+The 1B smoke golden remains
+`a6087ec5178c7619d8136de2aa159dde7161d56f9e4c3b899b7165935d0353d8`.
+
+Speed status: the retained 12B exact baseline is still far from the goal: final FPS `2.552`,
+final-four wall `52.636s`, CPU `52.486s`, generic raster `19.297s`, resident resolve `2.087s`,
+resident ensure `1.393s`. Final-four inclusive accounting shows `nv2a_pushbuffer_ns=38.132s`,
+`raster_ns=19.303s`, so pushbuffer time outside raster is about `18.829s`; CPU outside
+pushbuffer is about `14.354s`. A perfect generic-raster/resolve/ensure fix alone would not
+reach 10 fps, so the next pass must account for and reduce the broader pushbuffer/CPU cost too.
+
+Latest rejected experiment: gated `XLLE_Q_RECIP_HOIST=1` was exact at 1B and 12B, but slower
+against the retained baseline: final FPS `2.552 -> 2.448`, final-four wall `+3.80%`,
+CPU `+3.26%`, generic raster `+4.07%`, resolve `+23.24%`. Source was reverted.
+
+One-time Fable critique result: stop treating scalar micro-tweaks as the main path. Before the
+next architecture bet, establish clearer accounting/error bars and target a larger exact bucket:
+tile/row threading, SIMD, and family-keyed combiner specialization for the hot
+`03aa4000` blended generic families. GPU fixed-function OpenGL/Vulkan is not exact for these
+packets on this host; exact compute remains plausible only if it operates on coherent resident
+color storage with old-color reads and no full CPU snapshot/readback.
+
 ## Arc 1 burndown
 
 - **Done:** A0 foundations; A2 live-kernel boot, phase-1 device init, FATX mount, and
