@@ -19,6 +19,12 @@ Packet checks on `build/generic-hotpacket-fp6751-v2-12b.xgp` and
 `876b58c2...`; against the retained report it improved final FPS `3.356 -> 3.575` and
 final-four wall `42.880s -> 38.982s` (`-9.09%`).
 
+Follow-up retained inside the gated path: replaced the per-tile `vector<vector<uint32_t>>` bin
+builder with a two-pass flat offset/index builder. Hotpacket exactness still held, and the 12B
+no-accounting replay `build/texture-compute-tilebins-flat-v1-12b.report.json` stayed exact/empty
+stderr while improving the gated result to final FPS `3.876` and final-four wall `37.216s`
+(`-4.53%` versus the first gated tile-bin replay, `-13.21%` versus the retained default report).
+
 Do not treat this as a default retained speedup yet. A default-on admission trial was rejected:
 same-window 1B reruns showed large machine variance, and the binned path did not fire in the 1B
 smoke. Keep it gated until a better automatic admission rule or repeated 12B pair confirms the

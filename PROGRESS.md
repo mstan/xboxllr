@@ -41,8 +41,10 @@ probes for `build/generic-hotpacket-fp6751-v2-12b.xgp` and
 `build/generic-hotpacket-mixedw-texmod-fp02cc-v1.xgp` were exact (`0` mismatches), and the gated
 12B no-accounting run `build/texture-compute-tilebins-v1-12b.report.json` was exact/empty stderr
 with final FPS `3.356 -> 3.575` and final-four wall `42.880s -> 38.982s` (`-9.09%`) against the
-retained report. A default-on admission trial was rejected pending better/repeated comparable
-12B evidence; launch tentative runs with the env gate instead.
+retained report. A flat two-pass bin builder improved the gated path further:
+`build/texture-compute-tilebins-flat-v1-12b.report.json` stayed exact/empty stderr with final FPS
+`3.876` and final-four wall `37.216s`. A default-on admission trial was rejected pending
+better/repeated comparable 12B evidence; launch tentative runs with the env gate instead.
 
 Active Beads issue: `beads-xbox.1.13` (`Performance: reach interactive-navigable stock
 dashboard (>=10 fps sustained)`). The retained emulator behavior now includes direct vertex

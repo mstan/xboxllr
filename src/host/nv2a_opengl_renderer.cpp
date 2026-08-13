@@ -1796,11 +1796,19 @@ public:
             const bool use_tile_bins =
                 std::getenv("XLLE_TEXTURE_COMPUTE_TILE_BINS") != nullptr &&
                 tile_cols != 0 && tile_rows != 0;
-            std::vector<std::vector<uint32_t>> bins;
             std::vector<uint32_t> tile_offsets;
             std::vector<uint32_t> tile_triangles;
             if (use_tile_bins) {
-                bins.resize(static_cast<size_t>(tile_cols) * tile_rows);
+                struct TileBounds {
+                    uint32_t min_x = 0;
+                    uint32_t max_x = 0;
+                    uint32_t min_y = 0;
+                    uint32_t max_y = 0;
+                    bool visible = false;
+                };
+                const uint32_t tile_count = tile_cols * tile_rows;
+                std::vector<TileBounds> triangle_bounds(packet.vertices.size() / 3u);
+                std::vector<uint32_t> tile_counts(tile_count, 0);
                 const int32_t clip_min_x =
                     static_cast<int32_t>(packet.fixture_clip_x);
                 const int32_t clip_min_y =
@@ -1845,17 +1853,30 @@ public:
                         static_cast<uint32_t>(min_y) / kTextureComputeTileSize;
                     const uint32_t tile_max_y =
                         static_cast<uint32_t>(max_y) / kTextureComputeTileSize;
+                    triangle_bounds[tri] =
+                        TileBounds{tile_min_x, tile_max_x, tile_min_y, tile_max_y, true};
                     for (uint32_t ty = tile_min_y; ty <= tile_max_y; ++ty) {
                         for (uint32_t tx = tile_min_x; tx <= tile_max_x; ++tx) {
-                            bins[static_cast<size_t>(ty) * tile_cols + tx].push_back(tri);
+                            ++tile_counts[ty * tile_cols + tx];
                         }
                     }
                 }
-                tile_offsets.reserve(bins.size() + 1u);
+                tile_offsets.reserve(static_cast<size_t>(tile_count) + 1u);
                 tile_offsets.push_back(0);
-                for (const auto& bin : bins) {
-                    tile_triangles.insert(tile_triangles.end(), bin.begin(), bin.end());
-                    tile_offsets.push_back(static_cast<uint32_t>(tile_triangles.size()));
+                for (uint32_t count : tile_counts) {
+                    tile_offsets.push_back(tile_offsets.back() + count);
+                }
+                tile_triangles.resize(tile_offsets.back());
+                std::vector<uint32_t> tile_cursor = tile_offsets;
+                for (uint32_t tri = 0; tri < triangle_bounds.size(); ++tri) {
+                    const TileBounds bounds = triangle_bounds[tri];
+                    if (!bounds.visible) continue;
+                    for (uint32_t ty = bounds.min_y; ty <= bounds.max_y; ++ty) {
+                        for (uint32_t tx = bounds.min_x; tx <= bounds.max_x; ++tx) {
+                            const uint32_t tile = ty * tile_cols + tx;
+                            tile_triangles[tile_cursor[tile]++] = tri;
+                        }
+                    }
                 }
             } else {
                 tile_offsets = {0u, static_cast<uint32_t>(packet.vertices.size() / 3u)};
