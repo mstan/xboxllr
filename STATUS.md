@@ -3,6 +3,26 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-13 - Retained 1024-entry batch transform cache
+
+Increased the retained batch-local programmable post-transform cache from `256` to `1024`
+direct-mapped entries. The semantic scope is unchanged: it is still inside
+`submit_vertex_batch()`, still only for indexed parsed vertex programs that do not write context,
+and still keys only on the vertex index within the current batch.
+
+Validation: Release `xlle`/`test_nv2a` built cleanly, `git diff --check` passed,
+`build-release\test_nv2a.exe` passed, and all `build-release/test*.exe` passed. The 1B
+no-accounting smoke `build/posttransform-cache-direct1024-noperf-smoke-1b.report.json` was
+exact/empty stderr with final SHA `a6087ec5...` and improved final FPS `2.841 -> 2.987`
+against the direct-256 cache baseline. The full 12B no-accounting replay
+`build/posttransform-cache-direct1024-noperf-v1-12b.report.json` was exact/empty stderr with final
+SHA `876b58c2...`; final FPS improved `3.095 -> 3.356`, and final-four wall improved
+`43.786s -> 42.880s` (`-2.07%`).
+
+Adjacent cache-size probes: `2048` entries stayed exact but failed the final-four gate at 12B
+(`43.786s -> 44.130s`, `+0.78%`), and `512` entries stayed exact but regressed the 1B smoke
+(`24.405s -> 26.436s`, `+8.32%`), so both were rejected. The >=10 fps goal remains open.
+
 ## 2026-08-13 - Rejected resident exact-compute texture path
 
 Tested a resident exact-compute variant for the mixed-W texture-modulate dashboard family. The

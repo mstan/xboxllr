@@ -1330,7 +1330,7 @@ bool Nv2a::submit_vertex_batch() {
     transformed_batch_.clear();
     transformed_batch_.reserve(vertex_count);
 
-    constexpr size_t kBatchTransformCacheEntries = 256;
+    constexpr size_t kBatchTransformCacheEntries = 1024;
 
     struct BatchTransformCache {
         BatchTransformCache() { valid.fill(0); }

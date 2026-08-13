@@ -37,11 +37,11 @@ commits without explicit current authorization.
 Active Beads issue: `beads-xbox.1.13` (`Performance: reach interactive-navigable stock
 dashboard (>=10 fps sustained)`). The retained emulator behavior now includes direct vertex
 fetch, disabled perf-timer guards, reduced default-path NV2A diagnostic telemetry, immutable-context
-VSH execution, and a batch-local post-transform cache for large indexed programmable batches. The
-cache is deliberately scoped inside `submit_vertex_batch()`: it is enabled only for parsed
-non-context-writing programmable draws with at least 64 indexed vertices and keys on the index
-within that one batch. This avoids cross-batch invalidation hazards while capturing the measured
-late-dashboard index reuse.
+VSH execution, and a 1024-entry batch-local post-transform cache for large indexed programmable
+batches. The cache is deliberately scoped inside `submit_vertex_batch()`: it is enabled only for
+parsed non-context-writing programmable draws with at least 64 indexed vertices and keys on the
+index within that one batch. This avoids cross-batch invalidation hazards while capturing the
+measured late-dashboard index reuse.
 
 Correctness status: the exact OpenGL/resident baseline for the stock dashboard 12B replay is
 `build/resident-resolve-bgra-v1-12b.report.json`. It exits cleanly with empty stderr and final
@@ -50,13 +50,13 @@ The 1B smoke golden remains
 `a6087ec5178c7619d8136de2aa159dde7161d56f9e4c3b899b7165935d0353d8`.
 
 Speed status: the retained no-accounting 12B replay
-`build/posttransform-cache-direct256-noperf-v1-12b.report.json` is exact/empty stderr with final
-SHA `876b58c2...`, final FPS `3.095`, and final-four wall `43.786s`. Against the prior retained
-baseline `build/vsh-context-direct-noperf-v1-12b.report.json`, this is `2.635 -> 3.095` final FPS
-and `49.967s -> 43.786s` final-four wall (`-12.37%`). It is still far from 10 fps. The 1B
-no-accounting smoke remains exact but slower (`2.955 -> 2.841`, final-four wall `+7.71%`), so do
-not generalize this as a startup win; it is retained because the target is sustained late dashboard
-navigation. The refreshed detailed
+`build/posttransform-cache-direct1024-noperf-v1-12b.report.json` is exact/empty stderr with final
+SHA `876b58c2...`, final FPS `3.356`, and final-four wall `42.880s`. Against the previous
+direct-256 cache baseline `build/posttransform-cache-direct256-noperf-v1-12b.report.json`, this is
+`3.095 -> 3.356` final FPS and `43.786s -> 42.880s` final-four wall (`-2.07%`). It is still far
+from 10 fps. Adjacent cache sizes were rejected: 2048 entries was exact but regressed the 12B
+final-four wall to `44.130s` (`+0.78%`), and 512 entries was exact but regressed the 1B smoke
+final-four wall to `26.436s` (`+8.32%`). The refreshed detailed
 perf-accounting 12B replay `build/vsh-context-direct-perf-v2-12b.report.json` is also
 exact/empty stderr with final SHA `876b58c2...`; under accounting, final-four wall is `56.485s`,
 CPU `56.314s`, generic raster `21.826s`, dispatch `37.903s`, submit `36.152s`, transform
@@ -77,6 +77,11 @@ SHA `876b58c2...`; against `build/vsh-context-direct-perf-v2-12b.report.json`, f
 `13.800s -> 3.878s` (`-71.90%`). This confirms the cache captured the measured reuse and shifts
 the next large target to generic raster/setup plus exact resident admission. Temporary counter
 source was reverted.
+
+Latest retained change: the direct-mapped batch-local transform cache now uses 1024 entries.
+Validation: Release `xlle`/`test_nv2a` build clean, `test_nv2a` ok, all `build-release/test*.exe`
+ok, `git diff --check` clean, 1B no-accounting smoke exact/empty stderr with final SHA
+`a6087ec5...`, and 12B no-accounting replay exact/empty stderr with final SHA `876b58c2...`.
 
 Latest rejected probe: resident exact compute for mixed-W texture-modulate. It wrote exact compute
 shader results directly into the OpenGL resident color texture, avoiding full-surface CPU
