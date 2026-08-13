@@ -3,6 +3,26 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-13 - Promoted texture tile-bin compute to default
+
+Promoted the previously gated mixed-W texture-modulate tile-bin compute route from
+`XLLE_TEXTURE_COMPUTE_TILE_BINS=1` to the normal admission path. The packet now carries an
+explicit `fixture_use_tile_bins` bit, so the machine admission predicate and OpenGL renderer
+agree without consulting process-global env state. Diagnostic `XLLE_LARGE_TEXTURE_COMPUTE_FIXTURE`
+still exists for unrelated large texture-compute experiments.
+
+Validation: Release `xlle`/`test_nv2a` build passed, `test_nv2a` passed, the 1B perf smoke
+`build/texture-tilebins-default-smoke-1b.report.json` stayed exact/empty stderr with SHA
+`a6087ec5...`, and the no-accounting full 12B replay
+`build/texture-tilebins-default-noperf-v1-12b.report.json` stayed exact/empty stderr with SHA
+`876b58c2...`.
+
+Performance: versus retained no-accounting default baseline
+`build/posttransform-cache-direct1024-noperf-v1-12b.report.json`, final FPS improved
+`3.356 -> 3.571` and final-four wall improved `42.880s -> 38.852s` (`-9.39%`). This run is
+still slower than the best prior gated tile-bin measurement (`3.876`, `37.216s` final-four wall),
+but it confirms the route is a default-speed win and should remain enabled.
+
 ## 2026-08-13 - Resident submit split rejects uniform/VAO as primary target
 
 Added `--perf-accounting` resident OpenGL submit sub-buckets for context switching,

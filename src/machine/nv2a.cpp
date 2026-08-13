@@ -7947,9 +7947,8 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                             return true;
                         };
                     const bool binned_texture_compute =
-                        mixed_w_triangle &&
-                        std::getenv("XLLE_TEXTURE_COMPUTE_TILE_BINS") != nullptr &&
-                        !uses_depth && !passthrough_combiner_words_match;
+                        mixed_w_triangle && !uses_depth &&
+                        !passthrough_combiner_words_match;
                     bool expanded_ok = binned_texture_compute || !mixed_w_triangle;
                     if (expanded_ok) {
                         expanded.reserve((packet.vertices.size() - 2) * 3);
@@ -8003,6 +8002,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                             passthrough_combiner_words_match;
                         packet.fixture_texture_constant_color_alpha =
                             constant_color_alpha_combiner_words_match;
+                        packet.fixture_use_tile_bins = binned_texture_compute;
                         if (constant_color_alpha_combiner_words_match) {
                             packet.fixture_constant_argb =
                                 raster_state_[kRasterCombinerFactor0_0];

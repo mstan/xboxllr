@@ -82,6 +82,7 @@ struct Nv2aGenericCombinerPacket {
     bool fixture_texture_passthrough = false;
     bool fixture_texture_constant_color_alpha = false;
     bool fixture_color_format_x8 = false;
+    bool fixture_use_tile_bins = false;
 };
 
 // A successful synchronous submission returns complete replacement images for the

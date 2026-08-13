@@ -1113,7 +1113,7 @@ public:
             if (linear_texture && packet.textures[0].pitch == 0) return false;
             const bool large_diagnostic =
                 std::getenv("XLLE_LARGE_TEXTURE_COMPUTE_FIXTURE") != nullptr ||
-                std::getenv("XLLE_TEXTURE_COMPUTE_TILE_BINS") != nullptr;
+                packet.fixture_use_tile_bins;
             const uint32_t width = (packet.surface_pitch & 0xffffu) / 4u;
             return width > 0 &&
                    (large_diagnostic ||
@@ -2162,8 +2162,7 @@ public:
                 (packet.surface_height + kTextureComputeTileSize - 1u) /
                 kTextureComputeTileSize;
             const bool use_tile_bins =
-                std::getenv("XLLE_TEXTURE_COMPUTE_TILE_BINS") != nullptr &&
-                tile_cols != 0 && tile_rows != 0;
+                packet.fixture_use_tile_bins && tile_cols != 0 && tile_rows != 0;
             std::vector<uint32_t> tile_offsets;
             std::vector<uint32_t> tile_triangles;
             if (use_tile_bins) {
