@@ -34,6 +34,13 @@ commits without explicit current authorization.
 
 ## Current optimization cursor (2026-08-13)
 
+Latest rejected probe: broad `XLLE_PRIMARY_COMPUTE_TILE_BINS=1` admission for mixed-W primary
+batches. The primary hotpacket `build/generic-hotpacket-primary-fp9779-v1.xgp` was exact, and
+the 1B smoke was exact/empty stderr, but the full 12B no-accounting replay
+`build/texture-primary-tilebins-v1-12b.report.json` changed the final SHA to
+`0db057c790e30538a246432862c277f8ba731a37f35eb608d288d60d38ee1250` and regressed final-four
+wall `37.216s -> 91.772s` (`+146.59%`) versus the texture tile-bin baseline. Source was reverted.
+
 Latest gated probe: `XLLE_TEXTURE_COMPUTE_TILE_BINS=1` enables a mixed-W texture-modulate exact
 compute path that CPU-clips with the software rasterizer's homogeneous clip rules and uploads
 16x16 tile triangle lists so pixels do not scan every triangle. It is **not default-on**. Packet

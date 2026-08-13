@@ -3,6 +3,22 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-13 - Rejected primary tile-binned exact compute probe
+
+Tested extending the tile-binned exact compute idea to mixed-W untextured primary-color batches
+behind `XLLE_PRIMARY_COMPUTE_TILE_BINS=1`, alongside the retained gated texture tile-bin path.
+The focused primary hotpacket `build/generic-hotpacket-primary-fp9779-v1.xgp` stayed exact with
+`0` mismatches after switching the hotpacket helper to the new non-resident primary compute enum,
+and the 1B smoke `build/texture-primary-tilebins-smoke-1b.report.json` was exact/empty stderr.
+
+The full 12B no-accounting replay `build/texture-primary-tilebins-v1-12b.report.json` failed:
+final SHA changed from `876b58c2...` to
+`0db057c790e30538a246432862c277f8ba731a37f35eb608d288d60d38ee1250`, final FPS regressed
+`3.876 -> 1.318`, and final-four wall regressed `37.216s -> 91.772s` (`+146.59%`) versus the
+gated texture tile-bin baseline. Source was reverted to the last good texture-only tile-bin
+state. Do not retry this broad primary exact-compute admission without narrower packet-level
+differential work; a single exact hotpacket is not representative enough.
+
 ## 2026-08-13 - Gated tile-binned exact compute probe for mixed-W texture batches
 
 Added an explicit `XLLE_TEXTURE_COMPUTE_TILE_BINS=1` path for the mixed-W large
