@@ -3,6 +3,22 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-13 - Replay variance summarizer added for optimization gates
+
+Added `tools/summarize_xbox_report_set.py`, a post-processing helper that summarizes repeated
+replay reports without launching the emulator. It reports final-SHA consistency, stderr status,
+final-FPS mean/stdev/CV, and final-window focus bucket variance using the same `focus_sums`
+logic as `tools/compare_xbox_reports.py`.
+
+Validation: `py -3 -m py_compile tools\summarize_xbox_report_set.py` passes, `git diff --check`
+is clean, and the tool successfully summarized both the exact no-perf 1B pair
+(`build/vsh-context-direct-noperf-smoke-1b.report.json`,
+`build/vsh-census-source-reverted-noperf-smoke-1b.report.json`) and the exact 12B perf pair
+(`build/vsh-context-direct-perf-v2-12b.report.json`,
+`build/vsh-census-perf-v1-12b.report.json`). The latter shows final-four wall CV about `0.84%`,
+while derived `generic_other~` and resident-ensure buckets vary much more, reinforcing that
+future 2-6% deltas need repeated/error-bar evidence before being accepted or rejected.
+
 ## 2026-08-13 - VSH census finding retained as tooling/data only; source hooks reverted
 
 A one-time Claude Fable high critique was run as requested with tools disabled and limited to

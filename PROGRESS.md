@@ -122,6 +122,18 @@ SHA `a6087ec5...`, final FPS `2.988`, and final-four wall only `+1.01%` against 
 baseline. Retained changes are limited to report parser/summarizer support for historical and
 future `[perf-vsh-program]` artifacts.
 
+Measurement-tooling addition: `tools/summarize_xbox_report_set.py` summarizes repeated reports
+without launching xlle. Use it before judging small deltas:
+
+```
+py -3 tools\summarize_xbox_report_set.py <report-a.json> <report-b.json> ... --require-same-final-sha --require-empty-stderr
+```
+
+The tool reports final-FPS and final-window focus bucket mean/stdev/CV using the same focus sums
+as `tools/compare_xbox_reports.py`. A quick check across the exact 12B perf baseline and VSH
+census reports shows final-four wall CV about `0.84%`, but `generic_other~` and resident-ensure
+are much noisier; do not treat one-run 2-6% movement in those derived buckets as decisive.
+
 One-time Fable critique result: stop treating scalar micro-tweaks as the main path. Before the
 next architecture bet, establish clearer exclusive-time/unit-cost accounting and target a larger
 exact bucket. Fable specifically called out measurement noise/code-layout effects around 2-6%
