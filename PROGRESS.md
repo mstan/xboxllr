@@ -104,6 +104,14 @@ compute fixture produces `0` mismatches. Treat widened native-graphics resident 
 blocked for both texture and primary mixed-W packets unless the raster/interpolation/blend
 semantics are made byte-exact.
 
+Rejected primary compute production probe: adding a separate non-resident primary compute fixture
+and routing only clipped mixed-W large-dashboard primary batches through it was exact at the 1B
+no-accounting stock smoke, but regressed final FPS `2.841 -> 2.414` and final-four wall
+`24.405s -> 26.975s` (`+10.53%`) versus
+`build/posttransform-cache-direct256-noperf-smoke-1b.report.json`. Source was reverted and no 12B
+run was spent. This confirms the full-surface compute round trip is too costly even without
+texture upload/sampling.
+
 Latest rejected experiment: gated `XLLE_Q_RECIP_HOIST=1` was exact at 1B and 12B, but slower
 against the retained baseline: final FPS `2.552 -> 2.448`, final-four wall `+3.80%`,
 CPU `+3.26%`, generic raster `+4.07%`, resolve `+23.24%`. Source was reverted. Also rejected:

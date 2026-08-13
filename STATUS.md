@@ -38,6 +38,13 @@ all by one LSB, while the exact compute fixture had `0` mismatches. This reinfor
 resident graphics admission is blocked by native GL coverage/interpolation/blend semantics, not
 just by texture sampling.
 
+Rejected exact primary compute fallback: a prototype routed only clipped mixed-W large-dashboard
+primary-color batches through a non-resident compute fixture. The focused hotpacket remained
+exact, and the 1B no-accounting stock smoke stayed exact/empty stderr with final SHA
+`a6087ec5...`, but final FPS regressed `2.841 -> 2.414` and final-four wall
+`24.405s -> 26.975s` (`+10.53%`) against the retained cache baseline. Source was reverted and no
+12B run was spent.
+
 ## 2026-08-13 - Retained batch-local post-transform cache lifts late stock dashboard to 3.095 fps
 
 Implemented a conservative NV2A post-transform cache for indexed programmable vertex batches.
