@@ -5,7 +5,7 @@
 
 ## 2026-08-13 - Stock dashboard performance cursor: exact but still below 10 fps
 
-Current pushed head is `c0098e5` on `origin/master`. Retained emulator behavior includes direct
+Retained emulator behavior includes direct
 vertex fetch, disabled perf-timer guards, reduced default-path NV2A diagnostic telemetry, and
 immutable-context VSH execution. The best retained no-accounting stock-dashboard 12B replay is
 `build/vsh-context-direct-noperf-v1-12b.report.json`: exact/empty stderr, final SHA-256
@@ -32,6 +32,12 @@ packet materialization probe also stayed exact at 1B but regressed final FPS `2.
 final-four wall `+5.32%`; source was reverted. Current focus should remain the large exact
 buckets: generic software raster/family specialization, exact resident/tile work, and VSH
 execution, not packet-copy or wrapper shaving.
+
+Rejected tile-thread probe: a gated `XLLE_GENERIC_TILE_THREADS=4` generic software raster
+prototype partitioned the target into disjoint x-ranges and preserved per-pixel triangle order
+inside each worker. It stayed exact at 1B, but the gate-off scaffolding already regressed
+final-four wall `22.659s -> 23.769s` (`+4.90%`), and the env-on tile run regressed to
+`24.458s` (`+7.94%`, final FPS `2.955 -> 2.875`). Source was reverted.
 
 ## 2026-08-09 - A4: synthetic Down-then-A replay reaches a stable black frame; dashboard identified as XBMC
 

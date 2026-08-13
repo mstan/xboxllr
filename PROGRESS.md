@@ -35,13 +35,13 @@ commits without explicit current authorization.
 ## Current optimization cursor (2026-08-13)
 
 Active Beads issue: `beads-xbox.1.13` (`Performance: reach interactive-navigable stock
-dashboard (>=10 fps sustained)`). Current pushed head on `origin/master` is commit `c0098e5`;
-the retained emulator behavior is from `95fe3ab` plus tooling/status updates. It includes direct
+dashboard (>=10 fps sustained)`). The retained emulator behavior is from `95fe3ab` plus
+tooling/status updates. It includes direct
 vertex fetch, disabled perf-timer guards, reduced default-path NV2A diagnostic telemetry, and
-immutable-context VSH execution. The latest rejected experiment was a reduced-path guard around
-the remaining resident/texture-modulate diagnostic counters; it was exact on the 1B no-accounting
-smoke but slower (`2.955 -> 2.912` final FPS, final-four wall `22.659s -> 23.016s`, `+1.58%`) and
-was reverted.
+immutable-context VSH execution. The latest rejected experiment was a gated generic software
+raster tile-thread prototype (`XLLE_GENERIC_TILE_THREADS=4`); it was exact at the 1B
+no-accounting smoke gate but slower (`2.955 -> 2.875` final FPS, final-four wall
+`22.659s -> 24.458s`, `+7.94%`) and was reverted.
 
 Correctness status: the exact OpenGL/resident baseline for the stock dashboard 12B replay is
 `build/resident-resolve-bgra-v1-12b.report.json`. It exits cleanly with empty stderr and final
@@ -89,6 +89,13 @@ lazy renderer-packet materialization probe was also exact at 1B but slower (`2.9
 final FPS, `+5.32%` final-four wall), so it was reverted. Do not keep chasing renderer packet
 copy/wrapper shape without stronger evidence; the important remaining work is generic software
 raster/family specialization, exact resident/tile work, and VSH execution.
+
+Tile-thread continuation reject: a gated `XLLE_GENERIC_TILE_THREADS=4` generic software raster
+prototype partitioned the target into disjoint x-ranges so each pixel kept triangle order inside
+one worker. It built and was exact at 1B, but the inert gate-off build already regressed final-four
+wall `22.659s -> 23.769s` (`+4.90%`), and the env-on tile run regressed further to `24.458s`
+(`+7.94%`, final FPS `2.955 -> 2.875`). Source was reverted. Do not revive this "replay all
+triangles per tile" shape unless the setup/coverage duplication is eliminated.
 
 One-time Fable critique result: stop treating scalar micro-tweaks as the main path. Before the
 next architecture bet, establish clearer self-time/unit-cost accounting and target a larger exact
