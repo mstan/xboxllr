@@ -8626,9 +8626,16 @@ int main() {
                 const bool compute_probe =
                     std::getenv("XLLE_HOTPACKET_PROBE_COMPUTE") != nullptr;
                 if (compute_probe) {
-                    CHECK(texture_resident_probe);
-                    resident.compute_fixture = xlle::Nv2aGenericCombinerPacket::
-                        ComputeFixture::kTextureModulateTriangle;
+                    if (primary_resident_probe) {
+                        resident.compute_fixture =
+                            xlle::Nv2aGenericCombinerPacket::ComputeFixture::
+                                kResidentPrimaryColorTriangles;
+                    } else {
+                        CHECK(texture_resident_probe);
+                        resident.compute_fixture =
+                            xlle::Nv2aGenericCombinerPacket::ComputeFixture::
+                                kTextureModulateTriangle;
+                    }
                     CHECK(gl_renderer->supports_generic_combiner(resident));
                     CHECK(gl_renderer->submit_generic_combiner(
                         resident, result, gl_error));

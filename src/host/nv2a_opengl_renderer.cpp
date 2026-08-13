@@ -394,6 +394,130 @@ void main() {
 }
 )GLSL";
 
+constexpr const char* kPrimaryColorTriangleComputeSource = R"GLSL(#version 430 core
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(std430, binding = 0) buffer ColorSurface { uint color[]; };
+layout(std430, binding = 1) buffer VertexData { float vertex_data[]; };
+layout(std430, binding = 2) buffer VertexXY { int vertex_xy[]; };
+uniform int surface_width;
+uniform int surface_height;
+uniform int surface_pitch_words;
+uniform int triangle_count;
+uniform ivec2 clip_origin;
+uniform ivec2 clip_extent;
+uniform uint blend_src;
+uniform uint blend_dst;
+uniform uint color_format_x8;
+double edge_value(ivec2 p0, ivec2 p1, ivec2 p) {
+    return double(p1.x - p0.x) * double(p.y - p0.y) -
+           double(p1.y - p0.y) * double(p.x - p0.x);
+}
+bool top_left(ivec2 p0, ivec2 p1) {
+    int dx = p1.x - p0.x; int dy = p1.y - p0.y;
+    return dy < 0 || (dy == 0 && dx > 0);
+}
+vec4 unpack_argb(uint word) {
+    return vec4(float((word >> 16u) & 255u), float((word >> 8u) & 255u),
+                float(word & 255u), float((word >> 24u) & 255u)) / 255.0;
+}
+uint pack_argb(vec4 value) {
+    uvec4 v = uvec4(floor(clamp(value, 0.0, 1.0) * 255.0 + 0.5));
+    return (v.a << 24u) | (v.r << 16u) | (v.g << 8u) | v.b;
+}
+float vdata(uint vertex, uint offset) {
+    return vertex_data[vertex * 5u + offset];
+}
+vec4 vdiffuse(uint vertex) {
+    return clamp(vec4(vdata(vertex, 0u), vdata(vertex, 1u),
+                      vdata(vertex, 2u), vdata(vertex, 3u)), 0.0, 1.0);
+}
+float vpos_w(uint vertex) {
+    return vdata(vertex, 4u);
+}
+ivec2 vxy(uint vertex) {
+    return ivec2(vertex_xy[vertex * 2u], vertex_xy[vertex * 2u + 1u]);
+}
+float blend_factor(uint factor, float src_alpha) {
+    if (factor == 0u) return 0.0;
+    if (factor == 1u) return 1.0;
+    if (factor == 0x0302u) return src_alpha;
+    if (factor == 0x0303u) return 1.0 - src_alpha;
+    return 0.0;
+}
+void main() {
+    ivec2 xy = ivec2(gl_GlobalInvocationID.xy);
+    if (xy.x >= surface_width || xy.y >= surface_height ||
+        xy.x < clip_origin.x || xy.y < clip_origin.y ||
+        xy.x >= clip_origin.x + clip_extent.x ||
+        xy.y >= clip_origin.y + clip_extent.y) return;
+    ivec2 p = xy * 16 + ivec2(8);
+    uint offset = uint(xy.y * surface_pitch_words + xy.x);
+    vec4 current = unpack_argb(color[offset]);
+    bool covered = false;
+    for (int tri = 0; tri < triangle_count; ++tri) {
+        uint ia = uint(tri * 3);
+        uint ib = ia + 1u;
+        uint ic = ia + 2u;
+        ivec2 vertex_a = vxy(ia);
+        ivec2 vertex_b = vxy(ib);
+        ivec2 vertex_c = vxy(ic);
+        double area = edge_value(vertex_a, vertex_b, vertex_c);
+        if (area == 0.0) continue;
+        if (area < 0.0) {
+            ivec2 tmp = vertex_b;
+            vertex_b = vertex_c;
+            vertex_c = tmp;
+            uint tmp_index = ib;
+            ib = ic;
+            ic = tmp_index;
+            area = -area;
+        }
+        double w0 = edge_value(vertex_b, vertex_c, p);
+        double w1 = edge_value(vertex_c, vertex_a, p);
+        double w2 = edge_value(vertex_a, vertex_b, p);
+        if (w0 < 0.0 || (w0 == 0.0 && !top_left(vertex_b, vertex_c)) ||
+            w1 < 0.0 || (w1 == 0.0 && !top_left(vertex_c, vertex_a)) ||
+            w2 < 0.0 || (w2 == 0.0 && !top_left(vertex_a, vertex_b))) continue;
+        double l0 = w0 / area;
+        double l1 = w1 / area;
+        double l2 = w2 / area;
+        double inv_w0 = 1.0 / double(vpos_w(ia));
+        double inv_w1 = 1.0 / double(vpos_w(ib));
+        double inv_w2 = 1.0 / double(vpos_w(ic));
+        double q0 = l0 * inv_w0;
+        double q1 = l1 * inv_w1;
+        double q2 = l2 * inv_w2;
+        double qsum = q0 + q1 + q2;
+        if (qsum == 0.0 || isnan(qsum) || isinf(qsum)) continue;
+        vec4 diffuse = vec4(
+            float((double(vdiffuse(ia).r) * q0 + double(vdiffuse(ib).r) * q1 +
+                   double(vdiffuse(ic).r) * q2) / qsum),
+            float((double(vdiffuse(ia).g) * q0 + double(vdiffuse(ib).g) * q1 +
+                   double(vdiffuse(ic).g) * q2) / qsum),
+            float((double(vdiffuse(ia).b) * q0 + double(vdiffuse(ib).b) * q1 +
+                   double(vdiffuse(ic).b) * q2) / qsum),
+            float((double(vdiffuse(ia).a) * q0 + double(vdiffuse(ib).a) * q1 +
+                   double(vdiffuse(ic).a) * q2) / qsum));
+        vec4 src = clamp(diffuse, 0.0, 1.0);
+        precise float src_alpha = src.a;
+        precise float sf = blend_factor(blend_src, src_alpha);
+        precise float df = blend_factor(blend_dst, src_alpha);
+        precise float src_r = src.r * sf;
+        precise float src_g = src.g * sf;
+        precise float src_b = src.b * sf;
+        precise float dst_r = current.r * df;
+        precise float dst_g = current.g * df;
+        precise float dst_b = current.b * df;
+        vec3 rgb = clamp(vec3(src_r + dst_r, src_g + dst_g, src_b + dst_b),
+                         0.0, 1.0);
+        float alpha = color_format_x8 != 0u ? 1.0 : src.a;
+        current = unpack_argb(pack_argb(vec4(rgb, alpha)));
+        covered = true;
+    }
+    if (covered) color[offset] = pack_argb(current);
+}
+)GLSL";
+
 constexpr const char* kDashboardProject2dFanComputeSource = R"GLSL(#version 430 core
 layout(local_size_x = 8, local_size_y = 8) in;
 layout(std430, binding = 0) buffer ColorSurface { uint color[]; };
@@ -803,6 +927,8 @@ public:
         // context, not whichever context happened to be current last.
         if (window_ && context_) SDL_GL_MakeCurrent(window_, context_);
         if (fixture_program_ && delete_program_) delete_program_(fixture_program_);
+        if (primary_color_program_ && delete_program_)
+            delete_program_(primary_color_program_);
         if (texture_modulate_program_ && delete_program_)
             delete_program_(texture_modulate_program_);
         if (dashboard_program_ && delete_program_)
@@ -849,6 +975,37 @@ public:
                    packet.fixture_clip_x + packet.fixture_clip_width <=
                        (packet.surface_pitch & 0xffffu) / 4 &&
                    packet.fixture_clip_y + packet.fixture_clip_height <= packet.surface_height;
+        }
+        if (packet.compute_fixture ==
+            Nv2aGenericCombinerPacket::ComputeFixture::kResidentPrimaryColorTriangles) {
+            if (std::getenv("XLLE_PRIMARY_COMPUTE_FIXTURE") == nullptr)
+                return false;
+            if (primary_color_program_ == 0 || packet.primitive_mode != 5 ||
+                packet.vertices.empty() || (packet.vertices.size() % 3u) != 0 ||
+                !packet.depth_input.empty() || packet.surface_pitch == 0 ||
+                packet.surface_height == 0 || packet.fixture_clip_width == 0 ||
+                packet.fixture_clip_height == 0) {
+                return false;
+            }
+            if (packet.fixture_blend_enabled) {
+                auto factor_supported = [](uint32_t factor) {
+                    return factor == 0 || factor == 1 || factor == 0x0302 ||
+                           factor == 0x0303;
+                };
+                if (!factor_supported(packet.fixture_blend_src) ||
+                    !factor_supported(packet.fixture_blend_dst)) {
+                    return false;
+                }
+            }
+            const uint32_t width = (packet.surface_pitch & 0xffffu) / 4u;
+            const bool large_diagnostic =
+                std::getenv("XLLE_LARGE_PRIMARY_COMPUTE_FIXTURE") != nullptr;
+            return width > 0 &&
+                   (large_diagnostic ||
+                    (width <= 64 && packet.surface_height <= 64)) &&
+                   packet.fixture_clip_x + packet.fixture_clip_width <= width &&
+                   packet.fixture_clip_y + packet.fixture_clip_height <=
+                       packet.surface_height;
         }
         if (packet.compute_fixture ==
             Nv2aGenericCombinerPacket::ComputeFixture::kTextureModulateTriangle) {
@@ -1476,6 +1633,92 @@ public:
             }
         } restore{previous_window, previous_context, window_};
         if (packet.compute_fixture ==
+            Nv2aGenericCombinerPacket::ComputeFixture::kResidentPrimaryColorTriangles) {
+            if (packet.color_input.size() % sizeof(uint32_t) != 0 ||
+                packet.color_input.size() !=
+                    static_cast<size_t>(packet.surface_pitch & 0xffffu) *
+                        packet.surface_height) {
+                error = "OpenGL primary-color fixture received invalid color surface";
+                return false;
+            }
+            std::array<unsigned int, 3> buffers{};
+            gen_buffers_(static_cast<int>(buffers.size()), buffers.data());
+            auto upload_buffer = [&](unsigned int binding, unsigned int buffer,
+                                     const void* data, size_t size) {
+                bind_buffer_(kGlShaderStorageBuffer, buffer);
+                buffer_data_(kGlShaderStorageBuffer,
+                             static_cast<std::ptrdiff_t>(size), data,
+                             kGlDynamicCopy);
+                bind_buffer_base_(kGlShaderStorageBuffer, binding, buffer);
+            };
+            std::vector<float> vertex_data(packet.vertices.size() * 5u, 0.0f);
+            std::vector<int32_t> xy_data(packet.vertices.size() * 2u, 0);
+            for (size_t vertex = 0; vertex < packet.vertices.size(); ++vertex) {
+                for (size_t component = 0; component < 4; ++component) {
+                    vertex_data[vertex * 5u + component] =
+                        packet.vertices[vertex].diffuse[component];
+                }
+                vertex_data[vertex * 5u + 4u] =
+                    packet.vertices[vertex].position[3];
+                xy_data[vertex * 2u + 0u] = static_cast<int32_t>(
+                    std::llround(packet.vertices[vertex].position[0] * 16.0f));
+                xy_data[vertex * 2u + 1u] = static_cast<int32_t>(
+                    std::llround(packet.vertices[vertex].position[1] * 16.0f));
+            }
+            upload_buffer(0, buffers[0], packet.color_input.data(),
+                          packet.color_input.size());
+            upload_buffer(1, buffers[1], vertex_data.data(),
+                          vertex_data.size() * sizeof(float));
+            upload_buffer(2, buffers[2], xy_data.data(),
+                          xy_data.size() * sizeof(int32_t));
+            use_program_(primary_color_program_);
+            uniform_1i_(uniform_location_(primary_color_program_, "surface_width"),
+                        static_cast<int>((packet.surface_pitch & 0xffffu) / 4u));
+            uniform_1i_(uniform_location_(primary_color_program_, "surface_height"),
+                        static_cast<int>(packet.surface_height));
+            uniform_1i_(uniform_location_(primary_color_program_,
+                                          "surface_pitch_words"),
+                        static_cast<int>((packet.surface_pitch & 0xffffu) / 4u));
+            uniform_1i_(uniform_location_(primary_color_program_, "triangle_count"),
+                        static_cast<int>(packet.vertices.size() / 3u));
+            uniform_2i_(uniform_location_(primary_color_program_, "clip_origin"),
+                        static_cast<int>(packet.fixture_clip_x),
+                        static_cast<int>(packet.fixture_clip_y));
+            uniform_2i_(uniform_location_(primary_color_program_, "clip_extent"),
+                        static_cast<int>(packet.fixture_clip_width),
+                        static_cast<int>(packet.fixture_clip_height));
+            uniform_1ui_(uniform_location_(primary_color_program_, "blend_src"),
+                         packet.fixture_blend_enabled ? packet.fixture_blend_src : 1u);
+            uniform_1ui_(uniform_location_(primary_color_program_, "blend_dst"),
+                         packet.fixture_blend_enabled ? packet.fixture_blend_dst : 0u);
+            uniform_1ui_(uniform_location_(primary_color_program_,
+                                           "color_format_x8"),
+                         packet.fixture_color_format_x8 ? 1u : 0u);
+            dispatch_compute_(((packet.surface_pitch & 0xffffu) / 4u + 7u) / 8u,
+                              (packet.surface_height + 7u) / 8u, 1);
+            memory_barrier_(kGlShaderStorageBarrierBit | kGlBufferUpdateBarrierBit);
+            if (get_error_() != kGlNoError) {
+                delete_buffers_(static_cast<int>(buffers.size()), buffers.data());
+                error = "OpenGL primary-color fixture dispatch failed";
+                return false;
+            }
+            result.color_output.resize(packet.color_input.size());
+            bind_buffer_(kGlShaderStorageBuffer, buffers[0]);
+            get_buffer_sub_data_(kGlShaderStorageBuffer, 0,
+                                 static_cast<std::ptrdiff_t>(
+                                     result.color_output.size()),
+                                 result.color_output.data());
+            delete_buffers_(static_cast<int>(buffers.size()), buffers.data());
+            if (get_error_() != kGlNoError) {
+                error = "OpenGL primary-color fixture readback failed";
+                return false;
+            }
+            result.triangles = packet.vertices.size() / 3u;
+            result.fragments = 0;
+            result.writes = 0;
+            return true;
+        }
+        if (packet.compute_fixture ==
             Nv2aGenericCombinerPacket::ComputeFixture::kTextureModulateTriangle) {
             if (packet.color_input.size() % sizeof(uint32_t) != 0 ||
                 packet.color_input.size() !=
@@ -1806,8 +2049,8 @@ public:
             error = "OpenGL 4.3 compute fixture is missing a required entry point";
             return false;
         }
-        return compile_fixture(error) && compile_texture_modulate(error) &&
-               compile_dashboard(error) &&
+        return compile_fixture(error) && compile_primary_color(error) &&
+               compile_texture_modulate(error) && compile_dashboard(error) &&
                compile_resident_primary(error) &&
                compile_resident_alpha(error) &&
                compile_resident_texture_modulate(error) &&
@@ -2261,6 +2504,10 @@ private:
     bool compile_fixture(std::string& error) {
         return compile_program(kFixtureComputeSource, "fixture", fixture_program_, error);
     }
+    bool compile_primary_color(std::string& error) {
+        return compile_program(kPrimaryColorTriangleComputeSource, "primary-color",
+                               primary_color_program_, error);
+    }
     bool compile_dashboard(std::string& error) {
         return compile_program(kDashboardProject2dFanComputeSource, "dashboard",
                                dashboard_program_, error);
@@ -2299,6 +2546,7 @@ private:
     SDL_GLContext context_ = nullptr;
     bool owns_video_ = false;
     unsigned int fixture_program_ = 0;
+    unsigned int primary_color_program_ = 0;
     unsigned int texture_modulate_program_ = 0;
     unsigned int dashboard_program_ = 0;
     unsigned int resident_program_ = 0;
