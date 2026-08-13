@@ -34,6 +34,18 @@ commits without explicit current authorization.
 
 ## Current optimization cursor (2026-08-13)
 
+Latest packet-level finding: captured the top final-window primary-color full-state
+`fp=420f0b01c73c2c93/full=be372882a4961758` into
+`build/generic-hotpacket-primary-be372-v1.xgp`. The capture replay stayed exact/empty stderr
+with final SHA `876b58c2...`. Resident OpenGL primary replay for this packet is non-exact but
+only one LSB (`337,986` pixels, `maxd=1`, mixed positive/negative channel deltas). Exact primary
+compute replay is byte-exact (`0` mismatches) with
+`XLLE_PRIMARY_COMPUTE_FIXTURE=1`, `XLLE_LARGE_PRIMARY_COMPUTE_FIXTURE=1`,
+`XLLE_HOTPACKET_PROBE_COMPUTE=1`, and `XLLE_HOTPACKET_PROBE_REQUIRE_EXACT=1`. This reinforces
+the current strategy: do not widen native resident primary until blend/interpolation exactness is
+fixed, and do not broadly re-enable exact primary compute because the prior full 12B route was
+wrong and much slower.
+
 Latest rejected probe: broad `XLLE_PRIMARY_COMPUTE_TILE_BINS=1` admission for mixed-W primary
 batches. The primary hotpacket `build/generic-hotpacket-primary-fp9779-v1.xgp` was exact, and
 the 1B smoke was exact/empty stderr, but the full 12B no-accounting replay

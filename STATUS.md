@@ -3,6 +3,25 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-13 - Captured top primary sub-state packet
+
+Captured the hottest final-window primary-color sub-state from
+`build/texture-compute-tilebins-flat-perf-v1-12b.report.json`
+(`fp=420f0b01c73c2c93`, `full=be372882a4961758`) with
+`--debug-generic-packet-dump` into `build/generic-hotpacket-primary-be372-v1.xgp`.
+The capture replay `build/primary-substate-be372-capture-12b.report.json` stayed
+exact/empty stderr with final SHA `876b58c2...`; the lower final FPS (`3.631`) is
+diagnostic capture overhead, not a candidate speed result.
+
+Packet replay result: native resident OpenGL primary rendering is still non-exact for this
+state (`337,986` mismatching pixels, `maxd=1`, both positive and negative one-LSB channel
+deltas). Exact primary compute is byte-exact for the same packet when run with
+`XLLE_PRIMARY_COMPUTE_FIXTURE=1`, `XLLE_LARGE_PRIMARY_COMPUTE_FIXTURE=1`,
+`XLLE_HOTPACKET_PROBE_COMPUTE=1`, and `XLLE_HOTPACKET_PROBE_REQUIRE_EXACT=1`
+(`0` mismatches). Conclusion: this confirms the earlier pattern on a top sub-state:
+resident primary needs a real blend/interpolation exactness fix before widening; exact compute
+is correct but remains the expensive fallback class and should not be broadly re-enabled.
+
 ## 2026-08-13 - Rejected primary tile-binned exact compute probe
 
 Tested extending the tile-binned exact compute idea to mixed-W untextured primary-color batches
