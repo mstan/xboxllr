@@ -108,6 +108,24 @@ PERF_RENDERER_RE = re.compile(
     r"resolve-pixels=(?P<resolve_pixels>\d+))?"
 )
 
+PERF_RENDERER_RESIDENT_DETAIL_RE = re.compile(
+    r"^\[perf-renderer-resident-detail\] "
+    r"context-ns=(?P<resident_context_ns>\d+) "
+    r"\(n=(?P<resident_context_n>\d+)\) "
+    r"vertex-build-ns=(?P<resident_vertex_build_ns>\d+) "
+    r"\(n=(?P<resident_vertex_build_n>\d+)\) "
+    r"state-setup-ns=(?P<resident_state_setup_ns>\d+) "
+    r"\(n=(?P<resident_state_setup_n>\d+)\) "
+    r"uniforms-ns=(?P<resident_uniforms_ns>\d+) "
+    r"\(n=(?P<resident_uniforms_n>\d+)\) "
+    r"attribs-ns=(?P<resident_attribs_ns>\d+) "
+    r"\(n=(?P<resident_attribs_n>\d+)\) "
+    r"cleanup-ns=(?P<resident_cleanup_ns>\d+) "
+    r"\(n=(?P<resident_cleanup_n>\d+)\) "
+    r"error-check-ns=(?P<resident_error_check_ns>\d+) "
+    r"\(n=(?P<resident_error_check_n>\d+)\)"
+)
+
 PERF_RENDERER_RESOLVE_CONTEXT_RE = re.compile(
     r"^\[perf-renderer-resolve-context\] top=(?P<top>.*)$"
 )
@@ -564,6 +582,7 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
     host_memory_samples: list[dict[str, Any]] = []
     unicorn_memory_samples: list[dict[str, Any]] = []
     renderer_samples: list[dict[str, Any]] = []
+    renderer_resident_detail_samples: list[dict[str, Any]] = []
     renderer_resolve_context_samples: list[dict[str, dict[str, int]]] = []
     perf_memory_samples: list[dict[str, Any]] = []
     generic_split_samples: list[dict[str, Any]] = []
@@ -604,6 +623,8 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
             unicorn_memory_samples.append(parse_int_fields(match))
         elif match := PERF_RENDERER_RE.match(line):
             renderer_samples.append(parse_int_fields(match))
+        elif match := PERF_RENDERER_RESIDENT_DETAIL_RE.match(line):
+            renderer_resident_detail_samples.append(parse_int_fields(match))
         elif match := PERF_RENDERER_RESOLVE_CONTEXT_RE.match(line):
             renderer_resolve_context_samples.append(
                 parse_renderer_resolve_contexts(match.group("top"))
@@ -666,6 +687,12 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
         ),
         "renderer_samples": renderer_samples,
         "final_renderer": renderer_samples[-1] if renderer_samples else None,
+        "renderer_resident_detail_samples": renderer_resident_detail_samples,
+        "final_renderer_resident_detail": (
+            renderer_resident_detail_samples[-1]
+            if renderer_resident_detail_samples
+            else None
+        ),
         "renderer_resolve_context_samples": renderer_resolve_context_samples,
         "final_renderer_resolve_context": (
             renderer_resolve_context_samples[-1]

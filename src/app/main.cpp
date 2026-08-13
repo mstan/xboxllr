@@ -2140,6 +2140,10 @@ int main(int argc, char** argv) {
                     xlle::perf::format_renderer_report();
                 if (!renderer_report.empty())
                     std::printf("%s\n", renderer_report.c_str());
+                const std::string renderer_resident_detail_report =
+                    xlle::perf::format_renderer_resident_detail_report();
+                if (!renderer_resident_detail_report.empty())
+                    std::printf("%s\n", renderer_resident_detail_report.c_str());
                 const std::string renderer_resolve_context_report =
                     xlle::perf::format_renderer_resolve_context_report();
                 if (!renderer_resolve_context_report.empty())
@@ -2755,6 +2759,10 @@ int main(int argc, char** argv) {
                     xlle::perf::format_renderer_report();
                 if (!renderer_report.empty())
                     std::printf("%s\n", renderer_report.c_str());
+                const std::string renderer_resident_detail_report =
+                    xlle::perf::format_renderer_resident_detail_report();
+                if (!renderer_resident_detail_report.empty())
+                    std::printf("%s\n", renderer_resident_detail_report.c_str());
                 const std::string renderer_resolve_context_report =
                     xlle::perf::format_renderer_resolve_context_report();
                 if (!renderer_resolve_context_report.empty())
@@ -2813,6 +2821,10 @@ int main(int argc, char** argv) {
                     xlle::perf::format_renderer_report();
                 if (!renderer_report.empty())
                     std::printf("%s\n", renderer_report.c_str());
+                const std::string renderer_resident_detail_report =
+                    xlle::perf::format_renderer_resident_detail_report();
+                if (!renderer_resident_detail_report.empty())
+                    std::printf("%s\n", renderer_resident_detail_report.c_str());
                 const std::string renderer_resolve_context_report =
                     xlle::perf::format_renderer_resolve_context_report();
                 if (!renderer_resolve_context_report.empty())

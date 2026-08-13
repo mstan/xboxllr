@@ -115,11 +115,25 @@ inline std::atomic<uint64_t> g_ns_renderer_texture_stage{0};
 inline std::atomic<uint64_t> g_ns_renderer_vertex_upload{0};
 inline std::atomic<uint64_t> g_ns_renderer_draw{0};
 inline std::atomic<uint64_t> g_ns_renderer_resolve{0};
+inline std::atomic<uint64_t> g_ns_renderer_resident_context{0};
+inline std::atomic<uint64_t> g_ns_renderer_resident_vertex_build{0};
+inline std::atomic<uint64_t> g_ns_renderer_resident_state_setup{0};
+inline std::atomic<uint64_t> g_ns_renderer_resident_uniforms{0};
+inline std::atomic<uint64_t> g_ns_renderer_resident_attribs{0};
+inline std::atomic<uint64_t> g_ns_renderer_resident_cleanup{0};
+inline std::atomic<uint64_t> g_ns_renderer_resident_error_check{0};
 inline std::atomic<uint64_t> g_calls_renderer_resident_ensure{0};
 inline std::atomic<uint64_t> g_calls_renderer_texture_stage{0};
 inline std::atomic<uint64_t> g_calls_renderer_vertex_upload{0};
 inline std::atomic<uint64_t> g_calls_renderer_draw{0};
 inline std::atomic<uint64_t> g_calls_renderer_resolve{0};
+inline std::atomic<uint64_t> g_calls_renderer_resident_context{0};
+inline std::atomic<uint64_t> g_calls_renderer_resident_vertex_build{0};
+inline std::atomic<uint64_t> g_calls_renderer_resident_state_setup{0};
+inline std::atomic<uint64_t> g_calls_renderer_resident_uniforms{0};
+inline std::atomic<uint64_t> g_calls_renderer_resident_attribs{0};
+inline std::atomic<uint64_t> g_calls_renderer_resident_cleanup{0};
+inline std::atomic<uint64_t> g_calls_renderer_resident_error_check{0};
 inline std::atomic<uint64_t> g_renderer_dirty_clip_pixels{0};
 inline std::atomic<uint64_t> g_renderer_dirty_surface_pixels{0};
 inline std::atomic<uint64_t> g_renderer_resolve_pixels{0};
@@ -497,6 +511,32 @@ inline std::string format_renderer_report() {
         (unsigned long long)g_renderer_dirty_clip_pixels.load(),
         (unsigned long long)g_renderer_dirty_surface_pixels.load(),
         (unsigned long long)g_renderer_resolve_pixels.load());
+    return std::string(buf);
+}
+
+inline std::string format_renderer_resident_detail_report() {
+    if (!g_enabled) return {};
+    char buf[1024];
+    std::snprintf(
+        buf, sizeof(buf),
+        "[perf-renderer-resident-detail] context-ns=%llu (n=%llu) "
+        "vertex-build-ns=%llu (n=%llu) state-setup-ns=%llu (n=%llu) "
+        "uniforms-ns=%llu (n=%llu) attribs-ns=%llu (n=%llu) "
+        "cleanup-ns=%llu (n=%llu) error-check-ns=%llu (n=%llu)",
+        (unsigned long long)g_ns_renderer_resident_context.load(),
+        (unsigned long long)g_calls_renderer_resident_context.load(),
+        (unsigned long long)g_ns_renderer_resident_vertex_build.load(),
+        (unsigned long long)g_calls_renderer_resident_vertex_build.load(),
+        (unsigned long long)g_ns_renderer_resident_state_setup.load(),
+        (unsigned long long)g_calls_renderer_resident_state_setup.load(),
+        (unsigned long long)g_ns_renderer_resident_uniforms.load(),
+        (unsigned long long)g_calls_renderer_resident_uniforms.load(),
+        (unsigned long long)g_ns_renderer_resident_attribs.load(),
+        (unsigned long long)g_calls_renderer_resident_attribs.load(),
+        (unsigned long long)g_ns_renderer_resident_cleanup.load(),
+        (unsigned long long)g_calls_renderer_resident_cleanup.load(),
+        (unsigned long long)g_ns_renderer_resident_error_check.load(),
+        (unsigned long long)g_calls_renderer_resident_error_check.load());
     return std::string(buf);
 }
 

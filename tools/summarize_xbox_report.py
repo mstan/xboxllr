@@ -300,6 +300,7 @@ def summarize(path: pathlib.Path) -> None:
     frames = parsed.get("frame_series", [])
     perf = parsed.get("perf_samples", [])
     renderer = parsed.get("renderer_samples", [])
+    renderer_resident_detail = parsed.get("renderer_resident_detail_samples", [])
     renderer_resolve_context = parsed.get("renderer_resolve_context_samples", [])
     resident = parsed.get("resident_samples", [])
     memory = parsed.get("host_memory_samples", [])
@@ -333,6 +334,7 @@ def summarize(path: pathlib.Path) -> None:
 
     print("  interval deltas:")
     previous_perf = previous_renderer = previous_resident = previous_memory = None
+    previous_renderer_resident_detail = None
     previous_renderer_resolve_context = None
     previous_generic_perf = None
     previous_generic_family = None
@@ -347,6 +349,7 @@ def summarize(path: pathlib.Path) -> None:
     for index, frame in enumerate(frames):
         p = sample_for_deadline(perf, index)
         r = sample_for_deadline(renderer, index)
+        rdet = sample_for_deadline(renderer_resident_detail, index)
         rc = sample_for_deadline(renderer_resolve_context, index)
         rs = sample_for_deadline(resident, index)
         m = sample_for_deadline(memory, index)
@@ -362,6 +365,7 @@ def summarize(path: pathlib.Path) -> None:
         vr = sample_for_deadline(vertex_reuse_samples, index)
         pd = delta_dict(p, previous_perf) if p else {}
         rd = delta_dict(r, previous_renderer) if r else {}
+        rdd = delta_dict(rdet, previous_renderer_resident_detail) if rdet else {}
         rsd = delta_dict(rs, previous_resident) if rs else {}
         md = delta_dict(m, previous_memory) if m else {}
         ucmd = delta_dict(ucm, previous_unicorn_memory) if ucm else {}
@@ -379,6 +383,9 @@ def summarize(path: pathlib.Path) -> None:
         )
         previous_perf = p or previous_perf
         previous_renderer = r or previous_renderer
+        previous_renderer_resident_detail = (
+            rdet or previous_renderer_resident_detail
+        )
         previous_resident = rs or previous_resident
         previous_memory = m or previous_memory
         previous_unicorn_memory = ucm or previous_unicorn_memory
@@ -487,6 +494,13 @@ def summarize(path: pathlib.Path) -> None:
             f"rdraw={ns_to_s(rd.get('draw_ns'))} "
             f"resolv={ns_to_s(rd.get('resolve_ns'))} "
             f"ensure={ns_to_s(rd.get('resident_ensure_ns'))} "
+            f"rctx={ns_to_s(rdd.get('resident_context_ns'))} "
+            f"rvbld={ns_to_s(rdd.get('resident_vertex_build_ns'))} "
+            f"rstate={ns_to_s(rdd.get('resident_state_setup_ns'))} "
+            f"runif={ns_to_s(rdd.get('resident_uniforms_ns'))} "
+            f"rattr={ns_to_s(rdd.get('resident_attribs_ns'))} "
+            f"rclean={ns_to_s(rdd.get('resident_cleanup_ns'))} "
+            f"rerr={ns_to_s(rdd.get('resident_error_check_ns'))} "
             f"uploads={rsd.get('uploads', '-')} "
             f"submits={rsd.get('submits', '-')} "
             f"dirty={dirty_pct} "

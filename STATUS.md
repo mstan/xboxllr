@@ -3,6 +3,25 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-13 - Resident submit split rejects uniform/VAO as primary target
+
+Added `--perf-accounting` resident OpenGL submit sub-buckets for context switching,
+vertex packet build, GL state setup, uniforms, vertex attrib setup, cleanup, and GL
+error checks. Report/parser/summary support now prints `[perf-renderer-resident-detail]`
+and interval columns `rctx`, `rvbld`, `rstate`, `runif`, `rattr`, `rclean`, and `rerr`.
+
+Validation: Release `xlle`/`test_nv2a` build passed, `test_nv2a` passed, Python
+parser/summary compile checks passed, the 1B perf smoke
+`build/renderer-resident-detail-smoke-1b.report.json` stayed exact/empty stderr with
+SHA `a6087ec5...`, and the full 12B perf replay
+`build/renderer-resident-detail-v1-12b.report.json` stayed exact/empty stderr with
+SHA `876b58c2...`.
+
+Late-window result: final interval `rctx=0.002s`, `rvbld=0.068s`, `rstate=0.004s`,
+`runif=0.190s`, `rattr=0.001s`, `rclean=0.001s`, and `rerr=0.016s`. Uniform-location
+or VAO caching may be a small cleanup, but it is not a primary route to the 10 fps
+target; focus remains on software generic raster, full color resolves, and admission.
+
 ## 2026-08-13 - Generic texture setup split keeps focus on resolves/admission
 
 Added `--perf-accounting` texture setup sub-buckets for generic texture readback resolve,

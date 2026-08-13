@@ -1537,17 +1537,26 @@ public:
     bool submit_resident_generic_combiner(const Nv2aGenericCombinerPacket& packet,
                                           Nv2aGenericCombinerResult& result,
                                           std::string& error) override {
-        SDL_Window* previous_window = SDL_GL_GetCurrentWindow();
-        SDL_GLContext previous_context = SDL_GL_GetCurrentContext();
-        if (!SDL_GL_MakeCurrent(window_, context_)) {
-            error = std::string("OpenGL resident context lost: ") + SDL_GetError();
-            return false;
+        SDL_Window* previous_window = nullptr;
+        SDL_GLContext previous_context = nullptr;
+        {
+            perf::ScopedAdd timer(perf::g_ns_renderer_resident_context,
+                                  perf::g_calls_renderer_resident_context);
+            previous_window = SDL_GL_GetCurrentWindow();
+            previous_context = SDL_GL_GetCurrentContext();
+            if (!SDL_GL_MakeCurrent(window_, context_)) {
+                error = std::string("OpenGL resident context lost: ") +
+                        SDL_GetError();
+                return false;
+            }
         }
         struct ContextRestore {
             SDL_Window* previous_window;
             SDL_GLContext previous_context;
             SDL_Window* fallback_window;
             ~ContextRestore() {
+                perf::ScopedAdd timer(perf::g_ns_renderer_resident_context,
+                                      perf::g_calls_renderer_resident_context);
                 restore_previous_gl_context(previous_window, previous_context,
                                             fallback_window);
             }
@@ -1586,26 +1595,30 @@ public:
             float tex[4][4];
         };
         std::vector<GpuVertex> vertices;
-        vertices.reserve(dashboard_fixture ? 6u : packet.vertices.size());
-        auto append_vertex = [&](const Nv2aGenericCombinerVertex& vertex) {
-            GpuVertex out{};
-            for (size_t i = 0; i < 4; ++i) {
-                out.position[i] = vertex.position[i];
-                out.diffuse[i] = vertex.diffuse[i];
-                for (size_t stage = 0; stage < 4; ++stage)
-                    out.tex[stage][i] = vertex.texture[stage][i];
+        {
+            perf::ScopedAdd timer(perf::g_ns_renderer_resident_vertex_build,
+                                  perf::g_calls_renderer_resident_vertex_build);
+            vertices.reserve(dashboard_fixture ? 6u : packet.vertices.size());
+            auto append_vertex = [&](const Nv2aGenericCombinerVertex& vertex) {
+                GpuVertex out{};
+                for (size_t i = 0; i < 4; ++i) {
+                    out.position[i] = vertex.position[i];
+                    out.diffuse[i] = vertex.diffuse[i];
+                    for (size_t stage = 0; stage < 4; ++stage)
+                        out.tex[stage][i] = vertex.texture[stage][i];
+                }
+                vertices.push_back(out);
+            };
+            if (dashboard_fixture) {
+                append_vertex(packet.vertices[0]);
+                append_vertex(packet.vertices[1]);
+                append_vertex(packet.vertices[2]);
+                append_vertex(packet.vertices[0]);
+                append_vertex(packet.vertices[2]);
+                append_vertex(packet.vertices[3]);
+            } else {
+                for (const auto& vertex : packet.vertices) append_vertex(vertex);
             }
-            vertices.push_back(out);
-        };
-        if (dashboard_fixture) {
-            append_vertex(packet.vertices[0]);
-            append_vertex(packet.vertices[1]);
-            append_vertex(packet.vertices[2]);
-            append_vertex(packet.vertices[0]);
-            append_vertex(packet.vertices[2]);
-            append_vertex(packet.vertices[3]);
-        } else {
-            for (const auto& vertex : packet.vertices) append_vertex(vertex);
         }
         if (dashboard_fixture) {
             perf::ScopedAdd timer(perf::g_ns_renderer_texture_stage,
@@ -1665,32 +1678,36 @@ public:
                           static_cast<int>(texture.height), 0, kGlRgba,
                           kGlUnsignedByte, rgba.data());
         }
-        bind_framebuffer_(kGlFramebuffer, resident_fbo_);
-        viewport_(0, 0, static_cast<int>(width), static_cast<int>(height));
-        const bool native_depth_test = packet.fixture_depth_test_enabled &&
-                                       !dashboard_fixture;
-        if (native_depth_test) {
-            enable_(kGlDepthTest);
-            depth_func_(gl_depth_func(packet.fixture_depth_func));
-        } else {
-            disable_(kGlDepthTest);
+        {
+            perf::ScopedAdd timer(perf::g_ns_renderer_resident_state_setup,
+                                  perf::g_calls_renderer_resident_state_setup);
+            bind_framebuffer_(kGlFramebuffer, resident_fbo_);
+            viewport_(0, 0, static_cast<int>(width), static_cast<int>(height));
+            const bool native_depth_test = packet.fixture_depth_test_enabled &&
+                                           !dashboard_fixture;
+            if (native_depth_test) {
+                enable_(kGlDepthTest);
+                depth_func_(gl_depth_func(packet.fixture_depth_func));
+            } else {
+                disable_(kGlDepthTest);
+            }
+            depth_mask_(packet.fixture_depth_write_enabled ? 1 : 0);
+            enable_(kGlScissorTest);
+            scissor_(static_cast<int>(packet.fixture_clip_x),
+                     static_cast<int>(height - packet.fixture_clip_y -
+                                      packet.fixture_clip_height),
+                     static_cast<int>(packet.fixture_clip_width),
+                     static_cast<int>(packet.fixture_clip_height));
+            if (packet.fixture_blend_enabled) {
+                enable_(kGlBlend);
+                blend_equation_(kGlFuncAdd);
+                blend_func_(gl_blend_factor(packet.fixture_blend_src),
+                            gl_blend_factor(packet.fixture_blend_dst));
+            } else {
+                disable_(kGlBlend);
+            }
+            color_mask_(1, 1, 1, packet.fixture_color_format_x8 ? 0 : 1);
         }
-        depth_mask_(packet.fixture_depth_write_enabled ? 1 : 0);
-        enable_(kGlScissorTest);
-        scissor_(static_cast<int>(packet.fixture_clip_x),
-                 static_cast<int>(height - packet.fixture_clip_y -
-                                  packet.fixture_clip_height),
-                 static_cast<int>(packet.fixture_clip_width),
-                 static_cast<int>(packet.fixture_clip_height));
-        if (packet.fixture_blend_enabled) {
-            enable_(kGlBlend);
-            blend_equation_(kGlFuncAdd);
-            blend_func_(gl_blend_factor(packet.fixture_blend_src),
-                        gl_blend_factor(packet.fixture_blend_dst));
-        } else {
-            disable_(kGlBlend);
-        }
-        color_mask_(1, 1, 1, packet.fixture_color_format_x8 ? 0 : 1);
         if (!resident_vao_) gen_vertex_arrays_(1, &resident_vao_);
         bind_vertex_array_(resident_vao_);
         if (!resident_vbo_) gen_buffers_(1, &resident_vbo_);
@@ -1706,69 +1723,79 @@ public:
         const unsigned int program = dashboard_fixture
             ? resident_dashboard_program_
             : (texture_fixture ? resident_texture_modulate_program_ : resident_program_);
-        use_program_(program);
-        uniform_2f_(uniform_location_(program, "surface_size"),
-                    static_cast<float>(width), static_cast<float>(height));
-        if (primary_fixture || constant_fixture) {
-            uniform_1ui_(uniform_location_(program, "primary_mode"),
-                         constant_fixture ? 1u : 0u);
-            uniform_1ui_(uniform_location_(program, "constant_argb"),
-                         packet.fixture_constant_argb);
-        }
-        if (texture_fixture) {
-            uniform_1i_(uniform_location_(program, "texture0"), 0);
-            uniform_2f_(uniform_location_(program, "texture_size"),
-                        static_cast<float>(packet.textures[0].width),
-                        static_cast<float>(packet.textures[0].height));
-            uniform_1ui_(uniform_location_(program, "texture_passthrough"),
-                         packet.fixture_texture_passthrough ? 1u : 0u);
-        } else if (dashboard_fixture) {
-            if (packet.fixture_depth_test_enabled) {
-                if (!active_depth_resident_ ||
-                    !active_depth_resident_->depth_word_texture) {
-                    error = "OpenGL resident dashboard missing zeta-word texture";
-                    return false;
-                }
-                active_texture_(kGlTexture0 + 1);
-                bind_texture_(kGlTexture2D,
-                              active_depth_resident_->depth_word_texture);
-                uniform_1i_(uniform_location_(program, "depth_words"), 1);
-                uniform_1ui_(uniform_location_(program, "use_depth_equal"), 1u);
-            } else {
-                uniform_1ui_(uniform_location_(program, "use_depth_equal"), 0u);
+        {
+            perf::ScopedAdd timer(perf::g_ns_renderer_resident_uniforms,
+                                  perf::g_calls_renderer_resident_uniforms);
+            use_program_(program);
+            uniform_2f_(uniform_location_(program, "surface_size"),
+                        static_cast<float>(width), static_cast<float>(height));
+            if (primary_fixture || constant_fixture) {
+                uniform_1ui_(uniform_location_(program, "primary_mode"),
+                             constant_fixture ? 1u : 0u);
+                uniform_1ui_(uniform_location_(program, "constant_argb"),
+                             packet.fixture_constant_argb);
             }
-            uniform_1ui_(uniform_location_(program, "factor_stage2"),
-                         packet.fixture_factor0_stage2_argb);
-            uniform_1ui_(uniform_location_(program, "factor_stage4"),
-                         packet.fixture_factor0_stage4_argb);
+            if (texture_fixture) {
+                uniform_1i_(uniform_location_(program, "texture0"), 0);
+                uniform_2f_(uniform_location_(program, "texture_size"),
+                            static_cast<float>(packet.textures[0].width),
+                            static_cast<float>(packet.textures[0].height));
+                uniform_1ui_(uniform_location_(program, "texture_passthrough"),
+                             packet.fixture_texture_passthrough ? 1u : 0u);
+            } else if (dashboard_fixture) {
+                if (packet.fixture_depth_test_enabled) {
+                    if (!active_depth_resident_ ||
+                        !active_depth_resident_->depth_word_texture) {
+                        error = "OpenGL resident dashboard missing zeta-word texture";
+                        return false;
+                    }
+                    active_texture_(kGlTexture0 + 1);
+                    bind_texture_(kGlTexture2D,
+                                  active_depth_resident_->depth_word_texture);
+                    uniform_1i_(uniform_location_(program, "depth_words"), 1);
+                    uniform_1ui_(uniform_location_(program, "use_depth_equal"), 1u);
+                } else {
+                    uniform_1ui_(uniform_location_(program, "use_depth_equal"), 0u);
+                }
+                uniform_1ui_(uniform_location_(program, "factor_stage2"),
+                             packet.fixture_factor0_stage2_argb);
+                uniform_1ui_(uniform_location_(program, "factor_stage4"),
+                             packet.fixture_factor0_stage4_argb);
+            }
         }
-        vertex_attrib_pointer_(0, 4, kGlFloat, 0, sizeof(GpuVertex),
-                               reinterpret_cast<const void*>(offsetof(GpuVertex, position)));
-        vertex_attrib_pointer_(1, 4, kGlFloat, 0, sizeof(GpuVertex),
-                               reinterpret_cast<const void*>(offsetof(GpuVertex, diffuse)));
-        if (texture_fixture || dashboard_fixture) {
+        {
+            perf::ScopedAdd timer(perf::g_ns_renderer_resident_attribs,
+                                  perf::g_calls_renderer_resident_attribs);
             vertex_attrib_pointer_(
-                2, 4, kGlFloat, 0, sizeof(GpuVertex),
-                reinterpret_cast<const void*>(offsetof(GpuVertex, tex[0])));
-        }
-        if (dashboard_fixture) {
+                0, 4, kGlFloat, 0, sizeof(GpuVertex),
+                reinterpret_cast<const void*>(offsetof(GpuVertex, position)));
             vertex_attrib_pointer_(
-                3, 4, kGlFloat, 0, sizeof(GpuVertex),
-                reinterpret_cast<const void*>(offsetof(GpuVertex, tex[1])));
-            vertex_attrib_pointer_(
-                4, 4, kGlFloat, 0, sizeof(GpuVertex),
-                reinterpret_cast<const void*>(offsetof(GpuVertex, tex[2])));
-            vertex_attrib_pointer_(
-                5, 4, kGlFloat, 0, sizeof(GpuVertex),
-                reinterpret_cast<const void*>(offsetof(GpuVertex, tex[3])));
-        }
-        enable_vertex_attrib_array_(0);
-        enable_vertex_attrib_array_(1);
-        if (texture_fixture || dashboard_fixture) enable_vertex_attrib_array_(2);
-        if (dashboard_fixture) {
-            enable_vertex_attrib_array_(3);
-            enable_vertex_attrib_array_(4);
-            enable_vertex_attrib_array_(5);
+                1, 4, kGlFloat, 0, sizeof(GpuVertex),
+                reinterpret_cast<const void*>(offsetof(GpuVertex, diffuse)));
+            if (texture_fixture || dashboard_fixture) {
+                vertex_attrib_pointer_(
+                    2, 4, kGlFloat, 0, sizeof(GpuVertex),
+                    reinterpret_cast<const void*>(offsetof(GpuVertex, tex[0])));
+            }
+            if (dashboard_fixture) {
+                vertex_attrib_pointer_(
+                    3, 4, kGlFloat, 0, sizeof(GpuVertex),
+                    reinterpret_cast<const void*>(offsetof(GpuVertex, tex[1])));
+                vertex_attrib_pointer_(
+                    4, 4, kGlFloat, 0, sizeof(GpuVertex),
+                    reinterpret_cast<const void*>(offsetof(GpuVertex, tex[2])));
+                vertex_attrib_pointer_(
+                    5, 4, kGlFloat, 0, sizeof(GpuVertex),
+                    reinterpret_cast<const void*>(offsetof(GpuVertex, tex[3])));
+            }
+            enable_vertex_attrib_array_(0);
+            enable_vertex_attrib_array_(1);
+            if (texture_fixture || dashboard_fixture) enable_vertex_attrib_array_(2);
+            if (dashboard_fixture) {
+                enable_vertex_attrib_array_(3);
+                enable_vertex_attrib_array_(4);
+                enable_vertex_attrib_array_(5);
+            }
         }
         {
             perf::ScopedAdd timer(perf::g_ns_renderer_draw,
@@ -1788,20 +1815,30 @@ public:
                 color_mask_(1, 1, 1, 0);
             }
         }
-        if (dashboard_fixture) {
-            disable_vertex_attrib_array_(5);
-            disable_vertex_attrib_array_(4);
-            disable_vertex_attrib_array_(3);
+        {
+            perf::ScopedAdd timer(perf::g_ns_renderer_resident_cleanup,
+                                  perf::g_calls_renderer_resident_cleanup);
+            if (dashboard_fixture) {
+                disable_vertex_attrib_array_(5);
+                disable_vertex_attrib_array_(4);
+                disable_vertex_attrib_array_(3);
+            }
+            if (texture_fixture || dashboard_fixture) disable_vertex_attrib_array_(2);
+            disable_vertex_attrib_array_(1);
+            disable_vertex_attrib_array_(0);
+            color_mask_(1, 1, 1, 1);
+            depth_mask_(1);
+            disable_(kGlDepthTest);
+            disable_(kGlBlend);
+            disable_(kGlScissorTest);
         }
-        if (texture_fixture || dashboard_fixture) disable_vertex_attrib_array_(2);
-        disable_vertex_attrib_array_(1);
-        disable_vertex_attrib_array_(0);
-        color_mask_(1, 1, 1, 1);
-        depth_mask_(1);
-        disable_(kGlDepthTest);
-        disable_(kGlBlend);
-        disable_(kGlScissorTest);
-        if (get_error_() != kGlNoError) {
+        bool gl_error = false;
+        {
+            perf::ScopedAdd timer(perf::g_ns_renderer_resident_error_check,
+                                  perf::g_calls_renderer_resident_error_check);
+            gl_error = get_error_() != kGlNoError;
+        }
+        if (gl_error) {
             if (dashboard_fixture) {
                 error = "OpenGL resident dashboard draw failed";
             } else {
