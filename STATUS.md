@@ -39,6 +39,12 @@ inside each worker. It stayed exact at 1B, but the gate-off scaffolding already 
 final-four wall `22.659s -> 23.769s` (`+4.90%`), and the env-on tile run regressed to
 `24.458s` (`+7.94%`, final FPS `2.955 -> 2.875`). Source was reverted.
 
+Rejected follow-up CPU/code-shape probes: `XLLE_PRIMARY_BLEND_FAST=1` specialized the untextured
+primary-color/SRC_ALPHA generic path and stayed exact at 1B, but regressed final-four wall to
+`23.295s` (`+2.81%`, final FPS `2.955 -> 2.913`); the disabled-gate scaffolding regressed more.
+Caching immutable generic texture `SwizzleLookup` tables by `(width,height)` also stayed exact at
+1B but regressed final-four wall to `25.521s` (`+12.63%`). Both source probes were reverted.
+
 ## 2026-08-09 - A4: synthetic Down-then-A replay reaches a stable black frame; dashboard identified as XBMC
 
 Extending the Down-only proof below to a full Down-then-A sequence, at commit `ed399fe` all six

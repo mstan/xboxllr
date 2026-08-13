@@ -97,6 +97,14 @@ wall `22.659s -> 23.769s` (`+4.90%`), and the env-on tile run regressed further 
 (`+7.94%`, final FPS `2.955 -> 2.875`). Source was reverted. Do not revive this "replay all
 triangles per tile" shape unless the setup/coverage duplication is eliminated.
 
+Additional continuation rejects: a gated `XLLE_PRIMARY_BLEND_FAST=1` CPU specialization for the
+untextured primary-color/SRC_ALPHA generic family was exact at 1B, but even with the gate enabled
+regressed final-four wall to `23.295s` (`+2.81%`, final FPS `2.955 -> 2.913`); the gate-off
+scaffolding alone was worse (`25.024s`, `+10.44%`). An immutable texture `SwizzleLookup` cache for
+generic texture stages was also exact at 1B, but regressed final-four wall to `25.521s`
+(`+12.63%`, final FPS `2.955 -> 2.727`). Both source probes were removed. Treat small code-shape
+changes in the generic raster path as suspect unless they remove a clearly measured large cost.
+
 One-time Fable critique result: stop treating scalar micro-tweaks as the main path. Before the
 next architecture bet, establish clearer self-time/unit-cost accounting and target a larger exact
 bucket: tile/row threading, SIMD, and family-keyed combiner specialization for the hot
