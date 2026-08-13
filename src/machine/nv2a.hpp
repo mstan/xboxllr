@@ -42,6 +42,7 @@ public:
         : fault_(std::move(fault)), renderer_(renderer), pramin_(0x100000, 0), methods_(4096) {}
 
     void set_renderer(Nv2aRenderer* renderer) { renderer_ = renderer; }
+    void set_detailed_telemetry(bool enabled) { detailed_telemetry_ = enabled; }
 
     const char* name() const override { return "nv2a"; }
     uint32_t mmio_base() const override { return kBase; }
@@ -1686,6 +1687,7 @@ private:
     std::array<uint64_t, 11> primitive_mode_counts_{};
     std::array<uint64_t, 7> vertex_format_fetches_{};
     std::array<uint64_t, 16> vertex_slot_fetches_{};
+    bool detailed_telemetry_ = true;
 
     // NV2A Cheops transform state. Programmable vertex shaders consist of up to 136
     // four-word instructions and address 192 float4 constants. The pinned xemu CPU

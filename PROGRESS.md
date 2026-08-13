@@ -36,9 +36,9 @@ commits without explicit current authorization.
 
 Active Beads issue: `beads-xbox.1.13` (`Performance: reach interactive-navigable stock
 dashboard (>=10 fps sustained)`). Current retained code on `origin/master` includes the direct
-vertex-fetch optimization plus disabled perf-timer guards for the default no-accounting path.
-The latest rejected experiment was direct PFIFO command-word fetch via `mem_direct_`; it was
-exact but slower on the 1B smoke and was reverted.
+vertex-fetch optimization, disabled perf-timer guards, and reduced NV2A diagnostic telemetry
+for the default no-accounting interactive path. The latest rejected experiment was direct PFIFO
+command-word fetch via `mem_direct_`; it was exact but slower on the 1B smoke and was reverted.
 
 Correctness status: the exact OpenGL/resident baseline for the stock dashboard 12B replay is
 `build/resident-resolve-bgra-v1-12b.report.json`. It exits cleanly with empty stderr and final
@@ -97,6 +97,21 @@ final-four wall against the clean direct-fetch no-accounting smoke by `25.617s -
 emitted parseable CPU/host/NV2A split counters. Rejected adjacent experiment:
 `build/direct-pfifo-fetch-smoke-1b.report.json` was exact but regressed final FPS
 `2.845 -> 2.819` and final-four wall by `+3.81%`, so source was reverted.
+
+Retained interactive-path cleanup: when `--reduced-retire-diag` is used without
+`--perf-accounting`, NV2A now skips detailed raster-state census, transform hashes/counts,
+vertex fetch histograms, and generic-combiner per-fragment diagnostic counters/FNV output
+hashing. Unit tests and perf-accounting replays keep detailed telemetry enabled. Validation:
+Release `xlle`/`test_nv2a` build passed; all `build-release/test*.exe` passed; 1B no-accounting
+smoke `build/reduced-nv2a-telemetry-noperf-smoke-1b.report.json` was exact/empty stderr with
+final SHA `a6087ec5...`, final FPS `2.777 -> 2.983`, and final-four wall `23.549s -> 22.759s`
+(`-3.35%`) vs `build/disabled-timer-guards-noperf-smoke-1b.report.json`; 1B perf smoke
+`build/reduced-nv2a-telemetry-perf-smoke-1b.report.json` was exact/empty stderr and retained
+parseable detailed counters; full 12B no-accounting replay
+`build/reduced-nv2a-telemetry-noperf-v1-12b.report.json` was exact/empty stderr with final SHA
+`876b58c2...`, final-four wall `56.783s -> 54.116s` (`-4.70%`), and final FPS `2.482 -> 2.420`.
+The last single interval regressed while the sustained final-four window improved, so keep
+watching this with repeated/error-bar measurements before stacking riskier changes.
 
 ## Arc 1 burndown
 

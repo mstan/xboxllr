@@ -976,9 +976,11 @@ bool Nv2a::fetch_vertex_attribute(uint32_t slot, uint32_t index) {
         return false;
     }
 
-    ++vertex_attribute_fetches_;
-    ++vertex_format_fetches_[attr.format];
-    ++vertex_slot_fetches_[slot];
+    if (detailed_telemetry_ || perf::g_enabled) {
+        ++vertex_attribute_fetches_;
+        ++vertex_format_fetches_[attr.format];
+        ++vertex_slot_fetches_[slot];
+    }
     return true;
 }
 
@@ -1139,86 +1141,89 @@ bool Nv2a::submit_vertex_batch() {
                               : inline_array ? inline_vertices_.size()
                                              : immediate_vertices_.size();
 
-    auto raster_sample = std::find_if(
-        raster_state_samples_.begin(), raster_state_samples_.end(),
-        [&](const RasterStateSample& sample) {
-            return sample.words == raster_state_;
-        });
+    const bool collect_diagnostics = detailed_telemetry_ || perf::g_enabled;
     size_t raster_sample_index = 0;
-    if (raster_sample == raster_state_samples_.end()) {
-        raster_state_samples_.push_back(RasterStateSample{raster_state_, 1, 0});
-        raster_sample_index = raster_state_samples_.size() - 1;
-    } else {
-        ++raster_sample->batches;
-        raster_sample_index =
-            static_cast<size_t>(raster_sample - raster_state_samples_.begin());
+    RasterStateSample* tracked_raster_sample = nullptr;
+    if (collect_diagnostics) {
+        auto raster_sample = std::find_if(
+            raster_state_samples_.begin(), raster_state_samples_.end(),
+            [&](const RasterStateSample& sample) {
+                return sample.words == raster_state_;
+            });
+        if (raster_sample == raster_state_samples_.end()) {
+            raster_state_samples_.push_back(RasterStateSample{raster_state_, 1, 0});
+            raster_sample_index = raster_state_samples_.size() - 1;
+        } else {
+            ++raster_sample->batches;
+            raster_sample_index =
+                static_cast<size_t>(raster_sample - raster_state_samples_.begin());
+        }
+        tracked_raster_sample = &raster_state_samples_[raster_sample_index];
+        current_raster_state_sample_index_ = static_cast<uint32_t>(raster_sample_index);
+        tracked_raster_sample->vertices += vertex_count;
+        tracked_raster_sample->inline_batches += inline_array ? 1 : 0;
+        ++tracked_raster_sample->primitive_batches[primitive_mode_];
     }
-    auto& tracked_raster_sample =
-        raster_state_samples_[raster_sample_index];
-    current_raster_state_sample_index_ = static_cast<uint32_t>(raster_sample_index);
-    tracked_raster_sample.vertices += vertex_count;
-    tracked_raster_sample.inline_batches += inline_array ? 1 : 0;
-    ++tracked_raster_sample.primitive_batches[primitive_mode_];
     const bool immediate_quad = immediate && primitive_mode_ == 8;
     bool capture_immediate_quad = false;
-    if (immediate_quad) {
+    if (immediate_quad && tracked_raster_sample) {
         const uint64_t program_hash = fnv1a_bytes(
             transform_program_.data(), sizeof(transform_program_));
         const uint64_t constants_hash = fnv1a_bytes(
             transform_constants_.data(), sizeof(transform_constants_));
         const RasterStateSample::ImmediateQuadTransformVariant identity{
             transform_execution_mode_, transform_program_start_, program_hash, constants_hash};
-        ++tracked_raster_sample.immediate_quad_batches;
+        ++tracked_raster_sample->immediate_quad_batches;
         const uint32_t count = static_cast<uint32_t>(std::min<size_t>(
             vertex_count, std::numeric_limits<uint32_t>::max()));
-        if (tracked_raster_sample.immediate_quad_batches == 1) {
-            tracked_raster_sample.immediate_quad_min_vertices = count;
-            tracked_raster_sample.immediate_quad_max_vertices = count;
+        if (tracked_raster_sample->immediate_quad_batches == 1) {
+            tracked_raster_sample->immediate_quad_min_vertices = count;
+            tracked_raster_sample->immediate_quad_max_vertices = count;
         } else {
-            tracked_raster_sample.immediate_quad_min_vertices = std::min(
-                tracked_raster_sample.immediate_quad_min_vertices, count);
-            tracked_raster_sample.immediate_quad_max_vertices = std::max(
-                tracked_raster_sample.immediate_quad_max_vertices, count);
+            tracked_raster_sample->immediate_quad_min_vertices = std::min(
+                tracked_raster_sample->immediate_quad_min_vertices, count);
+            tracked_raster_sample->immediate_quad_max_vertices = std::max(
+                tracked_raster_sample->immediate_quad_max_vertices, count);
         }
         if (vertex_count % 4 != 0)
-            ++tracked_raster_sample.immediate_quad_nonmultiple_of_four;
+            ++tracked_raster_sample->immediate_quad_nonmultiple_of_four;
         capture_immediate_quad =
-            !tracked_raster_sample.immediate_quad_first_captured;
+            !tracked_raster_sample->immediate_quad_first_captured;
         if (capture_immediate_quad) {
-            tracked_raster_sample.immediate_quad_first_captured = true;
-            tracked_raster_sample.immediate_quad_transform_mode =
+            tracked_raster_sample->immediate_quad_first_captured = true;
+            tracked_raster_sample->immediate_quad_transform_mode =
                 transform_execution_mode_;
-            tracked_raster_sample.immediate_quad_transform_start =
+            tracked_raster_sample->immediate_quad_transform_start =
                 transform_program_start_;
-            tracked_raster_sample.immediate_quad_program_hash = program_hash;
-            tracked_raster_sample.immediate_quad_constants_hash = constants_hash;
-            tracked_raster_sample.immediate_quad_transform_variants[0] = identity;
-            tracked_raster_sample.immediate_quad_transform_variant_count = 1;
-            ++tracked_raster_sample.immediate_quad_first_transform_batches;
+            tracked_raster_sample->immediate_quad_program_hash = program_hash;
+            tracked_raster_sample->immediate_quad_constants_hash = constants_hash;
+            tracked_raster_sample->immediate_quad_transform_variants[0] = identity;
+            tracked_raster_sample->immediate_quad_transform_variant_count = 1;
+            ++tracked_raster_sample->immediate_quad_first_transform_batches;
             const size_t captured_vertices = std::min<size_t>(4, vertex_count);
             for (size_t vertex = 0; vertex < captured_vertices; ++vertex) {
-                tracked_raster_sample.immediate_quad_decoded_input0[vertex] =
+                tracked_raster_sample->immediate_quad_decoded_input0[vertex] =
                     immediate_vertices_[vertex][0];
-                tracked_raster_sample.immediate_quad_decoded_input3[vertex] =
+                tracked_raster_sample->immediate_quad_decoded_input3[vertex] =
                     immediate_vertices_[vertex][3];
-                tracked_raster_sample.immediate_quad_decoded_input9[vertex] =
+                tracked_raster_sample->immediate_quad_decoded_input9[vertex] =
                     immediate_vertices_[vertex][9];
             }
         } else {
             const auto& first =
-                tracked_raster_sample.immediate_quad_transform_variants[0];
+                tracked_raster_sample->immediate_quad_transform_variants[0];
             if (identity.mode == first.mode && identity.start == first.start &&
                 identity.program_hash == first.program_hash &&
                 identity.constants_hash == first.constants_hash) {
-                ++tracked_raster_sample.immediate_quad_first_transform_batches;
+                ++tracked_raster_sample->immediate_quad_first_transform_batches;
             } else {
-                ++tracked_raster_sample.immediate_quad_later_transform_batches;
+                ++tracked_raster_sample->immediate_quad_later_transform_batches;
                 bool known = false;
                 for (uint8_t variant = 0;
-                     variant < tracked_raster_sample.immediate_quad_transform_variant_count;
+                     variant < tracked_raster_sample->immediate_quad_transform_variant_count;
                      ++variant) {
                     const auto& existing =
-                        tracked_raster_sample.immediate_quad_transform_variants[variant];
+                        tracked_raster_sample->immediate_quad_transform_variants[variant];
                     known = existing.mode == identity.mode &&
                             existing.start == identity.start &&
                             existing.program_hash == identity.program_hash &&
@@ -1226,22 +1231,24 @@ bool Nv2a::submit_vertex_batch() {
                     if (known) break;
                 }
                 if (!known) {
-                    if (tracked_raster_sample.immediate_quad_transform_variant_count <
-                        tracked_raster_sample.immediate_quad_transform_variants.size()) {
-                        tracked_raster_sample.immediate_quad_transform_variants[
-                            tracked_raster_sample.immediate_quad_transform_variant_count++] =
+                    if (tracked_raster_sample->immediate_quad_transform_variant_count <
+                        tracked_raster_sample->immediate_quad_transform_variants.size()) {
+                        tracked_raster_sample->immediate_quad_transform_variants[
+                            tracked_raster_sample->immediate_quad_transform_variant_count++] =
                             identity;
                     } else {
                         ++tracked_raster_sample
-                              .immediate_quad_transform_variant_overflow_batches;
+                              ->immediate_quad_transform_variant_overflow_batches;
                     }
                 }
             }
         }
     }
 
-    ++transform_mode_batches_[transform_execution_mode_ & 3u];
-    if (transform_execution_mode_ == 0) {
+    if (collect_diagnostics) {
+        ++transform_mode_batches_[transform_execution_mode_ & 3u];
+    }
+    if (collect_diagnostics && transform_execution_mode_ == 0) {
         ++fixed_skin_batches_[fixed_skin_mode_];
         if (fixed_lighting_) ++fixed_lighting_batches_;
         if (fixed_normalization_) ++fixed_normalization_batches_;
@@ -1417,7 +1424,7 @@ bool Nv2a::submit_vertex_batch() {
             }
             if (program_parsed || fixed_function) {
                 transformed_batch_.push_back(vertex);
-                record_transformed_vertex_stats(vertex);
+                if (collect_diagnostics) record_transformed_vertex_stats(vertex);
             }
         }
     }
@@ -1505,53 +1512,55 @@ bool Nv2a::submit_vertex_batch() {
         raster_ok = rasterize_witnessed_batch(raster_executed);
     }
     if (!raster_ok) return false;
-    if (raster_executed)
+    if (raster_executed && tracked_raster_sample)
         ++raster_state_samples_[raster_sample_index].executed_batches;
 
-    const uint64_t n = vertex_count;
-    uint64_t primitives = 0, triangles = 0;
-    switch (primitive_mode_) {
-    case 1:  // points
-        primitives = n;
-        break;
-    case 2:  // lines
-        primitives = n / 2;
-        break;
-    case 3:  // line loop
-        primitives = n >= 2 ? n : 0;
-        break;
-    case 4:  // line strip
-        primitives = n >= 2 ? n - 1 : 0;
-        break;
-    case 5:  // triangles
-        primitives = triangles = n / 3;
-        break;
-    case 6:  // triangle strip
-    case 7:  // triangle fan
-        primitives = triangles = n >= 3 ? n - 2 : 0;
-        break;
-    case 8:  // quads
-        primitives = n / 4;
-        triangles = primitives * 2;
-        break;
-    case 9:  // quad strip
-        primitives = n >= 4 ? (n - 2) / 2 : 0;
-        triangles = primitives * 2;
-        break;
-    case 10:  // polygon
-        primitives = n >= 3 ? 1 : 0;
-        triangles = n >= 3 ? n - 2 : 0;
-        break;
+    if (collect_diagnostics) {
+        const uint64_t n = vertex_count;
+        uint64_t primitives = 0, triangles = 0;
+        switch (primitive_mode_) {
+        case 1:  // points
+            primitives = n;
+            break;
+        case 2:  // lines
+            primitives = n / 2;
+            break;
+        case 3:  // line loop
+            primitives = n >= 2 ? n : 0;
+            break;
+        case 4:  // line strip
+            primitives = n >= 2 ? n - 1 : 0;
+            break;
+        case 5:  // triangles
+            primitives = triangles = n / 3;
+            break;
+        case 6:  // triangle strip
+        case 7:  // triangle fan
+            primitives = triangles = n >= 3 ? n - 2 : 0;
+            break;
+        case 8:  // quads
+            primitives = n / 4;
+            triangles = primitives * 2;
+            break;
+        case 9:  // quad strip
+            primitives = n >= 4 ? (n - 2) / 2 : 0;
+            triangles = primitives * 2;
+            break;
+        case 10:  // polygon
+            primitives = n >= 3 ? 1 : 0;
+            triangles = n >= 3 ? n - 2 : 0;
+            break;
+        }
+        ++vertex_batches_;
+        submitted_vertices_ += n;
+        if (immediate) {
+            ++immediate_batches_;
+            immediate_vertices_total_ += n;
+        }
+        assembled_primitives_ += primitives;
+        assembled_triangles_ += triangles;
+        ++primitive_mode_counts_[primitive_mode_];
     }
-    ++vertex_batches_;
-    submitted_vertices_ += n;
-    if (immediate) {
-        ++immediate_batches_;
-        immediate_vertices_total_ += n;
-    }
-    assembled_primitives_ += primitives;
-    assembled_triangles_ += triangles;
-    ++primitive_mode_counts_[primitive_mode_];
     return true;
 }
 
@@ -5771,12 +5780,15 @@ void Nv2a::record_generic_texture_modulate_reject(
 bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     executed = false;
     ++generic_combiner_attempted_batches_;
-    // This routine is reached only by the strict generic fallback. Keep all extra
-    // counter snapshots and clock reads behind --perf-accounting: normal replays
-    // retain the pre-profiling path's fingerprint-batch census cost only.
+    // This routine is reached only by the strict generic fallback. Keep diagnostic
+    // census and split timing work out of reduced, non-perf interactive replays.
     const bool profile_generic_fingerprint = perf::g_enabled;
+    const bool collect_diagnostics =
+        detailed_telemetry_ || profile_generic_fingerprint ||
+        generic_batch_debug_cb_ || generic_packet_snapshot_filter_cb_ ||
+        surface_write_debug_cb_;
     const bool capture_generic_deltas =
-        profile_generic_fingerprint || generic_batch_debug_cb_ || surface_write_debug_cb_;
+        collect_diagnostics;
     const uint64_t generic_fragments_before =
         capture_generic_deltas ? generic_combiner_fragments_ : 0;
     const uint64_t generic_writes_before =
@@ -8060,9 +8072,10 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     const uint64_t generic_batch_index = generic_combiner_batches_;
     GenericCombinerFingerprintStats* generic_fingerprint_stats = nullptr;
     uint64_t generic_batch_fingerprint = 1469598103934665603ull;
-    uint64_t generic_batch_full_hash =
-        fnv1a_bytes(raster_state_.data(), sizeof(raster_state_));
-    {
+    uint64_t generic_batch_full_hash = 0;
+    if (collect_diagnostics) {
+        generic_batch_full_hash =
+            fnv1a_bytes(raster_state_.data(), sizeof(raster_state_));
         for (uint32_t index = kRasterShaderStageProgram;
              index <= kRasterCombinerFinalFactor1; ++index) {
             generic_batch_fingerprint ^= raster_state_[index];
@@ -8147,7 +8160,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         }
     }
     auto record_generic_fingerprint_perf = [&]() {
-        if (!profile_generic_fingerprint) return;
+        if (!profile_generic_fingerprint || !generic_fingerprint_stats) return;
         const auto elapsed = std::chrono::steady_clock::now() - generic_started_at;
         generic_fingerprint_stats->fragments +=
             generic_combiner_fragments_ - generic_fragments_before;
@@ -8836,7 +8849,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     w2 < 0 || (w2 == 0 && !edge2_top_left)) {
                     continue;
                 }
-                ++generic_combiner_fragments_;
+                if (collect_diagnostics) ++generic_combiner_fragments_;
                 uint32_t incoming_depth = constant_incoming_depth;
                 if (constant_depth) {
                     if (!constant_depth_passes) continue;
@@ -8875,7 +8888,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                         continue;
                     }
                 }
-                ++generic_combiner_depth_passes_;
+                if (collect_diagnostics) ++generic_combiner_depth_passes_;
 
                 const double lambda0 =
                     static_cast<double>(w0) / static_cast<double>(area);
@@ -9030,7 +9043,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                         return;
                     }
                     regs[8 + stage] = sampled;
-                    ++generic_combiner_texture_samples_;
+                    if (collect_diagnostics) ++generic_combiner_texture_samples_;
                 }
 
                 if (needs_general_combiner) {
@@ -9267,12 +9280,14 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                         return;
                     }
                 }
-                ++generic_combiner_writes_;
+                if (collect_diagnostics) ++generic_combiner_writes_;
                 const uint32_t address = color_address + static_cast<uint32_t>(offset);
                 last_generic_combiner_raster_address_ = address;
-                for (uint32_t word : {address, color}) {
-                    generic_combiner_output_hash_ ^= word;
-                    generic_combiner_output_hash_ *= 1099511628211ull;
+                if (collect_diagnostics) {
+                    for (uint32_t word : {address, color}) {
+                        generic_combiner_output_hash_ ^= word;
+                        generic_combiner_output_hash_ *= 1099511628211ull;
+                    }
                 }
             }
         }

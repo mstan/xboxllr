@@ -1058,6 +1058,10 @@ int main(int argc, char** argv) {
             }
             // Stand up the I/O fabric (PCI host, SMBus+SMC, NV2A) the 2BL platform-init drives.
             mach.init_devices();
+            if (mach.nv2a()) {
+                mach.nv2a()->set_detailed_telemetry(
+                    !reduced_retire_diag || perf_accounting);
+            }
             if (test_synthetic_controller_hub) {
                 std::printf("[input] TEST-ONLY synthetic Controller S hub topology enabled; "
                             "not retail evidence\n");
