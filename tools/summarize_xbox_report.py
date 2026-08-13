@@ -90,19 +90,36 @@ def generic_top_delta(
         old = previous_by_key.get(generic_entry_key(entry), {})
         ns_delta = int(entry.get("ns", 0)) - int(old.get("ns", 0))
         frags_delta = int(entry.get("frags", 0)) - int(old.get("frags", 0))
+        color_reads_delta = int(entry.get("color_reads", 0)) - int(
+            old.get("color_reads", 0)
+        )
+        depth_reads_delta = int(entry.get("depth_reads", 0)) - int(
+            old.get("depth_reads", 0)
+        )
         batches_delta = int(entry.get("batches", 0)) - int(old.get("batches", 0))
         if ns_delta <= 0 and frags_delta <= 0 and batches_delta <= 0:
             continue
-        deltas.append((ns_delta, entry, frags_delta, batches_delta))
+        deltas.append(
+            (ns_delta, entry, frags_delta, batches_delta, color_reads_delta, depth_reads_delta)
+        )
     if not deltas:
         return "-"
     deltas.sort(reverse=True, key=lambda item: item[0])
     parts = []
-    for ns_delta, entry, frags_delta, batches_delta in deltas[:limit]:
+    for (
+        ns_delta,
+        entry,
+        frags_delta,
+        batches_delta,
+        color_reads_delta,
+        depth_reads_delta,
+    ) in deltas[:limit]:
         fp = str(entry.get("fp", ""))[:8]
         full = str(entry.get("full", ""))[:8]
         parts.append(
             f"{fp}/{full}:b{batches_delta}/f{frags_delta / 1_000_000:.2f}M/"
+            f"cr{color_reads_delta / 1_000_000:.2f}M/"
+            f"dr{depth_reads_delta / 1_000_000:.2f}M/"
             f"{ns_to_s(ns_delta)}"
         )
     return ",".join(parts)
@@ -126,19 +143,36 @@ def generic_family_delta(
         old = previous_by_key.get(generic_family_key(entry), {})
         ns_delta = int(entry.get("ns", 0)) - int(old.get("ns", 0))
         frags_delta = int(entry.get("frags", 0)) - int(old.get("frags", 0))
+        color_reads_delta = int(entry.get("color_reads", 0)) - int(
+            old.get("color_reads", 0)
+        )
+        depth_reads_delta = int(entry.get("depth_reads", 0)) - int(
+            old.get("depth_reads", 0)
+        )
         batches_delta = int(entry.get("batches", 0)) - int(old.get("batches", 0))
         if ns_delta <= 0 and frags_delta <= 0 and batches_delta <= 0:
             continue
-        deltas.append((ns_delta, entry, frags_delta, batches_delta))
+        deltas.append(
+            (ns_delta, entry, frags_delta, batches_delta, color_reads_delta, depth_reads_delta)
+        )
     if not deltas:
         return "-"
     deltas.sort(reverse=True, key=lambda item: item[0])
     parts = []
-    for ns_delta, entry, frags_delta, batches_delta in deltas[:limit]:
+    for (
+        ns_delta,
+        entry,
+        frags_delta,
+        batches_delta,
+        color_reads_delta,
+        depth_reads_delta,
+    ) in deltas[:limit]:
         parts.append(
             f"{entry.get('surface')}/sh{entry.get('shader')}/c{entry.get('combiner')}"
             f"/en{entry.get('enables')}:b{batches_delta}/"
-            f"f{frags_delta / 1_000_000:.2f}M/{ns_to_s(ns_delta)}"
+            f"f{frags_delta / 1_000_000:.2f}M/"
+            f"cr{color_reads_delta / 1_000_000:.2f}M/"
+            f"dr{depth_reads_delta / 1_000_000:.2f}M/{ns_to_s(ns_delta)}"
         )
     return ",".join(parts)
 

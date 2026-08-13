@@ -1637,11 +1637,13 @@ int main(int argc, char** argv) {
                     std::min<size_t>(fingerprints.size(), perf_generic_top_limit);
                 for (size_t i = 0; i < limit; ++i) {
                     const auto& entry = fingerprints[i];
-                    std::printf(" %016llx:b%llu/f%llu/w%llu/ns%llu",
+                    std::printf(" %016llx:b%llu/f%llu/w%llu/cr%llu/dr%llu/ns%llu",
                                 static_cast<unsigned long long>(entry.fingerprint),
                                 static_cast<unsigned long long>(entry.batches),
                                 static_cast<unsigned long long>(entry.fragments),
                                 static_cast<unsigned long long>(entry.writes),
+                                static_cast<unsigned long long>(entry.color_reads),
+                                static_cast<unsigned long long>(entry.depth_reads),
                                 static_cast<unsigned long long>(entry.wall_ns));
                     if (entry.bbox_pixels || entry.max_batch_fragments ||
                         entry.max_batch_bbox_pixels) {
@@ -1745,6 +1747,8 @@ int main(int argc, char** argv) {
                     uint64_t batches = 0;
                     uint64_t fragments = 0;
                     uint64_t writes = 0;
+                    uint64_t color_reads = 0;
+                    uint64_t depth_reads = 0;
                     uint64_t wall_ns = 0;
                     uint64_t texture_setup_ns = 0;
                     uint64_t software_raster_ns = 0;
@@ -1798,6 +1802,8 @@ int main(int argc, char** argv) {
                     family->batches += entry.batches;
                     family->fragments += entry.fragments;
                     family->writes += entry.writes;
+                    family->color_reads += entry.color_reads;
+                    family->depth_reads += entry.depth_reads;
                     family->wall_ns += entry.wall_ns;
                     family->texture_setup_ns += entry.texture_setup_ns;
                     family->software_raster_ns += entry.software_raster_ns;
@@ -1843,7 +1849,7 @@ int main(int argc, char** argv) {
                     const auto& key = family.key;
                     std::printf(
                         " surf%08x/sfmt%08x/pitch%08x/prim%u/en%08x/sh%08x/comb%08x"
-                        "/tf%08x,%08x,%08x,%08x:fp%llu/b%llu/f%llu/w%llu/ns%llu"
+                        "/tf%08x,%08x,%08x,%08x:fp%llu/b%llu/f%llu/w%llu/cr%llu/dr%llu/ns%llu"
                         "/bb%llu/setup%llu/soft%llu/flush%llu/v%u-%u",
                         key.surface_color, key.surface_format, key.surface_pitch,
                         static_cast<unsigned>(key.primitive), key.enables,
@@ -1854,6 +1860,8 @@ int main(int argc, char** argv) {
                         static_cast<unsigned long long>(family.batches),
                         static_cast<unsigned long long>(family.fragments),
                         static_cast<unsigned long long>(family.writes),
+                        static_cast<unsigned long long>(family.color_reads),
+                        static_cast<unsigned long long>(family.depth_reads),
                         static_cast<unsigned long long>(family.wall_ns),
                         static_cast<unsigned long long>(family.bbox_pixels),
                         static_cast<unsigned long long>(family.texture_setup_ns),
@@ -3207,8 +3215,8 @@ int main(int argc, char** argv) {
                             mach.nv2a()->last_inline_raster_address(),
                             (unsigned long long)mach.nv2a()->inline_color_output_hash());
                 std::printf("[2bl] NV2A generic-combiner: "
-                            "attempted/accelerated/fallback/software/exec/tri/frags/depth-pass/writes/tex-samples="
-                            "%llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu "
+                            "attempted/accelerated/fallback/software/exec/tri/frags/depth-pass/writes/color-reads/depth-reads/tex-samples="
+                            "%llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu "
                             "last=%08x hash=%016llx\n",
                             (unsigned long long)mach.nv2a()->generic_combiner_attempted_batches(),
                             (unsigned long long)mach.nv2a()->generic_combiner_accelerated_batches(),
@@ -3219,6 +3227,8 @@ int main(int argc, char** argv) {
                             (unsigned long long)mach.nv2a()->generic_combiner_fragments(),
                             (unsigned long long)mach.nv2a()->generic_combiner_depth_passes(),
                             (unsigned long long)mach.nv2a()->generic_combiner_writes(),
+                            (unsigned long long)mach.nv2a()->generic_combiner_color_reads(),
+                            (unsigned long long)mach.nv2a()->generic_combiner_depth_reads(),
                             (unsigned long long)mach.nv2a()->generic_combiner_texture_samples(),
                             mach.nv2a()->last_generic_combiner_raster_address(),
                             (unsigned long long)mach.nv2a()->generic_combiner_output_hash());

@@ -662,6 +662,12 @@ public:
     uint64_t generic_combiner_writes() const {
         return generic_combiner_writes_;
     }
+    uint64_t generic_combiner_color_reads() const {
+        return generic_combiner_color_reads_;
+    }
+    uint64_t generic_combiner_depth_reads() const {
+        return generic_combiner_depth_reads_;
+    }
     uint64_t generic_combiner_texture_samples() const {
         return generic_combiner_texture_samples_;
     }
@@ -689,6 +695,8 @@ public:
         uint64_t batches = 0;
         uint64_t fragments = 0;
         uint64_t writes = 0;
+        uint64_t color_reads = 0;
+        uint64_t depth_reads = 0;
         uint64_t wall_ns = 0;
         uint64_t texture_setup_ns = 0;
         uint64_t software_raster_ns = 0;
@@ -1536,6 +1544,8 @@ private:
     uint64_t generic_combiner_fragments_ = 0;
     uint64_t generic_combiner_depth_passes_ = 0;
     uint64_t generic_combiner_writes_ = 0;
+    uint64_t generic_combiner_color_reads_ = 0;
+    uint64_t generic_combiner_depth_reads_ = 0;
     uint64_t generic_combiner_texture_samples_ = 0;
     uint32_t last_generic_combiner_raster_address_ = 0;
     uint64_t generic_combiner_output_hash_ = 1469598103934665603ull;

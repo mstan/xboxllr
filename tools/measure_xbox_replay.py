@@ -155,10 +155,12 @@ PERF_GENERIC_FAMILY_RE = re.compile(
 GENERIC_RE = re.compile(
     r"^\[2bl\] NV2A generic-combiner: "
     r"attempted/accelerated/fallback/software/exec/tri/frags/depth-pass/"
-    r"writes/tex-samples="
+    r"writes/(?:color-reads/depth-reads/)?tex-samples="
     r"(?P<attempted>\d+)/(?P<accelerated>\d+)/(?P<fallback>\d+)/"
     r"(?P<software>\d+)/(?P<exec>\d+)/(?P<tri>\d+)/(?P<frags>\d+)/"
-    r"(?P<depth_pass>\d+)/(?P<writes>\d+)/(?P<tex_samples>\d+) "
+    r"(?P<depth_pass>\d+)/(?P<writes>\d+)/"
+    r"(?:(?P<color_reads>\d+)/(?P<depth_reads>\d+)/)?"
+    r"(?P<tex_samples>\d+) "
     r"last=(?P<last>[0-9a-fA-F]+) hash=(?P<hash>[0-9a-fA-F]+)"
 )
 
@@ -294,6 +296,7 @@ def parse_renderer_resolve_contexts(text: str) -> dict[str, dict[str, int]]:
 GENERIC_PERF_ITEM_RE = re.compile(
     r"^(?P<fp>[0-9a-f]+):"
     r"b(?P<batches>\d+)/f(?P<frags>\d+)/w(?P<writes>\d+)/"
+    r"(?:cr(?P<color_reads>\d+)/dr(?P<depth_reads>\d+)/)?"
     r"ns(?P<ns>\d+)/bb(?P<bbox_pixels>\d+)/"
     r"maxf(?P<max_frags>\d+)/maxbb(?P<max_bbox_pixels>\d+):"
     r"prim(?P<primitive>\d+)/v(?P<min_vertices>\d+)-(?P<max_vertices>\d+)/"
@@ -311,7 +314,9 @@ GENERIC_FAMILY_ITEM_RE = re.compile(
     r"tf(?P<texture_format0>[0-9a-f]+),(?P<texture_format1>[0-9a-f]+),"
     r"(?P<texture_format2>[0-9a-f]+),(?P<texture_format3>[0-9a-f]+):"
     r"fp(?P<fingerprints>\d+)/b(?P<batches>\d+)/f(?P<frags>\d+)/"
-    r"w(?P<writes>\d+)/ns(?P<ns>\d+)/bb(?P<bbox_pixels>\d+)/"
+    r"w(?P<writes>\d+)/"
+    r"(?:cr(?P<color_reads>\d+)/dr(?P<depth_reads>\d+)/)?"
+    r"ns(?P<ns>\d+)/bb(?P<bbox_pixels>\d+)/"
     r"(?:setup(?P<texture_setup_ns>\d+)/soft(?P<software_raster_ns>\d+)/"
     r"flush(?P<flush_ns>\d+)/)?"
     r"v(?P<min_vertices>\d+)-(?P<max_vertices>\d+)(?P<detail>.*)$"
@@ -334,6 +339,8 @@ def parse_generic_perf(match: re.Match[str]) -> dict[str, Any]:
                 "batches": int(groups["batches"]),
                 "frags": int(groups["frags"]),
                 "writes": int(groups["writes"]),
+                "color_reads": int(groups["color_reads"] or 0),
+                "depth_reads": int(groups["depth_reads"] or 0),
                 "ns": int(groups["ns"]),
                 "bbox_pixels": int(groups["bbox_pixels"]),
                 "max_frags": int(groups["max_frags"]),
@@ -386,6 +393,8 @@ def parse_generic_family_perf(match: re.Match[str]) -> dict[str, Any]:
                     "batches": int(groups["batches"]),
                     "frags": int(groups["frags"]),
                     "writes": int(groups["writes"]),
+                    "color_reads": int(groups["color_reads"] or 0),
+                    "depth_reads": int(groups["depth_reads"] or 0),
                     "ns": int(groups["ns"]),
                     "bbox_pixels": int(groups["bbox_pixels"]),
                     "texture_setup_ns": int(groups["texture_setup_ns"] or 0),

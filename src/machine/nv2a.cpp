@@ -5748,6 +5748,10 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         capture_generic_deltas ? generic_combiner_fragments_ : 0;
     const uint64_t generic_writes_before =
         capture_generic_deltas ? generic_combiner_writes_ : 0;
+    const uint64_t generic_color_reads_before =
+        capture_generic_deltas ? generic_combiner_color_reads_ : 0;
+    const uint64_t generic_depth_reads_before =
+        capture_generic_deltas ? generic_combiner_depth_reads_ : 0;
     std::chrono::steady_clock::time_point generic_started_at;
     if (profile_generic_fingerprint)
         generic_started_at = std::chrono::steady_clock::now();
@@ -8114,6 +8118,10 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             generic_combiner_fragments_ - generic_fragments_before;
         generic_fingerprint_stats->writes +=
             generic_combiner_writes_ - generic_writes_before;
+        generic_fingerprint_stats->color_reads +=
+            generic_combiner_color_reads_ - generic_color_reads_before;
+        generic_fingerprint_stats->depth_reads +=
+            generic_combiner_depth_reads_ - generic_depth_reads_before;
         generic_fingerprint_stats->wall_ns += static_cast<uint64_t>(
             std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count());
         generic_fingerprint_stats->texture_setup_ns +=
@@ -8817,6 +8825,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                           static_cast<size_t>(x) * sizeof(uint32_t);
                 uint32_t stored_depth_stencil = 0;
                 if (depth_read_required) {
+                    if (capture_generic_deltas) ++generic_combiner_depth_reads_;
                     if (!depth_surface.read32(offset, stored_depth_stencil)) {
                         fault_("NV2A generic-combiner zeta DMA read failed");
                         raster_failed = true;
@@ -9157,6 +9166,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 std::array<float, 4> dst{};
                 if (needs_existing_pixel) {
                     uint32_t existing = 0;
+                    if (capture_generic_deltas) ++generic_combiner_color_reads_;
                     if (!color_surface.read32(offset, existing)) {
                         fault_("NV2A generic-combiner color DMA read failed");
                         raster_failed = true;
