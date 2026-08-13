@@ -68,6 +68,24 @@ in the refreshed 12B final-four window, `dispatch_self~` is about `1.751s`, `sub
 is generic software raster (`11.490s`), generic renderer/setup overhead, and vertex transform,
 not the parent dispatch/submit wrappers.
 
+Post-transform cache diagnostic result: temporary perf-only counters on the retained direct-256
+batch cache showed `109,809,384` admitted vertices, `73,871,229` hits, and `35,938,155` misses
+by the end of a 12B perf replay (`~67.3%` hit rate). The same run
+(`build/posttransform-cache-direct256-perf-v1-12b.report.json`) was exact/empty stderr with final
+SHA `876b58c2...`; against `build/vsh-context-direct-perf-v2-12b.report.json`, final FPS moved
+`2.257 -> 3.019`, final-four wall `56.485s -> 44.650s` (`-20.95%`), and vertex_transform
+`13.800s -> 3.878s` (`-71.90%`). This confirms the cache captured the measured reuse and shifts
+the next large target to generic raster/setup plus exact resident admission. Temporary counter
+source was reverted.
+
+Latest rejected experiment: widening the texture-modulate resident OpenGL path by CPU-clipping
+mixed-W triangles was exact at the 1B no-accounting smoke and slightly faster in that short gate,
+but the full 12B no-accounting replay changed the final SHA from `876b58c2...` to
+`5ced34dfe9976069899fb118fd4e761b7dd62e14b4b182e6443228d76a2482d8`. It did raise final FPS to
+`3.99`, so this is a strong lead rather than a dead area. Do not retain the W-clip resident path
+without packet-level differential work through the existing `XLLE_HOTPACKET_PROBE*` snapshot
+fixtures. Source was reverted to the exact cache baseline.
+
 Latest rejected experiment: gated `XLLE_Q_RECIP_HOIST=1` was exact at 1B and 12B, but slower
 against the retained baseline: final FPS `2.552 -> 2.448`, final-four wall `+3.80%`,
 CPU `+3.26%`, generic raster `+4.07%`, resolve `+23.24%`. Source was reverted. Also rejected:

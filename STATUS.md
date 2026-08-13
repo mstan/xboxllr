@@ -3,6 +3,26 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-13 - Post-transform cache diagnostics shift the next target to exact resident/generic raster work
+
+Temporary perf-only counters on the retained batch-local post-transform cache show the cache is
+capturing the expected late-dashboard reuse: by the end of the 12B perf replay it admitted
+`109,809,384` vertices, with `73,871,229` hits and `35,938,155` misses (`~67.3%` hit rate).
+The diagnostic source hooks were removed.
+
+The matching 12B perf replay was exact/empty stderr with final SHA
+`876b58c2d0e6c63fec917c73dcc43a7d09983baf1da2b5b2176fa73a1b44da6d`. Against
+`build/vsh-context-direct-perf-v2-12b.report.json`, final FPS improved `2.257 -> 3.019`,
+final-four wall `56.485s -> 44.650s` (`-20.95%`), and vertex-transform time
+`13.800s -> 3.878s` (`-71.90%`). The remaining large buckets are now generic raster/setup
+and resident/offload eligibility, not transform alone.
+
+Rejected follow-up: a prototype that CPU-clipped mixed-W texture-modulate triangles into the
+resident OpenGL path stayed exact at the 1B smoke gate, but the full 12B no-accounting replay
+changed the final SHA to `5ced34dfe9976069899fb118fd4e761b7dd62e14b4b182e6443228d76a2482d8`
+while raising final FPS to `3.99`. This is a promising lead, but it is not retainable until the
+packet-level clipping/raster mismatch is isolated and made exact. Source was reverted.
+
 ## 2026-08-13 - Retained batch-local post-transform cache lifts late stock dashboard to 3.095 fps
 
 Implemented a conservative NV2A post-transform cache for indexed programmable vertex batches.
