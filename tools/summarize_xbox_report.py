@@ -49,6 +49,17 @@ def delta_dict(current: Mapping[str, Any], previous: Mapping[str, Any] | None) -
     return out
 
 
+def difference(base: Any, *subtract: Any) -> int | float | None:
+    if not isinstance(base, (int, float)):
+        return None
+    total = base
+    for value in subtract:
+        if not isinstance(value, (int, float)):
+            return None
+        total -= value
+    return total
+
+
 def sample_for_deadline(samples: list[dict[str, Any]], index: int) -> dict[str, Any] | None:
     if index < len(samples):
         return samples[index]
@@ -278,6 +289,23 @@ def summarize(path: pathlib.Path) -> None:
         previous_unicorn_memory = ucm or previous_unicorn_memory
         previous_generic_split = gs or previous_generic_split
         previous_nv2a_split = ns or previous_nv2a_split
+        raster_witnessed_est = difference(
+            pd.get("raster_ns"), pd.get("raster_generic_ns")
+        )
+        generic_other_est = difference(
+            pd.get("raster_generic_ns"),
+            gsd.get("texture_setup_ns"),
+            gsd.get("software_raster_ns"),
+            gsd.get("flush_ns"),
+        )
+        submit_self_est = difference(
+            nsd.get("submit_vertex_ns"),
+            nsd.get("vertex_transform_ns"),
+            pd.get("raster_ns"),
+        )
+        dispatch_self_est = difference(
+            nsd.get("dispatch_method_ns"), nsd.get("submit_vertex_ns")
+        )
         generic_delta = generic_top_delta(gp, previous_generic_perf)
         family_delta = generic_family_delta(gf, previous_generic_family)
         resolve_delta = resolve_context_delta(rc, previous_renderer_resolve_context)
@@ -293,12 +321,16 @@ def summarize(path: pathlib.Path) -> None:
             f"push={ns_to_s(pd.get('nv2a_pushbuffer_ns'))} "
             f"drain={ns_to_s(pd.get('nv2a_pull_drain_ns'))} "
             f"rast={ns_to_s(pd.get('raster_ns'))} "
+            f"rwit={ns_to_s(raster_witnessed_est)} "
             f"gen={ns_to_s(pd.get('raster_generic_ns'))} "
             f"gsetup={ns_to_s(gsd.get('texture_setup_ns'))} "
             f"gsoft={ns_to_s(gsd.get('software_raster_ns'))} "
             f"gflush={ns_to_s(gsd.get('flush_ns'))} "
+            f"gother~={ns_to_s(generic_other_est)} "
             f"dispatch={ns_to_s(nsd.get('dispatch_method_ns'))} "
+            f"dispself~={ns_to_s(dispatch_self_est)} "
             f"submit={ns_to_s(nsd.get('submit_vertex_ns'))} "
+            f"subself~={ns_to_s(submit_self_est)} "
             f"xform={ns_to_s(nsd.get('vertex_transform_ns'))} "
             f"resolv={ns_to_s(rd.get('resolve_ns'))} "
             f"ensure={ns_to_s(rd.get('resident_ensure_ns'))} "

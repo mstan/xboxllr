@@ -55,11 +55,19 @@ exact/empty stderr with final SHA `876b58c2...`; under accounting, final-four wa
 CPU `56.314s`, generic raster `21.826s`, dispatch `37.903s`, submit `36.152s`, transform
 `13.800s`, resolve `2.175s`, and resident ensure `1.535s`. These dispatch/submit/transform
 numbers are inclusive enough that self-time/unit-cost accounting must guide the next choice;
-do not pick targets from those buckets alone.
+do not pick targets from those buckets alone. The report tools now print derived estimates:
+in the refreshed 12B final-four window, `dispatch_self~` is about `1.751s`, `subself~` about
+`0.518s`, witnessed raster about `0.009s`, and generic `gother~` about `8.185s`; real hot work
+is generic software raster (`11.490s`), generic renderer/setup overhead, and vertex transform,
+not the parent dispatch/submit wrappers.
 
 Latest rejected experiment: gated `XLLE_Q_RECIP_HOIST=1` was exact at 1B and 12B, but slower
 against the retained baseline: final FPS `2.552 -> 2.448`, final-four wall `+3.80%`,
-CPU `+3.26%`, generic raster `+4.07%`, resolve `+23.24%`. Source was reverted.
+CPU `+3.26%`, generic raster `+4.07%`, resolve `+23.24%`. Source was reverted. Also rejected:
+a CPU-side `texture0_modulate_primary` fast branch that skipped generic register scaffolding and
+reused the same texture sampler/blend/write path. It was exact on the 1B no-accounting smoke
+but regressed final FPS `2.955 -> 2.772` and final-four wall `22.659s -> 24.284s` (`+7.17%`);
+source was reverted.
 
 One-time Fable critique result: stop treating scalar micro-tweaks as the main path. Before the
 next architecture bet, establish clearer self-time/unit-cost accounting and target a larger exact
