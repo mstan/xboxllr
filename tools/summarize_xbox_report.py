@@ -217,6 +217,43 @@ def resolve_context_delta(
     return ",".join(parts)
 
 
+def vsh_program_delta(
+    current: list[Mapping[str, Any]] | None,
+    previous: list[Mapping[str, Any]] | None,
+    limit: int = 2,
+) -> str:
+    if not current:
+        return "-"
+    previous_by_hash = {
+        str(entry.get("hash", "")): entry
+        for entry in previous or []
+    }
+    deltas: list[tuple[int, Mapping[str, Any], int, int]] = []
+    for entry in current:
+        key = str(entry.get("hash", ""))
+        old = previous_by_hash.get(key, {})
+        vertices_delta = int(entry.get("vertices", 0)) - int(old.get("vertices", 0))
+        steps_delta = int(entry.get("step_invocations", 0)) - int(
+            old.get("step_invocations", 0)
+        )
+        batches_delta = int(entry.get("batches", 0)) - int(old.get("batches", 0))
+        if vertices_delta <= 0 and steps_delta <= 0 and batches_delta <= 0:
+            continue
+        deltas.append((vertices_delta, entry, steps_delta, batches_delta))
+    if not deltas:
+        return "-"
+    deltas.sort(reverse=True, key=lambda item: item[0])
+    parts = []
+    for vertices_delta, entry, steps_delta, batches_delta in deltas[:limit]:
+        parts.append(
+            f"{str(entry.get('hash', ''))[:8]}:b{batches_delta}/"
+            f"v{vertices_delta / 1_000_000:.2f}M/"
+            f"steps{steps_delta / 1_000_000:.2f}M/"
+            f"maxspv{entry.get('max_steps_per_vertex', '-')}"
+        )
+    return ",".join(parts)
+
+
 def summarize(path: pathlib.Path) -> None:
     report = json.loads(path.read_text())
     parsed = report.get("parsed", {})
@@ -231,6 +268,7 @@ def summarize(path: pathlib.Path) -> None:
     generic_family = parsed.get("generic_family_samples", [])
     generic_split = parsed.get("generic_split_samples", [])
     nv2a_split = parsed.get("nv2a_split_samples", [])
+    vsh_programs = parsed.get("vsh_program_samples", [])
     final_frame = parsed.get("final_frame", {})
     final_mem = parsed.get("final_host_memory") or {}
     final_unicorn = parsed.get("final_unicorn_memory") or {}
@@ -256,6 +294,7 @@ def summarize(path: pathlib.Path) -> None:
     previous_generic_family = None
     previous_generic_split = None
     previous_nv2a_split = None
+    previous_vsh_programs = None
     previous_unicorn_memory = None
     for index, frame in enumerate(frames):
         p = sample_for_deadline(perf, index)
@@ -268,6 +307,7 @@ def summarize(path: pathlib.Path) -> None:
         gf = sample_for_deadline(generic_family, index)
         gs = sample_for_deadline(generic_split, index)
         ns = sample_for_deadline(nv2a_split, index)
+        vsh = sample_for_deadline(vsh_programs, index)
         pd = delta_dict(p, previous_perf) if p else {}
         rd = delta_dict(r, previous_renderer) if r else {}
         rsd = delta_dict(rs, previous_resident) if rs else {}
@@ -308,10 +348,12 @@ def summarize(path: pathlib.Path) -> None:
         )
         generic_delta = generic_top_delta(gp, previous_generic_perf)
         family_delta = generic_family_delta(gf, previous_generic_family)
+        vsh_delta = vsh_program_delta(vsh, previous_vsh_programs)
         resolve_delta = resolve_context_delta(rc, previous_renderer_resolve_context)
         previous_renderer_resolve_context = rc or previous_renderer_resolve_context
         previous_generic_perf = gp or previous_generic_perf
         previous_generic_family = gf or previous_generic_family
+        previous_vsh_programs = vsh or previous_vsh_programs
         print(
             "   "
             f"{frame.get('deadline', '-') / 1_000_000_000:.1f}B "
@@ -340,6 +382,7 @@ def summarize(path: pathlib.Path) -> None:
             f"resolveMP={rd.get('resolve_pixels', 0) / 1_000_000:.1f} "
             f"ucode+={ucmd.get('code_hook_regions', '-')} "
             f"texMB={md.get('generic_texture_bytes', 0) / BYTES_PER_MIB:.1f} "
+            f"vshTop={vsh_delta} "
             f"resCtx={resolve_delta} "
             f"genTop={generic_delta} "
             f"famTop={family_delta}"

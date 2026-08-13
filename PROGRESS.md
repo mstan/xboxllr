@@ -111,14 +111,32 @@ final FPS `2.955 -> 2.938`). Source was reverted. Even when the captured hot pri
 many all-behind triangles, adding more generic per-triangle branch/setup shape is not paying off
 in the 1B dashboard smoke.
 
+Latest VSH census/tooling result: a temporary VSH program census found the late stock-dashboard
+vertex-transform load is heavily concentrated in program hash `eaad51274b6cda50`. The exact 12B
+diagnostic `build/vsh-census-perf-v1-12b.report.json` reports late 0.5B intervals at about
+`22.12M` vertices and `464.59M` VSH step invocations for that one program (`maxspv=21`). The
+source-side census hooks are **not retained**: even with the option compiled out, the 1B
+no-accounting smoke regressed final-four wall by `+5.74%`. After reverting the source/CMake hooks,
+`build/vsh-census-source-reverted-noperf-smoke-1b.report.json` is exact/empty stderr with final
+SHA `a6087ec5...`, final FPS `2.988`, and final-four wall only `+1.01%` against the retained
+baseline. Retained changes are limited to report parser/summarizer support for historical and
+future `[perf-vsh-program]` artifacts.
+
 One-time Fable critique result: stop treating scalar micro-tweaks as the main path. Before the
-next architecture bet, establish clearer self-time/unit-cost accounting and target a larger exact
-bucket: tile/row threading, SIMD, and family-keyed combiner specialization for the hot
-`03aa4000` blended generic families. In the refreshed 12B perf run, the hottest late primary
-blend family is still far above a memory-touch floor (`2.823s / 50.38M` fragments, about
-`56 ns/pixel`), so span/tile work remains plausible. GPU fixed-function OpenGL/Vulkan is not
-exact for these packets on this host; exact compute remains plausible only if it operates on
-coherent resident color storage with old-color reads and no full CPU snapshot/readback.
+next architecture bet, establish clearer exclusive-time/unit-cost accounting and target a larger
+exact bucket. Fable specifically called out measurement noise/code-layout effects around 2-6%
+deltas, inclusive dispatch/submit buckets, and the need to verify whether the VSH concentration is
+repeated work before writing a JIT. Next best experiments: (1) hardware-sampled profiling of the
+retained no-perf build over the late dashboard window, with repeats/error bars; (2) offline
+vertex-reuse analysis of the replay under a hypothetical exact post-transform cache keyed by
+index, program hash, and constant-state version; (3) if reuse is not the main lever, a single
+straight-line exact specialization for `eaad51274b6cda50` with interpreter fallback. In the
+refreshed 12B perf run, the hottest late primary blend family is still far above a memory-touch
+floor (`2.823s / 50.38M` fragments, about `56 ns/pixel`), so span/tile/family work remains
+plausible too. The current launch path should stay OpenGL/resident; fixed-function OpenGL/Vulkan
+offload is not expected to preserve exact SHA semantics for these software packets, while exact
+GPU compute remains plausible only if it operates on coherent resident color storage with old-color
+reads and no full CPU snapshot/readback.
 
 Continuation finding: `perf-nv2a-split` now breaks out method dispatch, vertex submission, and
 vertex fetch/transform. The exact 12B diagnostic `build/nv2a-split-v1-12b.report.json` shows the

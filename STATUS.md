@@ -3,6 +3,33 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-13 - VSH census finding retained as tooling/data only; source hooks reverted
+
+A one-time Claude Fable high critique was run as requested with tools disabled and limited to
+strategy review. The useful correction is methodological: several 2-6% slowdowns are plausibly
+code-layout/noise, parent dispatch/submit timings are inclusive rather than primary exclusive
+hot spots, and the next optimization pass should start from less-distorting measurement plus
+larger exact levers.
+
+The temporary VSH program census found a real late-dashboard clue in
+`build/vsh-census-perf-v1-12b.report.json`: the run is exact/empty stderr with final SHA
+`876b58c2d0e6c63fec917c73dcc43a7d09983baf1da2b5b2176fa73a1b44da6d`, and late intervals are
+dominated by VSH program hash `eaad51274b6cda50` (about `22.12M` vertices and `464.59M` step
+invocations per late 0.5B interval, `maxspv=21`). However, retaining source-side census hooks was
+rejected: even compiled out, the 1B no-accounting gate regressed final-four wall by `+5.74%`.
+After reverting the source/CMake hooks, `build/vsh-census-source-reverted-noperf-smoke-1b.report.json`
+is exact/empty stderr with final SHA `a6087ec5...`, final FPS `2.988`, and final-four wall within
+`+1.01%` of the retained baseline. Only report parser/summarizer support for `[perf-vsh-program]`
+records remains.
+
+Next work should not be another scalar micro-tweak. Best candidates: hardware-sampled profiling
+of the retained no-perf build to establish exclusive time and noise floor; offline vertex-reuse
+analysis for a bit-exact post-transform cache keyed on index/program/constant state; then a
+single-program exact specialization for `eaad51274b6cda50` if reuse does not dominate. OpenGL is
+still the right launch renderer, but fixed-function OpenGL/Vulkan raster offload is unlikely to
+preserve exact SHA semantics; exact GPU compute remains a separate future path only if it operates
+on coherent resident storage.
+
 ## 2026-08-13 - Stock dashboard performance cursor: exact but still below 10 fps
 
 Retained emulator behavior includes direct

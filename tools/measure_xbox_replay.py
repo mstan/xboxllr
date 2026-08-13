@@ -150,6 +150,8 @@ PERF_NV2A_SPLIT_RE = re.compile(
     r"\(n=(?P<vertex_transform_n>\d+)\)"
 )
 
+PERF_VSH_PROGRAM_RE = re.compile(r"^\[perf-vsh-program\] top=(?P<top>.*)$")
+
 PERF_WITNESSED_PROFILE_RE = re.compile(r"^\[perf-witnessed-profile\] top=(?P<top>.*)$")
 
 PERF_GENERIC_RE = re.compile(
@@ -303,6 +305,63 @@ def parse_renderer_resolve_contexts(text: str) -> dict[str, dict[str, int]]:
     return contexts
 
 
+def parse_vsh_programs(text: str) -> list[dict[str, Any]]:
+    if text == "none":
+        return []
+    programs: list[dict[str, Any]] = []
+    for item in text.split():
+        fields = item.split("/")
+        if len(fields) < 6:
+            programs.append({"raw": item})
+            continue
+        hash_text, sep, batches_text = fields[0].partition(":")
+        if not sep:
+            programs.append({"raw": item})
+            continue
+        try:
+            program: dict[str, Any] = {
+                "hash": hash_text.lower(),
+                "batches": int(batches_text.removeprefix("b")),
+                "vertices": int(fields[1].removeprefix("v")),
+                "step_invocations": int(fields[2].removeprefix("steps")),
+                "max_steps_per_vertex": int(fields[3].removeprefix("maxspv")),
+                "context_writing_batches": int(fields[4].removeprefix("ctx")),
+                "opcodes": {},
+            }
+            for opcode_field in fields[5:]:
+                for opcode_name in (
+                    "nop",
+                    "mov",
+                    "mul",
+                    "add",
+                    "mad",
+                    "dp3",
+                    "dph",
+                    "dp4",
+                    "dst",
+                    "min",
+                    "max",
+                    "slt",
+                    "sge",
+                    "arl",
+                    "rcp",
+                    "rcc",
+                    "rsq",
+                    "exp",
+                    "log",
+                    "lit",
+                ):
+                    if opcode_field.startswith(opcode_name):
+                        program["opcodes"][opcode_name] = int(
+                            opcode_field[len(opcode_name) :]
+                        )
+                        break
+            programs.append(program)
+        except ValueError:
+            programs.append({"raw": item})
+    return programs
+
+
 GENERIC_PERF_ITEM_RE = re.compile(
     r"^(?P<fp>[0-9a-f]+):"
     r"b(?P<batches>\d+)/f(?P<frags>\d+)/w(?P<writes>\d+)/"
@@ -434,6 +493,7 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
     perf_memory_samples: list[dict[str, Any]] = []
     generic_split_samples: list[dict[str, Any]] = []
     nv2a_split_samples: list[dict[str, Any]] = []
+    vsh_program_samples: list[list[dict[str, Any]]] = []
     witnessed_profile_samples: list[list[dict[str, Any]]] = []
     generic_perf_samples: list[dict[str, Any]] = []
     generic_family_samples: list[dict[str, Any]] = []
@@ -475,6 +535,8 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
             generic_split_samples.append(parse_int_fields(match))
         elif match := PERF_NV2A_SPLIT_RE.match(line):
             nv2a_split_samples.append(parse_int_fields(match))
+        elif match := PERF_VSH_PROGRAM_RE.match(line):
+            vsh_program_samples.append(parse_vsh_programs(match.group("top")))
         elif match := PERF_WITNESSED_PROFILE_RE.match(line):
             witnessed_profile_samples.append(parse_witnessed_profiles(match.group("top")))
         elif match := PERF_GENERIC_RE.match(line):
@@ -528,6 +590,8 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
         ),
         "nv2a_split_samples": nv2a_split_samples,
         "final_nv2a_split": nv2a_split_samples[-1] if nv2a_split_samples else None,
+        "vsh_program_samples": vsh_program_samples,
+        "final_vsh_programs": vsh_program_samples[-1] if vsh_program_samples else None,
         "witnessed_profile_samples": witnessed_profile_samples,
         "final_witnessed_profiles": (
             witnessed_profile_samples[-1] if witnessed_profile_samples else None
