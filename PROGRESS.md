@@ -34,6 +34,15 @@ commits without explicit current authorization.
 
 ## Current optimization cursor (2026-08-13)
 
+Latest native-resident exactness diagnostic: a temporary test-only comparison on
+`build/generic-hotpacket-primary-be372-v1.xgp` disabled blending in both resident primary and
+exact primary compute. Resident still differed from exact compute by one LSB in `125,068`
+channels (`49,553/44,713/30,802/0`, `gt1=0`, `maxd=1`). Therefore the primary resident mismatch
+is not blend-only; GL interpolation/output conversion is already non-exact before blending.
+Avoid global blend tweaks, shader bias hacks, and manual-blend-only resident probes. A useful
+primary resident route needs integer/exact per-pixel output to resident storage, or a different
+CPU work-removal strategy.
+
 Latest rejected probe: a narrow exact-compute route for only the captured top primary full-state
 `fp=420f0b01c73c2c93/full=be372882a4961758`, gated by
 `XLLE_PRIMARY_BE372_COMPUTE_TILE_BINS=1`. Packet replay stayed exact (`0` mismatches), the 1B

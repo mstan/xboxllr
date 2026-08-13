@@ -3,6 +3,20 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-13 - Native resident primary mismatch is not blend-only
+
+Ran a temporary hotpacket diagnostic on `build/generic-hotpacket-primary-be372-v1.xgp` comparing
+resident primary rendering with blending disabled against exact primary compute with blending
+disabled. The unblended resident path still differed from exact compute by one LSB in `125,068`
+channels (`49,553/44,713/30,802/0`, `gt1=0`, `maxd=1`). The normal blended resident comparison
+for this packet was already non-exact by one LSB in `337,986` pixels.
+
+Conclusion: the resident primary blocker is not only fixed-function GL blending/packing; native
+GL raster interpolation/output conversion is already one-LSB divergent before blending. Do not
+spend more probes on global blend-factor tweaks, shader output bias, or manual blend alone. A
+retainable resident-primary route likely needs an integer/exact per-pixel path that writes a
+resident surface, or a different CPU work-removal strategy.
+
 ## 2026-08-13 - Rejected narrow primary exact-compute tile-bin route
 
 Prototyped a more constrained version of the rejected broad primary tile-bin path: only the
