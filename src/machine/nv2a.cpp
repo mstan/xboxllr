@@ -17,6 +17,19 @@ namespace xlle {
 
 namespace {
 
+bool vsh_program_writes_context(const Nv2aVshProgram& program) {
+    for (const Nv2aVshStep* step = program.steps; step; ++step) {
+        for (const Nv2aVshOutput& output : step->mac.outputs) {
+            if (output.type == NV2ART_CONTEXT) return true;
+        }
+        for (const Nv2aVshOutput& output : step->ilu.outputs) {
+            if (output.type == NV2ART_CONTEXT) return true;
+        }
+        if (step->is_final) return false;
+    }
+    return true;
+}
+
 // A draw must see memory written by earlier draws, clears, and the CPU, but reading an
 // entire multi-megabyte swizzled target for every small dashboard particle is needlessly
 // expensive. Keep coherence at the draw boundary while faulting pages in only when covered.
@@ -1312,6 +1325,8 @@ bool Nv2a::submit_vertex_batch() {
         fault_("NV2A vertex batch uses unsupported transform execution mode");
         return false;
     }
+    const bool program_writes_context =
+        program_parsed && vsh_program_writes_context(program);
     transformed_batch_.clear();
     transformed_batch_.reserve(vertex_count);
 
@@ -1349,29 +1364,52 @@ bool Nv2a::submit_vertex_batch() {
             }
             TransformedVertex vertex;
             if (program_parsed) {
+                const float* output_regs = nullptr;
                 Nv2aVshCPUFullExecutionState full_state;
-                Nv2aVshExecutionState execution =
-                    nv2a_vsh_emu_initialize_full_execution_state(&full_state);
-                std::memcpy(full_state.context_regs, transform_constants_.data(),
-                            sizeof(full_state.context_regs));
-                for (uint32_t slot = 0; slot < vertex_attributes_.size(); ++slot) {
-                    std::memcpy(&full_state.input_regs[slot * 4],
-                                vertex_attributes_[slot].value.data(),
-                                4 * sizeof(float));
+                std::array<float, 16 * 4> input_regs{};
+                std::array<float, 13 * 4> output_regs_storage{};
+                std::array<float, 12 * 4> temp_regs{};
+                std::array<float, 4> address_reg{};
+                if (program_writes_context) {
+                    Nv2aVshExecutionState execution =
+                        nv2a_vsh_emu_initialize_full_execution_state(&full_state);
+                    std::memcpy(full_state.context_regs, transform_constants_.data(),
+                                sizeof(full_state.context_regs));
+                    for (uint32_t slot = 0; slot < vertex_attributes_.size(); ++slot) {
+                        std::memcpy(&full_state.input_regs[slot * 4],
+                                    vertex_attributes_[slot].value.data(),
+                                    4 * sizeof(float));
+                    }
+                    nv2a_vsh_emu_execute(&execution, &program);
+                    output_regs = full_state.output_regs;
+                } else {
+                    Nv2aVshExecutionState execution{
+                        input_regs.data(),
+                        output_regs_storage.data(),
+                        temp_regs.data(),
+                        const_cast<float*>(transform_constants_[0].data()),
+                        address_reg.data(),
+                        nullptr};
+                    for (uint32_t slot = 0; slot < vertex_attributes_.size(); ++slot) {
+                        std::memcpy(&input_regs[slot * 4],
+                                    vertex_attributes_[slot].value.data(),
+                                    4 * sizeof(float));
+                    }
+                    nv2a_vsh_emu_execute(&execution, &program);
+                    output_regs = output_regs_storage.data();
                 }
-                nv2a_vsh_emu_execute(&execution, &program);
 
                 if (capture_immediate_quad && vertex_index < 4) {
                     auto& evidence = raster_state_samples_[raster_sample_index];
                     std::memcpy(evidence.immediate_quad_opos[vertex_index].data(),
-                                &full_state.output_regs[0], 4 * sizeof(float));
+                                &output_regs[0], 4 * sizeof(float));
                     std::memcpy(evidence.immediate_quad_od0[vertex_index].data(),
-                                &full_state.output_regs[3 * 4], 4 * sizeof(float));
+                                &output_regs[3 * 4], 4 * sizeof(float));
                     std::memcpy(evidence.immediate_quad_ot0[vertex_index].data(),
-                                &full_state.output_regs[9 * 4], 4 * sizeof(float));
+                                &output_regs[9 * 4], 4 * sizeof(float));
                 }
 
-                std::memcpy(vertex.position.data(), &full_state.output_regs[0],
+                std::memcpy(vertex.position.data(), &output_regs[0],
                             4 * sizeof(float));
                 vertex.position[0] = round_screen_coordinate(vertex.position[0]);
                 vertex.position[1] = round_screen_coordinate(vertex.position[1]);
@@ -1379,13 +1417,13 @@ bool Nv2a::submit_vertex_batch() {
                 if (capture_immediate_quad && vertex_index < 4)
                     raster_state_samples_[raster_sample_index]
                         .immediate_quad_raster_opos[vertex_index] = vertex.position;
-                std::memcpy(vertex.diffuse.data(), &full_state.output_regs[3 * 4],
+                std::memcpy(vertex.diffuse.data(), &output_regs[3 * 4],
                             4 * sizeof(float));
-                std::memcpy(vertex.specular.data(), &full_state.output_regs[4 * 4],
+                std::memcpy(vertex.specular.data(), &output_regs[4 * 4],
                             4 * sizeof(float));
                 for (uint32_t texture = 0; texture < 4; ++texture) {
                     std::memcpy(vertex.texture[texture].data(),
-                                &full_state.output_regs[(9 + texture) * 4],
+                                &output_regs[(9 + texture) * 4],
                                 4 * sizeof(float));
                 }
             } else if (fixed_function) {

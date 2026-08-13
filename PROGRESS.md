@@ -113,6 +113,23 @@ parseable detailed counters; full 12B no-accounting replay
 The last single interval regressed while the sustained final-four window improved, so keep
 watching this with repeated/error-bar measurements before stacking riskier changes.
 
+Retained vertex-transform cleanup: programmable VSH execution now scans the parsed program for
+context-register writes. Programs that do not write constants execute with `context_regs`
+pointing directly at the current Cheops constant array, avoiding the previous per-vertex
+`memset`+3 KiB context copy; context-writing programs retain the old full-state path. Validation:
+Release `xlle`/`test_nv2a` build passed; all `build-release/test*.exe` passed; 1B no-accounting
+smoke `build/vsh-context-direct-noperf-smoke-1b.report.json` was exact/empty stderr with final
+SHA `a6087ec5...` and final-four wall `22.759s -> 22.659s` (`-0.44%`) vs
+`build/reduced-nv2a-telemetry-noperf-smoke-1b.report.json`; 1B perf smoke
+`build/vsh-context-direct-perf-smoke-1b.report.json` was exact/empty stderr and showed
+vertex-transform `1.200s -> 0.961s` (`-19.96%`) with final-four wall `23.540s -> 23.049s`
+(`-2.08%`); full 12B no-accounting replay
+`build/vsh-context-direct-noperf-v1-12b.report.json` was exact/empty stderr with final SHA
+`876b58c2...`, final FPS `2.420 -> 2.635`, and final-four wall `54.116s -> 49.967s`
+(`-7.67%`). Rejected adjacent probes: parsed VSH program cache was exact but regressed 1B
+final-four wall by `+4.18%`; guarding the remaining `largest_vertex_index_` diagnostic max was
+exact but regressed 1B final-four wall by `+7.03%`; both source changes were removed.
+
 ## Arc 1 burndown
 
 - **Done:** A0 foundations; A2 live-kernel boot, phase-1 device init, FATX mount, and
