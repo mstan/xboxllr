@@ -35,10 +35,11 @@ commits without explicit current authorization.
 ## Current optimization cursor (2026-08-13)
 
 Active Beads issue: `beads-xbox.1.13` (`Performance: reach interactive-navigable stock
-dashboard (>=10 fps sustained)`). Current retained code on `origin/master` includes the direct
-vertex-fetch optimization, disabled perf-timer guards, and reduced NV2A diagnostic telemetry
-for the default no-accounting interactive path. The latest rejected experiment was direct PFIFO
-command-word fetch via `mem_direct_`; it was exact but slower on the 1B smoke and was reverted.
+dashboard (>=10 fps sustained)`). Current retained code on `origin/master` is commit `95fe3ab`
+and includes direct vertex fetch, disabled perf-timer guards, reduced default-path NV2A
+diagnostic telemetry, and immutable-context VSH execution. The latest rejected experiment was
+direct pitch-linear generic color reads/writes through the already-validated surface pointer;
+it was exact but slower on the 1B smoke and was reverted.
 
 Correctness status: the exact OpenGL/resident baseline for the stock dashboard 12B replay is
 `build/resident-resolve-bgra-v1-12b.report.json`. It exits cleanly with empty stderr and final
@@ -46,23 +47,28 @@ PPM SHA-256 `876b58c2d0e6c63fec917c73dcc43a7d09983baf1da2b5b2176fa73a1b44da6d`.
 The 1B smoke golden remains
 `a6087ec5178c7619d8136de2aa159dde7161d56f9e4c3b899b7165935d0353d8`.
 
-Speed status: the retained 12B exact baseline is still far from the goal: final FPS `2.552`,
-final-four wall `52.636s`, CPU `52.486s`, generic raster `19.297s`, resident resolve `2.087s`,
-resident ensure `1.393s`. Final-four inclusive accounting shows `nv2a_pushbuffer_ns=38.132s`,
-`raster_ns=19.303s`, so pushbuffer time outside raster is about `18.829s`; CPU outside
-pushbuffer is about `14.354s`. A perfect generic-raster/resolve/ensure fix alone would not
-reach 10 fps, so the next pass must account for and reduce the broader pushbuffer/CPU cost too.
+Speed status: the retained no-accounting 12B replay
+`build/vsh-context-direct-noperf-v1-12b.report.json` is exact/empty stderr with final FPS
+`2.635` and final-four wall `49.967s`, still far from 10 fps. The refreshed detailed
+perf-accounting 12B replay `build/vsh-context-direct-perf-v2-12b.report.json` is also
+exact/empty stderr with final SHA `876b58c2...`; under accounting, final-four wall is `56.485s`,
+CPU `56.314s`, generic raster `21.826s`, dispatch `37.903s`, submit `36.152s`, transform
+`13.800s`, resolve `2.175s`, and resident ensure `1.535s`. These dispatch/submit/transform
+numbers are inclusive enough that self-time/unit-cost accounting must guide the next choice;
+do not pick targets from those buckets alone.
 
 Latest rejected experiment: gated `XLLE_Q_RECIP_HOIST=1` was exact at 1B and 12B, but slower
 against the retained baseline: final FPS `2.552 -> 2.448`, final-four wall `+3.80%`,
 CPU `+3.26%`, generic raster `+4.07%`, resolve `+23.24%`. Source was reverted.
 
 One-time Fable critique result: stop treating scalar micro-tweaks as the main path. Before the
-next architecture bet, establish clearer accounting/error bars and target a larger exact bucket:
-tile/row threading, SIMD, and family-keyed combiner specialization for the hot
-`03aa4000` blended generic families. GPU fixed-function OpenGL/Vulkan is not exact for these
-packets on this host; exact compute remains plausible only if it operates on coherent resident
-color storage with old-color reads and no full CPU snapshot/readback.
+next architecture bet, establish clearer self-time/unit-cost accounting and target a larger exact
+bucket: tile/row threading, SIMD, and family-keyed combiner specialization for the hot
+`03aa4000` blended generic families. In the refreshed 12B perf run, the hottest late primary
+blend family is still far above a memory-touch floor (`2.823s / 50.38M` fragments, about
+`56 ns/pixel`), so span/tile work remains plausible. GPU fixed-function OpenGL/Vulkan is not
+exact for these packets on this host; exact compute remains plausible only if it operates on
+coherent resident color storage with old-color reads and no full CPU snapshot/readback.
 
 Continuation finding: `perf-nv2a-split` now breaks out method dispatch, vertex submission, and
 vertex fetch/transform. The exact 12B diagnostic `build/nv2a-split-v1-12b.report.json` shows the
@@ -128,7 +134,9 @@ vertex-transform `1.200s -> 0.961s` (`-19.96%`) with final-four wall `23.540s ->
 `876b58c2...`, final FPS `2.420 -> 2.635`, and final-four wall `54.116s -> 49.967s`
 (`-7.67%`). Rejected adjacent probes: parsed VSH program cache was exact but regressed 1B
 final-four wall by `+4.18%`; guarding the remaining `largest_vertex_index_` diagnostic max was
-exact but regressed 1B final-four wall by `+7.03%`; both source changes were removed.
+exact but regressed 1B final-four wall by `+7.03%`; parsed-VSH input-copy masking was exact but
+regressed 1B final-four wall by `+7.67%`; and VSH setup zeroing reduction was exact but regressed
+1B final-four wall by `+4.14%`. All source changes were removed.
 
 ## Arc 1 burndown
 
