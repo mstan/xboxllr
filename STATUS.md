@@ -5,7 +5,7 @@
 
 ## 2026-08-13 - Stock dashboard performance cursor: exact but still below 10 fps
 
-Current pushed head is `fdf5563` on `origin/master`. Retained emulator behavior includes direct
+Current pushed head is `c0098e5` on `origin/master`. Retained emulator behavior includes direct
 vertex fetch, disabled perf-timer guards, reduced default-path NV2A diagnostic telemetry, and
 immutable-context VSH execution. The best retained no-accounting stock-dashboard 12B replay is
 `build/vsh-context-direct-noperf-v1-12b.report.json`: exact/empty stderr, final SHA-256
@@ -24,6 +24,14 @@ counter gating. Each was exact at the 1B smoke gate but slower, so source was re
 Additional exact-but-slower 1B probes from the same cursor were also removed: generic-raster
 `std::function` callback replacement (`+12.38%` final-four wall), stack-first clip setup
 (`+2.92%`), and direct non-overlapping texture sampling (`+6.77%`).
+
+Follow-up on the renderer-admission hypothesis: pure software rendering is not a better launch
+mode for the current path (`build/software-renderer-noperf-smoke-1b.report.json` was exact but
+regressed final FPS `2.955 -> 2.454`, final-four wall `+15.11%`). A conservative lazy renderer
+packet materialization probe also stayed exact at 1B but regressed final FPS `2.955 -> 2.790`,
+final-four wall `+5.32%`; source was reverted. Current focus should remain the large exact
+buckets: generic software raster/family specialization, exact resident/tile work, and VSH
+execution, not packet-copy or wrapper shaving.
 
 ## 2026-08-09 - A4: synthetic Down-then-A replay reaches a stable black frame; dashboard identified as XBMC
 

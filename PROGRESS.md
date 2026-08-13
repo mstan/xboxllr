@@ -35,7 +35,7 @@ commits without explicit current authorization.
 ## Current optimization cursor (2026-08-13)
 
 Active Beads issue: `beads-xbox.1.13` (`Performance: reach interactive-navigable stock
-dashboard (>=10 fps sustained)`). Current pushed head on `origin/master` is commit `fdf5563`;
+dashboard (>=10 fps sustained)`). Current pushed head on `origin/master` is commit `c0098e5`;
 the retained emulator behavior is from `95fe3ab` plus tooling/status updates. It includes direct
 vertex fetch, disabled perf-timer guards, reduced default-path NV2A diagnostic telemetry, and
 immutable-context VSH execution. The latest rejected experiment was a reduced-path guard around
@@ -81,6 +81,14 @@ back to a vector only when clipping was needed was exact but regressed (`+2.92%`
 non-overlapping texture sampling from `mem_direct_` was exact but regressed (`+6.77%`). All three
 source probes were removed. A larger primary-passthrough scratch-register rewrite was abandoned
 at compile time as too invasive for the measured risk.
+
+Additional continuation rejects: switching the 1B no-accounting smoke to the pure software
+renderer was exact but slower (`2.955 -> 2.454` final FPS, `+15.11%` final-four wall), confirming
+the current OpenGL/resident path is still a net win despite fallback overhead. A conservative
+lazy renderer-packet materialization probe was also exact at 1B but slower (`2.955 -> 2.790`
+final FPS, `+5.32%` final-four wall), so it was reverted. Do not keep chasing renderer packet
+copy/wrapper shape without stronger evidence; the important remaining work is generic software
+raster/family specialization, exact resident/tile work, and VSH execution.
 
 One-time Fable critique result: stop treating scalar micro-tweaks as the main path. Before the
 next architecture bet, establish clearer self-time/unit-cost accounting and target a larger exact
