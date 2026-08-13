@@ -23,6 +23,15 @@ changed the final SHA to `5ced34dfe9976069899fb118fd4e761b7dd62e14b4b182e6443228
 while raising final FPS to `3.99`. This is a promising lead, but it is not retainable until the
 packet-level clipping/raster mismatch is isolated and made exact. Source was reverted.
 
+Packet-level follow-up on `build/generic-hotpacket-mixedw-texmod-fp02cc-v1.xgp` showed the
+resident graphics path is the non-exact piece: the hotpacket resident path mismatched
+`899,838` pixels, while the clipped exact compute fixture produced `0` mismatches. A prototype
+that routed mixed-W texture-modulate candidates through the exact compute fixture kept the 1B and
+12B no-accounting replay SHAs exact, but it was too slow at 12B: final FPS `3.095 -> 2.366` and
+final-four wall `43.786s -> 48.427s` (`+10.60%`). Source was reverted. Conclusion: large-surface
+snapshot/readback compute is not the fix; the useful path is making resident graphics exact or
+finding a coherent resident/compute route that avoids full-surface round trips.
+
 ## 2026-08-13 - Retained batch-local post-transform cache lifts late stock dashboard to 3.095 fps
 
 Implemented a conservative NV2A post-transform cache for indexed programmable vertex batches.

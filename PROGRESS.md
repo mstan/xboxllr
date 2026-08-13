@@ -86,6 +86,18 @@ but the full 12B no-accounting replay changed the final SHA from `876b58c2...` t
 without packet-level differential work through the existing `XLLE_HOTPACKET_PROBE*` snapshot
 fixtures. Source was reverted to the exact cache baseline.
 
+Mixed-W packet follow-up: `XLLE_HOTPACKET_PROBE` on
+`build/generic-hotpacket-mixedw-texmod-fp02cc-v1.xgp` showed clipped resident graphics is
+non-exact (`899,838` pixel mismatches, max delta `13`), while the exact compute fixture produces
+`0` mismatches. A production prototype routed mixed-W texture-modulate candidates through clipped
+`kTextureModulateTriangle` with `XLLE_LARGE_TEXTURE_COMPUTE_FIXTURE=1`; it stayed exact at 1B and
+12B, but regressed the full 12B no-accounting replay against
+`build/posttransform-cache-direct256-noperf-v1-12b.report.json`: final FPS `3.095 -> 2.366` and
+final-four wall `43.786s -> 48.427s` (`+10.60%`). Source was reverted. Conclusion: full-surface
+snapshot/readback compute is too expensive for this late large-surface family; the next useful
+resident path is exacting GL raster/interpolation semantics or using coherent resident compute
+without CPU round trips.
+
 Latest rejected experiment: gated `XLLE_Q_RECIP_HOIST=1` was exact at 1B and 12B, but slower
 against the retained baseline: final FPS `2.552 -> 2.448`, final-four wall `+3.80%`,
 CPU `+3.26%`, generic raster `+4.07%`, resolve `+23.24%`. Source was reverted. Also rejected:
