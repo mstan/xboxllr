@@ -98,6 +98,12 @@ snapshot/readback compute is too expensive for this late large-surface family; t
 resident path is exacting GL raster/interpolation semantics or using coherent resident compute
 without CPU round trips.
 
+Related primary hotpacket check: `build/generic-hotpacket-primary-fp9779-v1.xgp` shows resident
+graphics is close but still non-exact (`360,538` pixels, all one-LSB deltas), while the exact
+compute fixture produces `0` mismatches. Treat widened native-graphics resident admission as
+blocked for both texture and primary mixed-W packets unless the raster/interpolation/blend
+semantics are made byte-exact.
+
 Latest rejected experiment: gated `XLLE_Q_RECIP_HOIST=1` was exact at 1B and 12B, but slower
 against the retained baseline: final FPS `2.552 -> 2.448`, final-four wall `+3.80%`,
 CPU `+3.26%`, generic raster `+4.07%`, resolve `+23.24%`. Source was reverted. Also rejected:

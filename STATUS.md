@@ -32,6 +32,12 @@ final-four wall `43.786s -> 48.427s` (`+10.60%`). Source was reverted. Conclusio
 snapshot/readback compute is not the fix; the useful path is making resident graphics exact or
 finding a coherent resident/compute route that avoids full-surface round trips.
 
+The same packet-level pattern holds for the untextured primary mixed-W fixture
+`build/generic-hotpacket-primary-fp9779-v1.xgp`: resident graphics mismatched `360,538` pixels,
+all by one LSB, while the exact compute fixture had `0` mismatches. This reinforces that widened
+resident graphics admission is blocked by native GL coverage/interpolation/blend semantics, not
+just by texture sampling.
+
 ## 2026-08-13 - Retained batch-local post-transform cache lifts late stock dashboard to 3.095 fps
 
 Implemented a conservative NV2A post-transform cache for indexed programmable vertex batches.
