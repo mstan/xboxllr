@@ -912,14 +912,22 @@ bool Nv2a::fetch_vertex_attribute(uint32_t slot, uint32_t index) {
     }
 
     std::array<uint8_t, 16> data{};
-    if (!mem_read_ ||
-        !mem_read_(first_address, data.data(), static_cast<size_t>(element_bytes))) {
-        char why[160];
-        std::snprintf(why, sizeof(why),
-                      "NV2A vertex attribute %u DMA read failed at 0x%08x",
-                      slot, first_address);
-        fault_(why);
-        return false;
+    const uint8_t* source = nullptr;
+    if (mem_direct_) {
+        source = mem_direct_(first_address, static_cast<size_t>(element_bytes));
+    }
+    if (source) {
+        std::memcpy(data.data(), source, static_cast<size_t>(element_bytes));
+    } else {
+        if (!mem_read_ ||
+            !mem_read_(first_address, data.data(), static_cast<size_t>(element_bytes))) {
+            char why[160];
+            std::snprintf(why, sizeof(why),
+                          "NV2A vertex attribute %u DMA read failed at 0x%08x",
+                          slot, first_address);
+            fault_(why);
+            return false;
+        }
     }
 
     attr.value = {{0.0f, 0.0f, 0.0f, 1.0f}};

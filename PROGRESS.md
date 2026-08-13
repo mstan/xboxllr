@@ -73,6 +73,16 @@ late dashboard is not only fragment-bound: final-four instrumented counters were
 1,849 times versus 453,270 misses and regressed against the retained baseline. Do not revive that
 range-hash cache shape without a stronger repeated-batch key.
 
+Retained optimization: NV2A vertex attribute fetch now uses the direct unified-memory pointer
+when available, after the same DMA-object start/end validation, and falls back to the existing
+`mem_read_` callback otherwise. Validation: all `build-release/test*.exe` passed; 1B stock smoke
+`build/direct-vertex-fetch-default-smoke-1b.report.json` was exact/empty stderr; 12B stock replay
+`build/direct-vertex-fetch-default-v1-12b.report.json` was exact/empty stderr with final SHA
+`876b58c2...`. Against the same `perf-nv2a-split` instrumented baseline, final-four wall improved
+`61.490s -> 57.376s` (`-6.69%`), CPU `-6.70%`, dispatch `-7.84%`, submit `-8.05%`, and vertex
+transform `-14.33%`. The absolute FPS reported with heavier accounting is still only `2.376`, so
+the >=10 fps goal remains open.
+
 ## Arc 1 burndown
 
 - **Done:** A0 foundations; A2 live-kernel boot, phase-1 device init, FATX mount, and
