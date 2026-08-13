@@ -105,6 +105,12 @@ generic texture stages was also exact at 1B, but regressed final-four wall to `2
 (`+12.63%`, final FPS `2.955 -> 2.727`). Both source probes were removed. Treat small code-shape
 changes in the generic raster path as suspect unless they remove a clearly measured large cost.
 
+Clip-shape continuation reject: an early generic clipper trivial-reject for triangles wholly
+outside one clip plane was exact at 1B, but regressed final-four wall to `23.263s` (`+2.67%`,
+final FPS `2.955 -> 2.938`). Source was reverted. Even when the captured hot primary packet has
+many all-behind triangles, adding more generic per-triangle branch/setup shape is not paying off
+in the 1B dashboard smoke.
+
 One-time Fable critique result: stop treating scalar micro-tweaks as the main path. Before the
 next architecture bet, establish clearer self-time/unit-cost accounting and target a larger exact
 bucket: tile/row threading, SIMD, and family-keyed combiner specialization for the hot

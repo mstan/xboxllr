@@ -44,6 +44,8 @@ primary-color/SRC_ALPHA generic path and stayed exact at 1B, but regressed final
 `23.295s` (`+2.81%`, final FPS `2.955 -> 2.913`); the disabled-gate scaffolding regressed more.
 Caching immutable generic texture `SwizzleLookup` tables by `(width,height)` also stayed exact at
 1B but regressed final-four wall to `25.521s` (`+12.63%`). Both source probes were reverted.
+An early same-plane clip trivial-reject was also exact at 1B but slower (`23.263s`, `+2.67%`,
+final FPS `2.955 -> 2.938`) and was reverted.
 
 ## 2026-08-09 - A4: synthetic Down-then-A replay reaches a stable black frame; dashboard identified as XBMC
 
