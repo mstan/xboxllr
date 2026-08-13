@@ -3,6 +3,28 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-13 - Generic-detail accounting shifts target to renderer admission work
+
+Added `--perf-accounting` detail buckets for generic-combiner state setup, renderer/admission
+path, and fallback setup, plus report/parser/summary support for a new
+`[perf-generic-detail]` line. The instrumentation is inactive unless perf accounting is enabled
+and does not change normal replay behavior.
+
+Validation: Release `xlle`/`test_nv2a` build passed, `test_nv2a` passed, Python parser/summary
+compile checks passed, and the 1B perf smoke
+`build/generic-detail-perf-smoke-1b.report.json` stayed exact/empty stderr. The full 12B perf
+replay `build/generic-detail-perf-v1-12b.report.json` stayed exact/empty stderr with final SHA
+`876b58c2...`. Its late-window detail shows the old `gother~` time is almost entirely renderer
+admission/acceleration-path work rather than state setup: final interval `gother~=3.398s`,
+`gaccel=2.414s`, `gfbsetup=0.943s`, `gstate=0.002s`, `gother2~=0.039s`.
+
+Follow-up rejected probe: skipping large-dashboard resident-primary admission for packets with
+at least 256 vertices passed `test_nv2a` and a 1B smoke, but the full 12B replay
+`build/skip-primary-resident-admit-v2-12b.report.json` failed correctness (`ed1b2deb...` vs
+expected `876b58c2...`) and was slower (`2.841` final FPS). Source was reverted. Do not bypass
+that admission path without proving the skipped packets cannot be consumed by a correct resident
+route later in the same replay.
+
 ## 2026-08-13 - Rejected primary passthrough CPU fast branch
 
 Prototyped a gated CPU-side shortcut behind `XLLE_PRIMARY_PASSTHROUGH_FAST=1` for the simple

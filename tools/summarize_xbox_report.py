@@ -307,6 +307,7 @@ def summarize(path: pathlib.Path) -> None:
     generic_perf = parsed.get("generic_perf_samples", [])
     generic_family = parsed.get("generic_family_samples", [])
     generic_split = parsed.get("generic_split_samples", [])
+    generic_detail = parsed.get("generic_detail_samples", [])
     nv2a_split = parsed.get("nv2a_split_samples", [])
     vsh_programs = parsed.get("vsh_program_samples", [])
     vertex_reuse_samples = parsed.get("vertex_reuse_samples", [])
@@ -334,6 +335,7 @@ def summarize(path: pathlib.Path) -> None:
     previous_generic_perf = None
     previous_generic_family = None
     previous_generic_split = None
+    previous_generic_detail = None
     previous_nv2a_split = None
     previous_vsh_programs = None
     previous_vertex_reuse = None
@@ -348,6 +350,7 @@ def summarize(path: pathlib.Path) -> None:
         gp = sample_for_deadline(generic_perf, index)
         gf = sample_for_deadline(generic_family, index)
         gs = sample_for_deadline(generic_split, index)
+        gd = sample_for_deadline(generic_detail, index)
         ns = sample_for_deadline(nv2a_split, index)
         vsh = sample_for_deadline(vsh_programs, index)
         vr = sample_for_deadline(vertex_reuse_samples, index)
@@ -357,6 +360,7 @@ def summarize(path: pathlib.Path) -> None:
         md = delta_dict(m, previous_memory) if m else {}
         ucmd = delta_dict(ucm, previous_unicorn_memory) if ucm else {}
         gsd = delta_dict(gs, previous_generic_split) if gs else {}
+        gdd = delta_dict(gd, previous_generic_detail) if gd else {}
         nsd = delta_dict(ns, previous_nv2a_split) if ns else {}
         dirty_clip = rd.get("dirty_clip_pixels", 0)
         dirty_surface = rd.get("dirty_surface_pixels", 0)
@@ -371,6 +375,7 @@ def summarize(path: pathlib.Path) -> None:
         previous_memory = m or previous_memory
         previous_unicorn_memory = ucm or previous_unicorn_memory
         previous_generic_split = gs or previous_generic_split
+        previous_generic_detail = gd or previous_generic_detail
         previous_nv2a_split = ns or previous_nv2a_split
         raster_witnessed_est = difference(
             pd.get("raster_ns"), pd.get("raster_generic_ns")
@@ -380,6 +385,12 @@ def summarize(path: pathlib.Path) -> None:
             gsd.get("texture_setup_ns"),
             gsd.get("software_raster_ns"),
             gsd.get("flush_ns"),
+        )
+        generic_detail_other_est = difference(
+            generic_other_est,
+            gdd.get("state_setup_ns"),
+            gdd.get("accel_path_ns"),
+            gdd.get("fallback_setup_ns"),
         )
         submit_self_est = difference(
             nsd.get("submit_vertex_ns"),
@@ -414,6 +425,10 @@ def summarize(path: pathlib.Path) -> None:
             f"gsoft={ns_to_s(gsd.get('software_raster_ns'))} "
             f"gflush={ns_to_s(gsd.get('flush_ns'))} "
             f"gother~={ns_to_s(generic_other_est)} "
+            f"gstate={ns_to_s(gdd.get('state_setup_ns'))} "
+            f"gaccel={ns_to_s(gdd.get('accel_path_ns'))} "
+            f"gfbsetup={ns_to_s(gdd.get('fallback_setup_ns'))} "
+            f"gother2~={ns_to_s(generic_detail_other_est)} "
             f"dispatch={ns_to_s(nsd.get('dispatch_method_ns'))} "
             f"dispself~={ns_to_s(dispatch_self_est)} "
             f"submit={ns_to_s(nsd.get('submit_vertex_ns'))} "

@@ -2120,6 +2120,10 @@ int main(int argc, char** argv) {
                     xlle::perf::format_generic_split_report();
                 if (!generic_split_report.empty())
                     std::printf("%s\n", generic_split_report.c_str());
+                const std::string generic_detail_report =
+                    xlle::perf::format_generic_detail_report();
+                if (!generic_detail_report.empty())
+                    std::printf("%s\n", generic_detail_report.c_str());
                 const std::string nv2a_split_report =
                     xlle::perf::format_nv2a_split_report();
                 if (!nv2a_split_report.empty())
@@ -2723,6 +2727,10 @@ int main(int argc, char** argv) {
                     xlle::perf::format_generic_split_report();
                 if (!generic_split_report.empty())
                     std::printf("%s\n", generic_split_report.c_str());
+                const std::string generic_detail_report =
+                    xlle::perf::format_generic_detail_report();
+                if (!generic_detail_report.empty())
+                    std::printf("%s\n", generic_detail_report.c_str());
                 const std::string nv2a_split_report =
                     xlle::perf::format_nv2a_split_report();
                 if (!nv2a_split_report.empty())
@@ -2769,6 +2777,10 @@ int main(int argc, char** argv) {
                     xlle::perf::format_generic_split_report();
                 if (!generic_split_report.empty())
                     std::printf("%s\n", generic_split_report.c_str());
+                const std::string generic_detail_report =
+                    xlle::perf::format_generic_detail_report();
+                if (!generic_detail_report.empty())
+                    std::printf("%s\n", generic_detail_report.c_str());
                 const std::string nv2a_split_report =
                     xlle::perf::format_nv2a_split_report();
                 if (!nv2a_split_report.empty())

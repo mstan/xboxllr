@@ -140,6 +140,16 @@ PERF_GENERIC_SPLIT_RE = re.compile(
     r"\(n=(?P<flush_n>\d+)\)"
 )
 
+PERF_GENERIC_DETAIL_RE = re.compile(
+    r"^\[perf-generic-detail\] "
+    r"state-setup-ns=(?P<state_setup_ns>\d+) "
+    r"\(n=(?P<state_setup_n>\d+)\) "
+    r"accel-path-ns=(?P<accel_path_ns>\d+) "
+    r"\(n=(?P<accel_path_n>\d+)\) "
+    r"fallback-setup-ns=(?P<fallback_setup_ns>\d+) "
+    r"\(n=(?P<fallback_setup_n>\d+)\)"
+)
+
 PERF_NV2A_SPLIT_RE = re.compile(
     r"^\[perf-nv2a-split\] "
     r"dispatch-method-ns=(?P<dispatch_method_ns>\d+) "
@@ -523,6 +533,7 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
     renderer_resolve_context_samples: list[dict[str, dict[str, int]]] = []
     perf_memory_samples: list[dict[str, Any]] = []
     generic_split_samples: list[dict[str, Any]] = []
+    generic_detail_samples: list[dict[str, Any]] = []
     nv2a_split_samples: list[dict[str, Any]] = []
     vsh_program_samples: list[list[dict[str, Any]]] = []
     vertex_reuse_samples: list[list[dict[str, Any]]] = []
@@ -565,6 +576,8 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
             perf_memory_samples.append(parse_int_fields(match))
         elif match := PERF_GENERIC_SPLIT_RE.match(line):
             generic_split_samples.append(parse_int_fields(match))
+        elif match := PERF_GENERIC_DETAIL_RE.match(line):
+            generic_detail_samples.append(parse_int_fields(match))
         elif match := PERF_NV2A_SPLIT_RE.match(line):
             nv2a_split_samples.append(parse_int_fields(match))
         elif match := PERF_VSH_PROGRAM_RE.match(line):
@@ -623,6 +636,10 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
         "generic_split_samples": generic_split_samples,
         "final_generic_split": (
             generic_split_samples[-1] if generic_split_samples else None
+        ),
+        "generic_detail_samples": generic_detail_samples,
+        "final_generic_detail": (
+            generic_detail_samples[-1] if generic_detail_samples else None
         ),
         "nv2a_split_samples": nv2a_split_samples,
         "final_nv2a_split": nv2a_split_samples[-1] if nv2a_split_samples else None,

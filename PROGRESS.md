@@ -34,6 +34,21 @@ commits without explicit current authorization.
 
 ## Current optimization cursor (2026-08-13)
 
+Latest retained measurement tooling: `--perf-accounting` now emits `[perf-generic-detail]`
+with generic-combiner state setup, renderer/admission path, and fallback setup buckets. The 12B
+detail replay `build/generic-detail-perf-v1-12b.report.json` stayed exact/empty stderr with final
+SHA `876b58c2...`. In the final interval, the old `gother~` bucket is explained almost entirely
+by renderer/admission and fallback setup: `gother~=3.398s`, `gaccel=2.414s`, `gfbsetup=0.943s`,
+`gstate=0.002s`, `gother2~=0.039s`. Next optimization work should target why so many late
+generic batches enter the renderer/admission path and still fall back, or make that path do useful
+work, rather than specializing per-pixel math again.
+
+Latest rejected admission probe: skipping large-dashboard resident-primary admission for packets
+with at least 256 vertices passed `test_nv2a` and a 1B smoke, but failed the full 12B replay:
+`build/skip-primary-resident-admit-v2-12b.report.json` produced final SHA `ed1b2deb...` instead
+of `876b58c2...` and was slower (`2.841` final FPS). Source was reverted. The skipped candidate
+packets are not semantically disposable.
+
 Latest rejected CPU probe: a gated `XLLE_PRIMARY_PASSTHROUGH_FAST=1` branch tried to specialize
 the simple primary-color passthrough generic-combiner path while keeping
 `XLLE_TEXTURE_COMPUTE_TILE_BINS=1`. It passed `test_nv2a` with and without the env gate and

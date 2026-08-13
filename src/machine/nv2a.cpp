@@ -5886,6 +5886,11 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     std::chrono::steady_clock::time_point generic_started_at;
     if (profile_generic_fingerprint)
         generic_started_at = std::chrono::steady_clock::now();
+    std::optional<perf::ScopedAdd> generic_state_timer;
+    if (perf::g_enabled) {
+        generic_state_timer.emplace(perf::g_ns_generic_state_setup,
+                                    perf::g_calls_generic_state_setup);
+    }
     uint64_t generic_batch_bbox_pixels = 0;
     uint64_t generic_batch_texture_setup_ns = 0;
     uint64_t generic_batch_software_raster_ns = 0;
@@ -6656,6 +6661,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     std::chrono::steady_clock::time_point generic_texture_setup_started_at;
     if (profile_generic_fingerprint)
         generic_texture_setup_started_at = std::chrono::steady_clock::now();
+    if (generic_state_timer) generic_state_timer.reset();
     {
         std::optional<perf::ScopedAdd> texture_setup_timer;
         if (perf::g_enabled) {
@@ -6872,6 +6878,11 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 std::chrono::steady_clock::now() -
                 generic_texture_setup_started_at)
                 .count());
+    }
+    std::optional<perf::ScopedAdd> generic_accel_timer;
+    if (perf::g_enabled) {
+        generic_accel_timer.emplace(perf::g_ns_generic_accel_path,
+                                    perf::g_calls_generic_accel_path);
     }
     const bool only_texture0_input =
         texture_referenced[0] && !texture_referenced[1] &&
@@ -8327,10 +8338,16 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             return true;
         }
     }
+    if (generic_accel_timer) generic_accel_timer.reset();
     ++generic_combiner_fallback_batches_;
     executed = true;
     ++generic_combiner_batches_;
     const uint64_t generic_batch_index = generic_combiner_batches_;
+    std::optional<perf::ScopedAdd> generic_fallback_timer;
+    if (perf::g_enabled) {
+        generic_fallback_timer.emplace(perf::g_ns_generic_fallback_setup,
+                                       perf::g_calls_generic_fallback_setup);
+    }
     GenericCombinerFingerprintStats* generic_fingerprint_stats = nullptr;
     uint64_t generic_batch_fingerprint = 1469598103934665603ull;
     uint64_t generic_batch_full_hash = 0;
@@ -9557,6 +9574,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     std::chrono::steady_clock::time_point generic_software_raster_started_at;
     if (profile_generic_fingerprint)
         generic_software_raster_started_at = std::chrono::steady_clock::now();
+    if (generic_fallback_timer) generic_fallback_timer.reset();
     {
         std::optional<perf::ScopedAdd> software_raster_timer;
         if (perf::g_enabled) {
