@@ -34,6 +34,15 @@ commits without explicit current authorization.
 
 ## Current optimization cursor (2026-08-13)
 
+Latest rejected CPU probe: a gated `XLLE_PRIMARY_PASSTHROUGH_FAST=1` branch tried to specialize
+the simple primary-color passthrough generic-combiner path while keeping
+`XLLE_TEXTURE_COMPUTE_TILE_BINS=1`. It passed `test_nv2a` with and without the env gate and
+stayed exact at both 1B and 12B (`a6087ec5...` and `876b58c2...` final SHAs), but the full 12B
+replay regressed versus `build/texture-compute-tilebins-flat-v1-12b.report.json`: final FPS
+`3.876 -> 3.314`, final-four wall `37.216s -> 40.263s` (`+8.19%`). Source was reverted. The
+generic-register/final-combiner scaffolding alone is not enough work to remove; do not retry this
+duplicated CPU fast-branch shape.
+
 Latest rejected production probe: a resident-primary exact-compute tile-bin route using the
 byte-domain `RGBA8` image-load/blend/store shape below was not retainable. Broad admission
 (`XLLE_RESIDENT_PRIMARY_COMPUTE_TILE_BINS=1`) built, passed `test_nv2a`, and kept the focused

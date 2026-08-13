@@ -3,6 +3,23 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-13 - Rejected primary passthrough CPU fast branch
+
+Prototyped a gated CPU-side shortcut behind `XLLE_PRIMARY_PASSTHROUGH_FAST=1` for the simple
+primary-color passthrough generic-combiner path, alongside retained
+`XLLE_TEXTURE_COMPUTE_TILE_BINS=1`. The branch avoided the generic register/final-combiner
+scaffolding for `primary_color_passthrough` pixels while preserving the same diffuse
+interpolation, alpha test, blend, color-mask, X8 alpha, depth write, and output-hash math.
+
+Validation was exact but slower. `test_nv2a` passed with and without the env gate. The 1B
+candidate smoke stayed exact/empty stderr with final SHA `a6087ec5...` and was roughly neutral
+against a same-session texture-tilebin baseline (`2.595 -> 2.572` final FPS). The full 12B
+replay `build/primary-passthrough-fast-v2-12b.report.json` stayed exact/empty stderr with final
+SHA `876b58c2...`, but regressed versus `build/texture-compute-tilebins-flat-v1-12b.report.json`:
+final FPS `3.876 -> 3.314`, final-four wall `37.216s -> 40.263s` (`+8.19%`). Source was
+reverted. Do not retry this duplicated CPU fast-branch shape without removing materially more
+work than generic register/final-combiner setup.
+
 ## 2026-08-13 - Rejected resident-primary compute tile-bin route
 
 Prototyped a gated resident-primary exact-compute route using the byte-domain `RGBA8`
