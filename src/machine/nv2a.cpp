@@ -5,6 +5,7 @@
 #include <climits>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -7715,10 +7716,10 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                         return true;
                     };
                     std::vector<Nv2aGenericCombinerVertex> expanded;
-                    auto append_triangle = [&](size_t ia, size_t ib, size_t ic) {
-                        const Nv2aGenericCombinerVertex& a = packet.vertices[ia];
-                        const Nv2aGenericCombinerVertex& b = packet.vertices[ib];
-                        const Nv2aGenericCombinerVertex& c = packet.vertices[ic];
+                    auto append_oriented_triangle =
+                        [&](const Nv2aGenericCombinerVertex& a,
+                            const Nv2aGenericCombinerVertex& b,
+                            const Nv2aGenericCombinerVertex& c) {
                         if (!finite_vertex(a) || !finite_vertex(b) ||
                             !finite_vertex(c)) {
                             return false;
@@ -7757,30 +7758,197 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                         }
                         return true;
                     };
-                    bool expanded_ok = !mixed_w_triangle;
+                    auto append_triangle = [&](size_t ia, size_t ib, size_t ic) {
+                        return append_oriented_triangle(
+                            packet.vertices[ia], packet.vertices[ib],
+                            packet.vertices[ic]);
+                    };
+                    auto append_clipped_triangle =
+                        [&](size_t ia, size_t ib, size_t ic) {
+                            const Nv2aGenericCombinerVertex& a = packet.vertices[ia];
+                            const Nv2aGenericCombinerVertex& b = packet.vertices[ib];
+                            const Nv2aGenericCombinerVertex& c = packet.vertices[ic];
+                            if (!finite_vertex(a) || !finite_vertex(b) ||
+                                !finite_vertex(c)) {
+                                return false;
+                            }
+                            constexpr float kMinPositiveW = 1.0e-6f;
+                            const float surface_w =
+                                static_cast<float>((surface_pitch_ & 0xffffu) / 4u);
+                            const float surface_h = static_cast<float>(surface_height);
+                            struct ClipVertex {
+                                Nv2aGenericCombinerVertex vertex;
+                                float clip_x = 0.0f;
+                                float clip_y = 0.0f;
+                                float clip_w = 0.0f;
+                            };
+                            auto make_clip_vertex =
+                                [&](const Nv2aGenericCombinerVertex& vertex) {
+                                    ClipVertex out{};
+                                    out.vertex = vertex;
+                                    out.clip_w = vertex.position[3];
+                                    out.clip_x =
+                                        (2.0f * vertex.position[0] / surface_w -
+                                         1.0f) *
+                                        out.clip_w;
+                                    out.clip_y =
+                                        (2.0f * vertex.position[1] / surface_h -
+                                         1.0f) *
+                                        out.clip_w;
+                                    return out;
+                                };
+                            auto lerp_clip_vertex = [](const ClipVertex& v0,
+                                                       const ClipVertex& v1,
+                                                       float t) {
+                                ClipVertex out{};
+                                out.clip_x = v0.clip_x + (v1.clip_x - v0.clip_x) * t;
+                                out.clip_y = v0.clip_y + (v1.clip_y - v0.clip_y) * t;
+                                out.clip_w = v0.clip_w + (v1.clip_w - v0.clip_w) * t;
+                                out.vertex.position[2] =
+                                    v0.vertex.position[2] +
+                                    (v1.vertex.position[2] -
+                                     v0.vertex.position[2]) *
+                                        t;
+                                out.vertex.position[3] = out.clip_w;
+                                for (size_t component = 0; component < 4; ++component) {
+                                    out.vertex.diffuse[component] =
+                                        v0.vertex.diffuse[component] +
+                                        (v1.vertex.diffuse[component] -
+                                         v0.vertex.diffuse[component]) *
+                                            t;
+                                    out.vertex.specular[component] =
+                                        v0.vertex.specular[component] +
+                                        (v1.vertex.specular[component] -
+                                         v0.vertex.specular[component]) *
+                                            t;
+                                    for (size_t stage = 0; stage < 4; ++stage) {
+                                        out.vertex.texture[stage][component] =
+                                            v0.vertex.texture[stage][component] +
+                                            (v1.vertex.texture[stage][component] -
+                                             v0.vertex.texture[stage][component]) *
+                                                t;
+                                    }
+                                }
+                                return out;
+                            };
+                            std::vector<ClipVertex> clip_polygon{
+                                make_clip_vertex(a), make_clip_vertex(b),
+                                make_clip_vertex(c)};
+                            auto clip_plane = [&](auto plane_value) {
+                                if (clip_polygon.empty()) return;
+                                std::vector<ClipVertex> output;
+                                output.reserve(clip_polygon.size() + 1);
+                                ClipVertex prev = clip_polygon.back();
+                                float prev_value = plane_value(prev);
+                                bool prev_inside = prev_value >= 0.0f;
+                                for (const ClipVertex& cur : clip_polygon) {
+                                    const float cur_value = plane_value(cur);
+                                    const bool cur_inside = cur_value >= 0.0f;
+                                    if (cur_inside != prev_inside) {
+                                        const float denom = prev_value - cur_value;
+                                        const float t = denom == 0.0f ? 0.0f
+                                                                      : prev_value / denom;
+                                        output.push_back(lerp_clip_vertex(prev, cur, t));
+                                    }
+                                    if (cur_inside) output.push_back(cur);
+                                    prev = cur;
+                                    prev_value = cur_value;
+                                    prev_inside = cur_inside;
+                                }
+                                clip_polygon = std::move(output);
+                            };
+                            constexpr float kClipTolerance = 1.0e-4f;
+                            const bool needs_clip = std::any_of(
+                                clip_polygon.begin(), clip_polygon.end(),
+                                [](const ClipVertex& vertex) {
+                                    return vertex.clip_w < kMinPositiveW ||
+                                           vertex.clip_x <
+                                               -vertex.clip_w - kClipTolerance ||
+                                           vertex.clip_x >
+                                               vertex.clip_w + kClipTolerance ||
+                                           vertex.clip_y <
+                                               -vertex.clip_w - kClipTolerance ||
+                                           vertex.clip_y >
+                                               vertex.clip_w + kClipTolerance;
+                                });
+                            if (!needs_clip) return append_oriented_triangle(a, b, c);
+                            clip_plane([](const ClipVertex& vertex) {
+                                return vertex.clip_w - kMinPositiveW;
+                            });
+                            clip_plane([](const ClipVertex& vertex) {
+                                return vertex.clip_x + vertex.clip_w;
+                            });
+                            clip_plane([](const ClipVertex& vertex) {
+                                return vertex.clip_w - vertex.clip_x;
+                            });
+                            clip_plane([](const ClipVertex& vertex) {
+                                return vertex.clip_y + vertex.clip_w;
+                            });
+                            clip_plane([](const ClipVertex& vertex) {
+                                return vertex.clip_w - vertex.clip_y;
+                            });
+                            if (clip_polygon.size() < 3) return true;
+                            std::vector<Nv2aGenericCombinerVertex> clipped;
+                            clipped.reserve(clip_polygon.size());
+                            for (ClipVertex& vertex : clip_polygon) {
+                                if (vertex.clip_w <= 0.0f) return false;
+                                vertex.vertex.position[0] =
+                                    (vertex.clip_x / vertex.clip_w + 1.0f) *
+                                    surface_w * 0.5f;
+                                vertex.vertex.position[1] =
+                                    (vertex.clip_y / vertex.clip_w + 1.0f) *
+                                    surface_h * 0.5f;
+                                vertex.vertex.position[3] = vertex.clip_w;
+                                clipped.push_back(vertex.vertex);
+                            }
+                            for (size_t i = 1; i + 1 < clipped.size(); ++i) {
+                                if (!append_oriented_triangle(
+                                        clipped[0], clipped[i], clipped[i + 1])) {
+                                    return false;
+                                }
+                            }
+                            return true;
+                        };
+                    const bool binned_texture_compute =
+                        mixed_w_triangle &&
+                        std::getenv("XLLE_TEXTURE_COMPUTE_TILE_BINS") != nullptr &&
+                        !uses_depth && !passthrough_combiner_words_match;
+                    bool expanded_ok = binned_texture_compute || !mixed_w_triangle;
                     if (expanded_ok) {
                         expanded.reserve((packet.vertices.size() - 2) * 3);
                     }
                     if (expanded_ok && primitive_mode_ == 5) {
                         for (size_t i = 0; expanded_ok && i + 2 < packet.vertices.size();
                              i += 3)
-                            expanded_ok = append_triangle(i, i + 1, i + 2);
+                            expanded_ok = binned_texture_compute
+                                ? append_clipped_triangle(i, i + 1, i + 2)
+                                : append_triangle(i, i + 1, i + 2);
                     } else if (primitive_mode_ == 6) {
                         for (size_t i = 2; expanded_ok && i < packet.vertices.size(); ++i) {
                             if ((i & 1u) == 0)
-                                expanded_ok = append_triangle(i - 2, i - 1, i);
+                                expanded_ok = binned_texture_compute
+                                    ? append_clipped_triangle(i - 2, i - 1, i)
+                                    : append_triangle(i - 2, i - 1, i);
                             else
-                                expanded_ok = append_triangle(i - 1, i - 2, i);
+                                expanded_ok = binned_texture_compute
+                                    ? append_clipped_triangle(i - 1, i - 2, i)
+                                    : append_triangle(i - 1, i - 2, i);
                         }
                     } else {
                         for (size_t i = 2; expanded_ok && i < packet.vertices.size(); ++i)
-                            expanded_ok = append_triangle(0, i - 1, i);
+                            expanded_ok = binned_texture_compute
+                                ? append_clipped_triangle(0, i - 1, i)
+                                : append_triangle(0, i - 1, i);
                     }
                     if (expanded_ok && !expanded.empty()) {
                         packet.vertices = std::move(expanded);
                         packet.primitive_mode = 5;
                         packet.compute_fixture = Nv2aGenericCombinerPacket::
                             ComputeFixture::kResidentTextureModulateTriangles;
+                        if (binned_texture_compute) {
+                            packet.compute_fixture = Nv2aGenericCombinerPacket::
+                                ComputeFixture::kTextureModulateTriangle;
+                        }
                         packet.fixture_clip_x = effective_clip_x;
                         packet.fixture_clip_y = effective_clip_y;
                         packet.fixture_clip_width = effective_clip_width;
@@ -7796,11 +7964,19 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                         packet.fixture_color_format_x8 = color_format_x8;
                         packet.fixture_texture_passthrough =
                             passthrough_combiner_words_match;
-                        ++generic_combiner_resident_candidates_;
-                        resident_observed_this_batch = true;
-                        resident_exact_this_batch = true;
-                        resident_reject_this_batch =
-                            GenericResidentRejectReason::kCount;
+                        packet.fixture_texture_constant_color_alpha =
+                            constant_color_alpha_combiner_words_match;
+                        if (constant_color_alpha_combiner_words_match) {
+                            packet.fixture_constant_argb =
+                                raster_state_[kRasterCombinerFactor0_0];
+                        }
+                        if (!binned_texture_compute) {
+                            ++generic_combiner_resident_candidates_;
+                            resident_observed_this_batch = true;
+                            resident_exact_this_batch = true;
+                            resident_reject_this_batch =
+                                GenericResidentRejectReason::kCount;
+                        }
                     } else if (expanded_ok && expanded.empty()) {
                         resident_noop_batch = true;
                         ++generic_combiner_resident_candidates_;

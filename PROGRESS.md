@@ -34,6 +34,16 @@ commits without explicit current authorization.
 
 ## Current optimization cursor (2026-08-13)
 
+Latest gated probe: `XLLE_TEXTURE_COMPUTE_TILE_BINS=1` enables a mixed-W texture-modulate exact
+compute path that CPU-clips with the software rasterizer's homogeneous clip rules and uploads
+16x16 tile triangle lists so pixels do not scan every triangle. It is **not default-on**. Packet
+probes for `build/generic-hotpacket-fp6751-v2-12b.xgp` and
+`build/generic-hotpacket-mixedw-texmod-fp02cc-v1.xgp` were exact (`0` mismatches), and the gated
+12B no-accounting run `build/texture-compute-tilebins-v1-12b.report.json` was exact/empty stderr
+with final FPS `3.356 -> 3.575` and final-four wall `42.880s -> 38.982s` (`-9.09%`) against the
+retained report. A default-on admission trial was rejected pending better/repeated comparable
+12B evidence; launch tentative runs with the env gate instead.
+
 Active Beads issue: `beads-xbox.1.13` (`Performance: reach interactive-navigable stock
 dashboard (>=10 fps sustained)`). The retained emulator behavior now includes direct vertex
 fetch, disabled perf-timer guards, reduced default-path NV2A diagnostic telemetry, immutable-context

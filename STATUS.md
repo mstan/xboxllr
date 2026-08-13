@@ -3,6 +3,27 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-13 - Gated tile-binned exact compute probe for mixed-W texture batches
+
+Added an explicit `XLLE_TEXTURE_COMPUTE_TILE_BINS=1` path for the mixed-W large
+texture-modulate dashboard family. Nv2a CPU-clips the packet with the same homogeneous clip
+rules as the software rasterizer, then the OpenGL exact compute shader builds 16x16 tile
+triangle lists so each pixel scans only the triangles whose bounding boxes touch its tile.
+The retained default path is unchanged unless the env gate is present.
+
+Packet checks on `build/generic-hotpacket-fp6751-v2-12b.xgp` and
+`build/generic-hotpacket-mixedw-texmod-fp02cc-v1.xgp` were exact with
+`XLLE_HOTPACKET_PROBE_COMPUTE=1`, `XLLE_HOTPACKET_PROBE_REQUIRE_EXACT=1`, and
+`XLLE_TEXTURE_COMPUTE_TILE_BINS=1` (`0` mismatches). The gated 12B no-accounting replay
+`build/texture-compute-tilebins-v1-12b.report.json` was exact/empty stderr with final SHA
+`876b58c2...`; against the retained report it improved final FPS `3.356 -> 3.575` and
+final-four wall `42.880s -> 38.982s` (`-9.09%`).
+
+Do not treat this as a default retained speedup yet. A default-on admission trial was rejected:
+same-window 1B reruns showed large machine variance, and the binned path did not fire in the 1B
+smoke. Keep it gated until a better automatic admission rule or repeated 12B pair confirms the
+late-window win under comparable load. It is suitable for tentative launches with the env gate.
+
 ## 2026-08-13 - Rejected additive-X8 software blend fast path
 
 Ran a current 1024-entry-cache perf-accounting replay for fresh attribution:

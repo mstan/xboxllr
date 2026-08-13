@@ -2,6 +2,7 @@
 
 #include "machine/perf_accounting.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <array>
 #include <cmath>
@@ -200,6 +201,8 @@ layout(std430, binding = 0) buffer ColorSurface { uint color[]; };
 layout(std430, binding = 1) buffer VertexData { float vertex_data[]; };
 layout(std430, binding = 2) buffer Texture0 { uint tex0_words[]; };
 layout(std430, binding = 3) buffer VertexXY { int vertex_xy[]; };
+layout(std430, binding = 4) readonly buffer TileOffsets { uint tile_offsets[]; };
+layout(std430, binding = 5) readonly buffer TileTriangles { uint tile_triangles[]; };
 uniform int surface_width;
 uniform int surface_height;
 uniform int surface_pitch_words;
@@ -216,6 +219,9 @@ uniform ivec2 clip_extent;
 uniform uint blend_src;
 uniform uint blend_dst;
 uniform uint color_format_x8;
+uniform uint use_tile_bins;
+uniform int tile_size;
+uniform int tile_cols;
 double edge_value(ivec2 p0, ivec2 p1, ivec2 p) {
     return double(p1.x - p0.x) * double(p.y - p0.y) -
            double(p1.y - p0.y) * double(p.x - p0.x);
@@ -320,7 +326,15 @@ void main() {
     uint offset = uint(xy.y * surface_pitch_words + xy.x);
     vec4 current = unpack_argb(color[offset]);
     bool covered = false;
-    for (int tri = 0; tri < triangle_count; ++tri) {
+    int list_begin = 0;
+    int list_end = triangle_count;
+    if (use_tile_bins != 0u) {
+        uint tile_index = uint((xy.y / tile_size) * tile_cols + (xy.x / tile_size));
+        list_begin = int(tile_offsets[tile_index]);
+        list_end = int(tile_offsets[tile_index + 1u]);
+    }
+    for (int list_index = list_begin; list_index < list_end; ++list_index) {
+        int tri = use_tile_bins != 0u ? int(tile_triangles[list_index]) : list_index;
         uint ia = uint(tri * 3);
         uint ib = ia + 1u;
         uint ic = ia + 2u;
@@ -1030,7 +1044,8 @@ public:
             }
             if (linear_texture && packet.textures[0].pitch == 0) return false;
             const bool large_diagnostic =
-                std::getenv("XLLE_LARGE_TEXTURE_COMPUTE_FIXTURE") != nullptr;
+                std::getenv("XLLE_LARGE_TEXTURE_COMPUTE_FIXTURE") != nullptr ||
+                std::getenv("XLLE_TEXTURE_COMPUTE_TILE_BINS") != nullptr;
             const uint32_t width = (packet.surface_pitch & 0xffffu) / 4u;
             return width > 0 &&
                    (large_diagnostic ||
@@ -1740,7 +1755,7 @@ public:
                 error = "OpenGL texture-modulate fixture received invalid texture";
                 return false;
             }
-            std::array<unsigned int, 4> buffers{};
+            std::array<unsigned int, 6> buffers{};
             gen_buffers_(static_cast<int>(buffers.size()), buffers.data());
             auto upload_buffer = [&](unsigned int binding, unsigned int buffer,
                                      const void* data, size_t size) {
@@ -1769,6 +1784,83 @@ public:
                 xy_data[vertex * 2u + 1u] = static_cast<int32_t>(
                     std::llround(packet.vertices[vertex].position[1] * 16.0f));
             }
+            static constexpr uint32_t kTextureComputeTileSize = 16;
+            const uint32_t surface_width_words =
+                (packet.surface_pitch & 0xffffu) / 4u;
+            const uint32_t tile_cols =
+                (surface_width_words + kTextureComputeTileSize - 1u) /
+                kTextureComputeTileSize;
+            const uint32_t tile_rows =
+                (packet.surface_height + kTextureComputeTileSize - 1u) /
+                kTextureComputeTileSize;
+            const bool use_tile_bins =
+                std::getenv("XLLE_TEXTURE_COMPUTE_TILE_BINS") != nullptr &&
+                tile_cols != 0 && tile_rows != 0;
+            std::vector<std::vector<uint32_t>> bins;
+            std::vector<uint32_t> tile_offsets;
+            std::vector<uint32_t> tile_triangles;
+            if (use_tile_bins) {
+                bins.resize(static_cast<size_t>(tile_cols) * tile_rows);
+                const int32_t clip_min_x =
+                    static_cast<int32_t>(packet.fixture_clip_x);
+                const int32_t clip_min_y =
+                    static_cast<int32_t>(packet.fixture_clip_y);
+                const int32_t clip_max_x = static_cast<int32_t>(
+                    packet.fixture_clip_x + packet.fixture_clip_width - 1u);
+                const int32_t clip_max_y = static_cast<int32_t>(
+                    packet.fixture_clip_y + packet.fixture_clip_height - 1u);
+                for (uint32_t tri = 0; tri < packet.vertices.size() / 3u; ++tri) {
+                    const int64_t ax = xy_data[tri * 6u + 0u];
+                    const int64_t ay = xy_data[tri * 6u + 1u];
+                    const int64_t bx = xy_data[tri * 6u + 2u];
+                    const int64_t by = xy_data[tri * 6u + 3u];
+                    const int64_t cx = xy_data[tri * 6u + 4u];
+                    const int64_t cy = xy_data[tri * 6u + 5u];
+                    const int32_t min_x = std::max<int32_t>(
+                        clip_min_x,
+                        static_cast<int32_t>(std::ceil(
+                            (static_cast<double>(std::min({ax, bx, cx})) - 8.0) /
+                            16.0)));
+                    const int32_t max_x = std::min<int32_t>(
+                        clip_max_x,
+                        static_cast<int32_t>(std::floor(
+                            (static_cast<double>(std::max({ax, bx, cx})) - 8.0) /
+                            16.0)));
+                    const int32_t min_y = std::max<int32_t>(
+                        clip_min_y,
+                        static_cast<int32_t>(std::ceil(
+                            (static_cast<double>(std::min({ay, by, cy})) - 8.0) /
+                            16.0)));
+                    const int32_t max_y = std::min<int32_t>(
+                        clip_max_y,
+                        static_cast<int32_t>(std::floor(
+                            (static_cast<double>(std::max({ay, by, cy})) - 8.0) /
+                            16.0)));
+                    if (max_x < min_x || max_y < min_y) continue;
+                    const uint32_t tile_min_x =
+                        static_cast<uint32_t>(min_x) / kTextureComputeTileSize;
+                    const uint32_t tile_max_x =
+                        static_cast<uint32_t>(max_x) / kTextureComputeTileSize;
+                    const uint32_t tile_min_y =
+                        static_cast<uint32_t>(min_y) / kTextureComputeTileSize;
+                    const uint32_t tile_max_y =
+                        static_cast<uint32_t>(max_y) / kTextureComputeTileSize;
+                    for (uint32_t ty = tile_min_y; ty <= tile_max_y; ++ty) {
+                        for (uint32_t tx = tile_min_x; tx <= tile_max_x; ++tx) {
+                            bins[static_cast<size_t>(ty) * tile_cols + tx].push_back(tri);
+                        }
+                    }
+                }
+                tile_offsets.reserve(bins.size() + 1u);
+                tile_offsets.push_back(0);
+                for (const auto& bin : bins) {
+                    tile_triangles.insert(tile_triangles.end(), bin.begin(), bin.end());
+                    tile_offsets.push_back(static_cast<uint32_t>(tile_triangles.size()));
+                }
+            } else {
+                tile_offsets = {0u, static_cast<uint32_t>(packet.vertices.size() / 3u)};
+            }
+            if (tile_triangles.empty()) tile_triangles.push_back(0);
             upload_buffer(0, buffers[0], packet.color_input.data(),
                           packet.color_input.size());
             upload_buffer(1, buffers[1], vertex_data.data(),
@@ -1777,6 +1869,10 @@ public:
                           packet.textures[0].input.size());
             upload_buffer(3, buffers[3], xy_data.data(),
                           xy_data.size() * sizeof(int32_t));
+            upload_buffer(4, buffers[4], tile_offsets.data(),
+                          tile_offsets.size() * sizeof(uint32_t));
+            upload_buffer(5, buffers[5], tile_triangles.data(),
+                          tile_triangles.size() * sizeof(uint32_t));
             use_program_(texture_modulate_program_);
             uniform_1i_(uniform_location_(texture_modulate_program_, "surface_width"),
                         static_cast<int>((packet.surface_pitch & 0xffffu) / 4u));
@@ -1824,6 +1920,13 @@ public:
             uniform_1ui_(uniform_location_(texture_modulate_program_,
                                            "color_format_x8"),
                          packet.fixture_color_format_x8 ? 1u : 0u);
+            uniform_1ui_(uniform_location_(texture_modulate_program_,
+                                           "use_tile_bins"),
+                         use_tile_bins ? 1u : 0u);
+            uniform_1i_(uniform_location_(texture_modulate_program_, "tile_size"),
+                        static_cast<int>(kTextureComputeTileSize));
+            uniform_1i_(uniform_location_(texture_modulate_program_, "tile_cols"),
+                        static_cast<int>(tile_cols));
             dispatch_compute_(((packet.surface_pitch & 0xffffu) / 4u + 7u) / 8u,
                               (packet.surface_height + 7u) / 8u, 1);
             memory_barrier_(kGlShaderStorageBarrierBit | kGlBufferUpdateBarrierBit);
