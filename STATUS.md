@@ -25,6 +25,12 @@ not compare directly to no-accounting best). `gfbsetup=0.959s` is almost entirel
 late bottleneck. The next real optimization should reduce full-surface resident color resolve
 traffic or resident-surface ensure overhead without bypassing correctness-sensitive admission.
 
+Rejected follow-up probe: caching the currently attached resident FBO color/depth textures was
+correct (`build/resident-fbo-attach-cache-v1-12b.report.json` exact/empty stderr, final SHA
+`876b58c2...`) but slower over the final four intervals versus
+`build/generic-admission-perf-v1-12b.report.json` (wall `42.975s -> 45.800s`, +6.57%).
+Source was reverted.
+
 ## 2026-08-13 - Generic-detail accounting shifts target to renderer admission work
 
 Added `--perf-accounting` detail buckets for generic-combiner state setup, renderer/admission
