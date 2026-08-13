@@ -20,23 +20,20 @@ proven against real hardware, with a game (Blinx) as the second arc.
 
 ## The ONE current goal
 
-**Arc 1 / A4 — running dashboard with visible output and input.** The real firmware and
-kernel boot, FATX loads `xbmc.exe`, the boot animation completes through guest-driven NV2A
-flip/vblank interrupts, and dashboard user code now executes. The first recognizable
-`evoxdash` main-menu frame is proven: PFIFO/PGRAPH renders its text atlas into unified RAM and
-the retail flip queue carries it through PCRTC to the captured 720x480 scanout. A live
-host-to-XID mapping exists, but the observed dashboard run has not yet scheduled an endpoint
-poll. Finish the remaining output-affecting raster/device paths and prove real menu input
-without replacing guest kernel or application logic.
+**Arc 1 / A4 - make the stock dashboard interactively navigable.** The real firmware and
+kernel boot, FATX loads the stock dashboard image from the maintainer-supplied HDD image, and
+guest-owned NV2A output is visible through SDL3/OpenGL. The current bottleneck is speed: reach
+at least 10 presented fps during stock-dashboard navigation while preserving exact replay
+hashes and the software/LLE fallback.
 
 ## The ONE next milestone
 
-**Navigate the visible dashboard's most basic menu through the same LLE path.** Execute the
-remaining output-affecting NV2A states needed for readable UI, preserve the proven
-retail-kernel → PFIFO/PGRAPH → unified RAM → PCRTC chain, and make the guest schedule and
-consume real XID endpoint reports. Completion means an observed D-pad/A/B action changes
-guest-owned menu state, with no HLE renderer, synthetic USB poll, or host framebuffer
-substitution.
+**Reach an exact, demonstrable stock-dashboard run at >=10 presented fps.** The best retained
+opt-in path is still below target, so the next milestone is a validated performance step that
+removes real dashboard render/surface work without accepting image-hash drift. Completion means
+a bounded stock-dashboard replay and a live/tentative SDL run sustain the target with no
+host-rendered dashboard substitute, replacement kernel, synthetic USB poll, or copyrighted asset
+checked into the repo.
 
 ## Not-yet (explicitly deferred, do not drift into these)
 

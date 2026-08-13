@@ -3,6 +3,24 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-13 - Rejected resident-primary compute tile-bin route
+
+Prototyped a gated resident-primary exact-compute route using the byte-domain `RGBA8`
+load/blend/store shape proven by the diagnostics below. The broad gate
+`XLLE_RESIDENT_PRIMARY_COMPUTE_TILE_BINS=1` built and passed `test_nv2a`, and the focused
+primary hotpacket `build/generic-hotpacket-primary-be372-v1.xgp` remained exact with
+`0` mismatches, but the full 12B stock-dashboard replay failed correctness: final SHA changed
+from `876b58c2d0e6c63fec917c73dcc43a7d09983baf1da2b5b2176fa73a1b44da6d` to
+`f17a4776fc1e6c151d957c01a20105ecf6842e40c6ea8becee605eeef8e22017`.
+
+A narrower `XLLE_RESIDENT_PRIMARY_BE372_COMPUTE_TILE_BINS=1` variant also built and passed
+`test_nv2a`; its 12B replay stayed exact/empty stderr with final SHA `876b58c2...`, but it
+regressed versus `build/texture-compute-tilebins-flat-v1-12b.report.json`: final FPS
+`3.876 -> 3.714`, final-four wall `37.216s -> 37.470s` (`+0.68%`). Source was reverted.
+Conclusion: the byte-domain resident path is admissible for exactness on the captured packet,
+but this production shape is not a speedup and the broad admission is still unsafe. The best
+retained performance path remains gated `XLLE_TEXTURE_COMPUTE_TILE_BINS=1`.
+
 ## 2026-08-13 - RGBA8 image-load/blend exactness needs byte-domain math
 
 Added an env-gated OpenGL diagnostic `XLLE_RGBA8_IMAGE_LOAD_BLEND_PROBE=1` in `test_nv2a` through

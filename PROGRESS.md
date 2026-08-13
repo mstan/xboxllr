@@ -34,6 +34,16 @@ commits without explicit current authorization.
 
 ## Current optimization cursor (2026-08-13)
 
+Latest rejected production probe: a resident-primary exact-compute tile-bin route using the
+byte-domain `RGBA8` image-load/blend/store shape below was not retainable. Broad admission
+(`XLLE_RESIDENT_PRIMARY_COMPUTE_TILE_BINS=1`) built, passed `test_nv2a`, and kept the focused
+`build/generic-hotpacket-primary-be372-v1.xgp` replay exact, but failed the full 12B replay:
+final SHA changed from `876b58c2...` to `f17a4776...`. The narrow
+`XLLE_RESIDENT_PRIMARY_BE372_COMPUTE_TILE_BINS=1` route was exact at 12B, but slower than the
+best gated texture tile-bin report: final FPS `3.876 -> 3.714`, final-four wall
+`37.216s -> 37.470s` (`+0.68%`). Source was reverted. Do not retry this same resident-primary
+dispatch shape without either a different admission proof or a larger work-removal mechanism.
+
 Latest retained diagnostic: `XLLE_RGBA8_IMAGE_LOAD_BLEND_PROBE=1` in `test_nv2a` now proves the
 resident `RGBA8` target can be used by a compute path only if the shader canonicalizes
 `imageLoad(RGBA8)` back to bytes and performs supported blend factors in byte/integer form before
@@ -42,8 +52,8 @@ hit a one-byte `SRC_ALPHA/ONE_MINUS_SRC_ALPHA` mismatch (`got=194 expected=195` 
 `8,1` channel `0`). Retained validation: Release build, normal `test_nv2a`,
 `XLLE_RGBA8_IMAGE_STORE_PROBE=1`, and `XLLE_RGBA8_IMAGE_LOAD_BLEND_PROBE=1` pass. This still does
 not speed up the dashboard, but it gives resident-primary compute an admissible exact math shape.
-Next implementation work is tile-binned resident-primary compute using byte-domain image
-load/blend/store, then replay admission.
+Next implementation work should move away from the rejected "same packet, resident compute"
+shape and use fresh measurement to find a broader work-removal target.
 
 Prior retained diagnostic: `XLLE_RGBA8_IMAGE_STORE_PROBE=1` proves GL 4.3 compute `imageStore`
 into an `RGBA8` texture is byte-exact on this host for representative RGBA byte patterns produced
@@ -152,12 +162,15 @@ PPM SHA-256 `876b58c2d0e6c63fec917c73dcc43a7d09983baf1da2b5b2176fa73a1b44da6d`.
 The 1B smoke golden remains
 `a6087ec5178c7619d8136de2aa159dde7161d56f9e4c3b899b7165935d0353d8`.
 
-Speed status: the retained no-accounting 12B replay
+Speed status: the retained default no-accounting 12B replay
 `build/posttransform-cache-direct1024-noperf-v1-12b.report.json` is exact/empty stderr with final
 SHA `876b58c2...`, final FPS `3.356`, and final-four wall `42.880s`. Against the previous
 direct-256 cache baseline `build/posttransform-cache-direct256-noperf-v1-12b.report.json`, this is
 `3.095 -> 3.356` final FPS and `43.786s -> 42.880s` final-four wall (`-2.07%`). It is still far
-from 10 fps. Adjacent cache sizes were rejected: 2048 entries was exact but regressed the 12B
+from 10 fps. The best retained opt-in performance path is
+`XLLE_TEXTURE_COMPUTE_TILE_BINS=1`, with `build/texture-compute-tilebins-flat-v1-12b.report.json`
+exact/empty stderr, final SHA `876b58c2...`, final FPS `3.876`, and final-four wall `37.216s`.
+Adjacent cache sizes were rejected: 2048 entries was exact but regressed the 12B
 final-four wall to `44.130s` (`+0.78%`), and 512 entries was exact but regressed the 1B smoke
 final-four wall to `26.436s` (`+8.32%`). The refreshed detailed
 perf-accounting 12B replay `build/vsh-context-direct-perf-v2-12b.report.json` is also

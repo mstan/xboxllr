@@ -69,24 +69,18 @@ historical provenance. The standalone repository is the maintained, authoritativ
 
 ## Status
 
-**Arc 1 / A4 — real firmware is producing visible LLE boot output, not yet a dashboard
-menu.** The retail boot chain reaches the dashboard XBE through the modeled CPU and Xbox
-devices. The guest's PFIFO/PGRAPH stream rasterizes into unified RAM, the retail kernel's
-flip queue drives PCRTC, and SDL3 presents the resulting scanout. A deterministic 4.5B
-instruction replay reaches a recognizable Xbox X logo; this is guest-generated output with
-no replacement kernel, D3D interception, or host-rendered substitute. The later 4.75–6.0B
-window is black, 6.25B begins a mode transition with noisy lower scanlines, and the 6.4B
-endpoint is near-black 720x480 scanout at `0x03c8c000`, not a visible dashboard/menu.
+**Arc 1 / A4 - stock dashboard is running and the current blocker is interactive speed.**
+The real firmware and kernel boot, FATX loads the stock dashboard image from a maintainer-supplied
+HDD image, PFIFO/PGRAPH render guest-owned frames into unified RAM, and SDL3/OpenGL can present
+the resulting scanout. The active milestone is to make that stock-dashboard path usable for
+navigation at **at least 10 presented fps** while keeping replay hashes exact.
 
-The hardware floor is not complete: remaining low-frequency NV2A states, later boot/dashboard
-frames, observed guest XID polling/menu navigation, timing refinements, and broader device
-accuracy are still A4 work. See `STATUS.md` for exact evidence and `PROGRESS.md` for the
-current burndown.
-
-An opt-in disconnected-link replay now reaches `evoxdash` and proves its first mode-8
-immediate quad stream. The modeled front end submits and assembles those vertices, but mode 8
-remains deliberately recorder-only while post-VSH and texture evidence is gathered. The late
-alternating buffers are still near-black; this is not a visible menu or navigation claim.
+Current retained performance evidence is documented in `STATUS.md` and `PROGRESS.md`. The default
+exact OpenGL path is below target, and the best opt-in exact path is currently
+`XLLE_TEXTURE_COMPUTE_TILE_BINS=1` at about 3.9 fps on the 12B replay. The remaining work is
+performance and correctness on the heavy dashboard rendering/surface path, plus guest-consumed
+controller input; there is no host-rendered dashboard substitute, replacement kernel, or D3D
+interception.
 
 For the opt-in live Controller S keyboard path during an LLE replay, add `--interactive` to a
 `--boot ... --run2bl ...` invocation. It opens an SDL window before emulation and presents
@@ -113,6 +107,8 @@ completion, notification, semaphore, or flip timing.
 ## Legal / distribution posture
 
 No copyrighted bytes ever enter this repo. MCPX ROM, flash BIOS, kernel, EEPROM, HDD
-images, and game discs are **maintainer-supplied, git-ignored, and hash-gated**, and come
-from the maintainer's own console. Harvested code (Unicorn, xemu) is GPL-2; the whole is
-GPL-2. Borrowed host libs (SDL3 zlib, etc.) are permissive and compose in.
+images, dashboard files, and game discs are **maintainer-supplied, git-ignored, and
+hash-gated**, and come from the maintainer's own console. A tracked-tree audit should show no
+ROMs, HDD images, XBEs, ISOs/XISOs, EEPROM dumps, or machine evidence packages. Harvested code
+(Unicorn, xemu) is GPL-2; the whole is GPL-2. Borrowed host libs (SDL3 zlib, etc.) are
+permissive and compose in.
