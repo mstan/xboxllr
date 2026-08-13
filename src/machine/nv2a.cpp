@@ -6743,26 +6743,40 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 std::vector<uint8_t>* read_target = &ts.data;
                 if (compressed_argb8) read_target = &source;
                 read_target->resize(static_cast<size_t>(bytes64));
-                if (!resolve_renderer_color_overlap(address, read_target->size(),
-                                                    "generic texture read")) {
-                    return false;
+                {
+                    perf::ScopedAdd timer(perf::g_ns_generic_texture_resolve,
+                                          perf::g_calls_generic_texture_resolve);
+                    if (!resolve_renderer_color_overlap(address, read_target->size(),
+                                                        "generic texture read")) {
+                        return false;
+                    }
                 }
-                if (!mem_read_ ||
-                    !mem_read_(address, read_target->data(), read_target->size())) {
-                    fault_("NV2A generic-combiner texture DMA read failed");
-                    return false;
+                {
+                    perf::ScopedAdd timer(perf::g_ns_generic_texture_dma_read,
+                                          perf::g_calls_generic_texture_dma_read);
+                    if (!mem_read_ ||
+                        !mem_read_(address, read_target->data(), read_target->size())) {
+                        fault_("NV2A generic-combiner texture DMA read failed");
+                        return false;
+                    }
                 }
-                if (dxt1_argb8 &&
-                    !decode_dxt1_argb(source, ts.width, ts.height, ts.pitch, ts.data)) {
-                    record_generic_skip_detail(
-                        GenericSkipReason::kUnsupportedTextureFormat, format);
-                    return true;
-                }
-                if (dxt23_argb8 &&
-                    !decode_dxt23_argb(source, ts.width, ts.height, ts.pitch, ts.data)) {
-                    record_generic_skip_detail(
-                        GenericSkipReason::kUnsupportedTextureFormat, format);
-                    return true;
+                if (compressed_argb8) {
+                    perf::ScopedAdd timer(perf::g_ns_generic_texture_decode,
+                                          perf::g_calls_generic_texture_decode);
+                    if (dxt1_argb8 &&
+                        !decode_dxt1_argb(source, ts.width, ts.height, ts.pitch,
+                                          ts.data)) {
+                        record_generic_skip_detail(
+                            GenericSkipReason::kUnsupportedTextureFormat, format);
+                        return true;
+                    }
+                    if (dxt23_argb8 &&
+                        !decode_dxt23_argb(source, ts.width, ts.height, ts.pitch,
+                                           ts.data)) {
+                        record_generic_skip_detail(
+                            GenericSkipReason::kUnsupportedTextureFormat, format);
+                        return true;
+                    }
                 }
                 ts.pitch = ts.width * static_cast<uint32_t>(sizeof(uint32_t));
                 ts.address_u = address_u;
@@ -6845,18 +6859,30 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 return false;
             }
             ts.data.resize(static_cast<size_t>(bytes64));
-            if (!resolve_renderer_color_overlap(address, ts.data.size(),
-                                                "generic texture read")) {
-                return false;
+            {
+                perf::ScopedAdd timer(perf::g_ns_generic_texture_resolve,
+                                      perf::g_calls_generic_texture_resolve);
+                if (!resolve_renderer_color_overlap(address, ts.data.size(),
+                                                    "generic texture read")) {
+                    return false;
+                }
             }
-            if (!mem_read_ || !mem_read_(address, ts.data.data(), ts.data.size())) {
-                fault_("NV2A generic-combiner texture DMA read failed");
-                return false;
+            {
+                perf::ScopedAdd timer(perf::g_ns_generic_texture_dma_read,
+                                      perf::g_calls_generic_texture_dma_read);
+                if (!mem_read_ || !mem_read_(address, ts.data.data(), ts.data.size())) {
+                    fault_("NV2A generic-combiner texture DMA read failed");
+                    return false;
+                }
             }
             generic_texture_bytes_this_batch += ts.data.size();
             perf::record_generic_texture_allocation(
                 ts.data.size(), generic_texture_bytes_this_batch);
-            ts.swizzle = std::make_unique<SwizzleLookup>(ts.width, ts.height);
+            {
+                perf::ScopedAdd timer(perf::g_ns_generic_texture_swizzle_lookup,
+                                      perf::g_calls_generic_texture_swizzle_lookup);
+                ts.swizzle = std::make_unique<SwizzleLookup>(ts.width, ts.height);
+            }
             ts.address_u = address_u;
             ts.address_v = address_v;
             ts.border = raster_state_[kRasterTextureBorderColor0 + stage];

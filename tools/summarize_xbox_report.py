@@ -309,6 +309,7 @@ def summarize(path: pathlib.Path) -> None:
     generic_split = parsed.get("generic_split_samples", [])
     generic_detail = parsed.get("generic_detail_samples", [])
     generic_admission = parsed.get("generic_admission_samples", [])
+    generic_texture_detail = parsed.get("generic_texture_detail_samples", [])
     nv2a_split = parsed.get("nv2a_split_samples", [])
     vsh_programs = parsed.get("vsh_program_samples", [])
     vertex_reuse_samples = parsed.get("vertex_reuse_samples", [])
@@ -338,6 +339,7 @@ def summarize(path: pathlib.Path) -> None:
     previous_generic_split = None
     previous_generic_detail = None
     previous_generic_admission = None
+    previous_generic_texture_detail = None
     previous_nv2a_split = None
     previous_vsh_programs = None
     previous_vertex_reuse = None
@@ -354,6 +356,7 @@ def summarize(path: pathlib.Path) -> None:
         gs = sample_for_deadline(generic_split, index)
         gd = sample_for_deadline(generic_detail, index)
         ga = sample_for_deadline(generic_admission, index)
+        gt = sample_for_deadline(generic_texture_detail, index)
         ns = sample_for_deadline(nv2a_split, index)
         vsh = sample_for_deadline(vsh_programs, index)
         vr = sample_for_deadline(vertex_reuse_samples, index)
@@ -365,6 +368,7 @@ def summarize(path: pathlib.Path) -> None:
         gsd = delta_dict(gs, previous_generic_split) if gs else {}
         gdd = delta_dict(gd, previous_generic_detail) if gd else {}
         gad = delta_dict(ga, previous_generic_admission) if ga else {}
+        gtd = delta_dict(gt, previous_generic_texture_detail) if gt else {}
         nsd = delta_dict(ns, previous_nv2a_split) if ns else {}
         dirty_clip = rd.get("dirty_clip_pixels", 0)
         dirty_surface = rd.get("dirty_surface_pixels", 0)
@@ -381,6 +385,7 @@ def summarize(path: pathlib.Path) -> None:
         previous_generic_split = gs or previous_generic_split
         previous_generic_detail = gd or previous_generic_detail
         previous_generic_admission = ga or previous_generic_admission
+        previous_generic_texture_detail = gt or previous_generic_texture_detail
         previous_nv2a_split = ns or previous_nv2a_split
         raster_witnessed_est = difference(
             pd.get("raster_ns"), pd.get("raster_generic_ns")
@@ -412,6 +417,13 @@ def summarize(path: pathlib.Path) -> None:
             gad.get("fallback_color_resolve_ns"),
             gad.get("fallback_depth_resolve_ns"),
         )
+        generic_texture_other_est = difference(
+            gsd.get("texture_setup_ns"),
+            gtd.get("texture_resolve_ns"),
+            gtd.get("texture_dma_read_ns"),
+            gtd.get("texture_decode_ns"),
+            gtd.get("texture_swizzle_lookup_ns"),
+        )
         submit_self_est = difference(
             nsd.get("submit_vertex_ns"),
             nsd.get("vertex_transform_ns"),
@@ -442,6 +454,11 @@ def summarize(path: pathlib.Path) -> None:
             f"rwit={ns_to_s(raster_witnessed_est)} "
             f"gen={ns_to_s(pd.get('raster_generic_ns'))} "
             f"gsetup={ns_to_s(gsd.get('texture_setup_ns'))} "
+            f"gtres={ns_to_s(gtd.get('texture_resolve_ns'))} "
+            f"gtrd={ns_to_s(gtd.get('texture_dma_read_ns'))} "
+            f"gtdec={ns_to_s(gtd.get('texture_decode_ns'))} "
+            f"gtswz={ns_to_s(gtd.get('texture_swizzle_lookup_ns'))} "
+            f"gtother~={ns_to_s(generic_texture_other_est)} "
             f"gsoft={ns_to_s(gsd.get('software_raster_ns'))} "
             f"gflush={ns_to_s(gsd.get('flush_ns'))} "
             f"gother~={ns_to_s(generic_other_est)} "

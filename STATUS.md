@@ -3,6 +3,24 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-13 - Generic texture setup split keeps focus on resolves/admission
+
+Added `--perf-accounting` texture setup sub-buckets for generic texture readback resolve,
+guest DMA read, DXT decode, and swizzle lookup construction. Report/parser/summary support now
+prints `[perf-generic-texture-detail]` and interval columns `gtres`, `gtrd`, `gtdec`, `gtswz`,
+and `gtother~`.
+
+Validation: Release `xlle`/`test_nv2a` build passed, `test_nv2a` passed, Python parser/summary
+compile checks passed, the gated 1B perf smoke
+`build/generic-texture-detail-perf-smoke-1b.report.json` stayed exact/empty stderr, and the gated
+full 12B perf replay `build/generic-texture-detail-perf-v1-12b.report.json` stayed exact/empty
+stderr with final SHA `876b58c2...`.
+
+Late-window result: final interval `gsetup=0.488s`, split into `gtres=0.072s`,
+`gtrd=0.059s`, `gtdec=0.211s`, `gtswz=0.000s`, and `gtother~=0.145s`. This confirms the old
+swizzle-lookup cache rejection should stay rejected; texture setup is secondary to resident
+color resolves/admission in the late dashboard scene.
+
 ## 2026-08-13 - Generic admission split identifies resolve/ensure as next targets
 
 Added `--perf-accounting` branch buckets under generic renderer admission: resident support,

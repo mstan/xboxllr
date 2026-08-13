@@ -172,6 +172,18 @@ PERF_GENERIC_ADMISSION_RE = re.compile(
     r"\(n=(?P<fallback_depth_resolve_n>\d+)\)"
 )
 
+PERF_GENERIC_TEXTURE_DETAIL_RE = re.compile(
+    r"^\[perf-generic-texture-detail\] "
+    r"resolve-ns=(?P<texture_resolve_ns>\d+) "
+    r"\(n=(?P<texture_resolve_n>\d+)\) "
+    r"dma-read-ns=(?P<texture_dma_read_ns>\d+) "
+    r"\(n=(?P<texture_dma_read_n>\d+)\) "
+    r"decode-ns=(?P<texture_decode_ns>\d+) "
+    r"\(n=(?P<texture_decode_n>\d+)\) "
+    r"swizzle-lookup-ns=(?P<texture_swizzle_lookup_ns>\d+) "
+    r"\(n=(?P<texture_swizzle_lookup_n>\d+)\)"
+)
+
 PERF_NV2A_SPLIT_RE = re.compile(
     r"^\[perf-nv2a-split\] "
     r"dispatch-method-ns=(?P<dispatch_method_ns>\d+) "
@@ -557,6 +569,7 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
     generic_split_samples: list[dict[str, Any]] = []
     generic_detail_samples: list[dict[str, Any]] = []
     generic_admission_samples: list[dict[str, Any]] = []
+    generic_texture_detail_samples: list[dict[str, Any]] = []
     nv2a_split_samples: list[dict[str, Any]] = []
     vsh_program_samples: list[list[dict[str, Any]]] = []
     vertex_reuse_samples: list[list[dict[str, Any]]] = []
@@ -603,6 +616,8 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
             generic_detail_samples.append(parse_int_fields(match))
         elif match := PERF_GENERIC_ADMISSION_RE.match(line):
             generic_admission_samples.append(parse_int_fields(match))
+        elif match := PERF_GENERIC_TEXTURE_DETAIL_RE.match(line):
+            generic_texture_detail_samples.append(parse_int_fields(match))
         elif match := PERF_NV2A_SPLIT_RE.match(line):
             nv2a_split_samples.append(parse_int_fields(match))
         elif match := PERF_VSH_PROGRAM_RE.match(line):
@@ -669,6 +684,12 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
         "generic_admission_samples": generic_admission_samples,
         "final_generic_admission": (
             generic_admission_samples[-1] if generic_admission_samples else None
+        ),
+        "generic_texture_detail_samples": generic_texture_detail_samples,
+        "final_generic_texture_detail": (
+            generic_texture_detail_samples[-1]
+            if generic_texture_detail_samples
+            else None
         ),
         "nv2a_split_samples": nv2a_split_samples,
         "final_nv2a_split": nv2a_split_samples[-1] if nv2a_split_samples else None,

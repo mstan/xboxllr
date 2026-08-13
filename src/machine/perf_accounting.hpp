@@ -74,6 +74,10 @@ inline std::atomic<uint64_t> g_ns_generic_nonresident_submit{0};
 inline std::atomic<uint64_t> g_ns_generic_nonresident_writeback{0};
 inline std::atomic<uint64_t> g_ns_generic_fallback_color_resolve{0};
 inline std::atomic<uint64_t> g_ns_generic_fallback_depth_resolve{0};
+inline std::atomic<uint64_t> g_ns_generic_texture_resolve{0};
+inline std::atomic<uint64_t> g_ns_generic_texture_dma_read{0};
+inline std::atomic<uint64_t> g_ns_generic_texture_decode{0};
+inline std::atomic<uint64_t> g_ns_generic_texture_swizzle_lookup{0};
 inline std::atomic<uint64_t> g_calls_generic_texture_setup{0};
 inline std::atomic<uint64_t> g_calls_generic_state_setup{0};
 inline std::atomic<uint64_t> g_calls_generic_accel_path{0};
@@ -89,6 +93,10 @@ inline std::atomic<uint64_t> g_calls_generic_nonresident_submit{0};
 inline std::atomic<uint64_t> g_calls_generic_nonresident_writeback{0};
 inline std::atomic<uint64_t> g_calls_generic_fallback_color_resolve{0};
 inline std::atomic<uint64_t> g_calls_generic_fallback_depth_resolve{0};
+inline std::atomic<uint64_t> g_calls_generic_texture_resolve{0};
+inline std::atomic<uint64_t> g_calls_generic_texture_dma_read{0};
+inline std::atomic<uint64_t> g_calls_generic_texture_decode{0};
+inline std::atomic<uint64_t> g_calls_generic_texture_swizzle_lookup{0};
 
 inline std::atomic<uint64_t> g_calls_cpu{0};
 inline std::atomic<uint64_t> g_calls_nv2a_pushbuffer{0};
@@ -428,6 +436,25 @@ inline std::string format_generic_admission_report() {
         (unsigned long long)g_calls_generic_fallback_color_resolve.load(),
         (unsigned long long)g_ns_generic_fallback_depth_resolve.load(),
         (unsigned long long)g_calls_generic_fallback_depth_resolve.load());
+    return std::string(buf);
+}
+
+inline std::string format_generic_texture_detail_report() {
+    if (!g_enabled) return {};
+    char buf[512];
+    std::snprintf(
+        buf, sizeof(buf),
+        "[perf-generic-texture-detail] resolve-ns=%llu (n=%llu) "
+        "dma-read-ns=%llu (n=%llu) decode-ns=%llu (n=%llu) "
+        "swizzle-lookup-ns=%llu (n=%llu)",
+        (unsigned long long)g_ns_generic_texture_resolve.load(),
+        (unsigned long long)g_calls_generic_texture_resolve.load(),
+        (unsigned long long)g_ns_generic_texture_dma_read.load(),
+        (unsigned long long)g_calls_generic_texture_dma_read.load(),
+        (unsigned long long)g_ns_generic_texture_decode.load(),
+        (unsigned long long)g_calls_generic_texture_decode.load(),
+        (unsigned long long)g_ns_generic_texture_swizzle_lookup.load(),
+        (unsigned long long)g_calls_generic_texture_swizzle_lookup.load());
     return std::string(buf);
 }
 
