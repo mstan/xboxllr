@@ -21,8 +21,11 @@ targets (`dispatch_self~1.751s`, `subself~0.518s`).
 Rejected follow-up probes after `95fe3ab`: direct pitch-linear generic surface reads/writes,
 CPU-side texture0-modulate-primary specialization, and reduced-path resident/texture-modulate
 counter gating. Each was exact at the 1B smoke gate but slower, so source was reverted.
+Additional exact-but-slower 1B probes from the same cursor were also removed: generic-raster
+`std::function` callback replacement (`+12.38%` final-four wall), stack-first clip setup
+(`+2.92%`), and direct non-overlapping texture sampling (`+6.77%`).
 
-## 2026-08-09 — A4: synthetic Down-then-A replay reaches a stable black frame; dashboard identified as XBMC
+## 2026-08-09 - A4: synthetic Down-then-A replay reaches a stable black frame; dashboard identified as XBMC
 
 Extending the Down-only proof below to a full Down-then-A sequence, at commit `ed399fe` all six
 focused tests pass (`test_xid_down_a_script`, `test_xid_script`, `test_ohci`,

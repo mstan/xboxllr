@@ -74,6 +74,14 @@ counters in the reduced no-accounting path. It removed those counters from reduc
 kept the 1B frame SHA exact (`a6087ec5...`), but regressed final-four wall by `+1.58%`; source
 was reverted.
 
+Continuation rejects from the same cursor: replacing the generic rasterizer's `std::function`
+triangle callback with a self-recursive lambda was exact but regressed the 1B no-accounting
+smoke (`+12.38%` final-four wall); stack-allocating the initial clip triangle before falling
+back to a vector only when clipping was needed was exact but regressed (`+2.92%`); and direct
+non-overlapping texture sampling from `mem_direct_` was exact but regressed (`+6.77%`). All three
+source probes were removed. A larger primary-passthrough scratch-register rewrite was abandoned
+at compile time as too invasive for the measured risk.
+
 One-time Fable critique result: stop treating scalar micro-tweaks as the main path. Before the
 next architecture bet, establish clearer self-time/unit-cost accounting and target a larger exact
 bucket: tile/row threading, SIMD, and family-keyed combiner specialization for the hot
