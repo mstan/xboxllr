@@ -34,6 +34,16 @@ commits without explicit current authorization.
 
 ## Current optimization cursor (2026-08-13)
 
+Latest rejected probe: a gated X8 `SRC_ALPHA/ONE_MINUS_SRC_ALPHA` write shortcut behind
+`XLLE_X8_SRCALPHA_OMSA_FAST=1`. It tried to simplify the final write/blend path for the late
+primary-color family while keeping `XLLE_TEXTURE_COMPUTE_TILE_BINS=1`. The 1B smoke
+`build/x8-srcalpha-omsa-fast-smoke-1b.report.json` stayed exact but was slower (`2.987 -> 2.701`
+final FPS versus direct1024 smoke). The 12B replay
+`build/x8-srcalpha-omsa-fast-v1-12b.report.json` failed correctness despite empty stderr: final
+SHA changed from `876b58c2...` to
+`208b0818b8d21d5304f9bbc0e095a749c505e522af09d04f113c7e756ae2bb1d`. Source was reverted. Do not
+retry this write shortcut without packet-level exactness and original float ordering matched.
+
 Latest rejected probe: decoded the captured `shader=0x21`, `combiner=3` two-texture packet
 `build/generic-hotpacket-shader21-comb3-c0e-v1.xgp` and tested a narrow CPU-side shortcut behind
 `XLLE_SHADER21_COMB3_FAST=1`. The algebra was exact (`rgb = clamp(tex0 + tex1)`,

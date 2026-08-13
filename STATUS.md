@@ -3,6 +3,23 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-13 - Rejected X8 SRC_ALPHA/ONE_MINUS_SRC_ALPHA write shortcut
+
+Prototyped a gated fast write path for generic-combiner X8 surfaces using the common
+`SRC_ALPHA/ONE_MINUS_SRC_ALPHA` blend and all color channels enabled, behind
+`XLLE_X8_SRCALPHA_OMSA_FAST=1`, alongside the retained
+`XLLE_TEXTURE_COMPUTE_TILE_BINS=1` path. The intent was to remove the temporary destination
+float array and unused X8 alpha math for the late primary-color family.
+
+Validation rejected it. The 1B smoke
+`build/x8-srcalpha-omsa-fast-smoke-1b.report.json` stayed exact/empty stderr with final SHA
+`a6087ec5...`, but was slower (`2.987 -> 2.701` final FPS versus the direct1024 smoke). The full
+12B replay `build/x8-srcalpha-omsa-fast-v1-12b.report.json` exited cleanly with empty stderr but
+failed correctness: final SHA changed from `876b58c2...` to
+`208b0818b8d21d5304f9bbc0e095a749c505e522af09d04f113c7e756ae2bb1d`. Source was reverted. Do
+not retry this write shortcut without first proving byte-exact equivalence on captured
+hotpackets and matching the original float operation ordering.
+
 ## 2026-08-13 - Rejected shader21 two-texture combiner shortcut
 
 Decoded the captured `shader=0x21`, `combiner=3` packet
