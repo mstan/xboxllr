@@ -3,6 +3,18 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-13 - Rejected batch-cache admission threshold changes
+
+Tested adjacent admission thresholds for the retained 1024-entry batch-local post-transform
+cache. Raising the threshold from `64` to `128` failed the focused cache regression in
+`test_nv2a` (`gpu.vertex_attribute_fetches() == fetches_before_reuse + 4`), so it was rejected
+without replay spend. Lowering the threshold from `64` to `32` passed `test_nv2a` and
+`git diff --check`, and the 1B no-accounting smoke
+`build/posttransform-cache-direct1024-min32-noperf-smoke-1b.report.json` remained exact/empty
+stderr with final SHA `a6087ec5...`, but regressed against the retained threshold-64 smoke:
+final FPS `2.987 -> 2.628`, final-four wall `22.399s -> 24.300s` (`+8.49%`). Source was restored
+to the retained `>=64` threshold and rebuilt. The retained best remains final FPS `3.356`.
+
 ## 2026-08-13 - Retained 1024-entry batch transform cache
 
 Increased the retained batch-local programmable post-transform cache from `256` to `1024`

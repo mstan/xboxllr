@@ -83,6 +83,11 @@ Validation: Release `xlle`/`test_nv2a` build clean, `test_nv2a` ok, all `build-r
 ok, `git diff --check` clean, 1B no-accounting smoke exact/empty stderr with final SHA
 `a6087ec5...`, and 12B no-accounting replay exact/empty stderr with final SHA `876b58c2...`.
 
+Latest rejected threshold probes: raising the 1024-entry cache admission threshold from `64` to
+`128` failed the focused cache regression in `test_nv2a`, while lowering it to `32` stayed exact
+at 1B but regressed final FPS `2.987 -> 2.628` and final-four wall `22.399s -> 24.300s`
+(`+8.49%`) against the retained threshold-64 smoke. Source was restored to `>=64` and rebuilt.
+
 Latest rejected probe: resident exact compute for mixed-W texture-modulate. It wrote exact compute
 shader results directly into the OpenGL resident color texture, avoiding full-surface CPU
 readback/writeback, and stayed exact at both 1B and 12B. It was still slower at 12B:
