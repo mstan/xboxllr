@@ -65,12 +65,30 @@ inline std::atomic<uint64_t> g_ns_generic_accel_path{0};
 inline std::atomic<uint64_t> g_ns_generic_fallback_setup{0};
 inline std::atomic<uint64_t> g_ns_generic_software_raster{0};
 inline std::atomic<uint64_t> g_ns_generic_flush{0};
+inline std::atomic<uint64_t> g_ns_generic_resident_support{0};
+inline std::atomic<uint64_t> g_ns_generic_resident_prepare{0};
+inline std::atomic<uint64_t> g_ns_generic_resident_submit{0};
+inline std::atomic<uint64_t> g_ns_generic_nonresident_support{0};
+inline std::atomic<uint64_t> g_ns_generic_nonresident_snapshot{0};
+inline std::atomic<uint64_t> g_ns_generic_nonresident_submit{0};
+inline std::atomic<uint64_t> g_ns_generic_nonresident_writeback{0};
+inline std::atomic<uint64_t> g_ns_generic_fallback_color_resolve{0};
+inline std::atomic<uint64_t> g_ns_generic_fallback_depth_resolve{0};
 inline std::atomic<uint64_t> g_calls_generic_texture_setup{0};
 inline std::atomic<uint64_t> g_calls_generic_state_setup{0};
 inline std::atomic<uint64_t> g_calls_generic_accel_path{0};
 inline std::atomic<uint64_t> g_calls_generic_fallback_setup{0};
 inline std::atomic<uint64_t> g_calls_generic_software_raster{0};
 inline std::atomic<uint64_t> g_calls_generic_flush{0};
+inline std::atomic<uint64_t> g_calls_generic_resident_support{0};
+inline std::atomic<uint64_t> g_calls_generic_resident_prepare{0};
+inline std::atomic<uint64_t> g_calls_generic_resident_submit{0};
+inline std::atomic<uint64_t> g_calls_generic_nonresident_support{0};
+inline std::atomic<uint64_t> g_calls_generic_nonresident_snapshot{0};
+inline std::atomic<uint64_t> g_calls_generic_nonresident_submit{0};
+inline std::atomic<uint64_t> g_calls_generic_nonresident_writeback{0};
+inline std::atomic<uint64_t> g_calls_generic_fallback_color_resolve{0};
+inline std::atomic<uint64_t> g_calls_generic_fallback_depth_resolve{0};
 
 inline std::atomic<uint64_t> g_calls_cpu{0};
 inline std::atomic<uint64_t> g_calls_nv2a_pushbuffer{0};
@@ -376,6 +394,40 @@ inline std::string format_generic_detail_report() {
         (unsigned long long)g_calls_generic_accel_path.load(),
         (unsigned long long)g_ns_generic_fallback_setup.load(),
         (unsigned long long)g_calls_generic_fallback_setup.load());
+    return std::string(buf);
+}
+
+inline std::string format_generic_admission_report() {
+    if (!g_enabled) return {};
+    char buf[1024];
+    std::snprintf(
+        buf, sizeof(buf),
+        "[perf-generic-admission] resident-support-ns=%llu (n=%llu) "
+        "resident-prepare-ns=%llu (n=%llu) resident-submit-ns=%llu (n=%llu) "
+        "nonresident-support-ns=%llu (n=%llu) "
+        "nonresident-snapshot-ns=%llu (n=%llu) "
+        "nonresident-submit-ns=%llu (n=%llu) "
+        "nonresident-writeback-ns=%llu (n=%llu) "
+        "fallback-color-resolve-ns=%llu (n=%llu) "
+        "fallback-depth-resolve-ns=%llu (n=%llu)",
+        (unsigned long long)g_ns_generic_resident_support.load(),
+        (unsigned long long)g_calls_generic_resident_support.load(),
+        (unsigned long long)g_ns_generic_resident_prepare.load(),
+        (unsigned long long)g_calls_generic_resident_prepare.load(),
+        (unsigned long long)g_ns_generic_resident_submit.load(),
+        (unsigned long long)g_calls_generic_resident_submit.load(),
+        (unsigned long long)g_ns_generic_nonresident_support.load(),
+        (unsigned long long)g_calls_generic_nonresident_support.load(),
+        (unsigned long long)g_ns_generic_nonresident_snapshot.load(),
+        (unsigned long long)g_calls_generic_nonresident_snapshot.load(),
+        (unsigned long long)g_ns_generic_nonresident_submit.load(),
+        (unsigned long long)g_calls_generic_nonresident_submit.load(),
+        (unsigned long long)g_ns_generic_nonresident_writeback.load(),
+        (unsigned long long)g_calls_generic_nonresident_writeback.load(),
+        (unsigned long long)g_ns_generic_fallback_color_resolve.load(),
+        (unsigned long long)g_calls_generic_fallback_color_resolve.load(),
+        (unsigned long long)g_ns_generic_fallback_depth_resolve.load(),
+        (unsigned long long)g_calls_generic_fallback_depth_resolve.load());
     return std::string(buf);
 }
 

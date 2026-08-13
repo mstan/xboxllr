@@ -308,6 +308,7 @@ def summarize(path: pathlib.Path) -> None:
     generic_family = parsed.get("generic_family_samples", [])
     generic_split = parsed.get("generic_split_samples", [])
     generic_detail = parsed.get("generic_detail_samples", [])
+    generic_admission = parsed.get("generic_admission_samples", [])
     nv2a_split = parsed.get("nv2a_split_samples", [])
     vsh_programs = parsed.get("vsh_program_samples", [])
     vertex_reuse_samples = parsed.get("vertex_reuse_samples", [])
@@ -336,6 +337,7 @@ def summarize(path: pathlib.Path) -> None:
     previous_generic_family = None
     previous_generic_split = None
     previous_generic_detail = None
+    previous_generic_admission = None
     previous_nv2a_split = None
     previous_vsh_programs = None
     previous_vertex_reuse = None
@@ -351,6 +353,7 @@ def summarize(path: pathlib.Path) -> None:
         gf = sample_for_deadline(generic_family, index)
         gs = sample_for_deadline(generic_split, index)
         gd = sample_for_deadline(generic_detail, index)
+        ga = sample_for_deadline(generic_admission, index)
         ns = sample_for_deadline(nv2a_split, index)
         vsh = sample_for_deadline(vsh_programs, index)
         vr = sample_for_deadline(vertex_reuse_samples, index)
@@ -361,6 +364,7 @@ def summarize(path: pathlib.Path) -> None:
         ucmd = delta_dict(ucm, previous_unicorn_memory) if ucm else {}
         gsd = delta_dict(gs, previous_generic_split) if gs else {}
         gdd = delta_dict(gd, previous_generic_detail) if gd else {}
+        gad = delta_dict(ga, previous_generic_admission) if ga else {}
         nsd = delta_dict(ns, previous_nv2a_split) if ns else {}
         dirty_clip = rd.get("dirty_clip_pixels", 0)
         dirty_surface = rd.get("dirty_surface_pixels", 0)
@@ -376,6 +380,7 @@ def summarize(path: pathlib.Path) -> None:
         previous_unicorn_memory = ucm or previous_unicorn_memory
         previous_generic_split = gs or previous_generic_split
         previous_generic_detail = gd or previous_generic_detail
+        previous_generic_admission = ga or previous_generic_admission
         previous_nv2a_split = ns or previous_nv2a_split
         raster_witnessed_est = difference(
             pd.get("raster_ns"), pd.get("raster_generic_ns")
@@ -391,6 +396,21 @@ def summarize(path: pathlib.Path) -> None:
             gdd.get("state_setup_ns"),
             gdd.get("accel_path_ns"),
             gdd.get("fallback_setup_ns"),
+        )
+        generic_admission_other_est = difference(
+            gdd.get("accel_path_ns"),
+            gad.get("resident_support_ns"),
+            gad.get("resident_prepare_ns"),
+            gad.get("resident_submit_ns"),
+            gad.get("nonresident_support_ns"),
+            gad.get("nonresident_snapshot_ns"),
+            gad.get("nonresident_submit_ns"),
+            gad.get("nonresident_writeback_ns"),
+        )
+        generic_fallback_other_est = difference(
+            gdd.get("fallback_setup_ns"),
+            gad.get("fallback_color_resolve_ns"),
+            gad.get("fallback_depth_resolve_ns"),
         )
         submit_self_est = difference(
             nsd.get("submit_vertex_ns"),
@@ -429,11 +449,25 @@ def summarize(path: pathlib.Path) -> None:
             f"gaccel={ns_to_s(gdd.get('accel_path_ns'))} "
             f"gfbsetup={ns_to_s(gdd.get('fallback_setup_ns'))} "
             f"gother2~={ns_to_s(generic_detail_other_est)} "
+            f"grsup={ns_to_s(gad.get('resident_support_ns'))} "
+            f"grprep={ns_to_s(gad.get('resident_prepare_ns'))} "
+            f"grsub={ns_to_s(gad.get('resident_submit_ns'))} "
+            f"gnsup={ns_to_s(gad.get('nonresident_support_ns'))} "
+            f"gnsnap={ns_to_s(gad.get('nonresident_snapshot_ns'))} "
+            f"gnsub={ns_to_s(gad.get('nonresident_submit_ns'))} "
+            f"gnwb={ns_to_s(gad.get('nonresident_writeback_ns'))} "
+            f"gaother~={ns_to_s(generic_admission_other_est)} "
+            f"gfcol={ns_to_s(gad.get('fallback_color_resolve_ns'))} "
+            f"gfz={ns_to_s(gad.get('fallback_depth_resolve_ns'))} "
+            f"gfother~={ns_to_s(generic_fallback_other_est)} "
             f"dispatch={ns_to_s(nsd.get('dispatch_method_ns'))} "
             f"dispself~={ns_to_s(dispatch_self_est)} "
             f"submit={ns_to_s(nsd.get('submit_vertex_ns'))} "
             f"subself~={ns_to_s(submit_self_est)} "
             f"xform={ns_to_s(nsd.get('vertex_transform_ns'))} "
+            f"rtex={ns_to_s(rd.get('texture_stage_ns'))} "
+            f"rvup={ns_to_s(rd.get('vertex_upload_ns'))} "
+            f"rdraw={ns_to_s(rd.get('draw_ns'))} "
             f"resolv={ns_to_s(rd.get('resolve_ns'))} "
             f"ensure={ns_to_s(rd.get('resident_ensure_ns'))} "
             f"uploads={rsd.get('uploads', '-')} "

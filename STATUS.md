@@ -3,6 +3,28 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-13 - Generic admission split identifies resolve/ensure as next targets
+
+Added `--perf-accounting` branch buckets under generic renderer admission: resident support,
+resident prepare, resident submit, nonresident support/snapshot/submit/writeback, and fallback
+color/depth resolve. The report/parser/summary now emit and parse `[perf-generic-admission]`;
+normal no-accounting runs only pay the existing disabled timer guard checks.
+
+Validation: Release `xlle`/`test_nv2a` build passed, `test_nv2a` passed, Python parser/summary
+compile checks passed, the gated 1B perf smoke
+`build/generic-admission-perf-smoke-1b.report.json` stayed exact/empty stderr, the gated 1B
+no-accounting smoke `build/generic-admission-noperf-smoke-1b.report.json` stayed exact/empty
+stderr, and the gated full 12B perf replay `build/generic-admission-perf-v1-12b.report.json`
+stayed exact/empty stderr with final SHA `876b58c2...`.
+
+Late-window result: final interval still measured below target (`2.806` perf-accounting FPS; do
+not compare directly to no-accounting best). `gfbsetup=0.959s` is almost entirely
+`gfcol=0.957s`, i.e. fallback color resolves. The resident submit bucket is large
+(`grsub=1.095s`), but its renderer sub-buckets show `resolv=0.925s`, `ensure=0.552s`,
+`rtex=0.092s`, `rvup=0.029s`, and `rdraw=0.059s`; texture hashing/staging is not the dominant
+late bottleneck. The next real optimization should reduce full-surface resident color resolve
+traffic or resident-surface ensure overhead without bypassing correctness-sensitive admission.
+
 ## 2026-08-13 - Generic-detail accounting shifts target to renderer admission work
 
 Added `--perf-accounting` detail buckets for generic-combiner state setup, renderer/admission

@@ -8125,73 +8125,87 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             ++generic_combiner_executed_batches_;
             return true;
         }
-        if (renderer_->supports_resident_generic_combiner(packet)) {
+        bool resident_supported = false;
+        {
+            perf::ScopedAdd timer(perf::g_ns_generic_resident_support,
+                                  perf::g_calls_generic_resident_support);
+            resident_supported = renderer_->supports_resident_generic_combiner(packet);
+        }
+        if (resident_supported) {
             ++generic_combiner_resident_supported_;
-            const size_t color_size = static_cast<size_t>(color_bytes64);
-            const bool already_resident = renderer_->has_resident_color_surface(
-                color_address, color_size, surface_pitch_, surface_height,
-                surface_format_);
-            if (!already_resident) {
-                ++generic_combiner_resident_target_switch_resolves_;
-                if (renderer_->requires_resident_target_switch_resolve()) {
+            {
+                perf::ScopedAdd timer(perf::g_ns_generic_resident_prepare,
+                                      perf::g_calls_generic_resident_prepare);
+                const size_t color_size = static_cast<size_t>(color_bytes64);
+                const bool already_resident = renderer_->has_resident_color_surface(
+                    color_address, color_size, surface_pitch_, surface_height,
+                    surface_format_);
+                if (!already_resident) {
+                    ++generic_combiner_resident_target_switch_resolves_;
+                    if (renderer_->requires_resident_target_switch_resolve()) {
+                        if (!resolve_renderer_color_overlap(
+                                0, 64u * 1024u * 1024u,
+                                "resident generic target switch")) {
+                            return false;
+                        }
+                    }
                     if (!resolve_renderer_color_overlap(
-                            0, 64u * 1024u * 1024u,
-                            "resident generic target switch")) {
+                            color_address, color_size,
+                            "resident generic color upload")) {
                         return false;
                     }
-                }
-                if (!resolve_renderer_color_overlap(
-                        color_address, color_size,
-                        "resident generic color upload")) {
-                    return false;
-                }
-                packet.color_input.resize(color_size);
-                if (!mem_read_ ||
-                    !mem_read_(color_address, packet.color_input.data(),
-                               packet.color_input.size())) {
-                    fault_("NV2A resident generic color DMA read failed");
-                    return false;
-                }
-                ++generic_combiner_resident_uploads_;
-            } else {
-                ++generic_combiner_resident_reuses_;
-            }
-            if ((packet.fixture_depth_test_enabled ||
-                 packet.fixture_depth_write_enabled) &&
-                uses_depth) {
-                const size_t depth_size = static_cast<size_t>(depth_bytes64);
-                const bool depth_already_resident =
-                    renderer_->has_resident_depth_surface(
-                        depth_address, depth_size, surface_pitch_,
-                        surface_height, surface_format_);
-                if (!depth_already_resident) {
-                    if (!resolve_renderer_depth_overlap(
-                            depth_address, depth_size,
-                            "resident generic zeta upload")) {
-                        return false;
-                    }
-                    packet.depth_input.resize(depth_size);
+                    packet.color_input.resize(color_size);
                     if (!mem_read_ ||
-                        !mem_read_(depth_address, packet.depth_input.data(),
-                                   packet.depth_input.size())) {
-                        fault_("NV2A resident generic zeta DMA read failed");
+                        !mem_read_(color_address, packet.color_input.data(),
+                                   packet.color_input.size())) {
+                        fault_("NV2A resident generic color DMA read failed");
                         return false;
                     }
+                    ++generic_combiner_resident_uploads_;
+                } else {
+                    ++generic_combiner_resident_reuses_;
                 }
-            }
-            for (uint32_t stage = 0; stage < packet.textures.size(); ++stage) {
-                if (packet.textures[stage].referenced)
-                    packet.textures[stage].input =
-                        std::move(texture_stages[stage].data);
+                if ((packet.fixture_depth_test_enabled ||
+                     packet.fixture_depth_write_enabled) &&
+                    uses_depth) {
+                    const size_t depth_size = static_cast<size_t>(depth_bytes64);
+                    const bool depth_already_resident =
+                        renderer_->has_resident_depth_surface(
+                            depth_address, depth_size, surface_pitch_,
+                            surface_height, surface_format_);
+                    if (!depth_already_resident) {
+                        if (!resolve_renderer_depth_overlap(
+                                depth_address, depth_size,
+                                "resident generic zeta upload")) {
+                            return false;
+                        }
+                        packet.depth_input.resize(depth_size);
+                        if (!mem_read_ ||
+                            !mem_read_(depth_address, packet.depth_input.data(),
+                                       packet.depth_input.size())) {
+                            fault_("NV2A resident generic zeta DMA read failed");
+                            return false;
+                        }
+                    }
+                }
+                for (uint32_t stage = 0; stage < packet.textures.size(); ++stage) {
+                    if (packet.textures[stage].referenced)
+                        packet.textures[stage].input =
+                            std::move(texture_stages[stage].data);
+                }
             }
             Nv2aGenericCombinerResult result;
             std::string renderer_error;
-            if (!renderer_->submit_resident_generic_combiner(packet, result,
-                                                             renderer_error)) {
-                fault_(renderer_error.empty()
-                           ? "NV2A resident generic-combiner submission failed"
-                           : renderer_error);
-                return false;
+            {
+                perf::ScopedAdd timer(perf::g_ns_generic_resident_submit,
+                                      perf::g_calls_generic_resident_submit);
+                if (!renderer_->submit_resident_generic_combiner(packet, result,
+                                                                 renderer_error)) {
+                    fault_(renderer_error.empty()
+                               ? "NV2A resident generic-combiner submission failed"
+                               : renderer_error);
+                    return false;
+                }
             }
             ++generic_combiner_resident_submits_;
             executed = true;
@@ -8240,64 +8254,84 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             resident_reject_this_batch =
                 GenericResidentRejectReason::kBackendUnsupported;
         }
-        if (renderer_->supports_generic_combiner(packet)) {
-            if (!resolve_renderer_color_overlap(
-                    color_address, static_cast<size_t>(color_bytes64),
-                    "accelerated generic color snapshot")) {
-                return false;
-            }
-            packet.color_input.resize(static_cast<size_t>(color_bytes64));
-            if (!mem_read_ ||
-                !mem_read_(color_address, packet.color_input.data(),
-                           packet.color_input.size())) {
-                fault_("NV2A accelerated color DMA read failed");
-                return false;
-            }
-            if (uses_depth) {
-                if (!resolve_renderer_depth_overlap(
-                        depth_address, static_cast<size_t>(depth_bytes64),
-                        "accelerated generic zeta snapshot")) {
+        bool nonresident_supported = false;
+        {
+            perf::ScopedAdd timer(perf::g_ns_generic_nonresident_support,
+                                  perf::g_calls_generic_nonresident_support);
+            nonresident_supported = renderer_->supports_generic_combiner(packet);
+        }
+        if (nonresident_supported) {
+            {
+                perf::ScopedAdd timer(perf::g_ns_generic_nonresident_snapshot,
+                                      perf::g_calls_generic_nonresident_snapshot);
+                if (!resolve_renderer_color_overlap(
+                        color_address, static_cast<size_t>(color_bytes64),
+                        "accelerated generic color snapshot")) {
                     return false;
                 }
-                packet.depth_input.resize(static_cast<size_t>(depth_bytes64));
-                if (!mem_read_(depth_address, packet.depth_input.data(),
-                               packet.depth_input.size())) {
-                    fault_("NV2A accelerated zeta DMA read failed");
+                packet.color_input.resize(static_cast<size_t>(color_bytes64));
+                if (!mem_read_ ||
+                    !mem_read_(color_address, packet.color_input.data(),
+                               packet.color_input.size())) {
+                    fault_("NV2A accelerated color DMA read failed");
                     return false;
                 }
-            }
-            for (uint32_t stage = 0; stage < packet.textures.size(); ++stage) {
-                if (packet.textures[stage].referenced)
-                    packet.textures[stage].input =
-                        std::move(texture_stages[stage].data);
+                if (uses_depth) {
+                    if (!resolve_renderer_depth_overlap(
+                            depth_address, static_cast<size_t>(depth_bytes64),
+                            "accelerated generic zeta snapshot")) {
+                        return false;
+                    }
+                    packet.depth_input.resize(static_cast<size_t>(depth_bytes64));
+                    if (!mem_read_(depth_address, packet.depth_input.data(),
+                                   packet.depth_input.size())) {
+                        fault_("NV2A accelerated zeta DMA read failed");
+                        return false;
+                    }
+                }
+                for (uint32_t stage = 0; stage < packet.textures.size(); ++stage) {
+                    if (packet.textures[stage].referenced)
+                        packet.textures[stage].input =
+                            std::move(texture_stages[stage].data);
+                }
             }
 
             Nv2aGenericCombinerResult result;
             std::string renderer_error;
-            if (!renderer_->submit_generic_combiner(packet, result,
-                                                     renderer_error)) {
-                fault_(renderer_error.empty()
-                           ? "NV2A accelerated generic-combiner submission failed"
-                           : renderer_error);
-                return false;
+            {
+                perf::ScopedAdd timer(perf::g_ns_generic_nonresident_submit,
+                                      perf::g_calls_generic_nonresident_submit);
+                if (!renderer_->submit_generic_combiner(packet, result,
+                                                        renderer_error)) {
+                    fault_(renderer_error.empty()
+                               ? "NV2A accelerated generic-combiner submission failed"
+                               : renderer_error);
+                    return false;
+                }
             }
             if (result.color_output.size() != packet.color_input.size() ||
                 result.depth_output.size() != packet.depth_input.size()) {
                 fault_("NV2A accelerated generic-combiner returned invalid surface sizes");
                 return false;
             }
-            if (!mem_write_ ||
-                !mem_write_(color_address, result.color_output.data(),
-                            result.color_output.size()) ||
-                (uses_depth &&
-                 !mem_write_(depth_address, result.depth_output.data(),
-                             result.depth_output.size()))) {
-                fault_("NV2A accelerated generic-combiner DMA write failed");
-                return false;
+            {
+                perf::ScopedAdd timer(perf::g_ns_generic_nonresident_writeback,
+                                      perf::g_calls_generic_nonresident_writeback);
+                if (!mem_write_ ||
+                    !mem_write_(color_address, result.color_output.data(),
+                                result.color_output.size()) ||
+                    (uses_depth &&
+                     !mem_write_(depth_address, result.depth_output.data(),
+                                 result.depth_output.size()))) {
+                    fault_("NV2A accelerated generic-combiner DMA write failed");
+                    return false;
+                }
+                invalidate_renderer_color_overlap(color_address,
+                                                  result.color_output.size());
+                if (uses_depth)
+                    invalidate_renderer_depth_overlap(depth_address,
+                                                      result.depth_output.size());
             }
-            invalidate_renderer_color_overlap(color_address, result.color_output.size());
-            if (uses_depth)
-                invalidate_renderer_depth_overlap(depth_address, result.depth_output.size());
             executed = true;
             ++generic_combiner_accelerated_batches_;
             generic_combiner_triangles_ += result.triangles;
@@ -8548,17 +8582,25 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                    sizeof(polygon_bias));
     }
 
-    if (!resolve_renderer_color_overlap(color_address, static_cast<size_t>(color_bytes64),
-                                        "software generic color surface")) {
-        record_generic_fingerprint_perf();
-        return false;
+    {
+        perf::ScopedAdd timer(perf::g_ns_generic_fallback_color_resolve,
+                              perf::g_calls_generic_fallback_color_resolve);
+        if (!resolve_renderer_color_overlap(color_address,
+                                            static_cast<size_t>(color_bytes64),
+                                            "software generic color surface")) {
+            record_generic_fingerprint_perf();
+            return false;
+        }
     }
-    if (uses_depth &&
-        !resolve_renderer_depth_overlap(depth_address,
-                                        static_cast<size_t>(depth_bytes64),
-                                        "software generic zeta surface")) {
-        record_generic_fingerprint_perf();
-        return false;
+    if (uses_depth) {
+        perf::ScopedAdd timer(perf::g_ns_generic_fallback_depth_resolve,
+                              perf::g_calls_generic_fallback_depth_resolve);
+        if (!resolve_renderer_depth_overlap(depth_address,
+                                            static_cast<size_t>(depth_bytes64),
+                                            "software generic zeta surface")) {
+            record_generic_fingerprint_perf();
+            return false;
+        }
     }
     PagedRasterSurface color_surface(
         color_address, static_cast<size_t>(color_bytes64), mem_read_, mem_write_,
