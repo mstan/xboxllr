@@ -3,6 +3,27 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-13 - Retained batch-local post-transform cache lifts late stock dashboard to 3.095 fps
+
+Implemented a conservative NV2A post-transform cache for indexed programmable vertex batches.
+It is batch-local only, enabled for non-context-writing parsed vertex programs with at least
+64 indexed vertices, and keys on the vertex index inside the submitted batch. That deliberately
+avoids cross-batch invalidation hazards from CPU/GPU memory writes while capturing the repeated
+indices proven by the vertex-reuse census.
+
+Validation: Release `xlle`/`test_nv2a` build passes, `git diff --check` is clean, all
+`build-release/test*.exe` pass, 1B no-accounting and 1B perf-accounting stock smokes are
+exact/empty stderr with final SHA `a6087ec5...`, and full 12B no-accounting replay
+`build/posttransform-cache-direct256-noperf-v1-12b.report.json` is exact/empty stderr with final
+SHA-256 `876b58c2d0e6c63fec917c73dcc43a7d09983baf1da2b5b2176fa73a1b44da6d`.
+
+Impact against `build/vsh-context-direct-noperf-v1-12b.report.json`: final FPS `2.635 -> 3.095`
+and final-four wall `49.967s -> 43.786s` (`-12.37%`). The early 1B no-accounting smoke remains
+exact but slower (`2.955 -> 2.841`, final-four wall `+7.71%`), so this is a late-dashboard-targeted
+optimization rather than a universal startup win. The >=10 fps goal remains open; the next large
+targets are still generic software raster/family work, exact resident/tile acceleration, and
+further vertex execution work.
+
 ## 2026-08-13 - Vertex-reuse census proves a high-value VSH cache target
 
 Ran a temporary, compile-time-only vertex-reuse census in a separate diagnostic build

@@ -1330,6 +1330,43 @@ bool Nv2a::submit_vertex_batch() {
     transformed_batch_.clear();
     transformed_batch_.reserve(vertex_count);
 
+    constexpr size_t kBatchTransformCacheEntries = 256;
+
+    struct BatchTransformCache {
+        BatchTransformCache() { valid.fill(0); }
+
+        std::array<uint8_t, kBatchTransformCacheEntries> valid;
+        std::array<uint32_t, kBatchTransformCacheEntries> indices;
+        std::array<TransformedVertex, kBatchTransformCacheEntries> vertices;
+    };
+    std::optional<BatchTransformCache> batch_transform_cache;
+    if (indexed && program_parsed && !program_writes_context && vertex_count >= 64) {
+        batch_transform_cache.emplace();
+    }
+    auto batch_transform_cache_base = [](uint32_t index) {
+        const uint32_t mixed = index ^ (index >> 4) ^ (index >> 9);
+        return static_cast<size_t>(mixed & (kBatchTransformCacheEntries - 1));
+    };
+    auto lookup_batch_transform_cache =
+        [&](uint32_t index, TransformedVertex& vertex) {
+            if (!batch_transform_cache) return false;
+            const size_t base = batch_transform_cache_base(index);
+            if (!batch_transform_cache->valid[base] ||
+                batch_transform_cache->indices[base] != index) {
+                return false;
+            }
+            vertex = batch_transform_cache->vertices[base];
+            return true;
+        };
+    auto store_batch_transform_cache =
+        [&](uint32_t index, const TransformedVertex& vertex) {
+            if (!batch_transform_cache) return;
+            const size_t base = batch_transform_cache_base(index);
+            batch_transform_cache->valid[base] = 1;
+            batch_transform_cache->indices[base] = index;
+            batch_transform_cache->vertices[base] = vertex;
+        };
+
     auto record_transformed_vertex_stats = [&](const TransformedVertex& vertex) {
         for (float component : vertex.position) {
             uint32_t bits = 0;
@@ -1338,6 +1375,10 @@ bool Nv2a::submit_vertex_batch() {
             transform_output_hash_ *= 1099511628211ull;
         }
         ++transformed_vertices_;
+    };
+    auto emit_transformed_vertex = [&](const TransformedVertex& vertex) {
+        transformed_batch_.push_back(vertex);
+        if (collect_diagnostics) record_transformed_vertex_stats(vertex);
     };
 
     {
@@ -1355,6 +1396,11 @@ bool Nv2a::submit_vertex_batch() {
             } else {
                 const uint32_t index = vertex_indices_[vertex_index];
                 largest_vertex_index_ = std::max(largest_vertex_index_, index);
+                TransformedVertex cached_vertex;
+                if (lookup_batch_transform_cache(index, cached_vertex)) {
+                    emit_transformed_vertex(cached_vertex);
+                    continue;
+                }
                 for (uint32_t slot = 0; slot < vertex_attributes_.size(); ++slot) {
                     if (!fetch_vertex_attribute(slot, index)) {
                         if (program_parsed) nv2a_vsh_program_destroy(&program);
@@ -1461,8 +1507,9 @@ bool Nv2a::submit_vertex_batch() {
                     vertex.texture[texture] = vertex_attributes_[9 + texture].value;
             }
             if (program_parsed || fixed_function) {
-                transformed_batch_.push_back(vertex);
-                if (collect_diagnostics) record_transformed_vertex_stats(vertex);
+                if (indexed && program_parsed && !program_writes_context)
+                    store_batch_transform_cache(vertex_indices_[vertex_index], vertex);
+                emit_transformed_vertex(vertex);
             }
         }
     }

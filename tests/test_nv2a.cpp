@@ -572,6 +572,19 @@ int main() {
     CHECK(gpu.transform_constant_words() == 4);
     CHECK(gpu.transform_output_hash() != 1469598103934665603ull);
 
+    const uint64_t fetches_before_reuse = gpu.vertex_attribute_fetches();
+    emit(0x17FC, 5);
+    for (uint32_t pair = 0; pair < 33; ++pair)
+        emit(0x1800, 0x00010000);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.vertex_batches() == 2);
+    CHECK(gpu.submitted_vertices() == 69);
+    CHECK(gpu.vertex_attribute_fetches() == fetches_before_reuse + 4);
+    CHECK(gpu.transformed_vertices() == 69);
+    CHECK(gpu.transform_mode_batches(2) == 2);
+
     // Exercised dashboard fixed-function subset: no skinning/lights/texgen,
     // separate specular, composite transform, ambient/material color.
     const float specular_values[] = {
@@ -615,7 +628,7 @@ int main() {
     emit(0x17FC, 0);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
     CHECK(fault.empty());
-    CHECK(gpu.vertex_batches() == 2);
+    CHECK(gpu.vertex_batches() == 3);
     CHECK(gpu.transform_mode_batches(0) == 1);
     CHECK(gpu.fixed_skin_batches(0) == 1);
     CHECK(gpu.fixed_lighting_batches() == 1);
@@ -623,7 +636,7 @@ int main() {
     CHECK(gpu.fixed_light_type_batches(0) == 8);
     CHECK(gpu.fixed_color_material_batches(0) == 1);
     CHECK(gpu.fixed_light_control_batches(1) == 1);
-    CHECK(gpu.transformed_vertices() == 6);
+    CHECK(gpu.transformed_vertices() == 72);
     const auto fixed_position = gpu.last_transformed_position();
     CHECK(fixed_position[0] == 20.0625f);
     CHECK(fixed_position[1] == 59.875f);
@@ -649,13 +662,13 @@ int main() {
     emit(0x17FC, 0);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
     CHECK(fault.empty());
-    CHECK(gpu.vertex_batches() == 3);
+    CHECK(gpu.vertex_batches() == 4);
     CHECK(gpu.transform_mode_batches(0) == 2);
     CHECK(gpu.fixed_lighting_batches() == 1);
     CHECK(gpu.fixed_specular_batches() == 1);
     CHECK(gpu.fixed_light_type_batches(0) == 16);
     CHECK(gpu.fixed_light_control_batches(5) == 1);
-    CHECK(gpu.transformed_vertices() == 9);
+    CHECK(gpu.transformed_vertices() == 75);
     const std::array<float, 4> unlit_diffuse =
         {0.0f, 0.0f, 1.0f, 1.0f};
     CHECK(gpu.last_transformed_diffuse() == unlit_diffuse);
@@ -706,7 +719,7 @@ int main() {
     emit(0x17FC, 0);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
     CHECK(fault.empty());
-    CHECK(gpu.vertex_batches() == 4);
+    CHECK(gpu.vertex_batches() == 5);
     CHECK(gpu.depth_raster_batches() == 1);
     CHECK(gpu.rasterized_triangles() == 1);
     CHECK(gpu.rasterized_fragments() > 0);

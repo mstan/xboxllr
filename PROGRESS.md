@@ -35,13 +35,13 @@ commits without explicit current authorization.
 ## Current optimization cursor (2026-08-13)
 
 Active Beads issue: `beads-xbox.1.13` (`Performance: reach interactive-navigable stock
-dashboard (>=10 fps sustained)`). The retained emulator behavior is from `95fe3ab` plus
-tooling/status updates. It includes direct
-vertex fetch, disabled perf-timer guards, reduced default-path NV2A diagnostic telemetry, and
-immutable-context VSH execution. The latest rejected experiment was a gated generic software
-raster tile-thread prototype (`XLLE_GENERIC_TILE_THREADS=4`); it was exact at the 1B
-no-accounting smoke gate but slower (`2.955 -> 2.875` final FPS, final-four wall
-`22.659s -> 24.458s`, `+7.94%`) and was reverted.
+dashboard (>=10 fps sustained)`). The retained emulator behavior now includes direct vertex
+fetch, disabled perf-timer guards, reduced default-path NV2A diagnostic telemetry, immutable-context
+VSH execution, and a batch-local post-transform cache for large indexed programmable batches. The
+cache is deliberately scoped inside `submit_vertex_batch()`: it is enabled only for parsed
+non-context-writing programmable draws with at least 64 indexed vertices and keys on the index
+within that one batch. This avoids cross-batch invalidation hazards while capturing the measured
+late-dashboard index reuse.
 
 Correctness status: the exact OpenGL/resident baseline for the stock dashboard 12B replay is
 `build/resident-resolve-bgra-v1-12b.report.json`. It exits cleanly with empty stderr and final
@@ -50,8 +50,13 @@ The 1B smoke golden remains
 `a6087ec5178c7619d8136de2aa159dde7161d56f9e4c3b899b7165935d0353d8`.
 
 Speed status: the retained no-accounting 12B replay
-`build/vsh-context-direct-noperf-v1-12b.report.json` is exact/empty stderr with final FPS
-`2.635` and final-four wall `49.967s`, still far from 10 fps. The refreshed detailed
+`build/posttransform-cache-direct256-noperf-v1-12b.report.json` is exact/empty stderr with final
+SHA `876b58c2...`, final FPS `3.095`, and final-four wall `43.786s`. Against the prior retained
+baseline `build/vsh-context-direct-noperf-v1-12b.report.json`, this is `2.635 -> 3.095` final FPS
+and `49.967s -> 43.786s` final-four wall (`-12.37%`). It is still far from 10 fps. The 1B
+no-accounting smoke remains exact but slower (`2.955 -> 2.841`, final-four wall `+7.71%`), so do
+not generalize this as a startup win; it is retained because the target is sustained late dashboard
+navigation. The refreshed detailed
 perf-accounting 12B replay `build/vsh-context-direct-perf-v2-12b.report.json` is also
 exact/empty stderr with final SHA `876b58c2...`; under accounting, final-four wall is `56.485s`,
 CPU `56.314s`, generic raster `21.826s`, dispatch `37.903s`, submit `36.152s`, transform
@@ -81,6 +86,10 @@ back to a vector only when clipping was needed was exact but regressed (`+2.92%`
 non-overlapping texture sampling from `mem_direct_` was exact but regressed (`+6.77%`). All three
 source probes were removed. A larger primary-passthrough scratch-register rewrite was abandoned
 at compile time as too invasive for the measured risk.
+
+Rejected post-transform cache shape: the first 16x4 set-associative/move-to-front batch-local
+cache was exact at 1B but slower (`2.955 -> 2.811`, final-four wall `+7.36%`) and was replaced
+with the retained direct-mapped 256-entry, large-batch-only shape above.
 
 Additional continuation rejects: switching the 1B no-accounting smoke to the pure software
 renderer was exact but slower (`2.955 -> 2.454` final FPS, `+15.11%` final-four wall), confirming
@@ -140,20 +149,22 @@ The exact 12B report `build/vertex-reuse-census-perf-v1-12b.report.json` proves 
 VSH program `eaad51274b6cda50` has a large post-transform-cache ceiling: in the final intervals,
 it processes about `22.12M` vertices per 0.5B, a 24-entry LRU index cache would hit about
 `14.71M` (`66.5%`), and exact duplicate indices inside batches total about `16.29M` (`73.6%`).
-Max batch size for that program is `14328`. Next implementation should be a correctness-first
-bounded post-transform cache for indexed programmable batches, keyed on program bytes/hash,
-transform constant version, vertex DMA/attribute descriptor state, and index, with conservative
-invalidation/fallback. This should be attempted before a VSH JIT.
+Max batch size for that program is `14328`. This led to a correctness-first bounded
+post-transform cache for indexed programmable batches. The first retained implementation
+is the batch-local direct-mapped cache described above; it intentionally avoids cross-batch state
+keys/invalidation. Further cache work should either refine that shape with measured hit evidence
+or move to a full cross-batch cache only after solving memory/state invalidation conservatively.
 
 One-time Fable critique result: stop treating scalar micro-tweaks as the main path. Before the
 next architecture bet, establish clearer exclusive-time/unit-cost accounting and target a larger
 exact bucket. Fable specifically called out measurement noise/code-layout effects around 2-6%
 deltas, inclusive dispatch/submit buckets, and the need to verify whether the VSH concentration is
-repeated work before writing a JIT. Next best experiments: (1) hardware-sampled profiling of the
-retained no-perf build over the late dashboard window, with repeats/error bars; (2) offline
-vertex-reuse analysis of the replay under a hypothetical exact post-transform cache keyed by
-index, program hash, and constant-state version; (3) if reuse is not the main lever, a single
-straight-line exact specialization for `eaad51274b6cda50` with interpreter fallback. In the
+repeated work before writing a JIT. The offline vertex-reuse analysis and first batch-local cache
+are now done. Next best experiments: (1) hardware-sampled profiling of the retained no-perf build
+over the late dashboard window, with repeats/error bars; (2) a measured refinement of the
+post-transform cache shape if hit/miss accounting justifies it; (3) a single straight-line exact
+specialization for `eaad51274b6cda50` with interpreter fallback if transform remains a top bucket.
+In the
 refreshed 12B perf run, the hottest late primary blend family is still far above a memory-touch
 floor (`2.823s / 50.38M` fragments, about `56 ns/pixel`), so span/tile/family work remains
 plausible too. The current launch path should stay OpenGL/resident; fixed-function OpenGL/Vulkan
