@@ -31,6 +31,12 @@ correct (`build/resident-fbo-attach-cache-v1-12b.report.json` exact/empty stderr
 `build/generic-admission-perf-v1-12b.report.json` (wall `42.975s -> 45.800s`, +6.57%).
 Source was reverted.
 
+Rejected follow-up probe: clipping mixed-W large-dashboard resident-primary candidates behind
+`XLLE_RESIDENT_PRIMARY_CLIP=1` passed `test_nv2a` with and without the gate and passed the gated
+1B smoke `build/resident-primary-clip-v1-smoke-1b.report.json`, but the full 12B replay
+`build/resident-primary-clip-v1-12b.report.json` failed correctness (`aea485b6...` vs expected
+`876b58c2...`) and was much slower (`1.660` final perf-accounting FPS). Source was reverted.
+
 ## 2026-08-13 - Generic-detail accounting shifts target to renderer admission work
 
 Added `--perf-accounting` detail buckets for generic-combiner state setup, renderer/admission
