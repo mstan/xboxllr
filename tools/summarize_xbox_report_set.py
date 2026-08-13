@@ -19,9 +19,11 @@ import argparse
 import json
 import pathlib
 import statistics
+import sys
 from collections.abc import Callable, Mapping
 from typing import Any
 
+sys.path.insert(0, str(pathlib.Path(__file__.replace("\\", "/")).resolve().parent))
 from compare_xbox_reports import final_fps, final_sha, focus_sums
 
 
