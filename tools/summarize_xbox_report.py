@@ -143,12 +143,42 @@ def generic_family_delta(
     return ",".join(parts)
 
 
+def resolve_context_delta(
+    current: Mapping[str, Any] | None,
+    previous: Mapping[str, Any] | None,
+    limit: int = 3,
+) -> str:
+    if not current:
+        return "-"
+    previous = previous or {}
+    deltas: list[tuple[int, str, int]] = []
+    for name, values in current.items():
+        if not isinstance(values, Mapping):
+            continue
+        old = previous.get(name, {})
+        if not isinstance(old, Mapping):
+            old = {}
+        bytes_delta = int(values.get("bytes", 0)) - int(old.get("bytes", 0))
+        calls_delta = int(values.get("calls", 0)) - int(old.get("calls", 0))
+        if bytes_delta <= 0 and calls_delta <= 0:
+            continue
+        deltas.append((bytes_delta, str(name), calls_delta))
+    if not deltas:
+        return "-"
+    deltas.sort(reverse=True)
+    parts = []
+    for bytes_delta, name, calls_delta in deltas[:limit]:
+        parts.append(f"{name}:n{calls_delta}/{mib(bytes_delta)}")
+    return ",".join(parts)
+
+
 def summarize(path: pathlib.Path) -> None:
     report = json.loads(path.read_text())
     parsed = report.get("parsed", {})
     frames = parsed.get("frame_series", [])
     perf = parsed.get("perf_samples", [])
     renderer = parsed.get("renderer_samples", [])
+    renderer_resolve_context = parsed.get("renderer_resolve_context_samples", [])
     resident = parsed.get("resident_samples", [])
     memory = parsed.get("host_memory_samples", [])
     unicorn_memory = parsed.get("unicorn_memory_samples", [])
@@ -175,6 +205,7 @@ def summarize(path: pathlib.Path) -> None:
 
     print("  interval deltas:")
     previous_perf = previous_renderer = previous_resident = previous_memory = None
+    previous_renderer_resolve_context = None
     previous_generic_perf = None
     previous_generic_family = None
     previous_generic_split = None
@@ -182,6 +213,7 @@ def summarize(path: pathlib.Path) -> None:
     for index, frame in enumerate(frames):
         p = sample_for_deadline(perf, index)
         r = sample_for_deadline(renderer, index)
+        rc = sample_for_deadline(renderer_resolve_context, index)
         rs = sample_for_deadline(resident, index)
         m = sample_for_deadline(memory, index)
         ucm = sample_for_deadline(unicorn_memory, index)
@@ -209,6 +241,8 @@ def summarize(path: pathlib.Path) -> None:
         previous_generic_split = gs or previous_generic_split
         generic_delta = generic_top_delta(gp, previous_generic_perf)
         family_delta = generic_family_delta(gf, previous_generic_family)
+        resolve_delta = resolve_context_delta(rc, previous_renderer_resolve_context)
+        previous_renderer_resolve_context = rc or previous_renderer_resolve_context
         previous_generic_perf = gp or previous_generic_perf
         previous_generic_family = gf or previous_generic_family
         print(
@@ -232,6 +266,7 @@ def summarize(path: pathlib.Path) -> None:
             f"resolveMP={rd.get('resolve_pixels', 0) / 1_000_000:.1f} "
             f"ucode+={ucmd.get('code_hook_regions', '-')} "
             f"texMB={md.get('generic_texture_bytes', 0) / BYTES_PER_MIB:.1f} "
+            f"resCtx={resolve_delta} "
             f"genTop={generic_delta} "
             f"famTop={family_delta}"
         )

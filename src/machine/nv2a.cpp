@@ -202,6 +202,7 @@ bool Nv2a::resolve_renderer_color_overlap(uint32_t address, size_t size,
             return false;
         }
         if (resolve.data.empty()) return true;
+        perf::record_renderer_color_resolve_context(context, resolve.data.size());
         if (!mem_write_ ||
             !mem_write_(resolve.address, resolve.data.data(),
                         resolve.data.size())) {

@@ -108,6 +108,10 @@ PERF_RENDERER_RE = re.compile(
     r"resolve-pixels=(?P<resolve_pixels>\d+))?"
 )
 
+PERF_RENDERER_RESOLVE_CONTEXT_RE = re.compile(
+    r"^\[perf-renderer-resolve-context\] top=(?P<top>.*)$"
+)
+
 PERF_MEMORY_RE = re.compile(
     r"^\[perf-memory\] "
     r"paged-surface-creations=(?P<paged_surface_creations>\d+) "
@@ -272,6 +276,21 @@ def parse_witnessed_profiles(text: str) -> list[dict[str, Any]]:
     return profiles
 
 
+def parse_renderer_resolve_contexts(text: str) -> dict[str, dict[str, int]]:
+    if text == "none":
+        return {}
+    contexts: dict[str, dict[str, int]] = {}
+    for item in text.split():
+        match = re.match(r"^(?P<name>[^:]+):n(?P<calls>\d+)/bytes(?P<bytes>\d+)$", item)
+        if not match:
+            continue
+        contexts[match.group("name")] = {
+            "calls": int(match.group("calls")),
+            "bytes": int(match.group("bytes")),
+        }
+    return contexts
+
+
 GENERIC_PERF_ITEM_RE = re.compile(
     r"^(?P<fp>[0-9a-f]+):"
     r"b(?P<batches>\d+)/f(?P<frags>\d+)/w(?P<writes>\d+)/"
@@ -392,6 +411,7 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
     host_memory_samples: list[dict[str, Any]] = []
     unicorn_memory_samples: list[dict[str, Any]] = []
     renderer_samples: list[dict[str, Any]] = []
+    renderer_resolve_context_samples: list[dict[str, dict[str, int]]] = []
     perf_memory_samples: list[dict[str, Any]] = []
     generic_split_samples: list[dict[str, Any]] = []
     witnessed_profile_samples: list[list[dict[str, Any]]] = []
@@ -425,6 +445,10 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
             unicorn_memory_samples.append(parse_int_fields(match))
         elif match := PERF_RENDERER_RE.match(line):
             renderer_samples.append(parse_int_fields(match))
+        elif match := PERF_RENDERER_RESOLVE_CONTEXT_RE.match(line):
+            renderer_resolve_context_samples.append(
+                parse_renderer_resolve_contexts(match.group("top"))
+            )
         elif match := PERF_MEMORY_RE.match(line):
             perf_memory_samples.append(parse_int_fields(match))
         elif match := PERF_GENERIC_SPLIT_RE.match(line):
@@ -469,6 +493,11 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
         ),
         "renderer_samples": renderer_samples,
         "final_renderer": renderer_samples[-1] if renderer_samples else None,
+        "renderer_resolve_context_samples": renderer_resolve_context_samples,
+        "final_renderer_resolve_context": (
+            renderer_resolve_context_samples[-1]
+            if renderer_resolve_context_samples else None
+        ),
         "perf_memory_samples": perf_memory_samples,
         "final_perf_memory": perf_memory_samples[-1] if perf_memory_samples else None,
         "generic_split_samples": generic_split_samples,

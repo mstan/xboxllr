@@ -35,6 +35,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <string>
 
 namespace xlle::perf {
@@ -84,6 +85,27 @@ inline std::atomic<uint64_t> g_calls_renderer_resolve{0};
 inline std::atomic<uint64_t> g_renderer_dirty_clip_pixels{0};
 inline std::atomic<uint64_t> g_renderer_dirty_surface_pixels{0};
 inline std::atomic<uint64_t> g_renderer_resolve_pixels{0};
+
+inline constexpr size_t kRendererResolveContextCount = 12;
+inline constexpr std::array<const char*, kRendererResolveContextCount>
+    kRendererResolveContextNames{{
+        "clear-surface",
+        "witnessed-color-surface",
+        "generic-texture-read",
+        "debug-generic-packet-color-snapshot",
+        "resident-generic-target-switch",
+        "resident-generic-color-upload",
+        "accelerated-generic-color-snapshot",
+        "software-generic-color-surface",
+        "image-blit-source",
+        "image-blit-destination",
+        "scanout-capture",
+        "other",
+    }};
+inline std::array<std::atomic<uint64_t>, kRendererResolveContextCount>
+    g_renderer_resolve_context_calls{};
+inline std::array<std::atomic<uint64_t>, kRendererResolveContextCount>
+    g_renderer_resolve_context_bytes{};
 
 inline constexpr size_t kWitnessedProfileCount = 16;
 inline constexpr std::array<const char*, kWitnessedProfileCount> kWitnessedProfileNames{{
@@ -186,6 +208,30 @@ inline void record_renderer_dirty_area(uint64_t clip_pixels,
 inline void record_renderer_resolve_pixels(uint64_t pixels) {
     if (!g_enabled) return;
     g_renderer_resolve_pixels.fetch_add(pixels, std::memory_order_relaxed);
+}
+
+inline size_t renderer_resolve_context_index(const char* context) {
+    if (!context) return kRendererResolveContextCount - 1;
+    if (std::strcmp(context, "CLEAR_SURFACE") == 0) return 0;
+    if (std::strcmp(context, "witnessed color surface") == 0) return 1;
+    if (std::strcmp(context, "generic texture read") == 0) return 2;
+    if (std::strcmp(context, "debug generic packet color snapshot") == 0) return 3;
+    if (std::strcmp(context, "resident generic target switch") == 0) return 4;
+    if (std::strcmp(context, "resident generic color upload") == 0) return 5;
+    if (std::strcmp(context, "accelerated generic color snapshot") == 0) return 6;
+    if (std::strcmp(context, "software generic color surface") == 0) return 7;
+    if (std::strcmp(context, "IMAGE_BLIT source") == 0) return 8;
+    if (std::strcmp(context, "IMAGE_BLIT destination") == 0) return 9;
+    if (std::strcmp(context, "scanout capture") == 0) return 10;
+    return kRendererResolveContextCount - 1;
+}
+
+inline void record_renderer_color_resolve_context(const char* context, size_t bytes) {
+    if (!g_enabled) return;
+    const size_t index = renderer_resolve_context_index(context);
+    g_renderer_resolve_context_calls[index].fetch_add(1, std::memory_order_relaxed);
+    g_renderer_resolve_context_bytes[index].fetch_add(static_cast<uint64_t>(bytes),
+                                                      std::memory_order_relaxed);
 }
 
 inline void record_pfifo_queue_push() {
@@ -329,6 +375,40 @@ inline std::string format_renderer_report() {
         (unsigned long long)g_renderer_dirty_surface_pixels.load(),
         (unsigned long long)g_renderer_resolve_pixels.load());
     return std::string(buf);
+}
+
+inline std::string format_renderer_resolve_context_report() {
+    if (!g_enabled) return {};
+    std::string out = "[perf-renderer-resolve-context] top=";
+    struct Entry {
+        uint64_t bytes = 0;
+        uint64_t calls = 0;
+        size_t index = 0;
+    };
+    std::array<Entry, kRendererResolveContextCount> entries{};
+    for (size_t index = 0; index < kRendererResolveContextCount; ++index) {
+        entries[index] = {g_renderer_resolve_context_bytes[index].load(),
+                          g_renderer_resolve_context_calls[index].load(), index};
+    }
+    std::sort(entries.begin(), entries.end(),
+              [](const Entry& a, const Entry& b) {
+                  if (a.bytes != b.bytes) return a.bytes > b.bytes;
+                  return a.calls > b.calls;
+              });
+    bool any = false;
+    for (const Entry& entry : entries) {
+        if (entry.bytes == 0 && entry.calls == 0) continue;
+        if (any) out += " ";
+        char buf[160];
+        std::snprintf(buf, sizeof(buf), "%s:n%llu/bytes%llu",
+                      kRendererResolveContextNames[entry.index],
+                      (unsigned long long)entry.calls,
+                      (unsigned long long)entry.bytes);
+        out += buf;
+        any = true;
+    }
+    if (!any) out += "none";
+    return out;
 }
 
 inline std::string format_witnessed_profile_report() {
