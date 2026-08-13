@@ -34,6 +34,16 @@ commits without explicit current authorization.
 
 ## Current optimization cursor (2026-08-13)
 
+Latest rejected probe: source-hashed DXT decode cache behind `XLLE_GENERIC_DXT_DECODE_CACHE=1`,
+combined with `XLLE_TEXTURE_COMPUTE_TILE_BINS=1`. It reread compressed guest bytes every batch and
+keyed decoded ARGB output by DXT type/dimensions/pitch/source FNV hash. The 1B smoke
+`build/dxt-decode-cache-v2-smoke-1b.report.json` stayed exact but was slower (`2.987 -> 2.839`
+final FPS versus direct1024 smoke). The full 12B replay
+`build/dxt-decode-cache-v2-12b.report.json` stayed exact/empty stderr with final SHA
+`876b58c2...`, but regressed versus the texture tile-bin baseline: final FPS `3.876 -> 3.410`,
+final-four wall `37.216s -> 40.300s` (`+8.29%`). Source was reverted. Do not retry this hashed
+decode-cache shape; hash/lookup/copy costs dominate the saved DXT decode.
+
 Latest rejected probe: a gated X8 `SRC_ALPHA/ONE_MINUS_SRC_ALPHA` write shortcut behind
 `XLLE_X8_SRCALPHA_OMSA_FAST=1`. It tried to simplify the final write/blend path for the late
 primary-color family while keeping `XLLE_TEXTURE_COMPUTE_TILE_BINS=1`. The 1B smoke

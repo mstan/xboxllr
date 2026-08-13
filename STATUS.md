@@ -3,6 +3,21 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-13 - Rejected source-hashed DXT decode cache
+
+Prototyped a gated generic-combiner DXT decode cache behind `XLLE_GENERIC_DXT_DECODE_CACHE=1`,
+combined with the retained `XLLE_TEXTURE_COMPUTE_TILE_BINS=1` path. The cache reread the guest
+compressed bytes and keyed decoded ARGB output by DXT type, width, height, pitch, and FNV hash of
+the source bytes, so it could not reuse stale decoded output when texture contents changed.
+
+Validation was exact but slower. The 1B smoke
+`build/dxt-decode-cache-v2-smoke-1b.report.json` stayed exact/empty stderr with final SHA
+`a6087ec5...`, but regressed final FPS `2.987 -> 2.839` versus the direct1024 smoke. The full 12B
+replay `build/dxt-decode-cache-v2-12b.report.json` stayed exact/empty stderr with final SHA
+`876b58c2...`, but regressed versus the gated texture tile-bin baseline: final FPS
+`3.876 -> 3.410`, final-four wall `37.216s -> 40.300s` (`+8.29%`). Source was reverted.
+Conclusion: hash + cache lookup/copy costs more than the saved DXT decompression in this path.
+
 ## 2026-08-13 - Rejected X8 SRC_ALPHA/ONE_MINUS_SRC_ALPHA write shortcut
 
 Prototyped a gated fast write path for generic-combiner X8 surfaces using the common
