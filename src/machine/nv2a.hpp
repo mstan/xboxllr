@@ -1267,6 +1267,16 @@ private:
     bool resolve_renderer_depth_overlap(uint32_t address, size_t size,
                                         const char* context);
     void invalidate_renderer_depth_overlap(uint32_t address, size_t size);
+    // After a software generic-combiner batch wrote guest color memory
+    // directly, keep an exactly-matching valid resident renderer surface
+    // coherent by uploading only the written rows. Falls back to the blanket
+    // invalidate when the backend cannot do region uploads, the target is not
+    // resident, or the surface is not linear. Returns true when the resident
+    // surface (if any) is coherent with guest memory.
+    bool refresh_resident_color_after_software_write(
+        uint32_t address, size_t size, uint32_t key_pitch, uint32_t row_pitch,
+        uint32_t height, uint32_t format, size_t write_begin,
+        size_t write_end);
     bool execute_image_blit_srccopy();
 
     FaultFn fault_;
@@ -1289,6 +1299,9 @@ private:
     };
     std::array<ChannelState, 32> channels_{};
     std::vector<uint8_t> pramin_;
+    // Scratch for software-batch resident region uploads; reused to avoid
+    // per-batch allocation churn.
+    std::vector<uint8_t> region_upload_scratch_;
     Ring<PushMethod> methods_;
     static constexpr size_t kClearTracePreMethods = 32;
     static constexpr size_t kClearTraceMethodLimit = 4096;

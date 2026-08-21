@@ -3,6 +3,50 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-21 - Resident region upload keeps software-written surfaces accelerated
+
+After a generic-combiner software-fallback batch writes guest color memory directly,
+`Nv2a` no longer drops residency for the target surface. `PagedRasterSurface` now tracks
+the written byte span per batch, and a new renderer contract
+(`supports_resident_color_region_upload` + `upload_resident_color_rows`) pushes only the
+covered rows back into the exactly-matching valid resident texture (guest-order bytes,
+same `kGlBgra` transform as full uploads), preserving the overlap contract by
+invalidating any other overlapping resident surface. Non-linear targets, non-resident
+targets, and backends without the capability keep the previous blanket-invalidate
+behavior; depth invalidation is unchanged.
+
+Validation: Release `xlle`/`test_nv2a` build clean, all 15 `build-release/test*.exe`
+passed; 1B smoke `build/region-upload-smoke-1b.report.json` exact/empty stderr with the
+documented golden SHA `a6087ec5...`; two independent no-accounting 12B replays
+`build/region-upload-noperf-v1-12b.report.json` and
+`build/region-upload-noperf-v2-12b.report.json` stayed exact/empty stderr with final SHA
+`876b58c2...`; perf-accounting 12B replay `build/region-upload-perf-v1-12b.report.json`
+also stayed exact/empty stderr.
+
+Performance: against the same-session retained baseline
+`build/oxalpha-baseline-a-noperf-v1-12b.report.json`, final FPS improved `3.68 -> 3.724/
+3.740` across the two no-accounting replays (three-run set CV 0.84%) and final-four wall
+improved `37.063s -> 36.405s/36.41s (~-1.8%)`; the perf-accounting replay improved
+final-four wall `41.124s -> 39.330s (-4.36%)`. Full-surface resident re-uploads fell
+from 725 to 143 per run (-80.28%); the new
+`software-generic-color-region-upload` resolve context records 651 calls / 449.9MB
+(average 0.69MB versus the prior ~4.7MB full-surface uploads).
+
+Measurement tooling added in the same milestone: an opt-in host sampled profiler
+(`--host-sample-profile <period_ms>`, `src/host/sample_profiler.hpp`) that samples the
+main thread's RIP into per-guest-instruction-window tables (module-attributed, with a
+StackWalk64 + raw-stack-scan fallback that attributes blocking leaves to their xlle
+callers) and prints `[host-sampler]` reports symbolized offline by
+`tools/symbolize_host_profile.py`. The sampler run
+`build/oxalpha-sampler-12b-v6.report.json` stayed exact/empty stderr with final SHA
+`876b58c2...` at fps 3.592, confirming the probe does not perturb behavior. Its
+navigation-window (10.5B-12B) attribution: ~39% blocked inside ntdll syscall stubs under
+GL submits (`submit_generic_combiner`, `submit_resident_generic_combiner`,
+`ensure_resident_surface`), ~20% `helper_uc_tracecode` + ~14% `code_trampoline`
+(per-instruction code-hook machinery, load-bearing for IRQ delivery timing), ~14%
+msvcrt memcpy/memset from per-packet vector resize/fill churn and readback row copies,
+~2% software raster. These buckets define the next optimization targets.
+
 ## 2026-08-13 - Promoted texture tile-bin compute to default
 
 Promoted the previously gated mixed-W texture-modulate tile-bin compute route from

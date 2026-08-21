@@ -138,7 +138,7 @@ inline std::atomic<uint64_t> g_renderer_dirty_clip_pixels{0};
 inline std::atomic<uint64_t> g_renderer_dirty_surface_pixels{0};
 inline std::atomic<uint64_t> g_renderer_resolve_pixels{0};
 
-inline constexpr size_t kRendererResolveContextCount = 12;
+inline constexpr size_t kRendererResolveContextCount = 13;
 inline constexpr std::array<const char*, kRendererResolveContextCount>
     kRendererResolveContextNames{{
         "clear-surface",
@@ -152,6 +152,7 @@ inline constexpr std::array<const char*, kRendererResolveContextCount>
         "image-blit-source",
         "image-blit-destination",
         "scanout-capture",
+        "software-generic-color-region-upload",
         "other",
     }};
 inline std::array<std::atomic<uint64_t>, kRendererResolveContextCount>
@@ -275,6 +276,8 @@ inline size_t renderer_resolve_context_index(const char* context) {
     if (std::strcmp(context, "IMAGE_BLIT source") == 0) return 8;
     if (std::strcmp(context, "IMAGE_BLIT destination") == 0) return 9;
     if (std::strcmp(context, "scanout capture") == 0) return 10;
+    if (std::strcmp(context, "software generic color region upload") == 0)
+        return 11;
     return kRendererResolveContextCount - 1;
 }
 

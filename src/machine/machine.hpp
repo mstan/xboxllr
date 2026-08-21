@@ -2,6 +2,7 @@
 // A2 foundation. Layout: 64 MB unified RAM at 0x0; the flash BIOS mirrored across
 // 0xFF000000-0xFFFFFFFF (256KB image, 64 mirrors in the 16MB window).
 #pragma once
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -66,6 +67,9 @@ public:
     CpuFloor& cpu() { return *cpu_; }
     size_t flash_size() const { return flash_size_; }
     uint64_t total_insns() const { return total_insns_; }
+    // Relaxed mirror of total_insns_ for host probes (e.g. the sampled
+    // profiler) that read progress from another thread without locking.
+    std::atomic<uint64_t>& progress_insns() { return progress_insns_atomic_; }
 
     // Observability: fired for every serviced I/O-port access (see IoEvent). Installed once.
     void on_io_event(std::function<void(const IoEvent&)> cb) { io_event_cb_ = std::move(cb); }
@@ -120,6 +124,7 @@ private:
     uint64_t io_seq_ = 0;
     uint64_t mmio_seq_ = 0;
     uint64_t total_insns_ = 0;  // retired-instruction clock feeding the PIT time base
+    std::atomic<uint64_t> progress_insns_atomic_{0};
     uint64_t injected_ = 0;     // external interrupts actually delivered to the guest
     uint64_t irq0_pulses_ = 0;  // PIT channel-0 period boundaries reached
     uint64_t pending_boundaries_ = 0;  // chunk boundaries with an unmasked IRQ pending

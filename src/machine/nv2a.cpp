@@ -76,6 +76,16 @@ public:
     }
     uint8_t* direct_data() const { return direct_base_; }
 
+    // Written-byte span since the last reset_written_span(), [begin, end).
+    // Callers use this to push only the covered rows back into a resident
+    // renderer surface after a software batch writes guest memory directly.
+    void reset_written_span() {
+        written_begin_ = 0;
+        written_end_ = 0;
+    }
+    size_t written_begin() const { return written_begin_; }
+    size_t written_end() const { return written_end_; }
+
     bool flush() {
         if (direct_base_) return true;
         if (!write_) return false;
@@ -102,6 +112,17 @@ private:
     template <typename T>
     bool access(size_t offset, T& value, bool write) {
         if (offset > size_ || sizeof(T) > size_ - offset) return false;
+        if (write) {
+            if (written_end_ == 0 || written_begin_ == written_end_) {
+                // First recorded write of the span.
+                written_begin_ = offset;
+                written_end_ = offset + sizeof(T);
+            } else {
+                if (offset < written_begin_) written_begin_ = offset;
+                const size_t end = offset + sizeof(T);
+                if (end > written_end_) written_end_ = end;
+            }
+        }
         if (direct_base_) {
             if (write) {
                 std::memcpy(direct_base_ + offset, &value, sizeof(T));
@@ -144,6 +165,8 @@ private:
     uint8_t* direct_base_ = nullptr;
     std::vector<Page> pages_;
     size_t resident_bytes_ = 0;
+    size_t written_begin_ = 0;
+    size_t written_end_ = 0;
 };
 
 class SwizzleLookup {
@@ -234,6 +257,49 @@ bool Nv2a::resolve_renderer_color_overlap(uint32_t address, size_t size,
 void Nv2a::invalidate_renderer_color_overlap(uint32_t address, size_t size) {
     if (renderer_ && size != 0)
         renderer_->invalidate_resident_color_surface(address, size);
+}
+
+bool Nv2a::refresh_resident_color_after_software_write(
+    uint32_t address, size_t size, uint32_t key_pitch, uint32_t row_pitch,
+    uint32_t height, uint32_t format, size_t write_begin, size_t write_end) {
+    if (!renderer_ || size == 0 || write_end <= write_begin || row_pitch == 0) {
+        return true;  // nothing written or nothing to keep coherent
+    }
+    if (renderer_->supports_resident_color_region_upload() &&
+        renderer_->has_resident_color_surface(address, size, key_pitch, height,
+                                              format)) {
+        const uint32_t first_row =
+            static_cast<uint32_t>(write_begin / row_pitch);
+        const uint32_t last_row =
+            static_cast<uint32_t>((write_end - 1) / row_pitch);
+        const size_t row_bytes = static_cast<size_t>(row_pitch);
+        region_upload_scratch_.resize((last_row - first_row + 1) * row_bytes);
+        const uint32_t rows_address =
+            address + static_cast<uint32_t>(first_row * row_bytes);
+        if (!mem_read_ ||
+            !mem_read_(rows_address, region_upload_scratch_.data(),
+                       region_upload_scratch_.size())) {
+            fault_("NV2A resident color region upload DMA read failed");
+            return false;
+        }
+        std::string error;
+        if (!renderer_->upload_resident_color_rows(
+                address, size, key_pitch, height, format, first_row, last_row,
+                region_upload_scratch_, error)) {
+            fault_(error.empty()
+                       ? "NV2A resident color region upload failed"
+                       : error.c_str());
+            return false;
+        }
+        perf::record_renderer_color_resolve_context(
+            "software generic color region upload",
+            region_upload_scratch_.size());
+        return true;
+    }
+    // Not resident (or backend cannot region-upload): preserve the old
+    // contract — drop residency so the next accelerated draw re-uploads.
+    invalidate_renderer_color_overlap(address, size);
+    return true;
 }
 
 bool Nv2a::resolve_renderer_depth_overlap(uint32_t address, size_t size,
@@ -8633,6 +8699,9 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         mem_direct_);
     PagedRasterSurface depth_surface(
         depth_address, static_cast<size_t>(depth_bytes64), mem_read_, mem_write_);
+    // Track the written byte span so the post-flush resident refresh can
+    // region-upload exactly the covered rows instead of dropping residency.
+    color_surface.reset_written_span();
 
     auto unpack_argb8 = [](uint32_t pixel) {
         return std::array<float, 4>{{
@@ -9699,8 +9768,22 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             record_generic_fingerprint_perf();
             return false;
         }
-        invalidate_renderer_color_overlap(color_address,
-                                          static_cast<size_t>(color_bytes64));
+        if (surface_pitch_linear) {
+            // Linear targets: refresh the exact resident surface's covered
+            // rows from guest memory, keeping residency instead of forcing
+            // the next accelerated draw to re-upload the whole surface.
+            if (!refresh_resident_color_after_software_write(
+                    color_address, static_cast<size_t>(color_bytes64),
+                    surface_pitch_, pitch, surface_height, surface_format_,
+                    color_surface.written_begin(),
+                    color_surface.written_end())) {
+                record_generic_fingerprint_perf();
+                return false;
+            }
+        } else {
+            invalidate_renderer_color_overlap(color_address,
+                                              static_cast<size_t>(color_bytes64));
+        }
         if (uses_depth && !depth_surface.flush()) {
             fault_("NV2A generic-combiner zeta DMA write failed");
             record_generic_fingerprint_perf();

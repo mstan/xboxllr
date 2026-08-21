@@ -1987,6 +1987,81 @@ public:
             }
         }
     }
+    bool supports_resident_color_region_upload() const override { return true; }
+    bool upload_resident_color_rows(
+        uint32_t address, size_t size, uint32_t key_pitch, uint32_t height,
+        uint32_t format, uint32_t first_row, uint32_t last_row,
+        const std::vector<uint8_t>& guest_bytes, std::string& error) override {
+        ResidentSurface* surface =
+            find_resident_surface(address, size, key_pitch, height, format);
+        if (!surface || !surface->valid) {
+            error = "OpenGL resident color region upload has no matching surface";
+            return false;
+        }
+        if (first_row > last_row || last_row >= surface->height ||
+            surface->width == 0) {
+            error = "OpenGL resident color region upload has invalid rows";
+            return false;
+        }
+        const uint32_t width = surface->width;
+        const uint32_t surface_rows = surface->height;
+        const size_t row_bytes = static_cast<size_t>(width) * 4u;
+        const uint32_t rows = last_row - first_row + 1u;
+        if (guest_bytes.size() != row_bytes * rows) {
+            error = "OpenGL resident color region upload has invalid byte count";
+            return false;
+        }
+        // Guest rows are top-down; GL texel rows are bottom-up. Stage the
+        // covered rows in GL order. Byte order stays guest ARGB (B,G,R,A in
+        // memory): uploading with kGlBgra produces exactly the texels the
+        // full-surface kGlRgba swizzled path stores.
+        region_staging_.resize(row_bytes * rows);
+        for (uint32_t index = 0; index < rows; ++index) {
+            const uint32_t guest_row = last_row - index;  // bottom-up target
+            const size_t source = static_cast<size_t>(guest_row - first_row) *
+                                  row_bytes;
+            std::memcpy(region_staging_.data() + static_cast<size_t>(index) *
+                                                  row_bytes,
+                        guest_bytes.data() + source, row_bytes);
+        }
+        SDL_Window* previous_window = SDL_GL_GetCurrentWindow();
+        SDL_GLContext previous_context = SDL_GL_GetCurrentContext();
+        if (!SDL_GL_MakeCurrent(window_, context_)) {
+            error = std::string("OpenGL resident region context lost: ") +
+                    SDL_GetError();
+            return false;
+        }
+        struct ContextRestore {
+            SDL_Window* previous_window;
+            SDL_GLContext previous_context;
+            SDL_Window* fallback_window;
+            ~ContextRestore() {
+                restore_previous_gl_context(previous_window, previous_context,
+                                            fallback_window);
+            }
+        } restore{previous_window, previous_context, window_};
+        bind_texture_(kGlTexture2D, surface->texture);
+        pixel_store_i_(kGlUnpackAlignment, 1);
+        tex_sub_image_2d_(kGlTexture2D, 0, 0,
+                          static_cast<int>(surface_rows - 1 - last_row),
+                          static_cast<int>(width), static_cast<int>(rows),
+                          kGlBgra, kGlUnsignedByte, region_staging_.data());
+        if (get_error_() != kGlNoError) {
+            error = "OpenGL resident color region upload failed";
+            return false;
+        }
+        // Preserve the overlap contract: any other resident surface covering
+        // part of this address range is now stale relative to guest memory.
+        for (auto& other : resident_surfaces_) {
+            if (&other == surface) continue;
+            if (resident_overlaps(other, address, size)) {
+                other.valid = false;
+                other.dirty = false;
+                if (active_resident_ == &other) active_resident_ = nullptr;
+            }
+        }
+        return true;
+    }
     void invalidate_resident_depth_surface(uint32_t address, size_t size) override {
         if (size == 0) return;
         for (auto& surface : resident_surfaces_) {
@@ -3051,6 +3126,7 @@ private:
     unsigned int resident_vao_ = 0;
     static constexpr size_t kMaxResidentSurfaces = 8;
     std::array<ResidentSurface, kMaxResidentSurfaces> resident_surfaces_{};
+    std::vector<uint8_t> region_staging_;
     ResidentSurface* active_resident_ = nullptr;
     ResidentSurface* active_depth_resident_ = nullptr;
     std::array<CachedBuffer, 4> dashboard_texture_cache_{};

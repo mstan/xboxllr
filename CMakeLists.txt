@@ -113,7 +113,7 @@ add_executable(xlle src/app/main.cpp)
 target_include_directories(xlle PRIVATE ${XLLE_INCLUDES})
 target_link_libraries(xlle PRIVATE xlle_obs xlle_cpu xlle_machine xlle_spike xlle_host xlle_net)
 if(WIN32)
-  target_link_libraries(xlle PRIVATE psapi)
+  target_link_libraries(xlle PRIVATE psapi dbghelp)
 endif()
 
 # Put SDL3.dll next to the exe so `xlle --window` runs without a manual PATH.

@@ -171,6 +171,34 @@ public:
         (void)format;
         return false;
     }
+    // Whether upload_resident_color_rows is available on this backend.
+    virtual bool supports_resident_color_region_upload() const { return false; }
+    // Push guest bytes for rows [first_row, last_row] of an already-valid
+    // resident color surface so the GL copy stays coherent after a software
+    // path wrote guest memory directly, without a full-surface re-upload.
+    // key_pitch is the exact value used when the surface became resident
+    // (raw SET_SURFACE_FORMAT pitch); row_bytes are derived by the backend
+    // from its stored surface width. guest_bytes holds
+    // (last_row-first_row+1)*row_bytes in guest row order (top row first),
+    // exactly as they read from guest memory. The backend applies the same
+    // vertical flip and byte-order transform its full uploads use. On success
+    // the backend must also invalidate any OTHER overlapping resident surface,
+    // preserving the overlap contract of invalidate_resident_color_surface.
+    virtual bool upload_resident_color_rows(
+        uint32_t address, size_t size, uint32_t key_pitch, uint32_t height,
+        uint32_t format, uint32_t first_row, uint32_t last_row,
+        const std::vector<uint8_t>& guest_bytes, std::string& error) {
+        (void)address;
+        (void)size;
+        (void)key_pitch;
+        (void)height;
+        (void)format;
+        (void)first_row;
+        (void)last_row;
+        (void)guest_bytes;
+        error = "resident color region upload is not supported";
+        return false;
+    }
     virtual bool requires_resident_target_switch_resolve() const {
         return true;
     }

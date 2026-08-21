@@ -358,6 +358,7 @@ uint64_t XboxMachine::run(uint32_t start, uint64_t max, std::string& err) {
         uint64_t n = cpu_->run(eip, chunk, cerr);
         done += n;
         total_insns_ += n;
+        progress_insns_atomic_.store(total_insns_, std::memory_order_relaxed);
 
         // A host/device safety stop can retire zero instructions. Surface it before
         // advancing device clocks or allocating any optional diagnostic buffers.

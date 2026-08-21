@@ -32,7 +32,34 @@ paths are acceptable only when the software LLE fallback remains available and t
 faithfulness loss is nominal-to-none. Do not contact real Xbox hardware or push `xboxlle`
 commits without explicit current authorization.
 
-## Current optimization cursor (2026-08-13)
+## Current optimization cursor (2026-08-21)
+
+Retained this session: (1) an opt-in host sampled profiler (`--host-sample-profile`,
+`src/host/sample_profiler.hpp` + `tools/symbolize_host_profile.py`) that attributes main-
+thread host time per 1.5B-instruction window with module and xlle-caller attribution; and
+(2) resident region uploads after software-fallback batches (`refresh_resident_color_after_software_write`
+in `src/machine/nv2a.cpp`, `upload_resident_color_rows` in the OpenGL renderer): software
+writes no longer drop residency for the target surface; only the written rows upload back.
+Both are validated exact at 1B and 12B (final SHA `876b58c2...`, 1B golden `a6087ec5...`);
+evidence in `build/region-upload-{smoke-1b,noperf-v1-12b,noperf-v2-12b,perf-v1-12b}.report.json`.
+Final-four wall improved ~-1.8% no-accounting / -4.36% under accounting; resident
+re-uploads fell 725 -> 143 per run.
+
+Navigation-window (10.5B-12B) host attribution from
+`build/oxalpha-sampler-12b-v6.report.json` (exact, fps 3.592): ~39% blocked in ntdll
+syscall stubs beneath GL submits (`submit_generic_combiner` non-resident compute,
+`submit_resident_generic_combiner`, `ensure_resident_surface`), ~34% Unicorn per-
+instruction hook machinery (`helper_uc_tracecode` + `code_trampoline`; load-bearing for
+sti-window IRQ delivery — do not remove without a timing-exact replacement), ~14%
+msvcrt memcpy/memset (per-packet `vector::resize/_M_fill_assign` churn on multi-MB
+`color_input`/`depth_input` buffers plus readback row copies), ~2% generic software
+raster. Next targets in confidence order: (1) reuse per-packet staging vectors to kill
+the resize/fill churn; (2) coherent resident tile-bin compute for the dominant texmod
+family so `submit_generic_combiner`'s full-surface snapshot/readback round trips
+(`gnsub` ~0.5-2.5s per final interval) disappear; (3) page-lazy color resolve so
+software batches read back only the pages they blend against.
+
+## Prior optimization cursor (2026-08-13)
 
 Latest retained measurement tooling: `--perf-accounting` now emits `[perf-generic-detail]`
 with generic-combiner state setup, renderer/admission path, and fallback setup buckets. The 12B

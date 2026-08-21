@@ -27,6 +27,7 @@
 #include "cpu/unicorn_floor.hpp"
 #include "host/ethernet_udp.hpp"
 #include "host/nv2a_opengl_renderer.hpp"
+#include "host/sample_profiler.hpp"
 #include "host/sdl_shell.hpp"
 #include "host/xid_script.hpp"
 #include "machine/aci.hpp"
@@ -597,6 +598,7 @@ int main(int argc, char** argv) {
     uint64_t debug_nv2a_surface_event_interval = 1;
     uint64_t debug_nv2a_surface_event_after_insns = 0;
     size_t perf_generic_top_limit = 12;
+    uint32_t host_sample_profile_ms = 0;
     uint64_t max_insns = 128ull * 1000 * 1000;  // 2BL kernel LZX decompress needs tens of M
     uint64_t machine_chunk_insns = 4096;
     for (int i = 1; i < argc; ++i) {
@@ -625,6 +627,17 @@ int main(int argc, char** argv) {
                 return 1;
             }
             perf_generic_top_limit = static_cast<size_t>(parsed);
+        }
+        else if (!std::strcmp(argv[i], "--host-sample-profile") && i + 1 < argc) {
+            uint64_t parsed = 0;
+            if (!parse_u64_arg(argv[++i], parsed) || parsed == 0 ||
+                parsed > 1000) {
+                std::fprintf(
+                    stderr,
+                    "[host] --host-sample-profile needs a period in 1..1000 ms\n");
+                return 1;
+            }
+            host_sample_profile_ms = static_cast<uint32_t>(parsed);
         }
         else if (!std::strcmp(argv[i], "--net-disconnected"))
             net_disconnected = true;
@@ -2717,7 +2730,13 @@ int main(int argc, char** argv) {
             std::printf("[2bl] entering decrypted 2BL at 0x901ee (budget %llu insns) ...\n",
                         (unsigned long long)max_insns);
             std::string err2;
+            HostSampleProfiler host_sampler;
+            if (host_sample_profile_ms) {
+                host_sampler.set_progress_source(&mach.progress_insns());
+                host_sampler.start(host_sample_profile_ms);
+            }
             uint64_t n = mach.run(0x901ee, max_insns, err2);
+            if (host_sample_profile_ms) host_sampler.stop_and_report();
             const bool host_memory_safety_stop =
                 err2.find("host memory reached soft limit") != std::string::npos ||
                 err2.find("GetProcessMemoryInfo failed while enforcing host memory limit") !=
