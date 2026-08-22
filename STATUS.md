@@ -3,6 +3,44 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-21 - GL state/location caches cut per-submit driver entries
+
+The OpenGL renderer now mirrors the pipeline state it owns and skips redundant driver
+calls across submits: framebuffer binding and color/depth-stencil attachments,
+viewport, depth-test enable/func, depth mask, scissor enable/rect, blend enable/func,
+color mask, VAO/VBO bindings, active texture unit plus per-unit 2D bindings, and
+uniform locations (per-program string-lookup cache; entries dropped on recompile
+because drivers may reuse program names). The mirror is primed with an explicitly
+established known state at the end of renderer initialization. Every non-render path
+that touches the context routes through the cache or invalidates it: resident
+resolves attach through cached calls, region uploads bind through unit 0 with mirror
+updates, debug probes invalidate at entry, and the per-submit cleanup block plus the
+X8 alpha-draw interlude now flow through the cache so the next submit re-establishes
+only what actually changed. The three non-resident compute fixture paths also stopped
+generating and deleting their shader-storage buffers per submit: a persistent six-
+buffer pool is generated lazily and re-specified via glBufferData each submit
+(previous behavior: glGenBuffers + glDeleteBuffers around every dispatch — a major
+driver-entry and memory-churn source).
+
+A first version of this change failed the 12B replay (`build/gl-cache-noperf-v1-
+12b.report.json`, SHA `8ced485f...` versus expected `876b58c2...`, 57,886 differing
+final-frame pixels) because the untracked cleanup block desynchronized the mirror;
+the fix routed cleanup/alpha-interlude transitions through the cache and restored
+exactness. Root cause and evidence retained here deliberately: any future state-cache
+extension must account for EVERY context touch, including hygiene resets.
+
+Validation: Release `xlle`/`test_nv2a` build clean; all 15 `build-release/test*.exe`
+passed; 1B smoke `build/gl-cache-smoke-1b.report.json` exact/empty stderr with golden
+SHA `a6087ec5...`; two no-accounting 12B replays
+`build/gl-cache-noperf-v2-12b.report.json` and `build/gl-cache-noperf-v3-12b.report.json`
+exact/empty stderr with final SHA `876b58c2...`.
+
+Performance: versus this session's retained scratch-churn state, final FPS improved
+3.981/4.044 -> 4.402/4.256 and final-four wall improved 33.94s/34.51s -> 31.96s/~32.3s
+(about -6%). Session cumulative against the original baseline
+(`build/oxalpha-baseline-a-noperf-v1-12b.report.json`): final FPS 3.68 -> ~4.33 mean
+(+18%) with byte-exact output throughout.
+
 ## 2026-08-21 - GL syscall-storm attribution and per-site context accounting
 
 Extended observability and settled the navigation-window host-time question:

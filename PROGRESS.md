@@ -37,32 +37,35 @@ commits without explicit current authorization.
 Retained this session: (1) an opt-in host sampled profiler (`--host-sample-profile`,
 `src/host/sample_profiler.hpp` + `tools/symbolize_host_profile.py`) that attributes main-
 thread host time per 1.5B-instruction window with module and xlle-caller attribution; (2)
-resident region uploads after software-fallback batches (`refresh_resident_color_after_software_write`
-in `src/machine/nv2a.cpp`, `upload_resident_color_rows` in the OpenGL renderer): software
-writes no longer drop residency for the target surface; only the written rows upload back;
-(3) recycled surface-snapshot buffers (`SurfaceScratchSwap` in `rasterize_generic_combiner_batch`,
-renderer-side `resolve_readback_scratch_`/`upload_staging_`, caller-recycled resolve
-buffer) so multi-megabyte snapshots stop reallocating and zero-filling every batch.
-All three are validated exact at 1B and 12B (final SHA `876b58c2...`, 1B golden
+resident region uploads after software-fallback batches: software writes no longer drop
+residency for the target surface; only the written rows upload back; (3) recycled
+surface-snapshot buffers so multi-megabyte snapshots stop reallocating every batch; (4)
+GL driver-entry reduction: mirrored pipeline state (FBO/attachments, viewport,
+depth/scissor/blend/mask, VAO/VBO, texture units, uniform locations) with a primed known
+state and disciplined invalidation, plus a persistent SSBO pool replacing per-submit
+glGenBuffers/glDeleteBuffers in the non-resident compute fixtures. CAUTION for future
+state-cache work: the first cut failed 12B exactness because the untracked per-submit
+cleanup block desynchronized the mirror (see STATUS 2026-08-21 GL-cache entry); any new
+context touch must route through the cache or invalidate it.
+All retained work is validated exact at 1B and 12B (final SHA `876b58c2...`, 1B golden
 `a6087ec5...`); evidence in `build/region-upload-*.report.json`,
-`build/scratch-churn-*.report.json`, and `build/oxalpha-{baseline-a-noperf-v1,sampler-12b-v6}`
-reports. Session cumulative: final FPS 3.68 -> about 4.0 (+9%), final-four wall
-37.063s -> ~34s (-8%), resident re-uploads 725 -> 143 per run, with byte-exact output.
+`build/scratch-churn-*.report.json`, `build/gl-cache-*.report.json`, and
+`build/oxalpha-*` reports. Session cumulative: final FPS 3.68 -> ~4.33 (+18%), final-four
+wall 37.06s -> ~32s (-14%), resident re-uploads 725 -> 143 per run, byte-exact output.
 
 Navigation-window (10.5B-12B) host attribution — refined 2026-08-21 with per-site GL
 context counters and a text-filtered caller scan: the dominant ntdll leaf share (~40%
 uninstrumented) is a driver-side SYSCALL STORM (rapid non-blocking thread-info/memory-free
 syscalls inside the ICD on every submit-path GL entry; software-renderer control run shows
-none), concentrated under `submit_generic_combiner` (non-resident compute), resident
-submits, and region uploads. MakeCurrent measured small (~1.9s of a 240s run) — earlier
-blame on context switching is disproven. `--perf-accounting` perturbs the storm (41%->18%),
-so read driver-timing buckets with that in mind. Unicorn per-instruction hook machinery
-(`helper_uc_tracecode` + `code_trampoline`; load-bearing for sti-window IRQ delivery)
-remains ~34-43% and needs a timing-exact redesign, not removal. Next targets in confidence
-order: (1) cached GL state transitions to cut driver entries per frame (conservative
-invalidation across resolve/upload paths); (2) coherent resident tile-bin compute for the
-dominant texmod family to remove whole non-resident round trips; (3) page-lazy color
-resolve for software-batch blending reads.
+none). MakeCurrent measured small (~1.9s of a 240s run) — earlier blame on context
+switching is disproven. `--perf-accounting` perturbs the storm (41%->18%). Unicorn per-
+instruction hook machinery (`helper_uc_tracecode` + `code_trampoline`; load-bearing for
+sti-window IRQ delivery) remains ~34-43% and needs a timing-exact redesign, not removal.
+Next targets in confidence order: (1) coherent resident tile-bin compute for the dominant
+texmod family to remove whole non-resident round trips (the largest remaining storm site,
+`submit_generic_combiner`); (2) page-lazy color resolve for software-batch blending reads;
+(3) re-run the sampler after each retained change to re-rank buckets before further
+CPU-side work.
 
 ## Prior optimization cursor (2026-08-13)
 

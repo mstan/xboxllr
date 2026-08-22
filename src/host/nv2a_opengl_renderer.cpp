@@ -3,6 +3,7 @@
 #include "machine/perf_accounting.hpp"
 
 #include <algorithm>
+#include <unordered_map>
 #include <cstdio>
 #include <array>
 #include <cmath>
@@ -1158,6 +1159,7 @@ public:
         return true;
     }
     bool debug_probe_rgba8_image_store(std::string& error) override {
+        invalidate_gl_state_cache();
         SDL_Window* previous_window = SDL_GL_GetCurrentWindow();
         SDL_GLContext previous_context = SDL_GL_GetCurrentContext();
         if (!SDL_GL_MakeCurrent(window_, context_)) {
@@ -1264,6 +1266,7 @@ public:
         return ok;
     }
     bool debug_probe_rgba8_image_load_blend(std::string& error) override {
+        invalidate_gl_state_cache();
         SDL_Window* previous_window = SDL_GL_GetCurrentWindow();
         SDL_GLContext previous_context = SDL_GL_GetCurrentContext();
         if (!SDL_GL_MakeCurrent(window_, context_)) {
@@ -1684,8 +1687,7 @@ public:
                 return false;
             }
             if (!resident_source_texture_) gen_textures_(1, &resident_source_texture_);
-            active_texture_(kGlTexture0);
-            bind_texture_(kGlTexture2D, resident_source_texture_);
+            cache_bind_texture_unit(kGlTexture0, resident_source_texture_);
             tex_parameter_i_(kGlTexture2D, kGlTextureMinFilter, kGlNearest);
             tex_parameter_i_(kGlTexture2D, kGlTextureMagFilter, kGlNearest);
             tex_parameter_i_(kGlTexture2D, kGlTextureWrapS, kGlRepeat);
@@ -1702,37 +1704,32 @@ public:
         {
             perf::ScopedAdd timer(perf::g_ns_renderer_resident_state_setup,
                                   perf::g_calls_renderer_resident_state_setup);
-            bind_framebuffer_(kGlFramebuffer, resident_fbo_);
-            viewport_(0, 0, static_cast<int>(width), static_cast<int>(height));
+            cache_bind_framebuffer(resident_fbo_);
+            cache_viewport(0, 0, static_cast<int>(width),
+                           static_cast<int>(height));
             const bool native_depth_test = packet.fixture_depth_test_enabled &&
                                            !dashboard_fixture;
-            if (native_depth_test) {
-                enable_(kGlDepthTest);
-                depth_func_(gl_depth_func(packet.fixture_depth_func));
-            } else {
-                disable_(kGlDepthTest);
-            }
-            depth_mask_(packet.fixture_depth_write_enabled ? 1 : 0);
-            enable_(kGlScissorTest);
-            scissor_(static_cast<int>(packet.fixture_clip_x),
-                     static_cast<int>(height - packet.fixture_clip_y -
-                                      packet.fixture_clip_height),
-                     static_cast<int>(packet.fixture_clip_width),
-                     static_cast<int>(packet.fixture_clip_height));
-            if (packet.fixture_blend_enabled) {
-                enable_(kGlBlend);
-                blend_equation_(kGlFuncAdd);
-                blend_func_(gl_blend_factor(packet.fixture_blend_src),
-                            gl_blend_factor(packet.fixture_blend_dst));
-            } else {
-                disable_(kGlBlend);
-            }
-            color_mask_(1, 1, 1, packet.fixture_color_format_x8 ? 0 : 1);
+            cache_depth_test(native_depth_test,
+                             native_depth_test
+                                 ? gl_depth_func(packet.fixture_depth_func)
+                                 : kGlAlways);
+            cache_depth_mask(packet.fixture_depth_write_enabled);
+            // Scissor is always enabled for resident draws (the software
+            // fixture clips to the same rect).
+            cache_scissor(true,
+                          static_cast<int>(packet.fixture_clip_x),
+                          static_cast<int>(height - packet.fixture_clip_y -
+                                           packet.fixture_clip_height),
+                          static_cast<int>(packet.fixture_clip_width),
+                          static_cast<int>(packet.fixture_clip_height));
+            cache_blend(packet.fixture_blend_enabled,
+                        gl_blend_factor(packet.fixture_blend_src),
+                        gl_blend_factor(packet.fixture_blend_dst));
+            cache_color_mask(1, 1, 1, packet.fixture_color_format_x8 ? 0 : 1);
         }
         if (!resident_vao_) gen_vertex_arrays_(1, &resident_vao_);
-        bind_vertex_array_(resident_vao_);
         if (!resident_vbo_) gen_buffers_(1, &resident_vbo_);
-        bind_buffer_(kGlArrayBuffer, resident_vbo_);
+        cache_bind_vao_vbo(resident_vao_, resident_vbo_);
         {
             perf::ScopedAdd timer(perf::g_ns_renderer_vertex_upload,
                                   perf::g_calls_renderer_vertex_upload);
@@ -1748,20 +1745,20 @@ public:
             perf::ScopedAdd timer(perf::g_ns_renderer_resident_uniforms,
                                   perf::g_calls_renderer_resident_uniforms);
             use_program_(program);
-            uniform_2f_(uniform_location_(program, "surface_size"),
+            uniform_2f_(cached_uniform_location(program, "surface_size"),
                         static_cast<float>(width), static_cast<float>(height));
             if (primary_fixture || constant_fixture) {
-                uniform_1ui_(uniform_location_(program, "primary_mode"),
+                uniform_1ui_(cached_uniform_location(program, "primary_mode"),
                              constant_fixture ? 1u : 0u);
-                uniform_1ui_(uniform_location_(program, "constant_argb"),
+                uniform_1ui_(cached_uniform_location(program, "constant_argb"),
                              packet.fixture_constant_argb);
             }
             if (texture_fixture) {
-                uniform_1i_(uniform_location_(program, "texture0"), 0);
-                uniform_2f_(uniform_location_(program, "texture_size"),
+                uniform_1i_(cached_uniform_location(program, "texture0"), 0);
+                uniform_2f_(cached_uniform_location(program, "texture_size"),
                             static_cast<float>(packet.textures[0].width),
                             static_cast<float>(packet.textures[0].height));
-                uniform_1ui_(uniform_location_(program, "texture_passthrough"),
+                uniform_1ui_(cached_uniform_location(program, "texture_passthrough"),
                              packet.fixture_texture_passthrough ? 1u : 0u);
             } else if (dashboard_fixture) {
                 if (packet.fixture_depth_test_enabled) {
@@ -1773,14 +1770,14 @@ public:
                     active_texture_(kGlTexture0 + 1);
                     bind_texture_(kGlTexture2D,
                                   active_depth_resident_->depth_word_texture);
-                    uniform_1i_(uniform_location_(program, "depth_words"), 1);
-                    uniform_1ui_(uniform_location_(program, "use_depth_equal"), 1u);
+                    uniform_1i_(cached_uniform_location(program, "depth_words"), 1);
+                    uniform_1ui_(cached_uniform_location(program, "use_depth_equal"), 1u);
                 } else {
-                    uniform_1ui_(uniform_location_(program, "use_depth_equal"), 0u);
+                    uniform_1ui_(cached_uniform_location(program, "use_depth_equal"), 0u);
                 }
-                uniform_1ui_(uniform_location_(program, "factor_stage2"),
+                uniform_1ui_(cached_uniform_location(program, "factor_stage2"),
                              packet.fixture_factor0_stage2_argb);
-                uniform_1ui_(uniform_location_(program, "factor_stage4"),
+                uniform_1ui_(cached_uniform_location(program, "factor_stage4"),
                              packet.fixture_factor0_stage4_argb);
             }
         }
@@ -1825,15 +1822,15 @@ public:
             if (packet.fixture_color_format_x8 &&
                 !packet.fixture_depth_test_enabled &&
                 !packet.fixture_depth_write_enabled) {
-                disable_(kGlBlend);
-                color_mask_(0, 0, 0, 1);
+                cache_blend(false, 0, 0);
+                cache_color_mask(0, 0, 0, 1);
                 use_program_(resident_alpha_program_);
-                uniform_2f_(uniform_location_(resident_alpha_program_,
+                uniform_2f_(cached_uniform_location(resident_alpha_program_,
                                               "surface_size"),
                             static_cast<float>(width),
                             static_cast<float>(height));
                 draw_arrays_(kGlTriangles, 0, static_cast<int>(vertices.size()));
-                color_mask_(1, 1, 1, 0);
+                cache_color_mask(1, 1, 1, 0);
             }
         }
         {
@@ -1847,11 +1844,11 @@ public:
             if (texture_fixture || dashboard_fixture) disable_vertex_attrib_array_(2);
             disable_vertex_attrib_array_(1);
             disable_vertex_attrib_array_(0);
-            color_mask_(1, 1, 1, 1);
-            depth_mask_(1);
-            disable_(kGlDepthTest);
-            disable_(kGlBlend);
-            disable_(kGlScissorTest);
+            cache_color_mask(1, 1, 1, 1);
+            cache_depth_mask(true);
+            cache_depth_test(false, kGlAlways);
+            cache_blend(false, 0, 0);
+            cache_scissor(false, 0, 0, 0, 0);
         }
         bool gl_error = false;
         {
@@ -1941,9 +1938,8 @@ public:
             const size_t pixel_bytes = static_cast<size_t>(surface->width) *
                                        surface->height * 4u;
             resolve_readback_scratch_.resize(pixel_bytes);
-            bind_framebuffer_(kGlFramebuffer, resident_fbo_);
-            framebuffer_texture_2d_(kGlFramebuffer, kGlColorAttachment0,
-                                    kGlTexture2D, surface->texture, 0);
+            cache_bind_framebuffer(resident_fbo_);
+            cache_framebuffer_color_texture(resident_fbo_, surface->texture);
             pixel_store_i_(kGlPackAlignment, 1);
             read_pixels_(0, 0, static_cast<int>(surface->width),
                          static_cast<int>(surface->height), kGlBgra,
@@ -2012,9 +2008,8 @@ public:
                   perf::kGlContextDepthResolveRestore};
         std::vector<uint32_t> gl_depth(static_cast<size_t>(surface->width) *
                                        surface->height);
-        bind_framebuffer_(kGlFramebuffer, resident_fbo_);
-        framebuffer_texture_2d_(kGlFramebuffer, kGlDepthStencilAttachment,
-                                kGlTexture2D, surface->depth_texture, 0);
+        cache_bind_framebuffer(resident_fbo_);
+        cache_framebuffer_depth_texture(resident_fbo_, surface->depth_texture);
         pixel_store_i_(kGlPackAlignment, 4);
         read_pixels_(0, 0, static_cast<int>(surface->width),
                      static_cast<int>(surface->height), kGlDepthStencil,
@@ -2104,7 +2099,12 @@ public:
             }
         } restore{previous_window, previous_context, window_,
                   perf::kGlContextRegionUploadRestore};
+        active_texture_(kGlTexture0);
         bind_texture_(kGlTexture2D, surface->texture);
+        if (gl_state_.valid) {
+            gl_state_.active_unit = kGlTexture0;
+            gl_state_.unit2d_binding[0] = surface->texture;
+        }
         pixel_store_i_(kGlUnpackAlignment, 1);
         tex_sub_image_2d_(kGlTexture2D, 0, 0,
                           static_cast<int>(surface_rows - 1 - last_row),
@@ -2175,8 +2175,12 @@ public:
                 error = "OpenGL primary-color fixture received invalid color surface";
                 return false;
             }
-            std::array<unsigned int, 3> buffers{};
-            gen_buffers_(static_cast<int>(buffers.size()), buffers.data());
+            unsigned int* buffers = [&] {
+                for (auto& ssbo : compute_staging_ssbo_) {
+                    if (!ssbo) gen_buffers_(1, &ssbo);
+                }
+                return compute_staging_ssbo_.data();
+            }();
             auto upload_buffer = [&](unsigned int binding, unsigned int buffer,
                                      const void* data, size_t size) {
                 bind_buffer_(kGlShaderStorageBuffer, buffer);
@@ -2206,33 +2210,32 @@ public:
             upload_buffer(2, buffers[2], xy_data.data(),
                           xy_data.size() * sizeof(int32_t));
             use_program_(primary_color_program_);
-            uniform_1i_(uniform_location_(primary_color_program_, "surface_width"),
+            uniform_1i_(cached_uniform_location(primary_color_program_, "surface_width"),
                         static_cast<int>((packet.surface_pitch & 0xffffu) / 4u));
-            uniform_1i_(uniform_location_(primary_color_program_, "surface_height"),
+            uniform_1i_(cached_uniform_location(primary_color_program_, "surface_height"),
                         static_cast<int>(packet.surface_height));
-            uniform_1i_(uniform_location_(primary_color_program_,
+            uniform_1i_(cached_uniform_location(primary_color_program_,
                                           "surface_pitch_words"),
                         static_cast<int>((packet.surface_pitch & 0xffffu) / 4u));
-            uniform_1i_(uniform_location_(primary_color_program_, "triangle_count"),
+            uniform_1i_(cached_uniform_location(primary_color_program_, "triangle_count"),
                         static_cast<int>(packet.vertices.size() / 3u));
-            uniform_2i_(uniform_location_(primary_color_program_, "clip_origin"),
+            uniform_2i_(cached_uniform_location(primary_color_program_, "clip_origin"),
                         static_cast<int>(packet.fixture_clip_x),
                         static_cast<int>(packet.fixture_clip_y));
-            uniform_2i_(uniform_location_(primary_color_program_, "clip_extent"),
+            uniform_2i_(cached_uniform_location(primary_color_program_, "clip_extent"),
                         static_cast<int>(packet.fixture_clip_width),
                         static_cast<int>(packet.fixture_clip_height));
-            uniform_1ui_(uniform_location_(primary_color_program_, "blend_src"),
+            uniform_1ui_(cached_uniform_location(primary_color_program_, "blend_src"),
                          packet.fixture_blend_enabled ? packet.fixture_blend_src : 1u);
-            uniform_1ui_(uniform_location_(primary_color_program_, "blend_dst"),
+            uniform_1ui_(cached_uniform_location(primary_color_program_, "blend_dst"),
                          packet.fixture_blend_enabled ? packet.fixture_blend_dst : 0u);
-            uniform_1ui_(uniform_location_(primary_color_program_,
+            uniform_1ui_(cached_uniform_location(primary_color_program_,
                                            "color_format_x8"),
                          packet.fixture_color_format_x8 ? 1u : 0u);
             dispatch_compute_(((packet.surface_pitch & 0xffffu) / 4u + 7u) / 8u,
                               (packet.surface_height + 7u) / 8u, 1);
             memory_barrier_(kGlShaderStorageBarrierBit | kGlBufferUpdateBarrierBit);
             if (get_error_() != kGlNoError) {
-                delete_buffers_(static_cast<int>(buffers.size()), buffers.data());
                 error = "OpenGL primary-color fixture dispatch failed";
                 return false;
             }
@@ -2242,7 +2245,6 @@ public:
                                  static_cast<std::ptrdiff_t>(
                                      result.color_output.size()),
                                  result.color_output.data());
-            delete_buffers_(static_cast<int>(buffers.size()), buffers.data());
             if (get_error_() != kGlNoError) {
                 error = "OpenGL primary-color fixture readback failed";
                 return false;
@@ -2274,8 +2276,12 @@ public:
                 error = "OpenGL texture-modulate fixture received invalid texture";
                 return false;
             }
-            std::array<unsigned int, 6> buffers{};
-            gen_buffers_(static_cast<int>(buffers.size()), buffers.data());
+            unsigned int* buffers = [&] {
+                for (auto& ssbo : compute_staging_ssbo_) {
+                    if (!ssbo) gen_buffers_(1, &ssbo);
+                }
+                return compute_staging_ssbo_.data();
+            }();
             auto upload_buffer = [&](unsigned int binding, unsigned int buffer,
                                      const void* data, size_t size) {
                 bind_buffer_(kGlShaderStorageBuffer, buffer);
@@ -2413,64 +2419,63 @@ public:
             upload_buffer(5, buffers[5], tile_triangles.data(),
                           tile_triangles.size() * sizeof(uint32_t));
             use_program_(texture_modulate_program_);
-            uniform_1i_(uniform_location_(texture_modulate_program_, "surface_width"),
+            uniform_1i_(cached_uniform_location(texture_modulate_program_, "surface_width"),
                         static_cast<int>((packet.surface_pitch & 0xffffu) / 4u));
-            uniform_1i_(uniform_location_(texture_modulate_program_, "surface_height"),
+            uniform_1i_(cached_uniform_location(texture_modulate_program_, "surface_height"),
                         static_cast<int>(packet.surface_height));
-            uniform_1i_(uniform_location_(texture_modulate_program_,
+            uniform_1i_(cached_uniform_location(texture_modulate_program_,
                                           "surface_pitch_words"),
                         static_cast<int>((packet.surface_pitch & 0xffffu) / 4u));
-            uniform_1i_(uniform_location_(texture_modulate_program_, "texture_width"),
+            uniform_1i_(cached_uniform_location(texture_modulate_program_, "texture_width"),
                         static_cast<int>(packet.textures[0].width));
-            uniform_1i_(uniform_location_(texture_modulate_program_, "texture_height"),
+            uniform_1i_(cached_uniform_location(texture_modulate_program_, "texture_height"),
                         static_cast<int>(packet.textures[0].height));
-            uniform_1i_(uniform_location_(texture_modulate_program_,
+            uniform_1i_(cached_uniform_location(texture_modulate_program_,
                                           "texture_pitch_words"),
                         static_cast<int>(texture_swizzled
                                              ? packet.textures[0].width
                                              : packet.textures[0].pitch / 4u));
-            uniform_1ui_(uniform_location_(texture_modulate_program_,
+            uniform_1ui_(cached_uniform_location(texture_modulate_program_,
                                            "texture_swizzled"),
                          texture_swizzled ? 1u : 0u);
             const uint32_t texture_address = packet.textures[0].address_mode;
             const bool texture_repeat =
                 (texture_address & 0xffu) == 1u &&
                 ((texture_address >> 8) & 0xffu) == 1u;
-            uniform_1ui_(uniform_location_(texture_modulate_program_,
+            uniform_1ui_(cached_uniform_location(texture_modulate_program_,
                                            "texture_repeat"),
                          texture_repeat ? 1u : 0u);
-            uniform_1ui_(uniform_location_(texture_modulate_program_,
+            uniform_1ui_(cached_uniform_location(texture_modulate_program_,
                                            "texture_constant_color_alpha"),
                          packet.fixture_texture_constant_color_alpha ? 1u : 0u);
-            uniform_1ui_(uniform_location_(texture_modulate_program_, "constant_argb"),
+            uniform_1ui_(cached_uniform_location(texture_modulate_program_, "constant_argb"),
                          packet.fixture_constant_argb);
-            uniform_1i_(uniform_location_(texture_modulate_program_, "triangle_count"),
+            uniform_1i_(cached_uniform_location(texture_modulate_program_, "triangle_count"),
                         static_cast<int>(packet.vertices.size() / 3u));
-            uniform_2i_(uniform_location_(texture_modulate_program_, "clip_origin"),
+            uniform_2i_(cached_uniform_location(texture_modulate_program_, "clip_origin"),
                         static_cast<int>(packet.fixture_clip_x),
                         static_cast<int>(packet.fixture_clip_y));
-            uniform_2i_(uniform_location_(texture_modulate_program_, "clip_extent"),
+            uniform_2i_(cached_uniform_location(texture_modulate_program_, "clip_extent"),
                         static_cast<int>(packet.fixture_clip_width),
                         static_cast<int>(packet.fixture_clip_height));
-            uniform_1ui_(uniform_location_(texture_modulate_program_, "blend_src"),
+            uniform_1ui_(cached_uniform_location(texture_modulate_program_, "blend_src"),
                          packet.fixture_blend_enabled ? packet.fixture_blend_src : 1u);
-            uniform_1ui_(uniform_location_(texture_modulate_program_, "blend_dst"),
+            uniform_1ui_(cached_uniform_location(texture_modulate_program_, "blend_dst"),
                          packet.fixture_blend_enabled ? packet.fixture_blend_dst : 0u);
-            uniform_1ui_(uniform_location_(texture_modulate_program_,
+            uniform_1ui_(cached_uniform_location(texture_modulate_program_,
                                            "color_format_x8"),
                          packet.fixture_color_format_x8 ? 1u : 0u);
-            uniform_1ui_(uniform_location_(texture_modulate_program_,
+            uniform_1ui_(cached_uniform_location(texture_modulate_program_,
                                            "use_tile_bins"),
                          use_tile_bins ? 1u : 0u);
-            uniform_1i_(uniform_location_(texture_modulate_program_, "tile_size"),
+            uniform_1i_(cached_uniform_location(texture_modulate_program_, "tile_size"),
                         static_cast<int>(kTextureComputeTileSize));
-            uniform_1i_(uniform_location_(texture_modulate_program_, "tile_cols"),
+            uniform_1i_(cached_uniform_location(texture_modulate_program_, "tile_cols"),
                         static_cast<int>(tile_cols));
             dispatch_compute_(((packet.surface_pitch & 0xffffu) / 4u + 7u) / 8u,
                               (packet.surface_height + 7u) / 8u, 1);
             memory_barrier_(kGlShaderStorageBarrierBit | kGlBufferUpdateBarrierBit);
             if (get_error_() != kGlNoError) {
-                delete_buffers_(static_cast<int>(buffers.size()), buffers.data());
                 error = "OpenGL texture-modulate fixture dispatch failed";
                 return false;
             }
@@ -2480,7 +2485,6 @@ public:
                                  static_cast<std::ptrdiff_t>(
                                      result.color_output.size()),
                                  result.color_output.data());
-            delete_buffers_(static_cast<int>(buffers.size()), buffers.data());
             if (get_error_() != kGlNoError) {
                 error = "OpenGL texture-modulate fixture readback failed";
                 return false;
@@ -2497,8 +2501,12 @@ public:
                 error = "OpenGL dashboard fixture received invalid surface sizes";
                 return false;
             }
-            std::array<unsigned int, 6> buffers{};
-            gen_buffers_(static_cast<int>(buffers.size()), buffers.data());
+            unsigned int* buffers = [&] {
+                for (auto& ssbo : compute_staging_ssbo_) {
+                    if (!ssbo) gen_buffers_(1, &ssbo);
+                }
+                return compute_staging_ssbo_.data();
+            }();
             auto upload_buffer = [&](unsigned int binding, unsigned int buffer,
                                      const void* data, size_t size) {
                 bind_buffer_(kGlShaderStorageBuffer, buffer);
@@ -2531,26 +2539,25 @@ public:
                     16.0));
             };
             use_program_(dashboard_program_);
-            uniform_1i_(uniform_location_(dashboard_program_, "surface_width"), 1280);
-            uniform_1i_(uniform_location_(dashboard_program_, "surface_height"), 480);
-            uniform_1i_(uniform_location_(dashboard_program_, "surface_pitch_words"),
+            uniform_1i_(cached_uniform_location(dashboard_program_, "surface_width"), 1280);
+            uniform_1i_(cached_uniform_location(dashboard_program_, "surface_height"), 480);
+            uniform_1i_(cached_uniform_location(dashboard_program_, "surface_pitch_words"),
                         0x1400 / 4);
-            uniform_2i_(uniform_location_(dashboard_program_, "vertex_a"),
+            uniform_2i_(cached_uniform_location(dashboard_program_, "vertex_a"),
                         fixed_xy(0, 0), fixed_xy(0, 1));
-            uniform_2i_(uniform_location_(dashboard_program_, "vertex_b"),
+            uniform_2i_(cached_uniform_location(dashboard_program_, "vertex_b"),
                         fixed_xy(1, 0), fixed_xy(1, 1));
-            uniform_2i_(uniform_location_(dashboard_program_, "vertex_c"),
+            uniform_2i_(cached_uniform_location(dashboard_program_, "vertex_c"),
                         fixed_xy(2, 0), fixed_xy(2, 1));
-            uniform_2i_(uniform_location_(dashboard_program_, "vertex_d"),
+            uniform_2i_(cached_uniform_location(dashboard_program_, "vertex_d"),
                         fixed_xy(3, 0), fixed_xy(3, 1));
-            uniform_1ui_(uniform_location_(dashboard_program_, "factor_stage2"),
+            uniform_1ui_(cached_uniform_location(dashboard_program_, "factor_stage2"),
                          packet.fixture_factor0_stage2_argb);
-            uniform_1ui_(uniform_location_(dashboard_program_, "factor_stage4"),
+            uniform_1ui_(cached_uniform_location(dashboard_program_, "factor_stage4"),
                          packet.fixture_factor0_stage4_argb);
             dispatch_compute_((1280 + 7) / 8, (480 + 7) / 8, 1);
             memory_barrier_(kGlShaderStorageBarrierBit | kGlBufferUpdateBarrierBit);
             if (get_error_() != kGlNoError) {
-                delete_buffers_(static_cast<int>(buffers.size()), buffers.data());
                 error = "OpenGL dashboard fixture dispatch failed";
                 return false;
             }
@@ -2560,7 +2567,6 @@ public:
                                  static_cast<std::ptrdiff_t>(
                                      result.color_output.size()),
                                  result.color_output.data());
-            delete_buffers_(static_cast<int>(buffers.size()), buffers.data());
             if (get_error_() != kGlNoError) {
                 error = "OpenGL dashboard fixture readback failed";
                 return false;
@@ -2585,25 +2591,25 @@ public:
                      packet.color_input.data(), kGlDynamicCopy);
         bind_buffer_base_(kGlShaderStorageBuffer, 0, buffer);
         use_program_(fixture_program_);
-        uniform_1i_(uniform_location_(fixture_program_, "surface_width"),
+        uniform_1i_(cached_uniform_location(fixture_program_, "surface_width"),
                     static_cast<int>((packet.surface_pitch & 0xffffu) / 4));
-        uniform_1i_(uniform_location_(fixture_program_, "surface_height"),
+        uniform_1i_(cached_uniform_location(fixture_program_, "surface_height"),
                     static_cast<int>(packet.surface_height));
-        uniform_1i_(uniform_location_(fixture_program_, "surface_pitch_words"),
+        uniform_1i_(cached_uniform_location(fixture_program_, "surface_pitch_words"),
                     static_cast<int>((packet.surface_pitch & 0xffffu) / 4));
-        uniform_2i_(uniform_location_(fixture_program_, "vertex_a"),
+        uniform_2i_(cached_uniform_location(fixture_program_, "vertex_a"),
                     packet.fixture_xy_16[0], packet.fixture_xy_16[1]);
-        uniform_2i_(uniform_location_(fixture_program_, "vertex_b"),
+        uniform_2i_(cached_uniform_location(fixture_program_, "vertex_b"),
                     packet.fixture_xy_16[2], packet.fixture_xy_16[3]);
-        uniform_2i_(uniform_location_(fixture_program_, "vertex_c"),
+        uniform_2i_(cached_uniform_location(fixture_program_, "vertex_c"),
                     packet.fixture_xy_16[4], packet.fixture_xy_16[5]);
-        uniform_2i_(uniform_location_(fixture_program_, "clip_origin"),
+        uniform_2i_(cached_uniform_location(fixture_program_, "clip_origin"),
                     static_cast<int>(packet.fixture_clip_x),
                     static_cast<int>(packet.fixture_clip_y));
-        uniform_2i_(uniform_location_(fixture_program_, "clip_extent"),
+        uniform_2i_(cached_uniform_location(fixture_program_, "clip_extent"),
                     static_cast<int>(packet.fixture_clip_width),
                     static_cast<int>(packet.fixture_clip_height));
-        uniform_1ui_(uniform_location_(fixture_program_, "source_argb"),
+        uniform_1ui_(cached_uniform_location(fixture_program_, "source_argb"),
                      packet.fixture_source_argb);
         dispatch_compute_(((packet.surface_pitch & 0xffffu) / 4 + 7) / 8,
                           (packet.surface_height + 7) / 8, 1);
@@ -2692,12 +2698,55 @@ public:
             error = "OpenGL 4.3 compute fixture is missing a required entry point";
             return false;
         }
-        return compile_fixture(error) && compile_primary_color(error) &&
-               compile_texture_modulate(error) && compile_dashboard(error) &&
-               compile_resident_primary(error) &&
-               compile_resident_alpha(error) &&
-               compile_resident_texture_modulate(error) &&
-               compile_resident_dashboard(error);
+        if (!(compile_fixture(error) && compile_primary_color(error) &&
+              compile_texture_modulate(error) && compile_dashboard(error) &&
+              compile_resident_primary(error) &&
+              compile_resident_alpha(error) &&
+              compile_resident_texture_modulate(error) &&
+              compile_resident_dashboard(error))) {
+            return false;
+        }
+        prime_gl_state_cache();
+        return true;
+    }
+
+    // Establish a fully known GL state and mark the mirror valid. Issued once
+    // right after context setup; nothing else uses this context beforehand.
+    void prime_gl_state_cache() {
+        bind_framebuffer_(kGlFramebuffer, 0);
+        gl_state_.bound_fbo = 0;
+        gl_state_.fbo_color_texture = 0;
+        gl_state_.fbo_depth_texture = 0;
+        viewport_(0, 0, 1, 1);
+        gl_state_.viewport_x = 0; gl_state_.viewport_y = 0;
+        gl_state_.viewport_w = 1; gl_state_.viewport_h = 1;
+        disable_(kGlDepthTest);
+        gl_state_.depth_test = false;
+        depth_func_(kGlAlways);
+        gl_state_.depth_func = kGlAlways;
+        depth_mask_(1);
+        gl_state_.depth_writemask = true;
+        disable_(kGlScissorTest);
+        gl_state_.scissor_test = false;
+        gl_state_.scissor_x = 0; gl_state_.scissor_y = 0;
+        gl_state_.scissor_w = 0; gl_state_.scissor_h = 0;
+        disable_(kGlBlend);
+        gl_state_.blend = false;
+        gl_state_.blend_src = 0; gl_state_.blend_dst = 0;
+        color_mask_(1, 1, 1, 1);
+        gl_state_.color_mask = {{1, 1, 1, 1}};
+        bind_vertex_array_(0);
+        gl_state_.bound_vao = 0;
+        bind_buffer_(kGlArrayBuffer, 0);
+        gl_state_.bound_array_buffer = 0;
+        for (unsigned unit = 0; unit < 4; ++unit) {
+            active_texture_(kGlTexture0 + unit);
+            bind_texture_(kGlTexture2D, 0);
+            gl_state_.unit2d_binding[unit] = 0;
+        }
+        active_texture_(kGlTexture0);
+        gl_state_.active_unit = kGlTexture0;
+        gl_state_.valid = true;
     }
 private:
     struct ResidentSurface {
@@ -2920,11 +2969,10 @@ private:
                 packet.color_address, size, packet.surface_pitch,
                 packet.surface_height, packet.surface_format)) {
             active_resident_ = existing;
-            bind_texture_(kGlTexture2D, existing->texture);
+            cache_bind_texture_unit(kGlTexture0, existing->texture);
             if (!resident_fbo_) gen_framebuffers_(1, &resident_fbo_);
-            bind_framebuffer_(kGlFramebuffer, resident_fbo_);
-            framebuffer_texture_2d_(kGlFramebuffer, kGlColorAttachment0,
-                                    kGlTexture2D, existing->texture, 0);
+            cache_bind_framebuffer(resident_fbo_);
+            cache_framebuffer_color_texture(resident_fbo_, existing->texture);
             return true;
         }
         if (packet.color_input.size() != size) {
@@ -2942,13 +2990,13 @@ private:
                 error = "OpenGL resident color texture allocation failed";
                 return false;
             }
-            bind_texture_(kGlTexture2D, slot->texture);
+            cache_bind_texture_unit(kGlTexture0, slot->texture);
             tex_parameter_i_(kGlTexture2D, kGlTextureMinFilter, kGlNearest);
             tex_parameter_i_(kGlTexture2D, kGlTextureMagFilter, kGlNearest);
             tex_parameter_i_(kGlTexture2D, kGlTextureWrapS, kGlClampToEdge);
             tex_parameter_i_(kGlTexture2D, kGlTextureWrapT, kGlClampToEdge);
         } else {
-            bind_texture_(kGlTexture2D, slot->texture);
+            cache_bind_texture_unit(kGlTexture0, slot->texture);
         }
         std::vector<uint8_t>& rgba = upload_staging_;
         guest_words_to_rgba(packet.color_input, rgba, width, height,
@@ -2958,9 +3006,8 @@ private:
                       static_cast<int>(height), 0, kGlRgba, kGlUnsignedByte,
                       rgba.data());
         if (!resident_fbo_) gen_framebuffers_(1, &resident_fbo_);
-        bind_framebuffer_(kGlFramebuffer, resident_fbo_);
-        framebuffer_texture_2d_(kGlFramebuffer, kGlColorAttachment0, kGlTexture2D,
-                                slot->texture, 0);
+        cache_bind_framebuffer(resident_fbo_);
+        cache_framebuffer_color_texture(resident_fbo_, slot->texture);
         if (check_framebuffer_status_(kGlFramebuffer) != kGlFramebufferComplete) {
             error = "OpenGL resident color framebuffer is incomplete";
             return false;
@@ -2987,16 +3034,15 @@ private:
                                        std::string& error) {
         if (!packet.fixture_depth_test_enabled &&
             !packet.fixture_depth_write_enabled) {
-            framebuffer_texture_2d_(kGlFramebuffer, kGlDepthStencilAttachment,
-                                    kGlTexture2D, 0, 0);
+            cache_framebuffer_depth_texture(resident_fbo_, 0);
             active_depth_resident_ = nullptr;
             return true;
         }
         if (ResidentSurface* existing = find_resident_depth_surface(
                 packet.depth_address, size, packet.surface_pitch,
                 packet.surface_height, packet.surface_format)) {
-            framebuffer_texture_2d_(kGlFramebuffer, kGlDepthStencilAttachment,
-                                    kGlTexture2D, existing->depth_texture, 0);
+            cache_framebuffer_depth_texture(resident_fbo_,
+                                            existing->depth_texture);
             if (check_framebuffer_status_(kGlFramebuffer) !=
                 kGlFramebufferComplete) {
                 error = "OpenGL resident color+zeta framebuffer is incomplete";
@@ -3015,13 +3061,13 @@ private:
                 error = "OpenGL resident zeta texture allocation failed";
                 return false;
             }
-            bind_texture_(kGlTexture2D, slot.depth_texture);
+            cache_bind_texture_unit(kGlTexture0, slot.depth_texture);
             tex_parameter_i_(kGlTexture2D, kGlTextureMinFilter, kGlNearest);
             tex_parameter_i_(kGlTexture2D, kGlTextureMagFilter, kGlNearest);
             tex_parameter_i_(kGlTexture2D, kGlTextureWrapS, kGlClampToEdge);
             tex_parameter_i_(kGlTexture2D, kGlTextureWrapT, kGlClampToEdge);
         } else {
-            bind_texture_(kGlTexture2D, slot.depth_texture);
+            cache_bind_texture_unit(kGlTexture0, slot.depth_texture);
         }
         if (!slot.depth_word_texture) {
             gen_textures_(1, &slot.depth_word_texture);
@@ -3029,7 +3075,7 @@ private:
                 error = "OpenGL resident zeta-word texture allocation failed";
                 return false;
             }
-            bind_texture_(kGlTexture2D, slot.depth_word_texture);
+            cache_bind_texture_unit(kGlTexture0, slot.depth_word_texture);
             tex_parameter_i_(kGlTexture2D, kGlTextureMinFilter, kGlNearest);
             tex_parameter_i_(kGlTexture2D, kGlTextureMagFilter, kGlNearest);
             tex_parameter_i_(kGlTexture2D, kGlTextureWrapS, kGlClampToEdge);
@@ -3037,12 +3083,12 @@ private:
         }
         std::vector<uint32_t> gl_depth;
         guest_d24s8_to_gl(packet.depth_input, gl_depth, width, height);
-        bind_texture_(kGlTexture2D, slot.depth_word_texture);
+        cache_bind_texture_unit(kGlTexture0, slot.depth_word_texture);
         pixel_store_i_(kGlUnpackAlignment, 4);
         tex_image_2d_(kGlTexture2D, 0, kGlR32ui,
                       static_cast<int>(width), static_cast<int>(height), 0,
                       kGlRedInteger, kGlUnsignedInt, gl_depth.data());
-        bind_texture_(kGlTexture2D, slot.depth_texture);
+        cache_bind_texture_unit(kGlTexture0, slot.depth_texture);
         pixel_store_i_(kGlUnpackAlignment, 4);
         tex_image_2d_(kGlTexture2D, 0, kGlDepth24Stencil8,
                       static_cast<int>(width), static_cast<int>(height), 0,
@@ -3054,8 +3100,7 @@ private:
         slot.depth_pitch = packet.surface_pitch;
         slot.depth_height = packet.surface_height;
         slot.depth_format = packet.surface_format;
-        framebuffer_texture_2d_(kGlFramebuffer, kGlDepthStencilAttachment,
-                                kGlTexture2D, slot.depth_texture, 0);
+        cache_framebuffer_depth_texture(resident_fbo_, slot.depth_texture);
         if (check_framebuffer_status_(kGlFramebuffer) != kGlFramebufferComplete) {
             error = "OpenGL resident color+zeta framebuffer is incomplete";
             return false;
@@ -3089,13 +3134,16 @@ private:
         get_program_iv_(program, kGlLinkStatus, &success);
         if (!success) {
             std::array<char, 1024> log{};
-            get_program_log_(program, static_cast<int>(log.size()), nullptr, log.data());
+            get_shader_log_(shader, static_cast<int>(log.size()), nullptr, log.data());
             error = std::string("OpenGL ") + label + " compute link failed: " +
                     log.data();
             delete_program_(program);
             program = 0;
             return false;
         }
+        // Program names can be reused by the driver after deletion; drop any
+        // cached uniform locations bound to this handle.
+        uniform_location_cache_.erase(program);
         return true;
     }
     bool compile_graphics_program(const char* vertex_source,
@@ -3205,6 +3253,11 @@ private:
     std::vector<uint8_t> region_staging_;
     // Recycled glReadPixels target for resident color resolves.
     std::vector<uint8_t> resolve_readback_scratch_;
+    // Persistent shader-storage staging for the non-resident compute fixture
+    // paths. Generated once and re-specified with glBufferData per submit;
+    // the previous per-submit glGenBuffers/glDeleteBuffers pair was a major
+    // driver-entry and host-memory-churn source.
+    std::array<unsigned int, 6> compute_staging_ssbo_{};
     // Recycled guest->RGBA staging for resident uploads.
     std::vector<uint8_t> upload_staging_;
     ResidentSurface* active_resident_ = nullptr;
@@ -3244,7 +3297,166 @@ private:
     GlDisableVertexAttribArray disable_vertex_attrib_array_ = nullptr;
     GlDrawArrays draw_arrays_ = nullptr; GlReadPixels read_pixels_ = nullptr;
     GlPixelStorei pixel_store_i_ = nullptr; GlGetError get_error_ = nullptr;
+
+    // ---- driver-entry reduction caches -----------------------------------
+    // glGetUniformLocation results per program handle. Entries are dropped
+    // when a program is (re)compiled, because the driver may reuse names.
+    std::unordered_map<unsigned int, std::unordered_map<std::string, int>>
+        uniform_location_cache_;
+    int cached_uniform_location(unsigned int program, const char* name) {
+        auto& per_program = uniform_location_cache_[program];
+        const auto it = per_program.find(name);
+        if (it != per_program.end()) return it->second;
+        const int location = uniform_location_(program, name);
+        per_program.emplace(name, location);
+        return location;
+    }
+
+    // Mirrored GL pipeline state so consecutive submits with identical state
+    // skip redundant driver calls. Anything outside this class that touches
+    // the context must call invalidate_gl_state_cache().
+    struct GlStateCache {
+        bool valid = false;
+        unsigned int bound_fbo = 0;
+        unsigned int fbo_color_texture = 0;
+        unsigned int fbo_depth_texture = 0;
+        int viewport_x = 0, viewport_y = 0, viewport_w = 0, viewport_h = 0;
+        bool depth_test = false;
+        unsigned int depth_func = 0;
+        bool depth_writemask = true;
+        bool scissor_test = false;
+        int scissor_x = 0, scissor_y = 0, scissor_w = 0, scissor_h = 0;
+        bool blend = false;
+        unsigned int blend_src = 0, blend_dst = 0;
+        std::array<uint8_t, 4> color_mask = {{1, 1, 1, 1}};
+        unsigned int bound_vao = 0;
+        unsigned int bound_array_buffer = 0;
+        unsigned int active_unit = kGlTexture0;
+        unsigned int unit2d_binding[4] = {0, 0, 0, 0};  // units TEXTURE0..3
+        void invalidate() { valid = false; }
+    } gl_state_;
+
+    // Cached wrappers: issue the driver call only when the mirrored state
+    // would actually change. All of them assume gl_state_ is coherent; any
+    // foreign context touch invalidates.
+    void cache_bind_framebuffer(unsigned int fbo) {
+        if (gl_state_.valid && gl_state_.bound_fbo == fbo) return;
+        bind_framebuffer_(kGlFramebuffer, fbo);
+        gl_state_.bound_fbo = fbo;
+        // Attachments belong to the bound FBO object and persist across
+        // rebinds, but our mirror only tracks what we set on resident_fbo_;
+        // rebinds to other FBOs drop attachment knowledge conservatively.
+        if (fbo != resident_fbo_) {
+            gl_state_.fbo_color_texture = 0;
+            gl_state_.fbo_depth_texture = 0;
+        }
+    }
+    void cache_framebuffer_color_texture(unsigned int fbo, unsigned int texture) {
+        if (!gl_state_.valid || gl_state_.bound_fbo != fbo ||
+            gl_state_.fbo_color_texture != texture) {
+            framebuffer_texture_2d_(kGlFramebuffer, kGlColorAttachment0,
+                                    kGlTexture2D, texture, 0);
+            if (gl_state_.bound_fbo == fbo) gl_state_.fbo_color_texture = texture;
+        }
+    }
+    void cache_framebuffer_depth_texture(unsigned int fbo, unsigned int texture) {
+        if (!gl_state_.valid || gl_state_.bound_fbo != fbo ||
+            gl_state_.fbo_depth_texture != texture) {
+            framebuffer_texture_2d_(kGlFramebuffer, kGlDepthStencilAttachment,
+                                    kGlTexture2D, texture, 0);
+            if (gl_state_.bound_fbo == fbo) gl_state_.fbo_depth_texture = texture;
+        }
+    }
+    void cache_bind_texture_unit(unsigned int unit, unsigned int texture) {
+        if (gl_state_.valid && gl_state_.active_unit == unit &&
+            unit - kGlTexture0 < 4 &&
+            gl_state_.unit2d_binding[unit - kGlTexture0] == texture) {
+            return;
+        }
+        active_texture_(unit);
+        bind_texture_(kGlTexture2D, texture);
+        if (!gl_state_.valid) return;
+        gl_state_.active_unit = unit;
+        if (unit - kGlTexture0 < 4)
+            gl_state_.unit2d_binding[unit - kGlTexture0] = texture;
+    }
+    void cache_viewport(int x, int y, int w, int h) {
+        if (gl_state_.valid && gl_state_.viewport_x == x &&
+            gl_state_.viewport_y == y && gl_state_.viewport_w == w &&
+            gl_state_.viewport_h == h) return;
+        viewport_(x, y, w, h);
+        if (gl_state_.valid) {
+            gl_state_.viewport_x = x; gl_state_.viewport_y = y;
+            gl_state_.viewport_w = w; gl_state_.viewport_h = h;
+        }
+    }
+    void cache_depth_test(bool enable, unsigned int func) {
+        if (!gl_state_.valid || gl_state_.depth_test != enable) {
+            if (enable) enable_(kGlDepthTest); else disable_(kGlDepthTest);
+            if (gl_state_.valid) gl_state_.depth_test = enable;
+        }
+        if (!gl_state_.valid || gl_state_.depth_func != func) {
+            depth_func_(func);
+            if (gl_state_.valid) gl_state_.depth_func = func;
+        }
+    }
+    void cache_depth_mask(bool writemask) {
+        if (gl_state_.valid && gl_state_.depth_writemask == writemask) return;
+        depth_mask_(writemask ? 1 : 0);
+        if (gl_state_.valid) gl_state_.depth_writemask = writemask;
+    }
+    void cache_scissor(bool enable, int x, int y, int w, int h) {
+        if (!gl_state_.valid || gl_state_.scissor_test != enable) {
+            if (enable) enable_(kGlScissorTest); else disable_(kGlScissorTest);
+            if (gl_state_.valid) gl_state_.scissor_test = enable;
+        }
+        if (!gl_state_.valid || gl_state_.scissor_x != x ||
+            gl_state_.scissor_y != y || gl_state_.scissor_w != w ||
+            gl_state_.scissor_h != h) {
+            scissor_(x, y, w, h);
+            if (gl_state_.valid) {
+                gl_state_.scissor_x = x; gl_state_.scissor_y = y;
+                gl_state_.scissor_w = w; gl_state_.scissor_h = h;
+            }
+        }
+    }
+    void cache_blend(bool enable, unsigned int src, unsigned int dst) {
+        if (!gl_state_.valid || gl_state_.blend != enable) {
+            if (enable) enable_(kGlBlend); else disable_(kGlBlend);
+            if (gl_state_.valid) gl_state_.blend = enable;
+        }
+        if (enable &&
+            (!gl_state_.valid || gl_state_.blend_src != src ||
+             gl_state_.blend_dst != dst)) {
+            blend_func_(src, dst);
+            if (gl_state_.valid) { gl_state_.blend_src = src; gl_state_.blend_dst = dst; }
+        }
+    }
+    void cache_color_mask(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+        if (gl_state_.valid && gl_state_.color_mask[0] == r &&
+            gl_state_.color_mask[1] == g && gl_state_.color_mask[2] == b &&
+            gl_state_.color_mask[3] == a) return;
+        color_mask_(r, g, b, a);
+        if (gl_state_.valid) {
+            gl_state_.color_mask = {{r, g, b, a}};
+        }
+    }
+    void cache_bind_vao_vbo(unsigned int vao, unsigned int vbo) {
+        if (!gl_state_.valid || gl_state_.bound_vao != vao) {
+            bind_vertex_array_(vao);
+            if (gl_state_.valid) {
+                gl_state_.bound_vao = vao;
+                gl_state_.bound_array_buffer = 0;  // VAO switch resets attrib binds
+            }
+        }
+        if (!gl_state_.valid || gl_state_.bound_array_buffer != vbo) {
+            bind_buffer_(kGlArrayBuffer, vbo);
+            if (gl_state_.valid) gl_state_.bound_array_buffer = vbo;
+        }
+    }
+    void invalidate_gl_state_cache() { gl_state_.invalidate(); }
 };
+
 }  // namespace
 
 std::unique_ptr<Nv2aRenderer> create_nv2a_opengl_renderer(std::string& error) {
