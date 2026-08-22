@@ -3,6 +3,37 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-21 - Border-clamp resident fixture built; byte-exact promotion blocked by interpolation precision
+
+Implemented the extended resident texture-modulate contract for family `fp=789a30f9`
+in the OpenGL renderer behind packet flags that no production admission sets yet
+(dormant by default): CLAMP_TO_BORDER bilinear sampling mirroring the software
+sampler's tap/border/lerp structure (with `fma()` matching GCC `-march=native`
+contraction), constant-modulated output alpha with in-shader `floor(a*255+0.5)`
+quantization, and GEQUAL-ref-1 alpha kill via discard.
+
+Hotpacket probe progression for `build/generic-hotpacket-texmod-depth-789a30f9-v1.xgp`:
+`621341 -> 2812 -> 70` mismatches across three fixes (border sampling; alpha
+contract; in-shader quantization). The residual **70 pixels (0.014% of covered,
+64 exactly-one-LSB alpha plus 6 kill-boundary flips)** stem from float32 GPU varying
+interpolation versus the software rasterizer's double-precision per-fragment texcoord
+interpolation — not reproducible in a GL 4.3 rasterized draw. Byte-exact promotion of
+this family through the resident path is therefore BLOCKED under the no-drift
+doctrine; whether a documented ±1-LSB opt-in is acceptable is escalated to the
+maintainer. The companion primary family (`fp=68d00785`) probe confirms full divergence
+(1.57M channels, blending+interpolation), matching prior findings that native resident
+primary stays blocked until blend/interpolation exactness exists.
+
+Validation of the dormant state: Release `xlle`/`test_nv2a` build clean, all 15
+`build-release/test*.exe` passed, 1B smoke `build/border-clamp-smoke-1b.report.json`
+exact/empty stderr with golden SHA `a6087ec5...`, 12B replay
+`build/border-clamp-noperf-v1-12b.report.json` exact/empty stderr with final SHA
+`876b58c2...`. The extra uniforms are issued only when the extended-contract flags or
+border addressing are present, so retained signatures pay zero additional driver
+entries. Note for next session: host-measured fps drifted downward across this long
+session (identical code measured 3.7-4.4); re-baseline with interleaved runs before
+comparing small deltas.
+
 ## 2026-08-21 - Texmod-depth contract decoded; resident alpha variant reverted
 
 Continued the hotpacket differential work on family `fp=789a30f9`

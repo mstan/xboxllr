@@ -40,6 +40,7 @@ using GlUseProgram = void (*)(unsigned int);
 using GlGetUniformLocation = int (*)(unsigned int, const char*);
 using GlUniform1i = void (*)(int, int);
 using GlUniform1ui = void (*)(int, unsigned int);
+using GlUniform1f = void (*)(int, float);
 using GlUniform2i = void (*)(int, int, int);
 using GlUniform2f = void (*)(int, float, float);
 using GlUniform4f = void (*)(int, float, float, float, float);
@@ -837,6 +838,11 @@ noperspective in float inv_w_out;
 uniform sampler2D texture0;
 uniform vec2 texture_size;
 uniform uint texture_passthrough;
+uniform uint address_border;
+uniform vec4 border_color;
+uniform uint alpha_constant_modulate;
+uniform float alpha_constant;
+uniform uint alpha_kill_zero;
 layout(location = 0) out vec4 out_color;
 vec4 fetch_repeat(ivec2 p) {
     ivec2 size = ivec2(texture_size);
@@ -854,14 +860,58 @@ vec4 sample_repeat_bilinear(vec2 texcoord) {
     vec4 c11 = fetch_repeat(base + ivec2(1, 1));
     return mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);
 }
+// Mirrors the software generic-combiner sampler for CLAMP_TO_BORDER on both
+// axes: taps outside the texture resolve to the border color, in-range taps
+// clamp their coordinate, and the bilinear weights follow the same
+// two-stage lerp shape as the software reference.
+vec4 sample_border_bilinear(vec2 texcoord) {
+    vec2 t = texcoord - vec2(0.5, 0.5);
+    ivec2 i0 = ivec2(floor(t));
+    vec2 f = t - vec2(i0);
+    ivec2 sz = ivec2(texture_size);
+    vec4 c00 = border_color, c10 = border_color,
+          c01 = border_color, c11 = border_color;
+    if (i0.x >= 0 && i0.x < sz.x && i0.y >= 0 && i0.y < sz.y)
+        c00 = texelFetch(texture0, i0, 0);
+    if (i0.x + 1 >= 0 && i0.x + 1 < sz.x && i0.y >= 0 && i0.y < sz.y)
+        c10 = texelFetch(texture0, ivec2(i0.x + 1, i0.y), 0);
+    if (i0.x >= 0 && i0.x < sz.x && i0.y + 1 >= 0 && i0.y + 1 < sz.y)
+        c01 = texelFetch(texture0, ivec2(i0.x, i0.y + 1), 0);
+    if (i0.x + 1 >= 0 && i0.x + 1 < sz.x && i0.y + 1 >= 0 && i0.y + 1 < sz.y)
+        c11 = texelFetch(texture0, ivec2(i0.x + 1, i0.y + 1), 0);
+    // Same operation sequence as the software sampler (top/bottom rows via
+    // fx, then vertical fy), with fma() matching GCC's -march=native FMA
+    // contraction of `c + (n - c) * f`.
+    vec4 top = fma(c10 - c00, vec4(f.x), c00);
+    vec4 bottom = fma(c11 - c01, vec4(f.x), c01);
+    return fma(bottom - top, vec4(f.y), top);
+}
 void main() {
     vec4 diffuse = inv_w_out == 0.0 ? vec4(0.0, 0.0, 0.0, 1.0)
                                     : diffuse_over_w / inv_w_out;
     vec4 texcoord = inv_w_out == 0.0 ? vec4(0.0, 0.0, 0.0, 1.0)
                                      : tex0_over_w / inv_w_out;
-    vec4 texel = sample_repeat_bilinear(texcoord.xy);
+    vec4 texel = address_border != 0u
+        ? sample_border_bilinear(texcoord.xy)
+        : sample_repeat_bilinear(texcoord.xy);
     out_color = texture_passthrough != 0u ? clamp(texel, 0.0, 1.0)
                                           : clamp(diffuse * texel, 0.0, 1.0);
+    if (alpha_constant_modulate != 0u) {
+        // Quantize to the destination byte grid inside the shader so the
+        // framebuffer's own float->unorm8 conversion cannot re-round a
+        // neighboring float representation (mirrors software's
+        // floor(a*255+0.5) pack exactly).
+        const float scaled =
+            floor(clamp(texel.a, 0.0, 1.0) * alpha_constant * 255.0 + 0.5);
+        out_color.a = scaled / 255.0;
+    }
+    if (alpha_kill_zero != 0u) {
+        // Software packs the combiner output alpha with floor(v*255+0.5) and
+        // compares the byte against the alpha reference (GEQUAL ref 1):
+        // a zero packed byte means discard.
+        float scaled = floor(clamp(out_color.a, 0.0, 1.0) * 255.0 + 0.5);
+        if (scaled < 1.0) discard;
+    }
 }
 )GLSL";
 
@@ -1760,6 +1810,51 @@ public:
                             static_cast<float>(packet.textures[0].height));
                 uniform_1ui_(cached_uniform_location(program, "texture_passthrough"),
                              packet.fixture_texture_passthrough ? 1u : 0u);
+                {
+                    // Extra state only for the extended border/alpha contract;
+                    // retained signatures pay zero additional driver entries.
+                    const uint32_t address_word = packet.textures[0].address_mode;
+                    const bool border_u =
+                        (address_word & 0xFFu) == 4u;  // NV097 wrap code 4: BORDER
+                    const bool border_v =
+                        ((address_word >> 8) & 0xFFu) == 4u;
+                    const bool extended =
+                        packet.fixture_alpha_constant_modulate ||
+                        packet.fixture_alpha_kill_zero || (border_u && border_v);
+                    if (extended) {
+                        uniform_1ui_(cached_uniform_location(program,
+                                                             "address_border"),
+                                     (border_u && border_v) ? 1u : 0u);
+                        const uint32_t border_word =
+                            packet.textures[0].border_color;
+                        uniform_4f_(
+                            cached_uniform_location(program, "border_color"),
+                            static_cast<float>((border_word >> 16) & 0xFFu) /
+                                255.0f,
+                            static_cast<float>((border_word >> 8) & 0xFFu) /
+                                255.0f,
+                            static_cast<float>(border_word & 0xFFu) / 255.0f,
+                            static_cast<float>((border_word >> 24) & 0xFFu) /
+                                255.0f);
+                        uniform_1ui_(
+                            cached_uniform_location(program,
+                                                    "alpha_constant_modulate"),
+                            packet.fixture_alpha_constant_modulate ? 1u : 0u);
+                        const uint32_t constant =
+                            packet.fixture_alpha_constant_modulate
+                                ? packet.fixture_constant_argb
+                                : 0u;
+                        const float alpha =
+                            static_cast<float>((constant >> 24) & 0xFFu) /
+                            255.0f;
+                        uniform_1f_(cached_uniform_location(program,
+                                                            "alpha_constant"),
+                                    alpha);
+                        uniform_1ui_(cached_uniform_location(program,
+                                                             "alpha_kill_zero"),
+                                     packet.fixture_alpha_kill_zero ? 1u : 0u);
+                    }
+                }
             } else if (dashboard_fixture) {
                 if (packet.fixture_depth_test_enabled) {
                     if (!active_depth_resident_ ||
@@ -2651,6 +2746,7 @@ public:
                load_gl(use_program_, "glUseProgram") &&
                load_gl(uniform_location_, "glGetUniformLocation") &&
                load_gl(uniform_1i_, "glUniform1i") &&
+               load_gl(uniform_1f_, "glUniform1f") &&
                load_gl(uniform_1ui_, "glUniform1ui") &&
                load_gl(uniform_2i_, "glUniform2i") &&
                load_gl(uniform_2f_, "glUniform2f") &&
@@ -3271,6 +3367,7 @@ private:
     GlGetProgramInfoLog get_program_log_ = nullptr; GlDeleteProgram delete_program_ = nullptr;
     GlUseProgram use_program_ = nullptr; GlGetUniformLocation uniform_location_ = nullptr;
     GlUniform1i uniform_1i_ = nullptr; GlUniform1ui uniform_1ui_ = nullptr;
+    GlUniform1f uniform_1f_ = nullptr;
     GlUniform2i uniform_2i_ = nullptr; GlUniform2f uniform_2f_ = nullptr;
     GlUniform4f uniform_4f_ = nullptr; GlGenBuffers gen_buffers_ = nullptr;
     GlBindBuffer bind_buffer_ = nullptr; GlBufferData buffer_data_ = nullptr;
