@@ -3,6 +3,34 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-22 - Ox Alpha branch reviewed, coherency-fixed, and revalidated
+
+Codex adversarial review of `opencode/ox-alpha-20260821` found two merge-blocking
+issues in the parked Ox Alpha work: the OpenGL state mirror could become stale when
+dashboard depth binding used raw `glActiveTexture`/`glBindTexture`, and the
+hotpacket alpha-contract probe contradicted its documented mode (`const-mod` set
+texel passthrough then unconditionally cleared it). The renderer now routes the
+dashboard depth texture through `cache_bind_texture_unit`, texture resident draws
+always program deterministic border/alpha uniforms (so no stale uniform can leak
+from an extended probe/use into a later ordinary draw), and the hotpacket probe now
+uses the captured surface extent/depth contract and preserves passthrough for the
+constant-modulated-alpha mode. Production admission remains unchanged for the
+blocked `fp=789a30f9` family.
+
+Validation after the fix: Release `xlle`/`test_nv2a` rebuilt clean; all 15
+`build-release/test*.exe` binaries passed when run directly. The documented
+hotpacket probe for `build/generic-hotpacket-texmod-depth-789a30f9-v1.xgp` now exits
+0 and reports the intended forced contract (`passthrough=1 alpha_mod=1 alpha_kill=1`)
+with the same residual 70 alpha-channel pixel mismatches, preserving the prior
+"blocked by GL interpolation precision" conclusion. Replay evidence:
+`build/codex-cachefix-smoke-1b.report.json` exact/empty stderr with SHA
+`a6087ec5...` and final FPS 2.904; `build/codex-cachefix-noperf-v1-12b.report.json`
+exact/empty stderr with SHA `876b58c2...` and final FPS 3.846; and
+`build/codex-cachefix-perf-v1-12b.report.json` exact/empty stderr with SHA
+`876b58c2...` and final FPS 3.188. `ctest` remains unusable in this existing
+Windows build tree because its generated command path is malformed; direct test
+executables are the validation source above.
+
 ## 2026-08-21 - Border-clamp resident fixture built; byte-exact promotion blocked by interpolation precision
 
 Implemented the extended resident texture-modulate contract for family `fp=789a30f9`

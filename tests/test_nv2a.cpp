@@ -8369,7 +8369,9 @@ int main() {
             packet.depth_input = read_vec();
             const std::vector<uint8_t> expected_color = read_vec();
             const std::vector<uint8_t> expected_depth = read_vec();
-            CHECK(expected_depth.empty());
+            const bool probe_keep_depth =
+                std::getenv("XLLE_HOTPACKET_PROBE_KEEP_DEPTH") != nullptr;
+            if (!probe_keep_depth) CHECK(expected_depth.empty());
             CHECK(in.peek() == std::ifstream::traits_type::eof());
 
             xlle::Nv2aGenericCombinerPacket resident = packet;
@@ -8389,8 +8391,9 @@ int main() {
                       kResidentTextureModulateTriangles;
             resident.fixture_clip_x = 0;
             resident.fixture_clip_y = 0;
-            resident.fixture_clip_width = 1280;
-            resident.fixture_clip_height = 960;
+            resident.fixture_clip_width =
+                (resident.surface_pitch & 0xffffu) / sizeof(uint32_t);
+            resident.fixture_clip_height = resident.surface_height;
             resident.fixture_blend_enabled =
                 (resident.raster_state[xlle::Nv2a::kRasterEnables] & (1u << 1)) != 0;
             resident.fixture_blend_src =
@@ -8402,8 +8405,6 @@ int main() {
             // XLLE_HOTPACKET_PROBE_KEEP_DEPTH=1 to preserve the captured
             // depth configuration instead (used to validate resident depth
             // support against software reference output byte-for-byte).
-            const bool probe_keep_depth =
-                std::getenv("XLLE_HOTPACKET_PROBE_KEEP_DEPTH") != nullptr;
             resident.fixture_depth_test_enabled =
                 probe_keep_depth &&
                 resident.raster_state[xlle::Nv2a::kRasterEnables] & (1u << 3);
@@ -8435,7 +8436,8 @@ int main() {
             // channel in the GL draw, which breaks families that write real
             // alpha (e.g. fp=789a30f9).
             resident.fixture_color_format_x8 = packet.fixture_color_format_x8;
-            resident.fixture_texture_passthrough = false;
+            if (!resident.fixture_alpha_constant_modulate)
+                resident.fixture_texture_passthrough = false;
 
             const bool cull_enabled =
                 (resident.raster_state[xlle::Nv2a::kRasterEnables] & (1u << 2)) != 0;

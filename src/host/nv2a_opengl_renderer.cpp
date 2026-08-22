@@ -1555,10 +1555,15 @@ public:
         }
         if (texture_fixture) {
             const auto& texture = packet.textures[0];
+            const bool supported_texture_extent =
+                texture.width == 1280 &&
+                (texture.height == 960 ||
+                 (texture.height == 480 &&
+                  packet.fixture_alpha_constant_modulate));
             if (!texture.referenced ||
                 texture.layout != Nv2aGenericCombinerPacket::TextureLayout::kLinear ||
                 texture.format != Nv2aGenericCombinerPacket::TextureFormat::kArgb8 ||
-                texture.width != 1280 || texture.height != 960 ||
+                !supported_texture_extent ||
                 texture.pitch != 0x1400 || texture.mode !=
                     Nv2aGenericCombinerPacket::TextureMode::kProject2d) {
                 return false;
@@ -1810,51 +1815,32 @@ public:
                             static_cast<float>(packet.textures[0].height));
                 uniform_1ui_(cached_uniform_location(program, "texture_passthrough"),
                              packet.fixture_texture_passthrough ? 1u : 0u);
-                {
-                    // Extra state only for the extended border/alpha contract;
-                    // retained signatures pay zero additional driver entries.
-                    const uint32_t address_word = packet.textures[0].address_mode;
-                    const bool border_u =
-                        (address_word & 0xFFu) == 4u;  // NV097 wrap code 4: BORDER
-                    const bool border_v =
-                        ((address_word >> 8) & 0xFFu) == 4u;
-                    const bool extended =
-                        packet.fixture_alpha_constant_modulate ||
-                        packet.fixture_alpha_kill_zero || (border_u && border_v);
-                    if (extended) {
-                        uniform_1ui_(cached_uniform_location(program,
-                                                             "address_border"),
-                                     (border_u && border_v) ? 1u : 0u);
-                        const uint32_t border_word =
-                            packet.textures[0].border_color;
-                        uniform_4f_(
-                            cached_uniform_location(program, "border_color"),
-                            static_cast<float>((border_word >> 16) & 0xFFu) /
-                                255.0f,
-                            static_cast<float>((border_word >> 8) & 0xFFu) /
-                                255.0f,
-                            static_cast<float>(border_word & 0xFFu) / 255.0f,
-                            static_cast<float>((border_word >> 24) & 0xFFu) /
-                                255.0f);
-                        uniform_1ui_(
-                            cached_uniform_location(program,
-                                                    "alpha_constant_modulate"),
-                            packet.fixture_alpha_constant_modulate ? 1u : 0u);
-                        const uint32_t constant =
-                            packet.fixture_alpha_constant_modulate
-                                ? packet.fixture_constant_argb
-                                : 0u;
-                        const float alpha =
-                            static_cast<float>((constant >> 24) & 0xFFu) /
-                            255.0f;
-                        uniform_1f_(cached_uniform_location(program,
-                                                            "alpha_constant"),
-                                    alpha);
-                        uniform_1ui_(cached_uniform_location(program,
-                                                             "alpha_kill_zero"),
-                                     packet.fixture_alpha_kill_zero ? 1u : 0u);
-                    }
-                }
+                const uint32_t address_word = packet.textures[0].address_mode;
+                const bool border_u =
+                    (address_word & 0xFFu) == 4u;  // NV097 wrap code 4: BORDER
+                const bool border_v = ((address_word >> 8) & 0xFFu) == 4u;
+                const uint32_t border_word = packet.textures[0].border_color;
+                uniform_1ui_(cached_uniform_location(program, "address_border"),
+                             (border_u && border_v) ? 1u : 0u);
+                uniform_4f_(
+                    cached_uniform_location(program, "border_color"),
+                    static_cast<float>((border_word >> 16) & 0xFFu) / 255.0f,
+                    static_cast<float>((border_word >> 8) & 0xFFu) / 255.0f,
+                    static_cast<float>(border_word & 0xFFu) / 255.0f,
+                    static_cast<float>((border_word >> 24) & 0xFFu) / 255.0f);
+                uniform_1ui_(
+                    cached_uniform_location(program, "alpha_constant_modulate"),
+                    packet.fixture_alpha_constant_modulate ? 1u : 0u);
+                const uint32_t constant =
+                    packet.fixture_alpha_constant_modulate
+                        ? packet.fixture_constant_argb
+                        : 0u;
+                const float alpha =
+                    static_cast<float>((constant >> 24) & 0xFFu) / 255.0f;
+                uniform_1f_(cached_uniform_location(program, "alpha_constant"),
+                            alpha);
+                uniform_1ui_(cached_uniform_location(program, "alpha_kill_zero"),
+                             packet.fixture_alpha_kill_zero ? 1u : 0u);
             } else if (dashboard_fixture) {
                 if (packet.fixture_depth_test_enabled) {
                     if (!active_depth_resident_ ||
@@ -1862,9 +1848,9 @@ public:
                         error = "OpenGL resident dashboard missing zeta-word texture";
                         return false;
                     }
-                    active_texture_(kGlTexture0 + 1);
-                    bind_texture_(kGlTexture2D,
-                                  active_depth_resident_->depth_word_texture);
+                    cache_bind_texture_unit(
+                        kGlTexture0 + 1,
+                        active_depth_resident_->depth_word_texture);
                     uniform_1i_(cached_uniform_location(program, "depth_words"), 1);
                     uniform_1ui_(cached_uniform_location(program, "use_depth_equal"), 1u);
                 } else {

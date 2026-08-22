@@ -32,7 +32,7 @@ paths are acceptable only when the software LLE fallback remains available and t
 faithfulness loss is nominal-to-none. Do not contact real Xbox hardware or push `xboxlle`
 commits without explicit current authorization.
 
-## Current optimization cursor (2026-08-21)
+## Current optimization cursor (2026-08-22)
 
 Retained this session: (1) an opt-in host sampled profiler (`--host-sample-profile`,
 `src/host/sample_profiler.hpp` + `tools/symbolize_host_profile.py`) that attributes main-
@@ -49,9 +49,12 @@ cleanup block desynchronized the mirror (see STATUS 2026-08-21 GL-cache entry); 
 context touch must route through the cache or invalidate it.
 All retained work is validated exact at 1B and 12B (final SHA `876b58c2...`, 1B golden
 `a6087ec5...`); evidence in `build/region-upload-*.report.json`,
-`build/scratch-churn-*.report.json`, `build/gl-cache-*.report.json`, and
-`build/oxalpha-*` reports. Session cumulative: final FPS 3.68 -> ~4.33 (+18%), final-four
-wall 37.06s -> ~32s (-14%), resident re-uploads 725 -> 143 per run, byte-exact output.
+`build/scratch-churn-*.report.json`, `build/gl-cache-*.report.json`,
+`build/oxalpha-*`, and the Codex review/fix reports
+`build/codex-cachefix-{smoke-1b,noperf-v1-12b,perf-v1-12b}.report.json`.
+Session cumulative: final FPS 3.68 -> ~4.33 in the best interleaved pair (+18%),
+with the post-review no-accounting run at 3.846 fps; resident re-uploads remain cut
+from 725-class runs to roughly 143-450 depending on window mix, byte-exact output.
 
 Navigation-window (10.5B-12B) host attribution — refined 2026-08-21 with per-site GL
 context counters and a text-filtered caller scan: the dominant ntdll leaf share (~40%
@@ -90,9 +93,12 @@ ignored):
    (W-plane crossing / fixed-point bounds). Same probe workflow with
    `XLLE_HOTPACKET_PROBE_RESIDENT_FIXTURE=primary`.
 
-Next targets in confidence order: (1) the texel-passthrough + constant-modulated-alpha
-shader variant above; (2) same differential treatment for the primary W-expansion
-family; (3) page-lazy color resolve; (4) sampler re-runs after each retained change.
+Next targets in confidence order: (1) decide whether a documented +/-1-LSB opt-in is
+acceptable for the `fp=789a30f9` resident border/alpha contract, because the forced
+probe now exits cleanly but remains at 70 alpha-channel pixel mismatches from GL
+float32 interpolation versus software double interpolation; (2) same differential
+treatment for the primary W-expansion family; (3) page-lazy color resolve; (4)
+sampler re-runs after each retained change.
 
 Session addendum (same day): the texmod-depth contract work progressed to a full
 implementation — CLAMP_TO_BORDER bilinear sampling, constant-modulated alpha with
