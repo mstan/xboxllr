@@ -61,11 +61,32 @@ none). MakeCurrent measured small (~1.9s of a 240s run) — earlier blame on con
 switching is disproven. `--perf-accounting` perturbs the storm (41%->18%). Unicorn per-
 instruction hook machinery (`helper_uc_tracecode` + `code_trampoline`; load-bearing for
 sti-window IRQ delivery) remains ~34-43% and needs a timing-exact redesign, not removal.
-Next targets in confidence order: (1) coherent resident tile-bin compute for the dominant
-texmod family to remove whole non-resident round trips (the largest remaining storm site,
-`submit_generic_combiner`); (2) page-lazy color resolve for software-batch blending reads;
-(3) re-run the sampler after each retained change to re-rank buckets before further
-CPU-side work.
+
+Hotpacket fixtures captured for the two largest remaining software-fallback families
+(both capture replays stayed exact at `876b58c2...`; fixtures live in `build/`, git-
+ignored):
+
+1. `build/generic-hotpacket-texmod-depth-789a30f9-v1.xgp` — surface `0x03628000`,
+   shader 1, enables `0x0c`, ~3.46M fragments with depth READS per final interval,
+   ~0.30s/interval software raster time. Rejected from residency on depth
+   (`machine-side kDepth` at the `uses_depth` check in the resident admission chain)
+   and from tile-bin compute on combiner words. Hotpacket probe result with the
+   existing resident texture fixture (depth force-disabled, as the probe does):
+   `mismatches=621341 channels / 502392 pixels, maxd=228, alpha channel dominant`
+   — i.e., extending the resident texture-modulate route to this family REQUIRES
+   exact depth-test support; without it nearly every covered pixel diverges.
+   Probe invocation:
+   `XLLE_HOTPACKET_PROBE=1 XLLE_HOTPACKET_PROBE_PATH=<xgp> XLLE_HOTPACKET_PROBE_RESIDENT_FIXTURE=texture build-release\test_nv2a.exe`.
+2. `build/generic-hotpacket-primary-wexp-68d00785-v1.xgp` — surface `0x03aa4000`,
+   shader 0, enables `0x12`, primary-color blended family rejected on vertex-expansion
+   (W-plane crossing / fixed-point bounds). Same probe workflow with
+   `XLLE_HOTPACKET_PROBE_RESIDENT_FIXTURE=primary`.
+
+Next targets in confidence order: (1) extend the resident texture-modulate route to
+the captured texmod+depth family's exact depth contract (packet-level differential work
+through the probe above until 0 mismatches, then admission widening and full A|B 12B
+validation); (2) same for the primary W-expansion family; (3) page-lazy color resolve;
+(4) sampler re-runs after each retained change to re-rank buckets.
 
 ## Prior optimization cursor (2026-08-13)
 
