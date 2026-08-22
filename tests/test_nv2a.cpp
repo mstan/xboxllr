@@ -8391,9 +8391,21 @@ int main() {
                 resident.raster_state[xlle::Nv2a::kRasterBlendSrc];
             resident.fixture_blend_dst =
                 resident.raster_state[xlle::Nv2a::kRasterBlendDst];
-            resident.fixture_depth_test_enabled = false;
-            resident.fixture_depth_write_enabled = false;
-            resident.fixture_depth_func = 0x0207;
+            // Default probes disable depth so families without an exact
+            // resident depth contract still compare meaningfully. Set
+            // XLLE_HOTPACKET_PROBE_KEEP_DEPTH=1 to preserve the captured
+            // depth configuration instead (used to validate resident depth
+            // support against software reference output byte-for-byte).
+            const bool probe_keep_depth =
+                std::getenv("XLLE_HOTPACKET_PROBE_KEEP_DEPTH") != nullptr;
+            resident.fixture_depth_test_enabled =
+                probe_keep_depth &&
+                resident.raster_state[xlle::Nv2a::kRasterEnables] & (1u << 3);
+            resident.fixture_depth_write_enabled =
+                probe_keep_depth &&
+                resident.raster_state[xlle::Nv2a::kRasterDepthMask] != 0;
+            resident.fixture_depth_func =
+                resident.raster_state[xlle::Nv2a::kRasterDepthFunc];
             resident.fixture_color_format_x8 = true;
             resident.fixture_texture_passthrough = false;
 

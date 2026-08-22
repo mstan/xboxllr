@@ -66,15 +66,23 @@ Hotpacket fixtures captured for the two largest remaining software-fallback fami
 (both capture replays stayed exact at `876b58c2...`; fixtures live in `build/`, git-
 ignored):
 
-1. `build/generic-hotpacket-texmod-depth-789a30f9-v1.xgp` — surface `0x03628000`,
-   shader 1, enables `0x0c`, ~3.46M fragments with depth READS per final interval,
-   ~0.30s/interval software raster time. Rejected from residency on depth
-   (`machine-side kDepth` at the `uses_depth` check in the resident admission chain)
-   and from tile-bin compute on combiner words. Hotpacket probe result with the
-   existing resident texture fixture (depth force-disabled, as the probe does):
-   `mismatches=621341 channels / 502392 pixels, maxd=228, alpha channel dominant`
-   — i.e., extending the resident texture-modulate route to this family REQUIRES
-   exact depth-test support; without it nearly every covered pixel diverges.
+1. `build/generic-hotpacket-texmod-depth-789a30f9-v1.xgp` — surface `0x03628000`
+   (1280x480 linear A8R8G8B8, depth `0x033d0000`), shader 1, ~3.46M fragments with
+   depth READS per final interval, ~0.30s/interval software raster time. Full state
+   decoded from the packet's raster words: **depth LEQUAL (`0x0203`) test with depth
+   write ENABLED, no blending, GEQUAL-1 alpha kill, color ICW `0x08200000`
+   (texel-passthrough RGB), alpha ICW `0x11180000` = CONSTANT_COLOR0.a x TEXTURE0.a,
+   constant0 `0xC4A0FF60`, one combiner stage, cull-front**. This exact word pair is
+   unmatched by every retained accelerated contract — hence the combiner-words reject.
+   Probe evidence: with the resident texture fixture as-is, mismatches are
+   `621341 channels / 502392 pixels, maxd=228, alpha channel dominant (got ff,
+   expected 62-class values)` and IDENTICAL with `XLLE_HOTPACKET_PROBE_KEEP_DEPTH=1`
+   (new probe toggle in `test_nv2a.cpp` that preserves captured depth config) —
+   i.e., all fragments pass LEQUAL here anyway; the real gap is the alpha combiner
+   (`c0.a * texel.a`), not depth. Next step for this family: a resident/compute
+   shader variant emitting `vec4(texel.rgb, texel.a * constant_alpha)` plus an
+   admission signature on `(ColorIcw0==0x08200000, AlphaIcw0==0x11180000)` —
+   then probe to 0 mismatches, widen admission, full A|B 12B.
    Probe invocation:
    `XLLE_HOTPACKET_PROBE=1 XLLE_HOTPACKET_PROBE_PATH=<xgp> XLLE_HOTPACKET_PROBE_RESIDENT_FIXTURE=texture build-release\test_nv2a.exe`.
 2. `build/generic-hotpacket-primary-wexp-68d00785-v1.xgp` — surface `0x03aa4000`,
@@ -82,11 +90,9 @@ ignored):
    (W-plane crossing / fixed-point bounds). Same probe workflow with
    `XLLE_HOTPACKET_PROBE_RESIDENT_FIXTURE=primary`.
 
-Next targets in confidence order: (1) extend the resident texture-modulate route to
-the captured texmod+depth family's exact depth contract (packet-level differential work
-through the probe above until 0 mismatches, then admission widening and full A|B 12B
-validation); (2) same for the primary W-expansion family; (3) page-lazy color resolve;
-(4) sampler re-runs after each retained change to re-rank buckets.
+Next targets in confidence order: (1) the texel-passthrough + constant-modulated-alpha
+shader variant above; (2) same differential treatment for the primary W-expansion
+family; (3) page-lazy color resolve; (4) sampler re-runs after each retained change.
 
 ## Prior optimization cursor (2026-08-13)
 
