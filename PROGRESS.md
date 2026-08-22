@@ -94,6 +94,19 @@ Next targets in confidence order: (1) the texel-passthrough + constant-modulated
 shader variant above; (2) same differential treatment for the primary W-expansion
 family; (3) page-lazy color resolve; (4) sampler re-runs after each retained change.
 
+Session addendum (same day): the texmod-depth contract work progressed to a
+uniform-driven resident shader implementation and probe validation — the constant-
+alpha math is provably correct where applied, but probe experiments exposed that the
+family samples CLAMP_TO_BORDER while the resident fixture implements REPEAT, which is
+the dominant divergence. The uniform-driven variant was REVERTED after two exact 12B
+runs measured ~11% below the retained pair with a post-revert control also low
+(attribution: host drift across the marathon session, unconfirmed). Retained from this
+work: probe env toggles (`XLLE_HOTPACKET_PROBE_KEEP_DEPTH`,
+`XLLE_HOTPACKET_PROBE_ALPHA_CONTRACT=const-mod`), xgp v3 serialization with
+`fixture_alpha_constant_modulate`/`fixture_alpha_kill_zero`, and the corrected probe
+(no forced x8). Next concrete step: border-clamp bilinear sampling in the resident
+texture fixture, then admission widening, on a re-baselined host.
+
 ## Prior optimization cursor (2026-08-13)
 
 Latest retained measurement tooling: `--perf-accounting` now emits `[perf-generic-detail]`
