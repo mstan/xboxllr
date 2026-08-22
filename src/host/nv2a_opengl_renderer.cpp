@@ -152,12 +152,19 @@ constexpr unsigned int kGlNoError = 0;
 
 void restore_previous_gl_context(SDL_Window* previous_window,
                                  SDL_GLContext previous_context,
-                                 SDL_Window* fallback_window) {
+                                 SDL_Window* fallback_window,
+                                 size_t perf_site) {
+    const auto started = std::chrono::steady_clock::now();
     if (previous_context) {
         SDL_GL_MakeCurrent(previous_window, previous_context);
     } else {
         SDL_GL_MakeCurrent(fallback_window, nullptr);
     }
+    perf::record_gl_context_site(
+        perf_site,
+        static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                  std::chrono::steady_clock::now() - started)
+                                  .count()));
 }
 
 // `color` begins as the owned guest surface snapshot.  The integer edge equations
@@ -1162,11 +1169,13 @@ public:
             SDL_Window* previous_window;
             SDL_GLContext previous_context;
             SDL_Window* fallback_window;
+            size_t perf_site;
             ~ContextRestore() {
                 restore_previous_gl_context(previous_window, previous_context,
-                                            fallback_window);
+                                            fallback_window, perf_site);
             }
-        } restore{previous_window, previous_context, window_};
+        } restore{previous_window, previous_context, window_,
+                  perf::kGlContextOtherRestore};
 
         unsigned int program = 0;
         if (!compile_program(kRgba8ImageStoreProbeSource, "rgba8-image-store",
@@ -1266,11 +1275,13 @@ public:
             SDL_Window* previous_window;
             SDL_GLContext previous_context;
             SDL_Window* fallback_window;
+            size_t perf_site;
             ~ContextRestore() {
                 restore_previous_gl_context(previous_window, previous_context,
-                                            fallback_window);
+                                            fallback_window, perf_site);
             }
-        } restore{previous_window, previous_context, window_};
+        } restore{previous_window, previous_context, window_,
+                  perf::kGlContextOtherRestore};
 
         unsigned int program = 0;
         if (!compile_program(kRgba8ImageLoadBlendProbeSource,
@@ -1544,7 +1555,15 @@ public:
                                   perf::g_calls_renderer_resident_context);
             previous_window = SDL_GL_GetCurrentWindow();
             previous_context = SDL_GL_GetCurrentContext();
-            if (!SDL_GL_MakeCurrent(window_, context_)) {
+            const auto make_current_started = std::chrono::steady_clock::now();
+            const bool make_current_ok = SDL_GL_MakeCurrent(window_, context_);
+            perf::record_gl_context_site(
+                perf::kGlContextResidentSubmitEnter,
+                static_cast<uint64_t>(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now() - make_current_started)
+                    .count()));
+            if (!make_current_ok) {
                 error = std::string("OpenGL resident context lost: ") +
                         SDL_GetError();
                 return false;
@@ -1554,13 +1573,15 @@ public:
             SDL_Window* previous_window;
             SDL_GLContext previous_context;
             SDL_Window* fallback_window;
+            size_t perf_site;
             ~ContextRestore() {
                 perf::ScopedAdd timer(perf::g_ns_renderer_resident_context,
                                       perf::g_calls_renderer_resident_context);
                 restore_previous_gl_context(previous_window, previous_context,
-                                            fallback_window);
+                                            fallback_window, perf_site);
             }
-        } restore{previous_window, previous_context, window_};
+        } restore{previous_window, previous_context, window_,
+                  perf::kGlContextResidentSubmitRestore};
         const uint32_t pitch = packet.surface_pitch & 0xffffu;
         const uint32_t width = pitch / 4;
         const uint32_t height = packet.surface_height;
@@ -1888,20 +1909,32 @@ public:
         if (!surface) return true;
         SDL_Window* previous_window = SDL_GL_GetCurrentWindow();
         SDL_GLContext previous_context = SDL_GL_GetCurrentContext();
-        if (!SDL_GL_MakeCurrent(window_, context_)) {
-            error = std::string("OpenGL resident resolve context lost: ") +
-                    SDL_GetError();
-            return false;
+        {
+            const auto make_current_started = std::chrono::steady_clock::now();
+            const bool make_current_ok = SDL_GL_MakeCurrent(window_, context_);
+            perf::record_gl_context_site(
+                perf::kGlContextColorResolveEnter,
+                static_cast<uint64_t>(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now() - make_current_started)
+                    .count()));
+            if (!make_current_ok) {
+                error = std::string("OpenGL resident resolve context lost: ") +
+                        SDL_GetError();
+                return false;
+            }
         }
         struct ContextRestore {
             SDL_Window* previous_window;
             SDL_GLContext previous_context;
             SDL_Window* fallback_window;
+            size_t perf_site;
             ~ContextRestore() {
                 restore_previous_gl_context(previous_window, previous_context,
-                                            fallback_window);
+                                            fallback_window, perf_site);
             }
-        } restore{previous_window, previous_context, window_};
+        } restore{previous_window, previous_context, window_,
+                  perf::kGlContextColorResolveRestore};
         {
             perf::ScopedAdd timer(perf::g_ns_renderer_resolve,
                                   perf::g_calls_renderer_resolve);
@@ -1951,20 +1984,32 @@ public:
         if (!surface) return true;
         SDL_Window* previous_window = SDL_GL_GetCurrentWindow();
         SDL_GLContext previous_context = SDL_GL_GetCurrentContext();
-        if (!SDL_GL_MakeCurrent(window_, context_)) {
-            error = std::string("OpenGL resident depth resolve context lost: ") +
-                    SDL_GetError();
-            return false;
+        {
+            const auto make_current_started = std::chrono::steady_clock::now();
+            const bool make_current_ok = SDL_GL_MakeCurrent(window_, context_);
+            perf::record_gl_context_site(
+                perf::kGlContextDepthResolveEnter,
+                static_cast<uint64_t>(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now() - make_current_started)
+                    .count()));
+            if (!make_current_ok) {
+                error = std::string("OpenGL resident depth resolve context lost: ") +
+                        SDL_GetError();
+                return false;
+            }
         }
         struct ContextRestore {
             SDL_Window* previous_window;
             SDL_GLContext previous_context;
             SDL_Window* fallback_window;
+            size_t perf_site;
             ~ContextRestore() {
                 restore_previous_gl_context(previous_window, previous_context,
-                                            fallback_window);
+                                            fallback_window, perf_site);
             }
-        } restore{previous_window, previous_context, window_};
+        } restore{previous_window, previous_context, window_,
+                  perf::kGlContextDepthResolveRestore};
         std::vector<uint32_t> gl_depth(static_cast<size_t>(surface->width) *
                                        surface->height);
         bind_framebuffer_(kGlFramebuffer, resident_fbo_);
@@ -2033,20 +2078,32 @@ public:
         }
         SDL_Window* previous_window = SDL_GL_GetCurrentWindow();
         SDL_GLContext previous_context = SDL_GL_GetCurrentContext();
-        if (!SDL_GL_MakeCurrent(window_, context_)) {
-            error = std::string("OpenGL resident region context lost: ") +
-                    SDL_GetError();
-            return false;
+        {
+            const auto make_current_started = std::chrono::steady_clock::now();
+            const bool make_current_ok = SDL_GL_MakeCurrent(window_, context_);
+            perf::record_gl_context_site(
+                perf::kGlContextRegionUploadEnter,
+                static_cast<uint64_t>(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now() - make_current_started)
+                    .count()));
+            if (!make_current_ok) {
+                error = std::string("OpenGL resident region context lost: ") +
+                        SDL_GetError();
+                return false;
+            }
         }
         struct ContextRestore {
             SDL_Window* previous_window;
             SDL_GLContext previous_context;
             SDL_Window* fallback_window;
+            size_t perf_site;
             ~ContextRestore() {
                 restore_previous_gl_context(previous_window, previous_context,
-                                            fallback_window);
+                                            fallback_window, perf_site);
             }
-        } restore{previous_window, previous_context, window_};
+        } restore{previous_window, previous_context, window_,
+                  perf::kGlContextRegionUploadRestore};
         bind_texture_(kGlTexture2D, surface->texture);
         pixel_store_i_(kGlUnpackAlignment, 1);
         tex_sub_image_2d_(kGlTexture2D, 0, 0,
@@ -2084,19 +2141,31 @@ public:
                                  std::string& error) override {
         SDL_Window* previous_window = SDL_GL_GetCurrentWindow();
         SDL_GLContext previous_context = SDL_GL_GetCurrentContext();
-        if (!SDL_GL_MakeCurrent(window_, context_)) {
-            error = std::string("OpenGL compute context lost: ") + SDL_GetError();
-            return false;
+        {
+            const auto make_current_started = std::chrono::steady_clock::now();
+            const bool make_current_ok = SDL_GL_MakeCurrent(window_, context_);
+            perf::record_gl_context_site(
+                perf::kGlContextComputeSubmitEnter,
+                static_cast<uint64_t>(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now() - make_current_started)
+                    .count()));
+            if (!make_current_ok) {
+                error = std::string("OpenGL compute context lost: ") + SDL_GetError();
+                return false;
+            }
         }
         struct ContextRestore {
             SDL_Window* previous_window;
             SDL_GLContext previous_context;
             SDL_Window* fallback_window;
+            size_t perf_site;
             ~ContextRestore() {
                 restore_previous_gl_context(previous_window, previous_context,
-                                            fallback_window);
+                                            fallback_window, perf_site);
             }
-        } restore{previous_window, previous_context, window_};
+        } restore{previous_window, previous_context, window_,
+                  perf::kGlContextComputeSubmitRestore};
         if (packet.compute_fixture ==
             Nv2aGenericCombinerPacket::ComputeFixture::kResidentPrimaryColorTriangles) {
             if (packet.color_input.size() % sizeof(uint32_t) != 0 ||
@@ -3227,7 +3296,8 @@ std::unique_ptr<Nv2aRenderer> create_nv2a_opengl_renderer(std::string& error) {
         std::make_unique<OpenGlNv2aRenderer>(window, context, owns_video, 0, 0, 0,
                                              0, 0, 0, 0);
     if (!renderer->initialize(error)) return nullptr;
-    restore_previous_gl_context(previous_window, previous_context, window);
+    restore_previous_gl_context(previous_window, previous_context, window,
+                                perf::kGlContextOtherRestore);
     std::printf("[nv2a-renderer] opengl context ready: GL %d.%d; narrow compute fixtures enabled\n",
                 major, minor);
     return renderer;

@@ -608,4 +608,80 @@ inline std::string format_witnessed_profile_report() {
     return out;
 }
 
+// Per-call-site SDL_GL_MakeCurrent wall time (enter and context-restore
+// exits). Settles where host-side GL context churn actually blocks; the
+// aggregate `rctx` bucket cannot distinguish sites.
+inline constexpr size_t kGlContextSiteCount = 12;
+enum GlContextSite : size_t {
+    kGlContextResidentSubmitEnter = 0,
+    kGlContextResidentSubmitRestore,
+    kGlContextComputeSubmitEnter,
+    kGlContextComputeSubmitRestore,
+    kGlContextColorResolveEnter,
+    kGlContextColorResolveRestore,
+    kGlContextDepthResolveEnter,
+    kGlContextDepthResolveRestore,
+    kGlContextRegionUploadEnter,
+    kGlContextRegionUploadRestore,
+    kGlContextOtherEnter,
+    kGlContextOtherRestore,
+};
+inline constexpr std::array<const char*, kGlContextSiteCount>
+    kGlContextSiteNames{{
+        "resident-submit-enter",
+        "resident-submit-restore",
+        "compute-submit-enter",
+        "compute-submit-restore",
+        "color-resolve-enter",
+        "color-resolve-restore",
+        "depth-resolve-enter",
+        "depth-resolve-restore",
+        "region-upload-enter",
+        "region-upload-restore",
+        "other-enter",
+        "other-restore",
+    }};
+inline std::array<std::atomic<uint64_t>, kGlContextSiteCount> g_ns_gl_context{};
+inline std::array<std::atomic<uint64_t>, kGlContextSiteCount>
+    g_calls_gl_context{};
+
+// Always records (callers pay one steady_clock read per MakeCurrent); the
+// formatter gates on g_enabled so normal replays emit nothing.
+inline void record_gl_context_site(size_t site, uint64_t ns) {
+    if (site >= kGlContextSiteCount) site = kGlContextSiteCount - 1;
+    g_ns_gl_context[site].fetch_add(ns, std::memory_order_relaxed);
+    g_calls_gl_context[site].fetch_add(1, std::memory_order_relaxed);
+}
+
+inline std::string format_gl_context_report() {
+    if (!g_enabled) return {};
+    std::string out = "[perf-gl-context] top=";
+    struct Entry {
+        uint64_t ns = 0;
+        uint64_t calls = 0;
+        size_t index = 0;
+    };
+    std::array<Entry, kGlContextSiteCount> entries{};
+    for (size_t index = 0; index < kGlContextSiteCount; ++index) {
+        entries[index] = {g_ns_gl_context[index].load(),
+                          g_calls_gl_context[index].load(), index};
+    }
+    std::sort(entries.begin(), entries.end(),
+              [](const Entry& a, const Entry& b) { return a.ns > b.ns; });
+    bool any = false;
+    for (const Entry& entry : entries) {
+        if (entry.ns == 0 && entry.calls == 0) continue;
+        if (any) out += " ";
+        char buf[192];
+        std::snprintf(buf, sizeof(buf), "%s:ns%llu/n%llu",
+                      kGlContextSiteNames[entry.index],
+                      (unsigned long long)entry.ns,
+                      (unsigned long long)entry.calls);
+        out += buf;
+        any = true;
+    }
+    if (!any) out += "none";
+    return out;
+}
+
 }  // namespace xlle::perf

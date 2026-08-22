@@ -121,36 +121,61 @@ class HostSampleProfiler {
     uint32_t id;  // index into module_names_
   };
 
-  // Snapshots the loaded module list once so per-sample attribution is a
-  // binary search instead of an API call.
-  void snapshot_modules() {
-    module_names_.clear();
-    module_ranges_.clear();
-    module_names_.push_back("[no-module]");
-    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, process_id_);
-    if (snapshot != INVALID_HANDLE_VALUE) {
-      MODULEENTRY32W entry{};
-      entry.dwSize = sizeof(entry);
-      if (Module32FirstW(snapshot, &entry)) {
-        do {
-          ModuleRange range{};
-          range.base = reinterpret_cast<uintptr_t>(entry.modBaseAddr);
-          range.size = entry.modBaseSize;
-          range.id = static_cast<uint32_t>(module_names_.size());
-          char name[MAX_PATH];
-          WideCharToMultiByte(CP_UTF8, 0, entry.szModule, -1, name,
-                              sizeof(name), nullptr, nullptr);
-          module_names_.push_back(name);
-          module_ranges_.push_back(range);
-        } while (Module32NextW(snapshot, &entry));
+    // Snapshots the loaded module list once so per-sample attribution is a
+    // binary search instead of an API call.
+    void snapshot_modules() {
+      module_names_.clear();
+      module_ranges_.clear();
+      module_names_.push_back("[no-module]");
+      HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, process_id_);
+      if (snapshot != INVALID_HANDLE_VALUE) {
+        MODULEENTRY32W entry{};
+        entry.dwSize = sizeof(entry);
+        if (Module32FirstW(snapshot, &entry)) {
+          do {
+            ModuleRange range{};
+            range.base = reinterpret_cast<uintptr_t>(entry.modBaseAddr);
+            range.size = entry.modBaseSize;
+            range.id = static_cast<uint32_t>(module_names_.size());
+            char name[MAX_PATH];
+            WideCharToMultiByte(CP_UTF8, 0, entry.szModule, -1, name,
+                                sizeof(name), nullptr, nullptr);
+            module_names_.push_back(name);
+            module_ranges_.push_back(range);
+          } while (Module32NextW(snapshot, &entry));
+        }
+        CloseHandle(snapshot);
       }
-      CloseHandle(snapshot);
+      std::sort(module_ranges_.begin(), module_ranges_.end(),
+                [](const ModuleRange& a, const ModuleRange& b) {
+                  return a.base < b.base;
+                });
+      resolve_text_range();
     }
-    std::sort(module_ranges_.begin(), module_ranges_.end(),
-              [](const ModuleRange& a, const ModuleRange& b) {
-                return a.base < b.base;
-              });
-  }
+
+    // Parses the main image's section headers so the raw stack scan can
+    // reject non-code xlle addresses (saved data pointers into .data/.rdata
+    // otherwise masquerade as return sites).
+    void resolve_text_range() {
+      text_begin_ = 0;
+      text_end_ = 0;
+      HMODULE base = reinterpret_cast<HMODULE>(module_base_);
+      const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+      if (!dos || dos->e_magic != IMAGE_DOS_SIGNATURE) return;
+      const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(
+          reinterpret_cast<const uint8_t*>(base) + dos->e_lfanew);
+      if (nt->Signature != IMAGE_NT_SIGNATURE) return;
+      const auto* section = IMAGE_FIRST_SECTION(nt);
+      for (unsigned index = 0; index < nt->FileHeader.NumberOfSections;
+           ++index, ++section) {
+        if (std::memcmp(section->Name, ".text", 6) == 0) {
+          text_begin_ =
+              module_base_ + static_cast<uintptr_t>(section->VirtualAddress);
+          text_end_ = text_begin_ + section->Misc.VirtualSize;
+          return;
+        }
+      }
+    }
 
   // Returns the matched range or nullptr; rva receives rip relative to base
   // (or the raw rip when no module matches).
@@ -245,11 +270,13 @@ class HostSampleProfiler {
       }
     }
     // Meta-unwind failed (GL ICD frames often break it): fall back to a raw
-    // stack scan for the nearest value that is an xlle code address.
+    // stack scan for the nearest value that is an xlle .text address. The
+    // text-range filter rejects saved data pointers (.data/.rdata globals)
+    // that otherwise masquerade as return sites.
     uint8_t stack[16384];
     SIZE_T read = 0;
     const uintptr_t rsp = static_cast<uintptr_t>(context.Rsp);
-    if (ReadProcessMemory(process_handle_,
+    if (text_begin_ && ReadProcessMemory(process_handle_,
                           reinterpret_cast<LPCVOID>(rsp), stack,
                           sizeof(stack), &read) &&
         read >= sizeof(uintptr_t)) {
@@ -257,7 +284,7 @@ class HostSampleProfiler {
            offset += sizeof(uintptr_t)) {
         uintptr_t value;
         std::memcpy(&value, stack + offset, sizeof(value));
-        if (value >= module_base_ && value < module_base_ + module_size_) {
+        if (value >= text_begin_ && value < text_end_) {
           return static_cast<uint32_t>(value - module_base_);
         }
       }
@@ -381,6 +408,8 @@ class HostSampleProfiler {
   DWORD process_id_ = 0;
   DWORD main_thread_id_ = 0;
   bool sym_initialized_ = false;
+  uintptr_t text_begin_ = 0;
+  uintptr_t text_end_ = 0;
   std::vector<ModuleRange> module_ranges_;
   std::vector<std::string> module_names_;
   uint64_t samples_ = 0;

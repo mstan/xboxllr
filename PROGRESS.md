@@ -49,20 +49,20 @@ All three are validated exact at 1B and 12B (final SHA `876b58c2...`, 1B golden
 reports. Session cumulative: final FPS 3.68 -> about 4.0 (+9%), final-four wall
 37.063s -> ~34s (-8%), resident re-uploads 725 -> 143 per run, with byte-exact output.
 
-Navigation-window (10.5B-12B) host attribution from
-`build/oxalpha-sampler-12b-v6.report.json` (exact, fps 3.592, taken BEFORE the
-region-upload and churn fixes): ~39% blocked in ntdll syscall stubs beneath GL submits
-(`submit_generic_combiner` non-resident compute, `submit_resident_generic_combiner`,
-`ensure_resident_surface`), ~34% Unicorn per-instruction hook machinery
-(`helper_uc_tracecode` + `code_trampoline`; load-bearing for sti-window IRQ delivery —
-do not remove without a timing-exact replacement), ~14% msvcrt memcpy/memset (per-packet
-vector churn — now largely fixed — plus readback row copies), ~2% generic software
-raster. Next targets in confidence order: (1) coherent resident tile-bin compute for the
-dominant texmod family so `submit_generic_combiner`'s full-surface snapshot/readback
-round trips (`gnsub` ~0.5-2.5s per final interval, and its syscall-stall share) disappear;
-(2) page-lazy color resolve so software batches read back only the pages they blend
-against; (3) re-run the sampler on the current build to re-rank the remaining buckets
-before choosing further CPU-side work.
+Navigation-window (10.5B-12B) host attribution — refined 2026-08-21 with per-site GL
+context counters and a text-filtered caller scan: the dominant ntdll leaf share (~40%
+uninstrumented) is a driver-side SYSCALL STORM (rapid non-blocking thread-info/memory-free
+syscalls inside the ICD on every submit-path GL entry; software-renderer control run shows
+none), concentrated under `submit_generic_combiner` (non-resident compute), resident
+submits, and region uploads. MakeCurrent measured small (~1.9s of a 240s run) — earlier
+blame on context switching is disproven. `--perf-accounting` perturbs the storm (41%->18%),
+so read driver-timing buckets with that in mind. Unicorn per-instruction hook machinery
+(`helper_uc_tracecode` + `code_trampoline`; load-bearing for sti-window IRQ delivery)
+remains ~34-43% and needs a timing-exact redesign, not removal. Next targets in confidence
+order: (1) cached GL state transitions to cut driver entries per frame (conservative
+invalidation across resolve/upload paths); (2) coherent resident tile-bin compute for the
+dominant texmod family to remove whole non-resident round trips; (3) page-lazy color
+resolve for software-batch blending reads.
 
 ## Prior optimization cursor (2026-08-13)
 

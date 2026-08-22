@@ -3,6 +3,43 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-21 - GL syscall-storm attribution and per-site context accounting
+
+Extended observability and settled the navigation-window host-time question:
+
+* Per-call-site `SDL_GL_MakeCurrent` counters (`[perf-gl-context]`, sites in
+  `perf_accounting.hpp`, instrumentation in the OpenGL renderer). Measured result over a
+  full 12B replay (`build/gl-context-perf-v1-12b.report.json`): resident-submit
+  enter+restore ~1.85s of a ~240s run (~76us + ~51us x 14,468 calls) — real overhead but
+  NOT the dominant cost. This DISPROVES the earlier sampler-pair reading that blamed
+  context switching.
+* Sampler raw-stack-scan now accepts only xlle `.text` addresses (PE section header
+  parse in `sample_profiler.hpp`), rejecting saved `.data`/`.rdata` pointers that had
+  masqueraded as call sites. Re-validated exact: `build/oxalpha-sampler-text-v1.report.json`
+  final SHA `876b58c2...`.
+
+Attribution findings for the late dashboard window (10.5B-12B):
+
+1. The dominant ntdll leaf share (~40% in uninstrumented runs) is a SYSCALL STORM, not
+   kernel blocking: samples sit exactly on the `ret` after `syscall` of two rapid,
+   non-blocking stubs. It exists ONLY with the OpenGL renderer — a software-renderer
+   control run shows zero storm (`build/oxalpha-sampler-sw-v1.stdout.log`). The text-filtered
+   caller scan places it under `submit_generic_combiner` (non-resident compute; largest),
+   `submit_resident_generic_combiner`, and `upload_resident_color_rows` — i.e., the ICD
+   performs thread-info-query and memory-free bookkeeping on every submit-path GL entry.
+2. `--perf-accounting` itself perturbs the storm (41% -> 18% of window samples in the
+   combined run `build/oxalpha-both-v1.stdout.log`), so driver-timing buckets must be read
+   with that Heisenberg effect in mind.
+3. Disproven this session (do not re-chase without new evidence): MakeCurrent as primary
+   blocker; recycled non-resident output buffers as a speed win (exact but neutral:
+   `build/output-scratch-noperf-v1-12b.report.json` +0.63% wall vs
+   `build/scratch-churn-noperf-v1-12b.report.json`; reverted).
+
+Next optimization direction this points to: reduce the NUMBER of driver entries per frame
+(cached GL state transitions across submits/resolves/uploads with conservative
+invalidation), rather than making individual calls cheaper; then the coherent resident
+tile-bin compute route to remove whole non-resident round trips.
+
 ## 2026-08-21 - Recycled surface-snapshot buffers remove per-batch MB-scale churn
 
 The generic-combiner packet's `color_input`/`depth_input` snapshots, the resident

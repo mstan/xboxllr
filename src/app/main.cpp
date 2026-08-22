@@ -2787,6 +2787,10 @@ int main(int argc, char** argv) {
                 if (!renderer_resolve_context_report.empty())
                     std::printf("%s\n",
                                 renderer_resolve_context_report.c_str());
+                const std::string gl_context_report =
+                    xlle::perf::format_gl_context_report();
+                if (!gl_context_report.empty())
+                    std::printf("%s\n", gl_context_report.c_str());
                 print_memory_diagnostics();
                 host_input.close();
                 const X86Regs stopped = mach.cpu().get_regs();
@@ -2849,6 +2853,10 @@ int main(int argc, char** argv) {
                 if (!renderer_resolve_context_report.empty())
                     std::printf("%s\n",
                                 renderer_resolve_context_report.c_str());
+                const std::string gl_context_report =
+                    xlle::perf::format_gl_context_report();
+                if (!gl_context_report.empty())
+                    std::printf("%s\n", gl_context_report.c_str());
                 print_memory_diagnostics();
             }
             host_input.close();
