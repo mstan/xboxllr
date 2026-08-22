@@ -1669,7 +1669,7 @@ public:
             tex_parameter_i_(kGlTexture2D, kGlTextureMagFilter, kGlNearest);
             tex_parameter_i_(kGlTexture2D, kGlTextureWrapS, kGlRepeat);
             tex_parameter_i_(kGlTexture2D, kGlTextureWrapT, kGlRepeat);
-            std::vector<uint8_t> rgba;
+            std::vector<uint8_t>& rgba = upload_staging_;
             guest_words_to_rgba_unflipped(texture.input, rgba, texture.width,
                                           texture.height, false);
             pixel_store_i_(kGlUnpackAlignment, 1);
@@ -1871,7 +1871,12 @@ public:
     bool resolve_resident_color_surface(uint32_t address, size_t size,
                                         Nv2aResidentColorResolve& resolve,
                                         std::string& error) override {
-        resolve = {};
+        // The caller moves a recycled buffer into resolve.data; keep its
+        // capacity and only overwrite the fields this call owns. Paths that
+        // resolve nothing MUST clear data so the caller's empty-check stays
+        // truthful with a recycled buffer.
+        resolve.address = 0;
+        resolve.data.clear();
         if (size == 0) return true;
         ResidentSurface* surface = nullptr;
         for (auto& candidate : resident_surfaces_) {
@@ -1900,15 +1905,16 @@ public:
         {
             perf::ScopedAdd timer(perf::g_ns_renderer_resolve,
                                   perf::g_calls_renderer_resolve);
-            std::vector<uint8_t> bgra(static_cast<size_t>(surface->width) *
-                                      surface->height * 4u);
+            const size_t pixel_bytes = static_cast<size_t>(surface->width) *
+                                       surface->height * 4u;
+            resolve_readback_scratch_.resize(pixel_bytes);
             bind_framebuffer_(kGlFramebuffer, resident_fbo_);
             framebuffer_texture_2d_(kGlFramebuffer, kGlColorAttachment0,
                                     kGlTexture2D, surface->texture, 0);
             pixel_store_i_(kGlPackAlignment, 1);
             read_pixels_(0, 0, static_cast<int>(surface->width),
                          static_cast<int>(surface->height), kGlBgra,
-                         kGlUnsignedByte, bgra.data());
+                         kGlUnsignedByte, resolve_readback_scratch_.data());
             perf::record_renderer_resolve_pixels(
                 static_cast<uint64_t>(surface->width) * surface->height);
             if (get_error_() != kGlNoError) {
@@ -1917,11 +1923,12 @@ public:
             }
             resolve.address = surface->address;
             resolve.data.resize(surface->size);
+            const uint8_t* bgra = resolve_readback_scratch_.data();
             const size_t row_bytes = static_cast<size_t>(surface->width) * 4u;
             for (uint32_t y = 0; y < surface->height; ++y) {
                 const uint32_t gl_y = surface->height - 1u - y;
                 std::memcpy(resolve.data.data() + static_cast<size_t>(y) * row_bytes,
-                            bgra.data() + static_cast<size_t>(gl_y) * row_bytes,
+                            bgra + static_cast<size_t>(gl_y) * row_bytes,
                             row_bytes);
             }
         }
@@ -2874,7 +2881,7 @@ private:
         } else {
             bind_texture_(kGlTexture2D, slot->texture);
         }
-        std::vector<uint8_t> rgba;
+        std::vector<uint8_t>& rgba = upload_staging_;
         guest_words_to_rgba(packet.color_input, rgba, width, height,
                             packet.fixture_color_format_x8);
         pixel_store_i_(kGlUnpackAlignment, 1);
@@ -3127,6 +3134,10 @@ private:
     static constexpr size_t kMaxResidentSurfaces = 8;
     std::array<ResidentSurface, kMaxResidentSurfaces> resident_surfaces_{};
     std::vector<uint8_t> region_staging_;
+    // Recycled glReadPixels target for resident color resolves.
+    std::vector<uint8_t> resolve_readback_scratch_;
+    // Recycled guest->RGBA staging for resident uploads.
+    std::vector<uint8_t> upload_staging_;
     ResidentSurface* active_resident_ = nullptr;
     ResidentSurface* active_depth_resident_ = nullptr;
     std::array<CachedBuffer, 4> dashboard_texture_cache_{};

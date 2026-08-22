@@ -36,28 +36,33 @@ commits without explicit current authorization.
 
 Retained this session: (1) an opt-in host sampled profiler (`--host-sample-profile`,
 `src/host/sample_profiler.hpp` + `tools/symbolize_host_profile.py`) that attributes main-
-thread host time per 1.5B-instruction window with module and xlle-caller attribution; and
-(2) resident region uploads after software-fallback batches (`refresh_resident_color_after_software_write`
+thread host time per 1.5B-instruction window with module and xlle-caller attribution; (2)
+resident region uploads after software-fallback batches (`refresh_resident_color_after_software_write`
 in `src/machine/nv2a.cpp`, `upload_resident_color_rows` in the OpenGL renderer): software
-writes no longer drop residency for the target surface; only the written rows upload back.
-Both are validated exact at 1B and 12B (final SHA `876b58c2...`, 1B golden `a6087ec5...`);
-evidence in `build/region-upload-{smoke-1b,noperf-v1-12b,noperf-v2-12b,perf-v1-12b}.report.json`.
-Final-four wall improved ~-1.8% no-accounting / -4.36% under accounting; resident
-re-uploads fell 725 -> 143 per run.
+writes no longer drop residency for the target surface; only the written rows upload back;
+(3) recycled surface-snapshot buffers (`SurfaceScratchSwap` in `rasterize_generic_combiner_batch`,
+renderer-side `resolve_readback_scratch_`/`upload_staging_`, caller-recycled resolve
+buffer) so multi-megabyte snapshots stop reallocating and zero-filling every batch.
+All three are validated exact at 1B and 12B (final SHA `876b58c2...`, 1B golden
+`a6087ec5...`); evidence in `build/region-upload-*.report.json`,
+`build/scratch-churn-*.report.json`, and `build/oxalpha-{baseline-a-noperf-v1,sampler-12b-v6}`
+reports. Session cumulative: final FPS 3.68 -> about 4.0 (+9%), final-four wall
+37.063s -> ~34s (-8%), resident re-uploads 725 -> 143 per run, with byte-exact output.
 
 Navigation-window (10.5B-12B) host attribution from
-`build/oxalpha-sampler-12b-v6.report.json` (exact, fps 3.592): ~39% blocked in ntdll
-syscall stubs beneath GL submits (`submit_generic_combiner` non-resident compute,
-`submit_resident_generic_combiner`, `ensure_resident_surface`), ~34% Unicorn per-
-instruction hook machinery (`helper_uc_tracecode` + `code_trampoline`; load-bearing for
-sti-window IRQ delivery — do not remove without a timing-exact replacement), ~14%
-msvcrt memcpy/memset (per-packet `vector::resize/_M_fill_assign` churn on multi-MB
-`color_input`/`depth_input` buffers plus readback row copies), ~2% generic software
-raster. Next targets in confidence order: (1) reuse per-packet staging vectors to kill
-the resize/fill churn; (2) coherent resident tile-bin compute for the dominant texmod
-family so `submit_generic_combiner`'s full-surface snapshot/readback round trips
-(`gnsub` ~0.5-2.5s per final interval) disappear; (3) page-lazy color resolve so
-software batches read back only the pages they blend against.
+`build/oxalpha-sampler-12b-v6.report.json` (exact, fps 3.592, taken BEFORE the
+region-upload and churn fixes): ~39% blocked in ntdll syscall stubs beneath GL submits
+(`submit_generic_combiner` non-resident compute, `submit_resident_generic_combiner`,
+`ensure_resident_surface`), ~34% Unicorn per-instruction hook machinery
+(`helper_uc_tracecode` + `code_trampoline`; load-bearing for sti-window IRQ delivery —
+do not remove without a timing-exact replacement), ~14% msvcrt memcpy/memset (per-packet
+vector churn — now largely fixed — plus readback row copies), ~2% generic software
+raster. Next targets in confidence order: (1) coherent resident tile-bin compute for the
+dominant texmod family so `submit_generic_combiner`'s full-surface snapshot/readback
+round trips (`gnsub` ~0.5-2.5s per final interval, and its syscall-stall share) disappear;
+(2) page-lazy color resolve so software batches read back only the pages they blend
+against; (3) re-run the sampler on the current build to re-rank the remaining buckets
+before choosing further CPU-side work.
 
 ## Prior optimization cursor (2026-08-13)
 

@@ -1302,6 +1302,13 @@ private:
     // Scratch for software-batch resident region uploads; reused to avoid
     // per-batch allocation churn.
     std::vector<uint8_t> region_upload_scratch_;
+    // Persistent backing storage swapped into the per-batch generic-combiner
+    // packet's surface snapshots so multi-megabyte buffers keep their capacity
+    // across batches instead of reallocating and zero-filling every submit.
+    std::vector<uint8_t> generic_color_input_scratch_;
+    std::vector<uint8_t> generic_depth_input_scratch_;
+    // Recycled GL->guest readback buffer for resident color resolves.
+    std::vector<uint8_t> color_resolve_scratch_;
     Ring<PushMethod> methods_;
     static constexpr size_t kClearTracePreMethods = 32;
     static constexpr size_t kClearTraceMethodLimit = 4096;

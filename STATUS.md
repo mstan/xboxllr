@@ -3,6 +3,38 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-21 - Recycled surface-snapshot buffers remove per-batch MB-scale churn
+
+The generic-combiner packet's `color_input`/`depth_input` snapshots, the resident
+resolve readback buffer (GL side and guest-write side), and the resident upload RGBA
+staging are now persistent recycled buffers instead of per-batch allocations:
+`Nv2a` swaps member scratch vectors into the packet for the submit scope with an RAII
+move-out/move-back guard (`SurfaceScratchSwap`), presenting the same empty-with-
+capacity state a fresh packet had; the OpenGL resolve path keeps its `glReadPixels`
+target in a member and no longer clears the caller-provided data buffer (paths that
+resolve nothing explicitly clear it so the caller's empty-check stays truthful);
+resident create-path uploads reuse one staging vector. This removes the multi-megabyte
+realloc/zero-fill per submit that the sampler attributed to msvcrt memcpy/memset
+(~14% of navigation-window host time).
+
+Validation: Release `xlle`/`test_nv2a` build clean; all 15 `build-release/test*.exe`
+passed (an intermediate version that carried stale snapshot sizes into admission
+predicates failed two focused accelerated-batch checks in `test_nv2a` and was fixed by
+clearing the swapped-in buffers — capacity is kept, visible size returns to zero); 1B
+smoke `build/scratch-churn-smoke-1b.report.json` exact/empty stderr with golden SHA
+`a6087ec5...`; two independent no-accounting 12B replays
+`build/scratch-churn-noperf-v1-12b.report.json` and
+`build/scratch-churn-noperf-v2-12b.report.json` exact/empty stderr with final SHA
+`876b58c2...`.
+
+Performance: versus this session's retained region-upload state
+(`build/region-upload-noperf-v2-12b.report.json`, final FPS 3.740), the two churn
+replays measured final FPS 4.044 and 3.981 and final-four wall 33.915s and ~34.6s —
+about `-6.85%` wall / `+8%` FPS on the repeat-pair comparison. Cumulative session
+progress against the original baseline
+(`build/oxalpha-baseline-a-noperf-v1-12b.report.json`, final FPS 3.68, final-four wall
+37.063s): final FPS about 4.0 (+9%) with byte-exact output throughout.
+
 ## 2026-08-21 - Resident region upload keeps software-written surfaces accelerated
 
 After a generic-combiner software-fallback batch writes guest color memory directly,

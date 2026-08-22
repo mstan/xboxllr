@@ -231,18 +231,28 @@ bool Nv2a::resolve_renderer_color_overlap(uint32_t address, size_t size,
     if (!renderer_ || size == 0) return true;
     for (;;) {
         Nv2aResidentColorResolve resolve;
+        // Recycle the readback buffer across resolves so repeated full-surface
+        // readbacks stop reallocating and zero-filling multi-megabyte vectors.
+        resolve.data = std::move(color_resolve_scratch_);
         std::string error;
         if (!renderer_->resolve_resident_color_surface(address, size, resolve,
                                                        error)) {
+            color_resolve_scratch_ = std::move(resolve.data);
             fault_(error.empty() ? "NV2A resident color resolve failed"
                                  : error.c_str());
             return false;
         }
-        if (resolve.data.empty()) return true;
+        if (resolve.data.empty()) {
+            color_resolve_scratch_ = std::move(resolve.data);
+            return true;
+        }
         perf::record_renderer_color_resolve_context(context, resolve.data.size());
-        if (!mem_write_ ||
-            !mem_write_(resolve.address, resolve.data.data(),
-                        resolve.data.size())) {
+        const bool wrote =
+            mem_write_ &&
+            mem_write_(resolve.address, resolve.data.data(),
+                       resolve.data.size());
+        color_resolve_scratch_ = std::move(resolve.data);
+        if (!wrote) {
             char why[160];
             std::snprintf(
                 why, sizeof(why),
@@ -7048,6 +7058,25 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         GenericResidentRejectReason::kCount;
     if (renderer_ && effective_clip_valid) {
         Nv2aGenericCombinerPacket packet;
+        // Reuse persistent surface-snapshot storage across batches: the
+        // renderer contract forbids retaining packet pointers after submit
+        // returns, so swapping the big vectors out and back is safe and keeps
+        // their capacity (avoids per-batch multi-MB realloc + zero-fill).
+        struct SurfaceScratchSwap {
+            std::vector<uint8_t>& scratch;
+            std::vector<uint8_t>& packet_buffer;
+            SurfaceScratchSwap(std::vector<uint8_t>& s,
+                               std::vector<uint8_t>& p)
+                : scratch(s), packet_buffer(p) {
+                packet_buffer = std::move(scratch);
+                // Keep the recycled capacity but present the same visible
+                // state a fresh packet would: empty with size() == 0.
+                packet_buffer.clear();
+            }
+            ~SurfaceScratchSwap() { scratch = std::move(packet_buffer); }
+        } color_input_swap(generic_color_input_scratch_, packet.color_input),
+            depth_input_swap(generic_depth_input_scratch_,
+                             packet.depth_input);
         packet.primitive_mode = primitive_mode_;
         packet.surface_format = surface_format_;
         packet.surface_pitch = surface_pitch_;
