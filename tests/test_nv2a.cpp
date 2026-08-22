@@ -8290,8 +8290,10 @@ int main() {
             char magic[8]{};
             CHECK(read_bytes(magic, sizeof(magic)));
             const uint32_t version = read_u32();
-            CHECK(std::memcmp(magic, "XLLEGPB2", 8) == 0);
-            CHECK(version == 2);
+            CHECK(std::memcmp(magic, "XLLEGPB", 7) == 0);
+            CHECK(magic[7] == '2' || magic[7] == '3');
+            CHECK(version == (magic[7] == '3' ? 3u : 2u));
+            const bool has_alpha_contract_fields = magic[7] == '3';
             const uint64_t candidate = read_u64();
             const uint64_t fingerprint = read_u64();
             const uint64_t full_hash = read_u64();
@@ -8325,6 +8327,10 @@ int main() {
             packet.fixture_texture_passthrough = read_u8() != 0;
             packet.fixture_texture_constant_color_alpha = read_u8() != 0;
             packet.fixture_color_format_x8 = read_u8() != 0;
+            if (has_alpha_contract_fields) {
+                packet.fixture_alpha_constant_modulate = read_u8() != 0;
+                packet.fixture_alpha_kill_zero = read_u8() != 0;
+            }
 
             const uint64_t vertex_count = read_u64();
             CHECK(vertex_count <= 20000);
@@ -8406,7 +8412,29 @@ int main() {
                 resident.raster_state[xlle::Nv2a::kRasterDepthMask] != 0;
             resident.fixture_depth_func =
                 resident.raster_state[xlle::Nv2a::kRasterDepthFunc];
-            resident.fixture_color_format_x8 = true;
+            // XLLE_HOTPACKET_PROBE_ALPHA_CONTRACT=const-mod drives the
+            // texel-passthrough + constant-modulated-alpha contract decoded
+            // from the fp=789a30f9 family (ColorIcw0=0x08200000 /
+            // AlphaIcw0=0x11180000, GEQUAL-1 alpha kill): RGB = texel,
+            // alpha = texel.a * constant0.a.
+            if (std::getenv("XLLE_HOTPACKET_PROBE_ALPHA_CONTRACT") &&
+                !std::strcmp(
+                    std::getenv("XLLE_HOTPACKET_PROBE_ALPHA_CONTRACT"),
+                    "const-mod")) {
+                resident.fixture_texture_passthrough = true;
+                resident.fixture_alpha_constant_modulate = true;
+                resident.fixture_constant_argb =
+                    resident.raster_state[xlle::Nv2a::kRasterCombinerFactor0_0];
+                resident.fixture_alpha_kill_zero =
+                    (resident.raster_state[xlle::Nv2a::kRasterAlphaFunc] ==
+                     0x0206) &&
+                    (resident.raster_state[xlle::Nv2a::kRasterAlphaRef] &
+                     0xFFu) == 1;
+            }
+            // Preserve the captured x8 flag: forcing it true masks the alpha
+            // channel in the GL draw, which breaks families that write real
+            // alpha (e.g. fp=789a30f9).
+            resident.fixture_color_format_x8 = packet.fixture_color_format_x8;
             resident.fixture_texture_passthrough = false;
 
             const bool cull_enabled =
@@ -8703,6 +8731,14 @@ int main() {
                                     gl_error.c_str());
                     actual_color = result.color_output;
                 } else {
+                    std::printf(
+                        "[probe-submit] fixture=%d x8=%d passthrough=%d "
+                        "alpha_mod=%d alpha_kill=%d\n",
+                        static_cast<int>(resident.compute_fixture),
+                        resident.fixture_color_format_x8 ? 1 : 0,
+                        resident.fixture_texture_passthrough ? 1 : 0,
+                        resident.fixture_alpha_constant_modulate ? 1 : 0,
+                        resident.fixture_alpha_kill_zero ? 1 : 0);
                     CHECK(gl_renderer->supports_resident_generic_combiner(resident));
                     CHECK(gl_renderer->submit_resident_generic_combiner(
                         resident, result, gl_error));

@@ -453,8 +453,8 @@ bool write_generic_packet_dump(const char* path,
         return true;
     };
 
-    const char magic[8] = {'X', 'L', 'L', 'E', 'G', 'P', 'B', '2'};
-    if (!write_bytes(magic, sizeof(magic)) || !write_u32(2) ||
+    const char magic[8] = {'X', 'L', 'L', 'E', 'G', 'P', 'B', '3'};
+    if (!write_bytes(magic, sizeof(magic)) || !write_u32(3) ||
         !write_u64(info.candidate) || !write_u64(info.fingerprint) ||
         !write_u64(info.full_state_hash) || !write_u32(info.color_address) ||
         !write_u32(info.depth_address) || !write_u32(info.pitch) ||
@@ -500,6 +500,8 @@ bool write_generic_packet_dump(const char* path,
         !write_u8(packet.fixture_texture_passthrough ? 1 : 0) ||
         !write_u8(packet.fixture_texture_constant_color_alpha ? 1 : 0) ||
         !write_u8(packet.fixture_color_format_x8 ? 1 : 0) ||
+        !write_u8(packet.fixture_alpha_constant_modulate ? 1 : 0) ||
+        !write_u8(packet.fixture_alpha_kill_zero ? 1 : 0) ||
         !write_u64(static_cast<uint64_t>(packet.vertices.size()))) {
         error = "fixture fields write failed";
         return false;

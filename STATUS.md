@@ -3,6 +3,47 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-08-21 - Texmod-depth contract decoded; resident alpha variant reverted
+
+Continued the hotpacket differential work on family `fp=789a30f9`
+(`build/generic-hotpacket-texmod-depth-789a30f9-v1.xgp`):
+
+* Decoded the full state contract from the captured raster words: depth LEQUAL test
+  with write enabled, no blending, GEQUAL-1 alpha kill, one combiner stage with
+  ColorIcw0 `0x08200000` (texel-passthrough RGB) and AlphaIcw0 `0x11180000`
+  (`CONSTANT_COLOR0.a x TEXTURE0.a`, constant0 `0xC4A0FF60`), texture linear ARGB8
+  1280x480 pitch `0x1400`, address word stage0 `0x00030404` with border color
+  `0xff000000` (CLAMP_TO_BORDER-class addressing).
+* Probe infrastructure extended and validated: `XLLE_HOTPACKET_PROBE_KEEP_DEPTH=1`
+  preserves captured depth config, `XLLE_HOTPACKET_PROBE_ALPHA_CONTRACT=const-mod`
+  drives the texel-passthrough/constant-alpha/alpha-kill contract, and the probe no
+  longer force-sets `fixture_color_format_x8=true` (which masked the GL draw's alpha
+  and invalidated comparisons for real-alpha families). Packet serialization bumped to
+  `XLLEGPB3` with two new fixture fields (`fixture_alpha_constant_modulate`,
+  `fixture_alpha_kill_zero`); reader accepts v2 and v3.
+* Probe experiments proved: constant-modulated alpha math is CORRECT where applied
+  (expected/actual ratio clusters at 96..196-blend values); the dominant divergence is
+  ADDRESSING — the resident texture fixture samples REPEAT while this family uses
+  CLAMP_TO_BORDER, so texels near/beyond edges differ, and combined with the alpha
+  kill most covered pixels keep stale destination content. Extending the resident
+  fixture requires border-clamped bilinear sampling (as the witnessed
+  clamp-to-border profiles already implement in software).
+* A uniform-driven implementation of the alpha contract in the resident fragment
+  shader was built and probe-tested, then REVERTED: two 12B runs stayed byte-exact
+  (`build/alpha-contract-noperf-v1/v2-12b.report.json`) but measured ~11% below the
+  retained GL-cache pair. A post-revert control run also measured low
+  (`build/alpha-contract-reverted-12b.report.json`, fps 3.914), so the slowdown tracks
+  host-machine drift across this marathon session (unconfirmed attribution, recorded
+  per doctrine) rather than proven code cost. The next session must re-establish an
+  interleaved A/B/A baseline before trusting any small deltas.
+
+Retained state remains commit `fa9aaba` semantics plus test/packet infrastructure;
+retained performance evidence is still the GL-cache pair (~4.33 mean fps, final-four
+wall ~32s, exact `876b58c2...`). Next concrete step unchanged: border-clamp bilinear
+sampling in the resident texture fixture, then admission signature
+`(ColorIcw0==0x08200000, AlphaIcw0==0x11180000)` with the alpha-kill contract, probe
+to zero mismatches, full A|B validation on a re-baselined host.
+
 ## 2026-08-21 - GL state/location caches cut per-submit driver entries
 
 The OpenGL renderer now mirrors the pipeline state it owns and skips redundant driver

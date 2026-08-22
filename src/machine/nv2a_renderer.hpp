@@ -81,6 +81,16 @@ struct Nv2aGenericCombinerPacket {
     bool fixture_depth_write_enabled = false;
     bool fixture_texture_passthrough = false;
     bool fixture_texture_constant_color_alpha = false;
+    // When set, fragment output alpha = texel.a * unpack_argb(
+    // fixture_constant_argb).a while RGB follows fixture_texture_passthrough.
+    // Encodes the witnessed combiner pair ColorIcw0=0x08200000 /
+    // AlphaIcw0=0x11180000 exactly; distinct from
+    // fixture_texture_constant_color_alpha whose compute contract also
+    // replaces RGB with the constant.
+    bool fixture_alpha_constant_modulate = false;
+    // When set, discard fragments whose packed output-alpha byte is zero
+    // (witnessed as GEQUAL alpha-ref 1 on combiner output).
+    bool fixture_alpha_kill_zero = false;
     bool fixture_color_format_x8 = false;
     bool fixture_use_tile_bins = false;
 };
