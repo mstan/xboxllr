@@ -94,18 +94,18 @@ Next targets in confidence order: (1) the texel-passthrough + constant-modulated
 shader variant above; (2) same differential treatment for the primary W-expansion
 family; (3) page-lazy color resolve; (4) sampler re-runs after each retained change.
 
-Session addendum (same day): the texmod-depth contract work progressed to a
-uniform-driven resident shader implementation and probe validation — the constant-
-alpha math is provably correct where applied, but probe experiments exposed that the
-family samples CLAMP_TO_BORDER while the resident fixture implements REPEAT, which is
-the dominant divergence. The uniform-driven variant was REVERTED after two exact 12B
-runs measured ~11% below the retained pair with a post-revert control also low
-(attribution: host drift across the marathon session, unconfirmed). Retained from this
-work: probe env toggles (`XLLE_HOTPACKET_PROBE_KEEP_DEPTH`,
-`XLLE_HOTPACKET_PROBE_ALPHA_CONTRACT=const-mod`), xgp v3 serialization with
-`fixture_alpha_constant_modulate`/`fixture_alpha_kill_zero`, and the corrected probe
-(no forced x8). Next concrete step: border-clamp bilinear sampling in the resident
-texture fixture, then admission widening, on a re-baselined host.
+Session addendum (same day): the texmod-depth contract work progressed to a full
+implementation — CLAMP_TO_BORDER bilinear sampling, constant-modulated alpha with
+in-shader byte quantization, and GEQUAL-ref1 alpha kill in the resident texture fixture,
+all dormant behind packet flags. Hotpacket probe progression: 621341 -> 2812 -> 70
+mismatches; the residual 70 (0.014%, 64 one-LSB alpha + 6 kill-boundary) come from
+float32 GPU varying interpolation versus software's double-precision interpolation and
+are unreachable in GL 4.3 rasterized draws — byte-exact promotion is blocked under
+no-drift doctrine, with the documented opt-in decision escalated to Matthew. The
+primary W-expansion family probe confirms full divergence (blending+interpolation),
+matching prior findings. Dormant state validated exact at 1B/12B; extended uniforms are
+issued only for extended-contract packets. Host fps drifted 3.7-4.4 across the session
+on identical code — re-baseline with interleaved runs before comparing small deltas.
 
 ## Prior optimization cursor (2026-08-13)
 
