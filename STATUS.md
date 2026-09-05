@@ -54,9 +54,10 @@ shipping binary `a3e98dc1`, 3+3 interleaved, arm A = `--no-nv2a-gpu-generic-shad
 5 % bar**, retained under section 3 item 3 as a pure simplification. All 28 checkpoints are
 byte-identical between the arms and every determinism digest matches including `dma_digest`.
 
-**Batching was declined on measurement.** The reroute leg issued 4 003 generated draws instead of
-792 and was 2.2 s faster overall; `nv2a_gl` is 5.319 s over 304 888 entries of which the witnessed
-executor's already-batched 20 816 draw calls are the bulk.
+**Batching was not built, and is recorded as undetermined rather than disproven.** 792 generated
+draws are 0.26 % of `nv2a_gl`'s 304 888 entries in a 5.319 s bucket, and the reroute leg issued
+4 003 of them while being 2.2 s faster overall. Neither is a controlled A/B; both are ceilings far
+below the method's MDE, so no gate could resolve the lever today.
 
 **Golden: `goldens/golden-noperf-defaults12-2026-09-05d.json` is reproduced and NOT re-pinned.**
 The reference-configuration leg passes 31 of 31 checks and is byte-identical to `golden-ref-v2`

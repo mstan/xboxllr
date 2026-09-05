@@ -971,12 +971,17 @@ through `glTexSubImage2D` instead of re-specifying storage. This is the transfor
 executor's upload path already used. `--no-nv2a-gpu-generic-shader-bgra-upload` restores the
 shuffle on the same binary.
 
-**(4) Batching: DECLINED ON MEASUREMENT.** Each generated batch is still one `glDrawArrays` with
-its own SSBO upload, 792 per canonical run. The reroute leg above ran **4 003** of them -- five
-times as many -- and was 2.2 s FASTER overall, so the per-draw cost cannot be a material term;
-the instrumented partition puts the whole of `nv2a_gl` at 5.319 s over 304 888 entries, of which
-the witnessed executor's 20 816 already-batched draw calls are the bulk. **DO NOT RETRY WITHOUT**
-a run in which the generated executor's own draw count is the dominant term in `nv2a_gl`.
+**(4) Batching: NOT BUILT, and bounded INDIRECTLY rather than by an A/B -- so it is recorded as
+UNDETERMINED under section 2 rule 8, not as disproven.** Each generated batch is still one
+`glDrawArrays` with its own SSBO upload, 792 per canonical run. Two facts bound it. The reroute
+leg above ran **4 003** of them -- five times as many -- and was 2.2 s FASTER overall, which is
+not a controlled comparison (that leg changed the whole plane) but does put a ceiling on what
+3 211 extra generated draws can cost. And the instrumented partition puts the whole of `nv2a_gl`
+at 5.319 s over 304 888 entries, of which the witnessed executor's 20 816 already-batched draw
+calls plus its per-batch state are the bulk; 792 of 304 888 entries is 0.26 % of that bucket.
+Both are far below the ~1 % MDE of the 3+3 method, so no gate could resolve the lever today.
+**DO NOT RETRY WITHOUT** a run in which the generated executor's own draw count is the dominant
+term in `nv2a_gl` -- which is exactly what the reroute would create if it ever ships.
 
 **(5) The decision A/B. 3+3 interleaved, one binary (`a3e98dc1`), one session, arm A =
 `--no-nv2a-gpu-generic-shader-bgra-upload` on the SAME binary. Gate = total 12 B wall, median AND
@@ -1169,7 +1174,7 @@ was `build/p5-perf-leg01-B-r1`, wall 62.496 s.)
 | 2 | ~~**The VSH interpreter**: 38 337 230 vertices at 118 ns (§3i(3))~~ | **MEASURED OUT 2026-09-05, §3k.** The pre-decoded step form is worth **12 %** of it, not the 3-5× an interpreter usually gives, because the ceiling probe says the DECODE was never the majority: operand traffic and fixed per-vertex cost 53 %, the NV2A-specific operation bodies 47 %. `vsh_ns` 4.823 → 4.237 s, gate **+2.11 % / +1.49 %, FAIL**. The remaining ceiling for the whole lever is `vsh_ns` → 0, i.e. **7.8 %** of the wall, and the two routes to any of it (an SSE `fix_inf_mult`, a `pshufb` operand fetch) are worth ~2 % and ~1 % | done and recorded; §3k(10) has what is left |
 | 3 | ~~The 1 878 generic-combiner software fallbacks~~ | **DONE**, and the phase-5 framing of this row was wrong twice: the 602 texture reads are NOT software fallbacks (row 1c), and the 704 fallback resolves were all on a plane §3i(2) never named | — |
 | 4 | ~~1 831.6 MB of texture upload + 479.3 MB of surface upload per run on the generated path, through a per-pixel scalar staging loop~~ | **DONE 2026-09-05 phase 7**, §3l(3): `GL_BGRA` deletes the loop entirely for a texture and reduces a colour surface to a row copy. Gate **+1.51 % median / +1.49 % min, FAILS the 5 % bar**, 3 of 3 rounds, 28 of 28 checkpoints byte-identical; retained under §3 item 3 as a pure simplification | done |
-| 5 | ~~batch the generated draws (792 per run, one SSBO each)~~ | **DECLINED ON MEASUREMENT 2026-09-05 phase 7**, §3l(4). The reroute leg ran 4 003 of them and was 2.2 s FASTER; `nv2a_gl` is 5.319 s over 304 888 entries of which the witnessed executor's 20 816 already-batched draw calls are the bulk | — |
+| 5 | batch the generated draws (792 per run, one SSBO each) | **UNDETERMINED, bounded well below the method's MDE, 2026-09-05 phase 7**, §3l(4). 792 of `nv2a_gl`'s 304 888 entries is 0.26 % of a 5.319 s bucket, and the reroute leg ran 4 003 of them while being 2.2 s faster. Neither is a controlled A/B; both are ceilings | not built — needs a workload where the generated draw count dominates `nv2a_gl` |
 | 6 | **`nv2a_dispatch` 4.774 s + `nv2a_pfifo` 2.811 s = 7.585 s, 13.0 % of the wall**, on 82.7 M dispatch entries at 57.7 ns each | 13.0 % | untouched by the whole GPU arc: it is the pushbuffer parse and the method ladder, and after phase 7 it is the third-largest item in the run |
 | — | ~~the 148 317 no-op per-draw residency queries~~ | **16 ms — DECLINED ON MEASUREMENT** | — |
 | — | ~~`kPitchZ16Depth` on the GPU (142 842 draws, 476 M fragments)~~ | **zero resolves removed**; its two zeta planes have no GPU draws at all | one shader, for CPU raster removal only |
