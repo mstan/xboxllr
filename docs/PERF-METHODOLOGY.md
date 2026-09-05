@@ -768,10 +768,17 @@ measured on the canonical 2 B window with `--nv2a-vertex-census`, same session:
 
 | form | `vsh_ns`, 2 B window | verdict |
 |---|---:|---|
-| vendored interpreter | 1.021 s | baseline |
-| pre-decoded, vendored `fn` pointer | **0.906 s** | kept |
+| vendored interpreter (`--no-nv2a-vsh-compile`, shipping binary) | 0.993 s | baseline |
+| pre-decoded, vendored `fn` pointer (shipping binary) | **0.906 / 0.909 s** | kept |
 | pre-decoded, the twenty bodies TRANSCRIBED into an inlined switch | 1.540 s | **+70 %, rejected** |
-| the same switch forced out of line | 1.346 s | **+49 %, rejected** |
+| the same switch forced out of line (`noinline`) | 1.346 s | **+49 %, rejected** |
+
+*Caveat stated because it bounds what these rows can carry:* a 2 B single leg is not a gate. Arm A
+measured 0.993, 1.021, 1.107, 1.109, 1.157 and 1.219 s across six different builds of code that
+never changed on that path, so the build-to-build and host noise here is about ±10 %. The two
+rejected rows are +49 % and +70 %, five to seven times that band, which is why they are called
+rejected; the 8-12 % kept row is confirmed by the matched instrumented pair in (4) and by the gate
+in (7), not by this table.
 
 Transcribing the vendored bodies into the executor was the obvious next step and it is a large
 REGRESSION. The vendored functions are small, hot in the instruction cache, and reached through
@@ -784,11 +791,19 @@ that changes what it measures is not an instrument).
 
 **(6) The ceiling probe, which is why the lever is small.** `--nv2a-vsh-unsafe-probe`
 (knowingly incorrect when armed, default 0, no `--no-` spelling) runs the operand fetch and
-optionally the destination stores without the operation. On the 2 B window, per vertex:
-full 115.8 ns, **fetch only 61.0 ns**. So the operand traffic and the per-vertex fixed cost are
-~53 % and the OPERATIONS THEMSELVES are ~47 %, and the operations are the vendored
-`fix_inf_mult` / `nv2a_less_than` special cases that the NV2A semantics require. **The decode was
-never the majority of the cost**, which is why removing all of it is worth 12 % and not 3-5×.
+optionally the destination stores without the operation. Five legs on ONE binary (the shipping
+`5be3655e`), one session, the 2 B window, identical `vsh_n = 7 822 822` in every leg:
+
+| leg | `vsh_ns` | per vertex | what it contains |
+|---|---:|---:|---|
+| `--no-nv2a-vsh-compile` | 0.993 s | 127.0 ns | the vendored interpreter |
+| compiled (×2) | 0.906 / 0.909 s | **116.0 ns** | everything |
+| `--nv2a-vsh-unsafe-probe 2` (×2) | 0.349 / 0.358 s | **45.2 ns** | the zero plan, the input copy, the operand fetch and the output extraction -- no operation, no destination store |
+
+So the operand traffic plus the fixed per-vertex cost is **39 %** and the OPERATIONS AND THEIR
+DESTINATION STORES are **61 %**, and those operations are the vendored `fix_inf_mult` /
+`nv2a_less_than` special cases the NV2A semantics require. **The decode was never the majority of
+the cost**, which is why removing all of it is worth 12 % and not 3-5×.
 **The ceiling for this whole lever is `vsh_ns` going to zero: 4.24 s of a ~54 s wall, 7.8 %.**
 
 **(7) The decision A/B. 3+3 interleaved, one binary (`5be3655e`), one session, arm A =
@@ -832,7 +847,7 @@ it is one flag either way.
 
 **(10) What is NOT done, with the number each is worth.**
 
-* **The operations themselves, ~47 % of `vsh_ns` (~2.0 s).** `fix_inf_mult` is four scalar
+* **The operations and their destination stores, 61 % of `vsh_ns` (~2.6 s).** `fix_inf_mult` is four scalar
   multiplies each with up to three `isinf` tests, called four times per MUL/MAD/DP*/DST. A
   branch-free SSE form (one `mulps`, three compares against +inf, one blend) would collapse ~32
   scalar instructions into ~10 SIMD ones. It is a REIMPLEMENTATION of NV2A-specific semantics, so
