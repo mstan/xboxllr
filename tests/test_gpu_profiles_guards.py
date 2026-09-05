@@ -578,9 +578,15 @@ check("the separable identity is asserted where it is used, and the "
       "witnessed_swizzle_index(i, 0, w, h)" in gl and
       "witnessed_swizzle_index(0, j, w, h)" in gl)
 check("an unchanged geometry re-uploads through glTexSubImage2D, and every "
-      "path that re-specifies the storage updates the tracked allocation",
-      gl.count("slot->tex_alloc_w = width;") == 2 and
-      gl.count("slot.depth_alloc_w = width;") + gl.count("slot->depth_alloc_w = width;") == 2)
+      "path that re-specifies the storage updates the tracked allocation -- "
+      "there are five such paths after phase 7 (generic colour, witnessed "
+      "colour, generic zeta, witnessed zeta, generated zeta) plus the "
+      "generated colour and texture pair, and glTexImage2D appears in each "
+      "exactly as often as the allocation is stamped",
+      gl.count("tex_alloc_w = width;") == 2 and
+      gl.count("tex_alloc_w = up_w;") == 2 and
+      gl.count("slot.alloc_w = texture.width;") == 2 and
+      gl.count("depth_alloc_w = width;") == 3)
 check("the zero fill is kept exactly where the Morton map is not onto, "
       "so an unwritten hole cannot carry a previous surface's bytes",
       "static bool is_power_of_two(uint32_t v)" in gl and
@@ -1204,6 +1210,124 @@ check("the record layout the device writes and the layout the generated source "
       "declares are pinned to each other by a static_assert",
       "static_assert(sizeof(GeneratedTriRecord) == 448," in gl and
       "dvec4 recip;" in gen_cpp and "vec4 v[18];" in gen_cpp)
+
+# -------------------------------------------------------------------------
+print("\n16. phase 7: depth in the generated executor, the witnessed reroute, "
+      "and the BGRA upload")
+# -------------------------------------------------------------------------
+# Phase 7 attacked the three items section 3j(8) left, in the order the plane
+# census orders them. Two of the three are DEFAULT OFF and the measurement that
+# put them there is the thing worth pinning: a guard that only checked "the
+# feature exists" would let a later session flip a default that is known to be
+# a regression or known to move the image.
+
+# --- depth in the generated executor -------------------------------------
+check("a depth-using generated batch does NOT take the image-blend path, "
+      "because writing gl_FragDepth forces late-Z and an in-shader imageStore "
+      "would then write colour for a fragment that loses the depth test",
+      "st.image_blend = gpu_generic_shader_image_blend_ && !uses_depth;" in cpp)
+check("the depth TEST-ENABLE bit and the depth WRITE mask travel separately, "
+      "because the software path's 'test disabled, write enabled' case passes "
+      "every fragment and still stores",
+      "bool depth_test = false;" in rhpp and
+      "gpu_shader_packet.depth_test = uses_depth && depth_test_enabled_bit;"
+      in cpp and
+      "gpu_shader_packet.depth_write =\n                uses_depth && raster_state[kRasterDepthMask] != 0;"
+      in cpp and
+      "cache_depth_test(packet.depth_test," in gl and
+      "cache_depth_mask(packet.depth_write);" in gl)
+check("the generated executor's zeta plane is looked up on the SAME "
+      "(address, size) key the witnessed executor uses, so a plane one of them "
+      "made resident is found by the other",
+      "bool generated_shader_depth_resident(uint32_t depth_address," in rhpp and
+      "return find_witnessed_depth_slot(depth_address, size) != nullptr;" in gl and
+      "depth_slot = find_witnessed_depth_slot(packet.depth_address," in gl)
+check("the zeta plane is snapshotted ONLY when the backend does not already "
+      "hold it, exactly as the colour plane is",
+      "renderer_->generated_shader_depth_resident(" in cpp and
+      "gpu_shader_packet.needs_depth_upload = true;" in cpp)
+check("the aliasing guard covers the ZETA range too once the executor writes "
+      "one, or two GPU-authoritative copies of one guest range can exist",
+      "const bool wants_depth = descriptor.state.uses_depth;" in gl and
+      "if (wants_depth && overlaps(wantd0, wantd1, c0, c1))" in gl and
+      "if (wants_depth && !depth_is_ours &&\n                        overlaps(wantd0, wantd1, d0, d1)) {"
+      in gl)
+check("a slot made depth-resident by this executor still carries the R32UI "
+      "WORD form the resident dashboard fixture's depth-EQUAL test reads, and "
+      "a slot made resident by a path that had none has it REBUILT from the "
+      "depth attachment rather than faulting",
+      "depth_slot->depth_word_texture" in gl and
+      "bool ensure_depth_word_texture(ResidentSurface& slot," in gl and
+      "!existing->depth_word_texture &&\n                !ensure_depth_word_texture(*existing, error)"
+      in gl and
+      "depth_word_rebuilds" in rhpp and
+      "depth_word_rebuilds=%llu" in main)
+check("depth support is DEFAULT OFF and both spellings exist on one binary, "
+      "because on its own it is a MEASURED regression (3 G window: colour "
+      "resolves 566 -> 761, zeta 180 -> 375) and only pays with the reroute",
+      "bool gpu_generic_shader_depth_ = false;" in hpp and
+      '"--nv2a-gpu-generic-shader-depth"' in main and
+      '"--no-nv2a-gpu-generic-shader-depth"' in main and
+      "bool nv2a_gpu_generic_shader_depth = false;" in main and
+      "DEFAULT OFF, and the reason is MEASURED rather than cautious" in hpp)
+
+# --- the witnessed-family reroute ----------------------------------------
+check("the reroute is ONE mask over the eight families the plane census names, "
+      "not eight hand-written GPU fixtures, and the bit order is fixed in one "
+      "function",
+      "inline int generic_shader_witnessed_bit(Profile profile) {" in cpp and
+      "case Profile::kPitchMultiTextureColor:  return 0;" in cpp and
+      "case Profile::kPitchAdditiveColor:      return 7;" in cpp)
+check("the reroute is gated on the generated executor AND on its depth "
+      "support, so either negative spelling restores the ladder exactly -- "
+      "without them it would land these batches in the SOFTWARE evaluator",
+      "witnessed_reroute_bit >= 0 && gpu_generic_shader_ &&" in cpp and
+      "gpu_generic_shader_depth_ && renderer_ &&" in cpp)
+check("the rerouted batch takes the same ordering fence the ladder's own "
+      "generic arm takes, because the generic path reaches the GL backend",
+      "++generic_shader_witnessed_reroutes_;" in cpp and
+      cpp.index("++generic_shader_witnessed_reroutes_;") <
+      cpp.index("draw_order_fence();\n        return rasterize_generic_combiner_batch(job, executed);\n    }\n    executed = true;"))
+check("the reroute is DEFAULT 0 and the per-family measurement that put it "
+      "there is recorded, family by family, so it is not re-derived",
+      "uint32_t gpu_generic_shader_witnessed_ = 0u;" in hpp and
+      "uint32_t nv2a_gpu_generic_shader_witnessed = 0u;" in main and
+      "bit 0 pitch_multi_texture  (120 draws)        0 px   EXACT" in hpp and
+      "bit 2 pitch_tex5_projected (126)        286 151 px, max delta 255" in hpp and
+      "unsupported-texture-shader-program=126" in hpp)
+check("the cause is attributed to the GENERIC EVALUATOR and not to the GPU "
+      "executor, by a leg with the generated executor masked off reproducing "
+      "the same pixels",
+      "--nv2a-gpu-generic-shader-mask 0, so the reroute lands in SOFTWARE" in hpp)
+check("the reroute and the reroute count are exported by the always-on census, "
+      "so a leg that rerouted nothing cannot be mistaken for one that did",
+      "witnessed_mask=%02x" in main and
+      "witnessed_reroutes=%llu" in main and
+      "generic_shader_witnessed_reroutes()" in hpp)
+
+# --- upload staging -------------------------------------------------------
+check("the generated executor uploads guest A8R8G8B8 words as GL_BGRA with NO "
+      "staging buffer for a texture, because the word's bytes in memory ARE "
+      "B,G,R,A -- the same transform the witnessed executor already uses",
+      "kGlBgra, kGlUnsignedByte,\n                                               texture.linear.data());"
+      in gl and
+      "PHASE 7 (upload staging). GL_BGRA, and NO staging buffer at all." in gl)
+check("a colour-surface upload is a ROW COPY plus the vertical flip, and an "
+      "unchanged geometry re-uploads through glTexSubImage2D instead of "
+      "re-specifying storage",
+      "PHASE 7 (upload staging), the same two changes the witnessed path" in gl and
+      "slot->tex_alloc_w == up_w && slot->tex_alloc_h == up_h" in gl and
+      "uint32_t alloc_w = 0;" in gl)
+check("the pre-phase-7 per-pixel shuffle is still reachable on the SAME "
+      "binary, because that is the arm the change is measured against",
+      '"--no-nv2a-gpu-generic-shader-bgra-upload"' in main and
+      "bool generated_bgra_upload_ = true;" in gl and
+      "guest_words_to_rgba_unflipped(texture.linear, rgba," in gl and
+      "virtual void set_generated_shader_bgra_upload(bool on)" in rhpp)
+check("the BGRA state is exported by the census, so an A/B cannot silently "
+      "run both arms with the same upload path",
+      "bgra=%u" in main and
+      "gpu_generic_shader_bgra_upload()" in hpp)
 
 print("\n%d checks, %d failures" % (checks, len(failures)))
 if failures:

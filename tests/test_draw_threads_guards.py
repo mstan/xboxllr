@@ -160,9 +160,20 @@ check("a non-threadable witnessed job is fenced before it executes inline",
 # fence too. It does not write guest memory itself, but it makes the GPU copy of
 # a surface authoritative, and a queued software job writing the same surface
 # must retire before that happens.
-check("every inline pixel path is fenced: four fences, no more, no fewer",
-      latch_half.count("draw_order_fence();") == 4,
+# FIVE as of 2026-09-05 phase 7 (beads-xbox.1.15.10): the witnessed-family
+# reroute (--nv2a-gpu-generic-shader-witnessed) is a second entry into the
+# strict generic fallback and takes the identical fence the ladder's own
+# `else` arm takes, for the identical reason -- that path reaches the GL
+# backend and the resident-surface protocol and is never threadable.
+check("every inline pixel path is fenced: five fences, no more, no fewer",
+      latch_half.count("draw_order_fence();") == 5,
       str(latch_half.count("draw_order_fence();")))
+check("the fifth fence is the witnessed-family reroute's, and it is taken "
+      "after the reroute counter is banked and before the fallback is entered",
+      re.search(r"\+\+generic_shader_witnessed_reroutes_;"
+                r"(?:[^;]*?)draw_order_fence\(\);\s*"
+                r"return rasterize_generic_combiner_batch\(",
+                latch_half, re.S) is not None)
 check("the fourth fence is the stage (f) GPU executor's",
       re.search(r"draw_order_fence\(\);\s+bool gpu_submitted = false;",
                 latch_half) is not None)

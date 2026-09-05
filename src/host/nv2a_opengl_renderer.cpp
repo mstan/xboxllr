@@ -2308,6 +2308,14 @@ public:
                                uint64_t b1) { return a0 < b1 && b0 < a1; };
             const uint64_t want0 = descriptor.color_address;
             const uint64_t want1 = want0 + descriptor.surface_size;
+            // Phase 7: the ZETA range this batch will write, when it writes
+            // one. The guard below is the same one in the other direction --
+            // this plane must not alias a DIFFERENT resident colour or zeta
+            // image, or two GPU-authoritative copies of one guest range exist
+            // and whichever resolves last wins.
+            const bool wants_depth = descriptor.state.uses_depth;
+            const uint64_t wantd0 = descriptor.depth_address;
+            const uint64_t wantd1 = wantd0 + descriptor.surface_size;
             for (const auto& surface : resident_surfaces_) {
                 const bool is_ours =
                     surface.valid &&
@@ -2319,12 +2327,40 @@ public:
                     const uint64_t c0 = surface.address;
                     const uint64_t c1 = c0 + surface.size;
                     if (overlaps(want0, want1, c0, c1)) return false;
+                    if (wants_depth && overlaps(wantd0, wantd1, c0, c1))
+                        return false;
                 }
                 if (surface.depth_valid) {
                     const uint64_t d0 = surface.depth_address;
                     const uint64_t d1 = d0 + surface.depth_size;
                     if (overlaps(want0, want1, d0, d1)) return false;
+                    const bool depth_is_ours =
+                        surface.depth_address == descriptor.depth_address &&
+                        surface.depth_size == descriptor.surface_size;
+                    if (wants_depth && !depth_is_ours &&
+                        overlaps(wantd0, wantd1, d0, d1)) {
+                        return false;
+                    }
                 }
+            }
+        }
+        // Same rule as the colour plane below: a zeta plane that is not
+        // resident needs a snapshot to upload and a slot to land in, and
+        // refusing HERE is what keeps "after supports_ returns true, failure
+        // is fatal" honest.
+        if (descriptor.state.uses_depth) {
+            if (descriptor.depth_address == 0) return false;
+            if (find_witnessed_depth_slot(descriptor.depth_address,
+                                          descriptor.surface_size) == nullptr) {
+                if (!descriptor.needs_depth_upload) return false;
+                bool slot = false;
+                for (const auto& surface : resident_surfaces_) {
+                    if (!surface.depth_valid || !surface.depth_dirty) {
+                        slot = true;
+                        break;
+                    }
+                }
+                if (!slot) return false;
             }
         }
         // A plane that is already resident always has somewhere to land; one
@@ -2363,11 +2399,21 @@ public:
                                      format) != nullptr;
     }
 
+    // (address, size), the witnessed executor's own zeta key. See the
+    // declaration in nv2a_renderer.hpp for why it is not the five-field one.
+    bool generated_shader_depth_resident(uint32_t depth_address,
+                                         size_t size) const override {
+        return find_witnessed_depth_slot(depth_address, size) != nullptr;
+    }
+
     GeneratedShaderStats generated_shader_stats() const override {
         return generated_stats_;
     }
     void set_generated_shader_nodraw(bool on) override {
         generated_nodraw_ = on;
+    }
+    void set_generated_shader_bgra_upload(bool on) override {
+        generated_bgra_upload_ = on;
     }
 
     bool submit_generated_shader(const Nv2aGeneratedShaderPacket& packet,
@@ -2391,6 +2437,16 @@ public:
         ResidentSurface* surface = nullptr;
         if (!ensure_generated_surface(packet, surface, result, error))
             return false;
+        // Phase 7 (beads-xbox.1.15.10): the zeta plane, on exactly the same
+        // resident cache and the same (address, size) key the witnessed
+        // executor uses, so a plane one of them made resident is found by the
+        // other and the existing resolve/invalidate seam keeps both coherent.
+        ResidentSurface* depth_surface = nullptr;
+        if (packet.state.uses_depth &&
+            !ensure_generated_depth_surface(packet, surface, depth_surface,
+                                            result, error)) {
+            return false;
+        }
 
         // ---- textures --------------------------------------------------
         for (uint32_t i = 0; i < 4; ++i) {
@@ -2416,20 +2472,54 @@ public:
                 ++generated_stats_.texture_upload_skips;
                 continue;
             }
-            std::vector<uint8_t>& rgba = upload_staging_;
-            guest_words_to_rgba_unflipped(texture.linear, rgba, texture.width,
-                                          texture.height, false);
-            pixel_store_i_(kGlUnpackAlignment, 1);
-            gpu_timed_tex_image_2d(kGlTexture2D, 0, kGlRgba8,
-                                   static_cast<int>(texture.width),
-                                   static_cast<int>(texture.height), 0, kGlRgba,
-                                   kGlUnsignedByte, rgba.data());
+            // PHASE 7 (upload staging). GL_BGRA, and NO staging buffer at all.
+            // A guest A8R8G8B8 word is little-endian, so its bytes in memory
+            // are already B,G,R,A -- which is exactly what
+            // GL_BGRA/GL_UNSIGNED_BYTE means. The per-pixel shuffle that was
+            // here reordered them to R,G,B,A only for the driver to put them
+            // back, over 1 831.6 MB of texture per canonical 12 B run. The
+            // device hands over a TIGHTLY PACKED image (it unswizzles and
+            // expands A8 on the way in), so the packet's own bytes are the
+            // upload. This is the same transform the witnessed executor's
+            // upload path already uses.
+            if (generated_bgra_upload_) {
+                pixel_store_i_(kGlUnpackAlignment, 4);
+                if (slot.alloc_w == texture.width &&
+                    slot.alloc_h == texture.height) {
+                    gpu_timed_tex_sub_image_2d(kGlTexture2D, 0, 0, 0,
+                                               static_cast<int>(texture.width),
+                                               static_cast<int>(texture.height),
+                                               kGlBgra, kGlUnsignedByte,
+                                               texture.linear.data());
+                } else {
+                    gpu_timed_tex_image_2d(kGlTexture2D, 0, kGlRgba8,
+                                           static_cast<int>(texture.width),
+                                           static_cast<int>(texture.height), 0,
+                                           kGlBgra, kGlUnsignedByte,
+                                           texture.linear.data());
+                    slot.alloc_w = texture.width;
+                    slot.alloc_h = texture.height;
+                }
+            } else {
+                // The comparison arm: the pre-phase-7 per-pixel shuffle.
+                std::vector<uint8_t>& rgba = upload_staging_;
+                guest_words_to_rgba_unflipped(texture.linear, rgba,
+                                              texture.width, texture.height,
+                                              false);
+                pixel_store_i_(kGlUnpackAlignment, 1);
+                gpu_timed_tex_image_2d(kGlTexture2D, 0, kGlRgba8,
+                                       static_cast<int>(texture.width),
+                                       static_cast<int>(texture.height), 0,
+                                       kGlRgba, kGlUnsignedByte, rgba.data());
+                slot.alloc_w = texture.width;
+                slot.alloc_h = texture.height;
+            }
             slot.valid = true;
             slot.hash = texture.hash;
             slot.width = texture.width;
             slot.height = texture.height;
             ++generated_stats_.texture_uploads;
-            result.texture_upload_bytes += rgba.size();
+            result.texture_upload_bytes += texture.linear.size();
         }
         // Leave unit 0 active, which every other path in this file assumes.
         cache_bind_texture_unit(kGlTexture0,
@@ -2535,7 +2625,8 @@ public:
         // ---- fixed-function state ---------------------------------------
         cache_bind_framebuffer(resident_fbo_);
         cache_framebuffer_color_texture(resident_fbo_, surface->texture);
-        cache_framebuffer_depth_texture(resident_fbo_, 0);
+        cache_framebuffer_depth_texture(
+            resident_fbo_, depth_surface ? depth_surface->depth_texture : 0u);
         cache_viewport(0, 0, static_cast<int>(packet.surface_width),
                        static_cast<int>(packet.surface_height));
         // Guest scissor rows are top-down; the resident image is stored
@@ -2545,8 +2636,31 @@ public:
                                        packet.ymax),
                       static_cast<int>(packet.xmax - packet.xmin + 1u),
                       static_cast<int>(packet.ymax - packet.ymin + 1u));
-        cache_depth_test(false, kGlAlways);
-        cache_depth_mask(false);
+        if (depth_surface) {
+            // The shader writes gl_FragDepth from the software path's own
+            // expression, so the driver's interpolation never decides the
+            // value; the ROP does the COMPARISON and the store. Writing
+            // gl_FragDepth forces late-Z, and that is exactly why a
+            // depth-using batch does NOT take the image-blend path: an
+            // imageStore happens inside the fragment shader, i.e. BEFORE a
+            // late depth test, so a fragment that loses the depth test would
+            // already have written its colour. With the ROP owning both, the
+            // colour write is ordered after the depth test the way the
+            // software path's `continue` orders it. The device forces
+            // state.image_blend false whenever uses_depth is set for this
+            // reason; see nv2a.cpp.
+            cache_depth_test(packet.depth_test,
+                             packet.depth_test ? gl_depth_func(packet.depth_func)
+                                               : kGlAlways);
+            // Stencil is never touched: GL_STENCIL_TEST is off for the whole
+            // executor, so the packed word's low byte survives, which is what
+            // the software path's `(incoming << 8) | (stored & 0xFF)` does.
+            cache_depth_mask(packet.depth_write);
+            ++generated_stats_.depth_draws;
+        } else {
+            cache_depth_test(false, kGlAlways);
+            cache_depth_mask(false);
+        }
         if (packet.state.image_blend) {
             // The blend, the colour mask and the X8 alpha rule are all inside
             // the fragment program now, written against an rgba8 image binding
@@ -2640,10 +2754,170 @@ public:
         surface->dirty_rect.add(packet.xmin, packet.ymin,
                                 packet.xmax - packet.xmin + 1u,
                                 packet.ymax - packet.ymin + 1u);
+        if (depth_surface && packet.depth_write) {
+            depth_surface->depth_dirty = true;
+            depth_surface->depth_dirty_rect.add(packet.xmin, packet.ymin,
+                                                packet.xmax - packet.xmin + 1u,
+                                                packet.ymax - packet.ymin + 1u);
+        }
         ++generated_stats_.draws;
         generated_stats_.triangles += count;
         result.triangles = count;
         result.draw_calls = 1;
+        return true;
+    }
+
+    // The zeta counterpart of ensure_generated_surface. It deliberately mirrors
+    // ensure_witnessed_surface's depth half -- the same (address, size) key, the
+    // same slot-acquisition rule, the same row-copy upload and the same
+    // upload-cause census -- because plane 0x033d0000 is shared with the
+    // witnessed executor and the two must agree on what "resident" means.
+    bool ensure_generated_depth_surface(const Nv2aGeneratedShaderPacket& packet,
+                                        ResidentSurface* color_slot,
+                                        ResidentSurface*& depth_slot,
+                                        Nv2aGeneratedShaderResult& result,
+                                        std::string& error) {
+        depth_slot = find_witnessed_depth_slot(packet.depth_address,
+                                               packet.surface_size);
+        if (depth_slot) {
+            if (!resident_fbo_) gen_framebuffers_(1, &resident_fbo_);
+            active_depth_resident_ = depth_slot;
+            return true;
+        }
+        if (packet.depth_input.size() != packet.surface_size) {
+            error = "OpenGL generated combiner missing initial zeta snapshot";
+            return false;
+        }
+        // The colour slot is the preferred home; it is refused only when that
+        // would overwrite a DIRTY zeta plane of a different guest range, which
+        // would discard GPU depth writes no resolve has moved back.
+        if (color_slot &&
+            (!color_slot->depth_valid || !color_slot->depth_dirty ||
+             (color_slot->depth_address == packet.depth_address &&
+              color_slot->depth_size == packet.surface_size))) {
+            depth_slot = note_depth_slot_reuse(*color_slot);
+        } else {
+            depth_slot = acquire_depth_slot(color_slot);
+        }
+        if (!depth_slot) {
+            error = "OpenGL resident surface cache is full of dirty targets";
+            return false;
+        }
+        const uint32_t width = packet.surface_width;
+        const uint32_t height = packet.surface_height;
+        if (!depth_slot->depth_texture) {
+            gen_textures_(1, &depth_slot->depth_texture);
+            if (!depth_slot->depth_texture) {
+                error = "OpenGL generated combiner zeta texture allocation failed";
+                return false;
+            }
+            cache_bind_texture_unit(kGlTexture0, depth_slot->depth_texture);
+            tex_parameter_i_(kGlTexture2D, kGlTextureMinFilter, kGlNearest);
+            tex_parameter_i_(kGlTexture2D, kGlTextureMagFilter, kGlNearest);
+            tex_parameter_i_(kGlTexture2D, kGlTextureWrapS, kGlClampToEdge);
+            tex_parameter_i_(kGlTexture2D, kGlTextureWrapT, kGlClampToEdge);
+        } else {
+            cache_bind_texture_unit(kGlTexture0, depth_slot->depth_texture);
+        }
+        // The guest word IS GL_UNSIGNED_INT_24_8; the whole transform is the
+        // vertical flip. The destination is never swizzled here (the device
+        // declines a swizzled destination outright), so this is a row copy.
+        const size_t row_words = static_cast<size_t>(width);
+        if (packet.depth_input.size() < row_words * height * 4u) {
+            error = "OpenGL generated combiner zeta snapshot is smaller than its surface";
+            return false;
+        }
+        resize_or_zero(witnessed_depth_staging_, row_words * height, 1u, 1u);
+        uint32_t* dst = witnessed_depth_staging_.data();
+        const uint8_t* src = packet.depth_input.data();
+        for (uint32_t y = 0; y < height; ++y) {
+            std::memcpy(dst + static_cast<size_t>(height - 1u - y) * row_words,
+                        src + static_cast<size_t>(y) * row_words * 4u,
+                        row_words * 4u);
+        }
+        // The WORD form of the same plane, R32UI. The resident dashboard
+        // fixture's depth-EQUAL test reads it as a usampler2D, and its
+        // contract is "a slot whose depth is valid has one" -- a contract
+        // ensure_resident_depth_surface establishes and this path has to keep,
+        // or the fixture faults with "missing zeta-word texture" the moment
+        // this executor is the one that made the plane resident.
+        if (!depth_slot->depth_word_texture) {
+            gen_textures_(1, &depth_slot->depth_word_texture);
+            if (!depth_slot->depth_word_texture) {
+                error = "OpenGL generated combiner zeta-word texture allocation failed";
+                return false;
+            }
+            cache_bind_texture_unit(kGlTexture0,
+                                    depth_slot->depth_word_texture);
+            tex_parameter_i_(kGlTexture2D, kGlTextureMinFilter, kGlNearest);
+            tex_parameter_i_(kGlTexture2D, kGlTextureMagFilter, kGlNearest);
+            tex_parameter_i_(kGlTexture2D, kGlTextureWrapS, kGlClampToEdge);
+            tex_parameter_i_(kGlTexture2D, kGlTextureWrapT, kGlClampToEdge);
+        } else {
+            cache_bind_texture_unit(kGlTexture0,
+                                    depth_slot->depth_word_texture);
+        }
+        pixel_store_i_(kGlUnpackAlignment, 4);
+        gpu_timed_tex_image_2d(kGlTexture2D, 0, kGlR32ui,
+                               static_cast<int>(width),
+                               static_cast<int>(height), 0, kGlRedInteger,
+                               kGlUnsignedInt, witnessed_depth_staging_.data());
+        cache_bind_texture_unit(kGlTexture0, depth_slot->depth_texture);
+        pixel_store_i_(kGlUnpackAlignment, 4);
+        if (depth_slot->depth_alloc_w == width &&
+            depth_slot->depth_alloc_h == height) {
+            gpu_timed_tex_sub_image_2d(kGlTexture2D, 0, 0, 0,
+                                       static_cast<int>(width),
+                                       static_cast<int>(height),
+                                       kGlDepthStencil, kGlUnsignedInt248,
+                                       witnessed_depth_staging_.data());
+        } else {
+            gpu_timed_tex_image_2d(kGlTexture2D, 0, kGlDepth24Stencil8,
+                                   static_cast<int>(width),
+                                   static_cast<int>(height), 0, kGlDepthStencil,
+                                   kGlUnsignedInt248,
+                                   witnessed_depth_staging_.data());
+            depth_slot->depth_alloc_w = width;
+            depth_slot->depth_alloc_h = height;
+        }
+        if (!resident_fbo_) gen_framebuffers_(1, &resident_fbo_);
+        cache_bind_framebuffer(resident_fbo_);
+        cache_framebuffer_color_texture(
+            resident_fbo_, color_slot ? color_slot->texture : 0u);
+        cache_framebuffer_depth_texture(resident_fbo_,
+                                        depth_slot->depth_texture);
+        if (check_framebuffer_status_(kGlFramebuffer) != kGlFramebufferComplete) {
+            error = "OpenGL generated combiner colour+zeta framebuffer is incomplete";
+            return false;
+        }
+        if (get_error_() != kGlNoError) {
+            error = "OpenGL generated combiner zeta upload failed";
+            return false;
+        }
+        if (depth_slot->depth_valid && depth_slot->depth_dirty)
+            ++witnessed_upload_census_.upload_over_dirty_depth;
+        if (depth_slot->depth_valid &&
+            depth_slot->depth_address == packet.depth_address)
+            ++witnessed_upload_census_.depth_key_mismatch;
+        if (depth_slot->depth_valid &&
+            depth_slot->depth_address != packet.depth_address)
+            ++witnessed_upload_census_.depth_slot_takeover;
+        note_upload_cause(witnessed_upload_census_.depth_uploads,
+                          witnessed_upload_census_.depth_bytes,
+                          take_invalidate_stamp(depth_stamps_,
+                                                packet.depth_address),
+                          packet.surface_size);
+        depth_slot->depth_valid = true;
+        depth_slot->depth_dirty = false;
+        depth_slot->depth_dirty_rect.reset();
+        depth_slot->depth_address = packet.depth_address;
+        depth_slot->depth_size = packet.surface_size;
+        depth_slot->depth_pitch = packet.surface_pitch;
+        depth_slot->depth_height = packet.surface_height;
+        depth_slot->depth_format = packet.surface_format;
+        active_depth_resident_ = depth_slot;
+        ++generated_stats_.depth_uploads;
+        result.depth_upload_bytes += packet.surface_size;
         return true;
     }
 
@@ -2688,17 +2962,53 @@ public:
         } else {
             cache_bind_texture_unit(kGlTexture0, slot->texture);
         }
+        // PHASE 7 (upload staging), the same two changes the witnessed path
+        // already carries: GL_BGRA (the guest word's own byte order, so the
+        // per-pixel shuffle disappears) and a straight ROW COPY, because the
+        // vertical flip is the whole of the transform for a pitch-linear
+        // destination -- and this executor never takes a swizzled one.
+        const uint32_t up_w = packet.surface_width;
+        const uint32_t up_h = packet.surface_height;
+        const size_t row_bytes = static_cast<size_t>(up_w) * 4u;
+        if (packet.color_input.size() < row_bytes * up_h) {
+            error = "OpenGL generated combiner colour snapshot is smaller than its surface";
+            return false;
+        }
         std::vector<uint8_t>& rgba = upload_staging_;
-        guest_words_to_rgba(packet.color_input, rgba, packet.surface_width,
-                            packet.surface_height,
-                            packet.state.color_format_x8);
-        pixel_store_i_(kGlUnpackAlignment, 1);
-        gpu_timed_tex_image_2d(kGlTexture2D, 0, kGlRgba8,
-                               static_cast<int>(packet.surface_width),
-                               static_cast<int>(packet.surface_height), 0,
-                               kGlRgba, kGlUnsignedByte, rgba.data());
-        slot->tex_alloc_w = packet.surface_width;
-        slot->tex_alloc_h = packet.surface_height;
+        if (generated_bgra_upload_) {
+            rgba.resize(row_bytes * up_h);
+            for (uint32_t y = 0; y < up_h; ++y) {
+                std::memcpy(
+                    rgba.data() + static_cast<size_t>(up_h - 1u - y) * row_bytes,
+                    packet.color_input.data() + static_cast<size_t>(y) * row_bytes,
+                    row_bytes);
+            }
+            pixel_store_i_(kGlUnpackAlignment, 4);
+            if (slot->tex_alloc_w == up_w && slot->tex_alloc_h == up_h) {
+                gpu_timed_tex_sub_image_2d(kGlTexture2D, 0, 0, 0,
+                                           static_cast<int>(up_w),
+                                           static_cast<int>(up_h), kGlBgra,
+                                           kGlUnsignedByte, rgba.data());
+            } else {
+                gpu_timed_tex_image_2d(kGlTexture2D, 0, kGlRgba8,
+                                       static_cast<int>(up_w),
+                                       static_cast<int>(up_h), 0, kGlBgra,
+                                       kGlUnsignedByte, rgba.data());
+                slot->tex_alloc_w = up_w;
+                slot->tex_alloc_h = up_h;
+            }
+        } else {
+            // The comparison arm: the pre-phase-7 per-pixel shuffle.
+            guest_words_to_rgba(packet.color_input, rgba, up_w, up_h,
+                                packet.state.color_format_x8);
+            pixel_store_i_(kGlUnpackAlignment, 1);
+            gpu_timed_tex_image_2d(kGlTexture2D, 0, kGlRgba8,
+                                   static_cast<int>(up_w),
+                                   static_cast<int>(up_h), 0, kGlRgba,
+                                   kGlUnsignedByte, rgba.data());
+            slot->tex_alloc_w = up_w;
+            slot->tex_alloc_h = up_h;
+        }
         if (!resident_fbo_) gen_framebuffers_(1, &resident_fbo_);
         cache_bind_framebuffer(resident_fbo_);
         cache_framebuffer_color_texture(resident_fbo_, slot->texture);
@@ -5110,6 +5420,58 @@ private:
         active_resident_ = slot;
         return true;
     }
+    // Build the R32UI word form of a resident zeta plane from the plane
+    // itself. The depth attachment is the authority for that range whoever
+    // wrote it, so reading it back is the one construction that cannot
+    // disagree with what the next draw will test against. Used only when a
+    // slot became depth-resident through a path that had no word form to
+    // upload; it costs one readback of the plane, counted by the same GL
+    // timing wrapper every other readback goes through.
+    bool ensure_depth_word_texture(ResidentSurface& slot, std::string& error) {
+        if (slot.depth_word_texture) return true;
+        if (!slot.depth_valid || !slot.depth_texture || !slot.width ||
+            !slot.height) {
+            error = "OpenGL zeta-word texture requested for a non-resident plane";
+            return false;
+        }
+        std::vector<uint32_t>& words = depth_readback_scratch_;
+        words.resize(static_cast<size_t>(slot.width) * slot.height);
+        if (!resident_fbo_) gen_framebuffers_(1, &resident_fbo_);
+        cache_bind_framebuffer(resident_fbo_);
+        cache_framebuffer_color_texture(resident_fbo_, slot.texture);
+        cache_framebuffer_depth_texture(resident_fbo_, slot.depth_texture);
+        pixel_store_i_(kGlPackAlignment, 4);
+        gpu_timed_resolve_read_pixels(
+            0, 0, static_cast<int>(slot.width), static_cast<int>(slot.height),
+            kGlDepthStencil, kGlUnsignedInt248, words.data(),
+            static_cast<uint64_t>(slot.width) * slot.height * 4ull,
+            static_cast<uint64_t>(slot.width) * slot.height * 4ull);
+        if (get_error_() != kGlNoError) {
+            error = "OpenGL zeta-word texture readback failed";
+            return false;
+        }
+        gen_textures_(1, &slot.depth_word_texture);
+        if (!slot.depth_word_texture) {
+            error = "OpenGL zeta-word texture allocation failed";
+            return false;
+        }
+        cache_bind_texture_unit(kGlTexture0, slot.depth_word_texture);
+        tex_parameter_i_(kGlTexture2D, kGlTextureMinFilter, kGlNearest);
+        tex_parameter_i_(kGlTexture2D, kGlTextureMagFilter, kGlNearest);
+        tex_parameter_i_(kGlTexture2D, kGlTextureWrapS, kGlClampToEdge);
+        tex_parameter_i_(kGlTexture2D, kGlTextureWrapT, kGlClampToEdge);
+        pixel_store_i_(kGlUnpackAlignment, 4);
+        gpu_timed_tex_image_2d(kGlTexture2D, 0, kGlR32ui,
+                               static_cast<int>(slot.width),
+                               static_cast<int>(slot.height), 0, kGlRedInteger,
+                               kGlUnsignedInt, words.data());
+        if (get_error_() != kGlNoError) {
+            error = "OpenGL zeta-word texture upload failed";
+            return false;
+        }
+        ++witnessed_upload_census_.depth_word_rebuilds;
+        return true;
+    }
     bool ensure_resident_depth_surface(const Nv2aGenericCombinerPacket& packet,
                                        ResidentSurface& slot, uint32_t width,
                                        uint32_t height, size_t size,
@@ -5123,6 +5485,16 @@ private:
         if (ResidentSurface* existing = find_resident_depth_surface(
                 packet.depth_address, size, packet.surface_pitch,
                 packet.surface_height, packet.surface_format)) {
+            // Phase 7: the plane can now have been made resident by a path
+            // that has no reason to build the WORD form of it (the witnessed
+            // executor never did; the generated executor does, but only when
+            // IT performed the upload). The fixture's depth-EQUAL test reads
+            // that word texture, so build it here from the authoritative
+            // image -- the GPU depth attachment -- rather than faulting.
+            if (!existing->depth_word_texture &&
+                !ensure_depth_word_texture(*existing, error)) {
+                return false;
+            }
             cache_framebuffer_depth_texture(resident_fbo_,
                                             existing->depth_texture);
             if (check_framebuffer_status_(kGlFramebuffer) !=
@@ -6105,11 +6477,18 @@ private:
     // ---- stage (f3): the generated generic-combiner executor -------------
     bool generated_available_ = false;
     bool generated_nodraw_ = false;
+    bool generated_bgra_upload_ = true;
     struct GeneratedTextureSlot {
         unsigned int texture = 0;
         uint64_t hash = 0;
         uint32_t width = 0;
         uint32_t height = 0;
+        // Phase 7 (upload staging): the geometry the GL storage was actually
+        // allocated with, so an unchanged geometry re-uploads through
+        // glTexSubImage2D instead of re-specifying storage. Same distinction
+        // ResidentSurface::tex_alloc_w draws, and for the same reason.
+        uint32_t alloc_w = 0;
+        uint32_t alloc_h = 0;
         bool valid = false;
     };
     std::vector<std::pair<uint64_t, GeneratedProgram>> generated_programs_;

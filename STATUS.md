@@ -3,6 +3,78 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-09-05 - GPU phase 7: the last plane is reachable, and the thing that blocks it is named
+
+One commit on `perf/measurement-first-2026-09` closes `beads-xbox.1.15.10` phase 7, the four
+items phase 6 left. The rules are `docs/PERF-METHODOLOGY.md` section 3l; the lever order is
+section 5b.
+
+**The headline is a blocked lever, and it is blocked for a reason that is now written down.**
+Phases 5 and 6 named "free plane `0x03628000`" as the largest remaining GPU-resident item -- 417
+colour plus 304 zeta resolves and 2.49 s of emulation-thread raster, all-or-nothing across eight
+witnessed families. Phase 7 built both halves it needs and **reached the goal on the census**:
+with depth support in the generated executor and all eight families rerouted through it, planes
+`0x03628000` and `0x033d0000` both fall to `cpu_draws=0`, every one of the 304 transferring zeta
+resolves disappears, guest-memory surface uploads go 391 / 915.4 MB to 4 / 8.3 MB, `uses-depth`
+declines go 512 to 0, and one 12 G leg goes 54.542 to 52.374 s (**-3.98 %**). **And five of the
+eight families move the image**, so it ships DEFAULT OFF.
+
+**The cause is measured, not guessed, and it is not in the new code.** Rerouting a witnessed
+family sends it down the ladder's own strict generic fallback, and the generic evaluator is not
+equal to the pinned specializations for five of the eight. Single-bit legs to 5.1 G:
+`pitch_multi_texture`, `pitch_three_texture` and `texf_projected_fan` are byte-exact (0 differing
+pixels, 2 475 of the 3 181 draws); `pitch_tex5_projected` differs on 286 151 pixels at max delta
+255, `pitch_additive` on 204 691, `pitch_tex5_diffuse` on 20 875, `pitch_single_texture` on
+18 883, `tex7_fan` on 14 560. Re-running the worst one with the GPU executor masked off
+reproduces the **same 286 151 pixels**, which puts the fault in the software generic evaluator.
+For two of the five the evaluator does not implement the batch's texture-shader program at all
+and says so in its own census (`unsupported-texture-shader-program` = 126 and 304, exactly those
+draw counts) -- and the refusal is deliberate: `src/machine/nv2a.cpp:10503-10520` records that
+letting the generic per-ICW formula loose on a single-stage combiner with a non-{0,1}
+`SHADER_STAGE_PROGRAM` produced a wrong answer for `tex7_fan`. Three of eight is worth nothing
+under the first-consumer rule, so `--nv2a-gpu-generic-shader-witnessed` defaults to 0 and exists
+for bisection.
+
+**Depth in the generated executor is exact, and on its own it is a regression.** The executor now
+attaches the resident zeta plane on the same `(address, size)` key the witnessed executor uses,
+and the ROP performs the guest's depth comparison against `gl_FragDepth`. A depth batch
+deliberately does NOT take the in-shader blend path: writing `gl_FragDepth` forces late-Z, so an
+`imageStore` inside the fragment shader would write colour for a fragment that then loses the
+depth test. With the reroute off it is byte-identical on all 10 checkpoints to 5.0 G -- and it
+makes things slower, because the 527 batches it moves become GPU producers on a plane that still
+has 3 181 CPU consumers: 3 G window, colour resolves 566 to 761 and zeta 180 to 375. Default off,
+and the flag comment says why.
+
+**What did ship: the upload staging.** The generated executor's 1 831.6 MB of texture and
+479.3 MB of colour-surface upload per run went through a per-pixel byte shuffle. A guest
+A8R8G8B8 word is little-endian, so its bytes in memory already are `GL_BGRA`: a texture now needs
+no staging buffer at all and a colour surface only its vertical flip as a row copy. Gate on the
+shipping binary `a3e98dc1`, 3+3 interleaved, arm A = `--no-nv2a-gpu-generic-shader-bgra-upload`:
+54.539 / 54.456 s to 53.718 / 53.643 s, **+1.51 % median / +1.49 % min, 3 of 3 rounds, FAILS the
+5 % bar**, retained under section 3 item 3 as a pure simplification. All 28 checkpoints are
+byte-identical between the arms and every determinism digest matches including `dma_digest`.
+
+**Batching was declined on measurement.** The reroute leg issued 4 003 generated draws instead of
+792 and was 2.2 s faster overall; `nv2a_gl` is 5.319 s over 304 888 entries of which the witnessed
+executor's already-batched 20 816 draw calls are the bulk.
+
+**Golden: `goldens/golden-noperf-defaults12-2026-09-05d.json` is reproduced and NOT re-pinned.**
+The reference-configuration leg passes 31 of 31 checks and is byte-identical to `golden-ref-v2`
+on 25 of 28 checkpoints, differing on the same three phase-6 frames by the same four pixels.
+Guards: `tests/test_gpu_profiles_guards.py` section 16, 17 new checks (240 total, was 223), 11 of
+11 applicable negative controls caught, each mutated on the real source file and restored by
+SHA-256. Four call-site-count guards moved with the change and are updated with the reason.
+`ctest` 28/28.
+
+**The emulation-thread partition after phase 7** (`--perf-accounting`, wall 58.444 s, unaccounted
+0.161 %) -- the floor estimate, and what is left in it is CPU emulation, command dispatch and
+driver overhead rather than raster: `tcg_exec` 14.690 (25.1 %), `nv2a_raster_witnessed` 9.162
+(15.7 %), `nv2a_vertex` 6.739 (11.5 %), `nv2a_raster_generic_sw` 5.806 (9.9 %), `nv2a_gl` 5.319
+(9.1 %), `nv2a_dispatch` 4.774 (8.2 %), `nv2a_gl_resolve` 3.791 (6.5 %), `nv2a_pfifo` 2.811
+(4.8 %), `nv2a_texture` 1.760 (3.0 %), `nv2a_clear` 1.528 (2.6 %). **`nv2a_dispatch` plus
+`nv2a_pfifo` is 7.585 s, 13.0 % of the wall, on 82.7 M entries at 57.7 ns each, and nothing in
+the whole GPU arc has ever touched it.**
+
 ## 2026-09-05 - GPU phases 5-6 land (+5.75 %), and the CPU tier is measured out of the running
 
 Three commits on `perf/measurement-first-2026-09` close `beads-xbox.1.15.10` phases 5 and 6 and

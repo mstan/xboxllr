@@ -306,13 +306,15 @@ check("a span-parallel job never enters the ring",
       "job.deferred = true;" not in spans and
       "draw_queue_publish(" not in spans)
 # Four fences as of 2026-09-05 (beads-xbox.1.15.7): the stage (f) GPU executor
-# takes one before it makes a GPU surface copy authoritative. The property this
-# guard defends is unchanged -- one fence implementation, one drain condition,
-# and every inline pixel path behind a fence.
+# takes one before it makes a GPU surface copy authoritative. FIVE as of phase 7
+# (beads-xbox.1.15.10): the witnessed-family reroute is a second entry into the
+# strict generic fallback and takes the same fence. The property this guard
+# defends is unchanged -- one fence implementation, one drain condition, and
+# every inline pixel path behind a fence.
 check("the ten coherence anchors and the order fence are untouched",
       "if (draw_threads_ != 0) draw_queue_drain();" in cpp and
       cpp.count("void Nv2a::draw_order_fence() {") == 1 and
-      latch_half.count("draw_order_fence();") == 4,
+      latch_half.count("draw_order_fence();") == 5,
       str(latch_half.count("draw_order_fence();")))
 
 # -------------------------------------------------------------------------

@@ -331,6 +331,27 @@ enum class Profile {
     kPitchAdditiveColor,
 };
 
+// Phase 7 (beads-xbox.1.15.10). The mask bit that reroutes a witnessed family
+// into the strict generic fallback, or -1 for a profile that is never
+// rerouted. The eight are exactly the CPU consumers the phase-5 plane census
+// found on plane 0x03628000 / 0x033d0000; every other profile either already
+// runs on the GPU (pitch_textured, pitch_projected, swizzled_radial), draws to
+// a pure-CPU plane no GPU draw ever touches (the six swizzled planes,
+// 0x032a4000, the two z16 zeta planes), or is the inline blit.
+inline int generic_shader_witnessed_bit(Profile profile) {
+    switch (profile) {
+    case Profile::kPitchMultiTextureColor:  return 0;
+    case Profile::kPitchThreeTextureColor:  return 1;
+    case Profile::kPitchTex5ProjectedColor: return 2;
+    case Profile::kPitchTex5DiffuseColor:   return 3;
+    case Profile::kPitchSingleTextureColor: return 4;
+    case Profile::kTex7FanColor:            return 5;
+    case Profile::kTexfProjectedFanColor:   return 6;
+    case Profile::kPitchAdditiveColor:      return 7;
+    default:                                return -1;
+    }
+}
+
 }  // namespace
 
 // Engine-block map (offsets/sizes from xemu nv2a.c blocktable). USER/PRAMIN sizes trimmed to
@@ -6112,6 +6133,40 @@ bool Nv2a::rasterize_witnessed_batch(DrawJob& job, bool& executed) {
         // here. It writes colour and zeta -- and it is what the threads=1
         // byte-lock caught overtaking queued jobs, moving the read-only-depth
         // profiles' depth-pass counts.
+        draw_order_fence();
+        return rasterize_generic_combiner_batch(job, executed);
+    }
+    // ---- phase 7: the witnessed-family reroute ---------------------------
+    // A profile matched, and it is one of the EIGHT families that still
+    // rasterize on the CPU on plane 0x03628000 (the phase-5 plane census).
+    // Sending it down the strict generic fallback is exactly what the ladder's
+    // own `else` comment describes -- the generic evaluator decodes the ACTUAL
+    // bound combiner state, and every witnessed profile is a specialization of
+    // it, so the two produce the same fragments -- and the generated executor
+    // then takes it on the GPU with the resident colour AND zeta planes.
+    //
+    // It is deliberately NOT eight hand-written GPU fixtures. The plane's
+    // residency breaks at its FIRST CPU consumer, so all eight have to move at
+    // once or none of them is worth a resolve, and eight more pinned shaders
+    // would have to be right eight times over. One generator, one census.
+    //
+    // Gated on the generated executor AND on its depth support: without either
+    // of them the reroute would land these batches in the SOFTWARE generic
+    // evaluator, which is the same pixels through a slower loop. Both negative
+    // spellings therefore restore the ladder exactly.
+    const int witnessed_reroute_bit = generic_shader_witnessed_bit(profile);
+    if (witnessed_reroute_bit >= 0 && gpu_generic_shader_ &&
+        gpu_generic_shader_depth_ && renderer_ &&
+        (gpu_generic_shader_witnessed_ &
+         (uint32_t{1} << witnessed_reroute_bit)) != 0) {
+        std::optional<perf::ScopedAdd> t;
+        if (perf::g_enabled) {
+            t.emplace(perf::g_ns_raster_generic, perf::g_calls_raster_generic);
+        }
+        ++generic_shader_witnessed_reroutes_;
+        // Same fence the `else` arm takes, and for the same reason: the
+        // generic path reaches the GL backend and the resident-surface
+        // protocol and is never threadable.
         draw_order_fence();
         return rasterize_generic_combiner_batch(job, executed);
     }
@@ -12549,7 +12604,19 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
         st.alpha_test = alpha_test_enabled;
         st.alpha_func = alpha_func;
         st.blend = blend_enabled;
-        st.image_blend = gpu_generic_shader_image_blend_;
+        // PHASE 7. A depth-using batch cannot take the image-blend path. The
+        // fragment program's imageStore happens INSIDE the shader, and writing
+        // gl_FragDepth forces the depth test to run AFTER it, so a fragment
+        // that loses the depth test would already have written its colour --
+        // the software path's `continue` skips both. With the ROP owning the
+        // colour write, the hardware orders it after the depth test for us.
+        // The cost is that GL's fixed-function blend quantises its inputs to 8
+        // bits where the software path does not (section 3j(4)); that is a
+        // measured trade on 527 batches of one plane, not a silent one, and
+        // --no-nv2a-gpu-generic-shader-depth is the arm it is measured
+        // against. `image_blend` is part of the shader-state identity, so the
+        // depth and non-depth forms of one combiner are simply two programs.
+        st.image_blend = gpu_generic_shader_image_blend_ && !uses_depth;
         st.blend_src = blend_enabled ? blend_src : 0;
         st.blend_dst = blend_enabled ? blend_dst : 0;
         for (size_t c = 0; c < 4; ++c) st.color_mask[c] = color_mask_write[c];
@@ -12570,7 +12637,9 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
         if (decline == GenericShaderDeclineReason::kNone) {
             if (surface_swizzled)
                 decline = GenericShaderDeclineReason::kSwizzledDestination;
-            else if (uses_depth)
+            else if (uses_depth &&
+                     (!gpu_generic_shader_depth_ || depth_address == 0 ||
+                      depth_bytes64 != color_bytes64))
                 decline = GenericShaderDeclineReason::kUsesDepth;
             else if (zero_alpha_gequal_noop)
                 decline = GenericShaderDeclineReason::kNoopBatch;
@@ -12616,8 +12685,14 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             gpu_shader_packet.alpha_ref = alpha_ref;
             gpu_shader_packet.blend_src = blend_src;
             gpu_shader_packet.blend_dst = blend_dst;
+            // Phase 7: the guest's own depth semantics, carried verbatim.
+            // depth_test_enabled_bit is SEMANTIC and independent of the write
+            // mask -- the software path's "test disabled, write enabled" case
+            // passes every fragment and still stores -- so both travel.
             gpu_shader_packet.depth_func = depth_func;
-            gpu_shader_packet.depth_write = false;
+            gpu_shader_packet.depth_test = uses_depth && depth_test_enabled_bit;
+            gpu_shader_packet.depth_write =
+                uses_depth && raster_state[kRasterDepthMask] != 0;
             for (size_t c = 0; c < 4; ++c)
                 gpu_shader_packet.color_mask[c] = color_mask_write[c];
             // The colour plane is snapshotted ONLY when the backend does not
@@ -12636,6 +12711,28 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                                gpu_shader_packet.color_input.size())) {
                     fault_("NV2A generated-shader colour snapshot read failed");
                     return false;
+                }
+            }
+            // Phase 7, and the same rule for the zeta plane: it is snapshotted
+            // ONLY when the backend does not already hold it. On the canonical
+            // run plane 0x033d0000 is made resident by the witnessed executor's
+            // 131 632 GPU draws and is therefore resident for nearly every one
+            // of these batches, so this read almost never happens.
+            if (uses_depth) {
+                const bool depth_resident =
+                    renderer_->generated_shader_depth_resident(
+                        depth_address, gpu_shader_packet.surface_size);
+                if (!depth_resident) {
+                    gpu_shader_packet.needs_depth_upload = true;
+                    gpu_shader_packet.depth_input.resize(
+                        gpu_shader_packet.surface_size);
+                    if (!mem_read_ ||
+                        !mem_read_(depth_address,
+                                   gpu_shader_packet.depth_input.data(),
+                                   gpu_shader_packet.depth_input.size())) {
+                        fault_("NV2A generated-shader zeta snapshot read failed");
+                        return false;
+                    }
                 }
             }
             bool textures_ok = true;
@@ -13993,6 +14090,8 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                 generic_shader_triangles_ += gpu_result.triangles;
                 generic_shader_color_upload_bytes_ +=
                     gpu_result.color_upload_bytes;
+                generic_shader_depth_upload_bytes_ +=
+                    gpu_result.depth_upload_bytes;
                 generic_shader_texture_upload_bytes_ +=
                     gpu_result.texture_upload_bytes;
                 if (generic_shader_row_) ++generic_shader_row_->gpu_batches;

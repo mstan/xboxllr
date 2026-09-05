@@ -256,6 +256,12 @@ struct Nv2aWitnessedUploadCensus {
     // of the fix: takeover falls, split rises, uploads fall.
     uint64_t plane_split_hits = 0;
     uint64_t plane_split_uploads = 0;
+    // Phase 7. A resident zeta plane whose R32UI WORD form had to be rebuilt
+    // by reading the depth attachment back, because the path that made the
+    // plane resident had no word form to upload. It is a readback, so it must
+    // stay small; a large number means the dashboard depth-EQUAL fixture and
+    // the executors are fighting over one plane.
+    uint64_t depth_word_rebuilds = 0;
 };
 
 // ===================== stage (f): witnessed-profile GPU execution ===========
@@ -467,6 +473,10 @@ struct Nv2aGeneratedShaderPacket {
     uint32_t alpha_ref = 0;
     uint32_t blend_src = 0, blend_dst = 0;
     uint32_t depth_func = 0x0207;
+    // Whether NV_PGRAPH's depth-test-enable bit is set. The software path
+    // treats "test disabled, write enabled" as pass-everything-and-store, so
+    // the two are independent and both have to travel.
+    bool depth_test = false;
     bool depth_write = false;
     bool color_mask[4] = {true, true, true, true};
     std::array<Nv2aGeneratedTexture, 4> textures{};
@@ -477,6 +487,7 @@ struct Nv2aGeneratedShaderResult {
     uint64_t triangles = 0;
     uint64_t draw_calls = 0;
     uint64_t color_upload_bytes = 0;
+    uint64_t depth_upload_bytes = 0;
     uint64_t texture_upload_bytes = 0;
     uint64_t programs_compiled = 0;
     uint64_t program_cache_hits = 0;
@@ -797,6 +808,18 @@ public:
         (void)color_address; (void)size; (void)pitch; (void)height; (void)format;
         return false;
     }
+    // The same question for the ZETA plane. Keyed on (address, size) ONLY,
+    // deliberately: that is the key the witnessed executor's
+    // find_witnessed_depth_slot uses, and plane 0x033d0000 is made resident by
+    // the witnessed executor under the COLOUR packet's pitch/height/format
+    // words. A stricter key here would report "not resident" for a plane that
+    // is, and the device would then read 2.4 MB of zeta out of guest memory
+    // per batch for nothing.
+    virtual bool generated_shader_depth_resident(uint32_t depth_address,
+                                                 size_t size) const {
+        (void)depth_address; (void)size;
+        return false;
+    }
     virtual bool submit_generated_shader(
         const Nv2aGeneratedShaderPacket& packet,
         Nv2aGeneratedShaderResult& result, std::string& error) {
@@ -815,6 +838,8 @@ public:
         uint64_t texture_uploads = 0;
         uint64_t texture_upload_skips = 0;  // hash matched, upload skipped
         uint64_t surface_uploads = 0;
+        uint64_t depth_uploads = 0;
+        uint64_t depth_draws = 0;
         uint64_t compile_failures = 0;
     };
     virtual GeneratedShaderStats generated_shader_stats() const { return {}; }
@@ -822,6 +847,16 @@ public:
     // generated submission except the draw call. Default off, no negative
     // spelling, never a shipping path.
     virtual void set_generated_shader_nodraw(bool on) { (void)on; }
+    // Phase 7 (upload staging). ON is the shipping path: the generated
+    // executor uploads a guest A8R8G8B8 word run straight to GL as GL_BGRA,
+    // because the word's bytes in memory ARE B,G,R,A -- so a texture needs no
+    // staging buffer at all and a colour surface needs only its vertical flip
+    // as a row copy. OFF restores the per-pixel byte shuffle through
+    // guest_words_to_rgba on the SAME binary, which is the arm the change is
+    // measured against; it is exactness-neutral by construction (the same
+    // texels reach the driver either way) and the 28-checkpoint comparison is
+    // its evidence.
+    virtual void set_generated_shader_bgra_upload(bool on) { (void)on; }
 
     virtual bool debug_probe_rgba8_image_store(std::string& error) {
         error = "RGBA8 image-store probe is not supported";

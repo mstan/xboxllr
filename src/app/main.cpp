@@ -525,7 +525,9 @@ void print_gpu_residency_census(const xlle::Nv2a* nv, const char* scope,
             "color_upload_mb=%.1f texture_upload_mb=%.1f programs=%llu "
             "compiles=%llu compile_failures=%llu cache_hits=%llu draws=%llu "
             "backend_triangles=%llu tex_uploads=%llu tex_skips=%llu "
-            "surface_uploads=%llu\n",
+            "surface_uploads=%llu depth_uploads=%llu depth_draws=%llu "
+            "depth_upload_mb=%.1f depth_enabled=%u witnessed_mask=%02x bgra=%u "
+            "witnessed_reroutes=%llu\n",
             scope, deadline, nv->gpu_generic_shader() ? 1u : 0u,
             (unsigned long long)d.attempts, (unsigned long long)d.submits,
             (unsigned long long)d.empty_batches,
@@ -538,7 +540,14 @@ void print_gpu_residency_census(const xlle::Nv2a* nv, const char* scope,
             (unsigned long long)r.triangles,
             (unsigned long long)r.texture_uploads,
             (unsigned long long)r.texture_upload_skips,
-            (unsigned long long)r.surface_uploads);
+            (unsigned long long)r.surface_uploads,
+            (unsigned long long)r.depth_uploads,
+            (unsigned long long)r.depth_draws,
+            d.depth_upload_bytes / 1048576.0,
+            nv->gpu_generic_shader_depth() ? 1u : 0u,
+            nv->gpu_generic_shader_witnessed(),
+            nv->gpu_generic_shader_bgra_upload() ? 1u : 0u,
+            (unsigned long long)nv->generic_shader_witnessed_reroutes());
         for (size_t k = 0; k < nv->generic_shader_program_count(); ++k) {
             std::printf(
                 "[host] generic-shader-program scope=%s deadline=%llu "
@@ -611,7 +620,8 @@ void print_gpu_residency_census(const xlle::Nv2a* nv, const char* scope,
             "over_dirty_color=%llu over_dirty_zeta=%llu key_mismatch_color=%llu "
             "key_mismatch_zeta=%llu stamp_overflows=%llu "
             "takeover_color=%llu takeover_zeta=%llu "
-            "plane_split_hits=%llu plane_split_uploads=%llu\n",
+            "plane_split_hits=%llu plane_split_uploads=%llu "
+            "depth_word_rebuilds=%llu\n",
             scope, deadline, (unsigned long long)uc.clear_accept_color,
             (unsigned long long)uc.clear_accept_depth,
             (unsigned long long)uc.clear_decline_color_missing,
@@ -624,7 +634,8 @@ void print_gpu_residency_census(const xlle::Nv2a* nv, const char* scope,
             (unsigned long long)uc.color_slot_takeover,
             (unsigned long long)uc.depth_slot_takeover,
             (unsigned long long)uc.plane_split_hits,
-            (unsigned long long)uc.plane_split_uploads);
+            (unsigned long long)uc.plane_split_uploads,
+            (unsigned long long)uc.depth_word_rebuilds);
         std::printf(
             "[host] gpu-clear scope=%s deadline=%llu enabled=%u accepted=%llu "
             "mb=%.1f decline_planes=%llu decline_mask=%llu "
@@ -1512,6 +1523,9 @@ int main(int argc, char** argv) {
     uint64_t nv2a_gpu_generic_shader_mask = ~uint64_t{0};
     bool nv2a_gpu_generic_shader_fp64 = true;
     bool nv2a_gpu_generic_shader_image_blend = true;
+    bool nv2a_gpu_generic_shader_depth = false;
+    bool nv2a_gpu_generic_shader_bgra_upload = true;
+    uint32_t nv2a_gpu_generic_shader_witnessed = 0u;
     bool nv2a_gpu_generic_shader_nodraw = false;
     uint32_t nv2a_gpu_generic_shader_wide = 4096;
     uint32_t nv2a_gpu_generic_shader_verify = 0;
@@ -1746,6 +1760,30 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(argv[i],
                               "--no-nv2a-gpu-generic-shader-image-blend"))
             nv2a_gpu_generic_shader_image_blend = false;
+        else if (!std::strcmp(argv[i], "--nv2a-gpu-generic-shader-depth"))
+            nv2a_gpu_generic_shader_depth = true;
+        else if (!std::strcmp(argv[i], "--no-nv2a-gpu-generic-shader-depth"))
+            nv2a_gpu_generic_shader_depth = false;
+        else if (!std::strcmp(argv[i],
+                              "--nv2a-gpu-generic-shader-bgra-upload"))
+            nv2a_gpu_generic_shader_bgra_upload = true;
+        else if (!std::strcmp(argv[i],
+                              "--no-nv2a-gpu-generic-shader-bgra-upload"))
+            nv2a_gpu_generic_shader_bgra_upload = false;
+        else if (!std::strcmp(argv[i],
+                              "--nv2a-gpu-generic-shader-witnessed") &&
+                 i + 1 < argc) {
+            uint64_t parsed = 0;
+            if (!parse_u64_arg(argv[++i], parsed) || parsed > 0xFFull) {
+                std::fprintf(stderr,
+                             "invalid --nv2a-gpu-generic-shader-witnessed\n");
+                return 2;
+            }
+            nv2a_gpu_generic_shader_witnessed = static_cast<uint32_t>(parsed);
+        }
+        else if (!std::strcmp(argv[i],
+                              "--no-nv2a-gpu-generic-shader-witnessed"))
+            nv2a_gpu_generic_shader_witnessed = 0;
         else if (!std::strcmp(argv[i], "--nv2a-gpu-generic-shader-fp64"))
             nv2a_gpu_generic_shader_fp64 = true;
         else if (!std::strcmp(argv[i], "--no-nv2a-gpu-generic-shader-fp64"))
@@ -2392,6 +2430,12 @@ int main(int argc, char** argv) {
                     nv2a_gpu_generic_shader_fp64);
                 mach.nv2a()->set_gpu_generic_shader_image_blend(
                     nv2a_gpu_generic_shader_image_blend);
+                mach.nv2a()->set_gpu_generic_shader_depth(
+                    nv2a_gpu_generic_shader_depth);
+                mach.nv2a()->set_gpu_generic_shader_witnessed(
+                    nv2a_gpu_generic_shader_witnessed);
+                mach.nv2a()->set_gpu_generic_shader_bgra_upload(
+                    nv2a_gpu_generic_shader_bgra_upload);
                 mach.nv2a()->set_gpu_generic_shader_nodraw(
                     nv2a_gpu_generic_shader_nodraw);
                 mach.nv2a()->set_gpu_generic_shader_wide_pixels(

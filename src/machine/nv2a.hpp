@@ -1595,11 +1595,96 @@ public:
     bool gpu_generic_shader_image_blend() const {
         return gpu_generic_shader_image_blend_;
     }
+    // --nv2a-gpu-generic-shader-depth: the generated executor attaches the
+    // resident ZETA plane -- the same slot and the same (address, size) key
+    // the witnessed executor uses -- and the ROP performs the guest's depth
+    // comparison against the value the fragment program writes to
+    // gl_FragDepth. Without it, every batch that reads or writes zeta declines
+    // `uses-depth` (512 of them on the canonical 12 B run) and is rasterized
+    // in software after resolving BOTH planes.
+    //
+    // DEFAULT OFF, and the reason is MEASURED rather than cautious. On its own
+    // it is a REGRESSION, because plane 0x03628000 still has 3 181 witnessed
+    // CPU draws on it and residency breaks at the FIRST CPU consumer: turning
+    // the 527 generic depth batches from CPU consumers into GPU producers
+    // makes the plane dirty again after each one, so the next witnessed CPU
+    // draw breaks it again. Canonical 3 G window, one binary, one session:
+    // transferring colour resolves 566 -> 761 and zeta 180 -> 375. It is
+    // EXACT (10 of 10 checkpoints byte-identical to 5.0 G with the reroute
+    // below off) and it is a PREREQUISITE for that reroute; it is not a win by
+    // itself and must not be turned on without it.
+    void set_gpu_generic_shader_depth(bool on) {
+        gpu_generic_shader_depth_ = on;
+    }
+    bool gpu_generic_shader_depth() const { return gpu_generic_shader_depth_; }
+    // --nv2a-gpu-generic-shader-witnessed MASK. Bit k sends the k-th of the
+    // EIGHT witnessed families that are still CPU-rasterized on plane
+    // 0x03628000 down the strict generic fallback instead of its hand-derived
+    // specialization, so the GENERATED executor can take it. The bit order is
+    // the one gpu_res_profile_name prints and is fixed by
+    // generic_shader_witnessed_bit below:
+    //   0 pitch_multi_texture   1 pitch_three_texture  2 pitch_tex5_projected
+    //   3 pitch_tex5_diffuse    4 pitch_single_texture 5 tex7_fan
+    //   6 texf_projected_fan    7 pitch_additive
+    //
+    // WHY IT IS ALL-OR-NOTHING, measured rather than argued. A plane's
+    // residency is broken by its FIRST CPU consumer, so moving SOME of the
+    // consumers to the GPU does not remove a single resolve -- it ADDS them,
+    // because each GPU batch re-establishes residency that the next CPU
+    // consumer then breaks again. The mask exists for BISECTION, not for
+    // partial deployment.
+    //
+    // DEFAULT 0, AND HERE IS THE MEASUREMENT THAT PUT IT THERE. With all eight
+    // rerouted the plane census reaches the goal exactly -- 0x03628000 and
+    // 0x033d0000 both fall to `cpu_draws=0`, transferring zeta resolves
+    // 304 -> 0, colour 1 356 -> 1 244, guest-memory surface uploads 391 -> 4
+    // (915.4 MB -> 8.3 MB), `uses-depth` declines 512 -> 0, and the 12 G wall
+    // 54.542 -> 52.374 s on one leg -- but the IMAGE MOVES, and not by an LSB.
+    // Single-bit legs to 5.1 G against the shipping defaults, all ten
+    // checkpoints compared with tools/compare_ppm_series.py:
+    //   bit 0 pitch_multi_texture  (120 draws)        0 px   EXACT
+    //   bit 1 pitch_three_texture  (2 304)            0 px   EXACT
+    //   bit 6 texf_projected_fan   (51)               0 px   EXACT
+    //   bit 2 pitch_tex5_projected (126)        286 151 px, max delta 255
+    //   bit 3 pitch_tex5_diffuse   (42)          20 875 px, max delta 122
+    //   bit 4 pitch_single_texture (121)         18 883 px, max delta 202
+    //   bit 5 tex7_fan             (304)         14 560 px, max delta  98
+    //   bit 7 pitch_additive       (113)        204 691 px, max delta 116
+    // The CAUSE is in the GENERIC EVALUATOR, not in the GPU executor: the same
+    // bit-2 leg with the generated executor masked off
+    // (--nv2a-gpu-generic-shader-mask 0, so the reroute lands in SOFTWARE)
+    // reproduces the SAME 286 151 pixels. For bits 2 and 5 the evaluator does
+    // not implement the batch's texture-shader program at all and skips it --
+    // `[2bl] NV2A generic-combiner skip census:
+    // unsupported-texture-shader-program=126` and `=304`, exactly those draw
+    // counts -- so the draws vanish. Bits 3, 4 and 7 are skipped by nothing
+    // and still differ, which is a numeric divergence between the generic
+    // decode and the pinned specialization. Three of eight is worth nothing
+    // under the first-consumer rule, so the whole lever waits on the five.
+    void set_gpu_generic_shader_witnessed(uint32_t mask) {
+        gpu_generic_shader_witnessed_ = mask;
+    }
+    uint32_t gpu_generic_shader_witnessed() const {
+        return gpu_generic_shader_witnessed_;
+    }
+    uint64_t generic_shader_witnessed_reroutes() const {
+        return generic_shader_witnessed_reroutes_;
+    }
     void set_gpu_generic_shader_verify(uint32_t batches) {
         gpu_generic_shader_verify_ = batches;
     }
     void set_gpu_generic_shader_nodraw(bool on) {
         if (renderer_) renderer_->set_generated_shader_nodraw(on);
+    }
+    // --no-nv2a-gpu-generic-shader-bgra-upload restores the pre-phase-7
+    // per-pixel byte shuffle on the SAME binary. See
+    // Nv2aRenderer::set_generated_shader_bgra_upload.
+    void set_gpu_generic_shader_bgra_upload(bool on) {
+        gpu_generic_shader_bgra_upload_ = on;
+        if (renderer_) renderer_->set_generated_shader_bgra_upload(on);
+    }
+    bool gpu_generic_shader_bgra_upload() const {
+        return gpu_generic_shader_bgra_upload_;
     }
     void set_gpu_generic_shader_mask(uint64_t mask) {
         gpu_generic_shader_mask_ = mask;
@@ -1679,6 +1764,7 @@ public:
         uint64_t empty_batches = 0;
         uint64_t triangles = 0;
         uint64_t color_upload_bytes = 0;
+        uint64_t depth_upload_bytes = 0;
         uint64_t texture_upload_bytes = 0;
         std::array<uint64_t, 32> declines{};
     };
@@ -1697,6 +1783,7 @@ public:
         out.empty_batches = generic_shader_empty_batches_;
         out.triangles = generic_shader_triangles_;
         out.color_upload_bytes = generic_shader_color_upload_bytes_;
+        out.depth_upload_bytes = generic_shader_depth_upload_bytes_;
         out.texture_upload_bytes = generic_shader_texture_upload_bytes_;
         out.declines = generic_shader_declines_;
         return out;
@@ -3120,6 +3207,10 @@ private:
     bool gpu_generic_shader_fp64_ = true;
     uint32_t gpu_generic_shader_wide_pixels_ = 4096;
     bool gpu_generic_shader_image_blend_ = true;
+    bool gpu_generic_shader_depth_ = false;
+    bool gpu_generic_shader_bgra_upload_ = true;
+    uint32_t gpu_generic_shader_witnessed_ = 0u;
+    uint64_t generic_shader_witnessed_reroutes_ = 0;
     uint32_t gpu_generic_shader_verify_ = 0;
     uint32_t gpu_generic_shader_verified_ = 0;
     std::vector<uint8_t> generic_shader_verify_before_;
@@ -3153,6 +3244,7 @@ private:
     uint64_t generic_shader_empty_batches_ = 0;
     uint64_t generic_shader_triangles_ = 0;
     uint64_t generic_shader_color_upload_bytes_ = 0;
+    uint64_t generic_shader_depth_upload_bytes_ = 0;
     uint64_t generic_shader_texture_upload_bytes_ = 0;
     std::array<uint64_t, 32> generic_shader_declines_{};
     void record_generic_shader_decline(GenericShaderDeclineReason reason) {

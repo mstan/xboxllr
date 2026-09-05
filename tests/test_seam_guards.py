@@ -141,9 +141,19 @@ check("rasterize_witnessed_immediate_quad is reached only from the witnessed bod
       len(callers["rasterize_witnessed_immediate_quad"]) == 1 and
       "rasterize_witnessed_immediate_quad(job, executed)" in witnessed,
       repr(callers["rasterize_witnessed_immediate_quad"]))
+# beads-xbox.1.15.10 phase 7: the strict generic fallback now has TWO call
+# sites, both inside rasterize_witnessed_batch and both returning its result --
+# the profile ladder's own `else` arm, and the witnessed-family reroute
+# (--nv2a-gpu-generic-shader-witnessed, default 0) that sends a matched profile
+# down the same fallback so the GENERATED executor can take it. The seam
+# property this guard protects is unchanged: the generic evaluator is reachable
+# ONLY from the witnessed body, i.e. from the emulation thread's latch half,
+# never from a worker.
 check("rasterize_generic_combiner_batch is reached only from the witnessed body",
-      len(callers["rasterize_generic_combiner_batch"]) == 1 and
-      "rasterize_generic_combiner_batch(job, executed)" in witnessed,
+      len(callers["rasterize_generic_combiner_batch"]) == 2 and
+      all(site == "return rasterize_generic_combiner_batch(job, executed);"
+          for site in callers["rasterize_generic_combiner_batch"]) and
+      witnessed.count("rasterize_generic_combiner_batch(job, executed)") == 2,
       repr(callers["rasterize_generic_combiner_batch"]))
 check("all three raster entry points take the job",
       hpp.count("bool rasterize_witnessed_immediate_quad(DrawJob& job, bool& executed);") == 1 and

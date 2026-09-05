@@ -233,6 +233,9 @@ so the record carries all 24 per-profile hashes. The DEFAULT configuration
 | `--nv2a-gpu-generic-shader-fp64` | **on** (`--no-…` is single precision) | the generated programs' perspective interpolation in double, matching the software path. Measured to be worth ZERO pixels on this workload (§3j(3)); on by default because it is what the software does, not because it fixed anything. |
 | `--nv2a-gpu-generic-shader-wide N` | **4096** guest pixels (0 = every triangle) | a triangle with a vertex further than N pixels from the origin is drawn as its own scanline bounding box, so the fixed-function rasterizer can never under-cover it. 0 is the exactness control and was used to disprove coverage as a cause. |
 | `--nv2a-gpu-generic-shader-mask N` | all ones | bit *k* enables the *k*-th distinct generated program in first-attempt order. The bisection tool that isolated the wrong program to one of six. |
+| `--nv2a-gpu-generic-shader-depth` | **off** as of 2026-09-05 phase 7 (`--nv2a-gpu-generic-shader-depth` opts in) | the generated executor attaches the resident zeta plane and the ROP performs the guest's depth comparison against `gl_FragDepth`; `uses-depth` declines go 512 to 0. EXACT (10 of 10 checkpoints byte-identical to 5.0 G) and a MEASURED REGRESSION on its own: plane `0x03628000` still has 3 181 witnessed CPU draws, so the 527 batches this moves become GPU producers the next CPU consumer breaks again -- 3 G window, colour resolves 566 to 761 and zeta 180 to 375. A prerequisite for the row below, not a win. See section 3l(1). |
+| `--nv2a-gpu-generic-shader-witnessed N` | **0** (all eight bits available) | bit *k* sends the *k*-th of the eight witnessed families still CPU-rasterized on plane `0x03628000` down the strict generic fallback so the generated executor can take it. With all eight the plane census reaches `cpu_draws=0` on both planes and one leg is 54.542 to 52.374 s -- but five of the eight move the image (bit 2 alone: 286 151 px at max delta 255), and the cause is in the GENERIC EVALUATOR, not the executor. BISECTION only. See section 3l(2). |
+| `--nv2a-gpu-generic-shader-bgra-upload` | **on** as of 2026-09-05 phase 7 (`--no-...` restores the per-pixel shuffle) | the generated executor uploads guest A8R8G8B8 words as `GL_BGRA` -- no staging buffer at all for a texture, a row copy for a colour surface -- deleting a per-pixel byte shuffle over 2.3 GB per run. Exactness-neutral by construction and by evidence (28 of 28 checkpoints byte-identical between the arms); gate **+1.51 % median / +1.49 % min, FAILS the 5 % bar** and is retained under section 3 item 3. See section 3l(3). |
 | `--nv2a-gpu-generic-shader-verify N` | **0**, no `--no-` spelling | DIAGNOSTIC, very slow, changes residency: runs BOTH paths for the first N submitted batches from the same starting image and reports the per-pixel difference. This is the instrument that found the blend, after three wrong theories. |
 | `--nv2a-gpu-generic-shader-nodraw` | **off**, no `--no-` spelling | DIAGNOSTIC, KNOWN INCORRECT when on: everything but the draw call, so the frame is missing exactly this executor's output. The control that sized what the executor contributes. |
 | `--nv2a-vertex-census` | **off**, no `--no-` spelling | attribution only: two clock reads per VERTEX (91 M pairs per 12 B run). It is what produced the split in §3i and must never ride in a timing leg. |
@@ -860,6 +863,189 @@ it is one flag either way.
   barrier against 4.2 s of work, which is why it is not obviously a win and needs measuring rather
   than assuming.
 
+### 3l. Phase 7 (2026-09-05, `beads-xbox.1.15.10`): depth in the generated executor, the witnessed-family reroute, and the upload staging
+
+Phase 7 was asked for the four items section 3j(8) left, in the order the plane census orders
+them. The first two are ONE lever, not two, and that lever is measured, complete, and **DEFAULT
+OFF** -- for a reason that is a measurement rather than caution. The third is exact and small.
+The fourth was declined on measurement.
+
+**(1) Depth in the generated executor: BUILT, EXACT, and a REGRESSION on its own.** The executor
+now attaches the resident ZETA plane -- the same slot and the same `(address, size)` key the
+witnessed executor's `find_witnessed_depth_slot` uses, so a plane either of them makes resident
+is found by the other -- and the ROP performs the guest's depth comparison against the value the
+fragment program writes to `gl_FragDepth`. The one design decision worth recording is what a
+depth batch must NOT do: **it does not take the image-blend path**. Writing `gl_FragDepth` forces
+late-Z, and the in-shader `imageStore` of section 3j(4) happens INSIDE the fragment shader, i.e.
+BEFORE a late depth test -- so a fragment that loses the depth test would already have written
+its colour, where the software path's `continue` skips both. With the ROP owning the colour
+write, the hardware orders it after the depth test. `image_blend` is part of the shader-state
+identity, so the depth and non-depth forms of one combiner are simply two programs.
+
+`uses-depth` declines go **512 to 0** and the batches execute on the GPU (`depth_draws=195` on
+the 3 G window, 3 211 on the full run). It is EXACT: with the reroute below off, all 10
+checkpoints to 5.0 G are **byte-identical** to the shipping defaults. **And it is a regression.**
+Plane `0x03628000` still has 3 181 witnessed CPU draws on it, residency breaks at its FIRST CPU
+consumer, and turning the 527 generic depth batches from CPU consumers into GPU producers makes
+the plane dirty again after each one, so the next witnessed CPU draw breaks it again. Measured on
+the canonical 3 G window, one binary, one session:
+
+| | arm A (shipping defaults) | arm B (depth on, reroute off) |
+|---|---:|---:|
+| transferring COLOUR resolves | 566 | **761** |
+| their cost | 1.160 s | **2.023 s** |
+| transferring ZETA resolves | 180 | **375** |
+| their cost | 0.378 s | **0.850 s** |
+| generated colour-surface uploads | 0 | 195 of 195 submits |
+
+`--nv2a-gpu-generic-shader-depth` therefore defaults **off**. It is a PREREQUISITE for (2), not a
+win, and it must not be turned on without it.
+
+**(2) The witnessed-family reroute: BUILT, and it reaches the goal exactly -- but the IMAGE
+MOVES, and the cause is in the generic evaluator.** `--nv2a-gpu-generic-shader-witnessed MASK`
+sends a matched witnessed profile down the ladder's own strict generic fallback instead of its
+hand-derived specialization, so the generated executor takes it. It is ONE mask over the eight
+families the phase-5 plane census names, not eight hand-written GPU fixtures, and it is gated on
+the generated executor AND on its depth support so either negative spelling restores the ladder
+exactly.
+
+With all eight rerouted (`witnessed_reroutes=3181`), the canonical 12 G run reaches the phase-7
+goal on the census:
+
+| | shipping defaults | all eight rerouted |
+|---|---:|---:|
+| plane `0x03628000` CPU draws | 3 181 | **0** |
+| plane `0x033d0000` CPU draws | 3 110 | **0** |
+| transferring ZETA resolves | 304 (0.636 s) | **0 (0.000 s)** |
+| transferring COLOUR resolves | 1 356 (3.206 s) | 1 244 (3.302 s) |
+| transferring texture-source resolves | 230 (0.700 s) | 484 (1.233 s) |
+| guest-memory surface uploads (`gpu-upload-total`) | 391 / 915.4 MB | **4 / 8.3 MB** |
+| GPU clears accepted / declined-missing (colour) | 691 / 318 | **995 / 14** |
+| GPU clears accepted / declined-missing (zeta) | 757 / 495 | **1 240 / 12** |
+| `uses-depth` declines | 512 | **0** |
+| generated submits / draws | 792 | 4 003 |
+| total 12 G wall, one leg each | 54.542 s | **52.374 s** |
+
+**And 12 of 28 checkpoints differ, structurally.** 4.5 G differs on 99.79 % of its pixels at max
+delta 255: the Xbox boot logo is simply absent. Single-bit legs to 5.1 G, all ten checkpoints
+compared with `tools/compare_ppm_series.py` against the shipping defaults:
+
+| bit | family | CPU draws | differing pixels | max delta | verdict |
+|---|---|---:|---:|---:|---|
+| 0 | `pitch_multi_texture` | 120 | **0** | 0 | EXACT |
+| 1 | `pitch_three_texture` | 2 304 | **0** | 0 | EXACT |
+| 6 | `texf_projected_fan` | 51 | **0** | 0 | EXACT |
+| 2 | `pitch_tex5_projected` | 126 | 286 151 | 255 | differs |
+| 3 | `pitch_tex5_diffuse` | 42 | 20 875 | 122 | differs |
+| 4 | `pitch_single_texture` | 121 | 18 883 | 202 | differs |
+| 5 | `tex7_fan` | 304 | 14 560 | 98 | differs |
+| 7 | `pitch_additive` | 113 | 204 691 | 116 | differs |
+
+**The cause is the GENERIC EVALUATOR, not the GPU executor, and that is measured rather than
+argued.** The same bit-2 leg run with the generated executor masked off
+(`--nv2a-gpu-generic-shader-mask 0`, so the reroute lands in SOFTWARE) reproduces the **same
+286 151 pixels**. For bits 2 and 5 the evaluator does not implement the batch's texture-shader
+program at all and skips it: `[2bl] NV2A generic-combiner skip census:
+unsupported-texture-shader-program=126` and `=304`, exactly those draw counts, so those draws
+vanish. And it is not an oversight -- `src/machine/nv2a.cpp:10503-10520` states the restriction
+and its reason in the source: a single-stage combiner with a non-{0,1} `SHADER_STAGE_PROGRAM` is
+refused because "letting this evaluator's simpler per-ICW-literal formula loose on that same
+narrow state produced a wrong (not hardware-matching) answer for tex7_fan". Bits 3, 4 and 7 are
+skipped by nothing and still differ, which is a numeric divergence between the generic decode and
+the pinned specialization.
+
+Three of eight is worth nothing under the first-consumer rule, so the mask exists for BISECTION
+and defaults to **0**. **DO NOT RETRY WITHOUT**: the generic evaluator modelling the
+texture-shader stage chain for `SHADER_STAGE_PROGRAM` 0x0C01 and tex7_fan's 0x0C61 (bits 2, 5),
+and an explanation for the three that diverge numerically (bits 3, 4, 7) -- or, alternatively, a
+route that hands the GENERATOR the witnessed specialization's own expression instead of the
+generic decode's.
+
+**(3) The upload staging: BUILT, EXACT, retained at flat cost.** The generated executor's
+1 831.6 MB of texture and 479.3 MB of colour-surface upload per run went through
+`guest_words_to_rgba*`, a per-pixel byte shuffle. A guest A8R8G8B8 word is little-endian, so its
+bytes in memory are already B,G,R,A -- exactly `GL_BGRA`/`GL_UNSIGNED_BYTE`. A texture therefore
+needs **no staging buffer at all** (the device already hands over a tightly packed image), and a
+colour surface needs only its vertical flip as a row copy; an unchanged geometry re-uploads
+through `glTexSubImage2D` instead of re-specifying storage. This is the transform the WITNESSED
+executor's upload path already used. `--no-nv2a-gpu-generic-shader-bgra-upload` restores the
+shuffle on the same binary.
+
+**(4) Batching: DECLINED ON MEASUREMENT.** Each generated batch is still one `glDrawArrays` with
+its own SSBO upload, 792 per canonical run. The reroute leg above ran **4 003** of them -- five
+times as many -- and was 2.2 s FASTER overall, so the per-draw cost cannot be a material term;
+the instrumented partition puts the whole of `nv2a_gl` at 5.319 s over 304 888 entries, of which
+the witnessed executor's 20 816 already-batched draw calls are the bulk. **DO NOT RETRY WITHOUT**
+a run in which the generated executor's own draw count is the dominant term in `nv2a_gl`.
+
+**(5) The decision A/B. 3+3 interleaved, one binary (`a3e98dc1`), one session, arm A =
+`--no-nv2a-gpu-generic-shader-bgra-upload` on the SAME binary. Gate = total 12 B wall, median AND
+min, 5 %.** Depth and the reroute are default-off, so they take zero batches in either arm and
+this set measures the upload staging alone.
+
+| set | arm A median / min | arm B median / min | median | min | rounds | verdict |
+|---|---|---|---|---|---|---|
+| `p7-gate` | 54.539 / 54.456 s | 53.718 / 53.643 s | **+1.51 %** | **+1.49 %** | 3/3 | **FAIL the 5 % bar** |
+
+Paired per-round deltas -2.14, -0.63, -1.51 %; 3 of 3 favour B. Arm cv 0.28 % (A) and 0.38 % (B).
+Final-four indicator +3.01 % median / +2.48 % min (not gated). Every leg is flagged
+`contaminated` by the same four idle `beads-mcp` python processes present in both arms, which is
+a constant and not a differential. Retained under section 3 item 3 as a pure simplification: it
+deletes a per-pixel shuffle over 2.3 GB and cannot change a texel.
+
+**(6) Behaviour: EXACT, and it adds zero pixels.** Arm A vs arm B, all **28 checkpoint PPMs
+byte-identical (0 differing pixels)**, and every determinism digest identical INCLUDING
+`dma_digest`: `det_digest ed86cf6a1fe11c4f`, `dev_digest bbadac889020716f`,
+`dev_events 17 588 661`, `dma_digest f5c98df2a12072bb`, `dma_writes 1 237 379`, `irq0 16342`,
+final frame SHA `36e87a97...`, scanout FNV `b7e78a1ac17ac5e8`, all 24 profile hashes
+(`0 differ`), exit 0 and empty stderr on every leg of both arms. Against
+`build/golden-ref-v2-*.ppm` arm B reproduces the section 3k(8) signature UNCHANGED -- 21
+byte-identical and the same seven checkpoints (2.5 G 5 px, 3.0 G 1, 3.5 G 56, 4.0 G 15, 11.0 G 2,
+11.5 G 1, `settle-1` 1), largest connected component 1 px, worst frame 0.0182 %. Diff PNGs read
+by eye (`build/diff-p7/`): the three boot frames are isolated 1-LSB specks with no shape and the
+final dashboard diff is entirely untinted.
+
+**Golden: `goldens/golden-noperf-defaults12-2026-09-05d.json` is reproduced and NOT re-pinned.**
+The reference-configuration leg (`--nv2a-draw-threads 0 --nv2a-profile-hashes`, `build/p7-ref`)
+passes **31 of 31** checks and is byte-identical to `golden-ref-v2` on 25 of 28 checkpoints,
+differing on the same three phase-6 frames by the same four pixels.
+
+**(7) The emulation-thread partition after phase 7** (`build/p7-perf`, `--perf-accounting`, wall
+58.444 s, unaccounted 0.161 %). This is the floor estimate the owner was promised, and what
+remains in it is CPU emulation, command dispatch and PFIFO, and driver overhead -- not raster:
+
+| bucket | s | % of wall |
+|---|---:|---:|
+| `tcg_exec` | 14.690 | 25.14 |
+| `nv2a_raster_witnessed` | 9.162 | 15.68 |
+| `nv2a_vertex` | 6.739 | 11.53 |
+| `nv2a_raster_generic_sw` | 5.806 | 9.93 |
+| `nv2a_gl` | 5.319 | 9.10 |
+| `nv2a_dispatch` | 4.774 | 8.17 |
+| `nv2a_gl_resolve` | 3.791 | 6.49 |
+| `nv2a_pfifo` | 2.811 | 4.81 |
+| `nv2a_texture` | 1.760 | 3.01 |
+| `nv2a_clear` | 1.528 | 2.61 |
+| `mmio_dispatch` | 0.673 | 1.15 |
+| `nv2a_recorder` | 0.597 | 1.02 |
+| everything else (slice overhead, checkpoints, io, poll, scanout, interrupts) | 1.280 | 2.19 |
+
+**(8) What is NOT done, with the number each is worth.**
+
+* **The five diverging witnessed families (bits 2, 3, 4, 5, 7; 706 of 3 181 CPU draws).** They
+  are the whole of what stands between here and a free `0x03628000`, which the reroute leg
+  measured at **-2.17 s (-3.98 %) on one leg**, with all 304 zeta resolves and 907 MB of upload
+  removed. Two need the generic evaluator to model a texture-shader stage chain; three need an
+  explanation for a numeric divergence.
+* **The 484 transferring texture-source resolves (1.233 s with the reroute on; 230 / 0.700 s
+  without).** Already-GL-accelerated batches sampling a GPU-resident plane. The lever is a
+  GPU-to-GPU copy (`glBlitFramebuffer` with the Y flip, or `glCopyImageSubData`) from the
+  resident plane into the texture slot instead of a readback plus a re-upload; its ceiling is
+  1.3 % of the wall without the reroute and 2.3 % with it.
+* **`nv2a_dispatch` 4.774 s + `nv2a_pfifo` 2.811 s = 7.585 s, 13.0 % of the wall**, on 82.7 M
+  dispatch entries at 57.7 ns each. Nothing in the GPU arc touches it; it is the pushbuffer parse
+  and the method ladder, and it is now the third-largest bucket in the run.
+
 ### 3e. Draw-thread knee sweep (2026-09-05)
 
 One binary, one session, quiet host, `--no-nv2a-profile-hashes`, gate = total 12 B wall, median
@@ -963,26 +1149,28 @@ already taken most of it, and what remained was 13.7 s of `tcg_exec` (1.09× at 
 8. Per-vblank ring, GL timer queries, profiler fix. `beads-xbox.1.14.5-7`.
 9. Hardware framebuffer capture when it becomes a blocker. `beads-xbox.1.14.9` (ask first).
 
-### 5b. The measured lever order after phase 5 (2026-09-05)
+### 5b. The measured lever order after phase 7 (2026-09-05)
 
 Every row is a direct measurement on the canonical 12 B replay, not an inference. The
-emulation-thread partition it is read against is the phase-5 arm-B instrumented leg
-(`build/p5-perf-leg01-B-r1`, wall 62.496 s, unaccounted 0.151 %): `tcg_exec` 14.652,
-`nv2a_raster_witnessed` 8.950, `nv2a_vertex` 7.383, `nv2a_raster_generic_sw` 7.201, `nv2a_gl`
-5.877, `nv2a_gl_resolve` 5.609, `nv2a_dispatch` 4.788, `nv2a_pfifo` 2.823, `nv2a_texture` 1.762,
-`nv2a_clear` 1.530; off-thread `worker_raster_ns` 27.897 s over 11 helpers, `part0_raster_ns`
-2.580, `barrier_wait_ns` 0.604.
+emulation-thread partition it is read against is the phase-7 instrumented leg
+(`build/p7-perf`, wall 58.444 s, unaccounted 0.161 %): `tcg_exec` 14.690,
+`nv2a_raster_witnessed` 9.162, `nv2a_vertex` 6.739, `nv2a_raster_generic_sw` 5.806, `nv2a_gl`
+5.319, `nv2a_dispatch` 4.774, `nv2a_gl_resolve` 3.791, `nv2a_pfifo` 2.811, `nv2a_texture` 1.760,
+`nv2a_clear` 1.528, `mmio_dispatch` 0.673, `nv2a_recorder` 0.597. (The phase-5 leg it replaces
+was `build/p5-perf-leg01-B-r1`, wall 62.496 s.)
 
 | # | lever | measured size | what it costs to build |
 |---|---|---:|---|
 | 0 | ~~the 704 generic software-fallback resolves on plane `0x03AA4000`~~ | **DONE 2026-09-05 phase 6**: 704 → 0, `nv2a_gl_resolve` −1.670 s and `nv2a_raster_generic_sw` −1.364 s, gate +5.75 / +6.01 % | the generated combiner executor, §3j |
 | 1 | **The remaining transferring residency resolves**: 1 356 colour, 304 zeta after phase 6 | **4.32 s** | three routes, below |
-| 1a | — free plane `0x03628000`: the eight witnessed families (§3i(2)) **AND the four generic shader states that also draw to it**, which the phase-5 plane table could not see because it counts witnessed draws only | ~1.9 s of the above, plus 2.49 s of their emulation-thread raster | the eight predicates plus DEPTH support in the generated executor (512 batches decline on it today) |
-| 1c | — the 602 `generic-texture-read` resolves: ALREADY-GL-accelerated batches sampling a GPU-resident plane, which the generator cannot touch | ~1.8 s | sample the resident surface as a texture — the lever §3h declined at a number now known to be wrong |
+| 1a | — free plane `0x03628000`: the eight witnessed families (§3i(2)) **AND the eight generic shader states that also draw to it** | **MEASURED END TO END 2026-09-05 phase 7 and BLOCKED**, §3l(2). Depth in the generated executor is BUILT and exact (declines 512 → 0), the reroute is BUILT, and together they take both planes to `cpu_draws=0`, all 304 zeta resolves to 0, guest-memory surface uploads 391/915.4 MB → 4/8.3 MB and one 12 G leg 54.542 → 52.374 s (**−3.98 %**). But **five of the eight families move the image** and the cause is the GENERIC EVALUATOR: bits 2 and 5 hit a texture-shader program it deliberately refuses (`unsupported-texture-shader-program` = 126 and 304, exactly their draw counts), bits 3, 4 and 7 diverge numerically. Both flags ship DEFAULT OFF | the generic evaluator must model the texture-shader stage chain for `SHADER_STAGE_PROGRAM` 0x0C01 and 0x0C61, and the three numeric divergences must be explained |
+| 1c | — the transferring texture-source resolves: ALREADY-GL-accelerated batches sampling a GPU-resident plane, which the generator cannot touch. Measured directly by `[host] gpu-resolve-cost`: **230 at 0.700 s** on the shipping defaults, 484 at 1.233 s once the reroute frees `0x03628000` | 1.3 % of the wall today, 2.3 % after 1a | a GPU-to-GPU copy (`glBlitFramebuffer` with the Y flip, or `glCopyImageSubData`) from the resident plane into the texture slot, replacing the readback plus re-upload. NOT the shader-side resident sampler §3h costed |
 | 1b | — make a resolve cheaper: 4.80 s backend (glReadPixels 2.53 s GPU-side + stall) + 0.90 s writeback of 6 109 MB, and `dirty=100.0 %` on every resolve | up to ~2 s | row-scope the resolve+upload against a real dirty rect, or resolve straight into guest RAM via `mem_direct_` |
 | 2 | ~~**The VSH interpreter**: 38 337 230 vertices at 118 ns (§3i(3))~~ | **MEASURED OUT 2026-09-05, §3k.** The pre-decoded step form is worth **12 %** of it, not the 3-5× an interpreter usually gives, because the ceiling probe says the DECODE was never the majority: operand traffic and fixed per-vertex cost 53 %, the NV2A-specific operation bodies 47 %. `vsh_ns` 4.823 → 4.237 s, gate **+2.11 % / +1.49 %, FAIL**. The remaining ceiling for the whole lever is `vsh_ns` → 0, i.e. **7.8 %** of the wall, and the two routes to any of it (an SSE `fix_inf_mult`, a `pshufb` operand fetch) are worth ~2 % and ~1 % | done and recorded; §3k(10) has what is left |
 | 3 | ~~The 1 878 generic-combiner software fallbacks~~ | **DONE**, and the phase-5 framing of this row was wrong twice: the 602 texture reads are NOT software fallbacks (row 1c), and the 704 fallback resolves were all on a plane §3i(2) never named | — |
-| 4 | 1 831.6 MB of texture upload + 479.3 MB of surface upload per run on the generated path, through a per-pixel scalar staging loop | not yet sized | `GL_BGRA` + `GL_UNSIGNED_INT_8_8_8_8_REV` deletes the loop |
+| 4 | ~~1 831.6 MB of texture upload + 479.3 MB of surface upload per run on the generated path, through a per-pixel scalar staging loop~~ | **DONE 2026-09-05 phase 7**, §3l(3): `GL_BGRA` deletes the loop entirely for a texture and reduces a colour surface to a row copy. Gate **+1.51 % median / +1.49 % min, FAILS the 5 % bar**, 3 of 3 rounds, 28 of 28 checkpoints byte-identical; retained under §3 item 3 as a pure simplification | done |
+| 5 | ~~batch the generated draws (792 per run, one SSBO each)~~ | **DECLINED ON MEASUREMENT 2026-09-05 phase 7**, §3l(4). The reroute leg ran 4 003 of them and was 2.2 s FASTER; `nv2a_gl` is 5.319 s over 304 888 entries of which the witnessed executor's 20 816 already-batched draw calls are the bulk | — |
+| 6 | **`nv2a_dispatch` 4.774 s + `nv2a_pfifo` 2.811 s = 7.585 s, 13.0 % of the wall**, on 82.7 M dispatch entries at 57.7 ns each | 13.0 % | untouched by the whole GPU arc: it is the pushbuffer parse and the method ladder, and after phase 7 it is the third-largest item in the run |
 | — | ~~the 148 317 no-op per-draw residency queries~~ | **16 ms — DECLINED ON MEASUREMENT** | — |
 | — | ~~`kPitchZ16Depth` on the GPU (142 842 draws, 476 M fragments)~~ | **zero resolves removed**; its two zeta planes have no GPU draws at all | one shader, for CPU raster removal only |
 

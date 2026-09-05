@@ -129,14 +129,25 @@ def lines_matching(pattern):
 # destination-plane upload and its per-stage sampled textures). 3 -> 4, 7 -> 8
 # and 10 -> 12. Every one of them goes through the wrapper, which is the
 # property this file exists to keep true.
+# Updated again 2026-09-05 for beads-xbox.1.15.10 phase 7. Five new upload
+# sites and one new readback site, all through the wrapper:
+#   * ensure_generated_depth_surface uploads the zeta plane in BOTH forms --
+#     GL_DEPTH24_STENCIL8 (image or sub-image) and the R32UI word texture the
+#     dashboard depth-EQUAL fixture reads: +2 tex_image_2d, +1 tex_sub_image_2d
+#   * the generated colour surface and the generated per-stage textures each
+#     gained a sub-image branch and a BGRA/shuffle pair of image branches:
+#     +3 tex_image_2d, +2 tex_sub_image_2d
+#   * ensure_depth_word_texture rebuilds a missing word texture from the depth
+#     attachment: +1 resolve_read_pixels and +1 tex_image_2d
+# 12 -> 17, 5 -> 8, 2 -> 3.
 WRAPPED = [
     ("draw_arrays_", {"gpu_timed_draw_arrays": 4}),
     ("dispatch_compute_", {"gpu_timed_dispatch_compute": 6}),
     ("buffer_data_", {"gpu_timed_buffer_data": 8}),
-    ("tex_image_2d_", {"gpu_timed_tex_image_2d": 12}),
-    ("tex_sub_image_2d_", {"gpu_timed_tex_sub_image_2d": 5}),
+    ("tex_image_2d_", {"gpu_timed_tex_image_2d": 17}),
+    ("tex_sub_image_2d_", {"gpu_timed_tex_sub_image_2d": 8}),
     ("read_pixels_", {"gpu_timed_read_pixels": 2,          # the two GL probes
-                      "gpu_timed_resolve_read_pixels": 2}),  # color + zeta
+                      "gpu_timed_resolve_read_pixels": 3}),  # color, zeta, word
 ]
 
 print("GPU-timed wrapper coverage")
