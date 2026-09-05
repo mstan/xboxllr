@@ -22,18 +22,31 @@ proven against real hardware, with a game (Blinx) as the second arc.
 
 **Arc 1 / A4 - make the stock dashboard interactively navigable.** The real firmware and
 kernel boot, FATX loads the stock dashboard image from the maintainer-supplied HDD image, and
-guest-owned NV2A output is visible through SDL3/OpenGL. The current bottleneck is speed: reach
-at least 10 presented fps during stock-dashboard navigation while preserving exact replay
-hashes and the software/LLE fallback.
+guest-owned NV2A output is visible through SDL3/OpenGL. The bottleneck is still speed: sustain
+at least 10 presented fps during stock-dashboard navigation, keeping the software/LLE fallback.
+
+**The metric is defined, not vibes** (`docs/PERF-METHODOLOGY.md`). Presented fps = NV2A flip
+write-increments per second of host wall. It is NOT `effective_fps`, which is 60 x guest speed
+and may be reported but never gated on. The retention gate is the **total 12 B replay wall,
+median AND min, both required to improve by 5 %**, from interleaved same-session legs on a quiet
+host. Acceptance is **behavioural faithfulness, not byte-exactness**: same screens reached, same
+input and interrupt timeline within tolerance, no artifacts, no faults. Byte-locks stay as the
+cheapest regression detector, and hardware truth outranks any golden.
 
 ## The ONE next milestone
 
-**Reach an exact, demonstrable stock-dashboard run at >=10 presented fps.** The best retained
-opt-in path is still below target, so the next milestone is a validated performance step that
-removes real dashboard render/surface work without accepting image-hash drift. Completion means
-a bounded stock-dashboard replay and a live/tentative SDL run sustain the target with no
-host-rendered dashboard substitute, replacement kernel, synthetic USB poll, or copyrighted asset
-checked into the repo.
+**Sustain >=10 presented fps in a LIVE SDL navigation session.** The bounded-replay half is
+**met**: on the shipping binary at the shipping defaults the canonical 12 B replay is 58.5-59.4 s
+at **11.7 presented flips/s** across nine legs of three interleaved sets, reproducing the golden
+final frame SHA `36e87a97...`; the single-threaded software-raster reference is 147.5 s and
+4.71 flips/s. What remains unmeasured is the interactive path, which carries a 33 ms present
+throttle and a scalar scanout that the replay never exercises. Completion means a live SDL run
+holds the target with no host-rendered dashboard substitute, replacement kernel, synthetic USB
+poll, or copyrighted asset checked into the repo.
+
+After that, the CPU tier: `tcg_exec` is down 5.4x (77.3 -> 14.3 s) but Unicorn is the next floor,
+and the owner decision is to replace it if it must be replaced (WHPX/Hyper-V versus a custom
+dynamic recompiler).
 
 ## Not-yet (explicitly deferred, do not drift into these)
 

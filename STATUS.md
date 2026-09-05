@@ -3,6 +3,104 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-09-05 - Measurement-first performance week: 12 B replay 227 s -> 58.5 s, 11.7 presented flips/s
+
+The week of 2026-09-02..05 replaced guesswork with instruments, then used them. Everything
+below is on branch `perf/measurement-first-2026-09`. The rules it was run under are
+`docs/PERF-METHODOLOGY.md`; what each stage measured, including the rejections, is
+`docs/PERF-AUDIT-2026-09-02.md`; the reference identities now live in `goldens/`.
+
+**The metric changed, and that is the most important line here.** The gate is the **total 12 B
+replay wall, median AND min, both required to improve by 5 %**, from interleaved A1 B1 A2 B2
+legs in ONE session on a quiet host. The old final-four gate window is generic-combiner and
+GL-tail dominated and had hidden a 4-7 % witnessed-raster win; it is now reported as an
+indicator and never gated. `effective_fps` is 60 x guest speed and is NOT presented fps. And
+under owner decision 9 the acceptance standard is **behavioural faithfulness, not
+byte-exactness**: byte-locks remain the cheapest regression detector, but a small explained
+pixel drift is a question to answer, not a blocker.
+
+**Where the time actually went, measured rather than inferred.** `src/machine/perf_excl.hpp`
+makes exactly one bucket accrue at any instant and publishes the shortfall as `unaccounted_ns`
+(0.045 % on the first run). The first partition of a 227.0 s run: witnessed rasterizer 104.3 s
+(46.0 %), `tcg_exec` 82.2 s (36.2 %), everything else 40.5 s. So NV2A 60.7 %, TCG 36.2 %, all
+other overhead 0.5 % - the old "68-78 % is the device path" inference was right in direction
+and high in size, and the dispatch if-chain premise (209 ns/word) did not survive contact:
+dispatch + recorder is 66 ns/word, a 2.4 % ceiling.
+
+**Four things landed, in this order.** (1) The NV2A CPU path: NV097 jump table and per-profile
+compile-time loop specialization, +3.46 % median / +4.00 % min with every witnessed-raster
+window +4.3 to +6.7 %; attribution says the win is the specialization, the table is ~1 %.
+(2) The seam and threading: a `DrawJob` latched at the draw-batch boundary with the fragment
+code textually unchanged, then span-parallel rasterization where all N workers walk interleaved
+rows of the SAME job - exact by construction and byte-locked (threads 0 vs 4, 24 checkpoint
+PPMs and every counter identical). Deferral to a single consumer was implemented, measured at
++0.39 %, and REJECTED: worker busy 0.489 and emulation thread blocked 0.449 put the ceiling at
+4 %. Span parallelism is 154.475 -> 71.336 s median (-53.8 %) against the inline fallback; the
+knee sweep chose N = 12, and N = 16 is a regression because the barrier goes from 3.7 % to
+22.5 % of elapsed. (3) The CPU tier: block hooks with per-TB icount (`tcg_exec` 50.0 -> 28.0 s),
+a guest TSC derived from the retired-instruction clock instead of the host TSC, and idle
+fast-forward retiring 4,918,497,264 instructions in 14,801 skips - 40.99 % of the run and
+99.36 % of all idle instructions. Chained, `tcg_exec` is 77.3 -> 28.0 -> 14.3 s, **5.4x**, and
+the CPU tier is finished as a lever. (4) The GPU executor: the witnessed profiles as GL fragment
+programs, -5.86 % on the min of the 5+5 set run on the shipping binary, with FP32 shaders
+(`gpu_draw_ns` 10.746 -> 2.364 s), a 256-triangle flush bound chosen from a sweep, and a 4-deep
+SSBO ring.
+
+**Two defects found by the instruments, both load-bearing.** The replay was **mutating its own
+input disk**: `attach_hdd` opened the image `"r+b"` and the retail boot increments the BRFR
+refurb boot counter at LBA 3 within the first 18 M instructions of every run, so no two runs
+started from the same disk. It was localised with three new always-on digests down to two bytes
+at `0x000d48c8` / `0x000d4b04`, `0x35` vs `0x36`, and fixed with a copy-on-write attach (default
+on, `--hdd-writeback` opts back in). That single finding retires every earlier "correlated but
+not determined by" line about speed, draw threads, the RTC and the guest TSC. Separately, the
+GL `GL_TIME_ELAPSED` bracket around the synchronous `glReadPixels` was measuring GPU IDLE time:
+`gpu_resolve` read 146.6 s and is 2.46 s once `glFlush` follows `glEndQuery`. Real GPU busy is
+about 4 % of the run, which is what justified moving work onto it.
+
+**Where the stock dashboard is now.** Shipping binary `054f6585`, shipping defaults
+(`--nv2a-draw-threads` auto = 12, profile hashes off, GPU executor on, FP32 shaders, idle
+fast-forward on, copy-on-write HDD): the canonical 12 B replay is **58.5-59.4 s at 11.7
+presented flips/s** across nine arm-B legs of three interleaved sets, every one reproducing the
+golden final frame SHA `36e87a97...` and scanout FNV-64 `b7e78a1ac17ac5e8`. The
+single-threaded software-raster reference configuration is 147.5 s at 4.71 flips/s. Against the
+227 s of the first instrumented run at the start of the week that is **3.9x**. The
+10-presented-fps milestone is therefore met on the bounded replay; the live SDL half, which
+carries a 33 ms present throttle and a scalar scanout the replay never exercises, has not been
+measured and is the next milestone (`NORTH-STAR.md`).
+
+**Behavioural acceptance of the defaults.** Against the reference leg: final frame SHA and
+scanout FNV identical on all measured legs; 24 of 28 checkpoint PPMs byte-identical and 4
+differing by isolated single pixels (worst frame 0.018 % of pixels, largest connected component
+1 px in every case), whose mechanism is measured - FP32 barycentric interpolation in the
+projected fragment shader - not assumed; XID endpoint2 461, irq0 16,342 and retired
+12,000,000,001 identical between arms.
+
+**Rejections recorded, with numbers.** Stage (c) early depth rejection is a null (+0.21 %
+median; 11 of 12 depth-testing profiles already test depth before any texture fetch, and an
+earlier +6.8 % reading was host contamination). Deferred single-consumer threading is rejected
+at +0.39 %. Phase-4 transfer-volume work failed its gate. Sampling a rendered surface from the
+resident texture was declined without being built, its ceiling measured at 0.6 % of the wall
+because only 230 of 148,547 texture-source calls move bytes. Two levers were retained BELOW the
+5 % bar and labelled as such: per-plane resident-slot selection (+0.37 %) because it is a
+correctness fix - the old selector overwrote a still-valid different colour surface 342 times
+per run without resolving it - and `kPitchProjectedColor` on the GPU (-3.15 %) as an owner call.
+
+**Validation of the committed tree.** Release rebuilt clean; `ctest` 27/27 including all eleven
+source-level guard tests; one canonical 12 B replay at the shipping defaults
+(`build/commit-verify-12b.report.json`, git HEAD `5ca85f4`) exit 0 with empty stderr, final
+frame SHA `36e87a97...`, retired 12,000,000,001 at `0x8001e3e3`, XID endpoint2 461, irq0 16342,
+flips 694, presented 11.740 flips/s, total 12 B wall 59.114 s. Twenty of the 24 frame-series
+checkpoint hashes match `goldens/golden-noperf-defaults12-2026-09-05d.json` exactly and the four
+that differ are exactly the documented 2.5 / 3.0 / 3.5 / 4.0 B checkpoints - the single-pixel
+FP32 interpolation scatter, reproduced rather than newly appeared. The leg was flagged
+`contaminated` by the harness (40 foreign python processes), so its wall time is a sanity check
+against the 58.5-59.4 s band and NOT a timing measurement.
+
+**Correction worth carrying forward:** a golden record's `exe_sha256` is a build identity, not a
+content identity. The mingw linker stamps the link time into the PE header, so relinking an
+unchanged tree changes the SHA - `054f6585` and `6fd3714f` are the same sources. Identity
+questions have to be settled on behaviour and on the recorded argv, not on the exe hash alone.
+
 ## 2026-08-22 - Ox Alpha branch reviewed, coherency-fixed, and revalidated
 
 Codex adversarial review of `opencode/ox-alpha-20260821` found two merge-blocking

@@ -23,6 +23,11 @@ the identity of the run that produced it (exe SHA-256, git HEAD, engine, argv, c
   HDD attached copy-on-write
 * source run `build/golden-ref-v6.report.json`, exe SHA-256 `054f6585…`
 
+`exe_sha256` is a BUILD identity, not a content identity: the mingw linker stamps the link time
+into the PE header, so relinking an unchanged tree produces a different SHA (`054f6585` and
+`6fd3714f` are the same sources). Settle identity questions on behaviour and on the recorded
+argv, not on the exe hash alone.
+
 ## Which configuration reproduces which part of it
 
 The record is taken in the **reference configuration**, `--nv2a-draw-threads 0

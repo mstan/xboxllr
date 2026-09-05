@@ -58,22 +58,29 @@ historical provenance. The standalone repository is the maintained, authoritativ
 | The arc/milestone ladder | `docs/ROADMAP.md` |
 | What is true *right now* | `STATUS.md` |
 | What the maintainer must supply (BIOS/dumps/hardware) | `docs/INPUTS.md` |
+| How performance is measured, gated, and accepted | `docs/PERF-METHODOLOGY.md` |
+| What each performance stage measured, including the rejections | `docs/PERF-AUDIT-2026-09-02.md` |
+| The NV2A latch/execute seam | `docs/DESIGN-NV2A-SEAM.md` |
+| The reference identities a replay must reproduce | `goldens/README.md` |
 | How real-hardware measurements are collected | [`xboxlle-probe`](https://github.com/mstan/xboxlle-probe) |
 
 ## Status
 
-**Arc 1 / A4 - stock dashboard is running and the current blocker is interactive speed.**
-The real firmware and kernel boot, FATX loads the stock dashboard image from a maintainer-supplied
-HDD image, PFIFO/PGRAPH render guest-owned frames into unified RAM, and SDL3/OpenGL can present
-the resulting scanout. The active milestone is to make that stock-dashboard path usable for
-navigation at **at least 10 presented fps** while keeping replay hashes exact.
+**Arc 1 / A4 - stock dashboard is running, and the 10-presented-fps target is met on the
+bounded replay.** The real firmware and kernel boot, FATX loads the stock dashboard image from a
+maintainer-supplied HDD image, PFIFO/PGRAPH render guest-owned frames into unified RAM, and
+SDL3/OpenGL can present the resulting scanout. At the shipping defaults the canonical 12 B
+replay runs in **58.5-59.4 s** at **11.7 presented flips/s** (nine legs, three sets, one binary),
+against 147.5 s and 4.71 flips/s in the single-threaded software-raster reference configuration.
+The live SDL navigation half of the milestone has not been measured yet.
 
-Current retained performance evidence is documented in `STATUS.md` and `PROGRESS.md`. The default
-exact OpenGL path is below target, and the best opt-in exact path is currently
-`XLLE_TEXTURE_COMPUTE_TILE_BINS=1` at about 3.9 fps on the 12B replay. The remaining work is
-performance and correctness on the heavy dashboard rendering/surface path, plus guest-consumed
-controller input; there is no host-rendered dashboard substitute, replacement kernel, or D3D
-interception.
+How that is measured, and what counts as accepted, is `docs/PERF-METHODOLOGY.md`: the gate metric
+is the total 12 B replay wall, median AND min, 5 %; `effective_fps` is 60 x guest speed and is a
+different number from presented flips/s; acceptance is behavioural faithfulness rather than
+byte-exactness, with byte-locks retained as the cheapest regression detector. `goldens/` carries
+the reference identities. The remaining work is the CPU tier's replacement and correctness on the
+dashboard surface path; there is no host-rendered dashboard substitute, replacement kernel, or
+D3D interception.
 
 For the opt-in live Controller S keyboard path during an LLE replay, add `--interactive` to a
 `--boot ... --run2bl ...` invocation. It opens an SDL window before emulation and presents
