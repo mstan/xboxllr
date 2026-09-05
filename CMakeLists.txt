@@ -199,3 +199,46 @@ add_test(NAME nvnet COMMAND test_nvnet)
 
 # The fixture spike is itself an acceptance test: all fixtures must pass (exit 0).
 add_test(NAME spike COMMAND xlle)
+
+# Source-level guard tests (pure Python, no build artifacts required). Each one pins
+# structural invariants of a perf change that a compiler cannot check:
+#   perf_excl_guards            - the exclusive-time partition (beads-xbox.1.14.3)
+#   dispatch_table_guards       - the NV097 jump table equals the old if-chain (beads-xbox.1.15.1)
+#   gl_timing_guards            - every GL call routes through a timed wrapper (beads-xbox.1.14.6)
+#   raster_specialization_guards- compile-time profile dispatch, gated hashes (beads-xbox.1.15.2)
+#   seam_guards                 - the latch/execute seam and its anchors (beads-xbox.1.15.4)
+#   draw_threads_guards         - the threaded draw consumer and its fences (beads-xbox.1.15.5)
+#   span_raster_guards          - within-job destination-span parallel raster (beads-xbox.1.15.9)
+#   cpu_blockhook_guards        - block-granularity CPU tier + guest TSC (beads-xbox.1.4.6)
+#   idle_fast_forward_guards    - the idle-loop skip and its preconditions (beads-xbox.1.4.7)
+#   gpu_profiles_guards         - the witnessed-profile GPU executor, its exact state
+#                                 predicate, its residency transitions and its default-off
+#                                 flag (beads-xbox.1.15.7)
+#   hdd_cow_guards              - copy-on-write HDD attach + the determinism digests
+#                                 (beads-xbox.1.14.11): without it the replay rewrites the
+#                                 BRFR boot counter in its own image on every run
+# They read src/ directly, so they run from the source dir, not the build dir.
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+  set(XLLE_PYTHON_GUARD_TESTS
+      perf_excl_guards
+      dispatch_table_guards
+      gl_timing_guards
+      raster_specialization_guards
+      seam_guards
+      draw_threads_guards
+      span_raster_guards
+      cpu_blockhook_guards
+      idle_fast_forward_guards
+      hdd_cow_guards
+      gpu_profiles_guards)
+  foreach(guard IN LISTS XLLE_PYTHON_GUARD_TESTS)
+    add_test(NAME ${guard}
+             COMMAND ${Python3_EXECUTABLE}
+                     ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_${guard}.py)
+    set_tests_properties(${guard} PROPERTIES
+                         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  endforeach()
+else()
+  message(STATUS "Python3 interpreter not found; skipping source guard tests")
+endif()

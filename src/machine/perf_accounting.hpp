@@ -138,7 +138,17 @@ inline std::atomic<uint64_t> g_renderer_dirty_clip_pixels{0};
 inline std::atomic<uint64_t> g_renderer_dirty_surface_pixels{0};
 inline std::atomic<uint64_t> g_renderer_resolve_pixels{0};
 
-inline constexpr size_t kRendererResolveContextCount = 13;
+// beads-xbox.1.15.10 phase 3. Two gaps closed, both of which made the readback
+// census unreadable rather than merely coarse:
+//   * four COLOUR contexts had no entry and collapsed into "other" -- the
+//     witnessed texture snapshot, both immediate-quad reads and the vblank
+//     sweep -- so "other" was the second largest bucket and unattributable;
+//   * the ZETA resolves were not recorded AT ALL. A 12 B default run reads back
+//     7.9 GB and roughly half of it is depth, so the instrument was reporting
+//     on half the traffic while the bead reasoned about all of it.
+// Every string a resolve call site passes now has its own slot, and the two
+// planes are separate slots even where they share a context string.
+inline constexpr size_t kRendererResolveContextCount = 26;
 inline constexpr std::array<const char*, kRendererResolveContextCount>
     kRendererResolveContextNames{{
         "clear-surface",
@@ -153,6 +163,19 @@ inline constexpr std::array<const char*, kRendererResolveContextCount>
         "image-blit-destination",
         "scanout-capture",
         "software-generic-color-region-upload",
+        "witnessed-texture-snapshot",
+        "immediate-quad-destination",
+        "immediate-quad-texture",
+        "vblank-sweep-color",
+        "zeta-clear-surface",
+        "zeta-witnessed-surface",
+        "zeta-software-generic-surface",
+        "zeta-accelerated-generic-snapshot",
+        "zeta-debug-generic-packet-snapshot",
+        "zeta-resident-generic-upload",
+        "zeta-image-blit-source",
+        "zeta-image-blit-destination",
+        "zeta-vblank-sweep",
         "other",
     }};
 inline std::array<std::atomic<uint64_t>, kRendererResolveContextCount>
@@ -278,12 +301,38 @@ inline size_t renderer_resolve_context_index(const char* context) {
     if (std::strcmp(context, "scanout capture") == 0) return 10;
     if (std::strcmp(context, "software generic color region upload") == 0)
         return 11;
+    if (std::strcmp(context, "witnessed texture snapshot") == 0) return 12;
+    if (std::strcmp(context, "immediate-quad destination") == 0) return 13;
+    if (std::strcmp(context, "immediate-quad texture") == 0) return 14;
+    if (std::strcmp(context, "vblank sweep") == 0) return 15;
+    return kRendererResolveContextCount - 1;
+}
+
+inline size_t renderer_depth_resolve_context_index(const char* context) {
+    if (!context) return kRendererResolveContextCount - 1;
+    if (std::strcmp(context, "CLEAR_SURFACE") == 0) return 16;
+    if (std::strcmp(context, "witnessed zeta surface") == 0) return 17;
+    if (std::strcmp(context, "software generic zeta surface") == 0) return 18;
+    if (std::strcmp(context, "accelerated generic zeta snapshot") == 0) return 19;
+    if (std::strcmp(context, "debug generic packet zeta snapshot") == 0) return 20;
+    if (std::strcmp(context, "resident generic zeta upload") == 0) return 21;
+    if (std::strcmp(context, "IMAGE_BLIT source") == 0) return 22;
+    if (std::strcmp(context, "IMAGE_BLIT destination") == 0) return 23;
+    if (std::strcmp(context, "vblank sweep") == 0) return 24;
     return kRendererResolveContextCount - 1;
 }
 
 inline void record_renderer_color_resolve_context(const char* context, size_t bytes) {
     if (!g_enabled) return;
     const size_t index = renderer_resolve_context_index(context);
+    g_renderer_resolve_context_calls[index].fetch_add(1, std::memory_order_relaxed);
+    g_renderer_resolve_context_bytes[index].fetch_add(static_cast<uint64_t>(bytes),
+                                                      std::memory_order_relaxed);
+}
+
+inline void record_renderer_depth_resolve_context(const char* context, size_t bytes) {
+    if (!g_enabled) return;
+    const size_t index = renderer_depth_resolve_context_index(context);
     g_renderer_resolve_context_calls[index].fetch_add(1, std::memory_order_relaxed);
     g_renderer_resolve_context_bytes[index].fetch_add(static_cast<uint64_t>(bytes),
                                                       std::memory_order_relaxed);
@@ -645,13 +694,45 @@ inline std::array<std::atomic<uint64_t>, kGlContextSiteCount> g_ns_gl_context{};
 inline std::array<std::atomic<uint64_t>, kGlContextSiteCount>
     g_calls_gl_context{};
 
-// Always records (callers pay one steady_clock read per MakeCurrent); the
-// formatter gates on g_enabled so normal replays emit nothing.
+// Records one MakeCurrent sample. Callers MUST gate the clock reads that produce
+// `ns` on g_enabled — use ScopedGlContextTimer below rather than reading the clock
+// inline (beads-xbox.1.14.3 item 5).
 inline void record_gl_context_site(size_t site, uint64_t ns) {
     if (site >= kGlContextSiteCount) site = kGlContextSiteCount - 1;
     g_ns_gl_context[site].fetch_add(ns, std::memory_order_relaxed);
     g_calls_gl_context[site].fetch_add(1, std::memory_order_relaxed);
 }
+
+// RAII timer for one SDL_GL_MakeCurrent, gated on g_enabled.
+//
+// Before beads-xbox.1.14.3 every MakeCurrent call site read steady_clock twice
+// unconditionally, in every build and every run, for a number
+// format_gl_context_report() then DISCARDS unless --perf-accounting is on and which
+// no tool parses (docs/PERF-AUDIT-2026-09-02.md §6: "the one always-on timing site").
+// That is an always-on cost with no always-on consumer. Gating it here keeps the
+// numbers available under --perf-accounting and costs a default replay one bool load
+// per context switch.
+class ScopedGlContextTimer {
+public:
+    explicit ScopedGlContextTimer(size_t site) : site_(site), active_(g_enabled) {
+        if (active_) start_ = std::chrono::steady_clock::now();
+    }
+    ~ScopedGlContextTimer() {
+        if (!active_) return;
+        const auto elapsed = std::chrono::steady_clock::now() - start_;
+        record_gl_context_site(
+            site_, static_cast<uint64_t>(
+                       std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed)
+                           .count()));
+    }
+    ScopedGlContextTimer(const ScopedGlContextTimer&) = delete;
+    ScopedGlContextTimer& operator=(const ScopedGlContextTimer&) = delete;
+
+private:
+    size_t site_;
+    bool active_;
+    std::chrono::steady_clock::time_point start_;
+};
 
 inline std::string format_gl_context_report() {
     if (!g_enabled) return {};
