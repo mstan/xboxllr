@@ -30,6 +30,12 @@ FetchContent_Declare(unicorn
   GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(unicorn)
 target_sources(unicorn PRIVATE src/cpu/unicorn_metrics.c)
+# Guest RDTSC must not read the host TSC (beads-xbox.1.4.6): rename the pinned QEMU
+# definition out of the way so src/cpu/unicorn_metrics.c owns the symbol every RDTSC and
+# TSC-MSR read resolves to. Nothing in the vendored tree is edited.
+set_source_files_properties(${unicorn_SOURCE_DIR}/qemu/hw/i386/x86.c
+  TARGET_DIRECTORY unicorn
+  PROPERTIES COMPILE_DEFINITIONS cpu_get_tsc_x86_64=xlle_unused_host_cpu_get_tsc)
 
 # --- NV2A CPU vertex-shader interpreter (same pinned reference used by xemu) ---
 set(nv2a_vsh_cpu_UNIT_TEST OFF CACHE BOOL "" FORCE)
@@ -109,7 +115,7 @@ if(XLLE_WITH_SDL)
 endif()
 
 # --- A0 app ---
-add_executable(xlle src/app/main.cpp)
+add_executable(xlle src/app/main.cpp src/host/heap_poison.cpp)
 target_include_directories(xlle PRIVATE ${XLLE_INCLUDES})
 target_link_libraries(xlle PRIVATE xlle_obs xlle_cpu xlle_machine xlle_spike xlle_host xlle_net)
 if(WIN32)

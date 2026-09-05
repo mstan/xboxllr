@@ -33,6 +33,15 @@ public:
     // period crossed since the last call.
     void set_time(uint64_t now);
 
+    // Absolute tick of the next channel-0 IRQ0 edge, or 0 when the programmed mode raises
+    // none. This is the PIT's next guest-visible EVENT, as opposed to the input clock that
+    // ticks 1725x more often; the machine's slice loop uses it to bound a slice so no
+    // interrupt edge can be stepped over (see XboxMachine::next_device_deadline).
+    uint64_t next_irq0_tick() const {
+        const uint8_t m = ch_[0].mode;
+        return (m == 0 || m == 2 || m == 3) ? ch0_next_irq_ : 0;
+    }
+
 private:
     struct Channel {
         uint32_t reload = 0x10000;  // programmed count (0 -> 0x10000)

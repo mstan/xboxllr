@@ -2,6 +2,7 @@
 // ide.hpp for the fidelity notes and silicon captures.
 #include "machine/ide.hpp"
 
+#include <array>
 #include <cstring>
 
 namespace xlle {
@@ -72,9 +73,14 @@ IdeController::~IdeController() {
     if (drives_[0].blk) std::fclose(drives_[0].blk);
 }
 
-bool IdeController::attach_hdd(const std::string& path) {
+bool IdeController::attach_hdd(const std::string& path, bool writeback) {
     IdeDrive& d = drives_[0];
-    d.blk = std::fopen(path.c_str(), "r+b");
+    hdd_writeback_ = writeback;
+    overlay_.clear();
+    // Read-only unless writeback was explicitly asked for: see the write-policy note in
+    // ide.hpp. Opening "rb" is itself part of the guarantee — nothing can modify the image
+    // even by accident.
+    d.blk = std::fopen(path.c_str(), writeback ? "r+b" : "rb");
     if (!d.blk) return false;
 #ifdef _WIN32
     _fseeki64(d.blk, 0, SEEK_END);
@@ -387,16 +393,47 @@ bool IdeController::disk_rw(IdeDrive& d, uint64_t sector, uint32_t count, bool w
                             uint8_t* buf) {
     if (!d.blk) return false;
     if (sector + count > d.nb_sectors) return false;
+    const size_t n = static_cast<size_t>(count) * 512;
+
+    // ---- copy-on-write path (default; beads-xbox.1.14.11) -------------------------------
+    // A guest write never reaches the file: it is recorded per LBA and served back to every
+    // later read of that LBA in the same run. The guest cannot tell the difference, and the
+    // image is byte-identical after the run, so the NEXT run reads the same disk.
+    if (!hdd_writeback_ && &d == &drives_[0]) {
+        if (write) {
+            if (overlay_.size() + count > kMaxOverlaySectors) {
+                if (fault_)
+                    fault_("IDE copy-on-write overlay is full — raise "
+                           "IdeController::kMaxOverlaySectors or pass --hdd-writeback");
+                return false;
+            }
+            for (uint32_t i = 0; i < count; ++i) {
+                std::array<uint8_t, 512>& slot = overlay_[sector + i];
+                std::memcpy(slot.data(), buf + static_cast<size_t>(i) * 512, 512);
+            }
+            sectors_written_ += count;
+            return true;
+        }
+    }
+
 #ifdef _WIN32
     if (_fseeki64(d.blk, static_cast<int64_t>(sector) * 512, SEEK_SET) != 0) return false;
 #else
     if (std::fseek(d.blk, static_cast<long>(sector * 512), SEEK_SET) != 0) return false;
 #endif
-    size_t n = static_cast<size_t>(count) * 512;
     size_t done = write ? std::fwrite(buf, 1, n, d.blk) : std::fread(buf, 1, n, d.blk);
     if (write) { sectors_written_ += count; std::fflush(d.blk); }
     else sectors_read_ += count;
-    return done == n;
+    if (done != n) return false;
+    // Overlay wins over the file for any sector the guest has already written.
+    if (!write && !hdd_writeback_ && &d == &drives_[0] && !overlay_.empty()) {
+        for (uint32_t i = 0; i < count; ++i) {
+            const auto it = overlay_.find(sector + i);
+            if (it != overlay_.end())
+                std::memcpy(buf + static_cast<size_t>(i) * 512, it->second.data(), 512);
+        }
+    }
+    return true;
 }
 
 // --- PIO sector read/write (xemu ide_sector_read / ide_sector_write_cb) -----------------------

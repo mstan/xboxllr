@@ -14,10 +14,12 @@
 // exercises that we do not model fault-stops loudly with full context. Bus-level errors the
 // firmware polls for (no media, aborted command) are faithful device states, not faults.
 #pragma once
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <functional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "machine/io_device.hpp"
@@ -81,10 +83,27 @@ public:
     }
     ~IdeController() override;
 
-    // Attach the HDD image (read/write). The drive reports ATA security LOCKED — the retail
+    // Attach the HDD image. The drive reports ATA security LOCKED — the retail
     // kernel unlocks it with its computed key (we accept the unlock as xemu does; the kernel
     // always presents the correct key, so verification is not load-bearing for fidelity).
-    bool attach_hdd(const std::string& path);
+    //
+    // WRITE POLICY (beads-xbox.1.14.11). By default the image is opened READ-ONLY and guest
+    // writes land in an in-memory copy-on-write overlay keyed by LBA. Within a run the guest
+    // sees exactly what it wrote — fidelity is unchanged — but the file on disk is never
+    // modified, so run N+1 starts from the same bytes as run N.
+    //
+    // This is not a nicety. The retail boot path reads LBA 3 (the "BRFR" refurb-info sector),
+    // increments the boot counter in it and writes it straight back, within the first 18 M
+    // instructions of EVERY run. With writeback on, the canonical 12 B replay therefore
+    // MUTATES ITS OWN INPUT and no two runs start from the same disk: that is the mechanism
+    // behind the two guest trajectories recorded in docs/PERF-METHODOLOGY.md section 3b.
+    // Pass writeback=true only when persisting guest disk state is the point of the run.
+    bool attach_hdd(const std::string& path, bool writeback = false);
+    // Sectors currently held by the overlay, and the cap that fault-stops the machine rather
+    // than silently dropping a guest write.
+    uint64_t overlay_sectors() const { return overlay_.size(); }
+    bool hdd_writeback() const { return hdd_writeback_; }
+    static constexpr size_t kMaxOverlaySectors = 512u * 1024u;  // 256 MiB of guest writes
 
     // Level-triggered completion interrupt to the PIC (IRQ 14).
     void set_irq(std::function<void(int irq, bool level)> cb, int irq_num) {
@@ -184,6 +203,10 @@ private:
     uint32_t bm_addr_ = 0;
 
     uint64_t irq_pulses_ = 0, sectors_read_ = 0, sectors_written_ = 0;
+    // Copy-on-write overlay for drive 0: LBA -> the 512 bytes the guest last wrote there.
+    // Integer key, point lookups only, so iteration order never reaches the guest.
+    std::unordered_map<uint64_t, std::array<uint8_t, 512>> overlay_;
+    bool hdd_writeback_ = false;
 };
 
 }  // namespace xlle

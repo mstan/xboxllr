@@ -122,7 +122,20 @@ public:
     // first instruction boundary where IF is enabled, so the controller can deliver the IRQ in
     // exactly the window the guest opened (e.g. the `sti; nop; cli` idle loop) instead of only
     // at coarse chunk boundaries. Cleared by the controller once delivered.
+    //
+    // A block-granularity floor checks IF at translation-block entry instead of before every
+    // instruction. That is not a weakening: in the harvested QEMU x86 translator every
+    // instruction that can raise IF (`sti`, `popf`, `iret`) ends its block, so IF can only
+    // transition 0->1 at a block boundary, and set_irq_pending() itself is only called at a
+    // block boundary (between execution slices). See src/cpu/unicorn_floor.cpp.
     virtual void set_irq_pending(bool pending) = 0;
+
+    // Did the last run() stop because the guest opened its interrupt window (IF became set
+    // while an IRQ was armed) rather than because the instruction budget was reached? The
+    // machine's slice census uses this instead of `retired < budget`, which a block-granularity
+    // floor trips on every slice by construction (a slice ends at the last whole block that
+    // fits the budget).
+    virtual bool stopped_for_irq_window() const { return false; }
 
     // Deliver an external hardware interrupt: synthesize the CPU's protected-mode interrupt-gate
     // entry for `vector` (read the IDT via IDTR, push EFLAGS/CS/EIP with no error code, clear IF
@@ -135,9 +148,24 @@ public:
     // paging is off). Useful for reading guest structures that live in non-identity mappings.
     virtual bool translate(uint32_t linear, uint32_t& phys) = 0;
 
+    // Advance the floor's retired-instruction clock by `insns` WITHOUT executing anything,
+    // and republish it as the guest TSC. This exists for one caller: an exactness-preserving
+    // fast-forward over a guest loop the platform has proved has no guest-visible effect for
+    // the whole skipped range (the kernel idle loop -- see XboxMachine::try_idle_fast_forward).
+    // It is not a general "skip instructions" facility: the caller owns the proof. Also clears
+    // any stopped_for_irq_window() latch, because no run() happened. Returns false on a floor
+    // that has no such clock, in which case the caller must not skip.
+    virtual bool advance_instruction_clock(uint64_t insns) { (void)insns; return false; }
+
     // Execute up to `max_insns` instructions starting at the current EIP. Returns the
     // number actually retired. `err` is set to a human-readable reason on fault-stop
     // (PRINCIPLES §3: a halt records the exact context, never a silent default).
+    //
+    // `max_insns` is a BUDGET, not an exact count: a floor that schedules at translation-block
+    // granularity stops at the last whole block that fits, so it may retire fewer. The one
+    // exception is forward progress -- at least one block always runs, so a single block larger
+    // than the remaining budget overshoots it rather than deadlocking. Callers must therefore
+    // treat the return value as authoritative and never assume `retired == max_insns`.
     virtual uint64_t run(uint32_t start_eip, uint64_t max_insns, std::string& err) = 0;
 };
 
