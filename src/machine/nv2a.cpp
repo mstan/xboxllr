@@ -2234,6 +2234,24 @@ bool Nv2a::set_draw_threads(unsigned n) {
     return true;
 }
 
+// Phase 5 item 3 (beads-xbox.1.15.10). Cache lifetime. destroy_ frees the
+// malloc the vendored parser owns; invalidate_ is what the two method handlers
+// call and is the only thing on a hot path, so it is a free plus two stores in
+// the rare case and a single predictable branch otherwise.
+void Nv2a::destroy_vsh_program_cache() {
+    if (!vsh_cache_steps_) return;
+    Nv2aVshProgram cached{static_cast<Nv2aVshStep*>(vsh_cache_steps_)};
+    nv2a_vsh_program_destroy(&cached);
+    vsh_cache_steps_ = nullptr;
+}
+
+void Nv2a::invalidate_vsh_program_cache() {
+    if (!vsh_cache_valid_ && !vsh_cache_steps_) return;
+    vsh_cache_valid_ = false;
+    vsh_cache_writes_context_ = false;
+    destroy_vsh_program_cache();
+}
+
 Nv2a::~Nv2a() {
     // Worker lifetime is tied to the device. Stop it and JOIN before any member
     // it reads -- the slot ring, the job vectors, the direct pointers into guest
@@ -2249,6 +2267,9 @@ Nv2a::~Nv2a() {
         draw_work_cv_.notify_all();
     }
     if (draw_worker_.joinable()) draw_worker_.join();
+    // Phase 5 item 3: the parsed-program cache owns one malloc from the
+    // vendored disassembler. Released here so the device does not leak it.
+    destroy_vsh_program_cache();
     // Stage (e2): the destination-span helpers hold raw pointers into the job
     // and into guest RAM for the duration of a barrier; the barrier has always
     // completed by the time control returns to the emulation thread, so there is
@@ -2820,23 +2841,44 @@ bool Nv2a::submit_vertex_batch() {
         ++fixed_color_material_batches_[fixed_color_material_];
         ++fixed_light_control_batches_[fixed_light_control_];
     }
+    ++vertex_census_.batches;
     Nv2aVshProgram program{};
     bool program_parsed = false;
     bool fixed_function = false;
+    // True when `program` owns a malloc this function must release. With the
+    // parse cache on and warm, the cache owns it and this stays false.
+    bool program_owned = false;
     if (transform_execution_mode_ == 2) {
-        const uint32_t slots =
-            static_cast<uint32_t>(transform_program_.size()) - transform_program_start_;
-        Nv2aVshParseResult result = nv2a_vsh_parse_program(
-            &program, transform_program_[transform_program_start_].data(), slots);
-        if (result != NV2AVPR_SUCCESS) {
-            char why[128];
-            std::snprintf(why, sizeof(why),
-                          "NV2A vertex program parse failed at slot %u: result=%u",
-                          transform_program_start_, static_cast<unsigned>(result));
-            fault_(why);
-            return false;
+        if (vertex_program_cache_enabled_ && vsh_cache_valid_) {
+            // Phase 5 item 3: the cached parse. Byte-identical to what the call
+            // below would produce -- the cache is invalidated by the only two
+            // method handlers that can change either input (the program words
+            // and the start slot), so a valid cache means the inputs have not
+            // moved since it was filled.
+            program.steps = static_cast<Nv2aVshStep*>(vsh_cache_steps_);
+            program_parsed = true;
+            ++vertex_census_.parse_reuses;
+        } else {
+            const uint64_t parse_start = perf_excl::tick_now();
+            const uint32_t slots =
+                static_cast<uint32_t>(transform_program_.size()) - transform_program_start_;
+            Nv2aVshParseResult result = nv2a_vsh_parse_program(
+                &program, transform_program_[transform_program_start_].data(), slots);
+            const uint64_t parse_delta = perf_excl::tick_now() - parse_start;
+            if (parse_delta <= perf_excl::g_max_plausible_ticks)
+                vertex_census_.parse_ticks += parse_delta;
+            ++vertex_census_.parses;
+            if (result != NV2AVPR_SUCCESS) {
+                char why[128];
+                std::snprintf(why, sizeof(why),
+                              "NV2A vertex program parse failed at slot %u: result=%u",
+                              transform_program_start_, static_cast<unsigned>(result));
+                fault_(why);
+                return false;
+            }
+            program_parsed = true;
+            program_owned = true;
         }
-        program_parsed = true;
     } else if (transform_execution_mode_ == 0) {
         bool any_texture_matrix =
             std::any_of(fixed_texture_matrix_enable_.begin(),
@@ -2863,8 +2905,23 @@ bool Nv2a::submit_vertex_batch() {
         fault_("NV2A vertex batch uses unsupported transform execution mode");
         return false;
     }
-    const bool program_writes_context =
-        program_parsed && vsh_program_writes_context(program);
+    bool program_writes_context = false;
+    if (program_parsed && !program_owned) {
+        // Served from the cache: vsh_program_writes_context is a pure function
+        // of the same steps, so it is cached beside them rather than re-walked.
+        program_writes_context = vsh_cache_writes_context_;
+    } else if (program_parsed) {
+        program_writes_context = vsh_program_writes_context(program);
+        if (vertex_program_cache_enabled_) {
+            destroy_vsh_program_cache();
+            vsh_cache_steps_ = program.steps;
+            vsh_cache_writes_context_ = program_writes_context;
+            vsh_cache_valid_ = true;
+            // Ownership transferred to the cache: every destroy site below is
+            // keyed on program_owned, so the steps outlive this batch.
+            program_owned = false;
+        }
+    }
     transformed_batch_.clear();
     transformed_batch_.reserve(vertex_count);
 
@@ -2925,6 +2982,25 @@ bool Nv2a::submit_vertex_batch() {
             transform_timer.emplace(perf::g_ns_nv2a_vertex_transform,
                                     perf::g_calls_nv2a_vertex_transform);
         }
+        vertex_census_.vertices += vertex_count;
+        const bool vertex_census_on = vertex_census_enabled_;
+        // Phase 5 item 3, exactness-neutral hoist. fetch_vertex_attribute's
+        // FIRST statement is `if (!attr.count) return true;` -- an inactive
+        // slot reads nothing, writes nothing and cannot fault -- and
+        // attr.count only moves through SET_VERTEX_ARRAY_FORMAT, which is a
+        // method and therefore cannot run inside this batch. So the per-vertex
+        // loop over all 16 slots is a loop over ~4 real ones plus 12 calls
+        // that return immediately, 52.5 M times per canonical run. The active
+        // list is built ONCE per batch and the loop runs over it instead. The
+        // sequence of real fetches, and their order, are unchanged.
+        const bool fast_fetch = vertex_fast_fetch_;
+        std::array<uint8_t, 16> active_attribute_slots{};
+        uint32_t active_attribute_count = 0;
+        for (uint32_t slot = 0; slot < vertex_attributes_.size(); ++slot) {
+            if (!fast_fetch || vertex_attributes_[slot].count)
+                active_attribute_slots[active_attribute_count++] =
+                    static_cast<uint8_t>(slot);
+        }
         for (size_t vertex_index = 0; vertex_index < vertex_count; ++vertex_index) {
             if (inline_array || immediate) {
                 const auto& inputs = inline_array ? inline_vertices_[vertex_index]
@@ -2936,21 +3012,43 @@ bool Nv2a::submit_vertex_batch() {
                 largest_vertex_index_ = std::max(largest_vertex_index_, index);
                 TransformedVertex cached_vertex;
                 if (lookup_batch_transform_cache(index, cached_vertex)) {
+                    ++vertex_census_.reuse_hits;
                     emit_transformed_vertex(cached_vertex);
                     continue;
                 }
-                for (uint32_t slot = 0; slot < vertex_attributes_.size(); ++slot) {
-                    if (!fetch_vertex_attribute(slot, index)) {
-                        if (program_parsed) nv2a_vsh_program_destroy(&program);
+                // Phase 5 item 3: attribute fetch, timed per VERTEX and
+                // therefore only under --nv2a-vertex-census (rule 9).
+                const uint64_t fetch_start =
+                    vertex_census_on ? perf_excl::tick_now() : 0u;
+                for (uint32_t i = 0; i < active_attribute_count; ++i) {
+                    if (!fetch_vertex_attribute(active_attribute_slots[i],
+                                                index)) {
+                        if (program_owned) nv2a_vsh_program_destroy(&program);
                         return false;
                     }
+                }
+                if (vertex_census_on) {
+                    const uint64_t d = perf_excl::tick_now() - fetch_start;
+                    if (d <= perf_excl::g_max_plausible_ticks)
+                        vertex_census_.fetch_ticks += d;
+                    ++vertex_census_.fetch_n;
                 }
             }
             TransformedVertex vertex;
             if (program_parsed) {
+                const uint64_t vsh_start =
+                    vertex_census_on ? perf_excl::tick_now() : 0u;
                 const float* output_regs = nullptr;
                 Nv2aVshCPUFullExecutionState full_state;
-                std::array<float, 16 * 4> input_regs{};
+                // NOT value-initialized: every one of its 16 * 4 floats is
+                // overwritten by the vertex_attributes_ copy below before the
+                // interpreter runs, so the 256-byte zero-fill was dead. The
+                // other three register files ARE zeroed, because the
+                // interpreter can read a temp or an output the program never
+                // wrote and their initial value is observable.
+                std::array<float, 16 * 4> input_regs;
+                // Arm A of the same-binary A/B restores the zero-fill verbatim.
+                if (!fast_fetch) input_regs.fill(0.0f);
                 std::array<float, 13 * 4> output_regs_storage{};
                 std::array<float, 12 * 4> temp_regs{};
                 std::array<float, 4> address_reg{};
@@ -3010,6 +3108,14 @@ bool Nv2a::submit_vertex_batch() {
                                 &output_regs[(9 + texture) * 4],
                                 4 * sizeof(float));
                 }
+                if (vertex_census_on) {
+                    const uint64_t d = perf_excl::tick_now() - vsh_start;
+                    if (d <= perf_excl::g_max_plausible_ticks)
+                        vertex_census_.vsh_ticks += d;
+                    ++vertex_census_.vsh_n;
+                    if (program_writes_context)
+                        ++vertex_census_.vsh_context_vertices;
+                }
             } else if (fixed_function) {
                 const auto& position = vertex_attributes_[0].value;
                 std::array<float, 4> clip{};
@@ -3043,6 +3149,7 @@ bool Nv2a::submit_vertex_batch() {
                 }
                 for (uint32_t texture = 0; texture < 4; ++texture)
                     vertex.texture[texture] = vertex_attributes_[9 + texture].value;
+                if (vertex_census_on) ++vertex_census_.fixed_function_vertices;
             }
             if (program_parsed || fixed_function) {
                 if (indexed && program_parsed && !program_writes_context)
@@ -3051,7 +3158,7 @@ bool Nv2a::submit_vertex_batch() {
             }
         }
     }
-    if (program_parsed) nv2a_vsh_program_destroy(&program);
+    if (program_owned) nv2a_vsh_program_destroy(&program);
     if (capture_immediate_quad) {
         auto& evidence = raster_state_samples_[raster_sample_index];
         if (!program_parsed) {
@@ -15095,6 +15202,9 @@ void Nv2a::dispatch_method(PushMethod push) {
             return;
         }
         transform_program_[transform_program_load_][slot & 3u] = parameter;
+        // Phase 5 item 3: one of exactly TWO inputs the parsed-program cache
+        // depends on. Writing any program word invalidates it.
+        invalidate_vsh_program_cache();
         ++transform_program_words_;
         if ((slot & 3u) == 3) ++transform_program_load_;
         break;
@@ -15128,6 +15238,11 @@ void Nv2a::dispatch_method(PushMethod push) {
             fault_("NV2A transform program start is out of range");
             return;
         }
+        // The SECOND of the parsed-program cache's two inputs: the parse begins
+        // at this slot and covers 136 - start slots, so both the contents and
+        // the length of the cached program change with it.
+        if (transform_program_start_ != static_cast<uint8_t>(parameter))
+            invalidate_vsh_program_cache();
         transform_program_start_ = static_cast<uint8_t>(parameter);
         break;
     }

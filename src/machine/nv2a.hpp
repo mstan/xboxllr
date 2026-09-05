@@ -1305,6 +1305,51 @@ public:
     const GpuResSurfaceTable& gpu_res_depth_surfaces() const {
         return gpu_res_depth_surfaces_;
     }
+
+    // ---- phase 5 item 3: the vertex-pipeline split ------------------------
+    // `nv2a_vertex` is 8.551 s of a 63.909 s instrumented run and the existing
+    // [perf-nv2a-split] line resolves only its per-vertex transform loop
+    // (7.817 s) against everything else (0.734 s). This census splits it
+    // further so the lever is chosen on measurement:
+    //   parse_*   -- nv2a_vsh_parse_program, per batch. ALWAYS ON (two clock
+    //                reads per batch, 455 k per run, under 5 ms).
+    //   fetch_* / vsh_* -- per VERTEX, so they are gated behind
+    //                --nv2a-vertex-census: at tens of millions of vertices two
+    //                clock reads each is a real cost and must not ride in a
+    //                shipping run. Rule 9: an instrument carries its own
+    //                denominator and its own cost.
+    struct VertexCensus {
+        uint64_t batches = 0;
+        uint64_t vertices = 0;          // vertices entering the transform loop
+        uint64_t reuse_hits = 0;        // batch transform cache hits
+        uint64_t parses = 0;            // actual nv2a_vsh_parse_program calls
+        uint64_t parse_reuses = 0;      // batches served from the cached parse
+        uint64_t parse_ticks = 0;
+        uint64_t fetch_ticks = 0;
+        uint64_t fetch_n = 0;
+        uint64_t vsh_ticks = 0;
+        uint64_t vsh_n = 0;
+        uint64_t vsh_context_vertices = 0;  // the 3.7 kB full-state path
+        uint64_t fixed_function_vertices = 0;
+    };
+    const VertexCensus& vertex_census() const { return vertex_census_; }
+    void set_vertex_program_cache_enabled(bool on) {
+        vertex_program_cache_enabled_ = on;
+        if (!on) invalidate_vsh_program_cache();
+    }
+    bool vertex_program_cache_enabled() const {
+        return vertex_program_cache_enabled_;
+    }
+    // The two exactness-neutral hoists in the per-vertex loop: iterate only
+    // the attribute slots whose count is non-zero, and skip the dead 256-byte
+    // zero-fill of the input register file. Both are pure removals of work
+    // whose result is never read; the flag exists ONLY so the pair can be
+    // A/B'd against the previous behaviour on the same binary.
+    void set_vertex_fast_fetch_enabled(bool on) { vertex_fast_fetch_ = on; }
+    bool vertex_fast_fetch_enabled() const { return vertex_fast_fetch_; }
+    void set_vertex_census_enabled(bool on) { vertex_census_enabled_ = on; }
+    bool vertex_census_enabled() const { return vertex_census_enabled_; }
+
     // ---- phase 5 item 2: what a residency QUERY actually costs -------------
     // beads-xbox.1.15.10 phase 4 section 5 inferred ~0.9 s for the 148 317
     // no-op residency queries from the difference between a ceiling probe
@@ -2500,6 +2545,25 @@ private:
     uint8_t transform_constant_load_ = 0;
     uint64_t transform_program_words_ = 0;
     uint64_t transform_constant_words_ = 0;
+    // ---- parsed-program cache (beads-xbox.1.15.10 phase 5, item 3) ---------
+    // nv2a_vsh_parse_program() mallocs sizeof(Nv2aVshStep) * (136 - start) --
+    // about 21 kB -- and disassembles EVERY slot, including the ones past the
+    // final instruction that the interpreter never reaches, and it did so once
+    // per vertex batch (455 812 per canonical 12 G run). The parse is a pure
+    // function of the program words and the start slot, both of which change
+    // only through two method handlers, so the result is cached and the two
+    // handlers invalidate it. Exactness-neutral by construction: the cached
+    // Nv2aVshProgram is the byte-identical output of the same call, and
+    // nv2a_vsh_emu_execute takes it by const pointer.
+    //
+    // Held as void* so nv2a.hpp does not have to pull in the vendored
+    // nv2a_vsh_disassembler.h; nv2a.cpp casts it back to Nv2aVshStep*.
+    void* vsh_cache_steps_ = nullptr;
+    bool vsh_cache_valid_ = false;
+    bool vsh_cache_writes_context_ = false;
+    bool vertex_program_cache_enabled_ = true;
+    void invalidate_vsh_program_cache();
+    void destroy_vsh_program_cache();
     uint64_t transformed_vertices_ = 0;
     uint64_t transform_output_hash_ = 1469598103934665603ull;
     std::array<uint64_t, 4> transform_mode_batches_{};
@@ -2932,6 +2996,9 @@ private:
     // Phase 5 per-plane consumer tables (see GpuResSurfaceTable above).
     GpuResSurfaceTable gpu_res_color_surfaces_{};
     GpuResSurfaceTable gpu_res_depth_surfaces_{};
+    VertexCensus vertex_census_{};
+    bool vertex_census_enabled_ = false;
+    bool vertex_fast_fetch_ = true;
     ResolveQueryCensus resolve_query_census_{};
     // Set for the duration of one witnessed texture-snapshot residency query so
     // the census can attribute that call site apart from every other consumer.

@@ -285,6 +285,31 @@ void print_gpu_residency_census(const xlle::Nv2a* nv, const char* scope,
             ns(q.depth_backend_ticks), ns(q.depth_memwrite_ticks),
             q.depth_memwrite_bytes / 1048576.0);
     }
+    // Phase 5 item 3 (beads-xbox.1.15.10): the vertex-pipeline split. parse_*
+    // is always on; fetch_* / vsh_* are zero unless --nv2a-vertex-census armed
+    // them, and the line says which by reporting their denominators.
+    {
+        const auto& v = nv->vertex_census();
+        const auto ns = [](unsigned long long ticks) {
+            return xlle::perf_excl::ticks_to_ns(ticks);
+        };
+        std::printf(
+            "[host] nv2a-vertex-census scope=%s deadline=%llu batches=%llu "
+            "vertices=%llu reuse_hits=%llu parses=%llu parse_reuses=%llu "
+            "parse_ns=%llu fetch_n=%llu fetch_ns=%llu vsh_n=%llu vsh_ns=%llu "
+            "vsh_context_vertices=%llu fixed_function_vertices=%llu "
+            "program_cache=%u fast_fetch=%u census=%u\n",
+            scope, deadline, (unsigned long long)v.batches,
+            (unsigned long long)v.vertices, (unsigned long long)v.reuse_hits,
+            (unsigned long long)v.parses, (unsigned long long)v.parse_reuses,
+            ns(v.parse_ticks), (unsigned long long)v.fetch_n,
+            ns(v.fetch_ticks), (unsigned long long)v.vsh_n, ns(v.vsh_ticks),
+            (unsigned long long)v.vsh_context_vertices,
+            (unsigned long long)v.fixed_function_vertices,
+            nv->vertex_program_cache_enabled() ? 1u : 0u,
+            nv->vertex_fast_fetch_enabled() ? 1u : 0u,
+            nv->vertex_census_enabled() ? 1u : 0u);
+    }
     // Phase 5 item 1 (beads-xbox.1.15.10): the per-PLANE consumer table. The
     // phase-4 rule is that a break is attributed to whichever CPU consumer
     // touches the plane first, so `gpu-residency-profile` above cannot answer
@@ -1480,6 +1505,17 @@ int main(int argc, char** argv) {
     // snapshot coherent with a GPU-authoritative surface. Its only purpose is
     // to bound what a correct resident-texture sampler could win.
     bool nv2a_gpu_unsafe_skip_texture_resolve = false;
+    // beads-xbox.1.15.10 phase 5 item 3. The parsed vertex-program cache.
+    // DEFAULT ON; --no-nv2a-vertex-program-cache restores the per-batch
+    // nv2a_vsh_parse_program call verbatim so the change is a same-binary A/B.
+    bool nv2a_vertex_program_cache = true;
+    // Phase 5 item 3 attribution instrument. DEFAULT OFF: it takes two clock
+    // reads per VERTEX, which is tens of millions per replay. Never a shipping
+    // path; it exists so the vertex split is measured rather than inferred.
+    bool nv2a_vertex_census = false;
+    // Phase 5 item 3. The two exactness-neutral per-vertex hoists. DEFAULT ON;
+    // --no-nv2a-vertex-fast-fetch restores the previous loop verbatim.
+    bool nv2a_vertex_fast_fetch = true;
     uint32_t nv2a_gpu_ssbo_ring = 4;
     // beads-xbox.1.15.10 step 2. DEFAULT ON with the executor: FP64 in the
     // witnessed fragment shaders cost gpu_draw_ns 10.746 s against 2.364 s for
@@ -1713,6 +1749,16 @@ int main(int argc, char** argv) {
             nv2a_gpu_kick_flush = false;
         else if (!std::strcmp(argv[i], "--nv2a-gpu-unsafe-skip-texture-resolve"))
             nv2a_gpu_unsafe_skip_texture_resolve = true;
+        else if (!std::strcmp(argv[i], "--nv2a-vertex-program-cache"))
+            nv2a_vertex_program_cache = true;
+        else if (!std::strcmp(argv[i], "--no-nv2a-vertex-program-cache"))
+            nv2a_vertex_program_cache = false;
+        else if (!std::strcmp(argv[i], "--nv2a-vertex-census"))
+            nv2a_vertex_census = true;
+        else if (!std::strcmp(argv[i], "--nv2a-vertex-fast-fetch"))
+            nv2a_vertex_fast_fetch = true;
+        else if (!std::strcmp(argv[i], "--no-nv2a-vertex-fast-fetch"))
+            nv2a_vertex_fast_fetch = false;
         else if (!std::strcmp(argv[i], "--nv2a-gpu-plane-split"))
             nv2a_gpu_plane_split = true;
         else if (!std::strcmp(argv[i], "--no-nv2a-gpu-plane-split"))
@@ -2261,6 +2307,11 @@ int main(int argc, char** argv) {
                 // would force every draw inline and silently disable the span
                 // raster. --nv2a-profile-hashes opts back in.
                 mach.nv2a()->set_profile_hashes_enabled(nv2a_profile_hashes);
+                mach.nv2a()->set_vertex_program_cache_enabled(
+                    nv2a_vertex_program_cache);
+                mach.nv2a()->set_vertex_census_enabled(nv2a_vertex_census);
+                mach.nv2a()->set_vertex_fast_fetch_enabled(
+                    nv2a_vertex_fast_fetch);
                 mach.nv2a()->set_gpu_profiles_enabled(nv2a_gpu_profiles);
                 mach.nv2a()->set_gpu_generic_shader(nv2a_gpu_generic_shader);
                 mach.nv2a()->set_gpu_generic_shader_mask(

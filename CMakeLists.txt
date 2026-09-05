@@ -220,6 +220,9 @@ add_test(NAME spike COMMAND xlle)
 #   gpu_profiles_guards         - the witnessed-profile GPU executor, its exact state
 #                                 predicate, its residency transitions and its default-off
 #                                 flag (beads-xbox.1.15.7)
+#   vertex_pipeline_guards      - the parsed-vertex-program cache, the per-vertex hoists
+#                                 and the always-on residency/vertex censuses that
+#                                 re-ranked the work (beads-xbox.1.15.10 phase 5)
 #   hdd_cow_guards              - copy-on-write HDD attach + the determinism digests
 #                                 (beads-xbox.1.14.11): without it the replay rewrites the
 #                                 BRFR boot counter in its own image on every run
@@ -237,7 +240,8 @@ if(Python3_Interpreter_FOUND)
       cpu_blockhook_guards
       idle_fast_forward_guards
       hdd_cow_guards
-      gpu_profiles_guards)
+      gpu_profiles_guards
+      vertex_pipeline_guards)
   foreach(guard IN LISTS XLLE_PYTHON_GUARD_TESTS)
     add_test(NAME ${guard}
              COMMAND ${Python3_EXECUTABLE}

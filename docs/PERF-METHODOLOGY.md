@@ -225,6 +225,8 @@ so the record carries all 24 per-profile hashes. The DEFAULT configuration
 | `--nv2a-gpu-ssbo-ring` | **4** | SSBO names round-robined per issued batch. Needed only once the batch is submitted early: with one name, a refill lands on a buffer the in-flight draw is still reading. |
 | `--nv2a-gpu-kick-flush` / `--nv2a-gpu-vblank-kick` | **on** | submit each issued batch to the driver, and issue a partial batch at the frame boundary. Both have `--no-` spellings so the overlap can be bisected without a rebuild. |
 
+| `--nv2a-vertex-program-cache` | **on** as of 2026-09-05 phase 5 (`--no-…` restores the per-batch parse) | `nv2a_vsh_parse_program` mallocs ~21 kB and disassembles all 136 slots once per vertex batch; 289 617 of 309 159 mode-2 batches (93.7 %) re-derive a byte-identical result. Exact because the parse is a pure function of the program words and the start slot and both are invalidated at their only writers. Measured 202 → 18 ms. See §3i. |
+| `--nv2a-vertex-fast-fetch` | **on** as of 2026-09-05 phase 5 (`--no-…` restores the sixteen-slot loop and the zero-fill) | two pure removals in the per-vertex loop: iterate only attribute slots with a non-zero count (`fetch_vertex_attribute` returns immediately for the others), and drop the 256-byte zero-fill of an input register file that all sixteen slots overwrite before the interpreter runs. Measured 2.682 → 1.300 s of attribute fetch. |
 | `--nv2a-gpu-generic-shader` | **on** as of 2026-09-05 phase 6 (`--no-…` restores the software fallback) | the GENERATED register-combiner executor. Four 3+3 interleaved sets on three binaries, all passing: on the shipping binary `3a612b6d`, total 12 B wall median 60.802 → 57.308 s (**+5.75 %**), min 60.460 → 56.825 s (**+6.01 %**), 3 of 3 rounds; 12 of 12 rounds across the four sets. Removes all 704 transferring `software-generic-color-surface` resolves and 1 339 software batches from plane `0x03AA4000`. See §3j. |
 | `--nv2a-gpu-generic-shader-image-blend` | **on** (`--no-…` restores GL fixed-function blending) | the blend, the colour mask and the X8 alpha rule inside the generated program, against an image binding under a fragment-shader interlock. NOT an optimisation: GL blending quantises its inputs to 8 bits and the software path does not, measured at exactly 1 LSB over ~90 % of the plane per batch and 38 LSB end to end. §3j(4). |
 | `--nv2a-gpu-generic-shader-fp64` | **on** (`--no-…` is single precision) | the generated programs' perspective interpolation in double, matching the software path. Measured to be worth ZERO pixels on this workload (§3j(3)); on by default because it is what the software does, not because it fixed anything. |
@@ -372,6 +374,121 @@ the residency census hook and a backend query, per witnessed sampled-profile dra
 query out of the per-draw path (it can only matter when some surface is GPU-authoritative and its
 range overlaps) is a next lever with a measured size of about 0.9 s and no exactness argument
 attached.
+
+### 3i. Phase 5 (2026-09-05, `beads-xbox.1.15.10`): the vertex pipeline, and two numbers this file had wrong
+
+Phase 5 was asked for three things in the order the phase-4 evidence supported. Measuring them
+first **inverted that order**, and the inversion is the main result.
+
+**(1) The "148 317 no-op residency queries, about 0.9 s" of §3h is WRONG by two orders of
+magnitude. Measured directly: 16 ms.** §3h derived it as (a ceiling probe worth −1.3 %) minus (a
+byte-rate model of the 230 queries that transfer). Both halves of that subtraction were replaced
+by a direct always-on timer around every entry to `resolve_renderer_color_overlap` /
+`_depth_overlap`, credited to `noop` or `moved` by whether the call actually wrote guest memory
+(`[host] gpu-resolve-cost`, 12 B noperf, exe `65c4aad0`, both arms of the phase-5 A/B agreeing to
+0.5 %):
+
+| queries | n | total | per call |
+|---|---:|---:|---:|
+| colour, moved nothing | 161 015 | **10.0 ms** | 62 ns |
+| zeta, moved nothing | 151 064 | **6.1 ms** | 40 ns |
+| — of which the witnessed texture snapshot (§3h's 148 317) | 148 317 | **8.2 ms** | 55 ns |
+| **colour, MOVED bytes** | **1 954** | **5.70 s** | **2.92 ms** |
+| **zeta, MOVED bytes** | **304** | **0.673 s** | **2.21 ms** |
+| — of which the witnessed texture snapshot (§3h's 230) | 230 | 0.841 s | 3.66 ms |
+
+So the whole no-op query population is **0.028 % of the run** and a per-draw fast path for it is
+**declined on measurement, not built**. The `n` cross-checks against an independent instrument:
+`[perf-gl-gpu] gpu_resolve_n=2258` = 1 954 + 304 exactly. What §3h's ceiling probe actually
+removed was the 230 **transferring** snapshots at 3.66 ms each — 0.84 s — which is the same
+number by a different route, and the resolve rate that produced the 0.39 s estimate (0.741 s/GB)
+is wrong because a resolve's cost is a pipeline stall, not bytes: the colour half splits
+**4.80 s backend / 0.90 s guest writeback of 6 109 MB**.
+
+**A residency resolve costs 2.2–2.9 ms and there are 2 258 of them: 6.37 s, 11 % of the 12 B
+wall. That is the largest single identified item in the run.**
+
+**(2) The per-PLANE consumer census (`[host] gpu-residency-plane`, always on) says exactly which
+families gate it, and it is not the family the fragment count points at.** Phase 4's rule — a
+break is attributed to the FIRST CPU consumer, so only removing the LAST one removes the
+resolves — makes the per-profile break table unusable as a work order. The plane table is a
+direct count at the GPU/CPU decision point. On the canonical 12 B run only **two** planes are
+mixed:
+
+| plane | bytes | GPU draws | CPU draws | CPU families that must ALL move |
+|---|---:|---:|---:|---|
+| colour `0x03628000` | 2 457 600 | 131 632 | 3 181 | pitch_three_texture 2304, pitch_single_texture 121, pitch_multi_texture 120, pitch_tex5_projected 126, pitch_tex5_diffuse 42, tex7_fan 304, texf_projected_fan 51, pitch_additive 113 |
+| zeta `0x033d0000` | 2 457 600 | 131 632 | 3 110 | the same eight, with pitch_additive 42 |
+
+Every other plane is pure-GPU (`0x02c05000`, `0x02e05000`, zeta `0x02a05000` — already free of
+round trips) or pure-CPU (the six 256 kB swizzled planes, `0x032a4000`, and the two z16 zeta
+planes) and therefore never resident and never resolved. **`kPitchZ16Depth` is 142 842 CPU draws
+and 476 M fragments on two planes with ZERO GPU draws: moving it to the GPU removes no resolve at
+all**, confirming phase 2 (b) from the other side. The prize is `witnessed-color-surface` 417 +
+`zeta-witnessed-surface` 304 resolves ≈ **1.9 s**, plus those eight families' 2.49 s of
+emulation-thread raster — about **4.4 s (7.5 %)** — and it is **all or nothing across eight
+shaders**, which is the generator route, not eight hand-written programs. NOT BUILT in phase 5.
+
+**(3) The vertex split, and the answer to "does the parse cache fix it": no.** `nv2a_vertex` is
+8.536 s of a 64.214 s instrumented run. `--nv2a-vertex-census` (default off, two clock reads per
+vertex, never a shipping path) splits it, on the canonical 12 B run:
+
+| part | n | before | after | per item after |
+|---|---:|---:|---:|---:|
+| `nv2a_vsh_parse_program` | 309 159 → 19 542 calls | 202 ms | **18 ms** | 905 ns/parse |
+| attribute fetch | 52 539 501 vertices | 2.682 s | **1.300 s** | 25 ns |
+| **VSH interpretation** | 38 337 230 vertices | 4.520 s | **4.542 s** | **118 ns** |
+| batch transform-cache hits (no work) | 75 499 247 of 128 040 827 vertices (59.0 %) | — | — | — |
+| fixed-function transform | 14 204 350 vertices | — | — | — |
+
+**The interpreter dominates (4.54 s of the 7.38 s bucket, 62 %) and the cache does not touch it**
+— the cache is worth 184 ms. Per the phase-5 task's own condition, that is the statement with
+numbers: the next vertex lever is the interpreter (a compiled step form, or the transform on the
+GPU), not the parse. `vsh_context_vertices = 0`, so the 3.7 kB full-execution-state path is never
+taken on this workload and is not the target.
+
+**The phase-5 A/B.** One binary, one session, 3+3 interleaved A1 B1 A2 B2 A3 B3. Arm A restores
+the previous behaviour on the SAME binary with
+`--no-nv2a-vertex-program-cache --no-nv2a-vertex-fast-fetch`; arm B is the new defaults.
+
+| set | arm A median / min | arm B median / min | median | min | rounds | verdict |
+|---|---|---|---|---|---|---|
+| `p5-vgate` (exe `65c4aad0`) | 59.143 / 59.129 s | 57.488 / 56.977 s | **−2.80 %** | **−3.64 %** | 3/3 | **FAIL the 5 % bar** |
+| **`p5-vgate2` (shipping exe `8df76ed3`)** | **59.134 / 58.936 s** | **57.585 / 57.511 s** | **−2.62 %** | **−2.42 %** | **3/3** | **FAIL the 5 % bar** |
+
+Two independent 3+3 sets on two binaries that differ only by a rebuild, and unlike §3d's four sets
+they AGREE: median −2.6 to −2.8 %, min −2.4 to −3.6 %, 6 of 6 paired rounds favouring B
+(−3.66, −2.70, −3.27, −2.42, −2.94, −2.42 %). Arm cv 0.17–0.54 % in both sets. Final-four
+indicator −2.33 % median / −1.82 % min on the shipping set (not gated). The decision is taken on
+`p5-vgate2`, the set run on the binary that ships. The matched instrumented pair puts the win
+exactly where the census says it is and nowhere else — `nv2a_vertex` **8.536 → 7.383 s
+(−1.153 s)** against a wall of 64.214 → 62.496 s, with `tcg_exec` −0.068, `nv2a_raster_witnessed`
++0.061, `nv2a_gl_resolve` +0.004 and `span_jobs` identical at 149 106 in both arms.
+
+**Behaviour: exact.** All 28 checkpoint PPMs are **byte-identical between arm A and arm B**
+(0 differing pixels). Against `build/golden-ref-v2-*.ppm` arm B reproduces the shipping default's
+signature from §3a unchanged — 24 byte-identical and the same four checkpoints at 5 / 1 / 56 / 15
+pixels, largest connected component 1 px, worst 0.018 % — i.e. **zero new pixels**. Both results
+reproduce on both binaries. Final frame SHA `36e87a97…`, scanout FNV `b7e78a1ac17ac5e8`, irq0
+16342, XID endpoint2 461, retired 12 000 000 001, exit 0, empty stderr on every leg of both arms;
+all 24 profile hashes identical between arms (`differ: []`). The determinism digests are
+identical between the arms too, INCLUDING `dma_digest` — `det_digest ed86cf6a1fe11c4f`,
+`dev_digest bbadac889020716f`, `dev_events 17588661`, `dma_digest 9ce3cac041285a44`,
+`dma_writes 1237977`, `tb_entries 2 302 057 484`, `tb_insns 7 301 344 897` — which is a stronger
+byte-lock than phase 4 achieved (there `dma_digest` moved with the differing pixels). Diff PNGs
+read by eye (`build/diff-p5/`, reproduced in `build/diff-p5b/`): 3.5 B is isolated 1-LSB
+specks on a black boot frame with no shape, 4.0 B is isolated specks on a dark gradient with no
+structure, and the final dashboard diff is **entirely untinted** with MEMORY / MUSIC / XBOX LIVE /
+SETTINGS legible. `goldens/golden-noperf-defaults12-2026-09-05d.json` is reproduced and is
+**NOT re-pinned**.
+
+**Retention.** The gate is failed, so this is a §3 item 3 question rather than a gate pass.
+`--nv2a-vertex-fast-fetch` is a **pure simplification** — it removes a loop over twelve attribute
+slots whose fetch is `if (!attr.count) return true;` and a 256-byte zero-fill of a register file
+that is fully overwritten before it is read; it cannot change output, and it is 3/3 rounds and
+0.97 s of the 1.15 s. `--nv2a-vertex-program-cache` is **added state** (one cached parse, two
+invalidation hooks) for 0.18 s and is the owner call; `--no-nv2a-vertex-program-cache` restores
+the previous behaviour on the same binary, so either decision is a one-flag change.
 
 ### 3j. Phase 6 (2026-09-05, `beads-xbox.1.15.10`): the generated register-combiner → GLSL executor
 
