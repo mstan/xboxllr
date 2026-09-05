@@ -1,0 +1,174 @@
+{
+  "chunk_insns": 4096,
+  "command": "F:\\Projects\\xboxlle\\xboxlle\\build-release\\xlle.exe --nv2a-renderer opengl --boot ..\\machine\\flash-dump-ff000000.bin --run2bl ..\\machine\\bios-extract\\bldr.bin --hdd ..\\machine\\xbox-hdd-stockdash.img --eeprom ..\\machine\\eeprom.bin --net-disconnected --reduced-retire-diag --test-synthetic-controller-hub --test-input-script tests\\scripts\\clock-accept.txt --test-input-capture-prefix F:\\Projects\\xboxlle\\xboxlle\\build\\golden-ref-v6 --max-host-memory-mb 768 --machine-chunk-insns 4096 --frame-series F:\\Projects\\xboxlle\\xboxlle\\build\\golden-ref-v6 500000000 --max-insns 12000000000 --frame-dump F:\\Projects\\xboxlle\\xboxlle\\build\\golden-ref-v6-final.ppm --nv2a-draw-threads 0 --nv2a-profile-hashes",
+  "created_utc": "2026-09-05T14:35:04+00:00",
+  "engine": "unicorn-2.1.1",
+  "exe_sha256": "054f65855f0825225afa91fa5830b1239090d0b49039b3fc6cafbc79be4fddda",
+  "final_frame_series_hash": "b7e78a1ac17ac5e8",
+  "final_frame_sha256": "36e87a97a1883e44115db2be6d03996baccd6eae2b8499cb1d52446d04b09dfe",
+  "final_scanout_fnv64": "b7e78a1ac17ac5e8",
+  "frame_series_count": 24,
+  "frame_series_hashes": [
+    {
+      "deadline": 500000000,
+      "hash": "bee38a32a69372a1"
+    },
+    {
+      "deadline": 1000000000,
+      "hash": "c29a7452cec88383"
+    },
+    {
+      "deadline": 1500000000,
+      "hash": "c29a7452cec88383"
+    },
+    {
+      "deadline": 2000000000,
+      "hash": "dcdabf93b575f658"
+    },
+    {
+      "deadline": 2500000000,
+      "hash": "48213d5fb3d9051a"
+    },
+    {
+      "deadline": 3000000000,
+      "hash": "8055e67e91ebb4c7"
+    },
+    {
+      "deadline": 3500000000,
+      "hash": "8390a0208a87fd09"
+    },
+    {
+      "deadline": 4000000000,
+      "hash": "ece2c34f2e5e0699"
+    },
+    {
+      "deadline": 4500000000,
+      "hash": "41a7f8d9993f90ae"
+    },
+    {
+      "deadline": 5000000000,
+      "hash": "b4c6ede6d9a8dba2"
+    },
+    {
+      "deadline": 5500000000,
+      "hash": "b4c6ede6d9a8dba2"
+    },
+    {
+      "deadline": 6000000000,
+      "hash": "b4c6ede6d9a8dba2"
+    },
+    {
+      "deadline": 6500000000,
+      "hash": "82c6770e53098bec"
+    },
+    {
+      "deadline": 7000000000,
+      "hash": "82c6770e53098bec"
+    },
+    {
+      "deadline": 7500000000,
+      "hash": "82c6770e53098bec"
+    },
+    {
+      "deadline": 8000000000,
+      "hash": "82c6770e53098bec"
+    },
+    {
+      "deadline": 8500000000,
+      "hash": "82c6770e53098bec"
+    },
+    {
+      "deadline": 9000000000,
+      "hash": "82c6770e53098bec"
+    },
+    {
+      "deadline": 9500000000,
+      "hash": "018d35aced7209e4"
+    },
+    {
+      "deadline": 10000000000,
+      "hash": "dd5bd32f8f411f69"
+    },
+    {
+      "deadline": 10500000000,
+      "hash": "33478f2707fba506"
+    },
+    {
+      "deadline": 11000000000,
+      "hash": "b7295c85833f43a8"
+    },
+    {
+      "deadline": 11500000000,
+      "hash": "d8b8737d115b4f08"
+    },
+    {
+      "deadline": 12000000000,
+      "hash": "b7e78a1ac17ac5e8"
+    }
+  ],
+  "generic_fingerprint_census_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "generic_fingerprint_unique": 0,
+  "git_head": "93d006d5d3eb61a5c581c0340acfde5ae7637068",
+  "hdd_write_policy": "copy-on-write",
+  "input_sha256": {
+    "boot": {
+      "bytes": 262144,
+      "path": "F:\\Projects\\xboxlle\\machine\\flash-dump-ff000000.bin",
+      "sha256": "579893cf8c4097484eea9973d06191ae5ca560cbc82f40ed7932d38ad13c54af"
+    },
+    "eeprom": {
+      "bytes": 256,
+      "path": "F:\\Projects\\xboxlle\\machine\\eeprom.bin",
+      "sha256": "c7c5613b78efb7c09e949b844a4dda63fe3f8ea6457d0a21e267c8c77f91c0d0"
+    },
+    "hdd": {
+      "bytes": 8589934592,
+      "path": "F:\\Projects\\xboxlle\\machine\\xbox-hdd-stockdash.img",
+      "sha256": "8af2d1bb3f292bef122facdd7f9166f06b23ad69d1316bc63e674ed8ffba55dd"
+    },
+    "run2bl": {
+      "bytes": 24576,
+      "path": "F:\\Projects\\xboxlle\\machine\\bios-extract\\bldr.bin",
+      "sha256": "9f11b3ac8801aff08aedb85e2241de25e2382dc56cb0c9a0a0a99d096a3a9b08"
+    }
+  },
+  "max_insns": 12000000001,
+  "name": "golden-defaults12-v4",
+  "note": "beads-xbox.1.15.10 phase 4. Re-pinned to name the phase-4 binary (exe 054f6585), in which kPitchProjectedColor runs on the GPU (--nv2a-gpu-profile-mask default 3 -> 7) and the witnessed resident cache selects the colour and zeta planes into slots INDEPENDENTLY (--nv2a-gpu-plane-split, default on). Reference configuration --nv2a-draw-threads 0 --nv2a-profile-hashes, in which the executor takes ZERO jobs (all 436110 rejected hash_on), so this record is the software-raster reference the default configuration must reproduce and it is UNCHANGED by phase 4: all 28 checkpoint PPMs are byte-identical to golden-ref-v2, and the final SHA, the scanout FNV and all 24 profile hashes are identical to golden-defaults12-v3.",
+  "ohci_xid_endpoint2": null,
+  "perf_accounting": false,
+  "profile_hashes": {
+    "generic_combiner": "14650fb0739d0383",
+    "immediate_quad_a4r4g4b4": "14650fb0739d0383",
+    "immediate_quad_a8r8g8b8": "14650fb0739d0383",
+    "immediate_quad_artwork_i8_palette_512x128": "14650fb0739d0383",
+    "immediate_quad_full_screen_a8r8g8b8_1024x1024": "14650fb0739d0383",
+    "immediate_quad_i8_palette": "14650fb0739d0383",
+    "immediate_quad_main_panel_a8r8g8b8_512x512": "14650fb0739d0383",
+    "immediate_quad_menu_i8_palette_64x128": "14650fb0739d0383",
+    "inline_blit": "950d033f4fddfdcd",
+    "inline_color": "a68a1926408acb14",
+    "pitch_multi": "14650fb0739d0383",
+    "pitch_projected": "92f89d8feef2f236",
+    "pitch_single": "5a3eea32a4c421c8",
+    "pitch_tex5": "d086e8b1d07364d6",
+    "pitch_textured": "44a2dc66751d1ec2",
+    "pitch_three": "734635805e04fbcd",
+    "projected_color": "3b4d286c6661f34a",
+    "radial_color": "65244987cc739e10",
+    "raster": "7169634bfe1baeec",
+    "scanout_rgba_fnv64": "b7e78a1ac17ac5e8",
+    "tex7_fan": "0982ecc26c6e3efe",
+    "tex_f_fan": "fe3e996e6e928783",
+    "textured_color": "6c35d2574377f5f3",
+    "transform_position_fnv64": "14650fb0739d0383"
+  },
+  "renderer": "selected=opengl generic-combiner=accelerated when supported, otherwise software",
+  "schema": "xboxlle.replay.golden.v1",
+  "source_report": "build\\golden-ref-v6.report.json",
+  "source_stdout": "F:\\Projects\\xboxlle\\xboxlle\\build\\golden-ref-v6.stdout.log",
+  "telemetry_gated_profile_hashes": [
+    "generic_combiner",
+    "transform_position_fnv64"
+  ]
+}

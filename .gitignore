@@ -43,3 +43,14 @@ cromwell/
 unicorn/
 refs/
 *.d
+
+# Measurement evidence. Reports, frame dumps and run logs are evidence, not authority:
+# they live under build/ (already ignored above), and these suffix rules stop a stray run
+# from adding one anywhere else -- tools/bench/run_*.log is the case that motivated them.
+# The tracked reference identities are goldens/*.json, which none of these match.
+*.report.json
+*.argv.json
+*.quiescence.json
+*.ppm
+*.png
+*.log

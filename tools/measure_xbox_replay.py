@@ -130,6 +130,108 @@ PERF_RENDERER_RESOLVE_CONTEXT_RE = re.compile(
     r"^\[perf-renderer-resolve-context\] top=(?P<top>.*)$"
 )
 
+# beads-xbox.1.14.6: GPU-side timing. renderer_draw_ns / renderer_resolve_ns are
+# CPU issue time; these are GL_TIME_ELAPSED nanoseconds plus the fence split of a
+# readback (drain = GPU reaching the fence, readpixels = transfer + driver,
+# cpu_copy = the flip into guest bytes). bytes_read vs dirty_bytes is the
+# full-surface readback against the tracked dirty union -- the headroom a
+# scissored readback would have. gpu_timing_available=0 means the driver lacked
+# an entry point, so zeros there mean "not measured", NOT "the GPU was idle".
+#
+# The renderer has no per-checkpoint report hook (main.cpp formats the perf::
+# buckets itself), so xlle emits exactly one of these at shutdown, scope=
+# cumulative. The parser keeps a list anyway so per-checkpoint lines need no
+# change here if one is ever added.
+PERF_GL_GPU_RE = re.compile(
+    r"^\[perf-gl-gpu\] "
+    r"scope=(?P<scope>\S+) "
+    r"gpu_timing_available=(?P<gpu_timing_available>\d+) "
+    r"gpu_draw_ns=(?P<gpu_draw_ns>\d+) "
+    r"gpu_draw_n=(?P<gpu_draw_n>\d+) "
+    r"gpu_upload_ns=(?P<gpu_upload_ns>\d+) "
+    r"gpu_upload_n=(?P<gpu_upload_n>\d+) "
+    r"gpu_resolve_ns=(?P<gpu_resolve_ns>\d+) "
+    r"gpu_resolve_n=(?P<gpu_resolve_n>\d+) "
+    r"drain_ns=(?P<drain_ns>\d+) "
+    r"readpixels_ns=(?P<readpixels_ns>\d+) "
+    r"cpu_copy_ns=(?P<cpu_copy_ns>\d+) "
+    r"bytes_read=(?P<bytes_read>\d+) "
+    r"dirty_bytes=(?P<dirty_bytes>\d+) "
+    r"nested_skipped=(?P<nested_skipped>\d+) "
+    r"queries_dropped=(?P<queries_dropped>\d+)"
+    # beads-xbox.1.14.6: resolve_bracket_ok is a print-time self-check on the
+    # GL_TIME_ELAPSED bracket around glReadPixels, added 2026-09-04. OPTIONAL on
+    # purpose: reports captured before that build carry the line without it, and
+    # the parser must keep reading them rather than dropping the whole family.
+    # parse_gl_gpu() maps a missing group to None, which lands in the JSON as
+    # null -- distinguishable from a printed 0, which means the check FAILED.
+    r"(?: resolve_bracket_ok=(?P<resolve_bracket_ok>\d+))?$"
+)
+
+# [perf-excl] (beads-xbox.1.14.3) is a FLAT key=value line whose field list grows
+# every time a bucket is added -- perf_excl.hpp emits one `<bucket>_ns=` /
+# `<bucket>_n=` pair per entry of kBucketNames, walked over kBucketCount. A rigid
+# field-by-field regex like the ones above would therefore have to be edited in
+# lockstep with the header and would silently stop matching the whole line the
+# first time it was not, dropping the family rather than one field. Match the
+# prefix only and split the rest generically.
+PERF_EXCL_RE = re.compile(r"^\[perf-excl\] (?P<fields>\S+=\S+(?: \S+=\S+)*)$")
+
+# [host] idle-census (beads-xbox.1.14.4) is mostly flat key=value, plus two
+# comma-separated association lists introduced by `<name>-insns:`.
+IDLE_CENSUS_RE = re.compile(r"^\[host\] idle-census (?P<fields>.+)$")
+
+# src/app/main.cpp print_seam_census -- the stage (d) NV2A seam census
+# (beads-xbox.1.15.4, DESIGN-NV2A-SEAM.md measurement M5). Two line families,
+# each emitted once per frame-series checkpoint with scope=interval and once
+# at shutdown with scope=cumulative:
+#   [host] seam-census  scope=... deadline=... jobs_latched=... ...
+#   [host] seam-anchor  scope=... deadline=... anchor=<name> hits=... ...
+# Absent from any pre-stage-(d) log, so both are parsed additively: a log
+# without them yields empty lists and no key changes meaning.
+SEAM_CENSUS_RE = re.compile(r"^\[host\] seam-census (?P<fields>.+)$")
+SEAM_ANCHOR_RE = re.compile(r"^\[host\] seam-anchor (?P<fields>.+)$")
+
+# src/app/main.cpp print_seam_census -- the stage (e) THREADED draw consumer
+# census (beads-xbox.1.15.5, DESIGN-NV2A-SEAM.md section 5(e)). Same two scopes
+# as the seam census above:
+#   [host] draw-queue scope=... deadline=... threads=... jobs_queued=... ...
+#   [host] draw-depth scope=... deadline=... bucket=<name> count=...
+# jobs_queued is the WITNESS that threading actually ran: a byte-lock that passes
+# with jobs_queued=0 proved nothing. Parsed additively like the two above.
+DRAW_QUEUE_RE = re.compile(r"^\[host\] draw-queue (?P<fields>.+)$")
+DRAW_DEPTH_RE = re.compile(r"^\[host\] draw-depth (?P<fields>.+)$")
+# Stage (e2), beads-xbox.1.15.9: the destination-span partition. Its own line
+# family so DRAW_QUEUE_RE keeps its exact field set across the stage (e) and
+# stage (e2) reports.
+DRAW_SPAN_RE = re.compile(r"^\[host\] draw-span (?P<fields>.+)$")
+# Off-thread raster time, printed BESIDE the [perf-excl] partition and
+# deliberately NOT inside it (beads-xbox.1.15.9 loose end 1): [perf-excl]'s
+# denominator is emulation-thread wall, so folding helper time in would make the
+# partition sum past wall. Parsed as its own family for the same reason.
+PERF_WORKER_RE = re.compile(r"^\[perf-worker\] (?P<fields>.+)$")
+
+
+def parse_seam_fields(fields: str) -> dict[str, Any]:
+    """`k=v` tokens -> dict, ints where possible, floats next, else strings."""
+    parsed: dict[str, Any] = {}
+    for token in fields.split():
+        key, sep, value = token.partition("=")
+        if not sep:
+            continue
+        key = key.replace("-", "_")
+        try:
+            parsed[key] = int(value)
+            continue
+        except ValueError:
+            pass
+        try:
+            parsed[key] = float(value)
+        except ValueError:
+            parsed[key] = value
+    return parsed
+IDLE_CENSUS_LIST_KEYS = ("threads-insns", "boundary-pages-insns")
+
 PERF_MEMORY_RE = re.compile(
     r"^\[perf-memory\] "
     r"paged-surface-creations=(?P<paged_surface_creations>\d+) "
@@ -257,6 +359,83 @@ OHCI_RE = re.compile(
     r"^\[2bl\] OHCI0: .*xid-endpoint2=(?P<xid_endpoint2>\d+)"
 )
 
+# beads-xbox.1.14.8 -- per-profile output hashes and fingerprint/census hashes.
+#
+# Every witnessed Profile prints one end-of-run line of the shape
+#   [2bl] NV2A <label>: <counters> last=<addr> hash=<16 hex>
+# (src/app/main.cpp:3133..3520; the accumulators live in src/machine/nv2a.cpp,
+# e.g. raster_output_hash_ at nv2a.cpp:4599, radial_color_output_hash_ at 5699).
+# Matching the *shape* rather than an enumerated list means a Profile added later
+# is picked up without touching this parser.
+PROFILE_HASH_RE = re.compile(
+    r"^\[2bl\] NV2A (?P<label>[^:]+): (?P<body>.*?)\bhash=(?P<hash>[0-9a-fA-F]{16})\b"
+)
+
+# src/app/main.cpp:3570-3572 -- transform position FNV-64.
+TRANSFORM_POSITION_RE = re.compile(
+    r"^\[2bl\] NV2A transform: .*\bposition-fnv64=(?P<hash>[0-9a-fA-F]{16})\b"
+)
+
+# src/app/main.cpp:3902 -- scanout RGBA FNV-64 (also captured by SCANOUT_RE).
+SCANOUT_FNV_RE = re.compile(
+    r"^\[2bl\] NV2A scanout: .*\brgba-fnv64=(?P<hash>[0-9a-fA-F]{16})\b"
+)
+
+# src/app/main.cpp:3413 -- generic-combiner fingerprint census.
+# Only populated when perf::g_enabled (nv2a.cpp:5947), i.e. --perf-accounting.
+FINGERPRINT_CENSUS_RE = re.compile(
+    r"^\[2bl\] NV2A generic-combiner fingerprints: unique=(?P<unique>\d+)(?P<top>.*)$"
+)
+
+# src/app/main.cpp:3892 -- guest-visible flip counters (presented frames).
+FLIP_RE = re.compile(
+    r"^\[2bl\] NV2A flip: write-increments=(?P<write_increments>\d+) "
+    r"stalls=(?P<stalls>\d+) read-increments=(?P<read_increments>\d+) "
+    r"notifications=(?P<notifications>\d+) surface=(?P<surface>[0-9a-fA-F]+) "
+    r"waiting=(?P<waiting>\d+)"
+)
+
+# Hashes whose accumulators are gated on `collect_diagnostics`
+# (= detailed_telemetry_ || perf::g_enabled) and therefore only advance when
+# --perf-accounting is on:
+#   * transform_position_fnv64 -- nv2a.cpp:1234 sets collect_diagnostics,
+#     nv2a.cpp:1458 gates record_transformed_vertex_stats which folds the hash
+#     at nv2a.cpp:1451.
+#   * generic_combiner -- nv2a.cpp:5948 sets collect_diagnostics,
+#     nv2a.cpp:9730-9733 gates the hash fold.
+# In a noperf run both stay at the FNV-1a offset basis 14650fb0739d0383, so they
+# are NOT comparable across arms with different --perf-accounting settings.
+TELEMETRY_GATED_PROFILE_HASHES = frozenset(
+    {"generic_combiner", "transform_position_fnv64"}
+)
+
+# FNV-1a 64-bit offset basis: the value an output hash keeps when its Profile was
+# never exercised (or its accumulator was gated off).
+FNV1A64_OFFSET_BASIS = "14650fb0739d0383"
+
+
+def profile_hash_key(label: str) -> str:
+    """Stable snake_case key for an NV2A profile label.
+
+    'tex=f fan' -> 'tex_f_fan', 'immediate-quad menu I8+palette 64x128' ->
+    'immediate_quad_menu_i8_palette_64x128'.
+    """
+    slug = re.sub(r"[^0-9a-z]+", "_", label.strip().lower())
+    return slug.strip("_")
+
+
+def parse_fingerprint_census(text: str) -> dict[str, int]:
+    census: dict[str, int] = {}
+    for item in text.split():
+        fingerprint, sep, count = item.partition(":")
+        if not sep:
+            continue
+        try:
+            census[fingerprint.lower()] = int(count)
+        except ValueError:
+            continue
+    return census
+
 
 def sha256_file(path: pathlib.Path) -> str:
     digest = hashlib.sha256()
@@ -308,6 +487,91 @@ def parse_int_fields(match: re.Match[str]) -> dict[str, Any]:
             parsed[key] = float(value)
         else:
             parsed[key] = int(value)
+    return parsed
+
+
+def parse_gl_gpu(match: re.Match[str]) -> dict[str, Any]:
+    """[perf-gl-gpu] fields: `scope` is a label, everything else a counter.
+
+    parse_int_fields would int() the scope and raise, so this family gets its own
+    two-line parser rather than a special case bolted into the shared one.
+    """
+    fields: dict[str, Any] = {}
+    for key, value in match.groupdict().items():
+        if key == "scope":
+            fields[key] = value
+        elif value is None:
+            # An optional field absent from an older report line. None, not 0:
+            # resolve_bracket_ok=0 means the bracket check FAILED, and a missing
+            # field must never be readable as a failure that was measured.
+            fields[key] = None
+        else:
+            fields[key] = int(value)
+    return fields
+
+
+def _coerce_scalar(key: str, value: str) -> Any:
+    """int where possible, float for the _pct/_per_tick fields, else the string.
+
+    Kept deliberately permissive: these two families carry a mix of counters,
+    ratios, a `scope` label and hex ranges (`idle_range=0x8001e3ce-0x8001e3ff`),
+    and a new field must land in the JSON as-is rather than raise.
+    """
+    if key in ("scope", "idle_range"):
+        return value
+    try:
+        return int(value)
+    except ValueError:
+        pass
+    try:
+        return float(value)
+    except ValueError:
+        return value
+
+
+def parse_perf_excl(fields: str) -> dict[str, Any]:
+    """[perf-excl] -> flat dict, one entry per key=value token.
+
+    Bucket-count agnostic by construction (see PERF_EXCL_RE). `unaccounted_ns` is
+    signed and must survive as a negative int, which int() handles; the partition
+    is only trustworthy when `unaccounted_pct` is small, so that field is the one
+    a consumer should gate on.
+    """
+    parsed: dict[str, Any] = {}
+    for token in fields.split():
+        key, _, value = token.partition("=")
+        parsed[key] = _coerce_scalar(key, value)
+    return parsed
+
+
+def parse_idle_census(fields: str) -> dict[str, Any]:
+    """[host] idle-census -> flat dict plus the two association lists.
+
+    `threads-insns:` and `boundary-pages-insns:` are comma-separated
+    `0xADDR=COUNT` pairs. They become `threads_insns` / `boundary_pages_insns`
+    dicts keyed by the lowercased address string, so the retired-instruction
+    attribution beads-xbox.1.14.4 needs is queryable from the report JSON instead
+    of only from the log.
+    """
+    parsed: dict[str, Any] = {}
+    for token in fields.split():
+        if ":" in token and token.split(":", 1)[0] in IDLE_CENSUS_LIST_KEYS:
+            name, _, body = token.partition(":")
+            entries: dict[str, int] = {}
+            for item in body.split(","):
+                if not item:
+                    continue
+                addr, _, count = item.partition("=")
+                try:
+                    entries[addr.lower()] = int(count)
+                except ValueError:
+                    continue
+            parsed[name.replace("-", "_")] = entries
+            continue
+        key, sep, value = token.partition("=")
+        if not sep:
+            continue
+        parsed[key.replace("-", "_")] = _coerce_scalar(key, value)
     return parsed
 
 
@@ -584,6 +848,15 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
     renderer_samples: list[dict[str, Any]] = []
     renderer_resident_detail_samples: list[dict[str, Any]] = []
     renderer_resolve_context_samples: list[dict[str, dict[str, int]]] = []
+    gl_gpu_samples: list[dict[str, Any]] = []
+    perf_excl_samples: list[dict[str, Any]] = []
+    idle_census_samples: list[dict[str, Any]] = []
+    seam_census_samples: list[dict[str, Any]] = []
+    seam_anchor_samples: list[dict[str, Any]] = []
+    draw_queue_samples: list[dict[str, Any]] = []
+    draw_depth_samples: list[dict[str, Any]] = []
+    draw_span_samples: list[dict[str, Any]] = []
+    perf_worker_samples: list[dict[str, Any]] = []
     perf_memory_samples: list[dict[str, Any]] = []
     generic_split_samples: list[dict[str, Any]] = []
     generic_detail_samples: list[dict[str, Any]] = []
@@ -602,6 +875,43 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
     selected_renderer: str | None = None
     memory_limit: str | None = None
     generic_fingerprints: str | None = None
+    profile_hashes: dict[str, str] = {}
+    profile_hash_labels: dict[str, str] = {}
+    fingerprint_census: dict[str, int] | None = None
+    fingerprint_unique: int | None = None
+    flip: dict[str, Any] | None = None
+
+    # beads-xbox.1.14.1 item 3(c): counter samples are emitted as a block right
+    # after each `[host] frame-series` line, plus one extra block at shutdown.
+    # Positional indexing therefore silently mis-associates whenever a sample
+    # family is missing a checkpoint (perf-resident/perf-texture-modulate emit 24
+    # blocks where [perf] emits 25) or absent entirely (a noperf run has zero).
+    # Record the owning checkpoint for every sample so consumers can key on the
+    # guest-anchored deadline instead of the list index.
+    checkpoints: dict[str, list[dict[str, Any]]] = {}
+    checkpoint_index = -1
+    checkpoint_deadline: int | None = None
+    checkpoint_insns: int | None = None
+    seen_checkpoints: dict[str, set[int]] = {}
+
+    def note(kind: str) -> None:
+        seen = seen_checkpoints.setdefault(kind, set())
+        if checkpoint_index >= 0 and checkpoint_index not in seen:
+            seen.add(checkpoint_index)
+            tag = {
+                "index": checkpoint_index,
+                "deadline": checkpoint_deadline,
+                "insns": checkpoint_insns,
+                "scope": "frame-series",
+            }
+        else:
+            tag = {
+                "index": None,
+                "deadline": None,
+                "insns": None,
+                "scope": "shutdown" if checkpoint_index >= 0 else "preamble",
+            }
+        checkpoints.setdefault(kind, []).append(tag)
 
     for raw_line in read_log_text(path).splitlines():
         line = raw_line.rstrip("\n")
@@ -610,49 +920,105 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
         elif line.startswith("[host] hard process-memory limit armed: "):
             memory_limit = line[len("[host] ") :]
         elif match := FRAME_RE.match(line):
-            frames.append(parse_int_fields(match))
+            frame = parse_int_fields(match)
+            frames.append(frame)
+            checkpoint_index = len(frames) - 1
+            checkpoint_deadline = frame["deadline"]
+            checkpoint_insns = frame["insns"]
         elif match := PERF_RE.match(line):
+            note("perf_samples")
             perf_samples.append(parse_int_fields(match))
         elif match := PERF_RESIDENT_RE.match(line):
+            note("resident_samples")
             resident_samples.append(parse_counter_sample(match))
         elif match := PERF_TEXTURE_MODULATE_RE.match(line):
+            note("texture_modulate_samples")
             texture_modulate_samples.append(parse_counter_sample(match))
         elif match := HOST_MEMORY_RE.match(line):
+            note("host_memory_samples")
             host_memory_samples.append(parse_int_fields(match))
         elif match := UNICORN_MEMORY_RE.match(line):
+            note("unicorn_memory_samples")
             unicorn_memory_samples.append(parse_int_fields(match))
         elif match := PERF_RENDERER_RE.match(line):
+            note("renderer_samples")
             renderer_samples.append(parse_int_fields(match))
         elif match := PERF_RENDERER_RESIDENT_DETAIL_RE.match(line):
+            note("renderer_resident_detail_samples")
             renderer_resident_detail_samples.append(parse_int_fields(match))
         elif match := PERF_RENDERER_RESOLVE_CONTEXT_RE.match(line):
+            note("renderer_resolve_context_samples")
             renderer_resolve_context_samples.append(
                 parse_renderer_resolve_contexts(match.group("top"))
             )
+        elif match := PERF_GL_GPU_RE.match(line):
+            note("gl_gpu_samples")
+            gl_gpu_samples.append(parse_gl_gpu(match))
+        elif match := PERF_EXCL_RE.match(line):
+            note("perf_excl_samples")
+            perf_excl_samples.append(parse_perf_excl(match.group("fields")))
+        elif match := IDLE_CENSUS_RE.match(line):
+            note("idle_census_samples")
+            idle_census_samples.append(parse_idle_census(match.group("fields")))
+        elif match := SEAM_CENSUS_RE.match(line):
+            note("seam_census_samples")
+            seam_census_samples.append(parse_seam_fields(match.group("fields")))
+        elif match := SEAM_ANCHOR_RE.match(line):
+            note("seam_anchor_samples")
+            seam_anchor_samples.append(parse_seam_fields(match.group("fields")))
+        elif match := DRAW_QUEUE_RE.match(line):
+            note("draw_queue_samples")
+            draw_queue_samples.append(parse_seam_fields(match.group("fields")))
+        elif match := DRAW_DEPTH_RE.match(line):
+            note("draw_depth_samples")
+            draw_depth_samples.append(parse_seam_fields(match.group("fields")))
+        elif match := DRAW_SPAN_RE.match(line):
+            note("draw_span_samples")
+            draw_span_samples.append(parse_seam_fields(match.group("fields")))
+        elif match := PERF_WORKER_RE.match(line):
+            note("perf_worker_samples")
+            perf_worker_samples.append(parse_seam_fields(match.group("fields")))
         elif match := PERF_MEMORY_RE.match(line):
+            note("perf_memory_samples")
             perf_memory_samples.append(parse_int_fields(match))
         elif match := PERF_GENERIC_SPLIT_RE.match(line):
+            note("generic_split_samples")
             generic_split_samples.append(parse_int_fields(match))
         elif match := PERF_GENERIC_DETAIL_RE.match(line):
+            note("generic_detail_samples")
             generic_detail_samples.append(parse_int_fields(match))
         elif match := PERF_GENERIC_ADMISSION_RE.match(line):
+            note("generic_admission_samples")
             generic_admission_samples.append(parse_int_fields(match))
         elif match := PERF_GENERIC_TEXTURE_DETAIL_RE.match(line):
+            note("generic_texture_detail_samples")
             generic_texture_detail_samples.append(parse_int_fields(match))
         elif match := PERF_NV2A_SPLIT_RE.match(line):
+            note("nv2a_split_samples")
             nv2a_split_samples.append(parse_int_fields(match))
         elif match := PERF_VSH_PROGRAM_RE.match(line):
+            note("vsh_program_samples")
             vsh_program_samples.append(parse_vsh_programs(match.group("top")))
         elif match := PERF_VERTEX_REUSE_RE.match(line):
+            note("vertex_reuse_samples")
             vertex_reuse_samples.append(
                 parse_vertex_reuse_programs(match.group("top"))
             )
         elif match := PERF_WITNESSED_PROFILE_RE.match(line):
+            note("witnessed_profile_samples")
             witnessed_profile_samples.append(parse_witnessed_profiles(match.group("top")))
         elif match := PERF_GENERIC_RE.match(line):
+            note("generic_perf_samples")
             generic_perf_samples.append(parse_generic_perf(match))
         elif match := PERF_GENERIC_FAMILY_RE.match(line):
+            note("generic_family_samples")
             generic_family_samples.append(parse_generic_family_perf(match))
+        elif match := FLIP_RE.match(line):
+            flip = parse_int_fields(match)
+        elif match := FINGERPRINT_CENSUS_RE.match(line):
+            generic_fingerprints = line
+            fingerprint_unique = int(match.group("unique"))
+            fingerprint_census = parse_fingerprint_census(match.group("top"))
         elif match := GENERIC_RE.match(line):
             generic = parse_int_fields(match)
         elif match := SCANOUT_RE.match(line):
@@ -661,12 +1027,85 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
             retired = parse_int_fields(match)
         elif match := OHCI_RE.match(line):
             ohci_endpoint2 = int(match.group("xid_endpoint2"))
-        elif line.startswith("[2bl] NV2A generic-combiner fingerprints: "):
-            generic_fingerprints = line
+
+        # Hash harvesting runs independently of the dispatch chain above: several
+        # of these lines are also consumed as counter samples (scanout, the
+        # generic-combiner census), and a profile line must be recorded even when
+        # an earlier branch already claimed it.
+        if hash_match := PROFILE_HASH_RE.match(line):
+            label = hash_match.group("label")
+            key = profile_hash_key(label)
+            profile_hashes[key] = hash_match.group("hash").lower()
+            profile_hash_labels[key] = label
+        if hash_match := TRANSFORM_POSITION_RE.match(line):
+            profile_hashes["transform_position_fnv64"] = hash_match.group("hash").lower()
+            profile_hash_labels["transform_position_fnv64"] = "transform position-fnv64"
+        if hash_match := SCANOUT_FNV_RE.match(line):
+            profile_hashes["scanout_rgba_fnv64"] = hash_match.group("hash").lower()
+            profile_hash_labels["scanout_rgba_fnv64"] = "scanout rgba-fnv64"
 
     final_perf = perf_samples[-1] if perf_samples else None
     final_frame = frames[-1] if frames else None
+
+    census_digest = None
+    if fingerprint_census is not None:
+        canonical = ";".join(
+            f"{fingerprint}:{count}"
+            for fingerprint, count in sorted(fingerprint_census.items())
+        )
+        census_digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    # beads-xbox.1.14.1 item 4: effective_fps is 60 x realtime ratio for the last
+    # guest-anchored window, NOT presented frames per second. The guest-visible
+    # presented-frame count is the NV2A flip write-increment counter, which xlle
+    # prints once at shutdown -- so the derived rate is a whole-run average and is
+    # labelled as such. If the line is absent the value is reported as unknown.
+    wall_ns_total = sum(
+        int(frame.get("wall_ns", 0)) for frame in frames if isinstance(frame, dict)
+    )
+    presented: dict[str, Any] = {
+        "flips_counter_present": flip is not None,
+        "flips_total": flip["write_increments"] if flip else None,
+        "wall_ns_total": wall_ns_total,
+        "flips_per_second": None,
+        "scope": "whole-run average" if flip else "unknown",
+        "note": (
+            "presented flips/s = NV2A flip write-increments / summed frame-series "
+            "wall time; the flip counter is emitted once at shutdown so no "
+            "per-window rate is available"
+            if flip
+            else "no '[2bl] NV2A flip:' line in this log; presented fps unknown"
+        ),
+    }
+    if flip and wall_ns_total:
+        presented["flips_per_second"] = (
+            float(flip["write_increments"]) * 1_000_000_000.0 / float(wall_ns_total)
+        )
+
     return {
+        "sample_checkpoints": checkpoints,
+        "profile_hashes": profile_hashes,
+        "profile_hash_labels": profile_hash_labels,
+        "profile_hash_scope": "final",
+        "telemetry_gated_profile_hashes": sorted(
+            key for key in profile_hashes if key in TELEMETRY_GATED_PROFILE_HASHES
+        ),
+        "unexercised_profile_hashes": sorted(
+            key
+            for key, value in profile_hashes.items()
+            if value == FNV1A64_OFFSET_BASIS
+        ),
+        "generic_fingerprint_census": fingerprint_census,
+        "generic_fingerprint_unique": fingerprint_unique,
+        "generic_fingerprint_census_sha256": census_digest,
+        "flip": flip,
+        "presented_frames": presented,
+        "effective_fps": (
+            final_frame.get("effective_fps") if final_frame else None
+        ),
+        "effective_fps_label": (
+            "realtime-ratio x60 for the final frame-series window, not presented fps"
+        ),
         "selected_renderer": selected_renderer,
         "memory_limit": memory_limit,
         "frame_series": frames,
@@ -698,6 +1137,66 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
             renderer_resolve_context_samples[-1]
             if renderer_resolve_context_samples else None
         ),
+        # beads-xbox.1.14.6. `gl_gpu` is the cumulative run total (None when the
+        # log predates the line or the run used no GL renderer); `gl_gpu_samples`
+        # keeps every line seen, in order.
+        "gl_gpu": gl_gpu_samples[-1] if gl_gpu_samples else None,
+        "gl_gpu_samples": gl_gpu_samples,
+        # beads-xbox.1.14.3. `perf_excl` is the cumulative partition emitted at
+        # shutdown; the samples list holds every checkpoint interval in order.
+        # Absent entirely from a noperf log, which is why both default to
+        # None/[] rather than raising.
+        "perf_excl": perf_excl_samples[-1] if perf_excl_samples else None,
+        "perf_excl_samples": perf_excl_samples,
+        # beads-xbox.1.14.4. Present in noperf logs too -- the census is not
+        # gated on --perf-accounting.
+        "idle_census": idle_census_samples[-1] if idle_census_samples else None,
+        "idle_census_samples": idle_census_samples,
+        # Stage (d) seam census. `seam_census` / `seam_anchors` are the CUMULATIVE
+        # records (scope=cumulative, printed once at shutdown); the *_samples lists
+        # keep every interval delta so a per-window rate is derivable. All four are
+        # None/empty for a build without the seam, which is what makes this
+        # additive: no existing key changes meaning.
+        "seam_census": next(
+            (s for s in reversed(seam_census_samples)
+             if s.get("scope") == "cumulative"), None),
+        "seam_census_samples": seam_census_samples,
+        "seam_anchors": {
+            s["anchor"]: s
+            for s in seam_anchor_samples
+            if s.get("scope") == "cumulative" and "anchor" in s
+        },
+        "seam_anchor_samples": seam_anchor_samples,
+        # Stage (e) threaded draw consumer. Same shape and the same additive
+        # rule: `draw_queue` is the cumulative record, `draw_depth` the cumulative
+        # queue-depth histogram keyed by bucket name, and both are None/empty for
+        # any build or run without the worker (including every threads=0 run,
+        # which still prints the line with jobs_queued=0).
+        "draw_queue": next(
+            (s for s in reversed(draw_queue_samples)
+             if s.get("scope") == "cumulative"), None),
+        "draw_queue_samples": draw_queue_samples,
+        # str() because two bucket names ("0", "1") parse as ints and a JSON
+        # object cannot have mixed-type keys sorted.
+        "draw_depth": {
+            str(s["bucket"]): s.get("count")
+            for s in draw_depth_samples
+            if s.get("scope") == "cumulative" and "bucket" in s
+        },
+        "draw_depth_samples": draw_depth_samples,
+        # Stage (e2) destination-span partition (beads-xbox.1.15.9). span_jobs
+        # is the witness that work division ran: an A/B whose cumulative
+        # span_jobs is 0 measured the inline path in both arms.
+        "draw_span": next(
+            (s for s in reversed(draw_span_samples)
+             if s.get("scope") == "cumulative"), None),
+        "draw_span_samples": draw_span_samples,
+        # worker_raster_ns and friends: off-thread, excluded from the
+        # [perf-excl] partition and from its residual by construction.
+        "perf_worker": next(
+            (s for s in reversed(perf_worker_samples)
+             if s.get("scope") == "cumulative"), None),
+        "perf_worker_samples": perf_worker_samples,
         "perf_memory_samples": perf_memory_samples,
         "final_perf_memory": perf_memory_samples[-1] if perf_memory_samples else None,
         "generic_split_samples": generic_split_samples,
@@ -744,6 +1243,57 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
     }
 
 
+DEFAULT_ENGINE = "unicorn-2.1.1"
+DEFAULT_CHUNK_INSNS = 4096
+
+
+def split_command(command: str | None) -> list[str] | None:
+    """Best-effort argv recovery from the recorded command string.
+
+    The harness now records argv exactly (--argv-json); this only backfills
+    provenance for reports produced from an older command string.
+    """
+    if not command:
+        return None
+    try:
+        import shlex
+
+        return shlex.split(command, posix=False)
+    except ValueError:
+        return command.split()
+
+
+def chunk_insns_from_command(command: str | None) -> int | None:
+    if not command:
+        return None
+    match = re.search(r"--machine-chunk-insns[= ]+(\d+)", command)
+    return int(match.group(1)) if match else None
+
+
+def perf_accounting_from_command(command: str | None) -> bool | None:
+    if not command:
+        return None
+    return "--perf-accounting" in command
+
+
+def load_json(path: pathlib.Path) -> Any:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def expected_hashes_from(document: Any) -> dict[str, str]:
+    """Accept either a bare {key: hash} mapping or a golden record."""
+    if not isinstance(document, dict):
+        raise SystemExit("expected-profile-hashes document must be a JSON object")
+    source = document.get("profile_hashes", document)
+    if not isinstance(source, dict):
+        raise SystemExit("expected-profile-hashes: 'profile_hashes' must be an object")
+    out: dict[str, str] = {}
+    for key, value in source.items():
+        if isinstance(value, str):
+            out[str(key)] = value.lower()
+    return out
+
+
 def build_report(args: argparse.Namespace) -> dict[str, Any]:
     stdout_path = args.stdout.resolve()
     stderr_path = args.stderr.resolve() if args.stderr else None
@@ -755,8 +1305,33 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
     if stderr_path and stderr_path.exists():
         stderr_text = read_log_text(stderr_path)
 
+    argv = None
+    if getattr(args, "argv_json", None):
+        argv = load_json(args.argv_json)
+        if not isinstance(argv, list):
+            raise SystemExit("--argv-json must contain a JSON array of arguments")
+        argv = [str(item) for item in argv]
+    if argv is None:
+        argv = split_command(args.command)
+
+    chunk_insns = getattr(args, "chunk_insns", None)
+    if chunk_insns is None:
+        chunk_insns = chunk_insns_from_command(args.command)
+
+    perf_accounting = getattr(args, "perf_accounting", None)
+    if perf_accounting is None:
+        perf_accounting = perf_accounting_from_command(args.command)
+
+    quiescence = None
+    if getattr(args, "quiescence_json", None):
+        quiescence = load_json(args.quiescence_json)
+
     report: dict[str, Any] = {
-        "schema": "xboxlle.replay.measurement.v1",
+        # v2 adds parsed.profile_hashes, parsed.sample_checkpoints,
+        # parsed.presented_frames and the leg/quiescence provenance block
+        # (beads-xbox.1.14.1, beads-xbox.1.14.8). v1 readers keep working: every
+        # v1 key is still present and unchanged.
+        "schema": "xboxlle.replay.measurement.v2",
         "name": args.name,
         "inputs": {
             "stdout": str(stdout_path),
@@ -771,6 +1346,17 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             "platform": platform.platform(),
             "python": sys.version,
             "exe_sha256": sha256_file(exe) if exe and exe.exists() else None,
+            "argv": argv,
+            "chunk_insns": chunk_insns,
+            "engine": getattr(args, "engine", None) or DEFAULT_ENGINE,
+            "perf_accounting": perf_accounting,
+            "leg": {
+                "index": getattr(args, "leg_index", None),
+                "arm": getattr(args, "arm", None),
+                "repetition": getattr(args, "repetition", None),
+                "session": getattr(args, "session", None),
+            },
+            "host_quiescence": quiescence,
         },
         "artifacts": {
             "stdout_sha256": sha256_file(stdout_path),
@@ -788,12 +1374,26 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
 
     checks: list[dict[str, Any]] = report["checks"]
 
-    def add_check(name: str, ok: bool, detail: str) -> None:
-        checks.append({"name": name, "ok": ok, "detail": detail})
+    def add_check(name: str, ok: bool, detail: str, *, skipped: bool = False) -> None:
+        checks.append(
+            {"name": name, "ok": ok, "detail": detail, "skipped": skipped}
+        )
 
-    if args.expect_final_sha:
+    # A golden record supplies the expected identity plus the expected hashes.
+    golden: dict[str, Any] | None = None
+    if getattr(args, "golden", None):
+        loaded = load_json(args.golden)
+        if not isinstance(loaded, dict):
+            raise SystemExit("--golden must contain a JSON object")
+        golden = loaded
+
+    expected_final_sha = args.expect_final_sha
+    if not expected_final_sha and golden:
+        expected_final_sha = golden.get("final_frame_sha256")
+
+    if expected_final_sha:
         actual = report["artifacts"]["frame_dump_sha256"]
-        expect = args.expect_final_sha.lower()
+        expect = expected_final_sha.lower()
         add_check(
             "final_frame_dump_sha256",
             actual == expect,
@@ -821,7 +1421,98 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             f"empty={report['artifacts']['stderr_empty']}",
         )
 
-    report["ok"] = all(check["ok"] for check in checks)
+    # ---- beads-xbox.1.14.8: per-profile output hash gates -------------------
+    expected_hashes: dict[str, str] = {}
+    expectation_source: str | None = None
+    if getattr(args, "expected_profile_hashes", None):
+        expected_hashes = expected_hashes_from(load_json(args.expected_profile_hashes))
+        expectation_source = str(args.expected_profile_hashes)
+    elif golden is not None and isinstance(golden.get("profile_hashes"), dict):
+        expected_hashes = expected_hashes_from(golden)
+        expectation_source = str(args.golden)
+
+    if expected_hashes:
+        actual_hashes: dict[str, str] = parsed["profile_hashes"]
+        golden_perf = golden.get("perf_accounting") if golden else None
+        report["profile_hash_expectation"] = {
+            "source": expectation_source,
+            "count": len(expected_hashes),
+            "golden_perf_accounting": golden_perf,
+            "actual_perf_accounting": perf_accounting,
+        }
+        for key in sorted(set(expected_hashes) | set(actual_hashes)):
+            expect = expected_hashes.get(key)
+            actual = actual_hashes.get(key)
+            if expect is None:
+                add_check(
+                    f"profile_hash:{key}",
+                    True,
+                    f"actual={actual} not present in expectation set",
+                    skipped=True,
+                )
+                continue
+            if actual is None:
+                add_check(
+                    f"profile_hash:{key}",
+                    False,
+                    f"MISSING from log; expected={expect}",
+                )
+                continue
+            # Two hashes only advance under --perf-accounting (see
+            # TELEMETRY_GATED_PROFILE_HASHES above). Comparing them across arms
+            # with different accounting settings is meaningless, so skip rather
+            # than report a bogus mismatch -- or a bogus pass.
+            if (
+                key in TELEMETRY_GATED_PROFILE_HASHES
+                and golden_perf is not None
+                and perf_accounting is not None
+                and bool(golden_perf) != bool(perf_accounting)
+            ):
+                add_check(
+                    f"profile_hash:{key}",
+                    True,
+                    (
+                        f"SKIPPED telemetry-gated hash: golden perf_accounting="
+                        f"{bool(golden_perf)} actual={bool(perf_accounting)}; "
+                        f"actual={actual} expected={expect}"
+                    ),
+                    skipped=True,
+                )
+                continue
+            add_check(
+                f"profile_hash:{key}",
+                actual == expect,
+                f"actual={actual} expected={expect}",
+            )
+
+    # ---- golden identity (PERF-METHODOLOGY section 3 item 5) ---------------
+    if golden is not None:
+        identity_fields = (
+            ("chunk_insns", chunk_insns),
+            ("engine", report["provenance"]["engine"]),
+            ("exe_sha256", report["provenance"]["exe_sha256"]),
+            ("git_head", report["provenance"]["git_head"]),
+            ("perf_accounting", perf_accounting),
+        )
+        gate_identity = bool(getattr(args, "require_golden_identity", False))
+        for field, actual in identity_fields:
+            if field not in golden:
+                continue
+            expect = golden.get(field)
+            matches = expect == actual
+            add_check(
+                f"golden_identity:{field}",
+                True if (not gate_identity and not matches) else matches,
+                f"actual={actual} golden={expect}",
+                skipped=not gate_identity and not matches,
+            )
+
+    report["ok"] = all(
+        check["ok"] for check in checks if not check.get("skipped")
+    )
+    report["skipped_checks"] = [
+        check["name"] for check in checks if check.get("skipped")
+    ]
     return report
 
 
@@ -838,6 +1529,51 @@ def main() -> int:
     parser.add_argument("--expect-scanout-hash")
     parser.add_argument("--min-final-fps", type=float)
     parser.add_argument("--require-empty-stderr", action="store_true")
+    # beads-xbox.1.14.8
+    parser.add_argument(
+        "--expected-profile-hashes",
+        type=pathlib.Path,
+        help="JSON file: either {key: hash} or a golden record with profile_hashes.",
+    )
+    parser.add_argument(
+        "--golden",
+        type=pathlib.Path,
+        help="Golden record JSON (tools/make_golden_record.py): supplies expected "
+        "final SHA, profile hashes and the identity fields.",
+    )
+    parser.add_argument(
+        "--require-golden-identity",
+        action="store_true",
+        help="Gate on chunk_insns/engine/exe_sha256/git_head/perf_accounting "
+        "matching the golden record instead of only reporting the difference.",
+    )
+    # beads-xbox.1.14.1 provenance
+    parser.add_argument("--argv-json", type=pathlib.Path, help="JSON array: exact xlle argv.")
+    parser.add_argument("--chunk-insns", type=int, help="--machine-chunk-insns value used.")
+    parser.add_argument("--engine", help=f"Execution engine id (default {DEFAULT_ENGINE}).")
+    perf_group = parser.add_mutually_exclusive_group()
+    perf_group.add_argument(
+        "--perf-accounting",
+        dest="perf_accounting",
+        action="store_true",
+        default=None,
+        help="Record that this leg ran with --perf-accounting.",
+    )
+    perf_group.add_argument(
+        "--no-perf-accounting",
+        dest="perf_accounting",
+        action="store_false",
+        help="Record that this leg ran without --perf-accounting.",
+    )
+    parser.add_argument("--leg-index", type=int, help="0-based leg index in the session.")
+    parser.add_argument("--arm", help="Arm label, e.g. A (baseline) or B (candidate).")
+    parser.add_argument("--repetition", type=int, help="1-based repetition within the arm.")
+    parser.add_argument("--session", help="Session id shared by every leg of one run.")
+    parser.add_argument(
+        "--quiescence-json",
+        type=pathlib.Path,
+        help="JSON file with the before/after foreign-process census for this leg.",
+    )
     args = parser.parse_args()
 
     report = build_report(args)
@@ -846,12 +1582,41 @@ def main() -> int:
     tmp.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     os.replace(tmp, args.report)
 
+    parsed = report["parsed"]
+    final_frame = parsed["final_frame"]
+    presented = parsed["presented_frames"]
+    print(f"wrote {args.report} ok={report['ok']}")
     print(
-        f"wrote {args.report} ok={report['ok']} "
-        f"final_fps={report['parsed']['final_frame']['effective_fps'] if report['parsed']['final_frame'] else 'n/a'}"
+        "  effective_fps="
+        f"{final_frame['effective_fps'] if final_frame else 'n/a'} "
+        f"({parsed['effective_fps_label']})"
     )
+    if presented["flips_per_second"] is not None:
+        print(
+            "  presented_flips_per_second="
+            f"{presented['flips_per_second']:.3f} "
+            f"(flips={presented['flips_total']}, {presented['scope']}; "
+            f"{presented['note']})"
+        )
+    else:
+        print(f"  presented_flips_per_second=unknown ({presented['note']})")
+    print(
+        f"  profile_hashes={len(parsed['profile_hashes'])} "
+        f"telemetry_gated={parsed['telemetry_gated_profile_hashes']} "
+        f"unexercised={len(parsed['unexercised_profile_hashes'])}"
+    )
+    quiescence = report["provenance"].get("host_quiescence")
+    if isinstance(quiescence, dict):
+        print(
+            f"  host_quiescence contaminated={quiescence.get('contaminated')} "
+            f"foreign={quiescence.get('foreign_processes')}"
+        )
     for check in report["checks"]:
-        print(f"check {check['name']}: {'ok' if check['ok'] else 'FAIL'} {check['detail']}")
+        if check.get("skipped"):
+            status = "SKIP"
+        else:
+            status = "ok" if check["ok"] else "FAIL"
+        print(f"check {check['name']}: {status} {check['detail']}")
     return 0 if report["ok"] else 2
 
 

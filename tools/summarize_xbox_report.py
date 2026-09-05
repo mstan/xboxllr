@@ -318,20 +318,95 @@ def summarize(path: pathlib.Path) -> None:
     final_mem = parsed.get("final_host_memory") or {}
     final_unicorn = parsed.get("final_unicorn_memory") or {}
 
+    presented = parsed.get("presented_frames") or {}
+    flips_per_second = presented.get("flips_per_second")
+    flips_text = (
+        f"{flips_per_second:.3f}"
+        if isinstance(flips_per_second, (int, float))
+        else "unknown"
+    )
+
     print(path)
     print(
         "  final "
         f"ok={report.get('ok')} "
-        f"fps={final_frame.get('effective_fps', '-')} "
+        f"effective_fps={final_frame.get('effective_fps', '-')} "
+        f"presented_flips_per_s={flips_text} "
         f"frame={final_frame.get('hash', '-')} "
         f"private={mib(final_mem.get('private_commit'))} "
         f"ws={mib(final_mem.get('working_set'))} "
         f"ucode={final_unicorn.get('code_hook_regions', '-')}"
     )
+    print(
+        "  effective_fps is realtime-ratio x60 for one frame-series window, NOT "
+        "presented fps; presented_flips_per_s is the NV2A flip write-increment "
+        "count over the summed frame-series wall time (whole-run average)"
+    )
+    # beads-xbox.1.14.3. The exclusive partition is only worth reading when its
+    # residual is small, so lead with unaccounted_pct rather than burying it: a
+    # large positive residual means real time escaped every region and the bucket
+    # shares below it are wrong. discarded_deltas != 0 means the TSC stepped
+    # backwards and some intervals were dropped on the floor.
+    perf_excl = parsed.get("perf_excl") or {}
+    if perf_excl:
+        wall = perf_excl.get("wall_ns") or 0
+        print(
+            "  [perf-excl] "
+            f"scope={perf_excl.get('scope', '-')} "
+            f"wall={ns_to_s(wall)} "
+            f"unaccounted_pct={perf_excl.get('unaccounted_pct', '-')}% "
+            f"clock_reads={perf_excl.get('clock_reads', '-')} "
+            f"overhead_ticks_per_read={perf_excl.get('overhead_ticks_per_read', '-')} "
+            f"discarded_deltas={perf_excl.get('discarded_deltas', '-')}"
+        )
+        buckets = sorted(
+            (
+                (key[:-3], value)
+                for key, value in perf_excl.items()
+                if key.endswith("_ns")
+                and key
+                not in ("wall_ns", "accounted_ns", "unaccounted_ns", "compensated_ns")
+                and isinstance(value, int)
+            ),
+            key=lambda kv: -kv[1],
+        )
+        for name, value in buckets:
+            share = (100.0 * value / wall) if wall else 0.0
+            count = perf_excl.get(f"{name}_n", 0)
+            per = f"{value / count:,.1f}" if count else "-"
+            print(
+                f"    {name:<24} {ns_to_s(value):>10} {share:6.2f}%  "
+                f"n={count:<12} ns/entry={per}"
+            )
+    idle_census = parsed.get("idle_census") or {}
+    if idle_census:
+        print(
+            "  [idle-census] "
+            f"scope={idle_census.get('scope', '-')} "
+            f"idle_insn_pct={idle_census.get('idle_insn_pct', '-')} "
+            f"idle_slice_pct={idle_census.get('idle_slice_pct', '-')} "
+            f"early_stops={idle_census.get('early_stops', '-')} "
+            f"irq0={idle_census.get('irq0', '-')} "
+            f"threads={len(idle_census.get('threads_insns', {}))} "
+            f"boundary_pages={len(idle_census.get('boundary_pages_insns', {}))} "
+            f"pages_dropped={idle_census.get('pages_dropped', '-')} "
+            f"threads_dropped={idle_census.get('threads_dropped', '-')}"
+        )
     if not frames:
         print("  no frame-series samples")
         return
 
+    # beads-xbox.1.14.1 item 3(a): the perf buckets are NOT a mutually exclusive
+    # partition (src/machine/perf_accounting.hpp:11-29). Any field computed by
+    # subtracting sibling buckets is therefore a residual with no defined
+    # meaning, and is marked with a leading '!'. The one legitimate subtraction
+    # is rwit (= raster - raster_generic), because raster_generic is documented
+    # as a strict subset of raster.
+    print(
+        "  legend: fields prefixed '!' are residuals of overlapping buckets, "
+        "not measurements (perf_accounting.hpp:11-29); 'rwit' is the one valid "
+        "subtraction"
+    )
     print("  interval deltas:")
     previous_perf = previous_renderer = previous_resident = previous_memory = None
     previous_renderer_resident_detail = None
@@ -465,14 +540,14 @@ def summarize(path: pathlib.Path) -> None:
             f"gtrd={ns_to_s(gtd.get('texture_dma_read_ns'))} "
             f"gtdec={ns_to_s(gtd.get('texture_decode_ns'))} "
             f"gtswz={ns_to_s(gtd.get('texture_swizzle_lookup_ns'))} "
-            f"gtother~={ns_to_s(generic_texture_other_est)} "
+            f"!gtother={ns_to_s(generic_texture_other_est)} "
             f"gsoft={ns_to_s(gsd.get('software_raster_ns'))} "
             f"gflush={ns_to_s(gsd.get('flush_ns'))} "
-            f"gother~={ns_to_s(generic_other_est)} "
+            f"!gother={ns_to_s(generic_other_est)} "
             f"gstate={ns_to_s(gdd.get('state_setup_ns'))} "
             f"gaccel={ns_to_s(gdd.get('accel_path_ns'))} "
             f"gfbsetup={ns_to_s(gdd.get('fallback_setup_ns'))} "
-            f"gother2~={ns_to_s(generic_detail_other_est)} "
+            f"!gother2={ns_to_s(generic_detail_other_est)} "
             f"grsup={ns_to_s(gad.get('resident_support_ns'))} "
             f"grprep={ns_to_s(gad.get('resident_prepare_ns'))} "
             f"grsub={ns_to_s(gad.get('resident_submit_ns'))} "
@@ -480,14 +555,14 @@ def summarize(path: pathlib.Path) -> None:
             f"gnsnap={ns_to_s(gad.get('nonresident_snapshot_ns'))} "
             f"gnsub={ns_to_s(gad.get('nonresident_submit_ns'))} "
             f"gnwb={ns_to_s(gad.get('nonresident_writeback_ns'))} "
-            f"gaother~={ns_to_s(generic_admission_other_est)} "
+            f"!gaother={ns_to_s(generic_admission_other_est)} "
             f"gfcol={ns_to_s(gad.get('fallback_color_resolve_ns'))} "
             f"gfz={ns_to_s(gad.get('fallback_depth_resolve_ns'))} "
-            f"gfother~={ns_to_s(generic_fallback_other_est)} "
+            f"!gfother={ns_to_s(generic_fallback_other_est)} "
             f"dispatch={ns_to_s(nsd.get('dispatch_method_ns'))} "
-            f"dispself~={ns_to_s(dispatch_self_est)} "
+            f"!dispself={ns_to_s(dispatch_self_est)} "
             f"submit={ns_to_s(nsd.get('submit_vertex_ns'))} "
-            f"subself~={ns_to_s(submit_self_est)} "
+            f"!subself={ns_to_s(submit_self_est)} "
             f"xform={ns_to_s(nsd.get('vertex_transform_ns'))} "
             f"rtex={ns_to_s(rd.get('texture_stage_ns'))} "
             f"rvup={ns_to_s(rd.get('vertex_upload_ns'))} "
