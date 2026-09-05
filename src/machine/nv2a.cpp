@@ -10,8 +10,10 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <type_traits>
 
 #include "machine/perf_accounting.hpp"
+#include "machine/perf_excl.hpp"
 #include "nv2a_vsh_emulator.h"
 
 namespace xlle {
@@ -169,34 +171,33 @@ private:
     size_t written_end_ = 0;
 };
 
-class SwizzleLookup {
-public:
-    SwizzleLookup(uint32_t width, uint32_t height)
-        : x_(width), y_(height) {
-        uint32_t output_bit = 1;
-        for (uint32_t input_bit = 1;
-             input_bit < width || input_bit < height;
-             input_bit <<= 1) {
-            if (input_bit < width) {
-                for (uint32_t x = 0; x < width; ++x)
-                    if (x & input_bit) x_[x] |= output_bit;
-                output_bit <<= 1;
-            }
-            if (input_bit < height) {
-                for (uint32_t y = 0; y < height; ++y)
-                    if (y & input_bit) y_[y] |= output_bit;
-                output_bit <<= 1;
-            }
-        }
-    }
+// SwizzleLookup moved to nv2a.hpp (stage (e), beads-xbox.1.15.5): a DrawJob owns
+// its swizzle tables because a worker thread reads them through the job.
 
-    uint32_t index(uint32_t x, uint32_t y) const {
-        return x_[x] | y_[y];
-    }
-
-private:
-    std::vector<uint32_t> x_;
-    std::vector<uint32_t> y_;
+// The witnessed profile tag. It used to be declared INSIDE
+// Nv2a::rasterize_witnessed_batch; stage (e) splits that function into a latch
+// half (which matches the profile, validates it, resolves surfaces and snapshots
+// textures -- all emulation-thread work that can fault_) and a pure execute half
+// (Nv2a::execute_witnessed_fragments, which a worker may run), and both halves
+// need the tag. Same enumerators, same order, same values: `job.profile` is the
+// underlying integer and every `Profile::kX` use site below is unchanged.
+enum class Profile {
+    kNone,
+    kPitchZ16Depth,
+    kSwizzledRadialColor,
+    kSwizzledTexturedColor,
+    kPitchTexturedColor,
+    kSwizzledProjectedColor,
+    kPitchProjectedColor,
+    kPitchMultiTextureColor,
+    kPitchThreeTextureColor,
+    kPitchTex5ProjectedColor,
+    kPitchTex5DiffuseColor,
+    kInlineLinearBlitColor,
+    kPitchSingleTextureColor,
+    kTex7FanColor,
+    kTexfProjectedFanColor,
+    kPitchAdditiveColor,
 };
 
 }  // namespace
@@ -226,9 +227,229 @@ const Nv2a::Block* Nv2a::find_block(uint32_t rel, uint32_t& block_rel) {
     return nullptr;
 }
 
+// ============ stage (f) GPU-resident consumer: residency model ==============
+// beads-xbox.1.15.7. See the contract on GpuResidencyCensus in nv2a.hpp. In
+// simulate mode (the only mode until the GL executor lands) these five
+// functions do nothing but count, so they are always on: the whole point is
+// that the cost model of the design is measured from the canonical run rather
+// than estimated, and measured continuously from process start rather than
+// captured in a window (PRINCIPLES section 7).
+const char* Nv2a::gpu_reject_reason_name(size_t reason) {
+    switch (reason) {
+    case kGpuRejectHashOn:          return "hash_on";
+    case kGpuRejectDebugCb:         return "debug_cb";
+    case kGpuRejectCombiner:        return "combiner_words";
+    case kGpuRejectRasterSubset:    return "raster_subset";
+    case kGpuRejectSurface:         return "surface";
+    case kGpuRejectTexture:         return "texture";
+    case kGpuRejectPrimitive:       return "primitive";
+    case kGpuRejectVertexRange:     return "vertex_range";
+    case kGpuRejectVertexNonFinite: return "vertex_non_finite";
+    default: break;
+    }
+    return "unknown";
+}
+
+const char* Nv2a::gpu_residency_cause_name(size_t cause) {
+    switch (cause) {
+    case kGpuResCauseClearSurface:     return "clear_surface";
+    case kGpuResCauseWitnessedCpuDraw: return "witnessed_cpu_draw";
+    case kGpuResCauseGeneric:          return "generic";
+    case kGpuResCauseImageBlit:        return "image_blit";
+    case kGpuResCauseScanout:          return "scanout";
+    case kGpuResCauseImmediateQuad:    return "immediate_quad";
+    case kGpuResCauseRetarget:         return "retarget";
+    case kGpuResCauseOther:            return "other";
+    default: break;
+    }
+    return "unknown";
+}
+
+uint32_t Nv2a::gpu_res_cause_from_context(const char* context) {
+    if (!context) return kGpuResCauseOther;
+    if (std::strcmp(context, "CLEAR_SURFACE") == 0)
+        return kGpuResCauseClearSurface;
+    if (std::strcmp(context, "witnessed color surface") == 0 ||
+        std::strcmp(context, "witnessed zeta surface") == 0)
+        return kGpuResCauseWitnessedCpuDraw;
+    if (std::strcmp(context, "scanout capture") == 0)
+        return kGpuResCauseScanout;
+    if (std::strncmp(context, "IMAGE_BLIT", 10) == 0)
+        return kGpuResCauseImageBlit;
+    if (std::strstr(context, "generic") != nullptr)
+        return kGpuResCauseGeneric;
+    return kGpuResCauseOther;
+}
+
+// Phase 2 (beads-xbox.1.15.10). Mirrors the anonymous-namespace `Profile` enum
+// declared at the top of this file, by value, so the census can be printed from
+// src/app/main.cpp without exporting the enum. A slot that drifts out of sync
+// would show up immediately as a mislabelled row against the [2bl] per-profile
+// batch counters, which are produced by a completely separate path.
+const char* Nv2a::gpu_res_profile_name(size_t profile) {
+    switch (static_cast<Profile>(profile)) {
+    case Profile::kNone:                    return "none";
+    case Profile::kPitchZ16Depth:           return "pitch_z16_depth";
+    case Profile::kSwizzledRadialColor:     return "swizzled_radial";
+    case Profile::kSwizzledTexturedColor:   return "swizzled_textured";
+    case Profile::kPitchTexturedColor:      return "pitch_textured";
+    case Profile::kSwizzledProjectedColor:  return "swizzled_projected";
+    case Profile::kPitchProjectedColor:     return "pitch_projected";
+    case Profile::kPitchMultiTextureColor:  return "pitch_multi_texture";
+    case Profile::kPitchThreeTextureColor:  return "pitch_three_texture";
+    case Profile::kPitchTex5ProjectedColor: return "pitch_tex5_projected";
+    case Profile::kPitchTex5DiffuseColor:   return "pitch_tex5_diffuse";
+    case Profile::kInlineLinearBlitColor:   return "inline_linear_blit";
+    case Profile::kPitchSingleTextureColor: return "pitch_single_texture";
+    case Profile::kTex7FanColor:            return "tex7_fan";
+    case Profile::kTexfProjectedFanColor:   return "texf_projected_fan";
+    case Profile::kPitchAdditiveColor:      return "pitch_additive";
+    }
+    return "unknown";
+}
+
+void Nv2a::gpu_res_end_run() {
+    if (gpu_res_run_ == 0) return;
+    ++gpu_res_.runs;
+    gpu_res_.run_sum += gpu_res_run_;
+    if (gpu_res_run_ > gpu_res_.run_max) gpu_res_.run_max = gpu_res_run_;
+    gpu_res_run_ = 0;
+}
+
+// A draw the GPU executor would take. If the destination pair is not already
+// GPU-authoritative it costs an upload of both planes; if a DIFFERENT pair is,
+// that one is resolved first (the backend keeps one active target).
+void Nv2a::gpu_res_note_gpu_draw(uint32_t color_addr, uint64_t color_bytes,
+                                 uint32_t depth_addr, uint64_t depth_bytes) {
+    ++gpu_res_.gpu_draws;
+    ++gpu_res_run_;
+    if (gpu_res_color_addr_ == color_addr &&
+        gpu_res_color_bytes_ == color_bytes &&
+        gpu_res_depth_addr_ == depth_addr &&
+        gpu_res_depth_bytes_ == depth_bytes) {
+        return;  // already resident and authoritative: no transfer at all
+    }
+    if (gpu_res_color_addr_ != 0) {
+        ++gpu_res_.resolves;
+        gpu_res_.resolve_bytes += gpu_res_color_bytes_;
+        ++gpu_res_.cause[kGpuResCauseRetarget];
+        if (gpu_res_depth_addr_ != 0) {
+            ++gpu_res_.depth_resolves;
+            gpu_res_.depth_resolve_bytes += gpu_res_depth_bytes_;
+        }
+    }
+    ++gpu_res_.uploads;
+    gpu_res_.upload_bytes += color_bytes;
+    gpu_res_color_addr_ = color_addr;
+    gpu_res_color_bytes_ = color_bytes;
+    gpu_res_depth_addr_ = depth_addr;
+    gpu_res_depth_bytes_ = depth_bytes;
+    if (depth_addr != 0) {
+        ++gpu_res_.depth_uploads;
+        gpu_res_.depth_upload_bytes += depth_bytes;
+    }
+}
+
+void Nv2a::gpu_res_cpu_color_access(uint32_t address, uint64_t bytes,
+                                    uint32_t cause) {
+    if (gpu_res_in_gpu_draw_ || gpu_res_color_addr_ == 0 || bytes == 0) return;
+    const uint64_t lo = address;
+    const uint64_t hi = lo + bytes;
+    const uint64_t rlo = gpu_res_color_addr_;
+    const uint64_t rhi = rlo + gpu_res_color_bytes_;
+    if (hi <= rlo || rhi <= lo) return;
+    if (cause == kGpuResCauseClearSurface && lo <= rlo && hi >= rhi) {
+        // A full-surface clear of a GPU-authoritative surface is a glClear,
+        // not a readback: residency is retained and nothing crosses the bus.
+        ++gpu_res_.clears_on_gpu;
+        return;
+    }
+    gpu_res_end_run();
+    ++gpu_res_.resolves;
+    gpu_res_.resolve_bytes += gpu_res_color_bytes_;
+    ++gpu_res_.cause[cause < kGpuResidencyCauses ? cause : kGpuResCauseOther];
+    // Phase 2 attribution: a witnessed CPU draw is the only cause that carries
+    // a profile, and gpu_res_cpu_profile_ was set for THIS draw at the
+    // classification point in rasterize_witnessed_batch.
+    if (cause == kGpuResCauseWitnessedCpuDraw &&
+        gpu_res_cpu_profile_ < kGpuResProfileSlots) {
+        ++gpu_res_.breaks_profile[gpu_res_cpu_profile_];
+    }
+    if (gpu_res_depth_addr_ != 0) {
+        ++gpu_res_.depth_resolves;
+        gpu_res_.depth_resolve_bytes += gpu_res_depth_bytes_;
+    }
+    gpu_res_color_addr_ = 0;
+    gpu_res_color_bytes_ = 0;
+    gpu_res_depth_addr_ = 0;
+    gpu_res_depth_bytes_ = 0;
+}
+
+void Nv2a::gpu_res_cpu_depth_access(uint32_t address, uint64_t bytes,
+                                    uint32_t cause) {
+    if (gpu_res_in_gpu_draw_ || gpu_res_depth_addr_ == 0 || bytes == 0) return;
+    const uint64_t lo = address;
+    const uint64_t hi = lo + bytes;
+    const uint64_t rlo = gpu_res_depth_addr_;
+    const uint64_t rhi = rlo + gpu_res_depth_bytes_;
+    if (hi <= rlo || rhi <= lo) return;
+    if (cause == kGpuResCauseClearSurface && lo <= rlo && hi >= rhi) return;
+    // The pair is resolved together: the colour plane is what the executor
+    // renders and the two are always bound as one target.
+    const uint64_t resolves_before = gpu_res_.resolves;
+    gpu_res_cpu_color_access(gpu_res_color_addr_,
+                             gpu_res_color_bytes_ ? gpu_res_color_bytes_ : 1,
+                             cause);
+    if (gpu_res_depth_addr_ != 0) {
+        gpu_res_end_run();
+        ++gpu_res_.depth_resolves;
+        gpu_res_.depth_resolve_bytes += gpu_res_depth_bytes_;
+        ++gpu_res_.cause[cause < kGpuResidencyCauses ? cause
+                                                    : kGpuResCauseOther];
+        // Attribute the break exactly once. If the colour half already took a
+        // resolve above it has already counted this draw; only a depth-only
+        // break (no resident colour plane) is counted here.
+        if (gpu_res_.resolves == resolves_before &&
+            cause == kGpuResCauseWitnessedCpuDraw &&
+            gpu_res_cpu_profile_ < kGpuResProfileSlots) {
+            ++gpu_res_.breaks_profile[gpu_res_cpu_profile_];
+        }
+        gpu_res_depth_addr_ = 0;
+        gpu_res_depth_bytes_ = 0;
+    }
+}
+
 bool Nv2a::resolve_renderer_color_overlap(uint32_t address, size_t size,
                                           const char* context) {
     if (!renderer_ || size == 0) return true;
+    // F3 CLOSURE (beads-xbox.1.15.5 residual risk). BEFORE the renderer is asked
+    // what it owns, drain anything queued: a pending job's recorded
+    // invalidate_renderer_color_overlap has not been applied yet, so without
+    // this the query can return bytes for a surface a pending job is about to
+    // overwrite, and the mem_write_ below would then clobber the software
+    // output. Two compares when the ring is empty, which at N == 0 and at every
+    // N >= 2 (a span job never enters the ring) is always.
+    draw_renderer_query_fence();
+    // Stage (f) residency census: every CPU consumer that is about to read or
+    // overwrite a colour surface already funnels through here with its context
+    // string, so this one call covers CLEAR_SURFACE, the witnessed CPU draws,
+    // the generic-combiner paths, IMAGE_BLIT and scanout without a hook at each.
+    gpu_res_cpu_color_access(address, size, gpu_res_cause_from_context(context));
+    // Seam anchor 8 (F3): GL/software mixing. HIT counted here, after the
+    // no-renderer early-out -- with no renderer this function neither reads nor
+    // writes guest memory and cannot be a coherence point at all. The DRAIN is
+    // raised below, only when the resolve actually moves bytes back into guest
+    // RAM through mem_write_, because that is the whole of the hazard: a resolve
+    // that returns nothing queries the GL backend's resident set and touches no
+    // guest memory, so it cannot collide with a pending job's destination. The
+    // resident set is decided by the renderer independently of what is pending,
+    // so evaluating it first and draining afterwards is safe.
+    seam_anchor(kSeamAnchorResolveOverlap, false);
+    // NV2A_GL_RESOLVE (beads-xbox.1.14.3): the resident-surface readback plus the
+    // guest-memory writeback that makes it coherent. Opened AFTER the early-out on
+    // purpose: with no renderer this function is a compare and a return, and timing that
+    // would put two clock reads on a hot path for a bucket that stays zero.
+    perf_excl::Scope region(perf_excl::kNv2aGlResolve);
     for (;;) {
         Nv2aResidentColorResolve resolve;
         // Recycle the readback buffer across resolves so repeated full-surface
@@ -246,6 +467,11 @@ bool Nv2a::resolve_renderer_color_overlap(uint32_t address, size_t size,
             color_resolve_scratch_ = std::move(resolve.data);
             return true;
         }
+        // The subset of anchor-8 hits that actually moves bytes back into guest
+        // RAM -- and therefore the actual drain condition. Reporting hits and
+        // transfers separately lets the conservative policy be judged too.
+        ++seam_resolve_transfers_;
+        seam_anchor_drain(kSeamAnchorResolveOverlap);
         perf::record_renderer_color_resolve_context(context, resolve.data.size());
         const bool wrote =
             mem_write_ &&
@@ -264,9 +490,10 @@ bool Nv2a::resolve_renderer_color_overlap(uint32_t address, size_t size,
     }
 }
 
-void Nv2a::invalidate_renderer_color_overlap(uint32_t address, size_t size) {
+void Nv2a::invalidate_renderer_color_overlap(uint32_t address, size_t size,
+                                             uint32_t cause) {
     if (renderer_ && size != 0)
-        renderer_->invalidate_resident_color_surface(address, size);
+        renderer_->invalidate_resident_color_surface(address, size, cause);
 }
 
 bool Nv2a::refresh_resident_color_after_software_write(
@@ -275,6 +502,11 @@ bool Nv2a::refresh_resident_color_after_software_write(
     if (!renderer_ || size == 0 || write_end <= write_begin || row_pitch == 0) {
         return true;  // nothing written or nothing to keep coherent
     }
+    // F3 CLOSURE, third and last renderer residency query in the device. Its
+    // caller (the generic-combiner software flush) is already behind
+    // draw_order_fence, so this is expected to stay at zero; it is here so the
+    // property is local to the query rather than a fact about one call site.
+    draw_renderer_query_fence();
     if (renderer_->supports_resident_color_region_upload() &&
         renderer_->has_resident_color_surface(address, size, key_pitch, height,
                                               format)) {
@@ -308,13 +540,20 @@ bool Nv2a::refresh_resident_color_after_software_write(
     }
     // Not resident (or backend cannot region-upload): preserve the old
     // contract — drop residency so the next accelerated draw re-uploads.
-    invalidate_renderer_color_overlap(address, size);
+    invalidate_renderer_color_overlap(
+        address, size, nv2a_invalidate_token(kNv2aInvalidateRegionFallback));
     return true;
 }
 
 bool Nv2a::resolve_renderer_depth_overlap(uint32_t address, size_t size,
                                           const char* context) {
     if (!renderer_ || size == 0) return true;
+    // F3 CLOSURE, depth half. Same argument as the colour half above.
+    draw_renderer_query_fence();
+    gpu_res_cpu_depth_access(address, size, gpu_res_cause_from_context(context));
+    // Seam anchor 8 (F3), depth half. Same hit/drain split as the colour half.
+    seam_anchor(kSeamAnchorResolveOverlap, false);
+    perf_excl::Scope region(perf_excl::kNv2aGlResolve);
     for (;;) {
         Nv2aResidentDepthResolve resolve;
         std::string error;
@@ -325,6 +564,10 @@ bool Nv2a::resolve_renderer_depth_overlap(uint32_t address, size_t size,
             return false;
         }
         if (resolve.data.empty()) return true;
+        ++seam_resolve_transfers_;
+        seam_anchor_drain(kSeamAnchorResolveOverlap);
+        perf::record_renderer_depth_resolve_context(context,
+                                                    resolve.data.size());
         if (!mem_write_ ||
             !mem_write_(resolve.address, resolve.data.data(),
                         resolve.data.size())) {
@@ -339,9 +582,10 @@ bool Nv2a::resolve_renderer_depth_overlap(uint32_t address, size_t size,
     }
 }
 
-void Nv2a::invalidate_renderer_depth_overlap(uint32_t address, size_t size) {
+void Nv2a::invalidate_renderer_depth_overlap(uint32_t address, size_t size,
+                                             uint32_t cause) {
     if (renderer_ && size != 0)
-        renderer_->invalidate_resident_depth_surface(address, size);
+        renderer_->invalidate_resident_depth_surface(address, size, cause);
 }
 
 // PCI identity mirror exposed through PBUS (xemu pbus.c reads d->config). NV2A = 10DE:02A0,
@@ -443,6 +687,12 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
         // Captured from silicon 2026-07-16 (agent read 0xFD100200).
         if (bo == 0x200) return 0x03070003;  // NV_PFB_CFG0
     } else if (blk->off == 0x400000) {  // PGRAPH
+        // Seam anchor 7: conservative catch-all for guest status polling of
+        // PGRAPH. Cannot detect a bare framebuffer read (F7, measurement M1).
+        seam_anchor(kSeamAnchorPgraphRegisterRead, true);
+        // Stage (f): what the CONSERVATIVE anchor policy would cost on top of
+        // the demand-driven residency rule. Counted, never acted on.
+        if (gpu_res_color_addr_ != 0) ++gpu_res_.pgraph_read_resolves;
         switch (bo) {
             case 0x100: return pgraph_intr_;
             case 0x108: return pgraph_nsource_;
@@ -698,11 +948,54 @@ bool Nv2a::bind_object(uint8_t channel, uint8_t subchannel, uint32_t handle) {
     return true;
 }
 
+bool Nv2a::clear_plane_extent(uint32_t dma_instance, bool dma_bound,
+                              uint32_t surface_offset, uint32_t pitch,
+                              uint32_t bytes_per_pixel, uint32_t write_mask,
+                              uint32_t& first_address, size_t& span) const {
+    const uint32_t xmin = clear_rect_horizontal_ & 0xFFFFu;
+    const uint32_t xmax = clear_rect_horizontal_ >> 16;
+    const uint32_t ymin = clear_rect_vertical_ & 0xFFFFu;
+    const uint32_t ymax = clear_rect_vertical_ >> 16;
+    if (!dma_bound || !pitch || xmax < xmin || ymax < ymin) return false;
+    if (bytes_per_pixel != 2 && bytes_per_pixel != 4) return false;
+    const uint32_t pixel_mask = bytes_per_pixel == 2 ? 0xFFFFu : 0xFFFFFFFFu;
+    // A partial write mask is a read-modify-write of the guest bytes, not a
+    // fill, so it cannot become a glClear.
+    if (write_mask != pixel_mask) return false;
+    const uint64_t width = static_cast<uint64_t>(xmax) - xmin + 1;
+    const uint64_t height = static_cast<uint64_t>(ymax) - ymin + 1;
+    const uint64_t row_bytes = width * bytes_per_pixel;
+    const uint64_t x_bytes = static_cast<uint64_t>(xmin) * bytes_per_pixel;
+    // Every byte of every row in the range, and the range starts at the plane
+    // base: only then is the cleared region a contiguous whole-plane fill whose
+    // guest-address extent equals the resident surface's extent. Anything else
+    // leaves guest bytes the GL copy would not have.
+    if (x_bytes != 0 || row_bytes != pitch || ymin != 0) return false;
+    const uint64_t first_offset64 = static_cast<uint64_t>(surface_offset);
+    const uint64_t last_offset64 =
+        first_offset64 + (height - 1) * pitch + row_bytes - 1;
+    if (last_offset64 > UINT32_MAX) return false;
+    uint32_t last_address = 0;
+    if (!dma_object_address(dma_instance, static_cast<uint32_t>(first_offset64),
+                            first_address) ||
+        !dma_object_address(dma_instance, static_cast<uint32_t>(last_offset64),
+                            last_address) ||
+        last_address < first_address ||
+        static_cast<uint64_t>(last_address) - first_address !=
+            last_offset64 - first_offset64) {
+        return false;
+    }
+    span = static_cast<size_t>(static_cast<uint64_t>(last_address) -
+                               first_address + 1);
+    return true;
+}
+
 bool Nv2a::clear_surface_plane(uint32_t dma_instance, bool dma_bound,
                                uint32_t surface_offset, uint32_t pitch,
                                uint32_t bytes_per_pixel, uint32_t write_mask,
                                uint32_t clear_value, const char* plane,
-                               uint32_t& first_address) {
+                               uint32_t& first_address, bool skip_memory,
+                               bool skip_invalidate) {
     const uint32_t xmin = clear_rect_horizontal_ & 0xFFFFu;
     const uint32_t xmax = clear_rect_horizontal_ >> 16;
     const uint32_t ymin = clear_rect_vertical_ & 0xFFFFu;
@@ -759,6 +1052,14 @@ bool Nv2a::clear_surface_plane(uint32_t dma_instance, bool dma_bound,
     }
     const size_t resolved_span =
         static_cast<size_t>(static_cast<uint64_t>(last_address) - first_address + 1);
+    // beads-xbox.1.15.10 phase 3, step 3. The GL copy has already been cleared
+    // by glClear and is the authoritative image; guest memory is stale by the
+    // same residency contract every witnessed GPU draw already relies on, and
+    // the next consumer resolves it. Resolving here would read back the
+    // PRE-clear image and write it into memory this call is about to overwrite,
+    // and invalidating would throw away the clear. Every fault check above this
+    // point still runs, in order, so a malformed clear fails identically.
+    if (skip_memory) return true;
     if (!resolve_renderer_color_overlap(first_address, resolved_span, "CLEAR_SURFACE") ||
         !resolve_renderer_depth_overlap(first_address, resolved_span, "CLEAR_SURFACE"))
         return false;
@@ -794,12 +1095,29 @@ bool Nv2a::clear_surface_plane(uint32_t dma_instance, bool dma_bound,
             return false;
         }
     }
-    invalidate_renderer_color_overlap(first_address, resolved_span);
-    invalidate_renderer_depth_overlap(first_address, resolved_span);
+    // skip_invalidate: the backend cleared the resident copy of this plane to
+    // the same values the loop above just wrote into guest memory, so the two
+    // agree and residency is KEPT. Dropping it here would force a full
+    // re-upload for nothing -- that re-upload is what phase 3 set out to
+    // remove. The overlap contract for OTHER resident surfaces is honoured by
+    // clear_resident_surface, which invalidates them itself.
+    if (skip_invalidate) return true;
+    invalidate_renderer_color_overlap(
+        first_address, resolved_span,
+        nv2a_invalidate_token(kNv2aInvalidateClearSurface));
+    invalidate_renderer_depth_overlap(
+        first_address, resolved_span,
+        nv2a_invalidate_token(kNv2aInvalidateClearSurface));
     return true;
 }
 
 bool Nv2a::clear_surface(uint32_t parameter) {
+    // Seam anchor 2 (F4): a clear is a read-modify-write over the same
+    // destination range as pending jobs and is ordered against them.
+    seam_anchor(kSeamAnchorClearSurface, true);
+    // NV2A_CLEAR: the plane fills reached from the CLEAR_SURFACE method, exclusive of the
+    // resident-surface resolves they drive (those open NV2A_GL_RESOLVE).
+    perf_excl::Scope region(perf_excl::kNv2aClear);
     constexpr uint32_t kKnownMask = 0xF3u;
     constexpr uint32_t kColorMask = 0xF0u;
     if (parameter & ~kKnownMask) {
@@ -828,6 +1146,94 @@ bool Nv2a::clear_surface(uint32_t parameter) {
     }
     const uint64_t width = static_cast<uint64_t>(xmax) - xmin + 1;
     const uint64_t height = static_cast<uint64_t>(ymax) - ymin + 1;
+
+    // ---- step 3: serve the clear as a glClear on the resident pair ---------
+    //
+    // MEASURED reason this exists (phase 3 census, 12 B canonical, shipping
+    // defaults): CLEAR_SURFACE is the LARGEST single cause of witnessed
+    // residency breaks -- 535 colour plane re-uploads (1131.5 MB) and 398 zeta
+    // re-uploads (810.1 MB), against 51+262 for kPitchProjectedColor and 74+0
+    // for the additive profile -- plus 358 zeta and 15 colour resolves
+    // (746.0 MB) taken on the way in. The simulation census reported
+    // cause=clear_surface resolves=0 because it MODELS a glClear that the
+    // device never actually asked the backend for: clear_resident_surface has
+    // existed since phase 1 and had no caller. This is that caller.
+    //
+    // Eligibility is deliberately narrow and is all-or-nothing across the pair:
+    // a clear that fills one plane on the GPU and the other in guest memory
+    // would leave the slot half authoritative on each side.
+    bool resident_cleared_color = false;
+    bool resident_cleared_zeta = false;
+    // The plane was clean: the backend cleared the GL copy, the software fill
+    // below writes the same values into guest memory, and residency is kept
+    // WITHOUT making the plane dirty. No resolve, no re-upload.
+    bool resident_kept_clean_color = false;
+    bool resident_kept_clean_zeta = false;
+    if (gpu_clear_enabled_ && renderer_ != nullptr) {
+        const uint32_t color_format_id = surface_format_ & 0xFu;
+        const uint32_t zeta_format_id = (surface_format_ >> 4) & 0xFu;
+        const bool color_is32 = color_format_id >= 4 && color_format_id <= 8;
+        const bool zeta_is32 = zeta_format_id == 2;
+        // Each plane is decided on its own. The pair-only form declined every
+        // clear on this workload -- 457 of 768 CLEAR_SURFACE calls at 2 G
+        // instructions request exactly one plane -- and a plane is its own
+        // resident image with its own dirty flag, so there is no coupling to
+        // preserve. A partially masked plane stays on the software path: it is
+        // a read-modify-write of guest bytes, not a fill.
+        const bool want_color = (parameter & kColorMask) == kColorMask &&
+                                color_is32;
+        const bool want_zeta = (parameter & 3u) == 3u && zeta_is32;
+        const bool partial_color =
+            (parameter & kColorMask) != 0 && !want_color;
+        const bool partial_zeta = (parameter & 3u) != 0 && !want_zeta;
+        if (partial_color || partial_zeta) ++gpu_clear_decline_mask_;
+        uint32_t color_first = 0, zeta_first = 0;
+        size_t color_span = 0, zeta_span = 0;
+        const bool color_ok =
+            want_color &&
+            clear_plane_extent(color_dma_, color_dma_bound_,
+                               surface_color_offset_, surface_pitch_ & 0xFFFFu,
+                               4u, 0xFFFFFFFFu, color_first, color_span);
+        const bool zeta_ok =
+            want_zeta &&
+            clear_plane_extent(zeta_dma_, zeta_dma_bound_,
+                               surface_zeta_offset_, surface_pitch_ >> 16, 4u,
+                               0xFFFFFFFFu, zeta_first, zeta_span);
+        if ((want_color && !color_ok) || (want_zeta && !zeta_ok))
+            ++gpu_clear_decline_geometry_;
+        // Two separate attempts, so a clear that can serve one plane on the GPU
+        // is not forced back onto the software path for both.
+        for (int plane = 0; plane < 2; ++plane) {
+            const bool is_color = plane == 0;
+            if (is_color ? !color_ok : !zeta_ok) continue;
+            std::string error;
+            bool needs_guest_fill = true;
+            perf_excl::Scope gl_region(perf_excl::kNv2aGl);
+            const bool ok = renderer_->clear_resident_surface(
+                is_color ? color_first : 0u, is_color ? color_span : 0u,
+                is_color, color_clear_value_, is_color ? 0u : zeta_first,
+                is_color ? 0u : zeta_span, !is_color, zeta_clear_value_,
+                needs_guest_fill, error);
+            if (ok) {
+                if (is_color) {
+                    resident_cleared_color = !needs_guest_fill;
+                    resident_kept_clean_color = needs_guest_fill;
+                    if (!needs_guest_fill) gpu_clear_bytes_ += color_span;
+                } else {
+                    resident_cleared_zeta = !needs_guest_fill;
+                    resident_kept_clean_zeta = needs_guest_fill;
+                    if (!needs_guest_fill) gpu_clear_bytes_ += zeta_span;
+                }
+                ++gpu_clear_accepted_;
+                if (needs_guest_fill) ++gpu_clear_kept_clean_;
+            } else if (!error.empty()) {
+                fault_(error.c_str());
+                return false;
+            } else {
+                ++gpu_clear_decline_resident_;
+            }
+        }
+    }
 
     if (parameter & kColorMask) {
         const uint32_t color_format = surface_format_ & 0xFu;
@@ -865,7 +1271,10 @@ bool Nv2a::clear_surface(uint32_t parameter) {
         uint32_t first_address = 0;
         if (!clear_surface_plane(color_dma_, color_dma_bound_, surface_color_offset_,
                                  surface_pitch_ & 0xFFFFu, bytes_per_pixel, write_mask,
-                                 color_clear_value_, "color", first_address))
+                                 color_clear_value_, "color", first_address,
+                                 resident_cleared_color,
+                                 resident_cleared_color ||
+                                     resident_kept_clean_color))
             return false;
         ++color_clears_;
         color_clear_pixels_ += width * height;
@@ -905,7 +1314,10 @@ bool Nv2a::clear_surface(uint32_t parameter) {
         uint32_t first_address = 0;
         if (!clear_surface_plane(zeta_dma_, zeta_dma_bound_, surface_zeta_offset_,
                                  surface_pitch_ >> 16, bytes_per_pixel, write_mask,
-                                 zeta_clear_value_, "zeta", first_address))
+                                 zeta_clear_value_, "zeta", first_address,
+                                 resident_cleared_zeta,
+                                 resident_cleared_zeta ||
+                                     resident_kept_clean_zeta))
             return false;
         ++zeta_clears_;
         zeta_clear_pixels_ += width * height;
@@ -1066,7 +1478,12 @@ bool Nv2a::fetch_vertex_attribute(uint32_t slot, uint32_t index) {
         return false;
     }
 
-    if (detailed_telemetry_ || perf::g_enabled) {
+    // beads-xbox.1.14.3 item 4 completed: --perf-accounting must NOT change the code
+    // being timed. perf::g_enabled was still OR'd in here, so every attribute fetch on
+    // an instrumented run did three extra counter increments the noperf run did not.
+    // Detailed telemetry is now the only switch; use --nv2a-detailed-telemetry to get
+    // these counters back alongside --perf-accounting.
+    if (detailed_telemetry_) {
         ++vertex_attribute_fetches_;
         ++vertex_format_fetches_[attr.format];
         ++vertex_slot_fetches_[slot];
@@ -1206,7 +1623,920 @@ bool Nv2a::decode_inline_array() {
     return true;
 }
 
+// ==================== stage (d): the latch/execute seam =====================
+// DESIGN-NV2A-SEAM.md sections 1.1-1.5 and 3.1, bead beads-xbox.1.15.4.
+//
+// The producer/consumer boundary is the draw-batch boundary inside
+// submit_vertex_batch: after vertex transform has filled transformed_batch_ and
+// before any pixel is touched. latch_draw_job() takes owned copies of everything
+// the fragment loop reads that a later method in the same pushbuffer batch could
+// still change; execute_draw_job() is the ONLY implementation of the pixel math.
+// In stage (d) the job is executed inline, immediately, at the latch point --
+// which is also, by construction, what stage (e)'s toggle-off path does.
+const char* Nv2a::seam_anchor_name(size_t anchor) {
+    switch (anchor) {
+    case kSeamAnchorSemaphoreRelease: return "semaphore_release";
+    case kSeamAnchorClearSurface:     return "clear_surface";
+    case kSeamAnchorScanout:          return "scanout";
+    case kSeamAnchorSetFrame:         return "set_frame";
+    case kSeamAnchorFlipStallClear:   return "flip_stall_clear";
+    case kSeamAnchorTextureOverlap:   return "texture_overlap";
+    case kSeamAnchorPgraphRegisterRead: return "pgraph_register_read";
+    case kSeamAnchorResolveOverlap:   return "resolve_overlap";
+    case kSeamAnchorSurfaceRetarget:  return "surface_retarget";
+    case kSeamAnchorCheckpoint:       return "checkpoint";
+    default: break;
+    }
+    return "unknown";
+}
+
+const char* Nv2a::seam_reason_name(uint32_t reason) {
+    switch (reason) {
+    case kSeamThreadable:       return "threadable";
+    case kSeamNoDirectPointer:  return "no_direct_ptr";
+    case kSeamHashOn:           return "hash_on";
+    case kSeamRendererPath:     return "f3_renderer_path";
+    case kSeamDebugCallback:    return "f15_debug_cb";
+    default: break;
+    }
+    return "unknown";
+}
+
+void Nv2a::latch_draw_job(DrawJob& job) {
+    ++seam_jobs_latched_;
+    // Identity / ordering. job.seq is read back by the executor for the F15
+    // surface-write debug record, exactly where it used to read vertex_batches_.
+    job.seq = vertex_batches_;
+    job.primitive_mode = primitive_mode_;
+    // Register mirrors: the full raster_state_ block plus the surface scalars.
+    // SET_SURFACE_* and every combiner method can rewrite any of these before a
+    // worker would run, so they are copied, not referenced.
+    job.raster_state = raster_state_;
+    job.surface_format = surface_format_;
+    job.surface_pitch = surface_pitch_;
+    job.surface_clip_horizontal = surface_clip_horizontal_;
+    job.surface_clip_vertical = surface_clip_vertical_;
+    job.surface_color_offset = surface_color_offset_;
+    job.surface_zeta_offset = surface_zeta_offset_;
+    // F16: by value. raster_state_samples_ can reallocate under a raw pointer.
+    job.raster_state_sample_index = current_raster_state_sample_index_;
+    job.hash_on = profile_hashes_enabled_;
+    // F15: any diagnostic callback pins the job to the emulation thread.
+    job.debug_cb_installed = static_cast<bool>(surface_write_debug_cb_) ||
+                             static_cast<bool>(generic_batch_debug_cb_) ||
+                             static_cast<bool>(generic_packet_snapshot_cb_);
+    // The single most dangerous shared buffer (section 1.2): transformed_batch_
+    // is one member vector that the very next batch clear()s. MOVED, not copied.
+    job.vertices = std::move(transformed_batch_);
+    seed_draw_telemetry(job);
+}
+
+// The twelve per-write FNV-1a accumulators are order-dependent chains, so a job
+// cannot start one from zero: it continues the run's chain. Seeding at the latch
+// and writing back at the fold is exact because hash_on forces the job INLINE
+// (design section 4.3 option O3), i.e. the seed is always the value left by the
+// immediately preceding job. Skipped entirely when the fold is off, which is the
+// configuration a threaded run uses.
+void Nv2a::seed_draw_telemetry(DrawJob& job) {
+    if (job.hash_on) {
+        job.out.inline_color_output_hash = inline_color_output_hash_;
+        job.out.inline_linear_blit_output_hash = inline_linear_blit_output_hash_;
+        job.out.pitch_projected_color_output_hash = pitch_projected_color_output_hash_;
+        job.out.pitch_multi_texture_output_hash = pitch_multi_texture_output_hash_;
+        job.out.pitch_three_texture_output_hash = pitch_three_texture_output_hash_;
+        job.out.pitch_single_texture_output_hash = pitch_single_texture_output_hash_;
+        job.out.pitch_tex5_output_hash = pitch_tex5_output_hash_;
+        job.out.pitch_textured_color_output_hash = pitch_textured_color_output_hash_;
+        job.out.projected_color_output_hash = projected_color_output_hash_;
+        job.out.radial_color_output_hash = radial_color_output_hash_;
+        job.out.raster_output_hash = raster_output_hash_;
+        job.out.tex7_fan_output_hash = tex7_fan_output_hash_;
+        job.out.texf_projected_fan_output_hash = texf_projected_fan_output_hash_;
+        job.out.textured_color_output_hash = textured_color_output_hash_;
+    }
+}
+
+bool Nv2a::execute_draw_job(DrawJob& job, bool& executed) {
+    // The one and only entry to the pixel math. Stage (e) hands the same job to
+    // a worker which calls this same function; there is no second copy of the
+    // fragment loop and no #ifdef.
+    return rasterize_witnessed_batch(job, executed);
+}
+
+void Nv2a::seam_note_threadable(DrawJob& job, bool threadable, uint32_t reason) {
+    job.threadable = threadable;
+    job.not_threadable_reason = threadable ? kSeamThreadable : reason;
+    // The M5 queue simulation asks a COHERENCE question, not a telemetry one:
+    // how deep would the ring be at each anchor, in the configuration stage (e)
+    // would actually run in? The per-write FNV fold (section 4.3 option O3) is a
+    // runtime switch that stage (e) turns off, so a job held back only by
+    // hash_on is still queueable for the simulation. A job held back by the
+    // direct-pointer rule, the GL path or a debug callback is not: those are
+    // structural, and no flag makes them go away.
+    job.queueable = threadable || reason == kSeamHashOn;
+}
+
+void Nv2a::retire_draw_job(DrawJob& job, bool executed) {
+    if (job.deferred) {
+        // Stage (e): the fragment loop has NOT run; the job is being handed to
+        // the worker. Its census is taken here, at the latch point, exactly
+        // where the inline path takes it, so the seam-census numbers mean the
+        // same thing in both modes. Its telemetry and its deferred guest-visible
+        // side effects are folded later, in latch order, by the drain that
+        // retires it. `executed` is true for every deferred job by construction:
+        // only a matched witnessed profile can set job.threadable.
+        ++seam_jobs_threadable_;
+        seam_publish_job(job);
+        draw_queue_publish(job);
+        return;
+    }
+    // Hand the transform buffer -- and its capacity -- back, so the next batch's
+    // clear()/reserve() and the last_transformed_* accessors behave exactly as
+    // they did before the split. This is what makes the move free.
+    transformed_batch_ = std::move(job.vertices);
+    if (!executed) {
+        ++seam_jobs_not_executed_;
+        return;
+    }
+    ++draw_jobs_inline_;
+    // Stage (e2): a job that ran as ONE part while N >= 2 was configured could
+    // not be divided -- the immediate-quad family and the generic-combiner GL
+    // path are structurally inline, and a witnessed job can be held back by the
+    // direct-pointer rule, the hash fold or a debug callback. Counted here, at
+    // the single funnel every executed non-deferred job passes through, so the
+    // census covers all three families rather than only the witnessed one.
+    if (draw_threads_ > 1 && job.span_parts == 1) ++draw_span_inline_jobs_;
+    fold_draw_job(job);
+    if (job.threadable) {
+        ++seam_jobs_threadable_;
+    } else {
+        const uint32_t reason =
+            job.not_threadable_reason < kSeamNotThreadableReasons
+                ? job.not_threadable_reason : kSeamNoDirectPointer;
+        ++seam_not_threadable_[reason];
+    }
+    seam_publish_job(job);
+}
+
+// Apply everything a finished job owes the device. Emulation thread only, in
+// latch order: for an inline job this runs immediately after the fragment loop,
+// for a queued job at the drain that retires it. Because there is exactly one
+// consumer executing strictly in order, the fold sequence IS the single-threaded
+// sequence, which is what makes the counters and the FNV chains identical.
+void Nv2a::fold_draw_job(DrawJob& job) {
+    // Part 0 first, then the stage (e2) helper parts in index order. Every field
+    // fold_draw_telemetry touches is a pure sum or a last-write-wins cell whose
+    // value is job-invariant, so this is order-independent and equal to the
+    // single-threaded fold; the enumeration that proves it is in nv2a.hpp above
+    // execute_witnessed_fragments. There is deliberately no second summation
+    // list: the same 110-line fold runs once per part.
+    //
+    // beads-xbox.1.15.9 loose end 2, closed: draw_span_fold_ticks_ is now
+    // MEASURED rather than estimated. The fold runs span_parts times instead of
+    // once, so this is the direct cost of the partition's telemetry merge. The
+    // two clock reads are gated on perf_excl::g_enabled so an uninstrumented
+    // timing leg -- the runs the gate is decided on -- executes exactly the code
+    // it executed before this line existed. That is the same rule the rest of
+    // this module follows: an instrument may not perturb the number it is not
+    // being asked for.
+    const bool time_fold = perf_excl::g_enabled;
+    const uint64_t fold_t0 = time_fold ? perf_excl::tick_now() : 0;
+    fold_draw_telemetry(job.out, job.hash_on);
+    for (unsigned p = 1; p < job.span_parts; ++p)
+        fold_draw_telemetry(span_out_[p], job.hash_on);
+    if (time_fold) draw_span_fold_ticks_ += perf_excl::tick_now() - fold_t0;
+    DrawJobTelemetry& out = job.out;
+    // F3: the renderer invalidations the executor recorded instead of making.
+    if (out.invalidate_color) {
+        invalidate_renderer_color_overlap(out.invalidate_color_address,
+                                          out.invalidate_color_bytes,
+                                          out.invalidate_color_cause);
+    }
+    if (out.invalidate_depth) {
+        invalidate_renderer_depth_overlap(out.invalidate_depth_address,
+                                          out.invalidate_depth_bytes,
+                                          out.invalidate_depth_cause);
+    }
+    // F13: the executor may not fault_. It recorded the first message; the fault
+    // is raised here, on the emulation thread, with the original text. For a
+    // queued job this is a DELAYED attribution -- the guest instruction blamed is
+    // the one that reached the drain, not the one that issued the draw -- so any
+    // faulting threaded run must be re-run with --nv2a-draw-threads 0 to get the
+    // true attribution.
+    if (out.failed) fault_(out.fault_message);
+    if (!out.ok) ++draw_worker_failures_;
+}
+
+void Nv2a::fold_draw_telemetry(const DrawJobTelemetry& out, bool hash_on) {
+    depth_raster_batches_ += out.depth_raster_batches;
+    depth_test_passes_ += out.depth_test_passes;
+    depth_writes_ += out.depth_writes;
+    inline_color_alpha_passes_ += out.inline_color_alpha_passes;
+    inline_color_batches_ += out.inline_color_batches;
+    inline_color_fragments_ += out.inline_color_fragments;
+    inline_color_triangles_ += out.inline_color_triangles;
+    inline_color_writes_ += out.inline_color_writes;
+    inline_linear_blit_batches_ += out.inline_linear_blit_batches;
+    inline_linear_blit_fragments_ += out.inline_linear_blit_fragments;
+    inline_linear_blit_samples_ += out.inline_linear_blit_samples;
+    inline_linear_blit_triangles_ += out.inline_linear_blit_triangles;
+    inline_linear_blit_writes_ += out.inline_linear_blit_writes;
+    inline_texture_samples_ += out.inline_texture_samples;
+    pitch_multi_texture_alpha_passes_ += out.pitch_multi_texture_alpha_passes;
+    pitch_three_texture_rescale_direction0_ += out.pitch_three_texture_rescale_direction0;
+    pitch_three_texture_rescale_direction1_ += out.pitch_three_texture_rescale_direction1;
+    pitch_three_texture_zero_direction0_ += out.pitch_three_texture_zero_direction0;
+    pitch_three_texture_zero_direction1_ += out.pitch_three_texture_zero_direction1;
+    pitch_three_texture_xy_tie_direction0_ += out.pitch_three_texture_xy_tie_direction0;
+    pitch_three_texture_xy_tie_direction1_ += out.pitch_three_texture_xy_tie_direction1;
+    pitch_multi_texture_batches_ += out.pitch_multi_texture_batches;
+    pitch_multi_texture_color_writes_ += out.pitch_multi_texture_color_writes;
+    pitch_multi_texture_depth_passes_ += out.pitch_multi_texture_depth_passes;
+    pitch_multi_texture_depth_writes_ += out.pitch_multi_texture_depth_writes;
+    pitch_multi_texture_fragments_ += out.pitch_multi_texture_fragments;
+    pitch_multi_texture_samples_ += out.pitch_multi_texture_samples;
+    pitch_multi_texture_triangles_ += out.pitch_multi_texture_triangles;
+    pitch_projected_color_batches_ += out.pitch_projected_color_batches;
+    pitch_projected_color_depth_passes_ += out.pitch_projected_color_depth_passes;
+    pitch_projected_color_depth_writes_ += out.pitch_projected_color_depth_writes;
+    pitch_projected_color_fragments_ += out.pitch_projected_color_fragments;
+    pitch_projected_color_triangles_ += out.pitch_projected_color_triangles;
+    pitch_projected_color_writes_ += out.pitch_projected_color_writes;
+    pitch_projected_texture_samples_ += out.pitch_projected_texture_samples;
+    pitch_single_texture_batches_ += out.pitch_single_texture_batches;
+    pitch_single_texture_depth_passes_ += out.pitch_single_texture_depth_passes;
+    pitch_single_texture_fragments_ += out.pitch_single_texture_fragments;
+    pitch_single_texture_samples_ += out.pitch_single_texture_samples;
+    pitch_single_texture_triangles_ += out.pitch_single_texture_triangles;
+    pitch_single_texture_writes_ += out.pitch_single_texture_writes;
+    pitch_tex5_batches_ += out.pitch_tex5_batches;
+    pitch_tex5_color_writes_ += out.pitch_tex5_color_writes;
+    pitch_tex5_depth_passes_ += out.pitch_tex5_depth_passes;
+    pitch_tex5_depth_writes_ += out.pitch_tex5_depth_writes;
+    pitch_tex5_fragments_ += out.pitch_tex5_fragments;
+    pitch_tex5_samples_ += out.pitch_tex5_samples;
+    pitch_tex5_triangles_ += out.pitch_tex5_triangles;
+    pitch_texture_samples_ += out.pitch_texture_samples;
+    pitch_textured_color_batches_ += out.pitch_textured_color_batches;
+    pitch_textured_color_depth_passes_ += out.pitch_textured_color_depth_passes;
+    pitch_textured_color_depth_writes_ += out.pitch_textured_color_depth_writes;
+    pitch_textured_color_fragments_ += out.pitch_textured_color_fragments;
+    pitch_textured_color_triangles_ += out.pitch_textured_color_triangles;
+    pitch_textured_color_writes_ += out.pitch_textured_color_writes;
+    pitch_three_texture_batches_ += out.pitch_three_texture_batches;
+    pitch_three_texture_color_writes_ += out.pitch_three_texture_color_writes;
+    pitch_three_texture_depth_passes_ += out.pitch_three_texture_depth_passes;
+    pitch_three_texture_depth_writes_ += out.pitch_three_texture_depth_writes;
+    pitch_three_texture_fragments_ += out.pitch_three_texture_fragments;
+    pitch_three_texture_samples_ += out.pitch_three_texture_samples;
+    pitch_three_texture_triangles_ += out.pitch_three_texture_triangles;
+    projected_color_batches_ += out.projected_color_batches;
+    projected_color_depth_passes_ += out.projected_color_depth_passes;
+    projected_color_depth_writes_ += out.projected_color_depth_writes;
+    projected_color_fragments_ += out.projected_color_fragments;
+    projected_color_triangles_ += out.projected_color_triangles;
+    projected_color_writes_ += out.projected_color_writes;
+    projected_texture_samples_ += out.projected_texture_samples;
+    radial_color_batches_ += out.radial_color_batches;
+    radial_color_depth_passes_ += out.radial_color_depth_passes;
+    radial_color_depth_writes_ += out.radial_color_depth_writes;
+    radial_color_fragments_ += out.radial_color_fragments;
+    radial_color_triangles_ += out.radial_color_triangles;
+    radial_color_writes_ += out.radial_color_writes;
+    rasterized_fragments_ += out.rasterized_fragments;
+    rasterized_triangles_ += out.rasterized_triangles;
+    tex7_fan_batches_ += out.tex7_fan_batches;
+    tex7_fan_depth_passes_ += out.tex7_fan_depth_passes;
+    tex7_fan_fragments_ += out.tex7_fan_fragments;
+    tex7_fan_samples_ += out.tex7_fan_samples;
+    tex7_fan_triangles_ += out.tex7_fan_triangles;
+    tex7_fan_writes_ += out.tex7_fan_writes;
+    texf_projected_fan_alpha_passes_ += out.texf_projected_fan_alpha_passes;
+    texf_projected_fan_batches_ += out.texf_projected_fan_batches;
+    texf_projected_fan_fragments_ += out.texf_projected_fan_fragments;
+    texf_projected_fan_triangles_ += out.texf_projected_fan_triangles;
+    texf_projected_fan_writes_ += out.texf_projected_fan_writes;
+    texture_samples_ += out.texture_samples;
+    textured_color_batches_ += out.textured_color_batches;
+    textured_color_depth_passes_ += out.textured_color_depth_passes;
+    textured_color_depth_writes_ += out.textured_color_depth_writes;
+    textured_color_fragments_ += out.textured_color_fragments;
+    textured_color_triangles_ += out.textured_color_triangles;
+    textured_color_writes_ += out.textured_color_writes;
+    if (hash_on) {
+        inline_color_output_hash_ = out.inline_color_output_hash;
+        inline_linear_blit_output_hash_ = out.inline_linear_blit_output_hash;
+        pitch_projected_color_output_hash_ = out.pitch_projected_color_output_hash;
+        pitch_multi_texture_output_hash_ = out.pitch_multi_texture_output_hash;
+        pitch_three_texture_output_hash_ = out.pitch_three_texture_output_hash;
+        pitch_single_texture_output_hash_ = out.pitch_single_texture_output_hash;
+        pitch_tex5_output_hash_ = out.pitch_tex5_output_hash;
+        pitch_textured_color_output_hash_ = out.pitch_textured_color_output_hash;
+        projected_color_output_hash_ = out.projected_color_output_hash;
+        radial_color_output_hash_ = out.radial_color_output_hash;
+        raster_output_hash_ = out.raster_output_hash;
+        tex7_fan_output_hash_ = out.tex7_fan_output_hash;
+        texf_projected_fan_output_hash_ = out.texf_projected_fan_output_hash;
+        textured_color_output_hash_ = out.textured_color_output_hash;
+    }
+    if (out.last_color_raster_address.set) last_color_raster_address_ = out.last_color_raster_address.value;
+    if (out.last_inline_linear_blit_raster_address.set) last_inline_linear_blit_raster_address_ = out.last_inline_linear_blit_raster_address.value;
+    if (out.last_inline_raster_address.set) last_inline_raster_address_ = out.last_inline_raster_address.value;
+    if (out.last_pitch_multi_texture_raster_address.set) last_pitch_multi_texture_raster_address_ = out.last_pitch_multi_texture_raster_address.value;
+    if (out.last_pitch_projected_raster_address.set) last_pitch_projected_raster_address_ = out.last_pitch_projected_raster_address.value;
+    if (out.last_pitch_single_texture_raster_address.set) last_pitch_single_texture_raster_address_ = out.last_pitch_single_texture_raster_address.value;
+    if (out.last_pitch_tex5_raster_address.set) last_pitch_tex5_raster_address_ = out.last_pitch_tex5_raster_address.value;
+    if (out.last_pitch_textured_raster_address.set) last_pitch_textured_raster_address_ = out.last_pitch_textured_raster_address.value;
+    if (out.last_pitch_three_rescale_factor3.set) last_pitch_three_rescale_factor3_ = out.last_pitch_three_rescale_factor3.value;
+    if (out.last_pitch_three_texture_raster_address.set) last_pitch_three_texture_raster_address_ = out.last_pitch_three_texture_raster_address.value;
+    if (out.last_pitch_three_xy_tie_factor3.set) last_pitch_three_xy_tie_factor3_ = out.last_pitch_three_xy_tie_factor3.value;
+    if (out.last_pitch_three_zero_factor3.set) last_pitch_three_zero_factor3_ = out.last_pitch_three_zero_factor3.value;
+    if (out.last_projected_raster_address.set) last_projected_raster_address_ = out.last_projected_raster_address.value;
+    if (out.last_raster_address.set) last_raster_address_ = out.last_raster_address.value;
+    if (out.last_tex7_fan_raster_address.set) last_tex7_fan_raster_address_ = out.last_tex7_fan_raster_address.value;
+    if (out.last_texf_projected_fan_raster_address.set) last_texf_projected_fan_raster_address_ = out.last_texf_projected_fan_raster_address.value;
+    if (out.last_textured_raster_address.set) last_textured_raster_address_ = out.last_textured_raster_address.value;
+}
+
+void Nv2a::seam_publish_job(const DrawJob& job) {
+    if (!job.queueable) return;
+    ++seam_jobs_queueable_;
+    // Publish into the M5 simulation: in stage (e) this job would be sitting in
+    // the ring, unretired, until the next anchor drains it.
+    ++seam_pending_;
+    ++seam_vblank_jobs_;
+    if (seam_vblank_jobs_ > seam_vblank_jobs_max_)
+        seam_vblank_jobs_max_ = seam_vblank_jobs_;
+    if (job.color_profile && job.color_bytes) {
+        seam_pending_spans_.emplace_back(
+            static_cast<uint64_t>(job.color_address),
+            static_cast<uint64_t>(job.color_address) + job.color_bytes);
+    }
+    if (job.writes_depth && job.depth_bytes) {
+        seam_pending_spans_.emplace_back(
+            static_cast<uint64_t>(job.depth_address),
+            static_cast<uint64_t>(job.depth_address) + job.depth_bytes);
+    }
+}
+
+void Nv2a::seam_anchor(SeamAnchor anchor, bool required) {
+    // `hits` counts every time the anchor SITE was reached; `drains` counts the
+    // subset at which a threaded consumer would actually have had to stop and
+    // wait, i.e. the site's own condition held AND jobs were outstanding. In
+    // stage (d) nothing is outstanding for real -- the count is the simulation.
+    ++seam_anchor_hits_[anchor];
+    if (!required) return;
+    seam_anchor_drain(anchor);
+}
+
+void Nv2a::seam_anchor_drain(SeamAnchor anchor) {
+    // Stage (e): THIS is the fence. All ten anchors of design section 2.2(c)
+    // funnel through here, so every one of them becomes a real drain the moment
+    // a worker exists. With --nv2a-draw-threads 0 the whole thing is one compare
+    // against a plain emulation-thread integer and the simulation below is
+    // byte-for-byte what stage (d) counted.
+    if (draw_threads_ != 0) draw_queue_drain();
+    if (seam_pending_ == 0) return;
+    ++seam_anchor_drains_[anchor];
+    seam_anchor_pending_sum_[anchor] += seam_pending_;
+    if (seam_pending_ > seam_anchor_pending_max_[anchor])
+        seam_anchor_pending_max_[anchor] = seam_pending_;
+    seam_pending_ = 0;
+    seam_pending_spans_.clear();
+}
+
+void Nv2a::seam_texture_source_anchor(uint32_t address, uint64_t bytes) {
+    // F6 / anchor 6: a texture snapshot is only a drain when its source span
+    // intersects a pending job's destination span (render-to-texture inside one
+    // frame). One linear scan of a list bounded by the drain frequency.
+    const uint64_t begin = address;
+    const uint64_t end = begin + bytes;
+    bool overlap = false;
+    for (const auto& span : seam_pending_spans_) {
+        if (begin < span.second && span.first < end) {
+            overlap = true;
+            break;
+        }
+    }
+    seam_anchor(kSeamAnchorTextureOverlap, overlap);
+}
+
+void Nv2a::seam_checkpoint_anchor() {
+    seam_anchor(kSeamAnchorCheckpoint, true);
+}
+
+// ================== stage (e): the threaded draw consumer ====================
+// beads-xbox.1.15.5, DESIGN-NV2A-SEAM.md section 5(e), PERF-METHODOLOGY.md
+// section 4. One bounded ring, one worker, three cursors, ten fences.
+//
+// ORDERING. Draws to the same destination surface are order-dependent: the
+// shared colour body does read-modify-write blending and twelve of the fifteen
+// witnessed profiles test against stored depth. There is therefore exactly ONE
+// consumer and it executes jobs strictly in submission order. That is also why
+// kDrawThreadsMax is 1: a second worker needs destination-span partitioning,
+// which is design section 1.5's deferred item.
+//
+// WHY THE DRAIN WAITS RATHER THAN HELPING. PERF-METHODOLOGY.md section 4 allows
+// the emulation thread to execute pending jobs itself while draining. Under
+// strict in-order execution with one consumer that is not available: the
+// emulation thread may only run a job once every earlier job has completed, and
+// at that point the worker is either idle (queue already empty -- nothing to
+// help with) or still running the job in front (helping would reorder). So the
+// drain waits. The degrade-to-single-threaded guarantee is provided instead by
+// --nv2a-draw-threads 0 and by the backpressure path, which drains and then runs
+// the job inline. draw_drain_wait_ticks_ measures exactly what the waiting cost.
+namespace {
+inline void draw_cpu_pause() {
+#if defined(__i386__) || defined(__x86_64__) || defined(_M_IX86) || defined(_M_X64)
+    __builtin_ia32_pause();
+#endif
+}
+// Spin before sleeping. A burst is ~96 jobs deep (M5), so the interesting waits
+// are short; the condvar is the backstop, not the common case.
+constexpr int kDrawSpin = 1024;
+}  // namespace
+
+const char* Nv2a::draw_depth_bucket_name(size_t i) {
+    static const char* kNames[kDrawDepthBuckets] = {
+        // Prefixed because "16_63" and friends parse as INTEGERS in Python
+        // (PEP 515 digit separators), which silently turned the histogram into
+        // nonsense keys in measure_xbox_replay.py.
+        "d0", "d1", "d2_3", "d4_7", "d8_15", "d16_63", "d64_255", "d256_plus",
+    };
+    return i < kDrawDepthBuckets ? kNames[i] : "unknown";
+}
+
+uint64_t Nv2a::draw_elapsed_ticks() const {
+    if (!draw_epoch_ticks_) return 0;
+    const uint64_t now = perf_excl::tick_now();
+    return now > draw_epoch_ticks_ ? now - draw_epoch_ticks_ : 0;
+}
+
+bool Nv2a::set_draw_threads(unsigned n) {
+    if (n > kDrawThreadsMax) return false;
+    if (n == draw_threads_) return true;
+    if (draw_threads_ != 0) {
+        draw_queue_drain_all();
+        draw_stop_.store(true);
+        {
+            std::lock_guard<std::mutex> lock(draw_mutex_);
+            draw_work_cv_.notify_all();
+        }
+        if (draw_worker_.joinable()) draw_worker_.join();
+        draw_stop_.store(false);
+        span_pool_stop();
+    }
+    draw_threads_ = n;
+    if (n == 1) {
+        // Stage (e): the asynchronous single consumer and its ring.
+        draw_slots_.resize(kDrawQueueSlots);
+        draw_published_ = 0;
+        draw_retired_ = 0;
+        draw_published_pub_.store(0);
+        draw_executed_.store(0);
+        draw_epoch_ticks_ = perf_excl::tick_now();
+        draw_worker_ = std::thread([this] { draw_worker_main(); });
+    } else if (n >= 2) {
+        // Stage (e2): N destination-span parts, of which the emulation thread is
+        // part 0. No ring worker is started and draw_slots_ stays empty -- a
+        // span-parallel job never enters the queue, so draw_published_ ==
+        // draw_retired_ == 0 forever and every anchor drain is the empty case.
+        draw_epoch_ticks_ = perf_excl::tick_now();
+        span_pool_start(n);
+    }
+    return true;
+}
+
+Nv2a::~Nv2a() {
+    // Worker lifetime is tied to the device. Stop it and JOIN before any member
+    // it reads -- the slot ring, the job vectors, the direct pointers into guest
+    // RAM -- is destroyed. The worker finishes whatever is already published
+    // first (its loop only tests the stop flag when the ring is empty), so no
+    // half-executed draw is left behind. Folding is deliberately NOT done here:
+    // the fold applies renderer invalidations, and the renderer may already be
+    // gone by the time the device is destroyed. main.cpp drains at shutdown
+    // through the checkpoint anchor while everything is still alive.
+    draw_stop_.store(true);
+    {
+        std::lock_guard<std::mutex> lock(draw_mutex_);
+        draw_work_cv_.notify_all();
+    }
+    if (draw_worker_.joinable()) draw_worker_.join();
+    // Stage (e2): the destination-span helpers hold raw pointers into the job
+    // and into guest RAM for the duration of a barrier; the barrier has always
+    // completed by the time control returns to the emulation thread, so there is
+    // never work in flight here -- but they must still be joined before the
+    // members they read are destroyed.
+    span_pool_stop();
+}
+
+void Nv2a::draw_worker_main() {
+    uint64_t next = 0;
+    for (;;) {
+        uint64_t published = draw_published_pub_.load(std::memory_order_acquire);
+        if (next == published) {
+            if (draw_stop_.load()) break;
+            for (int spin = 0; spin < kDrawSpin; ++spin) {
+                draw_cpu_pause();
+                published = draw_published_pub_.load(std::memory_order_acquire);
+                if (next != published) break;
+            }
+            if (next == published) {
+                std::unique_lock<std::mutex> lock(draw_mutex_);
+                // The consumer half of the Dekker pair documented in
+                // draw_queue_publish: seq_cst store of the flag, then seq_cst
+                // load of the cursor.
+                draw_worker_sleeping_.store(true, std::memory_order_seq_cst);
+                draw_work_cv_.wait(lock, [this, next] {
+                    return draw_published_pub_.load(std::memory_order_seq_cst) != next ||
+                           draw_stop_.load();
+                });
+                draw_worker_sleeping_.store(false, std::memory_order_seq_cst);
+            }
+            continue;
+        }
+        DrawJob& job = draw_slots_[static_cast<size_t>(next % kDrawQueueSlots)];
+        const uint64_t t0 = perf_excl::tick_now();
+        // The SAME function the inline path calls. There is no worker-only copy
+        // of the pixel math, and nothing in it reaches Unicorn, the renderer or
+        // an Nv2a member.
+        job.out.ok = execute_witnessed_fragments(job, job.out, 0, 1);
+        job.out.busy_ticks = perf_excl::tick_now() - t0;
+        draw_worker_busy_ticks_.fetch_add(job.out.busy_ticks,
+                                          std::memory_order_relaxed);
+        ++next;
+        // Same Dekker pair as the publish side, roles swapped: this cursor and
+        // draw_emu_waiting_ are read by the draining emulation thread.
+        draw_executed_.store(next, std::memory_order_seq_cst);
+        if (draw_emu_waiting_.load(std::memory_order_seq_cst)) {
+            std::lock_guard<std::mutex> lock(draw_mutex_);
+            draw_done_cv_.notify_one();
+        }
+    }
+}
+
+// Bytes a job holds hostage while it sits in the ring: its transformed vertices
+// and its texture snapshots. The swizzle tables and the register mirror are
+// bounded and small; these two are not.
+uint64_t Nv2a::draw_job_bytes(const DrawJob& job) {
+    uint64_t bytes = job.vertices.capacity() * sizeof(TransformedVertex);
+    bytes += job.texture_data.capacity();
+    bytes += job.projected_texture_data.capacity();
+    bytes += job.linear_blit_texture_data.capacity();
+    bytes += job.multi_texture_data.capacity();
+    bytes += job.single_texture_data.capacity();
+    bytes += job.pitch_tex5_texture_data.capacity();
+    bytes += job.inline_texture_data.capacity();
+    bytes += job.palette_data.capacity();
+    return bytes;
+}
+
+void Nv2a::draw_queue_publish(DrawJob& job) {
+    const uint64_t bytes = draw_job_bytes(job);
+    const bool slots_full = draw_published_ - draw_retired_ >= kDrawQueueSlots;
+    const bool bytes_full = draw_queue_bytes_ + bytes > kDrawQueueMaxBytes;
+    if (slots_full || bytes_full) {
+        // Backpressure. A full ring is not an error and not a drop: drain it
+        // (which empties every slot AND guarantees nothing is outstanding), then
+        // run this job inline, here, which is in order precisely because the
+        // drain just happened. M5 measured a maximum depth of 423 against 1024
+        // slots, so this is expected to stay at zero; it is counted so that a
+        // non-zero value is visible rather than silently costing time.
+        draw_queue_drain();
+        ++draw_backpressure_inline_;
+        if (bytes_full && !slots_full) ++draw_backpressure_bytes_;
+        const uint64_t t0 = perf_excl::tick_now();
+        job.out.ok = execute_witnessed_fragments(job, job.out, 0, 1);
+        draw_worker_busy_ticks_.fetch_add(perf_excl::tick_now() - t0,
+                                          std::memory_order_relaxed);
+        transformed_batch_ = std::move(job.vertices);
+        fold_draw_job(job);
+        return;
+    }
+    const size_t slot = static_cast<size_t>(draw_published_ % kDrawQueueSlots);
+    draw_slots_[slot] = std::move(job);
+    draw_queue_bytes_ += bytes;
+    if (draw_queue_bytes_ > draw_queue_bytes_max_)
+        draw_queue_bytes_max_ = draw_queue_bytes_;
+    ++draw_published_;
+    // SEQ_CST, NOT RELEASE, and the pairing below is why. This store and the
+    // draw_worker_sleeping_ load at the end of this function form a Dekker
+    // store-load pair with the worker's own sleeping-flag store and its
+    // published-cursor load. A release store followed by a load is NOT ordered
+    // against that load on x86 (the store sits in the store buffer), so both
+    // sides could read the other's stale value: the producer decides the worker
+    // is awake and skips the notify while the worker decides there is no work
+    // and sleeps. The predicate form of condition_variable::wait does not save
+    // you -- a predicate is only re-evaluated on a WAKE, and the wake is the
+    // thing that was lost. Measured 2026-09-05: the async ring hung at draw 174
+    // with published_pub=174, executed=173, worker_sleeping=1, and a bare
+    // notify_all released it. Making all four operations seq_cst restores the
+    // total order in which at least one side must observe the other.
+    draw_published_pub_.store(draw_published_, std::memory_order_seq_cst);
+    ++draw_jobs_queued_;
+
+    const uint64_t depth =
+        draw_published_ - draw_executed_.load(std::memory_order_relaxed);
+    draw_depth_sum_ += depth;
+    ++draw_depth_samples_;
+    if (depth > draw_depth_max_) draw_depth_max_ = depth;
+    size_t bucket = 0;
+    if (depth >= 256) bucket = 7;
+    else if (depth >= 64) bucket = 6;
+    else if (depth >= 16) bucket = 5;
+    else if (depth >= 8) bucket = 4;
+    else if (depth >= 4) bucket = 3;
+    else if (depth >= 2) bucket = 2;
+    else if (depth >= 1) bucket = 1;
+    ++draw_depth_hist_[bucket];
+
+    // The latch MOVED transformed_batch_ into the job and the job is now in the
+    // ring, so the producer needs a buffer for the next batch. Recycling one a
+    // finished job gave back keeps the allocation count identical to the inline
+    // path, where retire_draw_job hands the same vector straight back.
+    if (!draw_free_vertex_buffers_.empty()) {
+        transformed_batch_ = std::move(draw_free_vertex_buffers_.back());
+        draw_free_vertex_buffers_.pop_back();
+        transformed_batch_.clear();
+    }
+    if (draw_worker_sleeping_.load(std::memory_order_seq_cst)) {
+        std::lock_guard<std::mutex> lock(draw_mutex_);
+        draw_work_cv_.notify_one();
+    }
+}
+
+void Nv2a::draw_queue_drain() {
+    if (draw_threads_ == 0) return;
+    const uint64_t target = draw_published_;
+    if (draw_retired_ == target) {
+        ++draw_drains_empty_;
+        return;
+    }
+    ++draw_drains_nonempty_;
+    if (draw_executed_.load(std::memory_order_acquire) != target) {
+        const uint64_t t0 = perf_excl::tick_now();
+        for (int spin = 0; spin < kDrawSpin; ++spin) {
+            draw_cpu_pause();
+            if (draw_executed_.load(std::memory_order_acquire) == target) break;
+        }
+        if (draw_executed_.load(std::memory_order_acquire) != target) {
+            std::unique_lock<std::mutex> lock(draw_mutex_);
+            draw_emu_waiting_.store(true, std::memory_order_seq_cst);
+            // Bounded wait with an always-on stall report. An unbounded wait
+            // here turns any ordering defect into a silent hang with no
+            // evidence at all -- which is exactly what happened on 2026-09-05
+            // when the F3 query fence was first wired in. The predicate is
+            // re-checked on every wakeup, so this is behaviourally identical to
+            // an unbounded wait; the only addition is that a drain that has not
+            // completed in five seconds prints the three cursors and the
+            // worker's own state, once per stall, before continuing to wait.
+            while (!draw_done_cv_.wait_for(
+                lock, std::chrono::seconds(5), [this, target] {
+                    return draw_executed_.load(std::memory_order_seq_cst) ==
+                           target;
+                })) {
+                std::fprintf(
+                    stderr,
+                    "[nv2a] draw drain stalled >5s: threads=%u target=%llu "
+                    "published=%llu published_pub=%llu executed=%llu "
+                    "retired=%llu worker_sleeping=%d emu_waiting=%d stop=%d\n",
+                    draw_threads_, (unsigned long long)target,
+                    (unsigned long long)draw_published_,
+                    (unsigned long long)draw_published_pub_.load(
+                        std::memory_order_relaxed),
+                    (unsigned long long)draw_executed_.load(
+                        std::memory_order_relaxed),
+                    (unsigned long long)draw_retired_,
+                    draw_worker_sleeping_.load() ? 1 : 0,
+                    draw_emu_waiting_.load() ? 1 : 0,
+                    draw_stop_.load() ? 1 : 0);
+                std::fflush(stderr);
+            }
+            draw_emu_waiting_.store(false, std::memory_order_seq_cst);
+        }
+        draw_drain_wait_ticks_ += perf_excl::tick_now() - t0;
+    }
+    // Fold in latch order. Nothing else may touch a slot between the worker's
+    // release store and this loop, which is why draw_retired_ exists: a slot is
+    // reusable only once the emulation thread has taken its telemetry and its
+    // deferred side effects.
+    while (draw_retired_ != target) {
+        DrawJob& done = draw_slots_[static_cast<size_t>(draw_retired_ % kDrawQueueSlots)];
+        fold_draw_job(done);
+        const uint64_t bytes = draw_job_bytes(done);
+        done.vertices.clear();
+        if (draw_free_vertex_buffers_.size() < kDrawFreeVertexBuffers)
+            draw_free_vertex_buffers_.push_back(std::move(done.vertices));
+        // Release everything else the job owns NOW rather than at the slot's next
+        // reuse. A slot that keeps a multi-megabyte texture snapshot alive until
+        // it is overwritten makes the ring's resident set kDrawQueueSlots times
+        // the largest job -- measured: it blew the harness's 768 MiB host-memory
+        // cap on the canonical run before this line existed.
+        done = DrawJob();
+        draw_queue_bytes_ -= bytes < draw_queue_bytes_ ? bytes : draw_queue_bytes_;
+        ++draw_retired_;
+    }
+}
+
+void Nv2a::draw_order_fence() {
+    if (draw_threads_ == 0) return;
+    if (draw_published_ == draw_retired_) return;
+    ++draw_order_fences_;
+    draw_queue_drain();
+}
+
+// F3 CLOSURE. See the comment on the declaration in nv2a.hpp. Called at the top
+// of every renderer RESIDENCY QUERY, before the query is made, so the resident
+// set the query evaluates already reflects every invalidation a pending job
+// owes. Deliberately a separate counter from draw_order_fences_: that one
+// measures inline pixel paths not overtaking the queue, this one measures the
+// staleness window, and folding them would make either unreadable.
+void Nv2a::draw_renderer_query_fence() {
+    if (draw_threads_ == 0) return;
+    if (draw_published_ == draw_retired_) return;
+    ++draw_renderer_query_fences_;
+    draw_queue_drain();
+}
+
+void Nv2a::draw_queue_drain_all() {
+    draw_queue_drain();
+}
+
+// ============ stage (e2): within-job destination-span parallel raster ========
+// beads-xbox.1.15.9. Stage (e) moved a whole draw onto a second thread and was
+// rejected: it is latency hiding, and the emulation thread has nothing to
+// overlap with (worker busy 0.489 of elapsed, emulation thread blocked in
+// drains 0.449, computed ceiling 4.0 percent, measured +0.39 percent). This is
+// WORK DIVISION instead. One job at a time, globally; all N workers inside it;
+// each owning a disjoint set of destination scanlines; a barrier before the next
+// job. Draw order is therefore preserved by construction and no two workers ever
+// write the same pixel, which is what makes it exact rather than merely
+// probably-exact.
+//
+// The ring, the ten anchors and the order fence are untouched and simply never
+// have anything outstanding at N >= 2, so every coherence question stage (e)
+// had to answer is satisfied trivially here: a job is finished before the guest
+// instruction that issued it retires, exactly as at --nv2a-draw-threads 0.
+namespace {
+// Helpers spin before sleeping. A burst is ~96 draws deep (M5) and a draw is
+// tens of microseconds, so within a burst a helper must never reach the condvar;
+// the sleep is for the gap between bursts, where the guest is in its idle loop.
+constexpr int kSpanSpin = 20000;
+}  // namespace
+
+void Nv2a::span_pool_start(unsigned parts) {
+    span_out_.assign(parts, DrawJobTelemetry());
+    span_job_ = nullptr;
+    span_parts_ = 1;
+    span_gen_.store(0, std::memory_order_release);
+    span_done_.store(0, std::memory_order_relaxed);
+    span_stop_.store(false);
+    span_workers_.reserve(parts - 1);
+    for (unsigned i = 1; i < parts; ++i)
+        span_workers_.emplace_back([this, i] { span_worker_main(i); });
+}
+
+void Nv2a::span_pool_stop() {
+    if (span_workers_.empty()) return;
+    span_stop_.store(true);
+    {
+        std::lock_guard<std::mutex> lock(span_mutex_);
+        span_work_cv_.notify_all();
+    }
+    for (auto& worker : span_workers_)
+        if (worker.joinable()) worker.join();
+    span_workers_.clear();
+    span_out_.clear();
+}
+
+void Nv2a::span_worker_main(unsigned part) {
+    uint64_t seen = span_gen_.load(std::memory_order_acquire);
+    for (;;) {
+        uint64_t gen = span_gen_.load(std::memory_order_acquire);
+        if (gen == seen) {
+            if (span_stop_.load()) break;
+            for (int spin = 0; spin < kSpanSpin; ++spin) {
+                draw_cpu_pause();
+                gen = span_gen_.load(std::memory_order_acquire);
+                if (gen != seen) break;
+            }
+            if (gen == seen) {
+                std::unique_lock<std::mutex> lock(span_mutex_);
+                span_sleepers_.fetch_add(1, std::memory_order_relaxed);
+                span_work_cv_.wait(lock, [this, seen] {
+                    return span_gen_.load(std::memory_order_acquire) != seen ||
+                           span_stop_.load();
+                });
+                span_sleepers_.fetch_sub(1, std::memory_order_relaxed);
+            }
+            continue;
+        }
+        seen = gen;
+        // The generation store is a release and this load is an acquire, so
+        // span_job_ and span_parts_ -- plain members written by the emulation
+        // thread before the store -- are visible here. The job itself is not
+        // mutated again until the barrier completes.
+        DrawJob& job = *span_job_;
+        const unsigned parts = span_parts_;
+        if (part < parts) {
+            DrawJobTelemetry& out = span_out_[part];
+            const uint64_t t0 = perf_excl::tick_now();
+            // The SAME function part 0 and every inline job call. There is no
+            // worker-only copy of the pixel math; the only difference is which
+            // destination rows this call owns.
+            out.ok = execute_witnessed_fragments(job, out, part, parts);
+            span_helper_busy_ticks_.fetch_add(perf_excl::tick_now() - t0,
+                                              std::memory_order_relaxed);
+        }
+        // Release: everything this part wrote -- destination pixels and its own
+        // telemetry cell -- happens-before the emulation thread's acquire on the
+        // completion count, so the fold and the guest both see finished work.
+        // seq_cst for the same Dekker reason as the async ring's publish: a
+        // relaxed load of span_emu_waiting_ after a release RMW lets this helper
+        // conclude the emulation thread is not waiting while the emulation
+        // thread concludes this part has not finished, and the barrier sleeps
+        // forever. This is the DEFAULT path as of 2026-09-05, so the unsound
+        // version was a latent hang in the shipping configuration.
+        span_done_.fetch_add(1, std::memory_order_seq_cst);
+        if (span_emu_waiting_.load(std::memory_order_seq_cst)) {
+            std::lock_guard<std::mutex> lock(span_mutex_);
+            span_done_cv_.notify_one();
+        }
+    }
+}
+
+bool Nv2a::execute_draw_spans(DrawJob& job) {
+    const unsigned parts = draw_threads_;
+    const unsigned helpers = parts - 1;
+    job.span_parts = parts;
+    span_job_ = &job;
+    span_parts_ = parts;
+    for (unsigned p = 1; p < parts; ++p) span_out_[p].reset();
+    span_done_.store(0, std::memory_order_relaxed);
+    {
+        // Published UNDER the mutex on purpose. ndsrecomp commit 0206ba3 records
+        // the failure mode of publishing outside it: a worker between its
+        // predicate check and its wait misses the notify and sleeps with work
+        // queued. Correctness survives (the barrier still completes once it
+        // wakes) but the feature silently degrades to single-threaded plus
+        // overhead, which is exactly the outcome a timing gate cannot
+        // distinguish from "the idea does not work".
+        std::lock_guard<std::mutex> lock(span_mutex_);
+        span_gen_.fetch_add(1, std::memory_order_release);
+        span_work_cv_.notify_all();
+    }
+
+    const uint64_t t0 = perf_excl::tick_now();
+    bool ok = execute_witnessed_fragments(job, job.out, 0, parts);
+    const uint64_t t1 = perf_excl::tick_now();
+    draw_span_part0_busy_ticks_ += t1 - t0;
+
+    // ---- the barrier ------------------------------------------------------
+    if (span_done_.load(std::memory_order_acquire) != helpers) {
+        for (int spin = 0; spin < kSpanSpin; ++spin) {
+            draw_cpu_pause();
+            if (span_done_.load(std::memory_order_acquire) == helpers) break;
+        }
+        if (span_done_.load(std::memory_order_acquire) != helpers) {
+            std::unique_lock<std::mutex> lock(span_mutex_);
+            span_emu_waiting_.store(true, std::memory_order_seq_cst);
+            span_done_cv_.wait(lock, [this, helpers] {
+                return span_done_.load(std::memory_order_seq_cst) == helpers;
+            });
+            span_emu_waiting_.store(false, std::memory_order_seq_cst);
+        }
+    }
+    draw_span_barrier_wait_ticks_ += perf_excl::tick_now() - t1;
+    span_job_ = nullptr;
+    ++draw_span_jobs_;
+
+    // ---- merge the four non-additive scalars ------------------------------
+    // Everything else -- the ~110 counters and the three job-invariant
+    // last-value cells -- is folded straight into the members by
+    // fold_draw_telemetry, once per part, so there is no second summation list.
+    for (unsigned p = 1; p < parts; ++p) {
+        const DrawJobTelemetry& sub = span_out_[p];
+        ok = ok && sub.ok;
+        // First failure by PART INDEX, not by wall-clock order, so the recorded
+        // message is deterministic across runs. F13 already documents that a
+        // fault from a threaded run has shifted attribution and must be re-run
+        // at --nv2a-draw-threads 0; with a partition the SET of pixels written
+        // before the stop is partition-dependent too, so that rule is stronger
+        // here, not weaker.
+        if (sub.failed && !job.out.failed) {
+            job.out.failed = true;
+            job.out.fault_message = sub.fault_message;
+        }
+    }
+    job.out.ok = ok;
+    return ok;
+}
+
 bool Nv2a::submit_vertex_batch() {
+    // NV2A_VERTEX: attribute fetch, vertex-shader/fixed-function transform and batch
+    // assembly. The raster call below opens its own region, so this bucket's self time is
+    // the vertex pipeline alone.
+    perf_excl::Scope region(perf_excl::kNv2aVertex);
     std::optional<perf::ScopedAdd> submit_timer;
     if (perf::g_enabled) {
         submit_timer.emplace(perf::g_ns_nv2a_submit_vertex,
@@ -1231,7 +2561,11 @@ bool Nv2a::submit_vertex_batch() {
                               : inline_array ? inline_vertices_.size()
                                              : immediate_vertices_.size();
 
-    const bool collect_diagnostics = detailed_telemetry_ || perf::g_enabled;
+    // beads-xbox.1.14.3 item 4 completed: perf::g_enabled removed from the disjunction.
+    // The raster-state sample search below is a linear scan per batch; running it only
+    // because timing is on is the exact "instrument changes the instrumented code"
+    // hazard. --nv2a-detailed-telemetry restores it.
+    const bool collect_diagnostics = detailed_telemetry_;
     size_t raster_sample_index = 0;
     RasterStateSample* tracked_raster_sample = nullptr;
     if (collect_diagnostics) {
@@ -1666,13 +3000,27 @@ bool Nv2a::submit_vertex_batch() {
             }
         }
     }
+    // ==================== THE SEAM (stage (d)) ==========================
+    // DESIGN-NV2A-SEAM.md section 1.1 candidate (C). Everything above this line
+    // -- attribute fetch, VSH/fixed-function transform, the immediate-quad
+    // evidence capture -- ran on the emulation thread and stays there. From here
+    // the batch is an owned DrawJob. Profile match, the subset validators,
+    // surface resolution and the texture snapshots still run on this thread
+    // (they fault, and faults must be raised in guest order at the instruction
+    // that caused them, section 1.1) -- they run inside the executor's latch
+    // half and write their results into the job.
+    DrawJob job;
+    latch_draw_job(job);
     bool raster_executed = false;
     bool raster_ok;
     {
         std::optional<perf::ScopedAdd> t;
         if (perf::g_enabled) t.emplace(perf::g_ns_raster, perf::g_calls_raster);
-        raster_ok = rasterize_witnessed_batch(raster_executed);
+        // Stage (d): inline, immediately, at the latch point. Stage (e) publishes
+        // the job to a ring and a worker calls this same function.
+        raster_ok = execute_draw_job(job, raster_executed);
     }
+    retire_draw_job(job, raster_executed);
     if (!raster_ok) return false;
     if (raster_executed && tracked_raster_sample)
         ++raster_state_samples_[raster_sample_index].executed_batches;
@@ -1726,18 +3074,31 @@ bool Nv2a::submit_vertex_batch() {
     return true;
 }
 
-bool Nv2a::rasterize_witnessed_immediate_quad(bool& executed) {
+bool Nv2a::rasterize_witnessed_immediate_quad(DrawJob& job, bool& executed) {
     executed = false;
 
     // The authoritative 11.5B capture exposes alternating A4, I8/palette,
     // RS8/RS13 A8R8G8B8, RS16/RS17 I8 menu-column, and IQRS3/IQRS7 upper-left
     // I8 artwork immediate quads. Keep every other mode-8 state
     // recorder-only until its own texture/combiner behavior is witnessed.
+    // Stage (d) seam (beads-xbox.1.15.4, DESIGN-NV2A-SEAM.md section 3.2):
+    // the executor reads the LATCHED JOB, never the live members. These
+    // aliases are the whole of the mechanical redirection -- every use site
+    // below is textually unchanged, so no expression, and in particular no
+    // floating-point expression, moved with the split.
+    const auto& raster_state = job.raster_state;
+    const auto& transformed_batch = job.vertices;
+    const uint32_t surface_format = job.surface_format;
+    const uint32_t surface_pitch = job.surface_pitch;
+    const uint32_t surface_clip_horizontal = job.surface_clip_horizontal;
+    const uint32_t surface_clip_vertical = job.surface_clip_vertical;
+    const uint32_t surface_color_offset = job.surface_color_offset;
+    const uint32_t surface_zeta_offset = job.surface_zeta_offset;
     const bool immediate_source =
         !immediate_vertices_.empty() &&
-        immediate_vertices_.size() == transformed_batch_.size();
-    const size_t vertex_count = transformed_batch_.size();
-    const uint32_t color_offset = surface_color_offset_;
+        immediate_vertices_.size() == transformed_batch.size();
+    const size_t vertex_count = transformed_batch.size();
+    const uint32_t color_offset = surface_color_offset;
     const bool witnessed_target =
         color_offset == 0x03DF4000 || color_offset == 0x03C8C000;
     const bool a4_source_shape =
@@ -1757,199 +3118,199 @@ bool Nv2a::rasterize_witnessed_immediate_quad(bool& executed) {
     const bool transform_state =
         transform_execution_mode_ == 2 && transform_program_start_ == 0;
     const bool surface_state =
-        surface_format_ == 0x00000128 &&
-        surface_pitch_ == 0x00400C00 && witnessed_target &&
-        surface_zeta_offset_ == 0 &&
-        surface_clip_horizontal_ == 0x00B4010E &&
-        surface_clip_vertical_ == 0x00D7009E &&
-        raster_state_[kRasterWindowClipHorizontal] == 0x02D00000 &&
-        raster_state_[kRasterWindowClipVertical] == 0x01E00000;
+        surface_format == 0x00000128 &&
+        surface_pitch == 0x00400C00 && witnessed_target &&
+        surface_zeta_offset == 0 &&
+        surface_clip_horizontal == 0x00B4010E &&
+        surface_clip_vertical == 0x00D7009E &&
+        raster_state[kRasterWindowClipHorizontal] == 0x02D00000 &&
+        raster_state[kRasterWindowClipVertical] == 0x01E00000;
     const bool menu_i8_surface_state =
-        surface_format_ == 0x00000128 &&
-        surface_pitch_ == 0x00400C00 && witnessed_target &&
-        surface_zeta_offset_ == 0 &&
-        surface_clip_horizontal_ == 0x02D00000 &&
-        surface_clip_vertical_ == 0x01E00000 &&
-        raster_state_[kRasterWindowClipHorizontal] == 0x02D00000 &&
-        raster_state_[kRasterWindowClipVertical] == 0x01E00000;
+        surface_format == 0x00000128 &&
+        surface_pitch == 0x00400C00 && witnessed_target &&
+        surface_zeta_offset == 0 &&
+        surface_clip_horizontal == 0x02D00000 &&
+        surface_clip_vertical == 0x01E00000 &&
+        raster_state[kRasterWindowClipHorizontal] == 0x02D00000 &&
+        raster_state[kRasterWindowClipVertical] == 0x01E00000;
     uint32_t a4_raster_reject_mask = 0;
     auto reject_raster = [&](size_t bit, bool matches) {
         if (!matches) a4_raster_reject_mask |= 1u << bit;
     };
-    reject_raster(0, raster_state_[kRasterEnables] == 0x00000007);
-    reject_raster(1, raster_state_[kRasterControl0] == 0x00100001);
-    reject_raster(2, raster_state_[kRasterAlphaFunc] == 0x0206);
+    reject_raster(0, raster_state[kRasterEnables] == 0x00000007);
+    reject_raster(1, raster_state[kRasterControl0] == 0x00100001);
+    reject_raster(2, raster_state[kRasterAlphaFunc] == 0x0206);
     // NV097_SET_ALPHA_REF is an 8-bit comparison value. Preserve the raw
     // retained word in telemetry, but only its guest-visible low byte gates.
-    reject_raster(3, (raster_state_[kRasterAlphaRef] & 0xFFu) == 8);
-    reject_raster(4, raster_state_[kRasterBlendSrc] == 0x0302);
-    reject_raster(5, raster_state_[kRasterBlendDst] == 0x0303);
-    reject_raster(6, raster_state_[kRasterBlendEquation] == 0x8006);
-    reject_raster(7, raster_state_[kRasterDepthFunc] == 0x0203);
-    reject_raster(8, raster_state_[kRasterColorMask] == 0x01010101);
-    reject_raster(9, raster_state_[kRasterDepthMask] == 1);
-    reject_raster(10, raster_state_[kRasterShadeMode] == 0x1D01);
+    reject_raster(3, (raster_state[kRasterAlphaRef] & 0xFFu) == 8);
+    reject_raster(4, raster_state[kRasterBlendSrc] == 0x0302);
+    reject_raster(5, raster_state[kRasterBlendDst] == 0x0303);
+    reject_raster(6, raster_state[kRasterBlendEquation] == 0x8006);
+    reject_raster(7, raster_state[kRasterDepthFunc] == 0x0203);
+    reject_raster(8, raster_state[kRasterColorMask] == 0x01010101);
+    reject_raster(9, raster_state[kRasterDepthMask] == 1);
+    reject_raster(10, raster_state[kRasterShadeMode] == 0x1D01);
     reject_raster(11,
-                  raster_state_[kRasterPolygonOffsetScale] == 0x80000000);
+                  raster_state[kRasterPolygonOffsetScale] == 0x80000000);
     reject_raster(12,
-                  raster_state_[kRasterPolygonOffsetBias] == 0x80000000);
-    reject_raster(13, raster_state_[kRasterFrontPolygonMode] == 0x1B02);
-    reject_raster(14, raster_state_[kRasterBackPolygonMode] == 0x1B02);
-    reject_raster(15, raster_state_[kRasterClipMin] == 0);
-    reject_raster(16, raster_state_[kRasterClipMax] == 0);
-    reject_raster(17, raster_state_[kRasterCullFace] == 0x0405);
-    reject_raster(18, raster_state_[kRasterFrontFace] == 0x0900);
-    reject_raster(19, raster_state_[kRasterZMinMaxControl] == 1);
-    reject_raster(20, raster_state_[kRasterShadowDepthFunc] == 0);
+                  raster_state[kRasterPolygonOffsetBias] == 0x80000000);
+    reject_raster(13, raster_state[kRasterFrontPolygonMode] == 0x1B02);
+    reject_raster(14, raster_state[kRasterBackPolygonMode] == 0x1B02);
+    reject_raster(15, raster_state[kRasterClipMin] == 0);
+    reject_raster(16, raster_state[kRasterClipMax] == 0);
+    reject_raster(17, raster_state[kRasterCullFace] == 0x0405);
+    reject_raster(18, raster_state[kRasterFrontFace] == 0x0900);
+    reject_raster(19, raster_state[kRasterZMinMaxControl] == 1);
+    reject_raster(20, raster_state[kRasterShadowDepthFunc] == 0);
     const bool a4_raster_state = a4_raster_reject_mask == 0;
     uint32_t i8_raster_reject_mask = 0;
     auto reject_i8_raster = [&](size_t bit, bool matches) {
         if (!matches) i8_raster_reject_mask |= 1u << bit;
     };
-    reject_i8_raster(0, raster_state_[kRasterEnables] == 0x00000006);
-    reject_i8_raster(1, raster_state_[kRasterControl0] == 0x00100001);
-    reject_i8_raster(2, raster_state_[kRasterAlphaFunc] == 0x0207);
-    reject_i8_raster(3, (raster_state_[kRasterAlphaRef] & 0xFFu) == 0);
-    reject_i8_raster(4, raster_state_[kRasterBlendSrc] == 0x0302);
-    reject_i8_raster(5, raster_state_[kRasterBlendDst] == 0x0303);
-    reject_i8_raster(6, raster_state_[kRasterBlendEquation] == 0x8006);
-    reject_i8_raster(7, raster_state_[kRasterDepthFunc] == 0x0203);
-    reject_i8_raster(8, raster_state_[kRasterColorMask] == 0x01010101);
-    reject_i8_raster(9, raster_state_[kRasterDepthMask] == 1);
-    reject_i8_raster(10, raster_state_[kRasterShadeMode] == 0x1D01);
-    reject_i8_raster(11, raster_state_[kRasterPolygonOffsetScale] == 0x80000000);
-    reject_i8_raster(12, raster_state_[kRasterPolygonOffsetBias] == 0x80000000);
-    reject_i8_raster(13, raster_state_[kRasterFrontPolygonMode] == 0x1B02);
-    reject_i8_raster(14, raster_state_[kRasterBackPolygonMode] == 0x1B02);
-    reject_i8_raster(15, raster_state_[kRasterClipMin] == 0);
-    reject_i8_raster(16, raster_state_[kRasterClipMax] == 0);
-    reject_i8_raster(17, raster_state_[kRasterCullFace] == 0x0405);
-    reject_i8_raster(18, raster_state_[kRasterFrontFace] == 0x0900);
-    reject_i8_raster(19, raster_state_[kRasterZMinMaxControl] == 1);
-    reject_i8_raster(20, raster_state_[kRasterShadowDepthFunc] == 0);
+    reject_i8_raster(0, raster_state[kRasterEnables] == 0x00000006);
+    reject_i8_raster(1, raster_state[kRasterControl0] == 0x00100001);
+    reject_i8_raster(2, raster_state[kRasterAlphaFunc] == 0x0207);
+    reject_i8_raster(3, (raster_state[kRasterAlphaRef] & 0xFFu) == 0);
+    reject_i8_raster(4, raster_state[kRasterBlendSrc] == 0x0302);
+    reject_i8_raster(5, raster_state[kRasterBlendDst] == 0x0303);
+    reject_i8_raster(6, raster_state[kRasterBlendEquation] == 0x8006);
+    reject_i8_raster(7, raster_state[kRasterDepthFunc] == 0x0203);
+    reject_i8_raster(8, raster_state[kRasterColorMask] == 0x01010101);
+    reject_i8_raster(9, raster_state[kRasterDepthMask] == 1);
+    reject_i8_raster(10, raster_state[kRasterShadeMode] == 0x1D01);
+    reject_i8_raster(11, raster_state[kRasterPolygonOffsetScale] == 0x80000000);
+    reject_i8_raster(12, raster_state[kRasterPolygonOffsetBias] == 0x80000000);
+    reject_i8_raster(13, raster_state[kRasterFrontPolygonMode] == 0x1B02);
+    reject_i8_raster(14, raster_state[kRasterBackPolygonMode] == 0x1B02);
+    reject_i8_raster(15, raster_state[kRasterClipMin] == 0);
+    reject_i8_raster(16, raster_state[kRasterClipMax] == 0);
+    reject_i8_raster(17, raster_state[kRasterCullFace] == 0x0405);
+    reject_i8_raster(18, raster_state[kRasterFrontFace] == 0x0900);
+    reject_i8_raster(19, raster_state[kRasterZMinMaxControl] == 1);
+    reject_i8_raster(20, raster_state[kRasterShadowDepthFunc] == 0);
     const bool i8_raster_state = i8_raster_reject_mask == 0;
     const bool stencil_state =
-        raster_state_[kRasterStencilFunc] == 0x0207 &&
-        raster_state_[kRasterStencilRef] == 0 &&
-        raster_state_[kRasterStencilFuncMask] == 0xFFFFFFFF &&
-        raster_state_[kRasterStencilOpFail] == 0x1E00 &&
-        raster_state_[kRasterStencilOpZFail] == 0x1E00 &&
-        raster_state_[kRasterStencilOpZPass] == 0x1E00;
+        raster_state[kRasterStencilFunc] == 0x0207 &&
+        raster_state[kRasterStencilRef] == 0 &&
+        raster_state[kRasterStencilFuncMask] == 0xFFFFFFFF &&
+        raster_state[kRasterStencilOpFail] == 0x1E00 &&
+        raster_state[kRasterStencilOpZFail] == 0x1E00 &&
+        raster_state[kRasterStencilOpZPass] == 0x1E00;
     const bool a4_combiner_state =
-        raster_state_[kRasterTextureEnableMask] == 1 &&
-        raster_state_[kRasterShaderStageProgram] == 1 &&
-        raster_state_[kRasterShaderOtherStageInput] == 0 &&
-        raster_state_[kRasterCombinerControl] == 1 &&
-        raster_state_[kRasterCombinerAlphaIcw0] == 0x18140000 &&
-        raster_state_[kRasterCombinerColorIcw0] == 0x08040000 &&
-        raster_state_[kRasterCombinerAlphaOcw0] == 0x000000C0 &&
-        raster_state_[kRasterCombinerColorOcw0] == 0x000000C0 &&
-        raster_state_[kRasterCombinerFactor0_0] == 0 &&
-        raster_state_[kRasterCombinerFactor1_0] == 0 &&
-        raster_state_[kRasterCombinerSpecularFog0] == 0x010C0002 &&
-        raster_state_[kRasterCombinerSpecularFog1] == 0x00001C00 &&
-        raster_state_[kRasterCombinerFinalFactor0] == 0x00DADADA &&
-        raster_state_[kRasterCombinerFinalFactor1] == 0x00101010;
+        raster_state[kRasterTextureEnableMask] == 1 &&
+        raster_state[kRasterShaderStageProgram] == 1 &&
+        raster_state[kRasterShaderOtherStageInput] == 0 &&
+        raster_state[kRasterCombinerControl] == 1 &&
+        raster_state[kRasterCombinerAlphaIcw0] == 0x18140000 &&
+        raster_state[kRasterCombinerColorIcw0] == 0x08040000 &&
+        raster_state[kRasterCombinerAlphaOcw0] == 0x000000C0 &&
+        raster_state[kRasterCombinerColorOcw0] == 0x000000C0 &&
+        raster_state[kRasterCombinerFactor0_0] == 0 &&
+        raster_state[kRasterCombinerFactor1_0] == 0 &&
+        raster_state[kRasterCombinerSpecularFog0] == 0x010C0002 &&
+        raster_state[kRasterCombinerSpecularFog1] == 0x00001C00 &&
+        raster_state[kRasterCombinerFinalFactor0] == 0x00DADADA &&
+        raster_state[kRasterCombinerFinalFactor1] == 0x00101010;
     const bool a4_texture_state =
-        raster_state_[kRasterTextureOffset0] == 0x03C0C000 &&
-        raster_state_[kRasterTextureFormat0] == 0x08810429 &&
-        raster_state_[kRasterTextureAddress0] == 0x00010303 &&
-        raster_state_[kRasterTextureFilter0] == 0x02022000 &&
-        raster_state_[kRasterTextureControl0_0] == 0x4003FFC0 &&
-        raster_state_[kRasterTextureControl1_0] == 0x01C00000 &&
-        raster_state_[kRasterTextureImageRect0] == 0x00640011 &&
-        raster_state_[kRasterTexturePalette0] == 0x02DED080 &&
-        raster_state_[kRasterTextureBorderColor0] == 0;
+        raster_state[kRasterTextureOffset0] == 0x03C0C000 &&
+        raster_state[kRasterTextureFormat0] == 0x08810429 &&
+        raster_state[kRasterTextureAddress0] == 0x00010303 &&
+        raster_state[kRasterTextureFilter0] == 0x02022000 &&
+        raster_state[kRasterTextureControl0_0] == 0x4003FFC0 &&
+        raster_state[kRasterTextureControl1_0] == 0x01C00000 &&
+        raster_state[kRasterTextureImageRect0] == 0x00640011 &&
+        raster_state[kRasterTexturePalette0] == 0x02DED080 &&
+        raster_state[kRasterTextureBorderColor0] == 0;
     const bool rs12_candidate =
         witnessed_target && vertex_count >= 28 && vertex_count <= 44 &&
-        raster_state_[kRasterAlphaFunc] == 0x0206 &&
-        (raster_state_[kRasterAlphaRef] & 0xFFu) == 8 &&
-        raster_state_[kRasterTextureFormat0] == 0x08810429;
+        raster_state[kRasterAlphaFunc] == 0x0206 &&
+        (raster_state[kRasterAlphaRef] & 0xFFu) == 8 &&
+        raster_state[kRasterTextureFormat0] == 0x08810429;
     const bool i8_combiner_state =
-        raster_state_[kRasterTextureEnableMask] == 1 &&
-        raster_state_[kRasterShaderStageProgram] == 1 &&
-        raster_state_[kRasterShaderOtherStageInput] == 0x00210000 &&
-        raster_state_[kRasterCombinerControl] == 1 &&
-        raster_state_[kRasterCombinerAlphaIcw0] == 0x18140000 &&
-        raster_state_[kRasterCombinerColorIcw0] == 0x08040000 &&
-        raster_state_[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
-        raster_state_[kRasterCombinerColorOcw0] == 0x00000C00 &&
-        raster_state_[kRasterCombinerFactor0_0] == 0xFFFFFFFF &&
-        raster_state_[kRasterCombinerFactor1_0] == 0xFFFFFFFF &&
-        raster_state_[kRasterCombinerSpecularFog0] == 0x0000000C &&
-        raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80 &&
-        raster_state_[kRasterCombinerFinalFactor0] == 0x00DADADA &&
-        raster_state_[kRasterCombinerFinalFactor1] == 0x00101010;
+        raster_state[kRasterTextureEnableMask] == 1 &&
+        raster_state[kRasterShaderStageProgram] == 1 &&
+        raster_state[kRasterShaderOtherStageInput] == 0x00210000 &&
+        raster_state[kRasterCombinerControl] == 1 &&
+        raster_state[kRasterCombinerAlphaIcw0] == 0x18140000 &&
+        raster_state[kRasterCombinerColorIcw0] == 0x08040000 &&
+        raster_state[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
+        raster_state[kRasterCombinerColorOcw0] == 0x00000C00 &&
+        raster_state[kRasterCombinerFactor0_0] == 0xFFFFFFFF &&
+        raster_state[kRasterCombinerFactor1_0] == 0xFFFFFFFF &&
+        raster_state[kRasterCombinerSpecularFog0] == 0x0000000C &&
+        raster_state[kRasterCombinerSpecularFog1] == 0x00001C80 &&
+        raster_state[kRasterCombinerFinalFactor0] == 0x00DADADA &&
+        raster_state[kRasterCombinerFinalFactor1] == 0x00101010;
     const bool i8_texture_state =
-        raster_state_[kRasterTextureOffset0] == 0x02DED480 &&
-        raster_state_[kRasterTextureFormat0] == 0x05710B29 &&
-        raster_state_[kRasterTextureAddress0] == 0x00010303 &&
-        raster_state_[kRasterTextureFilter0] == 0x02022000 &&
-        raster_state_[kRasterTextureControl0_0] == 0x4003FFC4 &&
-        raster_state_[kRasterTextureControl1_0] == 0x01C00000 &&
-        raster_state_[kRasterTextureImageRect0] == 0x00640011 &&
-        raster_state_[kRasterTexturePalette0] == 0x02DED080 &&
-        raster_state_[kRasterTextureBorderColor0] == 0;
+        raster_state[kRasterTextureOffset0] == 0x02DED480 &&
+        raster_state[kRasterTextureFormat0] == 0x05710B29 &&
+        raster_state[kRasterTextureAddress0] == 0x00010303 &&
+        raster_state[kRasterTextureFilter0] == 0x02022000 &&
+        raster_state[kRasterTextureControl0_0] == 0x4003FFC4 &&
+        raster_state[kRasterTextureControl1_0] == 0x01C00000 &&
+        raster_state[kRasterTextureImageRect0] == 0x00640011 &&
+        raster_state[kRasterTexturePalette0] == 0x02DED080 &&
+        raster_state[kRasterTextureBorderColor0] == 0;
     // RS8/RS13 are the format-6 sibling of the I8 pair: the same 128x32
     // swizzle and captured pixel state, but direct little-endian A8R8G8B8
     // texels instead of palette indices.  The trace pins the two target
     // offsets, T0 offset, and every admitted state word below.
     const bool a8_texture_state =
-        raster_state_[kRasterTextureOffset0] == 0x02DEF080 &&
-        raster_state_[kRasterTextureFormat0] == 0x05710629 &&
-        raster_state_[kRasterTextureAddress0] == 0x00010303 &&
-        raster_state_[kRasterTextureFilter0] == 0x02022000 &&
-        raster_state_[kRasterTextureControl0_0] == 0x4003FFC4 &&
-        raster_state_[kRasterTextureControl1_0] == 0x01C00000 &&
-        raster_state_[kRasterTextureImageRect0] == 0x00640011 &&
-        raster_state_[kRasterTextureBorderColor0] == 0;
+        raster_state[kRasterTextureOffset0] == 0x02DEF080 &&
+        raster_state[kRasterTextureFormat0] == 0x05710629 &&
+        raster_state[kRasterTextureAddress0] == 0x00010303 &&
+        raster_state[kRasterTextureFilter0] == 0x02022000 &&
+        raster_state[kRasterTextureControl0_0] == 0x4003FFC4 &&
+        raster_state[kRasterTextureControl1_0] == 0x01C00000 &&
+        raster_state[kRasterTextureImageRect0] == 0x00640011 &&
+        raster_state[kRasterTextureBorderColor0] == 0;
     // RS16/RS17 use the distinct format-0x0b indexed texture: format sizes
     // encode a 64x128 swizzle, with a palette immediately before T0.  The
     // exact nonzero final factors exclude the captured one-off lookalike.
     const bool menu_i8_texture_state =
-        raster_state_[kRasterTextureOffset0] == 0x039FE800 &&
-        raster_state_[kRasterTextureFormat0] == 0x07610B29 &&
-        raster_state_[kRasterTextureAddress0] == 0x00010303 &&
-        raster_state_[kRasterTextureFilter0] == 0x02022000 &&
-        raster_state_[kRasterTextureControl0_0] == 0x4003FFC4 &&
-        raster_state_[kRasterTextureControl1_0] == 0x01C00000 &&
-        raster_state_[kRasterTextureImageRect0] == 0x00640011 &&
-        raster_state_[kRasterTexturePalette0] == 0x039FE400 &&
-        raster_state_[kRasterTextureBorderColor0] == 0;
+        raster_state[kRasterTextureOffset0] == 0x039FE800 &&
+        raster_state[kRasterTextureFormat0] == 0x07610B29 &&
+        raster_state[kRasterTextureAddress0] == 0x00010303 &&
+        raster_state[kRasterTextureFilter0] == 0x02022000 &&
+        raster_state[kRasterTextureControl0_0] == 0x4003FFC4 &&
+        raster_state[kRasterTextureControl1_0] == 0x01C00000 &&
+        raster_state[kRasterTextureImageRect0] == 0x00640011 &&
+        raster_state[kRasterTexturePalette0] == 0x039FE400 &&
+        raster_state[kRasterTextureBorderColor0] == 0;
     // IQRS3/IQRS7 are an independently witnessed upper-left artwork layer:
     // a 512x128 indexed texture immediately following its A8R8G8B8 palette.
     const bool artwork_i8_texture_state =
-        raster_state_[kRasterTextureOffset0] == 0x02DF4480 &&
-        raster_state_[kRasterTextureFormat0] == 0x07910B29 &&
-        raster_state_[kRasterTextureAddress0] == 0x00010303 &&
-        raster_state_[kRasterTextureFilter0] == 0x02022000 &&
-        raster_state_[kRasterTextureControl0_0] == 0x4003FFC4 &&
-        raster_state_[kRasterTextureControl1_0] == 0x01C00000 &&
-        raster_state_[kRasterTextureImageRect0] == 0x00640011 &&
-        raster_state_[kRasterTexturePalette0] == 0x02DF4080 &&
-        raster_state_[kRasterTextureBorderColor0] == 0;
+        raster_state[kRasterTextureOffset0] == 0x02DF4480 &&
+        raster_state[kRasterTextureFormat0] == 0x07910B29 &&
+        raster_state[kRasterTextureAddress0] == 0x00010303 &&
+        raster_state[kRasterTextureFilter0] == 0x02022000 &&
+        raster_state[kRasterTextureControl0_0] == 0x4003FFC4 &&
+        raster_state[kRasterTextureControl1_0] == 0x01C00000 &&
+        raster_state[kRasterTextureImageRect0] == 0x00640011 &&
+        raster_state[kRasterTexturePalette0] == 0x02DF4080 &&
+        raster_state[kRasterTextureBorderColor0] == 0;
     // IQRS5/IQRS10 are the direct-color 512x512 main-panel pair. Palette0 is
     // intentionally passive for format 6, just as for RS8/RS13.
     const bool main_panel_texture_state =
-        raster_state_[kRasterTextureOffset0] == 0x034FC080 &&
-        raster_state_[kRasterTextureFormat0] == 0x09910629 &&
-        raster_state_[kRasterTextureAddress0] == 0x00010303 &&
-        raster_state_[kRasterTextureFilter0] == 0x02022000 &&
-        raster_state_[kRasterTextureControl0_0] == 0x4003FFC4 &&
-        raster_state_[kRasterTextureControl1_0] == 0x01C00000 &&
-        raster_state_[kRasterTextureImageRect0] == 0x00640011 &&
-        raster_state_[kRasterTextureBorderColor0] == 0;
+        raster_state[kRasterTextureOffset0] == 0x034FC080 &&
+        raster_state[kRasterTextureFormat0] == 0x09910629 &&
+        raster_state[kRasterTextureAddress0] == 0x00010303 &&
+        raster_state[kRasterTextureFilter0] == 0x02022000 &&
+        raster_state[kRasterTextureControl0_0] == 0x4003FFC4 &&
+        raster_state[kRasterTextureControl1_0] == 0x01C00000 &&
+        raster_state[kRasterTextureImageRect0] == 0x00640011 &&
+        raster_state[kRasterTextureBorderColor0] == 0;
     // IQRS4/IQRS7 are the 1024x1024 direct-color full-screen pair. Palette0
     // is stale/passive for format 6; nonzero final factors exclude IQRS12.
     const bool fullscreen_texture_state =
-        raster_state_[kRasterTextureOffset0] == 0x035FD080 &&
-        raster_state_[kRasterTextureFormat0] == 0x0AA10629 &&
-        raster_state_[kRasterTextureAddress0] == 0x00010303 &&
-        raster_state_[kRasterTextureFilter0] == 0x02022000 &&
-        raster_state_[kRasterTextureControl0_0] == 0x4003FFC4 &&
-        raster_state_[kRasterTextureControl1_0] == 0x01C00000 &&
-        raster_state_[kRasterTextureImageRect0] == 0x00640011 &&
-        raster_state_[kRasterTextureBorderColor0] == 0;
+        raster_state[kRasterTextureOffset0] == 0x035FD080 &&
+        raster_state[kRasterTextureFormat0] == 0x0AA10629 &&
+        raster_state[kRasterTextureAddress0] == 0x00010303 &&
+        raster_state[kRasterTextureFilter0] == 0x02022000 &&
+        raster_state[kRasterTextureControl0_0] == 0x4003FFC4 &&
+        raster_state[kRasterTextureControl1_0] == 0x01C00000 &&
+        raster_state[kRasterTextureImageRect0] == 0x00640011 &&
+        raster_state[kRasterTextureBorderColor0] == 0;
     uint32_t reject_mask = 0;
     if (!a4_source_shape) reject_mask |= 1u << 0;
     if (!transform_state) reject_mask |= 1u << 1;
@@ -1973,9 +3334,9 @@ bool Nv2a::rasterize_witnessed_immediate_quad(bool& executed) {
     if (!i8_texture_state) i8_reject_mask |= 1u << 6;
     const bool i8_candidate =
         immediate_source && witnessed_target && vertex_count == 4 &&
-        raster_state_[kRasterAlphaFunc] == 0x0207 &&
-        (raster_state_[kRasterAlphaRef] & 0xFFu) == 0 &&
-        raster_state_[kRasterTextureFormat0] == 0x05710B29;
+        raster_state[kRasterAlphaFunc] == 0x0207 &&
+        (raster_state[kRasterAlphaRef] & 0xFFu) == 0 &&
+        raster_state[kRasterTextureFormat0] == 0x05710B29;
     if (i8_candidate) {
         ++immediate_quad_i8_candidates_;
         last_immediate_quad_i8_reject_mask_ = i8_reject_mask;
@@ -1991,9 +3352,9 @@ bool Nv2a::rasterize_witnessed_immediate_quad(bool& executed) {
     if (!a8_texture_state) a8_reject_mask |= 1u << 6;
     const bool a8_candidate =
         immediate_source && witnessed_target && vertex_count == 4 &&
-        raster_state_[kRasterAlphaFunc] == 0x0207 &&
-        (raster_state_[kRasterAlphaRef] & 0xFFu) == 0 &&
-        raster_state_[kRasterTextureFormat0] == 0x05710629;
+        raster_state[kRasterAlphaFunc] == 0x0207 &&
+        (raster_state[kRasterAlphaRef] & 0xFFu) == 0 &&
+        raster_state[kRasterTextureFormat0] == 0x05710629;
     if (a8_candidate) {
         ++immediate_quad_a8_candidates_;
         last_immediate_quad_a8_reject_mask_ = a8_reject_mask;
@@ -2007,16 +3368,16 @@ bool Nv2a::rasterize_witnessed_immediate_quad(bool& executed) {
     if (!stencil_state) menu_i8_reject_mask |= 1u << 4;
     if (!i8_combiner_state) menu_i8_reject_mask |= 1u << 5;
     if (!menu_i8_texture_state) menu_i8_reject_mask |= 1u << 6;
-    if (raster_state_[kRasterCombinerFinalFactor0] != 0x00DADADA ||
-        raster_state_[kRasterCombinerFinalFactor1] != 0x00101010)
+    if (raster_state[kRasterCombinerFinalFactor0] != 0x00DADADA ||
+        raster_state[kRasterCombinerFinalFactor1] != 0x00101010)
         menu_i8_reject_mask |= 1u << 7;
     const bool menu_i8_candidate =
         immediate_source && witnessed_target && vertex_count == 4 &&
-        raster_state_[kRasterAlphaFunc] == 0x0207 &&
-        (raster_state_[kRasterAlphaRef] & 0xFFu) == 0 &&
-        raster_state_[kRasterTextureFormat0] == 0x07610B29 &&
-        raster_state_[kRasterCombinerFinalFactor0] == 0x00DADADA &&
-        raster_state_[kRasterCombinerFinalFactor1] == 0x00101010;
+        raster_state[kRasterAlphaFunc] == 0x0207 &&
+        (raster_state[kRasterAlphaRef] & 0xFFu) == 0 &&
+        raster_state[kRasterTextureFormat0] == 0x07610B29 &&
+        raster_state[kRasterCombinerFinalFactor0] == 0x00DADADA &&
+        raster_state[kRasterCombinerFinalFactor1] == 0x00101010;
     if (menu_i8_candidate) {
         ++immediate_quad_menu_i8_candidates_;
         last_immediate_quad_menu_i8_reject_mask_ = menu_i8_reject_mask;
@@ -2030,17 +3391,17 @@ bool Nv2a::rasterize_witnessed_immediate_quad(bool& executed) {
     if (!stencil_state) artwork_i8_reject_mask |= 1u << 4;
     if (!i8_combiner_state) artwork_i8_reject_mask |= 1u << 5;
     if (!artwork_i8_texture_state) artwork_i8_reject_mask |= 1u << 6;
-    if (raster_state_[kRasterCombinerFinalFactor0] != 0x00DADADA ||
-        raster_state_[kRasterCombinerFinalFactor1] != 0x00101010)
+    if (raster_state[kRasterCombinerFinalFactor0] != 0x00DADADA ||
+        raster_state[kRasterCombinerFinalFactor1] != 0x00101010)
         artwork_i8_reject_mask |= 1u << 7;
     const bool artwork_i8_candidate =
         immediate_source && witnessed_target && vertex_count == 4 &&
-        raster_state_[kRasterAlphaFunc] == 0x0207 &&
-        (raster_state_[kRasterAlphaRef] & 0xFFu) == 0 &&
-        raster_state_[kRasterTextureOffset0] == 0x02DF4480 &&
-        raster_state_[kRasterTextureFormat0] == 0x07910B29 &&
-        raster_state_[kRasterCombinerFinalFactor0] == 0x00DADADA &&
-        raster_state_[kRasterCombinerFinalFactor1] == 0x00101010;
+        raster_state[kRasterAlphaFunc] == 0x0207 &&
+        (raster_state[kRasterAlphaRef] & 0xFFu) == 0 &&
+        raster_state[kRasterTextureOffset0] == 0x02DF4480 &&
+        raster_state[kRasterTextureFormat0] == 0x07910B29 &&
+        raster_state[kRasterCombinerFinalFactor0] == 0x00DADADA &&
+        raster_state[kRasterCombinerFinalFactor1] == 0x00101010;
     if (artwork_i8_candidate) {
         ++immediate_quad_artwork_i8_candidates_;
         last_immediate_quad_artwork_i8_reject_mask_ = artwork_i8_reject_mask;
@@ -2054,17 +3415,17 @@ bool Nv2a::rasterize_witnessed_immediate_quad(bool& executed) {
     if (!stencil_state) main_panel_reject_mask |= 1u << 4;
     if (!i8_combiner_state) main_panel_reject_mask |= 1u << 5;
     if (!main_panel_texture_state) main_panel_reject_mask |= 1u << 6;
-    if (raster_state_[kRasterCombinerFinalFactor0] != 0x00DADADA ||
-        raster_state_[kRasterCombinerFinalFactor1] != 0x00101010)
+    if (raster_state[kRasterCombinerFinalFactor0] != 0x00DADADA ||
+        raster_state[kRasterCombinerFinalFactor1] != 0x00101010)
         main_panel_reject_mask |= 1u << 7;
     const bool main_panel_candidate =
         immediate_source && witnessed_target && vertex_count == 4 &&
-        raster_state_[kRasterAlphaFunc] == 0x0207 &&
-        (raster_state_[kRasterAlphaRef] & 0xFFu) == 0 &&
-        raster_state_[kRasterTextureOffset0] == 0x034FC080 &&
-        raster_state_[kRasterTextureFormat0] == 0x09910629 &&
-        raster_state_[kRasterCombinerFinalFactor0] == 0x00DADADA &&
-        raster_state_[kRasterCombinerFinalFactor1] == 0x00101010;
+        raster_state[kRasterAlphaFunc] == 0x0207 &&
+        (raster_state[kRasterAlphaRef] & 0xFFu) == 0 &&
+        raster_state[kRasterTextureOffset0] == 0x034FC080 &&
+        raster_state[kRasterTextureFormat0] == 0x09910629 &&
+        raster_state[kRasterCombinerFinalFactor0] == 0x00DADADA &&
+        raster_state[kRasterCombinerFinalFactor1] == 0x00101010;
     if (main_panel_candidate) {
         ++immediate_quad_main_panel_candidates_;
         last_immediate_quad_main_panel_reject_mask_ = main_panel_reject_mask;
@@ -2078,17 +3439,17 @@ bool Nv2a::rasterize_witnessed_immediate_quad(bool& executed) {
     if (!stencil_state) fullscreen_reject_mask |= 1u << 4;
     if (!i8_combiner_state) fullscreen_reject_mask |= 1u << 5;
     if (!fullscreen_texture_state) fullscreen_reject_mask |= 1u << 6;
-    if (raster_state_[kRasterCombinerFinalFactor0] != 0x00DADADA ||
-        raster_state_[kRasterCombinerFinalFactor1] != 0x00101010)
+    if (raster_state[kRasterCombinerFinalFactor0] != 0x00DADADA ||
+        raster_state[kRasterCombinerFinalFactor1] != 0x00101010)
         fullscreen_reject_mask |= 1u << 7;
     const bool fullscreen_candidate =
         immediate_source && witnessed_target && vertex_count == 4 &&
-        raster_state_[kRasterAlphaFunc] == 0x0207 &&
-        (raster_state_[kRasterAlphaRef] & 0xFFu) == 0 &&
-        raster_state_[kRasterTextureOffset0] == 0x035FD080 &&
-        raster_state_[kRasterTextureFormat0] == 0x0AA10629 &&
-        raster_state_[kRasterCombinerFinalFactor0] == 0x00DADADA &&
-        raster_state_[kRasterCombinerFinalFactor1] == 0x00101010;
+        raster_state[kRasterAlphaFunc] == 0x0207 &&
+        (raster_state[kRasterAlphaRef] & 0xFFu) == 0 &&
+        raster_state[kRasterTextureOffset0] == 0x035FD080 &&
+        raster_state[kRasterTextureFormat0] == 0x0AA10629 &&
+        raster_state[kRasterCombinerFinalFactor0] == 0x00DADADA &&
+        raster_state[kRasterCombinerFinalFactor1] == 0x00101010;
     if (fullscreen_candidate) {
         ++immediate_quad_fullscreen_candidates_;
         last_immediate_quad_fullscreen_reject_mask_ = fullscreen_reject_mask;
@@ -2178,14 +3539,14 @@ bool Nv2a::rasterize_witnessed_immediate_quad(bool& executed) {
     if (!resolve_range(color_dma_, color_offset, kColorBytes,
                        color_address, "color") ||
         !resolve_range(texture_dma_a_,
-                       raster_state_[kRasterTextureOffset0], texture_bytes,
+                       raster_state[kRasterTextureOffset0], texture_bytes,
                        texture_address, texture_name)) {
         return false;
     }
 
     uint32_t palette_address = 0;
     if ((i8_profile || menu_i8_profile || artwork_i8_profile) &&
-        !resolve_range(texture_dma_a_, raster_state_[kRasterTexturePalette0] & ~0x3Fu,
+        !resolve_range(texture_dma_a_, raster_state[kRasterTexturePalette0] & ~0x3Fu,
                        256u * sizeof(uint32_t), palette_address, "I8 palette")) {
         return false;
     }
@@ -2209,6 +3570,34 @@ bool Nv2a::rasterize_witnessed_immediate_quad(bool& executed) {
         return true;
     }
 
+    // Stage (d): the immediate-quad family builds its surfaces WITHOUT
+    // mem_direct_, so under DESIGN-NV2A-SEAM.md section 1.3 it is inline-only --
+    // its destination writes and its per-fragment palette reads both go through
+    // uc_mem_read/uc_mem_write. Converting it to the direct path is its own bead
+    // (design section 3.2); until then this is a permanent no_direct_ptr.
+    seam_note_threadable(job, false, kSeamNoDirectPointer);
+    // Seam anchor 6 (F6): the quad's texture source against pending destinations.
+    seam_texture_source_anchor(texture_address, texture_bytes);
+    // Stage (f) residency census: this family never queries renderer residency
+    // (it is the one witnessed path with no resolve_renderer_* call), so it is
+    // hooked directly. It is a full-screen CPU blit family and therefore one of
+    // the consumers that can force a GPU-authoritative surface back to guest RAM.
+    ++gpu_res_.cpu_draws;
+    gpu_res_cpu_color_access(color_address, kColorBytes,
+                             kGpuResCauseImmediateQuad);
+    // This family is the one witnessed path with no renderer residency query at
+    // all: it reads its texture and palette and writes its destination straight
+    // through uc_mem_read/uc_mem_write. That was invisible while nothing it
+    // touched was ever GPU-resident; with the stage (f) executor it is a
+    // coherence hole in both directions, so both are closed here.
+    if (!resolve_renderer_color_overlap(color_address,
+                                        static_cast<size_t>(kColorBytes),
+                                        "immediate-quad destination") ||
+        !resolve_renderer_color_overlap(texture_address,
+                                        static_cast<size_t>(texture_bytes),
+                                        "immediate-quad texture")) {
+        return false;
+    }
     PagedRasterSurface color_surface(
         color_address, static_cast<size_t>(kColorBytes), mem_read_, mem_write_);
     PagedRasterSurface texture_surface(
@@ -2220,10 +3609,10 @@ bool Nv2a::rasterize_witnessed_immediate_quad(bool& executed) {
     }
     SwizzleLookup texture_swizzle(texture_width, texture_height);
 
-    const uint32_t clip_x = surface_clip_horizontal_ & 0xFFFFu;
-    const uint32_t clip_width = surface_clip_horizontal_ >> 16;
-    const uint32_t clip_y = surface_clip_vertical_ & 0xFFFFu;
-    const uint32_t clip_height = surface_clip_vertical_ >> 16;
+    const uint32_t clip_x = surface_clip_horizontal & 0xFFFFu;
+    const uint32_t clip_width = surface_clip_horizontal >> 16;
+    const uint32_t clip_y = surface_clip_vertical & 0xFFFFu;
+    const uint32_t clip_height = surface_clip_vertical >> 16;
     const uint32_t xmin = clip_x;
     const uint32_t xmax = clip_x + clip_width - 1;
     const uint32_t ymin = clip_y;
@@ -2610,18 +3999,23 @@ bool Nv2a::rasterize_witnessed_immediate_quad(bool& executed) {
     // Kelvin QUADS uses two triangles per independent four-vertex group. This ordering
     // matches the retained winding and preserves the diagonal interpolation edge.
     for (size_t i = 0; i + 3 < vertex_count; i += 4) {
-        rasterize_triangle(transformed_batch_[i + 1],
-                           transformed_batch_[i + 2],
-                           transformed_batch_[i]);
-        rasterize_triangle(transformed_batch_[i + 2],
-                           transformed_batch_[i + 3],
-                           transformed_batch_[i]);
+        rasterize_triangle(transformed_batch[i + 1],
+                           transformed_batch[i + 2],
+                           transformed_batch[i]);
+        rasterize_triangle(transformed_batch[i + 2],
+                           transformed_batch[i + 3],
+                           transformed_batch[i]);
     }
     if (failed) return false;
     if (!color_surface.flush()) {
         fault_("NV2A immediate-quad color DMA write failed");
         return false;
     }
+    // The other half of the coherence hole closed at the head of this function:
+    // guest memory is now newer than any GPU copy of the same range.
+    invalidate_renderer_color_overlap(
+        color_address, static_cast<size_t>(kColorBytes),
+        nv2a_invalidate_token(kNv2aInvalidateImmediateQuad));
     if (i8_profile)
         ++immediate_quad_i8_raster_batches_;
     else if (menu_i8_profile)
@@ -2640,69 +4034,845 @@ bool Nv2a::rasterize_witnessed_immediate_quad(bool& executed) {
     return true;
 }
 
-bool Nv2a::rasterize_witnessed_batch(bool& executed) {
-    executed = false;
-    if (primitive_mode_ == 8)
-        return rasterize_witnessed_immediate_quad(executed);
-    enum class Profile {
-        kNone,
-        kPitchZ16Depth,
-        kSwizzledRadialColor,
-        kSwizzledTexturedColor,
-        kPitchTexturedColor,
-        kSwizzledProjectedColor,
-        kPitchProjectedColor,
-        kPitchMultiTextureColor,
-        kPitchThreeTextureColor,
-        kPitchTex5ProjectedColor,
-        kPitchTex5DiffuseColor,
-        kInlineLinearBlitColor,
-        kPitchSingleTextureColor,
-        kTex7FanColor,
-        kTexfProjectedFanColor,
-        kPitchAdditiveColor,
+// ============ stage (f): the witnessed-profile GPU executor =================
+// beads-xbox.1.15.7, DESIGN-NV2A-SEAM.md section 5(f).
+//
+// Selection is an EXACT STATE PREDICATE, not a profile test. The witnessed
+// matchers already pin every combiner word of these two profiles, and the
+// per-profile subset validators already pin the raster state (they fault_ on
+// anything outside it), so the shader for a profile has to implement exactly
+// one combiner configuration. gpu_profile_state_ok re-asserts that pinning
+// independently of the matcher, so a future matcher relaxation cannot silently
+// widen what the GPU claims to implement -- it would fall back to the CPU
+// executor instead, unchanged.
+bool Nv2a::gpu_profile_state_ok(const DrawJob& job) const {
+    // Deliberately independent of --nv2a-gpu-profiles and of whether a renderer
+    // exists: this is the STATE question, and the residency census below uses
+    // it in both arms so the flag-off run measures the same partition the
+    // flag-on run executes.
+    // F14 / design section 4.3 option O3: the per-write FNV folds are a
+    // sequential accumulator over every written word and cannot be reproduced
+    // by a fragment shader. F15: a diagnostic callback wants the software
+    // path's per-write record. Both fall back, exactly as threading does.
+    if (job.hash_on) { ++gpu_profile_reject_[kGpuRejectHashOn]; return false; }
+    if (job.debug_cb_installed) {
+        ++gpu_profile_reject_[kGpuRejectDebugCb];
+        return false;
+    }
+    const auto& rs = job.raster_state;
+    const Profile profile = static_cast<Profile>(job.profile);
+    const bool radial = profile == Profile::kSwizzledRadialColor;
+    const bool textured = profile == Profile::kPitchTexturedColor;
+    // beads-xbox.1.15.10 phase 4 (lever A). Third executor profile, mask bit 2.
+    const bool projected = profile == Profile::kPitchProjectedColor;
+    if (!radial && !textured && !projected) return false;
+    if ((gpu_profile_mask_ & (radial ? 1u : (textured ? 2u : 4u))) == 0)
+        return false;
+    // Polygon offset: the shader implements depth WITHOUT the
+    // `depth += bias + scale * max_z_slope` term, which is exact only while the
+    // offset is disabled. Both profiles' validators pin `enables` to a value
+    // with bit 13 clear, so this is a re-assertion, not a new restriction.
+    if ((rs[kRasterEnables] & (1u << 13)) != 0 ||
+        rs[kRasterShaderOtherStageInput] != 0 || rs[kRasterDotRgbMapping] != 0) {
+        ++gpu_profile_reject_[kGpuRejectRasterSubset];
+        return false;
+    }
+    if (radial) {
+        if (rs[kRasterTextureEnableMask] != 0 ||
+            rs[kRasterShaderStageProgram] != 0x00000004 ||
+            rs[kRasterCombinerControl] != 0x00011103 ||
+            rs[kRasterCombinerColorIcw0 + 0] != 0x48480000 ||
+            rs[kRasterCombinerColorIcw0 + 1] != 0x2D2D0000 ||
+            rs[kRasterCombinerColorIcw0 + 2] != 0xC4CD0000 ||
+            rs[kRasterCombinerAlphaIcw0 + 0] != 0x00000000 ||
+            rs[kRasterCombinerAlphaIcw0 + 1] != 0x3D3D1010 ||
+            rs[kRasterCombinerAlphaIcw0 + 2] != 0xD4DD1010 ||
+            rs[kRasterCombinerColorOcw0 + 0] != 0x000820D0 ||
+            rs[kRasterCombinerColorOcw0 + 1] != 0x000000D0 ||
+            rs[kRasterCombinerColorOcw0 + 2] != 0x000000C0 ||
+            rs[kRasterCombinerAlphaOcw0 + 0] != 0x00000000 ||
+            rs[kRasterCombinerAlphaOcw0 + 1] != 0x000000D0 ||
+            rs[kRasterCombinerAlphaOcw0 + 2] != 0x000000C0 ||
+            rs[kRasterCombinerSpecularFog0] != 0x0000000C ||
+            rs[kRasterCombinerSpecularFog1] != 0x00002080 ||
+            rs[kRasterEnables] != 0x000Fu ||
+            rs[kRasterAlphaFunc] != 0x0206 ||
+            (rs[kRasterAlphaRef] & 0xFFu) != 1) {
+            ++gpu_profile_reject_[kGpuRejectCombiner];
+            return false;
+        }
+        for (size_t stage = 0; stage < 3; ++stage) {
+            if (rs[kRasterCombinerFactor0_0 + stage] != 0 ||
+                rs[kRasterCombinerFactor1_0 + stage] != 0) {
+                ++gpu_profile_reject_[kGpuRejectCombiner];
+                return false;
+            }
+        }
+    } else if (projected) {
+        // The EXACT combiner fingerprint of kPitchProjectedColor, re-asserted
+        // independently of the matcher exactly as the two profiles above are:
+        // nv2a.cpp `projected_color_icw` / `projected_alpha_icw` /
+        // `projected_color_ocw` / `projected_factor0` / `projected_factor1`,
+        // seven stages, with STAGE 5 the only pair of free words (the shader's
+        // weight0 / weight1). RS0 0x00010C61 and CombinerControl 0x00011107
+        // separate it from the textured program, which is 0x00010C60 /
+        // 0x00011108 and has eight stages.
+        static const std::array<uint32_t, 7> kIcw{{
+            0x4849484A, 0x0D0D0000, 0xCDCD0000, 0xCDCD0000,
+            0xCDCD0000, 0xC10CC20D, 0xC40520C1,
+        }};
+        static const std::array<uint32_t, 7> kAlphaIcw{{
+            0x5859585A, 0, 0, 0, 0, 0, 0,
+        }};
+        static const std::array<uint32_t, 7> kOcw{{
+            0x000C30CD, 0x000000D0, 0x000000D0, 0x000000D0,
+            0x000000D0, 0x000005CD, 0x00000C00,
+        }};
+        static const std::array<uint32_t, 7> kFactor0{{
+            0, 0, 0, 0, 0, 0, 0xFF000000,
+        }};
+        static const std::array<uint32_t, 7> kFactor1{{
+            0, 0, 0, 0, 0, 0, 0,
+        }};
+        if (rs[kRasterTextureEnableMask] != 0xFu ||
+            rs[kRasterShaderStageProgram] != 0x00010C61 ||
+            rs[kRasterShadowDepthFunc] != 4 ||
+            rs[kRasterCombinerControl] != 0x00011107 ||
+            rs[kRasterCombinerSpecularFog0] != 0x0C0B000F ||
+            rs[kRasterCombinerSpecularFog1] != 0x0C011180 ||
+            rs[kRasterCombinerFinalFactor0] != 0xFF3F3F3F ||
+            rs[kRasterCombinerFinalFactor1] != 0 ||
+            rs[kRasterEnables] != 0x000Cu ||
+            rs[kRasterAlphaFunc] != 0x0206 ||
+            (rs[kRasterAlphaRef] & 0xFFu) != 1) {
+            ++gpu_profile_reject_[kGpuRejectCombiner];
+            return false;
+        }
+        for (size_t stage = 0; stage < 7; ++stage) {
+            if (rs[kRasterCombinerColorIcw0 + stage] != kIcw[stage] ||
+                rs[kRasterCombinerAlphaIcw0 + stage] != kAlphaIcw[stage] ||
+                rs[kRasterCombinerColorOcw0 + stage] != kOcw[stage] ||
+                rs[kRasterCombinerAlphaOcw0 + stage] != 0) {
+                ++gpu_profile_reject_[kGpuRejectCombiner];
+                return false;
+            }
+            if (stage == 5) continue;
+            if (rs[kRasterCombinerFactor0_0 + stage] != kFactor0[stage] ||
+                rs[kRasterCombinerFactor1_0 + stage] != kFactor1[stage]) {
+                ++gpu_profile_reject_[kGpuRejectCombiner];
+                return false;
+            }
+        }
+        // The two sampled images, pinned exactly as the profile's own subset
+        // validator pins them (nv2a.cpp, `witnessed_texture` and
+        // `witnessed_projected_texture`). The shader implements ONE addressing
+        // and filtering configuration per unit: CLAMP-to-edge bilinear on the
+        // cube pair (address 0x00030303, filter 0x02022000, control0
+        // 0x4003FFC0) and REPEAT bilinear on the stage-0 projective image
+        // (format 0x0771062A, address 0x00010101, filter 0x02022000, control0
+        // 0x4003FFF0, control1 0x14000000, palette 0). The border colour is not
+        // asserted because kRepeat and kClampToEdge never read it.
+        const uint32_t format1 = rs[kRasterTextureFormat0 + 1];
+        if (format1 != rs[kRasterTextureFormat0 + 2] ||
+            (format1 != 0x0661072E && format1 != 0x0771072E) ||
+            rs[kRasterTextureOffset0 + 1] != rs[kRasterTextureOffset0 + 2] ||
+            rs[kRasterTextureAddress0 + 1] != 0x00030303 ||
+            rs[kRasterTextureAddress0 + 2] != 0x00030303 ||
+            rs[kRasterTextureFilter0 + 1] != 0x02022000 ||
+            rs[kRasterTextureFilter0 + 2] != 0x02022000 ||
+            rs[kRasterTextureControl0_0 + 1] != 0x4003FFC0 ||
+            rs[kRasterTextureControl0_0 + 2] != 0x4003FFC0 ||
+            rs[kRasterTexturePalette0 + 1] != 0 ||
+            rs[kRasterTexturePalette0 + 2] != 0 ||
+            rs[kRasterTextureFormat0 + 0] != 0x0771062A ||
+            rs[kRasterTextureAddress0 + 0] != 0x00010101 ||
+            rs[kRasterTextureFilter0 + 0] != 0x02022000 ||
+            rs[kRasterTextureControl0_0 + 0] != 0x4003FFF0 ||
+            rs[kRasterTextureControl1_0 + 0] != 0x14000000 ||
+            rs[kRasterTexturePalette0 + 0] != 0) {
+            ++gpu_profile_reject_[kGpuRejectCombiner];
+            return false;
+        }
+        if (job.texture_width == 0 || job.texture_height == 0 ||
+            job.texture_data.size() != static_cast<size_t>(job.texture_width) *
+                                           job.texture_height * 4u ||
+            job.projected_texture_width == 0 ||
+            job.projected_texture_height == 0 ||
+            job.projected_texture_data.size() !=
+                static_cast<size_t>(job.projected_texture_width) *
+                    job.projected_texture_height * 4u) {
+            ++gpu_profile_reject_[kGpuRejectTexture];
+            return false;
+        }
+    } else {
+        static const std::array<uint32_t, 8> kIcw{{
+            0xC149C14A, 0x0D0D0000, 0xCDCD0000, 0xCDCD0000,
+            0xCDCD0000, 0xCDCD0000, 0xC10CC20D, 0xC40520C1,
+        }};
+        static const std::array<uint32_t, 8> kAlphaIcw{{
+            0xD159D15A, 0, 0, 0, 0, 0, 0, 0,
+        }};
+        static const std::array<uint32_t, 8> kOcw{{
+            0x000C30CD, 0x000000D0, 0x000000D0, 0x000000D0,
+            0x000000D0, 0x000000D0, 0x000005CD, 0x00000C00,
+        }};
+        static const std::array<uint32_t, 8> kFactor0{{
+            0xFF0000FF, 0, 0, 0, 0, 0, 0, 0xFF000000,
+        }};
+        static const std::array<uint32_t, 8> kFactor1{{
+            0, 0, 0, 0, 0, 0, 0, 0,
+        }};
+        if (rs[kRasterTextureEnableMask] != 0xFu ||
+            rs[kRasterShaderStageProgram] != 0x00010C60 ||
+            rs[kRasterShadowDepthFunc] != 4 ||
+            rs[kRasterCombinerControl] != 0x00011108 ||
+            rs[kRasterCombinerSpecularFog0] != 0x0C0B000F ||
+            rs[kRasterCombinerSpecularFog1] != 0x0C011180 ||
+            rs[kRasterCombinerFinalFactor0] != 0xFF3F3F3F ||
+            rs[kRasterCombinerFinalFactor1] != 0 ||
+            rs[kRasterEnables] != 0x000Cu ||
+            rs[kRasterAlphaFunc] != 0x0206 ||
+            (rs[kRasterAlphaRef] & 0xFFu) != 1) {
+            ++gpu_profile_reject_[kGpuRejectCombiner];
+            return false;
+        }
+        for (size_t stage = 0; stage < 8; ++stage) {
+            if (rs[kRasterCombinerColorIcw0 + stage] != kIcw[stage] ||
+                rs[kRasterCombinerAlphaIcw0 + stage] != kAlphaIcw[stage] ||
+                rs[kRasterCombinerColorOcw0 + stage] != kOcw[stage] ||
+                rs[kRasterCombinerAlphaOcw0 + stage] != 0) {
+                ++gpu_profile_reject_[kGpuRejectCombiner];
+                return false;
+            }
+            // Stage 6 carries the only two combiner words this fingerprint
+            // leaves free; they are the shader's weight0 / weight1 uniforms.
+            if (stage == 6) continue;
+            if (rs[kRasterCombinerFactor0_0 + stage] != kFactor0[stage] ||
+                rs[kRasterCombinerFactor1_0 + stage] != kFactor1[stage]) {
+                ++gpu_profile_reject_[kGpuRejectCombiner];
+                return false;
+            }
+        }
+        if (job.texture_width == 0 || job.texture_height == 0 ||
+            job.texture_data.size() != static_cast<size_t>(job.texture_width) *
+                                           job.texture_height * 4u) {
+            ++gpu_profile_reject_[kGpuRejectTexture];
+            return false;
+        }
+    }
+    // Common raster subset, re-asserted (the validators already faulted on
+    // anything else): no blending, LEQUAL depth with the write on, smooth
+    // shading, full colour mask.
+    if (rs[kRasterControl0] != 0x00100001 || rs[kRasterBlendSrc] != 1 ||
+        rs[kRasterBlendDst] != 0 || rs[kRasterBlendEquation] != 0x8006 ||
+        rs[kRasterDepthFunc] != 0x0203 || rs[kRasterColorMask] != 0x01010101 ||
+        rs[kRasterShadeMode] != 0x1D01 ||
+        rs[kRasterFrontPolygonMode] != 0x1B02 ||
+        rs[kRasterBackPolygonMode] != 0x1B02 ||
+        rs[kRasterCullFace] != 0x0405 || rs[kRasterFrontFace] != 0x0900 ||
+        rs[kRasterZMinMaxControl] != 1) {
+        ++gpu_profile_reject_[kGpuRejectRasterSubset];
+        return false;
+    }
+    const uint32_t surface_type = (job.surface_format >> 8) & 0xFu;
+    // beads-xbox.1.15.10 phase 2 session 2. A SWIZZLED destination (type 2) is
+    // Morton-ordered, and the Morton index only maps [0,w) x [0,h) ONTO
+    // [0, w*h) when BOTH extents are powers of two. It is not merely a gap
+    // otherwise: at 1280x480 the largest index the interleave produces is
+    // 718 847 against w*h - 1 = 614 399, so the upload and the resolve would
+    // index a pixel past the end of a buffer sized to the surface. Verified
+    // numerically, not assumed: for 1024x512 (the only swizzled witnessed
+    // surface this workload uses) the map is a bijection, max index 524 287 of
+    // 524 288; for 1280x480 and 300x200 it is not. The hardware only produces
+    // power-of-two swizzled surfaces, so this predicate has never rejected a
+    // job here -- it exists so that a workload that does produce one takes the
+    // CPU path instead of writing out of bounds.
+    const auto power_of_two = [](uint32_t v) {
+        return v != 0 && (v & (v - 1)) == 0;
     };
+    if (!job.uses_depth || !job.writes_depth ||
+        job.color_bytes != job.depth_bytes || job.surface_width == 0 ||
+        job.surface_height == 0 || job.pitch != job.surface_width * 4u ||
+        job.color_bytes !=
+            static_cast<uint64_t>(job.pitch) * job.surface_height ||
+        radial != (surface_type == 2) ||
+        (surface_type == 2 && !(power_of_two(job.surface_width) &&
+                                power_of_two(job.surface_height)))) {
+        ++gpu_profile_reject_[kGpuRejectSurface];
+        return false;
+    }
+    if (job.primitive_mode != 5 && job.primitive_mode != 6 &&
+        job.primitive_mode != 7) {
+        ++gpu_profile_reject_[kGpuRejectPrimitive];
+        return false;
+    }
+    // Phase 2 (beads-xbox.1.15.10): the shader now runs the SOFTWARE PATH'S OWN
+    // int64 edge arithmetic (GL_ARB_gpu_shader_int64), so there is no longer a
+    // magnitude at which the two disagree by construction -- including the
+    // degenerate regime where both wrap. The bound that remains is the one that
+    // keeps `llround(pos * 16.0f)` itself meaningful, so the DEFAULT moved from
+    // 2^24 to 2^50 (see set_gpu_exact_coords for the opt-out that restores the
+    // old bound for bisection).
+    //
+    // This is not a tuning change, it is the phase-2 census result. Per 12 G
+    // instructions the 2^24 bound rejected 1 126 jobs, and those 1 126 jobs
+    // caused 806 of the 1 110 witnessed-CPU-draw residency breaks -- 0.72 full
+    // surface round trips EACH, against 0.029 for kPitchProjectedColor and
+    // 0.000 for every one of the other eleven CPU profiles, including
+    // kPitchZ16Depth's 142 842 draws. A rejected radial or pitch-textured draw
+    // is, by definition, a draw on the surface that is GPU-authoritative at
+    // that instant, so it is the single most expensive kind of draw to leave on
+    // the CPU.
+    const double kFixedLimit = static_cast<double>(
+        gpu_exact_coords_ ? kGpuFixedCoordinateLimitExact
+                          : kGpuFixedCoordinateLimitRelaxed);
+    // Both sampled profiles read texcoord1 and texcoord2; the projected one
+    // also reads the PROJECTIVE texcoord0, components 0, 1 and 3.
+    const bool textured_profile = textured || projected;
+    bool out_of_range = false;
+    bool non_finite = false;
+    for (const TransformedVertex& v : job.vertices) {
+        // position[0..2] non-finite makes the software path DROP the triangle
+        // (the per-triangle isfinite guard), and position[3] non-finite is
+        // legal there -- 1.0/inf is 0.0 and 1.0/nan is nan, both of which the
+        // shader carries in the same doubles. So neither is a job-level
+        // disqualifier; the triangle-level drop is reproduced in the assembly
+        // loop of gpu_profile_submit.
+        const float fx = v.position[0] * 16.0f;
+        const float fy = v.position[1] * 16.0f;
+        const double magnitude = std::max(std::abs(static_cast<double>(fx)),
+                                          std::abs(static_cast<double>(fy)));
+        if (std::isfinite(fx) && std::isfinite(fy)) {
+            if (magnitude > static_cast<double>(gpu_profile_max_fixed_))
+                gpu_profile_max_fixed_ = static_cast<uint64_t>(magnitude);
+            // The packet carries the fixed-point coordinates as doubles, which
+            // hold every integer below 2^53 exactly, so the only bound left is
+            // the one that keeps llround itself meaningful.
+            if (magnitude >= kFixedLimit) out_of_range = true;
+        }
+        for (size_t c = 0; c < 3; ++c) {
+            // DIFFUSE IS NOT A DISQUALIFIER, at any value. The software path
+            // runs `if (isnan) value = 1.0f;` then clamps to [0,1] BEFORE
+            // interpolating, so +inf becomes 1.0f and -inf becomes 0.0f and the
+            // packet carries the already-fixed-up, already-clamped float. An
+            // earlier revision of this predicate rejected infinite diffuse and
+            // that alone put 1 857 of 105 070 eligible jobs back on the CPU per
+            // 2 G instructions, which shattered the residency runs (137 -> 1 279
+            // runs, 235 -> 1 377 surface round trips). Measured, not reasoned.
+            //
+            // TEXCOORDS ARE. A non-finite INTERPOLATED varying is a software
+            // fault_, and the executor may not fault (design F13), so a vertex
+            // carrying one keeps the whole job on the CPU where the fault can
+            // be raised at the instruction that caused it.
+            if (!std::isfinite(v.texture[textured_profile ? 1 : 0][c]) ||
+                (textured_profile && !std::isfinite(v.texture[2][c]))) {
+                non_finite = true;
+            }
+            if (projected && c < 2 && !std::isfinite(v.texture[0][c]))
+                non_finite = true;
+        }
+        if (projected && !std::isfinite(v.texture[0][3])) {
+            non_finite = true;
+        }
+    }
+    if (out_of_range) {
+        ++gpu_profile_reject_[kGpuRejectVertexRange];
+        return false;
+    }
+    // A non-finite texcoord on some vertex of the batch is NOT by itself a
+    // disqualifier, and treating it as one cost 1 857 of 105 070 eligible jobs
+    // per 2 G instructions -- 1.8 percent of the jobs, but enough interleaving
+    // to take the residency runs from 137 to 1 279 and the surface round trips
+    // from 235 to 1 377. The software path only faults when the INTERPOLATED
+    // varying is non-finite, which requires the bad vertex to belong to a
+    // triangle that survives culling and covers a fragment. The cheap
+    // conservative half of that -- does a surviving triangle reference the bad
+    // vertex at all -- is evaluated here, and only for the 1.8 percent of jobs
+    // that need it, so the common path pays one bool.
+    if (non_finite &&
+        gpu_profile_non_finite_reaches_raster(job, textured_profile,
+                                              projected)) {
+        ++gpu_profile_reject_[kGpuRejectVertexNonFinite];
+        return false;
+    }
+    return true;
+}
 
-    const uint32_t enables = raster_state_[kRasterEnables];
-    const uint32_t color_format = surface_format_ & 0xFu;
-    const uint32_t surface_type = (surface_format_ >> 8) & 0xFu;
-    const uint32_t anti_aliasing = (surface_format_ >> 12) & 0xFu;
-    const uint32_t zeta_format = (surface_format_ >> 4) & 0xFu;
+// True when a triangle that survives the software path's finiteness guard and
+// its back-face cull references a vertex with a non-finite texcoord -- i.e.
+// when the software path could reach its `fault_` on a non-finite varying.
+bool Nv2a::gpu_profile_non_finite_reaches_raster(const DrawJob& job,
+                                                 bool textured,
+                                                 bool projected) const {
+    const std::vector<TransformedVertex>& vertices = job.vertices;
+    auto bad = [textured, projected](const TransformedVertex& v) {
+        for (size_t c = 0; c < 3; ++c) {
+            if (!std::isfinite(v.texture[textured ? 1 : 0][c])) return true;
+            if (textured && !std::isfinite(v.texture[2][c])) return true;
+            if (projected && c < 2 && !std::isfinite(v.texture[0][c]))
+                return true;
+        }
+        if (projected && !std::isfinite(v.texture[0][3])) return true;
+        return false;
+    };
+    auto fixed_xy = [](float value) -> int64_t {
+        return static_cast<int64_t>(std::llround(value * 16.0f));
+    };
+    auto survives = [&](const TransformedVertex& a, const TransformedVertex& b,
+                        const TransformedVertex& c) {
+        for (const TransformedVertex* v : {&a, &b, &c}) {
+            if (!std::isfinite(v->position[0]) ||
+                !std::isfinite(v->position[1]) ||
+                !std::isfinite(v->position[2])) {
+                return false;
+            }
+        }
+        const int64_t ax = fixed_xy(a.position[0]);
+        const int64_t ay = fixed_xy(a.position[1]);
+        const int64_t bx = fixed_xy(b.position[0]);
+        const int64_t by = fixed_xy(b.position[1]);
+        const int64_t cx = fixed_xy(c.position[0]);
+        const int64_t cy = fixed_xy(c.position[1]);
+        const int64_t area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+        if (area <= 0) return false;
+        return bad(a) || bad(b) || bad(c);
+    };
+    const size_t n = vertices.size();
+    if (job.primitive_mode == 5) {
+        for (size_t i = 0; i + 2 < n; i += 3)
+            if (survives(vertices[i], vertices[i + 1], vertices[i + 2]))
+                return true;
+    } else if (job.primitive_mode == 6) {
+        for (size_t i = 2; i < n; ++i) {
+            const bool even = (i & 1u) == 0;
+            if (survives(vertices[even ? i - 2 : i - 1],
+                         vertices[even ? i - 1 : i - 2], vertices[i])) {
+                return true;
+            }
+        }
+    } else {
+        for (size_t i = 2; i < n; ++i)
+            if (survives(vertices[0], vertices[i - 1], vertices[i]))
+                return true;
+    }
+    return false;
+}
+
+// Build the packet and hand it to the backend. Everything that can fault_ has
+// already run; a failure here is reported as a fault on the emulation thread at
+// the call site, exactly as the resident generic-combiner path reports one.
+bool Nv2a::gpu_profile_submit(DrawJob& job, bool& submitted) {
+    submitted = false;
+    const Profile profile = static_cast<Profile>(job.profile);
+    const bool radial = profile == Profile::kSwizzledRadialColor;
+    const bool projected = profile == Profile::kPitchProjectedColor;
+    // Slot in the per-profile surface census; also the index the executor's
+    // batch counters use below.
+    const size_t profile_slot = radial ? 0u : (projected ? 2u : 1u);
+    const auto& rs = job.raster_state;
+    Nv2aWitnessedProfilePacket& packet = gpu_packet_;
+    packet.profile = radial
+        ? Nv2aWitnessedProfilePacket::Profile::kSwizzledRadialColor
+        : (projected
+               ? Nv2aWitnessedProfilePacket::Profile::kPitchProjectedColor
+               : Nv2aWitnessedProfilePacket::Profile::kPitchTexturedColor);
+    packet.color_address = job.color_address;
+    packet.depth_address = job.depth_address;
+    packet.surface_size = static_cast<size_t>(job.color_bytes);
+    packet.surface_pitch = job.surface_pitch;
+    packet.surface_format = job.surface_format;
+    packet.surface_width = job.surface_width;
+    packet.surface_height = job.surface_height;
+    packet.swizzled_destination = radial;
+    gpu_profile_color_addr_[profile_slot] = job.color_address;
+    gpu_profile_depth_addr_[profile_slot] = job.depth_address;
+    gpu_profile_surface_bytes_[profile_slot] =
+        static_cast<uint32_t>(job.color_bytes);
+    // Clip: exactly the software executor's xmin/xmax/ymin/ymax, which is the
+    // surface clip rect intersected with the window clip.
+    uint32_t xmin = job.clip_x;
+    uint32_t xmax = job.clip_x + job.clip_width - 1;
+    uint32_t ymin = job.clip_y;
+    uint32_t ymax = job.clip_y + job.clip_height - 1;
+    const uint32_t window_x = rs[kRasterWindowClipHorizontal];
+    const uint32_t window_y = rs[kRasterWindowClipVertical];
+    xmin = std::max(xmin, window_x & 0xFFFu);
+    xmax = std::min(xmax, (window_x >> 16) & 0xFFFu);
+    ymin = std::max(ymin, window_y & 0xFFFu);
+    ymax = std::min(ymax, (window_y >> 16) & 0xFFFu);
+    if (xmax < xmin || ymax < ymin) {
+        // Empty clip: the software path counts the batch and writes nothing.
+        // Same here, with no GL work at all.
+        if (radial) ++radial_color_batches_;
+        else if (projected) ++pitch_projected_color_batches_;
+        else ++pitch_textured_color_batches_;
+        ++gpu_profile_jobs_;
+        submitted = true;
+        return true;
+    }
+    if (xmax >= job.surface_width || ymax >= job.surface_height) return true;
+    packet.xmin = xmin; packet.xmax = xmax;
+    packet.ymin = ymin; packet.ymax = ymax;
+    std::memcpy(&packet.clip_min, &rs[kRasterClipMin], sizeof(float));
+    std::memcpy(&packet.clip_max, &rs[kRasterClipMax], sizeof(float));
+
+    // ---- primitive assembly, identical to emit_batch_primitives -------------
+    packet.triangles.clear();
+    const std::vector<TransformedVertex>& vertices = job.vertices;
+    const size_t vertex_count = vertices.size();
+    uint64_t triangle_tally = 0;
+    auto emit = [&](const TransformedVertex& ia, const TransformedVertex& ib,
+                    const TransformedVertex& ic) {
+        const TransformedVertex* a = &ia;
+        const TransformedVertex* b = &ib;
+        const TransformedVertex* c = &ic;
+        // The software path's per-triangle finiteness guard, verbatim: a
+        // triangle with a non-finite screen position contributes nothing.
+        for (const TransformedVertex* vertex : {a, b, c}) {
+            if (!std::isfinite(vertex->position[0]) ||
+                !std::isfinite(vertex->position[1]) ||
+                !std::isfinite(vertex->position[2])) {
+                return;
+            }
+        }
+        auto fixed_xy = [](float value) -> int64_t {
+            return static_cast<int64_t>(std::llround(value * 16.0f));
+        };
+        int64_t ax = fixed_xy(a->position[0]);
+        int64_t ay = fixed_xy(a->position[1]);
+        int64_t bx = fixed_xy(b->position[0]);
+        int64_t by = fixed_xy(b->position[1]);
+        int64_t cx = fixed_xy(c->position[0]);
+        int64_t cy = fixed_xy(c->position[1]);
+        auto edge = [](int64_t x0, int64_t y0, int64_t x1, int64_t y1,
+                       int64_t px, int64_t py) -> int64_t {
+            return (x1 - x0) * (py - y0) - (y1 - y0) * (px - x0);
+        };
+        int64_t area = edge(ax, ay, bx, by, cx, cy);
+        if (area <= 0) return;   // CW is front-facing in the witnessed states
+        // The per-triangle counter sits here in the software path, after the
+        // cull and before the bounding-box test, so it is tallied here too.
+        ++triangle_tally;
+        // The software path adds `polygon_bias + polygon_scale * max_z_slope`
+        // to every fragment's depth. Both terms are zero for these profiles
+        // (bit 13 of `enables` is clear, re-asserted by the predicate), so the
+        // sum is +0.0f -- EXCEPT when max_z_slope is not finite, where 0.0f*inf
+        // is NaN and the software path discards every fragment of the triangle.
+        // That case is reproduced by dropping the triangle here rather than by
+        // carrying a NaN through the shader.
+        const float x10 = static_cast<float>(bx - ax) / 16.0f;
+        const float y10 = static_cast<float>(by - ay) / 16.0f;
+        const float x20 = static_cast<float>(cx - ax) / 16.0f;
+        const float y20 = static_cast<float>(cy - ay) / 16.0f;
+        const float z10 = b->position[2] - a->position[2];
+        const float z20 = c->position[2] - a->position[2];
+        const float determinant = x10 * y20 - x20 * y10;
+        const float dzdx = (z10 * y20 - z20 * y10) / determinant;
+        const float dzdy = (z20 * x10 - z10 * x20) / determinant;
+        const float max_z_slope = std::max(std::abs(dzdx), std::abs(dzdy));
+        if (!std::isfinite(max_z_slope)) return;
+        Nv2aWitnessedTriangle t;
+        t.ax = ax; t.ay = ay;
+        t.bx = bx; t.by = by;
+        t.cx = cx; t.cy = cy;
+        // Phase 2 (beads-xbox.1.15.10): the software path's own scanline
+        // bounds, computed by the SAME expression on the same compiler so the
+        // two agree bit for bit -- including in the degenerate regime where the
+        // double-to-int32 conversion saturates, which is exactly the regime
+        // this path exists to serve. They are carried for every triangle
+        // (cheap: six compares) and consumed only by the WIDE path.
+        const auto scan_min = [](int64_t lo_bound, int64_t p, int64_t q,
+                                 int64_t r) {
+            return std::max<int32_t>(
+                static_cast<int32_t>(lo_bound),
+                static_cast<int32_t>(std::ceil(
+                    (static_cast<double>(std::min({p, q, r})) - 8.0) / 16.0)));
+        };
+        const auto scan_max = [](int64_t hi_bound, int64_t p, int64_t q,
+                                 int64_t r) {
+            return std::min<int32_t>(
+                static_cast<int32_t>(hi_bound),
+                static_cast<int32_t>(std::floor(
+                    (static_cast<double>(std::max({p, q, r})) - 8.0) / 16.0)));
+        };
+        t.bbox_xmin = scan_min(xmin, ax, bx, cx);
+        t.bbox_xmax = scan_max(xmax, ax, bx, cx);
+        t.bbox_ymin = scan_min(ymin, ay, by, cy);
+        t.bbox_ymax = scan_max(ymax, ay, by, cy);
+        if (t.bbox_xmax < t.bbox_xmin || t.bbox_ymax < t.bbox_ymin) return;
+        // A coordinate the fixed-function rasterizer cannot place reliably in
+        // float clip space. 2^24 is where a float stops holding every integer,
+        // and the vertex shader's clip-space position is a float; beyond it the
+        // driver may under-cover, which the in-shader test cannot repair
+        // because it can only remove fragments. Such a triangle is drawn as its
+        // own bounding box instead.
+        const int64_t kWide = 1ll << 24;
+        const auto is_wide = [kWide](int64_t v) {
+            return v >= kWide || v <= -kWide;
+        };
+        t.wide = is_wide(ax) || is_wide(ay) || is_wide(bx) || is_wide(by) ||
+                 is_wide(cx) || is_wide(cy);
+        t.za = a->position[2]; t.zb = b->position[2]; t.zc = c->position[2];
+        t.inverse_area = 1.0f / static_cast<float>(area);
+        t.wa = a->position[3]; t.wb = b->position[3]; t.wc = c->position[3];
+        t.inverse_area_double = 1.0 / static_cast<double>(area);
+        t.inverse_w[0] = 1.0 / static_cast<double>(a->position[3]);
+        t.inverse_w[1] = 1.0 / static_cast<double>(b->position[3]);
+        t.inverse_w[2] = 1.0 / static_cast<double>(c->position[3]);
+        const TransformedVertex* corner[3] = {a, b, c};
+        const size_t primary_tex = radial ? 0 : 1;
+        for (size_t v = 0; v < 3; ++v) {
+            for (size_t comp = 0; comp < 3; ++comp) {
+                float value = corner[v]->diffuse[comp];
+                if (std::isnan(value)) value = 1.0f;
+                t.diffuse[v][comp] = std::clamp(value, 0.0f, 1.0f);
+                t.tex_a[v][comp] = corner[v]->texture[primary_tex][comp];
+                if (!radial) t.tex_b[v][comp] = corner[v]->texture[2][comp];
+            }
+            if (projected) {
+                // The software path reads components 0, 1 and 3 of texture[0]
+                // and stores them at indices 0, 1, 2 -- `projected_coordinate[
+                // component == 3 ? 2 : component]`. Same order here.
+                t.tex_p[v][0] = corner[v]->texture[0][0];
+                t.tex_p[v][1] = corner[v]->texture[0][1];
+                t.tex_p[v][2] = corner[v]->texture[0][3];
+            }
+        }
+        packet.triangles.push_back(t);
+    };
+    if (job.primitive_mode == 5) {
+        for (size_t i = 0; i + 2 < vertex_count; i += 3)
+            emit(vertices[i], vertices[i + 1], vertices[i + 2]);
+    } else if (job.primitive_mode == 6) {
+        for (size_t i = 2; i < vertex_count; ++i) {
+            if ((i & 1u) == 0)
+                emit(vertices[i - 2], vertices[i - 1], vertices[i]);
+            else
+                emit(vertices[i - 1], vertices[i - 2], vertices[i]);
+        }
+    } else {
+        for (size_t i = 2; i < vertex_count; ++i)
+            emit(vertices[0], vertices[i - 1], vertices[i]);
+    }
+
+    // ---- texture snapshot, unswizzled here because the swizzle table is the
+    // ---- device's (nv2a.hpp SwizzleLookup), not the backend's ---------------
+    packet.texture_linear.clear();
+    packet.texture_hash = 0;
+    packet.texture_width = 0;
+    packet.texture_height = 0;
+    packet.projected_texture_linear.clear();
+    packet.projected_texture_hash = 0;
+    packet.projected_texture_width = 0;
+    packet.projected_texture_height = 0;
+    packet.factor0_stage6 = 0;
+    packet.factor1_stage6 = 0;
+    // The unswizzle, once, so both images go through the same transform.
+    const auto unswizzle_into = [](const std::vector<uint8_t>& src,
+                                   const SwizzleLookup& swizzle, uint32_t w,
+                                   uint32_t h, std::vector<uint8_t>& dst) {
+        dst.resize(static_cast<size_t>(w) * h * 4u);
+        for (uint32_t y = 0; y < h; ++y) {
+            for (uint32_t x = 0; x < w; ++x) {
+                const size_t from =
+                    static_cast<size_t>(swizzle.index(x, y)) * 4u;
+                const size_t to = (static_cast<size_t>(y) * w + x) * 4u;
+                std::memcpy(dst.data() + to, src.data() + from, 4u);
+            }
+        }
+    };
+    if (!radial) {
+        if (!job.texture_swizzle) return true;
+        packet.texture_width = job.texture_width;
+        packet.texture_height = job.texture_height;
+        // The only free combiner words: stage 6 for the textured fingerprint,
+        // stage 5 for the projected one.
+        const size_t factor_stage = projected ? 5u : 6u;
+        packet.factor0_stage6 = rs[kRasterCombinerFactor0_0 + factor_stage];
+        packet.factor1_stage6 = rs[kRasterCombinerFactor1_0 + factor_stage];
+        unswizzle_into(job.texture_data, *job.texture_swizzle,
+                       job.texture_width, job.texture_height,
+                       packet.texture_linear);
+        packet.texture_hash = fnv1a_bytes(packet.texture_linear.data(),
+                                          packet.texture_linear.size());
+        if (projected) {
+            if (!job.projected_texture_swizzle) return true;
+            packet.projected_texture_width = job.projected_texture_width;
+            packet.projected_texture_height = job.projected_texture_height;
+            unswizzle_into(job.projected_texture_data,
+                           *job.projected_texture_swizzle,
+                           job.projected_texture_width,
+                           job.projected_texture_height,
+                           packet.projected_texture_linear);
+            packet.projected_texture_hash =
+                fnv1a_bytes(packet.projected_texture_linear.data(),
+                            packet.projected_texture_linear.size());
+        }
+    }
+
+    if (!renderer_->supports_witnessed_profile(packet)) return true;
+
+    // ---- residency: supply the initial surface bytes only when needed -------
+    //
+    // beads-xbox.1.15.10 phase 3. PER PLANE, not "both or neither". The two
+    // planes are invalidated independently and ensure_witnessed_surface already
+    // uploads only the one it is missing, so asking a single question here made
+    // a zeta-only break read a full colour surface out of guest RAM through
+    // mem_read_ and hand the backend bytes it then ignored. The predicate is
+    // the SAME function the backend acts on (select_witnessed_slot), so the two
+    // cannot drift.
+    //
+    // And a packet whose triangle list came out EMPTY (every primitive culled,
+    // degenerate or clipped away) is discarded by the backend on its first line
+    // -- submit_witnessed_profile returns before ensure_witnessed_surface -- so
+    // snapshotting its destination reaches nothing at all. MEASURED on the
+    // shipping binary db326068: the device took 1336 surface snapshots
+    // (6016.4 MB of mem_read_) while the backend performed 662 colour and 662
+    // zeta plane uploads, so 674 of those snapshots -- about 3.0 GB per 12 G
+    // instructions -- were read out of guest memory and thrown away. Residency
+    // state is untouched either way; this declines to read bytes that provably
+    // reach nothing, and everything after it runs exactly as before.
+    const bool empty_packet =
+        gpu_skip_empty_packets_ && packet.triangles.empty();
+    bool color_resident = false;
+    bool depth_resident = false;
+    if (!empty_packet) {
+        renderer_->witnessed_target_residency(
+            job.color_address, static_cast<size_t>(job.color_bytes),
+            job.surface_pitch, job.surface_height, job.surface_format,
+            job.depth_address, color_resident, depth_resident);
+    } else {
+        color_resident = true;
+        depth_resident = true;
+        ++gpu_profile_empty_packets_;
+    }
+    packet.needs_color_upload = !color_resident;
+    packet.needs_depth_upload = !depth_resident;
+    if (!color_resident) {
+        packet.color_input.resize(static_cast<size_t>(job.color_bytes));
+        if (!mem_read_ ||
+            !mem_read_(job.color_address, packet.color_input.data(),
+                       packet.color_input.size())) {
+            fault_("NV2A witnessed GPU surface snapshot read failed");
+            return false;
+        }
+    } else {
+        packet.color_input.clear();
+    }
+    if (!depth_resident) {
+        packet.depth_input.resize(static_cast<size_t>(job.depth_bytes));
+        if (!mem_read_ ||
+            !mem_read_(job.depth_address, packet.depth_input.data(),
+                       packet.depth_input.size())) {
+            fault_("NV2A witnessed GPU surface snapshot read failed");
+            return false;
+        }
+    } else {
+        packet.depth_input.clear();
+    }
+    if (!color_resident || !depth_resident) {
+        ++gpu_profile_uploads_;
+        gpu_profile_upload_bytes_ +=
+            packet.color_input.size() + packet.depth_input.size();
+        if (!color_resident) ++gpu_profile_color_uploads_;
+        if (!depth_resident) ++gpu_profile_depth_uploads_;
+    }
+
+    Nv2aWitnessedProfileResult result;
+    std::string error;
+    if (!renderer_->submit_witnessed_profile(packet, result, error)) {
+        fault_(error.empty() ? "NV2A witnessed GPU submission failed"
+                             : error.c_str());
+        return false;
+    }
+    if (radial) {
+        ++radial_color_batches_;
+        radial_color_triangles_ += triangle_tally;
+    } else if (projected) {
+        ++pitch_projected_color_batches_;
+        pitch_projected_color_triangles_ += triangle_tally;
+    } else {
+        ++pitch_textured_color_batches_;
+        pitch_textured_color_triangles_ += triangle_tally;
+    }
+    ++gpu_profile_jobs_;
+    gpu_profile_triangles_ += result.triangles;
+    // The backend reports its CUMULATIVE flush count; this is an assignment,
+    // not an accumulation.
+    gpu_profile_draw_calls_ = result.draw_calls;
+    gpu_profile_texture_upload_bytes_ += result.texture_upload_bytes;
+    submitted = true;
+    return true;
+}
+
+bool Nv2a::rasterize_witnessed_batch(DrawJob& job, bool& executed) {
+    // NV2A_RASTER_WITNESSED: the fingerprint ladder plus the witnessed per-pixel profile
+    // that matches (including the immediate-quad path delegated to below). The generic
+    // fallback opens NV2A_RASTER_GENERIC_SW and is carved out of this bucket.
+    perf_excl::Scope region(perf_excl::kNv2aRasterWitnessed);
+    executed = false;
+    // Stage (d) seam (beads-xbox.1.15.4, DESIGN-NV2A-SEAM.md section 3.2):
+    // the executor reads the LATCHED JOB, never the live members. These
+    // aliases are the whole of the mechanical redirection -- every use site
+    // below is textually unchanged, so no expression, and in particular no
+    // floating-point expression, moved with the split.
+    const auto& raster_state = job.raster_state;
+    const auto& transformed_batch = job.vertices;
+    const uint32_t primitive_mode = job.primitive_mode;
+    const uint32_t surface_format = job.surface_format;
+    const uint32_t surface_pitch = job.surface_pitch;
+    const uint32_t surface_clip_horizontal = job.surface_clip_horizontal;
+    const uint32_t surface_clip_vertical = job.surface_clip_vertical;
+    const uint32_t surface_color_offset = job.surface_color_offset;
+    const uint32_t surface_zeta_offset = job.surface_zeta_offset;
+    if (primitive_mode == 8) {
+        // Stage (e) ordering fence: this family builds its surfaces WITHOUT
+        // mem_direct_ (section 1.3), so it always executes here, on the
+        // emulation thread. It writes the same colour surfaces queued jobs
+        // write, and it must not overtake them.
+        draw_order_fence();
+        return rasterize_witnessed_immediate_quad(job, executed);
+    }
+    const uint32_t enables = raster_state[kRasterEnables];
+    const uint32_t color_format = surface_format & 0xFu;
+    const uint32_t surface_type = (surface_format >> 8) & 0xFu;
+    const uint32_t anti_aliasing = (surface_format >> 12) & 0xFu;
+    const uint32_t zeta_format = (surface_format >> 4) & 0xFu;
     const bool supported_primitive =
-        primitive_mode_ == 5 || primitive_mode_ == 6 || primitive_mode_ == 7;
+        primitive_mode == 5 || primitive_mode == 6 || primitive_mode == 7;
     // Recorder-only primitive families still travel through transform/assembly, but must
     // not enter a witnessed triangle-raster profile (or its validation path).
     if (!supported_primitive) return true;
     const bool depth_only =
-        raster_state_[kRasterColorMask] == 0 &&
+        raster_state[kRasterColorMask] == 0 &&
         (enables & (1u << 3)) != 0 &&
-        raster_state_[kRasterDepthMask] != 0;
+        raster_state[kRasterDepthMask] != 0;
     const bool radial_combiner =
-        raster_state_[kRasterTextureEnableMask] == 0 &&
-        raster_state_[kRasterShaderStageProgram] == 0x00000004 &&
-        raster_state_[kRasterShaderOtherStageInput] == 0 &&
-        raster_state_[kRasterDotRgbMapping] == 0 &&
-        raster_state_[kRasterCombinerControl] == 0x00011103 &&
-        raster_state_[kRasterCombinerColorIcw0 + 0] == 0x48480000 &&
-        raster_state_[kRasterCombinerColorIcw0 + 1] == 0x2D2D0000 &&
-        raster_state_[kRasterCombinerColorIcw0 + 2] == 0xC4CD0000 &&
-        raster_state_[kRasterCombinerAlphaIcw0 + 0] == 0x00000000 &&
-        raster_state_[kRasterCombinerAlphaIcw0 + 1] == 0x3D3D1010 &&
-        raster_state_[kRasterCombinerAlphaIcw0 + 2] == 0xD4DD1010 &&
-        raster_state_[kRasterCombinerColorOcw0 + 0] == 0x000820D0 &&
-        raster_state_[kRasterCombinerColorOcw0 + 1] == 0x000000D0 &&
-        raster_state_[kRasterCombinerColorOcw0 + 2] == 0x000000C0 &&
-        raster_state_[kRasterCombinerAlphaOcw0 + 0] == 0x00000000 &&
-        raster_state_[kRasterCombinerAlphaOcw0 + 1] == 0x000000D0 &&
-        raster_state_[kRasterCombinerAlphaOcw0 + 2] == 0x000000C0 &&
-        raster_state_[kRasterCombinerFactor0_0 + 0] == 0 &&
-        raster_state_[kRasterCombinerFactor0_0 + 1] == 0 &&
-        raster_state_[kRasterCombinerFactor0_0 + 2] == 0 &&
-        raster_state_[kRasterCombinerFactor1_0 + 0] == 0 &&
-        raster_state_[kRasterCombinerFactor1_0 + 1] == 0 &&
-        raster_state_[kRasterCombinerFactor1_0 + 2] == 0 &&
-        raster_state_[kRasterCombinerSpecularFog0] == 0x0000000C &&
-        raster_state_[kRasterCombinerSpecularFog1] == 0x00002080;
+        raster_state[kRasterTextureEnableMask] == 0 &&
+        raster_state[kRasterShaderStageProgram] == 0x00000004 &&
+        raster_state[kRasterShaderOtherStageInput] == 0 &&
+        raster_state[kRasterDotRgbMapping] == 0 &&
+        raster_state[kRasterCombinerControl] == 0x00011103 &&
+        raster_state[kRasterCombinerColorIcw0 + 0] == 0x48480000 &&
+        raster_state[kRasterCombinerColorIcw0 + 1] == 0x2D2D0000 &&
+        raster_state[kRasterCombinerColorIcw0 + 2] == 0xC4CD0000 &&
+        raster_state[kRasterCombinerAlphaIcw0 + 0] == 0x00000000 &&
+        raster_state[kRasterCombinerAlphaIcw0 + 1] == 0x3D3D1010 &&
+        raster_state[kRasterCombinerAlphaIcw0 + 2] == 0xD4DD1010 &&
+        raster_state[kRasterCombinerColorOcw0 + 0] == 0x000820D0 &&
+        raster_state[kRasterCombinerColorOcw0 + 1] == 0x000000D0 &&
+        raster_state[kRasterCombinerColorOcw0 + 2] == 0x000000C0 &&
+        raster_state[kRasterCombinerAlphaOcw0 + 0] == 0x00000000 &&
+        raster_state[kRasterCombinerAlphaOcw0 + 1] == 0x000000D0 &&
+        raster_state[kRasterCombinerAlphaOcw0 + 2] == 0x000000C0 &&
+        raster_state[kRasterCombinerFactor0_0 + 0] == 0 &&
+        raster_state[kRasterCombinerFactor0_0 + 1] == 0 &&
+        raster_state[kRasterCombinerFactor0_0 + 2] == 0 &&
+        raster_state[kRasterCombinerFactor1_0 + 0] == 0 &&
+        raster_state[kRasterCombinerFactor1_0 + 1] == 0 &&
+        raster_state[kRasterCombinerFactor1_0 + 2] == 0 &&
+        raster_state[kRasterCombinerSpecularFog0] == 0x0000000C &&
+        raster_state[kRasterCombinerSpecularFog1] == 0x00002080;
     const std::array<uint32_t, 8> textured_color_icw{{
         0xC149C14A, 0x0D0D0000, 0xCDCD0000, 0xCDCD0000,
         0xCDCD0000, 0xCDCD0000, 0xC10CC20D, 0xC40520C1,
@@ -2721,36 +4891,36 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         0, 0, 0, 0, 0, 0, 0xFF35FF1A, 0,
     }};
     bool textured_combiner =
-        raster_state_[kRasterTextureEnableMask] == 0xFu &&
-        raster_state_[kRasterShaderStageProgram] == 0x00010C60 &&
-        raster_state_[kRasterShaderOtherStageInput] == 0 &&
-        raster_state_[kRasterDotRgbMapping] == 0 &&
-        (raster_state_[kRasterShadowDepthFunc] == 0 ||
-         raster_state_[kRasterShadowDepthFunc] == 4) &&
-        raster_state_[kRasterCombinerControl] == 0x00011108 &&
-        raster_state_[kRasterCombinerSpecularFog0] == 0x0C0B000F &&
-        raster_state_[kRasterCombinerSpecularFog1] == 0x0C011180 &&
-        raster_state_[kRasterCombinerFinalFactor0] == 0xFF3F3F3F &&
-        raster_state_[kRasterCombinerFinalFactor1] == 0;
+        raster_state[kRasterTextureEnableMask] == 0xFu &&
+        raster_state[kRasterShaderStageProgram] == 0x00010C60 &&
+        raster_state[kRasterShaderOtherStageInput] == 0 &&
+        raster_state[kRasterDotRgbMapping] == 0 &&
+        (raster_state[kRasterShadowDepthFunc] == 0 ||
+         raster_state[kRasterShadowDepthFunc] == 4) &&
+        raster_state[kRasterCombinerControl] == 0x00011108 &&
+        raster_state[kRasterCombinerSpecularFog0] == 0x0C0B000F &&
+        raster_state[kRasterCombinerSpecularFog1] == 0x0C011180 &&
+        raster_state[kRasterCombinerFinalFactor0] == 0xFF3F3F3F &&
+        raster_state[kRasterCombinerFinalFactor1] == 0;
     for (size_t stage = 0; stage < 8 && textured_combiner; ++stage) {
         textured_combiner =
-            raster_state_[kRasterCombinerColorIcw0 + stage] ==
+            raster_state[kRasterCombinerColorIcw0 + stage] ==
                 textured_color_icw[stage] &&
-            raster_state_[kRasterCombinerAlphaIcw0 + stage] ==
+            raster_state[kRasterCombinerAlphaIcw0 + stage] ==
                 textured_alpha_icw[stage] &&
-            raster_state_[kRasterCombinerColorOcw0 + stage] ==
+            raster_state[kRasterCombinerColorOcw0 + stage] ==
                 textured_color_ocw[stage] &&
-            raster_state_[kRasterCombinerAlphaOcw0 + stage] == 0 &&
+            raster_state[kRasterCombinerAlphaOcw0 + stage] == 0 &&
             (stage == 6 ||
-             (raster_state_[kRasterCombinerFactor0_0 + stage] ==
+             (raster_state[kRasterCombinerFactor0_0 + stage] ==
                   textured_factor0[stage] &&
-              raster_state_[kRasterCombinerFactor1_0 + stage] ==
+              raster_state[kRasterCombinerFactor1_0 + stage] ==
                   textured_factor1[stage]));
     }
     const bool textured_fixed_stage6 =
-        raster_state_[kRasterCombinerFactor0_0 + 6] ==
+        raster_state[kRasterCombinerFactor0_0 + 6] ==
             textured_factor0[6] &&
-        raster_state_[kRasterCombinerFactor1_0 + 6] ==
+        raster_state[kRasterCombinerFactor1_0 + 6] ==
             textured_factor1[6];
     const std::array<uint32_t, 7> projected_color_icw{{
         0x4849484A, 0x0D0D0000, 0xCDCD0000, 0xCDCD0000,
@@ -2770,36 +4940,36 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         0, 0, 0, 0, 0, 0xFF35FF1A, 0,
     }};
     bool projected_combiner =
-        raster_state_[kRasterTextureEnableMask] == 0xFu &&
-        raster_state_[kRasterShaderStageProgram] == 0x00010C61 &&
-        raster_state_[kRasterShaderOtherStageInput] == 0 &&
-        raster_state_[kRasterDotRgbMapping] == 0 &&
-        (raster_state_[kRasterShadowDepthFunc] == 0 ||
-         raster_state_[kRasterShadowDepthFunc] == 4) &&
-        raster_state_[kRasterCombinerControl] == 0x00011107 &&
-        raster_state_[kRasterCombinerSpecularFog0] == 0x0C0B000F &&
-        raster_state_[kRasterCombinerSpecularFog1] == 0x0C011180 &&
-        raster_state_[kRasterCombinerFinalFactor0] == 0xFF3F3F3F &&
-        raster_state_[kRasterCombinerFinalFactor1] == 0;
+        raster_state[kRasterTextureEnableMask] == 0xFu &&
+        raster_state[kRasterShaderStageProgram] == 0x00010C61 &&
+        raster_state[kRasterShaderOtherStageInput] == 0 &&
+        raster_state[kRasterDotRgbMapping] == 0 &&
+        (raster_state[kRasterShadowDepthFunc] == 0 ||
+         raster_state[kRasterShadowDepthFunc] == 4) &&
+        raster_state[kRasterCombinerControl] == 0x00011107 &&
+        raster_state[kRasterCombinerSpecularFog0] == 0x0C0B000F &&
+        raster_state[kRasterCombinerSpecularFog1] == 0x0C011180 &&
+        raster_state[kRasterCombinerFinalFactor0] == 0xFF3F3F3F &&
+        raster_state[kRasterCombinerFinalFactor1] == 0;
     for (size_t stage = 0; stage < 7 && projected_combiner; ++stage) {
         projected_combiner =
-            raster_state_[kRasterCombinerColorIcw0 + stage] ==
+            raster_state[kRasterCombinerColorIcw0 + stage] ==
                 projected_color_icw[stage] &&
-            raster_state_[kRasterCombinerAlphaIcw0 + stage] ==
+            raster_state[kRasterCombinerAlphaIcw0 + stage] ==
                 projected_alpha_icw[stage] &&
-            raster_state_[kRasterCombinerColorOcw0 + stage] ==
+            raster_state[kRasterCombinerColorOcw0 + stage] ==
                 projected_color_ocw[stage] &&
-            raster_state_[kRasterCombinerAlphaOcw0 + stage] == 0 &&
+            raster_state[kRasterCombinerAlphaOcw0 + stage] == 0 &&
             (stage == 5 ||
-             (raster_state_[kRasterCombinerFactor0_0 + stage] ==
+             (raster_state[kRasterCombinerFactor0_0 + stage] ==
                   projected_factor0[stage] &&
-              raster_state_[kRasterCombinerFactor1_0 + stage] ==
+              raster_state[kRasterCombinerFactor1_0 + stage] ==
                   projected_factor1[stage]));
     }
     const bool projected_fixed_stage5 =
-        raster_state_[kRasterCombinerFactor0_0 + 5] ==
+        raster_state[kRasterCombinerFactor0_0 + 5] ==
             projected_factor0[5] &&
-        raster_state_[kRasterCombinerFactor1_0 + 5] ==
+        raster_state[kRasterCombinerFactor1_0 + 5] ==
             projected_factor1[5];
     const std::array<uint32_t, 6> pitch_multi_color_icw{{
         0x48490000, 0x0C200000, 0x2D2D0000,
@@ -2821,64 +4991,64 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         0, 0, 0, 0xFF000000, 0xFF0D3308, 0xFFFFFFFF,
     }};
     bool pitch_multi_texture_combiner =
-        raster_state_[kRasterTextureEnableMask] == 3 &&
-        raster_state_[kRasterShaderStageProgram] == 0x00000063 &&
-        raster_state_[kRasterShaderOtherStageInput] == 0 &&
-        raster_state_[kRasterDotRgbMapping] == 0 &&
-        raster_state_[kRasterShadowDepthFunc] == 7 &&
-        raster_state_[kRasterCombinerControl] == 0x00011106 &&
-        raster_state_[kRasterCombinerSpecularFog0] == 0x0000000C &&
-        raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80 &&
-        raster_state_[kRasterCombinerFinalFactor0] == 0 &&
-        raster_state_[kRasterCombinerFinalFactor1] == 0;
+        raster_state[kRasterTextureEnableMask] == 3 &&
+        raster_state[kRasterShaderStageProgram] == 0x00000063 &&
+        raster_state[kRasterShaderOtherStageInput] == 0 &&
+        raster_state[kRasterDotRgbMapping] == 0 &&
+        raster_state[kRasterShadowDepthFunc] == 7 &&
+        raster_state[kRasterCombinerControl] == 0x00011106 &&
+        raster_state[kRasterCombinerSpecularFog0] == 0x0000000C &&
+        raster_state[kRasterCombinerSpecularFog1] == 0x00001C80 &&
+        raster_state[kRasterCombinerFinalFactor0] == 0 &&
+        raster_state[kRasterCombinerFinalFactor1] == 0;
     for (size_t stage = 0;
          stage < pitch_multi_color_icw.size() &&
          pitch_multi_texture_combiner;
          ++stage) {
         pitch_multi_texture_combiner =
-            raster_state_[kRasterCombinerColorIcw0 + stage] ==
+            raster_state[kRasterCombinerColorIcw0 + stage] ==
                 pitch_multi_color_icw[stage] &&
-            raster_state_[kRasterCombinerAlphaIcw0 + stage] ==
+            raster_state[kRasterCombinerAlphaIcw0 + stage] ==
                 pitch_multi_alpha_icw[stage] &&
-            raster_state_[kRasterCombinerColorOcw0 + stage] ==
+            raster_state[kRasterCombinerColorOcw0 + stage] ==
                 pitch_multi_color_ocw[stage] &&
-            raster_state_[kRasterCombinerAlphaOcw0 + stage] ==
+            raster_state[kRasterCombinerAlphaOcw0 + stage] ==
                 pitch_multi_alpha_ocw[stage] &&
-            raster_state_[kRasterCombinerFactor0_0 + stage] ==
+            raster_state[kRasterCombinerFactor0_0 + stage] ==
                 pitch_multi_factor0[stage] &&
-            raster_state_[kRasterCombinerFactor1_0 + stage] == 0;
+            raster_state[kRasterCombinerFactor1_0 + stage] == 0;
     }
     bool pitch_three_texture_combiner =
-        raster_state_[kRasterTextureEnableMask] == 7 &&
-        raster_state_[kRasterShaderStageProgram] == 0x00000063 &&
-        raster_state_[kRasterShaderOtherStageInput] == 0 &&
-        raster_state_[kRasterDotRgbMapping] == 0 &&
-        raster_state_[kRasterShadowDepthFunc] == 7 &&
-        raster_state_[kRasterCombinerControl] == 0x00011106 &&
-        raster_state_[kRasterCombinerSpecularFog0] == 0x0000000C &&
-        raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80 &&
-        raster_state_[kRasterCombinerFinalFactor0] == 0 &&
-        raster_state_[kRasterCombinerFinalFactor1] == 0;
+        raster_state[kRasterTextureEnableMask] == 7 &&
+        raster_state[kRasterShaderStageProgram] == 0x00000063 &&
+        raster_state[kRasterShaderOtherStageInput] == 0 &&
+        raster_state[kRasterDotRgbMapping] == 0 &&
+        raster_state[kRasterShadowDepthFunc] == 7 &&
+        raster_state[kRasterCombinerControl] == 0x00011106 &&
+        raster_state[kRasterCombinerSpecularFog0] == 0x0000000C &&
+        raster_state[kRasterCombinerSpecularFog1] == 0x00001C80 &&
+        raster_state[kRasterCombinerFinalFactor0] == 0 &&
+        raster_state[kRasterCombinerFinalFactor1] == 0;
     for (size_t stage = 0;
          stage < pitch_multi_color_icw.size() &&
          pitch_three_texture_combiner;
          ++stage) {
         const uint32_t factor0 =
-            raster_state_[kRasterCombinerFactor0_0 + stage];
+            raster_state[kRasterCombinerFactor0_0 + stage];
         const bool witnessed_factor0 =
             stage == 3 ? (factor0 & 0xFF000000u) == 0xFF000000u
                        : factor0 == pitch_multi_factor0[stage];
         pitch_three_texture_combiner =
-            raster_state_[kRasterCombinerColorIcw0 + stage] ==
+            raster_state[kRasterCombinerColorIcw0 + stage] ==
                 pitch_multi_color_icw[stage] &&
-            raster_state_[kRasterCombinerAlphaIcw0 + stage] ==
+            raster_state[kRasterCombinerAlphaIcw0 + stage] ==
                 pitch_multi_alpha_icw[stage] &&
-            raster_state_[kRasterCombinerColorOcw0 + stage] ==
+            raster_state[kRasterCombinerColorOcw0 + stage] ==
                 pitch_multi_color_ocw[stage] &&
-            raster_state_[kRasterCombinerAlphaOcw0 + stage] ==
+            raster_state[kRasterCombinerAlphaOcw0 + stage] ==
                 pitch_multi_alpha_ocw[stage] &&
             witnessed_factor0 &&
-            raster_state_[kRasterCombinerFactor1_0 + stage] == 0;
+            raster_state[kRasterCombinerFactor1_0 + stage] == 0;
     }
     // Shader 0x63 cube sampling never enters the 2D border path.  Opaque
     // black is output-inert here, but it is admitted only for the finite
@@ -2889,240 +5059,240 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         0xFF185F0E, 0xFF175C0E, 0xFF144F0C, 0xFF175D0E, 0xFF16570D,
         0xFF18600E}};
     const uint32_t pitch_three_factor3 =
-        raster_state_[kRasterCombinerFactor0_0 + 3];
+        raster_state[kRasterCombinerFactor0_0 + 3];
     const bool pitch_three_black_border_factor =
         std::find(kPitchThreeBlackBorderFactors.begin(),
                   kPitchThreeBlackBorderFactors.end(),
                   pitch_three_factor3) != kPitchThreeBlackBorderFactors.end();
     const bool pitch_three_texture_border0 =
-        raster_state_[kRasterTextureBorderColor0] == 0 ||
-        (raster_state_[kRasterTextureBorderColor0] == 0xFF000000 &&
+        raster_state[kRasterTextureBorderColor0] == 0 ||
+        (raster_state[kRasterTextureBorderColor0] == 0xFF000000 &&
          pitch_three_black_border_factor);
     const bool pitch_three_texture_state =
-        raster_state_[kRasterTextureFormat0] == 0x0661072E &&
-        raster_state_[kRasterTextureFormat0 + 1] == 0x0661072E &&
-        raster_state_[kRasterTextureFormat0 + 2] == 0x0771072E &&
-        raster_state_[kRasterTextureOffset0 + 1] ==
-            raster_state_[kRasterTextureOffset0] &&
-        raster_state_[kRasterTextureAddress0] == 0x00030303 &&
-        raster_state_[kRasterTextureAddress0 + 1] == 0x00030303 &&
-        raster_state_[kRasterTextureAddress0 + 2] == 0x00030303 &&
-        raster_state_[kRasterTextureFilter0] == 0x02022000 &&
-        raster_state_[kRasterTextureFilter0 + 1] == 0x02022000 &&
-        raster_state_[kRasterTextureFilter0 + 2] == 0x02022000 &&
-        raster_state_[kRasterTextureControl0_0] == 0x4003FFC0 &&
-        raster_state_[kRasterTextureControl0_0 + 1] == 0x4003FFC0 &&
-        raster_state_[kRasterTextureControl0_0 + 2] == 0x4003FFC0 &&
-        raster_state_[kRasterTextureControl1_0] == 0x14000000 &&
-        raster_state_[kRasterTextureControl1_0 + 1] == 0 &&
-        raster_state_[kRasterTextureControl1_0 + 2] == 0 &&
-        raster_state_[kRasterTextureImageRect0] == 0x050001E0 &&
-        raster_state_[kRasterTextureImageRect0 + 1] == 0 &&
-        raster_state_[kRasterTextureImageRect0 + 2] == 0 &&
-        raster_state_[kRasterTexturePalette0] == 0 &&
-        raster_state_[kRasterTexturePalette0 + 1] == 0 &&
-        raster_state_[kRasterTexturePalette0 + 2] == 0 &&
+        raster_state[kRasterTextureFormat0] == 0x0661072E &&
+        raster_state[kRasterTextureFormat0 + 1] == 0x0661072E &&
+        raster_state[kRasterTextureFormat0 + 2] == 0x0771072E &&
+        raster_state[kRasterTextureOffset0 + 1] ==
+            raster_state[kRasterTextureOffset0] &&
+        raster_state[kRasterTextureAddress0] == 0x00030303 &&
+        raster_state[kRasterTextureAddress0 + 1] == 0x00030303 &&
+        raster_state[kRasterTextureAddress0 + 2] == 0x00030303 &&
+        raster_state[kRasterTextureFilter0] == 0x02022000 &&
+        raster_state[kRasterTextureFilter0 + 1] == 0x02022000 &&
+        raster_state[kRasterTextureFilter0 + 2] == 0x02022000 &&
+        raster_state[kRasterTextureControl0_0] == 0x4003FFC0 &&
+        raster_state[kRasterTextureControl0_0 + 1] == 0x4003FFC0 &&
+        raster_state[kRasterTextureControl0_0 + 2] == 0x4003FFC0 &&
+        raster_state[kRasterTextureControl1_0] == 0x14000000 &&
+        raster_state[kRasterTextureControl1_0 + 1] == 0 &&
+        raster_state[kRasterTextureControl1_0 + 2] == 0 &&
+        raster_state[kRasterTextureImageRect0] == 0x050001E0 &&
+        raster_state[kRasterTextureImageRect0 + 1] == 0 &&
+        raster_state[kRasterTextureImageRect0 + 2] == 0 &&
+        raster_state[kRasterTexturePalette0] == 0 &&
+        raster_state[kRasterTexturePalette0 + 1] == 0 &&
+        raster_state[kRasterTexturePalette0 + 2] == 0 &&
         pitch_three_texture_border0 &&
-        raster_state_[kRasterTextureBorderColor0 + 1] == 0 &&
-        raster_state_[kRasterTextureBorderColor0 + 2] == 0;
+        raster_state[kRasterTextureBorderColor0 + 1] == 0 &&
+        raster_state[kRasterTextureBorderColor0 + 2] == 0;
     const bool pitch_tex5_raster =
-        primitive_mode_ == 5 && surface_type == 1 &&
+        primitive_mode == 5 && surface_type == 1 &&
         anti_aliasing == 0 && color_format == 8 && zeta_format == 2 &&
-        surface_pitch_ == 0x14001400 &&
-        surface_clip_horizontal_ == 0x05000000 &&
-        surface_clip_vertical_ == 0x01E00000 &&
+        surface_pitch == 0x14001400 &&
+        surface_clip_horizontal == 0x05000000 &&
+        surface_clip_vertical == 0x01E00000 &&
         enables == 0x000Cu &&
-        raster_state_[kRasterControl0] == 0x00100001 &&
-        raster_state_[kRasterDepthFunc] == 0x0203 &&
-        raster_state_[kRasterColorMask] == 0x01010101 &&
-        raster_state_[kRasterDepthMask] == 1 &&
-        raster_state_[kRasterShadeMode] == 0x1D01 &&
-        raster_state_[kRasterFrontPolygonMode] == 0x1B02 &&
-        raster_state_[kRasterBackPolygonMode] == 0x1B02 &&
-        raster_state_[kRasterCullFace] == 0x0404 &&
-        raster_state_[kRasterFrontFace] == 0x0900 &&
-        raster_state_[kRasterZMinMaxControl] == 1;
+        raster_state[kRasterControl0] == 0x00100001 &&
+        raster_state[kRasterDepthFunc] == 0x0203 &&
+        raster_state[kRasterColorMask] == 0x01010101 &&
+        raster_state[kRasterDepthMask] == 1 &&
+        raster_state[kRasterShadeMode] == 0x1D01 &&
+        raster_state[kRasterFrontPolygonMode] == 0x1B02 &&
+        raster_state[kRasterBackPolygonMode] == 0x1B02 &&
+        raster_state[kRasterCullFace] == 0x0404 &&
+        raster_state[kRasterFrontFace] == 0x0900 &&
+        raster_state[kRasterZMinMaxControl] == 1;
     const bool pitch_tex5_projected_combiner =
-        raster_state_[kRasterTextureEnableMask] == 5 &&
-        raster_state_[kRasterShaderStageProgram] == 0x00000C01 &&
-        raster_state_[kRasterShaderOtherStageInput] == 0x00210000 &&
-        raster_state_[kRasterDotRgbMapping] == 0 &&
-        raster_state_[kRasterShadowDepthFunc] == 7 &&
-        raster_state_[kRasterCombinerControl] == 0x00000001 &&
-        raster_state_[kRasterCombinerColorIcw0] == 0x08200000 &&
-        raster_state_[kRasterCombinerAlphaIcw0] == 0x11200000 &&
-        raster_state_[kRasterCombinerColorOcw0] == 0x00000C00 &&
-        raster_state_[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
-        (raster_state_[kRasterCombinerFactor0_0] &
+        raster_state[kRasterTextureEnableMask] == 5 &&
+        raster_state[kRasterShaderStageProgram] == 0x00000C01 &&
+        raster_state[kRasterShaderOtherStageInput] == 0x00210000 &&
+        raster_state[kRasterDotRgbMapping] == 0 &&
+        raster_state[kRasterShadowDepthFunc] == 7 &&
+        raster_state[kRasterCombinerControl] == 0x00000001 &&
+        raster_state[kRasterCombinerColorIcw0] == 0x08200000 &&
+        raster_state[kRasterCombinerAlphaIcw0] == 0x11200000 &&
+        raster_state[kRasterCombinerColorOcw0] == 0x00000C00 &&
+        raster_state[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
+        (raster_state[kRasterCombinerFactor0_0] &
          0xFF000000u) == 0xFF000000u &&
-        raster_state_[kRasterCombinerSpecularFog0] == 0x0000000C &&
-        raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80 &&
-        raster_state_[kRasterCombinerFinalFactor0] == 0 &&
-        raster_state_[kRasterCombinerFinalFactor1] == 0;
+        raster_state[kRasterCombinerSpecularFog0] == 0x0000000C &&
+        raster_state[kRasterCombinerSpecularFog1] == 0x00001C80 &&
+        raster_state[kRasterCombinerFinalFactor0] == 0 &&
+        raster_state[kRasterCombinerFinalFactor1] == 0;
     const uint32_t pitch_tex5_format0 =
-        raster_state_[kRasterTextureFormat0];
+        raster_state[kRasterTextureFormat0];
     const bool pitch_tex5_projected_texture =
         (pitch_tex5_format0 == 0x0741062A ||
          pitch_tex5_format0 == 0x0881062A) &&
-        raster_state_[kRasterTextureAddress0] == 0x00030404 &&
-        raster_state_[kRasterTextureFilter0] == 0x02022000 &&
-        raster_state_[kRasterTextureControl0_0] == 0x4003FFC0 &&
-        raster_state_[kRasterTextureControl1_0] == 0x14000000 &&
-        raster_state_[kRasterTextureImageRect0] == 0x050001E0 &&
-        raster_state_[kRasterTexturePalette0] == 0 &&
-        raster_state_[kRasterTextureBorderColor0] == 0xFF000000 &&
-        raster_state_[kRasterTextureFormat0 + 2] == 0x0771072E &&
-        raster_state_[kRasterTextureAddress0 + 2] == 0x00030303 &&
-        raster_state_[kRasterTextureFilter0 + 2] == 0x02022000 &&
-        raster_state_[kRasterTextureControl0_0 + 2] == 0x4003FFC0 &&
-        raster_state_[kRasterTextureControl1_0 + 2] == 0 &&
-        raster_state_[kRasterTextureImageRect0 + 2] == 0 &&
-        raster_state_[kRasterTexturePalette0 + 2] == 0 &&
-        raster_state_[kRasterTextureBorderColor0 + 2] == 0;
+        raster_state[kRasterTextureAddress0] == 0x00030404 &&
+        raster_state[kRasterTextureFilter0] == 0x02022000 &&
+        raster_state[kRasterTextureControl0_0] == 0x4003FFC0 &&
+        raster_state[kRasterTextureControl1_0] == 0x14000000 &&
+        raster_state[kRasterTextureImageRect0] == 0x050001E0 &&
+        raster_state[kRasterTexturePalette0] == 0 &&
+        raster_state[kRasterTextureBorderColor0] == 0xFF000000 &&
+        raster_state[kRasterTextureFormat0 + 2] == 0x0771072E &&
+        raster_state[kRasterTextureAddress0 + 2] == 0x00030303 &&
+        raster_state[kRasterTextureFilter0 + 2] == 0x02022000 &&
+        raster_state[kRasterTextureControl0_0 + 2] == 0x4003FFC0 &&
+        raster_state[kRasterTextureControl1_0 + 2] == 0 &&
+        raster_state[kRasterTextureImageRect0 + 2] == 0 &&
+        raster_state[kRasterTexturePalette0 + 2] == 0 &&
+        raster_state[kRasterTextureBorderColor0 + 2] == 0;
     const bool pitch_tex5_diffuse_combiner =
-        raster_state_[kRasterTextureEnableMask] == 5 &&
-        raster_state_[kRasterShaderStageProgram] == 0 &&
-        raster_state_[kRasterShaderOtherStageInput] == 0 &&
-        raster_state_[kRasterDotRgbMapping] == 0 &&
-        raster_state_[kRasterShadowDepthFunc] == 7 &&
-        raster_state_[kRasterCombinerControl] == 0x00011101 &&
-        raster_state_[kRasterCombinerColorIcw0] == 0xC4200000 &&
-        raster_state_[kRasterCombinerAlphaIcw0] == 0xD4301010 &&
-        raster_state_[kRasterCombinerColorOcw0] == 0x000000C0 &&
-        raster_state_[kRasterCombinerAlphaOcw0] == 0x000000C0 &&
-        raster_state_[kRasterCombinerSpecularFog0] == 0x0000000C &&
-        raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80 &&
-        raster_state_[kRasterCombinerFinalFactor0] == 0 &&
-        raster_state_[kRasterCombinerFinalFactor1] == 0;
+        raster_state[kRasterTextureEnableMask] == 5 &&
+        raster_state[kRasterShaderStageProgram] == 0 &&
+        raster_state[kRasterShaderOtherStageInput] == 0 &&
+        raster_state[kRasterDotRgbMapping] == 0 &&
+        raster_state[kRasterShadowDepthFunc] == 7 &&
+        raster_state[kRasterCombinerControl] == 0x00011101 &&
+        raster_state[kRasterCombinerColorIcw0] == 0xC4200000 &&
+        raster_state[kRasterCombinerAlphaIcw0] == 0xD4301010 &&
+        raster_state[kRasterCombinerColorOcw0] == 0x000000C0 &&
+        raster_state[kRasterCombinerAlphaOcw0] == 0x000000C0 &&
+        raster_state[kRasterCombinerSpecularFog0] == 0x0000000C &&
+        raster_state[kRasterCombinerSpecularFog1] == 0x00001C80 &&
+        raster_state[kRasterCombinerFinalFactor0] == 0 &&
+        raster_state[kRasterCombinerFinalFactor1] == 0;
     const bool inline_linear_blit_combiner =
-        raster_state_[kRasterTextureEnableMask] == 1 &&
-        raster_state_[kRasterShaderStageProgram] == 0x00000001 &&
-        raster_state_[kRasterShaderOtherStageInput] == 0x00210000 &&
-        raster_state_[kRasterDotRgbMapping] == 0 &&
+        raster_state[kRasterTextureEnableMask] == 1 &&
+        raster_state[kRasterShaderStageProgram] == 0x00000001 &&
+        raster_state[kRasterShaderOtherStageInput] == 0x00210000 &&
+        raster_state[kRasterDotRgbMapping] == 0 &&
         // PROJECT2D does not perform shadow comparison; both retained values
         // observed around the boot resolve are therefore equivalent.
-        (raster_state_[kRasterShadowDepthFunc] == 0 ||
-         raster_state_[kRasterShadowDepthFunc] == 7) &&
-        raster_state_[kRasterCombinerControl] == 0x00000001 &&
-        raster_state_[kRasterCombinerColorIcw0] == 0x08200000 &&
-        raster_state_[kRasterCombinerAlphaIcw0] == 0x14200000 &&
-        raster_state_[kRasterCombinerColorOcw0] == 0x00000C00 &&
-        raster_state_[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
-        raster_state_[kRasterCombinerSpecularFog0] == 0x0000000C &&
-        raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80 &&
-        raster_state_[kRasterCombinerFinalFactor0] == 0 &&
-        raster_state_[kRasterCombinerFinalFactor1] == 0;
+        (raster_state[kRasterShadowDepthFunc] == 0 ||
+         raster_state[kRasterShadowDepthFunc] == 7) &&
+        raster_state[kRasterCombinerControl] == 0x00000001 &&
+        raster_state[kRasterCombinerColorIcw0] == 0x08200000 &&
+        raster_state[kRasterCombinerAlphaIcw0] == 0x14200000 &&
+        raster_state[kRasterCombinerColorOcw0] == 0x00000C00 &&
+        raster_state[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
+        raster_state[kRasterCombinerSpecularFog0] == 0x0000000C &&
+        raster_state[kRasterCombinerSpecularFog1] == 0x00001C80 &&
+        raster_state[kRasterCombinerFinalFactor0] == 0 &&
+        raster_state[kRasterCombinerFinalFactor1] == 0;
     const bool inline_linear_blit_texture =
-        raster_state_[kRasterTextureFormat0] == 0x0001122A &&
+        raster_state[kRasterTextureFormat0] == 0x0001122A &&
         // PROJECT2D consumes U/V only; the witnessed P-axis WRAP/CLAMP
         // difference cannot affect this texture.
-        (raster_state_[kRasterTextureAddress0] == 0x00010303 ||
-         raster_state_[kRasterTextureAddress0] == 0x00030303) &&
-        raster_state_[kRasterTextureFilter0] == 0x02022000 &&
-        raster_state_[kRasterTextureControl0_0] == 0x4003FFC0 &&
-        raster_state_[kRasterTextureControl1_0] == 0x14000000 &&
-        raster_state_[kRasterTextureImageRect0] == 0x050001E0 &&
-        raster_state_[kRasterTexturePalette0] == 0 &&
+        (raster_state[kRasterTextureAddress0] == 0x00010303 ||
+         raster_state[kRasterTextureAddress0] == 0x00030303) &&
+        raster_state[kRasterTextureFilter0] == 0x02022000 &&
+        raster_state[kRasterTextureControl0_0] == 0x4003FFC0 &&
+        raster_state[kRasterTextureControl1_0] == 0x14000000 &&
+        raster_state[kRasterTextureImageRect0] == 0x050001E0 &&
+        raster_state[kRasterTexturePalette0] == 0 &&
         // The sampled U/V axes are CLAMP_TO_EDGE, so the two witnessed border
         // colors are output-inert.
-        (raster_state_[kRasterTextureBorderColor0] == 0 ||
-         raster_state_[kRasterTextureBorderColor0] == 0xFF000000);
+        (raster_state[kRasterTextureBorderColor0] == 0 ||
+         raster_state[kRasterTextureBorderColor0] == 0xFF000000);
     const bool inline_linear_blit_surface =
-        primitive_mode_ == 5 && surface_type == 1 &&
+        primitive_mode == 5 && surface_type == 1 &&
         anti_aliasing == 0 && color_format == 8 && zeta_format == 2 &&
-        surface_pitch_ == 0x0A000A00 &&
-        surface_clip_horizontal_ == 0x02800000 &&
-        surface_clip_vertical_ == 0x01E00000 &&
+        surface_pitch == 0x0A000A00 &&
+        surface_clip_horizontal == 0x02800000 &&
+        surface_clip_vertical == 0x01E00000 &&
         enables == 0x0010u &&
-        raster_state_[kRasterControl0] == 0x00100001 &&
-        raster_state_[kRasterColorMask] == 0x01010101 &&
-        raster_state_[kRasterShadeMode] == 0x1D01 &&
-        raster_state_[kRasterFrontPolygonMode] == 0x1B02 &&
-        raster_state_[kRasterBackPolygonMode] == 0x1B02 &&
-        raster_state_[kRasterZMinMaxControl] == 1;
+        raster_state[kRasterControl0] == 0x00100001 &&
+        raster_state[kRasterColorMask] == 0x01010101 &&
+        raster_state[kRasterShadeMode] == 0x1D01 &&
+        raster_state[kRasterFrontPolygonMode] == 0x1B02 &&
+        raster_state[kRasterBackPolygonMode] == 0x1B02 &&
+        raster_state[kRasterZMinMaxControl] == 1;
     const bool pitch_single_texture_combiner =
-        raster_state_[kRasterTextureEnableMask] == 1 &&
-        raster_state_[kRasterShaderStageProgram] == 0x00000001 &&
-        raster_state_[kRasterShaderOtherStageInput] == 0x00210000 &&
-        raster_state_[kRasterDotRgbMapping] == 0 &&
-        raster_state_[kRasterShadowDepthFunc] == 7 &&
-        raster_state_[kRasterCombinerControl] == 0x00000001 &&
-        raster_state_[kRasterCombinerColorIcw0] == 0x08200000 &&
-        raster_state_[kRasterCombinerAlphaIcw0] == 0x11200000 &&
-        raster_state_[kRasterCombinerColorOcw0] == 0x00000C00 &&
-        raster_state_[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
-        raster_state_[kRasterCombinerFactor0_0] == 0xFFFFFFFF &&
-        raster_state_[kRasterCombinerFactor1_0] == 0xFFFFFFFF &&
-        raster_state_[kRasterCombinerSpecularFog0] == 0x0000000C &&
-        raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80 &&
-        raster_state_[kRasterCombinerFinalFactor0] == 0 &&
-        raster_state_[kRasterCombinerFinalFactor1] == 0;
+        raster_state[kRasterTextureEnableMask] == 1 &&
+        raster_state[kRasterShaderStageProgram] == 0x00000001 &&
+        raster_state[kRasterShaderOtherStageInput] == 0x00210000 &&
+        raster_state[kRasterDotRgbMapping] == 0 &&
+        raster_state[kRasterShadowDepthFunc] == 7 &&
+        raster_state[kRasterCombinerControl] == 0x00000001 &&
+        raster_state[kRasterCombinerColorIcw0] == 0x08200000 &&
+        raster_state[kRasterCombinerAlphaIcw0] == 0x11200000 &&
+        raster_state[kRasterCombinerColorOcw0] == 0x00000C00 &&
+        raster_state[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
+        raster_state[kRasterCombinerFactor0_0] == 0xFFFFFFFF &&
+        raster_state[kRasterCombinerFactor1_0] == 0xFFFFFFFF &&
+        raster_state[kRasterCombinerSpecularFog0] == 0x0000000C &&
+        raster_state[kRasterCombinerSpecularFog1] == 0x00001C80 &&
+        raster_state[kRasterCombinerFinalFactor0] == 0 &&
+        raster_state[kRasterCombinerFinalFactor1] == 0;
     // RS0 in probe-reduced-diag-6.4b: only t0 reaches R0; t1/t2 are
     // enabled cubemaps but their shader stages are unused by the one combiner.
-    const uint32_t tex7_factor0 = raster_state_[kRasterCombinerFactor0_0];
-    const uint32_t tex7_factor1 = raster_state_[kRasterCombinerFactor1_0];
+    const uint32_t tex7_factor0 = raster_state[kRasterCombinerFactor0_0];
+    const uint32_t tex7_factor1 = raster_state[kRasterCombinerFactor1_0];
     const bool tex7_fan_factor_rgb =
         tex7_factor0 == tex7_factor1 &&
         (tex7_factor0 & 0x00FFFFFFu) == 0x00A0FF40u &&
         (tex7_factor1 & 0x00FFFFFFu) == 0x00A0FF40u;
     const bool tex7_fan_combiner =
-        raster_state_[kRasterTextureEnableMask] == 7 &&
-        raster_state_[kRasterShaderStageProgram] == 0x00000C61 &&
-        raster_state_[kRasterShaderOtherStageInput] == 0x00210000 &&
-        raster_state_[kRasterDotRgbMapping] == 0 &&
-        raster_state_[kRasterShadowDepthFunc] == 7 &&
-        raster_state_[kRasterCombinerControl] == 1 &&
-        raster_state_[kRasterCombinerColorIcw0] == 0x08010000 &&
-        raster_state_[kRasterCombinerAlphaIcw0] == 0x11200000 &&
-        raster_state_[kRasterCombinerColorOcw0] == 0x00000C00 &&
-        raster_state_[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
+        raster_state[kRasterTextureEnableMask] == 7 &&
+        raster_state[kRasterShaderStageProgram] == 0x00000C61 &&
+        raster_state[kRasterShaderOtherStageInput] == 0x00210000 &&
+        raster_state[kRasterDotRgbMapping] == 0 &&
+        raster_state[kRasterShadowDepthFunc] == 7 &&
+        raster_state[kRasterCombinerControl] == 1 &&
+        raster_state[kRasterCombinerColorIcw0] == 0x08010000 &&
+        raster_state[kRasterCombinerAlphaIcw0] == 0x11200000 &&
+        raster_state[kRasterCombinerColorOcw0] == 0x00000C00 &&
+        raster_state[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
         tex7_fan_factor_rgb &&
-        raster_state_[kRasterCombinerSpecularFog0] == 0x0000000C &&
-        raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80 &&
-        raster_state_[kRasterCombinerFinalFactor0] == 0xFF3F3F3F &&
-        raster_state_[kRasterCombinerFinalFactor1] == 0;
+        raster_state[kRasterCombinerSpecularFog0] == 0x0000000C &&
+        raster_state[kRasterCombinerSpecularFog1] == 0x00001C80 &&
+        raster_state[kRasterCombinerFinalFactor0] == 0xFF3F3F3F &&
+        raster_state[kRasterCombinerFinalFactor1] == 0;
     const bool tex7_fan_texture_state =
-        raster_state_[kRasterTextureFormat0] == 0x0888062A &&
-        raster_state_[kRasterTextureAddress0] == 0x00030303 &&
-        raster_state_[kRasterTextureFilter0] == 0x02022000 &&
-        raster_state_[kRasterTextureControl0_0] == 0x4003FFC0 &&
-        raster_state_[kRasterTextureControl1_0] == 0x14000000 &&
-        raster_state_[kRasterTextureImageRect0] == 0x050001E0 &&
-        raster_state_[kRasterTexturePalette0] == 0 &&
-        (raster_state_[kRasterTextureBorderColor0] == 0 ||
-         raster_state_[kRasterTextureBorderColor0] == 0xFF000000) &&
-        raster_state_[kRasterTextureFormat0 + 1] == 0x0771072E &&
-        raster_state_[kRasterTextureFormat0 + 2] == 0x0771072E &&
-        raster_state_[kRasterTextureAddress0 + 1] == 0x00030303 &&
-        raster_state_[kRasterTextureAddress0 + 2] == 0x00030303 &&
-        raster_state_[kRasterTextureFilter0 + 1] == 0x02022000 &&
-        raster_state_[kRasterTextureFilter0 + 2] == 0x02022000 &&
-        raster_state_[kRasterTextureControl0_0 + 1] == 0x4003FFC0 &&
-        raster_state_[kRasterTextureControl0_0 + 2] == 0x4003FFC0 &&
-        raster_state_[kRasterTextureControl1_0 + 1] == 0 &&
-        raster_state_[kRasterTextureControl1_0 + 2] == 0 &&
-        raster_state_[kRasterTextureImageRect0 + 1] == 0 &&
-        raster_state_[kRasterTextureImageRect0 + 2] == 0 &&
-        raster_state_[kRasterTexturePalette0 + 1] == 0 &&
-        raster_state_[kRasterTexturePalette0 + 2] == 0 &&
-        raster_state_[kRasterTextureBorderColor0 + 1] == 0 &&
-        raster_state_[kRasterTextureBorderColor0 + 2] == 0;
+        raster_state[kRasterTextureFormat0] == 0x0888062A &&
+        raster_state[kRasterTextureAddress0] == 0x00030303 &&
+        raster_state[kRasterTextureFilter0] == 0x02022000 &&
+        raster_state[kRasterTextureControl0_0] == 0x4003FFC0 &&
+        raster_state[kRasterTextureControl1_0] == 0x14000000 &&
+        raster_state[kRasterTextureImageRect0] == 0x050001E0 &&
+        raster_state[kRasterTexturePalette0] == 0 &&
+        (raster_state[kRasterTextureBorderColor0] == 0 ||
+         raster_state[kRasterTextureBorderColor0] == 0xFF000000) &&
+        raster_state[kRasterTextureFormat0 + 1] == 0x0771072E &&
+        raster_state[kRasterTextureFormat0 + 2] == 0x0771072E &&
+        raster_state[kRasterTextureAddress0 + 1] == 0x00030303 &&
+        raster_state[kRasterTextureAddress0 + 2] == 0x00030303 &&
+        raster_state[kRasterTextureFilter0 + 1] == 0x02022000 &&
+        raster_state[kRasterTextureFilter0 + 2] == 0x02022000 &&
+        raster_state[kRasterTextureControl0_0 + 1] == 0x4003FFC0 &&
+        raster_state[kRasterTextureControl0_0 + 2] == 0x4003FFC0 &&
+        raster_state[kRasterTextureControl1_0 + 1] == 0 &&
+        raster_state[kRasterTextureControl1_0 + 2] == 0 &&
+        raster_state[kRasterTextureImageRect0 + 1] == 0 &&
+        raster_state[kRasterTextureImageRect0 + 2] == 0 &&
+        raster_state[kRasterTexturePalette0 + 1] == 0 &&
+        raster_state[kRasterTexturePalette0 + 2] == 0 &&
+        raster_state[kRasterTextureBorderColor0 + 1] == 0 &&
+        raster_state[kRasterTextureBorderColor0 + 2] == 0;
     const bool pitch_additive_combiner =
-        raster_state_[kRasterTextureEnableMask] == 1 &&
-        raster_state_[kRasterShaderStageProgram] == 0x00000001 &&
-        raster_state_[kRasterShaderOtherStageInput] == 0x00210000 &&
-        raster_state_[kRasterDotRgbMapping] == 0 &&
-        raster_state_[kRasterCombinerControl] == 0x00000001 &&
-        raster_state_[kRasterCombinerColorIcw0] == 0x01080000 &&
-        raster_state_[kRasterCombinerAlphaIcw0] == 0x11180000 &&
-        raster_state_[kRasterCombinerColorOcw0] == 0x00000C00 &&
-        raster_state_[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
-        raster_state_[kRasterCombinerFactor0_0] ==
-            raster_state_[kRasterCombinerFactor1_0] &&
-        raster_state_[kRasterCombinerSpecularFog0] == 0x0000000C &&
-        raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80 &&
-        raster_state_[kRasterCombinerFinalFactor0] == 0 &&
-        raster_state_[kRasterCombinerFinalFactor1] == 0;
+        raster_state[kRasterTextureEnableMask] == 1 &&
+        raster_state[kRasterShaderStageProgram] == 0x00000001 &&
+        raster_state[kRasterShaderOtherStageInput] == 0x00210000 &&
+        raster_state[kRasterDotRgbMapping] == 0 &&
+        raster_state[kRasterCombinerControl] == 0x00000001 &&
+        raster_state[kRasterCombinerColorIcw0] == 0x01080000 &&
+        raster_state[kRasterCombinerAlphaIcw0] == 0x11180000 &&
+        raster_state[kRasterCombinerColorOcw0] == 0x00000C00 &&
+        raster_state[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
+        raster_state[kRasterCombinerFactor0_0] ==
+            raster_state[kRasterCombinerFactor1_0] &&
+        raster_state[kRasterCombinerSpecularFog0] == 0x0000000C &&
+        raster_state[kRasterCombinerSpecularFog1] == 0x00001C80 &&
+        raster_state[kRasterCombinerFinalFactor0] == 0 &&
+        raster_state[kRasterCombinerFinalFactor1] == 0;
     // RS0/RS1 from probe-rs2-ohci-6.4b.  This intentionally names every
     // register which affects the generated Xemu register-combiner program;
     // adjacent shadow=0 states are a distinct, still-recorder-only family.
@@ -3139,90 +5309,90 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                                             0x000000C0}};
     const std::array<uint32_t, 6> texf_f0{{0, 0, 0xFF000000, 0, 0, 0}};
     bool texf_projected_fan_combiner =
-        raster_state_[kRasterTextureEnableMask] == 0xF &&
-        raster_state_[kRasterShaderStageProgram] == 0x00008421 &&
-        raster_state_[kRasterShaderOtherStageInput] == 0 &&
-        raster_state_[kRasterDotRgbMapping] == 0 &&
-        raster_state_[kRasterShadowDepthFunc] == 7 &&
-        raster_state_[kRasterCombinerControl] == 0x00011106 &&
-        raster_state_[kRasterCombinerSpecularFog0] == 0x0000000C &&
-        raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80 &&
-        raster_state_[kRasterCombinerFinalFactor0] == 0 &&
-        raster_state_[kRasterCombinerFinalFactor1] == 0;
+        raster_state[kRasterTextureEnableMask] == 0xF &&
+        raster_state[kRasterShaderStageProgram] == 0x00008421 &&
+        raster_state[kRasterShaderOtherStageInput] == 0 &&
+        raster_state[kRasterDotRgbMapping] == 0 &&
+        raster_state[kRasterShadowDepthFunc] == 7 &&
+        raster_state[kRasterCombinerControl] == 0x00011106 &&
+        raster_state[kRasterCombinerSpecularFog0] == 0x0000000C &&
+        raster_state[kRasterCombinerSpecularFog1] == 0x00001C80 &&
+        raster_state[kRasterCombinerFinalFactor0] == 0 &&
+        raster_state[kRasterCombinerFinalFactor1] == 0;
     for (size_t stage = 0; stage < texf_ci.size() &&
                            texf_projected_fan_combiner; ++stage) {
         texf_projected_fan_combiner =
-            raster_state_[kRasterCombinerColorIcw0 + stage] == texf_ci[stage] &&
-            raster_state_[kRasterCombinerAlphaIcw0 + stage] == texf_ai[stage] &&
-            raster_state_[kRasterCombinerColorOcw0 + stage] == texf_co[stage] &&
-            raster_state_[kRasterCombinerAlphaOcw0 + stage] == texf_ao[stage] &&
-            raster_state_[kRasterCombinerFactor0_0 + stage] == texf_f0[stage] &&
-            raster_state_[kRasterCombinerFactor1_0 + stage] == 0;
+            raster_state[kRasterCombinerColorIcw0 + stage] == texf_ci[stage] &&
+            raster_state[kRasterCombinerAlphaIcw0 + stage] == texf_ai[stage] &&
+            raster_state[kRasterCombinerColorOcw0 + stage] == texf_co[stage] &&
+            raster_state[kRasterCombinerAlphaOcw0 + stage] == texf_ao[stage] &&
+            raster_state[kRasterCombinerFactor0_0 + stage] == texf_f0[stage] &&
+            raster_state[kRasterCombinerFactor1_0 + stage] == 0;
     }
-    const uint32_t texf_t0_offset = raster_state_[kRasterTextureOffset0];
+    const uint32_t texf_t0_offset = raster_state[kRasterTextureOffset0];
     const bool texf_projected_fan_textures =
         (texf_t0_offset == 0x02E05000 || texf_t0_offset == 0x02C05000) &&
-        raster_state_[kRasterTextureFormat0] == 0x09A1062A &&
-        raster_state_[kRasterTextureAddress0] == 0x00030303 &&
-        raster_state_[kRasterTextureFilter0] == 0x02022000 &&
-        raster_state_[kRasterTextureControl0_0] == 0x4003FFC0 &&
-        raster_state_[kRasterTextureControl1_0] == 0x14000000 &&
-        raster_state_[kRasterTextureImageRect0] == 0x050001E0 &&
-        raster_state_[kRasterTexturePalette0] == 0 &&
-        raster_state_[kRasterTextureBorderColor0] == 0 &&
-        raster_state_[kRasterTextureOffset0 + 1] == 0x029F3000 &&
-        raster_state_[kRasterTextureOffset0 + 2] == 0x029E3000 &&
-        raster_state_[kRasterTextureOffset0 + 3] == 0x029D3000 &&
-        raster_state_[kRasterTextureFormat0 + 1] == 0x0881192A &&
-        raster_state_[kRasterTextureFormat0 + 2] == 0x0881192A &&
-        raster_state_[kRasterTextureFormat0 + 3] == 0x0881192A &&
-        raster_state_[kRasterTextureAddress0 + 1] == 0x00030101 &&
-        raster_state_[kRasterTextureAddress0 + 2] == 0x00030101 &&
-        raster_state_[kRasterTextureAddress0 + 3] == 0x00030101 &&
-        raster_state_[kRasterTextureFilter0 + 1] == 0x02022000 &&
-        raster_state_[kRasterTextureFilter0 + 2] == 0x02022000 &&
-        raster_state_[kRasterTextureFilter0 + 3] == 0x02022000 &&
-        raster_state_[kRasterTextureControl0_0 + 1] == 0x4003FFC0 &&
-        raster_state_[kRasterTextureControl0_0 + 2] == 0x4003FFC0 &&
-        raster_state_[kRasterTextureControl0_0 + 3] == 0x4003FFC0 &&
-        raster_state_[kRasterTextureControl1_0 + 1] == 0 &&
-        raster_state_[kRasterTextureControl1_0 + 2] == 0 &&
-        raster_state_[kRasterTextureControl1_0 + 3] == 0x04000000 &&
-        raster_state_[kRasterTextureImageRect0 + 1] == 0 &&
-        raster_state_[kRasterTextureImageRect0 + 2] == 0 &&
-        raster_state_[kRasterTextureImageRect0 + 3] == 0x02000200 &&
-        raster_state_[kRasterTexturePalette0 + 1] == 0 &&
-        raster_state_[kRasterTexturePalette0 + 2] == 0 &&
-        raster_state_[kRasterTexturePalette0 + 3] == 0 &&
-        raster_state_[kRasterTextureBorderColor0 + 1] == 0 &&
-        raster_state_[kRasterTextureBorderColor0 + 2] == 0 &&
-        raster_state_[kRasterTextureBorderColor0 + 3] == 0xFFFFFFFF;
+        raster_state[kRasterTextureFormat0] == 0x09A1062A &&
+        raster_state[kRasterTextureAddress0] == 0x00030303 &&
+        raster_state[kRasterTextureFilter0] == 0x02022000 &&
+        raster_state[kRasterTextureControl0_0] == 0x4003FFC0 &&
+        raster_state[kRasterTextureControl1_0] == 0x14000000 &&
+        raster_state[kRasterTextureImageRect0] == 0x050001E0 &&
+        raster_state[kRasterTexturePalette0] == 0 &&
+        raster_state[kRasterTextureBorderColor0] == 0 &&
+        raster_state[kRasterTextureOffset0 + 1] == 0x029F3000 &&
+        raster_state[kRasterTextureOffset0 + 2] == 0x029E3000 &&
+        raster_state[kRasterTextureOffset0 + 3] == 0x029D3000 &&
+        raster_state[kRasterTextureFormat0 + 1] == 0x0881192A &&
+        raster_state[kRasterTextureFormat0 + 2] == 0x0881192A &&
+        raster_state[kRasterTextureFormat0 + 3] == 0x0881192A &&
+        raster_state[kRasterTextureAddress0 + 1] == 0x00030101 &&
+        raster_state[kRasterTextureAddress0 + 2] == 0x00030101 &&
+        raster_state[kRasterTextureAddress0 + 3] == 0x00030101 &&
+        raster_state[kRasterTextureFilter0 + 1] == 0x02022000 &&
+        raster_state[kRasterTextureFilter0 + 2] == 0x02022000 &&
+        raster_state[kRasterTextureFilter0 + 3] == 0x02022000 &&
+        raster_state[kRasterTextureControl0_0 + 1] == 0x4003FFC0 &&
+        raster_state[kRasterTextureControl0_0 + 2] == 0x4003FFC0 &&
+        raster_state[kRasterTextureControl0_0 + 3] == 0x4003FFC0 &&
+        raster_state[kRasterTextureControl1_0 + 1] == 0 &&
+        raster_state[kRasterTextureControl1_0 + 2] == 0 &&
+        raster_state[kRasterTextureControl1_0 + 3] == 0x04000000 &&
+        raster_state[kRasterTextureImageRect0 + 1] == 0 &&
+        raster_state[kRasterTextureImageRect0 + 2] == 0 &&
+        raster_state[kRasterTextureImageRect0 + 3] == 0x02000200 &&
+        raster_state[kRasterTexturePalette0 + 1] == 0 &&
+        raster_state[kRasterTexturePalette0 + 2] == 0 &&
+        raster_state[kRasterTexturePalette0 + 3] == 0 &&
+        raster_state[kRasterTextureBorderColor0 + 1] == 0 &&
+        raster_state[kRasterTextureBorderColor0 + 2] == 0 &&
+        raster_state[kRasterTextureBorderColor0 + 3] == 0xFFFFFFFF;
     const bool texf_projected_fan_bounds =
-        raster_state_[kRasterWindowClipHorizontal] == 0x04FF0000 &&
-        raster_state_[kRasterWindowClipVertical] == 0x01DF0000 &&
-        raster_state_[kRasterClipMin] == 0 &&
-        raster_state_[kRasterClipMax] == 0x4B7FFFFF;
+        raster_state[kRasterWindowClipHorizontal] == 0x04FF0000 &&
+        raster_state[kRasterWindowClipVertical] == 0x01DF0000 &&
+        raster_state[kRasterClipMin] == 0 &&
+        raster_state[kRasterClipMax] == 0x4B7FFFFF;
 
     Profile profile = Profile::kNone;
     if (depth_only && surface_type == 1 && anti_aliasing == 0 &&
         zeta_format == 1 && supported_primitive &&
-        raster_state_[kRasterTextureEnableMask] == 0) {
+        raster_state[kRasterTextureEnableMask] == 0) {
         profile = Profile::kPitchZ16Depth;
     } else if (radial_combiner) {
         profile = Profile::kSwizzledRadialColor;
     } else if (textured_combiner && surface_type == 1 &&
-               raster_state_[kRasterShadowDepthFunc] == 4) {
+               raster_state[kRasterShadowDepthFunc] == 4) {
         profile = Profile::kPitchTexturedColor;
     } else if (textured_combiner && textured_fixed_stage6 &&
                surface_type == 2 &&
-               raster_state_[kRasterShadowDepthFunc] == 0) {
+               raster_state[kRasterShadowDepthFunc] == 0) {
         profile = Profile::kSwizzledTexturedColor;
     } else if (projected_combiner && surface_type == 1 &&
-               raster_state_[kRasterShadowDepthFunc] == 4) {
+               raster_state[kRasterShadowDepthFunc] == 4) {
         profile = Profile::kPitchProjectedColor;
     } else if (projected_combiner && projected_fixed_stage5 &&
                surface_type == 2 &&
-               raster_state_[kRasterShadowDepthFunc] == 0) {
+               raster_state[kRasterShadowDepthFunc] == 0) {
         profile = Profile::kSwizzledProjectedColor;
     } else if (pitch_multi_texture_combiner) {
         profile = Profile::kPitchMultiTextureColor;
@@ -3260,16 +5430,24 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         if (perf::g_enabled) {
             t.emplace(perf::g_ns_raster_generic, perf::g_calls_raster_generic);
         }
-        return rasterize_generic_combiner_batch(executed);
+        // Stage (e) ordering fence: the generic path reaches the GL backend and
+        // the resident-surface protocol (F3) and is never threadable, so it runs
+        // here. It writes colour and zeta -- and it is what the threads=1
+        // byte-lock caught overtaking queued jobs, moving the read-only-depth
+        // profiles' depth-pass counts.
+        draw_order_fence();
+        return rasterize_generic_combiner_batch(job, executed);
     }
     executed = true;
+    // Stage (d): the ladder result is part of the job identity.
+    job.profile = static_cast<uint32_t>(profile);
     std::optional<perf::ScopedAdd> witnessed_profile_timer;
     if (perf::g_enabled) {
         witnessed_profile_timer.emplace(
             perf::g_ns_witnessed_profile[static_cast<size_t>(profile)],
             perf::g_calls_witnessed_profile[static_cast<size_t>(profile)]);
     }
-    const bool pitch_tex5_profile =
+    const bool& pitch_tex5_profile = job.pitch_tex5_profile =
         profile == Profile::kPitchTex5ProjectedColor ||
         profile == Profile::kPitchTex5DiffuseColor;
 
@@ -3278,65 +5456,65 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
             (1u << 2) | (1u << 3) | (1u << 13);
         if ((enables & ~kSupportedEnables) != 0 ||
             (enables & (1u << 2)) == 0 ||
-            raster_state_[kRasterDepthFunc] != 0x0203 ||
-            raster_state_[kRasterCullFace] != 0x0405 ||
-            raster_state_[kRasterFrontFace] != 0x0900 ||
-            raster_state_[kRasterFrontPolygonMode] != 0x1B02 ||
-            raster_state_[kRasterBackPolygonMode] != 0x1B02 ||
-            (raster_state_[kRasterControl0] &
+            raster_state[kRasterDepthFunc] != 0x0203 ||
+            raster_state[kRasterCullFace] != 0x0405 ||
+            raster_state[kRasterFrontFace] != 0x0900 ||
+            raster_state[kRasterFrontPolygonMode] != 0x1B02 ||
+            raster_state[kRasterBackPolygonMode] != 0x1B02 ||
+            (raster_state[kRasterControl0] &
              ((1u << 12) | (1u << 16))) != 0 ||
-            (raster_state_[kRasterZMinMaxControl] & 0xF0u) != 0) {
+            (raster_state[kRasterZMinMaxControl] & 0xF0u) != 0) {
             fault_("NV2A depth-only draw exceeds the witnessed raster subset");
             return false;
         }
     } else if (profile == Profile::kPitchMultiTextureColor) {
-        if (primitive_mode_ != 6 || surface_type != 1 ||
+        if (primitive_mode != 6 || surface_type != 1 ||
             anti_aliasing != 0 || color_format != 8 || zeta_format != 2 ||
             enables != 0x000Fu ||
-            raster_state_[kRasterControl0] != 0x00100001 ||
-            raster_state_[kRasterAlphaFunc] != 0x0206 ||
-            (raster_state_[kRasterAlphaRef] & 0xFFu) != 1 ||
-            raster_state_[kRasterBlendSrc] != 0x0302 ||
-            raster_state_[kRasterBlendDst] != 0x0303 ||
-            raster_state_[kRasterBlendEquation] != 0x8006 ||
-            raster_state_[kRasterDepthFunc] != 0x0203 ||
-            raster_state_[kRasterColorMask] != 0x01010101 ||
-            raster_state_[kRasterDepthMask] != 1 ||
-            raster_state_[kRasterShadeMode] != 0x1D01 ||
-            raster_state_[kRasterFrontPolygonMode] != 0x1B02 ||
-            raster_state_[kRasterBackPolygonMode] != 0x1B02 ||
-            raster_state_[kRasterCullFace] != 0x0405 ||
-            raster_state_[kRasterFrontFace] != 0x0900 ||
-            raster_state_[kRasterZMinMaxControl] != 1 ||
-            raster_state_[kRasterPolygonOffsetScale] != 0x40800000 ||
-            raster_state_[kRasterPolygonOffsetBias] != 0x41200000) {
+            raster_state[kRasterControl0] != 0x00100001 ||
+            raster_state[kRasterAlphaFunc] != 0x0206 ||
+            (raster_state[kRasterAlphaRef] & 0xFFu) != 1 ||
+            raster_state[kRasterBlendSrc] != 0x0302 ||
+            raster_state[kRasterBlendDst] != 0x0303 ||
+            raster_state[kRasterBlendEquation] != 0x8006 ||
+            raster_state[kRasterDepthFunc] != 0x0203 ||
+            raster_state[kRasterColorMask] != 0x01010101 ||
+            raster_state[kRasterDepthMask] != 1 ||
+            raster_state[kRasterShadeMode] != 0x1D01 ||
+            raster_state[kRasterFrontPolygonMode] != 0x1B02 ||
+            raster_state[kRasterBackPolygonMode] != 0x1B02 ||
+            raster_state[kRasterCullFace] != 0x0405 ||
+            raster_state[kRasterFrontFace] != 0x0900 ||
+            raster_state[kRasterZMinMaxControl] != 1 ||
+            raster_state[kRasterPolygonOffsetScale] != 0x40800000 ||
+            raster_state[kRasterPolygonOffsetBias] != 0x41200000) {
             fault_("NV2A pitch multi-texture draw exceeds the witnessed raster subset");
             return false;
         }
     } else if (profile == Profile::kPitchThreeTextureColor) {
-        if (primitive_mode_ != 6 || surface_type != 1 ||
+        if (primitive_mode != 6 || surface_type != 1 ||
             anti_aliasing != 0 || color_format != 8 || zeta_format != 2 ||
-            surface_pitch_ != 0x14001400 ||
-            surface_clip_horizontal_ != 0x05000000 ||
-            surface_clip_vertical_ != 0x01E00000 ||
+            surface_pitch != 0x14001400 ||
+            surface_clip_horizontal != 0x05000000 ||
+            surface_clip_vertical != 0x01E00000 ||
             enables != 0x000Eu ||
-            raster_state_[kRasterControl0] != 0x00100001 ||
-            raster_state_[kRasterAlphaFunc] != 0x0206 ||
-            (raster_state_[kRasterAlphaRef] & 0xFFu) != 1 ||
-            raster_state_[kRasterBlendSrc] != 0x0302 ||
-            raster_state_[kRasterBlendDst] != 0x0303 ||
-            raster_state_[kRasterBlendEquation] != 0x8006 ||
-            raster_state_[kRasterDepthFunc] != 0x0203 ||
-            raster_state_[kRasterColorMask] != 0x01010101 ||
-            raster_state_[kRasterDepthMask] != 1 ||
-            raster_state_[kRasterShadeMode] != 0x1D01 ||
-            raster_state_[kRasterFrontPolygonMode] != 0x1B02 ||
-            raster_state_[kRasterBackPolygonMode] != 0x1B02 ||
-            raster_state_[kRasterCullFace] != 0x0405 ||
-            raster_state_[kRasterFrontFace] != 0x0900 ||
-            raster_state_[kRasterZMinMaxControl] != 1 ||
-            raster_state_[kRasterPolygonOffsetScale] != 0x40800000 ||
-            raster_state_[kRasterPolygonOffsetBias] != 0x41200000) {
+            raster_state[kRasterControl0] != 0x00100001 ||
+            raster_state[kRasterAlphaFunc] != 0x0206 ||
+            (raster_state[kRasterAlphaRef] & 0xFFu) != 1 ||
+            raster_state[kRasterBlendSrc] != 0x0302 ||
+            raster_state[kRasterBlendDst] != 0x0303 ||
+            raster_state[kRasterBlendEquation] != 0x8006 ||
+            raster_state[kRasterDepthFunc] != 0x0203 ||
+            raster_state[kRasterColorMask] != 0x01010101 ||
+            raster_state[kRasterDepthMask] != 1 ||
+            raster_state[kRasterShadeMode] != 0x1D01 ||
+            raster_state[kRasterFrontPolygonMode] != 0x1B02 ||
+            raster_state[kRasterBackPolygonMode] != 0x1B02 ||
+            raster_state[kRasterCullFace] != 0x0405 ||
+            raster_state[kRasterFrontFace] != 0x0900 ||
+            raster_state[kRasterZMinMaxControl] != 1 ||
+            raster_state[kRasterPolygonOffsetScale] != 0x40800000 ||
+            raster_state[kRasterPolygonOffsetBias] != 0x41200000) {
             fault_("NV2A pitch three-texture draw exceeds the witnessed raster subset");
             return false;
         }
@@ -3349,90 +5527,90 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
             return false;
         }
     } else if (profile == Profile::kInlineLinearBlitColor) {
-        if (primitive_mode_ != 5 || surface_type != 1 ||
+        if (primitive_mode != 5 || surface_type != 1 ||
             anti_aliasing != 0 || color_format != 8 || zeta_format != 2 ||
-            surface_pitch_ != 0x0A000A00 ||
-            surface_clip_horizontal_ != 0x02800000 ||
-            surface_clip_vertical_ != 0x01E00000 ||
+            surface_pitch != 0x0A000A00 ||
+            surface_clip_horizontal != 0x02800000 ||
+            surface_clip_vertical != 0x01E00000 ||
             enables != 0x0010u ||
-            raster_state_[kRasterControl0] != 0x00100001 ||
-            raster_state_[kRasterColorMask] != 0x01010101 ||
-            raster_state_[kRasterShadeMode] != 0x1D01 ||
-            raster_state_[kRasterFrontPolygonMode] != 0x1B02 ||
-            raster_state_[kRasterBackPolygonMode] != 0x1B02 ||
-            raster_state_[kRasterZMinMaxControl] != 1) {
+            raster_state[kRasterControl0] != 0x00100001 ||
+            raster_state[kRasterColorMask] != 0x01010101 ||
+            raster_state[kRasterShadeMode] != 0x1D01 ||
+            raster_state[kRasterFrontPolygonMode] != 0x1B02 ||
+            raster_state[kRasterBackPolygonMode] != 0x1B02 ||
+            raster_state[kRasterZMinMaxControl] != 1) {
             fault_("NV2A inline linear-blit draw exceeds the witnessed raster subset");
             return false;
         }
     } else if (profile == Profile::kPitchSingleTextureColor) {
-        if (primitive_mode_ != 7 || surface_type != 1 ||
+        if (primitive_mode != 7 || surface_type != 1 ||
             anti_aliasing != 0 || color_format != 8 || zeta_format != 2 ||
             enables != 0x000Eu ||
-            raster_state_[kRasterControl0] != 0x00100001 ||
-            raster_state_[kRasterBlendSrc] != 1 ||
-            raster_state_[kRasterBlendDst] != 0 ||
-            raster_state_[kRasterBlendEquation] != 0x8006 ||
-            raster_state_[kRasterDepthFunc] != 0x0203 ||
-            raster_state_[kRasterColorMask] != 0x01010101 ||
-            raster_state_[kRasterDepthMask] != 0 ||
-            raster_state_[kRasterShadeMode] != 0x1D01 ||
-            raster_state_[kRasterFrontPolygonMode] != 0x1B02 ||
-            raster_state_[kRasterBackPolygonMode] != 0x1B02 ||
-            raster_state_[kRasterCullFace] != 0x0405 ||
-            raster_state_[kRasterFrontFace] != 0x0900 ||
-            raster_state_[kRasterZMinMaxControl] != 1) {
+            raster_state[kRasterControl0] != 0x00100001 ||
+            raster_state[kRasterBlendSrc] != 1 ||
+            raster_state[kRasterBlendDst] != 0 ||
+            raster_state[kRasterBlendEquation] != 0x8006 ||
+            raster_state[kRasterDepthFunc] != 0x0203 ||
+            raster_state[kRasterColorMask] != 0x01010101 ||
+            raster_state[kRasterDepthMask] != 0 ||
+            raster_state[kRasterShadeMode] != 0x1D01 ||
+            raster_state[kRasterFrontPolygonMode] != 0x1B02 ||
+            raster_state[kRasterBackPolygonMode] != 0x1B02 ||
+            raster_state[kRasterCullFace] != 0x0405 ||
+            raster_state[kRasterFrontFace] != 0x0900 ||
+            raster_state[kRasterZMinMaxControl] != 1) {
             fault_("NV2A pitch single-texture draw exceeds the witnessed raster subset");
             return false;
         }
     } else if (profile == Profile::kTex7FanColor) {
-        if (primitive_mode_ != 7 || surface_type != 1 ||
+        if (primitive_mode != 7 || surface_type != 1 ||
             anti_aliasing != 0 || color_format != 8 || zeta_format != 2 ||
-            surface_pitch_ != 0x14001400 ||
-            surface_clip_horizontal_ != 0x05000000 ||
-            surface_clip_vertical_ != 0x01E00000 || enables != 0x000Eu ||
-            raster_state_[kRasterControl0] != 0x00100001 ||
-            raster_state_[kRasterAlphaFunc] != 0x0206 ||
-            (raster_state_[kRasterAlphaRef] & 0xFFu) != 1 ||
-            raster_state_[kRasterBlendSrc] != 0x0302 ||
-            raster_state_[kRasterBlendDst] != 1 ||
-            raster_state_[kRasterBlendEquation] != 0x8006 ||
-            raster_state_[kRasterDepthFunc] != 0x0203 ||
-            raster_state_[kRasterColorMask] != 0x01010101 ||
-            raster_state_[kRasterDepthMask] != 0 ||
-            raster_state_[kRasterShadeMode] != 0x1D01 ||
-            raster_state_[kRasterFrontPolygonMode] != 0x1B02 ||
-            raster_state_[kRasterBackPolygonMode] != 0x1B02 ||
-            raster_state_[kRasterCullFace] != 0x0405 ||
-            raster_state_[kRasterFrontFace] != 0x0900 ||
-            raster_state_[kRasterZMinMaxControl] != 1) {
+            surface_pitch != 0x14001400 ||
+            surface_clip_horizontal != 0x05000000 ||
+            surface_clip_vertical != 0x01E00000 || enables != 0x000Eu ||
+            raster_state[kRasterControl0] != 0x00100001 ||
+            raster_state[kRasterAlphaFunc] != 0x0206 ||
+            (raster_state[kRasterAlphaRef] & 0xFFu) != 1 ||
+            raster_state[kRasterBlendSrc] != 0x0302 ||
+            raster_state[kRasterBlendDst] != 1 ||
+            raster_state[kRasterBlendEquation] != 0x8006 ||
+            raster_state[kRasterDepthFunc] != 0x0203 ||
+            raster_state[kRasterColorMask] != 0x01010101 ||
+            raster_state[kRasterDepthMask] != 0 ||
+            raster_state[kRasterShadeMode] != 0x1D01 ||
+            raster_state[kRasterFrontPolygonMode] != 0x1B02 ||
+            raster_state[kRasterBackPolygonMode] != 0x1B02 ||
+            raster_state[kRasterCullFace] != 0x0405 ||
+            raster_state[kRasterFrontFace] != 0x0900 ||
+            raster_state[kRasterZMinMaxControl] != 1) {
             fault_("NV2A tex7 fan draw exceeds the witnessed RS0 subset");
             return false;
         }
     } else if (profile == Profile::kTexfProjectedFanColor) {
-        if (primitive_mode_ != 7 || surface_type != 1 || anti_aliasing != 0 ||
+        if (primitive_mode != 7 || surface_type != 1 || anti_aliasing != 0 ||
             color_format != 8 || zeta_format != 2 ||
-            surface_pitch_ != 0x14001400 ||
-            surface_clip_horizontal_ != 0x05000000 ||
-            surface_clip_vertical_ != 0x01E00000 || enables != 0x000Fu ||
-            raster_state_[kRasterWindowClipHorizontal] != 0x04FF0000 ||
-            raster_state_[kRasterWindowClipVertical] != 0x01DF0000 ||
-            raster_state_[kRasterClipMin] != 0 ||
-            raster_state_[kRasterClipMax] != 0x4B7FFFFF ||
-            raster_state_[kRasterControl0] != 0x00100001 ||
-            raster_state_[kRasterAlphaFunc] != 0x0206 ||
-            (raster_state_[kRasterAlphaRef] & 0xFFu) != 1 ||
-            raster_state_[kRasterBlendSrc] != 0x0302 ||
-            raster_state_[kRasterBlendDst] != 1 ||
-            raster_state_[kRasterBlendEquation] != 0x8006 ||
-            raster_state_[kRasterDepthFunc] != 0x0207 ||
-            raster_state_[kRasterColorMask] != 0x01010101 ||
-            raster_state_[kRasterDepthMask] != 0 ||
-            raster_state_[kRasterShadeMode] != 0x1D01 ||
-            raster_state_[kRasterFrontPolygonMode] != 0x1B02 ||
-            raster_state_[kRasterBackPolygonMode] != 0x1B02 ||
-            raster_state_[kRasterCullFace] != 0x0405 ||
-            raster_state_[kRasterFrontFace] != 0x0900 ||
-            raster_state_[kRasterZMinMaxControl] != 1) {
+            surface_pitch != 0x14001400 ||
+            surface_clip_horizontal != 0x05000000 ||
+            surface_clip_vertical != 0x01E00000 || enables != 0x000Fu ||
+            raster_state[kRasterWindowClipHorizontal] != 0x04FF0000 ||
+            raster_state[kRasterWindowClipVertical] != 0x01DF0000 ||
+            raster_state[kRasterClipMin] != 0 ||
+            raster_state[kRasterClipMax] != 0x4B7FFFFF ||
+            raster_state[kRasterControl0] != 0x00100001 ||
+            raster_state[kRasterAlphaFunc] != 0x0206 ||
+            (raster_state[kRasterAlphaRef] & 0xFFu) != 1 ||
+            raster_state[kRasterBlendSrc] != 0x0302 ||
+            raster_state[kRasterBlendDst] != 1 ||
+            raster_state[kRasterBlendEquation] != 0x8006 ||
+            raster_state[kRasterDepthFunc] != 0x0207 ||
+            raster_state[kRasterColorMask] != 0x01010101 ||
+            raster_state[kRasterDepthMask] != 0 ||
+            raster_state[kRasterShadeMode] != 0x1D01 ||
+            raster_state[kRasterFrontPolygonMode] != 0x1B02 ||
+            raster_state[kRasterBackPolygonMode] != 0x1B02 ||
+            raster_state[kRasterCullFace] != 0x0405 ||
+            raster_state[kRasterFrontFace] != 0x0900 ||
+            raster_state[kRasterZMinMaxControl] != 1) {
             fault_("NV2A tex=f projected fan draw exceeds RS0/RS1 subset");
             return false;
         }
@@ -3440,22 +5618,22 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         if (!supported_primitive || surface_type != 1 ||
             anti_aliasing != 0 || color_format != 8 || zeta_format != 2 ||
             enables != 0x000Fu ||
-            raster_state_[kRasterControl0] != 0x00100001 ||
-            raster_state_[kRasterAlphaFunc] != 0x0206 ||
-            (raster_state_[kRasterAlphaRef] & 0xFFu) != 1 ||
-            raster_state_[kRasterBlendSrc] != 0x0302 ||
-            raster_state_[kRasterBlendDst] != 1 ||
-            raster_state_[kRasterBlendEquation] != 0x8006 ||
-            (raster_state_[kRasterDepthFunc] != 0x0202 &&
-             raster_state_[kRasterDepthFunc] != 0x0207) ||
-            raster_state_[kRasterColorMask] != 0x01010101 ||
-            raster_state_[kRasterDepthMask] != 0 ||
-            raster_state_[kRasterShadeMode] != 0x1D01 ||
-            raster_state_[kRasterFrontPolygonMode] != 0x1B02 ||
-            raster_state_[kRasterBackPolygonMode] != 0x1B02 ||
-            raster_state_[kRasterCullFace] != 0x0405 ||
-            raster_state_[kRasterFrontFace] != 0x0900 ||
-            raster_state_[kRasterZMinMaxControl] != 1) {
+            raster_state[kRasterControl0] != 0x00100001 ||
+            raster_state[kRasterAlphaFunc] != 0x0206 ||
+            (raster_state[kRasterAlphaRef] & 0xFFu) != 1 ||
+            raster_state[kRasterBlendSrc] != 0x0302 ||
+            raster_state[kRasterBlendDst] != 1 ||
+            raster_state[kRasterBlendEquation] != 0x8006 ||
+            (raster_state[kRasterDepthFunc] != 0x0202 &&
+             raster_state[kRasterDepthFunc] != 0x0207) ||
+            raster_state[kRasterColorMask] != 0x01010101 ||
+            raster_state[kRasterDepthMask] != 0 ||
+            raster_state[kRasterShadeMode] != 0x1D01 ||
+            raster_state[kRasterFrontPolygonMode] != 0x1B02 ||
+            raster_state[kRasterBackPolygonMode] != 0x1B02 ||
+            raster_state[kRasterCullFace] != 0x0405 ||
+            raster_state[kRasterFrontFace] != 0x0900 ||
+            raster_state[kRasterZMinMaxControl] != 1) {
             char why[640];
             std::snprintf(
                 why, sizeof(why),
@@ -3463,22 +5641,22 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                 "(prim=%x sfmt=%08x en=%08x ctrl=%08x alpha=%x/%02x "
                 "blend=%x/%x/%x depth=%x/%x mask=%08x "
                 "shade=%x poly=%x/%x cull=%x/%x zctl=%08x)",
-                primitive_mode_, surface_format_, enables,
-                raster_state_[kRasterControl0],
-                raster_state_[kRasterAlphaFunc],
-                raster_state_[kRasterAlphaRef] & 0xFFu,
-                raster_state_[kRasterBlendSrc],
-                raster_state_[kRasterBlendDst],
-                raster_state_[kRasterBlendEquation],
-                raster_state_[kRasterDepthFunc],
-                raster_state_[kRasterDepthMask],
-                raster_state_[kRasterColorMask],
-                raster_state_[kRasterShadeMode],
-                raster_state_[kRasterFrontPolygonMode],
-                raster_state_[kRasterBackPolygonMode],
-                raster_state_[kRasterCullFace],
-                raster_state_[kRasterFrontFace],
-                raster_state_[kRasterZMinMaxControl]);
+                primitive_mode, surface_format, enables,
+                raster_state[kRasterControl0],
+                raster_state[kRasterAlphaFunc],
+                raster_state[kRasterAlphaRef] & 0xFFu,
+                raster_state[kRasterBlendSrc],
+                raster_state[kRasterBlendDst],
+                raster_state[kRasterBlendEquation],
+                raster_state[kRasterDepthFunc],
+                raster_state[kRasterDepthMask],
+                raster_state[kRasterColorMask],
+                raster_state[kRasterShadeMode],
+                raster_state[kRasterFrontPolygonMode],
+                raster_state[kRasterBackPolygonMode],
+                raster_state[kRasterCullFace],
+                raster_state[kRasterFrontFace],
+                raster_state[kRasterZMinMaxControl]);
             fault_(why);
             return false;
         }
@@ -3491,42 +5669,42 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         const bool witnessed_depth_mask =
             (profile == Profile::kPitchTexturedColor ||
              profile == Profile::kPitchProjectedColor)
-                ? (raster_state_[kRasterDepthMask] == 1 ||
-                   raster_state_[kRasterDepthMask] == 0xFFFFFFFFu)
-                : raster_state_[kRasterDepthMask] == 1;
+                ? (raster_state[kRasterDepthMask] == 1 ||
+                   raster_state[kRasterDepthMask] == 0xFFFFFFFFu)
+                : raster_state[kRasterDepthMask] == 1;
         const bool common_color_state =
             supported_primitive && witnessed_surface_type &&
             anti_aliasing == 0 && color_format == 8 && zeta_format == 2 &&
-            raster_state_[kRasterControl0] == 0x00100001 &&
-            raster_state_[kRasterBlendSrc] == 1 &&
-            raster_state_[kRasterBlendDst] == 0 &&
-            raster_state_[kRasterBlendEquation] == 0x8006 &&
-            raster_state_[kRasterDepthFunc] == 0x0203 &&
-            raster_state_[kRasterColorMask] == 0x01010101 &&
+            raster_state[kRasterControl0] == 0x00100001 &&
+            raster_state[kRasterBlendSrc] == 1 &&
+            raster_state[kRasterBlendDst] == 0 &&
+            raster_state[kRasterBlendEquation] == 0x8006 &&
+            raster_state[kRasterDepthFunc] == 0x0203 &&
+            raster_state[kRasterColorMask] == 0x01010101 &&
             witnessed_depth_mask &&
-            raster_state_[kRasterShadeMode] == 0x1D01 &&
-            raster_state_[kRasterFrontPolygonMode] == 0x1B02 &&
-            raster_state_[kRasterBackPolygonMode] == 0x1B02 &&
-            raster_state_[kRasterCullFace] == 0x0405 &&
-            raster_state_[kRasterFrontFace] == 0x0900 &&
-            raster_state_[kRasterZMinMaxControl] == 1;
+            raster_state[kRasterShadeMode] == 0x1D01 &&
+            raster_state[kRasterFrontPolygonMode] == 0x1B02 &&
+            raster_state[kRasterBackPolygonMode] == 0x1B02 &&
+            raster_state[kRasterCullFace] == 0x0405 &&
+            raster_state[kRasterFrontFace] == 0x0900 &&
+            raster_state[kRasterZMinMaxControl] == 1;
         const bool radial_state =
             profile == Profile::kSwizzledRadialColor &&
             enables == 0x000Fu &&
-            raster_state_[kRasterAlphaFunc] == 0x0206 &&
-            (raster_state_[kRasterAlphaRef] & 0xFFu) == 1;
+            raster_state[kRasterAlphaFunc] == 0x0206 &&
+            (raster_state[kRasterAlphaRef] & 0xFFu) == 1;
         const bool textured_state =
             (profile == Profile::kSwizzledTexturedColor ||
              profile == Profile::kSwizzledProjectedColor) &&
             enables == 0x000Cu &&
-            raster_state_[kRasterAlphaFunc] == 0x0207 &&
-            (raster_state_[kRasterAlphaRef] & 0xFFu) == 0;
+            raster_state[kRasterAlphaFunc] == 0x0207 &&
+            (raster_state[kRasterAlphaRef] & 0xFFu) == 0;
         const bool pitch_textured_state =
             (profile == Profile::kPitchTexturedColor ||
              profile == Profile::kPitchProjectedColor) &&
             enables == 0x000Cu &&
-            raster_state_[kRasterAlphaFunc] == 0x0206 &&
-            (raster_state_[kRasterAlphaRef] & 0xFFu) == 1;
+            raster_state[kRasterAlphaFunc] == 0x0206 &&
+            (raster_state[kRasterAlphaRef] & 0xFFu) == 1;
         if (!common_color_state ||
             (!radial_state && !textured_state && !pitch_textured_state)) {
             fault_("NV2A color draw exceeds the witnessed raster subset");
@@ -3534,25 +5712,34 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         }
     }
 
-    const uint32_t clip_x = surface_clip_horizontal_ & 0xFFFFu;
-    const uint32_t clip_width = surface_clip_horizontal_ >> 16;
-    const uint32_t clip_y = surface_clip_vertical_ & 0xFFFFu;
-    const uint32_t clip_height = surface_clip_vertical_ >> 16;
+    // Stage (d): the derived surface descriptors of DESIGN-NV2A-SEAM.md
+    // section 1.2 become DrawJob fields. Declared as references bound to the
+    // job so that every use site below is textually unchanged and the storage
+    // the executor reads is the job's, not the frame's stack.
+    uint32_t& clip_x = job.clip_x;
+    uint32_t& clip_width = job.clip_width;
+    uint32_t& clip_y = job.clip_y;
+    uint32_t& clip_height = job.clip_height;
+    clip_x = surface_clip_horizontal & 0xFFFFu;
+    clip_width = surface_clip_horizontal >> 16;
+    clip_y = surface_clip_vertical & 0xFFFFu;
+    clip_height = surface_clip_vertical >> 16;
     if (!clip_width || !clip_height) {
         fault_("NV2A raster surface has an empty clip");
         return false;
     }
 
-    const bool inline_depth_test =
+    bool& inline_depth_test = job.inline_depth_test;
+    inline_depth_test =
         profile == Profile::kPitchAdditiveColor &&
-        raster_state_[kRasterDepthFunc] == 0x0202;
-    uint32_t surface_width = 0;
-    uint32_t surface_height = 0;
-    uint32_t pitch = 0;
-    uint64_t depth_bytes64 = 0;
-    uint64_t color_bytes64 = 0;
+        raster_state[kRasterDepthFunc] == 0x0202;
+    uint32_t& surface_width = job.surface_width;
+    uint32_t& surface_height = job.surface_height;
+    uint32_t& pitch = job.pitch;
+    uint64_t& depth_bytes64 = job.depth_bytes;
+    uint64_t& color_bytes64 = job.color_bytes;
     if (profile == Profile::kPitchZ16Depth) {
-        pitch = surface_pitch_ >> 16;
+        pitch = surface_pitch >> 16;
         surface_width = pitch / 2;
         surface_height = clip_y + clip_height;
         depth_bytes64 = static_cast<uint64_t>(pitch) * surface_height;
@@ -3572,7 +5759,7 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                profile == Profile::kPitchSingleTextureColor ||
                profile == Profile::kTex7FanColor ||
                profile == Profile::kTexfProjectedFanColor) {
-        pitch = surface_pitch_ & 0xFFFFu;
+        pitch = surface_pitch & 0xFFFFu;
         surface_width = pitch / 4;
         surface_height = clip_y + clip_height;
         color_bytes64 = static_cast<uint64_t>(pitch) * surface_height;
@@ -3587,14 +5774,14 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
             profile == Profile::kTex7FanColor ||
             profile == Profile::kTexfProjectedFanColor)
             depth_bytes64 = color_bytes64;
-        if (!pitch || (surface_pitch_ >> 16) != pitch ||
+        if (!pitch || (surface_pitch >> 16) != pitch ||
             static_cast<uint64_t>(clip_x + clip_width) * 4 > pitch) {
             fault_("NV2A color pitch surface is invalid");
             return false;
         }
     } else {
-        const uint32_t width_log2 = (surface_format_ >> 16) & 0xFFu;
-        const uint32_t height_log2 = surface_format_ >> 24;
+        const uint32_t width_log2 = (surface_format >> 16) & 0xFFu;
+        const uint32_t height_log2 = surface_format >> 24;
         if (width_log2 >= 16 || height_log2 >= 16) {
             fault_("NV2A color swizzled dimensions are invalid");
             return false;
@@ -3606,18 +5793,20 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
             static_cast<uint64_t>(surface_width) * surface_height * 4;
         if (clip_x + clip_width > surface_width ||
             clip_y + clip_height > surface_height ||
-            (surface_pitch_ & 0xFFFFu) != pitch ||
-            (surface_pitch_ >> 16) != pitch) {
+            (surface_pitch & 0xFFFFu) != pitch ||
+            (surface_pitch >> 16) != pitch) {
             fault_("NV2A color swizzled surface is invalid");
             return false;
         }
     }
-    const bool uses_depth_surface =
+    bool& uses_depth_surface = job.uses_depth;
+    uses_depth_surface =
         profile == Profile::kPitchAdditiveColor
             ? inline_depth_test
             : profile != Profile::kInlineLinearBlitColor;
-    const bool writes_depth_surface =
-        uses_depth_surface && raster_state_[kRasterDepthMask] != 0;
+    bool& writes_depth_surface = job.writes_depth;
+    writes_depth_surface =
+        uses_depth_surface && raster_state[kRasterDepthMask] != 0;
     if ((uses_depth_surface && !depth_bytes64) ||
         depth_bytes64 > SIZE_MAX || color_bytes64 > SIZE_MAX) {
         fault_("NV2A raster surface size overflows");
@@ -3649,19 +5838,59 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                 fault_(why);
                 return false;
             }
+            // Seam anchor 6 (F6): every texture snapshot in this function is
+            // resolved through here. A snapshot whose source span intersects a
+            // pending job's DESTINATION span is render-to-texture inside one
+            // frame and would have to drain first. The job's own two destination
+            // planes are not sources, so they are excluded by name.
+            if (std::strcmp(plane, "zeta") != 0 &&
+                std::strcmp(plane, "color") != 0) {
+                seam_texture_source_anchor(address, bytes);
+                // F6, and the hole stage (f) opened: a witnessed texture
+                // snapshot reads guest RAM directly, so if the source span is a
+                // surface the GPU executor currently owns, the snapshot reads a
+                // stale image. Measured: the radial destination 0x02E05000 IS a
+                // texture source for other profiles in the boot animation, and
+                // without this the 3.65 G - 4.05 G checkpoints differ by up to
+                // 24 LSB over 80-90 percent of their pixels. The generic
+                // combiner path has always resolved before its texture reads
+                // (nv2a.cpp "generic texture read"); the witnessed path did not
+                // need to while nothing it drew was ever resident.
+                // beads-xbox.1.15.10 phase 4 (lever B) CEILING PROBE.
+                // --nv2a-gpu-unsafe-skip-texture-resolve is a DIAGNOSTIC and is
+                // KNOWN INCORRECT: it makes the snapshot read a stale image
+                // exactly as the pre-phase-1 code did (the bead records the
+                // symptom: 3.65-4.05 G differ by up to 24 LSB over 80-90 pct of
+                // their pixels). It exists to put an upper bound on what any
+                // correct implementation of "sample the resident surface
+                // instead of round-tripping it" could ever be worth, WITHOUT
+                // first building the Morton-inverting shader-side sampler that
+                // implementation needs. Default off; never a shipping path.
+                ++witnessed_texture_source_resolves_;
+                if (gpu_unsafe_skip_texture_resolve_) {
+                    ++witnessed_texture_source_skipped_;
+                    return true;
+                }
+                if (!resolve_renderer_color_overlap(
+                        address, static_cast<size_t>(bytes),
+                        "witnessed texture snapshot")) {
+                    return false;
+                }
+            }
             return true;
         };
 
-    uint32_t depth_address = 0;
-    uint32_t color_address = 0;
-    const bool color_profile = profile != Profile::kPitchZ16Depth;
+    uint32_t& depth_address = job.depth_address;
+    uint32_t& color_address = job.color_address;
+    bool& color_profile = job.color_profile;
+    color_profile = profile != Profile::kPitchZ16Depth;
     if (uses_depth_surface &&
-        !resolve_surface(zeta_dma_, zeta_dma_bound_, surface_zeta_offset_,
+        !resolve_surface(zeta_dma_, zeta_dma_bound_, surface_zeta_offset,
                          depth_bytes64, depth_address, "zeta")) {
         return false;
     }
     if (color_profile &&
-        !resolve_surface(color_dma_, color_dma_bound_, surface_color_offset_,
+        !resolve_surface(color_dma_, color_dma_bound_, surface_color_offset,
                          color_bytes64, color_address, "color")) {
         return false;
     }
@@ -3681,50 +5910,55 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         // four enabled PROJECT2D images still require valid DMA-B ranges.
         // Resolve their full format-derived extents without copying data.
         for (size_t stage = 0; stage < 4; ++stage) {
-            const uint32_t format = raster_state_[kRasterTextureFormat0 + stage];
+            const uint32_t format = raster_state[kRasterTextureFormat0 + stage];
             const uint32_t width = 1u << ((format >> 20) & 0xFu);
             const uint32_t height = 1u << ((format >> 24) & 0xFu);
             const uint64_t bytes = static_cast<uint64_t>(width) * height * 4;
             uint32_t address = 0;
             if (bytes > SIZE_MAX ||
                 !resolve_surface(texture_dma_b_, texture_dma_b_bound_,
-                                 raster_state_[kRasterTextureOffset0 + stage],
+                                 raster_state[kRasterTextureOffset0 + stage],
                                  bytes, address, "tex=f texture")) {
                 return false;
             }
         }
     }
 
-    std::vector<uint8_t> texture_data;
-    std::unique_ptr<SwizzleLookup> texture_swizzle;
-    uint32_t texture_width = 0;
-    uint32_t texture_height = 0;
-    std::vector<uint8_t> projected_texture_data;
-    std::unique_ptr<SwizzleLookup> projected_texture_swizzle;
-    uint32_t projected_texture_width = 0;
-    uint32_t projected_texture_height = 0;
+    // Stage (d): the texture snapshots are the job's bytes. Declaring them
+    // here as references to the job fields is the "move, do not copy" of
+    // DESIGN-NV2A-SEAM.md section 1.2 -- the bytes are read straight into the
+    // job, so the latch costs no extra copy at all.
+    std::vector<uint8_t>& texture_data = job.texture_data;
+    std::unique_ptr<SwizzleLookup>& texture_swizzle = job.texture_swizzle;
+    uint32_t& texture_width = job.texture_width;
+    uint32_t& texture_height = job.texture_height;
+    std::vector<uint8_t>& projected_texture_data = job.projected_texture_data;
+    std::unique_ptr<SwizzleLookup>& projected_texture_swizzle =
+        job.projected_texture_swizzle;
+    uint32_t& projected_texture_width = job.projected_texture_width;
+    uint32_t& projected_texture_height = job.projected_texture_height;
     const bool sampled_color_profile =
         profile == Profile::kSwizzledTexturedColor ||
         profile == Profile::kPitchTexturedColor ||
         profile == Profile::kSwizzledProjectedColor ||
         profile == Profile::kPitchProjectedColor;
     if (sampled_color_profile) {
-        const uint32_t format1 = raster_state_[kRasterTextureFormat0 + 1];
-        const uint32_t format2 = raster_state_[kRasterTextureFormat0 + 2];
-        const uint32_t offset1 = raster_state_[kRasterTextureOffset0 + 1];
-        const uint32_t offset2 = raster_state_[kRasterTextureOffset0 + 2];
+        const uint32_t format1 = raster_state[kRasterTextureFormat0 + 1];
+        const uint32_t format2 = raster_state[kRasterTextureFormat0 + 2];
+        const uint32_t offset1 = raster_state[kRasterTextureOffset0 + 1];
+        const uint32_t offset2 = raster_state[kRasterTextureOffset0 + 2];
         const bool witnessed_texture =
             format1 == format2 &&
             (format1 == 0x0661072E || format1 == 0x0771072E) &&
             offset1 == offset2 &&
-            raster_state_[kRasterTextureAddress0 + 1] == 0x00030303 &&
-            raster_state_[kRasterTextureAddress0 + 2] == 0x00030303 &&
-            raster_state_[kRasterTextureFilter0 + 1] == 0x02022000 &&
-            raster_state_[kRasterTextureFilter0 + 2] == 0x02022000 &&
-            raster_state_[kRasterTextureControl0_0 + 1] == 0x4003FFC0 &&
-            raster_state_[kRasterTextureControl0_0 + 2] == 0x4003FFC0 &&
-            raster_state_[kRasterTexturePalette0 + 1] == 0 &&
-            raster_state_[kRasterTexturePalette0 + 2] == 0;
+            raster_state[kRasterTextureAddress0 + 1] == 0x00030303 &&
+            raster_state[kRasterTextureAddress0 + 2] == 0x00030303 &&
+            raster_state[kRasterTextureFilter0 + 1] == 0x02022000 &&
+            raster_state[kRasterTextureFilter0 + 2] == 0x02022000 &&
+            raster_state[kRasterTextureControl0_0 + 1] == 0x4003FFC0 &&
+            raster_state[kRasterTextureControl0_0 + 2] == 0x4003FFC0 &&
+            raster_state[kRasterTexturePalette0 + 1] == 0 &&
+            raster_state[kRasterTexturePalette0 + 2] == 0;
         if (!witnessed_texture || (format1 & 3u) != 2u) {
             fault_("NV2A textured-color texture state exceeds the witnessed subset");
             return false;
@@ -3752,22 +5986,22 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         if (profile == Profile::kSwizzledProjectedColor ||
             profile == Profile::kPitchProjectedColor) {
             const uint32_t format0 =
-                raster_state_[kRasterTextureFormat0 + 0];
+                raster_state[kRasterTextureFormat0 + 0];
             const uint32_t offset0 =
-                raster_state_[kRasterTextureOffset0 + 0];
+                raster_state[kRasterTextureOffset0 + 0];
             const uint32_t border0 =
-                raster_state_[kRasterTextureBorderColor0 + 0];
+                raster_state[kRasterTextureBorderColor0 + 0];
             const bool witnessed_projected_border =
                 profile == Profile::kPitchProjectedColor
                     ? (border0 == 0 || border0 == 0xFF000000)
                     : border0 == 0;
             const bool witnessed_projected_texture =
                 format0 == 0x0771062A &&
-                raster_state_[kRasterTextureAddress0 + 0] == 0x00010101 &&
-                raster_state_[kRasterTextureFilter0 + 0] == 0x02022000 &&
-                raster_state_[kRasterTextureControl0_0 + 0] == 0x4003FFF0 &&
-                raster_state_[kRasterTextureControl1_0 + 0] == 0x14000000 &&
-                raster_state_[kRasterTexturePalette0 + 0] == 0 &&
+                raster_state[kRasterTextureAddress0 + 0] == 0x00010101 &&
+                raster_state[kRasterTextureFilter0 + 0] == 0x02022000 &&
+                raster_state[kRasterTextureControl0_0 + 0] == 0x4003FFF0 &&
+                raster_state[kRasterTextureControl1_0 + 0] == 0x14000000 &&
+                raster_state[kRasterTexturePalette0 + 0] == 0 &&
                 witnessed_projected_border;
             if (!witnessed_projected_texture || (format0 & 3u) != 2u) {
                 char why[320];
@@ -3777,12 +6011,12 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                     "witnessed subset (off=%08x fmt=%08x addr=%08x "
                     "filter=%08x ctl0=%08x ctl1=%08x pal=%08x border=%08x)",
                     offset0, format0,
-                    raster_state_[kRasterTextureAddress0 + 0],
-                    raster_state_[kRasterTextureFilter0 + 0],
-                    raster_state_[kRasterTextureControl0_0 + 0],
-                    raster_state_[kRasterTextureControl1_0 + 0],
-                    raster_state_[kRasterTexturePalette0 + 0],
-                    raster_state_[kRasterTextureBorderColor0 + 0]);
+                    raster_state[kRasterTextureAddress0 + 0],
+                    raster_state[kRasterTextureFilter0 + 0],
+                    raster_state[kRasterTextureControl0_0 + 0],
+                    raster_state[kRasterTextureControl1_0 + 0],
+                    raster_state[kRasterTexturePalette0 + 0],
+                    raster_state[kRasterTextureBorderColor0 + 0]);
                 fault_(why);
                 return false;
             }
@@ -3811,23 +6045,23 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                 projected_texture_width, projected_texture_height);
         }
     }
-    std::vector<uint8_t> linear_blit_texture_data;
-    uint32_t linear_blit_texture_width = 0;
-    uint32_t linear_blit_texture_height = 0;
-    uint32_t linear_blit_texture_pitch = 0;
+    std::vector<uint8_t>& linear_blit_texture_data = job.linear_blit_texture_data;
+    uint32_t& linear_blit_texture_width = job.linear_blit_texture_width;
+    uint32_t& linear_blit_texture_height = job.linear_blit_texture_height;
+    uint32_t& linear_blit_texture_pitch = job.linear_blit_texture_pitch;
     if (profile == Profile::kInlineLinearBlitColor) {
-        const uint32_t format0 = raster_state_[kRasterTextureFormat0];
-        const uint32_t offset0 = raster_state_[kRasterTextureOffset0];
+        const uint32_t format0 = raster_state[kRasterTextureFormat0];
+        const uint32_t offset0 = raster_state[kRasterTextureOffset0];
         if (!inline_linear_blit_texture || (format0 & 3u) != 2u) {
             fault_("NV2A inline linear-blit texture exceeds the witnessed subset");
             return false;
         }
         linear_blit_texture_width =
-            raster_state_[kRasterTextureImageRect0] >> 16;
+            raster_state[kRasterTextureImageRect0] >> 16;
         linear_blit_texture_height =
-            raster_state_[kRasterTextureImageRect0] & 0xFFFFu;
+            raster_state[kRasterTextureImageRect0] & 0xFFFFu;
         linear_blit_texture_pitch =
-            raster_state_[kRasterTextureControl1_0] >> 16;
+            raster_state[kRasterTextureControl1_0] >> 16;
         const uint64_t linear_blit_texture_bytes64 =
             static_cast<uint64_t>(linear_blit_texture_pitch) *
             linear_blit_texture_height;
@@ -3863,38 +6097,39 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
             return false;
         }
     }
-    std::vector<uint8_t> multi_texture_data;
-    std::unique_ptr<SwizzleLookup> multi_texture_swizzle;
-    uint32_t multi_texture_width = 0;
-    uint32_t multi_texture_height = 0;
+    std::vector<uint8_t>& multi_texture_data = job.multi_texture_data;
+    std::unique_ptr<SwizzleLookup>& multi_texture_swizzle =
+        job.multi_texture_swizzle;
+    uint32_t& multi_texture_width = job.multi_texture_width;
+    uint32_t& multi_texture_height = job.multi_texture_height;
     if (profile == Profile::kPitchMultiTextureColor ||
         profile == Profile::kPitchThreeTextureColor) {
-        const uint32_t format0 = raster_state_[kRasterTextureFormat0];
-        const uint32_t format1 = raster_state_[kRasterTextureFormat0 + 1];
-        const uint32_t offset0 = raster_state_[kRasterTextureOffset0];
-        const uint32_t offset1 = raster_state_[kRasterTextureOffset0 + 1];
+        const uint32_t format0 = raster_state[kRasterTextureFormat0];
+        const uint32_t format1 = raster_state[kRasterTextureFormat0 + 1];
+        const uint32_t offset0 = raster_state[kRasterTextureOffset0];
+        const uint32_t offset1 = raster_state[kRasterTextureOffset0 + 1];
         const bool witnessed_t0_border =
-            raster_state_[kRasterTextureBorderColor0] == 0 ||
+            raster_state[kRasterTextureBorderColor0] == 0 ||
             (profile == Profile::kPitchThreeTextureColor &&
-             raster_state_[kRasterTextureBorderColor0] == 0xFF000000 &&
+             raster_state[kRasterTextureBorderColor0] == 0xFF000000 &&
              pitch_three_black_border_factor);
         const bool witnessed_multi_texture =
             format0 == 0x0661072E && format1 == format0 &&
             offset1 == offset0 &&
-            raster_state_[kRasterTextureAddress0] == 0x00030303 &&
-            raster_state_[kRasterTextureAddress0 + 1] == 0x00030303 &&
-            raster_state_[kRasterTextureFilter0] == 0x02022000 &&
-            raster_state_[kRasterTextureFilter0 + 1] == 0x02022000 &&
-            raster_state_[kRasterTextureControl0_0] == 0x4003FFC0 &&
-            raster_state_[kRasterTextureControl0_0 + 1] == 0x4003FFC0 &&
-            raster_state_[kRasterTextureControl1_0] == 0x14000000 &&
-            raster_state_[kRasterTextureControl1_0 + 1] == 0 &&
-            raster_state_[kRasterTextureImageRect0] == 0x050001E0 &&
-            raster_state_[kRasterTextureImageRect0 + 1] == 0 &&
-            raster_state_[kRasterTexturePalette0] == 0 &&
-            raster_state_[kRasterTexturePalette0 + 1] == 0 &&
+            raster_state[kRasterTextureAddress0] == 0x00030303 &&
+            raster_state[kRasterTextureAddress0 + 1] == 0x00030303 &&
+            raster_state[kRasterTextureFilter0] == 0x02022000 &&
+            raster_state[kRasterTextureFilter0 + 1] == 0x02022000 &&
+            raster_state[kRasterTextureControl0_0] == 0x4003FFC0 &&
+            raster_state[kRasterTextureControl0_0 + 1] == 0x4003FFC0 &&
+            raster_state[kRasterTextureControl1_0] == 0x14000000 &&
+            raster_state[kRasterTextureControl1_0 + 1] == 0 &&
+            raster_state[kRasterTextureImageRect0] == 0x050001E0 &&
+            raster_state[kRasterTextureImageRect0 + 1] == 0 &&
+            raster_state[kRasterTexturePalette0] == 0 &&
+            raster_state[kRasterTexturePalette0 + 1] == 0 &&
             witnessed_t0_border &&
-            raster_state_[kRasterTextureBorderColor0 + 1] == 0;
+            raster_state[kRasterTextureBorderColor0 + 1] == 0;
         if (!witnessed_multi_texture ||
             (profile == Profile::kPitchThreeTextureColor &&
              !pitch_three_texture_state) ||
@@ -3925,24 +6160,25 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         multi_texture_swizzle = std::make_unique<SwizzleLookup>(
             multi_texture_width, multi_texture_height);
     }
-    std::vector<uint8_t> single_texture_data;
-    std::unique_ptr<SwizzleLookup> single_texture_swizzle;
-    uint32_t single_texture_width = 0;
-    uint32_t single_texture_height = 0;
+    std::vector<uint8_t>& single_texture_data = job.single_texture_data;
+    std::unique_ptr<SwizzleLookup>& single_texture_swizzle =
+        job.single_texture_swizzle;
+    uint32_t& single_texture_width = job.single_texture_width;
+    uint32_t& single_texture_height = job.single_texture_height;
     if (profile == Profile::kPitchSingleTextureColor ||
         profile == Profile::kTex7FanColor) {
-        const uint32_t format0 = raster_state_[kRasterTextureFormat0];
-        const uint32_t offset0 = raster_state_[kRasterTextureOffset0];
+        const uint32_t format0 = raster_state[kRasterTextureFormat0];
+        const uint32_t offset0 = raster_state[kRasterTextureOffset0];
         const bool witnessed_single_texture =
             (profile == Profile::kPitchSingleTextureColor &&
             format0 == 0x0AA1062A &&
-            raster_state_[kRasterTextureAddress0] == 0x00030404 &&
-            raster_state_[kRasterTextureFilter0] == 0x02022000 &&
-            raster_state_[kRasterTextureControl0_0] == 0x4003FFC0 &&
-            raster_state_[kRasterTextureControl1_0] == 0x14000000 &&
-            raster_state_[kRasterTextureImageRect0] == 0x050001E0 &&
-            raster_state_[kRasterTexturePalette0] == 0 &&
-            raster_state_[kRasterTextureBorderColor0] == 0xFF000000) ||
+            raster_state[kRasterTextureAddress0] == 0x00030404 &&
+            raster_state[kRasterTextureFilter0] == 0x02022000 &&
+            raster_state[kRasterTextureControl0_0] == 0x4003FFC0 &&
+            raster_state[kRasterTextureControl1_0] == 0x14000000 &&
+            raster_state[kRasterTextureImageRect0] == 0x050001E0 &&
+            raster_state[kRasterTexturePalette0] == 0 &&
+            raster_state[kRasterTextureBorderColor0] == 0xFF000000) ||
             (profile == Profile::kTex7FanColor && tex7_fan_texture_state);
         if (!witnessed_single_texture || (format0 & 3u) != 2u) {
             fault_("NV2A pitch single-texture state exceeds the witnessed subset");
@@ -3971,13 +6207,14 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         single_texture_swizzle = std::make_unique<SwizzleLookup>(
             single_texture_width, single_texture_height);
     }
-    std::vector<uint8_t> pitch_tex5_texture_data;
-    std::unique_ptr<SwizzleLookup> pitch_tex5_texture_swizzle;
-    uint32_t pitch_tex5_texture_width = 0;
-    uint32_t pitch_tex5_texture_height = 0;
+    std::vector<uint8_t>& pitch_tex5_texture_data = job.pitch_tex5_texture_data;
+    std::unique_ptr<SwizzleLookup>& pitch_tex5_texture_swizzle =
+        job.pitch_tex5_texture_swizzle;
+    uint32_t& pitch_tex5_texture_width = job.pitch_tex5_texture_width;
+    uint32_t& pitch_tex5_texture_height = job.pitch_tex5_texture_height;
     if (profile == Profile::kPitchTex5ProjectedColor) {
-        const uint32_t format0 = raster_state_[kRasterTextureFormat0];
-        const uint32_t offset0 = raster_state_[kRasterTextureOffset0];
+        const uint32_t format0 = raster_state[kRasterTextureFormat0];
+        const uint32_t offset0 = raster_state[kRasterTextureOffset0];
         if (!pitch_tex5_projected_texture || (format0 & 3u) != 2u) {
             fault_("NV2A pitch tex5 texture exceeds the witnessed subset");
             return false;
@@ -4011,28 +6248,29 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                 pitch_tex5_texture_width,
                 pitch_tex5_texture_height);
     }
-    std::vector<uint8_t> inline_texture_data;
-    std::unique_ptr<SwizzleLookup> inline_texture_swizzle;
-    uint32_t inline_texture_width = 0;
-    uint32_t inline_texture_height = 0;
+    std::vector<uint8_t>& inline_texture_data = job.inline_texture_data;
+    std::unique_ptr<SwizzleLookup>& inline_texture_swizzle =
+        job.inline_texture_swizzle;
+    uint32_t& inline_texture_width = job.inline_texture_width;
+    uint32_t& inline_texture_height = job.inline_texture_height;
     if (profile == Profile::kPitchAdditiveColor) {
-        const uint32_t format0 = raster_state_[kRasterTextureFormat0];
-        const uint32_t address0 = raster_state_[kRasterTextureAddress0];
+        const uint32_t format0 = raster_state[kRasterTextureFormat0];
+        const uint32_t address0 = raster_state[kRasterTextureAddress0];
         // The dashboard switches the unused P coordinate between WRAP and
         // CLAMP_TO_EDGE. PROJECT2D only consumes the witnessed clamped U/V.
         const bool witnessed_inline_address =
             address0 == 0x00010303 || address0 == 0x00030303;
         const uint32_t border0 =
-            raster_state_[kRasterTextureBorderColor0];
+            raster_state[kRasterTextureBorderColor0];
         const bool witnessed_inline_border =
             border0 == 0 || border0 == 0xFF000000;
         const bool witnessed_inline_texture =
             format0 == 0x0888062A &&
             witnessed_inline_address &&
-            raster_state_[kRasterTextureFilter0] == 0x02022000 &&
-            raster_state_[kRasterTextureControl0_0] == 0x4003FFC0 &&
-            raster_state_[kRasterTextureControl1_0] == 0x14000000 &&
-            raster_state_[kRasterTexturePalette0] == 0 &&
+            raster_state[kRasterTextureFilter0] == 0x02022000 &&
+            raster_state[kRasterTextureControl0_0] == 0x4003FFC0 &&
+            raster_state[kRasterTextureControl1_0] == 0x14000000 &&
+            raster_state[kRasterTexturePalette0] == 0 &&
             witnessed_inline_border;
         if (!witnessed_inline_texture || (format0 & 3u) != 2u) {
             char why[320];
@@ -4042,10 +6280,10 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                 "(fmt=%08x addr=%08x filter=%08x ctl0=%08x ctl1=%08x "
                 "pal=%08x border=%08x)",
                 format0, address0,
-                raster_state_[kRasterTextureFilter0],
-                raster_state_[kRasterTextureControl0_0],
-                raster_state_[kRasterTextureControl1_0],
-                raster_state_[kRasterTexturePalette0],
+                raster_state[kRasterTextureFilter0],
+                raster_state[kRasterTextureControl0_0],
+                raster_state[kRasterTextureControl1_0],
+                raster_state[kRasterTexturePalette0],
                 border0);
             fault_(why);
             return false;
@@ -4058,7 +6296,7 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         uint32_t inline_texture_address = 0;
         if (inline_texture_bytes64 > SIZE_MAX ||
             !resolve_surface(texture_dma_b_, texture_dma_b_bound_,
-                             raster_state_[kRasterTextureOffset0],
+                             raster_state[kRasterTextureOffset0],
                              inline_texture_bytes64,
                              inline_texture_address, "inline texture")) {
             return false;
@@ -4075,24 +6313,394 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
             inline_texture_width, inline_texture_height);
     }
 
-    if (!resolve_renderer_color_overlap(color_address, static_cast<size_t>(color_bytes64),
-                                        "witnessed color surface")) {
-        return false;
+    // Stage (f) residency census (beads-xbox.1.15.7). The GPU executor takes
+    // exactly the two dominant witnessed profiles; every other witnessed draw is
+    // a CPU consumer of the same surfaces and is what forces a resolve. The
+    // classification is taken here, where the destination pair is resolved and
+    // before the residency queries below, and the queries a GPU draw makes about
+    // its OWN destination are excluded -- they are not a foreign consumer.
+    const bool gpu_profile_candidate = gpu_profile_state_ok(job);
+    if (gpu_profile_candidate) {
+        gpu_res_note_gpu_draw(color_address, color_bytes64,
+                              uses_depth_surface ? depth_address : 0,
+                              uses_depth_surface ? depth_bytes64 : 0);
+    } else {
+        ++gpu_res_.cpu_draws;
+        // Phase 2 attribution (beads-xbox.1.15.10). Set BEFORE the residency
+        // queries below, which is where a break, if any, is taken and
+        // attributed. The member is a plain scalar on the emulation thread and
+        // is read only inside gpu_res_cpu_*_access on the same thread.
+        gpu_res_cpu_profile_ = job.profile;
+        if (job.profile < kGpuResProfileSlots)
+            ++gpu_res_.cpu_draws_profile[job.profile];
     }
-    if (uses_depth_surface &&
-        !resolve_renderer_depth_overlap(depth_address,
+    // ---- stage (f): the GPU executor branch ------------------------------
+    // This `if`, and nothing else, is the difference between the software
+    // executor and the GPU one. Everything above it -- profile match, subset
+    // validation, surface resolution, texture snapshot, every fault_ site --
+    // ran on the emulation thread in both modes. A job the GPU takes does NOT
+    // resolve its own destination back into guest RAM: that resolve is exactly
+    // what the residency model exists to avoid, and it happens instead at the
+    // first CPU consumer of the surface, through the same
+    // resolve_renderer_*_overlap seam every other path already calls.
+    if (gpu_profile_candidate && gpu_profiles_enabled_ && renderer_) {
+        // Stage (e) ordering fence: a queued software job writing the same
+        // surface must retire before the GPU copy becomes authoritative. With
+        // two or more span workers the ring is always empty and this is two
+        // compares. (The thread count is deliberately not named here: the
+        // draw-threads guard asserts that the raster path READS it only inside
+        // the enqueue branch, and it matches on the identifier.)
+        draw_order_fence();
+        bool gpu_submitted = false;
+        if (!gpu_profile_submit(job, gpu_submitted)) return false;
+        if (gpu_submitted) return true;
+        ++gpu_profile_declined_;
+    }
+    gpu_res_in_gpu_draw_ = gpu_profile_candidate;
+    const bool witnessed_resolve_ok =
+        resolve_renderer_color_overlap(color_address,
+                                       static_cast<size_t>(color_bytes64),
+                                       "witnessed color surface") &&
+        (!uses_depth_surface ||
+         resolve_renderer_depth_overlap(depth_address,
                                         static_cast<size_t>(depth_bytes64),
-                                        "witnessed zeta surface")) {
-        return false;
+                                        "witnessed zeta surface"));
+    gpu_res_in_gpu_draw_ = false;
+    if (!witnessed_resolve_ok) return false;
+    // Stage (e): the destination direct pointers are resolved HERE, at the latch,
+    // and the PagedRasterSurface objects are constructed by the executor instead.
+    // mem_direct_ is a pure pointer computation over the two RAM aliases
+    // (machine.cpp:153-159) -- it never enters Unicorn -- so it can answer the
+    // threadability question before any surface object exists, and a queued job's
+    // surfaces then live on whichever thread runs the fragment loop. The value is
+    // identical: PagedRasterSurface's constructor computes direct_base_ with the
+    // same call on the same arguments.
+    uint8_t*& depth_direct = job.depth_direct;
+    uint8_t*& color_direct = job.color_direct;
+    depth_direct = mem_direct_ ? mem_direct_(depth_address,
+                                             static_cast<size_t>(depth_bytes64))
+                               : nullptr;
+    color_direct = mem_direct_ ? mem_direct_(color_address,
+                                             static_cast<size_t>(color_bytes64))
+                               : nullptr;
+    // Stage (d): the threadability decision, taken at the latch, on the
+    // emulation thread, with everything the job needs already resolved.
+    // Rules, in the order DESIGN-NV2A-SEAM.md fixes them:
+    //   section 1.3 (F2) -- every destination region a worker would touch
+    //     must have a mem_direct_ pointer, because the paged fallback writes
+    //     through mem_write_ == uc_mem_write, which Unicorn does not permit
+    //     off the emulation thread. A depth-less profile needs no zeta
+    //     pointer, so it is only required when uses_depth_surface is set.
+    //   section 4.3 option O3 (F14) -- the per-write FNV fold is a serial,
+    //     order-dependent accumulator; with it on, jobs run inline.
+    //   F15 -- any installed diagnostic callback forces inline.
+    // NOTHING ACTS ON THE FLAG IN STAGE (d): every job is executed inline at
+    // the latch point regardless. It is measured so that stage (e) can be
+    // sized before it is written (measurement M5).
+    // Stage (e2), beads-xbox.1.15.9: the DESTINATION swizzle table moves here,
+    // to the latch, from the top of execute_witnessed_fragments. It is a pure
+    // function of (surface_width, surface_height) and immutable once built, so
+    // the N destination-span parts share one const instance instead of building
+    // an identical ~10.7 k-entry table each. Built once per job in every mode,
+    // so the inline path pays exactly what it paid before.
+    if (profile == Profile::kSwizzledRadialColor ||
+        profile == Profile::kSwizzledTexturedColor ||
+        profile == Profile::kSwizzledProjectedColor) {
+        job.surface_swizzle =
+            std::make_unique<SwizzleLookup>(surface_width, surface_height);
     }
+    const bool direct_ok = color_direct != nullptr &&
+                           (!uses_depth_surface || depth_direct != nullptr);
+    if (!direct_ok)
+        seam_note_threadable(job, false, kSeamNoDirectPointer);
+    else if (job.hash_on)
+        seam_note_threadable(job, false, kSeamHashOn);
+    else if (job.debug_cb_installed)
+        seam_note_threadable(job, false, kSeamDebugCallback);
+    else
+        seam_note_threadable(job, true, kSeamThreadable);
+    // ================= stage (e): THE ENQUEUE BRANCH =======================
+    // beads-xbox.1.15.5, DESIGN-NV2A-SEAM.md section 5(e). This `if`, and
+    // nothing else, is the difference between --nv2a-draw-threads 0 (today's
+    // behaviour, byte for byte) and a threaded run. Everything above it ran on
+    // the emulation thread in both modes -- profile match, the subset validators,
+    // surface resolution, the texture snapshots, every fault_ site. Everything
+    // below it is the pure pixel math, and it runs on the emulation thread when
+    // threads == 0 and on the single worker when the job was queued.
+    if (draw_threads_ > 0) {
+        if (job.threadable) {
+            if (draw_threads_ == 1) {
+                // Stage (e): hand the whole job to the single asynchronous
+                // consumer, which executes it in submission order off the ring.
+                job.deferred = true;
+                return true;
+            }
+            // Stage (e2), beads-xbox.1.15.9: N >= 2 divides THIS job across N
+            // destination-span parts and barriers before returning, so the job
+            // does not outlive the latch point and the ring stays empty.
+            return execute_draw_spans(job);
+        }
+        // Not threadable (no direct destination pointer, or the per-write hash
+        // fold is on, or a diagnostic callback is installed): it executes below,
+        // on this thread, so it must not overtake the queue. At N >= 2 the queue
+        // is always empty and the fence is free, but it stays because the fence
+        // is what makes the N == 1 path correct and there is one code path.
+        draw_order_fence();
+    }
+    return execute_witnessed_fragments(job, job.out, 0, 1);
+}
+
+// The pure execute half of the witnessed raster path: triangle setup and the
+// shared fragment loop, and nothing else. It reads ONLY the job (plus the
+// immutable SwizzleLookup tables the job owns) and writes ONLY into the job's
+// destination surfaces through mem_direct_ pointers and into job.out. It calls
+// no Unicorn API, touches no renderer_, and raises no fault_ -- a failure is
+// recorded in job.out and reported by the emulation thread at the next fold.
+// DESIGN-NV2A-SEAM.md sections 1.3, 3.1, 3.2 and F13/F14/F3.
+bool Nv2a::execute_witnessed_fragments(DrawJob& job, DrawJobTelemetry& out,
+                                       unsigned part, unsigned parts) {
+    // Stage (e2), beads-xbox.1.15.9. `parts` is the number of disjoint
+    // destination-scanline sets this draw is split across and `part` is which
+    // one this call owns; parts == 1 is the whole surface and is byte-for-byte
+    // the stage (e) executor. The row filter is applied as a STRIDE on the
+    // per-triangle scanline loop below, so a part never visits a row it does
+    // not own and the parts == 1 loop is the same loop with step 1.
+    // The full enumeration of everything in here that is not per-pixel, and
+    // how each item is handled, is in the declaration in nv2a.hpp.
+    // ---- the latched state this half reads, bound by the same alias technique
+    // ---- stage (d) used, so the ~1900 lines below are textually unchanged.
+    const auto& raster_state = job.raster_state;
+    const auto& transformed_batch = job.vertices;
+    const uint32_t primitive_mode = job.primitive_mode;
+    const uint32_t surface_format = job.surface_format;
+    const Profile profile = static_cast<Profile>(job.profile);
+    const uint32_t enables = raster_state[kRasterEnables];
+    const bool pitch_tex5_profile = job.pitch_tex5_profile;
+    const uint32_t color_address = job.color_address;
+    const uint32_t depth_address = job.depth_address;
+    const uint32_t pitch = job.pitch;
+    const uint32_t surface_width = job.surface_width;
+    const uint32_t surface_height = job.surface_height;
+    const uint32_t clip_x = job.clip_x;
+    const uint32_t clip_y = job.clip_y;
+    const uint32_t clip_width = job.clip_width;
+    const uint32_t clip_height = job.clip_height;
+    const uint64_t color_bytes64 = job.color_bytes;
+    const uint64_t depth_bytes64 = job.depth_bytes;
+    const bool uses_depth_surface = job.uses_depth;
+    const bool writes_depth_surface = job.writes_depth;
+    const bool color_profile = job.color_profile;
+    const bool inline_depth_test = job.inline_depth_test;
+    uint8_t* const depth_direct = job.depth_direct;
+    uint8_t* const color_direct = job.color_direct;
+    const std::vector<uint8_t>& texture_data = job.texture_data;
+    const std::unique_ptr<SwizzleLookup>& texture_swizzle = job.texture_swizzle;
+    const uint32_t texture_width = job.texture_width;
+    const uint32_t texture_height = job.texture_height;
+    const std::vector<uint8_t>& projected_texture_data = job.projected_texture_data;
+    const std::unique_ptr<SwizzleLookup>& projected_texture_swizzle =
+        job.projected_texture_swizzle;
+    const uint32_t projected_texture_width = job.projected_texture_width;
+    const uint32_t projected_texture_height = job.projected_texture_height;
+    const std::vector<uint8_t>& linear_blit_texture_data =
+        job.linear_blit_texture_data;
+    const uint32_t linear_blit_texture_width = job.linear_blit_texture_width;
+    const uint32_t linear_blit_texture_height = job.linear_blit_texture_height;
+    const uint32_t linear_blit_texture_pitch = job.linear_blit_texture_pitch;
+    const std::vector<uint8_t>& multi_texture_data = job.multi_texture_data;
+    const std::unique_ptr<SwizzleLookup>& multi_texture_swizzle =
+        job.multi_texture_swizzle;
+    const uint32_t multi_texture_width = job.multi_texture_width;
+    const uint32_t multi_texture_height = job.multi_texture_height;
+    const std::vector<uint8_t>& single_texture_data = job.single_texture_data;
+    const std::unique_ptr<SwizzleLookup>& single_texture_swizzle =
+        job.single_texture_swizzle;
+    const uint32_t single_texture_width = job.single_texture_width;
+    const uint32_t single_texture_height = job.single_texture_height;
+    const std::vector<uint8_t>& pitch_tex5_texture_data =
+        job.pitch_tex5_texture_data;
+    const std::unique_ptr<SwizzleLookup>& pitch_tex5_texture_swizzle =
+        job.pitch_tex5_texture_swizzle;
+    const uint32_t pitch_tex5_texture_width = job.pitch_tex5_texture_width;
+    const uint32_t pitch_tex5_texture_height = job.pitch_tex5_texture_height;
+    const std::vector<uint8_t>& inline_texture_data = job.inline_texture_data;
+    const std::unique_ptr<SwizzleLookup>& inline_texture_swizzle =
+        job.inline_texture_swizzle;
+    const uint32_t inline_texture_width = job.inline_texture_width;
+    const uint32_t inline_texture_height = job.inline_texture_height;
+
+    // ---- telemetry redirection (stage (e), beads-xbox.1.15.5) ----------------
+    // Every counter the fragment loop used to increment on `this` is bound here
+    // to a JOB-LOCAL cell that shadows the member name, so all ~1900 lines below
+    // are textually unchanged and a worker writes no Nv2a member at all. The
+    // emulation thread folds these into the members at retire/drain, in latch
+    // order, in Nv2a::fold_draw_telemetry.
+    uint64_t& depth_raster_batches_ = out.depth_raster_batches;
+    uint64_t& depth_test_passes_ = out.depth_test_passes;
+    uint64_t& depth_writes_ = out.depth_writes;
+    uint64_t& inline_color_alpha_passes_ = out.inline_color_alpha_passes;
+    uint64_t& inline_color_batches_ = out.inline_color_batches;
+    uint64_t& inline_color_fragments_ = out.inline_color_fragments;
+    uint64_t& inline_color_triangles_ = out.inline_color_triangles;
+    uint64_t& inline_color_writes_ = out.inline_color_writes;
+    uint64_t& inline_linear_blit_batches_ = out.inline_linear_blit_batches;
+    uint64_t& inline_linear_blit_fragments_ = out.inline_linear_blit_fragments;
+    uint64_t& inline_linear_blit_samples_ = out.inline_linear_blit_samples;
+    uint64_t& inline_linear_blit_triangles_ = out.inline_linear_blit_triangles;
+    uint64_t& inline_linear_blit_writes_ = out.inline_linear_blit_writes;
+    uint64_t& inline_texture_samples_ = out.inline_texture_samples;
+    uint64_t& pitch_multi_texture_alpha_passes_ = out.pitch_multi_texture_alpha_passes;
+    uint64_t& pitch_three_texture_rescale_direction0_ = out.pitch_three_texture_rescale_direction0;
+    uint64_t& pitch_three_texture_rescale_direction1_ = out.pitch_three_texture_rescale_direction1;
+    uint64_t& pitch_three_texture_zero_direction0_ = out.pitch_three_texture_zero_direction0;
+    uint64_t& pitch_three_texture_zero_direction1_ = out.pitch_three_texture_zero_direction1;
+    uint64_t& pitch_three_texture_xy_tie_direction0_ = out.pitch_three_texture_xy_tie_direction0;
+    uint64_t& pitch_three_texture_xy_tie_direction1_ = out.pitch_three_texture_xy_tie_direction1;
+    uint64_t& pitch_multi_texture_batches_ = out.pitch_multi_texture_batches;
+    uint64_t& pitch_multi_texture_color_writes_ = out.pitch_multi_texture_color_writes;
+    uint64_t& pitch_multi_texture_depth_passes_ = out.pitch_multi_texture_depth_passes;
+    uint64_t& pitch_multi_texture_depth_writes_ = out.pitch_multi_texture_depth_writes;
+    uint64_t& pitch_multi_texture_fragments_ = out.pitch_multi_texture_fragments;
+    uint64_t& pitch_multi_texture_samples_ = out.pitch_multi_texture_samples;
+    uint64_t& pitch_multi_texture_triangles_ = out.pitch_multi_texture_triangles;
+    uint64_t& pitch_projected_color_batches_ = out.pitch_projected_color_batches;
+    uint64_t& pitch_projected_color_depth_passes_ = out.pitch_projected_color_depth_passes;
+    uint64_t& pitch_projected_color_depth_writes_ = out.pitch_projected_color_depth_writes;
+    uint64_t& pitch_projected_color_fragments_ = out.pitch_projected_color_fragments;
+    uint64_t& pitch_projected_color_triangles_ = out.pitch_projected_color_triangles;
+    uint64_t& pitch_projected_color_writes_ = out.pitch_projected_color_writes;
+    uint64_t& pitch_projected_texture_samples_ = out.pitch_projected_texture_samples;
+    uint64_t& pitch_single_texture_batches_ = out.pitch_single_texture_batches;
+    uint64_t& pitch_single_texture_depth_passes_ = out.pitch_single_texture_depth_passes;
+    uint64_t& pitch_single_texture_fragments_ = out.pitch_single_texture_fragments;
+    uint64_t& pitch_single_texture_samples_ = out.pitch_single_texture_samples;
+    uint64_t& pitch_single_texture_triangles_ = out.pitch_single_texture_triangles;
+    uint64_t& pitch_single_texture_writes_ = out.pitch_single_texture_writes;
+    uint64_t& pitch_tex5_batches_ = out.pitch_tex5_batches;
+    uint64_t& pitch_tex5_color_writes_ = out.pitch_tex5_color_writes;
+    uint64_t& pitch_tex5_depth_passes_ = out.pitch_tex5_depth_passes;
+    uint64_t& pitch_tex5_depth_writes_ = out.pitch_tex5_depth_writes;
+    uint64_t& pitch_tex5_fragments_ = out.pitch_tex5_fragments;
+    uint64_t& pitch_tex5_samples_ = out.pitch_tex5_samples;
+    uint64_t& pitch_tex5_triangles_ = out.pitch_tex5_triangles;
+    uint64_t& pitch_texture_samples_ = out.pitch_texture_samples;
+    uint64_t& pitch_textured_color_batches_ = out.pitch_textured_color_batches;
+    uint64_t& pitch_textured_color_depth_passes_ = out.pitch_textured_color_depth_passes;
+    uint64_t& pitch_textured_color_depth_writes_ = out.pitch_textured_color_depth_writes;
+    uint64_t& pitch_textured_color_fragments_ = out.pitch_textured_color_fragments;
+    uint64_t& pitch_textured_color_triangles_ = out.pitch_textured_color_triangles;
+    uint64_t& pitch_textured_color_writes_ = out.pitch_textured_color_writes;
+    uint64_t& pitch_three_texture_batches_ = out.pitch_three_texture_batches;
+    uint64_t& pitch_three_texture_color_writes_ = out.pitch_three_texture_color_writes;
+    uint64_t& pitch_three_texture_depth_passes_ = out.pitch_three_texture_depth_passes;
+    uint64_t& pitch_three_texture_depth_writes_ = out.pitch_three_texture_depth_writes;
+    uint64_t& pitch_three_texture_fragments_ = out.pitch_three_texture_fragments;
+    uint64_t& pitch_three_texture_samples_ = out.pitch_three_texture_samples;
+    uint64_t& pitch_three_texture_triangles_ = out.pitch_three_texture_triangles;
+    uint64_t& projected_color_batches_ = out.projected_color_batches;
+    uint64_t& projected_color_depth_passes_ = out.projected_color_depth_passes;
+    uint64_t& projected_color_depth_writes_ = out.projected_color_depth_writes;
+    uint64_t& projected_color_fragments_ = out.projected_color_fragments;
+    uint64_t& projected_color_triangles_ = out.projected_color_triangles;
+    uint64_t& projected_color_writes_ = out.projected_color_writes;
+    uint64_t& projected_texture_samples_ = out.projected_texture_samples;
+    uint64_t& radial_color_batches_ = out.radial_color_batches;
+    uint64_t& radial_color_depth_passes_ = out.radial_color_depth_passes;
+    uint64_t& radial_color_depth_writes_ = out.radial_color_depth_writes;
+    uint64_t& radial_color_fragments_ = out.radial_color_fragments;
+    uint64_t& radial_color_triangles_ = out.radial_color_triangles;
+    uint64_t& radial_color_writes_ = out.radial_color_writes;
+    uint64_t& rasterized_fragments_ = out.rasterized_fragments;
+    uint64_t& rasterized_triangles_ = out.rasterized_triangles;
+    uint64_t& tex7_fan_batches_ = out.tex7_fan_batches;
+    uint64_t& tex7_fan_depth_passes_ = out.tex7_fan_depth_passes;
+    uint64_t& tex7_fan_fragments_ = out.tex7_fan_fragments;
+    uint64_t& tex7_fan_samples_ = out.tex7_fan_samples;
+    uint64_t& tex7_fan_triangles_ = out.tex7_fan_triangles;
+    uint64_t& tex7_fan_writes_ = out.tex7_fan_writes;
+    uint64_t& texf_projected_fan_alpha_passes_ = out.texf_projected_fan_alpha_passes;
+    uint64_t& texf_projected_fan_batches_ = out.texf_projected_fan_batches;
+    uint64_t& texf_projected_fan_fragments_ = out.texf_projected_fan_fragments;
+    uint64_t& texf_projected_fan_triangles_ = out.texf_projected_fan_triangles;
+    uint64_t& texf_projected_fan_writes_ = out.texf_projected_fan_writes;
+    uint64_t& texture_samples_ = out.texture_samples;
+    uint64_t& textured_color_batches_ = out.textured_color_batches;
+    uint64_t& textured_color_depth_passes_ = out.textured_color_depth_passes;
+    uint64_t& textured_color_depth_writes_ = out.textured_color_depth_writes;
+    uint64_t& textured_color_fragments_ = out.textured_color_fragments;
+    uint64_t& textured_color_triangles_ = out.textured_color_triangles;
+    uint64_t& textured_color_writes_ = out.textured_color_writes;
+    uint64_t& inline_color_output_hash_ = out.inline_color_output_hash;
+    uint64_t& inline_linear_blit_output_hash_ = out.inline_linear_blit_output_hash;
+    uint64_t& pitch_projected_color_output_hash_ = out.pitch_projected_color_output_hash;
+    uint64_t& pitch_multi_texture_output_hash_ = out.pitch_multi_texture_output_hash;
+    uint64_t& pitch_three_texture_output_hash_ = out.pitch_three_texture_output_hash;
+    uint64_t& pitch_single_texture_output_hash_ = out.pitch_single_texture_output_hash;
+    uint64_t& pitch_tex5_output_hash_ = out.pitch_tex5_output_hash;
+    uint64_t& pitch_textured_color_output_hash_ = out.pitch_textured_color_output_hash;
+    uint64_t& projected_color_output_hash_ = out.projected_color_output_hash;
+    uint64_t& radial_color_output_hash_ = out.radial_color_output_hash;
+    uint64_t& raster_output_hash_ = out.raster_output_hash;
+    uint64_t& tex7_fan_output_hash_ = out.tex7_fan_output_hash;
+    uint64_t& texf_projected_fan_output_hash_ = out.texf_projected_fan_output_hash;
+    uint64_t& textured_color_output_hash_ = out.textured_color_output_hash;
+    DrawJobLastValue& last_color_raster_address_ = out.last_color_raster_address;
+    DrawJobLastValue& last_inline_linear_blit_raster_address_ = out.last_inline_linear_blit_raster_address;
+    DrawJobLastValue& last_inline_raster_address_ = out.last_inline_raster_address;
+    DrawJobLastValue& last_pitch_multi_texture_raster_address_ = out.last_pitch_multi_texture_raster_address;
+    DrawJobLastValue& last_pitch_projected_raster_address_ = out.last_pitch_projected_raster_address;
+    DrawJobLastValue& last_pitch_single_texture_raster_address_ = out.last_pitch_single_texture_raster_address;
+    DrawJobLastValue& last_pitch_tex5_raster_address_ = out.last_pitch_tex5_raster_address;
+    DrawJobLastValue& last_pitch_textured_raster_address_ = out.last_pitch_textured_raster_address;
+    DrawJobLastValue& last_pitch_three_rescale_factor3_ = out.last_pitch_three_rescale_factor3;
+    DrawJobLastValue& last_pitch_three_texture_raster_address_ = out.last_pitch_three_texture_raster_address;
+    DrawJobLastValue& last_pitch_three_xy_tie_factor3_ = out.last_pitch_three_xy_tie_factor3;
+    DrawJobLastValue& last_pitch_three_zero_factor3_ = out.last_pitch_three_zero_factor3;
+    DrawJobLastValue& last_projected_raster_address_ = out.last_projected_raster_address;
+    DrawJobLastValue& last_raster_address_ = out.last_raster_address;
+    DrawJobLastValue& last_tex7_fan_raster_address_ = out.last_tex7_fan_raster_address;
+    DrawJobLastValue& last_texf_projected_fan_raster_address_ = out.last_texf_projected_fan_raster_address;
+    DrawJobLastValue& last_textured_raster_address_ = out.last_textured_raster_address;
+
+    // ---- F13: the executor may not fault_. This local lambda SHADOWS the
+    // member of the same name, so every fault_("...") site below is unchanged;
+    // the message is recorded and the emulation thread raises the real fault at
+    // the next fold, with the original text. First message wins, exactly as the
+    // machine's first fault wins today.
+    auto fault_ = [&out](const std::string& message) {
+        if (!out.failed) {
+            out.failed = true;
+            out.fault_message = message;
+        }
+    };
+    // ---- F3: the renderer invalidations are guest-visible side effects that
+    // touch renderer_ and mem_write_. Same shadowing trick: the call sites are
+    // unchanged, the effect is recorded and applied on the emulation thread, in
+    // job order, at the fold.
+    auto invalidate_renderer_color_overlap = [&out](uint32_t address, size_t bytes,
+                                                    uint32_t cause) {
+        out.invalidate_color = true;
+        out.invalidate_color_address = address;
+        out.invalidate_color_bytes = bytes;
+        out.invalidate_color_cause = cause;
+    };
+    auto invalidate_renderer_depth_overlap = [&out](uint32_t address, size_t bytes,
+                                                    uint32_t cause) {
+        out.invalidate_depth = true;
+        out.invalidate_depth_address = address;
+        out.invalidate_depth_bytes = bytes;
+        out.invalidate_depth_cause = cause;
+    };
+    // The destination surfaces. For a queued job both direct pointers are
+    // non-null by the section 1.3 eligibility rule, so read_/write_ are never
+    // invoked and no Unicorn call is reachable from here; the constructor's only
+    // use of them is to bind the references.
     PagedRasterSurface depth_surface(
         depth_address, static_cast<size_t>(depth_bytes64),
         mem_read_, mem_write_, mem_direct_);
     PagedRasterSurface color_surface(
         color_address, static_cast<size_t>(color_bytes64),
         mem_read_, mem_write_, mem_direct_);
-    uint8_t* const depth_direct = depth_surface.direct_data();
-    uint8_t* const color_direct = color_surface.direct_data();
     auto read_depth32 = [&](size_t offset, uint32_t& value) {
         if (depth_direct) {
             std::memcpy(&value, depth_direct + offset, sizeof(value));
@@ -4114,25 +6722,30 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         }
         return color_surface.write32(offset, value);
     };
-    std::unique_ptr<SwizzleLookup> surface_swizzle;
-    if (profile == Profile::kSwizzledRadialColor ||
-        profile == Profile::kSwizzledTexturedColor ||
-        profile == Profile::kSwizzledProjectedColor) {
-        surface_swizzle =
-            std::make_unique<SwizzleLookup>(surface_width, surface_height);
-    }
+    // Stage (e2): built ONCE per job at the latch (rasterize_witnessed_batch)
+    // and owned by the job, not rebuilt here. With N parts this function is
+    // entered N times, and SwizzleLookup(640,480) walks ~10.7 k entries against
+    // ~26 k fragments per batch, so per-part construction would have been a
+    // 30-40 percent tax on the three swizzled profiles. Immutable after
+    // construction, so every part reads the same table concurrently.
+    const SwizzleLookup* const surface_swizzle = job.surface_swizzle.get();
 
     uint32_t xmin = clip_x;
     uint32_t xmax = clip_x + clip_width - 1;
     uint32_t ymin = clip_y;
     uint32_t ymax = clip_y + clip_height - 1;
-    const uint32_t window_x = raster_state_[kRasterWindowClipHorizontal];
-    const uint32_t window_y = raster_state_[kRasterWindowClipVertical];
+    const uint32_t window_x = raster_state[kRasterWindowClipHorizontal];
+    const uint32_t window_y = raster_state[kRasterWindowClipVertical];
     xmin = std::max(xmin, window_x & 0xFFFu);
     xmax = std::min(xmax, (window_x >> 16) & 0xFFFu);
     ymin = std::max(ymin, window_y & 0xFFFu);
     ymax = std::min(ymax, (window_y >> 16) & 0xFFFu);
     if (xmax < xmin || ymax < ymin) {
+        // Stage (e2): a batch counter is a property of the DRAW, not of a
+        // destination span. Every part evaluates this clip test identically
+        // (it reads only latched state), so counting it on part 0 alone
+        // reproduces the single-threaded tally exactly.
+        if (part != 0) return true;
         if (profile == Profile::kPitchZ16Depth)
             ++depth_raster_batches_;
         else if (profile == Profile::kSwizzledRadialColor)
@@ -4165,15 +6778,15 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
     }
 
     float clip_min = 0.0f, clip_max = 0.0f;
-    std::memcpy(&clip_min, &raster_state_[kRasterClipMin], sizeof(clip_min));
-    std::memcpy(&clip_max, &raster_state_[kRasterClipMax], sizeof(clip_max));
+    std::memcpy(&clip_min, &raster_state[kRasterClipMin], sizeof(clip_min));
+    std::memcpy(&clip_max, &raster_state[kRasterClipMax], sizeof(clip_max));
     float polygon_scale = 0.0f, polygon_bias = 0.0f;
     if (enables & (1u << 13)) {
         std::memcpy(&polygon_scale,
-                    &raster_state_[kRasterPolygonOffsetScale],
+                    &raster_state[kRasterPolygonOffsetScale],
                     sizeof(polygon_scale));
         std::memcpy(&polygon_bias,
-                    &raster_state_[kRasterPolygonOffsetBias],
+                    &raster_state[kRasterPolygonOffsetBias],
                     sizeof(polygon_bias));
     }
 
@@ -4326,7 +6939,7 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                 if (!zero_direction_counter) return false;
                 ++*zero_direction_counter;
                 last_pitch_three_zero_factor3_ =
-                    raster_state_[kRasterCombinerFactor0_0 + 3];
+                    raster_state[kRasterCombinerFactor0_0 + 3];
                 return sample_texture(data, swizzle, width, height,
                                       0.0f, 0.0f,
                                       TextureAddressMode::kClampToEdge, 0,
@@ -4344,7 +6957,7 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
             if (abs_x == abs_y && abs_x > abs_z && xy_tie_counter) {
                 ++*xy_tie_counter;
                 last_pitch_three_xy_tie_factor3_ =
-                    raster_state_[kRasterCombinerFactor0_0 + 3];
+                    raster_state[kRasterCombinerFactor0_0 + 3];
                 divisor = abs_x;
                 u = direction[0] >= 0.0f ? -direction[2] : direction[2];
                 v = direction[1];
@@ -4369,11 +6982,35 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                                   color, nullptr);
         };
 
+    // Stage (b2) / DESIGN-NV2A-SEAM.md section 4.3 option O3: the per-write
+    // FNV-1a folds (`h ^= word; h *= 1099511628211ull;`) are a two-operation
+    // loop-carried dependency executed once per written word on the hottest loop
+    // in the emulator. Latch the switch once per batch so the whole telemetry
+    // block -- fold, last-written-address store, and write census -- sits behind
+    // one perfectly-predicted branch instead of forming a serial chain through
+    // the fragment path. Default is ON, so the 22 witnessed/scanout hashes and
+    // the write counters are bit-identical to today until the default flips,
+    // which is a separate re-baseline decision (methodology section 3).
+    const bool hash_on = job.hash_on;
+    // Stage (b1): per-batch fragment tally, folded into the profile's counter
+    // once below the primitive-assembly switch.
+    uint64_t witnessed_fragment_count = 0;
     bool raster_failed = false;
     auto rasterize_triangle =
-        [&](const TransformedVertex& input_a,
+        [&](auto profile_tag,
+            const TransformedVertex& input_a,
             const TransformedVertex& input_b,
             const TransformedVertex& input_c) {
+            // Stage (b3): the batch profile is loop-invariant, so it arrives as a
+            // compile-time tag and every test against it in this body is a
+            // constant expression. `if constexpr` then removes the 14 dead profile
+            // arms from each of the 15 instantiations, which is what makes the ~57
+            // per-fragment `profile ==` compares disappear.
+            constexpr Profile kProfile =
+                static_cast<Profile>(decltype(profile_tag)::value);
+            constexpr bool kPitchTex5Profile =
+                kProfile == Profile::kPitchTex5ProjectedColor ||
+                kProfile == Profile::kPitchTex5DiffuseColor;
             if (raster_failed) return;
             const TransformedVertex* a = &input_a;
             const TransformedVertex* b = &input_b;
@@ -4402,51 +7039,67 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                        (y1 - y0) * (px - x0);
             };
             int64_t area = edge(ax, ay, bx, by, cx, cy);
-            if (pitch_tex5_profile) {
+            if constexpr (kPitchTex5Profile) {
                 if (area >= 0) return;  // FRONT culling.
                 std::swap(b, c);
                 std::swap(bx, cx);
                 std::swap(by, cy);
                 area = -area;
-            } else if (area < 0 &&
-                       profile == Profile::kInlineLinearBlitColor) {
-                std::swap(b, c);
-                std::swap(bx, cx);
-                std::swap(by, cy);
-                area = -area;  // Culling is disabled for this blit.
+            } else if constexpr (kProfile == Profile::kInlineLinearBlitColor) {
+                if (area < 0) {
+                    std::swap(b, c);
+                    std::swap(bx, cx);
+                    std::swap(by, cy);
+                    area = -area;  // Culling is disabled for this blit.
+                } else if (area <= 0) {
+                    return;  // CW is front-facing in the witnessed culled states.
+                }
             } else if (area <= 0) {
                 return;  // CW is front-facing in the witnessed culled states.
             }
             if (area == 0) return;
 
-            if (profile == Profile::kPitchZ16Depth)
+            // Stage (e2), beads-xbox.1.15.9: a TRIANGLE counter is per primitive,
+            // not per destination span. Every part runs the whole primitive loop
+            // and repeats this setup -- the culling and degeneracy tests above
+            // read only latched vertex data, so every part reaches this point for
+            // exactly the same triangles -- and counting on each would multiply
+            // the tally by `parts`. It did: the threads 0 vs 4 byte-lock caught
+            // all fourteen per-profile triangle counters at exactly 4x (radial
+            // 7 293 635 -> 29 174 540) with every fragment, pass, write, sample
+            // and batch counter, and all 24 checkpoint framebuffers, identical.
+            // The per-FRAGMENT ladder below stays per-part, because each part
+            // rasterizes its own rows and those sums add.
+            if (part == 0) {
+            if constexpr (kProfile == Profile::kPitchZ16Depth)
                 ++rasterized_triangles_;
-            else if (profile == Profile::kSwizzledRadialColor)
+            else if constexpr (kProfile == Profile::kSwizzledRadialColor)
                 ++radial_color_triangles_;
-            else if (profile == Profile::kSwizzledTexturedColor)
+            else if constexpr (kProfile == Profile::kSwizzledTexturedColor)
                 ++textured_color_triangles_;
-            else if (profile == Profile::kPitchTexturedColor)
+            else if constexpr (kProfile == Profile::kPitchTexturedColor)
                 ++pitch_textured_color_triangles_;
-            else if (profile == Profile::kSwizzledProjectedColor)
+            else if constexpr (kProfile == Profile::kSwizzledProjectedColor)
                 ++projected_color_triangles_;
-            else if (profile == Profile::kPitchProjectedColor)
+            else if constexpr (kProfile == Profile::kPitchProjectedColor)
                 ++pitch_projected_color_triangles_;
-            else if (profile == Profile::kPitchMultiTextureColor)
+            else if constexpr (kProfile == Profile::kPitchMultiTextureColor)
                 ++pitch_multi_texture_triangles_;
-            else if (profile == Profile::kPitchThreeTextureColor)
+            else if constexpr (kProfile == Profile::kPitchThreeTextureColor)
                 ++pitch_three_texture_triangles_;
-            else if (pitch_tex5_profile)
+            else if constexpr (kPitchTex5Profile)
                 ++pitch_tex5_triangles_;
-            else if (profile == Profile::kInlineLinearBlitColor)
+            else if constexpr (kProfile == Profile::kInlineLinearBlitColor)
                 ++inline_linear_blit_triangles_;
-            else if (profile == Profile::kPitchSingleTextureColor)
+            else if constexpr (kProfile == Profile::kPitchSingleTextureColor)
                 ++pitch_single_texture_triangles_;
-            else if (profile == Profile::kTex7FanColor)
+            else if constexpr (kProfile == Profile::kTex7FanColor)
                 ++tex7_fan_triangles_;
-            else if (profile == Profile::kTexfProjectedFanColor)
+            else if constexpr (kProfile == Profile::kTexfProjectedFanColor)
                 ++texf_projected_fan_triangles_;
             else
                 ++inline_color_triangles_;
+            }
             const int32_t tri_xmin = std::max<int32_t>(
                 static_cast<int32_t>(xmin),
                 static_cast<int32_t>(std::ceil(
@@ -4521,7 +7174,22 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                 }
             }
 
-            for (int32_t y = tri_ymin; y <= tri_ymax; ++y) {
+            // ---- stage (e2) destination-span partition (beads-xbox.1.15.9) --
+            // This part owns exactly the destination rows y with
+            // y % parts == part. Expressed as a STRIDE rather than as an
+            // ownership test inside the loop: it renders the identical row set
+            // and never enters an iteration it would immediately skip, and at
+            // parts == 1 it degenerates to `y = tri_ymin; y <= tri_ymax; y += 1`,
+            // i.e. the loop that was here before. Disjoint rows are the whole
+            // exactness argument -- see the enumeration in nv2a.hpp.
+            int32_t y_first = tri_ymin;
+            const int32_t y_step = static_cast<int32_t>(parts);
+            if (parts > 1) {
+                int32_t skew = (tri_ymin - static_cast<int32_t>(part)) % y_step;
+                if (skew < 0) skew += y_step;
+                if (skew != 0) y_first = tri_ymin + (y_step - skew);
+            }
+            for (int32_t y = y_first; y <= tri_ymax; y += y_step) {
                 const int64_t py = static_cast<int64_t>(y) * 16 + 8;
                 for (int32_t x = tri_xmin; x <= tri_xmax; ++x) {
                     const int64_t px = static_cast<int64_t>(x) * 16 + 8;
@@ -4533,34 +7201,14 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                         w2 < 0 || (w2 == 0 && !edge2_top_left)) {
                         continue;
                     }
-                    if (profile == Profile::kPitchZ16Depth)
-                        ++rasterized_fragments_;
-                    else if (profile == Profile::kSwizzledRadialColor)
-                        ++radial_color_fragments_;
-                    else if (profile == Profile::kSwizzledTexturedColor)
-                        ++textured_color_fragments_;
-                    else if (profile == Profile::kPitchTexturedColor)
-                        ++pitch_textured_color_fragments_;
-                    else if (profile == Profile::kSwizzledProjectedColor)
-                        ++projected_color_fragments_;
-                    else if (profile == Profile::kPitchProjectedColor)
-                        ++pitch_projected_color_fragments_;
-                    else if (profile == Profile::kPitchMultiTextureColor)
-                        ++pitch_multi_texture_fragments_;
-                    else if (profile == Profile::kPitchThreeTextureColor)
-                        ++pitch_three_texture_fragments_;
-                    else if (pitch_tex5_profile)
-                        ++pitch_tex5_fragments_;
-                    else if (profile == Profile::kInlineLinearBlitColor)
-                        ++inline_linear_blit_fragments_;
-                    else if (profile == Profile::kPitchSingleTextureColor)
-                        ++pitch_single_texture_fragments_;
-                    else if (profile == Profile::kTex7FanColor)
-                        ++tex7_fan_fragments_;
-                    else if (profile == Profile::kTexfProjectedFanColor)
-                        ++texf_projected_fan_fragments_;
-                    else
-                        ++inline_color_fragments_;
+                    // Stage (b1): the 15-way per-fragment profile ladder that used
+                    // to run here -- 8.59 G times per canonical run -- is now one
+                    // register increment. The tally is folded into the same profile
+                    // counter, through the same ladder, once per batch below the
+                    // primitive-assembly switch. This is the only fragment-counter
+                    // site in the loop and the fold runs on every path out of the
+                    // assembly loop, so the totals are unchanged.
+                    ++witnessed_fragment_count;
                     float depth =
                         (static_cast<float>(w0) * a->position[2] +
                          static_cast<float>(w1) * b->position[2] +
@@ -4571,7 +7219,7 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                         depth < clip_min || depth > clip_max) {
                         continue;
                     }
-                    if (profile == Profile::kPitchZ16Depth) {
+                    if constexpr (kProfile == Profile::kPitchZ16Depth) {
                         const uint16_t incoming = static_cast<uint16_t>(
                             std::floor(std::clamp(depth, 0.0f, 65535.0f)));
                         const size_t offset =
@@ -4590,18 +7238,20 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                             raster_failed = true;
                             return;
                         }
-                        ++depth_writes_;
-                        const uint32_t address =
-                            depth_address + static_cast<uint32_t>(offset);
-                        last_raster_address_ = address;
-                        for (uint32_t word :
-                             {address, static_cast<uint32_t>(incoming)}) {
-                            raster_output_hash_ ^= word;
-                            raster_output_hash_ *= 1099511628211ull;
+                        if (hash_on) {
+                            ++depth_writes_;
+                            const uint32_t address =
+                                depth_address + static_cast<uint32_t>(offset);
+                            last_raster_address_ = address;
+                            for (uint32_t word :
+                                 {address, static_cast<uint32_t>(incoming)}) {
+                                raster_output_hash_ ^= word;
+                                raster_output_hash_ *= 1099511628211ull;
+                            }
                         }
                         continue;
                     }
-                    if (profile == Profile::kInlineLinearBlitColor) {
+                    if constexpr (kProfile == Profile::kInlineLinearBlitColor) {
                         const size_t offset =
                             static_cast<size_t>(y) * pitch +
                             static_cast<size_t>(x) * sizeof(uint32_t);
@@ -4694,21 +7344,23 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                             raster_failed = true;
                             return;
                         }
-                        ++inline_linear_blit_writes_;
-                        const uint32_t address =
-                            color_address +
-                            static_cast<uint32_t>(offset);
-                        last_inline_linear_blit_raster_address_ =
-                            address;
-                        for (uint32_t word : {address, color}) {
-                            inline_linear_blit_output_hash_ ^= word;
-                            inline_linear_blit_output_hash_ *=
-                                1099511628211ull;
+                        if (hash_on) {
+                            ++inline_linear_blit_writes_;
+                            const uint32_t address =
+                                color_address +
+                                static_cast<uint32_t>(offset);
+                            last_inline_linear_blit_raster_address_ =
+                                address;
+                            for (uint32_t word : {address, color}) {
+                                inline_linear_blit_output_hash_ ^= word;
+                                inline_linear_blit_output_hash_ *=
+                                    1099511628211ull;
+                            }
                         }
                         continue;
                     }
-                    if (profile == Profile::kPitchMultiTextureColor ||
-                        profile == Profile::kPitchThreeTextureColor) {
+                    if constexpr (kProfile == Profile::kPitchMultiTextureColor ||
+                                  kProfile == Profile::kPitchThreeTextureColor) {
                         const size_t offset =
                             static_cast<size_t>(y) * pitch +
                             static_cast<size_t>(x) * sizeof(uint32_t);
@@ -4725,7 +7377,7 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                         }
                         if (incoming > (stored_depth_stencil >> 8))
                             continue;  // LEQUAL
-                        if (profile == Profile::kPitchMultiTextureColor)
+                        if constexpr (kProfile == Profile::kPitchMultiTextureColor)
                             ++pitch_multi_texture_depth_passes_;
                         else
                             ++pitch_three_texture_depth_passes_;
@@ -4791,7 +7443,7 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                                 if (rescale) {
                                     ++*rescale_counter;
                                     last_pitch_three_rescale_factor3_ =
-                                        raster_state_[kRasterCombinerFactor0_0 + 3];
+                                        raster_state[kRasterCombinerFactor0_0 + 3];
                                 }
                                 for (size_t component = 0; component < 3;
                                      ++component) {
@@ -4803,30 +7455,30 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                         std::array<float, 3> direction1{};
                         narrow_cube_direction(
                             direction0_double, direction0,
-                            profile == Profile::kPitchThreeTextureColor
+                            kProfile == Profile::kPitchThreeTextureColor
                                 ? &pitch_three_texture_rescale_direction0_
                                 : nullptr);
                         narrow_cube_direction(
                             direction1_double, direction1,
-                            profile == Profile::kPitchThreeTextureColor
+                            kProfile == Profile::kPitchThreeTextureColor
                                 ? &pitch_three_texture_rescale_direction1_
                                 : nullptr);
                         std::array<float, 3> texture0{};
                         std::array<float, 3> texture1{};
                         uint64_t* zero_direction0 =
-                            profile == Profile::kPitchThreeTextureColor
+                            kProfile == Profile::kPitchThreeTextureColor
                                 ? &pitch_three_texture_zero_direction0_
                                 : nullptr;
                         uint64_t* zero_direction1 =
-                            profile == Profile::kPitchThreeTextureColor
+                            kProfile == Profile::kPitchThreeTextureColor
                                 ? &pitch_three_texture_zero_direction1_
                                 : nullptr;
                         uint64_t* xy_tie_direction0 =
-                            profile == Profile::kPitchThreeTextureColor
+                            kProfile == Profile::kPitchThreeTextureColor
                                 ? &pitch_three_texture_xy_tie_direction0_
                                 : nullptr;
                         uint64_t* xy_tie_direction1 =
-                            profile == Profile::kPitchThreeTextureColor
+                            kProfile == Profile::kPitchThreeTextureColor
                                 ? &pitch_three_texture_xy_tie_direction1_
                                 : nullptr;
                         if (!sample_cube_texture(
@@ -4848,7 +7500,7 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                             raster_failed = true;
                             return;
                         }
-                        if (profile == Profile::kPitchMultiTextureColor)
+                        if constexpr (kProfile == Profile::kPitchMultiTextureColor)
                             pitch_multi_texture_samples_ += 2;
                         else
                             pitch_three_texture_samples_ += 2;
@@ -4869,10 +7521,11 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                         const float source_alpha =
                             1.0f - std::clamp(
                                 inverted * inverted, 0.0f, 1.0f);
-                        if (profile == Profile::kPitchMultiTextureColor &&
-                            std::lround(source_alpha * 255.0f) < 1)
-                            continue;  // GEQUAL alpha reference 1.
-                        if (profile == Profile::kPitchMultiTextureColor)
+                        if constexpr (kProfile == Profile::kPitchMultiTextureColor) {
+                            if (std::lround(source_alpha * 255.0f) < 1)
+                                continue;  // GEQUAL alpha reference 1.
+                        }
+                        if constexpr (kProfile == Profile::kPitchMultiTextureColor)
                             ++pitch_multi_texture_alpha_passes_;
 
                         uint32_t destination_pixel = 0;
@@ -4884,9 +7537,9 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                             return;
                         }
                         const uint32_t stage3_factor =
-                            raster_state_[kRasterCombinerFactor0_0 + 3];
+                            raster_state[kRasterCombinerFactor0_0 + 3];
                         const uint32_t stage4_factor =
-                            raster_state_[kRasterCombinerFactor0_0 + 4];
+                            raster_state[kRasterCombinerFactor0_0 + 4];
                         auto factor_component =
                             [](uint32_t factor, uint32_t shift) {
                                 return static_cast<float>(
@@ -4954,38 +7607,40 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                             raster_failed = true;
                             return;
                         }
-                        if (profile == Profile::kPitchMultiTextureColor) {
-                            ++pitch_multi_texture_color_writes_;
-                            ++pitch_multi_texture_depth_writes_;
-                        } else {
-                            ++pitch_three_texture_color_writes_;
-                            ++pitch_three_texture_depth_writes_;
-                        }
-                        const uint32_t color_pixel_address =
-                            color_address +
-                            static_cast<uint32_t>(offset);
-                        const uint32_t depth_pixel_address =
-                            depth_address +
-                            static_cast<uint32_t>(offset);
-                        if (profile == Profile::kPitchMultiTextureColor)
-                            last_pitch_multi_texture_raster_address_ =
-                                color_pixel_address;
-                        else
-                            last_pitch_three_texture_raster_address_ =
-                                color_pixel_address;
-                        for (uint32_t word :
-                             {color_pixel_address, color,
-                              depth_pixel_address, depth_stencil}) {
-                            uint64_t& output_hash =
-                                profile == Profile::kPitchMultiTextureColor
-                                    ? pitch_multi_texture_output_hash_
-                                    : pitch_three_texture_output_hash_;
-                            output_hash ^= word;
-                            output_hash *= 1099511628211ull;
+                        if (hash_on) {
+                            if constexpr (kProfile == Profile::kPitchMultiTextureColor) {
+                                ++pitch_multi_texture_color_writes_;
+                                ++pitch_multi_texture_depth_writes_;
+                            } else {
+                                ++pitch_three_texture_color_writes_;
+                                ++pitch_three_texture_depth_writes_;
+                            }
+                            const uint32_t color_pixel_address =
+                                color_address +
+                                static_cast<uint32_t>(offset);
+                            const uint32_t depth_pixel_address =
+                                depth_address +
+                                static_cast<uint32_t>(offset);
+                            if constexpr (kProfile == Profile::kPitchMultiTextureColor)
+                                last_pitch_multi_texture_raster_address_ =
+                                    color_pixel_address;
+                            else
+                                last_pitch_three_texture_raster_address_ =
+                                    color_pixel_address;
+                            for (uint32_t word :
+                                 {color_pixel_address, color,
+                                  depth_pixel_address, depth_stencil}) {
+                                uint64_t& output_hash =
+                                    kProfile == Profile::kPitchMultiTextureColor
+                                        ? pitch_multi_texture_output_hash_
+                                        : pitch_three_texture_output_hash_;
+                                output_hash ^= word;
+                                output_hash *= 1099511628211ull;
+                            }
                         }
                         continue;
                     }
-                    if (pitch_tex5_profile) {
+                    if constexpr (kPitchTex5Profile) {
                         const size_t offset =
                             static_cast<size_t>(y) * pitch +
                             static_cast<size_t>(x) * sizeof(uint32_t);
@@ -5020,8 +7675,8 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                             continue;
 
                         std::array<float, 4> source{};
-                        if (profile ==
-                            Profile::kPitchTex5ProjectedColor) {
+                        if constexpr (kProfile ==
+                                      Profile::kPitchTex5ProjectedColor) {
                             std::array<float, 3> coordinate{};
                             for (size_t component :
                                  {size_t{0}, size_t{1}, size_t{3}}) {
@@ -5104,26 +7759,28 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                             raster_failed = true;
                             return;
                         }
-                        ++pitch_tex5_color_writes_;
-                        ++pitch_tex5_depth_writes_;
-                        const uint32_t color_pixel_address =
-                            color_address +
-                            static_cast<uint32_t>(offset);
-                        const uint32_t depth_pixel_address =
-                            depth_address +
-                            static_cast<uint32_t>(offset);
-                        last_pitch_tex5_raster_address_ =
-                            color_pixel_address;
-                        for (uint32_t word :
-                             {color_pixel_address, color,
-                              depth_pixel_address, depth_stencil}) {
-                            pitch_tex5_output_hash_ ^= word;
-                            pitch_tex5_output_hash_ *=
-                                1099511628211ull;
+                        if (hash_on) {
+                            ++pitch_tex5_color_writes_;
+                            ++pitch_tex5_depth_writes_;
+                            const uint32_t color_pixel_address =
+                                color_address +
+                                static_cast<uint32_t>(offset);
+                            const uint32_t depth_pixel_address =
+                                depth_address +
+                                static_cast<uint32_t>(offset);
+                            last_pitch_tex5_raster_address_ =
+                                color_pixel_address;
+                            for (uint32_t word :
+                                 {color_pixel_address, color,
+                                  depth_pixel_address, depth_stencil}) {
+                                pitch_tex5_output_hash_ ^= word;
+                                pitch_tex5_output_hash_ *=
+                                    1099511628211ull;
+                            }
                         }
                         continue;
                     }
-                    if (profile == Profile::kTexfProjectedFanColor) {
+                    if constexpr (kProfile == Profile::kTexfProjectedFanColor) {
                         const size_t offset = static_cast<size_t>(y) * pitch +
                             static_cast<size_t>(x) * sizeof(uint32_t);
                         // The exact captured six-stage combiner reduces to
@@ -5144,17 +7801,20 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                             raster_failed = true;
                             return;
                         }
-                        ++texf_projected_fan_writes_;
-                        const uint32_t address = color_address + static_cast<uint32_t>(offset);
-                        last_texf_projected_fan_raster_address_ = address;
-                        for (uint32_t word : {address, color}) {
-                            texf_projected_fan_output_hash_ ^= word;
-                            texf_projected_fan_output_hash_ *= 1099511628211ull;
+                        if (hash_on) {
+                            ++texf_projected_fan_writes_;
+                            const uint32_t address =
+                                color_address + static_cast<uint32_t>(offset);
+                            last_texf_projected_fan_raster_address_ = address;
+                            for (uint32_t word : {address, color}) {
+                                texf_projected_fan_output_hash_ ^= word;
+                                texf_projected_fan_output_hash_ *= 1099511628211ull;
+                            }
                         }
                         continue;
                     }
-                    if (profile == Profile::kPitchSingleTextureColor ||
-                        profile == Profile::kTex7FanColor) {
+                    if constexpr (kProfile == Profile::kPitchSingleTextureColor ||
+                                  kProfile == Profile::kTex7FanColor) {
                         const size_t offset =
                             static_cast<size_t>(y) * pitch +
                             static_cast<size_t>(x) * sizeof(uint32_t);
@@ -5171,7 +7831,7 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                         }
                         if (incoming > (stored_depth_stencil >> 8))
                             continue;  // LEQUAL, read-only depth.
-                        if (profile == Profile::kPitchSingleTextureColor)
+                        if constexpr (kProfile == Profile::kPitchSingleTextureColor)
                             ++pitch_single_texture_depth_passes_;
                         else
                             ++tex7_fan_depth_passes_;
@@ -5221,7 +7881,7 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                                 single_texture_height,
                                 coordinate[0] / coordinate[2],
                                 coordinate[1] / coordinate[2],
-                                profile == Profile::kPitchSingleTextureColor
+                                kProfile == Profile::kPitchSingleTextureColor
                                     ? TextureAddressMode::kBorder
                                     : TextureAddressMode::kClampToEdge,
                                 0xFF000000, texture, nullptr)) {
@@ -5230,7 +7890,7 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                             raster_failed = true;
                             return;
                         }
-                        if (profile == Profile::kPitchSingleTextureColor)
+                        if constexpr (kProfile == Profile::kPitchSingleTextureColor)
                             ++pitch_single_texture_samples_;
                         else
                             ++tex7_fan_samples_;
@@ -5241,23 +7901,24 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                                 0.5f));
                         };
                         const std::array<float, 3> source =
-                            profile == Profile::kTex7FanColor
+                            kProfile == Profile::kTex7FanColor
                                 ? std::array<float, 3>{{texture[0] * (160.0f / 255.0f),
                                                         texture[1],
                                                         texture[2] * (64.0f / 255.0f)}}
                                 : texture;
                         uint32_t destination = 0;
-                        if (profile == Profile::kTex7FanColor &&
-                            !color_surface.read32(offset, destination)) {
-                            fault_("NV2A tex7 fan color DMA read failed");
-                            raster_failed = true;
-                            return;
+                        if constexpr (kProfile == Profile::kTex7FanColor) {
+                            if (!color_surface.read32(offset, destination)) {
+                                fault_("NV2A tex7 fan color DMA read failed");
+                                raster_failed = true;
+                                return;
+                            }
                         }
                         auto add_saturate = [&](float value, uint32_t dst) {
                             return pack_unorm8(value +
                                 static_cast<float>(dst) / 255.0f);
                         };
-                        const uint32_t color = profile == Profile::kTex7FanColor
+                        const uint32_t color = kProfile == Profile::kTex7FanColor
                             ? (add_saturate(1.0f,
                                             (destination >> 24) & 0xFFu) << 24) |
                                   (add_saturate(source[0],
@@ -5275,28 +7936,30 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                             raster_failed = true;
                             return;
                         }
-                        if (profile == Profile::kPitchSingleTextureColor)
-                            ++pitch_single_texture_writes_;
-                        else
-                            ++tex7_fan_writes_;
-                        const uint32_t address =
-                            color_address + static_cast<uint32_t>(offset);
-                        if (profile == Profile::kPitchSingleTextureColor) {
-                            last_pitch_single_texture_raster_address_ = address;
-                            for (uint32_t word : {address, color}) {
-                                pitch_single_texture_output_hash_ ^= word;
-                                pitch_single_texture_output_hash_ *= 1099511628211ull;
-                            }
-                        } else {
-                            last_tex7_fan_raster_address_ = address;
-                            for (uint32_t word : {address, color}) {
-                                tex7_fan_output_hash_ ^= word;
-                                tex7_fan_output_hash_ *= 1099511628211ull;
+                        if (hash_on) {
+                            if constexpr (kProfile == Profile::kPitchSingleTextureColor)
+                                ++pitch_single_texture_writes_;
+                            else
+                                ++tex7_fan_writes_;
+                            const uint32_t address =
+                                color_address + static_cast<uint32_t>(offset);
+                            if constexpr (kProfile == Profile::kPitchSingleTextureColor) {
+                                last_pitch_single_texture_raster_address_ = address;
+                                for (uint32_t word : {address, color}) {
+                                    pitch_single_texture_output_hash_ ^= word;
+                                    pitch_single_texture_output_hash_ *= 1099511628211ull;
+                                }
+                            } else {
+                                last_tex7_fan_raster_address_ = address;
+                                for (uint32_t word : {address, color}) {
+                                    tex7_fan_output_hash_ ^= word;
+                                    tex7_fan_output_hash_ *= 1099511628211ull;
+                                }
                             }
                         }
                         continue;
                     }
-                    if (profile == Profile::kPitchAdditiveColor) {
+                    if constexpr (kProfile == Profile::kPitchAdditiveColor) {
                         const double lambda0 =
                             static_cast<double>(w0) /
                             static_cast<double>(area);
@@ -5347,7 +8010,7 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                         }
                         ++inline_texture_samples_;
                         const uint32_t factor =
-                            raster_state_[kRasterCombinerFactor0_0];
+                            raster_state[kRasterCombinerFactor0_0];
                         const std::array<float, 4> constant{{
                             static_cast<float>((factor >> 16) & 0xFFu) /
                                 255.0f,
@@ -5433,20 +8096,22 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                             raster_failed = true;
                             return;
                         }
-                        ++inline_color_writes_;
-                        const uint32_t address =
-                            color_address + static_cast<uint32_t>(offset);
-                        last_inline_raster_address_ = address;
-                        for (uint32_t word : {address, color}) {
-                            inline_color_output_hash_ ^= word;
-                            inline_color_output_hash_ *= 1099511628211ull;
+                        if (hash_on) {
+                            ++inline_color_writes_;
+                            const uint32_t address =
+                                color_address + static_cast<uint32_t>(offset);
+                            last_inline_raster_address_ = address;
+                            for (uint32_t word : {address, color}) {
+                                inline_color_output_hash_ ^= word;
+                                inline_color_output_hash_ *= 1099511628211ull;
+                            }
                         }
                         continue;
                     }
 
                     const size_t offset =
-                        (profile == Profile::kPitchTexturedColor ||
-                         profile == Profile::kPitchProjectedColor)
+                        (kProfile == Profile::kPitchTexturedColor ||
+                         kProfile == Profile::kPitchProjectedColor)
                             ? static_cast<size_t>(y) * pitch +
                                   static_cast<size_t>(x) * sizeof(uint32_t)
                             : static_cast<size_t>(surface_swizzle->index(
@@ -5462,13 +8127,13 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                         return;
                     }
                     if (incoming > (stored_depth_stencil >> 8)) continue;
-                    if (profile == Profile::kSwizzledRadialColor)
+                    if constexpr (kProfile == Profile::kSwizzledRadialColor)
                         ++radial_color_depth_passes_;
-                    else if (profile == Profile::kSwizzledTexturedColor)
+                    else if constexpr (kProfile == Profile::kSwizzledTexturedColor)
                         ++textured_color_depth_passes_;
-                    else if (profile == Profile::kPitchTexturedColor)
+                    else if constexpr (kProfile == Profile::kPitchTexturedColor)
                         ++pitch_textured_color_depth_passes_;
-                    else if (profile == Profile::kPitchProjectedColor)
+                    else if constexpr (kProfile == Profile::kPitchProjectedColor)
                         ++pitch_projected_color_depth_passes_;
                     else
                         ++projected_color_depth_passes_;
@@ -5500,7 +8165,7 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                     }
 
                     std::array<float, 3> output{};
-                    if (profile == Profile::kSwizzledRadialColor) {
+                    if constexpr (kProfile == Profile::kSwizzledRadialColor) {
                         std::array<float, 3> texture{};
                         for (size_t component = 0; component < 3; ++component) {
                             const double t =
@@ -5561,11 +8226,11 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                         }
                         float r0 = 0.0f;
                         float r1 = 0.0f;
-                        const bool textured_family =
-                            profile == Profile::kSwizzledTexturedColor ||
-                            profile == Profile::kPitchTexturedColor;
-                        if (textured_family) {
-                            if (profile == Profile::kPitchTexturedColor)
+                        constexpr bool textured_family =
+                            kProfile == Profile::kSwizzledTexturedColor ||
+                            kProfile == Profile::kPitchTexturedColor;
+                        if constexpr (textured_family) {
+                            if constexpr (kProfile == Profile::kPitchTexturedColor)
                                 pitch_texture_samples_ += 2;
                             else
                                 texture_samples_ += 2;
@@ -5614,7 +8279,7 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                                 raster_failed = true;
                                 return;
                             }
-                            if (profile == Profile::kPitchProjectedColor)
+                            if constexpr (kProfile == Profile::kPitchProjectedColor)
                                 pitch_projected_texture_samples_ += 3;
                             else
                                 projected_texture_samples_ += 3;
@@ -5637,10 +8302,10 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                         const size_t factor_stage =
                             textured_family ? 6 : 5;
                         const uint32_t factor0 =
-                            raster_state_[kRasterCombinerFactor0_0 +
+                            raster_state[kRasterCombinerFactor0_0 +
                                           factor_stage];
                         const uint32_t factor1 =
-                            raster_state_[kRasterCombinerFactor1_0 +
+                            raster_state[kRasterCombinerFactor1_0 +
                                           factor_stage];
                         const std::array<float, 3> weight0{{
                             static_cast<float>((factor0 >> 16) & 0xFFu) /
@@ -5685,92 +8350,208 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
                         raster_failed = true;
                         return;
                     }
-                    const uint32_t color_pixel_address =
-                        color_address + static_cast<uint32_t>(offset);
-                    const uint32_t depth_pixel_address =
-                        depth_address + static_cast<uint32_t>(offset);
-                    if (profile == Profile::kSwizzledRadialColor) {
-                        ++radial_color_writes_;
-                        ++radial_color_depth_writes_;
-                        last_color_raster_address_ = color_pixel_address;
-                        for (uint32_t word :
-                             {color_pixel_address, color,
-                              depth_pixel_address, depth_stencil}) {
-                            radial_color_output_hash_ ^= word;
-                            radial_color_output_hash_ *= 1099511628211ull;
-                        }
-                    } else if (profile == Profile::kSwizzledTexturedColor) {
-                        ++textured_color_writes_;
-                        ++textured_color_depth_writes_;
-                        last_textured_raster_address_ = color_pixel_address;
-                        for (uint32_t word :
-                             {color_pixel_address, color,
-                              depth_pixel_address, depth_stencil}) {
-                            textured_color_output_hash_ ^= word;
-                            textured_color_output_hash_ *= 1099511628211ull;
-                        }
-                    } else if (profile == Profile::kPitchTexturedColor) {
-                        ++pitch_textured_color_writes_;
-                        ++pitch_textured_color_depth_writes_;
-                        last_pitch_textured_raster_address_ =
-                            color_pixel_address;
-                        for (uint32_t word :
-                             {color_pixel_address, color,
-                              depth_pixel_address, depth_stencil}) {
-                            pitch_textured_color_output_hash_ ^= word;
-                            pitch_textured_color_output_hash_ *=
-                                1099511628211ull;
-                        }
-                    } else if (profile == Profile::kPitchProjectedColor) {
-                        ++pitch_projected_color_writes_;
-                        ++pitch_projected_color_depth_writes_;
-                        last_pitch_projected_raster_address_ =
-                            color_pixel_address;
-                        for (uint32_t word :
-                             {color_pixel_address, color,
-                              depth_pixel_address, depth_stencil}) {
-                            pitch_projected_color_output_hash_ ^= word;
-                            pitch_projected_color_output_hash_ *=
-                                1099511628211ull;
-                        }
-                    } else {
-                        ++projected_color_writes_;
-                        ++projected_color_depth_writes_;
-                        last_projected_raster_address_ = color_pixel_address;
-                        for (uint32_t word :
-                             {color_pixel_address, color,
-                              depth_pixel_address, depth_stencil}) {
-                            projected_color_output_hash_ ^= word;
-                            projected_color_output_hash_ *= 1099511628211ull;
+                    if (hash_on) {
+                        const uint32_t color_pixel_address =
+                            color_address + static_cast<uint32_t>(offset);
+                        const uint32_t depth_pixel_address =
+                            depth_address + static_cast<uint32_t>(offset);
+                        if constexpr (kProfile == Profile::kSwizzledRadialColor) {
+                            ++radial_color_writes_;
+                            ++radial_color_depth_writes_;
+                            last_color_raster_address_ = color_pixel_address;
+                            for (uint32_t word :
+                                 {color_pixel_address, color,
+                                  depth_pixel_address, depth_stencil}) {
+                                radial_color_output_hash_ ^= word;
+                                radial_color_output_hash_ *= 1099511628211ull;
+                            }
+                        } else if constexpr (kProfile ==
+                                             Profile::kSwizzledTexturedColor) {
+                            ++textured_color_writes_;
+                            ++textured_color_depth_writes_;
+                            last_textured_raster_address_ = color_pixel_address;
+                            for (uint32_t word :
+                                 {color_pixel_address, color,
+                                  depth_pixel_address, depth_stencil}) {
+                                textured_color_output_hash_ ^= word;
+                                textured_color_output_hash_ *= 1099511628211ull;
+                            }
+                        } else if constexpr (kProfile == Profile::kPitchTexturedColor) {
+                            ++pitch_textured_color_writes_;
+                            ++pitch_textured_color_depth_writes_;
+                            last_pitch_textured_raster_address_ =
+                                color_pixel_address;
+                            for (uint32_t word :
+                                 {color_pixel_address, color,
+                                  depth_pixel_address, depth_stencil}) {
+                                pitch_textured_color_output_hash_ ^= word;
+                                pitch_textured_color_output_hash_ *=
+                                    1099511628211ull;
+                            }
+                        } else if constexpr (kProfile == Profile::kPitchProjectedColor) {
+                            ++pitch_projected_color_writes_;
+                            ++pitch_projected_color_depth_writes_;
+                            last_pitch_projected_raster_address_ =
+                                color_pixel_address;
+                            for (uint32_t word :
+                                 {color_pixel_address, color,
+                                  depth_pixel_address, depth_stencil}) {
+                                pitch_projected_color_output_hash_ ^= word;
+                                pitch_projected_color_output_hash_ *=
+                                    1099511628211ull;
+                            }
+                        } else {
+                            ++projected_color_writes_;
+                            ++projected_color_depth_writes_;
+                            last_projected_raster_address_ = color_pixel_address;
+                            for (uint32_t word :
+                                 {color_pixel_address, color,
+                                  depth_pixel_address, depth_stencil}) {
+                                projected_color_output_hash_ ^= word;
+                                projected_color_output_hash_ *= 1099511628211ull;
+                            }
                         }
                     }
                 }
             }
         };
 
-    const size_t vertex_count = transformed_batch_.size();
-    if (primitive_mode_ == 5) {
-        for (size_t i = 0; i + 2 < vertex_count; i += 3)
-            rasterize_triangle(transformed_batch_[i],
-                               transformed_batch_[i + 1],
-                               transformed_batch_[i + 2]);
-    } else if (primitive_mode_ == 6) {
-        for (size_t i = 2; i < vertex_count; ++i) {
-            if ((i & 1u) == 0)
-                rasterize_triangle(transformed_batch_[i - 2],
-                                   transformed_batch_[i - 1],
-                                   transformed_batch_[i]);
-            else
-                rasterize_triangle(transformed_batch_[i - 1],
-                                   transformed_batch_[i - 2],
-                                   transformed_batch_[i]);
+    const size_t vertex_count = transformed_batch.size();
+    // Stage (b3): assemble the batch's primitives through a generic lambda so the
+    // batch profile travels as a compile-time tag. The switch below runs ONCE PER
+    // BATCH -- not per triangle and not per fragment -- and selects one of the 15
+    // instantiations of rasterize_triangle, inside which every test against
+    // kProfile is a constant expression and the 14 dead profile arms of the
+    // fragment loop are discarded by `if constexpr`.
+    auto emit_batch_primitives = [&](auto profile_tag) {
+        if (primitive_mode == 5) {
+            for (size_t i = 0; i + 2 < vertex_count; i += 3)
+                rasterize_triangle(profile_tag,
+                                   transformed_batch[i],
+                                   transformed_batch[i + 1],
+                                   transformed_batch[i + 2]);
+        } else if (primitive_mode == 6) {
+            for (size_t i = 2; i < vertex_count; ++i) {
+                if ((i & 1u) == 0)
+                    rasterize_triangle(profile_tag,
+                                       transformed_batch[i - 2],
+                                       transformed_batch[i - 1],
+                                       transformed_batch[i]);
+                else
+                    rasterize_triangle(profile_tag,
+                                       transformed_batch[i - 1],
+                                       transformed_batch[i - 2],
+                                       transformed_batch[i]);
+            }
+        } else {
+            for (size_t i = 2; i < vertex_count; ++i)
+                rasterize_triangle(profile_tag,
+                                   transformed_batch[0],
+                                   transformed_batch[i - 1],
+                                   transformed_batch[i]);
         }
-    } else {
-        for (size_t i = 2; i < vertex_count; ++i)
-            rasterize_triangle(transformed_batch_[0],
-                               transformed_batch_[i - 1],
-                               transformed_batch_[i]);
+    };
+    switch (profile) {
+        case Profile::kPitchZ16Depth:
+            emit_batch_primitives(std::integral_constant<
+                int, static_cast<int>(Profile::kPitchZ16Depth)>{});
+            break;
+        case Profile::kSwizzledRadialColor:
+            emit_batch_primitives(std::integral_constant<
+                int, static_cast<int>(Profile::kSwizzledRadialColor)>{});
+            break;
+        case Profile::kSwizzledTexturedColor:
+            emit_batch_primitives(std::integral_constant<
+                int, static_cast<int>(Profile::kSwizzledTexturedColor)>{});
+            break;
+        case Profile::kPitchTexturedColor:
+            emit_batch_primitives(std::integral_constant<
+                int, static_cast<int>(Profile::kPitchTexturedColor)>{});
+            break;
+        case Profile::kSwizzledProjectedColor:
+            emit_batch_primitives(std::integral_constant<
+                int, static_cast<int>(Profile::kSwizzledProjectedColor)>{});
+            break;
+        case Profile::kPitchProjectedColor:
+            emit_batch_primitives(std::integral_constant<
+                int, static_cast<int>(Profile::kPitchProjectedColor)>{});
+            break;
+        case Profile::kPitchMultiTextureColor:
+            emit_batch_primitives(std::integral_constant<
+                int, static_cast<int>(Profile::kPitchMultiTextureColor)>{});
+            break;
+        case Profile::kPitchThreeTextureColor:
+            emit_batch_primitives(std::integral_constant<
+                int, static_cast<int>(Profile::kPitchThreeTextureColor)>{});
+            break;
+        case Profile::kPitchTex5ProjectedColor:
+            emit_batch_primitives(std::integral_constant<
+                int, static_cast<int>(Profile::kPitchTex5ProjectedColor)>{});
+            break;
+        case Profile::kPitchTex5DiffuseColor:
+            emit_batch_primitives(std::integral_constant<
+                int, static_cast<int>(Profile::kPitchTex5DiffuseColor)>{});
+            break;
+        case Profile::kInlineLinearBlitColor:
+            emit_batch_primitives(std::integral_constant<
+                int, static_cast<int>(Profile::kInlineLinearBlitColor)>{});
+            break;
+        case Profile::kPitchSingleTextureColor:
+            emit_batch_primitives(std::integral_constant<
+                int, static_cast<int>(Profile::kPitchSingleTextureColor)>{});
+            break;
+        case Profile::kTex7FanColor:
+            emit_batch_primitives(std::integral_constant<
+                int, static_cast<int>(Profile::kTex7FanColor)>{});
+            break;
+        case Profile::kTexfProjectedFanColor:
+            emit_batch_primitives(std::integral_constant<
+                int, static_cast<int>(Profile::kTexfProjectedFanColor)>{});
+            break;
+        case Profile::kPitchAdditiveColor:
+            emit_batch_primitives(std::integral_constant<
+                int, static_cast<int>(Profile::kPitchAdditiveColor)>{});
+            break;
+        case Profile::kNone:
+            // Unreachable: the no-fingerprint-matched arm of the ladder above
+            // returns through rasterize_generic_combiner_batch, so `profile` is
+            // never kNone here. No instantiation is emitted for it.
+            break;
     }
+
+    // Stage (b1): fold the batch's fragment tally into the profile's counter
+    // once. This ladder is the ladder that used to run per fragment (same arm
+    // order, same `else` arm), it runs on every path the per-fragment increments
+    // could reach, and it precedes every `return` that follows the assembly loop
+    // -- so the per-profile totals are unchanged.
+    if (profile == Profile::kPitchZ16Depth)
+        rasterized_fragments_ += witnessed_fragment_count;
+    else if (profile == Profile::kSwizzledRadialColor)
+        radial_color_fragments_ += witnessed_fragment_count;
+    else if (profile == Profile::kSwizzledTexturedColor)
+        textured_color_fragments_ += witnessed_fragment_count;
+    else if (profile == Profile::kPitchTexturedColor)
+        pitch_textured_color_fragments_ += witnessed_fragment_count;
+    else if (profile == Profile::kSwizzledProjectedColor)
+        projected_color_fragments_ += witnessed_fragment_count;
+    else if (profile == Profile::kPitchProjectedColor)
+        pitch_projected_color_fragments_ += witnessed_fragment_count;
+    else if (profile == Profile::kPitchMultiTextureColor)
+        pitch_multi_texture_fragments_ += witnessed_fragment_count;
+    else if (profile == Profile::kPitchThreeTextureColor)
+        pitch_three_texture_fragments_ += witnessed_fragment_count;
+    else if (pitch_tex5_profile)
+        pitch_tex5_fragments_ += witnessed_fragment_count;
+    else if (profile == Profile::kInlineLinearBlitColor)
+        inline_linear_blit_fragments_ += witnessed_fragment_count;
+    else if (profile == Profile::kPitchSingleTextureColor)
+        pitch_single_texture_fragments_ += witnessed_fragment_count;
+    else if (profile == Profile::kTex7FanColor)
+        tex7_fan_fragments_ += witnessed_fragment_count;
+    else if (profile == Profile::kTexfProjectedFanColor)
+        texf_projected_fan_fragments_ += witnessed_fragment_count;
+    else
+        inline_color_fragments_ += witnessed_fragment_count;
 
     if (raster_failed) return false;
     if (uses_depth_surface && !depth_surface.flush()) {
@@ -5781,36 +8562,50 @@ bool Nv2a::rasterize_witnessed_batch(bool& executed) {
         fault_("NV2A color DMA write failed");
         return false;
     }
-    if (color_profile)
-        invalidate_renderer_color_overlap(color_address, static_cast<size_t>(color_bytes64));
-    if (writes_depth_surface)
-        invalidate_renderer_depth_overlap(depth_address,
-                                          static_cast<size_t>(depth_bytes64));
-    if (color_profile && surface_write_debug_cb_) {
+    // Stage (e2): F3 and F15 are per-DRAW side effects. fold_draw_job reads them
+    // out of job.out, which is part 0's accumulator, so recording them on any
+    // other part would silently drop them. Gated so the intent is explicit.
+    if (part == 0 && color_profile)
+        invalidate_renderer_color_overlap(
+            color_address, static_cast<size_t>(color_bytes64),
+            nv2a_invalidate_token(kNv2aInvalidateWitnessedCpuDraw,
+                                  static_cast<uint32_t>(profile)));
+    if (part == 0 && writes_depth_surface)
+        invalidate_renderer_depth_overlap(
+            depth_address, static_cast<size_t>(depth_bytes64),
+            nv2a_invalidate_token(kNv2aInvalidateWitnessedCpuDraw,
+                                  static_cast<uint32_t>(profile)));
+    // F15 forces the job inline (parts == 1) at the latch, so this can only be
+    // reached with part == 0; the guard is defensive and pinned by the test.
+    if (part == 0 && color_profile && surface_write_debug_cb_) {
         SurfaceWriteDebugInfo info;
         info.kind = "witnessed";
-        info.sequence = vertex_batches_;
+        info.sequence = job.seq;
         info.color_address = color_address;
         info.pitch = pitch;
         info.width = pitch / 4u;
         info.height = surface_height;
-        info.surface_format = surface_format_;
-        info.shader_stage_program = raster_state_[kRasterShaderStageProgram];
-        info.combiner_control = raster_state_[kRasterCombinerControl];
-        info.alpha_func = raster_state_[kRasterAlphaFunc];
-        info.alpha_ref = raster_state_[kRasterAlphaRef] & 0xFFu;
-        info.blend_src = raster_state_[kRasterBlendSrc];
-        info.blend_dst = raster_state_[kRasterBlendDst];
-        info.blend_equation = raster_state_[kRasterBlendEquation];
-        info.depth_func = raster_state_[kRasterDepthFunc];
-        info.depth_mask = raster_state_[kRasterDepthMask];
-        info.texture_enable_mask = raster_state_[kRasterTextureEnableMask];
-        info.primitive_mode = primitive_mode_;
+        info.surface_format = surface_format;
+        info.shader_stage_program = raster_state[kRasterShaderStageProgram];
+        info.combiner_control = raster_state[kRasterCombinerControl];
+        info.alpha_func = raster_state[kRasterAlphaFunc];
+        info.alpha_ref = raster_state[kRasterAlphaRef] & 0xFFu;
+        info.blend_src = raster_state[kRasterBlendSrc];
+        info.blend_dst = raster_state[kRasterBlendDst];
+        info.blend_equation = raster_state[kRasterBlendEquation];
+        info.depth_func = raster_state[kRasterDepthFunc];
+        info.depth_mask = raster_state[kRasterDepthMask];
+        info.texture_enable_mask = raster_state[kRasterTextureEnableMask];
+        info.primitive_mode = primitive_mode;
         info.vertex_count = static_cast<uint32_t>(std::min<size_t>(
-            transformed_batch_.size(), std::numeric_limits<uint32_t>::max()));
+            transformed_batch.size(), std::numeric_limits<uint32_t>::max()));
         info.profile = static_cast<uint32_t>(profile);
         surface_write_debug_cb_(info);
     }
+    // Stage (e2): one batch, one increment, regardless of how many destination
+    // spans executed it. The fragment ladder above is per-part on purpose (each
+    // part counts its own fragments and the sums add); this one is not.
+    if (part != 0) return true;
     if (profile == Profile::kPitchZ16Depth)
         ++depth_raster_batches_;
     else if (profile == Profile::kSwizzledRadialColor)
@@ -5939,16 +8734,57 @@ void Nv2a::record_generic_texture_modulate_reject(
 // and the OCW scale/bias field layout are inferred, not verified against hardware, and
 // are exactly the two things gated behind GenericSkipReason so a wrong guess there
 // cannot silently mis-render — it skips instead.
-bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
+bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
+    // NV2A_RASTER_GENERIC_SW: generic-combiner decode and software raster. Texture setup,
+    // GL submission and resident-surface resolves each open their own region below.
+    perf_excl::Scope region(perf_excl::kNv2aRasterGenericSw);
+    // F3 CLOSURE. This body asks the renderer three more residency questions --
+    // supports_resident_generic_combiner, has_resident_color_surface,
+    // has_resident_depth_surface -- and picks its whole execution path from the
+    // answers. Its single call site already carries draw_order_fence(), so this
+    // is expected to stay at zero; it is stated here so the invariant belongs to
+    // the query rather than to one caller.
+    draw_renderer_query_fence();
     executed = false;
+    // Stage (d) seam (beads-xbox.1.15.4, DESIGN-NV2A-SEAM.md section 3.2):
+    // the executor reads the LATCHED JOB, never the live members. These
+    // aliases are the whole of the mechanical redirection -- every use site
+    // below is textually unchanged, so no expression, and in particular no
+    // floating-point expression, moved with the split.
+    const auto& raster_state = job.raster_state;
+    const auto& transformed_batch = job.vertices;
+    const uint32_t primitive_mode = job.primitive_mode;
+    const uint32_t surface_format = job.surface_format;
+    const uint32_t surface_pitch = job.surface_pitch;
+    const uint32_t surface_clip_horizontal = job.surface_clip_horizontal;
+    const uint32_t surface_clip_vertical = job.surface_clip_vertical;
+    const uint32_t surface_color_offset = job.surface_color_offset;
+    const uint32_t surface_zeta_offset = job.surface_zeta_offset;
     ++generic_combiner_attempted_batches_;
     // This routine is reached only by the strict generic fallback. Keep diagnostic
     // census and split timing work out of reduced, non-perf interactive replays.
+    // profile_generic_fingerprint still tracks --perf-accounting because it gates the
+    // per-phase steady_clock TIMING below (texture setup / software raster / flush ns),
+    // which is what an instrumented run is for.
     const bool profile_generic_fingerprint = perf::g_enabled;
+    // beads-xbox.1.14.3 item 4 completed: profile_generic_fingerprint REMOVED from this
+    // disjunction. The census it used to switch on is per-batch hot-loop work -- an FNV
+    // fold over the whole raster-state block plus a linear search of
+    // generic_combiner_fingerprints_ on every generic batch -- so gating it on
+    // --perf-accounting made the timed code differ from the untimed code.
+    // DECISION: the "[2bl] NV2A generic-combiner fingerprints:" census now requires
+    // --nv2a-detailed-telemetry; it is no longer produced by --perf-accounting alone.
+    // docs/PERF-METHODOLOGY.md section 5a already declares these families
+    // instrumentation artifacts and out of scope for goldens. The two per-profile
+    // hashes (generic_combiner, transform_position_fnv64) therefore stay at the FNV-1a
+    // offset basis 14650fb0739d0383 in a --perf-accounting run, which is what section
+    // 5a says they should do and what the tools already expect.
+    // Every surviving profile_generic_fingerprint site is pure timing except two that
+    // read generic_fingerprint_stats, and both are null-guarded, so the pointer simply
+    // stays nullptr when the census is off.
     const bool collect_diagnostics =
-        detailed_telemetry_ || profile_generic_fingerprint ||
-        generic_batch_debug_cb_ || generic_packet_snapshot_filter_cb_ ||
-        surface_write_debug_cb_;
+        detailed_telemetry_ || generic_batch_debug_cb_ ||
+        generic_packet_snapshot_filter_cb_ || surface_write_debug_cb_;
     const bool capture_generic_deltas =
         collect_diagnostics;
     const uint64_t generic_fragments_before =
@@ -5972,16 +8808,16 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     uint64_t generic_batch_software_raster_ns = 0;
     uint64_t generic_batch_flush_ns = 0;
     const bool supported_primitive =
-        primitive_mode_ == 5 || primitive_mode_ == 6 || primitive_mode_ == 7;
+        primitive_mode == 5 || primitive_mode == 6 || primitive_mode == 7;
     if (!supported_primitive) {
         record_generic_skip(GenericSkipReason::kUnsupportedPrimitive);
         return true;
     }
-    const uint32_t color_format = surface_format_ & 0xFu;
-    const uint32_t surface_type = (surface_format_ >> 8) & 0xFu;
-    const uint32_t anti_aliasing = (surface_format_ >> 12) & 0xFu;
-    const uint32_t zeta_format = (surface_format_ >> 4) & 0xFu;
-    const uint32_t enables = raster_state_[kRasterEnables];
+    const uint32_t color_format = surface_format & 0xFu;
+    const uint32_t surface_type = (surface_format >> 8) & 0xFu;
+    const uint32_t anti_aliasing = (surface_format >> 12) & 0xFu;
+    const uint32_t zeta_format = (surface_format >> 4) & 0xFu;
+    const uint32_t enables = raster_state[kRasterEnables];
 
     // --- Per-feature semantic gate -----------------------------------------------
     // Every check below tests the specific behavior the shared rasterizer actually
@@ -6015,27 +8851,27 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     // passes.
     constexpr uint32_t kControl0Required = 1u;
     constexpr uint32_t kControl0Unsupported = (1u << 12) | (1u << 16);
-    if ((raster_state_[kRasterControl0] & kControl0Required) != kControl0Required ||
-        (raster_state_[kRasterControl0] & kControl0Unsupported) != 0) {
+    if ((raster_state[kRasterControl0] & kControl0Required) != kControl0Required ||
+        (raster_state[kRasterControl0] & kControl0Unsupported) != 0) {
         record_generic_skip_detail(GenericSkipReason::kUnsupportedControl0,
-                                   raster_state_[kRasterControl0]);
+                                   raster_state[kRasterControl0]);
         return true;
     }
     // Shading: the shared per-pixel loop always interpolates diffuse/specular smoothly
     // (Gouraud); flat shading is not implemented.
-    if (raster_state_[kRasterShadeMode] != 0x1D01) {
+    if (raster_state[kRasterShadeMode] != 0x1D01) {
         record_generic_skip_detail(GenericSkipReason::kUnsupportedShadeMode,
-                                   raster_state_[kRasterShadeMode]);
+                                   raster_state[kRasterShadeMode]);
         return true;
     }
     // Polygon mode: the shared rasterizer only ever fills triangles (no line/point
     // polygon-mode rendering), for both front and back faces independently.
-    if (raster_state_[kRasterFrontPolygonMode] != 0x1B02 ||
-        raster_state_[kRasterBackPolygonMode] != 0x1B02) {
+    if (raster_state[kRasterFrontPolygonMode] != 0x1B02 ||
+        raster_state[kRasterBackPolygonMode] != 0x1B02) {
         record_generic_skip_detail(
             GenericSkipReason::kUnsupportedPolygonMode,
-            (static_cast<uint64_t>(raster_state_[kRasterFrontPolygonMode]) << 32) |
-                raster_state_[kRasterBackPolygonMode]);
+            (static_cast<uint64_t>(raster_state[kRasterFrontPolygonMode]) << 32) |
+                raster_state[kRasterBackPolygonMode]);
         return true;
     }
     // Cull: honor the enable bit (bit2) semantically instead of assuming culling is
@@ -6046,33 +8882,33 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     const bool cull_enabled = (enables & (1u << 2)) != 0;
     bool cull_front = false;
     if (cull_enabled) {
-        if (raster_state_[kRasterCullFace] == 0x0405) {
+        if (raster_state[kRasterCullFace] == 0x0405) {
             cull_front = false;
-        } else if (raster_state_[kRasterCullFace] == 0x0404) {
+        } else if (raster_state[kRasterCullFace] == 0x0404) {
             cull_front = true;
         } else {
             record_generic_skip_detail(GenericSkipReason::kUnsupportedCullFace,
-                                       raster_state_[kRasterCullFace]);
+                                       raster_state[kRasterCullFace]);
             return true;
         }
-        if (raster_state_[kRasterFrontFace] != 0x0900) {
+        if (raster_state[kRasterFrontFace] != 0x0900) {
             record_generic_skip_detail(GenericSkipReason::kUnsupportedFrontFace,
-                                       raster_state_[kRasterFrontFace]);
+                                       raster_state[kRasterFrontFace]);
             return true;
         }
     }
     // Z min/max control is not read anywhere in this evaluator's math; every witnessed
     // profile carries the same value 1, so require it named rather than assume it is
     // inert.
-    if (raster_state_[kRasterZMinMaxControl] != 1) {
+    if (raster_state[kRasterZMinMaxControl] != 1) {
         record_generic_skip_detail(GenericSkipReason::kUnsupportedZMinMax,
-                                   raster_state_[kRasterZMinMaxControl]);
+                                   raster_state[kRasterZMinMaxControl]);
         return true;
     }
     // Color mask: honor each of the four per-channel write-enable bytes exactly
     // (0=disabled, 1=enabled per channel), applied for real at write time below,
     // instead of requiring the single all-channels-enabled tuple.
-    const uint32_t color_mask_word = raster_state_[kRasterColorMask];
+    const uint32_t color_mask_word = raster_state[kRasterColorMask];
     bool color_mask_write[4];
     bool color_mask_supported = true;
     for (size_t channel = 0; channel < 4; ++channel) {
@@ -6129,7 +8965,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     // Which of TEXTURE0-3 a stage's color/alpha inputs actually read.
     bool texture_referenced[4] = {false, false, false, false};
 
-    const uint32_t stage_count_raw = raster_state_[kRasterCombinerControl] & 0xFFu;
+    const uint32_t stage_count_raw = raster_state[kRasterCombinerControl] & 0xFFu;
     if (stage_count_raw == 0) {
         record_generic_skip(GenericSkipReason::kStageCount);
         return true;
@@ -6138,7 +8974,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     // NV097_SET_COMBINER_CONTROL bit8 selects the MUX_SUM comparison: MSB of R0.alpha
     // (bit set) vs LSB (bit clear) -- a single global flag shared by every stage's
     // MUX_SUM output, matching xemu's PS_COMBINERCOUNT_MUX_MSB.
-    const bool mux_on_msb = ((raster_state_[kRasterCombinerControl] >> 8) & 1u) != 0;
+    const bool mux_on_msb = ((raster_state[kRasterCombinerControl] >> 8) & 1u) != 0;
 
     struct Stage {
         DecodedInput color[4];
@@ -6153,10 +8989,10 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     };
     std::array<Stage, 8> stages{};
     for (uint32_t stage = 0; stage < stage_count; ++stage) {
-        const uint32_t ci = raster_state_[kRasterCombinerColorIcw0 + stage];
-        const uint32_t ai = raster_state_[kRasterCombinerAlphaIcw0 + stage];
-        const uint32_t co = raster_state_[kRasterCombinerColorOcw0 + stage];
-        const uint32_t ao = raster_state_[kRasterCombinerAlphaOcw0 + stage];
+        const uint32_t ci = raster_state[kRasterCombinerColorIcw0 + stage];
+        const uint32_t ai = raster_state[kRasterCombinerAlphaIcw0 + stage];
+        const uint32_t co = raster_state[kRasterCombinerColorOcw0 + stage];
+        const uint32_t ao = raster_state[kRasterCombinerAlphaOcw0 + stage];
         Stage& s = stages[stage];
         // Byte order within the ICW word is A (bits31:24), B (23:16), C (15:8),
         // D (bits7:0) -- matching xemu's parse_combiner_inputs() exactly (cross-checked
@@ -6241,8 +9077,8 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     // identity signature this evaluator originally only recognized by its exact
     // SpecularFogCW/FinalFactor values -- that was this constant pair, decoded
     // generically it turns out to mean A=B=C=0(ZERO), D=R0(identity), G=R0.alpha).
-    const uint32_t final_cw0 = raster_state_[kRasterCombinerSpecularFog0];
-    const uint32_t final_cw1 = raster_state_[kRasterCombinerSpecularFog1];
+    const uint32_t final_cw0 = raster_state[kRasterCombinerSpecularFog0];
+    const uint32_t final_cw1 = raster_state[kRasterCombinerSpecularFog1];
     DecodedInput final_a = decode((final_cw0 >> 24) & 0xFFu);
     DecodedInput final_b = decode((final_cw0 >> 16) & 0xFFu);
     DecodedInput final_c = decode((final_cw0 >> 8) & 0xFFu);
@@ -6288,10 +9124,10 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         !texture_referenced[2] && !texture_referenced[3];
     const bool primary_color_passthrough =
         no_texture_inputs && stage_count == 1 &&
-        raster_state_[kRasterCombinerColorIcw0] == 0x04200000 &&
-        raster_state_[kRasterCombinerAlphaIcw0] == 0x14200000 &&
-        raster_state_[kRasterCombinerColorOcw0] == 0x00000C00 &&
-        raster_state_[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
+        raster_state[kRasterCombinerColorIcw0] == 0x04200000 &&
+        raster_state[kRasterCombinerAlphaIcw0] == 0x14200000 &&
+        raster_state[kRasterCombinerColorOcw0] == 0x00000C00 &&
+        raster_state[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
         final_cw0 == 0x0000000C && final_cw1 == 0x00001C80;
 
     // --- Alpha test / depth test / blend mode ----------------------------------
@@ -6315,15 +9151,15 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     // skip no matter what stale value it holds.
     const bool alpha_test_enabled = (enables & (1u << 0)) != 0;
     const bool depth_test_enabled_bit = (enables & (1u << 3)) != 0;
-    const uint32_t alpha_func = raster_state_[kRasterAlphaFunc];
-    const uint32_t depth_func = raster_state_[kRasterDepthFunc];
-    const uint32_t alpha_ref = raster_state_[kRasterAlphaRef] & 0xFFu;
+    const uint32_t alpha_func = raster_state[kRasterAlphaFunc];
+    const uint32_t depth_func = raster_state[kRasterDepthFunc];
+    const uint32_t alpha_ref = raster_state[kRasterAlphaRef] & 0xFFu;
     const bool zero_alpha_gequal_noop =
         alpha_test_enabled && alpha_func == 0x0206 && alpha_ref != 0 &&
         stage_count == 1 &&
-        raster_state_[kRasterCombinerAlphaIcw0] == 0x11200000 &&
-        raster_state_[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
-        ((raster_state_[kRasterCombinerFactor0_0] >> 24) & 0xFFu) == 0 &&
+        raster_state[kRasterCombinerAlphaIcw0] == 0x11200000 &&
+        raster_state[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
+        ((raster_state[kRasterCombinerFactor0_0] >> 24) & 0xFFu) == 0 &&
         final_cw0 == 0x0000000C && final_cw1 == 0x00001C80;
     if (alpha_test_enabled && !compare_supported(alpha_func)) {
         record_generic_skip_detail(GenericSkipReason::kAlphaFunc, alpha_func);
@@ -6339,9 +9175,9 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     // (ZERO/ONE/SRC_ALPHA/ONE_MINUS_SRC_ALPHA) needed to express "disabled via factors"
     // and simple additive/replace blends.
     const bool blend_enabled = (enables & (1u << 1)) != 0;
-    const uint32_t blend_src = raster_state_[kRasterBlendSrc];
-    const uint32_t blend_dst = raster_state_[kRasterBlendDst];
-    const uint32_t blend_eq = raster_state_[kRasterBlendEquation];
+    const uint32_t blend_src = raster_state[kRasterBlendSrc];
+    const uint32_t blend_dst = raster_state[kRasterBlendDst];
+    const uint32_t blend_eq = raster_state[kRasterBlendEquation];
     auto blend_factor_supported = [](uint32_t factor) {
         return factor == 0 || factor == 1 || factor == 0x0302 || factor == 0x0303;
     };
@@ -6359,10 +9195,10 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         }
     }
 
-    const uint32_t clip_x = surface_clip_horizontal_ & 0xFFFFu;
-    const uint32_t clip_width = surface_clip_horizontal_ >> 16;
-    const uint32_t clip_y = surface_clip_vertical_ & 0xFFFFu;
-    const uint32_t clip_height = surface_clip_vertical_ >> 16;
+    const uint32_t clip_x = surface_clip_horizontal & 0xFFFFu;
+    const uint32_t clip_width = surface_clip_horizontal >> 16;
+    const uint32_t clip_y = surface_clip_vertical & 0xFFFFu;
+    const uint32_t clip_height = surface_clip_vertical >> 16;
     if (!clip_width || !clip_height) {
         record_generic_skip(GenericSkipReason::kUnsupportedSurface);
         return true;
@@ -6372,10 +9208,10 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     // witnessed 0x00401400: color pitch 0x1400, zeta pitch 0x0040). Only the color
     // pitch is required to size the color surface; the zeta pitch is validated
     // separately, and only when the zeta surface is actually touched below.
-    const bool depth_write_enabled = raster_state_[kRasterDepthMask] != 0;
+    const bool depth_write_enabled = raster_state[kRasterDepthMask] != 0;
     const bool wants_zeta = depth_test_enabled_bit || depth_write_enabled;
-    const uint32_t pitch = surface_pitch_ & 0xFFFFu;
-    const uint32_t zeta_pitch = surface_pitch_ >> 16;
+    const uint32_t pitch = surface_pitch & 0xFFFFu;
+    const uint32_t zeta_pitch = surface_pitch >> 16;
     uint32_t surface_width = clip_x + clip_width;
     uint32_t surface_height = clip_y + clip_height;
     uint64_t color_bytes64 = 0;
@@ -6388,11 +9224,11 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             return true;
         }
     } else {
-        const uint32_t width_log2 = (surface_format_ >> 16) & 0xFFu;
-        const uint32_t height_log2 = (surface_format_ >> 24) & 0xFFu;
+        const uint32_t width_log2 = (surface_format >> 16) & 0xFFu;
+        const uint32_t height_log2 = (surface_format >> 24) & 0xFFu;
         if (width_log2 >= 31 || height_log2 >= 31) {
             record_generic_skip_detail(GenericSkipReason::kUnsupportedSurface,
-                                       surface_format_);
+                                       surface_format);
             return true;
         }
         surface_width = 1u << width_log2;
@@ -6400,21 +9236,21 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         if (clip_x + clip_width > surface_width ||
             clip_y + clip_height > surface_height) {
             record_generic_skip_detail(GenericSkipReason::kUnsupportedSurface,
-                                       surface_format_);
+                                       surface_format);
             return true;
         }
         const uint32_t expected_pitch = surface_width * sizeof(uint32_t);
         if (pitch != expected_pitch ||
             (wants_zeta && zeta_pitch != expected_pitch)) {
             record_generic_skip_detail(GenericSkipReason::kUnsupportedSurface,
-                                       surface_pitch_);
+                                       surface_pitch);
             return true;
         }
         color_bytes64 =
             static_cast<uint64_t>(surface_width) * surface_height * sizeof(uint32_t);
         if (color_bytes64 > SIZE_MAX) {
             record_generic_skip_detail(GenericSkipReason::kUnsupportedSurface,
-                                       surface_format_);
+                                       surface_format);
             return true;
         }
         surface_swizzle = std::make_unique<SwizzleLookup>(surface_width,
@@ -6473,13 +9309,13 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     };
     uint32_t color_address = 0;
     uint32_t depth_address = 0;
-    if (!resolve_surface(color_dma_, color_dma_bound_, surface_color_offset_,
+    if (!resolve_surface(color_dma_, color_dma_bound_, surface_color_offset,
                          color_bytes64, color_address)) {
         fault_("NV2A generic-combiner color surface is unbound or overflows");
         return false;
     }
     if (uses_depth &&
-        !resolve_surface(zeta_dma_, zeta_dma_bound_, surface_zeta_offset_,
+        !resolve_surface(zeta_dma_, zeta_dma_bound_, surface_zeta_offset,
                          depth_bytes64, depth_address)) {
         // The zeta context resolves to something this evaluator cannot safely treat
         // as a real depth buffer (unbound, out of range, or degenerate -- e.g. an
@@ -6506,8 +9342,8 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     uint32_t effective_xmax = clip_x + clip_width - 1;
     uint32_t effective_ymin = clip_y;
     uint32_t effective_ymax = clip_y + clip_height - 1;
-    const uint32_t window_x = raster_state_[kRasterWindowClipHorizontal];
-    const uint32_t window_y = raster_state_[kRasterWindowClipVertical];
+    const uint32_t window_x = raster_state[kRasterWindowClipHorizontal];
+    const uint32_t window_y = raster_state[kRasterWindowClipVertical];
     effective_xmin = std::max(effective_xmin, window_x & 0xFFFu);
     effective_xmax = std::min(effective_xmax, (window_x >> 16) & 0xFFFu);
     effective_ymin = std::max(effective_ymin, window_y & 0xFFFu);
@@ -6563,7 +9399,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     };
     std::array<TextureStage, 4> texture_stages;
     size_t generic_texture_bytes_this_batch = 0;
-    const uint32_t shader_stage_program = raster_state_[kRasterShaderStageProgram];
+    const uint32_t shader_stage_program = raster_state[kRasterShaderStageProgram];
     auto decode_address_mode = [](uint32_t byte, bool& supported) {
         supported = true;
         switch (byte) {
@@ -6576,10 +9412,15 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     auto resolve_texture_surface = [&](uint32_t format, uint32_t offset,
                                         uint64_t bytes64, uint32_t& address) {
         const bool uses_dma_b = (format & 2u) != 0;
-        return resolve_surface(uses_dma_b ? texture_dma_b_ : texture_dma_a_,
-                               uses_dma_b ? texture_dma_b_bound_
-                                           : texture_dma_a_bound_,
-                               offset, bytes64, address);
+        if (!resolve_surface(uses_dma_b ? texture_dma_b_ : texture_dma_a_,
+                             uses_dma_b ? texture_dma_b_bound_
+                                         : texture_dma_a_bound_,
+                             offset, bytes64, address)) {
+            return false;
+        }
+        // Seam anchor 6 (F6), generic path.
+        seam_texture_source_anchor(address, bytes64);
+        return true;
     };
     auto unpack_rgb565 = [](uint16_t value) {
         const uint32_t r5 = (value >> 11) & 0x1Fu;
@@ -6739,6 +9580,11 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         generic_texture_setup_started_at = std::chrono::steady_clock::now();
     if (generic_state_timer) generic_state_timer.reset();
     {
+        // NV2A_TEXTURE: surface resolve, DMA read, DXT decode and swizzle-table build for
+        // this batch. This block is the single funnel every texture stage passes through in
+        // the generic path; the enclosing function is monolithic, so the region sits at the
+        // funnel rather than at a definition.
+        perf_excl::Scope texture_region(perf_excl::kNv2aTexture);
         std::optional<perf::ScopedAdd> texture_setup_timer;
         if (perf::g_enabled) {
             texture_setup_timer.emplace(perf::g_ns_generic_texture_setup,
@@ -6746,7 +9592,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         }
         for (uint32_t stage = 0; stage < 4; ++stage) {
         if (!texture_referenced[stage]) continue;
-        if ((raster_state_[kRasterTextureEnableMask] & (1u << stage)) == 0) {
+        if ((raster_state[kRasterTextureEnableMask] & (1u << stage)) == 0) {
             record_generic_skip_detail(GenericSkipReason::kTextureStage, stage);
             return true;
         }
@@ -6757,7 +9603,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         ts.project2d = stage_mode == 1;
         bool handled_linear_project2d = false;
         if (single_stage_project2d) {
-            const uint32_t format = raster_state_[kRasterTextureFormat0 + stage];
+            const uint32_t format = raster_state[kRasterTextureFormat0 + stage];
             const uint32_t color_code = (format >> 8) & 0xFFu;
             const bool legacy_raw_linear = format == 0;
             const bool dxt1_argb8 = color_code == 0x0Cu;
@@ -6770,13 +9616,13 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             // preserve that behavior for every non-DXT format and specialize
             // only the compressed color codes witnessed in the dashboard.
             const bool raw_argb8 = !compressed_argb8;
-            const uint32_t rect = raster_state_[kRasterTextureImageRect0 + stage];
+            const uint32_t rect = raster_state[kRasterTextureImageRect0 + stage];
             ts.width = rect >> 16;
             ts.height = rect & 0xFFFFu;
-            ts.pitch = raster_state_[kRasterTextureControl1_0 + stage] >> 16;
+            ts.pitch = raster_state[kRasterTextureControl1_0 + stage] >> 16;
             if (ts.width && ts.height && (raw_argb8 || compressed_argb8)) {
                 const uint32_t address_word =
-                    raster_state_[kRasterTextureAddress0 + stage];
+                    raster_state[kRasterTextureAddress0 + stage];
                 bool u_ok = true, v_ok = true;
                 TextureAddressMode address_u = TextureAddressMode::kClampToEdge;
                 TextureAddressMode address_v = TextureAddressMode::kClampToEdge;
@@ -6806,15 +9652,18 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 if (bytes64 > SIZE_MAX ||
                     !(legacy_raw_linear
                           ? resolve_surface(texture_dma_b_, texture_dma_b_bound_,
-                                            raster_state_[kRasterTextureOffset0 + stage],
+                                            raster_state[kRasterTextureOffset0 + stage],
                                             bytes64, address)
                           : resolve_texture_surface(
                                 format,
-                                raster_state_[kRasterTextureOffset0 + stage],
+                                raster_state[kRasterTextureOffset0 + stage],
                                 bytes64, address))) {
                     fault_("NV2A generic-combiner texture surface is unbound or overflows");
                     return false;
                 }
+                // Seam anchor 6 (F6): the legacy raw-linear branch above bypasses
+                // resolve_texture_surface, so it raises the anchor here instead.
+                if (legacy_raw_linear) seam_texture_source_anchor(address, bytes64);
                 std::vector<uint8_t> source;
                 std::vector<uint8_t>* read_target = &ts.data;
                 if (compressed_argb8) read_target = &source;
@@ -6857,7 +9706,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 ts.pitch = ts.width * static_cast<uint32_t>(sizeof(uint32_t));
                 ts.address_u = address_u;
                 ts.address_v = address_v;
-                ts.border = raster_state_[kRasterTextureBorderColor0 + stage];
+                ts.border = raster_state[kRasterTextureBorderColor0 + stage];
                 generic_texture_bytes_this_batch += ts.data.size();
                 perf::record_generic_texture_allocation(
                     ts.data.size(), generic_texture_bytes_this_batch);
@@ -6888,7 +9737,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             // stages 1-2 (both CUBEMAP) may or may not feed forward into it on real
             // hardware -- unmodeled here, and only safe to ignore once a real
             // multi-stage combiner is actually consuming those other textures too.
-            const uint32_t format = raster_state_[kRasterTextureFormat0 + stage];
+            const uint32_t format = raster_state[kRasterTextureFormat0 + stage];
             const uint32_t color_code = (format >> 8) & 0xFFu;
             // Color codes 6/7 are the raw-ARGB8 (swizzled) codes cross-checked against
             // the pinned profiles' own textures; 0x19 is NV097_SET_TEXTURE_FORMAT_
@@ -6905,12 +9754,12 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                                            format);
                 return true;
             }
-            if (raster_state_[kRasterTexturePalette0 + stage] != 0) {
+            if (raster_state[kRasterTexturePalette0 + stage] != 0) {
                 record_generic_skip_detail(GenericSkipReason::kUnsupportedTextureFormat,
                                            0x80000000ull | format);
                 return true;
             }
-            const uint32_t address_word = raster_state_[kRasterTextureAddress0 + stage];
+            const uint32_t address_word = raster_state[kRasterTextureAddress0 + stage];
             bool u_ok = false, v_ok = false;
             const TextureAddressMode address_u =
                 decode_address_mode(address_word & 0xFFu, u_ok);
@@ -6929,7 +9778,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             uint32_t address = 0;
             if (bytes64 > SIZE_MAX ||
                 !resolve_texture_surface(
-                    format, raster_state_[kRasterTextureOffset0 + stage], bytes64,
+                    format, raster_state[kRasterTextureOffset0 + stage], bytes64,
                     address)) {
                 fault_("NV2A generic-combiner texture surface is unbound or overflows");
                 return false;
@@ -6961,7 +9810,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             }
             ts.address_u = address_u;
             ts.address_v = address_v;
-            ts.border = raster_state_[kRasterTextureBorderColor0 + stage];
+            ts.border = raster_state[kRasterTextureBorderColor0 + stage];
             ts.linear = false;
             ts.cubemap = (stage_mode == 3);
             ts.alpha8 = alpha8;
@@ -6996,19 +9845,19 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     };
     const bool texture0_modulate_primary =
         texture0_input && stage_count == 1 &&
-        (raster_state_[kRasterCombinerColorIcw0] == 0x08040000 ||
-         raster_state_[kRasterCombinerColorIcw0] == 0x04080000) &&
-        writes_r0_from_ab_or_sum(raster_state_[kRasterCombinerColorOcw0]) &&
-        (raster_state_[kRasterCombinerAlphaIcw0] == 0x14200000 ||
-         raster_state_[kRasterCombinerAlphaIcw0] == 0x14180000) &&
-        writes_r0_from_ab_or_sum(raster_state_[kRasterCombinerAlphaOcw0]) &&
+        (raster_state[kRasterCombinerColorIcw0] == 0x08040000 ||
+         raster_state[kRasterCombinerColorIcw0] == 0x04080000) &&
+        writes_r0_from_ab_or_sum(raster_state[kRasterCombinerColorOcw0]) &&
+        (raster_state[kRasterCombinerAlphaIcw0] == 0x14200000 ||
+         raster_state[kRasterCombinerAlphaIcw0] == 0x14180000) &&
+        writes_r0_from_ab_or_sum(raster_state[kRasterCombinerAlphaOcw0]) &&
         final_cw0 == 0x0000000C && final_cw1 == 0x00001C80;
     const bool texture0_passthrough =
         texture0_input && stage_count == 1 &&
-        raster_state_[kRasterCombinerColorIcw0] == 0x08200000 &&
-        raster_state_[kRasterCombinerAlphaIcw0] == 0x14200000 &&
-        writes_r0_from_ab_or_sum(raster_state_[kRasterCombinerColorOcw0]) &&
-        writes_r0_from_ab_or_sum(raster_state_[kRasterCombinerAlphaOcw0]) &&
+        raster_state[kRasterCombinerColorIcw0] == 0x08200000 &&
+        raster_state[kRasterCombinerAlphaIcw0] == 0x14200000 &&
+        writes_r0_from_ab_or_sum(raster_state[kRasterCombinerColorOcw0]) &&
+        writes_r0_from_ab_or_sum(raster_state[kRasterCombinerAlphaOcw0]) &&
         final_cw0 == 0x0000000C && final_cw1 == 0x00001C80;
     const std::array<uint32_t, 6> texf_black_color_icw{{
         0xD920DA20, 0xCD20DB20, 0xCDC10000, 0xC8CD0000, 0xCC20C120, 0x00000000}};
@@ -7028,16 +9877,16 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     for (uint32_t stage = 0; texf_projected_black_alpha_one && stage < 6;
          ++stage) {
         texf_projected_black_alpha_one =
-            raster_state_[kRasterCombinerColorIcw0 + stage] ==
+            raster_state[kRasterCombinerColorIcw0 + stage] ==
                 texf_black_color_icw[stage] &&
-            raster_state_[kRasterCombinerAlphaIcw0 + stage] ==
+            raster_state[kRasterCombinerAlphaIcw0 + stage] ==
                 texf_black_alpha_icw[stage] &&
-            raster_state_[kRasterCombinerColorOcw0 + stage] ==
+            raster_state[kRasterCombinerColorOcw0 + stage] ==
                 texf_black_color_ocw[stage] &&
-            raster_state_[kRasterCombinerAlphaOcw0 + stage] ==
+            raster_state[kRasterCombinerAlphaOcw0 + stage] ==
                 texf_black_alpha_ocw[stage] &&
-            raster_state_[kRasterCombinerFactor1_0 + stage] == 0 &&
-            raster_state_[kRasterCombinerFactor0_0 + stage] ==
+            raster_state[kRasterCombinerFactor1_0 + stage] == 0 &&
+            raster_state[kRasterCombinerFactor0_0 + stage] ==
                 (stage == 2 ? 0xFF000000u : 0u);
     }
     const bool needs_general_combiner =
@@ -7077,15 +9926,15 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         } color_input_swap(generic_color_input_scratch_, packet.color_input),
             depth_input_swap(generic_depth_input_scratch_,
                              packet.depth_input);
-        packet.primitive_mode = primitive_mode_;
-        packet.surface_format = surface_format_;
-        packet.surface_pitch = surface_pitch_;
+        packet.primitive_mode = primitive_mode;
+        packet.surface_format = surface_format;
+        packet.surface_pitch = surface_pitch;
         packet.surface_height = surface_height;
         packet.color_address = color_address;
         packet.depth_address = depth_address;
-        packet.raster_state.assign(raster_state_.begin(), raster_state_.end());
-        packet.vertices.reserve(transformed_batch_.size());
-        for (const auto& vertex : transformed_batch_) {
+        packet.raster_state.assign(raster_state.begin(), raster_state.end());
+        packet.vertices.reserve(transformed_batch.size());
+        for (const auto& vertex : transformed_batch) {
             packet.vertices.push_back(
                 {vertex.position, vertex.diffuse, vertex.specular, vertex.texture});
         }
@@ -7107,7 +9956,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             destination.height = source.height;
             destination.pitch = source.pitch;
             destination.address_mode =
-                raster_state_[kRasterTextureAddress0 + stage];
+                raster_state[kRasterTextureAddress0 + stage];
             destination.border_color = source.border;
         }
         // First correctness fixture for the GL compute path.  Keep this predicate
@@ -7120,28 +9969,28 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             return lhs.diffuse == rhs.diffuse;
         };
         const bool compute_fixture_state =
-            primitive_mode_ == 5 && transformed_batch_.size() == 3 &&
+            primitive_mode == 5 && transformed_batch.size() == 3 &&
             no_texture_inputs && !uses_depth && color_format_a8 &&
             stage_count == 1 && (!cull_enabled || !cull_front) &&
             (!alpha_test_enabled ||
              (alpha_func == 0x0207 &&
-              (raster_state_[kRasterAlphaRef] & 0xFFu) == 0)) &&
+              (raster_state[kRasterAlphaRef] & 0xFFu) == 0)) &&
             !blend_enabled && color_mask_word == 0x01010101 &&
-            raster_state_[kRasterShaderStageProgram] == 0 &&
-            raster_state_[kRasterShaderOtherStageInput] == 0x00210000 &&
-            raster_state_[kRasterCombinerControl] == 1 &&
-            raster_state_[kRasterCombinerColorIcw0] == 0x04200000 &&
-            raster_state_[kRasterCombinerAlphaIcw0] == 0x14200000 &&
-            raster_state_[kRasterCombinerColorOcw0] == 0x00000C00 &&
-            raster_state_[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
-            raster_state_[kRasterCombinerSpecularFog0] == 0x0000000C &&
-            raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80 &&
-            raster_state_[kRasterCombinerFinalFactor0] == 0 &&
-            raster_state_[kRasterCombinerFinalFactor1] == 0 &&
-            same_diffuse(transformed_batch_[0], transformed_batch_[1]) &&
-            same_diffuse(transformed_batch_[0], transformed_batch_[2]);
+            raster_state[kRasterShaderStageProgram] == 0 &&
+            raster_state[kRasterShaderOtherStageInput] == 0x00210000 &&
+            raster_state[kRasterCombinerControl] == 1 &&
+            raster_state[kRasterCombinerColorIcw0] == 0x04200000 &&
+            raster_state[kRasterCombinerAlphaIcw0] == 0x14200000 &&
+            raster_state[kRasterCombinerColorOcw0] == 0x00000C00 &&
+            raster_state[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
+            raster_state[kRasterCombinerSpecularFog0] == 0x0000000C &&
+            raster_state[kRasterCombinerSpecularFog1] == 0x00001C80 &&
+            raster_state[kRasterCombinerFinalFactor0] == 0 &&
+            raster_state[kRasterCombinerFinalFactor1] == 0 &&
+            same_diffuse(transformed_batch[0], transformed_batch[1]) &&
+            same_diffuse(transformed_batch[0], transformed_batch[2]);
         if (compute_fixture_state) {
-            const auto& diffuse = transformed_batch_[0].diffuse;
+            const auto& diffuse = transformed_batch[0].diffuse;
             auto pack_component = [](float value) {
                 return static_cast<uint32_t>(std::floor(
                     std::clamp(value, 0.0f, 1.0f) * 255.0f + 0.5f));
@@ -7149,7 +9998,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             bool positions_representable = true;
             for (size_t vertex = 0; vertex < 3; ++vertex) {
                 for (size_t component = 0; component < 2; ++component) {
-                    const float position = transformed_batch_[vertex].position[component];
+                    const float position = transformed_batch[vertex].position[component];
                     const double fixed = std::round(static_cast<double>(position) * 16.0);
                     if (!std::isfinite(position) ||
                         fixed < static_cast<double>(INT32_MIN) ||
@@ -7203,16 +10052,16 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             {{20488, 7688}},
         }};
         bool dashboard_fullscreen_vertices =
-            primitive_mode_ == 7 && transformed_batch_.size() == 4;
+            primitive_mode == 7 && transformed_batch.size() == 4;
         for (size_t vertex = 0; dashboard_fullscreen_vertices && vertex < 4; ++vertex) {
-            const auto& position = transformed_batch_[vertex].position;
+            const auto& position = transformed_batch[vertex].position;
             dashboard_fullscreen_vertices =
                 exact_fixed_xy(position[0], dashboard_xy[vertex][0]) &&
                 exact_fixed_xy(position[1], dashboard_xy[vertex][1]) &&
                 position[2] == 16777215.0f && position[3] == 1.0f;
             for (uint32_t stage = 0; dashboard_fullscreen_vertices && stage < 4;
                  ++stage) {
-                for (float component : transformed_batch_[vertex].texture[stage]) {
+                for (float component : transformed_batch[vertex].texture[stage]) {
                     if (!std::isfinite(component)) {
                         dashboard_fullscreen_vertices = false;
                         break;
@@ -7224,20 +10073,20 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             dashboard_fullscreen_vertices && color_format_a8 && uses_depth &&
             depth_test_enabled_bit &&
             (depth_func == 0x0202 || depth_func == 0x0207) &&
-            raster_state_[kRasterDepthMask] == 0 && alpha_test_enabled &&
+            raster_state[kRasterDepthMask] == 0 && alpha_test_enabled &&
             alpha_func == 0x0206 &&
-            (raster_state_[kRasterAlphaRef] & 0xFFu) == 1 &&
+            (raster_state[kRasterAlphaRef] & 0xFFu) == 1 &&
             blend_enabled && blend_src == 0x0302 && blend_dst == 1 &&
             blend_eq == 0x8006 && cull_enabled && !cull_front &&
             color_mask_word == 0x01010101 && clip_x == 0 && clip_y == 0 &&
             clip_width == 1280 && clip_height == 480 && pitch == 0x1400 &&
-            surface_height == 480 && raster_state_[kRasterWindowClipHorizontal] ==
+            surface_height == 480 && raster_state[kRasterWindowClipHorizontal] ==
                                         0x04ff0000 &&
-            raster_state_[kRasterWindowClipVertical] == 0x01df0000 &&
-            raster_state_[kRasterShaderStageProgram] == 0x00008421 &&
-            raster_state_[kRasterShaderOtherStageInput] == 0 &&
-            raster_state_[kRasterCombinerControl] == 0x00011106 &&
-            raster_state_[kRasterTextureEnableMask] == 0x0000000f &&
+            raster_state[kRasterWindowClipVertical] == 0x01df0000 &&
+            raster_state[kRasterShaderStageProgram] == 0x00008421 &&
+            raster_state[kRasterShaderOtherStageInput] == 0 &&
+            raster_state[kRasterCombinerControl] == 0x00011106 &&
+            raster_state[kRasterTextureEnableMask] == 0x0000000f &&
             texture_stages[0].valid && texture_stages[1].valid &&
             texture_stages[2].valid && texture_stages[3].valid &&
             !texture_stages[0].linear && !texture_stages[0].cubemap &&
@@ -7247,11 +10096,11 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             texture_stages[1].width == 256 && texture_stages[1].height == 256 &&
             texture_stages[2].width == 256 && texture_stages[2].height == 256 &&
             texture_stages[3].width == 256 && texture_stages[3].height == 256 &&
-            (raster_state_[kRasterTextureAddress0] == 0x00010303 ||
-             raster_state_[kRasterTextureAddress0] == 0x00030303) &&
-            raster_state_[kRasterTextureAddress0 + 1] == 0x00030101 &&
-            raster_state_[kRasterTextureAddress0 + 2] == 0x00030101 &&
-            raster_state_[kRasterTextureAddress0 + 3] == 0x00030101;
+            (raster_state[kRasterTextureAddress0] == 0x00010303 ||
+             raster_state[kRasterTextureAddress0] == 0x00030303) &&
+            raster_state[kRasterTextureAddress0 + 1] == 0x00030101 &&
+            raster_state[kRasterTextureAddress0 + 2] == 0x00030101 &&
+            raster_state[kRasterTextureAddress0 + 3] == 0x00030101;
         if (dashboard_project2d_state) {
             const std::array<uint32_t, 6> alpha_icw{{
                 0xd930da30, 0xdd30db30, 0xddd11010, 0, 0, 0x30301010,
@@ -7271,31 +10120,31 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             for (uint32_t stage = 0; stage < 6; ++stage) {
                 combiner_words_match =
                     combiner_words_match &&
-                    raster_state_[kRasterCombinerAlphaIcw0 + stage] ==
+                    raster_state[kRasterCombinerAlphaIcw0 + stage] ==
                         alpha_icw[stage] &&
-                    raster_state_[kRasterCombinerColorIcw0 + stage] ==
+                    raster_state[kRasterCombinerColorIcw0 + stage] ==
                         color_icw[stage] &&
-                    raster_state_[kRasterCombinerAlphaOcw0 + stage] ==
+                    raster_state[kRasterCombinerAlphaOcw0 + stage] ==
                         alpha_ocw[stage] &&
-                    raster_state_[kRasterCombinerColorOcw0 + stage] ==
+                    raster_state[kRasterCombinerColorOcw0 + stage] ==
                         color_ocw[stage] &&
-                    raster_state_[kRasterCombinerFactor1_0 + stage] == 0;
+                    raster_state[kRasterCombinerFactor1_0 + stage] == 0;
             }
             if (combiner_words_match &&
-                raster_state_[kRasterCombinerFactor0_0] == 0 &&
-                raster_state_[kRasterCombinerFactor0_0 + 1] == 0 &&
-                raster_state_[kRasterCombinerFactor0_0 + 3] == 0 &&
-                raster_state_[kRasterCombinerFactor0_0 + 5] == 0 &&
-                raster_state_[kRasterCombinerSpecularFog0] == 0x0000000c &&
-                raster_state_[kRasterCombinerSpecularFog1] == 0x00001c80 &&
-                raster_state_[kRasterCombinerFinalFactor0] == 0 &&
-                raster_state_[kRasterCombinerFinalFactor1] == 0) {
+                raster_state[kRasterCombinerFactor0_0] == 0 &&
+                raster_state[kRasterCombinerFactor0_0 + 1] == 0 &&
+                raster_state[kRasterCombinerFactor0_0 + 3] == 0 &&
+                raster_state[kRasterCombinerFactor0_0 + 5] == 0 &&
+                raster_state[kRasterCombinerSpecularFog0] == 0x0000000c &&
+                raster_state[kRasterCombinerSpecularFog1] == 0x00001c80 &&
+                raster_state[kRasterCombinerFinalFactor0] == 0 &&
+                raster_state[kRasterCombinerFinalFactor1] == 0) {
                 packet.compute_fixture =
                     Nv2aGenericCombinerPacket::ComputeFixture::kDashboardProject2dFan;
                 packet.fixture_factor0_stage2_argb =
-                    raster_state_[kRasterCombinerFactor0_0 + 2];
+                    raster_state[kRasterCombinerFactor0_0 + 2];
                 packet.fixture_factor0_stage4_argb =
-                    raster_state_[kRasterCombinerFactor0_0 + 4];
+                    raster_state[kRasterCombinerFactor0_0 + 4];
                 packet.fixture_clip_x = effective_clip_x;
                 packet.fixture_clip_y = effective_clip_y;
                 packet.fixture_clip_width = effective_clip_width;
@@ -7313,56 +10162,56 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         if (packet.compute_fixture == Nv2aGenericCombinerPacket::ComputeFixture::kNone) {
             using ResidentReject = GenericResidentRejectReason;
             const bool resident_primary_combiner_words =
-                raster_state_[kRasterCombinerControl] == 1 &&
-                raster_state_[kRasterCombinerColorIcw0] == 0x04200000 &&
-                raster_state_[kRasterCombinerAlphaIcw0] == 0x14200000 &&
-                raster_state_[kRasterCombinerColorOcw0] == 0x00000C00 &&
-                raster_state_[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
-                raster_state_[kRasterCombinerSpecularFog0] == 0x0000000C &&
-                raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80;
+                raster_state[kRasterCombinerControl] == 1 &&
+                raster_state[kRasterCombinerColorIcw0] == 0x04200000 &&
+                raster_state[kRasterCombinerAlphaIcw0] == 0x14200000 &&
+                raster_state[kRasterCombinerColorOcw0] == 0x00000C00 &&
+                raster_state[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
+                raster_state[kRasterCombinerSpecularFog0] == 0x0000000C &&
+                raster_state[kRasterCombinerSpecularFog1] == 0x00001C80;
             const bool resident_constant_color_target =
                 color_address == 0x03AA4000 && color_format_x8 &&
                 surface_type == 1 && anti_aliasing == 0 &&
-                surface_pitch_ == 0x00401400 && surface_height == 960 &&
+                surface_pitch == 0x00401400 && surface_height == 960 &&
                 clip_x == 0 && clip_y == 0 && clip_width == 1280 &&
                 clip_height == 960;
             const bool resident_constant_color_combiner_words =
                 resident_constant_color_target && no_texture_inputs &&
-                raster_state_[kRasterCombinerControl] == 1 &&
-                raster_state_[kRasterShaderStageProgram] == 0 &&
-                raster_state_[kRasterTextureEnableMask] == 0 &&
-                raster_state_[kRasterCombinerColorIcw0] == 0x01200000 &&
-                raster_state_[kRasterCombinerAlphaIcw0] == 0x14110000 &&
-                raster_state_[kRasterCombinerColorOcw0] == 0x00000C00 &&
-                raster_state_[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
-                raster_state_[kRasterCombinerSpecularFog0] == 0x0000000C &&
-                raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80;
+                raster_state[kRasterCombinerControl] == 1 &&
+                raster_state[kRasterShaderStageProgram] == 0 &&
+                raster_state[kRasterTextureEnableMask] == 0 &&
+                raster_state[kRasterCombinerColorIcw0] == 0x01200000 &&
+                raster_state[kRasterCombinerAlphaIcw0] == 0x14110000 &&
+                raster_state[kRasterCombinerColorOcw0] == 0x00000C00 &&
+                raster_state[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
+                raster_state[kRasterCombinerSpecularFog0] == 0x0000000C &&
+                raster_state[kRasterCombinerSpecularFog1] == 0x00001C80;
             const bool resident_primary_observable =
-                raster_state_[kRasterCombinerControl] == 1 ||
+                raster_state[kRasterCombinerControl] == 1 ||
                 resident_primary_combiner_words ||
                 resident_constant_color_combiner_words;
             resident_observed_this_batch = resident_primary_observable;
             const bool resident_primitive_supported =
-                primitive_mode_ == 5 || primitive_mode_ == 6 || primitive_mode_ == 7;
+                primitive_mode == 5 || primitive_mode == 6 || primitive_mode == 7;
             const bool resident_vertex_count_supported =
-                transformed_batch_.size() >= 3 && transformed_batch_.size() <= 20000;
+                transformed_batch.size() >= 3 && transformed_batch.size() <= 20000;
             const bool resident_alpha_supported =
                 !alpha_test_enabled ||
                 (alpha_func == 0x0207 &&
-                 (raster_state_[kRasterAlphaRef] & 0xFFu) == 0);
+                 (raster_state[kRasterAlphaRef] & 0xFFu) == 0);
             const bool resident_blend_supported =
                 (!blend_enabled || blend_eq == 0x8006) &&
                 (!blend_enabled ||
                  ((blend_src == 0x0302 || blend_src == 1) &&
                   (blend_dst == 0x0303 || blend_dst == 1 || blend_dst == 0)));
             const bool resident_shader_supported =
-                raster_state_[kRasterShaderStageProgram] == 0 ||
-                raster_state_[kRasterShaderStageProgram] == 1 ||
-                (raster_state_[kRasterShaderStageProgram] == 0x20 &&
+                raster_state[kRasterShaderStageProgram] == 0 ||
+                raster_state[kRasterShaderStageProgram] == 1 ||
+                (raster_state[kRasterShaderStageProgram] == 0x20 &&
                  no_texture_inputs);
             const bool resident_other_stage_supported =
-                raster_state_[kRasterShaderOtherStageInput] == 0 ||
-                raster_state_[kRasterShaderOtherStageInput] == 0x00210000;
+                raster_state[kRasterShaderOtherStageInput] == 0 ||
+                raster_state[kRasterShaderOtherStageInput] == 0x00210000;
             ResidentReject resident_reject_reason = ResidentReject::kCount;
             if (!resident_primitive_supported) {
                 resident_reject_reason = ResidentReject::kUnsupportedPrimitive;
@@ -7394,7 +10243,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 const bool resident_primary_large_dashboard_target =
                     color_address == 0x03AA4000 && color_format_x8 &&
                     surface_type == 1 && anti_aliasing == 0 &&
-                    surface_pitch_ == 0x00401400 && surface_height == 960 &&
+                    surface_pitch == 0x00401400 && surface_height == 960 &&
                     clip_x == 0 && clip_y == 0 && clip_width == 1280 &&
                     clip_height == 960;
                 auto fixed_xy = [](float value, int64_t& fixed) {
@@ -7478,11 +10327,11 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     return true;
                 };
                 bool expanded_ok = true;
-                if (primitive_mode_ == 5) {
+                if (primitive_mode == 5) {
                     for (size_t i = 0; expanded_ok && i + 2 < packet.vertices.size();
                          i += 3)
                         expanded_ok = append_triangle(i, i + 1, i + 2);
-                } else if (primitive_mode_ == 6) {
+                } else if (primitive_mode == 6) {
                     for (size_t i = 2; expanded_ok && i < packet.vertices.size(); ++i) {
                         if ((i & 1u) == 0)
                             expanded_ok = append_triangle(i - 2, i - 1, i);
@@ -7502,7 +10351,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                         packet.compute_fixture = Nv2aGenericCombinerPacket::
                             ComputeFixture::kResidentConstantColorTriangles;
                         packet.fixture_constant_argb =
-                            raster_state_[kRasterCombinerFactor0_0];
+                            raster_state[kRasterCombinerFactor0_0];
                     }
                     packet.fixture_clip_x = effective_clip_x;
                     packet.fixture_clip_y = effective_clip_y;
@@ -7530,8 +10379,8 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         {
             using TextureReject = GenericTextureModulateRejectReason;
             const bool texture_modulate_observable =
-                raster_state_[kRasterShaderStageProgram] == 1 &&
-                raster_state_[kRasterCombinerControl] == 1;
+                raster_state[kRasterShaderStageProgram] == 1 &&
+                raster_state[kRasterCombinerControl] == 1;
             if (texture_modulate_observable) {
                 ++generic_combiner_texture_modulate_observed_;
                 texture_modulate_observed_this_batch = true;
@@ -7539,15 +10388,15 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     texture_referenced[0] && !texture_referenced[1] &&
                     !texture_referenced[2] && !texture_referenced[3];
                 const bool primitive_supported =
-                    primitive_mode_ == 5 || primitive_mode_ == 6 ||
-                    primitive_mode_ == 7;
+                    primitive_mode == 5 || primitive_mode == 6 ||
+                    primitive_mode == 7;
                 const bool vertex_count_supported =
-                    transformed_batch_.size() >= 3 &&
-                    transformed_batch_.size() <= 20000;
+                    transformed_batch.size() >= 3 &&
+                    transformed_batch.size() <= 20000;
                 const bool alpha_supported =
                     !alpha_test_enabled ||
                     (alpha_func == 0x0207 &&
-                     (raster_state_[kRasterAlphaRef] & 0xFFu) == 0);
+                     (raster_state[kRasterAlphaRef] & 0xFFu) == 0);
                 const bool blend_supported =
                     (!blend_enabled || blend_eq == 0x8006) &&
                     (!blend_enabled ||
@@ -7558,34 +10407,34 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     !uses_depth ||
                     (depth_test_enabled_bit && depth_func == 0x0203);
                 const bool combiner_words_match =
-                    raster_state_[kRasterCombinerColorIcw0] == 0x04080000 &&
-                    raster_state_[kRasterCombinerAlphaIcw0] == 0x14180000 &&
-                    raster_state_[kRasterCombinerColorOcw0] == 0x00000C00 &&
-                    raster_state_[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
-                    raster_state_[kRasterCombinerSpecularFog0] == 0x0000000C &&
-                    raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80;
+                    raster_state[kRasterCombinerColorIcw0] == 0x04080000 &&
+                    raster_state[kRasterCombinerAlphaIcw0] == 0x14180000 &&
+                    raster_state[kRasterCombinerColorOcw0] == 0x00000C00 &&
+                    raster_state[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
+                    raster_state[kRasterCombinerSpecularFog0] == 0x0000000C &&
+                    raster_state[kRasterCombinerSpecularFog1] == 0x00001C80;
                 const bool constant_color_alpha_combiner_words_match =
-                    raster_state_[kRasterCombinerColorIcw0] == 0x01200000 &&
-                    raster_state_[kRasterCombinerAlphaIcw0] == 0x18110000 &&
-                    raster_state_[kRasterCombinerColorOcw0] == 0x00000C00 &&
-                    raster_state_[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
-                    raster_state_[kRasterCombinerSpecularFog0] == 0x0000000C &&
-                    raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80;
+                    raster_state[kRasterCombinerColorIcw0] == 0x01200000 &&
+                    raster_state[kRasterCombinerAlphaIcw0] == 0x18110000 &&
+                    raster_state[kRasterCombinerColorOcw0] == 0x00000C00 &&
+                    raster_state[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
+                    raster_state[kRasterCombinerSpecularFog0] == 0x0000000C &&
+                    raster_state[kRasterCombinerSpecularFog1] == 0x00001C80;
                 const bool passthrough_combiner_words_match =
-                    raster_state_[kRasterCombinerColorIcw0] == 0x08200000 &&
-                    raster_state_[kRasterCombinerAlphaIcw0] == 0x14200000 &&
-                    raster_state_[kRasterCombinerColorOcw0] == 0x00000C00 &&
-                    raster_state_[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
-                    raster_state_[kRasterCombinerSpecularFog0] == 0x0000000C &&
-                    raster_state_[kRasterCombinerSpecularFog1] == 0x00001C80;
+                    raster_state[kRasterCombinerColorIcw0] == 0x08200000 &&
+                    raster_state[kRasterCombinerAlphaIcw0] == 0x14200000 &&
+                    raster_state[kRasterCombinerColorOcw0] == 0x00000C00 &&
+                    raster_state[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
+                    raster_state[kRasterCombinerSpecularFog0] == 0x0000000C &&
+                    raster_state[kRasterCombinerSpecularFog1] == 0x00001C80;
                 const bool texture_modulate_registers_match =
-                    raster_state_[kRasterTextureFormat0] == 0x08890E2A &&
-                    raster_state_[kRasterTextureImageRect0] == 0x050003C0 &&
-                    raster_state_[kRasterTextureControl1_0] == 0x14000000;
+                    raster_state[kRasterTextureFormat0] == 0x08890E2A &&
+                    raster_state[kRasterTextureImageRect0] == 0x050003C0 &&
+                    raster_state[kRasterTextureControl1_0] == 0x14000000;
                 const bool passthrough_texture_registers_match =
-                    raster_state_[kRasterTextureFormat0] == 0x00011E29 &&
-                    raster_state_[kRasterTextureImageRect0] == 0x050003C0 &&
-                    raster_state_[kRasterTextureControl1_0] == 0x14000000;
+                    raster_state[kRasterTextureFormat0] == 0x00011E29 &&
+                    raster_state[kRasterTextureImageRect0] == 0x050003C0 &&
+                    raster_state[kRasterTextureControl1_0] == 0x14000000;
                 const bool texture_registers_match =
                     texture_modulate_registers_match ||
                     (passthrough_combiner_words_match &&
@@ -7598,13 +10447,13 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 const bool target_surface_match =
                     color_address == 0x03AA4000 && color_format_x8 &&
                     surface_type == 1 && anti_aliasing == 0 &&
-                    surface_pitch_ == 0x00401400 && surface_height == 960 &&
+                    surface_pitch == 0x00401400 && surface_height == 960 &&
                     clip_x == 0 && clip_y == 0 && clip_width == 1280 &&
                     clip_height == 960;
                 const bool passthrough_front_surface_match =
                     color_address == 0x03978000 && color_format_x8 &&
                     surface_type == 1 && anti_aliasing == 0 &&
-                    surface_pitch_ == 0x00400A00 && surface_height == 480 &&
+                    surface_pitch == 0x00400A00 && surface_height == 480 &&
                     clip_x == 0 && clip_y == 0 && clip_width == 640 &&
                     clip_height == 480;
                 const bool resident_texture_target_match =
@@ -7630,9 +10479,9 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     reject_reason = TextureReject::kAlphaMode;
                 } else if (!blend_supported) {
                     reject_reason = TextureReject::kBlendMode;
-                } else if (raster_state_[kRasterShaderStageProgram] != 1) {
+                } else if (raster_state[kRasterShaderStageProgram] != 1) {
                     reject_reason = TextureReject::kShaderProgram;
-                } else if (raster_state_[kRasterShaderOtherStageInput] !=
+                } else if (raster_state[kRasterShaderOtherStageInput] !=
                            0x00210000) {
                     reject_reason = TextureReject::kOtherStageInput;
                 } else if (!combiner_words_match &&
@@ -7654,15 +10503,15 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     texture_modulate_reject_this_batch = reject_reason;
                 }
                 const uint32_t texture_surface_width =
-                    (surface_pitch_ & 0xffffu) / 4u;
+                    (surface_pitch & 0xffffu) / 4u;
                 const bool texture_compute_surface_small =
                     texture_surface_width > 0 && texture_surface_width <= 64 &&
                     surface_height > 0 && surface_height <= 64;
                 const bool texture_compute_state =
                     packet.compute_fixture ==
                         Nv2aGenericCombinerPacket::ComputeFixture::kNone &&
-                    primitive_mode_ == 5 && transformed_batch_.size() >= 3 &&
-                    (transformed_batch_.size() % 3u) == 0 &&
+                    primitive_mode == 5 && transformed_batch.size() >= 3 &&
+                    (transformed_batch.size() % 3u) == 0 &&
                     texture_compute_surface_small &&
                     primitive_supported && vertex_count_supported &&
                     only_texture0_input && !uses_depth &&
@@ -7670,8 +10519,8 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     color_mask_word == 0x01010101 &&
                     (color_format_x8 || color_format_a8) && stage_count == 1 &&
                     alpha_supported && blend_supported &&
-                    raster_state_[kRasterShaderStageProgram] == 1 &&
-                    raster_state_[kRasterShaderOtherStageInput] == 0x00210000 &&
+                    raster_state[kRasterShaderStageProgram] == 1 &&
+                    raster_state[kRasterShaderOtherStageInput] == 0x00210000 &&
                     (combiner_words_match ||
                      constant_color_alpha_combiner_words_match) &&
                     texture_stages[0].valid && !texture_stages[0].alpha8 &&
@@ -7793,7 +10642,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                             constant_color_alpha_combiner_words_match;
                         if (constant_color_alpha_combiner_words_match) {
                             packet.fixture_constant_argb =
-                                raster_state_[kRasterCombinerFactor0_0];
+                                raster_state[kRasterCombinerFactor0_0];
                         }
                     }
                 }
@@ -7817,13 +10666,13 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                         return any_behind && !all_behind;
                     };
                     bool mixed_w_triangle = false;
-                    if (primitive_mode_ == 5) {
+                    if (primitive_mode == 5) {
                         for (size_t i = 0; !mixed_w_triangle &&
                              i + 2 < packet.vertices.size(); i += 3) {
                             mixed_w_triangle =
                                 triangle_crosses_w_plane(i, i + 1, i + 2);
                         }
-                    } else if (primitive_mode_ == 6) {
+                    } else if (primitive_mode == 6) {
                         for (size_t i = 2; !mixed_w_triangle &&
                              i < packet.vertices.size(); ++i) {
                             mixed_w_triangle = ((i & 1u) == 0)
@@ -7906,7 +10755,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                             }
                             constexpr float kMinPositiveW = 1.0e-6f;
                             const float surface_w =
-                                static_cast<float>((surface_pitch_ & 0xffffu) / 4u);
+                                static_cast<float>((surface_pitch & 0xffffu) / 4u);
                             const float surface_h = static_cast<float>(surface_height);
                             struct ClipVertex {
                                 Nv2aGenericCombinerVertex vertex;
@@ -8048,13 +10897,13 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     if (expanded_ok) {
                         expanded.reserve((packet.vertices.size() - 2) * 3);
                     }
-                    if (expanded_ok && primitive_mode_ == 5) {
+                    if (expanded_ok && primitive_mode == 5) {
                         for (size_t i = 0; expanded_ok && i + 2 < packet.vertices.size();
                              i += 3)
                             expanded_ok = binned_texture_compute
                                 ? append_clipped_triangle(i, i + 1, i + 2)
                                 : append_triangle(i, i + 1, i + 2);
-                    } else if (primitive_mode_ == 6) {
+                    } else if (primitive_mode == 6) {
                         for (size_t i = 2; expanded_ok && i < packet.vertices.size(); ++i) {
                             if ((i & 1u) == 0)
                                 expanded_ok = binned_texture_compute
@@ -8100,7 +10949,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                         packet.fixture_use_tile_bins = binned_texture_compute;
                         if (constant_color_alpha_combiner_words_match) {
                             packet.fixture_constant_argb =
-                                raster_state_[kRasterCombinerFactor0_0];
+                                raster_state[kRasterCombinerFactor0_0];
                         }
                         if (!binned_texture_compute) {
                             ++generic_combiner_resident_candidates_;
@@ -8139,11 +10988,11 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         uint64_t debug_batch_fingerprint = 1469598103934665603ull;
         for (uint32_t index = kRasterShaderStageProgram;
              index <= kRasterCombinerFinalFactor1; ++index) {
-            debug_batch_fingerprint ^= raster_state_[index];
+            debug_batch_fingerprint ^= raster_state[index];
             debug_batch_fingerprint *= 1099511628211ull;
         }
         const uint64_t debug_batch_full_hash =
-            fnv1a_bytes(raster_state_.data(), sizeof(raster_state_));
+            fnv1a_bytes(raster_state.data(), sizeof(raster_state));
         auto fill_surface_write_vertex_debug =
             [](SurfaceWriteDebugInfo& info,
                const std::vector<Nv2aGenericCombinerVertex>& vertices) {
@@ -8166,13 +11015,13 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             info.pitch = pitch;
             info.width = pitch / 4u;
             info.height = surface_height;
-            info.surface_format = surface_format_;
-            info.shader_stage_program = raster_state_[kRasterShaderStageProgram];
-            info.combiner_control = raster_state_[kRasterCombinerControl];
-            info.texture_enable_mask = raster_state_[kRasterTextureEnableMask];
-            info.primitive_mode = primitive_mode_;
+            info.surface_format = surface_format;
+            info.shader_stage_program = raster_state[kRasterShaderStageProgram];
+            info.combiner_control = raster_state[kRasterCombinerControl];
+            info.texture_enable_mask = raster_state[kRasterTextureEnableMask];
+            info.primitive_mode = primitive_mode;
             info.vertex_count = static_cast<uint32_t>(std::min<size_t>(
-                transformed_batch_.size(), std::numeric_limits<uint32_t>::max()));
+                transformed_batch.size(), std::numeric_limits<uint32_t>::max()));
             if (generic_packet_snapshot_filter_cb_(info)) {
                 auto snapshot = std::make_unique<GenericPacketSnapshot>();
                 snapshot->packet = packet;
@@ -8213,6 +11062,10 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         }
         if (resident_noop_batch) {
             executed = true;
+            // Stage (d) / F3: this batch reached the GL backend. GL calls must
+            // stay on the thread owning the context and the resident protocol
+            // writes guest memory through mem_write_, so the job is inline-only.
+            seam_note_threadable(job, false, kSeamRendererPath);
             ++generic_combiner_accelerated_batches_;
             if (surface_write_debug_cb_) {
                 SurfaceWriteDebugInfo info;
@@ -8224,21 +11077,21 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 info.pitch = pitch;
                 info.width = pitch / 4u;
                 info.height = surface_height;
-                info.surface_format = surface_format_;
+                info.surface_format = surface_format;
                 info.shader_stage_program =
-                    raster_state_[kRasterShaderStageProgram];
-                info.combiner_control = raster_state_[kRasterCombinerControl];
-                info.alpha_func = raster_state_[kRasterAlphaFunc];
-                info.alpha_ref = raster_state_[kRasterAlphaRef] & 0xFFu;
-                info.blend_src = raster_state_[kRasterBlendSrc];
-                info.blend_dst = raster_state_[kRasterBlendDst];
-                info.blend_equation = raster_state_[kRasterBlendEquation];
-                info.depth_func = raster_state_[kRasterDepthFunc];
-                info.depth_mask = raster_state_[kRasterDepthMask];
-                info.texture_enable_mask = raster_state_[kRasterTextureEnableMask];
-                info.primitive_mode = primitive_mode_;
+                    raster_state[kRasterShaderStageProgram];
+                info.combiner_control = raster_state[kRasterCombinerControl];
+                info.alpha_func = raster_state[kRasterAlphaFunc];
+                info.alpha_ref = raster_state[kRasterAlphaRef] & 0xFFu;
+                info.blend_src = raster_state[kRasterBlendSrc];
+                info.blend_dst = raster_state[kRasterBlendDst];
+                info.blend_equation = raster_state[kRasterBlendEquation];
+                info.depth_func = raster_state[kRasterDepthFunc];
+                info.depth_mask = raster_state[kRasterDepthMask];
+                info.texture_enable_mask = raster_state[kRasterTextureEnableMask];
+                info.primitive_mode = primitive_mode;
                 info.vertex_count = static_cast<uint32_t>(std::min<size_t>(
-                    transformed_batch_.size(),
+                    transformed_batch.size(),
                     std::numeric_limits<uint32_t>::max()));
                 fill_surface_write_vertex_debug(info, packet.vertices);
                 surface_write_debug_cb_(info);
@@ -8259,8 +11112,8 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                                       perf::g_calls_generic_resident_prepare);
                 const size_t color_size = static_cast<size_t>(color_bytes64);
                 const bool already_resident = renderer_->has_resident_color_surface(
-                    color_address, color_size, surface_pitch_, surface_height,
-                    surface_format_);
+                    color_address, color_size, surface_pitch, surface_height,
+                    surface_format);
                 if (!already_resident) {
                     ++generic_combiner_resident_target_switch_resolves_;
                     if (renderer_->requires_resident_target_switch_resolve()) {
@@ -8292,8 +11145,8 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     const size_t depth_size = static_cast<size_t>(depth_bytes64);
                     const bool depth_already_resident =
                         renderer_->has_resident_depth_surface(
-                            depth_address, depth_size, surface_pitch_,
-                            surface_height, surface_format_);
+                            depth_address, depth_size, surface_pitch,
+                            surface_height, surface_format);
                     if (!depth_already_resident) {
                         if (!resolve_renderer_depth_overlap(
                                 depth_address, depth_size,
@@ -8330,6 +11183,10 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             }
             ++generic_combiner_resident_submits_;
             executed = true;
+            // Stage (d) / F3: this batch reached the GL backend. GL calls must
+            // stay on the thread owning the context and the resident protocol
+            // writes guest memory through mem_write_, so the job is inline-only.
+            seam_note_threadable(job, false, kSeamRendererPath);
             ++generic_combiner_accelerated_batches_;
             generic_combiner_triangles_ += result.triangles;
             generic_combiner_fragments_ += result.fragments;
@@ -8346,21 +11203,21 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 info.pitch = pitch;
                 info.width = pitch / 4u;
                 info.height = surface_height;
-                info.surface_format = surface_format_;
+                info.surface_format = surface_format;
                 info.shader_stage_program =
-                    raster_state_[kRasterShaderStageProgram];
-                info.combiner_control = raster_state_[kRasterCombinerControl];
-                info.alpha_func = raster_state_[kRasterAlphaFunc];
-                info.alpha_ref = raster_state_[kRasterAlphaRef] & 0xFFu;
-                info.blend_src = raster_state_[kRasterBlendSrc];
-                info.blend_dst = raster_state_[kRasterBlendDst];
-                info.blend_equation = raster_state_[kRasterBlendEquation];
-                info.depth_func = raster_state_[kRasterDepthFunc];
-                info.depth_mask = raster_state_[kRasterDepthMask];
-                info.texture_enable_mask = raster_state_[kRasterTextureEnableMask];
-                info.primitive_mode = primitive_mode_;
+                    raster_state[kRasterShaderStageProgram];
+                info.combiner_control = raster_state[kRasterCombinerControl];
+                info.alpha_func = raster_state[kRasterAlphaFunc];
+                info.alpha_ref = raster_state[kRasterAlphaRef] & 0xFFu;
+                info.blend_src = raster_state[kRasterBlendSrc];
+                info.blend_dst = raster_state[kRasterBlendDst];
+                info.blend_equation = raster_state[kRasterBlendEquation];
+                info.depth_func = raster_state[kRasterDepthFunc];
+                info.depth_mask = raster_state[kRasterDepthMask];
+                info.texture_enable_mask = raster_state[kRasterTextureEnableMask];
+                info.primitive_mode = primitive_mode;
                 info.vertex_count = static_cast<uint32_t>(std::min<size_t>(
-                    transformed_batch_.size(),
+                    transformed_batch.size(),
                     std::numeric_limits<uint32_t>::max()));
                 fill_surface_write_vertex_debug(info, packet.vertices);
                 surface_write_debug_cb_(info);
@@ -8447,13 +11304,20 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     fault_("NV2A accelerated generic-combiner DMA write failed");
                     return false;
                 }
-                invalidate_renderer_color_overlap(color_address,
-                                                  result.color_output.size());
+                invalidate_renderer_color_overlap(
+                    color_address, result.color_output.size(),
+                    nv2a_invalidate_token(kNv2aInvalidateGenericAccelerated));
                 if (uses_depth)
-                    invalidate_renderer_depth_overlap(depth_address,
-                                                      result.depth_output.size());
+                    invalidate_renderer_depth_overlap(
+                        depth_address, result.depth_output.size(),
+                        nv2a_invalidate_token(
+                            kNv2aInvalidateGenericAccelerated));
             }
             executed = true;
+            // Stage (d) / F3: this batch reached the GL backend. GL calls must
+            // stay on the thread owning the context and the resident protocol
+            // writes guest memory through mem_write_, so the job is inline-only.
+            seam_note_threadable(job, false, kSeamRendererPath);
             ++generic_combiner_accelerated_batches_;
             generic_combiner_triangles_ += result.triangles;
             generic_combiner_fragments_ += result.fragments;
@@ -8470,21 +11334,21 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 info.pitch = pitch;
                 info.width = pitch / 4u;
                 info.height = surface_height;
-                info.surface_format = surface_format_;
+                info.surface_format = surface_format;
                 info.shader_stage_program =
-                    raster_state_[kRasterShaderStageProgram];
-                info.combiner_control = raster_state_[kRasterCombinerControl];
-                info.alpha_func = raster_state_[kRasterAlphaFunc];
-                info.alpha_ref = raster_state_[kRasterAlphaRef] & 0xFFu;
-                info.blend_src = raster_state_[kRasterBlendSrc];
-                info.blend_dst = raster_state_[kRasterBlendDst];
-                info.blend_equation = raster_state_[kRasterBlendEquation];
-                info.depth_func = raster_state_[kRasterDepthFunc];
-                info.depth_mask = raster_state_[kRasterDepthMask];
-                info.texture_enable_mask = raster_state_[kRasterTextureEnableMask];
-                info.primitive_mode = primitive_mode_;
+                    raster_state[kRasterShaderStageProgram];
+                info.combiner_control = raster_state[kRasterCombinerControl];
+                info.alpha_func = raster_state[kRasterAlphaFunc];
+                info.alpha_ref = raster_state[kRasterAlphaRef] & 0xFFu;
+                info.blend_src = raster_state[kRasterBlendSrc];
+                info.blend_dst = raster_state[kRasterBlendDst];
+                info.blend_equation = raster_state[kRasterBlendEquation];
+                info.depth_func = raster_state[kRasterDepthFunc];
+                info.depth_mask = raster_state[kRasterDepthMask];
+                info.texture_enable_mask = raster_state[kRasterTextureEnableMask];
+                info.primitive_mode = primitive_mode;
                 info.vertex_count = static_cast<uint32_t>(std::min<size_t>(
-                    transformed_batch_.size(),
+                    transformed_batch.size(),
                     std::numeric_limits<uint32_t>::max()));
                 fill_surface_write_vertex_debug(info, packet.vertices);
                 surface_write_debug_cb_(info);
@@ -8496,6 +11360,10 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     if (generic_accel_timer) generic_accel_timer.reset();
     ++generic_combiner_fallback_batches_;
     executed = true;
+    // Stage (d) / section 1.3: the generic software fallback builds its zeta
+    // surface WITHOUT mem_direct_ (see the PagedRasterSurface pair below), so
+    // the depth destination has no direct pointer and the job is inline-only.
+    seam_note_threadable(job, false, kSeamNoDirectPointer);
     ++generic_combiner_batches_;
     const uint64_t generic_batch_index = generic_combiner_batches_;
     std::optional<perf::ScopedAdd> generic_fallback_timer;
@@ -8508,10 +11376,10 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     uint64_t generic_batch_full_hash = 0;
     if (collect_diagnostics) {
         generic_batch_full_hash =
-            fnv1a_bytes(raster_state_.data(), sizeof(raster_state_));
+            fnv1a_bytes(raster_state.data(), sizeof(raster_state));
         for (uint32_t index = kRasterShaderStageProgram;
              index <= kRasterCombinerFinalFactor1; ++index) {
-            generic_batch_fingerprint ^= raster_state_[index];
+            generic_batch_fingerprint ^= raster_state[index];
             generic_batch_fingerprint *= 1099511628211ull;
         }
         auto it = std::find_if(
@@ -8561,12 +11429,12 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 }
             }
             const uint32_t vertex_count = static_cast<uint32_t>(std::min<size_t>(
-                transformed_batch_.size(), std::numeric_limits<uint32_t>::max()));
+                transformed_batch.size(), std::numeric_limits<uint32_t>::max()));
             if (generic_fingerprint_stats->raster_state_sample_index == UINT32_MAX) {
                 generic_fingerprint_stats->raster_state_sample_index =
-                    current_raster_state_sample_index_;
+                    job.raster_state_sample_index;
                 generic_fingerprint_stats->full_state_hash = generic_batch_full_hash;
-                generic_fingerprint_stats->primitive_mode = primitive_mode_;
+                generic_fingerprint_stats->primitive_mode = primitive_mode;
                 generic_fingerprint_stats->min_vertices = vertex_count;
                 generic_fingerprint_stats->max_vertices = vertex_count;
                 generic_fingerprint_stats->first_vertices_recorded = true;
@@ -8576,13 +11444,13 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                      vertex < generic_fingerprint_stats->first_vertex_count;
                      ++vertex) {
                     generic_fingerprint_stats->first_vertex_position[vertex] =
-                        transformed_batch_[vertex].position;
+                        transformed_batch[vertex].position;
                     generic_fingerprint_stats->first_vertex_diffuse[vertex] =
-                        transformed_batch_[vertex].diffuse;
+                        transformed_batch[vertex].diffuse;
                     generic_fingerprint_stats->first_vertex_specular[vertex] =
-                        transformed_batch_[vertex].specular;
+                        transformed_batch[vertex].specular;
                     generic_fingerprint_stats->first_vertex_texture[vertex] =
-                        transformed_batch_[vertex].texture;
+                        transformed_batch[vertex].texture;
                 }
             } else {
                 generic_fingerprint_stats->min_vertices = std::min(
@@ -8639,20 +11507,20 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             info.pitch = pitch;
             info.width = pitch / 4u;
             info.height = surface_height;
-            info.surface_format = surface_format_;
-            info.shader_stage_program = raster_state_[kRasterShaderStageProgram];
-            info.combiner_control = raster_state_[kRasterCombinerControl];
-            info.alpha_func = raster_state_[kRasterAlphaFunc];
+            info.surface_format = surface_format;
+            info.shader_stage_program = raster_state[kRasterShaderStageProgram];
+            info.combiner_control = raster_state[kRasterCombinerControl];
+            info.alpha_func = raster_state[kRasterAlphaFunc];
             info.alpha_ref = alpha_ref;
-            info.blend_src = raster_state_[kRasterBlendSrc];
-            info.blend_dst = raster_state_[kRasterBlendDst];
-            info.blend_equation = raster_state_[kRasterBlendEquation];
-            info.depth_func = raster_state_[kRasterDepthFunc];
-            info.depth_mask = raster_state_[kRasterDepthMask];
-            info.texture_enable_mask = raster_state_[kRasterTextureEnableMask];
-            info.primitive_mode = primitive_mode_;
+            info.blend_src = raster_state[kRasterBlendSrc];
+            info.blend_dst = raster_state[kRasterBlendDst];
+            info.blend_equation = raster_state[kRasterBlendEquation];
+            info.depth_func = raster_state[kRasterDepthFunc];
+            info.depth_mask = raster_state[kRasterDepthMask];
+            info.texture_enable_mask = raster_state[kRasterTextureEnableMask];
+            info.primitive_mode = primitive_mode;
             info.vertex_count = static_cast<uint32_t>(std::min<size_t>(
-                transformed_batch_.size(), std::numeric_limits<uint32_t>::max()));
+                transformed_batch.size(), std::numeric_limits<uint32_t>::max()));
             info.texture_modulate_observed = texture_modulate_observed_this_batch;
             info.texture_modulate_exact = texture_modulate_exact_this_batch;
             info.texture_modulate_reject =
@@ -8671,20 +11539,20 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             info.pitch = pitch;
             info.width = pitch / 4u;
             info.height = surface_height;
-            info.surface_format = surface_format_;
-            info.shader_stage_program = raster_state_[kRasterShaderStageProgram];
-            info.combiner_control = raster_state_[kRasterCombinerControl];
-            info.alpha_func = raster_state_[kRasterAlphaFunc];
+            info.surface_format = surface_format;
+            info.shader_stage_program = raster_state[kRasterShaderStageProgram];
+            info.combiner_control = raster_state[kRasterCombinerControl];
+            info.alpha_func = raster_state[kRasterAlphaFunc];
             info.alpha_ref = alpha_ref;
-            info.blend_src = raster_state_[kRasterBlendSrc];
-            info.blend_dst = raster_state_[kRasterBlendDst];
-            info.blend_equation = raster_state_[kRasterBlendEquation];
-            info.depth_func = raster_state_[kRasterDepthFunc];
-            info.depth_mask = raster_state_[kRasterDepthMask];
-            info.texture_enable_mask = raster_state_[kRasterTextureEnableMask];
-            info.primitive_mode = primitive_mode_;
+            info.blend_src = raster_state[kRasterBlendSrc];
+            info.blend_dst = raster_state[kRasterBlendDst];
+            info.blend_equation = raster_state[kRasterBlendEquation];
+            info.depth_func = raster_state[kRasterDepthFunc];
+            info.depth_mask = raster_state[kRasterDepthMask];
+            info.texture_enable_mask = raster_state[kRasterTextureEnableMask];
+            info.primitive_mode = primitive_mode;
             info.vertex_count = static_cast<uint32_t>(std::min<size_t>(
-                transformed_batch_.size(), std::numeric_limits<uint32_t>::max()));
+                transformed_batch.size(), std::numeric_limits<uint32_t>::max()));
             surface_write_debug_cb_(info);
         }
         ++generic_combiner_executed_batches_;
@@ -8693,13 +11561,13 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
     }
 
     float clip_min = 0.0f, clip_max = 0.0f;
-    std::memcpy(&clip_min, &raster_state_[kRasterClipMin], sizeof(clip_min));
-    std::memcpy(&clip_max, &raster_state_[kRasterClipMax], sizeof(clip_max));
+    std::memcpy(&clip_min, &raster_state[kRasterClipMin], sizeof(clip_min));
+    std::memcpy(&clip_max, &raster_state[kRasterClipMax], sizeof(clip_max));
     float polygon_scale = 0.0f, polygon_bias = 0.0f;
     if (enables & (1u << 13)) {
-        std::memcpy(&polygon_scale, &raster_state_[kRasterPolygonOffsetScale],
+        std::memcpy(&polygon_scale, &raster_state[kRasterPolygonOffsetScale],
                    sizeof(polygon_scale));
-        std::memcpy(&polygon_bias, &raster_state_[kRasterPolygonOffsetBias],
+        std::memcpy(&polygon_bias, &raster_state[kRasterPolygonOffsetBias],
                    sizeof(polygon_bias));
     }
 
@@ -9005,7 +11873,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             }
         }
         constexpr float kMinPositiveW = 1.0e-6f;
-        const float surface_w = static_cast<float>((surface_pitch_ & 0xffffu) / 4u);
+        const float surface_w = static_cast<float>((surface_pitch & 0xffffu) / 4u);
         const float surface_h = static_cast<float>(surface_height);
         struct ClipVertex {
             TransformedVertex vertex;
@@ -9226,7 +12094,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             : 0u;
         const bool depth_read_required =
             uses_depth &&
-            ((raster_state_[kRasterDepthMask] != 0) ||
+            ((raster_state[kRasterDepthMask] != 0) ||
              (depth_test_enabled_bit && depth_func != 0x0207));
         const std::array<const TransformedVertex*, 3> triangle_vertices{{a, b, c}};
         std::array<std::array<float, 4>, 3> diffuse_values{};
@@ -9509,9 +12377,9 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     for (uint32_t stage = 0; stage < stage_count; ++stage) {
                         const Stage& s = stages[stage];
                         regs[1] = unpack_argb8(
-                            raster_state_[kRasterCombinerFactor0_0 + stage]);
+                            raster_state[kRasterCombinerFactor0_0 + stage]);
                         regs[2] = unpack_argb8(
-                            raster_state_[kRasterCombinerFactor1_0 + stage]);
+                            raster_state[kRasterCombinerFactor1_0 + stage]);
 
                         const std::array<float, 3> ca = fetch_color(s.color[0], regs);
                         const std::array<float, 3> cb = fetch_color(s.color[1], regs);
@@ -9604,7 +12472,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     const std::array<float, 4>& tex0 = regs[8];
                     for (size_t c3 = 0; c3 < 3; ++c3)
                         final_color[c3] = tex0[c3] * diffuse[c3];
-                    if (raster_state_[kRasterCombinerAlphaIcw0] == 0x14180000)
+                    if (raster_state[kRasterCombinerAlphaIcw0] == 0x14180000)
                         final_color[3] = tex0[3] * diffuse[3];
                     else
                         final_color[3] = diffuse[3];
@@ -9619,8 +12487,8 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     // from SPECFOGFACTOR0/1 (FinalFactor0/1), not the per-stage
                     // Factor0_0[stage]/Factor1_0[stage] array -- reload them now that
                     // every ordinary stage above is done reading regs[1]/regs[2].
-                    regs[1] = unpack_argb8(raster_state_[kRasterCombinerFinalFactor0]);
-                    regs[2] = unpack_argb8(raster_state_[kRasterCombinerFinalFactor1]);
+                    regs[1] = unpack_argb8(raster_state[kRasterCombinerFinalFactor0]);
+                    regs[2] = unpack_argb8(raster_state[kRasterCombinerFinalFactor1]);
                     const std::array<float, 3> fa = fetch_color(final_a, regs);
                     const std::array<float, 3> fb = fetch_color(final_b, regs);
                     const std::array<float, 3> fc = fetch_color(final_c, regs);
@@ -9636,7 +12504,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 const float src_alpha = std::clamp(final_color[3], 0.0f, 1.0f);
                 const uint32_t alpha_scaled =
                     static_cast<uint32_t>(std::floor(src_alpha * 255.0f + 0.5f));
-                const uint32_t alpha_ref = raster_state_[kRasterAlphaRef] & 0xFFu;
+                const uint32_t alpha_ref = raster_state[kRasterAlphaRef] & 0xFFu;
                 // Alpha-test-enable (bit0) is semantic: when disabled every fragment
                 // passes regardless of AlphaFunc/AlphaRef.
                 if (alpha_test_enabled &&
@@ -9715,7 +12583,7 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                     raster_failed = true;
                     return;
                 }
-                if (uses_depth && raster_state_[kRasterDepthMask] != 0) {
+                if (uses_depth && raster_state[kRasterDepthMask] != 0) {
                     const uint32_t depth_stencil =
                         (incoming_depth << 8) | (stored_depth_stencil & 0xFFu);
                     if (!depth_surface.write32(offset, depth_stencil)) {
@@ -9724,8 +12592,18 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                         return;
                     }
                 }
+                // Stage (b2) applied to the generic path: the write census and the FNV
+                // fold are gated on collect_diagnostics. The last-written-address store
+                // is NOT gated and must not be: it is reported unconditionally, and in
+                // the canonical noperf replay gating it changed the report from
+                // last=03d20840 to last=0. Restored to the baseline structure
+                // (nv2a.cpp:9727-9736 at HEAD 93d006d): counter gated, address store
+                // bare, fold gated. The generic combiner is NOT specialized: it has one
+                // decoded path, no profile ladder, and its per-fragment counters were
+                // already gated.
                 if (collect_diagnostics) ++generic_combiner_writes_;
-                const uint32_t address = color_address + static_cast<uint32_t>(offset);
+                const uint32_t address =
+                    color_address + static_cast<uint32_t>(offset);
                 last_generic_combiner_raster_address_ = address;
                 if (collect_diagnostics) {
                     for (uint32_t word : {address, color}) {
@@ -9747,28 +12625,28 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             software_raster_timer.emplace(perf::g_ns_generic_software_raster,
                                           perf::g_calls_generic_software_raster);
         }
-        const size_t vertex_count = transformed_batch_.size();
-        if (primitive_mode_ == 5) {
+        const size_t vertex_count = transformed_batch.size();
+        if (primitive_mode == 5) {
             for (size_t i = 0; i + 2 < vertex_count; i += 3)
-                rasterize_triangle(transformed_batch_[i],
-                                  transformed_batch_[i + 1],
-                                  transformed_batch_[i + 2]);
-        } else if (primitive_mode_ == 6) {
+                rasterize_triangle(transformed_batch[i],
+                                  transformed_batch[i + 1],
+                                  transformed_batch[i + 2]);
+        } else if (primitive_mode == 6) {
             for (size_t i = 2; i < vertex_count; ++i) {
                 if ((i & 1u) == 0)
-                    rasterize_triangle(transformed_batch_[i - 2],
-                                      transformed_batch_[i - 1],
-                                      transformed_batch_[i]);
+                    rasterize_triangle(transformed_batch[i - 2],
+                                      transformed_batch[i - 1],
+                                      transformed_batch[i]);
                 else
-                    rasterize_triangle(transformed_batch_[i - 1],
-                                      transformed_batch_[i - 2],
-                                      transformed_batch_[i]);
+                    rasterize_triangle(transformed_batch[i - 1],
+                                      transformed_batch[i - 2],
+                                      transformed_batch[i]);
             }
         } else {
             for (size_t i = 2; i < vertex_count; ++i)
-                rasterize_triangle(transformed_batch_[0],
-                                  transformed_batch_[i - 1],
-                                  transformed_batch_[i]);
+                rasterize_triangle(transformed_batch[0],
+                                  transformed_batch[i - 1],
+                                  transformed_batch[i]);
         }
     }
     if (profile_generic_fingerprint) {
@@ -9803,15 +12681,16 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
             // the next accelerated draw to re-upload the whole surface.
             if (!refresh_resident_color_after_software_write(
                     color_address, static_cast<size_t>(color_bytes64),
-                    surface_pitch_, pitch, surface_height, surface_format_,
+                    surface_pitch, pitch, surface_height, surface_format,
                     color_surface.written_begin(),
                     color_surface.written_end())) {
                 record_generic_fingerprint_perf();
                 return false;
             }
         } else {
-            invalidate_renderer_color_overlap(color_address,
-                                              static_cast<size_t>(color_bytes64));
+            invalidate_renderer_color_overlap(
+                color_address, static_cast<size_t>(color_bytes64),
+                nv2a_invalidate_token(kNv2aInvalidateGenericSoftware));
         }
         if (uses_depth && !depth_surface.flush()) {
             fault_("NV2A generic-combiner zeta DMA write failed");
@@ -9825,9 +12704,10 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
                 std::chrono::steady_clock::now() - generic_flush_started_at)
                 .count());
     }
-    if (uses_depth && raster_state_[kRasterDepthMask] != 0)
-        invalidate_renderer_depth_overlap(depth_address,
-                                          static_cast<size_t>(depth_bytes64));
+    if (uses_depth && raster_state[kRasterDepthMask] != 0)
+        invalidate_renderer_depth_overlap(
+            depth_address, static_cast<size_t>(depth_bytes64),
+            nv2a_invalidate_token(kNv2aInvalidateGenericSoftware));
     if (debug_packet_snapshot) {
         debug_packet_snapshot->color_output.resize(static_cast<size_t>(color_bytes64));
         if (!mem_read_ ||
@@ -9867,20 +12747,20 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         info.pitch = pitch;
         info.width = pitch / 4u;
         info.height = surface_height;
-        info.surface_format = surface_format_;
-        info.shader_stage_program = raster_state_[kRasterShaderStageProgram];
-        info.combiner_control = raster_state_[kRasterCombinerControl];
-        info.alpha_func = raster_state_[kRasterAlphaFunc];
-        info.alpha_ref = raster_state_[kRasterAlphaRef] & 0xFFu;
-        info.blend_src = raster_state_[kRasterBlendSrc];
-        info.blend_dst = raster_state_[kRasterBlendDst];
-        info.blend_equation = raster_state_[kRasterBlendEquation];
-        info.depth_func = raster_state_[kRasterDepthFunc];
-        info.depth_mask = raster_state_[kRasterDepthMask];
-        info.texture_enable_mask = raster_state_[kRasterTextureEnableMask];
-        info.primitive_mode = primitive_mode_;
+        info.surface_format = surface_format;
+        info.shader_stage_program = raster_state[kRasterShaderStageProgram];
+        info.combiner_control = raster_state[kRasterCombinerControl];
+        info.alpha_func = raster_state[kRasterAlphaFunc];
+        info.alpha_ref = raster_state[kRasterAlphaRef] & 0xFFu;
+        info.blend_src = raster_state[kRasterBlendSrc];
+        info.blend_dst = raster_state[kRasterBlendDst];
+        info.blend_equation = raster_state[kRasterBlendEquation];
+        info.depth_func = raster_state[kRasterDepthFunc];
+        info.depth_mask = raster_state[kRasterDepthMask];
+        info.texture_enable_mask = raster_state[kRasterTextureEnableMask];
+        info.primitive_mode = primitive_mode;
         info.vertex_count = static_cast<uint32_t>(std::min<size_t>(
-            transformed_batch_.size(), std::numeric_limits<uint32_t>::max()));
+            transformed_batch.size(), std::numeric_limits<uint32_t>::max()));
         info.texture_modulate_observed = texture_modulate_observed_this_batch;
         info.texture_modulate_exact = texture_modulate_exact_this_batch;
         info.texture_modulate_reject =
@@ -9901,20 +12781,20 @@ bool Nv2a::rasterize_generic_combiner_batch(bool& executed) {
         info.pitch = pitch;
         info.width = pitch / 4u;
         info.height = surface_height;
-        info.surface_format = surface_format_;
-        info.shader_stage_program = raster_state_[kRasterShaderStageProgram];
-        info.combiner_control = raster_state_[kRasterCombinerControl];
-        info.alpha_func = raster_state_[kRasterAlphaFunc];
-        info.alpha_ref = raster_state_[kRasterAlphaRef] & 0xFFu;
-        info.blend_src = raster_state_[kRasterBlendSrc];
-        info.blend_dst = raster_state_[kRasterBlendDst];
-        info.blend_equation = raster_state_[kRasterBlendEquation];
-        info.depth_func = raster_state_[kRasterDepthFunc];
-        info.depth_mask = raster_state_[kRasterDepthMask];
-        info.texture_enable_mask = raster_state_[kRasterTextureEnableMask];
-        info.primitive_mode = primitive_mode_;
+        info.surface_format = surface_format;
+        info.shader_stage_program = raster_state[kRasterShaderStageProgram];
+        info.combiner_control = raster_state[kRasterCombinerControl];
+        info.alpha_func = raster_state[kRasterAlphaFunc];
+        info.alpha_ref = raster_state[kRasterAlphaRef] & 0xFFu;
+        info.blend_src = raster_state[kRasterBlendSrc];
+        info.blend_dst = raster_state[kRasterBlendDst];
+        info.blend_equation = raster_state[kRasterBlendEquation];
+        info.depth_func = raster_state[kRasterDepthFunc];
+        info.depth_mask = raster_state[kRasterDepthMask];
+        info.texture_enable_mask = raster_state[kRasterTextureEnableMask];
+        info.primitive_mode = primitive_mode;
         info.vertex_count = static_cast<uint32_t>(std::min<size_t>(
-            transformed_batch_.size(), std::numeric_limits<uint32_t>::max()));
+            transformed_batch.size(), std::numeric_limits<uint32_t>::max()));
         surface_write_debug_cb_(info);
     }
     ++generic_combiner_executed_batches_;
@@ -10057,8 +12937,12 @@ bool Nv2a::execute_image_blit_srccopy() {
             return false;
         }
     }
-    invalidate_renderer_color_overlap(dest_address, static_cast<size_t>(dest_span64));
-    invalidate_renderer_depth_overlap(dest_address, static_cast<size_t>(dest_span64));
+    invalidate_renderer_color_overlap(
+        dest_address, static_cast<size_t>(dest_span64),
+        nv2a_invalidate_token(kNv2aInvalidateImageBlit));
+    invalidate_renderer_depth_overlap(
+        dest_address, static_cast<size_t>(dest_span64),
+        nv2a_invalidate_token(kNv2aInvalidateImageBlit));
     ++image_blit_copies_;
     image_blit_bytes_ += static_cast<uint64_t>(row_bytes) * image_blit_.height;
     last_image_blit_source_ = source_address;
@@ -10068,6 +12952,449 @@ bool Nv2a::execute_image_blit_srccopy() {
         (static_cast<uint32_t>(image_blit_.width) & 0xFFFFu);
     return true;
 }
+
+namespace {
+
+// Stage (a) of beads-xbox.1.15.1: the NV097 (class 0x97) method dispatch table.
+//
+// dispatch_method used to test 126 `if / else if (method ...)` arms in source order,
+// so the hottest method in the canonical run -- 0x1800 ARRAY_ELEMENT16, 76.9 % of the
+// 83.3 M dispatched method words -- reached its body only after ~120 predicted-
+// not-taken compares.  The arms below are that chain, transcribed in the *same order*,
+// as (begin, end, handler) triples over the half-open method range each arm accepted.
+// build_nv097_table() replays them first-match-wins into a 2048-entry byte table indexed
+// by method >> 2, which is exactly the index method_counts_ already uses, so a method
+// now reaches its handler with one table load plus one indirect branch.  Because the
+// replay is first-match-wins in chain order, an overlapping pair of arms keeps the
+// earlier arm's body, matching the if/else-if chain by construction.
+//
+// Arm catalogue (chain order; `M` = single method, `R` = half-open method range):
+//
+//   #    methods                 handler                     kind
+//   1    0x0100                  kNv097M0100                 exact + guard (parameter != 0)
+//   2    0x0120                  kNv097M0120                 exact
+//   3    0x0124                  kNv097M0124                 exact
+//   4    0x0128                  kNv097M0128                 exact
+//   5    0x012C                  kNv097M012C                 exact
+//   6    0x0130                  kNv097M0130                 exact
+//   7    0x0184                  kNv097M0184                 exact
+//   8    0x0188                  kNv097M0188                 exact
+//   9    0x0194                  kNv097M0194                 exact
+//   10   0x0198                  kNv097M0198                 exact
+//   11   0x019C                  kNv097M019C                 exact
+//   12   0x01A0                  kNv097M01A0                 exact
+//   13   0x0200                  kNv097M0200                 exact
+//   14   0x0204                  kNv097M0204                 exact
+//   15   0x0208                  kNv097M0208                 exact
+//   16   0x020C                  kNv097M020C                 exact
+//   17   0x0210                  kNv097M0210                 exact
+//   18   0x0214                  kNv097M0214                 exact
+//   19   0x1D8C                  kNv097M1D8C                 exact
+//   20   0x1D90                  kNv097M1D90                 exact
+//   21   0x1D98                  kNv097M1D98                 exact
+//   22   0x1D9C                  kNv097M1D9C                 exact
+//   23   0x1D94                  kNv097M1D94                 exact
+//   24   0x0260..0x027C          kNv097R0260_0280            range, 8 methods
+//   25   0x0288                  kNv097M0288                 exact
+//   26   0x028C                  kNv097M028C                 exact
+//   27   0x0290                  kNv097M0290                 exact
+//   28   0x02C0                  kNv097M02C0                 exact
+//   29   0x02E0                  kNv097M02E0                 exact
+//   30   0x0300                  kNv097M0300                 exact
+//   31   0x0304                  kNv097M0304                 exact
+//   32   0x0308                  kNv097M0308                 exact
+//   33   0x030C                  kNv097M030C                 exact
+//   34   0x0310                  kNv097M0310                 exact
+//   35   0x0318                  kNv097M0318                 exact
+//   36   0x031C                  kNv097M031C                 exact
+//   37   0x0320                  kNv097M0320                 exact
+//   38   0x0324                  kNv097M0324                 exact
+//   39   0x032C                  kNv097M032C                 exact
+//   40   0x0330                  kNv097M0330                 exact
+//   41   0x0334                  kNv097M0334                 exact
+//   42   0x0338                  kNv097M0338                 exact
+//   43   0x033C                  kNv097M033C                 exact
+//   44   0x0340                  kNv097M0340                 exact
+//   45   0x0344                  kNv097M0344                 exact
+//   46   0x0348                  kNv097M0348                 exact
+//   47   0x034C                  kNv097M034C                 exact
+//   48   0x0350                  kNv097M0350                 exact
+//   49   0x0354                  kNv097M0354                 exact
+//   50   0x0358                  kNv097M0358                 exact
+//   51   0x035C                  kNv097M035C                 exact
+//   52   0x0360                  kNv097M0360                 exact
+//   53   0x0364                  kNv097M0364                 exact
+//   54   0x0368                  kNv097M0368                 exact
+//   55   0x036C                  kNv097M036C                 exact
+//   56   0x0370                  kNv097M0370                 exact
+//   57   0x0374                  kNv097M0374                 exact
+//   58   0x0378                  kNv097M0378                 exact
+//   59   0x037C                  kNv097M037C                 exact
+//   60   0x0384                  kNv097M0384                 exact
+//   61   0x0388                  kNv097M0388                 exact
+//   62   0x038C                  kNv097M038C                 exact
+//   63   0x0390                  kNv097M0390                 exact
+//   64   0x0394                  kNv097M0394                 exact
+//   65   0x0398                  kNv097M0398                 exact
+//   66   0x039C                  kNv097M039C                 exact
+//   67   0x03A0                  kNv097M03A0                 exact
+//   68   0x17BC                  kNv097M17BC                 exact
+//   69   0x17C0                  kNv097M17C0                 exact
+//   70   0x1D78                  kNv097M1D78                 exact
+//   71   0x1E20                  kNv097M1E20                 exact
+//   72   0x1E24                  kNv097M1E24                 exact
+//   73   0x1E40..0x1E5C          kNv097R1E40_1E60            range, 8 methods
+//   74   0x1E60                  kNv097M1E60                 exact
+//   75   0x1E6C                  kNv097M1E6C                 exact
+//   76   0x1E70                  kNv097M1E70                 exact
+//   77   0x1E74                  kNv097M1E74                 exact
+//   78   0x1E78                  kNv097M1E78                 exact
+//   79   0x1B00..0x1BFC          kNv097R1B00_1C00            range, 64 methods
+//   80   0x0294                  kNv097M0294                 exact
+//   81   0x0298                  kNv097M0298                 exact
+//   82   0x02A4                  kNv097M02A4                 exact
+//   83   0x0314                  kNv097M0314                 exact
+//   84   0x0328                  kNv097M0328                 exact
+//   85   0x03A4                  kNv097M03A4                 exact
+//   86   0x03A8..0x03B0          kNv097R03A8_03B4            range, 3 methods
+//   87   0x03B4                  kNv097M03B4                 exact
+//   88   0x03B8                  kNv097M03B8                 exact
+//   89   0x03BC                  kNv097M03BC                 exact
+//   90   0x03C0..0x03FC          kNv097R03C0_0400            range, 16 methods
+//   91   0x0420..0x042C          kNv097R0420_0430            range, 4 methods
+//   92   0x0440..0x047C          kNv097R0440_0480            range, 16 methods
+//   93   0x0480..0x057C          kNv097R0480_0580            range, 64 methods
+//   94   0x0580..0x067C          kNv097R0580_0680            range, 64 methods
+//   95   0x0680..0x06BC          kNv097R0680_06C0            range, 16 methods
+//   96   0x06C0..0x07BC          kNv097R06C0_07C0            range, 64 methods
+//   97   0x0840..0x093C          kNv097R0840_0940            range, 64 methods
+//   98   0x0A10..0x0A18          kNv097R0A10_0A1C            range, 3 methods
+//   99   0x0A20..0x0A2C          kNv097R0A20_0A30            range, 4 methods
+//   100  0x0A60..0x0A7C          kNv097R0A60_0A80            range, 8 methods
+//   101  0x0A80..0x0A9C          kNv097R0A80_0AA0            range, 8 methods
+//   102  0x0AA0..0x0ABC          kNv097R0AA0_0AC0            range, 8 methods
+//   103  0x0AC0..0x0ADC          kNv097R0AC0_0AE0            range, 8 methods
+//   104  0x0AF0..0x0AFC          kNv097R0AF0_0B00            range, 4 methods
+//   105  0x0B00..0x0B7C          kNv097R0B00_0B80            range, 32 methods
+//   106  0x0B80..0x0BFC          kNv097R0B80_0C00            range, 32 methods
+//   107  0x1E94                  kNv097M1E94                 exact
+//   108  0x1E9C                  kNv097M1E9C                 exact
+//   109  0x1EA0                  kNv097M1EA0                 exact
+//   110  0x1EA4                  kNv097M1EA4                 exact
+//   111  0x1518..0x1524          kNv097R1518_1528            range, 4 methods
+//   112  0x1880..0x18FC          kNv097R1880_1900            range, 32 methods
+//   113  0x1900..0x193C          kNv097R1900_1940            range, 16 methods
+//   114  0x1940..0x197C          kNv097R1940_1980            range, 16 methods
+//   115  0x1980..0x19FC          kNv097R1980_1A00            range, 32 methods
+//   116  0x1A00..0x1AFC          kNv097R1A00_1B00            range, 64 methods
+//   117  0x1720..0x175C          kNv097R1720_1760            range, 16 methods
+//   118  0x1760..0x179C          kNv097R1760_17A0            range, 16 methods
+//   119  0x17FC                  kNv097M17FC                 exact
+//   120  0x1800                  kNv097M1800                 exact
+//   121  0x1808                  kNv097M1808                 exact
+//   122  0x1810                  kNv097M1810                 exact
+//   123  0x1818                  kNv097M1818                 exact
+//   124  0x01A4                  kNv097M01A4                 exact
+//   125  0x1D6C                  kNv097M1D6C                 exact
+//   126  0x1D70                  kNv097M1D70                 exact
+//
+// Predicates that are NOT a pure function of `method`: arm 1 only
+// (`method == 0x0100 && parameter != 0`).  Its guard is kept inside its case, and
+// falling through the guard is a no-op exactly as falling through the whole chain was,
+// because no later arm accepts 0x0100.
+//
+// Methods outside 0x0000-0x1FFC, and methods that are not a multiple of four, matched no
+// arm and were silently dropped; the guard in front of the switch keeps that behavior.
+// PFIFO cannot produce a misaligned method: the command header forces bits 0-1 of
+// ch.method to zero (nv2a.cpp: `ch.method = word & 0x1FFFu` under a 0xE0030003 mask
+// test) and an incrementing run only ever adds 4.
+enum Nv097Handler : uint8_t {
+    kNv097None = 0,  // no arm matched: same silent drop as falling off the old chain
+    kNv097M0100,                // method == 0x0100 && parameter != 0
+    kNv097M0120,                // method == 0x0120
+    kNv097M0124,                // method == 0x0124
+    kNv097M0128,                // method == 0x0128
+    kNv097M012C,                // method == 0x012C
+    kNv097M0130,                // method == 0x0130
+    kNv097M0184,                // method == 0x0184
+    kNv097M0188,                // method == 0x0188
+    kNv097M0194,                // method == 0x0194
+    kNv097M0198,                // method == 0x0198
+    kNv097M019C,                // method == 0x019C
+    kNv097M01A0,                // method == 0x01A0
+    kNv097M0200,                // method == 0x0200
+    kNv097M0204,                // method == 0x0204
+    kNv097M0208,                // method == 0x0208
+    kNv097M020C,                // method == 0x020C
+    kNv097M0210,                // method == 0x0210
+    kNv097M0214,                // method == 0x0214
+    kNv097M1D8C,                // method == 0x1D8C
+    kNv097M1D90,                // method == 0x1D90
+    kNv097M1D98,                // method == 0x1D98
+    kNv097M1D9C,                // method == 0x1D9C
+    kNv097M1D94,                // method == 0x1D94
+    kNv097R0260_0280,           // 0x0260 <= method < 0x0280
+    kNv097M0288,                // method == 0x0288
+    kNv097M028C,                // method == 0x028C
+    kNv097M0290,                // method == 0x0290
+    kNv097M02C0,                // method == 0x02C0
+    kNv097M02E0,                // method == 0x02E0
+    kNv097M0300,                // method == 0x0300
+    kNv097M0304,                // method == 0x0304
+    kNv097M0308,                // method == 0x0308
+    kNv097M030C,                // method == 0x030C
+    kNv097M0310,                // method == 0x0310
+    kNv097M0318,                // method == 0x0318
+    kNv097M031C,                // method == 0x031C
+    kNv097M0320,                // method == 0x0320
+    kNv097M0324,                // method == 0x0324
+    kNv097M032C,                // method == 0x032C
+    kNv097M0330,                // method == 0x0330
+    kNv097M0334,                // method == 0x0334
+    kNv097M0338,                // method == 0x0338
+    kNv097M033C,                // method == 0x033C
+    kNv097M0340,                // method == 0x0340
+    kNv097M0344,                // method == 0x0344
+    kNv097M0348,                // method == 0x0348
+    kNv097M034C,                // method == 0x034C
+    kNv097M0350,                // method == 0x0350
+    kNv097M0354,                // method == 0x0354
+    kNv097M0358,                // method == 0x0358
+    kNv097M035C,                // method == 0x035C
+    kNv097M0360,                // method == 0x0360
+    kNv097M0364,                // method == 0x0364
+    kNv097M0368,                // method == 0x0368
+    kNv097M036C,                // method == 0x036C
+    kNv097M0370,                // method == 0x0370
+    kNv097M0374,                // method == 0x0374
+    kNv097M0378,                // method == 0x0378
+    kNv097M037C,                // method == 0x037C
+    kNv097M0384,                // method == 0x0384
+    kNv097M0388,                // method == 0x0388
+    kNv097M038C,                // method == 0x038C
+    kNv097M0390,                // method == 0x0390
+    kNv097M0394,                // method == 0x0394
+    kNv097M0398,                // method == 0x0398
+    kNv097M039C,                // method == 0x039C
+    kNv097M03A0,                // method == 0x03A0
+    kNv097M17BC,                // method == 0x17BC
+    kNv097M17C0,                // method == 0x17C0
+    kNv097M1D78,                // method == 0x1D78
+    kNv097M1E20,                // method == 0x1E20
+    kNv097M1E24,                // method == 0x1E24
+    kNv097R1E40_1E60,           // 0x1E40 <= method < 0x1E60
+    kNv097M1E60,                // method == 0x1E60
+    kNv097M1E6C,                // method == 0x1E6C
+    kNv097M1E70,                // method == 0x1E70
+    kNv097M1E74,                // method == 0x1E74
+    kNv097M1E78,                // method == 0x1E78
+    kNv097R1B00_1C00,           // 0x1B00 <= method < 0x1C00
+    kNv097M0294,                // method == 0x0294
+    kNv097M0298,                // method == 0x0298
+    kNv097M02A4,                // method == 0x02A4
+    kNv097M0314,                // method == 0x0314
+    kNv097M0328,                // method == 0x0328
+    kNv097M03A4,                // method == 0x03A4
+    kNv097R03A8_03B4,           // 0x03A8 <= method < 0x03B4
+    kNv097M03B4,                // method == 0x03B4
+    kNv097M03B8,                // method == 0x03B8
+    kNv097M03BC,                // method == 0x03BC
+    kNv097R03C0_0400,           // 0x03C0 <= method < 0x0400
+    kNv097R0420_0430,           // 0x0420 <= method < 0x0430
+    kNv097R0440_0480,           // 0x0440 <= method < 0x0480
+    kNv097R0480_0580,           // 0x0480 <= method < 0x0580
+    kNv097R0580_0680,           // 0x0580 <= method < 0x0680
+    kNv097R0680_06C0,           // 0x0680 <= method < 0x06C0
+    kNv097R06C0_07C0,           // 0x06C0 <= method < 0x07C0
+    kNv097R0840_0940,           // 0x0840 <= method < 0x0940
+    kNv097R0A10_0A1C,           // 0x0A10 <= method < 0x0A1C
+    kNv097R0A20_0A30,           // 0x0A20 <= method < 0x0A30
+    kNv097R0A60_0A80,           // 0x0A60 <= method < 0x0A80
+    kNv097R0A80_0AA0,           // 0x0A80 <= method < 0x0AA0
+    kNv097R0AA0_0AC0,           // 0x0AA0 <= method < 0x0AC0
+    kNv097R0AC0_0AE0,           // 0x0AC0 <= method < 0x0AE0
+    kNv097R0AF0_0B00,           // 0x0AF0 <= method < 0x0B00
+    kNv097R0B00_0B80,           // 0x0B00 <= method < 0x0B80
+    kNv097R0B80_0C00,           // 0x0B80 <= method < 0x0C00
+    kNv097M1E94,                // method == 0x1E94
+    kNv097M1E9C,                // method == 0x1E9C
+    kNv097M1EA0,                // method == 0x1EA0
+    kNv097M1EA4,                // method == 0x1EA4
+    kNv097R1518_1528,           // 0x1518 <= method < 0x1528
+    kNv097R1880_1900,           // 0x1880 <= method < 0x1900
+    kNv097R1900_1940,           // 0x1900 <= method < 0x1940
+    kNv097R1940_1980,           // 0x1940 <= method < 0x1980
+    kNv097R1980_1A00,           // 0x1980 <= method < 0x1A00
+    kNv097R1A00_1B00,           // 0x1A00 <= method < 0x1B00
+    kNv097R1720_1760,           // 0x1720 <= method < 0x1760
+    kNv097R1760_17A0,           // 0x1760 <= method < 0x17A0
+    kNv097M17FC,                // method == 0x17FC
+    kNv097M1800,                // method == 0x1800
+    kNv097M1808,                // method == 0x1808
+    kNv097M1810,                // method == 0x1810
+    kNv097M1818,                // method == 0x1818
+    kNv097M01A4,                // method == 0x01A4
+    kNv097M1D6C,                // method == 0x1D6C
+    kNv097M1D70,                // method == 0x1D70
+};
+
+constexpr uint32_t kNv097MethodLimit = 0x2000;
+constexpr size_t kNv097TableSize = kNv097MethodLimit / 4;
+
+struct Nv097Arm {
+    uint32_t begin;   // first method accepted
+    uint32_t end;     // one past the last method accepted (half-open, as in the chain)
+    uint8_t handler;
+};
+
+// The old chain, in chain order.  Do not sort: order is the semantics.
+constexpr Nv097Arm kNv097Arms[] = {
+    {0x0100, 0x0104, kNv097M0100},
+    {0x0120, 0x0124, kNv097M0120},
+    {0x0124, 0x0128, kNv097M0124},
+    {0x0128, 0x012C, kNv097M0128},
+    {0x012C, 0x0130, kNv097M012C},
+    {0x0130, 0x0134, kNv097M0130},
+    {0x0184, 0x0188, kNv097M0184},
+    {0x0188, 0x018C, kNv097M0188},
+    {0x0194, 0x0198, kNv097M0194},
+    {0x0198, 0x019C, kNv097M0198},
+    {0x019C, 0x01A0, kNv097M019C},
+    {0x01A0, 0x01A4, kNv097M01A0},
+    {0x0200, 0x0204, kNv097M0200},
+    {0x0204, 0x0208, kNv097M0204},
+    {0x0208, 0x020C, kNv097M0208},
+    {0x020C, 0x0210, kNv097M020C},
+    {0x0210, 0x0214, kNv097M0210},
+    {0x0214, 0x0218, kNv097M0214},
+    {0x1D8C, 0x1D90, kNv097M1D8C},
+    {0x1D90, 0x1D94, kNv097M1D90},
+    {0x1D98, 0x1D9C, kNv097M1D98},
+    {0x1D9C, 0x1DA0, kNv097M1D9C},
+    {0x1D94, 0x1D98, kNv097M1D94},
+    {0x0260, 0x0280, kNv097R0260_0280},
+    {0x0288, 0x028C, kNv097M0288},
+    {0x028C, 0x0290, kNv097M028C},
+    {0x0290, 0x0294, kNv097M0290},
+    {0x02C0, 0x02C4, kNv097M02C0},
+    {0x02E0, 0x02E4, kNv097M02E0},
+    {0x0300, 0x0304, kNv097M0300},
+    {0x0304, 0x0308, kNv097M0304},
+    {0x0308, 0x030C, kNv097M0308},
+    {0x030C, 0x0310, kNv097M030C},
+    {0x0310, 0x0314, kNv097M0310},
+    {0x0318, 0x031C, kNv097M0318},
+    {0x031C, 0x0320, kNv097M031C},
+    {0x0320, 0x0324, kNv097M0320},
+    {0x0324, 0x0328, kNv097M0324},
+    {0x032C, 0x0330, kNv097M032C},
+    {0x0330, 0x0334, kNv097M0330},
+    {0x0334, 0x0338, kNv097M0334},
+    {0x0338, 0x033C, kNv097M0338},
+    {0x033C, 0x0340, kNv097M033C},
+    {0x0340, 0x0344, kNv097M0340},
+    {0x0344, 0x0348, kNv097M0344},
+    {0x0348, 0x034C, kNv097M0348},
+    {0x034C, 0x0350, kNv097M034C},
+    {0x0350, 0x0354, kNv097M0350},
+    {0x0354, 0x0358, kNv097M0354},
+    {0x0358, 0x035C, kNv097M0358},
+    {0x035C, 0x0360, kNv097M035C},
+    {0x0360, 0x0364, kNv097M0360},
+    {0x0364, 0x0368, kNv097M0364},
+    {0x0368, 0x036C, kNv097M0368},
+    {0x036C, 0x0370, kNv097M036C},
+    {0x0370, 0x0374, kNv097M0370},
+    {0x0374, 0x0378, kNv097M0374},
+    {0x0378, 0x037C, kNv097M0378},
+    {0x037C, 0x0380, kNv097M037C},
+    {0x0384, 0x0388, kNv097M0384},
+    {0x0388, 0x038C, kNv097M0388},
+    {0x038C, 0x0390, kNv097M038C},
+    {0x0390, 0x0394, kNv097M0390},
+    {0x0394, 0x0398, kNv097M0394},
+    {0x0398, 0x039C, kNv097M0398},
+    {0x039C, 0x03A0, kNv097M039C},
+    {0x03A0, 0x03A4, kNv097M03A0},
+    {0x17BC, 0x17C0, kNv097M17BC},
+    {0x17C0, 0x17C4, kNv097M17C0},
+    {0x1D78, 0x1D7C, kNv097M1D78},
+    {0x1E20, 0x1E24, kNv097M1E20},
+    {0x1E24, 0x1E28, kNv097M1E24},
+    {0x1E40, 0x1E60, kNv097R1E40_1E60},
+    {0x1E60, 0x1E64, kNv097M1E60},
+    {0x1E6C, 0x1E70, kNv097M1E6C},
+    {0x1E70, 0x1E74, kNv097M1E70},
+    {0x1E74, 0x1E78, kNv097M1E74},
+    {0x1E78, 0x1E7C, kNv097M1E78},
+    {0x1B00, 0x1C00, kNv097R1B00_1C00},
+    {0x0294, 0x0298, kNv097M0294},
+    {0x0298, 0x029C, kNv097M0298},
+    {0x02A4, 0x02A8, kNv097M02A4},
+    {0x0314, 0x0318, kNv097M0314},
+    {0x0328, 0x032C, kNv097M0328},
+    {0x03A4, 0x03A8, kNv097M03A4},
+    {0x03A8, 0x03B4, kNv097R03A8_03B4},
+    {0x03B4, 0x03B8, kNv097M03B4},
+    {0x03B8, 0x03BC, kNv097M03B8},
+    {0x03BC, 0x03C0, kNv097M03BC},
+    {0x03C0, 0x0400, kNv097R03C0_0400},
+    {0x0420, 0x0430, kNv097R0420_0430},
+    {0x0440, 0x0480, kNv097R0440_0480},
+    {0x0480, 0x0580, kNv097R0480_0580},
+    {0x0580, 0x0680, kNv097R0580_0680},
+    {0x0680, 0x06C0, kNv097R0680_06C0},
+    {0x06C0, 0x07C0, kNv097R06C0_07C0},
+    {0x0840, 0x0940, kNv097R0840_0940},
+    {0x0A10, 0x0A1C, kNv097R0A10_0A1C},
+    {0x0A20, 0x0A30, kNv097R0A20_0A30},
+    {0x0A60, 0x0A80, kNv097R0A60_0A80},
+    {0x0A80, 0x0AA0, kNv097R0A80_0AA0},
+    {0x0AA0, 0x0AC0, kNv097R0AA0_0AC0},
+    {0x0AC0, 0x0AE0, kNv097R0AC0_0AE0},
+    {0x0AF0, 0x0B00, kNv097R0AF0_0B00},
+    {0x0B00, 0x0B80, kNv097R0B00_0B80},
+    {0x0B80, 0x0C00, kNv097R0B80_0C00},
+    {0x1E94, 0x1E98, kNv097M1E94},
+    {0x1E9C, 0x1EA0, kNv097M1E9C},
+    {0x1EA0, 0x1EA4, kNv097M1EA0},
+    {0x1EA4, 0x1EA8, kNv097M1EA4},
+    {0x1518, 0x1528, kNv097R1518_1528},
+    {0x1880, 0x1900, kNv097R1880_1900},
+    {0x1900, 0x1940, kNv097R1900_1940},
+    {0x1940, 0x1980, kNv097R1940_1980},
+    {0x1980, 0x1A00, kNv097R1980_1A00},
+    {0x1A00, 0x1B00, kNv097R1A00_1B00},
+    {0x1720, 0x1760, kNv097R1720_1760},
+    {0x1760, 0x17A0, kNv097R1760_17A0},
+    {0x17FC, 0x1800, kNv097M17FC},
+    {0x1800, 0x1804, kNv097M1800},
+    {0x1808, 0x180C, kNv097M1808},
+    {0x1810, 0x1814, kNv097M1810},
+    {0x1818, 0x181C, kNv097M1818},
+    {0x01A4, 0x01A8, kNv097M01A4},
+    {0x1D6C, 0x1D70, kNv097M1D6C},
+    {0x1D70, 0x1D74, kNv097M1D70},
+};
+
+struct Nv097Table {
+    uint8_t handler[kNv097TableSize];
+};
+
+constexpr Nv097Table build_nv097_table() {
+    Nv097Table table{};  // value-initialized: every slot starts at kNv097None
+    for (const Nv097Arm& arm : kNv097Arms) {
+        for (uint32_t method = arm.begin; method < arm.end; method += 4) {
+            const size_t index = method >> 2;
+            if (table.handler[index] == kNv097None) table.handler[index] = arm.handler;
+        }
+    }
+    return table;
+}
+
+constexpr Nv097Table kNv097Table = build_nv097_table();
+
+}  // namespace
 
 void Nv2a::dispatch_method(PushMethod push) {
     const uint8_t channel = push.channel;
@@ -10085,41 +13412,49 @@ void Nv2a::dispatch_method(PushMethod push) {
     } else {
         push.object_class = object_class_[subchannel];
     }
-    push.seq = methods_.total();
-    methods_.push(push);
+    // NV2A_RECORDER (beads-xbox.1.15.1 / .1.14.3): the per-method bookkeeping that
+    // runs before any handler. Measured separately from NV2A_DISPATCH so the jump
+    // table's A/B is attributable -- see the bucket comment in perf_excl.hpp. The
+    // scope closes at the end of this block, so method_counts_ is inside it and
+    // the switch below is not.
+    {
+        perf_excl::Scope recorder_region(perf_excl::kNv2aRecorder);
+        push.seq = methods_.total();
+        methods_.push(push);
 
-    if (clear_trace_triggered_ && !clear_trace_begin_triggered_ &&
-        !clear_trace_truncated_) {
-        clear_trace_pre_methods_.push_back(push);
-        if (clear_trace_pre_methods_.size() > kClearTracePreMethods)
-            clear_trace_pre_methods_.pop_front();
+        if (clear_trace_triggered_ && !clear_trace_begin_triggered_ &&
+            !clear_trace_truncated_) {
+            clear_trace_pre_methods_.push_back(push);
+            if (clear_trace_pre_methods_.size() > kClearTracePreMethods)
+                clear_trace_pre_methods_.pop_front();
 
-        if (push.object_class == 0x97 && method == 0x17FC && parameter != 0) {
-            clear_trace_begin_triggered_ = true;
-            clear_trace_begin_seq_ = push.seq;
-            clear_trace_begin_channel_ = channel;
-            clear_trace_begin_subchannel_ = subchannel;
-            clear_trace_methods_.assign(clear_trace_pre_methods_.begin(),
-                                        clear_trace_pre_methods_.end());
-            clear_trace_pre_count_ = clear_trace_methods_.size();
-            clear_trace_pre_methods_.clear();
+            if (push.object_class == 0x97 && method == 0x17FC && parameter != 0) {
+                clear_trace_begin_triggered_ = true;
+                clear_trace_begin_seq_ = push.seq;
+                clear_trace_begin_channel_ = channel;
+                clear_trace_begin_subchannel_ = subchannel;
+                clear_trace_methods_.assign(clear_trace_pre_methods_.begin(),
+                                            clear_trace_pre_methods_.end());
+                clear_trace_pre_count_ = clear_trace_methods_.size();
+                clear_trace_pre_methods_.clear();
+            }
+        } else if (clear_trace_begin_triggered_ && !clear_trace_complete_ &&
+                   !clear_trace_truncated_) {
+            if (clear_trace_methods_.size() < kClearTraceMethodLimit)
+                clear_trace_methods_.push_back(push);
+
+            const bool matching_end =
+                push.object_class == 0x97 && channel == clear_trace_begin_channel_ &&
+                subchannel == clear_trace_begin_subchannel_ && method == 0x17FC &&
+                parameter == 0;
+            if (matching_end) {
+                clear_trace_complete_ = true;
+            } else if (clear_trace_methods_.size() == kClearTraceMethodLimit) {
+                clear_trace_truncated_ = true;
+            }
         }
-    } else if (clear_trace_begin_triggered_ && !clear_trace_complete_ &&
-               !clear_trace_truncated_) {
-        if (clear_trace_methods_.size() < kClearTraceMethodLimit)
-            clear_trace_methods_.push_back(push);
-
-        const bool matching_end =
-            push.object_class == 0x97 && channel == clear_trace_begin_channel_ &&
-            subchannel == clear_trace_begin_subchannel_ && method == 0x17FC &&
-            parameter == 0;
-        if (matching_end) {
-            clear_trace_complete_ = true;
-        } else if (clear_trace_methods_.size() == kClearTraceMethodLimit) {
-            clear_trace_truncated_ = true;
-        }
-    }
-    if (method < 0x2000 && !(method & 3u)) ++method_counts_[method >> 2];
+        if (method < 0x2000 && !(method & 3u)) ++method_counts_[method >> 2];
+    }  // end NV2A_RECORDER region
 
     // PFIFO resolves SET_OBJECT through RAMHT, then PGRAPH caches the object's class for
     // this subchannel.
@@ -10154,49 +13489,77 @@ void Nv2a::dispatch_method(PushMethod push) {
         }
     }
     if (object_class_[subchannel] == 0x62) {
-        if (method == 0x0184) {
+        switch (method) {
+        case 0x0184: {
             uint32_t instance = 0;
             if (resolve_object(channel, parameter, instance)) {
                 context_surfaces_2d_.dma_source = instance;
                 context_surfaces_2d_.dma_source_bound = true;
             }
-        } else if (method == 0x0188) {
+            break;
+        }
+        case 0x0188: {
             uint32_t instance = 0;
             if (resolve_object(channel, parameter, instance)) {
                 context_surfaces_2d_.dma_dest = instance;
                 context_surfaces_2d_.dma_dest_bound = true;
             }
-        } else if (method == 0x0300) {
+            break;
+        }
+        case 0x0300: {
             context_surfaces_2d_.color_format = parameter;
-        } else if (method == 0x0304) {
+            break;
+        }
+        case 0x0304: {
             context_surfaces_2d_.source_pitch = parameter & 0xFFFFu;
             context_surfaces_2d_.dest_pitch = parameter >> 16;
-        } else if (method == 0x0308) {
+            break;
+        }
+        case 0x0308: {
             context_surfaces_2d_.source_offset = parameter & 0x07FFFFFFu;
-        } else if (method == 0x030C) {
+            break;
+        }
+        case 0x030C: {
             context_surfaces_2d_.dest_offset = parameter & 0x07FFFFFFu;
+            break;
+        }
+        default:
+            break;
         }
         return;
     }
     if (object_class_[subchannel] == 0x9F) {
-        if (method == 0x019C) {
+        switch (method) {
+        case 0x019C: {
             uint32_t instance = 0;
             if (resolve_object(channel, parameter, instance)) {
                 image_blit_.context_surfaces = instance;
                 image_blit_.context_surfaces_bound = true;
             }
-        } else if (method == 0x02FC) {
+            break;
+        }
+        case 0x02FC: {
             image_blit_.operation = parameter;
-        } else if (method == 0x0300) {
+            break;
+        }
+        case 0x0300: {
             image_blit_.in_x = parameter & 0xFFFFu;
             image_blit_.in_y = parameter >> 16;
-        } else if (method == 0x0304) {
+            break;
+        }
+        case 0x0304: {
             image_blit_.out_x = parameter & 0xFFFFu;
             image_blit_.out_y = parameter >> 16;
-        } else if (method == 0x0308) {
+            break;
+        }
+        case 0x0308: {
             image_blit_.width = parameter & 0xFFFFu;
             image_blit_.height = parameter >> 16;
             execute_image_blit_srccopy();
+            break;
+        }
+        default:
+            break;
         }
         return;
     }
@@ -10209,10 +13572,17 @@ void Nv2a::dispatch_method(PushMethod push) {
     }
     if (object_class_[subchannel] != 0x97) return;
 
+    // beads-xbox.1.15.1 stage (a): the 126-arm if/else-if chain that used to
+    // start here is now the kNv097Arms catalogue above.  Case labels sit at the
+    // `switch` indent on purpose: every handler body below is byte-for-byte the
+    // body of the arm it came from, so the diff is the arm headers only.
+    if (method >= kNv097MethodLimit || (method & 3u) != 0) return;
+    switch (kNv097Table.handler[method >> 2]) {
     // NV097 flip queue. FLIP_INCREMENT_WRITE advances the producer modulo; FLIP_STALL
     // blocks PFIFO only when the producer has caught the display/vblank consumer. The
     // kernel advances READ_3D through NV_PGRAPH_INCREMENT in its vblank ISR.
-    if (method == 0x0100 && parameter != 0) {
+    case kNv097M0100: {
+        if (parameter == 0) break;
         // The Xbox kernel uses a nonzero NV097_NO_OPERATION as a software method call.
         // NV2A traps it as a PGRAPH notification and holds the puller until the ISR clears
         // ERROR. In particular parameter 0x304 schedules the vblank-side flip increment.
@@ -10224,91 +13594,147 @@ void Nv2a::dispatch_method(PushMethod push) {
         waiting_for_nop_ = true;
         ++pgraph_notifications_;
         update_irq();
-    } else if (method == 0x0120) {
+        break;
+    }
+    case kNv097M0120: {
         flip_read_ = static_cast<uint8_t>(parameter & 7u);
-    } else if (method == 0x0124) {
+        break;
+    }
+    case kNv097M0124: {
         flip_write_ = static_cast<uint8_t>(parameter & 7u);
-    } else if (method == 0x0128) {
+        break;
+    }
+    case kNv097M0128: {
         flip_modulo_ = static_cast<uint8_t>(parameter & 7u);
-    } else if (method == 0x012C) {
+        break;
+    }
+    case kNv097M012C: {
         if (!flip_modulo_) {
             fault_("NV2A FLIP_INCREMENT_WRITE with zero modulo");
             return;
         }
         flip_write_ = static_cast<uint8_t>((flip_write_ + 1u) % flip_modulo_);
         ++flip_increments_;
-    } else if (method == 0x0130) {
+        break;
+    }
+    case kNv097M0130: {
         ++flip_stalls_;
         if (flip_modulo_ && flip_read_ == flip_write_) {
             waiting_for_flip_ = true;
         }
+        break;
+    }
     // NV097 object-taking methods arrive at PGRAPH as resolved PRAMIN instances.
-    } else if (method == 0x0184) {
+    case kNv097M0184: {
         uint32_t instance = 0;
         if (resolve_object(channel, parameter, instance)) {
             texture_dma_a_ = instance;
             texture_dma_a_bound_ = true;
             raster_state_[kRasterTextureDmaA] = instance;
         }
-    } else if (method == 0x0188) {
+        break;
+    }
+    case kNv097M0188: {
         uint32_t instance = 0;
         if (resolve_object(channel, parameter, instance)) {
             texture_dma_b_ = instance;
             texture_dma_b_bound_ = true;
             raster_state_[kRasterTextureDmaB] = instance;
         }
-    } else if (method == 0x0194) {
+        break;
+    }
+    case kNv097M0194: {
         uint32_t instance = 0;
         if (resolve_object(channel, parameter, instance)) {
             color_dma_ = instance;
             color_dma_bound_ = true;
         }
-    } else if (method == 0x0198) {
+        break;
+    }
+    case kNv097M0198: {
         uint32_t instance = 0;
         if (resolve_object(channel, parameter, instance)) {
             zeta_dma_ = instance;
             zeta_dma_bound_ = true;
         }
-    } else if (method == 0x019C) {
+        break;
+    }
+    case kNv097M019C: {
         uint32_t instance = 0;
         if (resolve_object(channel, parameter, instance)) {
             vertex_dma_a_ = instance;
             vertex_dma_a_bound_ = true;
         }
-    } else if (method == 0x01A0) {
+        break;
+    }
+    case kNv097M01A0: {
         uint32_t instance = 0;
         if (resolve_object(channel, parameter, instance)) {
             vertex_dma_b_ = instance;
             vertex_dma_b_bound_ = true;
         }
+        break;
+    }
     // NV097 color-surface state and the first software raster operation.
-    } else if (method == 0x0200) {
+    case kNv097M0200: {
         surface_clip_horizontal_ = parameter;
         raster_state_[kRasterSurfaceClipHorizontal] = parameter;
-    } else if (method == 0x0204) {
+        break;
+    }
+    case kNv097M0204: {
         surface_clip_vertical_ = parameter;
         raster_state_[kRasterSurfaceClipVertical] = parameter;
-    } else if (method == 0x0208) {
+        break;
+    }
+    case kNv097M0208: {
+        // Seam anchor 9: a surface descriptor change retargets the
+        // destination and can alias a pending job's.
+        seam_anchor(kSeamAnchorSurfaceRetarget, true);
         surface_format_ = parameter;
         raster_state_[kRasterSurfaceFormat] = parameter;
-    } else if (method == 0x020C) {
+        break;
+    }
+    case kNv097M020C: {
+        // Seam anchor 9: a surface descriptor change retargets the
+        // destination and can alias a pending job's.
+        seam_anchor(kSeamAnchorSurfaceRetarget, true);
         surface_pitch_ = parameter;
         raster_state_[kRasterSurfacePitch] = parameter;
-    } else if (method == 0x0210) {
+        break;
+    }
+    case kNv097M0210: {
+        // Seam anchor 9: a surface descriptor change retargets the
+        // destination and can alias a pending job's.
+        seam_anchor(kSeamAnchorSurfaceRetarget, true);
         surface_color_offset_ = parameter;
         raster_state_[kRasterSurfaceColorOffset] = parameter;
-    } else if (method == 0x0214) {
+        break;
+    }
+    case kNv097M0214: {
+        // Seam anchor 9: a surface descriptor change retargets the
+        // destination and can alias a pending job's.
+        seam_anchor(kSeamAnchorSurfaceRetarget, true);
         surface_zeta_offset_ = parameter;
         raster_state_[kRasterSurfaceZetaOffset] = parameter;
-    } else if (method == 0x1D8C) {
+        break;
+    }
+    case kNv097M1D8C: {
         zeta_clear_value_ = parameter;
-    } else if (method == 0x1D90) {
+        break;
+    }
+    case kNv097M1D90: {
         color_clear_value_ = parameter;
-    } else if (method == 0x1D98) {
+        break;
+    }
+    case kNv097M1D98: {
         clear_rect_horizontal_ = parameter;
-    } else if (method == 0x1D9C) {
+        break;
+    }
+    case kNv097M1D9C: {
         clear_rect_vertical_ = parameter;
-    } else if (method == 0x1D94) {
+        break;
+    }
+    case kNv097M1D94: {
         const uint64_t color_clears_before = color_clears_;
         clear_surface(parameter);
         if (clear_trace_armed_ && color_clears_ != color_clears_before &&
@@ -10321,150 +13747,262 @@ void Nv2a::dispatch_method(PushMethod push) {
             clear_trace_trigger_seq_ = push.seq;
             clear_trace_pre_methods_.clear();
         }
+        break;
+    }
     // Raster state is sampled at each indexed batch. Enable bits are alpha,
     // blend, cull, depth, dither, stencil, logic, point-params/smooth,
     // line/poly smooth, and point/line/fill polygon offset respectively.
-    } else if (method >= 0x0260 && method < 0x0280) {
+    case kNv097R0260_0280: {
         raster_state_[kRasterCombinerAlphaIcw0 +
                       (method - 0x0260) / 4] = parameter;
-    } else if (method == 0x0288) {
+        break;
+    }
+    case kNv097M0288: {
         raster_state_[kRasterCombinerSpecularFog0] = parameter;
-    } else if (method == 0x028C) {
+        break;
+    }
+    case kNv097M028C: {
         raster_state_[kRasterCombinerSpecularFog1] = parameter;
-    } else if (method == 0x0290) {
+        break;
+    }
+    case kNv097M0290: {
         raster_state_[kRasterControl0] = parameter;
-    } else if (method == 0x02C0) {
+        break;
+    }
+    case kNv097M02C0: {
         raster_state_[kRasterWindowClipHorizontal] = parameter;
-    } else if (method == 0x02E0) {
+        break;
+    }
+    case kNv097M02E0: {
         raster_state_[kRasterWindowClipVertical] = parameter;
-    } else if (method == 0x0300) {
+        break;
+    }
+    case kNv097M0300: {
         raster_state_[kRasterEnables] =
             (raster_state_[kRasterEnables] & ~(1u << 0)) |
             ((parameter != 0) << 0);
-    } else if (method == 0x0304) {
+        break;
+    }
+    case kNv097M0304: {
         raster_state_[kRasterEnables] =
             (raster_state_[kRasterEnables] & ~(1u << 1)) |
             ((parameter != 0) << 1);
-    } else if (method == 0x0308) {
+        break;
+    }
+    case kNv097M0308: {
         raster_state_[kRasterEnables] =
             (raster_state_[kRasterEnables] & ~(1u << 2)) |
             ((parameter != 0) << 2);
-    } else if (method == 0x030C) {
+        break;
+    }
+    case kNv097M030C: {
         raster_state_[kRasterEnables] =
             (raster_state_[kRasterEnables] & ~(1u << 3)) |
             ((parameter != 0) << 3);
-    } else if (method == 0x0310) {
+        break;
+    }
+    case kNv097M0310: {
         raster_state_[kRasterEnables] =
             (raster_state_[kRasterEnables] & ~(1u << 4)) |
             ((parameter != 0) << 4);
-    } else if (method == 0x0318) {
+        break;
+    }
+    case kNv097M0318: {
         raster_state_[kRasterEnables] =
             (raster_state_[kRasterEnables] & ~(1u << 7)) |
             ((parameter != 0) << 7);
-    } else if (method == 0x031C) {
+        break;
+    }
+    case kNv097M031C: {
         raster_state_[kRasterEnables] =
             (raster_state_[kRasterEnables] & ~(1u << 8)) |
             ((parameter != 0) << 8);
-    } else if (method == 0x0320) {
+        break;
+    }
+    case kNv097M0320: {
         raster_state_[kRasterEnables] =
             (raster_state_[kRasterEnables] & ~(1u << 9)) |
             ((parameter != 0) << 9);
-    } else if (method == 0x0324) {
+        break;
+    }
+    case kNv097M0324: {
         raster_state_[kRasterEnables] =
             (raster_state_[kRasterEnables] & ~(1u << 10)) |
             ((parameter != 0) << 10);
-    } else if (method == 0x032C) {
+        break;
+    }
+    case kNv097M032C: {
         raster_state_[kRasterEnables] =
             (raster_state_[kRasterEnables] & ~(1u << 5)) |
             ((parameter != 0) << 5);
-    } else if (method == 0x0330) {
+        break;
+    }
+    case kNv097M0330: {
         raster_state_[kRasterEnables] =
             (raster_state_[kRasterEnables] & ~(1u << 11)) |
             ((parameter != 0) << 11);
-    } else if (method == 0x0334) {
+        break;
+    }
+    case kNv097M0334: {
         raster_state_[kRasterEnables] =
             (raster_state_[kRasterEnables] & ~(1u << 12)) |
             ((parameter != 0) << 12);
-    } else if (method == 0x0338) {
+        break;
+    }
+    case kNv097M0338: {
         raster_state_[kRasterEnables] =
             (raster_state_[kRasterEnables] & ~(1u << 13)) |
             ((parameter != 0) << 13);
-    } else if (method == 0x033C) {
+        break;
+    }
+    case kNv097M033C: {
         raster_state_[kRasterAlphaFunc] = parameter;
-    } else if (method == 0x0340) {
+        break;
+    }
+    case kNv097M0340: {
         raster_state_[kRasterAlphaRef] = parameter;
-    } else if (method == 0x0344) {
+        break;
+    }
+    case kNv097M0344: {
         raster_state_[kRasterBlendSrc] = parameter;
-    } else if (method == 0x0348) {
+        break;
+    }
+    case kNv097M0348: {
         raster_state_[kRasterBlendDst] = parameter;
-    } else if (method == 0x034C) {
+        break;
+    }
+    case kNv097M034C: {
         raster_state_[kRasterBlendColor] = parameter;
-    } else if (method == 0x0350) {
+        break;
+    }
+    case kNv097M0350: {
         raster_state_[kRasterBlendEquation] = parameter;
-    } else if (method == 0x0354) {
+        break;
+    }
+    case kNv097M0354: {
         raster_state_[kRasterDepthFunc] = parameter;
-    } else if (method == 0x0358) {
+        break;
+    }
+    case kNv097M0358: {
         raster_state_[kRasterColorMask] = parameter;
-    } else if (method == 0x035C) {
+        break;
+    }
+    case kNv097M035C: {
         raster_state_[kRasterDepthMask] = parameter;
-    } else if (method == 0x0360) {
+        break;
+    }
+    case kNv097M0360: {
         raster_state_[kRasterStencilWriteMask] = parameter;
-    } else if (method == 0x0364) {
+        break;
+    }
+    case kNv097M0364: {
         raster_state_[kRasterStencilFunc] = parameter;
-    } else if (method == 0x0368) {
+        break;
+    }
+    case kNv097M0368: {
         raster_state_[kRasterStencilRef] = parameter;
-    } else if (method == 0x036C) {
+        break;
+    }
+    case kNv097M036C: {
         raster_state_[kRasterStencilFuncMask] = parameter;
-    } else if (method == 0x0370) {
+        break;
+    }
+    case kNv097M0370: {
         raster_state_[kRasterStencilOpFail] = parameter;
-    } else if (method == 0x0374) {
+        break;
+    }
+    case kNv097M0374: {
         raster_state_[kRasterStencilOpZFail] = parameter;
-    } else if (method == 0x0378) {
+        break;
+    }
+    case kNv097M0378: {
         raster_state_[kRasterStencilOpZPass] = parameter;
-    } else if (method == 0x037C) {
+        break;
+    }
+    case kNv097M037C: {
         raster_state_[kRasterShadeMode] = parameter;
-    } else if (method == 0x0384) {
+        break;
+    }
+    case kNv097M0384: {
         raster_state_[kRasterPolygonOffsetScale] = parameter;
-    } else if (method == 0x0388) {
+        break;
+    }
+    case kNv097M0388: {
         raster_state_[kRasterPolygonOffsetBias] = parameter;
-    } else if (method == 0x038C) {
+        break;
+    }
+    case kNv097M038C: {
         raster_state_[kRasterFrontPolygonMode] = parameter;
-    } else if (method == 0x0390) {
+        break;
+    }
+    case kNv097M0390: {
         raster_state_[kRasterBackPolygonMode] = parameter;
-    } else if (method == 0x0394) {
+        break;
+    }
+    case kNv097M0394: {
         raster_state_[kRasterClipMin] = parameter;
-    } else if (method == 0x0398) {
+        break;
+    }
+    case kNv097M0398: {
         raster_state_[kRasterClipMax] = parameter;
-    } else if (method == 0x039C) {
+        break;
+    }
+    case kNv097M039C: {
         raster_state_[kRasterCullFace] = parameter;
-    } else if (method == 0x03A0) {
+        break;
+    }
+    case kNv097M03A0: {
         raster_state_[kRasterFrontFace] = parameter;
-    } else if (method == 0x17BC) {
+        break;
+    }
+    case kNv097M17BC: {
         raster_state_[kRasterEnables] =
             (raster_state_[kRasterEnables] & ~(1u << 6)) |
             ((parameter != 0) << 6);
-    } else if (method == 0x17C0) {
+        break;
+    }
+    case kNv097M17C0: {
         raster_state_[kRasterLogicOp] = parameter;
-    } else if (method == 0x1D78) {
+        break;
+    }
+    case kNv097M1D78: {
         raster_state_[kRasterZMinMaxControl] = parameter;
-    } else if (method == 0x1E20) {
+        break;
+    }
+    case kNv097M1E20: {
         raster_state_[kRasterCombinerFinalFactor0] = parameter;
-    } else if (method == 0x1E24) {
+        break;
+    }
+    case kNv097M1E24: {
         raster_state_[kRasterCombinerFinalFactor1] = parameter;
-    } else if (method >= 0x1E40 && method < 0x1E60) {
+        break;
+    }
+    case kNv097R1E40_1E60: {
         raster_state_[kRasterCombinerColorOcw0 +
                       (method - 0x1E40) / 4] = parameter;
-    } else if (method == 0x1E60) {
+        break;
+    }
+    case kNv097M1E60: {
         raster_state_[kRasterCombinerControl] = parameter;
-    } else if (method == 0x1E6C) {
+        break;
+    }
+    case kNv097M1E6C: {
         raster_state_[kRasterShadowDepthFunc] = parameter;
-    } else if (method == 0x1E70) {
+        break;
+    }
+    case kNv097M1E70: {
         raster_state_[kRasterShaderStageProgram] = parameter;
-    } else if (method == 0x1E74) {
+        break;
+    }
+    case kNv097M1E74: {
         raster_state_[kRasterDotRgbMapping] = parameter;
-    } else if (method == 0x1E78) {
+        break;
+    }
+    case kNv097M1E78: {
         raster_state_[kRasterShaderOtherStageInput] = parameter;
-    } else if (method >= 0x1B00 && method < 0x1C00) {
+        break;
+    }
+    case kNv097R1B00_1C00: {
         const uint32_t stage = (method - 0x1B00) / 0x40;
         const uint32_t local = (method - 0x1B00) & 0x3Fu;
         if (local == 0x00) {
@@ -10490,108 +14028,160 @@ void Nv2a::dispatch_method(PushMethod push) {
         } else if (local == 0x24) {
             raster_state_[kRasterTextureBorderColor0 + stage] = parameter;
         }
+        break;
+    }
     // Fixed-function vertex-state selectors. Their batch census gates which xemu equations
     // must execute before fixed-function output can be admitted to rasterization.
-    } else if (method == 0x0294) {
+    case kNv097M0294: {
         fixed_light_control_ =
             static_cast<uint8_t>((parameter & 1u) |
                                  ((parameter >> 15) & 2u) |
                                  ((parameter >> 15) & 4u));
-    } else if (method == 0x0298) {
+        break;
+    }
+    case kNv097M0298: {
         fixed_color_material_ = static_cast<uint8_t>(parameter);
-    } else if (method == 0x02A4) {
+        break;
+    }
+    case kNv097M02A4: {
         fixed_fog_ = parameter != 0;
-    } else if (method == 0x0314) {
+        break;
+    }
+    case kNv097M0314: {
         fixed_lighting_ = parameter != 0;
-    } else if (method == 0x0328) {
+        break;
+    }
+    case kNv097M0328: {
         if (parameter > 6) {
             fault_("NV2A fixed-function skin mode is invalid");
             return;
         }
         fixed_skin_mode_ = static_cast<uint8_t>(parameter);
-    } else if (method == 0x03A4) {
+        break;
+    }
+    case kNv097M03A4: {
         fixed_normalization_ = parameter != 0;
-    } else if (method >= 0x03A8 && method < 0x03B4) {
+        break;
+    }
+    case kNv097R03A8_03B4: {
         const uint32_t component = (method - 0x03A8) / 4;
         std::memcpy(&fixed_material_emission_[component],
                     &parameter, sizeof(parameter));
-    } else if (method == 0x03B4) {
+        break;
+    }
+    case kNv097M03B4: {
         std::memcpy(&fixed_material_alpha_, &parameter, sizeof(parameter));
-    } else if (method == 0x03B8) {
+        break;
+    }
+    case kNv097M03B8: {
         fixed_specular_ = parameter != 0;
-    } else if (method == 0x03BC) {
+        break;
+    }
+    case kNv097M03BC: {
         fixed_light_enable_mask_ = static_cast<uint16_t>(parameter);
-    } else if (method >= 0x03C0 && method < 0x0400) {
+        break;
+    }
+    case kNv097R03C0_0400: {
         const uint32_t stage = (method - 0x03C0) / 0x10;
         const uint32_t component = ((method - 0x03C0) & 0xFu) / 4;
         fixed_texgen_[stage][component] = parameter;
-    } else if (method >= 0x0420 && method < 0x0430) {
+        break;
+    }
+    case kNv097R0420_0430: {
         fixed_texture_matrix_enable_[(method - 0x0420) / 4] = parameter != 0;
+        break;
+    }
     // Fixed-function matrix uploads share Cheops constant memory. Matrices are
     // interleaved exactly as the NV2A XF context lays them out.
-    } else if (method >= 0x0440 && method < 0x0480) {
+    case kNv097R0440_0480: {
         const uint32_t slot = (method - 0x0440) / 4;
         std::memcpy(&transform_constants_[0x04 + slot / 4][slot & 3u],
                     &parameter, sizeof(parameter));
-    } else if (method >= 0x0480 && method < 0x0580) {
+        break;
+    }
+    case kNv097R0480_0580: {
         const uint32_t slot = (method - 0x0480) / 4;
         const uint32_t matrix = slot / 16;
         const uint32_t entry = slot & 15u;
         std::memcpy(&transform_constants_[0x08 + matrix * 8 + entry / 4]
                                          [entry & 3u],
                     &parameter, sizeof(parameter));
-    } else if (method >= 0x0580 && method < 0x0680) {
+        break;
+    }
+    case kNv097R0580_0680: {
         const uint32_t slot = (method - 0x0580) / 4;
         const uint32_t matrix = slot / 16;
         const uint32_t entry = slot & 15u;
         std::memcpy(&transform_constants_[0x0C + matrix * 8 + entry / 4]
                                          [entry & 3u],
                     &parameter, sizeof(parameter));
-    } else if (method >= 0x0680 && method < 0x06C0) {
+        break;
+    }
+    case kNv097R0680_06C0: {
         const uint32_t slot = (method - 0x0680) / 4;
         std::memcpy(&transform_constants_[slot / 4][slot & 3u],
                     &parameter, sizeof(parameter));
-    } else if (method >= 0x06C0 && method < 0x07C0) {
+        break;
+    }
+    case kNv097R06C0_07C0: {
         const uint32_t slot = (method - 0x06C0) / 4;
         const uint32_t texture = slot / 16;
         const uint32_t entry = slot & 15u;
         std::memcpy(&transform_constants_[0x44 + texture * 8 + entry / 4]
                                          [entry & 3u],
                     &parameter, sizeof(parameter));
-    } else if (method >= 0x0840 && method < 0x0940) {
+        break;
+    }
+    case kNv097R0840_0940: {
         const uint32_t slot = (method - 0x0840) / 4;
         const uint32_t texture = slot / 16;
         const uint32_t entry = slot & 15u;
         std::memcpy(&transform_constants_[0x40 + texture * 8 + entry / 4]
                                          [entry & 3u],
                     &parameter, sizeof(parameter));
-    } else if (method >= 0x0A10 && method < 0x0A1C) {
+        break;
+    }
+    case kNv097R0A10_0A1C: {
         const uint32_t component = (method - 0x0A10) / 4;
         std::memcpy(&fixed_scene_ambient_[component],
                     &parameter, sizeof(parameter));
+        break;
+    }
     // Kelvin viewport and Cheops programmable-transform state. Program/constant upload
     // pointers advance after each complete four-word vector, matching xemu's PGRAPH model.
-    } else if (method >= 0x0A20 && method < 0x0A30) {
+    case kNv097R0A20_0A30: {
         const uint32_t slot = (method - 0x0A20) / 4;
         std::memcpy(&viewport_offset_[slot], &parameter, sizeof(parameter));
         transform_constants_[0x3B][slot] = viewport_offset_[slot];
-    } else if (method >= 0x0A60 && method < 0x0A80) {
+        break;
+    }
+    case kNv097R0A60_0A80: {
         raster_state_[kRasterCombinerFactor0_0 +
                       (method - 0x0A60) / 4] = parameter;
-    } else if (method >= 0x0A80 && method < 0x0AA0) {
+        break;
+    }
+    case kNv097R0A80_0AA0: {
         raster_state_[kRasterCombinerFactor1_0 +
                       (method - 0x0A80) / 4] = parameter;
-    } else if (method >= 0x0AA0 && method < 0x0AC0) {
+        break;
+    }
+    case kNv097R0AA0_0AC0: {
         raster_state_[kRasterCombinerAlphaOcw0 +
                       (method - 0x0AA0) / 4] = parameter;
-    } else if (method >= 0x0AC0 && method < 0x0AE0) {
+        break;
+    }
+    case kNv097R0AC0_0AE0: {
         raster_state_[kRasterCombinerColorIcw0 +
                       (method - 0x0AC0) / 4] = parameter;
-    } else if (method >= 0x0AF0 && method < 0x0B00) {
+        break;
+    }
+    case kNv097R0AF0_0B00: {
         const uint32_t slot = (method - 0x0AF0) / 4;
         std::memcpy(&viewport_scale_[slot], &parameter, sizeof(parameter));
         transform_constants_[0x3A][slot] = viewport_scale_[slot];
-    } else if (method >= 0x0B00 && method < 0x0B80) {
+        break;
+    }
+    case kNv097R0B00_0B80: {
         const uint32_t slot = (method - 0x0B00) / 4;
         if (transform_program_load_ >= transform_program_.size()) {
             fault_("NV2A transform program upload exceeds instruction memory");
@@ -10600,7 +14190,9 @@ void Nv2a::dispatch_method(PushMethod push) {
         transform_program_[transform_program_load_][slot & 3u] = parameter;
         ++transform_program_words_;
         if ((slot & 3u) == 3) ++transform_program_load_;
-    } else if (method >= 0x0B80 && method < 0x0C00) {
+        break;
+    }
+    case kNv097R0B80_0C00: {
         const uint32_t slot = (method - 0x0B80) / 4;
         if (transform_constant_load_ >= transform_constants_.size()) {
             fault_("NV2A transform constant upload exceeds constant memory");
@@ -10610,38 +14202,50 @@ void Nv2a::dispatch_method(PushMethod push) {
                     &parameter, sizeof(parameter));
         ++transform_constant_words_;
         if ((slot & 3u) == 3) ++transform_constant_load_;
-    } else if (method == 0x1E94) {
+        break;
+    }
+    case kNv097M1E94: {
         transform_execution_mode_ = static_cast<uint8_t>(parameter & 3u);
-    } else if (method == 0x1E9C) {
+        break;
+    }
+    case kNv097M1E9C: {
         if (parameter >= transform_program_.size()) {
             fault_("NV2A transform program load pointer is out of range");
             return;
         }
         transform_program_load_ = static_cast<uint8_t>(parameter);
-    } else if (method == 0x1EA0) {
+        break;
+    }
+    case kNv097M1EA0: {
         if (parameter >= transform_program_.size()) {
             fault_("NV2A transform program start is out of range");
             return;
         }
         transform_program_start_ = static_cast<uint8_t>(parameter);
-    } else if (method == 0x1EA4) {
+        break;
+    }
+    case kNv097M1EA4: {
         if (parameter >= transform_constants_.size()) {
             fault_("NV2A transform constant load pointer is out of range");
             return;
         }
         transform_constant_load_ = static_cast<uint8_t>(parameter);
+        break;
+    }
     // The dashboard's immediate quad path uses generic texture/diffuse attributes and the
     // legacy position stream.  These follow xemu's NV097 handlers: attributes persist until
     // changed, while a completed write to attribute slot 0 (position) snapshots one full
     // 16-slot vertex.  This covers the legacy SET_VERTEX4F position stream plus every
     // SET_VERTEX_DATA* family (2F_M, 2S, 4UB, 4S_M, 4F_M); each commits on the write that
     // finishes slot 0, matching hardware semantics where position completion latches a vertex.
-    } else if (method >= 0x1518 && method < 0x1528) {
+    case kNv097R1518_1528: {
         const uint32_t component = (method - 0x1518) / 4;
         std::memcpy(&vertex_attributes_[0].value[component], &parameter, sizeof(parameter));
         ++immediate_methods_;
         if (component == 3 && !commit_immediate_vertex()) return;
-    } else if (method >= 0x1880 && method < 0x1900) {
+        break;
+    }
+    case kNv097R1880_1900: {
         const uint32_t word = (method - 0x1880) / 4;
         const uint32_t slot = word / 2;
         const uint32_t component = word & 1u;
@@ -10651,7 +14255,9 @@ void Nv2a::dispatch_method(PushMethod push) {
         value[3] = 1.0f;
         ++immediate_methods_;
         if (slot == 0 && component == 1 && !commit_immediate_vertex()) return;
-    } else if (method >= 0x1900 && method < 0x1940) {
+        break;
+    }
+    case kNv097R1900_1940: {
         const uint32_t slot = (method - 0x1900) / 4;
         auto& value = vertex_attributes_[slot].value;
         const int16_t x = static_cast<int16_t>(parameter & 0xFFFFu);
@@ -10662,7 +14268,9 @@ void Nv2a::dispatch_method(PushMethod push) {
         value[3] = 1.0f;
         ++immediate_methods_;
         if (slot == 0 && !commit_immediate_vertex()) return;
-    } else if (method >= 0x1940 && method < 0x1980) {
+        break;
+    }
+    case kNv097R1940_1980: {
         const uint32_t slot = (method - 0x1940) / 4;
         auto& value = vertex_attributes_[slot].value;
         value[0] = static_cast<float>(parameter & 0xFFu) / 255.0f;
@@ -10671,7 +14279,9 @@ void Nv2a::dispatch_method(PushMethod push) {
         value[3] = static_cast<float>((parameter >> 24) & 0xFFu) / 255.0f;
         ++immediate_methods_;
         if (slot == 0 && !commit_immediate_vertex()) return;
-    } else if (method >= 0x1980 && method < 0x1A00) {
+        break;
+    }
+    case kNv097R1980_1A00: {
         const uint32_t word = (method - 0x1980) / 4;
         const uint32_t slot = word / 2;
         const uint32_t part = word & 1u;
@@ -10682,22 +14292,30 @@ void Nv2a::dispatch_method(PushMethod push) {
         value[part * 2 + 1] = static_cast<float>(hi);
         ++immediate_methods_;
         if (slot == 0 && part == 1 && !commit_immediate_vertex()) return;
-    } else if (method >= 0x1A00 && method < 0x1B00) {
+        break;
+    }
+    case kNv097R1A00_1B00: {
         const uint32_t word = (method - 0x1A00) / 4;
         const uint32_t slot = word / 4;
         const uint32_t component = word & 3u;
         std::memcpy(&vertex_attributes_[slot].value[component], &parameter, sizeof(parameter));
         ++immediate_methods_;
         if (slot == 0 && component == 3 && !commit_immediate_vertex()) return;
+        break;
+    }
     // Kelvin array-fed vertex submission. ARRAY_ELEMENT16 is non-incrementing and packs two
     // indices per parameter; the pusher has already expanded non-incrementing method runs.
-    } else if (method >= 0x1720 && method < 0x1760) {
+    case kNv097R1720_1760: {
         const uint32_t slot = (method - 0x1720) / 4;
         vertex_attributes_[slot].dma_b = (parameter & 0x80000000u) != 0;
         vertex_attributes_[slot].offset = parameter & 0x7FFFFFFFu;
-    } else if (method >= 0x1760 && method < 0x17A0) {
+        break;
+    }
+    case kNv097R1760_17A0: {
         set_vertex_array_format((method - 0x1760) / 4, parameter);
-    } else if (method == 0x17FC) {
+        break;
+    }
+    case kNv097M17FC: {
         if (parameter == 0) {
             if (primitive_mode_ != 0 &&
                 decode_inline_array()) {
@@ -10715,20 +14333,26 @@ void Nv2a::dispatch_method(PushMethod push) {
             inline_vertices_.clear();
             immediate_vertices_.clear();
         }
-    } else if (method == 0x1800) {
+        break;
+    }
+    case kNv097M1800: {
         if (vertex_indices_.size() > (1u << 24) - 2) {
             fault_("NV2A indexed vertex batch exceeds safety bound");
             return;
         }
         vertex_indices_.push_back(parameter & 0xFFFFu);
         vertex_indices_.push_back(parameter >> 16);
-    } else if (method == 0x1808) {
+        break;
+    }
+    case kNv097M1808: {
         if (vertex_indices_.size() >= (1u << 24)) {
             fault_("NV2A indexed vertex batch exceeds safety bound");
             return;
         }
         vertex_indices_.push_back(parameter);
-    } else if (method == 0x1810) {
+        break;
+    }
+    case kNv097M1810: {
         const uint32_t start = parameter & 0x00FFFFFFu;
         const uint32_t count = (parameter >> 24) + 1u;
         if (vertex_indices_.size() > (1u << 24) - count) {
@@ -10737,7 +14361,9 @@ void Nv2a::dispatch_method(PushMethod push) {
         }
         for (uint32_t i = 0; i < count; ++i)
             vertex_indices_.push_back(start + i);
-    } else if (method == 0x1818) {
+        break;
+    }
+    case kNv097M1818: {
         if (primitive_mode_ == 0) {
             fault_("NV2A inline-array data submitted outside BEGIN/END");
             return;
@@ -10747,14 +14373,29 @@ void Nv2a::dispatch_method(PushMethod push) {
             return;
         }
         inline_array_words_.push_back(parameter);
+        break;
+    }
     // NV097 semaphore methods. AvSetDisplayMode uses RELEASE as a GPU completion fence.
-    } else if (method == 0x01A4) {
+    case kNv097M01A4: {
         uint32_t instance = 0;
         if (resolve_object(channel, parameter, instance))
             semaphore_dma_[subchannel] = instance;
-    } else if (method == 0x1D6C) {
+        break;
+    }
+    case kNv097M1D6C: {
         semaphore_offset_[subchannel] = parameter;
-    } else if (method == 0x1D70) {
+        break;
+    }
+    case kNv097M1D70: {
+        // Seam anchor 1 (F11): a semaphore release is literally the guest
+        // asking whether the GPU has finished. Answering it with jobs
+        // pending is the one unambiguous correctness bug the seam could
+        // introduce, so it is an unconditional drain.
+        seam_anchor(kSeamAnchorSemaphoreRelease, true);
+        if (gpu_res_color_addr_ != 0) {
+            ++gpu_res_.semaphore_resolves;
+            gpu_res_.semaphore_resolve_bytes += gpu_res_color_bytes_;
+        }
         uint32_t address = 0;
         if (!dma_object_address(semaphore_dma_[subchannel], semaphore_offset_[subchannel],
                                 address)) {
@@ -10777,10 +14418,19 @@ void Nv2a::dispatch_method(PushMethod push) {
             std::printf("[nv2a] semaphore release ch%u/sub%u [0x%08x] <- 0x%08x\n",
                         channel, subchannel, address, parameter);
         }
+        break;
+    }
+    default:
+        break;
     }
 }
 
 void Nv2a::resume_pushbuffers() {
+    // Seam anchor 5 (F10): the guest is being told the GPU finished. Every
+    // flip-stall clear reaches this function (nv2a.cpp, the PGRAPH
+    // INCREMENT_READ_3D write clears waiting_for_flip_ and calls straight
+    // in), so one anchor here covers the whole path without double counting.
+    seam_anchor(kSeamAnchorFlipStallClear, true);
     drain_pull_queue();
     if (waiting_for_flip_ || waiting_for_nop_ || !pgraph_fifo_access_) return;
     for (uint8_t channel = 0; channel < channels_.size(); ++channel) {
@@ -10797,6 +14447,13 @@ void Nv2a::drain_pull_queue() {
         pull_queue_.empty()) {
         return;
     }
+    // NV2A_DISPATCH (beads-xbox.1.14.3). This definition is the single funnel every queued
+    // PGRAPH method passes through, so a new dispatch call site cannot bypass the region.
+    // Exact, not sampled: this is a hot child of the hot NV2A_PFIFO parent, and on an
+    // unsampled entry its time would stay in the parent while a scaled child total also
+    // covered it -- an overlap only a subtraction between buckets could remove, which is
+    // the defect this bead deletes. See the header for the cost accounting.
+    perf_excl::Scope region(perf_excl::kNv2aDispatch);
     std::optional<perf::ScopedAdd> perf_t;
     if (perf::g_pull_drain_enabled) {
         perf_t.emplace(perf::g_ns_nv2a_pull_drain,
@@ -10831,6 +14488,10 @@ bool Nv2a::pusher_enabled(uint8_t channel) const {
 }
 
 void Nv2a::process_pushbuffer(uint8_t channel) {
+    // NV2A_PFIFO: word fetch, DMA-object translate, command parse and CACHE1 push. The
+    // drain_pull_queue() call inside the parse loop opens NV2A_DISPATCH and is carved out,
+    // so this bucket's self time is the pusher alone.
+    perf_excl::Scope region(perf_excl::kNv2aPfifo);
     std::optional<perf::ScopedAdd> perf_t;
     if (perf::g_enabled) {
         perf_t.emplace(perf::g_ns_nv2a_pushbuffer,
@@ -10949,6 +14610,11 @@ Nv2a::ScanoutInfo Nv2a::scanout_info() const {
 
 bool Nv2a::capture_scanout(std::vector<uint8_t>& rgba, ScanoutInfo& info,
                            std::string& error) {
+    // Seam anchor 3 (F5): scanout reads the whole visible framebuffer out
+    // of guest RAM. Guest-anchored gate point.
+    seam_anchor(kSeamAnchorScanout, true);
+    // NV2A_SCANOUT: guest framebuffer read and RGBA conversion.
+    perf_excl::Scope region(perf_excl::kNv2aScanout);
     info = scanout_info();
     if (!mem_read_) {
         error = "NV2A scanout has no guest-memory reader";
@@ -11042,7 +14708,34 @@ void Nv2a::update_irq() {
 }
 
 void Nv2a::set_frame(uint64_t frame_no) {
+    // set_frame is called on every machine slice to advance the frame phase; the
+    // FRAME BOUNDARY is the inner condition, and that is the anchor. Raising it
+    // at the top would count ~2.9 M slice ticks as vblanks.
     if (frame_no > frame_no_) {
+        // Seam anchor 4 (F12): the frame boundary, where the PPMs and the
+        // scanout hash are taken. Also closes the per-vblank job window -- the
+        // second, independent simulation that gives the ceiling the anchor
+        // drains cut into (M2).
+        seam_anchor(kSeamAnchorSetFrame, true);
+        // DIAGNOSTIC (beads-xbox.1.15.7): the most conservative possible
+        // residency policy -- every GPU-authoritative surface is pushed back to
+        // guest RAM at every vblank. If a behavioral difference survives this,
+        // it is not a missing resolve, because there is no window longer than
+        // one frame in which guest memory can be stale.
+        if (gpu_vblank_resolve_ && renderer_) {
+            resolve_renderer_color_overlap(0, 0x08000000u, "vblank sweep");
+            resolve_renderer_depth_overlap(0, 0x08000000u, "vblank sweep");
+        }
+        // beads-xbox.1.15.10 step 1 (overlap). NOT a resolve: nothing is read
+        // back and no guest memory is touched. It only ISSUES the draws the
+        // backend is still holding and submits them to the driver, so the GPU
+        // starts on them while the emulation thread continues. Order is
+        // unchanged -- the pending batch precedes everything that follows it in
+        // guest order by construction.
+        if (gpu_vblank_kick_ && renderer_) renderer_->kick_pending_gpu_work();
+        ++seam_vblanks_;
+        seam_vblank_jobs_sum_ += seam_vblank_jobs_;
+        seam_vblank_jobs_ = 0;
         frame_no_ = frame_no;
         vblanks_++;
         pcrtc_intr_ |= 1u;  // NV_PCRTC_INTR_0_VBLANK latches every frame boundary

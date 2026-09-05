@@ -113,7 +113,9 @@ public:
         resident_resolve_data.clear();
         return true;
     }
-    void invalidate_resident_color_surface(uint32_t address, size_t size) override {
+    void invalidate_resident_color_surface(uint32_t address, size_t size,
+                                           uint32_t cause) override {
+        (void)cause;
         const uint64_t request_end = static_cast<uint64_t>(address) + size;
         const uint64_t resident_end =
             static_cast<uint64_t>(resident_resolve_address) +
@@ -146,7 +148,9 @@ public:
         resident_depth_resolve_data.clear();
         return true;
     }
-    void invalidate_resident_depth_surface(uint32_t address, size_t size) override {
+    void invalidate_resident_depth_surface(uint32_t address, size_t size,
+                                           uint32_t cause) override {
+        (void)cause;
         const uint64_t request_end = static_cast<uint64_t>(address) + size;
         const uint64_t resident_end =
             static_cast<uint64_t>(resident_depth_resolve_address) +

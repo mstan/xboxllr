@@ -25,15 +25,22 @@
 #endif
 
 #include "cpu/unicorn_floor.hpp"
+#include "cpu/unicorn_metrics.h"
 #include "host/ethernet_udp.hpp"
 #include "host/nv2a_opengl_renderer.hpp"
 #include "host/sample_profiler.hpp"
+
+// Heap poisoning (src/host/heap_poison.cpp). Selected by XLLE_HEAP_POISON, not by argv,
+// because allocations start before argv is parsed.
+bool xlle_heap_poison_enabled();
+int xlle_heap_poison_byte();
 #include "host/sdl_shell.hpp"
 #include "host/xid_script.hpp"
 #include "machine/aci.hpp"
 #include "machine/apu.hpp"
 #include "machine/machine.hpp"
 #include "machine/perf_accounting.hpp"
+#include "machine/perf_excl.hpp"
 #include "obs/debug_server.hpp"
 #include "spike/fixtures.hpp"
 #include "xlle/jsonl.hpp"
@@ -46,6 +53,509 @@ namespace {
 Ring<RetiredInsn> g_retired(1u << 16);
 Ring<MemEvent> g_mem(1u << 16);
 constexpr uint64_t kMinFrameSeriesInterval = 1000000;
+
+// ============ stage (d) seam census printer (beads-xbox.1.15.4) =============
+// DESIGN-NV2A-SEAM.md measurement M5. Stage (d) has no job queue: every DrawJob
+// runs inline at the latch point. The ten coherence anchors of section 2.2(c)
+// therefore do nothing but COUNT how often a threaded consumer would have had to
+// stop and drain, and how deep the queue would have been when it did. That is
+// what sizes -- or kills -- stage (e), and it comes free with stage (d).
+//
+// Printed at every frame-series checkpoint as an interval delta and once at
+// shutdown as the cumulative total. Parsed additively by
+// tools/measure_xbox_replay.py.
+struct SeamCensusSnapshot {
+    uint64_t jobs_latched = 0;
+    uint64_t jobs_threadable = 0;
+    uint64_t jobs_queueable = 0;
+    uint64_t jobs_not_executed = 0;
+    uint64_t vblanks = 0;
+    uint64_t vblank_jobs_sum = 0;
+    uint64_t resolve_transfers = 0;
+    std::array<uint64_t, xlle::Nv2a::kSeamNotThreadableReasons> not_threadable{};
+    std::array<uint64_t, xlle::Nv2a::kSeamAnchorCount> hits{};
+    std::array<uint64_t, xlle::Nv2a::kSeamAnchorCount> drains{};
+    std::array<uint64_t, xlle::Nv2a::kSeamAnchorCount> pending_sum{};
+    // Stage (e) (beads-xbox.1.15.5): the real queue, not the simulation.
+    uint64_t jobs_queued = 0;
+    uint64_t jobs_inline = 0;
+    uint64_t backpressure_inline = 0;
+    uint64_t backpressure_bytes = 0;
+    uint64_t order_fences = 0;
+    uint64_t drains_empty = 0;
+    uint64_t drains_nonempty = 0;
+    uint64_t depth_sum = 0;
+    uint64_t depth_samples = 0;
+    uint64_t worker_busy_ticks = 0;
+    uint64_t drain_wait_ticks = 0;
+    uint64_t elapsed_ticks = 0;
+    uint64_t worker_failures = 0;
+    std::array<uint64_t, xlle::Nv2a::kDrawDepthBuckets> depth_hist{};
+    // Stage (e2) (beads-xbox.1.15.9): the destination-span partition. span_jobs
+    // is the witness that work division actually ran -- an A/B whose span_jobs
+    // is 0 measured nothing, which is the trap ndsrecomp documented for its own
+    // threaded_lines / inline_lines pair.
+    uint64_t span_jobs = 0;
+    uint64_t span_inline_jobs = 0;
+    uint64_t span_barrier_wait_ticks = 0;
+    uint64_t span_part0_busy_ticks = 0;
+    uint64_t span_helper_busy_ticks = 0;
+    // beads-xbox.1.15.9 loose end 2: the per-part telemetry merge, MEASURED
+    // rather than estimated. Only accrues under --perf-accounting (the two clock
+    // reads are gated on perf_excl::g_enabled), so it is 0 on every noperf leg
+    // by design, not by omission.
+    uint64_t span_fold_ticks = 0;
+    // F3 closure (beads-xbox.1.15.5 residual risk): renderer residency queries
+    // that found the ring non-empty and drained BEFORE asking. While this stays
+    // 0 the query result provably could not have depended on a pending job.
+    uint64_t renderer_query_fences = 0;
+};
+
+// Stage (f) GPU-residency census (beads-xbox.1.15.7). Cumulative-only: the
+// state machine accumulates from process start, so the interval form would only
+// re-derive differences the reader can take from two cumulative lines.
+void print_gpu_residency_census(const xlle::Nv2a* nv, const char* scope,
+                                unsigned long long deadline,
+                                unsigned long long vblanks) {
+    if (!nv) return;
+    const auto& c = nv->gpu_residency_census();
+    const double vb = vblanks ? (double)vblanks : 1.0;
+    std::printf(
+        "[host] gpu-residency scope=%s deadline=%llu gpu_draws=%llu "
+        "cpu_draws=%llu uploads=%llu upload_mb=%.1f resolves=%llu "
+        "resolve_mb=%.1f depth_uploads=%llu depth_upload_mb=%.1f "
+        "depth_resolves=%llu depth_resolve_mb=%.1f clears_on_gpu=%llu "
+        "runs=%llu run_mean=%.2f run_max=%llu "
+        "resolve_mb_per_vblank=%.3f upload_mb_per_vblank=%.3f "
+        "sem_resolves=%llu sem_resolve_mb=%.1f pgraph_read_resolves=%llu\n",
+        scope, deadline,
+        (unsigned long long)c.gpu_draws, (unsigned long long)c.cpu_draws,
+        (unsigned long long)c.uploads, c.upload_bytes / 1048576.0,
+        (unsigned long long)c.resolves, c.resolve_bytes / 1048576.0,
+        (unsigned long long)c.depth_uploads, c.depth_upload_bytes / 1048576.0,
+        (unsigned long long)c.depth_resolves, c.depth_resolve_bytes / 1048576.0,
+        (unsigned long long)c.clears_on_gpu,
+        (unsigned long long)c.runs,
+        c.runs ? (double)c.run_sum / (double)c.runs : 0.0,
+        (unsigned long long)c.run_max,
+        (c.resolve_bytes + c.depth_resolve_bytes) / 1048576.0 / vb,
+        (c.upload_bytes + c.depth_upload_bytes) / 1048576.0 / vb,
+        (unsigned long long)c.semaphore_resolves,
+        c.semaphore_resolve_bytes / 1048576.0,
+        (unsigned long long)c.pgraph_read_resolves);
+    std::printf(
+        "[host] gpu-executor scope=%s deadline=%llu enabled=%u relaxed=%u mask=%u jobs=%llu "
+        "triangles=%llu draw_calls=%llu declined=%llu surface_uploads=%llu "
+        "surface_upload_mb=%.1f texture_upload_mb=%.1f\n",
+        scope, deadline, nv->gpu_profiles_enabled() ? 1u : 0u,
+        nv->gpu_exact_coords() ? 1u : 0u, nv->gpu_profile_mask(),
+        (unsigned long long)nv->gpu_profile_jobs(),
+        (unsigned long long)nv->gpu_profile_triangles(),
+        (unsigned long long)nv->gpu_profile_draw_calls(),
+        (unsigned long long)nv->gpu_profile_declined(),
+        (unsigned long long)nv->gpu_profile_uploads(),
+        nv->gpu_profile_upload_bytes() / 1048576.0,
+        nv->gpu_profile_texture_upload_bytes() / 1048576.0);
+    // beads-xbox.1.15.10 step 1 (overlap): the witness that the pending batch
+    // is actually being issued early. bound is the configured triangle bound,
+    // size/kick are the two early triggers and gl_flushes is how many draws
+    // were submitted to the driver on issue rather than left for a resolve to
+    // submit. draw_calls above minus (size + kick) is what the old
+    // resolve-driven policy would have issued on its own.
+    {
+        const auto fs = nv->witnessed_flush_stats();
+        std::printf(
+            "[host] gpu-executor-flush scope=%s deadline=%llu bound=%llu "
+            "size_flushes=%llu kick_flushes=%llu gl_flushes=%llu "
+            "vblank_kick=%u ssbo_ring=%llu kick_flush=%u fp32_shader=%u "
+            "plane_split=%u\n",
+            scope, deadline, (unsigned long long)fs.bound,
+            (unsigned long long)fs.size_flushes,
+            (unsigned long long)fs.kick_flushes,
+            (unsigned long long)fs.gl_flushes,
+            nv->gpu_vblank_kick() ? 1u : 0u,
+            (unsigned long long)fs.ssbo_ring, fs.kick_flush ? 1u : 0u,
+            fs.fp32_shader ? 1u : 0u, fs.plane_split ? 1u : 0u);
+    }
+    std::printf(
+        "[host] gpu-executor-surfaces scope=%s deadline=%llu "
+        "radial_color=%08x radial_zeta=%08x radial_bytes=%u "
+        "textured_color=%08x textured_zeta=%08x textured_bytes=%u "
+        "projected_color=%08x projected_zeta=%08x projected_bytes=%u\n",
+        scope, deadline, nv->gpu_profile_surface(0, false),
+        nv->gpu_profile_surface(0, true), nv->gpu_profile_surface_bytes(0),
+        nv->gpu_profile_surface(1, false), nv->gpu_profile_surface(1, true),
+        nv->gpu_profile_surface_bytes(1),
+        nv->gpu_profile_surface(2, false), nv->gpu_profile_surface(2, true),
+        nv->gpu_profile_surface_bytes(2));
+    for (size_t k = 0; k < xlle::Nv2a::kGpuRejectReasons; ++k) {
+        const uint64_t n = nv->gpu_profile_reject(k);
+        if (n == 0) continue;
+        std::printf(
+            "[host] gpu-executor-reject scope=%s deadline=%llu reason=%s "
+            "jobs=%llu\n",
+            scope, deadline, xlle::Nv2a::gpu_reject_reason_name(k),
+            (unsigned long long)n);
+    }
+    // beads-xbox.1.15.10 phase 4 (lever B). Always on: how many witnessed
+    // texture snapshots asked for a resolve because their source range could be
+    // a GPU-authoritative surface, and how many the ceiling probe skipped.
+    std::printf(
+        "[host] gpu-texture-source scope=%s deadline=%llu resolves=%llu "
+        "skipped=%llu unsafe_skip=%u\n",
+        scope, deadline,
+        (unsigned long long)nv->witnessed_texture_source_resolves(),
+        (unsigned long long)nv->witnessed_texture_source_skipped(),
+        nv->gpu_unsafe_skip_texture_resolve() ? 1u : 0u);
+    if (nv->gpu_profile_max_fixed() != 0) {
+        std::printf(
+            "[host] gpu-executor-range scope=%s deadline=%llu "
+            "max_fixed_xy=%llu limit=%llu\n",
+            scope, deadline, (unsigned long long)nv->gpu_profile_max_fixed(),
+            (unsigned long long)(nv->gpu_exact_coords()
+                                     ? xlle::Nv2a::kGpuFixedCoordinateLimitExact
+                                     : xlle::Nv2a::kGpuFixedCoordinateLimitRelaxed));
+    }
+    for (size_t k = 0; k < xlle::Nv2a::kGpuResidencyCauses; ++k) {
+        std::printf(
+            "[host] gpu-residency-cause scope=%s deadline=%llu cause=%s "
+            "resolves=%llu\n",
+            scope, deadline, xlle::Nv2a::gpu_residency_cause_name(k),
+            (unsigned long long)c.cause[k]);
+    }
+    // Phase 2 work-order census (beads-xbox.1.15.10). Two columns per profile:
+    // cpu_draws is the CPU work left, breaks is the round trips that work
+    // actually costs. They are not proportional and the work order follows
+    // breaks; both are printed so the reader can see the difference.
+    for (size_t k = 0; k < xlle::Nv2a::kGpuResProfileSlots; ++k) {
+        if (c.cpu_draws_profile[k] == 0 && c.breaks_profile[k] == 0) continue;
+        std::printf(
+            "[host] gpu-residency-profile scope=%s deadline=%llu profile=%s "
+            "cpu_draws=%llu breaks=%llu\n",
+            scope, deadline, xlle::Nv2a::gpu_res_profile_name(k),
+            (unsigned long long)c.cpu_draws_profile[k],
+            (unsigned long long)c.breaks_profile[k]);
+    }
+    // Phase 3 (beads-xbox.1.15.10): the MEASURED residency-break attribution,
+    // taken from the BACKEND rather than from the simulation above. One row per
+    // (cause, profile) pair that actually caused a re-upload, split by plane.
+    // The simulation reported 647 breaks where the backend performed 1336
+    // uploads; this is the line that says which consumer the difference belongs
+    // to, so the transfer-volume work is ordered by measurement and not by a
+    // model whose one-active-target assumption is known to be wrong.
+    {
+        const auto uc = nv->witnessed_upload_census();
+        unsigned long long total_color = 0, total_depth = 0;
+        double total_color_mb = 0.0, total_depth_mb = 0.0;
+        for (size_t cause = 0; cause < xlle::kNv2aInvalidateCauseSlots; ++cause) {
+            for (size_t prof = 0; prof < xlle::kNv2aInvalidateProfileSlots;
+                 ++prof) {
+                const unsigned long long cn =
+                    (unsigned long long)uc.color_uploads[cause][prof];
+                const unsigned long long dn =
+                    (unsigned long long)uc.depth_uploads[cause][prof];
+                total_color += cn;
+                total_depth += dn;
+                total_color_mb += uc.color_bytes[cause][prof] / 1048576.0;
+                total_depth_mb += uc.depth_bytes[cause][prof] / 1048576.0;
+                if (cn == 0 && dn == 0) continue;
+                std::printf(
+                    "[host] gpu-upload-cause scope=%s deadline=%llu cause=%s "
+                    "profile=%s color_uploads=%llu color_mb=%.1f "
+                    "depth_uploads=%llu depth_mb=%.1f\n",
+                    scope, deadline, xlle::nv2a_invalidate_cause_name(cause),
+                    xlle::Nv2a::gpu_res_profile_name(prof), cn,
+                    uc.color_bytes[cause][prof] / 1048576.0, dn,
+                    uc.depth_bytes[cause][prof] / 1048576.0);
+            }
+        }
+        for (size_t cause = 0; cause < xlle::kNv2aInvalidateCauseSlots; ++cause) {
+            const auto& ce = uc.color_invalidate_extent[cause];
+            const auto& de = uc.depth_invalidate_extent[cause];
+            if (ce[0] + ce[1] + ce[2] + de[0] + de[1] + de[2] == 0) continue;
+            std::printf(
+                "[host] gpu-invalidate-extent scope=%s deadline=%llu cause=%s "
+                "color_exact=%llu color_cover=%llu color_partial=%llu "
+                "zeta_exact=%llu zeta_cover=%llu zeta_partial=%llu\n",
+                scope, deadline, xlle::nv2a_invalidate_cause_name(cause),
+                (unsigned long long)ce[0], (unsigned long long)ce[1],
+                (unsigned long long)ce[2], (unsigned long long)de[0],
+                (unsigned long long)de[1], (unsigned long long)de[2]);
+        }
+        std::printf(
+            "[host] gpu-clear-backend scope=%s deadline=%llu accept_color=%llu "
+            "accept_zeta=%llu missing_color=%llu missing_zeta=%llu "
+            "over_dirty_color=%llu over_dirty_zeta=%llu key_mismatch_color=%llu "
+            "key_mismatch_zeta=%llu stamp_overflows=%llu "
+            "takeover_color=%llu takeover_zeta=%llu "
+            "plane_split_hits=%llu plane_split_uploads=%llu\n",
+            scope, deadline, (unsigned long long)uc.clear_accept_color,
+            (unsigned long long)uc.clear_accept_depth,
+            (unsigned long long)uc.clear_decline_color_missing,
+            (unsigned long long)uc.clear_decline_depth_missing,
+            (unsigned long long)uc.upload_over_dirty_color,
+            (unsigned long long)uc.upload_over_dirty_depth,
+            (unsigned long long)uc.color_key_mismatch,
+            (unsigned long long)uc.depth_key_mismatch,
+            (unsigned long long)uc.stamp_overflows,
+            (unsigned long long)uc.color_slot_takeover,
+            (unsigned long long)uc.depth_slot_takeover,
+            (unsigned long long)uc.plane_split_hits,
+            (unsigned long long)uc.plane_split_uploads);
+        std::printf(
+            "[host] gpu-clear scope=%s deadline=%llu enabled=%u accepted=%llu "
+            "mb=%.1f decline_planes=%llu decline_mask=%llu "
+            "decline_geometry=%llu decline_resident=%llu kept_clean=%llu "
+            "skip_empty=%u "
+            "empty_packets=%llu\n",
+            scope, deadline, nv->gpu_clear_enabled() ? 1u : 0u,
+            (unsigned long long)nv->gpu_clear_accepted(),
+            nv->gpu_clear_bytes() / 1048576.0,
+            (unsigned long long)nv->gpu_clear_decline_planes(),
+            (unsigned long long)nv->gpu_clear_decline_mask(),
+            (unsigned long long)nv->gpu_clear_decline_geometry(),
+            (unsigned long long)nv->gpu_clear_decline_resident(),
+            (unsigned long long)nv->gpu_clear_kept_clean(),
+            nv->gpu_skip_empty_packets() ? 1u : 0u,
+            (unsigned long long)nv->gpu_profile_empty_packets());
+        std::printf(
+            "[host] gpu-upload-total scope=%s deadline=%llu color_uploads=%llu "
+            "color_mb=%.1f depth_uploads=%llu depth_mb=%.1f "
+            "device_color_uploads=%llu device_depth_uploads=%llu "
+            "device_pair_uploads=%llu row_uploads=%llu row_rows=%llu "
+            "row_mb=%.1f row_surface_rows=%llu\n",
+            scope, deadline, total_color, total_color_mb, total_depth,
+            total_depth_mb,
+            (unsigned long long)nv->gpu_profile_color_uploads(),
+            (unsigned long long)nv->gpu_profile_depth_uploads(),
+            (unsigned long long)nv->gpu_profile_uploads(),
+            (unsigned long long)uc.row_uploads,
+            (unsigned long long)uc.row_upload_rows,
+            uc.row_upload_bytes / 1048576.0,
+            (unsigned long long)uc.row_upload_surface_rows);
+    }
+}
+
+void print_seam_census(const xlle::Nv2a* nv, const char* scope,
+                       unsigned long long deadline, SeamCensusSnapshot& prev) {
+    if (!nv) return;
+    SeamCensusSnapshot now;
+    now.jobs_latched = nv->seam_jobs_latched();
+    now.jobs_threadable = nv->seam_jobs_threadable();
+    now.jobs_queueable = nv->seam_jobs_queueable();
+    now.jobs_not_executed = nv->seam_jobs_not_executed();
+    now.vblanks = nv->seam_vblanks();
+    now.vblank_jobs_sum = nv->seam_vblank_jobs_sum();
+    now.resolve_transfers = nv->seam_resolve_transfers();
+    for (size_t r = 0; r < xlle::Nv2a::kSeamNotThreadableReasons; ++r)
+        now.not_threadable[r] = nv->seam_not_threadable(static_cast<uint32_t>(r));
+    for (size_t a = 0; a < xlle::Nv2a::kSeamAnchorCount; ++a) {
+        now.hits[a] = nv->seam_anchor_hits(a);
+        now.drains[a] = nv->seam_anchor_drains(a);
+        now.pending_sum[a] = nv->seam_anchor_pending_sum(a);
+    }
+    now.jobs_queued = nv->draw_jobs_queued();
+    now.jobs_inline = nv->draw_jobs_inline();
+    now.backpressure_inline = nv->draw_backpressure_inline();
+    now.backpressure_bytes = nv->draw_backpressure_bytes();
+    now.order_fences = nv->draw_order_fences();
+    now.drains_empty = nv->draw_drains_empty();
+    now.drains_nonempty = nv->draw_drains_nonempty();
+    now.depth_sum = nv->draw_depth_sum();
+    now.depth_samples = nv->draw_depth_samples();
+    now.worker_busy_ticks = nv->draw_worker_busy_ticks();
+    now.drain_wait_ticks = nv->draw_drain_wait_ticks();
+    now.elapsed_ticks = nv->draw_elapsed_ticks();
+    now.worker_failures = nv->draw_worker_failures();
+    for (size_t b = 0; b < xlle::Nv2a::kDrawDepthBuckets; ++b)
+        now.depth_hist[b] = nv->draw_depth_bucket(b);
+    now.span_jobs = nv->draw_span_jobs();
+    now.span_inline_jobs = nv->draw_span_inline_jobs();
+    now.span_barrier_wait_ticks = nv->draw_span_barrier_wait_ticks();
+    now.span_part0_busy_ticks = nv->draw_span_part0_busy_ticks();
+    now.span_helper_busy_ticks = nv->draw_span_helper_busy_ticks();
+    now.span_fold_ticks = nv->draw_span_fold_ticks();
+    now.renderer_query_fences = nv->draw_renderer_query_fences();
+    const uint64_t latched = now.jobs_latched - prev.jobs_latched;
+    const uint64_t threadable = now.jobs_threadable - prev.jobs_threadable;
+    const uint64_t executed_jobs =
+        latched - (now.jobs_not_executed - prev.jobs_not_executed);
+    const uint64_t vblanks = now.vblanks - prev.vblanks;
+    std::printf(
+        "[host] seam-census scope=%s deadline=%llu jobs_latched=%llu "
+        "jobs_executed=%llu jobs_threadable=%llu threadable_pct=%.3f "
+        "jobs_queueable=%llu queueable_pct=%.3f "
+        "jobs_not_executed=%llu nt_no_direct_ptr=%llu nt_hash_on=%llu "
+        "nt_f3_renderer_path=%llu nt_f15_debug_cb=%llu vblanks=%llu "
+        "vblank_jobs_sum=%llu vblank_jobs_max=%llu resolve_transfers=%llu\n",
+        scope, deadline,
+        (unsigned long long)latched,
+        (unsigned long long)executed_jobs,
+        (unsigned long long)threadable,
+        executed_jobs ? 100.0 * (double)threadable / (double)executed_jobs : 0.0,
+        (unsigned long long)(now.jobs_queueable - prev.jobs_queueable),
+        executed_jobs
+            ? 100.0 * (double)(now.jobs_queueable - prev.jobs_queueable) /
+                  (double)executed_jobs
+            : 0.0,
+        (unsigned long long)(now.jobs_not_executed - prev.jobs_not_executed),
+        (unsigned long long)(now.not_threadable[xlle::Nv2a::kSeamNoDirectPointer] -
+                             prev.not_threadable[xlle::Nv2a::kSeamNoDirectPointer]),
+        (unsigned long long)(now.not_threadable[xlle::Nv2a::kSeamHashOn] -
+                             prev.not_threadable[xlle::Nv2a::kSeamHashOn]),
+        (unsigned long long)(now.not_threadable[xlle::Nv2a::kSeamRendererPath] -
+                             prev.not_threadable[xlle::Nv2a::kSeamRendererPath]),
+        (unsigned long long)(now.not_threadable[xlle::Nv2a::kSeamDebugCallback] -
+                             prev.not_threadable[xlle::Nv2a::kSeamDebugCallback]),
+        (unsigned long long)vblanks,
+        (unsigned long long)(now.vblank_jobs_sum - prev.vblank_jobs_sum),
+        (unsigned long long)nv->seam_vblank_jobs_max(),
+        (unsigned long long)(now.resolve_transfers - prev.resolve_transfers));
+    // One line per anchor so the dominant anchor is visible rather than summed
+    // away: hits = the site was reached, drains = a threaded consumer would have
+    // had to stop there, pending = jobs it would have been waiting on.
+    for (size_t a = 0; a < xlle::Nv2a::kSeamAnchorCount; ++a) {
+        const uint64_t hits = now.hits[a] - prev.hits[a];
+        const uint64_t drains = now.drains[a] - prev.drains[a];
+        const uint64_t psum = now.pending_sum[a] - prev.pending_sum[a];
+        std::printf(
+            "[host] seam-anchor scope=%s deadline=%llu anchor=%s hits=%llu "
+            "drains=%llu pending_sum=%llu pending_mean=%.3f pending_max=%llu "
+            "drains_per_vblank=%.3f\n",
+            scope, deadline, xlle::Nv2a::seam_anchor_name(a),
+            (unsigned long long)hits, (unsigned long long)drains,
+            (unsigned long long)psum,
+            drains ? (double)psum / (double)drains : 0.0,
+            (unsigned long long)nv->seam_anchor_pending_max(a),
+            vblanks ? (double)drains / (double)vblanks : 0.0);
+    }
+    // Stage (e) (beads-xbox.1.15.5): the REAL queue. jobs_queued is the witness
+    // that threading actually ran -- a gate that passes with jobs_queued=0 is a
+    // gate that tested nothing. Ticks are raw rdtsc; the fractions are against
+    // draw_elapsed_ticks (wall since the worker was created), which is what makes
+    // them comparable across legs without needing a calibrated ns/tick.
+    const uint64_t queued = now.jobs_queued - prev.jobs_queued;
+    const uint64_t depth_samples = now.depth_samples - prev.depth_samples;
+    const uint64_t depth_sum = now.depth_sum - prev.depth_sum;
+    const uint64_t drains_empty = now.drains_empty - prev.drains_empty;
+    const uint64_t drains_nonempty = now.drains_nonempty - prev.drains_nonempty;
+    const uint64_t busy = now.worker_busy_ticks - prev.worker_busy_ticks;
+    const uint64_t waited = now.drain_wait_ticks - prev.drain_wait_ticks;
+    const uint64_t elapsed = now.elapsed_ticks - prev.elapsed_ticks;
+    std::printf(
+        "[host] draw-queue scope=%s deadline=%llu threads=%u jobs_queued=%llu "
+        "jobs_inline=%llu backpressure_inline=%llu drains_empty=%llu "
+        "drains_nonempty=%llu queue_depth_mean=%.3f queue_depth_max=%llu "
+        "backpressure_bytes=%llu queue_bytes_max=%llu order_fences=%llu "
+        "worker_busy_ticks=%llu drain_wait_ticks=%llu elapsed_ticks=%llu "
+        "worker_busy_frac=%.4f drain_wait_frac=%.4f worker_failures=%llu "
+        "renderer_query_fences=%llu\n",
+        scope, deadline, nv->draw_threads(),
+        (unsigned long long)queued,
+        (unsigned long long)(now.jobs_inline - prev.jobs_inline),
+        (unsigned long long)(now.backpressure_inline - prev.backpressure_inline),
+        (unsigned long long)drains_empty,
+        (unsigned long long)drains_nonempty,
+        depth_samples ? (double)depth_sum / (double)depth_samples : 0.0,
+        (unsigned long long)nv->draw_depth_max(),
+        (unsigned long long)(now.backpressure_bytes - prev.backpressure_bytes),
+        (unsigned long long)nv->draw_queue_bytes_max(),
+        (unsigned long long)(now.order_fences - prev.order_fences),
+        (unsigned long long)busy,
+        (unsigned long long)waited,
+        (unsigned long long)elapsed,
+        elapsed ? (double)busy / (double)elapsed : 0.0,
+        elapsed ? (double)waited / (double)elapsed : 0.0,
+        (unsigned long long)(now.worker_failures - prev.worker_failures),
+        (unsigned long long)(now.renderer_query_fences -
+                             prev.renderer_query_fences));
+    for (size_t b = 0; b < xlle::Nv2a::kDrawDepthBuckets; ++b) {
+        std::printf("[host] draw-depth scope=%s deadline=%llu bucket=%s count=%llu\n",
+                    scope, deadline, xlle::Nv2a::draw_depth_bucket_name(b),
+                    (unsigned long long)(now.depth_hist[b] - prev.depth_hist[b]));
+    }
+    // Stage (e2) (beads-xbox.1.15.9). Its own line rather than more fields on
+    // draw-queue, so the existing DRAW_QUEUE_RE parser is untouched. threads is
+    // the configured part count N; span_jobs counts draws that were divided
+    // across all N; span_inline counts draws that ran whole on the emulation
+    // thread because they are not threadable. barrier_wait_ticks is the
+    // emulation thread's time waiting for the helper parts AFTER finishing its
+    // own -- i.e. the mechanism's direct cost and its load-imbalance together.
+    // helper_busy_ticks is summed across the N-1 helpers, so the per-helper duty
+    // cycle is helper_busy / ((N-1) * elapsed).
+    {
+        const uint64_t span_jobs = now.span_jobs - prev.span_jobs;
+        const uint64_t barrier = now.span_barrier_wait_ticks -
+                                 prev.span_barrier_wait_ticks;
+        const uint64_t part0 = now.span_part0_busy_ticks -
+                               prev.span_part0_busy_ticks;
+        const uint64_t helper = now.span_helper_busy_ticks -
+                                prev.span_helper_busy_ticks;
+        const unsigned helpers =
+            nv->draw_threads() > 1 ? nv->draw_threads() - 1 : 0;
+        std::printf(
+            "[host] draw-span scope=%s deadline=%llu threads=%u span_jobs=%llu "
+            "span_inline=%llu barrier_wait_ticks=%llu part0_busy_ticks=%llu "
+            "helper_busy_ticks=%llu elapsed_ticks=%llu barrier_frac=%.4f "
+            "part0_busy_frac=%.4f helper_busy_frac=%.4f "
+            "barrier_ticks_per_job=%.1f fold_ticks=%llu\n",
+            scope, deadline, nv->draw_threads(),
+            (unsigned long long)span_jobs,
+            (unsigned long long)(now.span_inline_jobs - prev.span_inline_jobs),
+            (unsigned long long)barrier, (unsigned long long)part0,
+            (unsigned long long)helper, (unsigned long long)elapsed,
+            elapsed ? (double)barrier / (double)elapsed : 0.0,
+            elapsed ? (double)part0 / (double)elapsed : 0.0,
+            (elapsed && helpers) ? (double)helper / ((double)elapsed * helpers)
+                                 : 0.0,
+            span_jobs ? (double)barrier / (double)span_jobs : 0.0,
+            (unsigned long long)(now.span_fold_ticks - prev.span_fold_ticks));
+    }
+    // ---- worker_raster_ns: the SIBLING line, not a partition bucket ---------
+    // beads-xbox.1.15.9 loose end 1. [perf-excl]'s denominator is EMULATION-
+    // THREAD wall and it currently sums to ~99.94 % of it; folding helper time
+    // into it would make the partition sum PAST wall and destroy the one
+    // property that makes it trustworthy. So the off-thread raster time is
+    // printed HERE, beside the partition, explicitly labelled off-thread and
+    // explicitly excluded from unaccounted_ns.
+    //
+    // Reading it: nv2a_raster_witnessed in [perf-excl] measures part 0's share
+    // plus the per-job barrier wait, NOT the helpers' work. Total software
+    // raster CPU time for the run is part0_raster_ns + worker_raster_ns; at
+    // N = 4 that made the bucket under-report the true raster cost by ~3.7x.
+    // Printed only under --perf-accounting, because ns_per_tick is only
+    // calibrated there (perf_excl::init() is called from the same flag).
+    if (xlle::perf_excl::g_enabled) {
+        const uint64_t helper_ticks =
+            now.span_helper_busy_ticks - prev.span_helper_busy_ticks;
+        const uint64_t part0_ticks =
+            now.span_part0_busy_ticks - prev.span_part0_busy_ticks;
+        const uint64_t barrier_ticks =
+            now.span_barrier_wait_ticks - prev.span_barrier_wait_ticks;
+        const uint64_t fold_ticks = now.span_fold_ticks - prev.span_fold_ticks;
+        // Stage (e) N == 1 keeps its own accumulator; report it in the same
+        // line so one parser covers both threaded modes.
+        const uint64_t async_ticks =
+            now.worker_busy_ticks - prev.worker_busy_ticks;
+        const unsigned helpers =
+            nv->draw_threads() > 1 ? nv->draw_threads() - 1 : 0;
+        std::printf(
+            "[perf-worker] scope=%s deadline=%llu off_thread=1 "
+            "in_partition=0 threads=%u helpers=%u ns_per_tick=%.6f "
+            "worker_raster_ns=%llu async_worker_raster_ns=%llu "
+            "part0_raster_ns=%llu barrier_wait_ns=%llu span_fold_ns=%llu "
+            "span_jobs=%llu\n",
+            scope, deadline, nv->draw_threads(), helpers,
+            xlle::perf_excl::g_ns_per_tick,
+            (unsigned long long)xlle::perf_excl::ticks_to_ns(helper_ticks),
+            (unsigned long long)xlle::perf_excl::ticks_to_ns(async_ticks),
+            (unsigned long long)xlle::perf_excl::ticks_to_ns(part0_ticks),
+            (unsigned long long)xlle::perf_excl::ticks_to_ns(barrier_ticks),
+            (unsigned long long)xlle::perf_excl::ticks_to_ns(fold_ticks),
+            (unsigned long long)(now.span_jobs - prev.span_jobs));
+    }
+    prev = now;
+}
 
 struct HostMemoryUsage {
     uint64_t working_set = 0;
@@ -545,14 +1055,183 @@ bool write_generic_packet_dump(const char* path,
 
 }  // namespace
 
+// Idle fast-forward default (beads-xbox.1.4.7). FLIPPED TO TRUE 2026-09-05: the byte-lock
+// passed once the copy-on-write HDD attach (beads-xbox.1.14.11) made two runs of the same
+// binary the same experiment. Same binary, --nv2a-draw-threads 0, profile hashes on, 12 B,
+// 6 legs off vs 3 legs on (build/det/t01..t06 vs build/det/ff1..ff3): identical final frame
+// SHA-256, all 24 checkpoint PPMs and the scanout hash chain, all 22 per-profile hash lines,
+// retired/IRQ0/injected/pending/early-stop counters, the IDE census, AND the two always-on
+// input digests -- dev_digest over all 17,588,661 device-register accesses and dma_digest over
+// all 1,610,786 device DMA writes into guest RAM. Only the slice census moves, which is what
+// the feature is defined to move. See docs/PERF-METHODOLOGY.md section 3d.
+static constexpr bool kIdleFastForwardDefault = true;
+
+// ---- draw-thread and profile-hash defaults (beads-xbox.1.15.9, 2026-09-05) ----
+//
+// Stage (e2) span-parallel raster is DEFAULT ON. It is work division, not
+// latency hiding: each draw's destination scanlines are split across N parts
+// that cannot touch each other's pixels, with a barrier per draw, so exactly one
+// draw is ever in flight and every coherence anchor sees an empty queue -- the
+// same state --nv2a-draw-threads 0 leaves them in. --nv2a-draw-threads 0 remains
+// the inline fallback and runs the identical executor with parts == 1.
+//
+// kDrawThreadsAutoTarget is the part count the knee sweep chose. The effective
+// default is min(target, hardware_concurrency - 2) so a smaller host is not
+// oversubscribed -- two logical processors are left for the GL driver, the host
+// poll and the OS -- and 0 (inline) on anything with fewer than two, where
+// ndsrecomp measured a REGRESSION from this class of change.
+// 12, from the knee sweep of 2026-09-05 on the reference host (9800X3D, 8C/16T),
+// same binary, interleaved 3+3, total 12 B wall, median AND min, 5 % threshold:
+//   0 -> 4 -> 8   beads-xbox.1.15.9, PASS at both steps (-26.8 %, -11.8 %)
+//   8 -> 12       PASS  median -6.28 %, min -6.14 %, 3 of 3 rounds favour 12
+//   12 -> 16      FAIL  median +24.07 %, min +12.37 % (a REGRESSION), and arm 16
+//                 has cv 7.3 % against 0.33 % at 12 -- the signature of running
+//                 the emulation thread plus 15 helpers on 16 logical processors
+//                 with nothing left for the GL driver, the host poll and the OS.
+// So the knee is 12 and the rule ("largest N that clears 5 % over the previous
+// step, else the previous step") selects it.
+static constexpr unsigned kDrawThreadsAutoTarget = 12;
+
+static unsigned auto_draw_threads() {
+    const unsigned hw = std::thread::hardware_concurrency();
+    if (hw < 2) return 0;
+    const unsigned budget = hw - 2;
+    unsigned n = kDrawThreadsAutoTarget < budget ? kDrawThreadsAutoTarget : budget;
+    if (n > xlle::Nv2a::kDrawThreadsMax) n = xlle::Nv2a::kDrawThreadsMax;
+    return n < 2 ? 0 : n;
+}
+
+// Per-write FNV-1a profile hashes are DEFAULT OFF. They are an instrument, not
+// guest-visible output: the fold is a two-cycle loop-carried dependency executed
+// once per written word (727 M writes for the radial profile alone) on the
+// hottest loop in the emulator, and -- decisively -- hash_on forces every job
+// INLINE (design section 4.3 option O3), so leaving them on would silently
+// disable the span raster that is now the default. The exactness surface is
+// unchanged in substance: the framebuffer SHA, the 24 frame-series checkpoint
+// PPMs, the scanout hash chain and every guest-side counter remain the record.
+// --nv2a-profile-hashes turns the folds back on for a hash-level comparison.
+// Stage (f) witnessed-profile GPU executor default (beads-xbox.1.15.7).
+//
+// DEFAULT ON as of 2026-09-05 (beads-xbox.1.15.10 phase 2 session 2). It was
+// off while the executor lost the gate: phase 1 measured -30.02 pct median,
+// phase 2 session 1 -13.15 pct. Session 2 removed the three mechanisms behind
+// that (the GPU serialized behind the resolve, FP64 in the fragment shaders,
+// and per-pixel staging on both sides of the transfer) and the 3+3 interleaved
+// gate then reads median -6.11 pct / min -5.85 pct FASTER against the 5 pct
+// bar, 3 of 3 rounds, with the golden final SHA on every leg and 24 of 28
+// checkpoints byte-identical (the other four differ by ONE pixel each, 1-4
+// LSB, largest connected component 1 px).
+// --no-nv2a-gpu-profiles is the software-raster fallback and runs the identical
+// executor with every job declined.
+constexpr bool kNv2aGpuProfilesDefault = true;
+static constexpr bool kNv2aProfileHashesDefault = false;
+
 int main(int argc, char** argv) {
     bool serve = false, window = false, interactive = false;
     bool test_synthetic_controller_hub = false;
     bool test_synthetic_controller_hub_input_down = false;
     bool test_synthetic_controller_hub_input_down_a = false;
     bool reduced_retire_diag = false;
+    // CPU tier (beads-xbox.1.4.6). Default: block-granularity scheduling, no per-instruction
+    // hook. --cpu-insn-hook is the toggle-off arm -- identical binary, identical device
+    // models, identical guest workload, only the floor's scheduling granularity differs.
+    bool cpu_insn_hook = false;
+    // Default: the guest time-stamp counter is the retired-instruction clock. The legacy
+    // behaviour passed the HOST rdtsc straight through, which makes guest behaviour depend
+    // on how fast the emulator runs; keep it only to compare against a pre-2026-09-04 build.
+    bool legacy_host_tsc = false;
+    // Idle fast-forward (beads-xbox.1.4.7). Retires whole kernel-idle-loop iterations
+    // without executing them, bounded by the next device deadline. Default is set by the
+    // byte-lock verdict recorded on the bead; both spellings always exist so an A/B can
+    // toggle it on the SAME binary.
+    bool idle_fast_forward = kIdleFastForwardDefault;
+    // HDD write policy (beads-xbox.1.14.11). Default copy-on-write: guest writes are held in
+    // memory for the run and the image file is never modified, so consecutive replays start
+    // from identical bytes. --hdd-writeback opts back into persisting them.
+    bool hdd_writeback = false;
+    // Determinism trace reporting (beads-xbox.1.14.11). Capture is always on in
+    // XboxMachine; these only choose where it is reported.
+    const char* det_log_path = nullptr;
+    uint64_t det_log_interval = 1000000;
+    const char* det_ring_dump_path = nullptr;
+    uint64_t det_ring_dump_at = 0;
+    const char* det_dev_dump_path = nullptr;
+    uint64_t det_dev_dump_at = 0;
+    const char* det_dma_dump_path = nullptr;
+    uint64_t det_dma_dump_at = 0;
+    std::vector<std::pair<std::string, uint64_t>> det_ram_dumps;
     bool perf_accounting = false;
     bool perf_pull_drain = false;
+    // NV2A detailed telemetry used to ride on --perf-accounting (see the set_detailed_
+    // telemetry call below). That coupling meant an instrumented run executed DIFFERENT
+    // hot-loop code from the run it was supposed to be measuring: collect_diagnostics
+    // turns on per-vertex stats folding and the generic-combiner fingerprint census
+    // (nv2a.cpp submit_vertex_batch / rasterize_generic_combiner_batch), which is a large
+    // part of the 17.1 % cost attributed to --perf-accounting
+    // (docs/PERF-AUDIT-2026-09-02.md §6). It now has its own switch
+    // (beads-xbox.1.14.3 item 4).
+    bool nv2a_detailed_telemetry = false;
+    // Per-write FNV-1a output-hash folds in the witnessed raster fragment loop
+    // (beads-xbox.1.15.2 stage b2). Default OFF as of 2026-09-05 -- see
+    // kNv2aProfileHashesDefault above for why. --nv2a-profile-hashes turns them
+    // back on and, by option O3, forces every draw inline with them.
+    bool nv2a_profile_hashes = kNv2aProfileHashesDefault;
+    // Stage (f): the witnessed-profile GPU executor. Default OFF until the
+    // behavioral comparison in PERF-METHODOLOGY.md section 3 passes.
+    bool nv2a_gpu_profiles = kNv2aGpuProfilesDefault;
+    // Stage (f): let the GPU executor take jobs whose 1/16-pixel screen
+    // coordinates exceed the exact-double product bound. Off by default: it is
+    // faster but it moved one checkpoint frame (nv2a.hpp
+    // kGpuFixedCoordinateLimitExact).
+    bool nv2a_gpu_relaxed_coords = false;
+    bool nv2a_gpu_exact_coords = false;
+    // Bit 0 = kSwizzledRadialColor, bit 1 = kPitchTexturedColor,
+    // bit 2 = kPitchProjectedColor (beads-xbox.1.15.10 phase 4, lever A).
+    uint32_t nv2a_gpu_profile_mask = 7;
+    bool nv2a_gpu_vblank_resolve = false;
+    // beads-xbox.1.15.10 step 1 (overlap). The phase-2 measurement had
+    // 5 628 312 triangles in 965 draw calls (5 832 each, ~8.0 ms of GPU work
+    // each), every one issued immediately before the readback that waited on
+    // it. 0 restores that unbounded batch. The default is the flat part of a
+    // measured 2 B sweep (total wall, two rounds, same session): 32 -> 15.01 s,
+    // 64 -> 15.07, 128 -> 14.98, 256 -> 15.09, 1024 -> 15.72, 4096 -> 16.24,
+    // unbounded -> 17.82. 256 is the largest bound still on the floor, so it
+    // takes the floor with the fewest driver submissions.
+    uint64_t nv2a_gpu_flush_triangles = 256;
+    bool nv2a_gpu_vblank_kick = true;
+    // beads-xbox.1.15.10 phase 3 step 3: serve a whole-plane CLEAR_SURFACE on a
+    // GPU-authoritative pair as a glClear instead of a resolve + software fill
+    // + invalidate. Default ON with the executor; --no-nv2a-gpu-clear restores
+    // the software clear on the same binary so the two can be A/B'd.
+    bool nv2a_gpu_clear = true;
+    bool nv2a_gpu_skip_empty_packets = true;
+    bool nv2a_gpu_kick_flush = true;
+    // beads-xbox.1.15.10 phase 4 (lever C). --no-nv2a-gpu-plane-split is
+    // the A/B arm that restores the pre-phase-4 pair-scoped slot rule.
+    bool nv2a_gpu_plane_split = true;
+    // beads-xbox.1.15.10 phase 4 (lever B) CEILING PROBE. DIAGNOSTIC, KNOWN
+    // INCORRECT when on: it skips the resolve that keeps a witnessed texture
+    // snapshot coherent with a GPU-authoritative surface. Its only purpose is
+    // to bound what a correct resident-texture sampler could win.
+    bool nv2a_gpu_unsafe_skip_texture_resolve = false;
+    uint32_t nv2a_gpu_ssbo_ring = 4;
+    // beads-xbox.1.15.10 step 2. DEFAULT ON with the executor: FP64 in the
+    // witnessed fragment shaders cost gpu_draw_ns 10.746 s against 2.364 s for
+    // the same run in single precision (matched instrumented pair, 12 B), and
+    // it drags drain_ns with it (3.715 -> 0.889 s). The 28-checkpoint
+    // comparison against the golden is the acceptance test and it passes.
+    // --no-nv2a-gpu-fp32-shader restores the double-precision variant as a
+    // bisection tool; the SSBO record is byte-identical either way.
+    bool nv2a_gpu_fp32_shader = true;
+    // Draw threads. 0 = inline, the toggle-off fallback, which runs the SAME
+    // executor with parts == 1; 1 = the stage (e) asynchronous single consumer
+    // and its ring, behind the ten coherence anchors of DESIGN-NV2A-SEAM.md
+    // section 2.2(c), retained as a mechanism and never a win; N >= 2 = stage
+    // (e2) span-parallel work division (beads-xbox.1.15.9), which is the
+    // DEFAULT as of 2026-09-05 -- see auto_draw_threads() above. A job is only
+    // divisible with the per-write FNV folds off, which is why those now default
+    // off too; --nv2a-profile-hashes forces every draw inline again.
+    unsigned nv2a_draw_threads = auto_draw_threads();
     bool net_disconnected = false;
     bool pfifo_clear_trace = false;
     const char* nv2a_renderer_name = "software";
@@ -615,10 +1294,146 @@ int main(int argc, char** argv) {
             test_synthetic_controller_hub_input_down_a = true;
         else if (!std::strcmp(argv[i], "--reduced-retire-diag"))
             reduced_retire_diag = true;
+        else if (!std::strcmp(argv[i], "--cpu-insn-hook"))
+            cpu_insn_hook = true;
+        else if (!std::strcmp(argv[i], "--legacy-host-tsc"))
+            legacy_host_tsc = true;
+        else if (!std::strcmp(argv[i], "--det-log") && i + 2 < argc) {
+            det_log_path = argv[++i];
+            det_log_interval = std::strtoull(argv[++i], nullptr, 0);
+            if (det_log_interval == 0) {
+                std::fprintf(stderr,
+                             "[host] --det-log needs a positive interval\n");
+                return 1;
+            }
+        }
+        else if (!std::strcmp(argv[i], "--det-ring-dump") && i + 2 < argc) {
+            det_ring_dump_path = argv[++i];
+            det_ring_dump_at = std::strtoull(argv[++i], nullptr, 0);
+        }
+        else if (!std::strcmp(argv[i], "--det-dev-dump") && i + 2 < argc) {
+            det_dev_dump_path = argv[++i];
+            det_dev_dump_at = std::strtoull(argv[++i], nullptr, 0);
+        }
+        else if (!std::strcmp(argv[i], "--det-dma-dump") && i + 2 < argc) {
+            det_dma_dump_path = argv[++i];
+            det_dma_dump_at = std::strtoull(argv[++i], nullptr, 0);
+        }
+        else if (!std::strcmp(argv[i], "--det-ram-dump") && i + 2 < argc) {
+            const char* path = argv[++i];
+            det_ram_dumps.emplace_back(path, std::strtoull(argv[++i], nullptr, 0));
+        }
+        else if (!std::strcmp(argv[i], "--hdd-writeback"))
+            hdd_writeback = true;
+        else if (!std::strcmp(argv[i], "--no-hdd-writeback"))
+            hdd_writeback = false;
+        else if (!std::strcmp(argv[i], "--idle-fast-forward"))
+            idle_fast_forward = true;
+        else if (!std::strcmp(argv[i], "--no-idle-fast-forward"))
+            idle_fast_forward = false;
         else if (!std::strcmp(argv[i], "--perf-accounting"))
             perf_accounting = true;
         else if (!std::strcmp(argv[i], "--perf-pull-drain"))
             perf_pull_drain = true;
+        else if (!std::strcmp(argv[i], "--nv2a-detailed-telemetry"))
+            nv2a_detailed_telemetry = true;
+        else if (!std::strcmp(argv[i], "--no-nv2a-profile-hashes"))
+            nv2a_profile_hashes = false;
+        // Positive spelling. BOTH spellings always exist on the same binary so
+        // the instrument can be toggled in an A/B without changing the build,
+        // whichever way the default points (PERF-METHODOLOGY.md section 3).
+        else if (!std::strcmp(argv[i], "--nv2a-profile-hashes"))
+            nv2a_profile_hashes = true;
+        // Stage (f) GPU-resident consumer (beads-xbox.1.15.7). Both spellings
+        // always exist so the executor can be toggled in a same-binary A/B
+        // whichever way the default points (PERF-METHODOLOGY.md section 3).
+        else if (!std::strcmp(argv[i], "--nv2a-gpu-profiles"))
+            nv2a_gpu_profiles = true;
+        else if (!std::strcmp(argv[i], "--no-nv2a-gpu-profiles"))
+            nv2a_gpu_profiles = false;
+        else if (!std::strcmp(argv[i], "--nv2a-gpu-profile-mask") && i + 1 < argc) {
+            uint64_t parsed = 0;
+            if (!parse_u64_arg(argv[++i], parsed) || parsed > 7) {
+                std::fprintf(stderr, "invalid --nv2a-gpu-profile-mask\n");
+                return 2;
+            }
+            nv2a_gpu_profile_mask = static_cast<uint32_t>(parsed);
+        }
+        else if (!std::strcmp(argv[i], "--nv2a-gpu-vblank-resolve"))
+            nv2a_gpu_vblank_resolve = true;
+        // beads-xbox.1.15.10 step 1 (overlap): triangle bound on the pending
+        // witnessed batch. 0 = unbounded, the pre-step-1 behavior where the
+        // batch is issued only when a resolve needs it and no GPU work overlaps
+        // the emulation thread. Both spellings of the vblank kick exist on one
+        // binary so either can be bisected without a rebuild.
+        else if (!std::strcmp(argv[i], "--nv2a-gpu-flush-triangles") &&
+                 i + 1 < argc) {
+            uint64_t parsed = 0;
+            if (!parse_u64_arg(argv[++i], parsed)) {
+                std::fprintf(stderr, "invalid --nv2a-gpu-flush-triangles\n");
+                return 2;
+            }
+            nv2a_gpu_flush_triangles = parsed;
+        }
+        else if (!std::strcmp(argv[i], "--nv2a-gpu-vblank-kick"))
+            nv2a_gpu_vblank_kick = true;
+        else if (!std::strcmp(argv[i], "--no-nv2a-gpu-vblank-kick"))
+            nv2a_gpu_vblank_kick = false;
+        else if (!std::strcmp(argv[i], "--nv2a-gpu-clear"))
+            nv2a_gpu_clear = true;
+        else if (!std::strcmp(argv[i], "--no-nv2a-gpu-clear"))
+            nv2a_gpu_clear = false;
+        else if (!std::strcmp(argv[i], "--nv2a-gpu-skip-empty-packets"))
+            nv2a_gpu_skip_empty_packets = true;
+        else if (!std::strcmp(argv[i], "--no-nv2a-gpu-skip-empty-packets"))
+            nv2a_gpu_skip_empty_packets = false;
+        // beads-xbox.1.15.10 step 2: single-precision witnessed fragment
+        // shaders. Both spellings on one binary; the record layout is identical
+        // either way, so this is a same-binary A/B.
+        else if (!std::strcmp(argv[i], "--nv2a-gpu-fp32-shader"))
+            nv2a_gpu_fp32_shader = true;
+        else if (!std::strcmp(argv[i], "--no-nv2a-gpu-fp32-shader"))
+            nv2a_gpu_fp32_shader = false;
+        else if (!std::strcmp(argv[i], "--nv2a-gpu-kick-flush"))
+            nv2a_gpu_kick_flush = true;
+        else if (!std::strcmp(argv[i], "--no-nv2a-gpu-kick-flush"))
+            nv2a_gpu_kick_flush = false;
+        else if (!std::strcmp(argv[i], "--nv2a-gpu-unsafe-skip-texture-resolve"))
+            nv2a_gpu_unsafe_skip_texture_resolve = true;
+        else if (!std::strcmp(argv[i], "--nv2a-gpu-plane-split"))
+            nv2a_gpu_plane_split = true;
+        else if (!std::strcmp(argv[i], "--no-nv2a-gpu-plane-split"))
+            nv2a_gpu_plane_split = false;
+        else if (!std::strcmp(argv[i], "--nv2a-gpu-ssbo-ring") && i + 1 < argc) {
+            uint64_t parsed = 0;
+            if (!parse_u64_arg(argv[++i], parsed) || parsed < 1 || parsed > 16) {
+                std::fprintf(stderr, "invalid --nv2a-gpu-ssbo-ring (1..16)\n");
+                return 2;
+            }
+            nv2a_gpu_ssbo_ring = static_cast<uint32_t>(parsed);
+        }
+        else if (!std::strcmp(argv[i], "--nv2a-gpu-relaxed-coords"))
+            nv2a_gpu_relaxed_coords = true;
+        // Phase 2 (beads-xbox.1.15.10): the relaxed bound is now the default;
+        // this restores the pre-phase-2 2^24 bound as a bisection tool.
+        else if (!std::strcmp(argv[i], "--nv2a-gpu-exact-coords"))
+            nv2a_gpu_exact_coords = true;
+        else if (!std::strcmp(argv[i], "--no-nv2a-gpu-relaxed-coords"))
+            nv2a_gpu_relaxed_coords = false;
+        else if (!std::strcmp(argv[i], "--nv2a-draw-threads") && i + 1 < argc) {
+            uint64_t parsed = 0;
+            if (!parse_u64_arg(argv[++i], parsed) ||
+                parsed > xlle::Nv2a::kDrawThreadsMax) {
+                std::fprintf(stderr,
+                             "invalid --nv2a-draw-threads '%s' (0..%u; 0=inline, "
+                             "1=stage (e) single async consumer, N>=2=stage (e2) "
+                             "destination-span parallel raster, "
+                             "beads-xbox.1.15.9)\n",
+                             argv[i], xlle::Nv2a::kDrawThreadsMax);
+                return 2;
+            }
+            nv2a_draw_threads = static_cast<unsigned>(parsed);
+        }
         else if (!std::strcmp(argv[i], "--perf-generic-top") && i + 1 < argc) {
             uint64_t parsed = 0;
             if (!parse_u64_arg(argv[++i], parsed) || parsed == 0 ||
@@ -1011,6 +1826,18 @@ int main(int argc, char** argv) {
             return 1;
         }
     }
+    if (nv2a_renderer) {
+        nv2a_renderer->set_witnessed_flush_triangles(nv2a_gpu_flush_triangles);
+        nv2a_renderer->set_witnessed_kick_flush(nv2a_gpu_kick_flush);
+        nv2a_renderer->set_witnessed_plane_split(nv2a_gpu_plane_split);
+        nv2a_renderer->set_witnessed_ssbo_ring(nv2a_gpu_ssbo_ring);
+        std::string fp32_error;
+        if (!nv2a_renderer->set_witnessed_fp32_shader(nv2a_gpu_fp32_shader,
+                                                      fp32_error)) {
+            std::fprintf(stderr, "[nv2a-renderer] %s\n", fp32_error.c_str());
+            return 1;
+        }
+    }
     std::printf("[nv2a-renderer] selected=%s generic-combiner=%s\n",
                 nv2a_renderer_name,
                 nv2a_renderer ? "accelerated when supported, otherwise software" :
@@ -1073,9 +1900,89 @@ int main(int argc, char** argv) {
             }
             // Stand up the I/O fabric (PCI host, SMBus+SMC, NV2A) the 2BL platform-init drives.
             mach.init_devices();
+            // Idle fast-forward (beads-xbox.1.4.7). Off unless asked for; when on, the skip
+            // announces itself so no log can be read as a fast-forwarded run by accident.
+            mach.set_idle_fast_forward(idle_fast_forward);
+            // Determinism trace sinks (beads-xbox.1.14.11). The per-slice fold and the
+            // 1 Mi-slice ring run unconditionally; these only open report sinks.
+            if (det_log_path) {
+                if (!mach.open_det_log(det_log_path, det_log_interval)) {
+                    std::fprintf(stderr, "[host] --det-log: cannot open %s\n", det_log_path);
+                    return 1;
+                }
+                std::printf("[det] checkpoint log %s every %llu instructions\n",
+                            det_log_path,
+                            static_cast<unsigned long long>(det_log_interval));
+            }
+            for (const auto& dump : det_ram_dumps) {
+                mach.add_det_ram_dump(dump.first, dump.second);
+                std::printf("[det] ram dump %s at insns>=%llu\n", dump.first.c_str(),
+                            static_cast<unsigned long long>(dump.second));
+            }
+            if (det_dev_dump_path)
+                mach.set_det_dev_dump(det_dev_dump_path, det_dev_dump_at);
+            if (det_dma_dump_path)
+                mach.set_det_dma_dump(det_dma_dump_path, det_dma_dump_at);
+            if (xlle_heap_poison_enabled()) {
+                std::printf("[det] heap poison ON: every operator-new block starts as "
+                            "0x%02x (beads-xbox.1.14.11)\n", xlle_heap_poison_byte());
+            }
+            if (det_ring_dump_path) {
+                mach.set_det_ring_dump(det_ring_dump_path, det_ring_dump_at);
+                std::printf("[det] ring dump %s at insns>=%llu\n", det_ring_dump_path,
+                            static_cast<unsigned long long>(det_ring_dump_at));
+            }
+            if (idle_fast_forward) {
+                std::printf("[host] idle-fast-forward ON: whole idle-loop iterations at "
+                            "0x%08x are retired without executing, bounded by the next "
+                            "device deadline\n", 0x8001e3ceu);
+            }
             if (mach.nv2a()) {
+                // Decoupled from --perf-accounting (beads-xbox.1.14.3 item 4): timing must
+                // not change the code being timed. Use --nv2a-detailed-telemetry to force
+                // it on alongside --reduced-retire-diag.
                 mach.nv2a()->set_detailed_telemetry(
-                    !reduced_retire_diag || perf_accounting);
+                    !reduced_retire_diag || nv2a_detailed_telemetry);
+                // Default OFF as of 2026-09-05 (kNv2aProfileHashesDefault):
+                // the per-write folds are an instrument, and leaving them on
+                // would force every draw inline and silently disable the span
+                // raster. --nv2a-profile-hashes opts back in.
+                mach.nv2a()->set_profile_hashes_enabled(nv2a_profile_hashes);
+                mach.nv2a()->set_gpu_profiles_enabled(nv2a_gpu_profiles);
+                mach.nv2a()->set_gpu_relaxed_coords(nv2a_gpu_relaxed_coords);
+                mach.nv2a()->set_gpu_exact_coords(nv2a_gpu_exact_coords);
+                mach.nv2a()->set_gpu_profile_mask(nv2a_gpu_profile_mask);
+                mach.nv2a()->set_gpu_unsafe_skip_texture_resolve(
+                    nv2a_gpu_unsafe_skip_texture_resolve);
+                mach.nv2a()->set_gpu_vblank_resolve(nv2a_gpu_vblank_resolve);
+                mach.nv2a()->set_gpu_vblank_kick(nv2a_gpu_vblank_kick);
+                mach.nv2a()->set_gpu_clear_enabled(nv2a_gpu_clear);
+                mach.nv2a()->set_gpu_skip_empty_packets(
+                    nv2a_gpu_skip_empty_packets);
+                // Draw threads. Default is auto_draw_threads() as of
+                // 2026-09-05; --nv2a-draw-threads 0 is the inline fallback. The
+                // pool is created here and torn down by ~Nv2a. At N >= 2 no job
+                // ever enters the ring, so every coherence anchor sees an empty
+                // queue -- the state the inline path leaves them in.
+                if (!mach.nv2a()->set_draw_threads(nv2a_draw_threads)) {
+                    std::fprintf(stderr,
+                                 "NV2A draw threads %u refused (max %u)\n",
+                                 nv2a_draw_threads, xlle::Nv2a::kDrawThreadsMax);
+                    return 2;
+                }
+                // Printed unconditionally now that threads are on by default:
+                // "which mode did this leg actually run in" is part of every
+                // report's identity, and the inline case is the one a reader is
+                // most likely to assume rather than check.
+                std::printf("[host] nv2a-draw-threads=%u hw_concurrency=%u mode=%s "
+                            "queue-slots=%zu profile-hashes=%d\n",
+                            nv2a_draw_threads,
+                            std::thread::hardware_concurrency(),
+                            nv2a_draw_threads == 0   ? "inline"
+                            : nv2a_draw_threads == 1 ? "async-consumer"
+                                                     : "destination-spans",
+                            (size_t)xlle::Nv2a::kDrawQueueSlots,
+                            nv2a_profile_hashes ? 1 : 0);
             }
             if (test_synthetic_controller_hub) {
                 std::printf("[input] TEST-ONLY synthetic Controller S hub topology enabled; "
@@ -1561,11 +2468,16 @@ int main(int argc, char** argv) {
                         debug_nv2a_surface_event_after_insns));
             }
             if (hdd) {
-                if (!mach.attach_hdd(hdd)) {
+                if (!mach.attach_hdd(hdd, hdd_writeback)) {
                     std::fprintf(stderr, "[hdd] attach failed: %s\n", hdd);
                     return 1;
                 }
-                std::printf("[hdd] attached %s (IDE drive 0, security LOCKED)\n", hdd);
+                // The write policy is part of the run's identity: the retail boot increments
+                // the LBA-3 "BRFR" boot counter and writes it straight back, so a writeback
+                // run changes its own input for the NEXT run (beads-xbox.1.14.11).
+                std::printf("[hdd] attached %s (IDE drive 0, security LOCKED, writes=%s)\n",
+                            hdd, hdd_writeback ? "PERSISTED to the image"
+                                               : "copy-on-write, image never modified");
             } else {
                 std::printf("[hdd] no --hdd image: IDE drive 0 reports absent\n");
             }
@@ -1597,9 +2509,183 @@ int main(int argc, char** argv) {
             std::string live_scanout_error;
             uint64_t next_frame_series_insn = frame_series_every;
             bool frame_series_exhausted = false;
+            // Stage (d) seam census: previous checkpoint's totals, so each line
+            // is an interval delta (methodology section 2 rule 9 -- an instrument
+            // carries its own denominators).
+            SeamCensusSnapshot seam_prev;
             auto frame_series_interval_start = std::chrono::steady_clock::now();
             uint64_t frame_series_vblanks_start =
                 mach.nv2a() ? mach.nv2a()->vblanks() : 0;
+            // Idle census reporting. Always on (NOT gated on --perf-accounting or on the
+            // retire-diag switch): the machine-side accumulators cost one compare plus one
+            // 4-byte guest read per CPU slice. Printed as INTERVAL deltas at every
+            // frame-series checkpoint so a per-window idle fraction is directly readable, and
+            // once cumulatively at end of run.
+            XboxMachine::IdleCensus idle_census_prev{};
+            // Block-tier denominators travel with the census so every claim about the
+            // instruction clock carries its own counts (PERF-METHODOLOGY rule 9). They are
+            // always on: `tb_icount_misses` is the exactness self-check and must read 0.
+            UnicornFloor* unicorn_floor = dynamic_cast<UnicornFloor*>(&mach.cpu());
+            if (unicorn_floor && cpu_insn_hook) unicorn_floor->force_insn_scheduling();
+            xlle_guest_tsc_deterministic = legacy_host_tsc ? 0 : 1;
+            std::printf(
+                "[cpu] scheduling=%s guest-tsc=%s\n",
+                (unicorn_floor && unicorn_floor->insn_scheduling()) ? "per-instruction"
+                                                                   : "per-block",
+                legacy_host_tsc ? "host-rdtsc-passthrough (NON-DETERMINISTIC)"
+                                : "retired-instruction clock");
+            // Always-on translation-block PC ring (PRINCIPLES 7). Read backwards after the
+            // fact; never armed. Prints the last `n` block entries, oldest first.
+            auto print_block_pc_ring = [&](const char* tag, size_t n) {
+                if (!unicorn_floor) return;
+                const uint64_t writes = unicorn_floor->block_pc_ring_writes();
+                const uint32_t* ring = unicorn_floor->block_pc_ring();
+                if (!writes || !ring) return;
+                const size_t cap = UnicornFloor::kBlockPcRing;
+                const size_t have = writes < cap ? static_cast<size_t>(writes) : cap;
+                if (n > have) n = have;
+                std::printf("[ring] block-pc %s last=%zu of %llu:", tag, n,
+                            static_cast<unsigned long long>(writes));
+                for (size_t i = 0; i < n; ++i)
+                    std::printf(" %08x", ring[(writes - n + i) & (cap - 1)]);
+                std::printf("\n");
+            };
+            UnicornFloor::BlockStats block_stats_prev{};
+            uint64_t idle_census_prev_irq0 = 0;
+            uint64_t idle_census_prev_injected = 0;
+            uint64_t idle_census_prev_pending = 0;
+            auto print_idle_census = [&](const char* scope, unsigned long long deadline,
+                                         bool interval) {
+                const XboxMachine::IdleCensus& now = mach.idle_census();
+                const XboxMachine::IdleCensus& was = idle_census_prev;
+                const auto delta = [interval](uint64_t a, uint64_t b) {
+                    return interval ? a - b : a;
+                };
+                const auto pct = [](uint64_t a, uint64_t b) {
+                    return b ? 100.0 * static_cast<double>(a) / static_cast<double>(b) : 0.0;
+                };
+                const uint64_t slices = delta(now.slices, was.slices);
+                const uint64_t insns = delta(now.insns, was.insns);
+                const uint64_t idle_slices = delta(now.idle_slices, was.idle_slices);
+                const uint64_t idle_insns = delta(now.idle_insns, was.idle_insns);
+                const UnicornFloor::BlockStats bs =
+                    unicorn_floor ? unicorn_floor->block_stats() : UnicornFloor::BlockStats{};
+                const UnicornFloor::BlockStats& bsw = block_stats_prev;
+                std::printf(
+                    "[host] idle-census scope=%s deadline=%llu slices=%llu insns=%llu "
+                    "idle_eip_slices=%llu idle_slice_pct=%.3f idle_insns=%llu "
+                    "idle_insn_pct=%.3f early_stops=%llu early_stops_irq=%llu "
+                    "budget_slack=%llu "
+                    "thread_reads=%llu irq0=%llu injected=%llu pending_boundaries=%llu "
+                    "tb_entries=%llu tb_insns=%llu tb_icount_entries=%llu "
+                    "tb_icount_misses=%llu tb_icount_evictions=%llu tb_deadline_stops=%llu "
+                    "tb_irq_window_stops=%llu tb_bootstrap_blocks=%llu "
+                    "tb_skipped_insns=%llu "
+                    "runs_insn_mode=%llu runs_block_mode=%llu "
+                    "guest_tsc_reads=%llu guest_tsc_deterministic=%d "
+                    "ff_on=%d ff_skips=%llu ff_insns=%llu ff_iters=%llu ff_insn_pct=%.3f "
+                    "ff_max_insns=%llu ff_at_phase=%llu ff_p0=%llu ff_p1=%llu ff_p2=%llu ff_p6=%llu "
+                    "ff_rej_flags=%llu ff_rej_state=%llu "
+                    "ff_rej_short=%llu ff_rej_read=%llu ff_rej_bytes=%llu "
+                    "idle_range=0x%08x-0x%08x "
+                    "det_digest=%016llx det_slices=%llu "
+                    "dev_digest=%016llx dev_events=%llu "
+                    "dma_digest=%016llx dma_writes=%llu",
+                    scope, deadline,
+                    static_cast<unsigned long long>(slices),
+                    static_cast<unsigned long long>(insns),
+                    static_cast<unsigned long long>(idle_slices), pct(idle_slices, slices),
+                    static_cast<unsigned long long>(idle_insns), pct(idle_insns, insns),
+                    static_cast<unsigned long long>(delta(now.early_stops, was.early_stops)),
+                    static_cast<unsigned long long>(
+                        delta(now.early_stops_irq_armed, was.early_stops_irq_armed)),
+                    static_cast<unsigned long long>(delta(now.budget_slack, was.budget_slack)),
+                    static_cast<unsigned long long>(delta(now.thread_reads, was.thread_reads)),
+                    static_cast<unsigned long long>(
+                        delta(mach.irq0_pulses(), idle_census_prev_irq0)),
+                    static_cast<unsigned long long>(
+                        delta(mach.injected_interrupts(), idle_census_prev_injected)),
+                    static_cast<unsigned long long>(
+                        delta(mach.pending_boundaries(), idle_census_prev_pending)),
+                    static_cast<unsigned long long>(delta(bs.tb_entries, bsw.tb_entries)),
+                    static_cast<unsigned long long>(delta(bs.tb_insns, bsw.tb_insns)),
+                    static_cast<unsigned long long>(bs.icount_entries),
+                    static_cast<unsigned long long>(bs.icount_misses),
+                    static_cast<unsigned long long>(bs.icount_evictions),
+                    static_cast<unsigned long long>(
+                        delta(bs.deadline_stops, bsw.deadline_stops)),
+                    static_cast<unsigned long long>(
+                        delta(bs.irq_window_stops, bsw.irq_window_stops)),
+                    static_cast<unsigned long long>(bs.bootstrap_blocks),
+                    static_cast<unsigned long long>(
+                        delta(bs.skipped_insns, bsw.skipped_insns)),
+                    static_cast<unsigned long long>(
+                        delta(bs.insn_mode_runs, bsw.insn_mode_runs)),
+                    static_cast<unsigned long long>(
+                        delta(bs.block_mode_runs, bsw.block_mode_runs)),
+                    static_cast<unsigned long long>(xlle_guest_tsc_reads),
+                    xlle_guest_tsc_deterministic,
+                    mach.idle_fast_forward() ? 1 : 0,
+                    static_cast<unsigned long long>(delta(now.ff_skips, was.ff_skips)),
+                    static_cast<unsigned long long>(delta(now.ff_insns, was.ff_insns)),
+                    static_cast<unsigned long long>(delta(now.ff_iters, was.ff_iters)),
+                    pct(delta(now.ff_insns, was.ff_insns), insns),
+                    static_cast<unsigned long long>(now.ff_max_insns),
+                    static_cast<unsigned long long>(delta(now.ff_at_head, was.ff_at_head)),
+                    static_cast<unsigned long long>(delta(now.ff_phase[0], was.ff_phase[0])),
+                    static_cast<unsigned long long>(delta(now.ff_phase[1], was.ff_phase[1])),
+                    static_cast<unsigned long long>(delta(now.ff_phase[2], was.ff_phase[2])),
+                    static_cast<unsigned long long>(delta(now.ff_phase[3], was.ff_phase[3])),
+                    static_cast<unsigned long long>(delta(now.ff_rej_flags, was.ff_rej_flags)),
+                    static_cast<unsigned long long>(delta(now.ff_rej_state, was.ff_rej_state)),
+                    static_cast<unsigned long long>(delta(now.ff_rej_short, was.ff_rej_short)),
+                    static_cast<unsigned long long>(delta(now.ff_rej_read, was.ff_rej_read)),
+                    static_cast<unsigned long long>(delta(now.ff_rej_bytes, was.ff_rej_bytes)),
+                    mach.idle_eip_lo(), mach.idle_eip_hi(),
+                    static_cast<unsigned long long>(mach.det_digest()),
+                    static_cast<unsigned long long>(mach.det_slices()),
+                    static_cast<unsigned long long>(mach.dev_digest()),
+                    static_cast<unsigned long long>(mach.dev_events()),
+                    static_cast<unsigned long long>(mach.dma_digest()),
+                    static_cast<unsigned long long>(mach.dma_writes()));
+                struct CensusRow {
+                    uint64_t value;
+                    uint32_t key;
+                };
+                std::vector<CensusRow> rows;
+                const auto emit_rows = [&](const char* label, size_t cap) {
+                    std::sort(rows.begin(), rows.end(),
+                              [](const CensusRow& a, const CensusRow& b) {
+                                  return a.value > b.value;
+                              });
+                    std::printf(" %s:", label);
+                    if (rows.empty()) std::printf("none");
+                    for (size_t i = 0; i < rows.size() && i < cap; ++i)
+                        std::printf("%s0x%08x=%llu", i ? "," : "", rows[i].key,
+                                    static_cast<unsigned long long>(rows[i].value));
+                };
+                for (uint32_t i = 0; i < now.thread_count; ++i) {
+                    const uint64_t v = delta(now.threads[i].insns, was.threads[i].insns);
+                    if (v) rows.push_back({v, now.threads[i].thread});
+                }
+                emit_rows("threads-insns", 16);
+                rows.clear();
+                for (uint32_t i = 0; i < now.page_count; ++i) {
+                    const uint64_t v = delta(now.pages[i].insns, was.pages[i].insns);
+                    if (v) rows.push_back({v, now.pages[i].page});
+                }
+                emit_rows("boundary-pages-insns", 12);
+                std::printf(" pages_dropped=%llu threads_dropped=%llu\n",
+                            static_cast<unsigned long long>(
+                                delta(now.pages_dropped, was.pages_dropped)),
+                            static_cast<unsigned long long>(
+                                delta(now.threads_dropped, was.threads_dropped)));
+                idle_census_prev = now;
+                block_stats_prev = bs;
+                idle_census_prev_irq0 = mach.irq0_pulses();
+                idle_census_prev_injected = mach.injected_interrupts();
+                idle_census_prev_pending = mach.pending_boundaries();
+            };
             auto print_memory_diagnostics = [&]() {
                 if (!perf_accounting) return;
                 HostMemoryUsage process;
@@ -1630,12 +2716,35 @@ int main(int argc, char** argv) {
                 if (unicorn) {
                     uint64_t code_regions = 0;
                     uint64_t count_regions = 0;
-                    unicorn->hook_region_counts(code_regions, count_regions);
+                    uint64_t block_regions = 0;
+                    unicorn->hook_region_counts(code_regions, count_regions, block_regions);
+                    const UnicornFloor::BlockStats bs = unicorn->block_stats();
+                    // code-hook / count-hook regions are 0 on the canonical path by design
+                    // (beads-xbox.1.4.6): no per-instruction hook is installed there. The
+                    // block-tier denominators travel on the same line so any claim about the
+                    // block clock carries its own counts (PERF-METHODOLOGY rule 9).
                     std::printf(
                         "[unicorn-memory] code-hook-regions=%llu "
-                        "count-hook-regions=%llu\n",
+                        "count-hook-regions=%llu block-hook-regions=%llu "
+                        "tb-entries=%llu tb-insns=%llu tb-icount-entries=%llu "
+                        "tb-icount-misses=%llu tb-icount-evictions=%llu "
+                        "tb-deadline-stops=%llu tb-irq-window-stops=%llu "
+                        "tb-skipped-insns=%llu tb-skips=%llu "
+                        "runs-insn-mode=%llu runs-block-mode=%llu\n",
                         static_cast<unsigned long long>(code_regions),
-                        static_cast<unsigned long long>(count_regions));
+                        static_cast<unsigned long long>(count_regions),
+                        static_cast<unsigned long long>(block_regions),
+                        static_cast<unsigned long long>(bs.tb_entries),
+                        static_cast<unsigned long long>(bs.tb_insns),
+                        static_cast<unsigned long long>(bs.icount_entries),
+                        static_cast<unsigned long long>(bs.icount_misses),
+                        static_cast<unsigned long long>(bs.icount_evictions),
+                        static_cast<unsigned long long>(bs.deadline_stops),
+                        static_cast<unsigned long long>(bs.irq_window_stops),
+                        static_cast<unsigned long long>(bs.skipped_insns),
+                        static_cast<unsigned long long>(bs.skips),
+                        static_cast<unsigned long long>(bs.insn_mode_runs),
+                        static_cast<unsigned long long>(bs.block_mode_runs));
                 }
             };
             auto print_generic_combiner_perf_report = [&]() {
@@ -2074,6 +3183,14 @@ int main(int argc, char** argv) {
                     !mach.nv2a())
                     return;
 
+                // Checkpoint work -- scanout capture, PPM write, report formatting and
+                // printing -- is diagnostics, not emulation, and capture_frame_series()
+                // runs inside host_poll_cb_. Without this region every checkpoint's cost
+                // would land in HOST_POLL and corrupt the partition (beads-xbox.1.14.3).
+                xlle::perf_excl::Scope diag_region(xlle::perf_excl::kDiagCheckpoint);
+                // Seam anchor 10: the frame-series checkpoint is a guest-anchored
+                // gate point -- it reads the framebuffer and every counter.
+                mach.nv2a()->seam_checkpoint_anchor();
                 const uint64_t deadline = next_frame_series_insn;
                 const uint64_t sampled_at = mach.total_insns();
                 const auto interval_end = std::chrono::steady_clock::now();
@@ -2119,6 +3236,23 @@ int main(int argc, char** argv) {
                     live_scanout_error.empty()
                         ? ""
                         : (live_scanout_error + ")").c_str());
+                print_seam_census(mach.nv2a(), "interval",
+                                  static_cast<unsigned long long>(deadline),
+                                  seam_prev);
+                print_gpu_residency_census(
+                    mach.nv2a(), "cumulative",
+                    static_cast<unsigned long long>(deadline),
+                    mach.nv2a() ? mach.nv2a()->seam_vblanks() : 0);
+                print_idle_census("interval", static_cast<unsigned long long>(deadline),
+                                  /*interval=*/true);
+                // Exclusive-time partition, as INTERVAL deltas (beads-xbox.1.14.3). The
+                // [perf...] lines below are the legacy inclusive buckets and are kept
+                // verbatim for tool compatibility; this line is the one that partitions.
+                const std::string perf_excl_report = xlle::perf_excl::format_report(
+                    "interval", static_cast<unsigned long long>(deadline),
+                    /*interval=*/true);
+                if (!perf_excl_report.empty())
+                    std::printf("%s\n", perf_excl_report.c_str());
                 const std::string perf_report = xlle::perf::format_report();
                 if (!perf_report.empty()) std::printf("%s\n", perf_report.c_str());
                 print_generic_combiner_perf_report();
@@ -2715,8 +3849,12 @@ int main(int argc, char** argv) {
                     return;
                 }
                 if (vec_logged < 32) {
-                    std::printf("[dbg] guest vector 0x%02x raised at eip=0x%08x eax=0x%08x\n", vec,
-                                ir.eip, ir.eax);
+                    std::printf(
+                        "[dbg] guest vector 0x%02x raised at eip=0x%08x eax=0x%08x "
+                        "eflags=0x%08x insns=%llu\n",
+                        vec, ir.eip, ir.eax, ir.eflags,
+                        static_cast<unsigned long long>(mach.total_insns()));
+                    print_block_pc_ring("at-vector", 48);
                     if (++vec_logged == 32) std::printf("[dbg] (vector log capped)\n");
                 }
             });
@@ -2726,6 +3864,16 @@ int main(int argc, char** argv) {
             r.eflags = 0x2;
             mach.cpu().set_regs(r);
             mach.cpu().setup_flat_segments(0x1000);  // MCPX handoff GDT (code=0x08, data=0x10)
+            // Calibrate the exclusive-time clock BEFORE arming it, so the first measured
+            // region is not the one paying for calibration, and so wall_ns starts here
+            // rather than at the first region.
+            // Only pay for calibration when the instrument will actually be armed.
+            // init() spin-waits ~4 ms against steady_clock and takes 8192 rdtsc reads;
+            // an unconditional call charged every noperf run -- including every timing
+            // leg whose whole purpose is to not run the instrument -- for a measurement
+            // it then discarded.
+            if (perf_accounting) xlle::perf_excl::init();
+            xlle::perf_excl::g_enabled = perf_accounting;
             xlle::perf::g_enabled = perf_accounting;
             xlle::perf::g_pull_drain_enabled =
                 perf_accounting && perf_pull_drain;
@@ -2747,6 +3895,13 @@ int main(int argc, char** argv) {
                 // Preserve the soft-to-hard-limit headroom. Full scanout, raster-state,
                 // scheduler, and stack diagnostics allocate temporary vectors and can turn
                 // a controlled memory stop into std::bad_alloc before teardown.
+                // Exclusive-time partition, run totals (beads-xbox.1.14.3).
+                const std::string perf_excl_report = xlle::perf_excl::format_report(
+                    "cumulative",
+                    static_cast<unsigned long long>(mach.total_insns()),
+                    /*interval=*/false);
+                if (!perf_excl_report.empty())
+                    std::printf("%s\n", perf_excl_report.c_str());
                 const std::string perf_report = xlle::perf::format_report();
                 if (!perf_report.empty()) std::printf("%s\n", perf_report.c_str());
                 print_generic_combiner_perf_report();
@@ -2802,6 +3957,7 @@ int main(int argc, char** argv) {
                     static_cast<unsigned long long>(n), stopped.eip, stopped.eax,
                     stopped.ecx);
                 std::printf("[2bl] STOPPED: %s\n", err2.c_str());
+                print_block_pc_ring("at-stop", 96);
                 std::printf(
                     "[host] allocation-heavy final diagnostics skipped after memory "
                     "safety stop\n");
@@ -2811,6 +3967,13 @@ int main(int argc, char** argv) {
             // The run may cross its final series deadline after the last 1 kHz host poll.
             capture_frame_series();
             {
+                // Exclusive-time partition, run totals (beads-xbox.1.14.3).
+                const std::string perf_excl_report = xlle::perf_excl::format_report(
+                    "cumulative",
+                    static_cast<unsigned long long>(mach.total_insns()),
+                    /*interval=*/false);
+                if (!perf_excl_report.empty())
+                    std::printf("%s\n", perf_excl_report.c_str());
                 const std::string perf_report = xlle::perf::format_report();
                 if (!perf_report.empty()) std::printf("%s\n", perf_report.c_str());
                 print_generic_combiner_perf_report();
@@ -2903,6 +4066,13 @@ int main(int argc, char** argv) {
                     static_cast<unsigned long long>(mach.ohci0()->xid_input_reports()),
                     mach.ohci0()->xid_configuration());
             }
+            // Seam anchor 10 (stage (e), beads-xbox.1.15.5): shutdown is a
+            // guest-anchored gate point. Everything printed below -- the 24
+            // profile hashes, every per-profile fragment/write tally, the
+            // scanout itself -- is only complete once the draw worker has
+            // finished and its jobs have been folded on this thread, so drain
+            // before the first of them is read.
+            if (mach.nv2a()) mach.nv2a()->seam_checkpoint_anchor();
             X86Regs f = mach.cpu().get_regs();
             Nv2a::ScanoutInfo scanout;
             std::vector<uint8_t> frame_rgba;
@@ -2913,7 +4083,10 @@ int main(int argc, char** argv) {
             bool frame_output_ok = true;
             std::printf("[2bl] retired %llu instructions; final eip=0x%08x eax=0x%08x ecx=0x%08x\n",
                         (unsigned long long)n, f.eip, f.eax, f.ecx);
-            if (!err2.empty()) std::printf("[2bl] STOPPED: %s\n", err2.c_str());
+            if (!err2.empty()) {
+                std::printf("[2bl] STOPPED: %s\n", err2.c_str());
+                print_block_pc_ring("at-stop", 96);
+            }
             else std::printf("[2bl] ran to instruction budget without fault\n");
             // Dump kernel code bytes around the final EIP (virtual 0x8xxxxxxx -> physical
             // & 0x07FFFFFF) so the faulting instruction can be disassembled off-line.
@@ -3889,6 +5062,17 @@ int main(int argc, char** argv) {
                     }
                     print_immediate_quad_evidence(sample);
                 }
+                {
+                    // Stage (d) seam census, cumulative over the whole run.
+                    SeamCensusSnapshot zero;
+                    print_seam_census(mach.nv2a(), "cumulative",
+                                      (unsigned long long)mach.total_insns(),
+                                      zero);
+                    print_gpu_residency_census(
+                        mach.nv2a(), "cumulative",
+                        (unsigned long long)mach.total_insns(),
+                        mach.nv2a() ? mach.nv2a()->seam_vblanks() : 0);
+                }
                 std::printf("[2bl] NV2A flip: write-increments=%llu stalls=%llu "
                             "read-increments=%llu notifications=%llu surface=%08x waiting=%u\n",
                             (unsigned long long)mach.nv2a()->flip_increments(),
@@ -4095,10 +5279,13 @@ int main(int argc, char** argv) {
                 }
             }
             std::printf("[2bl] IDE: port accesses=%llu irqs=%llu sectors rd/wr=%llu/%llu "
+                        "cow_sectors=%llu writeback=%d "
                         "bm_base=0x%04x\n", (unsigned long long)ide_io_count,
                         (unsigned long long)(mach.ide() ? mach.ide()->irq_pulses() : 0),
                         (unsigned long long)(mach.ide() ? mach.ide()->sectors_read() : 0),
                         (unsigned long long)(mach.ide() ? mach.ide()->sectors_written() : 0),
+                        (unsigned long long)(mach.ide() ? mach.ide()->overlay_sectors() : 0),
+                        mach.ide() && mach.ide()->hdd_writeback() ? 1 : 0,
                         mach.ide() ? mach.ide()->bm_base() : 0);
             std::printf("[2bl] MCPX ROM overlay disabled by firmware: %s\n",
                         mach.pci() && mach.pci()->mcpx_rom_disabled() ? "yes" : "no");
@@ -4106,6 +5293,9 @@ int main(int argc, char** argv) {
                         (unsigned long long)mach.irq0_pulses(),
                         (unsigned long long)mach.pending_boundaries(),
                         (unsigned long long)mach.injected_interrupts());
+            print_idle_census("cumulative",
+                              static_cast<unsigned long long>(mach.total_insns()),
+                              /*interval=*/false);
             if (mach.pic_dbg()) {
                 auto& m = mach.pic_dbg()->master();
                 auto& s = mach.pic_dbg()->slave();

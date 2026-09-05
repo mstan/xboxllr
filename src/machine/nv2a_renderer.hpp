@@ -118,6 +118,277 @@ struct Nv2aResidentDepthResolve {
     std::vector<uint8_t> data;
 };
 
+// ===================== residency-break attribution (beads-xbox.1.15.10 p3) ==
+// EVERY re-upload of a resident witnessed surface exists because something
+// dropped that plane's residency. Which consumer did it is the whole of the
+// transfer-volume question, and until now it was INFERRED from a separate
+// simulation (Nv2a::GpuResidencyCensus) whose one-active-target model reported
+// 647 breaks against the renderer's 1336 actual uploads. This is the direct
+// measurement: the invalidator stamps the slot, the uploader reports the stamp.
+//
+// Always on, in Release. Cost is one 32-bit store per invalidation and one
+// increment per upload -- both already off the per-fragment path.
+enum Nv2aResidentInvalidateCause : uint32_t {
+    kNv2aInvalidateClearSurface = 0,
+    kNv2aInvalidateWitnessedCpuDraw,
+    kNv2aInvalidateGenericSoftware,
+    kNv2aInvalidateImageBlit,
+    kNv2aInvalidateScanout,
+    kNv2aInvalidateImmediateQuad,
+    kNv2aInvalidateRetarget,
+    kNv2aInvalidateOther,
+    // Never invalidated: this is the plane's FIRST upload into the slot.
+    kNv2aInvalidateCold,
+    // The slot was taken over for a different surface while still holding a
+    // clean copy of this one (find_reusable_resident_slot stole it).
+    kNv2aInvalidateEvicted,
+    kNv2aInvalidateGenericAccelerated,
+    // refresh_resident_color_after_software_write could not region-upload
+    // (surface not resident under that key, or backend cannot) and fell back to
+    // dropping residency.
+    kNv2aInvalidateRegionFallback,
+    // upload_resident_color_rows invalidating OTHER slots that overlap the
+    // range it just refreshed (the overlap contract).
+    kNv2aInvalidateRegionOverlap,
+    kNv2aInvalidateCauses,
+};
+inline constexpr size_t kNv2aInvalidateCauseSlots = 16;
+inline constexpr size_t kNv2aInvalidateProfileSlots = 16;
+inline const char* nv2a_invalidate_cause_name(size_t cause) {
+    switch (cause) {
+    case kNv2aInvalidateClearSurface:       return "clear_surface";
+    case kNv2aInvalidateWitnessedCpuDraw:   return "witnessed_cpu_draw";
+    case kNv2aInvalidateGenericSoftware:    return "generic_software";
+    case kNv2aInvalidateImageBlit:          return "image_blit";
+    case kNv2aInvalidateScanout:            return "scanout";
+    case kNv2aInvalidateImmediateQuad:      return "immediate_quad";
+    case kNv2aInvalidateRetarget:           return "retarget";
+    case kNv2aInvalidateOther:              return "other";
+    case kNv2aInvalidateCold:               return "cold";
+    case kNv2aInvalidateEvicted:            return "evicted";
+    case kNv2aInvalidateGenericAccelerated: return "generic_accelerated";
+    case kNv2aInvalidateRegionFallback:     return "region_fallback";
+    case kNv2aInvalidateRegionOverlap:      return "region_overlap";
+    default: break;
+    }
+    return "unknown";
+}
+// The token an invalidating call site passes, and the two fields it packs.
+inline constexpr uint32_t nv2a_invalidate_token(uint32_t cause,
+                                                uint32_t profile = 0) {
+    return (cause & 0xFFu) | ((profile & 0xFFu) << 8);
+}
+inline constexpr uint32_t nv2a_invalidate_token_cause(uint32_t token) {
+    return token & 0xFFu;
+}
+inline constexpr uint32_t nv2a_invalidate_token_profile(uint32_t token) {
+    return (token >> 8) & 0xFFu;
+}
+
+struct Nv2aWitnessedUploadCensus {
+    // [cause][profile] -- profile is 0 for every cause but witnessed_cpu_draw.
+    std::array<std::array<uint64_t, kNv2aInvalidateProfileSlots>,
+               kNv2aInvalidateCauseSlots> color_uploads{};
+    std::array<std::array<uint64_t, kNv2aInvalidateProfileSlots>,
+               kNv2aInvalidateCauseSlots> color_bytes{};
+    std::array<std::array<uint64_t, kNv2aInvalidateProfileSlots>,
+               kNv2aInvalidateCauseSlots> depth_uploads{};
+    std::array<std::array<uint64_t, kNv2aInvalidateProfileSlots>,
+               kNv2aInvalidateCauseSlots> depth_bytes{};
+    // Rows actually pushed by the row-scoped witnessed upload path, against the
+    // rows a full-surface upload would have pushed. The ratio is the whole
+    // value of step 4 and it is reported, not estimated.
+    uint64_t row_uploads = 0;
+    uint64_t row_upload_rows = 0;
+    uint64_t row_upload_bytes = 0;
+    uint64_t row_upload_surface_rows = 0;
+    // How the invalidating range sat on the plane it dropped, per cause:
+    //   [0] EXACT  -- same base address and same length as the resident plane;
+    //                 a whole-plane fill, so a glClear could serve it instead.
+    //   [1] COVER  -- strictly contains the plane (same fill, wider request).
+    //   [2] PARTIAL-- merely overlaps. Nothing whole-plane can replace this one;
+    //                 it needs a row-scoped refresh or the profile moved.
+    // Recorded at invalidation time, so it is available even for planes that
+    // are never re-uploaded afterwards.
+    std::array<std::array<uint64_t, 3>, kNv2aInvalidateCauseSlots>
+        color_invalidate_extent{};
+    std::array<std::array<uint64_t, 3>, kNv2aInvalidateCauseSlots>
+        depth_invalidate_extent{};
+    // clear_resident_surface acceptance, split so a decline says which plane
+    // the backend could not find.
+    uint64_t clear_accept_color = 0;
+    uint64_t clear_accept_depth = 0;
+    uint64_t clear_decline_color_missing = 0;
+    uint64_t clear_decline_depth_missing = 0;
+    // An upload that overwrote a plane the GPU had written and no resolve had
+    // moved back. This MUST stay zero: it is silent loss of guest-visible
+    // output, and it is the failure mode a GPU-side CLEAR_SURFACE introduces if
+    // the residency key can change under a dirty plane.
+    uint64_t upload_over_dirty_color = 0;
+    uint64_t upload_over_dirty_depth = 0;
+    // A slot whose ADDRESS matched but whose pitch/height/format key did not.
+    // The plane is re-uploaded from guest memory; it is not an invalidation, so
+    // it shows up as `cold` in the cause table unless it is counted here.
+    uint64_t color_key_mismatch = 0;
+    uint64_t depth_key_mismatch = 0;
+    // Invalidation stamps dropped because the attribution table was full. Any
+    // nonzero value means the `cold` bucket is overstated by up to this much.
+    uint64_t stamp_overflows = 0;
+    // Clears served on the GPU whose plane was CLEAN, so the caller also filled
+    // guest memory and the plane stayed clean. These cost a guest fill and save
+    // a re-upload; the others save the fill too and leave the plane dirty.
+    uint64_t clear_kept_clean = 0;
+    // Uploads that took over a slot still holding a DIFFERENT surface. That
+    // ends the other surface's residency without an invalidation, so its next
+    // upload is reported `cold`; these two counters bound how much of the cold
+    // bucket is slot pressure rather than a genuine first touch.
+    uint64_t color_slot_takeover = 0;
+    uint64_t depth_slot_takeover = 0;
+    // beads-xbox.1.15.10 phase 4 (lever C). How often a witnessed packet's
+    // colour and zeta planes were served from DIFFERENT resident slots -- the
+    // configuration the pair-scoped selector could not represent and resolved
+    // by evicting one of the two colour surfaces instead (color_slot_takeover,
+    // 342 per canonical 12 B run before this change). `hits` is the fully
+    // resident case, which costs nothing at all; `uploads` is a packet that
+    // still had to upload a plane while split. Both are the visible signature
+    // of the fix: takeover falls, split rises, uploads fall.
+    uint64_t plane_split_hits = 0;
+    uint64_t plane_split_uploads = 0;
+};
+
+// ===================== stage (f): witnessed-profile GPU execution ===========
+// beads-xbox.1.15.7. The two dominant witnessed profiles (kSwizzledRadialColor
+// and kPitchTexturedColor, 83 percent of all fragments) execute on the GPU with
+// the destination surfaces RESIDENT across consecutive GPU jobs. The packet is
+// deliberately POST-SETUP: Nv2a has already matched the profile, validated the
+// raster subset, resolved the surfaces, snapshotted the texture, assembled the
+// primitives, snapped the screen positions to NV2A 1/16-pixel fixed point and
+// applied the same culling and degeneracy tests the software rasterizer applies.
+// What crosses this boundary is therefore the SAME triangle set the software
+// path would have rasterized, in the same order, with the same numbers -- the
+// renderer re-derives coverage and interpolation from the identical integer
+// edge functions, so the seam carries no rounding of its own.
+struct Nv2aWitnessedTriangle {
+    // Screen positions in NV2A 1/16-pixel fixed point, in the software
+    // rasterizer's post-cull a/b/c order, as the EXACT int64 values
+    // `llround(pos*16)` produced. Phase 2 (beads-xbox.1.15.10) changed these
+    // from double to int64_t and moved the shader's edge functions to
+    // GL_ARB_gpu_shader_int64, because the double form was only exact below
+    // 2^24 and the resulting `vertex_range` rejection was measured to be the
+    // DOMINANT cause of residency breaks: 1 126 rejected jobs produced 806 of
+    // the 1 110 witnessed-CPU-draw round trips per 12 G instructions, against
+    // 304 from every other profile combined. In int64 the shader runs the
+    // software rasterizer's arithmetic verbatim -- the same products, the same
+    // two's-complement wrap on the degenerate geometry that overflows it -- so
+    // there is no coordinate bound left to reject on.
+    int64_t ax = 0, ay = 0, bx = 0, by = 0, cx = 0, cy = 0;
+    // The software path's per-triangle destination bounding box: its scanline
+    // loop bounds, already intersected with the clip rect. Used only by the
+    // WIDE path below; see `wide`.
+    int32_t bbox_xmin = 0, bbox_xmax = -1, bbox_ymin = 0, bbox_ymax = -1;
+    // True when a vertex coordinate is too large for the fixed-function
+    // rasterizer to place reliably in float clip space. The in-shader edge test
+    // is authoritative in both cases -- it can only REMOVE a candidate fragment
+    // the driver generated, never add one -- so the only thing at risk for a
+    // wide triangle is UNDER-coverage by the driver. A wide triangle is
+    // therefore drawn as its own bounding-box quad instead of as itself, which
+    // is exactly the region the software path's scanline loop visits, and the
+    // edge test then carves the identical triangle out of it.
+    bool wide = false;
+    float za = 0.0f, zb = 0.0f, zc = 0.0f;       // window depth per vertex
+    float inverse_area = 0.0f;                   // 1.0f / (float)area
+    float wa = 1.0f, wb = 1.0f, wc = 1.0f;       // position[3] per vertex
+    // The software path's inverse_area_double and inverse_position_w0..2. They
+    // are carried rather than recomputed on the GPU so the reciprocals are the
+    // exact same doubles the software rasterizer divides with -- GLSL's
+    // required precision for double division is not the place to introduce a
+    // difference the design is trying to avoid.
+    double inverse_area_double = 0.0;
+    double inverse_w[3] = {1.0, 1.0, 1.0};
+    // Per-vertex diffuse after the software path's NaN fixup and [0,1] clamp.
+    std::array<std::array<float, 3>, 3> diffuse{};
+    // Radial: texture[0].xyz. Pitch-textured and pitch-projected: texture[1].xyz.
+    std::array<std::array<float, 3>, 3> tex_a{};
+    // Pitch-textured and pitch-projected: texture[2].xyz.
+    std::array<std::array<float, 3>, 3> tex_b{};
+    // kPitchProjectedColor only: the PROJECTIVE stage-0 texcoord, carried as
+    // the software path reads it -- components 0, 1 and 3 of texture[0], in
+    // that order (component 3 is the projective w the fragment divides by).
+    // It rides in the unused .w lanes of the existing d/t/u vec4 triples on the
+    // way to the shader, so the SSBO record and its 288-byte std430 stride are
+    // unchanged; see nv2a_witnessed_gl_shaders.hpp.
+    std::array<std::array<float, 3>, 3> tex_p{};
+};
+
+struct Nv2aWitnessedProfilePacket {
+    enum class Profile : uint8_t {
+        kSwizzledRadialColor,
+        kPitchTexturedColor,
+        // beads-xbox.1.15.10 phase 4 (lever A). Same destination geometry and
+        // the same triangle record as kPitchTexturedColor; it adds one
+        // REPEAT-addressed 2D image sampled through a projective texcoord.
+        kPitchProjectedColor,
+    };
+    Profile profile = Profile::kSwizzledRadialColor;
+
+    // ---- destination -------------------------------------------------------
+    uint32_t color_address = 0;
+    uint32_t depth_address = 0;
+    size_t   surface_size = 0;      // colour bytes; the zeta plane is the same
+    uint32_t surface_pitch = 0;     // raw SET_SURFACE_FORMAT pitch word (the key)
+    uint32_t surface_format = 0;    // raw SET_SURFACE_FORMAT word (the key)
+    uint32_t surface_width = 0;
+    uint32_t surface_height = 0;    // the key's height (clip_y + clip_height)
+    bool     swizzled_destination = false;
+
+    // ---- clip / depth range ------------------------------------------------
+    uint32_t xmin = 0, xmax = 0, ymin = 0, ymax = 0;   // inclusive pixel bounds
+    float clip_min = 0.0f, clip_max = 0.0f;
+
+    // ---- pitch-textured / pitch-projected combiner inputs ------------------
+    // The only two combiner words either fingerprint leaves free: STAGE 6 for
+    // kPitchTexturedColor, STAGE 5 for kPitchProjectedColor. The name records
+    // where they came from for the profile that introduced them; both land in
+    // the shader's weight0 / weight1 uniforms.
+    uint32_t factor0_stage6 = 0;
+    uint32_t factor1_stage6 = 0;
+    uint32_t texture_width = 0;
+    uint32_t texture_height = 0;
+    // Already UNSWIZZLED by Nv2a into linear rows of A8R8G8B8 guest words, so
+    // the renderer does not need the swizzle table for the texture.
+    std::vector<uint8_t> texture_linear;
+    // FNV-64 of texture_linear, so the backend can skip an unchanged re-upload
+    // without hashing the bytes a second time.
+    uint64_t texture_hash = 0;
+    // kPitchProjectedColor only: the stage-0 projective image, a SECOND
+    // sampler. Same conventions as texture_linear above -- already unswizzled
+    // by Nv2a into linear rows of A8R8G8B8 guest words, with its own FNV-64 so
+    // an unchanged re-upload is skipped.
+    uint32_t projected_texture_width = 0;
+    uint32_t projected_texture_height = 0;
+    std::vector<uint8_t> projected_texture_linear;
+    uint64_t projected_texture_hash = 0;
+
+    // ---- initial surface bytes, supplied only when not already resident ----
+    // Both are LINEAR row images the renderer can upload directly: Nv2a
+    // unswizzles a swizzled destination on the way in and re-swizzles it on the
+    // way out, because the swizzle table lives on the device side.
+    bool needs_color_upload = false;
+    bool needs_depth_upload = false;
+    std::vector<uint8_t> color_input;   // width*height*4, guest A8R8G8B8 words
+    std::vector<uint8_t> depth_input;   // width*height*4, guest Z24S8 words
+
+    std::vector<Nv2aWitnessedTriangle> triangles;
+};
+
+struct Nv2aWitnessedProfileResult {
+    uint64_t triangles = 0;
+    uint64_t draw_calls = 0;
+    uint64_t color_upload_bytes = 0;
+    uint64_t depth_upload_bytes = 0;
+    uint64_t texture_upload_bytes = 0;
+};
+
 class Nv2aRenderer {
 public:
     virtual ~Nv2aRenderer() = default;
@@ -144,9 +415,19 @@ public:
         error.clear();
         return true;
     }
-    virtual void invalidate_resident_color_surface(uint32_t address, size_t size) {
+    // beads-xbox.1.15.10 phase 3: `cause` is an ALWAYS-ON attribution token,
+    // not a control input. Low 8 bits are an Nv2aResidentInvalidateCause; bits
+    // 8..15 carry the witnessed profile index when the caller is a witnessed
+    // CPU draw, 0 otherwise. The backend stores it on the slot it invalidates
+    // and reports it back through witnessed_upload_census(), so every resident
+    // re-upload is attributable to the consumer that dropped the residency
+    // instead of being inferred from a simulation. Behaviour must not depend on
+    // it.
+    virtual void invalidate_resident_color_surface(uint32_t address, size_t size,
+                                                   uint32_t cause) {
         (void)address;
         (void)size;
+        (void)cause;
     }
     virtual bool resolve_resident_depth_surface(
         uint32_t address, size_t size, Nv2aResidentDepthResolve& resolve,
@@ -157,9 +438,11 @@ public:
         error.clear();
         return true;
     }
-    virtual void invalidate_resident_depth_surface(uint32_t address, size_t size) {
+    virtual void invalidate_resident_depth_surface(uint32_t address, size_t size,
+                                                   uint32_t cause) {
         (void)address;
         (void)size;
+        (void)cause;
     }
     virtual bool has_resident_depth_surface(
         uint32_t address, size_t size, uint32_t pitch,
@@ -180,6 +463,64 @@ public:
         (void)height;
         (void)format;
         return false;
+    }
+    // ---- stage (f) phase 2 step 1: CPU/GPU overlap (beads-xbox.1.15.10) ----
+    // Issue any GPU work the backend is still holding and submit it to the
+    // driver, so the GPU executes it WHILE the emulation thread runs on. Before
+    // this existed the pending witnessed batch was issued only when a resolve
+    // needed its result, which serialized the whole GPU execution behind the
+    // emulation thread: the matched instrumented pair measured gpu_draw_ns
+    // 7.740 s of witnessed GPU work and drain_ns 5.878 s of emulation-thread
+    // time spent blocking on exactly that work. It must be safe to call at any
+    // point where the emulation thread is between guest-visible operations; it
+    // changes only WHEN the pending draws are issued, never their order, and
+    // GL executes primitives across draw calls in submission order.
+    virtual void kick_pending_gpu_work() {}
+    // Always-on witness that the early flush actually happened, so the census
+    // reports it rather than leaving it to be inferred from the draw-call count
+    // (which also moves for unrelated reasons).
+    struct WitnessedFlushStats {
+        uint64_t size_flushes = 0;  // batch issued because the bound was hit
+        uint64_t kick_flushes = 0;  // batch issued by kick_pending_gpu_work
+        uint64_t gl_flushes = 0;    // glFlush calls that submitted a draw
+        uint64_t bound = 0;         // the configured triangle bound
+        uint64_t ssbo_ring = 1;     // SSBO names round-robined per flush
+        bool kick_flush = false;    // glFlush issued after each batch
+        bool fp32_shader = false;   // single-precision fragment variant
+        // beads-xbox.1.15.10 phase 4 (lever C): colour and zeta planes are
+        // selected into resident slots independently. False restores the
+        // pre-phase-4 pair-scoped rule for the A/B arm.
+        bool plane_split = true;
+    };
+    virtual WitnessedFlushStats witnessed_flush_stats() const { return {}; }
+    // Upper bound on triangles allowed to accumulate in the pending batch
+    // before it is issued. 0 restores the pre-step-1 behavior (issue only when
+    // some other entry point demands it), which is what the bisection arm uses.
+    virtual void set_witnessed_flush_triangles(uint64_t triangles) {
+        (void)triangles;
+    }
+    // Whether an issued batch is submitted to the driver immediately (glFlush).
+    // Off leaves submission to the driver's own schedule, which is what the
+    // pre-step-1 path did; this exists so "chunking" and "submitting early" can
+    // be measured apart from each other.
+    virtual void set_witnessed_kick_flush(bool on) { (void)on; }
+    // Number of SSBO names the witnessed batch round-robins through. 1 is the
+    // pre-step-1 behavior; >1 stops a refill from landing on a buffer an
+    // in-flight draw is still reading.
+    virtual void set_witnessed_ssbo_ring(uint32_t slots) { (void)slots; }
+    // beads-xbox.1.15.10 phase 4 (lever C). Independent per-plane resident-slot
+    // selection for witnessed packets. Off restores the pre-phase-4 rule where
+    // a colour miss fell back to the ZETA key and overwrote whatever colour
+    // surface that slot still held (342 takeovers / 686 MB per canonical 12 B
+    // run). Runtime switch on one binary so the change is a same-binary A/B.
+    virtual void set_witnessed_plane_split(bool on) { (void)on; }
+    // Single-precision witnessed fragment shaders. The record layout is the
+    // same either way, so this is a runtime switch on one binary and an A/B
+    // needs no rebuild. Returns false only if the recompile itself failed.
+    virtual bool set_witnessed_fp32_shader(bool on, std::string& error) {
+        (void)on;
+        error.clear();
+        return true;
     }
     // Whether upload_resident_color_rows is available on this backend.
     virtual bool supports_resident_color_region_upload() const { return false; }
@@ -223,6 +564,112 @@ public:
         (void)packet;
         (void)result;
         error = "resident generic-combiner submission is not supported";
+        return false;
+    }
+    // ---- stage (f) witnessed-profile GPU execution -------------------------
+    // Whether this backend implements the packet's profile AND every state
+    // variation it carries. Must have no side effects: Nv2a asks before it
+    // builds the (potentially large) triangle array or reads a surface.
+    virtual bool supports_witnessed_profile(
+        const Nv2aWitnessedProfilePacket& descriptor) const {
+        (void)descriptor;
+        return false;
+    }
+    // Whether the destination pair is already resident AND GPU-authoritative,
+    // so the packet does not have to carry the initial surface bytes.
+    virtual bool witnessed_target_resident(
+        uint32_t color_address, size_t size, uint32_t pitch, uint32_t height,
+        uint32_t format, uint32_t depth_address) const {
+        (void)color_address; (void)size; (void)pitch; (void)height;
+        (void)format; (void)depth_address;
+        return false;
+    }
+    // beads-xbox.1.15.10 phase 3. The two planes go non-resident INDEPENDENTLY
+    // -- a generic software draw that writes zeta invalidates only the zeta --
+    // and the backend already uploads only the plane it is missing. The single
+    // bool above made the device read BOTH planes out of guest memory whenever
+    // either was missing, so a zeta-only break still cost a full colour
+    // mem_read_ and a full colour vector. This reports them apart. It must
+    // agree with what ensure_witnessed_surface will decide, hence the shared
+    // slot-selection helper in the backend rather than a second predicate.
+    virtual void witnessed_target_residency(
+        uint32_t color_address, size_t size, uint32_t pitch, uint32_t height,
+        uint32_t format, uint32_t depth_address, bool& color_resident,
+        bool& depth_resident) const {
+        const bool both = witnessed_target_resident(color_address, size, pitch,
+                                                    height, format,
+                                                    depth_address);
+        color_resident = both;
+        depth_resident = both;
+    }
+    // Always-on residency-break attribution; see Nv2aWitnessedUploadCensus.
+    virtual Nv2aWitnessedUploadCensus witnessed_upload_census() const {
+        return {};
+    }
+    // Push guest bytes for rows [first_row,last_row] of an already-resident
+    // witnessed ZETA plane, the depth counterpart of upload_resident_color_rows.
+    // guest_bytes holds (last_row-first_row+1)*width*4 bytes in guest row order.
+    virtual bool upload_resident_depth_rows(
+        uint32_t depth_address, size_t size, uint32_t first_row,
+        uint32_t last_row, const std::vector<uint8_t>& guest_bytes,
+        std::string& error) {
+        (void)depth_address; (void)size; (void)first_row; (void)last_row;
+        (void)guest_bytes;
+        error = "resident depth region upload is not supported";
+        return false;
+    }
+    // Whether the witnessed colour plane at this exact key is resident AND
+    // clean enough to accept a row-scoped refresh (i.e. the GL copy is not
+    // holding writes that guest memory does not have). A dirty plane must be
+    // resolved, not patched.
+    virtual bool witnessed_rows_refreshable(uint32_t color_address, size_t size,
+                                            uint32_t pitch, uint32_t height,
+                                            uint32_t format,
+                                            uint32_t depth_address,
+                                            bool& color_ok,
+                                            bool& depth_ok) const {
+        (void)color_address; (void)size; (void)pitch; (void)height;
+        (void)format; (void)depth_address;
+        color_ok = false;
+        depth_ok = false;
+        return false;
+    }
+    // Execute the packet against the resident destination. Failure is fatal for
+    // this draw in exactly the sense submit_generic_combiner is: the caller has
+    // already committed to the GPU path and cannot replay it in software.
+    virtual bool submit_witnessed_profile(
+        const Nv2aWitnessedProfilePacket& packet,
+        Nv2aWitnessedProfileResult& result, std::string& error) {
+        (void)packet; (void)result;
+        error = "witnessed-profile GPU submission is not supported";
+        return false;
+    }
+    // A full-surface CLEAR_SURFACE served as a glClear on a GPU-authoritative
+    // surface. Returns false when the surface is not resident (the caller then
+    // performs its normal software clear).
+    // `needs_guest_fill` is an OUT parameter and the whole of the policy split
+    // measured in beads-xbox.1.15.10 phase 3:
+    //   plane already DIRTY (GPU-authoritative) -> false. The GL image is the
+    //     truth, guest memory is stale by the existing residency contract, and
+    //     the caller skips its fill. This is the case that pays: no resolve in,
+    //     no fill, no invalidation, no re-upload.
+    //   plane resident but CLEAN -> true. glClear alone would turn a clean
+    //     plane dirty and MANUFACTURE a resolve for the next consumer, which is
+    //     exactly what regressed the generic-combiner tail (+0.89 percent over
+    //     the last four windows, accelerated-generic-color-snapshot resolves
+    //     1 -> 101 / 473.4 MB). The caller performs its ordinary guest fill and
+    //     the plane stays valid and clean, so there is no resolve AND no
+    //     re-upload -- strictly better than the pre-phase-3 invalidate.
+    virtual bool clear_resident_surface(
+        uint32_t color_address, size_t color_size, bool clear_color,
+        uint32_t color_value, uint32_t depth_address, size_t depth_size,
+        bool clear_depth, uint32_t depth_value, bool& needs_guest_fill,
+        std::string& error) {
+        (void)color_address; (void)color_size; (void)clear_color;
+        (void)color_value; (void)depth_address; (void)depth_size;
+        (void)clear_depth; (void)depth_value;
+        needs_guest_fill = true;
+        error.clear();
         return false;
     }
     virtual bool debug_probe_rgba8_image_store(std::string& error) {
