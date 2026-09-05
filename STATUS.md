@@ -3,6 +3,91 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-09-05 - GPU phases 5-6 land (+5.75 %), and the CPU tier is measured out of the running
+
+Three commits on `perf/measurement-first-2026-09` close `beads-xbox.1.15.10` phases 5 and 6 and
+answer owner decision 11 ("if Unicorn must be replaced, replace it") with numbers. The rules are
+`docs/PERF-METHODOLOGY.md` sections 3i, 3j and 5b; the CPU-tier evaluation is
+`docs/DESIGN-CPU-TIER.md`.
+
+**Phase 6: the generated register-combiner executor, and the only change this week to clear the
+5 % bar.** `src/host/nv2a_combiner_glsl.{hpp,cpp}` compiles a combiner-state struct into a
+fragment program whose expressions are the software rasterizer's own fragment body, transcribed
+statement for statement, with the phase-1 exactness rules (int64 edge functions, the same
+top-left rule at the same 1/16-pixel sample points, device-side unswizzle, explicit bilinear
+against `texelFetch`). Four 3+3 interleaved sets on three binaries all pass; the decision set on
+the shipping binary `3a612b6d` is **+5.75 % median / +6.01 % min** on the total 12 B wall, 3 of 3
+rounds, 12 of 12 across the four sets. It removes all 704 transferring
+`software-generic-color-surface` resolves and 1 339 software batches from plane `0x03AA4000`;
+`nv2a_gl_resolve` 5.387 -> 3.717 s and `nv2a_raster_generic_sw` 7.508 -> 6.144 s on a matched
+instrumented pair. Behaviour: 25 of 28 checkpoints byte-identical between the arms, three tail
+frames differing by **four pixels in total**, largest connected component 1 px; the
+reference-configuration leg passes `goldens/golden-noperf-defaults12-2026-09-05d.json` **31 of
+31**, and unlike the witnessed executor the generated one really runs in that configuration.
+
+**The finding inside it: GL fixed-function blending is not bit-faithful, and the error is
+structural rather than precision.** A differential verifier running both paths from the same
+starting image reported exactly **1 LSB on about 90 % of the plane, per batch, in both
+directions** - 38 LSB over 79 % of the frame end to end, because the dashboard composites about
+five hundred blended layers. GL quantizes the source colour and the blend factor to the
+framebuffer's 8 bits before evaluating `Cs*Sf + Cd*Df`; the software path evaluates on
+unquantized floats and rounds only the result. Three plausible causes were **disproved first,
+with numbers** - FP32 interpolation (253 072 differing pixels vs 253 071 in double),
+fixed-function coverage (244 069 either way), and resident-surface aliasing (0 pixels, though
+the missing guard was added anyway). The fix is programmable blending: blend, colour mask and
+the X8R8G8B8 alpha rule inside the shader against an `rgba8` image binding under
+`GL_ARB_fragment_shader_interlock`, with the ROP told to write nothing so there is exactly one
+writer. The verifier then reports 0 to 2 differing pixels per batch.
+
+**Phase 5: two censuses that re-ranked the work, and a vertex change that failed the bar and was
+kept anyway.** `[host] gpu-resolve-cost` times every residency query and credits it by whether
+it actually wrote guest RAM. That **kills the "148 317 no-op residency queries, about 0.9 s"
+item at 16 ms** - 0.028 % of the run, declined on measurement rather than built - and replaces it
+with the real one: a transferring resolve costs 2.2-2.9 ms and there are 2 258 of them,
+**6.37 s, 11 % of the wall, the largest single identified item in the run**.
+`[host] gpu-residency-plane` counts GPU-taken and CPU-executed draws per destination plane,
+which is the question the per-profile break table cannot answer. The vertex work
+(`--nv2a-vertex-program-cache`, `--nv2a-vertex-fast-fetch`) is **-2.62 % median / -2.42 % min**,
+6 of 6 rounds across two sets - **below the 5 % bar**, retained under section 3 item 3 as a pure
+simplification (fast-fetch, 0.97 s of the 1.15 s) plus one owner call (the cache, 0.18 s). It is
+byte-exact: all 28 checkpoint PPMs identical between the arms and every determinism digest
+identical including `dma_digest`.
+
+**And the measurement that outlives both: the VSH interpreter is the next vertex lever.**
+`--nv2a-vertex-census` splits `nv2a_vertex` into parse (202 -> 18 ms, cached), attribute fetch
+(2.682 -> 1.300 s, hoisted) and **VSH interpretation, 38 337 230 vertices at 118 ns = 4.54 s,
+which neither cache touches** - 62 % of the bucket. `vsh_context_vertices` is 0, so the 3.7 kB
+full-execution-state path is disproved as a lever rather than merely unsuspected. Tracked as
+`beads-xbox.1.15.11`.
+
+**The CPU tier: all three replacement options measured, none justified.** Under owner decision 11,
+`docs/DESIGN-CPU-TIER.md` evaluates tuned TCG, WHPX and a custom JIT against `tcg_exec`, which is
+**14.700 s of a 63.909 s instrumented emulation thread - 23.0 %**, so deleting the CPU tier
+outright is a 1.30x whole-run speedup and nothing more.
+*(A)* `tools/bench/block_size_bench.cpp` sweeps block size at four hook shapes and destroys the
+premise the "6x slower than bare Unicorn" figure rested on: the benchmark that produced 2 991 M
+insn/s runs **34 instructions per block** and production runs **3.172**, so per-block cost is
+amortized over ten times fewer instructions. Removing the block hook *entirely* still leaves
+about 9.90 s, and the best single patch (emitting the icount into the TB) is worth 0.995 s.
+*(B)* `tools/bench/whpx_bench.cpp` measures WHPX on this host directly - one partition, one vCPU,
+real GDT/IDT in guest RAM, exact exit-count assertions, 5 interleaved reps. Guest code is fast
+(MIXED **21 768 M insn/s**, 7.3x TCG) and **it does not matter**: an MMIO exit costs **3199 ns**
+bare and 3693 ns through `WHvEmulatorTryMmioEmulation`, and the canonical run takes **17 546 710**
+of them. That is **56.1 s of exits alone**, for a floor of **56.6-59.1 s** against the 15.43 s
+(`tcg_exec` + `mmio_dispatch`) it would replace - **3.7x to 4.4x slower**. Rejected on
+measurement. A second, independent blocker is recorded: on AMD/SVM WHPX gives no instruction
+length on an MMIO exit, so the port would owe a full x86 decoder before it could even be wrong.
+*(C)* A custom x86->x64 JIT is bounded by the same 8.25 s bucket that is genuine work; design and
+beads only. **Do not retry (B)** without an MMIO count under ~5 M per 12 B instructions or a
+hypervisor release with a materially cheaper exit round trip.
+
+**Validation of the committed tree.** Release rebuilt clean from the split intermediate and the
+final tree; `ctest` **28/28** including twelve source-level guard tests (`gpu_profiles_guards`
+223 checks, `vertex_pipeline_guards` 36 checks with 18 of 18 negative controls caught). The
+binary that produced the phase-6 gate and the golden check is `3a612b6d`; relinking the identical
+tree yields `23810e9e`, which is the link-time-stamp effect already recorded below and not a
+content change.
+
 ## 2026-09-05 - Measurement-first performance week: 12 B replay 227 s -> 58.5 s, 11.7 presented flips/s
 
 The week of 2026-09-02..05 replaced guesswork with instruments, then used them. Everything
