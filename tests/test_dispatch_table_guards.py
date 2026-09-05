@@ -40,8 +40,17 @@ So each property below is one named assertion:
     plus a pre-switch guard over exactly the domain the table covers;
   * the hot methods reach their body through the table, not through a compare;
   * the NV2A_DISPATCH perf_excl region still sits at the drain_pull_queue
-    funnel, and dispatch_method is still called only from inside it, so the
-    restructuring did not move the dispatch bucket's boundary.
+    funnel, dispatch_method is still called only from inside a NV2A_DISPATCH
+    region, and the second such funnel -- Nv2a::drain_method_run, the run fast
+    path of beads-xbox.1.15.1 stage (c) -- opens the same bucket;
+  * the run fast path preserves ORDER and COUNTS: it is entered only with an
+    empty CACHE1 queue, it re-tests the stall predicate on every word exactly as
+    drain_pull_queue's loop does, its bulk tier pushes the method ring PER WORD
+    while adding the two histograms PER RUN, and it hoists each hot handler's
+    own safety bound so a run that would have faulted still faults through the
+    handler;
+  * the strict per-word pusher is still present and still reachable, behind
+    --no-nv2a-pfifo-run-batching, so the A/B has an arm A on one binary.
 
 Run standalone:
     python tests/test_dispatch_table_guards.py
@@ -329,10 +338,21 @@ check("drain_pull_queue still opens NV2A_DISPATCH",
 check("the region is opened before the drain loop",
       drain.index("perf_excl::kNv2aDispatch") < drain.index("while ("),
       "an inner-loop region would re-enter the bucket per method")
-check("dispatch_method is still called only from drain_pull_queue",
-      len(re.findall(r"[^:\w]dispatch_method\(push\);", src)) == 2 and
-      drain.count("dispatch_method(push);") == 2,
-      "a call site outside the funnel would leave its time in the parent bucket")
+run = body(src, "Nv2a::drain_method_run", NV2A_CPP)
+check("drain_method_run opens NV2A_DISPATCH too",
+      "perf_excl::Scope region(perf_excl::kNv2aDispatch);" in run,
+      "the run fast path is the SECOND funnel every queued PGRAPH method can "
+      "pass through; if it did not open the bucket, the handler bodies it "
+      "drives would be charged to NV2A_PFIFO instead")
+check("drain_method_run opens the region before either of its loops",
+      run.index("perf_excl::kNv2aDispatch") < run.index("while ("),
+      "an inner-loop region would re-enter the bucket per method")
+check("dispatch_method is still called only from inside a NV2A_DISPATCH region",
+      len(re.findall(r"[^:\w]dispatch_method\(push\);", src)) == 4 and
+      drain.count("dispatch_method(push);") == 2 and
+      run.count("dispatch_method(push);") == 2,
+      "a call site outside the two funnels would leave its time in the parent "
+      "bucket")
 check("the per-call dispatch timer is still gated on perf::g_enabled",
       "if (perf::g_enabled) {" in drain and
       "perf::g_ns_nv2a_dispatch_method" in drain,
@@ -360,6 +380,135 @@ check("the recorder region covers the method_counts_ histogram",
       dispatch.index("++method_counts_[method >> 2]")
       < dispatch.index("end NV2A_RECORDER region"),
       "method_counts_ is recorder work and belongs inside the bucket")
+
+# ── 8. The run fast path is order- and count-preserving ────────────────────
+#
+# beads-xbox.1.15.1 stage (c)/(d) replaced one CACHE1 round trip per method DATA
+# word with one pass per RUN. What that can silently break is not the timing --
+# it is the same thing the table could break, ORDER, plus two new things: the
+# counts (a histogram bumped per run instead of per word must add the same
+# total) and the fault points (a handler's safety bound hoisted out of the loop
+# must decline the whole run rather than swallow the fault). Each is one named
+# assertion below, because none of them would fail to compile and only a
+# byte-lock on an exercised path would otherwise catch them.
+print()
+print("the PFIFO run fast path preserves order, counts and fault points")
+pushbuf = body(src, "Nv2a::process_pushbuffer", NV2A_CPP)
+
+check("the strict per-word pusher is still present",
+      "pull_queue_.push_back(PushMethod{" in pushbuf and
+      "drain_pull_queue();" in pushbuf,
+      "the per-word path is arm A of the decision A/B and the fallback for "
+      "every declined run; it must not become dead code")
+check("the fast path is behind the --no-nv2a-pfifo-run-batching flag",
+      "if (pfifo_run_batching_ && ch.method_count) {" in pushbuf,
+      "arm A has to be reachable on the SAME binary")
+check("a run is only taken with an EMPTY CACHE1 queue",
+      "if (!pull_queue_.empty()) {" in pushbuf and
+      "++pfifo_decline_queue_;" in pushbuf,
+      "an entry a stalled drain left behind would otherwise be overtaken, "
+      "which is a reordering the byte-lock might not reach")
+check("a run is only taken when the puller is not stalled",
+      "waiting_for_flip_ || waiting_for_nop_ || !pgraph_fifo_access_" in pushbuf,
+      "a stalled puller must queue its words, not dispatch them")
+
+check("the generic run re-tests the stall predicate on every word",
+      "consumed < max_words && !waiting_for_flip_ && !waiting_for_nop_" in run and
+      "pgraph_fifo_access_" in run,
+      "drain_pull_queue's loop re-tests it per word; a run that did not would "
+      "keep dispatching past a FLIP_STALL")
+check("the generic run re-checks ch.get against the word it fetched",
+      "ch.get == expected_get" in run,
+      "the run holds a host pointer across dispatch_method; the check stops it "
+      "rather than reading a stale pointer if the parser is ever re-entered")
+check("the run declines rather than faults on a bad DMA translate",
+      run.count("++pfifo_decline_dma_;") == 2,
+      "the per-word path owns the fault message, so the run must fall back to "
+      "it instead of reporting the fault itself")
+check("the run proves the whole span is contiguous before reading it",
+      "last != first + span" in run,
+      "the DMA object maps offsets linearly, so first and last inside the "
+      "limit implies every word between them is -- but the 0x07FFFFFF mask can "
+      "wrap, and this is what catches that")
+check("the queue telemetry stays paired",
+      run.count("perf::record_pfifo_queue_push();") == 2 and
+      run.count("perf::record_pfifo_queue_pop();") == 2,
+      "push immediately followed by pop reproduces the live count and the peak "
+      "the per-word push/drain pair produced")
+
+# The bulk tier.
+RUN_BULK_METHODS = [
+    (0x1800, "ARRAY_ELEMENT16", "vertex_indices_"),
+    (0x1808, "ARRAY_ELEMENT32", "vertex_indices_"),
+    (0x1818, "INLINE_ARRAY", "inline_array_words_"),
+]
+for method, why, container in RUN_BULK_METHODS:
+    check("0x%04X (%s) has a bulk run arm appending to %s"
+          % (method, why, container),
+          ("method == 0x%04X" % method) in run and
+          ("%s.push_back(" % container) in run,
+          "the mandate's run-friendly hot methods each need a bulk append")
+check("the bulk tier is behind --no-nv2a-pfifo-run-bulk",
+      "if (pfifo_run_bulk_ &&" in run,
+      "stage (c) and stage (d) have to be attributable separately")
+check("the bulk tier only runs on a NON-incrementing run of class 0x97",
+      "ch.non_incrementing && object_class_[ch.subchannel] == 0x97" in run,
+      "an incrementing run changes method every word, so one hoisted handler "
+      "would be the wrong handler for all but the first")
+check("the bulk tier declines while a clear trace is capturing",
+      "!clear_trace_triggered_ && !clear_trace_begin_triggered_" in run,
+      "the clear-trace deques are filled inside dispatch_method; a bulk run "
+      "would skip them and the capture would lose words")
+check("the bulk tier pushes the method ring PER WORD",
+      run.count("methods_.push(push);") == len(RUN_BULK_METHODS),
+      "push_methods() and every seq in the always-on ring must be unchanged, "
+      "so the ring push cannot be hoisted out of the loop")
+check("the bulk tier sets seq per word from the ring itself",
+      run.count("push.seq = methods_.total();") == len(RUN_BULK_METHODS),
+      "dispatch_method assigns seq from methods_.total() before the push; the "
+      "bulk form must do the same or the ring's sequence numbers shift")
+check("the bulk tier adds both histograms PER RUN",
+      run.count("method_counts_[method >> 2] += n;") == 1 and
+      run.count("class_method_counts_[0x97] += n;") == 1,
+      "n increments become one add; the totals must be identical and no "
+      "handler reads either histogram, which is what makes that legal")
+check("the bulk tier hoists each handler's own safety bound",
+      run.count("(1u << 24)") == len(RUN_BULK_METHODS),
+      "a run that would have faulted mid-way must be declined to the generic "
+      "form so the fault still comes from the handler, at the same word")
+check("the bulk tier checks primitive_mode_ for INLINE_ARRAY",
+      "primitive_mode_ != 0 &&" in run,
+      "the 0x1818 handler faults outside BEGIN/END; the bulk form must decline "
+      "rather than append")
+
+MAIN_CPP = ROOT / "src/app/main.cpp"
+main_src = read(MAIN_CPP)
+for flag in ["--nv2a-pfifo-run-batching", "--no-nv2a-pfifo-run-batching",
+             "--nv2a-pfifo-run-bulk", "--no-nv2a-pfifo-run-bulk",
+             "--nv2a-pfifo-direct-fetch", "--no-nv2a-pfifo-direct-fetch"]:
+    check("main.cpp accepts %s" % flag,
+          ('"%s"' % flag) in main_src,
+          "the decision A/B runs both arms on one binary")
+# Stage (d): the direct host window.
+check("the direct window is gated by its own flag",
+      "if (!pfifo_direct_fetch_ || !mem_direct_ || !bytes) return nullptr;" in
+      body(src, "Nv2a::pushbuffer_host_bytes", NV2A_CPP),
+      "the window helps the PER-WORD path too, so arm A of the decision A/B "
+      "must be able to turn it off as well or the A/B measures only half the "
+      "lever -- measured 2026-09-05: leaving it on in arm A moved the arm from "
+      "53.479 s to 52.282 s and the apparent win from 4.44 % to 2.55 %")
+check("the window is reset at the top of every kick",
+      "push_win_ = nullptr;" in pushbuf,
+      "a host pointer must not outlive the process_pushbuffer invocation that "
+      "resolved it")
+check("mem_read_ is still the fallback for a span that is not directly addressable",
+      "} else if (!mem_read_(fetch, &word, sizeof(word))) {" in pushbuf,
+      "the top of a mapping and any non-RAM DMA target still go through "
+      "uc_mem_read; that path must not become dead")
+check("the run census is reported",
+      "NV2A PFIFO runs:" in main_src and "NV2A PFIFO run declines:" in main_src,
+      "batched + per-word must be checkable against the method total, and a "
+      "decline must be attributable to a named precondition")
 
 print()
 if failures:

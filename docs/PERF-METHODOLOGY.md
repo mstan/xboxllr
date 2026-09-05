@@ -1051,6 +1051,214 @@ remains in it is CPU emulation, command dispatch and PFIFO, and driver overhead 
   dispatch entries at 57.7 ns each. Nothing in the GPU arc touches it; it is the pushbuffer parse
   and the method ladder, and it is now the third-largest bucket in the run.
 
+### 3m. The pushbuffer run path (2026-09-05, `beads-xbox.1.15.1` reopened) -- **FAILED the 5 % bar at +4.29 %, and the bucket pair is gone**
+
+Section 5b row 6 was the last untouched item in the run: `nv2a_dispatch` 4.774 s +
+`nv2a_pfifo` 2.811 s = 7.585 s, 13.0 % of the phase-7 instrumented wall, on 82.7 M method words
+that the whole GPU arc never went near. This session measured where those nanoseconds went,
+removed the per-word overhead, and gated the result. The change is **byte-exact** -- 28 of 28
+checkpoints identical, every determinism digest identical, all 24 profile hashes identical -- and
+it **fails the 5 % retention bar by 0.71 pp**.
+
+**(1) The per-word breakdown, measured before anything changed.** `src/machine/nv2a_dispatch_micro.hpp`
+is a compile-time-optional (`-DXLLE_DISPATCH_MICRO=ON`, default OFF) micro-partition of one
+pushbuffer word into eleven sibling slots, sampled 1 word in 64. It is NOT perf_excl: the slots
+never nest, so sampling is sound here in a way perf_excl documents it is not for a hot child of a
+hot parent. Two findings had to be fixed before the numbers meant anything, and both are worth
+carrying forward:
+
+* **A bare `rdtsc` cannot time a 40 ns interval.** The first chained version summed twelve deltas
+  to 12.2 ns against a 41.4 ns envelope -- 36 % of the whole -- because unfenced reads float to
+  the head of the reorder window and collapse toward each other while the real work retires
+  behind them. `lfence` on both sides of the read fixed it. `perf_excl::tick_now()` is still an
+  unfenced `rdtsc`; that is tolerable for its own regions and would not have been tolerable here.
+* **The instrument's own cost is SOLVED, not assumed.** Sampled words alternate between an
+  envelope mode (2 reads, nothing inside) and a breakdown mode (12 chained reads). The deltas
+  telescope, so `span_breakdown = W + 12R` and `span_envelope = W + R` give R -- the marginal cost
+  of one fenced read where it actually sits -- from two equations. Measured R = 16.38 ns. The
+  obvious estimator, a `null` slot with no work in it, is NOT R: it also carries the sampler's own
+  bookkeeping (2.1 ns, mostly two 64-bit divisions by the runtime period) and using it
+  over-subtracts from every slot. With R solved, the parts sum to 99.5 % of the whole.
+
+One 12 B noperf leg, `XLLE_DISPATCH_MICRO_METHOD=all`, period 64, 650 697 sampled words of
+83 289 212 data words (`build/micro/all1`):
+
+| slot | ns/word | s over the run | what it is |
+|---|---:|---:|---|
+| `dm_handler` | 354.51 | 29.527 | the method's own semantics, i.e. the DRAW. Not overhead |
+| `pf_queue` | 22.37 | 1.863 | the PushMethod aggregate + `pull_queue_.push_back` |
+| `pf_fetch` | 18.73 | 1.560 | `mem_read_` -- the std::function into `uc_mem_read` -- for four bytes |
+| `drain_enter` | 14.89 | 1.240 | the drain funnel: stall predicate, perf scope, `front()` / `pop_front()` |
+| `rec_ring` | 3.93 | 0.328 | `methods_.push` into the always-on ring |
+| `dm_prologue` | 2.29 | 0.191 | dispatch_method's SET_OBJECT test and object-class read |
+| `pf_dma` | 1.42 | 0.118 | `dma_object_address` |
+| `dm_class` | 0.65 | 0.054 | `class_method_counts_` + the class2d slot search + three class compares |
+| `drain_exit` | 0.43 | 0.036 | loop re-test and scope destructors |
+| `rec_trace`, `rec_counts` | ~0 | 0.000 | at the floor: the clear-trace deques and `method_counts_` cost nothing |
+| header words | 28.36 | 0.163 | 5 757 919 jump / call / return / method-header words |
+| **per-word overhead** | **64.71** | **5.390** | everything above except `dm_handler` |
+
+So the answer to "where do 57.7 ns/word go" is: **they are not in the method ladder and they are
+not in the recorder.** `pf_queue + pf_fetch + drain_enter` alone are 56 ns/word and 4.66 s -- the
+CACHE1 deque round trip and the `uc_mem_read` hop, both of which exist only because the pusher was
+written one word at a time. The jump table (`beads-xbox.1.15.1` stage (a)) and the recorder split
+(`kNv2aRecorder`) were measuring the wrong half of the problem, and this table is the retraction.
+
+A second leg filtered to ARRAY_ELEMENT16 (`build/micro/e16b`, 64 011 925 words = 76.86 % of the
+run) prices the whole word at **43.0 ns**, of which the handler -- two vector appends -- is 4.46.
+
+**(2) The method census, and why three arms cover 77 % of the words.** The micro build prints
+`[2bl] NV2A method census` from the always-on `method_counts_` histogram at shutdown. 454 distinct
+methods, 83 288 956 words: `0x1800` ARRAY_ELEMENT16 **64 011 925 (76.86 %)**, `0x17FC` 911 624,
+`0x1EA4` 882 697, the transform-constant range `0x0B80..0x0BBC` 8 552 000 across twelve methods in
+runs of four, the transform-matrix range `0x0480..0x04BC` 1 418 400 in runs of sixteen, `0x1808`
+9 672, `0x1818` 5 820, `0x1810` 1 306.
+
+**(3) What was built.** Three stages, all default ON, each with a negative spelling on the same
+binary.
+
+* **(c) `Nv2a::drain_method_run`** -- a run of method DATA words is consumed in one pass instead
+  of one CACHE1 round trip per word. It is the SECOND funnel that opens `kNv2aDispatch`, and it is
+  entered only when `pull_queue_` is empty, the puller is not stalled, and the DMA object maps the
+  whole run contiguously (proved by translating the first and last word and requiring the host
+  addresses to differ by exactly `4 * (n - 1)`, which also catches a wrap of the 0x07FFFFFF mask).
+  It re-tests the stall predicate on EVERY word, exactly as `drain_pull_queue`'s loop does, and
+  advances `ch.get` / `ch.method` / `ch.method_count` per word, so an observer sees the same
+  channel state at the same instant. `--no-nv2a-pfifo-run-batching`.
+* **(d) `Nv2a::pushbuffer_host_bytes`** -- one resolved host window per kick instead of a
+  `uc_mem_read` per word. XboxMachine maps guest RAM into Unicorn with
+  `uc_mem_map_ptr(ram_.data())` and hands the same pointer back through `mem_direct_`, so the bytes
+  are identical by construction rather than by agreement. The window is reset at the top of every
+  `process_pushbuffer`, which bounds a cached host pointer to one invocation.
+  `--no-nv2a-pfifo-direct-fetch`.
+* **(d-bulk) the bulk append** for `0x1800` / `0x1808` / `0x1818` -- a non-incrementing class-0x97
+  run of one of those goes straight into `vertex_indices_` / `inline_array_words_` without
+  entering `dispatch_method` at all. `methods_.push` still runs PER WORD with the same `seq`, so
+  the always-on ring and `push_methods()` are unchanged; `method_counts_` and
+  `class_method_counts_` take `+= n`, which is legal precisely because no handler reads either;
+  each handler's own safety bound is hoisted so a run that would have faulted is declined to the
+  generic form and still faults at the same word through the same code; and a clear trace in
+  progress declines to the generic form so the capture still sees every word.
+  `--no-nv2a-pfifo-run-bulk`.
+
+**Run census on the shipping default, 12 B:** `runs=5 575 015 words=82 709 636 bulk-runs=788 162
+bulk-words=63 931 139 per-word=579 576`. **99.30 % of method words are batched**, 76.76 % go
+through the bulk append (99.87 % of all ARRAY_ELEMENT16 words), and the 0.70 % that still take the
+strict per-word pusher are attributable: `queue=577 314` (words behind an entry a stalled drain
+left in CACHE1) and `stall=2 262`. Zero DMA declines, zero direct-window declines. The per-word
+path is therefore reachable in every default run and is not dead code.
+
+**(4) The AFTER number for the dominant word class.** The same micro build, run-path envelope,
+12 315 sampled runs covering 1 017 009 ARRAY_ELEMENT16 words: **5.34 ns/word**, against 43.0 ns on
+the per-word path. Eight times cheaper for 76.9 % of the run's method words.
+
+**(5) The decision A/B. 3+3 interleaved, ONE binary (`a48a1e83`), one session, arm A =
+`--no-nv2a-pfifo-run-batching --no-nv2a-pfifo-direct-fetch` (the exact pre-change pusher: run
+census `runs=0 per-word=83 289 212`), arm B = the shipping default. Gate = total 12 B wall, median
+AND min, 5 %.**
+
+| set | arm A median / min | arm B median / min | median | min | rounds | verdict |
+|---|---|---|---|---|---|---|
+| `rb-gate3` (both stages) | 53.515 / 53.467 s | 51.222 / 51.129 s | **+4.29 %** | **+4.37 %** | 3/3 | **FAIL the 5 % bar** |
+| `rb-gate2` (run batching alone, direct window on in BOTH arms) | 52.282 / 52.158 s | 50.949 / 50.879 s | +2.55 % | +2.45 % | 3/3 | attribution |
+| `rb-gate` (run batching alone, direct window in NEITHER arm) | 53.479 / 53.387 s | 51.102 / 51.010 s | +4.44 % | +4.45 % | 3/3 | superseded, see below |
+
+Final-four indicator on the decision set: **+8.07 % median / +8.00 % min** (not gated). Arm cv
+0.059 % (A) and 0.275 % (B); median-to-minimum spread 0.090 % and 0.180 %. Every leg is flagged
+`contaminated` by the same six idle `beads-mcp` python processes present in both arms -- a
+constant, not a differential, exactly as in section 3l(5).
+
+**The `rb-gate` row is the methodological finding of this session and is why it is superseded.**
+That set was run before stage (d) existed and reported +4.44 %. When stage (d) landed, the same
+A/B reported **+2.55 %** -- because `--no-nv2a-pfifo-run-batching` gated only the run path, so the
+direct window was helping ARM A TOO. The per-word arm moved 53.479 -> 52.282 s (**+2.30 % for the
+direct window on its own**) and the apparent win of the change nearly halved. A flag that names
+one stage of a two-stage lever measures half the lever and reports it as the whole. Arm A must
+restore EVERY stage; `tests/test_dispatch_table_guards.py` now pins that with the numbers in the
+failure message.
+
+**(6) Behaviour: EXACT.** Arm A vs arm B of the decision set, `tools/compare_ppm_series.py`:
+**28 of 28 checkpoints byte-identical, 0 differing pixels**. A separate 12 B pair
+(`build/rb/f12A` vs `build/rb/f12B`) additionally shows every `[2bl]` census line identical, all
+24 frame-series checkpoint hashes identical, and every determinism digest identical at all 24
+checkpoints -- `det_digest`, `dev_digest`, `dev_events` (17 588 661), `dma_digest`, `dma_writes`
+(1 237 379), `irq0` (16 342) -- with final frame SHA `36e87a97...` on both arms. All 24 profile
+hashes agree in the gate set (`0 differ`). This is not "behaviourally faithful"; it is identical.
+
+**Golden: `goldens/golden-noperf-defaults12-2026-09-05d.json` is reproduced and NOT re-pinned.**
+The reference-configuration leg (`--nv2a-draw-threads 0 --nv2a-profile-hashes`, `build/rb-ref`)
+exits 0 with empty stderr and passes every check: final frame SHA `36e87a97...`, all 24 profile
+hashes equal, chunk_insns and engine equal, with only `exe_sha256` and `git_head` SKIPped as
+expected. Against `build/golden-ref-v2-*.ppm` it is byte-identical on 25 of 28 checkpoints and
+differs on the same three phase-6 frames by the same four pixels section 3l(6) records (11.0 B
+2 px, 11.5 B 1 px, `settle-1` 1 px, largest connected component 1 px). No new drift.
+
+**(7) The bucket pair after the change.** Two instrumented legs on the same binary, arm A =
+both negatives, arm B = default (`build/rb/q12A`, `build/rb/q12B`):
+
+| bucket | arm A s | arm A n | arm B s | arm B n | delta |
+|---|---:|---:|---:|---:|---:|
+| `nv2a_dispatch` | 4.841 | 82 712 961 | **2.317** | **5 578 340** | −2.524 |
+| `nv2a_pfifo` | 2.846 | 20 191 | **0.154** | 20 191 | −2.692 |
+| `nv2a_recorder` | 0.598 | 83 288 956 | **0.139** | 19 357 817 | −0.459 |
+| the pair | **7.687** | | **2.471** | | **−5.216** |
+| the pair + recorder | 8.285 | | 2.610 | | −5.675 |
+
+The dispatch region is now entered once per RUN (5.58 M) instead of once per WORD (82.71 M), and
+`nv2a_pfifo` -- the pusher's own self time -- falls by 94.6 %. **The instrumented delta must not be
+quoted as the win:** removing 82.7 M region entries also removes 282 M of the instrument's own
+`rdtsc` reads (`clock_reads` 377 887 349 -> 95 755 829), so −5.2 s instrumented corresponds to
+−2.3 s noperf. The trustworthy number is the gate: 2.293 s of a 53.5 s wall.
+
+**(8) The emulation-thread partition after this change** (`build/rb/q12B2`, `--perf-accounting`,
+wall 52.501 s, unaccounted 0.065 %; a second arm-B leg, because the first agreed to 0.001 s on
+every bucket of this lever but carried 1.0 s of host noise in `tcg_exec`):
+
+| bucket | s | % of wall |
+|---|---:|---:|
+| `tcg_exec` | 14.509 | 27.64 |
+| `nv2a_raster_witnessed` | 9.172 | 17.47 |
+| `nv2a_vertex` | 6.799 | 12.95 |
+| `nv2a_raster_generic_sw` | 5.892 | 11.22 |
+| `nv2a_gl` | 5.189 | 9.88 |
+| `nv2a_gl_resolve` | 3.757 | 7.16 |
+| `nv2a_dispatch` | 2.316 | 4.41 |
+| `nv2a_texture` | 1.755 | 3.34 |
+| `nv2a_clear` | 1.531 | 2.92 |
+| `mmio_dispatch` | 0.677 | 1.29 |
+| `nv2a_pfifo` | 0.158 | 0.30 |
+| `nv2a_recorder` | 0.139 | 0.26 |
+| everything else (slice overhead, checkpoints, io, poll, scanout, interrupts) | 0.573 | 1.09 |
+
+**(9) Retention.** The gate says REJECT and the numbers say the lever is finished, so both belong
+in the record. What remains in `nv2a_dispatch` after the change is 2.32 s of method SEMANTICS --
+the handler bodies of the 19.4 M words that are not a bulk vertex-index append -- not overhead:
+the entire per-word overhead this bead was about is now 0.30 % of the wall. **Recommended for
+retention under section 3 item 3** on the same reading section 3l(3)/(5) used for the BGRA upload
+staging (retained at +1.51 %): it is byte-exact on every surface the project measures, it deletes
+82.7 M `uc_mem_read` hops, 82.7 M deque round trips and 82.7 M region entries, and it is 2.8x the
+win that precedent retained. It ships DEFAULT ON with three negative spellings, so reversing it is
+a flag rather than a revert. **This is a judgement call the owner can overrule with
+`--no-nv2a-pfifo-run-batching --no-nv2a-pfifo-direct-fetch`.**
+
+**(10) What is NOT done, with the number each is worth.** All three are below the ~1 % MDE of the
+3+3 method and are recorded as **UNDETERMINED** under section 2 rule 8, not disproven:
+
+* **A bulk arm for the incrementing transform-constant range `0x0B80..0x0BBC`** (8 552 000 words,
+  10.3 % of the run). It would remove `dm_prologue + rec_ring + dm_class` plus the call, ~7 ns/word
+  measured, ~0.06 s deflated -- **0.11 % of the wall**. DO NOT RETRY WITHOUT a reason to touch that
+  handler anyway: its per-word `transform_constant_load_` advance and bounds test have to be
+  reproduced exactly and it feeds the VSH parsed-program cache.
+* **Hoisting `ch.get` / `ch.put` and the ring head out of the bulk loop** (63.9 M words at 5.34 ns
+  measured, ~2.6 ns deflated). Worth ~0.1 s, **0.2 %**, and the ring-head part would weaken
+  PRINCIPLES section 7's always-on visibility mid-run for that. DO NOT RETRY WITHOUT a workload
+  where the bulk loop is the dominant term.
+* **Skipping `methods_.push` when no debug consumer is attached** (the shape this session's brief
+  suggested). 83.3 M ring pushes are 2.67 GB of stores, measured at 3.93 ns/word, ~0.17 s, **0.3 %**
+  -- and it would change `push_methods()`, the `[2bl] NV2A PFIFO: methods=` census and the
+  `recent_methods` dump, i.e. it trades an exact result for 0.3 %. DECLINED on that trade, not on
+  the number.
+
 ### 3e. Draw-thread knee sweep (2026-09-05)
 
 One binary, one session, quiet host, `--no-nv2a-profile-hashes`, gate = total 12 B wall, median
@@ -1157,12 +1365,13 @@ already taken most of it, and what remained was 13.7 s of `tcg_exec` (1.09× at 
 ### 5b. The measured lever order after phase 7 (2026-09-05)
 
 Every row is a direct measurement on the canonical 12 B replay, not an inference. The
-emulation-thread partition it is read against is the phase-7 instrumented leg
-(`build/p7-perf`, wall 58.444 s, unaccounted 0.161 %): `tcg_exec` 14.690,
-`nv2a_raster_witnessed` 9.162, `nv2a_vertex` 6.739, `nv2a_raster_generic_sw` 5.806, `nv2a_gl`
-5.319, `nv2a_dispatch` 4.774, `nv2a_gl_resolve` 3.791, `nv2a_pfifo` 2.811, `nv2a_texture` 1.760,
-`nv2a_clear` 1.528, `mmio_dispatch` 0.673, `nv2a_recorder` 0.597. (The phase-5 leg it replaces
-was `build/p5-perf-leg01-B-r1`, wall 62.496 s.)
+emulation-thread partition it is read against is the section-3m instrumented leg
+(`build/rb/q12B2`, wall 52.501 s, unaccounted 0.065 %): `tcg_exec` 14.509,
+`nv2a_raster_witnessed` 9.172, `nv2a_vertex` 6.799, `nv2a_raster_generic_sw` 5.892, `nv2a_gl`
+5.189, `nv2a_gl_resolve` 3.757, `nv2a_dispatch` 2.316, `nv2a_texture` 1.755, `nv2a_clear`
+1.531, `mmio_dispatch` 0.677, `nv2a_pfifo` 0.158, `nv2a_recorder` 0.139. (The phase-7 leg it
+replaces was `build/p7-perf`, wall 58.444 s; the phase-5 leg before that was
+`build/p5-perf-leg01-B-r1`, wall 62.496 s.)
 
 | # | lever | measured size | what it costs to build |
 |---|---|---:|---|
@@ -1175,7 +1384,7 @@ was `build/p5-perf-leg01-B-r1`, wall 62.496 s.)
 | 3 | ~~The 1 878 generic-combiner software fallbacks~~ | **DONE**, and the phase-5 framing of this row was wrong twice: the 602 texture reads are NOT software fallbacks (row 1c), and the 704 fallback resolves were all on a plane §3i(2) never named | — |
 | 4 | ~~1 831.6 MB of texture upload + 479.3 MB of surface upload per run on the generated path, through a per-pixel scalar staging loop~~ | **DONE 2026-09-05 phase 7**, §3l(3): `GL_BGRA` deletes the loop entirely for a texture and reduces a colour surface to a row copy. Gate **+1.51 % median / +1.49 % min, FAILS the 5 % bar**, 3 of 3 rounds, 28 of 28 checkpoints byte-identical; retained under §3 item 3 as a pure simplification | done |
 | 5 | batch the generated draws (792 per run, one SSBO each) | **UNDETERMINED, bounded well below the method's MDE, 2026-09-05 phase 7**, §3l(4). 792 of `nv2a_gl`'s 304 888 entries is 0.26 % of a 5.319 s bucket, and the reroute leg ran 4 003 of them while being 2.2 s faster. Neither is a controlled A/B; both are ceilings | not built — needs a workload where the generated draw count dominates `nv2a_gl` |
-| 6 | **`nv2a_dispatch` 4.774 s + `nv2a_pfifo` 2.811 s = 7.585 s, 13.0 % of the wall**, on 82.7 M dispatch entries at 57.7 ns each | 13.0 % | untouched by the whole GPU arc: it is the pushbuffer parse and the method ladder, and after phase 7 it is the third-largest item in the run |
+| 6 | ~~**`nv2a_dispatch` 4.774 s + `nv2a_pfifo` 2.811 s = 7.585 s, 13.0 % of the wall**, on 82.7 M dispatch entries at 57.7 ns each~~ | **DONE 2026-09-05, section 3m, and the 57.7 ns/word was never the method ladder.** The per-word micro-partition puts 56 of the 65 ns/word of overhead in the CACHE1 deque round trip and the `uc_mem_read` hop, not in dispatch. Consuming a METHOD RUN in one pass and reading the pushbuffer through the host pointer Unicorn already maps takes the pair 7.687 -> 2.471 s instrumented and `nv2a_pfifo` self time down 94.6 %; 99.30 % of method words are batched and 76.8 % skip `dispatch_method` entirely. Gate **+4.29 % median / +4.37 % min, FAILS the 5 % bar**, 3 of 3 rounds, 28 of 28 checkpoints byte-identical and every determinism digest identical; recommended for retention under section 3 item 3 on the section 3l(3) reading | done; section 3m(10) has the three remaining items, all below the method's MDE |
 | — | ~~the 148 317 no-op per-draw residency queries~~ | **16 ms — DECLINED ON MEASUREMENT** | — |
 | — | ~~`kPitchZ16Depth` on the GPU (142 842 draws, 476 M fragments)~~ | **zero resolves removed**; its two zeta planes have no GPU draws at all | one shader, for CPU raster removal only |
 

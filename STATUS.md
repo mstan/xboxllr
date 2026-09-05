@@ -3,6 +3,86 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-09-05 - The pushbuffer run path: the last untouched bucket pair, and where its nanoseconds actually were
+
+One commit on `perf/measurement-first-2026-09` closes `docs/PERF-METHODOLOGY.md` section 5b row 6,
+the item the whole GPU arc never went near: `nv2a_dispatch` 4.774 s + `nv2a_pfifo` 2.811 s =
+7.585 s, 13.0 % of the phase-7 wall, on 82.7 M method words. The rules are section 3m; the lever
+order is section 5b.
+
+**The headline is that the 57.7 ns/word was never the method ladder, and the jump table
+(`beads-xbox.1.15.1` stage (a)) and the recorder split were measuring the wrong half.** A new
+compile-time-optional micro-partition (`src/machine/nv2a_dispatch_micro.hpp`,
+`-DXLLE_DISPATCH_MICRO=ON`, default OFF) breaks one pushbuffer word into eleven sibling slots,
+sampled 1 in 64. Over all 83.3 M data words the per-word OVERHEAD is 64.71 ns, and 56 of those
+nanoseconds are three things that exist only because the pusher was written one word at a time:
+`pull_queue_.push_back` of a 32-byte PushMethod (22.37 ns, 1.863 s), a `std::function` hop into
+`uc_mem_read` for four bytes (18.73 ns, 1.560 s), and the `drain_pull_queue` funnel that pops the
+entry straight back off (14.89 ns, 1.240 s). The recorder is 3.93 ns; `method_counts_` and the
+clear-trace deques are at the measurement floor, i.e. free.
+
+**Two measurement findings came out of building the instrument and both generalise.** A bare
+`rdtsc` cannot time a 40 ns interval: the first chained version summed twelve deltas to 12.2 ns
+against a 41.4 ns envelope, because unfenced reads float to the head of the reorder window and
+collapse toward each other while the real work retires behind them; `lfence` on both sides fixed
+it, and `perf_excl::tick_now()` is still unfenced. And the instrument's own per-read cost is
+SOLVED rather than assumed, from two sampling modes and the fact that chained deltas telescope
+(`W + 12R` and `W + R`, so R = 16.38 ns); the obvious estimator -- a null slot -- is not R, because
+it also carries the sampler's own bookkeeping, and using it over-subtracts from every slot. With R
+solved the parts sum to 99.5 % of the whole.
+
+**What shipped: three stages, all default ON, each with a negative spelling on the same binary.**
+`Nv2a::drain_method_run` consumes a whole method RUN in one pass and is the second funnel that
+opens `kNv2aDispatch`; `Nv2a::pushbuffer_host_bytes` resolves one host window per kick, reading
+the pushbuffer through the very pointer XboxMachine hands `uc_mem_map_ptr`, so the bytes are
+identical by construction; and a bulk append for `0x1800` / `0x1808` / `0x1818` puts a
+non-incrementing run straight into `vertex_indices_` without entering `dispatch_method`. On the
+canonical run **99.30 % of method words are batched** and 76.8 % skip `dispatch_method` entirely,
+with the 0.70 % that still take the strict per-word pusher attributable to a named precondition
+(`queue=577 314`, `stall=2 262`, zero DMA or direct-window declines). ARRAY_ELEMENT16, 76.86 % of
+all method words, goes from 43.0 ns/word to 5.34.
+
+**The result is byte-exact and it FAILS the 5 % bar.** 3+3 interleaved, one binary, arm A =
+`--no-nv2a-pfifo-run-batching --no-nv2a-pfifo-direct-fetch` (run census `runs=0
+per-word=83 289 212`, i.e. the exact pre-change pusher): **+4.29 % median / +4.37 % min, 3 of 3
+rounds, REJECT against the 5.00 % threshold**; final-four indicator +8.07 % / +8.00 %. Behaviour is
+not merely faithful but identical -- 28 of 28 checkpoints byte-identical with zero differing
+pixels, every `[2bl]` census line equal, all 24 frame-series hashes equal, and `det_digest`,
+`dev_digest`, `dev_events`, `dma_digest`, `dma_writes` and `irq0` equal at all 24 checkpoints, with
+final frame SHA `36e87a97...` on both arms. `goldens/golden-noperf-defaults12-2026-09-05d.json` is
+reproduced by the reference-configuration leg and NOT re-pinned; against `golden-ref-v2` it carries
+the same three-frame four-pixel phase-6 signature section 3l(6) already records. It is retained
+under section 3 item 3 on the reading section 3l(3)/(5) used for the BGRA upload staging at
++1.51 %, and the owner can reverse it with two flags.
+
+**A methodology finding worth more than the 4.29 %.** The first gate set reported +4.44 %. When
+the direct-window stage landed the SAME A/B reported +2.55 %, because the flag named only the run
+path and the window was helping arm A too -- the per-word arm moved 53.479 to 52.282 s. A flag that
+gates one stage of a two-stage lever measures half the lever and reports it as the whole.
+`tests/test_dispatch_table_guards.py` now pins that arm A restores every stage, with those numbers
+in the failure message.
+
+**The bucket pair, instrumented, same binary, arm A vs arm B:** `nv2a_dispatch` 4.841 -> 2.317 s
+with entries 82 712 961 -> 5 578 340 (once per run, not once per word), `nv2a_pfifo` 2.846 ->
+0.154 s (-94.6 %), `nv2a_recorder` 0.598 -> 0.139 s; the pair 7.687 -> 2.471 s. That -5.2 s must
+NOT be quoted as the win: removing 82.7 M region entries also removes 282 M of the instrument's own
+`rdtsc` reads (`clock_reads` 377 887 349 -> 95 755 829), and the trustworthy number is the gate's
+2.293 s. What is left in `nv2a_dispatch` is method semantics, not overhead: the per-word overhead
+this bead was about is now 0.30 % of the wall.
+
+**The emulation-thread partition after this change** (`build/rb/q12B2`, wall 52.501 s, unaccounted
+0.065 %): `tcg_exec` 14.509 (27.6 %), `nv2a_raster_witnessed` 9.172, `nv2a_vertex` 6.799,
+`nv2a_raster_generic_sw` 5.892, `nv2a_gl` 5.189, `nv2a_gl_resolve` 3.757, `nv2a_dispatch` 2.316,
+`nv2a_texture` 1.755, `nv2a_clear` 1.531, `mmio_dispatch` 0.677, `nv2a_pfifo` 0.158,
+`nv2a_recorder` 0.139. The device path no longer has a command-dispatch item in its top six.
+
+**Guards:** `tests/test_dispatch_table_guards.py` grew a section that pins order, counts and fault
+points on the run path -- an empty CACHE1 queue as a precondition, the stall predicate re-tested
+per word, the ring pushed per word while the two histograms are added per run, each hot handler's
+safety bound hoisted so a run that would fault is declined, the clear-trace decline, the
+contiguity proof, and the per-word pusher still reachable behind its flag. Seven targeted mutations
+are each caught; the pre-change tree fails outright. ctest 28/28.
+
 ## 2026-09-05 - GPU phase 7: the last plane is reachable, and the thing that blocks it is named
 
 One commit on `perf/measurement-first-2026-09` closes `beads-xbox.1.15.10` phase 7, the four

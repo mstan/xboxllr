@@ -17,6 +17,15 @@ option(XLLE_WITH_SDL "Build the SDL3 host shell" ON)
 option(XLLE_NATIVE_OPTIMIZATIONS
   "Build local host-native optimized binaries (-march=native on x86_64 GNU/Clang)"
   ON)
+# Temporary per-word micro-partition of the NV2A pushbuffer/dispatch path
+# (src/machine/nv2a_dispatch_micro.hpp, beads-xbox.1.15.1 step 1). OFF here means
+# the probes are empty inlines with no globals behind them, so the shipping
+# binary's hot loop is compiled exactly as if the header did not exist and the
+# decision A/B is not run against instrumented code. Turn it on into a SEPARATE
+# build directory when the per-word breakdown needs re-measuring.
+option(XLLE_DISPATCH_MICRO
+  "Compile the temporary NV2A per-word dispatch micro-partition probes"
+  OFF)
 
 include(FetchContent)
 
@@ -95,6 +104,9 @@ add_library(xlle_machine STATIC
   src/machine/rtc.cpp)
 target_include_directories(xlle_machine PUBLIC ${XLLE_INCLUDES})
 target_link_libraries(xlle_machine PUBLIC xlle_cpu nv2a_vsh_emulator)
+if(XLLE_DISPATCH_MICRO)
+  target_compile_definitions(xlle_machine PUBLIC XLLE_DISPATCH_MICRO=1)
+endif()
 if(XLLE_NATIVE_OPTIMIZATIONS AND
    CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND
    CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")

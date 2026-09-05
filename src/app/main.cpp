@@ -40,6 +40,7 @@ int xlle_heap_poison_byte();
 #include "machine/apu.hpp"
 #include "machine/machine.hpp"
 #include "machine/perf_accounting.hpp"
+#include "machine/nv2a_dispatch_micro.hpp"
 #include "machine/perf_excl.hpp"
 #include "obs/debug_server.hpp"
 #include "spike/fixtures.hpp"
@@ -1525,6 +1526,12 @@ int main(int argc, char** argv) {
     bool nv2a_gpu_generic_shader_image_blend = true;
     bool nv2a_gpu_generic_shader_depth = false;
     bool nv2a_gpu_generic_shader_bgra_upload = true;
+    // PFIFO run batching (beads-xbox.1.15.1 stages (c)/(d)). Both default ON;
+    // the negative spellings are the arm-A form of the decision A/B and restore
+    // the strict per-word pusher / the per-word handler call on the SAME binary.
+    bool nv2a_pfifo_run_batching = true;
+    bool nv2a_pfifo_run_bulk = true;
+    bool nv2a_pfifo_direct_fetch = true;
     uint32_t nv2a_gpu_generic_shader_witnessed = 0u;
     bool nv2a_gpu_generic_shader_nodraw = false;
     uint32_t nv2a_gpu_generic_shader_wide = 4096;
@@ -1770,6 +1777,18 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(argv[i],
                               "--no-nv2a-gpu-generic-shader-bgra-upload"))
             nv2a_gpu_generic_shader_bgra_upload = false;
+        else if (!std::strcmp(argv[i], "--nv2a-pfifo-run-batching"))
+            nv2a_pfifo_run_batching = true;
+        else if (!std::strcmp(argv[i], "--no-nv2a-pfifo-run-batching"))
+            nv2a_pfifo_run_batching = false;
+        else if (!std::strcmp(argv[i], "--nv2a-pfifo-run-bulk"))
+            nv2a_pfifo_run_bulk = true;
+        else if (!std::strcmp(argv[i], "--no-nv2a-pfifo-run-bulk"))
+            nv2a_pfifo_run_bulk = false;
+        else if (!std::strcmp(argv[i], "--nv2a-pfifo-direct-fetch"))
+            nv2a_pfifo_direct_fetch = true;
+        else if (!std::strcmp(argv[i], "--no-nv2a-pfifo-direct-fetch"))
+            nv2a_pfifo_direct_fetch = false;
         else if (!std::strcmp(argv[i],
                               "--nv2a-gpu-generic-shader-witnessed") &&
                  i + 1 < argc) {
@@ -2436,6 +2455,9 @@ int main(int argc, char** argv) {
                     nv2a_gpu_generic_shader_witnessed);
                 mach.nv2a()->set_gpu_generic_shader_bgra_upload(
                     nv2a_gpu_generic_shader_bgra_upload);
+                mach.nv2a()->set_pfifo_run_batching(nv2a_pfifo_run_batching);
+                mach.nv2a()->set_pfifo_run_bulk(nv2a_pfifo_run_bulk);
+                mach.nv2a()->set_pfifo_direct_fetch(nv2a_pfifo_direct_fetch);
                 mach.nv2a()->set_gpu_generic_shader_nodraw(
                     nv2a_gpu_generic_shader_nodraw);
                 mach.nv2a()->set_gpu_generic_shader_wide_pixels(
@@ -3746,6 +3768,18 @@ int main(int argc, char** argv) {
                     /*interval=*/true);
                 if (!perf_excl_report.empty())
                     std::printf("%s\n", perf_excl_report.c_str());
+                // Per-word micro-partition of the NV2A pushbuffer/dispatch path
+                // (beads-xbox.1.15.1 step 1). Empty unless the binary was configured
+                // with -DXLLE_DISPATCH_MICRO=ON, so this costs a call and a length
+                // test on a shipping build.
+                {
+                    const std::string dispatch_micro_report =
+                        xlle::dispatch_micro::format_report(
+                            "at-checkpoint",
+                            static_cast<unsigned long long>(deadline));
+                    if (!dispatch_micro_report.empty())
+                        std::printf("%s\n", dispatch_micro_report.c_str());
+                }
                 const std::string perf_report = xlle::perf::format_report();
                 if (!perf_report.empty()) std::printf("%s\n", perf_report.c_str());
                 print_generic_combiner_perf_report();
@@ -4373,6 +4407,11 @@ int main(int argc, char** argv) {
             // below, so no perf_excl::Scope becomes active: this call changes
             // the units the always-on lines are printed in and nothing else.
             xlle::perf_excl::init();
+            // Temporary per-word micro-partition (beads-xbox.1.15.1 step 1). A
+            // no-op unless the binary was configured with -DXLLE_DISPATCH_MICRO=ON;
+            // it borrows perf_excl's calibration, which the call above performs
+            // regardless of --perf-accounting.
+            xlle::dispatch_micro::init_from_env();
             xlle::perf_excl::g_enabled = perf_accounting;
             xlle::perf::g_enabled = perf_accounting;
             xlle::perf::g_pull_drain_enabled =
@@ -4402,6 +4441,18 @@ int main(int argc, char** argv) {
                     /*interval=*/false);
                 if (!perf_excl_report.empty())
                     std::printf("%s\n", perf_excl_report.c_str());
+                // Per-word micro-partition of the NV2A pushbuffer/dispatch path
+                // (beads-xbox.1.15.1 step 1). Empty unless the binary was configured
+                // with -DXLLE_DISPATCH_MICRO=ON, so this costs a call and a length
+                // test on a shipping build.
+                {
+                    const std::string dispatch_micro_report =
+                        xlle::dispatch_micro::format_report(
+                            "cumulative",
+                            static_cast<unsigned long long>(mach.total_insns()));
+                    if (!dispatch_micro_report.empty())
+                        std::printf("%s\n", dispatch_micro_report.c_str());
+                }
                 const std::string perf_report = xlle::perf::format_report();
                 if (!perf_report.empty()) std::printf("%s\n", perf_report.c_str());
                 print_generic_combiner_perf_report();
@@ -4474,6 +4525,18 @@ int main(int argc, char** argv) {
                     /*interval=*/false);
                 if (!perf_excl_report.empty())
                     std::printf("%s\n", perf_excl_report.c_str());
+                // Per-word micro-partition of the NV2A pushbuffer/dispatch path
+                // (beads-xbox.1.15.1 step 1). Empty unless the binary was configured
+                // with -DXLLE_DISPATCH_MICRO=ON, so this costs a call and a length
+                // test on a shipping build.
+                {
+                    const std::string dispatch_micro_report =
+                        xlle::dispatch_micro::format_report(
+                            "cumulative",
+                            static_cast<unsigned long long>(mach.total_insns()));
+                    if (!dispatch_micro_report.empty())
+                        std::printf("%s\n", dispatch_micro_report.c_str());
+                }
                 const std::string perf_report = xlle::perf::format_report();
                 if (!perf_report.empty()) std::printf("%s\n", perf_report.c_str());
                 print_generic_combiner_perf_report();
@@ -4760,6 +4823,28 @@ int main(int argc, char** argv) {
                 std::printf("[2bl] NV2A PFIFO: methods=%llu semaphore-writes=%llu\n",
                             (unsigned long long)mach.nv2a()->push_methods(),
                             (unsigned long long)mach.nv2a()->semaphore_writes());
+                // Run batching census (beads-xbox.1.15.1 stages (c)/(d)). A query
+                // against always-on counters; `per-word` is the number of method
+                // data words that still took the strict CACHE1 round trip, so
+                // batched + per-word must equal methods above.
+                std::printf("[2bl] NV2A PFIFO runs: batching=%u bulk=%u direct=%u "
+                            "runs=%llu words=%llu bulk-runs=%llu bulk-words=%llu "
+                            "per-word=%llu declines=%llu\n",
+                            mach.nv2a()->pfifo_run_batching() ? 1u : 0u,
+                            mach.nv2a()->pfifo_run_bulk() ? 1u : 0u,
+                            mach.nv2a()->pfifo_direct_fetch() ? 1u : 0u,
+                            (unsigned long long)mach.nv2a()->pfifo_runs_batched(),
+                            (unsigned long long)mach.nv2a()->pfifo_words_batched(),
+                            (unsigned long long)mach.nv2a()->pfifo_runs_bulk(),
+                            (unsigned long long)mach.nv2a()->pfifo_words_bulk(),
+                            (unsigned long long)mach.nv2a()->pfifo_words_per_word(),
+                            (unsigned long long)mach.nv2a()->pfifo_run_declines());
+                std::printf("[2bl] NV2A PFIFO run declines: queue=%llu stall=%llu "
+                            "dma=%llu direct=%llu\n",
+                            (unsigned long long)mach.nv2a()->pfifo_decline_queue(),
+                            (unsigned long long)mach.nv2a()->pfifo_decline_stall(),
+                            (unsigned long long)mach.nv2a()->pfifo_decline_dma(),
+                            (unsigned long long)mach.nv2a()->pfifo_decline_direct());
                 std::printf("[2bl] NV2A draws: begin/end=%llu elem16/32=%llu/%llu "
                             "arrays=%llu inline=%llu\n",
                             (unsigned long long)mach.nv2a()->method_count(0x17FC),
@@ -4767,6 +4852,33 @@ int main(int argc, char** argv) {
                             (unsigned long long)mach.nv2a()->method_count(0x1808),
                             (unsigned long long)mach.nv2a()->method_count(0x1810),
                             (unsigned long long)mach.nv2a()->method_count(0x1818));
+#if XLLE_DISPATCH_MICRO
+                // Which methods the pushbuffer actually spends its words on.
+                // A query against the always-on method_counts_ histogram at
+                // shutdown -- no hot-path cost, and micro-build only so a
+                // shipping run's stdout is unchanged while this is scaffolding.
+                {
+                    std::vector<std::pair<uint64_t, uint32_t>> census;
+                    uint64_t census_total = 0;
+                    for (uint32_t m = 0; m < 0x2000; m += 4) {
+                        const uint64_t c = mach.nv2a()->method_count(m);
+                        if (c) census.push_back({c, m});
+                        census_total += c;
+                    }
+                    std::sort(census.begin(), census.end(),
+                              [](const auto& a, const auto& b) { return a.first > b.first; });
+                    std::printf("[2bl] NV2A method census: distinct=%zu total=%llu",
+                                census.size(), (unsigned long long)census_total);
+                    uint64_t shown = 0;
+                    for (size_t i = 0; i < census.size() && i < 40; ++i) {
+                        std::printf(" %04x=%llu", census[i].second,
+                                    (unsigned long long)census[i].first);
+                        shown += census[i].first;
+                    }
+                    std::printf(" shown=%llu rest=%llu\n", (unsigned long long)shown,
+                                (unsigned long long)(census_total - shown));
+                }
+#endif
                 std::printf("[2bl] NV2A classes: Kelvin97=%llu surfaces62=%llu "
                             "blit9f=%llu pattern44=%llu unbound=%llu\n",
                             (unsigned long long)mach.nv2a()->class_method_count(0x97),

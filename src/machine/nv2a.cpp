@@ -12,6 +12,7 @@
 #include <optional>
 #include <type_traits>
 
+#include "machine/nv2a_dispatch_micro.hpp"
 #include "machine/perf_accounting.hpp"
 #include "machine/perf_excl.hpp"
 #include "nv2a_vsh_emulator.h"
@@ -14973,10 +14974,12 @@ void Nv2a::dispatch_method(PushMethod push) {
     // table's A/B is attributable -- see the bucket comment in perf_excl.hpp. The
     // scope closes at the end of this block, so method_counts_ is inside it and
     // the switch below is not.
+    dispatch_micro::mark(dispatch_micro::kDmPrologue);
     {
         perf_excl::Scope recorder_region(perf_excl::kNv2aRecorder);
         push.seq = methods_.total();
         methods_.push(push);
+        dispatch_micro::mark(dispatch_micro::kRecRing);
 
         if (clear_trace_triggered_ && !clear_trace_begin_triggered_ &&
             !clear_trace_truncated_) {
@@ -15009,7 +15012,9 @@ void Nv2a::dispatch_method(PushMethod push) {
                 clear_trace_truncated_ = true;
             }
         }
+        dispatch_micro::mark(dispatch_micro::kRecTrace);
         if (method < 0x2000 && !(method & 3u)) ++method_counts_[method >> 2];
+        dispatch_micro::mark(dispatch_micro::kRecCounts);
     }  // end NV2A_RECORDER region
 
     // PFIFO resolves SET_OBJECT through RAMHT, then PGRAPH caches the object's class for
@@ -15127,6 +15132,7 @@ void Nv2a::dispatch_method(PushMethod push) {
         return;
     }
     if (object_class_[subchannel] != 0x97) return;
+    dispatch_micro::mark(dispatch_micro::kDmClass);
 
     // beads-xbox.1.15.1 stage (a): the 126-arm if/else-if chain that used to
     // start here is now the kNv097Arms catalogue above.  Case labels sit at the
@@ -16028,6 +16034,286 @@ void Nv2a::drain_pull_queue() {
         PushMethod push = pull_queue_.front();
         pull_queue_.pop_front();
         perf::record_pfifo_queue_pop();
+        dispatch_micro::mark(dispatch_micro::kDrainEnter);
+        if (perf::g_enabled) {
+            perf::ScopedAdd dispatch_timer(perf::g_ns_nv2a_dispatch_method,
+                                           perf::g_calls_nv2a_dispatch_method);
+            dispatch_method(push);
+        } else {
+            dispatch_method(push);
+        }
+        // The handler slot closes here rather than at the tail of
+        // dispatch_method: the call and return are part of what a per-word
+        // dispatch costs, and the tail of dispatch_method is pinned by
+        // tests/test_dispatch_table_guards.py as `default: break;` and nothing
+        // after it.
+        dispatch_micro::mark(dispatch_micro::kDmHandler);
+    }
+}
+
+// beads-xbox.1.15.1 stage (d): one resolved host window per pushbuffer kick.
+//
+// Every word of the pushbuffer used to travel through mem_read_ -- a
+// std::function into UnicornFloor::read_mem, i.e. uc_mem_read, for four bytes.
+// The per-word micro-partition prices that at 18.73 ns of the word's 420.74 ns,
+// 1.560 s of the canonical run, and it is the single largest item in the PFIFO
+// half of the bucket pair. It is also entirely avoidable: XboxMachine maps guest
+// RAM into Unicorn with uc_mem_map_ptr(ram_.data()) and hands the SAME pointer
+// back through mem_direct_, so a read through that pointer returns the bytes
+// uc_mem_read would have returned, by construction rather than by agreement.
+//
+// The window is cached across the words of one kick because the pushbuffer is
+// contiguous between jumps, so 4 KiB of it covers ~2048 words. It is RESET at
+// the top of every process_pushbuffer call, which bounds a cached host pointer
+// to a single invocation: within one invocation nothing can move guest RAM
+// (dispatch_method reaches no path that resizes it, and every re-entry into the
+// parser comes from Nv2a::mmio_write, i.e. from the guest CPU, never from a
+// handler). A span that is not directly addressable -- the top of a mapping, a
+// non-RAM DMA target -- returns nullptr and the caller uses mem_read_, so the
+// fallback is never dead.
+const uint8_t* Nv2a::pushbuffer_host_bytes(uint32_t addr, uint32_t bytes) {
+    constexpr uint32_t kPushWindowBytes = 8192;  // >= the 8188 B of a 2047-word run
+    const uint64_t lo = addr;
+    const uint64_t hi = lo + bytes;
+    if (push_win_ && lo >= push_win_lo_ && hi <= push_win_hi_)
+        return push_win_ + (lo - push_win_lo_);
+    if (!pfifo_direct_fetch_ || !mem_direct_ || !bytes) return nullptr;
+    const uint32_t span = bytes > kPushWindowBytes ? bytes : kPushWindowBytes;
+    if (const uint8_t* p = mem_direct_(addr, span)) {
+        push_win_ = p;
+        push_win_lo_ = lo;
+        push_win_hi_ = lo + span;
+        return p;
+    }
+    // Too near the top of a mapping for a whole window. Serve this span alone
+    // and leave the cached window as it was.
+    return mem_direct_(addr, bytes);
+}
+
+// beads-xbox.1.15.1 stage (c): dispatch a RUN of method data words in one pass.
+//
+// WHAT THE PER-WORD PATH COSTS, MEASURED. The strict pusher below does, for
+// every one of the run's 83.3 M method data words, a PRAMIN DMA-object decode,
+// a std::function hop into uc_mem_read for four bytes, a PushMethod aggregate
+// pushed onto a std::deque, a call into drain_pull_queue that re-tests the stall
+// predicate, opens the NV2A_DISPATCH region, front()s and pop_front()s that same
+// entry back off, and then dispatches it. The per-word micro-partition
+// (src/machine/nv2a_dispatch_micro.hpp, one 12 B noperf leg, 650 697 sampled
+// words, period 64) prices those pieces at, per word, over ALL data words:
+//
+//     pf_fetch (dma translate + uc_mem_read) 18.73 ns   1.560 s of the run
+//     pf_queue (PushMethod + deque push)     22.37 ns   1.863 s
+//     drain_enter (funnel + front/pop_front) 14.89 ns   1.240 s
+//     pf_dma (dma_object_address)             1.42 ns   0.118 s
+//     drain_exit                              0.43 ns   0.036 s
+//                                            -------   -------
+//                                            57.84 ns   4.817 s
+//
+// -- against a whole-word envelope of 420.74 ns, the rest of which is the draw
+// work the handler for SET_BEGIN_END reaches. This function deletes that 4.8 s
+// of per-word overhead and nothing else.
+//
+// WHY IT IS THE SAME ANSWER, WORD FOR WORD. The loop below is the per-word loop
+// with five things removed and nothing added:
+//
+//   * The word comes from a host pointer into the same guest RAM page Unicorn
+//     maps (XboxMachine passes ram_.data() to uc_mem_map_ptr and hands the same
+//     pointer back through mem_direct_), so the bytes are the bytes uc_mem_read
+//     would have returned. The DMA object is decoded for the FIRST and LAST word
+//     of the run and the run is declined unless the two host addresses differ by
+//     exactly 4 * (n - 1); the object maps offsets linearly, so that check
+//     proves every word between them is inside the limit and contiguous, and it
+//     catches a run that wraps the 0x07FFFFFF address mask.
+//   * pull_queue_ is bypassed -- but ONLY when it is already empty, so nothing
+//     can be reordered ahead of an entry left behind by a stalled drain.
+//   * The queue telemetry is still exact: record_pfifo_queue_push() immediately
+//     followed by record_pfifo_queue_pop() reproduces the same live count and
+//     the same peak the push/drain pair produced.
+//   * The stall predicate is re-tested EVERY word, exactly as drain_pull_queue's
+//     loop does, so a handler that sets waiting_for_flip_ / waiting_for_nop_ or
+//     clears pgraph_fifo_access_ stops the run at the same word. The caller then
+//     resumes on the per-word path, which is what queues the remainder.
+//   * ch.get, ch.method and ch.method_count are advanced per word rather than
+//     per run, so an observer sees the same channel state at the same instant;
+//     and `expected_get` re-checks ch.get at the top of every iteration, so if a
+//     handler ever did re-enter the parser (no current path does: every
+//     process_pushbuffer / resume_pushbuffers call site is in Nv2a::mmio_write)
+//     the run stops instead of reading from a stale pointer.
+//
+// NV2A_DISPATCH is opened once per run rather than once per word. That is a
+// granularity change to the perf_excl partition, not an estimate: the region
+// still covers exactly the method-semantics time and nothing else, because the
+// only work inside it that is not a handler is the loop itself.
+uint32_t Nv2a::drain_method_run(ChannelState& ch, uint8_t channel, uint32_t max_words) {
+    if (!max_words) return 0;
+    uint32_t first = 0;
+    if (!dma_object_address(ch.dma_instance, ch.get, first)) {
+        // The per-word path faults here; let it, through its own code.
+        ++pfifo_decline_dma_;
+        return 0;
+    }
+    if (max_words > 1) {
+        uint32_t last = 0;
+        const uint32_t span = 4u * (max_words - 1u);
+        if (!dma_object_address(ch.dma_instance, ch.get + span, last) ||
+            last != first + span) {
+            ++pfifo_decline_dma_;
+            return 0;
+        }
+    }
+    const uint8_t* host = pushbuffer_host_bytes(first, 4u * max_words);
+    if (!host) {
+        ++pfifo_decline_direct_;
+        ++pfifo_run_declines_;
+        return 0;
+    }
+
+    // The same funnel the per-word path opens, at the same bucket, once per run.
+    perf_excl::Scope region(perf_excl::kNv2aDispatch);
+    std::optional<perf::ScopedAdd> perf_t;
+    if (perf::g_pull_drain_enabled) {
+        perf_t.emplace(perf::g_ns_nv2a_pull_drain, perf::g_calls_nv2a_pull_drain);
+    }
+    ++pfifo_runs_batched_;
+
+    PushMethod push{};
+    push.channel = channel;
+    push.subchannel = ch.subchannel;
+    push.parser_put = ch.put;
+
+    // ---- stage (d): the bulk append for the three run-friendly hot methods ---
+    //
+    // 0x1800 ARRAY_ELEMENT16 alone is 64 011 925 of the run's 83 288 956 method
+    // words (76.9 %), it is always a NON-incrementing run, and its handler is two
+    // vector appends behind one safety-bound test. Sending it through
+    // dispatch_method costs the SET_OBJECT test, the recorder's three pieces, the
+    // class histogram, the class2d slot search, three class compares, the table
+    // load and the call -- measured at 11.3 ns/word on top of the two appends.
+    // The bulk form below reproduces every one of those effects exactly:
+    //
+    //   * methods_.push runs PER WORD, in order, with the same seq, so the
+    //     always-on ring and push_methods() are unchanged;
+    //   * method_counts_ and class_method_counts_ take += n instead of ++ per
+    //     word. Both are write-only until report time and no handler reads them,
+    //     so the totals and every intermediate observation agree;
+    //   * class2d_method_stats_ is not touched, which is what dispatch_method
+    //     does for class 0x97 (its slot search finds no slot);
+    //   * the safety bound is hoisted: the run is declined to the generic form
+    //     unless EVERY word of it would pass the handler's own test, so a run
+    //     that would fault still faults at the same word through the same code;
+    //   * a clear trace in progress declines to the generic form, so the capture
+    //     still sees every word through dispatch_method.
+    //
+    // None of the three handlers can set waiting_for_flip_ / waiting_for_nop_ or
+    // clear pgraph_fifo_access_, so the stall re-test the generic loop performs
+    // cannot fire inside a bulk run. 0x1808 (9 672 words) and 0x1818 (5 820) are
+    // 0.017 % of the run between them and are here for completeness, not for
+    // their time.
+    if (pfifo_run_bulk_ && ch.non_incrementing && object_class_[ch.subchannel] == 0x97 &&
+        !clear_trace_triggered_ && !clear_trace_begin_triggered_ &&
+        !waiting_for_flip_ && !waiting_for_nop_ && pgraph_fifo_access_) {
+        const uint32_t n = max_words;
+        const uint32_t method = ch.method;
+        bool bulk = false;
+        // Envelope probe for the AFTER measurement; compiled away unless
+        // XLLE_DISPATCH_MICRO.
+        const uint64_t micro_run = dispatch_micro::begin_run(method);
+        if (method == 0x1800) {
+            // Handler: `if (size > (1<<24) - 2) fault;` then two appends.
+            bulk = vertex_indices_.size() + 2u * static_cast<size_t>(n - 1) <=
+                   (1u << 24) - 2u;
+            if (bulk) {
+                vertex_indices_.reserve(vertex_indices_.size() + 2u * n);
+                push.method = 0x1800;
+                push.object_class = 0x97;
+                for (uint32_t i = 0; i < n; ++i) {
+                    uint32_t word = 0;
+                    std::memcpy(&word, host + 4u * static_cast<size_t>(i), 4);
+                    ch.get += 4;
+                    push.parameter = word;
+                    push.parser_get = ch.get;
+                    push.parser_put = ch.put;
+                    push.seq = methods_.total();
+                    methods_.push(push);
+                    vertex_indices_.push_back(word & 0xFFFFu);
+                    vertex_indices_.push_back(word >> 16);
+                }
+            }
+        } else if (method == 0x1808) {
+            bulk = vertex_indices_.size() + static_cast<size_t>(n - 1) < (1u << 24);
+            if (bulk) {
+                vertex_indices_.reserve(vertex_indices_.size() + n);
+                push.method = 0x1808;
+                push.object_class = 0x97;
+                for (uint32_t i = 0; i < n; ++i) {
+                    uint32_t word = 0;
+                    std::memcpy(&word, host + 4u * static_cast<size_t>(i), 4);
+                    ch.get += 4;
+                    push.parameter = word;
+                    push.parser_get = ch.get;
+                    push.parser_put = ch.put;
+                    push.seq = methods_.total();
+                    methods_.push(push);
+                    vertex_indices_.push_back(word);
+                }
+            }
+        } else if (method == 0x1818) {
+            bulk = primitive_mode_ != 0 &&
+                   inline_array_words_.size() + static_cast<size_t>(n - 1) < (1u << 24);
+            if (bulk) {
+                inline_array_words_.reserve(inline_array_words_.size() + n);
+                push.method = 0x1818;
+                push.object_class = 0x97;
+                for (uint32_t i = 0; i < n; ++i) {
+                    uint32_t word = 0;
+                    std::memcpy(&word, host + 4u * static_cast<size_t>(i), 4);
+                    ch.get += 4;
+                    push.parameter = word;
+                    push.parser_get = ch.get;
+                    push.parser_put = ch.put;
+                    push.seq = methods_.total();
+                    methods_.push(push);
+                    inline_array_words_.push_back(word);
+                }
+            }
+        }
+        dispatch_micro::end_run(micro_run, bulk ? n : 0u);
+        if (bulk) {
+            method_counts_[method >> 2] += n;
+            class_method_counts_[0x97] += n;
+            ch.method_count -= n;
+            if (perf::g_enabled) {
+                for (uint32_t i = 0; i < n; ++i) {
+                    perf::record_pfifo_queue_push();
+                    perf::record_pfifo_queue_pop();
+                }
+            }
+            ++pfifo_runs_bulk_;
+            pfifo_words_bulk_ += n;
+            pfifo_words_batched_ += n;
+            return n;
+        }
+    }
+
+    // ---- stage (c): the generic run, one dispatch_method per word ------------
+    const uint64_t micro_generic = dispatch_micro::begin_run(ch.method);
+    uint32_t consumed = 0;
+    uint32_t expected_get = ch.get;
+    while (consumed < max_words && !waiting_for_flip_ && !waiting_for_nop_ &&
+           pgraph_fifo_access_ && ch.get == expected_get) {
+        uint32_t word = 0;
+        std::memcpy(&word, host + 4u * static_cast<size_t>(consumed), 4);
+        ch.get += 4;
+        expected_get = ch.get;
+        ++consumed;
+        push.method = static_cast<uint16_t>(ch.method);
+        push.parameter = word;
+        push.parser_get = ch.get;
+        push.parser_put = ch.put;
+        if (!ch.non_incrementing) ch.method += 4;
+        --ch.method_count;
+        perf::record_pfifo_queue_push();
+        perf::record_pfifo_queue_pop();
         if (perf::g_enabled) {
             perf::ScopedAdd dispatch_timer(perf::g_ns_nv2a_dispatch_method,
                                            perf::g_calls_nv2a_dispatch_method);
@@ -16036,6 +16322,9 @@ void Nv2a::drain_pull_queue() {
             dispatch_method(push);
         }
     }
+    dispatch_micro::end_run(micro_generic, consumed);
+    pfifo_words_batched_ += consumed;
+    return consumed;
 }
 
 bool Nv2a::pusher_enabled(uint8_t channel) const {
@@ -16070,10 +16359,65 @@ void Nv2a::process_pushbuffer(uint8_t channel) {
         return;
     }
 
+    // stage (d): a host window never outlives the kick that resolved it.
+    push_win_ = nullptr;
+    push_win_lo_ = 0;
+    push_win_hi_ = 0;
+
     constexpr uint32_t kMaxWordsPerKick = 4u * 1024u * 1024u;
     uint32_t words = 0;
     while (ch.get != ch.put && pull_queue_.size() < kPullQueueCapacity &&
            words++ < kMaxWordsPerKick) {
+        // beads-xbox.1.15.1 stage (c): a RUN of method data words in one pass.
+        // Every precondition here is a condition under which the per-word body
+        // below would have behaved differently, so failing any of them simply
+        // falls through to it:
+        //   * pull_queue_ must be EMPTY, or an entry a stalled drain left behind
+        //     would be overtaken;
+        //   * the puller must not be stalled, or the words belong in the queue
+        //     rather than in PGRAPH;
+        //   * ch.put must be ahead of ch.get, so (put - get) / 4 is the number of
+        //     words this kick may consume without passing PUT. When PUT is behind
+        //     GET the parse is walking toward a jump and the word budget is not
+        //     computable, so the run is declined.
+        // `words` was already incremented for this iteration, so the run's first
+        // word is the one this iteration would have processed and the budget is
+        // measured from words - 1.
+        if (pfifo_run_batching_ && ch.method_count) {
+            if (!pull_queue_.empty()) {
+                ++pfifo_decline_queue_;
+            } else if (waiting_for_flip_ || waiting_for_nop_ || !pgraph_fifo_access_) {
+                ++pfifo_decline_stall_;
+            } else {
+                uint32_t run = ch.method_count;
+                // PUT ahead of GET bounds the run: the outer loop stops the
+                // moment GET reaches PUT, so a run may not step past it. PUT
+                // BEHIND GET cannot be reached by incrementing GET at all (that
+                // would need a 2^32 wrap, and a run is at most 2047 words), so
+                // in that case ch.method_count is the only bound and capping is
+                // neither possible nor needed.
+                if (ch.put > ch.get) {
+                    const uint32_t avail = (ch.put - ch.get) >> 2;
+                    if (run > avail) run = avail;
+                }
+                const uint32_t budget = kMaxWordsPerKick - (words - 1u);
+                if (run > budget) run = budget;
+                const uint32_t consumed = drain_method_run(ch, channel, run);
+                if (consumed) {
+                    words += consumed - 1u;
+                    continue;
+                }
+            }
+        }
+        // beads-xbox.1.15.1 step 1: whether this word is a method DATA word is
+        // known from CACHE1 state before the fetch, so the micro-partition can
+        // open the right denominator here rather than reclassifying later.
+        // Compiled away entirely unless XLLE_DISPATCH_MICRO.
+        uint64_t micro_header_probe = 0;
+        if (ch.method_count)
+            dispatch_micro::begin_word(ch.method);
+        else
+            micro_header_probe = dispatch_micro::begin_header_word();
         uint32_t word = 0;
         uint32_t fetch = 0;
         if (!dma_object_address(ch.dma_instance, ch.get, fetch)) {
@@ -16085,13 +16429,20 @@ void Nv2a::process_pushbuffer(uint8_t channel) {
             fault_(why);
             return;
         }
-        if (!mem_read_(fetch, &word, sizeof(word))) {
+        dispatch_micro::mark(dispatch_micro::kPfDma);
+        // stage (d): the kick's host window if the span is directly addressable,
+        // and mem_read_ (uc_mem_read) otherwise. Both return the same four bytes;
+        // see pushbuffer_host_bytes for why that is by construction.
+        if (const uint8_t* src = pushbuffer_host_bytes(fetch, 4u)) {
+            std::memcpy(&word, src, 4);
+        } else if (!mem_read_(fetch, &word, sizeof(word))) {
             char why[128];
             std::snprintf(why, sizeof(why), "NV2A PFIFO read failed at 0x%08x", fetch);
             fault_(why);
             return;
         }
         ch.get += 4;
+        dispatch_micro::mark(dispatch_micro::kPfFetch);
 
         if (ch.method_count) {
             pull_queue_.push_back(PushMethod{
@@ -16100,7 +16451,11 @@ void Nv2a::process_pushbuffer(uint8_t channel) {
             perf::record_pfifo_queue_push();
             if (!ch.non_incrementing) ch.method += 4;
             --ch.method_count;
+            ++pfifo_words_per_word_;
+            dispatch_micro::mark(dispatch_micro::kPfQueue);
             drain_pull_queue();
+            dispatch_micro::mark(dispatch_micro::kDrainExit);
+            dispatch_micro::end_word();
             continue;
         }
 
@@ -16140,6 +16495,7 @@ void Nv2a::process_pushbuffer(uint8_t channel) {
             fault_(why);
             return;
         }
+        dispatch_micro::end_header_word(micro_header_probe);
     }
     // CACHE1_DMA_GET is the same hardware state exposed through the PFIFO register window
     // and the current channel's USER window. The synchronous parser has completed by the

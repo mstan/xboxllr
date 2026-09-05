@@ -1686,6 +1686,40 @@ public:
     bool gpu_generic_shader_bgra_upload() const {
         return gpu_generic_shader_bgra_upload_;
     }
+    // ---- PFIFO run batching (beads-xbox.1.15.1 stages (c) and (d)) ----------
+    //
+    // `--no-nv2a-pfifo-run-batching` restores the strict per-word pusher on the
+    // SAME binary: one DMA translate, one uc_mem_read, one CACHE1 deque round
+    // trip and one drain_pull_queue call for every method DATA word. That is the
+    // arm-A form of the decision A/B, and it is also the fallback the fast path
+    // takes whenever any of its preconditions fails, so the per-word code is
+    // never dead.
+    void set_pfifo_run_batching(bool on) { pfifo_run_batching_ = on; }
+    bool pfifo_run_batching() const { return pfifo_run_batching_; }
+    // `--no-nv2a-pfifo-run-bulk` keeps the run path but sends every word through
+    // dispatch_method instead of the bulk vertex-index / inline-array append, so
+    // the two stages can be attributed separately.
+    void set_pfifo_run_bulk(bool on) { pfifo_run_bulk_ = on; }
+    bool pfifo_run_bulk() const { return pfifo_run_bulk_; }
+    // `--no-nv2a-pfifo-direct-fetch` restores the per-word mem_read_ (uc_mem_read)
+    // hop for every pushbuffer word. It is a SEPARATE stage from run batching and
+    // it helps the per-word path too, so arm A of the decision A/B must pass BOTH
+    // negatives to reproduce the pre-change pusher; measured 2026-09-05, turning
+    // this off alone moved a 3-leg per-word arm 52.282 -> 53.479 s.
+    void set_pfifo_direct_fetch(bool on) { pfifo_direct_fetch_ = on; }
+    bool pfifo_direct_fetch() const { return pfifo_direct_fetch_; }
+    uint64_t pfifo_runs_batched() const { return pfifo_runs_batched_; }
+    uint64_t pfifo_words_batched() const { return pfifo_words_batched_; }
+    uint64_t pfifo_runs_bulk() const { return pfifo_runs_bulk_; }
+    uint64_t pfifo_words_bulk() const { return pfifo_words_bulk_; }
+    uint64_t pfifo_words_per_word() const { return pfifo_words_per_word_; }
+    uint64_t pfifo_run_declines() const { return pfifo_run_declines_; }
+    // Why a data word fell back to the per-word pusher. One counter per
+    // precondition, so the batched fraction is attributable instead of argued.
+    uint64_t pfifo_decline_queue() const { return pfifo_decline_queue_; }
+    uint64_t pfifo_decline_stall() const { return pfifo_decline_stall_; }
+    uint64_t pfifo_decline_dma() const { return pfifo_decline_dma_; }
+    uint64_t pfifo_decline_direct() const { return pfifo_decline_direct_; }
     void set_gpu_generic_shader_mask(uint64_t mask) {
         gpu_generic_shader_mask_ = mask;
     }
@@ -3209,6 +3243,22 @@ private:
     bool gpu_generic_shader_image_blend_ = true;
     bool gpu_generic_shader_depth_ = false;
     bool gpu_generic_shader_bgra_upload_ = true;
+    // PFIFO run batching (beads-xbox.1.15.1 stages (c)/(d)). Both default ON;
+    // the negative spellings restore the per-word pusher and the per-word
+    // handler call respectively, on the same binary.
+    bool pfifo_run_batching_ = true;
+    bool pfifo_run_bulk_ = true;
+    bool pfifo_direct_fetch_ = true;
+    uint64_t pfifo_runs_batched_ = 0;
+    uint64_t pfifo_words_batched_ = 0;
+    uint64_t pfifo_runs_bulk_ = 0;
+    uint64_t pfifo_words_bulk_ = 0;
+    uint64_t pfifo_words_per_word_ = 0;
+    uint64_t pfifo_run_declines_ = 0;
+    uint64_t pfifo_decline_queue_ = 0;
+    uint64_t pfifo_decline_stall_ = 0;
+    uint64_t pfifo_decline_dma_ = 0;
+    uint64_t pfifo_decline_direct_ = 0;
     uint32_t gpu_generic_shader_witnessed_ = 0u;
     uint64_t generic_shader_witnessed_reroutes_ = 0;
     uint32_t gpu_generic_shader_verify_ = 0;
@@ -3483,6 +3533,23 @@ private:
     void process_pushbuffer(uint8_t channel);
     bool pusher_enabled(uint8_t channel) const;
     void drain_pull_queue();
+    // beads-xbox.1.15.1 stage (c): dispatch a RUN of method data words in one
+    // pass instead of one CACHE1 round trip per word. Returns the number of
+    // words consumed; 0 means the run was declined and the caller must use the
+    // per-word path. See the definition in nv2a.cpp for the preconditions and
+    // for why the result is identical word for word.
+    uint32_t drain_method_run(ChannelState& ch, uint8_t channel, uint32_t max_words);
+    // beads-xbox.1.15.1 stage (d): one resolved host window over the pushbuffer
+    // per kick, instead of a std::function hop into uc_mem_read for every four
+    // bytes. Returns nullptr when the span is not directly addressable, in which
+    // case the caller falls back to mem_read_.
+    const uint8_t* pushbuffer_host_bytes(uint32_t addr, uint32_t bytes);
+    // The window, and the guest range it covers. Reset at the top of every
+    // process_pushbuffer call so a host pointer never outlives the invocation
+    // that produced it.
+    const uint8_t* push_win_ = nullptr;
+    uint64_t push_win_lo_ = 0;
+    uint64_t push_win_hi_ = 0;
     void resume_pushbuffers();
     void dispatch_method(PushMethod push);
     bool bind_object(uint8_t channel, uint8_t subchannel, uint32_t handle);
