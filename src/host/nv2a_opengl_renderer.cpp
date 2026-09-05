@@ -1,8 +1,11 @@
 #include "host/nv2a_opengl_renderer.hpp"
 
+#include "host/nv2a_witnessed_gl_shaders.hpp"
 #include "machine/perf_accounting.hpp"
+#include "machine/perf_excl.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <unordered_map>
 #include <cstdio>
 #include <array>
@@ -89,6 +92,42 @@ using GlDrawArrays = void (*)(unsigned int, int, int);
 using GlReadPixels = void (*)(int, int, int, int, unsigned int, unsigned int, void*);
 using GlPixelStorei = void (*)(unsigned int, int);
 using GlGetError = unsigned int (*)();
+// ---- GPU-side timing entry points (beads-xbox.1.14.6) ---------------------
+// GL 3.3 / ARB_timer_query + ARB_sync, loaded through the same
+// SDL_GL_GetProcAddress path as everything above but OPTIONALLY: a driver
+// without them still renders, and the report says gpu_timing_available=0.
+// GLsync is an opaque `struct __GLsync*`; void* is layout-identical and keeps
+// this file free of a GL header, matching the hand-rolled prototypes above.
+using GlSyncHandle = void*;
+using GlGenQueries = void (*)(int, unsigned int*);
+using GlDeleteQueries = void (*)(int, const unsigned int*);
+using GlBeginQuery = void (*)(unsigned int, unsigned int);
+using GlEndQuery = void (*)(unsigned int);
+using GlGetQueryObjectuiv = void (*)(unsigned int, unsigned int, unsigned int*);
+using GlGetQueryObjectui64v = void (*)(unsigned int, unsigned int, uint64_t*);
+using GlFenceSync = GlSyncHandle (*)(unsigned int, unsigned int);
+using GlClientWaitSync = unsigned int (*)(GlSyncHandle, unsigned int, uint64_t);
+using GlDeleteSync = void (*)(GlSyncHandle);
+// Core GL 1.0, but this file resolves everything through SDL_GL_GetProcAddress
+// rather than linking libGL, so it needs a pointer like the rest. Loaded OUTSIDE
+// the gpu_timing_available_ conjunction: failing to find glFinish must not
+// disable GPU timing, it only costs the shutdown drain its safety net.
+using GlFinish = void (*)();
+// Also core GL 1.0 and also loaded outside the conjunction. glFlush is what
+// closes a GL_TIME_ELAPSED bracket around a SYNCHRONOUS readback: glEndQuery
+// only ENQUEUES the end marker, so without a flush the marker waits in the
+// command buffer until the next submission and the query measures the host's
+// idle time between frames (beads-xbox.1.14.6, 2026-09-04).
+using GlFlush = void (*)();
+// ---- stage (f) witnessed-profile GPU execution (beads-xbox.1.15.7) --------
+using GlClear = void (*)(unsigned int);
+using GlClearColor = void (*)(float, float, float, float);
+using GlClearDepth = void (*)(double);
+using GlClearStencil = void (*)(int);
+using GlStencilMask = void (*)(unsigned int);
+using GlUniform3f = void (*)(int, float, float, float);
+using GlBufferSubData = void (*)(unsigned int, std::ptrdiff_t, std::ptrdiff_t,
+                                 const void*);
 constexpr unsigned int kGlMajorVersion = 0x821B;
 constexpr unsigned int kGlMinorVersion = 0x821C;
 constexpr unsigned int kGlComputeShader = 0x91B9;
@@ -148,25 +187,123 @@ constexpr unsigned int kGlTextureWrapT = 0x2803;
 constexpr unsigned int kGlClampToEdge = 0x812F;
 constexpr unsigned int kGlRepeat = 0x2901;
 constexpr unsigned int kGlTexture0 = 0x84C0;
+constexpr unsigned int kGlTexture1 = 0x84C1;
 constexpr unsigned int kGlUnpackAlignment = 0x0CF5;
 constexpr unsigned int kGlPackAlignment = 0x0D05;
 constexpr unsigned int kGlNoError = 0;
+constexpr unsigned int kGlCullFace = 0x0B44;
+constexpr unsigned int kGlStencilTest = 0x0B90;
+constexpr unsigned int kGlColorBufferBit = 0x00004000;
+constexpr unsigned int kGlDepthBufferBit = 0x00000100;
+constexpr unsigned int kGlStencilBufferBit = 0x00000400;
+constexpr unsigned int kGlStaticDraw = 0x88E4;
+constexpr unsigned int kGlStreamDraw = 0x88E0;
+// ---- GPU-side timing (beads-xbox.1.14.6) ---------------------------------
+constexpr unsigned int kGlTimeElapsed = 0x88BF;
+constexpr unsigned int kGlQueryResult = 0x8866;
+constexpr unsigned int kGlQueryResultAvailable = 0x8867;
+constexpr unsigned int kGlSyncGpuCommandsComplete = 0x9117;
+constexpr unsigned int kGlSyncFlushCommandsBit = 0x00000001;
+// One second. A drain that has not finished by then is a hung GPU, not a
+// measurement; the glReadPixels that follows blocks anyway, so the wait only
+// ever splits the same total into drain_ns and readpixels_ns.
+constexpr uint64_t kGlFenceTimeoutNs = 1000000000ull;
+// Results are collected many submits later, so the ring only has to cover the
+// driver's queue depth. A full ring drops the sample instead of stalling.
+constexpr size_t kGpuQueryRingSize = 64;
+
+// GPU-side timing accumulators. File scope, not class members, so the field
+// list has exactly one definition (tests/test_gl_timing_guards.py compares it
+// against the printed line) and so shutdown can format without reaching into
+// the renderer.
+//
+// EVERY field is written only while perf::g_enabled is true. With accounting
+// off the renderer issues no query, no fence and no clock read; the cost is the
+// bool load perf::ScopedAdd already pays.
+struct GlGpuTimingStats {
+    std::atomic<uint64_t> gpu_timing_available{0};
+    std::atomic<uint64_t> gpu_draw_ns{0};
+    std::atomic<uint64_t> gpu_draw_n{0};
+    std::atomic<uint64_t> gpu_upload_ns{0};
+    std::atomic<uint64_t> gpu_upload_n{0};
+    std::atomic<uint64_t> gpu_resolve_ns{0};
+    std::atomic<uint64_t> gpu_resolve_n{0};
+    std::atomic<uint64_t> drain_ns{0};
+    std::atomic<uint64_t> readpixels_ns{0};
+    std::atomic<uint64_t> cpu_copy_ns{0};
+    std::atomic<uint64_t> bytes_read{0};
+    std::atomic<uint64_t> dirty_bytes{0};
+    std::atomic<uint64_t> nested_skipped{0};
+    std::atomic<uint64_t> queries_dropped{0};
+};
+GlGpuTimingStats g_gl_gpu;
+
+// perf::ScopedAdd commits an (ns, calls) pair and is already gated on
+// g_enabled. The [perf-gl-gpu] line has no call-count column for the three
+// CPU-side splits, so they share one discard sink. Reusing ScopedAdd instead of
+// a local clock is what keeps this translation unit free of an ungated
+// steady_clock read (tests/test_perf_excl_guards.py; audit section 6).
+std::atomic<uint64_t> g_gl_gpu_split_calls{0};
+
+std::string format_gl_gpu_report(const char* scope) {
+    char buf[832];
+    // beads-xbox.1.14.6: a self-check on the GL_TIME_ELAPSED bracket around the
+    // readback, COMPUTED AT PRINT TIME from two counters this line already
+    // carries -- it is not a struct field and costs nothing at run time.
+    //
+    // gpu_resolve_ns is the GPU-side bracket; readpixels_ns is the CPU-side wall
+    // clock around the same glReadPixels calls. A correctly closed bracket makes
+    // the first at most a small multiple of the second (the GPU work is a subset
+    // of what the blocking call waits for, plus driver overhead). When the end
+    // marker is not flushed the ratio blows out -- it was 77x before the flush
+    // landed. 1.5x is the acceptance band. When readpixels_ns is 0 there were no
+    // timed resolves at all, and the only consistent reading is gpu_resolve_ns
+    // also 0; anything else is a bracket that ran without its CPU-side pair.
+    const uint64_t resolve_gpu_ns = g_gl_gpu.gpu_resolve_ns.load();
+    const uint64_t resolve_cpu_ns = g_gl_gpu.readpixels_ns.load();
+    const unsigned resolve_bracket_ok =
+        resolve_cpu_ns == 0
+            ? (resolve_gpu_ns == 0 ? 1u : 0u)
+            : (resolve_gpu_ns <= resolve_cpu_ns + resolve_cpu_ns / 2 ? 1u : 0u);
+    std::snprintf(
+        buf, sizeof(buf),
+        "[perf-gl-gpu] scope=%s gpu_timing_available=%llu gpu_draw_ns=%llu "
+        "gpu_draw_n=%llu gpu_upload_ns=%llu gpu_upload_n=%llu "
+        "gpu_resolve_ns=%llu gpu_resolve_n=%llu drain_ns=%llu "
+        "readpixels_ns=%llu cpu_copy_ns=%llu bytes_read=%llu dirty_bytes=%llu "
+        "nested_skipped=%llu queries_dropped=%llu resolve_bracket_ok=%llu",
+        scope,
+        (unsigned long long)g_gl_gpu.gpu_timing_available.load(),
+        (unsigned long long)g_gl_gpu.gpu_draw_ns.load(),
+        (unsigned long long)g_gl_gpu.gpu_draw_n.load(),
+        (unsigned long long)g_gl_gpu.gpu_upload_ns.load(),
+        (unsigned long long)g_gl_gpu.gpu_upload_n.load(),
+        (unsigned long long)g_gl_gpu.gpu_resolve_ns.load(),
+        (unsigned long long)g_gl_gpu.gpu_resolve_n.load(),
+        (unsigned long long)g_gl_gpu.drain_ns.load(),
+        (unsigned long long)g_gl_gpu.readpixels_ns.load(),
+        (unsigned long long)g_gl_gpu.cpu_copy_ns.load(),
+        (unsigned long long)g_gl_gpu.bytes_read.load(),
+        (unsigned long long)g_gl_gpu.dirty_bytes.load(),
+        (unsigned long long)g_gl_gpu.nested_skipped.load(),
+        (unsigned long long)g_gl_gpu.queries_dropped.load(),
+        (unsigned long long)resolve_bracket_ok);
+    return std::string(buf);
+}
 
 void restore_previous_gl_context(SDL_Window* previous_window,
                                  SDL_GLContext previous_context,
                                  SDL_Window* fallback_window,
                                  size_t perf_site) {
-    const auto started = std::chrono::steady_clock::now();
+    // Gated: this ran two steady_clock reads on every context restore in every build
+    // for a number the report discards unless --perf-accounting is on
+    // (beads-xbox.1.14.3 item 5).
+    perf::ScopedGlContextTimer gl_timer(perf_site);
     if (previous_context) {
         SDL_GL_MakeCurrent(previous_window, previous_context);
     } else {
         SDL_GL_MakeCurrent(fallback_window, nullptr);
     }
-    perf::record_gl_context_site(
-        perf_site,
-        static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                  std::chrono::steady_clock::now() - started)
-                                  .count()));
 }
 
 // `color` begins as the owned guest surface snapshot.  The integer edge equations
@@ -1066,6 +1203,41 @@ public:
         // current; GL object deletion must be issued against this renderer's own
         // context, not whichever context happened to be current last.
         if (window_ && context_) SDL_GL_MakeCurrent(window_, context_);
+        // Stage (f): a pending witnessed batch must be issued before the
+        // context and its buffers go away. In practice the final scanout
+        // resolve has already flushed it; this is the backstop that makes the
+        // "no batch outlives the renderer" property local rather than a fact
+        // about the call order.
+        flush_witnessed_batch_deferred();
+        // beads-xbox.1.14.6: drain the outstanding GL_TIME_ELAPSED queries while
+        // this context is still current and the query objects still exist, then
+        // emit the one cumulative [perf-gl-gpu] line.
+        //
+        // WHY SHUTDOWN IS THE ONLY PRINT SITE: main.cpp prints each perf family
+        // by calling a free xlle::perf::format_*_report() declared in
+        // src/machine/perf_accounting.hpp, and Nv2aRenderer
+        // (src/machine/nv2a_renderer.hpp) exposes no report or per-checkpoint
+        // hook a backend could feed. Neither file is in scope for this change,
+        // so this family has run totals only -- no frame-series samples.
+        if (perf::g_enabled) {
+            if (gpu_timing_available_) {
+                // Force the pipeline to completion BEFORE the blocking harvest.
+                // harvest_gpu_queries(block=true) spins on GL_QUERY_RESULT for each
+                // outstanding query; on a driver that has not been flushed, work the
+                // queries sit behind may never be submitted, and the spin never
+                // terminates. glFinish makes termination the driver's problem, which
+                // it is required to solve. Costs one full sync, once, at shutdown.
+                if (finish_) finish_();
+                harvest_gpu_queries(/*block=*/true);
+            }
+            std::printf("%s\n", format_gl_gpu_report("cumulative").c_str());
+            std::fflush(stdout);
+        }
+        if (delete_queries_) {
+            for (auto& slot : gpu_query_ring_) {
+                if (slot.id) delete_queries_(1, &slot.id);
+            }
+        }
         if (fixture_program_ && delete_program_) delete_program_(fixture_program_);
         if (primary_color_program_ && delete_program_)
             delete_program_(primary_color_program_);
@@ -1084,6 +1256,10 @@ public:
             if (cache.buffer && delete_buffers_) delete_buffers_(1, &cache.buffer);
         }
         if (resident_vbo_ && delete_buffers_) delete_buffers_(1, &resident_vbo_);
+        if (delete_buffers_) {
+            for (unsigned int& ssbo : witnessed_ssbo_ring_)
+                if (ssbo) delete_buffers_(1, &ssbo);
+        }
         if (resident_vao_ && delete_vertex_arrays_)
             delete_vertex_arrays_(1, &resident_vao_);
         if (resident_fbo_ && delete_framebuffers_)
@@ -1241,11 +1417,11 @@ public:
         tex_parameter_i_(kGlTexture2D, kGlTextureMagFilter, kGlNearest);
         tex_parameter_i_(kGlTexture2D, kGlTextureWrapS, kGlClampToEdge);
         tex_parameter_i_(kGlTexture2D, kGlTextureWrapT, kGlClampToEdge);
-        tex_image_2d_(kGlTexture2D, 0, kGlRgba8, 256, 4, 0, kGlRgba,
-                      kGlUnsignedByte, nullptr);
+        gpu_timed_tex_image_2d(kGlTexture2D, 0, kGlRgba8, 256, 4, 0, kGlRgba,
+                               kGlUnsignedByte, nullptr);
         bind_image_texture_(0, texture, 0, 0, 0, kGlWriteOnly, kGlRgba8);
         use_program_(program);
-        dispatch_compute_(16, 4, 1);
+        gpu_timed_dispatch_compute(16, 4, 1);
         memory_barrier_(kGlShaderImageAccessBarrierBit | kGlFramebufferBarrierBit);
 
         unsigned int fbo = 0;
@@ -1261,7 +1437,8 @@ public:
         std::vector<uint8_t> actual(256u * 4u * 4u, 0);
         if (ok) {
             pixel_store_i_(kGlPackAlignment, 1);
-            read_pixels_(0, 0, 256, 4, kGlRgba, kGlUnsignedByte, actual.data());
+            gpu_timed_read_pixels(0, 0, 256, 4, kGlRgba, kGlUnsignedByte,
+                                  actual.data());
             if (get_error_() != kGlNoError) {
                 error = "OpenGL RGBA8 image-store probe readback failed";
                 ok = false;
@@ -1419,11 +1596,11 @@ public:
         tex_parameter_i_(kGlTexture2D, kGlTextureWrapS, kGlClampToEdge);
         tex_parameter_i_(kGlTexture2D, kGlTextureWrapT, kGlClampToEdge);
         pixel_store_i_(kGlUnpackAlignment, 1);
-        tex_image_2d_(kGlTexture2D, 0, kGlRgba8, 256, 8, 0, kGlRgba,
-                      kGlUnsignedByte, initial.data());
+        gpu_timed_tex_image_2d(kGlTexture2D, 0, kGlRgba8, 256, 8, 0, kGlRgba,
+                               kGlUnsignedByte, initial.data());
         bind_image_texture_(0, texture, 0, 0, 0, kGlReadWrite, kGlRgba8);
         use_program_(program);
-        dispatch_compute_(16, 8, 1);
+        gpu_timed_dispatch_compute(16, 8, 1);
         memory_barrier_(kGlShaderImageAccessBarrierBit | kGlFramebufferBarrierBit);
 
         unsigned int fbo = 0;
@@ -1439,7 +1616,8 @@ public:
         std::vector<uint8_t> actual(256u * 8u * 4u, 0);
         if (ok) {
             pixel_store_i_(kGlPackAlignment, 1);
-            read_pixels_(0, 0, 256, 8, kGlRgba, kGlUnsignedByte, actual.data());
+            gpu_timed_read_pixels(0, 0, 256, 8, kGlRgba, kGlUnsignedByte,
+                                  actual.data());
             if (get_error_() != kGlNoError) {
                 error = "OpenGL RGBA8 image-load/blend probe readback failed";
                 ok = false;
@@ -1606,6 +1784,13 @@ public:
     bool submit_resident_generic_combiner(const Nv2aGenericCombinerPacket& packet,
                                           Nv2aGenericCombinerResult& result,
                                           std::string& error) override {
+        if (!flush_witnessed_batch(error)) return false;
+        if (!take_witnessed_flush_error(error)) return false;
+        // NV2A_GL (beads-xbox.1.14.3): host GL driver wall time for one resident submit --
+        // context switch, surface residency, staging, uploads, uniforms and the draw. This
+        // is CPU-side API time, not a GPU timer query; the distinction is the audit's
+        // (docs/PERF-AUDIT-2026-09-02.md §6, "zero timer queries/fences").
+        perf_excl::Scope gl_region(perf_excl::kNv2aGl);
         SDL_Window* previous_window = nullptr;
         SDL_GLContext previous_context = nullptr;
         {
@@ -1613,14 +1798,11 @@ public:
                                   perf::g_calls_renderer_resident_context);
             previous_window = SDL_GL_GetCurrentWindow();
             previous_context = SDL_GL_GetCurrentContext();
-            const auto make_current_started = std::chrono::steady_clock::now();
-            const bool make_current_ok = SDL_GL_MakeCurrent(window_, context_);
-            perf::record_gl_context_site(
-                perf::kGlContextResidentSubmitEnter,
-                static_cast<uint64_t>(
-                    std::chrono::duration_cast<std::chrono::nanoseconds>(
-                        std::chrono::steady_clock::now() - make_current_started)
-                    .count()));
+            bool make_current_ok;
+            {
+                perf::ScopedGlContextTimer gl_timer(perf::kGlContextResidentSubmitEnter);
+                make_current_ok = SDL_GL_MakeCurrent(window_, context_);
+            }
             if (!make_current_ok) {
                 error = std::string("OpenGL resident context lost: ") +
                         SDL_GetError();
@@ -1720,9 +1902,10 @@ public:
                 bind_buffer_(kGlShaderStorageBuffer, cache.buffer);
                 if (!cache.valid || cache.size != texture.input.size() ||
                     cache.hash != hash) {
-                    buffer_data_(kGlShaderStorageBuffer,
-                                 static_cast<std::ptrdiff_t>(texture.input.size()),
-                                 texture.input.data(), kGlDynamicCopy);
+                    gpu_timed_buffer_data(
+                        kGlShaderStorageBuffer,
+                        static_cast<std::ptrdiff_t>(texture.input.size()),
+                        texture.input.data(), kGlDynamicCopy);
                     cache.valid = true;
                     cache.size = texture.input.size();
                     cache.hash = hash;
@@ -1751,10 +1934,10 @@ public:
             guest_words_to_rgba_unflipped(texture.input, rgba, texture.width,
                                           texture.height, false);
             pixel_store_i_(kGlUnpackAlignment, 1);
-            tex_image_2d_(kGlTexture2D, 0, kGlRgba8,
-                          static_cast<int>(texture.width),
-                          static_cast<int>(texture.height), 0, kGlRgba,
-                          kGlUnsignedByte, rgba.data());
+            gpu_timed_tex_image_2d(kGlTexture2D, 0, kGlRgba8,
+                                   static_cast<int>(texture.width),
+                                   static_cast<int>(texture.height), 0, kGlRgba,
+                                   kGlUnsignedByte, rgba.data());
         }
         {
             perf::ScopedAdd timer(perf::g_ns_renderer_resident_state_setup,
@@ -1788,10 +1971,10 @@ public:
         {
             perf::ScopedAdd timer(perf::g_ns_renderer_vertex_upload,
                                   perf::g_calls_renderer_vertex_upload);
-            buffer_data_(kGlArrayBuffer,
-                         static_cast<std::ptrdiff_t>(
-                             vertices.size() * sizeof(GpuVertex)),
-                         vertices.data(), kGlDynamicDraw);
+            gpu_timed_buffer_data(kGlArrayBuffer,
+                                  static_cast<std::ptrdiff_t>(
+                                      vertices.size() * sizeof(GpuVertex)),
+                                  vertices.data(), kGlDynamicDraw);
         }
         const unsigned int program = dashboard_fixture
             ? resident_dashboard_program_
@@ -1899,7 +2082,8 @@ public:
         {
             perf::ScopedAdd timer(perf::g_ns_renderer_draw,
                                   perf::g_calls_renderer_draw);
-            draw_arrays_(kGlTriangles, 0, static_cast<int>(vertices.size()));
+            gpu_timed_draw_arrays(kGlTriangles, 0,
+                                  static_cast<int>(vertices.size()));
             if (packet.fixture_color_format_x8 &&
                 !packet.fixture_depth_test_enabled &&
                 !packet.fixture_depth_write_enabled) {
@@ -1910,7 +2094,8 @@ public:
                                               "surface_size"),
                             static_cast<float>(width),
                             static_cast<float>(height));
-                draw_arrays_(kGlTriangles, 0, static_cast<int>(vertices.size()));
+                gpu_timed_draw_arrays(kGlTriangles, 0,
+                                      static_cast<int>(vertices.size()));
                 cache_color_mask(1, 1, 1, 0);
             }
         }
@@ -1953,11 +2138,22 @@ public:
                     packet.fixture_clip_height,
                 static_cast<uint64_t>(active_resident_->width) *
                     active_resident_->height);
+            if (perf::g_enabled) {
+                active_resident_->dirty_rect.add(
+                    packet.fixture_clip_x, packet.fixture_clip_y,
+                    packet.fixture_clip_width, packet.fixture_clip_height);
+            }
             active_resident_ = nullptr;
         }
         if (active_depth_resident_) {
-            if (packet.fixture_depth_write_enabled)
+            if (packet.fixture_depth_write_enabled) {
                 active_depth_resident_->depth_dirty = true;
+                if (perf::g_enabled) {
+                    active_depth_resident_->depth_dirty_rect.add(
+                        packet.fixture_clip_x, packet.fixture_clip_y,
+                        packet.fixture_clip_width, packet.fixture_clip_height);
+                }
+            }
             active_depth_resident_ = nullptr;
         }
         result.color_output.clear();
@@ -1967,9 +2163,747 @@ public:
         result.writes = 0;
         return true;
     }
+    // ============ stage (f) witnessed-profile GPU execution ================
+    // beads-xbox.1.15.7. These four entry points sit on top of the SAME
+    // ResidentSurface cache the resident generic-combiner path uses, keyed on
+    // the same (address, size, raw pitch word, height, raw format word) tuple,
+    // so a surface made resident by one path is found by the other and the
+    // existing resolve / invalidate seam in nv2a.cpp keeps both coherent
+    // without a second protocol.
+    bool supports_witnessed_profile(
+        const Nv2aWitnessedProfilePacket& descriptor) const override {
+        if (!witnessed_available_) return false;
+        if (descriptor.surface_width == 0 || descriptor.surface_height == 0)
+            return false;
+        if (descriptor.surface_size !=
+            static_cast<size_t>(descriptor.surface_width) *
+                descriptor.surface_height * 4u) {
+            return false;
+        }
+        if (descriptor.profile !=
+            Nv2aWitnessedProfilePacket::Profile::kSwizzledRadialColor) {
+            if (descriptor.texture_width == 0 || descriptor.texture_height == 0)
+                return false;
+        }
+        if (descriptor.profile ==
+            Nv2aWitnessedProfilePacket::Profile::kPitchProjectedColor) {
+            if (descriptor.projected_texture_width == 0 ||
+                descriptor.projected_texture_height == 0) {
+                return false;
+            }
+        }
+        // ALIASING GUARD. The resident cache is keyed on
+        // (address, size, pitch, format), so a surface RETARGET -- the same
+        // guest memory rebound with a different format or pitch, which is
+        // exactly what happens when the swizzled radial target and the pitch
+        // textured target share an address -- would silently produce a SECOND
+        // resident copy of the same bytes. Two GPU-authoritative copies of one
+        // range is data loss: whichever resolves last wins and the other's
+        // draws vanish. Refusing here sends the draw to the CPU executor, whose
+        // resolve_renderer_*_overlap call resolves and invalidates the stale
+        // copy through the existing seam, after which the next draw can go
+        // resident cleanly.
+        auto overlaps = [](uint64_t a0, uint64_t a1, uint64_t b0, uint64_t b1) {
+            return a0 < b1 && b0 < a1;
+        };
+        const uint64_t want_colour0 = descriptor.color_address;
+        const uint64_t want_colour1 = want_colour0 + descriptor.surface_size;
+        const uint64_t want_depth0 = descriptor.depth_address;
+        const uint64_t want_depth1 = want_depth0 + descriptor.surface_size;
+        for (const auto& surface : resident_surfaces_) {
+            const bool is_our_colour =
+                surface.valid && surface.address == descriptor.color_address &&
+                surface.size == descriptor.surface_size &&
+                surface.pitch == descriptor.surface_pitch &&
+                surface.format == descriptor.surface_format;
+            const bool is_our_depth =
+                surface.depth_valid &&
+                surface.depth_address == descriptor.depth_address &&
+                surface.depth_size == descriptor.surface_size;
+            if (surface.valid && !is_our_colour) {
+                const uint64_t c0 = surface.address;
+                const uint64_t c1 = c0 + surface.size;
+                if (overlaps(want_colour0, want_colour1, c0, c1) ||
+                    overlaps(want_depth0, want_depth1, c0, c1)) {
+                    return false;
+                }
+            }
+            if (surface.depth_valid && !is_our_depth) {
+                const uint64_t d0 = surface.depth_address;
+                const uint64_t d1 = d0 + surface.depth_size;
+                if (overlaps(want_colour0, want_colour1, d0, d1) ||
+                    overlaps(want_depth0, want_depth1, d0, d1)) {
+                    return false;
+                }
+            }
+        }
+        // The cache never evicts a DIRTY target, so a packet that is not
+        // already resident and has nowhere to land must be refused here, before
+        // the device builds it -- after supports_ returns true, failure is
+        // fatal for the draw (the same contract submit_generic_combiner has).
+        if (find_resident_surface(descriptor.color_address,
+                                  descriptor.surface_size,
+                                  descriptor.surface_pitch,
+                                  descriptor.surface_height,
+                                  descriptor.surface_format) != nullptr) {
+            return true;
+        }
+        for (const auto& surface : resident_surfaces_) {
+            if (!surface.valid && !surface.depth_dirty) return true;
+            if (!surface.dirty && !surface.depth_dirty) return true;
+        }
+        return false;
+    }
+
+    bool witnessed_target_resident(uint32_t color_address, size_t size,
+                                   uint32_t pitch, uint32_t height,
+                                   uint32_t format,
+                                   uint32_t depth_address) const override {
+        const ResidentSurface* color_slot = nullptr;
+        const ResidentSurface* depth_slot = nullptr;
+        bool colour_resident = false;
+        bool depth_resident = false;
+        select_witnessed_slots(color_address, size, pitch, height, format,
+                               depth_address, color_slot, depth_slot,
+                               colour_resident, depth_resident);
+        return colour_resident && depth_resident;
+    }
+    void witnessed_target_residency(uint32_t color_address, size_t size,
+                                    uint32_t pitch, uint32_t height,
+                                    uint32_t format, uint32_t depth_address,
+                                    bool& color_resident,
+                                    bool& depth_resident) const override {
+        const ResidentSurface* color_slot = nullptr;
+        const ResidentSurface* depth_slot = nullptr;
+        select_witnessed_slots(color_address, size, pitch, height, format,
+                               depth_address, color_slot, depth_slot,
+                               color_resident, depth_resident);
+    }
+    Nv2aWitnessedUploadCensus witnessed_upload_census() const override {
+        Nv2aWitnessedUploadCensus out = witnessed_upload_census_;
+        out.stamp_overflows = stamp_overflows_;
+        return out;
+    }
+
+    bool submit_witnessed_profile(const Nv2aWitnessedProfilePacket& packet,
+                                  Nv2aWitnessedProfileResult& result,
+                                  std::string& error) override {
+        perf_excl::Scope gl_region(perf_excl::kNv2aGl);
+        result = {};
+        if (!take_witnessed_flush_error(error)) return false;
+        if (packet.triangles.empty()) return true;
+        if (!enter_witnessed_context(error)) return false;
+        const uint64_t draw_calls_before = witnessed_draw_calls_;
+
+        // A pending batch for different state has to be issued before this
+        // packet can join one; the key is every input the shader reads that is
+        // not in the triangle record.
+        WitnessedBatchKey key;
+        key.profile = packet.profile;
+        key.color_address = packet.color_address;
+        key.depth_address = packet.depth_address;
+        key.surface_size = packet.surface_size;
+        key.surface_pitch = packet.surface_pitch;
+        key.surface_format = packet.surface_format;
+        key.surface_width = packet.surface_width;
+        key.surface_height = packet.surface_height;
+        key.xmin = packet.xmin; key.xmax = packet.xmax;
+        key.ymin = packet.ymin; key.ymax = packet.ymax;
+        key.clip_min = packet.clip_min;
+        key.clip_max = packet.clip_max;
+        key.texture_hash = packet.texture_hash;
+        key.texture_width = packet.texture_width;
+        key.texture_height = packet.texture_height;
+        key.projected_texture_hash = packet.projected_texture_hash;
+        key.projected_texture_width = packet.projected_texture_width;
+        key.projected_texture_height = packet.projected_texture_height;
+        key.factor0_stage6 = packet.factor0_stage6;
+        key.factor1_stage6 = packet.factor1_stage6;
+        if (witnessed_batch_count_ != 0 && !(key == witnessed_batch_key_)) {
+            if (!flush_witnessed_batch(error)) return false;
+        }
+
+        ResidentSurface* surface = nullptr;
+        ResidentSurface* depth_surface = nullptr;
+        {
+            perf::ScopedAdd timer(perf::g_ns_renderer_resident_ensure,
+                                  perf::g_calls_renderer_resident_ensure);
+            if (!ensure_witnessed_surface(packet, surface, depth_surface,
+                                          result, error))
+                return false;
+        }
+        const bool radial = packet.profile ==
+            Nv2aWitnessedProfilePacket::Profile::kSwizzledRadialColor;
+
+        // ---- triangle records ------------------------------------------------
+        // Appended to the pending batch. Consecutive GPU jobs on the same
+        // surface with the same uniforms are ONE glDrawArrays: GL processes
+        // primitives within a draw in submission order for depth and colour, so
+        // merging draws that were already adjacent in guest order cannot change
+        // the result, and it takes ~80 k driver submissions per 2 G
+        // instructions down to the number of state changes.
+        const size_t count = packet.triangles.size();
+        // kPitchProjectedColor uses the TEXTURED record, byte for byte: its
+        // projective texcoord0 rides in the .w lanes that profile writes as
+        // zero. No new stride, no new SSBO layout.
+        const bool projected =
+            packet.profile ==
+            Nv2aWitnessedProfilePacket::Profile::kPitchProjectedColor;
+        const size_t stride = radial ? sizeof(witnessed_gl::RadialTriRecord)
+                                     : sizeof(witnessed_gl::TexturedTriRecord);
+        const size_t append_at = witnessed_records_.size();
+        witnessed_records_.resize(append_at + stride * count);
+        for (size_t i = 0; i < count; ++i) {
+            const Nv2aWitnessedTriangle& t = packet.triangles[i];
+            uint8_t* base = witnessed_records_.data() + append_at + stride * i;
+            // The two records share their leading 160 bytes by construction, so
+            // the common half is written once through the radial view.
+            auto* common =
+                reinterpret_cast<witnessed_gl::RadialTriRecord*>(base);
+            common->ab[0] = t.ax; common->ab[1] = t.ay;
+            common->ab[2] = t.bx; common->ab[3] = t.by;
+            common->cp[0] = t.cx; common->cp[1] = t.cy;
+            // cp[2] packs the software path's scanline box as four 16-bit
+            // fields; every bound is clip-rect-clamped and therefore in
+            // [0, 4095], and a record with an empty box is never emitted.
+            // cp[3] is the wide flag the vertex shader switches on.
+            common->cp[2] =
+                (static_cast<int64_t>(t.bbox_xmin) & 0xFFFF) |
+                ((static_cast<int64_t>(t.bbox_xmax) & 0xFFFF) << 16) |
+                ((static_cast<int64_t>(t.bbox_ymin) & 0xFFFF) << 32) |
+                ((static_cast<int64_t>(t.bbox_ymax) & 0xFFFF) << 48);
+            common->cp[3] = t.wide ? 1 : 0;
+            common->zi[0] = t.za; common->zi[1] = t.zb;
+            common->zi[2] = t.zc; common->zi[3] = t.inverse_area;
+            // beads-xbox.1.15.10 step 2. `wv` was padding that kept `recip` on
+            // its 32-byte std430 boundary and carried w0/w1/w2, which no shader
+            // ever read. It now carries the SINGLE-PRECISION copies of exactly
+            // the four reciprocals `recip` holds in double, so the FP32 shader
+            // variant reads its inputs out of the SAME record the FP64 variant
+            // uses -- identical layout, identical stride, one runtime switch.
+            common->wv[0] = static_cast<float>(t.inverse_area_double);
+            common->wv[1] = static_cast<float>(t.inverse_w[0]);
+            common->wv[2] = static_cast<float>(t.inverse_w[1]);
+            common->wv[3] = static_cast<float>(t.inverse_w[2]);
+            for (int v = 0; v < 3; ++v) {
+                float* d = v == 0 ? common->d0 : (v == 1 ? common->d1 : common->d2);
+                float* a = v == 0 ? common->t0 : (v == 1 ? common->t1 : common->t2);
+                for (int c = 0; c < 3; ++c) {
+                    d[c] = t.diffuse[v][c];
+                    a[c] = t.tex_a[v][c];
+                }
+                // The projective texcoord0's x and y for this vertex; 0 for
+                // every other profile, which is what those lanes have always
+                // held and what no shader but the projected one reads.
+                d[3] = projected ? t.tex_p[v][0] : 0.0f;
+                a[3] = projected ? t.tex_p[v][1] : 0.0f;
+            }
+            if (radial) {
+                auto* rec =
+                    reinterpret_cast<witnessed_gl::RadialTriRecord*>(base);
+                rec->recip[0] = t.inverse_area_double;
+                rec->recip[1] = t.inverse_w[0];
+                rec->recip[2] = t.inverse_w[1];
+                rec->recip[3] = t.inverse_w[2];
+            } else {
+                auto* rec =
+                    reinterpret_cast<witnessed_gl::TexturedTriRecord*>(base);
+                for (int v = 0; v < 3; ++v) {
+                    float* u = v == 0 ? rec->u0 : (v == 1 ? rec->u1 : rec->u2);
+                    for (int c = 0; c < 3; ++c) u[c] = t.tex_b[v][c];
+                    // The projective w (the software path's texture[0][3]).
+                    u[3] = projected ? t.tex_p[v][2] : 0.0f;
+                }
+                rec->recip[0] = t.inverse_area_double;
+                rec->recip[1] = t.inverse_w[0];
+                rec->recip[2] = t.inverse_w[1];
+                rec->recip[3] = t.inverse_w[2];
+            }
+        }
+        if (!radial && !ensure_witnessed_texture(packet, result, error))
+            return false;
+        if (packet.profile ==
+                Nv2aWitnessedProfilePacket::Profile::kPitchProjectedColor &&
+            !ensure_witnessed_projected_texture(packet, result, error)) {
+            return false;
+        }
+        witnessed_batch_key_ = key;
+        witnessed_batch_surface_ = surface;
+        // beads-xbox.1.15.10 phase 4 (lever C): the colour and zeta planes of a
+        // witnessed packet can now live in DIFFERENT resident slots, so the
+        // batch carries both. It is one pointer per plane and not one per
+        // packet because the batch key already pins both guest addresses.
+        witnessed_batch_depth_surface_ = depth_surface;
+        witnessed_batch_count_ += count;
+        result.triangles = count;
+        // beads-xbox.1.15.10 step 1 (overlap). The batch used to be issued only
+        // when some other entry point demanded its result, and the measured
+        // consequence was 965 draw calls of ~8.0 ms of GPU work each, every one
+        // of them issued immediately before the readback that waited on it. A
+        // triangle bound splits that into chunks the GPU can chew through while
+        // the emulation thread runs on. Batching itself is still what keeps the
+        // driver-submission count sane (it took this path from ~80 k submits to
+        // 965), so the bound is a tunable, not a removal: 0 restores the old
+        // behavior for the bisection arm.
+        if (witnessed_flush_triangles_ != 0 &&
+            witnessed_batch_count_ >= witnessed_flush_triangles_) {
+            ++witnessed_flush_size_;
+            if (!flush_witnessed_batch(error)) return false;
+        }
+        // Bound the pending batch so a very long run cannot grow the staging
+        // buffer without limit; 64 MiB is ~230 k radial triangles.
+        else if (witnessed_records_.size() >= (size_t{64} << 20)) {
+            if (!flush_witnessed_batch(error)) return false;
+        }
+        // CUMULATIVE, not a per-submit delta: most flushes are triggered by
+        // some other entry point (a resolve, an invalidate, the next state
+        // change), so a delta measured inside submit reads zero and the census
+        // silently claims the executor issued no draws at all.
+        (void)draw_calls_before;
+        result.draw_calls = witnessed_draw_calls_;
+        return true;
+    }
+
+    // Records the FIRST stage of a flush at which GL already had an error
+    // pending, so a failure is attributed to the call that raised it rather
+    // than to the next call that happened to look.
+    int witnessed_bad_stage_ = -1;
+    void witnessed_stage_error(int stage) {
+        if (witnessed_bad_stage_ >= 0) return;
+        if (get_error_() != kGlNoError) witnessed_bad_stage_ = stage;
+    }
+    bool flush_witnessed_batch(std::string& error) {
+        if (witnessed_batch_count_ == 0) {
+            witnessed_records_.clear();
+            return true;
+        }
+        const WitnessedBatchKey& packet = witnessed_batch_key_;
+        ResidentSurface* surface = witnessed_batch_surface_;
+        ResidentSurface* depth_surface = witnessed_batch_depth_surface_;
+        const size_t count = witnessed_batch_count_;
+        witnessed_batch_count_ = 0;
+        witnessed_batch_surface_ = nullptr;
+        witnessed_batch_depth_surface_ = nullptr;
+        if (!surface || !depth_surface) {
+            witnessed_records_.clear();
+            error = "OpenGL witnessed batch lost its target";
+            return false;
+        }
+        perf_excl::Scope gl_region(perf_excl::kNv2aGl);
+        if (!enter_witnessed_context(error)) {
+            witnessed_records_.clear();
+            return false;
+        }
+        const bool radial = packet.profile ==
+            Nv2aWitnessedProfilePacket::Profile::kSwizzledRadialColor;
+        witnessed_stage_error(0);
+        if (witnessed_ssbo_ring_size_ > kWitnessedSsboRingMax)
+            witnessed_ssbo_ring_size_ = kWitnessedSsboRingMax;
+        if (witnessed_ssbo_ring_size_ < 1) witnessed_ssbo_ring_size_ = 1;
+        unsigned int& slot = witnessed_ssbo_ring_[witnessed_ssbo_ring_head_];
+        if (!slot) gen_buffers_(1, &slot);
+        witnessed_ssbo_ = slot;
+        witnessed_ssbo_ring_head_ =
+            (witnessed_ssbo_ring_head_ + 1) % witnessed_ssbo_ring_size_;
+        bind_buffer_(kGlShaderStorageBuffer, witnessed_ssbo_);
+        // Orphan-and-refill: a fresh store per flush is what lets the driver
+        // pipeline the previous draw instead of stalling on a buffer it is
+        // still reading.
+        gpu_timed_buffer_data(kGlShaderStorageBuffer,
+                              static_cast<std::ptrdiff_t>(
+                                  witnessed_records_.size()),
+                              witnessed_records_.data(), kGlStreamDraw);
+        witnessed_ssbo_bytes_ = witnessed_records_.size();
+        witnessed_records_.clear();
+        bind_buffer_base_(kGlShaderStorageBuffer, 0, witnessed_ssbo_);
+        witnessed_stage_error(1);
+        Nv2aWitnessedProfileResult result;
+        std::string texture_error;
+
+        const bool projected =
+            packet.profile ==
+            Nv2aWitnessedProfilePacket::Profile::kPitchProjectedColor;
+        WitnessedProgram& wp =
+            radial ? witnessed_radial_
+                   : (projected ? witnessed_projected_ : witnessed_textured_);
+        // glGetUniformLocation is a driver-side string lookup; at a few hundred
+        // flushes per run it is not a per-flush operation either, so the
+        // locations are resolved once at link time and every uniform is written
+        // only when its value actually changes.
+        //
+        // use_program IS issued unconditionally, and the mirror that used to
+        // suppress it is gone. The resident generic-combiner path calls
+        // use_program_ on its own programs without telling this mirror, so a
+        // cached "already bound" could be false, and glUniform* against a
+        // location belonging to a different program is GL_INVALID_OPERATION.
+        // That is not theoretical: with --nv2a-gpu-profile-mask 2 it stopped
+        // the machine at 647 782 750 instructions with GL 0x0502. Uniform
+        // VALUES are per-program state and survive a rebind, so uniforms_valid
+        // is still correct across one; only the program binding was.
+        use_program_(wp.program);
+        witnessed_bound_program_ = wp.program;
+        const float surface_w = static_cast<float>(packet.surface_width);
+        const float surface_h = static_cast<float>(packet.surface_height);
+        if (!wp.uniforms_valid || wp.surface_w != surface_w ||
+            wp.surface_h != surface_h) {
+            uniform_2f_(wp.loc_surface_size, surface_w, surface_h);
+            wp.surface_w = surface_w;
+            wp.surface_h = surface_h;
+        }
+        if (!wp.uniforms_valid || wp.clip_min != packet.clip_min) {
+            uniform_1f_(wp.loc_clip_min, packet.clip_min);
+            wp.clip_min = packet.clip_min;
+        }
+        if (!wp.uniforms_valid || wp.clip_max != packet.clip_max) {
+            uniform_1f_(wp.loc_clip_max, packet.clip_max);
+            wp.clip_max = packet.clip_max;
+        }
+        if (!radial) {
+            if (projected) {
+                // Unit 1 FIRST, so unit 0 is the active unit when the block
+                // ends -- every other path in this file assumes that.
+                cache_bind_texture_unit(kGlTexture1,
+                                        witnessed_projected_texture_);
+            }
+            cache_bind_texture_unit(kGlTexture0, witnessed_texture_);
+            if (!wp.uniforms_valid) uniform_1i_(wp.loc_texture0, 0);
+            const float tex_w = static_cast<float>(packet.texture_width);
+            const float tex_h = static_cast<float>(packet.texture_height);
+            if (!wp.uniforms_valid || wp.texture_w != tex_w ||
+                wp.texture_h != tex_h) {
+                uniform_2f_(wp.loc_texture_size, tex_w, tex_h);
+                wp.texture_w = tex_w;
+                wp.texture_h = tex_h;
+            }
+            if (projected) {
+                if (!wp.uniforms_valid) uniform_1i_(wp.loc_texture1, 1);
+                const float pw =
+                    static_cast<float>(packet.projected_texture_width);
+                const float ph =
+                    static_cast<float>(packet.projected_texture_height);
+                if (!wp.uniforms_valid || wp.proj_texture_w != pw ||
+                    wp.proj_texture_h != ph) {
+                    uniform_2f_(wp.loc_projected_texture_size, pw, ph);
+                    wp.proj_texture_w = pw;
+                    wp.proj_texture_h = ph;
+                }
+            }
+            const uint32_t f0 = packet.factor0_stage6;
+            const uint32_t f1 = packet.factor1_stage6;
+            if (!wp.uniforms_valid || wp.factor0 != f0) {
+                uniform_3f_(wp.loc_weight0,
+                            static_cast<float>((f0 >> 16) & 0xFFu) / 255.0f,
+                            static_cast<float>((f0 >> 8) & 0xFFu) / 255.0f,
+                            static_cast<float>(f0 & 0xFFu) / 255.0f);
+                wp.factor0 = f0;
+            }
+            if (!wp.uniforms_valid || wp.factor1 != f1) {
+                uniform_3f_(wp.loc_weight1,
+                            static_cast<float>((f1 >> 16) & 0xFFu) / 255.0f,
+                            static_cast<float>((f1 >> 8) & 0xFFu) / 255.0f,
+                            static_cast<float>(f1 & 0xFFu) / 255.0f);
+                wp.factor1 = f1;
+            }
+        }
+        wp.uniforms_valid = true;
+        witnessed_stage_error(2);
+
+        cache_bind_framebuffer(resident_fbo_);
+        cache_framebuffer_color_texture(resident_fbo_, surface->texture);
+        cache_framebuffer_depth_texture(resident_fbo_,
+                                        depth_surface->depth_texture);
+        cache_viewport(0, 0, static_cast<int>(packet.surface_width),
+                       static_cast<int>(packet.surface_height));
+        // Guest scissor rows are top-down; the resident image is stored
+        // bottom-up, exactly as guest_words_to_rgba stores it.
+        const int scissor_w =
+            static_cast<int>(packet.xmax - packet.xmin + 1u);
+        const int scissor_h =
+            static_cast<int>(packet.ymax - packet.ymin + 1u);
+        cache_scissor(true, static_cast<int>(packet.xmin),
+                      static_cast<int>(packet.surface_height - 1u -
+                                       packet.ymax),
+                      scissor_w, scissor_h);
+        cache_depth_test(true, kGlLequal);
+        cache_depth_mask(true);
+        cache_blend(false, 0, 0);
+        cache_color_mask(1, 1, 1, 1);
+        if (!witnessed_fixed_state_) {
+            // Both are off in the primed state and nothing in this file turns
+            // them on, so this is a one-time assertion, not a per-draw call.
+            disable_(kGlCullFace);
+            disable_(kGlStencilTest);
+            witnessed_fixed_state_ = true;
+        }
+        witnessed_stage_error(3);
+        cache_bind_vao_vbo(witnessed_vao_, 0);
+        witnessed_stage_error(4);
+        // Phase 2 (beads-xbox.1.15.10): SIX vertices per triangle record, not
+        // three. k = 3,4,5 is a degenerate copy of vertex 0 for an ordinary
+        // record -- zero area, no fragments, one extra vertex-shader invocation
+        // per triangle -- and the two triangles of the scanline bounding box
+        // for a wide one. The alternative, two draw calls with two vertex
+        // counts, would have split every batch the moment a wide triangle
+        // appeared in it, and batching is what took this path from 80 k driver
+        // submissions to 1 737.
+        gpu_timed_draw_arrays(kGlTriangles, 0,
+                              static_cast<int>(count * 6u));
+        // beads-xbox.1.15.10 step 1 (overlap). glDrawArrays only APPENDS to the
+        // driver's command buffer; nothing submits it to the GPU until some
+        // call needs a result. Before this, the only such call was the resolve's
+        // glReadPixels (or its glClientWaitSync under --perf-accounting), so the
+        // GPU started the batch at the moment the emulation thread began waiting
+        // for it and none of the 7.740 s of witnessed GPU work overlapped the
+        // emulation thread -- 5.878 s of it was paid a second time as drain_ns.
+        // glFlush submits the batch and returns without waiting, which is the
+        // whole of the fix: the GPU runs the draw while the emulation thread
+        // goes back to TCG, vertex transform and the CPU-side profiles. It is
+        // NOT gated on perf accounting: this is the shipping path, not an
+        // instrument.
+        if (flush_ && witnessed_kick_flush_) {
+            flush_();
+            ++witnessed_gl_flushes_;
+        }
+        // glGetError forces a driver round trip; at 80 k submits that is a
+        // measurable serialization. The state is checked once per surface
+        // residency change (in ensure_witnessed_surface) and at every resolve,
+        // which is where a real GL error would surface anyway.
+
+        surface->dirty = true;
+        depth_surface->depth_dirty = true;
+        surface->dirty_rect.add(packet.xmin, packet.ymin,
+                                packet.xmax - packet.xmin + 1u,
+                                packet.ymax - packet.ymin + 1u);
+        depth_surface->depth_dirty_rect.add(packet.xmin, packet.ymin,
+                                            packet.xmax - packet.xmin + 1u,
+                                            packet.ymax - packet.ymin + 1u);
+        // One glGetError per FLUSH, not per draw: at a few hundred flushes per
+        // run this costs nothing, and without it a GL error raised by a draw
+        // would surface at the next resolve and be misattributed to it -- which
+        // is exactly what happened while this was missing.
+        const unsigned int gl_error = get_error_();
+        if (gl_error != kGlNoError) {
+            char why[192];
+            std::snprintf(why, sizeof(why),
+                          "OpenGL witnessed-profile draw failed (GL 0x%04x, "
+                          "%zu triangles, profile %u, first bad stage %d, "
+                          "fbo=%u colour=%u depth=%u unit0=%u tex=%u)",
+                          gl_error, count,
+                          static_cast<unsigned>(packet.profile),
+                          witnessed_bad_stage_, gl_state_.bound_fbo,
+                          gl_state_.fbo_color_texture,
+                          gl_state_.fbo_depth_texture,
+                          gl_state_.unit2d_binding[0], witnessed_texture_);
+            error = why;
+            return false;
+        }
+        ++witnessed_draw_calls_;
+        (void)texture_error;
+        return true;
+    }
+    // Flush ONLY when the requested guest range can actually observe the
+    // pending batch, i.e. when it overlaps the batch's own colour or zeta
+    // plane. The unconditional version was correct and far too blunt: every
+    // witnessed CPU draw calls resolve_renderer_color_overlap for ITS OWN
+    // surface, 160 568 times per 12 G instructions, and flushing there cut the
+    // batching from a few hundred draw calls to 93 842.
+    bool flush_witnessed_batch_for(uint32_t address, size_t size,
+                                   std::string& error) {
+        if (witnessed_batch_count_ == 0) return true;
+        const uint64_t lo = address;
+        const uint64_t hi = lo + size;
+        const WitnessedBatchKey& k = witnessed_batch_key_;
+        const uint64_t c0 = k.color_address;
+        const uint64_t c1 = c0 + k.surface_size;
+        const uint64_t d0 = k.depth_address;
+        const uint64_t d1 = d0 + k.surface_size;
+        if ((lo < c1 && c0 < hi) || (lo < d1 && d0 < hi))
+            return flush_witnessed_batch(error);
+        return true;
+    }
+    void flush_witnessed_batch_for_deferred(uint32_t address, size_t size) {
+        std::string error;
+        if (!flush_witnessed_batch_for(address, size, error) &&
+            witnessed_flush_error_.empty()) {
+            witnessed_flush_error_ = error;
+        }
+    }
+    // Void entry points cannot report a flush failure, so it is latched and
+    // surfaced by the next fallible call. A GL error here is fatal for the run
+    // either way; what matters is that it is never silently dropped.
+    void flush_witnessed_batch_deferred() {
+        std::string error;
+        if (!flush_witnessed_batch(error) && witnessed_flush_error_.empty())
+            witnessed_flush_error_ = error;
+    }
+    bool take_witnessed_flush_error(std::string& error) {
+        if (witnessed_flush_error_.empty()) return true;
+        error = witnessed_flush_error_;
+        witnessed_flush_error_.clear();
+        return false;
+    }
+
+    bool clear_resident_surface(uint32_t color_address, size_t color_size,
+                                bool clear_color, uint32_t color_value,
+                                uint32_t depth_address, size_t depth_size,
+                                bool clear_depth, uint32_t depth_value,
+                                bool& needs_guest_fill,
+                                std::string& error) override {
+        error.clear();
+        needs_guest_fill = true;
+        if (!witnessed_available_) return false;
+        if (!flush_witnessed_batch(error)) return false;
+        // beads-xbox.1.15.10 phase 3, step 3. The two planes are looked up
+        // SEPARATELY and cleared separately. The pair-only form this had was
+        // measured to decline every clear on the canonical workload: at 2 G
+        // instructions 457 of 768 CLEAR_SURFACE calls request exactly one plane
+        // (the guest clears colour and zeta in separate methods) and the rest
+        // found no slot whose colour AND zeta keys both matched. Each plane is
+        // its own resident image with its own dirty flag, so clearing one
+        // without the other is the same operation the software path performed.
+        ResidentSurface* color_surface = nullptr;
+        if (clear_color) {
+            for (auto& candidate : resident_surfaces_) {
+                if (candidate.valid && candidate.address == color_address &&
+                    candidate.size == color_size) {
+                    color_surface = &candidate;
+                    break;
+                }
+            }
+            if (!color_surface) {
+                ++witnessed_upload_census_.clear_decline_color_missing;
+                return false;
+            }
+        }
+        ResidentSurface* depth_surface = nullptr;
+        if (clear_depth) {
+            for (auto& candidate : resident_surfaces_) {
+                if (candidate.depth_valid &&
+                    candidate.depth_address == depth_address &&
+                    candidate.depth_size == depth_size) {
+                    depth_surface = &candidate;
+                    break;
+                }
+            }
+            if (!depth_surface) {
+                ++witnessed_upload_census_.clear_decline_depth_missing;
+                return false;
+            }
+        }
+        ResidentSurface* surface = color_surface ? color_surface : depth_surface;
+        if (!surface) return false;
+        perf_excl::Scope gl_region(perf_excl::kNv2aGl);
+        if (!enter_witnessed_context(error)) return false;
+        cache_bind_framebuffer(resident_fbo_);
+        // Attach ONLY the planes being cleared. The resident FBO is shared and
+        // two resident surfaces need not have the same dimensions; with both
+        // attached its effective size is their intersection and the clear would
+        // silently miss part of a plane. That is the same defect the colour
+        // readback hit in phase 2 and the fix is the same.
+        cache_framebuffer_color_texture(
+            resident_fbo_, color_surface ? color_surface->texture : 0u);
+        cache_framebuffer_depth_texture(
+            resident_fbo_, depth_surface ? depth_surface->depth_texture : 0u);
+        cache_scissor(false, 0, 0, 0, 0);
+        unsigned int bits = 0;
+        if (clear_color) {
+            cache_color_mask(1, 1, 1, 1);
+            // Exact for every guest byte: the GL float -> UNORM8 conversion is
+            // round(clamp(f) * 255), and float(v / 255.0f) * 255 differs from v
+            // by at most 255 * 2^-24, so it rounds back to v for all 256
+            // values. The channel order is A8R8G8B8 -> (R,G,B,A), matching the
+            // GL_BGRA the upload and the resolve both use.
+            clear_color_(static_cast<float>((color_value >> 16) & 0xFFu) / 255.0f,
+                         static_cast<float>((color_value >> 8) & 0xFFu) / 255.0f,
+                         static_cast<float>(color_value & 0xFFu) / 255.0f,
+                         static_cast<float>((color_value >> 24) & 0xFFu) / 255.0f);
+            bits |= kGlColorBufferBit;
+        }
+        if (clear_depth) {
+            cache_depth_mask(true);
+            // Same argument in double: (z / 16777215.0) * 16777215 is within
+            // 2e-9 of z for every z < 2^24, so the D24 store is exactly z.
+            clear_depth_(static_cast<double>(depth_value >> 8) / 16777215.0);
+            clear_stencil_(static_cast<int>(depth_value & 0xFFu));
+            stencil_mask_(0xFFFFFFFFu);
+            bits |= kGlDepthBufferBit | kGlStencilBufferBit;
+        }
+        if (bits == 0) return false;
+        clear_(bits);
+        if (get_error_() != kGlNoError) {
+            error = "OpenGL resident clear failed";
+            return false;
+        }
+        if (clear_color) ++witnessed_upload_census_.clear_accept_color;
+        if (clear_depth) ++witnessed_upload_census_.clear_accept_depth;
+        // See the contract on the base declaration: a plane that was already
+        // GPU-authoritative stays so and the caller skips its guest fill; a
+        // clean plane is kept clean and the caller fills guest memory to the
+        // same values, so the two copies still agree and no resolve is created.
+        needs_guest_fill = false;
+        if (clear_color) {
+            if (color_surface->dirty) {
+                color_surface->dirty_rect.add(0, 0, color_surface->width,
+                                              color_surface->height);
+            } else {
+                needs_guest_fill = true;
+            }
+        }
+        if (clear_depth) {
+            if (depth_surface->depth_dirty) {
+                depth_surface->depth_dirty_rect.add(0, 0, depth_surface->width,
+                                                    depth_surface->height);
+            } else {
+                needs_guest_fill = true;
+            }
+        }
+        if (needs_guest_fill)
+            ++witnessed_upload_census_.clear_kept_clean;
+        // The overlap contract the software clear used to provide through
+        // invalidate_resident_color_surface / _depth_surface: any OTHER slot
+        // covering these ranges is now stale, because this call changed the
+        // authoritative image for them and did not touch their copies. Skipping
+        // it would leave a second resident view of the same guest range holding
+        // pre-clear pixels, which is the exact defect class phase 1 recorded
+        // for the colour/zeta key mismatch.
+        for (auto& other : resident_surfaces_) {
+            if (&other == color_surface || &other == depth_surface) continue;
+            if (clear_color && resident_overlaps(other, color_address,
+                                                 color_size)) {
+                other.valid = false;
+                other.dirty = false;
+                other.dirty_rect.reset();
+                stamp_invalidate(color_stamps_, other.address,
+                                 nv2a_invalidate_token(
+                                     kNv2aInvalidateClearSurface));
+                if (active_resident_ == &other) active_resident_ = nullptr;
+            }
+            if (clear_depth && resident_depth_overlaps(other, depth_address,
+                                                       depth_size)) {
+                other.depth_valid = false;
+                other.depth_dirty = false;
+                other.depth_dirty_rect.reset();
+                stamp_invalidate(depth_stamps_, other.depth_address,
+                                 nv2a_invalidate_token(
+                                     kNv2aInvalidateClearSurface));
+                if (active_depth_resident_ == &other)
+                    active_depth_resident_ = nullptr;
+            }
+        }
+        return true;
+    }
+
     bool resolve_resident_color_surface(uint32_t address, size_t size,
                                         Nv2aResidentColorResolve& resolve,
                                         std::string& error) override {
+        // Every pending GPU draw has to have happened before the range it wrote
+        // is read back. This, and the matching calls in the depth resolve, the
+        // two invalidations, the region upload, the clear and both generic
+        // submits, are the complete set of places a deferred batch could
+        // otherwise be observed out of order
+        // (tests/test_gpu_profiles_guards.py pins it).
+        if (!flush_witnessed_batch_for(address, size, error)) return false;
+        if (!take_witnessed_flush_error(error)) return false;
         // The caller moves a recycled buffer into resolve.data; keep its
         // capacity and only overwrite the fields this call owns. Paths that
         // resolve nothing MUST clear data so the caller's empty-check stays
@@ -1988,14 +2922,11 @@ public:
         SDL_Window* previous_window = SDL_GL_GetCurrentWindow();
         SDL_GLContext previous_context = SDL_GL_GetCurrentContext();
         {
-            const auto make_current_started = std::chrono::steady_clock::now();
-            const bool make_current_ok = SDL_GL_MakeCurrent(window_, context_);
-            perf::record_gl_context_site(
-                perf::kGlContextColorResolveEnter,
-                static_cast<uint64_t>(
-                    std::chrono::duration_cast<std::chrono::nanoseconds>(
-                        std::chrono::steady_clock::now() - make_current_started)
-                    .count()));
+            bool make_current_ok;
+            {
+                perf::ScopedGlContextTimer gl_timer(perf::kGlContextColorResolveEnter);
+                make_current_ok = SDL_GL_MakeCurrent(window_, context_);
+            }
             if (!make_current_ok) {
                 error = std::string("OpenGL resident resolve context lost: ") +
                         SDL_GetError();
@@ -2021,33 +2952,80 @@ public:
             resolve_readback_scratch_.resize(pixel_bytes);
             cache_bind_framebuffer(resident_fbo_);
             cache_framebuffer_color_texture(resident_fbo_, surface->texture);
+            // DETACH the depth attachment before the readback. The resident FBO
+            // is shared by every surface, and two resident surfaces need not
+            // have the same dimensions -- 1024x512 for the swizzled radial
+            // target against 1280x480 for the pitch textured one. With both
+            // attached the framebuffer's effective size is their INTERSECTION
+            // and glReadPixels outside it is undefined, so a colour readback
+            // taken while some other surface's zeta was still attached returned
+            // undefined pixels for part of the surface. That is invisible with
+            // one resident surface and appears the moment there are two, which
+            // is exactly the --nv2a-gpu-profile-mask 3 signature.
+            cache_framebuffer_depth_texture(resident_fbo_, 0);
             pixel_store_i_(kGlPackAlignment, 1);
-            read_pixels_(0, 0, static_cast<int>(surface->width),
-                         static_cast<int>(surface->height), kGlBgra,
-                         kGlUnsignedByte, resolve_readback_scratch_.data());
+            gpu_timed_resolve_read_pixels(
+                0, 0, static_cast<int>(surface->width),
+                static_cast<int>(surface->height), kGlBgra, kGlUnsignedByte,
+                resolve_readback_scratch_.data(),
+                static_cast<uint64_t>(pixel_bytes),
+                surface->dirty_rect.bytes(4u));
             perf::record_renderer_resolve_pixels(
                 static_cast<uint64_t>(surface->width) * surface->height);
-            if (get_error_() != kGlNoError) {
-                error = "OpenGL resident color readback failed";
+            const unsigned int readback_error = get_error_();
+            if (readback_error != kGlNoError) {
+                char why[160];
+                std::snprintf(why, sizeof(why),
+                              "OpenGL resident color readback failed "
+                              "(GL 0x%04x, %ux%u, swizzled=%u)",
+                              readback_error, surface->width, surface->height,
+                              surface->swizzled ? 1u : 0u);
+                error = why;
                 return false;
             }
             resolve.address = surface->address;
             resolve.data.resize(surface->size);
             const uint8_t* bgra = resolve_readback_scratch_.data();
             const size_t row_bytes = static_cast<size_t>(surface->width) * 4u;
-            for (uint32_t y = 0; y < surface->height; ++y) {
-                const uint32_t gl_y = surface->height - 1u - y;
-                std::memcpy(resolve.data.data() + static_cast<size_t>(y) * row_bytes,
-                            bgra + static_cast<size_t>(gl_y) * row_bytes,
-                            row_bytes);
+            // The flip into guest byte order is the third component of
+            // renderer_resolve_ns and is pure CPU work (beads-xbox.1.14.6).
+            perf::ScopedAdd copy_timer(g_gl_gpu.cpu_copy_ns,
+                                       g_gl_gpu_split_calls);
+            if (surface->swizzled) {
+                // Stage (f): a Morton-ordered destination scatters per pixel.
+                // The readback is GL_BGRA/GL_UNSIGNED_BYTE, whose byte order is
+                // already the guest A8R8G8B8 word's little-endian byte order,
+                // so this is a placement, not a conversion.
+                swizzle_tables_.ensure(surface->width, surface->height);
+                const uint32_t* sx = swizzle_tables_.x.data();
+                for (uint32_t y = 0; y < surface->height; ++y) {
+                    const uint32_t gl_y = surface->height - 1u - y;
+                    const uint8_t* row = bgra + static_cast<size_t>(gl_y) * row_bytes;
+                    const uint32_t yb = swizzle_tables_.y[y];
+                    for (uint32_t x = 0; x < surface->width; ++x) {
+                        std::memcpy(resolve.data.data() +
+                                        static_cast<size_t>(sx[x] | yb) * 4u,
+                                    row + static_cast<size_t>(x) * 4u, 4u);
+                    }
+                }
+            } else {
+                for (uint32_t y = 0; y < surface->height; ++y) {
+                    const uint32_t gl_y = surface->height - 1u - y;
+                    std::memcpy(resolve.data.data() + static_cast<size_t>(y) * row_bytes,
+                                bgra + static_cast<size_t>(gl_y) * row_bytes,
+                                row_bytes);
+                }
             }
         }
         surface->dirty = false;
+        surface->dirty_rect.reset();
         return true;
     }
     bool resolve_resident_depth_surface(uint32_t address, size_t size,
                                         Nv2aResidentDepthResolve& resolve,
                                         std::string& error) override {
+        if (!flush_witnessed_batch_for(address, size, error)) return false;
+        if (!take_witnessed_flush_error(error)) return false;
         resolve = {};
         if (size == 0) return true;
         ResidentSurface* surface = nullptr;
@@ -2062,14 +3040,11 @@ public:
         SDL_Window* previous_window = SDL_GL_GetCurrentWindow();
         SDL_GLContext previous_context = SDL_GL_GetCurrentContext();
         {
-            const auto make_current_started = std::chrono::steady_clock::now();
-            const bool make_current_ok = SDL_GL_MakeCurrent(window_, context_);
-            perf::record_gl_context_site(
-                perf::kGlContextDepthResolveEnter,
-                static_cast<uint64_t>(
-                    std::chrono::duration_cast<std::chrono::nanoseconds>(
-                        std::chrono::steady_clock::now() - make_current_started)
-                    .count()));
+            bool make_current_ok;
+            {
+                perf::ScopedGlContextTimer gl_timer(perf::kGlContextDepthResolveEnter);
+                make_current_ok = SDL_GL_MakeCurrent(window_, context_);
+            }
             if (!make_current_ok) {
                 error = std::string("OpenGL resident depth resolve context lost: ") +
                         SDL_GetError();
@@ -2087,39 +3062,161 @@ public:
             }
         } restore{previous_window, previous_context, window_,
                   perf::kGlContextDepthResolveRestore};
-        std::vector<uint32_t> gl_depth(static_cast<size_t>(surface->width) *
-                                       surface->height);
+        // Recycled across resolves for the same reason color_resolve_scratch_ is:
+        // a fresh multi-megabyte zero-filled vector per resolve is pure waste,
+        // and every element is overwritten by the readback below.
+        std::vector<uint32_t>& gl_depth = depth_readback_scratch_;
+        gl_depth.resize(static_cast<size_t>(surface->width) * surface->height);
         cache_bind_framebuffer(resident_fbo_);
+        // Same rule, the other way round: pair the zeta plane with ITS OWN
+        // colour texture so the effective framebuffer size is the surface's.
+        cache_framebuffer_color_texture(resident_fbo_, surface->texture);
         cache_framebuffer_depth_texture(resident_fbo_, surface->depth_texture);
         pixel_store_i_(kGlPackAlignment, 4);
-        read_pixels_(0, 0, static_cast<int>(surface->width),
-                     static_cast<int>(surface->height), kGlDepthStencil,
-                     kGlUnsignedInt248, gl_depth.data());
+        gpu_timed_resolve_read_pixels(
+            0, 0, static_cast<int>(surface->width),
+            static_cast<int>(surface->height), kGlDepthStencil,
+            kGlUnsignedInt248, gl_depth.data(),
+            static_cast<uint64_t>(surface->width) * surface->height * 4ull,
+            surface->depth_dirty_rect.bytes(4u));
         if (get_error_() != kGlNoError) {
             error = "OpenGL resident zeta readback failed";
             return false;
         }
         resolve.address = surface->depth_address;
-        gl_d24s8_to_guest(gl_depth, resolve.data, surface->width,
-                          surface->height);
+        {
+            perf::ScopedAdd copy_timer(g_gl_gpu.cpu_copy_ns,
+                                       g_gl_gpu_split_calls);
+            if (surface->swizzled) {
+                // The Morton map is a bijection onto [0, w*h) exactly when
+                // both extents are powers of two, which is when every guest
+                // word below is written. Where it is not, the zero fill is what
+                // keeps an unwritten hole from carrying bytes of a previous
+                // resolve, so it stays -- guarded rather than removed.
+                resize_or_zero(resolve.data,
+                               static_cast<size_t>(surface->width) *
+                                   surface->height * sizeof(uint32_t),
+                               surface->width, surface->height);
+                swizzle_tables_.ensure(surface->width, surface->height);
+                const uint32_t* sx = swizzle_tables_.x.data();
+                for (uint32_t y = 0; y < surface->height; ++y) {
+                    const uint32_t gl_y = surface->height - 1u - y;
+                    const uint32_t* src_row =
+                        gl_depth.data() + static_cast<size_t>(gl_y) * surface->width;
+                    const uint32_t yb = swizzle_tables_.y[y];
+                    for (uint32_t x = 0; x < surface->width; ++x) {
+                        const uint32_t word = src_row[x];
+                        std::memcpy(resolve.data.data() +
+                                        static_cast<size_t>(sx[x] | yb) * 4u,
+                                    &word, sizeof(word));
+                    }
+                }
+            } else {
+                gl_d24s8_to_guest(gl_depth, resolve.data, surface->width,
+                                  surface->height);
+            }
+        }
         surface->depth_dirty = false;
+        surface->depth_dirty_rect.reset();
         return true;
     }
-    void invalidate_resident_color_surface(uint32_t address, size_t size) override {
+    void invalidate_resident_color_surface(uint32_t address, size_t size,
+                                           uint32_t cause) override {
         if (size == 0) return;
+        flush_witnessed_batch_for_deferred(address, size);
         for (auto& surface : resident_surfaces_) {
             if (resident_overlaps(surface, address, size)) {
                 surface.valid = false;
                 surface.dirty = false;
+                surface.dirty_rect.reset();
+                note_invalidate_extent(
+                    witnessed_upload_census_.color_invalidate_extent, cause,
+                    surface.address, surface.size, address, size);
+                stamp_invalidate(color_stamps_, surface.address, cause);
                 if (active_resident_ == &surface) active_resident_ = nullptr;
             }
         }
+    }
+    // beads-xbox.1.15.10 step 1 (overlap). Issue whatever is pending and let
+    // the driver submit it. flush_witnessed_batch already ends in a glFlush, so
+    // there is never GL work left unsubmitted after this returns; when the
+    // batch is empty the call is two compares. Called from Nv2a at the frame
+    // boundary so a partial batch at the end of a residency run starts on the
+    // GPU immediately rather than waiting for the next consumer.
+    void kick_pending_gpu_work() override {
+        if (witnessed_batch_count_ == 0) return;
+        ++witnessed_flush_kick_;
+        flush_witnessed_batch_deferred();
+    }
+    void set_witnessed_flush_triangles(uint64_t triangles) override {
+        witnessed_flush_triangles_ = triangles;
+    }
+    void set_witnessed_kick_flush(bool on) override {
+        witnessed_kick_flush_ = on;
+    }
+    // The programs are compiled during renderer startup, which happens before
+    // the host has parsed its command line, so switching variants means
+    // recompiling. That is two shader compiles and a link, once.
+    bool set_witnessed_fp32_shader(bool on, std::string& error) override {
+        if (on == witnessed_fp32_shader_) return true;
+        witnessed_fp32_shader_ = on;
+        if (!witnessed_available_) return true;
+        if (!enter_witnessed_context(error)) return false;
+        if (witnessed_radial_program_ && delete_program_) {
+            uniform_location_cache_.erase(witnessed_radial_program_);
+            delete_program_(witnessed_radial_program_);
+            witnessed_radial_program_ = 0;
+        }
+        if (witnessed_textured_program_ && delete_program_) {
+            uniform_location_cache_.erase(witnessed_textured_program_);
+            delete_program_(witnessed_textured_program_);
+            witnessed_textured_program_ = 0;
+        }
+        if (witnessed_projected_program_ && delete_program_) {
+            uniform_location_cache_.erase(witnessed_projected_program_);
+            delete_program_(witnessed_projected_program_);
+            witnessed_projected_program_ = 0;
+        }
+        // A rebuilt program invalidates the cached "which program is bound"
+        // mirror and every cached uniform value on it.
+        witnessed_bound_program_ = 0;
+        witnessed_radial_.uniforms_valid = false;
+        witnessed_textured_.uniforms_valid = false;
+        witnessed_projected_.uniforms_valid = false;
+        if (!compile_witnessed_programs(error)) {
+            witnessed_available_ = false;
+            return false;
+        }
+        return true;
+    }
+    void set_witnessed_plane_split(bool on) override {
+        witnessed_plane_split_ = on;
+    }
+    void set_witnessed_ssbo_ring(uint32_t slots) override {
+        if (slots < 1) slots = 1;
+        if (slots > kWitnessedSsboRingMax)
+            slots = static_cast<uint32_t>(kWitnessedSsboRingMax);
+        witnessed_ssbo_ring_size_ = slots;
+    }
+    WitnessedFlushStats witnessed_flush_stats() const override {
+        WitnessedFlushStats s;
+        s.size_flushes = witnessed_flush_size_;
+        s.kick_flushes = witnessed_flush_kick_;
+        s.gl_flushes = witnessed_gl_flushes_;
+        s.bound = witnessed_flush_triangles_;
+        s.ssbo_ring = witnessed_ssbo_ring_size_;
+        s.kick_flush = witnessed_kick_flush_;
+        s.fp32_shader = witnessed_fp32_shader_;
+        s.plane_split = witnessed_plane_split_;
+        return s;
     }
     bool supports_resident_color_region_upload() const override { return true; }
     bool upload_resident_color_rows(
         uint32_t address, size_t size, uint32_t key_pitch, uint32_t height,
         uint32_t format, uint32_t first_row, uint32_t last_row,
         const std::vector<uint8_t>& guest_bytes, std::string& error) override {
+        perf_excl::Scope gl_region(perf_excl::kNv2aGl);
+        if (!flush_witnessed_batch_for(address, size, error)) return false;
         ResidentSurface* surface =
             find_resident_surface(address, size, key_pitch, height, format);
         if (!surface || !surface->valid) {
@@ -2155,14 +3252,11 @@ public:
         SDL_Window* previous_window = SDL_GL_GetCurrentWindow();
         SDL_GLContext previous_context = SDL_GL_GetCurrentContext();
         {
-            const auto make_current_started = std::chrono::steady_clock::now();
-            const bool make_current_ok = SDL_GL_MakeCurrent(window_, context_);
-            perf::record_gl_context_site(
-                perf::kGlContextRegionUploadEnter,
-                static_cast<uint64_t>(
-                    std::chrono::duration_cast<std::chrono::nanoseconds>(
-                        std::chrono::steady_clock::now() - make_current_started)
-                    .count()));
+            bool make_current_ok;
+            {
+                perf::ScopedGlContextTimer gl_timer(perf::kGlContextRegionUploadEnter);
+                make_current_ok = SDL_GL_MakeCurrent(window_, context_);
+            }
             if (!make_current_ok) {
                 error = std::string("OpenGL resident region context lost: ") +
                         SDL_GetError();
@@ -2187,10 +3281,11 @@ public:
             gl_state_.unit2d_binding[0] = surface->texture;
         }
         pixel_store_i_(kGlUnpackAlignment, 1);
-        tex_sub_image_2d_(kGlTexture2D, 0, 0,
-                          static_cast<int>(surface_rows - 1 - last_row),
-                          static_cast<int>(width), static_cast<int>(rows),
-                          kGlBgra, kGlUnsignedByte, region_staging_.data());
+        gpu_timed_tex_sub_image_2d(
+            kGlTexture2D, 0, 0,
+            static_cast<int>(surface_rows - 1 - last_row),
+            static_cast<int>(width), static_cast<int>(rows), kGlBgra,
+            kGlUnsignedByte, region_staging_.data());
         if (get_error_() != kGlNoError) {
             error = "OpenGL resident color region upload failed";
             return false;
@@ -2202,17 +3297,28 @@ public:
             if (resident_overlaps(other, address, size)) {
                 other.valid = false;
                 other.dirty = false;
+                other.dirty_rect.reset();
+                stamp_invalidate(
+                    color_stamps_, other.address,
+                    nv2a_invalidate_token(kNv2aInvalidateRegionOverlap));
                 if (active_resident_ == &other) active_resident_ = nullptr;
             }
         }
         return true;
     }
-    void invalidate_resident_depth_surface(uint32_t address, size_t size) override {
+    void invalidate_resident_depth_surface(uint32_t address, size_t size,
+                                           uint32_t cause) override {
+        flush_witnessed_batch_for_deferred(address, size);
         if (size == 0) return;
         for (auto& surface : resident_surfaces_) {
             if (resident_depth_overlaps(surface, address, size)) {
                 surface.depth_valid = false;
                 surface.depth_dirty = false;
+                surface.depth_dirty_rect.reset();
+                note_invalidate_extent(
+                    witnessed_upload_census_.depth_invalidate_extent, cause,
+                    surface.depth_address, surface.depth_size, address, size);
+                stamp_invalidate(depth_stamps_, surface.depth_address, cause);
                 if (active_depth_resident_ == &surface) active_depth_resident_ = nullptr;
             }
         }
@@ -2220,17 +3326,17 @@ public:
     bool submit_generic_combiner(const Nv2aGenericCombinerPacket& packet,
                                  Nv2aGenericCombinerResult& result,
                                  std::string& error) override {
+        if (!flush_witnessed_batch(error)) return false;
+        if (!take_witnessed_flush_error(error)) return false;
+        perf_excl::Scope gl_region(perf_excl::kNv2aGl);
         SDL_Window* previous_window = SDL_GL_GetCurrentWindow();
         SDL_GLContext previous_context = SDL_GL_GetCurrentContext();
         {
-            const auto make_current_started = std::chrono::steady_clock::now();
-            const bool make_current_ok = SDL_GL_MakeCurrent(window_, context_);
-            perf::record_gl_context_site(
-                perf::kGlContextComputeSubmitEnter,
-                static_cast<uint64_t>(
-                    std::chrono::duration_cast<std::chrono::nanoseconds>(
-                        std::chrono::steady_clock::now() - make_current_started)
-                    .count()));
+            bool make_current_ok;
+            {
+                perf::ScopedGlContextTimer gl_timer(perf::kGlContextComputeSubmitEnter);
+                make_current_ok = SDL_GL_MakeCurrent(window_, context_);
+            }
             if (!make_current_ok) {
                 error = std::string("OpenGL compute context lost: ") + SDL_GetError();
                 return false;
@@ -2265,9 +3371,9 @@ public:
             auto upload_buffer = [&](unsigned int binding, unsigned int buffer,
                                      const void* data, size_t size) {
                 bind_buffer_(kGlShaderStorageBuffer, buffer);
-                buffer_data_(kGlShaderStorageBuffer,
-                             static_cast<std::ptrdiff_t>(size), data,
-                             kGlDynamicCopy);
+                gpu_timed_buffer_data(kGlShaderStorageBuffer,
+                                      static_cast<std::ptrdiff_t>(size), data,
+                                      kGlDynamicCopy);
                 bind_buffer_base_(kGlShaderStorageBuffer, binding, buffer);
             };
             std::vector<float> vertex_data(packet.vertices.size() * 5u, 0.0f);
@@ -2313,8 +3419,9 @@ public:
             uniform_1ui_(cached_uniform_location(primary_color_program_,
                                            "color_format_x8"),
                          packet.fixture_color_format_x8 ? 1u : 0u);
-            dispatch_compute_(((packet.surface_pitch & 0xffffu) / 4u + 7u) / 8u,
-                              (packet.surface_height + 7u) / 8u, 1);
+            gpu_timed_dispatch_compute(
+                ((packet.surface_pitch & 0xffffu) / 4u + 7u) / 8u,
+                (packet.surface_height + 7u) / 8u, 1);
             memory_barrier_(kGlShaderStorageBarrierBit | kGlBufferUpdateBarrierBit);
             if (get_error_() != kGlNoError) {
                 error = "OpenGL primary-color fixture dispatch failed";
@@ -2366,8 +3473,9 @@ public:
             auto upload_buffer = [&](unsigned int binding, unsigned int buffer,
                                      const void* data, size_t size) {
                 bind_buffer_(kGlShaderStorageBuffer, buffer);
-                buffer_data_(kGlShaderStorageBuffer, static_cast<std::ptrdiff_t>(size),
-                             data, kGlDynamicCopy);
+                gpu_timed_buffer_data(kGlShaderStorageBuffer,
+                                      static_cast<std::ptrdiff_t>(size), data,
+                                      kGlDynamicCopy);
                 bind_buffer_base_(kGlShaderStorageBuffer, binding, buffer);
             };
             std::vector<float> vertex_data(packet.vertices.size() * 8u, 0.0f);
@@ -2553,8 +3661,9 @@ public:
                         static_cast<int>(kTextureComputeTileSize));
             uniform_1i_(cached_uniform_location(texture_modulate_program_, "tile_cols"),
                         static_cast<int>(tile_cols));
-            dispatch_compute_(((packet.surface_pitch & 0xffffu) / 4u + 7u) / 8u,
-                              (packet.surface_height + 7u) / 8u, 1);
+            gpu_timed_dispatch_compute(
+                ((packet.surface_pitch & 0xffffu) / 4u + 7u) / 8u,
+                (packet.surface_height + 7u) / 8u, 1);
             memory_barrier_(kGlShaderStorageBarrierBit | kGlBufferUpdateBarrierBit);
             if (get_error_() != kGlNoError) {
                 error = "OpenGL texture-modulate fixture dispatch failed";
@@ -2591,8 +3700,9 @@ public:
             auto upload_buffer = [&](unsigned int binding, unsigned int buffer,
                                      const void* data, size_t size) {
                 bind_buffer_(kGlShaderStorageBuffer, buffer);
-                buffer_data_(kGlShaderStorageBuffer, static_cast<std::ptrdiff_t>(size),
-                             data, kGlDynamicCopy);
+                gpu_timed_buffer_data(kGlShaderStorageBuffer,
+                                      static_cast<std::ptrdiff_t>(size), data,
+                                      kGlDynamicCopy);
                 bind_buffer_base_(kGlShaderStorageBuffer, binding, buffer);
             };
             std::vector<float> vertex_data(4u * 4u * 4u, 0.0f);
@@ -2636,7 +3746,7 @@ public:
                          packet.fixture_factor0_stage2_argb);
             uniform_1ui_(cached_uniform_location(dashboard_program_, "factor_stage4"),
                          packet.fixture_factor0_stage4_argb);
-            dispatch_compute_((1280 + 7) / 8, (480 + 7) / 8, 1);
+            gpu_timed_dispatch_compute((1280 + 7) / 8, (480 + 7) / 8, 1);
             memory_barrier_(kGlShaderStorageBarrierBit | kGlBufferUpdateBarrierBit);
             if (get_error_() != kGlNoError) {
                 error = "OpenGL dashboard fixture dispatch failed";
@@ -2667,9 +3777,10 @@ public:
         unsigned int buffer = 0;
         gen_buffers_(1, &buffer);
         bind_buffer_(kGlShaderStorageBuffer, buffer);
-        buffer_data_(kGlShaderStorageBuffer,
-                     static_cast<std::ptrdiff_t>(packet.color_input.size()),
-                     packet.color_input.data(), kGlDynamicCopy);
+        gpu_timed_buffer_data(
+            kGlShaderStorageBuffer,
+            static_cast<std::ptrdiff_t>(packet.color_input.size()),
+            packet.color_input.data(), kGlDynamicCopy);
         bind_buffer_base_(kGlShaderStorageBuffer, 0, buffer);
         use_program_(fixture_program_);
         uniform_1i_(cached_uniform_location(fixture_program_, "surface_width"),
@@ -2692,8 +3803,8 @@ public:
                     static_cast<int>(packet.fixture_clip_height));
         uniform_1ui_(cached_uniform_location(fixture_program_, "source_argb"),
                      packet.fixture_source_argb);
-        dispatch_compute_(((packet.surface_pitch & 0xffffu) / 4 + 7) / 8,
-                          (packet.surface_height + 7) / 8, 1);
+        gpu_timed_dispatch_compute(((packet.surface_pitch & 0xffffu) / 4 + 7) / 8,
+                                   (packet.surface_height + 7) / 8, 1);
         memory_barrier_(kGlShaderStorageBarrierBit | kGlBufferUpdateBarrierBit);
         if (get_error_() != kGlNoError) {
             delete_buffers_(1, &buffer);
@@ -2780,6 +3891,38 @@ public:
             error = "OpenGL 4.3 compute fixture is missing a required entry point";
             return false;
         }
+        // beads-xbox.1.14.6: GPU timing is OPTIONAL. A driver without timer
+        // queries or sync objects must still render; the report then carries
+        // gpu_timing_available=0 so an empty GPU column is never misread as
+        // "the GPU did no work".
+        gpu_timing_available_ =
+            load_gl(gen_queries_, "glGenQueries") &&
+            load_gl(delete_queries_, "glDeleteQueries") &&
+            load_gl(begin_query_, "glBeginQuery") &&
+            load_gl(end_query_, "glEndQuery") &&
+            load_gl(get_query_object_uiv_, "glGetQueryObjectuiv") &&
+            load_gl(get_query_object_ui64v_, "glGetQueryObjectui64v") &&
+            load_gl(fence_sync_, "glFenceSync") &&
+            load_gl(client_wait_sync_, "glClientWaitSync") &&
+            load_gl(delete_sync_, "glDeleteSync");
+        // Separate from the conjunction above on purpose: glFinish is core GL 1.0
+        // and its absence must not turn GPU timing off.
+        load_gl(finish_, "glFinish");
+        load_gl(flush_, "glFlush");
+        // Stage (f): the witnessed-profile GPU executor is OPTIONAL in exactly
+        // the way GPU timing is. A driver missing any of these still renders
+        // everything through the software path; the device-side predicate asks
+        // supports_witnessed_profile() and gets false.
+        witnessed_available_ =
+            load_gl(clear_, "glClear") &&
+            load_gl(clear_color_, "glClearColor") &&
+            load_gl(clear_depth_, "glClearDepth") &&
+            load_gl(clear_stencil_, "glClearStencil") &&
+            load_gl(stencil_mask_, "glStencilMask") &&
+            load_gl(uniform_3f_, "glUniform3f") &&
+            load_gl(buffer_sub_data_, "glBufferSubData");
+        g_gl_gpu.gpu_timing_available.store(gpu_timing_available_ ? 1u : 0u,
+                                           std::memory_order_relaxed);
         if (!(compile_fixture(error) && compile_primary_color(error) &&
               compile_texture_modulate(error) && compile_dashboard(error) &&
               compile_resident_primary(error) &&
@@ -2787,6 +3930,18 @@ public:
               compile_resident_texture_modulate(error) &&
               compile_resident_dashboard(error))) {
             return false;
+        }
+        if (witnessed_available_) {
+            std::string witnessed_error;
+            if (!compile_witnessed_programs(witnessed_error)) {
+                // Not fatal: the witnessed GPU executor turns itself off and
+                // says why once, and every draw keeps taking the software path.
+                witnessed_available_ = false;
+                std::fprintf(stderr,
+                             "[nv2a-renderer] witnessed-profile GPU executor "
+                             "unavailable: %s\n",
+                             witnessed_error.c_str());
+            }
         }
         prime_gl_state_cache();
         return true;
@@ -2831,12 +3986,47 @@ public:
         gl_state_.valid = true;
     }
 private:
+    // Union of the scissor rects written to a resident surface since it last
+    // resolved (beads-xbox.1.14.6). dirty_surface_pixels already reports how
+    // big the surface is; this reports how small the readback COULD be, which
+    // is the number a scissored readback has to beat. Maintained only under
+    // --perf-accounting.
+    struct DirtyRect {
+        uint32_t x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+        bool any = false;
+        void reset() { *this = DirtyRect{}; }
+        void add(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+            if (w == 0 || h == 0) return;
+            const uint32_t nx1 = x + w;
+            const uint32_t ny1 = y + h;
+            if (!any) {
+                x0 = x; y0 = y; x1 = nx1; y1 = ny1; any = true;
+                return;
+            }
+            if (x < x0) x0 = x;
+            if (y < y0) y0 = y;
+            if (nx1 > x1) x1 = nx1;
+            if (ny1 > y1) y1 = ny1;
+        }
+        uint64_t bytes(uint32_t bytes_per_pixel) const {
+            if (!any) return 0;
+            return static_cast<uint64_t>(x1 - x0) * (y1 - y0) * bytes_per_pixel;
+        }
+    };
     struct ResidentSurface {
         bool valid = false;
         bool dirty = false;
         bool depth_valid = false;
         bool depth_dirty = false;
+        DirtyRect dirty_rect;
+        DirtyRect depth_dirty_rect;
         bool x8 = false;
+        // Stage (f): a witnessed swizzled colour surface (SET_SURFACE_FORMAT
+        // type 2) stores its guest pixels in Morton order, not row-major. The
+        // GL image is always linear and bottom-up; this flag is what the upload
+        // and the resolve use to map between them, so one resident cache and
+        // one resolve seam serve both destination layouts.
+        bool swizzled = false;
         unsigned int texture = 0;
         unsigned int depth_texture = 0;
         unsigned int depth_word_texture = 0;
@@ -2851,6 +4041,35 @@ private:
         uint32_t depth_pitch = 0;
         uint32_t depth_height = 0;
         uint32_t depth_format = 0;
+        // beads-xbox.1.15.10 step 3 (upload staging). The dimensions the GL
+        // texture storage was actually allocated with, which is NOT the same as
+        // width/height above: those describe the guest surface currently mapped
+        // to this slot and are updated on every upload, while these change only
+        // when glTexImage2D re-specifies storage. A re-upload of the same
+        // geometry can then be a glTexSubImage2D, which reuses the allocation
+        // instead of dropping and re-creating it.
+        uint32_t tex_alloc_w = 0;
+        uint32_t tex_alloc_h = 0;
+        uint32_t depth_alloc_w = 0;
+        uint32_t depth_alloc_h = 0;
+    };
+    // beads-xbox.1.15.10 phase 3. Who dropped a plane's residency last, keyed
+    // by the GUEST ADDRESS of that plane rather than by the slot, because a
+    // slot is reused for different surfaces and a slot-keyed stamp would then
+    // attribute one surface's break to another's consumer. A miss is reported
+    // as `cold`, so an undersized table cannot silently misattribute -- it can
+    // only show up as cold uploads, which is a visible, checkable number.
+    // 256, not 32. The table is shared with every GENERIC resident surface,
+    // and the canonical run touches far more than 32 distinct addresses: at 32
+    // it overflowed, table[0] was recycled, and 343 of 647 colour uploads came
+    // back as `cold` when the invalidation that caused them had in fact been
+    // recorded. The overflow counter below makes that failure visible instead
+    // of silently mislabelling the census.
+    static constexpr size_t kInvalidateStampSlots = 256;
+    struct InvalidateStamp {
+        bool used = false;
+        uint32_t address = 0;
+        uint32_t token = 0;
     };
     struct CachedBuffer {
         unsigned int buffer = 0;
@@ -2918,14 +4137,207 @@ private:
         }
         return nullptr;
     }
-    ResidentSurface* find_reusable_resident_slot() {
-        for (auto& surface : resident_surfaces_) {
-            if (!surface.valid && !surface.depth_dirty) return &surface;
+    void stamp_invalidate(
+        std::array<InvalidateStamp, kInvalidateStampSlots>& table,
+        uint32_t address, uint32_t token) {
+        for (auto& entry : table) {
+            if (entry.used && entry.address == address) {
+                entry.token = token;
+                return;
+            }
         }
-        for (auto& surface : resident_surfaces_) {
-            if (!surface.dirty && !surface.depth_dirty) return &surface;
+        for (auto& entry : table) {
+            if (!entry.used) {
+                entry.used = true;
+                entry.address = address;
+                entry.token = token;
+                return;
+            }
+        }
+        // Table full: overwrite slot 0, and SAY SO. A census that quietly
+        // mislabels its biggest bucket is the failure class this audit exists
+        // to catch.
+        ++stamp_overflows_;
+        table[0].address = address;
+        table[0].token = token;
+    }
+    static uint32_t take_invalidate_stamp(
+        std::array<InvalidateStamp, kInvalidateStampSlots>& table,
+        uint32_t address) {
+        for (auto& entry : table) {
+            if (entry.used && entry.address == address) {
+                entry.used = false;
+                return entry.token;
+            }
+        }
+        return nv2a_invalidate_token(kNv2aInvalidateCold);
+    }
+    static void note_invalidate_extent(
+        std::array<std::array<uint64_t, 3>, kNv2aInvalidateCauseSlots>& table,
+        uint32_t token, uint32_t plane_address, size_t plane_size,
+        uint32_t address, size_t size) {
+        size_t cause = nv2a_invalidate_token_cause(token);
+        if (cause >= kNv2aInvalidateCauseSlots) cause = kNv2aInvalidateOther;
+        const uint64_t p0 = plane_address;
+        const uint64_t p1 = p0 + plane_size;
+        const uint64_t r0 = address;
+        const uint64_t r1 = r0 + size;
+        size_t bucket = 2;
+        if (r0 == p0 && r1 == p1) bucket = 0;
+        else if (r0 <= p0 && r1 >= p1) bucket = 1;
+        ++table[cause][bucket];
+    }
+    static void note_upload_cause(
+        std::array<std::array<uint64_t, kNv2aInvalidateProfileSlots>,
+                   kNv2aInvalidateCauseSlots>& counts,
+        std::array<std::array<uint64_t, kNv2aInvalidateProfileSlots>,
+                   kNv2aInvalidateCauseSlots>& bytes,
+        uint32_t token, uint64_t amount) {
+        size_t cause = nv2a_invalidate_token_cause(token);
+        size_t profile = nv2a_invalidate_token_profile(token);
+        if (cause >= kNv2aInvalidateCauseSlots) cause = kNv2aInvalidateOther;
+        if (profile >= kNv2aInvalidateProfileSlots) profile = 0;
+        ++counts[cause][profile];
+        bytes[cause][profile] += amount;
+    }
+    // The witnessed depth key. Deliberately (address, size) and NOT the full
+    // five-field key find_resident_depth_surface uses: the witnessed path
+    // uploads a zeta plane with the packet's COLOUR pitch/height/format words,
+    // so a plane made resident by the generic path under its own words would
+    // miss the full key and be re-uploaded over a possibly dirty image. This is
+    // the same key the pre-phase-4 zeta fallback used, kept verbatim so the set
+    // of planes that count as resident does not move with this change.
+    ResidentSurface* find_witnessed_depth_slot(uint32_t depth_address,
+                                               size_t size) {
+        for (auto& candidate : resident_surfaces_) {
+            if (candidate.depth_valid &&
+                candidate.depth_address == depth_address &&
+                candidate.depth_size == size) {
+                return &candidate;
+            }
         }
         return nullptr;
+    }
+    const ResidentSurface* find_witnessed_depth_slot(uint32_t depth_address,
+                                                     size_t size) const {
+        for (const auto& candidate : resident_surfaces_) {
+            if (candidate.depth_valid &&
+                candidate.depth_address == depth_address &&
+                candidate.depth_size == size) {
+                return &candidate;
+            }
+        }
+        return nullptr;
+    }
+    // The ONE slot-selection rule, shared by ensure_witnessed_surface (which
+    // acts on it) and witnessed_target_residency (which reports it). They used
+    // to be two separate predicates and the reporting one answered a coarser
+    // question -- both planes or neither -- which is what made the device read
+    // a resident plane out of guest memory for nothing.
+    //
+    // beads-xbox.1.15.10 phase 4 (lever C): THE TWO PLANES ARE LOOKED UP
+    // INDEPENDENTLY. The previous rule found the colour slot and, on a colour
+    // miss, fell back to a slot whose ZETA matched -- and ensure_witnessed_surface
+    // then wrote this packet's colour over whatever different, still-valid colour
+    // that slot held. Measured at 342 of 647 colour re-uploads (686.0 MB) per
+    // canonical 12 B run: two colour surfaces sharing one zeta plane ping-ponged
+    // through a single slot. The capacity knob was TRIED AND DISPROVED (8 -> 16
+    // changed the census by exactly nothing). The real fix is here: a colour
+    // plane and a zeta plane are separate resident images with separate keys and
+    // separate dirty flags, so they get separate slots and the FBO is assembled
+    // from both -- exactly what the generic path (ensure_resident_surface +
+    // ensure_resident_depth_surface) has always done.
+    void select_witnessed_slots(uint32_t color_address, size_t size,
+                                uint32_t pitch, uint32_t height,
+                                uint32_t format, uint32_t depth_address,
+                                const ResidentSurface*& color_slot,
+                                const ResidentSurface*& depth_slot,
+                                bool& colour_resident,
+                                bool& depth_resident) const {
+        color_slot =
+            find_resident_surface(color_address, size, pitch, height, format);
+        colour_resident = color_slot != nullptr;
+        depth_slot = find_witnessed_depth_slot(depth_address, size);
+        depth_resident = depth_slot != nullptr;
+        if (witnessed_plane_split_) return;
+        // The PRE-PHASE-4 rule, restored verbatim so the change is a
+        // same-binary A/B (--no-nv2a-gpu-plane-split). ONE slot serves both
+        // planes: on a colour miss the ZETA key picks the slot, and the colour
+        // is then written over whatever different colour surface that slot
+        // still held. `colour_resident` stays false in that case -- the
+        // fallback slot is where the colour will LAND, not where it already is
+        // -- which is exactly what the old two-value predicate reported.
+        const ResidentSurface* slot = colour_resident ? color_slot : depth_slot;
+        color_slot = slot;
+        depth_slot = slot;
+        depth_resident = slot != nullptr && slot->depth_valid &&
+                         slot->depth_address == depth_address &&
+                         slot->depth_size == size;
+    }
+    ResidentSurface* find_reusable_resident_slot() {
+        for (auto& surface : resident_surfaces_) {
+            if (!surface.valid && !surface.depth_dirty)
+                return note_slot_reuse(surface);
+        }
+        for (auto& surface : resident_surfaces_) {
+            if (!surface.dirty && !surface.depth_dirty)
+                return note_slot_reuse(surface);
+        }
+        return nullptr;
+    }
+    // Per-plane acquisition for the witnessed path. `exclude` is the slot the
+    // OTHER plane of this packet already owns and must therefore not be
+    // recycled out from under it.
+    //
+    // These are deliberately weaker than find_reusable_resident_slot, and the
+    // difference is the point: taking a slot's COLOUR does not touch its zeta,
+    // so a dirty zeta is no reason to refuse the slot, and vice versa. The old
+    // pair-scoped predicate required both planes clean and is what made a
+    // colour upload evict a clean colour plane rather than land on a free slot.
+    ResidentSurface* acquire_color_slot(const ResidentSurface* exclude) {
+        for (auto& surface : resident_surfaces_) {
+            if (&surface == exclude) continue;
+            if (!surface.valid) return note_color_slot_reuse(surface);
+        }
+        for (auto& surface : resident_surfaces_) {
+            if (&surface == exclude) continue;
+            if (!surface.dirty) return note_color_slot_reuse(surface);
+        }
+        return nullptr;
+    }
+    ResidentSurface* acquire_depth_slot(const ResidentSurface* exclude) {
+        for (auto& surface : resident_surfaces_) {
+            if (&surface == exclude) continue;
+            if (!surface.depth_valid) return note_depth_slot_reuse(surface);
+        }
+        for (auto& surface : resident_surfaces_) {
+            if (&surface == exclude) continue;
+            if (!surface.depth_dirty) return note_depth_slot_reuse(surface);
+        }
+        return nullptr;
+    }
+    // A slot handed out for a DIFFERENT surface silently ends the residency of
+    // whatever clean image it still held. That is a residency break with no
+    // invalidation behind it, so without this stamp its re-upload is reported
+    // as `cold` and looks like a first touch.
+    ResidentSurface* note_slot_reuse(ResidentSurface& surface) {
+        note_color_slot_reuse(surface);
+        note_depth_slot_reuse(surface);
+        return &surface;
+    }
+    ResidentSurface* note_color_slot_reuse(ResidentSurface& surface) {
+        if (surface.valid) {
+            stamp_invalidate(color_stamps_, surface.address,
+                             nv2a_invalidate_token(kNv2aInvalidateEvicted));
+        }
+        return &surface;
+    }
+    ResidentSurface* note_depth_slot_reuse(ResidentSurface& surface) {
+        if (surface.depth_valid) {
+            stamp_invalidate(depth_stamps_, surface.depth_address,
+                             nv2a_invalidate_token(kNv2aInvalidateEvicted));
+        }
+        return &surface;
     }
     static bool resident_overlaps(const ResidentSurface& surface, uint32_t address,
                                   size_t size) {
@@ -3084,9 +4496,16 @@ private:
         guest_words_to_rgba(packet.color_input, rgba, width, height,
                             packet.fixture_color_format_x8);
         pixel_store_i_(kGlUnpackAlignment, 1);
-        tex_image_2d_(kGlTexture2D, 0, kGlRgba8, static_cast<int>(width),
-                      static_cast<int>(height), 0, kGlRgba, kGlUnsignedByte,
-                      rgba.data());
+        gpu_timed_tex_image_2d(kGlTexture2D, 0, kGlRgba8,
+                               static_cast<int>(width),
+                               static_cast<int>(height), 0, kGlRgba,
+                               kGlUnsignedByte, rgba.data());
+        // beads-xbox.1.15.10 step 3. This path RE-SPECIFIES the slot's colour
+        // storage, and the witnessed path decides between glTexSubImage2D and
+        // glTexImage2D from these two fields. Leaving them stale here would let
+        // a later witnessed upload sub-image into storage of a different size.
+        slot->tex_alloc_w = width;
+        slot->tex_alloc_h = height;
         if (!resident_fbo_) gen_framebuffers_(1, &resident_fbo_);
         cache_bind_framebuffer(resident_fbo_);
         cache_framebuffer_color_texture(resident_fbo_, slot->texture);
@@ -3100,6 +4519,7 @@ private:
         }
         slot->valid = true;
         slot->dirty = false;
+        slot->dirty_rect.reset();
         slot->x8 = packet.fixture_color_format_x8;
         slot->address = packet.color_address;
         slot->size = size;
@@ -3167,16 +4587,23 @@ private:
         guest_d24s8_to_gl(packet.depth_input, gl_depth, width, height);
         cache_bind_texture_unit(kGlTexture0, slot.depth_word_texture);
         pixel_store_i_(kGlUnpackAlignment, 4);
-        tex_image_2d_(kGlTexture2D, 0, kGlR32ui,
-                      static_cast<int>(width), static_cast<int>(height), 0,
-                      kGlRedInteger, kGlUnsignedInt, gl_depth.data());
+        gpu_timed_tex_image_2d(kGlTexture2D, 0, kGlR32ui,
+                               static_cast<int>(width),
+                               static_cast<int>(height), 0, kGlRedInteger,
+                               kGlUnsignedInt, gl_depth.data());
         cache_bind_texture_unit(kGlTexture0, slot.depth_texture);
         pixel_store_i_(kGlUnpackAlignment, 4);
-        tex_image_2d_(kGlTexture2D, 0, kGlDepth24Stencil8,
-                      static_cast<int>(width), static_cast<int>(height), 0,
-                      kGlDepthStencil, kGlUnsignedInt248, gl_depth.data());
+        gpu_timed_tex_image_2d(kGlTexture2D, 0, kGlDepth24Stencil8,
+                               static_cast<int>(width),
+                               static_cast<int>(height), 0, kGlDepthStencil,
+                               kGlUnsignedInt248, gl_depth.data());
+        // Same reason as the colour plane above: this re-specifies the zeta
+        // storage the witnessed path's sub-image decision keys on.
+        slot.depth_alloc_w = width;
+        slot.depth_alloc_h = height;
         slot.depth_valid = true;
         slot.depth_dirty = false;
+        slot.depth_dirty_rect.reset();
         slot.depth_address = packet.depth_address;
         slot.depth_size = size;
         slot.depth_pitch = packet.surface_pitch;
@@ -3309,6 +4736,681 @@ private:
                                         resident_texture_modulate_program_,
                                         error);
     }
+    // ============ stage (f) witnessed-profile GPU helpers ==================
+    // Injects `#define WP_FP32 0|1` immediately after the shader's `#version`
+    // line -- the only place a #define may go and still precede every use. The
+    // define is ALWAYS emitted, so a source that spells `#if WP_FP32` cannot
+    // silently take the wrong branch on an undefined name.
+    std::string witnessed_fp32_source(const char* source) const {
+        std::string out(source);
+        const size_t newline = out.find('\n');
+        const char* define =
+            witnessed_fp32_shader_ ? "#define WP_FP32 1\n" : "#define WP_FP32 0\n";
+        out.insert(newline == std::string::npos ? out.size() : newline + 1,
+                   define);
+        return out;
+    }
+    bool compile_witnessed_programs(std::string& error) {
+        static_assert(sizeof(witnessed_gl::RadialTriRecord) == 224,
+                      "RadialTriRecord must match the std430 array stride");
+        static_assert(sizeof(witnessed_gl::TexturedTriRecord) == 288,
+                      "TexturedTriRecord must match the std430 array stride");
+        static_assert(offsetof(witnessed_gl::RadialTriRecord, recip) == 192,
+                      "RadialTriRecord.recip must sit on the dvec4 boundary");
+        static_assert(offsetof(witnessed_gl::TexturedTriRecord, recip) == 256,
+                      "TexturedTriRecord.recip must sit on the dvec4 boundary");
+        // The leading 160 bytes are written once through the radial view in
+        // submit_witnessed_profile, so the two records must agree on them.
+        static_assert(offsetof(witnessed_gl::RadialTriRecord, t2) ==
+                          offsetof(witnessed_gl::TexturedTriRecord, t2),
+                      "witnessed triangle records must share their common half");
+        // beads-xbox.1.15.10 step 2 (FP64 removal). ONE source per stage with a
+        // WP_FP32 switch injected after the #version line, so the two variants
+        // cannot drift apart the way two copies would; the SSBO record is
+        // byte-identical either way (the FP32 body reads the float reciprocals
+        // out of `wv`, the FP64 body the doubles out of `recip`).
+        const std::string radial_vs =
+            witnessed_fp32_source(witnessed_gl::kRadialVertexSource);
+        const std::string radial_fs =
+            witnessed_fp32_source(witnessed_gl::kRadialFragmentSource);
+        const std::string textured_vs =
+            witnessed_fp32_source(witnessed_gl::kTexturedVertexSource);
+        const std::string textured_fs =
+            witnessed_fp32_source(witnessed_gl::kTexturedFragmentSource);
+        // beads-xbox.1.15.10 phase 4 (lever A). The projected program shares
+        // the TEXTURED VERTEX SHADER verbatim -- same record, same 288-byte
+        // std430 stride, same six-vertex wide-triangle expansion -- so only the
+        // fragment stage differs.
+        const std::string projected_fs =
+            witnessed_fp32_source(witnessed_gl::kProjectedFragmentSource);
+        if (!compile_graphics_program(radial_vs.c_str(), radial_fs.c_str(),
+                                      "witnessed-radial",
+                                      witnessed_radial_program_, error)) {
+            return false;
+        }
+        if (!compile_graphics_program(textured_vs.c_str(), textured_fs.c_str(),
+                                      "witnessed-textured",
+                                      witnessed_textured_program_, error)) {
+            return false;
+        }
+        if (!compile_graphics_program(textured_vs.c_str(), projected_fs.c_str(),
+                                      "witnessed-projected",
+                                      witnessed_projected_program_, error)) {
+            return false;
+        }
+        gen_vertex_arrays_(1, &witnessed_vao_);
+        if (!witnessed_vao_) {
+            error = "OpenGL witnessed vertex array allocation failed";
+            return false;
+        }
+        auto bind_uniforms = [this](WitnessedProgram& wp, unsigned int program,
+                                    bool textured, bool projected) {
+            wp.program = program;
+            wp.loc_surface_size = uniform_location_(program, "surface_size");
+            wp.loc_clip_min = uniform_location_(program, "clip_min");
+            wp.loc_clip_max = uniform_location_(program, "clip_max");
+            if (textured) {
+                wp.loc_texture0 = uniform_location_(program, "texture0");
+                wp.loc_texture_size = uniform_location_(program, "texture_size");
+                wp.loc_weight0 = uniform_location_(program, "weight0");
+                wp.loc_weight1 = uniform_location_(program, "weight1");
+            }
+            if (projected) {
+                wp.loc_texture1 = uniform_location_(program, "texture1");
+                wp.loc_projected_texture_size =
+                    uniform_location_(program, "projected_texture_size");
+            }
+            wp.uniforms_valid = false;
+        };
+        bind_uniforms(witnessed_radial_, witnessed_radial_program_, false,
+                      false);
+        bind_uniforms(witnessed_textured_, witnessed_textured_program_, true,
+                      false);
+        bind_uniforms(witnessed_projected_, witnessed_projected_program_, true,
+                      true);
+        return true;
+    }
+
+    // The GL context is made current ONCE and left current. The previous
+    // pattern -- make current, draw, restore -- unbinds the context on every
+    // submit, and at ~80 k submits per 2 G instructions the bind/unbind pair
+    // dominated the whole executor. Leaving a context current is not observable
+    // by any other consumer: everything in this process that uses GL makes its
+    // own context current first, which is what the restore was protecting.
+    bool enter_witnessed_context(std::string& error) {
+        if (SDL_GL_GetCurrentContext() == context_) return true;
+        perf::ScopedAdd timer(perf::g_ns_renderer_resident_context,
+                              perf::g_calls_renderer_resident_context);
+        if (!SDL_GL_MakeCurrent(window_, context_)) {
+            error = std::string("OpenGL witnessed context lost: ") +
+                    SDL_GetError();
+            witnessed_context_owned_ = false;
+            return false;
+        }
+        // Something else held the context between two submits, so neither the
+        // mirrored GL state nor the bound program and its uniforms can be
+        // trusted. Dropping every mirror here is what makes leaving the context
+        // current safe rather than merely fast.
+        if (witnessed_context_owned_) invalidate_gl_state_cache();
+        witnessed_bound_program_ = 0;
+        witnessed_radial_.uniforms_valid = false;
+        witnessed_textured_.uniforms_valid = false;
+        witnessed_projected_.uniforms_valid = false;
+        witnessed_fixed_state_ = false;
+        witnessed_context_owned_ = true;
+        return true;
+    }
+
+    static uint32_t witnessed_swizzle_index(uint32_t x, uint32_t y,
+                                            uint32_t width, uint32_t height) {
+        // Identical to SwizzleLookup (nv2a.hpp) and to the swizzle_index()
+        // already present in this file's compute shaders: interleave the x and
+        // y bits, low bit first, skipping the axis that has run out of bits.
+        uint32_t result = 0;
+        uint32_t output_bit = 1;
+        for (uint32_t input_bit = 1;
+             input_bit < width || input_bit < height; input_bit <<= 1) {
+            if (input_bit < width) {
+                if (x & input_bit) result |= output_bit;
+                output_bit <<= 1;
+            }
+            if (input_bit < height) {
+                if (y & input_bit) result |= output_bit;
+                output_bit <<= 1;
+            }
+        }
+        return result;
+    }
+    // beads-xbox.1.15.10 step 3 (upload/resolve staging). witnessed_swizzle_index
+    // ORs bits derived from x into output positions that are DISJOINT from the
+    // ones it ORs bits of y into -- that is what interleaving means -- so
+    //     index(x, y) == index(x, 0) | index(0, y)
+    // identically, for every (x, y, width, height), including the ragged case
+    // where one axis runs out of bits first. Two tables therefore replace an
+    // eleven-iteration bit loop per pixel with a load and an OR. The tables are
+    // rebuilt only when the geometry changes, which on this workload is never
+    // after the first upload of each surface.
+    static bool is_power_of_two(uint32_t v) { return v != 0 && (v & (v - 1)) == 0; }
+    // Sizes a staging/destination buffer for a full-surface rewrite. When the
+    // Morton map covers every element (both extents powers of two) or the
+    // layout is linear, resize is enough and the zero fill of a multi-megabyte
+    // vector is pure cost; otherwise the fill is required, because the holes
+    // would otherwise carry bytes from a previous surface.
+    template <typename T>
+    static void resize_or_zero(std::vector<T>& buffer, size_t elements,
+                               uint32_t width, uint32_t height) {
+        if (is_power_of_two(width) && is_power_of_two(height)) {
+            buffer.resize(elements);
+        } else {
+            buffer.assign(elements, T{});
+        }
+    }
+    std::vector<uint32_t> depth_readback_scratch_;
+    struct SwizzleTables {
+        uint32_t width = 0;
+        uint32_t height = 0;
+        std::vector<uint32_t> x;
+        std::vector<uint32_t> y;
+        void ensure(uint32_t w, uint32_t h) {
+            if (width == w && height == h && x.size() == w && y.size() == h)
+                return;
+            width = w;
+            height = h;
+            x.resize(w);
+            y.resize(h);
+            for (uint32_t i = 0; i < w; ++i)
+                x[i] = witnessed_swizzle_index(i, 0, w, h);
+            for (uint32_t j = 0; j < h; ++j)
+                y[j] = witnessed_swizzle_index(0, j, w, h);
+        }
+    };
+    SwizzleTables swizzle_tables_;
+    // (beads-xbox.1.15.10 step 3: witnessed_guest_pixel, the per-pixel
+    // "which guest pixel is (x, y)" helper, is deleted. Every one of its five
+    // call sites was the inner statement of a full-surface loop, and each is
+    // now either a row memcpy -- the pitch layout only ever needed the vertical
+    // flip -- or a lookup in the separable Morton tables above.)
+
+    bool ensure_witnessed_texture(const Nv2aWitnessedProfilePacket& packet,
+                                  Nv2aWitnessedProfileResult& result,
+                                  std::string& error) {
+        if (witnessed_texture_ && witnessed_texture_hash_ == packet.texture_hash &&
+            witnessed_texture_width_ == packet.texture_width &&
+            witnessed_texture_height_ == packet.texture_height) {
+            return true;   // same bytes as last upload; nothing to send
+        }
+        if (!witnessed_texture_) {
+            gen_textures_(1, &witnessed_texture_);
+            if (!witnessed_texture_) {
+                error = "OpenGL witnessed texture allocation failed";
+                return false;
+            }
+            cache_bind_texture_unit(kGlTexture0, witnessed_texture_);
+            tex_parameter_i_(kGlTexture2D, kGlTextureMinFilter, kGlNearest);
+            tex_parameter_i_(kGlTexture2D, kGlTextureMagFilter, kGlNearest);
+            tex_parameter_i_(kGlTexture2D, kGlTextureWrapS, kGlClampToEdge);
+            tex_parameter_i_(kGlTexture2D, kGlTextureWrapT, kGlClampToEdge);
+        } else {
+            cache_bind_texture_unit(kGlTexture0, witnessed_texture_);
+        }
+        // packet.texture_linear is already unswizzled by the device (it owns the
+        // SwizzleLookup) and holds guest A8R8G8B8 words, so the byte shuffle is
+        // the same one guest_words_to_rgba does.
+        const size_t pixels = static_cast<size_t>(packet.texture_width) *
+                              packet.texture_height;
+        if (packet.texture_linear.size() != pixels * 4u) {
+            error = "OpenGL witnessed texture snapshot has the wrong size";
+            return false;
+        }
+        // beads-xbox.1.15.10 step 3. The guest A8R8G8B8 words are already in
+        // GL_BGRA byte order, so the shuffle-into-a-staging-buffer step is
+        // deleted outright and the snapshot is uploaded in place; and an
+        // unchanged geometry re-uploads through glTexSubImage2D.
+        pixel_store_i_(kGlUnpackAlignment, 4);
+        if (witnessed_texture_alloc_w_ == packet.texture_width &&
+            witnessed_texture_alloc_h_ == packet.texture_height) {
+            gpu_timed_tex_sub_image_2d(kGlTexture2D, 0, 0, 0,
+                                       static_cast<int>(packet.texture_width),
+                                       static_cast<int>(packet.texture_height),
+                                       kGlBgra, kGlUnsignedByte,
+                                       packet.texture_linear.data());
+        } else {
+            gpu_timed_tex_image_2d(kGlTexture2D, 0, kGlRgba8,
+                                   static_cast<int>(packet.texture_width),
+                                   static_cast<int>(packet.texture_height), 0,
+                                   kGlBgra, kGlUnsignedByte,
+                                   packet.texture_linear.data());
+            witnessed_texture_alloc_w_ = packet.texture_width;
+            witnessed_texture_alloc_h_ = packet.texture_height;
+        }
+        if (get_error_() != kGlNoError) {
+            error = "OpenGL witnessed texture upload failed";
+            return false;
+        }
+        witnessed_texture_hash_ = packet.texture_hash;
+        witnessed_texture_width_ = packet.texture_width;
+        witnessed_texture_height_ = packet.texture_height;
+        result.texture_upload_bytes = pixels * 4u;
+        return true;
+    }
+
+    // beads-xbox.1.15.10 phase 4 (lever A). kPitchProjectedColor's stage-0
+    // image, on texture unit 1. A separate object and a separate upload cache
+    // from the cube image above: the two are different guest ranges with
+    // different addressing modes, and sharing one slot would make every
+    // alternation between the projected and textured programs re-upload both.
+    // The upload itself is the same transform -- guest A8R8G8B8 words are
+    // already GL_BGRA bytes, so the snapshot goes in place -- and an unchanged
+    // geometry re-uploads through glTexSubImage2D.
+    bool ensure_witnessed_projected_texture(
+        const Nv2aWitnessedProfilePacket& packet,
+        Nv2aWitnessedProfileResult& result, std::string& error) {
+        if (witnessed_projected_texture_ &&
+            witnessed_projected_texture_hash_ ==
+                packet.projected_texture_hash &&
+            witnessed_projected_texture_width_ ==
+                packet.projected_texture_width &&
+            witnessed_projected_texture_height_ ==
+                packet.projected_texture_height) {
+            return true;
+        }
+        if (!witnessed_projected_texture_) {
+            gen_textures_(1, &witnessed_projected_texture_);
+            if (!witnessed_projected_texture_) {
+                error = "OpenGL witnessed projected texture allocation failed";
+                return false;
+            }
+            cache_bind_texture_unit(kGlTexture1, witnessed_projected_texture_);
+            // texelFetch ignores every one of these; they are set so the object
+            // is never left in a state a future sampler read would surprise on.
+            tex_parameter_i_(kGlTexture2D, kGlTextureMinFilter, kGlNearest);
+            tex_parameter_i_(kGlTexture2D, kGlTextureMagFilter, kGlNearest);
+            tex_parameter_i_(kGlTexture2D, kGlTextureWrapS, kGlRepeat);
+            tex_parameter_i_(kGlTexture2D, kGlTextureWrapT, kGlRepeat);
+        } else {
+            cache_bind_texture_unit(kGlTexture1, witnessed_projected_texture_);
+        }
+        const size_t pixels =
+            static_cast<size_t>(packet.projected_texture_width) *
+            packet.projected_texture_height;
+        if (packet.projected_texture_linear.size() != pixels * 4u) {
+            error =
+                "OpenGL witnessed projected texture snapshot has the wrong size";
+            cache_bind_texture_unit(kGlTexture0, witnessed_texture_);
+            return false;
+        }
+        pixel_store_i_(kGlUnpackAlignment, 4);
+        if (witnessed_projected_texture_alloc_w_ ==
+                packet.projected_texture_width &&
+            witnessed_projected_texture_alloc_h_ ==
+                packet.projected_texture_height) {
+            gpu_timed_tex_sub_image_2d(
+                kGlTexture2D, 0, 0, 0,
+                static_cast<int>(packet.projected_texture_width),
+                static_cast<int>(packet.projected_texture_height), kGlBgra,
+                kGlUnsignedByte, packet.projected_texture_linear.data());
+        } else {
+            gpu_timed_tex_image_2d(
+                kGlTexture2D, 0, kGlRgba8,
+                static_cast<int>(packet.projected_texture_width),
+                static_cast<int>(packet.projected_texture_height), 0, kGlBgra,
+                kGlUnsignedByte, packet.projected_texture_linear.data());
+            witnessed_projected_texture_alloc_w_ =
+                packet.projected_texture_width;
+            witnessed_projected_texture_alloc_h_ =
+                packet.projected_texture_height;
+        }
+        // Leave unit 0 active: every other site in this file binds without
+        // selecting a unit first and would otherwise land on unit 1.
+        cache_bind_texture_unit(kGlTexture0, witnessed_texture_);
+        if (get_error_() != kGlNoError) {
+            error = "OpenGL witnessed projected texture upload failed";
+            return false;
+        }
+        witnessed_projected_texture_hash_ = packet.projected_texture_hash;
+        witnessed_projected_texture_width_ = packet.projected_texture_width;
+        witnessed_projected_texture_height_ = packet.projected_texture_height;
+        result.texture_upload_bytes += pixels * 4u;
+        return true;
+    }
+
+    bool ensure_witnessed_surface(const Nv2aWitnessedProfilePacket& packet,
+                                  ResidentSurface*& out,
+                                  ResidentSurface*& out_depth,
+                                  Nv2aWitnessedProfileResult& result,
+                                  std::string& error) {
+        const uint32_t width = packet.surface_width;
+        const uint32_t height = packet.surface_height;
+        // A slot is OURS if EITHER plane still matches. The colour and the zeta
+        // plane are invalidated independently -- a CPU draw of a profile that
+        // reads depth without writing it invalidates only the colour -- so a
+        // slot can be colour-invalid while still holding the authoritative,
+        // DIRTY zeta image. Matching on the colour key alone then sent the next
+        // upload to a different slot and left two resident copies of the same
+        // zeta range, and resolve_resident_depth_surface takes the first dirty
+        // match: the stale one won and the depth the guest read back was one
+        // epoch old. That is a silent depth corruption whose symptom is large
+        // smooth colour differences inside a single frame, which is exactly what
+        // the 4.0 G checkpoint showed.
+        //
+        // beads-xbox.1.15.10 phase 3: the selection is now ONE function, shared
+        // with witnessed_target_residency, so the device's per-plane snapshot
+        // decision cannot drift from what this does with it.
+        //
+        // beads-xbox.1.15.10 phase 4 (lever C): and the two planes are selected
+        // INDEPENDENTLY. `slot` (colour) and `depth_slot` may be different
+        // entries; the FBO is then assembled from both, which is what the
+        // generic resident path has always done. See select_witnessed_slots.
+        const ResidentSurface* found_color = nullptr;
+        const ResidentSurface* found_depth = nullptr;
+        bool colour_resident = false;
+        bool depth_resident = false;
+        select_witnessed_slots(packet.color_address, packet.surface_size,
+                               packet.surface_pitch, packet.surface_height,
+                               packet.surface_format, packet.depth_address,
+                               found_color, found_depth, colour_resident,
+                               depth_resident);
+        ResidentSurface* slot =
+            colour_resident ? const_cast<ResidentSurface*>(found_color)
+                            : nullptr;
+        ResidentSurface* depth_slot =
+            depth_resident ? const_cast<ResidentSurface*>(found_depth)
+                           : nullptr;
+        // Legacy arm only: the zeta-key fallback slot is where the colour will
+        // LAND, so it is carried past the residency test as the landing slot.
+        ResidentSurface* legacy_slot =
+            witnessed_plane_split_
+                ? nullptr
+                : const_cast<ResidentSurface*>(found_color);
+        if (colour_resident && depth_resident) {
+            out = slot;
+            out_depth = depth_slot;
+            active_resident_ = slot;
+            active_depth_resident_ = depth_slot;
+            if (slot != depth_slot) ++witnessed_upload_census_.plane_split_hits;
+            return true;
+        }
+        // Only the planes that are NOT already resident are uploaded. Uploading
+        // a dirty resident zeta from guest memory would discard GPU-side depth
+        // writes that no resolve has moved back yet.
+        const bool upload_colour = !colour_resident;
+        const bool upload_depth = !depth_resident;
+        if ((upload_colour && packet.color_input.size() != packet.surface_size) ||
+            (upload_depth && packet.depth_input.size() != packet.surface_size)) {
+            error = "OpenGL witnessed draw missing its initial surface snapshot";
+            return false;
+        }
+        if (!slot) {
+            if (!witnessed_plane_split_) {
+                // Pre-phase-4: the zeta-key fallback slot, else any reusable
+                // slot, and the colour is written over whatever it held.
+                slot = legacy_slot ? legacy_slot : find_reusable_resident_slot();
+            } else if (depth_slot && !depth_slot->valid) {
+                // Prefer the slot the zeta already lives in, but ONLY when its
+                // colour half is free. Taking it while it holds a different
+                // valid colour is precisely the 342-takeover defect this
+                // replaces.
+                slot = note_color_slot_reuse(*depth_slot);
+            } else {
+                slot = acquire_color_slot(depth_slot);
+            }
+            if (!slot) {
+                error = "OpenGL resident surface cache is full of dirty targets";
+                return false;
+            }
+        }
+        if (!depth_slot && !witnessed_plane_split_) {
+            depth_slot = slot;
+        }
+        if (!depth_slot) {
+            // The colour slot is the preferred home for the zeta -- one slot,
+            // one FBO pair, and the common case stays exactly as it was. It is
+            // refused only when that would overwrite a DIRTY zeta plane of a
+            // different guest range, which would discard GPU depth writes no
+            // resolve has moved back.
+            if (!slot->depth_valid || !slot->depth_dirty ||
+                (slot->depth_address == packet.depth_address &&
+                 slot->depth_size == packet.surface_size)) {
+                depth_slot = note_depth_slot_reuse(*slot);
+            } else {
+                depth_slot = acquire_depth_slot(slot);
+            }
+            if (!depth_slot) {
+                error = "OpenGL resident surface cache is full of dirty targets";
+                return false;
+            }
+        }
+        if (slot != depth_slot) ++witnessed_upload_census_.plane_split_uploads;
+        if (!slot->texture) {
+            gen_textures_(1, &slot->texture);
+            if (!slot->texture) {
+                error = "OpenGL witnessed colour texture allocation failed";
+                return false;
+            }
+            cache_bind_texture_unit(kGlTexture0, slot->texture);
+            tex_parameter_i_(kGlTexture2D, kGlTextureMinFilter, kGlNearest);
+            tex_parameter_i_(kGlTexture2D, kGlTextureMagFilter, kGlNearest);
+            tex_parameter_i_(kGlTexture2D, kGlTextureWrapS, kGlClampToEdge);
+            tex_parameter_i_(kGlTexture2D, kGlTextureWrapT, kGlClampToEdge);
+        } else {
+            cache_bind_texture_unit(kGlTexture0, slot->texture);
+        }
+        if (upload_colour) {
+        // Colour: guest words (linear or Morton) -> bottom-up image, the same
+        // storage convention guest_words_to_rgba establishes for the generic
+        // resident path, so one resolve path serves both.
+        //
+        // beads-xbox.1.15.10 step 3 (upload staging). Two changes, both exact:
+        //  * GL_BGRA, not GL_RGBA. A guest A8R8G8B8 word is little-endian, so
+        //    its bytes in memory are already B,G,R,A -- which is precisely what
+        //    GL_BGRA/GL_UNSIGNED_BYTE means. The per-pixel byte shuffle that
+        //    was here reordered them to R,G,B,A only to have the driver put
+        //    them back. The RESOLVE has always read back with GL_BGRA and
+        //    memcpy'd rows straight into guest words, so this makes the two
+        //    directions the same transform; the texels are unchanged.
+        //  * the pitch layout is a straight row copy. It only ever needed the
+        //    vertical flip, and calling witnessed_guest_pixel per pixel to
+        //    compute y*width+x cost 614 400 calls per 1280x480 upload.
+        // The Morton path keeps its per-pixel scatter -- there is no row
+        // structure to exploit -- but copies a 4-byte word instead of shuffling
+        // four bytes.
+        const size_t row_bytes = static_cast<size_t>(width) * 4u;
+        // The row copy reads [0, row_bytes*height) out of the snapshot, and the
+        // Morton scatter reads the same range through a permutation, so one
+        // check covers both. It was implicit before and is now stated, because
+        // the row copy would read past the end instead of indexing past it.
+        if (packet.color_input.size() < row_bytes * height) {
+            error = "OpenGL witnessed colour snapshot is smaller than its surface";
+            return false;
+        }
+        resize_or_zero(witnessed_surface_staging_, row_bytes * height,
+                       packet.swizzled_destination ? width : 1u,
+                       packet.swizzled_destination ? height : 1u);
+        uint8_t* dst_base = witnessed_surface_staging_.data();
+        const uint8_t* src_base = packet.color_input.data();
+        if (!packet.swizzled_destination) {
+            for (uint32_t y = 0; y < height; ++y) {
+                std::memcpy(dst_base + static_cast<size_t>(height - 1u - y) * row_bytes,
+                            src_base + static_cast<size_t>(y) * row_bytes,
+                            row_bytes);
+            }
+        } else {
+            swizzle_tables_.ensure(width, height);
+            const uint32_t* sx = swizzle_tables_.x.data();
+            for (uint32_t y = 0; y < height; ++y) {
+                uint8_t* row = dst_base +
+                               static_cast<size_t>(height - 1u - y) * row_bytes;
+                const uint32_t yb = swizzle_tables_.y[y];
+                for (uint32_t x = 0; x < width; ++x) {
+                    std::memcpy(row + static_cast<size_t>(x) * 4u,
+                                src_base + static_cast<size_t>(sx[x] | yb) * 4u,
+                                4u);
+                }
+            }
+        }
+        pixel_store_i_(kGlUnpackAlignment, 4);
+        // glTexImage2D RE-SPECIFIES storage: the driver drops the allocation
+        // and makes a new one on every upload. glTexSubImage2D reuses it, and
+        // the geometry is unchanged on all but the first upload into a slot.
+        if (slot->tex_alloc_w == width && slot->tex_alloc_h == height) {
+            gpu_timed_tex_sub_image_2d(kGlTexture2D, 0, 0, 0,
+                                       static_cast<int>(width),
+                                       static_cast<int>(height), kGlBgra,
+                                       kGlUnsignedByte,
+                                       witnessed_surface_staging_.data());
+        } else {
+            gpu_timed_tex_image_2d(kGlTexture2D, 0, kGlRgba8,
+                                   static_cast<int>(width),
+                                   static_cast<int>(height), 0, kGlBgra,
+                                   kGlUnsignedByte,
+                                   witnessed_surface_staging_.data());
+            slot->tex_alloc_w = width;
+            slot->tex_alloc_h = height;
+        }
+        }
+        if (!depth_slot->depth_texture) {
+            gen_textures_(1, &depth_slot->depth_texture);
+            if (!depth_slot->depth_texture) {
+                error = "OpenGL witnessed zeta texture allocation failed";
+                return false;
+            }
+            cache_bind_texture_unit(kGlTexture0, depth_slot->depth_texture);
+            tex_parameter_i_(kGlTexture2D, kGlTextureMinFilter, kGlNearest);
+            tex_parameter_i_(kGlTexture2D, kGlTextureMagFilter, kGlNearest);
+            tex_parameter_i_(kGlTexture2D, kGlTextureWrapS, kGlClampToEdge);
+            tex_parameter_i_(kGlTexture2D, kGlTextureWrapT, kGlClampToEdge);
+        } else {
+            cache_bind_texture_unit(kGlTexture0, depth_slot->depth_texture);
+        }
+        if (upload_depth) {
+        // Zeta: the guest word IS GL_UNSIGNED_INT_24_8, depth in the high 24
+        // bits and stencil in the low 8, so the plane needs only the layout and
+        // vertical flip -- no numeric conversion at all, in either direction.
+        // Same two changes as the colour plane: the pitch layout is a row copy
+        // (the flip is the whole of the transform), and an unchanged geometry
+        // re-uploads through glTexSubImage2D instead of re-specifying storage.
+        const size_t depth_row_words = static_cast<size_t>(width);
+        if (packet.depth_input.size() < depth_row_words * height * 4u) {
+            error = "OpenGL witnessed zeta snapshot is smaller than its surface";
+            return false;
+        }
+        resize_or_zero(witnessed_depth_staging_, depth_row_words * height,
+                       packet.swizzled_destination ? width : 1u,
+                       packet.swizzled_destination ? height : 1u);
+        uint32_t* depth_dst = witnessed_depth_staging_.data();
+        const uint8_t* depth_src = packet.depth_input.data();
+        if (!packet.swizzled_destination) {
+            for (uint32_t y = 0; y < height; ++y) {
+                std::memcpy(depth_dst +
+                                static_cast<size_t>(height - 1u - y) * depth_row_words,
+                            depth_src + static_cast<size_t>(y) * depth_row_words * 4u,
+                            depth_row_words * 4u);
+            }
+        } else {
+            swizzle_tables_.ensure(width, height);
+            const uint32_t* sx = swizzle_tables_.x.data();
+            for (uint32_t y = 0; y < height; ++y) {
+                uint32_t* row = depth_dst +
+                                static_cast<size_t>(height - 1u - y) * depth_row_words;
+                const uint32_t yb = swizzle_tables_.y[y];
+                for (uint32_t x = 0; x < width; ++x)
+                    std::memcpy(row + x,
+                                depth_src + static_cast<size_t>(sx[x] | yb) * 4u,
+                                4u);
+            }
+        }
+        pixel_store_i_(kGlUnpackAlignment, 4);
+        if (depth_slot->depth_alloc_w == width && depth_slot->depth_alloc_h == height) {
+            gpu_timed_tex_sub_image_2d(kGlTexture2D, 0, 0, 0,
+                                       static_cast<int>(width),
+                                       static_cast<int>(height),
+                                       kGlDepthStencil, kGlUnsignedInt248,
+                                       witnessed_depth_staging_.data());
+        } else {
+            gpu_timed_tex_image_2d(kGlTexture2D, 0, kGlDepth24Stencil8,
+                                   static_cast<int>(width),
+                                   static_cast<int>(height), 0, kGlDepthStencil,
+                                   kGlUnsignedInt248,
+                                   witnessed_depth_staging_.data());
+            depth_slot->depth_alloc_w = width;
+            depth_slot->depth_alloc_h = height;
+        }
+        }
+        if (!resident_fbo_) gen_framebuffers_(1, &resident_fbo_);
+        cache_bind_framebuffer(resident_fbo_);
+        cache_framebuffer_color_texture(resident_fbo_, slot->texture);
+        cache_framebuffer_depth_texture(resident_fbo_, depth_slot->depth_texture);
+        if (check_framebuffer_status_(kGlFramebuffer) != kGlFramebufferComplete) {
+            error = "OpenGL witnessed colour+zeta framebuffer is incomplete";
+            return false;
+        }
+        if (get_error_() != kGlNoError) {
+            error = "OpenGL witnessed surface upload failed";
+            return false;
+        }
+        if (upload_colour) {
+            // Overwriting a plane the GPU wrote and no resolve has moved back
+            // destroys guest-visible output. Counted, always on, so the CLEAR
+            // path above cannot lose a clear without saying so.
+            if (slot->valid && slot->dirty)
+                ++witnessed_upload_census_.upload_over_dirty_color;
+            if (slot->valid && slot->address == packet.color_address)
+                ++witnessed_upload_census_.color_key_mismatch;
+            // The slot still held a DIFFERENT colour surface. Writing this
+            // packet's colour into it ends that surface's residency with no
+            // invalidation behind it, which is why its next upload reports
+            // `cold`. Counted so the size of that path is a number.
+            if (slot->valid && slot->address != packet.color_address)
+                ++witnessed_upload_census_.color_slot_takeover;
+            note_upload_cause(witnessed_upload_census_.color_uploads,
+                              witnessed_upload_census_.color_bytes,
+                              take_invalidate_stamp(color_stamps_,
+                                                    packet.color_address),
+                              packet.surface_size);
+            slot->valid = true;
+            slot->dirty = false;
+            slot->dirty_rect.reset();
+            slot->x8 = false;
+            slot->swizzled = packet.swizzled_destination;
+            slot->address = packet.color_address;
+            slot->size = packet.surface_size;
+            slot->pitch = packet.surface_pitch;
+            slot->width = width;
+            slot->height = height;
+            slot->format = packet.surface_format;
+            result.color_upload_bytes = packet.surface_size;
+        }
+        if (upload_depth) {
+            if (depth_slot->depth_valid && depth_slot->depth_dirty)
+                ++witnessed_upload_census_.upload_over_dirty_depth;
+            if (depth_slot->depth_valid &&
+                depth_slot->depth_address == packet.depth_address)
+                ++witnessed_upload_census_.depth_key_mismatch;
+            if (depth_slot->depth_valid &&
+                depth_slot->depth_address != packet.depth_address)
+                ++witnessed_upload_census_.depth_slot_takeover;
+            note_upload_cause(witnessed_upload_census_.depth_uploads,
+                              witnessed_upload_census_.depth_bytes,
+                              take_invalidate_stamp(depth_stamps_,
+                                                    packet.depth_address),
+                              packet.surface_size);
+            depth_slot->depth_valid = true;
+            depth_slot->depth_dirty = false;
+            depth_slot->depth_dirty_rect.reset();
+            depth_slot->depth_address = packet.depth_address;
+            depth_slot->depth_size = packet.surface_size;
+            depth_slot->depth_pitch = packet.surface_pitch;
+            depth_slot->depth_height = packet.surface_height;
+            depth_slot->depth_format = packet.surface_format;
+            result.depth_upload_bytes = packet.surface_size;
+        }
+        active_resident_ = slot;
+        active_depth_resident_ = depth_slot;
+        out = slot;
+        out_depth = depth_slot;
+        return true;
+    }
+
     bool compile_resident_dashboard(std::string& error) {
         return compile_graphics_program(kResidentDashboardProject2dFanVertexSource,
                                         kResidentDashboardProject2dFanFragmentSource,
@@ -3330,8 +5432,23 @@ private:
     unsigned int resident_fbo_ = 0;
     unsigned int resident_vbo_ = 0;
     unsigned int resident_vao_ = 0;
+    // beads-xbox.1.15.10 phase 3: 16 was TRIED and is NULL. 342 of the 647
+    // colour re-uploads on the canonical 12 B run (686 MB) are slot TAKEOVERS
+    // -- ensure_witnessed_surface repurposing a slot that still holds a
+    // different VALID colour surface, reached through the zeta-key fallback --
+    // and doubling the cache changed the census by exactly nothing
+    // (takeover_color 342 either way, byte-identical upload and resolve
+    // tables). It is not capacity pressure: two colour surfaces are contending
+    // for ONE slot because the fallback matches on the zeta plane. Do not retry
+    // the capacity knob; fix the fallback to move the zeta to a free slot
+    // instead of stealing the colour. witnessed_upload_census()
+    // .color_slot_takeover is the number to watch.
     static constexpr size_t kMaxResidentSurfaces = 8;
     std::array<ResidentSurface, kMaxResidentSurfaces> resident_surfaces_{};
+    uint64_t stamp_overflows_ = 0;
+    std::array<InvalidateStamp, kInvalidateStampSlots> color_stamps_{};
+    std::array<InvalidateStamp, kInvalidateStampSlots> depth_stamps_{};
+    Nv2aWitnessedUploadCensus witnessed_upload_census_{};
     std::vector<uint8_t> region_staging_;
     // Recycled glReadPixels target for resident color resolves.
     std::vector<uint8_t> resolve_readback_scratch_;
@@ -3380,6 +5497,395 @@ private:
     GlDisableVertexAttribArray disable_vertex_attrib_array_ = nullptr;
     GlDrawArrays draw_arrays_ = nullptr; GlReadPixels read_pixels_ = nullptr;
     GlPixelStorei pixel_store_i_ = nullptr; GlGetError get_error_ = nullptr;
+
+    // ---- GPU-side timing (beads-xbox.1.14.6) -----------------------------
+    // Optional entry points; initialize() loads them after the required set and
+    // clears gpu_timing_available_ instead of failing when any is missing.
+    GlGenQueries gen_queries_ = nullptr;
+    GlDeleteQueries delete_queries_ = nullptr;
+    GlBeginQuery begin_query_ = nullptr;
+    GlEndQuery end_query_ = nullptr;
+    GlGetQueryObjectuiv get_query_object_uiv_ = nullptr;
+    GlGetQueryObjectui64v get_query_object_ui64v_ = nullptr;
+    GlFenceSync fence_sync_ = nullptr;
+    GlClientWaitSync client_wait_sync_ = nullptr;
+    GlDeleteSync delete_sync_ = nullptr;
+    GlFinish finish_ = nullptr;
+    GlFlush flush_ = nullptr;
+    // ---- stage (f) witnessed-profile GPU execution (beads-xbox.1.15.7) ----
+    GlClear clear_ = nullptr;
+    GlClearColor clear_color_ = nullptr;
+    GlClearDepth clear_depth_ = nullptr;
+    GlClearStencil clear_stencil_ = nullptr;
+    GlStencilMask stencil_mask_ = nullptr;
+    GlUniform3f uniform_3f_ = nullptr;
+    GlBufferSubData buffer_sub_data_ = nullptr;
+    bool witnessed_available_ = false;
+    bool witnessed_fixed_state_ = false;
+    bool witnessed_context_owned_ = false;
+    unsigned int witnessed_bound_program_ = 0;
+    // One cached uniform block per witnessed program. `uniforms_valid` is
+    // cleared whenever the program is rebound, because a foreign use_program
+    // between two submits would otherwise let a stale mirror suppress a needed
+    // write.
+    struct WitnessedProgram {
+        unsigned int program = 0;
+        int loc_surface_size = -1;
+        int loc_clip_min = -1;
+        int loc_clip_max = -1;
+        int loc_texture0 = -1;
+        int loc_texture_size = -1;
+        int loc_texture1 = -1;
+        int loc_projected_texture_size = -1;
+        int loc_weight0 = -1;
+        int loc_weight1 = -1;
+        bool uniforms_valid = false;
+        float surface_w = 0.0f, surface_h = 0.0f;
+        float clip_min = 0.0f, clip_max = 0.0f;
+        float texture_w = 0.0f, texture_h = 0.0f;
+        float proj_texture_w = 0.0f, proj_texture_h = 0.0f;
+        uint32_t factor0 = 0xFFFFFFFFu, factor1 = 0xFFFFFFFFu;
+    };
+    WitnessedProgram witnessed_radial_;
+    WitnessedProgram witnessed_textured_;
+    WitnessedProgram witnessed_projected_;
+    unsigned int witnessed_radial_program_ = 0;
+    unsigned int witnessed_textured_program_ = 0;
+    unsigned int witnessed_projected_program_ = 0;
+    // beads-xbox.1.15.10 step 1. ONE buffer name was enough while the batch was
+    // issued only at a resolve, because the resolve had already drained the GPU
+    // before the next glBufferData touched the buffer. Once the draws are
+    // flushed early the previous draw is still IN FLIGHT reading this buffer
+    // when the next batch refills it, and glBufferData then either orphans (a
+    // fresh multi-hundred-kilobyte allocation per flush) or waits. A small
+    // round-robin of buffer names removes both: by the time a name comes back
+    // around, ring_size-1 draws have been issued after it. Size 1 is the
+    // pre-step-1 behavior and is the bisection arm.
+    static constexpr size_t kWitnessedSsboRingMax = 16;
+    std::array<unsigned int, kWitnessedSsboRingMax> witnessed_ssbo_ring_{};
+    size_t witnessed_ssbo_ring_size_ = 1;
+    size_t witnessed_ssbo_ring_head_ = 0;
+    unsigned int witnessed_ssbo_ = 0;
+    size_t witnessed_ssbo_bytes_ = 0;
+    unsigned int witnessed_vao_ = 0;
+    unsigned int witnessed_texture_ = 0;
+    uint64_t witnessed_texture_hash_ = 0;
+    uint32_t witnessed_texture_width_ = 0;
+    uint32_t witnessed_texture_height_ = 0;
+    // beads-xbox.1.15.10 phase 4 (lever A): kPitchProjectedColor's second
+    // image. Its own object and its own upload cache, on texture unit 1, so a
+    // projected batch never re-uploads the cube image and vice versa.
+    unsigned int witnessed_projected_texture_ = 0;
+    uint64_t witnessed_projected_texture_hash_ = 0;
+    uint32_t witnessed_projected_texture_width_ = 0;
+    uint32_t witnessed_projected_texture_height_ = 0;
+    uint32_t witnessed_projected_texture_alloc_w_ = 0;
+    uint32_t witnessed_projected_texture_alloc_h_ = 0;
+    // Dimensions the witnessed texture's GL storage was allocated with; see
+    // ResidentSurface::tex_alloc_w. The staging vector the shuffle used is
+    // gone: the guest snapshot is uploaded in place as GL_BGRA.
+    uint32_t witnessed_texture_alloc_w_ = 0;
+    uint32_t witnessed_texture_alloc_h_ = 0;
+    std::vector<uint8_t> witnessed_surface_staging_;
+    std::vector<uint32_t> witnessed_depth_staging_;
+    std::vector<uint8_t> witnessed_records_;
+    // Everything the shader reads that is NOT in a triangle record. Two
+    // consecutive GPU jobs whose keys are equal are merged into one draw.
+    struct WitnessedBatchKey {
+        Nv2aWitnessedProfilePacket::Profile profile =
+            Nv2aWitnessedProfilePacket::Profile::kSwizzledRadialColor;
+        uint32_t color_address = 0;
+        uint32_t depth_address = 0;
+        size_t   surface_size = 0;
+        uint32_t surface_pitch = 0;
+        uint32_t surface_format = 0;
+        uint32_t surface_width = 0;
+        uint32_t surface_height = 0;
+        uint32_t xmin = 0, xmax = 0, ymin = 0, ymax = 0;
+        float clip_min = 0.0f, clip_max = 0.0f;
+        uint64_t texture_hash = 0;
+        uint32_t texture_width = 0, texture_height = 0;
+        // kPitchProjectedColor's second sampler; zero for the other profiles.
+        uint64_t projected_texture_hash = 0;
+        uint32_t projected_texture_width = 0, projected_texture_height = 0;
+        uint32_t factor0_stage6 = 0, factor1_stage6 = 0;
+        bool operator==(const WitnessedBatchKey& o) const {
+            return profile == o.profile && color_address == o.color_address &&
+                   depth_address == o.depth_address &&
+                   surface_size == o.surface_size &&
+                   surface_pitch == o.surface_pitch &&
+                   surface_format == o.surface_format &&
+                   surface_width == o.surface_width &&
+                   surface_height == o.surface_height && xmin == o.xmin &&
+                   xmax == o.xmax && ymin == o.ymin && ymax == o.ymax &&
+                   clip_min == o.clip_min && clip_max == o.clip_max &&
+                   texture_hash == o.texture_hash &&
+                   texture_width == o.texture_width &&
+                   texture_height == o.texture_height &&
+                   projected_texture_hash == o.projected_texture_hash &&
+                   projected_texture_width == o.projected_texture_width &&
+                   projected_texture_height == o.projected_texture_height &&
+                   factor0_stage6 == o.factor0_stage6 &&
+                   factor1_stage6 == o.factor1_stage6;
+        }
+    };
+    WitnessedBatchKey witnessed_batch_key_;
+    ResidentSurface* witnessed_batch_surface_ = nullptr;
+    ResidentSurface* witnessed_batch_depth_surface_ = nullptr;
+    size_t witnessed_batch_count_ = 0;
+    uint64_t witnessed_draw_calls_ = 0;
+    std::string witnessed_flush_error_;
+    // beads-xbox.1.15.10 step 1 (overlap). Triangle bound on the pending batch;
+    // 0 = unbounded, which is the pre-step-1 behavior. Set from the CLI through
+    // set_witnessed_flush_triangles.
+    uint64_t witnessed_flush_triangles_ = 0;
+    bool witnessed_kick_flush_ = true;
+    // beads-xbox.1.15.10 phase 4 (lever C). See set_witnessed_plane_split.
+    bool witnessed_plane_split_ = true;
+    bool witnessed_fp32_shader_ = false;
+    // Early-flush accounting, always on and free when the path is not taken, so
+    // "did the batch actually get issued early" is a measurement rather than an
+    // inference from the draw-call count.
+    uint64_t witnessed_flush_size_ = 0;    // issued because the bound was hit
+    uint64_t witnessed_flush_kick_ = 0;    // issued by kick_pending_gpu_work
+    uint64_t witnessed_gl_flushes_ = 0;    // glFlush calls that kicked a draw
+    bool gpu_timing_available_ = false;
+
+    enum class GpuTimerBucket : uint8_t { kDraw, kUpload, kResolve };
+    struct GpuQuerySlot {
+        unsigned int id = 0;
+        bool in_flight = false;
+        GpuTimerBucket bucket = GpuTimerBucket::kDraw;
+    };
+    // Ring of GL_TIME_ELAPSED query objects. Results are harvested in issue
+    // order and only once GL_QUERY_RESULT_AVAILABLE says so, so collecting them
+    // never blocks the emulation thread on the GPU (PRINCIPLES section 7: read
+    // the buffer, do not arm-and-wait). A full ring drops the sample.
+    std::array<GpuQuerySlot, kGpuQueryRingSize> gpu_query_ring_{};
+    size_t gpu_query_head_ = 0;
+    size_t gpu_query_live_ = 0;
+    bool gpu_query_active_ = false;
+
+    bool gpu_timing_active() const {
+        return gpu_timing_available_ && perf::g_enabled;
+    }
+
+    // Collects finished queries in issue order. `block` is used once, from the
+    // destructor, where GL_QUERY_RESULT waits for the last few submissions
+    // rather than throwing them away.
+    void harvest_gpu_queries(bool block) {
+        while (gpu_query_live_ > 0) {
+            const size_t tail =
+                (gpu_query_head_ + kGpuQueryRingSize - gpu_query_live_) %
+                kGpuQueryRingSize;
+            GpuQuerySlot& slot = gpu_query_ring_[tail];
+            if (!slot.in_flight || slot.id == 0) {
+                slot.in_flight = false;
+                --gpu_query_live_;
+                continue;
+            }
+            if (!block) {
+                unsigned int available = 0;
+                get_query_object_uiv_(slot.id, kGlQueryResultAvailable,
+                                      &available);
+                if (!available) return;
+            }
+            uint64_t elapsed = 0;
+            get_query_object_ui64v_(slot.id, kGlQueryResult, &elapsed);
+            switch (slot.bucket) {
+                case GpuTimerBucket::kDraw:
+                    g_gl_gpu.gpu_draw_ns.fetch_add(elapsed,
+                                                   std::memory_order_relaxed);
+                    g_gl_gpu.gpu_draw_n.fetch_add(1, std::memory_order_relaxed);
+                    break;
+                case GpuTimerBucket::kUpload:
+                    g_gl_gpu.gpu_upload_ns.fetch_add(elapsed,
+                                                     std::memory_order_relaxed);
+                    g_gl_gpu.gpu_upload_n.fetch_add(1,
+                                                    std::memory_order_relaxed);
+                    break;
+                case GpuTimerBucket::kResolve:
+                    g_gl_gpu.gpu_resolve_ns.fetch_add(elapsed,
+                                                      std::memory_order_relaxed);
+                    g_gl_gpu.gpu_resolve_n.fetch_add(1,
+                                                     std::memory_order_relaxed);
+                    break;
+            }
+            slot.in_flight = false;
+            --gpu_query_live_;
+        }
+    }
+
+    // Opens one GL_TIME_ELAPSED region. Returns false -- and the caller then
+    // must NOT call gpu_timer_end() -- when timing is off, when the ring is
+    // full, or when a query is already active: GL permits only one
+    // GL_TIME_ELAPSED query at a time, so a site entered inside another is
+    // counted under nested_skipped instead of raising GL_INVALID_OPERATION,
+    // which the get_error_() checks in the submit paths would turn into a
+    // spurious draw failure.
+    bool gpu_timer_begin(GpuTimerBucket bucket) {
+        if (!gpu_timing_active()) return false;
+        if (gpu_query_active_) {
+            g_gl_gpu.nested_skipped.fetch_add(1, std::memory_order_relaxed);
+            return false;
+        }
+        harvest_gpu_queries(/*block=*/false);
+        if (gpu_query_live_ >= kGpuQueryRingSize) {
+            g_gl_gpu.queries_dropped.fetch_add(1, std::memory_order_relaxed);
+            return false;
+        }
+        GpuQuerySlot& slot = gpu_query_ring_[gpu_query_head_];
+        if (slot.id == 0) {
+            gen_queries_(1, &slot.id);
+            if (slot.id == 0) {
+                g_gl_gpu.queries_dropped.fetch_add(1, std::memory_order_relaxed);
+                return false;
+            }
+        }
+        slot.bucket = bucket;
+        begin_query_(kGlTimeElapsed, slot.id);
+        gpu_query_active_ = true;
+        return true;
+    }
+
+    void gpu_timer_end() {
+        end_query_(kGlTimeElapsed);
+        gpu_query_ring_[gpu_query_head_].in_flight = true;
+        gpu_query_head_ = (gpu_query_head_ + 1) % kGpuQueryRingSize;
+        ++gpu_query_live_;
+        gpu_query_active_ = false;
+    }
+
+    class ScopedGpuTimer {
+    public:
+        // gpu_timer_begin() is called from the constructor BODY, not a
+        // mem-initializer: the enclosing class is only guaranteed complete
+        // inside function bodies of a nested class.
+        ScopedGpuTimer(OpenGlNv2aRenderer* owner, GpuTimerBucket bucket)
+            : owner_(owner), started_(false) {
+            started_ = owner_->gpu_timer_begin(bucket);
+        }
+        ~ScopedGpuTimer() {
+            if (started_) owner_->gpu_timer_end();
+        }
+        ScopedGpuTimer(const ScopedGpuTimer&) = delete;
+        ScopedGpuTimer& operator=(const ScopedGpuTimer&) = delete;
+
+    private:
+        OpenGlNv2aRenderer* owner_;
+        bool started_;
+    };
+
+    // ---- GPU-timed GL entry wrappers -------------------------------------
+    // EVERY submission, upload and readback in this file goes through one of
+    // these. The raw draw_arrays_ / dispatch_compute_ / buffer_data_ /
+    // tex_image_2d_ / tex_sub_image_2d_ / read_pixels_ pointers are called
+    // nowhere else, so a new site cannot silently escape GPU timing
+    // (tests/test_gl_timing_guards.py asserts exactly that).
+    void gpu_timed_draw_arrays(unsigned int mode, int first, int count) {
+        ScopedGpuTimer gpu_timer(this, GpuTimerBucket::kDraw);
+        draw_arrays_(mode, first, count);
+    }
+    void gpu_timed_dispatch_compute(unsigned int groups_x, unsigned int groups_y,
+                                    unsigned int groups_z) {
+        ScopedGpuTimer gpu_timer(this, GpuTimerBucket::kDraw);
+        dispatch_compute_(groups_x, groups_y, groups_z);
+    }
+    void gpu_timed_buffer_data(unsigned int target, std::ptrdiff_t size,
+                               const void* data, unsigned int usage) {
+        ScopedGpuTimer gpu_timer(this, GpuTimerBucket::kUpload);
+        buffer_data_(target, size, data, usage);
+    }
+    void gpu_timed_tex_image_2d(unsigned int target, int level,
+                                int internal_format, int width, int height,
+                                int border, unsigned int format,
+                                unsigned int type, const void* pixels) {
+        ScopedGpuTimer gpu_timer(this, GpuTimerBucket::kUpload);
+        tex_image_2d_(target, level, internal_format, width, height, border,
+                      format, type, pixels);
+    }
+    void gpu_timed_tex_sub_image_2d(unsigned int target, int level, int xoffset,
+                                    int yoffset, int width, int height,
+                                    unsigned int format, unsigned int type,
+                                    const void* pixels) {
+        ScopedGpuTimer gpu_timer(this, GpuTimerBucket::kUpload);
+        tex_sub_image_2d_(target, level, xoffset, yoffset, width, height, format,
+                          type, pixels);
+    }
+    // beads-xbox.1.14.6 (defect found 2026-09-03, fixed 2026-09-04): closes the
+    // GL_TIME_ELAPSED bracket around a readback at the point the code means it to
+    // close.
+    //
+    // THE DEFECT. glReadPixels is synchronous: it flushes the command stream and
+    // blocks, so the GL_TIME_ELAPSED begin marker and the read itself are executed
+    // by the GPU immediately. gpu_timer_end() then calls glEndQuery, which only
+    // ENQUEUES the end marker -- nothing flushes it. The GPU executes that marker
+    // at the NEXT flush, which is the next frame's submission, milliseconds of
+    // host wall time later. GL_TIME_ELAPSED reports the GPU time between the two
+    // markers EXECUTING, so the resolve bucket accumulated the host's idle time
+    // between resolves: measured 138.480 s over 1 308 resolves (105.9 ms each)
+    // against readpixels_ns of 1.799 s (1.38 ms each), a factor of 77. The number
+    // was GPU idle time wearing a "GPU resolve" label -- the same class of error
+    // the audit found when this family had no GPU timing at all.
+    //
+    // THE FIX. Flush right after glEndQuery so the end marker is executed while
+    // the GPU is still at the readback. Gated on gpu_timing_active(), so a noperf
+    // replay -- where no query was opened at all -- pays one predictable bool load
+    // and issues no GL call. tests/test_gl_timing_guards.py asserts that every
+    // ScopedGpuTimer body containing a read_pixels_ call is followed by this.
+    void flush_timed_readback_bracket() {
+        if (!gpu_timing_active()) return;
+        if (flush_) flush_();
+    }
+
+    void gpu_timed_read_pixels(int x, int y, int width, int height,
+                               unsigned int format, unsigned int type,
+                               void* pixels) {
+        {
+            ScopedGpuTimer gpu_timer(this, GpuTimerBucket::kResolve);
+            read_pixels_(x, y, width, height, format, type, pixels);
+        }
+        flush_timed_readback_bracket();
+    }
+    // Fence-split readback. renderer_resolve_ns (3 998 ms over 1 308 resolves,
+    // 3.06 ms each, where a 640x480 BGRA8 transfer is about 0.3 ms) conflates
+    // three different costs: the GPU still working through queued draws, the
+    // pixel transfer itself, and the CPU flip/copy into guest byte order.
+    // glFenceSync + glClientWaitSync BEFORE the read charges the first of those
+    // to drain_ns, leaving readpixels_ns as transfer plus driver; the caller
+    // times its own flip under cpu_copy_ns. `bytes` is the area actually read,
+    // `dirty` the tracked union of scissor rects written since the last resolve
+    // -- the gain a scissored readback could deliver, quantified before one is
+    // written (beads-xbox.1.14.6).
+    void gpu_timed_resolve_read_pixels(int x, int y, int width, int height,
+                                       unsigned int format, unsigned int type,
+                                       void* pixels, uint64_t bytes,
+                                       uint64_t dirty) {
+        if (gpu_timing_active()) {
+            perf::ScopedAdd drain_timer(g_gl_gpu.drain_ns, g_gl_gpu_split_calls);
+            const GlSyncHandle sync = fence_sync_(kGlSyncGpuCommandsComplete, 0);
+            if (sync) {
+                // A GL_TIMEOUT_EXPIRED return is not an error here: the read
+                // below blocks on the same work, so the split just degrades.
+                client_wait_sync_(sync, kGlSyncFlushCommandsBit,
+                                  kGlFenceTimeoutNs);
+                delete_sync_(sync);
+            }
+        }
+        {
+            ScopedGpuTimer gpu_timer(this, GpuTimerBucket::kResolve);
+            // Declared second so it is destroyed first: readpixels_ns covers the
+            // call alone, not the glEndQuery that closes the timer query.
+            perf::ScopedAdd read_timer(g_gl_gpu.readpixels_ns,
+                                       g_gl_gpu_split_calls);
+            read_pixels_(x, y, width, height, format, type, pixels);
+        }
+        flush_timed_readback_bracket();
+        if (perf::g_enabled) {
+            g_gl_gpu.bytes_read.fetch_add(bytes, std::memory_order_relaxed);
+            g_gl_gpu.dirty_bytes.fetch_add(dirty, std::memory_order_relaxed);
+        }
+    }
 
     // ---- driver-entry reduction caches -----------------------------------
     // glGetUniformLocation results per program handle. Entries are dropped
