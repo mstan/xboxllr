@@ -236,6 +236,259 @@ void print_gpu_residency_census(const xlle::Nv2a* nv, const char* scope,
             (unsigned long long)c.cpu_draws_profile[k],
             (unsigned long long)c.breaks_profile[k]);
     }
+    // Phase 5 item 2 (beads-xbox.1.15.10): what a residency QUERY costs, split
+    // by whether it moved any bytes. ALWAYS ON. This is the line that decides
+    // whether the "148 317 no-op residency queries, about 0.9 s" item is real:
+    // noop_n x noop_ns is the whole of what a per-draw fast path could remove,
+    // measured directly rather than inferred from a ceiling probe minus a
+    // byte-rate model.
+    {
+        const auto& q = nv->resolve_query_census();
+        const auto ns = [](unsigned long long ticks) {
+            return xlle::perf_excl::ticks_to_ns(ticks);
+        };
+        const auto per = [](unsigned long long total_ns,
+                            unsigned long long n) {
+            return n ? (double)total_ns / (double)n : 0.0;
+        };
+        const unsigned long long cn = ns(q.color_noop_ticks);
+        const unsigned long long cm = ns(q.color_moved_ticks);
+        const unsigned long long dn = ns(q.depth_noop_ticks);
+        const unsigned long long dm = ns(q.depth_moved_ticks);
+        const unsigned long long tn = ns(q.texsrc_noop_ticks);
+        const unsigned long long tm = ns(q.texsrc_moved_ticks);
+        std::printf(
+            "[host] gpu-resolve-cost scope=%s deadline=%llu "
+            "color_noop_n=%llu color_noop_ns=%llu color_noop_ns_each=%.1f "
+            "color_moved_n=%llu color_moved_ns=%llu color_moved_ns_each=%.1f "
+            "depth_noop_n=%llu depth_noop_ns=%llu depth_noop_ns_each=%.1f "
+            "depth_moved_n=%llu depth_moved_ns=%llu depth_moved_ns_each=%.1f "
+            "texsrc_noop_n=%llu texsrc_noop_ns=%llu texsrc_noop_ns_each=%.1f "
+            "texsrc_moved_n=%llu texsrc_moved_ns=%llu texsrc_moved_ns_each=%.1f "
+            "color_backend_ns=%llu color_memwrite_ns=%llu color_memwrite_mb=%.1f "
+            "depth_backend_ns=%llu depth_memwrite_ns=%llu depth_memwrite_mb=%.1f\n",
+            scope, deadline,
+            (unsigned long long)q.color_noop_n, cn,
+            per(cn, q.color_noop_n),
+            (unsigned long long)q.color_moved_n, cm,
+            per(cm, q.color_moved_n),
+            (unsigned long long)q.depth_noop_n, dn,
+            per(dn, q.depth_noop_n),
+            (unsigned long long)q.depth_moved_n, dm,
+            per(dm, q.depth_moved_n),
+            (unsigned long long)q.texsrc_noop_n, tn,
+            per(tn, q.texsrc_noop_n),
+            (unsigned long long)q.texsrc_moved_n, tm,
+            per(tm, q.texsrc_moved_n),
+            ns(q.color_backend_ticks), ns(q.color_memwrite_ticks),
+            q.color_memwrite_bytes / 1048576.0,
+            ns(q.depth_backend_ticks), ns(q.depth_memwrite_ticks),
+            q.depth_memwrite_bytes / 1048576.0);
+    }
+    // Phase 5 item 1 (beads-xbox.1.15.10): the per-PLANE consumer table. The
+    // phase-4 rule is that a break is attributed to whichever CPU consumer
+    // touches the plane first, so `gpu-residency-profile` above cannot answer
+    // "which families would I have to move to stop resolving this plane".
+    // This can: one row per destination plane, with the GPU-taken and
+    // CPU-executed draw counts and the CPU families listed by name. A plane
+    // whose cpu_draws is 0 has no CPU consumer left and its resolves are gone.
+    {
+        struct PlaneTable {
+            const char* plane;
+            const xlle::Nv2a::GpuResSurfaceTable* table;
+        };
+        const PlaneTable tables[2] = {
+            {"color", &nv->gpu_res_color_surfaces()},
+            {"zeta", &nv->gpu_res_depth_surfaces()},
+        };
+        for (const auto& entry : tables) {
+            for (size_t r = 0; r < entry.table->count; ++r) {
+                const auto& row = entry.table->rows[r];
+                char families[512];
+                size_t used = 0;
+                families[0] = '\0';
+                for (size_t k = 0; k < xlle::Nv2a::kGpuResProfileSlots; ++k) {
+                    if (row.cpu_draws_profile[k] == 0) continue;
+                    const int n = std::snprintf(
+                        families + used, sizeof(families) - used, "%s%s:%llu",
+                        used ? "," : "", xlle::Nv2a::gpu_res_profile_name(k),
+                        (unsigned long long)row.cpu_draws_profile[k]);
+                    if (n <= 0 || used + (size_t)n >= sizeof(families)) break;
+                    used += (size_t)n;
+                }
+                std::printf(
+                    "[host] gpu-residency-plane scope=%s deadline=%llu "
+                    "plane=%s address=%08x bytes=%u gpu_draws=%llu "
+                    "cpu_draws=%llu cpu_families=%s\n",
+                    scope, deadline, entry.plane, row.address, row.bytes,
+                    (unsigned long long)row.gpu_draws,
+                    (unsigned long long)row.cpu_draws,
+                    used ? families : "-");
+            }
+            if (entry.table->overflow) {
+                std::printf(
+                    "[host] gpu-residency-plane scope=%s deadline=%llu "
+                    "plane=%s address=OVERFLOW bytes=0 gpu_draws=0 "
+                    "cpu_draws=%llu cpu_families=-\n",
+                    scope, deadline, entry.plane,
+                    (unsigned long long)entry.table->overflow);
+            }
+        }
+    }
+    // Phase 6 (beads-xbox.1.15.10): the generic-combiner SHADER census. One row
+    // per distinct generated-fragment-program state, with the transferring
+    // resolves that state's software fallback actually caused. This is the work
+    // order for the generator: phase 5 measured that 1 307 of the 1 954 colour
+    // resolves are generic-combiner paths but could not say which STATES, and a
+    // census keyed on the whole raster block (the --nv2a-detailed-telemetry
+    // fingerprint table) splits one program across many rows. Always on.
+    {
+        const auto& g = nv->generic_shader_census();
+        for (size_t r = 0; r < g.count; ++r) {
+            const auto& row = g.rows[r];
+            std::printf(
+                "[host] generic-shader scope=%s deadline=%llu fp=%016llx "
+                "batches=%llu sw=%llu gl=%llu gpu=%llu tri=%llu bbox=%llu "
+                "verts=%llu "
+                "color_resolves=%llu depth_resolves=%llu tex_resolves=%llu "
+                "reject=%s stages=%u cc=%08x rs0=%08x osi=%08x fmt=%08x "
+                "swz=%u depth=%u dfunc=%04x dmask=%u afunc=%04x aref=%u "
+                "bsrc=%04x bdst=%04x beq=%04x cmask=%08x cull=%04x "
+                "texref=%x texcube=%x texlin=%x texa8=%x texen=%x prim=%x\n",
+                scope, deadline, (unsigned long long)row.fingerprint,
+                (unsigned long long)row.batches,
+                (unsigned long long)row.software_batches,
+                (unsigned long long)row.accelerated_batches,
+                (unsigned long long)row.gpu_batches,
+                (unsigned long long)row.triangles,
+                (unsigned long long)row.bbox_pixels,
+                (unsigned long long)row.vertices,
+                (unsigned long long)row.color_resolves,
+                (unsigned long long)row.depth_resolves,
+                (unsigned long long)row.texture_resolves,
+                row.reject_reason >=
+                        xlle::Nv2a::generic_resident_reject_reason_count()
+                    ? "not-observed"
+                    : xlle::Nv2a::generic_resident_reject_reason_name(
+                          row.reject_reason),
+                row.stage_count, row.combiner_control, row.shader_stage_program,
+                row.other_stage_input, row.surface_format,
+                row.swizzled_destination, row.uses_depth, row.depth_func,
+                row.depth_mask, row.alpha_func, row.alpha_ref, row.blend_src,
+                row.blend_dst, row.blend_equation, row.color_mask,
+                row.cull_face, row.texture_referenced, row.texture_cubemap,
+                row.texture_linear, row.texture_alpha8,
+                row.texture_enable_mask, row.primitive_modes);
+            // The combiner words themselves, on their own line so the shader a
+            // row needs can be read out of the log without a second run.
+            std::printf(
+                "[host] generic-shader-words scope=%s deadline=%llu "
+                "fp=%016llx cicw=%08x,%08x,%08x,%08x,%08x,%08x,%08x,%08x "
+                "aicw=%08x,%08x,%08x,%08x,%08x,%08x,%08x,%08x "
+                "cocw=%08x,%08x,%08x,%08x,%08x,%08x,%08x,%08x "
+                "aocw=%08x,%08x,%08x,%08x,%08x,%08x,%08x,%08x "
+                "f0=%08x,%08x,%08x,%08x,%08x,%08x,%08x,%08x "
+                "f1=%08x,%08x,%08x,%08x,%08x,%08x,%08x,%08x "
+                "sf=%08x,%08x ff=%08x,%08x "
+                "texfmt=%08x,%08x,%08x,%08x texaddr=%08x,%08x,%08x,%08x "
+                "texfilt=%08x,%08x,%08x,%08x "
+                "texdim=%ux%u,%ux%u,%ux%u,%ux%u\n",
+                scope, deadline, (unsigned long long)row.fingerprint,
+                row.color_icw[0], row.color_icw[1], row.color_icw[2],
+                row.color_icw[3], row.color_icw[4], row.color_icw[5],
+                row.color_icw[6], row.color_icw[7],
+                row.alpha_icw[0], row.alpha_icw[1], row.alpha_icw[2],
+                row.alpha_icw[3], row.alpha_icw[4], row.alpha_icw[5],
+                row.alpha_icw[6], row.alpha_icw[7],
+                row.color_ocw[0], row.color_ocw[1], row.color_ocw[2],
+                row.color_ocw[3], row.color_ocw[4], row.color_ocw[5],
+                row.color_ocw[6], row.color_ocw[7],
+                row.alpha_ocw[0], row.alpha_ocw[1], row.alpha_ocw[2],
+                row.alpha_ocw[3], row.alpha_ocw[4], row.alpha_ocw[5],
+                row.alpha_ocw[6], row.alpha_ocw[7],
+                row.factor0[0], row.factor0[1], row.factor0[2], row.factor0[3],
+                row.factor0[4], row.factor0[5], row.factor0[6], row.factor0[7],
+                row.factor1[0], row.factor1[1], row.factor1[2], row.factor1[3],
+                row.factor1[4], row.factor1[5], row.factor1[6], row.factor1[7],
+                row.specular_fog0, row.specular_fog1, row.final_factor0,
+                row.final_factor1,
+                row.tex_format[0], row.tex_format[1], row.tex_format[2],
+                row.tex_format[3], row.tex_address[0], row.tex_address[1],
+                row.tex_address[2], row.tex_address[3], row.tex_filter[0],
+                row.tex_filter[1], row.tex_filter[2], row.tex_filter[3],
+                row.tex_width[0], row.tex_height[0], row.tex_width[1],
+                row.tex_height[1], row.tex_width[2], row.tex_height[2],
+                row.tex_width[3], row.tex_height[3]);
+            // Which destination plane the row's batches and resolves belong to.
+            std::printf(
+                "[host] generic-shader-dest scope=%s deadline=%llu fp=%016llx "
+                "d0=%08x/%llu/%llu d1=%08x/%llu/%llu d2=%08x/%llu/%llu "
+                "d3=%08x/%llu/%llu overflow=%llu\n",
+                scope, deadline, (unsigned long long)row.fingerprint,
+                row.dest_address[0], (unsigned long long)row.dest_batches[0],
+                (unsigned long long)row.dest_resolves[0],
+                row.dest_address[1], (unsigned long long)row.dest_batches[1],
+                (unsigned long long)row.dest_resolves[1],
+                row.dest_address[2], (unsigned long long)row.dest_batches[2],
+                (unsigned long long)row.dest_resolves[2],
+                row.dest_address[3], (unsigned long long)row.dest_batches[3],
+                (unsigned long long)row.dest_resolves[3],
+                (unsigned long long)row.dest_overflow);
+        }
+        std::printf(
+            "[host] generic-shader-total scope=%s deadline=%llu rows=%zu "
+            "overflow_batches=%llu overflow_color_resolves=%llu\n",
+            scope, deadline, g.count,
+            (unsigned long long)g.overflow_batches,
+            (unsigned long long)g.overflow_color_resolves);
+    }
+    // Phase 6 (beads-xbox.1.15.10): what the GENERATED-shader executor took and
+    // why every batch it declined was declined. Always on, and the decline
+    // table covers both halves -- the device's own limits and the generator's
+    // own unsupported-state answer -- so no decline is unattributed.
+    {
+        const auto d = nv->generated_shader_census();
+        const auto r = nv->generated_shader_backend_stats();
+        std::printf(
+            "[host] generic-shader-gpu scope=%s deadline=%llu enabled=%u "
+            "attempts=%llu submits=%llu empty=%llu triangles=%llu "
+            "color_upload_mb=%.1f texture_upload_mb=%.1f programs=%llu "
+            "compiles=%llu compile_failures=%llu cache_hits=%llu draws=%llu "
+            "backend_triangles=%llu tex_uploads=%llu tex_skips=%llu "
+            "surface_uploads=%llu\n",
+            scope, deadline, nv->gpu_generic_shader() ? 1u : 0u,
+            (unsigned long long)d.attempts, (unsigned long long)d.submits,
+            (unsigned long long)d.empty_batches,
+            (unsigned long long)d.triangles,
+            d.color_upload_bytes / 1048576.0,
+            d.texture_upload_bytes / 1048576.0,
+            (unsigned long long)r.programs, (unsigned long long)r.compiles,
+            (unsigned long long)r.compile_failures,
+            (unsigned long long)r.cache_hits, (unsigned long long)r.draws,
+            (unsigned long long)r.triangles,
+            (unsigned long long)r.texture_uploads,
+            (unsigned long long)r.texture_upload_skips,
+            (unsigned long long)r.surface_uploads);
+        for (size_t k = 0; k < nv->generic_shader_program_count(); ++k) {
+            std::printf(
+                "[host] generic-shader-program scope=%s deadline=%llu "
+                "index=%zu bit=%016llx fp=%016llx batches=%llu\n",
+                scope, deadline, k,
+                (unsigned long long)(uint64_t{1} << k),
+                (unsigned long long)nv->generic_shader_program_fingerprint(k),
+                (unsigned long long)nv->generic_shader_program_batches(k));
+        }
+        for (size_t k = 0; k < xlle::Nv2a::generic_shader_decline_count() &&
+                           k < d.declines.size();
+             ++k) {
+            if (d.declines[k] == 0) continue;
+            std::printf(
+                "[host] generic-shader-decline scope=%s deadline=%llu "
+                "reason=%s batches=%llu\n",
+                scope, deadline, xlle::Nv2a::generic_shader_decline_name(k),
+                (unsigned long long)d.declines[k]);
+        }
+    }
     // Phase 3 (beads-xbox.1.15.10): the MEASURED residency-break attribution,
     // taken from the BACKEND rather than from the simulation above. One row per
     // (cause, profile) pair that actually caused a re-upload, split by plane.
@@ -1179,6 +1432,19 @@ int main(int argc, char** argv) {
     // Stage (f): the witnessed-profile GPU executor. Default OFF until the
     // behavioral comparison in PERF-METHODOLOGY.md section 3 passes.
     bool nv2a_gpu_profiles = kNv2aGpuProfilesDefault;
+    // Default ON as of beads-xbox.1.15.10 phase 6: two independent 3+3
+    // interleaved sets on one binary and one session gave +6.63 / +6.46 pct and
+    // +6.81 / +6.79 pct on the total 12 B wall (median / min), 6 of 6 rounds,
+    // against a 5 pct bar, with the golden final SHA reproduced on every leg.
+    // --no-nv2a-gpu-generic-shader restores the previous behaviour on the SAME
+    // binary, so the decision is a one-flag change either way.
+    bool nv2a_gpu_generic_shader = true;
+    uint64_t nv2a_gpu_generic_shader_mask = ~uint64_t{0};
+    bool nv2a_gpu_generic_shader_fp64 = true;
+    bool nv2a_gpu_generic_shader_image_blend = true;
+    bool nv2a_gpu_generic_shader_nodraw = false;
+    uint32_t nv2a_gpu_generic_shader_wide = 4096;
+    uint32_t nv2a_gpu_generic_shader_verify = 0;
     // Stage (f): let the GPU executor take jobs whose 1/16-pixel screen
     // coordinates exceed the exact-double product bound. Off by default: it is
     // faster but it moved one checkpoint frame (nv2a.hpp
@@ -1351,6 +1617,53 @@ int main(int argc, char** argv) {
             nv2a_gpu_profiles = true;
         else if (!std::strcmp(argv[i], "--no-nv2a-gpu-profiles"))
             nv2a_gpu_profiles = false;
+        // Stage (f3) the GENERATED generic-combiner executor
+        // (beads-xbox.1.15.10 phase 6). Both spellings always exist so the
+        // decision A/B is a one-flag change on one binary.
+        else if (!std::strcmp(argv[i], "--nv2a-gpu-generic-shader"))
+            nv2a_gpu_generic_shader = true;
+        else if (!std::strcmp(argv[i], "--no-nv2a-gpu-generic-shader"))
+            nv2a_gpu_generic_shader = false;
+        else if (!std::strcmp(argv[i], "--nv2a-gpu-generic-shader-nodraw"))
+            nv2a_gpu_generic_shader_nodraw = true;
+        else if (!std::strcmp(argv[i], "--nv2a-gpu-generic-shader-verify") &&
+                 i + 1 < argc) {
+            uint64_t parsed = 0;
+            if (!parse_u64_arg(argv[++i], parsed) || parsed > 100000ull) {
+                std::fprintf(stderr,
+                             "invalid --nv2a-gpu-generic-shader-verify\n");
+                return 2;
+            }
+            nv2a_gpu_generic_shader_verify = static_cast<uint32_t>(parsed);
+        }
+        else if (!std::strcmp(argv[i], "--nv2a-gpu-generic-shader-wide") &&
+                 i + 1 < argc) {
+            uint64_t parsed = 0;
+            if (!parse_u64_arg(argv[++i], parsed) || parsed > 0x0FFFFFFFull) {
+                std::fprintf(stderr,
+                             "invalid --nv2a-gpu-generic-shader-wide\n");
+                return 2;
+            }
+            nv2a_gpu_generic_shader_wide = static_cast<uint32_t>(parsed);
+        }
+        else if (!std::strcmp(argv[i], "--nv2a-gpu-generic-shader-image-blend"))
+            nv2a_gpu_generic_shader_image_blend = true;
+        else if (!std::strcmp(argv[i],
+                              "--no-nv2a-gpu-generic-shader-image-blend"))
+            nv2a_gpu_generic_shader_image_blend = false;
+        else if (!std::strcmp(argv[i], "--nv2a-gpu-generic-shader-fp64"))
+            nv2a_gpu_generic_shader_fp64 = true;
+        else if (!std::strcmp(argv[i], "--no-nv2a-gpu-generic-shader-fp64"))
+            nv2a_gpu_generic_shader_fp64 = false;
+        else if (!std::strcmp(argv[i], "--nv2a-gpu-generic-shader-mask") &&
+                 i + 1 < argc) {
+            uint64_t parsed = 0;
+            if (!parse_u64_arg(argv[++i], parsed)) {
+                std::fprintf(stderr, "invalid --nv2a-gpu-generic-shader-mask\n");
+                return 2;
+            }
+            nv2a_gpu_generic_shader_mask = parsed;
+        }
         else if (!std::strcmp(argv[i], "--nv2a-gpu-profile-mask") && i + 1 < argc) {
             uint64_t parsed = 0;
             if (!parse_u64_arg(argv[++i], parsed) || parsed > 7) {
@@ -1949,6 +2262,19 @@ int main(int argc, char** argv) {
                 // raster. --nv2a-profile-hashes opts back in.
                 mach.nv2a()->set_profile_hashes_enabled(nv2a_profile_hashes);
                 mach.nv2a()->set_gpu_profiles_enabled(nv2a_gpu_profiles);
+                mach.nv2a()->set_gpu_generic_shader(nv2a_gpu_generic_shader);
+                mach.nv2a()->set_gpu_generic_shader_mask(
+                    nv2a_gpu_generic_shader_mask);
+                mach.nv2a()->set_gpu_generic_shader_fp64(
+                    nv2a_gpu_generic_shader_fp64);
+                mach.nv2a()->set_gpu_generic_shader_image_blend(
+                    nv2a_gpu_generic_shader_image_blend);
+                mach.nv2a()->set_gpu_generic_shader_nodraw(
+                    nv2a_gpu_generic_shader_nodraw);
+                mach.nv2a()->set_gpu_generic_shader_wide_pixels(
+                    nv2a_gpu_generic_shader_wide);
+                mach.nv2a()->set_gpu_generic_shader_verify(
+                    nv2a_gpu_generic_shader_verify);
                 mach.nv2a()->set_gpu_relaxed_coords(nv2a_gpu_relaxed_coords);
                 mach.nv2a()->set_gpu_exact_coords(nv2a_gpu_exact_coords);
                 mach.nv2a()->set_gpu_profile_mask(nv2a_gpu_profile_mask);
@@ -3867,12 +4193,19 @@ int main(int argc, char** argv) {
             // Calibrate the exclusive-time clock BEFORE arming it, so the first measured
             // region is not the one paying for calibration, and so wall_ns starts here
             // rather than at the first region.
-            // Only pay for calibration when the instrument will actually be armed.
-            // init() spin-waits ~4 ms against steady_clock and takes 8192 rdtsc reads;
-            // an unconditional call charged every noperf run -- including every timing
-            // leg whose whole purpose is to not run the instrument -- for a measurement
-            // it then discarded.
-            if (perf_accounting) xlle::perf_excl::init();
+            // beads-xbox.1.15.10 phase 5: the calibration is now UNCONDITIONAL,
+            // and the comment below is kept because it records why it used to
+            // be gated. init() spin-waits ~4 ms against steady_clock and takes
+            // 8192 rdtsc reads -- a fixed ~4 ms charged once per process, which
+            // is 0.007 % of a 59 s replay leg and does not move the gate metric.
+            // It has to be unconditional now because the ALWAYS-ON residency and
+            // vertex censuses (Nv2a::ResolveQueryCensus / VertexCensus) report in
+            // nanoseconds, and without calibration g_ns_per_tick is 1.0 and every
+            // always-on line in a noperf run would be a raw TSC tick count
+            // silently labelled `ns`. g_enabled stays gated on --perf-accounting
+            // below, so no perf_excl::Scope becomes active: this call changes
+            // the units the always-on lines are printed in and nothing else.
+            xlle::perf_excl::init();
             xlle::perf_excl::g_enabled = perf_accounting;
             xlle::perf::g_enabled = perf_accounting;
             xlle::perf::g_pull_drain_enabled =

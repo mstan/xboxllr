@@ -308,6 +308,47 @@ const char* Nv2a::gpu_res_profile_name(size_t profile) {
     return "unknown";
 }
 
+// Phase 5 item 1 (beads-xbox.1.15.10). One row per distinct destination plane
+// address; the per-profile column is only filled for CPU-executed draws, which
+// is what "the CPU consumers of this surface" means. A linear scan over at most
+// kGpuResSurfaceSlots rows, once per witnessed draw (436 k per canonical run):
+// the whole table fits in two cache lines' worth of addresses and the workload
+// has fewer than a dozen distinct planes, so the scan terminates in the first
+// few entries in practice. Overflow is counted rather than evicting, so the
+// table can never silently under-report a plane it already knows about.
+void Nv2a::gpu_res_note_surface_consumer(GpuResSurfaceTable& table,
+                                         uint32_t address, uint64_t bytes,
+                                         uint32_t profile, bool on_gpu) {
+    if (bytes == 0) return;
+    GpuResSurfaceRow* row = nullptr;
+    for (size_t i = 0; i < table.count; ++i) {
+        if (table.rows[i].address == address) {
+            row = &table.rows[i];
+            break;
+        }
+    }
+    if (!row) {
+        if (table.count >= kGpuResSurfaceSlots) {
+            ++table.overflow;
+            return;
+        }
+        row = &table.rows[table.count++];
+        row->address = address;
+    }
+    // The largest span seen at this base: a plane re-bound at a different
+    // height is the same plane for the purpose of "who consumes it".
+    if (bytes > row->bytes) {
+        row->bytes = static_cast<uint32_t>(
+            bytes > UINT32_MAX ? UINT32_MAX : bytes);
+    }
+    if (on_gpu) {
+        ++row->gpu_draws;
+        return;
+    }
+    ++row->cpu_draws;
+    if (profile < kGpuResProfileSlots) ++row->cpu_draws_profile[profile];
+}
+
 void Nv2a::gpu_res_end_run() {
     if (gpu_res_run_ == 0) return;
     ++gpu_res_.runs;
@@ -419,9 +460,66 @@ void Nv2a::gpu_res_cpu_depth_access(uint32_t address, uint64_t bytes,
     }
 }
 
+// Phase 5 item 2 (beads-xbox.1.15.10). Times ONE residency query and credits it
+// to the no-op or the transferring bucket at scope exit. The bucket is decided
+// by `moved`, which the body sets the moment mem_write_ puts bytes back into
+// guest RAM -- the same predicate `seam_resolve_transfers_` uses -- so the two
+// columns cannot disagree about which calls transferred.
+namespace {
+struct ResolveQueryTimer {
+    uint64_t* noop_n;
+    uint64_t* noop_ticks;
+    uint64_t* moved_n;
+    uint64_t* moved_ticks;
+    uint64_t* alt_noop_n;
+    uint64_t* alt_noop_ticks;
+    uint64_t* alt_moved_n;
+    uint64_t* alt_moved_ticks;
+    uint64_t start;
+    bool moved = false;
+    ResolveQueryTimer(uint64_t* nn, uint64_t* nt, uint64_t* mn, uint64_t* mt,
+                      uint64_t* ann, uint64_t* ant, uint64_t* amn,
+                      uint64_t* amt)
+        : noop_n(nn), noop_ticks(nt), moved_n(mn), moved_ticks(mt),
+          alt_noop_n(ann), alt_noop_ticks(ant), alt_moved_n(amn),
+          alt_moved_ticks(amt), start(perf_excl::tick_now()) {}
+    ~ResolveQueryTimer() {
+        const uint64_t delta = perf_excl::tick_now() - start;
+        // The same plausibility clamp perf_excl::accrue uses: one backwards TSC
+        // read would otherwise wrap and poison the bucket for the whole run.
+        if (delta > perf_excl::g_max_plausible_ticks) return;
+        if (moved) {
+            ++*moved_n;
+            *moved_ticks += delta;
+            if (alt_moved_n) {
+                ++*alt_moved_n;
+                *alt_moved_ticks += delta;
+            }
+        } else {
+            ++*noop_n;
+            *noop_ticks += delta;
+            if (alt_noop_n) {
+                ++*alt_noop_n;
+                *alt_noop_ticks += delta;
+            }
+        }
+    }
+};
+}  // namespace
+
 bool Nv2a::resolve_renderer_color_overlap(uint32_t address, size_t size,
                                           const char* context) {
     if (!renderer_ || size == 0) return true;
+    const bool from_texsrc = resolve_query_from_texture_source_;
+    ResolveQueryTimer query_timer(
+        &resolve_query_census_.color_noop_n,
+        &resolve_query_census_.color_noop_ticks,
+        &resolve_query_census_.color_moved_n,
+        &resolve_query_census_.color_moved_ticks,
+        from_texsrc ? &resolve_query_census_.texsrc_noop_n : nullptr,
+        from_texsrc ? &resolve_query_census_.texsrc_noop_ticks : nullptr,
+        from_texsrc ? &resolve_query_census_.texsrc_moved_n : nullptr,
+        from_texsrc ? &resolve_query_census_.texsrc_moved_ticks : nullptr);
     // F3 CLOSURE (beads-xbox.1.15.5 residual risk). BEFORE the renderer is asked
     // what it owns, drain anything queued: a pending job's recorded
     // invalidate_renderer_color_overlap has not been applied yet, so without
@@ -456,6 +554,10 @@ bool Nv2a::resolve_renderer_color_overlap(uint32_t address, size_t size,
         // readbacks stop reallocating and zero-filling multi-megabyte vectors.
         resolve.data = std::move(color_resolve_scratch_);
         std::string error;
+        // Phase 5 item 2: split the TRANSFERRING resolve into its backend half
+        // and its guest-writeback half. Two clock reads per iteration of a loop
+        // that runs 2 258 times per canonical run.
+        const uint64_t backend_start = perf_excl::tick_now();
         if (!renderer_->resolve_resident_color_surface(address, size, resolve,
                                                        error)) {
             color_resolve_scratch_ = std::move(resolve.data);
@@ -463,20 +565,29 @@ bool Nv2a::resolve_renderer_color_overlap(uint32_t address, size_t size,
                                  : error.c_str());
             return false;
         }
+        const uint64_t backend_delta = perf_excl::tick_now() - backend_start;
         if (resolve.data.empty()) {
             color_resolve_scratch_ = std::move(resolve.data);
             return true;
         }
+        if (backend_delta <= perf_excl::g_max_plausible_ticks)
+            resolve_query_census_.color_backend_ticks += backend_delta;
         // The subset of anchor-8 hits that actually moves bytes back into guest
         // RAM -- and therefore the actual drain condition. Reporting hits and
         // transfers separately lets the conservative policy be judged too.
         ++seam_resolve_transfers_;
+        query_timer.moved = true;
         seam_anchor_drain(kSeamAnchorResolveOverlap);
         perf::record_renderer_color_resolve_context(context, resolve.data.size());
+        const uint64_t write_start = perf_excl::tick_now();
         const bool wrote =
             mem_write_ &&
             mem_write_(resolve.address, resolve.data.data(),
                        resolve.data.size());
+        const uint64_t write_delta = perf_excl::tick_now() - write_start;
+        if (write_delta <= perf_excl::g_max_plausible_ticks)
+            resolve_query_census_.color_memwrite_ticks += write_delta;
+        resolve_query_census_.color_memwrite_bytes += resolve.data.size();
         color_resolve_scratch_ = std::move(resolve.data);
         if (!wrote) {
             char why[160];
@@ -548,6 +659,11 @@ bool Nv2a::refresh_resident_color_after_software_write(
 bool Nv2a::resolve_renderer_depth_overlap(uint32_t address, size_t size,
                                           const char* context) {
     if (!renderer_ || size == 0) return true;
+    ResolveQueryTimer query_timer(&resolve_query_census_.depth_noop_n,
+                                  &resolve_query_census_.depth_noop_ticks,
+                                  &resolve_query_census_.depth_moved_n,
+                                  &resolve_query_census_.depth_moved_ticks,
+                                  nullptr, nullptr, nullptr, nullptr);
     // F3 CLOSURE, depth half. Same argument as the colour half above.
     draw_renderer_query_fence();
     gpu_res_cpu_depth_access(address, size, gpu_res_cause_from_context(context));
@@ -557,20 +673,31 @@ bool Nv2a::resolve_renderer_depth_overlap(uint32_t address, size_t size,
     for (;;) {
         Nv2aResidentDepthResolve resolve;
         std::string error;
+        const uint64_t backend_start = perf_excl::tick_now();
         if (!renderer_->resolve_resident_depth_surface(address, size, resolve,
                                                        error)) {
             fault_(error.empty() ? "NV2A resident depth resolve failed"
                                  : error.c_str());
             return false;
         }
+        const uint64_t backend_delta = perf_excl::tick_now() - backend_start;
         if (resolve.data.empty()) return true;
+        if (backend_delta <= perf_excl::g_max_plausible_ticks)
+            resolve_query_census_.depth_backend_ticks += backend_delta;
         ++seam_resolve_transfers_;
+        query_timer.moved = true;
         seam_anchor_drain(kSeamAnchorResolveOverlap);
         perf::record_renderer_depth_resolve_context(context,
                                                     resolve.data.size());
-        if (!mem_write_ ||
-            !mem_write_(resolve.address, resolve.data.data(),
-                        resolve.data.size())) {
+        const uint64_t write_start = perf_excl::tick_now();
+        const bool depth_wrote =
+            mem_write_ && mem_write_(resolve.address, resolve.data.data(),
+                                     resolve.data.size());
+        const uint64_t write_delta = perf_excl::tick_now() - write_start;
+        if (write_delta <= perf_excl::g_max_plausible_ticks)
+            resolve_query_census_.depth_memwrite_ticks += write_delta;
+        resolve_query_census_.depth_memwrite_bytes += resolve.data.size();
+        if (!depth_wrote) {
             char why[160];
             std::snprintf(
                 why, sizeof(why),
@@ -5871,11 +5998,14 @@ bool Nv2a::rasterize_witnessed_batch(DrawJob& job, bool& executed) {
                     ++witnessed_texture_source_skipped_;
                     return true;
                 }
-                if (!resolve_renderer_color_overlap(
-                        address, static_cast<size_t>(bytes),
-                        "witnessed texture snapshot")) {
-                    return false;
-                }
+                // Phase 5 item 2: attribute THIS call site apart. The flag is a
+                // plain bool on the emulation thread, set only across the call.
+                resolve_query_from_texture_source_ = true;
+                const bool texture_resolve_ok = resolve_renderer_color_overlap(
+                    address, static_cast<size_t>(bytes),
+                    "witnessed texture snapshot");
+                resolve_query_from_texture_source_ = false;
+                if (!texture_resolve_ok) return false;
             }
             return true;
         };
@@ -6320,6 +6450,20 @@ bool Nv2a::rasterize_witnessed_batch(DrawJob& job, bool& executed) {
     // before the residency queries below, and the queries a GPU draw makes about
     // its OWN destination are excluded -- they are not a foreign consumer.
     const bool gpu_profile_candidate = gpu_profile_state_ok(job);
+    // Phase 5 item 1: the per-plane consumer tables. Taken HERE, at the same
+    // point and on the same condition as the pair-scoped model above, so the
+    // two are directly comparable; unlike the model this one is a plain count
+    // of what each plane's draws actually were.
+    if (color_profile) {
+        gpu_res_note_surface_consumer(gpu_res_color_surfaces_, color_address,
+                                      color_bytes64, job.profile,
+                                      gpu_profile_candidate);
+    }
+    if (uses_depth_surface) {
+        gpu_res_note_surface_consumer(gpu_res_depth_surfaces_, depth_address,
+                                      depth_bytes64, job.profile,
+                                      gpu_profile_candidate);
+    }
     if (gpu_profile_candidate) {
         gpu_res_note_gpu_draw(color_address, color_bytes64,
                               uses_depth_surface ? depth_address : 0,
@@ -8666,6 +8810,27 @@ void Nv2a::record_generic_texture_modulate_reject(
         ++generic_combiner_texture_modulate_rejects_[index];
 }
 
+// beads-xbox.1.15.10 phase 6. Linear scan of at most 128 rows, once per generic
+// BATCH. Overflow is COUNTED, never evicted, so a state the table already knows
+// about can never be under-reported -- the same rule the phase-5 plane table
+// follows and for the same reason.
+Nv2a::GenericShaderCensusRow* Nv2a::generic_shader_census_row(
+    uint64_t fingerprint) {
+    for (size_t i = 0; i < generic_shader_census_.count; ++i) {
+        if (generic_shader_census_.rows[i].fingerprint == fingerprint)
+            return &generic_shader_census_.rows[i];
+    }
+    if (generic_shader_census_.count >= kGenericShaderCensusSlots) {
+        ++generic_shader_census_.overflow_batches;
+        return nullptr;
+    }
+    GenericShaderCensusRow& row =
+        generic_shader_census_.rows[generic_shader_census_.count++];
+    row = GenericShaderCensusRow{};
+    row.fingerprint = fingerprint;
+    return &row;
+}
+
 // Generic NV2A register-combiner evaluator.
 //
 // Every Profile above is a hand-derived, exact-match fingerprint: a whole-register
@@ -8761,6 +8926,12 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
     const uint32_t surface_color_offset = job.surface_color_offset;
     const uint32_t surface_zeta_offset = job.surface_zeta_offset;
     ++generic_combiner_attempted_batches_;
+    // beads-xbox.1.15.10 phase 6: the generic-combiner shader census. Per-batch
+    // state, reset here so an early return cannot leak a row pointer or a
+    // texture-resolve count into the next batch.
+    generic_shader_row_ = nullptr;
+    generic_batch_texture_resolves_ = 0;
+    generic_shader_dest_slot_ = 0;
     // This routine is reached only by the strict generic fallback. Keep diagnostic
     // census and split timing work out of reduced, non-perf interactive replays.
     // profile_generic_fingerprint still tracks --perf-accounting because it gates the
@@ -9671,10 +9842,17 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                 {
                     perf::ScopedAdd timer(perf::g_ns_generic_texture_resolve,
                                           perf::g_calls_generic_texture_resolve);
+                    // Phase 6 census, linear/compressed branch. Same accounting
+                    // as the swizzled branch below; both call sites carry the
+                    // same "generic texture read" context, so the census row
+                    // and [perf-renderer-resolve-context] count the same calls.
+                    const uint64_t transfers_before = seam_resolve_transfers_;
                     if (!resolve_renderer_color_overlap(address, read_target->size(),
                                                         "generic texture read")) {
                         return false;
                     }
+                    generic_batch_texture_resolves_ +=
+                        seam_resolve_transfers_ - transfers_before;
                 }
                 {
                     perf::ScopedAdd timer(perf::g_ns_generic_texture_dma_read,
@@ -9787,10 +9965,19 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             {
                 perf::ScopedAdd timer(perf::g_ns_generic_texture_resolve,
                                       perf::g_calls_generic_texture_resolve);
+                // Phase 6 census: whether THIS texture read moved bytes back out
+                // of a GPU-authoritative surface, taken from the same counter
+                // [host] gpu-resolve-cost's `moved` column is taken from. The
+                // fingerprint is not known yet (it needs the texture modes this
+                // loop is still deriving), so it is banked per batch and folded
+                // into the row below.
+                const uint64_t transfers_before = seam_resolve_transfers_;
                 if (!resolve_renderer_color_overlap(address, ts.data.size(),
                                                     "generic texture read")) {
                     return false;
                 }
+                generic_batch_texture_resolves_ +=
+                    seam_resolve_transfers_ - transfers_before;
             }
             {
                 perf::ScopedAdd timer(perf::g_ns_generic_texture_dma_read,
@@ -9896,6 +10083,151 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
     const bool needs_specular = needs_general_combiner;
     std::unique_ptr<GenericPacketSnapshot> debug_packet_snapshot;
     GenericPacketDebugInfo debug_packet_snapshot_info;
+
+    // ---- generic-combiner SHADER census (beads-xbox.1.15.10 phase 6) --------
+    // ALWAYS ON. The fingerprint is over EXACTLY the words a generated fragment
+    // program is a function of and nothing else -- no surface address, no
+    // offset, no clip rectangle, no vertex data -- so one generated program is
+    // one row. It is taken HERE, after the combiner decode and the texture
+    // setup have derived the per-stage modes and formats, and before the
+    // accelerate/software decision, so every batch that reaches the decision is
+    // counted exactly once whichever way it goes.
+    {
+        uint64_t fp = 1469598103934665603ull;
+        const auto fold = [&fp](uint32_t word) {
+            fp ^= word;
+            fp *= 1099511628211ull;
+        };
+        fold(raster_state[kRasterCombinerControl]);
+        fold(raster_state[kRasterShaderStageProgram]);
+        fold(raster_state[kRasterShaderOtherStageInput]);
+        for (uint32_t stage = 0; stage < stage_count; ++stage) {
+            fold(raster_state[kRasterCombinerColorIcw0 + stage]);
+            fold(raster_state[kRasterCombinerAlphaIcw0 + stage]);
+            fold(raster_state[kRasterCombinerColorOcw0 + stage]);
+            fold(raster_state[kRasterCombinerAlphaOcw0 + stage]);
+        }
+        fold(final_cw0);
+        fold(final_cw1);
+        // The raster words the generated program's own code depends on. Values
+        // that are only UNIFORMS of an otherwise identical program (the eight
+        // per-stage constant pairs, the two final factors, the texture
+        // dimensions) are deliberately NOT folded: they must not split a row.
+        fold(raster_state[kRasterAlphaFunc]);
+        fold(alpha_test_enabled ? 1u : 0u);
+        fold(blend_enabled ? ((blend_src << 16) ^ blend_dst ^ (blend_eq << 8))
+                           : 0u);
+        fold(raster_state[kRasterColorMask]);
+        fold(uses_depth ? ((depth_test_enabled_bit ? depth_func : 0u) ^
+                           (raster_state[kRasterDepthMask] ? 0x80000000u : 0u))
+                        : 0u);
+        fold(color_format);
+        fold(surface_swizzled ? 1u : 0u);
+        fold(cull_enabled ? (cull_front ? 2u : 1u) : 0u);
+        fold(enables & (1u << 13));  // polygon offset
+        for (uint32_t stage = 0; stage < 4; ++stage) {
+            if (!texture_referenced[stage]) {
+                fold(0u);
+                continue;
+            }
+            const TextureStage& ts = texture_stages[stage];
+            fold((ts.valid ? 1u : 0u) | (ts.linear ? 2u : 0u) |
+                 (ts.cubemap ? 4u : 0u) | (ts.alpha8 ? 8u : 0u) |
+                 (ts.project2d ? 16u : 0u) |
+                 (static_cast<uint32_t>(ts.address_u) << 8) |
+                 (static_cast<uint32_t>(ts.address_v) << 12));
+        }
+        generic_shader_row_ = generic_shader_census_row(fp);
+        if (generic_shader_row_) {
+            GenericShaderCensusRow& row = *generic_shader_row_;
+            ++row.batches;
+            row.vertices += transformed_batch.size();
+            // Destination plane, first-come over four slots. Recorded for every
+            // batch (not only the ones that resolve) so the denominator is
+            // visible: a plane with many batches and no resolves is one the GPU
+            // never owns, and moving its draws buys nothing.
+            {
+                size_t slot = 0;
+                for (; slot < row.dest_address.size(); ++slot) {
+                    if (row.dest_batches[slot] == 0) {
+                        row.dest_address[slot] = color_address;
+                        break;
+                    }
+                    if (row.dest_address[slot] == color_address) break;
+                }
+                if (slot < row.dest_address.size()) {
+                    ++row.dest_batches[slot];
+                    generic_shader_dest_slot_ = slot;
+                } else {
+                    ++row.dest_overflow;
+                    generic_shader_dest_slot_ = row.dest_address.size();
+                }
+            }
+            row.texture_resolves += generic_batch_texture_resolves_;
+            row.primitive_modes |= 1u << (primitive_mode & 31u);
+            row.combiner_control = raster_state[kRasterCombinerControl];
+            row.shader_stage_program = raster_state[kRasterShaderStageProgram];
+            row.other_stage_input = raster_state[kRasterShaderOtherStageInput];
+            row.enables = enables;
+            row.alpha_func = alpha_test_enabled ? alpha_func : 0u;
+            row.alpha_ref = alpha_test_enabled ? alpha_ref : 0u;
+            row.blend_src = blend_enabled ? blend_src : 0u;
+            row.blend_dst = blend_enabled ? blend_dst : 0u;
+            row.blend_equation = blend_enabled ? blend_eq : 0u;
+            row.depth_func = depth_test_enabled_bit ? depth_func : 0u;
+            row.depth_mask = raster_state[kRasterDepthMask];
+            row.color_mask = color_mask_word;
+            row.surface_format = surface_format;
+            row.texture_enable_mask = raster_state[kRasterTextureEnableMask];
+            row.cull_face = cull_enabled ? raster_state[kRasterCullFace] : 0u;
+            for (uint32_t stage = 0; stage < 8; ++stage) {
+                row.color_icw[stage] =
+                    raster_state[kRasterCombinerColorIcw0 + stage];
+                row.alpha_icw[stage] =
+                    raster_state[kRasterCombinerAlphaIcw0 + stage];
+                row.color_ocw[stage] =
+                    raster_state[kRasterCombinerColorOcw0 + stage];
+                row.alpha_ocw[stage] =
+                    raster_state[kRasterCombinerAlphaOcw0 + stage];
+                row.factor0[stage] =
+                    raster_state[kRasterCombinerFactor0_0 + stage];
+                row.factor1[stage] =
+                    raster_state[kRasterCombinerFactor1_0 + stage];
+            }
+            row.specular_fog0 = final_cw0;
+            row.specular_fog1 = final_cw1;
+            row.final_factor0 = raster_state[kRasterCombinerFinalFactor0];
+            row.final_factor1 = raster_state[kRasterCombinerFinalFactor1];
+            row.stage_count = static_cast<uint8_t>(stage_count);
+            row.uses_depth = uses_depth ? 1u : 0u;
+            row.swizzled_destination = surface_swizzled ? 1u : 0u;
+            row.texture_referenced = 0;
+            row.texture_cubemap = 0;
+            row.texture_linear = 0;
+            row.texture_alpha8 = 0;
+            for (uint32_t stage = 0; stage < 4; ++stage) {
+                row.tex_format[stage] =
+                    raster_state[kRasterTextureFormat0 + stage];
+                row.tex_address[stage] =
+                    raster_state[kRasterTextureAddress0 + stage];
+                row.tex_filter[stage] =
+                    raster_state[kRasterTextureFilter0 + stage];
+                row.tex_width[stage] = texture_stages[stage].width;
+                row.tex_height[stage] = texture_stages[stage].height;
+                if (texture_referenced[stage])
+                    row.texture_referenced |= static_cast<uint8_t>(1u << stage);
+                if (texture_stages[stage].cubemap)
+                    row.texture_cubemap |= static_cast<uint8_t>(1u << stage);
+                if (texture_stages[stage].linear)
+                    row.texture_linear |= static_cast<uint8_t>(1u << stage);
+                if (texture_stages[stage].alpha8)
+                    row.texture_alpha8 |= static_cast<uint8_t>(1u << stage);
+            }
+        } else {
+            generic_shader_census_.overflow_color_resolves +=
+                generic_batch_texture_resolves_;
+        }
+    }
 
     bool texture_modulate_observed_this_batch = false;
     bool texture_modulate_exact_this_batch = false;
@@ -11067,6 +11399,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             // writes guest memory through mem_write_, so the job is inline-only.
             seam_note_threadable(job, false, kSeamRendererPath);
             ++generic_combiner_accelerated_batches_;
+            if (generic_shader_row_) ++generic_shader_row_->accelerated_batches;
             if (surface_write_debug_cb_) {
                 SurfaceWriteDebugInfo info;
                 info.kind = "resident-generic-noop";
@@ -11188,6 +11521,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             // writes guest memory through mem_write_, so the job is inline-only.
             seam_note_threadable(job, false, kSeamRendererPath);
             ++generic_combiner_accelerated_batches_;
+            if (generic_shader_row_) ++generic_shader_row_->accelerated_batches;
             generic_combiner_triangles_ += result.triangles;
             generic_combiner_fragments_ += result.fragments;
             generic_combiner_writes_ += result.writes;
@@ -11319,6 +11653,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             // writes guest memory through mem_write_, so the job is inline-only.
             seam_note_threadable(job, false, kSeamRendererPath);
             ++generic_combiner_accelerated_batches_;
+            if (generic_shader_row_) ++generic_shader_row_->accelerated_batches;
             generic_combiner_triangles_ += result.triangles;
             generic_combiner_fragments_ += result.fragments;
             generic_combiner_writes_ += result.writes;
@@ -11359,6 +11694,14 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
     }
     if (generic_accel_timer) generic_accel_timer.reset();
     ++generic_combiner_fallback_batches_;
+    // Phase 6 census: this batch is the software fallback. The resident-path
+    // reject reason is recorded on the row so the census says WHY each shader
+    // state is still on the CPU, not merely that it is.
+    if (generic_shader_row_) {
+        ++generic_shader_row_->software_batches;
+        generic_shader_row_->reject_reason =
+            static_cast<uint32_t>(resident_reject_this_batch);
+    }
     executed = true;
     // Stage (d) / section 1.3: the generic software fallback builds its zeta
     // surface WITHOUT mem_direct_ (see the PagedRasterSurface pair below), so
@@ -11571,24 +11914,290 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                    sizeof(polygon_bias));
     }
 
-    {
+    // ======================================================================
+    // GENERATED-SHADER EXECUTOR (beads-xbox.1.15.10 phase 6, stage f3)
+    // ======================================================================
+    // The decision is taken HERE, before the destination resolve below,
+    // because that resolve IS the cost being removed: the phase-6 census
+    // measured all 704 transferring `software-generic-color-surface` resolves
+    // of the canonical run at this exact call site, on ONE plane, from EIGHT
+    // combiner states. Collecting the triangles cannot half-execute: the
+    // collection pass runs the SAME rasterize_triangle setup the software path
+    // runs and returns before the pixel loop, so a decline at any triangle
+    // throws the whole list away, performs the resolve, and re-runs the
+    // identical loop in software.
+    Nv2aGeneratedShaderPacket gpu_shader_packet;
+    bool gpu_shader_collect = false;
+    bool gpu_shader_collect_failed = false;
+    if (gpu_generic_shader_ && renderer_ && effective_clip_valid) {
+        ++generic_shader_attempts_;
+        GenericShaderDeclineReason decline = GenericShaderDeclineReason::kNone;
+        auto& st = gpu_shader_packet.state;
+        st.stage_count = static_cast<uint8_t>(stage_count);
+        st.mux_on_msb = mux_on_msb;
+        for (uint32_t i = 0; i < 8; ++i) {
+            st.color_icw[i] = raster_state[kRasterCombinerColorIcw0 + i];
+            st.alpha_icw[i] = raster_state[kRasterCombinerAlphaIcw0 + i];
+            st.color_ocw[i] = raster_state[kRasterCombinerColorOcw0 + i];
+            st.alpha_ocw[i] = raster_state[kRasterCombinerAlphaOcw0 + i];
+        }
+        st.final_cw0 = final_cw0;
+        st.final_cw1 = final_cw1;
+        st.final_enabled = final_enabled;
+        st.needs_general_combiner = needs_general_combiner;
+        st.needs_diffuse = needs_diffuse;
+        st.needs_specular = needs_specular;
+        using FinalMode = Nv2aCombinerShaderState::FinalMode;
+        if (primary_color_passthrough) {
+            st.final_mode = FinalMode::kPrimaryColor;
+        } else if (texture0_modulate_primary) {
+            st.final_mode =
+                raster_state[kRasterCombinerAlphaIcw0] == 0x14180000
+                    ? FinalMode::kTexture0ModulatePrimaryAlpha
+                    : FinalMode::kTexture0ModulatePrimary;
+        } else if (texture0_passthrough) {
+            st.final_mode = FinalMode::kTexture0Passthrough;
+        } else if (texf_projected_black_alpha_one) {
+            st.final_mode = FinalMode::kBlackAlphaOne;
+        } else if (final_enabled) {
+            st.final_mode = FinalMode::kGeneric;
+        } else {
+            st.final_mode = FinalMode::kPassthroughR0;
+        }
+        using TexMode = Nv2aCombinerShaderState::TexMode;
+        using GlslAddress = Nv2aCombinerShaderState::AddressMode;
+        const auto map_address = [](TextureAddressMode mode) {
+            switch (mode) {
+                case TextureAddressMode::kRepeat: return GlslAddress::kRepeat;
+                case TextureAddressMode::kClampToEdge:
+                    return GlslAddress::kClampToEdge;
+                default: return GlslAddress::kBorder;
+            }
+        };
+        for (uint32_t i = 0; i < 4; ++i) {
+            auto& ts = st.textures[i];
+            ts.referenced = texture_referenced[i];
+            if (!ts.referenced) continue;
+            const TextureStage& src = texture_stages[i];
+            if (!src.valid) {
+                decline = GenericShaderDeclineReason::kTextureUnsupported;
+                break;
+            }
+            ts.alpha8 = src.alpha8;
+            ts.address_u = map_address(src.address_u);
+            ts.address_v = map_address(src.address_v);
+            if (src.cubemap) {
+                ts.mode = TexMode::kCubemap;
+            } else if (src.linear) {
+                ts.mode = TexMode::kLinear2d;
+            } else if (src.project2d) {
+                ts.mode = TexMode::kProject2d;
+            } else {
+                ts.mode = TexMode::kSwizzled2d;
+            }
+        }
+        st.alpha_test = alpha_test_enabled;
+        st.alpha_func = alpha_func;
+        st.blend = blend_enabled;
+        st.image_blend = gpu_generic_shader_image_blend_;
+        st.blend_src = blend_enabled ? blend_src : 0;
+        st.blend_dst = blend_enabled ? blend_dst : 0;
+        for (size_t c = 0; c < 4; ++c) st.color_mask[c] = color_mask_write[c];
+        st.uses_depth = uses_depth;
+        st.fp64_interpolate = gpu_generic_shader_fp64_;
+        st.color_format_x8 = color_format_x8;
+        if (decline == GenericShaderDeclineReason::kNone) {
+            const Nv2aCombinerShaderReject reject =
+                nv2a_combiner_shader_supported(st);
+            if (reject != Nv2aCombinerShaderReject::kNone) {
+                decline = static_cast<GenericShaderDeclineReason>(
+                    static_cast<uint32_t>(
+                        GenericShaderDeclineReason::kGeneratorFirst) +
+                    static_cast<uint32_t>(reject));
+            }
+        }
+        // Device-side limits, each named so the census says which one bit.
+        if (decline == GenericShaderDeclineReason::kNone) {
+            if (surface_swizzled)
+                decline = GenericShaderDeclineReason::kSwizzledDestination;
+            else if (uses_depth)
+                decline = GenericShaderDeclineReason::kUsesDepth;
+            else if (zero_alpha_gequal_noop)
+                decline = GenericShaderDeclineReason::kNoopBatch;
+            else if (transformed_batch.size() < 3)
+                decline = GenericShaderDeclineReason::kVertexCount;
+        }
+        if (decline == GenericShaderDeclineReason::kNone) {
+            gpu_shader_packet.fingerprint =
+                nv2a_combiner_shader_fingerprint(st);
+            const size_t program_index =
+                generic_shader_program_index(gpu_shader_packet.fingerprint);
+            if (program_index >= 64 ||
+                (gpu_generic_shader_mask_ & (uint64_t{1} << program_index)) ==
+                    0) {
+                decline = GenericShaderDeclineReason::kMaskedOff;
+            }
+        }
+        if (decline == GenericShaderDeclineReason::kNone) {
+            gpu_shader_packet.color_address = color_address;
+            gpu_shader_packet.depth_address = depth_address;
+            gpu_shader_packet.surface_size =
+                static_cast<size_t>(pitch) * surface_height;
+            gpu_shader_packet.surface_pitch = surface_pitch;
+            gpu_shader_packet.surface_format = surface_format;
+            gpu_shader_packet.surface_width = pitch / 4u;
+            gpu_shader_packet.surface_height = surface_height;
+            gpu_shader_packet.xmin = effective_xmin;
+            gpu_shader_packet.xmax = effective_xmax;
+            gpu_shader_packet.ymin = effective_ymin;
+            gpu_shader_packet.ymax = effective_ymax;
+            gpu_shader_packet.clip_min = clip_min;
+            gpu_shader_packet.clip_max = clip_max;
+            for (uint32_t i = 0; i < 8; ++i) {
+                gpu_shader_packet.stage_const0[i] =
+                    raster_state[kRasterCombinerFactor0_0 + i];
+                gpu_shader_packet.stage_const1[i] =
+                    raster_state[kRasterCombinerFactor1_0 + i];
+            }
+            gpu_shader_packet.final_factor0 =
+                raster_state[kRasterCombinerFinalFactor0];
+            gpu_shader_packet.final_factor1 =
+                raster_state[kRasterCombinerFinalFactor1];
+            gpu_shader_packet.alpha_ref = alpha_ref;
+            gpu_shader_packet.blend_src = blend_src;
+            gpu_shader_packet.blend_dst = blend_dst;
+            gpu_shader_packet.depth_func = depth_func;
+            gpu_shader_packet.depth_write = false;
+            for (size_t c = 0; c < 4; ++c)
+                gpu_shader_packet.color_mask[c] = color_mask_write[c];
+            // The colour plane is snapshotted ONLY when the backend does not
+            // already hold it, which is the whole point: on the canonical run
+            // this plane is resident for 17 324 of 18 663 generic batches.
+            const bool resident = renderer_->generated_shader_target_resident(
+                color_address, gpu_shader_packet.surface_size, surface_pitch,
+                surface_height, surface_format);
+            if (!resident) {
+                gpu_shader_packet.needs_color_upload = true;
+                gpu_shader_packet.color_input.resize(
+                    gpu_shader_packet.surface_size);
+                if (!mem_read_ ||
+                    !mem_read_(color_address,
+                               gpu_shader_packet.color_input.data(),
+                               gpu_shader_packet.color_input.size())) {
+                    fault_("NV2A generated-shader colour snapshot read failed");
+                    return false;
+                }
+            }
+            bool textures_ok = true;
+            for (uint32_t i = 0; i < 4 && textures_ok; ++i) {
+                if (!texture_referenced[i]) continue;
+                const TextureStage& src = texture_stages[i];
+                Nv2aGeneratedTexture& dst = gpu_shader_packet.textures[i];
+                if (!src.width || !src.height) {
+                    textures_ok = false;
+                    break;
+                }
+                dst.present = true;
+                dst.width = src.width;
+                dst.height = src.height;
+                dst.border_argb = src.border;
+                const size_t texels =
+                    static_cast<size_t>(src.width) * src.height;
+                dst.linear.resize(texels * 4u);
+                uint32_t* out = reinterpret_cast<uint32_t*>(dst.linear.data());
+                if (src.linear) {
+                    // sample_linear reads data[y * row_pitch + x * 4] with
+                    // row_pitch = width * 4 (the texture setup rewrites
+                    // ts.pitch to that after the DMA read), so the tight
+                    // prefix of ts.data IS the image the software samples.
+                    if (src.data.size() < texels * 4u) {
+                        textures_ok = false;
+                        break;
+                    }
+                    std::memcpy(out, src.data.data(), texels * 4u);
+                } else {
+                    const size_t bytes_per_texel = src.alpha8 ? 1u : 4u;
+                    for (uint32_t y = 0; y < src.height; ++y) {
+                        for (uint32_t x = 0; x < src.width; ++x) {
+                            const size_t offset =
+                                static_cast<size_t>(src.swizzle->index(x, y)) *
+                                bytes_per_texel;
+                            if (offset + bytes_per_texel > src.data.size()) {
+                                textures_ok = false;
+                                break;
+                            }
+                            uint32_t word = 0;
+                            if (src.alpha8) {
+                                // sample_swizzled's A8 texel is (1,1,1,a).
+                                word = 0x00FFFFFFu |
+                                       (static_cast<uint32_t>(
+                                            src.data[offset]) << 24);
+                            } else {
+                                std::memcpy(&word, src.data.data() + offset,
+                                            sizeof(word));
+                            }
+                            out[static_cast<size_t>(y) * src.width + x] = word;
+                        }
+                        if (!textures_ok) break;
+                    }
+                }
+                dst.hash = fnv1a_bytes(dst.linear.data(), dst.linear.size());
+            }
+            if (!textures_ok) {
+                decline = GenericShaderDeclineReason::kTextureUnsupported;
+            } else if (!renderer_->supports_generated_shader(
+                           gpu_shader_packet)) {
+                decline = GenericShaderDeclineReason::kBackendDeclined;
+            } else {
+                gpu_shader_collect = true;
+            }
+        }
+        if (!gpu_shader_collect) {
+            record_generic_shader_decline(decline);
+            gpu_shader_packet = Nv2aGeneratedShaderPacket{};
+        }
+    }
+
+    if (!gpu_shader_collect) {
         perf::ScopedAdd timer(perf::g_ns_generic_fallback_color_resolve,
                               perf::g_calls_generic_fallback_color_resolve);
+        // Phase 6 census: the 704 `software-generic-color-surface` resolves of
+        // the phase-5 table are exactly the ones this call makes that MOVE
+        // bytes. Crediting them to the shader row here is what turns "1 307 of
+        // the 1 954 colour resolves are generic" into a work order.
+        const uint64_t transfers_before = seam_resolve_transfers_;
         if (!resolve_renderer_color_overlap(color_address,
                                             static_cast<size_t>(color_bytes64),
                                             "software generic color surface")) {
             record_generic_fingerprint_perf();
             return false;
         }
+        if (generic_shader_row_) {
+            const uint64_t moved = seam_resolve_transfers_ - transfers_before;
+            generic_shader_row_->color_resolves += moved;
+            if (generic_shader_dest_slot_ <
+                generic_shader_row_->dest_resolves.size()) {
+                generic_shader_row_->dest_resolves[generic_shader_dest_slot_] +=
+                    moved;
+            }
+        } else {
+            generic_shader_census_.overflow_color_resolves +=
+                seam_resolve_transfers_ - transfers_before;
+        }
     }
-    if (uses_depth) {
+    if (uses_depth && !gpu_shader_collect) {
         perf::ScopedAdd timer(perf::g_ns_generic_fallback_depth_resolve,
                               perf::g_calls_generic_fallback_depth_resolve);
+        const uint64_t transfers_before = seam_resolve_transfers_;
         if (!resolve_renderer_depth_overlap(depth_address,
                                             static_cast<size_t>(depth_bytes64),
                                             "software generic zeta surface")) {
             record_generic_fingerprint_perf();
             return false;
+        }
+        if (generic_shader_row_) {
+            generic_shader_row_->depth_resolves +=
+                seam_resolve_transfers_ - transfers_before;
         }
     }
     PagedRasterSurface color_surface(
@@ -12027,6 +12636,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
         }
 
         ++generic_combiner_triangles_;
+        if (generic_shader_row_) ++generic_shader_row_->triangles;
         const int32_t tri_xmin = std::max<int32_t>(
             static_cast<int32_t>(xmin),
             static_cast<int32_t>(std::ceil(
@@ -12044,6 +12654,16 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             static_cast<int32_t>(std::floor(
                 (static_cast<double>(std::max({ay, by, cy})) - 8.0) / 16.0)));
         if (tri_xmax < tri_xmin || tri_ymax < tri_ymin) return;
+        // Phase 6 census: the scanline box this triangle's software loop will
+        // walk, ALWAYS ON (the block below is --perf-accounting only). One
+        // 64-bit multiply-add per software triangle; it is the only per-
+        // triangle size number available without collect_diagnostics and it is
+        // what sizes the GPU work a generated shader would take over.
+        if (generic_shader_row_) {
+            generic_shader_row_->bbox_pixels +=
+                static_cast<uint64_t>(tri_xmax - tri_xmin + 1) *
+                static_cast<uint64_t>(tri_ymax - tri_ymin + 1);
+        }
         if (profile_generic_fingerprint && generic_fingerprint_stats) {
             const uint64_t bbox_pixels =
                 static_cast<uint64_t>(tri_xmax - tri_xmin + 1) *
@@ -12147,6 +12767,95 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                 }
             }
             texture_component_masks[stage] = component_mask;
+        }
+
+        // ---- generated-shader COLLECTION (phase 6) -------------------------
+        // Everything above this point is the software path's own per-triangle
+        // setup, unmodified: the clip, the fixed-point snap, the cull, the
+        // scanline box, the depth slope, the diffuse/specular sanitisation and
+        // the texcoord component mask. Collecting HERE is what makes the GPU
+        // execute the same triangle set with the same numbers -- and it is
+        // also why the four `vertex-expansion` declines the phase-6 census
+        // recorded (519 batches, 97 resolves) simply do not exist on this
+        // path: a w-plane crossing has already been clipped by the recursion
+        // above, so there is no geometry left for the executor to refuse.
+        if (gpu_shader_collect) {
+            if (constant_depth && !constant_depth_passes) return;
+            Nv2aGeneratedTriangle t;
+            t.ax = ax; t.ay = ay; t.bx = bx; t.by = by; t.cx = cx; t.cy = cy;
+            t.bbox_xmin = tri_xmin; t.bbox_xmax = tri_xmax;
+            t.bbox_ymin = tri_ymin; t.bbox_ymax = tri_ymax;
+            // The witnessed executor's rule is 2^24, where a float stops
+            // holding every integer. That is necessary but NOT sufficient
+            // here: the geometry this executor takes is precisely the geometry
+            // the hand-written resident fixture declined, which means vertices
+            // far outside the viewport, and a triangle beyond the driver's
+            // GUARD BAND is clipped by the driver in float NDC -- moving its
+            // edges by a fraction of a pixel and UNDER-covering, the one error
+            // an in-shader test cannot repair. The bound is therefore a
+            // runtime value in guest pixels, defaulted well inside any desktop
+            // guard band, and 0 forces every triangle onto the exact
+            // scanline-box path (the diagnostic that measured this).
+            const int64_t kWide =
+                static_cast<int64_t>(gpu_generic_shader_wide_pixels_) * 16;
+            const auto is_wide = [kWide](int64_t v) {
+                return v >= kWide || v <= -kWide;
+            };
+            t.wide = kWide == 0 || is_wide(ax) || is_wide(ay) || is_wide(bx) ||
+                     is_wide(by) || is_wide(cx) || is_wide(cy);
+            t.za = a->position[2];
+            t.zb = b->position[2];
+            t.zc = c->position[2];
+            t.inverse_area = inverse_area;
+            t.inv_area_double = 1.0 / static_cast<double>(area);
+            t.inv_area_recip = static_cast<float>(t.inv_area_double);
+            // The bias is carried and ALWAYS added by the shader, never
+            // optimised away when polygon offset is off: max_z_slope is
+            // infinite for a triangle whose float determinant underflows to
+            // zero, and 0.0f * inf is NaN, which is exactly how the software
+            // path discards those fragments.
+            t.depth_bias = polygon_bias + polygon_scale * max_z_slope;
+            t.constant_depth = constant_depth;
+            t.constant_depth_value = constant_depth_value;
+            bool collect_ok = true;
+            for (size_t v = 0; v < 3 && collect_ok; ++v) {
+                const float pw = triangle_vertices[v]->position[3];
+                if (!std::isfinite(pw) || pw == 0.0f) {
+                    collect_ok = false;
+                    break;
+                }
+                t.inv_w_double[v] = 1.0 / static_cast<double>(pw);
+                t.inv_w[v] = static_cast<float>(t.inv_w_double[v]);
+                for (size_t c4 = 0; c4 < 4; ++c4) {
+                    t.varying[v][0][c4] =
+                        needs_diffuse ? diffuse_values[v][c4] : 0.0f;
+                    t.varying[v][1][c4] =
+                        needs_specular ? specular_values[v][c4] : 0.0f;
+                }
+                for (uint32_t stage = 0; stage < 4 && collect_ok; ++stage) {
+                    if (!texture_referenced[stage]) continue;
+                    for (size_t c4 = 0; c4 < 4; ++c4) {
+                        // A lane the software path's component mask leaves
+                        // uninterpolated stays exactly zero, which is what the
+                        // software's own texcoord[] holds for it.
+                        const bool masked =
+                            (texture_component_masks[stage] & (1u << c4)) != 0;
+                        const float value =
+                            masked ? texture_values[stage][v][c4] : 0.0f;
+                        if (masked && !std::isfinite(value)) {
+                            collect_ok = false;
+                            break;
+                        }
+                        t.varying[v][2 + stage][c4] = value;
+                    }
+                }
+            }
+            if (!collect_ok) {
+                gpu_shader_collect_failed = true;
+                return;
+            }
+            gpu_shader_packet.triangles.push_back(t);
+            return;
         }
 
         for (int32_t y = tri_ymin; y <= tri_ymax; ++y) {
@@ -12619,9 +13328,14 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
     if (profile_generic_fingerprint)
         generic_software_raster_started_at = std::chrono::steady_clock::now();
     if (generic_fallback_timer) generic_fallback_timer.reset();
-    {
+    // The primitive dispatch is a lambda because the generated-shader executor
+    // may have to run it TWICE: once collecting, and -- only if the collection
+    // declined -- again rasterizing in software after the resolve it skipped.
+    // It is the SAME loop in the same order both times, which is what makes
+    // the fallback structurally identical to never having tried.
+    const auto run_primitives = [&]() {
         std::optional<perf::ScopedAdd> software_raster_timer;
-        if (perf::g_enabled) {
+        if (perf::g_enabled && !gpu_shader_collect) {
             software_raster_timer.emplace(perf::g_ns_generic_software_raster,
                                           perf::g_calls_generic_software_raster);
         }
@@ -12648,6 +13362,199 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                                   transformed_batch[i - 1],
                                   transformed_batch[i]);
         }
+    };
+    run_primitives();
+    if (gpu_shader_collect) {
+        bool submitted = false;
+        if (!gpu_shader_collect_failed && !raster_failed) {
+            if (gpu_shader_packet.triangles.empty()) {
+                // Every triangle was culled or degenerate. The software path
+                // would have written nothing either, so this is a completed
+                // batch, not a decline -- and crucially it must NOT resolve.
+                submitted = true;
+                ++generic_shader_empty_batches_;
+            } else {
+                // ---- differential verification (diagnostic) --------------
+                // Run the software path on the SAME collected geometry and the
+                // SAME starting image, then run the GPU path from that image,
+                // and report the per-pixel difference. Both halves start from
+                // `before`, so nothing about residency history can confuse the
+                // comparison.
+                const bool verify =
+                    gpu_generic_shader_verify_ != 0 &&
+                    gpu_generic_shader_verified_ < gpu_generic_shader_verify_;
+                if (verify) {
+                    ++gpu_generic_shader_verified_;
+                    const size_t bytes = static_cast<size_t>(color_bytes64);
+                    if (!resolve_renderer_color_overlap(
+                            color_address, bytes, "software generic color surface")) {
+                        record_generic_fingerprint_perf();
+                        return false;
+                    }
+                    generic_shader_verify_before_.resize(bytes);
+                    if (!mem_read_ ||
+                        !mem_read_(color_address,
+                                   generic_shader_verify_before_.data(), bytes)) {
+                        fault_("NV2A generated-shader verify read failed");
+                        return false;
+                    }
+                    gpu_shader_collect = false;
+                    color_surface.reset_written_span();
+                    run_primitives();
+                    if (!color_surface.flush()) {
+                        fault_("NV2A generated-shader verify software flush failed");
+                        return false;
+                    }
+                    generic_shader_verify_soft_.resize(bytes);
+                    if (!mem_read_(color_address,
+                                   generic_shader_verify_soft_.data(), bytes)) {
+                        fault_("NV2A generated-shader verify read failed");
+                        return false;
+                    }
+                    // Put the pre-draw image back and drop residency so the
+                    // GPU path starts from exactly the same bytes.
+                    if (!mem_write_ ||
+                        !mem_write_(color_address,
+                                    generic_shader_verify_before_.data(), bytes)) {
+                        fault_("NV2A generated-shader verify restore failed");
+                        return false;
+                    }
+                    invalidate_renderer_color_overlap(
+                        color_address, bytes,
+                        nv2a_invalidate_token(kNv2aInvalidateGenericSoftware));
+                    gpu_shader_packet.needs_color_upload = true;
+                    gpu_shader_packet.color_input =
+                        generic_shader_verify_before_;
+                    gpu_shader_collect = true;
+                }
+                Nv2aGeneratedShaderResult gpu_result;
+                std::string gpu_error;
+                if (!renderer_->submit_generated_shader(gpu_shader_packet,
+                                                        gpu_result,
+                                                        gpu_error)) {
+                    fault_(gpu_error.empty()
+                               ? "NV2A generated-shader submission failed"
+                               : gpu_error.c_str());
+                    record_generic_fingerprint_perf();
+                    return false;
+                }
+                submitted = true;
+                ++generic_shader_submits_;
+                generic_shader_triangles_ += gpu_result.triangles;
+                generic_shader_color_upload_bytes_ +=
+                    gpu_result.color_upload_bytes;
+                generic_shader_texture_upload_bytes_ +=
+                    gpu_result.texture_upload_bytes;
+                if (generic_shader_row_) ++generic_shader_row_->gpu_batches;
+                if (verify) {
+                    const size_t bytes = static_cast<size_t>(color_bytes64);
+                    if (!resolve_renderer_color_overlap(
+                            color_address, bytes,
+                            "software generic color surface")) {
+                        record_generic_fingerprint_perf();
+                        return false;
+                    }
+                    generic_shader_verify_gpu_.resize(bytes);
+                    if (!mem_read_(color_address,
+                                   generic_shader_verify_gpu_.data(), bytes)) {
+                        fault_("NV2A generated-shader verify read failed");
+                        return false;
+                    }
+                    uint64_t differing = 0;
+                    uint32_t maxd = 0;
+                    char samples[512];
+                    size_t used = 0;
+                    samples[0] = '\0';
+                    const uint32_t row_words = pitch / 4u;
+                    for (size_t i = 0; i + 3 < bytes; i += 4) {
+                        uint32_t sw = 0, gp = 0;
+                        std::memcpy(&sw, generic_shader_verify_soft_.data() + i,
+                                    4);
+                        std::memcpy(&gp, generic_shader_verify_gpu_.data() + i,
+                                    4);
+                        if (sw == gp) continue;
+                        ++differing;
+                        for (int c = 0; c < 4; ++c) {
+                            const int32_t d =
+                                static_cast<int32_t>((sw >> (c * 8)) & 0xFF) -
+                                static_cast<int32_t>((gp >> (c * 8)) & 0xFF);
+                            const uint32_t ad = d < 0 ? -d : d;
+                            if (ad > maxd) maxd = ad;
+                        }
+                        if (differing <= 4 && used + 96 < sizeof(samples)) {
+                            const size_t px = i / 4u;
+                            const int n = std::snprintf(
+                                samples + used, sizeof(samples) - used,
+                                " (%zu,%zu sw=%08x gpu=%08x)",
+                                row_words ? px % row_words : px,
+                                row_words ? px / row_words : 0, sw, gp);
+                            if (n > 0) used += static_cast<size_t>(n);
+                        }
+                    }
+                    std::fprintf(
+                        stderr,
+                        "[host] generic-shader-verify batch=%u fp=%016llx "
+                        "tris=%zu differing=%llu maxdelta=%u blend=%u/%04x/%04x "
+                        "x8=%u samples:%s\n",
+                        gpu_generic_shader_verified_,
+                        (unsigned long long)gpu_shader_packet.fingerprint,
+                        gpu_shader_packet.triangles.size(),
+                        (unsigned long long)differing, maxd,
+                        gpu_shader_packet.state.blend ? 1u : 0u,
+                        gpu_shader_packet.blend_src, gpu_shader_packet.blend_dst,
+                        gpu_shader_packet.state.color_format_x8 ? 1u : 0u,
+                        samples);
+                }
+            }
+        }
+        if (submitted) {
+            // The batch was already counted as a software fallback at the top
+            // of this section (that counter means "the hand-written fixtures
+            // declined it"), so move it to the GPU column now rather than
+            // leaving the census claiming CPU work that did not happen. The
+            // seam note is NOT repeated: the fallback path already marked this
+            // job inline-only, which is what a GL submission needs too.
+            if (generic_shader_row_ && generic_shader_row_->software_batches)
+                --generic_shader_row_->software_batches;
+            ++generic_combiner_executed_batches_;
+            record_generic_fingerprint_perf();
+            return true;
+        }
+        // DECLINED after collection. Nothing has been submitted and nothing
+        // has been written, so the software path runs from the top of the
+        // primitive loop with the resolve it skipped performed first.
+        record_generic_shader_decline(
+            raster_failed ? GenericShaderDeclineReason::kRasterFailed
+                          : GenericShaderDeclineReason::kTriangleUnsupported);
+        gpu_shader_collect = false;
+        gpu_shader_packet.triangles.clear();
+        raster_failed = false;
+        {
+            perf::ScopedAdd timer(perf::g_ns_generic_fallback_color_resolve,
+                                  perf::g_calls_generic_fallback_color_resolve);
+            const uint64_t transfers_before = seam_resolve_transfers_;
+            if (!resolve_renderer_color_overlap(
+                    color_address, static_cast<size_t>(color_bytes64),
+                    "software generic color surface")) {
+                record_generic_fingerprint_perf();
+                return false;
+            }
+            if (generic_shader_row_) {
+                generic_shader_row_->color_resolves +=
+                    seam_resolve_transfers_ - transfers_before;
+            }
+        }
+        if (uses_depth) {
+            perf::ScopedAdd timer(perf::g_ns_generic_fallback_depth_resolve,
+                                  perf::g_calls_generic_fallback_depth_resolve);
+            if (!resolve_renderer_depth_overlap(
+                    depth_address, static_cast<size_t>(depth_bytes64),
+                    "software generic zeta surface")) {
+                record_generic_fingerprint_perf();
+                return false;
+            }
+        }
+        run_primitives();
     }
     if (profile_generic_fingerprint) {
         generic_batch_software_raster_ns = static_cast<uint64_t>(

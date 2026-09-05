@@ -1271,6 +1271,322 @@ public:
     const GpuResidencyCensus& gpu_residency_census() const {
         return gpu_res_;
     }
+    // beads-xbox.1.15.10 phase 5, item 1. The phase-4 rule -- "a residency
+    // BREAK is caused by whichever CPU consumer touches the surface FIRST, so
+    // removing the first one in line RE-ATTRIBUTES the break rather than
+    // removing it; only removing the LAST CPU consumer of a surface removes its
+    // resolves" -- makes `breaks_profile` above the wrong work order all by
+    // itself. What decides the order is the SET of CPU consumers per
+    // destination plane: a plane is only freed of round trips when EVERY family
+    // that draws to it is on the GPU.
+    //
+    // This is that set, and it is a direct count at the GPU/CPU decision point
+    // (not a model): one row per distinct destination plane address, with the
+    // GPU-taken and CPU-executed draw counts and, for the CPU ones, the
+    // per-profile split. Colour and zeta planes are counted in SEPARATE tables
+    // because a depth-only profile (kPitchZ16Depth) has no colour plane at all
+    // and would otherwise be invisible in a pair-keyed table.
+    static constexpr size_t kGpuResSurfaceSlots = 32;
+    struct GpuResSurfaceRow {
+        uint32_t address = 0;
+        uint32_t bytes = 0;
+        uint64_t gpu_draws = 0;
+        uint64_t cpu_draws = 0;
+        std::array<uint64_t, kGpuResProfileSlots> cpu_draws_profile{};
+    };
+    struct GpuResSurfaceTable {
+        std::array<GpuResSurfaceRow, kGpuResSurfaceSlots> rows{};
+        size_t count = 0;
+        uint64_t overflow = 0;  // draws that found no free row
+    };
+    const GpuResSurfaceTable& gpu_res_color_surfaces() const {
+        return gpu_res_color_surfaces_;
+    }
+    const GpuResSurfaceTable& gpu_res_depth_surfaces() const {
+        return gpu_res_depth_surfaces_;
+    }
+    // ---- phase 5 item 2: what a residency QUERY actually costs -------------
+    // beads-xbox.1.15.10 phase 4 section 5 inferred ~0.9 s for the 148 317
+    // no-op residency queries from the difference between a ceiling probe
+    // (-1.3 s) and a byte-rate model of the 230 queries that transfer
+    // (0.39 s). That is an inference across two instruments and it is the kind
+    // of number this bead has already had to retract twice, so it is measured
+    // directly instead: every entry to resolve_renderer_color_overlap /
+    // resolve_renderer_depth_overlap is timed and credited to `noop` or
+    // `moved` by whether it wrote any bytes back into guest RAM. Always on:
+    // two clock reads per call, 314 336 calls per canonical run, ~3 ms.
+    struct ResolveQueryCensus {
+        uint64_t color_noop_n = 0;
+        uint64_t color_noop_ticks = 0;
+        uint64_t color_moved_n = 0;
+        uint64_t color_moved_ticks = 0;
+        uint64_t depth_noop_n = 0;
+        uint64_t depth_noop_ticks = 0;
+        uint64_t depth_moved_n = 0;
+        uint64_t depth_moved_ticks = 0;
+        // Inside a TRANSFERRING resolve, which is where the seconds actually
+        // are (2.2-3.8 ms each, measured): the backend call -- glReadPixels
+        // plus the flip/deswizzle copy, and the pipeline stall in front of
+        // them -- against the guest-RAM writeback that follows it. Counted
+        // only on calls that moved bytes, so it costs nothing on the 312 k
+        // no-ops.
+        uint64_t color_backend_ticks = 0;
+        uint64_t color_memwrite_ticks = 0;
+        uint64_t color_memwrite_bytes = 0;
+        uint64_t depth_backend_ticks = 0;
+        uint64_t depth_memwrite_ticks = 0;
+        uint64_t depth_memwrite_bytes = 0;
+        // The witnessed texture-snapshot call site specifically -- the 148 547
+        // the ceiling probe skipped.
+        uint64_t texsrc_noop_n = 0;
+        uint64_t texsrc_noop_ticks = 0;
+        uint64_t texsrc_moved_n = 0;
+        uint64_t texsrc_moved_ticks = 0;
+    };
+    const ResolveQueryCensus& resolve_query_census() const {
+        return resolve_query_census_;
+    }
+    // ==================== generic-combiner SHADER census =====================
+    // beads-xbox.1.15.10 phase 6. Phase 5 measured that 1 307 of the 1 954
+    // transferring colour resolves are generic-combiner paths -- 704 from the
+    // software fallbacks and 602 from the generic texture reads -- and that a
+    // resolve costs 2.2-2.9 ms, so those alone are 3.8 s of a 57.6 s run. What
+    // it could NOT say is WHICH generic states cause them, because the only
+    // per-fingerprint census in this file
+    // (GenericCombinerFingerprintStats) is gated on --nv2a-detailed-telemetry,
+    // folds the WHOLE raster block, and keys on state a generated shader does
+    // not depend on (surface addresses, offsets, clip words), so it splits one
+    // shader across many rows.
+    //
+    // This census keys on EXACTLY the words the generated fragment program is a
+    // function of, and it is ALWAYS ON: one FNV fold over ~50 words plus a
+    // linear scan of at most kGenericShaderCensusSlots rows, once per generic
+    // BATCH (19 702 per canonical 12 G run), which is ~1 ms.
+    //
+    // A row's `color_resolves` is not modelled: it counts the batches whose own
+    // software-fallback resolve actually moved bytes back into guest RAM, taken
+    // from the same seam_resolve_transfers_ counter the `moved` column of
+    // [host] gpu-resolve-cost is taken from, so the two cannot disagree.
+    static constexpr size_t kGenericShaderCensusSlots = 128;
+    struct GenericShaderCensusRow {
+        uint64_t fingerprint = 0;
+        uint64_t batches = 0;             // batches carrying this shader state
+        uint64_t software_batches = 0;    // of those, the ones GL declined
+        uint64_t accelerated_batches = 0; // of those, the ones GL took
+        uint64_t gpu_batches = 0;         // of those, the ones the GENERATED
+                                          // shader executor took (phase 6)
+        uint64_t triangles = 0;           // software-rasterized triangles
+        uint64_t bbox_pixels = 0;         // their scanline-box area
+        uint64_t vertices = 0;
+        uint64_t color_resolves = 0;      // fallback colour resolves that MOVED
+        uint64_t depth_resolves = 0;      // fallback zeta resolves that MOVED
+        uint64_t texture_resolves = 0;    // generic texture reads that MOVED
+        // WHICH destination plane this state's resolves belong to. Without it
+        // the census cannot answer the question phase 5's plane table answers
+        // for the witnessed families -- "is this the same plane, so does
+        // removing only one side remove nothing" -- because the plane table
+        // counts witnessed draws only and a generic software draw is invisible
+        // to it. Four slots, first-come; a fifth distinct plane is counted in
+        // dest_overflow rather than evicting one that is already reported.
+        std::array<uint32_t, 4> dest_address{};
+        std::array<uint64_t, 4> dest_batches{};
+        std::array<uint64_t, 4> dest_resolves{};
+        uint64_t dest_overflow = 0;
+        // The state the fingerprint is over, kept verbatim so the work order
+        // can be read out of one run instead of re-derived from a second.
+        uint32_t combiner_control = 0;
+        uint32_t shader_stage_program = 0;
+        uint32_t other_stage_input = 0;
+        uint32_t enables = 0;
+        uint32_t alpha_func = 0, alpha_ref = 0;
+        uint32_t blend_src = 0, blend_dst = 0, blend_equation = 0;
+        uint32_t depth_func = 0, depth_mask = 0, color_mask = 0;
+        uint32_t surface_format = 0;
+        uint32_t texture_enable_mask = 0;
+        uint32_t cull_face = 0;
+        std::array<uint32_t, 8> color_icw{};
+        std::array<uint32_t, 8> alpha_icw{};
+        std::array<uint32_t, 8> color_ocw{};
+        std::array<uint32_t, 8> alpha_ocw{};
+        std::array<uint32_t, 8> factor0{};
+        std::array<uint32_t, 8> factor1{};
+        uint32_t specular_fog0 = 0, specular_fog1 = 0;
+        uint32_t final_factor0 = 0, final_factor1 = 0;
+        std::array<uint32_t, 4> tex_format{};
+        std::array<uint32_t, 4> tex_address{};
+        std::array<uint32_t, 4> tex_filter{};
+        std::array<uint32_t, 4> tex_width{};
+        std::array<uint32_t, 4> tex_height{};
+        uint32_t primitive_modes = 0;     // bitmask over primitive_mode
+        uint32_t reject_reason = 0xFFFFFFFFu;  // last resident-reject reason
+        uint8_t stage_count = 0;
+        uint8_t uses_depth = 0;
+        uint8_t texture_referenced = 0;   // bit per stage
+        uint8_t texture_cubemap = 0;
+        uint8_t texture_linear = 0;
+        uint8_t texture_alpha8 = 0;
+        uint8_t swizzled_destination = 0;
+    };
+    struct GenericShaderCensus {
+        std::array<GenericShaderCensusRow, kGenericShaderCensusSlots> rows{};
+        size_t count = 0;
+        // Batches whose state did not fit the table. Counted, never evicted, so
+        // a row the table already knows about cannot be under-reported.
+        uint64_t overflow_batches = 0;
+        uint64_t overflow_color_resolves = 0;
+    };
+    const GenericShaderCensus& generic_shader_census() const {
+        return generic_shader_census_;
+    }
+    // ============ stage (f3): the generated-shader executor =================
+    // --nv2a-gpu-generic-shader. Off restores the pre-phase-6 behaviour on the
+    // SAME binary (every generic batch the hand-written fixtures decline goes
+    // to the software rasterizer and resolves its destination), so the decision
+    // A/B is a one-flag change and not a rebuild.
+    void set_gpu_generic_shader(bool on) { gpu_generic_shader_ = on; }
+    bool gpu_generic_shader() const { return gpu_generic_shader_; }
+    // --nv2a-gpu-generic-shader-mask: bit k enables the k-th DISTINCT generated
+    // program in first-attempt order. It is the bisection tool the hand-written
+    // profiles have as --nv2a-gpu-profile-mask, and it is what makes "which
+    // generated program moved a pixel" a measurement instead of a guess. The
+    // order is deterministic because the replay is.
+    // --no-nv2a-gpu-generic-shader-fp64 switches the generated programs'
+    // perspective interpolation to single precision on the SAME binary, which
+    // is how the precision question was measured rather than assumed.
+    void set_gpu_generic_shader_fp64(bool on) { gpu_generic_shader_fp64_ = on; }
+    bool gpu_generic_shader_fp64() const { return gpu_generic_shader_fp64_; }
+    // --nv2a-gpu-generic-shader-wide N: a triangle with a vertex more than N
+    // guest pixels from the origin is drawn as its own scanline bounding box
+    // instead of as itself, so the fixed-function rasterizer never has to
+    // place it and can never under-cover it. 0 forces every triangle onto that
+    // path, which is the exactness control.
+    void set_gpu_generic_shader_wide_pixels(uint32_t pixels) {
+        gpu_generic_shader_wide_pixels_ = pixels;
+    }
+    uint32_t gpu_generic_shader_wide_pixels() const {
+        return gpu_generic_shader_wide_pixels_;
+    }
+    // --nv2a-gpu-generic-shader-verify N: for the first N submitted batches,
+    // run BOTH paths on the same inputs and report the difference per pixel.
+    // DIAGNOSTIC, VERY SLOW, and it changes residency (it invalidates the
+    // plane so the GPU re-uploads the pre-draw image). It is the instrument
+    // that answers "which pixel and by how much", which no amount of reading
+    // the generated source can.
+    // --no-nv2a-gpu-generic-shader-image-blend restores GL fixed-function
+    // blending on the SAME binary. The difference between the two is measured,
+    // not assumed: see Nv2aCombinerShaderState::blend.
+    void set_gpu_generic_shader_image_blend(bool on) {
+        gpu_generic_shader_image_blend_ = on;
+    }
+    bool gpu_generic_shader_image_blend() const {
+        return gpu_generic_shader_image_blend_;
+    }
+    void set_gpu_generic_shader_verify(uint32_t batches) {
+        gpu_generic_shader_verify_ = batches;
+    }
+    void set_gpu_generic_shader_nodraw(bool on) {
+        if (renderer_) renderer_->set_generated_shader_nodraw(on);
+    }
+    void set_gpu_generic_shader_mask(uint64_t mask) {
+        gpu_generic_shader_mask_ = mask;
+    }
+    uint64_t gpu_generic_shader_mask() const {
+        return gpu_generic_shader_mask_;
+    }
+    // The fingerprint each mask bit selects, in the order the bits are
+    // assigned, so a decline can be named in the log rather than counted.
+    size_t generic_shader_program_count() const {
+        return generic_shader_seen_count_;
+    }
+    uint64_t generic_shader_program_fingerprint(size_t index) const {
+        return index < generic_shader_seen_count_
+                   ? generic_shader_seen_fp_[index]
+                   : 0;
+    }
+    uint64_t generic_shader_program_batches(size_t index) const {
+        return index < generic_shader_seen_count_
+                   ? generic_shader_seen_batches_[index]
+                   : 0;
+    }
+    // Why a batch the executor was offered did NOT take the GPU. The first
+    // block is device-side; kGeneratorFirst + Nv2aCombinerShaderReject is the
+    // generator's own answer, so one census covers both halves and no decline
+    // is unattributed.
+    enum class GenericShaderDeclineReason : uint32_t {
+        kNone = 0,
+        kSwizzledDestination,
+        kUsesDepth,
+        kNoopBatch,
+        kVertexCount,
+        kTextureUnsupported,
+        kBackendDeclined,
+        kTriangleUnsupported,
+        kRasterFailed,
+        kMaskedOff,
+        kGeneratorFirst,
+        kCount = kGeneratorFirst +
+                 static_cast<uint32_t>(Nv2aCombinerShaderReject::kCount),
+    };
+    static size_t generic_shader_decline_count() {
+        return static_cast<size_t>(GenericShaderDeclineReason::kCount);
+    }
+    static const char* generic_shader_decline_name(size_t index) {
+        switch (static_cast<GenericShaderDeclineReason>(index)) {
+            case GenericShaderDeclineReason::kNone: return "none";
+            case GenericShaderDeclineReason::kSwizzledDestination:
+                return "swizzled-destination";
+            case GenericShaderDeclineReason::kUsesDepth: return "uses-depth";
+            case GenericShaderDeclineReason::kNoopBatch: return "noop-batch";
+            case GenericShaderDeclineReason::kVertexCount: return "vertex-count";
+            case GenericShaderDeclineReason::kTextureUnsupported:
+                return "texture-unsupported";
+            case GenericShaderDeclineReason::kBackendDeclined:
+                return "backend-declined";
+            case GenericShaderDeclineReason::kTriangleUnsupported:
+                return "triangle-unsupported";
+            case GenericShaderDeclineReason::kRasterFailed:
+                return "raster-failed";
+            case GenericShaderDeclineReason::kMaskedOff: return "masked-off";
+            default: break;
+        }
+        const size_t first =
+            static_cast<size_t>(GenericShaderDeclineReason::kGeneratorFirst);
+        if (index >= first &&
+            index < first +
+                        static_cast<size_t>(Nv2aCombinerShaderReject::kCount)) {
+            return nv2a_combiner_shader_reject_name(
+                static_cast<Nv2aCombinerShaderReject>(index - first));
+        }
+        return "unknown";
+    }
+    struct GeneratedShaderCensus {
+        uint64_t attempts = 0;
+        uint64_t submits = 0;
+        uint64_t empty_batches = 0;
+        uint64_t triangles = 0;
+        uint64_t color_upload_bytes = 0;
+        uint64_t texture_upload_bytes = 0;
+        std::array<uint64_t, 32> declines{};
+    };
+    // The BACKEND's own view of the same executor: how many distinct programs
+    // it compiled, how many texture uploads the hash skipped. Taken from the
+    // renderer so the device census and the backend census can be compared
+    // rather than one standing in for the other.
+    Nv2aRenderer::GeneratedShaderStats generated_shader_backend_stats() const {
+        return renderer_ ? renderer_->generated_shader_stats()
+                         : Nv2aRenderer::GeneratedShaderStats{};
+    }
+    GeneratedShaderCensus generated_shader_census() const {
+        GeneratedShaderCensus out;
+        out.attempts = generic_shader_attempts_;
+        out.submits = generic_shader_submits_;
+        out.empty_batches = generic_shader_empty_batches_;
+        out.triangles = generic_shader_triangles_;
+        out.color_upload_bytes = generic_shader_color_upload_bytes_;
+        out.texture_upload_bytes = generic_shader_texture_upload_bytes_;
+        out.declines = generic_shader_declines_;
+        return out;
+    }
     // --nv2a-gpu-profiles: execute the two dominant witnessed profiles on the
     // GPU with the destination surfaces resident. Off means the residency model
     // above still runs as a pure simulation, so both arms of an A/B carry the
@@ -2613,6 +2929,70 @@ private:
     // while a CPU-executed witnessed draw is asking its residency questions.
     // Phase 2 attribution (beads-xbox.1.15.10).
     uint32_t gpu_res_cpu_profile_ = 0;
+    // Phase 5 per-plane consumer tables (see GpuResSurfaceTable above).
+    GpuResSurfaceTable gpu_res_color_surfaces_{};
+    GpuResSurfaceTable gpu_res_depth_surfaces_{};
+    ResolveQueryCensus resolve_query_census_{};
+    // Set for the duration of one witnessed texture-snapshot residency query so
+    // the census can attribute that call site apart from every other consumer.
+    bool resolve_query_from_texture_source_ = false;
+    // beads-xbox.1.15.10 phase 6: the generic-combiner shader census (above).
+    GenericShaderCensus generic_shader_census_{};
+    // Fingerprint of exactly the words a generated fragment program is a
+    // function of, plus the row it selected, for the batch currently being
+    // decoded. Reset per batch.
+    GenericShaderCensusRow* generic_shader_row_ = nullptr;
+    uint64_t generic_batch_texture_resolves_ = 0;
+    size_t generic_shader_dest_slot_ = 0;
+    bool gpu_generic_shader_ = false;
+    uint64_t gpu_generic_shader_mask_ = ~uint64_t{0};
+    bool gpu_generic_shader_fp64_ = true;
+    uint32_t gpu_generic_shader_wide_pixels_ = 4096;
+    bool gpu_generic_shader_image_blend_ = true;
+    uint32_t gpu_generic_shader_verify_ = 0;
+    uint32_t gpu_generic_shader_verified_ = 0;
+    std::vector<uint8_t> generic_shader_verify_before_;
+    std::vector<uint8_t> generic_shader_verify_soft_;
+    std::vector<uint8_t> generic_shader_verify_gpu_;
+    static constexpr size_t kGenericShaderProgramSlots = 64;
+    std::array<uint64_t, kGenericShaderProgramSlots> generic_shader_seen_fp_{};
+    std::array<uint64_t, kGenericShaderProgramSlots>
+        generic_shader_seen_batches_{};
+    size_t generic_shader_seen_count_ = 0;
+    // Index of a generated program in first-attempt order, assigning one on
+    // first sight. Returns kGenericShaderProgramSlots when the table is full,
+    // which the caller treats as "not selectable" rather than evicting an
+    // index a mask already refers to.
+    size_t generic_shader_program_index(uint64_t fingerprint) {
+        for (size_t i = 0; i < generic_shader_seen_count_; ++i) {
+            if (generic_shader_seen_fp_[i] == fingerprint) {
+                ++generic_shader_seen_batches_[i];
+                return i;
+            }
+        }
+        if (generic_shader_seen_count_ >= kGenericShaderProgramSlots)
+            return kGenericShaderProgramSlots;
+        const size_t index = generic_shader_seen_count_++;
+        generic_shader_seen_fp_[index] = fingerprint;
+        generic_shader_seen_batches_[index] = 1;
+        return index;
+    }
+    uint64_t generic_shader_attempts_ = 0;
+    uint64_t generic_shader_submits_ = 0;
+    uint64_t generic_shader_empty_batches_ = 0;
+    uint64_t generic_shader_triangles_ = 0;
+    uint64_t generic_shader_color_upload_bytes_ = 0;
+    uint64_t generic_shader_texture_upload_bytes_ = 0;
+    std::array<uint64_t, 32> generic_shader_declines_{};
+    void record_generic_shader_decline(GenericShaderDeclineReason reason) {
+        const size_t index = static_cast<size_t>(reason);
+        if (index < generic_shader_declines_.size())
+            ++generic_shader_declines_[index];
+    }
+    GenericShaderCensusRow* generic_shader_census_row(uint64_t fingerprint);
+    void gpu_res_note_surface_consumer(GpuResSurfaceTable& table,
+                                       uint32_t address, uint64_t bytes,
+                                       uint32_t profile, bool on_gpu);
     void gpu_res_note_gpu_draw(uint32_t color_addr, uint64_t color_bytes,
                                uint32_t depth_addr, uint64_t depth_bytes);
     void gpu_res_end_run();

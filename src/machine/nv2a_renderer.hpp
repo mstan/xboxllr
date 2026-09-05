@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+#include "host/nv2a_combiner_glsl.hpp"
+
 namespace xlle {
 
 // This is deliberately an owned snapshot.  A renderer must never retain pointers into
@@ -381,6 +383,105 @@ struct Nv2aWitnessedProfilePacket {
     std::vector<Nv2aWitnessedTriangle> triangles;
 };
 
+// ============ stage (f3): the GENERATED generic-combiner executor ===========
+// beads-xbox.1.15.10 phase 6. Same contract as Nv2aWitnessedProfilePacket -- a
+// POST-SETUP packet whose triangles are exactly the ones the software path
+// would have rasterized, in the same order, with the same numbers -- but the
+// fragment program is GENERATED from the combiner state instead of hand
+// written. See src/host/nv2a_combiner_glsl.hpp for the generator and the
+// census that ordered it.
+struct Nv2aGeneratedTriangle {
+    // The software rasterizer's post-cull a/b/c order in NV2A 1/16-pixel fixed
+    // point, exactly the int64 values llround(pos*16) produced.
+    int64_t ax = 0, ay = 0, bx = 0, by = 0, cx = 0, cy = 0;
+    // Its scanline loop bounds, already intersected with the clip rect. Used
+    // only when `wide` is set; see Nv2aWitnessedTriangle for the full argument.
+    int32_t bbox_xmin = 0, bbox_xmax = -1, bbox_ymin = 0, bbox_ymax = -1;
+    bool wide = false;
+    float za = 0.0f, zb = 0.0f, zc = 0.0f;
+    float inverse_area = 0.0f;        // 1.0f / (float)area, the software value
+    float inv_area_recip = 0.0f;      // (float)(1.0 / (double)area)
+    float inv_w[3] = {1.0f, 1.0f, 1.0f};
+    // The software path's own doubles, carried rather than recomputed on the
+    // GPU. A generated program interpolating in double reads these; the FP32
+    // variant reads the float copies above, and the record layout is the same
+    // either way so the choice is a runtime switch on one binary.
+    double inv_area_double = 0.0;
+    double inv_w_double[3] = {1.0, 1.0, 1.0};
+    // polygon_bias + polygon_scale * max_z_slope for this triangle.
+    float depth_bias = 0.0f;
+    // The software path's constant-depth shortcut: when all three window depths
+    // are equal it computes ONE value and either skips the whole triangle or
+    // uses that value for every fragment. A triangle whose constant depth FAILS
+    // the range test is never emitted at all, so the shader only ever sees the
+    // passing case.
+    bool constant_depth = false;
+    float constant_depth_value = 0.0f;
+    // Per vertex (a, b, c), per slot: 0 diffuse, 1 specular, 2..5 texcoord 0..3.
+    // Already carrying the software path's NaN fixup and [0,1] clamp for
+    // diffuse/specular, its NaN->0 fixup for texcoords, and a hard zero in every
+    // texcoord lane the software path's component mask leaves uninterpolated.
+    std::array<std::array<std::array<float, 4>, 6>, 3> varying{};
+};
+
+struct Nv2aGeneratedTexture {
+    bool present = false;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    uint32_t border_argb = 0;
+    // Linear rows of guest A8R8G8B8 words, top row first: the device has
+    // already applied the Morton table for a swizzled source and expanded an A8
+    // source to (0xFF, 0xFF, 0xFF, a).
+    std::vector<uint8_t> linear;
+    // FNV-64 of `linear`, so the backend skips an unchanged re-upload without
+    // hashing the bytes a second time.
+    uint64_t hash = 0;
+};
+
+struct Nv2aGeneratedShaderPacket {
+    Nv2aCombinerShaderState state;
+    uint64_t fingerprint = 0;
+
+    uint32_t color_address = 0;
+    uint32_t depth_address = 0;
+    size_t surface_size = 0;
+    uint32_t surface_pitch = 0;      // raw SET_SURFACE_PITCH word (the key)
+    uint32_t surface_format = 0;     // raw SET_SURFACE_FORMAT word (the key)
+    uint32_t surface_width = 0;      // (pitch & 0xffff) / 4
+    uint32_t surface_height = 0;
+    // Effective clip rectangle, inclusive pixel bounds.
+    uint32_t xmin = 0, xmax = 0, ymin = 0, ymax = 0;
+    float clip_min = 0.0f, clip_max = 0.0f;
+
+    bool needs_color_upload = false;
+    std::vector<uint8_t> color_input;   // width*height*4 guest A8R8G8B8 words
+    bool needs_depth_upload = false;
+    std::vector<uint8_t> depth_input;   // width*height*4 guest Z24S8 words
+
+    // Uniform values: everything that parameterises the generated program
+    // without changing its source.
+    std::array<uint32_t, 8> stage_const0{};
+    std::array<uint32_t, 8> stage_const1{};
+    uint32_t final_factor0 = 0;
+    uint32_t final_factor1 = 0;
+    uint32_t alpha_ref = 0;
+    uint32_t blend_src = 0, blend_dst = 0;
+    uint32_t depth_func = 0x0207;
+    bool depth_write = false;
+    bool color_mask[4] = {true, true, true, true};
+    std::array<Nv2aGeneratedTexture, 4> textures{};
+    std::vector<Nv2aGeneratedTriangle> triangles;
+};
+
+struct Nv2aGeneratedShaderResult {
+    uint64_t triangles = 0;
+    uint64_t draw_calls = 0;
+    uint64_t color_upload_bytes = 0;
+    uint64_t texture_upload_bytes = 0;
+    uint64_t programs_compiled = 0;
+    uint64_t program_cache_hits = 0;
+};
+
 struct Nv2aWitnessedProfileResult {
     uint64_t triangles = 0;
     uint64_t draw_calls = 0;
@@ -672,6 +773,56 @@ public:
         error.clear();
         return false;
     }
+    // ---- stage (f3): the GENERATED generic-combiner executor ---------------
+    // Whether this backend can execute the packet's generated program AND has
+    // somewhere to put its destination surface. The device asks before it
+    // collects triangles, and after this returns true failure is fatal for the
+    // draw, exactly as it is for submit_generic_combiner and
+    // submit_witnessed_profile. It is deliberately NOT const and it MAY compile
+    // and cache the generated program: a shader compile is the one step of the
+    // submission that can legitimately fail, so it has to happen on the side of
+    // the contract where failure is still allowed. Nothing it does is
+    // guest-visible.
+    virtual bool supports_generated_shader(
+        const Nv2aGeneratedShaderPacket& descriptor) {
+        (void)descriptor;
+        return false;
+    }
+    // Whether the destination colour plane is already resident, so the packet
+    // does not have to carry (and the device does not have to read) the whole
+    // surface.
+    virtual bool generated_shader_target_resident(
+        uint32_t color_address, size_t size, uint32_t pitch, uint32_t height,
+        uint32_t format) const {
+        (void)color_address; (void)size; (void)pitch; (void)height; (void)format;
+        return false;
+    }
+    virtual bool submit_generated_shader(
+        const Nv2aGeneratedShaderPacket& packet,
+        Nv2aGeneratedShaderResult& result, std::string& error) {
+        (void)packet; (void)result;
+        error = "generated-shader GPU submission is not supported";
+        return false;
+    }
+    // Always-on census of the generated-program cache, so "one program per
+    // distinct combiner state" is a reported number rather than a claim.
+    struct GeneratedShaderStats {
+        uint64_t programs = 0;         // distinct fingerprints compiled
+        uint64_t compiles = 0;         // compile calls (must equal programs)
+        uint64_t cache_hits = 0;
+        uint64_t draws = 0;
+        uint64_t triangles = 0;
+        uint64_t texture_uploads = 0;
+        uint64_t texture_upload_skips = 0;  // hash matched, upload skipped
+        uint64_t surface_uploads = 0;
+        uint64_t compile_failures = 0;
+    };
+    virtual GeneratedShaderStats generated_shader_stats() const { return {}; }
+    // Diagnostic only, and KNOWN INCORRECT when on: perform every step of a
+    // generated submission except the draw call. Default off, no negative
+    // spelling, never a shipping path.
+    virtual void set_generated_shader_nodraw(bool on) { (void)on; }
+
     virtual bool debug_probe_rgba8_image_store(std::string& error) {
         error = "RGBA8 image-store probe is not supported";
         return false;

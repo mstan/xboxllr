@@ -978,6 +978,233 @@ check("the probe skips ONLY the resolve, and the coherence comment that "
       "++witnessed_texture_source_skipped_;" in cpp and
       '"witnessed texture snapshot")' in cpp)
 
+# -------------------------------------------------------------------------
+print("\n14. phase 5: the residency story is measured, not modelled")
+# -------------------------------------------------------------------------
+# Phase 4 section 5 read the -1.3 pct ceiling probe as "mostly the 148 317
+# no-op residency queries, about 0.9 s". The direct measurement is 16 ms for
+# ALL 312 079 no-op queries in the device and 6.37 s for the 2 258 that
+# transfer. The instrument that produced that correction is pinned here so the
+# claim cannot drift back to an inference.
+check("every residency query is timed, and split by whether it MOVED bytes",
+      "struct ResolveQueryTimer {" in cpp and
+      "uint64_t color_noop_ticks = 0;" in hpp and
+      "uint64_t color_moved_ticks = 0;" in hpp and
+      "[host] gpu-resolve-cost scope=%s" in main)
+check("the no-op and the transferring column each carry their own denominator, "
+      "so a per-call cost is derivable and not assumed",
+      "color_noop_ns_each=%.1f" in main and
+      "color_moved_ns_each=%.1f" in main)
+check("the transferring resolve is further split into the backend call and "
+      "the guest-memory writeback, because that is where the seconds are",
+      "color_backend_ns=%llu color_memwrite_ns=%llu color_memwrite_mb=%.1f"
+      in main)
+# The phase-4 rule: a break is attributed to the FIRST CPU consumer, so
+# breaks_profile cannot answer "which families must move to free this plane".
+check("the per-PLANE consumer table exists beside the per-profile break table, "
+      "because only the plane table can answer which families gate a resolve",
+      "struct GpuResSurfaceRow {" in hpp and
+      "std::array<uint64_t, kGpuResProfileSlots> cpu_draws_profile{};" in hpp and
+      "[host] gpu-residency-plane scope=%s" in main and
+      "[host] gpu-residency-profile scope=%s" in main)
+check("the plane table is taken at the SAME decision point as the pair-scoped "
+      "model, so the two are directly comparable",
+      latch_half.index("gpu_res_note_surface_consumer(gpu_res_color_surfaces_") <
+      latch_half.index("gpu_res_note_gpu_draw(color_address"))
+check("the plane table separates the colour and the zeta plane, which is what "
+      "makes a depth-only profile visible at all",
+      "gpu_res_color_surfaces()" in hpp and "gpu_res_depth_surfaces()" in hpp and
+      'plane=color' not in cpp and '{"color", &nv->gpu_res_color_surfaces()}' in main
+      and '{"zeta", &nv->gpu_res_depth_surfaces()}' in main)
+
+# -------------------------------------------------------------------------
+print("\n15. phase 6: the generated generic-combiner executor (stage f3)")
+# -------------------------------------------------------------------------
+# The phase-6 census measured that ALL 704 transferring
+# `software-generic-color-surface` resolves of the canonical 12 G replay land
+# on ONE plane, 0x03AA4000, from EIGHT combiner states across 1 339 software
+# fallback batches. This section pins the properties that make the generated
+# replacement faithful, none of which a passing replay can demonstrate on its
+# own.
+GEN_HPP = os.path.join(ROOT, "src", "host", "nv2a_combiner_glsl.hpp")
+GEN_CPP = os.path.join(ROOT, "src", "host", "nv2a_combiner_glsl.cpp")
+gen_hpp = read(GEN_HPP)
+gen_cpp = read(GEN_CPP)
+cml = read(os.path.join(ROOT, "CMakeLists.txt"))
+
+# --- the census that ordered the work ------------------------------------
+check("the generic-combiner SHADER census is ALWAYS ON and keyed on the words "
+      "the generated source is a function of, not on the whole raster block",
+      "struct GenericShaderCensusRow {" in hpp and
+      "GenericShaderCensusRow* generic_shader_census_row(uint64_t" in hpp and
+      "[host] generic-shader scope=%s" in main and
+      "generic_shader_row_ = generic_shader_census_row(fp);" in cpp)
+check("its resolve column is MEASURED at the call site from the same counter "
+      "[host] gpu-resolve-cost's `moved` column comes from, not modelled",
+      cpp.count("const uint64_t transfers_before = seam_resolve_transfers_;") >= 3 and
+      cpp.count("generic_shader_row_->color_resolves +=") == 2 and
+      "generic_shader_row_->texture_resolves" not in cpp.split(
+          "row.texture_resolves += generic_batch_texture_resolves_;")[0][-200:])
+check("the census records the DESTINATION PLANE of every row, which is the "
+      "only thing that can say whether removing a consumer frees a plane",
+      "std::array<uint32_t, 4> dest_address{};" in hpp and
+      "[host] generic-shader-dest scope=%s" in main)
+check("census overflow is COUNTED, never evicted, so a state the table already "
+      "knows about cannot be under-reported",
+      "++generic_shader_census_.overflow_batches;" in cpp and
+      "overflow_batches=%llu" in main)
+
+# --- the generator itself -------------------------------------------------
+check("the generator is data driven: one state struct in, one GLSL string out, "
+      "and it is built into the host library",
+      "std::string nv2a_generate_combiner_fragment_glsl(" in gen_hpp and
+      "src/host/nv2a_combiner_glsl.cpp" in cml)
+check("the program cache key is a fingerprint over EXACTLY the state the "
+      "source depends on -- the per-stage constants, the final factors, the "
+      "texture dimensions and the alpha reference are UNIFORMS and must not "
+      "appear in it, or one program would be compiled per constant value",
+      "uint64_t nv2a_combiner_shader_fingerprint(" in gen_hpp and
+      "state.stage_const" not in gen_hpp and
+      "uniform vec4 stage_const0[8]" in gen_cpp and
+      "uniform float alpha_ref" in gen_cpp)
+check("the fingerprint folds only the stages the combiner actually runs",
+      "if (i >= state.stage_count) continue;" in gen_hpp)
+check("the backend caches compiled programs on that fingerprint and counts "
+      "both halves, so 'one program per distinct state' is a reported number",
+      "GeneratedProgram* find_generated_program(uint64_t fingerprint)" in gl and
+      "++generated_stats_.cache_hits;" in gl and
+      "++generated_stats_.programs;" in gl and
+      "programs=%llu " in main and "cache_hits=%llu" in main)
+check("a program that fails to compile is remembered as failed, so a driver "
+      "without the extensions declines once instead of recompiling per batch",
+      "gp.failed = true;" in gl and
+      "return existing->failed ? nullptr : existing;" in gl and
+      "compile_failures=%llu" in main)
+check("the compile happens in supports_ , the one place where failure is still "
+      "allowed, and NOT in submit_ where the device has already committed",
+      "ensure_generated_program(descriptor) != nullptr;" in
+      body(gl, "bool supports_generated_shader(", "bool generated_shader_target_resident("))
+
+# --- the phase-1 exactness rules ------------------------------------------
+check("coverage is recomputed in the fragment program from the SAME int64 edge "
+      "functions and the SAME top-left rule at the SAME 1/16-pixel samples",
+      "int64_t gc_edge(int64_t x0" in gen_cpp and
+      "bool gc_top_left(int64_t x0" in gen_cpp and
+      "int64_t px = int64_t(xg) * 16L + 8L;" in gen_cpp)
+check("a triangle the fixed-function rasterizer might under-cover is drawn as "
+      "the SOFTWARE PATH's own scanline bounding box instead, and the bound is "
+      "a runtime value so the exactness control (0 = always) exists",
+      "t.wide = kWide == 0 || is_wide(ax)" in cpp and
+      "set_gpu_generic_shader_wide_pixels" in hpp and
+      '"--nv2a-gpu-generic-shader-wide"' in main)
+check("the perspective reciprocals are CARRIED from the device, in float AND "
+      "in double, so the precision question is a runtime switch not a rebuild",
+      "double inv_area_double = 0.0;" in rhpp and
+      "double inv_w_double[3]" in rhpp and
+      "bool fp64_interpolate = true;" in gen_hpp and
+      '"--no-nv2a-gpu-generic-shader-fp64"' in main)
+check("bilinear filtering is written out explicitly against texelFetch in the "
+      "software sampler's own two-stage order, never left to a LINEAR sampler",
+      "texelFetch(texture" in gen_cpp and
+      "precise vec4 top = c00 + (c10 - c00) * fx;" in gen_cpp and
+      "color = top + (bottom - top) * fy;" in gen_cpp)
+check("swizzled and A8 textures are unswizzled and expanded by the DEVICE, "
+      "which owns the Morton table, and carry an FNV so an unchanged re-upload "
+      "is skipped",
+      "src.swizzle->index(x, y)" in cpp and
+      "0x00FFFFFFu |" in cpp and
+      "dst.hash = fnv1a_bytes(dst.linear.data()" in cpp and
+      "slot.hash == texture.hash" in gl and
+      "++generated_stats_.texture_upload_skips;" in gl)
+check("the software path's four exact final-combiner SHORTCUTS are reproduced "
+      "as shortcuts, not re-derived through the general form, because they are "
+      "not always equal to it",
+      "kPrimaryColor" in gen_hpp and "kTexture0ModulatePrimaryAlpha" in gen_hpp and
+      "kTexture0Passthrough" in gen_hpp and "kBlackAlphaOne" in gen_hpp and
+      "st.final_mode = FinalMode::kPrimaryColor;" in cpp)
+
+# --- the blend, which is where the first attempt was wrong ----------------
+# MEASURED with --nv2a-gpu-generic-shader-verify: GL fixed-function blending
+# differs from the software blend by exactly 1 LSB over ~90 pct of the plane on
+# EVERY batch, because GL quantises the source and the factor to the
+# framebuffer's 8 bits and the software path does not. Over the dashboard's
+# ~500 blended layers that compounded to 38 LSB over 79 pct of the frame.
+check("the blend, the colour mask and the X8R8G8B8 alpha rule are done IN THE "
+      "SHADER against an image binding, using the software path's own "
+      "expressions and its own floor(x*255+0.5) pack",
+      "beginInvocationInterlockARB();" in gen_cpp and
+      "imageStore(dest_image, store_at, stored);" in gen_cpp and
+      "float gc_pack(float v) { return floor(clamp(v, 0.0, 1.0) * 255.0 + 0.5)"
+      in gen_cpp)
+check("the interlock is ORDERED, so overlapping fragments of one draw "
+      "serialise in primitive order exactly as the scanline loop does",
+      "layout(pixel_interlock_ordered) in;" in gen_cpp)
+check("with the shader blending, the ROP is told to write NOTHING -- blending "
+      "off and every channel masked -- so there is exactly one writer",
+      'if (packet.state.image_blend) {\n            // The blend, the colour mask'
+      in gl and
+      "cache_color_mask(0, 0, 0, 0);" in gl)
+check("the image stores are ordered against the next draw, the resolve's "
+      "readback and any texture fetch of the plane by a memory barrier",
+      "memory_barrier_(kGlShaderImageAccessBarrierBit |" in gl and
+      "kGlFramebufferBarrierBit |" in gl and
+      "kGlTextureFetchBarrierBit);" in gl)
+check("GL fixed-function blending is still reachable on the same binary, "
+      "because that is the arm the difference was measured against",
+      '"--no-nv2a-gpu-generic-shader-image-blend"' in main and
+      "bool image_blend = true;" in gen_hpp)
+check("the differential verifier that measured it is a DIAGNOSTIC: default "
+      "off, and it runs BOTH paths from the same starting image",
+      '"--nv2a-gpu-generic-shader-verify"' in main and
+      "uint32_t gpu_generic_shader_verify_ = 0;" in hpp and
+      "generic_shader_verify_before_" in hpp and
+      "[host] generic-shader-verify batch=%u" in cpp)
+
+# --- selection, decline census, and the fallback --------------------------
+check("every decline is NAMED and counted, and the table covers both halves -- "
+      "the device's own limits and the generator's unsupported-state answer",
+      "enum class GenericShaderDeclineReason : uint32_t {" in hpp and
+      "kGeneratorFirst" in hpp and
+      "nv2a_combiner_shader_reject_name(" in hpp and
+      "[host] generic-shader-decline scope=%s" in main)
+check("the decision is taken BEFORE the destination resolve, because that "
+      "resolve is the cost the executor exists to remove",
+      cpp.index("if (gpu_generic_shader_ && renderer_ && effective_clip_valid) {") <
+      cpp.index('"software generic color surface")'))
+check("a decline after collection throws the whole triangle list away, does "
+      "the resolve it skipped, and re-runs the IDENTICAL primitive loop",
+      "const auto run_primitives = [&]() {" in cpp and
+      cpp.count("run_primitives();") == 3 and
+      "gpu_shader_packet.triangles.clear();" in cpp)
+check("a batch that collected NO triangle is a completed batch, not a decline, "
+      "and must not resolve either",
+      "++generic_shader_empty_batches_;" in cpp and
+      "empty=%llu" in main)
+check("the generated executor carries the SAME aliasing guard the witnessed "
+      "one does, so one guest range can never have two resident copies",
+      "ALIASING GUARD, the same one supports_witnessed_profile carries" in gl)
+check("the executor runs on the emulation thread in the generic-combiner "
+      "batch body, which is inline-only, so no GL call is reachable from a "
+      "worker",
+      "seam_note_threadable(job, false, kSeamNoDirectPointer);" in cpp and
+      "submit_generated_shader(gpu_shader_packet," in cpp and
+      "submit_generated_shader" not in exec_half)
+check("both flag spellings exist on one binary and the mask exists so a single "
+      "generated program can be bisected out",
+      '"--nv2a-gpu-generic-shader"' in main and
+      '"--no-nv2a-gpu-generic-shader"' in main and
+      '"--nv2a-gpu-generic-shader-mask"' in main and
+      "[host] generic-shader-program scope=%s" in main)
+check("the nodraw control exists, is default off and has no --no- spelling, "
+      "because it is knowingly incorrect when on",
+      '"--nv2a-gpu-generic-shader-nodraw"' in main and
+      '"--no-nv2a-gpu-generic-shader-nodraw"' not in main and
+      "bool generated_nodraw_ = false;" in gl)
+check("the record layout the device writes and the layout the generated source "
+      "declares are pinned to each other by a static_assert",
+      "static_assert(sizeof(GeneratedTriRecord) == 448," in gl and
+      "dvec4 recip;" in gen_cpp and "vec4 v[18];" in gen_cpp)
+
 print("\n%d checks, %d failures" % (checks, len(failures)))
 if failures:
     for name in failures:

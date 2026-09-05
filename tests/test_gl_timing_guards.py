@@ -123,11 +123,17 @@ def lines_matching(pattern):
 # projected profile's SECOND sampled image (ensure_witnessed_projected_texture)
 # adds one glTexImage2D and one glTexSubImage2D, both through the wrapper.
 # 9 -> 10 and 4 -> 5.
+# Updated again 2026-09-05 for beads-xbox.1.15.10 phase 6 (stage f3): the
+# GENERATED generic-combiner executor adds one glDrawArrays (its own batched
+# draw), one glBufferData (its triangle SSBO) and two glTexImage2D (its
+# destination-plane upload and its per-stage sampled textures). 3 -> 4, 7 -> 8
+# and 10 -> 12. Every one of them goes through the wrapper, which is the
+# property this file exists to keep true.
 WRAPPED = [
-    ("draw_arrays_", {"gpu_timed_draw_arrays": 3}),
+    ("draw_arrays_", {"gpu_timed_draw_arrays": 4}),
     ("dispatch_compute_", {"gpu_timed_dispatch_compute": 6}),
-    ("buffer_data_", {"gpu_timed_buffer_data": 7}),
-    ("tex_image_2d_", {"gpu_timed_tex_image_2d": 10}),
+    ("buffer_data_", {"gpu_timed_buffer_data": 8}),
+    ("tex_image_2d_", {"gpu_timed_tex_image_2d": 12}),
     ("tex_sub_image_2d_", {"gpu_timed_tex_sub_image_2d": 5}),
     ("read_pixels_", {"gpu_timed_read_pixels": 2,          # the two GL probes
                       "gpu_timed_resolve_read_pixels": 2}),  # color + zeta

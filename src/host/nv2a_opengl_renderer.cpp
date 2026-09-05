@@ -1,6 +1,7 @@
 #include "host/nv2a_opengl_renderer.hpp"
 
 #include "host/nv2a_witnessed_gl_shaders.hpp"
+#include "host/nv2a_combiner_glsl.hpp"
 #include "machine/perf_accounting.hpp"
 #include "machine/perf_excl.hpp"
 
@@ -79,6 +80,8 @@ using GlDisable = void (*)(unsigned int);
 using GlDepthFunc = void (*)(unsigned int);
 using GlDepthMask = void (*)(unsigned char);
 using GlBlendFunc = void (*)(unsigned int, unsigned int);
+using GlBlendFuncSeparate = void (*)(unsigned int, unsigned int,
+                                     unsigned int, unsigned int);
 using GlBlendEquation = void (*)(unsigned int);
 using GlColorMask = void (*)(unsigned char, unsigned char, unsigned char, unsigned char);
 using GlVertexAttribPointer = void (*)(unsigned int, int, unsigned int, unsigned char,
@@ -141,6 +144,7 @@ constexpr unsigned int kGlDynamicCopy = 0x88EA;
 constexpr unsigned int kGlDynamicDraw = 0x88E8;
 constexpr unsigned int kGlShaderStorageBarrierBit = 0x2000;
 constexpr unsigned int kGlBufferUpdateBarrierBit = 0x0200;
+constexpr unsigned int kGlTextureFetchBarrierBit = 0x0008;
 constexpr unsigned int kGlShaderImageAccessBarrierBit = 0x0020;
 constexpr unsigned int kGlFramebufferBarrierBit = 0x0400;
 constexpr unsigned int kGlFramebuffer = 0x8D40;
@@ -178,6 +182,10 @@ constexpr unsigned int kGlZero = 0;
 constexpr unsigned int kGlOne = 1;
 constexpr unsigned int kGlSrcAlpha = 0x0302;
 constexpr unsigned int kGlOneMinusSrcAlpha = 0x0303;
+// Dual-source blending (GL 3.3 core): the second fragment output supplies the
+// blend factor while the first supplies the written colour.
+constexpr unsigned int kGlSrc1Alpha = 0x8589;
+constexpr unsigned int kGlOneMinusSrc1Alpha = 0x88FB;
 constexpr unsigned int kGlTextureMinFilter = 0x2801;
 constexpr unsigned int kGlTextureMagFilter = 0x2800;
 constexpr unsigned int kGlNearest = 0x2600;
@@ -1181,6 +1189,10 @@ bool load_gl(T& destination, const char* name) {
 }
 
 class OpenGlNv2aRenderer final : public Nv2aRenderer {
+    // Forward declaration only. The definition is far below with the rest of
+    // the resident-surface cache; the generated-shader executor sits ABOVE it
+    // in the file and needs the name in a parameter type.
+    struct ResidentSurface;
 public:
     OpenGlNv2aRenderer(SDL_Window* window, SDL_GLContext context, bool owns_video,
                        unsigned int fixture_program,
@@ -2163,6 +2175,559 @@ public:
         result.writes = 0;
         return true;
     }
+    // ======= stage (f3): the GENERATED generic-combiner executor ==========
+    // beads-xbox.1.15.10 phase 6. Sits on the SAME ResidentSurface cache the
+    // hand-written resident fixtures and the witnessed executor use, keyed on
+    // the same (address, size, raw pitch word, height, raw format word) tuple,
+    // so a plane made resident by any of the three is found by the other two
+    // and the existing resolve/invalidate seam keeps all of them coherent.
+    //
+    // The DRAW is phase-1 shaped, not fixture shaped: six vertices per triangle
+    // record out of an SSBO, coverage and depth recomputed in the fragment
+    // program from int64 edge functions at the software rasterizer's own
+    // 1/16-pixel sample points. Blending, the colour mask and the depth test
+    // are GL fixed function, exactly as the resident fixtures on this same
+    // plane already use them.
+    struct GeneratedTriRecord {
+        int64_t ab[4];          // 0   ax, ay, bx, by
+        int64_t cp[4];          // 32  cx, cy, packed scanline box, wide flag
+        float   zi[4];          // 64  za, zb, zc, inverse_area (float)
+        float   wv[4];          // 80  1/area, 1/w0, 1/w1, 1/w2 (float)
+        float   misc[4];        // 96  depth bias, const-depth flag, its value
+        float   v[18][4];       // 112 vertex k slot s at v[k*6+s]
+        float   pad[4];         // 400 (keeps `recip` on its 32-byte boundary)
+        alignas(32) double recip[4];  // 416 1/area, 1/w0, 1/w1, 1/w2 (double)
+    };
+    static_assert(sizeof(GeneratedTriRecord) == 448,
+                  "generated triangle record must match the std430 layout");
+
+    struct GeneratedProgram {
+        unsigned int program = 0;
+        int loc_surface_size = -1;
+        int loc_clip_min = -1;
+        int loc_clip_max = -1;
+        int loc_alpha_ref = -1;
+        int loc_stage_const0 = -1;
+        int loc_stage_const1 = -1;
+        int loc_final_const0 = -1;
+        int loc_final_const1 = -1;
+        int loc_texture[4] = {-1, -1, -1, -1};
+        int loc_tex_size[4] = {-1, -1, -1, -1};
+        int loc_tex_border[4] = {-1, -1, -1, -1};
+        bool failed = false;
+    };
+
+    // Program cache keyed on the generator's own fingerprint, which is an FNV
+    // over exactly the state the SOURCE is a function of. A linear scan is the
+    // right shape here: the canonical run compiles a single-digit number of
+    // programs and the lookup is once per submitted batch, not per triangle.
+    GeneratedProgram* find_generated_program(uint64_t fingerprint) {
+        for (auto& entry : generated_programs_)
+            if (entry.first == fingerprint) return &entry.second;
+        return nullptr;
+    }
+
+    GeneratedProgram* ensure_generated_program(
+        const Nv2aGeneratedShaderPacket& packet) {
+        if (GeneratedProgram* existing =
+                find_generated_program(packet.fingerprint)) {
+            ++generated_stats_.cache_hits;
+            return existing->failed ? nullptr : existing;
+        }
+        GeneratedProgram gp;
+        const std::string fragment =
+            nv2a_generate_combiner_fragment_glsl(packet.state);
+        std::string error;
+        ++generated_stats_.compiles;
+        if (!compile_graphics_program(kNv2aGeneratedVertexSource,
+                                      fragment.c_str(), "generated-combiner",
+                                      gp.program, error)) {
+            gp.failed = true;
+            ++generated_stats_.compile_failures;
+            std::fprintf(stderr,
+                         "[nv2a-renderer] generated combiner program %016llx "
+                         "failed: %s\n",
+                         (unsigned long long)packet.fingerprint, error.c_str());
+            generated_programs_.push_back({packet.fingerprint, gp});
+            return nullptr;
+        }
+        gp.loc_surface_size = cached_uniform_location(gp.program, "surface_size");
+        gp.loc_clip_min = cached_uniform_location(gp.program, "clip_min");
+        gp.loc_clip_max = cached_uniform_location(gp.program, "clip_max");
+        gp.loc_alpha_ref = cached_uniform_location(gp.program, "alpha_ref");
+        gp.loc_stage_const0 =
+            cached_uniform_location(gp.program, "stage_const0[0]");
+        gp.loc_stage_const1 =
+            cached_uniform_location(gp.program, "stage_const1[0]");
+        gp.loc_final_const0 =
+            cached_uniform_location(gp.program, "final_const0");
+        gp.loc_final_const1 =
+            cached_uniform_location(gp.program, "final_const1");
+        for (int i = 0; i < 4; ++i) {
+            char name[32];
+            std::snprintf(name, sizeof(name), "texture%d", i);
+            gp.loc_texture[i] = cached_uniform_location(gp.program, name);
+            std::snprintf(name, sizeof(name), "tex_size%d", i);
+            gp.loc_tex_size[i] = cached_uniform_location(gp.program, name);
+            std::snprintf(name, sizeof(name), "tex_border%d", i);
+            gp.loc_tex_border[i] = cached_uniform_location(gp.program, name);
+        }
+        ++generated_stats_.programs;
+        generated_programs_.push_back({packet.fingerprint, gp});
+        return &generated_programs_.back().second;
+    }
+
+    bool supports_generated_shader(
+        const Nv2aGeneratedShaderPacket& descriptor) override {
+        if (!generated_available_) return false;
+        if (descriptor.surface_width == 0 || descriptor.surface_height == 0)
+            return false;
+        if (descriptor.surface_size !=
+            static_cast<size_t>(descriptor.surface_width) *
+                descriptor.surface_height * 4u) {
+            return false;
+        }
+        for (const auto& texture : descriptor.textures) {
+            if (!texture.present) continue;
+            if (texture.width == 0 || texture.height == 0) return false;
+            if (texture.linear.size() !=
+                static_cast<size_t>(texture.width) * texture.height * 4u) {
+                return false;
+            }
+        }
+        // ALIASING GUARD, the same one supports_witnessed_profile carries and
+        // for the same reason. The resident cache is keyed on
+        // (address, size, pitch, format), so the SAME guest memory rebound
+        // with a different surface format or pitch would silently produce a
+        // SECOND resident copy. Two GPU-authoritative copies of one range is
+        // data loss: whichever resolves last wins and the other's draws
+        // vanish. Refusing here sends the batch to the software path, whose
+        // resolve/invalidate resolves the stale copy through the existing seam.
+        {
+            auto overlaps = [](uint64_t a0, uint64_t a1, uint64_t b0,
+                               uint64_t b1) { return a0 < b1 && b0 < a1; };
+            const uint64_t want0 = descriptor.color_address;
+            const uint64_t want1 = want0 + descriptor.surface_size;
+            for (const auto& surface : resident_surfaces_) {
+                const bool is_ours =
+                    surface.valid &&
+                    surface.address == descriptor.color_address &&
+                    surface.size == descriptor.surface_size &&
+                    surface.pitch == descriptor.surface_pitch &&
+                    surface.format == descriptor.surface_format;
+                if (surface.valid && !is_ours) {
+                    const uint64_t c0 = surface.address;
+                    const uint64_t c1 = c0 + surface.size;
+                    if (overlaps(want0, want1, c0, c1)) return false;
+                }
+                if (surface.depth_valid) {
+                    const uint64_t d0 = surface.depth_address;
+                    const uint64_t d1 = d0 + surface.depth_size;
+                    if (overlaps(want0, want1, d0, d1)) return false;
+                }
+            }
+        }
+        // A plane that is already resident always has somewhere to land; one
+        // that is not needs a slot the cache is allowed to take, and the cache
+        // never evicts a dirty target. Refusing HERE is what keeps the "after
+        // supports_ returns true, failure is fatal" contract honest.
+        if (find_resident_surface(descriptor.color_address,
+                                  descriptor.surface_size,
+                                  descriptor.surface_pitch,
+                                  descriptor.surface_height,
+                                  descriptor.surface_format) == nullptr) {
+            if (!descriptor.needs_color_upload) return false;
+            bool slot = false;
+            for (const auto& surface : resident_surfaces_) {
+                if ((!surface.valid && !surface.depth_dirty) ||
+                    (!surface.dirty && !surface.depth_dirty)) {
+                    slot = true;
+                    break;
+                }
+            }
+            if (!slot) return false;
+        }
+        // Compiling here rather than in submit() is deliberate: submit() may
+        // not fail once the device has committed to the GPU path, and a shader
+        // compile is the one step that legitimately can. It happens once per
+        // distinct combiner state.
+        std::string error;
+        if (!enter_witnessed_context(error)) return false;
+        return ensure_generated_program(descriptor) != nullptr;
+    }
+
+    bool generated_shader_target_resident(uint32_t color_address, size_t size,
+                                          uint32_t pitch, uint32_t height,
+                                          uint32_t format) const override {
+        return find_resident_surface(color_address, size, pitch, height,
+                                     format) != nullptr;
+    }
+
+    GeneratedShaderStats generated_shader_stats() const override {
+        return generated_stats_;
+    }
+    void set_generated_shader_nodraw(bool on) override {
+        generated_nodraw_ = on;
+    }
+
+    bool submit_generated_shader(const Nv2aGeneratedShaderPacket& packet,
+                                 Nv2aGeneratedShaderResult& result,
+                                 std::string& error) override {
+        perf_excl::Scope gl_region(perf_excl::kNv2aGl);
+        result = {};
+        if (packet.triangles.empty()) return true;
+        // A pending witnessed batch may target this very plane, and GL executes
+        // primitives in submission order only within one command stream; the
+        // resident fixtures flush for the same reason.
+        if (!flush_witnessed_batch(error)) return false;
+        if (!take_witnessed_flush_error(error)) return false;
+        if (!enter_witnessed_context(error)) return false;
+
+        GeneratedProgram* gp = ensure_generated_program(packet);
+        if (!gp) {
+            error = "OpenGL generated combiner program unavailable";
+            return false;
+        }
+        ResidentSurface* surface = nullptr;
+        if (!ensure_generated_surface(packet, surface, result, error))
+            return false;
+
+        // ---- textures --------------------------------------------------
+        for (uint32_t i = 0; i < 4; ++i) {
+            const Nv2aGeneratedTexture& texture = packet.textures[i];
+            if (!texture.present) continue;
+            GeneratedTextureSlot& slot = generated_textures_[i];
+            if (!slot.texture) {
+                gen_textures_(1, &slot.texture);
+                if (!slot.texture) {
+                    error = "OpenGL generated combiner texture allocation failed";
+                    return false;
+                }
+                cache_bind_texture_unit(kGlTexture0 + i, slot.texture);
+                tex_parameter_i_(kGlTexture2D, kGlTextureMinFilter, kGlNearest);
+                tex_parameter_i_(kGlTexture2D, kGlTextureMagFilter, kGlNearest);
+                tex_parameter_i_(kGlTexture2D, kGlTextureWrapS, kGlClampToEdge);
+                tex_parameter_i_(kGlTexture2D, kGlTextureWrapT, kGlClampToEdge);
+            } else {
+                cache_bind_texture_unit(kGlTexture0 + i, slot.texture);
+            }
+            if (slot.valid && slot.hash == texture.hash &&
+                slot.width == texture.width && slot.height == texture.height) {
+                ++generated_stats_.texture_upload_skips;
+                continue;
+            }
+            std::vector<uint8_t>& rgba = upload_staging_;
+            guest_words_to_rgba_unflipped(texture.linear, rgba, texture.width,
+                                          texture.height, false);
+            pixel_store_i_(kGlUnpackAlignment, 1);
+            gpu_timed_tex_image_2d(kGlTexture2D, 0, kGlRgba8,
+                                   static_cast<int>(texture.width),
+                                   static_cast<int>(texture.height), 0, kGlRgba,
+                                   kGlUnsignedByte, rgba.data());
+            slot.valid = true;
+            slot.hash = texture.hash;
+            slot.width = texture.width;
+            slot.height = texture.height;
+            ++generated_stats_.texture_uploads;
+            result.texture_upload_bytes += rgba.size();
+        }
+        // Leave unit 0 active, which every other path in this file assumes.
+        cache_bind_texture_unit(kGlTexture0,
+                                generated_textures_[0].texture);
+
+        // ---- triangle records ------------------------------------------
+        const size_t count = packet.triangles.size();
+        generated_records_.resize(sizeof(GeneratedTriRecord) * count);
+        for (size_t i = 0; i < count; ++i) {
+            const Nv2aGeneratedTriangle& t = packet.triangles[i];
+            auto* rec = reinterpret_cast<GeneratedTriRecord*>(
+                generated_records_.data() + sizeof(GeneratedTriRecord) * i);
+            rec->ab[0] = t.ax; rec->ab[1] = t.ay;
+            rec->ab[2] = t.bx; rec->ab[3] = t.by;
+            rec->cp[0] = t.cx; rec->cp[1] = t.cy;
+            rec->cp[2] = (static_cast<int64_t>(t.bbox_xmin) & 0xFFFF) |
+                         ((static_cast<int64_t>(t.bbox_xmax) & 0xFFFF) << 16) |
+                         ((static_cast<int64_t>(t.bbox_ymin) & 0xFFFF) << 32) |
+                         ((static_cast<int64_t>(t.bbox_ymax) & 0xFFFF) << 48);
+            rec->cp[3] = t.wide ? 1 : 0;
+            rec->zi[0] = t.za; rec->zi[1] = t.zb; rec->zi[2] = t.zc;
+            rec->zi[3] = t.inverse_area;
+            rec->wv[0] = t.inv_area_recip;
+            rec->wv[1] = t.inv_w[0];
+            rec->wv[2] = t.inv_w[1];
+            rec->wv[3] = t.inv_w[2];
+            rec->misc[0] = t.depth_bias;
+            rec->misc[1] = t.constant_depth ? 1.0f : 0.0f;
+            rec->misc[2] = t.constant_depth_value;
+            rec->misc[3] = 0.0f;
+            for (int v = 0; v < 3; ++v) {
+                for (int slot = 0; slot < 6; ++slot) {
+                    for (int c = 0; c < 4; ++c)
+                        rec->v[v * 6 + slot][c] = t.varying[v][slot][c];
+                }
+            }
+            rec->pad[0] = rec->pad[1] = rec->pad[2] = rec->pad[3] = 0.0f;
+            rec->recip[0] = t.inv_area_double;
+            rec->recip[1] = t.inv_w_double[0];
+            rec->recip[2] = t.inv_w_double[1];
+            rec->recip[3] = t.inv_w_double[2];
+        }
+        if (!generated_ssbo_) gen_buffers_(1, &generated_ssbo_);
+        bind_buffer_(kGlShaderStorageBuffer, generated_ssbo_);
+        gpu_timed_buffer_data(
+            kGlShaderStorageBuffer,
+            static_cast<std::ptrdiff_t>(generated_records_.size()),
+            generated_records_.data(), kGlStreamDraw);
+        bind_buffer_base_(kGlShaderStorageBuffer, 0, generated_ssbo_);
+
+        // ---- program and uniforms ---------------------------------------
+        use_program_(gp->program);
+        witnessed_bound_program_ = gp->program;
+        uniform_2f_(gp->loc_surface_size,
+                    static_cast<float>(packet.surface_width),
+                    static_cast<float>(packet.surface_height));
+        uniform_1f_(gp->loc_clip_min, packet.clip_min);
+        uniform_1f_(gp->loc_clip_max, packet.clip_max);
+        uniform_1f_(gp->loc_alpha_ref,
+                    static_cast<float>(packet.alpha_ref & 0xFFu));
+        const auto unpack = [](uint32_t word, float* out) {
+            out[0] = static_cast<float>((word >> 16) & 0xFFu) / 255.0f;
+            out[1] = static_cast<float>((word >> 8) & 0xFFu) / 255.0f;
+            out[2] = static_cast<float>(word & 0xFFu) / 255.0f;
+            out[3] = static_cast<float>((word >> 24) & 0xFFu) / 255.0f;
+        };
+        float c[4];
+        // Uniform ARRAY element locations are consecutive by the GL spec, so
+        // the eight per-stage constant pairs need one glGetUniformLocation
+        // each rather than eight.
+        for (int i = 0; i < 8; ++i) {
+            if (gp->loc_stage_const0 >= 0) {
+                unpack(packet.stage_const0[i], c);
+                uniform_4f_(gp->loc_stage_const0 + i, c[0], c[1], c[2], c[3]);
+            }
+            if (gp->loc_stage_const1 >= 0) {
+                unpack(packet.stage_const1[i], c);
+                uniform_4f_(gp->loc_stage_const1 + i, c[0], c[1], c[2], c[3]);
+            }
+        }
+        if (gp->loc_final_const0 >= 0) {
+            unpack(packet.final_factor0, c);
+            uniform_4f_(gp->loc_final_const0, c[0], c[1], c[2], c[3]);
+        }
+        if (gp->loc_final_const1 >= 0) {
+            unpack(packet.final_factor1, c);
+            uniform_4f_(gp->loc_final_const1, c[0], c[1], c[2], c[3]);
+        }
+        for (int i = 0; i < 4; ++i) {
+            if (!packet.textures[i].present) continue;
+            if (gp->loc_texture[i] >= 0) uniform_1i_(gp->loc_texture[i], i);
+            if (gp->loc_tex_size[i] >= 0) {
+                uniform_2f_(gp->loc_tex_size[i],
+                            static_cast<float>(packet.textures[i].width),
+                            static_cast<float>(packet.textures[i].height));
+            }
+            if (gp->loc_tex_border[i] >= 0) {
+                unpack(packet.textures[i].border_argb, c);
+                uniform_4f_(gp->loc_tex_border[i], c[0], c[1], c[2], c[3]);
+            }
+        }
+
+        // ---- fixed-function state ---------------------------------------
+        cache_bind_framebuffer(resident_fbo_);
+        cache_framebuffer_color_texture(resident_fbo_, surface->texture);
+        cache_framebuffer_depth_texture(resident_fbo_, 0);
+        cache_viewport(0, 0, static_cast<int>(packet.surface_width),
+                       static_cast<int>(packet.surface_height));
+        // Guest scissor rows are top-down; the resident image is stored
+        // bottom-up, exactly as guest_words_to_rgba stores it.
+        cache_scissor(true, static_cast<int>(packet.xmin),
+                      static_cast<int>(packet.surface_height - 1u -
+                                       packet.ymax),
+                      static_cast<int>(packet.xmax - packet.xmin + 1u),
+                      static_cast<int>(packet.ymax - packet.ymin + 1u));
+        cache_depth_test(false, kGlAlways);
+        cache_depth_mask(false);
+        if (packet.state.image_blend) {
+            // The blend, the colour mask and the X8 alpha rule are all inside
+            // the fragment program now, written against an rgba8 image binding
+            // under a fragment-shader interlock. The ROP must therefore write
+            // NOTHING: blending off, every channel masked. Measured reason:
+            // GL fixed-function blending quantises its inputs to the
+            // framebuffer's 8 bits and the software path does not, which the
+            // differential verifier reported as exactly 1 LSB over ~90 pct of
+            // the plane on every batch, compounding to 38 LSB over the
+            // dashboard's ~500 blended layers.
+            bind_image_texture_(1, surface->texture, 0, 0, 0, kGlReadWrite,
+                                kGlRgba8);
+            cache_blend(false, 0, 0);
+            cache_color_mask(0, 0, 0, 0);
+        } else if (packet.state.blend) {
+            if (packet.state.color_format_x8) {
+                // X8R8G8B8: the written alpha byte is 0xFF (fragment output
+                // index 0) while the BLEND FACTOR is the combiner's own alpha
+                // (index 1). SRC_ALPHA would read the written 1.0 and simply
+                // replace the destination, so the factors move to their
+                // SRC1 forms and the alpha channel takes ONE/ZERO.
+                cache_blend(true, kGlOne, kGlZero);
+                blend_func_separate_(
+                    gl_blend_factor_src1(packet.blend_src),
+                    gl_blend_factor_src1(packet.blend_dst), kGlOne, kGlZero);
+                // The mirror no longer describes the driver state; force the
+                // next cache_blend to re-issue both factors.
+                if (gl_state_.valid) gl_state_.blend_src = 0xFFFFFFFFu;
+            } else {
+                cache_blend(true, gl_blend_factor(packet.blend_src),
+                            gl_blend_factor(packet.blend_dst));
+            }
+            cache_color_mask(packet.color_mask[0] ? 1 : 0,
+                             packet.color_mask[1] ? 1 : 0,
+                             packet.color_mask[2] ? 1 : 0,
+                             packet.color_mask[3] ? 1 : 0);
+        } else {
+            cache_blend(false, 0, 0);
+            cache_color_mask(packet.color_mask[0] ? 1 : 0,
+                             packet.color_mask[1] ? 1 : 0,
+                             packet.color_mask[2] ? 1 : 0,
+                             packet.color_mask[3] ? 1 : 0);
+        }
+        if (!witnessed_fixed_state_) {
+            disable_(kGlCullFace);
+            disable_(kGlStencilTest);
+            witnessed_fixed_state_ = true;
+        }
+        if (!generated_vao_) gen_vertex_arrays_(1, &generated_vao_);
+        cache_bind_vao_vbo(generated_vao_, 0);
+        // DIAGNOSTIC, KNOWN INCORRECT WHEN ON. Everything but the draw itself:
+        // the residency, the uploads and the state all happen, so the ONLY
+        // thing missing from the frame is this executor's own output. It is
+        // the control that separates "my draws are nearly right" from "my
+        // draws contribute almost nothing", which no amount of reading the
+        // shader can settle.
+        if (!generated_nodraw_)
+            gpu_timed_draw_arrays(kGlTriangles, 0, static_cast<int>(count * 6u));
+        if (packet.state.image_blend) {
+            // The image stores must be visible to the NEXT generated draw (a
+            // second interlocked read-modify-write of the same pixels), to the
+            // resident-surface readback that a resolve performs through the
+            // framebuffer, and to any texture fetch of this plane. The
+            // interlock orders fragments WITHIN a draw; only a memory barrier
+            // orders them against everything else.
+            memory_barrier_(kGlShaderImageAccessBarrierBit |
+                            kGlFramebufferBarrierBit |
+                            kGlTextureFetchBarrierBit);
+        }
+        if (flush_ && witnessed_kick_flush_) {
+            flush_();
+            ++witnessed_gl_flushes_;
+        }
+        cache_color_mask(1, 1, 1, 1);
+        cache_blend(false, 0, 0);
+        cache_scissor(false, 0, 0, 0, 0);
+        cache_depth_mask(true);
+
+        const unsigned int gl_error = get_error_();
+        if (gl_error != kGlNoError) {
+            char why[192];
+            std::snprintf(why, sizeof(why),
+                          "OpenGL generated-combiner draw failed (GL 0x%04x, "
+                          "%zu triangles, program %016llx)",
+                          gl_error, count,
+                          (unsigned long long)packet.fingerprint);
+            error = why;
+            return false;
+        }
+        surface->dirty = true;
+        surface->dirty_rect.add(packet.xmin, packet.ymin,
+                                packet.xmax - packet.xmin + 1u,
+                                packet.ymax - packet.ymin + 1u);
+        ++generated_stats_.draws;
+        generated_stats_.triangles += count;
+        result.triangles = count;
+        result.draw_calls = 1;
+        return true;
+    }
+
+    // The colour-only counterpart of ensure_witnessed_surface. It shares the
+    // ResidentSurface cache and the invalidation-stamp census with every other
+    // resident path, so a plane this executor uploads is attributable in
+    // [host] gpu-upload-cause exactly like one the witnessed executor uploads.
+    bool ensure_generated_surface(const Nv2aGeneratedShaderPacket& packet,
+                                  ResidentSurface*& surface,
+                                  Nv2aGeneratedShaderResult& result,
+                                  std::string& error) {
+        surface = find_resident_surface(packet.color_address,
+                                        packet.surface_size,
+                                        packet.surface_pitch,
+                                        packet.surface_height,
+                                        packet.surface_format);
+        if (surface) {
+            if (!resident_fbo_) gen_framebuffers_(1, &resident_fbo_);
+            return true;
+        }
+        if (packet.color_input.size() != packet.surface_size) {
+            error = "OpenGL generated combiner missing initial colour snapshot";
+            return false;
+        }
+        ResidentSurface* slot = find_reusable_resident_slot();
+        if (!slot) {
+            error = "OpenGL resident surface cache is full of dirty targets";
+            return false;
+        }
+        note_color_slot_reuse(*slot);
+        if (!slot->texture) {
+            gen_textures_(1, &slot->texture);
+            if (!slot->texture) {
+                error = "OpenGL generated combiner colour texture allocation failed";
+                return false;
+            }
+            cache_bind_texture_unit(kGlTexture0, slot->texture);
+            tex_parameter_i_(kGlTexture2D, kGlTextureMinFilter, kGlNearest);
+            tex_parameter_i_(kGlTexture2D, kGlTextureMagFilter, kGlNearest);
+            tex_parameter_i_(kGlTexture2D, kGlTextureWrapS, kGlClampToEdge);
+            tex_parameter_i_(kGlTexture2D, kGlTextureWrapT, kGlClampToEdge);
+        } else {
+            cache_bind_texture_unit(kGlTexture0, slot->texture);
+        }
+        std::vector<uint8_t>& rgba = upload_staging_;
+        guest_words_to_rgba(packet.color_input, rgba, packet.surface_width,
+                            packet.surface_height,
+                            packet.state.color_format_x8);
+        pixel_store_i_(kGlUnpackAlignment, 1);
+        gpu_timed_tex_image_2d(kGlTexture2D, 0, kGlRgba8,
+                               static_cast<int>(packet.surface_width),
+                               static_cast<int>(packet.surface_height), 0,
+                               kGlRgba, kGlUnsignedByte, rgba.data());
+        slot->tex_alloc_w = packet.surface_width;
+        slot->tex_alloc_h = packet.surface_height;
+        if (!resident_fbo_) gen_framebuffers_(1, &resident_fbo_);
+        cache_bind_framebuffer(resident_fbo_);
+        cache_framebuffer_color_texture(resident_fbo_, slot->texture);
+        cache_framebuffer_depth_texture(resident_fbo_, 0);
+        if (check_framebuffer_status_(kGlFramebuffer) != kGlFramebufferComplete) {
+            error = "OpenGL generated combiner framebuffer is incomplete";
+            return false;
+        }
+        if (get_error_() != kGlNoError) {
+            error = "OpenGL generated combiner colour upload failed";
+            return false;
+        }
+        slot->valid = true;
+        slot->dirty = false;
+        slot->dirty_rect.reset();
+        slot->swizzled = false;
+        slot->x8 = packet.state.color_format_x8;
+        slot->address = packet.color_address;
+        slot->size = packet.surface_size;
+        slot->pitch = packet.surface_pitch;
+        slot->width = packet.surface_width;
+        slot->height = packet.surface_height;
+        slot->format = packet.surface_format;
+        ++generated_stats_.surface_uploads;
+        result.color_upload_bytes += rgba.size();
+        surface = slot;
+        return true;
+    }
+
     // ============ stage (f) witnessed-profile GPU execution ================
     // beads-xbox.1.15.7. These four entry points sit on top of the SAME
     // ResidentSurface cache the resident generic-combiner path uses, keyed on
@@ -3876,6 +4441,7 @@ public:
                load_gl(depth_func_, "glDepthFunc") &&
                load_gl(depth_mask_, "glDepthMask") &&
                load_gl(blend_func_, "glBlendFunc") &&
+               load_gl(blend_func_separate_, "glBlendFuncSeparate") &&
                load_gl(blend_equation_, "glBlendEquation") &&
                load_gl(color_mask_, "glColorMask") &&
                load_gl(gen_vertex_arrays_, "glGenVertexArrays") &&
@@ -3921,6 +4487,11 @@ public:
             load_gl(stencil_mask_, "glStencilMask") &&
             load_gl(uniform_3f_, "glUniform3f") &&
             load_gl(buffer_sub_data_, "glBufferSubData");
+        // The generated-combiner executor needs everything the witnessed one
+        // needs (int64 in GLSL, SSBOs, glClear) plus glBlendFuncSeparate for
+        // the X8R8G8B8 alpha rule. It is optional in exactly the same way.
+        generated_available_ = witnessed_available_ &&
+                               blend_func_separate_ != nullptr;
         g_gl_gpu.gpu_timing_available.store(gpu_timing_available_ ? 1u : 0u,
                                            std::memory_order_relaxed);
         if (!(compile_fixture(error) && compile_primary_color(error) &&
@@ -4354,6 +4925,15 @@ private:
             static_cast<uint64_t>(surface.depth_address) + surface.depth_size;
         return surface.depth_valid && address < resident_end &&
                surface.depth_address < request_end;
+    }
+    // The SRC1 forms of the four supported factors, for the dual-source path.
+    static unsigned int gl_blend_factor_src1(uint32_t factor) {
+        switch (factor) {
+            case 0: return kGlZero;
+            case 1: return kGlOne;
+            case 0x0302: return kGlSrc1Alpha;
+            default: return kGlOneMinusSrc1Alpha;
+        }
     }
     static unsigned int gl_blend_factor(uint32_t factor) {
         switch (factor) {
@@ -5489,6 +6069,7 @@ private:
     GlScissor scissor_ = nullptr; GlEnable enable_ = nullptr; GlDisable disable_ = nullptr;
     GlDepthFunc depth_func_ = nullptr; GlDepthMask depth_mask_ = nullptr;
     GlBlendFunc blend_func_ = nullptr; GlBlendEquation blend_equation_ = nullptr;
+    GlBlendFuncSeparate blend_func_separate_ = nullptr;
     GlColorMask color_mask_ = nullptr; GlGenVertexArrays gen_vertex_arrays_ = nullptr;
     GlBindVertexArray bind_vertex_array_ = nullptr;
     GlDeleteVertexArrays delete_vertex_arrays_ = nullptr;
@@ -5521,6 +6102,22 @@ private:
     GlUniform3f uniform_3f_ = nullptr;
     GlBufferSubData buffer_sub_data_ = nullptr;
     bool witnessed_available_ = false;
+    // ---- stage (f3): the generated generic-combiner executor -------------
+    bool generated_available_ = false;
+    bool generated_nodraw_ = false;
+    struct GeneratedTextureSlot {
+        unsigned int texture = 0;
+        uint64_t hash = 0;
+        uint32_t width = 0;
+        uint32_t height = 0;
+        bool valid = false;
+    };
+    std::vector<std::pair<uint64_t, GeneratedProgram>> generated_programs_;
+    std::array<GeneratedTextureSlot, 4> generated_textures_{};
+    unsigned int generated_ssbo_ = 0;
+    unsigned int generated_vao_ = 0;
+    std::vector<uint8_t> generated_records_;
+    GeneratedShaderStats generated_stats_{};
     bool witnessed_fixed_state_ = false;
     bool witnessed_context_owned_ = false;
     unsigned int witnessed_bound_program_ = 0;
