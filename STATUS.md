@@ -55,6 +55,14 @@ the same three-frame four-pixel phase-6 signature section 3l(6) already records.
 under section 3 item 3 on the reading section 3l(3)/(5) used for the BGRA upload staging at
 +1.51 %, and the owner can reverse it with two flags.
 
+**The win is where the traffic is, and there is one place the change costs time.** Per-window
+medians: +3.5 to +6.0 % across the boot windows 1.0-4.0 B and +5.5 to +9.0 % across the busy
+dashboard windows 10.0-12.0 B. In the idle-fast-forward block 6.5-9.5 B -- ~0.6-1.0 s windows at
+~60 effective fps with almost no pushbuffer traffic -- arm B is SLOWER in seven of nine windows,
+102 ms in total, 0.19 % of the run: small, but too consistent in sign to call noise. It is the
+run path's fixed cost showing where there are no words to amortise it over. A minimum-run-length
+threshold would remove it and was deliberately not added; see section 3m(5).
+
 **A methodology finding worth more than the 4.29 %.** The first gate set reported +4.44 %. When
 the direct-window stage landed the SAME A/B reported +2.55 %, because the flag named only the run
 path and the window was helping arm A too -- the per-word arm moved 53.479 to 52.282 s. A flag that

@@ -1168,6 +1168,35 @@ Final-four indicator on the decision set: **+8.07 % median / +8.00 % min** (not 
 `contaminated` by the same six idle `beads-mcp` python processes present in both arms -- a
 constant, not a differential, exactly as in section 3l(5).
 
+**Per-window medians of the decision set, and the one place the change COSTS time.** The win is
+where the pushbuffer traffic is, and there is a small consistent regression where there is none:
+
+| window | arm A median | arm B median | delta | window | arm A median | arm B median | delta |
+|---|---:|---:|---:|---|---:|---:|---:|
+| 0.5 B | 2.285 s | 2.244 s | +1.78 % | 6.5 B | 1.021 s | 1.047 s | **-2.50 %** |
+| 1.0 B | 2.170 s | 2.039 s | +6.01 % | 7.0 B | 0.672 s | 0.701 s | **-4.41 %** |
+| 1.5 B | 3.179 s | 3.041 s | +4.33 % | 7.5 B | 0.680 s | 0.693 s | **-1.94 %** |
+| 2.0 B | 3.292 s | 3.168 s | +3.75 % | 8.0 B | 0.673 s | 0.680 s | **-1.09 %** |
+| 2.5 B | 3.394 s | 3.260 s | +3.93 % | 8.5 B | 0.667 s | 0.674 s | **-1.10 %** |
+| 3.0 B | 3.519 s | 3.395 s | +3.53 % | 9.0 B | 0.666 s | 0.675 s | **-1.30 %** |
+| 3.5 B | 3.526 s | 3.386 s | +3.97 % | 9.5 B | 0.616 s | 0.629 s | **-2.02 %** |
+| 4.0 B | 3.668 s | 3.523 s | +3.96 % | 10.0 B | 1.496 s | 1.414 s | +5.46 % |
+| 4.5 B | 3.303 s | 3.262 s | +1.23 % | 10.5 B | 2.226 s | 2.077 s | +6.66 % |
+| 5.0 B | 1.359 s | 1.350 s | +0.64 % | 11.0 B | 4.084 s | 3.738 s | +8.46 % |
+| 5.5 B | 0.847 s | 0.847 s | +0.11 % | 11.5 B | 4.652 s | 4.234 s | +9.00 % |
+| 6.0 B | 0.857 s | 0.855 s | +0.25 % | 12.0 B | 4.653 s | 4.294 s | +7.73 % |
+
+The 6.5 B .. 9.5 B block is idle-fast-forward: ~0.6-1.0 s windows at ~60 effective fps with almost
+no pushbuffer traffic. Arm B is slower in **seven of those nine windows**, by 102 ms in total --
+0.19 % of the run, small but too consistent in sign to call noise. The mechanism is the run path's
+FIXED cost showing where there are no words to amortise it over: the window reset at the top of
+every `process_pushbuffer`, the batching preconditions per data word, and two `dma_object_address`
+calls plus one `mem_direct_` hop per run. A minimum-run-length threshold would remove it and was
+deliberately NOT added -- at 14.8 words per run on the whole workload the threshold would decline
+runs worth ~56 ns/word to save ~10 ns of setup, and 102 ms against a 2 293 ms gain is not worth a
+tuning knob that has to be re-tuned per title. Recorded so the next session finds it measured
+rather than rediscovering it as a mystery.
+
 **The `rb-gate` row is the methodological finding of this session and is why it is superseded.**
 That set was run before stage (d) existed and reported +4.44 %. When stage (d) landed, the same
 A/B reported **+2.55 %** -- because `--no-nv2a-pfifo-run-batching` gated only the run path, so the
