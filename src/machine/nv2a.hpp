@@ -34,6 +34,7 @@
 #include "machine/io_device.hpp"   // FaultFn
 #include "machine/mmio_device.hpp"
 #include "machine/nv2a_renderer.hpp"
+#include "machine/nv2a_vsh_compiled.hpp"
 #include "xlle/ring.hpp"
 
 namespace xlle {
@@ -1331,8 +1332,76 @@ public:
         uint64_t vsh_n = 0;
         uint64_t vsh_context_vertices = 0;  // the 3.7 kB full-state path
         uint64_t fixed_function_vertices = 0;
+        // beads-xbox.1.15.11. Which of the two step forms actually ran, so the
+        // compiled path can never be claimed without its own denominator.
+        uint64_t vsh_compiled_vertices = 0;
+        uint64_t vsh_interpreted_vertices = 0;
+        uint64_t vsh_compiles = 0;      // programs pre-decoded (per parse)
+        uint64_t vsh_compile_ticks = 0;  // and what that cost, always on
+        uint64_t vsh_compile_declines = 0;
     };
     const VertexCensus& vertex_census() const { return vertex_census_; }
+
+    // ---- the distinct-program census (beads-xbox.1.15.11) -----------------
+    // The compiled step form is amortised over every vertex a program runs for,
+    // so "how many DISTINCT programs are there and what share of the vertices
+    // does each carry" is the number that decides whether the lever exists at
+    // all. ALWAYS ON: the fingerprint is folded once per PARSE (19 542 per
+    // canonical run with the phase-5 cache on, not once per batch), and the
+    // per-batch cost is a stored row pointer plus two adds.
+    struct VshProgramCensusRow {
+        uint64_t fingerprint = 0;
+        uint64_t batches = 0;
+        uint64_t vertices = 0;  // vertices that actually ran the program
+        uint32_t start_slot = 0;
+        uint32_t slots = 0;   // slots handed to the parser
+        uint32_t steps = 0;   // steps up to and including the final one
+        uint32_t ops = 0;     // non-NOP halves, i.e. compiled records
+        uint32_t paired = 0;  // steps issuing a MAC and an ILU together
+        // Register files the read-before-write analysis could NOT prove dead,
+        // i.e. what the compiled path still has to zero per vertex out of the
+        // interpreter's 13 + 12 + 1.
+        uint32_t zero_outputs = 13;
+        uint32_t zero_temps = 12;
+        uint32_t zero_address = 1;
+        bool compiled = false;
+        bool writes_context = false;
+    };
+    struct VshProgramCensus {
+        static constexpr size_t kSlots = 64;
+        std::array<VshProgramCensusRow, kSlots> rows{};
+        size_t count = 0;
+        uint64_t overflow = 0;  // distinct programs that found no free row
+    };
+    const VshProgramCensus& vsh_program_census() const {
+        return vsh_program_census_;
+    }
+    // The pre-decoded step form. DEFAULT ON; --no-nv2a-vsh-compile runs the
+    // vendored nv2a_vsh_emu_execute on the same binary, which is the arm the
+    // decision A/B is measured against.
+    void set_vsh_compile_enabled(bool on) {
+        if (vsh_compile_enabled_ == on) return;
+        vsh_compile_enabled_ = on;
+        vsh_cache_ops_valid_ = false;
+    }
+    bool vsh_compile_enabled() const { return vsh_compile_enabled_; }
+    // Ceiling probe, KNOWINGLY INCORRECT when armed. Default 0; no --no-
+    // spelling. See nv2a_vsh_compiled.hpp.
+    void set_vsh_unsafe_probe(uint32_t mode) { vsh_unsafe_probe_ = mode; }
+    uint32_t vsh_unsafe_probe() const { return vsh_unsafe_probe_; }
+    // ---- the differential verifier (beads-xbox.1.15.11) -------------------
+    // DIAGNOSTIC, default 0, very slow when armed. For the first N vertices
+    // that run a compiled program it runs the VENDORED interpreter on a scratch
+    // state from the SAME inputs and compares, BIT FOR BIT, the seven output
+    // registers the device reads back -- position, diffuse, specular and the
+    // four texture coordinates. That is the whole observable contract of the
+    // vertex program, so it covers the operand fetch, the operations, the
+    // destination stores AND the read-before-write zero plan together. It is
+    // how the exactness claim is evidence rather than argument.
+    void set_vsh_verify(uint32_t vertices) { vsh_verify_budget_ = vertices; }
+    uint32_t vsh_verify_budget() const { return vsh_verify_budget_; }
+    uint64_t vsh_verify_checked() const { return vsh_verify_checked_; }
+    uint64_t vsh_verify_mismatched() const { return vsh_verify_mismatched_; }
     void set_vertex_program_cache_enabled(bool on) {
         vertex_program_cache_enabled_ = on;
         if (!on) invalidate_vsh_program_cache();
@@ -2562,6 +2631,40 @@ private:
     bool vsh_cache_valid_ = false;
     bool vsh_cache_writes_context_ = false;
     bool vertex_program_cache_enabled_ = true;
+    // ---- the pre-decoded step form (beads-xbox.1.15.11) --------------------
+    // Compiled from the parsed program, once per parse, into 32-byte records
+    // whose operand bases, offsets, swizzles and writemasks are already
+    // resolved. `vsh_cache_ops_valid_` is cleared with the parse cache and
+    // whenever the flag moves, and a program the compiler declines leaves it
+    // false so the vendored interpreter runs unchanged.
+    std::vector<VshCompiledOp> vsh_cache_ops_;
+    // Which register files this program can actually observe unwritten. See
+    // VshZeroPlan in nv2a_vsh_compiled.hpp.
+    VshZeroPlan vsh_cache_zero_plan_{};
+    bool vsh_cache_ops_valid_ = false;
+    bool vsh_compile_enabled_ = true;
+    uint32_t vsh_unsafe_probe_ = 0;
+    uint32_t vsh_verify_budget_ = 0;
+    uint64_t vsh_verify_checked_ = 0;
+    uint64_t vsh_verify_mismatched_ = 0;
+    uint64_t vsh_verify_reported_ = 0;
+    // Runs one vertex through BOTH forms and compares. Out of line and called
+    // only when the budget is non-zero, so the shipping loop carries one
+    // predictable branch and nothing else.
+    void vsh_verify_vertex(const void* program, const float* input_regs,
+                           const float* compiled_output_regs);
+    uint64_t vsh_cache_fingerprint_ = 0;
+    VshProgramCensusRow* vsh_cache_census_row_ = nullptr;
+    // Returns false when the program contains anything the pre-decoded form
+    // cannot represent EXACTLY -- an index outside the range the vendored code
+    // asserts, an opcode outside its dispatch table, or no final step. There is
+    // no partial compile: the caller runs the interpreter for the whole program.
+    // `steps` is the Nv2aVshStep array the vendored parser produced; it is taken
+    // as void* for the same reason vsh_cache_steps_ is, so this header does not
+    // have to pull in nv2a_vsh_disassembler.h.
+    bool compile_vsh_program(const void* steps, uint32_t slots,
+                             VshProgramCensusRow* row);
+    VshProgramCensusRow* vsh_program_census_row(uint64_t fingerprint);
     void invalidate_vsh_program_cache();
     void destroy_vsh_program_cache();
     uint64_t transformed_vertices_ = 0;
@@ -2997,6 +3100,7 @@ private:
     GpuResSurfaceTable gpu_res_color_surfaces_{};
     GpuResSurfaceTable gpu_res_depth_surfaces_{};
     VertexCensus vertex_census_{};
+    VshProgramCensus vsh_program_census_{};
     bool vertex_census_enabled_ = false;
     bool vertex_fast_fetch_ = true;
     ResolveQueryCensus resolve_query_census_{};

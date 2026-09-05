@@ -30,6 +30,17 @@ passing replay does not exercise:
      split -- are pinned so the next session inherits the measurement rather
      than the inference.
 
+  4. THE COMPILED STEP FORM (beads-xbox.1.15.11, sections 6-8). The parse cache
+     is pre-decoded once per distinct program into 32-byte records, and a
+     read-before-write analysis deletes most of the 416-byte per-vertex register
+     zero-fill. Both are exactness-critical rather than merely fast: the record
+     must call the SAME vendored implementation the interpreter would, in the
+     vendored opcode order; the operand fetch must keep the multiply that
+     answers the sNaN question; the MAC/ILU pairing must survive; and the zero
+     plan must cover every register the DEVICE reads back, not just the ones the
+     program reads. A wrong answer here is a wrong vertex, not a rounding
+     difference, and the replay would still finish.
+
 Run: python tests/test_vertex_pipeline_guards.py   (exit 0 = all guards hold)
 """
 
@@ -39,6 +50,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NV2A_CPP = os.path.join(ROOT, "src", "machine", "nv2a.cpp")
 NV2A_HPP = os.path.join(ROOT, "src", "machine", "nv2a.hpp")
+VSH_HPP = os.path.join(ROOT, "src", "machine", "nv2a_vsh_compiled.hpp")
 MAIN_CPP = os.path.join(ROOT, "src", "app", "main.cpp")
 
 failures = []
@@ -69,6 +81,7 @@ def body(text, signature, terminator):
 cpp = read(NV2A_CPP)
 hpp = read(NV2A_HPP)
 main = read(MAIN_CPP)
+vsh = read(VSH_HPP)
 
 SUBMIT = "bool Nv2a::submit_vertex_batch() {"
 FETCH = "bool Nv2a::fetch_vertex_attribute(uint32_t slot, uint32_t index) {"
@@ -173,12 +186,17 @@ check("the input register file is fully written before the interpreter runs, "
       "                        std::memcpy(&input_regs[slot * 4]," in submit)
 check("arm A restores the zero-fill",
       "if (!fast_fetch) input_regs.fill(0.0f);" in submit)
-# The other three register files ARE still zeroed: the interpreter can read a
-# temp or an output the program never wrote.
-check("the temp, output and address register files are STILL zero-filled",
-      "std::array<float, 13 * 4> output_regs_storage{};" in submit and
-      "std::array<float, 12 * 4> temp_regs{};" in submit and
-      "std::array<float, 4> address_reg{};" in submit)
+# The other three register files are zeroed WHOLESALE on the interpreter arm,
+# because the interpreter can read a temp or an output the program never wrote
+# and their initial value is then observable. Only the compiled form
+# (beads-xbox.1.15.11, section 7 below) can prove which of them are dead, and it
+# is the only thing allowed to skip any of them.
+check("the temp, output and address register files are zero-filled WHOLESALE "
+      "unless the compiled form proved otherwise",
+      "std::array<float, 13 * 4> output_regs_storage;" in submit and
+      "if (use_compiled_vsh) {\n                    vsh_apply_zero_plan("
+      in submit and
+      "} else {\n                    output_regs_storage.fill(0.0f);" in submit)
 
 # -------------------------------------------------------------------------
 print("\n4. both changes are same-binary A/B-able and default ON")
@@ -255,6 +273,155 @@ check("every plane is printed with its CPU families by name, which is what "
       "makes 'this plane has no CPU consumer left' checkable",
       "[host] gpu-residency-plane scope=%s" in main and
       "cpu_families=%s" in main)
+
+# -------------------------------------------------------------------------
+print("\n6. the compiled step form (beads-xbox.1.15.11)")
+# -------------------------------------------------------------------------
+# Phase 5 measured the VSH interpreter at 4.54 s and 118 ns per vertex and named
+# it the next vertex lever. What landed is a PRE-DECODED form: the parse cache
+# is compiled once per distinct program into 32-byte records whose operand
+# bases, offsets, swizzles and writemasks are already resolved, plus a
+# read-before-write analysis that deletes most of the 416-byte per-vertex
+# register zero-fill. Every property below is one a passing replay does not
+# exercise and a compiler cannot check, and each is load-bearing for EXACTNESS
+# rather than for speed.
+check("the compiled record holds the VENDORED implementation pointer, so the "
+      "arithmetic is the same object code and not a transcription",
+      "using Fn = void (*)(float* out, const float* inputs);" in vsh and
+      "Fn fn = nullptr;" in vsh and
+      "kVshDispatchTable" in cpp and "nv2a_vsh_cpu_lit," in cpp)
+# The whole exactness argument is "the compiled record calls the function the
+# vendored dispatch table would have called". That holds only if the table is
+# the vendored one ENTRY FOR ENTRY, in the vendored Nv2aVshOpcode order -- a
+# single transposition silently runs MUL where the program said ADD. So the
+# order is pinned as the exact sequence, not by sampling a few entries.
+VENDORED_DISPATCH = [
+    "mov", "mul", "add", "mad", "dp3", "dph", "dp4", "dst", "min", "max",
+    "slt", "sge", "arl", "rcp", "rcc", "rsq", "exp", "log", "lit",
+]
+table = body(cpp, "const VshCompiledOp::Fn kVshDispatchTable[] = {", "};")
+import re as _re
+check("that table is the vendored kDispatchTable ENTRY FOR ENTRY in the "
+      "vendored order, and a static_assert pins its length to the enum",
+      _re.findall(r"nv2a_vsh_cpu_(\w+)", table) == VENDORED_DISPATCH and
+      table.count("nullptr") == 1 and
+      table.index("nullptr") < table.index("nv2a_vsh_cpu_mov") and
+      "static_cast<size_t>(NV2AOP_LIT) + 1," in cpp,
+      str(_re.findall(r"nv2a_vsh_cpu_(\w+)", table)))
+check("no operation is REIMPLEMENTED in the compiled header -- the transcribed "
+      "inlined form was built, measured slower, and removed",
+      "inline float vsh_fix_inf_mult(" not in vsh and "::powf(" not in vsh and
+      "::log2f(" not in vsh and "vsh_apply_operation" not in vsh)
+check("the operand fetch keeps the interpreter's multiply by +/-1.0f rather "
+      "than a copy, which is the whole answer to the sNaN question",
+      "const float mult = (op.in_negate_mask & (1u << k)) ? -1.0f : 1.0f;"
+      in vsh and "out[0] = mult * in[swizzle & 3u];" in vsh)
+check("relative context addressing reproduces the interpreter's uint32_t "
+      "offset arithmetic, wrap included, not ptrdiff_t",
+      "const uint32_t offset =" in vsh and
+      "in = bases[kVshBaseContext] + offset * 4u;" in vsh)
+check("the MAC/ILU pairing is preserved: the ILU operand is fetched BEFORE the "
+      "MAC executes, so an ILU reading its own step's MAC sees the OLD value",
+      vsh.index("vsh_fetch_operand(ilu_input, ilu, 0, bases);") <
+      vsh.index("op.fn(result, mac_inputs);\n            vsh_store_operand("))
+check("the compiler DECLINES the whole program for anything it cannot "
+      "represent exactly, and the device then runs the interpreter unchanged",
+      "return false;  // r13-r15: an out-of-bounds read either way" in cpp and
+      "if (input.index >= 16) return false;" in cpp and
+      "if (output.index >= 13) return false;" in cpp and
+      "if (output.index >= 12) return false;" in cpp and
+      "if (!found_final) return false;" in cpp)
+check("there is no PARTIAL compile: a decline leaves vsh_cache_ops_valid_ "
+      "false, which is the only thing the executor tests",
+      "vsh_cache_ops_valid_ = false;\n    vsh_cache_ops_.clear();" in cpp and
+      "const bool use_compiled_vsh = vsh_cache_ops_valid_;" in cpp)
+check("a destination that provably stores nothing -- unused, an input "
+      "register, or ARL's zero writemask -- is resolved away at compile time",
+      "if (output.type == NV2ART_NONE || output.type == NV2ART_INPUT) "
+      "return true;" in cpp and "if (!mask) return true;" in cpp)
+check("the compiled form is invalidated with the parse cache AND when the flag "
+      "moves, so stale records can never be reachable",
+      "vsh_cache_ops_valid_ = false;" in cpp and
+      "vsh_cache_ops_valid_ = false;" in hpp)
+check("both flag spellings exist on one binary, so the decision A/B needs no "
+      "rebuild",
+      '"--nv2a-vsh-compile"' in main and '"--no-nv2a-vsh-compile"' in main)
+check("the record stays small enough to keep a program's decode in L1, pinned "
+      "by a static_assert rather than by a comment",
+      "static_assert(sizeof(VshCompiledOp) <= 32," in vsh)
+
+# -------------------------------------------------------------------------
+print("\n7. the read-before-write zero plan, and why it cannot change output")
+# -------------------------------------------------------------------------
+check("the interpreter arm still zero-fills all three register files, because "
+      "without the analysis any of them is observable",
+      "output_regs_storage.fill(0.0f);" in cpp and
+      "temp_regs.fill(0.0f);" in cpp and "address_reg.fill(0.0f);" in cpp)
+check("the analysis walks the COMPILED ops in issue order and respects the "
+      "MAC/ILU pairing -- both halves read before either writes",
+      "for (unsigned k = 0; k < ilu.input_count; ++k) note_read(ilu, k);" in cpp
+      and cpp.index("for (unsigned k = 0; k < ilu.input_count; ++k) "
+                    "note_read(ilu, k);")
+      < cpp.index("note_write(op);\n            note_write(ilu);"))
+check("a lane read before it is written marks its register for zeroing, and "
+      "the register is then treated as written so the walk terminates",
+      "plan.temp_mask |= static_cast<uint16_t>(1u << index);" in cpp and
+      "temp_written[index] = 0xF;" in cpp)
+check("the SEVEN output registers the device reads back afterwards are added "
+      "unconditionally unless the program writes all four of their lanes",
+      "kConsumedOutputs[] = {0, 3, 4, 9, 10, 11, 12};" in cpp and
+      "if (0xFu & ~static_cast<unsigned>(output_written[index]))" in cpp)
+check("the same seven registers are what the verifier compares, so the plan "
+      "and its check cannot disagree about what is observable",
+      "kConsumed[] = {0, 3, 4, 9, 10, 11, 12};" in cpp)
+check("a relative operand marks a0 for zeroing, because ARL's zero writemask "
+      "means nothing ever writes it",
+      "plan.address = true;  // the fetch reads a0" in cpp)
+check("the plan is reported per program, so 'how much zeroing is left' is a "
+      "measured number and not a claim",
+      "zero_outputs=%u zero_temps=%u " in main)
+
+# -------------------------------------------------------------------------
+print("\n8. the instruments: a program census, a ceiling probe and a verifier")
+# -------------------------------------------------------------------------
+check("the program census is ALWAYS ON and keyed on the two inputs the parse "
+      "is a function of -- the program words and the start slot",
+      "fold_word(transform_program_start_);" in cpp and
+      "[host] nv2a-vsh-program-census scope=%s" in main)
+check("it is folded once per PARSE, not once per batch: a cache hit reuses the "
+      "row pointer the parse stored",
+      "census_row = vsh_cache_census_row_;" in cpp and
+      "vsh_cache_census_row_ = census_row;" in cpp)
+check("overflow is counted, never evicted, so a program the table already "
+      "knows about can never be under-reported",
+      "++vsh_program_census_.overflow;" in cpp)
+check("which of the two step forms actually ran is reported with its own "
+      "denominator, so a compiled-path claim cannot be made without one",
+      "vsh_compiled_vertices" in hpp and "vsh_interpreted_vertices" in hpp and
+      "[host] nv2a-vsh-form scope=%s" in main)
+check("the pre-decode's own cost is measured and reported, not assumed free",
+      "vertex_census_.vsh_compile_ticks += compile_delta;" in cpp and
+      "compile_ns=%llu" in main)
+check("the ceiling probe is DEFAULT OFF, has no --no- spelling and is a "
+      "SEPARATE function, because a branch for it inside the executor loop "
+      "changed what it measured",
+      '"--nv2a-vsh-unsafe-probe"' in main and
+      '"--no-nv2a-vsh-unsafe-probe"' not in main and
+      "inline void vsh_execute_compiled_probe(" in vsh and
+      "if (vsh_probe)" in cpp)
+check("the differential verifier runs the VENDORED interpreter on a scratch "
+      "state from the SAME inputs, and is default off",
+      "nv2a_vsh_emu_execute(&state, &reference);" in cpp and
+      '"--nv2a-vsh-verify"' in main and
+      '"--no-nv2a-vsh-verify"' not in main)
+check("it compares BITS, not floats, so a signalling NaN or a signed zero "
+      "cannot pass as equal",
+      "std::memcpy(&reference_bits, &output[element], sizeof(uint32_t));" in cpp
+      and "if (reference_bits == compiled_bits) continue;" in cpp)
+check("it reports its own denominator and its mismatch count, and bounds how "
+      "much it prints",
+      "checked=%llu mismatched=%llu" in main and
+      "if (vsh_verify_reported_ < 32) {" in cpp)
 
 print("\n%d checks, %d failures" % (checks, len(failures)))
 if failures:

@@ -222,7 +222,10 @@ add_test(NAME spike COMMAND xlle)
 #                                 flag (beads-xbox.1.15.7)
 #   vertex_pipeline_guards      - the parsed-vertex-program cache, the per-vertex hoists
 #                                 and the always-on residency/vertex censuses that
-#                                 re-ranked the work (beads-xbox.1.15.10 phase 5)
+#                                 re-ranked the work (beads-xbox.1.15.10 phase 5),
+#                                 plus the pre-decoded compiled step form, its
+#                                 read-before-write zero plan and its differential
+#                                 verifier (beads-xbox.1.15.11)
 #   hdd_cow_guards              - copy-on-write HDD attach + the determinism digests
 #                                 (beads-xbox.1.14.11): without it the replay rewrites the
 #                                 BRFR boot counter in its own image on every run

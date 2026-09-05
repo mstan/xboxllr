@@ -20,6 +20,137 @@ namespace xlle {
 
 namespace {
 
+// ---- the pre-decoded vertex-shader step form (beads-xbox.1.15.11) ----------
+//
+// This table is a TRANSCRIPTION of `kDispatchTable` in the vendored
+// nv2a_vsh_emulator.c, in the same order, naming the same functions. It exists
+// so a compiled record can hold the implementation POINTER directly instead of
+// an opcode the executor would have to switch on; it deliberately does NOT
+// reimplement any operation, so every IEEE detail and every NV2A special case
+// is the same object code the interpreter calls.
+const VshCompiledOp::Fn kVshDispatchTable[] = {
+    nullptr,          nv2a_vsh_cpu_mov, nv2a_vsh_cpu_mul, nv2a_vsh_cpu_add,
+    nv2a_vsh_cpu_mad, nv2a_vsh_cpu_dp3, nv2a_vsh_cpu_dph, nv2a_vsh_cpu_dp4,
+    nv2a_vsh_cpu_dst, nv2a_vsh_cpu_min, nv2a_vsh_cpu_max, nv2a_vsh_cpu_slt,
+    nv2a_vsh_cpu_sge, nv2a_vsh_cpu_arl, nv2a_vsh_cpu_rcp, nv2a_vsh_cpu_rcc,
+    nv2a_vsh_cpu_rsq, nv2a_vsh_cpu_exp, nv2a_vsh_cpu_log, nv2a_vsh_cpu_lit,
+};
+static_assert(sizeof(kVshDispatchTable) / sizeof(kVshDispatchTable[0]) ==
+                  static_cast<size_t>(NV2AOP_LIT) + 1,
+              "the compiled dispatch table must cover exactly the vendored "
+              "Nv2aVshOpcode enum, in its order");
+
+// Resolve ONE operand. Returns false -- declining the whole program -- for any
+// index the vendored code only guards with an assert, because with NDEBUG the
+// interpreter would read out of bounds there and the compiled form must not
+// invent a different wrong answer. Declining is safe: the interpreter runs.
+bool compile_vsh_input(const Nv2aVshInput& input, VshCompiledOp& op,
+                       unsigned slot) {
+    switch (input.type) {
+        case NV2ART_TEMPORARY:
+            if (input.index == 12) {
+                // r12 aliases the output register file; `fetch_value` reads
+                // output_regs from element 0, not from element 12 * 4.
+                op.in_base[slot] = kVshBaseOutput;
+                op.in_offset[slot] = 0;
+            } else if (input.index < 12) {
+                op.in_base[slot] = kVshBaseTemp;
+                op.in_offset[slot] =
+                    static_cast<uint16_t>(input.index * 4u);
+            } else {
+                return false;  // r13-r15: an out-of-bounds read either way
+            }
+            break;
+        case NV2ART_INPUT:
+            if (input.index >= 16) return false;
+            op.in_base[slot] = kVshBaseInput;
+            op.in_offset[slot] = static_cast<uint16_t>(input.index * 4u);
+            break;
+        case NV2ART_CONTEXT:
+            op.in_base[slot] = kVshBaseContext;
+            if (input.is_relative) {
+                // The final offset depends on a0 and is computed per fetch with
+                // the interpreter's own uint32_t arithmetic, so the RAW index
+                // is what the record carries.
+                op.in_relative_mask |= static_cast<uint8_t>(1u << slot);
+                op.in_offset[slot] = static_cast<uint16_t>(input.index);
+            } else {
+                if (input.index >= 192) return false;
+                op.in_offset[slot] = static_cast<uint16_t>(input.index * 4u);
+            }
+            break;
+        default:
+            return false;
+    }
+    if (input.is_negated) op.in_negate_mask |= static_cast<uint8_t>(1u << slot);
+    op.in_swizzle[slot] = static_cast<uint8_t>(
+        (input.swizzle[0] & 3u) | ((input.swizzle[1] & 3u) << 2) |
+        ((input.swizzle[2] & 3u) << 4) | ((input.swizzle[3] & 3u) << 6));
+    return true;
+}
+
+// Resolve ONE destination half. A slot that provably stores nothing -- unused,
+// a write to an input register (which the vendored code falls through to
+// `continue` for once asserts are off), or a zero writemask (which ARL's
+// address destination always carries) -- becomes kVshBaseNone.
+bool compile_vsh_output(const Nv2aVshOutput& output, VshCompiledOp& op,
+                        unsigned slot) {
+    op.out_base[slot] = kVshBaseNone;
+    op.out_mask[slot] = 0;
+    op.out_offset[slot] = 0;
+    if (output.type == NV2ART_NONE || output.type == NV2ART_INPUT) return true;
+    const unsigned mask = static_cast<unsigned>(output.writemask) & 0xFu;
+    if (!mask) return true;
+    switch (output.type) {
+        case NV2ART_OUTPUT:
+            if (output.index >= 13) return false;
+            op.out_base[slot] = kVshBaseOutput;
+            op.out_offset[slot] = static_cast<uint16_t>(output.index * 4u);
+            break;
+        case NV2ART_TEMPORARY:
+            if (output.index >= 12) return false;
+            op.out_base[slot] = kVshBaseTemp;
+            op.out_offset[slot] = static_cast<uint16_t>(output.index * 4u);
+            break;
+        case NV2ART_CONTEXT:
+            if (output.index >= 192) return false;
+            op.out_base[slot] = kVshBaseContext;
+            op.out_offset[slot] = static_cast<uint16_t>(output.index * 4u);
+            break;
+        case NV2ART_ADDRESS:
+            op.out_base[slot] = kVshBaseAddress;
+            op.out_offset[slot] = 0;
+            break;
+        default:
+            return false;
+    }
+    op.out_mask[slot] = static_cast<uint8_t>(mask);
+    return true;
+}
+
+bool compile_vsh_operation(const Nv2aVshOperation& operation,
+                           VshCompiledOp& op) {
+    const size_t opcode = static_cast<size_t>(operation.opcode);
+    if (opcode == 0 ||
+        opcode >= sizeof(kVshDispatchTable) / sizeof(kVshDispatchTable[0]))
+        return false;
+    op.fn = kVshDispatchTable[opcode];
+    if (!op.fn) return false;
+    // `prepare_inputs` stops at the first NV2ART_NONE and leaves the remaining
+    // operand block uninitialised; the arity recorded here is exactly that
+    // prefix, and no operation reads past its own arity.
+    unsigned count = 0;
+    for (unsigned k = 0; k < 3; ++k) {
+        if (operation.inputs[k].type == NV2ART_NONE) break;
+        if (!compile_vsh_input(operation.inputs[k], op, k)) return false;
+        ++count;
+    }
+    op.input_count = static_cast<uint8_t>(count);
+    for (unsigned o = 0; o < 2; ++o)
+        if (!compile_vsh_output(operation.outputs[o], op, o)) return false;
+    return true;
+}
+
 bool vsh_program_writes_context(const Nv2aVshProgram& program) {
     for (const Nv2aVshStep* step = program.steps; step; ++step) {
         for (const Nv2aVshOutput& output : step->mac.outputs) {
@@ -2246,10 +2377,204 @@ void Nv2a::destroy_vsh_program_cache() {
 }
 
 void Nv2a::invalidate_vsh_program_cache() {
-    if (!vsh_cache_valid_ && !vsh_cache_steps_) return;
+    if (!vsh_cache_valid_ && !vsh_cache_steps_) {
+        // The compiled form is derived from the parse; when the parse cache is
+        // OFF it is rebuilt per batch, and this is the one place that says the
+        // previous batch's records no longer describe the program.
+        vsh_cache_ops_valid_ = false;
+        return;
+    }
     vsh_cache_valid_ = false;
     vsh_cache_writes_context_ = false;
+    vsh_cache_ops_valid_ = false;
+    vsh_cache_census_row_ = nullptr;
     destroy_vsh_program_cache();
+}
+
+// beads-xbox.1.15.11. One row per distinct program, keyed on a fold of the
+// program words and the start slot -- exactly the two inputs the parse is a
+// function of. Overflow is COUNTED, never evicted, so a program the table
+// already knows about can never be under-reported; the same rule the phase-5
+// plane table and the phase-6 shader table follow.
+Nv2a::VshProgramCensusRow* Nv2a::vsh_program_census_row(uint64_t fingerprint) {
+    for (size_t i = 0; i < vsh_program_census_.count; ++i)
+        if (vsh_program_census_.rows[i].fingerprint == fingerprint)
+            return &vsh_program_census_.rows[i];
+    if (vsh_program_census_.count >= VshProgramCensus::kSlots) {
+        ++vsh_program_census_.overflow;
+        return nullptr;
+    }
+    VshProgramCensusRow& row =
+        vsh_program_census_.rows[vsh_program_census_.count++];
+    row.fingerprint = fingerprint;
+    return &row;
+}
+
+// beads-xbox.1.15.11. The differential verifier. `compiled_output_regs` is the
+// output register file the compiled form just produced for this vertex, from
+// the same `input_regs` and the same transform constants; this reruns the
+// vendored interpreter on a scratch state and compares the SEVEN registers the
+// device reads back afterwards, which is the whole observable contract.
+void Nv2a::vsh_verify_vertex(const void* program, const float* input_regs,
+                             const float* compiled_output_regs) {
+    const Nv2aVshProgram reference{
+        const_cast<Nv2aVshStep*>(static_cast<const Nv2aVshStep*>(program))};
+    std::vector<float> context(192 * 4);
+    std::memcpy(context.data(), transform_constants_.data(),
+                context.size() * sizeof(float));
+    std::array<float, 13 * 4> output{};
+    std::array<float, 12 * 4> temp{};
+    std::array<float, 4> address{};
+    Nv2aVshExecutionState state{const_cast<float*>(input_regs),
+                                output.data(),
+                                temp.data(),
+                                context.data(),
+                                address.data(),
+                                nullptr};
+    nv2a_vsh_emu_execute(&state, &reference);
+    static constexpr unsigned kConsumed[] = {0, 3, 4, 9, 10, 11, 12};
+    bool mismatch = false;
+    for (unsigned index : kConsumed) {
+        for (unsigned lane = 0; lane < 4; ++lane) {
+            const size_t element = index * 4 + lane;
+            uint32_t reference_bits = 0;
+            uint32_t compiled_bits = 0;
+            std::memcpy(&reference_bits, &output[element], sizeof(uint32_t));
+            std::memcpy(&compiled_bits, &compiled_output_regs[element],
+                        sizeof(uint32_t));
+            if (reference_bits == compiled_bits) continue;
+            mismatch = true;
+            if (vsh_verify_reported_ < 32) {
+                ++vsh_verify_reported_;
+                std::printf(
+                    "[host] nv2a-vsh-verify MISMATCH vertex=%llu o%u.%u "
+                    "interpreter=%08x compiled=%08x\n",
+                    static_cast<unsigned long long>(vsh_verify_checked_), index,
+                    lane, reference_bits, compiled_bits);
+            }
+        }
+    }
+    ++vsh_verify_checked_;
+    if (mismatch) ++vsh_verify_mismatched_;
+}
+
+bool Nv2a::compile_vsh_program(const void* steps, uint32_t slots,
+                               VshProgramCensusRow* row) {
+    vsh_cache_ops_valid_ = false;
+    vsh_cache_ops_.clear();
+    const Nv2aVshStep* step = static_cast<const Nv2aVshStep*>(steps);
+    if (!step || !slots) return false;
+    uint32_t step_count = 0;
+    uint32_t paired_steps = 0;
+    bool found_final = false;
+    for (uint32_t index = 0; index < slots; ++index, ++step) {
+        ++step_count;
+        const bool has_mac = step->mac.opcode != NV2AOP_NOP;
+        const bool has_ilu = step->ilu.opcode != NV2AOP_NOP;
+        if (has_mac) {
+            VshCompiledOp op{};
+            if (!compile_vsh_operation(step->mac, op)) return false;
+            // The ILU half of the SAME step must have its operand fetched
+            // before this one executes; `prepare_inputs` does both first.
+            op.paired = has_ilu ? 1u : 0u;
+            vsh_cache_ops_.push_back(op);
+        }
+        if (has_ilu) {
+            VshCompiledOp op{};
+            if (!compile_vsh_operation(step->ilu, op)) return false;
+            vsh_cache_ops_.push_back(op);
+        }
+        if (has_mac && has_ilu) ++paired_steps;
+        if (step->is_final) {
+            found_final = true;
+            break;
+        }
+    }
+    // A program with no final step runs off the end of the parsed array in the
+    // vendored walker. Decline rather than guess where it ends.
+    if (!found_final) return false;
+    // ---- the read-before-write analysis (beads-xbox.1.15.11) --------------
+    // Straight-line code with no branches makes "can this register be read
+    // before it is written" decidable exactly, per LANE. The walk is over the
+    // COMPILED ops in issue order, and it respects the MAC/ILU pairing the same
+    // way the executor does: both halves of a step read before either writes,
+    // so an ILU reading what its own step's MAC writes counts as reading the
+    // OLD value and therefore as a read-before-write.
+    std::array<uint8_t, 12> temp_written{};
+    std::array<uint8_t, 13> output_written{};
+    VshZeroPlan plan{};
+    plan.temp_mask = 0;
+    plan.output_mask = 0;
+    plan.address = false;
+    const auto note_read = [&](const VshCompiledOp& op, unsigned k) {
+        if (op.in_relative_mask & (1u << k)) {
+            plan.address = true;  // the fetch reads a0
+            return;
+        }
+        const unsigned lanes = vsh_swizzle_lane_mask(op.in_swizzle[k]);
+        const unsigned index = op.in_offset[k] / 4u;
+        if (op.in_base[k] == kVshBaseTemp && index < temp_written.size()) {
+            if (lanes & ~static_cast<unsigned>(temp_written[index])) {
+                plan.temp_mask |= static_cast<uint16_t>(1u << index);
+                temp_written[index] = 0xF;
+            }
+        } else if (op.in_base[k] == kVshBaseOutput &&
+                   index < output_written.size()) {
+            if (lanes & ~static_cast<unsigned>(output_written[index])) {
+                plan.output_mask |= static_cast<uint16_t>(1u << index);
+                output_written[index] = 0xF;
+            }
+        }
+    };
+    const auto note_write = [&](const VshCompiledOp& op) {
+        for (unsigned o = 0; o < 2; ++o) {
+            if (op.out_base[o] == kVshBaseNone) continue;
+            const unsigned lanes = vsh_writemask_lane_mask(op.out_mask[o]);
+            const unsigned index = op.out_offset[o] / 4u;
+            if (op.out_base[o] == kVshBaseTemp && index < temp_written.size())
+                temp_written[index] |= static_cast<uint8_t>(lanes);
+            else if (op.out_base[o] == kVshBaseOutput &&
+                     index < output_written.size())
+                output_written[index] |= static_cast<uint8_t>(lanes);
+        }
+    };
+    for (size_t i = 0; i < vsh_cache_ops_.size();) {
+        const VshCompiledOp& op = vsh_cache_ops_[i];
+        const bool paired = op.paired != 0;
+        for (unsigned k = 0; k < op.input_count; ++k) note_read(op, k);
+        if (paired) {
+            const VshCompiledOp& ilu = vsh_cache_ops_[i + 1];
+            for (unsigned k = 0; k < ilu.input_count; ++k) note_read(ilu, k);
+            note_write(op);
+            note_write(ilu);
+            i += 2;
+        } else {
+            note_write(op);
+            i += 1;
+        }
+    }
+    // The DEVICE reads these seven output registers back after the program:
+    // position (0), diffuse (3), specular (4) and the four texture coordinates
+    // (9-12). That is a read like any other, of all four lanes.
+    static constexpr unsigned kConsumedOutputs[] = {0, 3, 4, 9, 10, 11, 12};
+    for (unsigned index : kConsumedOutputs)
+        if (0xFu & ~static_cast<unsigned>(output_written[index]))
+            plan.output_mask |= static_cast<uint16_t>(1u << index);
+    vsh_cache_zero_plan_ = plan;
+    if (row) {
+        row->zero_outputs =
+            static_cast<uint32_t>(__builtin_popcount(plan.output_mask));
+        row->zero_temps =
+            static_cast<uint32_t>(__builtin_popcount(plan.temp_mask));
+        row->zero_address = plan.address ? 1u : 0u;
+    }
+    if (row) {
+        row->steps = step_count;
+        row->ops = static_cast<uint32_t>(vsh_cache_ops_.size());
+        row->paired = paired_steps;
+    }
+    vsh_cache_ops_valid_ = true;
+    return true;
 }
 
 Nv2a::~Nv2a() {
@@ -2906,12 +3231,57 @@ bool Nv2a::submit_vertex_batch() {
         return false;
     }
     bool program_writes_context = false;
+    VshProgramCensusRow* census_row = nullptr;
     if (program_parsed && !program_owned) {
         // Served from the cache: vsh_program_writes_context is a pure function
         // of the same steps, so it is cached beside them rather than re-walked.
         program_writes_context = vsh_cache_writes_context_;
+        census_row = vsh_cache_census_row_;
     } else if (program_parsed) {
         program_writes_context = vsh_program_writes_context(program);
+        // beads-xbox.1.15.11. The distinct-program census and the pre-decode
+        // are both pure functions of the parse, so both are paid HERE -- once
+        // per parse (19 542 per canonical run with the phase-5 cache on), never
+        // per batch and never per vertex.
+        const uint32_t program_slots =
+            static_cast<uint32_t>(transform_program_.size()) -
+            transform_program_start_;
+        uint64_t fingerprint = 1469598103934665603ull;
+        const auto fold_word = [&fingerprint](uint32_t word) {
+            for (unsigned byte = 0; byte < 4; ++byte) {
+                fingerprint ^= (word >> (byte * 8)) & 0xFFu;
+                fingerprint *= 1099511628211ull;
+            }
+        };
+        fold_word(transform_program_start_);
+        for (uint32_t slot = transform_program_start_;
+             slot < transform_program_.size(); ++slot)
+            for (uint32_t word = 0; word < 4; ++word)
+                fold_word(transform_program_[slot][word]);
+        census_row = vsh_program_census_row(fingerprint);
+        if (census_row) {
+            census_row->start_slot = transform_program_start_;
+            census_row->slots = program_slots;
+            census_row->writes_context = program_writes_context;
+        }
+        bool program_compiled = false;
+        if (vsh_compile_enabled_) {
+            const uint64_t compile_start = perf_excl::tick_now();
+            program_compiled =
+                compile_vsh_program(program.steps, program_slots, census_row);
+            const uint64_t compile_delta =
+                perf_excl::tick_now() - compile_start;
+            if (compile_delta <= perf_excl::g_max_plausible_ticks)
+                vertex_census_.vsh_compile_ticks += compile_delta;
+            ++vertex_census_.vsh_compiles;
+            if (!program_compiled) ++vertex_census_.vsh_compile_declines;
+        } else {
+            // Arm A of the same-binary A/B. The records from whatever program
+            // ran last must not be reachable.
+            vsh_cache_ops_valid_ = false;
+        }
+        if (census_row) census_row->compiled = program_compiled;
+        vsh_cache_census_row_ = census_row;
         if (vertex_program_cache_enabled_) {
             destroy_vsh_program_cache();
             vsh_cache_steps_ = program.steps;
@@ -2994,6 +3364,17 @@ bool Nv2a::submit_vertex_batch() {
         // list is built ONCE per batch and the loop runs over it instead. The
         // sequence of real fetches, and their order, are unchanged.
         const bool fast_fetch = vertex_fast_fetch_;
+        // beads-xbox.1.15.11. Hoisted per batch: whether this program has a
+        // pre-decoded form, and where it is. An empty compiled program is a
+        // real possibility (every step a NOP) and must not be mistaken for a
+        // missing one, which is why the emptiness is NOT part of the test.
+        const bool use_compiled_vsh = vsh_cache_ops_valid_;
+        const uint32_t vsh_probe = vsh_unsafe_probe_;
+        const VshZeroPlan vsh_zero_plan = vsh_cache_zero_plan_;
+        const VshCompiledOp* const compiled_ops = vsh_cache_ops_.data();
+        const uint32_t compiled_op_count =
+            static_cast<uint32_t>(vsh_cache_ops_.size());
+        uint64_t program_vertices = 0;
         std::array<uint8_t, 16> active_attribute_slots{};
         uint32_t active_attribute_count = 0;
         for (uint32_t slot = 0; slot < vertex_attributes_.size(); ++slot) {
@@ -3049,9 +3430,22 @@ bool Nv2a::submit_vertex_batch() {
                 std::array<float, 16 * 4> input_regs;
                 // Arm A of the same-binary A/B restores the zero-fill verbatim.
                 if (!fast_fetch) input_regs.fill(0.0f);
-                std::array<float, 13 * 4> output_regs_storage{};
-                std::array<float, 12 * 4> temp_regs{};
-                std::array<float, 4> address_reg{};
+                // beads-xbox.1.15.11: 416 bytes of zero-fill per vertex, of
+                // which the compiled form's read-before-write analysis usually
+                // proves most dead. The interpreter arm still fills all three,
+                // because without the analysis any of them is observable.
+                std::array<float, 13 * 4> output_regs_storage;
+                std::array<float, 12 * 4> temp_regs;
+                std::array<float, 4> address_reg;
+                if (use_compiled_vsh) {
+                    vsh_apply_zero_plan(vsh_zero_plan, output_regs_storage.data(),
+                                        temp_regs.data(), address_reg.data());
+                } else {
+                    output_regs_storage.fill(0.0f);
+                    temp_regs.fill(0.0f);
+                    address_reg.fill(0.0f);
+                }
+                ++program_vertices;
                 if (program_writes_context) {
                     Nv2aVshExecutionState execution =
                         nv2a_vsh_emu_initialize_full_execution_state(&full_state);
@@ -3062,7 +3456,27 @@ bool Nv2a::submit_vertex_batch() {
                                     vertex_attributes_[slot].value.data(),
                                     4 * sizeof(float));
                     }
-                    nv2a_vsh_emu_execute(&execution, &program);
+                    if (use_compiled_vsh) {
+                        // The compiled form takes the five register files as a
+                        // base table in the fixed order nv2a_vsh_compiled.hpp
+                        // declares; the vendored walker takes the same five
+                        // pointers inside Nv2aVshExecutionState.
+                        float* bases[kVshBaseCount] = {
+                            full_state.temp_regs, full_state.output_regs,
+                            full_state.input_regs, full_state.context_regs,
+                            full_state.address_reg};
+                        if (vsh_probe)
+                            vsh_execute_compiled_probe(
+                                compiled_ops, compiled_op_count, bases,
+                                vsh_probe);
+                        else
+                            vsh_execute_compiled(compiled_ops,
+                                                 compiled_op_count, bases);
+                        ++vertex_census_.vsh_compiled_vertices;
+                    } else {
+                        nv2a_vsh_emu_execute(&execution, &program);
+                        ++vertex_census_.vsh_interpreted_vertices;
+                    }
                     output_regs = full_state.output_regs;
                 } else {
                     Nv2aVshExecutionState execution{
@@ -3077,7 +3491,28 @@ bool Nv2a::submit_vertex_batch() {
                                     vertex_attributes_[slot].value.data(),
                                     4 * sizeof(float));
                     }
-                    nv2a_vsh_emu_execute(&execution, &program);
+                    if (use_compiled_vsh) {
+                        float* bases[kVshBaseCount] = {
+                            temp_regs.data(), output_regs_storage.data(),
+                            input_regs.data(),
+                            const_cast<float*>(transform_constants_[0].data()),
+                            address_reg.data()};
+                        if (vsh_probe)
+                            vsh_execute_compiled_probe(
+                                compiled_ops, compiled_op_count, bases,
+                                vsh_probe);
+                        else
+                            vsh_execute_compiled(compiled_ops,
+                                                 compiled_op_count, bases);
+                        if (vsh_verify_budget_ &&
+                            vsh_verify_checked_ < vsh_verify_budget_)
+                            vsh_verify_vertex(program.steps, input_regs.data(),
+                                              output_regs_storage.data());
+                        ++vertex_census_.vsh_compiled_vertices;
+                    } else {
+                        nv2a_vsh_emu_execute(&execution, &program);
+                        ++vertex_census_.vsh_interpreted_vertices;
+                    }
                     output_regs = output_regs_storage.data();
                 }
 
@@ -3156,6 +3591,14 @@ bool Nv2a::submit_vertex_batch() {
                     store_batch_transform_cache(vertex_indices_[vertex_index], vertex);
                 emit_transformed_vertex(vertex);
             }
+        }
+        // beads-xbox.1.15.11: the per-program denominator, folded once per
+        // batch rather than per vertex. `program_vertices` counts the vertices
+        // that actually RAN the program, so it excludes the 59 % the batch
+        // transform cache serves and the fixed-function batches entirely.
+        if (census_row) {
+            ++census_row->batches;
+            census_row->vertices += program_vertices;
         }
     }
     if (program_owned) nv2a_vsh_program_destroy(&program);

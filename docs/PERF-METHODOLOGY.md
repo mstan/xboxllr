@@ -227,6 +227,7 @@ so the record carries all 24 per-profile hashes. The DEFAULT configuration
 
 | `--nv2a-vertex-program-cache` | **on** as of 2026-09-05 phase 5 (`--no-…` restores the per-batch parse) | `nv2a_vsh_parse_program` mallocs ~21 kB and disassembles all 136 slots once per vertex batch; 289 617 of 309 159 mode-2 batches (93.7 %) re-derive a byte-identical result. Exact because the parse is a pure function of the program words and the start slot and both are invalidated at their only writers. Measured 202 → 18 ms. See §3i. |
 | `--nv2a-vertex-fast-fetch` | **on** as of 2026-09-05 phase 5 (`--no-…` restores the sixteen-slot loop and the zero-fill) | two pure removals in the per-vertex loop: iterate only attribute slots with a non-zero count (`fetch_vertex_attribute` returns immediately for the others), and drop the 256-byte zero-fill of an input register file that all sixteen slots overwrite before the interpreter runs. Measured 2.682 → 1.300 s of attribute fetch. |
+| `--nv2a-vsh-compile` | **on** as of 2026-09-05 `beads-xbox.1.15.11` (`--no-…` runs the vendored `nv2a_vsh_emu_execute`) | the pre-decoded vertex-shader step form: 32-byte records off the parse cache, plus a read-before-write analysis that deletes most of the 416-byte per-vertex register zero-fill. Bit-exact by construction (it calls the vendored implementations) and by evidence (7 822 822 of 7 822 822 verified vertices, 0 mismatches). `vsh_ns` 4.823 → 4.237 s; gate **+2.11 % median / +1.49 % min, FAILS the 5 % bar** and is retained under §3 item 3. See §3k. |
 | `--nv2a-gpu-generic-shader` | **on** as of 2026-09-05 phase 6 (`--no-…` restores the software fallback) | the GENERATED register-combiner executor. Four 3+3 interleaved sets on three binaries, all passing: on the shipping binary `3a612b6d`, total 12 B wall median 60.802 → 57.308 s (**+5.75 %**), min 60.460 → 56.825 s (**+6.01 %**), 3 of 3 rounds; 12 of 12 rounds across the four sets. Removes all 704 transferring `software-generic-color-surface` resolves and 1 339 software batches from plane `0x03AA4000`. See §3j. |
 | `--nv2a-gpu-generic-shader-image-blend` | **on** (`--no-…` restores GL fixed-function blending) | the blend, the colour mask and the X8 alpha rule inside the generated program, against an image binding under a fragment-shader interlock. NOT an optimisation: GL blending quantises its inputs to 8 bits and the software path does not, measured at exactly 1 LSB over ~90 % of the plane per batch and 38 LSB end to end. §3j(4). |
 | `--nv2a-gpu-generic-shader-fp64` | **on** (`--no-…` is single precision) | the generated programs' perspective interpolation in double, matching the software path. Measured to be worth ZERO pixels on this workload (§3j(3)); on by default because it is what the software does, not because it fixed anything. |
@@ -687,6 +688,163 @@ run in which it takes zero jobs. Against `build/golden-ref-v2-*.ppm` that leg is
   through a per-pixel scalar staging loop. It is already inside a passing gate, but it is the
   obvious next reduction: `GL_BGRA` + `GL_UNSIGNED_INT_8_8_8_8_REV` would delete the loop.
 
+### 3k. The compiled VSH step form (2026-09-05, `beads-xbox.1.15.11`) -- **FAILED the 5 % bar, and the interesting result is WHY**
+
+§3i(3) measured the vendored VSH interpreter at **4.54 s, 38 337 230 vertices at 118 ns**, 62 % of
+the `nv2a_vertex` bucket, untouched by either cache, and named it the next vertex lever. The
+working assumption -- stated in the bead and in the task that opened it -- was that a pre-decoded
+op array would be worth the usual **3-5×** an interpreter gets from removing per-op decode. **It is
+worth 12 %.** The decode was never the cost, and that is now measured rather than assumed.
+
+**(1) The distinct-program census, always on.** `[host] nv2a-vsh-program-census` /
+`-program` keys one row on exactly the two inputs the parse is a function of -- the program words
+and the start slot -- folded once per PARSE (19 542 per canonical run, not once per batch) and
+carried on the parse cache so a hit costs a stored row pointer and two adds. Canonical 12 B run:
+**20 distinct programs, 0 overflow, 20 of 20 compiled, 0 declines**, and the vertices are
+concentrated:
+
+| program | steps / ops / paired | batches | vertices | share |
+|---|---|---:|---:|---:|
+| `a83505a475320999` | 21 / 23 / 2 | 13 440 | **18 211 764** | 47.5 % |
+| `7545f5d888770122` | 18 / 21 / 3 | 138 012 | **8 725 576** | 22.8 % |
+| `cf4ed0fcd680199d` | 28 / 32 / 4 | 123 690 | **6 187 540** | 16.1 % |
+| `3c02d8b087b89d04` | 28 / 33 / 5 | 10 540 | 2 204 640 | 5.7 % |
+| `476754744910d47f` | 18 / 21 / 3 | 17 360 | 1 185 280 | 3.1 % |
+| the other 15 | 2-24 steps | 152 770 | 1 822 430 | 4.8 % |
+
+**Four programs carry 92.1 % of the vertices and a program averages 22 ops**, so a per-program
+compile is amortised over a million vertices each and the compile cost cannot be the problem: the
+whole pre-decode is **12.4 ms per run, 0.02 %**, measured, not assumed.
+
+**(2) What landed.** `src/machine/nv2a_vsh_compiled.hpp`. Each program compiles once, off the
+phase-5 parse cache, into 32-byte records with the operand base pointer, element offset, packed
+swizzle, negate and relative bits, the destination base/offset/writemask and a `paired` bit,
+replacing a walk over the disassembler's ~168-byte `Nv2aVshStep`. The step walk, the `is_final`
+test, the NOP tests, the three-way operand-type switch and the five-way destination-type switch
+are all gone. Exactness is structural, not argued: the record holds the **vendored
+`nv2a_vsh_cpu_*` function pointer**, so the arithmetic is the same object code; the operand fetch
+keeps `mult * in[swizzle[i]]` including the multiply by +1.0f, which is how the bead's **sNaN
+question is answered without depending on the answer** (a copy would not quiet a signalling NaN;
+the multiply does, and so does the interpreter); the MAC/ILU pairing is preserved so an ILU
+reading what its own step's MAC writes still sees the OLD value; and anything outside the range
+the vendored code only guards with an assert -- r13-r15, o13+, c192+, a program with no final step
+-- makes the WHOLE program decline, after which the interpreter runs it unchanged.
+
+A second, independent removal rides with it. The interpreter path zero-fills 13 output registers,
+12 temporaries and a0 -- **416 bytes on every one of 38 337 230 vertices, 16 GB of stores** --
+because any of them can be read before the program writes it. Straight-line code makes that
+decidable exactly, so the compile walks the ops in issue order (respecting the pairing) and marks
+only the registers a lane actually reads before any write, plus the seven the DEVICE reads back
+afterwards (position, diffuse, specular, four texture coordinates) unless the program writes all
+four of their lanes. On the two dominant programs the plan is **5 outputs + 4 temps** and
+**4 outputs + 3 temps**: 144 and 112 bytes instead of 416.
+
+**(3) Exactness is EVIDENCE, not an argument.** `--nv2a-vsh-verify N` (diagnostic, default off)
+runs the vendored interpreter on a scratch state from the SAME inputs and compares the seven
+registers the device reads back **bit for bit** -- which covers the fetch, the operations, the
+stores and the zero plan together. On a 2 B window with the budget set above the vertex count:
+**7 822 822 of 7 822 822 compiled vertices checked, 0 mismatched, 0 differing bits.**
+
+**(4) The matched instrumented pair (one binary, one session, `--perf-accounting
+--nv2a-vertex-census`, `build/v11-perf-leg00-A-r1` vs `-leg01-B-r1`).** The census denominators are
+IDENTICAL between the arms -- batches 455 812, vertices 128 040 827, reuse_hits 75 499 247,
+vsh_n 38 337 230, fixed_function 14 204 350 -- so the two arms did exactly the same work:
+
+| | arm A (interpreter) | arm B (compiled) | delta |
+|---|---:|---:|---:|
+| `vsh_ns` | 4.823 s | **4.237 s** | **−0.586 s (−12.1 %)** |
+| per vertex | 125.8 ns | **110.5 ns** | −15.3 ns |
+| attribute fetch | 1.302 s | 1.326 s | +0.024 s (noise) |
+| parse | 21.8 ms | 22.3 ms | — |
+| pre-decode itself | — | **12.4 ms** over 19 542 compiles | 633 ns each |
+| `nv2a_vertex` (exclusive) | 7.736 s | **7.198 s** | **−0.538 s** |
+| compiled / interpreted vertices | 0 / 38 337 230 | 38 337 230 / 0 | declines 0 |
+
+(Both legs are census-armed, which adds two `rdtsc` per vertex to BOTH arms; the shipping cost is
+lower and the gate below is the number that decides.)
+
+**(5) Two variants BUILT, MEASURED and DISPROVED. Recorded so they are not re-derived.** Both were
+measured on the canonical 2 B window with `--nv2a-vertex-census`, same session:
+
+| form | `vsh_ns`, 2 B window | verdict |
+|---|---:|---|
+| vendored interpreter | 1.021 s | baseline |
+| pre-decoded, vendored `fn` pointer | **0.906 s** | kept |
+| pre-decoded, the twenty bodies TRANSCRIBED into an inlined switch | 1.540 s | **+70 %, rejected** |
+| the same switch forced out of line | 1.346 s | **+49 %, rejected** |
+
+Transcribing the vendored bodies into the executor was the obvious next step and it is a large
+REGRESSION. The vendored functions are small, hot in the instruction cache, and reached through
+one indirect branch whose target sequence is identical on every vertex, which an indirect
+predictor learns; a nineteen-way switch is a second indirect branch on top of that, and inlining
+nineteen bodies into three call sites blows out the loop. **Do not retry the inlined-switch form.**
+A third one is recorded for the same reason: carrying the ceiling probe's branch inside the
+executor loop cost 0.906 → 1.071 s, so the probe is a separate function (rule 9 -- an instrument
+that changes what it measures is not an instrument).
+
+**(6) The ceiling probe, which is why the lever is small.** `--nv2a-vsh-unsafe-probe`
+(knowingly incorrect when armed, default 0, no `--no-` spelling) runs the operand fetch and
+optionally the destination stores without the operation. On the 2 B window, per vertex:
+full 115.8 ns, **fetch only 61.0 ns**. So the operand traffic and the per-vertex fixed cost are
+~53 % and the OPERATIONS THEMSELVES are ~47 %, and the operations are the vendored
+`fix_inf_mult` / `nv2a_less_than` special cases that the NV2A semantics require. **The decode was
+never the majority of the cost**, which is why removing all of it is worth 12 % and not 3-5×.
+**The ceiling for this whole lever is `vsh_ns` going to zero: 4.24 s of a ~54 s wall, 7.8 %.**
+
+**(7) The decision A/B. 3+3 interleaved, one binary (`5be3655e`), one session, arm A =
+`--no-nv2a-vsh-compile` on the SAME binary. Gate = total 12 B wall, median AND min, 5 %.**
+
+| set | arm A median / min | arm B median / min | median | min | rounds | verdict |
+|---|---|---|---|---|---|---|
+| `v11-gate` | 54.750 / 54.015 s | 53.597 / 53.210 s | **+2.11 %** | **+1.49 %** | 3/3 | **FAIL the 5 % bar** |
+
+Paired per-round deltas −2.81, −2.15, −0.77 %; 3 of 3 favour B. Arm cv 1.11 % (A) and 0.77 % (B),
+median-to-min spread 1.36 % and 0.73 %. Final-four indicator +2.91 % median / +3.09 % min (not
+gated). Every leg is flagged `contaminated` by the same 40 idle `beads-mcp` python processes
+present in both arms, which is a constant and not a differential.
+
+**(8) Behaviour: EXACT, and it adds zero pixels.** Arm A vs arm B on the shipping binary, all
+**28 checkpoint PPMs byte-identical (0 differing pixels)**, and every determinism digest identical
+INCLUDING `dma_digest`: `det_digest ed86cf6a1fe11c4f`, `dev_digest bbadac889020716f`,
+`dev_events 17 588 661`, `dma_digest f5c98df2a12072bb`, `dma_writes 1 237 379`,
+`tb_entries 2 302 057 484`, `tb_insns 7 301 344 897`, `irq0 16342`, scanout FNV
+`b7e78a1ac17ac5e8`, exit 0 and empty stderr on every leg of both arms. Against
+`build/golden-ref-v2-*.ppm` arm B reproduces the §3j(7) signature UNCHANGED -- 21 byte-identical
+and the same seven checkpoints (2.5 G 5 px, 3.0 G 1, 3.5 G 56, 4.0 G 15, 11.0 G 2, 11.5 G 1,
+`settle-1` 1), largest connected component 1 px, worst frame 0.0182 % -- i.e. **zero new pixels**.
+
+**Golden: `goldens/golden-noperf-defaults12-2026-09-05d.json` is reproduced and NOT re-pinned.**
+The reference-configuration leg (`--nv2a-draw-threads 0 --nv2a-profile-hashes`, `build/v11-ref`)
+passes **31 of 31** checks -- final SHA `36e87a97…`, scanout FNV, all 24 profile hashes, retired --
+and the compiled form REALLY RUNS in it (`compiled_vertices=38 337 230, interpreted 0,
+declines 0`), so it is a test of the change and not a run in which it takes zero jobs. That leg is
+byte-identical to `golden-ref-v2` on 25 of 28 checkpoints and differs on the same three phase-6
+frames by the same four pixels.
+
+**(9) Retention.** The gate is failed, so this is a §3 item 3 judgement, and it is recorded as one
+rather than dressed up. What is retained, default ON with `--no-nv2a-vsh-compile` restoring the
+previous behaviour on the same binary: a change that is **bit-exact on 7 822 822 verified vertices
+and on all 28 checkpoints**, wins **+2.11 % median / +1.49 % min with 3 of 3 rounds favouring it**,
+costs 12.4 ms of compile per run, and brings with it the three instruments that turned "the next
+vertex lever is worth 3-5×" into a measured 12 % with a 7.8 % ceiling. The alternative reading is
+that 2 % does not buy a compiled representation and an analysis pass; that call is the owner's and
+it is one flag either way.
+
+**(10) What is NOT done, with the number each is worth.**
+
+* **The operations themselves, ~47 % of `vsh_ns` (~2.0 s).** `fix_inf_mult` is four scalar
+  multiplies each with up to three `isinf` tests, called four times per MUL/MAD/DP*/DST. A
+  branch-free SSE form (one `mulps`, three compares against +inf, one blend) would collapse ~32
+  scalar instructions into ~10 SIMD ones. It is a REIMPLEMENTATION of NV2A-specific semantics, so
+  it needs `--nv2a-vsh-verify` as its gate, and its ceiling is ~2 % of the wall.
+* **The operand fetch, ~4 loads + 4 multiplies + 4 stores per operand.** A 256-entry `pshufb`
+  control table makes it a load, a shuffle, a `mulps` and one store. Bit-exact (a permutation plus
+  the same multiply) and worth perhaps 1 %.
+* **The transform off the emulation thread.** The output feeds the CPU rasterizer, so this is a
+  fork-join per batch, not a pipeline; 455 812 batches at a measured 5.8 µs barrier is 2.6 s of
+  barrier against 4.2 s of work, which is why it is not obviously a win and needs measuring rather
+  than assuming.
+
 ### 3e. Draw-thread knee sweep (2026-09-05)
 
 One binary, one session, quiet host, `--no-nv2a-profile-hashes`, gate = total 12 B wall, median
@@ -807,7 +965,7 @@ emulation-thread partition it is read against is the phase-5 arm-B instrumented 
 | 1a | — free plane `0x03628000`: the eight witnessed families (§3i(2)) **AND the four generic shader states that also draw to it**, which the phase-5 plane table could not see because it counts witnessed draws only | ~1.9 s of the above, plus 2.49 s of their emulation-thread raster | the eight predicates plus DEPTH support in the generated executor (512 batches decline on it today) |
 | 1c | — the 602 `generic-texture-read` resolves: ALREADY-GL-accelerated batches sampling a GPU-resident plane, which the generator cannot touch | ~1.8 s | sample the resident surface as a texture — the lever §3h declined at a number now known to be wrong |
 | 1b | — make a resolve cheaper: 4.80 s backend (glReadPixels 2.53 s GPU-side + stall) + 0.90 s writeback of 6 109 MB, and `dirty=100.0 %` on every resolve | up to ~2 s | row-scope the resolve+upload against a real dirty rect, or resolve straight into guest RAM via `mem_direct_` |
-| 2 | **The VSH interpreter**: 38 337 230 vertices at 118 ns (§3i(3)) | **4.54 s** | a compiled step form built once per cached parse, or the transform on the GPU |
+| 2 | ~~**The VSH interpreter**: 38 337 230 vertices at 118 ns (§3i(3))~~ | **MEASURED OUT 2026-09-05, §3k.** The pre-decoded step form is worth **12 %** of it, not the 3-5× an interpreter usually gives, because the ceiling probe says the DECODE was never the majority: operand traffic and fixed per-vertex cost 53 %, the NV2A-specific operation bodies 47 %. `vsh_ns` 4.823 → 4.237 s, gate **+2.11 % / +1.49 %, FAIL**. The remaining ceiling for the whole lever is `vsh_ns` → 0, i.e. **7.8 %** of the wall, and the two routes to any of it (an SSE `fix_inf_mult`, a `pshufb` operand fetch) are worth ~2 % and ~1 % | done and recorded; §3k(10) has what is left |
 | 3 | ~~The 1 878 generic-combiner software fallbacks~~ | **DONE**, and the phase-5 framing of this row was wrong twice: the 602 texture reads are NOT software fallbacks (row 1c), and the 704 fallback resolves were all on a plane §3i(2) never named | — |
 | 4 | 1 831.6 MB of texture upload + 479.3 MB of surface upload per run on the generated path, through a per-pixel scalar staging loop | not yet sized | `GL_BGRA` + `GL_UNSIGNED_INT_8_8_8_8_REV` deletes the loop |
 | — | ~~the 148 317 no-op per-draw residency queries~~ | **16 ms — DECLINED ON MEASUREMENT** | — |

@@ -309,6 +309,51 @@ void print_gpu_residency_census(const xlle::Nv2a* nv, const char* scope,
             nv->vertex_program_cache_enabled() ? 1u : 0u,
             nv->vertex_fast_fetch_enabled() ? 1u : 0u,
             nv->vertex_census_enabled() ? 1u : 0u);
+        // beads-xbox.1.15.11: which of the two step forms actually ran, and
+        // what the pre-decode itself cost. ALWAYS ON, because a compiled-path
+        // claim without its own denominator is not a measurement.
+        std::printf(
+            "[host] nv2a-vsh-form scope=%s deadline=%llu compiled_vertices=%llu "
+            "interpreted_vertices=%llu compiles=%llu declines=%llu "
+            "compile_ns=%llu compile=%u\n",
+            scope, deadline,
+            (unsigned long long)v.vsh_compiled_vertices,
+            (unsigned long long)v.vsh_interpreted_vertices,
+            (unsigned long long)v.vsh_compiles,
+            (unsigned long long)v.vsh_compile_declines,
+            ns(v.vsh_compile_ticks), nv->vsh_compile_enabled() ? 1u : 0u);
+        std::printf(
+            "[host] nv2a-vsh-verify scope=%s deadline=%llu budget=%u "
+            "checked=%llu mismatched=%llu\n",
+            scope, deadline, nv->vsh_verify_budget(),
+            (unsigned long long)nv->vsh_verify_checked(),
+            (unsigned long long)nv->vsh_verify_mismatched());
+    }
+    // beads-xbox.1.15.11: the DISTINCT-program census. The compiled step form
+    // is amortised over every vertex a program runs for, so the lever exists
+    // only if a handful of programs carry the vertices. One row per distinct
+    // (program words, start slot) pair; overflow is counted, never evicted.
+    {
+        const auto& census = nv->vsh_program_census();
+        std::printf(
+            "[host] nv2a-vsh-program-census scope=%s deadline=%llu rows=%llu "
+            "overflow=%llu\n",
+            scope, deadline, (unsigned long long)census.count,
+            (unsigned long long)census.overflow);
+        for (size_t i = 0; i < census.count; ++i) {
+            const auto& row = census.rows[i];
+            std::printf(
+                "[host] nv2a-vsh-program scope=%s deadline=%llu index=%llu "
+                "fp=%016llx start=%u slots=%u steps=%u ops=%u paired=%u "
+                "compiled=%u writes_context=%u zero_outputs=%u zero_temps=%u "
+                "zero_address=%u batches=%llu vertices=%llu\n",
+                scope, deadline, (unsigned long long)i,
+                (unsigned long long)row.fingerprint, row.start_slot, row.slots,
+                row.steps, row.ops, row.paired, row.compiled ? 1u : 0u,
+                row.writes_context ? 1u : 0u, row.zero_outputs, row.zero_temps,
+                row.zero_address, (unsigned long long)row.batches,
+                (unsigned long long)row.vertices);
+        }
     }
     // Phase 5 item 1 (beads-xbox.1.15.10): the per-PLANE consumer table. The
     // phase-4 rule is that a break is attributed to whichever CPU consumer
@@ -1516,6 +1561,20 @@ int main(int argc, char** argv) {
     // Phase 5 item 3. The two exactness-neutral per-vertex hoists. DEFAULT ON;
     // --no-nv2a-vertex-fast-fetch restores the previous loop verbatim.
     bool nv2a_vertex_fast_fetch = true;
+    // beads-xbox.1.15.11. The pre-decoded vertex-shader step form. DEFAULT ON;
+    // --no-nv2a-vsh-compile runs the vendored nv2a_vsh_emu_execute on the same
+    // binary, which is the arm the decision A/B is measured against.
+    bool nv2a_vsh_compile = true;
+    // Ceiling probe (beads-xbox.1.15.11). DEFAULT 0 and no --no- spelling,
+    // because it is knowingly incorrect when armed: 1 skips the operation and
+    // stores the first operand, 2 skips the stores too. It bounds how much of
+    // the per-op cost is the vendored call rather than the operand traffic.
+    uint32_t nv2a_vsh_unsafe_probe = 0;
+    // The differential verifier (beads-xbox.1.15.11). DIAGNOSTIC, default 0,
+    // very slow when armed: it runs the vendored interpreter a SECOND time for
+    // each checked vertex and compares the seven output registers the device
+    // reads back, bit for bit.
+    uint32_t nv2a_vsh_verify = 0;
     uint32_t nv2a_gpu_ssbo_ring = 4;
     // beads-xbox.1.15.10 step 2. DEFAULT ON with the executor: FP64 in the
     // witnessed fragment shaders cost gpu_draw_ns 10.746 s against 2.364 s for
@@ -1759,6 +1818,16 @@ int main(int argc, char** argv) {
             nv2a_vertex_fast_fetch = true;
         else if (!std::strcmp(argv[i], "--no-nv2a-vertex-fast-fetch"))
             nv2a_vertex_fast_fetch = false;
+        else if (!std::strcmp(argv[i], "--nv2a-vsh-compile"))
+            nv2a_vsh_compile = true;
+        else if (!std::strcmp(argv[i], "--no-nv2a-vsh-compile"))
+            nv2a_vsh_compile = false;
+        else if (!std::strcmp(argv[i], "--nv2a-vsh-unsafe-probe") && i + 1 < argc)
+            nv2a_vsh_unsafe_probe =
+                static_cast<uint32_t>(std::strtoul(argv[++i], nullptr, 0));
+        else if (!std::strcmp(argv[i], "--nv2a-vsh-verify") && i + 1 < argc)
+            nv2a_vsh_verify =
+                static_cast<uint32_t>(std::strtoul(argv[++i], nullptr, 0));
         else if (!std::strcmp(argv[i], "--nv2a-gpu-plane-split"))
             nv2a_gpu_plane_split = true;
         else if (!std::strcmp(argv[i], "--no-nv2a-gpu-plane-split"))
@@ -2312,6 +2381,9 @@ int main(int argc, char** argv) {
                 mach.nv2a()->set_vertex_census_enabled(nv2a_vertex_census);
                 mach.nv2a()->set_vertex_fast_fetch_enabled(
                     nv2a_vertex_fast_fetch);
+                mach.nv2a()->set_vsh_compile_enabled(nv2a_vsh_compile);
+                mach.nv2a()->set_vsh_unsafe_probe(nv2a_vsh_unsafe_probe);
+                mach.nv2a()->set_vsh_verify(nv2a_vsh_verify);
                 mach.nv2a()->set_gpu_profiles_enabled(nv2a_gpu_profiles);
                 mach.nv2a()->set_gpu_generic_shader(nv2a_gpu_generic_shader);
                 mach.nv2a()->set_gpu_generic_shader_mask(
