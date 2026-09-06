@@ -34,6 +34,7 @@
 #include "machine/io_device.hpp"   // FaultFn
 #include "machine/mmio_device.hpp"
 #include "machine/nv2a_renderer.hpp"
+#include "machine/nv2a_generic_vertex_scratch.hpp"
 #include "machine/nv2a_texture_conversion_cache.hpp"
 #include "machine/nv2a_vsh_compiled.hpp"
 #include "machine/nv2a_vsh_dot_prefix.hpp"
@@ -1406,6 +1407,26 @@ public:
     const VshDotPrefixStats& vsh_dot_prefix_stats() const {
         return vsh_dot_prefix_stats_;
     }
+    void set_generic_vertex_scratch(bool on) {
+        if (generic_vertex_scratch_enabled_ == on) return;
+        generic_vertex_scratch_enabled_ = on;
+        ++generic_vertex_scratch_epoch_;
+        if (!on) {
+            generic_vector_scratch_release(generic_packet_vertices_scratch_);
+            generic_vector_scratch_release(generic_primary_expanded_vertices_scratch_);
+        }
+    }
+    bool generic_vertex_scratch_enabled() const {
+        return generic_vertex_scratch_enabled_;
+    }
+    GenericVertexScratchStats generic_vertex_scratch_stats() const {
+        GenericVertexScratchStats out = generic_vertex_scratch_stats_;
+        out.retained_bytes =
+            generic_vector_scratch_retained_bytes(generic_packet_vertices_scratch_) +
+            generic_vector_scratch_retained_bytes(
+                generic_primary_expanded_vertices_scratch_);
+        return out;
+    }
 #if XLLE_VSH_DRAW_OVERLAP_CENSUS
     void set_vsh_draw_overlap_census(bool on) {
         if (vsh_draw_overlap_enabled_ == on) return;
@@ -2408,6 +2429,11 @@ private:
     // across batches instead of reallocating and zero-filling every submit.
     std::vector<uint8_t> generic_color_input_scratch_;
     std::vector<uint8_t> generic_depth_input_scratch_;
+    bool generic_vertex_scratch_enabled_ = false;
+    uint64_t generic_vertex_scratch_epoch_ = 0;
+    GenericVertexScratchStats generic_vertex_scratch_stats_{};
+    std::vector<Nv2aGenericCombinerVertex> generic_packet_vertices_scratch_;
+    std::vector<Nv2aGenericCombinerVertex> generic_primary_expanded_vertices_scratch_;
     // Recycled GL->guest readback buffer for resident color resolves.
     std::vector<uint8_t> color_resolve_scratch_;
     Ring<PushMethod> methods_;

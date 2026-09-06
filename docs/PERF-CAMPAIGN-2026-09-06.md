@@ -181,6 +181,13 @@ around that population and preserve index reuse. Bucket totals and high
 execution coverage alone have not predicted savings; these costs are not a
 promised improvement.
 
+`PERF-VERTEX-SCRATCH-2026-09-06.md` isolates packet/primary expansion allocation
+reuse. Its clean selected 3+3 returns +2.494% median / +2.836% minimum, below
+the 5% gate, with every checkpoint and checked guest-state field exact. It stays
+opt-in. Next establish GPU arithmetic agreement against the vendored CPU floor
+before implementing a complete vertex-plus-triangle path; a partial arithmetic
+probe alone cannot establish that path's fidelity or performance.
+
 * **"There is no swapchain": false.** The interactive SDL D3D11 backend already calls DXGI
   `Present1`. Stage g measures and improves it. Sharing the NV2A GL context is a different
   optimization, with a transfer cost that still needs to justify the work.

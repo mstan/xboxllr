@@ -415,6 +415,18 @@ void print_gpu_residency_census(const xlle::Nv2a* nv, const char* scope,
 #if XLLE_VSH_DRAW_OVERLAP_CENSUS
     print_vsh_draw_overlap(nv, scope, deadline);
 #endif
+    if (nv->generic_vertex_scratch_enabled()) {
+        const auto s = nv->generic_vertex_scratch_stats();
+        std::printf("[host] nv2a-generic-vertex-scratch scope=%s deadline=%llu "
+                    "enabled=1 packet_leases=%llu expansion_leases=%llu "
+                    "reuse_hits=%llu oversized_releases=%llu retained_bytes=%llu\n",
+                    scope, deadline,
+                    (unsigned long long)s.packet_leases,
+                    (unsigned long long)s.expansion_leases,
+                    (unsigned long long)s.reuse_hits,
+                    (unsigned long long)s.oversized_releases,
+                    (unsigned long long)s.retained_bytes);
+    }
 #if XLLE_VERTEX_REUSE_DIAGNOSTICS
     if (const auto* shadow = nv->vertex_reuse_shadow()) {
         const auto& s = shadow->stats();
@@ -1742,6 +1754,7 @@ int main(int argc, char** argv) {
     // path; it exists so the vertex split is measured rather than inferred.
     bool nv2a_vertex_census = false;
     bool nv2a_vsh_draw_overlap_census = false;
+    bool nv2a_generic_vertex_scratch = false;
     bool nv2a_vertex_reuse_census = false;
     bool nv2a_vertex_reuse_timing = false;
     // Phase 5 item 3. The two exactness-neutral per-vertex hoists. DEFAULT ON;
@@ -2088,6 +2101,10 @@ int main(int argc, char** argv) {
             nv2a_vsh_dot_prefix = true;
         else if (!std::strcmp(argv[i], "--no-nv2a-vsh-dot-prefix"))
             nv2a_vsh_dot_prefix = false;
+        else if (!std::strcmp(argv[i], "--nv2a-generic-vertex-scratch"))
+            nv2a_generic_vertex_scratch = true;
+        else if (!std::strcmp(argv[i], "--no-nv2a-generic-vertex-scratch"))
+            nv2a_generic_vertex_scratch = false;
         else if (!std::strcmp(argv[i], "--nv2a-vsh-draw-overlap-census"))
             nv2a_vsh_draw_overlap_census = true;
         else if (!std::strcmp(argv[i], "--no-nv2a-vsh-draw-overlap-census"))
@@ -2709,6 +2726,7 @@ int main(int argc, char** argv) {
                     nv2a_vertex_fast_fetch);
                 mach.nv2a()->set_vsh_compile_enabled(nv2a_vsh_compile);
                 mach.nv2a()->set_vsh_dot_prefix(nv2a_vsh_dot_prefix);
+                mach.nv2a()->set_generic_vertex_scratch(nv2a_generic_vertex_scratch);
 #if XLLE_VSH_DRAW_OVERLAP_CENSUS
                 mach.nv2a()->set_vsh_draw_overlap_census(nv2a_vsh_draw_overlap_census);
 #endif

@@ -11020,6 +11020,14 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             ? perf_excl::tick_now() : 0;
 #endif
         Nv2aGenericCombinerPacket packet;
+        std::optional<GenericVectorScratchLease<Nv2aGenericCombinerVertex>>
+            packet_vertices_lease;
+        if (generic_vertex_scratch_enabled_) {
+            packet_vertices_lease.emplace(
+                generic_packet_vertices_scratch_, packet.vertices,
+                generic_vertex_scratch_enabled_, generic_vertex_scratch_epoch_,
+                generic_vertex_scratch_stats_, false);
+        }
         // Reuse persistent surface-snapshot storage across batches: the
         // renderer contract forbids retaining packet pointers after submit
         // returns, so swapping the big vectors out and back is safe and keeps
@@ -11376,6 +11384,14 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                     return true;
                 };
                 std::vector<Nv2aGenericCombinerVertex> expanded;
+                std::optional<GenericVectorScratchLease<Nv2aGenericCombinerVertex>>
+                    expanded_vertices_lease;
+                if (generic_vertex_scratch_enabled_) {
+                    expanded_vertices_lease.emplace(
+                        generic_primary_expanded_vertices_scratch_, expanded,
+                        generic_vertex_scratch_enabled_, generic_vertex_scratch_epoch_,
+                        generic_vertex_scratch_stats_, true);
+                }
                 expanded.reserve((packet.vertices.size() - 2) * 3);
                 auto append_triangle = [&](size_t ia, size_t ib, size_t ic) {
                     const auto* a = &packet.vertices[ia];
@@ -11456,7 +11472,11 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                         expanded_ok = append_triangle(0, i - 1, i);
                 }
                 if (expanded_ok && !expanded.empty()) {
-                    packet.vertices = std::move(expanded);
+                    if (generic_vertex_scratch_enabled_) {
+                        packet.vertices.swap(expanded);
+                    } else {
+                        packet.vertices = std::move(expanded);
+                    }
                     packet.primitive_mode = 5;
                     packet.compute_fixture = Nv2aGenericCombinerPacket::
                         ComputeFixture::kResidentPrimaryColorTriangles;

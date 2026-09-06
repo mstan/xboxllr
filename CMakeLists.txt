@@ -195,6 +195,10 @@ add_executable(test_vsh_draw_overlap tests/test_vsh_draw_overlap.cpp)
 target_include_directories(test_vsh_draw_overlap PRIVATE ${XLLE_INCLUDES})
 add_test(NAME vsh_draw_overlap COMMAND test_vsh_draw_overlap)
 
+add_executable(test_generic_vertex_scratch tests/test_generic_vertex_scratch.cpp)
+target_include_directories(test_generic_vertex_scratch PRIVATE ${XLLE_INCLUDES})
+add_test(NAME generic_vertex_scratch COMMAND test_generic_vertex_scratch)
+
 add_executable(test_generated_submit_perf tests/test_generated_submit_perf.cpp)
 target_include_directories(test_generated_submit_perf PRIVATE ${XLLE_INCLUDES})
 add_test(NAME generated_submit_perf COMMAND test_generated_submit_perf)

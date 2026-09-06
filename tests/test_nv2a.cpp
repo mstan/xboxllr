@@ -6389,6 +6389,9 @@ int main() {
             std::string gl_error;
             auto gl_renderer = xlle::create_nv2a_opengl_renderer(gl_error);
             if (gl_renderer) {
+                // Exercise recycled storage against the existing software
+                // surface oracle, including empty, clipped and multi-target draws.
+                gc_gpu.set_generic_vertex_scratch(true);
                 const uint64_t accelerated_before =
                     gc_gpu.generic_combiner_accelerated_batches();
                 const std::array<std::array<float, 6>, 3> triangles{{
@@ -6820,6 +6823,7 @@ int main() {
             emit_gc(0x035C, 0);
 
             fake.resident_supported = true;
+            gc_gpu.set_generic_vertex_scratch(false);
             emit_gc(0x1E20, 0x12345678);  // inert: final combiner passes R0 directly
             emit_gc(0x1E24, 0x9ABCDEF0);
             const uint64_t resident_accel_before =
@@ -6846,6 +6850,34 @@ int main() {
                   resident_supported_before + 1);
             CHECK(gc_gpu.generic_combiner_resident_uploads() >= 1);
             CHECK(gc_gpu.generic_combiner_resident_submits() >= 1);
+            const auto original_packet = fake.last_packet;
+            gc_gpu.set_generic_vertex_scratch(true);
+            submit_two_triangles(gc_pack_ub4(0x99, 0x77, 0x55, 0xAA));
+            CHECK(gc_fault.empty());
+            const auto different_packet = fake.last_packet;
+            submit_two_triangles(gc_pack_ub4(0x22, 0x44, 0x66, 0xCC));
+            CHECK(gc_fault.empty());
+            CHECK(fake.last_packet.vertices.size() == original_packet.vertices.size());
+            CHECK(fake.last_packet.raster_state == original_packet.raster_state);
+            for (size_t i = 0; i < original_packet.vertices.size(); ++i) {
+                const auto& expected = original_packet.vertices[i];
+                const auto& actual = fake.last_packet.vertices[i];
+                CHECK(actual.position == expected.position);
+                CHECK(actual.diffuse == expected.diffuse);
+                CHECK(actual.specular == expected.specular);
+                CHECK(actual.texture == expected.texture);
+                // Callback-owned snapshots must survive later buffer reuse.
+                CHECK(different_packet.vertices[i].diffuse != expected.diffuse);
+            }
+            const auto scratch = gc_gpu.generic_vertex_scratch_stats();
+            CHECK(scratch.packet_leases >= 2);
+            CHECK(scratch.expansion_leases >= 2);
+            CHECK(scratch.reuse_hits > 0);
+            CHECK(scratch.retained_bytes > 0);
+            CHECK(scratch.retained_bytes <= 2u * 65536u *
+                  sizeof(xlle::Nv2aGenericCombinerVertex));
+            gc_gpu.set_generic_vertex_scratch(false);
+            CHECK(gc_gpu.generic_vertex_scratch_stats().retained_bytes == 0);
             emit_gc(0x1E20, 0);
             emit_gc(0x1E24, 0);
             gc_gpu.set_renderer(nullptr);

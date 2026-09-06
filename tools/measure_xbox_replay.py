@@ -890,6 +890,7 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
     vsh_dot_prefix_samples: list[dict[str, Any]] = []
     vsh_draw_overlap_samples: list[dict[str, Any]] = []
     vsh_draw_overlap_rows: list[dict[str, Any]] = []
+    generic_vertex_scratch_samples: list[dict[str, Any]] = []
 
     # beads-xbox.1.14.1 item 3(c): counter samples are emitted as a block right
     # after each `[host] frame-series` line, plus one extra block at shutdown.
@@ -938,6 +939,10 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
             target = (generated_submit_phase_samples if " phase=" in line
                       else generated_submit_cpu_samples)
             target.append(sample)
+        elif line.startswith("[host] nv2a-generic-vertex-scratch "):
+            generic_vertex_scratch_samples.append({
+                key: int(value) if value.isdecimal() else value
+                for key, value in re.findall(r"(\w+)=([^\s]+)", line)})
         elif line.startswith(("[host] vsh-draw-overlap ", "[host] vsh-draw-overlap-row ")):
             sample = {}
             for key, value in re.findall(r"(\w+)=([^\s]+)", line):
@@ -1160,6 +1165,7 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
         "vsh_dot_prefix_samples": vsh_dot_prefix_samples,
         "vsh_draw_overlap_samples": vsh_draw_overlap_samples,
         "vsh_draw_overlap_rows": vsh_draw_overlap_rows,
+        "generic_vertex_scratch_samples": generic_vertex_scratch_samples,
         "host_present_samples": host_present_samples,
         "host_present": next((s for s in reversed(host_present_samples)
                               if s.get("scope") == "cumulative"), None),
