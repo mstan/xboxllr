@@ -181,6 +181,15 @@ wiring.
 | Performance methodology | `docs/PERF-METHODOLOGY.md` |
 | Interactive presentation metrics | `docs/PERF-PRESENT-2026-09-06.md` |
 | Golden replay identities | `goldens/README.md` |
+| Debugging a black or stalled dashboard | [Diagnostic guide](docs/DASHBOARD-DEBUGGING.md) |
+
+## Acknowledgments
+
+Credit to [sp00nznet's xboxdashboard](https://github.com/sp00nznet/xboxdashboard)
+for the dashboard investigation lessons incorporated into our
+[debugging guide](docs/DASHBOARD-DEBUGGING.md).
+Our [source review](docs/PERF-EXTERNAL-REVIEW-2026-09-06.md) also examines
+sp00nznet's xboxrecomp GPU techniques and their limits against the LLE floor.
 
 ## Repository and publication posture
 

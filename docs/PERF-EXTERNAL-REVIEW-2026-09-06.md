@@ -96,6 +96,37 @@ hardware-validation TODO for LOG.
 
 ## Amended next experiments
 
+### Dashboard-specific follow-up and credit
+
+The follow-up rechecked the dashboard remote at the same `34c2dda` commit and
+inspected both disk tools, build/startup code, XBE analysis and debugging notes.
+The directly incorporated result is
+[DASHBOARD-DEBUGGING.md](DASHBOARD-DEBUGGING.md), with explicit credit to
+**sp00nznet** also in the README. It connects the distinction between guest
+progress, clears, geometry and presentation to xlle's existing diagnostics.
+The build-3944 analysis is retained as a version-specific reference; its addresses
+are not installed as labels or hooks in our guest.
+
+The [QCOW2/FATX preparation script](https://github.com/sp00nznet/xboxdashboard/blob/34c2dda6b444af88dc22d404846db206a630c7fc/tools/extract_hdd.py)
+provides useful examples of partition discovery and private asset preparation,
+but is not suitable for direct adoption: it materializes the full virtual disk
+in RAM, does not resolve backing files, silently retains zeros after some failed
+cluster reads/decompression, and infers partition extents from magic hits.
+Its output paths use image-provided names without containment checks.
+The [raw FATX extractor](https://github.com/sp00nznet/xboxdashboard/blob/34c2dda6b444af88dc22d404846db206a630c7fc/tools/extract_fatx.py)
+also lacks a global directory-cycle guard, can seek beyond the supplied partition
+estimate, and accepts unchecked output names. These conclusions were independently
+checked in source; the external scripts were not run on private inputs.
+
+xlle's runtime consumes full raw HDD sectors through IDE. It does not need a
+host FATX extraction path to boot the dashboard. We therefore incorporated the
+diagnostic workflow and attribution, with no disk-parser or kernel-substitution
+patch. A future preparation tool would need bounded reads, explicit partition
+geometry, cycle detection, contained private output, and preserved empty files.
+There is no measured rendering/performance improvement from this follow-up.
+
+### Proposed order
+
 1. Finish the pending disabled-diagnostic 3+3 retention check when the host is
    available. Keep the rejected direct-mapped vertex reuse result recorded;
    do not implement it as an optimization.
