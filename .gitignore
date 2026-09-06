@@ -58,6 +58,8 @@ credentials.*
 hardware.json
 eeprom*.json
 eeprom*.txt
+[Ee][Ee][Pp][Rr][Oo][Mm]*.[Cc][Ff][Gg]
+[Ee][Ee][Pp][Rr][Oo][Mm]*.[Ii][Nn][Ii]
 console-identity*
 *.gpr
 *.rep/

@@ -36,7 +36,7 @@ def private_path(path):
         or name == '.env' or name.startswith('.env.')
         or name == 'hardware.json' or name.startswith(('id_rsa', 'id_ed25519', 'console-identity'))
         or name == 'credentials' or name.startswith('credentials.')
-        or (name.startswith('eeprom') and p.suffix in {'.json', '.txt'})
+        or (name.startswith('eeprom') and p.suffix in {'.json', '.txt', '.cfg', '.ini'})
         or name.endswith(('.report.json', '.argv.json', '.quiescence.json'))
     )
 

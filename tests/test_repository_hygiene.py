@@ -15,7 +15,8 @@ class HygieneTests(unittest.TestCase):
     def test_private_paths_and_source_exceptions(self):
         for name in ['xbox-hdd-stockdash.img', 'renamed.rom', 'backup/eeprom.json',
                      'private/data.txt', 'a/.env.local', 'a/hardware.json', 'disk.vhdx',
-                     'backup.zip', 'key.pem', 'a/test.rep/data', 'capture.pcapng']:
+                     'backup.zip', 'key.pem', 'a/test.rep/data', 'capture.pcapng',
+                     'EEPROMBackup.cfg', 'export/EEPROM.INI']:
             self.assertTrue(hygiene.private_path(name), name)
         for name in ['src/machine/nv2a.cpp', 'goldens/reference.json', 'docs/INPUTS.md']:
             self.assertFalse(hygiene.private_path(name), name)
