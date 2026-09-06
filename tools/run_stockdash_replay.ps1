@@ -69,6 +69,10 @@ param(
     [double] $MinImprovementPct = 5.0,
     [switch] $RequireQuiescence,
     [switch] $RequireSameProfileHashes,
+    # Retry WHOLE contaminated pairs, within this invocation/session. All attempted
+    # legs remain on disk; selection uses only the process census, never wall time.
+    [switch] $RetryContaminatedPairs,
+    [ValidateRange(1, 100)] [int] $MaxPairAttempts = 12,
     [string] $QuiescencePattern = '^(xlle|g\+\+|cc1plus|ld|collect2|cmake|ninja|python|pythonw|py)([-._0-9]|$)'
 )
 
@@ -344,6 +348,12 @@ try {
     $twoArm = [bool] $Candidate -or ($ExtraXlleArgsA.Count -gt 0) -or ($ExtraXlleArgsB.Count -gt 0)
     if ($twoArm -and -not $Candidate) { $Candidate = $BaselineExe }
     $singleRun = (-not $twoArm) -and (-not $explicitRepetitions)
+    if ($RetryContaminatedPairs -and (-not $twoArm -or $NoParse)) {
+        throw '-RetryContaminatedPairs requires two parsed arms'
+    }
+    if ($RetryContaminatedPairs -and $MaxPairAttempts -lt $Repetitions) {
+        throw '-MaxPairAttempts must be at least -Repetitions'
+    }
 
     $armAReports = @()
     $armBReports = @()
@@ -356,20 +366,49 @@ try {
         if ($report) { $armAReports += $report }
     } else {
         $legIndex = 0
+        $pairAttempts = @()
         for ($rep = 1; $rep -le $Repetitions; $rep++) {
+            if ($RetryContaminatedPairs -and $pairAttempts.Count -ge $MaxPairAttempts) {
+                throw "only $($rep - 1) clean pairs after $MaxPairAttempts attempts; no timing gate"
+            }
             $legName = '{0}-leg{1:d2}-A-r{2}' -f $Label, $legIndex, $rep
+            $prefixA = Join-Path $buildDir $legName
             $report = Invoke-ReplayLeg -Prefix (Join-Path $buildDir $legName) `
                 -Exe $BaselineExe -Arm 'A' -LegIndex $legIndex -Repetition $rep -LegName $legName
-            if ($report) { $armAReports += $report }
+            $reportA = $report
             $legIndex++
 
             if ($twoArm) {
                 $legName = '{0}-leg{1:d2}-B-r{2}' -f $Label, $legIndex, $rep
+                $prefixB = Join-Path $buildDir $legName
                 $report = Invoke-ReplayLeg -Prefix (Join-Path $buildDir $legName) `
                     -Exe $Candidate -Arm 'B' -LegIndex $legIndex -Repetition $rep -LegName $legName
+                if ($RetryContaminatedPairs) {
+                    $censusA = Get-Content -Raw -LiteralPath "$prefixA.quiescence.json" | ConvertFrom-Json
+                    $censusB = Get-Content -Raw -LiteralPath "$prefixB.quiescence.json" | ConvertFrom-Json
+                    $acceptPair = -not ($censusA.contaminated -or $censusB.contaminated)
+                    $pairAttempts += [pscustomobject]@{
+                        attempt = $pairAttempts.Count + 1
+                        repetition = $rep
+                        arm_a = $reportA
+                        arm_b = $report
+                        accepted = $acceptPair
+                        reason = $(if ($acceptPair) { 'both process censuses clean' }
+                                   else { 'foreign process in at least one leg; whole pair excluded' })
+                    }
+                    Write-JsonFile -Path (Join-Path $buildDir "$Label-pair-selection.json") `
+                        -Value ([pscustomobject]@{ session = $sessionId; attempts = $pairAttempts })
+                    if (-not $acceptPair) {
+                        Write-Warning "pair attempt $($pairAttempts.Count) contaminated; archived both legs, retrying repetition $rep"
+                        $legIndex++
+                        $rep--
+                        continue
+                    }
+                }
                 if ($report) { $armBReports += $report }
                 $legIndex++
             }
+            if ($reportA) { $armAReports += $reportA }
         }
     }
 

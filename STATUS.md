@@ -3,6 +3,42 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-09-06 - Stage g completed; faithful 60 FPS with headroom remains the target
+
+The interactive path now uploads native guest scanout bytes, replaces the fixed 33 ms
+throttle with guest-vblank pacing, and measures SDL presents separately from guest speed
+and flip writes. SDL already had a D3D11/DXGI swapchain; the remaining GL/RAM/SDL transfer
+is a separate measured opportunity. `--interactive-present-legacy` restores scalar capture
+and the old throttle for same-binary comparisons. Details and commands:
+[`PERF-PRESENT-2026-09-06.md`](docs/PERF-PRESENT-2026-09-06.md).
+
+Final noperf, clean interleaved 3+3: median capture cost **453.2 -> 8.8 us** and
+capture-to-present return **1345.4 -> 769.3 us**; successful SDL calls **16.50 -> 18.76/s**.
+Total 12 B wall improves **1.07% median / 1.02% min**, so the formal 5% gate **REJECTS**.
+The preserved-old/new headless comparison is **0.30% / 0.36% slower** (median/min).
+Retained as an explicit presentation/measurement capability exception, with that cost
+recorded, not as a 5% whole-emulator win. Guest speed remains about 31%; successful SDL
+calls can repeat images or be discarded and are not distinct displayed frames.
+
+Validation: CTest **29/29**, report tests **2/2**, whole-pair retry protocol tests pass,
+reference golden **31/31**, and every A/B and interactive/headless image comparison
+**28/28 byte-identical**. CPU/device, input and interrupt checkpoint timelines agree.
+DMA history differs across presentation modes: the first difference was traced to one
+identical 1.23 MB framebuffer writeback occurring earlier during interactive capture;
+all other entries in the 262,144-entry ring match, with no overlapping intervening writes.
+Native interactive repeats its DMA digest across all three legs; headless golden is
+unchanged. The detailed report preserves this distinction instead of claiming full
+cross-mode determinism.
+
+The owner clarified **faithful LLE at 60 FPS with headroom**, with opt-in HLE matching the
+LLE floor. That goal is not achieved. `NORTH-STAR.md` and
+[`PERF-CAMPAIGN-2026-09-06.md`](docs/PERF-CAMPAIGN-2026-09-06.md) now require steady animation
+and navigation baselines, latency tails, and measured remaining budgets. Twenty percent
+headroom is provisional. Read-only GPT-5.5 High audits, checked by the primary agent,
+identify a texture-stage admission error candidate and a bounded production TCG metadata
+experiment; neither is implemented or counted as a win. Earlier CPU models do not prove
+TCG optimal, and rejected work requires changed prerequisites before another trial.
+
 ## 2026-09-05 - The pushbuffer run path: the last untouched bucket pair, and where its nanoseconds actually were
 
 One commit on `perf/measurement-first-2026-09` closes `docs/PERF-METHODOLOGY.md` section 5b row 6,

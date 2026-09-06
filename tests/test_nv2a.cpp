@@ -13,6 +13,7 @@
 
 #include "machine/nv2a.hpp"
 #include "machine/perf_accounting.hpp"
+#include "machine/perf_excl.hpp"
 #include "host/nv2a_opengl_renderer.hpp"
 
 static int fails = 0;
@@ -2970,7 +2971,13 @@ int main() {
     xlle::Nv2a::ScanoutInfo scanout;
     std::vector<uint8_t> rgba;
     std::string scanout_error;
+    const uint64_t scanout_entries_before =
+        xlle::perf_excl::g_profile.entries[xlle::perf_excl::kNv2aScanout];
+    xlle::perf_excl::g_enabled = true;
     CHECK(gpu.capture_scanout(rgba, scanout, scanout_error));
+    xlle::perf_excl::g_enabled = false;
+    CHECK(xlle::perf_excl::g_profile.entries[xlle::perf_excl::kNv2aScanout] ==
+          scanout_entries_before + 1);
     CHECK(scanout.start == 0x4000);
     CHECK(scanout.pitch == 8);
     CHECK(scanout.width == 2 && scanout.height == 2 && scanout.bits_per_pixel == 16);
@@ -2979,6 +2986,16 @@ int main() {
         0, 0, 255, 255, 255, 255, 255, 255,
     };
     CHECK(rgba == expected_rgba);
+    size_t direct_size = 0;
+    xlle::perf_excl::g_enabled = true;
+    const uint8_t* direct_scanout = gpu.scanout_direct_bytes(scanout, direct_size, scanout_error);
+    xlle::perf_excl::g_enabled = false;
+    CHECK(xlle::perf_excl::g_profile.entries[xlle::perf_excl::kNv2aScanout] ==
+          scanout_entries_before + 2);
+    CHECK(direct_scanout == ram.data() + 0x4000);
+    CHECK(direct_size == sizeof(scanout_pixels));  // excludes final-row padding
+    CHECK(scanout.rgb565);
+    CHECK(std::memcmp(direct_scanout, scanout_pixels, direct_size) == 0);
     CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x600800, 4) == 0x4000);
     CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x6013D5, 1) == 2);
     CHECK(gpu.scanout_writes() == 1);
@@ -3006,7 +3023,29 @@ int main() {
         CHECK(rgba == expected_resolved_rgba);
         CHECK(std::memcmp(ram.data() + 0x4000, resolved_pixels,
                           sizeof(resolved_pixels)) == 0);
+        // A direct view must perform the SAME resident resolve before exposing RAM.
+        std::memset(ram.data() + 0x4000, 0, sizeof(scanout_pixels));
+        resident_fake.resident_resolve_data.resize(sizeof(resolved_pixels));
+        std::memcpy(resident_fake.resident_resolve_data.data(), resolved_pixels,
+                    sizeof(resolved_pixels));
+        gpu.set_renderer(&resident_fake);
+        direct_scanout = gpu.scanout_direct_bytes(scanout, direct_size, scanout_error);
+        gpu.set_renderer(nullptr);
+        CHECK(resident_fake.resident_resolves == 2);
+        CHECK(direct_scanout == ram.data() + 0x4000);
+        CHECK(std::memcmp(direct_scanout, resolved_pixels, direct_size) == 0);
     }
+
+    // Both public scanout paths reject the same out-of-RAM and short-pitch modes.
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x600800, 4, 0x03fffffc);
+    CHECK(!gpu.scanout_direct_bytes(scanout, direct_size, scanout_error));
+    CHECK(direct_size == 0 && !scanout_error.empty());
+    CHECK(!gpu.capture_scanout(rgba, scanout, scanout_error));
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x600800, 4, 0x4000);
+    crtc_write(0x13, 0);
+    CHECK(!gpu.scanout_direct_bytes(scanout, direct_size, scanout_error));
+    CHECK(!gpu.capture_scanout(rgba, scanout, scanout_error));
+    crtc_write(0x13, 1);
 
     // The dashboard's first immediate draw is a Kelvin quad: generic texture slot 9 and
     // diffuse slot 3 are persistent state, while legacy SET_VERTEX4F position W commits

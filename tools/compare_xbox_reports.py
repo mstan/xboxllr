@@ -166,7 +166,7 @@ def pct(delta: float | None, base: float | None) -> str:
 
 
 def final_fps(report: Mapping[str, Any]) -> float | None:
-    value = report.get("parsed", {}).get("final_frame", {}).get("effective_fps")
+    value = (report.get("parsed", {}).get("final_frame") or {}).get("effective_fps")
     return float(value) if isinstance(value, (int, float)) else None
 
 

@@ -33,6 +33,11 @@ and `ISSUES.md`; adapted to xboxlle's replay harness.
 3. **Interleaved, repeated, same session.** Minimum 3 legs per arm, order A1 B1 A2 B2 A3 B3 (or
    B/A/B), on a quiet host (no compiler or other runner processes before/after each leg). Never a
    single run against a stored baseline of another date.
+   `-RetryContaminatedPairs` may collect replacement **whole pairs within that same harness
+   invocation**. Every attempted leg is retained and `*-pair-selection.json` records exclusions
+   based solely on before/after process censuses, never timing or correctness outcomes.
+   Correctness failures still stop the run. A bounded attempt count stops without a gate if
+   three clean pairs cannot be collected; it never relaxes the quiet-host requirement.
 4. **Report min-of-N and median, both.** A large median-to-minimum spread is a contamination
    detector, not a result. Physically impossible outcomes (faster with fewer cores, a control
    that changes identically) indict the host or the harness, not the change.
@@ -1393,6 +1398,11 @@ already taken most of it, and what remained was 13.7 s of `tcg_exec` (1.09× at 
 
 ### 5b. The measured lever order after phase 7 (2026-09-05)
 
+Stage g is complete as of 2026-09-06; its separate interactive measurements and explicit
+retention exception are in `PERF-PRESENT-2026-09-06.md`. The forward plan is now
+`PERF-CAMPAIGN-2026-09-06.md`, targeting faithful LLE 60 FPS with headroom. This inventory
+preserves earlier configurations and bounds; it does not establish global optimality.
+
 Every row is a direct measurement on the canonical 12 B replay, not an inference. The
 emulation-thread partition it is read against is the section-3m instrumented leg
 (`build/rb/q12B2`, wall 52.501 s, unaccounted 0.065 %): `tcg_exec` 14.509,
@@ -1416,6 +1426,15 @@ replaces was `build/p7-perf`, wall 58.444 s; the phase-5 leg before that was
 | 6 | ~~**`nv2a_dispatch` 4.774 s + `nv2a_pfifo` 2.811 s = 7.585 s, 13.0 % of the wall**, on 82.7 M dispatch entries at 57.7 ns each~~ | **DONE 2026-09-05, section 3m, and the 57.7 ns/word was never the method ladder.** The per-word micro-partition puts 56 of the 65 ns/word of overhead in the CACHE1 deque round trip and the `uc_mem_read` hop, not in dispatch. Consuming a METHOD RUN in one pass and reading the pushbuffer through the host pointer Unicorn already maps takes the pair 7.687 -> 2.471 s instrumented and `nv2a_pfifo` self time down 94.6 %; 99.30 % of method words are batched and 76.8 % skip `dispatch_method` entirely. Gate **+4.29 % median / +4.37 % min, FAILS the 5 % bar**, 3 of 3 rounds, 28 of 28 checkpoints byte-identical and every determinism digest identical; recommended for retention under section 3 item 3 on the section 3l(3) reading | done; section 3m(10) has the three remaining items, all below the method's MDE |
 | — | ~~the 148 317 no-op per-draw residency queries~~ | **16 ms — DECLINED ON MEASUREMENT** | — |
 | — | ~~`kPitchZ16Depth` on the GPU (142 842 draws, 476 M fragments)~~ | **zero resolves removed**; its two zeta planes have no GPU draws at all | one shader, for CPU raster removal only |
+
+**Row 7 / stage g - DONE, 2026-09-06:** native scanout upload and guest-vblank pacing;
+same-binary interactive 3+3 improves total wall +1.07% median / +1.02% min (**5% REJECT**),
+capture 453.2 -> 8.8 us and successful SDL calls 16.50 -> 18.76/s (medians). Old/new
+headless is 0.30% median / 0.36% min slower. Explicit presentation/measurement capability
+exception, not a 5% claim. Reference golden 31/31 and every checkpoint comparison 28/28
+exact. Host capture can move a resident writeback earlier, so the DMA history hash differs
+across modes even though the traced payload and all image/input/CPU/device checks agree.
+`PERF-PRESENT-2026-09-06.md` carries the complete evidence and metric denominators.
 
 ### 5a. Open owner decision (raised 2026-09-03)
 

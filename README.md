@@ -59,6 +59,7 @@ historical provenance. The standalone repository is the maintained, authoritativ
 | What is true *right now* | `STATUS.md` |
 | What the maintainer must supply (BIOS/dumps/hardware) | `docs/INPUTS.md` |
 | How performance is measured, gated, and accepted | `docs/PERF-METHODOLOGY.md` |
+| Interactive presentation, native scanout, and what its FPS/latency counters mean | `docs/PERF-PRESENT-2026-09-06.md` |
 | What each performance stage measured, including the rejections | `docs/PERF-AUDIT-2026-09-02.md` |
 | The NV2A latch/execute seam | `docs/DESIGN-NV2A-SEAM.md` |
 | The reference identities a replay must reproduce | `goldens/README.md` |
@@ -84,11 +85,17 @@ D3D interception.
 
 For the opt-in live Controller S keyboard path during an LLE replay, add `--interactive` to a
 `--boot ... --run2bl ...` invocation. It opens an SDL window before emulation and presents
-guest scanout at a host-wall-clock 30 Hz maximum; arrows map
+guest scanout on the guest vblank cadence, with VSync disabled and a display-derived pacing
+guard; arrows map
 to the D-pad, `Z`/`X` to A/B, and Enter/Backspace to Start/Back. This feeds the modeled OHCI/XID
 endpoint 2 on the emulation thread. The retail replay has not yet been proven to poll endpoint 2
 at the dashboard menu: it configures the device but never requests the XID class descriptor
 or publishes an endpoint ED. This is input plumbing rather than a navigation-complete claim.
+`--interactive-present-legacy` restores the old 33 ms throttle and scalar RGBA capture for
+comparison. `--interactive-present-stats-ms N` sets the reporting interval (`0` prints only
+the cumulative line). A test input script can own the pad while the interactive window
+presents; keyboard state is then not published. See the presentation measurement document
+above for the separate host-present, guest-speed, and capture-to-present counters.
 
 For reproducible visual checkpoints, `--frame-series <path-prefix> <instruction-interval>`
 writes scanouts at guest-instruction intervals. The interval is a positive integer of at least

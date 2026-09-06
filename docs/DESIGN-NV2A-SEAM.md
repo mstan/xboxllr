@@ -784,6 +784,14 @@ witnessed pass rate — i.e. **80 % of shaded fragments are discarded**, and rad
 
 ### (g) Presentation via a real swapchain
 
+**2026-09-06 correction and implementation:** SDL already presents the interactive window
+through a real DXGI swapchain on Windows. Absence of `SDL_GL_SwapWindow` did not mean absence
+of a swapchain. Stage g keeps SDL, removes scalar scanout staging and the fixed 33 ms
+throttle, and measures successful host presents separately from guest flip writes and
+guest speed. The shared scanout fence/resolve remains mandatory. See
+[PERF-PRESENT-2026-09-06.md](PERF-PRESENT-2026-09-06.md) for the scope, driver evidence,
+measurement definitions, and validation. The following bullets record the original plan.
+
 * **Touches:** there is **no `SDL_GL_SwapWindow` in the tree** (audit §1); the GL context is a
   hidden 1×1 window (`nv2a_opengl_renderer.cpp:3561`) and output leaves only through
   `glReadPixels` into guest RAM. The interactive path (`sdl_shell.cpp:80`) has a 33 ms throttle

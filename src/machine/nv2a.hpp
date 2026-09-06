@@ -2247,10 +2247,26 @@ public:
         uint32_t width = 0;
         uint32_t height = 0;
         uint32_t bits_per_pixel = 0;
+        // 16-bit mode only: PRAMDAC general control bit 12 selects RGB565 over
+        // XRGB1555. Derived state, carried here so a presenter can name the guest
+        // pixel format without reaching back into PRAMDAC.
+        bool rgb565 = false;
     };
     ScanoutInfo scanout_info() const;
     bool capture_scanout(std::vector<uint8_t>& rgba, ScanoutInfo& info,
                          std::string& error);
+    // INTERACTIVE PRESENTER ONLY (beads-xbox.1.15.8 stage (g)). A zero-copy view of
+    // the current scanout: the same validation and the same seam anchor and resident
+    // resolve as capture_scanout, but it returns the guest bytes where they already
+    // live instead of a converted RGBA copy. Returns nullptr when guest RAM has no
+    // contiguous host pointer for the range, in which case the caller falls back to
+    // capture_scanout. `size` is the byte extent from `info.start`.
+    //
+    // The pointer is valid only until the guest runs again, so it must be consumed
+    // (uploaded) before returning to the emulation loop. The replay path never calls
+    // this: --frame-series and --frame-dump keep capture_scanout, which is the
+    // byte-lockable capture every golden is taken with.
+    const uint8_t* scanout_direct_bytes(ScanoutInfo& info, size_t& size, std::string& error);
     bool debug_resolve_color_surface(uint32_t address, size_t size,
                                      const char* context) {
         return resolve_renderer_color_overlap(address, size, context);
@@ -2267,6 +2283,10 @@ private:
     static const Block* find_block(uint32_t rel_addr, uint32_t& block_rel);
     bool resolve_renderer_color_overlap(uint32_t address, size_t size,
                                         const char* context);
+    // The validation and the resident-surface resolve shared by capture_scanout and
+    // scanout_direct_bytes. ONE copy, so the byte-locked capture path and the
+    // interactive presenter cannot disagree about what a valid scanout is.
+    bool prepare_scanout(ScanoutInfo& info, uint64_t& source_size, std::string& error);
     // `cause` is the always-on attribution token (nv2a_invalidate_token);
     // beads-xbox.1.15.10 phase 3. Attribution only -- no behaviour reads it.
     void invalidate_renderer_color_overlap(uint32_t address, size_t size,

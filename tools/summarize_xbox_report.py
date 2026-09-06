@@ -314,7 +314,7 @@ def summarize(path: pathlib.Path) -> None:
     nv2a_split = parsed.get("nv2a_split_samples", [])
     vsh_programs = parsed.get("vsh_program_samples", [])
     vertex_reuse_samples = parsed.get("vertex_reuse_samples", [])
-    final_frame = parsed.get("final_frame", {})
+    final_frame = parsed.get("final_frame") or {}
     final_mem = parsed.get("final_host_memory") or {}
     final_unicorn = parsed.get("final_unicorn_memory") or {}
 
@@ -331,7 +331,8 @@ def summarize(path: pathlib.Path) -> None:
         "  final "
         f"ok={report.get('ok')} "
         f"effective_fps={final_frame.get('effective_fps', '-')} "
-        f"presented_flips_per_s={flips_text} "
+        f"guest_flip_writes_per_s={flips_text} "
+        f"host_presented_fps={(parsed.get('host_present') or {}).get('presented_fps', 'unknown')} "
         f"frame={final_frame.get('hash', '-')} "
         f"private={mib(final_mem.get('private_commit'))} "
         f"ws={mib(final_mem.get('working_set'))} "
@@ -339,7 +340,7 @@ def summarize(path: pathlib.Path) -> None:
     )
     print(
         "  effective_fps is realtime-ratio x60 for one frame-series window, NOT "
-        "presented fps; presented_flips_per_s is the NV2A flip write-increment "
+        "presented fps; guest_flip_writes_per_s is the NV2A flip write-increment "
         "count over the summed frame-series wall time (whole-run average)"
     )
     # beads-xbox.1.14.3. The exclusive partition is only worth reading when its

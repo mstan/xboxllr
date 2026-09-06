@@ -16525,16 +16525,17 @@ Nv2a::ScanoutInfo Nv2a::scanout_info() const {
         info.bits_per_pixel = 16;
     else if (depth == 3)
         info.bits_per_pixel = 32;
+    info.rgb565 = (pramdac_general_control_ & (1u << 12)) != 0;
     return info;
 }
 
-bool Nv2a::capture_scanout(std::vector<uint8_t>& rgba, ScanoutInfo& info,
-                           std::string& error) {
+// Everything capture_scanout and scanout_direct_bytes must agree on: the seam
+// drain, the geometry validation and the resident-surface
+// resolve. Extracted verbatim from capture_scanout, which keeps calling it first.
+bool Nv2a::prepare_scanout(ScanoutInfo& info, uint64_t& source_size, std::string& error) {
     // Seam anchor 3 (F5): scanout reads the whole visible framebuffer out
     // of guest RAM. Guest-anchored gate point.
     seam_anchor(kSeamAnchorScanout, true);
-    // NV2A_SCANOUT: guest framebuffer read and RGBA conversion.
-    perf_excl::Scope region(perf_excl::kNv2aScanout);
     info = scanout_info();
     if (!mem_read_) {
         error = "NV2A scanout has no guest-memory reader";
@@ -16554,8 +16555,7 @@ bool Nv2a::capture_scanout(std::vector<uint8_t>& rgba, ScanoutInfo& info,
         error = "NV2A scanout pitch is smaller than the visible row";
         return false;
     }
-    const uint64_t source_size =
-        static_cast<uint64_t>(info.pitch) * (info.height - 1) + row_bytes;
+    source_size = static_cast<uint64_t>(info.pitch) * (info.height - 1) + row_bytes;
     if (static_cast<uint64_t>(info.start) + source_size > 64ull * 1024 * 1024) {
         error = "NV2A scanout exceeds unified RAM";
         return false;
@@ -16565,6 +16565,36 @@ bool Nv2a::capture_scanout(std::vector<uint8_t>& rgba, ScanoutInfo& info,
         error = "NV2A scanout resident color resolve failed";
         return false;
     }
+    return true;
+}
+
+const uint8_t* Nv2a::scanout_direct_bytes(ScanoutInfo& info, size_t& size,
+                                          std::string& error) {
+    perf_excl::Scope region(perf_excl::kNv2aScanout);
+    size = 0;
+    uint64_t source_size = 0;
+    if (!prepare_scanout(info, source_size, error)) return nullptr;
+    if (!mem_direct_) {
+        error = "NV2A scanout has no direct guest-memory pointer";
+        return nullptr;
+    }
+    const uint8_t* bytes = mem_direct_(info.start, static_cast<size_t>(source_size));
+    if (!bytes) {
+        error = "NV2A scanout range is not contiguously mapped";
+        return nullptr;
+    }
+    size = static_cast<size_t>(source_size);
+    error.clear();
+    return bytes;
+}
+
+bool Nv2a::capture_scanout(std::vector<uint8_t>& rgba, ScanoutInfo& info,
+                           std::string& error) {
+    // One entry per capture attempt, including its coherence fence and resolve.
+    perf_excl::Scope region(perf_excl::kNv2aScanout);
+    uint64_t source_size = 0;
+    if (!prepare_scanout(info, source_size, error)) return false;
+    const uint32_t bytes_per_pixel = info.bits_per_pixel / 8;
 
     std::vector<uint8_t> source(static_cast<size_t>(source_size));
     if (!mem_read_(info.start, source.data(), source.size())) {

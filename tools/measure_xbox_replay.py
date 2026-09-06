@@ -880,6 +880,7 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
     fingerprint_census: dict[str, int] | None = None
     fingerprint_unique: int | None = None
     flip: dict[str, Any] | None = None
+    host_present_samples: list[dict[str, Any]] = []
 
     # beads-xbox.1.14.1 item 3(c): counter samples are emitted as a block right
     # after each `[host] frame-series` line, plus one extra block at shutdown.
@@ -915,7 +916,15 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
 
     for raw_line in read_log_text(path).splitlines():
         line = raw_line.rstrip("\n")
-        if line.startswith("[nv2a-renderer] "):
+        if line.startswith("[host] present "):
+            sample: dict[str, Any] = {}
+            for key, value in re.findall(r"(\w+)=([^\s]+)", line):
+                try:
+                    sample[key] = float(value) if "." in value else int(value)
+                except ValueError:
+                    sample[key] = value
+            host_present_samples.append(sample)
+        elif line.startswith("[nv2a-renderer] "):
             selected_renderer = line[len("[nv2a-renderer] ") :]
         elif line.startswith("[host] hard process-memory limit armed: "):
             memory_limit = line[len("[host] ") :]
@@ -1055,11 +1064,9 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
         )
         census_digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
-    # beads-xbox.1.14.1 item 4: effective_fps is 60 x realtime ratio for the last
-    # guest-anchored window, NOT presented frames per second. The guest-visible
-    # presented-frame count is the NV2A flip write-increment counter, which xlle
-    # prints once at shutdown -- so the derived rate is a whole-run average and is
-    # labelled as such. If the line is absent the value is reported as unknown.
+    # Guest flip writes are not host presents: even a headless replay has them.
+    # Keep the old presented_frames JSON key for existing report consumers, with
+    # its corrected scope. Actual SDL presents have a separate measured counter.
     wall_ns_total = sum(
         int(frame.get("wall_ns", 0)) for frame in frames if isinstance(frame, dict)
     )
@@ -1070,11 +1077,11 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
         "flips_per_second": None,
         "scope": "whole-run average" if flip else "unknown",
         "note": (
-            "presented flips/s = NV2A flip write-increments / summed frame-series "
+            "guest flip writes/s = NV2A flip write-increments / summed frame-series "
             "wall time; the flip counter is emitted once at shutdown so no "
             "per-window rate is available"
             if flip
-            else "no '[2bl] NV2A flip:' line in this log; presented fps unknown"
+            else "no '[2bl] NV2A flip:' line in this log; guest flip rate unknown"
         ),
     }
     if flip and wall_ns_total:
@@ -1100,6 +1107,9 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
         "generic_fingerprint_census_sha256": census_digest,
         "flip": flip,
         "presented_frames": presented,
+        "host_present_samples": host_present_samples,
+        "host_present": next((s for s in reversed(host_present_samples)
+                              if s.get("scope") == "cumulative"), None),
         "effective_fps": (
             final_frame.get("effective_fps") if final_frame else None
         ),
@@ -1593,13 +1603,16 @@ def main() -> int:
     )
     if presented["flips_per_second"] is not None:
         print(
-            "  presented_flips_per_second="
+            "  guest_flip_writes_per_second="
             f"{presented['flips_per_second']:.3f} "
             f"(flips={presented['flips_total']}, {presented['scope']}; "
             f"{presented['note']})"
         )
     else:
-        print(f"  presented_flips_per_second=unknown ({presented['note']})")
+        print(f"  guest_flip_writes_per_second=unknown ({presented['note']})")
+    host_present = parsed["host_present"]
+    print(f"  host_presented_fps={host_present['presented_fps'] if host_present else 'unknown'} "
+          "(successful SDL presents / interactive wall; not physical display scans)")
     print(
         f"  profile_hashes={len(parsed['profile_hashes'])} "
         f"telemetry_gated={parsed['telemetry_gated_profile_hashes']} "

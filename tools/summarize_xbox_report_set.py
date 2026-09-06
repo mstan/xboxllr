@@ -333,6 +333,17 @@ def arm_summary(
         "total_wall_ns": describe(totals),
         "final_four_wall_ns": describe(final_four),
         "effective_fps": describe(fps_values),
+        "host_present": {
+            key: describe([
+                float((report.get("parsed", {}).get("host_present") or {})[key])
+                for report in reports
+                if isinstance((report.get("parsed", {}).get("host_present") or {}).get(key),
+                              (int, float))
+            ])
+            for key in ("presented_fps", "guest_speed", "capture_us_avg",
+                        "capture_to_present_us_avg", "upload_us_avg", "swap_us_avg",
+                        "capture_to_present_us_max_total", "present_fail")
+        },
         "presented_flips_per_second": describe(flips_values),
         "window_wall_ns": {
             str(deadline): describe(values)
@@ -536,8 +547,11 @@ def print_arm(arm: Mapping[str, Any]) -> None:
     print_stat_row("total_wall (GATE)", arm["total_wall_ns"], seconds=True)
     print_stat_row("final_four_wall (ind)", arm["final_four_wall_ns"], seconds=True)
     print_stat_row("effective_fps", arm["effective_fps"], seconds=False)
+    for key, stats in arm.get("host_present", {}).items():
+        if stats.get("n"):
+            print_stat_row("host_" + key, stats, seconds=False)
     print_stat_row(
-        "presented_flips_per_s", arm["presented_flips_per_second"], seconds=False
+        "guest_flip_writes_per_s", arm["presented_flips_per_second"], seconds=False
     )
     print("  per-window wall:")
     for deadline, stats in arm["window_wall_ns"].items():
@@ -648,7 +662,7 @@ def run_single_set(args: argparse.Namespace) -> int:
         print(f"  final_sha={unique_shas[0] if len(unique_shas) == 1 else 'mixed'}")
     print_metric("final_fps", collect(loaded, final_fps))
     print_metric(
-        "presented_flips_per_second", collect(loaded, presented_flips_per_second)
+        "guest_flip_writes_per_second", collect(loaded, presented_flips_per_second)
     )
     print_metric("total_wall_ns", collect(loaded, total_wall), seconds=True)
     print_metric(

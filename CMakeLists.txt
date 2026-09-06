@@ -186,6 +186,12 @@ target_include_directories(test_xid_input PRIVATE ${XLLE_INCLUDES})
 target_link_libraries(test_xid_input PRIVATE xlle_machine)
 add_test(NAME xid_input COMMAND test_xid_input)
 
+if(XLLE_WITH_SDL)
+  add_executable(test_present tests/test_present.cpp)
+  target_link_libraries(test_present PRIVATE xlle_host)
+  add_test(NAME present COMMAND test_present)
+endif()
+
 add_executable(test_xid_script tests/test_xid_script.cpp)
 target_include_directories(test_xid_script PRIVATE ${XLLE_INCLUDES})
 add_test(NAME xid_script COMMAND test_xid_script)

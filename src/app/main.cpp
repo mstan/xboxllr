@@ -1664,10 +1664,25 @@ int main(int argc, char** argv) {
     uint32_t host_sample_profile_ms = 0;
     uint64_t max_insns = 128ull * 1000 * 1000;  // 2BL kernel LZX decompress needs tens of M
     uint64_t machine_chunk_insns = 4096;
+    // Interactive presentation (beads-xbox.1.15.8 stage (g)). All three are
+    // INTERACTIVE-ONLY: none of them is reachable without --interactive, and the
+    // canonical replay never passes it. `interactive_present_legacy` is arm A --
+    // the pre-1.15.8 33 ms wall-clock throttle plus the per-pixel scalar
+    // capture_scanout conversion, restored on the SAME binary so the A/B is a flag.
+    bool interactive_present_legacy = false;
+    unsigned interactive_legacy_throttle_ms = 33;
+    uint64_t interactive_present_stats_ms = 1000;
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--serve")) serve = true;
         else if (!std::strcmp(argv[i], "--window")) window = true;
         else if (!std::strcmp(argv[i], "--interactive")) interactive = true;
+        else if (!std::strcmp(argv[i], "--interactive-present-legacy"))
+            interactive_present_legacy = true;
+        else if (!std::strcmp(argv[i], "--interactive-legacy-throttle-ms") && i + 1 < argc)
+            interactive_legacy_throttle_ms =
+                static_cast<unsigned>(std::strtoul(argv[++i], nullptr, 10));
+        else if (!std::strcmp(argv[i], "--interactive-present-stats-ms") && i + 1 < argc)
+            interactive_present_stats_ms = std::strtoull(argv[++i], nullptr, 10);
         else if (!std::strcmp(argv[i], "--test-synthetic-controller-hub"))
             test_synthetic_controller_hub = true;
         else if (!std::strcmp(argv[i], "--test-synthetic-controller-hub-input-down"))
@@ -2240,11 +2255,13 @@ int main(int argc, char** argv) {
                      "--run2bl <2bl.bin>, plus --test-input-capture-prefix <path>\n");
         return 1;
     }
+    // A script can drive repeatable interactive measurements. The keyboard is
+    // still pumped (window close still stops the run) but it
+    // does not publish gamepad state -- two writers to one pad would race and the
+    // script's timeline is the one under measurement.
     if (test_input_script && interactive) {
-        std::fprintf(stderr,
-                     "[input] --test-input-script cannot be combined with "
-                     "--interactive\n");
-        return 1;
+        std::printf("[input] --test-input-script owns the pad; --interactive presents "
+                    "and pumps the window only\n");
     }
     if (test_input_script && net_requested) {
         std::fprintf(stderr,
@@ -3012,6 +3029,8 @@ int main(int argc, char** argv) {
             if (interactive) {
                 if (!host_input.open("xboxlle input — arrows=D-pad, Z=A, X=B, Enter=Start, Backspace=Back"))
                     return 1;
+                host_input.set_legacy_throttle_ms(
+                    interactive_present_legacy ? interactive_legacy_throttle_ms : 0);
                 std::printf("[input] interactive Controller S: arrows=D-pad Z=A X=B "
                             "Enter=Start Backspace=Back\n");
             }
@@ -3022,6 +3041,30 @@ int main(int argc, char** argv) {
             std::vector<uint8_t> live_rgba;
             Nv2a::ScanoutInfo live_scanout;
             std::string live_scanout_error;
+            uint64_t interactive_start_ns = 0, interactive_stats_ns = 0;
+            uint64_t interactive_prev_insns = 0, interactive_prev_vblanks = 0;
+            uint64_t interactive_prev_flips = 0;
+            PresentStats interactive_prev_stats{};
+            auto print_present_stats = [&](const char* scope, uint64_t now) {
+                const bool cumulative = !std::strcmp(scope, "cumulative");
+                const uint64_t vblanks = mach.nv2a() ? mach.nv2a()->vblanks() : 0;
+                const uint64_t flips = mach.nv2a() ? mach.nv2a()->flip_increments() : 0;
+                const PresentStats stats = host_input.stats_copy();
+                char line[2048];
+                format_present_line(line, sizeof(line), scope,
+                    now - (cumulative ? interactive_start_ns : interactive_stats_ns),
+                    stats, cumulative ? PresentStats{} : interactive_prev_stats,
+                    vblanks - (cumulative ? 0 : interactive_prev_vblanks),
+                    flips - (cumulative ? 0 : interactive_prev_flips),
+                    mach.total_insns() - (cumulative ? 0 : interactive_prev_insns),
+                    733333333ull);
+                std::printf("%s\n", line);
+                interactive_stats_ns = now;
+                interactive_prev_stats = stats;
+                interactive_prev_insns = mach.total_insns();
+                interactive_prev_vblanks = vblanks;
+                interactive_prev_flips = flips;
+            };
             uint64_t next_frame_series_insn = frame_series_every;
             bool frame_series_exhausted = false;
             // Stage (d) seam census: previous checkpoint's totals, so each line
@@ -4210,19 +4253,61 @@ int main(int argc, char** argv) {
                         mach.ohci0()->set_xid_gamepad_state(generic_script.state());
                     }
                     if (interactive) {
+                        const uint64_t input_t0 = host_input.now_ns();
                         host_input.poll();
-                        mach.ohci0()->set_xid_gamepad_state(host_input.state());
+                        // The XID pad is serviced on EVERY host poll -- once per guest
+                        // millisecond, independent of present pacing -- so the guest's
+                        // 1 kHz USB poll always finds fresh state. When a test script
+                        // owns the pad it has already published above.
+                        if (!test_input_script)
+                            mach.ohci0()->set_xid_gamepad_state(host_input.state());
+                        host_input.note_input_poll(input_t0);
                         if (host_input.quit_requested())
                             mach.cpu().request_stop("host input window closed");
-                        // capture_scanout copies the complete guest surface, so keep it on a
-                        // host-wall-clock cadence rather than the 1 kHz guest poll cadence.
-                        if (host_input.frame_due() && mach.nv2a()) {
-                            if (mach.nv2a()->capture_scanout(
-                                    live_rgba, live_scanout, live_scanout_error)) {
-                                host_input.present_rgba(
+                        // Present when the GUEST has produced a frame this presenter has
+                        // not shown yet (Nv2a::vblanks(), the guest's own retired-
+                        // instruction frame clock). No host wall clock decides the
+                        // cadence below the display-derived pacing guard.
+                        if (mach.nv2a() && host_input.frame_due(mach.nv2a()->vblanks())) {
+                            const uint64_t cap_t0 = host_input.now_ns();
+                            bool presented = false;
+                            if (!interactive_present_legacy) {
+                                // Zero copy, zero conversion: the guest's own bytes go
+                                // straight into the SDL texture in the guest's own
+                                // format (little-endian A8R8G8B8 == SDL BGRX32).
+                                size_t direct_size = 0;
+                                const uint8_t* direct = mach.nv2a()->scanout_direct_bytes(
+                                    live_scanout, direct_size, live_scanout_error);
+                                if (direct) {
+                                    host_input.note_capture(cap_t0, direct_size, true);
+                                    const xlle::PresentFormat fmt =
+                                        live_scanout.bits_per_pixel == 32
+                                            ? xlle::PresentFormat::kXrgb8888
+                                            : (live_scanout.rgb565
+                                                   ? xlle::PresentFormat::kRgb565
+                                                   : xlle::PresentFormat::kXrgb1555);
+                                    presented = host_input.present_pixels(
+                                        direct, fmt, static_cast<int>(live_scanout.width),
+                                        static_cast<int>(live_scanout.height),
+                                        static_cast<size_t>(live_scanout.pitch), cap_t0);
+                                }
+                            }
+                            if (!presented && mach.nv2a()->capture_scanout(
+                                                  live_rgba, live_scanout,
+                                                  live_scanout_error)) {
+                                // Fallback / arm A: the per-pixel scalar conversion.
+                                host_input.note_capture(cap_t0, live_rgba.size(), false);
+                                presented = host_input.present_rgba(
                                     live_rgba.data(), static_cast<int>(live_scanout.width),
                                     static_cast<int>(live_scanout.height),
-                                    static_cast<size_t>(live_scanout.width) * 4);
+                                    static_cast<size_t>(live_scanout.width) * 4, cap_t0);
+                            }
+                            if (interactive_present_stats_ms) {
+                                const uint64_t now = host_input.now_ns();
+                                if ((now - interactive_stats_ns) / 1000000ull >=
+                                    interactive_present_stats_ms) {
+                                    print_present_stats("interval", now);
+                                }
                             }
                         }
                     }
@@ -4424,7 +4509,10 @@ int main(int argc, char** argv) {
                 host_sampler.set_progress_source(&mach.progress_insns());
                 host_sampler.start(host_sample_profile_ms);
             }
+            if (interactive)
+                interactive_start_ns = interactive_stats_ns = host_input.now_ns();
             uint64_t n = mach.run(0x901ee, max_insns, err2);
+            if (interactive) print_present_stats("cumulative", host_input.now_ns());
             if (host_sample_profile_ms) host_sampler.stop_and_report();
             const bool host_memory_safety_stop =
                 err2.find("host memory reached soft limit") != std::string::npos ||
