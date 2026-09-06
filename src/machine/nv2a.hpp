@@ -1340,6 +1340,7 @@ public:
         uint64_t vsh_compiles = 0;      // programs pre-decoded (per parse)
         uint64_t vsh_compile_ticks = 0;  // and what that cost, always on
         uint64_t vsh_compile_declines = 0;
+        uint64_t discarded_deltas = 0; // Invalid direct census clock intervals.
     };
     const VertexCensus& vertex_census() const { return vertex_census_; }
 
@@ -1693,6 +1694,7 @@ public:
     }
     void set_gpu_generic_texture_cache(bool on) { gpu_generic_texture_cache_ = on; }
     bool gpu_generic_texture_cache() const { return gpu_generic_texture_cache_; }
+    void set_gpu_generic_texture_trace(bool on) { gpu_generic_texture_trace_ = on; }
     const Nv2aTextureConversionCache& generic_texture_conversion_cache() const {
         return generic_texture_conversion_cache_;
     }
@@ -3274,6 +3276,7 @@ private:
     bool gpu_generic_shader_depth_ = false;
     bool gpu_generic_shader_bgra_upload_ = true;
     bool gpu_generic_texture_cache_ = true; // Exact post-resolve snapshots; measured default.
+    bool gpu_generic_texture_trace_ = false; // Explicit FNV trace; perturbs cache timing.
     Nv2aTextureConversionCache generic_texture_conversion_cache_;
     // PFIFO run batching (beads-xbox.1.15.1 stages (c)/(d)). Both default ON;
     // the negative spellings restore the per-word pusher and the per-word

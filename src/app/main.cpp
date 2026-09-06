@@ -299,7 +299,8 @@ void print_gpu_residency_census(const xlle::Nv2a* nv, const char* scope,
             "vertices=%llu reuse_hits=%llu parses=%llu parse_reuses=%llu "
             "parse_ns=%llu fetch_n=%llu fetch_ns=%llu vsh_n=%llu vsh_ns=%llu "
             "vsh_context_vertices=%llu fixed_function_vertices=%llu "
-            "program_cache=%u fast_fetch=%u census=%u\n",
+            "program_cache=%u fast_fetch=%u census=%u discarded_deltas=%llu "
+            "overhead_ticks_per_pair=%llu\n",
             scope, deadline, (unsigned long long)v.batches,
             (unsigned long long)v.vertices, (unsigned long long)v.reuse_hits,
             (unsigned long long)v.parses, (unsigned long long)v.parse_reuses,
@@ -309,7 +310,9 @@ void print_gpu_residency_census(const xlle::Nv2a* nv, const char* scope,
             (unsigned long long)v.fixed_function_vertices,
             nv->vertex_program_cache_enabled() ? 1u : 0u,
             nv->vertex_fast_fetch_enabled() ? 1u : 0u,
-            nv->vertex_census_enabled() ? 1u : 0u);
+            nv->vertex_census_enabled() ? 1u : 0u,
+            (unsigned long long)v.discarded_deltas,
+            (unsigned long long)xlle::perf_excl::g_overhead_ticks);
         // beads-xbox.1.15.11: which of the two step forms actually ran, and
         // what the pre-decode itself cost. ALWAYS ON, because a compiled-path
         // claim without its own denominator is not a measurement.
@@ -1535,6 +1538,7 @@ int main(int argc, char** argv) {
     bool nv2a_gpu_generic_shader_depth = false;
     bool nv2a_gpu_generic_shader_bgra_upload = true;
     bool nv2a_gpu_generic_texture_cache = true;
+    bool nv2a_gpu_generic_texture_trace = false;
     // PFIFO run batching (beads-xbox.1.15.1 stages (c)/(d)). Both default ON;
     // the negative spellings are the arm-A form of the decision A/B and restore
     // the strict per-word pusher / the per-word handler call on the SAME binary.
@@ -1805,6 +1809,8 @@ int main(int argc, char** argv) {
             nv2a_gpu_generic_texture_cache = true;
         else if (!std::strcmp(argv[i], "--no-nv2a-gpu-generic-texture-cache"))
             nv2a_gpu_generic_texture_cache = false;
+        else if (!std::strcmp(argv[i], "--nv2a-gpu-generic-texture-trace"))
+            nv2a_gpu_generic_texture_trace = true;
         else if (!std::strcmp(argv[i], "--nv2a-pfifo-run-batching"))
             nv2a_pfifo_run_batching = true;
         else if (!std::strcmp(argv[i], "--no-nv2a-pfifo-run-batching"))
@@ -2487,6 +2493,8 @@ int main(int argc, char** argv) {
                     nv2a_gpu_generic_shader_bgra_upload);
                 mach.nv2a()->set_gpu_generic_texture_cache(
                     nv2a_gpu_generic_texture_cache);
+                mach.nv2a()->set_gpu_generic_texture_trace(
+                    nv2a_gpu_generic_texture_trace);
                 mach.nv2a()->set_pfifo_run_batching(nv2a_pfifo_run_batching);
                 mach.nv2a()->set_pfifo_run_bulk(nv2a_pfifo_run_bulk);
                 mach.nv2a()->set_pfifo_direct_fetch(nv2a_pfifo_direct_fetch);

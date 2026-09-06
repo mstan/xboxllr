@@ -32,9 +32,11 @@ namespaces, including when their numeric values happen to match. This avoids
 hashing every fresh multi-megabyte image merely to identify an upload. The
 disabled path retains the earlier FNV behavior.
 
-Instrumented conversion traces compute FNV for analysis, so those runs do **not**
+Conversion traces (`--nv2a-gpu-generic-texture-trace`) compute FNV for analysis, so those runs do **not**
 measure the noperf hash-elimination gain. No claim is made that this change removes
 guest memory reads, DXT decoding, GPU resolves or necessary uploads of changed data.
+The original experiment emitted this trace under `--perf-accounting`; the timer
+follow-up separates it so ordinary profiling retains the accepted no-FNV path.
 
 ## Counterexamples and review
 

@@ -151,6 +151,10 @@ add_executable(test_jsonl tests/test_jsonl.cpp)
 target_include_directories(test_jsonl PRIVATE ${XLLE_INCLUDES})
 add_test(NAME jsonl COMMAND test_jsonl)
 
+add_executable(test_perf_excl tests/test_perf_excl.cpp)
+target_include_directories(test_perf_excl PRIVATE ${XLLE_INCLUDES})
+add_test(NAME perf_excl COMMAND test_perf_excl)
+
 add_executable(test_nv2a tests/test_nv2a.cpp src/machine/nv2a.cpp)
 target_include_directories(test_nv2a PRIVATE ${XLLE_INCLUDES})
 target_link_libraries(test_nv2a PRIVATE nv2a_vsh_emulator xlle_host)

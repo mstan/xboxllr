@@ -400,7 +400,7 @@ check("which of the two step forms actually ran is reported with its own "
       "vsh_compiled_vertices" in hpp and "vsh_interpreted_vertices" in hpp and
       "[host] nv2a-vsh-form scope=%s" in main)
 check("the pre-decode's own cost is measured and reported, not assumed free",
-      "vertex_census_.vsh_compile_ticks += compile_delta;" in cpp and
+      "vertex_census_.vsh_compile_ticks += perf_excl::compensated_delta(" in cpp and
       "compile_ns=%llu" in main)
 check("the ceiling probe is DEFAULT OFF, has no --no- spelling and is a "
       "SEPARATE function, because a branch for it inside the executor loop "

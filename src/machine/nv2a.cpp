@@ -3212,8 +3212,8 @@ bool Nv2a::submit_vertex_batch() {
             Nv2aVshParseResult result = nv2a_vsh_parse_program(
                 &program, transform_program_[transform_program_start_].data(), slots);
             const uint64_t parse_delta = perf_excl::tick_now() - parse_start;
-            if (parse_delta <= perf_excl::g_max_plausible_ticks)
-                vertex_census_.parse_ticks += parse_delta;
+            vertex_census_.parse_ticks += perf_excl::compensated_delta(
+                parse_delta, vertex_census_.discarded_deltas);
             ++vertex_census_.parses;
             if (result != NV2AVPR_SUCCESS) {
                 char why[128];
@@ -3293,8 +3293,8 @@ bool Nv2a::submit_vertex_batch() {
                 compile_vsh_program(program.steps, program_slots, census_row);
             const uint64_t compile_delta =
                 perf_excl::tick_now() - compile_start;
-            if (compile_delta <= perf_excl::g_max_plausible_ticks)
-                vertex_census_.vsh_compile_ticks += compile_delta;
+            vertex_census_.vsh_compile_ticks += perf_excl::compensated_delta(
+                compile_delta, vertex_census_.discarded_deltas);
             ++vertex_census_.vsh_compiles;
             if (!program_compiled) ++vertex_census_.vsh_compile_declines;
         } else {
@@ -3432,8 +3432,8 @@ bool Nv2a::submit_vertex_batch() {
                 }
                 if (vertex_census_on) {
                     const uint64_t d = perf_excl::tick_now() - fetch_start;
-                    if (d <= perf_excl::g_max_plausible_ticks)
-                        vertex_census_.fetch_ticks += d;
+                    vertex_census_.fetch_ticks += perf_excl::compensated_delta(
+                        d, vertex_census_.discarded_deltas);
                     ++vertex_census_.fetch_n;
                 }
             }
@@ -3567,8 +3567,8 @@ bool Nv2a::submit_vertex_batch() {
                 }
                 if (vertex_census_on) {
                     const uint64_t d = perf_excl::tick_now() - vsh_start;
-                    if (d <= perf_excl::g_max_plausible_ticks)
-                        vertex_census_.vsh_ticks += d;
+                    vertex_census_.vsh_ticks += perf_excl::compensated_delta(
+                        d, vertex_census_.discarded_deltas);
                     ++vertex_census_.vsh_n;
                     if (program_writes_context)
                         ++vertex_census_.vsh_context_vertices;
@@ -12758,7 +12758,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                 dst.height = src.height;
                 dst.border_argb = src.border;
                 const auto trace_conversion = [&](bool hit) {
-                    if (gpu_generic_texture_cache_ && perf::g_enabled) {
+                    if (gpu_generic_texture_trace_) {
                         std::printf(
                             "[nv2a-texture-conversion] batch=%llu stage=%u "
                             "width=%u height=%u linear=%u alpha8=%u "
@@ -12832,7 +12832,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                 // The backend needs a stable upload identity, not a digest of
                 // every fresh multi-megabyte snapshot. Keep the FNV for legacy
                 // routing, exhausted IDs, and instrumented conversion traces.
-                if (!dst.content_id || perf::g_enabled)
+                if (!dst.content_id || gpu_generic_texture_trace_)
                     dst.hash = fnv1a_bytes(dst.linear.data(), dst.linear.size());
                 trace_conversion(false);
                 if (gpu_generic_texture_cache_ && textures_ok) {

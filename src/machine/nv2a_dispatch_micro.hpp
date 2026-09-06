@@ -156,10 +156,8 @@ inline uint8_t g_mode = 0;
 inline uint64_t g_last = 0;
 inline uint64_t g_word_start = 0;
 
-// SERIALIZED tick read, and this module does NOT reuse perf_excl::tick_now().
-// perf_excl reads a bare `rdtsc`, which is not ordered against the surrounding
-// loads and stores. That is tolerable for its regions (a method dispatch is
-// ~58 ns, a resolve is milliseconds) and it is NOT tolerable here: the first
+// SERIALIZED tick read. perf_excl now also fences its clock; this experimental
+// micro probe retains its own read/calibration pair. The first
 // version of this module chained bare reads across a ~41 ns word and the twelve
 // deltas summed to 12.2 ns -- 36 % of the whole -- because the reads float to
 // the head of the reorder window and collapse toward each other while the real

@@ -56,39 +56,34 @@
 //     "KNOWN LIMIT OF THE HYBRID" and tolerates it only on a path worth ~0 % of
 //     a frame; here it would be the majority of the run.)
 //
-// So every region is exact, and the cost is bounded, compensated and EXPORTED:
-// two rdtsc reads per boundary pair at ~6-10 ns each replaces today's two
-// steady_clock::now() reads (QueryPerformanceCounter, ~20-25 ns each) plus two
-// atomic read-modify-writes, i.e. roughly 15-20 ns per method word against
-// ~70 ns today. `clock_reads` and `overhead_ticks_per_read` ship in every
-// report line so the instrumentation's own share is checkable from a log
-// instead of argued about (docs/PERF-METHODOLOGY.md §2 rule 9).
+// Every region boundary is measured. The read cost is calibrated and EXPORTED:
+// `clock_reads`, `overhead_ticks_per_read` and the actual compensation ship in
+// every report line. Neither calibration nor subtraction removes perturbation
+// from bookkeeping or fenced instruction scheduling. Use noperf runs for gates.
 //
 // If a measured run ever puts this over the 1 % gate, the exact fallback is one
 // line: have Nv2a::drain_pull_queue open kNv2aPfifo instead of kNv2aDispatch.
 // The partition stays exact, it just stops separating PFIFO parse from method
 // semantics. It is a granularity knob, never an estimate.
 //
-// CLOCK CHOICE: rdtsc. The regions here run from ~50 ns (a PFIFO method) to
-// milliseconds (a GL resolve). On this MinGW/Windows target std::chrono::
-// steady_clock::now() lowers to QueryPerformanceCounter, ~20-25 ns per read;
-// at the boundary counts above that is seconds of perturbation per run and it
-// is a large fraction of the smallest regions' own value. __rdtsc is ~6-10 ns,
-// and — more importantly for compensation — its cost is far more repeatable, so
-// the measured minimum we subtract per boundary is close to the real cost
-// rather than an optimistic floor under a noisy distribution. ns/tick is
+// CLOCK CHOICE: lfence; rdtsc; lfence plus compiler barriers. Bare RDTSC can
+// execute out of order and collapse small-region deltas; the dispatch micro
+// probe demonstrated this in this repository. Both calibration and measured
+// reads use the fenced implementation. LFENCE orders local instruction execution;
+// this is not a measurement of store-buffer drain or GPU completion. ns/tick is
 // calibrated once against steady_clock and sanity-bounded to 0.1-10 ns/tick
 // (100 MHz - 10 GHz); outside that band the calibration is discarded and ticks
 // are treated as nanoseconds rather than publishing a wild scale factor. A
 // non-x86 build falls back to steady_clock automatically.
 //
-// OVERHEAD IS COMPENSATED, NOT ASSUMED. Every boundary is exactly one tick read
-// and closes exactly one region, so subtracting one measured clock-pair cost
+// OVERHEAD IS COMPENSATED, NOT ASSUMED. A boundary closing a region subtracts
+// one measured clock-pair cost
 // (g_overhead_ticks, the MINIMUM over 4096 back-to-back reads — the minimum is
 // the un-preempted cost, whereas a mean would fold in scheduler noise and
-// over-subtract) from the region being closed removes the instrumentation from
-// the accumulated numbers. The residual perturbation is what `clock_reads`
-// exports.
+// over-subtract), bounded by the interval length. Reads while no region is open
+// and discarded deltas subtract nothing. This removes an estimated clock floor,
+// not all instrumentation effects. Raw wall, actual subtraction and residual
+// excluding that subtraction remain separately visible.
 //
 // A LEAKED REGION IS A FAT BUCKET, NEVER A WRONG TOTAL. Every region is opened
 // through the RAII Scope/ScopeIf types, so an early return unwinds it. The one
@@ -116,15 +111,19 @@
 // measures the same hot-loop code an uninstrumented one runs.
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <string>
 
-#if defined(__x86_64__) || defined(__i386__) || defined(_M_X64) || defined(_M_IX86)
+// LFENCE needs SSE2. Older 32-bit x86 builds use the steady-clock fallback.
+#if defined(__x86_64__) || defined(_M_X64) || defined(__SSE2__) || \
+    (defined(_M_IX86_FP) && _M_IX86_FP >= 2)
 #define XLLE_PERF_EXCL_TSC 1
 #if defined(_MSC_VER)
+#include <emmintrin.h>
 #include <intrin.h>
 #endif
 #endif
@@ -253,10 +252,11 @@ struct Profile {
     // below opens no region and is not counted, because it did not start a new
     // measured interval.
     uint64_t entries[kBucketCount] = {};
-    // Tick reads taken. reads * overhead_ticks is the instrumentation's own
-    // measured cost, already subtracted from the buckets above; exported so the
-    // residual perturbation is checkable rather than assumed.
+    // Tick reads taken, including reads that close no bucket.
     uint64_t reads = 0;
+    // Actual ticks removed by compensation. Reads from kNone, discarded
+    // intervals and intervals shorter than the floor make reads*floor differ.
+    uint64_t compensated_ticks = 0;
     // Intervals rejected by the plausibility clamp in accrue(). The TSC is not
     // guaranteed monotonic across every migration/power event, and the delta is
     // computed unsigned: one backwards read would otherwise wrap to ~2^64 ticks
@@ -293,11 +293,18 @@ inline bool g_calibrated = false;
 // Monotonic tick source. See the CLOCK CHOICE note at the top of this file.
 inline uint64_t tick_now() {
 #if defined(XLLE_PERF_EXCL_TSC)
+    std::atomic_signal_fence(std::memory_order_seq_cst);
 #if defined(_MSC_VER)
-    return __rdtsc();
+    _mm_lfence();
+    const uint64_t t = __rdtsc();
+    _mm_lfence();
 #else
-    return __builtin_ia32_rdtsc();
+    __builtin_ia32_lfence();
+    const uint64_t t = __builtin_ia32_rdtsc();
+    __builtin_ia32_lfence();
 #endif
+    std::atomic_signal_fence(std::memory_order_seq_cst);
+    return t;
 #else
     return static_cast<uint64_t>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -374,6 +381,18 @@ inline uint64_t ticks_to_ns(uint64_t ticks) {
     return static_cast<uint64_t>(static_cast<double>(ticks) * g_ns_per_tick);
 }
 
+// Independent two-read census scopes use the same floor and plausibility rule
+// as the partition. Their discard counter belongs to the census, not g_profile
+// (some direct timers execute on workers). This estimates probe cost; it cannot
+// remove the fences' effect on surrounding instruction scheduling.
+inline uint64_t compensated_delta(uint64_t delta, uint64_t& discarded) {
+    if (delta > g_max_plausible_ticks) {
+        ++discarded;
+        return 0;
+    }
+    return delta > g_overhead_ticks ? delta - g_overhead_ticks : 0;
+}
+
 // The single place a measured interval is credited to a bucket.
 //
 // `delta` is unsigned by construction (t - g_last). If the TSC ever steps
@@ -389,8 +408,9 @@ inline void accrue(uint8_t bucket, uint64_t delta) {
         ++g_profile.discarded_deltas;
         return;
     }
-    g_profile.ticks[bucket] +=
-        delta > g_overhead_ticks ? delta - g_overhead_ticks : 0u;
+    const uint64_t removed = delta > g_overhead_ticks ? g_overhead_ticks : delta;
+    g_profile.compensated_ticks += removed;
+    g_profile.ticks[bucket] += delta - removed;
 }
 
 // Open a region. Returns the bucket to restore, or kInactive when this entry
@@ -398,7 +418,7 @@ inline void accrue(uint8_t bucket, uint64_t delta) {
 //
 // The single tick read closes the parent's accrual and opens this bucket's. One
 // read, one region closed: subtracting one clock-pair overhead from the region
-// being closed compensates the instrumentation exactly.
+// being closed compensates its measured minimum clock cost.
 //
 // RE-ENTRANCY ELISION. Entering the bucket that is already current would cost
 // two reads to measure an interval that is already being measured, and would
@@ -477,13 +497,11 @@ private:
 // string when accounting was never enabled, so call sites can print
 // unconditionally.
 //
-// unaccounted_ns is SIGNED and published as a number. It can be slightly
-// negative: the compensation subtracts the minimum clock-pair cost, and a read
-// placed between real work costs marginally more than that floor, so the
-// buckets can over-attribute by a fraction of a percent. A large positive
-// residual means real time is escaping the partition (work outside every
-// region), which is a finding about the instrument, not something to bury in a
-// bucket.
+// Raw wall includes probe time; bucket time has had compensation removed.
+// unaccounted_ns retains wall-accounted for compatibility. residual_ns also
+// removes the ACTUAL compensation, exposing time outside regions or discarded
+// deltas. Publish both: fencing must not disguise probe overhead as escaped work.
+// Signed residuals preserve clock/window defects rather than wrapping them.
 inline std::string format_report(const char* scope, unsigned long long deadline,
                                  bool interval) {
     if (!g_enabled) return {};
@@ -512,21 +530,26 @@ inline std::string format_report(const char* scope, unsigned long long deadline,
     const double unaccounted_pct =
         wall_ns ? 100.0 * static_cast<double>(unaccounted_ns) / static_cast<double>(wall_ns)
                 : 0.0;
-    // The instrumentation's own compensated cost, in ns, for this window.
-    const uint64_t compensated_ns = ticks_to_ns(reads * g_overhead_ticks);
+    const uint64_t compensated_ticks = interval
+        ? g_profile.compensated_ticks - g_prev.compensated_ticks
+        : g_profile.compensated_ticks;
+    const uint64_t compensated_ns = ticks_to_ns(compensated_ticks);
+    const int64_t residual_ns = unaccounted_ns - static_cast<int64_t>(compensated_ns);
+    const double residual_pct = wall_ns
+        ? 100.0 * static_cast<double>(residual_ns) / static_cast<double>(wall_ns) : 0.0;
 
     char head[512];
     std::snprintf(head, sizeof(head),
                   "[perf-excl] scope=%s deadline=%llu wall_ns=%llu accounted_ns=%llu "
                   "unaccounted_ns=%lld unaccounted_pct=%.3f clock_reads=%llu "
                   "overhead_ticks_per_read=%llu ns_per_tick=%.6f compensated_ns=%llu "
-                  "discarded_deltas=%llu",
+                  "discarded_deltas=%llu residual_ns=%lld residual_pct=%.3f",
                   scope, deadline, (unsigned long long)wall_ns,
                   (unsigned long long)accounted_ns, (long long)unaccounted_ns,
                   unaccounted_pct, (unsigned long long)reads,
                   (unsigned long long)g_overhead_ticks, g_ns_per_tick,
                   (unsigned long long)compensated_ns,
-                  (unsigned long long)discarded);
+                  (unsigned long long)discarded, (long long)residual_ns, residual_pct);
     std::string out(head);
     for (std::size_t i = 0; i < static_cast<std::size_t>(kBucketCount); ++i) {
         char field[128];

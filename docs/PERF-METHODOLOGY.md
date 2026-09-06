@@ -1450,3 +1450,18 @@ enables detailed telemetry; those two hashes now require `--nv2a-detailed-teleme
 `[perf-excl]` line family is an exclusive partition (18 buckets, rdtsc with compensated overhead,
 residual printed as `unaccounted_ns`); legacy `[perf]` lines are kept for tool compatibility but
 `host_poll_devices` now spans a narrower region and is not comparable with earlier reports.
+
+Update 2026-09-06 (`beads-xbox.1.14.3`): small-region timing now uses
+`lfence; rdtsc; lfence` with compiler barriers, including calibration. Earlier
+bare-RDTSC costs are historical observations, not reliable absolute costs for
+short bodies. The old `compensated_ns = clock_reads * overhead` overstates actual
+subtraction when a read closes no region, the delta is rejected, or it is shorter
+than the floor. Reports now sum compensation actually applied in `accrue()`.
+`unaccounted_ns` remains raw wall minus compensated buckets; the added
+`residual_ns/pct` also removes the actual compensation. Inspect both, along with
+discarded deltas. Probe bookkeeping and fence-induced scheduling changes still
+perturb an instrumented run, so noperf interleaved sets remain the retention gate.
+Direct vertex parse/compile/fetch/execute census deltas subtract the same measured
+floor and expose a separate discard count. Detailed texture FNV tracing requires
+`--nv2a-gpu-generic-texture-trace`; ordinary profiling no longer restores the
+hashing eliminated by the accepted texture cache.

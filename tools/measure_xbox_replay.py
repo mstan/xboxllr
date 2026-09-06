@@ -533,9 +533,11 @@ def parse_perf_excl(fields: str) -> dict[str, Any]:
     """[perf-excl] -> flat dict, one entry per key=value token.
 
     Bucket-count agnostic by construction (see PERF_EXCL_RE). `unaccounted_ns` is
-    signed and must survive as a negative int, which int() handles; the partition
-    is only trustworthy when `unaccounted_pct` is small, so that field is the one
-    a consumer should gate on.
+    signed and must survive as a negative int, which int() handles. Raw wall
+    includes timing overhead removed from the buckets; new reports also expose
+    actual `compensated_ns` and `residual_ns/pct` excluding that subtraction.
+    Inspect those together with discarded deltas; a small raw unaccounted share
+    alone does not validate an unordered clock or unmeasured probe perturbation.
     """
     parsed: dict[str, Any] = {}
     for token in fields.split():
