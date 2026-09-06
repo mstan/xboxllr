@@ -134,6 +134,10 @@ on both minimum and median, then distinct interactive frames and latency tails.
 
 ## Reproduce
 
+Follow-up: [parallel triangle packing and cost attribution](PERF-VSH-GPU-PACK-2026-09-06.md)
+identifies and removes the serial pack bottleneck while retaining this verified
+handoff and the serial counterfactual.
+
 Configure `XLLE_VSH_GPU_RESIDENT=ON` using the README's Release toolchain, then:
 
 ```powershell

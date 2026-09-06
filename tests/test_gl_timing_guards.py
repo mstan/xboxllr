@@ -185,7 +185,6 @@ for raw, wrappers in WRAPPED:
 # attribution wrong, which is the harder failure to see.
 BUCKETS = [
     ("gpu_timed_draw_arrays", "GpuTimerBucket::kDraw"),
-    ("gpu_timed_dispatch_compute", "GpuTimerBucket::kDraw"),
     ("gpu_timed_buffer_data", "GpuTimerBucket::kUpload"),
     ("gpu_timed_tex_image_2d", "GpuTimerBucket::kUpload"),
     ("gpu_timed_tex_sub_image_2d", "GpuTimerBucket::kUpload"),
@@ -193,6 +192,10 @@ BUCKETS = [
     ("gpu_timed_resolve_read_pixels", "GpuTimerBucket::kResolve"),
 ]
 print("\nbucket routing")
+check("compute defaults to draw timing and honors its bucket argument",
+      re.search(r"void gpu_timed_dispatch_compute\([^)]*GpuTimerBucket bucket = GpuTimerBucket::kDraw", gl_src) is not None
+      and "ScopedGpuTimer gpu_timer(this, bucket)" in body(gl_src, "gpu_timed_dispatch_compute", GL_CPP),
+      "VSH and pack must retain distinct query labels without losing the default draw bucket")
 for wrapper, bucket in BUCKETS:
     check("%s targets %s" % (wrapper, bucket.split("::")[-1]),
           bucket in body(gl_src, wrapper, GL_CPP),

@@ -267,6 +267,33 @@ ProbeCase malformed_gpu_wire_layout() {
             false, true, true, true};
 }
 
+ProbeCase pack_boundary(uint32_t triangles, bool mixed_cull, bool late_decline = false) {
+    std::vector<cap::Execution> executions;
+    std::vector<uint32_t> expected;
+    for (uint32_t i = 0; i < triangles; ++i) {
+        const uint32_t base = static_cast<uint32_t>(executions.size());
+        const std::array<float, 4> color{
+            static_cast<float>(i % 251 + 1) / 256.0f,
+            static_cast<float>(i / 251 + 1) / 256.0f, 0.125f, 1.0f};
+        const bool culled = mixed_cull && i % 3 == 1;
+        if (late_decline && i + 1 == triangles) {
+            executions.push_back(exec(-62500.0625f, -62500.0625f, 0, 1, color));
+            executions.push_back(exec(62500.0625f, -62500.0625f, 0, 1, color));
+            executions.push_back(exec(32, 62500.0625f, 0, 1, color));
+        } else {
+            executions.push_back(exec(8, 8, 0, 1, color));
+            executions.push_back(exec(culled ? 8 : 40, culled ? 40 : 8, 0, 1, color));
+            executions.push_back(exec(culled ? 40 : 8, culled ? 8 : 40, 0, 1, color));
+        }
+        if (!culled) expected.insert(expected.end(), {base, base + 1, base + 2});
+    }
+    auto batch = uncached(5, std::move(executions), std::move(expected));
+    batch.cull_enabled = mixed_cull;
+    batch.large_target = late_decline;
+    return {"pack_boundary_" + std::to_string(triangles) + (mixed_cull ? "_mixed" : "_all") +
+            (late_decline ? "_late_decline" : ""), std::move(batch), false, late_decline, true};
+}
+
 std::vector<ProbeCase> make_probe_cases() {
     std::vector<ProbeCase> out;
     out.push_back(visible_list());
@@ -274,6 +301,12 @@ std::vector<ProbeCase> make_probe_cases() {
     out.push_back(large_target_visible());
     out.push_back(large_target_out_of_bound_fallback());
     out.push_back(malformed_gpu_wire_layout());
+    out.push_back(pack_boundary(255, false));
+    out.push_back(pack_boundary(256, false));
+    out.push_back(pack_boundary(257, false));
+    out.push_back(pack_boundary(769, true));
+    out.push_back(pack_boundary(5461, false));
+    out.push_back(pack_boundary(257, false, true));
     out.push_back({"visible_strip", uncached(6,
         {exec(8, 8, 0, 1), exec(40, 8, 0, 1), exec(8, 40, 0, 1),
          exec(40, 40, 0, 1)}, {0, 1, 2, 2, 1, 3}), false, false, true});
@@ -352,7 +385,7 @@ int fail(const std::string& message) {
 
 }  // namespace
 
-int run() {
+int run(bool parallel_pack) {
     std::string error;
     auto cpu_renderer = xlle::create_nv2a_opengl_renderer(error);
     if (!cpu_renderer) {
@@ -364,6 +397,8 @@ int run() {
         std::printf("SKIP: GPU VSH OpenGL renderer unavailable: %s\n", error.c_str());
         return 2;
     }
+    gpu_renderer->set_vsh_gpu_parallel_pack(parallel_pack);
+    std::printf("[resident-probe] parallel_pack=%u\n", parallel_pack ? 1u : 0u);
 
     uint32_t case_index = 0;
     uint32_t compared = 0;
@@ -420,6 +455,7 @@ int run() {
         if (mode1_checked == 0 && !probe.expect_decline) {
             auto mode1_renderer = xlle::create_nv2a_opengl_renderer(error);
             if (!mode1_renderer) return fail("mode1 renderer creation failed: " + error);
+            mode1_renderer->set_vsh_gpu_parallel_pack(parallel_pack);
             auto mode1_packet = make_packet(probe.batch, gpu_address + 0x700000u,
                                             probe.x8, 1);
             std::vector<uint8_t> mode1_output;
@@ -464,9 +500,13 @@ int run() {
     return 0;
 }
 
-int main() {
+int main(int argc, char** argv) {
     try {
-        return run();
+        if (argc > 2 || (argc == 2 && std::strcmp(argv[1], "--parallel-pack"))) {
+            std::fprintf(stderr, "usage: xlle_vsh_resident_probe [--parallel-pack]\n");
+            return 2;
+        }
+        return run(argc == 2);
     } catch (const std::exception& ex) {
         return fail(std::string("unhandled exception: ") + ex.what());
     } catch (...) {

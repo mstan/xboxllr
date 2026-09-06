@@ -1231,6 +1231,7 @@ public:
         if (delete_program_) {
             if (vsh_batch_program_) delete_program_(vsh_batch_program_);
             if (vsh_pack_program_) delete_program_(vsh_pack_program_);
+            if (vsh_parallel_pack_program_) delete_program_(vsh_parallel_pack_program_);
         }
         if (delete_buffers_) delete_buffers_(static_cast<int>(vsh_buffers_.size()), vsh_buffers_.data());
 #endif
@@ -1263,6 +1264,22 @@ public:
                 harvest_gpu_queries(/*block=*/true);
             }
             std::printf("%s\n", format_gl_gpu_report("cumulative").c_str());
+#if XLLE_VSH_GPU_RESIDENT
+            if (vsh_resident_stats_.batches) {
+                constexpr const char* phases[] = {"total", "upload", "vsh_submit", "pack_submit",
+                    "read_outputs", "read_status", "read_candidates", "read_vertices", "read_control", "verify"};
+                for (size_t i = 0; i < vsh_cpu_ns_.size(); ++i)
+                    std::printf("[perf-vsh-resident-cpu] phase=%s ns=%llu calls=%llu\n", phases[i],
+                        static_cast<unsigned long long>(vsh_cpu_ns_[i].load()),
+                        static_cast<unsigned long long>(vsh_cpu_calls_[i].load()));
+                std::printf("[perf-vsh-resident-gpu] vsh_ns=%llu vsh_n=%llu pack_ns=%llu pack_n=%llu "
+                    "upload_bytes=%llu download_bytes=%llu available=%u\n",
+                    static_cast<unsigned long long>(vsh_gpu_ns_[0]), static_cast<unsigned long long>(vsh_gpu_calls_[0]),
+                    static_cast<unsigned long long>(vsh_gpu_ns_[1]), static_cast<unsigned long long>(vsh_gpu_calls_[1]),
+                    static_cast<unsigned long long>(vsh_upload_bytes_), static_cast<unsigned long long>(vsh_download_bytes_),
+                    gpu_timing_available_ && gpu_timers_enabled_ ? 1u : 0u);
+            }
+#endif
             std::fflush(stdout);
         }
         if (delete_queries_) {
@@ -1815,6 +1832,7 @@ public:
     }
 #if XLLE_VSH_GPU_RESIDENT
     VshGpuResidentStats vsh_gpu_resident_stats() const override { return vsh_resident_stats_; }
+    void set_vsh_gpu_parallel_pack(bool on) override { vsh_parallel_pack_ = on; }
     bool prepare_vsh_gpu_resident(std::string& error) override {
         SDL_Window* previous_window = SDL_GL_GetCurrentWindow();
         SDL_GLContext previous_context = SDL_GL_GetCurrentContext();
@@ -5738,15 +5756,21 @@ private:
         return true;
     }
 #if XLLE_VSH_GPU_RESIDENT
+    unsigned int& active_vsh_pack_program() {
+        return vsh_parallel_pack_ ? vsh_parallel_pack_program_ : vsh_pack_program_;
+    }
     bool ensure_vsh_gpu_programs(std::string& error) {
         return (vsh_batch_program_ || compile_program(vsh_gpu_batch::kVshBatchComputeSource.c_str(),
                     "shared VSH", vsh_batch_program_, error)) &&
-               (vsh_pack_program_ || compile_program(vsh_gpu_batch::kResidentPrimaryPackComputeSource.c_str(),
-                    "resident VSH pack", vsh_pack_program_, error));
+               (active_vsh_pack_program() || compile_program(
+                    (vsh_parallel_pack_ ? vsh_gpu_batch::kResidentPrimaryParallelPackComputeSource :
+                        vsh_gpu_batch::kResidentPrimaryPackComputeSource).c_str(),
+                    "resident VSH pack", active_vsh_pack_program(), error));
     }
     bool prepare_verified_vsh_resident(const Nv2aGenericCombinerPacket& packet,
                                        bool& use_gpu_buffer, std::string& error) {
         namespace gpu = vsh_gpu_batch;
+        perf::ScopedAdd total_timer(vsh_cpu_ns_[0], vsh_cpu_calls_[0]);
         const auto& reference = *packet.gpu_vsh;
         const auto& batch = reference.batch;
         auto& stats = vsh_resident_stats_;
@@ -5781,6 +5805,8 @@ private:
         std::array<uint32_t, 4> control{};
         control.fill(0xdeadbeefu);
         const auto upload = [&](size_t index, unsigned binding, const void* data, size_t bytes) {
+            perf::ScopedAdd timer(vsh_cpu_ns_[1], vsh_cpu_calls_[1]);
+            if (perf::g_enabled) vsh_upload_bytes_ += bytes;
             bind_buffer_(kGlShaderStorageBuffer, vsh_buffers_[index]);
             gpu_timed_buffer_data(kGlShaderStorageBuffer, static_cast<std::ptrdiff_t>(bytes), data, kGlDynamicCopy);
             bind_buffer_base_(kGlShaderStorageBuffer, binding, vsh_buffers_[index]);
@@ -5796,35 +5822,45 @@ private:
             uniform_1ui_(location, value);
             return true;
         };
+        {
+        perf::ScopedAdd timer(vsh_cpu_ns_[2], vsh_cpu_calls_[2]);
         use_program_(vsh_batch_program_);
         if (!uniform(vsh_batch_program_, "u_execution_count", batch.shape.execution_count) ||
             !uniform(vsh_batch_program_, "u_op_count", batch.shape.op_count)) return false;
-        gpu_timed_dispatch_compute(groups, 1, 1);
+        gpu_timed_dispatch_compute(groups, 1, 1, GpuTimerBucket::kVsh);
         memory_barrier_(kGlShaderStorageBarrierBit | kGlBufferUpdateBarrierBit);
+        }
         upload(4, 4, batch.references.data(), batch.references.size() * sizeof(uint32_t));
         upload(5, 5, triangle_data.data(), triangle_data.size() * sizeof(triangle_data[0]));
         upload(6, 6, packed.data(), packed.size() * sizeof(packed[0]));
         upload(7, 7, control.data(), sizeof(control));
-        use_program_(vsh_pack_program_);
-        if (!uniform(vsh_pack_program_, "u_execution_count", batch.shape.execution_count) ||
-            !uniform(vsh_pack_program_, "u_reference_count", batch.shape.reference_count) ||
-            !uniform(vsh_pack_program_, "u_primitive", batch.shape.primitive_mode) ||
-            !uniform(vsh_pack_program_, "u_large_target", batch.shape.large_target) ||
-            !uniform(vsh_pack_program_, "u_cull_enabled", batch.shape.cull_enabled) ||
-            !uniform(vsh_pack_program_, "u_cull_front", batch.shape.cull_front) ||
-            !uniform(vsh_pack_program_, "u_max_resident_vertices", static_cast<uint32_t>(max_vertices))) return false;
-        gpu_timed_dispatch_compute(1, 1, 1);
+        {
+        perf::ScopedAdd timer(vsh_cpu_ns_[3], vsh_cpu_calls_[3]);
+        const auto pack_program = active_vsh_pack_program();
+        use_program_(pack_program);
+        if (!uniform(pack_program, "u_execution_count", batch.shape.execution_count) ||
+            !uniform(pack_program, "u_reference_count", batch.shape.reference_count) ||
+            !uniform(pack_program, "u_primitive", batch.shape.primitive_mode) ||
+            !uniform(pack_program, "u_large_target", batch.shape.large_target) ||
+            !uniform(pack_program, "u_cull_enabled", batch.shape.cull_enabled) ||
+            !uniform(pack_program, "u_cull_front", batch.shape.cull_front) ||
+            !uniform(pack_program, "u_max_resident_vertices", static_cast<uint32_t>(max_vertices))) return false;
+        gpu_timed_dispatch_compute(1, 1, 1, GpuTimerBucket::kVshPack);
         constexpr unsigned kVertexAttribBarrier = 0x00000001;
         memory_barrier_(kGlShaderStorageBarrierBit | kGlBufferUpdateBarrierBit | kVertexAttribBarrier);
-        const auto download = [&](size_t index, void* data, size_t bytes) {
+        }
+        const auto download = [&](size_t index, void* data, size_t bytes, size_t phase) {
+            perf::ScopedAdd timer(vsh_cpu_ns_[phase], vsh_cpu_calls_[phase]);
+            if (perf::g_enabled) vsh_download_bytes_ += bytes;
             bind_buffer_(kGlShaderStorageBuffer, vsh_buffers_[index]);
             get_buffer_sub_data_(kGlShaderStorageBuffer, 0, static_cast<std::ptrdiff_t>(bytes), data);
         };
-        download(2, outputs.data(), outputs.size() * sizeof(outputs[0]));
-        download(3, statuses.data(), statuses.size() * sizeof(statuses[0]));
-        download(5, triangle_data.data(), triangle_data.size() * sizeof(triangle_data[0]));
-        download(6, packed.data(), packed.size() * sizeof(packed[0]));
-        download(7, control.data(), sizeof(control));
+        download(2, outputs.data(), outputs.size() * sizeof(outputs[0]), 4);
+        download(3, statuses.data(), statuses.size() * sizeof(statuses[0]), 5);
+        download(5, triangle_data.data(), triangle_data.size() * sizeof(triangle_data[0]), 6);
+        download(6, packed.data(), packed.size() * sizeof(packed[0]), 7);
+        download(7, control.data(), sizeof(control), 8);
+        perf::ScopedAdd verify_timer(vsh_cpu_ns_[9], vsh_cpu_calls_[9]);
         if (get_error_() != kGlNoError) { error = "GPU VSH resident compute/readback failed"; return false; }
         bool program_decline = false;
         bool numeric_decline = false, opcode_decline = false;
@@ -6690,8 +6726,16 @@ private:
     unsigned int resident_vbo_ = 0;
 #if XLLE_VSH_GPU_RESIDENT
     unsigned int vsh_batch_program_ = 0, vsh_pack_program_ = 0;
+    unsigned int vsh_parallel_pack_program_ = 0;
+    bool vsh_parallel_pack_ = false;
     std::array<unsigned int, 9> vsh_buffers_{};
     VshGpuResidentStats vsh_resident_stats_{};
+    // CPU phases are raw inclusive wall durations, not the exclusive partition.
+    // Total contains every child phase plus setup/destruction. GPU times overlap
+    // blocking CPU calls and must never be added to them.
+    std::array<std::atomic<uint64_t>, 10> vsh_cpu_ns_{}, vsh_cpu_calls_{};
+    std::array<uint64_t, 2> vsh_gpu_ns_{}, vsh_gpu_calls_{};
+    uint64_t vsh_upload_bytes_ = 0, vsh_download_bytes_ = 0;
 #endif
     unsigned int resident_vao_ = 0;
     // beads-xbox.1.15.10 phase 3: 16 was TRIED and is NULL. 342 of the 647
@@ -6945,7 +6989,11 @@ private:
     bool gpu_timing_available_ = false;
     bool gpu_timers_enabled_ = true;
 
-    enum class GpuTimerBucket : uint8_t { kDraw, kUpload, kResolve };
+    enum class GpuTimerBucket : uint8_t { kDraw, kUpload, kResolve
+#if XLLE_VSH_GPU_RESIDENT
+        , kVsh, kVshPack
+#endif
+    };
     struct GpuQuerySlot {
         unsigned int id = 0;
         bool in_flight = false;
@@ -6987,6 +7035,15 @@ private:
             uint64_t elapsed = 0;
             get_query_object_ui64v_(slot.id, kGlQueryResult, &elapsed);
             switch (slot.bucket) {
+#if XLLE_VSH_GPU_RESIDENT
+                case GpuTimerBucket::kVsh:
+                case GpuTimerBucket::kVshPack: {
+                    const size_t phase = slot.bucket == GpuTimerBucket::kVsh ? 0 : 1;
+                    vsh_gpu_ns_[phase] += elapsed;
+                    ++vsh_gpu_calls_[phase];
+                    [[fallthrough]];
+                }
+#endif
                 case GpuTimerBucket::kDraw:
                     g_gl_gpu.gpu_draw_ns.fetch_add(elapsed,
                                                    std::memory_order_relaxed);
@@ -7081,8 +7138,8 @@ private:
         draw_arrays_(mode, first, count);
     }
     void gpu_timed_dispatch_compute(unsigned int groups_x, unsigned int groups_y,
-                                    unsigned int groups_z) {
-        ScopedGpuTimer gpu_timer(this, GpuTimerBucket::kDraw);
+                                    unsigned int groups_z, GpuTimerBucket bucket = GpuTimerBucket::kDraw) {
+        ScopedGpuTimer gpu_timer(this, bucket);
         dispatch_compute_(groups_x, groups_y, groups_z);
     }
     void gpu_timed_buffer_data(unsigned int target, std::ptrdiff_t size,

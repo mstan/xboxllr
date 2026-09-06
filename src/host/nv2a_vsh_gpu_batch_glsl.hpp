@@ -182,13 +182,10 @@ void main() {
 }
 )GLSL";
 
-// Serial ordered pack for the first renderer fidelity bridge. Accepted triangles
-// are compacted in source order; empty/culled/degenerate candidates are omitted
-// without forcing fallback. control.y carries fallback bits only for unsupported
-// program/numeric status, geometry uncertainty, invalid shape, or output overflow.
-inline const std::string kResidentPrimaryPackComputeSource = std::string(R"GLSL(
-#version 430
-layout(local_size_x = 1) in;
+// Common resident-primary triangle evaluation and resident-VBO packing helpers.
+// The including shader supplies its own local_size_x and main(). Bindings and
+// uniforms are identical for the serial and parallel pack entry points.
+inline const std::string kResidentPrimaryPackCommonSource = std::string(R"GLSL(
 struct ProgramOutput { uvec4 values[8]; };
 struct ResidentVertex { uvec4 position; uvec4 diffuse; uvec4 texture[4]; };
 layout(std430, binding = 2) readonly buffer ProgramOutputs { ProgramOutput vertices[]; };
@@ -306,6 +303,16 @@ uint evaluate_triangle(uint tid, out uvec3 ids) {
     }
     return TRI_ACCEPTED;
 }
+)GLSL";
+
+// Serial ordered pack for the first renderer fidelity bridge. Accepted triangles
+// are compacted in source order; empty/culled/degenerate candidates are omitted
+// without forcing fallback. control.y carries fallback bits only for unsupported
+// program/numeric status, geometry uncertainty, invalid shape, or output overflow.
+inline const std::string kResidentPrimaryPackComputeSource = std::string(R"GLSL(
+#version 430
+layout(local_size_x = 1) in;
+)GLSL") + kResidentPrimaryPackCommonSource + R"GLSL(
 
 void main() {
     if (gl_GlobalInvocationID.x != 0u) return;
@@ -335,6 +342,91 @@ void main() {
         }
     }
     control = uvec4(out_count, decline_bits, count, 0u);
+}
+)GLSL";
+
+// Stable parallel pack: one 256-lane workgroup processes candidates in source
+// order rounds. Each round computes an accepted-prefix and decline OR in shared
+// memory, then scatters accepted triangles at deterministic serial-equivalent
+// offsets. No unordered atomics participate in output order.
+inline const std::string kResidentPrimaryParallelPackComputeSource = std::string(R"GLSL(
+#version 430
+layout(local_size_x = 256) in;
+)GLSL") + kResidentPrimaryPackCommonSource + R"GLSL(
+
+shared uvec2 prefix_a[256];
+shared uvec2 prefix_b[256];
+shared uint shared_base;
+shared uint shared_decline;
+
+void main() {
+    uint lane = gl_LocalInvocationID.x;
+    uint count = candidate_count();
+    if (lane == 0u) {
+        shared_base = 0u;
+        shared_decline = 0u;
+        if (u_primitive != 5u && u_primitive != 6u && u_primitive != 7u)
+            shared_decline |= BATCH_INVALID_SHAPE;
+    }
+    barrier();
+
+    for (uint round = 0u; round < count; round += 256u) {
+        uint tid = round + lane;
+        uvec3 ids = uvec3(0u);
+        uint status = TRI_EMPTY_OR_CULLED;
+        uint accepted = 0u;
+        uint decline = 0u;
+        if (tid < count) {
+            status = evaluate_triangle(tid, ids);
+            if (status == TRI_ACCEPTED) accepted = 1u;
+            else if (status == TRI_PROGRAM_DECLINE) decline = BATCH_PROGRAM_DECLINE;
+            else if (status == TRI_GEOMETRY_DECLINE) decline = BATCH_GEOMETRY_DECLINE;
+        }
+
+        prefix_a[lane] = uvec2(accepted, decline);
+        barrier();
+        for (uint step = 1u; step < 256u; step <<= 1u) {
+            uvec2 value = prefix_a[lane];
+            if (lane >= step) {
+                uvec2 other = prefix_a[lane - step];
+                value.x += other.x;
+                value.y |= other.y;
+            }
+            prefix_b[lane] = value;
+            barrier();
+            prefix_a[lane] = prefix_b[lane];
+            barrier();
+        }
+
+        uint accepted_before = prefix_a[lane].x - accepted;
+        uint round_base = shared_base;
+        uint dst = round_base + accepted_before * 3u;
+        bool overflow = accepted != 0u && dst + 3u > u_max_resident_vertices;
+        if (tid < count) {
+            if (overflow) {
+                status = TRI_OUTPUT_OVERFLOW;
+            }
+            write_candidate(tid, ids, status);
+            if (accepted != 0u && !overflow) {
+                write_resident_vertex(dst, ids.x);
+                write_resident_vertex(dst + 1u, ids.y);
+                write_resident_vertex(dst + 2u, ids.z);
+            }
+        }
+        barrier();
+
+        if (lane == 0u) {
+            uint accepted_this_round = prefix_a[255].x;
+            uint room = u_max_resident_vertices > shared_base ?
+                (u_max_resident_vertices - shared_base) / 3u : 0u;
+            shared_decline |= prefix_a[255].y;
+            if (accepted_this_round > room) shared_decline |= BATCH_OUTPUT_OVERFLOW;
+            shared_base += min(accepted_this_round, room) * 3u;
+        }
+        barrier();
+    }
+
+    if (lane == 0u) control = uvec4(shared_base, shared_decline, count, 0u);
 }
 )GLSL";
 

@@ -525,6 +525,7 @@ public:
         uint64_t layout_declines = 0, numeric_declines = 0, opcode_declines = 0, geometry_declines = 0;
     };
     virtual VshGpuResidentStats vsh_gpu_resident_stats() const { return {}; }
+    virtual void set_vsh_gpu_parallel_pack(bool on) { (void)on; }
     virtual bool prepare_vsh_gpu_resident(std::string& error) {
         error = "GPU resident VSH is unavailable on this renderer";
         return false;

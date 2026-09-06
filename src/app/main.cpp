@@ -1765,6 +1765,7 @@ int main(int argc, char** argv) {
     // binary, which is the arm the decision A/B is measured against.
     bool nv2a_vsh_compile = true;
     uint32_t nv2a_vsh_gpu_resident = 0;
+    uint32_t nv2a_vsh_gpu_pack_parallel = 0;
     // Ceiling probe (beads-xbox.1.15.11). DEFAULT 0 and no --no- spelling,
     // because it is knowingly incorrect when armed: 1 skips the operation and
     // stores the first operand, 2 skips the stores too. It bounds how much of
@@ -2137,6 +2138,12 @@ int main(int argc, char** argv) {
                 !parse_u32_arg(argv[++i], debug_vsh_capture_budget) ||
                 !debug_vsh_capture_budget || debug_vsh_capture_budget > 16384) {
                 std::fprintf(stderr, "Invalid VSH capture path, interval, or count (1..16384)\n");
+                return 2;
+            }
+        }
+        else if (!std::strcmp(argv[i], "--nv2a-vsh-gpu-pack-parallel")) {
+            if (i + 1 >= argc || !parse_u32_arg(argv[++i], nv2a_vsh_gpu_pack_parallel) || nv2a_vsh_gpu_pack_parallel > 1) {
+                std::fprintf(stderr, "--nv2a-vsh-gpu-pack-parallel expects 0 or 1\n");
                 return 2;
             }
         }
@@ -2595,6 +2602,10 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "Verified GPU resident handoff requires the faithful compiled CPU reference\n");
         return 2;
     }
+    if (nv2a_vsh_gpu_pack_parallel && !nv2a_vsh_gpu_resident) {
+        std::fprintf(stderr, "--nv2a-vsh-gpu-pack-parallel requires a nonzero --nv2a-vsh-gpu-resident mode\n");
+        return 2;
+    }
     if ((debug_vsh_capture_path || debug_vsh_batch_capture_path) && (!nv2a_vsh_compile || nv2a_vsh_unsafe_probe)) {
         std::fprintf(stderr, "VSH capture requires the faithful compiled CPU path\n");
         return 2;
@@ -2696,6 +2707,7 @@ int main(int argc, char** argv) {
         // Compile under the same hard cap, before guest RAM/TBs and resident
         // surfaces compete with the driver's transient compiler allocations.
         std::string vsh_error;
+        if (nv2a_renderer) nv2a_renderer->set_vsh_gpu_parallel_pack(nv2a_vsh_gpu_pack_parallel != 0);
         if (!nv2a_renderer || !nv2a_renderer->prepare_vsh_gpu_resident(vsh_error)) {
             std::fprintf(stderr, "[host] GPU resident VSH preparation failed: %s\n",
                          nv2a_renderer ? vsh_error.c_str() : "OpenGL renderer required");
@@ -6463,13 +6475,14 @@ int main(int argc, char** argv) {
                 const auto stats = mach.nv2a()->vsh_gpu_resident_stats();
                 std::printf("[host] vsh-gpu-resident mode=%u batches=%llu executions=%llu refs=%llu vertices=%llu "
                     "verified=%llu gpu_draws=%llu declines=%llu mismatches=%llu "
-                    "layout_declines=%llu numeric_declines=%llu opcode_declines=%llu geometry_declines=%llu\n", nv2a_vsh_gpu_resident,
+                    "layout_declines=%llu numeric_declines=%llu opcode_declines=%llu geometry_declines=%llu parallel_pack=%u\n", nv2a_vsh_gpu_resident,
                     static_cast<unsigned long long>(stats.batches), static_cast<unsigned long long>(stats.executions),
                     static_cast<unsigned long long>(stats.references), static_cast<unsigned long long>(stats.vertices),
                     static_cast<unsigned long long>(stats.verified), static_cast<unsigned long long>(stats.gpu_draws),
                     static_cast<unsigned long long>(stats.declines), static_cast<unsigned long long>(stats.mismatches),
                     static_cast<unsigned long long>(stats.layout_declines), static_cast<unsigned long long>(stats.numeric_declines),
-                    static_cast<unsigned long long>(stats.opcode_declines), static_cast<unsigned long long>(stats.geometry_declines));
+                    static_cast<unsigned long long>(stats.opcode_declines), static_cast<unsigned long long>(stats.geometry_declines),
+                    nv2a_vsh_gpu_pack_parallel);
             }
 #endif
             if (window && frame_available)
