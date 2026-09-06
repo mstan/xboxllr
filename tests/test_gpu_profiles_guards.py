@@ -1115,8 +1115,8 @@ check("bilinear filtering is written out explicitly against texelFetch in the "
       "precise vec4 top = c00 + (c10 - c00) * fx;" in gen_cpp and
       "color = top + (bottom - top) * fy;" in gen_cpp)
 check("swizzled and A8 textures are unswizzled and expanded by the DEVICE, "
-      "which owns the Morton table, and carry an FNV so an unchanged re-upload "
-      "is skipped",
+      "which owns the Morton table; legacy upload identity retains FNV "
+      "(content-ID transitions have a real GL readback test)",
       "src.swizzle->index(x, y)" in cpp and
       "0x00FFFFFFu |" in cpp and
       "dst.hash = fnv1a_bytes(dst.linear.data()" in cpp and

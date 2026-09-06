@@ -34,6 +34,7 @@
 #include "machine/io_device.hpp"   // FaultFn
 #include "machine/mmio_device.hpp"
 #include "machine/nv2a_renderer.hpp"
+#include "machine/nv2a_texture_conversion_cache.hpp"
 #include "machine/nv2a_vsh_compiled.hpp"
 #include "xlle/ring.hpp"
 
@@ -1690,6 +1691,11 @@ public:
     bool gpu_generic_shader_bgra_upload() const {
         return gpu_generic_shader_bgra_upload_;
     }
+    void set_gpu_generic_texture_cache(bool on) { gpu_generic_texture_cache_ = on; }
+    bool gpu_generic_texture_cache() const { return gpu_generic_texture_cache_; }
+    const Nv2aTextureConversionCache& generic_texture_conversion_cache() const {
+        return generic_texture_conversion_cache_;
+    }
     // ---- PFIFO run batching (beads-xbox.1.15.1 stages (c) and (d)) ----------
     //
     // `--no-nv2a-pfifo-run-batching` restores the strict per-word pusher on the
@@ -3267,6 +3273,8 @@ private:
     bool gpu_generic_shader_image_blend_ = true;
     bool gpu_generic_shader_depth_ = false;
     bool gpu_generic_shader_bgra_upload_ = true;
+    bool gpu_generic_texture_cache_ = true; // Exact post-resolve snapshots; measured default.
+    Nv2aTextureConversionCache generic_texture_conversion_cache_;
     // PFIFO run batching (beads-xbox.1.15.1 stages (c)/(d)). Both default ON;
     // the negative spellings restore the per-word pusher and the per-word
     // handler call respectively, on the same binary.

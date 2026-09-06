@@ -54,6 +54,12 @@ public:
     uint64_t resident_depth_resolves = 0;
     uint64_t resident_depth_invalidates = 0;
     xlle::Nv2aGenericCombinerPacket last_packet;
+    xlle::Nv2aGeneratedShaderPacket last_generated_packet;
+    bool supports_generated_shader(
+        const xlle::Nv2aGeneratedShaderPacket& packet) override {
+        last_generated_packet = packet;
+        return false; // Observe the packet, then exercise the software fallback.
+    }
     const char* name() const override { return "fake"; }
     bool supports_generic_combiner(
         const xlle::Nv2aGenericCombinerPacket&) const override {
@@ -183,7 +189,129 @@ static uint32_t swizzled_pixel_index(uint32_t x, uint32_t y,
     return result;
 }
 
+static void test_texture_conversion_cache() {
+    std::atomic<uint64_t> near_exhaustion{UINT64_MAX - 1};
+    CHECK(xlle::nv2a_allocate_texture_content_id(near_exhaustion) == UINT64_MAX - 1);
+    CHECK(xlle::nv2a_allocate_texture_content_id(near_exhaustion) == UINT64_MAX);
+    CHECK(xlle::nv2a_allocate_texture_content_id(near_exhaustion) == 0);
+    CHECK(xlle::nv2a_allocate_texture_content_id(near_exhaustion) == 0);
+    CHECK(xlle::Nv2aTextureConversionCache::new_content_id() !=
+          xlle::Nv2aTextureConversionCache::new_content_id());
+    xlle::Nv2aTextureConversionCache cache;
+    const std::vector<uint8_t> source{1, 2, 3, 4};
+    const std::vector<uint8_t> converted{4, 3, 2, 1};
+    cache.store(source, 2, 2, false, true, converted, 123);
+    const auto* hit = cache.find(source, 2, 2, false, true);
+    CHECK(hit && hit->output == converted && hit->hash == 123);
+    auto changed = source;
+    changed.back() ^= 1;
+    CHECK(!cache.find(changed, 2, 2, false, true));
+    changed = source;
+    changed.front() ^= 1;
+    CHECK(!cache.find(changed, 2, 2, false, true));
+    CHECK(!cache.find(source, 1, 4, false, true));
+    CHECK(!cache.find(source, 2, 2, true, true));
+    CHECK(!cache.find(source, 2, 2, false, false));
+    CHECK(!cache.find(std::vector<uint8_t>{1, 2, 3}, 2, 2, false, true));
+
+    // Interleaved inputs must not invalidate an already copied draw packet.
+    const auto owned_packet = hit->output;
+    for (uint32_t i = 0; i < 10; ++i)
+        cache.store(source, i + 10, 1, true, false, converted, i);
+    CHECK(cache.evictions() > 0);
+    CHECK(owned_packet == converted);
+    CHECK(!cache.find(source, 2, 2, false, true));
+
+    // Bound retained payload bytes even when a texture approaches the budget.
+    std::vector<uint8_t> large(xlle::Nv2aTextureConversionCache::kBudget / 2, 7);
+    cache.store(large, 1, 1, true, false, large, 8);
+    CHECK(cache.bytes() == xlle::Nv2aTextureConversionCache::kBudget);
+    CHECK(cache.find(large, 1, 1, true, false));
+    large.push_back(7);
+    cache.store(large, 1, 1, true, false, large, 9);
+    CHECK(cache.oversize() == 1);
+    CHECK(cache.bytes() <= xlle::Nv2aTextureConversionCache::kBudget);
+    CHECK(!cache.find(large, 1, 1, true, false));
+}
+
+static void test_generated_texture_identity() {
+    std::string error;
+    auto renderer = xlle::create_nv2a_opengl_renderer(error);
+    if (!renderer) {
+        std::printf("SKIP: generated texture identity GL fixture: %s\n", error.c_str());
+        return;
+    }
+    xlle::Nv2aGeneratedShaderPacket packet;
+    packet.surface_width = packet.surface_height = 8;
+    packet.surface_size = 8 * 8 * 4;
+    packet.surface_pitch = 0x00200020;
+    packet.surface_format = 0x128;
+    packet.color_address = 0x10000;
+    packet.xmax = packet.ymax = 7;
+    packet.clip_max = 16777215.0f;
+    packet.needs_color_upload = true;
+    packet.color_input.resize(packet.surface_size);
+    packet.state.needs_general_combiner = false;
+    packet.state.image_blend = false;
+    packet.state.fp64_interpolate = false;
+    packet.state.final_mode = xlle::Nv2aCombinerShaderState::FinalMode::kTexture0Passthrough;
+    packet.state.textures[0].referenced = true;
+    packet.state.textures[0].mode = xlle::Nv2aCombinerShaderState::TexMode::kProject2d;
+    packet.fingerprint = xlle::nv2a_combiner_shader_fingerprint(packet.state);
+    xlle::Nv2aGeneratedTriangle triangle;
+    triangle.bx = triangle.cy = 128;
+    triangle.bbox_xmax = triangle.bbox_ymax = 7;
+    triangle.inverse_area = triangle.inv_area_recip = 1.0f / (128 * 128);
+    triangle.inv_area_double = 1.0 / (128 * 128);
+    triangle.constant_depth = true;
+    for (auto& vertex : triangle.varying) {
+        vertex[0] = {{1, 1, 1, 1}};
+        vertex[2] = {{0, 0, 0, 1}};
+    }
+    packet.triangles.push_back(triangle);
+    auto& texture = packet.textures[0];
+    texture.present = true;
+    texture.width = texture.height = 1;
+    texture.linear.resize(4);
+    auto submit = [&](uint32_t color, uint64_t id) {
+        std::memcpy(texture.linear.data(), &color, sizeof(color));
+        texture.content_id = id;
+        texture.hash = 0;
+        if (!id) {
+            texture.hash = 1469598103934665603ull;
+            for (uint8_t byte : texture.linear) {
+                texture.hash ^= byte;
+                texture.hash *= 1099511628211ull;
+            }
+        }
+        CHECK(renderer->supports_generated_shader(packet));
+        xlle::Nv2aGeneratedShaderResult result;
+        CHECK(renderer->submit_generated_shader(packet, result, error));
+        CHECK(error.empty());
+        xlle::Nv2aResidentColorResolve resolve;
+        CHECK(renderer->resolve_resident_color_surface(packet.color_address,
+                    packet.surface_size, resolve, error));
+        CHECK(resolve.data.size() == packet.surface_size);
+        if (resolve.data.size() == packet.surface_size)
+            CHECK(get32(resolve.data, (1 * 8 + 1) * 4) == color);
+    };
+    const uint64_t first_id = xlle::Nv2aTextureConversionCache::new_content_id();
+    submit(0xFFFF0000, first_id);
+    const uint64_t uploads = renderer->generated_shader_stats().texture_uploads;
+    submit(0xFFFF0000, first_id);
+    CHECK(renderer->generated_shader_stats().texture_uploads == uploads);
+    submit(0xFF00FF00, xlle::Nv2aTextureConversionCache::new_content_id());
+    CHECK(renderer->generated_shader_stats().texture_uploads == uploads + 1);
+    submit(0xFF0000FF, 0); // Switch to the legacy hash namespace on the same slot.
+    const uint64_t legacy_hash = texture.hash;
+    CHECK(renderer->generated_shader_stats().texture_uploads == uploads + 2);
+    submit(0xFFFFFFFF, legacy_hash); // Numeric ID/hash equality cannot alias namespaces.
+    CHECK(renderer->generated_shader_stats().texture_uploads == uploads + 3);
+}
+
 int main() {
+    test_texture_conversion_cache();
+    test_generated_texture_identity();
     std::string fault;
     xlle::Nv2a gpu([&](const std::string& why) { fault = why; });
     // This renderer declines every accelerated route, forcing the existing
@@ -2951,6 +3079,13 @@ int main() {
             std::memcpy(reinterpret_cast<uint8_t*>(words.data()) +
                             vertex * kInlineVertexBytes + 36, texcoord, sizeof(texcoord));
         auto draw = [&]() {
+            // This fixture's texture aliases an untouched part of the target.
+            // Reset prior blend output without undoing a deliberate source write.
+            const std::vector<uint8_t> texture_before_reset(
+                ram.begin() + rs0_texture, ram.begin() + rs0_texture + 256 * 256 * 4);
+            std::memcpy(ram.data() + rs0_color, initial.data(), initial.size());
+            std::memcpy(ram.data() + rs0_texture, texture_before_reset.data(),
+                        texture_before_reset.size());
             emit(0x17FC, 7); for (uint32_t word : words) emit(0x1818, word);
             emit(0x17FC, 0);
             gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
@@ -2962,9 +3097,62 @@ int main() {
         std::memcpy(ram.data() + rs0_color, initial.data(), initial.size());
         generic_cpu_reroute(1u << 5);
         draw();
+        const auto uncached_texture = generic_cpu_renderer.last_generated_packet.textures[0];
+        CHECK(uncached_texture.present && !uncached_texture.linear.empty());
+        gpu.set_gpu_generic_texture_cache(true);
+        draw();
+        const uint64_t content_id = generic_cpu_renderer.last_generated_packet.textures[0].content_id;
+        CHECK(content_id != 0);
+        const uint64_t cache_hits = gpu.generic_texture_conversion_cache().hits();
+        draw();
+        CHECK(gpu.generic_texture_conversion_cache().hits() > cache_hits);
+        CHECK(generic_cpu_renderer.last_generated_packet.textures[0].linear == uncached_texture.linear);
+        CHECK(generic_cpu_renderer.last_generated_packet.textures[0].content_id == content_id);
+        emit(0x1B24, 0xA1B2C3D4);
+        draw();
+        CHECK(generic_cpu_renderer.last_generated_packet.textures[0].border_argb == 0xA1B2C3D4);
+        CHECK(generic_cpu_renderer.last_generated_packet.textures[0].content_id == content_id);
+        CHECK(generic_cpu_renderer.last_generated_packet.textures[0].linear == uncached_texture.linear);
+        emit(0x1B24, 0);
+        // A same-address guest write outside the sampled interior still must
+        // invalidate the conversion; all uploaded texels belong to this draw.
+        const uint8_t saved_texel = ram[rs0_texture];
+        ram[rs0_texture] ^= q < 1.0f ? 1 : 2;
+        const uint64_t cache_misses = gpu.generic_texture_conversion_cache().misses();
+        draw();
+        CHECK(gpu.generic_texture_conversion_cache().misses() > cache_misses);
+        const auto changed_texture = generic_cpu_renderer.last_generated_packet.textures[0];
+        CHECK(changed_texture.linear != uncached_texture.linear);
+        CHECK(changed_texture.content_id && changed_texture.content_id != content_id);
+        gpu.set_gpu_generic_texture_cache(false);
+        draw();
+        CHECK(generic_cpu_renderer.last_generated_packet.textures[0].linear == changed_texture.linear);
+        CHECK(generic_cpu_renderer.last_generated_packet.textures[0].content_id == 0);
+        ram[rs0_texture] = saved_texel;
         generic_cpu_reroute(0);
         CHECK(std::memcmp(ram.data() + rs0_color, expected.data(), expected.size()) == 0);
         CHECK(std::memcmp(ram.data() + rs0_depth, rs0_expected_depth.data(), rs0_expected_depth.size()) == 0);
+        // The single PROJECT2D program selects the tight linear setup funnel.
+        // Both paths must upload the same rows; layout is part of the cache key.
+        emit(0x1E70, 1); emit(0x1B1C, 0x01000100); emit(0x1B10, 0x04000000);
+        generic_cpu_reroute(1u << 5);
+        draw();
+        const auto linear_texture = generic_cpu_renderer.last_generated_packet.textures[0];
+        CHECK(linear_texture.present && linear_texture.linear.size() == 256 * 256 * 4);
+        CHECK(std::memcmp(linear_texture.linear.data(), ram.data() + rs0_texture,
+                          linear_texture.linear.size()) == 0);
+        gpu.set_gpu_generic_texture_cache(true);
+        draw();
+        const uint64_t linear_id = generic_cpu_renderer.last_generated_packet.textures[0].content_id;
+        CHECK(linear_id != 0);
+        const uint64_t linear_hits = gpu.generic_texture_conversion_cache().hits();
+        draw();
+        CHECK(gpu.generic_texture_conversion_cache().hits() > linear_hits);
+        CHECK(generic_cpu_renderer.last_generated_packet.textures[0].linear == linear_texture.linear);
+        CHECK(generic_cpu_renderer.last_generated_packet.textures[0].content_id == linear_id);
+        gpu.set_gpu_generic_texture_cache(false);
+        generic_cpu_reroute(0);
+        emit(0x1E70, 0xC61); emit(0x1B1C, 0x050001E0); emit(0x1B10, 0x14000000);
     }
 
     // RS0/RS1 in probe-rs2-ohci-6.4b: tex=F, shader 8421, four PROJECT2D

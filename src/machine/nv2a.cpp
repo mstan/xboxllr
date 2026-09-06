@@ -12757,6 +12757,36 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                 dst.width = src.width;
                 dst.height = src.height;
                 dst.border_argb = src.border;
+                const auto trace_conversion = [&](bool hit) {
+                    if (gpu_generic_texture_cache_ && perf::g_enabled) {
+                        std::printf(
+                            "[nv2a-texture-conversion] batch=%llu stage=%u "
+                            "width=%u height=%u linear=%u alpha8=%u "
+                            "source_bytes=%llu output_bytes=%llu hash=%016llx hit=%u\n",
+                            (unsigned long long)generic_shader_attempts_, i,
+                            src.width, src.height, src.linear ? 1u : 0u,
+                            src.alpha8 ? 1u : 0u,
+                            (unsigned long long)src.data.size(),
+                            (unsigned long long)dst.linear.size(),
+                            (unsigned long long)(dst.hash ? dst.hash :
+                                fnv1a_bytes(dst.linear.data(), dst.linear.size())),
+                            hit ? 1u : 0u);
+                    }
+                };
+                // src.data was just resolved/read by texture setup. Reuse only
+                // the pure layout conversion when ALL source bytes still agree.
+                // Border/wrap/projective sampling state remains in this packet.
+                if (gpu_generic_texture_cache_) {
+                    const auto* cached = generic_texture_conversion_cache_.find(
+                        src.data, src.width, src.height, src.linear, src.alpha8);
+                    if (cached) {
+                        dst.linear = cached->output;
+                        dst.hash = cached->hash;
+                        dst.content_id = cached->content_id;
+                        trace_conversion(true);
+                        continue;
+                    }
+                }
                 const size_t texels =
                     static_cast<size_t>(src.width) * src.height;
                 dst.linear.resize(texels * 4u);
@@ -12797,7 +12827,19 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                         if (!textures_ok) break;
                     }
                 }
-                dst.hash = fnv1a_bytes(dst.linear.data(), dst.linear.size());
+                dst.content_id = gpu_generic_texture_cache_
+                    ? Nv2aTextureConversionCache::new_content_id() : 0;
+                // The backend needs a stable upload identity, not a digest of
+                // every fresh multi-megabyte snapshot. Keep the FNV for legacy
+                // routing, exhausted IDs, and instrumented conversion traces.
+                if (!dst.content_id || perf::g_enabled)
+                    dst.hash = fnv1a_bytes(dst.linear.data(), dst.linear.size());
+                trace_conversion(false);
+                if (gpu_generic_texture_cache_ && textures_ok) {
+                    generic_texture_conversion_cache_.store(
+                        src.data, src.width, src.height, src.linear, src.alpha8,
+                        dst.linear, dst.hash, dst.content_id);
+                }
             }
             if (!textures_ok) {
                 decline = GenericShaderDeclineReason::kTextureUnsupported;

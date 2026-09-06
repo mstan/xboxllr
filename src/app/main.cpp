@@ -549,6 +549,14 @@ void print_gpu_residency_census(const xlle::Nv2a* nv, const char* scope,
             nv->gpu_generic_shader_witnessed(),
             nv->gpu_generic_shader_bgra_upload() ? 1u : 0u,
             (unsigned long long)nv->generic_shader_witnessed_reroutes());
+        const auto& cache = nv->generic_texture_conversion_cache();
+        std::printf(
+            "[host] generic-texture-cache scope=%s deadline=%llu enabled=%u "
+            "hits=%llu misses=%llu evictions=%llu oversize=%llu bytes=%llu\n",
+            scope, deadline, nv->gpu_generic_texture_cache() ? 1u : 0u,
+            (unsigned long long)cache.hits(), (unsigned long long)cache.misses(),
+            (unsigned long long)cache.evictions(), (unsigned long long)cache.oversize(),
+            (unsigned long long)cache.bytes());
         for (size_t k = 0; k < nv->generic_shader_program_count(); ++k) {
             std::printf(
                 "[host] generic-shader-program scope=%s deadline=%llu "
@@ -1526,6 +1534,7 @@ int main(int argc, char** argv) {
     bool nv2a_gpu_generic_shader_image_blend = true;
     bool nv2a_gpu_generic_shader_depth = false;
     bool nv2a_gpu_generic_shader_bgra_upload = true;
+    bool nv2a_gpu_generic_texture_cache = true;
     // PFIFO run batching (beads-xbox.1.15.1 stages (c)/(d)). Both default ON;
     // the negative spellings are the arm-A form of the decision A/B and restore
     // the strict per-word pusher / the per-word handler call on the SAME binary.
@@ -1792,6 +1801,10 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(argv[i],
                               "--no-nv2a-gpu-generic-shader-bgra-upload"))
             nv2a_gpu_generic_shader_bgra_upload = false;
+        else if (!std::strcmp(argv[i], "--nv2a-gpu-generic-texture-cache"))
+            nv2a_gpu_generic_texture_cache = true;
+        else if (!std::strcmp(argv[i], "--no-nv2a-gpu-generic-texture-cache"))
+            nv2a_gpu_generic_texture_cache = false;
         else if (!std::strcmp(argv[i], "--nv2a-pfifo-run-batching"))
             nv2a_pfifo_run_batching = true;
         else if (!std::strcmp(argv[i], "--no-nv2a-pfifo-run-batching"))
@@ -2472,6 +2485,8 @@ int main(int argc, char** argv) {
                     nv2a_gpu_generic_shader_witnessed);
                 mach.nv2a()->set_gpu_generic_shader_bgra_upload(
                     nv2a_gpu_generic_shader_bgra_upload);
+                mach.nv2a()->set_gpu_generic_texture_cache(
+                    nv2a_gpu_generic_texture_cache);
                 mach.nv2a()->set_pfifo_run_batching(nv2a_pfifo_run_batching);
                 mach.nv2a()->set_pfifo_run_bulk(nv2a_pfifo_run_bulk);
                 mach.nv2a()->set_pfifo_direct_fetch(nv2a_pfifo_direct_fetch);

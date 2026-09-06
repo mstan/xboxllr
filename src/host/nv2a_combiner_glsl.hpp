@@ -44,8 +44,8 @@
 //     operation order against texelFetch, never left to a LINEAR sampler whose
 //     weights are fixed point.
 //   * Swizzled textures are unswizzled by the DEVICE on the way in (it owns the
-//     Morton table) and uploaded as linear RGBA8 with an FNV-64 so an unchanged
-//     re-upload is skipped.
+//     Morton table) and uploaded as linear RGBA8. Upload reuse uses a unique
+//     exact-snapshot content ID, or FNV-64 on the legacy path.
 //   * FP32 throughout, matching the shipping witnessed shaders (docs/
 //     PERF-METHODOLOGY.md section 3b). The software path carries the
 //     barycentric division in double; that difference is the same precision

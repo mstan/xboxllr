@@ -439,9 +439,12 @@ struct Nv2aGeneratedTexture {
     // already applied the Morton table for a swizzled source and expanded an A8
     // source to (0xFF, 0xFF, 0xFF, a).
     std::vector<uint8_t> linear;
-    // FNV-64 of `linear`, so the backend skips an unchanged re-upload without
-    // hashing the bytes a second time.
+    // FNV-64 in the legacy content_id==0 namespace. A nonzero content_id is
+    // unique across device instances; reuse is justified by exact source-byte
+    // equality in the device conversion cache. Each packet still owns its bytes.
+    // Cache eviction never reuses an ID. Hash may be zero in the ID namespace.
     uint64_t hash = 0;
+    uint64_t content_id = 0;
 };
 
 struct Nv2aGeneratedShaderPacket {
@@ -836,7 +839,7 @@ public:
         uint64_t draws = 0;
         uint64_t triangles = 0;
         uint64_t texture_uploads = 0;
-        uint64_t texture_upload_skips = 0;  // hash matched, upload skipped
+        uint64_t texture_upload_skips = 0;  // content identity matched
         uint64_t surface_uploads = 0;
         uint64_t depth_uploads = 0;
         uint64_t depth_draws = 0;

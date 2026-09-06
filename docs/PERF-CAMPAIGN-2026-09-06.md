@@ -46,6 +46,17 @@ benchmarks never overlap.
 
 ## Claims that need narrower wording
 
+Validated progress after the initial audits: stage g is committed; independent
+PROJECT2D admission for witnessed families 2/5 is repaired; the Settings workload
+and aligned product-window tool are committed. Exact post-resolve texture
+conversion reuse plus content IDs passes canonical (+5.70% median / +5.73% minimum)
+and interactive navigation (+16.47% / +16.64%) gates and is enabled by default.
+See `PERF-TEXTURE-CACHE-2026-09-06.md`. The current returned-dashboard capacity is
+about 12.06 guest-equivalent FPS at the median, so this does not close the 60 FPS
+goal. Next: calibrate the small-region clocks, re-profile with the accepted cache,
+and measure vertex reuse/cost before choosing another optimization. Numeric
+generic families 3/4/7 and direct distinct-frame/tail-latency measurement remain open.
+
 * **"There is no swapchain": false.** The interactive SDL D3D11 backend already calls DXGI
   `Present1`. Stage g measures and improves it. Sharing the NV2A GL context is a different
   optimization, with a transfer cost that still needs to justify the work.
@@ -64,8 +75,10 @@ benchmarks never overlap.
   residency pattern is not a universal result after the generic evaluator or GPU ownership
   changes. Preserve failed numbers and require a changed prerequisite before repeating them.
 
-No hardware access, source-repository push, direct master commit, or replacement CPU arc is
-implicitly authorized by this plan. Real-console capture still needs the owner's approval.
+The owner explicitly authorized committing the accumulated work and pushing it to
+main/master on 2026-09-06. Integrate validated commits from the performance branch;
+continue subsequent experiments there. This does not authorize hardware access or
+a replacement CPU arc. Real-console capture still needs the owner's approval.
 Do not reintroduce a rejected Unicorn per-access hook or mix positive-count and zero-count
 execution. Never use Unicorn timeout.
 

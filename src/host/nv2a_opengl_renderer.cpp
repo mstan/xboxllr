@@ -2467,7 +2467,10 @@ public:
             } else {
                 cache_bind_texture_unit(kGlTexture0 + i, slot.texture);
             }
-            if (slot.valid && slot.hash == texture.hash &&
+            const bool same_content = texture.content_id
+                ? slot.content_id == texture.content_id
+                : slot.content_id == 0 && slot.hash == texture.hash;
+            if (slot.valid && same_content &&
                 slot.width == texture.width && slot.height == texture.height) {
                 ++generated_stats_.texture_upload_skips;
                 continue;
@@ -2516,6 +2519,7 @@ public:
             }
             slot.valid = true;
             slot.hash = texture.hash;
+            slot.content_id = texture.content_id;
             slot.width = texture.width;
             slot.height = texture.height;
             ++generated_stats_.texture_uploads;
@@ -6481,6 +6485,7 @@ private:
     struct GeneratedTextureSlot {
         unsigned int texture = 0;
         uint64_t hash = 0;
+        uint64_t content_id = 0;
         uint32_t width = 0;
         uint32_t height = 0;
         // Phase 7 (upload staging): the geometry the GL storage was actually
