@@ -10367,6 +10367,19 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             texture_setup_timer.emplace(perf::g_ns_generic_texture_setup,
                                         perf::g_calls_generic_texture_setup);
         }
+        // Texture shaders run before the register combiners. Independent NONE,
+        // PROJECT2D and CUBEMAP stages cannot feed a later stage back into T0.
+        // Other modes may discard fragments or replace depth even when their
+        // color is not referenced by an ICW, so do not silently omit them.
+        for (uint32_t stage = 0; stage < 4; ++stage) {
+            const uint32_t mode = (shader_stage_program >> (stage * 5)) & 0x1Fu;
+            if (mode != 0 && mode != 1 && mode != 3) {
+                record_generic_skip_detail(
+                    GenericSkipReason::kUnsupportedTextureShaderProgram,
+                    (static_cast<uint64_t>(mode) << 8) | stage);
+                return true;
+            }
+        }
         for (uint32_t stage = 0; stage < 4; ++stage) {
         if (!texture_referenced[stage]) continue;
         if ((raster_state[kRasterTextureEnableMask] & (1u << stage)) == 0) {
@@ -10377,6 +10390,9 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
         TextureStage& ts = texture_stages[stage];
         const bool single_stage_project2d =
             shader_stage_program == 1 && stage_mode == 1 && stage == 0;
+        const bool independent_project2d =
+            stage_mode == 1 &&
+            (raster_state[kRasterTextureFormat0 + stage] & (1u << 2)) == 0;
         ts.project2d = stage_mode == 1;
         bool handled_linear_project2d = false;
         if (single_stage_project2d) {
@@ -10502,25 +10518,17 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
         if (handled_linear_project2d) {
             continue;
         } else if (shader_stage_program == 0 || single_stage_project2d ||
+                  independent_project2d ||
                   (stage_count >= 2 && (stage_mode == 1 || stage_mode == 3))) {
             // shader_stage_program==0 (every stage's mode is NONE/0x00) is the
-            // original narrowly-proven "ordinary swizzled 2D" special case (matches
-            // kSwizzledTexturedColor/kPitchSingleTextureColor/kTex7FanColor's own
-            // textures). The newer, fully general per-stage PROJECT2D/CUBEMAP decode
-            // is additionally restricted to stage_count>=2 (a real multi-stage
-            // combiner, matching the witnessed production evidence for both
-            // ShaderStageProgram==0x63 and ==0x8421, comb=00011106/6 stages) --
-            // NOT a single-general-combiner-stage program like tex7_fan's own
-            // ShaderStageProgram==0x00000C61 (comb=1). Single-stage combiners with a
-            // non-{0,1} whole-register value are exactly what the 15 hand-derived
-            // Profiles above already cover; letting this evaluator's simpler
-            // per-ICW-literal formula loose on that same narrow state produced a
-            // wrong (not hardware-matching) answer for tex7_fan's own unwitnessed-
-            // border-color test case, because a single referenced TEXTURE0 there
-            // does not account for whatever the texture-shader stage chain across
-            // stages 1-2 (both CUBEMAP) may or may not feed forward into it on real
-            // hardware -- unmodeled here, and only safe to ignore once a real
-            // multi-stage combiner is actually consuming those other textures too.
+            // original compatibility interpretation as ordinary swizzled 2D.
+            // PROJECT2D admission depends on the texture program, not the number
+            // of register-combiner stages. The independent modes checked above
+            // have no backward dependency or fragment side effects. Do not
+            // extend this admission to cube-format PROJECT2D: that needs layout
+            // semantics beyond a single swizzled image. The pre-existing cubemap
+            // compatibility path remains bounded to its prior admission here;
+            // a full face-layout implementation is separate work.
             const uint32_t format = raster_state[kRasterTextureFormat0 + stage];
             const uint32_t color_code = (format >> 8) & 0xFFu;
             // Color codes 6/7 are the raw-ARGB8 (swizzled) codes cross-checked against

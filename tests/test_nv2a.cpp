@@ -186,6 +186,15 @@ static uint32_t swizzled_pixel_index(uint32_t x, uint32_t y,
 int main() {
     std::string fault;
     xlle::Nv2a gpu([&](const std::string& why) { fault = why; });
+    // This renderer declines every accelerated route, forcing the existing
+    // per-family reroute through the generic CPU evaluator without a GL context.
+    FakeNv2aRenderer generic_cpu_renderer;
+    auto generic_cpu_reroute = [&](uint32_t mask) {
+        gpu.set_renderer(mask ? &generic_cpu_renderer : nullptr);
+        gpu.set_gpu_generic_shader(mask != 0);
+        gpu.set_gpu_generic_shader_depth(mask != 0);
+        gpu.set_gpu_generic_shader_witnessed(mask);
+    };
     std::vector<uint8_t> ram(0x4000000, 0);
     gpu.set_mem_access(
         [&](uint32_t addr, void* dst, size_t n) {
@@ -2258,6 +2267,31 @@ int main() {
     CHECK(gpu.pitch_tex5_output_hash() !=
           1469598103934665603ull);
 
+    // The independent stage-2 cube cannot change T0 or suppress a one-stage
+    // combiner. Force the same draw through generic software and compare the
+    // complete color/depth targets, not just the admitted-batch counter.
+    const size_t tex5_target_bytes = pitch_three_stride * 480;
+    const std::vector<uint8_t> tex5_expected_color(
+        ram.begin() + pitch_three_color, ram.begin() + pitch_three_color + tex5_target_bytes);
+    const std::vector<uint8_t> tex5_expected_depth(
+        ram.begin() + pitch_three_depth, ram.begin() + pitch_three_depth + tex5_target_bytes);
+    for (uint32_t y = 10; y < 50; ++y) {
+        for (uint32_t x = 10; x < 50; ++x) {
+            const uint32_t offset = y * pitch_three_stride + x * 4;
+            put32(ram, pitch_three_color + offset, 0);
+            put32(ram, pitch_three_depth + offset, 0xFFFFFF5A);
+        }
+    }
+    const uint64_t tex5_generic_before = gpu.generic_combiner_executed_batches();
+    generic_cpu_reroute(1u << 2);
+    emit(0x17FC, 5); emit(0x1800, 0x00010000); emit(0x1808, 2); emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    generic_cpu_reroute(0);
+    CHECK(fault.empty());
+    CHECK(gpu.generic_combiner_executed_batches() == tex5_generic_before + 1);
+    CHECK(std::memcmp(ram.data() + pitch_three_color, tex5_expected_color.data(), tex5_target_bytes) == 0);
+    CHECK(std::memcmp(ram.data() + pitch_three_depth, tex5_expected_depth.data(), tex5_target_bytes) == 0);
+
     const uint64_t pitch_tex5_fragments =
         gpu.pitch_tex5_fragments();
     const uint64_t pitch_tex5_writes =
@@ -2744,6 +2778,8 @@ int main() {
     emit(0x0A60, 0xFFA0FF40); emit(0x0A80, 0xFFA0FF40);
     emit(0x0288, 0x0000000C); emit(0x028C, 0x00001C80);
     emit(0x1E20, 0xFF3F3F3F); emit(0x1E24, 0);
+    const std::vector<uint8_t> rs0_initial_color(
+        ram.begin() + rs0_color, ram.begin() + rs0_color + rs0_pitch * 480);
     emit(0x17FC, 7); for (uint32_t word : rs0_words) emit(0x1818, word);
     emit(0x17FC, 0);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
@@ -2758,6 +2794,61 @@ int main() {
           rs0_color + rs0_pitch * 480);
     CHECK(get32(ram, rs0_color + rs0_inside) == 0xFF707048u);
     CHECK(get32(ram, rs0_depth + rs0_inside) == 0x00FFFF00u);
+
+    const std::vector<uint8_t> rs0_expected_color(
+        ram.begin() + rs0_color, ram.begin() + rs0_color + rs0_pitch * 480);
+    const std::vector<uint8_t> rs0_expected_depth(
+        ram.begin() + rs0_depth, ram.begin() + rs0_depth + rs0_pitch * 480);
+    std::memcpy(ram.data() + rs0_color, rs0_initial_color.data(), rs0_initial_color.size());
+    const uint64_t rs0_generic_before = gpu.generic_combiner_executed_batches();
+    generic_cpu_reroute(1u << 5);
+    emit(0x17FC, 7); for (uint32_t word : rs0_words) emit(0x1818, word);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    generic_cpu_reroute(0);
+    CHECK(fault.empty());
+    CHECK(gpu.generic_combiner_executed_batches() == rs0_generic_before + 1);
+    CHECK(std::memcmp(ram.data() + rs0_color, rs0_expected_color.data(), rs0_expected_color.size()) == 0);
+    CHECK(std::memcmp(ram.data() + rs0_depth, rs0_expected_depth.data(), rs0_expected_depth.size()) == 0);
+
+    // Unreferenced independent stages and an inert border register cannot feed
+    // back into T0. Exercise more than the two recorded whole-register words.
+    generic_cpu_reroute(1u << 5);
+    for (uint32_t program : {0x1u, 0x61u, 0xC01u, 0xC61u, 0x8421u}) {
+        for (uint32_t border : {0u, 0xFF010203u}) {
+            std::memcpy(ram.data() + rs0_color, rs0_initial_color.data(), rs0_initial_color.size());
+            emit(0x1E70, program); emit(0x1B24, border);
+            const uint64_t before = gpu.generic_combiner_executed_batches();
+            emit(0x17FC, 7); for (uint32_t word : rs0_words) emit(0x1818, word);
+            emit(0x17FC, 0);
+            gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+            CHECK(fault.empty());
+            CHECK(gpu.generic_combiner_executed_batches() == before + 1);
+            CHECK(std::memcmp(ram.data() + rs0_color, rs0_expected_color.data(), rs0_expected_color.size()) == 0);
+            CHECK(std::memcmp(ram.data() + rs0_depth, rs0_expected_depth.data(), rs0_expected_depth.size()) == 0);
+        }
+    }
+    // A CLIPPLANE stage may discard fragments even if its RGBA is unused.
+    // A cube-format source is not a single PROJECT2D image. Neither is admitted
+    // by this generalization; check actual framebuffer preservation on refusal.
+    for (bool cube_format : {false, true}) {
+        emit(0x1E70, 0xC61u | (cube_format ? 0u : (5u << 15)));
+        emit(0x1B04, 0x0888062Au | (cube_format ? 4u : 0u));
+        const uint64_t before = gpu.generic_combiner_executed_batches();
+        const auto shader_skip = static_cast<size_t>(
+            xlle::Nv2a::GenericSkipReason::kUnsupportedTextureShaderProgram);
+        const uint64_t skips_before = gpu.generic_skip_reason_batches(shader_skip);
+        emit(0x17FC, 7); for (uint32_t word : rs0_words) emit(0x1818, word);
+        emit(0x17FC, 0);
+        gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+        CHECK(fault.empty());
+        CHECK(gpu.generic_combiner_executed_batches() == before);
+        CHECK(gpu.generic_skip_reason_batches(shader_skip) == skips_before + 1);
+        CHECK(std::memcmp(ram.data() + rs0_color, rs0_expected_color.data(), rs0_expected_color.size()) == 0);
+        CHECK(std::memcmp(ram.data() + rs0_depth, rs0_expected_depth.data(), rs0_expected_depth.size()) == 0);
+    }
+    generic_cpu_reroute(0);
+    emit(0x1E70, 0xC61); emit(0x1B04, 0x0888062A); emit(0x1B24, 0xFF000000);
 
     // The later 30-batch state changes only the unused border register. With
     // out-of-range coordinates and a distinct edge texel, identical output
@@ -2841,6 +2932,40 @@ int main() {
     for (uint32_t word : rs0_words) emit(0x1818, word);
     emit(0x17FC, 0); gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
     CHECK(fault == "NV2A tex7 fan draw exceeds the witnessed RS0 subset");
+
+    // The clamp-edge cases above cannot distinguish projection/filtering from a
+    // constant sample. Use an interior gradient and non-unit Q as well.
+    fault.clear();
+    emit(0x033C, 0x0206);
+    for (float q : {0.5f, 2.0f}) {
+        std::memcpy(ram.data() + rs0_color, rs0_initial_color.data(), rs0_initial_color.size());
+        for (uint32_t y = 0; y < 256; ++y)
+            for (uint32_t x = 0; x < 256; ++x)
+                put_rgb_texture(rs0_texture, 256, 256, x, y,
+                                0xFF000000u | (x << 16) | (y << 8) | (x ^ y));
+        const std::vector<uint8_t> initial(
+            ram.begin() + rs0_color, ram.begin() + rs0_color + rs0_pitch * 480);
+        std::vector<uint32_t> words = rs0_words;
+        const float texcoord[] = {0.371f * q, 0.723f * q, 0, q};
+        for (size_t vertex = 0; vertex < 4; ++vertex)
+            std::memcpy(reinterpret_cast<uint8_t*>(words.data()) +
+                            vertex * kInlineVertexBytes + 36, texcoord, sizeof(texcoord));
+        auto draw = [&]() {
+            emit(0x17FC, 7); for (uint32_t word : words) emit(0x1818, word);
+            emit(0x17FC, 0);
+            gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+            CHECK(fault.empty());
+        };
+        draw();
+        const std::vector<uint8_t> expected(
+            ram.begin() + rs0_color, ram.begin() + rs0_color + rs0_pitch * 480);
+        std::memcpy(ram.data() + rs0_color, initial.data(), initial.size());
+        generic_cpu_reroute(1u << 5);
+        draw();
+        generic_cpu_reroute(0);
+        CHECK(std::memcmp(ram.data() + rs0_color, expected.data(), expected.size()) == 0);
+        CHECK(std::memcmp(ram.data() + rs0_depth, rs0_expected_depth.data(), rs0_expected_depth.size()) == 0);
+    }
 
     // RS0/RS1 in probe-rs2-ohci-6.4b: tex=F, shader 8421, four PROJECT2D
     // stages and a six-stage combiner. Xemu's register-combiner semantics

@@ -1650,11 +1650,15 @@ public:
     //   bit 4 pitch_single_texture (121)         18 883 px, max delta 202
     //   bit 5 tex7_fan             (304)         14 560 px, max delta  98
     //   bit 7 pitch_additive       (113)        204 691 px, max delta 116
-    // The CAUSE is in the GENERIC EVALUATOR, not in the GPU executor: the same
+    // This table records the phase-7 result. The 2026-09-06 independent PROJECT2D
+    // admission fix now executes bits 2 and 5; full-target CPU comparisons pass.
+    // Their GPU replay still has a one-LSB checkpoint difference, and bits 3/4/7
+    // remain under investigation. Keep the reroute opt-in until validated/gated.
+    // The phase-7 CAUSE was in the GENERIC EVALUATOR, not in the GPU executor: the same
     // bit-2 leg with the generated executor masked off
     // (--nv2a-gpu-generic-shader-mask 0, so the reroute lands in SOFTWARE)
     // reproduces the SAME 286 151 pixels. For bits 2 and 5 the evaluator does
-    // not implement the batch's texture-shader program at all and skips it --
+    // did not implement the batch's texture-shader program and skipped it --
     // `[2bl] NV2A generic-combiner skip census:
     // unsupported-texture-shader-program=126` and `=304`, exactly those draw
     // counts -- so the draws vanish. Bits 3, 4 and 7 are skipped by nothing
