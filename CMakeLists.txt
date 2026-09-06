@@ -32,6 +32,9 @@ option(XLLE_DISPATCH_MICRO
 option(XLLE_VERTEX_REUSE_DIAGNOSTICS
   "Compile the opt-in NV2A vertex reuse shadow diagnostic plumbing"
   OFF)
+option(XLLE_GENERATED_SUBMIT_DIAGNOSTICS
+  "Compile the opt-in NV2A generated-submit CPU phase diagnostic plumbing"
+  OFF)
 
 include(FetchContent)
 
@@ -132,6 +135,11 @@ target_include_directories(xlle_spike PUBLIC ${XLLE_INCLUDES})
 add_library(xlle_host STATIC src/host/sdl_shell.cpp src/host/xid_input.cpp
   src/host/nv2a_opengl_renderer.cpp src/host/nv2a_combiner_glsl.cpp)
 target_include_directories(xlle_host PUBLIC ${XLLE_INCLUDES})
+if(XLLE_GENERATED_SUBMIT_DIAGNOSTICS)
+  target_compile_definitions(xlle_host PUBLIC XLLE_GENERATED_SUBMIT_DIAGNOSTICS=1)
+else()
+  target_compile_definitions(xlle_host PUBLIC XLLE_GENERATED_SUBMIT_DIAGNOSTICS=0)
+endif()
 if(XLLE_WITH_SDL)
   target_compile_definitions(xlle_host PUBLIC XLLE_WITH_SDL)
   target_link_libraries(xlle_host PUBLIC SDL3::SDL3)
@@ -169,6 +177,10 @@ add_test(NAME perf_excl COMMAND test_perf_excl)
 add_executable(test_vertex_reuse_shadow tests/test_vertex_reuse_shadow.cpp)
 target_include_directories(test_vertex_reuse_shadow PRIVATE ${XLLE_INCLUDES})
 add_test(NAME vertex_reuse_shadow COMMAND test_vertex_reuse_shadow)
+
+add_executable(test_generated_submit_perf tests/test_generated_submit_perf.cpp)
+target_include_directories(test_generated_submit_perf PRIVATE ${XLLE_INCLUDES})
+add_test(NAME generated_submit_perf COMMAND test_generated_submit_perf)
 
 add_executable(test_nv2a tests/test_nv2a.cpp src/machine/nv2a.cpp)
 target_include_directories(test_nv2a PRIVATE ${XLLE_INCLUDES})
@@ -300,6 +312,9 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME generated_uniform_report
            COMMAND ${Python3_EXECUTABLE}
                    ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_generated_uniform_report.py)
+  add_test(NAME generated_submit_report
+           COMMAND ${Python3_EXECUTABLE}
+                   ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_generated_submit_report.py)
 else()
   message(STATUS "Python3 interpreter not found; skipping source guard tests")
 endif()

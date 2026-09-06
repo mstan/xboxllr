@@ -89,6 +89,17 @@ uniform overhead. Add opt-in generated CPU scopes and issuance-window GPU query
 tags before choosing buffer reuse or packing changes. Do not drain the GPU to
 make a timing report easier to collect.
 
+The generated CPU census is now measured; see
+`PERF-GENERATED-SUBMIT-2026-09-06.md`. Query-OFF settled attribution puts only
+2.117 ms in buffer upload/bind and 0.671 ms in uniforms over a 12.553 s window.
+The proposed generated ring is deferred for lack of a measured target. Surface
+preparation and texture uploads dominate this function, whose inclusive phases
+do not explain the rest of the exclusive GL bucket. Three same-binary diagnostic
+companions preserve all 72 images and guest state; they are not throughput gates.
+Next attribute resident/legacy submission and evaluate exact CPU specialization
+of the dominant VSH program. GPU ownership and presentation-tail work remain
+necessary for the 60 FPS/headroom objective.
+
 GPU VSH needs an integrated path: `submit_vertex_batch` materializes CPU
 positions/varyings, then generated raster setup consumes them for finiteness,
 culling, area, bounding boxes, depth slope and packed triangle records. The

@@ -165,7 +165,8 @@ PERF_GL_GPU_RE = re.compile(
     # the parser must keep reading them rather than dropping the whole family.
     # parse_gl_gpu() maps a missing group to None, which lands in the JSON as
     # null -- distinguishable from a printed 0, which means the check FAILED.
-    r"(?: resolve_bracket_ok=(?P<resolve_bracket_ok>\d+))?$"
+    r"(?: resolve_bracket_ok=(?P<resolve_bracket_ok>\d+))?"
+    r"(?: gpu_timing_enabled=(?P<gpu_timing_enabled>\d+))?$"
 )
 
 # [perf-excl] (beads-xbox.1.14.3) is a FLAT key=value line whose field list grows
@@ -884,6 +885,8 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
     flip: dict[str, Any] | None = None
     host_present_samples: list[dict[str, Any]] = []
     generated_uniform_samples: list[dict[str, Any]] = []
+    generated_submit_cpu_samples: list[dict[str, Any]] = []
+    generated_submit_phase_samples: list[dict[str, Any]] = []
 
     # beads-xbox.1.14.1 item 3(c): counter samples are emitted as a block right
     # after each `[host] frame-series` line, plus one extra block at shutdown.
@@ -919,7 +922,20 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
 
     for raw_line in read_log_text(path).splitlines():
         line = raw_line.rstrip("\n")
-        if line.startswith("[host] generic-uniforms "):
+        if line.startswith(("[host] generated-submit-cpu ", "[host] generated-submit-phase ")):
+            sample = {}
+            for key, value in re.findall(r"(\w+)=([^\s]+)", line):
+                try:
+                    sample[key] = int(value)
+                except ValueError:
+                    try:
+                        sample[key] = float(value)
+                    except ValueError:
+                        sample[key] = value
+            target = (generated_submit_phase_samples if " phase=" in line
+                      else generated_submit_cpu_samples)
+            target.append(sample)
+        elif line.startswith("[host] generic-uniforms "):
             sample = {}
             for key, value in re.findall(r"(\w+)=([^\s]+)", line):
                 sample[key] = int(value) if value.isdecimal() else value
@@ -1116,6 +1132,8 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
         "flip": flip,
         "presented_frames": presented,
         "generated_uniform_samples": generated_uniform_samples,
+        "generated_submit_cpu_samples": generated_submit_cpu_samples,
+        "generated_submit_phase_samples": generated_submit_phase_samples,
         "host_present_samples": host_present_samples,
         "host_present": next((s for s in reversed(host_present_samples)
                               if s.get("scope") == "cumulative"), None),

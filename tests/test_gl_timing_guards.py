@@ -360,9 +360,10 @@ print("\ncost when off, and self-description")
 check("gpu_timer_begin early-outs on the enable flag",
       begin.lstrip().startswith("if (!gpu_timing_active()) return false;"),
       "a default replay must pay one bool load, not a glBeginQuery")
-check("gpu_timing_active() gates on perf::g_enabled",
-      "perf::g_enabled" in body(gl_src, "gpu_timing_active", GL_CPP),
-      "the flag must be the existing accounting flag, not a private one")
+check("gpu_timing_active() gates on perf::g_enabled and the explicit timer flag",
+      "perf::g_enabled" in body(gl_src, "gpu_timing_active", GL_CPP) and
+      "gpu_timers_enabled_" in body(gl_src, "gpu_timing_active", GL_CPP),
+      "the runtime control must disable GL queries without disabling the broader accounting flag")
 code_lines = [l for l in gl_lines if not l.lstrip().startswith("//")]
 check("no ungated clock read reappears in this file",
       not any("steady_clock" in l for l in code_lines),
@@ -388,7 +389,7 @@ for entry in ("glGenQueries", "glDeleteQueries", "glBeginQuery", "glEndQuery",
 # ── 6. One field list, three copies ─────────────────────────────────────────
 print("\nfield list agreement")
 struct_match = re.search(r"struct GlGpuTimingStats \{(.*?)\n\};", gl_src, re.S)
-struct_fields = re.findall(r"std::atomic<uint64_t> (\w+)\{0\};",
+struct_fields = re.findall(r"std::atomic<uint64_t> (\w+)\{(?:0|1)\};",
                            struct_match.group(1) if struct_match else "")
 report_body = body(gl_src, "format_gl_gpu_report", GL_CPP)
 format_string = "".join(re.findall(r'"([^"]*)"', report_body))
@@ -396,13 +397,17 @@ printed = re.findall(r"(\w+)=%(?:llu|s)", format_string)
 # beads-xbox.1.14.6 (2026-09-04): resolve_bracket_ok is DERIVED at print time
 # from gpu_resolve_ns and readpixels_ns, so it is deliberately not a struct
 # field -- it costs nothing at run time and cannot drift from the two counters it
-# compares. It is the only such field; anything else appearing between `scope`
-# and the end of the line must be backed by a counter.
+# compares. gpu_timing_enabled is appended after it but is backed by the stats
+# block, because it is control-plane state rather than a derived check.
 COMPUTED_FIELDS = ["resolve_bracket_ok"]
-check("the struct declares the 14 documented counters",
-      len(struct_fields) == 14, "found %d: %s" % (len(struct_fields), struct_fields))
-check("the printed field list IS the struct field list plus the computed checks",
-      printed[:1] == ["scope"] and printed[1:] == struct_fields + COMPUTED_FIELDS,
+check("the struct declares the 15 documented counters",
+      len(struct_fields) == 15, "found %d: %s" % (len(struct_fields), struct_fields))
+check("gpu_timing_enabled is backed by the GPU stats block",
+      struct_fields[-1:] == ["gpu_timing_enabled"],
+      "struct=%s" % (struct_fields,))
+check("the printed field list preserves the existing order and appends the enable flag",
+      printed[:1] == ["scope"] and
+      printed[1:] == struct_fields[:-1] + COMPUTED_FIELDS + ["gpu_timing_enabled"],
       "printed=%s struct=%s computed=%s"
       % (printed, struct_fields, COMPUTED_FIELDS))
 check("resolve_bracket_ok is computed from the two counters it compares",
@@ -427,11 +432,13 @@ parsed_fields = re.findall(r"\(\?P<(\w+)>", regex_match.group(1) if regex_match 
 check("measure_xbox_replay.py parses the same field list in the same order",
       parsed_fields == printed,
       "parser=%s printed=%s" % (parsed_fields, printed))
-check("the computed field is parsed OPTIONALLY so older reports still read",
-      r"(?: resolve_bracket_ok=(?P<resolve_bracket_ok>\d+))?$"
+check("the trailing diagnostic fields are parsed OPTIONALLY so older reports still read",
+      r"(?: resolve_bracket_ok=(?P<resolve_bracket_ok>\d+))?"
+      in (regex_match.group(1) if regex_match else "") and
+      r"(?: gpu_timing_enabled=(?P<gpu_timing_enabled>\d+))?$"
       in (regex_match.group(1) if regex_match else ""),
-      "a report captured before this build carries the line without the field; "
-      "making it mandatory would silently drop the whole gl_gpu family")
+      "a report captured before this build carries the line without these fields; "
+      "making either mandatory would silently drop the whole gl_gpu family")
 check("a missing optional field parses as None, never as 0",
       "value is None" in measure_src and "fields[key] = None" in measure_src,
       "resolve_bracket_ok=0 means the bracket check FAILED; an absent field must "
@@ -453,7 +460,8 @@ check("the line is printed from the shutdown path",
       "Nv2aRenderer has no report hook and main.cpp formats the perf:: buckets "
       "itself, so the destructor is this family's only print site")
 check("the print is gated on perf::g_enabled",
-      re.search(r"if \(perf::g_enabled\) \{\s*\n\s*if \(gpu_timing_available_\)",
+      re.search(r"if \(perf::g_enabled\) \{\s*\n\s*if \(gpu_timing_available_ &&\s*"
+                r"\(gpu_timers_enabled_ \|\| gpu_query_live_ > 0\)\)",
                 dtor) is not None,
       "match the other families: silent unless --perf-accounting")
 check("the drain happens before the print",

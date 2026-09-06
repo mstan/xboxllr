@@ -561,10 +561,144 @@ static void test_generated_uniform_batching() {
           after_inactive_batched.stage_uniform_scalar_calls);
 }
 
+
+static bool generated_submit_stats_equal(
+    const xlle::GeneratedSubmitCpuStats& a,
+    const xlle::GeneratedSubmitCpuStats& b) {
+    return a.raw_ticks == b.raw_ticks &&
+           a.compensated_ticks == b.compensated_ticks &&
+           a.calls == b.calls &&
+           a.discarded_deltas == b.discarded_deltas &&
+           a.record_bytes == b.record_bytes &&
+           a.submits == b.submits;
+}
+
+static void test_generated_submit_census_gl() {
+    std::string error;
+    auto renderer = xlle::create_nv2a_opengl_renderer(error);
+    if (!renderer) {
+        std::printf("SKIP: generated submit census GL fixture: %s\n",
+                    error.c_str());
+        return;
+    }
+
+#if !XLLE_GENERATED_SUBMIT_DIAGNOSTICS
+    CHECK(!renderer->set_generated_submit_census(true));
+    const auto stats = renderer->generated_submit_cpu_stats();
+    CHECK(!stats.available);
+    CHECK(!stats.enabled);
+    CHECK(stats.submits == 0);
+    CHECK(stats.record_bytes == 0);
+    for (std::size_t i = 0; i < xlle::GeneratedSubmitCpuStats::kPhaseCount; ++i) {
+        CHECK(stats.calls[i] == 0);
+        CHECK(stats.raw_ticks[i] == 0);
+        CHECK(stats.compensated_ticks[i] == 0);
+    }
+#else
+    struct PerfExclSnapshot {
+        bool enabled;
+        uint8_t cur;
+        uint64_t last;
+        double ns_per_tick;
+        uint64_t overhead_ticks;
+        uint64_t wall_start_ticks;
+        uint64_t max_plausible_ticks;
+        uint64_t prev_wall_ticks;
+        bool calibrated;
+        xlle::perf_excl::Profile profile;
+        xlle::perf_excl::Profile prev;
+    } snapshot{
+        xlle::perf_excl::g_enabled,
+        xlle::perf_excl::g_cur,
+        xlle::perf_excl::g_last,
+        xlle::perf_excl::g_ns_per_tick,
+        xlle::perf_excl::g_overhead_ticks,
+        xlle::perf_excl::g_wall_start_ticks,
+        xlle::perf_excl::g_max_plausible_ticks,
+        xlle::perf_excl::g_prev_wall_ticks,
+        xlle::perf_excl::g_calibrated,
+        xlle::perf_excl::g_profile,
+        xlle::perf_excl::g_prev,
+    };
+    struct RestorePerfExcl {
+        PerfExclSnapshot snapshot;
+        ~RestorePerfExcl() {
+            xlle::perf_excl::g_enabled = snapshot.enabled;
+            xlle::perf_excl::g_cur = snapshot.cur;
+            xlle::perf_excl::g_last = snapshot.last;
+            xlle::perf_excl::g_ns_per_tick = snapshot.ns_per_tick;
+            xlle::perf_excl::g_overhead_ticks = snapshot.overhead_ticks;
+            xlle::perf_excl::g_wall_start_ticks = snapshot.wall_start_ticks;
+            xlle::perf_excl::g_max_plausible_ticks = snapshot.max_plausible_ticks;
+            xlle::perf_excl::g_prev_wall_ticks = snapshot.prev_wall_ticks;
+            xlle::perf_excl::g_calibrated = snapshot.calibrated;
+            xlle::perf_excl::g_profile = snapshot.profile;
+            xlle::perf_excl::g_prev = snapshot.prev;
+        }
+    } restore{snapshot};
+
+    xlle::perf_excl::g_enabled = false;
+    xlle::perf_excl::g_cur = xlle::perf_excl::kNone;
+    xlle::perf_excl::g_last = 0;
+    xlle::perf_excl::init();
+
+    uint32_t color = 0;
+    CHECK(renderer->set_generated_submit_census(false));
+    xlle::perf_excl::g_enabled = true;
+    auto disabled_packet = make_uniform_stage_packet(1, true, 0x3B000);
+    const auto before_disabled_submit = renderer->generated_submit_cpu_stats();
+    CHECK(submit_generated_and_read(*renderer, disabled_packet, color));
+    CHECK(color == expected_uniform_stage_color(1, true));
+    const auto after_disabled_submit = renderer->generated_submit_cpu_stats();
+    CHECK(after_disabled_submit.available);
+    CHECK(!after_disabled_submit.enabled);
+    CHECK(generated_submit_stats_equal(after_disabled_submit,
+                                       before_disabled_submit));
+
+    CHECK(renderer->set_generated_submit_census(true));
+    auto active_packet = make_uniform_stage_packet(1, false, 0x3C000);
+    const auto before_active_submit = renderer->generated_submit_cpu_stats();
+    CHECK(before_active_submit.available);
+    CHECK(before_active_submit.enabled);
+    CHECK(submit_generated_and_read(*renderer, active_packet, color));
+    CHECK(color == expected_uniform_stage_color(1, false));
+    const auto after_active_submit = renderer->generated_submit_cpu_stats();
+    CHECK(after_active_submit.available);
+    CHECK(after_active_submit.enabled);
+    CHECK(after_active_submit.submits == before_active_submit.submits + 1);
+    CHECK(after_active_submit.record_bytes > before_active_submit.record_bytes);
+    CHECK(after_active_submit.discarded_deltas ==
+          before_active_submit.discarded_deltas);
+    for (std::size_t i = 0; i < xlle::GeneratedSubmitCpuStats::kPhaseCount; ++i) {
+        CHECK(after_active_submit.calls[i] == before_active_submit.calls[i] + 1);
+        CHECK(after_active_submit.raw_ticks[i] >= before_active_submit.raw_ticks[i]);
+        CHECK(after_active_submit.compensated_ticks[i] >=
+              before_active_submit.compensated_ticks[i]);
+        CHECK(after_active_submit.compensated_ticks[i] <=
+              after_active_submit.raw_ticks[i]);
+    }
+
+    CHECK(renderer->set_generated_submit_census(false));
+    auto disabled_again_packet = make_uniform_stage_packet(8, true, 0x3D000);
+    const auto before_disabled_again = renderer->generated_submit_cpu_stats();
+    CHECK(before_disabled_again.available);
+    CHECK(!before_disabled_again.enabled);
+    CHECK(submit_generated_and_read(*renderer, disabled_again_packet, color));
+    CHECK(color == expected_uniform_stage_color(8, true));
+    const auto after_disabled_again = renderer->generated_submit_cpu_stats();
+    CHECK(after_disabled_again.available);
+    CHECK(!after_disabled_again.enabled);
+    CHECK(generated_submit_stats_equal(after_disabled_again,
+                                       before_disabled_again));
+    xlle::perf_excl::g_enabled = false;
+#endif
+}
+
 int main() {
     test_texture_conversion_cache();
     test_generated_texture_identity();
     test_generated_uniform_batching();
+    test_generated_submit_census_gl();
     std::string fault;
     xlle::Nv2a gpu([&](const std::string& why) { fault = why; });
     // This renderer declines every accelerated route, forcing the existing

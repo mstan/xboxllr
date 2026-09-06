@@ -4,6 +4,9 @@
 #include "host/nv2a_combiner_glsl.hpp"
 #include "machine/perf_accounting.hpp"
 #include "machine/perf_excl.hpp"
+#if XLLE_GENERATED_SUBMIT_DIAGNOSTICS
+#include "machine/nv2a_generated_submit_perf.hpp"
+#endif
 
 #include <algorithm>
 #include <atomic>
@@ -226,9 +229,11 @@ constexpr size_t kGpuQueryRingSize = 64;
 // against the printed line) and so shutdown can format without reaching into
 // the renderer.
 //
-// EVERY field is written only while perf::g_enabled is true. With accounting
-// off the renderer issues no query, no fence and no clock read; the cost is the
-// bool load perf::ScopedAdd already pays.
+// Timing totals are written only while perf::g_enabled is true. Availability
+// and gpu_timing_enabled are control-plane state and may change before a run so
+// the shutdown report can distinguish disabled query timing from unavailable
+// query support. With accounting off the renderer issues no query, no fence and
+// no clock read; the cost is the bool load perf::ScopedAdd already pays.
 struct GlGpuTimingStats {
     std::atomic<uint64_t> gpu_timing_available{0};
     std::atomic<uint64_t> gpu_draw_ns{0};
@@ -244,6 +249,7 @@ struct GlGpuTimingStats {
     std::atomic<uint64_t> dirty_bytes{0};
     std::atomic<uint64_t> nested_skipped{0};
     std::atomic<uint64_t> queries_dropped{0};
+    std::atomic<uint64_t> gpu_timing_enabled{1};
 };
 GlGpuTimingStats g_gl_gpu;
 
@@ -280,7 +286,8 @@ std::string format_gl_gpu_report(const char* scope) {
         "gpu_draw_n=%llu gpu_upload_ns=%llu gpu_upload_n=%llu "
         "gpu_resolve_ns=%llu gpu_resolve_n=%llu drain_ns=%llu "
         "readpixels_ns=%llu cpu_copy_ns=%llu bytes_read=%llu dirty_bytes=%llu "
-        "nested_skipped=%llu queries_dropped=%llu resolve_bracket_ok=%llu",
+        "nested_skipped=%llu queries_dropped=%llu resolve_bracket_ok=%llu "
+        "gpu_timing_enabled=%llu",
         scope,
         (unsigned long long)g_gl_gpu.gpu_timing_available.load(),
         (unsigned long long)g_gl_gpu.gpu_draw_ns.load(),
@@ -296,7 +303,8 @@ std::string format_gl_gpu_report(const char* scope) {
         (unsigned long long)g_gl_gpu.dirty_bytes.load(),
         (unsigned long long)g_gl_gpu.nested_skipped.load(),
         (unsigned long long)g_gl_gpu.queries_dropped.load(),
-        (unsigned long long)resolve_bracket_ok);
+        (unsigned long long)resolve_bracket_ok,
+        (unsigned long long)g_gl_gpu.gpu_timing_enabled.load());
     return std::string(buf);
 }
 
@@ -1233,7 +1241,8 @@ public:
         // hook a backend could feed. Neither file is in scope for this change,
         // so this family has run totals only -- no frame-series samples.
         if (perf::g_enabled) {
-            if (gpu_timing_available_) {
+            if (gpu_timing_available_ &&
+                (gpu_timers_enabled_ || gpu_query_live_ > 0)) {
                 // Force the pipeline to completion BEFORE the blocking harvest.
                 // harvest_gpu_queries(block=true) spins on GL_QUERY_RESULT for each
                 // outstanding query; on a driver that has not been flushed, work the
@@ -2424,11 +2433,42 @@ public:
     void set_generated_uniform_batching(bool on) override {
         generated_uniform_batching_ = on;
     }
+    void set_gpu_timing_enabled(bool on) override {
+        gpu_timers_enabled_ = on;
+        g_gl_gpu.gpu_timing_enabled.store(on ? 1u : 0u,
+                                         std::memory_order_relaxed);
+    }
+#if XLLE_GENERATED_SUBMIT_DIAGNOSTICS
+    bool set_generated_submit_census(bool on) override {
+        generated_submit_census_ = on;
+        generated_submit_cpu_stats_.available = true;
+        generated_submit_cpu_stats_.enabled = on && perf_excl::g_enabled;
+        return true;
+    }
+    GeneratedSubmitCpuStats generated_submit_cpu_stats() const override {
+        GeneratedSubmitCpuStats stats = generated_submit_cpu_stats_;
+        stats.available = true;
+        stats.enabled = generated_submit_census_ && perf_excl::g_enabled;
+        return stats;
+    }
+#endif
 
     bool submit_generated_shader(const Nv2aGeneratedShaderPacket& packet,
                                  Nv2aGeneratedShaderResult& result,
                                  std::string& error) override {
         perf_excl::Scope gl_region(perf_excl::kNv2aGl);
+#if XLLE_GENERATED_SUBMIT_DIAGNOSTICS
+        generated_submit_cpu_stats_.available = true;
+        generated_submit_cpu_stats_.enabled =
+            generated_submit_census_ && perf_excl::g_enabled;
+        Nv2aGeneratedSubmitPhaseRecorder generated_submit_perf(
+            generated_submit_cpu_stats_,
+            generated_submit_census_ && perf_excl::g_enabled);
+        const auto generated_submit_phase =
+            [&](Nv2aGeneratedSubmitPhaseRecorder::Phase phase) {
+                generated_submit_perf.enter(phase);
+            };
+#endif
         result = {};
         if (packet.triangles.empty()) return true;
         // A pending witnessed batch may target this very plane, and GL executes
@@ -2438,6 +2478,9 @@ public:
         if (!take_witnessed_flush_error(error)) return false;
         if (!enter_witnessed_context(error)) return false;
 
+#if XLLE_GENERATED_SUBMIT_DIAGNOSTICS
+        generated_submit_phase(Nv2aGeneratedSubmitPhaseRecorder::kEnsure);
+#endif
         GeneratedProgram* gp = ensure_generated_program(packet);
         if (!gp) {
             error = "OpenGL generated combiner program unavailable";
@@ -2457,6 +2500,9 @@ public:
             return false;
         }
 
+#if XLLE_GENERATED_SUBMIT_DIAGNOSTICS
+        generated_submit_phase(Nv2aGeneratedSubmitPhaseRecorder::kTextures);
+#endif
         // ---- textures --------------------------------------------------
         for (uint32_t i = 0; i < 4; ++i) {
             const Nv2aGeneratedTexture& texture = packet.textures[i];
@@ -2538,6 +2584,9 @@ public:
         cache_bind_texture_unit(kGlTexture0,
                                 generated_textures_[0].texture);
 
+#if XLLE_GENERATED_SUBMIT_DIAGNOSTICS
+        generated_submit_phase(Nv2aGeneratedSubmitPhaseRecorder::kRecords);
+#endif
         // ---- triangle records ------------------------------------------
         const size_t count = packet.triangles.size();
         generated_records_.resize(sizeof(GeneratedTriRecord) * count);
@@ -2575,6 +2624,10 @@ public:
             rec->recip[2] = t.inv_w_double[1];
             rec->recip[3] = t.inv_w_double[2];
         }
+#if XLLE_GENERATED_SUBMIT_DIAGNOSTICS
+        generated_submit_perf.add_record_bytes(generated_records_.size());
+        generated_submit_phase(Nv2aGeneratedSubmitPhaseRecorder::kBuffer);
+#endif
         if (!generated_ssbo_) gen_buffers_(1, &generated_ssbo_);
         bind_buffer_(kGlShaderStorageBuffer, generated_ssbo_);
         gpu_timed_buffer_data(
@@ -2583,6 +2636,9 @@ public:
             generated_records_.data(), kGlStreamDraw);
         bind_buffer_base_(kGlShaderStorageBuffer, 0, generated_ssbo_);
 
+#if XLLE_GENERATED_SUBMIT_DIAGNOSTICS
+        generated_submit_phase(Nv2aGeneratedSubmitPhaseRecorder::kUniforms);
+#endif
         // ---- program and uniforms ---------------------------------------
         use_program_(gp->program);
         witnessed_bound_program_ = gp->program;
@@ -2662,6 +2718,9 @@ public:
             }
         }
 
+#if XLLE_GENERATED_SUBMIT_DIAGNOSTICS
+        generated_submit_phase(Nv2aGeneratedSubmitPhaseRecorder::kState);
+#endif
         // ---- fixed-function state ---------------------------------------
         cache_bind_framebuffer(resident_fbo_);
         cache_framebuffer_color_texture(resident_fbo_, surface->texture);
@@ -2751,6 +2810,9 @@ public:
         }
         if (!generated_vao_) gen_vertex_arrays_(1, &generated_vao_);
         cache_bind_vao_vbo(generated_vao_, 0);
+#if XLLE_GENERATED_SUBMIT_DIAGNOSTICS
+        generated_submit_phase(Nv2aGeneratedSubmitPhaseRecorder::kDraw);
+#endif
         // DIAGNOSTIC, KNOWN INCORRECT WHEN ON. Everything but the draw itself:
         // the residency, the uploads and the state all happen, so the ONLY
         // thing missing from the frame is this executor's own output. It is
@@ -2759,6 +2821,9 @@ public:
         // shader can settle.
         if (!generated_nodraw_)
             gpu_timed_draw_arrays(kGlTriangles, 0, static_cast<int>(count * 6u));
+#if XLLE_GENERATED_SUBMIT_DIAGNOSTICS
+        generated_submit_phase(Nv2aGeneratedSubmitPhaseRecorder::kBarrier);
+#endif
         if (packet.state.image_blend) {
             // The image stores must be visible to the NEXT generated draw (a
             // second interlocked read-modify-write of the same pixels), to the
@@ -2774,11 +2839,17 @@ public:
             flush_();
             ++witnessed_gl_flushes_;
         }
+#if XLLE_GENERATED_SUBMIT_DIAGNOSTICS
+        generated_submit_phase(Nv2aGeneratedSubmitPhaseRecorder::kCleanup);
+#endif
         cache_color_mask(1, 1, 1, 1);
         cache_blend(false, 0, 0);
         cache_scissor(false, 0, 0, 0, 0);
         cache_depth_mask(true);
 
+#if XLLE_GENERATED_SUBMIT_DIAGNOSTICS
+        generated_submit_phase(Nv2aGeneratedSubmitPhaseRecorder::kError);
+#endif
         const unsigned int gl_error = get_error_();
         if (gl_error != kGlNoError) {
             char why[192];
@@ -2790,6 +2861,9 @@ public:
             error = why;
             return false;
         }
+#if XLLE_GENERATED_SUBMIT_DIAGNOSTICS
+        generated_submit_phase(Nv2aGeneratedSubmitPhaseRecorder::kFinish);
+#endif
         surface->dirty = true;
         surface->dirty_rect.add(packet.xmin, packet.ymin,
                                 packet.xmax - packet.xmin + 1u,
@@ -4845,6 +4919,8 @@ public:
                                blend_func_separate_ != nullptr;
         g_gl_gpu.gpu_timing_available.store(gpu_timing_available_ ? 1u : 0u,
                                            std::memory_order_relaxed);
+        g_gl_gpu.gpu_timing_enabled.store(gpu_timers_enabled_ ? 1u : 0u,
+                                         std::memory_order_relaxed);
         if (!(compile_fixture(error) && compile_primary_color(error) &&
               compile_texture_modulate(error) && compile_dashboard(error) &&
               compile_resident_primary(error) &&
@@ -6521,6 +6597,10 @@ private:
     bool generated_nodraw_ = false;
     bool generated_bgra_upload_ = true;
     bool generated_uniform_batching_ = false;
+#if XLLE_GENERATED_SUBMIT_DIAGNOSTICS
+    bool generated_submit_census_ = false;
+    GeneratedSubmitCpuStats generated_submit_cpu_stats_{};
+#endif
     struct GeneratedTextureSlot {
         unsigned int texture = 0;
         uint64_t hash = 0;
@@ -6670,6 +6750,7 @@ private:
     uint64_t witnessed_flush_kick_ = 0;    // issued by kick_pending_gpu_work
     uint64_t witnessed_gl_flushes_ = 0;    // glFlush calls that kicked a draw
     bool gpu_timing_available_ = false;
+    bool gpu_timers_enabled_ = true;
 
     enum class GpuTimerBucket : uint8_t { kDraw, kUpload, kResolve };
     struct GpuQuerySlot {
@@ -6687,7 +6768,7 @@ private:
     bool gpu_query_active_ = false;
 
     bool gpu_timing_active() const {
-        return gpu_timing_available_ && perf::g_enabled;
+        return gpu_timing_available_ && perf::g_enabled && gpu_timers_enabled_;
     }
 
     // Collects finished queries in issue order. `block` is used once, from the

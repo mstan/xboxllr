@@ -1849,6 +1849,10 @@ public:
         return renderer_ ? renderer_->generated_shader_stats()
                          : Nv2aRenderer::GeneratedShaderStats{};
     }
+    Nv2aRenderer::GeneratedSubmitCpuStats generated_submit_cpu_stats() const {
+        return renderer_ ? renderer_->generated_submit_cpu_stats()
+                         : Nv2aRenderer::GeneratedSubmitCpuStats{};
+    }
     GeneratedShaderCensus generated_shader_census() const {
         GeneratedShaderCensus out;
         out.attempts = generic_shader_attempts_;

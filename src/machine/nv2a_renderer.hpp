@@ -853,6 +853,22 @@ public:
     };
     virtual GeneratedShaderStats generated_shader_stats() const { return {}; }
     virtual void set_generated_uniform_batching(bool on) { (void)on; }
+    virtual void set_gpu_timing_enabled(bool on) { (void)on; }
+    struct GeneratedSubmitCpuStats {
+        bool available = false;
+        bool enabled = false;
+        static constexpr size_t kPhaseCount = 12;
+        std::array<uint64_t, kPhaseCount> raw_ticks{};
+        std::array<uint64_t, kPhaseCount> compensated_ticks{};
+        std::array<uint64_t, kPhaseCount> calls{};
+        uint64_t discarded_deltas = 0;
+        uint64_t record_bytes = 0;
+        uint64_t submits = 0;
+    };
+    virtual bool set_generated_submit_census(bool on) { return !on; }
+    virtual GeneratedSubmitCpuStats generated_submit_cpu_stats() const {
+        return {};
+    }
     // Diagnostic only, and KNOWN INCORRECT when on: perform every step of a
     // generated submission except the draw call. Default off, no negative
     // spelling, never a shipping path.
@@ -877,5 +893,7 @@ public:
         return false;
     }
 };
+
+using GeneratedSubmitCpuStats = Nv2aRenderer::GeneratedSubmitCpuStats;
 
 }  // namespace xlle

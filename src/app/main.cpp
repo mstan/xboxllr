@@ -588,6 +588,32 @@ void print_gpu_residency_census(const xlle::Nv2a* nv, const char* scope,
             (unsigned long long)r.stage_uniform_scalar_calls,
             (unsigned long long)r.stage_uniform_bulk_calls,
             (unsigned long long)r.stage_uniform_vectors);
+#if XLLE_GENERATED_SUBMIT_DIAGNOSTICS
+        const auto cpu = nv->generated_submit_cpu_stats();
+        if (cpu.available && cpu.enabled) {
+            static constexpr const char* phases[] = {
+                "entry", "ensure", "textures", "records", "buffer", "uniforms",
+                "state", "draw", "barrier", "cleanup", "error", "finish"};
+            static_assert(sizeof(phases) / sizeof(phases[0]) ==
+                          Nv2aRenderer::GeneratedSubmitCpuStats::kPhaseCount);
+            std::printf("[host] generated-submit-cpu scope=%s deadline=%llu "
+                        "available=1 enabled=1 submits=%llu record_bytes=%llu discarded_deltas=%llu "
+                        "inclusive_children=1 clock_ns_per_tick=%.9f overhead_ticks=%llu\n",
+                        scope, deadline, (unsigned long long)cpu.submits,
+                        (unsigned long long)cpu.record_bytes,
+                        (unsigned long long)cpu.discarded_deltas,
+                        xlle::perf_excl::g_ns_per_tick,
+                        (unsigned long long)xlle::perf_excl::g_overhead_ticks);
+            for (size_t phase = 0; phase < cpu.kPhaseCount; ++phase) {
+                std::printf("[host] generated-submit-phase scope=%s deadline=%llu "
+                            "phase=%s calls=%llu raw_ns=%llu compensated_ns=%llu\n",
+                            scope, deadline, phases[phase],
+                            (unsigned long long)cpu.calls[phase],
+                            (unsigned long long)xlle::perf_excl::ticks_to_ns(cpu.raw_ticks[phase]),
+                            (unsigned long long)xlle::perf_excl::ticks_to_ns(cpu.compensated_ticks[phase]));
+            }
+        }
+#endif
         const auto& cache = nv->generic_texture_conversion_cache();
         std::printf(
             "[host] generic-texture-cache scope=%s deadline=%llu enabled=%u "
@@ -1576,6 +1602,8 @@ int main(int argc, char** argv) {
     // Experimental host submission optimization; retain scalar A arm until
     // same-session canonical and product-window gates have passed.
     bool nv2a_gpu_generated_uniform_batching = false;
+    bool nv2a_gpu_timers = true;
+    bool nv2a_generated_submit_census = false;
     bool nv2a_gpu_generic_texture_cache = true;
     bool nv2a_gpu_generic_texture_trace = false;
     // PFIFO run batching (beads-xbox.1.15.1 stages (c)/(d)). Both default ON;
@@ -1944,6 +1972,14 @@ int main(int argc, char** argv) {
             nv2a_gpu_generated_uniform_batching = true;
         else if (!std::strcmp(argv[i], "--no-nv2a-gpu-generated-uniform-batching"))
             nv2a_gpu_generated_uniform_batching = false;
+        else if (!std::strcmp(argv[i], "--nv2a-generated-submit-census"))
+            nv2a_generated_submit_census = true;
+        else if (!std::strcmp(argv[i], "--no-nv2a-generated-submit-census"))
+            nv2a_generated_submit_census = false;
+        else if (!std::strcmp(argv[i], "--nv2a-gpu-timers"))
+            nv2a_gpu_timers = true;
+        else if (!std::strcmp(argv[i], "--no-nv2a-gpu-timers"))
+            nv2a_gpu_timers = false;
         else if (!std::strcmp(argv[i], "--nv2a-vertex-program-cache"))
             nv2a_vertex_program_cache = true;
         else if (!std::strcmp(argv[i], "--no-nv2a-vertex-program-cache"))
@@ -2389,6 +2425,18 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+#if !XLLE_GENERATED_SUBMIT_DIAGNOSTICS
+    if (nv2a_generated_submit_census) {
+        std::fprintf(stderr, "[host] --nv2a-generated-submit-census requires an "
+                     "XLLE_GENERATED_SUBMIT_DIAGNOSTICS=ON build\n");
+        return 2;
+    }
+#endif
+    if (nv2a_generated_submit_census && !perf_accounting) {
+        std::fprintf(stderr, "[host] --nv2a-generated-submit-census requires "
+                     "--perf-accounting for calibrated clocks\n");
+        return 2;
+    }
 #if !XLLE_VERTEX_REUSE_DIAGNOSTICS
     if (nv2a_vertex_reuse_census || nv2a_vertex_reuse_timing) {
         std::fprintf(stderr,
@@ -2403,6 +2451,11 @@ int main(int argc, char** argv) {
         return 2;
     }
     std::unique_ptr<Nv2aRenderer> nv2a_renderer;
+    if (nv2a_generated_submit_census && std::strcmp(nv2a_renderer_name, "opengl")) {
+        std::fprintf(stderr, "[host] --nv2a-generated-submit-census requires "
+                     "--nv2a-renderer opengl\n");
+        return 2;
+    }
     if (!std::strcmp(nv2a_renderer_name, "opengl")) {
         std::string renderer_error;
         nv2a_renderer = create_nv2a_opengl_renderer(renderer_error);
@@ -2417,6 +2470,13 @@ int main(int argc, char** argv) {
         nv2a_renderer->set_witnessed_plane_split(nv2a_gpu_plane_split);
         nv2a_renderer->set_witnessed_ssbo_ring(nv2a_gpu_ssbo_ring);
         nv2a_renderer->set_generated_uniform_batching(nv2a_gpu_generated_uniform_batching);
+        nv2a_renderer->set_gpu_timing_enabled(nv2a_gpu_timers);
+#if XLLE_GENERATED_SUBMIT_DIAGNOSTICS
+        if (!nv2a_renderer->set_generated_submit_census(nv2a_generated_submit_census)) {
+            std::fprintf(stderr, "[host] renderer cannot enable generated submit census\n");
+            return 2;
+        }
+#endif
         std::string fp32_error;
         if (!nv2a_renderer->set_witnessed_fp32_shader(nv2a_gpu_fp32_shader,
                                                       fp32_error)) {
