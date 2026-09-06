@@ -6,6 +6,59 @@ floor. A subsystem is not exempt from investigation because an earlier session c
 "done". This amends the 10 FPS milestone in `NORTH-STAR.md` and the interpretation of older
 performance conclusions; it does not erase their measurements.
 
+## Resuming optimization after the external review
+
+The owner's next request is a whole-pipeline reassessment and concrete borrowable
+A/B candidates. Source and measurements were rechecked at `38eba85`. The
+independent play instance remains active; measured runs require a quiet host and
+must not reuse that instance.
+
+The first bounded candidate, informed by sp00nznet's bulk constant-buffer
+submission, is generated-stage uniform batching: at most sixteen `glUniform4f`
+calls become two `glUniform4fv` calls. This changes host submission, not guest
+shader arithmetic. Packing cost and every other GL call remain. It is a candidate,
+not a promised 5% improvement. A generated-path upload ring is the next candidate
+only if buffer-upload/stall attribution justifies it; the witnessed path already
+has a four-buffer ring.
+
+Before timing uniform batching, verify linked active array extents. Current code
+caches element zero then adds 0..7 to its location. Source declarations of eight
+elements do not prove all eight remain active after linking. Cache valid element
+locations or reflect the active extent for a safe scalar comparator; test inactive
+arrays, short arrays, both arrays with different constants, and alternating
+programs. Do not confuse a correctness repair with batching's performance effect.
+Khronos specifies that array uploads beyond the array end are ignored; the
+reviewer's suggestion that a count of eight alone causes an error for a shorter
+active array was rejected. This is a source-level concern, not an observed driver
+failure. See [glUniform](https://registry.khronos.org/OpenGL-Refpages/gl4/html/glUniform.xhtml)
+and [active uniform sizes](https://registry.khronos.org/OpenGL-Refpages/gl4/html/glGetActiveUniform.xhtml).
+
+Run this six-part reassessment before choosing larger changes:
+
+| Question | Evidence / next action |
+|---|---|
+| Are we measuring the product? | Extend settled animation, Settings and return windows; identify newly submitted guest frames separately from repeated presents. Record guest-clock anchors and p50/p95/p99 frame intervals/capture-to-present latency. Equal pixel hashes do not necessarily mean the same guest frame. |
+| Can we trust attribution? | Preserve noperf headline runs. Compare timer/query-enabled and disabled diagnostics, fence/calibrate short CPU scopes, and assign delayed GPU query results to their issuance windows. Separate CPU API time, GPU work and synchronization. |
+| Where does the next frame wait? | Correlate emulation-thread work, raster-worker completion, GPU queue progress, resolves and presentation. Summed worker time is not wall time, and overlapping CPU/GPU savings cannot be added. |
+| Which work is repeated unnecessarily? | Count calls and bytes per guest frame: generated constants, buffer repacking/uploads, triangle setup, state changes and ownership transitions. Measure hit rates and cost per attempt before adding caches; the failed vertex-reuse probe remains a counterexample. |
+| Is the work on the right processor? | The dominant 23-op VSH is a candidate for exact program specialization or an integrated GPU path. Include CPU triangle-setup consumers and transfer costs; a synchronous GPU round trip may erase the savings. Keep unsupported semantics on the floor. |
+| Does an improvement survive the whole workload? | Same-session interleaved 3+3, min and median, canonical behavior checks and per-state navigation results. Re-profile after each retained change. Revisit TCG/MMIO/architecture using the new critical path, not a fixed historical percentage. |
+
+The corrected diagnostic settled window is approximately 24.6% vertex, 23.0% GL
+submission, 20.7% generic body/setup, 8.8% dispatch, 8.5% texture, 6.7% TCG and
+3.1% resolve. It has zero software pixel-loop calls: the generic bucket must not
+be interpreted as software rasterization. This is one attribution run, not a
+noperf retention set. Details and probe perturbation are in
+`PERF-TIMERS-2026-09-06.md`.
+
+First close the pending default-off vertex-diagnostic overhead gate, then run the
+uniform correctness/call-count experiment and its A/B. Larger GPU vertex work
+follows the critical-path and data-ownership review. The returned-dashboard
+capacity previously measured about 12 guest-equivalent FPS; reaching 60 requires
+roughly five times that capacity, and a proposed 20% reserve roughly six times.
+These ratios describe the gap in that workload, not proof of a ceiling or a
+prediction that any listed experiment will close it.
+
 ## Acceptance and budgets
 
 Twenty percent headroom is the proposed planning threshold pending owner preference:
