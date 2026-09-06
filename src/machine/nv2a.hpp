@@ -37,6 +37,12 @@
 #include "machine/nv2a_texture_conversion_cache.hpp"
 #include "machine/nv2a_vsh_compiled.hpp"
 #include "machine/nv2a_vsh_dot_prefix.hpp"
+#ifndef XLLE_VSH_DRAW_OVERLAP_CENSUS
+#define XLLE_VSH_DRAW_OVERLAP_CENSUS 0
+#endif
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+#include "machine/nv2a_vsh_draw_overlap.hpp"
+#endif
 #if XLLE_VERTEX_REUSE_DIAGNOSTICS
 #include "machine/nv2a_vertex_reuse_shadow.hpp"
 #endif
@@ -1400,6 +1406,20 @@ public:
     const VshDotPrefixStats& vsh_dot_prefix_stats() const {
         return vsh_dot_prefix_stats_;
     }
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+    void set_vsh_draw_overlap_census(bool on) {
+        if (vsh_draw_overlap_enabled_ == on) return;
+        if (vsh_draw_overlap_enabled_) draw_order_fence();
+        vsh_draw_overlap_enabled_ = on;
+        vsh_draw_overlap_census_.enabled = on;
+    }
+    bool vsh_draw_overlap_census_enabled() const {
+        return vsh_draw_overlap_enabled_;
+    }
+    const VshDrawOverlapCensus& vsh_draw_overlap_census() const {
+        return vsh_draw_overlap_census_;
+    }
+#endif
     // Ceiling probe, KNOWINGLY INCORRECT when armed. Default 0; no --no-
     // spelling. See nv2a_vsh_compiled.hpp.
     void set_vsh_unsafe_probe(uint32_t mode) { vsh_unsafe_probe_ = mode; }
@@ -2852,6 +2872,11 @@ private:
                            const float* compiled_output_regs);
     uint64_t vsh_cache_fingerprint_ = 0;
     VshProgramCensusRow* vsh_cache_census_row_ = nullptr;
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+    VshDrawOverlapProgramIdentity vsh_cache_overlap_identity_{};
+    bool vsh_draw_overlap_enabled_ = false;
+    VshDrawOverlapCensus vsh_draw_overlap_census_{};
+#endif
     // Returns false when the program contains anything the pre-decoded form
     // cannot represent EXACTLY -- an index outside the range the vendored code
     // asserts, an opcode outside its dispatch table, or no final step. There is
@@ -3232,6 +3257,11 @@ private:
         // instead of executing it. Set only inside the one enqueue branch in
         // rasterize_witnessed_batch, and only when draw_threads_ > 0.
         bool deferred = false;
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+        // Host-only census metadata copied from submit_vertex_batch locals at
+        // latch. It is never consulted by emulation semantics.
+        VshDrawOverlapJob vsh_overlap{};
+#endif
     };
 
     void latch_draw_job(DrawJob& job);
@@ -3241,6 +3271,9 @@ private:
     // apply its deferred guest-visible side effects. Emulation thread only, in
     // latch order -- inline jobs at their own retire, queued jobs at the drain.
     void fold_draw_job(DrawJob& job);
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+    void record_vsh_draw_overlap(DrawJob& job, VshDrawOverlapOutcome fallback);
+#endif
     // The ONE place a job's counters are added into the members. Stage (e2)
     // calls it once per destination-span part, in part order; every field it
     // touches is either a pure sum (order-independent) or a last-write-wins cell

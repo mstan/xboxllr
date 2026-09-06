@@ -115,6 +115,76 @@ struct SeamCensusSnapshot {
 // Stage (f) GPU-residency census (beads-xbox.1.15.7). Cumulative-only: the
 // state machine accumulates from process start, so the interval form would only
 // re-derive differences the reader can take from two cumulative lines.
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+void print_vsh_draw_overlap_counts(const xlle::VshDrawOverlapCounters& c) {
+#define XLLE_OVERLAP_PRINT(field) \
+    std::printf(" " #field "=%llu", (unsigned long long)c.field)
+    XLLE_OVERLAP_PRINT(batches);
+    XLLE_OVERLAP_PRINT(submitted_vertices);
+    XLLE_OVERLAP_PRINT(transformed_vertices);
+    XLLE_OVERLAP_PRINT(executed_vsh_vertices);
+    XLLE_OVERLAP_PRINT(index_cache_hits);
+    XLLE_OVERLAP_PRINT(transform_mode_other_batches);
+    XLLE_OVERLAP_PRINT(fixed_function_batches);
+    XLLE_OVERLAP_PRINT(programmable_batches);
+    XLLE_OVERLAP_PRINT(interpreted_batches);
+    XLLE_OVERLAP_PRINT(compiled_batches);
+    XLLE_OVERLAP_PRINT(context_writing_batches);
+    XLLE_OVERLAP_PRINT(generated_setup_calls);
+    XLLE_OVERLAP_PRINT(generated_setup_raw_ticks);
+    XLLE_OVERLAP_PRINT(generated_setup_compensated_ticks);
+    XLLE_OVERLAP_PRINT(fixture_setup_calls);
+    XLLE_OVERLAP_PRINT(fixture_setup_raw_ticks);
+    XLLE_OVERLAP_PRINT(fixture_setup_compensated_ticks);
+    XLLE_OVERLAP_PRINT(fixture_input_vertices);
+    XLLE_OVERLAP_PRINT(fixture_output_vertices);
+    XLLE_OVERLAP_PRINT(discarded_deltas);
+    XLLE_OVERLAP_PRINT(primitive_input_triangles);
+    XLLE_OVERLAP_PRINT(primitive_collected_triangles);
+    XLLE_OVERLAP_PRINT(primitive_refused_batches);
+    XLLE_OVERLAP_PRINT(primitive_nonfinite_batches);
+#undef XLLE_OVERLAP_PRINT
+    for (size_t i = 0; i < c.outcomes.size(); ++i)
+        std::printf(" outcome_%s=%llu", xlle::vsh_draw_overlap_outcome_name(
+                        static_cast<xlle::VshDrawOverlapOutcome>(i)),
+                    (unsigned long long)c.outcomes[i]);
+    for (size_t i = 0; i < c.transform_mode_batches.size(); ++i)
+        std::printf(" mode_%zu=%llu", i,
+                    (unsigned long long)c.transform_mode_batches[i]);
+    std::printf("\n");
+}
+
+void print_vsh_draw_overlap(const xlle::Nv2a* nv, const char* scope,
+                            unsigned long long deadline) {
+    if (!nv->vsh_draw_overlap_census_enabled()) return;
+    const auto& c = nv->vsh_draw_overlap_census();
+    std::printf("[host] vsh-draw-overlap scope=%s deadline=%llu enabled=1 "
+                "schema=1 rows=%zu row_capacity=%zu inclusive_setup=1 "
+                "clock_ns_per_tick=%.9f overhead_ticks=%llu unknown_program_batches=%llu",
+                scope, deadline, c.row_count, c.kRows, xlle::perf_excl::g_ns_per_tick,
+                (unsigned long long)xlle::perf_excl::g_overhead_ticks,
+                (unsigned long long)c.unknown_program.batches);
+    print_vsh_draw_overlap_counts(c.totals);
+    const auto print_row = [&](const xlle::VshDrawOverlapRow& row, size_t index,
+                               const char* kind) {
+        const auto& key = row.key;
+        std::printf("[host] vsh-draw-overlap-row scope=%s deadline=%llu "
+                    "kind=%s index=%zu known=%u vsh_fp=%016llx start_slot=%u slots=%u "
+                    "outcome=%s transform_mode=%u fixed_function=%u programmable=%u "
+                    "compiled=%u writes_context=%u fixture=%u",
+                    scope, deadline, kind, index, key.program.known ? 1u : 0u,
+                    (unsigned long long)key.program.fingerprint,
+                    key.program.start_slot, key.program.slots,
+                    xlle::vsh_draw_overlap_outcome_name(key.outcome), key.transform_mode,
+                    key.fixed_function ? 1u : 0u, key.programmable ? 1u : 0u,
+                    key.compiled ? 1u : 0u, key.writes_context ? 1u : 0u, key.fixture);
+        print_vsh_draw_overlap_counts(row.totals);
+    };
+    for (size_t i = 0; i < c.row_count; ++i) print_row(c.rows[i], i, "program");
+    print_row(c.overflow, c.kRows, "overflow");
+}
+#endif
+
 void print_gpu_residency_census(const xlle::Nv2a* nv, const char* scope,
                                 unsigned long long deadline,
                                 unsigned long long vblanks) {
@@ -342,6 +412,9 @@ void print_gpu_residency_census(const xlle::Nv2a* nv, const char* scope,
             (unsigned long long)dot.executed_vertices,
             (unsigned long long)dot.executed_ops);
     }
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+    print_vsh_draw_overlap(nv, scope, deadline);
+#endif
 #if XLLE_VERTEX_REUSE_DIAGNOSTICS
     if (const auto* shadow = nv->vertex_reuse_shadow()) {
         const auto& s = shadow->stats();
@@ -1668,6 +1741,7 @@ int main(int argc, char** argv) {
     // reads per VERTEX, which is tens of millions per replay. Never a shipping
     // path; it exists so the vertex split is measured rather than inferred.
     bool nv2a_vertex_census = false;
+    bool nv2a_vsh_draw_overlap_census = false;
     bool nv2a_vertex_reuse_census = false;
     bool nv2a_vertex_reuse_timing = false;
     // Phase 5 item 3. The two exactness-neutral per-vertex hoists. DEFAULT ON;
@@ -2014,6 +2088,10 @@ int main(int argc, char** argv) {
             nv2a_vsh_dot_prefix = true;
         else if (!std::strcmp(argv[i], "--no-nv2a-vsh-dot-prefix"))
             nv2a_vsh_dot_prefix = false;
+        else if (!std::strcmp(argv[i], "--nv2a-vsh-draw-overlap-census"))
+            nv2a_vsh_draw_overlap_census = true;
+        else if (!std::strcmp(argv[i], "--no-nv2a-vsh-draw-overlap-census"))
+            nv2a_vsh_draw_overlap_census = false;
         else if (!std::strcmp(argv[i], "--nv2a-vsh-unsafe-probe") && i + 1 < argc)
             nv2a_vsh_unsafe_probe =
                 static_cast<uint32_t>(std::strtoul(argv[++i], nullptr, 0));
@@ -2439,6 +2517,18 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+#if !XLLE_VSH_DRAW_OVERLAP_CENSUS
+    if (nv2a_vsh_draw_overlap_census) {
+        std::fprintf(stderr, "[host] --nv2a-vsh-draw-overlap-census requires an "
+                     "XLLE_VSH_DRAW_OVERLAP_CENSUS=ON build\n");
+        return 2;
+    }
+#endif
+    if (nv2a_vsh_draw_overlap_census && !perf_accounting) {
+        std::fprintf(stderr, "[host] --nv2a-vsh-draw-overlap-census requires "
+                     "--perf-accounting for calibrated clocks\n");
+        return 2;
+    }
 #if !XLLE_GENERATED_SUBMIT_DIAGNOSTICS
     if (nv2a_generated_submit_census) {
         std::fprintf(stderr, "[host] --nv2a-generated-submit-census requires an "
@@ -2619,6 +2709,9 @@ int main(int argc, char** argv) {
                     nv2a_vertex_fast_fetch);
                 mach.nv2a()->set_vsh_compile_enabled(nv2a_vsh_compile);
                 mach.nv2a()->set_vsh_dot_prefix(nv2a_vsh_dot_prefix);
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+                mach.nv2a()->set_vsh_draw_overlap_census(nv2a_vsh_draw_overlap_census);
+#endif
                 mach.nv2a()->set_vsh_unsafe_probe(nv2a_vsh_unsafe_probe);
                 mach.nv2a()->set_vsh_verify(nv2a_vsh_verify);
                 mach.nv2a()->set_gpu_profiles_enabled(nv2a_gpu_profiles);

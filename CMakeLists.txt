@@ -35,6 +35,9 @@ option(XLLE_VERTEX_REUSE_DIAGNOSTICS
 option(XLLE_GENERATED_SUBMIT_DIAGNOSTICS
   "Compile the opt-in NV2A generated-submit CPU phase diagnostic plumbing"
   OFF)
+option(XLLE_VSH_DRAW_OVERLAP_CENSUS
+  "Compile the opt-in NV2A vertex and draw-route overlap census"
+  OFF)
 
 include(FetchContent)
 
@@ -121,6 +124,11 @@ if(XLLE_VERTEX_REUSE_DIAGNOSTICS)
 else()
   target_compile_definitions(xlle_machine PUBLIC XLLE_VERTEX_REUSE_DIAGNOSTICS=0)
 endif()
+if(XLLE_VSH_DRAW_OVERLAP_CENSUS)
+  target_compile_definitions(xlle_machine PUBLIC XLLE_VSH_DRAW_OVERLAP_CENSUS=1)
+else()
+  target_compile_definitions(xlle_machine PUBLIC XLLE_VSH_DRAW_OVERLAP_CENSUS=0)
+endif()
 if(XLLE_NATIVE_OPTIMIZATIONS AND
    CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND
    CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
@@ -182,6 +190,10 @@ add_executable(test_vsh_dot_prefix tests/test_vsh_dot_prefix.cpp)
 target_include_directories(test_vsh_dot_prefix PRIVATE ${XLLE_INCLUDES})
 target_link_libraries(test_vsh_dot_prefix PRIVATE nv2a_vsh_emulator nv2a_vsh_cpu)
 add_test(NAME vsh_dot_prefix COMMAND test_vsh_dot_prefix)
+
+add_executable(test_vsh_draw_overlap tests/test_vsh_draw_overlap.cpp)
+target_include_directories(test_vsh_draw_overlap PRIVATE ${XLLE_INCLUDES})
+add_test(NAME vsh_draw_overlap COMMAND test_vsh_draw_overlap)
 
 add_executable(test_generated_submit_perf tests/test_generated_submit_perf.cpp)
 target_include_directories(test_generated_submit_perf PRIVATE ${XLLE_INCLUDES})
@@ -320,6 +332,9 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME generated_submit_report
            COMMAND ${Python3_EXECUTABLE}
                    ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_generated_submit_report.py)
+  add_test(NAME vsh_draw_overlap_report
+           COMMAND ${Python3_EXECUTABLE}
+                   ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_vsh_draw_overlap_report.py)
 else()
   message(STATUS "Python3 interpreter not found; skipping source guard tests")
 endif()

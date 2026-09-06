@@ -41,6 +41,16 @@ static_assert(sizeof(kVshDispatchTable) / sizeof(kVshDispatchTable[0]) ==
               "the compiled dispatch table must cover exactly the vendored "
               "Nv2aVshOpcode enum, in its order");
 
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+uint64_t vsh_draw_overlap_triangle_candidates(uint32_t primitive_mode,
+                                              size_t vertex_count) {
+    if (primitive_mode == 5) return static_cast<uint64_t>(vertex_count / 3u);
+    if (primitive_mode == 6 || primitive_mode == 7)
+        return vertex_count >= 3u ? static_cast<uint64_t>(vertex_count - 2u) : 0;
+    return 0;
+}
+#endif
+
 // Resolve ONE operand. Returns false -- declining the whole program -- for any
 // index the vendored code only guards with an assert, because with NDEBUG the
 // interpreter would read out of bounds there and the compiled form must not
@@ -2016,6 +2026,17 @@ void Nv2a::seam_note_threadable(DrawJob& job, bool threadable, uint32_t reason) 
     job.queueable = threadable || reason == kSeamHashOn;
 }
 
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+void Nv2a::record_vsh_draw_overlap(DrawJob& job,
+                                   VshDrawOverlapOutcome fallback) {
+    if (!vsh_draw_overlap_enabled_) return;
+    if (!job.vsh_overlap.valid || job.vsh_overlap.counted) return;
+    if (job.vsh_overlap.outcome == VshDrawOverlapOutcome::kUnknown)
+        job.vsh_overlap.outcome = fallback;
+    vsh_draw_overlap_record(vsh_draw_overlap_census_, job.vsh_overlap);
+}
+#endif
+
 void Nv2a::retire_draw_job(DrawJob& job, bool executed) {
     if (job.deferred) {
         // Stage (e): the fragment loop has NOT run; the job is being handed to
@@ -2035,6 +2056,9 @@ void Nv2a::retire_draw_job(DrawJob& job, bool executed) {
     // they did before the split. This is what makes the move free.
     transformed_batch_ = std::move(job.vertices);
     if (!executed) {
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+        record_vsh_draw_overlap(job, VshDrawOverlapOutcome::kNoRaster);
+#endif
         ++seam_jobs_not_executed_;
         return;
     }
@@ -2103,6 +2127,11 @@ void Nv2a::fold_draw_job(DrawJob& job) {
     // the one that reached the drain, not the one that issued the draw -- so any
     // faulting threaded run must be re-run with --nv2a-draw-threads 0 to get the
     // true attribution.
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+    if (out.failed || !out.ok)
+        job.vsh_overlap.outcome = VshDrawOverlapOutcome::kFault;
+    record_vsh_draw_overlap(job, VshDrawOverlapOutcome::kCpuWitnessed);
+#endif
     if (out.failed) fault_(out.fault_message);
     if (!out.ok) ++draw_worker_failures_;
 }
@@ -2405,6 +2434,9 @@ void Nv2a::invalidate_vsh_program_cache() {
         // previous batch's records no longer describe the program.
         vsh_cache_ops_valid_ = false;
         vsh_dot_prefix_plan_.clear();
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+        vsh_cache_overlap_identity_ = {};
+#endif
         return;
     }
     vsh_cache_valid_ = false;
@@ -2412,6 +2444,9 @@ void Nv2a::invalidate_vsh_program_cache() {
     vsh_cache_ops_valid_ = false;
     vsh_dot_prefix_plan_.clear();
     vsh_cache_census_row_ = nullptr;
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+    vsh_cache_overlap_identity_ = {};
+#endif
     destroy_vsh_program_cache();
 }
 
@@ -3257,11 +3292,17 @@ bool Nv2a::submit_vertex_batch() {
     }
     bool program_writes_context = false;
     VshProgramCensusRow* census_row = nullptr;
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+    VshDrawOverlapProgramIdentity overlap_program_identity{};
+#endif
     if (program_parsed && !program_owned) {
         // Served from the cache: vsh_program_writes_context is a pure function
         // of the same steps, so it is cached beside them rather than re-walked.
         program_writes_context = vsh_cache_writes_context_;
         census_row = vsh_cache_census_row_;
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+        overlap_program_identity = vsh_cache_overlap_identity_;
+#endif
     } else if (program_parsed) {
         program_writes_context = vsh_program_writes_context(program);
         // beads-xbox.1.15.11. The distinct-program census and the pre-decode
@@ -3289,6 +3330,12 @@ bool Nv2a::submit_vertex_batch() {
             census_row->slots = program_slots;
             census_row->writes_context = program_writes_context;
         }
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+        overlap_program_identity.known = true;
+        overlap_program_identity.fingerprint = fingerprint;
+        overlap_program_identity.start_slot = transform_program_start_;
+        overlap_program_identity.slots = program_slots;
+#endif
         bool program_compiled = false;
         if (vsh_compile_enabled_) {
             const uint64_t compile_start = perf_excl::tick_now();
@@ -3322,6 +3369,9 @@ bool Nv2a::submit_vertex_batch() {
         }
         if (census_row) census_row->compiled = program_compiled;
         vsh_cache_census_row_ = census_row;
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+        vsh_cache_overlap_identity_ = overlap_program_identity;
+#endif
         if (vertex_program_cache_enabled_) {
             destroy_vsh_program_cache();
             vsh_cache_steps_ = program.steps;
@@ -3385,6 +3435,9 @@ bool Nv2a::submit_vertex_batch() {
         transformed_batch_.push_back(vertex);
         if (collect_diagnostics) record_transformed_vertex_stats(vertex);
     };
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+    VshDrawOverlapJob overlap_job;
+#endif
 
     {
         std::optional<perf::ScopedAdd> transform_timer;
@@ -3442,6 +3495,9 @@ bool Nv2a::submit_vertex_batch() {
             use_compiled_vsh && vsh_dot_prefix_enabled_ &&
             dot_prefix_op_count >= 2u && !program_writes_context && !vsh_probe;
         uint64_t program_vertices = 0;
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+        uint64_t overlap_index_cache_hits = 0;
+#endif
         std::array<uint8_t, 16> active_attribute_slots{};
         uint32_t active_attribute_count = 0;
         for (uint32_t slot = 0; slot < vertex_attributes_.size(); ++slot) {
@@ -3461,6 +3517,9 @@ bool Nv2a::submit_vertex_batch() {
                 TransformedVertex cached_vertex;
                 if (lookup_batch_transform_cache(index, cached_vertex)) {
                     ++vertex_census_.reuse_hits;
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+                    if (vsh_draw_overlap_enabled_) ++overlap_index_cache_hits;
+#endif
 #if XLLE_VERTEX_REUSE_DIAGNOSTICS
                     if (shadow) ++vertex_reuse_shadow_census_.batch_cache_bypassed;
 #endif
@@ -3696,6 +3755,21 @@ bool Nv2a::submit_vertex_batch() {
             vsh_dot_prefix_stats_.executed_ops +=
                 program_vertices * dot_prefix_op_count;
         }
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+        if (vsh_draw_overlap_enabled_) {
+            overlap_job.valid = true;
+            overlap_job.program = overlap_program_identity;
+            overlap_job.submitted_vertices = vertex_count;
+            overlap_job.transformed_vertices = transformed_batch_.size();
+            overlap_job.executed_vsh_vertices = program_vertices;
+            overlap_job.index_cache_hits = overlap_index_cache_hits;
+            overlap_job.transform_mode = transform_execution_mode_;
+            overlap_job.fixed_function = fixed_function;
+            overlap_job.programmable = program_parsed;
+            overlap_job.compiled = program_parsed && use_compiled_vsh;
+            overlap_job.writes_context = program_writes_context;
+        }
+#endif
     }
     if (program_owned) nv2a_vsh_program_destroy(&program);
     if (capture_immediate_quad) {
@@ -3784,6 +3858,9 @@ bool Nv2a::submit_vertex_batch() {
     // half and write their results into the job.
     DrawJob job;
     latch_draw_job(job);
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+    job.vsh_overlap = overlap_job;
+#endif
     bool raster_executed = false;
     bool raster_ok;
     {
@@ -3793,6 +3870,10 @@ bool Nv2a::submit_vertex_batch() {
         // the job to a ring and a worker calls this same function.
         raster_ok = execute_draw_job(job, raster_executed);
     }
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+    if (!raster_ok)
+        job.vsh_overlap.outcome = VshDrawOverlapOutcome::kFault;
+#endif
     retire_draw_job(job, raster_executed);
     if (!raster_ok) return false;
     if (raster_executed && tracked_raster_sample)
@@ -5280,6 +5361,10 @@ bool Nv2a::gpu_profile_submit(DrawJob& job, bool& submitted) {
         else if (projected) ++pitch_projected_color_batches_;
         else ++pitch_textured_color_batches_;
         ++gpu_profile_jobs_;
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+        if (job.vsh_overlap.outcome == VshDrawOverlapOutcome::kUnknown)
+            job.vsh_overlap.outcome = VshDrawOverlapOutcome::kWitnessedEmpty;
+#endif
         submitted = true;
         return true;
     }
@@ -5569,6 +5654,9 @@ bool Nv2a::gpu_profile_submit(DrawJob& job, bool& submitted) {
         pitch_textured_color_triangles_ += triangle_tally;
     }
     ++gpu_profile_jobs_;
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+    job.vsh_overlap.outcome = VshDrawOverlapOutcome::kGpuWitnessed;
+#endif
     gpu_profile_triangles_ += result.triangles;
     // The backend reports its CUMULATIVE flush count; this is an assignment,
     // not an accumulation.
@@ -10926,6 +11014,11 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
     GenericResidentRejectReason resident_reject_this_batch =
         GenericResidentRejectReason::kCount;
     if (renderer_ && effective_clip_valid) {
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+        const bool fixture_overlap = vsh_draw_overlap_enabled_ && job.vsh_overlap.valid;
+        const uint64_t fixture_overlap_t0 = fixture_overlap && perf_excl::g_enabled
+            ? perf_excl::tick_now() : 0;
+#endif
         Nv2aGenericCombinerPacket packet;
         // Reuse persistent surface-snapshot storage across batches: the
         // renderer contract forbids retaining packet pointers after submit
@@ -11996,6 +12089,25 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                 }
             }
         }
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+        // Packet copying, state recognition, triangle expansion/clipping and
+        // CPU bin construction only. Backend admission/submission, debug
+        // snapshots, surface resolves and texture preparation are outside.
+        if (fixture_overlap) {
+            const uint64_t raw = fixture_overlap_t0
+                ? perf_excl::tick_now() - fixture_overlap_t0 : 0;
+            auto& overlap = job.vsh_overlap;
+            overlap.fixture = static_cast<uint32_t>(packet.compute_fixture);
+            ++overlap.fixture_setup_calls;
+            overlap.fixture_input_vertices += transformed_batch.size();
+            overlap.fixture_output_vertices += packet.vertices.size();
+            if (fixture_overlap_t0) {
+                overlap.fixture_setup_raw_ticks += raw;
+                overlap.fixture_setup_compensated_ticks +=
+                    perf_excl::compensated_delta(raw, overlap.discarded_deltas);
+            }
+        }
+#endif
         const bool resident_packet =
             packet.compute_fixture == Nv2aGenericCombinerPacket::ComputeFixture::
                                           kResidentPrimaryColorTriangles ||
@@ -12086,6 +12198,9 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             // stay on the thread owning the context and the resident protocol
             // writes guest memory through mem_write_, so the job is inline-only.
             seam_note_threadable(job, false, kSeamRendererPath);
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+            job.vsh_overlap.outcome = VshDrawOverlapOutcome::kGenericEmpty;
+#endif
             ++generic_combiner_accelerated_batches_;
             if (generic_shader_row_) ++generic_shader_row_->accelerated_batches;
             if (surface_write_debug_cb_) {
@@ -12208,6 +12323,9 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             // stay on the thread owning the context and the resident protocol
             // writes guest memory through mem_write_, so the job is inline-only.
             seam_note_threadable(job, false, kSeamRendererPath);
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+            job.vsh_overlap.outcome = VshDrawOverlapOutcome::kGenericResidentGpu;
+#endif
             ++generic_combiner_accelerated_batches_;
             if (generic_shader_row_) ++generic_shader_row_->accelerated_batches;
             generic_combiner_triangles_ += result.triangles;
@@ -12340,6 +12458,9 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             // stay on the thread owning the context and the resident protocol
             // writes guest memory through mem_write_, so the job is inline-only.
             seam_note_threadable(job, false, kSeamRendererPath);
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+            job.vsh_overlap.outcome = VshDrawOverlapOutcome::kGenericSnapshotGpu;
+#endif
             ++generic_combiner_accelerated_batches_;
             if (generic_shader_row_) ++generic_shader_row_->accelerated_batches;
             generic_combiner_triangles_ += result.triangles;
@@ -12391,6 +12512,10 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             static_cast<uint32_t>(resident_reject_this_batch);
     }
     executed = true;
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+    if (job.vsh_overlap.outcome == VshDrawOverlapOutcome::kUnknown)
+        job.vsh_overlap.outcome = VshDrawOverlapOutcome::kGenericCpu;
+#endif
     // Stage (d) / section 1.3: the generic software fallback builds its zeta
     // surface WITHOUT mem_direct_ (see the PagedRasterSurface pair below), so
     // the depth destination has no direct pointer and the job is inline-only.
@@ -12525,10 +12650,16 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
     uint32_t ymin = effective_clip_y;
     uint32_t ymax = effective_ymax;
     if (!effective_clip_valid) {
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+        job.vsh_overlap.outcome = VshDrawOverlapOutcome::kGenericEmpty;
+#endif
         record_generic_fingerprint_perf();
         return true;
     }
     if (zero_alpha_gequal_noop) {
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+        job.vsh_overlap.outcome = VshDrawOverlapOutcome::kGenericEmpty;
+#endif
         if (generic_batch_debug_cb_) {
             GenericBatchDebugInfo info;
             info.batch = generic_batch_index;
@@ -12617,6 +12748,9 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
     Nv2aGeneratedShaderPacket gpu_shader_packet;
     bool gpu_shader_collect = false;
     bool gpu_shader_collect_failed = false;
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+    bool gpu_shader_collect_nonfinite = false;
+#endif
     if (gpu_generic_shader_ && renderer_ && effective_clip_valid) {
         ++generic_shader_attempts_;
         GenericShaderDeclineReason decline = GenericShaderDeclineReason::kNone;
@@ -13593,6 +13727,9 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             for (size_t v = 0; v < 3 && collect_ok; ++v) {
                 const float pw = triangle_vertices[v]->position[3];
                 if (!std::isfinite(pw) || pw == 0.0f) {
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+                    if (!std::isfinite(pw)) gpu_shader_collect_nonfinite = true;
+#endif
                     collect_ok = false;
                     break;
                 }
@@ -13615,6 +13752,9 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                         const float value =
                             masked ? texture_values[stage][v][c4] : 0.0f;
                         if (masked && !std::isfinite(value)) {
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+                            gpu_shader_collect_nonfinite = true;
+#endif
                             collect_ok = false;
                             break;
                         }
@@ -14135,7 +14275,36 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                                   transformed_batch[i]);
         }
     };
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+    const bool collect_overlap = gpu_shader_collect && vsh_draw_overlap_enabled_ &&
+                                 job.vsh_overlap.valid;
+    const uint64_t overlap_input_triangles = collect_overlap
+        ? vsh_draw_overlap_triangle_candidates(primitive_mode, transformed_batch.size()) : 0;
+    const uint64_t overlap_t0 = collect_overlap && perf_excl::g_enabled
+        ? perf_excl::tick_now() : 0;
+#endif
     run_primitives();
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+    if (collect_overlap) {
+        const uint64_t raw = overlap_t0 ? perf_excl::tick_now() - overlap_t0 : 0;
+        VshDrawOverlapJob& overlap = job.vsh_overlap;
+        ++overlap.generated_setup_calls;
+        overlap.primitive_input_triangles += overlap_input_triangles;
+        const uint64_t collected =
+            static_cast<uint64_t>(gpu_shader_packet.triangles.size());
+        overlap.primitive_collected_triangles += collected;
+        if (gpu_shader_collect_failed || raster_failed) {
+            ++overlap.primitive_refused_batches;
+            if (gpu_shader_collect_nonfinite)
+                ++overlap.primitive_nonfinite_batches;
+        }
+        if (overlap_t0) {
+            overlap.generated_setup_raw_ticks += raw;
+            overlap.generated_setup_compensated_ticks +=
+                perf_excl::compensated_delta(raw, overlap.discarded_deltas);
+        }
+    }
+#endif
     if (gpu_shader_collect) {
         bool submitted = false;
         if (!gpu_shader_collect_failed && !raster_failed) {
@@ -14144,6 +14313,9 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                 // would have written nothing either, so this is a completed
                 // batch, not a decline -- and crucially it must NOT resolve.
                 submitted = true;
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+                job.vsh_overlap.outcome = VshDrawOverlapOutcome::kGeneratedEmpty;
+#endif
                 ++generic_shader_empty_batches_;
             } else {
                 // ---- differential verification (diagnostic) --------------
@@ -14211,6 +14383,9 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                     return false;
                 }
                 submitted = true;
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+                job.vsh_overlap.outcome = VshDrawOverlapOutcome::kGeneratedGpu;
+#endif
                 ++generic_shader_submits_;
                 generic_shader_triangles_ += gpu_result.triangles;
                 generic_shader_color_upload_bytes_ +=
@@ -14303,6 +14478,9 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
         gpu_shader_collect = false;
         gpu_shader_packet.triangles.clear();
         raster_failed = false;
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+        job.vsh_overlap.outcome = VshDrawOverlapOutcome::kGenericCpu;
+#endif
         {
             perf::ScopedAdd timer(perf::g_ns_generic_fallback_color_resolve,
                                   perf::g_calls_generic_fallback_color_resolve);
@@ -14478,6 +14656,10 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             transformed_batch.size(), std::numeric_limits<uint32_t>::max()));
         surface_write_debug_cb_(info);
     }
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+    if (job.vsh_overlap.outcome == VshDrawOverlapOutcome::kUnknown)
+        job.vsh_overlap.outcome = VshDrawOverlapOutcome::kGenericCpu;
+#endif
     ++generic_combiner_executed_batches_;
     record_generic_fingerprint_perf();
     return true;

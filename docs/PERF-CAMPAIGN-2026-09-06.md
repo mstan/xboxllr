@@ -171,9 +171,15 @@ submission gaps; direct buffer/uniform work is too small to justify the proposed
 ring. `PERF-VSH-DOT-PREFIX-2026-09-06.md` tests a general CPU dot-prefix plan:
 38.3 million verified vertices, zero mismatches, but a clean same-binary 3+3
 returns -0.148% median / -0.036% minimum improvement. It stays off by default.
-Next measure the overlap of programmable vertices with generated GPU draws and
-their CPU triangle preparation before designing a GPU vertex-plus-setup path.
-Bucket totals and high execution coverage alone have not predicted savings.
+`PERF-VSH-GPU-OVERLAP-2026-09-06.md` now measures actual draw outcomes for those
+vertices. In the settled window, resident generic draws carry 98.472% of actual
+VSH executions; generated draws carry 0.685%. The dominant population uses the
+resident primary-color fixture, with 17.5 million actual VSH executions from
+65.6 million references. Its inclusive CPU packet/triangle preparation takes
+1.30–1.41 s in diagnostic runs. Design the next combined vertex/setup experiment
+around that population and preserve index reuse. Bucket totals and high
+execution coverage alone have not predicted savings; these costs are not a
+promised improvement.
 
 * **"There is no swapchain": false.** The interactive SDL D3D11 backend already calls DXGI
   `Present1`. Stage g measures and improves it. Sharing the NV2A GL context is a different

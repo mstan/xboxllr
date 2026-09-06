@@ -788,6 +788,9 @@ static void test_vsh_compile_toggle_rebuilds_cached_parse() {
 
     std::string fault;
     xlle::Nv2a gpu([&](const std::string& why) { fault = why; });
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+    gpu.set_vsh_draw_overlap_census(true);
+#endif
     gpu.set_detailed_telemetry(false);
     std::vector<uint8_t> ram(0x4000000, 0);
     gpu.set_mem_access(
@@ -892,6 +895,55 @@ static void test_vsh_compile_toggle_rebuilds_cached_parse() {
     draw();
     CHECK(gpu.vertex_census().vsh_compiled_vertices == compiled_before + 6);
     CHECK(gpu.vsh_dot_prefix_stats().executed_vertices == 0);
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+    const auto& overlap = gpu.vsh_draw_overlap_census();
+    CHECK(overlap.totals.batches == 4);
+    CHECK(overlap.totals.submitted_vertices == 12);
+    CHECK(overlap.totals.executed_vsh_vertices == 12);
+    CHECK(overlap.totals.compiled_batches == 3);
+    CHECK(overlap.totals.interpreted_batches == 1);
+    CHECK(overlap.totals.index_cache_hits == 0);
+    CHECK(overlap.totals.generated_setup_calls == 0);
+    CHECK(overlap.unknown_program.batches == 0);
+    CHECK(overlap.overflow.totals.batches == 0);
+    CHECK(overlap.row_count >= 2); // Compiled/interpreted populations stay distinct.
+    uint64_t row_batches = 0;
+    uint64_t row_vertices = 0;
+    for (size_t i = 0; i < overlap.row_count; ++i) {
+        const auto& row = overlap.rows[i];
+        CHECK(row.key.program.known);
+        CHECK(row.key.program.fingerprint == overlap.rows[0].key.program.fingerprint);
+        CHECK(row.key.programmable);
+        CHECK(!row.key.writes_context);
+        CHECK(row.key.outcome != xlle::VshDrawOverlapOutcome::kUnknown);
+        CHECK(row.key.outcome != xlle::VshDrawOverlapOutcome::kFault);
+        row_batches += row.totals.batches;
+        row_vertices += row.totals.executed_vsh_vertices;
+    }
+    CHECK(row_batches == 4);
+    CHECK(row_vertices == 12);
+    const uint64_t original_program = overlap.rows[0].key.program.fingerprint;
+    const size_t original_rows = overlap.row_count;
+    emit(0x1E9C, 1);
+    emit(0x0B00, 0x00000000);
+    emit(0x0B04, 0x0020001B);
+    emit(0x0B08, 0x0836106C);
+    emit(0x0B0C, 0x2070F801);
+    emit(0x1EA0, 1);
+    draw();
+    CHECK(overlap.totals.batches == 5);
+    CHECK(overlap.totals.executed_vsh_vertices == 15);
+    CHECK(overlap.row_count == original_rows + 1);
+    CHECK(overlap.rows[original_rows].key.program.start_slot == 1);
+    CHECK(overlap.rows[original_rows].key.program.fingerprint != original_program);
+    CHECK(overlap.rows[original_rows].totals.executed_vsh_vertices == 3);
+    row_batches = 0;
+    for (size_t i = 0; i < original_rows; ++i) {
+        CHECK(overlap.rows[i].key.program.fingerprint == original_program);
+        row_batches += overlap.rows[i].totals.batches;
+    }
+    CHECK(row_batches == 4); // New program must not rewrite retired identities.
+#endif
 }
 
 int main() {

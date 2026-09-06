@@ -888,6 +888,8 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
     generated_submit_cpu_samples: list[dict[str, Any]] = []
     generated_submit_phase_samples: list[dict[str, Any]] = []
     vsh_dot_prefix_samples: list[dict[str, Any]] = []
+    vsh_draw_overlap_samples: list[dict[str, Any]] = []
+    vsh_draw_overlap_rows: list[dict[str, Any]] = []
 
     # beads-xbox.1.14.1 item 3(c): counter samples are emitted as a block right
     # after each `[host] frame-series` line, plus one extra block at shutdown.
@@ -935,6 +937,21 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
                         sample[key] = value
             target = (generated_submit_phase_samples if " phase=" in line
                       else generated_submit_cpu_samples)
+            target.append(sample)
+        elif line.startswith(("[host] vsh-draw-overlap ", "[host] vsh-draw-overlap-row ")):
+            sample = {}
+            for key, value in re.findall(r"(\w+)=([^\s]+)", line):
+                if key in ("vsh_fp", "generic_fp"):
+                    sample[key] = value
+                elif value.isdecimal():
+                    sample[key] = int(value)
+                else:
+                    try:
+                        sample[key] = float(value)
+                    except ValueError:
+                        sample[key] = value
+            target = (vsh_draw_overlap_rows if line.startswith("[host] vsh-draw-overlap-row ")
+                      else vsh_draw_overlap_samples)
             target.append(sample)
         elif line.startswith("[host] nv2a-vsh-dot-prefix "):
             sample = {}
@@ -1141,6 +1158,8 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
         "generated_submit_cpu_samples": generated_submit_cpu_samples,
         "generated_submit_phase_samples": generated_submit_phase_samples,
         "vsh_dot_prefix_samples": vsh_dot_prefix_samples,
+        "vsh_draw_overlap_samples": vsh_draw_overlap_samples,
+        "vsh_draw_overlap_rows": vsh_draw_overlap_rows,
         "host_present_samples": host_present_samples,
         "host_present": next((s for s in reversed(host_present_samples)
                               if s.get("scope") == "cumulative"), None),
