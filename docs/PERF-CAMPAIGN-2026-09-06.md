@@ -206,6 +206,15 @@ FPS gain. The next implementation checkpoint is complete decoded VSH shadow
 execution, preserving operand/store ordering and index reuse before GPU triangle
 preparation can become authoritative.
 
+`PERF-VSH-GPU-PROGRAM-2026-09-06.md` now validates complete decoded programs
+from bounded CPU-authoritative dashboard captures. The 16 B extension has
+2,617 exact GPU matches and six declines independently confirmed by a CPU
+intermediate trace; all 1,999 samples of the dominant 23-operation program match.
+The capture preserves actual execution versus index-cache-hit accounting and
+the replay frame/state references. This remains offline validation. Next retain
+whole-batch inputs and reference mapping, move triangle consumers onto the GPU,
+and measure a complete production candidate; no FPS gain follows from this probe.
+
 * **"There is no swapchain": false.** The interactive SDL D3D11 backend already calls DXGI
   `Present1`. Stage g measures and improves it. Sharing the NV2A GL context is a different
   optimization, with a transfer cost that still needs to justify the work.

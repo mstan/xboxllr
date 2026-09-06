@@ -38,6 +38,9 @@
 #include "machine/nv2a_texture_conversion_cache.hpp"
 #include "machine/nv2a_vsh_compiled.hpp"
 #include "machine/nv2a_vsh_dot_prefix.hpp"
+#if XLLE_VSH_CAPTURE
+#include "machine/nv2a_vsh_capture.hpp"
+#endif
 #ifndef XLLE_VSH_DRAW_OVERLAP_CENSUS
 #define XLLE_VSH_DRAW_OVERLAP_CENSUS 0
 #endif
@@ -1389,6 +1392,19 @@ public:
     const VshProgramCensus& vsh_program_census() const {
         return vsh_program_census_;
     }
+#if XLLE_VSH_CAPTURE
+    struct VshCaptureStats {
+        uint64_t executions = 0, eligible = 0, excluded = 0, samples = 0, cache_hits = 0;
+    };
+    void set_vsh_capture(uint64_t interval, uint32_t budget,
+                         std::function<void(const vsh_capture::Vertex&)> callback) {
+        vsh_capture_interval_ = interval;
+        vsh_capture_budget_ = budget;
+        vsh_capture_callback_ = std::move(callback);
+        vsh_capture_stats_ = {};
+    }
+    const VshCaptureStats& vsh_capture_stats() const { return vsh_capture_stats_; }
+#endif
     // The pre-decoded step form. DEFAULT ON; --no-nv2a-vsh-compile runs the
     // vendored nv2a_vsh_emu_execute on the same binary, which is the arm the
     // decision A/B is measured against.
@@ -2878,6 +2894,15 @@ private:
     // whenever the flag moves, and a program the compiler declines leaves it
     // false so the vendored interpreter runs unchanged.
     std::vector<VshCompiledOp> vsh_cache_ops_;
+#if XLLE_VSH_CAPTURE
+    VshCaptureStats vsh_capture_stats_{};
+    bool vsh_capture_plan_supported_ = false;
+    uint64_t vsh_capture_interval_ = 0;
+    uint32_t vsh_capture_budget_ = 0;
+    std::function<void(const vsh_capture::Vertex&)> vsh_capture_callback_;
+    void capture_vsh_vertex(bool eligible, uint64_t fingerprint,
+                            const float* inputs, const float* outputs, const float* post_position);
+#endif
     // Which register files this program can actually observe unwritten. See
     // VshZeroPlan in nv2a_vsh_compiled.hpp.
     VshZeroPlan vsh_cache_zero_plan_{};

@@ -41,6 +41,9 @@ option(XLLE_VSH_DRAW_OVERLAP_CENSUS
 option(XLLE_VSH_GPU_NUMERIC_PROBE
   "Build the standalone synthetic CPU/GPU VSH arithmetic diagnostic"
   OFF)
+option(XLLE_VSH_CAPTURE
+  "Compile bounded CPU-authoritative VSH capture for offline GPU validation"
+  OFF)
 
 include(FetchContent)
 
@@ -132,6 +135,7 @@ if(XLLE_VSH_DRAW_OVERLAP_CENSUS)
 else()
   target_compile_definitions(xlle_machine PUBLIC XLLE_VSH_DRAW_OVERLAP_CENSUS=0)
 endif()
+target_compile_definitions(xlle_machine PUBLIC XLLE_VSH_CAPTURE=$<BOOL:${XLLE_VSH_CAPTURE}>)
 if(XLLE_NATIVE_OPTIMIZATIONS AND
    CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND
    CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
@@ -212,6 +216,16 @@ add_executable(test_vsh_dot_prefix tests/test_vsh_dot_prefix.cpp)
 target_include_directories(test_vsh_dot_prefix PRIVATE ${XLLE_INCLUDES})
 target_link_libraries(test_vsh_dot_prefix PRIVATE nv2a_vsh_emulator nv2a_vsh_cpu)
 add_test(NAME vsh_dot_prefix COMMAND test_vsh_dot_prefix)
+
+add_executable(test_vsh_capture tests/test_vsh_capture.cpp)
+target_include_directories(test_vsh_capture PRIVATE ${XLLE_INCLUDES})
+target_link_libraries(test_vsh_capture PRIVATE nv2a_vsh_emulator nv2a_vsh_cpu)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  target_compile_options(test_vsh_capture PRIVATE -fno-fast-math -ffp-contract=off)
+elseif(MSVC)
+  target_compile_options(test_vsh_capture PRIVATE /fp:strict)
+endif()
+add_test(NAME vsh_capture COMMAND test_vsh_capture)
 
 add_executable(test_vsh_draw_overlap tests/test_vsh_draw_overlap.cpp)
 target_include_directories(test_vsh_draw_overlap PRIVATE ${XLLE_INCLUDES})

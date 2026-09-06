@@ -1775,6 +1775,12 @@ int main(int argc, char** argv) {
     // each checked vertex and compares the seven output registers the device
     // reads back, bit for bit.
     uint32_t nv2a_vsh_verify = 0;
+    const char* debug_vsh_capture_path = nullptr;
+    uint64_t debug_vsh_capture_interval = 0;
+    uint32_t debug_vsh_capture_budget = 0;
+#if XLLE_VSH_CAPTURE
+    std::unique_ptr<vsh_capture::Writer> vsh_capture_writer;
+#endif
     uint32_t nv2a_gpu_ssbo_ring = 4;
     // beads-xbox.1.15.10 step 2. DEFAULT ON with the executor: FP64 in the
     // witnessed fragment shaders cost gpu_draw_ns 10.746 s against 2.364 s for
@@ -2115,6 +2121,20 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(argv[i], "--nv2a-vsh-verify") && i + 1 < argc)
             nv2a_vsh_verify =
                 static_cast<uint32_t>(std::strtoul(argv[++i], nullptr, 0));
+        else if (!std::strcmp(argv[i], "--debug-vsh-capture")) {
+            if (i + 3 >= argc) {
+                std::fprintf(stderr, "--debug-vsh-capture expects path interval count\n");
+                return 2;
+            }
+            debug_vsh_capture_path = argv[++i];
+            if (!debug_vsh_capture_path[0] ||
+                !parse_u64_arg(argv[++i], debug_vsh_capture_interval) || !debug_vsh_capture_interval ||
+                !parse_u32_arg(argv[++i], debug_vsh_capture_budget) ||
+                !debug_vsh_capture_budget || debug_vsh_capture_budget > 16384) {
+                std::fprintf(stderr, "Invalid VSH capture path, interval, or count (1..16384)\n");
+                return 2;
+            }
+        }
         else if (!std::strcmp(argv[i], "--nv2a-gpu-plane-split"))
             nv2a_gpu_plane_split = true;
         else if (!std::strcmp(argv[i], "--no-nv2a-gpu-plane-split"))
@@ -2534,6 +2554,16 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+#if !XLLE_VSH_CAPTURE
+    if (debug_vsh_capture_path) {
+        std::fprintf(stderr, "--debug-vsh-capture requires XLLE_VSH_CAPTURE=ON\n");
+        return 2;
+    }
+#endif
+    if (debug_vsh_capture_path && (!nv2a_vsh_compile || nv2a_vsh_unsafe_probe)) {
+        std::fprintf(stderr, "VSH capture requires the faithful compiled CPU path\n");
+        return 2;
+    }
 #if !XLLE_VSH_DRAW_OVERLAP_CENSUS
     if (nv2a_vsh_draw_overlap_census) {
         std::fprintf(stderr, "[host] --nv2a-vsh-draw-overlap-census requires an "
@@ -2732,6 +2762,17 @@ int main(int argc, char** argv) {
 #endif
                 mach.nv2a()->set_vsh_unsafe_probe(nv2a_vsh_unsafe_probe);
                 mach.nv2a()->set_vsh_verify(nv2a_vsh_verify);
+#if XLLE_VSH_CAPTURE
+                if (debug_vsh_capture_path) {
+                    vsh_capture_writer = std::make_unique<vsh_capture::Writer>(debug_vsh_capture_path);
+                    if (!vsh_capture_writer->good()) {
+                        std::fprintf(stderr, "Cannot open VSH capture\n");
+                        return 2;
+                    }
+                    mach.nv2a()->set_vsh_capture(debug_vsh_capture_interval, debug_vsh_capture_budget,
+                        [&](const vsh_capture::Vertex& vertex) { vsh_capture_writer->append(vertex); });
+                }
+#endif
                 mach.nv2a()->set_gpu_profiles_enabled(nv2a_gpu_profiles);
                 mach.nv2a()->set_gpu_generic_shader(nv2a_gpu_generic_shader);
                 mach.nv2a()->set_gpu_generic_shader_mask(
@@ -6334,6 +6375,20 @@ int main(int argc, char** argv) {
                             memory_error.empty() ? "" : " (",
                             memory_error.empty() ? "" : (memory_error + ")").c_str());
             }
+#if XLLE_VSH_CAPTURE
+            if (vsh_capture_writer) {
+                const bool capture_ok = vsh_capture_writer->finish() && vsh_capture_writer->count() != 0;
+                const auto& stats = mach.nv2a()->vsh_capture_stats();
+                std::printf("[host] vsh-capture executions=%llu eligible=%llu excluded=%llu "
+                            "samples=%llu cache_hits=%llu written=%u complete=%u\n",
+                    static_cast<unsigned long long>(stats.executions),
+                    static_cast<unsigned long long>(stats.eligible),
+                    static_cast<unsigned long long>(stats.excluded),
+                    static_cast<unsigned long long>(stats.samples),
+                    static_cast<unsigned long long>(stats.cache_hits), vsh_capture_writer->count(), capture_ok);
+                frame_output_ok = frame_output_ok && capture_ok;
+            }
+#endif
             if (window && frame_available)
                 run_frame_window("xlle NV2A scanout", static_cast<int>(scanout.width),
                                  static_cast<int>(scanout.height), frame_rgba.data(),

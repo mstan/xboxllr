@@ -1,5 +1,9 @@
 # GPU vertex arithmetic probe
 
+Follow-up: [complete decoded-program shadow](PERF-VSH-GPU-PROGRAM-2026-09-06.md)
+adds real dashboard captures and full-program operand/store validation. The
+dot-only measurements below remain their original experiment populations.
+
 Tracker: `beads-xbox.1.15.11`. Starting revision: `1befefe`.
 Goal: faithful LLE at 60 FPS with headroom. This standalone diagnostic supplies
 arithmetic counterexamples before a combined GPU vertex/triangle path is built.

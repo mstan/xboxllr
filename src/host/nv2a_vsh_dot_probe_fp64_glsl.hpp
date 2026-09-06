@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string_view>
+#include <string>
 
 namespace xlle::vsh_shadow_probe {
 
@@ -8,15 +9,7 @@ namespace xlle::vsh_shadow_probe {
 // cannot erase subnormals. Binary64 arithmetic is tested on the actual device;
 // GLSL 4.30 does not promise full IEEE binary64 operation accuracy everywhere.
 // NaN operands and invalid operations explicitly decline the entire record.
-inline constexpr std::string_view kFp64ComputeSource = R"GLSL(
-#version 430
-layout(local_size_x = 64) in;
-struct DotInput { uvec4 a; uvec4 b; };
-layout(std430, binding = 0) readonly buffer DotInputs { DotInput records[]; };
-layout(std430, binding = 1) writeonly buffer DotOutputs { uvec4 results[]; };
-layout(std430, binding = 2) writeonly buffer DotStatus { uint status[]; };
-uniform uint u_record_count;
-
+inline constexpr std::string_view kFp32ArithmeticSource = R"GLSL(
 bool nan32(uint x) { return (x & 0x7fffffffu) > 0x7f800000u; }
 bool inf32(uint x) { return (x & 0x7fffffffu) == 0x7f800000u; }
 
@@ -103,6 +96,17 @@ uint w32(uint x) {
     uint magnitude = x & 0x7fffffffu;
     return (x & 0x80000000u) | clamp(magnitude, 0x1f800000u, 0x5f800000u);
 }
+)GLSL";
+
+inline const std::string kFp64ComputeSource = std::string(R"GLSL(
+#version 430
+layout(local_size_x = 64) in;
+struct DotInput { uvec4 a; uvec4 b; };
+layout(std430, binding = 0) readonly buffer DotInputs { DotInput records[]; };
+layout(std430, binding = 1) writeonly buffer DotOutputs { uvec4 results[]; };
+layout(std430, binding = 2) writeonly buffer DotStatus { uint status[]; };
+uniform uint u_record_count;
+)GLSL") + std::string(kFp32ArithmeticSource) + R"GLSL(
 
 void main() {
     uint index = gl_GlobalInvocationID.x;

@@ -2634,8 +2634,62 @@ bool Nv2a::compile_vsh_program(const void* steps, uint32_t slots,
         row->paired = paired_steps;
     }
     vsh_cache_ops_valid_ = true;
+#if XLLE_VSH_CAPTURE
+    vsh_capture_plan_supported_ = std::all_of(vsh_cache_ops_.begin(), vsh_cache_ops_.end(),
+        [](const VshCompiledOp& op) {
+            if (op.in_relative_mask) return false;
+            for (unsigned i = 0; i < 2; ++i)
+                if (op.out_base[i] != kVshBaseNone && op.out_base[i] != kVshBaseTemp &&
+                    op.out_base[i] != kVshBaseOutput) return false;
+            return true;
+        });
+#endif
     return true;
 }
+
+#if XLLE_VSH_CAPTURE
+void Nv2a::capture_vsh_vertex(bool eligible, uint64_t fingerprint,
+                             const float* inputs, const float* outputs, const float* post_position) {
+    if (!vsh_capture_callback_) return;
+    auto& stats = vsh_capture_stats_;
+    ++stats.executions;
+    if (!eligible || !vsh_capture_plan_supported_ || vsh_cache_ops_.empty() ||
+        vsh_cache_ops_.size() > vsh_capture::kMaxOps) {
+        ++stats.excluded;
+        return;
+    }
+    ++stats.eligible;
+    if (!vsh_capture_interval_ || (stats.eligible - 1) % vsh_capture_interval_ ||
+        stats.samples >= vsh_capture_budget_) return;
+    vsh_capture::Vertex vertex;
+    vertex.ordinal = stats.executions;
+    vertex.fingerprint = fingerprint;
+    std::memcpy(vertex.inputs.data(), inputs, sizeof(vertex.inputs));
+    std::memcpy(vertex.constants.data(), transform_constants_.data(), sizeof(vertex.constants));
+    std::memcpy(vertex.post_position.data(), post_position, sizeof(vertex.post_position));
+    for (size_t i = 0; i < vsh_capture::kConsumedOutputs.size(); ++i)
+        std::memcpy(vertex.expected.data() + i * 4,
+                    outputs + vsh_capture::kConsumedOutputs[i] * 4, 4 * sizeof(float));
+    for (const auto& source : vsh_cache_ops_) {
+        vsh_capture::Op op;
+        auto& w = op.words;
+        for (uint32_t id = 1; id < std::size(kVshDispatchTable); ++id)
+            if (source.fn == kVshDispatchTable[id]) w[0] = id;
+        w[1] = source.paired; w[2] = source.input_count; w[3] = source.in_negate_mask;
+        w[7] = source.in_relative_mask;
+        for (size_t i = 0; i < 3; ++i) {
+            w[4 + i] = source.in_base[i]; w[8 + i] = source.in_offset[i];
+            w[12 + i] = source.in_swizzle[i];
+        }
+        w[16] = source.out_base[0]; w[17] = source.out_base[1];
+        w[18] = source.out_offset[0]; w[19] = source.out_offset[1];
+        w[20] = source.out_mask[0]; w[21] = source.out_mask[1];
+        vertex.ops.push_back(op);
+    }
+    vsh_capture_callback_(vertex);
+    ++stats.samples;
+}
+#endif
 
 Nv2a::~Nv2a() {
     // Worker lifetime is tied to the device. Stop it and JOIN before any member
@@ -3516,6 +3570,9 @@ bool Nv2a::submit_vertex_batch() {
                 largest_vertex_index_ = std::max(largest_vertex_index_, index);
                 TransformedVertex cached_vertex;
                 if (lookup_batch_transform_cache(index, cached_vertex)) {
+#if XLLE_VSH_CAPTURE
+                    if (vsh_capture_callback_) ++vsh_capture_stats_.cache_hits;
+#endif
                     ++vertex_census_.reuse_hits;
 #if XLLE_VSH_DRAW_OVERLAP_CENSUS
                     if (vsh_draw_overlap_enabled_) ++overlap_index_cache_hits;
@@ -3693,6 +3750,11 @@ bool Nv2a::submit_vertex_batch() {
                                 &output_regs[(9 + texture) * 4],
                                 4 * sizeof(float));
                 }
+#if XLLE_VSH_CAPTURE
+                capture_vsh_vertex(use_compiled_vsh && !program_writes_context && !vsh_probe,
+                    census_row ? census_row->fingerprint : 0,
+                    input_regs.data(), output_regs, vertex.position.data());
+#endif
                 if (vertex_census_on) {
                     const uint64_t d = perf_excl::tick_now() - vsh_start;
                     vertex_census_.vsh_ticks += perf_excl::compensated_delta(
