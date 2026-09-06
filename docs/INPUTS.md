@@ -1,54 +1,106 @@
-# INPUTS — what the maintainer must supply
+# INPUTS - private machine material
 
-Everything here is **copyrighted or per-console secret**. It is **git-ignored, hash-gated,
-and never committed**. All of it should come from **your own console**, dumped with homebrew
-you already run — the cleanest sourcing story, and the only way to get the P2 authentic
-profile and the hardware-oracle tier.
+A clean checkout builds and runs the unit/spike tests without private Xbox material.
+Stock-dashboard replay and interactive dashboard work require a private sibling
+`machine` directory. Keep it outside the repo tree:
 
-## Nothing is needed to start A0
+```text
+F:\Projects\xboxlle\
+  xboxlle\        # this repository
+  machine\        # private, local-only console material
+```
 
-A0 (foundations + host shell + observability + CPU-floor spike) builds and tests with **no
-firmware and no hardware** — CPU fixtures, decode corpora, ring plumbing. We can begin
-immediately.
+The current repository ignores common private asset names if they are accidentally
+placed under the repo, but `.gitignore` is only a safety net. Do not commit or publish
+private console bytes, EEPROM contents, HDD images, extracted boot blobs, dashboard
+files, game discs, generated replay logs/reports, screenshots, or local machine evidence
+without a separate hygiene review. See [repository hygiene](REPOSITORY-HYGIENE.md)
+and the [publication guard](../tools/check_repository_hygiene.py).
 
-## Tier 1 — needed for A1 (oracle + hardware harness) and A2 (boot)
+## Current stock-dashboard layout
 
-Assemble a `machine/` "machine evidence package":
+These four files are the actual inputs used by `tools/run_stockdash_replay.ps1` and the
+README interactive command:
 
-| File | What it is | Notes |
+| Path relative to repo root | What it is | Current use |
 |---|---|---|
-| `mcpx.bin` | MCPX secret boot ROM (1BL) | 512 bytes. **MCPX v1.0** preferred (matches the recommended dev profile). |
-| `flash.bin` (P0) | An **xemu-bootable modified/debug retail BIOS** | Engine and reference must boot **byte-identical** firmware, so the cosim is meaningful. "COMPLEX 4627"-class is the known-good pairing. |
-| `eeprom.bin` | Per-console EEPROM (keys, region, video standard, settings) | 256 bytes. Fed identically to engine and reference. |
-| `hardware.json` | Machine metadata (hand-written) | motherboard revision, MCPX revision, RAM bytes (67108864), video encoder (Conexant/Focus/Xcalibur), SMC version, AV pack, video standard (NTSC-M/PAL), HDD model+firmware, DVD model, and the **dump method** for each blob. Pins the machine profile. |
+| `..\machine\flash-dump-ff000000.bin` | Flash image mapped by `--boot` | Mirrored into the 16 MiB flash window. |
+| `..\machine\bios-extract\bldr.bin` | Already extracted/decrypted 2BL blob | Loaded at RAM `0x90000` by `--run2bl` and entered at the current approximate 2BL handoff. |
+| `..\machine\xbox-hdd-stockdash.img` | Full sector-for-sector stock Xbox HDD image | Provides FATX partitions and dashboard files. |
+| `..\machine\eeprom.bin` | 256-byte per-console EEPROM dump | Attached as the SMBus EEPROM and used by the guest/kernel path. |
 
-## Tier 1b — needed for A4/A5 (the dashboard *is* on the HDD)
+The repo does not bundle a BIOS extractor; the current executable consumes
+`bios-extract\bldr.bin` as a supplied artifact. See the external extraction step below.
+Do not claim this path is authentic MCPX cold boot. Authentic MCPX -> 2BL cold boot is a
+later faithfulness pass.
 
-| File | What it is | Notes |
+The HDD image must be the whole disk image, not a folder and not only `xboxdash.xbe`.
+The dashboard target includes the C drive/FATX contents and related stock dashboard files
+as they exist on the imaged disk. The default IDE attach path is copy-on-write: guest
+writes are kept in memory and served back during the same run, but the image file is not
+modified unless `--hdd-writeback` is explicitly passed.
+
+The EEPROM dump is exactly 256 bytes. It contains per-console secrets, region/video
+settings, and material used by the console software for HDD-key derivation. Never publish
+it, decoded values, derived keys, or raw byte excerpts.
+
+## Preparing the bootloader
+
+Obtain the flash, EEPROM and full HDD image from your own console using your
+existing dump process. A locked physical HDD must be unlocked for imaging; supply
+readable raw sectors, not a compressed archive or a virtual disk container. Keep
+the untouched originals and use working copies. The current boot setup is tested
+with one machine/firmware profile; arbitrary retail BIOS revisions and modified
+disk layouts are not claimed compatible.
+
+An external [XboxBiosTool](https://github.com/tommojphillips/XboxBiosTool) checkout
+is used in the development workspace to extract/decrypt BIOS components. Its
+documented `/extr` command accepts the flash and either a matching private MCPX
+dump (`/mcpx`) or a private 16-byte 2BL key file (`/key-bldr`). The MCPX revision
+must match the BIOS; consult that tool's documentation. For example, adapting the
+tool executable path to your installation, from this repository root:
+
+```powershell
+$biosToolExe = 'F:\Projects\xboxlle\refs\XboxBiosTool\xbiostool.exe'
+& $biosToolExe /extr ..\machine\flash-dump-ff000000.bin `
+  /mcpx ..\machine\mcpx.bin /dir ..\machine\bios-extract
+```
+
+This is the tool's documented interface, not a claim that every BIOS/MCPX pairing
+has been validated here. Verify that extraction reports successful decryption and
+produces `bldr.bin`; do not substitute the encrypted flash region or kernel blob.
+Some already decrypted/modified BIOSes need different extraction options. The
+current executable does not read MCPX itself, but extraction of an encrypted 2BL
+needs the matching MCPX/key. All extraction output remains private, including
+additional key files that the tool may emit. No download of firmware, dashboard
+data, EEPROMs or keys is part of this setup.
+
+## Optional/later machine material
+
+These inputs are useful for hardware-oracle or later secure-boot work, but they are not
+consumed by the current stock-dashboard replay command:
+
+| File/category | What it is | Status |
 |---|---|---|
-| `hdd.raw` | Full **sector-for-sector** image of your unlocked HDD | Every partition + unused sectors (FATX). **Contains `xboxdash.xbe`** — Arc 1's whole target. Needed earlier than a game would be. |
+| MCPX 1BL ROM dump | Secret MCPX boot ROM, typically 512 bytes | Needed for authentic cold boot/hardware validation work, not current replay. |
+| Pristine retail flash BIOS | Unmodified retail flash image from the owner console | Later P2 authentic secure-boot profile. |
+| `hardware.json` | Hand-written machine metadata: board revision, RAM size, video encoder, SMC, AV pack, HDD/DVD identity, dump methods | Evidence/provenance. Current executable does not consume it. |
+| Game disc image (`.iso`/`.xiso`) | Owner-supplied game disc image | Arc 2 only. |
 
-## Tier 0 — the hardware-oracle capability (valuable from A0/A1, the highest-leverage thing)
+## Hardware oracle capability
 
-- **Homebrew execution on your Xbox** to run our **nxdk probe-agent XBEs** (small binaries we
-  write) that stream the same JSONL schema over the network. This is the ground-truth oracle
-  for: defined/undefined flags, x87/MMX/SSE edges, CPUID/MSR, TSC, PCI config reset values,
-  SMBus/SMC identities/responses, NV2A register reads, and cache/SMC behavior — none of which
-  xemu can authoritatively provide.
-- Practically: nxdk toolchain to build XBEs + a network (or serial) channel from the console
-  to this machine. This is the "hook Claude up to a real Xbox" capability, pulled **forward**
-  because it de-risks the hardest subsystems (NV2A, timing).
+The companion `xboxlle-probe` repo is the maintained homebrew/hardware path. It requires
+homebrew execution on an original Xbox, an nxdk build environment, and a network or serial
+channel. That capability is for collecting ground truth such as CPU flag edges, CPUID/MSR,
+TSC, PCI config reset values, SMBus/SMC responses, NV2A register behavior, cache behavior,
+and other hardware facts. It is not required for a clean build or for the current local
+stock-dashboard replay.
 
-## Tier 3 — later (authentic retail + Arc 2)
+## Log/report sensitivity
 
-| File | What it is | Notes |
-|---|---|---|
-| `flash-retail.bin` | Your **pristine, unmodified** retail flash BIOS | P2 authentic secure-boot profile, hardware-validated. Off the Arc-1 critical path. |
-| Blinx disc image (`.iso`/`.xiso`) | Your own copy of **Blinx: The Time Sweeper** | Arc 2 only. |
-
-## Legal note
-
-We only transform **your own** dumped bytes, on your own hardware, and never redistribute
-them. The framework repo stays clean and shareable. Harvested emulators (xemu, sp00nz,
-Cxbx-Reloaded) are cloned and used as external references/harvest sources under their GPL
-terms, kept **out of the framework tree** (in the workspace parent, not committed here).
+Replay artifacts can include exact argv, local paths, frame hashes, input script names,
+input timing, endpoint report counts, device counters, and performance data. They should
+be treated as review-before-publish material even when they contain no raw firmware,
+EEPROM, or HDD bytes. Fixture-specific runs whose final frame is not the canonical 12B
+frame should pass `-ExpectedFinalSha ''` and use their own evidence instead of relying on
+the canonical final-SHA gate.

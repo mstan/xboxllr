@@ -1,0 +1,6 @@
+#!/bin/sh
+# Inspect staged bytes, including force-added files that bypass .gitignore.
+if command -v py >/dev/null 2>&1; then
+    exec py -3 tools/check_repository_hygiene.py
+fi
+exec python3 tools/check_repository_hygiene.py

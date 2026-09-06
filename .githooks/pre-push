@@ -1,0 +1,6 @@
+#!/bin/sh
+# Inspect all local history, not merely the latest tree.
+if command -v py >/dev/null 2>&1; then
+    exec py -3 tools/check_repository_hygiene.py --history
+fi
+exec python3 tools/check_repository_hygiene.py --history

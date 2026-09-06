@@ -1,121 +1,197 @@
 # xboxlle
 
-A **faithful, LLE-first low-level emulation platform for the original Xbox** (2001,
-IA-32 "Coppermine" Pentium III + NV2A). It boots the **real** MCPX boot ROM, 2BL, and
-Microsoft kernel — no hand-written kernel, no HLE shell. Its first product goal is the
-**real Xbox dashboard, fully navigable**, running on that real firmware; navigation is not
-yet demonstrated.
+A faithful, LLE-first low-level emulation platform for the original Xbox (2001,
+IA-32 "Coppermine" Pentium III + NV2A). The current product path runs the real
+Microsoft 2BL/kernel/dashboard bytes, but it does **not** yet perform authentic
+MCPX cold boot: the executable loads a maintainer-supplied flash image and an
+already extracted/decrypted 2BL blob, then starts from the approximate 2BL handoff
+state used by the current bring-up path.
 
-It belongs to the recomp family (nesrecomp / psxrecomp / gbarecomp / gcnlle ) and inherits its doctrine: **LLE-first, run the real firmware, validate against
-ground truth, always-on ring buffers, no faked state, no stubs, artifacts are evidence
-not authority.** The Xbox guest is x86-on-x86-64, so this is a
-**dynamic execution platform** (a CPU floor + JIT + harvested device models), **not** a
-guest→C static recompiler. That distinction is why it is `xboxlle`, not `xboxrecomp`.
+The first product goal is the real Xbox dashboard, fully navigable and functional,
+with faithful LLE at 60 FPS with headroom. That goal is not achieved yet. HLE is
+allowed only as an opt-in layer that matches the faithful LLE floor; it is not a
+replacement for making the LLE path correct and fast.
+
+It belongs to the recomp family (nesrecomp / psxrecomp / gbarecomp / gcnlle) and
+inherits its doctrine: LLE-first, run the real firmware/dashboard where the current
+boundary permits it, validate against ground truth, keep observability cheap and
+explicit, and treat artifacts as evidence rather than authority. The Xbox guest is
+x86-on-x86-64, so this is a dynamic execution platform (CPU floor + JIT + harvested
+device models), not a guest-to-C static recompiler. That distinction is why it is
+`xboxlle`, not `xboxrecomp`.
 
 ## Strategy in one paragraph
 
-Don't reinvent proven wheels; don't take shortcuts either. **Harvest** the hard,
-already-solved parts and re-express them in our own modular, observable, hardware-correctable
-architecture: the CPU from **Unicorn Engine** (embeddable QEMU x86 core, GPL-2), the
-**NV2A / APU / device models** from **xemu** (GPL-2, rewritten modular + validated against
-real hardware). **Borrow** the host layer outright (SDL3, Vulkan/OpenGL — pure presentation,
-not faithfulness-critical). **Build ourselves** the parts that are the actual value: the
-deterministic machine wiring, the observability/cosim/hardware-conformance harness, the
-LLE-floor → opt-in-HLE framework, and the per-title packaging. Real **Xbox hardware** (via
-the companion [`xboxlle-probe`](https://github.com/mstan/xboxlle-probe) homebrew agent) is
-the ground-truth oracle; xemu is a reference we harvest from and check against.
+Harvest the hard, already-solved parts and re-express them in our own modular,
+observable, hardware-correctable architecture: the CPU floor from Unicorn Engine
+(embeddable QEMU x86 core, GPL-2), NV2A/APU/device behavior from xemu references
+and local hardware probes, and the host presentation layer from SDL3/OpenGL. The
+value we build here is deterministic machine wiring, observability/cosim,
+hardware-conformance harnesses, the LLE floor, opt-in matching HLE layers, and
+per-title packaging. Real Xbox hardware, via the companion `xboxlle-probe` repo,
+is the ground-truth oracle; xemu is a reference to harvest from and check against.
 
 ## The two arcs
 
-- **Arc 1 — the real Xbox dashboard, fully navigable and functional**, booted LLE. The
-  platform's first product and current goal; no game involved. (Mirrors gcnrecomp's GameCube
-  main menu and psxrecomp's BIOS shell.)
-- **Arc 2 — Blinx: The Time Sweeper**, the first game, on the proven Arc-1 platform, as its
-  own per-title repo (`BlinxLLE`).
+- **Arc 1 - the real Xbox dashboard, fully navigable and functional.** Boot through
+  the current firmware boundary, launch and run the dashboard from a real HDD image,
+  and make settings, clock, memory manager, music, and navigation work end-to-end.
+- **Arc 2 - Blinx: The Time Sweeper.** The first game target, in its own per-title
+  repo (`BlinxLLE`), after the Arc-1 platform is proven.
 
-## Companion hardware probe
+## Fresh Windows setup
 
-[`xboxlle-probe`](https://github.com/mstan/xboxlle-probe) is the independently built nxdk
-homebrew and host client used to collect ground truth from a physical original Xbox. It is
-kept as a separate repository because it does not participate in the emulator build and has
-its own hardware-safety, deployment, protocol, and AI-agent documentation.
+The supported development host is Windows x64 with PowerShell, MSYS2 MinGW64,
+CMake, Ninja, Git, and Python 3 with the Windows `py -3` launcher. Dependencies
+are fetched by CMake: Unicorn Engine 2.1.1, `nv2a_vsh_cpu` commit
+`863fc0f50aa4027af113718d2a63e45ac3be7a42`, and SDL `release-3.2.0` when the SDL
+host layer is enabled.
 
-> [!CAUTION]
-> `xboxlle-probe` provides dangerous low-level hardware access. Incorrect use can crash,
-> corrupt, or brick a console. Read its warning and security documentation before using it.
+Install Git for Windows, Python 3 with its launcher, Windows CMake (3.20 or newer),
+and MSYS2. In the MSYS2 MinGW64 terminal, install the compiler and build tool:
 
-The original `agent/` and `tools/xbox_agent.py` files in this repository are retained as
-historical provenance. The standalone repository is the maintained, authoritative version.
+```sh
+pacman -S --needed mingw-w64-x86_64-gcc mingw-w64-x86_64-ninja
+```
+
+Use a Windows graphics driver supporting OpenGL 4.3 for the GPU renderer. In
+PowerShell, clone into a workspace with room for the private full HDD image and
+build products (the current development HDD image alone is 8 GiB):
+
+```powershell
+New-Item -ItemType Directory -Force F:\Projects\xboxlle | Out-Null
+Set-Location F:\Projects\xboxlle
+git clone https://github.com/mstan/xboxlle.git xboxlle
+```
+
+Adjust these example paths to your machine. Build all Release targets before
+running CTest. Call Windows CMake directly to avoid MSYS/Cygwin path shims:
+
+```powershell
+Set-Location F:\Projects\xboxlle\xboxlle
+$env:Path = 'C:\msys64\mingw64\bin;' + $env:Path
+
+$cmakeExe = 'C:\Program Files\CMake\bin\cmake.exe'
+$ctestExe = 'C:\Program Files\CMake\bin\ctest.exe'
+& $cmakeExe -S . -B build-release -G Ninja `
+  -DCMAKE_C_COMPILER=C:/msys64/mingw64/bin/gcc.exe `
+  -DCMAKE_CXX_COMPILER=C:/msys64/mingw64/bin/g++.exe `
+  -DCMAKE_BUILD_TYPE=Release `
+  -DCMAKE_C_FLAGS_RELEASE="-O3 -DNDEBUG" `
+  -DCMAKE_CXX_FLAGS_RELEASE="-O3 -DNDEBUG" `
+  -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+
+& $cmakeExe --build build-release --config Release -j
+& $ctestExe --test-dir build-release --output-on-failure
+git config core.hooksPath .githooks
+py -3 tools/check_repository_hygiene.py --history
+```
+
+Use direct executable paths from the repo root in examples and scripts, e.g.
+`./build-release/xlle.exe` or `./tools/run_stockdash_replay.ps1`. Do not rely on
+changing into the build directory unless a command explicitly says so.
+
+## Private machine inputs
+
+A clean checkout builds and runs the unit/spike tests without private console
+material. Stock-dashboard replay needs a sibling private directory, outside this
+repo and ignored if copied into the repo root by mistake:
+
+```text
+F:\Projects\xboxlle\machine\
+  flash-dump-ff000000.bin      # flash image used by --boot
+  bios-extract\bldr.bin        # already extracted/decrypted 2BL used by --run2bl
+  xbox-hdd-stockdash.img       # full sector-for-sector stock-HDD image
+  eeprom.bin                   # 256-byte per-console EEPROM dump
+```
+
+Supply dumps from your own console. The repository does not bundle a BIOS
+extractor; [the input guide](docs/INPUTS.md#preparing-the-bootloader) describes
+the external XboxBiosTool extraction step and its private MCPX/key prerequisites.
+Current launch tooling consumes the decrypted blob as a supplied artifact. The HDD image is
+the whole disk, including FATX partitions and dashboard files such as the C drive
+contents, not just `xboxdash.xbe`. EEPROM data contains per-console secrets and
+HDD-key material; never publish it, derived keys, or raw bytes.
+
+Default HDD attachment is copy-on-write. Guest writes are served back within the
+run but are not persisted to the image unless `--hdd-writeback` is explicitly used.
+
+## Stock-dashboard replay commands
+
+Canonical 12B replay uses the private files above, OpenGL, disconnected modeled
+network, reduced retire diagnostics, the test synthetic Controller-S hub, and the
+stock clock-acceptance script:
+
+```powershell
+./tools/run_stockdash_replay.ps1 -Label defaults
+```
+
+That final-frame gate is specific to the maintainer's private fixture. For a first
+run with your own console dumps, use `-ExpectedFinalSha ''`; a different result is
+not automatically an emulator regression. Pin your own inputs and reference
+outputs before making repeatability or performance claims.
+
+For fixture-specific or longer routes whose final frame is not the canonical 12B
+image, clear the default final-SHA gate explicitly:
+
+```powershell
+./tools/run_stockdash_replay.ps1 -Label settings-v2-22b `
+  -MaxInsns 22000000000 `
+  -FrameInterval 250000000 `
+  -InputScript tests\scripts\stockdash-settings.txt `
+  -ExpectedFinalSha ''
+```
+
+Interactive keyboard presentation is a direct executable run. The current dashboard
+input route still requires the test synthetic Controller-S hub; do not add a test
+input script when using live keyboard input.
+
+```powershell
+./build-release/xlle.exe `
+  --nv2a-renderer opengl `
+  --boot ..\machine\flash-dump-ff000000.bin `
+  --run2bl ..\machine\bios-extract\bldr.bin `
+  --hdd ..\machine\xbox-hdd-stockdash.img `
+  --eeprom ..\machine\eeprom.bin `
+  --net-disconnected `
+  --reduced-retire-diag `
+  --test-synthetic-controller-hub `
+  --max-host-memory-mb 768 `
+  --machine-chunk-insns 4096 `
+  --max-insns 100000000000000 `
+  --interactive `
+  --interactive-present-stats-ms 1000
+```
+
+Keyboard mapping: arrows = D-pad, `Z` = A, `X` = B, Enter = Start, Backspace = Back.
+The synthetic hub is a current coverage limitation, not proof of real Controller-S
+wiring.
 
 ## Where to read
 
 | Question | File |
 |---|---|
-| What is this, in 10 lines? | this file |
-| The ONE current goal + next milestone | `NORTH-STAR.md` |
-| How we work (the law) | `PRINCIPLES.md` |
-| The architecture, cold-readable | `docs/DESIGN.md` |
-| The arc/milestone ladder | `docs/ROADMAP.md` |
-| What is true *right now* | `STATUS.md` |
-| What the maintainer must supply (BIOS/dumps/hardware) | `docs/INPUTS.md` |
-| How performance is measured, gated, and accepted | `docs/PERF-METHODOLOGY.md` |
-| Interactive presentation, native scanout, and what its FPS/latency counters mean | `docs/PERF-PRESENT-2026-09-06.md` |
-| What each performance stage measured, including the rejections | `docs/PERF-AUDIT-2026-09-02.md` |
-| The NV2A latch/execute seam | `docs/DESIGN-NV2A-SEAM.md` |
-| The reference identities a replay must reproduce | `goldens/README.md` |
-| How real-hardware measurements are collected | [`xboxlle-probe`](https://github.com/mstan/xboxlle-probe) |
+| Current goal and next milestone | `NORTH-STAR.md` |
+| What is true right now | `STATUS.md` |
+| Build/test/run setup | `docs/BUILDING.md` |
+| Private inputs and layout | `docs/INPUTS.md` |
+| Repository hygiene and sensitive-material checks | [Guide](docs/REPOSITORY-HYGIENE.md), [guard](tools/check_repository_hygiene.py) |
+| Architecture | `docs/DESIGN.md` |
+| Roadmap | `docs/ROADMAP.md` |
+| Performance methodology | `docs/PERF-METHODOLOGY.md` |
+| Interactive presentation metrics | `docs/PERF-PRESENT-2026-09-06.md` |
+| Golden replay identities | `goldens/README.md` |
 
-## Status
+## Repository and publication posture
 
-**Arc 1 / A4 - stock dashboard is running, and the 10-presented-fps target is met on the
-bounded replay.** The real firmware and kernel boot, FATX loads the stock dashboard image from a
-maintainer-supplied HDD image, PFIFO/PGRAPH render guest-owned frames into unified RAM, and
-SDL3/OpenGL can present the resulting scanout. At the shipping defaults the canonical 12 B
-replay runs in **58.5-59.4 s** at **11.7 presented flips/s** (nine legs, three sets, one binary),
-against 147.5 s and 4.71 flips/s in the single-threaded software-raster reference configuration.
-The live SDL navigation half of the milestone has not been measured yet.
+No private console bytes belong in this repo. MCPX ROM dumps, flash images, extracted
+2BL blobs, EEPROM dumps, HDD images, dashboard files, game discs, generated logs,
+reports, PPMs/PNGs, and local machine evidence packages are local-only material.
+Some of those files are copyrighted; some are per-console secrets; some are merely
+sensitive because they reveal machine paths, input schedules, timing, or private
+asset identities. Review before publishing any replay log or report.
 
-How that is measured, and what counts as accepted, is `docs/PERF-METHODOLOGY.md`: the gate metric
-is the total 12 B replay wall, median AND min, 5 %; `effective_fps` is 60 x guest speed and is a
-different number from presented flips/s; acceptance is behavioural faithfulness rather than
-byte-exactness, with byte-locks retained as the cheapest regression detector. `goldens/` carries
-the reference identities. The remaining work is the CPU tier's replacement and correctness on the
-dashboard surface path; there is no host-rendered dashboard substitute, replacement kernel, or
-D3D interception.
-
-For the opt-in live Controller S keyboard path during an LLE replay, add `--interactive` to a
-`--boot ... --run2bl ...` invocation. It opens an SDL window before emulation and presents
-guest scanout on the guest vblank cadence, with VSync disabled and a display-derived pacing
-guard; arrows map
-to the D-pad, `Z`/`X` to A/B, and Enter/Backspace to Start/Back. This feeds the modeled OHCI/XID
-endpoint 2 on the emulation thread. The retail replay has not yet been proven to poll endpoint 2
-at the dashboard menu: it configures the device but never requests the XID class descriptor
-or publishes an endpoint ED. This is input plumbing rather than a navigation-complete claim.
-`--interactive-present-legacy` restores the old 33 ms throttle and scalar RGBA capture for
-comparison. `--interactive-present-stats-ms N` sets the reporting interval (`0` prints only
-the cumulative line). A test input script can own the pad while the interactive window
-presents; keyboard state is then not published. See the presentation measurement document
-above for the separate host-present, guest-speed, and capture-to-present counters.
-
-For reproducible visual checkpoints, `--frame-series <path-prefix> <instruction-interval>`
-writes scanouts at guest-instruction intervals. The interval is a positive integer of at least
-1,000,000 instructions; captures are named with their actual sampled instruction count.
-
-Two bounded diagnostics support late-boot investigation. `--net-disconnected` changes the
-modeled PHY link state before guest execution; it is an experimental pre-boot link transition,
-not a verified cold-reset cable-out model. It cannot be combined with a UDP Ethernet peer.
-`--pfifo-clear-trace <32-bit-color-address>` arms at the first successful clear whose first
-resolved pixel address matches the target. It then selects the first subsequent Kelvin BEGIN,
-retains the 32 decoded methods ending at that BEGIN, and records through its matching END with
-a hard cap of 4,096 records. Entries include the active object class and parser-time GET/PUT
-snapshots. The trace describes command order only; it does not by itself prove PGRAPH
-completion, notification, semaphore, or flip timing.
-
-## Legal / distribution posture
-
-No copyrighted bytes ever enter this repo. MCPX ROM, flash BIOS, kernel, EEPROM, HDD
-images, dashboard files, and game discs are **maintainer-supplied, git-ignored, and
-hash-gated**, and come from the maintainer's own console. A tracked-tree audit should show no
-ROMs, HDD images, XBEs, ISOs/XISOs, EEPROM dumps, or machine evidence packages. Harvested code
-(Unicorn, xemu) is GPL-2; the whole is GPL-2. Borrowed host libs (SDL3 zlib, etc.) are
-permissive and compose in.
+The tracked `.gitignore` protects common private asset names and generated evidence;
+it is a safety net, not a substitute for review. Primary history/security checks live
+in [the hygiene guide](docs/REPOSITORY-HYGIENE.md) and
+[the publication guard](tools/check_repository_hygiene.py).

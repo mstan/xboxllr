@@ -2,8 +2,35 @@
 # NOTE: anchored to the repo root so it only ignores a top-level machine/ dump dir and does
 # NOT swallow the src/machine/ device sources (an unanchored `machine/` matched both).
 /machine/
+/private/
+/secrets/
+/dumps/
+/captures/
+/play/
+/private-audit*/
 *.bin
 *.raw
+*.rom
+*.img
+*.vhd
+*.vhdx
+*.vmdk
+*.vdi
+*.qcow
+*.qcow2
+*.dmp
+*.mem
+*.pcap
+*.pcapng
+# Dump archives are private too; source distributions are built outside Git.
+*.zip
+*.7z
+*.rar
+*.tar
+*.gz
+*.bz2
+*.xz
+*.zst
 flash*.bin
 mcpx*.bin
 eeprom*.bin
@@ -15,6 +42,25 @@ kernel*.img
 *.xiso
 *.iso
 disc/
+
+# Credentials and per-console identity/provenance, including renamed text exports.
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+id_rsa*
+id_ed25519*
+credentials
+credentials.*
+hardware.json
+eeprom*.json
+eeprom*.txt
+console-identity*
+*.gpr
+*.rep/
 
 # Build + generated (evidence, not authority)
 build/
