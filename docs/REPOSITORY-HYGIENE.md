@@ -51,6 +51,15 @@ to otherwise safe metadata.
 
 ## Audit checkpoint, 2026-09-06
 
+The follow-up audit at `5150e09` fetched the remote and checked its advertised
+heads/tags: only `master` was advertised, with no tags or GitHub releases listed.
+The all-ref/reflog hygiene scan checked **1,240 unique blobs with zero findings**;
+a separate Gitleaks scan of **193 publishable working files** also found none.
+No proprietary console payload was identified and no history rewrite was needed.
+These checks cover the fetched Git history and inventoried working files, not
+every GitHub issue attachment, external fork, cache or independently copied file.
+The current source-license gap is recorded below separately.
+
 Before this hygiene change, the local all-ref/reflog inventory covered **252
 commits, 1,085 unique historical blobs and 121,883,683 uncompressed blob bytes**.
 Every historical filename and full blob was checked; no private asset paths,
@@ -73,3 +82,30 @@ applicable, remove the material from every affected ref using a reviewed history
 rewrite, and rescan. Deleting it in a new commit alone is insufficient. Existing
 clones, forks and hosting caches need separate attention after a rewrite; follow
 [GitHub's sensitive-data removal procedure](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository).
+
+## Source licensing is a separate check
+
+Absence of console dumps is not the same as absence of copyright. At this
+checkpoint the repository has no top-level project `LICENSE` or complete
+third-party notice inventory. This document records that gap; it does not grant
+or change a license. The owner must select project terms compatible with any
+incorporated third-party code, and provenance/notices need review before a
+distributable release is represented as fully licensed.
+
+The top-level dependency files were inspected at the exact CMake pins:
+
+| Component | Pin / source | Observed license entry point |
+|---|---|---|
+| Unicorn and its QEMU CPU core | Unicorn `2.1.1` | `COPYING`: GPL v2 text; also contains component-specific notices/licenses. |
+| NV2A CPU VSH interpreter | `863fc0f50aa4027af113718d2a63e45ac3be7a42` | `LICENSE`: The Unlicense. |
+| SDL | `release-3.2.0` | `LICENSE.txt`: zlib-style license; review bundled component notices too. |
+| xemu behavioral/source references | References described in design/source comments | GPL-family source provenance must be assessed wherever code was incorporated; references alone do not establish which portions are derivatives. |
+
+Fetched sources stay under ignored build directories; they are still part of
+the build's licensing obligations. Unicorn is statically linked into the
+executable. A binary distribution must address the applicable GPL source and
+license requirements, plus all other included components; a link to the project
+README is not a substitute for corresponding source and required notices.
+This table is an inventory starting point, not a completed transitive license
+audit. See [Unicorn's pinned license](https://github.com/unicorn-engine/unicorn/blob/2.1.1/COPYING)
+and [GitHub's explanation of unlicensed repositories](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository).

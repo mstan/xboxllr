@@ -54,7 +54,10 @@ and MSYS2. In the MSYS2 MinGW64 terminal, install the compiler and build tool:
 pacman -S --needed mingw-w64-x86_64-gcc mingw-w64-x86_64-ninja
 ```
 
-Use a Windows graphics driver supporting OpenGL 4.3 for the GPU renderer. In
+Use a Windows graphics driver supporting OpenGL 4.3 for the GPU renderer. The
+current shader paths also use `GL_ARB_gpu_shader_int64` and
+`GL_ARB_fragment_shader_interlock`; OpenGL 4.3 alone does not guarantee these
+extensions. In
 PowerShell, clone into a workspace with room for the private full HDD image and
 build products (the current development HDD image alone is 8 GiB):
 
@@ -91,6 +94,20 @@ Use direct executable paths from the repo root in examples and scripts, e.g.
 `./build-release/xlle.exe` or `./tools/run_stockdash_replay.ps1`. Do not rely on
 changing into the build directory unless a command explicitly says so.
 
+You can immediately run the built-in CPU fixture demo without console dumps:
+
+```powershell
+./build-release/xlle.exe
+```
+
+This runs synthetic instruction tests; it does not boot the Microsoft dashboard.
+The source build currently has no installer or input-creation wizard. If Windows
+blocks the repository's PowerShell scripts, review them and use a process-scoped
+policy where your host policy permits it:
+`Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned`.
+Keep `SDL3.dll` beside `xlle.exe` when copying a build. Host-native builds target
+the build machine's CPU; see [portable build guidance](docs/BUILDING.md).
+
 ## Private machine inputs
 
 A clean checkout builds and runs the unit/spike tests without private console
@@ -115,6 +132,29 @@ HDD-key material; never publish it, derived keys, or raw bytes.
 
 Default HDD attachment is copy-on-write. Guest writes are served back within the
 run but are not persisted to the image unless `--hdd-writeback` is explicitly used.
+
+### What must I supply, and what could be generated?
+
+| Use | Inputs required today |
+|---|---|
+| Build, CTest, built-in CPU fixture demo | No console material. |
+| Run the Microsoft dashboard | Flash, decrypted 2BL, full raw HDD image with dashboard files, and a 256-byte EEPROM. |
+| Extract encrypted 2BL from flash | External extraction tool plus matching private MCPX/key prerequisites; see the input guide. |
+
+The replay script currently fixes the four sibling paths shown above. The direct
+interactive command accepts your chosen paths. A `.qcow2`/VHD file is not a raw
+HDD image; renaming it does not convert it. Size/file-existence checks alone cannot
+establish that a BIOS, decrypted bootloader, EEPROM and dashboard are compatible.
+Stock-dashboard bring-up has been validated against one private firmware/disk
+profile; compatibility with arbitrary BIOS revisions is not yet established.
+
+We can reduce future requirements by generating a fresh virtual EEPROM and a
+formatted FATX disk locally, then importing only the user's authorized dashboard
+files. Neither generator/import workflow is implemented or validated here yet.
+A blank disk contains no dashboard, and random EEPROM bytes are not a valid
+console profile. Microsoft firmware, bootloader, dashboard and game content
+remain supplied inputs for their respective stock-software paths. See
+[the generation plan and legal boundaries](docs/INPUTS.md#reducing-user-supplied-inputs).
 
 ## Stock-dashboard replay commands
 
@@ -204,3 +244,10 @@ The tracked `.gitignore` protects common private asset names and generated evide
 it is a safety net, not a substitute for review. Primary history/security checks live
 in [the hygiene guide](docs/REPOSITORY-HYGIENE.md) and
 [the publication guard](tools/check_repository_hygiene.py).
+
+The latest asset audit found no proprietary console payloads or secret-pattern
+findings in the checked source/history. This is a scoped audit, not a copyright
+clearance: source code and dependencies have their own copyrights and licenses.
+The repository currently has no top-level project license; redistribution terms
+and third-party notices still need to be settled before presenting it as a
+fully licensed release. See [dependency and license status](docs/REPOSITORY-HYGIENE.md#source-licensing-is-a-separate-check).

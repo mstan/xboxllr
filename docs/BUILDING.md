@@ -17,8 +17,9 @@ Install or provide these on PATH:
 - Git and network access for CMake `FetchContent`.
 - Python 3, including the Windows `py -3` launcher. CMake can discover Python through
   `find_package(Python3)`, but replay scripts call `py -3` directly.
-- An OpenGL-capable Windows graphics driver for the default SDL/OpenGL renderer and
-  presentation tests.
+- A Windows graphics driver with OpenGL 4.3 for the SDL/OpenGL renderer. Current
+  GPU shader paths additionally use `GL_ARB_gpu_shader_int64` and
+  `GL_ARB_fragment_shader_interlock`; the core version alone is insufficient.
 
 CMake fetches these pinned dependencies:
 
@@ -60,6 +61,12 @@ compiler paths are absolute: compiler subprocesses need it too.
 The build command builds all default targets,
 including the executable and C++ test binaries, before CTest runs them. Do not build
 only `xlle` and one focused test when validating a fresh setup.
+Check that configure reports a found Python3 interpreter: if it is missing,
+CMake omits the Python guard/report tests. Inspect
+`& $ctestExe --test-dir build-release -N` if the test count is unexpectedly small
+(the current normal build registers
+41 tests). The replay harness's `-Build` switch builds only `xlle` and
+`test_nv2a`; it does not replace the full build/test sequence above.
 
 For a faster core-only development build, configure a separate directory with
 `-DXLLE_WITH_SDL=OFF`; that build is not sufficient for the default stock-dashboard
@@ -129,8 +136,9 @@ Use `-PerfAccounting` only for attribution. Headline replay timings use noperf r
 ## Interactive keyboard run
 
 Current live keyboard input requires the test synthetic Controller-S hub and a large
-positive instruction budget. Do not combine this command with `--test-input-script`;
-scripted input owns the pad and live keyboard state is not published.
+positive instruction budget. Omit `--test-input-script` for live keyboard control.
+The combination is supported for scripted presentation, but scripted input owns
+the pad and live keyboard state is not published.
 
 ```powershell
 ./build-release/xlle.exe `

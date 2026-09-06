@@ -75,6 +75,56 @@ needs the matching MCPX/key. All extraction output remains private, including
 additional key files that the tool may emit. No download of firmware, dashboard
 data, EEPROMs or keys is part of this setup.
 
+## Reducing user-supplied inputs
+
+The following is a development plan, not an alternative setup command. Today,
+omitting `--hdd` or `--eeprom` reports an absent device; it does not create one.
+Only the built-in fixture demo and unit/probe tests need no console material.
+
+| Input | Candidate replacement | Remaining requirement |
+|---|---|---|
+| Full physical HDD dump | Generate a sparse raw disk with the correct Xbox/FATX layout, then import a user-supplied dashboard directory. | The Microsoft dashboard's executable and supporting files still come from an authorized source. A zero-filled file alone is not a formatted Xbox disk. Import/layout compatibility needs validation. |
+| Physical EEPROM dump | Generate a persistent virtual console profile with fresh identity, HDD-key material, selected region/video settings and valid checksums/authentication. | Match the supported firmware revision and validate boot/settings behavior. Do not clone another console's identity or assume 256 random bytes are valid. Any required firmware-specific cryptographic material needs its own sourcing review. |
+| Separately supplied decrypted 2BL | Integrate local extraction from supplied firmware with any required private MCPX/key input. | This derives a private artifact; it does not turn the bootloader into redistributable content or remove the firmware requirement. |
+| Microsoft dashboard | Optional independently authored or appropriately licensed homebrew dashboard. | Different guest software and a separate compatibility target; it cannot stand in for stock-dashboard fidelity validation. |
+| Microsoft flash/kernel/MCPX | Independently implemented, appropriately licensed replacement firmware could serve a future homebrew profile. | No compatible replacement is integrated or validated here. It must not silently replace the stock LLE floor. |
+
+There is practical precedent: [xemu generates a valid EEPROM when none is supplied](https://xemu.app/docs/eeprom/).
+Its [required-files guide](https://xemu.app/docs/required-files/) also offers a disk
+without the Microsoft dashboard. The separate
+[xemu-dashboard project](https://github.com/xemu-project/xemu-dashboard) builds an
+open-source guest dashboard and creates a raw disk before converting it to QCOW2.
+That is a useful implementation reference, not proof that its image boots in
+xboxlle. The current IDE backend requires raw sectors, not QCOW2.
+[Cromwell](https://github.com/XboxDev/cromwell) is a free replacement BIOS designed
+to load Linux; its maintainers explicitly say it cannot load original Xbox games.
+It is therefore not a drop-in solution for this project's stock-software target.
+
+The engineering recommendation is to start with a disk formatter/importer and a
+virtual EEPROM generator. This could remove the requirement for a full HDD image
+and a real console's EEPROM while retaining user-supplied firmware and dashboard
+files. Keep generated profiles private and persistent; use fixed synthetic test
+profiles only for reproducible tests, never as shared real-console identities.
+Retain the existing dump-based route as the reference and validate each generated
+profile against the same device behavior before promoting it.
+
+### Legal boundary
+
+For a U.S. baseline, copyright protects original expression, while procedures,
+systems and methods of operation are excluded under
+[17 USC 102(b)](https://www.copyright.gov/title17/92chap1.html#102).
+An independently written formatter or original homebrew program can avoid
+copying Microsoft's expressive content. Generating, decrypting, compressing or
+embedding someone else's firmware/artwork does not itself grant distribution
+rights. An open-source replacement still has license obligations.
+
+Access-control circumvention is a separate question under
+[17 USC 1201](https://www.copyright.gov/title17/92chap12.html#1201), including its
+conditional interoperability provisions. Owning a console is not a blanket
+permission to distribute its software or keys. These are design boundaries,
+not jurisdiction-independent legal clearance for a particular extraction tool
+or firmware package.
+
 ## Optional/later machine material
 
 These inputs are useful for hardware-oracle or later secure-boot work, but they are not
