@@ -2148,8 +2148,8 @@ int main(int argc, char** argv) {
             }
         }
         else if (!std::strcmp(argv[i], "--nv2a-vsh-gpu-resident")) {
-            if (i + 1 >= argc || !parse_u32_arg(argv[++i], nv2a_vsh_gpu_resident) || nv2a_vsh_gpu_resident > 2) {
-                std::fprintf(stderr, "--nv2a-vsh-gpu-resident expects 0 (off), 1 (verify), or 2 (verified GPU draw)\n");
+            if (i + 1 >= argc || !parse_u32_arg(argv[++i], nv2a_vsh_gpu_resident) || nv2a_vsh_gpu_resident > 3) {
+                std::fprintf(stderr, "--nv2a-vsh-gpu-resident expects 0 (off), 1 (verify), 2 (verified GPU draw), or 3 (deferred CPU work)\n");
                 return 2;
             }
         }
@@ -2599,7 +2599,7 @@ int main(int argc, char** argv) {
     }
 #endif
     if (nv2a_vsh_gpu_resident && (!nv2a_vsh_compile || nv2a_vsh_unsafe_probe)) {
-        std::fprintf(stderr, "Verified GPU resident handoff requires the faithful compiled CPU reference\n");
+        std::fprintf(stderr, "GPU resident handoff requires the faithful compiled CPU path for verification/fallback\n");
         return 2;
     }
     if (nv2a_vsh_gpu_pack_parallel && !nv2a_vsh_gpu_resident) {
@@ -6474,15 +6474,27 @@ int main(int argc, char** argv) {
             if (nv2a_vsh_gpu_resident) {
                 const auto stats = mach.nv2a()->vsh_gpu_resident_stats();
                 std::printf("[host] vsh-gpu-resident mode=%u batches=%llu executions=%llu refs=%llu vertices=%llu "
-                    "verified=%llu gpu_draws=%llu declines=%llu mismatches=%llu "
+                    "verified=%llu accepted=%llu gpu_draws=%llu declines=%llu mismatches=%llu "
                     "layout_declines=%llu numeric_declines=%llu opcode_declines=%llu geometry_declines=%llu parallel_pack=%u\n", nv2a_vsh_gpu_resident,
                     static_cast<unsigned long long>(stats.batches), static_cast<unsigned long long>(stats.executions),
                     static_cast<unsigned long long>(stats.references), static_cast<unsigned long long>(stats.vertices),
-                    static_cast<unsigned long long>(stats.verified), static_cast<unsigned long long>(stats.gpu_draws),
+                    static_cast<unsigned long long>(stats.verified), static_cast<unsigned long long>(stats.accepted),
+                    static_cast<unsigned long long>(stats.gpu_draws),
                     static_cast<unsigned long long>(stats.declines), static_cast<unsigned long long>(stats.mismatches),
                     static_cast<unsigned long long>(stats.layout_declines), static_cast<unsigned long long>(stats.numeric_declines),
                     static_cast<unsigned long long>(stats.opcode_declines), static_cast<unsigned long long>(stats.geometry_declines),
                     nv2a_vsh_gpu_pack_parallel);
+                const auto deferred = mach.nv2a()->vsh_gpu_deferred_stats();
+                std::printf("[host] vsh-gpu-deferred batches=%llu executions=%llu refs=%llu "
+                    "prepared=%llu vertices=%llu declines=%llu fallback_batches=%llu fallback_executions=%llu\n",
+                    static_cast<unsigned long long>(deferred.deferred_batches),
+                    static_cast<unsigned long long>(deferred.deferred_executions),
+                    static_cast<unsigned long long>(deferred.deferred_references),
+                    static_cast<unsigned long long>(deferred.prepared_batches),
+                    static_cast<unsigned long long>(deferred.prepared_vertices),
+                    static_cast<unsigned long long>(deferred.declined_batches),
+                    static_cast<unsigned long long>(deferred.fallback_batches),
+                    static_cast<unsigned long long>(deferred.fallback_executions));
             }
 #endif
             if (window && frame_available)

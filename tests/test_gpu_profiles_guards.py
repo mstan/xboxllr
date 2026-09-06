@@ -1283,11 +1283,11 @@ check("the reroute is gated on the generated executor AND on its depth "
       "without them it would land these batches in the SOFTWARE evaluator",
       "witnessed_reroute_bit >= 0 && gpu_generic_shader_ &&" in cpp and
       "gpu_generic_shader_depth_ && renderer_ &&" in cpp)
+reroute_start = cpp.index("++generic_shader_witnessed_reroutes_;")
+reroute_body = cpp[reroute_start:cpp.index("    executed = true;", reroute_start)]
 check("the rerouted batch takes the same ordering fence the ladder's own "
       "generic arm takes, because the generic path reaches the GL backend",
-      "++generic_shader_witnessed_reroutes_;" in cpp and
-      cpp.index("++generic_shader_witnessed_reroutes_;") <
-      cpp.index("draw_order_fence();\n        return rasterize_generic_combiner_batch(job, executed);\n    }\n    executed = true;"))
+      "draw_order_fence();\n        return rasterize_generic_combiner_batch(job, executed);" in reroute_body)
 check("the reroute is DEFAULT 0 and the per-family measurement that put it "
       "there is recorded, family by family, so it is not re-derived",
       "uint32_t gpu_generic_shader_witnessed_ = 0u;" in hpp and

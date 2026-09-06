@@ -29,7 +29,11 @@ struct Nv2aGenericCombinerPacket {
     struct GpuVshReference {
         vsh_gpu_batch::Batch batch;
         std::vector<vsh_gpu_batch::ProgramOutput128B> expected;
-        uint32_t mode = 0; // 1 verifies then draws CPU VBO; 2 draws verified GPU VBO.
+        uint32_t mode = 0; // 1 verifies CPU VBO; 2 verifies GPU VBO; 3 defers CPU work.
+        // Renderer-local, single-use preparation receipt. A declined batch has
+        // token zero. No destination writes occur during preparation.
+        uint64_t prepared_token = 0;
+        uint32_t prepared_vertices = 0;
     };
     std::shared_ptr<GpuVshReference> gpu_vsh;
 #endif
@@ -521,11 +525,18 @@ public:
 #if XLLE_VSH_GPU_RESIDENT
     struct VshGpuResidentStats {
         uint64_t batches = 0, executions = 0, references = 0, vertices = 0;
-        uint64_t verified = 0, gpu_draws = 0, declines = 0, mismatches = 0;
+        uint64_t verified = 0, accepted = 0, gpu_draws = 0, declines = 0, mismatches = 0;
         uint64_t layout_declines = 0, numeric_declines = 0, opcode_declines = 0, geometry_declines = 0;
     };
     virtual VshGpuResidentStats vsh_gpu_resident_stats() const { return {}; }
     virtual void set_vsh_gpu_parallel_pack(bool on) { (void)on; }
+    virtual bool prepare_vsh_gpu_batch(Nv2aGenericCombinerPacket::GpuVshReference& reference,
+                                       std::string& error) {
+        reference.prepared_token = 0;
+        reference.prepared_vertices = 0;
+        (void)error;
+        return true;
+    }
     virtual bool prepare_vsh_gpu_resident(std::string& error) {
         error = "GPU resident VSH is unavailable on this renderer";
         return false;

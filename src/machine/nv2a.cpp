@@ -2676,6 +2676,80 @@ void Nv2a::capture_vsh_vertex(bool eligible, uint64_t fingerprint,
 }
 #endif
 
+#if XLLE_VSH_GPU_RESIDENT
+bool Nv2a::materialize_deferred_gpu_vsh(DrawJob& job) {
+    if (!job.gpu_vsh || job.gpu_vsh->mode != 3 || !job.vertices.empty())
+        return true;
+    auto& reference = *job.gpu_vsh;
+    const auto& batch = reference.batch;
+    if (batch.shape.execution_count != batch.executions.size() ||
+        batch.shape.reference_count != batch.references.size() ||
+        job.gpu_vsh_compiled_ops.empty()) {
+        job.out.failed = true;
+        job.out.fault_message = "NV2A deferred GPU VSH fallback payload is incomplete";
+        return false;
+    }
+    ++vsh_gpu_deferred_stats_.fallback_batches;
+    vsh_gpu_deferred_stats_.fallback_executions += batch.executions.size();
+
+    std::array<float, 192 * 4> constants;
+    std::memcpy(constants.data(), batch.constants.words.data(), sizeof(constants));
+    std::vector<TransformedVertex> executed;
+    executed.reserve(batch.executions.size());
+    for (const auto& saved : batch.executions) {
+        std::array<float, 16 * 4> input_regs;
+        std::array<float, 13 * 4> output_regs;
+        std::array<float, 12 * 4> temp_regs;
+        std::array<float, 4> address_reg;
+        std::memcpy(input_regs.data(), saved.words.data(), sizeof(input_regs));
+        output_regs.fill(0.0f);
+        temp_regs.fill(0.0f);
+        address_reg.fill(0.0f);
+        float* bases[kVshBaseCount] = {
+            temp_regs.data(),
+            output_regs.data(),
+            input_regs.data(),
+            constants.data(),
+            address_reg.data()};
+        vsh_execute_compiled(job.gpu_vsh_compiled_ops.data(),
+                             static_cast<uint32_t>(job.gpu_vsh_compiled_ops.size()),
+                             bases);
+
+        TransformedVertex vertex;
+        std::memcpy(vertex.position.data(), output_regs.data(), 4 * sizeof(float));
+        vertex.position[0] = round_screen_coordinate(vertex.position[0]);
+        vertex.position[1] = round_screen_coordinate(vertex.position[1]);
+        vertex.position[3] = clamp_away_zero_inf(vertex.position[3]);
+        std::memcpy(vertex.diffuse.data(), output_regs.data() + 3 * 4,
+                    4 * sizeof(float));
+        std::memcpy(vertex.specular.data(), output_regs.data() + 4 * 4,
+                    4 * sizeof(float));
+        for (uint32_t texture = 0; texture < 4; ++texture) {
+            std::memcpy(vertex.texture[texture].data(),
+                        output_regs.data() + (9 + texture) * 4,
+                        4 * sizeof(float));
+        }
+        executed.push_back(vertex);
+        ++vertex_census_.vsh_compiled_vertices;
+    }
+
+    job.vertices.clear();
+    job.vertices.reserve(batch.references.size());
+    for (uint32_t id : batch.references) {
+        if (id >= executed.size()) {
+            job.out.failed = true;
+            job.out.fault_message = "NV2A deferred GPU VSH fallback reference is out of range";
+            job.vertices.clear();
+            return false;
+        }
+        job.vertices.push_back(executed[id]);
+    }
+    reference.prepared_token = 0;
+    reference.prepared_vertices = 0;
+    return true;
+}
+#endif
+
 #if XLLE_VSH_CAPTURE || XLLE_VSH_GPU_RESIDENT
 std::vector<vsh_capture::Op> Nv2a::capture_vsh_ops() const {
     std::vector<vsh_capture::Op> result;
@@ -2782,6 +2856,7 @@ uint64_t Nv2a::draw_job_bytes(const DrawJob& job) {
             batch.executions.capacity() * sizeof(vsh_gpu_batch::ExecutionInput) +
             batch.references.capacity() * sizeof(uint32_t) +
             job.gpu_vsh->expected.capacity() * sizeof(vsh_gpu_batch::ProgramOutput128B);
+        bytes += job.gpu_vsh_compiled_ops.capacity() * sizeof(VshCompiledOp);
     }
 #endif
 #if XLLE_VSH_CAPTURE
@@ -3463,16 +3538,35 @@ bool Nv2a::submit_vertex_batch() {
         }
     }
     transformed_batch_.clear();
-    transformed_batch_.reserve(vertex_count);
 #if XLLE_VSH_GPU_RESIDENT
     std::shared_ptr<Nv2aGenericCombinerPacket::GpuVshReference> gpu_vsh;
-    std::array<uint32_t, 1024> gpu_cache_ids;
+    const bool vsh_gpu_deferred_requested = vsh_gpu_resident_mode_ == 3;
+    bool vsh_gpu_deferred = false;
+    bool vsh_gpu_deferred_diagnostics_safe =
+        !collect_diagnostics && !profile_hashes_enabled_ && !vertex_census_enabled_ &&
+        vsh_verify_budget_ == 0 && !generic_batch_debug_cb_ &&
+        !generic_packet_snapshot_filter_cb_ && !generic_packet_snapshot_cb_ &&
+        !surface_write_debug_cb_;
+#if XLLE_VSH_CAPTURE
+    vsh_gpu_deferred_diagnostics_safe =
+        vsh_gpu_deferred_diagnostics_safe && !vsh_capture_callback_ &&
+        !vsh_batch_capture_callback_;
+#endif
+#if XLLE_VSH_DRAW_OVERLAP_CENSUS
+    vsh_gpu_deferred_diagnostics_safe =
+        vsh_gpu_deferred_diagnostics_safe && !vsh_draw_overlap_enabled_;
+#endif
+#if XLLE_VERTEX_REUSE_DIAGNOSTICS
+    vsh_gpu_deferred_diagnostics_safe =
+        vsh_gpu_deferred_diagnostics_safe && !vertex_reuse_shadow_;
+#endif
     if (vsh_gpu_resident_mode_ && renderer_ && program_parsed && vsh_cache_ops_valid_ &&
         !program_writes_context && !vsh_unsafe_probe_ && vsh_capture_plan_supported_ &&
         !vsh_cache_ops_.empty() && vsh_cache_ops_.size() <= vsh_gpu_batch::kMaxOps &&
         vertex_count >= 3 && vertex_count <= vsh_gpu_batch::kMaxReferences &&
         primitive_mode_ >= 5 && primitive_mode_ <= 7 &&
-        raster_state_[kRasterCombinerControl] == 1) {
+        raster_state_[kRasterCombinerControl] == 1 &&
+        (!vsh_gpu_deferred_requested || vsh_gpu_deferred_diagnostics_safe)) {
         gpu_vsh = std::make_shared<Nv2aGenericCombinerPacket::GpuVshReference>();
         gpu_vsh->mode = vsh_gpu_resident_mode_;
         auto& batch = gpu_vsh->batch;
@@ -3482,8 +3576,15 @@ bool Nv2a::submit_vertex_batch() {
         std::memcpy(batch.constants.words.data(), transform_constants_.data(), sizeof(batch.constants));
         batch.executions.reserve(vertex_count);
         batch.references.reserve(vertex_count);
-        gpu_vsh->expected.reserve(vertex_count);
+        if (vsh_gpu_deferred_requested) {
+            vsh_gpu_deferred = true;
+        } else {
+            gpu_vsh->expected.reserve(vertex_count);
+        }
     }
+    if (!vsh_gpu_deferred) transformed_batch_.reserve(vertex_count);
+#else
+    transformed_batch_.reserve(vertex_count);
 #endif
 #if XLLE_VSH_CAPTURE
     std::unique_ptr<vsh_batch_capture::Batch> captured_batch;
@@ -3526,6 +3627,9 @@ bool Nv2a::submit_vertex_batch() {
         std::array<uint8_t, kBatchTransformCacheEntries> valid;
         std::array<uint32_t, kBatchTransformCacheEntries> indices;
         std::array<TransformedVertex, kBatchTransformCacheEntries> vertices;
+#if XLLE_VSH_GPU_RESIDENT
+        std::array<uint32_t, kBatchTransformCacheEntries> gpu_execution_ids{};
+#endif
     };
     std::optional<BatchTransformCache> batch_transform_cache;
     if (indexed && program_parsed && !program_writes_context && vertex_count >= 64) {
@@ -3557,6 +3661,27 @@ bool Nv2a::submit_vertex_batch() {
             batch_transform_cache->indices[base] = index;
             batch_transform_cache->vertices[base] = vertex;
         };
+#if XLLE_VSH_GPU_RESIDENT
+    auto lookup_batch_transform_cache_gpu_id =
+        [&](uint32_t index, uint32_t& id) {
+            if (!batch_transform_cache) return false;
+            const size_t base = batch_transform_cache_base(index);
+            if (!batch_transform_cache->valid[base] ||
+                batch_transform_cache->indices[base] != index) {
+                return false;
+            }
+            id = batch_transform_cache->gpu_execution_ids[base];
+            return true;
+        };
+    auto store_batch_transform_cache_gpu_id =
+        [&](uint32_t index, uint32_t id) {
+            if (!batch_transform_cache) return;
+            const size_t base = batch_transform_cache_base(index);
+            batch_transform_cache->valid[base] = 1;
+            batch_transform_cache->indices[base] = index;
+            batch_transform_cache->gpu_execution_ids[base] = id;
+        };
+#endif
 
     auto record_transformed_vertex_stats = [&](const TransformedVertex& vertex) {
         for (float component : vertex.position) {
@@ -3650,11 +3775,23 @@ bool Nv2a::submit_vertex_batch() {
             } else {
                 const uint32_t index = vertex_indices_[vertex_index];
                 largest_vertex_index_ = std::max(largest_vertex_index_, index);
+#if XLLE_VSH_GPU_RESIDENT
+                if (vsh_gpu_deferred) {
+                    uint32_t cached_id = 0;
+                    if (lookup_batch_transform_cache_gpu_id(index, cached_id)) {
+                        gpu_vsh->batch.references.push_back(cached_id);
+                        ++vertex_census_.reuse_hits;
+                        continue;
+                    }
+                }
+#endif
                 TransformedVertex cached_vertex;
                 if (lookup_batch_transform_cache(index, cached_vertex)) {
 #if XLLE_VSH_GPU_RESIDENT
                     if (gpu_vsh)
-                        gpu_vsh->batch.references.push_back(gpu_cache_ids[batch_transform_cache_base(index)]);
+                        gpu_vsh->batch.references.push_back(
+                            batch_transform_cache->gpu_execution_ids[
+                                batch_transform_cache_base(index)]);
 #endif
 #if XLLE_VSH_CAPTURE
                     if (vsh_capture_callback_) ++vsh_capture_stats_.cache_hits;
@@ -3706,6 +3843,32 @@ bool Nv2a::submit_vertex_batch() {
                 std::array<float, 16 * 4> input_regs;
                 // Arm A of the same-binary A/B restores the zero-fill verbatim.
                 if (!fast_fetch) input_regs.fill(0.0f);
+                bool input_regs_loaded = false;
+                auto load_input_regs = [&]() {
+                    if (input_regs_loaded) return;
+                    for (uint32_t slot = 0; slot < vertex_attributes_.size(); ++slot) {
+                        std::memcpy(&input_regs[slot * 4],
+                                    vertex_attributes_[slot].value.data(),
+                                    4 * sizeof(float));
+                    }
+                    input_regs_loaded = true;
+                };
+#if XLLE_VSH_GPU_RESIDENT
+                if (vsh_gpu_deferred && !program_writes_context) {
+                    load_input_regs();
+                    auto& batch = gpu_vsh->batch;
+                    vsh_gpu_batch::ExecutionInput input;
+                    std::memcpy(input.words.data(), input_regs.data(), sizeof(input));
+                    const uint32_t id =
+                        static_cast<uint32_t>(batch.executions.size());
+                    batch.executions.push_back(input);
+                    batch.references.push_back(id);
+                    if (indexed)
+                        store_batch_transform_cache_gpu_id(
+                            vertex_indices_[vertex_index], id);
+                    continue;
+                }
+#endif
                 // beads-xbox.1.15.11: 416 bytes of zero-fill per vertex, of
                 // which the compiled form's read-before-write analysis usually
                 // proves most dead. The interpreter arm still fills all three,
@@ -3762,11 +3925,7 @@ bool Nv2a::submit_vertex_batch() {
                         const_cast<float*>(transform_constants_[0].data()),
                         address_reg.data(),
                         nullptr};
-                    for (uint32_t slot = 0; slot < vertex_attributes_.size(); ++slot) {
-                        std::memcpy(&input_regs[slot * 4],
-                                    vertex_attributes_[slot].value.data(),
-                                    4 * sizeof(float));
-                    }
+                    load_input_regs();
 #if XLLE_VERTEX_REUSE_DIAGNOSTICS
                     if (shadow) {
                         const uint64_t t = vertex_reuse_shadow_timing_ ? perf_excl::tick_now() : 0;
@@ -3854,8 +4013,9 @@ bool Nv2a::submit_vertex_batch() {
                     batch.executions.push_back(input);
                     gpu_vsh->expected.push_back(expected);
                     batch.references.push_back(id);
-                    if (batch_transform_cache)
-                        gpu_cache_ids[batch_transform_cache_base(vertex_indices_[vertex_index])] = id;
+                    if (indexed)
+                        store_batch_transform_cache_gpu_id(
+                            vertex_indices_[vertex_index], id);
                 }
 #endif
 #if XLLE_VSH_CAPTURE
@@ -4048,6 +4208,14 @@ bool Nv2a::submit_vertex_batch() {
     if (gpu_vsh) {
         gpu_vsh->batch.shape.execution_count = static_cast<uint32_t>(gpu_vsh->batch.executions.size());
         gpu_vsh->batch.shape.reference_count = static_cast<uint32_t>(gpu_vsh->batch.references.size());
+        if (gpu_vsh->mode == 3) {
+            job.gpu_vsh_compiled_ops = vsh_cache_ops_;
+            ++vsh_gpu_deferred_stats_.deferred_batches;
+            vsh_gpu_deferred_stats_.deferred_executions +=
+                gpu_vsh->batch.executions.size();
+            vsh_gpu_deferred_stats_.deferred_references +=
+                gpu_vsh->batch.references.size();
+        }
         job.gpu_vsh = std::move(gpu_vsh);
     }
 #endif
@@ -6529,6 +6697,9 @@ bool Nv2a::rasterize_witnessed_batch(DrawJob& job, bool& executed) {
         draw_order_fence();
         return rasterize_generic_combiner_batch(job, executed);
     }
+#if XLLE_VSH_GPU_RESIDENT
+    if (!materialize_deferred_gpu_vsh(job)) return false;
+#endif
     executed = true;
     // Stage (d): the ladder result is part of the job identity.
     job.profile = static_cast<uint32_t>(profile);
@@ -11250,11 +11421,141 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
         packet.color_address = color_address;
         packet.depth_address = depth_address;
         packet.raster_state.assign(raster_state.begin(), raster_state.end());
-        packet.vertices.reserve(transformed_batch.size());
-        for (const auto& vertex : transformed_batch) {
-            packet.vertices.push_back(
-                {vertex.position, vertex.diffuse, vertex.specular, vertex.texture});
-        }
+#if XLLE_VSH_GPU_RESIDENT
+        const bool deferred_gpu_vsh =
+            job.gpu_vsh && job.gpu_vsh->mode == 3;
+#else
+        const bool deferred_gpu_vsh = false;
+#endif
+        bool packet_vertices_copied = false;
+        auto copy_packet_vertices = [&]() -> bool {
+            if (packet_vertices_copied) return true;
+#if XLLE_VSH_GPU_RESIDENT
+            if (deferred_gpu_vsh && !materialize_deferred_gpu_vsh(job))
+                return false;
+            if (deferred_gpu_vsh) packet.gpu_vsh.reset();
+#endif
+            packet.vertices.reserve(transformed_batch.size());
+            for (const auto& vertex : transformed_batch) {
+                packet.vertices.push_back(
+                    {vertex.position, vertex.diffuse, vertex.specular, vertex.texture});
+            }
+            packet_vertices_copied = true;
+            return true;
+        };
+        struct ResidentPrimaryStateInfo {
+            GenericResidentRejectReason reject =
+                GenericResidentRejectReason::kCount;
+            bool observed = false;
+            bool state = false;
+            bool primary = false;
+            bool constant = false;
+            bool large_target = false;
+        };
+        auto evaluate_resident_primary_state =
+            [&](size_t vertex_total) -> ResidentPrimaryStateInfo {
+                using ResidentReject = GenericResidentRejectReason;
+                ResidentPrimaryStateInfo info;
+                const bool resident_primary_combiner_words =
+                    raster_state[kRasterCombinerControl] == 1 &&
+                    raster_state[kRasterCombinerColorIcw0] == 0x04200000 &&
+                    raster_state[kRasterCombinerAlphaIcw0] == 0x14200000 &&
+                    raster_state[kRasterCombinerColorOcw0] == 0x00000C00 &&
+                    raster_state[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
+                    raster_state[kRasterCombinerSpecularFog0] == 0x0000000C &&
+                    raster_state[kRasterCombinerSpecularFog1] == 0x00001C80;
+                const bool resident_constant_color_target =
+                    color_address == 0x03AA4000 && color_format_x8 &&
+                    surface_type == 1 && anti_aliasing == 0 &&
+                    surface_pitch == 0x00401400 && surface_height == 960 &&
+                    clip_x == 0 && clip_y == 0 && clip_width == 1280 &&
+                    clip_height == 960;
+                const bool resident_constant_color_combiner_words =
+                    resident_constant_color_target && no_texture_inputs &&
+                    raster_state[kRasterCombinerControl] == 1 &&
+                    raster_state[kRasterShaderStageProgram] == 0 &&
+                    raster_state[kRasterTextureEnableMask] == 0 &&
+                    raster_state[kRasterCombinerColorIcw0] == 0x01200000 &&
+                    raster_state[kRasterCombinerAlphaIcw0] == 0x14110000 &&
+                    raster_state[kRasterCombinerColorOcw0] == 0x00000C00 &&
+                    raster_state[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
+                    raster_state[kRasterCombinerSpecularFog0] == 0x0000000C &&
+                    raster_state[kRasterCombinerSpecularFog1] == 0x00001C80;
+                info.primary = resident_primary_combiner_words;
+                info.constant = resident_constant_color_combiner_words;
+                info.observed =
+                    raster_state[kRasterCombinerControl] == 1 ||
+                    resident_primary_combiner_words ||
+                    resident_constant_color_combiner_words;
+                const bool resident_primitive_supported =
+                    primitive_mode == 5 || primitive_mode == 6 || primitive_mode == 7;
+                const bool resident_vertex_count_supported =
+                    vertex_total >= 3 && vertex_total <= 20000;
+                const bool resident_alpha_supported =
+                    !alpha_test_enabled ||
+                    (alpha_func == 0x0207 &&
+                     (raster_state[kRasterAlphaRef] & 0xFFu) == 0);
+                const bool resident_blend_supported =
+                    (!blend_enabled || blend_eq == 0x8006) &&
+                    (!blend_enabled ||
+                     ((blend_src == 0x0302 || blend_src == 1) &&
+                      (blend_dst == 0x0303 || blend_dst == 1 || blend_dst == 0)));
+                const bool resident_shader_supported =
+                    raster_state[kRasterShaderStageProgram] == 0 ||
+                    raster_state[kRasterShaderStageProgram] == 1 ||
+                    (raster_state[kRasterShaderStageProgram] == 0x20 &&
+                     no_texture_inputs);
+                const bool resident_other_stage_supported =
+                    raster_state[kRasterShaderOtherStageInput] == 0 ||
+                    raster_state[kRasterShaderOtherStageInput] == 0x00210000;
+                if (!resident_primitive_supported) {
+                    info.reject = ResidentReject::kUnsupportedPrimitive;
+                } else if (!resident_vertex_count_supported) {
+                    info.reject = ResidentReject::kVertexCount;
+                } else if (uses_depth) {
+                    info.reject = ResidentReject::kDepth;
+                } else if (color_mask_word != 0x01010101) {
+                    info.reject = ResidentReject::kColorMask;
+                } else if (!color_format_x8 && !color_format_a8) {
+                    info.reject = ResidentReject::kColorFormat;
+                } else if (stage_count != 1) {
+                    info.reject = ResidentReject::kStageCount;
+                } else if (!resident_alpha_supported) {
+                    info.reject = ResidentReject::kAlphaMode;
+                } else if (!resident_blend_supported) {
+                    info.reject = ResidentReject::kBlendMode;
+                } else if (!resident_shader_supported) {
+                    info.reject = ResidentReject::kShaderProgram;
+                } else if (!resident_other_stage_supported) {
+                    info.reject = ResidentReject::kOtherStageInput;
+                } else if (!resident_primary_combiner_words &&
+                           !resident_constant_color_combiner_words) {
+                    info.reject = ResidentReject::kCombinerWords;
+                }
+                info.state = info.reject == ResidentReject::kCount;
+                info.large_target =
+                    color_address == 0x03AA4000 && color_format_x8 &&
+                    surface_type == 1 && anti_aliasing == 0 &&
+                    surface_pitch == 0x00401400 && surface_height == 960 &&
+                    clip_x == 0 && clip_y == 0 && clip_width == 1280 &&
+                    clip_height == 960;
+                return info;
+            };
+#if XLLE_VSH_GPU_RESIDENT
+        const size_t resident_vertex_total = deferred_gpu_vsh && job.gpu_vsh
+            ? job.gpu_vsh->batch.references.size()
+            : transformed_batch.size();
+#else
+        const size_t resident_vertex_total = transformed_batch.size();
+#endif
+        const ResidentPrimaryStateInfo resident_state =
+            evaluate_resident_primary_state(resident_vertex_total);
+        const bool deferred_resident_primary_candidate =
+            deferred_gpu_vsh && resident_state.state && resident_state.primary &&
+            !resident_state.constant && resident_vertex_total > 3;
+        if (!deferred_resident_primary_candidate && !copy_packet_vertices())
+            return false;
+        bool force_software_after_deferred_backend_decline = false;
         for (uint32_t stage = 0; stage < packet.textures.size(); ++stage) {
             if (!texture_stages[stage].valid) continue;
             auto& destination = packet.textures[stage];
@@ -11478,99 +11779,66 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
         bool resident_noop_batch = false;
         if (packet.compute_fixture == Nv2aGenericCombinerPacket::ComputeFixture::kNone) {
             using ResidentReject = GenericResidentRejectReason;
-            const bool resident_primary_combiner_words =
-                raster_state[kRasterCombinerControl] == 1 &&
-                raster_state[kRasterCombinerColorIcw0] == 0x04200000 &&
-                raster_state[kRasterCombinerAlphaIcw0] == 0x14200000 &&
-                raster_state[kRasterCombinerColorOcw0] == 0x00000C00 &&
-                raster_state[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
-                raster_state[kRasterCombinerSpecularFog0] == 0x0000000C &&
-                raster_state[kRasterCombinerSpecularFog1] == 0x00001C80;
-            const bool resident_constant_color_target =
-                color_address == 0x03AA4000 && color_format_x8 &&
-                surface_type == 1 && anti_aliasing == 0 &&
-                surface_pitch == 0x00401400 && surface_height == 960 &&
-                clip_x == 0 && clip_y == 0 && clip_width == 1280 &&
-                clip_height == 960;
-            const bool resident_constant_color_combiner_words =
-                resident_constant_color_target && no_texture_inputs &&
-                raster_state[kRasterCombinerControl] == 1 &&
-                raster_state[kRasterShaderStageProgram] == 0 &&
-                raster_state[kRasterTextureEnableMask] == 0 &&
-                raster_state[kRasterCombinerColorIcw0] == 0x01200000 &&
-                raster_state[kRasterCombinerAlphaIcw0] == 0x14110000 &&
-                raster_state[kRasterCombinerColorOcw0] == 0x00000C00 &&
-                raster_state[kRasterCombinerAlphaOcw0] == 0x00000C00 &&
-                raster_state[kRasterCombinerSpecularFog0] == 0x0000000C &&
-                raster_state[kRasterCombinerSpecularFog1] == 0x00001C80;
-            const bool resident_primary_observable =
-                raster_state[kRasterCombinerControl] == 1 ||
-                resident_primary_combiner_words ||
-                resident_constant_color_combiner_words;
+            const bool resident_primary_combiner_words = resident_state.primary;
+            const bool resident_constant_color_combiner_words = resident_state.constant;
+            const bool resident_primary_observable = resident_state.observed;
             resident_observed_this_batch = resident_primary_observable;
-            const bool resident_primitive_supported =
-                primitive_mode == 5 || primitive_mode == 6 || primitive_mode == 7;
-            const bool resident_vertex_count_supported =
-                transformed_batch.size() >= 3 && transformed_batch.size() <= 20000;
-            const bool resident_alpha_supported =
-                !alpha_test_enabled ||
-                (alpha_func == 0x0207 &&
-                 (raster_state[kRasterAlphaRef] & 0xFFu) == 0);
-            const bool resident_blend_supported =
-                (!blend_enabled || blend_eq == 0x8006) &&
-                (!blend_enabled ||
-                 ((blend_src == 0x0302 || blend_src == 1) &&
-                  (blend_dst == 0x0303 || blend_dst == 1 || blend_dst == 0)));
-            const bool resident_shader_supported =
-                raster_state[kRasterShaderStageProgram] == 0 ||
-                raster_state[kRasterShaderStageProgram] == 1 ||
-                (raster_state[kRasterShaderStageProgram] == 0x20 &&
-                 no_texture_inputs);
-            const bool resident_other_stage_supported =
-                raster_state[kRasterShaderOtherStageInput] == 0 ||
-                raster_state[kRasterShaderOtherStageInput] == 0x00210000;
-            ResidentReject resident_reject_reason = ResidentReject::kCount;
-            if (!resident_primitive_supported) {
-                resident_reject_reason = ResidentReject::kUnsupportedPrimitive;
-            } else if (!resident_vertex_count_supported) {
-                resident_reject_reason = ResidentReject::kVertexCount;
-            } else if (uses_depth) {
-                resident_reject_reason = ResidentReject::kDepth;
-            } else if (color_mask_word != 0x01010101) {
-                resident_reject_reason = ResidentReject::kColorMask;
-            } else if (!color_format_x8 && !color_format_a8) {
-                resident_reject_reason = ResidentReject::kColorFormat;
-            } else if (stage_count != 1) {
-                resident_reject_reason = ResidentReject::kStageCount;
-            } else if (!resident_alpha_supported) {
-                resident_reject_reason = ResidentReject::kAlphaMode;
-            } else if (!resident_blend_supported) {
-                resident_reject_reason = ResidentReject::kBlendMode;
-            } else if (!resident_shader_supported) {
-                resident_reject_reason = ResidentReject::kShaderProgram;
-            } else if (!resident_other_stage_supported) {
-                resident_reject_reason = ResidentReject::kOtherStageInput;
-            } else if (!resident_primary_combiner_words &&
-                       !resident_constant_color_combiner_words) {
-                resident_reject_reason = ResidentReject::kCombinerWords;
-            }
-            const bool resident_primary_state =
-                resident_reject_reason == ResidentReject::kCount;
+            ResidentReject resident_reject_reason = resident_state.reject;
+            const bool resident_primary_state = resident_state.state;
             if (resident_primary_state) {
                 const bool resident_primary_large_dashboard_target =
-                    color_address == 0x03AA4000 && color_format_x8 &&
-                    surface_type == 1 && anti_aliasing == 0 &&
-                    surface_pitch == 0x00401400 && surface_height == 960 &&
-                    clip_x == 0 && clip_y == 0 && clip_width == 1280 &&
-                    clip_height == 960;
+                    resident_state.large_target;
 #if XLLE_VSH_GPU_RESIDENT
                 if (job.gpu_vsh) {
                     job.gpu_vsh->batch.shape.large_target = resident_primary_large_dashboard_target;
                     job.gpu_vsh->batch.shape.cull_enabled = cull_enabled;
                     job.gpu_vsh->batch.shape.cull_front = cull_front;
-                    packet.gpu_vsh = job.gpu_vsh;
+                    if (job.gpu_vsh->mode != 3)
+                        packet.gpu_vsh = job.gpu_vsh;
                 }
 #endif
+                bool resident_deferred_prepared = false;
+#if XLLE_VSH_GPU_RESIDENT
+                if (deferred_resident_primary_candidate && job.gpu_vsh) {
+                    std::string renderer_error;
+                    if (!renderer_->prepare_vsh_gpu_batch(*job.gpu_vsh,
+                                                          renderer_error)) {
+                        fault_(renderer_error.empty()
+                                   ? "NV2A deferred GPU VSH preparation failed"
+                                   : renderer_error);
+                        return false;
+                    }
+                    if (job.gpu_vsh->prepared_token != 0) {
+                        if (job.gpu_vsh->prepared_vertices != 0) {
+                            packet.gpu_vsh = job.gpu_vsh;
+                            packet.compute_fixture = Nv2aGenericCombinerPacket::
+                                ComputeFixture::kResidentPrimaryColorTriangles;
+                            packet.primitive_mode = 5;
+                        } else {
+                            resident_noop_batch = true;
+                        }
+                        packet.fixture_clip_x = effective_clip_x;
+                        packet.fixture_clip_y = effective_clip_y;
+                        packet.fixture_clip_width = effective_clip_width;
+                        packet.fixture_clip_height = effective_clip_height;
+                        packet.fixture_blend_enabled = blend_enabled;
+                        packet.fixture_blend_src = blend_src;
+                        packet.fixture_blend_dst = blend_dst;
+                        packet.fixture_color_format_x8 = color_format_x8;
+                        ++generic_combiner_resident_candidates_;
+                        resident_exact_this_batch = true;
+                        resident_deferred_prepared = true;
+                        ++vsh_gpu_deferred_stats_.prepared_batches;
+                        vsh_gpu_deferred_stats_.prepared_vertices +=
+                            job.gpu_vsh->prepared_vertices;
+                    } else {
+                        ++vsh_gpu_deferred_stats_.declined_batches;
+                        if (!copy_packet_vertices()) return false;
+                        packet.gpu_vsh.reset();
+                    }
+                }
+#endif
+                if (!resident_deferred_prepared) {
 #if XLLE_VSH_CAPTURE
                 auto* captured = job.vsh_batch_capture.get();
                 if (captured) {
@@ -11748,6 +12016,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                 } else if (resident_primary_observable) {
                     record_generic_resident_reject(ResidentReject::kVertexExpansion);
                     resident_reject_this_batch = ResidentReject::kVertexExpansion;
+                }
                 }
             } else if (resident_primary_observable) {
                 record_generic_resident_reject(resident_reject_reason);
@@ -12636,9 +12905,19 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             resident_exact_this_batch = false;
             resident_reject_this_batch =
                 GenericResidentRejectReason::kBackendUnsupported;
+#if XLLE_VSH_GPU_RESIDENT
+            if (deferred_gpu_vsh) {
+                if (!copy_packet_vertices()) return false;
+                packet.gpu_vsh.reset();
+                packet.compute_fixture =
+                    Nv2aGenericCombinerPacket::ComputeFixture::kNone;
+                packet.primitive_mode = primitive_mode;
+                force_software_after_deferred_backend_decline = true;
+            }
+#endif
         }
         bool nonresident_supported = false;
-        {
+        if (!force_software_after_deferred_backend_decline) {
             perf::ScopedAdd timer(perf::g_ns_generic_nonresident_support,
                                   perf::g_calls_generic_nonresident_support);
             nonresident_supported = renderer_->supports_generic_combiner(packet);
@@ -12766,6 +13045,12 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             return true;
         }
     }
+#if XLLE_VSH_GPU_RESIDENT
+    if (job.gpu_vsh && job.gpu_vsh->mode == 3 &&
+        !materialize_deferred_gpu_vsh(job)) {
+        return false;
+    }
+#endif
     if (generic_accel_timer) generic_accel_timer.reset();
     ++generic_combiner_fallback_batches_;
     // Phase 6 census: this batch is the software fallback. The resident-path

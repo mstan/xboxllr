@@ -110,6 +110,19 @@ public:
     Nv2aRenderer::VshGpuResidentStats vsh_gpu_resident_stats() const {
         return renderer_ ? renderer_->vsh_gpu_resident_stats() : Nv2aRenderer::VshGpuResidentStats{};
     }
+    struct VshGpuDeferredStats {
+        uint64_t deferred_batches = 0;
+        uint64_t deferred_executions = 0;
+        uint64_t deferred_references = 0;
+        uint64_t prepared_batches = 0;
+        uint64_t prepared_vertices = 0;
+        uint64_t declined_batches = 0;
+        uint64_t fallback_batches = 0;
+        uint64_t fallback_executions = 0;
+    };
+    const VshGpuDeferredStats& vsh_gpu_deferred_stats() const {
+        return vsh_gpu_deferred_stats_;
+    }
 #endif
     void set_detailed_telemetry(bool enabled) { detailed_telemetry_ = enabled; }
     // Per-write raster telemetry (the 22 FNV-1a output hashes, the
@@ -2930,6 +2943,7 @@ private:
 #endif
 #if XLLE_VSH_GPU_RESIDENT
     uint32_t vsh_gpu_resident_mode_ = 0;
+    VshGpuDeferredStats vsh_gpu_deferred_stats_{};
 #endif
     // Which register files this program can actually observe unwritten. See
     // VshZeroPlan in nv2a_vsh_compiled.hpp.
@@ -3217,6 +3231,7 @@ private:
     struct DrawJob {
 #if XLLE_VSH_GPU_RESIDENT
         std::shared_ptr<Nv2aGenericCombinerPacket::GpuVshReference> gpu_vsh;
+        std::vector<VshCompiledOp> gpu_vsh_compiled_ops;
 #endif
 #if XLLE_VSH_CAPTURE
         std::unique_ptr<vsh_batch_capture::Batch> vsh_batch_capture;
@@ -3366,6 +3381,9 @@ private:
     // order and equals the single-threaded value exactly.
     void fold_draw_telemetry(const DrawJobTelemetry& out, bool hash_on);
     void seed_draw_telemetry(DrawJob& job);
+#if XLLE_VSH_GPU_RESIDENT
+    bool materialize_deferred_gpu_vsh(DrawJob& job);
+#endif
     void seam_note_threadable(DrawJob& job, bool threadable, uint32_t reason);
     void seam_publish_job(const DrawJob& job);
     void seam_anchor(SeamAnchor anchor, bool required);

@@ -129,3 +129,8 @@ expensive. Then remove CPU materialization only behind state admission and
 saved-input fallback, preserving guest fetch ordering and index-cache reuse.
 Headless fidelity and distinct interactive frames/latency remain separate proof
 requirements. No default shipping behavior is promoted by this checkpoint.
+
+Follow-up: [deferred CPU vertex/triangle work](PERF-VSH-GPU-DEFERRED-2026-09-06.md)
+implements saved-input fallback and actual CPU work removal. Its first complete
+CPU-versus-GPU gate rejects the candidate; the GPU preparation and synchronization
+still cost more than the work removed.

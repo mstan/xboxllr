@@ -37,6 +37,21 @@ static void fill32(std::vector<uint8_t>& mem, uint32_t value) {
 
 class FakeNv2aRenderer final : public xlle::Nv2aRenderer {
 public:
+#if XLLE_VSH_GPU_RESIDENT
+    bool accept_deferred = false;
+    uint64_t deferred_prepares = 0;
+    bool prepare_vsh_gpu_batch(xlle::Nv2aGenericCombinerPacket::GpuVshReference& reference,
+                               std::string&) override {
+        ++deferred_prepares;
+        CHECK(reference.mode == 3);
+        CHECK(reference.expected.empty());
+        reference.prepared_token = accept_deferred ? deferred_prepares : 0;
+        reference.prepared_vertices = accept_deferred
+            ? xlle::vsh_gpu_batch::triangle_count(reference.batch.shape.primitive_mode,
+                                                 reference.batch.shape.reference_count) * 3 : 0;
+        return true;
+    }
+#endif
     bool supported = false;
     bool resident_supported = false;
     mutable uint64_t support_queries = 0;
@@ -95,6 +110,10 @@ public:
         ++resident_submits;
         last_packet = packet;
         result.triangles = packet.vertices.size() / 3;
+#if XLLE_VSH_GPU_RESIDENT
+        if (packet.gpu_vsh && packet.gpu_vsh->mode == 3)
+            result.triangles = packet.gpu_vsh->prepared_vertices / 3;
+#endif
         result.fragments = 0;
         result.writes = 0;
         return true;
@@ -6084,9 +6103,17 @@ int main() {
         std::string gc_fault;
         xlle::Nv2a gc_gpu([&](const std::string& why) { gc_fault = why; });
         std::vector<uint8_t> gc_ram(0x40000, 0);
+#if XLLE_VSH_GPU_RESIDENT
+        bool track_deferred_fetches = false;
+        std::vector<uint64_t> deferred_fetches;
+#endif
         gc_gpu.set_mem_access(
             [&](uint32_t addr, void* dst, size_t n) {
                 if (addr > gc_ram.size() || n > gc_ram.size() - addr) return false;
+#if XLLE_VSH_GPU_RESIDENT
+                if (track_deferred_fetches && addr >= 0x38000)
+                    deferred_fetches.push_back((static_cast<uint64_t>(addr) << 32) | n);
+#endif
                 std::memcpy(dst, gc_ram.data() + addr, n);
                 return true;
             },
@@ -6880,6 +6907,115 @@ int main() {
             CHECK(gc_gpu.generic_vertex_scratch_stats().retained_bytes == 0);
             emit_gc(0x1E20, 0);
             emit_gc(0x1E24, 0);
+#if XLLE_VSH_GPU_RESIDENT
+            // Exercise the machine seam independently of the real-GL renderer
+            // probe: deferred acceptance has no CPU vertices, while a renderer
+            // decline reconstructs the original packet from owned inputs.
+            gc_gpu.set_detailed_telemetry(false);
+            gc_gpu.set_profile_hashes_enabled(false);
+            emit_gc(0x1E9C, 0);
+            emit_gc(0x0B00, 0x00000000); // MOV oPos, v0 (final)
+            emit_gc(0x0B04, 0x0020001B);
+            emit_gc(0x0B08, 0x0836106C);
+            emit_gc(0x0B0C, 0x2070F801);
+            emit_gc(0x1EA0, 0);
+            emit_gc(0x1E94, 2);
+            submit_two_triangles(gc_pack_ub4(0x22, 0x44, 0x66, 0xCC));
+            const auto cpu_reference_vertices = fake.last_packet.vertices;
+            CHECK(cpu_reference_vertices.size() == 6);
+            gc_gpu.set_vsh_gpu_resident_mode(3);
+            const auto compiled_before_defer = gc_gpu.vertex_census().vsh_compiled_vertices;
+            fake.accept_deferred = true;
+            submit_two_triangles(gc_pack_ub4(0x22, 0x44, 0x66, 0xCC));
+            CHECK(gc_fault.empty());
+            CHECK(fake.deferred_prepares == 1);
+            CHECK(fake.last_packet.vertices.empty());
+            CHECK(fake.last_packet.gpu_vsh && fake.last_packet.gpu_vsh->mode == 3);
+            CHECK(gc_gpu.vertex_census().vsh_compiled_vertices == compiled_before_defer);
+            fake.accept_deferred = false;
+            submit_two_triangles(gc_pack_ub4(0x22, 0x44, 0x66, 0xCC));
+            CHECK(gc_fault.empty());
+            CHECK(fake.deferred_prepares == 2);
+            CHECK(!fake.last_packet.gpu_vsh);
+            CHECK(fake.last_packet.vertices.size() == cpu_reference_vertices.size());
+            if (fake.last_packet.vertices.size() == cpu_reference_vertices.size())
+                for (size_t i = 0; i < cpu_reference_vertices.size(); ++i) {
+                    const auto& actual = fake.last_packet.vertices[i];
+                    const auto& expected = cpu_reference_vertices[i];
+                    CHECK(actual.position == expected.position);
+                    CHECK(actual.diffuse == expected.diffuse);
+                    CHECK(actual.specular == expected.specular);
+                    CHECK(actual.texture == expected.texture);
+                }
+            CHECK(gc_gpu.vertex_census().vsh_compiled_vertices == compiled_before_defer + 6);
+            // Indexed cache reuse must preserve actual fetches, including a
+            // fallback. Repeated references must not become repeated shading.
+            const float indexed_positions[3][4] = {
+                {0, 0, 50, 1}, {20, 0, 50, 1}, {0, 20, 50, 1}};
+            std::memcpy(gc_ram.data() + 0x38000, indexed_positions, sizeof(indexed_positions));
+            emit_gc(0x019C, 2);
+            for (uint32_t slot = 0; slot < 16; ++slot) emit_gc(0x1760 + slot * 4, 0);
+            emit_gc(0x1720, 0x38000);
+            emit_gc(0x1760, 0x00001042); // float4, stride16
+            auto submit_reused_indices = [&](uint32_t primitive = 5) {
+                deferred_fetches.clear();
+                track_deferred_fetches = true;
+                emit_gc(0x17FC, primitive);
+                for (uint32_t i = 0; i < 96; ++i) emit_gc(0x1808, i % 3);
+                emit_gc(0x17FC, 0);
+                kick_gc();
+                track_deferred_fetches = false;
+                CHECK(gc_fault.empty());
+            };
+            gc_gpu.set_vsh_gpu_resident_mode(0);
+            submit_reused_indices();
+            const auto indexed_cpu_packet = fake.last_packet;
+            const auto indexed_cpu_fetches = deferred_fetches;
+            CHECK(!indexed_cpu_fetches.empty());
+            CHECK(indexed_cpu_packet.vertices.size() == 96);
+            gc_gpu.set_vsh_gpu_resident_mode(3);
+            fake.accept_deferred = true;
+            const auto indexed_compiled_before = gc_gpu.vertex_census().vsh_compiled_vertices;
+            submit_reused_indices();
+            CHECK(deferred_fetches == indexed_cpu_fetches);
+            CHECK(gc_gpu.vertex_census().vsh_compiled_vertices == indexed_compiled_before);
+            CHECK(fake.last_packet.gpu_vsh);
+            if (fake.last_packet.gpu_vsh) {
+                CHECK(fake.last_packet.gpu_vsh->batch.executions.size() == 3);
+                CHECK(fake.last_packet.gpu_vsh->batch.references.size() == 96);
+            }
+            fake.accept_deferred = false;
+            submit_reused_indices();
+            CHECK(deferred_fetches == indexed_cpu_fetches);
+            CHECK(gc_gpu.vertex_census().vsh_compiled_vertices == indexed_compiled_before + 3);
+            CHECK(fake.last_packet.vertices.size() == indexed_cpu_packet.vertices.size());
+            if (fake.last_packet.vertices.size() == indexed_cpu_packet.vertices.size())
+                for (size_t i = 0; i < indexed_cpu_packet.vertices.size(); ++i)
+                    CHECK(fake.last_packet.vertices[i].position == indexed_cpu_packet.vertices[i].position);
+            // A backend may decline the prepared packet. Raw strip references
+            // must never be passed to a fallback tagged as expanded triangles.
+            gc_gpu.set_vsh_gpu_resident_mode(0);
+            gc_gpu.set_renderer(nullptr);
+            std::memset(gc_ram.data() + 0x10000, 0x77, 256 * 64);
+            submit_reused_indices(6);
+            const std::vector<uint8_t> strip_software(gc_ram.begin() + 0x10000,
+                                                     gc_ram.begin() + 0x14000);
+            gc_gpu.set_renderer(&fake);
+            gc_gpu.set_vsh_gpu_resident_mode(3);
+            fake.accept_deferred = true;
+            fake.resident_supported = false;
+            fake.supported = true;
+            const auto nonresident_submits_before = fake.submits;
+            std::memset(gc_ram.data() + 0x10000, 0x77, 256 * 64);
+            submit_reused_indices(6);
+            CHECK(fake.submits == nonresident_submits_before);
+            CHECK(std::equal(strip_software.begin(), strip_software.end(), gc_ram.begin() + 0x10000));
+            gc_gpu.set_vsh_gpu_resident_mode(0);
+            gc_gpu.set_profile_hashes_enabled(true);
+            gc_gpu.set_detailed_telemetry(true);
+            emit_gc(0x1E94, 0);
+            kick_gc();
+#endif
             gc_gpu.set_renderer(nullptr);
         }
 

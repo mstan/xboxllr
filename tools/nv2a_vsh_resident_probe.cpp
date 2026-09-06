@@ -154,7 +154,9 @@ bool submit_and_resolve(Nv2aRenderer& renderer, const Nv2aGenericCombinerPacket&
     }
     Nv2aGenericCombinerResult result;
     if (!renderer.submit_resident_generic_combiner(packet, result, error)) return false;
-    if (result.triangles != packet.vertices.size() / 3) {
+    const size_t expected_vertices = packet.gpu_vsh && packet.gpu_vsh->mode == 3
+        ? packet.gpu_vsh->prepared_vertices : packet.vertices.size();
+    if (result.triangles != expected_vertices / 3) {
         error = "renderer triangle result differs from submitted geometry";
         return false;
     }
@@ -385,7 +387,7 @@ int fail(const std::string& message) {
 
 }  // namespace
 
-int run(bool parallel_pack) {
+int run(bool parallel_pack, bool deferred) {
     std::string error;
     auto cpu_renderer = xlle::create_nv2a_opengl_renderer(error);
     if (!cpu_renderer) {
@@ -398,7 +400,7 @@ int run(bool parallel_pack) {
         return 2;
     }
     gpu_renderer->set_vsh_gpu_parallel_pack(parallel_pack);
-    std::printf("[resident-probe] parallel_pack=%u\n", parallel_pack ? 1u : 0u);
+    std::printf("[resident-probe] parallel_pack=%u deferred=%u\n", parallel_pack ? 1u : 0u, deferred ? 1u : 0u);
 
     uint32_t case_index = 0;
     uint32_t compared = 0;
@@ -415,7 +417,7 @@ int run(bool parallel_pack) {
         const uint32_t cpu_address = kBaseAddress + case_index * 0x20000u;
         const uint32_t gpu_address = cpu_address + 0x10000u;
         auto cpu_packet = make_packet(probe.batch, cpu_address, probe.x8, 0);
-        auto gpu_packet = make_packet(probe.batch, gpu_address, probe.x8, 2);
+        auto gpu_packet = make_packet(probe.batch, gpu_address, probe.x8, deferred ? 3 : 2);
         if (probe.malformed_gpu_layout) {
             if (!gpu_packet.gpu_vsh || gpu_packet.gpu_vsh->batch.ops.empty())
                 return fail(probe.name + ": missing GPU reference for malformed layout mutation");
@@ -428,8 +430,27 @@ int run(bool parallel_pack) {
             return fail(probe.name + ": CPU baseline submit failed: " + error);
         const auto before = gpu_renderer->vsh_gpu_resident_stats();
         error.clear();
+        if (deferred) {
+            gpu_packet.gpu_vsh->expected.clear();
+            const auto expected_vertices = gpu_packet.vertices.size();
+            gpu_packet.vertices.clear();
+            if (!gpu_renderer->prepare_vsh_gpu_batch(*gpu_packet.gpu_vsh, error))
+                return fail(probe.name + ": deferred preparation failed: " + error);
+            if (!gpu_packet.gpu_vsh->prepared_token) {
+                if (!probe.expect_decline) return fail(probe.name + ": unexpected preparation decline");
+                gpu_packet.gpu_vsh.reset();
+                gpu_packet.vertices = cpu_vertices_from_expected(probe.batch);
+            } else {
+                if (probe.expect_decline || gpu_packet.gpu_vsh->prepared_vertices != expected_vertices)
+                    return fail(probe.name + ": incorrect deferred acceptance/count");
+                if (cpu_renderer->supports_resident_generic_combiner(gpu_packet))
+                    return fail(probe.name + ": another renderer accepted a foreign receipt");
+            }
+        }
         if (!submit_and_resolve(*gpu_renderer, gpu_packet, gpu_output, error))
-            return fail(probe.name + ": mode2 submit failed: " + error);
+            return fail(probe.name + ": GPU submit failed: " + error);
+        if (deferred && gpu_packet.gpu_vsh && gpu_renderer->supports_resident_generic_combiner(gpu_packet))
+            return fail(probe.name + ": consumed receipt was reusable");
         const auto after = gpu_renderer->vsh_gpu_resident_stats();
         std::string diff;
         if (!equal_bytes(cpu_output, gpu_output, diff))
@@ -445,8 +466,10 @@ int run(bool parallel_pack) {
                 return fail(probe.name + ": decline case unexpectedly used GPU VBO draw");
             ++decline_checked;
         } else {
-            if (after.verified <= before.verified)
-                return fail(probe.name + ": verification success was not counted");
+            if (deferred ? after.accepted <= before.accepted : after.verified <= before.verified)
+                return fail(probe.name + ": acceptance/verification success was not counted");
+            if (deferred && after.verified != before.verified)
+                return fail(probe.name + ": deferred draw incorrectly claimed CPU verification");
             if (after.gpu_draws <= before.gpu_draws)
                 return fail(probe.name + ": mode2 GPU VBO draw was not counted");
             ++gpu_draw_checked;
@@ -502,11 +525,16 @@ int run(bool parallel_pack) {
 
 int main(int argc, char** argv) {
     try {
-        if (argc > 2 || (argc == 2 && std::strcmp(argv[1], "--parallel-pack"))) {
-            std::fprintf(stderr, "usage: xlle_vsh_resident_probe [--parallel-pack]\n");
-            return 2;
+        bool parallel_pack = false, deferred = false;
+        for (int i = 1; i < argc; ++i) {
+            if (!std::strcmp(argv[i], "--parallel-pack")) parallel_pack = true;
+            else if (!std::strcmp(argv[i], "--deferred")) deferred = true;
+            else {
+                std::fprintf(stderr, "usage: xlle_vsh_resident_probe [--parallel-pack] [--deferred]\n");
+                return 2;
+            }
         }
-        return run(argc == 2);
+        return run(parallel_pack, deferred);
     } catch (const std::exception& ex) {
         return fail(std::string("unhandled exception: ") + ex.what());
     } catch (...) {

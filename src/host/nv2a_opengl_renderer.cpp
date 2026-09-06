@@ -1737,14 +1737,22 @@ public:
             !dashboard_fixture) {
             return false;
         }
+        size_t vertex_count = packet.vertices.size();
+#if XLLE_VSH_GPU_RESIDENT
+        if (packet.gpu_vsh && packet.gpu_vsh->mode == 3) {
+            if ((!primary_fixture && !constant_fixture) || !packet.vertices.empty() ||
+                !valid_vsh_preparation(*packet.gpu_vsh)) return false;
+            vertex_count = packet.gpu_vsh->prepared_vertices;
+        }
+#endif
         if (((primary_fixture || constant_fixture) && resident_program_ == 0) ||
             (texture_fixture && resident_texture_modulate_program_ == 0) ||
             (dashboard_fixture && resident_dashboard_program_ == 0) ||
             (!dashboard_fixture && packet.primitive_mode != 5) ||
             (dashboard_fixture && packet.primitive_mode != 7) ||
-            packet.vertices.empty() ||
-            (!dashboard_fixture && (packet.vertices.size() % 3) != 0) ||
-            (dashboard_fixture && packet.vertices.size() != 4) ||
+            vertex_count == 0 ||
+            (!dashboard_fixture && (vertex_count % 3) != 0) ||
+            (dashboard_fixture && vertex_count != 4) ||
             packet.surface_pitch == 0 || packet.surface_height == 0 ||
             packet.fixture_clip_width == 0 || packet.fixture_clip_height == 0) {
             return false;
@@ -1833,6 +1841,29 @@ public:
 #if XLLE_VSH_GPU_RESIDENT
     VshGpuResidentStats vsh_gpu_resident_stats() const override { return vsh_resident_stats_; }
     void set_vsh_gpu_parallel_pack(bool on) override { vsh_parallel_pack_ = on; }
+    bool prepare_vsh_gpu_batch(Nv2aGenericCombinerPacket::GpuVshReference& reference,
+                               std::string& error) override {
+        reference.prepared_token = 0;
+        reference.prepared_vertices = 0;
+        if (reference.mode != 3) { error = "GPU VSH preparation requires deferred mode"; return false; }
+        if (!flush_witnessed_batch(error) || !take_witnessed_flush_error(error)) return false;
+        perf_excl::Scope gl_region(perf_excl::kNv2aGl);
+        SDL_Window* previous_window = SDL_GL_GetCurrentWindow();
+        SDL_GLContext previous_context = SDL_GL_GetCurrentContext();
+        if (!SDL_GL_MakeCurrent(window_, context_)) {
+            error = std::string("GPU VSH batch context: ") + SDL_GetError();
+            return false;
+        }
+        struct Restore {
+            SDL_Window* previous_window;
+            SDL_GLContext previous_context;
+            SDL_Window* window;
+            ~Restore() { restore_previous_gl_context(previous_window, previous_context, window,
+                                                     perf::kGlContextOtherRestore); }
+        } restore{previous_window, previous_context, window_};
+        bool accepted = false;
+        return prepare_vsh_resident(reference, nullptr, accepted, error);
+    }
     bool prepare_vsh_gpu_resident(std::string& error) override {
         SDL_Window* previous_window = SDL_GL_GetCurrentWindow();
         SDL_GLContext previous_context = SDL_GL_GetCurrentContext();
@@ -1899,8 +1930,17 @@ public:
                                           kResidentConstantColorTriangles;
 #if XLLE_VSH_GPU_RESIDENT
         bool use_gpu_vsh_buffer = false;
-        if (packet.gpu_vsh && (primary_fixture || constant_fixture) &&
-            !prepare_verified_vsh_resident(packet, use_gpu_vsh_buffer, error)) return false;
+        if (packet.gpu_vsh && (primary_fixture || constant_fixture)) {
+            if (packet.gpu_vsh->mode == 3) {
+                if (!packet.vertices.empty() || !valid_vsh_preparation(*packet.gpu_vsh)) {
+                    error = "GPU VSH preparation receipt is stale or belongs to another renderer";
+                    return false;
+                }
+                use_gpu_vsh_buffer = true;
+                prepared_vsh_reference_ = nullptr; // Single-use, including later fatal draw failures.
+            } else if (!prepare_vsh_resident(*packet.gpu_vsh, &packet.vertices,
+                                             use_gpu_vsh_buffer, error)) return false;
+        }
 #endif
         {
             perf::ScopedAdd timer(perf::g_ns_renderer_resident_ensure,
@@ -1956,7 +1996,8 @@ public:
         }
         size_t resident_vertex_count = vertices.size();
 #if XLLE_VSH_GPU_RESIDENT
-        if (use_gpu_vsh_buffer) resident_vertex_count = packet.vertices.size();
+        if (use_gpu_vsh_buffer) resident_vertex_count = packet.gpu_vsh->mode == 3
+            ? packet.gpu_vsh->prepared_vertices : packet.vertices.size();
 #endif
         if (dashboard_fixture) {
             perf::ScopedAdd timer(perf::g_ns_renderer_texture_stage,
@@ -5767,11 +5808,21 @@ private:
                         vsh_gpu_batch::kResidentPrimaryPackComputeSource).c_str(),
                     "resident VSH pack", active_vsh_pack_program(), error));
     }
-    bool prepare_verified_vsh_resident(const Nv2aGenericCombinerPacket& packet,
-                                       bool& use_gpu_buffer, std::string& error) {
+    bool valid_vsh_preparation(const Nv2aGenericCombinerPacket::GpuVshReference& reference) const {
+        return prepared_vsh_reference_ == &reference && reference.prepared_token != 0 &&
+               reference.prepared_token == vsh_preparation_token_ &&
+               reference.prepared_vertices == vsh_prepared_vertices_;
+    }
+    bool prepare_vsh_resident(Nv2aGenericCombinerPacket::GpuVshReference& reference,
+                               const std::vector<Nv2aGenericCombinerVertex>* cpu_vertices,
+                               bool& use_gpu_buffer, std::string& error) {
         namespace gpu = vsh_gpu_batch;
         perf::ScopedAdd total_timer(vsh_cpu_ns_[0], vsh_cpu_calls_[0]);
-        const auto& reference = *packet.gpu_vsh;
+        const bool verify = reference.mode != 3;
+        use_gpu_buffer = false;
+        reference.prepared_token = 0;
+        reference.prepared_vertices = 0;
+        prepared_vsh_reference_ = nullptr; // Any new dispatch invalidates the previous scratch receipt.
         const auto& batch = reference.batch;
         auto& stats = vsh_resident_stats_;
         ++stats.batches;
@@ -5782,7 +5833,9 @@ private:
             error = std::string("GPU resident VSH verification: ") + reason;
             return false;
         };
-        if (!gpu::validate_batch_vectors(batch) || batch.executions.empty() || reference.expected.size() != batch.executions.size())
+        if (!gpu::validate_batch_vectors(batch) || batch.executions.empty() ||
+            (verify && (!cpu_vertices || reference.expected.size() != batch.executions.size())) ||
+            (!verify && (cpu_vertices || !reference.expected.empty())))
             return mismatch("invalid owned batch shape");
         for (uint32_t id : batch.references)
             if (id >= batch.executions.size()) return mismatch("invalid execution reference");
@@ -5792,12 +5845,13 @@ private:
         const uint32_t groups = (batch.shape.execution_count + 63u) / 64u;
         const uint32_t candidates = gpu::triangle_count(batch.shape.primitive_mode, batch.shape.reference_count);
         const size_t max_vertices = static_cast<size_t>(candidates) * 3;
-        std::vector<gpu::ProgramOutput128B> outputs((groups + 1u) * 64u);
+        const size_t output_count = verify ? (groups + 1u) * 64u : batch.executions.size();
+        std::vector<gpu::ProgramOutput128B> outputs(verify ? output_count : 0);
         for (auto& out : outputs) for (auto& vec : out.values) vec.fill(0xdeadbeefu);
-        std::vector<uint32_t> statuses(outputs.size(), 0xdeadbeefu);
-        std::vector<std::array<uint32_t, 4>> triangle_data(candidates + 64);
+        std::vector<uint32_t> statuses(output_count, 0xdeadbeefu);
+        std::vector<std::array<uint32_t, 4>> triangle_data(verify ? candidates + 64 : 0);
         for (auto& vec : triangle_data) vec.fill(0xdeadbeefu);
-        std::vector<gpu::ResidentVertex96B> packed(max_vertices + 64);
+        std::vector<gpu::ResidentVertex96B> packed(verify ? max_vertices + 64 : 0);
         for (auto& vertex : packed) {
             vertex.position.fill(0xdeadbeefu); vertex.diffuse.fill(0xdeadbeefu);
             for (auto& tex : vertex.texture) tex.fill(0xdeadbeefu);
@@ -5806,7 +5860,7 @@ private:
         control.fill(0xdeadbeefu);
         const auto upload = [&](size_t index, unsigned binding, const void* data, size_t bytes) {
             perf::ScopedAdd timer(vsh_cpu_ns_[1], vsh_cpu_calls_[1]);
-            if (perf::g_enabled) vsh_upload_bytes_ += bytes;
+            if (perf::g_enabled && data) vsh_upload_bytes_ += bytes;
             bind_buffer_(kGlShaderStorageBuffer, vsh_buffers_[index]);
             gpu_timed_buffer_data(kGlShaderStorageBuffer, static_cast<std::ptrdiff_t>(bytes), data, kGlDynamicCopy);
             bind_buffer_base_(kGlShaderStorageBuffer, binding, vsh_buffers_[index]);
@@ -5814,8 +5868,8 @@ private:
         upload(0, 0, batch.executions.data(), batch.executions.size() * sizeof(batch.executions[0]));
         upload(1, 1, batch.ops.data(), batch.ops.size() * sizeof(batch.ops[0]));
         upload(8, 4, &batch.constants, sizeof(batch.constants));
-        upload(2, 2, outputs.data(), outputs.size() * sizeof(outputs[0]));
-        upload(3, 3, statuses.data(), statuses.size() * sizeof(statuses[0]));
+        upload(2, 2, verify ? outputs.data() : nullptr, output_count * sizeof(gpu::ProgramOutput128B));
+        upload(3, 3, verify ? statuses.data() : nullptr, statuses.size() * sizeof(statuses[0]));
         const auto uniform = [&](unsigned program, const char* name, uint32_t value) {
             const int location = cached_uniform_location(program, name);
             if (location < 0) { error = std::string("Missing GPU VSH uniform: ") + name; return false; }
@@ -5831,8 +5885,10 @@ private:
         memory_barrier_(kGlShaderStorageBarrierBit | kGlBufferUpdateBarrierBit);
         }
         upload(4, 4, batch.references.data(), batch.references.size() * sizeof(uint32_t));
-        upload(5, 5, triangle_data.data(), triangle_data.size() * sizeof(triangle_data[0]));
-        upload(6, 6, packed.data(), packed.size() * sizeof(packed[0]));
+        upload(5, 5, verify ? triangle_data.data() : nullptr,
+               (verify ? triangle_data.size() : candidates) * sizeof(std::array<uint32_t, 4>));
+        upload(6, 6, verify ? packed.data() : nullptr,
+               (verify ? packed.size() : max_vertices) * sizeof(gpu::ResidentVertex96B));
         upload(7, 7, control.data(), sizeof(control));
         {
         perf::ScopedAdd timer(vsh_cpu_ns_[3], vsh_cpu_calls_[3]);
@@ -5855,16 +5911,16 @@ private:
             bind_buffer_(kGlShaderStorageBuffer, vsh_buffers_[index]);
             get_buffer_sub_data_(kGlShaderStorageBuffer, 0, static_cast<std::ptrdiff_t>(bytes), data);
         };
-        download(2, outputs.data(), outputs.size() * sizeof(outputs[0]), 4);
+        if (verify) download(2, outputs.data(), outputs.size() * sizeof(outputs[0]), 4);
         download(3, statuses.data(), statuses.size() * sizeof(statuses[0]), 5);
-        download(5, triangle_data.data(), triangle_data.size() * sizeof(triangle_data[0]), 6);
-        download(6, packed.data(), packed.size() * sizeof(packed[0]), 7);
+        if (verify) download(5, triangle_data.data(), triangle_data.size() * sizeof(triangle_data[0]), 6);
+        if (verify) download(6, packed.data(), packed.size() * sizeof(packed[0]), 7);
         download(7, control.data(), sizeof(control), 8);
         perf::ScopedAdd verify_timer(vsh_cpu_ns_[9], vsh_cpu_calls_[9]);
         if (get_error_() != kGlNoError) { error = "GPU VSH resident compute/readback failed"; return false; }
         bool program_decline = false;
         bool numeric_decline = false, opcode_decline = false;
-        for (size_t i = 0; i < outputs.size(); ++i) {
+        for (size_t i = 0; i < statuses.size(); ++i) {
             if (i >= batch.executions.size()) {
                 if (statuses[i] != 0xdeadbeefu) return mismatch("program status tail guard");
             } else {
@@ -5872,10 +5928,10 @@ private:
                 program_decline = program_decline || statuses[i] != 0;
                 numeric_decline = numeric_decline || statuses[i] == gpu::ProgramStatus::kNumericDecline;
                 opcode_decline = opcode_decline || statuses[i] == gpu::ProgramStatus::kUnsupportedProgram;
-                if (!statuses[i] && std::memcmp(&outputs[i], &reference.expected[i], sizeof(outputs[i])))
+                if (verify && !statuses[i] && std::memcmp(&outputs[i], &reference.expected[i], sizeof(outputs[i])))
                     return mismatch("accepted program output differs from CPU");
             }
-            if (i >= batch.executions.size() || statuses[i])
+            if (verify && (i >= batch.executions.size() || statuses[i]))
                 for (const auto& vec : outputs[i].values) for (uint32_t word : vec)
                     if (word != 0xdeadbeefu) return mismatch("declined output or program tail guard");
         }
@@ -5887,7 +5943,7 @@ private:
                     if (word != 0xdeadbeefu) return mismatch("triangle tail guard");
             } else if (triangle_data[i][3] > 4) return mismatch("invalid triangle status");
         }
-        for (size_t i = control[0]; i < packed.size(); ++i) {
+        for (size_t i = control[0]; verify && i < packed.size(); ++i) {
             for (uint32_t word : packed[i].position) if (word != 0xdeadbeefu) return mismatch("packed position tail guard");
             for (uint32_t word : packed[i].diffuse) if (word != 0xdeadbeefu) return mismatch("packed diffuse tail guard");
             for (const auto& tex : packed[i].texture) for (uint32_t word : tex)
@@ -5900,9 +5956,20 @@ private:
             stats.geometry_declines += (control[1] & gpu::BatchStatusBits::kGeometryDecline) != 0;
             return true;
         }
-        if (control[0] != packet.vertices.size()) return mismatch("expanded vertex count differs from CPU");
-        for (size_t i = 0; i < packet.vertices.size(); ++i) {
-            const auto& cpu = packet.vertices[i];
+        if (!verify) {
+            ++stats.accepted;
+            stats.vertices += control[0];
+            if (++vsh_preparation_token_ == 0) ++vsh_preparation_token_;
+            reference.prepared_token = vsh_preparation_token_;
+            reference.prepared_vertices = control[0];
+            vsh_prepared_vertices_ = control[0];
+            prepared_vsh_reference_ = &reference;
+            use_gpu_buffer = true;
+            return true;
+        }
+        if (control[0] != cpu_vertices->size()) return mismatch("expanded vertex count differs from CPU");
+        for (size_t i = 0; i < cpu_vertices->size(); ++i) {
+            const auto& cpu = (*cpu_vertices)[i];
             if (std::memcmp(packed[i].position.data(), cpu.position.data(), 16) ||
                 std::memcmp(packed[i].diffuse.data(), cpu.diffuse.data(), 16) ||
                 std::memcmp(packed[i].texture.data(), cpu.texture.data(), 64))
@@ -6730,6 +6797,9 @@ private:
     bool vsh_parallel_pack_ = false;
     std::array<unsigned int, 9> vsh_buffers_{};
     VshGpuResidentStats vsh_resident_stats_{};
+    uint64_t vsh_preparation_token_ = 0;
+    uint32_t vsh_prepared_vertices_ = 0;
+    const Nv2aGenericCombinerPacket::GpuVshReference* prepared_vsh_reference_ = nullptr;
     // CPU phases are raw inclusive wall durations, not the exclusive partition.
     // Total contains every child phase plus setup/destruction. GPU times overlap
     // blocking CPU calls and must never be added to them.
