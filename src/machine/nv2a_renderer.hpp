@@ -844,8 +844,15 @@ public:
         uint64_t depth_uploads = 0;
         uint64_t depth_draws = 0;
         uint64_t compile_failures = 0;
+        uint64_t stage_uniform_scalar_calls = 0;
+        uint64_t stage_uniform_bulk_calls = 0;
+        // Number of vec4 values requested from the driver. Bulk uploads always
+        // request the full declared arrays; the GL spec ignores values beyond
+        // a linked uniform array's active length.
+        uint64_t stage_uniform_vectors = 0;
     };
     virtual GeneratedShaderStats generated_shader_stats() const { return {}; }
+    virtual void set_generated_uniform_batching(bool on) { (void)on; }
     // Diagnostic only, and KNOWN INCORRECT when on: perform every step of a
     // generated submission except the draw call. Default off, no negative
     // spelling, never a shipping path.

@@ -26,6 +26,12 @@ option(XLLE_NATIVE_OPTIMIZATIONS
 option(XLLE_DISPATCH_MICRO
   "Compile the temporary NV2A per-word dispatch micro-partition probes"
   OFF)
+# Vertex reuse shadow is a diagnostic-only probe. Keep it compiled out of
+# normal builds: the disabled integration did not establish zero overhead in
+# the canonical interleaved set. Preserve the probe in dedicated builds.
+option(XLLE_VERTEX_REUSE_DIAGNOSTICS
+  "Compile the opt-in NV2A vertex reuse shadow diagnostic plumbing"
+  OFF)
 
 include(FetchContent)
 
@@ -107,6 +113,11 @@ target_link_libraries(xlle_machine PUBLIC xlle_cpu nv2a_vsh_emulator)
 if(XLLE_DISPATCH_MICRO)
   target_compile_definitions(xlle_machine PUBLIC XLLE_DISPATCH_MICRO=1)
 endif()
+if(XLLE_VERTEX_REUSE_DIAGNOSTICS)
+  target_compile_definitions(xlle_machine PUBLIC XLLE_VERTEX_REUSE_DIAGNOSTICS=1)
+else()
+  target_compile_definitions(xlle_machine PUBLIC XLLE_VERTEX_REUSE_DIAGNOSTICS=0)
+endif()
 if(XLLE_NATIVE_OPTIMIZATIONS AND
    CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND
    CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
@@ -162,6 +173,11 @@ add_test(NAME vertex_reuse_shadow COMMAND test_vertex_reuse_shadow)
 add_executable(test_nv2a tests/test_nv2a.cpp src/machine/nv2a.cpp)
 target_include_directories(test_nv2a PRIVATE ${XLLE_INCLUDES})
 target_link_libraries(test_nv2a PRIVATE nv2a_vsh_emulator xlle_host)
+if(XLLE_VERTEX_REUSE_DIAGNOSTICS)
+  target_compile_definitions(test_nv2a PRIVATE XLLE_VERTEX_REUSE_DIAGNOSTICS=1)
+else()
+  target_compile_definitions(test_nv2a PRIVATE XLLE_VERTEX_REUSE_DIAGNOSTICS=0)
+endif()
 if(XLLE_NATIVE_OPTIMIZATIONS AND
    CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND
    CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
@@ -281,6 +297,9 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME product_window_summary
            COMMAND ${Python3_EXECUTABLE}
                    ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_product_window_summary.py)
+  add_test(NAME generated_uniform_report
+           COMMAND ${Python3_EXECUTABLE}
+                   ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_generated_uniform_report.py)
 else()
   message(STATUS "Python3 interpreter not found; skipping source guard tests")
 endif()

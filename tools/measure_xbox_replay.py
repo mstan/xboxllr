@@ -883,6 +883,7 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
     fingerprint_unique: int | None = None
     flip: dict[str, Any] | None = None
     host_present_samples: list[dict[str, Any]] = []
+    generated_uniform_samples: list[dict[str, Any]] = []
 
     # beads-xbox.1.14.1 item 3(c): counter samples are emitted as a block right
     # after each `[host] frame-series` line, plus one extra block at shutdown.
@@ -918,7 +919,12 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
 
     for raw_line in read_log_text(path).splitlines():
         line = raw_line.rstrip("\n")
-        if line.startswith("[host] present "):
+        if line.startswith("[host] generic-uniforms "):
+            sample = {}
+            for key, value in re.findall(r"(\w+)=([^\s]+)", line):
+                sample[key] = int(value) if value.isdecimal() else value
+            generated_uniform_samples.append(sample)
+        elif line.startswith("[host] present "):
             sample: dict[str, Any] = {}
             for key, value in re.findall(r"(\w+)=([^\s]+)", line):
                 try:
@@ -1109,6 +1115,7 @@ def parse_stdout(path: pathlib.Path) -> dict[str, Any]:
         "generic_fingerprint_census_sha256": census_digest,
         "flip": flip,
         "presented_frames": presented,
+        "generated_uniform_samples": generated_uniform_samples,
         "host_present_samples": host_present_samples,
         "host_present": next((s for s in reversed(host_present_samples)
                               if s.get("scope") == "cumulative"), None),

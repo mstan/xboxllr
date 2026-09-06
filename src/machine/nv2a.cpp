@@ -3392,6 +3392,7 @@ bool Nv2a::submit_vertex_batch() {
         // missing one, which is why the emptiness is NOT part of the test.
         const bool use_compiled_vsh = vsh_cache_ops_valid_;
         const uint32_t vsh_probe = vsh_unsafe_probe_;
+#if XLLE_VERTEX_REUSE_DIAGNOSTICS
         // Shadow diagnostics never skip fetch or shader work. Keep body timing
         // separate: otherwise these probes would be charged to the VSH census.
         Nv2aVertexReuseShadow* shadow = nullptr;
@@ -3413,6 +3414,7 @@ bool Nv2a::submit_vertex_batch() {
                         perf_excl::tick_now() - t, c.discarded_deltas);
             }
         }
+#endif
         const VshZeroPlan vsh_zero_plan = vsh_cache_zero_plan_;
         const VshCompiledOp* const compiled_ops = vsh_cache_ops_.data();
         const uint32_t compiled_op_count =
@@ -3437,7 +3439,9 @@ bool Nv2a::submit_vertex_batch() {
                 TransformedVertex cached_vertex;
                 if (lookup_batch_transform_cache(index, cached_vertex)) {
                     ++vertex_census_.reuse_hits;
+#if XLLE_VERTEX_REUSE_DIAGNOSTICS
                     if (shadow) ++vertex_reuse_shadow_census_.batch_cache_bypassed;
+#endif
                     emit_transformed_vertex(cached_vertex);
                     continue;
                 }
@@ -3535,6 +3539,7 @@ bool Nv2a::submit_vertex_batch() {
                                     vertex_attributes_[slot].value.data(),
                                     4 * sizeof(float));
                     }
+#if XLLE_VERTEX_REUSE_DIAGNOSTICS
                     if (shadow) {
                         const uint64_t t = vertex_reuse_shadow_timing_ ? perf_excl::tick_now() : 0;
                         shadow->observe(input_regs.data());
@@ -3545,6 +3550,7 @@ bool Nv2a::submit_vertex_batch() {
                             ++c.timed_lookups;
                         }
                     }
+#endif
                     if (use_compiled_vsh) {
                         float* bases[kVshBaseCount] = {
                             temp_regs.data(), output_regs_storage.data(),

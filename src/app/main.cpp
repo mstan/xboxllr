@@ -333,6 +333,7 @@ void print_gpu_residency_census(const xlle::Nv2a* nv, const char* scope,
             (unsigned long long)nv->vsh_verify_checked(),
             (unsigned long long)nv->vsh_verify_mismatched());
     }
+#if XLLE_VERTEX_REUSE_DIAGNOSTICS
     if (const auto* shadow = nv->vertex_reuse_shadow()) {
         const auto& s = shadow->stats();
         const auto& c = nv->vertex_reuse_shadow_census();
@@ -360,6 +361,7 @@ void print_gpu_residency_census(const xlle::Nv2a* nv, const char* scope,
             (unsigned long long)c.ineligible_verify, (unsigned long long)c.ineligible_capture,
             (unsigned long long)c.ineligible_census);
     }
+#endif
     // beads-xbox.1.15.11: the DISTINCT-program census. The compiled step form
     // is amortised over every vertex a program runs for, so the lever exists
     // only if a handful of programs carry the vertices. One row per distinct
@@ -579,6 +581,13 @@ void print_gpu_residency_census(const xlle::Nv2a* nv, const char* scope,
             nv->gpu_generic_shader_witnessed(),
             nv->gpu_generic_shader_bgra_upload() ? 1u : 0u,
             (unsigned long long)nv->generic_shader_witnessed_reroutes());
+        std::printf(
+            "[host] generic-uniforms scope=%s deadline=%llu "
+            "scalar_calls=%llu bulk_calls=%llu vectors_requested=%llu\n",
+            scope, deadline,
+            (unsigned long long)r.stage_uniform_scalar_calls,
+            (unsigned long long)r.stage_uniform_bulk_calls,
+            (unsigned long long)r.stage_uniform_vectors);
         const auto& cache = nv->generic_texture_conversion_cache();
         std::printf(
             "[host] generic-texture-cache scope=%s deadline=%llu enabled=%u "
@@ -1564,6 +1573,9 @@ int main(int argc, char** argv) {
     bool nv2a_gpu_generic_shader_image_blend = true;
     bool nv2a_gpu_generic_shader_depth = false;
     bool nv2a_gpu_generic_shader_bgra_upload = true;
+    // Experimental host submission optimization; retain scalar A arm until
+    // same-session canonical and product-window gates have passed.
+    bool nv2a_gpu_generated_uniform_batching = false;
     bool nv2a_gpu_generic_texture_cache = true;
     bool nv2a_gpu_generic_texture_trace = false;
     // PFIFO run batching (beads-xbox.1.15.1 stages (c)/(d)). Both default ON;
@@ -1928,6 +1940,10 @@ int main(int argc, char** argv) {
             nv2a_gpu_kick_flush = false;
         else if (!std::strcmp(argv[i], "--nv2a-gpu-unsafe-skip-texture-resolve"))
             nv2a_gpu_unsafe_skip_texture_resolve = true;
+        else if (!std::strcmp(argv[i], "--nv2a-gpu-generated-uniform-batching"))
+            nv2a_gpu_generated_uniform_batching = true;
+        else if (!std::strcmp(argv[i], "--no-nv2a-gpu-generated-uniform-batching"))
+            nv2a_gpu_generated_uniform_batching = false;
         else if (!std::strcmp(argv[i], "--nv2a-vertex-program-cache"))
             nv2a_vertex_program_cache = true;
         else if (!std::strcmp(argv[i], "--no-nv2a-vertex-program-cache"))
@@ -2373,6 +2389,14 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+#if !XLLE_VERTEX_REUSE_DIAGNOSTICS
+    if (nv2a_vertex_reuse_census || nv2a_vertex_reuse_timing) {
+        std::fprintf(stderr,
+                     "[host] --nv2a-vertex-reuse-census/timing requires an "
+                     "XLLE_VERTEX_REUSE_DIAGNOSTICS=ON build\n");
+        return 2;
+    }
+#endif
     if (nv2a_vertex_census && nv2a_vertex_reuse_census) {
         std::fprintf(stderr, "[host] run --nv2a-vertex-census and "
                      "--nv2a-vertex-reuse-census/timing separately; their probes overlap\n");
@@ -2392,6 +2416,7 @@ int main(int argc, char** argv) {
         nv2a_renderer->set_witnessed_kick_flush(nv2a_gpu_kick_flush);
         nv2a_renderer->set_witnessed_plane_split(nv2a_gpu_plane_split);
         nv2a_renderer->set_witnessed_ssbo_ring(nv2a_gpu_ssbo_ring);
+        nv2a_renderer->set_generated_uniform_batching(nv2a_gpu_generated_uniform_batching);
         std::string fp32_error;
         if (!nv2a_renderer->set_witnessed_fp32_shader(nv2a_gpu_fp32_shader,
                                                       fp32_error)) {
@@ -2512,8 +2537,10 @@ int main(int argc, char** argv) {
                 mach.nv2a()->set_vertex_program_cache_enabled(
                     nv2a_vertex_program_cache);
                 mach.nv2a()->set_vertex_census_enabled(nv2a_vertex_census);
+#if XLLE_VERTEX_REUSE_DIAGNOSTICS
                 mach.nv2a()->set_vertex_reuse_shadow(
                     nv2a_vertex_reuse_census, nv2a_vertex_reuse_timing);
+#endif
                 mach.nv2a()->set_vertex_fast_fetch_enabled(
                     nv2a_vertex_fast_fetch);
                 mach.nv2a()->set_vsh_compile_enabled(nv2a_vsh_compile);

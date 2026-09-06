@@ -36,7 +36,9 @@
 #include "machine/nv2a_renderer.hpp"
 #include "machine/nv2a_texture_conversion_cache.hpp"
 #include "machine/nv2a_vsh_compiled.hpp"
+#if XLLE_VERTEX_REUSE_DIAGNOSTICS
 #include "machine/nv2a_vertex_reuse_shadow.hpp"
+#endif
 #include "xlle/ring.hpp"
 
 namespace xlle {
@@ -1421,6 +1423,7 @@ public:
     bool vertex_fast_fetch_enabled() const { return vertex_fast_fetch_; }
     void set_vertex_census_enabled(bool on) { vertex_census_enabled_ = on; }
     bool vertex_census_enabled() const { return vertex_census_enabled_; }
+#if XLLE_VERTEX_REUSE_DIAGNOSTICS
     struct VertexReuseShadowCensus {
         uint64_t ineligible_nonprogrammable = 0, ineligible_context = 0;
         uint64_t ineligible_probe = 0, ineligible_verify = 0, ineligible_capture = 0;
@@ -1443,6 +1446,7 @@ public:
     const VertexReuseShadowCensus& vertex_reuse_shadow_census() const {
         return vertex_reuse_shadow_census_;
     }
+#endif
 
     // ---- phase 5 item 2: what a residency QUERY actually costs -------------
     // beads-xbox.1.15.10 phase 4 section 5 inferred ~0.9 s for the 148 317
@@ -3278,9 +3282,11 @@ private:
     VertexCensus vertex_census_{};
     VshProgramCensus vsh_program_census_{};
     bool vertex_census_enabled_ = false;
+#if XLLE_VERTEX_REUSE_DIAGNOSTICS
     std::unique_ptr<Nv2aVertexReuseShadow> vertex_reuse_shadow_;
     VertexReuseShadowCensus vertex_reuse_shadow_census_{};
     bool vertex_reuse_shadow_timing_ = false;
+#endif
     bool vertex_fast_fetch_ = true;
     ResolveQueryCensus resolve_query_census_{};
     // Set for the duration of one witnessed texture-snapshot residency query so

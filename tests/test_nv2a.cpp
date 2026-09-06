@@ -309,9 +309,262 @@ static void test_generated_texture_identity() {
     CHECK(renderer->generated_shader_stats().texture_uploads == uploads + 3);
 }
 
+static xlle::Nv2aGeneratedTriangle generated_full_surface_triangle() {
+    xlle::Nv2aGeneratedTriangle triangle;
+    triangle.bx = triangle.cy = 128;
+    triangle.bbox_xmax = triangle.bbox_ymax = 7;
+    triangle.inverse_area = triangle.inv_area_recip = 1.0f / (128 * 128);
+    triangle.inv_area_double = 1.0 / (128 * 128);
+    triangle.constant_depth = true;
+    for (auto& vertex : triangle.varying) {
+        vertex[0] = {{1, 1, 1, 1}};
+    }
+    return triangle;
+}
+
+static xlle::Nv2aGeneratedShaderPacket make_uniform_stage_packet(
+    uint8_t stage_count, bool alpha_from_stage_const1, uint32_t color_address) {
+    xlle::Nv2aGeneratedShaderPacket packet;
+    packet.surface_width = packet.surface_height = 8;
+    packet.surface_size = 8 * 8 * 4;
+    packet.surface_pitch = 0x00200020;
+    packet.surface_format = 0x128;
+    packet.color_address = color_address;
+    packet.xmax = packet.ymax = 7;
+    packet.clip_max = 16777215.0f;
+    packet.needs_color_upload = true;
+    packet.color_input.resize(packet.surface_size);
+    packet.state.needs_general_combiner = true;
+    packet.state.needs_diffuse = true;
+    packet.state.image_blend = false;
+    packet.state.fp64_interpolate = false;
+    packet.state.stage_count = stage_count;
+    packet.state.final_mode =
+        xlle::Nv2aCombinerShaderState::FinalMode::kPassthroughR0;
+    for (uint32_t stage = 0; stage < stage_count; ++stage) {
+        packet.stage_const0[stage] =
+            ((0x80u + stage) << 24) |
+            ((0x10u + stage) << 16) |
+            ((0x20u + stage) << 8) |
+            (0x30u + stage);
+        packet.stage_const1[stage] = (0xA0u + stage) << 24;
+        packet.state.color_icw[stage] = 0x01040000u; // stage_const0.rgb * diffuse.rgb
+        packet.state.alpha_icw[stage] =
+            alpha_from_stage_const1 ? 0x12140000u  // stage_const1.a * diffuse.a
+                                    : 0x11140000u; // stage_const0.a * diffuse.a
+        packet.state.color_ocw[stage] = 0x000000C0u; // AB -> R0/R[12]
+        packet.state.alpha_ocw[stage] = 0x000000C0u; // AB -> R0/R[12].a
+    }
+    packet.fingerprint = xlle::nv2a_combiner_shader_fingerprint(packet.state);
+    packet.triangles.push_back(generated_full_surface_triangle());
+    return packet;
+}
+
+static xlle::Nv2aGeneratedShaderPacket make_inactive_uniform_packet(
+    uint32_t color_address) {
+    xlle::Nv2aGeneratedShaderPacket packet;
+    packet.surface_width = packet.surface_height = 8;
+    packet.surface_size = 8 * 8 * 4;
+    packet.surface_pitch = 0x00200020;
+    packet.surface_format = 0x128;
+    packet.color_address = color_address;
+    packet.xmax = packet.ymax = 7;
+    packet.clip_max = 16777215.0f;
+    packet.needs_color_upload = true;
+    packet.color_input.resize(packet.surface_size);
+    packet.state.needs_general_combiner = false;
+    packet.state.needs_diffuse = false;
+    packet.state.image_blend = false;
+    packet.state.fp64_interpolate = false;
+    packet.state.final_mode =
+        xlle::Nv2aCombinerShaderState::FinalMode::kBlackAlphaOne;
+    packet.fingerprint = xlle::nv2a_combiner_shader_fingerprint(packet.state);
+    packet.triangles.push_back(generated_full_surface_triangle());
+    return packet;
+}
+
+static uint32_t expected_uniform_stage_color(
+    uint8_t stage_count, bool alpha_from_stage_const1) {
+    const uint32_t stage = stage_count - 1u;
+    const uint32_t alpha = alpha_from_stage_const1 ? 0xA0u + stage
+                                                   : 0x80u + stage;
+    return (alpha << 24) |
+           ((0x10u + stage) << 16) |
+           ((0x20u + stage) << 8) |
+           (0x30u + stage);
+}
+
+static bool submit_generated_and_read(
+    xlle::Nv2aRenderer& renderer,
+    const xlle::Nv2aGeneratedShaderPacket& packet,
+    uint32_t& color,
+    std::vector<uint8_t>* resolved = nullptr) {
+    CHECK(renderer.supports_generated_shader(packet));
+    std::string error;
+    xlle::Nv2aGeneratedShaderResult result;
+    CHECK(renderer.submit_generated_shader(packet, result, error));
+    CHECK(error.empty());
+    xlle::Nv2aResidentColorResolve resolve;
+    CHECK(renderer.resolve_resident_color_surface(packet.color_address,
+              packet.surface_size, resolve, error));
+    CHECK(error.empty());
+    CHECK(resolve.data.size() == packet.surface_size);
+    if (resolve.data.size() != packet.surface_size) return false;
+    color = get32(resolve.data, (1 * 8 + 1) * 4);
+    if (resolved) *resolved = resolve.data;
+    return true;
+}
+
+static void test_generated_uniform_batching() {
+    std::string error;
+    auto renderer = xlle::create_nv2a_opengl_renderer(error);
+    if (!renderer) {
+        std::printf("SKIP: generated uniform batching GL fixture: %s\n",
+                    error.c_str());
+        return;
+    }
+
+    uint32_t color = 0;
+    renderer->set_generated_uniform_batching(false);
+    auto stats = renderer->generated_shader_stats();
+    auto inactive = make_inactive_uniform_packet(0x12000);
+    CHECK(submit_generated_and_read(*renderer, inactive, color));
+    CHECK(color == 0xFF000000u);
+    auto after_inactive = renderer->generated_shader_stats();
+    CHECK(after_inactive.stage_uniform_scalar_calls ==
+          stats.stage_uniform_scalar_calls);
+    CHECK(after_inactive.stage_uniform_bulk_calls ==
+          stats.stage_uniform_bulk_calls);
+    CHECK(after_inactive.stage_uniform_vectors == stats.stage_uniform_vectors);
+
+    auto stage1_scalar = make_uniform_stage_packet(1, true, 0x13000);
+    CHECK(submit_generated_and_read(*renderer, stage1_scalar, color));
+    CHECK(color == expected_uniform_stage_color(1, true));
+    auto after_scalar = renderer->generated_shader_stats();
+    CHECK(after_scalar.stage_uniform_bulk_calls == 0);
+    CHECK(after_scalar.stage_uniform_scalar_calls >
+          after_inactive.stage_uniform_scalar_calls);
+    CHECK(after_scalar.stage_uniform_vectors ==
+          after_scalar.stage_uniform_scalar_calls);
+
+    const uint32_t scalar_reference = color;
+    renderer->set_generated_uniform_batching(true);
+    auto stage1_equal = make_uniform_stage_packet(1, true, 0x13500);
+    CHECK(submit_generated_and_read(*renderer, stage1_equal, color));
+    CHECK(color == scalar_reference);
+    auto after_bulk_equal = renderer->generated_shader_stats();
+    CHECK(after_bulk_equal.stage_uniform_bulk_calls ==
+          after_scalar.stage_uniform_bulk_calls + 2);
+    CHECK(after_bulk_equal.stage_uniform_scalar_calls ==
+          after_scalar.stage_uniform_scalar_calls);
+    CHECK(after_bulk_equal.stage_uniform_vectors ==
+          after_scalar.stage_uniform_vectors + 16);
+
+    auto stage1_bulk = make_uniform_stage_packet(1, true, 0x14000);
+    stage1_bulk.stage_const0[0] = 0xFF445566u;
+    stage1_bulk.stage_const1[0] = 0x77000000u;
+    CHECK(submit_generated_and_read(*renderer, stage1_bulk, color));
+    CHECK(color == 0x77445566u);
+    auto after_bulk_both = renderer->generated_shader_stats();
+    CHECK(after_bulk_both.stage_uniform_bulk_calls ==
+          after_bulk_equal.stage_uniform_bulk_calls + 2);
+    CHECK(after_bulk_both.stage_uniform_scalar_calls ==
+          after_bulk_equal.stage_uniform_scalar_calls);
+    CHECK(after_bulk_both.stage_uniform_vectors ==
+          after_bulk_equal.stage_uniform_vectors + 16);
+
+    auto stage1_one_active = make_uniform_stage_packet(1, false, 0x15000);
+    CHECK(submit_generated_and_read(*renderer, stage1_one_active, color));
+    CHECK(color == expected_uniform_stage_color(1, false));
+    auto after_bulk_one = renderer->generated_shader_stats();
+    CHECK(after_bulk_one.stage_uniform_bulk_calls ==
+          after_bulk_both.stage_uniform_bulk_calls + 1);
+    CHECK(after_bulk_one.stage_uniform_scalar_calls ==
+          after_bulk_both.stage_uniform_scalar_calls);
+    CHECK(after_bulk_one.stage_uniform_vectors ==
+          after_bulk_both.stage_uniform_vectors + 8);
+
+    auto stage8_bulk = make_uniform_stage_packet(8, true, 0x16000);
+    CHECK(submit_generated_and_read(*renderer, stage8_bulk, color));
+    CHECK(color == expected_uniform_stage_color(8, true));
+    auto after_stage8 = renderer->generated_shader_stats();
+    CHECK(after_stage8.stage_uniform_bulk_calls ==
+          after_bulk_one.stage_uniform_bulk_calls + 2);
+    CHECK(after_stage8.stage_uniform_scalar_calls ==
+          after_bulk_one.stage_uniform_scalar_calls);
+    CHECK(after_stage8.stage_uniform_vectors ==
+          after_bulk_one.stage_uniform_vectors + 16);
+
+    // Alternate back to the one-stage program with changed constants. This
+    // exercises program-cache reuse while proving uniforms remain per-submit
+    // state rather than program identity.
+    auto stage1_changed = make_uniform_stage_packet(1, true, 0x17000);
+    stage1_changed.stage_const0[0] = 0xCC010203u;
+    stage1_changed.stage_const1[0] = 0xEE000000u;
+    CHECK(submit_generated_and_read(*renderer, stage1_changed, color));
+    CHECK(color == 0xEE010203u);
+    auto final_stats = renderer->generated_shader_stats();
+    CHECK(final_stats.programs >= 3);
+    CHECK(final_stats.cache_hits > 0);
+    CHECK(final_stats.stage_uniform_bulk_calls ==
+          after_stage8.stage_uniform_bulk_calls + 2);
+    CHECK(final_stats.stage_uniform_scalar_calls ==
+          after_stage8.stage_uniform_scalar_calls);
+
+    renderer->set_generated_uniform_batching(true);
+    auto inactive_batched = make_inactive_uniform_packet(0x18000);
+    CHECK(submit_generated_and_read(*renderer, inactive_batched, color));
+    CHECK(color == 0xFF000000u);
+    auto after_inactive_batched = renderer->generated_shader_stats();
+    CHECK(after_inactive_batched.stage_uniform_bulk_calls ==
+          final_stats.stage_uniform_bulk_calls);
+    CHECK(after_inactive_batched.stage_uniform_scalar_calls ==
+          final_stats.stage_uniform_scalar_calls);
+    CHECK(after_inactive_batched.stage_uniform_vectors ==
+          final_stats.stage_uniform_vectors);
+
+    for (uint8_t stage_count : {uint8_t{1}, uint8_t{8}}) {
+        for (bool alpha_from_const1 : {false, true}) {
+            auto scalar_packet = make_uniform_stage_packet(
+                stage_count, alpha_from_const1,
+                0x19000u + stage_count * 0x1000u +
+                    (alpha_from_const1 ? 0x400u : 0u));
+            std::vector<uint8_t> scalar_resolved;
+            renderer->set_generated_uniform_batching(false);
+            CHECK(submit_generated_and_read(*renderer, scalar_packet, color,
+                                            &scalar_resolved));
+            CHECK(color ==
+                  expected_uniform_stage_color(stage_count, alpha_from_const1));
+
+            auto bulk_packet = scalar_packet;
+            bulk_packet.color_address += 0x20000u;
+            std::vector<uint8_t> bulk_resolved;
+            renderer->set_generated_uniform_batching(true);
+            CHECK(submit_generated_and_read(*renderer, bulk_packet, color,
+                                            &bulk_resolved));
+            CHECK(color ==
+                  expected_uniform_stage_color(stage_count, alpha_from_const1));
+            CHECK(bulk_resolved == scalar_resolved);
+        }
+    }
+
+    renderer->set_generated_uniform_batching(false);
+    auto scalar_after_bulk = make_uniform_stage_packet(1, true, 0x3A000);
+    scalar_after_bulk.stage_const0[0] = 0x99040506u;
+    scalar_after_bulk.stage_const1[0] = 0x88000000u;
+    CHECK(submit_generated_and_read(*renderer, scalar_after_bulk, color));
+    CHECK(color == 0x88040506u);
+    auto after_scalar_again = renderer->generated_shader_stats();
+    CHECK(after_scalar_again.stage_uniform_bulk_calls ==
+          after_inactive_batched.stage_uniform_bulk_calls + 6);
+    CHECK(after_scalar_again.stage_uniform_scalar_calls >
+          after_inactive_batched.stage_uniform_scalar_calls);
+}
+
 int main() {
     test_texture_conversion_cache();
     test_generated_texture_identity();
+    test_generated_uniform_batching();
     std::string fault;
     xlle::Nv2a gpu([&](const std::string& why) { fault = why; });
     // This renderer declines every accelerated route, forcing the existing

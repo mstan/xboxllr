@@ -48,6 +48,7 @@ using GlUniform1f = void (*)(int, float);
 using GlUniform2i = void (*)(int, int, int);
 using GlUniform2f = void (*)(int, float, float);
 using GlUniform4f = void (*)(int, float, float, float, float);
+using GlUniform4fv = void (*)(int, int, const float*);
 using GlGenBuffers = void (*)(int, unsigned int*);
 using GlBindBuffer = void (*)(unsigned int, unsigned int);
 using GlBufferData = void (*)(unsigned int, std::ptrdiff_t, const void*, unsigned int);
@@ -2207,8 +2208,10 @@ public:
         int loc_clip_min = -1;
         int loc_clip_max = -1;
         int loc_alpha_ref = -1;
-        int loc_stage_const0 = -1;
-        int loc_stage_const1 = -1;
+        std::array<int, 8> loc_stage_const0 =
+            {{-1, -1, -1, -1, -1, -1, -1, -1}};
+        std::array<int, 8> loc_stage_const1 =
+            {{-1, -1, -1, -1, -1, -1, -1, -1}};
         int loc_final_const0 = -1;
         int loc_final_const1 = -1;
         int loc_texture[4] = {-1, -1, -1, -1};
@@ -2255,10 +2258,13 @@ public:
         gp.loc_clip_min = cached_uniform_location(gp.program, "clip_min");
         gp.loc_clip_max = cached_uniform_location(gp.program, "clip_max");
         gp.loc_alpha_ref = cached_uniform_location(gp.program, "alpha_ref");
-        gp.loc_stage_const0 =
-            cached_uniform_location(gp.program, "stage_const0[0]");
-        gp.loc_stage_const1 =
-            cached_uniform_location(gp.program, "stage_const1[0]");
+        for (int i = 0; i < 8; ++i) {
+            char name[32];
+            std::snprintf(name, sizeof(name), "stage_const0[%d]", i);
+            gp.loc_stage_const0[i] = cached_uniform_location(gp.program, name);
+            std::snprintf(name, sizeof(name), "stage_const1[%d]", i);
+            gp.loc_stage_const1[i] = cached_uniform_location(gp.program, name);
+        }
         gp.loc_final_const0 =
             cached_uniform_location(gp.program, "final_const0");
         gp.loc_final_const1 =
@@ -2414,6 +2420,9 @@ public:
     }
     void set_generated_shader_bgra_upload(bool on) override {
         generated_bgra_upload_ = on;
+    }
+    void set_generated_uniform_batching(bool on) override {
+        generated_uniform_batching_ = on;
     }
 
     bool submit_generated_shader(const Nv2aGeneratedShaderPacket& packet,
@@ -2591,18 +2600,45 @@ public:
             out[3] = static_cast<float>((word >> 24) & 0xFFu) / 255.0f;
         };
         float c[4];
-        // Uniform ARRAY element locations are consecutive by the GL spec, so
-        // the eight per-stage constant pairs need one glGetUniformLocation
-        // each rather than eight.
-        for (int i = 0; i < 8; ++i) {
-            if (gp->loc_stage_const0 >= 0) {
-                unpack(packet.stage_const0[i], c);
-                uniform_4f_(gp->loc_stage_const0 + i, c[0], c[1], c[2], c[3]);
+        const auto upload_stage_uniforms_scalar = [&](
+            const std::array<int, 8>& locations,
+            const std::array<uint32_t, 8>& words) {
+            for (int i = 0; i < 8; ++i) {
+                if (locations[i] < 0) continue;
+                unpack(words[i], c);
+                uniform_4f_(locations[i], c[0], c[1], c[2], c[3]);
+                ++generated_stats_.stage_uniform_scalar_calls;
+                ++generated_stats_.stage_uniform_vectors;
             }
-            if (gp->loc_stage_const1 >= 0) {
-                unpack(packet.stage_const1[i], c);
-                uniform_4f_(gp->loc_stage_const1 + i, c[0], c[1], c[2], c[3]);
-            }
+        };
+        const auto upload_stage_uniforms_bulk = [&](
+            const std::array<int, 8>& locations,
+            const std::array<uint32_t, 8>& words) -> bool {
+            if (!uniform_4fv_ || locations[0] < 0) return false;
+            float values[32];
+            for (int i = 0; i < 8; ++i) unpack(words[i], values + i * 4);
+            uniform_4fv_(locations[0], 8, values);
+            ++generated_stats_.stage_uniform_bulk_calls;
+            generated_stats_.stage_uniform_vectors += 8;
+            return true;
+        };
+        // Credit to sp00nznet's xboxrecomp for motivating this narrow A/B: the
+        // local renderer keeps xlle's generated shader semantics and only
+        // changes how already-decoded stage constants enter GL. Scalar uses
+        // per-element queried locations so optimized-out array elements cannot
+        // alias unrelated uniforms. Bulk starts from element zero; per GL,
+        // values beyond a linked array's active length are ignored.
+        if (!generated_uniform_batching_ ||
+            !upload_stage_uniforms_bulk(gp->loc_stage_const0,
+                                        packet.stage_const0)) {
+            upload_stage_uniforms_scalar(gp->loc_stage_const0,
+                                         packet.stage_const0);
+        }
+        if (!generated_uniform_batching_ ||
+            !upload_stage_uniforms_bulk(gp->loc_stage_const1,
+                                        packet.stage_const1)) {
+            upload_stage_uniforms_scalar(gp->loc_stage_const1,
+                                         packet.stage_const1);
         }
         if (gp->loc_final_const0 >= 0) {
             unpack(packet.final_factor0, c);
@@ -4771,6 +4807,7 @@ public:
             error = "OpenGL 4.3 compute fixture is missing a required entry point";
             return false;
         }
+        load_gl(uniform_4fv_, "glUniform4fv");
         // beads-xbox.1.14.6: GPU timing is OPTIONAL. A driver without timer
         // queries or sync objects must still render; the report then carries
         // gpu_timing_available=0 so an empty GPU column is never misread as
@@ -6428,7 +6465,8 @@ private:
     GlUniform1i uniform_1i_ = nullptr; GlUniform1ui uniform_1ui_ = nullptr;
     GlUniform1f uniform_1f_ = nullptr;
     GlUniform2i uniform_2i_ = nullptr; GlUniform2f uniform_2f_ = nullptr;
-    GlUniform4f uniform_4f_ = nullptr; GlGenBuffers gen_buffers_ = nullptr;
+    GlUniform4f uniform_4f_ = nullptr; GlUniform4fv uniform_4fv_ = nullptr;
+    GlGenBuffers gen_buffers_ = nullptr;
     GlBindBuffer bind_buffer_ = nullptr; GlBufferData buffer_data_ = nullptr;
     GlBindBufferBase bind_buffer_base_ = nullptr; GlDispatchCompute dispatch_compute_ = nullptr;
     GlMemoryBarrier memory_barrier_ = nullptr; GlGetBufferSubData get_buffer_sub_data_ = nullptr;
@@ -6482,6 +6520,7 @@ private:
     bool generated_available_ = false;
     bool generated_nodraw_ = false;
     bool generated_bgra_upload_ = true;
+    bool generated_uniform_batching_ = false;
     struct GeneratedTextureSlot {
         unsigned int texture = 0;
         uint64_t hash = 0;

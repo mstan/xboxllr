@@ -10,8 +10,8 @@ performance conclusions; it does not erase their measurements.
 
 The owner's next request is a whole-pipeline reassessment and concrete borrowable
 A/B candidates. Source and measurements were rechecked at `38eba85`. The
-independent play instance remains active; measured runs require a quiet host and
-must not reuse that instance.
+independent play instance was kept separate and had exited before the new timed
+sets began. Measured runs require a quiet host and must not reuse that instance.
 
 The first bounded candidate, informed by sp00nznet's bulk constant-buffer
 submission, is generated-stage uniform batching: at most sixteen `glUniform4f`
@@ -51,13 +51,53 @@ be interpreted as software rasterization. This is one attribution run, not a
 noperf retention set. Details and probe perturbation are in
 `PERF-TIMERS-2026-09-06.md`.
 
-First close the pending default-off vertex-diagnostic overhead gate, then run the
-uniform correctness/call-count experiment and its A/B. Larger GPU vertex work
-follows the critical-path and data-ownership review. The returned-dashboard
+The first checks were the disabled vertex-diagnostic overhead set and the
+uniform correctness/call-count A/B; their completed results are below. Larger
+GPU vertex work follows the critical-path and data-ownership review. The returned-dashboard
 capacity previously measured about 12 guest-equivalent FPS; reaching 60 requires
 roughly five times that capacity, and a proposed 20% reserve roughly six times.
 These ratios describe the gap in that workload, not proof of a ceiling or a
 prediction that any listed experiment will close it.
+
+The disabled vertex-diagnostic set is now complete: all three pairs favor the
+pre-diagnostic executable, with 1.66% median / 1.50% minimum regression. All 28
+images and stable guest state agree across six legs. With 4.06% / 4.41% CV and
+within-session drift, this does not isolate a precise branch cost, but it fails
+to establish free instrumentation. The diagnostic is now isolated behind
+`XLLE_VERTEX_REUSE_DIAGNOSTICS`, default OFF; both builds pass CTest and the ON
+smoke verifies observations. Preserve its measured negative settled reuse
+result. Uniform comparisons keep the diagnostic configuration equal in both
+arms. No speedup is claimed from compile-time isolation alone. Details:
+`PERF-VERTEX-REUSE-2026-09-06.md`.
+
+The generated-uniform A/B is complete on the final normal build: 4,744 scalar
+calls become 593 bulk calls with all 28 images and stable state exact across
+six runs, but median/minimum wall regress 1.56% / 0.71% and the 5% gate rejects.
+The earlier contaminated set is retained separately. Bulk stays default off;
+safe scalar locations and their GL tests are retained for correctness. The
+final reference replay accepts 31/31 checks (two identity skips) and reproduces
+all 28 PPMs from the accepted reference run. See `PERF-UNIFORMS-2026-09-06.md`.
+
+The follow-up source audit confirms a gap in generated-submit CPU attribution:
+the broad GL scope includes program/surface ensure, texture identity and upload
+calls, triangle-record packing, SSBO submission, uniforms, fixed state,
+draw/barrier and cleanup/error checks. The `gpu_timed_*` wrappers measure GPU
+query intervals, not a CPU subdivision of those operations. The existing named
+non-resolve CPU counters account for approximately 1.1363 s of the settled
+2.7294 s GL bucket; the 1.5931 s difference is unassigned, not demonstrated
+uniform overhead. Add opt-in generated CPU scopes and issuance-window GPU query
+tags before choosing buffer reuse or packing changes. Do not drain the GPU to
+make a timing report easier to collect.
+
+GPU VSH needs an integrated path: `submit_vertex_batch` materializes CPU
+positions/varyings, then generated raster setup consumes them for finiteness,
+culling, area, bounding boxes, depth slope and packed triangle records. The
+first candidate must include those consumers or measure the cost of returning
+results to the CPU. Exclude context-writing shaders and raw-output diagnostics
+until modeled. The 2.248 s instrumented VSH-body census sizes an opportunity; it
+is not a demonstrated end-to-end saving, especially given measured probe
+perturbation. Exact CPU specialization of the dominant program is a separate
+candidate that avoids that ownership transition.
 
 ## Acceptance and budgets
 

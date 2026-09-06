@@ -1,8 +1,12 @@
 # Decoded vertex reuse: first shadow candidate
 
 Tracker: `beads-xbox.1.15.11`. This is a diagnostic, not a transform-output cache.
-Every eligible shader still executes, and no input fetch or output emission is
-skipped. The table is allocated only with `--nv2a-vertex-reuse-census`; adding
+It requires a dedicated build configured with
+`-DXLLE_VERTEX_REUSE_DIAGNOSTICS=ON` (default OFF). Normal builds omit the probe's
+members/API and hot-loop branches, and clearly reject its CLI flags before
+renderer creation or emulation. Every eligible shader still executes, and no
+input fetch or output emission is skipped. In a diagnostic build, the table is
+allocated only with `--nv2a-vertex-reuse-census`; adding
 timing uses `--nv2a-vertex-reuse-timing` (which also enables the census).
 
 The candidate keeps the most recent exact program/start/constants/compiled-mode
@@ -53,6 +57,35 @@ different candidates requiring new evidence. The counters report requested
 memcmp lengths, not the number of bytes libc actually inspected. Report `batches`
 means eligible batches; `bytes` is the entire diagnostic object's footprint.
 
-Normal-runtime overhead of adding the disabled diagnostic branch has not yet been
-measured in an interleaved set. Further measured runs are paused while the owner
-uses their independent play copy of upstream `123b7a8` (outside the build tree).
+## Disabled diagnostic overhead
+
+After the independent play process exited, `build/uniform-ab/shadow-20260906-r1`
+compared preserved pre-diagnostic and diagnostic executables, noperf, interleaved
+3+3 in one session. The diagnostic was disabled in every leg. Actual executable
+SHA-256 prefixes are `f7cc37fa6f7e3113` (A) and `586d2cf3b9973447` (B); these are
+preserved build artifacts, not binaries rebuilt from today's working tree.
+
+| Pair | Before (s) | Diagnostic compiled in, disabled (s) |
+|---|---:|---:|
+| 1 | 56.7650816 | 57.5706795 |
+| 2 | 56.7222820 | 57.7101464 |
+| 3 | 60.8274881 | 62.1530655 |
+
+Median wall regresses **1.6649%**, minimum **1.4957%**; all pairs favor A.
+The formal 5% improvement gate rejects. CV is 4.06% / 4.41%, with noticeable
+within-session drift, so this is not a precise causal measurement of a branch's
+cost. It does not support a zero-overhead claim. The process censuses are clean,
+with idle Beads/Python residents excluded by the recorded narrow pattern.
+All 28 PPMs and stable retired/scanout/flip/input/idle/device/DMA/generic/seam and
+checkpoint timeline fields match across all six runs (`*-fidelity.json`).
+
+Decision applied: preserve the diagnostic and disproved cache candidate, but
+isolate its integration at compile time. Both ON and OFF native release builds
+pass CTest 33/33. The ON-build 500 M smoke replay exercises 942,199 observations
+and 762,004 already-cached vertex bypasses; this short startup workload does not
+replace the settled-window reuse measurement above. Both flags on the OFF build
+exit 2 with an explicit build-option message before renderer/emulation. The
+standalone shadow helper and its counterexample tests remain available in either
+configuration. These checks establish the build separation and capability;
+they do not establish a measured speedup from compiling it out. The final
+uniform experiment uses the same OFF configuration in both arms.
