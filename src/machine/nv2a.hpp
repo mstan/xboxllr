@@ -40,6 +40,7 @@
 #include "machine/nv2a_vsh_dot_prefix.hpp"
 #if XLLE_VSH_CAPTURE
 #include "machine/nv2a_vsh_capture.hpp"
+#include "machine/nv2a_vsh_batch_capture.hpp"
 #endif
 #ifndef XLLE_VSH_DRAW_OVERLAP_CENSUS
 #define XLLE_VSH_DRAW_OVERLAP_CENSUS 0
@@ -1404,6 +1405,17 @@ public:
         vsh_capture_stats_ = {};
     }
     const VshCaptureStats& vsh_capture_stats() const { return vsh_capture_stats_; }
+    struct VshBatchCaptureStats {
+        uint64_t batches = 0, eligible = 0, selected = 0, written = 0;
+    };
+    void set_vsh_batch_capture(uint64_t interval, uint32_t budget,
+        std::function<bool(const vsh_batch_capture::Batch&)> callback) {
+        vsh_batch_capture_interval_ = interval;
+        vsh_batch_capture_budget_ = budget;
+        vsh_batch_capture_callback_ = std::move(callback);
+        vsh_batch_capture_stats_ = {};
+    }
+    const VshBatchCaptureStats& vsh_batch_capture_stats() const { return vsh_batch_capture_stats_; }
 #endif
     // The pre-decoded step form. DEFAULT ON; --no-nv2a-vsh-compile runs the
     // vendored nv2a_vsh_emu_execute on the same binary, which is the arm the
@@ -2900,6 +2912,11 @@ private:
     uint64_t vsh_capture_interval_ = 0;
     uint32_t vsh_capture_budget_ = 0;
     std::function<void(const vsh_capture::Vertex&)> vsh_capture_callback_;
+    VshBatchCaptureStats vsh_batch_capture_stats_{};
+    uint64_t vsh_batch_capture_interval_ = 0;
+    uint32_t vsh_batch_capture_budget_ = 0;
+    std::function<bool(const vsh_batch_capture::Batch&)> vsh_batch_capture_callback_;
+    std::vector<vsh_capture::Op> capture_vsh_ops() const;
     void capture_vsh_vertex(bool eligible, uint64_t fingerprint,
                             const float* inputs, const float* outputs, const float* post_position);
 #endif
@@ -3187,6 +3204,9 @@ private:
     // the executor reads the JOB and the ownership is already correct when
     // stage (e) moves execution off the emulation thread.
     struct DrawJob {
+#if XLLE_VSH_CAPTURE
+        std::unique_ptr<vsh_batch_capture::Batch> vsh_batch_capture;
+#endif
         // --- identity / ordering ---------------------------------------------
         uint64_t seq = 0;               // <- vertex_batches_
         uint32_t profile = 0;           // <- the witnessed Profile ladder result

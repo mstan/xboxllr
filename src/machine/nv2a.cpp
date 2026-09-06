@@ -2670,6 +2670,13 @@ void Nv2a::capture_vsh_vertex(bool eligible, uint64_t fingerprint,
     for (size_t i = 0; i < vsh_capture::kConsumedOutputs.size(); ++i)
         std::memcpy(vertex.expected.data() + i * 4,
                     outputs + vsh_capture::kConsumedOutputs[i] * 4, 4 * sizeof(float));
+    vertex.ops = capture_vsh_ops();
+    vsh_capture_callback_(vertex);
+    ++stats.samples;
+}
+
+std::vector<vsh_capture::Op> Nv2a::capture_vsh_ops() const {
+    std::vector<vsh_capture::Op> result;
     for (const auto& source : vsh_cache_ops_) {
         vsh_capture::Op op;
         auto& w = op.words;
@@ -2684,10 +2691,9 @@ void Nv2a::capture_vsh_vertex(bool eligible, uint64_t fingerprint,
         w[16] = source.out_base[0]; w[17] = source.out_base[1];
         w[18] = source.out_offset[0]; w[19] = source.out_offset[1];
         w[20] = source.out_mask[0]; w[21] = source.out_mask[1];
-        vertex.ops.push_back(op);
+        result.push_back(op);
     }
-    vsh_capture_callback_(vertex);
-    ++stats.samples;
+    return result;
 }
 #endif
 
@@ -2767,6 +2773,15 @@ void Nv2a::draw_worker_main() {
 // bounded and small; these two are not.
 uint64_t Nv2a::draw_job_bytes(const DrawJob& job) {
     uint64_t bytes = job.vertices.capacity() * sizeof(TransformedVertex);
+#if XLLE_VSH_CAPTURE
+    if (job.vsh_batch_capture) {
+        const auto& batch = *job.vsh_batch_capture;
+        bytes += sizeof(batch) + batch.ops.capacity() * sizeof(vsh_capture::Op) +
+            batch.executions.capacity() * sizeof(vsh_batch_capture::Execution) +
+            (batch.references.capacity() + batch.source_indices.capacity() +
+             batch.expected_indices.capacity()) * sizeof(uint32_t);
+    }
+#endif
     bytes += job.texture_data.capacity();
     bytes += job.projected_texture_data.capacity();
     bytes += job.linear_blit_texture_data.capacity();
@@ -3438,6 +3453,38 @@ bool Nv2a::submit_vertex_batch() {
     }
     transformed_batch_.clear();
     transformed_batch_.reserve(vertex_count);
+#if XLLE_VSH_CAPTURE
+    std::unique_ptr<vsh_batch_capture::Batch> captured_batch;
+    if (vsh_batch_capture_callback_) {
+        auto& stats = vsh_batch_capture_stats_;
+        ++stats.batches;
+        if (program_parsed && vsh_cache_ops_valid_ && !program_writes_context &&
+            !vsh_unsafe_probe_ && vsh_capture_plan_supported_ && !vsh_cache_ops_.empty() &&
+            vsh_cache_ops_.size() <= vsh_capture::kMaxOps &&
+            vertex_count >= 3 && vertex_count <= vsh_batch_capture::kMaxReferences &&
+            primitive_mode_ >= 5 && primitive_mode_ <= 7) {
+            ++stats.eligible;
+            if (vsh_batch_capture_interval_ &&
+                (stats.eligible - 1) % vsh_batch_capture_interval_ == 0 &&
+                stats.selected < vsh_batch_capture_budget_) {
+                ++stats.selected;
+                captured_batch = std::make_unique<vsh_batch_capture::Batch>();
+                // The existing vertex_batches_ counter is telemetry-gated.
+                // Capture ordering must also work with telemetry disabled.
+                captured_batch->sequence = stats.batches;
+                captured_batch->fingerprint = census_row ? census_row->fingerprint : 0;
+                captured_batch->primitive_mode = primitive_mode_;
+                captured_batch->ops = capture_vsh_ops();
+                std::memcpy(captured_batch->constants.data(), transform_constants_.data(),
+                            sizeof(captured_batch->constants));
+                captured_batch->executions.reserve(vertex_count);
+                captured_batch->references.reserve(vertex_count);
+                captured_batch->source_indices.reserve(vertex_count);
+            }
+        }
+    }
+    std::array<uint32_t, 1024> capture_cache_ids{};
+#endif
 
     constexpr size_t kBatchTransformCacheEntries = 1024;
 
@@ -3452,6 +3499,9 @@ bool Nv2a::submit_vertex_batch() {
     if (indexed && program_parsed && !program_writes_context && vertex_count >= 64) {
         batch_transform_cache.emplace();
     }
+#if XLLE_VSH_CAPTURE
+    if (captured_batch) captured_batch->cache_enabled = batch_transform_cache.has_value();
+#endif
     auto batch_transform_cache_base = [](uint32_t index) {
         const uint32_t mixed = index ^ (index >> 4) ^ (index >> 9);
         return static_cast<size_t>(mixed & (kBatchTransformCacheEntries - 1));
@@ -3572,6 +3622,10 @@ bool Nv2a::submit_vertex_batch() {
                 if (lookup_batch_transform_cache(index, cached_vertex)) {
 #if XLLE_VSH_CAPTURE
                     if (vsh_capture_callback_) ++vsh_capture_stats_.cache_hits;
+                    if (captured_batch) {
+                        captured_batch->source_indices.push_back(index);
+                        captured_batch->references.push_back(capture_cache_ids[batch_transform_cache_base(index)]);
+                    }
 #endif
                     ++vertex_census_.reuse_hits;
 #if XLLE_VSH_DRAW_OVERLAP_CENSUS
@@ -3754,6 +3808,22 @@ bool Nv2a::submit_vertex_batch() {
                 capture_vsh_vertex(use_compiled_vsh && !program_writes_context && !vsh_probe,
                     census_row ? census_row->fingerprint : 0,
                     input_regs.data(), output_regs, vertex.position.data());
+                if (captured_batch) {
+                    vsh_batch_capture::Execution execution;
+                    std::memcpy(execution.inputs.data(), input_regs.data(), sizeof(execution.inputs));
+                    for (size_t i = 0; i < vsh_capture::kConsumedOutputs.size(); ++i)
+                        std::memcpy(execution.expected.data() + i * 4,
+                            output_regs + vsh_capture::kConsumedOutputs[i] * 4, 4 * sizeof(float));
+                    std::memcpy(execution.expected.data() + 28, vertex.position.data(), 4 * sizeof(float));
+                    const uint32_t id = static_cast<uint32_t>(captured_batch->executions.size());
+                    const uint32_t source = indexed ? vertex_indices_[vertex_index] :
+                        static_cast<uint32_t>(vertex_index);
+                    captured_batch->executions.push_back(execution);
+                    captured_batch->source_indices.push_back(source);
+                    captured_batch->references.push_back(id);
+                    if (captured_batch->cache_enabled)
+                        capture_cache_ids[batch_transform_cache_base(source)] = id;
+                }
 #endif
                 if (vertex_census_on) {
                     const uint64_t d = perf_excl::tick_now() - vsh_start;
@@ -3920,6 +3990,9 @@ bool Nv2a::submit_vertex_batch() {
     // half and write their results into the job.
     DrawJob job;
     latch_draw_job(job);
+#if XLLE_VSH_CAPTURE
+    job.vsh_batch_capture = std::move(captured_batch);
+#endif
 #if XLLE_VSH_DRAW_OVERLAP_CENSUS
     job.vsh_overlap = overlap_job;
 #endif
@@ -11429,6 +11502,34 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                     surface_pitch == 0x00401400 && surface_height == 960 &&
                     clip_x == 0 && clip_y == 0 && clip_width == 1280 &&
                     clip_height == 960;
+#if XLLE_VSH_CAPTURE
+                auto* captured = job.vsh_batch_capture.get();
+                if (captured) {
+                    captured->large_target = resident_primary_large_dashboard_target;
+                    captured->cull_enabled = cull_enabled;
+                    captured->cull_front = cull_front;
+                    // Check the captured cache map against the actual packet,
+                    // independently of the codec's reconstructed cache model.
+                    if (captured->references.size() != packet.vertices.size())
+                        throw std::runtime_error("VSH batch capture reference count mismatch");
+                    for (size_t i = 0; i < packet.vertices.size(); ++i) {
+                        const auto& expected = captured->executions.at(captured->references[i]).expected;
+                        const auto& vertex = packet.vertices[i];
+                        if (std::memcmp(expected.data() + 28, vertex.position.data(), 16) ||
+                            std::memcmp(expected.data() + 4, vertex.diffuse.data(), 16) ||
+                            std::memcmp(expected.data() + 8, vertex.specular.data(), 16) ||
+                            std::memcmp(expected.data() + 12, vertex.texture.data(), 64))
+                            throw std::runtime_error("VSH batch capture cache/packet mismatch");
+                    }
+                }
+                const auto capture_triangle = [&](const Nv2aGenericCombinerVertex* a,
+                    const Nv2aGenericCombinerVertex* b, const Nv2aGenericCombinerVertex* c) {
+                    if (!captured) return;
+                    for (const auto* vertex : {a, b, c})
+                        captured->expected_indices.push_back(
+                            captured->references.at(static_cast<size_t>(vertex - packet.vertices.data())));
+                };
+#endif
                 auto fixed_xy = [](float value, int64_t& fixed) {
                     if (!std::isfinite(value)) return false;
                     const double rounded =
@@ -11490,6 +11591,9 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                         expanded.push_back(*a);
                         expanded.push_back(*b);
                         expanded.push_back(*c);
+#if XLLE_VSH_CAPTURE
+                        capture_triangle(a, b, c);
+#endif
                         return true;
                     }
                     int64_t ax = 0, ay = 0, bx = 0, by = 0, cx = 0, cy = 0;
@@ -11515,6 +11619,9 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                     expanded.push_back(*a);
                     expanded.push_back(*b);
                     expanded.push_back(*c);
+#if XLLE_VSH_CAPTURE
+                    capture_triangle(a, b, c);
+#endif
                     return true;
                 };
                 bool expanded_ok = true;
@@ -11533,6 +11640,13 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                     for (size_t i = 2; expanded_ok && i < packet.vertices.size(); ++i)
                         expanded_ok = append_triangle(0, i - 1, i);
                 }
+#if XLLE_VSH_CAPTURE
+                if (captured) {
+                    captured->expected_decline = !expanded_ok;
+                    if (!expanded_ok) captured->expected_indices.clear();
+                    if (vsh_batch_capture_callback_(*captured)) ++vsh_batch_capture_stats_.written;
+                }
+#endif
                 if (expanded_ok && !expanded.empty()) {
                     if (generic_vertex_scratch_enabled_) {
                         packet.vertices.swap(expanded);

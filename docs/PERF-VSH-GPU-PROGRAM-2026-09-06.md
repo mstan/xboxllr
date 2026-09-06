@@ -136,7 +136,9 @@ setup, or guard failure; 3 means GPU output differs; 4 means accepted records
 match but some records decline. Always retain the counts with the exit code.
 Restore both CMake options to OFF for normal builds.
 
-The next implementation must retain complete batch ownership and the original
+The follow-up in `PERF-VSH-GPU-BATCH-2026-09-06.md` now retains complete batch
+ownership and validates a GPU triangle dispatch consuming GPU VSH output.
+A production implementation must retain complete batch ownership and the original
 reference/index-cache mapping, then move triangle preparation with the GPU VSH
 consumer. It must preserve finite-position checks, signed W classification,
 area/cull rules, and destination ordering, including a defined decline before

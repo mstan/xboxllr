@@ -14,6 +14,9 @@
 #include "host/nv2a_vsh_dot_probe_fp64_glsl.hpp"
 #include "host/nv2a_vsh_program_probe_glsl.hpp"
 #include "nv2a_vsh_capture_oracle.hpp"
+#include "nv2a_vsh_triangle_oracle.hpp"
+#include "host/nv2a_vsh_triangle_probe_glsl.hpp"
+#include "nv2a_vsh_batch_probe_cases.hpp"
 
 namespace probe = xlle::vsh_shadow_probe;
 
@@ -37,11 +40,16 @@ int main(int argc, char** argv) try {
     bool fp64 = false;
     bool program_self_test = false;
     const char* capture_path = nullptr;
+    const char* batch_path = nullptr;
+    bool batch_self_test = false;
     if (argc == 2 && std::string_view(argv[1]) == "--fp64-rounding") fp64 = true;
     else if (argc == 2 && std::string_view(argv[1]) == "--program-self-test") program_self_test = true;
     else if (argc == 3 && std::string_view(argv[1]) == "--program-capture") capture_path = argv[2];
-    else if (argc != 1) throw std::runtime_error("Usage: xlle_vsh_dot_probe [--fp64-rounding | --program-self-test | --program-capture path]");
-    const bool program_mode = capture_path || program_self_test;
+    else if (argc == 3 && std::string_view(argv[1]) == "--batch-capture") batch_path = argv[2];
+    else if (argc == 2 && std::string_view(argv[1]) == "--batch-self-test") batch_self_test = true;
+    else if (argc != 1) throw std::runtime_error("Usage: xlle_vsh_dot_probe [--fp64-rounding | --program-self-test | --program-capture path | --batch-capture path | --batch-self-test]");
+    const bool batch_mode = batch_path || batch_self_test;
+    const bool program_mode = capture_path || program_self_test || batch_mode;
     Context context;
     if (!SDL_Init(SDL_INIT_VIDEO)) throw std::runtime_error(SDL_GetError());
     if (!SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4) ||
@@ -111,7 +119,54 @@ int main(int argc, char** argv) try {
 
     if (program_mode) {
         namespace capture = xlle::vsh_capture;
-        auto vertices = program_self_test ? xlle::vsh_capture_oracle::make_program_probe_cases() : capture::read(capture_path);
+        const auto batches = batch_self_test ? xlle::vsh_shadow_probe::make_batch_probe_cases() :
+            batch_path ? xlle::vsh_batch_capture::read(batch_path) :
+            std::vector<xlle::vsh_batch_capture::Batch>{};
+        if (batch_mode && batches.empty()) throw std::runtime_error("Empty batch capture");
+        GLuint triangle_program = 0;
+        if (batch_mode) {
+            const char* text = probe::kTriangleComputeSource.data();
+            const GLint size = static_cast<GLint>(probe::kTriangleComputeSource.size());
+            const GLuint triangle_shader = CreateShader(GL_COMPUTE_SHADER);
+            ShaderSource(triangle_shader, 1, &text, &size);
+            CompileShader(triangle_shader);
+            GetShaderiv(triangle_shader, GL_COMPILE_STATUS, &ok);
+            if (!ok) {
+                GetShaderInfoLog(triangle_shader, static_cast<GLsizei>(log.size()), nullptr, log.data());
+                throw std::runtime_error(log.data());
+            }
+            triangle_program = CreateProgram();
+            AttachShader(triangle_program, triangle_shader);
+            LinkProgram(triangle_program);
+            GetProgramiv(triangle_program, GL_LINK_STATUS, &ok);
+            if (!ok) {
+                GetProgramInfoLog(triangle_program, static_cast<GLsizei>(log.size()), nullptr, log.data());
+                throw std::runtime_error(log.data());
+            }
+            DeleteShader(triangle_shader);
+        }
+        size_t total_mismatches = 0, total_declines = 0, total_executions = 0;
+        size_t total_refs = 0, total_expanded = 0, triangle_declines = 0;
+        for (size_t batch_index = 0; batch_index < (batch_mode ? batches.size() : 1); ++batch_index) {
+        const auto* batch = batch_mode ? &batches[batch_index] : nullptr;
+        std::vector<capture::Vertex> vertices;
+        if (batch) {
+            const auto oracle = xlle::vsh_triangle_oracle::expand_resident_primary(*batch);
+            if (oracle.declined != batch->expected_decline || oracle.indices != batch->expected_indices)
+                throw std::runtime_error("Captured CPU triangles differ from independent oracle, batch " +
+                                         std::to_string(batch->sequence));
+            for (const auto& execution : batch->executions) {
+                capture::Vertex vertex;
+                vertex.ordinal = vertices.size() + 1;
+                vertex.fingerprint = batch->fingerprint;
+                vertex.ops = batch->ops;
+                vertex.inputs = execution.inputs;
+                vertex.constants = batch->constants;
+                std::copy_n(execution.expected.begin(), 28, vertex.expected.begin());
+                std::copy_n(execution.expected.begin() + 28, 4, vertex.post_position.begin());
+                vertices.push_back(std::move(vertex));
+            }
+        } else vertices = program_self_test ? xlle::vsh_capture_oracle::make_program_probe_cases() : capture::read(capture_path);
         if (program_self_test) {
             // Deliberate reciprocal/sqrt boundaries and wide finite inputs.
             const std::array<uint32_t, 20> edges{0u, 0x80000000u, 1u, 0x80000001u,
@@ -173,8 +228,8 @@ int main(int argc, char** argv) try {
         std::vector<std::array<uint32_t, 32>> actual((groups + 1) * 64);
         std::vector<uint32_t> status(actual.size(), 0xdeadbeefu);
         for (auto& item : actual) item.fill(0xdeadbeefu);
-        GLuint buffers[4]{};
-        GenBuffers(4, buffers);
+        GLuint buffers[6]{};
+        GenBuffers(6, buffers);
         const auto upload = [&](unsigned slot, const void* data, size_t bytes) {
             BindBuffer(GL_SHADER_STORAGE_BUFFER, buffers[slot]);
             BufferData(GL_SHADER_STORAGE_BUFFER, bytes, data, GL_DYNAMIC_READ);
@@ -190,11 +245,39 @@ int main(int argc, char** argv) try {
         Uniform1ui(location, static_cast<GLuint>(vertices.size()));
         DispatchCompute(static_cast<GLuint>(groups), 1, 1);
         MemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_BUFFER_UPDATE_BARRIER_BIT);
+        std::vector<std::array<uint32_t, 4>> triangles;
+        size_t triangle_count = 0;
+        if (batch) {
+            triangle_count = batch->primitive_mode == 5 ? batch->references.size() / 3 :
+                batch->references.size() >= 3 ? batch->references.size() - 2 : 0;
+            const size_t triangle_groups = (triangle_count + 63) / 64;
+            triangles.resize((triangle_groups + 1) * 64);
+            for (auto& item : triangles) item.fill(0xdeadbeefu);
+            upload(4, batch->references.data(), batch->references.size() * sizeof(uint32_t));
+            upload(5, triangles.data(), triangles.size() * sizeof(triangles[0]));
+            UseProgram(triangle_program);
+            const auto uniform = [&](const char* name, uint32_t value) {
+                const GLint loc = GetUniformLocation(triangle_program, name);
+                if (loc < 0) throw std::runtime_error(std::string("Missing triangle uniform ") + name);
+                Uniform1ui(loc, value);
+            };
+            uniform("u_reference_count", static_cast<uint32_t>(batch->references.size()));
+            uniform("u_primitive", batch->primitive_mode);
+            uniform("u_large_target", batch->large_target);
+            uniform("u_cull_enabled", batch->cull_enabled);
+            uniform("u_cull_front", batch->cull_front);
+            if (triangle_groups) DispatchCompute(static_cast<GLuint>(triangle_groups), 1, 1);
+            MemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_BUFFER_UPDATE_BARRIER_BIT);
+        }
         Finish();
         BindBuffer(GL_SHADER_STORAGE_BUFFER, buffers[2]);
         GetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, actual.size() * sizeof(actual[0]), actual.data());
         BindBuffer(GL_SHADER_STORAGE_BUFFER, buffers[3]);
         GetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, status.size() * sizeof(status[0]), status.data());
+        if (batch) {
+            BindBuffer(GL_SHADER_STORAGE_BUFFER, buffers[5]);
+            GetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, triangles.size() * sizeof(triangles[0]), triangles.data());
+        }
         if (GetError() != GL_NO_ERROR) throw std::runtime_error("Program probe GL error");
         size_t mismatches = 0, numeric_declines = 0, program_declines = 0;
         for (size_t i = 0; i < actual.size(); ++i) {
@@ -246,8 +329,52 @@ int main(int argc, char** argv) try {
         std::cout << "program_records=" << vertices.size() << " cpu_revalidated=" << vertices.size()
                   << " numeric_declines=" << numeric_declines << " program_declines=" << program_declines
                   << " mismatched_lanes=" << mismatches << " guard=ok\n";
-        DeleteBuffers(4, buffers); DeleteProgram(program); DeleteShader(shader);
-        return mismatches ? 3 : (numeric_declines || program_declines) ? 4 : 0;
+        if (batch) {
+            bool geometry_decline = false, vertex_decline = false;
+            std::vector<uint32_t> indices;
+            for (size_t i = 0; i < triangles.size(); ++i) {
+                const auto& item = triangles[i];
+                if (i >= triangle_count) {
+                    for (uint32_t word : item)
+                        if (word != 0xdeadbeefu) throw std::runtime_error("Triangle tail guard overwritten");
+                    continue;
+                }
+                if (item[3] > 3u) throw std::runtime_error("Invalid or missing triangle status");
+                if (item[3] == 1u) indices.insert(indices.end(), item.begin(), item.begin() + 3);
+                else {
+                    if (item[0] || item[1] || item[2]) throw std::runtime_error("Dropped triangle indices written");
+                    geometry_decline = geometry_decline || item[3] == 2u;
+                    vertex_decline = vertex_decline || item[3] == 3u;
+                }
+            }
+            // Production must fall back for the entire batch before writing a
+            // destination. This shadow validates the ordered candidate stream.
+            const bool vsh_declined = numeric_declines || program_declines;
+            if (vertex_decline && !vsh_declined) throw std::runtime_error("Spurious triangle VSH decline");
+            if (geometry_decline || vsh_declined) indices.clear();
+            if (!vsh_declined && (geometry_decline != batch->expected_decline || indices != batch->expected_indices)) {
+                ++mismatches;
+                std::cout << "triangle_mismatch sequence=" << batch->sequence << '\n';
+            }
+            if (geometry_decline || vsh_declined) ++triangle_declines;
+            total_refs += batch->references.size();
+            total_expanded += indices.size();
+            std::cout << "batch sequence=" << batch->sequence << " refs=" << batch->references.size()
+                      << " executions=" << vertices.size() << " expanded=" << indices.size()
+                      << " geometry_decline=" << geometry_decline << " vsh_decline=" << vsh_declined << " guard=ok\n";
+        }
+        total_mismatches += mismatches;
+        total_declines += numeric_declines + program_declines;
+        total_executions += vertices.size();
+        DeleteBuffers(6, buffers);
+        }
+        if (batch_mode)
+            std::cout << "batch_records=" << batches.size() << " executions=" << total_executions
+                      << " refs=" << total_refs << " expanded=" << total_expanded
+                      << " declined_batches=" << triangle_declines << " mismatches=" << total_mismatches << '\n';
+        if (triangle_program) DeleteProgram(triangle_program);
+        DeleteProgram(program); DeleteShader(shader);
+        return total_mismatches ? 3 : (total_declines || triangle_declines) ? 4 : 0;
     }
 
     static_assert(sizeof(probe::DotInput) == 32);

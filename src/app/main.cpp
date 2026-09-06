@@ -1778,8 +1778,12 @@ int main(int argc, char** argv) {
     const char* debug_vsh_capture_path = nullptr;
     uint64_t debug_vsh_capture_interval = 0;
     uint32_t debug_vsh_capture_budget = 0;
+    const char* debug_vsh_batch_capture_path = nullptr;
+    uint64_t debug_vsh_batch_capture_interval = 0;
+    uint32_t debug_vsh_batch_capture_budget = 0;
 #if XLLE_VSH_CAPTURE
     std::unique_ptr<vsh_capture::Writer> vsh_capture_writer;
+    std::unique_ptr<vsh_batch_capture::Writer> vsh_batch_capture_writer;
 #endif
     uint32_t nv2a_gpu_ssbo_ring = 4;
     // beads-xbox.1.15.10 step 2. DEFAULT ON with the executor: FP64 in the
@@ -2132,6 +2136,20 @@ int main(int argc, char** argv) {
                 !parse_u32_arg(argv[++i], debug_vsh_capture_budget) ||
                 !debug_vsh_capture_budget || debug_vsh_capture_budget > 16384) {
                 std::fprintf(stderr, "Invalid VSH capture path, interval, or count (1..16384)\n");
+                return 2;
+            }
+        }
+        else if (!std::strcmp(argv[i], "--debug-vsh-batch-capture")) {
+            if (i + 3 >= argc) {
+                std::fprintf(stderr, "--debug-vsh-batch-capture expects path interval count\n");
+                return 2;
+            }
+            debug_vsh_batch_capture_path = argv[++i];
+            if (!debug_vsh_batch_capture_path[0] ||
+                !parse_u64_arg(argv[++i], debug_vsh_batch_capture_interval) || !debug_vsh_batch_capture_interval ||
+                !parse_u32_arg(argv[++i], debug_vsh_batch_capture_budget) ||
+                !debug_vsh_batch_capture_budget || debug_vsh_batch_capture_budget > 64) {
+                std::fprintf(stderr, "Invalid VSH batch capture path, interval, or count (1..64)\n");
                 return 2;
             }
         }
@@ -2555,12 +2573,12 @@ int main(int argc, char** argv) {
     }
 
 #if !XLLE_VSH_CAPTURE
-    if (debug_vsh_capture_path) {
-        std::fprintf(stderr, "--debug-vsh-capture requires XLLE_VSH_CAPTURE=ON\n");
+    if (debug_vsh_capture_path || debug_vsh_batch_capture_path) {
+        std::fprintf(stderr, "VSH capture requires XLLE_VSH_CAPTURE=ON\n");
         return 2;
     }
 #endif
-    if (debug_vsh_capture_path && (!nv2a_vsh_compile || nv2a_vsh_unsafe_probe)) {
+    if ((debug_vsh_capture_path || debug_vsh_batch_capture_path) && (!nv2a_vsh_compile || nv2a_vsh_unsafe_probe)) {
         std::fprintf(stderr, "VSH capture requires the faithful compiled CPU path\n");
         return 2;
     }
@@ -2763,6 +2781,15 @@ int main(int argc, char** argv) {
                 mach.nv2a()->set_vsh_unsafe_probe(nv2a_vsh_unsafe_probe);
                 mach.nv2a()->set_vsh_verify(nv2a_vsh_verify);
 #if XLLE_VSH_CAPTURE
+                if (debug_vsh_batch_capture_path) {
+                    vsh_batch_capture_writer = std::make_unique<vsh_batch_capture::Writer>(debug_vsh_batch_capture_path);
+                    if (!vsh_batch_capture_writer->good()) {
+                        std::fprintf(stderr, "Cannot open VSH batch capture\n");
+                        return 2;
+                    }
+                    mach.nv2a()->set_vsh_batch_capture(debug_vsh_batch_capture_interval, debug_vsh_batch_capture_budget,
+                        [&](const vsh_batch_capture::Batch& batch) { return vsh_batch_capture_writer->append(batch); });
+                }
                 if (debug_vsh_capture_path) {
                     vsh_capture_writer = std::make_unique<vsh_capture::Writer>(debug_vsh_capture_path);
                     if (!vsh_capture_writer->good()) {
@@ -6376,6 +6403,16 @@ int main(int argc, char** argv) {
                             memory_error.empty() ? "" : (memory_error + ")").c_str());
             }
 #if XLLE_VSH_CAPTURE
+            if (vsh_batch_capture_writer) {
+                const bool capture_ok = vsh_batch_capture_writer->finish() && vsh_batch_capture_writer->count() != 0;
+                const auto& stats = mach.nv2a()->vsh_batch_capture_stats();
+                std::printf("[host] vsh-batch-capture batches=%llu eligible=%llu selected=%llu written=%llu complete=%u\n",
+                    static_cast<unsigned long long>(stats.batches),
+                    static_cast<unsigned long long>(stats.eligible),
+                    static_cast<unsigned long long>(stats.selected),
+                    static_cast<unsigned long long>(stats.written), capture_ok);
+                frame_output_ok = frame_output_ok && capture_ok;
+            }
             if (vsh_capture_writer) {
                 const bool capture_ok = vsh_capture_writer->finish() && vsh_capture_writer->count() != 0;
                 const auto& stats = mach.nv2a()->vsh_capture_stats();

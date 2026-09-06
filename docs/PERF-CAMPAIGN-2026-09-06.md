@@ -215,6 +215,14 @@ the replay frame/state references. This remains offline validation. Next retain
 whole-batch inputs and reference mapping, move triangle consumers onto the GPU,
 and measure a complete production candidate; no FPS gain follows from this probe.
 
+`PERF-VSH-GPU-BATCH-2026-09-06.md` follows through on batch ownership and the
+GPU triangle consumer. Six captured primary batches at 16 B carry 8,688 actual
+VSH executions behind 42,084 references; the combined GPU dispatches reproduce
+all 21,522 expanded vertices and all accepted raw/postposition words. The
+capture preserves all 40 reference image checkpoints and checked guest state.
+Production sharing of operations/constants, ordered GPU output, and fallback
+synchronization before destination writes remain ahead of the performance gate.
+
 * **"There is no swapchain": false.** The interactive SDL D3D11 backend already calls DXGI
   `Present1`. Stage g measures and improves it. Sharing the NV2A GL context is a different
   optimization, with a transfer cost that still needs to justify the work.
