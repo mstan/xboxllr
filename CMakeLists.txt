@@ -38,6 +38,9 @@ option(XLLE_GENERATED_SUBMIT_DIAGNOSTICS
 option(XLLE_VSH_DRAW_OVERLAP_CENSUS
   "Compile the opt-in NV2A vertex and draw-route overlap census"
   OFF)
+option(XLLE_VSH_GPU_NUMERIC_PROBE
+  "Build the standalone synthetic CPU/GPU VSH arithmetic diagnostic"
+  OFF)
 
 include(FetchContent)
 
@@ -169,6 +172,25 @@ if(XLLE_WITH_SDL)
 endif()
 
 # --- tests (no firmware, no devices) ---
+if(XLLE_VSH_GPU_NUMERIC_PROBE)
+  if(NOT XLLE_WITH_SDL)
+    message(FATAL_ERROR "XLLE_VSH_GPU_NUMERIC_PROBE requires XLLE_WITH_SDL")
+  endif()
+  add_executable(xlle_vsh_dot_probe tools/nv2a_vsh_dot_probe.cpp)
+  target_include_directories(xlle_vsh_dot_probe PRIVATE
+    ${XLLE_INCLUDES} ${nv2a_vsh_cpu_SOURCE_DIR}/src)
+  target_link_libraries(xlle_vsh_dot_probe PRIVATE nv2a_vsh_cpu SDL3::SDL3)
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(xlle_vsh_dot_probe PRIVATE -fno-fast-math -ffp-contract=off)
+  elseif(MSVC)
+    target_compile_options(xlle_vsh_dot_probe PRIVATE /fp:strict)
+  endif()
+  add_custom_command(TARGET xlle_vsh_dot_probe POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:SDL3::SDL3> $<TARGET_FILE_DIR:xlle_vsh_dot_probe>)
+  # A mismatch is an observed device capability, not a portable CTest assertion.
+endif()
+
 enable_testing()
 add_executable(test_ring tests/test_ring.cpp)
 target_include_directories(test_ring PRIVATE ${XLLE_INCLUDES})

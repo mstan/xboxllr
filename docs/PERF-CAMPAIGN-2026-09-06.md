@@ -188,6 +188,14 @@ opt-in. Next establish GPU arithmetic agreement against the vendored CPU floor
 before implementing a complete vertex-plus-triangle path; a partial arithmetic
 probe alone cannot establish that path's fidelity or performance.
 
+`PERF-VSH-GPU-NUMERIC-2026-09-06.md` supplies the first synthetic arithmetic
+counterexamples. GLSL dot-product arithmetic with explicit operation
+order still loses subnormal behavior on the measured GPU. A normal-finite
+input case reverses postprocessed W's sign; input finiteness alone therefore
+cannot admit a faithful GPU vertex path. Next validate exceptional arithmetic
+or conservative intermediate bounds, then carry the supported decoded program
+and index-reuse contract through a CPU-authoritative runtime shadow test.
+
 * **"There is no swapchain": false.** The interactive SDL D3D11 backend already calls DXGI
   `Present1`. Stage g measures and improves it. Sharing the NV2A GL context is a different
   optimization, with a transfer cost that still needs to justify the work.
