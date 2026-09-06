@@ -333,6 +333,33 @@ void print_gpu_residency_census(const xlle::Nv2a* nv, const char* scope,
             (unsigned long long)nv->vsh_verify_checked(),
             (unsigned long long)nv->vsh_verify_mismatched());
     }
+    if (const auto* shadow = nv->vertex_reuse_shadow()) {
+        const auto& s = shadow->stats();
+        const auto& c = nv->vertex_reuse_shadow_census();
+        std::printf(
+            "[host] nv2a-vertex-reuse-shadow scope=%s deadline=%llu "
+            "batches=%llu state_changes=%llu seen=%llu within_hits=%llu "
+            "cross_hits=%llu misses=%llu collisions=%llu exact_compares=%llu "
+            "compared_bytes_requested=%llu batch_cache_bypassed=%llu "
+            "bytes=%llu timing=%u state_ns=%llu lookup_ns=%llu timed_lookups=%llu "
+            "discarded_deltas=%llu skip_nonprogrammable=%llu skip_context=%llu "
+            "skip_probe=%llu skip_verify=%llu skip_capture=%llu skip_census=%llu\n",
+            scope, deadline,
+            (unsigned long long)s.batches, (unsigned long long)s.state_changes,
+            (unsigned long long)s.seen, (unsigned long long)s.within_hits,
+            (unsigned long long)s.cross_hits, (unsigned long long)s.misses,
+            (unsigned long long)s.collisions, (unsigned long long)s.exact_compares,
+            (unsigned long long)s.compared_bytes_requested,
+            (unsigned long long)c.batch_cache_bypassed,
+            (unsigned long long)sizeof(*shadow), nv->vertex_reuse_shadow_timing() ? 1u : 0u,
+            (unsigned long long)xlle::perf_excl::ticks_to_ns(c.state_ticks),
+            (unsigned long long)xlle::perf_excl::ticks_to_ns(c.lookup_ticks),
+            (unsigned long long)c.timed_lookups, (unsigned long long)c.discarded_deltas,
+            (unsigned long long)c.ineligible_nonprogrammable,
+            (unsigned long long)c.ineligible_context, (unsigned long long)c.ineligible_probe,
+            (unsigned long long)c.ineligible_verify, (unsigned long long)c.ineligible_capture,
+            (unsigned long long)c.ineligible_census);
+    }
     // beads-xbox.1.15.11: the DISTINCT-program census. The compiled step form
     // is amortised over every vertex a program runs for, so the lever exists
     // only if a handful of programs carry the vertices. One row per distinct
@@ -1592,6 +1619,8 @@ int main(int argc, char** argv) {
     // reads per VERTEX, which is tens of millions per replay. Never a shipping
     // path; it exists so the vertex split is measured rather than inferred.
     bool nv2a_vertex_census = false;
+    bool nv2a_vertex_reuse_census = false;
+    bool nv2a_vertex_reuse_timing = false;
     // Phase 5 item 3. The two exactness-neutral per-vertex hoists. DEFAULT ON;
     // --no-nv2a-vertex-fast-fetch restores the previous loop verbatim.
     bool nv2a_vertex_fast_fetch = true;
@@ -1905,6 +1934,12 @@ int main(int argc, char** argv) {
             nv2a_vertex_program_cache = false;
         else if (!std::strcmp(argv[i], "--nv2a-vertex-census"))
             nv2a_vertex_census = true;
+        else if (!std::strcmp(argv[i], "--nv2a-vertex-reuse-census"))
+            nv2a_vertex_reuse_census = true;
+        else if (!std::strcmp(argv[i], "--nv2a-vertex-reuse-timing")) {
+            nv2a_vertex_reuse_census = true;
+            nv2a_vertex_reuse_timing = true;
+        }
         else if (!std::strcmp(argv[i], "--nv2a-vertex-fast-fetch"))
             nv2a_vertex_fast_fetch = true;
         else if (!std::strcmp(argv[i], "--no-nv2a-vertex-fast-fetch"))
@@ -2338,6 +2373,11 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    if (nv2a_vertex_census && nv2a_vertex_reuse_census) {
+        std::fprintf(stderr, "[host] run --nv2a-vertex-census and "
+                     "--nv2a-vertex-reuse-census/timing separately; their probes overlap\n");
+        return 2;
+    }
     std::unique_ptr<Nv2aRenderer> nv2a_renderer;
     if (!std::strcmp(nv2a_renderer_name, "opengl")) {
         std::string renderer_error;
@@ -2472,6 +2512,8 @@ int main(int argc, char** argv) {
                 mach.nv2a()->set_vertex_program_cache_enabled(
                     nv2a_vertex_program_cache);
                 mach.nv2a()->set_vertex_census_enabled(nv2a_vertex_census);
+                mach.nv2a()->set_vertex_reuse_shadow(
+                    nv2a_vertex_reuse_census, nv2a_vertex_reuse_timing);
                 mach.nv2a()->set_vertex_fast_fetch_enabled(
                     nv2a_vertex_fast_fetch);
                 mach.nv2a()->set_vsh_compile_enabled(nv2a_vsh_compile);

@@ -3392,6 +3392,27 @@ bool Nv2a::submit_vertex_batch() {
         // missing one, which is why the emptiness is NOT part of the test.
         const bool use_compiled_vsh = vsh_cache_ops_valid_;
         const uint32_t vsh_probe = vsh_unsafe_probe_;
+        // Shadow diagnostics never skip fetch or shader work. Keep body timing
+        // separate: otherwise these probes would be charged to the VSH census.
+        Nv2aVertexReuseShadow* shadow = nullptr;
+        if (vertex_reuse_shadow_) {
+            auto& c = vertex_reuse_shadow_census_;
+            if (!program_parsed) ++c.ineligible_nonprogrammable;
+            else if (program_writes_context) ++c.ineligible_context;
+            else if (vsh_probe) ++c.ineligible_probe;
+            else if (vsh_verify_budget_) ++c.ineligible_verify;
+            else if (capture_immediate_quad) ++c.ineligible_capture;
+            else if (vertex_census_on) ++c.ineligible_census;
+            else {
+                shadow = vertex_reuse_shadow_.get();
+                const uint64_t t = vertex_reuse_shadow_timing_ ? perf_excl::tick_now() : 0;
+                shadow->begin_batch(transform_program_, transform_program_start_,
+                                    transform_constants_, use_compiled_vsh);
+                if (vertex_reuse_shadow_timing_)
+                    c.state_ticks += perf_excl::compensated_delta(
+                        perf_excl::tick_now() - t, c.discarded_deltas);
+            }
+        }
         const VshZeroPlan vsh_zero_plan = vsh_cache_zero_plan_;
         const VshCompiledOp* const compiled_ops = vsh_cache_ops_.data();
         const uint32_t compiled_op_count =
@@ -3416,6 +3437,7 @@ bool Nv2a::submit_vertex_batch() {
                 TransformedVertex cached_vertex;
                 if (lookup_batch_transform_cache(index, cached_vertex)) {
                     ++vertex_census_.reuse_hits;
+                    if (shadow) ++vertex_reuse_shadow_census_.batch_cache_bypassed;
                     emit_transformed_vertex(cached_vertex);
                     continue;
                 }
@@ -3512,6 +3534,16 @@ bool Nv2a::submit_vertex_batch() {
                         std::memcpy(&input_regs[slot * 4],
                                     vertex_attributes_[slot].value.data(),
                                     4 * sizeof(float));
+                    }
+                    if (shadow) {
+                        const uint64_t t = vertex_reuse_shadow_timing_ ? perf_excl::tick_now() : 0;
+                        shadow->observe(input_regs.data());
+                        if (vertex_reuse_shadow_timing_) {
+                            auto& c = vertex_reuse_shadow_census_;
+                            c.lookup_ticks += perf_excl::compensated_delta(
+                                perf_excl::tick_now() - t, c.discarded_deltas);
+                            ++c.timed_lookups;
+                        }
                     }
                     if (use_compiled_vsh) {
                         float* bases[kVshBaseCount] = {

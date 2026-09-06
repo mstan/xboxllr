@@ -36,6 +36,7 @@
 #include "machine/nv2a_renderer.hpp"
 #include "machine/nv2a_texture_conversion_cache.hpp"
 #include "machine/nv2a_vsh_compiled.hpp"
+#include "machine/nv2a_vertex_reuse_shadow.hpp"
 #include "xlle/ring.hpp"
 
 namespace xlle {
@@ -1420,6 +1421,28 @@ public:
     bool vertex_fast_fetch_enabled() const { return vertex_fast_fetch_; }
     void set_vertex_census_enabled(bool on) { vertex_census_enabled_ = on; }
     bool vertex_census_enabled() const { return vertex_census_enabled_; }
+    struct VertexReuseShadowCensus {
+        uint64_t ineligible_nonprogrammable = 0, ineligible_context = 0;
+        uint64_t ineligible_probe = 0, ineligible_verify = 0, ineligible_capture = 0;
+        uint64_t ineligible_census = 0, batch_cache_bypassed = 0;
+        uint64_t state_ticks = 0, lookup_ticks = 0, timed_lookups = 0;
+        uint64_t discarded_deltas = 0;
+    };
+    void set_vertex_reuse_shadow(bool enabled, bool timing = false) {
+        if (enabled && !vertex_reuse_shadow_) {
+            vertex_reuse_shadow_ = std::make_unique<Nv2aVertexReuseShadow>();
+            vertex_reuse_shadow_census_ = {};
+        }
+        if (!enabled) vertex_reuse_shadow_.reset();
+        vertex_reuse_shadow_timing_ = enabled && timing;
+    }
+    const Nv2aVertexReuseShadow* vertex_reuse_shadow() const {
+        return vertex_reuse_shadow_.get();
+    }
+    bool vertex_reuse_shadow_timing() const { return vertex_reuse_shadow_timing_; }
+    const VertexReuseShadowCensus& vertex_reuse_shadow_census() const {
+        return vertex_reuse_shadow_census_;
+    }
 
     // ---- phase 5 item 2: what a residency QUERY actually costs -------------
     // beads-xbox.1.15.10 phase 4 section 5 inferred ~0.9 s for the 148 317
@@ -3255,6 +3278,9 @@ private:
     VertexCensus vertex_census_{};
     VshProgramCensus vsh_program_census_{};
     bool vertex_census_enabled_ = false;
+    std::unique_ptr<Nv2aVertexReuseShadow> vertex_reuse_shadow_;
+    VertexReuseShadowCensus vertex_reuse_shadow_census_{};
+    bool vertex_reuse_shadow_timing_ = false;
     bool vertex_fast_fetch_ = true;
     ResolveQueryCensus resolve_query_census_{};
     // Set for the duration of one witnessed texture-snapshot residency query so
