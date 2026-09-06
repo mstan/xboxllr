@@ -53,8 +53,13 @@ conversion reuse plus content IDs passes canonical (+5.70% median / +5.73% minim
 and interactive navigation (+16.47% / +16.64%) gates and is enabled by default.
 See `PERF-TEXTURE-CACHE-2026-09-06.md`. The current returned-dashboard capacity is
 about 12.06 guest-equivalent FPS at the median, so this does not close the 60 FPS
-goal. Next: calibrate the small-region clocks, re-profile with the accepted cache,
-and measure vertex reuse/cost before choosing another optimization. Numeric
+goal. The small-region clocks are now calibrated and the vertex-reuse shadow
+census is committed: its direct-mapped candidate is rejected on observed lookup
+cost versus potential savings. See `PERF-TIMERS-2026-09-06.md` and
+`PERF-VERTEX-REUSE-2026-09-06.md`. The owner's subsequent source exploration is
+recorded in `PERF-EXTERNAL-REVIEW-2026-09-06.md`: next measure the generated GL
+submission gaps, then select bulk constants/upload reuse or a carefully bounded
+GPU vertex experiment. No external renderer is treated as a fidelity oracle. Numeric
 generic families 3/4/7 and direct distinct-frame/tail-latency measurement remain open.
 
 * **"There is no swapchain": false.** The interactive SDL D3D11 backend already calls DXGI
