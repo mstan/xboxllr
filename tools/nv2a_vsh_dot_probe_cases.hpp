@@ -208,4 +208,240 @@ inline std::vector<TestCase> make_cases(size_t random_normal_count = 128) {
     return cases;
 }
 
+inline uint32_t negate_bits(uint32_t value) {
+    return value ^ 0x80000000u;
+}
+
+inline uint32_t make_random_raw_finite_bits(uint32_t& state) {
+    uint32_t bits = next_xorshift32(state);
+    if (((bits >> 23) & 0xFFu) == 0xFFu) {
+        bits &= 0xFF7FFFFFu; // map Inf/NaN exponent 255 to finite exponent 254
+    }
+    const uint32_t selector = next_xorshift32(state) & 31u;
+    if (selector == 0u) {
+        return bits & 0x80000000u; // signed zero
+    }
+    if (selector <= 6u) {
+        return (bits & 0x807FFFFFu); // signed subnormal, including zero
+    }
+    if (((bits >> 23) & 0xFFu) == 0u) {
+        bits |= 0x00800000u; // keep most random cases normal finite
+    }
+    return bits;
+}
+
+inline void append_rounding_case(std::vector<TestCase>& cases,
+                                 std::array<uint32_t, 4> products,
+                                 const std::string& category) {
+    cases.push_back({make_input(products,
+                                {0x3F800000u, 0x3F800000u, 0x3F800000u, 0x3F800000u}),
+                     category});
+}
+
+inline void append_product_rounding_case(std::vector<TestCase>& cases,
+                                         std::array<uint32_t, 4> a,
+                                         std::array<uint32_t, 4> b,
+                                         const std::string& category) {
+    cases.push_back({make_input(a, b), category});
+}
+
+inline void append_rounding_cases(std::vector<TestCase>& cases) {
+    constexpr uint32_t kPosZero = 0x00000000u;
+    constexpr uint32_t kNegZero = 0x80000000u;
+    constexpr uint32_t kPosOne = 0x3F800000u;
+    constexpr uint32_t kNegOne = 0xBF800000u;
+    constexpr uint32_t kOneOdd = 0x3F800001u;
+    constexpr uint32_t kNegOneOdd = 0xBF800001u;
+    constexpr uint32_t kHalfUlpAtOne = 0x33800000u; // 2^-24
+    constexpr uint32_t kNegHalfUlpAtOne = 0xB3800000u;
+    constexpr uint32_t kMinSub = 0x00000001u;
+    constexpr uint32_t kNegMinSub = 0x80000001u;
+    constexpr uint32_t kMaxSub = 0x007FFFFFu;
+    constexpr uint32_t kNegMaxSub = 0x807FFFFFu;
+    constexpr uint32_t kMinNormal = 0x00800000u;
+    constexpr uint32_t kNegMinNormal = 0x80800000u;
+    constexpr uint32_t kMaxFinite = 0x7F7FFFFFu;
+    constexpr uint32_t kNegMaxFinite = 0xFF7FFFFFu;
+    constexpr uint32_t kTwo = 0x40000000u;
+    constexpr uint32_t kNegTwo = 0xC0000000u;
+    constexpr uint32_t kPow64 = 0x5F800000u;
+    constexpr uint32_t kBelowPow64 = 0x5F7FFFFFu;
+    constexpr uint32_t kNegPow64 = 0xDF800000u;
+    constexpr uint32_t kHalfOverflowUlp = 0x73000000u; // 2^103 at max exponent
+    constexpr uint32_t kBelowHalfOverflowUlp = 0x72FFFFFFu;
+    constexpr uint32_t kAboveHalfOverflowUlp = 0x73000001u;
+    constexpr uint32_t kPosInf = 0x7F800000u;
+    constexpr uint32_t kNegInf = 0xFF800000u;
+
+    cases.reserve(cases.size() + 104000);
+
+    // Directed normal add ties. Products are injected via b=1 so the DP sum
+    // exercises float32 addition rounding, not product rounding.
+    append_rounding_case(cases,
+                         {kPosOne, kHalfUlpAtOne, kPosZero, kPosZero},
+                         "round_tie_add_even_positive");
+    append_rounding_case(cases,
+                         {kOneOdd, kHalfUlpAtOne, kPosZero, kPosZero},
+                         "round_tie_add_odd_positive");
+    append_rounding_case(cases,
+                         {kNegOne, kNegHalfUlpAtOne, kNegZero, kPosZero},
+                         "round_tie_add_even_negative");
+    append_rounding_case(cases,
+                         {kNegOneOdd, kNegHalfUlpAtOne, kNegZero, kPosZero},
+                         "round_tie_add_odd_negative");
+
+    // Overflow threshold through sequential sums.
+    append_rounding_case(cases,
+                         {kMaxFinite, kBelowHalfOverflowUlp, kNegMaxFinite, kPosZero},
+                         "sum_overflow_below_threshold");
+    append_rounding_case(cases,
+                         {kMaxFinite, kHalfOverflowUlp, kNegMaxFinite, kPosZero},
+                         "sum_overflow_tie_threshold");
+    append_rounding_case(cases,
+                         {kMaxFinite, kAboveHalfOverflowUlp, kNegMaxFinite, kPosZero},
+                         "sum_overflow_above_threshold");
+    append_rounding_case(cases,
+                         {kNegMaxFinite, negate_bits(kBelowHalfOverflowUlp), kMaxFinite, kPosZero},
+                         "sum_negative_overflow_below_threshold");
+    append_rounding_case(cases,
+                         {kNegMaxFinite, negate_bits(kHalfOverflowUlp), kMaxFinite, kPosZero},
+                         "sum_negative_overflow_tie_threshold");
+    append_rounding_case(cases,
+                         {kNegMaxFinite, negate_bits(kAboveHalfOverflowUlp), kMaxFinite, kPosZero},
+                         "sum_negative_overflow_above_threshold");
+
+    // Product overflow and finite-overflow clamp behavior in fix_inf_mult.
+    append_product_rounding_case(cases,
+                                 {kMaxFinite, kBelowPow64, kPow64, kNegPow64},
+                                 {kPosOne, kBelowPow64, kPow64, kPow64},
+                                 "product_overflow_grid_positive_negative");
+    append_product_rounding_case(cases,
+                                 {kMaxFinite, kMaxFinite, kNegMaxFinite, kNegMaxFinite},
+                                 {kTwo, kNegTwo, kTwo, kNegTwo},
+                                 "product_maxfinite_times_two_signs");
+
+    // Sequential overflow followed by opposing infinity is intentionally an
+    // unsupported/decline stress for the FP64 fallback status path.
+    append_rounding_case(cases,
+                         {kMaxFinite, kMaxFinite, kNegInf, kPosZero},
+                         "decline_sequential_pos_overflow_then_neginf");
+    append_rounding_case(cases,
+                         {kNegMaxFinite, kNegMaxFinite, kPosInf, kNegZero},
+                         "decline_sequential_neg_overflow_then_posinf");
+
+    // Signed zero and product sign propagation.
+    append_product_rounding_case(cases,
+                                 {kPosZero, kNegZero, kPosZero, kNegZero},
+                                 {kNegOne, kPosOne, kPosOne, kNegOne},
+                                 "signed_zero_products");
+    append_rounding_case(cases,
+                         {kNegZero, kNegZero, kPosZero, kNegZero},
+                         "signed_zero_sum_chain");
+
+    // Normal/subnormal boundaries and broad subnormal products.
+    append_rounding_case(cases,
+                         {kMaxSub, kMinSub, kNegMinSub, kMinNormal},
+                         "subnormal_to_normal_sum_boundary");
+    append_rounding_case(cases,
+                         {kNegMaxSub, kNegMinSub, kMinSub, kNegMinNormal},
+                         "negative_subnormal_to_normal_sum_boundary");
+    append_product_rounding_case(cases,
+                                 {kMinNormal, kMinNormal, kMaxSub, kNegMaxSub},
+                                 {kMinNormal, kNegMinNormal, kMaxSub, kMaxSub},
+                                 "broad_subnormal_products");
+    append_product_rounding_case(cases,
+                                 {0x01000000u, 0x01800000u, 0x02000000u, 0x02800000u},
+                                 {0x01000000u, 0x01800000u, 0x82000000u, 0x82800000u},
+                                 "normal_products_underflow_to_subnormal_or_zero");
+
+    // Cancellation and screen/W postprocess boundaries.
+    append_product_rounding_case(cases,
+                                 {0x3F800001u, kNegOne, kPosZero, kPosZero},
+                                 {0x3F7FFFFEu, kPosOne, kPosOne, kPosOne},
+                                 "product_must_round_before_cancellation");
+    append_product_rounding_case(cases,
+                                 {0x3F800001u, kPosZero, kPosZero, kPosZero},
+                                 {0x3FC00000u, kPosOne, kPosOne, kPosOne},
+                                 "product_normal_halfway_odd");
+    append_product_rounding_case(cases,
+                                 {kMinSub, kNegZero, kNegZero, kNegZero},
+                                 {0x3F000000u, kPosOne, kPosOne, kPosOne},
+                                 "product_half_min_subnormal_even_zero");
+    append_product_rounding_case(cases,
+                                 {0x00000003u, kPosZero, kPosZero, kPosZero},
+                                 {0x3F000000u, kPosOne, kPosOne, kPosOne},
+                                 "product_subnormal_halfway_odd");
+    append_product_rounding_case(cases,
+                                 {kMinNormal, kPosZero, kPosZero, kPosZero},
+                                 {0x3F7FFFFFu, kPosOne, kPosOne, kPosOne},
+                                 "product_halfway_at_min_normal");
+    append_rounding_case(cases, {kPosInf, kNegOne, kPosZero, kPosZero},
+                         "valid_infinity_clamped");
+    append_product_rounding_case(cases,
+                                 {kPosInf, kPosZero, kPosZero, kPosZero},
+                                 {kNegZero, kPosOne, kPosOne, kPosOne},
+                                 "decline_infinity_times_zero");
+    append_rounding_case(cases,
+                         {0x4B7FFFFFu, 0xCB7FFFFFu, kHalfUlpAtOne, kNegHalfUlpAtOne},
+                         "large_exact_cancellation_then_tiny_terms");
+    append_rounding_case(cases,
+                         {0x3D7FFFFFu, kMinSub, kNegZero, kPosZero},
+                         "screen_trunc_below_one_sixteenth");
+    append_rounding_case(cases,
+                         {0x3D800000u, kNegZero, kPosZero, kPosZero},
+                         "screen_trunc_exact_one_sixteenth");
+    append_rounding_case(cases,
+                         {0xBD7FFFFFu, kNegZero, kPosZero, kPosZero},
+                         "screen_trunc_negative_below_one_sixteenth");
+    append_rounding_case(cases,
+                         {0x1F7FFFFFu, kNegZero, kPosZero, kPosZero},
+                         "w_clamp_just_below_min");
+    append_rounding_case(cases,
+                         {0x1F800000u, kNegZero, kPosZero, kPosZero},
+                         "w_clamp_exact_min");
+    append_rounding_case(cases,
+                         {0x5F800001u, kNegZero, kPosZero, kPosZero},
+                         "w_clamp_above_max");
+    append_rounding_case(cases,
+                         {0xDF800001u, kNegZero, kPosZero, kPosZero},
+                         "w_clamp_negative_above_max_magnitude");
+
+    const std::array<uint32_t, 36> edge_values = {
+        kPosZero, kNegZero, kMinSub, kNegMinSub, 0x00000002u, 0x80000002u,
+        0x00000100u, 0x80000100u, kMaxSub, kNegMaxSub, kMinNormal, kNegMinNormal,
+        0x00800001u, 0x80800001u, 0x00FFFFFFu, 0x80FFFFFFu, kHalfUlpAtOne,
+        kNegHalfUlpAtOne, kPosOne, kNegOne, kOneOdd, kNegOneOdd, kTwo, kNegTwo,
+        0x3F7FFFFFu, 0xBF7FFFFFu, 0x3F000000u, 0xBF000000u, kBelowHalfOverflowUlp,
+        negate_bits(kBelowHalfOverflowUlp), kHalfOverflowUlp, negate_bits(kHalfOverflowUlp),
+        kAboveHalfOverflowUlp, negate_bits(kAboveHalfOverflowUlp), kMaxFinite, kNegMaxFinite};
+
+    for (size_t i = 0; i < edge_values.size(); ++i) {
+        for (size_t j = 0; j < edge_values.size(); ++j) {
+            const uint32_t a = edge_values[i];
+            const uint32_t b = edge_values[j];
+            append_product_rounding_case(cases,
+                                         {a, b, negate_bits(a), negate_bits(b)},
+                                         {kPosOne, kPosOne, kNegOne, kNegOne},
+                                         "structured_edge_sum_grid");
+            append_product_rounding_case(cases,
+                                         {a, b, edge_values[(i + j) % edge_values.size()],
+                                          edge_values[(i * 7 + j * 11) % edge_values.size()]},
+                                         {b, a, kPosOne, kNegOne},
+                                         "structured_edge_product_grid");
+        }
+    }
+
+    uint32_t rng = 0x4450524Eu; // "DPRN"
+    constexpr size_t kRandomRawFiniteCases = 100000;
+    for (size_t i = 0; i < kRandomRawFiniteCases; ++i) {
+        DotInput input{};
+        for (size_t lane = 0; lane < 4; ++lane) {
+            input.a[lane] = make_random_raw_finite_bits(rng);
+            input.b[lane] = make_random_raw_finite_bits(rng);
+        }
+        cases.push_back({input, "random_raw_finite_with_zero_subnormal"});
+    }
+}
+
+
 }  // namespace xlle::vsh_shadow_probe

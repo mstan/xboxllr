@@ -196,6 +196,16 @@ cannot admit a faithful GPU vertex path. Next validate exceptional arithmetic
 or conservative intermediate bounds, then carry the supported decoded program
 and index-reuse contract through a CPU-authoritative runtime shadow test.
 
+The explicit-rounding follow-up in that same numeric report matches all
+302,635 accepted synthetic records on the measured GPU, with five independently
+checked NaN/invalid declines. The original float shader has 42,042 differing
+lanes on the expanded corpus. Raw FP32 intermediates with individually rounded
+double operations preserve the W counterexample; GLSL's double accuracy rules
+still require device validation. This is an arithmetic prerequisite, not an
+FPS gain. The next implementation checkpoint is complete decoded VSH shadow
+execution, preserving operand/store ordering and index reuse before GPU triangle
+preparation can become authoritative.
+
 * **"There is no swapchain": false.** The interactive SDL D3D11 backend already calls DXGI
   `Present1`. Stage g measures and improves it. Sharing the NV2A GL context is a different
   optimization, with a transfer cost that still needs to justify the work.
