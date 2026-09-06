@@ -105,6 +105,12 @@ public:
     ~Nv2a() override;
 
     void set_renderer(Nv2aRenderer* renderer) { renderer_ = renderer; }
+#if XLLE_VSH_GPU_RESIDENT
+    void set_vsh_gpu_resident_mode(uint32_t mode) { vsh_gpu_resident_mode_ = mode; }
+    Nv2aRenderer::VshGpuResidentStats vsh_gpu_resident_stats() const {
+        return renderer_ ? renderer_->vsh_gpu_resident_stats() : Nv2aRenderer::VshGpuResidentStats{};
+    }
+#endif
     void set_detailed_telemetry(bool enabled) { detailed_telemetry_ = enabled; }
     // Per-write raster telemetry (the 22 FNV-1a output hashes, the
     // last-written-address trackers, and the per-write census counters) is a
@@ -2908,7 +2914,6 @@ private:
     std::vector<VshCompiledOp> vsh_cache_ops_;
 #if XLLE_VSH_CAPTURE
     VshCaptureStats vsh_capture_stats_{};
-    bool vsh_capture_plan_supported_ = false;
     uint64_t vsh_capture_interval_ = 0;
     uint32_t vsh_capture_budget_ = 0;
     std::function<void(const vsh_capture::Vertex&)> vsh_capture_callback_;
@@ -2916,9 +2921,15 @@ private:
     uint64_t vsh_batch_capture_interval_ = 0;
     uint32_t vsh_batch_capture_budget_ = 0;
     std::function<bool(const vsh_batch_capture::Batch&)> vsh_batch_capture_callback_;
-    std::vector<vsh_capture::Op> capture_vsh_ops() const;
     void capture_vsh_vertex(bool eligible, uint64_t fingerprint,
                             const float* inputs, const float* outputs, const float* post_position);
+#endif
+#if XLLE_VSH_CAPTURE || XLLE_VSH_GPU_RESIDENT
+    bool vsh_capture_plan_supported_ = false;
+    std::vector<vsh_capture::Op> capture_vsh_ops() const;
+#endif
+#if XLLE_VSH_GPU_RESIDENT
+    uint32_t vsh_gpu_resident_mode_ = 0;
 #endif
     // Which register files this program can actually observe unwritten. See
     // VshZeroPlan in nv2a_vsh_compiled.hpp.
@@ -3204,6 +3215,9 @@ private:
     // the executor reads the JOB and the ownership is already correct when
     // stage (e) moves execution off the emulation thread.
     struct DrawJob {
+#if XLLE_VSH_GPU_RESIDENT
+        std::shared_ptr<Nv2aGenericCombinerPacket::GpuVshReference> gpu_vsh;
+#endif
 #if XLLE_VSH_CAPTURE
         std::unique_ptr<vsh_batch_capture::Batch> vsh_batch_capture;
 #endif

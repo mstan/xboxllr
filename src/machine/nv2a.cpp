@@ -2634,7 +2634,7 @@ bool Nv2a::compile_vsh_program(const void* steps, uint32_t slots,
         row->paired = paired_steps;
     }
     vsh_cache_ops_valid_ = true;
-#if XLLE_VSH_CAPTURE
+#if XLLE_VSH_CAPTURE || XLLE_VSH_GPU_RESIDENT
     vsh_capture_plan_supported_ = std::all_of(vsh_cache_ops_.begin(), vsh_cache_ops_.end(),
         [](const VshCompiledOp& op) {
             if (op.in_relative_mask) return false;
@@ -2674,7 +2674,9 @@ void Nv2a::capture_vsh_vertex(bool eligible, uint64_t fingerprint,
     vsh_capture_callback_(vertex);
     ++stats.samples;
 }
+#endif
 
+#if XLLE_VSH_CAPTURE || XLLE_VSH_GPU_RESIDENT
 std::vector<vsh_capture::Op> Nv2a::capture_vsh_ops() const {
     std::vector<vsh_capture::Op> result;
     for (const auto& source : vsh_cache_ops_) {
@@ -2773,6 +2775,15 @@ void Nv2a::draw_worker_main() {
 // bounded and small; these two are not.
 uint64_t Nv2a::draw_job_bytes(const DrawJob& job) {
     uint64_t bytes = job.vertices.capacity() * sizeof(TransformedVertex);
+#if XLLE_VSH_GPU_RESIDENT
+    if (job.gpu_vsh) {
+        const auto& batch = job.gpu_vsh->batch;
+        bytes += sizeof(*job.gpu_vsh) + batch.ops.capacity() * sizeof(vsh_gpu_batch::Op) +
+            batch.executions.capacity() * sizeof(vsh_gpu_batch::ExecutionInput) +
+            batch.references.capacity() * sizeof(uint32_t) +
+            job.gpu_vsh->expected.capacity() * sizeof(vsh_gpu_batch::ProgramOutput128B);
+    }
+#endif
 #if XLLE_VSH_CAPTURE
     if (job.vsh_batch_capture) {
         const auto& batch = *job.vsh_batch_capture;
@@ -3453,6 +3464,27 @@ bool Nv2a::submit_vertex_batch() {
     }
     transformed_batch_.clear();
     transformed_batch_.reserve(vertex_count);
+#if XLLE_VSH_GPU_RESIDENT
+    std::shared_ptr<Nv2aGenericCombinerPacket::GpuVshReference> gpu_vsh;
+    std::array<uint32_t, 1024> gpu_cache_ids;
+    if (vsh_gpu_resident_mode_ && renderer_ && program_parsed && vsh_cache_ops_valid_ &&
+        !program_writes_context && !vsh_unsafe_probe_ && vsh_capture_plan_supported_ &&
+        !vsh_cache_ops_.empty() && vsh_cache_ops_.size() <= vsh_gpu_batch::kMaxOps &&
+        vertex_count >= 3 && vertex_count <= vsh_gpu_batch::kMaxReferences &&
+        primitive_mode_ >= 5 && primitive_mode_ <= 7 &&
+        raster_state_[kRasterCombinerControl] == 1) {
+        gpu_vsh = std::make_shared<Nv2aGenericCombinerPacket::GpuVshReference>();
+        gpu_vsh->mode = vsh_gpu_resident_mode_;
+        auto& batch = gpu_vsh->batch;
+        batch.ops = capture_vsh_ops();
+        batch.shape.primitive_mode = primitive_mode_;
+        batch.shape.op_count = static_cast<uint32_t>(batch.ops.size());
+        std::memcpy(batch.constants.words.data(), transform_constants_.data(), sizeof(batch.constants));
+        batch.executions.reserve(vertex_count);
+        batch.references.reserve(vertex_count);
+        gpu_vsh->expected.reserve(vertex_count);
+    }
+#endif
 #if XLLE_VSH_CAPTURE
     std::unique_ptr<vsh_batch_capture::Batch> captured_batch;
     if (vsh_batch_capture_callback_) {
@@ -3620,6 +3652,10 @@ bool Nv2a::submit_vertex_batch() {
                 largest_vertex_index_ = std::max(largest_vertex_index_, index);
                 TransformedVertex cached_vertex;
                 if (lookup_batch_transform_cache(index, cached_vertex)) {
+#if XLLE_VSH_GPU_RESIDENT
+                    if (gpu_vsh)
+                        gpu_vsh->batch.references.push_back(gpu_cache_ids[batch_transform_cache_base(index)]);
+#endif
 #if XLLE_VSH_CAPTURE
                     if (vsh_capture_callback_) ++vsh_capture_stats_.cache_hits;
                     if (captured_batch) {
@@ -3804,6 +3840,24 @@ bool Nv2a::submit_vertex_batch() {
                                 &output_regs[(9 + texture) * 4],
                                 4 * sizeof(float));
                 }
+#if XLLE_VSH_GPU_RESIDENT
+                if (gpu_vsh) {
+                    auto& batch = gpu_vsh->batch;
+                    vsh_gpu_batch::ExecutionInput input;
+                    std::memcpy(input.words.data(), input_regs.data(), sizeof(input));
+                    vsh_gpu_batch::ProgramOutput128B expected;
+                    for (size_t i = 0; i < vsh_capture::kConsumedOutputs.size(); ++i)
+                        std::memcpy(expected.values[i].data(),
+                            output_regs + vsh_capture::kConsumedOutputs[i] * 4, 16);
+                    std::memcpy(expected.values[7].data(), vertex.position.data(), 16);
+                    const uint32_t id = static_cast<uint32_t>(batch.executions.size());
+                    batch.executions.push_back(input);
+                    gpu_vsh->expected.push_back(expected);
+                    batch.references.push_back(id);
+                    if (batch_transform_cache)
+                        gpu_cache_ids[batch_transform_cache_base(vertex_indices_[vertex_index])] = id;
+                }
+#endif
 #if XLLE_VSH_CAPTURE
                 capture_vsh_vertex(use_compiled_vsh && !program_writes_context && !vsh_probe,
                     census_row ? census_row->fingerprint : 0,
@@ -3990,6 +4044,13 @@ bool Nv2a::submit_vertex_batch() {
     // half and write their results into the job.
     DrawJob job;
     latch_draw_job(job);
+#if XLLE_VSH_GPU_RESIDENT
+    if (gpu_vsh) {
+        gpu_vsh->batch.shape.execution_count = static_cast<uint32_t>(gpu_vsh->batch.executions.size());
+        gpu_vsh->batch.shape.reference_count = static_cast<uint32_t>(gpu_vsh->batch.references.size());
+        job.gpu_vsh = std::move(gpu_vsh);
+    }
+#endif
 #if XLLE_VSH_CAPTURE
     job.vsh_batch_capture = std::move(captured_batch);
 #endif
@@ -11502,6 +11563,14 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                     surface_pitch == 0x00401400 && surface_height == 960 &&
                     clip_x == 0 && clip_y == 0 && clip_width == 1280 &&
                     clip_height == 960;
+#if XLLE_VSH_GPU_RESIDENT
+                if (job.gpu_vsh) {
+                    job.gpu_vsh->batch.shape.large_target = resident_primary_large_dashboard_target;
+                    job.gpu_vsh->batch.shape.cull_enabled = cull_enabled;
+                    job.gpu_vsh->batch.shape.cull_front = cull_front;
+                    packet.gpu_vsh = job.gpu_vsh;
+                }
+#endif
 #if XLLE_VSH_CAPTURE
                 auto* captured = job.vsh_batch_capture.get();
                 if (captured) {

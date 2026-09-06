@@ -44,6 +44,9 @@ option(XLLE_VSH_GPU_NUMERIC_PROBE
 option(XLLE_VSH_CAPTURE
   "Compile bounded CPU-authoritative VSH capture for offline GPU validation"
   OFF)
+option(XLLE_VSH_GPU_RESIDENT
+  "Compile the opt-in verified GPU vertex/triangle resident renderer handoff"
+  OFF)
 
 include(FetchContent)
 
@@ -136,6 +139,7 @@ else()
   target_compile_definitions(xlle_machine PUBLIC XLLE_VSH_DRAW_OVERLAP_CENSUS=0)
 endif()
 target_compile_definitions(xlle_machine PUBLIC XLLE_VSH_CAPTURE=$<BOOL:${XLLE_VSH_CAPTURE}>)
+target_compile_definitions(xlle_machine PUBLIC XLLE_VSH_GPU_RESIDENT=$<BOOL:${XLLE_VSH_GPU_RESIDENT}>)
 if(XLLE_NATIVE_OPTIMIZATIONS AND
    CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND
    CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
@@ -150,6 +154,7 @@ target_include_directories(xlle_spike PUBLIC ${XLLE_INCLUDES})
 add_library(xlle_host STATIC src/host/sdl_shell.cpp src/host/xid_input.cpp
   src/host/nv2a_opengl_renderer.cpp src/host/nv2a_combiner_glsl.cpp)
 target_include_directories(xlle_host PUBLIC ${XLLE_INCLUDES})
+target_compile_definitions(xlle_host PUBLIC XLLE_VSH_GPU_RESIDENT=$<BOOL:${XLLE_VSH_GPU_RESIDENT}>)
 if(XLLE_GENERATED_SUBMIT_DIAGNOSTICS)
   target_compile_definitions(xlle_host PUBLIC XLLE_GENERATED_SUBMIT_DIAGNOSTICS=1)
 else()
@@ -193,6 +198,24 @@ if(XLLE_VSH_GPU_NUMERIC_PROBE)
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
             $<TARGET_FILE:SDL3::SDL3> $<TARGET_FILE_DIR:xlle_vsh_dot_probe>)
   # A mismatch is an observed device capability, not a portable CTest assertion.
+endif()
+
+if(XLLE_VSH_GPU_RESIDENT)
+  if(NOT XLLE_WITH_SDL)
+    message(FATAL_ERROR "XLLE_VSH_GPU_RESIDENT requires XLLE_WITH_SDL")
+  endif()
+  add_executable(xlle_vsh_resident_probe tools/nv2a_vsh_resident_probe.cpp)
+  target_include_directories(xlle_vsh_resident_probe PRIVATE
+    ${XLLE_INCLUDES} ${nv2a_vsh_cpu_SOURCE_DIR}/src)
+  target_link_libraries(xlle_vsh_resident_probe PRIVATE xlle_host nv2a_vsh_cpu)
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(xlle_vsh_resident_probe PRIVATE -fno-fast-math -ffp-contract=off)
+  elseif(MSVC)
+    target_compile_options(xlle_vsh_resident_probe PRIVATE /fp:strict)
+  endif()
+  add_custom_command(TARGET xlle_vsh_resident_probe POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:SDL3::SDL3> $<TARGET_FILE_DIR:xlle_vsh_resident_probe>)
 endif()
 
 enable_testing()

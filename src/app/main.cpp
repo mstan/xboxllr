@@ -1764,6 +1764,7 @@ int main(int argc, char** argv) {
     // --no-nv2a-vsh-compile runs the vendored nv2a_vsh_emu_execute on the same
     // binary, which is the arm the decision A/B is measured against.
     bool nv2a_vsh_compile = true;
+    uint32_t nv2a_vsh_gpu_resident = 0;
     // Ceiling probe (beads-xbox.1.15.11). DEFAULT 0 and no --no- spelling,
     // because it is knowingly incorrect when armed: 1 skips the operation and
     // stores the first operand, 2 skips the stores too. It bounds how much of
@@ -2136,6 +2137,12 @@ int main(int argc, char** argv) {
                 !parse_u32_arg(argv[++i], debug_vsh_capture_budget) ||
                 !debug_vsh_capture_budget || debug_vsh_capture_budget > 16384) {
                 std::fprintf(stderr, "Invalid VSH capture path, interval, or count (1..16384)\n");
+                return 2;
+            }
+        }
+        else if (!std::strcmp(argv[i], "--nv2a-vsh-gpu-resident")) {
+            if (i + 1 >= argc || !parse_u32_arg(argv[++i], nv2a_vsh_gpu_resident) || nv2a_vsh_gpu_resident > 2) {
+                std::fprintf(stderr, "--nv2a-vsh-gpu-resident expects 0 (off), 1 (verify), or 2 (verified GPU draw)\n");
                 return 2;
             }
         }
@@ -2578,6 +2585,16 @@ int main(int argc, char** argv) {
         return 2;
     }
 #endif
+#if !XLLE_VSH_GPU_RESIDENT
+    if (nv2a_vsh_gpu_resident) {
+        std::fprintf(stderr, "--nv2a-vsh-gpu-resident requires XLLE_VSH_GPU_RESIDENT=ON\n");
+        return 2;
+    }
+#endif
+    if (nv2a_vsh_gpu_resident && (!nv2a_vsh_compile || nv2a_vsh_unsafe_probe)) {
+        std::fprintf(stderr, "Verified GPU resident handoff requires the faithful compiled CPU reference\n");
+        return 2;
+    }
     if ((debug_vsh_capture_path || debug_vsh_batch_capture_path) && (!nv2a_vsh_compile || nv2a_vsh_unsafe_probe)) {
         std::fprintf(stderr, "VSH capture requires the faithful compiled CPU path\n");
         return 2;
@@ -2674,6 +2691,18 @@ int main(int argc, char** argv) {
             static_cast<unsigned long long>(max_host_memory_mb));
     }
 
+#if XLLE_VSH_GPU_RESIDENT
+    if (nv2a_vsh_gpu_resident) {
+        // Compile under the same hard cap, before guest RAM/TBs and resident
+        // surfaces compete with the driver's transient compiler allocations.
+        std::string vsh_error;
+        if (!nv2a_renderer || !nv2a_renderer->prepare_vsh_gpu_resident(vsh_error)) {
+            std::fprintf(stderr, "[host] GPU resident VSH preparation failed: %s\n",
+                         nv2a_renderer ? vsh_error.c_str() : "OpenGL renderer required");
+            return 2;
+        }
+    }
+#endif
     // --boot <flash.bin>: stand up the machine (RAM + flash) and smoke-test the map.
     if (boot_flash) {
         XboxMachine::Config machine_config;
@@ -2773,6 +2802,9 @@ int main(int argc, char** argv) {
                 mach.nv2a()->set_vertex_fast_fetch_enabled(
                     nv2a_vertex_fast_fetch);
                 mach.nv2a()->set_vsh_compile_enabled(nv2a_vsh_compile);
+#if XLLE_VSH_GPU_RESIDENT
+                mach.nv2a()->set_vsh_gpu_resident_mode(nv2a_vsh_gpu_resident);
+#endif
                 mach.nv2a()->set_vsh_dot_prefix(nv2a_vsh_dot_prefix);
                 mach.nv2a()->set_generic_vertex_scratch(nv2a_generic_vertex_scratch);
 #if XLLE_VSH_DRAW_OVERLAP_CENSUS
@@ -6424,6 +6456,20 @@ int main(int argc, char** argv) {
                     static_cast<unsigned long long>(stats.samples),
                     static_cast<unsigned long long>(stats.cache_hits), vsh_capture_writer->count(), capture_ok);
                 frame_output_ok = frame_output_ok && capture_ok;
+            }
+#endif
+#if XLLE_VSH_GPU_RESIDENT
+            if (nv2a_vsh_gpu_resident) {
+                const auto stats = mach.nv2a()->vsh_gpu_resident_stats();
+                std::printf("[host] vsh-gpu-resident mode=%u batches=%llu executions=%llu refs=%llu vertices=%llu "
+                    "verified=%llu gpu_draws=%llu declines=%llu mismatches=%llu "
+                    "layout_declines=%llu numeric_declines=%llu opcode_declines=%llu geometry_declines=%llu\n", nv2a_vsh_gpu_resident,
+                    static_cast<unsigned long long>(stats.batches), static_cast<unsigned long long>(stats.executions),
+                    static_cast<unsigned long long>(stats.references), static_cast<unsigned long long>(stats.vertices),
+                    static_cast<unsigned long long>(stats.verified), static_cast<unsigned long long>(stats.gpu_draws),
+                    static_cast<unsigned long long>(stats.declines), static_cast<unsigned long long>(stats.mismatches),
+                    static_cast<unsigned long long>(stats.layout_declines), static_cast<unsigned long long>(stats.numeric_declines),
+                    static_cast<unsigned long long>(stats.opcode_declines), static_cast<unsigned long long>(stats.geometry_declines));
             }
 #endif
             if (window && frame_available)

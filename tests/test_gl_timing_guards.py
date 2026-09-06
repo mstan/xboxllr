@@ -142,8 +142,8 @@ def lines_matching(pattern):
 # 12 -> 17, 5 -> 8, 2 -> 3.
 WRAPPED = [
     ("draw_arrays_", {"gpu_timed_draw_arrays": 4}),
-    ("dispatch_compute_", {"gpu_timed_dispatch_compute": 6}),
-    ("buffer_data_", {"gpu_timed_buffer_data": 8}),
+    ("dispatch_compute_", {"gpu_timed_dispatch_compute": 8}),
+    ("buffer_data_", {"gpu_timed_buffer_data": 9}),
     ("tex_image_2d_", {"gpu_timed_tex_image_2d": 17}),
     ("tex_sub_image_2d_", {"gpu_timed_tex_sub_image_2d": 8}),
     ("read_pixels_", {"gpu_timed_read_pixels": 2,          # the two GL probes

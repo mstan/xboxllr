@@ -6,6 +6,10 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#if XLLE_VSH_GPU_RESIDENT
+#include <memory>
+#include "machine/nv2a_vsh_gpu_batch.hpp"
+#endif
 
 #include "host/nv2a_combiner_glsl.hpp"
 
@@ -21,6 +25,14 @@ struct Nv2aGenericCombinerVertex {
 };
 
 struct Nv2aGenericCombinerPacket {
+#if XLLE_VSH_GPU_RESIDENT
+    struct GpuVshReference {
+        vsh_gpu_batch::Batch batch;
+        std::vector<vsh_gpu_batch::ProgramOutput128B> expected;
+        uint32_t mode = 0; // 1 verifies then draws CPU VBO; 2 draws verified GPU VBO.
+    };
+    std::shared_ptr<GpuVshReference> gpu_vsh;
+#endif
     // A deliberately decoded, narrowly supported compute fixture.  This is not a
     // replacement for the generic state vector: it gives a host backend the exact
     // coverage/output inputs it needs without teaching host code NV097 register
@@ -506,6 +518,18 @@ struct Nv2aWitnessedProfileResult {
 
 class Nv2aRenderer {
 public:
+#if XLLE_VSH_GPU_RESIDENT
+    struct VshGpuResidentStats {
+        uint64_t batches = 0, executions = 0, references = 0, vertices = 0;
+        uint64_t verified = 0, gpu_draws = 0, declines = 0, mismatches = 0;
+        uint64_t layout_declines = 0, numeric_declines = 0, opcode_declines = 0, geometry_declines = 0;
+    };
+    virtual VshGpuResidentStats vsh_gpu_resident_stats() const { return {}; }
+    virtual bool prepare_vsh_gpu_resident(std::string& error) {
+        error = "GPU resident VSH is unavailable on this renderer";
+        return false;
+    }
+#endif
     virtual ~Nv2aRenderer() = default;
     virtual const char* name() const = 0;
     // This query must have no side effects. Nv2a snapshots the potentially large

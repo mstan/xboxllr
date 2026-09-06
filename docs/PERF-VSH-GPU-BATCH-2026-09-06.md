@@ -5,6 +5,10 @@ Owner: `beads-xbox.1.15.11`. This follows the complete-program shadow in
 CPU-authoritative. This checkpoint validates batch ownership and a second GPU
 dispatch; it does not establish a performance improvement or 60 FPS.
 
+The subsequent [resident VBO handoff](PERF-VSH-GPU-RESIDENT-2026-09-06.md)
+shares program/constants per batch and validates GPU-produced buffers through
+the actual renderer. It remains opt-in and retains CPU reference work.
+
 ## Ownership and capture
 
 `XLLE_VSH_CAPTURE=ON` enables
