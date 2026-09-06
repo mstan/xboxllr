@@ -64,7 +64,7 @@ boot average; repeated noperf measurements remain required. `product-perf-16b` i
 separate instrumented attribution run for this interval.
 
 `tests/scripts/stockdash-settings.txt` extends the proven clock acceptance with stock-HDD
-navigation events and captured states. Its navigation portion is under calibration; older
+navigation events and captured states. Its corrected route is visually validated below; older
 Down/A evidence used a different HDD/XBMC image and cannot validate this route. Input still
 traverses the guest OHCI/XID path, with the existing test-only synthetic hub topology.
 That topology is a coverage limitation, not proof of real Controller-S wiring.
@@ -73,6 +73,13 @@ The first 19 B calibration (`settings-19b`) missed the second five-report Down h
 the two selected-state captures both show XBOX LIVE. The later captures show SELECT ACCOUNT
 and then a return to XBOX LIVE. It validates neither Settings entry nor the intended route.
 The next calibration lengthens holds to 20 reports and neutral gaps to 125 reports.
+
+The corrected `settings-v2-22b` run reaches SETTINGS selected at 16,861,533,326 instructions,
+the SETTINGS page at 18,445,533,325, and the dashboard again at 20,762,866,659. All three
+captures were viewed, and the report passes without a fault. The frame is intentionally
+not checked against the unrelated 12 B final SHA. This is route calibration, not repeated
+performance validation. Stable Settings checkpoints can use 18.5 B through 19 B, before
+the Back event; the returned dashboard can use 21 B through 22 B.
 
 ### Settled-window attribution, not a retention result
 

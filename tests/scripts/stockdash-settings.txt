@@ -1,0 +1,22 @@
+# Stock HDD route: accept the clock, settle on the dashboard, move from MUSIC
+# through XBOX LIVE to SETTINGS, enter and return. Endpoint2 counts anchor input
+# to guest USB reports. Captures precede their event's input transition.
+# Initial clock acceptance is the established clock-accept.txt schedule.
+# Validated settings-v2-22b: Settings selected at16.861B, open at18.445B,
+# back on the dashboard at20.762B. Holds20/neutral125 reports avoid missed input.
+# Run22B; use the report's exact captures rather than treating A as instant entry.
+# count buttons a0 a1 a2 a3 a4 a5 a6 a7 lx ly rx ry [capture name]
+220 0000 0xff 0 0 0 0 0 0 0 0 0 0 0 capture clock-pre-a
++5 0000 0 0 0 0 0 0 0 0 0 0 0 0
++5 0000 0 0 0 0 0 0 0 0 0 0 0 0 capture clock-post-a
+855 0000 0 0 0 0 0 0 0 0 0 0 0 0 capture dashboard-settled
+1000 0002 0 0 0 0 0 0 0 0 0 0 0 0 capture pre-down
++20 0000 0 0 0 0 0 0 0 0 0 0 0 0
++125 0002 0 0 0 0 0 0 0 0 0 0 0 0 capture live-selected
++20 0000 0 0 0 0 0 0 0 0 0 0 0 0
++125 0000 0xff 0 0 0 0 0 0 0 0 0 0 0 capture settings-selected
++20 0000 0 0 0 0 0 0 0 0 0 0 0 0
++250 0000 0 0 0 0 0 0 0 0 0 0 0 0 capture settings-open
++125 0000 0 0xff 0 0 0 0 0 0 0 0 0 0 capture pre-back
++20 0000 0 0 0 0 0 0 0 0 0 0 0 0
++250 0000 0 0 0 0 0 0 0 0 0 0 0 0 capture dashboard-return
