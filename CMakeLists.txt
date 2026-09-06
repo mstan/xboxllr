@@ -270,6 +270,9 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(${guard} PROPERTIES
                          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   endforeach()
+  add_test(NAME product_window_summary
+           COMMAND ${Python3_EXECUTABLE}
+                   ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_product_window_summary.py)
 else()
   message(STATUS "Python3 interpreter not found; skipping source guard tests")
 endif()
