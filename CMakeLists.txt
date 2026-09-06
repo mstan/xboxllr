@@ -178,6 +178,11 @@ add_executable(test_vertex_reuse_shadow tests/test_vertex_reuse_shadow.cpp)
 target_include_directories(test_vertex_reuse_shadow PRIVATE ${XLLE_INCLUDES})
 add_test(NAME vertex_reuse_shadow COMMAND test_vertex_reuse_shadow)
 
+add_executable(test_vsh_dot_prefix tests/test_vsh_dot_prefix.cpp)
+target_include_directories(test_vsh_dot_prefix PRIVATE ${XLLE_INCLUDES})
+target_link_libraries(test_vsh_dot_prefix PRIVATE nv2a_vsh_emulator nv2a_vsh_cpu)
+add_test(NAME vsh_dot_prefix COMMAND test_vsh_dot_prefix)
+
 add_executable(test_generated_submit_perf tests/test_generated_submit_perf.cpp)
 target_include_directories(test_generated_submit_perf PRIVATE ${XLLE_INCLUDES})
 add_test(NAME generated_submit_perf COMMAND test_generated_submit_perf)

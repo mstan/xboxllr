@@ -2404,11 +2404,13 @@ void Nv2a::invalidate_vsh_program_cache() {
         // OFF it is rebuilt per batch, and this is the one place that says the
         // previous batch's records no longer describe the program.
         vsh_cache_ops_valid_ = false;
+        vsh_dot_prefix_plan_.clear();
         return;
     }
     vsh_cache_valid_ = false;
     vsh_cache_writes_context_ = false;
     vsh_cache_ops_valid_ = false;
+    vsh_dot_prefix_plan_.clear();
     vsh_cache_census_row_ = nullptr;
     destroy_vsh_program_cache();
 }
@@ -2484,6 +2486,7 @@ bool Nv2a::compile_vsh_program(const void* steps, uint32_t slots,
                                VshProgramCensusRow* row) {
     vsh_cache_ops_valid_ = false;
     vsh_cache_ops_.clear();
+    vsh_dot_prefix_plan_.clear();
     const Nv2aVshStep* step = static_cast<const Nv2aVshStep*>(steps);
     if (!step || !slots) return false;
     uint32_t step_count = 0;
@@ -3291,6 +3294,20 @@ bool Nv2a::submit_vertex_batch() {
             const uint64_t compile_start = perf_excl::tick_now();
             program_compiled =
                 compile_vsh_program(program.steps, program_slots, census_row);
+            if (program_compiled && vsh_dot_prefix_enabled_ &&
+                !program_writes_context) {
+                const VshDotPrefixDispatch dispatch{
+                    kVshDispatchTable[NV2AOP_DP3],
+                    kVshDispatchTable[NV2AOP_DP4]};
+                if (vsh_build_dot_prefix_plan(vsh_cache_ops_.data(),
+                                              static_cast<uint32_t>(
+                                                  vsh_cache_ops_.size()),
+                                              dispatch, vsh_dot_prefix_plan_)) {
+                    ++vsh_dot_prefix_stats_.matched_programs;
+                    vsh_dot_prefix_stats_.planned_ops +=
+                        vsh_dot_prefix_plan_.op_count;
+                }
+            }
             const uint64_t compile_delta =
                 perf_excl::tick_now() - compile_start;
             vertex_census_.vsh_compile_ticks += perf_excl::compensated_delta(
@@ -3301,6 +3318,7 @@ bool Nv2a::submit_vertex_batch() {
             // Arm A of the same-binary A/B. The records from whatever program
             // ran last must not be reachable.
             vsh_cache_ops_valid_ = false;
+            vsh_dot_prefix_plan_.clear();
         }
         if (census_row) census_row->compiled = program_compiled;
         vsh_cache_census_row_ = census_row;
@@ -3419,6 +3437,10 @@ bool Nv2a::submit_vertex_batch() {
         const VshCompiledOp* const compiled_ops = vsh_cache_ops_.data();
         const uint32_t compiled_op_count =
             static_cast<uint32_t>(vsh_cache_ops_.size());
+        const uint32_t dot_prefix_op_count = vsh_dot_prefix_plan_.op_count;
+        const bool use_dot_prefix =
+            use_compiled_vsh && vsh_dot_prefix_enabled_ &&
+            dot_prefix_op_count >= 2u && !program_writes_context && !vsh_probe;
         uint64_t program_vertices = 0;
         std::array<uint8_t, 16> active_attribute_slots{};
         uint32_t active_attribute_count = 0;
@@ -3561,9 +3583,18 @@ bool Nv2a::submit_vertex_batch() {
                             vsh_execute_compiled_probe(
                                 compiled_ops, compiled_op_count, bases,
                                 vsh_probe);
-                        else
+                        else if (use_dot_prefix) {
+                            const uint32_t suffix_start =
+                                vsh_execute_dot_prefix(vsh_dot_prefix_plan_,
+                                                       bases);
+                            vsh_execute_compiled(compiled_ops + suffix_start,
+                                                 compiled_op_count -
+                                                     suffix_start,
+                                                 bases);
+                        } else {
                             vsh_execute_compiled(compiled_ops,
                                                  compiled_op_count, bases);
+                        }
                         if (vsh_verify_budget_ &&
                             vsh_verify_checked_ < vsh_verify_budget_)
                             vsh_verify_vertex(program.steps, input_regs.data(),
@@ -3659,6 +3690,11 @@ bool Nv2a::submit_vertex_batch() {
         if (census_row) {
             ++census_row->batches;
             census_row->vertices += program_vertices;
+        }
+        if (use_dot_prefix && program_vertices) {
+            vsh_dot_prefix_stats_.executed_vertices += program_vertices;
+            vsh_dot_prefix_stats_.executed_ops +=
+                program_vertices * dot_prefix_op_count;
         }
     }
     if (program_owned) nv2a_vsh_program_destroy(&program);

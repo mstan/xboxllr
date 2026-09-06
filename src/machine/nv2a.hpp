@@ -36,6 +36,7 @@
 #include "machine/nv2a_renderer.hpp"
 #include "machine/nv2a_texture_conversion_cache.hpp"
 #include "machine/nv2a_vsh_compiled.hpp"
+#include "machine/nv2a_vsh_dot_prefix.hpp"
 #if XLLE_VERTEX_REUSE_DIAGNOSTICS
 #include "machine/nv2a_vertex_reuse_shadow.hpp"
 #endif
@@ -1387,9 +1388,18 @@ public:
     void set_vsh_compile_enabled(bool on) {
         if (vsh_compile_enabled_ == on) return;
         vsh_compile_enabled_ = on;
-        vsh_cache_ops_valid_ = false;
+        invalidate_vsh_program_cache();
     }
     bool vsh_compile_enabled() const { return vsh_compile_enabled_; }
+    void set_vsh_dot_prefix(bool on) {
+        if (vsh_dot_prefix_enabled_ == on) return;
+        vsh_dot_prefix_enabled_ = on;
+        invalidate_vsh_program_cache();
+    }
+    bool vsh_dot_prefix_enabled() const { return vsh_dot_prefix_enabled_; }
+    const VshDotPrefixStats& vsh_dot_prefix_stats() const {
+        return vsh_dot_prefix_stats_;
+    }
     // Ceiling probe, KNOWINGLY INCORRECT when armed. Default 0; no --no-
     // spelling. See nv2a_vsh_compiled.hpp.
     void set_vsh_unsafe_probe(uint32_t mode) { vsh_unsafe_probe_ = mode; }
@@ -2825,8 +2835,11 @@ private:
     // Which register files this program can actually observe unwritten. See
     // VshZeroPlan in nv2a_vsh_compiled.hpp.
     VshZeroPlan vsh_cache_zero_plan_{};
+    VshDotPrefixPlan vsh_dot_prefix_plan_{};
+    VshDotPrefixStats vsh_dot_prefix_stats_{};
     bool vsh_cache_ops_valid_ = false;
     bool vsh_compile_enabled_ = true;
+    bool vsh_dot_prefix_enabled_ = false;
     uint32_t vsh_unsafe_probe_ = 0;
     uint32_t vsh_verify_budget_ = 0;
     uint64_t vsh_verify_checked_ = 0;

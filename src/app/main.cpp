@@ -332,6 +332,15 @@ void print_gpu_residency_census(const xlle::Nv2a* nv, const char* scope,
             scope, deadline, nv->vsh_verify_budget(),
             (unsigned long long)nv->vsh_verify_checked(),
             (unsigned long long)nv->vsh_verify_mismatched());
+        const auto& dot = nv->vsh_dot_prefix_stats();
+        std::printf(
+            "[host] nv2a-vsh-dot-prefix scope=%s deadline=%llu enabled=%u "
+            "matched_programs=%llu planned_ops=%llu executed_vertices=%llu executed_ops=%llu\n",
+            scope, deadline, nv->vsh_dot_prefix_enabled() ? 1u : 0u,
+            (unsigned long long)dot.matched_programs,
+            (unsigned long long)dot.planned_ops,
+            (unsigned long long)dot.executed_vertices,
+            (unsigned long long)dot.executed_ops);
     }
 #if XLLE_VERTEX_REUSE_DIAGNOSTICS
     if (const auto* shadow = nv->vertex_reuse_shadow()) {
@@ -1672,6 +1681,7 @@ int main(int argc, char** argv) {
     // because it is knowingly incorrect when armed: 1 skips the operation and
     // stores the first operand, 2 skips the stores too. It bounds how much of
     // the per-op cost is the vendored call rather than the operand traffic.
+    bool nv2a_vsh_dot_prefix = false;
     uint32_t nv2a_vsh_unsafe_probe = 0;
     // The differential verifier (beads-xbox.1.15.11). DIAGNOSTIC, default 0,
     // very slow when armed: it runs the vendored interpreter a SECOND time for
@@ -2000,6 +2010,10 @@ int main(int argc, char** argv) {
             nv2a_vsh_compile = true;
         else if (!std::strcmp(argv[i], "--no-nv2a-vsh-compile"))
             nv2a_vsh_compile = false;
+        else if (!std::strcmp(argv[i], "--nv2a-vsh-dot-prefix"))
+            nv2a_vsh_dot_prefix = true;
+        else if (!std::strcmp(argv[i], "--no-nv2a-vsh-dot-prefix"))
+            nv2a_vsh_dot_prefix = false;
         else if (!std::strcmp(argv[i], "--nv2a-vsh-unsafe-probe") && i + 1 < argc)
             nv2a_vsh_unsafe_probe =
                 static_cast<uint32_t>(std::strtoul(argv[++i], nullptr, 0));
@@ -2604,6 +2618,7 @@ int main(int argc, char** argv) {
                 mach.nv2a()->set_vertex_fast_fetch_enabled(
                     nv2a_vertex_fast_fetch);
                 mach.nv2a()->set_vsh_compile_enabled(nv2a_vsh_compile);
+                mach.nv2a()->set_vsh_dot_prefix(nv2a_vsh_dot_prefix);
                 mach.nv2a()->set_vsh_unsafe_probe(nv2a_vsh_unsafe_probe);
                 mach.nv2a()->set_vsh_verify(nv2a_vsh_verify);
                 mach.nv2a()->set_gpu_profiles_enabled(nv2a_gpu_profiles);

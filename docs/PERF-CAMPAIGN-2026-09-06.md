@@ -166,6 +166,15 @@ submission gaps, then select bulk constants/upload reuse or a carefully bounded
 GPU vertex experiment. No external renderer is treated as a fidelity oracle. Numeric
 generic families 3/4/7 and direct distinct-frame/tail-latency measurement remain open.
 
+Follow-through: `PERF-GENERATED-SUBMIT-2026-09-06.md` measures the generated
+submission gaps; direct buffer/uniform work is too small to justify the proposed
+ring. `PERF-VSH-DOT-PREFIX-2026-09-06.md` tests a general CPU dot-prefix plan:
+38.3 million verified vertices, zero mismatches, but a clean same-binary 3+3
+returns -0.148% median / -0.036% minimum improvement. It stays off by default.
+Next measure the overlap of programmable vertices with generated GPU draws and
+their CPU triangle preparation before designing a GPU vertex-plus-setup path.
+Bucket totals and high execution coverage alone have not predicted savings.
+
 * **"There is no swapchain": false.** The interactive SDL D3D11 backend already calls DXGI
   `Present1`. Stage g measures and improves it. Sharing the NV2A GL context is a different
   optimization, with a transfer cost that still needs to justify the work.

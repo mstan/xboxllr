@@ -694,11 +694,212 @@ static void test_generated_submit_census_gl() {
 #endif
 }
 
+static uint64_t run_mov_vertex_reference_hash(bool compile_enabled) {
+    std::string fault;
+    xlle::Nv2a gpu([&](const std::string& why) { fault = why; });
+    std::vector<uint8_t> ram(0x4000000, 0);
+    gpu.set_mem_access(
+        [&](uint32_t addr, void* dst, size_t n) {
+            if (addr + n > ram.size()) return false;
+            std::memcpy(dst, ram.data() + addr, n);
+            return true;
+        },
+        [&](uint32_t addr, const void* src, size_t n) {
+            if (addr + n > ram.size()) return false;
+            std::memcpy(ram.data() + addr, src, n);
+            return true;
+        },
+        [&](uint32_t addr, size_t n) -> uint8_t* {
+            if (addr + n > ram.size()) return nullptr;
+            return ram.data() + addr;
+        });
+
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700000, 4, 0x00000000);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700004, 4, 0x80010010);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700008, 4, 0x00000001);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x70000C, 4, 0x80010020);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700010, 4, 0x00000002);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700014, 4, 0x80010030);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700018, 4, 0x00000003);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x70001C, 4, 0x80010040);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700100, 4, 0x0000003D);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700104, 4, 0x00000FFF);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700108, 4, 0x00002000);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700200, 4, 0x00000097);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700180, 4, 0x0000003D);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700184, 4, 0x0000FFFF);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700188, 4, 0x00002000);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700300, 4, 0x0000003D);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700304, 4, 0x03FFFFFF);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700308, 4, 0x00000000);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700400, 4, 0x0000003D);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700404, 4, 0x03FFFFFF);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700408, 4, 0x00000000);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x003204, 4, 0x100);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x00322C, 4, 0x18);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x003244, 4, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x003220, 4, 1);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x003250, 4, 1);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x003200, 4, 1);
+    gpu.set_vsh_compile_enabled(compile_enabled);
+
+    const float positions[] = {
+        10.0f, 20.0f, 0.0f,
+        30.0f, 20.0f, 0.0f,
+        20.0f, 40.0f, 0.0f,
+    };
+    std::memcpy(ram.data() + 0x7000, positions, sizeof(positions));
+    uint32_t cursor = 0;
+    auto emit = [&](uint32_t method, uint32_t parameter) {
+        put32(ram, 0x2000 + cursor, (1u << 18) | method);
+        put32(ram, 0x2000 + cursor + 4, parameter);
+        cursor += 8;
+    };
+    emit(0x0000, 1);
+    emit(0x0194, 2);
+    emit(0x0198, 3);
+    emit(0x0208, 0x0128);
+    emit(0x020C, 0x00100010);
+    emit(0x0210, 0x5000);
+    emit(0x0214, 0x6000);
+    emit(0x019C, 2);
+    emit(0x01A0, 3);
+    emit(0x1720, 0x00007000);
+    emit(0x1760, 0x00000C32);
+    emit(0x1E9C, 0);
+    emit(0x0B00, 0x00000000);
+    emit(0x0B04, 0x0020001B);
+    emit(0x0B08, 0x0836106C);
+    emit(0x0B0C, 0x2070F801);
+    emit(0x1EA0, 0);
+    emit(0x1E94, 2);
+    emit(0x17FC, 5);
+    emit(0x1800, 0x00010000);
+    emit(0x1808, 2);
+    emit(0x17FC, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+    CHECK(fault.empty());
+    CHECK(gpu.transformed_vertices() == 3);
+    return gpu.transform_output_hash();
+}
+
+static void test_vsh_compile_toggle_rebuilds_cached_parse() {
+    const uint64_t interpreted_hash = run_mov_vertex_reference_hash(false);
+
+    std::string fault;
+    xlle::Nv2a gpu([&](const std::string& why) { fault = why; });
+    gpu.set_detailed_telemetry(false);
+    std::vector<uint8_t> ram(0x4000000, 0);
+    gpu.set_mem_access(
+        [&](uint32_t addr, void* dst, size_t n) {
+            if (addr + n > ram.size()) return false;
+            std::memcpy(dst, ram.data() + addr, n);
+            return true;
+        },
+        [&](uint32_t addr, const void* src, size_t n) {
+            if (addr + n > ram.size()) return false;
+            std::memcpy(ram.data() + addr, src, n);
+            return true;
+        },
+        [&](uint32_t addr, size_t n) -> uint8_t* {
+            if (addr + n > ram.size()) return nullptr;
+            return ram.data() + addr;
+        });
+
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700000, 4, 0x00000000);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700004, 4, 0x80010010);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700008, 4, 0x00000001);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x70000C, 4, 0x80010020);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700010, 4, 0x00000002);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700014, 4, 0x80010030);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700018, 4, 0x00000003);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x70001C, 4, 0x80010040);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700100, 4, 0x0000003D);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700104, 4, 0x00000FFF);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700108, 4, 0x00002000);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700200, 4, 0x00000097);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700180, 4, 0x0000003D);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700184, 4, 0x0000FFFF);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700188, 4, 0x00002000);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700300, 4, 0x0000003D);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700304, 4, 0x03FFFFFF);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700308, 4, 0x00000000);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700400, 4, 0x0000003D);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700404, 4, 0x03FFFFFF);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x700408, 4, 0x00000000);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x003204, 4, 0x100);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x00322C, 4, 0x18);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x003244, 4, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x003220, 4, 1);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x003250, 4, 1);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x003200, 4, 1);
+
+    const float positions[] = {
+        10.0f, 20.0f, 0.0f,
+        30.0f, 20.0f, 0.0f,
+        20.0f, 40.0f, 0.0f,
+    };
+    std::memcpy(ram.data() + 0x7000, positions, sizeof(positions));
+    uint32_t cursor = 0;
+    auto emit = [&](uint32_t method, uint32_t parameter) {
+        put32(ram, 0x2000 + cursor, (1u << 18) | method);
+        put32(ram, 0x2000 + cursor + 4, parameter);
+        cursor += 8;
+    };
+    auto draw = [&] {
+        emit(0x17FC, 5);
+        emit(0x1800, 0x00010000);
+        emit(0x1808, 2);
+        emit(0x17FC, 0);
+        gpu.mmio_write(xlle::Nv2a::kBase + 0x800040, 4, cursor);
+        CHECK(fault.empty());
+    };
+
+    emit(0x0000, 1);
+    emit(0x0194, 2);
+    emit(0x0198, 3);
+    emit(0x0208, 0x0128);
+    emit(0x020C, 0x00100010);
+    emit(0x0210, 0x5000);
+    emit(0x0214, 0x6000);
+    emit(0x019C, 2);
+    emit(0x01A0, 3);
+    emit(0x1720, 0x00007000);
+    emit(0x1760, 0x00000C32);
+    emit(0x1E9C, 0);
+    emit(0x0B00, 0x00000000);
+    emit(0x0B04, 0x0020001B);
+    emit(0x0B08, 0x0836106C);
+    emit(0x0B0C, 0x2070F801);
+    emit(0x1EA0, 0);
+    emit(0x1E94, 2);
+    draw();
+    CHECK(gpu.vertex_census().vsh_compiled_vertices == 3);
+
+    gpu.set_vsh_compile_enabled(false);
+    draw();
+    CHECK(gpu.vertex_census().vsh_interpreted_vertices == 3);
+
+    gpu.set_vsh_compile_enabled(true);
+    gpu.set_detailed_telemetry(true);
+    const uint64_t compiled_before = gpu.vertex_census().vsh_compiled_vertices;
+    draw();
+    CHECK(gpu.vertex_census().vsh_compiled_vertices == compiled_before + 3);
+    CHECK(gpu.transformed_vertices() == 3);
+    CHECK(gpu.transform_output_hash() == interpreted_hash);
+
+    gpu.set_vsh_dot_prefix(true);
+    draw();
+    CHECK(gpu.vertex_census().vsh_compiled_vertices == compiled_before + 6);
+    CHECK(gpu.vsh_dot_prefix_stats().executed_vertices == 0);
+}
+
 int main() {
     test_texture_conversion_cache();
     test_generated_texture_identity();
     test_generated_uniform_batching();
     test_generated_submit_census_gl();
+    test_vsh_compile_toggle_rebuilds_cached_parse();
     std::string fault;
     xlle::Nv2a gpu([&](const std::string& why) { fault = why; });
     // This renderer declines every accelerated route, forcing the existing

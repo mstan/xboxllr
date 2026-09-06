@@ -67,6 +67,8 @@ param(
     [string] $Candidate = '',
     [int] $Repetitions = 3,
     [double] $MinImprovementPct = 5.0,
+    # Refuse a known-busy host BEFORE launching a leg. Mid-run contamination
+    # still invalidates the leg/pair through the recorded after-census.
     [switch] $RequireQuiescence,
     [switch] $RequireSameProfileHashes,
     # Retry WHOLE contaminated pairs, within this invocation/session. All attempted
@@ -255,6 +257,20 @@ try {
         Write-Host $commandText
 
         $before = Get-ProcessCensus
+        if ($RequireQuiescence -and $before.Count -gt 0) {
+            $foreignNames = @($before | ForEach-Object { "$($_.name):$($_.pid)" })
+            Write-JsonFile -Path $quiescenceJson -Value ([pscustomobject]@{
+                pattern = $QuiescencePattern
+                harness_pid = $PID
+                before = @($before)
+                after = @()
+                foreign_processes = $foreignNames
+                contaminated = $true
+                emulator_started = $false
+                reason = 'busy_before_launch'
+            })
+            throw "host is busy; leg $LegIndex was not started: $($foreignNames -join ', ')"
+        }
         $cpuBefore = Get-CpuSnapshot
 
         & $exePath @commandArgs 1> $stdout 2> $stderr
