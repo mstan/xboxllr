@@ -12,6 +12,14 @@
 
 ## 0. The answer, first
 
+**2026-09-06 scope amendment:** the owner has reaffirmed faithful LLE at 60 FPS with
+headroom. The measurements below remain useful, particularly the WHPX exit-cost result.
+They do not establish that TCG tuning or memory-system optimization is exhausted. The
+synthetic benchmark's unsplit residual is not a proven irreducible floor, and section 5.1's
+blanket sub-5% conclusion is stronger than its own 7.5% hook envelope permits. See
+[the amended campaign plan](PERF-CAMPAIGN-2026-09-06.md) for the production measurements
+needed before retaining or rejecting further changes. The original decision follows.
+
 **None of the three replacements is justified, and the reason is arithmetic rather than taste.**
 
 | option | measured ceiling on `tcg_exec` (today 14.700 s) | correctness risk | verdict |
