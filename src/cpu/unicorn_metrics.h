@@ -25,6 +25,11 @@ void xlle_unicorn_hook_region_counts(void* engine, void* code_hook,
 // carries its own denominator.
 extern uint64_t xlle_guest_tsc_ticks;
 extern uint64_t xlle_guest_tsc_reads;
+// Generated TSC read/write sites publish their zero-based instruction index in the TB.
+// The diagnostic instruction hook already publishes an exact base, so it disables
+// this offset; the ordinary block scheduler enables it.
+extern uint32_t xlle_guest_tsc_prefix;
+extern int xlle_guest_tsc_block_clock;
 // 1 (default) = serve the published retired-instruction clock; 0 = pass through the host
 // TSC, which is what every build before 2026-09-04 did. Kept only so a leg can be compared
 // against an older binary; it makes the guest workload depend on how fast the host is.

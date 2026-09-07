@@ -5,7 +5,10 @@ primary executor; Unicorn remains the fallback and comparison engine. This is an
 implementation plan, not a request for another architecture decision. Work tracking
 and live status belong to central Beads under `beads-xbox.1.25`.
 
-The next executable goal is [the AOT-3 burndown](GOAL-AOT3-BURNDOWN.md).
+AOT-3's implementation and acceptance record are in
+[the machine-adapter design](DESIGN-AOT-MACHINE.md), with its requirements in
+[the AOT-3 goal](GOAL-AOT3-BURNDOWN.md). The next executable goal is
+[the AOT-4 burndown](GOAL-AOT4-BURNDOWN.md).
 
 ## Deliverable and boundaries
 
@@ -91,7 +94,11 @@ passes 45/45; the expanded AOT suites also pass after the final coverage additio
 The Python generator suite contains 14 tests. No performance claim follows from
 these test durations. No native code is linked into the dashboard executable yet.
 
-AOT-3 through AOT-5 are `beads-xbox.1.25.3` through `.5` and remain outstanding.
+AOT-3 (`beads-xbox.1.25.3`) now passes the 47-test Release suite, canonical
+reference checks, and image regression. Its 3+3 overhead measurement records
+2.88% median / 3.54% minimum wall regression, not a speedup. See the machine
+design for evidence, corrected CPU timing, and remaining scope limits.
+AOT-4 and AOT-5 (`beads-xbox.1.25.4` and `.5`) remain outstanding.
 The tests deliberately use `independent_regions: true` to bundle distinct programs
 at the same guest base. Each compiled function is bound to its own descriptor and
 expected bytes. This is not an ambiguous whole-address-space dispatcher.
@@ -118,7 +125,7 @@ push under existing owner authorization after checks pass. Preserve third-party
 licenses and the existing combined-executable release restriction. No new dependency
 is required for AOT-1. Record failures and disproved assumptions in Beads.
 
-After the first landing, start AOT-3. Do not replace the required AOT deliverable with
+After machine-adapter acceptance, start AOT-4. Do not replace the required AOT deliverable with
 another broad comparison, nor weaken fallback/coherence checks to increase coverage.
 
 ### DOAXBV audit amendment (2026-09-06)

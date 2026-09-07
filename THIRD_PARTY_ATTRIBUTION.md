@@ -15,6 +15,13 @@ A copy of its top-level GPL v2 text is in [LICENSES/GPL-2.0.txt](LICENSES/GPL-2.
 The QEMU and bundled-library tree includes additional notices and licenses;
 this top-level copy is not a substitute for those.
 
+`cmake/UnicornPreciseFault.cmake` derives hash-checked build-tree copies of the
+pinned QEMU TLB, translation and MSR helper sources for precise memory-fault
+restoration, instruction-clock/TSC repair, and code coherence through RAM aliases. The generated
+copies retain their upstream license headers. The bridge in
+`src/cpu/unicorn_aot_bridge.c` uses this pinned target's private structures;
+upgrading Unicorn requires requalifying these integration changes.
+
 ## nv2a_vsh_cpu
 
 [nv2a_vsh_cpu](https://github.com/xemu-project/nv2a_vsh_cpu), commit

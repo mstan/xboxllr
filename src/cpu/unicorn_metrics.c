@@ -30,6 +30,8 @@ void xlle_unicorn_hook_region_counts(void* engine, void* code_hook,
 // caller's side; it is unused here and typed void* so this bridge needs no target headers.
 uint64_t xlle_guest_tsc_ticks = 0;
 uint64_t xlle_guest_tsc_reads = 0;
+uint32_t xlle_guest_tsc_prefix = 0;
+int xlle_guest_tsc_block_clock = 1;
 int xlle_guest_tsc_deterministic = 1;  /* default: the emulator owns guest time */
 
 uint64_t xlle_unused_host_cpu_get_tsc(void* env);  /* the renamed original */
@@ -37,6 +39,7 @@ uint64_t cpu_get_tsc_x86_64(void* env);
 
 uint64_t cpu_get_tsc_x86_64(void* env) {
     xlle_guest_tsc_reads++;
-    if (xlle_guest_tsc_deterministic) return xlle_guest_tsc_ticks;
+    if (xlle_guest_tsc_deterministic)
+        return xlle_guest_tsc_ticks + (xlle_guest_tsc_block_clock ? xlle_guest_tsc_prefix : 0);
     return xlle_unused_host_cpu_get_tsc(env);
 }

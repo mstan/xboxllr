@@ -1,5 +1,6 @@
-// Original xboxlle AOT runtime contract. Version 1 is a bounded flat IA-32 test
-// environment, not a complete Xbox CPU-state interchange interface.
+// Original xboxlle AOT runtime contract. Version 1 carries the integer state
+// touched by generated IA-32 code. The machine adapter certifies its execution
+// context; untouched extended/hidden state remains owned by the CPU floor.
 #ifndef XLLE_AOT_RUNTIME_H
 #define XLLE_AOT_RUNTIME_H
 #include <stddef.h>
@@ -12,6 +13,9 @@ extern "C" {
 
 #define XLLE_AOT_ABI_VERSION 1u
 #define XLLE_AOT_CONTEXT_FLAT32_RAM 1u
+// Certified by the machine adapter from cached CPU segments and live MMU state.
+// IF, DF, IOPL and ID are preserved by this instruction subset, never modified.
+#define XLLE_AOT_CONTEXT_MACHINE_FLAT32_RAM 2u
 
 typedef enum xlle_aot_exit {
     XLLE_AOT_CONTINUE = 0,
@@ -40,7 +44,8 @@ typedef struct xlle_aot_bus {
     const uint8_t* code;
     size_t code_size;
     // Stable for an invocation, or changed synchronously by memory callbacks.
-    // Asynchronous device scheduling is outside ABI v1.
+    // The machine scheduler bounds each invocation by its next device deadline.
+    // No asynchronous guest-device mutation is allowed during an invocation.
     uint32_t event_pending;
     void* opaque;
     // Return 1 on complete success, 0 with NO guest-visible side effects.
@@ -67,10 +72,14 @@ static inline xlle_aot_exit xlle_aot_check(const xlle_aot_region* region,
     uint64_t budget, uint64_t start)
 {
     // The adapter certifies flat 32-bit code/data, mapped RAM and no hidden state
-    // effects. VM86, single-step and privileged flags are deliberately unsupported.
-    const uint32_t allowed_flags = UINT32_C(0x000008d7);
+    // effects. VM86 and single-step are unsupported; the certified machine
+    // context permits preserved IF/DF/IOPL/ID flags.
+    const uint32_t allowed_flags = bus &&
+        bus->context == XLLE_AOT_CONTEXT_MACHINE_FLAT32_RAM
+        ? UINT32_C(0x00203ed7) : UINT32_C(0x000008d7);
     if (!region || !state || !bus || region->abi_version != XLLE_AOT_ABI_VERSION ||
-        bus->context != XLLE_AOT_CONTEXT_FLAT32_RAM ||
+        (bus->context != XLLE_AOT_CONTEXT_FLAT32_RAM &&
+         bus->context != XLLE_AOT_CONTEXT_MACHINE_FLAT32_RAM) ||
         (state->eflags & ~allowed_flags) != 0 || (state->eflags & 2u) == 0 ||
         state->retired < start || state->retired == UINT64_MAX)
         return XLLE_AOT_CONTEXT;

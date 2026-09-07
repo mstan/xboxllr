@@ -14,8 +14,8 @@
 
 namespace xlle {
 
-// A0 scope: general-purpose registers + EIP + EFLAGS. x87/MMX/SSE state joins this struct
-// when a boot/game trace first needs it (PRINCIPLES §5: scope by trace, not by the manual).
+// Integer interchange state. x87/MMX/SSE and hidden CPU state stay in the floor;
+// read_reg/write_reg expose the explicit wide-register diagnostics below.
 struct X86Regs {
     uint32_t eax = 0, ecx = 0, edx = 0, ebx = 0;
     uint32_t esp = 0, ebp = 0, esi = 0, edi = 0;
@@ -46,7 +46,16 @@ struct IoEvent {
 // Wide / control registers addressed by name for typed read/write. Added as the fixture
 // corpus reaches x87/SSE and the control bits needed to enable them (PRINCIPLES §5: scope
 // by trace — the fixtures are that trace).
-enum class XReg { CR0, CR4, MXCSR, XMM0, XMM1, XMM2, ST0, ST1, MM0 };
+enum class XReg { CR0, CR4, MXCSR, XMM0, XMM1, XMM2, ST0, ST1, MM0,
+    CR3, XMM3, XMM4, XMM5, XMM6, XMM7, ST2, ST3, ST4, ST5, ST6, ST7,
+    FPCW, FPSW, FPTAG, CS, DS, SS, IDTR, DR7 };
+
+struct X86DescriptorTable {
+    uint16_t selector = 0;
+    uint64_t base = 0;
+    uint32_t limit = 0;
+    uint32_t flags = 0;
+};
 
 // Callbacks fired by the floor as it executes, so the platform can feed its rings without
 // the floor knowing about ring types.

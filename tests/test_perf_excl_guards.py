@@ -94,7 +94,8 @@ def body(source, name, path):
 # checked, not just the presence of a Scope, so a refactor cannot silently point
 # a region at the wrong bucket.
 SITES = [
-    (UNICORN_CPP, "UnicornFloor::run", ["kTcgExec"]),
+    (UNICORN_CPP, "UnicornFloor::run_unicorn", ["kTcgExec"]),
+    (SRC / "cpu/aot_executor.cpp", "AotExecutor::execute", ["kAotExec"]),
     (UNICORN_CPP, "UnicornFloor::inject_interrupt", ["kIntrDelivery"]),
     (MACHINE_CPP, "XboxMachine::mmio_read", ["kMmioDispatch", "kOtherDevice"]),
     (MACHINE_CPP, "XboxMachine::mmio_write", ["kMmioDispatch", "kOtherDevice"]),

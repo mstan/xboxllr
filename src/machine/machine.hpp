@@ -23,6 +23,7 @@
 #include "machine/pm.hpp"
 #include "machine/smbus.hpp"
 #include "xlle/cpu_floor.hpp"
+#include "xlle/aot_execution.hpp"
 
 namespace xlle {
 
@@ -69,6 +70,11 @@ public:
     uint64_t run(uint32_t start_eip, uint64_t max_insns, std::string& err);
 
     CpuFloor& cpu() { return *cpu_; }
+    // Register before execution. Immutable descriptors/code must outlive this machine.
+    bool register_aot_region(const xlle_aot_region& region);
+    bool register_aot_replacement(const AotReplacement& replacement);
+    void set_aot_profile(uint32_t profile);
+    AotExecutionStats aot_stats() const;
     size_t flash_size() const { return flash_size_; }
     uint64_t total_insns() const { return total_insns_; }
     // Relaxed mirror of total_insns_ for host probes (e.g. the sampled

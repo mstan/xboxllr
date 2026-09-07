@@ -238,11 +238,13 @@ check(
     "the deterministic guest TSC is the default",
     re.search(r"int xlle_guest_tsc_deterministic\s*=\s*1", metrics_c) is not None,
 )
-check(
-    "the guest TSC is published from the retired-instruction clock",
-    floor_cpp_code.count("xlle_guest_tsc_ticks = self->seq_;") == 2,
-    "both the block hook and the per-instruction hook must publish it",
-)
+for clock_site in ("code_trampoline", "block_trampoline", "restore_clock"):
+    clock_body = floor_cpp_code.split("void UnicornFloor::" + clock_site + "(", 1)[-1].split("\n}", 1)[0]
+    check(
+        "the guest TSC is published from the instruction clock in " + clock_site,
+        "xlle_guest_tsc_ticks = self->seq_;" in clock_body,
+        "instruction/block scheduling and precise restore must all publish the clock",
+    )
 check(
     "the host-TSC passthrough survives only as an explicit opt-out flag",
     "--legacy-host-tsc" in main_cpp_code,

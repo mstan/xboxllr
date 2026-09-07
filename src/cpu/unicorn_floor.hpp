@@ -1,15 +1,18 @@
 // xlle — UnicornFloor: CPU floor backed by the harvested QEMU x86 core (via Unicorn).
 #pragma once
+#include "cpu/unicorn_aot_bridge.h"
 #include <cstddef>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "xlle/cpu_floor.hpp"
+#include "xlle/aot_execution.hpp"
 
 struct uc_struct;  // unicorn's uc_engine (opaque)
 
 namespace xlle {
+class AotExecutor;
 
 class UnicornFloor : public CpuFloor {
 public:
@@ -53,6 +56,12 @@ public:
 
     uint64_t run(uint32_t start_eip, uint64_t max_insns, std::string& err) override;
 
+    // Compiled artifacts and hooks must outlive the floor. Configure between runs.
+    bool register_aot_region(const xlle_aot_region& region);
+    bool register_aot_replacement(const AotReplacement& replacement);
+    void set_aot_profile(uint32_t profile);
+    AotExecutionStats aot_stats() const;
+
     bool ok() const { return uc_ != nullptr; }
     void hook_region_counts(uint64_t& code_regions, uint64_t& count_regions,
                             uint64_t& block_regions) const;
@@ -78,10 +87,11 @@ public:
         uint64_t block_mode_runs = 0;
         uint64_t bootstrap_blocks = 0;  // uncharged-then-repaid first-block executions (<= a few)
         // Instructions added to the clock by advance_instruction_clock() (idle fast-forward).
-        // tb_insns + skipped_insns == the machine's retired total; the two are disjoint by
-        // construction, which is what keeps the block-tier accounting auditable.
+        // In block mode, tb_insns + skipped_insns + aot_stats().retired equals
+        // the machine's retired total; these three sources are disjoint.
         uint64_t skipped_insns = 0;
         uint64_t skips = 0;
+        uint64_t fault_unretired = 0;  // charged suffix removed on fault/SMC restart
     };
     BlockStats block_stats() const;
 
@@ -92,6 +102,17 @@ public:
     uint64_t block_pc_ring_writes() const { return stats_.tb_entries; }
 
 private:
+    friend class AotExecutor;
+    uint64_t run_unicorn(uint32_t start_eip, uint64_t max_insns, std::string& err);
+    struct HostRamMapping { uint32_t base; size_t size; uint8_t* host; };
+    std::vector<HostRamMapping> host_ram_;
+    std::unique_ptr<AotExecutor> aot_;
+    bool aot_dispatching_ = false;
+    bool aot_bypass_entry_ = false;
+    bool aot_handoff_ = false;
+    uint64_t aot_fallback_start_ = 0;
+    bool restore_charge_active_ = false;
+    static void restore_clock(void*, const xlle_unicorn_restore_record*);
     // C-ABI trampolines Unicorn calls; they recover `this` from user_data.
     static void code_trampoline(uc_struct*, uint64_t addr, uint32_t size, void* user);
     static void block_trampoline(uc_struct*, uint64_t addr, uint32_t size, void* user);
@@ -134,8 +155,7 @@ private:
     void icount_insert(uint32_t pc, uint16_t size, uint16_t icount);
     uint32_t icount_lookup(uint32_t pc, uint16_t size) const;
 
-    // Per-instruction scheduling is used when a retired-instruction observer is installed and
-    // for the single bootstrap slice (see run()).
+    // Per-instruction scheduling is opt-in for observers/diagnostics.
     // Charge the first-ever block once its icount becomes known (see the .cpp).
     void settle_bootstrap_block();
     void set_insn_mode(bool on);

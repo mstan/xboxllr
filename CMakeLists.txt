@@ -60,6 +60,8 @@ FetchContent_Declare(unicorn
   GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(unicorn)
 target_sources(unicorn PRIVATE src/cpu/unicorn_metrics.c)
+target_sources(x86_64-softmmu PRIVATE src/cpu/unicorn_aot_bridge.c)
+include(cmake/UnicornPreciseFault.cmake)
 # Guest RDTSC must not read the host TSC (beads-xbox.1.4.6): rename the pinned QEMU
 # definition out of the way so src/cpu/unicorn_metrics.c owns the symbol every RDTSC and
 # TSC-MSR read resolves to. Nothing in the vendored tree is edited.
@@ -105,7 +107,7 @@ if(WIN32)
 endif()
 
 # --- CPU floor (Unicorn-backed) ---
-add_library(xlle_cpu STATIC src/cpu/unicorn_floor.cpp)
+add_library(xlle_cpu STATIC src/cpu/unicorn_floor.cpp src/cpu/aot_executor.cpp)
 target_include_directories(xlle_cpu PUBLIC ${XLLE_INCLUDES})
 target_include_directories(xlle_cpu PRIVATE ${unicorn_SOURCE_DIR}/include)
 target_link_libraries(xlle_cpu PUBLIC unicorn)
@@ -411,6 +413,12 @@ if(Python3_Interpreter_FOUND)
     target_link_libraries(test_aot_${aot_variant} PRIVATE
                           xlle_aot_fixture_${aot_variant} xlle_cpu xlle_spike)
     add_test(NAME aot_${aot_variant} COMMAND test_aot_${aot_variant})
+    add_executable(test_aot_machine_${aot_variant} tests/test_aot_machine.cpp
+                   tests/test_aot_machine_state.cpp tests/test_aot_irq_shadow.cpp
+                   tests/test_aot_store_fault.cpp)
+    target_link_libraries(test_aot_machine_${aot_variant} PRIVATE
+                          xlle_aot_fixture_${aot_variant} xlle_machine)
+    add_test(NAME aot_machine_${aot_variant} COMMAND test_aot_machine_${aot_variant})
   endforeach()
   add_test(NAME aot_compile
            COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_aot_compile.py")

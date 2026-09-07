@@ -29,6 +29,19 @@ XboxMachine::XboxMachine(Config config)
 
 bool XboxMachine::ok() const { return static_cast<UnicornFloor*>(cpu_.get())->ok(); }
 
+bool XboxMachine::register_aot_region(const xlle_aot_region& region) {
+    return static_cast<UnicornFloor*>(cpu_.get())->register_aot_region(region);
+}
+bool XboxMachine::register_aot_replacement(const AotReplacement& replacement) {
+    return static_cast<UnicornFloor*>(cpu_.get())->register_aot_replacement(replacement);
+}
+void XboxMachine::set_aot_profile(uint32_t profile) {
+    static_cast<UnicornFloor*>(cpu_.get())->set_aot_profile(profile);
+}
+AotExecutionStats XboxMachine::aot_stats() const {
+    return static_cast<UnicornFloor*>(cpu_.get())->aot_stats();
+}
+
 bool XboxMachine::init_ram() {
     ram_.assign(kRamSize, 0);
     // Map the 64 MB backing at 0x0 and ALIAS it at 0x04000000-0x07FFFFFF: the 64 MB Xbox does

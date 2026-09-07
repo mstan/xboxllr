@@ -208,6 +208,9 @@ enum Bucket : uint8_t {
     // named bucket keeps them out of HOST_POLL, which is where they would
     // otherwise land because capture_frame_series() runs inside host_poll_cb_.
     kDiagCheckpoint,
+    // Generated execution, eligibility/coherence checks and state transfer.
+    // AotExecutor::execute; fallback remains in kTcgExec.
+    kAotExec,
     kBucketCount,
 
     // Sentinel: no region is open. A gap charged to this is discarded.
@@ -241,6 +244,7 @@ inline constexpr const char* kBucketNames[kBucketCount] = {
     "slice_overhead",
     "host_poll",
     "diag_checkpoint",
+    "aot_exec",
 };
 
 struct Profile {

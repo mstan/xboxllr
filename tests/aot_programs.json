@@ -28,6 +28,14 @@
     {"name":"xor_imm","base":4096,"code":"35ffffffff"},
     {"name":"branch_ne","base":4096,"code":"39d87505b84433221190"},
     {"name":"jump_near","base":4096,"code":"e905000000b8efbeadde90"},
-    {"name":"load_memory","base":4096,"code":"a100200000"}
+    {"name":"load_memory","base":4096,"code":"a100200000"},
+    {"name":"machine_mixed","base":4096,"code":"40eb0d"},
+    {"name":"machine_memory","base":4096,"code":"a10020000040a300200000ebf3"},
+    {"name":"machine_mmio","base":4096,"code":"43a10000000e40ebf7"},
+    {"name":"machine_alias","base":4096,"code":"a10020000440a300200004ebf3"},
+    {"name":"machine_crosspage","base":4096,"code":"a1fe2f000040a3fe2f0000ebf3"},
+    {"name":"machine_store_fault","base":4096,"code":"43a30000000e40ebf7"},
+    {"name":"machine_smc_alias","base":4096,"code":"a305100004b844332211ebf4"},
+    {"name":"machine_tsc_prefix","base":4096,"code":"400f31ebfb","entries":[0,3]}
   ]
 }
