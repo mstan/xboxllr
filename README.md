@@ -1,81 +1,144 @@
 # xboxlle
 
-A faithful, LLE-first low-level emulation platform for the original Xbox (2001,
-IA-32 "Coppermine" Pentium III + NV2A). The current product path runs the real
-Microsoft 2BL/kernel/dashboard bytes, but it does **not** yet perform authentic
-MCPX cold boot: the executable loads a maintainer-supplied flash image and an
-already extracted/decrypted 2BL blob, then starts from the approximate 2BL handoff
-state used by the current bring-up path.
+xboxlle runs original Xbox software by emulating the console's hardware. This is
+called **low-level emulation (LLE)**. The first goal is to run the original Xbox
+dashboard, the menu with Memory, Music, Xbox Live, and Settings.
 
-The first product goal is the real Xbox dashboard, fully navigable and functional,
-with faithful LLE at 60 FPS with headroom. That goal is not achieved yet. HLE is
-allowed only as an opt-in layer that matches the faithful LLE floor; it is not a
-replacement for making the LLE path correct and fast.
+**This is development software.** It can render the dashboard with the tested
+files, but support for other firmware and disk images is not yet established.
+Faithful LLE at 60 FPS with extra performance available is our goal. We have not
+reached it yet. High-level emulation (HLE) may be added as an optional mode, but
+it must match the LLE behavior.
 
-It belongs to the recomp family (nesrecomp / psxrecomp / gbarecomp / gcnlle) and
-inherits its doctrine: LLE-first, run the real firmware/dashboard where the current
-boundary permits it, validate against ground truth, keep observability cheap and
-explicit, and treat artifacts as evidence rather than authority. The Xbox guest is
-x86-on-x86-64, so this is a dynamic execution platform (CPU floor + JIT + harvested
-device models), not a guest-to-C static recompiler. That distinction is why it is
-`xboxlle`, not `xboxrecomp`.
+This guide takes you from a fresh Windows setup to a dashboard window you can
+control with your keyboard. Read the file requirements before installing the
+build tools. You can build and test xboxlle without Xbox files, but you need
+some private files to reach the Microsoft dashboard.
 
-## Strategy in one paragraph
+## 1. Check what you need
 
-Harvest the hard, already-solved parts and re-express them in our own modular,
-observable, hardware-correctable architecture: the CPU floor from Unicorn Engine
-(embeddable QEMU x86 core, GPL-2), NV2A/APU/device behavior from xemu references
-and local hardware probes, and the host presentation layer from SDL3/OpenGL. The
-value we build here is deterministic machine wiring, observability/cosim,
-hardware-conformance harnesses, the LLE floor, opt-in matching HLE layers, and
-per-title packaging. Real Xbox hardware, via the companion `xboxlle-probe` repo,
-is the ground-truth oracle; xemu is a reference to harvest from and check against.
+Use an **x64 Windows PC (Intel or AMD)** for this guide. You also need an internet connection
+for the first build and enough free disk space for the tools, build, and your HDD
+image. Our development HDD image alone uses 8 GiB; allow extra space for backups.
 
-## The two arcs
+The GPU renderer needs OpenGL 4.3 and the extensions
+`GL_ARB_gpu_shader_int64` and `GL_ARB_fragment_shader_interlock`. These are
+features provided by your graphics driver. Having OpenGL 4.3 alone is not enough.
+See [troubleshooting](#troubleshooting) if the renderer cannot start.
 
-- **Arc 1 - the real Xbox dashboard, fully navigable and functional.** Boot through
-  the current firmware boundary, launch and run the dashboard from a real HDD image,
-  and make settings, clock, memory manager, music, and navigation work end-to-end.
-- **Arc 2 - Blinx: The Time Sweeper.** The first game target, in its own per-title
-  repo (`BlinxLLE`), after the Arc-1 platform is proven.
+These are the files needed to boot the dashboard:
 
-## Fresh Windows setup
+| File | What it means | How you get it |
+|---|---|---|
+| Flash / BIOS image | The Xbox startup firmware. | Supply a backup from your own console. |
+| Decrypted 2BL bootloader | A small program inside the firmware that starts the Xbox kernel. | Extract it from your supplied firmware in step 6, or supply an already decrypted copy. |
+| Full raw HDD image | A copy of the entire Xbox hard disk, including its partitions and dashboard files. | Supply a readable backup of your own disk. |
+| EEPROM file | A 256-byte file with the virtual console's identity, keys, and settings. | Generate it in step 7, or supply your original console's EEPROM backup. |
 
-The supported development host is Windows x64 with PowerShell, MSYS2 MinGW64,
-CMake, Ninja, Git, and Python 3 with the Windows `py -3` launcher. Dependencies
-are fetched by CMake: Unicorn Engine 2.1.1, `nv2a_vsh_cpu` commit
-`863fc0f50aa4027af113718d2a63e45ac3be7a42`, and SDL `release-3.2.0` when the SDL
-host layer is enabled.
+Encrypted bootloader extraction also needs a **matching MCPX ROM backup or
+private 2BL key file**. Step 6 explains where these fit.
 
-Install Git for Windows, Python 3 with its launcher, Windows CMake (3.20 or newer),
-and MSYS2. In the MSYS2 MinGW64 terminal, install the compiler and build tool:
+Microsoft firmware, dashboard files, and game files are **not included**. The
+project cannot generate replacements for them today. A tool to create a new
+Xbox disk and import your dashboard files is planned, but is not implemented.
+Creating an empty disk file will not give you a dashboard.
+
+Keep your original backups untouched. Use working copies for this guide. Do not
+upload firmware, disk images, EEPROMs, or keys to GitHub.
+
+## 2. Install the tools
+
+A **terminal** is a window where you type commands. We use two terminals here:
+MSYS2 MINGW64 for installing the compiler, and PowerShell for everything else.
+
+Install these tools from their official sites:
+
+| Tool | Install choice | Why it is needed |
+|---|---|---|
+| [Git for Windows](https://git-scm.com/install/windows) | Windows x64; enable Git from the command line. | Downloads the project source. |
+| [Python 3](https://www.python.org/downloads/windows/) | Install a Python 3 runtime and make sure `py -3` works. | Runs setup tools and tests. |
+| [CMake](https://cmake.org/download/) | Windows x64 installer, version 3.20 or newer. This guide uses its default folder, `C:\Program Files\CMake`. | Prepares the build. |
+| [MSYS2](https://www.msys2.org/) | Install in `C:\msys64`, the default folder. | Provides the C/C++ compiler and Ninja build tool. |
+
+After installing MSYS2, follow its update instructions. Then open **MSYS2 MINGW64**
+from the Start menu. If you cannot find that shortcut, run
+`C:\msys64\mingw64.exe`. Do not use the MSYS or UCRT64 terminal for this step.
+
+Run this command in **MSYS2 MINGW64**:
 
 ```sh
 pacman -S --needed mingw-w64-x86_64-gcc mingw-w64-x86_64-ninja
 ```
 
-Use a Windows graphics driver supporting OpenGL 4.3 for the GPU renderer. The
-current shader paths also use `GL_ARB_gpu_shader_int64` and
-`GL_ARB_fragment_shader_interlock`; OpenGL 4.3 alone does not guarantee these
-extensions. In
-PowerShell, clone into a workspace with room for the private full HDD image and
-build products (the current development HDD image alone is 8 GiB):
+Accept the package installation when prompted. Wait until it finishes. You can
+then close this terminal.
+
+Open a **new PowerShell window** from the Start menu. Run all remaining command
+blocks in PowerShell, unless a step explicitly says otherwise. Administrator mode
+is not needed for the project commands.
+
+Check the tools:
 
 ```powershell
-New-Item -ItemType Directory -Force F:\Projects\xboxlle | Out-Null
-Set-Location F:\Projects\xboxlle
-git clone https://github.com/mstan/xboxlle.git xboxlle
+git --version
+py -3 --version
+& 'C:\Program Files\CMake\bin\cmake.exe' --version
+& 'C:\msys64\mingw64\bin\gcc.exe' --version
+& 'C:\msys64\mingw64\bin\ninja.exe' --version
 ```
 
-Adjust these example paths to your machine. Build all Release targets before
-running CTest. Call Windows CMake directly to avoid MSYS/Cygwin path shims:
+**Check:** each command should print a version. If one cannot find the command
+or file, fix that installation before continuing. If you installed a tool in
+another folder, change its path in the examples below.
+
+## 3. Clone the repository
+
+The **repository**, or **repo**, contains the project's source code. **Cloning**
+means downloading a working copy with Git.
+
+These commands create a workspace inside your Windows user folder. They do not
+require an `F:` drive. Run them once:
 
 ```powershell
-Set-Location F:\Projects\xboxlle\xboxlle
-$env:Path = 'C:\msys64\mingw64\bin;' + $env:Path
+$xboxWorkspace = Join-Path $env:USERPROFILE 'Projects\xboxlle'
+New-Item -ItemType Directory -Force -Path $xboxWorkspace | Out-Null
+Set-Location $xboxWorkspace
+git clone https://github.com/mstan/xboxlle.git xboxlle
+Set-Location .\xboxlle
+git config core.hooksPath .githooks
+```
 
+The two folders named `xboxlle` are intentional. The outer folder holds everything;
+the inner folder is the Git repository. The hooks enable checks for private files
+before commits and pushes.
+
+**Check:** `Get-Location` should show a path ending in
+`\Projects\xboxlle\xboxlle`. `Get-Item .\CMakeLists.txt` should find a file.
+This is the **repo root**. Run the remaining commands from here.
+
+If you close PowerShell, open it again and run this block before continuing:
+
+```powershell
+Set-Location (Join-Path $env:USERPROFILE 'Projects\xboxlle\xboxlle')
+$env:Path = 'C:\msys64\mingw64\bin;' + $env:Path
 $cmakeExe = 'C:\Program Files\CMake\bin\cmake.exe'
 $ctestExe = 'C:\Program Files\CMake\bin\ctest.exe'
+```
+
+`$env:USERPROFILE` means your Windows user folder. `.` means the current folder;
+`..` means its parent folder. The PATH change lets Windows find the compiler's
+helper programs. It lasts only for this PowerShell window.
+
+## 4. Build and test xboxlle
+
+**Building** compiles the source code into a program you can run. First, prepare
+the build from the repo root:
+
+```powershell
+$env:Path = 'C:\msys64\mingw64\bin;' + $env:Path
+$cmakeExe = 'C:\Program Files\CMake\bin\cmake.exe'
+$ctestExe = 'C:\Program Files\CMake\bin\ctest.exe'
+
 & $cmakeExe -S . -B build-release -G Ninja `
   -DCMAKE_C_COMPILER=C:/msys64/mingw64/bin/gcc.exe `
   -DCMAKE_CXX_COMPILER=C:/msys64/mingw64/bin/g++.exe `
@@ -83,125 +146,192 @@ $ctestExe = 'C:\Program Files\CMake\bin\ctest.exe'
   -DCMAKE_C_FLAGS_RELEASE="-O3 -DNDEBUG" `
   -DCMAKE_CXX_FLAGS_RELEASE="-O3 -DNDEBUG" `
   -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-
-& $cmakeExe --build build-release --config Release -j
-& $ctestExe --test-dir build-release --output-on-failure
-git config core.hooksPath .githooks
-py -3 tools/check_repository_hygiene.py --history
 ```
 
-Use direct executable paths from the repo root in examples and scripts, e.g.
-`./build-release/xlle.exe` or `./tools/run_stockdash_replay.ps1`. Do not rely on
-changing into the build directory unless a command explicitly says so.
+Copy the whole command block. A backtick at the end of a line joins it to the next
+line; do not put spaces after it. The `&` tells PowerShell to run the executable
+stored in the following path or variable.
 
-You can immediately run the built-in CPU fixture demo without console dumps:
+CMake downloads the required libraries automatically: Unicorn 2.1.1, SDL 3.2.0,
+and a pinned version of `nv2a_vsh_cpu`. You do not need to download these separately.
+The first setup can take several minutes.
+
+**Check:** CMake should finish with `Build files have been written to` and no
+errors. Check that it also found Python 3; otherwise some tests will be missing.
+
+Now build all targets:
 
 ```powershell
-./build-release/xlle.exe
+& $cmakeExe --build build-release --config Release -j
 ```
 
-This runs synthetic instruction tests; it does not boot the Microsoft dashboard.
-The source build currently has no installer or input-creation wizard. If Windows
-blocks the repository's PowerShell scripts, review them and use a process-scoped
-policy where your host policy permits it:
-`Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned`.
-Keep `SDL3.dll` beside `xlle.exe` when copying a build. Host-native builds target
-the build machine's CPU; see [portable build guidance](docs/BUILDING.md).
+**Check:** the build should finish without errors. The program is
+`build-release\xlle.exe`. The build also places `SDL3.dll` beside it.
 
-## Private machine inputs
+Run the tests:
 
-A clean checkout builds and runs the unit/spike tests without private console
-material. Stock-dashboard replay needs a sibling private directory, outside this
-repo and ignored if copied into the repo root by mistake:
+```powershell
+& $ctestExe --test-dir build-release --output-on-failure
+```
+
+**Check:** expect `100% tests passed`. The normal build currently has 42 tests
+when Python is available. Stop and investigate failed tests before trying to boot
+the dashboard.
+
+You can also run a small CPU test without any Xbox files:
+
+```powershell
+.\build-release\xlle.exe
+```
+
+**Check:** it should report `[spike] 15 passed, 0 failed` and exit. This command
+only runs built-in tests. It does not open the dashboard.
+
+## 5. Put your private Xbox files in place
+
+Create a separate folder for the files from your console:
+
+```powershell
+New-Item -ItemType Directory -Force -Path ..\machine\bios-extract | Out-Null
+```
+
+Use File Explorer to copy your **flash / BIOS image** and **full raw HDD image**
+into `machine`. Give the working copies the names shown below. Enable File name
+extensions in Explorer's View menu so you can check the complete names.
+
+The finished layout will be:
 
 ```text
-F:\Projects\xboxlle\machine\
-  flash-dump-ff000000.bin      # flash image used by --boot
-  bios-extract\bldr.bin        # already extracted/decrypted 2BL used by --run2bl
-  xbox-hdd-stockdash.img       # full sector-for-sector stock-HDD image
-  eeprom.bin                   # generated virtual EEPROM or supplied 256-byte dump
+Your Windows user folder\Projects\xboxlle\
+  xboxlle\                         The repository; README.md is here.
+  machine\                         Private files, outside the repository.
+    flash-dump-ff000000.bin         Your flash / BIOS working copy.
+    xbox-hdd-stockdash.img          Your full raw disk working copy.
+    eeprom.bin                     Generated or supplied in step 7.
+    bios-extract\
+      bldr.bin                     Extracted or supplied in step 6.
 ```
 
-Supply firmware and disk material from your own console. The repository does not bundle a BIOS
-extractor; [the input guide](docs/INPUTS.md#preparing-the-bootloader) describes
-the external XboxBiosTool extraction step and its private MCPX/key prerequisites.
-Current launch tooling consumes the decrypted blob as a supplied artifact. The HDD image is
-the whole disk, including FATX partitions and dashboard files such as the C drive
-contents, not just `xboxdash.xbe`. EEPROM data contains per-console secrets and
-HDD-key material; never publish it, derived keys, or raw bytes.
+The HDD image must contain the Xbox disk layout, its FATX partitions, and the
+Microsoft dashboard with its supporting files. **A folder of files or
+`xboxdash.xbe` alone is not enough.** A `.qcow2`, VHD, or VHDX is a different disk
+format. Renaming one to `.img` does not convert it. Supply readable raw sectors,
+not a compressed archive or a locked physical drive.
 
-For a new virtual console, create the EEPROM once with:
+If you do not have these backups yet, this is where you need to pause the
+dashboard setup. Xbox hardware backup steps depend on your console and its
+current setup; xboxlle does not include a console-dumping wizard. See
+[the private-input guide](docs/INPUTS.md#preparing-the-bootloader) for the required
+artifacts. Do not erase, format, or unlock a physical disk using guessed commands.
+
+## 6. Prepare the decrypted bootloader
+
+If you already have the **decrypted 2BL from the same firmware**, copy it to
+`..\machine\bios-extract\bldr.bin` and continue to step 7.
+
+Otherwise, use the separate [XboxBiosTool project](https://github.com/tommojphillips/XboxBiosTool).
+It is not included in the xboxlle build. Its upstream build uses
+[Visual Studio 2022](https://visualstudio.microsoft.com/vs/older-downloads/).
+Install its **Desktop development with C++** workload if you
+need to build this tool; this extra installation is only for the extractor.
+
+From the xboxlle repo root, download its source:
+
+```powershell
+git clone https://github.com/tommojphillips/XboxBiosTool.git ..\XboxBiosTool
+```
+
+In Visual Studio 2022, open `..\XboxBiosTool\vc\XboxBiosTools.sln`. Select
+**Release** and **Win32**, then **Build > Build Solution**. Follow the
+[upstream build instructions](https://github.com/tommojphillips/XboxBiosTool#building)
+if Visual Studio requests missing components. The expected output is
+`..\XboxBiosTool\bin\xbios.exe`.
+
+Return to PowerShell in the xboxlle repo root. For encrypted firmware, put your
+matching private MCPX backup at `..\machine\mcpx.bin`, then run:
+
+```powershell
+$biosToolExe = '..\XboxBiosTool\bin\xbios.exe'
+& $biosToolExe /extr ..\machine\flash-dump-ff000000.bin `
+  /mcpx ..\machine\mcpx.bin /dir ..\machine\bios-extract
+```
+
+If you already have an extractor executable elsewhere, change `$biosToolExe` to
+its full path. A private 16-byte 2BL key file can be supplied with `/key-bldr`
+instead of `/mcpx`. Modified or already decrypted firmware may need different
+options; use [the extractor's documentation](https://github.com/tommojphillips/XboxBiosTool#encryption--decryption).
+
+**Check:** extraction must succeed and produce the decrypted
+`..\machine\bios-extract\bldr.bin`. A file merely existing does not prove that
+decryption worked. Keep all extraction output private.
+
+xboxlle currently starts at an approximate **2BL handoff**, after the earliest
+startup steps. It does not yet reproduce the complete MCPX cold boot. The MCPX
+file is used by the extractor, not by the launch command below.
+
+## 7. Generate an EEPROM, or use your original
+
+Choose one option. **For a new virtual console, we recommend generating a file.**
+If you need your original console identity for existing saves or accounts, copy
+your own 256-byte EEPROM backup to `..\machine\eeprom.bin` and skip the generation
+command. Keep an untouched backup of that original EEPROM.
+
+To generate a new virtual console's EEPROM, run:
 
 ```powershell
 py -3 tools/create_eeprom.py
 ```
 
-This creates `..\machine\eeprom.bin` only if missing. A valid existing file is
-reused untouched; invalid or mismatched files produce an error, never a rewrite.
-Keep this file between runs. The default `r2` authentication profile matches our
-tested firmware; other firmware can require `--revision r1`, `r3`, or `debug`.
-Generation uses fresh identity/key data and North America/NTSC-M/English settings.
-It does not modify the HDD or require a physical EEPROM dump. Keep an original
-EEPROM available when migrating console-bound saves or accounts. See
-[compatibility and validation](docs/INPUTS.md#generated-eeprom-setup).
+**Check:** it should create `..\machine\eeprom.bin`, or report that an existing
+valid file was reused. The tool never overwrites an existing file. An invalid
+file or a different authentication revision produces an error.
 
-Default HDD attachment is copy-on-write. Guest writes are served back within the
-run but are not persisted to the image unless `--hdd-writeback` is explicitly used.
+Keep the generated file between runs. It contains a fresh virtual identity and
+private keys. The default profile is `r2`, with North America, NTSC-M video, and
+English settings. This profile reached the dashboard with our tested firmware
+and disk. Other firmware can need a different EEPROM revision.
 
-### What must I supply, and what could be generated?
+**A generated EEPROM is not guaranteed to work with every HDD image.** The
+firmware, dashboard, disk layout, and EEPROM settings still need to be compatible.
+It also cannot unlock a physical Xbox HDD or recover its lost keys. The current
+emulator accepts the virtual disk unlock command without checking the password;
+this is a device-model limitation, not complete physical-drive security emulation.
+See [EEPROM profiles and compatibility](docs/INPUTS.md#generated-eeprom-setup).
 
-| Use | Inputs required today |
-|---|---|
-| Build, CTest, built-in CPU fixture demo | No console material. |
-| Run the Microsoft dashboard | Supplied flash, decrypted 2BL and full raw HDD image with dashboard files; generate an EEPROM locally or supply the original. |
-| Extract encrypted 2BL from flash | External extraction tool plus matching private MCPX/key prerequisites; see the input guide. |
+## 8. Check the files, then open the dashboard
 
-The replay script currently fixes the four sibling paths shown above. The direct
-interactive command accepts your chosen paths. A `.qcow2`/VHD file is not a raw
-HDD image; renaming it does not convert it. Size/file-existence checks alone cannot
-establish that a BIOS, decrypted bootloader, EEPROM and dashboard are compatible.
-Stock-dashboard bring-up has been validated against one private firmware/disk
-profile; compatibility with arbitrary BIOS revisions is not yet established.
-
-EEPROM generation is implemented as the one-time setup command above. A future
-FATX disk formatter/importer could also remove the full-HDD-dump requirement;
-that workflow is not implemented yet. A blank disk contains no dashboard.
-Microsoft firmware, bootloader, dashboard and game content
-remain supplied inputs for their respective stock-software paths. See
-[the generation plan and legal boundaries](docs/INPUTS.md#reducing-user-supplied-inputs).
-
-## Stock-dashboard replay commands
-
-Canonical 12B replay uses the private files above, OpenGL, disconnected modeled
-network, reduced retire diagnostics, the test synthetic Controller-S hub, and the
-stock clock-acceptance script:
+From the repo root, check that all four files exist and are not empty:
 
 ```powershell
-./tools/run_stockdash_replay.ps1 -Label defaults
+& {
+  $requiredFiles = @(
+    '..\machine\flash-dump-ff000000.bin'
+    '..\machine\bios-extract\bldr.bin'
+    '..\machine\xbox-hdd-stockdash.img'
+    '..\machine\eeprom.bin'
+  )
+  foreach ($file in $requiredFiles) {
+    if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
+      throw "Missing file: $file"
+    }
+    if ((Get-Item -LiteralPath $file).Length -eq 0) {
+      throw "Empty file: $file"
+    }
+  }
+  if ((Get-Item -LiteralPath '..\machine\eeprom.bin').Length -ne 256) {
+    throw 'The EEPROM must be exactly 256 bytes.'
+  }
+  'All four input files are present.'
+}
 ```
 
-That final-frame gate is specific to the maintainer's private fixture. For a first
-run with your own console dumps, use `-ExpectedFinalSha ''`; a different result is
-not automatically an emulator regression. Pin your own inputs and reference
-outputs before making repeatability or performance claims.
+This checks names and basic sizes, not whether your files are compatible.
+If it reports a problem, fix that before running the next command.
 
-For fixture-specific or longer routes whose final frame is not the canonical 12B
-image, clear the default final-SHA gate explicitly:
+Now launch the emulator. Copy this whole block:
 
 ```powershell
-./tools/run_stockdash_replay.ps1 -Label settings-v2-22b `
-  -MaxInsns 22000000000 `
-  -FrameInterval 250000000 `
-  -InputScript tests\scripts\stockdash-settings.txt `
-  -ExpectedFinalSha ''
-```
-
-Interactive keyboard presentation is a direct executable run. The current dashboard
-input route still requires the test synthetic Controller-S hub; do not add a test
-input script when using live keyboard input.
-
-```powershell
-./build-release/xlle.exe `
+.\build-release\xlle.exe `
   --nv2a-renderer opengl `
   --boot ..\machine\flash-dump-ff000000.bin `
   --run2bl ..\machine\bios-extract\bldr.bin `
@@ -217,54 +347,141 @@ input script when using live keyboard input.
   --interactive-present-stats-ms 1000
 ```
 
-Keyboard mapping: arrows = D-pad, `Z` = A, `X` = B, Enter = Start, Backspace = Back.
-The synthetic hub is a current coverage limitation, not proof of real Controller-S
-wiring.
+The four file options load your private inputs. `--interactive` opens the window
+and enables keyboard input. The synthetic controller option supplies the current
+virtual controller connection; keep it even though you are using a keyboard.
+The other options keep the network disconnected and use the current run settings.
+You do not need to tune them for your first boot.
 
-## Where to read
+**Check:** a window should open and eventually show Xbox video. A fresh profile
+may first show the **CLOCK** screen. Let it finish loading, click inside the window,
+and use the controls below to set or confirm the clock. The target is the main
+dashboard with Memory, Music, Xbox Live, and Settings. Boot and navigation can be
+slow while this project is being optimized.
 
-| Question | File |
+If the window closes or stays black, look for an error in PowerShell and use
+[troubleshooting](#troubleshooting). A working build alone cannot guarantee that
+a new combination of console files will boot.
+
+## 9. Use the dashboard and close it
+
+Click the emulator window to give it keyboard focus.
+
+| Keyboard key | Xbox control | Common use |
+|---|---|---|
+| Arrow keys | D-pad | Move between items or change a value. |
+| Z | A | Select or confirm. |
+| X | B | Cancel or go back. |
+| Enter | Start | Start button. |
+| Backspace | Back | Back button; different from the B button. |
+
+These mappings use physical key positions; the Z/X labels refer to a US keyboard.
+The launch command has no automated input script, so the keyboard controls the
+virtual controller. Xbox Live will not connect in this disconnected setup.
+
+Close the emulator window to end the run and return to PowerShell.
+
+**Changes inside the virtual Xbox are temporary by default.** HDD writes stay in
+memory and disappear when the emulator exits. EEPROM settings changed by the
+guest also stay in memory. Keeping `eeprom.bin` preserves the identity created in
+step 7, but it does not make later in-dashboard settings changes persistent.
+Do not use this setup as the only copy of important saves. HDD writeback is an
+advanced opt-in option described in [the input guide](docs/INPUTS.md).
+
+To run again later, open PowerShell, use the return-to-repo block in step 3, and
+repeat the launch command in step 8. You do not need to clone, build, or generate
+the EEPROM again unless something has changed.
+
+## Troubleshooting
+
+| Problem | What to check |
 |---|---|
-| Current goal and next milestone | `NORTH-STAR.md` |
-| What is true right now | `STATUS.md` |
-| Build/test/run setup | `docs/BUILDING.md` |
-| Private inputs and layout | `docs/INPUTS.md` |
-| Repository hygiene and sensitive-material checks | [Guide](docs/REPOSITORY-HYGIENE.md), [guard](tools/check_repository_hygiene.py) |
-| Architecture | `docs/DESIGN.md` |
-| Roadmap | `docs/ROADMAP.md` |
-| Performance methodology | `docs/PERF-METHODOLOGY.md` |
-| Interactive presentation metrics | `docs/PERF-PRESENT-2026-09-06.md` |
-| Golden replay identities | `goldens/README.md` |
-| Debugging a black or stalled dashboard | [Diagnostic guide](docs/DASHBOARD-DEBUGGING.md) |
+| `git`, `py`, or another tool is not found | Finish installing that tool, then open a new PowerShell window. Run the version checks in step 2. |
+| CMake or the compiler path does not exist | Check the install folder. These commands assume Windows CMake under `C:\Program Files\CMake` and MSYS2 under `C:\msys64`. |
+| CMake cannot find Ninja, or GCC fails to start a helper program | Use the MINGW64 packages from step 2. Repeat the `$env:Path` line in your current PowerShell window. |
+| CMake cannot download a dependency | Check your internet connection and Git installation, then repeat the configure command. |
+| Build stops because the PC runs out of memory | Repeat the build command with `-j 2` instead of `-j` to run fewer compiler jobs at once. |
+| CTest says a test program is missing | Run the full build command in step 4 before running CTest. |
+| Tests pass, but Python tests are missing | Make `py -3 --version` work, rerun CMake configuration, and check that CMake found Python 3. |
+| Only CPU test results appear; no Xbox window | Running `xlle.exe` alone runs tests. Use the full interactive command in step 8. |
+| A required Xbox file cannot be opened | Return to the repo root. Run the file check in step 8. Check Explorer for doubled file extensions. |
+| Bootloader extraction fails | Check that the MCPX or private key matches your firmware. Do not substitute the encrypted bootloader or a kernel file for decrypted `bldr.bin`. |
+| EEPROM generation reports an invalid file or revision | Keep your original backup. Check the [profile guide](docs/INPUTS.md#generated-eeprom-setup); do not delete and regenerate files at random. |
+| OpenGL context or shader creation fails | Install your GPU maker's current driver and check support for both extensions listed in step 1. An unsupported GPU may not run this rendering path. |
+| A DLL is missing | Keep MinGW64 on PATH and `SDL3.dll` beside `xlle.exe`; do not copy just the EXE out of the build folder. |
+| Keys do nothing | Click the window, keep `--test-synthetic-controller-hub`, and do not add a test input script. Use Z to select, not Enter. |
+| The clock or settings return to their old values next run | Guest changes are temporary with the default disk and EEPROM behavior. See step 9. |
+| Xbox video is black or stops changing | Read the PowerShell error and [dashboard debugging guide](docs/DASHBOARD-DEBUGGING.md). Firmware/disk compatibility is still limited. |
 
-## Acknowledgments
+If you report a problem, include the source commit (`git rev-parse --short HEAD`),
+Windows version, GPU/driver, and the relevant error after checking it for private
+data. Do not attach your machine folder, raw logs, screenshots, keys, or dumps
+without a privacy review. See [repository hygiene](docs/REPOSITORY-HYGIENE.md).
+
+## Optional: record a scripted boot for development
+
+You can skip this section if you only want to use the dashboard window.
+A **replay** runs a fixed input script and saves diagnostic files. It is separate
+from interactive keyboard use.
+
+After completing setup, run from the repo root:
+
+```powershell
+.\tools\run_stockdash_replay.ps1 -Label first-run -ExpectedFinalSha ''
+```
+
+This uses the same four paths under `..\machine`, runs a fixed instruction budget,
+and writes logs, reports, and captured frames under `build`. It is not the command
+for an interactive dashboard window. Use a new label, such as `second-run`, for
+another recording.
+
+The empty `-ExpectedFinalSha ''` disables the final-image check against the
+maintainer's private files. Your files or generated EEPROM can produce a different
+image. This command does not establish that your run matches a reference console
+or that a performance change is faster. See [the measurement rules](docs/PERF-METHODOLOGY.md)
+before comparing performance, and [golden records](goldens/README.md) for reference
+checks.
+
+If Windows blocks the script, review it first. Where your PC's policy permits it,
+allow local scripts for this PowerShell window only, then retry:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
+```
+
+## More project information
+
+The first milestone is a faithful, fully functional dashboard. The next software
+target is **Blinx: The Time Sweeper**, in its own `BlinxLLE` project. Real Xbox
+hardware is the reference for correctness; xemu is also an implementation and
+behavior reference. The CPU uses Unicorn, with SDL3 and OpenGL for host graphics.
+
+| Topic | Read more |
+|---|---|
+| Goals and current progress | [North star](NORTH-STAR.md), [status](STATUS.md), [roadmap](docs/ROADMAP.md) |
+| Build options and portable builds | [Building](docs/BUILDING.md) |
+| File formats, EEPROM profiles, and planned input generation | [Private inputs](docs/INPUTS.md) |
+| How the emulator is organized | [Design](docs/DESIGN.md) |
+| Measuring speed and interactive presentation | [Methodology](docs/PERF-METHODOLOGY.md), [presentation measurements](docs/PERF-PRESENT-2026-09-06.md) |
+| Keeping private material out of Git | [Hygiene guide](docs/REPOSITORY-HYGIENE.md), [publication guard](tools/check_repository_hygiene.py) |
 
 Credit to [sp00nznet's xboxdashboard](https://github.com/sp00nznet/xboxdashboard)
-for the dashboard investigation lessons incorporated into our
-[debugging guide](docs/DASHBOARD-DEBUGGING.md).
-Our [source review](docs/PERF-EXTERNAL-REVIEW-2026-09-06.md) also examines
-sp00nznet's xboxrecomp GPU techniques and their limits against the LLE floor.
+for investigation lessons used in our debugging guide. Our
+[external source review](docs/PERF-EXTERNAL-REVIEW-2026-09-06.md) also covers
+sp00nznet's xboxrecomp GPU techniques and their limits for faithful LLE.
 
-## Repository and publication posture
+## License and private material
 
-No private console bytes belong in this repo. MCPX ROM dumps, flash images, extracted
-2BL blobs, EEPROM dumps, HDD images, dashboard files, game discs, generated logs,
-reports, PPMs/PNGs, and local machine evidence packages are local-only material.
-Some of those files are copyrighted; some are per-console secrets; some are merely
-sensitive because they reveal machine paths, input schedules, timing, or private
-asset identities. Review before publishing any replay log or report.
+The owner's original work uses [PolyForm Noncommercial 1.0.0](LICENSE).
+Third-party code retains its existing licenses, including the LGPL EEPROM tool.
+Read [license scope](LICENSE-SCOPE.md) and [third-party attribution](THIRD_PARTY_ATTRIBUTION.md).
 
-The tracked `.gitignore` protects common private asset names and generated evidence;
-it is a safety net, not a substitute for review. Primary history/security checks live
-in [the hygiene guide](docs/REPOSITORY-HYGIENE.md) and
-[the publication guard](tools/check_repository_hygiene.py).
+The current executable links GPL Unicorn. That conflicts with distributing the
+combined program under PolyForm alone; keeping notices does not resolve the
+conflict. The combined-executable release licensing work is still open.
 
-The latest asset audit found no proprietary console payloads or secret-pattern
-findings in the checked source/history. This is a scoped audit, not a copyright
-clearance: source code and dependencies have their own copyrights and licenses.
-The owner's original work is offered under [PolyForm Noncommercial 1.0.0](LICENSE).
-Third-party material keeps its existing licenses, including the LGPL EEPROM tool.
-The current executable links GPL Unicorn, which conflicts with a PolyForm-only
-combined distribution; preserving notices alone does not resolve this. See
-[license scope and release status](LICENSE-SCOPE.md) and
-[third-party attribution](THIRD_PARTY_ATTRIBUTION.md).
+The latest source/history audit found no proprietary console payloads or
+secret-pattern findings in the checked material. This is a scoped audit, not a
+copyright clearance. The source and its dependencies have their own copyrights.
+Private Xbox inputs and generated evidence stay local. `.gitignore` and the Git
+hooks help protect them, but do not replace review before publishing.
