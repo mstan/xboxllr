@@ -5,6 +5,8 @@ primary executor; Unicorn remains the fallback and comparison engine. This is an
 implementation plan, not a request for another architecture decision. Work tracking
 and live status belong to central Beads under `beads-xbox.1.25`.
 
+The next executable goal is [the AOT-3 burndown](GOAL-AOT3-BURNDOWN.md).
+
 ## Deliverable and boundaries
 
 Produce reproducible **IA-32 bytes → portable C → host executable** artifacts. Start
