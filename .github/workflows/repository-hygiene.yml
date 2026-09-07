@@ -12,4 +12,9 @@ jobs:
           persist-credentials: false
       - run: python3 tests/test_repository_hygiene.py
       - run: python3 tests/test_eeprom_generation.py
+      - run: python3 tests/test_aot_compile.py
+      - name: Compile portable generated C without Xbox inputs
+        run: |
+          python3 tools/aot_compile.py --input tests/aot_programs.json --output-c build-aot-ci/programs.c --output-h build-aot-ci/programs.h --manifest build-aot-ci/manifest.json
+          cc -std=c11 -Wall -Wextra -Werror -pedantic-errors -O2 -Iinclude -Ibuild-aot-ci -c build-aot-ci/programs.c -o build-aot-ci/programs.o
       - run: python3 tools/check_repository_hygiene.py --history

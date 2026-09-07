@@ -9,7 +9,8 @@
 Build a **faithful Xbox foundation for portable native ports**, with opt-in ultrawide,
 higher-resolution, and higher-frame-rate enhancements. The first validation workload
 is the original Xbox dashboard. The existing LLE runtime is the reference foundation;
-portable static/native output is a required deliverable, not an implemented capability.
+portable static/native output is a required deliverable. A synthetic AOT target now
+exists; the dashboard continues to use Unicorn until machine integration is qualified.
 
 ## The two arcs
 
@@ -47,6 +48,10 @@ input and interrupt timeline within tolerance, no artifacts, no faults. Byte-loc
 cheapest regression detector, and hardware truth outranks any golden.
 
 ## The ONE next milestone
+
+Execute the [AOT burndown plan](docs/PLAN-AOT-BURNDOWN-2026-09-06.md), tracked under
+`beads-xbox.1.25`. The first landing is the synthetic generated-code target; the
+later machine adapter and real dashboard integration remain separate gates.
 
 **Deliver the first reproducible generated-code target on the existing x64 host.**
 Define the artifact manifest, runtime ABI, complete state-preservation contract, and

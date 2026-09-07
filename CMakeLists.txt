@@ -376,6 +376,46 @@ add_test(NAME spike COMMAND xlle)
 # They read src/ directly, so they run from the source dir, not the build dir.
 find_package(Python3 COMPONENTS Interpreter)
 if(Python3_Interpreter_FOUND)
+  # Synthetic AOT proof only: these generated guest programs are not linked into
+  # xlle. Proprietary artifacts must use a private build directory/input path.
+  set(XLLE_AOT_GENERATED "${CMAKE_CURRENT_BINARY_DIR}/generated/aot")
+  add_custom_command(
+    OUTPUT "${XLLE_AOT_GENERATED}/aot_programs.c"
+           "${XLLE_AOT_GENERATED}/aot_programs.h"
+           "${XLLE_AOT_GENERATED}/aot_manifest.json"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${XLLE_AOT_GENERATED}"
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/aot_compile.py"
+            --input "${CMAKE_CURRENT_SOURCE_DIR}/tests/aot_programs.json"
+            --output-c "${XLLE_AOT_GENERATED}/aot_programs.c"
+            --output-h "${XLLE_AOT_GENERATED}/aot_programs.h"
+            --manifest "${XLLE_AOT_GENERATED}/aot_manifest.json"
+    DEPENDS tools/aot_compile.py tests/aot_programs.json
+    VERBATIM)
+  foreach(aot_variant IN ITEMS optimized unoptimized)
+    add_library(xlle_aot_fixture_${aot_variant} STATIC
+                "${XLLE_AOT_GENERATED}/aot_programs.c")
+    target_include_directories(xlle_aot_fixture_${aot_variant} PUBLIC
+                               include "${XLLE_AOT_GENERATED}")
+    set_target_properties(xlle_aot_fixture_${aot_variant} PROPERTIES
+                           C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+      target_compile_options(xlle_aot_fixture_${aot_variant} PRIVATE
+                             -Wall -Wextra -Werror -pedantic-errors)
+      if(aot_variant STREQUAL "optimized")
+        target_compile_options(xlle_aot_fixture_${aot_variant} PRIVATE -O3)
+      else()
+        target_compile_options(xlle_aot_fixture_${aot_variant} PRIVATE -O0)
+      endif()
+    endif()
+    add_executable(test_aot_${aot_variant} tests/test_aot.cpp)
+    target_link_libraries(test_aot_${aot_variant} PRIVATE
+                          xlle_aot_fixture_${aot_variant} xlle_cpu xlle_spike)
+    add_test(NAME aot_${aot_variant} COMMAND test_aot_${aot_variant})
+  endforeach()
+  add_test(NAME aot_compile
+           COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_aot_compile.py")
+endif()
+if(Python3_Interpreter_FOUND)
   add_test(NAME eeprom_generation
            COMMAND ${Python3_EXECUTABLE}
                    ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_eeprom_generation.py)

@@ -1,0 +1,33 @@
+{
+  "independent_regions": true,
+  "regions": [
+    {"name":"mov_eax_imm","base":4096,"code":"b844332211"},
+    {"name":"add_eax_ebx","base":4096,"code":"01d8"},
+    {"name":"sub_eax_ebx","base":4096,"code":"29d8"},
+    {"name":"xor_eax_eax","base":4096,"code":"31c0"},
+    {"name":"inc_eax","base":4096,"code":"40"},
+    {"name":"dec_eax","base":4096,"code":"48"},
+    {"name":"mov_add_two","base":4096,"code":"b90300000001c8"},
+    {"name":"mov_store_mem","base":4096,"code":"a300200000"},
+    {"name":"and_eax_imm","base":4096,"code":"250f0f0000"},
+    {"name":"cmp_je_taken","base":4096,"code":"39c07405b8efbeadde"},
+    {"name":"branch","base":4096,"code":"39d87405b84433221190"},
+    {"name":"bytes","base":4096,"code":"b07fb4a588c38ae1"},
+    {"name":"memory","base":4096,"code":"a300200000b800000000a100200000"},
+    {"name":"loop","base":4096,"code":"40ebfd"},
+    {"name":"mixed","base":4096,"code":"b8040302010fc840","entries":[0,7]},
+    {"name":"self_modify","base":4096,"code":"a305100000b844332211"},
+    {"name":"unsupported","base":4096,"code":"0fc8"},
+    {"name":"external","base":4096,"code":"eb10"},
+    {"name":"imm_ops","base":4096,"code":"05010000002d0300000035ff0000003dffffff7f"},
+    {"name":"register_moves","base":4096,"code":"89c38bcb88e58ae1"},
+    {"name":"and_regs","base":4096,"code":"21d8"},
+    {"name":"xor_regs","base":4096,"code":"31d8"},
+    {"name":"add_imm","base":4096,"code":"05ffffffff"},
+    {"name":"sub_imm","base":4096,"code":"2dffffffff"},
+    {"name":"xor_imm","base":4096,"code":"35ffffffff"},
+    {"name":"branch_ne","base":4096,"code":"39d87505b84433221190"},
+    {"name":"jump_near","base":4096,"code":"e905000000b8efbeadde90"},
+    {"name":"load_memory","base":4096,"code":"a100200000"}
+  ]
+}

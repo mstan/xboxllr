@@ -7,6 +7,10 @@ implementation are deferred; prepare their interfaces now. Decision tracking:
 
 ## Finding and recommendation
 
+Implementation update: the [AOT burndown](PLAN-AOT-BURNDOWN-2026-09-06.md) now has a
+synthetic generated-C target and differential tests. The source comparison below
+describes the audited baseline; production dashboard execution still uses Unicorn.
+
 xboxlle does not currently deliver that native-port product. It is a developing
 hardware emulator using a dynamic CPU translator. We have not demonstrated that it
 is more accurate or faster than xemu. Our regression tests are useful engineering
@@ -108,7 +112,7 @@ also emits native host instructions. The planned distinguishing deliverable is
 portable ahead-of-time artifacts with a faithful machine runtime, guarded fallback,
 and explicit modification interfaces. That is a useful product direction relative
 to the inspected projects; this review does not establish worldwide uniqueness,
-superior fidelity, or a speed advantage. The native implementation remains pending.
+superior fidelity, or a speed advantage. Production native integration remains pending.
 
 The most useful borrowing candidates are:
 

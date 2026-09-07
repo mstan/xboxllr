@@ -14,8 +14,11 @@ Portable native versions of selected Xbox software are a required project goal,
 following psxrecomp's architecture. The planned pipeline translates Xbox x86 code
 to portable C, then compiles it for the host computer. The runtime will provide
 places to add wider camera views, higher resolution, and higher frame rates later.
-That native build pipeline is **not implemented yet**. The first target and current
-tested setup are Windows x64; ARM hardware testing is deferred. Read the
+The first **synthetic AOT prototype** now generates and tests portable C. Dashboard
+execution still uses Unicorn; AOT dashboard integration is not implemented yet.
+The current tested runtime setup is Windows x64; ARM hardware testing is deferred.
+See the [AOT implementation plan and test commands](docs/PLAN-AOT-BURNDOWN-2026-09-06.md)
+and the
 [comparison with xemu and psxrecomp, and the implementation milestones](docs/COMPARISON-XEMU-NATIVIZATION-2026-09-06.md)
 for what exists today and what we still need to prove.
 

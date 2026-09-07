@@ -186,7 +186,8 @@ establishes behavior for that workload; it does not prove all hardware paths or 
 **xboxlle aims to provide a faithful foundation for portable native ports.** The
 dashboard is the first validation workload; Blinx remains a later full-title arc.
 Generated portable code, a device runtime, guarded fallback, and explicit enhancement
-hooks are the required product architecture. Native output is not implemented.
+hooks are the required product architecture. The first synthetic generated-C target
+is implemented; production native execution and modification hooks remain pending.
 NORTH-STAR scopes the first generated C target on the existing host. Host-specific
 JIT caches can complement this pipeline but cannot replace portable source artifacts.
 Build the modification interfaces now; actual enhancements and ARM qualification follow
