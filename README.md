@@ -14,9 +14,13 @@ Portable native versions of selected Xbox software are a required project goal,
 following psxrecomp's architecture. The planned pipeline translates Xbox x86 code
 to portable C, then compiles it for the host computer. The runtime will provide
 places to add wider camera views, higher resolution, and higher frame rates later.
-Generated portable C now runs in **machine-adapter tests**, including transitions
-to and from Unicorn. Dashboard execution still uses Unicorn; representative
-dashboard AOT coverage is the [next burndown stage](docs/GOAL-AOT4-BURNDOWN.md).
+Generated portable C runs in **machine-adapter tests** and an experimental private
+dashboard build, including transitions to and from Unicorn. Normal builds use
+Unicorn. The [dashboard AOT validation record](docs/RESULTS-AOT4-2026-09-07.md)
+reports matching dashboard images and a slower native path, which stays opt-in.
+Developers can follow the [private dashboard AOT workflow](docs/AOT-PRIVATE-WORKFLOW.md)
+to capture, generate, build and measure selected regions locally. This remains
+experimental; native coverage does not imply a performance improvement.
 See [machine integration and validation](docs/DESIGN-AOT-MACHINE.md).
 The current tested runtime setup is Windows x64; ARM hardware testing is deferred.
 See the [AOT implementation plan and test commands](docs/PLAN-AOT-BURNDOWN-2026-09-06.md)

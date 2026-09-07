@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
-ABI_VERSION = 1
+ABI_VERSION = 2
 REG_NAMES = ["eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"]
 NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 
@@ -32,6 +32,9 @@ class AotError(ValueError):
 class Operand:
     kind: str
     value: int
+    base: int = -1
+    index: int = -1
+    scale: int = 1
 
 
 @dataclass
@@ -91,6 +94,32 @@ def branch_edge(kind: str, target: int, next_offset: int, size: int) -> list[dic
     return edges
 
 
+def decode_memory32(code: bytes, modrm_offset: int) -> tuple[Operand, int]:
+    """32-bit ModRM/SIB address only; callers admit a specific memory opcode."""
+    modrm = read_u8(code, modrm_offset, "memory ModRM")
+    mod, base = modrm >> 6, modrm & 7
+    if mod == 3:
+        raise AotError("memory decoder received a register operand")
+    end, index, scale, displacement = modrm_offset + 1, -1, 1, 0
+    if base == 4:
+        sib = read_u8(code, end, "memory SIB")
+        end += 1
+        base, index, scale = sib & 7, (sib >> 3) & 7, 1 << (sib >> 6)
+        if index == 4:
+            index = -1
+    if mod == 0 and base == 5:
+        base = -1
+        displacement = read_u32(code, end, "absolute memory displacement")
+        end += 4
+    elif mod == 1:
+        displacement = u32(i8(read_u8(code, end, "signed memory displacement")))
+        end += 1
+    elif mod == 2:
+        displacement = read_u32(code, end, "memory displacement")
+        end += 4
+    return Operand("mem32", displacement, base, index, scale), end
+
+
 def decode_one(code: bytes, offset: int) -> DecodedInstruction:
     if offset < 0 or offset >= len(code):
         raise AotError(f"decode offset outside region: {offset}")
@@ -105,6 +134,11 @@ def decode_one(code: bytes, offset: int) -> DecodedInstruction:
     if op in (0x89, 0x8B, 0x88, 0x8A, 0x01, 0x29, 0x31, 0x21, 0x39):
         modrm, reg, rm = decode_modrm_reg_only(code, offset + 1, f"opcode 0x{op:02x}")
         if reg < 0:
+            if op in (0x89, 0x8B):
+                memory, end = decode_memory32(code, offset + 1)
+                name = "mov_r32_to_mem32" if op == 0x89 else "mov_mem32_to_r32"
+                return DecodedInstruction(offset, end - offset, name,
+                                          operands=[Operand("reg32", (modrm >> 3) & 7), memory])
             return DecodedInstruction(offset, 2, f"unsupported_0x{op:02x}_modrm_0x{modrm:02x}", status="unsupported")
         mapping = {
             0x89: "mov_r32_rm32_to_rm32",
@@ -119,6 +153,13 @@ def decode_one(code: bytes, offset: int) -> DecodedInstruction:
         }
         width = "reg8" if op in (0x88, 0x8A) else "reg32"
         return DecodedInstruction(offset, 2, mapping[op], operands=[Operand(width, reg), Operand(width, rm)])
+    if op == 0x83:
+        modrm = read_u8(code, offset + 1, "group-1 ModRM")
+        if modrm >> 6 == 3 and ((modrm >> 3) & 7) == 5:
+            immediate = u32(i8(read_u8(code, offset + 2, "SUB sign-extended immediate")))
+            return DecodedInstruction(offset, 3, "sub_r32_imm32",
+                                      operands=[Operand("reg32", modrm & 7), Operand("imm32", immediate)])
+        return DecodedInstruction(offset, 2, "unsupported_group1", status="unsupported")
     if op in (0x05, 0x2D, 0x35, 0x25, 0x3D):
         imm = read_u32(code, offset + 1, f"opcode 0x{op:02x} imm32")
         mapping = {
@@ -249,6 +290,9 @@ def parse_region(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 def operand_manifest(op: Operand) -> dict[str, Any]:
+    if op.kind == "mem32":
+        return {"kind": op.kind, "value": op.value,
+                "base": op.base, "index": op.index, "scale": op.scale}
     return {"kind": op.kind, "value": op.value}
 
 
@@ -301,6 +345,15 @@ def reg_expr(reg: int) -> str:
     return f"state->gpr[{reg}u]"
 
 
+def address_expr(op: Operand) -> str:
+    parts = [f"0x{op.value:08x}u"]
+    if op.base >= 0:
+        parts.append(reg_expr(op.base))
+    if op.index >= 0:
+        parts.append(f"({reg_expr(op.index)} * {op.scale}u)")
+    return "(uint32_t)(" + " + ".join(parts) + ")"
+
+
 def emit_set_eip_retire(next_eip: int) -> list[str]:
     return [f"            state->eip = 0x{next_eip:08x}u;", "            ++state->retired;"]
 
@@ -315,7 +368,19 @@ def emit_supported_body(inst: DecodedInstruction, region: dict[str, Any]) -> lis
     def finish(target: int | None = None) -> list[str]:
         return emit_set_eip_retire(next_eip if target is None else u32(base + target)) + ["            continue;"]
 
-    if m == "mov_r32_imm32":
+    if m == "mov_mem32_to_r32":
+        lines.append("            uint32_t value = 0;")
+        lines.append(f"            if (!xlle_aot_read32(bus, {address_expr(ops[1])}, &value)) return XLLE_AOT_MEMORY;")
+        lines.append(f"            {reg_expr(ops[0].value)} = value;")
+        lines += finish()
+    elif m == "mov_r32_to_mem32":
+        lines.append(f"            if (!xlle_aot_write32(bus, {address_expr(ops[1])}, {reg_expr(ops[0].value)})) return XLLE_AOT_MEMORY;")
+        lines += finish()
+    elif m == "sub_r32_imm32":
+        reg = reg_expr(ops[0].value)
+        lines.append(f"            {reg} = xlle_aot_sub(state, {reg}, 0x{ops[1].value:08x}u);")
+        lines += finish()
+    elif m == "mov_r32_imm32":
         lines.append(f"            {reg_expr(ops[0].value)} = 0x{ops[1].value:08x}u;")
         lines += finish()
     elif m == "mov_r8_imm8":
@@ -383,11 +448,13 @@ def emit_supported_body(inst: DecodedInstruction, region: dict[str, Any]) -> lis
         target = next(e["target"] for e in inst.edges if e["kind"] in ("je", "jne"))
         cond = "(state->eflags & 0x40u)" if m == "je_rel8" else "!(state->eflags & 0x40u)"
         lines.append(f"            const uint32_t target = 0x{u32(base + int(target)):08x}u;")
+        lines.append(f"            if ({cond} && !xlle_aot_branch_allowed(bus, target)) return XLLE_AOT_CONTEXT;")
         lines.append(f"            state->eip = {cond} ? target : 0x{next_eip:08x}u;")
         lines.append("            ++state->retired;")
         lines.append("            continue;")
     elif m in ("jmp_rel8", "jmp_rel32"):
         target = int(inst.edges[0]["target"])
+        lines.append(f"            if (!xlle_aot_branch_allowed(bus, 0x{u32(base + target):08x}u)) return XLLE_AOT_CONTEXT;")
         lines += finish(target)
     else:
         raise AotError(f"internal missing emitter for {m}")
@@ -435,7 +502,7 @@ def emit_region_c(region: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def emit_c(regions: list[dict[str, Any]], header_name: str) -> str:
+def emit_c(regions: list[dict[str, Any]], header_name: str, private: bool = False) -> str:
     parts = [
         "/* Generated by tools/aot_compile.py. Do not edit by hand. */",
         f"#include \"{header_name}\"",
@@ -444,10 +511,15 @@ def emit_c(regions: list[dict[str, Any]], header_name: str) -> str:
     for r in regions:
         parts.append(emit_region_c(r))
         parts.append("")
+    if private:
+        parts.append("const xlle_aot_region* const xlle_aot_private_regions[] = {")
+        parts.extend(f"    &xlle_aot_{c_ident(r['name'])}," for r in regions)
+        parts.append("};")
+        parts.append(f"const size_t xlle_aot_private_region_count = {len(regions)}u;")
     return "\n".join(parts)
 
 
-def emit_h(regions: list[dict[str, Any]], guard: str) -> str:
+def emit_h(regions: list[dict[str, Any]], guard: str, private: bool = False) -> str:
     lines = [
         "/* Generated by tools/aot_compile.py. Do not edit by hand. */",
         f"#ifndef {guard}",
@@ -462,6 +534,9 @@ def emit_h(regions: list[dict[str, Any]], guard: str) -> str:
     ]
     for r in regions:
         lines.append(f"extern const xlle_aot_region xlle_aot_{c_ident(r['name'])};")
+    if private:
+        lines.append("extern const xlle_aot_region* const xlle_aot_private_regions[];")
+        lines.append("extern const size_t xlle_aot_private_region_count;")
     lines += [
         "",
         "#ifdef __cplusplus",
@@ -525,11 +600,24 @@ def compile_input(input_path: Path, output_c: Path, output_h: Path, manifest_pat
 
     manifest = manifest_for(input_bytes, regions)
     manifest["independent_regions"] = independent
+    private = doc.get("private_guest_input", False)
+    if type(private) is not bool:
+        raise AotError("private_guest_input must be boolean")
+    manifest["private_guest_input"] = private
+    if private:
+        if doc.get("source_format") != "xboxlle.blockpack.v1":
+            raise AotError("private_guest_input requires source_format=xboxlle.blockpack.v1")
+        source_sha256 = doc.get("source_sha256")
+        if not isinstance(source_sha256, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", source_sha256):
+            raise AotError("private_guest_input requires a 64-hex source_sha256")
+        manifest["source_format"] = "xboxlle.blockpack.v1"
+        manifest["source_sha256"] = source_sha256.lower()
+    marker = "/* XLLE_" + "PRIVATE_GUEST_ARTIFACT */\n" if private else ""
     output_h.parent.mkdir(parents=True, exist_ok=True)
     output_c.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    output_h.write_text(emit_h(regions, include_guard_for(output_h)), encoding="utf-8", newline="\n")
-    output_c.write_text(emit_c(regions, output_header_include(output_h)), encoding="utf-8", newline="\n")
+    output_h.write_text(marker + emit_h(regions, include_guard_for(output_h), private), encoding="utf-8", newline="\n")
+    output_c.write_text(marker + emit_c(regions, output_header_include(output_h), private), encoding="utf-8", newline="\n")
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
 
 

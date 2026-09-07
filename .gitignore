@@ -73,6 +73,7 @@ generated/
 __pycache__/
 *.pyc
 *.blockpack
+*.aot-private.*
 traces/
 cosim-logs/
 *.jsonl

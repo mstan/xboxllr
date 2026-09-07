@@ -56,3 +56,17 @@ private-asset rules. Never use Unicorn timeout or switch one engine between
 positive-count and zero-count execution. Record disproved assumptions. Continue
 until acceptance passes or a concrete blocker requires an owner decision; do not
 substitute another comparison document for real dashboard native execution.
+
+## Goal to paste back
+
+> Burn down `docs/GOAL-AOT4-BURNDOWN.md` from the current repository state,
+> preserving completed work. Qualify reusable upstream work, then execute a
+> measured dashboard region through portable AOT with faithful LLE behavior and
+> Unicorn fallback. Verify correctness, private-asset protection, actual native
+> coverage, boundary costs, and total performance with the documented A/B gates.
+> Use one GPT-5.5 High helper at a time, with no children, and independently
+> challenge its findings. Commit and push validated work under my existing
+> authorization. Continue until this milestone passes acceptance or a concrete
+> blocker requires my decision. Finish with measured results and ranked next
+> steps toward predominantly AOT execution and 60 FPS with headroom; do not claim
+> that completing this milestone achieves the broader performance target.

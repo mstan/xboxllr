@@ -7,8 +7,10 @@ and live status belong to central Beads under `beads-xbox.1.25`.
 
 AOT-3's implementation and acceptance record are in
 [the machine-adapter design](DESIGN-AOT-MACHINE.md), with its requirements in
-[the AOT-3 goal](GOAL-AOT3-BURNDOWN.md). The next executable goal is
+[the AOT-3 goal](GOAL-AOT3-BURNDOWN.md). The representative-region requirements are
 [the AOT-4 burndown](GOAL-AOT4-BURNDOWN.md).
+Its implementation and current validation evidence are recorded in
+[the AOT-4 results](RESULTS-AOT4-2026-09-07.md).
 
 ## Deliverable and boundaries
 
@@ -98,7 +100,10 @@ AOT-3 (`beads-xbox.1.25.3`) now passes the 47-test Release suite, canonical
 reference checks, and image regression. Its 3+3 overhead measurement records
 2.88% median / 3.54% minimum wall regression, not a speedup. See the machine
 design for evidence, corrected CPU timing, and remaining scope limits.
-AOT-4 and AOT-5 (`beads-xbox.1.25.4` and `.5`) remain outstanding.
+AOT-4's representative regions now execute in a private dashboard build, with
+correctness validation and paired performance results in the linked AOT-4 record.
+Its native path is slower than Unicorn and stays opt-in. AOT-5
+(`beads-xbox.1.25.5`) remains open for safe coverage growth and performance work.
 The tests deliberately use `independent_regions: true` to bundle distinct programs
 at the same guest base. Each compiled function is bound to its own descriptor and
 expected bytes. This is not an ambiguous whole-address-space dispatcher.

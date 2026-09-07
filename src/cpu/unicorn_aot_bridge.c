@@ -43,7 +43,7 @@ static int xlle_aot_seg_flat_code32(const SegmentCache* seg) {
     if (!seg) {
         return 0;
     }
-    if (seg->base != 0 || seg->limit != 0xffffffffu) {
+    if (seg->base != 0) {
         return 0;
     }
     if ((seg->flags & required) != required) {
@@ -74,7 +74,7 @@ static int xlle_aot_seg_flat_data32(const SegmentCache* seg) {
     return ((seg->flags & DESC_DPL_MASK) == 0) ? 1 : 0;
 }
 
-int xlle_unicorn_aot_context_ok(void* engine) {
+const char* xlle_unicorn_aot_context_rejection(void* engine) {
     struct uc_struct* uc = (struct uc_struct*)engine;
     CPUState* cpu;
     CPUX86State* env;
@@ -83,31 +83,31 @@ int xlle_unicorn_aot_context_ok(void* engine) {
     unsigned i;
 
     if (!uc || uc->arch != UC_ARCH_X86 || !uc->cpu || !uc->cpu->env_ptr || uc->snapshot_level) {
-        return 0;
+        return "engine-or-snapshot";
     }
     if ((uc->mode & UC_MODE_32) == 0 || (uc->mode & (UC_MODE_16 | UC_MODE_64)) != 0) {
-        return 0;
+        return "engine-mode";
     }
 
     cpu = uc->cpu;
     env = (CPUX86State*)cpu->env_ptr;
 
     if ((env->cr[0] & CR0_PE_MASK) == 0) {
-        return 0;
+        return "real-mode";
     }
 #ifdef CR4_PAE_MASK
     if ((env->cr[4] & CR4_PAE_MASK) != 0) {
-        return 0;
+        return "pae";
     }
 #endif
 #ifdef CR4_SMAP_MASK
     if ((env->cr[4] & CR4_SMAP_MASK) != 0) {
-        return 0;
+        return "smap";
     }
 #endif
 #ifdef CR4_PKE_MASK
     if ((env->cr[4] & CR4_PKE_MASK) != 0) {
-        return 0;
+        return "pke";
     }
 #endif
 
@@ -117,58 +117,67 @@ int xlle_unicorn_aot_context_ok(void* engine) {
                       HF_SMAP_MASK | HF_IOBPT_MASK | HF_MPX_EN_MASK |
                       HF_MPX_IU_MASK;
     if ((env->hflags & rejected_hflags) != 0) {
-        return 0;
+        return "hidden-flags";
     }
     if ((env->hflags & HF_CPL_MASK) != 0) {
-        return 0;
+        return "privilege";
     }
     if ((env->hflags & (HF_PE_MASK | HF_CS32_MASK | HF_SS32_MASK)) !=
         (HF_PE_MASK | HF_CS32_MASK | HF_SS32_MASK)) {
-        return 0;
+        return "operand-stack-mode";
     }
 
     rejected_hflags2 = HF2_NMI_MASK | HF2_VINTR_MASK | HF2_SMM_INSIDE_NMI_MASK |
                        HF2_MPX_PR_MASK | HF2_NPT_MASK;
     if ((env->hflags2 & rejected_hflags2) != 0) {
-        return 0;
+        return "hidden-flags2";
     }
 
     if ((env->eflags & (TF_MASK | VM_MASK | RF_MASK | AC_MASK | NT_MASK | VIF_MASK | VIP_MASK)) != 0) {
-        return 0;
+        return "eflags";
     }
     if (cpu->singlestep_enabled || cpu->watchpoint_hit) {
-        return 0;
+        return "debug-step";
     }
     if (!QTAILQ_EMPTY(&cpu->breakpoints) || !QTAILQ_EMPTY(&cpu->watchpoints)) {
-        return 0;
+        return "debug-points";
     }
     if (cpu->interrupt_request != 0 || cpu->halted || cpu->stop || cpu->stopped ||
         cpu->exit_request || cpu->crash_occurred) {
-        return 0;
+        return "cpu-stop-or-interrupt";
     }
 
     if (env->a20_mask != -1) {
-        return 0;
+        return "a20";
     }
     if (env->efer != 0 || env->msr_bndcfgs != 0) {
-        return 0;
+        return "extended-control";
     }
     for (i = 0; i < 4; ++i) {
         if (env->bndcs_regs.cfgu || env->bndcs_regs.sts ||
             env->bnd_regs[i].lb || env->bnd_regs[i].ub) {
-            return 0;
+            return "bounds";
         }
     }
 
     if (!xlle_aot_seg_flat_code32(&env->segs[R_CS])) {
-        return 0;
+        return "code-segment";
     }
     if (!xlle_aot_seg_flat_data32(&env->segs[R_DS]) ||
         !xlle_aot_seg_flat_data32(&env->segs[R_SS])) {
-        return 0;
+        return "data-stack-segment";
     }
 
-    return 1;
+    return NULL;
+}
+
+int xlle_unicorn_aot_context_ok(void* engine) {
+    return xlle_unicorn_aot_context_rejection(engine) == NULL;
+}
+
+uint32_t xlle_unicorn_aot_code_limit(void* engine) {
+    struct uc_struct* uc = (struct uc_struct*)engine;
+    return ((CPUX86State*)uc->cpu->env_ptr)->segs[R_CS].limit;
 }
 
 static int xlle_aot_span_within_target_page(uint32_t linear, size_t size) {

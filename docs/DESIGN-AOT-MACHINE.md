@@ -1,5 +1,11 @@
 # AOT machine integration
 
+Current AOT-4 changes, including ABI2 bounded code segments, private dashboard
+execution and invocation-local RAM certification caches, are documented in
+[the AOT-4 results](RESULTS-AOT4-2026-09-07.md) and
+[the private workflow](AOT-PRIVATE-WORKFLOW.md). The AOT-3 record below describes
+the earlier implementation and its measured baseline.
+
 Status: AOT-3 implementation and local acceptance validated on 2026-09-07 under
 `beads-xbox.1.25.3`; integration is recorded in that issue and Git history.
 This document records the AOT-3 adapter; it does not claim dashboard AOT coverage

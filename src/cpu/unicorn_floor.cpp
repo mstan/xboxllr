@@ -58,6 +58,9 @@ UnicornFloor::UnicornFloor() {
 
     icount_ = std::make_unique<IcountSlot[]>(kIcountSlots);
     block_pc_ring_ = std::make_unique<uint32_t[]>(kBlockPcRing);
+#ifdef XLLE_CPU_BLOCK_CENSUS
+    census_ = std::make_unique<CensusRow[]>(kIcountSlots);
+#endif
 
     // Per-translation-block entry hook. This is the canonical scheduling point: instruction
     // accounting, the slice/device deadline, the interrupt window and the always-on block-PC
@@ -102,6 +105,93 @@ void UnicornFloor::hook_region_counts(uint64_t& code_regions, uint64_t& count_re
 }
 
 UnicornFloor::BlockStats UnicornFloor::block_stats() const { return stats_; }
+
+#ifdef XLLE_CPU_BLOCK_CENSUS
+UnicornFloor::CensusRow* UnicornFloor::census_row(uint32_t pc, uint32_t size) {
+    if (census_last_ && census_last_->pc == pc && census_last_->size == size)
+        return census_last_;
+    const size_t hash = (icount_hash(pc) ^ size) & (kIcountSlots - 1);
+    for (size_t i = 0; i < kIcountProbes; ++i) {
+        auto& row = census_[(hash + i) & (kIcountSlots - 1)];
+        if (!row.size || (row.pc == pc && row.size == size)) {
+            if (!row.size) {
+                row.first_code.resize(size);
+                // Capture fetched bytes at first execution, before boot-only
+                // pages can be freed/reused. Read cached fetch mappings only.
+                for (size_t offset = 0; offset < size;) {
+                    const uint32_t at = pc + static_cast<uint32_t>(offset);
+                    const size_t part = std::min(size - offset, size_t(4096 - (at & 4095)));
+                    const auto* code = xlle_unicorn_aot_ram_ptr(uc_, at, part, 2);
+                    if (!code) { row.first_code.clear(); break; }
+                    std::memcpy(row.first_code.data() + offset, code, part);
+                    offset += part;
+                }
+            }
+            row.pc = pc; row.size = size;
+            census_last_ = &row;
+            return &row;
+        }
+    }
+    ++census_overflow_;
+    return nullptr;
+}
+void UnicornFloor::census_charge(uint32_t pc, uint32_t size, uint64_t insns, uint64_t entries) {
+    if (auto* row = census_row(pc, size)) {
+        row->entries += entries;
+        row->charged += insns;
+    }
+}
+#endif
+
+bool UnicornFloor::write_block_census(const char* path) const {
+#ifdef XLLE_CPU_BLOCK_CENSUS
+    if (!path || !census_ || insn_mode_) return false;
+    auto* file = std::fopen(path, "wb");
+    if (!file) return false;
+    std::fprintf(file, "# schema=xboxlle.block-census.v1 total_insns=%llu fallback_insns=%llu "
+        "idle_skipped=%llu native_insns=%llu overflow=%llu\n",
+        (unsigned long long)seq_, (unsigned long long)stats_.tb_insns,
+        (unsigned long long)stats_.skipped_insns, (unsigned long long)aot_stats().retired,
+        (unsigned long long)census_overflow_);
+    std::fprintf(file, "pc,size,entries,charged_insns,unretired_insns\n");
+    for (size_t i = 0; i < kIcountSlots; ++i) {
+        const auto& row = census_[i];
+        if (row.size) std::fprintf(file, "0x%08x,%u,%llu,%llu,%llu\n", row.pc, row.size,
+            (unsigned long long)row.entries, (unsigned long long)row.charged,
+            (unsigned long long)row.unretired);
+    }
+    bool okay = !std::ferror(file);
+    if (std::fclose(file) != 0 || !okay) return false;
+    // Private binary artifact; the repository publication guard rejects this
+    // suffix. Counts aggregate versions, while these bytes are FIRST execution.
+    const std::string code_path = std::string(path) + ".blockpack";
+    file = std::fopen(code_path.c_str(), "wb");
+    if (!file) return false;
+    const uint8_t header[8] = {'X', 'L', 'L', 'E', 'B', 'C', '1', 0};
+    std::fwrite(header, 1, sizeof(header), file);
+    uint64_t captured = 0, missing = 0;
+    for (size_t i = 0; i < kIcountSlots; ++i) {
+        const auto& row = census_[i];
+        if (!row.size) continue;
+        if (row.first_code.size() != row.size) { ++missing; continue; }
+        const uint32_t values[2] = {row.pc, row.size};
+        for (const uint32_t value : values) {
+            const uint8_t bytes[4] = {uint8_t(value), uint8_t(value >> 8),
+                                    uint8_t(value >> 16), uint8_t(value >> 24)};
+            std::fwrite(bytes, 1, 4, file);
+        }
+        std::fwrite(row.first_code.data(), 1, row.size, file);
+        ++captured;
+    }
+    std::printf("[cpu-census] first-code captured=%llu missing=%llu\n",
+                (unsigned long long)captured, (unsigned long long)missing);
+    okay = !std::ferror(file);
+    return std::fclose(file) == 0 && okay;
+#else
+    (void)path;
+    return false;
+#endif
+}
 
 void UnicornFloor::icount_insert(uint32_t pc, uint16_t size, uint16_t icount) {
     if (icount == 0) return;  // cannot be represented; a real block has >= 1 instruction
@@ -179,6 +269,9 @@ void UnicornFloor::settle_bootstrap_block() {
     const uint64_t charged = static_cast<uint64_t>(ic) * boot_pending_;
     seq_ += charged;
     stats_.tb_insns += charged;
+#ifdef XLLE_CPU_BLOCK_CENSUS
+    census_charge(boot_pc_, boot_size_, charged, boot_pending_);
+#endif
     boot_pending_ = 0;
     boot_settled_ = true;
 }
@@ -607,6 +700,11 @@ void UnicornFloor::restore_clock(void* opaque, const xlle_unicorn_restore_record
     self->seq_ -= unretired;
     if (!self->insn_mode_) self->stats_.tb_insns -= unretired;
     self->stats_.fault_unretired += unretired;
+#ifdef XLLE_CPU_BLOCK_CENSUS
+    if (!self->insn_mode_)
+        if (auto* row = self->census_row(static_cast<uint32_t>(r->pc), r->size))
+            row->unretired += unretired;
+#endif
     xlle_guest_tsc_ticks = self->seq_;
 }
 
@@ -767,6 +865,9 @@ void UnicornFloor::block_trampoline(uc_struct* uc, uint64_t addr, uint32_t size,
     self->tbs_this_run_++;
     self->seq_ += icount;
     self->stats_.tb_insns += icount;
+#ifdef XLLE_CPU_BLOCK_CENSUS
+    self->census_charge(pc, sz, icount, 1);
+#endif
     self->restore_charge_active_ = true;
 }
 

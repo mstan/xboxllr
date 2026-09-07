@@ -93,6 +93,17 @@ class AotCompileTests(unittest.TestCase):
         decoded_offsets = [d["offset"] for d in manifest["regions"][0]["decoded"]]
         self.assertEqual(decoded_offsets, [0, 2, 4, 9])
 
+    def test_branches_emit_machine_code_limit_guards(self):
+        doc = {"independent_regions": True, "regions": [
+            {"name": "taken_conditional", "base": 0xbffffff0, "code": "750e" + "90" * 14},
+            {"name": "unconditional", "base": 0xbffffff0, "code": "eb0e" + "90" * 14},
+        ]}
+        td, _, c, _, manifest = self.compile_doc(doc)
+        self.addCleanup(td.cleanup)
+        self.assertIn("if (!(state->eflags & 0x40u) && !xlle_aot_branch_allowed(bus, target)) return XLLE_AOT_CONTEXT;", c)
+        self.assertIn("if (!xlle_aot_branch_allowed(bus, 0xc0000000u)) return XLLE_AOT_CONTEXT;", c)
+        self.assertEqual(manifest["abi_version"], aot_compile.ABI_VERSION)
+
     def test_unsupported_terminal_does_not_guess_fallthrough(self):
         doc = {"regions": [{"name": "bad", "base": 0x1000, "code": "0f90"}]}
         td, _, c, _, manifest = self.compile_doc(doc)
@@ -114,15 +125,72 @@ class AotCompileTests(unittest.TestCase):
         self.assert_cli_fails({"regions": [{"name": "trunc", "base": 0, "code": "b81122"}]}, "truncated mov r32,imm32")
         self.assert_cli_fails({"regions": [{"name": "trunc2", "base": 0, "code": "e901"}]}, "truncated jmp rel32")
 
-    def test_modrm_memory_form_is_terminal_unsupported(self):
-        doc = {"regions": [{"name": "memform", "base": 0, "code": "8b0090"}]}
+    def test_memory_arithmetic_form_is_terminal_unsupported(self):
+        doc = {"regions": [{"name": "memform", "base": 0, "code": "010090"}]}
         td, _, c, _, manifest = self.compile_doc(doc)
         self.addCleanup(td.cleanup)
         decoded = manifest["regions"][0]["decoded"]
         self.assertEqual(len(decoded), 1)
-        self.assertEqual(decoded[0]["mnemonic"], "unsupported_0x8b_modrm_0x00")
+        self.assertEqual(decoded[0]["mnemonic"], "unsupported_0x01_modrm_0x00")
         self.assertEqual(decoded[0]["status"], "unsupported")
         self.assertNotIn("case 0x00000002u", c)
+
+    def test_modrm_sib_memory_mov_forms_emit_exact_effective_addresses(self):
+        cases = [
+            ("base_index_scale", "8944b3208b54b320",
+             [
+                 {"kind": "reg32", "value": 0},
+                 {"kind": "mem32", "value": 0x20, "base": 3, "index": 6, "scale": 4},
+             ],
+             "(uint32_t)(0x00000020u + state->gpr[3u] + (state->gpr[6u] * 4u))"),
+            ("abs_sib_index", "890c85002100008b148500210000",
+             [
+                 {"kind": "reg32", "value": 1},
+                 {"kind": "mem32", "value": 0x2100, "base": -1, "index": 0, "scale": 4},
+             ],
+             "(uint32_t)(0x00002100u + (state->gpr[0u] * 4u))"),
+            ("negative_disp8", "8945fc8b5dfc",
+             [
+                 {"kind": "reg32", "value": 0},
+                 {"kind": "mem32", "value": 0xfffffffc, "base": 5, "index": -1, "scale": 1},
+             ],
+             "(uint32_t)(0xfffffffcu + state->gpr[5u])"),
+            ("esp_disp32", "898c24300000008bbc2430000000",
+             [
+                 {"kind": "reg32", "value": 1},
+                 {"kind": "mem32", "value": 0x30, "base": 4, "index": -1, "scale": 1},
+             ],
+             "(uint32_t)(0x00000030u + state->gpr[4u])"),
+            ("wrap_disp32", "899810f0ffff8b8810f0ffff",
+             [
+                 {"kind": "reg32", "value": 3},
+                 {"kind": "mem32", "value": 0xfffff010, "base": 0, "index": -1, "scale": 1},
+             ],
+             "(uint32_t)(0xfffff010u + state->gpr[0u])"),
+        ]
+        for name, code, first_operands, expression in cases:
+            with self.subTest(name=name):
+                td, _, c, _, manifest = self.compile_doc({"regions": [{"name": name, "base": 0x1000, "code": code}]})
+                self.addCleanup(td.cleanup)
+                decoded = manifest["regions"][0]["decoded"]
+                self.assertEqual(decoded[0]["status"], "supported")
+                self.assertEqual(decoded[0]["mnemonic"], "mov_r32_to_mem32")
+                self.assertEqual(decoded[0]["operands"], first_operands)
+                self.assertEqual(decoded[1]["status"], "supported")
+                self.assertEqual(decoded[1]["mnemonic"], "mov_mem32_to_r32")
+                self.assertIn(expression, c)
+
+    def test_opcode83_sub_sign_extends_immediate(self):
+        doc = {"regions": [{"name": "sub83", "base": 0x1000, "code": "83e80083eb7f83e88083efff"}]}
+        td, _, c, _, manifest = self.compile_doc(doc)
+        self.addCleanup(td.cleanup)
+        decoded = manifest["regions"][0]["decoded"]
+        self.assertEqual([d["mnemonic"] for d in decoded], ["sub_r32_imm32"] * 4)
+        self.assertEqual([d["operands"][0]["value"] for d in decoded], [0, 3, 0, 7])
+        self.assertEqual([d["operands"][1]["value"] for d in decoded],
+                         [0x00000000, 0x0000007f, 0xffffff80, 0xffffffff])
+        self.assertIn("state->gpr[0u] = xlle_aot_sub(state, state->gpr[0u], 0xffffff80u);", c)
+        self.assertIn("state->gpr[7u] = xlle_aot_sub(state, state->gpr[7u], 0xffffffffu);", c)
 
     def test_malformed_region_inputs_rejected(self):
         bad_docs = [

@@ -6,6 +6,7 @@ Default: scan the Git index (exact bytes the next commit would contain).
 This is a publication guard, not a replacement for a full secret scanner/review.
 """
 import argparse
+import json
 import pathlib
 import re
 import subprocess
@@ -38,10 +39,22 @@ def private_path(path):
         or name == 'credentials' or name.startswith('credentials.')
         or (name.startswith('eeprom') and p.suffix in {'.json', '.txt', '.cfg', '.ini'})
         or name.endswith(('.report.json', '.argv.json', '.quiescence.json'))
+        or '.aot-private.' in name
     )
 
 
 def content_findings(data):
+    if data.startswith(b'/* XLLE_' + b'PRIVATE_GUEST_ARTIFACT */'):
+        yield 'generated private guest code', 1
+    if data.startswith(b'# schema=xboxlle.block-census.v1 '):
+        yield 'private block census metadata', 1
+    if data.lstrip().startswith(b'{'):
+        try:
+            document = json.loads(data)
+            if isinstance(document, dict) and document.get('private_guest_input') is True:
+                yield 'private guest input', 1
+        except (ValueError, UnicodeError):
+            pass
     # The repository contains text source/metadata only. Renaming a dump is insufficient.
     if b'\0' in data:
         yield 'binary data', 1

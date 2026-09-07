@@ -29,6 +29,9 @@
 #include "host/ethernet_udp.hpp"
 #include "host/nv2a_opengl_renderer.hpp"
 #include "host/sample_profiler.hpp"
+#ifdef XLLE_HAS_PRIVATE_AOT
+#include "private_aot.h"
+#endif
 
 // Heap poisoning (src/host/heap_poison.cpp). Selected by XLLE_HEAP_POISON, not by argv,
 // because allocations start before argv is parsed.
@@ -1853,6 +1856,9 @@ int main(int argc, char** argv) {
     uint64_t debug_nv2a_surface_event_after_insns = 0;
     size_t perf_generic_top_limit = 12;
     uint32_t host_sample_profile_ms = 0;
+    const char* cpu_block_census = nullptr;
+    bool aot_native = false;
+    uint64_t aot_native_mask = UINT64_MAX;
     uint64_t max_insns = 128ull * 1000 * 1000;  // 2BL kernel LZX decompress needs tens of M
     uint64_t machine_chunk_insns = 4096;
     // Interactive presentation (beads-xbox.1.15.8 stage (g)). All three are
@@ -2211,6 +2217,26 @@ int main(int argc, char** argv) {
                 return 1;
             }
             perf_generic_top_limit = static_cast<size_t>(parsed);
+        }
+        else if (!std::strcmp(argv[i], "--aot-native")) aot_native = true;
+        else if (!std::strcmp(argv[i], "--no-aot-native")) aot_native = false;
+        else if (!std::strcmp(argv[i], "--aot-native-mask")) {
+            if (i + 1 >= argc || !parse_u64_arg(argv[++i], aot_native_mask)) {
+                std::fprintf(stderr, "[host] --aot-native-mask requires a 64-bit mask\n");
+                return 1;
+            }
+        }
+        else if (!std::strcmp(argv[i], "--cpu-block-census")) {
+#ifdef XLLE_CPU_BLOCK_CENSUS
+            if (i + 1 >= argc || !argv[i + 1][0]) {
+                std::fprintf(stderr, "[host] use --cpu-block-census <private-output.csv>\n");
+                return 1;
+            }
+            cpu_block_census = argv[++i];
+#else
+            std::fprintf(stderr, "[host] --cpu-block-census requires an XLLE_CPU_BLOCK_CENSUS build\n");
+            return 1;
+#endif
         }
         else if (!std::strcmp(argv[i], "--host-sample-profile") && i + 1 < argc) {
             uint64_t parsed = 0;
@@ -3474,6 +3500,27 @@ int main(int argc, char** argv) {
             // instruction clock carries its own counts (PERF-METHODOLOGY rule 9). They are
             // always on: `tb_icount_misses` is the exactness self-check and must read 0.
             UnicornFloor* unicorn_floor = dynamic_cast<UnicornFloor*>(&mach.cpu());
+            if (aot_native) {
+#ifdef XLLE_HAS_PRIVATE_AOT
+                if (xlle_aot_private_region_count > 64) {
+                    std::fprintf(stderr, "[host] private AOT registry exceeds 64 regions\n");
+                    return 1;
+                }
+                for (size_t region_index = 0; region_index < xlle_aot_private_region_count; ++region_index) {
+                    if (!(aot_native_mask & (uint64_t(1) << region_index))) continue;
+                    const auto* region = xlle_aot_private_regions[region_index];
+                    if (!mach.register_aot_region(*region)) {
+                        std::fprintf(stderr, "[host] private AOT region registration failed\n");
+                        return 1;
+                    }
+                    std::printf("[aot] registered index=%zu base=%08x size=%zu\n",
+                                region_index, region->base, region->code_size);
+                }
+#else
+                std::fprintf(stderr, "[host] --aot-native requires a private generated AOT build\n");
+                return 1;
+#endif
+            }
             if (unicorn_floor && cpu_insn_hook) unicorn_floor->force_insn_scheduling();
             xlle_guest_tsc_deterministic = legacy_host_tsc ? 0 : 1;
             std::printf(
@@ -3499,6 +3546,9 @@ int main(int argc, char** argv) {
                 std::printf("\n");
             };
             UnicornFloor::BlockStats block_stats_prev{};
+            AotExecutionStats aot_stats_prev{};
+            std::vector<AotRegionStats> aot_regions_prev;
+            uint64_t aot_total_prev = 0;
             uint64_t idle_census_prev_irq0 = 0;
             uint64_t idle_census_prev_injected = 0;
             uint64_t idle_census_prev_pending = 0;
@@ -3519,6 +3569,47 @@ int main(int argc, char** argv) {
                 const UnicornFloor::BlockStats bs =
                     unicorn_floor ? unicorn_floor->block_stats() : UnicornFloor::BlockStats{};
                 const UnicornFloor::BlockStats& bsw = block_stats_prev;
+                const auto aot_now = mach.aot_stats();
+                const auto aot_delta = [&](uint64_t AotExecutionStats::* field) {
+                    return (unsigned long long)delta(aot_now.*field, aot_stats_prev.*field);
+                };
+                std::printf("[aot] scope=%s deadline=%llu total_insns=%llu native_insns=%llu "
+                    "fallback_insns=%llu idle_insns=%llu attempts=%llu invocations=%llu "
+                    "fallback_runs=%llu handoffs=%llu context_declines=%llu code_tlb_declines=%llu "
+                    "memory_reads=%llu memory_writes=%llu memory_declines=%llu\n",
+                    scope, deadline, (unsigned long long)delta(mach.total_insns(), aot_total_prev),
+                    aot_delta(&AotExecutionStats::retired),
+                    (unsigned long long)delta(bs.tb_insns, bsw.tb_insns),
+                    (unsigned long long)delta(bs.skipped_insns, bsw.skipped_insns),
+                    aot_delta(&AotExecutionStats::attempts), aot_delta(&AotExecutionStats::invocations),
+                    aot_delta(&AotExecutionStats::fallback_runs), aot_delta(&AotExecutionStats::handoffs),
+                    aot_delta(&AotExecutionStats::context_declines), aot_delta(&AotExecutionStats::code_tlb_declines),
+                    aot_delta(&AotExecutionStats::memory_reads), aot_delta(&AotExecutionStats::memory_writes),
+                    aot_delta(&AotExecutionStats::memory_declines));
+                const auto aot_regions_now = mach.aot_region_stats();
+                aot_regions_prev.resize(aot_regions_now.size());
+                for (size_t i = 0; i < aot_regions_now.size(); ++i) {
+                    const auto& region = aot_regions_now[i];
+                    const auto& previous = aot_regions_prev[i];
+                    const auto rd = [&](uint64_t AotRegionStats::* field) {
+                        return (unsigned long long)delta(region.*field, previous.*field);
+                    };
+                    std::printf("[aot-region] scope=%s deadline=%llu base=%08x attempts=%llu "
+                        "invocations=%llu native_insns=%llu context_declines=%llu code_tlb_declines=%llu\n",
+                        scope, deadline, region.base, rd(&AotRegionStats::attempts),
+                        rd(&AotRegionStats::invocations), rd(&AotRegionStats::retired),
+                        rd(&AotRegionStats::context_declines), rd(&AotRegionStats::code_tlb_declines));
+                    for (unsigned reason = 0; reason <= XLLE_AOT_EXTERNAL; ++reason) {
+                        const auto count = delta(region.exits[reason], previous.exits[reason]);
+                        if (count) std::printf("[aot-exit] scope=%s deadline=%llu base=%08x reason=%u count=%llu\n",
+                            scope, deadline, region.base, reason, (unsigned long long)count);
+                    }
+                }
+                if (interval) {
+                    aot_stats_prev = aot_now;
+                    aot_regions_prev = aot_regions_now;
+                    aot_total_prev = mach.total_insns();
+                }
                 std::printf(
                     "[host] idle-census scope=%s deadline=%llu slices=%llu insns=%llu "
                     "idle_eip_slices=%llu idle_slice_pct=%.3f idle_insns=%llu "
@@ -4902,6 +4993,14 @@ int main(int argc, char** argv) {
             if (interactive)
                 interactive_start_ns = interactive_stats_ns = host_input.now_ns();
             uint64_t n = mach.run(0x901ee, max_insns, err2);
+            if (cpu_block_census) {
+                if (!unicorn_floor || !unicorn_floor->write_block_census(cpu_block_census)) {
+                    std::fprintf(stderr, "[host] cannot write block census: %s\n", cpu_block_census);
+                    return 1;
+                }
+                std::printf("[host] block census %s (attribution build; exclude from headline timing)\n",
+                            cpu_block_census);
+            }
             if (interactive) print_present_stats("cumulative", host_input.now_ns());
             if (host_sample_profile_ms) host_sampler.stop_and_report();
             const bool host_memory_safety_stop =

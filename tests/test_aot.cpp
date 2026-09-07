@@ -28,6 +28,8 @@ struct Memory {
     std::vector<Access> accesses;
     xlle_aot_bus bus{};
     bool reject = false;
+    bool reject_reads = false;
+    bool reject_writes = false;
     bool arm_event_after_write = false;
 
     explicit Memory(const xlle_aot_region& region) {
@@ -49,6 +51,7 @@ struct Memory {
     }
     static int read(void* opaque, uint32_t address, uint32_t* value) {
         auto& m = *static_cast<Memory*>(opaque);
+        if (m.reject_reads) return 0;
         if (!range(m, address)) return 0;
         *value = 0;
         for (unsigned i = 0; i < 4; ++i)
@@ -58,6 +61,7 @@ struct Memory {
     }
     static int write(void* opaque, uint32_t address, uint32_t value) {
         auto& m = *static_cast<Memory*>(opaque);
+        if (m.reject_writes) return 0;
         if (!range(m, address)) return 0;
         for (unsigned i = 0; i < 4; ++i)
             m.bytes[address - 0x1000 + i] = (uint8_t)(value >> (i * 8));
@@ -66,6 +70,34 @@ struct Memory {
         return 1;
     }
 };
+
+struct CodeOnlyBus {
+    std::vector<uint8_t> code;
+    xlle_aot_bus bus{};
+
+    CodeOnlyBus(const xlle_aot_region& region, uint32_t context, uint32_t code_limit) {
+        code.assign(region.code, region.code + region.code_size);
+        bus.context = context;
+        bus.code_base = region.base;
+        bus.code = code.data();
+        bus.code_size = code.size();
+        bus.code_limit = code_limit;
+    }
+};
+
+static void poke32(std::vector<uint8_t>& bytes, uint32_t address, uint32_t value) {
+    require(address >= 0x1000 && (uint64_t)address + 4 <= 0x4000, "poke address in mapped RAM");
+    for (unsigned i = 0; i < 4; ++i)
+        bytes[address - 0x1000 + i] = (uint8_t)(value >> (i * 8));
+}
+
+static uint32_t peek32(const std::vector<uint8_t>& bytes, uint32_t address) {
+    require(address >= 0x1000 && (uint64_t)address + 4 <= 0x4000, "peek address in mapped RAM");
+    uint32_t value = 0;
+    for (unsigned i = 0; i < 4; ++i)
+        value |= (uint32_t)bytes[address - 0x1000 + i] << (i * 8);
+    return value;
+}
 
 static xlle_aot_state from_regs(const X86Regs& r) {
     return {{r.eax, r.ecx, r.edx, r.ebx, r.esp, r.ebp, r.esi, r.edi},
@@ -119,10 +151,15 @@ static xlle_aot_state oracle(const xlle_aot_region& region,
     return state;
 }
 
-static void differential(const xlle_aot_region& region, xlle_aot_state initial,
-                         uint32_t flags) {
+static void differential_with_memory(const xlle_aot_region& region, xlle_aot_state initial,
+                                     uint32_t flags, const std::vector<uint8_t>* seeded_memory) {
     initial.eip = region.base;
     Memory memory(region);
+    if (seeded_memory) {
+        require(seeded_memory->size() == memory.bytes.size(), "seeded memory size");
+        memory.bytes = *seeded_memory;
+        memory.bus.code = memory.bytes.data() + region.base - 0x1000;
+    }
     const auto before = memory.bytes;
     auto native = initial;
     auto exit = region.run(&region, &native, &memory.bus, 100);
@@ -135,6 +172,11 @@ static void differential(const xlle_aot_region& region, xlle_aot_state initial,
     equal_state(native, expected, flags, "differential");
     require(memory.bytes == expected_memory, "memory contents match Unicorn");
     require(memory.accesses == expected_accesses, "memory event ordering matches Unicorn");
+}
+
+static void differential(const xlle_aot_region& region, xlle_aot_state initial,
+                         uint32_t flags) {
+    differential_with_memory(region, initial, flags, nullptr);
 }
 
 static void independent_fixtures() {
@@ -231,6 +273,233 @@ static void guards_and_exits() {
             "external control flow preserves continuation");
 }
 
+static void cs_limit_synthetic_guards() {
+    constexpr uint32_t limit = 0xbfffffffu;
+    {
+        const auto& r = xlle_aot_cs_limit_jmp_within;
+        CodeOnlyBus b(r, XLLE_AOT_CONTEXT_MACHINE_FLAT32_RAM, limit);
+        xlle_aot_state s{}; s.eip = r.base; s.eflags = 2;
+        require(r.run(&r, &s, &b.bus, 100) == XLLE_AOT_COMPLETE,
+                "machine CS limit allows branch target at limit");
+        require(s.retired == 2 && s.eip == 0xc0000000u,
+                "branch-to-limit retires then completes at end");
+    }
+    {
+        const auto& r = xlle_aot_cs_limit_jmp_beyond;
+        CodeOnlyBus b(r, XLLE_AOT_CONTEXT_MACHINE_FLAT32_RAM, limit);
+        xlle_aot_state s{}; s.eip = r.base; s.eflags = 2; s.gpr[0] = 0x11111111u;
+        require(r.run(&r, &s, &b.bus, 100) == XLLE_AOT_CONTEXT,
+                "machine CS limit rejects taken jump beyond limit");
+        require(s.retired == 0 && s.eip == r.base && s.gpr[0] == 0x11111111u,
+                "over-limit jump has no branch-instruction effects");
+    }
+    {
+        const auto& r = xlle_aot_cs_limit_inc_jmp_beyond;
+        CodeOnlyBus b(r, XLLE_AOT_CONTEXT_MACHINE_FLAT32_RAM, limit);
+        xlle_aot_state s{}; s.eip = r.base; s.eflags = 2; s.gpr[0] = 41;
+        require(r.run(&r, &s, &b.bus, 100) == XLLE_AOT_CONTEXT,
+                "prior instruction retires before following over-limit jump declines");
+        require(s.retired == 1 && s.eip == r.base + 1 && s.gpr[0] == 42,
+                "over-limit jump preserves precise continuation after previous instruction");
+    }
+    {
+        const auto& r = xlle_aot_cs_limit_jne_beyond_not_taken;
+        CodeOnlyBus b(r, XLLE_AOT_CONTEXT_MACHINE_FLAT32_RAM, limit);
+        xlle_aot_state s{}; s.eip = r.base; s.eflags = 2 | 0x40u;
+        require(r.run(&r, &s, &b.bus, 100) == XLLE_AOT_COMPLETE,
+                "untaken branch with out-of-limit target still runs");
+        require(s.retired == 15 && s.eip == 0xc0000000u,
+                "untaken out-of-limit branch only follows in-limit fallthrough");
+    }
+    {
+        const auto& r = xlle_aot_cs_limit_span_cross;
+        CodeOnlyBus b(r, XLLE_AOT_CONTEXT_MACHINE_FLAT32_RAM, limit);
+        xlle_aot_state s{}; s.eip = r.base; s.eflags = 2; s.gpr[0] = 0x55555555u;
+        require(r.run(&r, &s, &b.bus, 100) == XLLE_AOT_CONTEXT,
+                "region byte span crossing CS limit is rejected before execution");
+        require(s.retired == 0 && s.eip == r.base && s.gpr[0] == 0x55555555u,
+                "span-crossing region has no effects");
+    }
+    {
+        const auto& r = xlle_aot_cs_limit_span_cross;
+        CodeOnlyBus b(r, XLLE_AOT_CONTEXT_FLAT32_RAM, 0);
+        xlle_aot_state s{}; s.eip = r.base; s.eflags = 2; s.gpr[0] = 0x55555555u;
+        require(r.run(&r, &s, &b.bus, 100) == XLLE_AOT_COMPLETE,
+                "synthetic flat context ignores machine CS limit field");
+        require(s.retired == 13 && s.eip == r.base + r.code_size && s.gpr[0] == 0x11223344u,
+                "flat synthetic context preserves legacy full-region execution");
+    }
+}
+
+static xlle_aot_state expect_complete_with_seed(const xlle_aot_region& region, xlle_aot_state initial,
+                                                Memory& memory, uint64_t expected_retired) {
+    initial.eip = region.base;
+    const auto before = memory.bytes;
+    auto native = initial;
+    auto exit = region.run(&region, &native, &memory.bus, 100);
+    require(exit == XLLE_AOT_COMPLETE, "addressing fixture completes");
+    require(native.retired == expected_retired, "addressing fixture retired count");
+    std::vector<uint8_t> expected_memory;
+    std::vector<Access> expected_accesses;
+    auto expected = oracle(region, initial, native.retired, before,
+                           &expected_memory, &expected_accesses);
+    equal_state(native, expected, 0xffffffffu, "addressing fixture");
+    require(memory.bytes == expected_memory, "addressing memory matches Unicorn");
+    require(memory.accesses == expected_accesses, "addressing access order matches Unicorn");
+    return native;
+}
+
+static void memory_addressing_fixtures() {
+    {
+        const auto& r = xlle_aot_mov_mem_base_index_scale;
+        Memory m(r);
+        xlle_aot_state s{}; s.eflags = 2;
+        s.gpr[0] = 0x13579bdf; s.gpr[3] = 0x2000; s.gpr[6] = 3;
+        auto native = expect_complete_with_seed(r, s, m, 2);
+        require(peek32(m.bytes, 0x202c) == 0x13579bdf && native.gpr[2] == 0x13579bdf,
+                "base+index*scale fixture wrote expected address");
+        s.eip = r.base;
+        differential(r, s, 0xffffffffu);
+    }
+    {
+        const auto& r = xlle_aot_mov_mem_abs_sib_index;
+        Memory m(r);
+        xlle_aot_state s{}; s.eflags = 2;
+        s.gpr[0] = 4; s.gpr[1] = 0x2468ace0;
+        auto native = s; native.eip = r.base;
+        require(r.run(&r, &native, &m.bus, 100) == XLLE_AOT_COMPLETE, "absolute SIB completes");
+        require(native.gpr[2] == 0x2468ace0 && peek32(m.bytes, 0x2110) == 0x2468ace0,
+                "absolute SIB omits base and uses scaled index");
+        s.eip = r.base;
+        differential(r, s, 0xffffffffu);
+    }
+    {
+        const auto& r = xlle_aot_mov_mem_disp8_ebp;
+        Memory m(r);
+        xlle_aot_state s{}; s.eflags = 2;
+        s.gpr[0] = 0xfeedface; s.gpr[5] = 0x2204;
+        auto native = s; native.eip = r.base;
+        require(r.run(&r, &native, &m.bus, 100) == XLLE_AOT_COMPLETE, "negative disp8 EBP completes");
+        require(native.gpr[3] == 0xfeedface && peek32(m.bytes, 0x2200) == 0xfeedface,
+                "negative disp8 is sign-extended before address add");
+        s.eip = r.base;
+        differential(r, s, 0xffffffffu);
+    }
+    {
+        const auto& r = xlle_aot_mov_mem_disp32_esp;
+        Memory m(r);
+        xlle_aot_state s{}; s.eflags = 2;
+        s.gpr[1] = 0x11223344; s.gpr[4] = 0x2300;
+        auto native = s; native.eip = r.base;
+        require(r.run(&r, &native, &m.bus, 100) == XLLE_AOT_COMPLETE, "disp32 ESP completes");
+        require(native.gpr[7] == 0x11223344 && peek32(m.bytes, 0x2330) == 0x11223344,
+                "ESP SIB no-index addressing");
+        s.eip = r.base;
+        differential(r, s, 0xffffffffu);
+    }
+    {
+        const auto& r = xlle_aot_mov_mem_wrap_disp32;
+        Memory m(r);
+        xlle_aot_state s{}; s.eflags = 2;
+        s.gpr[0] = 0x3000; s.gpr[3] = 0xa5a55a5a;
+        auto native = s; native.eip = r.base;
+        require(r.run(&r, &native, &m.bus, 100) == XLLE_AOT_COMPLETE, "wrapped disp32 completes");
+        require(native.gpr[1] == 0xa5a55a5a && peek32(m.bytes, 0x2010) == 0xa5a55a5a,
+                "effective address wraps as uint32");
+        s.eip = r.base;
+        differential(r, s, 0xffffffffu);
+    }
+    {
+        const auto& r = xlle_aot_mov_load_dest_equals_base;
+        Memory m(r);
+        poke32(m.bytes, 0x2420, 0x2001);
+        const auto seeded = m.bytes;
+        xlle_aot_state s{}; s.eflags = 2; s.gpr[0] = 0x2400;
+        auto native = s; native.eip = r.base;
+        require(r.run(&r, &native, &m.bus, 100) == XLLE_AOT_COMPLETE, "load dest equals base completes");
+        require(native.gpr[0] == 0x2001, "load computes address before overwriting base register");
+        differential_with_memory(r, s, 0xffffffffu, &seeded);
+    }
+    {
+        const auto& r = xlle_aot_mov_store_source_equals_base;
+        Memory m(r);
+        xlle_aot_state s{}; s.eflags = 2; s.gpr[0] = 0x2500;
+        auto native = s; native.eip = r.base;
+        require(r.run(&r, &native, &m.bus, 100) == XLLE_AOT_COMPLETE, "store source equals base completes");
+        require(peek32(m.bytes, 0x2520) == 0x2500, "store computes address and value from original register");
+        s.eip = r.base;
+        differential(r, s, 0xffffffffu);
+    }
+
+    const auto& pair = xlle_aot_mov_mem_base_index_scale;
+    {
+        Memory denied(pair);
+        xlle_aot_state s{}; s.eip = pair.base; s.eflags = 2;
+        s.gpr[0] = 0x13579bdf; s.gpr[3] = 0x2000; s.gpr[6] = 3;
+        const auto before = denied.bytes;
+        denied.reject_writes = true;
+        require(pair.run(&pair, &s, &denied.bus, 100) == XLLE_AOT_MEMORY,
+                "denied ModRM write exits as memory");
+        require(s.retired == 0 && s.eip == pair.base && s.gpr[2] == 0 &&
+                denied.bytes == before && denied.accesses.empty(),
+                "denied ModRM write has no guest-visible effects");
+    }
+    {
+        const auto& load = xlle_aot_mov_load_dest_equals_base;
+        Memory denied(load);
+        poke32(denied.bytes, 0x2420, 0x2001);
+        xlle_aot_state s{}; s.eip = load.base; s.eflags = 2; s.gpr[0] = 0x2400;
+        denied.reject_reads = true;
+        require(load.run(&load, &s, &denied.bus, 100) == XLLE_AOT_MEMORY,
+                "denied ModRM read exits as memory");
+        require(s.retired == 0 && s.eip == load.base && s.gpr[0] == 0x2400 &&
+                denied.accesses.empty(),
+                "denied ModRM read preserves destination and continuation");
+    }
+    {
+        Memory event(pair);
+        event.arm_event_after_write = true;
+        xlle_aot_state s{}; s.eip = pair.base; s.eflags = 2;
+        s.gpr[0] = 0x13579bdf; s.gpr[3] = 0x2000; s.gpr[6] = 3; s.gpr[2] = 0x77777777;
+        require(pair.run(&pair, &s, &event.bus, 100) == XLLE_AOT_EVENT,
+                "event between ModRM memory operations exits before load");
+        require(s.retired == 1 && s.eip == pair.base + 4 && s.gpr[2] == 0x77777777 &&
+                peek32(event.bytes, 0x202c) == 0x13579bdf,
+                "event boundary preserves completed store only");
+    }
+    {
+        Memory budget(pair);
+        xlle_aot_state s{}; s.eip = pair.base; s.eflags = 2;
+        s.gpr[0] = 0x13579bdf; s.gpr[3] = 0x2000; s.gpr[6] = 3; s.gpr[2] = 0x77777777;
+        require(pair.run(&pair, &s, &budget.bus, 1) == XLLE_AOT_BUDGET,
+                "budget boundary between ModRM memory operations");
+        require(s.retired == 1 && s.eip == pair.base + 4 && s.gpr[2] == 0x77777777 &&
+                peek32(budget.bytes, 0x202c) == 0x13579bdf,
+                "budget boundary preserves completed store only");
+    }
+}
+
+static void expect_sub83(const xlle_aot_region& r, unsigned reg, uint32_t initial_value,
+                         uint32_t expected_value, uint32_t must_set, uint32_t must_clear) {
+    Memory m(r);
+    xlle_aot_state s{}; s.eip = r.base; s.eflags = 2u;
+    s.gpr[reg] = initial_value;
+    require(r.run(&r, &s, &m.bus, 100) == XLLE_AOT_COMPLETE, "SUB imm8 completes");
+    require(s.retired == 1 && s.gpr[reg] == expected_value, "SUB imm8 result");
+    require((s.eflags & must_set) == must_set, "SUB imm8 required flags set");
+    require((s.eflags & must_clear) == 0, "SUB imm8 required flags clear");
+    xlle_aot_state diff{}; diff.eflags = 2u; diff.gpr[reg] = initial_value;
+    differential(r, diff, 0xffffffffu);
+}
+
+static void sub83_boundary_fixtures() {
+    constexpr uint32_t CF = 0x001u, ZF = 0x040u, SF = 0x080u, OF = 0x800u;
+    expect_sub83(xlle_aot_sub83_zero, 0, 0x80000000u, 0x80000000u, SF, CF | ZF | OF);
+    expect_sub83(xlle_aot_sub83_7f, 3, 0x80000000u, 0x7fffff81u, OF, CF | ZF | SF);
+    expect_sub83(xlle_aot_sub83_80, 0, 0x7fffffffu, 0x8000007fu, CF | SF | OF, ZF);
+    expect_sub83(xlle_aot_sub83_ff, 7, 0xffffffffu, 0x00000000u, ZF, CF | SF | OF);
+}
+
 static void fallback_round_trip() {
     const auto& region = xlle_aot_mixed;
     Memory m(region);
@@ -254,13 +523,18 @@ static void fallback_round_trip() {
 int main() {
     independent_fixtures();
     guards_and_exits();
+    cs_limit_synthetic_guards();
+    memory_addressing_fixtures();
+    sub83_boundary_fixtures();
     fallback_round_trip();
     const xlle_aot_region* cases[] = {&xlle_aot_add_eax_ebx, &xlle_aot_sub_eax_ebx,
         &xlle_aot_xor_eax_eax, &xlle_aot_inc_eax, &xlle_aot_dec_eax,
         &xlle_aot_branch, &xlle_aot_bytes, &xlle_aot_memory, &xlle_aot_imm_ops,
         &xlle_aot_register_moves, &xlle_aot_and_regs, &xlle_aot_xor_regs,
         &xlle_aot_add_imm, &xlle_aot_sub_imm, &xlle_aot_xor_imm,
-        &xlle_aot_branch_ne, &xlle_aot_jump_near, &xlle_aot_load_memory};
+        &xlle_aot_branch_ne, &xlle_aot_jump_near, &xlle_aot_load_memory,
+        &xlle_aot_sub83_zero, &xlle_aot_sub83_7f, &xlle_aot_sub83_80,
+        &xlle_aot_sub83_ff};
     const uint32_t edges[] = {0, 1, 15, 16, 0x7fffffff, 0x80000000, 0xffffffff};
     uint32_t random = 0x58424f58;
     unsigned compared = 0;
@@ -279,6 +553,7 @@ int main() {
             ++compared;
         }
     }
-    std::cout << "AOT: 9 independent fixtures, " << compared
+    std::cout << "AOT: 9 independent fixtures, memory addressing and SUB imm8 boundaries, "
+              << compared
               << " differential cases, guards and native/Unicorn/native continuation passed\n";
 }

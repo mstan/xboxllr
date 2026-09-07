@@ -22,8 +22,9 @@ enum {
  * xlle_unicorn_aot_context_ok returns nonzero only for the bounded flat 32-bit
  * protected-mode context currently modeled by the generated AOT runtime. It
  * rejects interrupt shadow, debug/watchpoint, VM86/long-mode/SMM/SVM/MPX and
- * non-flat CS/DS/SS state. Unicorn remains the owner of all untouched hidden and
- * FP/SIMD state.
+ * nonzero CS base or non-flat DS/SS state. The caller must enforce the cached
+ * CS limit using the ABI2 code-range and branch guards. Unicorn remains the
+ * owner of all untouched hidden and FP/SIMD state.
  *
  * xlle_unicorn_aot_ram_ptr returns a direct host RAM pointer only when the exact
  * access is already resident in QEMU's direct or victim TLB for the current MMU
@@ -32,6 +33,10 @@ enum {
  * their caller must explicitly invalidate physical translated code after writing.
  */
 int xlle_unicorn_aot_context_ok(void* engine);
+// NULL means eligible. Otherwise identifies the first failed context predicate;
+// diagnostic names are stable and contain no guest data.
+const char* xlle_unicorn_aot_context_rejection(void* engine);
+uint32_t xlle_unicorn_aot_code_limit(void* engine);
 void* xlle_unicorn_aot_ram_ptr(void* engine, uint32_t linear, size_t size,
                                unsigned access);
 // Physical RAM invalidation without translating a guest virtual address or

@@ -61,6 +61,7 @@ public:
     bool register_aot_replacement(const AotReplacement& replacement);
     void set_aot_profile(uint32_t profile);
     AotExecutionStats aot_stats() const;
+    std::vector<AotRegionStats> aot_region_stats() const;
 
     bool ok() const { return uc_ != nullptr; }
     void hook_region_counts(uint64_t& code_regions, uint64_t& count_regions,
@@ -100,6 +101,8 @@ public:
     static constexpr size_t kBlockPcRing = 8192;
     const uint32_t* block_pc_ring() const { return block_pc_ring_.get(); }
     uint64_t block_pc_ring_writes() const { return stats_.tb_entries; }
+    // Only available in attribution builds; counts executed TBs, not sampled slices.
+    bool write_block_census(const char* path) const;
 
 private:
     friend class AotExecutor;
@@ -197,6 +200,18 @@ private:
     std::unique_ptr<IcountSlot[]> icount_;
     std::unique_ptr<uint32_t[]> block_pc_ring_;
     BlockStats stats_{};
+#ifdef XLLE_CPU_BLOCK_CENSUS
+    struct CensusRow {
+        uint32_t pc = 0, size = 0;
+        uint64_t entries = 0, charged = 0, unretired = 0;
+        std::vector<uint8_t> first_code;
+    };
+    std::unique_ptr<CensusRow[]> census_;
+    CensusRow* census_last_ = nullptr;
+    uint64_t census_overflow_ = 0;
+    CensusRow* census_row(uint32_t pc, uint32_t size);
+    void census_charge(uint32_t pc, uint32_t size, uint64_t insns, uint64_t entries);
+#endif
     // One-entry inline cache in front of the icount table: consecutive block entries repeat
     // heavily (the idle loop cycles through three blocks).
     uint32_t last_pc_ = 0;

@@ -41,6 +41,9 @@ void XboxMachine::set_aot_profile(uint32_t profile) {
 AotExecutionStats XboxMachine::aot_stats() const {
     return static_cast<UnicornFloor*>(cpu_.get())->aot_stats();
 }
+std::vector<AotRegionStats> XboxMachine::aot_region_stats() const {
+    return static_cast<UnicornFloor*>(cpu_.get())->aot_region_stats();
+}
 
 bool XboxMachine::init_ram() {
     ram_.assign(kRamSize, 0);

@@ -75,6 +75,7 @@ public:
     bool register_aot_replacement(const AotReplacement& replacement);
     void set_aot_profile(uint32_t profile);
     AotExecutionStats aot_stats() const;
+    std::vector<AotRegionStats> aot_region_stats() const;
     size_t flash_size() const { return flash_size_; }
     uint64_t total_insns() const { return total_insns_; }
     // Relaxed mirror of total_insns_ for host probes (e.g. the sampled

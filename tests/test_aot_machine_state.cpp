@@ -347,6 +347,30 @@ static void write_data_descriptor(uint32_t gdt_base, uint64_t descriptor, XboxMa
             "write data descriptor");
 }
 
+static void write_code_descriptor(uint32_t gdt_base, uint64_t descriptor, XboxMachine& machine) {
+    require(machine.cpu().write_mem(gdt_base + 8, &descriptor, sizeof(descriptor)),
+            "write code descriptor");
+}
+
+static void cs_limit_bfffffff_allows_low_native_execution() {
+    XboxMachine machine;
+    prepare(machine);
+    // Base 0, 32-bit executable/readable, G=1/D=1, limit field 0xbffff:
+    // effective inclusive CS limit is 0xbfffffff.
+    write_code_descriptor(kGdtBase, UINT64_C(0x00cb9a000000ffff), machine);
+    write_u32_xreg(machine.cpu(), XReg::CS, 0x08, "reload limited CS selector");
+    require(machine.register_aot_region(xlle_aot_loop), "register loop under limited CS");
+    run_exact(machine, xlle_aot_loop.base - 0x100, 101);
+    const auto regs = machine.cpu().get_regs();
+    require(regs.eax == 50 && regs.eip == xlle_aot_loop.base,
+            "limited CS still permits low native loop");
+    const auto stats = machine.aot_stats();
+    require(stats.retired > 0 && stats.context_declines == 0,
+            "zero-based limited CS is AOT eligible");
+    require(stats.retired + stats.fallback_insns == 101,
+            "limited CS retirement partition");
+}
+
 static void gdt_change_without_reload_keeps_cached_flat_context() {
     XboxMachine machine;
     prepare(machine);
@@ -455,6 +479,7 @@ void test_aot_machine_state() {
     hook_wrong_or_disabled_profile_is_ineligible(false);
     hook_wrong_or_disabled_profile_is_ineligible(true);
     changed_code_declines_before_hook();
+    cs_limit_bfffffff_allows_low_native_execution();
     gdt_change_without_reload_keeps_cached_flat_context();
     gdt_change_with_ds_reload_declines_native_context();
     pending_irq_interrupts_before_native_dispatch();

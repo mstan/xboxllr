@@ -6,6 +6,7 @@
 #include <unicorn/unicorn.h>
 #include <algorithm>
 #include <cstring>
+#include <cstdio>
 #include <limits>
 
 namespace xlle {
@@ -18,6 +19,9 @@ bool AotExecutor::add_region(const xlle_aot_region& r) {
         if (uint64_t(r.base) < uint64_t(existing->base) + existing->code_size &&
             uint64_t(existing->base) < uint64_t(r.base) + r.code_size) return false;
     regions_.push_back(&r);
+    AotRegionStats counters{};
+    counters.base = r.base;
+    region_stats.push_back(counters);
     return true;
 }
 
@@ -61,9 +65,9 @@ void* AotExecutor::ram(uint32_t address, size_t size, unsigned access) {
         if (!owned) return nullptr;
         offset += part;
     }
-    // One registered backing range must own the whole span. A write callback
-    // commits through that range's physical mapping; adjacent registrations
-    // alone cannot certify that single physical operation.
+    // One registered backing range must own the whole span, with a corresponding
+    // physical alias for code invalidation. Adjacent registrations alone cannot
+    // certify the complete access.
     for (const auto& m : cpu_.host_ram_) {
         uintptr_t delta = reinterpret_cast<uintptr_t>(first) -
                           reinterpret_cast<uintptr_t>(m.host);
@@ -74,8 +78,11 @@ void* AotExecutor::ram(uint32_t address, size_t size, unsigned access) {
 
 int AotExecutor::read32(void* opaque, uint32_t address, uint32_t* value) {
     auto& self = *static_cast<AotExecutor*>(opaque);
-    const auto* p = static_cast<const uint8_t*>(self.ram(address, 4, 0));
+    auto& access = self.read_access_;
+    auto* p = access.host && access.address == address ? access.host :
+        static_cast<uint8_t*>(self.ram(address, 4, 0));
     if (!p) { ++self.stats.memory_declines; return 0; }
+    access = {address, p};
     *value = uint32_t(p[0]) | (uint32_t(p[1]) << 8) |
              (uint32_t(p[2]) << 16) | (uint32_t(p[3]) << 24);
     ++self.stats.memory_reads;
@@ -84,27 +91,23 @@ int AotExecutor::read32(void* opaque, uint32_t address, uint32_t* value) {
 
 int AotExecutor::write32(void* opaque, uint32_t address, uint32_t value) {
     auto& self = *static_cast<AotExecutor*>(opaque);
-    auto* p = static_cast<uint8_t*>(self.ram(address, 4, 1));
+    auto& access = self.write_access_;
+    auto* p = access.host && access.address == address ? access.host :
+        static_cast<uint8_t*>(self.ram(address, 4, 1));
     if (!p) { ++self.stats.memory_declines; return 0; }
+    access = {address, p};
     const uint8_t bytes[4] = {uint8_t(value), uint8_t(value >> 8),
                              uint8_t(value >> 16), uint8_t(value >> 24)};
-    // A host buffer can back multiple physical ranges on Xbox. uc_mem_write
-    // only copies bytes in this Unicorn version: explicitly invalidate each alias.
-    // Validation above established the entire access before any effects occur.
-    bool committed = false;
+    // Snapshot/observer contexts are excluded before entry. Certification above
+    // already established write permission, accessed/dirty bits, and ownership
+    // of the entire span. Store once to the shared backing, in guest byte order.
+    // Keep physical code invalidation for EVERY alias: the copy alone cannot
+    // invalidate cached TCG code or expose a synchronous SMC exit request.
+    std::memcpy(p, bytes, sizeof(bytes));
     for (const auto& m : self.cpu_.host_ram_) {
         uintptr_t delta = reinterpret_cast<uintptr_t>(p) -
                           reinterpret_cast<uintptr_t>(m.host);
         if (delta < m.size && 4 <= m.size - delta) {
-            if (uc_mem_write(reinterpret_cast<uc_engine*>(self.cpu_.uc_),
-                             m.base + static_cast<uint32_t>(delta), bytes, 4) != UC_ERR_OK) {
-                self.cpu_.request_stop("AOT: certified RAM write failed");
-                // End generated execution at this boundary. A partially completed
-                // alias update is a fatal host error, never a retryable decline.
-                if (self.active_bus_) self.active_bus_->event_pending = 1;
-                return committed ? 1 : 0;
-            }
-            committed = true;
             xlle_unicorn_invalidate_ram(self.cpu_.uc_,
                 m.base + static_cast<uint32_t>(delta), 4);
         }
@@ -115,19 +118,29 @@ int AotExecutor::write32(void* opaque, uint32_t address, uint32_t value) {
 
 uint64_t AotExecutor::execute(uint32_t pc, uint64_t budget) {
     const xlle_aot_region* region = nullptr;
-    for (const auto* r : regions_)
+    size_t index = 0;
+    for (; index < regions_.size(); ++index) {
+        const auto* r = regions_[index];
         if (pc >= r->base && uint64_t(pc) < uint64_t(r->base) + r->code_size) {
             region = r; break;
         }
+    }
     if (!region || !budget) return 0;
+    auto& counters = region_stats[index];
     perf_excl::Scope timing(perf_excl::kAotExec);
     ++stats.attempts;
-    if (!xlle_unicorn_aot_context_ok(cpu_.uc_) || cpu_.mem_cb_ || cpu_.retired_cb_) {
+    ++counters.attempts;
+    const char* rejection = xlle_unicorn_aot_context_rejection(cpu_.uc_);
+    if (rejection || cpu_.mem_cb_ || cpu_.retired_cb_) {
+        if (!stats.context_declines)
+            std::printf("[aot] first-context-decline reason=%s pc=%08x\n",
+                        rejection ? rejection : "diagnostic-observer", pc);
         ++stats.context_declines;
+        ++counters.context_declines;
         return 0;
     }
     auto* code = static_cast<uint8_t*>(ram(region->base, region->code_size, 2));
-    if (!code) { ++stats.code_tlb_declines; return 0; }
+    if (!code) { ++stats.code_tlb_declines; ++counters.code_tlb_declines; return 0; }
     X86Regs regs = cpu_.get_regs();
     xlle_aot_state state{{regs.eax, regs.ecx, regs.edx, regs.ebx,
                            regs.esp, regs.ebp, regs.esi, regs.edi},
@@ -138,12 +151,13 @@ uint64_t AotExecutor::execute(uint32_t pc, uint64_t budget) {
     bus.code_base = region->base;
     bus.code = code;
     bus.code_size = region->code_size;
+    bus.code_limit = xlle_unicorn_aot_code_limit(cpu_.uc_);
     bus.opaque = this;
     bus.read32 = read32;
     bus.write32 = write32;
     bus.event_pending = cpu_.irq_pending_ && (state.eflags & 0x200u);
     auto result = xlle_aot_check(region, &state, &bus, budget, start);
-    if (result != XLLE_AOT_CONTINUE) { ++stats.exits[result]; return 0; }
+    if (result != XLLE_AOT_CONTINUE) { ++stats.exits[result]; ++counters.exits[result]; return 0; }
     bool replaced = false;
     for (const auto& h : hooks_) {
         if (h.region != region || pc != region->base) continue;
@@ -152,7 +166,8 @@ uint64_t AotExecutor::execute(uint32_t pc, uint64_t budget) {
         ++stats.hook_calls;
         if (h.propose(state, proposed, budget) && proposed.retired > start &&
             proposed.retired - start <= budget &&
-            ((proposed.eflags ^ state.eflags) & ~uint32_t(0x8d5)) == 0) {
+            ((proposed.eflags ^ state.eflags) & ~uint32_t(0x8d5)) == 0 &&
+            xlle_aot_branch_allowed(&bus, proposed.eip)) {
             state = proposed;
             replaced = true;
             result = XLLE_AOT_EXTERNAL;
@@ -161,12 +176,21 @@ uint64_t AotExecutor::execute(uint32_t pc, uint64_t budget) {
         break;
     }
     if (!replaced) {
-        active_bus_ = &bus;
+        perf_excl::Scope body_timing(perf_excl::kAotBody);
+        // Invalidate at EVERY native entry. Fallback/device execution may have
+        // changed mappings or permissions since the previous invocation.
+        // Native RAM writes can change page-table bytes but cannot invalidate
+        // architectural TLB translations; INVLPG/CR3 writes require fallback.
+        read_access_ = {};
+        write_access_ = {};
         result = region->run(region, &state, &bus, budget);
-        active_bus_ = nullptr;
     }
     ++stats.invocations;
-    if (static_cast<unsigned>(result) <= XLLE_AOT_EXTERNAL) ++stats.exits[result];
+    ++counters.invocations;
+    if (static_cast<unsigned>(result) <= XLLE_AOT_EXTERNAL) {
+        ++stats.exits[result];
+        ++counters.exits[result];
+    }
     if (state.retired < start || state.retired - start > budget) {
         cpu_.request_stop("AOT: generated code violated retirement budget");
         return 0;
@@ -182,6 +206,7 @@ uint64_t AotExecutor::execute(uint32_t pc, uint64_t budget) {
     cpu_.seq_ = state.retired;
     xlle_guest_tsc_ticks = cpu_.seq_;
     stats.retired += retired;
+    counters.retired += retired;
     return retired;
 }
 
@@ -197,6 +222,9 @@ void UnicornFloor::set_aot_profile(uint32_t profile) {
 }
 AotExecutionStats UnicornFloor::aot_stats() const {
     return aot_ ? aot_->stats : AotExecutionStats{};
+}
+std::vector<AotRegionStats> UnicornFloor::aot_region_stats() const {
+    return aot_ ? aot_->region_stats : std::vector<AotRegionStats>{};
 }
 
 uint64_t UnicornFloor::run(uint32_t start_eip, uint64_t max_insns, std::string& err) {

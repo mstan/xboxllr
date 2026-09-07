@@ -14,6 +14,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 option(XLLE_WITH_SDL "Build the SDL3 host shell" ON)
+option(XLLE_CPU_BLOCK_CENSUS "Compile guest block execution census (attribution builds only)" OFF)
 option(XLLE_NATIVE_OPTIMIZATIONS
   "Build local host-native optimized binaries (-march=native on x86_64 GNU/Clang)"
   ON)
@@ -111,6 +112,9 @@ add_library(xlle_cpu STATIC src/cpu/unicorn_floor.cpp src/cpu/aot_executor.cpp)
 target_include_directories(xlle_cpu PUBLIC ${XLLE_INCLUDES})
 target_include_directories(xlle_cpu PRIVATE ${unicorn_SOURCE_DIR}/include)
 target_link_libraries(xlle_cpu PUBLIC unicorn)
+if(XLLE_CPU_BLOCK_CENSUS)
+  target_compile_definitions(xlle_cpu PUBLIC XLLE_CPU_BLOCK_CENSUS=1)
+endif()
 
 # --- machine model (memory map + devices around the CPU floor) ---
 add_library(xlle_machine STATIC
@@ -377,6 +381,44 @@ add_test(NAME spike COMMAND xlle)
 #                                 BRFR boot counter in its own image on every run
 # They read src/ directly, so they run from the source dir, not the build dir.
 find_package(Python3 COMPONENTS Interpreter)
+set(XLLE_AOT_PRIVATE_INPUT "" CACHE FILEPATH "Private prepared .aot-private.json input; never distribute its generated code")
+set(XLLE_AOT_PRIVATE_OPTIMIZATION "O2" CACHE STRING "Private generated-C validation setting (O2 or O0)")
+if(XLLE_AOT_PRIVATE_INPUT)
+  if(NOT Python3_Interpreter_FOUND)
+    message(FATAL_ERROR "Private AOT generation requires Python 3")
+  endif()
+  if(NOT XLLE_AOT_PRIVATE_INPUT MATCHES "\\.aot-private\\.json$")
+    message(FATAL_ERROR "Private AOT input must have the guarded .aot-private.json suffix")
+  endif()
+  file(READ "${XLLE_AOT_PRIVATE_INPUT}" _xlle_private_json)
+  string(JSON _xlle_private GET "${_xlle_private_json}" private_guest_input)
+  if(NOT _xlle_private)
+    message(FATAL_ERROR "Private AOT input must explicitly identify private_guest_input=true")
+  endif()
+  if(NOT XLLE_AOT_PRIVATE_OPTIMIZATION MATCHES "^O[02]$")
+    message(FATAL_ERROR "Private generated C supports validation settings O2 and O0")
+  endif()
+  set(_xlle_private_dir "${CMAKE_CURRENT_BINARY_DIR}/generated/private_aot")
+  add_custom_command(
+    OUTPUT "${_xlle_private_dir}/private_aot.c" "${_xlle_private_dir}/private_aot.h"
+           "${_xlle_private_dir}/manifest.aot-private.json"
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/aot_compile.py"
+            --input "${XLLE_AOT_PRIVATE_INPUT}"
+            --output-c "${_xlle_private_dir}/private_aot.c"
+            --output-h "${_xlle_private_dir}/private_aot.h"
+            --manifest "${_xlle_private_dir}/manifest.aot-private.json"
+    DEPENDS tools/aot_compile.py "${XLLE_AOT_PRIVATE_INPUT}"
+    VERBATIM)
+  add_library(xlle_aot_private STATIC "${_xlle_private_dir}/private_aot.c")
+  target_include_directories(xlle_aot_private PUBLIC include "${_xlle_private_dir}")
+  set_target_properties(xlle_aot_private PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS OFF)
+  if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(xlle_aot_private PRIVATE -Wall -Wextra -Werror -pedantic-errors
+                           "-${XLLE_AOT_PRIVATE_OPTIMIZATION}")
+  endif()
+  target_link_libraries(xlle PRIVATE xlle_aot_private)
+  target_compile_definitions(xlle PRIVATE XLLE_HAS_PRIVATE_AOT=1)
+endif()
 if(Python3_Interpreter_FOUND)
   # Synthetic AOT proof only: these generated guest programs are not linked into
   # xlle. Proprietary artifacts must use a private build directory/input path.
@@ -422,6 +464,10 @@ if(Python3_Interpreter_FOUND)
   endforeach()
   add_test(NAME aot_compile
            COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_aot_compile.py")
+  add_test(NAME cpu_block_census
+           COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cpu_block_census.py")
+  add_test(NAME aot_private_input
+           COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_aot_private_input.py")
 endif()
 if(Python3_Interpreter_FOUND)
   add_test(NAME eeprom_generation

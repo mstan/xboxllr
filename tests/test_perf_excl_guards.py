@@ -95,7 +95,7 @@ def body(source, name, path):
 # a region at the wrong bucket.
 SITES = [
     (UNICORN_CPP, "UnicornFloor::run_unicorn", ["kTcgExec"]),
-    (SRC / "cpu/aot_executor.cpp", "AotExecutor::execute", ["kAotExec"]),
+    (SRC / "cpu/aot_executor.cpp", "AotExecutor::execute", ["kAotExec", "kAotBody"]),
     (UNICORN_CPP, "UnicornFloor::inject_interrupt", ["kIntrDelivery"]),
     (MACHINE_CPP, "XboxMachine::mmio_read", ["kMmioDispatch", "kOtherDevice"]),
     (MACHINE_CPP, "XboxMachine::mmio_write", ["kMmioDispatch", "kOtherDevice"]),

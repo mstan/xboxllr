@@ -1,0 +1,214 @@
+{
+  "schema_version": 1,
+  "source_identity": {
+    "project": "sp00nznet/xboxrecomp tools/recomp",
+    "required_commit": "32da23872a552b12b4a932c9d5a6e952bb3f24bb",
+    "required_file_sha256": "dcf56d90affb6a797ca1dc85c99a763a1c4ee2dd0bc35c295c1f12d2a097a929",
+    "required_files": [
+      "LICENSE",
+      "tools/recomp/__init__.py",
+      "tools/recomp/__main__.py",
+      "tools/recomp/config.py",
+      "tools/recomp/disasm.py",
+      "tools/recomp/lifter.py",
+      "tools/recomp/translator.py",
+      "tools/recomp/output.py",
+      "templates/runtime/recomp_types.h",
+      "templates/runtime/xbox_memory.h"
+    ]
+  },
+  "synthetic_image": {
+    "base": "0x00001000",
+    "size": "0x400",
+    "functions": [
+      {
+        "name": "qual_caller",
+        "start": "0x00001000",
+        "code": "b803000000e8160000000505000000c3",
+        "purpose": "direct call, callee memory write, caller continuation"
+      },
+      {
+        "name": "qual_callee",
+        "start": "0x00001020",
+        "code": "0502000000a300180000c3",
+        "purpose": "callee modifies eax and stores through MEM32"
+      },
+      {
+        "name": "qual_branch",
+        "start": "0x00001040",
+        "code": "3d050000007407bb01000000eb05bb02000000c3",
+        "purpose": "intra-function cmp/je/jmp branch"
+      },
+      {
+        "name": "qual_flags_caller",
+        "start": "0x00001100",
+        "code": "e81b0000007407b901000000eb05b902000000c3",
+        "purpose": "caller consumes flags set by callee"
+      },
+      {
+        "name": "qual_flags_callee",
+        "start": "0x00001120",
+        "code": "39d8c3",
+        "purpose": "cmp eax, ebx; ret"
+      },
+      {
+        "name": "qual_unsupported_continues",
+        "start": "0x00001140",
+        "code": "b8111111110f0ba304180000b822222222c3",
+        "purpose": "UD2 must stop before later state/memory effects in a faithful AOT ABI"
+      },
+      {
+        "name": "qual_budget_ignored",
+        "start": "0x00001160",
+        "code": "4040404040c3",
+        "purpose": "budget/event check must be per instruction in xboxlle AOT"
+      }
+    ]
+  },
+  "generated_checks": [
+    {
+      "name": "direct_call_eax",
+      "expected": "0x0000000a",
+      "expected_pass": true
+    },
+    {
+      "name": "direct_call_mem",
+      "expected": "0x00000005",
+      "expected_pass": true
+    },
+    {
+      "name": "direct_call_top_ret_esp",
+      "expected": "0x00003004",
+      "expected_pass": true,
+      "note": "Direct C call into a translated function has no real caller return slot; this checks upstream's own void-function stack convention, not a faithful machine boundary."
+    },
+    {
+      "name": "branch_taken",
+      "expected": "0x00000002",
+      "expected_pass": true
+    },
+    {
+      "name": "branch_not_taken",
+      "expected": "0x00000001",
+      "expected_pass": true
+    },
+    {
+      "name": "cross_function_flags",
+      "expected": "0x00000002",
+      "expected_pass": false
+    },
+    {
+      "name": "unsupported_should_stop_eax",
+      "expected": "0x11111111",
+      "expected_pass": false
+    },
+    {
+      "name": "unsupported_should_not_write_after",
+      "expected": "0x00000000",
+      "expected_pass": false
+    },
+    {
+      "name": "budget_one_expected_eax",
+      "expected": "0x00000001",
+      "expected_pass": false
+    }
+  ],
+  "unicorn_cases": [
+    {
+      "name": "caller",
+      "start": "0x00001000",
+      "end": "0x00001200",
+      "count": 100,
+      "eax": "0x00000000",
+      "ebx": "0x00000000",
+      "expect": {
+        "err": 0,
+        "eax": "0x0000000a",
+        "ebx": "0x00000000",
+        "ecx": "0x00000000",
+        "eip": "0x00001200",
+        "mem1804": "0x00000000"
+      }
+    },
+    {
+      "name": "branch_taken",
+      "start": "0x00001040",
+      "end": "0x00001200",
+      "count": 100,
+      "eax": "0x00000005",
+      "ebx": "0x00000000",
+      "expect": {
+        "err": 0,
+        "eax": "0x00000005",
+        "ebx": "0x00000002",
+        "ecx": "0x00000000",
+        "eip": "0x00001200",
+        "mem1804": "0x00000000"
+      }
+    },
+    {
+      "name": "branch_not_taken",
+      "start": "0x00001040",
+      "end": "0x00001200",
+      "count": 100,
+      "eax": "0x00000004",
+      "ebx": "0x00000000",
+      "expect": {
+        "err": 0,
+        "eax": "0x00000004",
+        "ebx": "0x00000001",
+        "ecx": "0x00000000",
+        "eip": "0x00001200",
+        "mem1804": "0x00000000"
+      }
+    },
+    {
+      "name": "cross_function_flags",
+      "start": "0x00001100",
+      "end": "0x00001200",
+      "count": 100,
+      "eax": "0x00000007",
+      "ebx": "0x00000007",
+      "expect": {
+        "err": 0,
+        "eax": "0x00000007",
+        "ebx": "0x00000007",
+        "ecx": "0x00000002",
+        "eip": "0x00001200",
+        "mem1804": "0x00000000"
+      }
+    },
+    {
+      "name": "unsupported_ud2",
+      "start": "0x00001140",
+      "end": "0x00001200",
+      "count": 100,
+      "eax": "0x00000000",
+      "ebx": "0x00000000",
+      "expect": {
+        "err": 10,
+        "eax": "0x11111111",
+        "ebx": "0x00000000",
+        "ecx": "0x00000000",
+        "eip": "0x00001145",
+        "mem1804": "0x00000000"
+      }
+    },
+    {
+      "name": "budget_one",
+      "start": "0x00001160",
+      "end": "0x00001200",
+      "count": 1,
+      "eax": "0x00000000",
+      "ebx": "0x00000000",
+      "expect": {
+        "err": 0,
+        "eax": "0x00000001",
+        "ebx": "0x00000000",
+        "ecx": "0x00000000",
+        "eip": "0x00001161",
+        "mem1804": "0x00000000"
+      }
+    }
+  ]
+}

@@ -232,6 +232,100 @@ static void write_protection(bool native) {
                         "native read/inc then precise write decline");
 }
 
+static void stale_write_permission_after_native_tlb() {
+    XboxMachine m;
+    prepare(m, xlle_aot_machine_memory);
+    paging(m, xlle_aot_machine_memory);
+    write_word(m, 0x22000, 50);
+    run_exact(m, 0xf00, 5);
+    require(read_word(m, 0x22000) == 51, "writable warm-up store commits");
+    write_word(m, 0x22000, 50);
+    auto regs = m.cpu().get_regs();
+    regs.eip = xlle_aot_machine_memory.base;
+    regs.eax = 0;
+    m.cpu().set_regs(regs);
+    require(m.register_aot_region(xlle_aot_machine_memory), "stale permission native region");
+
+    run_exact(m, xlle_aot_machine_memory.base, 4);
+    require(read_word(m, 0x22000) == 51, "initial writable native store commits");
+    auto before = m.aot_stats();
+    const uint64_t before_total = m.total_insns();
+    require(before.memory_reads == 1 && before.memory_writes == 1 && before.retired == 4,
+            "initial write actually used native store path");
+
+    // Revoke write permission after the writable TLB path has been exercised,
+    // then reload CR3 so a direct host write must not rely on stale permission.
+    write_word(m, 0x18008, 0x22001);
+    uint32_t cr3 = 0x19000;
+    require(m.cpu().write_reg(XReg::CR3, &cr3, 4), "reload CR3 after revoking write permission");
+
+    // Stay on the same mapped code page and warm FETCH plus READ under Unicorn,
+    // but never WRITE. A stale invocation-local write pointer would skip the
+    // post-CR3 permission check; a correct cache reset reaches native load/inc
+    // and then declines specifically at the store.
+    const uint8_t bootstrap[] = {
+        0x8b, 0x15, 0x00, 0x20, 0x00, 0x00,  // MOV EDX,[0x2000]
+        0xe9, 0xf5, 0xfe, 0xff, 0xff         // JMP 0x1000 from 0x1106
+    };
+    require(m.cpu().write_mem(0x21100, bootstrap, sizeof(bootstrap)),
+            "same-page post-revoke bootstrap");
+
+    std::string err;
+    const auto n = m.run(0x1100, 6, err);
+    const auto r = m.cpu().get_regs();
+    require(!err.empty(), "revoked native store faults loudly");
+    require(n == 4 && m.total_insns() == before_total + 4,
+            "revoked store retires bootstrap and native prefix only");
+    require(r.eip == 0x1006 && r.eax == 52, "revoked store preserves precise prefix state");
+    require(read_word(m, 0x22000) == 51, "revoked native store has no memory effect");
+    require((read_word(m, 0x18008) & 0x40) == 0, "revoked native store leaves dirty clear");
+    const auto after = m.aot_stats();
+    require(after.memory_writes == before.memory_writes,
+            "declined revoked write does not count as native write");
+    require(after.memory_reads > before.memory_reads &&
+            after.memory_declines > before.memory_declines &&
+            after.retired == before.retired + 2,
+            "revoked write reaches native read/inc then declines current write permission");
+}
+
+static void unaligned_same_page_store_bytes(bool native) {
+    XboxMachine m;
+    prepare(m, xlle_aot_machine_unaligned_store);
+    const std::array<uint8_t, 8> initial{{0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7}};
+    require(m.cpu().write_mem(0x2000, initial.data(), initial.size()), "unaligned initial bytes");
+    uint32_t entry = 0xf00;
+    uint64_t budget = 5;
+    if (native) {
+        run_exact(m, 0xf00, 5);
+        require(m.cpu().write_mem(0x2000, initial.data(), initial.size()),
+                "reset warmed unaligned bytes");
+        auto warm = m.cpu().get_regs();
+        warm.eip = xlle_aot_machine_unaligned_store.base;
+        warm.eax = 0;
+        m.cpu().set_regs(warm);
+        require(m.register_aot_region(xlle_aot_machine_unaligned_store),
+                "unaligned native store region");
+        entry = xlle_aot_machine_unaligned_store.base;
+        budget = 4;
+    }
+
+    std::string err;
+    const auto n = m.run(entry, budget, err);
+    require(err.empty(), err.c_str());
+    const auto r = m.cpu().get_regs();
+    require(n == budget && r.eip == 0x1000 && r.eax == 0xa4a3a2a2,
+            "unaligned load/inc/store executes exactly one loop body");
+    std::array<uint8_t, 8> bytes{};
+    require(m.cpu().read_mem(0x2000, bytes.data(), bytes.size()), "unaligned result bytes");
+    const std::array<uint8_t, 8> expected{{0xa0, 0xa2, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7}};
+    require(bytes == expected, "unaligned store writes exact little-endian bytes only");
+    if (native) {
+        const auto s = m.aot_stats();
+        require(s.memory_reads == 1 && s.memory_writes == 1 && s.retired == 4,
+                "unaligned read/write actually use native memory path");
+    }
+}
+
 static void cross_page(bool native, bool contiguous, bool readonly) {
     XboxMachine m;
     prepare(m, xlle_aot_machine_crosspage);
@@ -372,10 +466,12 @@ int main() {
         mmio_or_fault(native, true);
         mmio_or_fault(native, false);
         write_protection(native);
+        unaligned_same_page_store_bytes(native);
         for (bool contiguous : {false, true})
             for (bool readonly : {false, true}) cross_page(native, contiguous, readonly);
         native_alias_self_modify(native);
     }
+    stale_write_permission_after_native_tlb();
     alias_code_write(false);
     alias_code_write(true);
     test_aot_machine_state();

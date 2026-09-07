@@ -13,6 +13,8 @@ jobs:
       - run: python3 tests/test_repository_hygiene.py
       - run: python3 tests/test_eeprom_generation.py
       - run: python3 tests/test_aot_compile.py
+      - run: python3 tests/test_aot_private_input.py
+      - run: python3 tests/test_cpu_block_census.py
       - name: Compile portable generated C without Xbox inputs
         run: |
           python3 tools/aot_compile.py --input tests/aot_programs.json --output-c build-aot-ci/programs.c --output-h build-aot-ci/programs.h --manifest build-aot-ci/manifest.json

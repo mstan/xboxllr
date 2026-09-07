@@ -1,4 +1,4 @@
-// Original xboxlle AOT runtime contract. Version 1 carries the integer state
+// Original xboxlle AOT runtime contract. Version 2 carries the integer state
 // touched by generated IA-32 code. The machine adapter certifies its execution
 // context; untouched extended/hidden state remains owned by the CPU floor.
 #ifndef XLLE_AOT_RUNTIME_H
@@ -11,7 +11,7 @@
 extern "C" {
 #endif
 
-#define XLLE_AOT_ABI_VERSION 1u
+#define XLLE_AOT_ABI_VERSION 2u
 #define XLLE_AOT_CONTEXT_FLAT32_RAM 1u
 // Certified by the machine adapter from cached CPU segments and live MMU state.
 // IF, DF, IOPL and ID are preserved by this instruction subset, never modified.
@@ -43,6 +43,9 @@ typedef struct xlle_aot_bus {
     uint32_t code_base;
     const uint8_t* code;
     size_t code_size;
+    // Cached CS limit, inclusive, for MACHINE_FLAT32_RAM. CS base is zero;
+    // DS/SS remain full-range. Synthetic FLAT32_RAM uses a full code range.
+    uint32_t code_limit;
     // Stable for an invocation, or changed synchronously by memory callbacks.
     // The machine scheduler bounds each invocation by its next device deadline.
     // No asynchronous guest-device mutation is allowed during an invocation.
@@ -83,6 +86,10 @@ static inline xlle_aot_exit xlle_aot_check(const xlle_aot_region* region,
         (state->eflags & ~allowed_flags) != 0 || (state->eflags & 2u) == 0 ||
         state->retired < start || state->retired == UINT64_MAX)
         return XLLE_AOT_CONTEXT;
+    if (bus->context == XLLE_AOT_CONTEXT_MACHINE_FLAT32_RAM &&
+        (region->code_size == 0 ||
+         (uint64_t)region->base + region->code_size - 1 > bus->code_limit))
+        return XLLE_AOT_CONTEXT;
     if (!region->code || !bus->code || region->code_size == 0 ||
         bus->code_base != region->base || bus->code_size != region->code_size ||
         (uint64_t)region->base + region->code_size > UINT64_C(0xffffffff) ||
@@ -98,6 +105,13 @@ static inline xlle_aot_exit xlle_aot_check(const xlle_aot_region* region,
         return XLLE_AOT_EXTERNAL;
     if (state->retired - start >= budget) return XLLE_AOT_BUDGET;
     return XLLE_AOT_CONTINUE;
+}
+
+// A taken near branch checks CS before retiring. Decline at the original EIP
+// so Unicorn delivers any precise #GP; sequential fallthrough faults on fetch.
+static inline int xlle_aot_branch_allowed(const xlle_aot_bus* bus, uint32_t target)
+{
+    return bus->context != XLLE_AOT_CONTEXT_MACHINE_FLAT32_RAM || target <= bus->code_limit;
 }
 
 static inline uint32_t xlle_aot_szp(uint32_t value)
