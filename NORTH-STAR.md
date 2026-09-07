@@ -62,6 +62,13 @@ is later work. Actual ARM hardware and a matched xemu benchmark are not prerequi
 for this first native target. Runtime implementation choices remain measurable; the
 requirement to produce portable native artifacts is settled.
 
+**AOT is the intended primary execution path.** Progressively move most supported
+guest execution into code compiled before launch. Unicorn remains the fallback and
+comparison engine for uncovered or invalidated code. Measure the share of guest
+instructions executed through AOT versus fallback per workload phase, plus fallback
+time, reasons, and transition cost. Emitting many functions alone is not coverage.
+The first bounded target is an integration step, not completion of this AOT goal.
+
 Preserve the dashboard and performance baselines during this investigation.
 Stage g is validated; the old replay's 11.7 figure
 counted guest flip writes in a headless run; it did not prove interactive presentation.

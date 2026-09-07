@@ -213,6 +213,13 @@ built before execution, not just wrapped around a call that runs everything thro
 Unicorn. Runtime-discovered code may be captured/prepared locally for later builds;
 remaining dynamic paths use fallback. Full static coverage is not the first milestone.
 
+The intended steady-state design is predominantly AOT, with Unicorn as fallback and
+reference. Expand verified AOT coverage beyond the first region; retain strict guards
+when code or execution context changes. Report guest-instruction execution shares
+for AOT and fallback within each workload phase, alongside fallback time, reasons,
+and transition overhead. Separate cold boot from steady dashboard use. Generated
+function counts or source-file size do not establish how much execution is AOT.
+
 Carry these contracts from psxrecomp, adapting the CPU semantics to x86:
 
 | Contract | First Xbox implementation requirement |
