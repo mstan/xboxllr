@@ -1,8 +1,9 @@
 # Xbox emulation and portable native execution: decision review
 
-Date: 2026-09-06. Owner request: a faithful Xbox foundation that can support portable
-native ports, ultrawide rendering, higher resolution, and higher frame rates, in the
-spirit of psxrecomp. Tracking: `beads-xbox.1.24`.
+Date: 2026-09-06, amended after owner clarification. Portable static/native output is
+required, with psxrecomp as the architectural model. Actual ARM setup and enhancement
+implementation are deferred; prepare their interfaces now. Decision tracking:
+`beads-xbox.1.24`; first native implementation: `beads-xbox.1.25`.
 
 ## Finding and recommendation
 
@@ -12,17 +13,17 @@ is more accurate or faster than xemu. Our regression tests are useful engineerin
 assets; matching our own reference images does not establish superiority over xemu
 or correctness against a real Xbox.
 
-There is a meaningful candidate product here: generate portable code for selected
+The required product direction is to generate portable code for selected
 Xbox software, retain a faithful device runtime and execution fallback, and expose
-tested places to change camera, rendering, and timing. That could justify this work
-without having to win every general-emulation comparison. It is a proposal, not a
-capability we have already built.
+tested places to change camera, rendering, and timing. This defines a product beyond
+general emulation. It is the owner's decision, not a capability we have already built.
 
-**Recommendation:** retain xboxlle as the reference and measurement environment;
-qualify one representative portable native region and one useful enhancement before
-committing to a new compiler architecture. Compare the cost of keeping our device
-runtime with extending xemu. Do not spend another open-ended performance campaign
-assuming it automatically produces a native-port framework.
+**Implementation direction:** retain xboxlle as the reference and device runtime;
+build the first generated C/native target on the existing Windows x64 host. Keep
+portable artifacts, guarded fallback, and explicit modification interfaces central
+to the architecture. A matched xemu comparison remains useful independent work;
+neither it nor ARM hardware setup blocks this deliverable. Runtime choices can
+change with evidence, but dropping native output is not the current plan.
 
 ## What the terms mean
 
@@ -153,41 +154,81 @@ Enhancement profiles deliberately change declared behavior, such as aspect ratio
 validate their intended differences and preserve unrelated behavior. A single
 pixel-equality gate cannot express both modes.
 
-## Bounded next milestone and decision gates
+## Required native pipeline and first milestone
 
-The architecture qualification is the next milestone. A full CPU rewrite, complete
-game port, and universal enhancement system are not authorized by this comparison.
+The initial pipeline is **Xbox IA-32 bytes → portable generated C → host machine
+code**. On the current PC the final target is x86-64. A future ARM target compiles
+the portable source for ARM; it does not execute the x64 binary. Generated code is
+built before execution, not just wrapped around a call that runs everything through
+Unicorn. Runtime-discovered code may be captured/prepared locally for later builds;
+remaining dynamic paths use fallback. Full static coverage is not the first milestone.
 
-1. **Qualify the reference comparison.** Pin a common firmware/disk profile and
-   repeatable input route. Observe the same dashboard states in both engines. Use
-   the same host, driver, scale, VSync policy, guest settings, and controlled disk,
-   RTC, network, and audio configuration. Measure guest progress, distinct displayed
-   images, and latency; do not compare instruction-budget labels across engines.
-   Separate cold boot because startup boundaries differ. Use interleaved 3+3 or
-   more legs, quiet host, and report median and minimum with failures included.
-   Existing xemu qualification issue: `beads-xbox.1.2.4`.
-2. **Specify the execution boundary, then test plumbing.** Define complete state
-   transfer, memory access, interrupts, faults, and code invalidation. Translate a
-   small synthetic region and compare it with Unicorn, including changed code and
-   fault exits. Passing an arithmetic loop is only a plumbing result.
-3. **Prove useful portable execution.** Select a representative region from real
-   guest software based on traces, including realistic calls and memory/device
-   interaction. Generate C or portable IR, integrate fallback, and execute it on
-   x86-64 and an actual ARM64 host. Cross-compiling alone does not pass. Compare
-   full observable state and event ordering; record native coverage, fallback
-   frequency, handoff overhead, and total workload time. Keep proprietary inputs
-   and generated proprietary code private. No hardware-console access is needed.
-4. **Prove one enhancement seam.** In a selected scene, expose a deliberate camera
-   or presentation hook and demonstrate true wider view with correct culling and
-   UI placement. State exactly which title/scene it supports. Evaluate higher-rate
-   simulation separately with timing, input, and audio checks. This is a small
-   qualification scene, not a new full-game completion arc.
-5. **Choose the runtime from evidence.** Estimate the work to maintain these
-   contracts on xboxlle versus integrate with xemu. Continue a separate native
-   framework only if it supplies useful portable artifacts or enhancement control
-   with acceptable correctness and cost. If it cannot, reuse the research in xemu
-   or narrow the project. Work already spent is not a reason to retain an inferior
-   architecture.
+Carry these contracts from psxrecomp, adapting the CPU semantics to x86:
+
+| Contract | First Xbox implementation requirement |
+|---|---|
+| Generated artifacts | Emit C, shared declarations, dispatch data, and a versioned manifest. Identify guest code ranges, instruction boundaries, expected bytes/identity, address context, supported CPU state, exits, and generator/runtime versions. Provide a reproducible native build target. |
+| Native dispatch | Validate live code and execution context before entering a compiled region. Code-page writes, mapping changes, and physical aliases must invalidate the relevant lookup; stale or unknown code returns to Unicorn. |
+| Runtime ABI | Use explicit fixed-width guest values and a versioned state/event interface. Guest addresses are not host pointers. Return an explicit exit reason and guest continuation location; preserve flags, faults, event deadlines, and state owned by fallback. |
+| Memory and devices | Route accesses through the machine contract, including segmentation, paging, permissions, aliases, and MMIO. Any optimized RAM access needs proven preconditions. The first subset can decline operations it cannot model precisely. |
+| Modification points | Give generated regions stable, versioned identities and guarded replacement hooks. Keep renderer and scheduler interfaces separate from generated CPU code. Declare each hook's behavior profile; hooks are absent or disabled in faithful mode. |
+
+These are planned interfaces, not assertions that the current CpuFloor implements
+them. For a small GPR/EFLAGS-only first subset, other CPU state may stay owned by
+Unicorn if it is demonstrably preserved and never implicitly modified. Unsupported
+x87/MMX/SSE, privileged, segment/control, string, or fault-sensitive operations must
+decline before side effects. Rejecting an instruction after partial execution is
+not safe fallback. Broader coverage needs an expanded handoff implementation.
+
+The implementation sequence is:
+
+1. **Artifact and execution contract.** Specify the manifest, ABI, dispatch, memory,
+   and event exits above. Emit and compile a bounded synthetic IA-32 region to C
+   using the existing toolchain. Assert that the generated path actually executes;
+   a JIT cache or all-fallback executable does not satisfy the deliverable.
+2. **Semantic and fallback validation.** Compare defined CPU state, memory effects,
+   faults, and event ordering with Unicorn. Include partial-register/flag cases,
+   changed code, invalid entries, unsupported state, and memory/device boundaries.
+   Verify a disabled identity hook preserves behavior and a deliberately enabled
+   synthetic hook is selected only for the matching code/profile. This tests the
+   modification interface without implementing widescreen or higher-rate simulation.
+3. **Dashboard integration.** Select a representative real-software region from
+   traces, including realistic control flow and memory interaction. Generate it
+   locally, compile it into a target, and execute it with guarded fallback on x64.
+   Record native coverage, fallback reasons, handoff cost, and total workload time.
+   Preserve the dashboard regression workload. Keep private inputs and generated
+   proprietary code outside the source repository. Synthetic-only success is a
+   foundation result, not proof of a nativized dashboard.
+4. **Cheap portability checks as available.** Keep generated code independent of
+   x86 host assembly, host pointer width assumptions, and compiler-specific integer
+   behavior. Compile without host-native CPU tuning, compare optimization levels
+   or an available second compiler, and use cross-target compilation or emulated
+   execution only if existing tools make it inexpensive. These catch classes of
+   bugs; they do not prove ARM runtime correctness or performance. Do not stand up
+   ARM hardware or a new platform environment for this milestone.
+
+The required outcome is a real, reproducible native artifact with demonstrated
+generated execution and safe integration. It does not require an immediate speedup
+or completed enhancements. Speed claims still need measurements; later optimization
+must include the runtime boundary cost. A full game port and a replacement for every
+CPU operation remain beyond the first milestone.
+
+## Independent comparison and later work
+
+The xemu comparison remains unqualified (`beads-xbox.1.2.4`). Before making a ranking,
+pin a common firmware/disk profile and repeatable input route, observe the same
+dashboard states, and equalize host, driver, scale, VSync policy, guest settings,
+disk, RTC, network, and audio. Measure guest progress, distinct displayed images,
+and latency; instruction-budget labels are not comparable across engines. Separate
+cold boot because startup boundaries differ. Use quiet-host interleaved 3+3 or more
+legs and report median and minimum with failures included. This work is not a
+prerequisite for building the native path.
+
+Later work includes actual ARM platform qualification, true wider-view camera/UI
+changes, and higher-rate simulation with input/audio checks. The first milestone
+prepares the interfaces for them. Assess the cost of maintaining our device runtime
+versus integrating with xemu as evidence develops; either implementation choice must
+continue to serve the required portable-native product.
 
 The faithful 60 FPS goal remains. Use [the performance methodology](PERF-METHODOLOGY.md)
 for optimization claims; include boundary costs, not just isolated generated loops.
@@ -214,4 +255,4 @@ not yield captures. We did not establish an equivalent visible dashboard route,
 deterministic epochs, FPS, or comparative accuracy. All instances started for this
 review were stopped. Private assets, raw state, and logs remain outside the source
 repository. Source findings above remain useful, but a numerical xemu-versus-xboxlle
-claim must wait for gate 1.
+claim must wait for the independent comparison to be qualified.

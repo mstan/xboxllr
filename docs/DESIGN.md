@@ -9,7 +9,8 @@ maintainer's subsequent direction (harvest over from-scratch; arc structure).
 implemented features. The owner's clarified goal includes portable native ports;
 [NORTH-STAR](../NORTH-STAR.md) and the
 [architecture comparison](COMPARISON-XEMU-NATIVIZATION-2026-09-06.md) govern that
-qualification. The current build uses Unicorn and SDL3/OpenGL. Proposed alternative
+implementation plan. Static/native output is required; ARM hardware qualification
+is deferred. The current build uses Unicorn and SDL3/OpenGL. Proposed alternative
 backends and validation oracles below must not be read as completed work.
 
 ---
@@ -33,7 +34,7 @@ The original Microsoft Xbox (2001):
   LZX-decompresses the kernel and relocates it → **kernel** launches the dashboard (or a
   game). The chain is self-decrypting / self-modifying by construction.
 
-## 2. Current LLE runtime and proposed portable native tier
+## 2. Current LLE runtime and required portable native tier
 
 xboxlle currently uses Unicorn's dynamic translator to execute guest IA-32 code.
 The guest ISA does not constrain the host to x86: Unicorn has an AArch64 host
@@ -45,11 +46,14 @@ x86 host. Self-decryption and changed code complicate static coverage; they do n
 rule it out. Local code preparation, execution-time guards, and a dynamic fallback
 are candidate tools. AOT does not by itself solve Xbox devices, timing, or speed.
 
-The owner now wants a faithful foundation that can support portable native ports.
-Keep this runtime as the reference while qualifying that architecture. Full CPU
-state transfer, faults, interrupts, memory/device boundaries, and code invalidation
-must be designed and measured before adding a production native tier. See the
-[bounded comparison plan](COMPARISON-XEMU-NATIVIZATION-2026-09-06.md).
+The owner requires portable native ports following psxrecomp's architecture. The
+initial pipeline is IA-32 bytes to portable generated C to host machine code, first
+on Windows x64. Keep this runtime as the faithful baseline and device implementation.
+Full CPU state preservation, faults, interrupts, memory/device boundaries, and code
+invalidation must have explicit contracts, even when the first translated subset is
+small. Preserve unsupported state and fall back before unsupported operations.
+ARM hardware setup and actual enhancements are deferred; design their interfaces now.
+See the [implementation milestones](COMPARISON-XEMU-NATIVIZATION-2026-09-06.md).
 
 ## 3. Strategy: harvest, borrow, build
 
@@ -74,8 +78,9 @@ The combined Unicorn executable has an unresolved distribution restriction. See
 
 **Why maintain a separate runtime?** The original motivation was control over
 instrumentation and device boundaries. That is not evidence of greater accuracy or
-lower maintenance cost. The native-port qualification must compare extending this
-runtime with extending xemu, including correctness, integration cost, and licensing.
+lower maintenance cost. Begin the native path against this runtime and assess its
+cost as implementation proceeds. Comparing xemu integration remains useful but does
+not gate native output or replace that required deliverable.
 
 **Why harvest the CPU as a library (Unicorn) rather than write our own?** Unicorn exposes
 QEMU's mature x86 core — softfloat x87, correct flags, `REP`/fault semantics, and a dynamic
@@ -107,7 +112,8 @@ neither execution strategy is inherently the better modding substrate.
 
 An alternative interpreter would occupy the CPU-core slot; any generated fast tier
 would need the same state and event contract. Host backend and artifact choices
-remain subject to portable-execution qualification, not a presumed x86-64-only JIT.
+must preserve portable source artifacts, not assume an x86-64-only JIT. The first
+source backend is C; lower-level IR may be added if implementation evidence warrants it.
 
 ## 5. Memory & machine model (built by us)
 
@@ -180,10 +186,11 @@ establishes behavior for that workload; it does not prove all hardware paths or 
 **xboxlle aims to provide a faithful foundation for portable native ports.** The
 dashboard is the first validation workload; Blinx remains a later full-title arc.
 Generated portable code, a device runtime, guarded fallback, and explicit enhancement
-hooks are the candidate product architecture. Native output is not implemented.
-The bounded qualification in NORTH-STAR precedes selection of an artifact format,
-runtime, or full-title delivery plan. Host-specific JIT caches and portable generated
-source are different artifacts; neither is presumed to be the only valid choice.
+hooks are the required product architecture. Native output is not implemented.
+NORTH-STAR scopes the first generated C target on the existing host. Host-specific
+JIT caches can complement this pipeline but cannot replace portable source artifacts.
+Build the modification interfaces now; actual enhancements and ARM qualification follow
+later. This does not require translating every boot or kernel path in the first milestone.
 
 ## 11. Observability & tooling (built by us)
 

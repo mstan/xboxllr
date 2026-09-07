@@ -7,7 +7,8 @@ observable architecture**. Where this file and a platform note disagree, the str
 reading wins. Read this before touching code.
 
 The host is not required by design to use x86. Windows x64 is the validated build
-today; portable native execution is the qualification goal recorded in NORTH-STAR.
+today; portable static/native output is required by NORTH-STAR. Actual ARM hardware
+qualification is deferred and must not block the initial x64 native target.
 
 ## 0. Founding rationale (why xboxlle exists)
 

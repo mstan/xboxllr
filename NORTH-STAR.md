@@ -9,7 +9,7 @@
 Build a **faithful Xbox foundation for portable native ports**, with opt-in ultrawide,
 higher-resolution, and higher-frame-rate enhancements. The first validation workload
 is the original Xbox dashboard. The existing LLE runtime is the reference foundation;
-portable native output is a goal, not an implemented capability.
+portable static/native output is a required deliverable, not an implemented capability.
 
 ## The two arcs
 
@@ -21,10 +21,13 @@ portable native output is a goal, not an implemented capability.
 
 ## The ONE current goal
 
-**Qualify a faithful, portable execution architecture using Arc 1 / A4 as the baseline.**
-Owner clarification, 2026-09-06: the intended product follows psxrecomp's portable
-native-port direction. Merely making another hardware emulator faster does not complete
-that goal. See the [comparison and decision gates](docs/COMPARISON-XEMU-NATIVIZATION-2026-09-06.md).
+**Build the portable static/native path using Arc 1 / A4 as the faithful baseline.**
+Owner clarification, 2026-09-06: psxrecomp is the architectural model, and native
+artifacts are required. The initial pipeline is guest IA-32 to portable generated C
+to host machine code, with the existing device runtime and guarded execution fallback.
+The first host is Windows x64. ARM hardware setup is deferred; inexpensive portability
+checks may inform the design but are not proof of an ARM port. See the
+[comparison and implementation milestones](docs/COMPARISON-XEMU-NATIVIZATION-2026-09-06.md).
 
 The real firmware and
 kernel boot, FATX loads the stock dashboard image from the maintainer-supplied HDD image, and
@@ -45,12 +48,19 @@ cheapest regression detector, and hardware truth outranks any golden.
 
 ## The ONE next milestone
 
-**Qualify the native-execution proposal before a broad rewrite.** Establish a matched
-xemu reference, specify complete CPU-state and event handoff, and prove a representative
-guarded native region on x86-64 and actual ARM64. Then demonstrate one bounded enhancement
-seam and decide whether xboxlle or xemu is the better device runtime. A tiny arithmetic
-translation or an ARM cross-build alone does not pass. The comparison document defines
-the staged evidence required; none of these proposed native capabilities is implemented.
+**Deliver the first reproducible generated-code target on the existing x64 host.**
+Define the artifact manifest, runtime ABI, complete state-preservation contract, and
+guarded dispatcher; translate a bounded region to portable C and compile it before
+execution. Validate state, memory, faults, and event ordering against Unicorn, including
+safe rejection of changed or unsupported code. Synthetic fixtures establish plumbing;
+a representative dashboard region is the integration milestone. Neither a JIT cache nor
+a launcher that delegates all execution to Unicorn satisfies native output.
+
+Provide explicit, versioned replacement points for future title functions and runtime
+rendering/timing changes, disabled by default. Implementing 21:9 or higher-rate simulation
+is later work. Actual ARM hardware and a matched xemu benchmark are not prerequisites
+for this first native target. Runtime implementation choices remain measurable; the
+requirement to produce portable native artifacts is settled.
 
 Preserve the dashboard and performance baselines during this investigation.
 Stage g is validated; the old replay's 11.7 figure
@@ -74,12 +84,12 @@ or other faithful approaches exhausted. See
 
 ## Not-yet (explicitly deferred, do not drift into these)
 
-- Full game bring-up, including Blinx (that is Arc 2); any qualification scene must
-  stay bounded and must not silently become a full-title project.
+- Full game bring-up, including Blinx (that is Arc 2).
 - Replacing the current 2BL injection boundary with authentic MCPX cold boot (a later
   faithfulness pass).
-- Broad HLE and enhancement implementation beyond the bounded qualification scene
-  (opt-in, checked against the faithful floor).
-- A full replacement CPU/compiler or full-title native port before the architecture
-  qualification passes. Static x86-to-portable-code exploration is now in scope;
-  the previous blanket exclusion is superseded by the owner's clarified goal.
+- HLE and visual/timing enhancement implementation; establish their interfaces now,
+  keep the faithful default, and implement opt-in behavior later.
+- ARM hardware setup and platform qualification. Cheap cross-target or simulated
+  checks are optional diagnostics and must be labeled as such.
+- A full replacement CPU or full-title native port in the first milestone. Build the
+  static path incrementally with fallback; native output itself is required.
