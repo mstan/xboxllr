@@ -12,6 +12,49 @@ AOT-3's implementation and acceptance record are in
 Its implementation and current validation evidence are recorded in
 [the AOT-4 results](RESULTS-AOT4-2026-09-07.md).
 
+## AOT-5 direction: optimize the generated program
+
+Owner clarification, 2026-09-07: static/native execution is a required product
+capability and will not be abandoned because the first version is slower.
+Temporary regressions are acceptable during development when paired with a
+concrete optimization path. They remain measured regressions; no future speedup
+or 60 FPS result is assumed. Unicorn remains the faithful fallback and comparison
+engine while AOT becomes the primary supported execution path.
+
+The current generator emits an EIP-dispatched loop, full instruction guards and
+explicit architectural-state updates around each guest instruction. Portable C
+does execute natively, but the host compiler cannot be assumed to remove runtime
+checks, observable callbacks or required state synchronization. Inspect emitted
+host code and attribute actual costs before selecting a transformation.
+
+The compiler/runtime work should proceed through bounded experiments:
+
+1. Establish clean attribution, detecting foreign compiler work during the run,
+   and inspect the generated host instructions. Separate body cost, memory and
+   invalidation work, failed eligibility checks and actual transitions.
+2. Emit connected basic blocks with direct control flow. Keep guest values in
+   local variables where legal, and let the host compiler allocate registers.
+   Publish precise EIP, registers, flags and retirement on every fault, budget,
+   event, code-change and fallback exit; callbacks can require earlier visibility.
+3. Compute flags when they are needed. A flag apparently unused by the next
+   guest instruction may still be observable through an interrupt or fallback.
+   Preserve or reconstruct all defined live flags at every possible exit.
+4. Move invariant checks out of repeated execution only with a proof of validity.
+   Code/permission checks need invalidation for aliases, native self-modification,
+   host/DMA writes and mapping changes. Exact event deadlines and faults remain
+   guest-visible; batching must preserve them and support exits within a block.
+   A read-only instruction span alone is not sufficient proof under the generic
+   bus ABI: callbacks may synchronously change code or signal events.
+5. Improve certified memory paths and prevent needless fallback re-entry after
+   failed eligibility. Expand useful post-boot coverage from measured hot blocks,
+   not from instruction-count percentages dominated by startup/delay loops.
+
+These are source-supported opportunities, not independently measured bottlenecks
+or promised gains. Keep the conservative lowering as a comparison path while
+qualifying optimized lowering with independent expectations, Unicorn, O0/O2
+builds, live dashboard regressions and same-session interleaved A/B. Retain
+improvements only with their actual cost and correctness evidence recorded.
+
 ## Deliverable and boundaries
 
 Produce reproducible **IA-32 bytes → portable C → host executable** artifacts. Start

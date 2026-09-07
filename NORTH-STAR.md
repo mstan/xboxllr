@@ -9,8 +9,9 @@
 Build a **faithful Xbox foundation for portable native ports**, with opt-in ultrawide,
 higher-resolution, and higher-frame-rate enhancements. The first validation workload
 is the original Xbox dashboard. The existing LLE runtime is the reference foundation;
-portable static/native output is a required deliverable. A synthetic AOT target now
-exists; the dashboard continues to use Unicorn until machine integration is qualified.
+portable static/native output is a required deliverable. Selected real dashboard
+regions now execute through generated portable C with qualified machine fallback.
+The first implementation is slower than Unicorn and remains opt-in while optimized.
 
 ## The two arcs
 
@@ -50,21 +51,31 @@ cheapest regression detector, and hardware truth outranks any golden.
 ## The ONE next milestone
 
 Execute the [AOT burndown plan](docs/PLAN-AOT-BURNDOWN-2026-09-06.md), tracked under
-`beads-xbox.1.25`. The first landing is the synthetic generated-code target; the
-later machine adapter and real dashboard integration remain separate gates.
+`beads-xbox.1.25`. AOT-1 through AOT-4 are validated and integrated. The next stage,
+`beads-xbox.1.25.5`, is **improve generated-code efficiency and grow useful native
+coverage**. See the [AOT-4 evidence](docs/RESULTS-AOT4-2026-09-07.md): two mostly
+startup/delay regions retire 38.9% of the replay clock through AOT, but total wall
+time increases 39.7% versus the corrected Unicorn floor. That is a measured
+performance rejection, not a reason to abandon native output.
 
-**Deliver the first reproducible generated-code target on the existing x64 host.**
-Define the artifact manifest, runtime ABI, complete state-preservation contract, and
-guarded dispatcher; translate a bounded region to portable C and compile it before
-execution. Validate state, memory, faults, and event ordering against Unicorn, including
-safe rejection of changed or unsupported code. Synthetic fixtures establish plumbing;
-a representative dashboard region is the integration milestone. Neither a JIT cache nor
-a launcher that delegates all execution to Unicorn satisfies native output.
+Owner clarification, 2026-09-07: **static/native remains required even when an
+early implementation is slower**. Its differentiation and portability are part
+of the product goal. Temporary regressions must remain visible, with concrete
+optimization work and faithful fallback; they do not satisfy the performance
+target or justify leaving the path permanently slow. AOT itself is not a speed
+guarantee. Neither a JIT cache nor a launcher that delegates all execution to
+Unicorn satisfies native output.
+
+Measure generated guards, state/flag work, memory callbacks and fallback handoffs;
+then improve the generator and runtime with independently validated transformations.
+Prefer general basic-block/loop lowering and explicit state at observable exits
+over workload-specific patches. Grow coverage in a defined post-boot dashboard
+window as well as the boot replay, and retain the full-workload A/B gates.
 
 Provide explicit, versioned replacement points for future title functions and runtime
 rendering/timing changes, disabled by default. Implementing 21:9 or higher-rate simulation
 is later work. Actual ARM hardware and a matched xemu benchmark are not prerequisites
-for this first native target. Runtime implementation choices remain measurable; the
+for this next stage. Runtime implementation choices remain measurable; the
 requirement to produce portable native artifacts is settled.
 
 **AOT is the intended primary execution path.** Progressively move most supported
@@ -72,7 +83,7 @@ guest execution into code compiled before launch. Unicorn remains the fallback a
 comparison engine for uncovered or invalidated code. Measure the share of guest
 instructions executed through AOT versus fallback per workload phase, plus fallback
 time, reasons, and transition cost. Emitting many functions alone is not coverage.
-The first bounded target is an integration step, not completion of this AOT goal.
+The validated bounded target is an integration step, not completion of this AOT goal.
 
 Preserve the dashboard and performance baselines during this investigation.
 Stage g is validated; the old replay's 11.7 figure
