@@ -56,7 +56,13 @@ Execute the [AOT burndown plan](docs/PLAN-AOT-BURNDOWN-2026-09-06.md), tracked u
 coverage**. See the [AOT-4 evidence](docs/RESULTS-AOT4-2026-09-07.md): two mostly
 startup/delay regions retire 38.9% of the replay clock through AOT, but total wall
 time increases 39.7% versus the corrected Unicorn floor. That is a measured
-performance rejection, not a reason to abandon native output.
+diagnostic comparison, not the acceptance benchmark for native output.
+
+**The benchmark is faithful, portable static/native execution, made as efficient
+as we can. Beating Unicorn is not a requirement.** Judge native optimization
+against the preceding native implementation at equivalent guest work, alongside
+coverage, latency and the product's 60 FPS/headroom target. Unicorn supplies
+correctness comparisons and fallback; its speed is supplementary diagnostic data.
 
 Owner clarification, 2026-09-07: **static/native remains required even when an
 early implementation is slower**. Its differentiation and portability are part

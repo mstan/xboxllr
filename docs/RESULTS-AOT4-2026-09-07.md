@@ -6,6 +6,13 @@ performance gate is REJECT; optimization continues in AOT-5. Integration trackin
 [AOT-4 goal](GOAL-AOT4-BURNDOWN.md). Reproduction:
 [private AOT workflow](AOT-PRIVATE-WORKFLOW.md).
 
+Owner clarification, 2026-09-07: the benchmark is faithful static/native execution,
+as efficient as we can make it. Beating Unicorn is not an acceptance requirement.
+The historical comparison and its mechanical gate result below remain useful
+diagnostics. Native optimization is judged against the preceding native path and
+the product workload goals; the native deliverable does not depend on winning a
+JIT-versus-AOT comparison.
+
 ## Implemented capability
 
 Selected real dashboard regions execute through generated portable C in the Xbox
@@ -190,7 +197,7 @@ The final candidate is 13,706 bytes larger than the floor and 512 bytes smaller
 than the initial native checkpoint. Rebuilding O2 after the O0 validation changed
 the executable identity; gate reports record the exact restored O2 binary above.
 
-Retention decision: retain the explicitly requested AOT capability as an
+Initial retention decision, before the clarification above: retain the explicitly requested AOT capability as an
 experimental, opt-in architectural milestone. This is a labelled override of
 the performance-retention rule, not a timing PASS. The memory optimization
 separately clears its performance gate. Do not enable these regions by default
@@ -289,7 +296,7 @@ The measured private executable is saved outside Git at
 | Reproduction, integration and next work | This record and the private workflow; integration commit/branch recorded in central Beads; ranked AOT-5 work below remains open |
 
 This closes the representative-region capability, not predominant AOT coverage,
-steady rendering coverage, performance parity with Unicorn or the 60 FPS target.
+steady rendering coverage or the 60 FPS target.
 
 ## Ranked next work
 

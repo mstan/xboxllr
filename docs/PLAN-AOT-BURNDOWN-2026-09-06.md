@@ -21,6 +21,14 @@ concrete optimization path. They remain measured regressions; no future speedup
 or 60 FPS result is assumed. Unicorn remains the faithful fallback and comparison
 engine while AOT becomes the primary supported execution path.
 
+The owner's benchmark is **static/native execution, as efficient as we can make
+it**, not beating Unicorn. Native optimization experiments compare the candidate
+with the prior native implementation at equivalent guest work. Evaluate faithful
+coverage, portable output, whole-workload cost and product latency/frame-rate
+targets. Unicorn remains a correctness reference and fallback; relative speed
+against it can diagnose costs but does not decide whether AOT belongs in the
+product or whether the native milestone is accepted.
+
 The current generator emits an EIP-dispatched loop, full instruction guards and
 explicit architectural-state updates around each guest instruction. Portable C
 does execute natively, but the host compiler cannot be assumed to remove runtime

@@ -23,6 +23,15 @@
 
 ## 2. Measurement protocol (before any retention or claim)
 
+**AOT benchmark clarification (owner, 2026-09-07):** faithful portable static/native
+execution is a required deliverable, optimized as far as we can. Outperforming
+Unicorn is not its acceptance criterion. Native optimization claims compare a
+candidate against the preceding native implementation at equivalent guest work;
+the interleaved minimum/median rules below still apply. Unicorn is a correctness
+reference and fallback, with relative speed available as a diagnostic. Keep
+native capability acceptance distinct from a particular speedup claim and from
+the broader 60 FPS/headroom product target.
+
 Derived from `F:\Projects\ndsrecomp\ndsrecomp\docs\host_optimization_strategy.md` ("The contract")
 and `ISSUES.md`; adapted to xboxlle's replay harness.
 
