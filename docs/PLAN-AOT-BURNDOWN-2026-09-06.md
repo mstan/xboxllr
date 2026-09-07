@@ -118,5 +118,24 @@ is required for AOT-1. Record failures and disproved assumptions in Beads.
 
 After the first landing, start AOT-3. Do not replace the required AOT deliverable with
 another broad comparison, nor weaken fallback/coherence checks to increase coverage.
+
+### DOAXBV audit amendment (2026-09-06)
+
+The [pinned DOAXBV audit](AUDIT-DOAXBV-RE-2026-09-06.md) adds concrete checks,
+not another runtime dependency. AOT-3 must make split-function XMM/x87 state
+ownership explicit, preserve ordered memory/fault/event exits, and report hook
+eligibility and decline without silently treating an unsupported replacement as
+success. Keep future service models independently callable, separate from guest
+register/stack adapters and host backends. Tests of disabled and enabled synthetic
+hooks qualify this boundary; implementing D3D8 replacements is not an AOT-3 gate.
+
+Before substantial decoder expansion in AOT-4, perform one bounded upstream
+xboxrecomp frontend qualification using synthetic caller/callee, branch and
+unsupported-instruction cases. Pin its version and license; compare independent
+expectations and Unicorn results; assess lowering into our state/memory/exit ABI.
+Record a reuse decision or specific incompatible contracts. Do not import its
+game-port runtime assumptions or maintain snapshot-specific generated-C repairs.
+This evaluation must lead to an implementation choice, not an open-ended detour.
+
 Consult [NORTH-STAR](../NORTH-STAR.md) and the
 [architecture comparison](COMPARISON-XEMU-NATIVIZATION-2026-09-06.md) for product context.

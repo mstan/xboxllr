@@ -138,6 +138,11 @@ decoder, trace evidence, and safe fallback. Xbox format handling in
 can inform independent test cases. Treat graphics helpers as later measured candidates
 rather than importing the HLE graphics pipeline wholesale. Cxbx is not hardware truth.
 
+The later [DOAXBV native-port audit](AUDIT-DOAXBV-RE-2026-09-06.md) inspects a
+concrete portable-AOT/service-replacement project with indexed D3D11 rendering.
+It adds runtime contract requirements and a bounded upstream frontend qualification to
+our AOT plan; its public tests do not establish game fidelity or a speed advantage.
+
 ## What we should borrow from psxrecomp
 
 The useful pattern is **generated code plus a hardware runtime plus guarded
