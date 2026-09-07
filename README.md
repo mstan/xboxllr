@@ -10,6 +10,12 @@ Faithful LLE at 60 FPS with extra performance available is our goal. We have not
 reached it yet. High-level emulation (HLE) may be added as an optional mode, but
 it must match the LLE behavior.
 
+The long-term goal is also to build portable native versions of selected Xbox
+software, with optional wider camera views and higher resolution and frame rates.
+That native build pipeline is **not implemented yet**. The current tested setup is
+Windows x64. Read the [comparison with xemu and psxrecomp, and the next decision gates](docs/COMPARISON-XEMU-NATIVIZATION-2026-09-06.md)
+for what exists today and what we still need to prove.
+
 This guide takes you from a fresh Windows setup to a dashboard window you can
 control with your keyboard. Read the file requirements before installing the
 build tools. You can build and test xboxlle without Xbox files, but you need

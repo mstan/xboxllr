@@ -6,9 +6,10 @@
 
 ## The project, in one sentence
 
-Build a **faithful, LLE-first Xbox platform** — booting the real MCPX → 2BL → Microsoft
-kernel — whose first product is the **completely navigable, functional Xbox dashboard**,
-proven against real hardware, with a game (Blinx) as the second arc.
+Build a **faithful Xbox foundation for portable native ports**, with opt-in ultrawide,
+higher-resolution, and higher-frame-rate enhancements. The first validation workload
+is the original Xbox dashboard. The existing LLE runtime is the reference foundation;
+portable native output is a goal, not an implemented capability.
 
 ## The two arcs
 
@@ -20,7 +21,12 @@ proven against real hardware, with a game (Blinx) as the second arc.
 
 ## The ONE current goal
 
-**Arc 1 / A4 - make the stock dashboard interactively navigable.** The real firmware and
+**Qualify a faithful, portable execution architecture using Arc 1 / A4 as the baseline.**
+Owner clarification, 2026-09-06: the intended product follows psxrecomp's portable
+native-port direction. Merely making another hardware emulator faster does not complete
+that goal. See the [comparison and decision gates](docs/COMPARISON-XEMU-NATIVIZATION-2026-09-06.md).
+
+The real firmware and
 kernel boot, FATX loads the stock dashboard image from the maintainer-supplied HDD image, and
 guest-owned NV2A output is visible through SDL3/OpenGL. **Owner correction, 2026-09-06:
 the target is faithful LLE at 60 FPS with headroom**, including steady dashboard animation
@@ -39,8 +45,15 @@ cheapest regression detector, and hardware truth outranks any golden.
 
 ## The ONE next milestone
 
-**Establish the remaining budget to 60 FPS with headroom and attack the largest verified
-opportunities.** Stage g is validated; the old replay's 11.7 figure
+**Qualify the native-execution proposal before a broad rewrite.** Establish a matched
+xemu reference, specify complete CPU-state and event handoff, and prove a representative
+guarded native region on x86-64 and actual ARM64. Then demonstrate one bounded enhancement
+seam and decide whether xboxlle or xemu is the better device runtime. A tiny arithmetic
+translation or an ARM cross-build alone does not pass. The comparison document defines
+the staged evidence required; none of these proposed native capabilities is implemented.
+
+Preserve the dashboard and performance baselines during this investigation.
+Stage g is validated; the old replay's 11.7 figure
 counted guest flip writes in a headless run; it did not prove interactive presentation.
 Stage g removes scanout conversion and the fixed 33 ms throttle, but its measured
 18.76 successful SDL present calls/s is not the target.
@@ -61,9 +74,12 @@ or other faithful approaches exhausted. See
 
 ## Not-yet (explicitly deferred, do not drift into these)
 
-- Blinx or any game (that is Arc 2).
+- Full game bring-up, including Blinx (that is Arc 2); any qualification scene must
+  stay bounded and must not silently become a full-title project.
 - Replacing the current 2BL injection boundary with authentic MCPX cold boot (a later
   faithfulness pass).
-- HLE fast paths and enhancements (opt-in, and only after the faithful floor is proven).
-- Static x86→C export / "native port" artifacts (not this project — see `n64lle` vs
-  `n64recomp`).
+- Broad HLE and enhancement implementation beyond the bounded qualification scene
+  (opt-in, checked against the faithful floor).
+- A full replacement CPU/compiler or full-title native port before the architecture
+  qualification passes. Static x86-to-portable-code exploration is now in scope;
+  the previous blanket exclusion is superseded by the owner's clarified goal.

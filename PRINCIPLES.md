@@ -1,10 +1,13 @@
 # PRINCIPLES
 
 The law for xboxlle. Inherits the recomp-family constitution
-(`../recomp-template/PRINCIPLES.md`) and specializes it for an x86-on-x86-64,
+(`../recomp-template/PRINCIPLES.md`) and specializes it for an IA-32 guest,
 secure-booting, GPU-heavy console that we build by **harvesting proven code into a clean,
 observable architecture**. Where this file and a platform note disagree, the stricter
 reading wins. Read this before touching code.
+
+The host is not required by design to use x86. Windows x64 is the validated build
+today; portable native execution is the qualification goal recorded in NORTH-STAR.
 
 ## 0. Founding rationale (why xboxlle exists)
 
@@ -16,7 +19,9 @@ fix is impossible to write.** See `../xboxrecomp/ARCHITECTURE-REVIEW.md`.
 
 ## 1. LLE is the baseline; HLE is an opt-in optimization on top, never the starting point
 
-We boot the real MCPX ROM, real 2BL, and the real Microsoft kernel. The kernel builds its
+The target is the real MCPX ROM, real 2BL, and real Microsoft kernel boot chain.
+Today we start at an approximate 2BL handoff using a supplied decrypted bootloader;
+complete MCPX cold boot remains unimplemented. The real kernel builds its
 own dispatcher/thread/object/MM structures in real guest RAM. We do **not** implement kernel
 exports — the real kernel already implements them; we implement the CPU and hardware
 faithfully enough that the real loader resolves imports itself.
@@ -28,6 +33,10 @@ validated against the faithful path and against hardware. "Fake-the-answer" HLE 
 No subsystem returns fake device success; a *headless* subsystem still models every
 guest-visible register, DMA, status, timing, and interrupt — only host *output* is
 suppressed.
+
+Opt-in enhancement profiles are separate from equivalent HLE optimizations. They may
+change declared behavior, such as a title's camera aspect ratio, while preserving
+unrelated behavior and keeping the faithful default available.
 
 ## 2. Fast-track, don't shortcut: harvest and borrow, but own the architecture
 

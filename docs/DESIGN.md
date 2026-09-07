@@ -5,6 +5,13 @@ context should understand what we're building, why, and how it differs from both
 siblings and the existing Xbox emulators. It encodes two adversarial review rounds and the
 maintainer's subsequent direction (harvest over from-scratch; arc structure).
 
+**Status, 2026-09-06:** this document includes original design intentions, not just
+implemented features. The owner's clarified goal includes portable native ports;
+[NORTH-STAR](../NORTH-STAR.md) and the
+[architecture comparison](COMPARISON-XEMU-NATIVIZATION-2026-09-06.md) govern that
+qualification. The current build uses Unicorn and SDL3/OpenGL. Proposed alternative
+backends and validation oracles below must not be read as completed work.
+
 ---
 
 ## 1. The target
@@ -26,22 +33,23 @@ The original Microsoft Xbox (2001):
   LZX-decompresses the kernel and relocates it → **kernel** launches the dashboard (or a
   game). The chain is self-decrypting / self-modifying by construction.
 
-## 2. Why this is `xboxlle`, not `xboxrecomp`
+## 2. Current LLE runtime and proposed portable native tier
 
-Every "recomp" sibling (psxrecomp MIPS→C, gbarecomp ARM→C, gcnrecomp PPC→C) is a *cross-ISA
-static recompiler*: it lifts guest code to C ahead of time because translation is the only
-path to native speed on a foreign ISA. Two facts kill that model for Xbox:
+xboxlle currently uses Unicorn's dynamic translator to execute guest IA-32 code.
+The guest ISA does not constrain the host to x86: Unicorn has an AArch64 host
+backend, although xboxlle itself has only been validated on Windows x64.
 
-1. **The guest ISA is the host ISA** (x86-on-x86-64). A guest→C→native pipeline throws away
-   native x86 semantics only to have a C compiler rebuild the same ISA — huge artifacts,
-   solving none of the hard hardware problems.
-2. **The boot chain is self-decrypting / self-modifying.** Static AOT recompilation cannot
-   lift code that does not exist until runtime (the 2BL and kernel are ciphertext until
-   decrypted; games patch/generate code). You'd need a dynamic executor anyway.
+The earlier claim that x86-to-C has no purpose was too broad. Portable AOT output
+can support other host CPUs and maintainable per-title modifications even on an
+x86 host. Self-decryption and changed code complicate static coverage; they do not
+rule it out. Local code preparation, execution-time guards, and a dynamic fallback
+are candidate tools. AOT does not by itself solve Xbox devices, timing, or speed.
 
-So Xbox needs a **dynamic** engine. Following the family's own precedent (`n64lle` is the
-low-level-emulation counterpart to `n64recomp`), this project takes the `lle` name. It is
-still in the family and still faithful; it simply respects what x86-on-x86 makes different.
+The owner now wants a faithful foundation that can support portable native ports.
+Keep this runtime as the reference while qualifying that architecture. Full CPU
+state transfer, faults, interrupts, memory/device boundaries, and code invalidation
+must be designed and measured before adding a production native tier. See the
+[bounded comparison plan](COMPARISON-XEMU-NATIVIZATION-2026-09-06.md).
 
 ## 3. Strategy: harvest, borrow, build
 
@@ -55,16 +63,19 @@ author each part*:
 | **Host shell** (window, input plumbing, audio out, GPU context) | Borrow outright | **SDL3** (incl. SDL_gpu) | zlib |
 | **Host GPU helpers** | Borrow | VMA, glslang/SPIRV-Tools | MIT/BSD |
 | **Decode tables / FP / formats / crypto primitives** | Borrow | Zydis, SoftFloat, ISO9660/XBE/FATX/LZX/RC4/SHA-1 libs | MIT/BSD |
-| **Machine wiring, observability, cosim/hardware harness, LLE→HLE framework, packaging** | **Build ourselves** | — | GPL-2 whole |
+| **Machine wiring, observability, cosim/hardware harness, LLE→HLE framework, packaging** | **Build ourselves** | — | Original contributions: see LICENSE-SCOPE |
 
-The permissive borrows fold into a GPL-2 whole alongside the GPL-2 harvests. The maintainer
-has accepted GPL-2.
+This table records a sourcing strategy, not a completed attribution audit. The earlier
+statement that the maintainer accepted GPL for the whole project is superseded:
+original work is offered under PolyForm Noncommercial, while third-party terms remain.
+The combined Unicorn executable has an unresolved distribution restriction. See
+[LICENSE-SCOPE](../LICENSE-SCOPE.md) and
+[THIRD_PARTY_ATTRIBUTION](../THIRD_PARTY_ATTRIBUTION.md); this document grants no exception.
 
-**Why harvest instead of fork xemu wholesale?** Forking makes xemu's coupled internals and
-its approximations our foundation, and leaves us spelunking a huge foreign tree rather than
-owning a clean, instrumentable one. Harvesting takes the *knowledge and logic* (years of
-reverse engineering) and re-expresses it where we can instrument, cosim, and hardware-correct
-it. That is more complete than a fork, not a shortcut.
+**Why maintain a separate runtime?** The original motivation was control over
+instrumentation and device boundaries. That is not evidence of greater accuracy or
+lower maintenance cost. The native-port qualification must compare extending this
+runtime with extending xemu, including correctness, integration cost, and licensing.
 
 **Why harvest the CPU as a library (Unicorn) rather than write our own?** Unicorn exposes
 QEMU's mature x86 core — softfloat x87, correct flags, `REP`/fault semantics, and a dynamic
@@ -90,11 +101,13 @@ Self-modifying / self-decrypting code is handled by **page identity/versioning**
 page's generation bumps on write, invalidating dependent translated blocks; runtime
 decryption is then ordinary memory mutation. To stop at an exact instruction boundary (fault,
 interrupt, cosim checkpoint), the core runs under an instruction budget (QEMU already supports
-this). The block-hook layer is also our **mod-injection** point long-term (replace a block's
-translation), which is why a dynamic engine is a *better* modding substrate than a static one.
+this). Block hooks are a possible long-term **mod-injection** point. Whether runtime
+hooks or generated artifacts are easier to maintain depends on the modification;
+neither execution strategy is inherently the better modding substrate.
 
-If the spike selects the from-scratch interpreter instead, the same picture holds with our
-interpreter in the CPU-core slot and a later hand-written x86→x86-64 JIT as the fast tier.
+An alternative interpreter would occupy the CPU-core slot; any generated fast tier
+would need the same state and event contract. Host backend and artifact choices
+remain subject to portable-execution qualification, not a presumed x86-64-only JIT.
 
 ## 5. Memory & machine model (built by us)
 
@@ -120,8 +133,8 @@ MCPX cold-boot crypto is a later faithfulness pass (P2 profile), validated on ha
 
 The NV2A is harvested from xemu but split by faithfulness:
 
-- A **software rasterizer** computes NV2A output in software — the **byte-exact reference /
-  oracle** for "what pixels are correct."
+- A **software rasterizer** computes NV2A output in software — a regression reference,
+  not independent proof of what the real hardware produces.
 - A **hardware-accelerated backend** (NV2A → Vulkan/GL via SDL3/SDL_gpu) draws on the host
   GPU for speed, **validated to match the software reference** by frame-hash parity.
 
@@ -159,17 +172,18 @@ Ranked by expected pain (x86 *decoding* is not near the top, and is mostly harve
 6. **IDE / DVD + HDD security (FATX, lock key).**
 7. **CPU edge semantics** (mostly the harvested core; we validate the edges).
 
-The dashboard (Arc 1) is a real 3D UI and exercises nearly all of these — which is the point:
-Arc 1 proves the platform faithful across the board before any game.
+The dashboard (Arc 1) is a real 3D UI and exercises many of these systems. Passing it
+establishes behavior for that workload; it does not prove all hardware paths or games.
 
 ## 10. Project identity & deliverable
 
-**xboxlle is a faithful, LLE-first Xbox execution platform.** Its products are per-target:
-**Arc 1** ships the faithful navigable dashboard (in this repo, as the firmware product, like
-gcnrecomp's menu). **Arc 2** ships **Blinx** in a sibling `BlinxLLE` repo that pins the
-framework and takes BIOS + ISO → faithful, enhanced Blinx. No static x86→C export
-(that's `n64recomp`'s lane, not `n64lle`'s). Any per-title speed artifact would be **cached
-native block packs** (validated JIT output), not C source.
+**xboxlle aims to provide a faithful foundation for portable native ports.** The
+dashboard is the first validation workload; Blinx remains a later full-title arc.
+Generated portable code, a device runtime, guarded fallback, and explicit enhancement
+hooks are the candidate product architecture. Native output is not implemented.
+The bounded qualification in NORTH-STAR precedes selection of an artifact format,
+runtime, or full-title delivery plan. Host-specific JIT caches and portable generated
+source are different artifacts; neither is presumed to be the only valid choice.
 
 ## 11. Observability & tooling (built by us)
 
@@ -181,7 +195,8 @@ with checkpoint + binary-search to first divergence, behind the four validation 
 
 ## 12. Build & host
 
-Windows x64 host; CMake + Ninja; MSVC or MinGW/MSYS2. The engine builds and tests **without
+The validated setup is Windows x64 with CMake, Ninja, and MinGW/MSYS2; other hosts and
+toolchains require qualification. The engine builds and tests **without
 any copyrighted firmware** (CPU-floor crucibles, decode corpora, fixtures). Firmware-dependent
 boot and the dashboard require the maintainer's git-ignored, hash-gated dumps
 (`docs/INPUTS.md`), including the HDD image (the dashboard lives there).
