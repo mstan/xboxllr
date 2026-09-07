@@ -84,6 +84,56 @@ Source pins used in this review:
   release API's SHA-256. This binary and the inspected source are different pins;
   source observations are not an assertion that every detail was tested in it.
 
+## Cxbx-Reloaded: direct execution is a different native path
+
+Follow-up review: `beads-xbox.1.26`. The inspected Cxbx-Reloaded checkout is
+`585c49a50af1255ab155099e06f24505f9c5a800`, also the upstream master returned by the
+GitHub API during this review. This is source inspection, not a performance test.
+
+Cxbx executes the original Xbox x86 instructions directly on an x86 host. In
+[`CxbxKrnl.cpp`](https://github.com/Cxbx-Reloaded/Cxbx-Reloaded/blob/585c49a50af1255ab155099e06f24505f9c5a800/src/core/kernel/init/CxbxKrnl.cpp),
+`CxbxLaunchXbe` calls the guest entry pointer. Startup remaps guest kernel imports
+through `CxbxKrnl_KernelThunkTable`, which supplies the replacement kernel services.
+This is not the portable generated-C pipeline planned here.
+
+Its boundary is hybrid. The
+[`patch installer`](https://github.com/Cxbx-Reloaded/Cxbx-Reloaded/blob/585c49a50af1255ab155099e06f24505f9c5a800/src/core/hle/Patches.cpp)
+skips corresponding D3D, sound, or USB HLE patches when the respective LLE mode is
+selected. That is evidence of selectable paths, not proof that all LLE paths are
+complete or equally compatible. Calling Cxbx exclusively HLE would be inaccurate.
+
+Consequently, **LLE plus native execution is not a unique combination**. Cxbx already
+combines direct CPU execution with some LLE devices, and QEMU's dynamic translator
+also emits native host instructions. The planned distinguishing deliverable is
+portable ahead-of-time artifacts with a faithful machine runtime, guarded fallback,
+and explicit modification interfaces. That is a useful product direction relative
+to the inspected projects; this review does not establish worldwide uniqueness,
+superior fidelity, or a speed advantage. The native implementation remains pending.
+
+The most useful borrowing candidates are:
+
+| Candidate | Application here | Required boundary |
+|---|---|---|
+| XbSymbolDatabase function recognition | Annotate known Xbox library functions; suggest translation entry points and named future hooks | Treat signature matches as candidates. Verify code bytes, decoding, control flow, and execution context independently. A symbol match neither translates code nor authorizes an HLE replacement. |
+| Patch classification and selective installation | Keep faithful execution and opt-in replacements explicit, with per-profile eligibility | Use our versioned generated-code/runtime interface; do not inherit the direct-execution detours or kernel replacements as the baseline. |
+| Timing-instruction containment | Lower guest RDTSC to our deterministic guest-clock API in generated code | Cxbx's `src/core/kernel/support/PatchRdtsc.cpp` intercepts selected guest instructions by patching them. Borrow the requirement to control timing, not its heuristic byte patterns or direct host-memory writes. |
+
+The [symbol database](https://github.com/Cxbx-Reloaded/XbSymbolDatabase) was inspected
+at `20eced544726f5558c5a408458f38a086cc4e543`; its separate
+[license is MIT](https://github.com/Cxbx-Reloaded/XbSymbolDatabase/blob/20eced544726f5558c5a408458f38a086cc4e543/LICENSE).
+Cxbx ships GPL v2 text and inspected source headers permit GPL v2 or later. Preserve
+each component's applicable terms and provenance;
+the owner's PolyForm grant does not replace them. No source was imported in this
+review. See [LICENSE-SCOPE](../LICENSE-SCOPE.md) for the existing release restriction.
+
+First evaluate symbol recognition as optional preparation metadata for
+`beads-xbox.1.25`, after the synthetic generated-code path works. It must not become
+a prerequisite for translating every region: unknown title code still needs the
+decoder, trace evidence, and safe fallback. Xbox format handling in
+`src/core/hle/D3D8/XbConvert.cpp` and CPU edge handling in `src/devices/x86/EmuX86.cpp`
+can inform independent test cases. Treat graphics helpers as later measured candidates
+rather than importing the HLE graphics pipeline wholesale. Cxbx is not hardware truth.
+
 ## What we should borrow from psxrecomp
 
 The useful pattern is **generated code plus a hardware runtime plus guarded
