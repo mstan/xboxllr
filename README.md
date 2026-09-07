@@ -119,16 +119,31 @@ F:\Projects\xboxlle\machine\
   flash-dump-ff000000.bin      # flash image used by --boot
   bios-extract\bldr.bin        # already extracted/decrypted 2BL used by --run2bl
   xbox-hdd-stockdash.img       # full sector-for-sector stock-HDD image
-  eeprom.bin                   # 256-byte per-console EEPROM dump
+  eeprom.bin                   # generated virtual EEPROM or supplied 256-byte dump
 ```
 
-Supply dumps from your own console. The repository does not bundle a BIOS
+Supply firmware and disk material from your own console. The repository does not bundle a BIOS
 extractor; [the input guide](docs/INPUTS.md#preparing-the-bootloader) describes
 the external XboxBiosTool extraction step and its private MCPX/key prerequisites.
 Current launch tooling consumes the decrypted blob as a supplied artifact. The HDD image is
 the whole disk, including FATX partitions and dashboard files such as the C drive
 contents, not just `xboxdash.xbe`. EEPROM data contains per-console secrets and
 HDD-key material; never publish it, derived keys, or raw bytes.
+
+For a new virtual console, create the EEPROM once with:
+
+```powershell
+py -3 tools/create_eeprom.py
+```
+
+This creates `..\machine\eeprom.bin` only if missing. A valid existing file is
+reused untouched; invalid or mismatched files produce an error, never a rewrite.
+Keep this file between runs. The default `r2` authentication profile matches our
+tested firmware; other firmware can require `--revision r1`, `r3`, or `debug`.
+Generation uses fresh identity/key data and North America/NTSC-M/English settings.
+It does not modify the HDD or require a physical EEPROM dump. Keep an original
+EEPROM available when migrating console-bound saves or accounts. See
+[compatibility and validation](docs/INPUTS.md#generated-eeprom-setup).
 
 Default HDD attachment is copy-on-write. Guest writes are served back within the
 run but are not persisted to the image unless `--hdd-writeback` is explicitly used.
@@ -138,7 +153,7 @@ run but are not persisted to the image unless `--hdd-writeback` is explicitly us
 | Use | Inputs required today |
 |---|---|
 | Build, CTest, built-in CPU fixture demo | No console material. |
-| Run the Microsoft dashboard | Flash, decrypted 2BL, full raw HDD image with dashboard files, and a 256-byte EEPROM. |
+| Run the Microsoft dashboard | Supplied flash, decrypted 2BL and full raw HDD image with dashboard files; generate an EEPROM locally or supply the original. |
 | Extract encrypted 2BL from flash | External extraction tool plus matching private MCPX/key prerequisites; see the input guide. |
 
 The replay script currently fixes the four sibling paths shown above. The direct
@@ -148,11 +163,10 @@ establish that a BIOS, decrypted bootloader, EEPROM and dashboard are compatible
 Stock-dashboard bring-up has been validated against one private firmware/disk
 profile; compatibility with arbitrary BIOS revisions is not yet established.
 
-We can reduce future requirements by generating a fresh virtual EEPROM and a
-formatted FATX disk locally, then importing only the user's authorized dashboard
-files. Neither generator/import workflow is implemented or validated here yet.
-A blank disk contains no dashboard, and random EEPROM bytes are not a valid
-console profile. Microsoft firmware, bootloader, dashboard and game content
+EEPROM generation is implemented as the one-time setup command above. A future
+FATX disk formatter/importer could also remove the full-HDD-dump requirement;
+that workflow is not implemented yet. A blank disk contains no dashboard.
+Microsoft firmware, bootloader, dashboard and game content
 remain supplied inputs for their respective stock-software paths. See
 [the generation plan and legal boundaries](docs/INPUTS.md#reducing-user-supplied-inputs).
 
@@ -248,6 +262,9 @@ in [the hygiene guide](docs/REPOSITORY-HYGIENE.md) and
 The latest asset audit found no proprietary console payloads or secret-pattern
 findings in the checked source/history. This is a scoped audit, not a copyright
 clearance: source code and dependencies have their own copyrights and licenses.
-The repository currently has no top-level project license; redistribution terms
-and third-party notices still need to be settled before presenting it as a
-fully licensed release. See [dependency and license status](docs/REPOSITORY-HYGIENE.md#source-licensing-is-a-separate-check).
+The owner's original work is offered under [PolyForm Noncommercial 1.0.0](LICENSE).
+Third-party material keeps its existing licenses, including the LGPL EEPROM tool.
+The current executable links GPL Unicorn, which conflicts with a PolyForm-only
+combined distribution; preserving notices alone does not resolve this. See
+[license scope and release status](LICENSE-SCOPE.md) and
+[third-party attribution](THIRD_PARTY_ATTRIBUTION.md).

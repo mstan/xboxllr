@@ -27,7 +27,7 @@ README interactive command:
 | `..\machine\flash-dump-ff000000.bin` | Flash image mapped by `--boot` | Mirrored into the 16 MiB flash window. |
 | `..\machine\bios-extract\bldr.bin` | Already extracted/decrypted 2BL blob | Loaded at RAM `0x90000` by `--run2bl` and entered at the current approximate 2BL handoff. |
 | `..\machine\xbox-hdd-stockdash.img` | Full sector-for-sector stock Xbox HDD image | Provides FATX partitions and dashboard files. |
-| `..\machine\eeprom.bin` | 256-byte per-console EEPROM dump | Attached as the SMBus EEPROM and used by the guest/kernel path. |
+| `..\machine\eeprom.bin` | Generated 256-byte virtual EEPROM or original console dump | Attached as the SMBus EEPROM and used by the guest/kernel path. |
 
 The repo does not bundle a BIOS extractor; the current executable consumes
 `bios-extract\bldr.bin` as a supplied artifact. See the external extraction step below.
@@ -46,7 +46,7 @@ it, decoded values, derived keys, or raw byte excerpts.
 
 ## Preparing the bootloader
 
-Obtain the flash, EEPROM and full HDD image from your own console using your
+Obtain the flash and full HDD image (and optionally the original EEPROM) from your own console using your
 existing dump process. A locked physical HDD must be unlocked for imaging; supply
 readable raw sectors, not a compressed archive or a virtual disk container. Keep
 the untouched originals and use working copies. The current boot setup is tested
@@ -75,16 +75,89 @@ needs the matching MCPX/key. All extraction output remains private, including
 additional key files that the tool may emit. No download of firmware, dashboard
 data, EEPROMs or keys is part of this setup.
 
+## Generated EEPROM setup
+
+For the current tested firmware profile, run this once from the repo root:
+
+```powershell
+py -3 tools/create_eeprom.py
+```
+
+The tool creates a private `../machine/eeprom.bin` if missing, using a fresh
+virtual identity and key material. It validates and leaves an existing file
+untouched. It never repairs, replaces or overwrites an existing EEPROM. The
+implementation is a standalone LGPL Python port of xemu's generator; Python
+is used for this setup step, not invoked inside the emulator.
+
+The default `--revision r2` is selected for xboxlle's tested firmware profile.
+Other profiles are selectable: `r1` (retail 1.0), `r2` (retail 1.1-1.4), `r3`
+(retail 1.6), and `debug`. These are authentication-format choices, not proof
+that every corresponding board/BIOS is supported. Do not regenerate until a
+random revision happens to boot; choose a profile compatible with your firmware
+and keep it. A failed check leaves your supplied file unchanged.
+
+```powershell
+# An explicit alternate path/profile; no originals are overwritten:
+py -3 tools/create_eeprom.py ..\machine\virtual-eeprom.bin --revision r2
+# Integrity check only (does not print identity/key values):
+py -3 tools/create_eeprom.py ..\machine\virtual-eeprom.bin --revision r2 --validate-only
+```
+
+New profiles use North America/NTSC-M, English and xemu's GMT/BST defaults.
+There are no region/video editing options in this first tool version. The file's
+identity persists because the same file is reused. Guest EEPROM writes in the
+current emulator remain in memory only; generation does not add settings
+writeback or silently change the imported-dump behavior.
+
+### Will it work with any HDD image?
+
+Not necessarily. For basic dashboard boot, a generated EEPROM can work with a
+compatible readable raw disk image. The image must still contain a supported
+layout and dashboard, and the firmware must accept the EEPROM revision/settings.
+The present IDE model accepts the guest's SECURITY UNLOCK payload without
+checking its password. Therefore it does not require the source physical disk's
+password to match the generated virtual HDD key. This is an existing device-model
+limitation, not proof of faithful physical-drive security behavior.
+
+Keep the original EEPROM if you need the original console identity. Data tied
+to that identity, including some saves/accounts, is outside this generation
+validation. A generated file is not a physical-drive recovery/unlock tool and
+cannot reconstruct a lost console's keys. Supply readable sectors through your
+existing authorized imaging process. HDD writeback remains opt-in; generation
+does not write to your disk image.
+
+### Validation checkpoint, 2026-09-06
+
+The generator has 19 synthetic unit tests, including SHA-1 padding/multiblock
+cases, RC4, four revision-specific reference results, corrupt/oversized inputs,
+fresh identity, default revision, and exclusive-create/no-overwrite behavior.
+An independent harness compiled xemu's original C routines at
+`482088490c2d5983ed5e1eafbd09906157c1eca0`: Python accepted its outputs for all
+four revisions, and the C routines accepted four fresh Python-generated samples
+per revision. The test reference hashes use synthetic sequential RNG bytes,
+not console dumps. Private oracle artifacts remain under `build/eeprom-audit/`.
+
+The original C generator's `r1` profile did not reach video with our supplied
+firmware/disk; its `r2` profile completed 12 B instructions and displayed the
+stock clock UI. A fresh Python `r2` profile completed a 22 B instruction run
+with no emulator error and reached the stock dashboard, verified visually.
+This validates boot with one supplied firmware/disk profile. It does not
+establish arbitrary-HDD, game-save or account compatibility. The existing
+settings-route script did not actually open Settings on this new profile,
+so its capture labels are not evidence that settings navigation was validated.
+No performance comparison or old-fixture golden equivalence is claimed.
+
 ## Reducing user-supplied inputs
 
-The following is a development plan, not an alternative setup command. Today,
-omitting `--hdd` or `--eeprom` reports an absent device; it does not create one.
+The EEPROM setup command above is implemented; the other items below are a
+development plan. Omitting `--hdd` or `--eeprom` from a direct emulator command
+still reports an absent device. The setup tool must create the EEPROM first.
 Only the built-in fixture demo and unit/probe tests need no console material.
 
 | Input | Candidate replacement | Remaining requirement |
 |---|---|---|
 | Full physical HDD dump | Generate a sparse raw disk with the correct Xbox/FATX layout, then import a user-supplied dashboard directory. | The Microsoft dashboard's executable and supporting files still come from an authorized source. A zero-filled file alone is not a formatted Xbox disk. Import/layout compatibility needs validation. |
-| Physical EEPROM dump | Generate a persistent virtual console profile with fresh identity, HDD-key material, selected region/video settings and valid checksums/authentication. | Match the supported firmware revision and validate boot/settings behavior. Do not clone another console's identity or assume 256 random bytes are valid. Any required firmware-specific cryptographic material needs its own sourcing review. |
+| Physical EEPROM dump | Implemented: generate a persistent virtual console profile with fresh identity/key material and valid checksums/authentication using the command above. | Match the firmware revision. The initial tool uses fixed region/video defaults; original console-bound data is not validated. |
 | Separately supplied decrypted 2BL | Integrate local extraction from supplied firmware with any required private MCPX/key input. | This derives a private artifact; it does not turn the bootloader into redistributable content or remove the firmware requirement. |
 | Microsoft dashboard | Optional independently authored or appropriately licensed homebrew dashboard. | Different guest software and a separate compatibility target; it cannot stand in for stock-dashboard fidelity validation. |
 | Microsoft flash/kernel/MCPX | Independently implemented, appropriately licensed replacement firmware could serve a future homebrew profile. | No compatible replacement is integrated or validated here. It must not silently replace the stock LLE floor. |
@@ -100,10 +173,10 @@ xboxlle. The current IDE backend requires raw sectors, not QCOW2.
 to load Linux; its maintainers explicitly say it cannot load original Xbox games.
 It is therefore not a drop-in solution for this project's stock-software target.
 
-The engineering recommendation is to start with a disk formatter/importer and a
-virtual EEPROM generator. This could remove the requirement for a full HDD image
-and a real console's EEPROM while retaining user-supplied firmware and dashboard
-files. Keep generated profiles private and persistent; use fixed synthetic test
+EEPROM generation removes the physical EEPROM requirement for the validated
+setup. A disk formatter/importer is the next provisioning opportunity; it could
+also remove the full-HDD-image requirement while retaining user-supplied firmware
+and dashboard files. Keep generated profiles private and persistent; use fixed synthetic test
 profiles only for reproducible tests, never as shared real-console identities.
 Retain the existing dump-based route as the reference and validate each generated
 profile against the same device behavior before promoting it.

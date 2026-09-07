@@ -376,6 +376,9 @@ add_test(NAME spike COMMAND xlle)
 # They read src/ directly, so they run from the source dir, not the build dir.
 find_package(Python3 COMPONENTS Interpreter)
 if(Python3_Interpreter_FOUND)
+  add_test(NAME eeprom_generation
+           COMMAND ${Python3_EXECUTABLE}
+                   ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_eeprom_generation.py)
   set(XLLE_PYTHON_GUARD_TESTS
       perf_excl_guards
       dispatch_table_guards

@@ -85,12 +85,17 @@ clones, forks and hosting caches need separate attention after a rewrite; follow
 
 ## Source licensing is a separate check
 
-Absence of console dumps is not the same as absence of copyright. At this
-checkpoint the repository has no top-level project `LICENSE` or complete
-third-party notice inventory. This document records that gap; it does not grant
-or change a license. The owner must select project terms compatible with any
-incorporated third-party code, and provenance/notices need review before a
-distributable release is represented as fully licensed.
+Absence of console dumps is not the same as absence of copyright. Following the
+audit, the owner selected PolyForm Noncommercial 1.0.0 for his original work.
+[LICENSE](../LICENSE), [NOTICE](../NOTICE), [the scope document](../LICENSE-SCOPE.md)
+and [third-party attribution](../THIRD_PARTY_ATTRIBUTION.md) record that choice
+and retain third-party terms. The EEPROM-generation port remains LGPL.
+
+The release issue is still open: the current executable statically links GPL
+Unicorn, and PolyForm's noncommercial restriction is not GPL-compatible.
+Retaining notices alone does not fix combined distribution. No exception or
+alternate Unicorn license has been obtained. Incorporated-source provenance and
+transitive notices also need review before claiming a fully licensed release.
 
 The top-level dependency files were inspected at the exact CMake pins:
 
@@ -99,7 +104,8 @@ The top-level dependency files were inspected at the exact CMake pins:
 | Unicorn and its QEMU CPU core | Unicorn `2.1.1` | `COPYING`: GPL v2 text; also contains component-specific notices/licenses. |
 | NV2A CPU VSH interpreter | `863fc0f50aa4027af113718d2a63e45ac3be7a42` | `LICENSE`: The Unlicense. |
 | SDL | `release-3.2.0` | `LICENSE.txt`: zlib-style license; review bundled component notices too. |
-| xemu behavioral/source references | References described in design/source comments | GPL-family source provenance must be assessed wherever code was incorporated; references alone do not establish which portions are derivatives. |
+| xemu EEPROM generator | `482088490c2d5983ed5e1eafbd09906157c1eca0` | LGPL v2 or later; source port and license text retained separately. |
+| Other xemu behavioral/source references | References described in design/source comments | Upstream license/provenance must be assessed wherever code was incorporated; references alone do not establish which portions are derivatives. |
 
 Fetched sources stay under ignored build directories; they are still part of
 the build's licensing obligations. Unicorn is statically linked into the

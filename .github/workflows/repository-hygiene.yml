@@ -11,4 +11,5 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - run: python3 tests/test_repository_hygiene.py
+      - run: python3 tests/test_eeprom_generation.py
       - run: python3 tools/check_repository_hygiene.py --history

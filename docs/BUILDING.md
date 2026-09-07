@@ -65,7 +65,7 @@ Check that configure reports a found Python3 interpreter: if it is missing,
 CMake omits the Python guard/report tests. Inspect
 `& $ctestExe --test-dir build-release -N` if the test count is unexpectedly small
 (the current normal build registers
-41 tests). The replay harness's `-Build` switch builds only `xlle` and
+42 tests). The replay harness's `-Build` switch builds only `xlle` and
 `test_nv2a`; it does not replace the full build/test sequence above.
 
 For a faster core-only development build, configure a separate directory with
@@ -109,10 +109,17 @@ F:\Projects\xboxlle\machine\
   eeprom.bin
 ```
 
-Then run:
+Generate a virtual EEPROM if you are not supplying the original. The default
+profile matches our tested firmware; see INPUTS for other revisions and limits:
 
 ```powershell
-./tools/run_stockdash_replay.ps1 -Label defaults
+py -3 tools/create_eeprom.py
+```
+
+Then run (clear the fixture-specific gate when using your own/generated inputs):
+
+```powershell
+./tools/run_stockdash_replay.ps1 -Label first-run -ExpectedFinalSha ''
 ```
 
 The harness defaults to noperf, OpenGL, 12,000,000,000 max instructions, 500,000,000
