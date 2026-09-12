@@ -10,7 +10,7 @@ file(READ "${_xlle_tlb_source}" _xlle_tlb_text)
 string(REPLACE "\r\n" "\n" _xlle_tlb_text "${_xlle_tlb_text}")
 string(SHA256 _xlle_tlb_sha "${_xlle_tlb_text}")
 if(NOT _xlle_tlb_sha STREQUAL "d5d5d8aff986d2c6f7f6a2d93bcb4ada75e2f66d62445590ed6534daf43af2df")
-  message(FATAL_ERROR "Unicorn TLB source changed: requalify precise fault restoration")
+  message(FATAL_ERROR "Unicorn TLB source changed: requalify fault restoration and resize policy")
 endif()
 string(REPLACE "cpu_loop_exit(uc->cpu);"
                "cpu_loop_exit_restore(uc->cpu, retaddr);"
@@ -22,6 +22,30 @@ string(REGEX REPLACE "cpu_exit\\(uc->cpu\\);([ \t\r\n]+)return;"
                _xlle_tlb_text "${_xlle_tlb_text}")
 set(_xlle_tlb_derived "${CMAKE_CURRENT_BINARY_DIR}/generated/unicorn/cputlb.c")
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated/unicorn")
+# Keep the fault-corrected legacy policy available to the controlled test. It
+# compiles this copy in its own object, never into the product alongside cputlb.
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated/unicorn/cputlb-host-timed.c" "${_xlle_tlb_text}")
+if(NOT XLLE_HOST_TIMED_TLB)
+  # The upstream 100 ms host window changes software cache residency (and thus
+  # AOT eligibility) under host load. Retain adaptive growth/shrink thresholds,
+  # but age each MMU mode's window by resize opportunities (including selected
+  # modes and large-page invalidations that flush an entire mode). No guest
+  # access, permission check, invalidation, allocation limit or hot path changes.
+  # Reuse the private window field as a bounded counter; no new engine ABI.
+  string(REPLACE "    desc->window_begin_ns = ns;"
+    "    (void)ns;\n    desc->window_begin_ns = 0; /* xlle: per-mode resize opportunity counter */"
+    _xlle_tlb_text "${_xlle_tlb_text}")
+  set(_xlle_old_window "    int64_t window_len_ms = 100;\n    int64_t window_len_ns = window_len_ms * 1000 * 1000;\n    bool window_expired = now > desc->window_begin_ns + window_len_ns;")
+  set(_xlle_new_window "    (void)now;\n    bool window_expired = ++desc->window_begin_ns >= XLLE_TLB_RESIZE_FLUSH_WINDOW;")
+  string(FIND "${_xlle_tlb_text}" "${_xlle_old_window}" _xlle_window_position)
+  if(_xlle_window_position LESS 0)
+    message(FATAL_ERROR "Unicorn resize window changed: requalify deterministic TLB policy")
+  endif()
+  string(REPLACE "${_xlle_old_window}" "${_xlle_new_window}" _xlle_tlb_text "${_xlle_tlb_text}")
+  string(REPLACE "get_clock_realtime()" "0 /* xlle: no host clock in TLB policy */"
+    _xlle_tlb_text "${_xlle_tlb_text}")
+  set(_xlle_tlb_text "#define XLLE_TLB_RESIZE_FLUSH_WINDOW 100\n${_xlle_tlb_text}")
+endif()
 file(WRITE "${_xlle_tlb_derived}" "${_xlle_tlb_text}")
 
 # QEMU already decodes the exact instruction index while restoring a fault.

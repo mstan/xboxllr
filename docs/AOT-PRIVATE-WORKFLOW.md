@@ -101,6 +101,11 @@ $PrivateInput = (Resolve-Path build/dashboard.aot-private.json).Path
 ```
 
 Native execution is opt-in. `--no-aot-native` uses the fallback on the same binary.
+Normal builds use a deterministic software-TLB resize window. Keep
+`XLLE_HOST_TIMED_TLB=OFF` for repeatable native/fallback work counts. The `ON`
+setting restores the legacy host-time-dependent heuristic for diagnostics;
+it can change native eligibility under host load. See the
+[controlled TLB experiment](RESULTS-AOT5-TLB-2026-09-11.md).
 `--aot-native-mask 1` selects the first generated region; `2` selects the second;
 `3` selects both. Region ordering follows ascending selected address. Registration
 alone does not prove execution: read the `[aot]` and `[aot-region]` retirement counts.

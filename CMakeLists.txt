@@ -15,6 +15,7 @@ endif()
 
 option(XLLE_WITH_SDL "Build the SDL3 host shell" ON)
 option(XLLE_CPU_BLOCK_CENSUS "Compile guest block execution census (attribution builds only)" OFF)
+option(XLLE_HOST_TIMED_TLB "Use legacy host-time-dependent Unicorn TLB resizing (diagnostic comparison only)" OFF)
 option(XLLE_NATIVE_OPTIMIZATIONS
   "Build local host-native optimized binaries (-march=native on x86_64 GNU/Clang)"
   ON)
@@ -347,6 +348,25 @@ add_executable(test_unicorn_floor tests/test_unicorn_floor.cpp)
 target_include_directories(test_unicorn_floor PRIVATE ${XLLE_INCLUDES})
 target_link_libraries(test_unicorn_floor PRIVATE xlle_cpu)
 add_test(NAME unicorn_floor COMMAND test_unicorn_floor)
+
+# Real pinned TLB policy with controlled timestamps; no Xbox inputs or sleeps.
+foreach(tlb_variant IN ITEMS policy host_timed)
+  add_executable(test_unicorn_tlb_${tlb_variant} tests/test_unicorn_tlb_policy.c)
+  target_include_directories(test_unicorn_tlb_${tlb_variant} PRIVATE
+      "$<TARGET_PROPERTY:x86_64-softmmu,INCLUDE_DIRECTORIES>"
+      "${CMAKE_CURRENT_BINARY_DIR}/generated" "${CMAKE_CURRENT_SOURCE_DIR}/src/cpu")
+  target_compile_options(test_unicorn_tlb_${tlb_variant} PRIVATE
+      "$<TARGET_PROPERTY:x86_64-softmmu,COMPILE_OPTIONS>")
+  target_compile_definitions(test_unicorn_tlb_${tlb_variant} PRIVATE
+      "$<TARGET_PROPERTY:x86_64-softmmu,COMPILE_DEFINITIONS>")
+  if(tlb_variant STREQUAL "host_timed")
+    target_compile_definitions(test_unicorn_tlb_${tlb_variant} PRIVATE XLLE_TEST_HOST_TLB=1)
+  elseif(NOT XLLE_HOST_TIMED_TLB)
+    target_compile_definitions(test_unicorn_tlb_${tlb_variant} PRIVATE XLLE_TEST_EXPECT_FLUSH_CLOCK=1)
+  endif()
+  target_link_libraries(test_unicorn_tlb_${tlb_variant} PRIVATE unicorn)
+  add_test(NAME unicorn_tlb_${tlb_variant} COMMAND test_unicorn_tlb_${tlb_variant})
+endforeach()
 
 add_executable(test_nvnet tests/test_nvnet.cpp src/machine/nvnet.cpp)
 target_include_directories(test_nvnet PRIVATE ${XLLE_INCLUDES})

@@ -34,8 +34,11 @@ The observer implementation and tests are validated; its controlled overhead
 measurement and clean native attribution remain open. See
 [the first iteration evidence](RESULTS-AOT5-OBSERVER-2026-09-11.md).
 The correctness replay also exposed native/fallback partition variation despite
-matching images and device/DMA digests. Investigate host-time-dependent Unicorn
-TLB sizing and code residency before treating new native timing as equal work.
+matching images and device/DMA digests. A controlled fixture proves that host-time
+TLB sizing can change native eligibility. The
+[deterministic cache policy](RESULTS-AOT5-TLB-2026-09-11.md) removes that host-time
+input. Full O0/O2 native work and CPU-census records now match, with zero code-TLB
+declines on both reference replays. Clean attribution and timing remain open.
 Rows measure deliverables,
 not equal amounts of effort; they are not a calendar or percentage estimate.
 
@@ -45,7 +48,7 @@ not equal amounts of effort; they are not a calendar or percentage estimate.
 | 5.2 | Host code inspected; clean attribution waiting for quiet host | Profile the current native path and inspect generated host code | Current binary/source identities; clean separate attribution; generated-body, boundary and fallback costs; native/idle/fallback partitions by phase; ranked bottleneck hypotheses |
 | 5.3 | Planned | Improve generated control flow and state handling | Direct block edges and local guest values where justified; exact state on every observable exit; inspect host output; measure each retained transformation against native baseline |
 | 5.4 | Planned | Reduce repeated flag and guard work | Independent tests of defined flags and every affected exit boundary; code/event changes through callbacks remain visible; each proposed hoist has an explicit validity/invalidation argument |
-| 5.5 | Planned | Improve certified memory access and avoid unnecessary fallback attempts | Preserve permissions, aliases, self-modifying code and precise faults; diagnose actual fetch-TLB declines; measure callback/invalidation and handoff costs separately where practical |
+| 5.5 | Deterministic cache policy validated; further memory work open | Improve certified memory access and avoid unnecessary fallback attempts | Preserve permissions, aliases, self-modifying code and precise faults; diagnose actual fetch-TLB declines; measure callback/invalidation and handoff costs separately where practical |
 | 5.6 | Planned | Expand useful post-boot native coverage | Define guest-anchored animation/navigation windows; rank uncovered work; qualify and execute additional useful regions; report coverage separately from startup and idle skips |
 | 5.7 | Repeated per landing | Validate, document and integrate | Relevant differential tests, O0/O2 generated-C checks, full dashboard regression and suite for runtime changes, native-versus-native A/B, private-material checks, commit/push and Beads evidence |
 
