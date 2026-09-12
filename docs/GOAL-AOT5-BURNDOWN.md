@@ -1,0 +1,120 @@
+# AOT-5 burndown: efficient portable native execution
+
+Updated 2026-09-11. Owner: central Beads `beads-xbox.1.25.5`, under
+`beads-xbox.1.25`. The owner explicitly authorized subagents for this AOT-5 work
+on 2026-09-11. Delegate bounded, independent tasks where useful and review their
+results independently. Keep integration under one owner, do not spawn helper
+children, and allow no competing builds or workers during timing runs. For other
+tasks, the global solo-by-default policy still applies.
+
+## Objective
+
+Make the portable static/native path more efficient and move useful dashboard
+work into it. Static/native is a required deliverable. Compare each optimization
+with the preceding native implementation at equivalent guest work. Unicorn is
+the correctness reference and fallback; beating its speed is not an acceptance
+requirement. Faithful LLE and the broader 60 FPS with headroom target remain.
+
+## Starting point
+
+AOT-1 through AOT-4 are validated and integrated. The starting source commit is
+`82d0875`; the [AOT-4 results](RESULTS-AOT4-2026-09-07.md) record 49 passing tests,
+O0/O2 reference replays, private-input safeguards and actual dashboard native
+execution. Those are prior validation results, not fresh timing measurements.
+
+The two selected regions retire 38.9% of the full replay instruction clock, mostly
+in startup/delay loops. This does not establish steady dashboard coverage.
+The ordinary build has private input disabled. The saved private native executable
+and preparation workflow remain available locally; generated guest code stays
+outside Git. Follow [the private workflow](AOT-PRIVATE-WORKFLOW.md) to rebuild.
+
+## Burndown board
+
+No AOT-5 implementation checkpoint is complete yet. Rows measure deliverables,
+not equal amounts of effort; they are not a calendar or percentage estimate.
+
+| ID | Status | Work | Evidence required to finish |
+| --- | --- | --- | --- |
+| 5.1 | Ready first | Detect competing work during replay | A controlled foreign process starts and ends inside a leg and still marks it contaminated; owned emulator excluded; observer failure visible; monitor cost and detection limits recorded |
+| 5.2 | Pending 5.1 | Profile the current native path and inspect generated host code | Current binary/source identities; clean separate attribution; generated-body, boundary and fallback costs; native/idle/fallback partitions by phase; ranked bottleneck hypotheses |
+| 5.3 | Planned | Improve generated control flow and state handling | Direct block edges and local guest values where justified; exact state on every observable exit; inspect host output; measure each retained transformation against native baseline |
+| 5.4 | Planned | Reduce repeated flag and guard work | Independent tests of defined flags and every affected exit boundary; code/event changes through callbacks remain visible; each proposed hoist has an explicit validity/invalidation argument |
+| 5.5 | Planned | Improve certified memory access and avoid unnecessary fallback attempts | Preserve permissions, aliases, self-modifying code and precise faults; diagnose actual fetch-TLB declines; measure callback/invalidation and handoff costs separately where practical |
+| 5.6 | Planned | Expand useful post-boot native coverage | Define guest-anchored animation/navigation windows; rank uncovered work; qualify and execute additional useful regions; report coverage separately from startup and idle skips |
+| 5.7 | Repeated per landing | Validate, document and integrate | Relevant differential tests, O0/O2 generated-C checks, full dashboard regression and suite for runtime changes, native-versus-native A/B, private-material checks, commit/push and Beads evidence |
+
+Work through 5.1 and 5.2 first. Their findings determine the order of 5.3 through
+5.5; the list does not claim that every proposed optimization will help. Prepare
+the post-boot workload in 5.6 early enough to avoid optimizing only delay loops.
+Apply 5.7 to each useful landing instead of accumulating an unreviewed rewrite.
+
+## First bounded work package
+
+Fix the before/after-only process census in `tools/run_stockdash_replay.ps1`.
+Extend the existing `tests/test_replay_quiescence.ps1` with a process that is
+absent at both endpoints but runs during the leg. Include the compiler families
+actually used on this host, explicit resident-process handling, and a record of
+monitor health. Use an event or sampled observer with documented limits; a
+sampled observer must not claim to catch arbitrarily short processes.
+
+Record observer mode, lifetime, actual observation gaps or event health, and
+errors in the evidence. A configured polling interval is not a guarantee of
+detection. Identify the owned leg and observer explicitly, accounting for PID
+reuse; do not exclude an entire process tree that could conceal competing work.
+With required quiescence, an unavailable or failed monitor makes a timing leg
+unusable. Test a real mid-leg contaminant, an unrelated same-name process beside
+the owned leg, and monitor failure; census stubs alone do not prove detection.
+
+Keep all attempted legs and exclude runs based on contamination evidence, never
+their timing. Do not stop other projects' processes. Measure observer overhead
+and use equivalent monitoring in both A/B arms. After this lands, collect clean
+current-native attribution and choose the first compiler/runtime experiment.
+Older before/after-only records remain historical evidence, not substitutes for
+new monitored acceptance measurements.
+
+## Rules for compiler and runtime changes
+
+- Keep the conservative generated path available for comparison while qualifying
+  optimized output. Prefer general decoded transformations over patches tied to
+  a particular guest address or dashboard snapshot.
+- Preserve exact EIP, registers, defined flags and retirement at faults, events,
+  budgets, code changes and fallback exits. A flag unused by the next instruction
+  can still be observed by an interrupt. A read-only span can still invoke a
+  callback that changes code or signals an event.
+- Preserve permissions and invalidation across physical aliases, native writes,
+  host/DMA writes and mapping changes. Unsupported cases decline without effects.
+  Never use Unicorn timeout or mix positive-count and zero-count execution in one
+  engine. Keep private assets and generated guest code out of source publication.
+- Use the [measurement methodology](PERF-METHODOLOGY.md): uninstrumented headline
+  timings, quiet same-session interleaved 3+3 or more, total 12 B wall minimum and
+  median, and the existing 5% gate for a speedup claim. Separately report startup,
+  post-boot work, native coverage, guest speed, successful presents and latency.
+  Preserve negative results; an AOT capability does not need to beat Unicorn.
+
+## Stopping points and completion
+
+The first stopping point is validated contamination detection plus a usable
+current-native profile. The next is a qualified, measured improvement to native
+execution, with a native baseline preserved and the next experiment ranked.
+Neither stopping point closes all of AOT-5.
+
+For this AOT-5 cycle to finish, deliver useful post-boot coverage growth and
+measured native-efficiency improvement, resolve or record the compiler/runtime
+experiments with evidence, and complete the validation/integration row. A set of
+rejected experiments alone does not establish the requested improvement. Record
+remaining work toward predominantly AOT execution and the product frame-rate
+target; do not claim global optimality or 60 FPS from this checklist alone.
+
+## Goal for the first iteration
+
+> Start the AOT-5 burndown in `docs/GOAL-AOT5-BURNDOWN.md` from the current repo
+> state. Use subagents for bounded independent work where appropriate, with
+> independent review and a quiet host for timing. First fix and validate in-run
+> contamination detection, then
+> obtain clean attribution of the current native path. Use that evidence to
+> implement and validate the first useful native-code optimization, comparing it
+> against the previous native implementation. Preserve faithful LLE behavior,
+> precise fallback, portability and private-asset protections. Record rejected
+> hypotheses, commit and push validated work under my existing authorization,
+> and leave the board and Beads ready for the next iteration. Static/native is
+> required; beating Unicorn is not the benchmark.

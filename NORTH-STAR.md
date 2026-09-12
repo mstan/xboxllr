@@ -53,7 +53,9 @@ cheapest regression detector, and hardware truth outranks any golden.
 Execute the [AOT burndown plan](docs/PLAN-AOT-BURNDOWN-2026-09-06.md), tracked under
 `beads-xbox.1.25`. AOT-1 through AOT-4 are validated and integrated. The next stage,
 `beads-xbox.1.25.5`, is **improve generated-code efficiency and grow useful native
-coverage**. See the [AOT-4 evidence](docs/RESULTS-AOT4-2026-09-07.md): two mostly
+coverage**. Follow the [AOT-5 burndown board](docs/GOAL-AOT5-BURNDOWN.md), working
+solo unless the owner authorizes delegation for the current task.
+See the [AOT-4 evidence](docs/RESULTS-AOT4-2026-09-07.md): two mostly
 startup/delay regions retire 38.9% of the replay clock through AOT, but total wall
 time increases 39.7% versus the corrected Unicorn floor. That is a measured
 diagnostic comparison, not the acceptance benchmark for native output.

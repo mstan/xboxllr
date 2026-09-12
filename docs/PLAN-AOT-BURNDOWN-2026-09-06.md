@@ -14,6 +14,9 @@ Its implementation and current validation evidence are recorded in
 
 ## AOT-5 direction: optimize the generated program
 
+Use the [AOT-5 burndown board and first work package](GOAL-AOT5-BURNDOWN.md)
+for execution status and concrete completion checks.
+
 Owner clarification, 2026-09-07: static/native execution is a required product
 capability and will not be abandoned because the first version is slower.
 Temporary regressions are acceptable during development when paired with a
@@ -112,9 +115,9 @@ are outside this first landing and do not block it.
 | AOT-4 | Representative dashboard region | Private preparation and rebuild; existing dashboard regression route preserved; real AOT instruction share, fallback reasons/time/transitions, and total workload time reported |
 | AOT-5 | Expand predominant AOT coverage and optimize | Ranked hot regions, safe coverage growth, interleaved same-session measurements including boundary costs; faithful baseline and separate enhanced profiles preserved |
 
-Stages are sequential for acceptance, but independent generator and runtime work
-may overlap with one GPT-5.5 High helper. The root agent reviews and tests helper
-output adversarially. No helper children. A task closes only after its evidence
+Stages are sequential for acceptance. Work solo under the owner's 2026-09-10
+policy; delegate only with explicit authorization for the current task. Older
+handoffs do not supply that authorization. A task closes only after its evidence
 passes; synthetic success does not close the parent feature.
 
 ## Validation details
