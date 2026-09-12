@@ -7,7 +7,7 @@
 #   * With -Candidate, one invocation runs interleaved legs A1 B1 A2 B2 A3 B3 in
 #     a single session. Every leg writes its own report JSON carrying its leg
 #     index, arm label, exact argv, chunk size, exe SHA-256, git HEAD, and a
-#     before/after census of foreign compiler/runner processes.
+#     in-run sampled census of foreign compiler/runner processes and its health.
 #   * Without -Candidate and without an explicit -Repetitions, the script keeps
 #     its original single-run behavior and file naming.
 #
@@ -68,17 +68,24 @@ param(
     [int] $Repetitions = 3,
     [double] $MinImprovementPct = 5.0,
     # Refuse a known-busy host BEFORE launching a leg. Mid-run contamination
-    # still invalidates the leg/pair through the recorded after-census.
+    # or unhealthy observation invalidates the leg/pair.
     [switch] $RequireQuiescence,
     [switch] $RequireSameProfileHashes,
     # Retry WHOLE contaminated pairs, within this invocation/session. All attempted
     # legs remain on disk; selection uses only the process census, never wall time.
     [switch] $RetryContaminatedPairs,
     [ValidateRange(1, 100)] [int] $MaxPairAttempts = 12,
-    [string] $QuiescencePattern = '^(xlle|g\+\+|cc1plus|ld|collect2|cmake|ninja|python|pythonw|py)([-._0-9]|$)'
+    [string] $QuiescencePattern = '^(xlle|g\+\+|gcc|cc1plus|cc1|ld|collect2|clang(\+\+|-cl)?|cl|link|lld(-link)?|cmake|ninja|make|mingw32-make|msbuild|csc|vbc|dotnet|python|pythonw|py)([-._0-9]|$)',
+    [ValidateRange(10, 5000)] [int] $QuiescenceIntervalMs = 100,
+    [double] $QuiescenceMaxGapMs = 1000,
+    # Explicit known residents only; each PID is pinned to its creation time.
+    [int[]] $ResidentProcessIds = @()
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'replay_quiescence.ps1')
+# Compile the host helper before any timed leg, with identical monitoring in A/B.
+Initialize-ReplayObserver
 
 if ($PerfAccounting -and $NoPerfAccounting) {
     throw "-PerfAccounting and -NoPerfAccounting are mutually exclusive"
@@ -123,36 +130,17 @@ try {
 
     $sessionId = '{0}-{1}' -f $Label, (Get-Date -Format 'yyyyMMddTHHmmss')
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    # Pin exclusions once for the session. A later PID reuse is foreign work,
+    # even if it occurs between two legs.
+    $residentPins = New-ReplayObserver -Pattern $QuiescencePattern `
+        -IntervalMs $QuiescenceIntervalMs -AllowedGapMs $QuiescenceMaxGapMs -ResidentPids $ResidentProcessIds
+    try { $ResidentIdentities = @($residentPins.ResidentIdentities) }
+    finally { $residentPins.Dispose() }
 
     function Write-JsonFile {
         param([string] $Path, $Value)
         $json = ConvertTo-Json -InputObject $Value -Depth 8
         [System.IO.File]::WriteAllText($Path, $json, $utf8NoBom)
-    }
-
-    # ---- host quiescence -------------------------------------------------
-    # PERF-METHODOLOGY section 2 rule 3: a leg is only quiet if no compiler or
-    # other runner was live before or after it. The census is recorded either
-    # way; it is never used to silently discard a leg.
-    function Get-ProcessCensus {
-        param([int[]] $ExcludePids = @())
-        $found = @()
-        foreach ($process in (Get-Process -ErrorAction SilentlyContinue)) {
-            if ($process.Id -eq $PID) { continue }
-            if ($ExcludePids -contains $process.Id) { continue }
-            if ($process.ProcessName -notmatch $QuiescencePattern) { continue }
-            $processPath = $null
-            try { $processPath = $process.Path } catch { $processPath = $null }
-            $startTime = $null
-            try { $startTime = $process.StartTime.ToString('o') } catch { $startTime = $null }
-            $found += [pscustomobject]@{
-                pid       = $process.Id
-                name      = $process.ProcessName
-                path      = $processPath
-                startTime = $startTime
-            }
-        }
-        return , $found
     }
 
     function Get-CpuSnapshot {
@@ -208,14 +196,6 @@ try {
         return , $commandArgs
     }
 
-    function Get-QuotedCommandText {
-        param([string[]] $CommandArgs)
-        $quoted = $CommandArgs | ForEach-Object {
-            if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ }
-        }
-        return ($quoted -join ' ')
-    }
-
     # ---- one leg ----------------------------------------------------------
     function Invoke-ReplayLeg {
         param(
@@ -256,54 +236,40 @@ try {
         Write-Host "leg $LegIndex arm=$Arm rep=$Repetition"
         Write-Host $commandText
 
-        $before = Get-ProcessCensus
-        if ($RequireQuiescence -and $before.Count -gt 0) {
-            $foreignNames = @($before | ForEach-Object { "$($_.name):$($_.pid)" })
-            Write-JsonFile -Path $quiescenceJson -Value ([pscustomobject]@{
-                pattern = $QuiescencePattern
-                harness_pid = $PID
-                before = @($before)
-                after = @()
-                foreign_processes = $foreignNames
-                contaminated = $true
-                emulator_started = $false
-                reason = 'busy_before_launch'
-            })
-            throw "host is busy; leg $LegIndex was not started: $($foreignNames -join ', ')"
-        }
         $cpuBefore = Get-CpuSnapshot
-
-        & $exePath @commandArgs 1> $stdout 2> $stderr
-        $exitCode = $LASTEXITCODE
-
-        $after = Get-ProcessCensus
+        $observed = Invoke-ObservedProcess -Exe $exePath -CommandArgs $commandArgs `
+            -Stdout $stdout -Stderr $stderr -Pattern $QuiescencePattern `
+            -IntervalMs $QuiescenceIntervalMs -AllowedGapMs $QuiescenceMaxGapMs `
+            -ResidentIdentities $ResidentIdentities -RequireQuiescence:$RequireQuiescence
+        $exitCode = $observed.exit_code
         $cpuAfter = Get-CpuSnapshot
-
-        $foreign = @()
-        $foreign += @($before)
-        $foreign += @($after)
-        $contaminated = ($foreign.Count -gt 0)
-        $quiescence = [pscustomobject]@{
-            pattern           = $QuiescencePattern
-            harness_pid       = $PID
-            before            = @($before)
-            after             = @($after)
-            foreign_processes = @($foreign | ForEach-Object { "$($_.name):$($_.pid)" } | Select-Object -Unique)
-            contaminated      = $contaminated
-            cpu_before        = $cpuBefore
-            cpu_after         = $cpuAfter
-        }
+        $quiescence = $observed.quiescence
+        $quiescence | Add-Member -NotePropertyName cpu_before -NotePropertyValue $cpuBefore
+        $quiescence | Add-Member -NotePropertyName cpu_after -NotePropertyValue $cpuAfter
+        $contaminated = $quiescence.contaminated
         Write-JsonFile -Path $quiescenceJson -Value $quiescence
+        if ($quiescence.reason) {
+            throw "leg $LegIndex was not started: $($quiescence.reason); $($quiescence.foreign_processes -join ', '); $($quiescence.observer.errors -join ', ')"
+        }
+        if ($quiescence.launch_error) { throw "leg $LegIndex launch failed: $($quiescence.launch_error)" }
 
         Write-Host "xlle exit=$exitCode stdout=$stdout stderr=$stderr final=$finalPpm contaminated=$contaminated"
         if ($contaminated) {
             Write-Warning "leg $LegIndex ran with foreign compiler/runner processes present: $($quiescence.foreign_processes -join ', ')"
         }
+        if (!$quiescence.timing_usable) {
+            Write-Warning "leg $LegIndex is unusable for quiet-host timing; see $quiescenceJson"
+        }
         if ($exitCode -ne 0) {
             throw "xlle failed with exit code $exitCode"
         }
 
-        if ($NoParse) { return $null }
+        if ($NoParse) {
+            if ($RequireQuiescence -and !(Test-ReplayTimingUsable $quiescence)) {
+                throw "leg $LegIndex lacks healthy quiet-host observation"
+            }
+            return $null
+        }
 
         $parseArgs = @(
             'tools\measure_xbox_replay.py',
@@ -354,6 +320,11 @@ try {
         if ($summaryExit -ne 0) {
             throw "summary failed with exit code $summaryExit"
         }
+        # Validate correctness even on contaminated legs. Only pair retry may
+        # defer this timing rejection so both attempted reports remain archived.
+        if ($RequireQuiescence -and !$RetryContaminatedPairs -and !(Test-ReplayTimingUsable $quiescence)) {
+            throw "leg $LegIndex lacks healthy quiet-host observation"
+        }
         return $report
     }
 
@@ -402,20 +373,20 @@ try {
                 if ($RetryContaminatedPairs) {
                     $censusA = Get-Content -Raw -LiteralPath "$prefixA.quiescence.json" | ConvertFrom-Json
                     $censusB = Get-Content -Raw -LiteralPath "$prefixB.quiescence.json" | ConvertFrom-Json
-                    $acceptPair = -not ($censusA.contaminated -or $censusB.contaminated)
+                    $acceptPair = (Test-ReplayTimingUsable $censusA) -and (Test-ReplayTimingUsable $censusB)
                     $pairAttempts += [pscustomobject]@{
                         attempt = $pairAttempts.Count + 1
                         repetition = $rep
                         arm_a = $reportA
                         arm_b = $report
                         accepted = $acceptPair
-                        reason = $(if ($acceptPair) { 'both process censuses clean' }
-                                   else { 'foreign process in at least one leg; whole pair excluded' })
+                        reason = $(if ($acceptPair) { 'both legs have healthy quiet-host observation' }
+                                   else { 'contaminated or unproven observation in at least one leg; whole pair excluded' })
                     }
                     Write-JsonFile -Path (Join-Path $buildDir "$Label-pair-selection.json") `
                         -Value ([pscustomobject]@{ session = $sessionId; attempts = $pairAttempts })
                     if (-not $acceptPair) {
-                        Write-Warning "pair attempt $($pairAttempts.Count) contaminated; archived both legs, retrying repetition $rep"
+                        Write-Warning "pair attempt $($pairAttempts.Count) unusable; archived both legs, retrying repetition $rep"
                         $legIndex++
                         $rep--
                         continue
@@ -461,6 +432,7 @@ try {
         $setSummary = Join-Path $buildDir "$Label-set-summary.json"
         $summarizeArgs = @('tools\summarize_xbox_report_set.py') + $armAReports +
             @('--require-same-final-sha', '--require-empty-stderr')
+        if ($RequireQuiescence) { $summarizeArgs += '--require-quiescence' }
         & py -3 @summarizeArgs
         if ($LASTEXITCODE -ne 0) {
             throw "report-set summary failed with exit code $LASTEXITCODE"
@@ -481,6 +453,7 @@ try {
             $compareArgs += @('--max-focus-wall-regression-pct', "$MaxFocusWallRegressionPct")
         }
         if ($RequireSameProfileHashes) { $compareArgs += '--require-same-profile-hashes' }
+        if ($RequireQuiescence) { $compareArgs += '--require-quiescence' }
         & py -3 @compareArgs
         if ($LASTEXITCODE -ne 0) {
             throw "replay comparison checks failed with exit code $LASTEXITCODE"

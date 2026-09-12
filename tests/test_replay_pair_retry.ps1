@@ -2,6 +2,7 @@
 # No emulator, compiler, firmware, or timed run is involved.
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
+. (Join-Path $repo 'tools/replay_quiescence.ps1')
 $source = [IO.File]::ReadAllText((Join-Path $repo 'tools/run_stockdash_replay.ps1'))
 $start = $source.IndexOf('    $armAReports = @()')
 $end = $source.IndexOf('    if ($NoParse) { return }', $start)
@@ -18,9 +19,17 @@ try {
     function Invoke-ReplayLeg($Prefix, $Exe, $Arm, $LegIndex, $Repetition, $LegName) {
         if ($LegIndex -eq $failLeg) { throw 'injected correctness failure' }
         $script:calls += "$LegIndex/$Arm/$Repetition"
-        Write-JsonFile "$Prefix.quiescence.json" ([pscustomobject]@{
+        $record = [pscustomobject]@{
             contaminated = ($contaminatedLegs -contains $LegIndex)
-        })
+            observer = [pscustomobject]@{
+                schema='xboxlle.process-observer.v1'; mode='sampled'; started=$true
+                completed=$true; healthy=$true; covered_leg=$true; degraded=$false
+                errors=@(); samples=20; interval_ms=100; max_gap_ms=150; allowed_gap_ms=1000
+            }
+        }
+        if ($unprovenLegs -contains $LegIndex) { $record.observer = $null }
+        if ($unhealthyLegs -contains $LegIndex) { $record.observer.healthy = $false }
+        Write-JsonFile "$Prefix.quiescence.json" $record
         return "$Prefix.report.json"
     }
     $singleRun = $false
@@ -32,6 +41,8 @@ try {
     $RetryContaminatedPairs = $true
     $MaxPairAttempts = 3
     $failLeg = -1
+    $unprovenLegs = @()
+    $unhealthyLegs = @()
     $contaminatedLegs = @(0)  # reject BOTH legs of pair 1, even though B is clean
     $Label = 'retry'
     $script:calls = @()
@@ -48,6 +59,20 @@ try {
         $selection.attempts[0].accepted -or !$selection.attempts[1].accepted) {
         throw 'selection audit is incomplete'
     }
+    foreach ($kind in @('unproven', 'unhealthy')) {
+        $Label = $kind
+        $contaminatedLegs = @()
+        $unprovenLegs = @(); $unhealthyLegs = @()
+        if ($kind -eq 'unproven') { $unprovenLegs = @(0) } else { $unhealthyLegs = @(1) }
+        $script:calls = @()
+        . $orchestrate
+        if ($script:calls.Count -ne 6 -or $armAReports[0] -notlike '*leg02-A-r1*' -or
+            $armBReports[0] -notlike '*leg03-B-r1*') {
+            throw "$kind observer proof leaked into selected reports"
+        }
+    }
+    $unprovenLegs = @(); $unhealthyLegs = @()
+    $contaminatedLegs = @(0)
     $Label = 'limit'
     $MaxPairAttempts = 1
     $caught = $false

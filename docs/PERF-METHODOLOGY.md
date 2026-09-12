@@ -40,13 +40,16 @@ and `ISSUES.md`; adapted to xboxlle's replay harness.
 2. **Guest-anchored windows.** Compare legs at equal retired-instruction counts (the existing
    `--frame-series` deadlines). Host seconds are the *output*, never the input.
 3. **Interleaved, repeated, same session.** Minimum 3 legs per arm, order A1 B1 A2 B2 A3 B3 (or
-   B/A/B), on a quiet host (no compiler or other runner processes before/after each leg). Never a
+   B/A/B), on a quiet host (no competing compiler or runner processes during each leg). Never a
    single run against a stored baseline of another date.
    `-RetryContaminatedPairs` may collect replacement **whole pairs within that same harness
    invocation**. Every attempted leg is retained and `*-pair-selection.json` records exclusions
-   based solely on before/after process censuses, never timing or correctness outcomes.
+   based solely on recorded process activity and observer health, never timing or correctness outcomes.
    Correctness failures still stop the run. A bounded attempt count stops without a gate if
    three clean pairs cannot be collected; it never relaxes the quiet-host requirement.
+   Preflight refusal stops the invocation without launching that leg; replacement-pair
+   selection applies to completed legs. An unavailable observer or an excessive sampling
+   gap cannot qualify as a clean timing result.
 4. **Report min-of-N and median, both.** A large median-to-minimum spread is a contamination
    detector, not a result. Physically impossible outcomes (faster with fewer cores, a control
    that changes identically) indict the host or the harness, not the change.
@@ -79,11 +82,51 @@ and `ISSUES.md`; adapted to xboxlle's replay harness.
 |---|---|---|
 | 6 (noperf default) | `tools/run_stockdash_replay.ps1` | noperf is the default; `-PerfAccounting` opts in. `-NoPerfAccounting` is accepted as a no-op for older call sites. |
 | 3 (interleaved, same session) | `tools/run_stockdash_replay.ps1 -Candidate <exe> -Repetitions N` | One invocation runs `A1 B1 A2 B2 …`. Each leg writes `<label>-leg<NN>-<arm>-r<rep>.report.json` plus `.argv.json` and `.quiescence.json`. Without `-Candidate` and without an explicit `-Repetitions`, the original single-run behavior and file naming are preserved. |
-| 3 (quiet host) | same | Before and after every leg the harness lists processes matching `xlle\|g++\|cc1plus\|ld\|collect2\|cmake\|ninja\|python`, records them in `provenance.host_quiescence`, and flags the leg `contaminated`. `-RequireQuiescence` turns that into a rejection. |
+| 3 (quiet host) | same | A C# background thread samples matching processes throughout the leg, with endpoint snapshots, a union of observations, exact owned/resident identities and observer health in `provenance.host_quiescence`. `-RequireQuiescence` rejects contamination or missing/unhealthy observation, including single runs and `-NoParse`. |
 | 4 (min and median) | `tools/summarize_xbox_report_set.py --arm-a … --arm-b …` | min / median / mean / stdev / CV for the **total 12 B wall** (the gate metric), the final-four wall (indicator) and every frame-series window, per arm; the median-to-minimum spread; paired per-round deltas — decided on the total wall, with the final-four delta printed in the same row — and the fraction of rounds favouring B; a contamination summary. `--min-improvement-pct` applies the same gate here; `--json` writes the machine-readable form (`two_arm_summary.v2`: `improvement` = total wall, `final_four_improvement` = indicator). |
 | 5, 7 (gate metric, 5 %) | `tools/compare_xbox_reports.py --set-a … --set-b …` | Gates on **total 12 B wall** (the sum of every frame-series window `wall_ns`) **median AND min**, both required to improve by `--min-improvement-pct` (default 5). Final-four wall is still computed and printed as a tail-phase **indicator** and is never gated (`set_gate.v2` JSON: `gate` = total wall, `indicator` = final four). `--override` requires `--override-reason`, which is printed and written into the JSON alongside the failures it overrode. |
 | 9 (identity) | `provenance` in every report | Exact argv, `chunk_insns`, `engine`, `exe_sha256`, `git_head`, `perf_accounting`, leg index/arm/repetition/session. |
 | — | `tools/make_golden_record.py` | Builds a golden record (section 3 item 5) from an existing report plus its stdout log. |
+
+### 2b. In-run process observation (AOT-5)
+
+`tools/replay_process_observer.cs` runs inside the PowerShell harness, starting
+before the emulator and stopping after it exits and both output pipes drain.
+Compilation of the helper happens before any leg. Both A/B arms use the same
+observer. The launcher uses no shell, preserves Windows argument quoting and raw
+stdout/stderr bytes, and sets the child's directory to the repository.
+
+The default sampling interval is 100 ms (`-QuiescenceIntervalMs`); a measured gap
+over 1000 ms (`-QuiescenceMaxGapMs`) makes observation unhealthy. Evidence records
+sample count, maximum start-to-start gap (also bounding each enumeration's
+duration), cumulative enumeration wall time (`sample_work_ms`), observed lifetime,
+timestamps and errors. Enumeration wall time is instrument work, **not a measured
+emulator slowdown**. Monitor overhead still needs a separate controlled cost
+experiment; keep it distinct from native optimization timing.
+
+This is a sampled detector, not an assertion that the entire machine was idle.
+Processes shorter than an observation gap can be missed. Enumeration races,
+unmatched process names, active explicitly excluded residents, driver activity
+and other host load remain limitations. A healthy configured interval is not a
+guaranteed detection bound. Inspect actual gaps and keep the host quiet yourself.
+The tests exercise a same-name competing child alive for 1.2 seconds and absent
+at both endpoints; they do not establish detection of arbitrarily short work.
+
+The pattern covers the emulator, GCC, Clang, MSVC, common build tools and Python.
+Use `-ResidentProcessIds @(...)` only for processes already identified as expected
+residents, such as idle issue-tool servers. These exclusions are recorded and
+pinned to PID **and creation time once per session**. A reused PID gets no new
+exemption. Only the exact launched emulator and harness are owned; descendants
+and unrelated processes with the same name are still observed. No competing
+process is stopped by the harness.
+
+Current required timing proof uses `xboxlle.process-observer.v1`: completed,
+healthy observation covering the leg, at least two samples, no errors, no excessive
+gap and explicitly `contaminated=false`. The PowerShell retry selector and both
+Python report tools derive usability from these fields, never a caller-supplied
+`timing_usable` flag. Historical endpoint-only reports remain readable but cannot
+satisfy new `--require-quiescence` checks. A preflight refusal is archived and
+stops the invocation; it does not enter a busy retry loop.
 
 Two structural corrections landed with this tooling:
 

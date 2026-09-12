@@ -7,7 +7,7 @@ deltas are not accepted or rejected from one run
 
 Two modes:
 
-  Single set (legacy, unchanged):
+  Single set:
 
       py tools/summarize_xbox_report_set.py \
           build/baseline-a.report.json \
@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import pathlib
 import statistics
 import sys
@@ -52,6 +53,8 @@ from compare_xbox_reports import (
 
 
 NS_PER_SEC = 1_000_000_000
+OBSERVER_SCHEMA = "xboxlle.process-observer.v1"
+OBSERVER_MODE = "sampled"
 
 # Gate metric (docs/PERF-METHODOLOGY.md section 2 rule 5, amended 2026-09-03):
 # the TOTAL 12 B wall, i.e. the sum of every frame-series window wall. The
@@ -166,7 +169,15 @@ def describe(values: Sequence[float]) -> dict[str, Any]:
 def quiescence_of(report: Mapping[str, Any]) -> dict[str, Any]:
     value = report.get("provenance", {}).get("host_quiescence")
     if not isinstance(value, Mapping):
-        return {"recorded": False, "contaminated": None, "foreign_processes": []}
+        return {
+            "recorded": False,
+            "contaminated": None,
+            "foreign_processes": [],
+            "observer": None,
+            "current_quiescence_proof": False,
+            "timing_usable": False,
+            "timing_unusable_reasons": ["host_quiescence_missing"],
+        }
     foreign = value.get("foreign_processes")
     # ConvertTo-Json in Windows PowerShell 5.1 collapses a one-element array to a
     # scalar, so accept both shapes.
@@ -176,11 +187,74 @@ def quiescence_of(report: Mapping[str, Any]) -> dict[str, Any]:
         processes = []
     else:
         processes = [str(foreign)]
+    reasons = quiescence_unusable_reasons(value)
     return {
         "recorded": True,
         "contaminated": value.get("contaminated"),
         "foreign_processes": processes,
+        "observer": value.get("observer") if isinstance(value.get("observer"), Mapping) else None,
+        "current_quiescence_proof": not reasons,
+        "timing_usable": not reasons,
+        "timing_unusable_reasons": reasons,
     }
+
+
+def finite_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def quiescence_unusable_reasons(value: Mapping[str, Any]) -> list[str]:
+    """Reasons a host-quiescence record cannot prove a quiet timing leg.
+
+    Historical endpoint-only records remain readable, but current required
+    quiescence needs a healthy in-leg process observer and explicit
+    contaminated=false.
+    """
+    reasons: list[str] = []
+    if value.get("contaminated") is not False:
+        reasons.append("contaminated_not_explicitly_false")
+
+    observer = value.get("observer")
+    if not isinstance(observer, Mapping):
+        reasons.append("observer_missing")
+        return reasons
+
+    if observer.get("schema") != OBSERVER_SCHEMA:
+        reasons.append("observer_schema_unsupported")
+    if observer.get("mode") != OBSERVER_MODE:
+        reasons.append("observer_mode_unsupported")
+    for key in ("started", "completed", "healthy", "covered_leg"):
+        if observer.get(key) is not True:
+            reasons.append(f"observer_{key}_not_true")
+    if observer.get("degraded") is not False:
+        reasons.append("observer_degraded_not_false")
+
+    errors = observer.get("errors")
+    if not isinstance(errors, list):
+        reasons.append("observer_errors_not_array")
+    elif errors:
+        reasons.append("observer_errors_nonempty")
+
+    samples = observer.get("samples")
+    if not isinstance(samples, int) or isinstance(samples, bool) or samples < 2:
+        reasons.append("observer_samples_lt_2")
+
+    interval_ms = observer.get("interval_ms")
+    if not isinstance(interval_ms, int) or isinstance(interval_ms, bool) or interval_ms <= 0:
+        reasons.append("observer_interval_ms_not_positive_int")
+
+    allowed_gap_ms = observer.get("allowed_gap_ms")
+    if not finite_number(allowed_gap_ms) or float(allowed_gap_ms) <= 0.0:
+        reasons.append("observer_allowed_gap_ms_not_positive_finite")
+
+    max_gap_ms = observer.get("max_gap_ms")
+    if not finite_number(max_gap_ms) or float(max_gap_ms) < 0.0:
+        reasons.append("observer_max_gap_ms_not_nonnegative_finite")
+    elif finite_number(allowed_gap_ms) and float(allowed_gap_ms) > 0.0:
+        if float(max_gap_ms) > float(allowed_gap_ms):
+            reasons.append("observer_max_gap_exceeds_allowed")
+
+    return reasons
 
 
 def leg_identity(report: Mapping[str, Any]) -> dict[str, Any]:
@@ -326,6 +400,14 @@ def arm_summary(
     unrecorded = [
         leg["path"] for leg in legs if not leg["quiescence"].get("recorded")
     ]
+    unusable = [
+        {
+            "path": leg["path"],
+            "reasons": list(leg["quiescence"].get("timing_unusable_reasons") or []),
+        }
+        for leg in legs
+        if not leg["quiescence"].get("timing_usable")
+    ]
 
     return {
         "label": label,
@@ -355,6 +437,9 @@ def arm_summary(
             "contaminated_count": len(contaminated),
             "quiescence_unrecorded_legs": unrecorded,
             "quiescence_unrecorded_count": len(unrecorded),
+            "quiescence_unusable_legs": [entry["path"] for entry in unusable],
+            "quiescence_unusable_count": len(unusable),
+            "quiescence_unusable": unusable,
         },
         "final_shas": sorted({sha for sha in (leg["final_sha"] for leg in legs) if sha}),
         "alignment_notes": alignment_notes,
@@ -481,6 +566,14 @@ def two_arm_summary(
                 arm_a["contamination"]["contaminated_count"]
                 or arm_b["contamination"]["contaminated_count"]
             ),
+            "any_quiescence_unusable": bool(
+                arm_a["contamination"]["quiescence_unusable_count"]
+                or arm_b["contamination"]["quiescence_unusable_count"]
+            ),
+            "quiescence_unusable": (
+                arm_a["contamination"]["quiescence_unusable"]
+                + arm_b["contamination"]["quiescence_unusable"]
+            ),
         },
         "protocol": {
             "min_legs_per_arm": 3,
@@ -509,6 +602,24 @@ def fmt_pct(value: float | None) -> str:
 
 def fmt_ratio_pct(value: float | None) -> str:
     return "-" if value is None else f"{value:.2f}%"
+
+
+def quiescence_gate_failures(summary: Mapping[str, Any]) -> list[str]:
+    failures: list[str] = []
+    contamination = summary["contamination"]
+    if contamination["any_contaminated"]:
+        failures.append("at least one leg was contaminated by foreign processes")
+    for entry in contamination.get("quiescence_unusable", []):
+        if not isinstance(entry, Mapping):
+            continue
+        path = entry.get("path")
+        reasons = entry.get("reasons")
+        if isinstance(reasons, list) and reasons:
+            reason_text = ", ".join(str(reason) for reason in reasons)
+        else:
+            reason_text = "unknown"
+        failures.append(f"{path}: host quiescence unusable for timing ({reason_text})")
+    return failures
 
 
 def print_stat_row(label: str, stats: Mapping[str, Any], *, seconds: bool) -> None:
@@ -561,8 +672,13 @@ def print_arm(arm: Mapping[str, Any]) -> None:
     print(
         f"  contamination: contaminated={contamination['contaminated_count']}/"
         f"{contamination['legs']} "
-        f"quiescence_unrecorded={contamination['quiescence_unrecorded_count']}"
+        f"quiescence_unrecorded={contamination['quiescence_unrecorded_count']} "
+        f"quiescence_unusable={contamination['quiescence_unusable_count']}"
     )
+    for entry in contamination.get("quiescence_unusable", []):
+        reasons = entry.get("reasons") if isinstance(entry, Mapping) else None
+        if isinstance(reasons, list) and reasons:
+            print(f"  QUIESCENCE UNUSABLE {entry['path']}: {', '.join(reasons)}")
     if len(arm["final_shas"]) > 1:
         print(f"  WARNING: {len(arm['final_shas'])} distinct final SHAs within the arm")
     for note in arm["alignment_notes"]:
@@ -626,6 +742,8 @@ def print_two_arm(summary: Mapping[str, Any]) -> None:
         print(f"  mean  ={fmt_pct(four['mean_pct'])}")
     if summary["contamination"]["any_contaminated"]:
         print("  CONTAMINATION: at least one leg ran with foreign processes present")
+    if summary["contamination"].get("any_quiescence_unusable"):
+        print("  QUIESCENCE: at least one leg lacks current observer proof")
 
 
 # --------------------------------------------------------------------------
@@ -636,6 +754,12 @@ def print_two_arm(summary: Mapping[str, Any]) -> None:
 def run_single_set(args: argparse.Namespace) -> int:
     loaded = [load_report(path) for path in args.reports]
     failed: list[str] = []
+    if args.require_quiescence:
+        for path, report in zip(args.reports, loaded):
+            proof = quiescence_of(report)
+            if not proof["timing_usable"]:
+                failed.append(f"{path}: host quiescence unusable for timing ("
+                              + ", ".join(proof["timing_unusable_reasons"]) + ")")
 
     shas = [final_sha(report) for report in loaded]
     unique_shas = sorted({sha for sha in shas if sha})
@@ -727,8 +851,8 @@ def run_two_arm(args: argparse.Namespace) -> int:
             for leg in summary[arm_key]["legs"]:
                 if leg["stderr_empty"] is not True:
                     failed.append(f"{leg['path']}: stderr not empty")
-    if args.require_quiescence and summary["contamination"]["any_contaminated"]:
-        failed.append("at least one leg was contaminated by foreign processes")
+    if args.require_quiescence:
+        failed.extend(quiescence_gate_failures(summary))
 
     # Perf gate (opt-in here; compare_xbox_reports.py applies it unconditionally
     # in set mode). Always on the TOTAL 12 B wall, median AND min, per
@@ -802,7 +926,7 @@ def main() -> int:
     parser.add_argument(
         "--require-quiescence",
         action="store_true",
-        help="Two-arm mode: reject if any leg recorded a foreign compiler/runner.",
+        help="Reject contamination or missing/unhealthy in-run process observation in any leg.",
     )
     parser.add_argument(
         "--min-improvement-pct",

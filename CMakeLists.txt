@@ -473,6 +473,9 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME eeprom_generation
            COMMAND ${Python3_EXECUTABLE}
                    ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_eeprom_generation.py)
+  add_test(NAME replay_observer_reports
+           COMMAND ${Python3_EXECUTABLE}
+                   ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_replay_observer_reports.py)
   set(XLLE_PYTHON_GUARD_TESTS
       perf_excl_guards
       dispatch_table_guards
@@ -507,4 +510,15 @@ if(Python3_Interpreter_FOUND)
                    ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_vsh_draw_overlap_report.py)
 else()
   message(STATUS "Python3 interpreter not found; skipping source guard tests")
+endif()
+
+if(WIN32)
+  find_program(XLLE_POWERSHELL NAMES powershell)
+  if(XLLE_POWERSHELL)
+    foreach(replay_test IN ITEMS replay_quiescence replay_pair_retry)
+      add_test(NAME ${replay_test}
+               COMMAND "${XLLE_POWERSHELL}" -NoProfile -ExecutionPolicy Bypass
+                       -File "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_${replay_test}.ps1")
+    endforeach()
+  endif()
 endif()

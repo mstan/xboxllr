@@ -481,6 +481,13 @@ def run_pair(args: argparse.Namespace) -> int:
     print(f"final sha: {base_sha} -> {cand_sha}")
 
     failed: list[str] = []
+    if args.require_quiescence:
+        from summarize_xbox_report_set import quiescence_of
+        for path, report in ((args.baseline, baseline), (args.candidate, candidate)):
+            proof = quiescence_of(report)
+            if not proof["timing_usable"]:
+                failed.append(f"{path}: host quiescence unusable for timing ("
+                              + ", ".join(proof["timing_unusable_reasons"]) + ")")
     if args.require_same_final_sha and base_sha != cand_sha:
         failed.append("final SHA changed")
 
@@ -567,7 +574,11 @@ def run_sets(args: argparse.Namespace) -> int:
     import sys
 
     sys.path.insert(0, str(pathlib.Path(__file__.replace("\\", "/")).resolve().parent))
-    from summarize_xbox_report_set import print_two_arm, two_arm_summary
+    from summarize_xbox_report_set import (
+        print_two_arm,
+        quiescence_gate_failures,
+        two_arm_summary,
+    )
 
     summary = two_arm_summary(
         args.set_a, args.set_b, args.focus_last, args.label_a, args.label_b
@@ -610,8 +621,8 @@ def run_sets(args: argparse.Namespace) -> int:
             "docs/PERF-METHODOLOGY.md section 2 rule 3"
         )
 
-    if args.require_quiescence and summary["contamination"]["any_contaminated"]:
-        failed.append("at least one leg was contaminated by foreign processes")
+    if args.require_quiescence:
+        failed.extend(quiescence_gate_failures(summary))
 
     if args.require_same_final_sha:
         shas = set(summary["arm_a"]["final_shas"]) | set(summary["arm_b"]["final_shas"])
@@ -749,7 +760,7 @@ def main() -> int:
     parser.add_argument(
         "--require-quiescence",
         action="store_true",
-        help="Set mode: reject if any leg recorded a foreign compiler/runner process.",
+        help="Reject contamination or missing/unhealthy in-run process observation in any leg.",
     )
     parser.add_argument(
         "--override",
