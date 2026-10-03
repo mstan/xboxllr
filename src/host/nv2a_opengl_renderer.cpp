@@ -6,7 +6,7 @@
 #include "machine/perf_accounting.hpp"
 #include "machine/perf_excl.hpp"
 #if XLLE_VSH_GPU_RESIDENT
-#include "host/nv2a_vsh_gpu_batch_glsl.hpp"
+#include "host/nv2a_vsh_specialize.hpp"
 #endif
 #if XLLE_GENERATED_SUBMIT_DIAGNOSTICS
 #include "machine/nv2a_generated_submit_perf.hpp"
@@ -1273,6 +1273,8 @@ public:
             if (vsh_batch_program_) delete_program_(vsh_batch_program_);
             if (vsh_pack_program_) delete_program_(vsh_pack_program_);
             if (vsh_parallel_pack_program_) delete_program_(vsh_parallel_pack_program_);
+            for (const auto& entry : vsh_specializations_)
+                if (entry.program) delete_program_(entry.program);
         }
         if (delete_buffers_) delete_buffers_(static_cast<int>(vsh_buffers_.size()), vsh_buffers_.data());
 #endif
@@ -1880,8 +1882,14 @@ public:
         return true;
     }
 #if XLLE_VSH_GPU_RESIDENT
-    VshGpuResidentStats vsh_gpu_resident_stats() const override { return vsh_resident_stats_; }
+    VshGpuResidentStats vsh_gpu_resident_stats() const override {
+        auto stats = vsh_resident_stats_;
+        stats.specialized_compile_ns = vsh_compile_ns_.load();
+        return stats;
+    }
     void set_vsh_gpu_parallel_pack(bool on) override { vsh_parallel_pack_ = on; }
+    void set_vsh_gpu_specialize(bool on) override { vsh_specialize_ = on; }
+    void set_vsh_gpu_status_summary(bool on) override { vsh_status_summary_ = on; }
     bool prepare_vsh_gpu_batch(Nv2aGenericCombinerPacket::GpuVshReference& reference,
                                std::string& error) override {
         reference.prepared_token = 0;
@@ -5894,6 +5902,41 @@ private:
         return true;
     }
 #if XLLE_VSH_GPU_RESIDENT
+    unsigned int specialized_vsh_program(const std::vector<vsh_gpu_batch::Op>& ops) {
+        if (!vsh_specialize_) return 0;
+        for (const auto& entry : vsh_specializations_) {
+            if (!vsh_gpu_batch::same_program(entry.ops, ops)) continue;
+            ++vsh_resident_stats_.specialized_hits;
+            return entry.program; // A failed compile is also cached; never retry each draw.
+        }
+        if (vsh_specializations_.size() == vsh_gpu_batch::kSpecializeCacheSize) {
+            ++vsh_resident_stats_.specialized_declines;
+            return 0;
+        }
+        const auto source = vsh_gpu_batch::specialized_vsh_source(ops);
+        if (source.empty()) {
+            ++vsh_resident_stats_.specialized_declines;
+            return 0;
+        }
+        VshSpecialization entry;
+        entry.ops = ops;
+        ++vsh_resident_stats_.specialized_compiles;
+        std::string error;
+        std::printf("[vsh-specialize] compiling ops=%zu\n", ops.size());
+        std::fflush(stdout);
+        {
+            perf::ScopedAdd timer(vsh_compile_ns_, vsh_compile_calls_);
+            if (!compile_program(source.c_str(), "specialized VSH", entry.program, error)) {
+                ++vsh_resident_stats_.specialized_failures;
+                std::fprintf(stderr, "[vsh-specialize] using generic GPU program: %s\n", error.c_str());
+            }
+        }
+        std::printf("[vsh-specialize] compiled ops=%zu success=%u\n", ops.size(), entry.program ? 1u : 0u);
+        std::fflush(stdout);
+        const auto program = entry.program;
+        vsh_specializations_.push_back(std::move(entry));
+        return program;
+    }
     unsigned int& active_vsh_pack_program() {
         return vsh_parallel_pack_ ? vsh_parallel_pack_program_ : vsh_pack_program_;
     }
@@ -5916,6 +5959,7 @@ private:
         namespace gpu = vsh_gpu_batch;
         perf::ScopedAdd total_timer(vsh_cpu_ns_[0], vsh_cpu_calls_[0]);
         const bool verify = reference.mode != 3;
+        const bool read_statuses = verify || !vsh_status_summary_;
         use_gpu_buffer = false;
         reference.prepared_token = 0;
         reference.prepared_vertices = 0;
@@ -5938,6 +5982,8 @@ private:
             if (id >= batch.executions.size()) return mismatch("invalid execution reference");
         if (!gpu::supported_program_layout(batch.ops)) { ++stats.declines; ++stats.layout_declines; return true; }
         if (!ensure_vsh_gpu_programs(error)) return false;
+        const unsigned int specialized = specialized_vsh_program(batch.ops);
+        const unsigned int program = specialized ? specialized : vsh_batch_program_;
         for (auto& buffer : vsh_buffers_) if (!buffer) gen_buffers_(1, &buffer);
         const uint32_t groups = (batch.shape.execution_count + 63u) / 64u;
         const uint32_t candidates = gpu::triangle_count(batch.shape.primitive_mode, batch.shape.reference_count);
@@ -5945,7 +5991,7 @@ private:
         const size_t output_count = verify ? (groups + 1u) * 64u : batch.executions.size();
         std::vector<gpu::ProgramOutput128B> outputs(verify ? output_count : 0);
         for (auto& out : outputs) for (auto& vec : out.values) vec.fill(0xdeadbeefu);
-        std::vector<uint32_t> statuses(output_count, 0xdeadbeefu);
+        std::vector<uint32_t> statuses(read_statuses ? output_count : 0, 0xdeadbeefu);
         std::vector<std::array<uint32_t, 4>> triangle_data(verify ? candidates + 64 : 0);
         for (auto& vec : triangle_data) vec.fill(0xdeadbeefu);
         std::vector<gpu::ResidentVertex96B> packed(verify ? max_vertices + 64 : 0);
@@ -5963,10 +6009,10 @@ private:
             bind_buffer_base_(kGlShaderStorageBuffer, binding, vsh_buffers_[index]);
         };
         upload(0, 0, batch.executions.data(), batch.executions.size() * sizeof(batch.executions[0]));
-        upload(1, 1, batch.ops.data(), batch.ops.size() * sizeof(batch.ops[0]));
+        if (!specialized) upload(1, 1, batch.ops.data(), batch.ops.size() * sizeof(batch.ops[0]));
         upload(8, 4, &batch.constants, sizeof(batch.constants));
         upload(2, 2, verify ? outputs.data() : nullptr, output_count * sizeof(gpu::ProgramOutput128B));
-        upload(3, 3, verify ? statuses.data() : nullptr, statuses.size() * sizeof(statuses[0]));
+        upload(3, 3, verify ? statuses.data() : nullptr, output_count * sizeof(uint32_t));
         const auto uniform = [&](unsigned program, const char* name, uint32_t value) {
             const int location = cached_uniform_location(program, name);
             if (location < 0) { error = std::string("Missing GPU VSH uniform: ") + name; return false; }
@@ -5975,10 +6021,11 @@ private:
         };
         {
         perf::ScopedAdd timer(vsh_cpu_ns_[2], vsh_cpu_calls_[2]);
-        use_program_(vsh_batch_program_);
-        if (!uniform(vsh_batch_program_, "u_execution_count", batch.shape.execution_count) ||
-            !uniform(vsh_batch_program_, "u_op_count", batch.shape.op_count)) return false;
+        use_program_(program);
+        if (!uniform(program, "u_execution_count", batch.shape.execution_count) ||
+            (!specialized && !uniform(program, "u_op_count", batch.shape.op_count))) return false;
         gpu_timed_dispatch_compute(groups, 1, 1, GpuTimerBucket::kVsh);
+        stats.specialized_dispatches += specialized != 0;
         memory_barrier_(kGlShaderStorageBarrierBit | kGlBufferUpdateBarrierBit);
         }
         upload(4, 4, batch.references.data(), batch.references.size() * sizeof(uint32_t));
@@ -5991,6 +6038,7 @@ private:
         perf::ScopedAdd timer(vsh_cpu_ns_[3], vsh_cpu_calls_[3]);
         const auto pack_program = active_vsh_pack_program();
         use_program_(pack_program);
+        if (!uniform(pack_program, "u_status_summary", vsh_status_summary_ ? 1u : 0u)) return false;
         if (!uniform(pack_program, "u_execution_count", batch.shape.execution_count) ||
             !uniform(pack_program, "u_reference_count", batch.shape.reference_count) ||
             !uniform(pack_program, "u_primitive", batch.shape.primitive_mode) ||
@@ -6009,7 +6057,8 @@ private:
             get_buffer_sub_data_(kGlShaderStorageBuffer, 0, static_cast<std::ptrdiff_t>(bytes), data);
         };
         if (verify) download(2, outputs.data(), outputs.size() * sizeof(outputs[0]), 4);
-        download(3, statuses.data(), statuses.size() * sizeof(statuses[0]), 5);
+        if (read_statuses) download(3, statuses.data(), statuses.size() * sizeof(statuses[0]), 5);
+        else ++stats.status_readbacks_skipped;
         if (verify) download(5, triangle_data.data(), triangle_data.size() * sizeof(triangle_data[0]), 6);
         if (verify) download(6, packed.data(), packed.size() * sizeof(packed[0]), 7);
         download(7, control.data(), sizeof(control), 8);
@@ -6033,7 +6082,16 @@ private:
                     if (word != 0xdeadbeefu) return mismatch("declined output or program tail guard");
         }
         if (control[0] > max_vertices || control[0] % 3 || (control[1] & ~15u) ||
-            control[2] != candidates || control[3]) return mismatch("invalid packed control");
+            control[2] != candidates || (control[3] & ~3u) ||
+            (!vsh_status_summary_ && control[3])) return mismatch("invalid packed control");
+        if (vsh_status_summary_) {
+            const uint32_t cpu_summary = (numeric_decline ? 1u : 0u) | (opcode_decline ? 2u : 0u);
+            if (read_statuses && control[3] != cpu_summary)
+                return mismatch("GPU execution status summary differs from CPU status scan");
+            numeric_decline = (control[3] & 1u) != 0;
+            opcode_decline = (control[3] & 2u) != 0;
+            program_decline = numeric_decline || opcode_decline;
+        }
         for (size_t i = 0; i < triangle_data.size(); ++i) {
             if (i >= candidates) {
                 for (uint32_t word : triangle_data[i])
@@ -6892,6 +6950,14 @@ private:
     unsigned int vsh_batch_program_ = 0, vsh_pack_program_ = 0;
     unsigned int vsh_parallel_pack_program_ = 0;
     bool vsh_parallel_pack_ = false;
+    bool vsh_specialize_ = false;
+    bool vsh_status_summary_ = false;
+    struct VshSpecialization {
+        std::vector<vsh_gpu_batch::Op> ops;
+        unsigned int program = 0;
+    };
+    std::vector<VshSpecialization> vsh_specializations_;
+    std::atomic<uint64_t> vsh_compile_ns_{}, vsh_compile_calls_{};
     std::array<unsigned int, 9> vsh_buffers_{};
     VshGpuResidentStats vsh_resident_stats_{};
     uint64_t vsh_preparation_token_ = 0;

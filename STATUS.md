@@ -1,5 +1,31 @@
 # STATUS
 
+## 2026-10-03 - GPU status reduction preserves the dashboard route
+
+The opt-in GPU status summary eliminates **118,736 readbacks**, reducing
+downloaded status/control data from **594.7 MB to 1.9 MB** over the 27B route.
+The GPU still checks every execution, including trailing vertices, and real
+CPU fallback handles declines before destination rendering. No stubs were added.
+Both option settings match all **270 checkpoints, 28 captures and native/device
+counter rows**. Both the experimental and restored ordinary builds pass **79
+tests**; the real GPU probe passes **30 cases**, including the unreferenced-vertex
+decline. Ordinary configuration has private AOT input cleared and GPU residency
+disabled.
+
+This is not a demonstrated speedup or 60 FPS result. Competing builds invalidate
+timing, and the profile shows most waiting moving to the remaining control read.
+A separate program-specialization experiment preserves the same route but adds
+28.5 seconds of compilation in its diagnostic pair, shows higher GPU shader
+time, and hits one real compiler allocation failure that uses generic GPU
+fallback. Both experiments remain off by default. All three xboxrecomp donors
+and xemu were assessed for program generation/reuse.
+
+Menu60 remains the gate before Blinx. The next comparison is improved GPU
+execution against the CPU vertex floor; further gains require reducing the
+remaining execution/submission costs. Full AOT and sustained original-speed
+60 FPS remain open. See [implementation and evidence](docs/RESULTS-VSH-SPECIALIZATION-2026-10-03.md),
+tracked in `beads-xbox.1.15.11`.
+
 ## 2026-10-03 - Bulk AOT register transfer preserves the full dashboard route
 
 The opt-in `--aot-bulk-registers` path replaces twenty individual public register

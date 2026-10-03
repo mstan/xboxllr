@@ -247,6 +247,104 @@ ProbeCase visible_list(bool x8 = false) {
             x8, false, true};
 }
 
+void recompute_expected(cap::Batch& batch) {
+    for (auto& execution : batch.executions) {
+        xlle::vsh_capture::Vertex vertex;
+        vertex.ops = batch.ops;
+        vertex.inputs = execution.inputs;
+        vertex.constants = batch.constants;
+        const auto raw = xlle::vsh_capture_oracle::validate_and_execute(vertex);
+        std::copy(raw.begin(), raw.end(), execution.expected.begin());
+        execution.expected[28] = bits(cases::detail::round_screen_coordinate(from_bits(raw[0])));
+        execution.expected[29] = bits(cases::detail::round_screen_coordinate(from_bits(raw[1])));
+        execution.expected[30] = raw[2];
+        execution.expected[31] = bits(cases::detail::clamp_away_zero_inf(from_bits(raw[3])));
+    }
+}
+
+std::vector<ProbeCase> specialized_cases() {
+    std::vector<ProbeCase> out;
+    const std::vector<std::vector<uint32_t>> groups{{2,3,4,5,6,7}, {8,9,10,11,12,14}, {15,16}};
+    for (size_t group = 0; group < groups.size(); ++group) {
+        auto probe = visible_list();
+        probe.name = "arithmetic_program_" + std::to_string(group);
+        for (unsigned i = 0; i < 8; ++i) probe.batch.constants[i] = bits(float(i + 1) / 8.0f);
+        for (size_t i = 0; i < groups[group].size(); ++i) {
+            auto op = cases::detail::mov_input_to_output(3, xlle::vsh_capture::kConsumedOutputs[i + 1], 15);
+            op.words[0] = groups[group][i];
+            op.words[2] = xlle::vsh_capture_oracle::detail::opcode_arity(op.words[0]);
+            for (unsigned arg = 1; arg < op.words[2]; ++arg) {
+                op.words[4 + arg] = xlle::kVshBaseContext;
+                op.words[8 + arg] = (arg - 1) * 4;
+                op.words[12 + arg] = 0xE4;
+            }
+            probe.batch.ops.push_back(op);
+        }
+        recompute_expected(probe.batch);
+        out.push_back(std::move(probe));
+    }
+    auto paired = visible_list();
+    paired.name = "paired_alias_dynamic_constants";
+    paired.batch.constants[0] = paired.batch.constants[1] =
+        paired.batch.constants[2] = paired.batch.constants[3] = bits(0.5f);
+    auto seed = cases::detail::mov_input_to_output(3, 0, 15);
+    seed.words[16] = xlle::kVshBaseTemp;
+    paired.batch.ops.push_back(seed);
+    auto mac = seed;
+    mac.words[0] = 2; mac.words[1] = 1; mac.words[2] = 2;
+    mac.words[5] = xlle::kVshBaseContext; mac.words[12 + 1] = 0xE4;
+    paired.batch.ops.push_back(mac);
+    auto ilu = cases::detail::mov_input_to_output(0, 3, 15);
+    ilu.words[4] = xlle::kVshBaseTemp;
+    paired.batch.ops.push_back(ilu);
+    auto result = ilu;
+    result.words[18] = 4 * 4; // Observe the post-MAC temporary separately in oD1.
+    paired.batch.ops.push_back(result);
+    recompute_expected(paired.batch);
+    for (const auto& e : paired.batch.executions) {
+        for (unsigned lane = 0; lane < 4; ++lane) {
+            if (e.expected[4 + lane] != e.inputs[12 + lane] ||
+                e.expected[8 + lane] != bits(from_bits(e.inputs[12 + lane]) * 0.5f))
+                throw std::runtime_error("paired oracle did not preserve pre-MAC ILU input");
+        }
+    }
+    out.push_back(paired);
+    paired.name = "same_program_changed_constants";
+    paired.batch.constants[0] = bits(0.25f);
+    recompute_expected(paired.batch);
+    out.push_back(paired);
+    paired.name = "changed_operand_same_program_length";
+    paired.batch.ops[8].words[12] = 0x1B; // Reverse MAC input lanes; distinct cache identity.
+    recompute_expected(paired.batch);
+    out.push_back(paired);
+    paired.name = "changed_masks_and_negation";
+    paired.batch.ops[8].words[3] = 1;
+    paired.batch.ops[8].words[20] = 5;
+    recompute_expected(paired.batch);
+    out.push_back(std::move(paired));
+    auto large = visible_list();
+    large.name = "long_program_uses_generic_gpu";
+    while (large.batch.ops.size() <= 64) large.batch.ops.push_back(large.batch.ops[1]);
+    recompute_expected(large.batch);
+    out.push_back(std::move(large));
+    auto unsupported = visible_list();
+    unsupported.name = "unsupported_exp_declines_to_cpu";
+    unsupported.batch.ops.back().words[0] = 17;
+    unsupported.expect_decline = true;
+    recompute_expected(unsupported.batch);
+    out.push_back(std::move(unsupported));
+    auto trailing = visible_list();
+    trailing.name = "unreferenced_trailing_numeric_decline";
+    trailing.expect_decline = true;
+    trailing.batch.executions.push_back(exec(60, 60, 0, 1));
+    trailing.batch.executions.back().inputs[9 * 4] = bits(std::numeric_limits<float>::quiet_NaN());
+    trailing.batch.references.push_back(3);
+    trailing.batch.source_indices.push_back(1050);
+    recompute_expected(trailing.batch);
+    out.push_back(std::move(trailing));
+    return out;
+}
+
 ProbeCase large_target_visible() {
     auto batch = uncached(5, {exec(8, 8, 0, 1), exec(40, 8, 0, 1),
                               exec(8, 40, 0, 1)}, {0, 1, 2});
@@ -372,6 +470,7 @@ std::vector<ProbeCase> make_probe_cases() {
         out.push_back({"existing_cachetail_structural", existing[15], false,
                        existing[15].expected_decline, false});
     }
+    for (auto& probe : specialized_cases()) out.push_back(std::move(probe));
     for (size_t i = 0; i < out.size(); ++i) {
         out[i].batch.sequence = static_cast<uint64_t>(i + 1);
         cases::detail::verify_expected(out[i].batch);
@@ -387,7 +486,7 @@ int fail(const std::string& message) {
 
 }  // namespace
 
-int run(bool parallel_pack, bool deferred) {
+int run(bool parallel_pack, bool deferred, bool specialize, bool status_summary) {
     std::string error;
     auto cpu_renderer = xlle::create_nv2a_opengl_renderer(error);
     if (!cpu_renderer) {
@@ -400,6 +499,8 @@ int run(bool parallel_pack, bool deferred) {
         return 2;
     }
     gpu_renderer->set_vsh_gpu_parallel_pack(parallel_pack);
+    gpu_renderer->set_vsh_gpu_specialize(specialize);
+    gpu_renderer->set_vsh_gpu_status_summary(status_summary);
     std::printf("[resident-probe] parallel_pack=%u deferred=%u\n", parallel_pack ? 1u : 0u, deferred ? 1u : 0u);
 
     uint32_t case_index = 0;
@@ -479,6 +580,8 @@ int run(bool parallel_pack, bool deferred) {
             auto mode1_renderer = xlle::create_nv2a_opengl_renderer(error);
             if (!mode1_renderer) return fail("mode1 renderer creation failed: " + error);
             mode1_renderer->set_vsh_gpu_parallel_pack(parallel_pack);
+            mode1_renderer->set_vsh_gpu_specialize(specialize);
+            mode1_renderer->set_vsh_gpu_status_summary(status_summary);
             auto mode1_packet = make_packet(probe.batch, gpu_address + 0x700000u,
                                             probe.x8, 1);
             std::vector<uint8_t> mode1_output;
@@ -512,6 +615,18 @@ int run(bool parallel_pack, bool deferred) {
     if (gpu_draw_checked == 0) return fail("mode2 GPU VBO path was not checked");
     if (decline_checked == 0) return fail("numeric-decline CPU fallback path was not checked");
     const auto stats = gpu_renderer->vsh_gpu_resident_stats();
+    if ((deferred && status_summary) != (stats.status_readbacks_skipped != 0))
+        return fail("status readback count does not match selected execution mode");
+    std::printf("[resident-probe] status_summary=%u skipped_readbacks=%llu\n",
+        status_summary ? 1u : 0u, static_cast<unsigned long long>(stats.status_readbacks_skipped));
+    if (specialize && (!stats.specialized_dispatches || !stats.specialized_compiles ||
+                       !stats.specialized_hits || stats.specialized_failures))
+        return fail("specialized execution/cache reuse missing or compilation failed");
+    std::printf("[resident-probe] specialization=%u dispatches=%llu compiles=%llu hits=%llu failures=%llu\n",
+        specialize ? 1u : 0u, static_cast<unsigned long long>(stats.specialized_dispatches),
+        static_cast<unsigned long long>(stats.specialized_compiles),
+        static_cast<unsigned long long>(stats.specialized_hits),
+        static_cast<unsigned long long>(stats.specialized_failures));
     std::printf("[resident-probe] PASS compared=%u gpu_draw_cases=%u decline_cases=%u "
                 "stats_batches=%llu verified=%llu gpu_draws=%llu declines=%llu mismatches=%llu\n",
                 compared, gpu_draw_checked, decline_checked,
@@ -525,16 +640,19 @@ int run(bool parallel_pack, bool deferred) {
 
 int main(int argc, char** argv) {
     try {
-        bool parallel_pack = false, deferred = false;
+        std::setvbuf(stdout, nullptr, _IONBF, 0);
+        bool parallel_pack = false, deferred = false, specialize = false, status_summary = false;
         for (int i = 1; i < argc; ++i) {
             if (!std::strcmp(argv[i], "--parallel-pack")) parallel_pack = true;
             else if (!std::strcmp(argv[i], "--deferred")) deferred = true;
+            else if (!std::strcmp(argv[i], "--specialize")) specialize = true;
+            else if (!std::strcmp(argv[i], "--status-summary")) status_summary = true;
             else {
-                std::fprintf(stderr, "usage: xlle_vsh_resident_probe [--parallel-pack] [--deferred]\n");
+                std::fprintf(stderr, "usage: xlle_vsh_resident_probe [--parallel-pack] [--deferred] [--specialize] [--status-summary]\n");
                 return 2;
             }
         }
-        return run(parallel_pack, deferred);
+        return run(parallel_pack, deferred, specialize, status_summary);
     } catch (const std::exception& ex) {
         return fail(std::string("unhandled exception: ") + ex.what());
     } catch (...) {

@@ -59,7 +59,9 @@ struct ResidentVertex96B {
 static_assert(sizeof(ResidentVertex96B) == 96);
 
 struct BatchControl16B {
-    // output_vertex_count, decline bits, candidate triangle count, reserved.
+    // output_vertex_count, decline bits, candidate triangle count, optional
+    // all-execution status summary (numeric=1, unsupported=2, invalid=4).
+    // The fourth word remains zero when the summary option is disabled.
     std::array<uint32_t, 4> words{};
 };
 static_assert(sizeof(BatchControl16B) == 16);

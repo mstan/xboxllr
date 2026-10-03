@@ -538,9 +538,15 @@ public:
         uint64_t batches = 0, executions = 0, references = 0, vertices = 0;
         uint64_t verified = 0, accepted = 0, gpu_draws = 0, declines = 0, mismatches = 0;
         uint64_t layout_declines = 0, numeric_declines = 0, opcode_declines = 0, geometry_declines = 0;
+        uint64_t specialized_dispatches = 0, specialized_compiles = 0, specialized_hits = 0;
+        uint64_t specialized_declines = 0, specialized_failures = 0;
+        uint64_t specialized_compile_ns = 0;
+        uint64_t status_readbacks_skipped = 0;
     };
     virtual VshGpuResidentStats vsh_gpu_resident_stats() const { return {}; }
     virtual void set_vsh_gpu_parallel_pack(bool on) { (void)on; }
+    virtual void set_vsh_gpu_specialize(bool on) { (void)on; }
+    virtual void set_vsh_gpu_status_summary(bool on) { (void)on; }
     virtual bool prepare_vsh_gpu_batch(Nv2aGenericCombinerPacket::GpuVshReference& reference,
                                        std::string& error) {
         reference.prepared_token = 0;

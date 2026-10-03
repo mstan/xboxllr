@@ -1773,6 +1773,8 @@ int main(int argc, char** argv) {
     bool nv2a_vsh_compile = true;
     uint32_t nv2a_vsh_gpu_resident = 0;
     uint32_t nv2a_vsh_gpu_pack_parallel = 0;
+    uint32_t nv2a_vsh_gpu_specialize = 0;
+    uint32_t nv2a_vsh_gpu_status_summary = 0;
     // Ceiling probe (beads-xbox.1.15.11). DEFAULT 0 and no --no- spelling,
     // because it is knowingly incorrect when armed: 1 skips the operation and
     // stores the first operand, 2 skips the stores too. It bounds how much of
@@ -2168,6 +2170,18 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(argv[i], "--nv2a-vsh-gpu-pack-parallel")) {
             if (i + 1 >= argc || !parse_u32_arg(argv[++i], nv2a_vsh_gpu_pack_parallel) || nv2a_vsh_gpu_pack_parallel > 1) {
                 std::fprintf(stderr, "--nv2a-vsh-gpu-pack-parallel expects 0 or 1\n");
+                return 2;
+            }
+        }
+        else if (!std::strcmp(argv[i], "--nv2a-vsh-gpu-specialize")) {
+            if (i + 1 >= argc || !parse_u32_arg(argv[++i], nv2a_vsh_gpu_specialize) || nv2a_vsh_gpu_specialize > 1) {
+                std::fprintf(stderr, "--nv2a-vsh-gpu-specialize expects 0 or 1\n");
+                return 2;
+            }
+        }
+        else if (!std::strcmp(argv[i], "--nv2a-vsh-gpu-status-summary")) {
+            if (i + 1 >= argc || !parse_u32_arg(argv[++i], nv2a_vsh_gpu_status_summary) || nv2a_vsh_gpu_status_summary > 1) {
+                std::fprintf(stderr, "--nv2a-vsh-gpu-status-summary expects 0 or 1\n");
                 return 2;
             }
         }
@@ -2696,6 +2710,14 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "--nv2a-vsh-gpu-pack-parallel requires a nonzero --nv2a-vsh-gpu-resident mode\n");
         return 2;
     }
+    if (nv2a_vsh_gpu_specialize && !nv2a_vsh_gpu_resident) {
+        std::fprintf(stderr, "--nv2a-vsh-gpu-specialize requires a nonzero --nv2a-vsh-gpu-resident mode\n");
+        return 2;
+    }
+    if (nv2a_vsh_gpu_status_summary && !nv2a_vsh_gpu_resident) {
+        std::fprintf(stderr, "--nv2a-vsh-gpu-status-summary requires a nonzero --nv2a-vsh-gpu-resident mode\n");
+        return 2;
+    }
     if ((debug_vsh_capture_path || debug_vsh_batch_capture_path) && (!nv2a_vsh_compile || nv2a_vsh_unsafe_probe)) {
         std::fprintf(stderr, "VSH capture requires the faithful compiled CPU path\n");
         return 2;
@@ -2802,6 +2824,8 @@ int main(int argc, char** argv) {
         // surfaces compete with the driver's transient compiler allocations.
         std::string vsh_error;
         if (nv2a_renderer) nv2a_renderer->set_vsh_gpu_parallel_pack(nv2a_vsh_gpu_pack_parallel != 0);
+        if (nv2a_renderer) nv2a_renderer->set_vsh_gpu_specialize(nv2a_vsh_gpu_specialize != 0);
+        if (nv2a_renderer) nv2a_renderer->set_vsh_gpu_status_summary(nv2a_vsh_gpu_status_summary != 0);
         if (!nv2a_renderer || !nv2a_renderer->prepare_vsh_gpu_resident(vsh_error)) {
             std::fprintf(stderr, "[host] GPU resident VSH preparation failed: %s\n",
                          nv2a_renderer ? vsh_error.c_str() : "OpenGL renderer required");
@@ -6701,6 +6725,18 @@ int main(int argc, char** argv) {
                     static_cast<unsigned long long>(stats.layout_declines), static_cast<unsigned long long>(stats.numeric_declines),
                     static_cast<unsigned long long>(stats.opcode_declines), static_cast<unsigned long long>(stats.geometry_declines),
                     nv2a_vsh_gpu_pack_parallel);
+                std::printf("[host] vsh-gpu-specialize enabled=%u dispatches=%llu compiles=%llu hits=%llu declines=%llu failures=%llu profiled=%u compile_ns=%llu\n",
+                    nv2a_vsh_gpu_specialize,
+                    static_cast<unsigned long long>(stats.specialized_dispatches),
+                    static_cast<unsigned long long>(stats.specialized_compiles),
+                    static_cast<unsigned long long>(stats.specialized_hits),
+                    static_cast<unsigned long long>(stats.specialized_declines),
+                    static_cast<unsigned long long>(stats.specialized_failures),
+                    perf::g_enabled ? 1u : 0u,
+                    static_cast<unsigned long long>(stats.specialized_compile_ns));
+                std::printf("[host] vsh-gpu-status-summary enabled=%u skipped_readbacks=%llu\n",
+                    nv2a_vsh_gpu_status_summary,
+                    static_cast<unsigned long long>(stats.status_readbacks_skipped));
                 const auto deferred = mach.nv2a()->vsh_gpu_deferred_stats();
                 std::printf("[host] vsh-gpu-deferred batches=%llu executions=%llu refs=%llu "
                     "prepared=%llu vertices=%llu declines=%llu fallback_batches=%llu fallback_executions=%llu\n",

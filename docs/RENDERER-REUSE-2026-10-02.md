@@ -65,6 +65,37 @@ The concrete adaptation is bulk scalar transfer using the pinned Unicorn core's
 own flag compute/load helpers, retaining engine-owned extended/hidden state and
 the public register-API opt-out. No donor CPU or memory shim is imported.
 
+### Vertex-program follow-up, 2026-10-03
+
+The GPU specialization spike (`beads-xbox.1.15.11`) rechecked all three remote
+HEADs; the CPU-boundary pins above are unchanged. All three `d3d8_vsh.c` files
+implement program-to-host-shader generation and reuse a compiled shader cache.
+sp00nznet and NoRain target D3D11 directly; phobos uses its RHI and tracks
+constant/input bindings separately. Their inspected cache lookup accepts a
+32-bit hash match. Our adaptation instead compares every decoded operation word,
+keeps constants/inputs dynamic, and bounds compiled entries. It imports no D3D
+or kernel shim and does not claim their HLSL arithmetic is the LLE oracle.
+
+xemu's pinned `vsh-prog.c` emitter was also inspected. It generates direct GLSL
+from raw tokens and includes screen-to-clip conversion; our current resident
+boundary carries decoded operations and expects screen-space outputs before
+triangle packing. This experiment therefore specializes the existing qualified
+GPU helpers at that boundary. The generic GPU interpreter and CPU materialization
+remain real fallback implementations. This is an adaptation of the donors'
+program-compilation pattern, not an additional donor translator transplant.
+
+The older deferred GPU path's measured deficit included GPU interpretation and
+status synchronization. Specialization targets the former; it does not remove
+readbacks or make shader compilation free. Cold compilation of larger authored
+programs takes material time on this host. Runtime performance and whole-route
+qualification must establish whether the experiment is worth retaining. The
+[completed 27B follow-up](RESULTS-VSH-SPECIALIZATION-2026-10-03.md) preserves
+all checkpoints and images, but its diagnostic pair shows higher specialized
+GPU duration and 28.5 seconds of compilation. It stays off. An independent GPU
+status reduction removes 118,736 downloads with the same exact route; most wait
+time moves into the remaining control read. Neither result establishes a gain
+over the CPU vertex path or qualifies 60 FPS.
+
 ## What the refreshed review actually establishes
 
 Remote HEAD was checked for all three linked repositories on 2026-10-03.

@@ -190,7 +190,7 @@ implementation before its result can be accepted.
 | --- | --- |
 | Runnable floor and repeatable menu route | Implemented: 27B route reaches Settings and returns to animated main menu; 270 reference checkpoints and ten images retained |
 | Borrowed rendering | Implemented, experimental: 5,349 donor draws after decoded-texture qualification; no qualified speedup or whole-scene numerical tolerance yet |
-| Attribute and reduce steady-menu cost | Active: corrected host samples identify combiner submission, vertex work and native admission; isolate costs before promoting a change |
+| Attribute and reduce steady-menu cost | Active: opt-in bulk CPU register transfer and GPU status reduction preserve the full route; speed qualification remains open. Program specialization has not earned promotion |
 | Sustained original-speed 60 FPS and input | Open: repeat quiet-host steady windows and verify actual presentation, distinct output and input response |
 | Blinx launch | Sequenced after this menu gate; pinned media findings retained |
 
@@ -217,6 +217,15 @@ Remaining texture declines alone do not explain the distance to 60 FPS.
 Compare sp00nznet's content-checked DXT cache, NoRain's DOAXBV compressed uploads
 and phobos's resource/submission code as those measured costs warrant.
 Do not equate more donor draws with less frame time.
+
+The [GPU vertex follow-up](RESULTS-VSH-SPECIALIZATION-2026-10-03.md) preserves
+all 270 checkpoints and 28 captures in both status-summary settings. It removes
+118,736 readbacks, but most wait time moves to the remaining control read.
+Specialization's separate diagnostic shows higher GPU duration and costly
+compilation. Both options remain off, with 79 tests passing in experimental and
+ordinary builds. Compare the improved GPU path with CPU vertex execution before
+selecting it for menu performance; these busy-host diagnostics do not establish
+a speedup, and full AOT remains a separate unfinished requirement.
 
 ## Product burndown
 

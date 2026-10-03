@@ -117,7 +117,7 @@ void store_result(Op op, uvec4 value) {
 }
 )GLSL";
 
-inline const std::string kVshBatchComputeSource = std::string(R"GLSL(
+inline const std::string kVshBatchPreamble = std::string(R"GLSL(
 #version 430
 layout(local_size_x = 64) in;
 struct InputRecord { uvec4 inputs[16]; };
@@ -138,7 +138,22 @@ uvec4 regs[13];
 )GLSL") + kVshExecutionCommonSource + R"GLSL(
 #undef VSH_LOAD_INPUT
 #undef VSH_LOAD_CONSTANT
+)GLSL";
 
+inline const std::string kVshBatchFinish = R"GLSL(
+    const uint consumed[7] = uint[7](0u, 3u, 4u, 9u, 10u, 11u, 12u);
+    uvec4 position = regs[0];
+    position.x = screen32(position.x, supported);
+    position.y = screen32(position.y, supported);
+    position.w = w32(position.w);
+    if (!supported) { program_status[index] = 1u; return; }
+    for (uint i = 0u; i < 7u; ++i) outputs[index].values[i] = regs[consumed[i]];
+    outputs[index].values[7] = position;
+    program_status[index] = 0u;
+}
+)GLSL";
+
+inline const std::string kVshBatchComputeSource = kVshBatchPreamble + R"GLSL(
 void main() {
     uint index = gl_GlobalInvocationID.x;
     if (index >= u_execution_count) return;
@@ -170,17 +185,7 @@ void main() {
         }
         if (!supported) { program_status[index] = 1u; return; }
     }
-    const uint consumed[7] = uint[7](0u, 3u, 4u, 9u, 10u, 11u, 12u);
-    uvec4 position = regs[0];
-    position.x = screen32(position.x, supported);
-    position.y = screen32(position.y, supported);
-    position.w = w32(position.w);
-    if (!supported) { program_status[index] = 1u; return; }
-    for (uint i = 0u; i < 7u; ++i) outputs[index].values[i] = regs[consumed[i]];
-    outputs[index].values[7] = position;
-    program_status[index] = 0u;
-}
-)GLSL";
+)GLSL" + kVshBatchFinish;
 
 // Common resident-primary triangle evaluation and resident-VBO packing helpers.
 // The including shader supplies its own local_size_x and main(). Bindings and
@@ -201,6 +206,7 @@ uniform uint u_large_target;
 uniform uint u_cull_enabled;
 uniform uint u_cull_front;
 uniform uint u_max_resident_vertices;
+uniform uint u_status_summary;
 )GLSL") + std::string(xlle::vsh_shadow_probe::kFp32ArithmeticSource) + R"GLSL(
 
 const uint BATCH_PROGRAM_DECLINE = 1u;
@@ -212,6 +218,13 @@ const uint TRI_ACCEPTED = 1u;
 const uint TRI_GEOMETRY_DECLINE = 2u;
 const uint TRI_PROGRAM_DECLINE = 3u;
 const uint TRI_OUTPUT_OVERFLOW = 4u;
+
+// Complete execution status, including vertices not referenced by a triangle.
+// Bits 0/1 preserve numeric/opcode declines; bit 2 reports an invalid status.
+uint program_summary(uint execution) {
+    uint status = program_status[execution];
+    return status <= 2u ? status : 4u;
+}
 
 bool finite4(uvec4 v) { return all(lessThan(v & uvec4(0x7fffffffu), uvec4(0x7f800000u))); }
 
@@ -341,7 +354,11 @@ void main() {
             decline_bits |= BATCH_GEOMETRY_DECLINE;
         }
     }
-    control = uvec4(out_count, decline_bits, count, 0u);
+    uint summary = 0u;
+    if (u_status_summary != 0u)
+        for (uint execution = 0u; execution < u_execution_count; ++execution)
+            summary |= program_summary(execution);
+    control = uvec4(out_count, decline_bits, count, summary);
 }
 )GLSL";
 
@@ -426,7 +443,19 @@ void main() {
         barrier();
     }
 
-    if (lane == 0u) control = uvec4(shared_base, shared_decline, count, 0u);
+    uint summary = 0u;
+    if (u_status_summary != 0u) {
+        for (uint execution = lane; execution < u_execution_count; execution += 256u)
+            summary |= program_summary(execution);
+        prefix_a[lane].x = summary;
+        barrier();
+        for (uint step = 128u; step != 0u; step >>= 1u) {
+            if (lane < step) prefix_a[lane].x |= prefix_a[lane + step].x;
+            barrier();
+        }
+        summary = prefix_a[0].x;
+    }
+    if (lane == 0u) control = uvec4(shared_base, shared_decline, count, summary);
 }
 )GLSL";
 
