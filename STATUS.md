@@ -3,6 +3,27 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-10-03 - Sustained 60 FPS menu is the gate before Blinx
+
+The owner's latest direction supersedes the earlier Blinx-next order. Active
+work is original-speed 60 FPS in the animated stock dashboard main menu with
+working selection/input. Compatible enhanced/HLE paths and partial AOT remain
+allowed, with a runnable LLE opt-out and no stubs. Full AOT and every dashboard
+interior remain separate later gates. Blinx launch now depends on menu issue
+`beads-xbox.1.17` in central tracking.
+
+No new speedup is claimed. The preceding single timing pair measured **6.919
+reference / 6.478 enhanced guest vblanks per host second** in the steady final
+window; distinct displayed FPS and input response remain unqualified. Re-reading
+the rejection trace identifies DXT2/3 format `0x0E` at the first texture decline:
+the floor decodes it to owned ARGB, but donor admission excludes it. This is a
+concrete coverage candidate, not proof that texture declines dominate time.
+Next qualification pairs that boundary with steady-window CPU/GPU/resolve costs.
+
+The [gameplan](docs/GOAL-AOT-DASHBOARD.md#active-menu-performance-gate) records
+the menu workload, evidence gaps and reordered burndown. Runtime code is unchanged
+by this priority update; the preceding implementation passed 77/77 tests.
+
 ## 2026-10-03 - Borrowed xemu pixel shaders run the full dashboard route
 
 The experimental `--nv2a-renderer xemu` path executes xemu's pinned production
@@ -20,8 +41,8 @@ captures differ, up to 30/255 in a channel. Whole-scene tolerance remains open.
 The first sequential timing pair is **311.280 s enhanced / 245.645 s reference**.
 It has host variation before donor draws and is not a qualified backend-cost
 measurement; there is no speedup or 60 FPS claim. Keep the path experimental.
-This completes the live borrowed-component checkpoint; the next independent
-work is real Blinx media/loading with partial AOT. Full findings and limits:
+This completes the live borrowed-component checkpoint. Its then-proposed
+Blinx-next ordering is superseded by the menu-first entry above. Findings and limits:
 [results](docs/RESULTS-XEMU-PSH-2026-10-03.md),
 [contract](docs/RENDERER-XEMU-PSH.md). Tracking: `beads-xbox.1.15.7`.
 

@@ -1,8 +1,9 @@
 # Goal: faithful Xbox floor, enhanced native execution and playable games
 
 Owner clarification, 2026-10-03. Central tracker: `beads-xbox.1.25.5`;
-planning decision: `beads-xbox.1.40`. This supersedes the earlier
-dashboard-first/strict-AOT-first work order and blanket exclusion of donor HLE.
+planning decision: `beads-xbox.1.40`; active menu gate: `beads-xbox.1.17`.
+The latest owner direction puts sustained 60 FPS in the dashboard menu before
+Blinx. Full AOT remains a separate final gate; donor HLE remains eligible.
 Implementation resumed on the owner's subsequent direction. Bounded Sol/high
 assistance is authorized for this task; runtime progress is recorded in STATUS.
 
@@ -14,11 +15,13 @@ be substantially different when the selected boundary's observable contract is
 preserved, including documented enhancement tolerances. No stubs or fabricated
 success. The repository name and amount of original code retained are not goals.
 
-Get a responsive dashboard and a real Blinx launch/playable slice with the
-current hybrid CPU path. Full AOT with dynarec removed remains the final goal;
-it is not a prerequisite for renderer integration, game boot or performance wins.
-JSRF is the next generalization target. The dashboard is a useful first workload,
-not a gate that must be fully completed before any game work starts.
+Get the animated stock dashboard main menu to sustained 60 FPS at original guest
+speed with working selection/input, then pursue a real Blinx launch/playable
+slice. Use the current hybrid CPU path and compatible enhanced implementations.
+Full AOT with dynarec removed remains the final goal; it is not a prerequisite
+for menu performance. JSRF is the next generalization target. Completing every
+dashboard interior remains a broader product requirement, separate from the
+immediate menu performance gate.
 
 ## Acceptance
 
@@ -121,17 +124,18 @@ See [renderer reuse assessment](RENDERER-REUSE-2026-10-02.md).
 ## Fast-win delivery order
 
 Use bounded implementation checkpoints, not an open-ended framework rewrite.
-The renderer and Blinx launch packages are independent workstreams, worked solo;
-neither waits for 100% AOT or all dashboard menu interiors.
+Work on menu performance first. Blinx launch follows the qualified 60 FPS menu
+gate; neither milestone waits for 100% AOT or all dashboard menu interiors.
 
 | Order | Deliverable | First concrete result / decision |
 | --- | --- | --- |
 | 1 | Reference/enhanced selection around the existing renderer interface; short repeatable workload and opt-out smoke | Same live dashboard request reaches both implementations; effective backend, CPU/renderer cost, real guest progress and frame pacing are visible |
 | 2 | Borrow a substantial renderer path | Run one actual dashboard rendering workload through donor shader/raster/resource code and our real memory/resolve boundary. Measure against the previous path, validate tolerances, and expand useful coverage. Preserve reference fallback; no custom pixel-exact rewrite required |
-| 3 | First real Blinx launch with partial AOT | Resolve the pinned media/ATAPI/loader path and capture title entry plus the first actual blocker. Execute unsupported CPU instructions on the existing floor during development; AOT completion and enhanced-renderer completion do not block the attempt |
-| 4 | Enhanced playable slice and measured performance | Title screen, input and a reproducible gameplay scene; borrow or implement the actual reached audio/device contracts. Replace the measured expensive service/function next, validate opt-out and save/state behavior, then qualify original-speed output and latency |
-| 5 | Decide the long-term compiler/runtime foundation from a live comparison | Compare current xboxrecomp-generated execution with our current generator against the same implemented LLE/enhanced boundaries. Preserve useful broad frontend/tooling reuse; select on adaptation cost and measured workload, without repo loyalty |
-| 6 | Remove CPU fallback on the supported routes | Capture remaining code identities, compile reachable code and kernel paths, qualify transitions/save-reload, and run strict AOT in both profiles. Keep this final gate explicit while shipping useful intermediate development builds |
+| 3 | Qualify sustained 60 FPS dashboard menu before Blinx | Measure settled animation and selection/input at original guest speed. Accelerate the measured costs using renderer reuse, native/HLE services or CPU work as evidence warrants; preserve real reference opt-outs and qualify outputs. Report distinct frames, presentation pacing and response, not just vblanks |
+| 4 | First real Blinx launch with partial AOT | After the menu gate, resolve the pinned media/ATAPI/loader path and capture title entry plus the first actual blocker. Execute unsupported CPU instructions on the existing floor during development; full AOT and full renderer coverage are not prerequisites |
+| 5 | Enhanced playable slice and measured performance | Title screen, input and a reproducible gameplay scene; borrow or implement the actual reached audio/device contracts. Replace the measured expensive service/function next, validate opt-out and save/state behavior, then qualify original-speed output and latency |
+| 6 | Decide the long-term compiler/runtime foundation from a live comparison | Compare current xboxrecomp-generated execution with our current generator against the same implemented LLE/enhanced boundaries. Preserve useful broad frontend/tooling reuse; select on adaptation cost and measured workload, without repo loyalty. Bring this comparison forward if measured menu CPU cost makes it the useful next experiment |
+| 7 | Remove CPU fallback on the supported routes | Capture remaining code identities, compile reachable code and kernel paths, qualify transitions/save-reload, and run strict AOT in both profiles. Keep this final gate explicit while shipping useful intermediate development builds |
 
 Steps 1-2 are the first performance experiment. Bound donor investigation to a
 concrete input/output path and an executable result before widening scope; if a
@@ -139,9 +143,10 @@ full xemu state adapter dominates the work, first adapt its useful shader/format
 code at our existing packet boundary, or choose the better-matching donor. A
 large transplant remains allowed when it is cheaper than that adaptation.
 
-Start step 3 as soon as the first renderer checkpoint or a donor blocker is
-known; do not repeatedly extend graphics research while Blinx remains untried.
-Use the actual launch trace to choose which missing service to implement next.
+The first live donor checkpoint exists, but it has not demonstrated a speedup.
+Step 3 is now the active work. Qualify actual menu performance before starting
+step 4; a donor draw count or AOT percentage does not close that gate.
+Once Blinx starts, use its actual launch trace to choose the next missing service.
 Do not fabricate disc authentication, mutate the XBE's media constraints or
 force device readiness to create a boot milestone. An enhanced loader is eligible
 only with an implemented reference contract for the chosen media/firmware route.
@@ -158,14 +163,57 @@ fallback, HLE and idle accounting. A steady 60 FPS dashboard is a useful win
 even with partial AOT. No current evidence proves 60 FPS is one change away.
 Use executable milestones to establish velocity before assigning calendar dates.
 
+## Active menu performance gate
+
+Engineering qualification workload: at least 60 seconds of guest main-menu
+animation after warmup, including real selection changes, repeated on a quiet
+declared host. Keep startup timing separate and verify the reached screen.
+Measure capacity without detailed profiling, then verify interactive presentation
+at original speed. The nominal 60 Hz frame budget is 16.67 ms; report interval
+distributions, stalls, distinct guest-produced frames, host presents and input
+response with their denominators. A mean vblank rate alone is insufficient.
+This duration is a working measurement protocol, not an owner-specified tolerance.
+
+Keep reference opt-out runnable and qualify enhancement differences at their
+observable boundary. No host-only menu animation, duplicate-frame FPS claims,
+time acceleration or stubbed services. Audio and complete dashboard navigation
+remain open product requirements; this sequencing gate does not silently expand
+to every interior or full AOT. A newly reached correctness dependency still needs
+implementation before its result can be accepted.
+
+| Menu work package | Current evidence / next result |
+| --- | --- |
+| Runnable floor and repeatable menu route | Implemented: 27B route reaches Settings and returns to animated main menu; 270 reference checkpoints and ten images retained |
+| Borrowed rendering | Implemented, experimental: 1,035 donor draws; no qualified speedup or whole-menu numerical tolerance yet |
+| Attribute and reduce steady-menu cost | Active: corrected host samples identify combiner submission, vertex work and native admission; isolate costs before promoting a change |
+| Sustained original-speed 60 FPS and input | Open: repeat quiet-host steady windows and verify actual presentation, distinct output and input response |
+| Blinx launch | Sequenced after this menu gate; pinned media findings retained |
+
+The last unqualified timing pair gives **6.919 reference / 6.478 enhanced guest
+vblanks per host second** in the verified 25.5B-27B main-menu window, not displayed
+FPS. Even the reference observation is about 8.7 times below 60; this is a scale
+estimate, not a qualified capacity result or a calendar forecast. The
+[corrected host profile](RESULTS-HOST-SAMPLER-WINDOWS-2026-10-03.md) and
+[donor checkpoint](RESULTS-XEMU-PSH-2026-10-03.md) are the starting evidence.
+
+Immediate renderer investigation: 7,391 of 8,426 generated submissions declined
+the donor texture path. The first recorded rejection uses raw format `0x0E`
+(DXT2/3), which the floor already decodes into owned linear ARGB data, while the
+donor admission currently permits only two raw linear formats. Qualify this
+decoded-texture boundary and measure any useful coverage gain; the first rejection
+does not establish the format of all declines or their share of execution time.
+Pair that experiment with CPU/GPU/resolve attribution of the steady window.
+Do not equate more donor draws with less frame time.
+
 ## Product burndown
 
 | Gate | Status | Required evidence |
 | --- | --- | --- |
 | Faithful reference floor | Partial, runnable dashboard | Qualified contracts for each reached subsystem; real LLE opt-out; close known exception, media, rendering and audio gaps |
-| Interchangeable enhanced renderer | Planned integration | Live donor path, explicit tolerances, coherent readback/state and successful reference selection |
-| Responsive dashboard | Open | Required menu interiors, input/audio and measured original-speed output; partial AOT allowed |
-| Blinx launch and playable slice | Open; promoted from stretch | Real loading/title execution, input, gameplay/audio and save/reload; partial AOT allowed |
+| Interchangeable enhanced renderer | Live borrowed path, experimental | Qualify whole-route tolerances and performance; maintain coherent readback/state and reference selection |
+| 60 FPS dashboard main menu | Active; gates Blinx | Sustained original-speed animation, selection/input and measured distinct output/pacing; partial AOT allowed |
+| Complete dashboard functionality | Open, broader product gate | Required menu interiors, input/audio and persistence |
+| Blinx launch and playable slice | Open; follows menu performance gate | Real loading/title execution, input, gameplay/audio and save/reload; partial AOT allowed |
 | Enhanced performance | Open | Measured gain at equivalent logical work and accepted outputs; title-appropriate cadence and latency |
 | Full AOT without dynarec | Open, final gate | Prebuilt native execution of remaining guest work in both reference/enhanced supported workflows; no hidden CPU fallback |
 | JSRF generalization | Later | Second title validates reusable contracts rather than one-title assumptions |
@@ -174,7 +222,7 @@ These are unequal work packages, not percentages or a calendar forecast.
 The detailed compiler stages remain in the
 [coverage board](PLAN-AOT-COVERAGE-BURNDOWN.md).
 
-Current evidence: 76 public tests pass. The
+Current evidence: 77 public tests pass after the borrowed-renderer checkpoint. The
 [MMX checkpoint](RESULTS-AOT-MMX-2026-10-03.md) adds actual native
 menu execution beyond the startup loops. The
 [corrected 27B route](RESULTS-CPU-DEADLINES-2026-10-03.md) reaches Settings and
@@ -235,5 +283,5 @@ all 76 public tests and four census scalar/native-required tests pass. Attempts
 and handoffs increase, so the coverage gain carries no new speed claim.
 
 The evidence above is retained as the starting point. The fast-win order in this
-document now governs scheduling: enhanced renderer, real game progress and
-measured subsystem replacements take priority over broad opcode expansion.
+document now governs scheduling: measured menu performance and compatible
+subsystem replacements take priority over Blinx launch and broad opcode expansion.

@@ -1,7 +1,7 @@
 # NORTH-STAR
 
 > One active goal and one next milestone. Updated by the owner on 2026-10-03.
-> This replaces the previous strict-AOT-dashboard-first ordering.
+> Menu performance comes before Blinx; full AOT remains a separate final gate.
 
 ## The project
 
@@ -20,10 +20,12 @@ shows it gets to this outcome with less work.
 
 ## Current goal
 
-Get useful enhanced rendering, faster iteration and a real Blinx launch/playable
-slice using the existing hybrid CPU execution path. The dashboard is the first
-performance fixture; complete dashboard navigation remains a product requirement
-but does not gate game bring-up. JSRF is the next generalization target.
+Reach sustained 60 FPS at original guest speed in the animated stock dashboard
+main menu, with working selection/input, before starting Blinx launch work.
+Use enhanced rendering, compatible native/HLE replacements and the existing
+hybrid CPU path to get there. Complete dashboard navigation remains a product
+requirement; every menu interior is not part of this immediate performance gate.
+Blinx is the first game after that gate; JSRF is the next generalization target.
 
 Full portable AOT remains the final CPU goal: prepare native artifacts before
 launch and remove dynarec/interpreter dependence from the declared supported
@@ -38,7 +40,7 @@ stand in for an absent reference contract.
 
 ## Next milestone
 
-**A real Blinx launch through the supported media/loader route with partial AOT.**
+**Sustained original-speed 60 FPS in the dashboard menu with real input.**
 The first borrowed-renderer checkpoint now exists: xemu-generated pixel shaders
 execute live dashboard draws with reference opt-out. Its first timing pair was
 slower and whole-menu numerical differences remain unqualified, so it stays
@@ -46,15 +48,19 @@ experimental. See [the measured checkpoint](docs/RESULTS-XEMU-PSH-2026-10-03.md)
 Renderer performance/coverage work continues from measured costs; avoid building
 a general HLE framework first.
 
-Blinx loading is the next independent early workstream: move the pinned media through
-the real supported loader/device route and capture the first title execution or
-precise failure. Do not wait for full AOT, all dashboard interiors or a completed
-renderer transplant. Do not invent media authentication or device readiness.
+Measure steady animation and selection changes separately from startup. Establish
+frame pacing and distinct guest-produced output as well as guest progress;
+vblank counts or repeated host presents cannot close this gate. Profile the
+measured expensive work and qualify useful renderer/subsystem replacements.
+Neither full AOT nor a complete renderer transplant is a prerequisite.
+
+Blinx media/loading follows this menu gate. Retain the pinned launch-input audit
+and real loader/device requirements; do not invent authentication or readiness.
 
 The detailed order, PSX/Tomba source precedent, subsystem contracts, donor
 choices and completion gates live in the
 [ecosystem gameplan](docs/GOAL-AOT-DASHBOARD.md). Central tracking:
-`beads-xbox.1.25.5`; planning decision `beads-xbox.1.40`.
+`beads-xbox.1.25.5`; active menu gate `beads-xbox.1.17`.
 
 ## Evidence and performance
 

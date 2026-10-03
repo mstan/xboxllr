@@ -1,21 +1,23 @@
 # Blinx: path to the first faithful boot attempt
 
-Updated 2026-10-02. This is a milestone burndown, not a measured calendar
+Updated 2026-10-03. This is a milestone burndown, not a measured calendar
 forecast. Packages differ in size; counts are not percent completion.
 Central Beads is the issue source of truth.
 
-**Owner clarification, 2026-10-03:** Blinx launch and playable progress are now
-an early workstream alongside enhanced renderer integration. Follow the
+**Latest owner priority, 2026-10-03:** sustained original-speed 60 FPS in the
+animated dashboard main menu, with real selection/input, comes before Blinx.
+The active gate is `beads-xbox.1.17`; launch issue `beads-xbox.1.7.1` depends on it.
+Follow the
 [LLE floor / enhanced execution gameplan](GOAL-AOT-DASHBOARD.md).
 Partial AOT and the existing CPU floor are acceptable for this milestone;
-full dashboard completion and zero dynarec do not block a first game attempt.
+every dashboard interior and zero dynarec are not additional launch prerequisites.
 The dated media findings below remain launch dependencies, not newly completed work.
 
 The [first live borrowed-renderer checkpoint](RESULTS-XEMU-PSH-2026-10-03.md)
-is implemented. Its performance remains experimental; Blinx media/loading is
-the next independent milestone and does not wait for renderer promotion.
+is implemented. Its performance remains experimental and does not satisfy the
+menu gate. Resume Blinx media/loading after that performance gate is validated.
 
-## The next observable milestone
+## The next Blinx milestone, after the menu gate
 
 **Attempt to launch Blinx through the real Xbox kernel and capture the first
 guest execution or exact blocking failure.** This does not require completion
@@ -23,13 +25,15 @@ of the AOT compiler. The existing faithful CPU floor can execute the first
 attempt. It does require a valid input/launch route and implemented device
 behavior. No stubs, fabricated success or skipped initialization.
 
-The recorded route has four pending gates. A boot attempt is the next Blinx
-milestone and does not depend on finishing the enhanced renderer or AOT compiler.
+The recorded route has four launch packages below. A boot attempt is the next
+Blinx milestone after menu performance; full renderer coverage and full AOT
+are not additional prerequisites.
 Audio/device work can become necessary to get beyond a boot attempt into menus
 or gameplay. Do not postpone the first attempt until all of those projects end.
 
 ```mermaid
 flowchart LR
+    M["Dashboard menu: sustained original-speed 60 FPS"] --> C
     A["Blinx XBE pinned: done"] --> B["1. Validate launch media and firmware"]
     B --> S["2. Qualify provisioned HDD security"]
     B --> C["3. Implement real media/loading path"]

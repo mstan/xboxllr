@@ -5,10 +5,12 @@ explicit **Deliverable**, and — once closed — a dated **DONE** stamp with th
 machine-verifiable evidence that closed it.
 
 2026-10-03 owner direction makes the [LLE floor / enhanced execution gameplan](GOAL-AOT-DASHBOARD.md)
-authoritative: borrowed enhanced rendering and real Blinx progress with partial
-AOT come before strict AOT completion. Qualified enhanced paths can ship by
+authoritative: sustained original-speed 60 FPS in the animated dashboard menu
+comes before Blinx. Borrowed enhanced rendering, compatible HLE and partial AOT
+are allowed before strict AOT completion. Qualified enhanced paths can ship by
 default with a real LLE opt-out. Full AOT remains the final gate.
-The older dashboard-only ordering and Arc 2 deferral below are historical. Current launch
+The older requirement to finish all dashboard functionality before Arc 2 is
+historical; the immediate sequencing gate is menu performance. Current launch
 dependencies are in [BLINX-BURNDOWN.md](BLINX-BURNDOWN.md); current execution
 coverage work is in [PLAN-AOT-COVERAGE-BURNDOWN.md](PLAN-AOT-COVERAGE-BURNDOWN.md).
 

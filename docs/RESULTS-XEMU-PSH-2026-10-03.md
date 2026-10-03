@@ -105,7 +105,9 @@ constants; those cases remain excluded instead of using HLE to cover an absent
 floor contract.
 
 This meets the **live borrowed-component checkpoint**. Performance promotion,
-wider renderer coverage and full LLE qualification remain open. Under the
-owner's delivery order, the next independent milestone is the real Blinx
-media/loader path and first title execution or precise failure, using partial
-AOT; it does not wait for full shader coverage or dynarec removal.
+wider renderer coverage and full LLE qualification remain open. The owner's
+subsequent priority correction puts **sustained original-speed 60 FPS in the
+dashboard menu before Blinx**. These measurements do not close that gate.
+Partial AOT and compatible enhanced paths remain allowed; full shader coverage
+and dynarec removal are separate later goals. See the
+[active menu gate](GOAL-AOT-DASHBOARD.md#active-menu-performance-gate).

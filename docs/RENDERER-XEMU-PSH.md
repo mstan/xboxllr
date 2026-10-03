@@ -76,6 +76,7 @@ draws must be nonzero. Guest vblanks, host presents, distinct images and guest
 execution speed are separate measurements. A partial donor integration and an
 AOT instruction percentage cannot establish a 60 FPS result.
 
-Live-run evidence belongs in the dated results note and STATUS. The next early
-game checkpoint remains a real Blinx launch with partial AOT; full shader
-coverage and full dashboard AOT do not gate that work.
+Live-run evidence belongs in the dated results note and STATUS. The current
+priority is sustained original-speed 60 FPS in the animated dashboard menu with
+real input, before Blinx launch work. Partial AOT remains allowed; full shader
+coverage and full dashboard AOT are separate later goals.
