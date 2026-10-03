@@ -38,15 +38,15 @@ stand in for an absent reference contract.
 
 ## Next milestone
 
-**A live borrowed enhanced renderer path with an explicit LLE reference opt-out.**
-Use the existing owned-packet/resolve interface to establish the first contract.
-Borrow xemu or matching xboxrecomp shader/raster/resource implementation rather
-than requiring our software rasterizer's exact arithmetic. Compare observable
-outputs under declared tolerances, measure guest speed/frame pacing/latency and
-keep both execution modes working. Avoid building a general HLE framework first.
+**A real Blinx launch through the supported media/loader route with partial AOT.**
+The first borrowed-renderer checkpoint now exists: xemu-generated pixel shaders
+execute live dashboard draws with reference opt-out. Its first timing pair was
+slower and whole-menu numerical differences remain unqualified, so it stays
+experimental. See [the measured checkpoint](docs/RESULTS-XEMU-PSH-2026-10-03.md).
+Renderer performance/coverage work continues from measured costs; avoid building
+a general HLE framework first.
 
-Blinx loading is an independent early workstream: after the first renderer
-integration checkpoint or a concrete donor blocker, move the pinned media through
+Blinx loading is the next independent early workstream: move the pinned media through
 the real supported loader/device route and capture the first title execution or
 precise failure. Do not wait for full AOT, all dashboard interiors or a completed
 renderer transplant. Do not invent media authentication or device readiness.
@@ -76,8 +76,9 @@ and do not stand in for live menu/game performance.
 
 ## Work boundaries
 
-Work solo. Implementation is paused for the owner's check-in; the gameplan is
-the requested planning deliverable. Resume implementation on explicit direction.
+Implementation resumed on the owner's 2026-10-03 direction. Work solo by
+default; the owner authorized bounded Sol/high assistance for this task, with
+independent review of its recommendations.
 ARM hardware setup and authentic MCPX cold boot remain separate later work.
 Real-console qualification remains deferred until a concrete blocker requires
 it; disclose limits of authored/reference tests and never label them hardware

@@ -1147,7 +1147,7 @@ check("the interlock is ORDERED, so overlapping fragments of one draw "
       "layout(pixel_interlock_ordered) in;" in gen_cpp)
 check("with the shader blending, the ROP is told to write NOTHING -- blending "
       "off and every channel masked -- so there is exactly one writer",
-      'if (packet.state.image_blend) {\n            // The blend, the colour mask'
+      'if (packet.state.image_blend && !gp->enhanced) {\n            // The blend, the colour mask'
       in gl and
       "cache_color_mask(0, 0, 0, 0);" in gl)
 check("the image stores are ordered against the next draw, the resolve's "

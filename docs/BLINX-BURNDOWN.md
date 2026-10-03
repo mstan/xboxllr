@@ -11,6 +11,10 @@ Partial AOT and the existing CPU floor are acceptable for this milestone;
 full dashboard completion and zero dynarec do not block a first game attempt.
 The dated media findings below remain launch dependencies, not newly completed work.
 
+The [first live borrowed-renderer checkpoint](RESULTS-XEMU-PSH-2026-10-03.md)
+is implemented. Its performance remains experimental; Blinx media/loading is
+the next independent milestone and does not wait for renderer promotion.
+
 ## The next observable milestone
 
 **Attempt to launch Blinx through the real Xbox kernel and capture the first

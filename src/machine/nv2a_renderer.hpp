@@ -466,6 +466,14 @@ struct Nv2aGeneratedTexture {
 struct Nv2aGeneratedShaderPacket {
     Nv2aCombinerShaderState state;
     uint64_t fingerprint = 0;
+    // Unmodified guest controls for enhanced translators. The reference shader
+    // descriptor above includes software shortcuts and is not a hardware ABI.
+    struct GuestState {
+        bool valid = false;
+        uint32_t combiner_control = 0, shader_program = 0, shader_input = 0;
+        uint32_t control0 = 0, zminmax = 0, shade_mode = 0;
+        std::array<uint32_t, 4> texture_format{}, texture_control{}, texture_filter{};
+    } guest;
 
     uint32_t color_address = 0;
     uint32_t depth_address = 0;
@@ -522,6 +530,9 @@ struct Nv2aWitnessedProfileResult {
 
 class Nv2aRenderer {
 public:
+    // Final acceptance with collected geometry, before any destination effects.
+    // Backends may compile/choose a different program here, or decline the batch.
+    virtual bool prepare_generated_shader(const Nv2aGeneratedShaderPacket&) { return true; }
 #if XLLE_VSH_GPU_RESIDENT
     struct VshGpuResidentStats {
         uint64_t batches = 0, executions = 0, references = 0, vertices = 0;

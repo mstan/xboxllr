@@ -86,6 +86,8 @@ agent/bin/
 
 # External reference / harvest checkouts (kept out of tree; live in the workspace parent)
 xemu/
+# Deliberate licensed source import; not an external checkout or guest data.
+!/src/third_party/xemu/
 Cxbx-Reloaded/
 xboxrecomp-ref/
 cromwell/

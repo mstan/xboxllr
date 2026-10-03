@@ -405,6 +405,12 @@ virtual controller connection; keep it even though you are using a keyboard.
 The other options keep the network disconnected and use the current run settings.
 You do not need to tune them for your first boot.
 
+An experimental borrowed shader path is selectable with `--nv2a-renderer xemu`.
+It uses xemu-generated pixel shaders for supported draws and the reference path
+for the remainder. Return to `opengl` to opt out. This is an integration option,
+not a promise of 60 FPS or a qualified shipping default; see the
+[renderer contract and qualification notes](docs/RENDERER-XEMU-PSH.md).
+
 **Check:** a window should open and eventually show Xbox video. A fresh profile
 may first show the **CLOCK** screen. Let it finish loading, click inside the window,
 and use the controls below to set or confirm the clock. The target is the main

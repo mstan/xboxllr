@@ -13390,6 +13390,20 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
         st.uses_depth = uses_depth;
         st.fp64_interpolate = gpu_generic_shader_fp64_;
         st.color_format_x8 = color_format_x8;
+        auto& guest = gpu_shader_packet.guest;
+        guest.valid = true;
+        guest.combiner_control = raster_state[kRasterCombinerControl];
+        guest.shader_program = raster_state[kRasterShaderStageProgram];
+        guest.shader_input = (raster_state[kRasterShaderOtherStageInput] & 0x0FFFF000u) |
+                             (raster_state[kRasterDotRgbMapping] & 0xFFFu);
+        guest.control0 = raster_state[kRasterControl0];
+        guest.zminmax = raster_state[kRasterZMinMaxControl];
+        guest.shade_mode = raster_state[kRasterShadeMode];
+        for (size_t i = 0; i < 4; ++i) {
+            guest.texture_format[i] = raster_state[kRasterTextureFormat0 + i];
+            guest.texture_control[i] = raster_state[kRasterTextureControl0_0 + i];
+            guest.texture_filter[i] = raster_state[kRasterTextureFilter0 + i];
+        }
         if (decline == GenericShaderDeclineReason::kNone) {
             const Nv2aCombinerShaderReject reject =
                 nv2a_combiner_shader_supported(st);
@@ -14857,6 +14871,11 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
 #endif
     if (gpu_shader_collect) {
         bool submitted = false;
+        if (!gpu_shader_collect_failed && !raster_failed &&
+            !gpu_shader_packet.triangles.empty() &&
+            !renderer_->prepare_generated_shader(gpu_shader_packet)) {
+            gpu_shader_collect_failed = true;
+        }
         if (!gpu_shader_collect_failed && !raster_failed) {
             if (gpu_shader_packet.triangles.empty()) {
                 // Every triangle was culled or degenerate. The software path

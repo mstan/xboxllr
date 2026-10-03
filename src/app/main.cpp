@@ -2282,14 +2282,15 @@ int main(int argc, char** argv) {
             net_disconnected = true;
         else if (!std::strcmp(argv[i], "--nv2a-renderer")) {
             if (i + 1 >= argc) {
-                std::fprintf(stderr, "[nv2a-renderer] use --nv2a-renderer software|opengl\n");
+                std::fprintf(stderr, "[nv2a-renderer] use --nv2a-renderer software|opengl|xemu\n");
                 return 1;
             }
             nv2a_renderer_name = argv[++i];
             if (std::strcmp(nv2a_renderer_name, "software") &&
-                std::strcmp(nv2a_renderer_name, "opengl")) {
+                std::strcmp(nv2a_renderer_name, "opengl") &&
+                std::strcmp(nv2a_renderer_name, "xemu")) {
                 std::fprintf(stderr,
-                             "[nv2a-renderer] invalid renderer '%s'; use software or opengl\n",
+                             "[nv2a-renderer] invalid renderer '%s'; use software, opengl or xemu\n",
                              nv2a_renderer_name);
                 return 1;
             }
@@ -2734,14 +2735,15 @@ int main(int argc, char** argv) {
         return 2;
     }
     std::unique_ptr<Nv2aRenderer> nv2a_renderer;
-    if (nv2a_generated_submit_census && std::strcmp(nv2a_renderer_name, "opengl")) {
+    if (nv2a_generated_submit_census && !std::strcmp(nv2a_renderer_name, "software")) {
         std::fprintf(stderr, "[host] --nv2a-generated-submit-census requires "
                      "--nv2a-renderer opengl\n");
         return 2;
     }
-    if (!std::strcmp(nv2a_renderer_name, "opengl")) {
+    if (std::strcmp(nv2a_renderer_name, "software")) {
         std::string renderer_error;
-        nv2a_renderer = create_nv2a_opengl_renderer(renderer_error);
+        nv2a_renderer = create_nv2a_opengl_renderer(renderer_error,
+            !std::strcmp(nv2a_renderer_name, "xemu"));
         if (!nv2a_renderer) {
             std::fprintf(stderr, "[nv2a-renderer] %s\n", renderer_error.c_str());
             return 1;
@@ -2771,6 +2773,9 @@ int main(int argc, char** argv) {
                 nv2a_renderer_name,
                 nv2a_renderer ? "accelerated when supported, otherwise software" :
                                 "software");
+    if (!std::strcmp(nv2a_renderer_name, "xemu"))
+        std::printf("[nv2a-renderer] enhanced=xemu-psh experimental; reference opt-out: "
+                    "--nv2a-renderer opengl (or software); unsupported draws use reference\n");
 
     const uint64_t max_host_memory_bytes =
         max_host_memory_mb * 1024ull * 1024ull;

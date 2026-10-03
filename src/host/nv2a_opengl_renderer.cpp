@@ -2,6 +2,7 @@
 
 #include "host/nv2a_witnessed_gl_shaders.hpp"
 #include "host/nv2a_combiner_glsl.hpp"
+#include "host/nv2a_xemu_psh.hpp"
 #include "machine/perf_accounting.hpp"
 #include "machine/perf_excl.hpp"
 #if XLLE_VSH_GPU_RESIDENT
@@ -54,6 +55,7 @@ using GlUniform1f = void (*)(int, float);
 using GlUniform2i = void (*)(int, int, int);
 using GlUniform2f = void (*)(int, float, float);
 using GlUniform4f = void (*)(int, float, float, float, float);
+using GlUniform4i = void (*)(int, int, int, int, int);
 using GlUniform4fv = void (*)(int, int, const float*);
 using GlGenBuffers = void (*)(int, unsigned int*);
 using GlBindBuffer = void (*)(unsigned int, unsigned int);
@@ -1206,6 +1208,22 @@ class OpenGlNv2aRenderer final : public Nv2aRenderer {
     // in the file and needs the name in a parameter type.
     struct ResidentSurface;
 public:
+    void set_enhanced_xemu(bool enabled) { enhanced_xemu_ = enabled; }
+    bool prepare_generated_shader(const Nv2aGeneratedShaderPacket& packet) override {
+        if (!enhanced_xemu_) return true;
+        ++enhanced_attempts_;
+        const size_t decision = static_cast<size_t>(nv2a_xemu_psh_supported(packet));
+        if (++enhanced_decisions_[decision] == 1) {
+            std::printf("[nv2a-renderer] xemu-psh first-decision=%zu program=%08x input=%08x "
+                        "formats=%08x,%08x,%08x,%08x controls=%08x,%08x,%08x,%08x\n",
+                        decision, packet.guest.shader_program, packet.guest.shader_input,
+                        packet.guest.texture_format[0], packet.guest.texture_format[1],
+                        packet.guest.texture_format[2], packet.guest.texture_format[3],
+                        packet.guest.texture_control[0], packet.guest.texture_control[1],
+                        packet.guest.texture_control[2], packet.guest.texture_control[3]);
+        }
+        return supports_generated_shader(packet);
+    }
     OpenGlNv2aRenderer(SDL_Window* window, SDL_GLContext context, bool owns_video,
                        unsigned int fixture_program,
                        unsigned int texture_modulate_program,
@@ -1223,6 +1241,19 @@ public:
           resident_texture_modulate_program_(resident_texture_modulate_program),
           resident_dashboard_program_(resident_dashboard_program) {}
     ~OpenGlNv2aRenderer() override {
+        if (enhanced_xemu_) {
+            std::printf("[nv2a-renderer] xemu-psh attempts=%llu draws=%llu triangles=%llu "
+                        "eligible=%llu reference-state=%llu reference-combiner=%llu "
+                        "reference-texture=%llu reference-geometry=%llu\n",
+                        (unsigned long long)enhanced_attempts_,
+                        (unsigned long long)enhanced_draws_,
+                        (unsigned long long)enhanced_triangles_,
+                        (unsigned long long)enhanced_decisions_[0],
+                        (unsigned long long)enhanced_decisions_[1],
+                        (unsigned long long)enhanced_decisions_[2],
+                        (unsigned long long)enhanced_decisions_[3],
+                        (unsigned long long)enhanced_decisions_[4]);
+        }
         // Destruction can happen after an SDL presentation context was made
         // current; GL object deletion must be issued against this renderer's own
         // context, not whichever context happened to be current last.
@@ -1328,7 +1359,7 @@ public:
         if (window_) SDL_DestroyWindow(window_);
         if (owns_video_) SDL_QuitSubSystem(SDL_INIT_VIDEO);
     }
-    const char* name() const override { return "opengl"; }
+    const char* name() const override { return enhanced_xemu_ ? "xemu-psh-opengl" : "opengl"; }
     bool supports_generic_combiner(const Nv2aGenericCombinerPacket& packet) const override {
         if (packet.compute_fixture ==
             Nv2aGenericCombinerPacket::ComputeFixture::kUntexturedPrimaryTriangle) {
@@ -2319,6 +2350,10 @@ public:
 
     struct GeneratedProgram {
         unsigned int program = 0;
+        bool enhanced = false;
+        int loc_xemu_consts = -1, loc_xemu_clip_range = -1;
+        int loc_xemu_clip_region = -1, loc_xemu_surface_scale = -1;
+        int loc_xemu_tex_scale[4] = {-1, -1, -1, -1};
         int loc_surface_size = -1;
         int loc_clip_min = -1;
         int loc_clip_max = -1;
@@ -2347,17 +2382,22 @@ public:
 
     GeneratedProgram* ensure_generated_program(
         const Nv2aGeneratedShaderPacket& packet) {
+        const bool enhanced = enhanced_xemu_ &&
+            nv2a_xemu_psh_supported(packet) == XemuPshReject::kNone;
+        const uint64_t key = enhanced ? nv2a_xemu_psh_key(packet) : packet.fingerprint;
         if (GeneratedProgram* existing =
-                find_generated_program(packet.fingerprint)) {
+                find_generated_program(key)) {
             ++generated_stats_.cache_hits;
             return existing->failed ? nullptr : existing;
         }
         GeneratedProgram gp;
+        gp.enhanced = enhanced;
         const std::string fragment =
-            nv2a_generate_combiner_fragment_glsl(packet.state);
+            enhanced ? nv2a_xemu_fragment_glsl(packet) :
+                       nv2a_generate_combiner_fragment_glsl(packet.state);
         std::string error;
         ++generated_stats_.compiles;
-        if (!compile_graphics_program(kNv2aGeneratedVertexSource,
+        if (!compile_graphics_program(enhanced ? kNv2aXemuVertexSource : kNv2aGeneratedVertexSource,
                                       fragment.c_str(), "generated-combiner",
                                       gp.program, error)) {
             gp.failed = true;
@@ -2366,13 +2406,19 @@ public:
                          "[nv2a-renderer] generated combiner program %016llx "
                          "failed: %s\n",
                          (unsigned long long)packet.fingerprint, error.c_str());
-            generated_programs_.push_back({packet.fingerprint, gp});
+            generated_programs_.push_back({key, gp});
             return nullptr;
         }
         gp.loc_surface_size = cached_uniform_location(gp.program, "surface_size");
         gp.loc_clip_min = cached_uniform_location(gp.program, "clip_min");
         gp.loc_clip_max = cached_uniform_location(gp.program, "clip_max");
-        gp.loc_alpha_ref = cached_uniform_location(gp.program, "alpha_ref");
+        gp.loc_alpha_ref = cached_uniform_location(gp.program, enhanced ? "alphaRef" : "alpha_ref");
+        if (enhanced) {
+            gp.loc_xemu_consts = cached_uniform_location(gp.program, "consts[0]");
+            gp.loc_xemu_clip_range = cached_uniform_location(gp.program, "clipRange");
+            gp.loc_xemu_clip_region = cached_uniform_location(gp.program, "clipRegion[0]");
+            gp.loc_xemu_surface_scale = cached_uniform_location(gp.program, "surfaceScale");
+        }
         for (int i = 0; i < 8; ++i) {
             char name[32];
             std::snprintf(name, sizeof(name), "stage_const0[%d]", i);
@@ -2386,15 +2432,19 @@ public:
             cached_uniform_location(gp.program, "final_const1");
         for (int i = 0; i < 4; ++i) {
             char name[32];
-            std::snprintf(name, sizeof(name), "texture%d", i);
+            std::snprintf(name, sizeof(name), enhanced ? "texSamp%d" : "texture%d", i);
             gp.loc_texture[i] = cached_uniform_location(gp.program, name);
+            if (enhanced) {
+                std::snprintf(name, sizeof(name), "texScale[%d]", i);
+                gp.loc_xemu_tex_scale[i] = cached_uniform_location(gp.program, name);
+            }
             std::snprintf(name, sizeof(name), "tex_size%d", i);
             gp.loc_tex_size[i] = cached_uniform_location(gp.program, name);
             std::snprintf(name, sizeof(name), "tex_border%d", i);
             gp.loc_tex_border[i] = cached_uniform_location(gp.program, name);
         }
         ++generated_stats_.programs;
-        generated_programs_.push_back({packet.fingerprint, gp});
+        generated_programs_.push_back({key, gp});
         return &generated_programs_.back().second;
     }
 
@@ -2628,6 +2678,20 @@ public:
             } else {
                 cache_bind_texture_unit(kGlTexture0 + i, slot.texture);
             }
+            // The same owned texture slot can alternate reference/enhanced
+            // draws. Rebind sampler behavior even when the pixel upload is reused.
+            if (enhanced_xemu_) {
+                const auto& ts = packet.state.textures[i];
+                const uint32_t filter = packet.guest.texture_filter[i];
+                tex_parameter_i_(kGlTexture2D, kGlTextureMinFilter,
+                    gp->enhanced && ((filter >> 16) & 255) == 2 ? kGlLinear : kGlNearest);
+                tex_parameter_i_(kGlTexture2D, kGlTextureMagFilter,
+                    gp->enhanced && ((filter >> 24) & 15) == 2 ? kGlLinear : kGlNearest);
+                tex_parameter_i_(kGlTexture2D, kGlTextureWrapS,
+                    gp->enhanced && ts.address_u == Nv2aCombinerShaderState::AddressMode::kRepeat ? kGlRepeat : kGlClampToEdge);
+                tex_parameter_i_(kGlTexture2D, kGlTextureWrapT,
+                    gp->enhanced && ts.address_v == Nv2aCombinerShaderState::AddressMode::kRepeat ? kGlRepeat : kGlClampToEdge);
+            }
             const bool same_content = texture.content_id
                 ? slot.content_id == texture.content_id
                 : slot.content_id == 0 && slot.hash == texture.hash;
@@ -2753,8 +2817,8 @@ public:
                     static_cast<float>(packet.surface_height));
         uniform_1f_(gp->loc_clip_min, packet.clip_min);
         uniform_1f_(gp->loc_clip_max, packet.clip_max);
-        uniform_1f_(gp->loc_alpha_ref,
-                    static_cast<float>(packet.alpha_ref & 0xFFu));
+        if (gp->enhanced) uniform_1i_(gp->loc_alpha_ref, packet.alpha_ref & 0xFFu);
+        else uniform_1f_(gp->loc_alpha_ref, static_cast<float>(packet.alpha_ref & 0xFFu));
         const auto unpack = [](uint32_t word, float* out) {
             out[0] = static_cast<float>((word >> 16) & 0xFFu) / 255.0f;
             out[1] = static_cast<float>((word >> 8) & 0xFFu) / 255.0f;
@@ -2762,6 +2826,23 @@ public:
             out[3] = static_cast<float>((word >> 24) & 0xFFu) / 255.0f;
         };
         float c[4];
+        if (gp->enhanced) {
+            float constants[18 * 4];
+            for (size_t i = 0; i < 8; ++i) {
+                unpack(packet.stage_const0[i], constants + i * 8);
+                unpack(packet.stage_const1[i], constants + i * 8 + 4);
+            }
+            unpack(packet.final_factor0, constants + 64);
+            unpack(packet.final_factor1, constants + 68);
+            uniform_4fv_(gp->loc_xemu_consts, 18, constants);
+            uniform_4f_(gp->loc_xemu_clip_range, 0, 16777215.0f, packet.clip_min, packet.clip_max);
+            uniform_4i_(gp->loc_xemu_clip_region, packet.xmin,
+                packet.surface_height - 1u - packet.ymax,
+                packet.xmax + 1u, packet.surface_height - packet.ymin);
+            // Remaining clip rectangles stay empty at their GL initial values.
+            uniform_2i_(gp->loc_xemu_surface_scale, 1, 1);
+            for (size_t i = 0; i < 4; ++i) uniform_1f_(gp->loc_xemu_tex_scale[i], 1.0f);
+        }
         const auto upload_stage_uniforms_scalar = [&](
             const std::array<int, 8>& locations,
             const std::array<uint32_t, 8>& words) {
@@ -2866,7 +2947,7 @@ public:
             cache_depth_test(false, kGlAlways);
             cache_depth_mask(false);
         }
-        if (packet.state.image_blend) {
+        if (packet.state.image_blend && !gp->enhanced) {
             // The blend, the colour mask and the X8 alpha rule are all inside
             // the fragment program now, written against an rgba8 image binding
             // under a fragment-shader interlock. The ROP must therefore write
@@ -2926,11 +3007,11 @@ public:
         // draws contribute almost nothing", which no amount of reading the
         // shader can settle.
         if (!generated_nodraw_)
-            gpu_timed_draw_arrays(kGlTriangles, 0, static_cast<int>(count * 6u));
+            gpu_timed_draw_arrays(kGlTriangles, 0, static_cast<int>(count * (gp->enhanced ? 3u : 6u)));
 #if XLLE_GENERATED_SUBMIT_DIAGNOSTICS
         generated_submit_phase(Nv2aGeneratedSubmitPhaseRecorder::kBarrier);
 #endif
-        if (packet.state.image_blend) {
+        if (packet.state.image_blend && !gp->enhanced) {
             // The image stores must be visible to the NEXT generated draw (a
             // second interlocked read-modify-write of the same pixels), to the
             // resident-surface readback that a resolve performs through the
@@ -2981,6 +3062,10 @@ public:
                                                 packet.ymax - packet.ymin + 1u);
         }
         ++generated_stats_.draws;
+        if (gp->enhanced && !generated_nodraw_) {
+            ++enhanced_draws_;
+            enhanced_triangles_ += count;
+        }
         generated_stats_.triangles += count;
         result.triangles = count;
         result.draw_calls = 1;
@@ -4941,6 +5026,7 @@ public:
                load_gl(uniform_1f_, "glUniform1f") &&
                load_gl(uniform_1ui_, "glUniform1ui") &&
                load_gl(uniform_2i_, "glUniform2i") &&
+               load_gl(uniform_4i_, "glUniform4i") &&
                load_gl(uniform_2f_, "glUniform2f") &&
                load_gl(uniform_4f_, "glUniform4f") &&
                load_gl(gen_buffers_, "glGenBuffers") &&
@@ -6847,6 +6933,10 @@ private:
     GlUseProgram use_program_ = nullptr; GlGetUniformLocation uniform_location_ = nullptr;
     GlUniform1i uniform_1i_ = nullptr; GlUniform1ui uniform_1ui_ = nullptr;
     GlUniform1f uniform_1f_ = nullptr;
+    GlUniform4i uniform_4i_ = nullptr;
+    bool enhanced_xemu_ = false;
+    uint64_t enhanced_attempts_ = 0, enhanced_draws_ = 0, enhanced_triangles_ = 0;
+    std::array<uint64_t, static_cast<size_t>(XemuPshReject::kCount)> enhanced_decisions_{};
     GlUniform2i uniform_2i_ = nullptr; GlUniform2f uniform_2f_ = nullptr;
     GlUniform4f uniform_4f_ = nullptr; GlUniform4fv uniform_4fv_ = nullptr;
     GlGenBuffers gen_buffers_ = nullptr;
@@ -7469,7 +7559,7 @@ private:
 
 }  // namespace
 
-std::unique_ptr<Nv2aRenderer> create_nv2a_opengl_renderer(std::string& error) {
+std::unique_ptr<Nv2aRenderer> create_nv2a_opengl_renderer(std::string& error, bool enhanced_xemu) {
     error.clear();
     const bool owns_video = (SDL_WasInit(SDL_INIT_VIDEO) & SDL_INIT_VIDEO) == 0;
     if (owns_video && !SDL_InitSubSystem(SDL_INIT_VIDEO)) {
@@ -7518,6 +7608,7 @@ std::unique_ptr<Nv2aRenderer> create_nv2a_opengl_renderer(std::string& error) {
         std::make_unique<OpenGlNv2aRenderer>(window, context, owns_video, 0, 0, 0,
                                              0, 0, 0, 0);
     if (!renderer->initialize(error)) return nullptr;
+    renderer->set_enhanced_xemu(enhanced_xemu);
     restore_previous_gl_context(previous_window, previous_context, window,
                                 perf::kGlContextOtherRestore);
     std::printf("[nv2a-renderer] opengl context ready: GL %d.%d; narrow compute fixtures enabled\n",
@@ -7525,7 +7616,7 @@ std::unique_ptr<Nv2aRenderer> create_nv2a_opengl_renderer(std::string& error) {
     return renderer;
 }
 #else
-std::unique_ptr<Nv2aRenderer> create_nv2a_opengl_renderer(std::string& error) {
+std::unique_ptr<Nv2aRenderer> create_nv2a_opengl_renderer(std::string& error, bool) {
     error = "OpenGL renderer is unavailable: xlle was built without SDL3";
     return nullptr;
 }

@@ -1,10 +1,10 @@
 # Goal: faithful Xbox floor, enhanced native execution and playable games
 
 Owner clarification, 2026-10-03. Central tracker: `beads-xbox.1.25.5`;
-planning decision: `beads-xbox.1.40`. Work solo. This supersedes the earlier
+planning decision: `beads-xbox.1.40`. This supersedes the earlier
 dashboard-first/strict-AOT-first work order and blanket exclusion of donor HLE.
-Implementation is paused for the owner's check-in; this revision records the
-requested gameplan, not newly implemented runtime features.
+Implementation resumed on the owner's subsequent direction. Bounded Sol/high
+assistance is authorized for this task; runtime progress is recorded in STATUS.
 
 **The target ecosystem has a faithful, runnable LLE floor and interchangeable enhanced
 implementations. Qualified enhanced paths are the intended shipping defaults,

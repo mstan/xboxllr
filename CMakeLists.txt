@@ -161,7 +161,9 @@ target_include_directories(xlle_spike PUBLIC ${XLLE_INCLUDES})
 
 # --- host shell ---
 add_library(xlle_host STATIC src/host/sdl_shell.cpp src/host/xid_input.cpp
-  src/host/nv2a_opengl_renderer.cpp src/host/nv2a_combiner_glsl.cpp)
+  src/host/nv2a_opengl_renderer.cpp src/host/nv2a_combiner_glsl.cpp
+  src/host/nv2a_xemu_psh.cpp src/third_party/xemu/psh.c
+  src/third_party/xemu/common.c)
 target_include_directories(xlle_host PUBLIC ${XLLE_INCLUDES})
 target_compile_definitions(xlle_host PUBLIC XLLE_VSH_GPU_RESIDENT=$<BOOL:${XLLE_VSH_GPU_RESIDENT}>)
 if(XLLE_GENERATED_SUBMIT_DIAGNOSTICS)
@@ -304,6 +306,10 @@ if(XLLE_NATIVE_OPTIMIZATIONS AND
   target_compile_options(test_nv2a PRIVATE -march=native)
 endif()
 add_test(NAME nv2a COMMAND test_nv2a)
+add_executable(test_nv2a_xemu_psh tests/test_nv2a_xemu_psh.cpp)
+target_link_libraries(test_nv2a_xemu_psh PRIVATE xlle_host)
+add_test(NAME nv2a_xemu_psh COMMAND test_nv2a_xemu_psh)
+set_tests_properties(nv2a_xemu_psh PROPERTIES SKIP_RETURN_CODE 77)
 
 add_executable(test_apu tests/test_apu.cpp)
 target_include_directories(test_apu PRIVATE ${XLLE_INCLUDES})

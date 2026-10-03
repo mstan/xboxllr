@@ -65,6 +65,16 @@ safeguards, integrity validation and a locally administered virtual MAC address.
 
 ## Other xemu references
 
+The experimental `--nv2a-renderer xemu` path now directly incorporates the
+production pixel-shader generator at the same pinned xemu commit. Files and
+mechanical changes are listed in
+[src/third_party/xemu/README.md](src/third_party/xemu/README.md). The pixel
+translator retains GPL version 2-or-3 terms and its espes, Jannik Vogel,
+Matt Borgerson, Cxbx and Xeon attribution; supporting files retain their LGPL
+version 2-or-later notices. The integration supplies actual draw state and
+uniforms, without importing a QEMU machine shim. Existing combined-executable
+distribution questions in LICENSE-SCOPE remain unresolved.
+
 The project documents xemu-derived hardware behavior and source references in
 its design and implementation comments. Those comments are not an assertion
 that all referenced source was copied or that all implementation is original.

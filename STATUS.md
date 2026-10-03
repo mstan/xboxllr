@@ -3,6 +3,28 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-10-03 - Borrowed xemu pixel shaders run the full dashboard route
+
+The experimental `--nv2a-renderer xemu` path executes xemu's pinned production
+pixel-shader generator through the existing owned-packet/resident-surface
+contract. The 27B dashboard/Settings/return route completes with **1,035 donor
+draws / 806,426 triangles**, and 7,391 generated batches use reference shaders.
+Startup opt-out is `opengl` or `software`. No donor machine/device shims or
+placeholder shader outputs were incorporated. The full suite passes **77/77**.
+
+The reference still matches all prior checkpoint logs and ten images. Enhanced
+execution matches CPU/input/device-event/DMA-write counts, with recorded rendered
+byte differences. Clock and Settings-interior captures are exact; six main-menu
+captures differ, up to 30/255 in a channel. Whole-scene tolerance remains open.
+
+The first sequential timing pair is **311.280 s enhanced / 245.645 s reference**.
+It has host variation before donor draws and is not a qualified backend-cost
+measurement; there is no speedup or 60 FPS claim. Keep the path experimental.
+This completes the live borrowed-component checkpoint; the next independent
+work is real Blinx media/loading with partial AOT. Full findings and limits:
+[results](docs/RESULTS-XEMU-PSH-2026-10-03.md),
+[contract](docs/RENDERER-XEMU-PSH.md). Tracking: `beads-xbox.1.15.7`.
+
 ## 2026-10-03 - Delivery plan now prioritizes enhanced execution and game progress
 
 The owner's clarified target is a faithful runnable LLE floor with interchangeable
@@ -17,7 +39,8 @@ AOT coverage expansion. Full AOT with dynarec removed remains a final gate in
 both profiles. The PSX/Tomba renderer facade, software fallback and BIOS-HLE
 dispatch were inspected as architectural precedents. This is a planning change:
 no renderer transplant, new HLE service, game boot or 60 FPS result is claimed.
-Implementation remains paused for the check-in. Planning: `beads-xbox.1.40`.
+Implementation subsequently resumed at the owner's request, starting with the
+borrowed renderer boundary (`beads-xbox.1.15.7`). Planning: `beads-xbox.1.40`.
 
 ## 2026-10-03 - Memory integer AOT raises main-menu coverage to 77.60%
 
