@@ -1,6 +1,6 @@
 # Private dashboard AOT workflow
 
-Current work uses ABI 4 fixed MMX/x87 services and the qualified 27B menu route;
+Current work uses ABI 5 exact narrow RAM reads and fixed MMX/x87 services;
 see [STATUS](../STATUS.md) and the
 [x87 evidence](RESULTS-AOT-X87-2026-10-03.md). Full menu AOT and 60 FPS remain open.
 The examples below retain the original capture/build workflow and startup
@@ -144,8 +144,8 @@ indices above 63. An explicit mask is the legacy diagnostic selector for indices
 0..63; higher indices are excluded in that mode. Region ordering follows ascending selected address. Registration
 alone does not prove execution: read the `[aot]` and `[aot-region]` retirement counts.
 
-ABI version 4 retains the cached code-segment limit and MMX/cache-hint services,
-and adds fixed x87 memory/register callbacks. Rebuild generated artifacts;
+ABI version 5 retains the cached code-segment limit and MMX/x87/cache-hint services,
+and adds exact one- or two-byte RAM reads for MOVZX. Rebuild generated artifacts;
 older ABI artifacts are rejected. The measured kernel uses a
 zero-based 3 GiB code segment and full-range data/stack segments. Native entry
 checks that all region instruction bytes fit inside CS; taken branches check their
@@ -168,6 +168,18 @@ For multi-bit rotates, undefined OF follows the pinned CPU floor's policy;
 logical operations retain the documented undefined-AF policy. Widths, prefixes
 and memory forms outside the implemented subset still exit explicitly. See
 [integer qualification](RESULTS-AOT-KERNEL-INTEGER-2026-10-03.md).
+
+The scalar extension adds SHL/SHR/SAR on 32-bit registers, all 16 short/near
+conditional branches, MOVZX from byte/word registers or qualified RAM, and C7
+immediate stores. Narrow reads certify exactly their own width and cannot reuse
+the four-byte read cache. Split reads require every page to be cached and the
+complete span to be contiguous in one owned RAM mapping. Cold, absent, MMIO or
+noncontiguous mappings decline without memory or destination effects.
+Immediate stores retain the existing complete-span permission and code
+invalidation contract. Shift counts are masked to five bits, with all flags
+preserved for zero counts; undefined nonzero AF and multi-bit OF follow the
+pinned floor's documented policy. See
+[scalar qualification](RESULTS-AOT-SCALAR-2026-10-03.md).
 
 To remove embedded private code, clear the cached input and rebuild:
 

@@ -25,6 +25,7 @@ private:
     size_t region_index(uint32_t pc) const;
     void* ram(uint32_t address, size_t size, unsigned access);
     static int read32(void* opaque, uint32_t address, uint32_t* value);
+    static int read_narrow(void* opaque, uint32_t address, unsigned size, uint32_t* value);
     static int write32(void* opaque, uint32_t address, uint32_t value);
     void commit_ram(uint8_t* host, uint64_t value, size_t size);
     static xlle_aot_exit mmx_load64(void* opaque, unsigned reg, uint32_t address);

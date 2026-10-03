@@ -74,7 +74,7 @@ class AotCompileTests(unittest.TestCase):
                         self.assertEqual(inst.operands[1], aot_compile.Operand(
                             "reg8" if opcode == 0xd3 else "imm8", 1 if opcode != 0xc1 else count))
         for raw in ("c10001", "d108", "d308", "c0c001", "d0c0", "d2c0", "c1d001",
-                    "d1d8", "d3e0", "66d1c0", "67d1c0", "f0d1c0", "f3d3c0"):
+                    "d1d8", "d3f0", "66d1c0", "67d1c0", "f0d1c0", "f3d3c0"):
             self.assertEqual(aot_compile.decode_one(bytes.fromhex(raw), 0).status, "unsupported")
         for raw in ("c1", "c1c0", "d1", "d3"):
             with self.assertRaises(aot_compile.AotError):
@@ -104,6 +104,60 @@ class AotCompileTests(unittest.TestCase):
         for raw in ("09", "0b", "0d", "81c8", "83c8"):
             with self.assertRaises(aot_compile.AotError):
                 aot_compile.decode_one(bytes.fromhex(raw), 0)
+
+    def test_shift32_encodings(self):
+        for group, name in ((4,"shl"),(5,"shr"),(7,"sar")):
+            for reg in range(8):
+                for opcode in (0xc1,0xd1,0xd3):
+                    for count in (range(256) if opcode==0xc1 else (1,)):
+                        raw=bytes([opcode,0xc0+group*8+reg]+([count] if opcode==0xc1 else []))
+                        inst=aot_compile.decode_one(raw,0)
+                        self.assertEqual(inst.mnemonic,name+"_r32")
+                        self.assertEqual(inst.length,len(raw))
+                        self.assertEqual(inst.operands,[aot_compile.Operand("reg32",reg),
+                            aot_compile.Operand("reg8" if opcode==0xd3 else "imm8",count)])
+        for raw in ("d120","c12801","d338","d0e0","66d1e0","f0d1e0","d1f0"):
+            self.assertEqual(aot_compile.decode_one(bytes.fromhex(raw),0).status,"unsupported")
+
+    def test_all_near_condition_encodings(self):
+        for condition,name in enumerate(aot_compile.CC_NAMES):
+            for near in (False,True):
+                length=6 if near else 2
+                for displacement in (-length,-1,0,1,127):
+                    raw=(bytes([0x0f,0x80+condition])+displacement.to_bytes(4,"little",signed=True)
+                         if near else bytes([0x70+condition,displacement&255]))
+                    inst=aot_compile.decode_one(raw,0)
+                    self.assertEqual(inst.mnemonic,name+("_rel32" if near else "_rel8"))
+                    self.assertEqual(inst.length,length)
+                    self.assertEqual(inst.edges[0]['target'],length+displacement)
+                    self.assertEqual(inst.edges[1]['kind'],'fallthrough')
+                with self.assertRaises(aot_compile.AotError):aot_compile.decode_one(raw[:-1],0)
+        for raw in ('667001','660f8201000000','f07401','e301'):
+            self.assertEqual(aot_compile.decode_one(bytes.fromhex(raw),0).status,'unsupported')
+
+    def test_movzx_and_immediate_memory_forms(self):
+        for width,opcode in ((8,0xb6),(16,0xb7)):
+            for dest in range(8):
+                for source in range(8):
+                    inst=aot_compile.decode_one(bytes([0x0f,opcode,0xc0+dest*8+source]),0)
+                    self.assertEqual(inst.operands,[aot_compile.Operand('reg32',dest),aot_compile.Operand(f'reg{width}',source)])
+            for suffix in ('06','44b320','45fc','842430000000','048500210000'):
+                inst=aot_compile.decode_one(bytes([0x0f,opcode])+bytes.fromhex(suffix),0)
+                self.assertEqual(inst.operands[1].kind,f'mem{width}')
+            inst=aot_compile.decode_one(bytes([0x0f,opcode])+bytes.fromhex('44b3fc'),0)
+            self.assertEqual(aot_compile.operand_manifest(inst.operands[1]),
+                             {'kind':f'mem{width}','value':0xfffffffc,'base':3,'index':6,'scale':4})
+        for reg in range(8):
+            inst=aot_compile.decode_one(bytes([0xc7,0xc0+reg,0x78,0x56,0x34,0x12]),0)
+            self.assertEqual(inst.mnemonic,'mov_r32_imm32')
+            self.assertEqual([o.value for o in inst.operands],[reg,0x12345678])
+        inst=aot_compile.decode_one(bytes.fromhex('c744b3fc78563412'),0)
+        self.assertEqual(inst.mnemonic,'mov_imm32_to_mem32')
+        self.assertEqual(inst.operands,[aot_compile.Operand('mem32',0xfffffffc,3,6,4),aot_compile.Operand('imm32',0x12345678)])
+        for raw in ('c7','c700','c704','c745fc1234','0fb6','0fb744','0fb78501'):
+            with self.assertRaises(aot_compile.AotError):aot_compile.decode_one(bytes.fromhex(raw),0)
+        for raw in ('66c7001234','67c700','f0c700','c708','c7f8','660fb6c0','670fb700','f00fb6c0'):
+            self.assertEqual(aot_compile.decode_one(bytes.fromhex(raw),0).status,'unsupported')
 
     def compile_doc(self, doc):
         td = tempfile.TemporaryDirectory()

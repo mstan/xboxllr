@@ -19,8 +19,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
-ABI_VERSION = 4
+ABI_VERSION = 5
 REG_NAMES = ["eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"]
+CC_NAMES = ["jo", "jno", "jb", "jae", "je", "jne", "jbe", "ja",
+            "js", "jns", "jp", "jnp", "jl", "jge", "jle", "jg"]
 NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 
 
@@ -86,7 +88,7 @@ def decode_modrm_reg_only(code: bytes, offset: int, mnemonic: str) -> tuple[int,
 
 def branch_edge(kind: str, target: int, next_offset: int, size: int) -> list[dict[str, Any]]:
     edges: list[dict[str, Any]] = [{"kind": kind, "target": target}]
-    if kind in ("je", "jne"):
+    if kind in CC_NAMES:
         edges.append({"kind": "fallthrough", "target": next_offset})
     for e in edges:
         t = e["target"]
@@ -152,6 +154,22 @@ def decode_one(code: bytes, offset: int) -> DecodedInstruction:
 
     if op == 0x0F and offset + 1 < len(code):
         second = code[offset + 1]
+        if 0x80 <= second <= 0x8F:
+            rel = i32(read_u32(code, offset + 2, "jcc rel32"))
+            kind = CC_NAMES[second & 15]
+            inst = DecodedInstruction(offset, 6, kind + "_rel32", operands=[Operand("rel32", rel)])
+            inst.edges = branch_edge(kind, offset + 6 + rel, offset + 6, len(code))
+            return inst
+        if second in (0xB6, 0xB7):
+            modrm = read_u8(code, offset + 2, "MOVZX ModRM")
+            width = 8 if second == 0xB6 else 16
+            if modrm >> 6 == 3:
+                source, end = Operand(f"reg{width}", modrm & 7), offset + 3
+            else:
+                memory, end = decode_memory32(code, offset + 2)
+                source = Operand(f"mem{width}", memory.value, memory.base, memory.index, memory.scale)
+            return DecodedInstruction(offset, end-offset, "movzx_r32",
+                                      operands=[Operand("reg32", (modrm >> 3) & 7), source])
         if 0xC8 <= second <= 0xCF:
             return DecodedInstruction(offset, 2, "bswap_r32",
                                       operands=[Operand("reg32", second - 0xC8)])
@@ -215,6 +233,18 @@ def decode_one(code: bytes, offset: int) -> DecodedInstruction:
     if 0xB0 <= op <= 0xB7:
         imm = read_u8(code, offset + 1, "mov r8,imm8")
         return DecodedInstruction(offset, 2, "mov_r8_imm8", operands=[Operand("reg8", op - 0xB0), Operand("imm8", imm)])
+    if op == 0xC7:
+        modrm = read_u8(code, offset + 1, "MOV immediate ModRM")
+        if (modrm >> 3) & 7:
+            return DecodedInstruction(offset, 2, "unsupported_mov_immediate_form", status="unsupported")
+        if modrm >> 6 == 3:
+            destination, end, name = Operand("reg32", modrm & 7), offset + 2, "mov_r32_imm32"
+        else:
+            destination, end = decode_memory32(code, offset + 1)
+            name = "mov_imm32_to_mem32"
+        immediate = read_u32(code, end, "MOV immediate32")
+        return DecodedInstruction(offset, end + 4 - offset, name,
+                                  operands=[destination, Operand("imm32", immediate)])
     if op == 0x8D:
         modrm = read_u8(code, offset + 1, "lea ModRM")
         if modrm >> 6 == 3:
@@ -224,10 +254,10 @@ def decode_one(code: bytes, offset: int) -> DecodedInstruction:
                                   operands=[Operand("reg32", (modrm >> 3) & 7), address])
     if op in (0xC1, 0xD1, 0xD3):
         modrm = read_u8(code, offset + 1, "group-2 ModRM")
-        operation = {0: "rol", 1: "ror"}.get((modrm >> 3) & 7)
+        operation = {0: "rol", 1: "ror", 4: "shl", 5: "shr", 7: "sar"}.get((modrm >> 3) & 7)
         if modrm >> 6 == 3 and operation:
             count = (Operand("reg8", 1) if op == 0xD3 else
-                     Operand("imm8", read_u8(code, offset + 2, "rotate immediate") if op == 0xC1 else 1))
+                     Operand("imm8", read_u8(code, offset + 2, "shift/rotate immediate") if op == 0xC1 else 1))
             return DecodedInstruction(offset, 3 if op == 0xC1 else 2, operation + "_r32",
                                       operands=[Operand("reg32", modrm & 7), count])
         return DecodedInstruction(offset, 2, "unsupported_group2", status="unsupported")
@@ -302,11 +332,11 @@ def decode_one(code: bytes, offset: int) -> DecodedInstruction:
     if op == 0xA3:
         addr = read_u32(code, offset + 1, "mov moffs32,eax")
         return DecodedInstruction(offset, 5, "mov_moffs32_eax", operands=[Operand("moffs32", addr)])
-    if op in (0x74, 0x75):
+    if 0x70 <= op <= 0x7F:
         rel = i8(read_u8(code, offset + 1, "jcc rel8"))
         target = offset + 2 + rel
-        mnemonic = "je_rel8" if op == 0x74 else "jne_rel8"
-        kind = "je" if op == 0x74 else "jne"
+        kind = CC_NAMES[op & 15]
+        mnemonic = kind + "_rel8"
         inst = DecodedInstruction(offset, 2, mnemonic, operands=[Operand("rel8", rel)])
         inst.edges = branch_edge(kind, target, offset + 2, len(code))
         return inst
@@ -412,7 +442,7 @@ def parse_region(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 def operand_manifest(op: Operand) -> dict[str, Any]:
-    if op.kind in ("mem32", "mem64"):
+    if op.kind in ("mem8", "mem16", "mem32", "mem64"):
         return {"kind": op.kind, "value": op.value,
                 "base": op.base, "index": op.index, "scale": op.scale}
     return {"kind": op.kind, "value": op.value}
@@ -562,13 +592,29 @@ def emit_supported_body(inst: DecodedInstruction, region: dict[str, Any]) -> lis
     elif m == "mov_r32_to_mem32":
         lines.append(f"            if (!xlle_aot_write32(bus, {address_expr(ops[1])}, {reg_expr(ops[0].value)})) return XLLE_AOT_MEMORY;")
         lines += finish()
+    elif m == "mov_imm32_to_mem32":
+        lines.append(f"            if (!xlle_aot_write32(bus, {address_expr(ops[0])}, 0x{ops[1].value:08x}u)) return XLLE_AOT_MEMORY;")
+        lines += finish()
+    elif m == "movzx_r32":
+        source = ops[1]
+        if source.kind == "reg8":
+            value = f"xlle_aot_get8(state, {source.value}u)"
+        elif source.kind == "reg16":
+            value = f"({reg_expr(source.value)} & 0xffffu)"
+        else:
+            size = 1 if source.kind == "mem8" else 2
+            lines.append("            uint32_t value = 0;")
+            lines.append(f"            if (!xlle_aot_read_narrow(bus, {address_expr(source)}, {size}u, &value)) return XLLE_AOT_MEMORY;")
+            value = "value"
+        lines.append(f"            {reg_expr(ops[0].value)} = {value};")
+        lines += finish()
     elif m == "lea_r32":
         # LEA computes the effective offset. It neither reads memory nor adds a
         # segment base, and leaves every flag unchanged. RHS uses old registers
         # even when the destination is also the base or index.
         lines.append(f"            {reg_expr(ops[0].value)} = {address_expr(ops[1])};")
         lines += finish()
-    elif m in ("rol_r32", "ror_r32"):
+    elif m in ("rol_r32", "ror_r32", "shl_r32", "shr_r32", "sar_r32"):
         reg = reg_expr(ops[0].value)
         count = "xlle_aot_get8(state, 1u)" if ops[1].kind == "reg8" else f"{ops[1].value}u"
         lines.append(f"            {reg} = xlle_aot_{m[:3]}32(state, {reg}, {count});")
@@ -661,9 +707,20 @@ def emit_supported_body(inst: DecodedInstruction, region: dict[str, Any]) -> lis
     elif m == "mov_moffs32_eax":
         lines.append(f"            if (!xlle_aot_write32(bus, 0x{ops[0].value:08x}u, state->gpr[0])) return XLLE_AOT_MEMORY;")
         lines += finish()
-    elif m in ("je_rel8", "jne_rel8"):
-        target = next(e["target"] for e in inst.edges if e["kind"] in ("je", "jne"))
-        cond = "(state->eflags & 0x40u)" if m == "je_rel8" else "!(state->eflags & 0x40u)"
+    elif m.split("_")[0] in CC_NAMES:
+        kind = m.split("_")[0]
+        target = next(e["target"] for e in inst.edges if e["kind"] == kind)
+        signed_less = "(((state->eflags >> 7) ^ (state->eflags >> 11)) & 1u)"
+        conditions = ["(state->eflags & 0x800u)", "!(state->eflags & 0x800u)",
+                      "(state->eflags & 1u)", "!(state->eflags & 1u)",
+                      "(state->eflags & 0x40u)", "!(state->eflags & 0x40u)",
+                      "(state->eflags & 0x41u)", "!(state->eflags & 0x41u)",
+                      "(state->eflags & 0x80u)", "!(state->eflags & 0x80u)",
+                      "(state->eflags & 4u)", "!(state->eflags & 4u)",
+                      signed_less, "!" + signed_less,
+                      f"((state->eflags & 0x40u) || {signed_less})",
+                      f"(!(state->eflags & 0x40u) && !{signed_less})"]
+        cond = conditions[CC_NAMES.index(kind)]
         lines.append(f"            const uint32_t target = 0x{u32(base + int(target)):08x}u;")
         lines.append(f"            if ({cond} && !xlle_aot_branch_allowed(bus, target)) return XLLE_AOT_CONTEXT;")
         lines.append(f"            state->eip = {cond} ? target : 0x{next_eip:08x}u;")

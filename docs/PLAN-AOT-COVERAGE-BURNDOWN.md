@@ -95,6 +95,17 @@ Settings-entry native coverage rises from 29.33% to **61.32%**; main-idle stays
 27B; public tests pass 72/72. Shifts, extension/narrow transfers, branches,
 LEAVE and memory/system operations remain measured gaps. C1/C3/C6 remain open.
 
+The [scalar checkpoint](RESULTS-AOT-SCALAR-2026-10-03.md) adds general shifts,
+all short/near conditions, MOVZX8/16 and immediate stores. ABI 5 certifies exact
+narrow reads; independent and strict machine tests pass. **246 regions** yield
+**70.53%** main-idle native execution and **76.72%** at Settings entry. All 270
+checkpoints and ten images match across floor/O0/O2 and the previous reference;
+public tests pass **74/74**. Wider selection also creates substantially more
+native/fallback handoffs, including repeated zero-retirement admission attempts.
+C5 must qualify and reduce that cost; the coverage gain is not a speed claim.
+Error-code CPU exception delivery is an existing open LLE gap tracked in
+`beads-xbox.1.36`. No whole C0-C6 stage closes from this checkpoint.
+
 | ID | Deliverable | Depends on | Difficulty | Gate to close |
 | --- | --- | --- | --- | --- |
 | C0 | Trustworthy program and workload inventory | Existing capture/tools | Medium | Pinned images, initial static graph with explicit gaps, phase/version evidence, reconciled counters and a tested native-required detector |

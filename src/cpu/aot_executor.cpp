@@ -108,6 +108,17 @@ int AotExecutor::read32(void* opaque, uint32_t address, uint32_t* value) {
     return 1;
 }
 
+int AotExecutor::read_narrow(void* opaque, uint32_t address, unsigned size, uint32_t* value) {
+    auto& self = *static_cast<AotExecutor*>(opaque);
+    if ((size != 1 && size != 2) || !value) return 0;
+    // Do not reuse the four-byte read cache for a different access width.
+    const auto* p = static_cast<const uint8_t*>(self.ram(address, size, XLLE_UNICORN_AOT_ACCESS_READ));
+    if (!p) { ++self.stats.memory_declines; return 0; }
+    *value = uint32_t(p[0]) | (size == 2 ? uint32_t(p[1]) << 8 : 0);
+    ++self.stats.memory_reads;
+    return 1;
+}
+
 int AotExecutor::write32(void* opaque, uint32_t address, uint32_t value) {
     auto& self = *static_cast<AotExecutor*>(opaque);
     auto& access = self.write_access_;
@@ -276,6 +287,7 @@ uint64_t AotExecutor::execute(uint32_t pc, uint64_t budget) {
     bus.code_limit = xlle_unicorn_aot_code_limit(cpu_.uc_);
     bus.opaque = this;
     bus.read32 = read32;
+    bus.read_narrow = read_narrow;
     bus.write32 = write32;
     bus.mmx_load64 = mmx_load64;
     bus.mmx_store64 = mmx_store64;

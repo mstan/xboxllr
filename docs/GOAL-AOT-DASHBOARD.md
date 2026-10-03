@@ -65,7 +65,7 @@ Six dashboard gates remain. These are unequal work packages, not percentages or
 a calendar forecast. The detailed compiler stages remain in the
 [coverage board](PLAN-AOT-COVERAGE-BURNDOWN.md).
 
-Current evidence: 72 public tests pass. The
+Current evidence: 74 public tests pass. The
 [MMX checkpoint](RESULTS-AOT-MMX-2026-10-03.md) adds actual native
 menu execution beyond the startup loops. The
 [corrected 27B route](RESULTS-CPU-DEADLINES-2026-10-03.md) reaches Settings and
@@ -87,7 +87,14 @@ native counters. The subsequent
 regions using qualified ROL/ROR, OR and BSWAP. Settings-entry native share rises
 from **29.33% to 61.32%**, with main-idle unchanged at **47.92%**. Native work over
 the route reaches **1,379,683,118** instructions; floor/native O0/O2 retain every
-checkpoint and image. Six census intervals reconcile with zero overflow. These are observed
+checkpoint and image. The
+[scalar checkpoint](RESULTS-AOT-SCALAR-2026-10-03.md) expands to 246 real regions
+with qualified shifts, branches, exact narrow reads and immediate stores.
+Main-menu idle reaches **70.53%** native execution and Settings entry **76.72%**;
+full-route native work reaches **1,815,586,408** instructions. Floor/native O0/O2
+again retain all 270 checkpoints and ten images. The larger selection also
+increases handoffs substantially, so admission/dispatch cost needs native
+performance qualification. Six census intervals reconcile with zero overflow. These are observed
 comparisons, not full machine or hardware equivalence. Full menu AOT and
 60 FPS are unproven.
 
@@ -99,8 +106,8 @@ lowering is qualified. Production MMX and bounded x87 arithmetic/transfer
 services now exist. Broader x87 operations, exception/stack semantics and
 extended-state qualification remain open.
 
-Next: expand useful post-boot coverage with the measured x87 and kernel/memory
-gaps, and scale generated compilation units
+Next: measure native admission/dispatch costs and expand useful post-boot
+coverage with the measured x87 and kernel/memory gaps, and scale generated compilation units
 without weakening code identity, and qualify general compiler/runtime operations
 from the actual dashboard gaps. Renderer reuse proceeds against the same pinned
 LLE workload. Blinx media work resumes after dashboard progress or when shared

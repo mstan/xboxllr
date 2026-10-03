@@ -508,6 +508,32 @@ if(Python3_Interpreter_FOUND)
     DEPENDS tools/aot_compile.py tests/aot_programs.json
     VERBATIM)
   foreach(aot_variant IN ITEMS optimized unoptimized)
+    # Authored scalar fixtures; generated guest bytes never enter xlle itself.
+    set(XLLE_AOT_SCALAR_GENERATED "${CMAKE_CURRENT_BINARY_DIR}/generated/aot-scalar")
+    if(aot_variant STREQUAL "optimized")
+      add_custom_command(
+        OUTPUT "${XLLE_AOT_SCALAR_GENERATED}/scalar.c"
+               "${XLLE_AOT_SCALAR_GENERATED}/scalar.h"
+               "${XLLE_AOT_SCALAR_GENERATED}/scalar_cases.hpp"
+        COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tests/generate_aot_scalar_fixture.py"
+                "${XLLE_AOT_SCALAR_GENERATED}"
+        DEPENDS tests/generate_aot_scalar_fixture.py tools/aot_compile.py
+        VERBATIM)
+    endif()
+    add_library(xlle_aot_scalar_${aot_variant} STATIC "${XLLE_AOT_SCALAR_GENERATED}/scalar.c")
+    target_include_directories(xlle_aot_scalar_${aot_variant} PUBLIC include "${XLLE_AOT_SCALAR_GENERATED}")
+    set_target_properties(xlle_aot_scalar_${aot_variant} PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+      target_compile_options(xlle_aot_scalar_${aot_variant} PRIVATE -Wall -Wextra -Werror -pedantic-errors)
+      if(aot_variant STREQUAL "optimized")
+        target_compile_options(xlle_aot_scalar_${aot_variant} PRIVATE -O3)
+      else()
+        target_compile_options(xlle_aot_scalar_${aot_variant} PRIVATE -O0)
+      endif()
+    endif()
+    add_executable(test_aot_scalar_${aot_variant} tests/test_aot_scalar.cpp)
+    target_link_libraries(test_aot_scalar_${aot_variant} PRIVATE xlle_aot_scalar_${aot_variant} xlle_machine)
+    add_test(NAME aot_scalar_${aot_variant} COMMAND test_aot_scalar_${aot_variant})
     add_library(xlle_aot_registry_${aot_variant} STATIC
                 "${XLLE_AOT_REGISTRY_GENERATED}/registry.c")
     target_include_directories(xlle_aot_registry_${aot_variant} PUBLIC

@@ -3,6 +3,31 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-10-03 - Scalar AOT raises executed main-menu coverage to 70.53%
+
+General shifts, all short/near branch conditions, MOVZX and immediate stores
+qualify **246 real code regions**. ABI 5 adds exact byte/word RAM reads with
+page, alias, permission and code-identity guards. Public tests pass **74/74**;
+strict machine tests prove no hidden fallback at the checked boundaries.
+
+Floor/native O0/O2 complete the **27B** route with all **270 checkpoint rows and
+ten images byte-identical**, also matching the prior reference. Device/DMA
+history endpoints and native adapter counters agree. Main-menu idle native
+coverage rises from **47.92% to 70.53%** of executed instructions; Settings entry
+rises from **61.32% to 76.72%**. Full-route native work reaches **1,815,586,408**
+instructions, with unchanged idle skips and six reconciled census intervals.
+
+The wider selection increases native/fallback handoffs substantially, including
+two regions that never pass admission. This is a correctness/coverage result;
+native performance must be measured and improved separately. Full AOT, required
+menu interiors, UI audio and original-speed 60 FPS remain open. An existing
+error-code CPU exception delivery gap is now tracked as `beads-xbox.1.36`.
+
+See [scalar evidence and overhead findings](docs/RESULTS-AOT-SCALAR-2026-10-03.md).
+Keep the working OpenGL renderer and prioritize qualified donor reuse. Source
+integration is recorded in `beads-xbox.1.35` on
+`perf/measurement-first-2026-09`; private artifacts remain excluded.
+
 ## 2026-10-03 - General kernel integer AOT raises Settings-entry coverage to 61.32%
 
 Qualified ROL/ROR32, OR32 and BSWAP lowering adds five measured kernel regions.
