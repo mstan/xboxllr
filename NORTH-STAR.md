@@ -51,6 +51,9 @@ The first borrowed-renderer checkpoint now exists: xemu-generated pixel shaders
 execute live dashboard draws with reference opt-out. Its first timing pair was
 slower and whole-menu numerical differences remain unqualified, so it stays
 experimental. See [the measured checkpoint](docs/RESULTS-XEMU-PSH-2026-10-03.md).
+Decoded-texture and unused-stage qualification now raise donor execution to
+5,349 generated draws, with exact reference opt-out regression results. Timing
+remains unqualified and whole-scene tolerance open; this is not a 60 FPS win.
 Renderer performance/coverage work continues from measured costs; avoid building
 a general HLE framework first.
 

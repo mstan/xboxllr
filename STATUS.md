@@ -1,5 +1,27 @@
 # STATUS
 
+## 2026-10-03 - Menu60 renderer coverage expands; performance gate remains open
+
+The experimental xemu shader path now handles owned decoded DXT1/DXT2-3,
+single-level TENT mip filtering and effect-free unused PROJECT2D stages.
+The full 27B menu/Settings/return route executes **5,349 donor draws / 1,357,402
+triangles**, up from 1,035 / 806,426. That is **63.48% of generated batches**,
+with 3,077 genuine reference-texture fallbacks. No stubs were added.
+
+All **77 tests pass**, including actual GPU minification/content-replacement
+checks. The same executable's reference opt-out exactly reproduces all **270
+checkpoints and ten images**. Enhanced CPU/device history and native counters
+remain equal apart from rendered DMA bytes. Initial R0-alpha reads now decline
+until their reference contract is qualified (`beads-xbox.1.42`).
+
+This is coverage progress, **not a demonstrated speedup or 60 FPS result**.
+Competing builds invalidate both final timings; their last window observes
+7.554 reference / 6.866 enhanced guest vblanks per host second. Whole-scene
+numerical tolerance also remains open, including newly changed Clock/Settings
+captures. Native CPU body/services, vertex processing and host submission remain
+substantial measured costs. Menu60 stays active before Blinx, with partial AOT
+allowed. [Detailed evidence](docs/RESULTS-XEMU-PSH-2026-10-03.md#menu60-follow-up-decoded-textures-and-unused-stages).
+
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 

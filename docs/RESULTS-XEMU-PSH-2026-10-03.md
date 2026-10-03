@@ -111,3 +111,108 @@ dashboard menu before Blinx**. These measurements do not close that gate.
 Partial AOT and compatible enhanced paths remain allowed; full shader coverage
 and dynarec removal are separate later goals. See the
 [active menu gate](GOAL-AOT-DASHBOARD.md#active-menu-performance-gate).
+
+## Menu60 follow-up: decoded textures and unused stages
+
+The next implementation checkpoint expands the experimental adapter. It does
+**not** demonstrate a speedup or close `beads-xbox.1.17`.
+
+- Admit the reference device's owned, decoded DXT1/DXT2-3 image for its bounded
+  single-stage PROJECT2D path. Do not reinterpret raw compressed guest memory.
+- Reduce TENT mip minification to bilinear only for exactly one declared level.
+  Public GPU tests force minification with nearest magnification to distinguish
+  the two paths. Multi-level, unspecified-level and BOX mip filters stay excluded.
+- Remove unread independent PROJECT2D stages only when they have no alpha-kill,
+  color-key or cube effects. Require descriptors for consumed texture inputs.
+- Guard initial R0 alpha reads, including MUX: xemu and the current reference
+  initialize that value differently. Qualifying the floor is `beads-xbox.1.42`.
+  The adapter requires an overwrite before a read; no substitute value is added.
+
+The same final executable (`xlle-dxt-r6.exe`, SHA-256
+`091b93b347cfae7a860494077373d2a66bda85ca2f64da775dcd33edae559126`)
+completes the 27B route with both `opengl` and `xemu`. The 286-region private
+native input, O2 native compilation, Release O3 host, locked COW HDD and input
+route are unchanged. Full public validation passes **77/77**; the real donor
+GPU test executes, rather than skipping for an unavailable context.
+
+| Generated-shader execution | Previous enhanced | Final candidate |
+| --- | ---: | ---: |
+| Attempts | 8,426 | 8,426 |
+| Donor draws | 1,035 | 5,349 |
+| Donor triangles | 806,426 | 1,357,402 |
+| Reference texture declines | 7,391 | 3,077 |
+
+Donor draw coverage increases from 12.28% to **63.48% of generated batches**.
+This denominator excludes other GPU/device paths. The first remaining texture
+decline is raw format `0x08810629` with a linear packet interpretation; its
+layout contract remains excluded pending qualification.
+
+All **270 reference checkpoint rows and ten reference route captures** reproduce
+the prior reference exactly. Enhanced execution matches all checkpoint columns
+except the DMA data hash (210 rows differ). Native/fallback/idle instruction
+counts and all printed native execution counters match between the two arms.
+The script completes at 24,488,199,989 instructions; both arms reach endpoint2
+report 3018 at the final capture. No CPU coverage increase is claimed.
+
+| Final candidate versus reference | Differing pixels | Largest channel delta | Mean channel delta over differing pixels |
+| --- | ---: | ---: | ---: |
+| Clock before A | 258,270 | 29 | 1.7008 |
+| Clock after A | 2 | 1 | 0.3333 |
+| Dashboard settled | 130,263 | 25 | 0.6361 |
+| Before Down | 219,567 | 19 | 1.1626 |
+| Xbox Live selected | 234,156 | 30 | 1.7732 |
+| Settings selected | 210,060 | 29 | 1.0772 |
+| Settings open | 208,376 | 18 | 1.1882 |
+| Before Back | 203,203 | 16 | 1.0952 |
+| Dashboard returned | 235,770 | 28 | 1.2121 |
+| Final | 252,039 | 28 | 1.8730 |
+
+The six main-menu captures add at most one channel unit relative to the prior
+enhanced path. The newly admitted unused-texture draws also move Clock and
+Settings-interior rendering to donor shaders, introducing larger differences
+there. Inspected Clock, menu/selection, Settings, return and final images retain
+their expected objects and selection. These observations do not establish a
+whole-scene tolerance or hardware equivalence. The path stays experimental.
+
+Both final observers are healthy (2,170/2,124 samples; maximum gaps
+137.507/138.437 ms), but detect competing processes and mark timing unusable.
+The final steady window observes **7.554 reference / 6.866 enhanced guest
+vblanks per host second**, not qualified displayed FPS or a speedup estimate.
+Neither a quiet repeated set nor a sustained 60-second original-speed menu
+window has passed. Input-script correctness is separate from interactive latency.
+
+An earlier instrumented diagnostic of the preceding adapter identifies several
+costs in the last 25.5B-to-27B window. It also has host contamination, so use the
+distribution to choose further experiments, not to predict their gains:
+
+| Exclusive host work | Seconds | Share of diagnostic wall |
+| --- | ---: | ---: |
+| Native generated body | 3.472 | 18.56% |
+| OpenGL submission/work | 2.944 | 15.74% |
+| Vertex processing | 2.870 | 15.34% |
+| Generic raster preparation/work | 2.410 | 12.88% |
+| Slice overhead | 1.277 | 6.83% |
+| Native boundary/admission | 1.242 | 6.64% |
+| GPU command dispatch | 1.056 | 5.64% |
+| Texture setup | 1.001 | 5.35% |
+| Dynamic CPU execution | 0.960 | 5.13% |
+| OpenGL resolve | 0.485 | 2.59% |
+
+The generic bucket includes CPU preparation for GPU draws; it is not a count of
+software-rendered pixels. Native memory/MMX/x87 service costs, vertex work and
+host submission are larger next candidates than simply removing remaining shader
+declines. Whole-route GPU timestamp totals also show material uploads; overlapping
+GPU work cannot be added to this exclusive host table.
+
+The [all-donor review](RENDERER-REUSE-2026-10-02.md) remains the source map for
+those experiments: content-checked decode caching from sp00nznet, compiler fixes
+from NoRain211, phobos's RHI/state tracking, and DOAXBV's compressed uploads and
+presentation worker. The current packet contains decoded owned data; borrowing a
+compressed-upload path requires qualifying a real compressed packet contract.
+This checkpoint adds no other donor runtime or native/HLE service.
+
+Private artifacts: `build/menu60-20261003/` contains immutable executables,
+test logs, image comparisons and `r6-validation.json`; the final arm logs,
+argv, process observations, checkpoints and PPM captures are
+`build/menu60-dxt-r6-{opengl,xemu}*`. Earlier `r1`/`r2`/`r4`/`r5` artifacts are
+diagnostic iterations, not independent confirmation of a performance win.

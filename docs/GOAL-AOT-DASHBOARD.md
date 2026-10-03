@@ -189,25 +189,31 @@ implementation before its result can be accepted.
 | Menu work package | Current evidence / next result |
 | --- | --- |
 | Runnable floor and repeatable menu route | Implemented: 27B route reaches Settings and returns to animated main menu; 270 reference checkpoints and ten images retained |
-| Borrowed rendering | Implemented, experimental: 1,035 donor draws; no qualified speedup or whole-menu numerical tolerance yet |
+| Borrowed rendering | Implemented, experimental: 5,349 donor draws after decoded-texture qualification; no qualified speedup or whole-scene numerical tolerance yet |
 | Attribute and reduce steady-menu cost | Active: corrected host samples identify combiner submission, vertex work and native admission; isolate costs before promoting a change |
 | Sustained original-speed 60 FPS and input | Open: repeat quiet-host steady windows and verify actual presentation, distinct output and input response |
 | Blinx launch | Sequenced after this menu gate; pinned media findings retained |
 
-The last unqualified timing pair gives **6.919 reference / 6.478 enhanced guest
+The latest contaminated timing pair gives **7.554 reference / 6.866 enhanced guest
 vblanks per host second** in the verified 25.5B-27B main-menu window, not displayed
-FPS. Even the reference observation is about 8.7 times below 60; this is a scale
+FPS. Even the reference observation is about 7.9 times below 60; this is a scale
 estimate, not a qualified capacity result or a calendar forecast. The
 [corrected host profile](RESULTS-HOST-SAMPLER-WINDOWS-2026-10-03.md) and
 [donor checkpoint](RESULTS-XEMU-PSH-2026-10-03.md) are the starting evidence.
 
-Immediate renderer investigation: 7,391 of 8,426 generated submissions declined
-the donor texture path. The first recorded rejection uses raw format `0x0E`
-(DXT2/3), which the floor already decodes into owned linear ARGB data, while the
-donor admission currently permits only two raw linear formats. Qualify this
-decoded-texture boundary and measure any useful coverage gain; the first rejection
-does not establish the format of all declines or their share of execution time.
-Pair that experiment with CPU/GPU/resolve attribution of the steady window.
+The decoded-texture experiment is implemented and passes 77 tests plus the full
+route: donor draws increase from 1,035 to 5,349 of 8,426. Real reference opt-out
+still reproduces all checkpoints and images. Single-level TENT filtering and
+effect-free unused texture stages account for the wider admission. Initial R0
+alpha dependencies remain guarded pending reference qualification.
+
+Next performance experiments should address measured native body/memory-service
+cost, vertex processing and host submission, preserving their real fallback and
+observable contracts. The diagnostic steady window attributes 18.56% to native
+bodies, 15.74% to OpenGL work, 15.34% to vertex work and 12.88% to generic raster
+preparation/work. These are host costs from a contaminated instrumented run;
+they select investigations but cannot predict savings or qualify a promotion.
+Remaining texture declines alone do not explain the distance to 60 FPS.
 Compare sp00nznet's content-checked DXT cache, NoRain's DOAXBV compressed uploads
 and phobos's resource/submission code as those measured costs warrant.
 Do not equate more donor draws with less frame time.

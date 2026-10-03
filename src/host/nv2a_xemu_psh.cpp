@@ -15,8 +15,35 @@ bool inputs_supported(const Nv2aCombinerShaderState& s, uint32_t word,
         if (r == 3 || r == 6 || r == 7 || (!final && r >= 14)) return false;
         if (r == 4 && !s.needs_diffuse) return false;
         if ((r == 5 || r == 14) && !s.needs_specular) return false;
+        if (r >= 8 && r <= 11 && !s.textures[r - 8].referenced) return false;
     }
     return true;
+}
+
+// xemu initializes R0.a from T0 (or one without T0); the reference currently
+// initializes its scratch registers to zero. Admit only shaders which overwrite
+// that alpha before observing it, including MUX's implicit dependency. Do not
+// conceal the missing reference initialization by manufacturing a donor value.
+bool initial_r0_alpha_unused(const Nv2aCombinerShaderState& s) {
+    const auto reads_alpha = [](uint32_t word, unsigned count = 4) {
+        for (unsigned n = 0; n < count; ++n) {
+            const unsigned input = (word >> (24 - 8 * n)) & 31;
+            if (input == 0x1C || input == 0x1E) return true;
+        }
+        return false;
+    };
+    bool written = false;
+    for (unsigned i = 0; i < s.stage_count; ++i) {
+        const uint32_t co = s.color_ocw[i], ao = s.alpha_ocw[i];
+        if (!written && (reads_alpha(s.color_icw[i]) ||
+                         reads_alpha(s.alpha_icw[i]) || ((co | ao) & 0x4000u)))
+            return false;
+        for (unsigned shift : {0u, 4u, 8u})
+            written |= ((ao >> shift) & 15) == 12;
+        written |= ((co & 0x80000u) && ((co >> 4) & 15) == 12) ||
+                   ((co & 0x40000u) && (co & 15) == 12);
+    }
+    return written || (!reads_alpha(s.final_cw0) && !reads_alpha(s.final_cw1, 3));
 }
 }
 
@@ -33,7 +60,8 @@ XemuPshReject nv2a_xemu_psh_supported(const Nv2aGeneratedShaderPacket& p) {
     if ((g.combiner_control & 0xFFu) != s.stage_count || s.stage_count > 8 ||
         nv2a_combiner_shader_supported(s) != Nv2aCombinerShaderReject::kNone ||
         !inputs_supported(s, s.final_cw0, 4, true) ||
-        !inputs_supported(s, s.final_cw1, 3, true)) return R::kCombiner;
+        !inputs_supported(s, s.final_cw1, 3, true) ||
+        !initial_r0_alpha_unused(s)) return R::kCombiner;
     // E/F cannot recursively refer to SUM/EF_PRODUCT in the donor emitter.
     if (((s.final_cw1 >> 24) & 15) >= 14 ||
         ((s.final_cw1 >> 16) & 15) >= 14) return R::kCombiner;
@@ -58,9 +86,24 @@ XemuPshReject nv2a_xemu_psh_supported(const Nv2aGeneratedShaderPacket& p) {
         const auto& t = s.textures[i];
         const uint32_t fmt = g.texture_format[i], ctl = g.texture_control[i];
         const uint32_t filter = g.texture_filter[i];
+        // Pure independent PROJECT2D has no observable effect when no combiner
+        // input reads it and alpha-kill/color-key are disabled. The reference
+        // skips that fetch as well; strip it from the donor program instead of
+        // demanding (or inventing) an unused texture snapshot/mip chain.
+        if (mode == 1 && !t.referenced && !p.textures[i].present &&
+            !(ctl & 7u) && !(fmt & 4u) && ((fmt >> 4) & 15) == 2)
+            continue;
+        const unsigned min_filter = nv2a_xemu_min_filter(fmt, filter);
         const uint32_t color = (fmt >> 8) & 255;
         const bool linear = t.mode == Nv2aCombinerShaderState::TexMode::kLinear2d;
-        if (linear ? (color != 0x12 && color != 0x1E) :
+        // The device's single-stage PROJECT2D path decodes DXT1/DXT2-3
+        // into the same owned, tight ARGB image as a raw linear texture.
+        // The shader consumes that decoded image, not compressed guest bytes.
+        // Do not admit other compressed layouts or programs: those have not
+        // passed through this reference decoder/coordinate contract.
+        const bool decoded_dxt = (color == 0x0C || color == 0x0E) &&
+                                 linear && i == 0 && g.shader_program == 1;
+        if (linear ? (color != 0x12 && color != 0x1E && !decoded_dxt) :
                      (color != 0x06 && color != 0x07 && color != 0x19 && color != 0x0B))
             return R::kTexture;
         if (mode != 1 || !t.referenced || !p.textures[i].present ||
@@ -68,7 +111,7 @@ XemuPshReject nv2a_xemu_psh_supported(const Nv2aGeneratedShaderPacket& p) {
             // color-key implementation yet, so neither is interchangeable.
             !(ctl & 0x40000000u) || (ctl & 7u) || (fmt & 4u) || !(fmt & 8u) ||
             ((fmt >> 4) & 15) != 2 || (filter & 0xF0000000u) ||
-            ((filter >> 16) & 255) < 1 || ((filter >> 16) & 255) > 2 ||
+            min_filter < 1 || min_filter > 2 ||
             ((filter >> 24) & 15) < 1 || ((filter >> 24) & 15) > 2 ||
             (t.mode != Nv2aCombinerShaderState::TexMode::kProject2d &&
              t.mode != Nv2aCombinerShaderState::TexMode::kLinear2d) ||
@@ -122,6 +165,9 @@ std::string nv2a_xemu_fragment_glsl(const Nv2aGeneratedShaderPacket& p) {
     PshState state{};
     state.combiner_control = p.guest.combiner_control;
     state.shader_stage_program = p.guest.shader_program;
+    for (unsigned i = 0; i < 4; ++i)
+        if (!p.state.textures[i].referenced)
+            state.shader_stage_program &= ~(31u << (5 * i));
     state.other_stage_input = p.guest.shader_input;
     state.final_inputs_0 = p.state.final_cw0;
     state.final_inputs_1 = p.state.final_cw1;

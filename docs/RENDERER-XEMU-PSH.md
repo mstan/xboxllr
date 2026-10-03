@@ -38,13 +38,26 @@ errors after effects remain errors, not opportunities to silently replay.
 Initial admission covers smooth postclip triangles with finite positive W,
 valid projected coordinates, a final combiner, D24 depth representation, and
 NONE/PROJECT2D texture modes. Textures must have owned data with supported real
-linear or converted swizzled formats and nearest/bilinear nonmip filtering.
+linear or converted swizzled formats and nearest/bilinear filtering. The bounded
+single-stage PROJECT2D path also accepts DXT1/DXT2-3 already decoded by the
+reference device into owned tight ARGB. No raw compressed upload or new decoder
+is implied. TENT_NEARESTLOD/TENT_TENT_LOD reduce to bilinear only when the guest
+declares exactly one mip level; actual mip chains remain excluded.
 Texture border storage, color keys, signed/depth textures, texture Q poles,
 wide proxy triangles, polygon bias, W buffering, fog and unsupported registers
 retain the reference path. Alpha-kill and divergent shared constants are also
 excluded: the current general reference evaluator does not yet implement those
 contracts (tracked in `beads-xbox.1.15.16`). Donor support alone cannot qualify
-a replacement for a missing floor.
+a replacement for a missing floor. Initial R0 alpha is another excluded mismatch:
+xemu sources it from T0 or one, while the reference currently starts it at zero.
+Admission proves that the shader overwrites this alpha before reading it,
+including implicit MUX reads (`beads-xbox.1.42`).
+
+An unreferenced independent PROJECT2D stage may retain old texture registers.
+When no combiner input consumes it, no texture packet is present, and alpha-kill,
+color-key and cube modes are disabled, the adapter removes the unused fetch.
+It never supplies a dummy texture. Consumed texture inputs require real packet
+descriptors. Ambiguous raw-format/packet-layout combinations remain excluded.
 
 X8 color surfaces preserve the stored FF padding byte while blending with the
 actual source alpha through dual-source output. The raw combiner control word
@@ -57,6 +70,11 @@ semantics. Inactive routing selectors do not reject independent texture modes.
 packets. It checks constant selection, perspective interpolation against an
 independent barycentric result, nearest/bilinear/rectangle textures, X8 blending,
 alpha discard, unsupported state/geometry refusal and actual reference fallback.
+Decoded DXT checks include explicit alpha, transparent texels and replacing a
+previous upload after content changes. The single-level mip test forces
+minification with nearest magnification, so an accidental magnification-only
+test cannot qualify the change. Unused texture state and initial-R0-alpha reads
+have separate acceptance/refusal cases.
 It reports a skip when no OpenGL context exists, rather than claiming GPU checks
 passed. These are authored contract checks, not hardware capture evidence.
 
@@ -69,7 +87,8 @@ and performance are characterized. Never accept missing menu objects, control
 flow changes or stale guest memory as a numerical tolerance.
 
 Shutdown prints `xemu-psh attempts/draws/triangles` and reference-decline counts.
-The first occurrence of each decision prints its raw texture controls. Existing
+The first occurrence of each decision prints its raw texture controls, filters,
+packet modes and wrapping. Existing
 generated-shader upload/resolve/draw counters and frame-series windows remain
 available. Attempts and eligibility do not establish execution; actual donor
 draws must be nonzero. Guest vblanks, host presents, distinct images and guest

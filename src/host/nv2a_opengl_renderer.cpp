@@ -1215,12 +1215,22 @@ public:
         const size_t decision = static_cast<size_t>(nv2a_xemu_psh_supported(packet));
         if (++enhanced_decisions_[decision] == 1) {
             std::printf("[nv2a-renderer] xemu-psh first-decision=%zu program=%08x input=%08x "
-                        "formats=%08x,%08x,%08x,%08x controls=%08x,%08x,%08x,%08x\n",
+                        "formats=%08x,%08x,%08x,%08x controls=%08x,%08x,%08x,%08x "
+                        "filters=%08x,%08x,%08x,%08x modes=%u,%u,%u,%u "
+                        "address-uv=%u/%u,%u/%u,%u/%u,%u/%u\n",
                         decision, packet.guest.shader_program, packet.guest.shader_input,
                         packet.guest.texture_format[0], packet.guest.texture_format[1],
                         packet.guest.texture_format[2], packet.guest.texture_format[3],
                         packet.guest.texture_control[0], packet.guest.texture_control[1],
-                        packet.guest.texture_control[2], packet.guest.texture_control[3]);
+                        packet.guest.texture_control[2], packet.guest.texture_control[3],
+                        packet.guest.texture_filter[0], packet.guest.texture_filter[1],
+                        packet.guest.texture_filter[2], packet.guest.texture_filter[3],
+                        unsigned(packet.state.textures[0].mode), unsigned(packet.state.textures[1].mode),
+                        unsigned(packet.state.textures[2].mode), unsigned(packet.state.textures[3].mode),
+                        unsigned(packet.state.textures[0].address_u), unsigned(packet.state.textures[0].address_v),
+                        unsigned(packet.state.textures[1].address_u), unsigned(packet.state.textures[1].address_v),
+                        unsigned(packet.state.textures[2].address_u), unsigned(packet.state.textures[2].address_v),
+                        unsigned(packet.state.textures[3].address_u), unsigned(packet.state.textures[3].address_v));
         }
         return supports_generated_shader(packet);
     }
@@ -2684,7 +2694,8 @@ public:
                 const auto& ts = packet.state.textures[i];
                 const uint32_t filter = packet.guest.texture_filter[i];
                 tex_parameter_i_(kGlTexture2D, kGlTextureMinFilter,
-                    gp->enhanced && ((filter >> 16) & 255) == 2 ? kGlLinear : kGlNearest);
+                    gp->enhanced && nv2a_xemu_min_filter(
+                        packet.guest.texture_format[i], filter) == 2 ? kGlLinear : kGlNearest);
                 tex_parameter_i_(kGlTexture2D, kGlTextureMagFilter,
                     gp->enhanced && ((filter >> 24) & 15) == 2 ? kGlLinear : kGlNearest);
                 tex_parameter_i_(kGlTexture2D, kGlTextureWrapS,
