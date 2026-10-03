@@ -1,5 +1,14 @@
 # Burndown: predominantly static Xbox execution
 
+**Work-order update, 2026-10-03:** follow the owner's
+[LLE floor / enhanced execution gameplan](GOAL-AOT-DASHBOARD.md). Renderer reuse,
+fast iteration and real game launch with partial AOT take priority over broad
+opcode expansion. These compiler stages remain the final no-dynarec roadmap,
+not prerequisites for enhanced rendering or game boot. HLE work is reported
+separately and does not inflate AOT instruction coverage. Earlier dashboard-first
+and universal opt-in statements below are historical; qualified title profiles
+may now ship enhanced by default with an explicit reference opt-out.
+
 Created 2026-09-25; activated 2026-10-02 by the owner. Central Beads:
 `beads-xbox.1.25.5`. Status: **implementation in progress**. Work solo.
 The owner authorized implementation and reference clones; real-console access

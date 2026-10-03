@@ -1,5 +1,12 @@
 # AOT-5 burndown: efficient portable native execution
 
+**Work-order update, 2026-10-03:** the
+[current ecosystem gameplan](GOAL-AOT-DASHBOARD.md) governs priorities.
+Deliver useful enhanced rendering and a real game path with the existing hybrid
+CPU before requiring strict AOT completion. Qualified enhanced/HLE subsystems
+may ship by default with real LLE opt-outs. The AOT work below remains required
+for eventual removal of dynarec; its older ordering is superseded.
+
 Updated 2026-10-03. Owner: central Beads `beads-xbox.1.25.5`, under
 `beads-xbox.1.25`. The owner has authorized implementation, with no stubs and
 LLE as the required behavioral foundation. Work solo. Allow no competing builds

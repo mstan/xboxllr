@@ -1,5 +1,14 @@
 # Renderer reuse for the AOT dashboard
 
+**Owner clarification, 2026-10-03:** the
+[current gameplan](GOAL-AOT-DASHBOARD.md) now targets a borrowed enhanced
+renderer as an early product path, backed by the runnable LLE reference and
+an opt-out. Exact reproduction of our software renderer is not an enhanced-path
+acceptance requirement; observable contracts and documented tolerances are.
+Native-port internals and kernel HLE are eligible at qualified boundaries.
+The pinned source findings below remain useful; their unimplemented shim
+behaviors must be replaced with real services, not used to exclude a whole donor.
+
 Owner direction: borrow as much qualified rendering implementation as practical.
 This is a source assessment, not a new backend performance result. No new donor
 runtime has been integrated by this assessment. Primary goal:

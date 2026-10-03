@@ -4,18 +4,22 @@ xboxlle runs original Xbox software by emulating the console's hardware. This is
 called **low-level emulation (LLE)**. The first goal is to run the original Xbox
 dashboard, the menu with Memory, Music, Xbox Live, and Settings.
 
-The active goal is the [faithful AOT dashboard at original-speed 60 FPS](docs/GOAL-AOT-DASHBOARD.md),
-using as much qualified existing renderer code as practical. Blinx boot is the
-stretch goal.
+The active target is a [faithful LLE floor with interchangeable enhanced execution](docs/GOAL-AOT-DASHBOARD.md).
+Priorities are borrowed rendering, faster iteration and real Blinx progress with
+partial AOT. Qualified enhanced implementations are intended shipping defaults,
+with a real reference opt-out. Full AOT without dynarec remains the final CPU goal.
 
 **This is development software.** Earlier builds rendered the dashboard with
 the tested files. HDD startup now requires independently provisioned credentials;
 the kernel must supply the correct password. An explicit unlocked-drive setting
 is also available. See [HDD security setup and limits](docs/HDD-SECURITY.md).
 Support for other firmware and disk images is not yet established.
-Faithful LLE at 60 FPS with extra performance available is our goal. We have not
-reached it yet. High-level emulation (HLE) may be added as an optional mode, but
-it must match the LLE behavior.
+Original-speed, responsive output is the product goal; it is not yet achieved.
+Any subsystem may have a native/HLE replacement backed by its implemented LLE
+contract. Internal algorithms may differ, with compatible observable behavior
+and documented numerical/presentation tolerances. Current implementation status
+is in [STATUS](STATUS.md); the new delivery policy does not imply those enhanced
+paths already exist.
 
 Portable native versions of selected Xbox software are a required project goal,
 following psxrecomp's architecture. The planned pipeline translates Xbox x86 code

@@ -1,23 +1,39 @@
-# Goal: faithful AOT dashboard at original-speed 60 FPS
+# Goal: faithful Xbox floor, enhanced native execution and playable games
 
-Owner pivot, 2026-10-02. Active goal and central tracker: `beads-xbox.1.25.5`.
-Work solo. **The dashboard is the primary deliverable; booting Blinx is the
-stretch goal.** JSRF remains a later validation target. This supersedes the
-Blinx-first ordering in earlier planning records.
+Owner clarification, 2026-10-03. Central tracker: `beads-xbox.1.25.5`;
+planning decision: `beads-xbox.1.40`. Work solo. This supersedes the earlier
+dashboard-first/strict-AOT-first work order and blanket exclusion of donor HLE.
+Implementation is paused for the owner's check-in; this revision records the
+requested gameplan, not newly implemented runtime features.
+
+**The target ecosystem has a faithful, runnable LLE floor and interchangeable enhanced
+implementations. Qualified enhanced paths are the intended shipping defaults,
+with an explicit reference opt-out.** Any system or subsystem can be replaced,
+including rendering, audio, kernel services and title functions. Internals may
+be substantially different when the selected boundary's observable contract is
+preserved, including documented enhancement tolerances. No stubs or fabricated
+success. The repository name and amount of original code retained are not goals.
+
+Get a responsive dashboard and a real Blinx launch/playable slice with the
+current hybrid CPU path. Full AOT with dynarec removed remains the final goal;
+it is not a prerequisite for renderer integration, game boot or performance wins.
+JSRF is the next generalization target. The dashboard is a useful first workload,
+not a gate that must be fully completed before any game work starts.
 
 ## Acceptance
 
-Compile the pinned dashboard and the kernel code it executes before launch.
-Complete a declared post-boot animation/navigation route with zero guest CPU
-JIT/interpreter fallback and no runtime guest-code translation. Initial boot on
-the existing CPU floor is a separately disclosed first-stage boundary; whole-boot
-AOT is an additional coverage milestone, never implied by a post-boot result.
+Keep the implemented LLE execution path independently runnable. Its current
+dashboard success is bounded evidence, not proof that every device or title is
+faithful. Close actual reference gaps when a proposed replacement or game needs
+them; a missing reference implementation cannot be hidden behind HLE success.
 
-Retain the real kernel, guest memory and implemented hardware contracts.
-No stubs, forced acknowledgements, skipped initialization or captured-frame
-playback. HLE is opt-in only after its implemented LLE counterpart and full
-guest-visible contract are qualified. The explicit unlocked HDD policy is the
-owner's narrow documented exception; provisioned locked startup also works.
+Reference execution retains the real kernel and hardware path. Enhanced execution
+may replace a kernel service or initialization operation with a complete native
+implementation, including its observable state transitions. No forced
+acknowledgements, ignored required work or captured-frame playback. The explicit
+unlocked HDD policy remains the owner's narrow documented exception; provisioned
+locked startup also works. Per-title defaults can enable qualified replacements;
+global and per-subsystem opt-outs must select their real LLE counterparts.
 
 The product route must include sustained animated main-menu idle, selection
 changes, entry/return through Memory, Music, Settings and the locally available
@@ -31,17 +47,70 @@ where the dashboard produces 60 Hz content, counting distinct frames and input
 latency separately from host presents and guest vblanks. Preserve the native
 baseline and measure each optimization against it on a quiet host. Additional
 headroom remains desirable; 20% is a planning proposal, not an agreed gate.
+Preserve each game's simulation rate; presenting a 30 Hz game twice is not a
+60 Hz gameplay enhancement. Faster internal execution must not speed up gameplay.
+
+Full AOT is a separate final gate: all remaining guest CPU code in the declared
+supported workflows executes from prebuilt native artifacts. Neither enhanced
+nor reference opt-out mode may depend on CPU dynarec/interpreter execution for
+those workflows at that gate. HLE is counted separately, never reported as
+translated guest instructions. Dynamic discovery/capture is a development aid;
+final qualification starts with prepared artifacts and zero runtime translation.
+
+## Interchangeable subsystem contract
+
+An ABI is the call shape; the contract also includes memory/state effects,
+errors, resource ownership, callbacks, completion order and guest-visible time.
+The same request plus starting state must produce compatible observable results.
+Implement the first concrete renderer boundary before generalizing a framework.
+
+| Contract part | Required policy |
+| --- | --- |
+| Identity and inputs | Versioned boundary; supported image/profile identities; typed arguments and owned or explicitly synchronized input resources |
+| Outputs and state | Return values, guest-visible memory, handles and persistent state remain compatible; replacement-private caches are permitted |
+| Timing and events | Preserve relevant ordering, IRQ/fence/wakeup semantics and declared logical-time behavior; host wall time cannot silently replace guest time |
+| Numerical/presentation tolerance | Document per-operation tolerances and intended enhancements; higher resolution/filtering can differ, missing geometry or corrupted gameplay cannot |
+| Unsupported input | Decline before side effects and execute the real reference path; after commitment, fallback requires a defined resolve/state-transfer or rollback boundary |
+| Opt-out | Start either mode from the same inputs; initial backend changes may require restart. Arbitrary live hot swapping is not a first-delivery requirement |
+| Evidence | Compare reference/enhanced results at the contract boundary, record effective backend and fallback reasons, and exercise opt-out in regular smoke runs |
+
+Enhanced runs need not execute the reference path alongside every operation.
+Capture representative inputs and compare offline. Existing instruction-clock
+and image hashes remain reference regression tools; HLE changes execution paths,
+so cross-mode acceptance uses logical events, state/output contracts and stated
+tolerances instead of requiring identical retired-instruction histories.
+
+Proposed configuration axes (not existing switches): `profile=reference|enhanced`,
+per-subsystem overrides, and `cpu=hybrid|strict-aot`. Keep CPU execution choice
+independent of rendering/HLE choice. A qualified title ships enhanced; diagnostics
+must reveal its actual choices and any return to the reference path.
+
+## PSX/Tomba precedent checked
+
+The local `F:/Projects/psxrecomp/TombaRecomp/game.toml` selects OpenGL by default.
+The runtime's `gpu_render.h`/`gpu_render.c` provide a shared rendering interface,
+backend selection and software initialization fallback. Tomba also retains its
+software backend and separate optional presentation enhancements.
+`runtime/src/bios_hle.c` explicitly returns unhandled BIOS services to LLE;
+the framework documents a default-enabled, opt-out HLE tier and temporary CPU
+fallback while native artifacts grow. These are the architectural patterns to
+reuse. Source inspection is not a fresh Tomba performance or fidelity test.
 
 ## Renderer reuse
 
-Use the host GPU to execute the real NV2A workload. Existing OpenGL rendering is
-the working baseline. Prioritize qualified reuse over a new renderer project.
-xemu's OpenGL/Vulkan NV2A backends, shader translation and surface/texture logic
-are the primary donor candidates. Existing `nv2a_vsh_cpu` reuse remains in place.
-"Modern renderer" means host-GPU execution of the actual NV2A workload;
-changing graphics APIs is not an acceptance requirement.
-Evaluate xboxrecomp renderer pieces individually; do not import their kernel HLE,
-stubbed PCI/IRQ/memory interfaces or title-specific replay paths.
+Existing OpenGL and software rendering remain the reference starting points.
+The enhanced path may use ordinary GPU rasterization, shader execution, native
+filtering, batching and persistent GPU resources instead of reproducing our
+software renderer's arithmetic operation by operation. Our current pixels are
+regression evidence, not hardware truth. A GPU implementation can also preserve
+LLE semantics; the classification does not itself determine speed or fidelity.
+
+xemu's renderer, shader translation and surface/texture code are the primary
+donor at the NV2A boundary. sp00nznet's D3D/NV2A components and native runtime
+are candidates at matching service boundaries. The no-stubs rule excludes their
+unimplemented behavior, not their whole codebase. Replace shim dependencies with
+real services. Kernel HLE is now explicitly eligible when its LLE counterpart
+and observable contract exist. No title-specific captured-frame replay.
 
 Reuse can include substantial backend code when its real dependencies are wired
 and behavior passes qualification. Preserve upstream licenses and provenance.
@@ -49,20 +118,60 @@ The existing combined-executable distribution restriction remains tracked in
 `beads-xbox.1.21`; it does not prevent local qualification work.
 See [renderer reuse assessment](RENDERER-REUSE-2026-10-02.md).
 
-## Burndown
+## Fast-win delivery order
+
+Use bounded implementation checkpoints, not an open-ended framework rewrite.
+The renderer and Blinx launch packages are independent workstreams, worked solo;
+neither waits for 100% AOT or all dashboard menu interiors.
+
+| Order | Deliverable | First concrete result / decision |
+| --- | --- | --- |
+| 1 | Reference/enhanced selection around the existing renderer interface; short repeatable workload and opt-out smoke | Same live dashboard request reaches both implementations; effective backend, CPU/renderer cost, real guest progress and frame pacing are visible |
+| 2 | Borrow a substantial renderer path | Run one actual dashboard rendering workload through donor shader/raster/resource code and our real memory/resolve boundary. Measure against the previous path, validate tolerances, and expand useful coverage. Preserve reference fallback; no custom pixel-exact rewrite required |
+| 3 | First real Blinx launch with partial AOT | Resolve the pinned media/ATAPI/loader path and capture title entry plus the first actual blocker. Execute unsupported CPU instructions on the existing floor during development; AOT completion and enhanced-renderer completion do not block the attempt |
+| 4 | Enhanced playable slice and measured performance | Title screen, input and a reproducible gameplay scene; borrow or implement the actual reached audio/device contracts. Replace the measured expensive service/function next, validate opt-out and save/state behavior, then qualify original-speed output and latency |
+| 5 | Decide the long-term compiler/runtime foundation from a live comparison | Compare current xboxrecomp-generated execution with our current generator against the same implemented LLE/enhanced boundaries. Preserve useful broad frontend/tooling reuse; select on adaptation cost and measured workload, without repo loyalty |
+| 6 | Remove CPU fallback on the supported routes | Capture remaining code identities, compile reachable code and kernel paths, qualify transitions/save-reload, and run strict AOT in both profiles. Keep this final gate explicit while shipping useful intermediate development builds |
+
+Steps 1-2 are the first performance experiment. Bound donor investigation to a
+concrete input/output path and an executable result before widening scope; if a
+full xemu state adapter dominates the work, first adapt its useful shader/format
+code at our existing packet boundary, or choose the better-matching donor. A
+large transplant remains allowed when it is cheaper than that adaptation.
+
+Start step 3 as soon as the first renderer checkpoint or a donor blocker is
+known; do not repeatedly extend graphics research while Blinx remains untried.
+Use the actual launch trace to choose which missing service to implement next.
+Do not fabricate disc authentication, mutate the XBE's media constraints or
+force device readiness to create a boot milestone. An enhanced loader is eligible
+only with an implemented reference contract for the chosen media/firmware route.
+
+For iteration, reuse the existing packet captures, probes and short scripted
+windows. Do not build a full save-state system as a prerequisite. Replay a
+captured rendering request for development, then validate it in live execution;
+captured output is never substituted for game execution. Full reference replay
+remains a landing check for changes that affect scheduling/device state.
+
+Every performance checkpoint reports real guest speed, CPU/renderer wall time,
+frame pacing, distinct new frames and input latency, plus separate AOT, CPU
+fallback, HLE and idle accounting. A steady 60 FPS dashboard is a useful win
+even with partial AOT. No current evidence proves 60 FPS is one change away.
+Use executable milestones to establish velocity before assigning calendar dates.
+
+## Product burndown
 
 | Gate | Status | Required evidence |
 | --- | --- | --- |
-| D0: dashboard baseline and scope | In progress | Pinned inputs; validated animation/navigation captures; guest-anchored phase counts; reproducible host-GPU baseline command |
-| D1: useful general AOT execution | In progress | Integer/control flow, cold memory, kernel/device operations and required extended state; independent and differential tests |
-| D2: scalable native artifacts | In progress | 257-region indexed dispatch passes O0/O2; launcher cap removed; build partitioning and wider subset selection remain |
-| D3: fully AOT dashboard route | Open | Strict execution completes each declared menu phase; no CPU fallback or hidden guest execution in helpers; output/state checks pass |
-| D4: renderer/device completion | In progress | Reused renderer components qualify against LLE behavior; required surfaces, synchronization, UI audio and input work |
-| D5: original-speed 60 FPS | Open | Sustained guest speed, distinct displayed frames and input latency across the route; quiet native-versus-native measurements |
-| Stretch: Blinx boot | Open | Real media, kernel loader and device path reach title execution or a precisely recorded failure |
+| Faithful reference floor | Partial, runnable dashboard | Qualified contracts for each reached subsystem; real LLE opt-out; close known exception, media, rendering and audio gaps |
+| Interchangeable enhanced renderer | Planned integration | Live donor path, explicit tolerances, coherent readback/state and successful reference selection |
+| Responsive dashboard | Open | Required menu interiors, input/audio and measured original-speed output; partial AOT allowed |
+| Blinx launch and playable slice | Open; promoted from stretch | Real loading/title execution, input, gameplay/audio and save/reload; partial AOT allowed |
+| Enhanced performance | Open | Measured gain at equivalent logical work and accepted outputs; title-appropriate cadence and latency |
+| Full AOT without dynarec | Open, final gate | Prebuilt native execution of remaining guest work in both reference/enhanced supported workflows; no hidden CPU fallback |
+| JSRF generalization | Later | Second title validates reusable contracts rather than one-title assumptions |
 
-Six dashboard gates remain. These are unequal work packages, not percentages or
-a calendar forecast. The detailed compiler stages remain in the
+These are unequal work packages, not percentages or a calendar forecast.
+The detailed compiler stages remain in the
 [coverage board](PLAN-AOT-COVERAGE-BURNDOWN.md).
 
 Current evidence: 76 public tests pass. The
@@ -125,10 +234,6 @@ Floor/native O0/O2 preserve all 270 checkpoints, ten images and device histories
 all 76 public tests and four census scalar/native-required tests pass. Attempts
 and handoffs increase, so the coverage gain carries no new speed claim.
 
-Next: use that evidence to investigate native body/state-transfer and renderer
-reuse opportunities, refine phase attribution, and expand useful post-boot
-coverage with the measured x87 and kernel/memory gaps, and scale generated compilation units
-without weakening code identity, and qualify general compiler/runtime operations
-from the actual dashboard gaps. Renderer reuse proceeds against the same pinned
-LLE workload. Blinx media work resumes after dashboard progress or when shared
-infrastructure makes the stretch attempt practical.
+The evidence above is retained as the starting point. The fast-win order in this
+document now governs scheduling: enhanced renderer, real game progress and
+measured subsystem replacements take priority over broad opcode expansion.

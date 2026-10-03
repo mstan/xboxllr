@@ -3,6 +3,22 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-10-03 - Delivery plan now prioritizes enhanced execution and game progress
+
+The owner's clarified target is a faithful runnable LLE floor with interchangeable
+enhanced/HLE implementations for any subsystem. Qualified enhanced paths are the
+shipping default, with global/per-subsystem reference opt-outs. Implementations
+may differ internally; observable state, errors, ordering and declared numerical/
+presentation tolerances define compatibility. Stubs remain forbidden.
+
+The [revised gameplan](docs/GOAL-AOT-DASHBOARD.md) puts a borrowed enhanced
+renderer and a real Blinx launch with the existing hybrid CPU path ahead of broad
+AOT coverage expansion. Full AOT with dynarec removed remains a final gate in
+both profiles. The PSX/Tomba renderer facade, software fallback and BIOS-HLE
+dispatch were inspected as architectural precedents. This is a planning change:
+no renderer transplant, new HLE service, game boot or 60 FPS result is claimed.
+Implementation remains paused for the check-in. Planning: `beads-xbox.1.40`.
+
 ## 2026-10-03 - Memory integer AOT raises main-menu coverage to 77.60%
 
 General memory-read arithmetic/comparisons, register NEG/NOT and LEAVE qualify

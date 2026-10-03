@@ -4,9 +4,12 @@ Updated 2026-10-02. This is a milestone burndown, not a measured calendar
 forecast. Packages differ in size; counts are not percent completion.
 Central Beads is the issue source of truth.
 
-**Owner pivot, 2026-10-02:** Blinx boot is now the stretch goal behind the
-[faithful AOT dashboard](GOAL-AOT-DASHBOARD.md). This ledger preserves its launch
-dependencies; it no longer sets the primary work order.
+**Owner clarification, 2026-10-03:** Blinx launch and playable progress are now
+an early workstream alongside enhanced renderer integration. Follow the
+[LLE floor / enhanced execution gameplan](GOAL-AOT-DASHBOARD.md).
+Partial AOT and the existing CPU floor are acceptable for this milestone;
+full dashboard completion and zero dynarec do not block a first game attempt.
+The dated media findings below remain launch dependencies, not newly completed work.
 
 ## The next observable milestone
 
@@ -16,8 +19,8 @@ of the AOT compiler. The existing faithful CPU floor can execute the first
 attempt. It does require a valid input/launch route and implemented device
 behavior. No stubs, fabricated success or skipped initialization.
 
-The current route has four pending gates. A boot attempt is the next Blinx
-milestone, following the primary dashboard work order.
+The recorded route has four pending gates. A boot attempt is the next Blinx
+milestone and does not depend on finishing the enhanced renderer or AOT compiler.
 Audio/device work can become necessary to get beyond a boot attempt into menus
 or gameplay. Do not postpone the first attempt until all of those projects end.
 
@@ -109,6 +112,10 @@ gameplay. Keep the owning issue open until its acceptance criteria pass.
 - No donor runtime has been transplanted. Rejected paths include control-register
   stubs, unimplemented-op continuation, and forced DSP acknowledgements.
 
-HLE can be scheduled only after its LLE counterpart exists and its full
-guest-visible behavioral contract is demonstrated. ABI compatibility alone
-does not qualify an HLE replacement.
+HLE can replace any reached subsystem once an implemented LLE counterpart and
+its observable contract exist. Enhanced profiles may enable it by default with
+an explicit reference opt-out. Native internals can differ, and numerical or
+presentation differences use documented per-contract tolerances. Required
+memory effects, errors, ordering and resource ownership remain compatible;
+ABI call signatures alone do not establish that. A missing reference behavior
+is an actual implementation gap, never permission to report fabricated success.

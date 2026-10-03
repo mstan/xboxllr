@@ -52,7 +52,11 @@ on Windows x64. Keep this runtime as the faithful baseline and device implementa
 Full CPU state preservation, faults, interrupts, memory/device boundaries, and code
 invalidation must have explicit contracts, even when the first translated subset is
 small. Preserve unsupported state and fall back before unsupported operations.
-ARM hardware setup and actual enhancements are deferred; design their interfaces now.
+ARM hardware setup remains deferred. Owner clarification, 2026-10-03: enhanced
+rendering and interchangeable native/HLE services are early delivery work, with
+the real LLE reference available by opt-out. Full AOT is the final CPU gate,
+not a prerequisite for game progress. [NORTH-STAR](../NORTH-STAR.md) and the
+[current gameplan](GOAL-AOT-DASHBOARD.md) supersede older arc ordering below.
 See the [implementation milestones](COMPARISON-XEMU-NATIVIZATION-2026-09-06.md).
 
 ## 3. Strategy: harvest, borrow, build
@@ -63,7 +67,7 @@ author each part*:
 | Part | Strategy | Source | License |
 |---|---|---|---|
 | **CPU core** | Harvest as embeddable, hookable library | **Unicorn Engine** (QEMU x86 core) | GPL-2 |
-| **NV2A, APU, device models, boot logic** | Harvest domain logic, **rewrite modular + hardware-validate** | **xemu** | GPL-2 |
+| **NV2A, APU, device models, boot logic** | Reuse components or substantial backends through real adapters; qualify observable behavior | **xemu**, matching xboxrecomp components | File-specific upstream terms; preserve provenance |
 | **Host shell** (window, input plumbing, audio out, GPU context) | Borrow outright | **SDL3** (incl. SDL_gpu) | zlib |
 | **Host GPU helpers** | Borrow | VMA, glslang/SPIRV-Tools | MIT/BSD |
 | **Decode tables / FP / formats / crypto primitives** | Borrow | Zydis, SoftFloat, ISO9660/XBE/FATX/LZX/RC4/SHA-1 libs | MIT/BSD |

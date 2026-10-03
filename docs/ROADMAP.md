@@ -4,17 +4,20 @@ Two arcs. Terse by design (the gcnrecomp shape): each milestone has a one-line i
 explicit **Deliverable**, and — once closed — a dated **DONE** stamp with the
 machine-verifiable evidence that closed it.
 
-2026-10-02 owner direction makes the [faithful AOT dashboard](GOAL-AOT-DASHBOARD.md)
-primary, with maximum qualified renderer reuse and Blinx boot as the stretch goal.
-The earlier Blinx-first ordering and older Arc 2 deferral below are historical. Current launch
+2026-10-03 owner direction makes the [LLE floor / enhanced execution gameplan](GOAL-AOT-DASHBOARD.md)
+authoritative: borrowed enhanced rendering and real Blinx progress with partial
+AOT come before strict AOT completion. Qualified enhanced paths can ship by
+default with a real LLE opt-out. Full AOT remains the final gate.
+The older dashboard-only ordering and Arc 2 deferral below are historical. Current launch
 dependencies are in [BLINX-BURNDOWN.md](BLINX-BURNDOWN.md); current execution
 coverage work is in [PLAN-AOT-COVERAGE-BURNDOWN.md](PLAN-AOT-COVERAGE-BURNDOWN.md).
 
 **Global gates (every milestone):**
 - Fault-stop on anything unimplemented; never a stub or plausible default.
 - Every claim backed by a machine-verifiable JSON artifact that regenerates deterministically.
-- Validated against **real hardware** (authority) and cross-checked against pinned xemu-TCG
-  (reference), to a documented first divergence, behind the four validation gates.
+- State each validation source and its limits. **Real hardware** remains authority;
+  hardware work is owner-deferred until a concrete blocker requires it. Pinned
+  references and authored tests support bounded development qualification.
 - Crucibles gate subsystem admission: a subsystem's conformance crucible passes **before** the
   milestone that first relies on it.
 
