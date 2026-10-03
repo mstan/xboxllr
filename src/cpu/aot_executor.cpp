@@ -292,10 +292,22 @@ uint64_t AotExecutor::execute(uint32_t pc, uint64_t budget) {
     }
     auto* code = static_cast<uint8_t*>(ram(region->base, region->code_size, 2));
     if (!code) { decline_reason_ = "code-translation"; ++stats.code_tlb_declines; ++counters.code_tlb_declines; return 0; }
-    X86Regs regs = cpu_.get_regs();
-    xlle_aot_state state{{regs.eax, regs.ecx, regs.edx, regs.ebx,
-                           regs.esp, regs.ebp, regs.esi, regs.edi},
-                          pc, regs.eflags, cpu_.seq_};
+    xlle_aot_state state{};
+    if (bulk_registers_) {
+        if (!xlle_unicorn_aot_read_integer(cpu_.uc_, state.gpr, &state.eip, &state.eflags)) {
+            decline_reason_ = "integer-transfer-context";
+            ++stats.context_declines;
+            ++counters.context_declines;
+            return 0;
+        }
+    } else {
+        const X86Regs regs = cpu_.get_regs();
+        state = {{regs.eax, regs.ecx, regs.edx, regs.ebx,
+                  regs.esp, regs.ebp, regs.esi, regs.edi}, regs.eip, regs.eflags, 0};
+    }
+    // The dispatcher supplies the requested PC, as in the public-API path.
+    state.eip = pc;
+    state.retired = cpu_.seq_;
     const uint64_t start = state.retired;
     xlle_aot_bus bus{};
     bus.context = XLLE_AOT_CONTEXT_MACHINE_FLAT32_RAM;
@@ -361,12 +373,17 @@ uint64_t AotExecutor::execute(uint32_t pc, uint64_t budget) {
     const uint64_t retired = state.retired - start;
     decline_reason_ = aot_exit_name(result);
     if (!retired) return 0;
-    regs.eax = state.gpr[0]; regs.ecx = state.gpr[1];
-    regs.edx = state.gpr[2]; regs.ebx = state.gpr[3];
-    regs.esp = state.gpr[4]; regs.ebp = state.gpr[5];
-    regs.esi = state.gpr[6]; regs.edi = state.gpr[7];
-    regs.eip = state.eip; regs.eflags = state.eflags;
-    cpu_.set_regs(regs);
+    if (bulk_registers_) {
+        if (!xlle_unicorn_aot_write_integer(cpu_.uc_, state.gpr, state.eip, state.eflags)) {
+            cpu_.request_stop("AOT: integer writeback context changed during native execution");
+            return 0;
+        }
+    } else {
+        const X86Regs regs{state.gpr[0], state.gpr[1], state.gpr[2], state.gpr[3],
+                           state.gpr[4], state.gpr[5], state.gpr[6], state.gpr[7],
+                           state.eip, state.eflags};
+        cpu_.set_regs(regs);
+    }
     cpu_.seq_ = state.retired;
     xlle_guest_tsc_ticks = cpu_.seq_;
     stats.retired += retired;
@@ -383,6 +400,10 @@ bool UnicornFloor::register_aot_replacement(const AotReplacement& h) {
 }
 void UnicornFloor::set_aot_profile(uint32_t profile) {
     if (aot_) aot_->set_profile(profile);
+}
+void UnicornFloor::set_aot_bulk_registers(bool enabled) {
+    // Configure after registering native regions; no empty executor is created.
+    if (aot_) aot_->set_bulk_registers(enabled);
 }
 AotExecutionStats UnicornFloor::aot_stats() const {
     return aot_ ? aot_->stats : AotExecutionStats{};

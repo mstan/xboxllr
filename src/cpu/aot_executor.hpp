@@ -18,6 +18,7 @@ public:
     bool add_region(const xlle_aot_region& region);
     bool add_replacement(const AotReplacement& hook);
     void set_profile(uint32_t profile) { profile_ = profile; }
+    void set_bulk_registers(bool enabled) { bulk_registers_ = enabled; }
     bool contains(uint32_t pc) const;
     uint64_t execute(uint32_t pc, uint64_t budget);
     const char* decline_reason() const { return decline_reason_; }
@@ -38,6 +39,7 @@ private:
     static xlle_aot_exit x87_memory(void*, unsigned, uint32_t, uint32_t, unsigned, unsigned);
     static xlle_aot_exit x87_register(void*, unsigned, unsigned, uint32_t, unsigned);
     UnicornFloor& cpu_;
+    bool bulk_registers_ = false;
     std::vector<const xlle_aot_region*> regions_;
     // Address order is independent of stable registration/statistics order.
     std::map<uint32_t, size_t> region_by_base_;

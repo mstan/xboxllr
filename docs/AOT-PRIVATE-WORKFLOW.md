@@ -202,6 +202,15 @@ Do not publish the build directory.
 
 ## 4. Validate and measure
 
+`--aot-bulk-registers` selects the experimental bulk integer-state transfer for
+registered native regions. `--no-aot-bulk-registers` retains the default ten
+individual public-API reads/writes. Both transfer the same GPR/EIP/EFLAGS state;
+the bulk path uses the pinned core's lazy-flag helpers and preserves its EIP
+exit request. Extended state, instruction budgets, interrupts, code validation
+and RAM checks retain their existing implementations. This does not add native
+instruction coverage or remove fallback. Configure this with `--aot-native`;
+the generated ABI and private artifacts are unchanged.
+
 Use the same binary for interleaved A/B. Stop other emulator runs and builds first.
 The harness reports contamination; a busy run is not a valid performance leg.
 

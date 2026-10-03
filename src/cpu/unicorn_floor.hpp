@@ -63,6 +63,8 @@ public:
     bool register_aot_region(const xlle_aot_region& region);
     bool register_aot_replacement(const AotReplacement& replacement);
     void set_aot_profile(uint32_t profile);
+    // Configure after registration, between runs; false retains the public API.
+    void set_aot_bulk_registers(bool enabled);
     // Validation scope starts at the next run boundary. The centralized fallback
     // entry refuses guest execution even with no AOT regions or with observers.
     void require_native_execution(bool required) { native_required_ = required; }

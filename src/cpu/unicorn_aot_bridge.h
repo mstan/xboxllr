@@ -40,6 +40,16 @@ const char* xlle_unicorn_aot_context_rejection(void* engine);
 // of unconditionally rejecting it. No hidden state is changed by this check.
 int xlle_unicorn_idle_context_ok(void* engine, int irq_shadow);
 uint32_t xlle_unicorn_aot_code_limit(void* engine);
+// Bulk integer transfer only at a certified AOT boundary, outside guest
+// execution. No register decoding, guest execution or hidden-state replacement.
+// GPR order is EAX, ECX, EDX, EBX, ESP, EBP, ESI, EDI. Flags use the pinned
+// core's compute/load helpers, and writing EIP preserves its public-API exit
+// request. Failure leaves the engine/output untouched. Caller certifies the
+// bounded AOT context before reading and keeps it fixed until writeback.
+int xlle_unicorn_aot_read_integer(void* engine, uint32_t gpr[8],
+                                  uint32_t* eip, uint32_t* eflags);
+int xlle_unicorn_aot_write_integer(void* engine, const uint32_t gpr[8],
+                                   uint32_t eip, uint32_t eflags);
 // Fixed MMX primitives on the engine-owned physical x87/MMX register file.
 // Caller checks availability and certifies the complete memory operand before
 // committing. No helper translates, executes guest code, fills a TLB or faults.

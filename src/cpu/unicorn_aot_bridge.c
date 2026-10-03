@@ -18,6 +18,42 @@ static _Thread_local void* xlle_restore_engine;
 static _Thread_local xlle_unicorn_restore_callback xlle_restore_callback;
 static _Thread_local void* xlle_restore_opaque;
 
+_Static_assert(R_EAX == 0 && R_ECX == 1 && R_EDX == 2 && R_EBX == 3 &&
+               R_ESP == 4 && R_EBP == 5 && R_ESI == 6 && R_EDI == 7,
+               "AOT integer register encoding must match the pinned core");
+
+static CPUX86State* xlle_integer_env(void* engine) {
+    struct uc_struct* uc = (struct uc_struct*)engine;
+    if (!uc || uc->arch != UC_ARCH_X86 || uc->mode != UC_MODE_32 ||
+        !uc->cpu || !uc->cpu->env_ptr || uc->nested_level) return NULL;
+    return (CPUX86State*)uc->cpu->env_ptr;
+}
+
+int xlle_unicorn_aot_read_integer(void* engine, uint32_t gpr[8],
+                                  uint32_t* eip, uint32_t* eflags) {
+    CPUX86State* env = xlle_integer_env(engine);
+    if (!env || !gpr || !eip || !eflags) return 0;
+    for (unsigned i = 0; i < 8; ++i) gpr[i] = (uint32_t)env->regs[i];
+    *eip = (uint32_t)env->eip;
+    // EFLAGS arithmetic bits are lazy; env->eflags alone is not the register.
+    *eflags = (uint32_t)cpu_compute_eflags(env);
+    return 1;
+}
+
+int xlle_unicorn_aot_write_integer(void* engine, const uint32_t gpr[8],
+                                   uint32_t eip, uint32_t eflags) {
+    CPUX86State* env = xlle_integer_env(engine);
+    if (!env || !gpr) return 0;
+    struct uc_struct* uc = (struct uc_struct*)engine;
+    // Match the UC_MODE_32 API's zero-extension and EIP/flags write order.
+    for (unsigned i = 0; i < 8; ++i) env->regs[i] = gpr[i];
+    env->eip = eip;
+    uc->quit_request = true;
+    break_translation_loop(uc);
+    cpu_load_eflags(env, eflags, -1);
+    return 1;
+}
+
 void xlle_unicorn_set_restore_callback(void* engine, xlle_unicorn_restore_callback callback,
                                         void* opaque) {
     xlle_restore_engine = engine;

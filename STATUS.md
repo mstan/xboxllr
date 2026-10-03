@@ -1,5 +1,26 @@
 # STATUS
 
+## 2026-10-03 - Bulk AOT register transfer preserves the full dashboard route
+
+The opt-in `--aot-bulk-registers` path replaces twenty individual public register
+API calls per native invocation with bulk transfer through the pinned core's
+own state and lazy-flag helpers. Context, memory, event and code guards remain
+active; extended CPU state and native coverage are unchanged. The public API
+remains the default and explicit opt-out. No stubs were added.
+
+All **79 tests pass**, including real floor/API/bulk instruction-prefix checks
+and extended-state handoffs at O0/O3. Both **27B** routes preserve all **270
+checkpoints, 28 captures and native/idle/device counter rows**, also matching
+the previous reference. All three donor register models were reviewed; phobos's
+new fog-coordinate fix is recorded as a separate renderer candidate.
+
+Performance is **not qualified**: both functional runs had competing builds,
+and the subsequent strict timing attempt refused to launch on the busy host.
+The optimization remains experimental. Full AOT and sustained 60 FPS remain
+open; menu performance still precedes Blinx. See the
+[implementation and evidence](docs/RESULTS-AOT-INTEGER-TRANSFER-2026-10-03.md),
+tracked in `beads-xbox.1.43`.
+
 ## 2026-10-03 - Menu60 renderer coverage expands; performance gate remains open
 
 The experimental xemu shader path now handles owned decoded DXT1/DXT2-3,

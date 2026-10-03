@@ -1,5 +1,6 @@
 #include "aot_programs.h"
 #include "machine/machine.hpp"
+#include "cpu/unicorn_floor.hpp"
 
 #include <array>
 #include <cstddef>
@@ -91,7 +92,7 @@ static std::array<uint8_t, 10> st_pattern(unsigned reg) {
     return v;
 }
 
-static void extended_state_survives_native_and_fallback() {
+static void extended_state_survives_native_and_fallback(bool bulk_registers) {
     XboxMachine machine;
     prepare(machine, xlle_aot_machine_mixed);
     const uint8_t fallback[] = {0x43, 0xe9, 0xea, 0xff, 0xff, 0xff};
@@ -115,6 +116,7 @@ static void extended_state_survives_native_and_fallback() {
     write_u16_xreg(machine.cpu(), XReg::FPTAG, 0x0000, "write FPTAG");
 
     require(machine.register_aot_region(xlle_aot_machine_mixed), "register mixed state loop");
+    static_cast<UnicornFloor&>(machine.cpu()).set_aot_bulk_registers(bulk_registers);
     run_exact(machine, xlle_aot_loop.base - 0x100, 101);
     const auto regs = machine.cpu().get_regs();
     require(regs.eax == 25 && regs.ebx == 25 && regs.eip == xlle_aot_loop.base,
@@ -470,7 +472,8 @@ static void pending_irq_interrupts_before_native_dispatch() {
 }  // namespace
 
 void test_aot_machine_state() {
-    extended_state_survives_native_and_fallback();
+    extended_state_survives_native_and_fallback(false);
+    extended_state_survives_native_and_fallback(true);
     hook_accepts_register_transaction();
     hook_decline_discards_proposal();
     hook_true_over_budget_discards_proposal();

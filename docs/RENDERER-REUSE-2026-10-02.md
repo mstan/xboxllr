@@ -45,6 +45,26 @@ and resident surfaces. A new graphics API is not an acceptance requirement.
 The local references live outside the source repository under `../refs/`.
 These pins state what was inspected, not that every graphics path is qualified.
 
+### CPU-boundary follow-up, 2026-10-03
+
+The bulk integer-transfer spike (`beads-xbox.1.43`) rechecked all three remote
+HEADs. sp00nznet and NoRain211 are unchanged. phobos advanced by one commit to
+`7884426a857b883d379e5c5d8e07a5ed083ae540`: its D3D8 shader now treats a vertex
+program's fog output as a coordinate and applies the configured fog range,
+including explicit zero-span/NaN/infinity handling. That delta was fetched and
+read; it was not built or qualified here. Keep it for the fog boundary work.
+The earlier compiler test results below still identify the `f01b20d` checkout.
+[Pinned fog change](https://github.com/phobos665/xboxrecomp/commit/7884426a857b883d379e5c5d8e07a5ed083ae540).
+
+All three `templates/runtime/recomp_types.h` register models were inspected for
+the CPU spike. They use direct scalar globals (TLS in current upstream/phobos)
+and a generated calling convention. NoRain's carry propagation and phobos's
+flag-join fixes remain useful adversarial examples. Their register lifetimes,
+flag representation and native calls are not a drop-in LLE CPU boundary.
+The concrete adaptation is bulk scalar transfer using the pinned Unicorn core's
+own flag compute/load helpers, retaining engine-owned extended/hidden state and
+the public register-API opt-out. No donor CPU or memory shim is imported.
+
 ## What the refreshed review actually establishes
 
 Remote HEAD was checked for all three linked repositories on 2026-10-03.

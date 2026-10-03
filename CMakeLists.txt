@@ -603,6 +603,10 @@ if(Python3_Interpreter_FOUND)
     target_link_libraries(test_aot_machine_${aot_variant} PRIVATE
                           xlle_aot_fixture_${aot_variant} xlle_machine)
     add_test(NAME aot_machine_${aot_variant} COMMAND test_aot_machine_${aot_variant})
+    add_executable(test_aot_integer_transfer_${aot_variant} tests/test_aot_integer_transfer.cpp)
+    target_link_libraries(test_aot_integer_transfer_${aot_variant} PRIVATE
+                          xlle_aot_fixture_${aot_variant} xlle_machine)
+    add_test(NAME aot_integer_transfer_${aot_variant} COMMAND test_aot_integer_transfer_${aot_variant})
     add_executable(test_aot_required_${aot_variant} tests/test_aot_required.cpp)
     target_link_libraries(test_aot_required_${aot_variant} PRIVATE
                           xlle_aot_fixture_${aot_variant} xlle_machine)

@@ -1862,6 +1862,7 @@ int main(int argc, char** argv) {
     uint32_t host_sample_profile_ms = 0;
     const char* cpu_block_census = nullptr;
     bool aot_native = false;
+    bool aot_bulk_registers = false;
     bool aot_require_native = false;
     bool aot_native_mask_explicit = false;
     uint64_t aot_require_native_after = 0;
@@ -2237,6 +2238,8 @@ int main(int argc, char** argv) {
         }
         else if (!std::strcmp(argv[i], "--aot-native")) aot_native = true;
         else if (!std::strcmp(argv[i], "--no-aot-native")) aot_native = false;
+        else if (!std::strcmp(argv[i], "--aot-bulk-registers")) aot_bulk_registers = true;
+        else if (!std::strcmp(argv[i], "--no-aot-bulk-registers")) aot_bulk_registers = false;
         else if (!std::strcmp(argv[i], "--aot-require-native")) {
             aot_require_native = true;
             aot_require_native_after = 0;
@@ -3590,6 +3593,11 @@ int main(int argc, char** argv) {
                 std::fprintf(stderr, "[host] --aot-native requires a private generated AOT build\n");
                 return 1;
 #endif
+            }
+            if (unicorn_floor && aot_native) {
+                unicorn_floor->set_aot_bulk_registers(aot_bulk_registers);
+                std::printf("[aot] integer-transfer=%s\n",
+                    aot_bulk_registers ? "bulk-pinned-core" : "reference-api");
             }
             if (unicorn_floor && cpu_insn_hook) unicorn_floor->force_insn_scheduling();
             auto arm_native_required = [&]() {
