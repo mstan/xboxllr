@@ -11,6 +11,7 @@
 #include "exec/exec-all.h"
 #include "exec/memory.h"
 #include "exec/ram_addr.h"
+#include "exec/helper-proto.h"
 #include "translate-all.h"
 
 static _Thread_local void* xlle_restore_engine;
@@ -34,6 +35,19 @@ int xlle_unicorn_irq_inhibited(void* engine) {
     struct uc_struct* uc = (struct uc_struct*)engine;
     if (!uc || !uc->cpu || !uc->cpu->env_ptr) return 1;
     return (((CPUX86State*)uc->cpu->env_ptr)->hflags & HF_INHIBIT_IRQ_MASK) != 0;
+}
+
+int xlle_unicorn_limit_next_tb(void* engine, unsigned instructions) {
+    struct uc_struct* uc = (struct uc_struct*)engine;
+    if (!uc || !uc->cpu || !instructions || instructions > CF_COUNT_MASK) return 0;
+    CPUState* cpu = uc->cpu;
+    uint32_t flags = cpu->cflags_next_tb;
+    if (flags == (uint32_t)-1) flags = curr_cflags();
+    // Preserve a tighter precise-SMC/watchpoint request and its other flags.
+    const unsigned previous = flags & CF_COUNT_MASK;
+    if (previous && previous < instructions) instructions = previous;
+    cpu->cflags_next_tb = (flags & ~CF_COUNT_MASK) | instructions;
+    return 1;
 }
 
 static int xlle_aot_seg_flat_code32(const SegmentCache* seg) {
@@ -74,7 +88,7 @@ static int xlle_aot_seg_flat_data32(const SegmentCache* seg) {
     return ((seg->flags & DESC_DPL_MASK) == 0) ? 1 : 0;
 }
 
-const char* xlle_unicorn_aot_context_rejection(void* engine) {
+static const char* xlle_context_rejection(void* engine, int irq_shadow) {
     struct uc_struct* uc = (struct uc_struct*)engine;
     CPUState* cpu;
     CPUX86State* env;
@@ -111,7 +125,10 @@ const char* xlle_unicorn_aot_context_rejection(void* engine) {
     }
 #endif
 
-    rejected_hflags = HF_INHIBIT_IRQ_MASK | HF_ADDSEG_MASK | HF_TF_MASK |
+    if (!!(env->hflags & HF_INHIBIT_IRQ_MASK) != !!irq_shadow) {
+        return "interrupt-shadow";
+    }
+    rejected_hflags = HF_ADDSEG_MASK | HF_TF_MASK |
                       HF_LMA_MASK | HF_CS64_MASK | HF_RF_MASK | HF_VM_MASK |
                       HF_AC_MASK | HF_SMM_MASK | HF_SVME_MASK | HF_GUEST_MASK |
                       HF_SMAP_MASK | HF_IOBPT_MASK | HF_MPX_EN_MASK |
@@ -136,7 +153,7 @@ const char* xlle_unicorn_aot_context_rejection(void* engine) {
     if ((env->eflags & (TF_MASK | VM_MASK | RF_MASK | AC_MASK | NT_MASK | VIF_MASK | VIP_MASK)) != 0) {
         return "eflags";
     }
-    if (cpu->singlestep_enabled || cpu->watchpoint_hit) {
+    if (cpu->singlestep_enabled || cpu->watchpoint_hit || (env->dr[7] & 0x20ffu)) {
         return "debug-step";
     }
     if (!QTAILQ_EMPTY(&cpu->breakpoints) || !QTAILQ_EMPTY(&cpu->watchpoints)) {
@@ -171,13 +188,104 @@ const char* xlle_unicorn_aot_context_rejection(void* engine) {
     return NULL;
 }
 
+const char* xlle_unicorn_aot_context_rejection(void* engine) {
+    return xlle_context_rejection(engine, 0);
+}
+
+int xlle_unicorn_idle_context_ok(void* engine, int irq_shadow) {
+    return xlle_context_rejection(engine, irq_shadow) == NULL;
+}
+
 int xlle_unicorn_aot_context_ok(void* engine) {
     return xlle_unicorn_aot_context_rejection(engine) == NULL;
+}
+
+int xlle_unicorn_aot_x87_available(void* engine, unsigned read_mask, int push) {
+    struct uc_struct* uc = (struct uc_struct*)engine;
+    if (!uc || !uc->cpu || !uc->cpu->env_ptr || read_mask > 255) return 0;
+    CPUX86State* env = uc->cpu->env_ptr;
+    if (!(env->features[FEAT_1_EDX] & CPUID_FP87) ||
+        (env->cr[0] & (CR0_EM_MASK | CR0_TS_MASK)) ||
+        (env->fpuc & 0x3f) != 0x3f || (env->fpuc & 0x300) == 0x100 ||
+        (env->fpus & 0x80)) return 0;
+    if (push && !env->fptags[(env->fpstt - 1) & 7]) return 0;
+    for (unsigned i = 0; i < 8; ++i)
+        if ((read_mask & (1u << i)) && env->fptags[(env->fpstt + i) & 7]) return 0;
+    return 1;
+}
+
+void xlle_unicorn_aot_x87_load(void* engine, uint64_t value, int wide, int multiply) {
+    CPUX86State* env = ((struct uc_struct*)engine)->cpu->env_ptr;
+    if (multiply) {
+        if (wide) helper_xlle_fmul64(env, value); else helper_xlle_fmul32(env, (uint32_t)value);
+    } else {
+        if (wide) helper_fldl_ST0(env, value); else helper_flds_ST0(env, (uint32_t)value);
+    }
+}
+uint64_t xlle_unicorn_aot_x87_store(void* engine, int wide) {
+    CPUX86State* env = ((struct uc_struct*)engine)->cpu->env_ptr;
+    return wide ? helper_fstl_ST0(env) : helper_fsts_ST0(env);
+}
+void xlle_unicorn_aot_x87_pop(void* engine) {
+    helper_fpop(((struct uc_struct*)engine)->cpu->env_ptr);
+}
+void xlle_unicorn_aot_x87_register(void* engine, unsigned operation, unsigned reg) {
+    CPUX86State* env = ((struct uc_struct*)engine)->cpu->env_ptr;
+    switch (operation) {
+    case 0: helper_fpush(env); helper_fmov_ST0_STN(env, (reg + 1) & 7); break;
+    case 1: helper_fxchg_ST0_STN(env, reg); break;
+    case 2: helper_fadd_STN_ST0(env, reg); helper_fpop(env); break;
+    case 3: helper_fmov_STN_ST0(env, reg); helper_fpop(env); break;
+    case 4: helper_fmov_FT0_STN(env, reg); helper_fmul_ST0_FT0(env); break;
+    case 5: helper_fsub_STN_ST0(env, reg); helper_fpop(env); break;
+    case 6: helper_ffree_STN(env, reg); break;
+    default: g_assert_not_reached();
+    }
+}
+void xlle_unicorn_aot_x87_record(void* engine, uint32_t pc, unsigned opcode,
+                                uint32_t address, int segment) {
+    CPUX86State* env = ((struct uc_struct*)engine)->cpu->env_ptr;
+    env->fpip = pc; env->fpcs = env->segs[R_CS].selector; env->fpop = opcode;
+    if (segment >= 0) { env->fpdp = address; env->fpds = env->segs[segment ? R_SS : R_DS].selector; }
 }
 
 uint32_t xlle_unicorn_aot_code_limit(void* engine) {
     struct uc_struct* uc = (struct uc_struct*)engine;
     return ((CPUX86State*)uc->cpu->env_ptr)->segs[R_CS].limit;
+}
+
+int xlle_unicorn_aot_mmx_available(void* engine, int require_sse) {
+    struct uc_struct* uc = (struct uc_struct*)engine;
+    if (!uc || uc->arch != UC_ARCH_X86 || !uc->cpu || !uc->cpu->env_ptr) return 0;
+    CPUX86State* env = (CPUX86State*)uc->cpu->env_ptr;
+    const uint32_t required = CPUID_MMX | (require_sse ? CPUID_SSE : 0);
+    return (env->features[FEAT_1_EDX] & required) == required &&
+           !(env->cr[0] & (CR0_EM_MASK | CR0_TS_MASK)) && !(env->fpus & 0x80); /* ES */
+}
+
+int xlle_unicorn_aot_sse_available(void* engine) {
+    struct uc_struct* uc = (struct uc_struct*)engine;
+    if (!uc || uc->arch != UC_ARCH_X86 || !uc->cpu || !uc->cpu->env_ptr) return 0;
+    return (((CPUX86State*)uc->cpu->env_ptr)->features[FEAT_1_EDX] & CPUID_SSE) != 0;
+}
+
+uint64_t xlle_unicorn_aot_mmx_peek(void* engine, unsigned reg) {
+    CPUX86State* env = ((struct uc_struct*)engine)->cpu->env_ptr;
+    return env->fpregs[reg].mmx.MMX_Q(0);
+}
+
+void xlle_unicorn_aot_mmx_commit(void* engine, int destination, uint64_t value) {
+    CPUX86State* env = ((struct uc_struct*)engine)->cpu->env_ptr;
+    helper_enter_mmx(env);
+    if (destination >= 0) {
+        env->fpregs[destination].mmx.MMX_Q(0) = value;
+        env->fpregs[destination].d.high = 0xffff;
+    }
+}
+
+void xlle_unicorn_aot_mmx_emms(void* engine) {
+    CPUX86State* env = ((struct uc_struct*)engine)->cpu->env_ptr;
+    helper_emms(env);
 }
 
 static int xlle_aot_span_within_target_page(uint32_t linear, size_t size) {

@@ -73,8 +73,32 @@ IdeController::~IdeController() {
     if (drives_[0].blk) std::fclose(drives_[0].blk);
 }
 
+bool IdeController::configure_hdd_security(const HddSecurityConfig& config) {
+    if (drives_[0].blk) return false; // never change policy under a running guest
+    hdd_security_ = config;
+    return true;
+}
+
+uint16_t IdeController::hdd_security_status() const {
+    const auto& d = drives_[0];
+    const bool enabled = hdd_security_.mode != HddSecurityConfig::Mode::Disabled;
+    return 1 | (enabled ? 2 : 0) | (d.locked ? 4 : 0) |
+           (d.security_frozen ? 8 : 0) | (d.security_attempts == 0 ? 16 : 0) |
+           (enabled && hdd_security_.maximum ? 256 : 0);
+}
+
+void IdeController::hardware_reset() {
+    reset();
+    lower_irq();
+    auto& d = drives_[0];
+    d.locked = hdd_security_.mode != HddSecurityConfig::Mode::Disabled;
+    d.security_frozen = false;
+    d.security_attempts = 5;
+}
+
 bool IdeController::attach_hdd(const std::string& path, bool writeback) {
     IdeDrive& d = drives_[0];
+    if (d.blk) return false;
     hdd_writeback_ = writeback;
     overlay_.clear();
     // Read-only unless writeback was explicitly asked for: see the write-policy note in
@@ -96,9 +120,10 @@ bool IdeController::attach_hdd(const std::string& path, bool writeback) {
     d.sectors = d.drive_sectors = 63;
     int64_t cyl = size / 512 / (16 * 63);
     d.cylinders = static_cast<int>(cyl > 16383 ? 16383 : cyl);
-    // The retail kernel requires the drive LOCKED at boot (error 05 otherwise); it then sends
-    // SECURITY UNLOCK with its EEPROM-derived key, which we accept (xemu ide_security_cmd).
-    d.locked = true;
+    // Cold attachment models power-on, independently of task-file software reset.
+    d.locked = hdd_security_.mode != HddSecurityConfig::Mode::Disabled;
+    d.security_frozen = false;
+    d.security_attempts = 5;
     d.identify_set = false;
     return true;
 }
@@ -218,9 +243,9 @@ void IdeController::cmd_lba48_transform(IdeDrive& d, bool lba48) {
 }
 
 // --- IDENTIFY payloads (xemu ide_identify / ide_atapi_identify) -------------------------------
-// Identity strings: shaped like the real console's Seagate; the retail kernel derives its
-// SECURITY UNLOCK key from model+serial, but we accept any key (as xemu does), so these are
-// not load-bearing. Oracle debt: capture the live console's real IDENTIFY when convenient.
+// Virtual identity, also used by tools/provision_hdd_security.py. The kernel's
+// password derives from these exact model/serial strings and its EEPROM HDD key.
+// This is not a claim that these strings identify the owner's physical drive.
 void IdeController::build_identify(IdeDrive& d) {
     uint8_t* p = d.identify_data;
     if (!d.identify_set) {
@@ -259,7 +284,7 @@ void IdeController::build_identify(IdeDrive& d) {
         put_le16(p, 68, 120);
         put_le16(p, 80, 0xf0);                              // ata3..ata6
         put_le16(p, 81, 0x16);                              // conforms to ata5
-        put_le16(p, 82, (1 << 14) | (1 << 5) | 1);          // NOP, WCACHE, SMART
+        put_le16(p, 82, (1 << 14) | (1 << 5) | 3);          // NOP, WCACHE, SECURITY, SMART
         put_le16(p, 83, (1 << 14) | (1 << 13) | (1 << 12) | (1 << 10));
         put_le16(p, 84, (1 << 14));
         put_le16(p, 85, (1 << 14) | (1 << 5) | 1);
@@ -269,9 +294,10 @@ void IdeController::build_identify(IdeDrive& d) {
         put_le16(p, 93, 1 | (1 << 14) | 0x2000);
         d.identify_set = true;
     }
-    // Word 128, security status (xemu, Xbox-specific): 2=locked, 1=enabled, 0=supported.
-    // Refreshed every IDENTIFY so the post-unlock state reads back correctly.
-    put_le16(p, 128, d.locked ? ((1 << 2) | (1 << 1) | 1) : ((1 << 1) | 1));
+    // ATA-5 words 85/128 are live, including when IDENTIFY was cached earlier.
+    const uint16_t security = hdd_security_status();
+    p[85 * 2] = static_cast<uint8_t>((p[85 * 2] & ~2) | (security & 2));
+    put_le16(p, 128, security);
     // LBA28 capacity (words 60-61) + LBA48 capacity (words 100-103).
     uint64_t nb = d.nb_sectors;
     uint32_t lba28 = nb > 0x0FFFFFFF ? 0x0FFFFFFF : static_cast<uint32_t>(nb);
@@ -350,14 +376,27 @@ void IdeController::end_transfer(IdeDrive& d) {
         case IdeDrive::End::AtapiReplyStop:
             atapi_cmd_ok(d);
             break;
-        case IdeDrive::End::SecurityCmd:
-            // xemu ide_security_cmd: accept the password (the kernel always computes the
-            // right one), transition to unlocked.
-            d.locked = false;
-            d.error = 0;
-            d.status = READY_STAT | SEEK_STAT;
+        case IdeDrive::End::SecurityCmd: {
+            const bool master = (d.io_buffer[0] & 1) != 0;
+            const auto& expected = master ? hdd_security_.master : hdd_security_.user;
+            uint8_t difference = 0;
+            for (size_t i = 0; i < expected.size(); ++i)
+                difference |= expected[i] ^ d.io_buffer[2 + i];
+            // Do not retain the guest credential in the reusable transfer buffer.
+            std::memset(d.io_buffer.data(), 0, 512);
+            if ((master && hdd_security_.maximum) || difference) {
+                if (difference && d.locked && !(master && hdd_security_.maximum))
+                    --d.security_attempts;
+                abort_command(d);
+            } else {
+                d.locked = false;
+                d.error = 0;
+                d.status = READY_STAT | SEEK_STAT;
+                transfer_stop(d);
+            }
             raise_irq();
             break;
+        }
     }
 }
 
@@ -722,6 +761,30 @@ void IdeController::exec_cmd(uint8_t cmd) {
     d.status = READY_STAT | BUSY_STAT;
     d.error = 0;
 
+    // ATA-5 table 9: locked media access and frozen security changes abort.
+    // Unknown commands still reach the explicit unmodeled-command stop below.
+    if (!is_cd && d.blk) {
+        bool denied = d.security_frozen && cmd >= 0xF1 && cmd <= 0xF6 && cmd != 0xF5;
+        if (d.locked) {
+            switch (cmd) {
+                case 0x20: case 0x21: case 0x24: case 0x29:
+                case 0x30: case 0x31: case 0x34: case 0x39:
+                case 0x40: case 0x41: case 0x42:
+                case 0xC4: case 0xC5: case 0xC8: case 0xC9: case 0x25:
+                case 0xCA: case 0xCB: case 0x35: case 0xE7: case 0xEA:
+                case 0xF1: case 0xF5: case 0xF6:
+                    denied = true;
+                    break;
+            }
+        }
+        if ((cmd == 0xF2 || cmd == 0xF4) && d.security_attempts == 0) denied = true;
+        if (denied) {
+            abort_command(d);
+            raise_irq();
+            return;
+        }
+    }
+
     switch (cmd) {
         case 0xEC:  // IDENTIFY DEVICE
             if (!is_cd && d.blk) {
@@ -925,15 +988,21 @@ void IdeController::exec_cmd(uint8_t cmd) {
             }
             break;
         }
-        case 0xF2:  // SECURITY UNLOCK (Xbox-critical; xemu cmd_security_unlock)
+        case 0xF2:  // SECURITY UNLOCK: independently provisioned ATA credentials
+            if (is_cd || !d.blk) { abort_command(d); complete = true; break; }
+            if (hdd_security_.mode != HddSecurityConfig::Mode::Locked) {
+                abort_command(d);
+                if (fault_) fault_("IDE SECURITY UNLOCK unmodeled without provisioned credentials; configure the drive before boot");
+                break;
+            }
             d.error = 0;
             d.status = READY_STAT | SEEK_STAT;
             transfer_start(d, 512, IdeDrive::End::SecurityCmd);
             break;
-        case 0xF5:  // SECURITY FREEZE LOCK (xemu maps to a nop that clears nsector)
-            d.nsector = 0;
+        case 0xF5:  // SECURITY FREEZE LOCK
+            if (is_cd || !d.blk) { abort_command(d); complete = true; break; }
+            d.security_frozen = true;
             complete = true;
-            set_dsc = true;
             break;
         case 0xF8:  // READ NATIVE MAX ADDRESS
             if (d.nb_sectors == 0) {

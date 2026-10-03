@@ -48,7 +48,7 @@ struct IoEvent {
 // by trace — the fixtures are that trace).
 enum class XReg { CR0, CR4, MXCSR, XMM0, XMM1, XMM2, ST0, ST1, MM0,
     CR3, XMM3, XMM4, XMM5, XMM6, XMM7, ST2, ST3, ST4, ST5, ST6, ST7,
-    FPCW, FPSW, FPTAG, CS, DS, SS, IDTR, DR7 };
+    FPCW, FPSW, FPTAG, CS, DS, SS, IDTR, DR7, FIP, FDP, FCS, FDS, FOP };
 
 struct X86DescriptorTable {
     uint16_t selector = 0;
@@ -166,15 +166,23 @@ public:
     // that has no such clock, in which case the caller must not skip.
     virtual bool advance_instruction_clock(uint64_t insns) { (void)insns; return false; }
 
+    // Qualification for a whole idle-loop iteration with unchanged hidden state.
+    // Floors must explicitly certify flat ring-0 execution, the expected IRQ
+    // shadow, and absence of debug/observer/stop conditions. No effects on refusal.
+    virtual bool idle_skip_context_ok(bool irq_shadow) { (void)irq_shadow; return false; }
+    // Inspect only already-cached guest RAM, with the actual fetch/read permission.
+    // Never fill a TLB, read MMIO, or update page-table accessed bits.
+    virtual bool read_cached_ram(uint32_t linear, void* data, size_t size, bool fetch) {
+        (void)linear; (void)data; (void)size; (void)fetch; return false;
+    }
+
     // Execute up to `max_insns` instructions starting at the current EIP. Returns the
     // number actually retired. `err` is set to a human-readable reason on fault-stop
     // (PRINCIPLES §3: a halt records the exact context, never a silent default).
     //
-    // `max_insns` is a BUDGET, not an exact count: a floor that schedules at translation-block
-    // granularity stops at the last whole block that fits, so it may retire fewer. The one
-    // exception is forward progress -- at least one block always runs, so a single block larger
-    // than the remaining budget overshoots it rather than deadlocking. Callers must therefore
-    // treat the return value as authoritative and never assume `retired == max_insns`.
+    // `max_insns` is an upper bound. The Unicorn floor splits a translated tail
+    // to meet it exactly; faults, explicit stops and interrupt windows may end
+    // earlier. Treat the actual return value as authoritative.
     virtual uint64_t run(uint32_t start_eip, uint64_t max_insns, std::string& err) = 0;
 };
 

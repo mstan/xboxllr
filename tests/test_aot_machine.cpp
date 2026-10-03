@@ -20,8 +20,8 @@ static void prepare(XboxMachine& machine, const xlle_aot_region& region) {
     require(machine.ok() && machine.init_ram(), "machine RAM and floor");
     require(machine.cpu().setup_flat_segments(0x8000), "flat protected segments");
     require(machine.cpu().write_mem(region.base, region.code, region.code_size), "code load");
-    // A separate initial TB lets the existing block clock settle its bootstrap
-    // debt before entering a self-loop. This jump is part of both test arms.
+    // Keep an executed fallback entry before the native self-loop so both
+    // test arms exercise the same initial guest instruction.
     const uint8_t entry[] = {0xe9, 0xfb, 0, 0, 0};
     require(machine.cpu().write_mem(region.base - 0x100, entry, sizeof(entry)), "entry jump");
     X86Regs r{};
@@ -72,7 +72,7 @@ static void run_exact(XboxMachine& m, uint32_t pc, uint64_t budget) {
 static void continuation(bool native, bool tsc) {
     XboxMachine m;
     prepare(m, xlle_aot_machine_mixed);
-    // BSWAP (or RDTSC) is deliberately unsupported by the generator. Its jump
+    // BSWAP (or RDTSC) lives outside registered native code. Its jump
     // returns to a native block, repeatedly, within the same machine slice.
     uint8_t fallback[] = {0x0f, uint8_t(tsc ? 0x31 : 0xc8), 0xe9, 0xe9, 0xff, 0xff, 0xff};
     require(m.cpu().write_mem(0x1010, fallback, sizeof(fallback)), "fallback block");
@@ -431,26 +431,26 @@ static void precise_tsc_variants() {
     }
 }
 
-static void native_device_deadlines() {
+static void native_device_deadlines(bool native) {
     XboxMachine::Config options{};
     options.cpu_chunk_insns = 10000000;  // force device deadlines to bind
     XboxMachine m(options);
     prepare(m, xlle_aot_loop);
     m.init_devices();
-    require(m.register_aot_region(xlle_aot_loop), "deadline region");
+    if (native) require(m.register_aot_region(xlle_aot_loop), "deadline region");
     std::vector<uint64_t> polls;
     m.on_host_poll([&]() {
         polls.push_back(m.total_insns());
         require(m.cpu().get_regs().eax == m.total_insns() / 2,
-                "host service observes all native effects through deadline");
+                "host service observes all CPU effects through deadline");
     });
     // ceil(N * 733333333 / 1000), calculated independently of scheduler code.
     const uint64_t first = 733334, second = 1466667;
     run_exact(m, 0xf00, 2 * first + 1);
     require(std::find(polls.begin(), polls.end(), first) != polls.end() &&
             std::find(polls.begin(), polls.end(), second) != polls.end(),
-            "native execution stops exactly at successive device/host deadlines");
-    require(m.aot_stats().retired == 2 * first && m.aot_stats().fallback_insns == 1,
+            "both CPU tiers stop exactly at successive device/host deadlines");
+    if (native) require(m.aot_stats().retired == 2 * first && m.aot_stats().fallback_insns == 1,
             "deadline test executes natively after bootstrap");
 }
 
@@ -478,7 +478,8 @@ int main() {
     test_aot_irq_shadow();
     test_aot_store_fault();
     precise_tsc_variants();
-    native_device_deadlines();
+    native_device_deadlines(false);
+    native_device_deadlines(true);
     for (bool native : {false, true}) {
         XboxMachine m;
         prepare(m, xlle_aot_machine_tsc_prefix);

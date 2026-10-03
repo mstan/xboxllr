@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "xlle/cpu_floor.hpp"
@@ -53,6 +54,8 @@ public:
     bool translate(uint32_t linear, uint32_t& phys) override;
 
     bool advance_instruction_clock(uint64_t insns) override;
+    bool idle_skip_context_ok(bool irq_shadow) override;
+    bool read_cached_ram(uint32_t linear, void* data, size_t size, bool fetch) override;
 
     uint64_t run(uint32_t start_eip, uint64_t max_insns, std::string& err) override;
 
@@ -60,6 +63,10 @@ public:
     bool register_aot_region(const xlle_aot_region& region);
     bool register_aot_replacement(const AotReplacement& replacement);
     void set_aot_profile(uint32_t profile);
+    // Validation scope starts at the next run boundary. The centralized fallback
+    // entry refuses guest execution even with no AOT regions or with observers.
+    void require_native_execution(bool required) { native_required_ = required; }
+    bool native_execution_required() const { return native_required_; }
     AotExecutionStats aot_stats() const;
     std::vector<AotRegionStats> aot_region_stats() const;
 
@@ -86,7 +93,8 @@ public:
         uint64_t irq_window_stops = 0;  // slices ended by the block hook on an open IF window
         uint64_t insn_mode_runs = 0;  // run() calls that used the per-instruction path
         uint64_t block_mode_runs = 0;
-        uint64_t bootstrap_blocks = 0;  // uncharged-then-repaid first-block executions (<= a few)
+        uint64_t bootstrap_blocks = 0;  // legacy report field; all TBs now charged before execution
+        uint64_t deadline_splits = 0;   // bounded translated tails, no instruction hooks
         // Instructions added to the clock by advance_instruction_clock() (idle fast-forward).
         // In block mode, tb_insns + skipped_insns + aot_stats().retired equals
         // the machine's retired total; these three sources are disjoint.
@@ -111,6 +119,7 @@ private:
     std::vector<HostRamMapping> host_ram_;
     std::unique_ptr<AotExecutor> aot_;
     bool aot_dispatching_ = false;
+    bool native_required_ = false;
     bool aot_bypass_entry_ = false;
     bool aot_handoff_ = false;
     uint64_t aot_fallback_start_ = 0;
@@ -159,8 +168,6 @@ private:
     uint32_t icount_lookup(uint32_t pc, uint16_t size) const;
 
     // Per-instruction scheduling is opt-in for observers/diagnostics.
-    // Charge the first-ever block once its icount becomes known (see the .cpp).
-    void settle_bootstrap_block();
     void set_insn_mode(bool on);
 
     uc_struct* uc_ = nullptr;
@@ -186,18 +193,12 @@ private:
     bool insn_mode_ = false;        // per-instruction hook installed and counting
     uint64_t seq_ = 0;              // retired-instruction clock; also the ring sequence
     uint64_t run_deadline_ = 0;     // absolute seq_ value this run() may not exceed
-    uint64_t tbs_this_run_ = 0;     // blocks entered since uc_emu_start (forward-progress guard)
-    // The one block the edge hook cannot report before it executes: the first ever, since
-    // UC_HOOK_EDGE_GENERATED only fires once uc->last_tb is set. It runs uncharged and is
-    // charged as soon as its icount arrives (as the edge hook's prev_tb on the next block's
-    // generation). Bounded: more than kBootstrapPendingMax re-entries is a loud stop.
-    static constexpr uint64_t kBootstrapPendingMax = 4096;
-    uint32_t boot_pc_ = 0;
-    uint16_t boot_size_ = 0;
-    uint64_t boot_pending_ = 0;  // executions of that block still uncharged
-    bool boot_claimed_ = false;  // the bootstrap allowance has been handed out
-    bool boot_settled_ = false;  // ... and repaid
+    uint32_t deadline_tail_ = 0;   // restart the stopped TB with this instruction limit
     std::unique_ptr<IcountSlot[]> icount_;
+    // A displaced entry may still have live translated code. Retain its exact
+    // count until a generation callback replaces the same identity; eviction
+    // from our fast table does not force QEMU to regenerate that block.
+    std::unordered_map<uint64_t, uint16_t> icount_spill_;
     std::unique_ptr<uint32_t[]> block_pc_ring_;
     BlockStats stats_{};
 #ifdef XLLE_CPU_BLOCK_CENSUS
@@ -207,8 +208,10 @@ private:
         std::vector<uint8_t> first_code;
     };
     std::unique_ptr<CensusRow[]> census_;
+    std::unordered_map<uint64_t, CensusRow> census_spill_;
     CensusRow* census_last_ = nullptr;
     uint64_t census_overflow_ = 0;
+    std::string census_run_id_; // host-only provenance for cumulative snapshot pairing
     CensusRow* census_row(uint32_t pc, uint32_t size);
     void census_charge(uint32_t pc, uint32_t size, uint64_t insns, uint64_t entries);
 #endif

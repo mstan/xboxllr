@@ -1,13 +1,16 @@
 # AOT-5 burndown: efficient portable native execution
 
-Updated 2026-09-11. Owner: central Beads `beads-xbox.1.25.5`, under
-`beads-xbox.1.25`. The owner explicitly authorized subagents for this AOT-5 work
-on 2026-09-11. Delegate bounded, independent tasks where useful and review their
-results independently. Keep integration under one owner, do not spawn helper
-children, and allow no competing builds or workers during timing runs. For other
-tasks, the global solo-by-default policy still applies.
+Updated 2026-10-02. Owner: central Beads `beads-xbox.1.25.5`, under
+`beads-xbox.1.25`. The owner has authorized implementation, with no stubs and
+LLE as the required behavioral foundation. Work solo. Allow no competing builds
+or workers during timing runs. Initial inventory, integer/call and x87-helper
+evidence is recorded in [the foundations checkpoint](RESULTS-AOT-FOUNDATIONS-2026-10-02.md).
 
 ## Objective
+
+**Owner pivot, 2026-10-02:** the [faithful AOT dashboard at original-speed 60 FPS](GOAL-AOT-DASHBOARD.md)
+is primary. Maximize qualified renderer reuse. Blinx boot is the stretch goal;
+JSRF remains later. The dashboard scope includes the real kernel and LLE devices.
 
 Make the portable static/native path more efficient and move useful dashboard
 work into it. Static/native is a required deliverable. Compare each optimization
@@ -49,13 +52,38 @@ not equal amounts of effort; they are not a calendar or percentage estimate.
 | 5.3 | Planned | Improve generated control flow and state handling | Direct block edges and local guest values where justified; exact state on every observable exit; inspect host output; measure each retained transformation against native baseline |
 | 5.4 | Planned | Reduce repeated flag and guard work | Independent tests of defined flags and every affected exit boundary; code/event changes through callbacks remain visible; each proposed hoist has an explicit validity/invalidation argument |
 | 5.5 | Deterministic cache policy validated; further memory work open | Improve certified memory access and avoid unnecessary fallback attempts | Preserve permissions, aliases, self-modifying code and precise faults; diagnose actual fetch-TLB declines; measure callback/invalidation and handoff costs separately where practical |
-| 5.6 | Planned | Expand useful post-boot native coverage | Define guest-anchored animation/navigation windows; rank uncovered work; qualify and execute additional useful regions; report coverage separately from startup and idle skips |
+| 5.6 | Foundations implemented; product coverage open | Expand useful post-boot native coverage | Define guest-anchored animation/navigation windows; rank uncovered work; qualify and execute additional useful regions; report coverage separately from startup and idle skips |
 | 5.7 | Repeated per landing | Validate, document and integrate | Relevant differential tests, O0/O2 generated-C checks, full dashboard regression and suite for runtime changes, native-versus-native A/B, private-material checks, commit/push and Beads evidence |
 
 Work through 5.1 and 5.2 first. Their findings determine the order of 5.3 through
 5.5; the list does not claim that every proposed optimization will help. Prepare
 the post-boot workload in 5.6 early enough to avoid optimizing only delay loops.
 Apply 5.7 to each useful landing instead of accumulating an unreviewed rewrite.
+
+### Near-total coverage assessment (2026-09-25)
+
+The [static-coverage assessment](ASSESSMENT-STATIC-COVERAGE-2026-09-25.md)
+adds a measured gap inventory and proposed C0--C6 work packages. Only 896 of
+23,666 historical captured block shapes are fully supported by the current
+decoder/parser. Beyond the two selected loops, those shapes account for only
+0.397% of the remaining recorded instruction work; this is syntax support, not
+runtime eligibility. Blocks containing x87 account for 30.05% of that remaining
+work, counting the entire block. Phase attribution and complete static recovery
+remain unknown. The launcher cap, memory/extended-state ABI, fault handling and
+code-identity costs also need explicit work before wide native coverage.
+
+The next scope should establish static inventory and per-phase discrepancies,
+then qualify a general integer CALL/RET/memory path and a bounded x87 helper
+path. Instruction coverage, static recovery and product performance are separate
+acceptance measures. That assessment did not itself resume implementation;
+the owner's 2026-10-02 instruction now authorizes it.
+
+The [active coverage burndown](PLAN-AOT-COVERAGE-BURNDOWN.md) turns C0--C6
+into checklists and completion gates, with a first package covering C0, one
+general integer path and initial x87 qualification. C0/C1 and the bounded C4
+experiment are in progress; none of those stages is closed. Dashboard completion
+precedes the Blinx stretch goal and JSRF. Blinx real-kernel launch and removal of inherited device
+shortcuts are tracked in [the separate launch burndown](BLINX-BURNDOWN.md).
 
 ## First bounded work package
 

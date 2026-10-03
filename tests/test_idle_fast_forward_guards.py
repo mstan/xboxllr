@@ -85,15 +85,15 @@ check(
     and re.search(r"iters\s*\*\s*kIdleLoopInsns", ff_body) is not None,
 )
 check(
-    "the skip only starts at one of the loop's four block-boundary phases",
+    "the skip only starts at a qualified instruction boundary",
     re.search(r"eip == kIdlePhaseEip\[i\]", ff_body) is not None
     and re.search(r"if \(phase == kIdlePhases\) return false;", ff_body) is not None,
 )
 check(
-    "the four phases are the loop's block starts and carry their own IF value",
+    "the eight phases carry the IF value before each instruction",
     "kIdlePhaseEip[kIdlePhases] = {0x8001e3ceu, 0x8001e3cfu," in machine_hpp_code
-    and "0x8001e3d0u, 0x8001e3e3u}" in machine_hpp_code
-    and "kIdlePhaseIf[kIdlePhases] = {false, true, true, false}" in machine_hpp_code,
+    and "0x8001e3d0u, 0x8001e3d1u, 0x8001e3d2u, 0x8001e3d5u, 0x8001e3e3u, 0x8001e3e7u}" in machine_hpp_code
+    and "kIdlePhaseIf[kIdlePhases] = {false, true, true, true, false, false, false, false}" in machine_hpp_code,
 )
 check(
     "the expected EFLAGS include IF only for the phases where sti has run",
@@ -148,8 +148,16 @@ check(
     "dpc_head != r.ebp" in ff_body and "next_thread != 0" in ff_body,
 )
 check(
-    "guest reads go through the page tables, not a masked address",
-    "cpu_->translate(r.ebp" in ff_body and "cpu_->translate(r.ebx + 0x2cu" in ff_body,
+    "guest reads require cached read/fetch translations without a fresh page walk",
+    "cpu_->read_cached_ram(r.ebp" in ff_body
+    and "cpu_->read_cached_ram(r.ebx + 0x2cu" in ff_body
+    and "cpu_->read_cached_ram(kIdleLoopHead, code, sizeof(code), true)" in ff_body
+    and "cpu_->translate(" not in ff_body,
+)
+check(
+    "hidden context and phase-1 STI shadow are certified without effects",
+    "cpu_->idle_skip_context_ok(phase == 1)" in ff_body
+    and "ff_rej_context++" in ff_body,
 )
 
 # ---------------------------------------------------------------------------

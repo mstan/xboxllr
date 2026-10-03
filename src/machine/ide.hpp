@@ -26,6 +26,14 @@
 
 namespace xlle {
 
+// Provisioned virtual-drive state, independent of any guest command payload.
+// The 64-byte private file contains user[32] followed by master[32].
+struct HddSecurityConfig {
+    enum class Mode { Unprovisioned, Locked, Disabled } mode = Mode::Unprovisioned;
+    std::array<uint8_t, 32> user{}, master{};
+    bool maximum = false;
+};
+
 // One drive on the channel. Field names follow xemu's IDEState so the harvest stays legible.
 struct IdeDrive {
     enum Kind { kHd, kCd } kind = kHd;
@@ -45,6 +53,8 @@ struct IdeDrive {
     int mult_sectors = 16;                          // MAX_MULT_SECTORS
     bool lba48 = false;
     bool locked = false;        // ATA security state (retail kernel requires locked at boot)
+    bool security_frozen = false;
+    uint8_t security_attempts = 5;
     bool identify_set = false;
     uint8_t identify_data[512] = {0};
 
@@ -83,9 +93,15 @@ public:
     }
     ~IdeController() override;
 
-    // Attach the HDD image. The drive reports ATA security LOCKED — the retail
-    // kernel unlocks it with its computed key (we accept the unlock as xemu does; the kernel
-    // always presents the correct key, so verification is not load-bearing for fidelity).
+    // Configure before attaching. Locked requires independently provisioned
+    // user/master credentials; Disabled is an explicit unlocked-drive policy.
+    // Unprovisioned retains the loud stop on authentication, never accept-all.
+    bool configure_hdd_security(const HddSecurityConfig& config);
+    uint16_t hdd_security_status() const;
+    // Models ATA RESET- / power-on security transitions, not task-file SRST.
+    void hardware_reset();
+
+    // Attach the HDD image, applying the configured power-on security state.
     //
     // WRITE POLICY (beads-xbox.1.14.11). By default the image is opened READ-ONLY and guest
     // writes land in an in-memory copy-on-write overlay keyed by LBA. Within a run the guest
@@ -207,6 +223,7 @@ private:
     // Integer key, point lookups only, so iteration order never reaches the guest.
     std::unordered_map<uint64_t, std::array<uint8_t, 512>> overlay_;
     bool hdd_writeback_ = false;
+    HddSecurityConfig hdd_security_;
 };
 
 }  // namespace xlle

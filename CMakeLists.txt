@@ -302,6 +302,10 @@ add_executable(test_aci tests/test_aci.cpp)
 target_include_directories(test_aci PRIVATE ${XLLE_INCLUDES})
 add_test(NAME aci COMMAND test_aci)
 
+add_executable(test_ide_security tests/test_ide_security.cpp src/machine/ide.cpp)
+target_include_directories(test_ide_security PRIVATE ${XLLE_INCLUDES})
+add_test(NAME ide_security COMMAND test_ide_security)
+
 add_executable(test_smc tests/test_smc.cpp src/machine/smbus.cpp)
 target_include_directories(test_smc PRIVATE ${XLLE_INCLUDES})
 add_test(NAME smc COMMAND test_smc)
@@ -442,7 +446,55 @@ endif()
 if(Python3_Interpreter_FOUND)
   # Synthetic AOT proof only: these generated guest programs are not linked into
   # xlle. Proprietary artifacts must use a private build directory/input path.
+  # Compile the qualification adapter with the pinned target's private headers
+  # and definitions. It is linked only into this test, never into xlle.
+  foreach(probe_variant IN ITEMS optimized unoptimized)
+    add_library(xlle_x87_probe_${probe_variant} STATIC tests/aot_x87_probe.c)
+    target_include_directories(xlle_x87_probe_${probe_variant} PRIVATE
+        $<TARGET_PROPERTY:x86_64-softmmu,INCLUDE_DIRECTORIES>)
+    target_compile_options(xlle_x87_probe_${probe_variant} PRIVATE
+        $<TARGET_PROPERTY:x86_64-softmmu,COMPILE_OPTIONS>)
+    target_compile_definitions(xlle_x87_probe_${probe_variant} PRIVATE
+        $<TARGET_PROPERTY:x86_64-softmmu,COMPILE_DEFINITIONS>)
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+      if(probe_variant STREQUAL "optimized")
+        target_compile_options(xlle_x87_probe_${probe_variant} PRIVATE -O2)
+      else()
+        target_compile_options(xlle_x87_probe_${probe_variant} PRIVATE -O0)
+      endif()
+    endif()
+    add_executable(test_aot_x87_${probe_variant} tests/test_aot_x87.cpp)
+    target_include_directories(test_aot_x87_${probe_variant} PRIVATE "${unicorn_SOURCE_DIR}/include")
+    target_link_libraries(test_aot_x87_${probe_variant} PRIVATE xlle_x87_probe_${probe_variant} unicorn)
+    add_test(NAME aot_x87_helpers_${probe_variant} COMMAND test_aot_x87_${probe_variant})
+  endforeach()
   set(XLLE_AOT_GENERATED "${CMAKE_CURRENT_BINARY_DIR}/generated/aot")
+  add_executable(test_mmx_floor tests/test_mmx_floor.cpp)
+  target_include_directories(test_mmx_floor PRIVATE "${unicorn_SOURCE_DIR}/include")
+  target_link_libraries(test_mmx_floor PRIVATE xlle_x87_probe_optimized unicorn)
+  add_test(NAME mmx_floor COMMAND test_mmx_floor)
+  add_executable(test_x87_floor tests/test_x87_floor.cpp)
+  target_include_directories(test_x87_floor PRIVATE "${unicorn_SOURCE_DIR}/include")
+  target_link_libraries(test_x87_floor PRIVATE xlle_x87_probe_optimized unicorn)
+  add_test(NAME x87_floor COMMAND test_x87_floor)
+  add_executable(test_cpu_deadlines tests/test_cpu_deadlines.cpp)
+  target_link_libraries(test_cpu_deadlines PRIVATE xlle_cpu)
+  add_test(NAME cpu_deadlines COMMAND test_cpu_deadlines
+           "${CMAKE_CURRENT_BINARY_DIR}/generated/test-deadlines.census.csv")
+  add_executable(test_cmpxchg8b_floor tests/test_cmpxchg8b_floor.cpp)
+  target_link_libraries(test_cmpxchg8b_floor PRIVATE xlle_cpu)
+  add_test(NAME cmpxchg8b_floor COMMAND test_cmpxchg8b_floor)
+  add_executable(test_idle_fast_forward tests/test_idle_fast_forward.cpp)
+  target_link_libraries(test_idle_fast_forward PRIVATE xlle_machine)
+  add_test(NAME idle_fast_forward COMMAND test_idle_fast_forward)
+  set(XLLE_AOT_REGISTRY_GENERATED "${CMAKE_CURRENT_BINARY_DIR}/generated/aot-registry")
+  add_custom_command(
+    OUTPUT "${XLLE_AOT_REGISTRY_GENERATED}/registry.c"
+           "${XLLE_AOT_REGISTRY_GENERATED}/registry.h"
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tests/generate_aot_registry_fixture.py"
+            "${XLLE_AOT_REGISTRY_GENERATED}"
+    DEPENDS tests/generate_aot_registry_fixture.py tools/aot_compile.py
+    VERBATIM)
   add_custom_command(
     OUTPUT "${XLLE_AOT_GENERATED}/aot_programs.c"
            "${XLLE_AOT_GENERATED}/aot_programs.h"
@@ -456,6 +508,25 @@ if(Python3_Interpreter_FOUND)
     DEPENDS tools/aot_compile.py tests/aot_programs.json
     VERBATIM)
   foreach(aot_variant IN ITEMS optimized unoptimized)
+    add_library(xlle_aot_registry_${aot_variant} STATIC
+                "${XLLE_AOT_REGISTRY_GENERATED}/registry.c")
+    target_include_directories(xlle_aot_registry_${aot_variant} PUBLIC
+                               include "${XLLE_AOT_REGISTRY_GENERATED}")
+    set_target_properties(xlle_aot_registry_${aot_variant} PROPERTIES
+                         C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+      target_compile_options(xlle_aot_registry_${aot_variant} PRIVATE
+                             -Wall -Wextra -Werror -pedantic-errors)
+      if(aot_variant STREQUAL "optimized")
+        target_compile_options(xlle_aot_registry_${aot_variant} PRIVATE -O2)
+      else()
+        target_compile_options(xlle_aot_registry_${aot_variant} PRIVATE -O0)
+      endif()
+    endif()
+    add_executable(test_aot_registry_${aot_variant} tests/test_aot_registry.cpp)
+    target_link_libraries(test_aot_registry_${aot_variant} PRIVATE
+                          xlle_aot_registry_${aot_variant} xlle_machine)
+    add_test(NAME aot_registry_${aot_variant} COMMAND test_aot_registry_${aot_variant})
     add_library(xlle_aot_fixture_${aot_variant} STATIC
                 "${XLLE_AOT_GENERATED}/aot_programs.c")
     target_include_directories(xlle_aot_fixture_${aot_variant} PUBLIC
@@ -472,18 +543,32 @@ if(Python3_Interpreter_FOUND)
       endif()
     endif()
     add_executable(test_aot_${aot_variant} tests/test_aot.cpp)
+    add_executable(test_aot_x87_machine_${aot_variant} tests/test_aot_x87_machine.cpp)
+    target_link_libraries(test_aot_x87_machine_${aot_variant} PRIVATE
+                          xlle_aot_fixture_${aot_variant} xlle_machine)
+    add_test(NAME aot_x87_machine_${aot_variant} COMMAND test_aot_x87_machine_${aot_variant})
     target_link_libraries(test_aot_${aot_variant} PRIVATE
                           xlle_aot_fixture_${aot_variant} xlle_cpu xlle_spike)
     add_test(NAME aot_${aot_variant} COMMAND test_aot_${aot_variant})
+    add_executable(test_aot_mmx_${aot_variant} tests/test_aot_mmx.cpp)
+    target_link_libraries(test_aot_mmx_${aot_variant} PRIVATE
+                          xlle_aot_fixture_${aot_variant} xlle_machine)
+    add_test(NAME aot_mmx_${aot_variant} COMMAND test_aot_mmx_${aot_variant})
     add_executable(test_aot_machine_${aot_variant} tests/test_aot_machine.cpp
                    tests/test_aot_machine_state.cpp tests/test_aot_irq_shadow.cpp
                    tests/test_aot_store_fault.cpp)
     target_link_libraries(test_aot_machine_${aot_variant} PRIVATE
                           xlle_aot_fixture_${aot_variant} xlle_machine)
     add_test(NAME aot_machine_${aot_variant} COMMAND test_aot_machine_${aot_variant})
+    add_executable(test_aot_required_${aot_variant} tests/test_aot_required.cpp)
+    target_link_libraries(test_aot_required_${aot_variant} PRIVATE
+                          xlle_aot_fixture_${aot_variant} xlle_machine)
+    add_test(NAME aot_required_${aot_variant} COMMAND test_aot_required_${aot_variant})
   endforeach()
   add_test(NAME aot_compile
            COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_aot_compile.py")
+  add_test(NAME aot_inventory
+           COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_aot_inventory.py")
   add_test(NAME cpu_block_census
            COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cpu_block_census.py")
   add_test(NAME aot_private_input
@@ -493,6 +578,10 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME eeprom_generation
            COMMAND ${Python3_EXECUTABLE}
                    ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_eeprom_generation.py)
+  add_test(NAME hdd_security_provisioning
+           COMMAND ${Python3_EXECUTABLE}
+                   ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_hdd_security_provisioning.py
+                   $<TARGET_FILE:xlle>)
   add_test(NAME replay_observer_reports
            COMMAND ${Python3_EXECUTABLE}
                    ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_replay_observer_reports.py)

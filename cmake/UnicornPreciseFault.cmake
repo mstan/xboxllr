@@ -89,6 +89,20 @@ foreach(_xlle_tsc_opcode rdtsc rdtscp rdmsr wrmsr)
     _xlle_translate_text "${_xlle_translate_text}")
 endforeach()
 set(_xlle_translate_derived "${CMAKE_CURRENT_BINARY_DIR}/generated/unicorn/translate.c")
+include("${CMAKE_CURRENT_LIST_DIR}/UnicornMmx.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/UnicornX87.cmake")
+# CMPXCHG8B's helper computes the preserved flags from env->cc_op. Publish
+# the preceding lazy arithmetic operation before calling it. Otherwise an
+# ADD operand can become a literal EFLAGS image when the old operation is
+# CC_OP_EFLAGS, including control bits such as TF. No flags are canonicalized.
+set(_xlle_cmpxchg_old "        case 1: /* CMPXCHG8, CMPXCHG16 */\n            if (mod == 3) {\n                goto illegal_op;\n            }\n")
+string(FIND "${_xlle_translate_text}" "${_xlle_cmpxchg_old}" _xlle_cmpxchg_position)
+if(_xlle_cmpxchg_position LESS 0)
+  message(FATAL_ERROR "Unicorn CMPXCHG helper anchor changed: requalify lazy flags")
+endif()
+string(REPLACE "${_xlle_cmpxchg_old}"
+  "${_xlle_cmpxchg_old}            gen_update_cc_op(s);\n"
+  _xlle_translate_text "${_xlle_translate_text}")
 file(WRITE "${_xlle_translate_derived}" "#include \"unicorn_metrics.h\"\n${_xlle_translate_text}")
 
 # The pinned Unicorn omitted IA32_TIME_STAMP_COUNTER from RDMSR/WRMSR. Bind
@@ -113,17 +127,22 @@ if(NOT _xlle_tsc_case_count EQUAL 2)
   message(FATAL_ERROR "TSC MSR integration did not install both read and write cases")
 endif()
 file(WRITE "${_xlle_misc_derived}" "${_xlle_misc_text}")
+include("${CMAKE_CURRENT_LIST_DIR}/UnicornDeadlines.cmake")
 get_target_property(_xlle_x86_sources x86_64-softmmu SOURCES)
 set(_xlle_x86_updated)
 foreach(_xlle_source IN LISTS _xlle_x86_sources)
   if(_xlle_source MATCHES "(^|/)qemu/accel/tcg/cputlb\\.c$")
     list(APPEND _xlle_x86_updated "${_xlle_tlb_derived}")
+  elseif(_xlle_source MATCHES "(^|/)qemu/accel/tcg/cpu-exec\\.c$")
+    list(APPEND _xlle_x86_updated "${_xlle_exec_derived}")
   elseif(_xlle_source MATCHES "(^|/)qemu/accel/tcg/translate-all\\.c$")
     list(APPEND _xlle_x86_updated "${_xlle_restore_derived}")
   elseif(_xlle_source MATCHES "(^|/)qemu/target/i386/translate\\.c$")
     list(APPEND _xlle_x86_updated "${_xlle_translate_derived}")
   elseif(_xlle_source MATCHES "(^|/)qemu/target/i386/misc_helper\\.c$")
     list(APPEND _xlle_x86_updated "${_xlle_misc_derived}")
+  elseif(_xlle_source MATCHES "(^|/)qemu/target/i386/fpu_helper\\.c$")
+    list(APPEND _xlle_x86_updated "${_xlle_fpu_derived}")
   elseif(IS_ABSOLUTE "${_xlle_source}")
     list(APPEND _xlle_x86_updated "${_xlle_source}")
   else()

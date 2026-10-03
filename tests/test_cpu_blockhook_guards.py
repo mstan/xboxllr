@@ -109,7 +109,7 @@ check(
     "the edge hook records prev_tb too",
     re.search(r"edge_trampoline[^}]*prev_tb[^}]*icount_insert", floor_cpp_code, flags=re.S)
     is not None,
-    "prev_tb is the only way the first block ever executed reaches the icount table",
+    "refresh predecessor identities when the generation callback provides one",
 )
 check(
     "the icount table is keyed on (pc, size)",
@@ -177,8 +177,9 @@ check(
     "seq_ + icount > self->run_deadline_" in floor_cpp_code,
 )
 check(
-    "the first block of a slice is exempt from the budget stop (forward progress)",
-    "tbs_this_run_ != 0 && self->seq_ + icount > self->run_deadline_" in floor_cpp_code,
+    "bounded translations make forward progress without first-block overshoot",
+    "tbs_this_run_" not in floor_cpp_code
+    and "xlle_unicorn_limit_next_tb(uc_, deadline_tail_)" in floor_cpp_code,
 )
 check(
     "the interrupt window is checked at block entry while an IRQ is armed",

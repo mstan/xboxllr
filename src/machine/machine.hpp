@@ -138,7 +138,8 @@ public:
         uint64_t ff_iters = 0;       // idle-loop iterations those instructions represent
         uint64_t ff_max_insns = 0;   // largest single skip
         uint64_t ff_at_head = 0;     // slice boundaries at a loop phase with the flag on
-        uint64_t ff_phase[4] = {0, 0, 0, 0};  // skips taken from each of the four phases
+        uint64_t ff_phase[8] = {};  // skips at each instruction boundary in loop order
+        uint64_t ff_rej_context = 0; // hidden state, observers, debug or pending stop
         uint64_t ff_rej_flags = 0;   // ... rejected: EFLAGS not the loop's fixed point
         uint64_t ff_rej_state = 0;   // ... rejected: DPC list non-empty / next thread queued
         uint64_t ff_rej_short = 0;   // ... rejected: fewer than one whole iteration to the deadline
@@ -160,8 +161,8 @@ public:
     // The kernel-4983 NT idle loop, verified byte for byte before every skip:
     //   8001e3ce fb              sti
     //   8001e3cf 90              nop            <- the sti inhibit-IRQ block
-    //   8001e3d0 90              nop            <- the ONLY point in the loop where IF is
-    //   8001e3d1 fa              cli               open, i.e. the whole interrupt window
+    //   8001e3d0 90              nop            <- IF open, shadow cleared
+    //   8001e3d1 fa              cli            <- IF still open before CLI executes
     //   8001e3d2 3b 6d 00        cmp  ebp,[ebp]  ; DpcListHead empty <=> [ebp] == ebp
     //   8001e3d5 74 0c           je   8001e3e3
     //   8001e3d7 b1 02           mov  cl,2       ; DPC path -- NOT taken while idle
@@ -174,23 +175,15 @@ public:
     static constexpr uint32_t kIdleLoopHead = 0x8001e3ceu;
     static constexpr unsigned kIdleLoopInsns = 8;
     static constexpr unsigned kIdleLoopBytes = 27;  // 0x8001e3ce .. 0x8001e3e8 inclusive
-    // A slice always ends on a translation-block boundary, and 4096 is a multiple of 8, so an
-    // idle stretch keeps whatever PHASE it was entered at for its whole length. Skipping only
-    // at the head therefore catches almost nothing (measured: 338 of ~113,000 idle boundaries
-    // in one 500 M window). The loop has exactly four block boundaries and all four are valid
-    // skip points, because a whole iteration returns to the same EIP with the same flags from
-    // any of them:
-    //   phase 0  0x8001e3ce  before `sti`                     IF=0   blocks 1,1,4,2
-    //   phase 1  0x8001e3cf  after  `sti` (the inhibit block)  IF=1   blocks 1,4,2,1
-    //   phase 2  0x8001e3d0  after  `sti; nop`                 IF=1   blocks 4,2,1,1
-    //   phase 6  0x8001e3e3  after  `cmp ebp,[ebp]; je`        IF=0   blocks 2,1,1,4
+    // Exact deadlines can stop at any of the eight instruction boundaries.
+    // Whole iterations preserve the EIP, flags, and the phase-1 STI shadow.
     // ZF/PF are 1 and CF/AF/SF/OF are 0 at every one of them: both `cmp`s in the loop compare
-    // equal values while it is idle, so the flag word is the same at all four phases apart
+    // equal values while it is idle, so the flag word is the same at all eight phases apart
     // from IF, which is what kIdlePhaseIf records.
-    static constexpr unsigned kIdlePhases = 4;
+    static constexpr unsigned kIdlePhases = 8;
     static constexpr uint32_t kIdlePhaseEip[kIdlePhases] = {0x8001e3ceu, 0x8001e3cfu,
-                                                            0x8001e3d0u, 0x8001e3e3u};
-    static constexpr bool kIdlePhaseIf[kIdlePhases] = {false, true, true, false};
+        0x8001e3d0u, 0x8001e3d1u, 0x8001e3d2u, 0x8001e3d5u, 0x8001e3e3u, 0x8001e3e7u};
+    static constexpr bool kIdlePhaseIf[kIdlePhases] = {false, true, true, true, false, false, false, false};
     // EFLAGS is a FIXED POINT of the iteration: the last flag-setting instruction is
     // `cmp dword [ebx+0x2c],0` with a zero operand, and `cli` leaves IF clear. So an
     // iteration entered with these bits leaves exactly these bits, and skipping any whole

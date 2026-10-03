@@ -23,7 +23,7 @@ enum {
  * protected-mode context currently modeled by the generated AOT runtime. It
  * rejects interrupt shadow, debug/watchpoint, VM86/long-mode/SMM/SVM/MPX and
  * nonzero CS base or non-flat DS/SS state. The caller must enforce the cached
- * CS limit using the ABI2 code-range and branch guards. Unicorn remains the
+ * CS limit using the code-range and branch guards. Unicorn remains the
  * owner of all untouched hidden and FP/SIMD state.
  *
  * xlle_unicorn_aot_ram_ptr returns a direct host RAM pointer only when the exact
@@ -36,7 +36,27 @@ int xlle_unicorn_aot_context_ok(void* engine);
 // NULL means eligible. Otherwise identifies the first failed context predicate;
 // diagnostic names are stable and contain no guest data.
 const char* xlle_unicorn_aot_context_rejection(void* engine);
+// Same bounded context, but require the loop phase's exact IRQ shadow instead
+// of unconditionally rejecting it. No hidden state is changed by this check.
+int xlle_unicorn_idle_context_ok(void* engine, int irq_shadow);
 uint32_t xlle_unicorn_aot_code_limit(void* engine);
+// Fixed MMX primitives on the engine-owned physical x87/MMX register file.
+// Caller checks availability and certifies the complete memory operand before
+// committing. No helper translates, executes guest code, fills a TLB or faults.
+int xlle_unicorn_aot_mmx_available(void* engine, int require_sse);
+// Qualified x87 context: all arithmetic exceptions masked, no pending exception,
+// valid requested stack operands and (when pushing) an empty destination.
+int xlle_unicorn_aot_x87_available(void* engine, unsigned read_mask, int push);
+void xlle_unicorn_aot_x87_load(void* engine, uint64_t value, int wide, int multiply);
+uint64_t xlle_unicorn_aot_x87_store(void* engine, int wide);
+void xlle_unicorn_aot_x87_pop(void* engine);
+void xlle_unicorn_aot_x87_register(void* engine, unsigned operation, unsigned reg);
+void xlle_unicorn_aot_x87_record(void* engine, uint32_t pc, unsigned opcode,
+                                uint32_t address, int segment);
+int xlle_unicorn_aot_sse_available(void* engine);
+uint64_t xlle_unicorn_aot_mmx_peek(void* engine, unsigned reg);
+void xlle_unicorn_aot_mmx_commit(void* engine, int destination, uint64_t value);
+void xlle_unicorn_aot_mmx_emms(void* engine);
 void* xlle_unicorn_aot_ram_ptr(void* engine, uint32_t linear, size_t size,
                                unsigned access);
 // Physical RAM invalidation without translating a guest virtual address or
@@ -47,6 +67,9 @@ void xlle_unicorn_invalidate_ram(void* engine, uint32_t physical, size_t size);
 int xlle_unicorn_share_ram_identity(void* engine, uint32_t original, uint32_t alias);
 void xlle_unicorn_protect_code_aliases(void* engine, uint64_t first, uint64_t second);
 int xlle_unicorn_irq_inhibited(void* engine);
+// Fallback scheduler only: bound the next translated block to this many real
+// instructions. Does not execute guest code or install an instruction hook.
+int xlle_unicorn_limit_next_tb(void* engine, unsigned instructions);
 typedef struct xlle_unicorn_restore_record {
     uint64_t pc;
     uint32_t size, total, completed;

@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
-ABI_VERSION = 2
+ABI_VERSION = 4
 REG_NAMES = ["eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"]
 NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 
@@ -125,13 +125,114 @@ def decode_one(code: bytes, offset: int) -> DecodedInstruction:
         raise AotError(f"decode offset outside region: {offset}")
     op = code[offset]
 
+    if op in (0xD8, 0xD9, 0xDC, 0xDD, 0xDE):
+        modrm = read_u8(code, offset + 1, "x87 ModRM")
+        form, reg = (modrm >> 3) & 7, modrm & 7
+        fop = Operand("imm16", ((op & 7) << 8) | modrm)
+        if modrm >> 6 == 3:
+            operation = {(0xD9, 0): "LOAD_REG", (0xD9, 1): "EXCHANGE",
+                         (0xDE, 0): "ADD_POP", (0xDD, 3): "STORE_POP_REG",
+                         (0xD8, 1): "MUL_REG", (0xDE, 5): "SUB_POP",
+                         (0xDD, 0): "FREE_REG"}.get((op, form))
+            if operation:
+                return DecodedInstruction(offset, 2, "x87_reg_" + operation,
+                                          operands=[Operand("st", reg), fop])
+        else:
+            operation = {(0xD9, 0): "LOAD32", (0xDD, 0): "LOAD64",
+                         (0xD8, 1): "MUL32", (0xDC, 1): "MUL64",
+                         (0xD9, 2): "STORE32", (0xDD, 2): "STORE64",
+                         (0xD9, 3): "STORE_POP32", (0xDD, 3): "STORE_POP64"}.get((op, form))
+            if operation:
+                memory, end = decode_memory32(code, offset + 1)
+                # ModRM default segment follows the base, not the SIB index.
+                segment = Operand("imm8", int(memory.base in (4, 5)))
+                return DecodedInstruction(offset, end-offset, "x87_mem_" + operation,
+                                          operands=[memory, fop, segment])
+        return DecodedInstruction(offset, 2, "unsupported_x87_form", status="unsupported")
+
+    if op == 0x0F and offset + 1 < len(code):
+        second = code[offset + 1]
+        if 0xC8 <= second <= 0xCF:
+            return DecodedInstruction(offset, 2, "bswap_r32",
+                                      operands=[Operand("reg32", second - 0xC8)])
+        if second == 0x77:
+            return DecodedInstruction(offset, 2, "mmx_emms")
+        if second == 0x18:
+            modrm = read_u8(code, offset + 2, "PREFETCHh ModRM")
+            locality = (modrm >> 3) & 7
+            if modrm >> 6 == 3 or locality > 3:
+                return DecodedInstruction(offset, 3, "unsupported_prefetch_form", status="unsupported")
+            memory, end = decode_memory32(code, offset + 2)
+            return DecodedInstruction(offset, end - offset, "prefetch",
+                                      operands=[Operand("imm8", locality), memory])
+        if second in (0x6F, 0x7F, 0xE7):
+            modrm = read_u8(code, offset + 2, "MMX transfer ModRM")
+            reg, rm = (modrm >> 3) & 7, modrm & 7
+            if modrm >> 6 == 3:
+                if second == 0xE7:
+                    return DecodedInstruction(offset, 3, "invalid_movntq_register", status="unsupported")
+                destination, source = (reg, rm) if second == 0x6F else (rm, reg)
+                return DecodedInstruction(offset, 3, "mmx_move",
+                                          operands=[Operand("mmx", destination), Operand("mmx", source)])
+            memory, end = decode_memory32(code, offset + 2)
+            memory = Operand("mem64", memory.value, memory.base, memory.index, memory.scale)
+            name = {0x6F: "mmx_load64", 0x7F: "mmx_store64", 0xE7: "mmx_store_nt64"}[second]
+            return DecodedInstruction(offset, end - offset, name,
+                                      operands=[Operand("mmx", reg), memory])
+
+    if 0x50 <= op <= 0x5F:
+        return DecodedInstruction(offset, 1, "push_r32" if op < 0x58 else "pop_r32",
+                                  operands=[Operand("reg32", op & 7)])
+    if op in (0x68, 0x6A):
+        value = (read_u32(code, offset + 1, "push imm32") if op == 0x68 else
+                 u32(i8(read_u8(code, offset + 1, "push imm8"))))
+        return DecodedInstruction(offset, 5 if op == 0x68 else 2, "push_imm32",
+                                  operands=[Operand("imm32", value)])
+    if op in (0xC3, 0xC2):
+        adjust = 0
+        if op == 0xC2:
+            adjust = read_u8(code, offset + 1, "ret imm16") | (read_u8(code, offset + 2, "ret imm16") << 8)
+        return DecodedInstruction(offset, 1 if op == 0xC3 else 3, "ret_near",
+                                  operands=[Operand("imm16", adjust)])
+    if op == 0xE8:
+        rel = i32(read_u32(code, offset + 1, "call rel32"))
+        inst = DecodedInstruction(offset, 5, "call_rel32", operands=[Operand("rel32", rel)])
+        inst.edges = branch_edge("call", offset + 5 + rel, offset + 5, len(code))
+        inst.edges.append({"kind": "return-continuation", "target": offset + 5,
+                           "internal": offset + 5 < len(code)})
+        return inst
+    if op == 0xFF:
+        modrm = read_u8(code, offset + 1, "group-5 ModRM")
+        form = (modrm >> 3) & 7
+        if modrm >> 6 == 3 and form in (2, 4):
+            return DecodedInstruction(offset, 2, "call_r32" if form == 2 else "jmp_r32",
+                                      operands=[Operand("reg32", modrm & 7)])
+        return DecodedInstruction(offset, 2, "unsupported_group5", status="unsupported")
+
     if 0xB8 <= op <= 0xBF:
         imm = read_u32(code, offset + 1, "mov r32,imm32")
         return DecodedInstruction(offset, 5, "mov_r32_imm32", operands=[Operand("reg32", op - 0xB8), Operand("imm32", imm)])
     if 0xB0 <= op <= 0xB7:
         imm = read_u8(code, offset + 1, "mov r8,imm8")
         return DecodedInstruction(offset, 2, "mov_r8_imm8", operands=[Operand("reg8", op - 0xB0), Operand("imm8", imm)])
-    if op in (0x89, 0x8B, 0x88, 0x8A, 0x01, 0x29, 0x31, 0x21, 0x39):
+    if op == 0x8D:
+        modrm = read_u8(code, offset + 1, "lea ModRM")
+        if modrm >> 6 == 3:
+            return DecodedInstruction(offset, 2, "invalid_lea_register", status="unsupported")
+        address, end = decode_memory32(code, offset + 1)
+        return DecodedInstruction(offset, end - offset, "lea_r32",
+                                  operands=[Operand("reg32", (modrm >> 3) & 7), address])
+    if op in (0xC1, 0xD1, 0xD3):
+        modrm = read_u8(code, offset + 1, "group-2 ModRM")
+        operation = {0: "rol", 1: "ror"}.get((modrm >> 3) & 7)
+        if modrm >> 6 == 3 and operation:
+            count = (Operand("reg8", 1) if op == 0xD3 else
+                     Operand("imm8", read_u8(code, offset + 2, "rotate immediate") if op == 0xC1 else 1))
+            return DecodedInstruction(offset, 3 if op == 0xC1 else 2, operation + "_r32",
+                                      operands=[Operand("reg32", modrm & 7), count])
+        return DecodedInstruction(offset, 2, "unsupported_group2", status="unsupported")
+    if op in (0x89, 0x8B, 0x88, 0x8A, 0x01, 0x29, 0x31, 0x21, 0x39,
+              0x03, 0x2B, 0x33, 0x23, 0x3B, 0x85, 0x09, 0x0B):
         modrm, reg, rm = decode_modrm_reg_only(code, offset + 1, f"opcode 0x{op:02x}")
         if reg < 0:
             if op in (0x89, 0x8B):
@@ -140,6 +241,12 @@ def decode_one(code: bytes, offset: int) -> DecodedInstruction:
                 return DecodedInstruction(offset, end - offset, name,
                                           operands=[Operand("reg32", (modrm >> 3) & 7), memory])
             return DecodedInstruction(offset, 2, f"unsupported_0x{op:02x}_modrm_0x{modrm:02x}", status="unsupported")
+        # Normalize register-only arithmetic in either encoding direction to
+        # the same (source, destination) operands. Memory forms stay explicit
+        # unsupported exits until their access/fault behavior is implemented.
+        if op in (0x03, 0x2B, 0x33, 0x23, 0x3B, 0x0B):
+            op -= 2
+            reg, rm = rm, reg
         mapping = {
             0x89: "mov_r32_rm32_to_rm32",
             0x8B: "mov_rm32_to_r32",
@@ -150,17 +257,28 @@ def decode_one(code: bytes, offset: int) -> DecodedInstruction:
             0x31: "xor_r32_to_rm32",
             0x21: "and_r32_to_rm32",
             0x39: "cmp_r32_rm32",
+            0x85: "test_r32_rm32",
+            0x09: "or_r32_to_rm32",
         }
         width = "reg8" if op in (0x88, 0x8A) else "reg32"
         return DecodedInstruction(offset, 2, mapping[op], operands=[Operand(width, reg), Operand(width, rm)])
-    if op == 0x83:
+    if op == 0xF7:
+        modrm = read_u8(code, offset + 1, "group-3 ModRM")
+        if modrm >> 6 == 3 and ((modrm >> 3) & 7) == 0:
+            immediate = read_u32(code, offset + 2, "TEST immediate")
+            return DecodedInstruction(offset, 6, "test_r32_imm32",
+                                      operands=[Operand("reg32", modrm & 7), Operand("imm32", immediate)])
+        return DecodedInstruction(offset, 2, "unsupported_group3", status="unsupported")
+    if op in (0x81, 0x83):
         modrm = read_u8(code, offset + 1, "group-1 ModRM")
-        if modrm >> 6 == 3 and ((modrm >> 3) & 7) == 5:
-            immediate = u32(i8(read_u8(code, offset + 2, "SUB sign-extended immediate")))
-            return DecodedInstruction(offset, 3, "sub_r32_imm32",
+        operation = {0: "add", 1: "or", 5: "sub", 7: "cmp"}.get((modrm >> 3) & 7)
+        if modrm >> 6 == 3 and operation:
+            immediate = (u32(i8(read_u8(code, offset + 2, "group-1 sign-extended immediate")))
+                         if op == 0x83 else read_u32(code, offset + 2, "group-1 immediate"))
+            return DecodedInstruction(offset, 3 if op == 0x83 else 6, operation + "_r32_imm32",
                                       operands=[Operand("reg32", modrm & 7), Operand("imm32", immediate)])
         return DecodedInstruction(offset, 2, "unsupported_group1", status="unsupported")
-    if op in (0x05, 0x2D, 0x35, 0x25, 0x3D):
+    if op in (0x05, 0x2D, 0x35, 0x25, 0x3D, 0xA9, 0x0D):
         imm = read_u32(code, offset + 1, f"opcode 0x{op:02x} imm32")
         mapping = {
             0x05: "add_eax_imm32",
@@ -168,6 +286,8 @@ def decode_one(code: bytes, offset: int) -> DecodedInstruction:
             0x35: "xor_eax_imm32",
             0x25: "and_eax_imm32",
             0x3D: "cmp_eax_imm32",
+            0xA9: "test_eax_imm32",
+            0x0D: "or_eax_imm32",
         }
         return DecodedInstruction(offset, 5, mapping[op], operands=[Operand("imm32", imm)])
     if 0x40 <= op <= 0x47:
@@ -211,6 +331,8 @@ def default_fallthrough(inst: DecodedInstruction, size: int) -> list[dict[str, A
         return []
     if inst.edges:
         return inst.edges
+    if inst.mnemonic in ("ret_near", "jmp_r32"):
+        return []
     target = inst.end
     if target == size:
         return [{"kind": "complete", "target": target, "internal": False}]
@@ -290,7 +412,7 @@ def parse_region(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 def operand_manifest(op: Operand) -> dict[str, Any]:
-    if op.kind == "mem32":
+    if op.kind in ("mem32", "mem64"):
         return {"kind": op.kind, "value": op.value,
                 "base": op.base, "index": op.index, "scale": op.scale}
     return {"kind": op.kind, "value": op.value}
@@ -368,7 +490,71 @@ def emit_supported_body(inst: DecodedInstruction, region: dict[str, Any]) -> lis
     def finish(target: int | None = None) -> list[str]:
         return emit_set_eip_retire(next_eip if target is None else u32(base + target)) + ["            continue;"]
 
-    if m == "mov_mem32_to_r32":
+    if m.startswith("x87_"):
+        if m.startswith("x87_mem_"):
+            callback = "x87_memory"
+            args = f"XLLE_AOT_X87_{m[8:]}, {address_expr(ops[0])}, state->eip, {ops[1].value}u, {ops[2].value}u"
+        else:
+            callback = "x87_register"
+            args = f"XLLE_AOT_X87_{m[8:]}, {ops[0].value}u, state->eip, {ops[1].value}u"
+        lines.append(f"            if (!bus->{callback}) return XLLE_AOT_UNSUPPORTED;")
+        lines.append(f"            const xlle_aot_exit effect = bus->{callback}(bus->opaque, {args});")
+        lines.append("            if (effect != XLLE_AOT_CONTINUE) return effect;")
+        lines += finish()
+    elif m == "prefetch":
+        lines.append("            if (!bus->prefetch) return XLLE_AOT_UNSUPPORTED;")
+        lines.append(f"            const xlle_aot_exit effect = bus->prefetch(bus->opaque, {address_expr(ops[1])}, {ops[0].value}u);")
+        lines.append("            if (effect != XLLE_AOT_CONTINUE) return effect;")
+        lines += finish()
+    elif m.startswith("mmx_"):
+        if m == "mmx_emms":
+            callback, arguments = "mmx_emms", "bus->opaque"
+        elif m == "mmx_move":
+            callback, arguments = "mmx_move", f"bus->opaque, {ops[0].value}u, {ops[1].value}u"
+        else:
+            callback = "mmx_load64" if m == "mmx_load64" else "mmx_store64"
+            arguments = f"bus->opaque, {ops[0].value}u, {address_expr(ops[1])}"
+            if callback == "mmx_store64":
+                arguments += ", 1u" if m == "mmx_store_nt64" else ", 0u"
+        lines.append(f"            if (!bus->{callback}) return XLLE_AOT_UNSUPPORTED;")
+        lines.append(f"            const xlle_aot_exit effect = bus->{callback}({arguments});")
+        lines.append("            if (effect != XLLE_AOT_CONTINUE) return effect;")
+        lines += finish()
+    elif m in ("push_r32", "push_imm32", "call_rel32", "call_r32"):
+        call = m.startswith("call")
+        if call:
+            target = (f"0x{u32(base + inst.edges[0]['target']):08x}u" if m == "call_rel32"
+                      else reg_expr(ops[0].value))
+            # Capture an indirect ESP target before changing the guest stack.
+            lines.append(f"            const uint32_t target = {target};")
+            lines.append("            if (!xlle_aot_branch_allowed(bus, target)) return XLLE_AOT_CONTEXT;")
+            value = f"0x{next_eip:08x}u"
+        else:
+            value = reg_expr(ops[0].value) if m == "push_r32" else f"0x{ops[0].value:08x}u"
+        lines.append("            const uint32_t stack = state->gpr[4] - 4u;")
+        lines.append(f"            if (!xlle_aot_write32(bus, stack, {value})) return XLLE_AOT_MEMORY;")
+        lines.append("            state->gpr[4] = stack;")
+        if call:
+            lines += ["            state->eip = target;", "            ++state->retired;", "            continue;"]
+        else:
+            lines += finish()
+    elif m in ("pop_r32", "ret_near"):
+        lines.append("            uint32_t value = 0;")
+        lines.append("            if (!xlle_aot_read32(bus, state->gpr[4], &value)) return XLLE_AOT_MEMORY;")
+        if m == "ret_near":
+            lines.append("            if (!xlle_aot_branch_allowed(bus, value)) return XLLE_AOT_CONTEXT;")
+            lines.append(f"            state->gpr[4] += {4 + ops[0].value}u;")
+            lines += ["            state->eip = value;", "            ++state->retired;", "            continue;"]
+        else:
+            lines.append("            state->gpr[4] += 4u;")
+            # POP ESP replaces the incremented value with the popped value.
+            lines.append(f"            {reg_expr(ops[0].value)} = value;")
+            lines += finish()
+    elif m == "jmp_r32":
+        lines.append(f"            const uint32_t target = {reg_expr(ops[0].value)};")
+        lines.append("            if (!xlle_aot_branch_allowed(bus, target)) return XLLE_AOT_CONTEXT;")
+        lines += ["            state->eip = target;", "            ++state->retired;", "            continue;"]
+    elif m == "mov_mem32_to_r32":
         lines.append("            uint32_t value = 0;")
         lines.append(f"            if (!xlle_aot_read32(bus, {address_expr(ops[1])}, &value)) return XLLE_AOT_MEMORY;")
         lines.append(f"            {reg_expr(ops[0].value)} = value;")
@@ -376,9 +562,26 @@ def emit_supported_body(inst: DecodedInstruction, region: dict[str, Any]) -> lis
     elif m == "mov_r32_to_mem32":
         lines.append(f"            if (!xlle_aot_write32(bus, {address_expr(ops[1])}, {reg_expr(ops[0].value)})) return XLLE_AOT_MEMORY;")
         lines += finish()
-    elif m == "sub_r32_imm32":
+    elif m == "lea_r32":
+        # LEA computes the effective offset. It neither reads memory nor adds a
+        # segment base, and leaves every flag unchanged. RHS uses old registers
+        # even when the destination is also the base or index.
+        lines.append(f"            {reg_expr(ops[0].value)} = {address_expr(ops[1])};")
+        lines += finish()
+    elif m in ("rol_r32", "ror_r32"):
         reg = reg_expr(ops[0].value)
-        lines.append(f"            {reg} = xlle_aot_sub(state, {reg}, 0x{ops[1].value:08x}u);")
+        count = "xlle_aot_get8(state, 1u)" if ops[1].kind == "reg8" else f"{ops[1].value}u"
+        lines.append(f"            {reg} = xlle_aot_{m[:3]}32(state, {reg}, {count});")
+        lines += finish()
+    elif m == "bswap_r32":
+        reg = reg_expr(ops[0].value)
+        lines.append(f"            {reg} = xlle_aot_bswap32({reg});")
+        lines += finish()
+    elif m in ("sub_r32_imm32", "add_r32_imm32", "cmp_r32_imm32"):
+        reg = reg_expr(ops[0].value)
+        helper = "add" if m.startswith("add") else "sub"
+        assignment = "(void)" if m.startswith("cmp") else reg + " = "
+        lines.append(f"            {assignment}xlle_aot_{helper}(state, {reg}, 0x{ops[1].value:08x}u);")
         lines += finish()
     elif m == "mov_r32_imm32":
         lines.append(f"            {reg_expr(ops[0].value)} = 0x{ops[1].value:08x}u;")
@@ -410,8 +613,22 @@ def emit_supported_body(inst: DecodedInstruction, region: dict[str, Any]) -> lis
     elif m == "and_r32_to_rm32":
         lines.append(f"            {reg_expr(ops[1].value)} = xlle_aot_logic(state, {reg_expr(ops[1].value)} & {reg_expr(ops[0].value)});")
         lines += finish()
+    elif m == "or_r32_to_rm32":
+        lines.append(f"            {reg_expr(ops[1].value)} = xlle_aot_logic(state, {reg_expr(ops[1].value)} | {reg_expr(ops[0].value)});")
+        lines += finish()
+    elif m in ("or_r32_imm32", "or_eax_imm32"):
+        reg, immediate = (reg_expr(ops[0].value), ops[1].value) if m == "or_r32_imm32" else ("state->gpr[0]", ops[0].value)
+        lines.append(f"            {reg} = xlle_aot_logic(state, {reg} | 0x{immediate:08x}u);")
+        lines += finish()
     elif m == "cmp_r32_rm32":
         lines.append(f"            (void)xlle_aot_sub(state, {reg_expr(ops[1].value)}, {reg_expr(ops[0].value)});")
+        lines += finish()
+    elif m == "test_r32_rm32":
+        lines.append(f"            (void)xlle_aot_logic(state, {reg_expr(ops[1].value)} & {reg_expr(ops[0].value)});")
+        lines += finish()
+    elif m in ("test_r32_imm32", "test_eax_imm32"):
+        reg, immediate = (reg_expr(ops[0].value), ops[1].value) if m == "test_r32_imm32" else ("state->gpr[0]", ops[0].value)
+        lines.append(f"            (void)xlle_aot_logic(state, {reg} & 0x{immediate:08x}u);")
         lines += finish()
     elif m == "add_eax_imm32":
         lines.append(f"            state->gpr[0] = xlle_aot_add(state, state->gpr[0], 0x{ops[0].value:08x}u);")
@@ -605,12 +822,12 @@ def compile_input(input_path: Path, output_c: Path, output_h: Path, manifest_pat
         raise AotError("private_guest_input must be boolean")
     manifest["private_guest_input"] = private
     if private:
-        if doc.get("source_format") != "xboxlle.blockpack.v1":
-            raise AotError("private_guest_input requires source_format=xboxlle.blockpack.v1")
+        if doc.get("source_format") not in ("xboxlle.blockpack.v1", "xboxlle.xbe.v1"):
+            raise AotError("private_guest_input requires source_format=xboxlle.blockpack.v1 or xboxlle.xbe.v1")
         source_sha256 = doc.get("source_sha256")
         if not isinstance(source_sha256, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", source_sha256):
             raise AotError("private_guest_input requires a 64-hex source_sha256")
-        manifest["source_format"] = "xboxlle.blockpack.v1"
+        manifest["source_format"] = doc["source_format"]
         manifest["source_sha256"] = source_sha256.lower()
     marker = "/* XLLE_" + "PRIVATE_GUEST_ARTIFACT */\n" if private else ""
     output_h.parent.mkdir(parents=True, exist_ok=True)

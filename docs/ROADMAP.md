@@ -4,6 +4,12 @@ Two arcs. Terse by design (the gcnrecomp shape): each milestone has a one-line i
 explicit **Deliverable**, and — once closed — a dated **DONE** stamp with the
 machine-verifiable evidence that closed it.
 
+2026-10-02 owner direction makes the [faithful AOT dashboard](GOAL-AOT-DASHBOARD.md)
+primary, with maximum qualified renderer reuse and Blinx boot as the stretch goal.
+The earlier Blinx-first ordering and older Arc 2 deferral below are historical. Current launch
+dependencies are in [BLINX-BURNDOWN.md](BLINX-BURNDOWN.md); current execution
+coverage work is in [PLAN-AOT-COVERAGE-BURNDOWN.md](PLAN-AOT-COVERAGE-BURNDOWN.md).
+
 **Global gates (every milestone):**
 - Fault-stop on anything unimplemented; never a stub or plausible default.
 - Every claim backed by a machine-verifiable JSON artifact that regenerates deterministically.

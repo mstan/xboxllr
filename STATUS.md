@@ -3,6 +3,185 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-10-03 - General kernel integer AOT raises Settings-entry coverage to 61.32%
+
+Qualified ROL/ROR32, OR32 and BSWAP lowering adds five measured kernel regions.
+Independent count/flag/alias tests and strict machine execution pass; all **72
+public tests** pass, with native-required census tests **2/2**. Final floor/native
+O0/O2 complete the **27B** Settings route with all **270 checkpoint rows and ten
+images byte-identical**, also matching the previous expanded-x87 floor. Native
+partitions and every adapter counter agree.
+
+Settings-entry native coverage rises from **29.33% to 61.32% of executed
+instructions**. Main-menu idle remains **47.92%**. Across the full route, another
+**507,548,876** instructions execute natively, for **1,379,683,118** total; idle
+skips are unchanged. Six intervals reconcile with 54,522 census identities and
+zero overflow. This is dynamic coverage evidence, not a 60 FPS result.
+
+See [kernel integer evidence and remaining gaps](docs/RESULTS-AOT-KERNEL-INTEGER-2026-10-03.md).
+Full menu AOT, menu interiors, UI audio and original-speed 60 FPS remain open.
+The retained OpenGL renderer and qualified donor reuse remain the rendering
+direction. This checkpoint groups the accumulated implementation and evidence
+for integration on `perf/measurement-first-2026-09`; commit status is recorded
+in `beads-xbox.1.34` and the active goal issue. Private artifacts stay excluded.
+
+## 2026-10-03 - Expanded x87 AOT reaches 47.92% of executed main-menu idle
+
+General register multiply/subtract/free and TEST32 lowering now qualify five
+real dashboard regions. Independent cases exposed and corrected FFREE pending
+exception handling, extended denormal flags and memory-multiply exception
+priority before native admission. Public tests pass **72/72**; census x87 tests
+pass **3/3**. Unqualified exception/stack/memory cases retain explicit fallback.
+
+Final floor/native O0/O2 complete the **27B** Settings-entry/return route with
+**270 checkpoint rows and all ten images byte-identical**, also matching the
+previous qualified floor. Native partitions and all adapter counters agree.
+Native work rises by **170,378,215** instructions to **872,134,242**, with idle
+skips unchanged. Main-menu idle coverage rises from **39.33% to 47.92% of
+executed instructions**; all six phase intervals reconcile, with 56,589 census
+identities and zero overflow.
+
+See [expanded x87 evidence and limits](docs/RESULTS-AOT-X87-EXPANSION-2026-10-03.md).
+Full menu AOT, required menu interiors, UI audio and original-speed 60 FPS remain
+open. Retain the working OpenGL renderer and prioritize qualified donor reuse;
+a graphics API change is not a goal. These instrumented comparisons make no
+performance claim. Source changes remain uncommitted.
+
+## 2026-10-03 - General x87 AOT executes the dashboard math loop
+
+Fixed x87 services now execute the measured dashboard math region using shared
+80-bit SoftFloat state. Independent fixtures first exposed and corrected floor
+status, pending-exception and precise-store defects. Native operations preserve
+rounding/precision, tags, environment and memory/code coherence; unsupported
+stack/control/memory contexts decline without effects. Public tests pass
+**72/72**, including strict native O0/O3 and independent rounding expectations.
+
+The updated floor and native O0/O2 complete the **27B** Settings-entry/return route
+with all **270 checkpoints and ten images identical** to the previous qualified
+run. Native instruction partitions and adapter counters also agree. The new
+x87 region executes 263,882,564
+instructions natively. Main-menu idle native coverage rises from **26.04% to
+39.33% of executed instructions**, with idle skips unchanged. The refreshed
+census has 57,227 identities, zero overflow, and six reconciled intervals.
+
+See [x87 implementation, evidence and limits](docs/RESULTS-AOT-X87-2026-10-03.md).
+Broader x87 exception/stack semantics, kernel/memory coverage, full menu AOT,
+required menu interiors, UI audio and original-speed 60 FPS remain open.
+Renderer reuse policy is unchanged. These instrumented comparisons make no
+performance claim. Source changes remain uncommitted.
+
+## 2026-10-03 - All idle phases qualified against fully executed dashboard
+
+The guarded idle optimization now covers all eight instruction boundaries,
+including the STI interrupt shadow, and requires cached RAM translations and
+valid CPU/debug/observer state. The **27B** route completes on native O2 plus
+skipping, floor plus skipping, and floor executing every idle instruction.
+All ten captures and complete device/DMA history digests match each other and
+the preceding qualified run. The two skip-enabled arms have identical 270-row
+checkpoint streams. Public tests pass **69/69**.
+
+This removes another **4.294 billion idle instructions** from execution. The
+native menu loop still executes exactly the same work; its current share is
+**26.04% of executed main-menu idle instructions**, with all actual fallback
+included. This increase from the four-phase exact-deadline result's 10.02% is
+an idle optimization, not broader native instruction support. The refreshed
+census retains 57,304 block identities with zero overflow and all six menu
+intervals reconcile. The largest remaining main-idle block is x87 math.
+
+See [phase, memory and dashboard evidence](docs/RESULTS-IDLE-PHASES-2026-10-03.md).
+Full menu AOT, required menu interiors, UI audio and original-speed 60 FPS remain
+open. Renderer reuse policy is unchanged; these concurrent instrumented runs
+make no performance claim. Source changes remain uncommitted.
+
+## 2026-10-03 - Native menu loop and matching dashboard execution histories
+
+General AOT MMX transfers and cache hints now execute the measured dashboard
+copy loop. At this four-phase checkpoint, native share was **10.02% of executed main-menu idle
+instructions**, excluding idle skips. The earlier 26.11% measurement used the
+old block scheduler; exact deadlines expose more executed idle work. Pinned
+CPU-floor MMX state/fault defects were reproduced
+and corrected first. ABI 3 keeps the shared x87/MMX state inside the engine and
+uses fixed helpers without hidden guest execution. Public tests pass **68/68**;
+the census build also passes an authored table-collision fixture.
+
+The real **27B** floor/O0/O2 route has identical 270-row execution/device/DMA
+checkpoint streams and all ten same-clock images. Settings entry and return
+were visually verified. Native variants retire 437,873,463 instructions through
+the compiled loop and have identical instruction partitions and adapter counters.
+The previous event-order gap led to exact fallback deadlines, retained counts
+for cached block-length variants, and a reproduced CMPXCHG8B lazy-flag fix.
+No guest exception or device stop was bypassed. The input schedule was revised
+because the former first button press arrived before the clock UI accepted it.
+
+The repaired census retains all 57,301 observed block identities with zero
+overflow; all six menu intervals reconcile. Its replay preserves the qualified
+history and images. See [MMX evidence](docs/RESULTS-AOT-MMX-2026-10-03.md) and
+[deadline, flag and route qualification](docs/RESULTS-CPU-DEADLINES-2026-10-03.md).
+This qualifies observed comparisons, not all RAM or real-console behavior.
+Full menu AOT, UI audio and original-speed 60 FPS remain open. Renderer reuse
+policy is unchanged. Native remains experimental; source changes remain uncommitted.
+
+## 2026-10-02 - Primary goal pivots to faithful AOT dashboard
+
+The owner made the [AOT dashboard at original-speed 60 FPS](docs/GOAL-AOT-DASHBOARD.md)
+the primary goal; Blinx boot is the stretch goal. Reuse qualified existing
+renderer code as broadly as practical. The working OpenGL path remains the
+baseline; xemu's graphics backends are primary candidates. The
+[source assessment](docs/RENDERER-REUSE-2026-10-02.md) records reusable components,
+dependency/contract work and excluded stubbed wrappers. No new renderer runtime
+has been imported by that assessment.
+
+Compiler implementation continues under `beads-xbox.1.25.5`. Full menu AOT,
+complete dashboard device coverage and sustained 60 FPS remain open goals.
+
+The launcher now admits more than 64 AOT regions by default, with indexed range
+lookup in the machine adapter. Production-generated 257-region O0/O2 fixtures
+complete their declared warm strict scope without CPU fallback, preserve stable
+counters and reject changed guest code. Actual launcher probes validate default
+257-region, bit-63 and zero selection. See the
+[registry evidence and limits](docs/RESULTS-AOT-REGISTRY-2026-10-02.md).
+Full Release tests pass 63/63. The existing two-region native dashboard replay
+also passes 12B without fault and exactly matches the reference frame and prior
+native/fallback/idle counts. This is regression evidence, not full menu AOT or a
+new performance claim. Source changes remain uncommitted.
+
+The newer 22B OpenGL census route reaches the inspected Music/Live/Settings
+selections, Settings interior and main-menu return. Nine cumulative snapshots
+produce six reconciled menu intervals. Neither existing startup AOT region is
+executed in those intervals. Prominent first-code gaps are MMX transfers, x87
+math and kernel operations; counts do not establish host cost or code-version
+stability. General 32-bit LEA lowering now passes independent and differential
+O0/O2 tests; full Release remains 63/63. See the
+[phase evidence and compiler limits](docs/RESULTS-DASHBOARD-PHASES-2026-10-02.md).
+
+## 2026-10-02 - AOT foundations qualified; faithful Blinx launch remains open
+
+The owner authorized implementation with no stubs, LLE first, and HLE only after
+its implemented LLE counterpart and full behavioral contract are qualified.
+The new XBE inventory, bounded guest CALL/RET/stack lowering and selected x87
+helper qualification pass their checks. An isolated ten-instruction Blinx path
+passes O0/O2, including every prefix, full RAM comparison and zero fallback in
+an explicitly warmed scope. It is not game initialization or gameplay.
+Evidence and limits: [AOT foundations](docs/RESULTS-AOT-FOUNDATIONS-2026-10-02.md).
+
+The drive audit found pre-existing unconditional HDD unlock acceptance and a
+freeze-lock no-op. Their initial removal stopped retail startup at 17,940,376
+instructions. The follow-up implements independently provisioned password
+checking, lockout, freeze, protected media access and reset/IDENTIFY states.
+The owner also authorizes an explicit unlocked-drive option. A provisioned
+retail startup now completes the 12B clock-accept replay without fault, reaches
+the dashboard menu and exactly matches the existing final-image SHA-256. Security
+ends enabled/unlocked (`0x0003`). See [HDD security setup, evidence and limits](docs/HDD-SECURITY.md).
+Broader drive qualification remains open in `beads-xbox.1.28`. The DVD
+model has no media backing and the APU has no audio output. Blinx has not been
+booted. Its [launch burndown](docs/BLINX-BURNDOWN.md) has four pending gates,
+including the newly identified drive-security repair. The owner supplied Blinx
+and JSRF images for the input audit; revisions must remain explicitly pinned.
+
+Validation: the final full Release CTest suite passed 61/61, including ATA
+security behavior and credential provisioning/CLI tests. No new performance result or full-game
+coverage claim is made. Source changes are still uncommitted in the working tree.
+
 ## 2026-09-06 - Stage g completed; faithful 60 FPS with headroom remains the target
 
 The interactive path now uploads native guest scanout bytes, replaces the fixed 33 ms

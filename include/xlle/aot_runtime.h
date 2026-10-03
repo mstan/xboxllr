@@ -1,6 +1,6 @@
-// Original xboxlle AOT runtime contract. Version 2 carries the integer state
-// touched by generated IA-32 code. The machine adapter certifies its execution
-// context; untouched extended/hidden state remains owned by the CPU floor.
+// Original xboxlle AOT runtime contract. Version 4 adds fixed x87 services.
+// Generated code carries integer state; extended state stays in the CPU engine
+// and is modified only through qualified fixed-operation callbacks.
 #ifndef XLLE_AOT_RUNTIME_H
 #define XLLE_AOT_RUNTIME_H
 #include <stddef.h>
@@ -11,7 +11,7 @@
 extern "C" {
 #endif
 
-#define XLLE_AOT_ABI_VERSION 2u
+#define XLLE_AOT_ABI_VERSION 4u
 #define XLLE_AOT_CONTEXT_FLAT32_RAM 1u
 // Certified by the machine adapter from cached CPU segments and live MMU state.
 // IF, DF, IOPL and ID are preserved by this instruction subset, never modified.
@@ -38,6 +38,18 @@ typedef struct xlle_aot_state {
     uint64_t retired;
 } xlle_aot_state;
 
+typedef enum xlle_aot_x87_memory {
+    XLLE_AOT_X87_LOAD32, XLLE_AOT_X87_LOAD64,
+    XLLE_AOT_X87_MUL32, XLLE_AOT_X87_MUL64,
+    XLLE_AOT_X87_STORE32, XLLE_AOT_X87_STORE64,
+    XLLE_AOT_X87_STORE_POP32, XLLE_AOT_X87_STORE_POP64
+} xlle_aot_x87_memory;
+typedef enum xlle_aot_x87_register {
+    XLLE_AOT_X87_LOAD_REG, XLLE_AOT_X87_EXCHANGE,
+    XLLE_AOT_X87_ADD_POP, XLLE_AOT_X87_STORE_POP_REG,
+    XLLE_AOT_X87_MUL_REG, XLLE_AOT_X87_SUB_POP, XLLE_AOT_X87_FREE_REG
+} xlle_aot_x87_register;
+
 typedef struct xlle_aot_bus {
     uint32_t context;
     uint32_t code_base;
@@ -56,6 +68,27 @@ typedef struct xlle_aot_bus {
     // Successful writes to executable bytes must be visible via code immediately.
     int (*read32)(void* opaque, uint32_t address, uint32_t* value);
     int (*write32)(void* opaque, uint32_t address, uint32_t value);
+    // Fixed architectural operations, never runtime opcode decoding/execution.
+    // CONTINUE means the full operation committed. Any other exit guarantees
+    // no guest-visible effects, including MMX/x87 tags, TOP and register bits.
+    // Store's non_temporal parameter selects MOVNTQ's feature requirement;
+    // the current coherent RAM model exposes the complete store at retirement.
+    xlle_aot_exit (*mmx_load64)(void* opaque, unsigned reg, uint32_t address);
+    xlle_aot_exit (*mmx_store64)(void* opaque, unsigned reg, uint32_t address, unsigned non_temporal);
+    xlle_aot_exit (*mmx_move)(void* opaque, unsigned destination, unsigned source);
+    xlle_aot_exit (*mmx_emms)(void* opaque);
+    // PREFETCHh is an architecturally discardable, nonfaulting cache hint. The
+    // adapter checks SSE availability; it must never issue guest/MMIO reads or
+    // report a data fault for an unavailable address. Locality is 0..3 (NTA/T0/T1/T2).
+    xlle_aot_exit (*prefetch)(void* opaque, uint32_t address, unsigned locality);
+    // Fixed x87 operations on engine-owned extended state. No opcode decoding
+    // or guest execution occurs in these callbacks. The opcode argument is
+    // predecoded FOP metadata only; segment=0 selects DS, 1 selects SS.
+    // Unsupported stack/control/exception context or memory has NO effects.
+    xlle_aot_exit (*x87_memory)(void*, unsigned operation, uint32_t address,
+                               uint32_t pc, unsigned opcode, unsigned segment);
+    xlle_aot_exit (*x87_register)(void*, unsigned operation, unsigned reg,
+                                 uint32_t pc, unsigned opcode);
 } xlle_aot_bus;
 
 struct xlle_aot_region;
@@ -150,6 +183,36 @@ static inline uint32_t xlle_aot_logic(xlle_aot_state* state, uint32_t result)
     // Preserve it explicitly; comparisons must mask AF after these operations.
     state->eflags = (state->eflags & ~UINT32_C(0x8c5)) | xlle_aot_szp(result);
     return result;
+}
+
+static inline uint32_t xlle_aot_rol32(xlle_aot_state* state, uint32_t value, unsigned count)
+{
+    count &= 31u;
+    if (!count) return value;  // No flags change; never shift a C value by 32.
+    uint32_t result = (value << count) | (value >> (32u - count));
+    uint32_t carry = result & 1u;
+    // OF is defined for masked count 1. For larger counts retain the pinned
+    // CPU floor's deterministic result-bit policy, not a hardware claim.
+    uint32_t overflow = ((result >> 31) ^ carry) << 11;
+    state->eflags = (state->eflags & ~UINT32_C(0x801)) | carry | overflow;
+    return result;
+}
+
+static inline uint32_t xlle_aot_ror32(xlle_aot_state* state, uint32_t value, unsigned count)
+{
+    count &= 31u;
+    if (!count) return value;
+    uint32_t result = (value >> count) | (value << (32u - count));
+    uint32_t carry = result >> 31;
+    uint32_t overflow = (carry ^ ((result >> 30) & 1u)) << 11;
+    state->eflags = (state->eflags & ~UINT32_C(0x801)) | carry | overflow;
+    return result;
+}
+
+static inline uint32_t xlle_aot_bswap32(uint32_t value)
+{
+    return (value >> 24) | ((value >> 8) & UINT32_C(0xff00)) |
+           ((value << 8) & UINT32_C(0xff0000)) | (value << 24);
 }
 
 static inline uint32_t xlle_aot_inc(xlle_aot_state* state, uint32_t value)

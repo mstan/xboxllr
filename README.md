@@ -4,8 +4,15 @@ xboxlle runs original Xbox software by emulating the console's hardware. This is
 called **low-level emulation (LLE)**. The first goal is to run the original Xbox
 dashboard, the menu with Memory, Music, Xbox Live, and Settings.
 
-**This is development software.** It can render the dashboard with the tested
-files, but support for other firmware and disk images is not yet established.
+The active goal is the [faithful AOT dashboard at original-speed 60 FPS](docs/GOAL-AOT-DASHBOARD.md),
+using as much qualified existing renderer code as practical. Blinx boot is the
+stretch goal.
+
+**This is development software.** Earlier builds rendered the dashboard with
+the tested files. HDD startup now requires independently provisioned credentials;
+the kernel must supply the correct password. An explicit unlocked-drive setting
+is also available. See [HDD security setup and limits](docs/HDD-SECURITY.md).
+Support for other firmware and disk images is not yet established.
 Faithful LLE at 60 FPS with extra performance available is our goal. We have not
 reached it yet. High-level emulation (HLE) may be added as an optional mode, but
 it must match the LLE behavior.
@@ -22,6 +29,9 @@ Developers can follow the [private dashboard AOT workflow](docs/AOT-PRIVATE-WORK
 to capture, generate, build and measure selected regions locally. This remains
 experimental; native coverage does not imply a performance improvement.
 See [machine integration and validation](docs/DESIGN-AOT-MACHINE.md).
+See the [Blinx launch burndown](docs/BLINX-BURNDOWN.md) for the game-launch
+dependencies and the distinction between first execution, playable LLE and
+strict AOT. The drive-security gate must pass before qualifying a faithful boot.
 The current tested runtime setup is Windows x64; ARM hardware testing is deferred.
 See the [AOT implementation plan and test commands](docs/PLAN-AOT-BURNDOWN-2026-09-06.md)
 and the
@@ -104,6 +114,14 @@ py -3 --version
 & 'C:\msys64\mingw64\bin\gcc.exe' --version
 & 'C:\msys64\mingw64\bin\ninja.exe' --version
 ```
+
+Install the pinned decoder used by the XBE inventory and its tests:
+
+```powershell
+py -3 -m pip install capstone==5.0.9
+```
+
+It is a build/analysis dependency; it does not execute guest instructions.
 
 **Check:** each command should print a version. If one cannot find the command
 or file, fix that installation before continuing. If you installed a tool in
@@ -311,14 +329,21 @@ and disk. Other firmware can need a different EEPROM revision.
 
 **A generated EEPROM is not guaranteed to work with every HDD image.** The
 firmware, dashboard, disk layout, and EEPROM settings still need to be compatible.
-It also cannot unlock a physical Xbox HDD or recover its lost keys. The current
-emulator accepts the virtual disk unlock command without checking the password;
-this is a device-model limitation, not complete physical-drive security emulation.
+It also cannot unlock a physical Xbox HDD or recover its lost keys. Provision the
+virtual drive once from the EEPROM you chose:
+
+```powershell
+py -3 tools/provision_hdd_security.py --eeprom ..\machine\eeprom.bin --output ..\machine\hdd-security.key
+```
+
+Keep that private file between runs. Existing output is never overwritten.
+The emulator checks the guest's password against these independent credentials.
+See [HDD security modes and remaining limits](docs/HDD-SECURITY.md).
 See [EEPROM profiles and compatibility](docs/INPUTS.md#generated-eeprom-setup).
 
 ## 8. Check the files, then open the dashboard
 
-From the repo root, check that all four files exist and are not empty:
+From the repo root, check that all five files exist and are not empty:
 
 ```powershell
 & {
@@ -327,6 +352,7 @@ From the repo root, check that all four files exist and are not empty:
     '..\machine\bios-extract\bldr.bin'
     '..\machine\xbox-hdd-stockdash.img'
     '..\machine\eeprom.bin'
+    '..\machine\hdd-security.key'
   )
   foreach ($file in $requiredFiles) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
@@ -339,7 +365,10 @@ From the repo root, check that all four files exist and are not empty:
   if ((Get-Item -LiteralPath '..\machine\eeprom.bin').Length -ne 256) {
     throw 'The EEPROM must be exactly 256 bytes.'
   }
-  'All four input files are present.'
+  if ((Get-Item -LiteralPath '..\machine\hdd-security.key').Length -ne 64) {
+    throw 'The provisioned HDD security file must be exactly 64 bytes.'
+  }
+  'All five input files are present.'
 }
 ```
 
@@ -354,6 +383,7 @@ Now launch the emulator. Copy this whole block:
   --boot ..\machine\flash-dump-ff000000.bin `
   --run2bl ..\machine\bios-extract\bldr.bin `
   --hdd ..\machine\xbox-hdd-stockdash.img `
+  --hdd-security-file ..\machine\hdd-security.key `
   --eeprom ..\machine\eeprom.bin `
   --net-disconnected `
   --reduced-retire-diag `
@@ -365,7 +395,7 @@ Now launch the emulator. Copy this whole block:
   --interactive-present-stats-ms 1000
 ```
 
-The four file options load your private inputs. `--interactive` opens the window
+The file options load your private inputs. `--interactive` opens the window
 and enables keyboard input. The synthetic controller option supplies the current
 virtual controller connection; keep it even though you are using a keyboard.
 The other options keep the network disconnected and use the current run settings.

@@ -22,6 +22,16 @@ copies retain their upstream license headers. The bridge in
 `src/cpu/unicorn_aot_bridge.c` uses this pinned target's private structures;
 upgrading Unicorn requires requalifying these integration changes.
 
+`cmake/UnicornX87.cmake` also derives the pinned FPU helpers and declarations.
+`src/cpu/x87_status.inc` adapts exception merging from the portable SoftFloat
+path in xemu's `target/i386/tcg/fpu_helper.c` at commit
+`482088490c2d5983ed5e1eafbd09906157c1eca0`. Copyright (c) 2003 Fabrice Bellard;
+LGPL 2.1 or later, with the text in [LICENSES/LGPL-2.1.txt](LICENSES/LGPL-2.1.txt).
+Modifications include per-operation status/C1 handling and staging floating
+store conversion state until the actual memory operation succeeds. Arithmetic
+uses the existing extended-precision SoftFloat implementation. xemu's separate
+host-FPU path is not incorporated.
+
 ## nv2a_vsh_cpu
 
 [nv2a_vsh_cpu](https://github.com/xemu-project/nv2a_vsh_cpu), commit

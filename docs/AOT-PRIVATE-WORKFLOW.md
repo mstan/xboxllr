@@ -1,6 +1,12 @@
 # Private dashboard AOT workflow
 
-Status: AOT-4's real dashboard execution and correctness checks are validated.
+Current work uses ABI 4 fixed MMX/x87 services and the qualified 27B menu route;
+see [STATUS](../STATUS.md) and the
+[x87 evidence](RESULTS-AOT-X87-2026-10-03.md). Full menu AOT and 60 FPS remain open.
+The examples below retain the original capture/build workflow and startup
+selections; they do not select the newer menu regions automatically.
+
+Historical checkpoint: AOT-4's real dashboard execution and correctness checks are validated.
 The measured regions execute 38.9% of a 12-billion-instruction replay through
 generated C, mostly in startup/delay loops. All 28 images match the corrected
 baseline, but native execution takes about 40% longer overall. Keep it opt-in
@@ -40,7 +46,8 @@ $env:Path = 'C:/msys64/mingw64/bin;' + $env:Path
 & $CMake --build build-cpu-census --target xlle -j 12
 ./tools/run_stockdash_replay.ps1 -Label aot-capture `
   -BaselineExe build-cpu-census/xlle.exe `
-  -ExtraXlleArgs @('--cpu-block-census','build/aot-capture.csv')
+  -ExtraXlleArgs @('--cpu-block-census','build/aot-capture.csv',
+                  '--hdd-security-file','..\machine\hdd-security.key')
 py -3 tools/summarize_cpu_blocks.py build/aot-capture.csv --top 20
 ```
 
@@ -61,6 +68,30 @@ Do not select code from a final RAM snapshot alone. In the measured dashboard,
 some boot-code pages later held framebuffer data. The census build captures code
 when first executed and is for attribution only. Its extra work disqualifies its
 wall time from headline performance comparisons.
+
+### Separate menu intervals from startup
+
+With a census build, input-script image checkpoints also write cumulative census
+snapshots. Supply both `--cpu-block-census <path>` and
+`--test-input-capture-prefix <prefix>` with a validated `--test-input-script`.
+The log's `[cpu-census-phase]` rows associate the image label, guest clock and
+controller endpoint-report count with each CSV path. Collection runs continuously
+from reset; a checkpoint does not reset or arm the counters.
+
+Subtract two snapshots from the **same run**:
+
+```powershell
+py -3 tools/summarize_cpu_blocks.py <later.csv> --since <earlier.csv> --top 20
+```
+
+Each new census has a host-only random run identity. Interval analysis rejects
+missing/mismatched identities, decreasing counters, disappearing blocks, overflow
+and totals that do not reconcile. Legacy files without the identity still support
+cumulative summaries, but cannot be paired. Summaries written with `--json` are
+marked private too. Inspect the corresponding images before naming an interval:
+script labels alone do not establish which screen was reached. The same PC/size
+version-aggregation limitation applies to interval counts and first-code packs.
+See the [measured menu intervals](RESULTS-DASHBOARD-PHASES-2026-10-02.md).
 
 ## 2. Prepare selected regions
 
@@ -97,9 +128,10 @@ $PrivateInput = (Resolve-Path build/dashboard.aot-private.json).Path
   -DXLLE_AOT_PRIVATE_OPTIMIZATION=O2
 & $CMake --build build-release --target xlle -j 12
 ./tools/run_stockdash_replay.ps1 -Label aot-native `
-  -ExtraXlleArgs @('--aot-native')
+  -ExtraXlleArgs @('--aot-native','--hdd-security-file','..\machine\hdd-security.key')
 ```
 
+Provision the private HDD credentials first using [HDD security setup](HDD-SECURITY.md).
 Native execution is opt-in. `--no-aot-native` uses the fallback on the same binary.
 Normal builds use a deterministic software-TLB resize window. Keep
 `XLLE_HOST_TIMED_TLB=OFF` for repeatable native/fallback work counts. The `ON`
@@ -107,15 +139,35 @@ setting restores the legacy host-time-dependent heuristic for diagnostics;
 it can change native eligibility under host load. See the
 [controlled TLB experiment](RESULTS-AOT5-TLB-2026-09-11.md).
 `--aot-native-mask 1` selects the first generated region; `2` selects the second;
-`3` selects both. Region ordering follows ascending selected address. Registration
+`3` selects both. Omitting the mask selects **all** generated regions, including
+indices above 63. An explicit mask is the legacy diagnostic selector for indices
+0..63; higher indices are excluded in that mode. Region ordering follows ascending selected address. Registration
 alone does not prove execution: read the `[aot]` and `[aot-region]` retirement counts.
 
-ABI version 2 carries the cached code-segment limit. The measured kernel uses a
+ABI version 4 retains the cached code-segment limit and MMX/cache-hint services,
+and adds fixed x87 memory/register callbacks. Rebuild generated artifacts;
+older ABI artifacts are rejected. The measured kernel uses a
 zero-based 3 GiB code segment and full-range data/stack segments. Native entry
 checks that all region instruction bytes fit inside CS; taken branches check their
 target before retiring. Unsupported contexts return to Unicorn. Code identity is
 checked against live RAM at each supported instruction. Memory callbacks certify
 the full access and preserve faults, permissions, aliases and code invalidation.
+MMX transfers certify all eight bytes before modifying memory or x87/MMX state.
+The engine owns the shared register file; helpers never execute guest code.
+The x87 path uses the engine's 80-bit SoftFloat state and implemented precision,
+rounding and environment services. Current native eligibility requires masked
+exceptions, a valid stack for the operation and a fully cached RAM span.
+Unsupported controls, pending exceptions, stack faults, cold memory and MMIO
+decline before x87 effects; they remain CPU-floor work and count as fallback.
+This bounded support is not a claim of complete x87 semantics.
+
+General integer support also includes 32-bit register ROL/ROR (one, immediate,
+or CL count), OR register/immediate forms and BSWAP. Rotate counts use five-bit
+masking; zero counts preserve flags and old CL is used for ECX destinations.
+For multi-bit rotates, undefined OF follows the pinned CPU floor's policy;
+logical operations retain the documented undefined-AF policy. Widths, prefixes
+and memory forms outside the implemented subset still exit explicitly. See
+[integer qualification](RESULTS-AOT-KERNEL-INTEGER-2026-10-03.md).
 
 To remove embedded private code, clear the cached input and rebuild:
 

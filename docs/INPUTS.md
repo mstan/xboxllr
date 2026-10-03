@@ -114,10 +114,11 @@ writeback or silently change the imported-dump behavior.
 Not necessarily. For basic dashboard boot, a generated EEPROM can work with a
 compatible readable raw disk image. The image must still contain a supported
 layout and dashboard, and the firmware must accept the EEPROM revision/settings.
-The present IDE model accepts the guest's SECURITY UNLOCK payload without
-checking its password. Therefore it does not require the source physical disk's
-password to match the generated virtual HDD key. This is an existing device-model
-limitation, not proof of faithful physical-drive security behavior.
+The virtual drive must be provisioned from the selected EEPROM before boot;
+the IDE model checks the guest's password against that independent credential.
+The virtual identity differs from the source physical drive, whose password
+storage is not part of a raw sector image. See [HDD security setup](HDD-SECURITY.md)
+for the provisioning command, explicit unlocked option and remaining limits.
 
 Keep the original EEPROM if you need the original console identity. Data tied
 to that identity, including some saves/accounts, is outside this generation

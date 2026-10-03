@@ -668,8 +668,8 @@ uint64_t XboxMachine::run(uint32_t start, uint64_t max, std::string& err) {
         // ---- idle fast-forward (beads-xbox.1.4.7) ---------------------------------
         // Replaces the EXECUTION of the slice, not the slice: everything below this point
         // (device clocks, interrupt delivery, the census) runs exactly as it would have.
-        // The skip is always a whole number of idle-loop iterations ending back at the loop
-        // head, and never crosses `deadline`, so the guest state at every point the guest or
+        // The skip is always a whole number of idle-loop iterations ending at the same
+        // instruction boundary, and never crosses `deadline`, so the state the guest or
         // a device can observe is bit-identical to the executed path.
         // Determinism trace: this slice's entry identity, completed below (beads-xbox.1.14.11).
         DetSlice det{};
@@ -690,8 +690,8 @@ uint64_t XboxMachine::run(uint32_t start, uint64_t max, std::string& err) {
             idle_census_.ff_iters += skipped / kIdleLoopInsns;
             if (skipped > idle_census_.ff_max_insns) idle_census_.ff_max_insns = skipped;
         } else {
-            // A block-granularity floor returns at the last whole block that fits `chunk`, so
-            // `n <= chunk` with equality only by luck; `n` is authoritative, never `chunk`.
+            // Both CPU tiers honor the exact deadline. Exceptions, stops and
+            // interrupt windows may end early; `n` is authoritative, never `chunk`.
             n = cpu_->run(eip, chunk, cerr);
         }
         done += n;
@@ -773,7 +773,7 @@ uint64_t XboxMachine::run(uint32_t start, uint64_t max, std::string& err) {
 //     number of instructions skipped leaves it identical to the executed path.
 // It reads two guest cells -- DpcListHead at [ebp] and the ready-thread field at [ebx+0x2c] --
 // and both are mutated only by an ISR or a DPC. An ISR requires interrupt delivery, and the
-// only interruptible point in the loop is 0x8001e3d0 (IF is opened by `sti` and closed by
+// interruptible points are 0x8001e3d0 and 0x8001e3d1 (IF is opened by `sti` and closed by
 // `cli` two instructions later). So the skip is exact iff no interrupt can be delivered
 // inside it, and that is precisely what bounding it by next_device_deadline() guarantees:
 // every source that can make pic_->intr_pending() true -- PIT IRQ0, the 60 Hz vblank, the
@@ -783,13 +783,12 @@ uint64_t XboxMachine::run(uint32_t start, uint64_t max, std::string& err) {
 // The LANDING POINT is the phase the skip started from, never a different point in the
 // iteration -- the skip is always a whole multiple of 8 instructions. The remaining
 // (deadline - total) mod 8 instructions are then executed by the normal path, which ends the
-// slice at the same block boundary the un-skipped run would have ended it at, and the machine
+// slice at the same instruction boundary the un-skipped run would have ended it at, and the machine
 // loop delivers the interrupt at exactly the boundary it would have used. That equality is
 // exact, not approximate: an un-skipped run covers the same stretch in slices of exactly 4096
 // (a multiple of 8, so every intermediate boundary is the same phase), and its final
-// pre-deadline stop is at 8*floor(R/8) + f(R mod 8) where R is the distance to the deadline
-// and f is the last block boundary of one iteration that fits; the skip lands at 8*floor(R/8)
-// and the normal path then applies the same f to the same remainder. Intermediate slice
+// pre-deadline stop is at R, where R is the distance to the deadline. The skip lands at
+// 8*floor(R/8), and the exact CPU path executes the remaining R mod 8 instructions. Intermediate slice
 // boundaries are skipped, but a slice boundary has no side effect of its own: the host poll is
 // gated on the guest millisecond (in the deadline set), the device clocks are pure functions
 // of total_insns_ that nothing sampled in between, and no interrupt was deliverable.
@@ -797,10 +796,7 @@ bool XboxMachine::try_idle_fast_forward(uint32_t eip, bool irq_armed, uint64_t d
                                         uint64_t remaining, uint64_t& skipped) {
     skipped = 0;
     if (!idle_fast_forward_ || idle_ff_bytes_bad_) return false;
-    // A slice boundary is always a translation-block boundary, and the loop has exactly four
-    // of them; the phase an idle stretch is entered at is preserved for its whole length
-    // (4096 is a multiple of 8), so restricting the skip to the head would catch almost none
-    // of them. All four phases are valid skip points -- see the table in machine.hpp.
+    // Each skipped iteration returns to the same instruction boundary.
     unsigned phase = kIdlePhases;
     for (unsigned i = 0; i < kIdlePhases; ++i) {
         if (eip == kIdlePhaseEip[i]) { phase = i; break; }
@@ -809,10 +805,15 @@ bool XboxMachine::try_idle_fast_forward(uint32_t eip, bool irq_armed, uint64_t d
     // An armed IRQ means the very next open window delivers; never skip over that.
     if (irq_armed) return false;
     idle_census_.ff_at_head++;
+    if (!cpu_->idle_skip_context_ok(phase == 1)) {
+        idle_census_.ff_rej_context++;
+        return false;
+    }
 
     // How far may we go? Never past the next device event, never past the run budget.
     uint64_t budget = remaining;
-    if (deadline > total_insns_ && deadline - total_insns_ < budget)
+    if (deadline <= total_insns_) return false;
+    if (deadline - total_insns_ < budget)
         budget = deadline - total_insns_;
     const uint64_t iters = budget / kIdleLoopInsns;
     if (iters == 0) { idle_census_.ff_rej_short++; return false; }
@@ -828,9 +829,8 @@ bool XboxMachine::try_idle_fast_forward(uint32_t eip, bool irq_armed, uint64_t d
 
     // The pinned loop shape, re-verified on every skip. A kernel that is not build 4983, a
     // patched idle loop, or a remapped page must disable the skip rather than assume.
-    uint32_t phys = 0;
     uint8_t code[kIdleLoopBytes] = {};
-    if (!cpu_->translate(kIdleLoopHead, phys) || !read(phys, code, sizeof(code))) {
+    if (!cpu_->read_cached_ram(kIdleLoopHead, code, sizeof(code), true)) {
         idle_census_.ff_rej_read++;
         return false;
     }
@@ -857,9 +857,8 @@ bool XboxMachine::try_idle_fast_forward(uint32_t eip, bool irq_armed, uint64_t d
 
     // Both branches of the iteration must be the idle ones, or the shape is not 8 instructions.
     uint32_t dpc_head = 0, next_thread = 0;
-    uint32_t dpc_phys = 0, thr_phys = 0;
-    if (!cpu_->translate(r.ebp, dpc_phys) || !read(dpc_phys, &dpc_head, 4) ||
-        !cpu_->translate(r.ebx + 0x2cu, thr_phys) || !read(thr_phys, &next_thread, 4)) {
+    if (!cpu_->read_cached_ram(r.ebp, &dpc_head, 4, false) ||
+        !cpu_->read_cached_ram(r.ebx + 0x2cu, &next_thread, 4, false)) {
         idle_census_.ff_rej_read++;
         return false;
     }

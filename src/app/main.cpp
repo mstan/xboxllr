@@ -1654,6 +1654,10 @@ int main(int argc, char** argv) {
     // memory for the run and the image file is never modified, so consecutive replays start
     // from identical bytes. --hdd-writeback opts back into persisting them.
     bool hdd_writeback = false;
+    const char* hdd_security_mode = "locked";
+    const char* hdd_security_file = nullptr;
+    bool hdd_security_explicit = false;
+    HddSecurityConfig hdd_security;
     // Determinism trace reporting (beads-xbox.1.14.11). Capture is always on in
     // XboxMachine; these only choose where it is reported.
     const char* det_log_path = nullptr;
@@ -1858,6 +1862,9 @@ int main(int argc, char** argv) {
     uint32_t host_sample_profile_ms = 0;
     const char* cpu_block_census = nullptr;
     bool aot_native = false;
+    bool aot_require_native = false;
+    bool aot_native_mask_explicit = false;
+    uint64_t aot_require_native_after = 0;
     uint64_t aot_native_mask = UINT64_MAX;
     uint64_t max_insns = 128ull * 1000 * 1000;  // 2BL kernel LZX decompress needs tens of M
     uint64_t machine_chunk_insns = 4096;
@@ -1921,6 +1928,16 @@ int main(int argc, char** argv) {
             hdd_writeback = true;
         else if (!std::strcmp(argv[i], "--no-hdd-writeback"))
             hdd_writeback = false;
+        else if (!std::strcmp(argv[i], "--hdd-security") && i + 1 < argc) {
+            hdd_security_mode = argv[++i];
+            hdd_security_explicit = true;
+            if (std::strcmp(hdd_security_mode, "locked") && std::strcmp(hdd_security_mode, "unlocked")) {
+                std::fprintf(stderr, "[hdd] --hdd-security expects locked or unlocked\n");
+                return 1;
+            }
+        }
+        else if (!std::strcmp(argv[i], "--hdd-security-file") && i + 1 < argc)
+            hdd_security_file = argv[++i];
         else if (!std::strcmp(argv[i], "--idle-fast-forward"))
             idle_fast_forward = true;
         else if (!std::strcmp(argv[i], "--no-idle-fast-forward"))
@@ -2220,11 +2237,23 @@ int main(int argc, char** argv) {
         }
         else if (!std::strcmp(argv[i], "--aot-native")) aot_native = true;
         else if (!std::strcmp(argv[i], "--no-aot-native")) aot_native = false;
+        else if (!std::strcmp(argv[i], "--aot-require-native")) {
+            aot_require_native = true;
+            aot_require_native_after = 0;
+        }
+        else if (!std::strcmp(argv[i], "--aot-require-native-after")) {
+            if (i + 1 >= argc || !parse_u64_arg(argv[++i], aot_require_native_after)) {
+                std::fprintf(stderr, "[host] --aot-require-native-after requires a guest clock\n");
+                return 1;
+            }
+            aot_require_native = true;
+        }
         else if (!std::strcmp(argv[i], "--aot-native-mask")) {
             if (i + 1 >= argc || !parse_u64_arg(argv[++i], aot_native_mask)) {
                 std::fprintf(stderr, "[host] --aot-native-mask requires a 64-bit mask\n");
                 return 1;
             }
+            aot_native_mask_explicit = true;
         }
         else if (!std::strcmp(argv[i], "--cpu-block-census")) {
 #ifdef XLLE_CPU_BLOCK_CENSUS
@@ -2497,6 +2526,37 @@ int main(int argc, char** argv) {
         else {
             std::fprintf(stderr, "[host] unknown or incomplete option: %s\n", argv[i]);
             return 1;
+        }
+    }
+
+    if (!hdd && (hdd_security_explicit || hdd_security_file)) {
+        std::fprintf(stderr, "[hdd] security options require --hdd <image>\n");
+        return 1;
+    }
+    if (hdd) {
+        if (!std::strcmp(hdd_security_mode, "unlocked")) {
+            if (hdd_security_file) {
+                std::fprintf(stderr, "[hdd] unlocked mode cannot also provision a locked drive\n");
+                return 1;
+            }
+            hdd_security.mode = HddSecurityConfig::Mode::Disabled;
+        } else {
+            if (!hdd_security_file) {
+                std::fprintf(stderr, "[hdd] locked mode requires --hdd-security-file <private.key>; "
+                             "see docs/HDD-SECURITY.md for provisioning or explicit unlocked mode\n");
+                return 1;
+            }
+            // Bounded read. Passwords never appear in argv, diagnostics or reports.
+            std::ifstream credentials(hdd_security_file, std::ios::binary);
+            std::array<char, 65> bytes{};
+            credentials.read(bytes.data(), bytes.size());
+            if (credentials.bad() || credentials.gcount() != 64) {
+                std::fprintf(stderr, "[hdd] security file must contain exactly 64 bytes (user[32], master[32])\n");
+                return 1;
+            }
+            std::memcpy(hdd_security.user.data(), bytes.data(), 32);
+            std::memcpy(hdd_security.master.data(), bytes.data() + 32, 32);
+            hdd_security.mode = HddSecurityConfig::Mode::Locked;
         }
     }
 
@@ -3416,6 +3476,10 @@ int main(int argc, char** argv) {
                         debug_nv2a_surface_event_after_insns));
             }
             if (hdd) {
+                if (!mach.ide() || !mach.ide()->configure_hdd_security(hdd_security)) {
+                    std::fprintf(stderr, "[hdd] cannot configure drive security\n");
+                    return 1;
+                }
                 if (!mach.attach_hdd(hdd, hdd_writeback)) {
                     std::fprintf(stderr, "[hdd] attach failed: %s\n", hdd);
                     return 1;
@@ -3423,8 +3487,10 @@ int main(int argc, char** argv) {
                 // The write policy is part of the run's identity: the retail boot increments
                 // the LBA-3 "BRFR" boot counter and writes it straight back, so a writeback
                 // run changes its own input for the NEXT run (beads-xbox.1.14.11).
-                std::printf("[hdd] attached %s (IDE drive 0, security LOCKED, writes=%s)\n",
-                            hdd, hdd_writeback ? "PERSISTED to the image"
+                std::printf("[hdd] attached %s (IDE drive 0, security=%s, writes=%s)\n",
+                            hdd, hdd_security.mode == HddSecurityConfig::Mode::Locked
+                                ? "LOCKED, provisioned credentials" : "DISABLED, explicit unlocked policy",
+                            hdd_writeback ? "PERSISTED to the image"
                                                : "copy-on-write, image never modified");
             } else {
                 std::printf("[hdd] no --hdd image: IDE drive 0 reports absent\n");
@@ -3502,12 +3568,11 @@ int main(int argc, char** argv) {
             UnicornFloor* unicorn_floor = dynamic_cast<UnicornFloor*>(&mach.cpu());
             if (aot_native) {
 #ifdef XLLE_HAS_PRIVATE_AOT
-                if (xlle_aot_private_region_count > 64) {
-                    std::fprintf(stderr, "[host] private AOT registry exceeds 64 regions\n");
-                    return 1;
-                }
                 for (size_t region_index = 0; region_index < xlle_aot_private_region_count; ++region_index) {
-                    if (!(aot_native_mask & (uint64_t(1) << region_index))) continue;
+                    // Default: all generated regions, with no 64-entry cap.
+                    // The legacy explicit mask selects only indices 0..63.
+                    if (aot_native_mask_explicit && (region_index >= 64 ||
+                        !(aot_native_mask & (uint64_t(1) << region_index)))) continue;
                     const auto* region = xlle_aot_private_regions[region_index];
                     if (!mach.register_aot_region(*region)) {
                         std::fprintf(stderr, "[host] private AOT region registration failed\n");
@@ -3522,6 +3587,17 @@ int main(int argc, char** argv) {
 #endif
             }
             if (unicorn_floor && cpu_insn_hook) unicorn_floor->force_insn_scheduling();
+            auto arm_native_required = [&]() {
+                if (!aot_require_native || !unicorn_floor ||
+                    unicorn_floor->native_execution_required() ||
+                    mach.total_insns() < aot_require_native_after) return;
+                unicorn_floor->require_native_execution(true);
+                std::printf("[aot-required] armed requested=%llu actual=%llu "
+                            "scope=following-cpu-boundaries\n",
+                    static_cast<unsigned long long>(aot_require_native_after),
+                    static_cast<unsigned long long>(mach.total_insns()));
+            };
+            arm_native_required();
             xlle_guest_tsc_deterministic = legacy_host_tsc ? 0 : 1;
             std::printf(
                 "[cpu] scheduling=%s guest-tsc=%s\n",
@@ -3618,13 +3694,14 @@ int main(int argc, char** argv) {
                     "thread_reads=%llu irq0=%llu injected=%llu pending_boundaries=%llu "
                     "tb_entries=%llu tb_insns=%llu tb_icount_entries=%llu "
                     "tb_icount_misses=%llu tb_icount_evictions=%llu tb_deadline_stops=%llu "
-                    "tb_irq_window_stops=%llu tb_bootstrap_blocks=%llu "
+                    "tb_irq_window_stops=%llu tb_bootstrap_blocks=%llu tb_deadline_splits=%llu "
                     "tb_skipped_insns=%llu "
                     "runs_insn_mode=%llu runs_block_mode=%llu "
                     "guest_tsc_reads=%llu guest_tsc_deterministic=%d "
                     "ff_on=%d ff_skips=%llu ff_insns=%llu ff_iters=%llu ff_insn_pct=%.3f "
-                    "ff_max_insns=%llu ff_at_phase=%llu ff_p0=%llu ff_p1=%llu ff_p2=%llu ff_p6=%llu "
-                    "ff_rej_flags=%llu ff_rej_state=%llu "
+                    "ff_max_insns=%llu ff_at_phase=%llu ff_p0=%llu ff_p1=%llu ff_p2=%llu "
+                    "ff_p3=%llu ff_p4=%llu ff_p5=%llu ff_p6=%llu ff_p7=%llu "
+                    "ff_rej_context=%llu ff_rej_flags=%llu ff_rej_state=%llu "
                     "ff_rej_short=%llu ff_rej_read=%llu ff_rej_bytes=%llu "
                     "idle_range=0x%08x-0x%08x "
                     "det_digest=%016llx det_slices=%llu "
@@ -3656,6 +3733,7 @@ int main(int argc, char** argv) {
                     static_cast<unsigned long long>(
                         delta(bs.irq_window_stops, bsw.irq_window_stops)),
                     static_cast<unsigned long long>(bs.bootstrap_blocks),
+                    static_cast<unsigned long long>(bs.deadline_splits),
                     static_cast<unsigned long long>(
                         delta(bs.skipped_insns, bsw.skipped_insns)),
                     static_cast<unsigned long long>(
@@ -3675,6 +3753,11 @@ int main(int argc, char** argv) {
                     static_cast<unsigned long long>(delta(now.ff_phase[1], was.ff_phase[1])),
                     static_cast<unsigned long long>(delta(now.ff_phase[2], was.ff_phase[2])),
                     static_cast<unsigned long long>(delta(now.ff_phase[3], was.ff_phase[3])),
+                    static_cast<unsigned long long>(delta(now.ff_phase[4], was.ff_phase[4])),
+                    static_cast<unsigned long long>(delta(now.ff_phase[5], was.ff_phase[5])),
+                    static_cast<unsigned long long>(delta(now.ff_phase[6], was.ff_phase[6])),
+                    static_cast<unsigned long long>(delta(now.ff_phase[7], was.ff_phase[7])),
+                    static_cast<unsigned long long>(delta(now.ff_rej_context, was.ff_rej_context)),
                     static_cast<unsigned long long>(delta(now.ff_rej_flags, was.ff_rej_flags)),
                     static_cast<unsigned long long>(delta(now.ff_rej_state, was.ff_rej_state)),
                     static_cast<unsigned long long>(delta(now.ff_rej_short, was.ff_rej_short)),
@@ -4391,6 +4474,21 @@ int main(int argc, char** argv) {
                     path_ok ? path : "<path-too-long>", written ? "written" : "FAILED",
                     error.empty() ? "" : " (",
                     error.empty() ? "" : (error + ")").c_str());
+                if (cpu_block_census && written) {
+                    // Snapshot the census accumulated continuously since reset.
+                    // No tracing is armed/reset at a phase boundary.
+                    const std::string census_path = std::string(cpu_block_census) +
+                        ".xid-" + std::to_string(mach.ohci0()->xid_endpoint2_input_reports()) +
+                        ".clock-" + std::to_string(sampled_at) + ".csv";
+                    if (!unicorn_floor || !unicorn_floor->write_block_census(census_path.c_str())) {
+                        mach.cpu().request_stop("cannot write dashboard phase block census");
+                        return false;
+                    }
+                    std::printf("[cpu-census-phase] name=%s clock=%llu endpoint2=%llu path=%s\n",
+                                phase, static_cast<unsigned long long>(sampled_at),
+                                static_cast<unsigned long long>(mach.ohci0()->xid_endpoint2_input_reports()),
+                                census_path.c_str());
+                }
                 return written;
             };
             if (net_requested) {
@@ -4421,11 +4519,12 @@ int main(int argc, char** argv) {
             const uint64_t soft_host_memory_stop_bytes =
                 max_host_memory_bytes - max_host_memory_bytes / 10;
             auto next_host_memory_check = std::chrono::steady_clock::now();
-            if (interactive || net_requested || frame_series_requested ||
+            if (interactive || net_requested || frame_series_requested || aot_require_native ||
                 max_host_memory_bytes != 0 ||
                 test_synthetic_controller_hub_input_down ||
                 test_synthetic_controller_hub_input_down_a || test_input_script) {
                 mach.on_host_poll([&]() {
+                    arm_native_required();
                     // Host event processing is nonblocking and guest state changes only on this
                     // emulation thread. XID endpoint 2 observes it on its next periodic TD.
                     if (max_host_memory_bytes != 0) {
@@ -4993,6 +5092,9 @@ int main(int argc, char** argv) {
             if (interactive)
                 interactive_start_ns = interactive_stats_ns = host_input.now_ns();
             uint64_t n = mach.run(0x901ee, max_insns, err2);
+            if (aot_require_native && (!unicorn_floor ||
+                !unicorn_floor->native_execution_required()) && err2.empty())
+                err2 = "native-required scope never reached its requested start clock";
             if (cpu_block_census) {
                 if (!unicorn_floor || !unicorn_floor->write_block_census(cpu_block_census)) {
                     std::fprintf(stderr, "[host] cannot write block census: %s\n", cpu_block_census);
@@ -6476,6 +6578,9 @@ int main(int argc, char** argv) {
                         (unsigned long long)(mach.ide() ? mach.ide()->overlay_sectors() : 0),
                         mach.ide() && mach.ide()->hdd_writeback() ? 1 : 0,
                         mach.ide() ? mach.ide()->bm_base() : 0);
+            if (hdd && mach.ide())
+                std::printf("[hdd-security] final IDENTIFY word128=0x%04x\n",
+                            mach.ide()->hdd_security_status());
             std::printf("[2bl] MCPX ROM overlay disabled by firmware: %s\n",
                         mach.pci() && mach.pci()->mcpx_rom_disabled() ? "yes" : "no");
             std::printf("[2bl] IRQ0 pulses=%llu, pending-boundaries=%llu, delivered=%llu\n",

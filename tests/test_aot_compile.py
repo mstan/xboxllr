@@ -18,6 +18,93 @@ spec.loader.exec_module(aot_compile)
 
 
 class AotCompileTests(unittest.TestCase):
+    def test_x87_fixed_operations_and_environment_metadata(self):
+        for opcode, form, mnemonic in [(0xd9,0,"LOAD32"),(0xdd,0,"LOAD64"),
+                (0xd8,1,"MUL32"),(0xdc,1,"MUL64"),(0xd9,2,"STORE32"),
+                (0xdd,2,"STORE64"),(0xd9,3,"STORE_POP32"),(0xdd,3,"STORE_POP64")]:
+            for modrm, suffix, segment in [(0x00,b"",0),(0x45,b"\xfc",1),
+                    (0x04,b"\x2b",0),(0x04,b"\x25\x00\x20\x00\x00",0)]:
+                raw=modrm | form*8
+                inst=aot_compile.decode_one(bytes([opcode,raw])+suffix,0)
+                self.assertEqual(inst.mnemonic,"x87_mem_"+mnemonic)
+                self.assertEqual(inst.operands[1].value,((opcode&7)<<8)|raw)
+                self.assertEqual(inst.operands[2].value,segment)
+        for opcode,base,name in [(0xd9,0xc0,"LOAD_REG"),(0xd9,0xc8,"EXCHANGE"),
+                                 (0xde,0xc0,"ADD_POP"),(0xdd,0xd8,"STORE_POP_REG"),
+                                 (0xd8,0xc8,"MUL_REG"),(0xde,0xe8,"SUB_POP"),(0xdd,0xc0,"FREE_REG")]:
+            for index in range(8):
+                inst=aot_compile.decode_one(bytes([opcode,base+index]),0)
+                self.assertEqual(inst.mnemonic,"x87_reg_"+name)
+                self.assertEqual(inst.operands[0].value,index)
+        for raw in ("66d906","67d906","64d906","f0d906","f3d906","d9d1","de08"):
+            self.assertEqual(aot_compile.decode_one(bytes.fromhex(raw),0).status,"unsupported")
+        for raw in ("d9","d904","d945","d985010203"):
+            with self.assertRaises(aot_compile.AotError): aot_compile.decode_one(bytes.fromhex(raw),0)
+
+    def test_test32_encodings(self):
+        for source in range(8):
+            for dest in range(8):
+                inst=aot_compile.decode_one(bytes([0x85,0xc0+source*8+dest]),0)
+                self.assertEqual(inst.mnemonic,"test_r32_rm32")
+                self.assertEqual([o.value for o in inst.operands],[source,dest])
+        for dest in range(8):
+            inst=aot_compile.decode_one(bytes([0xf7,0xc0+dest,0x78,0x56,0x34,0x12]),0)
+            self.assertEqual(inst.mnemonic,"test_r32_imm32")
+            self.assertEqual([o.value for o in inst.operands],[dest,0x12345678])
+        self.assertEqual(aot_compile.decode_one(bytes.fromhex("a978563412"),0).mnemonic,"test_eax_imm32")
+        for raw in ("6685c0","85","f7","f7c012","a91234"):
+            if raw.startswith("66"):
+                self.assertEqual(aot_compile.decode_one(bytes.fromhex(raw),0).status,"unsupported")
+            else:
+                with self.assertRaises(aot_compile.AotError): aot_compile.decode_one(bytes.fromhex(raw),0)
+        for raw in ("8500","f700","f7c8"):
+            self.assertEqual(aot_compile.decode_one(bytes.fromhex(raw),0).status,"unsupported")
+
+    def test_rotate32_encodings(self):
+        for right in (0, 1):
+            for destination in range(8):
+                modrm = 0xc0 + 8 * right + destination
+                for opcode in (0xc1, 0xd1, 0xd3):
+                    for count in (range(256) if opcode == 0xc1 else (1,)):
+                        code = bytes([opcode, modrm] + ([count] if opcode == 0xc1 else []))
+                        inst = aot_compile.decode_one(code, 0)
+                        self.assertEqual(inst.mnemonic, "ror_r32" if right else "rol_r32")
+                        self.assertEqual(inst.length, len(code))
+                        self.assertEqual(inst.operands[0], aot_compile.Operand("reg32", destination))
+                        self.assertEqual(inst.operands[1], aot_compile.Operand(
+                            "reg8" if opcode == 0xd3 else "imm8", 1 if opcode != 0xc1 else count))
+        for raw in ("c10001", "d108", "d308", "c0c001", "d0c0", "d2c0", "c1d001",
+                    "d1d8", "d3e0", "66d1c0", "67d1c0", "f0d1c0", "f3d3c0"):
+            self.assertEqual(aot_compile.decode_one(bytes.fromhex(raw), 0).status, "unsupported")
+        for raw in ("c1", "c1c0", "d1", "d3"):
+            with self.assertRaises(aot_compile.AotError):
+                aot_compile.decode_one(bytes.fromhex(raw), 0)
+
+    def test_or32_and_bswap_encodings(self):
+        for destination in range(8):
+            inst = aot_compile.decode_one(bytes([0x0f, 0xc8 + destination]), 0)
+            self.assertEqual(inst.mnemonic, "bswap_r32")
+            self.assertEqual(inst.operands, [aot_compile.Operand("reg32", destination)])
+            for source in range(8):
+                direct = aot_compile.decode_one(bytes([0x09, 0xc0 + source * 8 + destination]), 0)
+                reverse = aot_compile.decode_one(bytes([0x0b, 0xc0 + destination * 8 + source]), 0)
+                self.assertEqual(direct, reverse)
+                self.assertEqual(direct.mnemonic, "or_r32_to_rm32")
+                self.assertEqual([o.value for o in direct.operands], [source, destination])
+            for immediate in range(256):
+                inst = aot_compile.decode_one(bytes([0x83, 0xc8 + destination, immediate]), 0)
+                self.assertEqual(inst.mnemonic, "or_r32_imm32")
+                self.assertEqual([o.value for o in inst.operands],
+                                 [destination, immediate if immediate < 128 else immediate + 0xffffff00])
+            inst = aot_compile.decode_one(bytes([0x81, 0xc8 + destination, 0x78, 0x56, 0x34, 0x12]), 0)
+            self.assertEqual([o.value for o in inst.operands], [destination, 0x12345678])
+        self.assertEqual(aot_compile.decode_one(bytes.fromhex("0d78563412"), 0).mnemonic, "or_eax_imm32")
+        for raw in ("660fc8", "f00fc8", "6609d8", "0900", "0b00", "0800", "8108", "8308"):
+            self.assertEqual(aot_compile.decode_one(bytes.fromhex(raw), 0).status, "unsupported")
+        for raw in ("09", "0b", "0d", "81c8", "83c8"):
+            with self.assertRaises(aot_compile.AotError):
+                aot_compile.decode_one(bytes.fromhex(raw), 0)
+
     def compile_doc(self, doc):
         td = tempfile.TemporaryDirectory()
         root = Path(td.name)
@@ -72,6 +159,33 @@ class AotCompileTests(unittest.TestCase):
         self.assertIn("case 0x00002002u", c)
         self.assertIn("case 0x00002004u", c)
         self.assertEqual(manifest["regions"][0]["entries"], [0, 2])
+
+    def test_calls_recover_callee_and_return_continuation(self):
+        region = aot_compile.parse_region({"name": "calls", "base": 4096,
+                                          "code": "e803000000c30f0b40c3"})
+        self.assertEqual(sorted(region["decoded"]), [0, 5, 8, 9])
+        self.assertEqual(region["decoded"][5].edges, [])
+        self.assertEqual(region["decoded"][9].edges, [])
+
+    def test_stack_encodings_and_dynamic_target_discovery(self):
+        for code, name in (("54", "push_r32"), ("5c", "pop_r32"), ("6aff", "push_imm32"),
+                           ("c20800", "ret_near"), ("ffd4", "call_r32"), ("ffe0", "jmp_r32")):
+            with self.subTest(code=code):
+                inst = aot_compile.decode_one(bytes.fromhex(code), 0)
+                self.assertEqual(inst.mnemonic, name)
+                self.assertEqual(inst.length, len(bytes.fromhex(code)))
+        self.assertEqual(aot_compile.decode_one(bytes.fromhex("6aff"), 0).operands[0].value, 0xffffffff)
+        self.assert_cli_fails({"regions": [{"name": "badret", "base": 4096, "code": "c208"}]}, "truncated ret")
+        self.assert_cli_fails({"regions": [{"name": "badcall", "base": 4096, "code": "e808"}]}, "truncated call")
+
+    def test_arithmetic_register_encoding_directions_agree(self):
+        for left, right in (("01d8", "03c3"), ("29d8", "2bc3"), ("31d8", "33c3"),
+                            ("21d8", "23c3"), ("39d8", "3bc3")):
+            with self.subTest(left=left, right=right):
+                self.assertEqual(aot_compile.decode_one(bytes.fromhex(left), 0),
+                                 aot_compile.decode_one(bytes.fromhex(right), 0))
+        for opcode in (0x03, 0x2b, 0x33, 0x23, 0x3b):
+            self.assertEqual(aot_compile.decode_one(bytes([opcode, 0]), 0).status, "unsupported")
 
     def test_external_branch_is_not_decoded_as_following_instruction(self):
         doc = {"regions": [{"name": "jump_out", "base": 0x3000, "code": "eb0590", "entries": [0]}]}
@@ -134,6 +248,54 @@ class AotCompileTests(unittest.TestCase):
         self.assertEqual(decoded[0]["mnemonic"], "unsupported_0x01_modrm_0x00")
         self.assertEqual(decoded[0]["status"], "unsupported")
         self.assertNotIn("case 0x00000002u", c)
+
+    def test_lea_address_forms_and_invalid_register_encoding(self):
+        for code, destination, address in (
+                ("8d44b320", 0, (0x20, 3, 6, 4)),
+                ("8d048500210000", 0, (0x2100, -1, 0, 4)),
+                ("8d6dfc", 5, (0xfffffffc, 5, -1, 1)),
+                ("8da42430000000", 4, (0x30, 4, -1, 1)),
+                ("8d1c2500000080", 3, (0x80000000, -1, -1, 1))):
+            with self.subTest(code=code):
+                inst = aot_compile.decode_one(bytes.fromhex(code), 0)
+                self.assertEqual(inst.mnemonic, "lea_r32")
+                self.assertEqual(inst.length, len(bytes.fromhex(code)))
+                self.assertEqual(inst.operands[0].value, destination)
+                operand = inst.operands[1]
+                self.assertEqual((operand.value, operand.base, operand.index, operand.scale), address)
+        # Invalid and prefixed forms must remain explicit unsupported exits.
+        for code in ("8dc0", "668d00", "678d00", "f08d00"):
+            self.assertEqual(aot_compile.decode_one(bytes.fromhex(code), 0).status, "unsupported")
+        for code in ("8d", "8d04", "8d0425", "8d80ffff"):
+            with self.subTest(code=code), self.assertRaises(aot_compile.AotError):
+                aot_compile.decode_one(bytes.fromhex(code), 0)
+
+    def test_mmx_transfer_forms_and_precise_unsupported_encodings(self):
+        for code, name, regs in (("0f77", "mmx_emms", []),
+                                 ("0f6fd5", "mmx_move", [2, 5]),
+                                 ("0f7fea", "mmx_move", [2, 5]),
+                                 ("0f6f44b320", "mmx_load64", [0]),
+                                 ("0f7f4c24fc", "mmx_store64", [1]),
+                                 ("0fe71d00200000", "mmx_store_nt64", [3])):
+            with self.subTest(code=code):
+                inst = aot_compile.decode_one(bytes.fromhex(code), 0)
+                self.assertEqual((inst.mnemonic, inst.length), (name, len(bytes.fromhex(code))))
+                self.assertEqual([op.value for op in inst.operands if op.kind == "mmx"], regs)
+                if name in ("mmx_load64", "mmx_store64", "mmx_store_nt64"):
+                    self.assertEqual(inst.operands[1].kind, "mem64")
+        for code in ("0fe7c0", "660f6fc0", "f30f7fc0", "f00f6f00", "670f6f00"):
+            self.assertEqual(aot_compile.decode_one(bytes.fromhex(code), 0).status, "unsupported")
+        for code in ("0f6f", "0f7f04", "0fe7051122"):
+            with self.subTest(code=code), self.assertRaises(aot_compile.AotError):
+                aot_compile.decode_one(bytes.fromhex(code), 0)
+
+    def test_prefetch_localities_and_unsupported_forms(self):
+        for locality in range(4):
+            inst = aot_compile.decode_one(bytes([0x0f, 0x18, 6 | (locality << 3)]), 0)
+            self.assertEqual(inst.mnemonic, "prefetch")
+            self.assertEqual(inst.operands[0].value, locality)
+        for code in ("0f18c0", "0f1820", "f00f1800", "670f1800"):
+            self.assertEqual(aot_compile.decode_one(bytes.fromhex(code), 0).status, "unsupported")
 
     def test_modrm_sib_memory_mov_forms_emit_exact_effective_addresses(self):
         cases = [

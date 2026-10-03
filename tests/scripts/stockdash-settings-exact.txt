@@ -1,0 +1,21 @@
+# Validated route for the corrected CPU's exact instruction deadlines.
+# Wait for the clock screen's input-ready animation before accepting it.
+# Captures precede each input transition; reached screens require image review.
+# Counted against guest USB endpoint2 reports, not host time.
+# 2026-10-03 floor/O2/O0: Settings interior at22.171B, return at24.488B.
+# Run27B. All ten same-clock images and all270 checkpoint rows agree.
+# count buttons a0 a1 a2 a3 a4 a5 a6 a7 lx ly rx ry [capture name]
+855 0000 0xff 0 0 0 0 0 0 0 0 0 0 0 capture clock-pre-a
++20 0000 0 0 0 0 0 0 0 0 0 0 0 0
++20 0000 0 0 0 0 0 0 0 0 0 0 0 0 capture clock-post-a
+1490 0000 0 0 0 0 0 0 0 0 0 0 0 0 capture dashboard-settled
+1635 0002 0 0 0 0 0 0 0 0 0 0 0 0 capture pre-down
++20 0000 0 0 0 0 0 0 0 0 0 0 0 0
++125 0002 0 0 0 0 0 0 0 0 0 0 0 0 capture live-selected
++20 0000 0 0 0 0 0 0 0 0 0 0 0 0
++125 0000 0xff 0 0 0 0 0 0 0 0 0 0 0 capture settings-selected
++20 0000 0 0 0 0 0 0 0 0 0 0 0 0
++250 0000 0 0 0 0 0 0 0 0 0 0 0 0 capture settings-open
++125 0000 0 0xff 0 0 0 0 0 0 0 0 0 0 capture pre-back
++20 0000 0 0 0 0 0 0 0 0 0 0 0 0
++250 0000 0 0 0 0 0 0 0 0 0 0 0 0 capture dashboard-return

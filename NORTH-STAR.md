@@ -50,6 +50,12 @@ cheapest regression detector, and hardware truth outranks any golden.
 
 ## The ONE next milestone
 
+Owner pivot, 2026-10-02: stand up the **faithful fully AOT dashboard at
+original-speed 60 FPS**, maximizing reuse of qualified host-GPU renderer code.
+The first native-required scope is post-boot animation/navigation including
+kernel execution; whole-boot AOT is separately measured. Blinx boot is the
+stretch goal. Follow the [primary dashboard goal](docs/GOAL-AOT-DASHBOARD.md).
+
 Execute the [AOT burndown plan](docs/PLAN-AOT-BURNDOWN-2026-09-06.md), tracked under
 `beads-xbox.1.25`. AOT-1 through AOT-4 are validated and integrated. The next stage,
 `beads-xbox.1.25.5`, is **improve generated-code efficiency and grow useful native

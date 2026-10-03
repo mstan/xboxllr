@@ -22,10 +22,10 @@
 //    adds UC_HOOK_CODE but still passes count=0 and timeout=0. Its hook owns the
 //    clock and budget; it is never used speculatively to bootstrap normal runs.
 //
-// Bootstrap. UC_HOOK_EDGE_GENERATED is only invoked when `uc->last_tb` is set
-// (cpu-exec.c:267), so the very first block ever executed is not reported. Its
-// charge is deferred until an edge reports its identity, or a precise restore
-// supplies it. Native handoff cannot bypass outstanding bootstrap debt.
+// The pinned build reports every new TB, including the first (null predecessor).
+// A block crossing a deadline is stopped before execution and resumed with
+// QEMU's instruction-count translation limit. Only this tail needs another
+// uc_emu_start; there is no first-block overshoot or deferred bootstrap charge.
 //
 // A0 note on fidelity (PRINCIPLES §6): on the instruction path UC_HOOK_CODE fires once per
 // instruction *before* execution. Its observer records dispatch; a subsequent
@@ -37,8 +37,12 @@
 
 #include <unicorn/unicorn.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
+#ifdef XLLE_CPU_BLOCK_CENSUS
+#include <random>
+#endif
 
 #include "machine/perf_accounting.hpp"
 #include "machine/perf_excl.hpp"
@@ -60,6 +64,13 @@ UnicornFloor::UnicornFloor() {
     block_pc_ring_ = std::make_unique<uint32_t[]>(kBlockPcRing);
 #ifdef XLLE_CPU_BLOCK_CENSUS
     census_ = std::make_unique<CensusRow[]>(kIcountSlots);
+    // Random identity is diagnostic metadata only; it never affects guest state.
+    // Rejecting cross-run snapshot subtraction needs more than matching counters.
+    std::random_device random;
+    char census_id[33];
+    for (unsigned i = 0; i < 4; ++i)
+        std::snprintf(census_id + 8 * i, 9, "%08x", static_cast<unsigned>(random()));
+    census_run_id_ = census_id;
 #endif
 
     // Per-translation-block entry hook. This is the canonical scheduling point: instruction
@@ -111,29 +122,34 @@ UnicornFloor::CensusRow* UnicornFloor::census_row(uint32_t pc, uint32_t size) {
     if (census_last_ && census_last_->pc == pc && census_last_->size == size)
         return census_last_;
     const size_t hash = (icount_hash(pc) ^ size) & (kIcountSlots - 1);
+    CensusRow* found = nullptr;
     for (size_t i = 0; i < kIcountProbes; ++i) {
         auto& row = census_[(hash + i) & (kIcountSlots - 1)];
         if (!row.size || (row.pc == pc && row.size == size)) {
-            if (!row.size) {
-                row.first_code.resize(size);
-                // Capture fetched bytes at first execution, before boot-only
-                // pages can be freed/reused. Read cached fetch mappings only.
-                for (size_t offset = 0; offset < size;) {
-                    const uint32_t at = pc + static_cast<uint32_t>(offset);
-                    const size_t part = std::min(size - offset, size_t(4096 - (at & 4095)));
-                    const auto* code = xlle_unicorn_aot_ram_ptr(uc_, at, part, 2);
-                    if (!code) { row.first_code.clear(); break; }
-                    std::memcpy(row.first_code.data() + offset, code, part);
-                    offset += part;
-                }
-            }
-            row.pc = pc; row.size = size;
-            census_last_ = &row;
-            return &row;
+            found = &row;
+            break;
         }
     }
-    ++census_overflow_;
-    return nullptr;
+    // Do not drop executed work when the fast table's probe window fills.
+    // unordered_map preserves references across rehashes, including census_last_.
+    if (!found) found = &census_spill_[(uint64_t(pc) << 32) | size];
+    auto& row = *found;
+    if (!row.size) {
+        row.pc = pc; row.size = size;
+        row.first_code.resize(size);
+        // Capture fetched bytes at first execution, before boot-only pages can
+        // be freed/reused. Read cached fetch mappings only, with no MMU effects.
+        for (size_t offset = 0; offset < size;) {
+            const uint32_t at = pc + static_cast<uint32_t>(offset);
+            const size_t part = std::min(size - offset, size_t(4096 - (at & 4095)));
+            const auto* code = xlle_unicorn_aot_ram_ptr(uc_, at, part, 2);
+            if (!code) { row.first_code.clear(); break; }
+            std::memcpy(row.first_code.data() + offset, code, part);
+            offset += part;
+        }
+    }
+    census_last_ = found;
+    return found;
 }
 void UnicornFloor::census_charge(uint32_t pc, uint32_t size, uint64_t insns, uint64_t entries) {
     if (auto* row = census_row(pc, size)) {
@@ -146,17 +162,24 @@ void UnicornFloor::census_charge(uint32_t pc, uint32_t size, uint64_t insns, uin
 bool UnicornFloor::write_block_census(const char* path) const {
 #ifdef XLLE_CPU_BLOCK_CENSUS
     if (!path || !census_ || insn_mode_) return false;
+    std::vector<const CensusRow*> rows;
+    for (size_t i = 0; i < kIcountSlots; ++i)
+        if (census_[i].size) rows.push_back(&census_[i]);
+    for (const auto& item : census_spill_) rows.push_back(&item.second);
+    std::sort(rows.begin(), rows.end(), [](const CensusRow* a, const CensusRow* b) {
+        return a->pc < b->pc || (a->pc == b->pc && a->size < b->size);
+    });
     auto* file = std::fopen(path, "wb");
     if (!file) return false;
     std::fprintf(file, "# schema=xboxlle.block-census.v1 total_insns=%llu fallback_insns=%llu "
-        "idle_skipped=%llu native_insns=%llu overflow=%llu\n",
+        "idle_skipped=%llu native_insns=%llu overflow=%llu run_id=%s\n",
         (unsigned long long)seq_, (unsigned long long)stats_.tb_insns,
         (unsigned long long)stats_.skipped_insns, (unsigned long long)aot_stats().retired,
-        (unsigned long long)census_overflow_);
+        (unsigned long long)census_overflow_, census_run_id_.c_str());
     std::fprintf(file, "pc,size,entries,charged_insns,unretired_insns\n");
-    for (size_t i = 0; i < kIcountSlots; ++i) {
-        const auto& row = census_[i];
-        if (row.size) std::fprintf(file, "0x%08x,%u,%llu,%llu,%llu\n", row.pc, row.size,
+    for (const auto* item : rows) {
+        const auto& row = *item;
+        std::fprintf(file, "0x%08x,%u,%llu,%llu,%llu\n", row.pc, row.size,
             (unsigned long long)row.entries, (unsigned long long)row.charged,
             (unsigned long long)row.unretired);
     }
@@ -170,9 +193,8 @@ bool UnicornFloor::write_block_census(const char* path) const {
     const uint8_t header[8] = {'X', 'L', 'L', 'E', 'B', 'C', '1', 0};
     std::fwrite(header, 1, sizeof(header), file);
     uint64_t captured = 0, missing = 0;
-    for (size_t i = 0; i < kIcountSlots; ++i) {
-        const auto& row = census_[i];
-        if (!row.size) continue;
+    for (const auto* item : rows) {
+        const auto& row = *item;
         if (row.first_code.size() != row.size) { ++missing; continue; }
         const uint32_t values[2] = {row.pc, row.size};
         for (const uint32_t value : values) {
@@ -195,6 +217,7 @@ bool UnicornFloor::write_block_census(const char* path) const {
 
 void UnicornFloor::icount_insert(uint32_t pc, uint16_t size, uint16_t icount) {
     if (icount == 0) return;  // cannot be represented; a real block has >= 1 instruction
+    icount_spill_.erase((uint64_t(pc) << 16) | size);
     const size_t h = icount_hash(pc);
     for (size_t i = 0; i < kIcountProbes; ++i) {
         IcountSlot& slot = icount_[(h + i) & (kIcountSlots - 1)];
@@ -211,9 +234,10 @@ void UnicornFloor::icount_insert(uint32_t pc, uint16_t size, uint16_t icount) {
             return;
         }
     }
-    // The probe window is full. Displace the first slot rather than lose the identity: a
-    // lookup miss at execution time is a hard stop, an eviction only costs a re-insert.
+    // QEMU can re-enter a cached TB without a generation callback. Displacing
+    // an identity must retain its exact count, not depend on a later re-insert.
     IcountSlot& slot = icount_[h];
+    icount_spill_[(uint64_t(slot.pc) << 16) | slot.size] = slot.icount;
     slot.pc = pc;
     slot.size = size;
     slot.icount = icount;
@@ -229,10 +253,11 @@ uint32_t UnicornFloor::icount_lookup(uint32_t pc, uint16_t size) const {
     const size_t h = icount_hash(pc);
     for (size_t i = 0; i < kIcountProbes; ++i) {
         const IcountSlot& slot = icount_[(h + i) & (kIcountSlots - 1)];
-        if (slot.icount == 0) return 0;
+        if (slot.icount == 0) break;
         if (slot.pc == pc && slot.size == size) return slot.icount;
     }
-    return 0;
+    const auto spilled = icount_spill_.find((uint64_t(pc) << 16) | size);
+    return spilled == icount_spill_.end() ? 0 : spilled->second;
 }
 
 void UnicornFloor::on_retired(RetiredCb cb) {
@@ -257,23 +282,6 @@ void UnicornFloor::set_insn_mode(bool on) {
         hook_code_ = from_hook(hc);
     }
     insn_mode_ = true;
-}
-
-// Charge the bootstrap block's executions as soon as its icount is known. The edge hook
-// reports it as `prev_tb` when the block after it is generated, so this normally settles at
-// the second block ever executed.
-void UnicornFloor::settle_bootstrap_block() {
-    if (!boot_pending_) return;
-    const uint32_t ic = icount_lookup(boot_pc_, boot_size_);
-    if (!ic) return;
-    const uint64_t charged = static_cast<uint64_t>(ic) * boot_pending_;
-    seq_ += charged;
-    stats_.tb_insns += charged;
-#ifdef XLLE_CPU_BLOCK_CENSUS
-    census_charge(boot_pc_, boot_size_, charged, boot_pending_);
-#endif
-    boot_pending_ = 0;
-    boot_settled_ = true;
 }
 
 bool UnicornFloor::map_mem(uint32_t addr, size_t size) {
@@ -395,6 +403,11 @@ static int xreg_to_uc(XReg r) {
         case XReg::SS: return UC_X86_REG_SS;
         case XReg::IDTR: return UC_X86_REG_IDTR;
         case XReg::DR7: return UC_X86_REG_DR7;
+        case XReg::FIP: return UC_X86_REG_FIP;
+        case XReg::FDP: return UC_X86_REG_FDP;
+        case XReg::FCS: return UC_X86_REG_FCS;
+        case XReg::FDS: return UC_X86_REG_FDS;
+        case XReg::FOP: return UC_X86_REG_FOP;
     }
     return -1;
 }
@@ -405,7 +418,8 @@ static size_t xreg_size(XReg r) {
         case XReg::XMM4: case XReg::XMM5: case XReg::XMM6: case XReg::XMM7: return 16;
         case XReg::ST0: case XReg::ST1: case XReg::ST2: case XReg::ST3:
         case XReg::ST4: case XReg::ST5: case XReg::ST6: case XReg::ST7: return 10;
-        case XReg::MM0: return 8;
+        case XReg::MM0: case XReg::FIP: case XReg::FDP: return 8;
+        case XReg::FCS: case XReg::FDS: case XReg::FOP: return 2;
         case XReg::FPCW: case XReg::FPSW: case XReg::FPTAG: return 2;
         case XReg::IDTR: return sizeof(uc_x86_mmr);
         default: return 4;
@@ -588,7 +602,46 @@ bool UnicornFloor::advance_instruction_clock(uint64_t insns) {
     return true;
 }
 
+bool UnicornFloor::idle_skip_context_ok(bool irq_shadow) {
+    return !insn_mode_ && !mem_cb_ && stop_reason_.empty() && !irq_pending_ &&
+           xlle_unicorn_idle_context_ok(uc_, irq_shadow);
+}
+
+bool UnicornFloor::read_cached_ram(uint32_t linear, void* data, size_t size, bool fetch) {
+    if (!uc_ || !data || !size || uint64_t(linear) + size > (uint64_t(1) << 32)) return false;
+    if (fetch && uint64_t(linear) + size - 1 > xlle_unicorn_aot_code_limit(uc_)) return false;
+    for (size_t offset = 0; offset < size;) {
+        const uint32_t at = linear + static_cast<uint32_t>(offset);
+        const size_t part = std::min(size - offset, size_t(4096 - (at & 4095)));
+        const auto* ptr = static_cast<const uint8_t*>(xlle_unicorn_aot_ram_ptr(
+            uc_, at, part, fetch ? XLLE_UNICORN_AOT_ACCESS_FETCH : XLLE_UNICORN_AOT_ACCESS_READ));
+        if (!ptr) return false;
+        bool owned = false;
+        for (const auto& mapping : host_ram_) {
+            const uintptr_t delta = reinterpret_cast<uintptr_t>(ptr) -
+                                    reinterpret_cast<uintptr_t>(mapping.host);
+            if (delta < mapping.size && part <= mapping.size - delta) { owned = true; break; }
+        }
+        if (!owned) return false;
+        std::memcpy(static_cast<uint8_t*>(data) + offset, ptr, part);
+        offset += part;
+    }
+    return true;
+}
+
 uint64_t UnicornFloor::run_unicorn(uint32_t start_eip, uint64_t max_insns, std::string& err) {
+    if (!max_insns) return 0;
+    if (native_required_ && stop_reason_.empty()) {
+        const char* reason = insn_mode_ || mem_cb_ ? "diagnostic-observer" :
+            aot_ ? aot_->decline_reason() : "no-native-regions";
+        char message[256];
+        std::snprintf(message, sizeof(message),
+            "native-required fallback refused: pc=0x%08x clock=%llu reason=%s",
+            start_eip, static_cast<unsigned long long>(seq_), reason);
+        request_stop(message);
+        err = message;
+        return 0;
+    }
     uc_engine* uc = reinterpret_cast<uc_engine*>(uc_);
     const uint64_t before = seq_;
     // request_stop() is also used by servicing callbacks between CPU chunks. In that
@@ -605,6 +658,7 @@ uint64_t UnicornFloor::run_unicorn(uint32_t start_eip, uint64_t max_insns, std::
         return 0;
     }
     stop_reason_.clear();
+    if (aot_dispatching_) ++aot_->stats.fallback_runs;
     last_fault_addr_ = 0;
     last_fault_type_ = 0;
     irq_window_stop_ = false;
@@ -615,9 +669,9 @@ uint64_t UnicornFloor::run_unicorn(uint32_t start_eip, uint64_t max_insns, std::
     xlle_guest_tsc_prefix = 0;
     xlle_guest_tsc_ticks = seq_;
     run_deadline_ = seq_ + max_insns;
-    tbs_this_run_ = 0;
     uc_err e;
-    {
+    do {
+        deadline_tail_ = 0;
         // TCG_EXEC: the SELF time of this region is translated code, Unicorn's internals
         // and the block (or, on the instruction path, UC_HOOK_CODE) trampoline. Everything
         // the guest reaches synchronously from inside uc_emu_start -- MMIO, I/O ports, IDT
@@ -641,18 +695,15 @@ uint64_t UnicornFloor::run_unicorn(uint32_t start_eip, uint64_t max_insns, std::
         } else {
             e = uc_emu_start(uc, start_eip, 0, /*timeout=*/0, /*count=*/0);
         }
-    }
+        if (e != UC_ERR_OK || !stop_reason_.empty() || !deadline_tail_) break;
+        if (!xlle_unicorn_limit_next_tb(uc_, deadline_tail_)) {
+            request_stop("CPU: cannot bound translated tail at instruction deadline");
+            break;
+        }
+        ++stats_.deadline_splits;
+        start_eip = get_regs().eip;
+    } while (true);
     xlle_unicorn_set_restore_callback(uc_, nullptr, nullptr);
-    settle_bootstrap_block();
-    if (boot_pending_ > kBootstrapPendingMax && stop_reason_.empty()) {
-        char b[192];
-        std::snprintf(b, sizeof(b),
-                      "bootstrap block 0x%08x size=%u executed %llu times without its icount "
-                      "ever being reported \u2014 the instruction clock is behind by that much",
-                      boot_pc_, static_cast<unsigned>(boot_size_),
-                      static_cast<unsigned long long>(boot_pending_));
-        stop_reason_ = b;
-    }
     if (!stop_reason_.empty()) {
         // A device/servicing callback requested a loud stop; its reason wins over Unicorn's
         // generic "stopped" code.
@@ -687,11 +738,6 @@ void UnicornFloor::restore_clock(void* opaque, const xlle_unicorn_restore_record
     if (!self->restore_charge_active_ || r->completed >= r->total || !self->stats_.tb_entries ||
         self->block_pc_ring_[(self->stats_.tb_entries - 1) & (kBlockPcRing - 1)] != r->pc) return;
     self->restore_charge_active_ = false;
-    if (self->boot_pending_ && self->boot_pc_ == r->pc) {
-        self->icount_insert(static_cast<uint32_t>(r->pc), static_cast<uint16_t>(r->size),
-                            static_cast<uint16_t>(r->total));
-        self->settle_bootstrap_block();
-    }
     const uint64_t unretired = self->insn_mode_ ? 1 : r->total - r->completed;
     if (self->seq_ < unretired) {
         self->request_stop("Unicorn restore exceeds charged instruction clock");
@@ -743,9 +789,8 @@ void UnicornFloor::edge_trampoline(uc_struct*, void* cur_tb, void* prev_tb, void
     auto* self = static_cast<UnicornFloor*>(user);
     const uc_tb* cur = static_cast<const uc_tb*>(cur_tb);
     self->icount_insert(static_cast<uint32_t>(cur->pc), cur->size, cur->icount);
-    // prev_tb is how the FIRST block ever executed gets into the table: the edge hook is not
-    // called for it (uc->last_tb was still NULL), but it is uc->last_tb when the block after
-    // it is generated, and Unicorn hands it over here.
+    // The pinned build reports the first TB with a null predecessor. Refresh a
+    // predecessor when present as well (including a regenerated identity).
     if (prev_tb) {
         const uc_tb* prev = static_cast<const uc_tb*>(prev_tb);
         self->icount_insert(static_cast<uint32_t>(prev->pc), prev->size, prev->icount);
@@ -765,7 +810,6 @@ void UnicornFloor::block_trampoline(uc_struct* uc, uint64_t addr, uint32_t size,
     self->block_pc_ring_[self->stats_.tb_entries & (kBlockPcRing - 1)] = pc;
     self->stats_.tb_entries++;
     if (self->insn_mode_) return;  // the per-instruction hook owns the clock on that path
-    if (self->boot_pending_) self->settle_bootstrap_block();
 
     // A device or host callback already asked for a loud stop. With exactly one block hook
     // installed Unicorn inlines the call (uc_add_inline_hook, tcg.c:666) and therefore skips
@@ -776,10 +820,10 @@ void UnicornFloor::block_trampoline(uc_struct* uc, uint64_t addr, uint32_t size,
     // AOT dispatch happens outside uc_emu_start, before this TB is charged.
     // A declined entry gets one fallback block to make forward progress. A cold
     // MMU entry is thus populated by real execution, including permission/A-D
-    // handling. Never interrupt bootstrap debt before the clock is settled.
+    // handling. All blocks, including the first, have a known count at entry.
     if (self->aot_dispatching_) {
         if (self->aot_bypass_entry_) self->aot_bypass_entry_ = false;
-        else if (!self->boot_pending_ && self->seq_ > self->aot_fallback_start_ &&
+        else if (self->seq_ > self->aot_fallback_start_ &&
                  self->seq_ < self->run_deadline_ &&
                  self->aot_->contains(pc)) {
             self->aot_handoff_ = true;
@@ -795,22 +839,6 @@ void UnicornFloor::block_trampoline(uc_struct* uc, uint64_t addr, uint32_t size,
     } else {
         icount = self->icount_lookup(pc, sz);
         if (icount == 0) {
-            // The first block ever executed is the one identity the edge hook cannot report
-            // in advance. Run it uncharged and repay the moment its icount arrives.
-            if (!self->boot_claimed_) {
-                self->boot_claimed_ = true;
-                self->boot_pc_ = pc;
-                self->boot_size_ = sz;
-            }
-            if (!self->boot_settled_ && pc == self->boot_pc_ && sz == self->boot_size_ &&
-                self->boot_pending_ <= kBootstrapPendingMax) {
-                self->boot_pending_++;
-                self->stats_.bootstrap_blocks++;
-                self->tbs_this_run_++;
-                self->restore_charge_active_ = true;
-                xlle_guest_tsc_ticks = self->seq_;
-                return;
-            }
             // Cannot advance the clock exactly. Stop loudly rather than guess: an approximate
             // instruction count would silently move every device deadline (PRINCIPLES §3).
             self->stats_.icount_misses++;
@@ -830,12 +858,13 @@ void UnicornFloor::block_trampoline(uc_struct* uc, uint64_t addr, uint32_t size,
         self->last_icount_ = static_cast<uint16_t>(icount);
     }
 
-    // Slice / device deadline: stop BEFORE the block that would cross it, so the retired
-    // count never runs past a deadline the machine has not serviced yet. The first block of
-    // a slice is exempt, so a block longer than the remaining budget makes progress instead
-    // of deadlocking; the overshoot is bounded by one block (<= 512 instructions).
-    if (self->tbs_this_run_ != 0 && self->seq_ + icount > self->run_deadline_) {
+    // Stop BEFORE a block that would cross the deadline, including the first.
+    // run_unicorn resumes the remaining prefix using QEMU's bounded translation;
+    // those instructions actually execute and get charged by this same hook.
+    if (self->seq_ + icount > self->run_deadline_) {
         self->stats_.deadline_stops++;
+        self->deadline_tail_ = self->seq_ < self->run_deadline_
+            ? static_cast<uint32_t>(self->run_deadline_ - self->seq_) : 0;
         uc_emu_stop(engine);
         return;
     }
@@ -862,7 +891,6 @@ void UnicornFloor::block_trampoline(uc_struct* uc, uint64_t addr, uint32_t size,
     // translated TSC read/write adds its exact instruction index (unicorn_metrics.c).
     // Publishing the entry count avoids exposing the precharged block suffix.
     xlle_guest_tsc_ticks = self->seq_;
-    self->tbs_this_run_++;
     self->seq_ += icount;
     self->stats_.tb_insns += icount;
 #ifdef XLLE_CPU_BLOCK_CENSUS
