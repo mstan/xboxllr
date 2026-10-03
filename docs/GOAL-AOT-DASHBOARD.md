@@ -108,9 +108,13 @@ software renderer's arithmetic operation by operation. Our current pixels are
 regression evidence, not hardware truth. A GPU implementation can also preserve
 LLE semantics; the classification does not itself determine speed or fidelity.
 
-xemu's renderer, shader translation and surface/texture code are the primary
-donor at the NV2A boundary. sp00nznet's D3D/NV2A components and native runtime
-are candidates at matching service boundaries. The no-stubs rule excludes their
+xemu's renderer, shader translation and surface/texture code are the current
+NV2A donor. All three linked xboxrecomp repositories remain active candidates:
+**sp00nznet, NoRain211 and phobos665**, including relevant title runtimes such as
+NoRain211's DOAXBV implementation. Check their distinct changes at each relevant
+performance spike, record the useful ideas and reuse decision, and revisit as
+upstream or measured costs change. HLE/native services and substantial backend
+reuse are eligible at compatible boundaries. The no-stubs rule excludes their
 unimplemented behavior, not their whole codebase. Replace shim dependencies with
 real services. Kernel HLE is now explicitly eligible when its LLE counterpart
 and observable contract exist. No title-specific captured-frame replay.
@@ -119,7 +123,8 @@ Reuse can include substantial backend code when its real dependencies are wired
 and behavior passes qualification. Preserve upstream licenses and provenance.
 The existing combined-executable distribution restriction remains tracked in
 `beads-xbox.1.21`; it does not prevent local qualification work.
-See [renderer reuse assessment](RENDERER-REUSE-2026-10-02.md).
+See the [refreshed all-donor assessment](RENDERER-REUSE-2026-10-02.md), including
+fork-specific code, fresh compiler tests and limits of each candidate.
 
 ## Fast-win delivery order
 
@@ -203,6 +208,8 @@ donor admission currently permits only two raw linear formats. Qualify this
 decoded-texture boundary and measure any useful coverage gain; the first rejection
 does not establish the format of all declines or their share of execution time.
 Pair that experiment with CPU/GPU/resolve attribution of the steady window.
+Compare sp00nznet's content-checked DXT cache, NoRain's DOAXBV compressed uploads
+and phobos's resource/submission code as those measured costs warrant.
 Do not equate more donor draws with less frame time.
 
 ## Product burndown

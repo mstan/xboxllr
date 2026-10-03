@@ -2,6 +2,14 @@
 
 Date: 2026-09-06. Tracking: `beads-xbox.1.27`.
 
+**Historical audit:** the source and 2/2 test results below apply to `df63e09`,
+not the current release. The 2026-10-03 source refresh inspected `aa1d3c8`:
+renderer/presentation and native services have expanded, and the donor now reports
+playable 60 FPS sessions with private inputs. We have not reproduced those sessions.
+The current policy explicitly allows compatible enhanced/HLE replacements and
+requires continued assessment of all three xboxrecomp donors. See the
+[updated findings and reuse candidates](RENDERER-REUSE-2026-10-02.md).
+
 **Recommendation:** continue our portable AOT implementation. Adopt the useful
 runtime boundaries and validation lessons below. Evaluate the upstream lifter
 before broadening our bootstrap decoder substantially. The DOAXBV runtime is not

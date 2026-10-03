@@ -3,6 +3,30 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-10-03 - All three xboxrecomp donors refreshed for menu performance
+
+The owner requires continued assessment and useful borrowing from sp00nznet,
+NoRain211 and phobos665, including relevant title runtimes. Earlier assessment
+named all three but had uneven depth. Remote HEAD checks retain sp00nznet
+`1409a7d` and NoRain211 `7adaf21`; phobos advanced to `f01b20d`. The associated
+DOAXBV runtime advanced to `aa1d3c8` from our September audit. New detached
+worktrees preserve both older reviews.
+
+Concrete candidates now include sp00nznet's content-checked DXT decode cache;
+phobos's Vulkan state tracking, RHI/resource code and disk shader cache;
+NoRain's carry/jump-table compiler fixes; and DOAXBV's compressed uploads,
+buffer rings and presentation worker. Their specific coherence/completion and
+ownership limitations are recorded alongside the useful code. Stubbed portions
+do not disqualify an entire donor. The DOAXBV donor now reports playable 60 FPS
+sessions; we have not reproduced those private-input runs.
+
+Fresh selected donor tests pass: NoRain **12 tests plus 4 subtests**; phobos
+**14 flag-join/backedge tests plus 1 incremental-write test**. These are compiler
+and tooling checks. No donor backend/game benchmark or new runtime integration
+is claimed. Dashboard 60 FPS remains the active gate before Blinx. See the
+[all-donor assessment](docs/RENDERER-REUSE-2026-10-02.md), tracked in
+`beads-xbox.1.41`; the recurring workflow is also in NORTH-STAR and the gameplan.
+
 ## 2026-10-03 - Sustained 60 FPS menu is the gate before Blinx
 
 The owner's latest direction supersedes the earlier Blinx-next order. Active

@@ -18,6 +18,12 @@ of the repository and retaining our own implementation are not objectives.
 Substantial donor reuse or a different foundation is allowed when evidence
 shows it gets to this outcome with less work.
 
+Continuously assess useful changes in all three linked xboxrecomp repositories:
+sp00nznet, NoRain211 and phobos665, plus relevant title runtimes. Each relevant
+performance spike records what can be borrowed or adapted from them. A stubbed
+portion excludes that behavior, not the donor's useful implementations elsewhere.
+See the [all-donor assessment](docs/RENDERER-REUSE-2026-10-02.md).
+
 ## Current goal
 
 Reach sustained 60 FPS at original guest speed in the animated stock dashboard
