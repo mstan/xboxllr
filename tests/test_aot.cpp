@@ -507,15 +507,15 @@ static void fallback_round_trip() {
     const auto initial = s;
     const auto original_memory = m.bytes;
     require(region.run(&region, &s, &m.bus, 100) == XLLE_AOT_UNSUPPORTED,
-            "unsupported NEG returns to fallback");
+            "unsupported NEG AL returns to fallback");
     require(s.retired == 1 && s.eip == 0x1005, "one native instruction precedes fallback");
     auto native_retired = s.retired;
     auto fallback = oracle(region, s, 1, m.bytes);
     s = fallback;
     s.retired = native_retired + fallback.retired;
     require(region.run(&region, &s, &m.bus, 100) == XLLE_AOT_COMPLETE,
-            "explicit entry resumes native after NEG");
-    require(s.retired == 3 && s.gpr[0] == 0xfefdfcfdu, "native fallback native result");
+            "explicit entry resumes native after NEG AL");
+    require(s.retired == 3 && s.gpr[0] == 0x010203fdu, "native fallback native result");
     auto expected = oracle(region, initial, 3, original_memory);
     equal_state(s, expected, 0xffffffffu, "fallback round trip");
 }

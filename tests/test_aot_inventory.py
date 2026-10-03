@@ -64,7 +64,7 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(result["gaps"][0]["reason"], "unresolved-indirect-call")
 
     def test_discovery_continues_past_unsupported_lowering_without_claiming_support(self):
-        data = xbe(bytes.fromhex("f7d840c3"))
+        data = xbe(bytes.fromhex("f6d840c3"))  # NEG AL remains unsupported.
         result = inventory.discover(data, inventory.parse_xbe(data))
         self.assertEqual([i["lowering_supported"] for i in result["instructions"]], [False, True, True])
 

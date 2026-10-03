@@ -18,7 +18,7 @@ struct Memory {
     std::vector<uint8_t> bytes=std::vector<uint8_t>(0x4000);
     std::vector<Access> accesses;
     xlle_aot_bus bus{};
-    bool reject=false, event_after_write=false;
+    bool reject=false, event_after_write=false, event_after_read=false, code_after_read=false;
     explicit Memory(const xlle_aot_region& r) {
         std::copy(r.code,r.code+r.code_size,bytes.begin());
         bus.context=XLLE_AOT_CONTEXT_FLAT32_RAM;bus.code_base=r.base;
@@ -33,7 +33,10 @@ struct Memory {
         if(!m.range(address,size))return 0;
         uint32_t result=0;
         for(unsigned i=0;i<size;++i)result|=uint32_t(m.bytes[address-0x1000+i])<<(8*i);
-        *value=result;m.accesses.push_back({address,size,false});return 1;
+        *value=result;m.accesses.push_back({address,size,false});
+        if(m.event_after_read)m.bus.event_pending=1;
+        if(m.code_after_read)m.bytes[0]^=1;
+        return 1;
     }
     static int narrow(void* p,uint32_t a,unsigned n,uint32_t* v) {
         return (n==1||n==2)&&read(p,a,n,v);
@@ -72,6 +75,132 @@ static xlle_aot_state seed(const xlle_aot_region& r,uint32_t flags=0x8d7) {
     xlle_aot_state s{};s.eip=r.base;s.eflags=flags;
     for(unsigned i=0;i<8;++i)s.gpr[i]=0x81234567+0x1020304u*i;
     return s;
+}
+static uint32_t arithmetic_expected(unsigned operation,uint32_t left,uint32_t right,uint32_t& flags) {
+    uint32_t result=0,bits=0;
+    const bool subtract=operation==1||operation==5||operation==6;
+    if(operation==0||subtract) {
+        const int64_t a=int64_t(left)-(left>>31?INT64_C(4294967296):0);
+        const int64_t b=int64_t(right)-(right>>31?INT64_C(4294967296):0);
+        const int64_t signed_result=subtract?a-b:a+b;
+        const int64_t unsigned_result=subtract?int64_t(left)-right:int64_t(left)+right;
+        result=uint32_t(unsigned_result);
+        if(unsigned_result<0||unsigned_result>UINT32_MAX)bits|=1;
+        if(signed_result<INT64_C(-2147483648)||signed_result>INT64_C(2147483647))bits|=0x800;
+        if(subtract?(left&15)<(right&15):(left&15)+(right&15)>15)bits|=0x10;
+    } else {
+        result=operation==2?left^right:operation==4?left|right:left&right;
+        // Logical AF is undefined architecturally. The existing native policy
+        // preserves it; differential checks must exclude this one flag.
+    }
+    unsigned ones=0;for(unsigned i=0;i<8;++i)ones+=(result>>i)&1u;
+    if(!(ones&1))bits|=4;
+    if(!result)bits|=0x40;
+    if(result>>31)bits|=0x80;
+    flags=(flags&~(operation==0||subtract?0x8d5u:0x8c5u))|bits;
+    return result;
+}
+static void put_word(Memory& m,uint32_t address,uint32_t value) {
+    check(m.range(address,4),"authored word address");
+    for(unsigned i=0;i<4;++i)m.bytes[address-0x1000+i]=uint8_t(value>>(8*i));
+}
+static void unary_integer() {
+    const uint32_t values[]={0,1,2,0xf,0x10,0x11,0x7fffffff,0x80000000,0x80000001,
+                             0xffffffff,0xfffffff0,0x12345678};
+    for(const auto& c:unary_cases)for(auto value:values)for(auto flags:{2u,0x8d7u,0x843u}) {
+        Memory m(*c.r);auto initial=seed(*c.r,flags);initial.gpr[c.reg]=value;
+        auto actual=initial,expected=initial;
+        expected.gpr[c.reg]=c.operation==0?arithmetic_expected(1,0,value,expected.eflags):~value;
+        expected.eip+=2;
+        check(c.r->run(c.r,&actual,&m.bus,1)==XLLE_AOT_COMPLETE,"unary exact completion");
+        equal(actual,expected,0xffffffffu,"unary independent arithmetic and flags");
+        equal(actual,oracle(initial,1,m),0xffffffffu,"unary floor comparison");
+        check(actual.retired==1&&m.accesses.empty(),"unary exact retirement and no memory");
+    }
+}
+static void read_integer() {
+    const uint32_t values[]={0,1,15,16,0x7fffffff,0x80000000,0xffffffff,0x81234567};
+    for(const auto& c:alu_read_cases) {
+        Memory m(*c.r);
+        for(auto left:values)for(auto right:values)for(auto flags:{2u,0x8d7u}) {
+            auto initial=seed(*c.r,flags);initial.gpr[c.reg]=left;
+            uint32_t address=0x2800;
+            if(c.form<8)initial.gpr[c.form]=address;
+            if(c.form==9){initial.gpr[3]=0x2800;initial.gpr[6]=3;address=0x2808;}
+            put_word(m,address,right);m.accesses.clear();
+            auto actual=initial,expected=initial;
+            const auto result=arithmetic_expected(c.operation,
+                c.operation==6?right:initial.gpr[c.reg],
+                c.operation==6?initial.gpr[c.reg]:right,expected.eflags);
+            if(c.operation<5)expected.gpr[c.reg]=result;
+            expected.eip+=uint32_t(c.r->code_size);
+            check(c.r->run(c.r,&actual,&m.bus,1)==XLLE_AOT_COMPLETE,"read ALU completes");
+            if(actual.eflags!=expected.eflags)
+                std::fprintf(stderr,"read ALU op=%u reg=%u form=%u left=%08x right=%08x flags=%08x\n",
+                             c.operation,c.reg,c.form,initial.gpr[c.reg],right,flags);
+            equal(actual,expected,0xffffffffu,"read ALU independent arithmetic/flags/address aliases");
+            check(actual.retired==1&&m.accesses==std::vector<Access>{{address,4,false}},
+                  "read ALU exact single read and retirement");
+            if(left==0x7fffffff&&right==0x80000000&&flags==0x8d7) {
+                std::vector<Access> access;std::vector<uint8_t> bytes;
+                const uint32_t defined=c.operation==2||c.operation==3||c.operation==4||c.operation==7
+                    ?~0x10u:0xffffffffu;
+                equal(actual,oracle(initial,1,m,&bytes,&access),defined,"read ALU floor");
+                check(access==m.accesses&&bytes==m.bytes,"read ALU floor memory effects");
+                m.reject=true;m.accesses.clear();actual=initial;
+                check(c.r->run(c.r,&actual,&m.bus,1)==XLLE_AOT_MEMORY,"read ALU refusal");
+                equal(actual,initial,0xffffffffu,"refused ALU keeps registers and flags");
+                check(actual.retired==0&&m.accesses.empty(),"refused ALU has no effects");
+                m.reject=false;
+            }
+        }
+    }
+    for(const auto& c:alu_immediate_cases)for(auto value:values)for(auto flags:{2u,0x8d7u}) {
+        Memory m(*c.r);auto initial=seed(*c.r,flags);initial.gpr[3]=0x2800;initial.gpr[6]=3;
+        put_word(m,0x2808,value);auto expected=initial,actual=initial;
+        arithmetic_expected(c.operation,value,c.immediate,expected.eflags);
+        expected.eip+=uint32_t(c.r->code_size);
+        check(c.r->run(c.r,&actual,&m.bus,1)==XLLE_AOT_COMPLETE,"immediate read comparison");
+        equal(actual,expected,0xffffffffu,"immediate sign extension and operand order");
+        equal(actual,oracle(initial,1,m),c.operation==7?~0x10u:0xffffffffu,"immediate compare/test floor");
+        check(actual.retired==1&&m.accesses==std::vector<Access>{{0x2808,4,false}},"immediate read effects");
+    }
+}
+static void epilogue_and_read_exits() {
+    const auto& leave=xlle_aot_leave32;
+    for(auto frame:{0x2000u,0x2001u,0x2ffcu,0x2fffu})for(auto value:{0u,0x12345678u,0xffffffffu}) {
+        Memory m(leave);auto initial=seed(leave,0x8d7);initial.gpr[4]=0x4800;initial.gpr[5]=frame;
+        put_word(m,frame,value);auto expected=initial,actual=initial;
+        expected.gpr[4]=frame+4;expected.gpr[5]=value;expected.eip++;
+        check(leave.run(&leave,&actual,&m.bus,1)==XLLE_AOT_COMPLETE,"LEAVE completes");
+        equal(actual,expected,0xffffffffu,"LEAVE preserves flags and uses old EBP");
+        equal(actual,oracle(initial,1,m),0xffffffffu,"LEAVE floor");
+        check(actual.retired==1&&m.accesses==std::vector<Access>{{frame,4,false}},"LEAVE stack access");
+        m.reject=true;m.accesses.clear();actual=initial;
+        check(leave.run(&leave,&actual,&m.bus,1)==XLLE_AOT_MEMORY,"LEAVE declined stack read");
+        equal(actual,initial,0xffffffffu,"LEAVE does not move ESP before certification");
+        check(actual.retired==0&&m.accesses.empty(),"LEAVE refusal has no effects");
+    }
+    for(const auto* r:{&xlle_aot_read_then_nop,&xlle_aot_leave_then_nop})for(unsigned mode=0;mode<4;++mode) {
+        Memory m(*r);auto initial=seed(*r,0x8d7);initial.gpr[6]=initial.gpr[5]=0x2800;
+        initial.gpr[4]=0x4800;put_word(m,0x2800,0x12345678);
+        auto actual=initial,expected=initial;
+        if(mode==0)m.bus.event_pending=1;
+        if(mode==2)m.event_after_read=true;
+        if(mode==3)m.code_after_read=true;
+        const auto result=r->run(r,&actual,&m.bus,mode==1?0:2);
+        if(mode>=2) {
+            expected.eip+=r==&xlle_aot_read_then_nop?2:1;
+            if(r==&xlle_aot_read_then_nop)
+                expected.gpr[0]=arithmetic_expected(0,initial.gpr[0],0x12345678,expected.eflags);
+            else {expected.gpr[4]=0x2804;expected.gpr[5]=0x12345678;}
+        }
+        const auto exit=mode==1?XLLE_AOT_BUDGET:mode==3?XLLE_AOT_CODE_CHANGED:XLLE_AOT_EVENT;
+        check(result==exit,"read boundary explicit exit");
+        equal(actual,expected,0xffffffffu,"read boundary exact visible state");
+        check(actual.retired==(mode>=2?1u:0u)&&m.accesses.size()==(mode>=2?1u:0u),
+              "read boundary commits only the completed instruction");
+    }
 }
 static void shifts() {
     const uint32_t patterns[]={0,1,0x80000000,0xffffffff,0x12345678,0xa5a55a5a};
@@ -335,5 +464,121 @@ static void page_widths() {
     }
 }
 
+static void memory_integer_machine() {
+    XboxMachine native,reference;
+    for(auto* m:{&native,&reference}) {
+        prepare(*m,xlle_aot_alu_read_cycle);
+        auto initial=m->cpu().get_regs();initial.esi=0x2200;initial.eax=0x7fffffff;
+        initial.ecx=0x87654321;initial.eflags=0x00203cd7;m->cpu().set_regs(initial);
+        uint32_t value=0x80000001;check(m->cpu().write_mem(0x2200,&value,4),"ALU machine operand");
+        run(*m,29); // bootstrap and two complete fourteen-instruction cycles
+    }
+    check(native.register_aot_region(xlle_aot_alu_read_cycle),"ALU cycle registration");
+    const auto before=native.aot_stats();const auto blocks=floor(native).block_stats();
+    floor(native).require_native_execution(true);
+    uint32_t defined=0xffffffffu;
+    for(unsigned i=0;i<140;++i) {
+        const uint32_t offset=reference.cpu().get_regs().eip-xlle_aot_alu_read_cycle.base;
+        // Undefined AF remains unqualified through flag-preserving operations;
+        // arithmetic/comparison defines it again. All other bits always agree.
+        if(offset==4||offset==6||offset==8||offset==14||offset==25)defined&=~0x10u;
+        else if(offset!=33&&offset!=35)defined=0xffffffffu;
+        run(native,1);run(reference,1);
+        equal(state(native.cpu().get_regs()),state(reference.cpu().get_regs()),defined,
+              "strict ALU machine boundary equals floor");
+    }
+    const auto after=native.aot_stats();const auto end=floor(native).block_stats();
+    check(after.retired-before.retired==140&&after.memory_reads-before.memory_reads==110,
+          "strict ALU scope includes every executed instruction and read");
+    check(after.fallback_insns==before.fallback_insns&&after.fallback_runs==before.fallback_runs&&
+          end.tb_entries==blocks.tb_entries&&end.insn_mode_runs==blocks.insn_mode_runs&&
+          end.block_mode_runs==blocks.block_mode_runs,"strict ALU has no hidden guest execution");
+}
+static void memory_integer_pages() {
+    struct Case {uint32_t address,second;bool cold,readonly,success;};
+    const Case cases[]={{0x2ffc,0,false,false,true},{0x2ffc,0,false,true,true},
+        {0x2ffd,0,false,false,false},{0x2ffd,0x23000,false,false,true},
+        {0x2ffd,0x26000,false,false,false},{0x2ffc,0,true,false,false}};
+    for(bool leave:{false,true})for(const auto& c:cases) {
+        const auto& r=leave?xlle_aot_leave_cycle:xlle_aot_read_cmp_loop;
+        const auto configure=[&](XboxMachine& m) {
+            prepare(m,r);paged(m,r,c.second);
+            if(c.readonly) {
+                uint32_t pte=0x22001;check(m.cpu().write_mem(0x18008,&pte,4),"read-only data PTE");
+            }
+            const uint8_t lo[]={0x11,0x22,0x33,0x44},hi=0x55;
+            check(m.cpu().write_mem(0x22ffc,lo,4),"ALU page-end operand");
+            if(c.second)check(m.cpu().write_mem(c.second,&hi,1),"ALU split operand");
+            auto s=m.cpu().get_regs();s.eip=r.base+(leave?1:2);s.esi=s.ebp=0x2ffc;m.cpu().set_regs(s);
+            run(m,1); // warm code through its real JMP; data remains cold
+            if(!c.cold) {
+                s=m.cpu().get_regs();s.esi=s.ebp=c.second?0x2ffd:0x2ffc;m.cpu().set_regs(s);run(m,2);
+            }
+            s=m.cpu().get_regs();s.eip=r.base;s.esi=s.ebp=c.address;s.esp=0x9000;s.eax=0x12345678;s.eflags=0xed7;
+            m.cpu().set_regs(s);
+        };
+        XboxMachine m;configure(m);const auto initial=m.cpu().get_regs();
+        check(m.register_aot_region(r),"paged ALU registration");floor(m).require_native_execution(true);
+        const auto before=m.aot_stats();const auto blocks=floor(m).block_stats();
+        uint32_t ptes[2];check(m.cpu().read_mem(0x18008,ptes,8),"ALU PTEs before");
+        std::string error;const auto n=m.run(initial.eip,1,error);
+        check(n==(c.success?1u:0u),"paged ALU retirement");
+        auto expected=state(initial);
+        const auto completed=[&](uint32_t value) {
+            if(leave){expected.gpr[4]=c.address+4;expected.gpr[5]=value;}
+            else arithmetic_expected(5,initial.eax,value,expected.eflags);
+            expected.eip+=leave?1:2;
+        };
+        if(c.success) {
+            completed(c.address==0x2ffc?0x44332211:0x55443322);
+            check(error.empty(),error.c_str());
+        } else check(error.find("native-required fallback refused")!=std::string::npos,"paged ALU loud decline");
+        equal(state(m.cpu().get_regs()),expected,0xffffffffu,"paged ALU precise state");
+        const auto after=m.aot_stats();const auto end=floor(m).block_stats();
+        check(after.retired-before.retired==n&&after.memory_reads-before.memory_reads==n,
+              "paged ALU counts only completed reads");
+        check(after.fallback_insns==before.fallback_insns&&after.fallback_runs==before.fallback_runs&&
+              end.tb_entries==blocks.tb_entries&&end.insn_mode_runs==blocks.insn_mode_runs&&
+              end.block_mode_runs==blocks.block_mode_runs,"paged ALU has no hidden execution");
+        uint32_t ptes_after[2];check(m.cpu().read_mem(0x18008,ptes_after,8),"ALU PTEs after");
+        check(std::equal(ptes,ptes+2,ptes_after),"ALU certification never walks page tables");
+        if(!c.success) {
+            XboxMachine reference;configure(reference);error.clear();
+            const auto count=reference.run(initial.eip,1,error);
+            if(c.second||c.cold) {
+                check(count==1&&error.empty(),"declined cold/noncontiguous read is real floor work");
+                completed(c.second?0x55443322:0x44332211);
+            } else check(count==0&&error.find("exception vector 14")!=std::string::npos,
+                         "missing operand page produces a precise floor fault");
+            equal(state(reference.cpu().get_regs()),expected,0xffffffffu,"floor after strict read refusal");
+        }
+    }
+}
+static void leave_high_stack() {
+    XboxMachine native,reference;const auto& r=xlle_aot_leave_cycle;
+    for(auto* m:{&native,&reference}) {
+        prepare(*m,r);paged(*m,r,0);
+        uint32_t pde=0x1a003,pte=0x23003;
+        check(m->cpu().write_mem(0x19000+1023*4,&pde,4)&&
+              m->cpu().write_mem(0x1a000+1023*4,&pte,4),"high stack translation");
+        const uint32_t saved=0x1234dead;check(m->cpu().write_mem(0x23ffc,&saved,4),"high saved frame");
+        auto s=m->cpu().get_regs();s.eip=r.base;s.ebp=0xfffffffc;s.esp=0x9000;
+        m->cpu().set_regs(s);run(*m,2); // LEAVE/JMP warm both real translations
+        s=m->cpu().get_regs();s.eip=r.base;s.ebp=0xfffffffc;s.esp=0x9000;s.eflags=0xed7;
+        m->cpu().set_regs(s);
+    }
+    check(native.register_aot_region(r),"high LEAVE registration");floor(native).require_native_execution(true);
+    const auto before=native.aot_stats();const auto blocks=floor(native).block_stats();
+    run(native,1);run(reference,1);
+    const auto result=native.cpu().get_regs();
+    equal(state(result),state(reference.cpu().get_regs()),0xffffffffu,"high LEAVE equals floor");
+    check(result.esp==0&&result.ebp==0x1234dead&&result.eflags==0xed7,"LEAVE wraps only its final stack pointer");
+    const auto after=native.aot_stats();const auto end=floor(native).block_stats();
+    check(after.retired-before.retired==1&&after.memory_reads-before.memory_reads==1&&
+          after.fallback_insns==before.fallback_insns&&after.fallback_runs==before.fallback_runs&&
+          end.tb_entries==blocks.tb_entries&&end.insn_mode_runs==blocks.insn_mode_runs&&
+          end.block_mode_runs==blocks.block_mode_runs,"high LEAVE is strictly native");
+}
 int main(){shifts();conditions();extensions();memory_forms();cycle();machine_cycle();page_widths();
+    unary_integer();read_integer();epilogue_and_read_exits();memory_integer_machine();memory_integer_pages();leave_high_stack();
     std::puts("scalar AOT: independent bits/conditions, exact widths, faults and strict machine scope pass");}

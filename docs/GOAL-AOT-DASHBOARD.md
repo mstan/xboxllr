@@ -117,6 +117,14 @@ accounts 101,462 samples across 18 actual intervals. The final interval is
 verified as sustained main-menu animation after the return. Other fixed windows
 can straddle scripted phases and must retain that limitation.
 
+The [memory integer checkpoint](RESULTS-AOT-MEMORY-INTEGER-2026-10-03.md)
+qualifies memory-read ALU/CMP/TEST, register NEG/NOT and LEAVE without an ABI or
+runtime-guard change. Preserving all prior regions and adding 40 yields **286
+regions**, **77.60% main-idle** and **82.08% Settings-entry** native execution.
+Floor/native O0/O2 preserve all 270 checkpoints, ten images and device histories;
+all 76 public tests and four census scalar/native-required tests pass. Attempts
+and handoffs increase, so the coverage gain carries no new speed claim.
+
 Next: use that evidence to investigate native body/state-transfer and renderer
 reuse opportunities, refine phase attribution, and expand useful post-boot
 coverage with the measured x87 and kernel/memory gaps, and scale generated compilation units

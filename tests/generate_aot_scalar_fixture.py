@@ -74,6 +74,46 @@ for name, code in {
 for reg in range(8):
     add(f"immediate_reg_{reg}",[0xc7,0xc0+reg,0x78,0x56,0x34,0x12])
 
+unary = []
+for operation, group in enumerate((3, 2)):
+    for reg in range(8):
+        unary.append(f"    {{{add(f'unary_{operation}_{reg}',[0xf7,0xc0+group*8+reg])}, {operation}, {reg}}}")
+tables.append("struct UnaryCase { const xlle_aot_region* r; unsigned operation, reg; };\n"
+              "static const UnaryCase unary_cases[]={\n" + ",\n".join(unary) + "\n};\n")
+
+reads = []
+for operation, opcode in enumerate((0x03,0x2b,0x33,0x23,0x0b,0x3b,0x39,0x85)):
+    for reg in range(8):
+        # All base/destination aliases plus absolute and scaled negative SIB.
+        for form in range(10):
+            if form < 8:
+                code = [opcode,0x40+reg*8+form]+([0x24] if form==4 else [])+[0]
+            elif form == 8:
+                code = [opcode,5+reg*8,0x00,0x28,0,0]
+            else:
+                code = [opcode,0x44+reg*8,0xb3,0xfc]
+            reads.append(f"    {{{add(f'alu_read_{operation}_{reg}_{form}',code)}, {operation}, {reg}, {form}}}")
+tables.append("struct AluReadCase { const xlle_aot_region* r; unsigned operation, reg, form; };\n"
+              "static const AluReadCase alu_read_cases[]={\n" + ",\n".join(reads) + "\n};\n")
+
+read_immediates=[]
+for operation,opcode,group,size in [(5,0x81,7,4),(5,0x83,7,1),(7,0xf7,0,4)]:
+    for immediate in ([0,1,0x7f,0x80,0xff] if size==1 else [0,1,0x7fffffff,0x80000000,0xffffffff]):
+        code=[opcode,0x44+group*8,0xb3,0xfc]+list(immediate.to_bytes(size,'little'))
+        value=immediate if size==4 or immediate<128 else immediate+0xffffff00
+        name=f'alu_immediate_{opcode}_{immediate}'
+        read_immediates.append(f"    {{{add(name,code)}, {operation}, 0x{value:08x}u}}")
+tables.append("struct AluImmediateCase { const xlle_aot_region* r; unsigned operation; uint32_t immediate; };\n"
+              "static const AluImmediateCase alu_immediate_cases[]={\n" + ",\n".join(read_immediates) + "\n};\n")
+for name,code in {
+    'leave32':'c9', 'leave_cycle':'c9ebfd',
+    'read_cmp_loop':'3b06ebfc', 'read_test_loop':'f70678563412ebf8',
+    'read_then_nop':'030690', 'leave_then_nop':'c990',
+}.items():
+    add(name,bytes.fromhex(code))
+cycle=bytes.fromhex('03062b0e330e230e0b0e3b0e390e850e813effffffff833e80f70678563412f7d9f7d1')
+add('alu_read_cycle',cycle+b'\xeb'+bytes([(-len(cycle)-2)&255]))
+
 source = out / "scalar.json"
 source.write_text(json.dumps(dict(independent_regions=True, regions=regions)), encoding="utf-8")
 compile_input(source, out / "scalar.c", out / "scalar.h", out / "scalar.manifest.json")

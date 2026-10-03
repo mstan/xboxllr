@@ -212,6 +212,8 @@ def decode_one(code: bytes, offset: int) -> DecodedInstruction:
             adjust = read_u8(code, offset + 1, "ret imm16") | (read_u8(code, offset + 2, "ret imm16") << 8)
         return DecodedInstruction(offset, 1 if op == 0xC3 else 3, "ret_near",
                                   operands=[Operand("imm16", adjust)])
+    if op == 0xC9:
+        return DecodedInstruction(offset, 1, "leave32")
     if op == 0xE8:
         rel = i32(read_u32(code, offset + 1, "call rel32"))
         inst = DecodedInstruction(offset, 5, "call_rel32", operands=[Operand("rel32", rel)])
@@ -270,10 +272,18 @@ def decode_one(code: bytes, offset: int) -> DecodedInstruction:
                 name = "mov_r32_to_mem32" if op == 0x89 else "mov_mem32_to_r32"
                 return DecodedInstruction(offset, end - offset, name,
                                           operands=[Operand("reg32", (modrm >> 3) & 7), memory])
+            name = {0x03: "add_mem32_to_r32", 0x2B: "sub_mem32_to_r32",
+                    0x33: "xor_mem32_to_r32", 0x23: "and_mem32_to_r32",
+                    0x0B: "or_mem32_to_r32", 0x3B: "cmp_mem32_to_r32",
+                    0x39: "cmp_r32_from_mem32", 0x85: "test_r32_mem32"}.get(op)
+            if name:
+                memory, end = decode_memory32(code, offset + 1)
+                return DecodedInstruction(offset, end - offset, name,
+                                          operands=[Operand("reg32", (modrm >> 3) & 7), memory])
             return DecodedInstruction(offset, 2, f"unsupported_0x{op:02x}_modrm_0x{modrm:02x}", status="unsupported")
         # Normalize register-only arithmetic in either encoding direction to
-        # the same (source, destination) operands. Memory forms stay explicit
-        # unsupported exits until their access/fault behavior is implemented.
+        # the same (source, destination) operands. Read-modify-write memory
+        # forms remain unsupported until their complete access contract exists.
         if op in (0x03, 0x2B, 0x33, 0x23, 0x3B, 0x0B):
             op -= 2
             reg, rm = rm, reg
@@ -294,10 +304,19 @@ def decode_one(code: bytes, offset: int) -> DecodedInstruction:
         return DecodedInstruction(offset, 2, mapping[op], operands=[Operand(width, reg), Operand(width, rm)])
     if op == 0xF7:
         modrm = read_u8(code, offset + 1, "group-3 ModRM")
-        if modrm >> 6 == 3 and ((modrm >> 3) & 7) == 0:
-            immediate = read_u32(code, offset + 2, "TEST immediate")
-            return DecodedInstruction(offset, 6, "test_r32_imm32",
-                                      operands=[Operand("reg32", modrm & 7), Operand("imm32", immediate)])
+        form = (modrm >> 3) & 7
+        if modrm >> 6 == 3 and form in (2, 3):
+            return DecodedInstruction(offset, 2, "not_r32" if form == 2 else "neg_r32",
+                                      operands=[Operand("reg32", modrm & 7)])
+        if form == 0:
+            if modrm >> 6 == 3:
+                source, end, name = Operand("reg32", modrm & 7), offset + 2, "test_r32_imm32"
+            else:
+                source, end = decode_memory32(code, offset + 1)
+                name = "test_mem32_imm32"
+            immediate = read_u32(code, end, "TEST immediate")
+            return DecodedInstruction(offset, end + 4 - offset, name,
+                                      operands=[source, Operand("imm32", immediate)])
         return DecodedInstruction(offset, 2, "unsupported_group3", status="unsupported")
     if op in (0x81, 0x83):
         modrm = read_u8(code, offset + 1, "group-1 ModRM")
@@ -307,6 +326,12 @@ def decode_one(code: bytes, offset: int) -> DecodedInstruction:
                          if op == 0x83 else read_u32(code, offset + 2, "group-1 immediate"))
             return DecodedInstruction(offset, 3 if op == 0x83 else 6, operation + "_r32_imm32",
                                       operands=[Operand("reg32", modrm & 7), Operand("imm32", immediate)])
+        if operation == "cmp":
+            memory, end = decode_memory32(code, offset + 1)
+            immediate = (u32(i8(read_u8(code, end, "CMP sign-extended immediate")))
+                         if op == 0x83 else read_u32(code, end, "CMP immediate"))
+            return DecodedInstruction(offset, end + (1 if op == 0x83 else 4) - offset,
+                                      "cmp_mem32_imm32", operands=[memory, Operand("imm32", immediate)])
         return DecodedInstruction(offset, 2, "unsupported_group1", status="unsupported")
     if op in (0x05, 0x2D, 0x35, 0x25, 0x3D, 0xA9, 0x0D):
         imm = read_u32(code, offset + 1, f"opcode 0x{op:02x} imm32")
@@ -580,6 +605,41 @@ def emit_supported_body(inst: DecodedInstruction, region: dict[str, Any]) -> lis
             # POP ESP replaces the incremented value with the popped value.
             lines.append(f"            {reg_expr(ops[0].value)} = value;")
             lines += finish()
+    elif m == "leave32":
+        lines.append("            const uint32_t frame = state->gpr[5];")
+        lines.append("            uint32_t value = 0;")
+        lines.append("            if (!xlle_aot_read32(bus, frame, &value)) return XLLE_AOT_MEMORY;")
+        lines.append("            state->gpr[4] = frame + 4u;")
+        lines.append("            state->gpr[5] = value;")
+        lines += finish()
+    elif m in ("neg_r32", "not_r32"):
+        reg = reg_expr(ops[0].value)
+        expression = f"xlle_aot_sub(state, 0u, {reg})" if m == "neg_r32" else f"~{reg}"
+        lines.append(f"            {reg} = {expression};")
+        lines += finish()
+    elif m in ("add_mem32_to_r32", "sub_mem32_to_r32", "xor_mem32_to_r32",
+               "and_mem32_to_r32", "or_mem32_to_r32", "cmp_mem32_to_r32",
+               "cmp_r32_from_mem32", "test_r32_mem32", "cmp_mem32_imm32", "test_mem32_imm32"):
+        operation = m.split("_")[0]
+        immediate = m.endswith("_imm32")
+        memory = ops[0] if immediate else ops[1]
+        lines.append("            uint32_t value = 0;")
+        lines.append(f"            if (!xlle_aot_read32(bus, {address_expr(memory)}, &value)) return XLLE_AOT_MEMORY;")
+        if immediate:
+            left, right = "value", f"0x{ops[1].value:08x}u"
+        elif m == "cmp_r32_from_mem32":
+            left, right = "value", reg_expr(ops[0].value)
+        else:
+            left, right = reg_expr(ops[0].value), "value"
+        if operation in ("add", "sub", "cmp"):
+            helper = "add" if operation == "add" else "sub"
+            expression = f"xlle_aot_{helper}(state, {left}, {right})"
+        else:
+            symbol = {"and": "&", "test": "&", "or": "|", "xor": "^"}[operation]
+            expression = f"xlle_aot_logic(state, {left} {symbol} {right})"
+        destination = "(void)" if operation in ("cmp", "test") else reg_expr(ops[0].value) + " = "
+        lines.append(f"            {destination}{expression};")
+        lines += finish()
     elif m == "jmp_r32":
         lines.append(f"            const uint32_t target = {reg_expr(ops[0].value)};")
         lines.append("            if (!xlle_aot_branch_allowed(bus, target)) return XLLE_AOT_CONTEXT;")

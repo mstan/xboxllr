@@ -57,8 +57,10 @@ class AotCompileTests(unittest.TestCase):
                 self.assertEqual(aot_compile.decode_one(bytes.fromhex(raw),0).status,"unsupported")
             else:
                 with self.assertRaises(aot_compile.AotError): aot_compile.decode_one(bytes.fromhex(raw),0)
-        for raw in ("8500","f700","f7c8"):
+        for raw in ("668500","f7c8"):
             self.assertEqual(aot_compile.decode_one(bytes.fromhex(raw),0).status,"unsupported")
+        with self.assertRaises(aot_compile.AotError):
+            aot_compile.decode_one(bytes.fromhex("f700"),0)
 
     def test_rotate32_encodings(self):
         for right in (0, 1):
@@ -99,7 +101,7 @@ class AotCompileTests(unittest.TestCase):
             inst = aot_compile.decode_one(bytes([0x81, 0xc8 + destination, 0x78, 0x56, 0x34, 0x12]), 0)
             self.assertEqual([o.value for o in inst.operands], [destination, 0x12345678])
         self.assertEqual(aot_compile.decode_one(bytes.fromhex("0d78563412"), 0).mnemonic, "or_eax_imm32")
-        for raw in ("660fc8", "f00fc8", "6609d8", "0900", "0b00", "0800", "8108", "8308"):
+        for raw in ("660fc8", "f00fc8", "6609d8", "0900", "0800", "8108", "8308"):
             self.assertEqual(aot_compile.decode_one(bytes.fromhex(raw), 0).status, "unsupported")
         for raw in ("09", "0b", "0d", "81c8", "83c8"):
             with self.assertRaises(aot_compile.AotError):
@@ -238,8 +240,42 @@ class AotCompileTests(unittest.TestCase):
             with self.subTest(left=left, right=right):
                 self.assertEqual(aot_compile.decode_one(bytes.fromhex(left), 0),
                                  aot_compile.decode_one(bytes.fromhex(right), 0))
-        for opcode in (0x03, 0x2b, 0x33, 0x23, 0x3b):
+        for opcode in (0x01, 0x29, 0x31, 0x21):
             self.assertEqual(aot_compile.decode_one(bytes([opcode, 0]), 0).status, "unsupported")
+
+    def test_memory_integer_and_epilogue_encodings(self):
+        names = {0x03: "add_mem32_to_r32", 0x2b: "sub_mem32_to_r32",
+                 0x33: "xor_mem32_to_r32", 0x23: "and_mem32_to_r32",
+                 0x0b: "or_mem32_to_r32", 0x3b: "cmp_mem32_to_r32",
+                 0x39: "cmp_r32_from_mem32", 0x85: "test_r32_mem32"}
+        for opcode, name in names.items():
+            for reg in range(8):
+                for base in range(8):
+                    code = bytes([opcode,0x40+reg*8+base]+([0x24] if base==4 else [])+[0xfc])
+                    inst = aot_compile.decode_one(code,0)
+                    self.assertEqual(inst.mnemonic,name)
+                    self.assertEqual(inst.length,len(code))
+                    self.assertEqual(inst.operands,[aot_compile.Operand('reg32',reg),
+                        aot_compile.Operand('mem32',0xfffffffc,base,-1,1)])
+        for form,name in [(2,'not_r32'),(3,'neg_r32')]:
+            for reg in range(8):
+                inst=aot_compile.decode_one(bytes([0xf7,0xc0+form*8+reg]),0)
+                self.assertEqual((inst.mnemonic,inst.length),(name,2))
+                self.assertEqual(inst.operands,[aot_compile.Operand('reg32',reg)])
+        self.assertEqual(aot_compile.decode_one(b'\xc9',0).mnemonic,'leave32')
+        for opcode, group, size, name in [(0x81,7,4,'cmp_mem32_imm32'),
+                                          (0x83,7,1,'cmp_mem32_imm32'),
+                                          (0xf7,0,4,'test_mem32_imm32')]:
+            code=bytes([opcode,0x44+group*8,0xb3,0xfc])+b'\xff'*size
+            inst=aot_compile.decode_one(code,0)
+            self.assertEqual((inst.mnemonic,inst.length),(name,len(code)))
+            self.assertEqual(inst.operands,[aot_compile.Operand('mem32',0xfffffffc,3,6,4),
+                                            aot_compile.Operand('imm32',0xffffffff)])
+        for raw in ['66c9','67c9','f0c9','f010','f710','f718','660300','670300']:
+            self.assertEqual(aot_compile.decode_one(bytes.fromhex(raw),0).status,'unsupported')
+        for raw in ['0304','0344','034424','81bc','81bc2400000000','83bd00000000','f745fc12']:
+            with self.assertRaises(aot_compile.AotError):
+                aot_compile.decode_one(bytes.fromhex(raw),0)
 
     def test_external_branch_is_not_decoded_as_following_instruction(self):
         doc = {"regions": [{"name": "jump_out", "base": 0x3000, "code": "eb0590", "entries": [0]}]}

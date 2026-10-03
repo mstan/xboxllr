@@ -3,6 +3,27 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-10-03 - Memory integer AOT raises main-menu coverage to 77.60%
+
+General memory-read arithmetic/comparisons, register NEG/NOT and LEAVE qualify
+40 additional regions, preserving all 246 prior regions. Existing RAM, code,
+event and context guards remain active; ABI 5 is unchanged. All **76 public
+tests** and **four census scalar/native-required tests** pass, including strict
+native boundaries and precise read refusal.
+
+Floor/native O0/O2 complete the **27B** route with all **270 checkpoint rows and
+ten images byte-identical**, also matching the prior reference. Device/DMA/
+IRQ/TSC endpoints and native adapter counters agree. Main-menu idle native
+coverage rises **70.53% to 77.60%**, and Settings entry **76.72% to 82.08%**.
+Full-route native work reaches **1,964,141,698 instructions**, with unchanged
+idle skips and six reconciled census intervals.
+
+Attempts and handoffs increase; this is a coverage result with no new speed
+claim. Full AOT, required menu interiors, UI audio and original-speed 60 FPS
+remain open. Keep OpenGL and prioritize qualified renderer reuse. See
+[memory integer evidence](docs/RESULTS-AOT-MEMORY-INTEGER-2026-10-03.md), tracked
+in `beads-xbox.1.39`. The ordinary build keeps private input cleared.
+
 ## 2026-10-03 - Host profiles now separate the full post-boot route
 
 The host sampler previously merged every sample after 10.5B while labelling that

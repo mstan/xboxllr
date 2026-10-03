@@ -112,6 +112,15 @@ less total 12B startup wall time in six quiet native-versus-native legs. Full
 27B checkpoints, images and native counters are unchanged. This improves lookup
 cost without changing coverage or handoffs; whole-menu performance remains open.
 
+The [memory integer checkpoint](RESULTS-AOT-MEMORY-INTEGER-2026-10-03.md)
+advances C1/C3/C6 with general memory-read ALU/comparisons, register NEG/NOT and
+LEAVE. The 286-region input preserves its 246 predecessors; main-idle native
+execution reaches **77.60%**, Settings entry **82.08%**. Full 27B floor/O0/O2
+histories and ten images match, with identical native counters. Public tests
+pass 76/76 and census scalar/native-required tests 4/4. Attempts/handoffs increase;
+efficiency remains a separate gate. Interrupt control, strings, byte-width
+operations, x87/SSE and translation refusals remain. No whole stage closes.
+
 | ID | Deliverable | Depends on | Difficulty | Gate to close |
 | --- | --- | --- | --- | --- |
 | C0 | Trustworthy program and workload inventory | Existing capture/tools | Medium | Pinned images, initial static graph with explicit gaps, phase/version evidence, reconciled counters and a tested native-required detector |

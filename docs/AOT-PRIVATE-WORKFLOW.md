@@ -181,6 +181,15 @@ preserved for zero counts; undefined nonzero AF and multi-bit OF follow the
 pinned floor's documented policy. See
 [scalar qualification](RESULTS-AOT-SCALAR-2026-10-03.md).
 
+Memory-read integer lowering adds 32-bit register NEG/NOT and LEAVE, plus
+memory-source ADD/SUB/XOR/AND/OR, both CMP directions, and memory TEST/CMP
+with register or immediate operands. These use the existing four-byte read
+contract without an ABI change. LEAVE commits ESP/EBP only after its saved-frame
+read succeeds. Logical AF remains architecturally undefined; the existing native
+policy preserves it. Read-modify-write memory arithmetic and other widths or
+prefixes remain unsupported. See
+[memory integer qualification](RESULTS-AOT-MEMORY-INTEGER-2026-10-03.md).
+
 To remove embedded private code, clear the cached input and rebuild:
 
 ```powershell
