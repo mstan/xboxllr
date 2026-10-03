@@ -240,6 +240,15 @@ add_executable(test_perf_excl tests/test_perf_excl.cpp)
 target_include_directories(test_perf_excl PRIVATE ${XLLE_INCLUDES})
 add_test(NAME perf_excl COMMAND test_perf_excl)
 
+add_executable(test_host_sample_windows tests/test_host_sample_windows.cpp)
+target_include_directories(test_host_sample_windows PRIVATE ${XLLE_INCLUDES})
+add_test(NAME host_sample_windows COMMAND test_host_sample_windows)
+if(WIN32)
+  add_executable(host_sample_probe tests/host_sample_probe.cpp)
+  target_include_directories(host_sample_probe PRIVATE ${XLLE_INCLUDES})
+  target_link_libraries(host_sample_probe PRIVATE psapi dbghelp)
+endif()
+
 add_executable(test_vertex_reuse_shadow tests/test_vertex_reuse_shadow.cpp)
 target_include_directories(test_vertex_reuse_shadow PRIVATE ${XLLE_INCLUDES})
 add_test(NAME vertex_reuse_shadow COMMAND test_vertex_reuse_shadow)
@@ -603,6 +612,13 @@ if(Python3_Interpreter_FOUND)
            COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_aot_private_input.py")
 endif()
 if(Python3_Interpreter_FOUND)
+  if(WIN32)
+    add_test(NAME host_sample_report COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_host_sample_report.py $<TARGET_FILE:host_sample_probe>)
+  else()
+    add_test(NAME host_sample_report COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_host_sample_report.py)
+  endif()
   add_test(NAME eeprom_generation
            COMMAND ${Python3_EXECUTABLE}
                    ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_eeprom_generation.py)

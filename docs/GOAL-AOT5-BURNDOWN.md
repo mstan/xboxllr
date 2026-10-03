@@ -48,7 +48,7 @@ not equal amounts of effort; they are not a calendar or percentage estimate.
 | ID | Status | Work | Evidence required to finish |
 | --- | --- | --- | --- |
 | 5.1 | Implemented and tested; controlled cost pending | Detect competing work during replay | A controlled foreign process starts and ends inside a leg and still marks it contaminated; owned emulator excluded; observer failure visible; monitor cost and detection limits recorded |
-| 5.2 | Clean full-route profile and post-boot interval costs qualified; precise phase leaf attribution open | Profile the current native path and inspect generated host code | Current binary/source identities; clean separate attribution; generated-body, boundary and fallback costs; native/idle/fallback partitions by phase; ranked bottleneck hypotheses |
+| 5.2 | Clean full-route and bounded post-boot leaf attribution qualified; exact script-phase alignment remains explicit | Profile the current native path and inspect generated host code | Current binary/source identities; clean separate attribution; generated-body, boundary and fallback costs; native/idle/fallback partitions by phase; ranked bottleneck hypotheses |
 | 5.3 | Planned | Improve generated control flow and state handling | Direct block edges and local guest values where justified; exact state on every observable exit; inspect host output; measure each retained transformation against native baseline |
 | 5.4 | Planned | Reduce repeated flag and guard work | Independent tests of defined flags and every affected exit boundary; code/event changes through callbacks remain visible; each proposed hoist has an explicit validity/invalidation argument |
 | 5.5 | Deterministic cache policy validated; further memory work open | Improve certified memory access and avoid unnecessary fallback attempts | Preserve permissions, aliases, self-modifying code and precise faults; diagnose actual fetch-TLB declines; measure callback/invalidation and handoff costs separately where practical |
@@ -72,8 +72,10 @@ not close post-boot performance or the broader compiler/runtime work. The first
 host profile was contaminated and remains excluded from attribution acceptance.
 A subsequent clean 27B candidate profile verifies all 101,633 leaf samples and
 separate post-boot interval costs. Native bodies and renderer work dominate those
-intervals. The sampler's last bucket clamps the long tail; precise phase leaf
-attribution is tracked in `beads-xbox.1.38`. Observer cost qualification remains open.
+intervals. The [sampler follow-up](RESULTS-HOST-SAMPLER-WINDOWS-2026-10-03.md)
+resolves the clamped long tail with recorded bounds and 18 separately qualified
+windows across 27B. Fixed windows can straddle scripted phases; observer cost
+qualification remains open. Public tests now pass 76/76.
 
 ### Near-total coverage assessment (2026-09-25)
 

@@ -123,7 +123,40 @@ def new_window():
         "coverage": None,
         "attribution": None,
         "pairs": [],
+        "instruction_range": None,
+        "sampled_progress": None,
+        "range_source": "unavailable",
     }
+
+
+def parse_window_range(fields, index, meta):
+    """Keep nominal intervals distinct from actual inclusive sampled extrema."""
+    text = fields.get("insns", "")
+    match = re.fullmatch(r"(\d+)-(\d+|unbounded)", text)
+    if not match:
+        if as_int(meta, "window_layout") >= 2:
+            raise ValueError("missing or invalid sampler instruction range")
+        return None, None, "unavailable"
+    begin = int(match.group(1))
+    end = None if match.group(2) == "unbounded" else int(match.group(2))
+    if as_int(meta, "window_layout") >= 2:
+        tail = fields.get("range") == "tail"
+        if fields.get("range") not in ("bounded", "tail") or tail != (end is None):
+            raise ValueError("inconsistent sampler range kind")
+        if end is not None and end <= begin:
+            raise ValueError("empty or reversed sampler interval")
+        try:
+            low, high = int(fields["sampled_min"]), int(fields["sampled_max"])
+        except (KeyError, ValueError) as exc:
+            raise ValueError("missing or invalid sampled extrema") from exc
+        if low < begin or high < low or high > (1 << 64) - 1 or (end is not None and high >= end):
+            raise ValueError("sampled progress outside its nominal interval")
+        return {"begin": begin, "end_exclusive": end}, {"minimum": low, "maximum": high}, "recorded"
+    # Old last buckets silently absorbed every later sample. The printed upper
+    # bound cannot be recovered as truth from the old log or its sample count.
+    if as_int(meta, "windows") > 0 and index == as_int(meta, "windows") - 1:
+        return {"begin": begin, "end_exclusive": None}, None, "legacy-clamped-tail"
+    return {"begin": begin, "end_exclusive": end}, None, "legacy-nominal"
 
 
 def parse_sampler_report(path):
@@ -175,6 +208,8 @@ def parse_sampler_report(path):
             window["unique_pairs"] = as_int(fields, "unique_pairs")
             window["span_ms"] = as_float(fields, "span_ms")
             window["hz"] = as_float(fields, "hz")
+            (window["instruction_range"], window["sampled_progress"],
+             window["range_source"]) = parse_window_range(fields, current, meta)
             continue
 
         match = RE_JIT.search(line)
@@ -438,9 +473,18 @@ def report_window(index, window, functions, image_base, args, out):
         out.append("== whole run (log has no per-window tables)  samples=%d  "
                    "(TRUE denominator)" % samples)
     else:
-        out.append("== window %d  insns=%d-%d  samples=%d  (TRUE denominator)"
-                   % (index, index * 1500000000, (index + 1) * 1500000000,
-                      samples))
+        bounds = window["instruction_range"]
+        interval = ("[%d,%s)" % (bounds["begin"],
+                    "unbounded" if bounds["end_exclusive"] is None else bounds["end_exclusive"])
+                    if bounds else "unknown")
+        out.append("== window %d  nominal_insns=%s  samples=%d  (TRUE denominator)"
+                   % (index, interval, samples))
+        observed = window["sampled_progress"]
+        if observed:
+            out.append("   sampled progress (inclusive): %d-%d"
+                       % (observed["minimum"], observed["maximum"]))
+        else:
+            out.append("   sampled progress: unknown; range source=%s" % window["range_source"])
     jit = window.get("jit")
     jit_samples = jit["samples"] if jit else window["jit_samples"]
     jit_text = ("jit_samples=%d (%.2f%%)" % (jit_samples,
@@ -505,6 +549,9 @@ def report_window(index, window, functions, image_base, args, out):
 
     return {
         "window": index,
+        "instruction_range": window["instruction_range"],
+        "sampled_progress": window["sampled_progress"],
+        "range_source": window["range_source"],
         "samples": samples,
         "accounted": accounted,
         "coverage_pct": 100.0 * accounted / samples,

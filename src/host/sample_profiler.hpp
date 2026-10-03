@@ -2,8 +2,8 @@
 //
 // Doctrine fit: this is an always-available observability probe, not a behavior
 // change. It is OFF unless `--host-sample-profile <period_ms>` is passed; it
-// never touches guest state, device state, or timing, so replay hashes are
-// unaffected. It samples ONLY the main emulation thread at a fixed host period.
+// never changes guest/device state or the guest clock. Sampling has host
+// overhead. It samples ONLY the main emulation thread at a fixed host period.
 //
 // Per guest-instruction window (1.5B instructions) it reports:
 //   * the COMPLETE leaf table — every non-empty hash bucket, one `leaf` line
@@ -41,6 +41,10 @@
 //   module id=<n> base=0x<va> size=0x<n> name=<utf8>
 //   window=<w> insns=<a>-<b> samples=<n> leaves_outside_xlle=<n>
 //       jit_samples=<n> unique_leaves=<n> unique_pairs=<n> span_ms=<f> hz=<f>
+//       range=<bounded|tail> sampled_min=<n> sampled_max=<n>
+// `insns` is a half-open nominal interval; the final upper bound is `unbounded`.
+// Sampled extrema are inclusive. Header `window_layout=2` identifies this
+// grammar; earlier layouts clamped the last window but printed a finite end.
 //   jit window=<w> samples=<n> pct=<f> lo=0x<va> hi=0x<va>
 //   attribution window=<w> pairs=<n> walk=<n> walk_mean_depth=<f> scan=<n>
 //       scan_mean_qwords=<f> unattributed=<n> unattributed_pct=<f>
@@ -74,6 +78,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include "host/sample_window.hpp"
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -102,10 +107,10 @@ class HostSampleProfiler {
   static constexpr size_t kPairTableSize = 1u << 13;  // power of two
   static constexpr size_t kDefaultReportEntries = 24;
   static constexpr size_t kMaxPairEntries = 16;
-  static constexpr size_t kWindowCount = 8;
+  static constexpr size_t kWindowCount = HostSampleWindows::count;
   static constexpr size_t kMaxExecRanges = 8;
   static constexpr size_t kStackScanBytes = 64 * 1024;
-  static constexpr uint64_t kWindowInsns = 1500000000ull;
+  static constexpr uint64_t kWindowInsns = HostSampleWindows::span;
 
   void set_progress_source(const std::atomic<uint64_t>* progress) {
     progress_ = progress;
@@ -323,6 +328,7 @@ class HostSampleProfiler {
     uint64_t scan_words_sum = 0;
     uint64_t first_qpc = 0;
     uint64_t last_qpc = 0;
+    HostSampleProgressRange progress;
   };
   struct ModuleRange {
     uintptr_t base;
@@ -772,9 +778,8 @@ class HostSampleProfiler {
         if (progress_) {
           progress = progress_->load(std::memory_order_relaxed);
         }
-        WindowTable& table =
-            (*windows_)[static_cast<size_t>(
-                std::min<uint64_t>(progress / kWindowInsns, kWindowCount - 1))];
+        WindowTable& table = (*windows_)[HostSampleWindows::index(progress)];
+        table.progress.record(progress);
         const uintptr_t rip = static_cast<uintptr_t>(context.Rip);
         uint64_t leaf_addr = 0;
         const ModuleRange* range = locate(rip, leaf_addr);
@@ -837,7 +842,7 @@ class HostSampleProfiler {
                 "module_size=0x%zx windows=%zu window_insns=%llu "
                 "overflow=%llu suspend_failures=%llu context_failures=%llu "
                 "open_failed=%d timer=%s elapsed_ms=%.3f mean_period_ms=%.3f "
-                "achieved_hz=%.1f\n",
+                "achieved_hz=%.1f window_layout=2 window_storage_bytes=%zu\n",
                 static_cast<unsigned long long>(samples_), period_ms_,
                 module_base_, module_size_, kWindowCount,
                 static_cast<unsigned long long>(kWindowInsns),
@@ -845,7 +850,7 @@ class HostSampleProfiler {
                 static_cast<unsigned long long>(suspend_failures_),
                 static_cast<unsigned long long>(context_failures_),
                 open_failed_ ? 1 : 0, timer_mode_, elapsed_ms, mean_period_ms,
-                achieved_hz);
+                achieved_hz, sizeof(*windows_));
     // Provenance: path last, because it is the only field that can contain
     // spaces or '='.
     std::printf("[host-sampler] binary sha256=%s size=%llu path=%s\n",
@@ -894,16 +899,24 @@ class HostSampleProfiler {
           (span_ms > 0.0 && table.samples > 1)
               ? 1000.0 * static_cast<double>(table.samples - 1) / span_ms
               : 0.0;
-      std::printf("[host-sampler] window=%zu insns=%llu-%llu samples=%llu "
+      const bool tail = HostSampleWindows::is_tail(window);
+      char upper[32];
+      if (tail) std::strcpy(upper, "unbounded");
+      else std::snprintf(upper, sizeof(upper), "%llu",
+                         static_cast<unsigned long long>((window + 1) * kWindowInsns));
+      std::printf("[host-sampler] window=%zu insns=%llu-%s samples=%llu "
                   "leaves_outside_xlle=%llu jit_samples=%llu "
-                  "unique_leaves=%zu unique_pairs=%zu span_ms=%.3f hz=%.1f\n",
+                  "unique_leaves=%zu unique_pairs=%zu span_ms=%.3f hz=%.1f "
+                  "range=%s sampled_min=%llu sampled_max=%llu\n",
                   window,
-                  static_cast<unsigned long long>(window * kWindowInsns),
-                  static_cast<unsigned long long>((window + 1) * kWindowInsns),
+                  static_cast<unsigned long long>(HostSampleWindows::begin(window)), upper,
                   static_cast<unsigned long long>(table.samples),
                   static_cast<unsigned long long>(table.leaf_outside_samples),
                   static_cast<unsigned long long>(table.jit_samples),
-                  entries.size(), pairs.size(), span_ms, window_hz);
+                  entries.size(), pairs.size(), span_ms, window_hz,
+                  tail ? "tail" : "bounded",
+                  static_cast<unsigned long long>(table.progress.minimum),
+                  static_cast<unsigned long long>(table.progress.maximum));
       std::printf("[host-sampler] jit window=%zu samples=%llu pct=%.2f "
                   "lo=0x%llx hi=0x%llx\n",
                   window,

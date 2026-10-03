@@ -3,6 +3,26 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-10-03 - Host profiles now separate the full post-boot route
+
+The host sampler previously merged every sample after 10.5B while labelling that
+bucket as ending at 12B. It now preallocates 32 windows, reports actual sampled
+extrema and marks the final range unbounded. The symbolizer preserves recorded
+bounds and marks old clamped tails as having an unknown end.
+
+All **76 public tests** pass, including a real Windows sampling/report probe.
+A quiet **27B** dashboard run preserves all **270 checkpoints, ten images and
+every native/device counter row** against the prior reference. Its **101,462
+verified samples** are fully accounted across **18 windows**, with no overflow
+or sampler failures. The steady main-menu window identifies native admission/
+register access and generic-combiner/vertex work; library caller pairs also
+identify render submissions, uploads and readbacks.
+
+This improves attribution, not native coverage or product speed. Full AOT,
+required menu interiors, UI audio and original-speed 60 FPS remain open. See
+[range qualification and findings](docs/RESULTS-HOST-SAMPLER-WINDOWS-2026-10-03.md),
+tracked in `beads-xbox.1.38`. The ordinary build has private input cleared.
+
 ## 2026-10-03 - Exact AOT membership cuts qualified startup wall time by 17.39%
 
 An exact sparse byte index replaces repeated tree searches in the native-entry

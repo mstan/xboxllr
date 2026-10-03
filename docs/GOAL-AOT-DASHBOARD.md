@@ -65,7 +65,7 @@ Six dashboard gates remain. These are unequal work packages, not percentages or
 a calendar forecast. The detailed compiler stages remain in the
 [coverage board](PLAN-AOT-COVERAGE-BURNDOWN.md).
 
-Current evidence: 74 public tests pass. The
+Current evidence: 76 public tests pass. The
 [MMX checkpoint](RESULTS-AOT-MMX-2026-10-03.md) adds actual native
 menu execution beyond the startup loops. The
 [corrected 27B route](RESULTS-CPU-DEADLINES-2026-10-03.md) reaches Settings and
@@ -110,8 +110,12 @@ extended-state qualification remain open.
 
 The clean candidate profile also retains every checkpoint and route image.
 Post-boot exclusive intervals identify native bodies, OpenGL, vertex and generic
-raster work as substantial costs; exact menu leaf attribution remains open
-because the sampler clamps its last range (`beads-xbox.1.38`).
+raster work as substantial costs. The subsequent
+[sampler correction](RESULTS-HOST-SAMPLER-WINDOWS-2026-10-03.md) resolves the
+clamped last range: a quiet 27B profile retains every checkpoint/image and
+accounts 101,462 samples across 18 actual intervals. The final interval is
+verified as sustained main-menu animation after the return. Other fixed windows
+can straddle scripted phases and must retain that limitation.
 
 Next: use that evidence to investigate native body/state-transfer and renderer
 reuse opportunities, refine phase attribution, and expand useful post-boot
