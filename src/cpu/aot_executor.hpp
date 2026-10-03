@@ -1,6 +1,8 @@
 #pragma once
 #include <vector>
 #include <map>
+#include <array>
+#include <memory>
 #include "xlle/aot_execution.hpp"
 
 namespace xlle {
@@ -39,6 +41,15 @@ private:
     std::vector<const xlle_aot_region*> regions_;
     // Address order is independent of stable registration/statistics order.
     std::map<uint32_t, size_t> region_by_base_;
+#if XLLE_AOT_FAST_MEMBERSHIP
+    // Exact registered-byte membership, not native eligibility or code identity.
+    // The sparse 10/10/12 address split allocates 8 KiB per populated directory
+    // and 512 bytes per populated 4 KiB page on a 64-bit host. Registration is
+    // additive and happens between runs; no guest-state result is cached here.
+    using CoveragePage = std::array<uint64_t, 64>;
+    using CoverageDirectory = std::array<std::unique_ptr<CoveragePage>, 1024>;
+    std::array<std::unique_ptr<CoverageDirectory>, 1024> coverage_{};
+#endif
     std::vector<AotReplacement> hooks_;
     uint32_t profile_ = 0;
     const char* decline_reason_ = "no-native-entry";

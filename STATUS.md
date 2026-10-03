@@ -3,6 +3,31 @@
 > The single source of "what is true right now." No competing status lives elsewhere.
 > Newest entry first. Dates are absolute.
 
+## 2026-10-03 - Exact AOT membership cuts qualified startup wall time by 17.39%
+
+An exact sparse byte index replaces repeated tree searches in the native-entry
+membership query. Actual execution keeps its context, translation, live-code
+and decoded-entry guards. The 246-region input uses 41,984 bytes of membership
+storage plus allocator metadata; the binary grows 512 bytes. The switch is now
+ON by default, with the prior lookup available for comparison.
+
+All **74 public tests** pass. Full **27B O0/O2** runs preserve the reference's
+**270 checkpoint rows, ten images and every native adapter counter**. Six quiet,
+uninstrumented interleaved startup timing legs retain identical images, guest
+deadlines, native work and device/DMA/IRQ/TSC counters. Total 12B wall-time median
+falls **80.0442 to 66.1236 seconds (17.39%)**; minimum falls **17.04%**. Both pass
+the 5% retention gate with no override or excluded pairs. The final four windows
+improve only 2.25% at the median; this does not establish menu or displayed FPS.
+The final public build clears private input and passes all 74 tests again. A
+subsequent clean 27B diagnostic profile preserves every checkpoint/image and
+identifies substantial native-body and renderer costs in the post-boot intervals.
+The sampler's clamped final range needs truthful bounds (`beads-xbox.1.38`).
+
+See [qualification and measurement](docs/RESULTS-AOT-MEMBERSHIP-2026-10-03.md),
+tracked in `beads-xbox.1.37`. Native coverage is unchanged. Full menu AOT, required
+menu interiors, UI audio and original-speed 60 FPS remain open. Keep the working
+OpenGL renderer and prioritize qualified donor reuse.
+
 ## 2026-10-03 - Scalar AOT raises executed main-menu coverage to 70.53%
 
 General shifts, all short/near branch conditions, MOVZX and immediate stores

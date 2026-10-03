@@ -1,6 +1,6 @@
 # AOT-5 burndown: efficient portable native execution
 
-Updated 2026-10-02. Owner: central Beads `beads-xbox.1.25.5`, under
+Updated 2026-10-03. Owner: central Beads `beads-xbox.1.25.5`, under
 `beads-xbox.1.25`. The owner has authorized implementation, with no stubs and
 LLE as the required behavioral foundation. Work solo. Allow no competing builds
 or workers during timing runs. Initial inventory, integer/call and x87-helper
@@ -48,7 +48,7 @@ not equal amounts of effort; they are not a calendar or percentage estimate.
 | ID | Status | Work | Evidence required to finish |
 | --- | --- | --- | --- |
 | 5.1 | Implemented and tested; controlled cost pending | Detect competing work during replay | A controlled foreign process starts and ends inside a leg and still marks it contaminated; owned emulator excluded; observer failure visible; monitor cost and detection limits recorded |
-| 5.2 | Host code inspected; clean attribution waiting for quiet host | Profile the current native path and inspect generated host code | Current binary/source identities; clean separate attribution; generated-body, boundary and fallback costs; native/idle/fallback partitions by phase; ranked bottleneck hypotheses |
+| 5.2 | Clean full-route profile and post-boot interval costs qualified; precise phase leaf attribution open | Profile the current native path and inspect generated host code | Current binary/source identities; clean separate attribution; generated-body, boundary and fallback costs; native/idle/fallback partitions by phase; ranked bottleneck hypotheses |
 | 5.3 | Planned | Improve generated control flow and state handling | Direct block edges and local guest values where justified; exact state on every observable exit; inspect host output; measure each retained transformation against native baseline |
 | 5.4 | Planned | Reduce repeated flag and guard work | Independent tests of defined flags and every affected exit boundary; code/event changes through callbacks remain visible; each proposed hoist has an explicit validity/invalidation argument |
 | 5.5 | Deterministic cache policy validated; further memory work open | Improve certified memory access and avoid unnecessary fallback attempts | Preserve permissions, aliases, self-modifying code and precise faults; diagnose actual fetch-TLB declines; measure callback/invalidation and handoff costs separately where practical |
@@ -59,6 +59,21 @@ Work through 5.1 and 5.2 first. Their findings determine the order of 5.3 throug
 5.5; the list does not claim that every proposed optimization will help. Prepare
 the post-boot workload in 5.6 early enough to avoid optimizing only delay loops.
 Apply 5.7 to each useful landing instead of accumulating an unreviewed rewrite.
+
+### Qualified native efficiency checkpoint (2026-10-03)
+
+The [exact membership index](RESULTS-AOT-MEMBERSHIP-2026-10-03.md) qualifies
+the first retained lookup improvement for the 246-region scalar input. Full
+27B O0/O2 preserve all 270 checkpoints, ten images and native counters; all
+74 public tests pass. Six quiet interleaved native-versus-native legs reduce
+total 12B wall time by **17.39% median / 17.04% minimum**, passing the 5% gate.
+The previous tree path remains selectable. This advances 5.5 and 5.7; it does
+not close post-boot performance or the broader compiler/runtime work. The first
+host profile was contaminated and remains excluded from attribution acceptance.
+A subsequent clean 27B candidate profile verifies all 101,633 leaf samples and
+separate post-boot interval costs. Native bodies and renderer work dominate those
+intervals. The sampler's last bucket clamps the long tail; precise phase leaf
+attribution is tracked in `beads-xbox.1.38`. Observer cost qualification remains open.
 
 ### Near-total coverage assessment (2026-09-25)
 

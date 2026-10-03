@@ -19,6 +19,14 @@ def generate(directory: Path) -> None:
         code = b"\xb8" + i.to_bytes(4, "little") + b"\xe9"
         code += ((destination - (pc + 10)) & 0xffffffff).to_bytes(4, "little")
         regions.append({"name": f"registry_{i}", "base": pc, "code": code.hex()})
+    # Real authored RET bodies with unreachable padding exercise registered
+    # interval geometry independently of decoded entry points. No body is
+    # fabricated by the runtime, and these are not part of the branch cycle.
+    bounds = [(0,1),(63,2),(4093,9),(0x3ffffe,5),(0x400005,3),
+              (0x8003fdfd,65536),(0x803ffffa,10),(0xffff0000,65535)]
+    for i,(pc,size) in enumerate(bounds):
+        regions.append({"name": f"membership_{i}", "base": pc,
+                        "code": (b'\xc3'+b'\x90'*(size-1)).hex()})
     source = directory / "registry-input.json"
     source.write_text(json.dumps({"regions": regions}), encoding="utf-8")
     c, h = directory / "registry.c", directory / "registry.h"
@@ -28,9 +36,13 @@ def generate(directory: Path) -> None:
         out.write("\nconst xlle_aot_region* const registry_regions[] = {\n")
         out.write("".join(f"    &xlle_aot_registry_{i},\n" for i in range(count)))
         out.write("};\n")
+        out.write("const xlle_aot_region* const membership_regions[] = {\n")
+        out.write("".join(f"    &xlle_aot_membership_{i},\n" for i in range(len(bounds))))
+        out.write("};\n")
     with h.open("a", encoding="utf-8") as out:
         out.write('\n#ifdef __cplusplus\nextern "C" {\n#endif\n')
         out.write(f"extern const xlle_aot_region* const registry_regions[{count}];\n")
+        out.write(f"extern const xlle_aot_region* const membership_regions[{len(bounds)}];\n")
         out.write("#ifdef __cplusplus\n}\n#endif\n")
 
 

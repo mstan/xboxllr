@@ -15,6 +15,7 @@ endif()
 
 option(XLLE_WITH_SDL "Build the SDL3 host shell" ON)
 option(XLLE_CPU_BLOCK_CENSUS "Compile guest block execution census (attribution builds only)" OFF)
+option(XLLE_AOT_FAST_MEMBERSHIP "Use exact sparse byte membership for registered AOT ranges" ON)
 option(XLLE_HOST_TIMED_TLB "Use legacy host-time-dependent Unicorn TLB resizing (diagnostic comparison only)" OFF)
 option(XLLE_NATIVE_OPTIMIZATIONS
   "Build local host-native optimized binaries (-march=native on x86_64 GNU/Clang)"
@@ -113,6 +114,7 @@ add_library(xlle_cpu STATIC src/cpu/unicorn_floor.cpp src/cpu/aot_executor.cpp)
 target_include_directories(xlle_cpu PUBLIC ${XLLE_INCLUDES})
 target_include_directories(xlle_cpu PRIVATE ${unicorn_SOURCE_DIR}/include)
 target_link_libraries(xlle_cpu PUBLIC unicorn)
+target_compile_definitions(xlle_cpu PUBLIC XLLE_AOT_FAST_MEMBERSHIP=$<BOOL:${XLLE_AOT_FAST_MEMBERSHIP}>)
 if(XLLE_CPU_BLOCK_CENSUS)
   target_compile_definitions(xlle_cpu PUBLIC XLLE_CPU_BLOCK_CENSUS=1)
 endif()

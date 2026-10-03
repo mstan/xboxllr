@@ -92,9 +92,11 @@ checkpoint and image. The
 with qualified shifts, branches, exact narrow reads and immediate stores.
 Main-menu idle reaches **70.53%** native execution and Settings entry **76.72%**;
 full-route native work reaches **1,815,586,408** instructions. Floor/native O0/O2
-again retain all 270 checkpoints and ten images. The larger selection also
-increases handoffs substantially, so admission/dispatch cost needs native
-performance qualification. Six census intervals reconcile with zero overflow. These are observed
+again retain all 270 checkpoints and ten images. The subsequent
+[exact membership checkpoint](RESULTS-AOT-MEMBERSHIP-2026-10-03.md) preserves
+every native counter and qualifies a **17.39% median / 17.04% minimum reduction**
+in total 12B startup wall time across six quiet interleaved native-versus-native
+legs. Menu performance remains unqualified. Six census intervals reconcile with zero overflow. These are observed
 comparisons, not full machine or hardware equivalence. Full menu AOT and
 60 FPS are unproven.
 
@@ -106,7 +108,13 @@ lowering is qualified. Production MMX and bounded x87 arithmetic/transfer
 services now exist. Broader x87 operations, exception/stack semantics and
 extended-state qualification remain open.
 
-Next: measure native admission/dispatch costs and expand useful post-boot
+The clean candidate profile also retains every checkpoint and route image.
+Post-boot exclusive intervals identify native bodies, OpenGL, vertex and generic
+raster work as substantial costs; exact menu leaf attribution remains open
+because the sampler clamps its last range (`beads-xbox.1.38`).
+
+Next: use that evidence to investigate native body/state-transfer and renderer
+reuse opportunities, refine phase attribution, and expand useful post-boot
 coverage with the measured x87 and kernel/memory gaps, and scale generated compilation units
 without weakening code identity, and qualify general compiler/runtime operations
 from the actual dashboard gaps. Renderer reuse proceeds against the same pinned

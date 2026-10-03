@@ -35,6 +35,17 @@ bool AotExecutor::add_region(const xlle_aot_region& r) {
     AotRegionStats counters{};
     counters.base = r.base;
     region_stats.push_back(counters);
+#if XLLE_AOT_FAST_MEMBERSHIP
+    // All rejection paths precede this update, including overlap and wrapping.
+    // Use 64-bit iteration so the exclusive end never wraps to zero.
+    for (uint64_t at = r.base, end = at + r.code_size; at < end; ++at) {
+        auto& directory = coverage_[at >> 22];
+        if (!directory) directory = std::make_unique<CoverageDirectory>();
+        auto& page = (*directory)[(at >> 12) & 1023];
+        if (!page) page = std::make_unique<CoveragePage>();
+        (*page)[(at >> 6) & 63] |= uint64_t(1) << (at & 63);
+    }
+#endif
     return true;
 }
 
@@ -59,7 +70,14 @@ size_t AotExecutor::region_index(uint32_t pc) const {
 }
 
 bool AotExecutor::contains(uint32_t pc) const {
+#if XLLE_AOT_FAST_MEMBERSHIP
+    const auto* directory = coverage_[pc >> 22].get();
+    if (!directory) return false;
+    const auto* page = (*directory)[(pc >> 12) & 1023].get();
+    return page && ((*page)[(pc >> 6) & 63] & (uint64_t(1) << (pc & 63))) != 0;
+#else
     return region_index(pc) != regions_.size();
+#endif
 }
 
 void* AotExecutor::ram(uint32_t address, size_t size, unsigned access) {

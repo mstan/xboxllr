@@ -106,6 +106,12 @@ C5 must qualify and reduce that cost; the coverage gain is not a speed claim.
 Error-code CPU exception delivery is an existing open LLE gap tracked in
 `beads-xbox.1.36`. No whole C0-C6 stage closes from this checkpoint.
 
+The [exact membership checkpoint](RESULTS-AOT-MEMBERSHIP-2026-10-03.md) advances
+C5 with a qualified general lookup improvement: **17.39% median / 17.04% minimum**
+less total 12B startup wall time in six quiet native-versus-native legs. Full
+27B checkpoints, images and native counters are unchanged. This improves lookup
+cost without changing coverage or handoffs; whole-menu performance remains open.
+
 | ID | Deliverable | Depends on | Difficulty | Gate to close |
 | --- | --- | --- | --- | --- |
 | C0 | Trustworthy program and workload inventory | Existing capture/tools | Medium | Pinned images, initial static graph with explicit gaps, phase/version evidence, reconciled counters and a tested native-required detector |

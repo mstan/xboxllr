@@ -5,18 +5,60 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <vector>
+#include <algorithm>
 
 using namespace xlle;
 static void require(bool okay, const char* message) {
     if (!okay) { std::fprintf(stderr, "AOT registry: %s\n", message); std::exit(1); }
 }
 static constexpr size_t count = 257;
+static void membership_boundaries(UnicornFloor& cpu) {
+    AotExecutor index(cpu);
+    std::vector<const xlle_aot_region*> registered;
+    const auto expected=[&](uint32_t pc) {
+        return std::any_of(registered.begin(),registered.end(),[&](const auto* r) {
+            return uint64_t(pc)>=r->base&&uint64_t(pc)-r->base<r->code_size;
+        });
+    };
+    const auto compare=[&](uint32_t pc) {
+        require(index.contains(pc)==expected(pc),"membership matches independent interval union");
+    };
+    // Empty directories/pages, additions after an earlier miss, and shuffled
+    // address order must all behave like the same mathematical interval union.
+    compare(0);compare(0xffffffffu);
+    for(unsigned n=0;n<8;++n) {
+        const auto* r=membership_regions[(n*3)%8];
+        require(!index.contains(r->base),"new range was previously absent");
+        require(index.add_region(*r),"boundary region registration");registered.push_back(r);
+        for(uint64_t at=r->base;at<uint64_t(r->base)+r->code_size;++at)compare(uint32_t(at));
+        for(int delta=-4;delta<=4;++delta) {
+            compare(r->base+uint32_t(delta));
+            compare(r->base+uint32_t(r->code_size)+uint32_t(delta));
+        }
+    }
+    // A rejected overlap would falsely populate previously empty bytes if the
+    // membership update happened before the registry's validation.
+    auto invalid=*membership_regions[3];invalid.base--;
+    require(!index.add_region(invalid),"overlap rejected before membership change");
+    invalid=*membership_regions[0];invalid.base=0xffffffffu;invalid.code_size=1;
+    require(!index.add_region(invalid),"exclusive end outside registry domain");
+    invalid=*membership_regions[0];invalid.base=0x90000000;invalid.abi_version++;
+    require(!index.add_region(invalid),"wrong ABI never adds coverage");
+    compare(0x3ffffd);compare(0xffffffffu);compare(0x90000000);
+    uint32_t random=0x12345678;
+    for(unsigned i=0;i<100000;++i) {
+        random=random*1664525u+1013904223u;compare(random);
+    }
+    require(index.region_stats.size()==8,"rejected ranges leave counters unchanged");
+}
 int main() {
     XboxMachine machine;
     require(machine.ok() && machine.init_ram(), "initialize machine");
     require(machine.cpu().setup_flat_segments(0x8000), "flat segments");
     auto* cpu = dynamic_cast<UnicornFloor*>(&machine.cpu());
     require(cpu != nullptr, "CPU adapter");
+    membership_boundaries(*cpu);
     AotExecutor index(*cpu);
     for (size_t i = 0; i < count; ++i) {
         const auto* region = registry_regions[(i * 73) % count]; // shuffled address order
