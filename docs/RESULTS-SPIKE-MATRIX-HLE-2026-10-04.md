@@ -1,4 +1,4 @@
-# Native dashboard matrix multiply: retain as an opt-in candidate
+# Native dashboard matrix multiply: parked; no substantial speed gain established
 
 Branch `spike/native-matrix-20261004`, parent `54c102a`; tracking
 `beads-xbox.1.51`. This is a whole-routine HLE replacement, independent of the
@@ -53,15 +53,41 @@ is at build/startup, with no live exchange of HLE and LLE internal state.
 
 Both arms are explicitly contaminated by other host processes. These timings
 do not establish a reliable percentage speedup or original-speed dashboard.
-Retain the narrow opt-in candidate for combined qualification because the
-whole hot routine is removed, its caller contract passes, and the route-level
-screen is favorable. Do not claim a 30.9% FPS gain from the instruction count.
+Park this implementation. Its caller contract passes, but it did not establish
+a substantial dashboard elapsed-time improvement. The 30.9% instruction-count
+change is not sufficient evidence to retain it as an active performance candidate.
 
 Private evidence: main `build/r2-matrix-r1-*`, `build/r2-matrix-tests.log`.
 No firmware, title bytes, generated private header or captures are committed.
 
-End-of-round disposition: preserve this validated opt-in candidate on its remote
-branch, but do not promote it as a proven performance win or change the working
-baseline. The other candidates did not justify a combined integration run.
-Further qualification needs a convincing menu elapsed-time result; the CPU
-work reduction alone is insufficient. No new dashboard speed milestone is claimed.
+Owner disposition, 2026-10-04: **park all experiments from this round**, including
+this one. The code and tests remain on this remote branch for reference, with no
+runtime integration or ongoing qualification. Reopen only on new evidence that
+identifies material host time to remove, not on the guest instruction count alone.
+
+## Why fewer counted instructions need not produce the expected speed gain
+
+The reported 91.9M -> 63.5M counts guest instructions executed by the native CPU
+tier. It neither counts host CPU instructions nor measures milliseconds spent
+in that tier. The new C++ HLE body and adapter also do not appear as equivalent
+retired guest instructions in that counter.
+
+`NativeMatrix::invoke` still uses `UnicornFloor::get_regs` (ten individual
+`uc_reg_read` calls), page-translated argument/input/output transfers, and
+`redirect_native_service`, which uses `set_regs` (ten `uc_reg_write` calls) and
+`uc_emu_stop`. The computation is native, but dispatch and guest state transfer
+still use the emulator. This is not a direct native-to-native AOT call.
+
+The final interval retains 39.9M fallback instructions versus 40.3M before;
+fallback-to-native handoffs are 4,536,916 versus 4,526,619. Whole-route rendered
+draws and vertices are unchanged. Most avoided logical clock units become
+fast-forwarded idle, rather than an earlier end of the fixed guest-time interval.
+This clock accounting does not itself explain host wall time or impose a host
+speed cap.
+
+The logs do not attribute host milliseconds to the original routine, adapter,
+handoffs or unrelated work. Adapter overhead could consume savings; other work
+could dominate; external load could hide a modest gain. Those are explanations
+to distinguish, not measured conclusions. Selecting this hotspot by instruction
+count alone was insufficient. The factual result remains: correctness checks
+pass, fewer guest instructions execute, and substantial menu speedup is unproven.
