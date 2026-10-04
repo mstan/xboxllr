@@ -59,3 +59,9 @@ screen is favorable. Do not claim a 30.9% FPS gain from the instruction count.
 
 Private evidence: main `build/r2-matrix-r1-*`, `build/r2-matrix-tests.log`.
 No firmware, title bytes, generated private header or captures are committed.
+
+End-of-round disposition: preserve this validated opt-in candidate on its remote
+branch, but do not promote it as a proven performance win or change the working
+baseline. The other candidates did not justify a combined integration run.
+Further qualification needs a convincing menu elapsed-time result; the CPU
+work reduction alone is insufficient. No new dashboard speed milestone is claimed.
