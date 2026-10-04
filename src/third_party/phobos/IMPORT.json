@@ -1,0 +1,72 @@
+{
+  "repository": "https://github.com/phobos665/xboxrecomp",
+  "commit": "f01b20ded38856abd3d37b561521cc7013363725",
+  "files": [
+    {
+      "local": "rhi.h",
+      "source": "src/d3d/rhi.h",
+      "source_file_sha256": "8f5ee099f8c2bd02af008495edf3ec3c43abf27c607d200d260625b47d0ca383",
+      "adapted_file_sha256": "8b13f57e1fe96e0f17cf08b49cbaa4509850e22b4658849c6c6b3cc318f51462"
+    },
+    {
+      "local": "rhi_backend.h",
+      "source": "src/d3d/rhi_backend.h",
+      "source_file_sha256": "cad379e674926c9a5a70956cb65535401635593c2441a186be799b03476cc9c9",
+      "adapted_file_sha256": "cad379e674926c9a5a70956cb65535401635593c2441a186be799b03476cc9c9"
+    },
+    {
+      "local": "rhi.c",
+      "source": "src/d3d/rhi.c",
+      "source_file_sha256": "2039e35765ea740c1dfb654ed63ac8ed4499803a6f96b427f31eb13fd0c468c9",
+      "adapted_file_sha256": "2039e35765ea740c1dfb654ed63ac8ed4499803a6f96b427f31eb13fd0c468c9"
+    },
+    {
+      "local": "rhi_d3d11.c",
+      "source": "src/d3d/rhi_d3d11.c",
+      "source_file_sha256": "f9c35de8ec9d12a28c3786d5d8974d40a1d2f37b0a5aa5de49947b8a30d8cf77",
+      "adapted_file_sha256": "afaed893784fb11caeae6d4b64b34ad597a2824d950afb04be5b463c26e76164"
+    },
+    {
+      "local": "d3d8_combiners.h",
+      "source": "src/d3d/d3d8_combiners.h",
+      "source_file_sha256": "08931a33ec7465ffa36fb17620ed6bfb72b2c1b0c64532b92a2a3e544277a5c9",
+      "adapted_file_sha256": "08931a33ec7465ffa36fb17620ed6bfb72b2c1b0c64532b92a2a3e544277a5c9"
+    },
+    {
+      "local": "nv2a_vsh.h",
+      "source": "src/kernel/nv2a_vsh.h",
+      "source_file_sha256": "00efa465af8c8620afbbc374833f5cf82e7751dcc2513e1a1c343a5c717a43d2",
+      "adapted_file_sha256": "00efa465af8c8620afbbc374833f5cf82e7751dcc2513e1a1c343a5c717a43d2"
+    },
+    {
+      "local": "nv2a_vsh.c",
+      "source": "src/kernel/nv2a_vsh.c",
+      "source_file_sha256": "30ff31a2df01e3b4099e17d789add93c3f20bf5d00ab6ec087819d61c1f45c96",
+      "adapted_file_sha256": "30ff31a2df01e3b4099e17d789add93c3f20bf5d00ab6ec087819d61c1f45c96"
+    },
+    {
+      "local": "vsh_hlsl.c",
+      "source": "src/d3d/d3d8_vsh.c",
+      "source_file_sha256": "99731875e349d61f80dbecada1eff1f8801f96bfc9feab124bc2698ec1b467d9",
+      "adapted_file_sha256": "2f3ac0f14c45cf88ba661d0cc9812e1057d6f72fbfe72d92696724a5583d5e29"
+    },
+    {
+      "local": "combiner_hlsl.c",
+      "source": "src/d3d/d3d8_combiners.c",
+      "source_file_sha256": "665aab14c418697db133b94da77aab381205cee292a7d72bd4325b74025aa6cf",
+      "adapted_file_sha256": "d588e460e7e292197340536a5f2426256f7200c4374cb43e0f64eac61efbf5be"
+    },
+    {
+      "local": "COPYING",
+      "source": "LICENSE",
+      "source_file_sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+      "adapted_file_sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    },
+    {
+      "local": "LICENSE.upstream-MIT",
+      "source": "LICENSE.upstream-MIT",
+      "source_file_sha256": "de6601cea3a6bf2d821b6b89f59b9d6e719cc017e530bcb4bbe2fcf7306e6dda",
+      "adapted_file_sha256": "de6601cea3a6bf2d821b6b89f59b9d6e719cc017e530bcb4bbe2fcf7306e6dda"
+    }
+  ]
+}
