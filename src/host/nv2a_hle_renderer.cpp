@@ -41,18 +41,18 @@ std::array<float, 4> argb(uint32_t c) {
   X(PFNGLCREATESHADERPROC, CreateShader)                                               \
   X(PFNGLSHADERSOURCEPROC, ShaderSource)                                               \
   X(PFNGLCOMPILESHADERPROC, CompileShader)                                             \
-  X(PFNGLGETSHADERIVPROC, GetShaderiv) X(                                              \
-      PFNGLGETSHADERINFOLOGPROC,                                                       \
-      GetShaderInfoLog) X(PFNGLDELETESHADERPROC,                                       \
-                          DeleteShader) X(PFNGLCREATEPROGRAMPROC,                      \
-                                          CreateProgram) X(PFNGLATTACHSHADERPROC,      \
-                                                           AttachShader)               \
-      X(PFNGLLINKPROGRAMPROC, LinkProgram) X(                                          \
-          PFNGLGETPROGRAMIVPROC,                                                       \
-          GetProgramiv) X(PFNGLGETPROGRAMINFOLOGPROC,                                  \
-                          GetProgramInfoLog) X(PFNGLDELETEPROGRAMPROC,                 \
-                                               DeleteProgram) X(PFNGLUSEPROGRAMPROC,   \
-                                                                UseProgram)            \
+  X(PFNGLGETSHADERIVPROC, GetShaderiv)                                                 \
+  X(PFNGLGETSHADERINFOLOGPROC, GetShaderInfoLog) X(                                    \
+      PFNGLDELETESHADERPROC,                                                           \
+      DeleteShader) X(PFNGLCREATEPROGRAMPROC,                                          \
+                      CreateProgram) X(PFNGLATTACHSHADERPROC,                          \
+                                       AttachShader) X(PFNGLLINKPROGRAMPROC,           \
+                                                       LinkProgram)                    \
+      X(PFNGLGETPROGRAMIVPROC, GetProgramiv) X(                                        \
+          PFNGLGETPROGRAMINFOLOGPROC,                                                  \
+          GetProgramInfoLog) X(PFNGLDELETEPROGRAMPROC,                                 \
+                               DeleteProgram) X(PFNGLUSEPROGRAMPROC,                   \
+                                                UseProgram)                            \
           X(PFNGLGETUNIFORMLOCATIONPROC, GetUniformLocation) X(                        \
               PFNGLUNIFORM1IPROC,                                                      \
               Uniform1i) X(PFNGLUNIFORM1FPROC,                                         \
@@ -104,7 +104,38 @@ class HleRenderer final : public Nv2aRenderer {
 #define DECL(type, name) type name = nullptr;
   HLE_GL_PROCS(DECL)
 #undef DECL
+  PFNGLMAPBUFFERRANGEPROC MapBufferRange = nullptr;
+  PFNGLUNMAPBUFFERPROC UnmapBuffer = nullptr;
+  PFNGLBINDBUFFERRANGEPROC BindBufferRange = nullptr;
   GLuint vao_ = 0, vbo_ = 0, ibo_ = 0, fbo_ = 0;
+  size_t vertex_capacity_ = 0, vertex_cursor_ = 0;
+  size_t index_capacity_ = 0, index_cursor_ = 0;
+  uint64_t stream_bytes_ = 0, raw_draws_ = 0;
+  size_t stream_alignment_ = 256;
+  size_t upload_ring(GLenum target, GLuint buffer, size_t &capacity,
+                     size_t &cursor, const void *data, size_t bytes) {
+    // NoRain's WRITE_DISCARD/WRITE_NO_OVERWRITE ring policy, using GL
+    // orphaning.
+    BindBuffer(target, buffer);
+    cursor = ((cursor + stream_alignment_ - 1) / stream_alignment_) *
+             stream_alignment_;
+    if (bytes > capacity || cursor + bytes > capacity) {
+      capacity = std::max(size_t(1024 * 1024), std::max(capacity, bytes));
+      BufferData(target, capacity, nullptr, GL_STREAM_DRAW);
+      cursor = 0;
+    }
+    void *mapped = MapBufferRange(target, cursor, bytes,
+                                  GL_MAP_WRITE_BIT | GL_MAP_UNSYNCHRONIZED_BIT);
+    if (!mapped)
+      throw std::runtime_error("vertex/index ring mapping failed");
+    std::memcpy(mapped, data, bytes);
+    if (!UnmapBuffer(target))
+      throw std::runtime_error("vertex/index ring invalidated");
+    const size_t offset = cursor;
+    cursor += bytes;
+    stream_bytes_ += bytes;
+    return offset;
+  }
   GLuint samplers_[4]{};
   struct Plane {
     Nv2aHleSurface desc;
@@ -205,7 +236,6 @@ class HleRenderer final : public Nv2aRenderer {
   }
   std::string vertex_source(const Nv2aHleDraw &p) {
     std::string header = R"GLSL(#version 430 core
-layout(std430,binding=0) readonly buffer VertexInputs { vec4 attributes[]; };
 uniform vec4 c[192];
 uniform vec2 surfaceSize;
 uniform vec4 clipRange;
@@ -229,9 +259,48 @@ vec2 roundScreenCoords(vec2 p) { return trunc(p*16.0)/16.0; }
 vec4 NaNToOne(vec4 c) { return mix(c,vec4(1),isnan(c)); }
 vec4 color(vec4 c) { return clamp(NaNToOne(c),0.0,1.0); }
 )GLSL";
-    for (unsigned i = 0; i < 16; ++i)
-      header += "#define v" + std::to_string(i) +
-                " attributes[gl_VertexID*16+" + std::to_string(i) + "]\n";
+    if (p.raw_vertex_count) {
+      header += R"GLSL(
+layout(std430,binding=0) readonly buffer VertexInputs { uint words[]; };
+uniform ivec4 vertexLayout[16];
+uniform vec4 defaultAttributes[16];
+uint byteAt(uint a) { return (words[a>>2] >> ((a&3u)*8u)) & 255u; }
+uint shortAt(uint a) { return byteAt(a) | (byteAt(a+1u)<<8u); }
+uint wordAt(uint a) {
+  if ((a&3u)==0u) return words[a>>2];
+  return shortAt(a) | (shortAt(a+2u)<<16u);
+}
+vec4 inputAttribute(int slot) {
+  ivec4 d=vertexLayout[slot];
+  if(d.w==0) return defaultAttributes[slot];
+  uint a=uint(d.x)+uint(gl_VertexID)*uint(d.y);
+  vec4 v=vec4(0,0,0,1);
+  if(d.z==6) {
+    int wordValue=int(wordAt(a));
+    v.xyz=max(vec3(float((wordValue<<21)>>21)/1023.0,
+                   float((wordValue<<10)>>21)/1023.0,
+                   float(wordValue>>22)/511.0),vec3(-1));
+  } else for(int c=0;c<d.w;++c) {
+    if(d.z==0 || d.z==4) v[c]=float(byteAt(a+uint(c)))/255.0;
+    else if(d.z==2) v[c]=uintBitsToFloat(wordAt(a+uint(c)*4u));
+    else {
+      int x=(int(shortAt(a+uint(c)*2u))<<16)>>16;
+      v[c]=d.z==1 ? max(float(x)/32767.0,-1.0) : float(x);
+    }
+  }
+  return v;
+}
+)GLSL";
+      for (unsigned i = 0; i < 16; ++i)
+        header += "#define v" + std::to_string(i) + " inputAttribute(" +
+                  std::to_string(i) + ")\n";
+    } else {
+      header += "layout(std430,binding=0) readonly buffer VertexInputs { vec4 "
+                "attributes[]; };\n";
+      for (unsigned i = 0; i < 16; ++i)
+        header += "#define v" + std::to_string(i) +
+                  " attributes[gl_VertexID*16+" + std::to_string(i) + "]\n";
+    }
     std::string body;
     if (p.transform_mode == 2) {
       MString *h = mstring_new();
@@ -309,6 +378,7 @@ gl_PointSize=max(oPts.x,1.0);
     s.alpha_func = static_cast<PshAlphaFunc>(r[N::kRasterAlphaFunc] & 7);
     std::string key(reinterpret_cast<const char *>(&s), sizeof(s));
     key.append(reinterpret_cast<const char *>(&p.transform_mode), 4);
+    key.push_back(p.raw_vertex_count ? 1 : 0);
     if (!p.program.empty())
       key.append(reinterpret_cast<const char *>(p.program.data()),
                  p.program.size() * 16);
@@ -666,6 +736,9 @@ public:
       SDL_DestroyWindow(window_);
     if (owns_video_)
       SDL_QuitSubSystem(SDL_INIT_VIDEO);
+    std::printf("[hle-streams] raw-draws=%llu upload-bytes=%llu\n",
+                (unsigned long long)raw_draws_,
+                (unsigned long long)stream_bytes_);
     std::printf("[hle-renderer] draws=%llu vertices=%llu shaders=%zu "
                 "uploads=%llu resolves=%llu resident-texture-samples=%llu\n",
                 (unsigned long long)draws_, (unsigned long long)vertices_,
@@ -704,7 +777,13 @@ public:
     return false;                                                              \
   }
     HLE_GL_PROCS(LOAD)
+    LOAD(PFNGLMAPBUFFERRANGEPROC, MapBufferRange)
+    LOAD(PFNGLUNMAPBUFFERPROC, UnmapBuffer)
+    LOAD(PFNGLBINDBUFFERRANGEPROC, BindBufferRange)
 #undef LOAD
+    GLint alignment = 0;
+    glGetIntegerv(GL_SHADER_STORAGE_BUFFER_OFFSET_ALIGNMENT, &alignment);
+    stream_alignment_ = std::max(size_t(16), size_t(alignment));
     GenVertexArrays(1, &vao_);
     GenBuffers(1, &vbo_);
     GenBuffers(1, &ibo_);
@@ -876,10 +955,39 @@ public:
   bool submit_hle_draw(const Nv2aHleDraw &p, std::string &error) override {
     try {
       Context context(*this);
-      if (p.vertices.empty() || p.indices.empty())
+      if (p.indices.empty())
         return true;
+      if (p.vertices.empty() && !p.raw_vertex_count)
+        throw std::runtime_error("draw has indices but no vertices");
+      if (p.raw_vertex_count) {
+        if (p.raw_vertices.empty() || p.raw_vertices.size() % 4)
+          throw std::runtime_error("raw vertex storage alignment");
+        for (auto index : p.indices)
+          if (index >= p.raw_vertex_count)
+            throw std::runtime_error("raw vertex index bounds");
+        for (const auto &d : p.vertex_layout) {
+          if (d[3] == 0)
+            continue;
+          const int size = (d[2] == 2 || d[2] == 6)   ? 4
+                           : (d[2] == 1 || d[2] == 5) ? 2
+                                                      : 1;
+          if (d[0] < 0 || d[1] < 0 || d[3] < 0 || d[3] > 4 ||
+              (d[2] != 0 && d[2] != 1 && d[2] != 2 && d[2] != 4 && d[2] != 5 &&
+               d[2] != 6) ||
+              uint64_t(d[0]) + uint64_t(d[1]) * (p.raw_vertex_count - 1) +
+                      size * d[3] >
+                  p.raw_vertices.size())
+            throw std::runtime_error("raw vertex attribute bounds or format");
+        }
+      }
       auto &prog = program(p);
       UseProgram(prog.id);
+      if (p.raw_vertex_count) {
+        Uniform4iv(uniform(prog, "vertexLayout"), 16,
+                   p.vertex_layout[0].data());
+        Uniform4fv(uniform(prog, "defaultAttributes"), 16,
+                   p.default_attributes[0].data());
+      }
       ensure_plane(p.color);
       if (p.depth.width)
         ensure_plane(p.depth);
@@ -1119,16 +1227,22 @@ public:
         throw std::runtime_error("primitive mode");
       }
       BindVertexArray(vao_);
-      BindBuffer(GL_SHADER_STORAGE_BUFFER, vbo_);
-      BufferData(GL_SHADER_STORAGE_BUFFER,
-                 p.vertices.size() * sizeof(Nv2aHleDraw::Vertex),
-                 p.vertices.data(), GL_STREAM_DRAW);
-      BindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, vbo_);
-      BindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo_);
-      BufferData(GL_ELEMENT_ARRAY_BUFFER, draw_indices->size() * 4,
-                 draw_indices->data(), GL_STREAM_DRAW);
+      const size_t vertex_bytes =
+          p.raw_vertex_count ? p.raw_vertices.size()
+                             : p.vertices.size() * sizeof(Nv2aHleDraw::Vertex);
+      const void *vertex_data =
+          p.raw_vertex_count ? static_cast<const void *>(p.raw_vertices.data())
+                             : static_cast<const void *>(p.vertices.data());
+      const auto vertex_offset =
+          upload_ring(GL_SHADER_STORAGE_BUFFER, vbo_, vertex_capacity_,
+                      vertex_cursor_, vertex_data, vertex_bytes);
+      BindBufferRange(GL_SHADER_STORAGE_BUFFER, 0, vbo_, vertex_offset,
+                      vertex_bytes);
+      const auto index_offset = upload_ring(
+          GL_ELEMENT_ARRAY_BUFFER, ibo_, index_capacity_, index_cursor_,
+          draw_indices->data(), draw_indices->size() * 4);
       glDrawElements(mode, GLsizei(draw_indices->size()), GL_UNSIGNED_INT,
-                     nullptr);
+                     reinterpret_cast<const void *>(index_offset));
       if ((mask & 0x01010101) && right > x && bottom > y)
         c->dirty = true;
       if (d && right > x && bottom > y &&
@@ -1140,7 +1254,8 @@ public:
       if (err != GL_NO_ERROR)
         throw std::runtime_error("OpenGL error " + std::to_string(err));
       ++draws_;
-      vertices_ += p.vertices.size();
+      vertices_ += p.raw_vertex_count ? p.raw_vertex_count : p.vertices.size();
+      raw_draws_ += p.raw_vertex_count != 0;
       return true;
     } catch (const std::exception &e) {
       error = e.what();
