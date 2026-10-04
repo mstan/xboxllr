@@ -511,7 +511,37 @@ static void native_service_redirect() {
             "native service work is not fabricated AOT retirement");
 }
 
+static void direct_native_service(bool decline) {
+    XboxMachine m;
+    prepare(m, xlle_aot_chain_a);
+    require(m.cpu().write_mem(0x1100, xlle_aot_chain_b.code, xlle_aot_chain_b.code_size), "service body");
+    require(m.register_aot_region(xlle_aot_chain_a) && m.register_aot_region(xlle_aot_chain_b), "service callers");
+    auto& cpu = static_cast<UnicornFloor&>(m.cpu());
+    unsigned calls = 0;
+    require(cpu.register_native_service(0x1100, [&](auto& state, const auto& memory) {
+        uint32_t untouched = 0x1234;
+        require(!memory.read(memory.opaque, 0xfffffffdu, &untouched, 4), "wrapping read declines");
+        require(!memory.write(memory.opaque, 0xfffffffdu, &untouched, 4), "wrapping write declines");
+        if (decline) return false;
+        state.gpr[0] += 7;
+        state.eip = 0x1000;
+        ++calls;
+        return true;
+    }), "register direct service");
+    run_exact(m, 0xf00, 201);
+    const auto stats = m.aot_stats();
+    if (!decline) {
+        require(calls == 99 && stats.native_service_calls == 99, "direct calls without emulator entry");
+        require(cpu.get_regs().eax == 793 && cpu.get_regs().eip == 0x1100, "live register return");
+    } else {
+        require(!calls && stats.native_service_declines && cpu.get_regs().eax == 100, "decline retains real guest function");
+    }
+    require(stats.retired + stats.fallback_insns == 201, "HLE does not invent retired instructions");
+}
+
 int main() {
+    direct_native_service(false);
+    direct_native_service(true);
     connected_regions(false, false);
     connected_regions(true, false);
     connected_regions(true, true);

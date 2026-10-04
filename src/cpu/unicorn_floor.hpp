@@ -62,6 +62,9 @@ public:
     // Compiled artifacts and hooks must outlive the floor. Configure between runs.
     bool register_aot_region(const xlle_aot_region& region);
     bool register_aot_replacement(const AotReplacement& replacement);
+    // Completes a native service while connected AOT retains live registers.
+    // The ordinary entry adapter remains available for cold/non-native callers.
+    bool register_native_service(uint32_t entry, NativeService service);
     // Observe a real guest function entry; the original function still runs.
     // Used by the HLE renderer to retire resources at allocator boundaries.
     bool observe_entry(uint32_t address, std::function<void()> callback);

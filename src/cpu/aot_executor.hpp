@@ -17,6 +17,7 @@ public:
     explicit AotExecutor(UnicornFloor& cpu) : cpu_(cpu) {}
     bool add_region(const xlle_aot_region& region);
     bool add_replacement(const AotReplacement& hook);
+    bool add_service(uint32_t entry, NativeService service);
     void set_profile(uint32_t profile) { profile_ = profile; }
     void set_bulk_registers(bool enabled) { bulk_registers_ = enabled; }
     bool contains(uint32_t pc) const;
@@ -31,6 +32,8 @@ private:
     static int read32(void* opaque, uint32_t address, uint32_t* value);
     static int read_narrow(void* opaque, uint32_t address, unsigned size, uint32_t* value);
     static int write32(void* opaque, uint32_t address, uint32_t value);
+    static bool service_read(void*, uint32_t, void*, size_t);
+    static bool service_write(void*, uint32_t, const void*, size_t);
     void commit_ram(uint8_t* host, uint64_t value, size_t size);
     static xlle_aot_exit mmx_load64(void* opaque, unsigned reg, uint32_t address);
     static xlle_aot_exit mmx_store64(void* opaque, unsigned reg, uint32_t address, unsigned non_temporal);
@@ -55,6 +58,7 @@ private:
     std::array<std::unique_ptr<CoverageDirectory>, 1024> coverage_{};
 #endif
     std::vector<AotReplacement> hooks_;
+    std::map<uint32_t, NativeService> services_;
     uint32_t profile_ = 0;
     const char* decline_reason_ = "no-native-entry";
     struct RamAccess {

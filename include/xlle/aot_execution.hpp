@@ -1,11 +1,24 @@
 #pragma once
 #include "xlle/aot_runtime.h"
+#include <cstddef>
+#include <functional>
 
 namespace xlle {
+
+// Build-selected whole-function HLE. The caller ABI, not instruction history,
+// defines the result. RAM methods certify the complete span before writing.
+// A declined callback must leave state and guest memory untouched.
+struct NativeServiceMemory {
+    void* opaque;
+    bool (*read)(void*, uint32_t, void*, size_t);
+    bool (*write)(void*, uint32_t, const void*, size_t);
+};
+using NativeService = std::function<bool(xlle_aot_state&, const NativeServiceMemory&)>;
 
 struct AotExecutionStats {
     uint64_t attempts = 0, invocations = 0, retired = 0;
     uint64_t chained_entries = 0;
+    uint64_t native_service_calls = 0, native_service_declines = 0;
     uint64_t fallback_runs = 0, fallback_insns = 0, handoffs = 0;
     uint64_t context_declines = 0, code_tlb_declines = 0;
     uint64_t memory_reads = 0, memory_writes = 0, memory_declines = 0;

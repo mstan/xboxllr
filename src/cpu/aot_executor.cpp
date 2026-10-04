@@ -63,6 +63,31 @@ bool AotExecutor::add_replacement(const AotReplacement& h) {
     return true;
 }
 
+bool AotExecutor::add_service(uint32_t entry, NativeService service) {
+    return service && services_.emplace(entry, std::move(service)).second;
+}
+
+bool AotExecutor::service_read(void* opaque, uint32_t address, void* out, size_t size) {
+    auto& self = *static_cast<AotExecutor*>(opaque);
+    auto* source = self.ram(address, size, XLLE_UNICORN_AOT_ACCESS_READ);
+    if (!source) return false;
+    std::memcpy(out, source, size);
+    return true;
+}
+
+bool AotExecutor::service_write(void* opaque, uint32_t address, const void* data, size_t size) {
+    auto& self = *static_cast<AotExecutor*>(opaque);
+    auto* destination = static_cast<uint8_t*>(self.ram(address, size, XLLE_UNICORN_AOT_ACCESS_WRITE));
+    if (!destination) return false;
+    std::memcpy(destination, data, size);
+    for (const auto& m : self.cpu_.host_ram_) {
+        uintptr_t delta = reinterpret_cast<uintptr_t>(destination) - reinterpret_cast<uintptr_t>(m.host);
+        if (delta < m.size && size <= m.size - delta)
+            xlle_unicorn_invalidate_ram(self.cpu_.uc_, m.base + static_cast<uint32_t>(delta), size);
+    }
+    return true;
+}
+
 void AotExecutor::observe_entry(uint32_t address) {
     const size_t i = region_index(address);
     if (i < regions_.size()) observed_regions_[i] = true;
@@ -385,8 +410,34 @@ uint64_t AotExecutor::execute(uint32_t pc, uint64_t budget) {
     // Keep the register ABI live across already-compiled connected regions,
     // like function-level donor execution. Device deadlines still bound this
     // entire invocation; unsupported instructions and observed entries exit.
+    unsigned consecutive_services = 0;
     while (!profile_ && state.retired > start && state.retired - start < budget &&
            (result == XLLE_AOT_EXTERNAL || result == XLLE_AOT_COMPLETE)) {
+        auto service = services_.find(state.eip);
+        if (service != services_.end()) {
+            // Bound service-only cycles without pretending HLE executed guest
+            // instructions. Real native/guest instructions own the clock.
+            if (++consecutive_services > 256) {
+                cpu_.request_stop("HLE: native services cycled without caller progress");
+                break;
+            }
+            auto proposed = state;
+            const NativeServiceMemory memory{this, service_read, service_write};
+            bool accepted = false;
+            try { accepted = service->second(proposed, memory); }
+            catch (const std::exception& e) { cpu_.request_stop(e.what()); break; }
+            if (!accepted) { ++stats.native_service_declines; break; }
+            if (proposed.retired != state.retired || proposed.eip == state.eip) {
+                cpu_.request_stop("HLE: service violated clock/return contract");
+                break;
+            }
+            state = proposed;
+            ++stats.native_service_calls;
+            read_access_ = {};
+            write_access_ = {};
+            continue;
+        }
+        consecutive_services = 0;
         const size_t next = region_index(state.eip);
         if (next == regions_.size() || observed_regions_[next]) break;
         const auto* next_region = regions_[next];
@@ -450,6 +501,10 @@ bool UnicornFloor::register_aot_region(const xlle_aot_region& region) {
 }
 bool UnicornFloor::register_aot_replacement(const AotReplacement& h) {
     return aot_ && aot_->add_replacement(h);
+}
+bool UnicornFloor::register_native_service(uint32_t entry, NativeService service) {
+    if (!aot_) aot_ = std::make_unique<AotExecutor>(*this);
+    return aot_->add_service(entry, std::move(service));
 }
 void UnicornFloor::set_aot_profile(uint32_t profile) {
     if (aot_) aot_->set_profile(profile);

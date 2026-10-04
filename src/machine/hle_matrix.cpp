@@ -29,10 +29,29 @@ void transfer(UnicornFloor &cpu, uint32_t va, void *data, size_t bytes,
 }
 struct NativeMatrix {
   uint64_t calls = 0;
+  uint64_t direct_calls = 0, cold_calls = 0;
   ~NativeMatrix() {
-    std::printf("[hle-matrix] multiply-calls=%llu\n", (unsigned long long)calls);
+    std::printf("[hle-matrix] multiply-calls=%llu direct-calls=%llu cold-calls=%llu\n",
+                (unsigned long long)calls, (unsigned long long)direct_calls,
+                (unsigned long long)cold_calls);
+  }
+  bool direct(xlle_aot_state &state, const NativeServiceMemory &memory) {
+    uint32_t frame[4];
+    HleMatrix a, b;
+    if (!memory.read(memory.opaque, state.gpr[4], frame, sizeof(frame)) ||
+        !memory.read(memory.opaque, frame[2], a.data(), sizeof(a)) ||
+        !memory.read(memory.opaque, frame[3], b.data(), sizeof(b))) return false;
+    auto out = hle_matrix_multiply(a, b);
+    if (!memory.write(memory.opaque, frame[1], out.data(), sizeof(out))) return false;
+    state.gpr[0] = frame[1];
+    state.gpr[4] += 16;
+    state.eip = frame[0];
+    ++calls;
+    ++direct_calls;
+    return true;
   }
   void invoke(UnicornFloor &cpu) {
+    ++cold_calls;
     auto regs = cpu.get_regs();
     uint32_t frame[4];
     transfer(cpu, regs.esp, frame, sizeof(frame), false);
@@ -62,6 +81,9 @@ void XboxMachine::install_hle_matrix() {
   if (std::memcmp(code.data(), P::code, code.size()))
     return;
   auto native = std::make_shared<NativeMatrix>();
+  if (!cpu.register_native_service(P::entry, [native](auto &state, const auto &memory) {
+        return native->direct(state, memory);
+      })) throw std::runtime_error("native matrix: cannot install direct service");
   if (!cpu.observe_entry(P::entry, [native, &cpu] { native->invoke(cpu); }))
     throw std::runtime_error("native matrix: cannot install entry");
   hle_matrix_installed_ = true;
