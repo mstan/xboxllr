@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 project(xlle CXX C)
 
 # ---- xlle: LLE-first original-Xbox platform. A0 foundations. ----
-# Harvest strategy (DESIGN §3): CPU floor from Unicorn (QEMU x86 core), host layer from
+# Harvest strategy (DESIGN Â§3): CPU floor from Unicorn (QEMU x86 core), host layer from
 # SDL3. Both pulled via FetchContent so the tree stays clean and reproducible. The engine
 # and its CPU-only tests build with NO copyrighted firmware.
 
@@ -181,6 +181,12 @@ add_library(xlle_host STATIC src/host/sdl_shell.cpp src/host/xid_input.cpp
 if(XLLE_RENDERER STREQUAL "HLE")
   target_sources(xlle_machine PRIVATE src/machine/nv2a_hle.cpp)
   target_sources(xlle_machine PRIVATE src/machine/hle_allocation_observers.cpp)
+  set(XLLE_XDK_CONSTANT_PROFILE "" CACHE FILEPATH "Private complete XDK constant upload ABI header")
+  if(XLLE_XDK_CONSTANT_PROFILE)
+    target_sources(xlle_machine PRIVATE src/machine/hle_xdk_constants.cpp)
+    target_compile_definitions(xlle_machine PUBLIC XLLE_XDK_CONSTANT_HLE=1)
+    target_compile_definitions(xlle_machine PRIVATE XLLE_XDK_CONSTANT_PROFILE_HEADER="${XLLE_XDK_CONSTANT_PROFILE}")
+  endif()
   set(XLLE_XDK_DRAW_PROFILE "" CACHE FILEPATH "Private byte-pinned native XDK draw ABI header")
   if(XLLE_XDK_DRAW_PROFILE)
     if(NOT EXISTS "${XLLE_XDK_DRAW_PROFILE}")
@@ -347,6 +353,12 @@ if(XLLE_RENDERER STREQUAL "LLE")
   add_test(NAME nv2a COMMAND test_nv2a)
 endif()
 if(XLLE_RENDERER STREQUAL "HLE")
+  if(XLLE_XDK_CONSTANT_PROFILE)
+    add_executable(test_hle_xdk_constants tests/test_hle_xdk_constants.cpp)
+    target_link_libraries(test_hle_xdk_constants PRIVATE xlle_cpu)
+    target_compile_definitions(test_hle_xdk_constants PRIVATE XLLE_XDK_CONSTANT_PROFILE_HEADER="${XLLE_XDK_CONSTANT_PROFILE}")
+    add_test(NAME hle_xdk_constants COMMAND test_hle_xdk_constants)
+  endif()
   add_executable(test_nv2a_hle_renderer tests/test_nv2a_hle_renderer.cpp)
   target_link_libraries(test_nv2a_hle_renderer PRIVATE xlle_host)
   add_test(NAME nv2a_hle_renderer COMMAND test_nv2a_hle_renderer)

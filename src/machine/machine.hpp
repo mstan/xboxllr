@@ -1,4 +1,4 @@
-// xlle — XboxMachine: the guest memory map (and, later, devices) around the CPU floor.
+// xlle â€” XboxMachine: the guest memory map (and, later, devices) around the CPU floor.
 // A2 foundation. Layout: 64 MB unified RAM at 0x0; the flash BIOS mirrored across
 // 0xFF000000-0xFFFFFFFF (256KB image, 64 mirrors in the 16MB window).
 #pragma once
@@ -293,6 +293,10 @@ public:
 private:
     void install_hle_allocation_observers();
     bool hle_allocation_observers_installed_ = false;
+#ifdef XLLE_XDK_CONSTANT_HLE
+    void install_hle_xdk_constants();
+    bool hle_xdk_constants_installed_ = false;
+#endif
 #if XLLE_XDK_DRAW_SPIKE
     void install_hle_xdk_draw();
     bool hle_xdk_draw_installed_ = false;

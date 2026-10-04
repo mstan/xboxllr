@@ -1,4 +1,4 @@
-// xlle — XboxMachine implementation.
+// xlle â€” XboxMachine implementation.
 #include "machine/machine.hpp"
 
 #include <algorithm>
@@ -85,7 +85,7 @@ bool XboxMachine::load_blob(uint32_t addr, const std::string& path) {
 }
 
 void XboxMachine::init_devices() {
-    // A device faults the machine by asking the CPU floor for a loud stop (PRINCIPLES §3).
+    // A device faults the machine by asking the CPU floor for a loud stop (PRINCIPLES Â§3).
     FaultFn fault = [this](const std::string& why) { cpu_->request_stop(why); };
 
     auto pci = std::make_unique<PciHost>(fault);
@@ -102,7 +102,7 @@ void XboxMachine::init_devices() {
     // ACPI/PM controller behind the LPC I/O BAR at 0x8000 (kernel-init timing, GPIO, GPE).
     io_devices_.push_back(std::make_unique<XboxPm>(fault));
 
-    // LPC47M157 SuperIO ports: PRESENT ON DEVKITS ONLY. On the retail console these float —
+    // LPC47M157 SuperIO ports: PRESENT ON DEVKITS ONLY. On the retail console these float â€”
     // silicon (agent) confirms 0x2e/0x2f/0x4e read 0xFF. The kernel's HAL probes for the chip
     // and must see "absent" (open bus), not a fault. (xemu's retail machine likewise omits it.)
     io_devices_.push_back(std::make_unique<OpenBus>(0x002E, 2, "superio-2e (absent)"));
@@ -113,7 +113,7 @@ void XboxMachine::init_devices() {
     pic_ = pic.get();
     io_devices_.push_back(std::move(pic));
     // Route the SMBus completion interrupt (IRQ 11, silicon LPC cfg 0x64) to the PIC now that
-    // it exists — this unblocks the kernel's interrupt-driven HAL SMBus reads.
+    // it exists â€” this unblocks the kernel's interrupt-driven HAL SMBus reads.
     smbus_raw->set_irq([this](int irq, bool level) { pic_->raise(irq, level); }, 11);
 
     auto pit = std::make_unique<Pit8254>();
@@ -126,7 +126,7 @@ void XboxMachine::init_devices() {
     io_devices_.push_back(std::make_unique<Mc146818Rtc>());
     // Extended-CMOS index/data ports (0x72/0x73): not decoded by the MCPX RTC. The kernel
     // pokes them during shutdown/century handling; xemu leaves them unmapped ISA space and
-    // boots this same retail kernel (writes discarded, reads float) — open bus, not a fault.
+    // boots this same retail kernel (writes discarded, reads float) â€” open bus, not a fault.
     io_devices_.push_back(std::make_unique<OpenBus>(0x0072, 2, "cmos-ext (absent)"));
 
     // IDE: primary channel (HDD master, ATAPI DVD slave) + bus master at BAR4 (0xFF60,
@@ -141,14 +141,14 @@ void XboxMachine::init_devices() {
         });
     io_devices_.push_back(std::move(ide));
     // The bus-master decode follows BAR4 if the kernel reprograms it. A BAR sizing probe
-    // (all-ones write) is unmodeled in our config space — stop loudly so it gets modelled
+    // (all-ones write) is unmodeled in our config space â€” stop loudly so it gets modelled
     // instead of silently corrupting the stored base.
     pci_->on_cfg_write([this](uint8_t bus, uint8_t dev, uint8_t fn, uint8_t reg, int size,
                               uint32_t value) {
         if (bus != 0 || dev != 9 || fn != 0) return;
         if (reg <= 0x20 && reg + size > 0x20) {
             if (value == 0xFFFFFFFFu) {
-                cpu_->request_stop("IDE BAR4 sizing write (0xFFFFFFFF) — BAR sizing unmodeled");
+                cpu_->request_stop("IDE BAR4 sizing write (0xFFFFFFFF) â€” BAR sizing unmodeled");
                 return;
             }
             ide_->set_bm_base(static_cast<uint16_t>(value & 0xFFF0));
@@ -282,7 +282,7 @@ uint32_t XboxMachine::mmio_read(uint32_t addr, int size) {
         val = d->mmio_read(addr, size);
     } else {
         char b[96];
-        std::snprintf(b, sizeof(b), "unhandled MMIO read addr=0x%08x size=%d — no device", addr,
+        std::snprintf(b, sizeof(b), "unhandled MMIO read addr=0x%08x size=%d â€” no device", addr,
                       size);
         cpu_->request_stop(b);
     }
@@ -304,7 +304,7 @@ void XboxMachine::mmio_write(uint32_t addr, int size, uint32_t value) {
         d->mmio_write(addr, size, value);
     } else {
         char b[96];
-        std::snprintf(b, sizeof(b), "unhandled MMIO write addr=0x%08x size=%d value=0x%08x — "
+        std::snprintf(b, sizeof(b), "unhandled MMIO write addr=0x%08x size=%d value=0x%08x â€” "
                       "no device", addr, size, value);
         cpu_->request_stop(b);
     }
@@ -332,7 +332,7 @@ uint32_t XboxMachine::io_in(uint16_t port, int size) {
         val = d->io_read(port, size);
     } else {
         char b[96];
-        std::snprintf(b, sizeof(b), "unhandled I/O IN port=0x%04x size=%d — no device", port,
+        std::snprintf(b, sizeof(b), "unhandled I/O IN port=0x%04x size=%d â€” no device", port,
                       size);
         cpu_->request_stop(b);
     }
@@ -352,7 +352,7 @@ void XboxMachine::io_out(uint16_t port, int size, uint32_t value) {
         d->io_write(port, size, value);
     } else {
         char b[96];
-        std::snprintf(b, sizeof(b), "unhandled I/O OUT port=0x%04x size=%d value=0x%08x — "
+        std::snprintf(b, sizeof(b), "unhandled I/O OUT port=0x%04x size=%d value=0x%08x â€” "
                       "no device", port, size, value);
         cpu_->request_stop(b);
     }
@@ -628,7 +628,7 @@ bool XboxMachine::dump_det_ring(const std::string& path) const {
 
 uint64_t XboxMachine::run(uint32_t start, uint64_t max, std::string& err) {
     // Execute in short chunks so the interrupt controller can deliver external IRQs at clean
-    // instruction boundaries between chunks (Unicorn has no native IRQ path — see the CPU
+    // instruction boundaries between chunks (Unicorn has no native IRQ path â€” see the CPU
     // floor's inject_interrupt). The PIT clock advances with retired instructions.
     uint32_t eip = start;
     uint64_t done = 0;
@@ -636,6 +636,9 @@ uint64_t XboxMachine::run(uint32_t start, uint64_t max, std::string& err) {
 #if XLLE_RENDERER_HLE
         if (!hle_allocation_observers_installed_)
             install_hle_allocation_observers();
+#ifdef XLLE_XDK_CONSTANT_HLE
+        if (!hle_xdk_constants_installed_) install_hle_xdk_constants();
+#endif
 #if XLLE_XDK_DRAW_SPIKE
         if (!hle_xdk_draw_installed_) install_hle_xdk_draw();
 #endif
@@ -646,7 +649,7 @@ uint64_t XboxMachine::run(uint32_t start, uint64_t max, std::string& err) {
         // pending check, the device frame clocks, interrupt-injection bookkeeping,
         // get_regs() and the idle census. This replaces three separate host_poll_devices
         // ScopedAdd scopes whose six steady_clock reads per slice were most of what that
-        // bucket reported (71.7 ns/scope, docs/PERF-AUDIT-2026-09-02.md §6).
+        // bucket reported (71.7 ns/scope, docs/PERF-AUDIT-2026-09-02.md Â§6).
         perf_excl::Scope slice_region(perf_excl::kSliceOverhead);
         bool irq_armed = false;
         {
@@ -738,7 +741,7 @@ uint64_t XboxMachine::run(uint32_t start, uint64_t max, std::string& err) {
             if (ohci1_) ohci1_->set_frame(total_insns_ * 1000 / kCpuHz);
             // Deliver one pending, unmasked external interrupt at this boundary. Confirm the
             // guest can take it (inject succeeds) BEFORE committing the PIC's ISR/ack
-            // bookkeeping — an ack without delivery would wedge the line in-service.
+            // bookkeeping â€” an ack without delivery would wedge the line in-service.
             if (pic_ && pic_->intr_pending() && cpu_->interrupts_enabled()) {
                 int vec = pic_->peek();
                 if (vec >= 0) {
