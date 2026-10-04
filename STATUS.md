@@ -1,5 +1,28 @@
 # STATUS
 
+## 2026-10-04 - Four donor spikes validated; three retained, presentation parked
+
+All four experiments have independent worktrees and pushed remote branches based
+on `4d2370a`. Raw vertex streams, connected native CPU regions and audited native
+XDK indexed command construction are integrated on `perf/measurement-first-2026-09`.
+The XDK path is a private-profile build opt-in and retains real guest preparation,
+ring allocation and completion. Full native XDK routing and full AOT remain open.
+
+The GPU-resident presentation branch is parked in [draft PR #1](https://github.com/mstan/xboxlle/pull/1).
+It reduces presentation latency from 1.430 to 0.394 ms, but the final menu interval
+is effectively unchanged (8.685 -> 8.661 s), so it is excluded from integration.
+
+Both integrated HLE and LLE builds pass all 79 applicable checks. The combined
+interactive dashboard route completes all 14 inputs with empty stderr and zero
+presentation failures. Against the standalone XDK route, 27/28 captures match;
+one pixel in the remaining capture differs by one channel level. The returned
+menu was visually reviewed. Final 123-vblank interval: **5.763 s**, compared with
+the earlier interactive baseline's **8.685 s**. Concurrent workloads make this
+provisional screening evidence, not an isolated speedup estimate. Original-speed
+operation, original distinct-frame cadence and the Blinx gate remain open.
+
+[Branch decisions, source provenance, exact results and reproduction](docs/RESULTS-DONOR-SPIKES-2026-10-04.md).
+
 ## 2026-10-03 - Original Xbox cadence target; next donor opportunities
 
 The owner clarified that original Xbox speed and content cadence are the target;
