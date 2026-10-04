@@ -166,6 +166,57 @@ int main() {
     if (!r->resolve_resident_color_surface(0x300000, 1024, out, error))
       throw std::runtime_error(error);
     require(out.data.empty(), "freed allocation wrote stale GPU data");
+    // Actual GPU decoding of every floor-supported stream format, including
+    // unaligned original guest strides. Repeated large payloads exercise ring
+    // orphaning and subsequent small draws exercise non-overlapping reuse.
+    for (unsigned format : {0u, 1u, 2u, 4u, 5u, 6u}) {
+      auto raw = opaque;
+      raw.color.address = 0x500000;
+      raw.raw_vertex_count = 3;
+      raw.raw_vertices.resize(format == 0 ? 1024 * 1024 + 4 : 128);
+      raw.vertex_layout[0] = {7, 36, 2, 4};
+      raw.vertex_layout[3] = {23, 36, int32_t(format), format == 6 ? 1 : 4};
+      for (unsigned i = 0; i < 3; ++i) {
+        std::memcpy(raw.raw_vertices.data() + 7 + i * 36,
+                    raw.vertices[i][0].data(), 16);
+        auto *color = raw.raw_vertices.data() + 23 + i * 36;
+        if (format == 0 || format == 4) {
+          color[1] = 255;
+          color[3] = 255;
+        } else if (format == 2) {
+          const float v[4] = {0, 1, 0, 1};
+          std::memcpy(color, v, 16);
+        } else if (format == 6) {
+          const uint32_t v = 1023u << 11;
+          std::memcpy(color, &v, 4);
+        } else {
+          const int16_t v[4] = {0, int16_t(format == 1 ? 32767 : 1), 0,
+                                int16_t(format == 1 ? 32767 : 1)};
+          std::memcpy(color, v, 8);
+        }
+      }
+      raw.vertices.clear();
+      for (unsigned repetition = 0; repetition < 2; ++repetition) {
+        require(r->submit_hle_draw(raw, error), error);
+        require(r->resolve_resident_color_surface(0x500000, 1024, out, error),
+                error);
+        require(out.data[(3 * 16 + 3) * 4 + 1] == 255 &&
+                    out.data[(3 * 16 + 3) * 4 + 2] == 0,
+                "raw vertex GPU format decode mismatch: " +
+                    std::to_string(format));
+      }
+      raw.vertex_layout[3][3] = 0;
+      raw.default_attributes[3] = {0, 0, 1, 1};
+      require(r->submit_hle_draw(raw, error), error);
+      require(r->resolve_resident_color_surface(0x500000, 1024, out, error),
+              error);
+      require(out.data[(3 * 16 + 3) * 4] == 255 &&
+                  out.data[(3 * 16 + 3) * 4 + 1] == 0,
+              "raw vertex constant attribute lost");
+      raw.indices[0] = 3;
+      require(!r->submit_hle_draw(raw, error),
+              "out-of-range raw index accepted");
+    }
     p.state[N::kRasterShaderStageProgram] =
         8; // unsupported mode, no fake success
     require(!r->submit_hle_draw(p, error),

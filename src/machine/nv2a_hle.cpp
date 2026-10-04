@@ -2,7 +2,6 @@
 #include "machine/nv2a_hle_draw.hpp"
 #include <algorithm>
 #include <cstring>
-#include <unordered_map>
 
 namespace xlle {
 bool Nv2a::submit_hle_vertex_batch() {
@@ -67,48 +66,102 @@ bool Nv2a::submit_hle_vertex_batch() {
   const size_t count = indexed   ? vertex_indices_.size()
                        : inlined ? inline_vertices_.size()
                                  : immediate_vertices_.size();
-  p.indices.reserve(count);
-  p.vertices.reserve(count);
-  // Xbox ELEMENT16 streams need a bounded array lookup, not a heap node per
-  // unique vertex. Retain sparse lookup for large ELEMENT32 indices.
-  std::vector<uint32_t> dense_remap;
   if (indexed) {
-    const auto max_index =
-        *std::max_element(vertex_indices_.begin(), vertex_indices_.end());
-    if (max_index < 65536)
-      dense_remap.assign(size_t(max_index) + 1, UINT32_MAX);
-  }
-  std::unordered_map<uint32_t, uint32_t> vertex_map;
-  for (size_t n = 0; n < count; ++n) {
-    if (indexed) {
-      const uint32_t index = vertex_indices_[n];
-      uint32_t remapped = UINT32_MAX;
-      if (!dense_remap.empty())
-        remapped = dense_remap[index];
-      else if (auto found = vertex_map.find(index); found != vertex_map.end())
-        remapped = found->second;
-      if (remapped != UINT32_MAX) {
-        p.indices.push_back(remapped);
+    const auto limits =
+        std::minmax_element(vertex_indices_.begin(), vertex_indices_.end());
+    const uint32_t first_index = *limits.first, last_index = *limits.second;
+    if (uint64_t(last_index) - first_index + 1 > UINT32_MAX)
+      return fail("vertex index span overflow");
+    p.raw_vertex_count = last_index - first_index + 1;
+    p.indices.reserve(count);
+    for (uint32_t index : vertex_indices_)
+      p.indices.push_back(index - first_index);
+    struct Span {
+      uint32_t start;
+      uint64_t end;
+      size_t offset = 0;
+    };
+    std::vector<Span> spans;
+    std::array<uint32_t, 16> addresses{};
+    for (unsigned a = 0; a < 16; ++a) {
+      auto &attr = vertex_attributes_[a];
+      p.default_attributes[a] = attr.value;
+      if (!attr.count)
         continue;
-      }
-      for (uint32_t a = 0; a < 16; ++a)
-        if (vertex_attributes_[a].count && !fetch_vertex_attribute(a, index))
-          return false;
-      if (!dense_remap.empty())
-        dense_remap[index] = static_cast<uint32_t>(p.vertices.size());
+      const uint64_t begin =
+          uint64_t(attr.offset) + uint64_t(attr.stride) * first_index;
+      const uint64_t end = uint64_t(attr.offset) +
+                           uint64_t(attr.stride) * last_index +
+                           uint64_t(attr.element_size) * attr.count;
+      const uint32_t dma = attr.dma_b ? vertex_dma_b_ : vertex_dma_a_;
+      uint32_t last_address;
+      if (!(attr.dma_b ? vertex_dma_b_bound_ : vertex_dma_a_bound_) ||
+          end <= begin || end > (uint64_t(1) << 32) ||
+          end - begin > 64 * 1024 * 1024 ||
+          !dma_object_address(dma, uint32_t(begin), addresses[a]) ||
+          !dma_object_address(dma, uint32_t(end - 1), last_address) ||
+          uint64_t(addresses[a]) + end - begin - 1 != last_address)
+        return fail("raw vertex DMA range");
+      spans.push_back({addresses[a], uint64_t(last_address) + 1});
+      p.vertex_layout[a] = {0, int32_t(attr.stride), attr.format, attr.count};
+    }
+    std::sort(spans.begin(), spans.end(),
+              [](const auto &a, const auto &b) { return a.start < b.start; });
+    std::vector<Span> merged;
+    for (const auto &span : spans) {
+      if (!merged.empty() && span.start <= merged.back().end)
+        merged.back().end = std::max(merged.back().end, span.end);
       else
-        vertex_map.emplace(index, static_cast<uint32_t>(p.vertices.size()));
-    } else {
+        merged.push_back(span);
+    }
+    for (auto &span : merged) {
+      const size_t size = size_t(span.end - span.start);
+      span.offset = p.raw_vertices.size();
+      if (span.offset + size > 64 * 1024 * 1024)
+        return fail("raw vertex storage bound");
+      if (!resolve_renderer_depth_overlap(span.start, size,
+                                          "HLE vertex stream") ||
+          !resolve_renderer_color_overlap(span.start, size,
+                                          "HLE vertex stream"))
+        return false;
+      p.raw_vertices.resize((span.offset + size + 3) & ~size_t(3));
+      const auto *direct =
+          mem_direct_ ? mem_direct_(span.start, size) : nullptr;
+      if (direct)
+        std::memcpy(p.raw_vertices.data() + span.offset, direct, size);
+      else if (!mem_read_ ||
+               !mem_read_(span.start, p.raw_vertices.data() + span.offset,
+                          size))
+        return fail("raw vertex read");
+    }
+    // Even an all-constant stream needs a valid SSBO binding.
+    if (p.raw_vertices.empty())
+      p.raw_vertices.resize(4);
+    for (unsigned a = 0; a < 16; ++a) {
+      if (!vertex_attributes_[a].count)
+        continue;
+      for (const auto &span : merged)
+        if (addresses[a] >= span.start && addresses[a] < span.end) {
+          p.vertex_layout[a][0] =
+              int32_t(span.offset + addresses[a] - span.start);
+          break;
+        }
+      // Preserve current attribute state for subsequent immediate commands;
+      // this is one decode per stream, rather than one decode per vertex.
+      if (!fetch_vertex_attribute(a, vertex_indices_.back()))
+        return false;
+    }
+  } else {
+    p.indices.reserve(count);
+    p.vertices.reserve(count);
+    for (size_t n = 0; n < count; ++n) {
       const auto &inputs =
           inlined ? inline_vertices_[n] : immediate_vertices_[n];
       for (unsigned a = 0; a < 16; ++a)
         vertex_attributes_[a].value = inputs[a];
+      p.indices.push_back(uint32_t(n));
+      p.vertices.push_back(inputs);
     }
-    Nv2aHleDraw::Vertex v;
-    for (unsigned a = 0; a < 16; ++a)
-      v[a] = vertex_attributes_[a].value;
-    p.indices.push_back(static_cast<uint32_t>(p.vertices.size()));
-    p.vertices.push_back(v);
   }
   auto range = [&](uint32_t dma, bool bound, uint32_t offset, size_t size,
                    uint32_t &addr) {

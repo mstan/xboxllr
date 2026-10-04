@@ -21,6 +21,13 @@ struct Nv2aHleTexture {
 struct Nv2aHleDraw {
   using Vertex = std::array<std::array<float, 4>, 16>;
   std::vector<Vertex> vertices;
+  // Original guest streams, as used by NoRain's native presenter. Indexed
+  // batches need no CPU attribute expansion; the GPU decodes these formats.
+  std::vector<uint8_t> raw_vertices;
+  std::array<std::array<int32_t, 4>, 16>
+      vertex_layout{}; // byte offset/stride/type/count
+  Vertex default_attributes{};
+  uint32_t raw_vertex_count = 0;
   std::vector<uint32_t> indices;
   std::vector<uint32_t> state;
   std::vector<std::array<uint32_t, 4>> program;
