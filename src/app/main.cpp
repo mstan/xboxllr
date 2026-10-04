@@ -28,6 +28,9 @@
 #include "cpu/unicorn_metrics.h"
 #include "host/ethernet_udp.hpp"
 #include "host/nv2a_opengl_renderer.hpp"
+#if XLLE_RENDERER_HLE
+#include "host/nv2a_hle_renderer.hpp"
+#endif
 #include "host/sample_profiler.hpp"
 #ifdef XLLE_HAS_PRIVATE_AOT
 #include "private_aot.h"
@@ -719,6 +722,16 @@ void print_gpu_residency_census(const xlle::Nv2a* nv, const char* scope,
             (unsigned long long)cache.hits(), (unsigned long long)cache.misses(),
             (unsigned long long)cache.evictions(), (unsigned long long)cache.oversize(),
             (unsigned long long)cache.bytes());
+        const auto& dxt_cache = nv->dxt_decode_cache();
+        std::printf(
+            "[host] dxt-decode-cache scope=%s deadline=%llu enabled=%u "
+            "hits=%llu misses=%llu evictions=%llu oversize=%llu bytes=%llu\n",
+            scope, deadline, nv->dxt_decode_cache_enabled() ? 1u : 0u,
+            (unsigned long long)dxt_cache.hits(),
+            (unsigned long long)dxt_cache.misses(),
+            (unsigned long long)dxt_cache.evictions(),
+            (unsigned long long)dxt_cache.oversize(),
+            (unsigned long long)dxt_cache.bytes());
         for (size_t k = 0; k < nv->generic_shader_program_count(); ++k) {
             std::printf(
                 "[host] generic-shader-program scope=%s deadline=%llu "
@@ -1632,6 +1645,9 @@ constexpr bool kNv2aGpuProfilesDefault = true;
 static constexpr bool kNv2aProfileHashesDefault = false;
 
 int main(int argc, char** argv) {
+#if XLLE_NATIVE_DRAW
+    std::printf("[build] graphics=native-draw-HLE selection=compile-time\n");
+#endif
     bool serve = false, window = false, interactive = false;
     bool test_synthetic_controller_hub = false;
     bool test_synthetic_controller_hub_input_down = false;
@@ -1706,6 +1722,7 @@ int main(int argc, char** argv) {
     bool nv2a_gpu_timers = true;
     bool nv2a_generated_submit_census = false;
     bool nv2a_gpu_generic_texture_cache = true;
+    bool nv2a_dxt_decode_cache = false;
     bool nv2a_gpu_generic_texture_trace = false;
     // PFIFO run batching (beads-xbox.1.15.1 stages (c)/(d)). Both default ON;
     // the negative spellings are the arm-A form of the decision A/B and restore
@@ -1775,6 +1792,7 @@ int main(int argc, char** argv) {
     uint32_t nv2a_vsh_gpu_pack_parallel = 0;
     uint32_t nv2a_vsh_gpu_specialize = 0;
     uint32_t nv2a_vsh_gpu_status_summary = 0;
+    uint32_t nv2a_vsh_gpu_native_fp32 = 0;
     // Ceiling probe (beads-xbox.1.15.11). DEFAULT 0 and no --no- spelling,
     // because it is knowingly incorrect when armed: 1 skips the operation and
     // stores the first operand, 2 skips the stores too. It bounds how much of
@@ -2013,6 +2031,10 @@ int main(int argc, char** argv) {
             nv2a_gpu_generic_texture_cache = true;
         else if (!std::strcmp(argv[i], "--no-nv2a-gpu-generic-texture-cache"))
             nv2a_gpu_generic_texture_cache = false;
+        else if (!std::strcmp(argv[i], "--nv2a-dxt-decode-cache"))
+            nv2a_dxt_decode_cache = true;
+        else if (!std::strcmp(argv[i], "--no-nv2a-dxt-decode-cache"))
+            nv2a_dxt_decode_cache = false;
         else if (!std::strcmp(argv[i], "--nv2a-gpu-generic-texture-trace"))
             nv2a_gpu_generic_texture_trace = true;
         else if (!std::strcmp(argv[i], "--nv2a-pfifo-run-batching"))
@@ -2182,6 +2204,12 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(argv[i], "--nv2a-vsh-gpu-status-summary")) {
             if (i + 1 >= argc || !parse_u32_arg(argv[++i], nv2a_vsh_gpu_status_summary) || nv2a_vsh_gpu_status_summary > 1) {
                 std::fprintf(stderr, "--nv2a-vsh-gpu-status-summary expects 0 or 1\n");
+                return 2;
+            }
+        }
+        else if (!std::strcmp(argv[i], "--nv2a-vsh-gpu-native-fp32")) {
+            if (i + 1 >= argc || !parse_u32_arg(argv[++i], nv2a_vsh_gpu_native_fp32) || nv2a_vsh_gpu_native_fp32 > 1) {
+                std::fprintf(stderr, "--nv2a-vsh-gpu-native-fp32 expects 0 or 1\n");
                 return 2;
             }
         }
@@ -2718,6 +2746,10 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "--nv2a-vsh-gpu-status-summary requires a nonzero --nv2a-vsh-gpu-resident mode\n");
         return 2;
     }
+    if (nv2a_vsh_gpu_native_fp32 && !nv2a_vsh_gpu_resident) {
+        std::fprintf(stderr, "--nv2a-vsh-gpu-native-fp32 requires a nonzero --nv2a-vsh-gpu-resident mode\n");
+        return 2;
+    }
     if ((debug_vsh_capture_path || debug_vsh_batch_capture_path) && (!nv2a_vsh_compile || nv2a_vsh_unsafe_probe)) {
         std::fprintf(stderr, "VSH capture requires the faithful compiled CPU path\n");
         return 2;
@@ -2765,6 +2797,18 @@ int main(int argc, char** argv) {
                      "--nv2a-renderer opengl\n");
         return 2;
     }
+#if XLLE_RENDERER_HLE
+    {
+        std::string renderer_error;
+        nv2a_renderer = create_nv2a_hle_renderer(renderer_error);
+        if (!nv2a_renderer) {
+            std::fprintf(stderr, "[hle-renderer] %s\n", renderer_error.c_str());
+            return 1;
+        }
+        nv2a_renderer_name = "hle-native";
+        std::printf("[build] graphics=HLE selection=compile-time pipeline=whole-renderer\n");
+    }
+#else
     if (std::strcmp(nv2a_renderer_name, "software")) {
         std::string renderer_error;
         nv2a_renderer = create_nv2a_opengl_renderer(renderer_error,
@@ -2774,6 +2818,8 @@ int main(int argc, char** argv) {
             return 1;
         }
     }
+#endif
+#if !XLLE_RENDERER_HLE
     if (nv2a_renderer) {
         nv2a_renderer->set_witnessed_flush_triangles(nv2a_gpu_flush_triangles);
         nv2a_renderer->set_witnessed_kick_flush(nv2a_gpu_kick_flush);
@@ -2802,6 +2848,10 @@ int main(int argc, char** argv) {
         std::printf("[nv2a-renderer] enhanced=xemu-psh experimental; reference opt-out: "
                     "--nv2a-renderer opengl (or software); unsupported draws use reference\n");
 
+#else
+    std::printf("[nv2a-renderer] selected=hle-native whole GPU pipeline; LLE selection: rebuild with XLLE_RENDERER=LLE\n");
+#endif
+
     const uint64_t max_host_memory_bytes =
         max_host_memory_mb * 1024ull * 1024ull;
     if (max_host_memory_bytes != 0) {
@@ -2826,6 +2876,7 @@ int main(int argc, char** argv) {
         if (nv2a_renderer) nv2a_renderer->set_vsh_gpu_parallel_pack(nv2a_vsh_gpu_pack_parallel != 0);
         if (nv2a_renderer) nv2a_renderer->set_vsh_gpu_specialize(nv2a_vsh_gpu_specialize != 0);
         if (nv2a_renderer) nv2a_renderer->set_vsh_gpu_status_summary(nv2a_vsh_gpu_status_summary != 0);
+        if (nv2a_renderer) nv2a_renderer->set_vsh_gpu_native_fp32(nv2a_vsh_gpu_native_fp32 != 0);
         if (!nv2a_renderer || !nv2a_renderer->prepare_vsh_gpu_resident(vsh_error)) {
             std::fprintf(stderr, "[host] GPU resident VSH preparation failed: %s\n",
                          nv2a_renderer ? vsh_error.c_str() : "OpenGL renderer required");
@@ -2978,6 +3029,7 @@ int main(int argc, char** argv) {
                     nv2a_gpu_generic_shader_bgra_upload);
                 mach.nv2a()->set_gpu_generic_texture_cache(
                     nv2a_gpu_generic_texture_cache);
+                mach.nv2a()->set_dxt_decode_cache(nv2a_dxt_decode_cache);
                 mach.nv2a()->set_gpu_generic_texture_trace(
                     nv2a_gpu_generic_texture_trace);
                 mach.nv2a()->set_pfifo_run_batching(nv2a_pfifo_run_batching);
@@ -6737,6 +6789,9 @@ int main(int argc, char** argv) {
                 std::printf("[host] vsh-gpu-status-summary enabled=%u skipped_readbacks=%llu\n",
                     nv2a_vsh_gpu_status_summary,
                     static_cast<unsigned long long>(stats.status_readbacks_skipped));
+                std::printf("[host] vsh-gpu-native-fp32 enabled=%u dispatches=%llu\n",
+                    nv2a_vsh_gpu_native_fp32,
+                    static_cast<unsigned long long>(stats.native_fp32_dispatches));
                 const auto deferred = mach.nv2a()->vsh_gpu_deferred_stats();
                 std::printf("[host] vsh-gpu-deferred batches=%llu executions=%llu refs=%llu "
                     "prepared=%llu vertices=%llu declines=%llu fallback_batches=%llu fallback_executions=%llu\n",

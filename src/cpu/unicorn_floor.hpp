@@ -62,6 +62,9 @@ public:
     // Compiled artifacts and hooks must outlive the floor. Configure between runs.
     bool register_aot_region(const xlle_aot_region& region);
     bool register_aot_replacement(const AotReplacement& replacement);
+    // Observe a real guest function entry; the original function still runs.
+    // Used by the HLE renderer to retire resources at allocator boundaries.
+    bool observe_entry(uint32_t address, std::function<void()> callback);
     void set_aot_profile(uint32_t profile);
     // Configure after registration, between runs; false retains the public API.
     void set_aot_bulk_registers(bool enabled);
@@ -181,6 +184,13 @@ private:
     void* hook_out_ = nullptr;
     void* hook_unmapped_ = nullptr;
     void* hook_intr_ = nullptr;
+    struct EntryObserver {
+        uint32_t address;
+        std::function<void()> callback;
+    };
+    std::vector<std::unique_ptr<EntryObserver>> entry_observers_;
+    uint32_t entry_observer_min_ = UINT32_MAX, entry_observer_max_ = 0;
+    void notify_entry(uint32_t pc);
     uint32_t last_fault_addr_ = 0;  // most recent unmapped-access address (for fault reporting)
     int last_fault_type_ = 0;
     RetiredCb retired_cb_;

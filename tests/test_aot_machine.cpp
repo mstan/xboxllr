@@ -1,5 +1,6 @@
 #include "aot_programs.h"
 #include "machine/machine.hpp"
+#include "cpu/unicorn_floor.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -454,7 +455,21 @@ static void native_device_deadlines(bool native) {
             "deadline test executes natively after bootstrap");
 }
 
+static void observed_entry() {
+    XboxMachine machine;
+    prepare(machine, xlle_aot_loop);
+    require(machine.register_aot_region(xlle_aot_loop), "observer native region");
+    auto& cpu = static_cast<UnicornFloor&>(machine.cpu());
+    unsigned calls = 0;
+    require(cpu.observe_entry(0x1000, [&] { ++calls; }), "install entry observer");
+    std::string err;
+    require(machine.run(0xf00, 101, err) == 101 && err.empty(), "observed original executes");
+    require(cpu.get_regs().eax == 50 && calls == 50, "observer does not replace guest body");
+    require(machine.aot_stats().retired == 0, "observed entry cannot be bypassed by AOT");
+}
+
 int main() {
+    observed_entry();
     loop(false);
     loop(true);
     for (bool native : {false, true}) {

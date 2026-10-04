@@ -444,4 +444,32 @@ inline void append_rounding_cases(std::vector<TestCase>& cases) {
 }
 
 
+inline void append_native_fp32_boundary_cases(std::vector<TestCase>& cases) {
+    constexpr uint32_t one = 0x3f800000u;
+    append_rounding_case(cases, {0x0c000001u, 0x8c000000u, 0u, 0u},
+                         "native_fp32_min_normal_cancellation");
+    append_rounding_case(cases, {0x0b800001u, 0x8b800000u, 0u, 0u},
+                         "native_fp32_subnormal_cancellation_fallback");
+    append_product_rounding_case(cases, {0x20000000u, 0u, 0u, 0u},
+                                 {0x20000000u, one, one, one},
+                                 "native_fp32_min_normal_product");
+    append_product_rounding_case(cases, {0x20000000u, 0u, 0u, 0u},
+                                 {0x1f800000u, one, one, one},
+                                 "native_fp32_subnormal_product_fallback");
+    // Straddle both bounds of each arithmetic admission predicate, including
+    // cancellation between adjacent mantissas and every sign combination.
+    constexpr std::array<uint32_t, 17> exponents{
+        1, 23, 24, 25, 63, 64, 65, 126, 127, 128, 188, 189, 190, 251, 252, 253, 254};
+    constexpr std::array<uint32_t, 3> mantissas{0, 1, 0x7fffff};
+    for (uint32_t ea : exponents) for (uint32_t eb : exponents)
+        for (uint32_t ma : mantissas) for (uint32_t mb : mantissas)
+            for (uint32_t signs = 0; signs < 4; ++signs) {
+                const uint32_t a = (ea << 23) | ma | ((signs & 1u) << 31);
+                const uint32_t b = (eb << 23) | mb | ((signs & 2u) << 30);
+                append_product_rounding_case(cases, {a, 0u, 0u, 0u}, {b, one, one, one},
+                                             "native_fp32_product_bounds");
+                append_rounding_case(cases, {a, b, 0u, 0u}, "native_fp32_add_bounds");
+            }
+}
+
 }  // namespace xlle::vsh_shadow_probe

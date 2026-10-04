@@ -141,7 +141,8 @@ def lines_matching(pattern):
 #     attachment: +1 resolve_read_pixels and +1 tex_image_2d
 # 12 -> 17, 5 -> 8, 2 -> 3.
 WRAPPED = [
-    ("draw_arrays_", {"gpu_timed_draw_arrays": 4}),
+    # Four reference sites plus the build-selected native whole-draw path.
+    ("draw_arrays_", {"gpu_timed_draw_arrays": 5}),
     ("dispatch_compute_", {"gpu_timed_dispatch_compute": 8}),
     ("buffer_data_", {"gpu_timed_buffer_data": 9}),
     ("tex_image_2d_", {"gpu_timed_tex_image_2d": 17}),

@@ -14,6 +14,7 @@
 #include "host/nv2a_combiner_glsl.hpp"
 
 namespace xlle {
+struct Nv2aHleDraw;
 
 // This is deliberately an owned snapshot.  A renderer must never retain pointers into
 // Nv2a's mutable register or vertex state after submit_generic_combiner returns.
@@ -508,6 +509,13 @@ struct Nv2aGeneratedShaderPacket {
     bool color_mask[4] = {true, true, true, true};
     std::array<Nv2aGeneratedTexture, 4> textures{};
     std::vector<Nv2aGeneratedTriangle> triangles;
+#if XLLE_NATIVE_DRAW
+    // HLE build: let the GPU assemble, clip and cull the original primitive.
+    // These are owned shader outputs, before software triangle preparation.
+    std::vector<Nv2aGenericCombinerVertex> native_vertices;
+    uint32_t native_primitive = 0;
+    bool native_cull = false, native_cull_front = false;
+#endif
 };
 
 struct Nv2aGeneratedShaderResult {
@@ -530,6 +538,11 @@ struct Nv2aWitnessedProfileResult {
 
 class Nv2aRenderer {
 public:
+#if XLLE_NATIVE_DRAW
+    // Capability check before any draw effects. An unsupported batch still
+    // executes through the implemented ordinary path in this scoped build.
+    virtual bool prepare_native_draw(const Nv2aGeneratedShaderPacket&) { return false; }
+#endif
     // Final acceptance with collected geometry, before any destination effects.
     // Backends may compile/choose a different program here, or decline the batch.
     virtual bool prepare_generated_shader(const Nv2aGeneratedShaderPacket&) { return true; }
@@ -542,11 +555,13 @@ public:
         uint64_t specialized_declines = 0, specialized_failures = 0;
         uint64_t specialized_compile_ns = 0;
         uint64_t status_readbacks_skipped = 0;
+        uint64_t native_fp32_dispatches = 0;
     };
     virtual VshGpuResidentStats vsh_gpu_resident_stats() const { return {}; }
     virtual void set_vsh_gpu_parallel_pack(bool on) { (void)on; }
     virtual void set_vsh_gpu_specialize(bool on) { (void)on; }
     virtual void set_vsh_gpu_status_summary(bool on) { (void)on; }
+    virtual void set_vsh_gpu_native_fp32(bool on) { (void)on; }
     virtual bool prepare_vsh_gpu_batch(Nv2aGenericCombinerPacket::GpuVshReference& reference,
                                        std::string& error) {
         reference.prepared_token = 0;
@@ -559,6 +574,10 @@ public:
         return false;
     }
 #endif
+    virtual bool submit_hle_draw(const Nv2aHleDraw&, std::string& error) {
+        error = "This renderer does not implement the complete HLE draw interface";
+        return false;
+    }
     virtual ~Nv2aRenderer() = default;
     virtual const char* name() const = 0;
     // This query must have no side effects. Nv2a snapshots the potentially large

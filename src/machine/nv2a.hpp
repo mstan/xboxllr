@@ -1819,6 +1819,11 @@ public:
     }
     void set_gpu_generic_texture_cache(bool on) { gpu_generic_texture_cache_ = on; }
     bool gpu_generic_texture_cache() const { return gpu_generic_texture_cache_; }
+    void set_dxt_decode_cache(bool on) { dxt_decode_cache_enabled_ = on; }
+    bool dxt_decode_cache_enabled() const { return dxt_decode_cache_enabled_; }
+    const Nv2aTextureConversionCache& dxt_decode_cache() const {
+        return dxt_decode_cache_;
+    }
     void set_gpu_generic_texture_trace(bool on) { gpu_generic_texture_trace_ = on; }
     const Nv2aTextureConversionCache& generic_texture_conversion_cache() const {
         return generic_texture_conversion_cache_;
@@ -3019,12 +3024,7 @@ private:
     std::function<void(const SurfaceWriteDebugInfo&)> surface_write_debug_cb_;
     std::vector<RasterStateSample> raster_state_samples_;
     uint32_t current_raster_state_sample_index_ = UINT32_MAX;
-    struct TransformedVertex {
-        std::array<float, 4> position{};
-        std::array<float, 4> diffuse{};
-        std::array<float, 4> specular{};
-        std::array<std::array<float, 4>, 4> texture{};
-    };
+    using TransformedVertex = Nv2aGenericCombinerVertex;
     std::vector<TransformedVertex> transformed_batch_;
 
     // ============ stage (e): the job's private telemetry sink ==============
@@ -3463,6 +3463,8 @@ private:
     bool gpu_generic_texture_cache_ = true; // Exact post-resolve snapshots; measured default.
     bool gpu_generic_texture_trace_ = false; // Explicit FNV trace; perturbs cache timing.
     Nv2aTextureConversionCache generic_texture_conversion_cache_;
+    bool dxt_decode_cache_enabled_ = false; // Donor reuse candidate; real decode opt-out.
+    Nv2aTextureConversionCache dxt_decode_cache_;
     // PFIFO run batching (beads-xbox.1.15.1 stages (c)/(d)). Both default ON;
     // the negative spellings restore the per-word pusher and the per-word
     // handler call respectively, on the same binary.
@@ -3796,6 +3798,9 @@ private:
     bool commit_immediate_vertex();
     bool decode_inline_array();
     bool submit_vertex_batch();
+#if XLLE_RENDERER_HLE
+    bool submit_hle_vertex_batch();
+#endif
     bool rasterize_witnessed_immediate_quad(DrawJob& job, bool& executed);
     bool rasterize_witnessed_batch(DrawJob& job, bool& executed);
     // The pure execute half of the witnessed path (stage (e)). Runs on the

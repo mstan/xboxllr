@@ -37,3 +37,21 @@ admission rules. Increasing coverage requires a real packet contract and tests.
 The adapter pairs the donor fragment shader with a host vertex shader over our
 existing postclip triangle records. Thus this is borrowed shader execution,
 not a transplant of xemu's complete GPU or proof of hardware pixel accuracy.
+
+
+## Separate HLE renderer imports
+
+`vsh-prog.c`, `vsh-prog.h`, `vsh_regs.h`, `swizzle.c` and `swizzle.h` come
+from the same pinned revision. `tools/import_xemu_hle.py` removes the QEMU
+header dependencies, retains the actual programmable vertex emitter and texture
+layout algorithms, and replaces the unreachable unfinished persistent-constant
+write branch with an explicit error. The adapter rejects those programs before
+generation. The vertex sources carry GPL-2.0-or-3.0 notices and the swizzle
+sources carry LGPL-2.0-or-later notices.
+
+`hle_psh.c` derives from the placeholder-free imported `psh.c` through that
+script, with a separate entry and coverage policy. It uses the complete donor
+PROJECT2D/PROJECT3D/CUBEMAP/PASSTHRU/CLIPPLANE implementations and integer depth
+texture comparisons. The HLE renderer replaces the donor software-style
+fragment depth reconstruction with native interpolation and derivatives. Its
+pipeline and admission rules are independent of the LLE host adapter.

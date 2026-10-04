@@ -279,6 +279,52 @@ int main() {
         std::memcpy(&fallback_pixel, fallback_image.data.data() + 36, 4);
     CHECK(fallback_pixel == 0xFF123456);
 
+#if XLLE_NATIVE_DRAW
+    auto native_packet = [](uint32_t address, uint32_t primitive) {
+        auto p = make_packet(address);
+        p.triangles.clear();
+        p.native_primitive = primitive;
+        p.native_vertices.resize(3);
+        p.native_vertices[0].position = {0, 0, 100, 1};
+        p.native_vertices[1].position = {8, 0, 100, 1};
+        p.native_vertices[2].position = {0, 8, 100, 1};
+        return p;
+    };
+    for (uint32_t primitive : {5u, 6u, 7u}) {
+        auto n = native_packet(0x20000 + primitive * 0x1000, primitive);
+        CHECK(renderer->prepare_native_draw(n));
+        CHECK(read_pixel(*renderer, n) == 0xFF123456);
+        CHECK(nv2a_xemu_fragment_glsl(n).find("float zvalue = native_depth;") != std::string::npos);
+    }
+    auto n = native_packet(0x30000, 5);
+    n.native_cull = true;
+    CHECK(read_pixel(*renderer, n) == 0xFF123456); // guest CW is front
+    n = native_packet(0x31000, 5);
+    n.native_cull = n.native_cull_front = true;
+    CHECK(read_pixel(*renderer, n) == 0); // front culled
+    n = native_packet(0x32000, 5);
+    std::swap(n.native_vertices[1], n.native_vertices[2]);
+    n.native_cull = true;
+    CHECK(read_pixel(*renderer, n) == 0); // back culled
+    // Depth remains real: a failing depth comparison must not write color.
+    n = native_packet(0x33000, 5);
+    n.state.uses_depth = true;
+    n.depth_address = 0x34000;
+    n.depth_test = n.depth_write = true;
+    n.depth_func = 0x201; // LESS; clear depth is 0, incoming 100 loses
+    n.needs_depth_upload = true;
+    n.depth_input.resize(n.surface_size);
+    CHECK(read_pixel(*renderer, n) == 0);
+    n.native_vertices[0].position[3] = 0;
+    CHECK(!renderer->prepare_native_draw(n));
+    n = native_packet(0x35000, 5);
+    n.native_vertices[1].position[0] = std::numeric_limits<float>::infinity();
+    CHECK(!renderer->prepare_native_draw(n));
+    // A normal draw after native culling must see restored graphics state.
+    p = make_packet(0x36000);
+    CHECK(read_pixel(*renderer, p) == 0xFF123456);
+#endif
+
     std::printf("xemu PSH contract: %s\n", failures ? "FAIL" : "PASS");
     return failures ? 1 : 0;
 }

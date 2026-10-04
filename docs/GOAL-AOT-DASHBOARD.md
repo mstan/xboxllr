@@ -2,10 +2,25 @@
 
 Owner clarification, 2026-10-03. Central tracker: `beads-xbox.1.25.5`;
 planning decision: `beads-xbox.1.40`; active menu gate: `beads-xbox.1.17`.
-The latest owner direction puts sustained 60 FPS in the dashboard menu before
-Blinx. Full AOT remains a separate final gate; donor HLE remains eligible.
-Implementation resumed on the owner's subsequent direction. Bounded Sol/high
-assistance is authorized for this task; runtime progress is recorded in STATUS.
+The latest owner direction targets the original Xbox's execution speed and
+content cadence in the dashboard menu before Blinx. A universal 60 rendered
+FPS requirement is superseded. Full AOT remains a separate final gate; donor
+HLE remains eligible. The dashboard's distinct-frame cadence is not yet verified.
+The renderer choice is now a whole implementation: `XLLE_RENDERER=LLE` or
+`XLLE_RENDERER=HLE`, using separate build directories. See
+[HLE-RENDERER.md](HLE-RENDERER.md).
+Runtime progress is recorded in STATUS. Follow the latest owner instruction for
+execution and delegation: work solo unless newly authorized. The owner resumed
+work on donor graphics integration after clarifying the HLE policy. Follow
+[the shared HLE policy](../../../recomp-template/HLE.md): build-time selection,
+compatible caller behavior, freedom to remove internal work and approximate
+arithmetic/timing. No live switching or instruction-history equivalence is
+required. The old FP32, status-readback and DXT-cache experiments remain parked.
+Active integration issue: `beads-xbox.1.45`.
+The separate whole HLE renderer completes the live input route and showed a
+provisional 1.87x throughput improvement on a shared host. See
+[the current results](RESULTS-WHOLE-HLE-RENDERER-2026-10-03.md).
+XDK service replacement and original-speed output remain unfinished.
 
 **The target ecosystem has a faithful, runnable LLE floor and interchangeable enhanced
 implementations. Qualified enhanced paths are the intended shipping defaults,
@@ -15,8 +30,8 @@ be substantially different when the selected boundary's observable contract is
 preserved, including documented enhancement tolerances. No stubs or fabricated
 success. The repository name and amount of original code retained are not goals.
 
-Get the animated stock dashboard main menu to sustained 60 FPS at original guest
-speed with working selection/input, then pursue a real Blinx launch/playable
+Get the animated stock dashboard main menu to its original execution speed and
+content cadence with working selection/input, then pursue a real Blinx launch/playable
 slice. Use the current hybrid CPU path and compatible enhanced implementations.
 Full AOT with dynarec removed remains the final goal; it is not a prerequisite
 for menu performance. JSRF is the next generalization target. Completing every
@@ -35,8 +50,8 @@ may replace a kernel service or initialization operation with a complete native
 implementation, including its observable state transitions. No forced
 acknowledgements, ignored required work or captured-frame playback. The explicit
 unlocked HDD policy remains the owner's narrow documented exception; provisioned
-locked startup also works. Per-title defaults can enable qualified replacements;
-global and per-subsystem opt-outs must select their real LLE counterparts.
+locked startup also works. Per-title build defaults can enable qualified
+replacements; opting out means selecting the LLE build and rebuilding.
 
 The product route must include sustained animated main-menu idle, selection
 changes, entry/return through Memory, Music, Settings and the locally available
@@ -45,9 +60,12 @@ responses are not. Pin the input identities and check actual reached screens.
 Script labels alone do not prove navigation. UI audio, input and transitions
 must be qualified; the current absence of host audio remains an open gap.
 
-The performance target is original-speed guest execution with sustained 60 FPS
-where the dashboard produces 60 Hz content, counting distinct frames and input
-latency separately from host presents and guest vblanks. Preserve the native
+The performance target is original-speed guest execution at the original
+content cadence for the selected title, region and video mode, counting distinct
+frames and input latency separately from host presents and guest vblanks. A
+30 FPS title on a 60 Hz output still needs 60 guest vblanks per real second;
+halving the emulated clock would slow gameplay. The existing 12.7-vblank/s
+screening result is not 12.7 measured distinct frames/s. Preserve the native
 baseline and measure each optimization against it on a quiet host. Additional
 headroom remains desirable; 20% is a planning proposal, not an agreed gate.
 Preserve each game's simulation rate; presenting a 30 Hz game twice is not a
@@ -73,8 +91,8 @@ Implement the first concrete renderer boundary before generalizing a framework.
 | Outputs and state | Return values, guest-visible memory, handles and persistent state remain compatible; replacement-private caches are permitted |
 | Timing and events | Preserve relevant ordering, IRQ/fence/wakeup semantics and declared logical-time behavior; host wall time cannot silently replace guest time |
 | Numerical/presentation tolerance | Document per-operation tolerances and intended enhancements; higher resolution/filtering can differ, missing geometry or corrupted gameplay cannot |
-| Unsupported input | Decline before side effects and execute the real reference path; after commitment, fallback requires a defined resolve/state-transfer or rollback boundary |
-| Opt-out | Start either mode from the same inputs; initial backend changes may require restart. Arbitrary live hot swapping is not a first-delivery requirement |
+| Unsupported input | Implement it, explicitly narrow supported build scope, or use the LLE build. No fabricated success. A scoped implementation may share existing helpers; a general live fallback mechanism is not required |
+| Opt-out | Select the LLE implementation at build time and rebuild. No runtime HLE selector, live handoff or cross-build savestate requirement |
 | Evidence | Compare reference/enhanced results at the contract boundary, record effective backend and fallback reasons, and exercise opt-out in regular smoke runs |
 
 Enhanced runs need not execute the reference path alongside every operation.
@@ -83,10 +101,11 @@ and image hashes remain reference regression tools; HLE changes execution paths,
 so cross-mode acceptance uses logical events, state/output contracts and stated
 tolerances instead of requiring identical retired-instruction histories.
 
-Proposed configuration axes (not existing switches): `profile=reference|enhanced`,
-per-subsystem overrides, and `cpu=hybrid|strict-aot`. Keep CPU execution choice
-independent of rendering/HLE choice. A qualified title ships enhanced; diagnostics
-must reveal its actual choices and any return to the reference path.
+CPU coverage is independent of HLE/LLE build selection. The active whole HLE
+renderer replaces CPU vertex programs and software rasterization; the earlier
+`XLLE_NATIVE_DRAW` subdivision remains parked. Guest XDK calls and CPU attribute
+staging still run. The borrowed phobos XDK symbol scanner identifies candidate
+call boundaries, whose ABI still needs verification against the actual binary.
 
 ## PSX/Tomba precedent checked
 
@@ -129,14 +148,14 @@ fork-specific code, fresh compiler tests and limits of each candidate.
 ## Fast-win delivery order
 
 Use bounded implementation checkpoints, not an open-ended framework rewrite.
-Work on menu performance first. Blinx launch follows the qualified 60 FPS menu
+Work on menu performance first. Blinx launch follows the qualified original-speed menu
 gate; neither milestone waits for 100% AOT or all dashboard menu interiors.
 
 | Order | Deliverable | First concrete result / decision |
 | --- | --- | --- |
 | 1 | Reference/enhanced selection around the existing renderer interface; short repeatable workload and opt-out smoke | Same live dashboard request reaches both implementations; effective backend, CPU/renderer cost, real guest progress and frame pacing are visible |
 | 2 | Borrow a substantial renderer path | Run one actual dashboard rendering workload through donor shader/raster/resource code and our real memory/resolve boundary. Measure against the previous path, validate tolerances, and expand useful coverage. Preserve reference fallback; no custom pixel-exact rewrite required |
-| 3 | Qualify sustained 60 FPS dashboard menu before Blinx | Measure settled animation and selection/input at original guest speed. Accelerate the measured costs using renderer reuse, native/HLE services or CPU work as evidence warrants; preserve real reference opt-outs and qualify outputs. Report distinct frames, presentation pacing and response, not just vblanks |
+| 3 | Qualify original-speed dashboard menu before Blinx | Measure settled animation and selection/input at original guest speed and content cadence. Accelerate the measured costs using renderer reuse, native/HLE services or CPU work as evidence warrants; preserve real reference opt-outs and qualify outputs. Report distinct frames, presentation pacing and response, not just vblanks |
 | 4 | First real Blinx launch with partial AOT | After the menu gate, resolve the pinned media/ATAPI/loader path and capture title entry plus the first actual blocker. Execute unsupported CPU instructions on the existing floor during development; full AOT and full renderer coverage are not prerequisites |
 | 5 | Enhanced playable slice and measured performance | Title screen, input and a reproducible gameplay scene; borrow or implement the actual reached audio/device contracts. Replace the measured expensive service/function next, validate opt-out and save/state behavior, then qualify original-speed output and latency |
 | 6 | Decide the long-term compiler/runtime foundation from a live comparison | Compare current xboxrecomp-generated execution with our current generator against the same implemented LLE/enhanced boundaries. Preserve useful broad frontend/tooling reuse; select on adaptation cost and measured workload, without repo loyalty. Bring this comparison forward if measured menu CPU cost makes it the useful next experiment |
@@ -148,8 +167,9 @@ full xemu state adapter dominates the work, first adapt its useful shader/format
 code at our existing packet boundary, or choose the better-matching donor. A
 large transplant remains allowed when it is cheaper than that adaptation.
 
-The first live donor checkpoint exists, but it has not demonstrated a speedup.
-Step 3 is now the active work. Qualify actual menu performance before starting
+The whole HLE renderer has demonstrated a provisional shared-host speedup;
+original-speed output remains unqualified. Step 3 is the active work. Qualify
+actual menu performance before starting
 step 4; a donor draw count or AOT percentage does not close that gate.
 Once Blinx starts, use its actual launch trace to choose the next missing service.
 Do not fabricate disc authentication, mutate the XBE's media constraints or
@@ -164,8 +184,8 @@ remains a landing check for changes that affect scheduling/device state.
 
 Every performance checkpoint reports real guest speed, CPU/renderer wall time,
 frame pacing, distinct new frames and input latency, plus separate AOT, CPU
-fallback, HLE and idle accounting. A steady 60 FPS dashboard is a useful win
-even with partial AOT. No current evidence proves 60 FPS is one change away.
+fallback, HLE and idle accounting. An original-speed dashboard is a useful win
+even with partial AOT. No current evidence proves it is one change away.
 Use executable milestones to establish velocity before assigning calendar dates.
 
 ## Active menu performance gate
@@ -174,7 +194,9 @@ Engineering qualification workload: at least 60 seconds of guest main-menu
 animation after warmup, including real selection changes, repeated on a quiet
 declared host. Keep startup timing separate and verify the reached screen.
 Measure capacity without detailed profiling, then verify interactive presentation
-at original speed. The nominal 60 Hz frame budget is 16.67 ms; report interval
+at original speed. Establish the original content cadence; 60 Hz output alone
+does not establish 60 distinct frames/s. A 60 Hz tick budget is 16.67 ms and
+a 30 FPS content budget is 33.33 ms; report interval
 distributions, stalls, distinct guest-produced frames, host presents and input
 response with their denominators. A mean vblank rate alone is insufficient.
 This duration is a working measurement protocol, not an owner-specified tolerance.
@@ -189,12 +211,14 @@ implementation before its result can be accepted.
 | Menu work package | Current evidence / next result |
 | --- | --- |
 | Runnable floor and repeatable menu route | Implemented: 27B route reaches Settings and returns to animated main menu; 270 reference checkpoints and ten images retained |
-| Borrowed rendering | Implemented, experimental: 5,349 donor draws after decoded-texture qualification; no qualified speedup or whole-scene numerical tolerance yet |
-| Attribute and reduce steady-menu cost | Active: opt-in bulk CPU register transfer and GPU status reduction preserve the full route; speed qualification remains open. Program specialization has not earned promotion |
-| Sustained original-speed 60 FPS and input | Open: repeat quiet-host steady windows and verify actual presentation, distinct output and input response |
+| Borrowed rendering | Separate whole HLE implementation completes the route; observed 1.87x throughput improvement remains shared-host screening evidence |
+| Attribute and reduce steady-menu cost | Borrow raw vertex-stream uploads next; assess whole XDK graphics replacement and larger native CPU regions against current handoff costs. See RENDERER-REUSE-2026-10-02.md |
+| Sustained original-speed cadence and input | Open: establish original content cadence, repeat quiet-host steady windows and verify actual presentation, distinct output and input response |
 | Blinx launch | Sequenced after this menu gate; pinned media findings retained |
 
-The latest contaminated timing pair gives **7.554 reference / 6.866 enhanced guest
+The following diagnostics predate the whole HLE renderer and retain the former
+60 FPS planning target for historical context; they do not select the next work.
+That earlier contaminated timing pair gives **7.554 reference / 6.866 enhanced guest
 vblanks per host second** in the verified 25.5B-27B main-menu window, not displayed
 FPS. Even the reference observation is about 7.9 times below 60; this is a scale
 estimate, not a qualified capacity result or a calendar forecast. The
@@ -233,7 +257,7 @@ a speedup, and full AOT remains a separate unfinished requirement.
 | --- | --- | --- |
 | Faithful reference floor | Partial, runnable dashboard | Qualified contracts for each reached subsystem; real LLE opt-out; close known exception, media, rendering and audio gaps |
 | Interchangeable enhanced renderer | Live borrowed path, experimental | Qualify whole-route tolerances and performance; maintain coherent readback/state and reference selection |
-| 60 FPS dashboard main menu | Active; gates Blinx | Sustained original-speed animation, selection/input and measured distinct output/pacing; partial AOT allowed |
+| Original-speed dashboard main menu | Active; gates Blinx | Original content cadence, selection/input and measured distinct output/pacing; partial AOT allowed |
 | Complete dashboard functionality | Open, broader product gate | Required menu interiors, input/audio and persistence |
 | Blinx launch and playable slice | Open; follows menu performance gate | Real loading/title execution, input, gameplay/audio and save/reload; partial AOT allowed |
 | Enhanced performance | Open | Measured gain at equivalent logical work and accepted outputs; title-appropriate cadence and latency |

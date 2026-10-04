@@ -119,6 +119,25 @@ XemuPshReject nv2a_xemu_psh_supported(const Nv2aGeneratedShaderPacket& p) {
             t.address_v == Nv2aCombinerShaderState::AddressMode::kBorder)
             return R::kTexture;
     }
+#if XLLE_NATIVE_DRAW
+    if (!p.native_vertices.empty()) {
+        if (p.native_primitive < 5 || p.native_primitive > 7 ||
+            p.native_vertices.size() > 0x7fffffffU || !p.triangles.empty()) return R::kGeometry;
+        for (const auto& v : p.native_vertices) {
+            for (float f : v.position) if (!std::isfinite(f)) return R::kGeometry;
+            if (v.position[3] <= 0) return R::kGeometry;
+            for (float f : v.diffuse) if (!std::isfinite(f)) return R::kGeometry;
+            for (float f : v.specular) if (!std::isfinite(f)) return R::kGeometry;
+            for (unsigned stage = 0; stage < 4; ++stage) {
+                if (!s.textures[stage].referenced) continue;
+                for (float f : v.texture[stage]) if (!std::isfinite(f)) return R::kGeometry;
+                // Same-sign projective coordinates cannot cross a pole within
+                // a triangle. Other inputs retain the complete existing path.
+                if (v.texture[stage][3] <= 0) return R::kGeometry;
+            }
+        }
+    }
+#endif
     for (const auto& t : p.triangles) {
         if (t.wide || !std::isfinite(t.depth_bias) || t.depth_bias != 0 ||
             !std::isfinite(t.za) || !std::isfinite(t.zb) || !std::isfinite(t.zc))
@@ -149,6 +168,9 @@ uint64_t nv2a_xemu_psh_key(const Nv2aGeneratedShaderPacket& p) {
     uint64_t h = p.fingerprint;
     using combiner_glsl_detail::fnv_word;
     fnv_word(h, 0x78656d752d707368ull);
+#if XLLE_NATIVE_DRAW
+    fnv_word(h, !p.native_vertices.empty());
+#endif
     fnv_word(h, p.guest.combiner_control);
     fnv_word(h, p.guest.shader_program);
     fnv_word(h, p.guest.shader_input);
@@ -191,6 +213,21 @@ std::string nv2a_xemu_fragment_glsl(const Nv2aGeneratedShaderPacket& p) {
     if (!generated) return {};
     std::string result = mstring_get_str(generated);
     mstring_unref(generated);
+#if XLLE_NATIVE_DRAW
+    if (!p.native_vertices.empty()) {
+        // Retain the donor combiner and depth tests, but use the driver's
+        // linear depth interpolation instead of per-fragment edge equations.
+        const auto begin = result.find("vec2 unscaled_xy = gl_FragCoord.xy / surfaceScale;");
+        const std::string end_marker = "zvalue += depthFactor*triMZ;\n";
+        const auto end = result.find(end_marker, begin);
+        if (begin == std::string::npos || end == std::string::npos) return {};
+        result.replace(begin, end + end_marker.size() - begin,
+                       "float zvalue = native_depth;\n");
+        const auto main = result.find("void main() {");
+        if (main == std::string::npos) return {};
+        result.insert(main, "noperspective in float native_depth;\n");
+    }
+#endif
     // X8's stored padding byte must be FF, while blending uses the real
     // combiner alpha. Preserve both through the existing dual-source ROP path.
     if (p.state.color_format_x8) {
@@ -242,4 +279,35 @@ void main() {
     vtxB0 = vec4(0); vtxB1 = vec4(0); vtxFog = 0.0; triMZ = 0.0;
 }
 )GLSL";
+#if XLLE_NATIVE_DRAW
+// Whole-draw GPU geometry, following the native submission model of the
+// DOAXBV donor. Guest shader outputs are screen coordinates with clip W.
+// Depth clipping stays in the donor fragment shader; XY clipping, winding
+// and varying interpolation belong to the host graphics pipeline.
+const char* const kNv2aNativeVertexSource = R"GLSL(#version 430 core
+struct Vertex { vec4 position, diffuse, specular; vec4 texture[4]; };
+layout(std430, binding = 0) readonly buffer Vertices { Vertex vertices[]; };
+uniform vec2 surface_size;
+out vec4 vtxD0, vtxD1, vtxB0, vtxB1;
+out float vtxFog;
+out vec4 vtxT0, vtxT1, vtxT2, vtxT3;
+flat out vec4 vtxPos0, vtxPos1, vtxPos2;
+flat out float triMZ;
+noperspective out float native_depth;
+void main() {
+    Vertex v = vertices[gl_VertexID];
+    vec2 ndc = vec2(v.position.x / surface_size.x * 2.0 - 1.0,
+                    1.0 - v.position.y / surface_size.y * 2.0);
+    gl_Position = vec4(ndc * v.position.w, 0.0, v.position.w);
+    native_depth = v.position.z;
+    vtxD0 = clamp(v.diffuse, 0.0, 1.0); vtxD1 = clamp(v.specular, 0.0, 1.0);
+    vtxT0 = v.texture[0]; vtxT1 = v.texture[1];
+    vtxT2 = v.texture[2]; vtxT3 = v.texture[3];
+    // Not read by this admitted combiner/depth contract.
+    vtxB0 = vtxB1 = vtxPos0 = vtxPos1 = vtxPos2 = vec4(0);
+    vtxFog = triMZ = 0.0;
+}
+)GLSL";
+#endif
+
 }

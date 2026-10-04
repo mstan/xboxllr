@@ -1,5 +1,118 @@
 # STATUS
 
+## 2026-10-03 - Original Xbox cadence target; next donor opportunities
+
+The owner clarified that original Xbox speed and content cadence are the target;
+60 distinct frames/s is not universal. The dashboard's original content cadence
+is still unverified. Existing vblank throughput measurements do not establish
+displayed FPS, and a 30 FPS title can still require 60 Hz guest timing.
+
+The bounded all-donor follow-up identifies raw vertex uploads, whole XDK graphics
+replacement, larger native CPU regions, native presentation, and real kernel/audio
+services. The current final menu interval makes 4,509,381 CPU tier handoffs;
+the whole route stages 175,545,669 vertices on the CPU. These counts select
+substantial candidates but do not establish their wall-time savings. Idle work
+is already fast-forwarded. NoRain's immediate-success waits and declined draws
+are excluded from borrowing. See the [source assessment](docs/RENDERER-REUSE-2026-10-02.md).
+This follow-up changed planning/tracking only; it ran no new build or benchmark.
+
+## 2026-10-03 - Separate whole HLE renderer runs the dashboard; 60 FPS open
+
+`-DXLLE_RENDERER=LLE` (default) and `-DXLLE_RENDERER=HLE` now select separate
+whole renderer implementations. HLE uses borrowed xemu vertex/pixel translation,
+NoRain texture layout, native GPU draws and textures, and allocator-release
+notifications inspired by NoRain's presenter. It bypasses CPU vertex execution
+and software triangle setup/rasterization. Guest XDK bodies still run. No live
+renderer switch or successful draw placeholders were added.
+
+Both builds passed all 79 applicable checks. Both completed the real 27B
+clock/menu/Settings/return route with all 14 USB input events and empty stderr.
+Live validation fixed a freed boot surface corrupting the heap on Settings entry,
+stencil/logic bit mappings, XRGB alpha and 16-bit color target storage. The clock
+model, panel and hour digit are visible. The HLE background grid/filtering still
+differ from the reference; this remains an opt-in integration, not a general
+Xbox graphics compatibility claim. Its allocation metadata adapter supports
+kernel 4983 and preserves the original kernel free bodies/results.
+
+One serial shared-host screen measured the final 123-vblank menu window at
+**18.121 s LLE / 10.707 s initial HLE**. Removing per-vertex allocation overhead
+and unnecessary GL context detachment reduced HLE to **9.694 s** in a follow-up
+that completed all 14 events and preserved all 28 HLE captures. The observed
+LLE-to-final-HLE throughput ratio is **1.87x**; all runs had foreign workloads,
+so this is provisional screening evidence. About **12.7 simulated FPS** is
+still far below the **60 FPS** gate, and is not a displayed fresh-frame measure.
+Blinx remains downstream. The next concrete donor opportunity is NoRain's raw
+vertex-stream upload, replacing this adapter's remaining CPU attribute staging.
+
+[Implementation and evidence](docs/RESULTS-WHOLE-HLE-RENDERER-2026-10-03.md).
+Private screen summaries and immutable binaries are under
+`build/whole-renderer-screen-r1*`; final HLE evidence uses
+`build/whole-hle-overhead-r1*`. Work remains uncommitted on
+`perf/measurement-first-2026-09`; `beads-xbox.1.45` remains in progress.
+
+
+## 2026-10-03 - Native draw HLE screening: functional, no speedup established
+
+The resumed donor integration has a build-selected native draw prototype:
+`-DXLLE_NATIVE_DRAW=ON` in `build-native-draw`. OFF keeps the existing renderer;
+`build-release` is OFF and the old GPU VSH experiments are disabled. Both retain
+private partial AOT for this comparison. No new runtime HLE selector or stubs.
+
+The native path reuses the xemu pixel translator and NoRain's primitive
+semantics, submitting original triangle lists/strips/fans to the GPU instead of
+building CPU clip/cull/edge/interpolation records. This is **not** the complete
+NoRain D3D11 renderer or an XDK-call replacement: CPU vertex programs and guest
+XDK bodies still execute. Phobos's XDK scanner is now in `tools/xdk_symbols`.
+It identifies 101 graphics functions in the local dashboard; DrawIndexedVertices
+has a database/binary argument-layout mismatch, so no unchecked hook is installed.
+
+One matching 27B dashboard route per build completed all 14 input events with
+empty stderr. All nine scripted input captures match, including Settings and
+return. Native submission executed **3,869 draws / 219,664 input triangles**.
+The final settled menu interval was **20.748 s before / 28.757 s native**, each
+with 123 guest vblanks. Summed frame windows were 283.534 s / 388.317 s.
+Both runs had foreign processes; the candidate also encountered substantially
+more compilation (48 versus 160 observed process identities). These figures
+cannot establish a causal regression, speedup or displayed FPS.
+
+**Decision: leave native draw OFF.** This screen does not demonstrate the
+substantial menu gain required to expand or promote this adapter. Do not turn
+it into another arithmetic/edge-accuracy project. The larger XDK/native renderer
+integration remains unfinished; menu60 and Blinx gates remain open.
+
+Validation: HLE GPU primitive/cull/depth/state-restoration checks and NV2A tests
+pass. The LLE build passes all 79 checks after updating the timing-call source
+guard for the fifth call site (78 passed initially; the corrected guard passed
+on rerun). Private evidence: `build/native-draw-screen-r1.summary.json`, matching
+leg logs/captures, and immutable executables/configurations under
+`build/native-draw-screen-r1-binaries/`. Work is uncommitted on
+`perf/measurement-first-2026-09`; tracker `beads-xbox.1.45` remains open.
+
+## 2026-10-03 - Finish the pending GPU comparison; park expansion
+
+The guarded native-FP32 candidate now passes its existing full dashboard route
+comparison in both settings: **270 checkpoints, 28 images and all native/device
+counter rows match**, with all 14 input events complete and empty stderr.
+Its earlier experimental build passed 79 tests. No new emulator run was needed.
+
+GPU shader timestamps fall from **21.577 to 10.195 seconds**, but the final
+settled-menu window takes **24.496 seconds off / 24.862 seconds on** for the same
+123 guest vblanks. Both profiled runs had competing builds, so neither a speedup
+nor a regression is qualified. This is not displayed FPS or a 60 FPS result.
+
+The candidate remains **off and uncommitted**. Park further GPU vertex arithmetic
+and specialization expansion. At the owner's request, use one bounded change,
+focused contract/live checks, and a menu-level keep-or-park decision before
+further implementation. The next question is the existing bulk CPU register
+option on the reference renderer, measured unprofiled on a quiet host. Do not
+equate shader time, donor coverage or test counts with a faster menu.
+
+The local build configuration still contains private AOT input and the GPU
+experiment; ordinary-build restoration/checking is pending. See the
+[validated comparison and decision](docs/RESULTS-VSH-NATIVE-FP32-2026-10-03.md)
+and [applied loop](docs/PERF-METHODOLOGY.md). Tracking: `beads-xbox.1.15.11`
+and menu gate `beads-xbox.1.17`.
+
 ## 2026-10-03 - GPU status reduction preserves the dashboard route
 
 The opt-in GPU status summary eliminates **118,736 readbacks**, reducing

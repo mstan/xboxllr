@@ -32,6 +32,9 @@ bool AotExecutor::add_region(const xlle_aot_region& r) {
     }
     region_by_base_.emplace_hint(next, r.base, regions_.size());
     regions_.push_back(&r);
+    observed_regions_.push_back(false);
+    for (const auto& observer : cpu_.entry_observers_)
+        observe_entry(observer->address);
     AotRegionStats counters{};
     counters.base = r.base;
     region_stats.push_back(counters);
@@ -58,6 +61,11 @@ bool AotExecutor::add_replacement(const AotReplacement& h) {
             (old.region == h.region && old.profile == h.profile)) return false;
     hooks_.push_back(h);
     return true;
+}
+
+void AotExecutor::observe_entry(uint32_t address) {
+    const size_t i = region_index(address);
+    if (i < regions_.size()) observed_regions_[i] = true;
 }
 
 size_t AotExecutor::region_index(uint32_t pc) const {
@@ -275,6 +283,9 @@ uint64_t AotExecutor::execute(uint32_t pc, uint64_t budget) {
     decline_reason_ = "unregistered-code";
     const size_t index = region_index(pc);
     if (index == regions_.size() || !budget) return 0;
+    // Targeted entry observers must see real execution. Only overlapping
+    // regions use the CPU floor; unrelated AOT regions remain accelerated.
+    if (observed_regions_[index]) { decline_reason_ = "entry-observer"; return 0; }
     const auto* region = regions_[index];
     auto& counters = region_stats[index];
     perf_excl::Scope timing(perf_excl::kAotExec);

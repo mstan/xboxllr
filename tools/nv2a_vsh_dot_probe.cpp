@@ -38,16 +38,25 @@ struct Context {
 
 int main(int argc, char** argv) try {
     bool fp64 = false;
+    bool native_fp32 = false;
     bool program_self_test = false;
     const char* capture_path = nullptr;
     const char* batch_path = nullptr;
     bool batch_self_test = false;
-    if (argc == 2 && std::string_view(argv[1]) == "--fp64-rounding") fp64 = true;
-    else if (argc == 2 && std::string_view(argv[1]) == "--program-self-test") program_self_test = true;
-    else if (argc == 3 && std::string_view(argv[1]) == "--program-capture") capture_path = argv[2];
-    else if (argc == 3 && std::string_view(argv[1]) == "--batch-capture") batch_path = argv[2];
-    else if (argc == 2 && std::string_view(argv[1]) == "--batch-self-test") batch_self_test = true;
-    else if (argc != 1) throw std::runtime_error("Usage: xlle_vsh_dot_probe [--fp64-rounding | --program-self-test | --program-capture path | --batch-capture path | --batch-self-test]");
+    bool selected_mode = false;
+    for (int i = 1; i < argc; ++i) {
+        const std::string_view arg(argv[i]);
+        if (arg == "--native-fp32" && !native_fp32) { native_fp32 = true; continue; }
+        if (selected_mode) throw std::runtime_error("Select only one probe mode");
+        selected_mode = true;
+        if (arg == "--fp64-rounding") fp64 = true;
+        else if (arg == "--program-self-test") program_self_test = true;
+        else if (arg == "--program-capture" && i + 1 < argc) capture_path = argv[++i];
+        else if (arg == "--batch-capture" && i + 1 < argc) batch_path = argv[++i];
+        else if (arg == "--batch-self-test") batch_self_test = true;
+        else throw std::runtime_error("Usage: xlle_vsh_dot_probe [--native-fp32] [--fp64-rounding | --program-self-test | --program-capture path | --batch-capture path | --batch-self-test]");
+    }
+    if (native_fp32) fp64 = true;
     const bool batch_mode = batch_path || batch_self_test;
     const bool program_mode = capture_path || program_self_test || batch_mode;
     Context context;
@@ -82,6 +91,7 @@ int main(int argc, char** argv) try {
     LOAD(PFNGLGETBUFFERSUBDATAPROC, GetBufferSubData);
     LOAD(PFNGLDELETEBUFFERSPROC, DeleteBuffers);
     LOAD(PFNGLGETUNIFORMLOCATIONPROC, GetUniformLocation);
+    LOAD(PFNGLGETUNIFORMUIVPROC, GetUniformuiv);
     LOAD(PFNGLUNIFORM1UIPROC, Uniform1ui);
     LOAD(PFNGLDISPATCHCOMPUTEPROC, DispatchCompute);
     LOAD(PFNGLMEMORYBARRIERPROC, MemoryBarrier);
@@ -94,6 +104,7 @@ int main(int argc, char** argv) try {
     const auto Finish = load<FinishFn>("glFinish");
     std::cout << "GL=" << GetString(GL_VERSION) << " renderer=" << GetString(GL_RENDERER) << '\n';
     std::cout << "arithmetic=" << (program_mode ? "program-fp64-rounding" : fp64 ? "fp64-rounding" : "native-float") << '\n';
+    std::cout << "native_fp32_normal_range=" << native_fp32 << '\n';
     const auto source_view = program_mode ? std::string_view(probe::kProgramComputeSource) :
         fp64 ? std::string_view(probe::kFp64ComputeSource) : probe::kComputeSource;
     const char* source = source_view.data();
@@ -116,6 +127,18 @@ int main(int argc, char** argv) try {
         GetProgramInfoLog(program, static_cast<GLsizei>(log.size()), nullptr, log.data());
         throw std::runtime_error(log.data());
     }
+    const auto configure_native_fp32 = [&](GLuint selected_program) {
+        if (!fp64 && !program_mode) return;
+        const GLint location = GetUniformLocation(selected_program, "u_native_fp32");
+        if (location < 0) throw std::runtime_error("Missing native-FP32 selection uniform");
+        UseProgram(selected_program);
+        Uniform1ui(location, native_fp32 ? 1u : 0u);
+        GLuint actual = 2;
+        GetUniformuiv(selected_program, location, &actual);
+        if (actual != (native_fp32 ? 1u : 0u))
+            throw std::runtime_error("Native-FP32 selection was not applied");
+    };
+    configure_native_fp32(program);
 
     if (program_mode) {
         namespace capture = xlle::vsh_capture;
@@ -394,6 +417,7 @@ int main(int argc, char** argv) try {
         cases.push_back({record, "bounded-finite"});
     }
     probe::append_rounding_cases(cases);
+    probe::append_native_fp32_boundary_cases(cases);
     std::vector<probe::DotInput> inputs;
     for (const auto& item : cases) inputs.push_back(item.input);
     const auto expected = probe::cpu_oracle(cases);
@@ -410,6 +434,10 @@ int main(int argc, char** argv) try {
         {"product_halfway_at_min_normal", 0x00800000u},
         {"sum_overflow_below_threshold", 0u},
         {"sum_overflow_tie_threshold", 0x7f7fffffu},
+        {"native_fp32_min_normal_cancellation", 0x00800000u},
+        {"native_fp32_subnormal_cancellation_fallback", 0x00400000u},
+        {"native_fp32_min_normal_product", 0x00800000u},
+        {"native_fp32_subnormal_product_fallback", 0x00400000u},
     };
     size_t checked_oracle_cases = 0;
     for (size_t i = 0; i < cases.size(); ++i) {

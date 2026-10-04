@@ -233,6 +233,15 @@ static void test_texture_conversion_cache() {
     CHECK(!cache.find(source, 2, 2, false, false));
     CHECK(!cache.find(std::vector<uint8_t>{1, 2, 3}, 2, 2, false, true));
 
+    // Compressed bytes have different meanings at different pitches/formats.
+    // This cache instance is separate from the post-decode conversion cache.
+    xlle::Nv2aTextureConversionCache decoded;
+    decoded.store(source, 2, 2, true, false, converted, 0, 0, 16, 0x0e);
+    CHECK(decoded.find(source, 2, 2, true, false, 16, 0x0e));
+    CHECK(!decoded.find(source, 2, 2, true, false, 8, 0x0e));
+    CHECK(!decoded.find(source, 2, 2, true, false, 16, 0x0c));
+    CHECK(!decoded.find(changed, 2, 2, true, false, 16, 0x0e));
+
     // Interleaved inputs must not invalidate an already copied draw packet.
     const auto owned_packet = hit->output;
     for (uint32_t i = 0; i < 10; ++i)
@@ -7557,6 +7566,7 @@ int main() {
             e_dxt23[10] = 0x00;
             e_dxt23[11] = 0x00;
             std::memcpy(e_ram.data() + 0x20100, e_dxt23.data(), e_dxt23.size());
+            e_gpu.set_dxt_decode_cache(true);
             put32(e_ram, 0x10000u + e_offset, 0);
             emit_e(0x0260, 0x14180000);   // AlphaIcw0: PRIMARY.a * TEXTURE0.a
             emit_e(0x1B00, 0x00020100);   // TextureOffset0
@@ -7579,6 +7589,39 @@ int main() {
             kick_e();
             CHECK(e_fault.empty());
             CHECK(get32(e_ram, 0x10000u + e_offset) == 0xAA305070u);
+
+            // Repeat an actual device draw, then rewrite the compressed alpha
+            // in place. Reuse must still read guest memory and expose that edit.
+            auto repeat_dxt_draw = [&]() {
+                put32(e_ram, 0x10000u + e_offset, 0);
+                emit_e(0x17FC, 5);
+                for (int v = 0; v < 3; ++v) {
+                    emit_e(0x1A90, e_float_bits(2.5f));
+                    emit_e(0x1A94, e_float_bits(2.5f));
+                    emit_e(0x1A98, e_float_bits(0.0f));
+                    emit_e(0x1A9C, e_float_bits(1.0f));
+                    emit_e(0x1518, e_float_bits(ex[v]));
+                    emit_e(0x151C, e_float_bits(ey[v]));
+                    emit_e(0x1520, e_float_bits(10.0f));
+                    emit_e(0x194C, e_pack_ub4(0x30, 0x50, 0x70, 0xFF));
+                    emit_e(0x1524, e_float_bits(1.0f));
+                }
+                emit_e(0x17FC, 0);
+                kick_e();
+                CHECK(e_fault.empty());
+                return get32(e_ram, 0x10000u + e_offset);
+            };
+            const auto dxt_hits = e_gpu.dxt_decode_cache().hits();
+            CHECK(repeat_dxt_draw() == 0xAA305070u);
+            CHECK(e_gpu.dxt_decode_cache().hits() == dxt_hits + 1);
+            e_ram[0x20105] ^= 1; // texel (2,2) alpha A -> B
+            const auto dxt_misses = e_gpu.dxt_decode_cache().misses();
+            CHECK(repeat_dxt_draw() == 0xBB305070u);
+            CHECK(e_gpu.dxt_decode_cache().misses() == dxt_misses + 1);
+            e_gpu.set_dxt_decode_cache(false);
+            CHECK(repeat_dxt_draw() == 0xBB305070u);
+            CHECK(e_gpu.dxt_decode_cache().misses() == dxt_misses + 1);
+            e_gpu.set_dxt_decode_cache(true);
 
             // DXT1/A1 variant (color code 0x0c): selector 3 is transparent when
             // color0 <= color1.  This verifies the other compressed dashboard format

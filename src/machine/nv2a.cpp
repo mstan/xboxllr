@@ -3221,6 +3221,9 @@ bool Nv2a::execute_draw_spans(DrawJob& job) {
 }
 
 bool Nv2a::submit_vertex_batch() {
+#if XLLE_RENDERER_HLE
+    return submit_hle_vertex_batch();
+#else
     // NV2A_VERTEX: attribute fetch, vertex-shader/fixed-function transform and batch
     // assembly. The raster call below opens its own region, so this bucket's self time is
     // the vertex pipeline alone.
@@ -4290,6 +4293,7 @@ bool Nv2a::submit_vertex_batch() {
         ++primitive_mode_counts_[primitive_mode_];
     }
     return true;
+#endif
 }
 
 bool Nv2a::rasterize_witnessed_immediate_quad(DrawJob& job, bool& executed) {
@@ -11017,19 +11021,31 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                 if (compressed_argb8) {
                     perf::ScopedAdd timer(perf::g_ns_generic_texture_decode,
                                           perf::g_calls_generic_texture_decode);
-                    if (dxt1_argb8 &&
-                        !decode_dxt1_argb(source, ts.width, ts.height, ts.pitch,
-                                          ts.data)) {
-                        record_generic_skip_detail(
-                            GenericSkipReason::kUnsupportedTextureFormat, format);
-                        return true;
-                    }
-                    if (dxt23_argb8 &&
-                        !decode_dxt23_argb(source, ts.width, ts.height, ts.pitch,
-                                           ts.data)) {
-                        record_generic_skip_detail(
-                            GenericSkipReason::kUnsupportedTextureFormat, format);
-                        return true;
+                    // Adapt sp00nznet/xboxrecomp nv2a_pb_exec.c's DXT reuse:
+                    // compare complete compressed bytes, never sampled hashes.
+                    // Our boundary owns a whole image, so cache whole decoded
+                    // images using the existing bounded storage. Resolve/DMA
+                    // above still run, including guest-visible failure paths.
+                    const auto* cached = dxt_decode_cache_enabled_
+                        ? dxt_decode_cache_.find(source, ts.width, ts.height,
+                                                 true, false, ts.pitch, color_code)
+                        : nullptr;
+                    if (cached) {
+                        ts.data = cached->output;
+                    } else {
+                        const bool decoded = dxt1_argb8
+                            ? decode_dxt1_argb(source, ts.width, ts.height,
+                                               ts.pitch, ts.data)
+                            : decode_dxt23_argb(source, ts.width, ts.height,
+                                                ts.pitch, ts.data);
+                        if (!decoded) {
+                            record_generic_skip_detail(
+                                GenericSkipReason::kUnsupportedTextureFormat, format);
+                            return true;
+                        }
+                        if (dxt_decode_cache_enabled_)
+                            dxt_decode_cache_.store(source, ts.width, ts.height,
+                                true, false, ts.data, 0, 0, ts.pitch, color_code);
                     }
                 }
                 ts.pitch = ts.width * static_cast<uint32_t>(sizeof(uint32_t));
@@ -13627,6 +13643,43 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             gpu_shader_packet = Nv2aGeneratedShaderPacket{};
         }
     }
+
+#if XLLE_NATIVE_DRAW
+    // Donor-style whole-draw submission. No CPU clipping, edge equations,
+    // triangle expansion or software interpolation records are needed here.
+    // Offset polygons retain the existing implementation until the adapter
+    // carries their depth-bias contract. Unsupported batches still render.
+    if (gpu_shader_collect && polygon_bias == 0.0f && polygon_scale == 0.0f &&
+        transformed_batch.size() >= 3 && !collect_diagnostics &&
+        gpu_generic_shader_verify_ == 0) {
+        gpu_shader_packet.native_vertices = transformed_batch;
+        gpu_shader_packet.native_primitive = primitive_mode;
+        gpu_shader_packet.native_cull = cull_enabled;
+        gpu_shader_packet.native_cull_front = cull_front;
+        if (renderer_->prepare_native_draw(gpu_shader_packet)) {
+            Nv2aGeneratedShaderResult result;
+            std::string error;
+            if (!renderer_->submit_generated_shader(gpu_shader_packet, result, error)) {
+                fault_(("NV2A native draw failed: " + error).c_str());
+                return false;
+            }
+            ++generic_shader_submits_;
+            generic_shader_triangles_ += result.triangles;
+            generic_shader_color_upload_bytes_ += result.color_upload_bytes;
+            generic_shader_depth_upload_bytes_ += result.depth_upload_bytes;
+            generic_shader_texture_upload_bytes_ += result.texture_upload_bytes;
+            if (generic_shader_row_) {
+                ++generic_shader_row_->gpu_batches;
+                if (generic_shader_row_->software_batches) --generic_shader_row_->software_batches;
+            }
+            ++generic_combiner_executed_batches_;
+            record_generic_fingerprint_perf();
+            return true;
+        }
+        gpu_shader_packet.native_vertices.clear();
+        gpu_shader_packet.native_primitive = 0;
+    }
+#endif
 
     if (!gpu_shader_collect) {
         perf::ScopedAdd timer(perf::g_ns_generic_fallback_color_resolve,

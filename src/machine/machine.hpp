@@ -291,6 +291,8 @@ public:
     }
 
 private:
+    void install_hle_allocation_observers();
+    bool hle_allocation_observers_installed_ = false;
     void det_record_slice(const DetSlice& s);
     // Returns the number of instructions that may be retired without executing them, or 0.
     bool try_idle_fast_forward(uint32_t eip, bool irq_armed, uint64_t deadline,

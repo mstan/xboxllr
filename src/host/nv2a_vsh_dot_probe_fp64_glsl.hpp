@@ -5,11 +5,15 @@
 
 namespace xlle::vsh_shadow_probe {
 
-// Diagnostic only. Keep binary32 intermediates as integers, so GPU float FTZ
-// cannot erase subnormals. Binary64 arithmetic is tested on the actual device;
-// GLSL 4.30 does not promise full IEEE binary64 operation accuracy everywhere.
+// Shared by numeric probes and the optional resident renderer. Keep binary32
+// intermediates as integers, so GPU float FTZ cannot erase subnormals. Both the
+// explicit-rounding path and opt-in native normal-range operations require
+// device qualification; GLSL does not guarantee the CPU's rounding mode.
 // NaN operands and invalid operations explicitly decline the entire record.
 inline constexpr std::string_view kFp32ArithmeticSource = R"GLSL(
+// Opt-in normal-range arithmetic. Zero defaults to the explicit-rounding path.
+// Exceptional operands and results stay in that implemented path below.
+uniform uint u_native_fp32;
 bool nan32(uint x) { return (x & 0x7fffffffu) > 0x7f800000u; }
 bool inf32(uint x) { return (x & 0x7fffffffu) == 0x7f800000u; }
 
@@ -54,6 +58,17 @@ uint multiply32(uint a, uint b, inout bool supported) {
         return 0u;
     }
     if (inf32(a) || inf32(b)) return sign | 0x7f800000u;
+    if (u_native_fp32 != 0u) {
+        if ((a & 0x7fffffffu) == 0u || (b & 0x7fffffffu) == 0u) return sign;
+        uint ea = (a >> 23) & 255u, eb = (b >> 23) & 255u;
+        // Normal inputs and 2^-126 <= abs(exact product) < 2^126.
+        // Input finiteness alone is insufficient: tiny products can lose their
+        // sign under GPU FTZ and subsequently change screen/W processing.
+        if (ea != 0u && eb != 0u && ea + eb >= 128u && ea + eb <= 378u) {
+            precise float product = uintBitsToFloat(a) * uintBitsToFloat(b);
+            return floatBitsToUint(product);
+        }
+    }
     precise double product = decode32(a) * decode32(b);
     return round32(product, sign);
 }
@@ -72,6 +87,20 @@ uint add32(uint a, uint b, inout bool supported) {
     }
     if (inf32(a)) return a;
     if (inf32(b)) return b;
+    if (u_native_fp32 != 0u) {
+        uint ma = a & 0x7fffffffu, mb = b & 0x7fffffffu;
+        if (ma == 0u && mb == 0u) return (a & b) & 0x80000000u;
+        if (ma == 0u) return b;
+        if (mb == 0u) return a;
+        uint ea = (a >> 23) & 255u, eb = (b >> 23) & 255u;
+        // Each operand's grid is at least 2^-126, so a nonzero cancellation
+        // remains normal. The upper bound excludes overflow after addition.
+        if (ea >= 24u && eb >= 24u && ea <= 252u && eb <= 252u) {
+            precise float sum = uintBitsToFloat(a) + uintBitsToFloat(b);
+            uint result = floatBitsToUint(sum);
+            return (result & 0x7fffffffu) == 0u ? 0u : result;
+        }
+    }
     precise double sum = decode32(a) + decode32(b);
     // Under RN-even, exact cancellation is +0; only -0 + -0 is -0.
     uint zero_sign = a == 0x80000000u && b == 0x80000000u ? 0x80000000u : 0u;

@@ -30,6 +30,7 @@ public:
         bool linear = false, alpha8 = false;
         std::vector<uint8_t> source, output;
         uint64_t hash = 0, content_id = 0, age = 0;
+        uint32_t source_pitch = 0, source_format = 0;
     };
 
     static uint64_t new_content_id() {
@@ -39,10 +40,13 @@ public:
     }
 
     const Entry* find(const std::vector<uint8_t>& source, uint32_t width,
-                      uint32_t height, bool linear, bool alpha8) {
+                      uint32_t height, bool linear, bool alpha8,
+                      uint32_t source_pitch = 0, uint32_t source_format = 0) {
         for (auto& entry : entries_) {
             if (entry.age && entry.width == width && entry.height == height &&
                 entry.linear == linear && entry.alpha8 == alpha8 &&
+                entry.source_pitch == source_pitch &&
+                entry.source_format == source_format &&
                 entry.source == source) {
                 entry.age = ++clock_;
                 ++hits_;
@@ -56,7 +60,8 @@ public:
     void store(const std::vector<uint8_t>& source, uint32_t width,
                uint32_t height, bool linear, bool alpha8,
                const std::vector<uint8_t>& output, uint64_t hash,
-               uint64_t content_id = 0) {
+               uint64_t content_id = 0, uint32_t source_pitch = 0,
+               uint32_t source_format = 0) {
         if (source.size() > kBudget || output.size() > kBudget - source.size()) {
             ++oversize_;
             return;
@@ -71,7 +76,8 @@ public:
             }
             if (empty && bytes_ <= kBudget - bytes) {
                 *empty = Entry{width, height, linear, alpha8, source, output,
-                               hash, content_id, ++clock_};
+                               hash, content_id, ++clock_, source_pitch,
+                               source_format};
                 bytes_ += bytes;
                 return;
             }

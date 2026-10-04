@@ -267,6 +267,23 @@ void UnicornFloor::on_retired(RetiredCb cb) {
     if (retired_cb_) set_insn_mode(true);
 }
 
+bool UnicornFloor::observe_entry(uint32_t address, std::function<void()> callback) {
+    if (!uc_ || !callback) return false;
+    auto observer = std::make_unique<EntryObserver>(EntryObserver{address, std::move(callback)});
+    entry_observer_min_ = std::min(entry_observer_min_, address);
+    entry_observer_max_ = std::max(entry_observer_max_, address);
+    entry_observers_.push_back(std::move(observer));
+    if (aot_) aot_->observe_entry(address);
+    return true;
+}
+
+void UnicornFloor::notify_entry(uint32_t pc) {
+    for (const auto& entry : entry_observers_) if (entry->address == pc) {
+        try { entry->callback(); }
+        catch (const std::exception& e) { request_stop(e.what()); }
+    }
+}
+
 // One-way switch, called only from on_retired(). It is never reversed: uc_hook_del would
 // have to sweep the hook's whole hooked_regions set, and nothing needs the per-instruction
 // hook to go away once a caller has asked for per-instruction events.
@@ -777,6 +794,10 @@ void UnicornFloor::code_trampoline(uc_struct* uc, uint64_t addr, uint32_t size, 
             return;
         }
     }
+    if (addr >= self->entry_observer_min_ && addr <= self->entry_observer_max_) {
+        self->notify_entry(static_cast<uint32_t>(addr));
+        if (!self->stop_reason_.empty()) return;
+    }
     xlle_guest_tsc_ticks = self->seq_;
     RetiredInsn ev{self->seq_++, static_cast<uint32_t>(addr), size};
     self->restore_charge_active_ = true;
@@ -885,6 +906,11 @@ void UnicornFloor::block_trampoline(uc_struct* uc, uint64_t addr, uint32_t size,
             uc_emu_stop(engine);
             return;
         }
+    }
+
+    if (pc >= self->entry_observer_min_ && pc <= self->entry_observer_max_) {
+        self->notify_entry(pc);
+        if (!self->stop_reason_.empty()) return;
     }
 
     // Publish the guest time-stamp counter as of this block's first instruction. The

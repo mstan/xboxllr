@@ -2,6 +2,9 @@
 #include "machine/nv2a_renderer.hpp"
 
 namespace xlle {
+#if XLLE_NATIVE_DRAW
+extern const char* const kNv2aNativeVertexSource;
+#endif
 // A real donor shader path with a deliberately bounded input contract. Decline
 // means use the existing reference implementation, never synthesize success.
 enum class XemuPshReject { kNone, kState, kCombiner, kTexture, kGeometry, kCount };

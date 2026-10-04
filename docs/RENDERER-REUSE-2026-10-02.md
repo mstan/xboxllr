@@ -1,5 +1,41 @@
 # Renderer and runtime reuse for the dashboard
 
+## Next substantial opportunities after the whole HLE renderer (2026-10-03)
+
+Active integration: `beads-xbox.1.45`. The owner now targets original Xbox
+execution speed and content cadence, not universal 60 rendered FPS. Whole
+subsystem replacements selected at build time remain eligible; nominal internal
+differences are allowed. This is a source audit, not measured speedup evidence.
+
+| Priority | Donor evidence and current cost | Concrete replacement |
+| --- | --- | --- |
+| First bounded implementation | NoRain `recomp-runtime/d3d_presenter_d3d11.cpp:1566,2269,2489` uploads original vertex strides through reusable rings and uses DrawIndexed. Our completed route expands 175,545,669 vertices into 16 vec4 attributes on the CPU. | Preserve guest vertex/index streams, decode formats on the GPU, reuse upload storage; remove per-vertex CPU expansion and unnecessary index rebuilding. Support all reached formats or fail explicitly. |
+| Largest graphics boundary opportunity | NoRain `d3d_draw_adapter.c` and phobos XDK discovery/native routing show API-level access to draws/resources. Our guest XDK still constructs commands which our NV2A device decodes. | Replace the complete supported XDK graphics service directly with native state/resource/draw operations. Eliminate guest driver work and redundant command construction/decoding while preserving observable resource, fence and memory behavior. Verify actual dashboard ABI; scanner names alone are insufficient. |
+| CPU execution opportunity | All three compilers offer function-level lifting. NoRain contributes carry/LOOP and jump-table fixes; phobos has flag-join and incremental-generation work. Our final 123-vblank interval has 4,509,381 AOT/emulator handoffs and 10,016,646 native invocations for 144,274,436 native instructions. | Compile larger connected regions/functions and use complete native library replacements where useful. Roughly 14 guest instructions/native invocation shows why coverage percentage alone misses transition overhead. Preserve required event exits; no instruction-history matching imposed on HLE. |
+| Native presentation/submission | NoRain `d3d_presenter_thread.cpp` queues owned packets; `d3d_presenter_d3d11.cpp:3009` presents via the swap chain. Our interactive path resolves graphics memory and uploads it through SDL. | Present GPU-resident output directly and allow queued GPU submission; synchronize on actual guest dependencies. Measure in interactive mode: headless replay cannot establish presentation savings. |
+| Other whole services | NoRain has native file reads, memory/string services and DirectSound/XAudio2 output. The phobos `kernel_bridge.c:1461-1660` implements guest event state, notification generations and host wakeups. | Native file/memory/event/audio services can avoid running corresponding guest stacks and device work. Rank by reached hot calls; audio also closes a current functionality gap. These are eligible later replacements, not demonstrated menu bottlenecks. |
+
+Counts come from `build/whole-hle-overhead-r1.stdout.log`, interval ending 27B
+and cumulative renderer summary. They are workload counts, not timing attribution.
+The route already fast-forwards 17.99B idle instructions; that skipped work is
+not another reclaimable CPU cost. Raw uploads are the next bounded candidate;
+whole XDK replacement and coarse native execution are the larger follow-ups.
+
+The donor runtimes cannot be imported wholesale under our policy. NoRain
+`kernel_thread.c:80-85,178-183` returns success for waits without waiting, and
+`d3d_presenter_thread.cpp:120-125` continues after declined draws. Those behaviors
+are excluded. Its real renderer, queues, codecs, resource and file services
+remain useful donors. Audit each selected contract rather than rejecting the
+project or accepting every implementation.
+
+Current public status checked on 2026-10-03: [NoRain DOAXVB](https://github.com/NoRain211/doaxvb-re)
+reports playable long sessions, with rendering limitations. We have not measured
+its FPS. [sp00nznet](https://github.com/sp00nznet/xboxrecomp) retracts the older
+Burnout playable/60 FPS and dashboard green-orb claims; those used scaffolding.
+The phobos fork supplies useful distinct runtime/compiler changes, but this audit
+does not establish a title FPS benchmark. Fork README claims are not independent
+measurements. The source pins below identify the inspected code.
+
 **All-donor refresh, 2026-10-03:** tracking `beads-xbox.1.41`. The owner requires
 continued assessment and useful borrowing from **all three** linked xboxrecomp
 repositories, including relevant title runtimes. Earlier coverage named all three

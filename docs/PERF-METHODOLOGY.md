@@ -5,6 +5,83 @@
 > (`docs/PERF-AUDIT-2026-09-02.md`, tracker `beads-xbox.1.14`). Where this file and older
 > STATUS/PROGRESS entries disagree, this file wins; update it on any pivot.
 
+## Current HLE iteration policy (owner clarification, 2026-10-03)
+
+Latest target clarification: match the original Xbox's execution speed and
+content cadence for each title/region/video mode. This supersedes a universal
+60 rendered FPS target in older sections. Measure guest-time throughput,
+distinct frames, host presentation and input response separately. A 30 FPS game
+on 60 Hz output must still advance 60 vblanks per real second. The dashboard's
+original distinct-frame cadence remains unverified.
+
+[HLE.md](../../../recomp-template/HLE.md) governs new replacements. Developers
+select HLE or LLE **at build time**. Preserve caller-visible behavior with
+allowed small differences; do not require internal arithmetic, instruction
+histories, or live state migration to match. Existing diagnostic switches do
+not justify adding runtime HLE selectors. Keep the LLE build functional.
+
+Whole-renderer comparisons use separate `XLLE_RENDERER=LLE` and
+`XLLE_RENDERER=HLE` builds. HLE owns native GPU vertex, raster and texture work;
+its acceptance requires the visible dashboard content and navigation route.
+Kernel allocation-release observation is an ownership boundary, not a demand
+for per-draw GPU/CPU synchronization.
+
+Screen substantial donor-based changes immediately on the real menu, including
+input and animation. Busy-host runs are useful screening evidence; record their
+limitations. A quiet host is for confirmation, not a prerequisite to finding
+large wins. Build-selected comparisons necessarily use distinct binaries with
+matching unrelated configuration. Older same-binary and equal-instruction
+rules below describe the historical exact-core experiments, not HLE acceptance.
+Do not mistake faster guest time, repeated presentations, or a smaller profiler
+bucket for the original-speed product result. No stubs or silently dropped draws.
+
+The native draw spike replaces software geometry preparation with GPU primitive
+submission using the existing xemu donor shader. Its first live result decides
+whether to expand it. The FP32 arithmetic and DXT decode-cache experiments are
+parked; they do not gate this work.
+
+## Dashboard iteration decision (owner follow-up, 2026-10-03)
+
+The owner requested a more applied validation loop after the GPU experiments
+preserved outputs without demonstrating a faster dashboard. For the current
+menu performance work, use the following loop before widening an implementation:
+
+1. Name the measured cost, the concrete change and its optimistic whole-menu
+   saving. Use disjoint costs from the same window; GPU durations overlap host
+   waits and cannot be added to them. A smaller bucket or larger donor coverage
+   is evidence about the mechanism, not a successful performance outcome.
+2. Make one bounded change with its real reference opt-out. Run the relevant
+   contract check and a live menu/input smoke, then measure the same settled
+   menu workload with the option off/on. Reuse existing probes and artifacts;
+   do not expand a test corpus or build infrastructure without a specific gap.
+3. Make an explicit decision: qualify a promising candidate, park one without
+   a menu benefit, or fix a demonstrated correctness failure. A busy-host run
+   may guide that decision but cannot qualify speed. If the host is busy, do
+   not keep launching long timing pairs or stack further changes on that path.
+4. For promotion, retain the same-binary, quiet-host, unprofiled, interleaved
+   three-pair protocol and the existing 5% median/minimum improvement threshold.
+   The primary metric for this goal is the settled menu window, with total
+   boot/route cost reported separately. The historical total-12B rule below
+   remains the old benchmark's gate; improving boot cannot substitute for
+   improving the menu. Record both gains and regressions, then run the relevant
+   full-route correctness checks before promoting the candidate.
+5. Qualification for the original-speed milestone remains the sustained live
+   animation/input protocol in GOAL-AOT-DASHBOARD.md. Guest vblank throughput,
+   GPU time, AOT coverage and unit-test counts do not establish displayed FPS.
+
+Behavioral faithfulness and the declared subsystem contract remain the
+acceptance standard. Cheap exact comparisons are useful regression checks;
+enhanced paths may use explained numerical tolerances and different execution
+histories. Neither success stubs nor removal of required guest work is allowed.
+
+The first application is the guarded native-FP32 experiment: finish its existing
+route comparison, leave it off, and park further vertex-shader expansion because
+the diagnostic does not show a faster settled menu. The next bounded timing
+question is the already-implemented bulk CPU register transfer on the reference
+renderer, with public register access as its opt-out. Collect that decision
+before implementing another optimization. Detailed evidence and limitations are
+in RESULTS-VSH-NATIVE-FP32-2026-10-03.md.
+
 ## 1. Owner decisions (2026-09-03)
 
 | # | Question | Decision |

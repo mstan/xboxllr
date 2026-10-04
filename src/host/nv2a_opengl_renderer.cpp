@@ -3,6 +3,9 @@
 #include "host/nv2a_witnessed_gl_shaders.hpp"
 #include "host/nv2a_combiner_glsl.hpp"
 #include "host/nv2a_xemu_psh.hpp"
+#if XLLE_NATIVE_DRAW
+#include "host/nv2a_native_draw.hpp"
+#endif
 #include "machine/perf_accounting.hpp"
 #include "machine/perf_excl.hpp"
 #if XLLE_VSH_GPU_RESIDENT
@@ -1208,7 +1211,15 @@ class OpenGlNv2aRenderer final : public Nv2aRenderer {
     // in the file and needs the name in a parameter type.
     struct ResidentSurface;
 public:
-    void set_enhanced_xemu(bool enabled) { enhanced_xemu_ = enabled; }
+    void set_enhanced_xemu(bool enabled) { enhanced_xemu_ = enabled || XLLE_NATIVE_DRAW; }
+#if XLLE_NATIVE_DRAW
+    bool prepare_native_draw(const Nv2aGeneratedShaderPacket& packet) override {
+        ++native_attempts_;
+        return !packet.native_vertices.empty() &&
+            nv2a_xemu_psh_supported(packet) == XemuPshReject::kNone &&
+            supports_generated_shader(packet);
+    }
+#endif
     bool prepare_generated_shader(const Nv2aGeneratedShaderPacket& packet) override {
         if (!enhanced_xemu_) return true;
         ++enhanced_attempts_;
@@ -1251,6 +1262,12 @@ public:
           resident_texture_modulate_program_(resident_texture_modulate_program),
           resident_dashboard_program_(resident_dashboard_program) {}
     ~OpenGlNv2aRenderer() override {
+#if XLLE_NATIVE_DRAW
+        std::printf("[nv2a-renderer] native-draw build=HLE attempts=%llu draws=%llu "
+                    "vertices=%llu triangles-submitted=%llu\n",
+                    (unsigned long long)native_attempts_, (unsigned long long)native_draws_,
+                    (unsigned long long)native_vertices_, (unsigned long long)native_triangles_);
+#endif
         if (enhanced_xemu_) {
             std::printf("[nv2a-renderer] xemu-psh attempts=%llu draws=%llu triangles=%llu "
                         "eligible=%llu reference-state=%llu reference-combiner=%llu "
@@ -1890,6 +1907,7 @@ public:
     void set_vsh_gpu_parallel_pack(bool on) override { vsh_parallel_pack_ = on; }
     void set_vsh_gpu_specialize(bool on) override { vsh_specialize_ = on; }
     void set_vsh_gpu_status_summary(bool on) override { vsh_status_summary_ = on; }
+    void set_vsh_gpu_native_fp32(bool on) override { vsh_native_fp32_ = on; }
     bool prepare_vsh_gpu_batch(Nv2aGenericCombinerPacket::GpuVshReference& reference,
                                std::string& error) override {
         reference.prepared_token = 0;
@@ -2415,7 +2433,11 @@ public:
                        nv2a_generate_combiner_fragment_glsl(packet.state);
         std::string error;
         ++generated_stats_.compiles;
-        if (!compile_graphics_program(enhanced ? kNv2aXemuVertexSource : kNv2aGeneratedVertexSource,
+        const char* vertex_source = enhanced ? kNv2aXemuVertexSource : kNv2aGeneratedVertexSource;
+#if XLLE_NATIVE_DRAW
+        if (!packet.native_vertices.empty()) vertex_source = kNv2aNativeVertexSource;
+#endif
+        if (!compile_graphics_program(vertex_source,
                                       fragment.c_str(), "generated-combiner",
                                       gp.program, error)) {
             gp.failed = true;
@@ -2644,7 +2666,12 @@ public:
             };
 #endif
         result = {};
-        if (packet.triangles.empty()) return true;
+#if XLLE_NATIVE_DRAW
+        const bool native = !packet.native_vertices.empty();
+#else
+        constexpr bool native = false;
+#endif
+        if (packet.triangles.empty() && !native) return true;
         // A pending witnessed batch may target this very plane, and GL executes
         // primitives in submission order only within one command stream; the
         // resident fixtures flush for the same reason.
@@ -2777,7 +2804,16 @@ public:
         generated_submit_phase(Nv2aGeneratedSubmitPhaseRecorder::kRecords);
 #endif
         // ---- triangle records ------------------------------------------
-        const size_t count = packet.triangles.size();
+        size_t count = packet.triangles.size();
+#if XLLE_NATIVE_DRAW
+        if (native) {
+            static_assert(sizeof(Nv2aGenericCombinerVertex) == 7 * 4 * sizeof(float));
+            count = native_draw_triangle_count(packet.native_primitive, packet.native_vertices.size());
+            generated_records_.resize(packet.native_vertices.size() * sizeof(Nv2aGenericCombinerVertex));
+            std::memcpy(generated_records_.data(), packet.native_vertices.data(), generated_records_.size());
+        } else
+#endif
+        {
         generated_records_.resize(sizeof(GeneratedTriRecord) * count);
         for (size_t i = 0; i < count; ++i) {
             const Nv2aGeneratedTriangle& t = packet.triangles[i];
@@ -2812,6 +2848,7 @@ public:
             rec->recip[1] = t.inv_w_double[0];
             rec->recip[2] = t.inv_w_double[1];
             rec->recip[3] = t.inv_w_double[2];
+        }
         }
 #if XLLE_GENERATED_SUBMIT_DIAGNOSTICS
         generated_submit_perf.add_record_bytes(generated_records_.size());
@@ -3025,6 +3062,27 @@ public:
         // the control that separates "my draws are nearly right" from "my
         // draws contribute almost nothing", which no amount of reading the
         // shader can settle.
+#if XLLE_NATIVE_DRAW
+        if (native) {
+            // Guest front faces have positive screen-space signed area. The
+            // Y flip in the vertex shader makes these clockwise in GL.
+            if (packet.native_cull) {
+                enable_(kGlCullFace);
+                native_front_face_(0x0900); // GL_CW
+                native_cull_face_(packet.native_cull_front ? 0x0404 : 0x0405);
+            }
+            const unsigned mode = packet.native_primitive == 5 ? kGlTriangles :
+                                  packet.native_primitive == 6 ? 0x0005u : 0x0006u;
+            if (!generated_nodraw_) {
+                gpu_timed_draw_arrays(mode, 0, static_cast<int>(packet.native_vertices.size()));
+                ++native_draws_;
+                native_vertices_ += packet.native_vertices.size();
+                native_triangles_ += count;
+            }
+            disable_(kGlCullFace);
+            native_front_face_(0x0901); // restore GL_CCW for the other executors
+        } else
+#endif
         if (!generated_nodraw_)
             gpu_timed_draw_arrays(kGlTriangles, 0, static_cast<int>(count * (gp->enhanced ? 3u : 6u)));
 #if XLLE_GENERATED_SUBMIT_DIAGNOSTICS
@@ -5073,6 +5131,10 @@ public:
                load_gl(scissor_, "glScissor") &&
                load_gl(enable_, "glEnable") &&
                load_gl(disable_, "glDisable") &&
+#if XLLE_NATIVE_DRAW
+               load_gl(native_cull_face_, "glCullFace") &&
+               load_gl(native_front_face_, "glFrontFace") &&
+#endif
                load_gl(depth_func_, "glDepthFunc") &&
                load_gl(depth_mask_, "glDepthMask") &&
                load_gl(blend_func_, "glBlendFunc") &&
@@ -6022,10 +6084,16 @@ private:
         {
         perf::ScopedAdd timer(vsh_cpu_ns_[2], vsh_cpu_calls_[2]);
         use_program_(program);
+        if (specialized) {
+            // A constant-result program may have all arithmetic folded away.
+            const int location = cached_uniform_location(program, "u_native_fp32");
+            if (location >= 0) uniform_1ui_(location, vsh_native_fp32_ ? 1u : 0u);
+        } else if (!uniform(program, "u_native_fp32", vsh_native_fp32_ ? 1u : 0u)) return false;
         if (!uniform(program, "u_execution_count", batch.shape.execution_count) ||
             (!specialized && !uniform(program, "u_op_count", batch.shape.op_count))) return false;
         gpu_timed_dispatch_compute(groups, 1, 1, GpuTimerBucket::kVsh);
         stats.specialized_dispatches += specialized != 0;
+        stats.native_fp32_dispatches += vsh_native_fp32_;
         memory_barrier_(kGlShaderStorageBarrierBit | kGlBufferUpdateBarrierBit);
         }
         upload(4, 4, batch.references.data(), batch.references.size() * sizeof(uint32_t));
@@ -6952,6 +7020,7 @@ private:
     bool vsh_parallel_pack_ = false;
     bool vsh_specialize_ = false;
     bool vsh_status_summary_ = false;
+    bool vsh_native_fp32_ = false;
     struct VshSpecialization {
         std::vector<vsh_gpu_batch::Op> ops;
         unsigned int program = 0;
@@ -7011,6 +7080,10 @@ private:
     GlUniform1i uniform_1i_ = nullptr; GlUniform1ui uniform_1ui_ = nullptr;
     GlUniform1f uniform_1f_ = nullptr;
     GlUniform4i uniform_4i_ = nullptr;
+#if XLLE_NATIVE_DRAW
+    GlEnable native_cull_face_ = nullptr, native_front_face_ = nullptr;
+    uint64_t native_attempts_ = 0, native_draws_ = 0, native_vertices_ = 0, native_triangles_ = 0;
+#endif
     bool enhanced_xemu_ = false;
     uint64_t enhanced_attempts_ = 0, enhanced_draws_ = 0, enhanced_triangles_ = 0;
     std::array<uint64_t, static_cast<size_t>(XemuPshReject::kCount)> enhanced_decisions_{};

@@ -20,6 +20,7 @@ public:
     void set_profile(uint32_t profile) { profile_ = profile; }
     void set_bulk_registers(bool enabled) { bulk_registers_ = enabled; }
     bool contains(uint32_t pc) const;
+    void observe_entry(uint32_t address);
     uint64_t execute(uint32_t pc, uint64_t budget);
     const char* decline_reason() const { return decline_reason_; }
     AotExecutionStats stats{};
@@ -41,6 +42,7 @@ private:
     UnicornFloor& cpu_;
     bool bulk_registers_ = false;
     std::vector<const xlle_aot_region*> regions_;
+    std::vector<bool> observed_regions_;
     // Address order is independent of stable registration/statistics order.
     std::map<uint32_t, size_t> region_by_base_;
 #if XLLE_AOT_FAST_MEMBERSHIP

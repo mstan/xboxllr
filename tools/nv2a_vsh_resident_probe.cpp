@@ -486,7 +486,7 @@ int fail(const std::string& message) {
 
 }  // namespace
 
-int run(bool parallel_pack, bool deferred, bool specialize, bool status_summary) {
+int run(bool parallel_pack, bool deferred, bool specialize, bool status_summary, bool native_fp32) {
     std::string error;
     auto cpu_renderer = xlle::create_nv2a_opengl_renderer(error);
     if (!cpu_renderer) {
@@ -501,6 +501,7 @@ int run(bool parallel_pack, bool deferred, bool specialize, bool status_summary)
     gpu_renderer->set_vsh_gpu_parallel_pack(parallel_pack);
     gpu_renderer->set_vsh_gpu_specialize(specialize);
     gpu_renderer->set_vsh_gpu_status_summary(status_summary);
+    gpu_renderer->set_vsh_gpu_native_fp32(native_fp32);
     std::printf("[resident-probe] parallel_pack=%u deferred=%u\n", parallel_pack ? 1u : 0u, deferred ? 1u : 0u);
 
     uint32_t case_index = 0;
@@ -582,6 +583,7 @@ int run(bool parallel_pack, bool deferred, bool specialize, bool status_summary)
             mode1_renderer->set_vsh_gpu_parallel_pack(parallel_pack);
             mode1_renderer->set_vsh_gpu_specialize(specialize);
             mode1_renderer->set_vsh_gpu_status_summary(status_summary);
+            mode1_renderer->set_vsh_gpu_native_fp32(native_fp32);
             auto mode1_packet = make_packet(probe.batch, gpu_address + 0x700000u,
                                             probe.x8, 1);
             std::vector<uint8_t> mode1_output;
@@ -615,6 +617,10 @@ int run(bool parallel_pack, bool deferred, bool specialize, bool status_summary)
     if (gpu_draw_checked == 0) return fail("mode2 GPU VBO path was not checked");
     if (decline_checked == 0) return fail("numeric-decline CPU fallback path was not checked");
     const auto stats = gpu_renderer->vsh_gpu_resident_stats();
+    if (native_fp32 != (stats.native_fp32_dispatches != 0))
+        return fail("native-FP32 dispatches do not match selected mode");
+    std::printf("[resident-probe] native_fp32=%u dispatches=%llu\n",
+        native_fp32 ? 1u : 0u, static_cast<unsigned long long>(stats.native_fp32_dispatches));
     if ((deferred && status_summary) != (stats.status_readbacks_skipped != 0))
         return fail("status readback count does not match selected execution mode");
     std::printf("[resident-probe] status_summary=%u skipped_readbacks=%llu\n",
@@ -641,18 +647,19 @@ int run(bool parallel_pack, bool deferred, bool specialize, bool status_summary)
 int main(int argc, char** argv) {
     try {
         std::setvbuf(stdout, nullptr, _IONBF, 0);
-        bool parallel_pack = false, deferred = false, specialize = false, status_summary = false;
+        bool parallel_pack = false, deferred = false, specialize = false, status_summary = false, native_fp32 = false;
         for (int i = 1; i < argc; ++i) {
             if (!std::strcmp(argv[i], "--parallel-pack")) parallel_pack = true;
             else if (!std::strcmp(argv[i], "--deferred")) deferred = true;
             else if (!std::strcmp(argv[i], "--specialize")) specialize = true;
             else if (!std::strcmp(argv[i], "--status-summary")) status_summary = true;
+            else if (!std::strcmp(argv[i], "--native-fp32")) native_fp32 = true;
             else {
-                std::fprintf(stderr, "usage: xlle_vsh_resident_probe [--parallel-pack] [--deferred] [--specialize] [--status-summary]\n");
+                std::fprintf(stderr, "usage: xlle_vsh_resident_probe [--parallel-pack] [--deferred] [--specialize] [--status-summary] [--native-fp32]\n");
                 return 2;
             }
         }
-        return run(parallel_pack, deferred, specialize, status_summary);
+        return run(parallel_pack, deferred, specialize, status_summary, native_fp32);
     } catch (const std::exception& ex) {
         return fail(std::string("unhandled exception: ") + ex.what());
     } catch (...) {
