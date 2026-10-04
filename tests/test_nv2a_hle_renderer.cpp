@@ -15,9 +15,10 @@ static void require(bool ok, const std::string &why) {
   if (!ok)
     throw std::runtime_error(why);
 }
-int main() {
+int main(int argc, char **) {
+  const bool worker = argc > 1;
   std::string error;
-  auto r = create_nv2a_hle_renderer(error);
+  auto r = create_nv2a_hle_renderer(error, worker);
   if (!r) {
     std::fprintf(stderr, "%s\n", error.c_str());
     return 1;
@@ -55,6 +56,8 @@ int main() {
     p.indices = {0, 1, 2};
     if (!r->submit_hle_draw(p, error))
       throw std::runtime_error(error);
+    // Queued work must own its inputs before the caller changes the packet.
+    for (auto &v : p.vertices) v[3] = {0, 1, 0, 1};
     Nv2aResidentColorResolve out;
     if (!r->resolve_resident_color_surface(0x100000, 1024, out, error))
       throw std::runtime_error(error);
@@ -214,13 +217,29 @@ int main() {
                   out.data[(3 * 16 + 3) * 4 + 1] == 0,
               "raw vertex constant attribute lost");
       raw.indices[0] = 3;
-      require(!r->submit_hle_draw(raw, error),
+      if (!worker) require(!r->submit_hle_draw(raw, error),
               "out-of-range raw index accepted");
+    }
+    if (worker) {
+      // Exercise queue backpressure and ordered final output without per-draw
+      // readbacks. The owned snapshots may outlive each caller mutation.
+      for (unsigned i = 0; i < 1000; ++i) {
+        for (auto &v : opaque.vertices) v[3] = {float(i & 1), float(!(i & 1)), 0, 1};
+        require(r->submit_hle_draw(opaque, error), error);
+      }
+      require(r->resolve_resident_color_surface(0x300000, 1024, out, error), error);
+      require(out.data[(3 * 16 + 3) * 4 + 2] == 255 && out.data[(3 * 16 + 3) * 4 + 1] == 0,
+              "queued draw order or owned inputs lost");
     }
     p.state[N::kRasterShaderStageProgram] =
         8; // unsupported mode, no fake success
-    require(!r->submit_hle_draw(p, error),
-            "unsupported shader silently accepted");
+    if (worker) {
+      require(r->submit_hle_draw(p, error), error);
+      require(!r->resolve_resident_color_surface(0x100000, 1024, out, error),
+              "worker lost asynchronous shader failure");
+    } else {
+      require(!r->submit_hle_draw(p, error), "unsupported shader silently accepted");
+    }
     std::puts("HLE renderer: real fixed/programmed GPU draws, depth rejection, "
               "unsupported error pass");
     return 0;

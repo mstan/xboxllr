@@ -190,7 +190,9 @@ if(XLLE_RENDERER STREQUAL "HLE")
     target_compile_definitions(xlle_machine PUBLIC XLLE_XDK_DRAW_SPIKE=1)
     target_compile_definitions(xlle_machine PRIVATE XLLE_XDK_DRAW_PROFILE_HEADER="${XLLE_XDK_DRAW_PROFILE}")
   endif()
-  target_sources(xlle_host PRIVATE src/host/nv2a_hle_renderer.cpp
+  option(XLLE_HLE_WORKER "Use an owned asynchronous HLE render worker" OFF)
+  target_compile_definitions(xlle_host PUBLIC XLLE_HLE_WORKER=$<BOOL:${XLLE_HLE_WORKER}>)
+  target_sources(xlle_host PRIVATE src/host/nv2a_hle_renderer.cpp src/host/nv2a_hle_worker.cpp
     src/third_party/xemu/vsh-prog.c src/third_party/xemu/hle_psh.c src/third_party/xemu/swizzle.c
     src/third_party/norain/d3d_texture_model.c)
   if(WIN32)
@@ -350,6 +352,7 @@ if(XLLE_RENDERER STREQUAL "HLE")
   add_executable(test_nv2a_hle_renderer tests/test_nv2a_hle_renderer.cpp)
   target_link_libraries(test_nv2a_hle_renderer PRIVATE xlle_host)
   add_test(NAME nv2a_hle_renderer COMMAND test_nv2a_hle_renderer)
+  add_test(NAME nv2a_hle_worker COMMAND test_nv2a_hle_renderer --worker)
 endif()
 add_executable(test_nv2a_xemu_psh tests/test_nv2a_xemu_psh.cpp)
 target_link_libraries(test_nv2a_xemu_psh PRIVATE xlle_host)

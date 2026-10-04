@@ -2,6 +2,7 @@
 // register combiners; NoRain supplies the texture layout algorithms. This class
 // never invokes the LLE renderer or submits software-transformed triangles.
 #include "host/nv2a_hle_renderer.hpp"
+#include "host/nv2a_hle_worker.hpp"
 #include "machine/nv2a.hpp"
 #include "machine/nv2a_hle_draw.hpp"
 #include <SDL3/SDL.h>
@@ -711,6 +712,10 @@ gl_PointSize=max(oPts.x,1.0);
   }
 
 public:
+  void release_thread_context() {
+    if (SDL_GL_GetCurrentContext() == context_ && !SDL_GL_MakeCurrent(window_, nullptr))
+      throw std::runtime_error(SDL_GetError());
+  }
   ~HleRenderer() override {
     if (context_) {
       SDL_GL_MakeCurrent(window_, context_);
@@ -1264,10 +1269,14 @@ public:
   }
 };
 } // namespace
-std::unique_ptr<Nv2aRenderer> create_nv2a_hle_renderer(std::string &error) {
+std::unique_ptr<Nv2aRenderer> create_nv2a_hle_renderer(std::string &error, bool worker) {
   auto renderer = std::make_unique<HleRenderer>();
   if (!renderer->initialize(error))
     return {};
+  if (worker) {
+    auto *owner = renderer.get();
+    return wrap_hle_worker(std::move(renderer), [owner]{owner->release_thread_context();});
+  }
   return renderer;
 }
 } // namespace xlle

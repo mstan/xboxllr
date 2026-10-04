@@ -574,6 +574,10 @@ public:
         return false;
     }
 #endif
+    // HLE submission accepts an owned draw. An asynchronous implementation must
+    // copy/own every input before returning, retain FIFO ordering and apply
+    // backpressure rather than discard work. Readback is a completion fence;
+    // delayed failures must be surfaced there or on subsequent API use.
     virtual bool submit_hle_draw(const Nv2aHleDraw&, std::string& error) {
         error = "This renderer does not implement the complete HLE draw interface";
         return false;

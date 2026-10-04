@@ -2800,7 +2800,7 @@ int main(int argc, char** argv) {
 #if XLLE_RENDERER_HLE
     {
         std::string renderer_error;
-        nv2a_renderer = create_nv2a_hle_renderer(renderer_error);
+        nv2a_renderer = create_nv2a_hle_renderer(renderer_error, XLLE_HLE_WORKER);
         if (!nv2a_renderer) {
             std::fprintf(stderr, "[hle-renderer] %s\n", renderer_error.c_str());
             return 1;
