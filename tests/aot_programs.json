@@ -1,6 +1,8 @@
 {
   "independent_regions": true,
   "regions": [
+    {"name":"chain_a","base":4096,"code":"40e9fa000000"},
+    {"name":"chain_b","base":4352,"code":"40e9fafeffff"},
     {"name":"rol_eax_cl","base":4096,"code":"d3c0"},
     {"name":"rol_ecx_cl","base":4096,"code":"d3c1"},
     {"name":"rol_edx_cl","base":4096,"code":"d3c2"},

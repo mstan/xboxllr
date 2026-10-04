@@ -5,6 +5,7 @@ namespace xlle {
 
 struct AotExecutionStats {
     uint64_t attempts = 0, invocations = 0, retired = 0;
+    uint64_t chained_entries = 0;
     uint64_t fallback_runs = 0, fallback_insns = 0, handoffs = 0;
     uint64_t context_declines = 0, code_tlb_declines = 0;
     uint64_t memory_reads = 0, memory_writes = 0, memory_declines = 0;
@@ -16,6 +17,7 @@ struct AotExecutionStats {
 struct AotRegionStats {
     uint32_t base = 0;
     uint64_t attempts = 0, invocations = 0, retired = 0;
+    uint64_t chained_entries = 0;
     uint64_t context_declines = 0, code_tlb_declines = 0;
     uint64_t exits[XLLE_AOT_EXTERNAL + 1]{};
 };

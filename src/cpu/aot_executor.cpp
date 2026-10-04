@@ -281,16 +281,16 @@ xlle_aot_exit AotExecutor::prefetch(void* opaque, uint32_t address, unsigned loc
 
 uint64_t AotExecutor::execute(uint32_t pc, uint64_t budget) {
     decline_reason_ = "unregistered-code";
-    const size_t index = region_index(pc);
+    size_t index = region_index(pc);
     if (index == regions_.size() || !budget) return 0;
     // Targeted entry observers must see real execution. Only overlapping
     // regions use the CPU floor; unrelated AOT regions remain accelerated.
     if (observed_regions_[index]) { decline_reason_ = "entry-observer"; return 0; }
     const auto* region = regions_[index];
-    auto& counters = region_stats[index];
+    auto* counters = &region_stats[index];
     perf_excl::Scope timing(perf_excl::kAotExec);
     ++stats.attempts;
-    ++counters.attempts;
+    ++counters->attempts;
     const char* rejection = xlle_unicorn_aot_context_rejection(cpu_.uc_);
     if (rejection || cpu_.mem_cb_ || cpu_.retired_cb_) {
         decline_reason_ = rejection ? rejection : "diagnostic-observer";
@@ -298,17 +298,17 @@ uint64_t AotExecutor::execute(uint32_t pc, uint64_t budget) {
             std::printf("[aot] first-context-decline reason=%s pc=%08x\n",
                         rejection ? rejection : "diagnostic-observer", pc);
         ++stats.context_declines;
-        ++counters.context_declines;
+        ++counters->context_declines;
         return 0;
     }
     auto* code = static_cast<uint8_t*>(ram(region->base, region->code_size, 2));
-    if (!code) { decline_reason_ = "code-translation"; ++stats.code_tlb_declines; ++counters.code_tlb_declines; return 0; }
+    if (!code) { decline_reason_ = "code-translation"; ++stats.code_tlb_declines; ++counters->code_tlb_declines; return 0; }
     xlle_aot_state state{};
     if (bulk_registers_) {
         if (!xlle_unicorn_aot_read_integer(cpu_.uc_, state.gpr, &state.eip, &state.eflags)) {
             decline_reason_ = "integer-transfer-context";
             ++stats.context_declines;
-            ++counters.context_declines;
+            ++counters->context_declines;
             return 0;
         }
     } else {
@@ -339,7 +339,7 @@ uint64_t AotExecutor::execute(uint32_t pc, uint64_t budget) {
     bus.x87_register = x87_register;
     bus.event_pending = cpu_.irq_pending_ && (state.eflags & 0x200u);
     auto result = xlle_aot_check(region, &state, &bus, budget, start);
-    if (result != XLLE_AOT_CONTINUE) { decline_reason_ = aot_exit_name(result); ++stats.exits[result]; ++counters.exits[result]; return 0; }
+    if (result != XLLE_AOT_CONTINUE) { decline_reason_ = aot_exit_name(result); ++stats.exits[result]; ++counters->exits[result]; return 0; }
     if (cpu_.native_required_ && profile_) {
         decline_reason_ = "replacement-profile";
         return 0;
@@ -372,14 +372,57 @@ uint64_t AotExecutor::execute(uint32_t pc, uint64_t budget) {
         result = region->run(region, &state, &bus, budget);
     }
     ++stats.invocations;
-    ++counters.invocations;
+    ++counters->invocations;
     if (static_cast<unsigned>(result) <= XLLE_AOT_EXTERNAL) {
         ++stats.exits[result];
-        ++counters.exits[result];
+        ++counters->exits[result];
     }
     if (state.retired < start || state.retired - start > budget) {
         cpu_.request_stop("AOT: generated code violated retirement budget");
         return 0;
+    }
+    counters->retired += state.retired - start;
+    // Keep the register ABI live across already-compiled connected regions,
+    // like function-level donor execution. Device deadlines still bound this
+    // entire invocation; unsupported instructions and observed entries exit.
+    while (!profile_ && state.retired > start && state.retired - start < budget &&
+           (result == XLLE_AOT_EXTERNAL || result == XLLE_AOT_COMPLETE)) {
+        const size_t next = region_index(state.eip);
+        if (next == regions_.size() || observed_regions_[next]) break;
+        const auto* next_region = regions_[next];
+        auto* next_code = static_cast<uint8_t*>(ram(next_region->base, next_region->code_size, 2));
+        if (!next_code) break;
+        bus.code_base = next_region->base;
+        bus.code = next_code;
+        bus.code_size = next_region->code_size;
+        const uint64_t entry_retired = state.retired;
+        const uint64_t remaining = budget - (entry_retired - start);
+        const auto guard = xlle_aot_check(next_region, &state, &bus, remaining, entry_retired);
+        if (guard != XLLE_AOT_CONTINUE) break;
+        index = next;
+        region = next_region;
+        counters = &region_stats[index];
+        ++stats.attempts;
+        ++counters->attempts;
+        read_access_ = {};
+        write_access_ = {};
+        {
+            perf_excl::Scope body_timing(perf_excl::kAotBody);
+            result = region->run(region, &state, &bus, remaining);
+        }
+        ++stats.invocations;
+        ++counters->invocations;
+        if (static_cast<unsigned>(result) <= XLLE_AOT_EXTERNAL) {
+            ++stats.exits[result];
+            ++counters->exits[result];
+        }
+        if (state.retired < entry_retired || state.retired - start > budget) {
+            cpu_.request_stop("AOT: chained code violated retirement budget");
+            return 0;
+        }
+        counters->retired += state.retired - entry_retired;
+        if (state.retired == entry_retired) break;
+        ++stats.chained_entries;
     }
     const uint64_t retired = state.retired - start;
     decline_reason_ = aot_exit_name(result);
@@ -398,7 +441,6 @@ uint64_t AotExecutor::execute(uint32_t pc, uint64_t budget) {
     cpu_.seq_ = state.retired;
     xlle_guest_tsc_ticks = cpu_.seq_;
     stats.retired += retired;
-    counters.retired += retired;
     return retired;
 }
 
