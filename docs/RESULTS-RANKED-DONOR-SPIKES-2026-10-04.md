@@ -104,7 +104,13 @@ Adapter overhead, other dominant work and external load are plausible factors,
 not a measured causal attribution. Instruction count alone was an inadequate
 proxy for expected elapsed-time benefit.
 
-## Identified opportunities that remain untried
+## Opportunities identified at the end of this round
+
+The owner subsequently authorized all five. See the
+[follow-up implementation results](RESULTS-REMAINING-DONOR-SPIKES-2026-10-04.md).
+The table below records the leads as they stood before that follow-up; it is
+not the current work queue. Wider AOT and full XDK subsystem replacement remain
+broader than the bounded implementations that followed.
 
 These are recorded leads, not new implementation commitments or speed claims.
 The parked results do not qualify these larger changes as tested failures.

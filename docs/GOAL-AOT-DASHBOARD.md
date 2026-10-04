@@ -17,6 +17,9 @@ compatible caller behavior, freedom to remove internal work and approximate
 arithmetic/timing. No live switching or instruction-history equivalence is
 required. The old FP32, status-readback and DXT-cache experiments remain parked.
 Active integration issue: `beads-xbox.1.45`.
+The remaining donor opportunities have now received bounded implementations;
+see [the latest experiment results](RESULTS-REMAINING-DONOR-SPIKES-2026-10-04.md)
+for their measured scope, saved branches and remaining full-subsystem work.
 The separate whole HLE renderer completes the live input route and showed a
 provisional 1.87x throughput improvement on a shared host. See
 [the current results](RESULTS-WHOLE-HLE-RENDERER-2026-10-03.md).

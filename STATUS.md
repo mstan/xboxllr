@@ -1,5 +1,32 @@
 # STATUS
 
+## 2026-10-04 - Five remaining donor experiments tried; no new menu speedup
+
+Direct AOT-to-matrix service calls, two complete native XDK constant APIs,
+phobos's D3D11 renderer, multi-command worker packets and persistent compiled
+shader caching now have independent implementations and actual dashboard
+results. All five pass their 80 applicable checks and complete the real
+clock/menu/Settings/return route. No substantial steady-menu speedup is proven.
+
+The shader cache avoids 33 repeated source compilations (1.7746 seconds measured
+compile work becomes zero; warm binary loads take 0.0502 seconds), so it is
+preserved as a startup/hitch candidate. The other four are parked. The phobos
+port executes all 580,540 draws with close visual results but measures slower:
+149.5616 -> 207.7754 seconds across route windows. All timing pairs ran on a
+busy shared host; no exact causal small-percentage or displayed-FPS claim.
+
+The matrix experiment bypasses the old Unicorn entry/register adapter for
+74.3% of calls, yet remains essentially flat. This directly tests one proposed
+explanation for the earlier instruction-count reduction without a speedup.
+Full XDK subsystem replacement and wider AOT coverage remain larger open work;
+the two API replacements and matrix dispatch change do not complete them.
+
+All implementations and notes are preserved on remote branches. The retained
+runtime remains `54c102a`; this checkout receives documentation only. Central
+Beads `.55` through `.59` record the bounded outcomes; original-speed dashboard
+qualification and Blinx remain open. [Results, contracts, timings and branch
+links](docs/RESULTS-REMAINING-DONOR-SPIKES-2026-10-04.md).
+
 ## 2026-10-04 - Ranked donor follow-up fully parked; working runtime unchanged
 
 Four independent implementations were tested in the requested order: native
