@@ -3,6 +3,7 @@
 #include "host/nv2a_hle_worker.hpp"
 #include "machine/nv2a_hle_draw.hpp"
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
@@ -22,7 +23,11 @@ class Worker final : public Nv2aRenderer {
   std::unique_ptr<Nv2aRenderer> renderer_;
   std::function<void()> release_;
   struct Job { std::function<void()> run; size_t bytes; };
-  std::deque<Job> jobs_;
+  struct Packet { std::vector<Job> jobs; size_t bytes = 0; };
+  Packet open_; // Producer owned until publication; payloads own guest inputs.
+  std::deque<Packet> packets_;
+  size_t pending_ = 0; // Includes the packet currently executing.
+  std::atomic<bool> failed_{false};
   std::thread thread_;
   mutable std::mutex mutex_;
   std::condition_variable ready_, space_;
@@ -34,27 +39,44 @@ class Worker final : public Nv2aRenderer {
   // It does not expose completed pixels; all readbacks run behind a fence.
   std::vector<Nv2aHleSurface> planes_;
   uint64_t draws_ = 0, fences_ = 0, backpressure_ = 0, max_jobs_ = 0;
-  uint64_t busy_ns_ = 0, wait_ns_ = 0;
+  uint64_t busy_ns_ = 0, wait_ns_ = 0, published_ = 0, commands_ = 0;
   void check_locked() const {
     if (!failure_.empty()) {
       reported_ = true;
       throw std::runtime_error("HLE worker: " + failure_);
     }
   }
-  void check() const { std::lock_guard lock(mutex_); check_locked(); }
-  void enqueue(std::function<void()> work, size_t bytes = 0) {
+  void check() const {
+    if (!failed_.load(std::memory_order_acquire)) return;
+    std::lock_guard lock(mutex_); check_locked();
+  }
+  void publish() {
+    if (open_.jobs.empty()) return;
     std::unique_lock lock(mutex_);
-    if (jobs_.size() >= 128 || (bytes_ && bytes_ + bytes > 64 * 1024 * 1024))
+    if (pending_ >= 2 || (bytes_ && bytes_ + open_.bytes > 64 * 1024 * 1024))
       ++backpressure_;
     space_.wait(lock, [&] {
-      return !failure_.empty() || (jobs_.size() < 128 &&
-             (!bytes_ || bytes_ + bytes <= 64 * 1024 * 1024));
+      return !failure_.empty() || (pending_ < 2 &&
+             (!bytes_ || bytes_ + open_.bytes <= 64 * 1024 * 1024));
     });
     check_locked();
-    bytes_ += bytes;
-    jobs_.push_back({std::move(work), bytes});
-    max_jobs_ = std::max(max_jobs_, uint64_t(jobs_.size()));
+    bytes_ += open_.bytes;
+    ++pending_;
+    ++published_;
+    commands_ += open_.jobs.size();
+    packets_.push_back(std::move(open_));
+    open_ = {};
+    max_jobs_ = std::max(max_jobs_, uint64_t(pending_));
     ready_.notify_one();
+  }
+  void enqueue(std::function<void()> work, size_t bytes = 0) {
+    check();
+    // Amortize synchronization over a packet. Bound latency and memory even
+    // if a guest stream never presents. One oversized owned draw is allowed.
+    if (!open_.jobs.empty() && open_.bytes + bytes > 8 * 1024 * 1024) publish();
+    open_.bytes += bytes;
+    open_.jobs.push_back({std::move(work), bytes});
+    if (open_.jobs.size() >= 128 || open_.bytes >= 8 * 1024 * 1024) publish();
   }
   void sync(std::function<void()> work) {
     ++fences_;
@@ -64,6 +86,7 @@ class Worker final : public Nv2aRenderer {
       try { work(); done->set_value(); }
       catch (...) { done->set_exception(std::current_exception()); }
     });
+    publish();
     const auto start = std::chrono::steady_clock::now();
     future.get();
     wait_ns_ += std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -108,41 +131,48 @@ public:
     release_(); // Detach on creator; window lifetime stays on creator thread.
     thread_ = std::thread([this] {
       for (;;) {
-        Job job;
+        Packet packet;
         {
           std::unique_lock lock(mutex_);
-          ready_.wait(lock, [&] { return stop_ || !jobs_.empty(); });
-          if (jobs_.empty()) break;
-          job = std::move(jobs_.front()); jobs_.pop_front();
+          ready_.wait(lock, [&] { return stop_ || !packets_.empty(); });
+          if (packets_.empty()) break;
+          packet = std::move(packets_.front()); packets_.pop_front();
         }
         auto start = std::chrono::steady_clock::now();
         // Keep executing fence promises even after a draw failure so callers
         // cannot deadlock. Draw lambdas check the sticky failure before work.
-        try { job.run(); }
-        catch (const std::exception &e) {
-          std::lock_guard lock(mutex_); if (failure_.empty()) failure_ = e.what();
+        for (auto& job : packet.jobs) {
+          try { job.run(); }
+          catch (const std::exception &e) {
+            std::lock_guard lock(mutex_);
+            if (failure_.empty()) failure_ = e.what();
+            failed_.store(true, std::memory_order_release);
+          }
         }
         busy_ns_ += std::chrono::duration_cast<std::chrono::nanoseconds>(
                        std::chrono::steady_clock::now() - start).count();
-        { std::lock_guard lock(mutex_); bytes_ -= job.bytes; }
+        { std::lock_guard lock(mutex_); bytes_ -= packet.bytes; --pending_; }
         space_.notify_all();
       }
       release_();
     });
   }
   ~Worker() override {
+    // Flush the final partial packet; no final-frame draws are left behind.
+    try { publish(); } catch (const std::exception&) { /* sticky failure reported below */ }
     { std::lock_guard lock(mutex_); stop_ = true; }
     ready_.notify_one(); thread_.join();
-    std::printf("[hle-worker] draws=%llu fences=%llu backpressure=%llu max-queue=%llu busy-ns=%llu wait-ns=%llu\n",
+    std::printf("[hle-worker] draws=%llu fences=%llu backpressure=%llu max-queue=%llu busy-ns=%llu wait-ns=%llu packets=%llu commands=%llu\n",
       (unsigned long long)draws_, (unsigned long long)fences_,
       (unsigned long long)backpressure_, (unsigned long long)max_jobs_,
-      (unsigned long long)busy_ns_, (unsigned long long)wait_ns_);
+      (unsigned long long)busy_ns_, (unsigned long long)wait_ns_,
+      (unsigned long long)published_, (unsigned long long)commands_);
     if (!failure_.empty() && !reported_) {
       std::fprintf(stderr,"Unobserved HLE worker failure: %s\n",failure_.c_str());
       std::terminate(); // Never report success for a failed final queued draw.
     }
   }
-  const char *name() const override { return "hle-native-worker"; }
+  const char *name() const override { return "hle-native-packet-worker"; }
   bool supports_generic_combiner(const Nv2aGenericCombinerPacket &) const override { return false; }
   bool submit_generic_combiner(const Nv2aGenericCombinerPacket &, Nv2aGenericCombinerResult &, std::string &e) override {
     e = "LLE packet submitted to HLE worker"; return false;
@@ -159,7 +189,7 @@ public:
       for (const auto &t : p.textures) bytes += t.bytes.size() + t.palette.size();
       if (!p.indices.empty()) { remember(p.color); remember(p.depth); }
       enqueue([this,owned] {
-        { std::lock_guard lock(mutex_); if (!failure_.empty()) return; }
+        if (failed_.load(std::memory_order_acquire)) return;
         std::string error;
         if (!renderer_->submit_hle_draw(*owned,error)) throw std::runtime_error(error);
       }, bytes);
@@ -178,7 +208,7 @@ public:
   }
   void invalidate_resident_color_surface(uint32_t a,size_t n,uint32_t c) override { invalidate(false,a,n,c); }
   void invalidate_resident_depth_surface(uint32_t a,size_t n,uint32_t c) override { invalidate(true,a,n,c); }
-  void kick_pending_gpu_work() override { enqueue([this]{renderer_->kick_pending_gpu_work();}); }
+  void kick_pending_gpu_work() override { enqueue([this]{renderer_->kick_pending_gpu_work();}); publish(); }
   bool clear_resident_surface(uint32_t ca,size_t cn,bool cc,uint32_t cv,uint32_t da,size_t dn,bool cd,uint32_t dv,bool &fill,std::string &error) override {
     try { bool ok=false; sync([&]{ok=renderer_->clear_resident_surface(ca,cn,cc,cv,da,dn,cd,dv,fill,error);}); return ok;
     } catch (const std::exception &e) { error=e.what(); return false; }
