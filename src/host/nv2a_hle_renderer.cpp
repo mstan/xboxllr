@@ -2,6 +2,9 @@
 // register combiners; NoRain supplies the texture layout algorithms. This class
 // never invokes the LLE renderer or submits software-transformed triangles.
 #include "host/nv2a_hle_renderer.hpp"
+#include "host/shader_disk_cache.hpp"
+#include <chrono>
+#include <cstdlib>
 #include "machine/nv2a.hpp"
 #include "machine/nv2a_hle_draw.hpp"
 #include <SDL3/SDL.h>
@@ -107,6 +110,13 @@ class HleRenderer final : public Nv2aRenderer {
   PFNGLMAPBUFFERRANGEPROC MapBufferRange = nullptr;
   PFNGLUNMAPBUFFERPROC UnmapBuffer = nullptr;
   PFNGLBINDBUFFERRANGEPROC BindBufferRange = nullptr;
+  PFNGLPROGRAMBINARYPROC ProgramBinary = nullptr;
+  PFNGLGETPROGRAMBINARYPROC GetProgramBinary = nullptr;
+  PFNGLPROGRAMPARAMETERIPROC ProgramParameteri = nullptr;
+  std::unique_ptr<ShaderDiskCache> disk_cache_;
+  std::string driver_key_;
+  uint64_t cache_hits_ = 0, cache_misses_ = 0, cache_rejects_ = 0, cache_saves_ = 0;
+  uint64_t compile_ns_ = 0, load_ns_ = 0;
   GLuint vao_ = 0, vbo_ = 0, ibo_ = 0, fbo_ = 0;
   size_t vertex_capacity_ = 0, vertex_cursor_ = 0;
   size_t index_capacity_ = 0, index_cursor_ = 0;
@@ -403,10 +413,39 @@ gl_PointSize=max(oPts.x,1.0);
                "zvalue=hleDepth+depthOffset+max(abs(dFdx(hleDepth)),abs(dFdy("
                "hleDepth)))*depthFactor;\n");
     fs.insert(fs.find("void main() {"), "noperspective in float hleDepth;\n");
-    GLuint vs = compile(GL_VERTEX_SHADER, vertex_source(p)), ps = 0, id = 0;
+    const std::string vertex = vertex_source(p);
+    std::string disk_key = driver_key_;
+    disk_key.append(vertex); disk_key.push_back('\0'); disk_key.append(fs);
+    if (disk_cache_) {
+      const auto begin = std::chrono::steady_clock::now();
+      uint32_t format = 0;
+      std::vector<uint8_t> binary;
+      if (disk_cache_->load(disk_key, format, binary)) {
+        GLuint id = CreateProgram();
+        ProgramBinary(id, format, binary.data(), static_cast<GLsizei>(binary.size()));
+        GLint ok = 0;
+        GetProgramiv(id, GL_LINK_STATUS, &ok);
+        if (ok) {
+          ++cache_hits_;
+          load_ns_ += std::chrono::duration_cast<std::chrono::nanoseconds>(
+              std::chrono::steady_clock::now() - begin).count();
+          return programs_.emplace(std::move(key), Program{id, {}}).first->second;
+        }
+        DeleteProgram(id);
+        // Driver rejection is a cache miss. Compile the actual shader source.
+        while (glGetError() != GL_NO_ERROR) {}
+        ++cache_rejects_;
+      }
+      ++cache_misses_;
+      load_ns_ += std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::steady_clock::now() - begin).count();
+    }
+    const auto compile_begin = std::chrono::steady_clock::now();
+    GLuint vs = compile(GL_VERTEX_SHADER, vertex), ps = 0, id = 0;
     try {
       ps = compile(GL_FRAGMENT_SHADER, fs);
       id = CreateProgram();
+      if (disk_cache_) ProgramParameteri(id, GL_PROGRAM_BINARY_RETRIEVABLE_HINT, GL_TRUE);
       AttachShader(id, vs);
       AttachShader(id, ps);
       LinkProgram(id);
@@ -427,6 +466,21 @@ gl_PointSize=max(oPts.x,1.0);
     }
     DeleteShader(vs);
     DeleteShader(ps);
+    compile_ns_ += std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - compile_begin).count();
+    if (disk_cache_) {
+      GLint size = 0;
+      GetProgramiv(id, GL_PROGRAM_BINARY_LENGTH, &size);
+      if (size > 0 && size <= 64 * 1024 * 1024) {
+        std::vector<uint8_t> binary(size);
+        GLsizei written = 0; GLenum format = 0;
+        GetProgramBinary(id, size, &written, &format, binary.data());
+        if (written > 0 && written <= size) {
+          binary.resize(written);
+          if (disk_cache_->save(disk_key, format, binary)) ++cache_saves_;
+        }
+      }
+    }
     return programs_.emplace(std::move(key), Program{id, {}}).first->second;
   }
   Plane &ensure_plane(const Nv2aHleSurface &s) {
@@ -736,6 +790,10 @@ public:
       SDL_DestroyWindow(window_);
     if (owns_video_)
       SDL_QuitSubSystem(SDL_INIT_VIDEO);
+    std::printf("[hle-shader-cache] hits=%llu misses=%llu rejects=%llu saves=%llu compile-ns=%llu load-ns=%llu\n",
+      (unsigned long long)cache_hits_, (unsigned long long)cache_misses_,
+      (unsigned long long)cache_rejects_, (unsigned long long)cache_saves_,
+      (unsigned long long)compile_ns_, (unsigned long long)load_ns_);
     std::printf("[hle-streams] raw-draws=%llu upload-bytes=%llu\n",
                 (unsigned long long)raw_draws_,
                 (unsigned long long)stream_bytes_);
@@ -781,6 +839,23 @@ public:
     LOAD(PFNGLUNMAPBUFFERPROC, UnmapBuffer)
     LOAD(PFNGLBINDBUFFERRANGEPROC, BindBufferRange)
 #undef LOAD
+    // Optional extension: unsupported drivers continue compiling real source.
+    ProgramBinary = reinterpret_cast<PFNGLPROGRAMBINARYPROC>(SDL_GL_GetProcAddress("glProgramBinary"));
+    GetProgramBinary = reinterpret_cast<PFNGLGETPROGRAMBINARYPROC>(SDL_GL_GetProcAddress("glGetProgramBinary"));
+    ProgramParameteri = reinterpret_cast<PFNGLPROGRAMPARAMETERIPROC>(SDL_GL_GetProcAddress("glProgramParameteri"));
+    GLint binary_formats = 0;
+    glGetIntegerv(GL_NUM_PROGRAM_BINARY_FORMATS, &binary_formats);
+    if (const char* directory = std::getenv("XLLE_HLE_SHADER_CACHE")) {
+      if (*directory && ProgramBinary && GetProgramBinary && ProgramParameteri && binary_formats > 0) {
+        disk_cache_ = std::make_unique<ShaderDiskCache>(directory);
+        driver_key_ = "xlle-hle-gl-program-v1";
+        for (GLenum field : {GL_VENDOR, GL_RENDERER, GL_VERSION, GL_SHADING_LANGUAGE_VERSION}) {
+          driver_key_.push_back('\0');
+          driver_key_.append(reinterpret_cast<const char*>(glGetString(field)));
+        }
+        driver_key_.push_back('\0');
+      }
+    }
     GLint alignment = 0;
     glGetIntegerv(GL_SHADER_STORAGE_BUFFER_OFFSET_ALIGNMENT, &alignment);
     stream_alignment_ = std::max(size_t(16), size_t(alignment));
