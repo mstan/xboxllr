@@ -1,6 +1,6 @@
 # STATUS
 
-## 2026-10-04 - Ranked donor follow-up completed; working runtime unchanged
+## 2026-10-04 - Ranked donor follow-up fully parked; working runtime unchanged
 
 Four independent implementations were tested in the requested order: native
 indexed submissions, whole-routine matrix math, graphics state suppression and
@@ -8,12 +8,14 @@ a real render worker. A fifth kernel-service audit found no justified narrow
 port. All work is preserved on pushed branches with caller contracts, actual
 dashboard results and keep/park decisions. No stubs or dropped required draws.
 
-Matrix HLE removes 30.9% of final-interval native guest instructions and passes
-2,000 original-function comparisons, but remains a remote opt-in candidate;
-elapsed-time evidence is insufficient to call it a new menu speed milestone.
+At the owner's request all five are parked, including matrix math. Matrix HLE
+removes 30.9% of final-interval native guest instructions and passes 2,000
+original-function comparisons, but no substantial elapsed-time gain is proven.
+Its adapter still uses Unicorn register transfers and dispatch; the percentage
+is an instruction count, not measured host CPU time.
 The state cache and worker reproduce all 28 route captures, but timings are
 small/mixed. Direct indexed submissions remove refills but lose idle
-fast-forward and regress. These three implementations are parked.
+fast-forward and regress. No active candidate remains from this round.
 
 No runtime changes from this round are integrated. `54c102a` remains the working
 runtime baseline, roughly 21 guest vblanks/s in the prior steady-menu screen;
