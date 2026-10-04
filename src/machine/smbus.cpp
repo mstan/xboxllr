@@ -48,9 +48,7 @@ bool XboxSmc::read_byte(uint8_t cmd, uint8_t& out) {
         case 0x1e: out = 0xea; return true;
         case 0x1f: out = 0x46; return true;
         case 0x01: out = version_[version_index_++ % 3]; return true;  // VER "P11" (cycles)
-        case 0x03: out = 0x00; return true;  // TRAYSTATE: closed (agent read from silicon
-                                             // 2026-07-16, tray closed; xemu's closed-empty
-                                             // value is 0x40 — both boot, silicon wins)
+        case 0x03: out = tray_state_ ? tray_state_() : 0x00; return true;
         case 0x04: out = 0x06; return true;  // AVPACK = COMPOSITE (agent read from silicon)
         case 0x11: out = 0x00; return true;  // INTSTATUS: no SMC events pending at boot (clr-on-rd)
         // POWER_FAN_READBACK. Cxbx identifies the 0..50 unit range; the prior HLE witness
@@ -86,6 +84,12 @@ bool XboxSmc::write_byte(uint8_t cmd, uint8_t val) {
         case 0x0e: error_reg_ = val; return true;       // ERROR_WRITE
         case 0x06: fan_speed_ = val > 50 ? 50 : val; return true;  // requested fan speed
         case 0x1b: scratch_reg_ = val; return true;     // SCRATCH
+        case 0x0c:
+            // Do not inherit the empty-drive bring-up's ignored motor command
+            // when a mounted image makes tray transitions observable.
+            if (tray_state_ && tray_state_() != 0 && fault_)
+                fault_("SMC tray motor command with mounted optical media is unimplemented");
+            return true;
         case 0x02:  // POWER: reset/cycle/shutdown request — surface it loudly
             if (val & 0xC1) {  // RESET(0x01)|CYCLE(0x40)|SHUTDOWN(0x80)
                 char b[96];

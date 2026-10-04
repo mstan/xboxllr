@@ -1,5 +1,10 @@
 # Burndown: predominantly static Xbox execution
 
+**Sequencing update, 2026-10-04:** exploratory Blinx launch may proceed before
+dashboard original-speed qualification. Dashboard slowness remains open;
+parked candidates are retained for later title-workload comparisons. The
+[current gameplan](GOAL-AOT-DASHBOARD.md) supersedes older ordering below.
+
 **Work-order update, 2026-10-03:** follow the owner's
 [LLE floor / enhanced execution gameplan](GOAL-AOT-DASHBOARD.md). Renderer reuse,
 fast iteration and real game launch with partial AOT take priority over broad

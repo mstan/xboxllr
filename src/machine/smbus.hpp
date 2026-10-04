@@ -48,8 +48,11 @@ public:
     bool receive_byte(uint8_t& out) override;
     bool quick(bool) override { return true; }
 
+    void set_tray_state_reader(std::function<uint8_t()> reader) { tray_state_ = std::move(reader); }
+
 private:
     FaultFn fault_;
+    std::function<uint8_t()> tray_state_;
     uint8_t scratch_reg_ = 0;
     uint8_t error_reg_ = 0;
     uint8_t fan_speed_ = 50;  // SMC units are 0..50; fixed auto-mode telemetry for now.

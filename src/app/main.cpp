@@ -1839,6 +1839,8 @@ int main(int argc, char** argv) {
     const char* boot_flash = nullptr;
     const char* run2bl = nullptr;
     const char* hdd = nullptr;
+    const char* dvd = nullptr;
+    bool dvd_trace = false;
     const char* eeprom = nullptr;
     const char* frame_dump = nullptr;
     const char* debug_surface_dump = nullptr;
@@ -2363,6 +2365,8 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(argv[i], "--boot") && i + 1 < argc) boot_flash = argv[++i];
         else if (!std::strcmp(argv[i], "--run2bl") && i + 1 < argc) run2bl = argv[++i];
         else if (!std::strcmp(argv[i], "--hdd") && i + 1 < argc) hdd = argv[++i];
+        else if (!std::strcmp(argv[i], "--dvd") && i + 1 < argc) dvd = argv[++i];
+        else if (!std::strcmp(argv[i], "--dvd-trace")) dvd_trace = true;
         else if (!std::strcmp(argv[i], "--eeprom") && i + 1 < argc) eeprom = argv[++i];
         else if (!std::strcmp(argv[i], "--frame-dump") && i + 1 < argc)
             frame_dump = argv[++i];
@@ -3578,6 +3582,14 @@ int main(int argc, char** argv) {
                                                : "copy-on-write, image never modified");
             } else {
                 std::printf("[hdd] no --hdd image: IDE drive 0 reports absent\n");
+            }
+            if (dvd) {
+                if (!mach.ide() || !mach.ide()->attach_dvd(dvd)) {
+                    std::fprintf(stderr, "[dvd] attach failed (need raw 2048-byte sectors): %s\n", dvd);
+                    return 1;
+                }
+                mach.ide()->set_dvd_trace(dvd_trace);
+                std::printf("[dvd] attached %s (IDE drive 1, read-only; authentication unqualified)\n", dvd);
             }
             if (eeprom) {
                 if (!mach.attach_eeprom(eeprom)) {

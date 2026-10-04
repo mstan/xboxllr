@@ -21,6 +21,28 @@ branch. No missing draw/service is replaced with successful placeholder work.
 HLE is allowed native math, scheduling and rendering differences; exact
 instruction histories and mandatory concurrent LLE comparison are not imposed.
 
+## Parked means available for a relevant title workload
+
+Owner clarification, 2026-10-04: preserve and revisit these branches. The closed
+issues describe completed bounded experiments; they do not declare the ideas
+useless for every game. Blinx bring-up is now allowed before menu performance
+qualification and will supply a second workload when it reaches a repeatable
+scene. These are retry conditions, not predicted speed gains:
+
+| Candidate | Revisit when |
+| --- | --- |
+| Direct native services | A reached, costly Blinx routine has a verified caller contract and native callers; audit the title's own function identity before installing an adapter |
+| Whole native XDK APIs | Blinx's SDK version and measured API usage identify substantial host cost; implement the full selected API effects rather than installing dashboard addresses |
+| phobos D3D11 backend | A repeatable title scene exercises supported graphics states and offers a different draw/vertex/texture workload; report missing state support explicitly |
+| Multi-command packets | A title trace shows useful independent GPU work between genuine completion dependencies; compare ordered draw completion and caller wait time |
+| Persistent shader cache | Cold/warm title loading or scene transitions compile new programs; measure compilation hitches separately from warm steady-scene speed |
+
+Keep the dashboard as a regression and attribution workload for every shared
+change. Current instruction/call counts have not established its limiting host
+cost. Use sampled host time on a reached menu window before selecting another
+dashboard optimization; retain sampling coverage, binary identity and host-load
+limits. Do not run every parked branch against a title merely because it boots.
+
 ## Actual dashboard measurements
 
 Each pair completes the real 27B clock/menu/Settings/return route with all 14

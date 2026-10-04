@@ -55,8 +55,8 @@ small. Preserve unsupported state and fall back before unsupported operations.
 ARM hardware setup remains deferred. Owner clarification, 2026-10-03: enhanced
 rendering and interchangeable native/HLE services are early delivery work, with
 the real LLE reference available by opt-out. Full AOT is the final CPU gate,
-not a prerequisite for menu performance. The owner's latest order requires
-sustained original-speed 60 FPS in the dashboard menu before Blinx.
+not a prerequisite for menu performance. The owner's 2026-10-04 order allows
+exploratory Blinx bring-up alongside dashboard performance investigation.
 [NORTH-STAR](../NORTH-STAR.md) and the
 [current gameplan](GOAL-AOT-DASHBOARD.md) supersede older arc ordering below.
 See the [implementation milestones](COMPARISON-XEMU-NATIVIZATION-2026-09-06.md).

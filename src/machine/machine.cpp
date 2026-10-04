@@ -93,7 +93,11 @@ void XboxMachine::init_devices() {
     io_devices_.push_back(std::move(pci));
 
     auto smbus = std::make_unique<Amd756Smbus>(0xC000, fault);
-    smbus->add_slave(std::make_unique<XboxSmc>(fault));
+    auto smc = std::make_unique<XboxSmc>(fault);
+    // Drive-backed tray state: xemu SMC 0x10 open / 0x60 media detected;
+    // retain the captured 0x00 empty-drive reset state for the dashboard.
+    smc->set_tray_state_reader([this]() { return ide_ ? ide_->dvd_tray_state() : 0; });
+    smbus->add_slave(std::move(smc));
     smbus->add_slave(std::make_unique<Cx25871>());  // TV encoder (board is Conexant, silicon)
     Amd756Smbus* smbus_raw = smbus.get();
     smbus_ = smbus_raw;

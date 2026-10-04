@@ -1,5 +1,30 @@
 # STATUS
 
+## 2026-10-04 - Blinx exploration active; optical authentication is the first blocker
+
+The owner relaxed dashboard speed as a hard prerequisite to exploratory Blinx
+launch. Dashboard slowness remains an active goal and regression workload.
+Parked donor branches are preserved with explicit title-workload retry criteria;
+closed experiment issues do not mean the ideas were abandoned.
+
+`--dvd` now attaches immutable raw optical media to the existing IDE controller.
+Real READ10/12, bounded PIO/DMA delivery, capacity and drive-backed SMC tray
+state are implemented from the existing xemu transport reference. Authentication
+and missing operations stop explicitly. The full Blinx Rev1 kernel probe sees
+the disc, then stops on DVD authentication page `0x3e` after 53,516,892 guest
+instructions at `0x8001857e`. No Blinx code entry or game frame is claimed.
+Both separate LLE and HLE builds reach that same blocker; the HLE suite passes
+80 checks, and focused optical/security checks pass after the final guard.
+
+The no-disc dashboard route still completes all 14 inputs and matches all 28
+retained-control captures. Actual host sampling over the last two menu/return
+windows places 40.08% of 4,883 samples in AOT interfaces, register transfers,
+address translation and invalidation. This is a concrete lead for shared CPU
+cost investigation, not a claim that all of it can be eliminated or a measured
+speedup. The busy-host, main-thread-only and symbolization limits are recorded.
+
+[Launch implementation, validation, donor limits and dashboard host-cost evidence](docs/RESULTS-BLINX-MEDIA-AND-DASHBOARD-COST-2026-10-04.md).
+
 ## 2026-10-04 - Five remaining donor experiments tried; no new menu speedup
 
 Direct AOT-to-matrix service calls, two complete native XDK constant APIs,

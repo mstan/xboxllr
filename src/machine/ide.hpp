@@ -4,8 +4,8 @@
 // Register semantics and command state machine harvested faithfully from xemu/hw/ide/
 // {core.c,atapi.c,pci.c} (which carries the Xbox-specific ATA SECURITY UNLOCK the retail
 // kernel requires — an unlocked drive is fatal error 05 on real hardware). Drive 0 is the
-// FATX HDD backed by an image file; drive 1 is the ATAPI DVD-ROM (present, no media —
-// a missing DVD drive is fatal error 11).
+// FATX HDD backed by an image file; drive 1 is the ATAPI DVD-ROM with optional
+// read-only optical media (a missing DVD drive is fatal error 11).
 //
 // Completion interrupts are level-triggered on IRQ 14 (silicon: LPC cfg 0x6C = 0x0E065491,
 // dev-9 nibble = 0xE = 14), same delivery shape as the SMBus IRQ-11 completion.
@@ -74,8 +74,11 @@ struct IdeDrive {
     uint8_t sense_key = 0, asc = 0;
     bool atapi_dma = false;
     int packet_reply_size = 0;  // pending reply bytes in io_buffer (for DMA replies)
+    size_t packet_reply_offset = 0;
+    uint16_t packet_byte_limit = 0;
+    bool tray_open = false, tray_locked = false;
 
-    // HDD backing file (drive 0 only; non-owning of the pathname).
+    // Owned backing file: writable only under the explicit HDD writeback policy.
     std::FILE* blk = nullptr;
 
     bool present() const { return kind == Kind::kCd || blk != nullptr; }
@@ -115,6 +118,16 @@ public:
     // behind the two guest trajectories recorded in docs/PERF-METHODOLOGY.md section 3b.
     // Pass writeback=true only when persisting guest disk state is the point of the run.
     bool attach_hdd(const std::string& path, bool writeback = false);
+    // Raw 2048-byte-sector optical image, opened read-only without rebasing or
+    // manufacturing authentication metadata. Attach before guest execution.
+    bool attach_dvd(const std::string& path);
+    bool dvd_attached() const { return drives_[1].blk != nullptr; }
+    bool dvd_media_present() const { return dvd_attached() && !drives_[1].tray_open; }
+    uint8_t dvd_tray_state() const {
+        return drives_[1].tray_open ? 0x10 : dvd_media_present() ? 0x60 : 0x00;
+    }
+    uint64_t dvd_sectors_read() const { return dvd_sectors_read_; }
+    void set_dvd_trace(bool enable) { dvd_trace_ = enable; }
     // Sectors currently held by the overlay, and the cap that fault-stops the machine rather
     // than silently dropping a guest write.
     uint64_t overlay_sectors() const { return overlay_.size(); }
@@ -184,9 +197,11 @@ private:
     void sector_read(IdeDrive& d);           // PIO read chunk
     void sector_write_done(IdeDrive& d);     // PIO write chunk landed
 
-    // ATAPI (xemu atapi.c). No media in the DVD drive.
+    // ATAPI transport from xemu atapi.c, including real mounted-media reads.
     void atapi_cmd(IdeDrive& d);
     void atapi_reply(IdeDrive& d, int size, int max_size);
+    void atapi_pio_next(IdeDrive& d);
+    void atapi_read(IdeDrive& d, uint32_t lba, uint32_t count);
     void atapi_cmd_ok(IdeDrive& d);
     void atapi_cmd_error(IdeDrive& d, int sense_key, int asc);
 
@@ -202,6 +217,8 @@ private:
     void lower_irq();
 
     FaultFn fault_;
+    uint64_t dvd_sectors_read_ = 0;
+    bool dvd_trace_ = false;
     IdeDrive drives_[2];
     int unit_ = 0;
     uint8_t bus_cmd_ = 0;  // device-control register (nIEN, SRST, HOB)

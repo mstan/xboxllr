@@ -1,5 +1,10 @@
 # AOT-5 burndown: efficient portable native execution
 
+**Sequencing update, 2026-10-04:** exploratory Blinx launch may proceed before
+dashboard original-speed qualification. Dashboard slowness remains open;
+parked candidates are retained for later title-workload comparisons. The
+[current gameplan](GOAL-AOT-DASHBOARD.md) supersedes older ordering below.
+
 **Work-order update, 2026-10-03:** the
 [current ecosystem gameplan](GOAL-AOT-DASHBOARD.md) governs priorities.
 Deliver useful enhanced rendering and a real game path with the existing hybrid

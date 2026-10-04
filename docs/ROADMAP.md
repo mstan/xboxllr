@@ -4,13 +4,13 @@ Two arcs. Terse by design (the gcnrecomp shape): each milestone has a one-line i
 explicit **Deliverable**, and — once closed — a dated **DONE** stamp with the
 machine-verifiable evidence that closed it.
 
-2026-10-03 owner direction makes the [LLE floor / enhanced execution gameplan](GOAL-AOT-DASHBOARD.md)
-authoritative: sustained original-speed 60 FPS in the animated dashboard menu
-comes before Blinx. Borrowed enhanced rendering, compatible HLE and partial AOT
+2026-10-04 owner direction makes the [LLE floor / enhanced execution gameplan](GOAL-AOT-DASHBOARD.md)
+authoritative: exploratory Blinx launch proceeds alongside investigation of the
+slow dashboard. Original-speed dashboard qualification remains open. Borrowed enhanced rendering, compatible HLE and partial AOT
 are allowed before strict AOT completion. Qualified enhanced paths can ship by
 default with a real LLE opt-out. Full AOT remains the final gate.
 The older requirement to finish all dashboard functionality before Arc 2 is
-historical; the immediate sequencing gate is menu performance. Current launch
+historical; menu performance no longer blocks exploratory game bring-up. Current launch
 dependencies are in [BLINX-BURNDOWN.md](BLINX-BURNDOWN.md); current execution
 coverage work is in [PLAN-AOT-COVERAGE-BURNDOWN.md](PLAN-AOT-COVERAGE-BURNDOWN.md).
 

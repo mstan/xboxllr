@@ -1,12 +1,14 @@
 # Blinx: path to the first faithful boot attempt
 
-Updated 2026-10-03. This is a milestone burndown, not a measured calendar
+Updated 2026-10-04. This is a milestone burndown, not a measured calendar
 forecast. Packages differ in size; counts are not percent completion.
 Central Beads is the issue source of truth.
 
-**Latest owner priority, 2026-10-03:** sustained original-speed 60 FPS in the
-animated dashboard main menu, with real selection/input, comes before Blinx.
-The active gate is `beads-xbox.1.17`; launch issue `beads-xbox.1.7.1` depends on it.
+**Owner priority, 2026-10-04:** exploratory Blinx bring-up may proceed before
+dashboard original-speed qualification. Dashboard slowness remains an active
+objective and regression workload (`beads-xbox.1.17`); it no longer blocks
+launch issue `beads-xbox.1.7.1`. Shared improvements must be checked on both
+workloads; incidental dashboard speed gains are a hypothesis, not a promise.
 Follow the
 [LLE floor / enhanced execution gameplan](GOAL-AOT-DASHBOARD.md).
 Partial AOT and the existing CPU floor are acceptable for this milestone;
@@ -15,9 +17,9 @@ The dated media findings below remain launch dependencies, not newly completed w
 
 The [first live borrowed-renderer checkpoint](RESULTS-XEMU-PSH-2026-10-03.md)
 is implemented. Its performance remains experimental and does not satisfy the
-menu gate. Resume Blinx media/loading after that performance gate is validated.
+menu target. Real media/loading work now proceeds while that target remains open.
 
-## The next Blinx milestone, after the menu gate
+## The next Blinx milestone
 
 **Attempt to launch Blinx through the real Xbox kernel and capture the first
 guest execution or exact blocking failure.** This does not require completion
@@ -26,14 +28,15 @@ attempt. It does require a valid input/launch route and implemented device
 behavior. No stubs, fabricated success or skipped initialization.
 
 The recorded route has four launch packages below. A boot attempt is the next
-Blinx milestone after menu performance; full renderer coverage and full AOT
+Blinx milestone; full renderer coverage and full AOT
 are not additional prerequisites.
 Audio/device work can become necessary to get beyond a boot attempt into menus
 or gameplay. Do not postpone the first attempt until all of those projects end.
 
 ```mermaid
 flowchart LR
-    M["Dashboard menu: sustained original-speed 60 FPS"] --> C
+    M["Dashboard original-speed qualification: remains open"]
+    J -. "recheck shared improvements" .-> M
     A["Blinx XBE pinned: done"] --> B["1. Validate launch media and firmware"]
     B --> S["2. Qualify provisioned HDD security"]
     B --> C["3. Implement real media/loading path"]
@@ -53,15 +56,17 @@ flowchart LR
 | --- | --- | --- | --- |
 | Pin existing Blinx XBE | Complete | NA retail, title 4D530013, XDK 4831; SHA-256 recorded in private inventory | beads-xbox.1.7.1 |
 | 1. Validate launch inputs | In progress | Selected firmware and full game files/media can support a real-kernel launch; missing metadata explicitly recorded | beads-xbox.1.7.1 |
-| 2. Qualify drive security | Boot subset implemented; broader qualification open | Security tests pass; provisioned 12B dashboard replay exactly matches the reference frame | beads-xbox.1.28 |
-| 3. Implement media/loading | Pending | Real sector reads, required ATAPI status/DMA/IRQs and loader behavior pass tests; no spoofed security success | beads-xbox.1.7.1 |
-| 4. First boot attempt | Pending | Reproducible command, input identities, entry-PC/device trace and exact first failure or progress marker | beads-xbox.1.7.1 |
+| 2. Qualify drive security | Complete for the selected launch configuration; broader drive qualification remains separate | Provisioned locked HDD unlocks on the mounted-disc kernel path and reaches optical authentication; no new security bypass | beads-xbox.1.28 |
+| 3. Implement media/loading | In progress on `bringup/blinx-media-20261004` | Real sector reads, required ATAPI status/DMA/IRQs and loader behavior pass tests; no spoofed security success | beads-xbox.1.7.1 |
+| 4. First boot attempt | Captured; game entry remains blocked | Real kernel sees Blinx Rev1 media and stops on DVD authentication page 0x3e after 53,516,892 instructions | beads-xbox.1.7.1 |
 | Reach gameplay | Pending | New game and reproducible movement/combat/time-control route through implemented hardware | beads-xbox.1.7.2 |
 | Complete playable slice | Pending | Audio, input, transition and save/reload validated | beads-xbox.1.7.2 |
 | Strict AOT slice | In progress: foundations | Compiled game and kernel execute the declared post-boot route with zero CPU JIT/interpreter fallback | beads-xbox.1.25.5 |
 | Real-time slice | Pending | Original-speed guest progress, distinct frames, audio and latency on the development PC | beads-xbox.1.7.2 |
 
-Current snapshot: **4 of 4 first-attempt gates remain**. There is not yet a
+Current snapshot: **2 of 4 launch packages remain open**: input/authentication
+suitability and complete media/loading. A captured failed attempt is not
+successful title initialization. See the [actual probe and transport validation](RESULTS-BLINX-MEDIA-AND-DASHBOARD-COST-2026-10-04.md). There is not yet a
 velocity history from which to draw an honest date-based burndown line. Append
 dated gate completions below; do not infer a calendar from checkboxes.
 
@@ -71,6 +76,8 @@ dated gate completions below; do not infer a calendar from checkboxes.
 | 2026-10-02, drive-contract audit | 4 | Scope increased: pre-existing unconditional HDD unlock and freeze no-op discovered; zero gates closed |
 | 2026-10-02, media audit | 4 | Three images hashed and bounded filesystem trees inspected; original Blinx/JSRF XBEs match extracted copies; authentication and launch suitability remain unqualified |
 | 2026-10-02, drive implementation | 4 | Provisioned authentication and explicit unlocked mode implemented; 61 tests pass; 12B dashboard replay matches reference; broader drive qualification remains open |
+
+| 2026-10-04, actual kernel probe | 2 | Selected provisioned HDD configuration reaches optical authentication; mounted Blinx Rev1 triggers page 0x3e and an explicit unsupported stop. Game entry remains open. |
 
 ## What changes the estimate
 
@@ -90,7 +97,8 @@ XDK 4831 compiler input, while Rev 1 uses XDK 5558. JSRF's image matches its
 extracted XDK 4134 XBE. The complete local manifest is
 `build/aot-20261002/media.aot-private.json`; source images remain unchanged.
 
-The current DVD model explicitly reports no media. The IDE audit found
+The DVD model now supports optional read-only media and bounded real sector
+transport. The observed Xbox authentication page remains unimplemented. The IDE audit found
 unconditional HDD password acceptance and a freeze-lock no-op. Both were
 replaced with a provisioned authentication model and stateful freeze behavior.
 The old stop at 17,940,376 instructions is cleared: a provisioned retail run

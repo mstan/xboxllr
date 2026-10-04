@@ -1,5 +1,10 @@
 # Borrowed enhanced pixel shaders
 
+**Sequencing update, 2026-10-04:** exploratory Blinx launch may proceed before
+dashboard original-speed qualification. Dashboard slowness remains open;
+parked candidates are retained for later title-workload comparisons. The
+[current gameplan](GOAL-AOT-DASHBOARD.md) supersedes older ordering below.
+
 Tracking: `beads-xbox.1.15.7`. This is the first integration checkpoint under the
 [enhanced execution gameplan](GOAL-AOT-DASHBOARD.md), not a complete xemu renderer
 transplant or a qualified shipping default.

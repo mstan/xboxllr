@@ -1,9 +1,10 @@
 # Goal: faithful Xbox floor, enhanced native execution and playable games
 
-Owner clarification, 2026-10-03. Central tracker: `beads-xbox.1.25.5`;
+Owner clarification, 2026-10-04. Central tracker: `beads-xbox.1.25.5`;
 planning decision: `beads-xbox.1.40`; active menu gate: `beads-xbox.1.17`.
-The latest owner direction targets the original Xbox's execution speed and
-content cadence in the dashboard menu before Blinx. A universal 60 rendered
+The owner targets original Xbox execution speed and content cadence. Exploratory
+Blinx bring-up now proceeds before dashboard performance qualification; the
+dashboard remains an unresolved goal and shared-change regression workload. A universal 60 rendered
 FPS requirement is superseded. Full AOT remains a separate final gate; donor
 HLE remains eligible. The dashboard's distinct-frame cadence is not yet verified.
 The renderer choice is now a whole implementation: `XLLE_RENDERER=LLE` or
@@ -34,8 +35,8 @@ preserved, including documented enhancement tolerances. No stubs or fabricated
 success. The repository name and amount of original code retained are not goals.
 
 Get the animated stock dashboard main menu to its original execution speed and
-content cadence with working selection/input, then pursue a real Blinx launch/playable
-slice. Use the current hybrid CPU path and compatible enhanced implementations.
+content cadence with working selection/input, while pursuing an exploratory Blinx
+launch and repeatable scene for a second performance workload. Use the current hybrid CPU path and compatible enhanced implementations.
 Full AOT with dynarec removed remains the final goal; it is not a prerequisite
 for menu performance. JSRF is the next generalization target. Completing every
 dashboard interior remains a broader product requirement, separate from the
@@ -151,15 +152,16 @@ fork-specific code, fresh compiler tests and limits of each candidate.
 ## Fast-win delivery order
 
 Use bounded implementation checkpoints, not an open-ended framework rewrite.
-Work on menu performance first. Blinx launch follows the qualified original-speed menu
-gate; neither milestone waits for 100% AOT or all dashboard menu interiors.
+Pursue real Blinx launch alongside dashboard cost attribution. Neither is gated
+by original-speed qualification of the other, 100% AOT or every menu interior.
+Parked experiments remain available for title-specific retesting.
 
 | Order | Deliverable | First concrete result / decision |
 | --- | --- | --- |
 | 1 | Reference/enhanced selection around the existing renderer interface; short repeatable workload and opt-out smoke | Same live dashboard request reaches both implementations; effective backend, CPU/renderer cost, real guest progress and frame pacing are visible |
 | 2 | Borrow a substantial renderer path | Run one actual dashboard rendering workload through donor shader/raster/resource code and our real memory/resolve boundary. Measure against the previous path, validate tolerances, and expand useful coverage. Preserve reference fallback; no custom pixel-exact rewrite required |
-| 3 | Qualify original-speed dashboard menu before Blinx | Measure settled animation and selection/input at original guest speed and content cadence. Accelerate the measured costs using renderer reuse, native/HLE services or CPU work as evidence warrants; preserve real reference opt-outs and qualify outputs. Report distinct frames, presentation pacing and response, not just vblanks |
-| 4 | First real Blinx launch with partial AOT | After the menu gate, resolve the pinned media/ATAPI/loader path and capture title entry plus the first actual blocker. Execute unsupported CPU instructions on the existing floor during development; full AOT and full renderer coverage are not prerequisites |
+| 3 | Qualify original-speed dashboard menu | Measure settled animation and selection/input at original guest speed and content cadence. Accelerate the measured costs using renderer reuse, native/HLE services or CPU work as evidence warrants; preserve real reference opt-outs and qualify outputs. Report distinct frames, presentation pacing and response, not just vblanks |
+| 4 | First real Blinx launch with partial AOT | Resolve the pinned media/ATAPI/loader path and capture title entry plus the first actual blocker. Execute unsupported CPU instructions on the existing floor during development; full AOT and full renderer coverage are not prerequisites |
 | 5 | Enhanced playable slice and measured performance | Title screen, input and a reproducible gameplay scene; borrow or implement the actual reached audio/device contracts. Replace the measured expensive service/function next, validate opt-out and save/state behavior, then qualify original-speed output and latency |
 | 6 | Decide the long-term compiler/runtime foundation from a live comparison | Compare current xboxrecomp-generated execution with our current generator against the same implemented LLE/enhanced boundaries. Preserve useful broad frontend/tooling reuse; select on adaptation cost and measured workload, without repo loyalty. Bring this comparison forward if measured menu CPU cost makes it the useful next experiment |
 | 7 | Remove CPU fallback on the supported routes | Capture remaining code identities, compile reachable code and kernel paths, qualify transitions/save-reload, and run strict AOT in both profiles. Keep this final gate explicit while shipping useful intermediate development builds |
@@ -171,9 +173,9 @@ code at our existing packet boundary, or choose the better-matching donor. A
 large transplant remains allowed when it is cheaper than that adaptation.
 
 The whole HLE renderer has demonstrated a provisional shared-host speedup;
-original-speed output remains unqualified. Step 3 is the active work. Qualify
-actual menu performance before starting
-step 4; a donor draw count or AOT percentage does not close that gate.
+original-speed output remains unqualified. Steps 3 and 4 are active independent
+workstreams. Blinx may expose shared costs, but a donor draw count or AOT
+percentage does not establish a speed gain on either workload.
 Once Blinx starts, use its actual launch trace to choose the next missing service.
 Do not fabricate disc authentication, mutate the XBE's media constraints or
 force device readiness to create a boot milestone. An enhanced loader is eligible
@@ -217,7 +219,7 @@ implementation before its result can be accepted.
 | Borrowed rendering | Separate whole HLE implementation completes the route; observed 1.87x throughput improvement remains shared-host screening evidence |
 | Attribute and reduce steady-menu cost | Borrow raw vertex-stream uploads next; assess whole XDK graphics replacement and larger native CPU regions against current handoff costs. See RENDERER-REUSE-2026-10-02.md |
 | Sustained original-speed cadence and input | Open: establish original content cadence, repeat quiet-host steady windows and verify actual presentation, distinct output and input response |
-| Blinx launch | Sequenced after this menu gate; pinned media findings retained |
+| Blinx launch | Exploratory launch active; pinned media findings retained |
 
 The following diagnostics predate the whole HLE renderer and retain the former
 60 FPS planning target for historical context; they do not select the next work.
@@ -260,9 +262,9 @@ a speedup, and full AOT remains a separate unfinished requirement.
 | --- | --- | --- |
 | Faithful reference floor | Partial, runnable dashboard | Qualified contracts for each reached subsystem; real LLE opt-out; close known exception, media, rendering and audio gaps |
 | Interchangeable enhanced renderer | Live borrowed path, experimental | Qualify whole-route tolerances and performance; maintain coherent readback/state and reference selection |
-| Original-speed dashboard main menu | Active; gates Blinx | Original content cadence, selection/input and measured distinct output/pacing; partial AOT allowed |
+| Original-speed dashboard main menu | Active; does not gate exploratory Blinx | Original content cadence, selection/input and measured distinct output/pacing; partial AOT allowed |
 | Complete dashboard functionality | Open, broader product gate | Required menu interiors, input/audio and persistence |
-| Blinx launch and playable slice | Open; follows menu performance gate | Real loading/title execution, input, gameplay/audio and save/reload; partial AOT allowed |
+| Blinx launch and playable slice | Open; exploratory bring-up proceeds alongside menu investigation | Real loading/title execution, input, gameplay/audio and save/reload; partial AOT allowed |
 | Enhanced performance | Open | Measured gain at equivalent logical work and accepted outputs; title-appropriate cadence and latency |
 | Full AOT without dynarec | Open, final gate | Prebuilt native execution of remaining guest work in both reference/enhanced supported workflows; no hidden CPU fallback |
 | JSRF generalization | Later | Second title validates reusable contracts rather than one-title assumptions |
@@ -332,5 +334,7 @@ all 76 public tests and four census scalar/native-required tests pass. Attempts
 and handoffs increase, so the coverage gain carries no new speed claim.
 
 The evidence above is retained as the starting point. The fast-win order in this
-document now governs scheduling: measured menu performance and compatible
-subsystem replacements take priority over Blinx launch and broad opcode expansion.
+document now governs scheduling: real Blinx launch, measured dashboard cost
+attribution and compatible subsystem replacements take priority over broad
+opcode expansion. Revisit parked candidates when a title supplies a relevant
+repeatable workload; preserve the old result as workload-specific evidence.

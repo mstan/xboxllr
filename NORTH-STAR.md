@@ -1,7 +1,7 @@
 # NORTH-STAR
 
-> One active goal and one next milestone. Updated by the owner on 2026-10-03.
-> Menu performance comes before Blinx; full AOT remains a separate final gate.
+> Updated by the owner on 2026-10-04.
+> Explore Blinx while investigating dashboard slowness; full AOT remains a final gate.
 
 ## The project
 
@@ -26,12 +26,13 @@ See the [all-donor assessment](docs/RENDERER-REUSE-2026-10-02.md).
 
 ## Current goal
 
-Reach sustained 60 FPS at original guest speed in the animated stock dashboard
-main menu, with working selection/input, before starting Blinx launch work.
+Reach original guest speed and content cadence in the animated stock dashboard
+main menu, with working selection/input. Exploratory Blinx launch proceeds
+alongside this investigation; dashboard speed no longer blocks that work.
 Use enhanced rendering, compatible native/HLE replacements and the existing
 hybrid CPU path to get there. Complete dashboard navigation remains a product
 requirement; every menu interior is not part of this immediate performance gate.
-Blinx is the first game after that gate; JSRF is the next generalization target.
+Blinx supplies the first game workload; JSRF is the next generalization target.
 
 Full portable AOT remains the final CPU goal: prepare native artifacts before
 launch and remove dynarec/interpreter dependence from the declared supported
@@ -46,7 +47,11 @@ stand in for an absent reference contract.
 
 ## Next milestone
 
-**Sustained original-speed 60 FPS in the dashboard menu with real input.**
+**Real Blinx kernel launch and the first concrete blocker, followed by a
+repeatable scene. Dashboard cost attribution remains an active workstream.**
+
+The paragraphs below retain earlier renderer evidence; the latest five trials
+and retry conditions are in [the donor results](docs/RESULTS-REMAINING-DONOR-SPIKES-2026-10-04.md).
 The first borrowed-renderer checkpoint now exists: xemu-generated pixel shaders
 execute live dashboard draws with reference opt-out. Its first timing pair was
 slower and whole-menu numerical differences remain unqualified, so it stays
@@ -63,7 +68,7 @@ vblank counts or repeated host presents cannot close this gate. Profile the
 measured expensive work and qualify useful renderer/subsystem replacements.
 Neither full AOT nor a complete renderer transplant is a prerequisite.
 
-Blinx media/loading follows this menu gate. Retain the pinned launch-input audit
+Blinx media/loading now proceeds independently. Retain the pinned launch-input audit
 and real loader/device requirements; do not invent authentication or readiness.
 
 The detailed order, PSX/Tomba source precedent, subsystem contracts, donor

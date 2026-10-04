@@ -3,6 +3,7 @@
 #include "machine/ide.hpp"
 
 #include <array>
+#include <algorithm>
 #include <cstring>
 
 namespace xlle {
@@ -70,7 +71,7 @@ void padstr8(uint8_t* p, int len, const char* s) {
 }  // namespace
 
 IdeController::~IdeController() {
-    if (drives_[0].blk) std::fclose(drives_[0].blk);
+    for (auto& d : drives_) if (d.blk) std::fclose(d.blk);
 }
 
 bool IdeController::configure_hdd_security(const HddSecurityConfig& config) {
@@ -128,6 +129,28 @@ bool IdeController::attach_hdd(const std::string& path, bool writeback) {
     return true;
 }
 
+bool IdeController::attach_dvd(const std::string& path) {
+    auto& d = drives_[1];
+    if (d.blk) return false;
+    auto* file = std::fopen(path.c_str(), "rb");
+    if (!file) return false;
+#ifdef _WIN32
+    const bool seek_ok = _fseeki64(file, 0, SEEK_END) == 0;
+    const int64_t size = _ftelli64(file);
+#else
+    const bool seek_ok = fseeko(file, 0, SEEK_END) == 0;
+    const int64_t size = ftello(file);
+#endif
+    if (!seek_ok || size <= 0 || size % 2048 || uint64_t(size) / 2048 > UINT32_MAX) {
+        std::fclose(file);
+        return false;
+    }
+    d.blk = file;
+    d.nb_sectors = uint64_t(size) / 512; // common IDE backing units, as in xemu
+    d.tray_open = d.tray_locked = false;
+    return true;
+}
+
 void IdeController::reset() {
     unit_ = 0;
     bus_cmd_ = 0;
@@ -150,6 +173,8 @@ void IdeController::reset_drive(IdeDrive& d) {
     d.asc = 0;
     d.atapi_dma = false;
     d.packet_reply_size = 0;
+    d.packet_reply_offset = 0;
+    d.packet_byte_limit = 0;
     d.dma_cmd = IdeDrive::DmaCmd::None;
     d.req_nb_sectors = 0;
     set_signature(d);
@@ -374,7 +399,7 @@ void IdeController::end_transfer(IdeDrive& d) {
             atapi_cmd(d);
             break;
         case IdeDrive::End::AtapiReplyStop:
-            atapi_cmd_ok(d);
+            atapi_pio_next(d);
             break;
         case IdeDrive::End::SecurityCmd: {
             const bool master = (d.io_buffer[0] & 1) != 0;
@@ -544,34 +569,80 @@ void IdeController::atapi_cmd_error(IdeDrive& d, int sense_key, int asc) {
     raise_irq();
 }
 
+// xemu ide_atapi_cmd_reply / ide_atapi_cmd_reply_end: each PIO phase obeys
+// the host byte-count limit; completion occurs after the last consumed byte.
 void IdeController::atapi_reply(IdeDrive& d, int size, int max_size) {
-    if (size > max_size) size = max_size;
+    size = std::min(size, max_size);
+    if (size == 0) { atapi_cmd_ok(d); return; }
+    if (size < 0 || size_t(size) > d.io_buffer.size() - 4) {
+        if (fault_) fault_("ATAPI reply exceeds owned buffer");
+        return;
+    }
+    d.packet_reply_size = size;
+    d.packet_reply_offset = 0;
     if (d.atapi_dma) {
-        // Reply is delivered by the bus master when the guest starts it.
-        d.packet_reply_size = size;
         d.status = READY_STAT | SEEK_STAT | DRQ_STAT;
         d.dma_cmd = IdeDrive::DmaCmd::Atapi;
         bm_maybe_run();
         return;
     }
-    // PIO reply, single elementary transfer. The byte-count limit registers must cover the
-    // reply; the boot's replies are tiny (sense/inquiry/GESN). A smaller BCL would need the
-    // full chunked reply loop — characterize before modelling.
-    int bcl = d.lcyl | (d.hcyl << 8);
-    if (bcl == 0xffff) bcl = 0xfffe;
-    if (bcl < size) {
-        char b[96];
-        std::snprintf(b, sizeof(b), "ATAPI reply %d bytes > BCL %d — chunked reply unmodeled",
-                      size, bcl);
-        if (fault_) fault_(b);
+    d.packet_byte_limit = uint16_t(d.lcyl | (d.hcyl << 8));
+    if (d.packet_byte_limit == 0xffff) d.packet_byte_limit = 0xfffe;
+    if (d.packet_byte_limit < 2) {
+        if (fault_) fault_("ATAPI PIO byte-count limit below two bytes");
         return;
     }
-    d.lcyl = static_cast<uint8_t>(size);
-    d.hcyl = static_cast<uint8_t>(size >> 8);
+    atapi_pio_next(d);
+}
+
+void IdeController::atapi_pio_next(IdeDrive& d) {
+    if (d.packet_reply_offset >= size_t(d.packet_reply_size)) {
+        d.packet_reply_size = 0;
+        atapi_cmd_ok(d);
+        return;
+    }
+    const size_t remaining = size_t(d.packet_reply_size) - d.packet_reply_offset;
+    size_t count = std::min(remaining, size_t(d.packet_byte_limit));
+    if (count < remaining) count &= ~size_t(1);
+    d.data_ptr = d.packet_reply_offset;
+    d.packet_reply_offset += count;
+    d.data_end = d.data_ptr + ((count + 1) & ~size_t(1));
+    if (count & 1) d.io_buffer[d.data_end - 1] = 0; // bus-word padding, not reply data
+    d.lcyl = uint8_t(count);
+    d.hcyl = uint8_t(count >> 8);
     d.nsector = (d.nsector & ~7) | ATAPI_INT_REASON_IO;
-    d.status = READY_STAT | SEEK_STAT;
-    transfer_start(d, static_cast<size_t>(size), IdeDrive::End::AtapiReplyStop);
+    d.status = READY_STAT | SEEK_STAT | DRQ_STAT;
+    d.end_transfer = IdeDrive::End::AtapiReplyStop;
     raise_irq();
+}
+
+void IdeController::atapi_read(IdeDrive& d, uint32_t lba, uint32_t count) {
+    // xemu cmd_read: zero transfer succeeds; range errors are genuine SCSI
+    // CHECK CONDITION, and no guest memory is written on a rejected request.
+    if (!count) { atapi_cmd_ok(d); return; }
+    const uint64_t sectors = d.nb_sectors / 4;
+    if (uint64_t(lba) + count > sectors) {
+        atapi_cmd_error(d, ILLEGAL_REQUEST, 0x21); // logical block out of range
+        return;
+    }
+    const uint64_t bytes = uint64_t(count) * 2048;
+    if (bytes > kIoBufferSize - 4) {
+        if (fault_) fault_("ATAPI optical read exceeds 128 KiB transport window; streaming unimplemented");
+        return;
+    }
+#ifdef _WIN32
+    const bool seek_ok = _fseeki64(d.blk, int64_t(lba) * 2048, SEEK_SET) == 0;
+#else
+    const bool seek_ok = fseeko(d.blk, int64_t(lba) * 2048, SEEK_SET) == 0;
+#endif
+    if (!seek_ok || std::fread(d.io_buffer.data(), 1, size_t(bytes), d.blk) != bytes) {
+        if (fault_) fault_("ATAPI optical image read failed; no successful completion");
+        return;
+    }
+    dvd_sectors_read_ += count;
+    if (dvd_trace_) std::printf("[dvd] read lba=%u sectors=%u transport=%s\n", lba, count,
+                d.atapi_dma ? "dma" : "pio");
+    atapi_reply(d, int(bytes), int(bytes));
 }
 
 void IdeController::atapi_cmd(IdeDrive& d) {
@@ -593,12 +664,38 @@ void IdeController::atapi_cmd(IdeDrive& d) {
     const bool check_ready = (op == 0x00 || op == 0x25 || op == 0x28 || op == 0x2b ||
                               op == 0x43 || op == 0x51 || op == 0xa8 || op == 0xad ||
                               op == 0xbe);
-    if (check_ready) {
+    if (check_ready && !dvd_media_present()) {
         atapi_cmd_error(d, NOT_READY, ASC_MEDIUM_NOT_PRESENT);
         return;
     }
 
+    if (dvd_trace_)
+        std::printf("[dvd] packet op=0x%02x page=0x%02x mode=%s\n", op,
+                    (op == 0x5a ? buf[2] & 63 : op == 0xad ? buf[7] : 0),
+                    d.atapi_dma ? "dma" : "pio");
     switch (op) {
+        case 0x00: // TEST UNIT READY, media presence checked above
+            atapi_cmd_ok(d);
+            return;
+        case 0x25: { // READ CAPACITY: last logical sector and 2048-byte blocks
+            const uint32_t last = uint32_t(d.nb_sectors / 4 - 1);
+            std::memset(buf, 0, 8);
+            for (unsigned i = 0; i < 4; ++i) buf[i] = uint8_t(last >> (24 - i * 8));
+            buf[6] = 8;
+            atapi_reply(d, 8, 8);
+            return;
+        }
+        case 0x28: case 0xa8: { // READ(10), READ(12), xemu cmd_read
+            auto be32 = [](const uint8_t* p) {
+                return (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) |
+                       (uint32_t(p[2]) << 8) | p[3];
+            };
+            const uint32_t lba = be32(buf + 2);
+            const uint32_t count = op == 0x28 ? (uint32_t(buf[7]) << 8) | buf[8]
+                                               : be32(buf + 6);
+            atapi_read(d, lba, count);
+            return;
+        }
         case 0x03: {  // REQUEST SENSE
             int max_len = buf[4];
             std::memset(buf, 0, 18);
@@ -628,12 +725,22 @@ void IdeController::atapi_cmd(IdeDrive& d) {
             atapi_reply(d, 36, max_len);
             return;
         }
-        case 0x1e:  // PREVENT/ALLOW MEDIUM REMOVAL
+        case 0x1e: // PREVENT/ALLOW MEDIUM REMOVAL
+            d.tray_locked = (buf[4] & 1) != 0;
             atapi_cmd_ok(d);
             return;
-        case 0x1b:  // START STOP UNIT (tray ops accepted; no media either way)
+        case 0x1b: { // START STOP UNIT, xemu cmd_start_stop_unit
+            const bool start = (buf[4] & 1) != 0;
+            if (!(buf[4] & 0xf0) && (buf[4] & 2)) {
+                if (!start && !d.tray_open && d.tray_locked) {
+                    atapi_cmd_error(d, dvd_media_present() ? NOT_READY : ILLEGAL_REQUEST, 0x53);
+                    return;
+                }
+                d.tray_open = !start;
+            }
             atapi_cmd_ok(d);
             return;
+        }
         case 0x4a: {  // GET EVENT STATUS NOTIFICATION
             int max_len = (buf[7] << 8) | buf[8];
             if (!(buf[1] & 0x01)) {  // async mode unsupported (xemu)
@@ -646,7 +753,7 @@ void IdeController::atapi_cmd(IdeDrive& d) {
             if (buf[4] & (1 << 4)) {
                 buf[2] |= 4;        // media class
                 buf[4] = 0;         // event: no change
-                buf[5] = 0;         // media status: no media, tray closed
+                buf[5] = d.tray_open ? 1 : dvd_media_present() ? 2 : 0;
                 buf[6] = buf[7] = 0;
                 used_len = 8;
             } else {
@@ -666,6 +773,10 @@ void IdeController::atapi_cmd(IdeDrive& d) {
             int max_len = (buf[7] << 8) | buf[8];
             int action = buf[2] >> 6;
             int code = buf[2] & 0x3f;
+            if (dvd_media_present() && code == 0x3e) {
+                if (fault_) fault_("Xbox DVD authentication mode page 0x3e: media attached, authentication contract unimplemented");
+                return;
+            }
             static int ms_logged = 0;
             if (ms_logged < 8) {
                 std::printf("[ide] ATAPI MODE SENSE action=%d page=0x%02x\n", action, code);
@@ -695,7 +806,7 @@ void IdeController::atapi_cmd(IdeDrive& d) {
                 buf[10] = 0x3b;
                 buf[12] = 0x71;
                 buf[13] = 3 << 5;
-                buf[14] = (1 << 0) | (1 << 3) | (1 << 5);
+                buf[14] = (1 << 0) | (1 << 3) | (1 << 5) | (d.tray_locked ? 2 : 0);
                 buf[16] = 704 >> 8; buf[17] = 704 & 0xff;
                 buf[19] = 2;
                 buf[20] = 512 >> 8; buf[21] = 512 & 0xff;
@@ -716,11 +827,14 @@ void IdeController::atapi_cmd(IdeDrive& d) {
             int max_len = (buf[7] << 8) | buf[8];
             if (max_len > 512) max_len = 512;
             std::memset(buf, 0, max_len > 32 ? static_cast<size_t>(max_len) : 32);
-            // No media: current profile stays 0. Feature 0 lists DVD-ROM + CD-ROM profiles.
+            // A mounted optical image exposes the DVD-ROM profile. This says nothing
+            // about Xbox disc authentication or the title's media policy.
+            if (dvd_media_present()) buf[7] = 0x10;
             buf[10] = 0x03;  // persistent | current
             // profile list feature descriptor: 2 profiles x 4 bytes
             buf[11] = 8;
             buf[12] = 0x00; buf[13] = 0x10;  // DVD-ROM (0x0010)
+            buf[14] = dvd_media_present() ? 1 : 0;
             buf[16] = 0x00; buf[17] = 0x08;  // CD-ROM (0x0008)
             uint32_t len = 12 + 8;
             buf[0] = static_cast<uint8_t>((len - 4) >> 24);
