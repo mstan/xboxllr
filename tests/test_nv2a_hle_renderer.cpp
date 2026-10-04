@@ -217,6 +217,40 @@ int main() {
       require(!r->submit_hle_draw(raw, error),
               "out-of-range raw index accepted");
     }
+    // A resident clear temporarily changes masks/scissor. Repeating identical
+    // draw state afterwards must restore the caller's color write mask.
+    auto masked = opaque;
+    masked.color.address = 0x600000;
+    require(r->submit_hle_draw(masked, error), error);
+    masked.state[N::kRasterColorMask] = 0;
+    require(r->submit_hle_draw(masked, error), error);
+    bool fill = false;
+    require(r->clear_resident_surface(0x600000, 1024, true, 0xff00ff00,
+                                      0, 0, false, 0, fill, error), error);
+    require(r->submit_hle_draw(masked, error), error);
+    require(r->resolve_resident_color_surface(0x600000, 1024, out, error), error);
+    require(out.data.size() == 1024 && out.data[(3 * 16 + 3) * 4 + 1] == 255 &&
+                out.data[(3 * 16 + 3) * 4 + 2] == 0,
+            "clear corrupted cached color mask");
+    // Return to a previously used fixed-function program. A changed active
+    // matrix row must upload; changing an optimized-away row must be harmless.
+    auto fixed = opaque;
+    fixed.transform_mode = 0;
+    fixed.program.clear();
+    fixed.color.address = 0x700000;
+    fixed.constants[0] = {0, 0, 0, 100}; // move all vertices outside viewport
+    require(r->submit_hle_draw(fixed, error), error);
+    require(r->resolve_resident_color_surface(0x700000, 1024, out, error), error);
+    require(out.data[(3 * 16 + 3) * 4 + 2] == 0,
+            "changed matrix row not uploaded");
+    fixed.constants[0] = {1, 0, 0, 0};
+    fixed.constants[191] = {100, 200, 300, 400};
+    require(r->submit_hle_draw(fixed, error), error);
+    require(r->resolve_resident_color_surface(0x700000, 1024, out, error), error);
+    require(out.data[(3 * 16 + 3) * 4 + 2] == 255,
+            "program constants not restored");
+    fixed.constants[191][0] += 1;
+    require(r->submit_hle_draw(fixed, error), error);
     p.state[N::kRasterShaderStageProgram] =
         8; // unsupported mode, no fake success
     require(!r->submit_hle_draw(p, error),

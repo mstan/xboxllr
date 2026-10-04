@@ -150,7 +150,12 @@ class HleRenderer final : public Nv2aRenderer {
   std::map<std::string, Texture> textures_;
   struct Program {
     GLuint id = 0;
-    std::unordered_map<std::string, GLint> uniforms;
+    struct Uniform {
+      GLint location;
+      std::vector<uint8_t> value;
+      size_t active_count = 0;
+    };
+    std::unordered_map<std::string, Uniform> uniforms;
   };
   std::unordered_map<std::string, Program> programs_;
   uint64_t draws_ = 0, vertices_ = 0, uploads_ = 0, resolves_ = 0,
@@ -209,12 +214,101 @@ class HleRenderer final : public Nv2aRenderer {
         return &p;
     return nullptr;
   }
-  GLint uniform(Program &p, const std::string &name) {
+  uint64_t uniform_updates_ = 0, uniform_skips_ = 0, uniform_bytes_ = 0;
+  uint64_t raster_updates_ = 0, raster_skips_ = 0, sampler_updates_ = 0,
+           sampler_skips_ = 0;
+  std::vector<uint32_t> raster_cache_;
+  uint32_t raster_width_ = 0, raster_height_ = 0;
+  bool raster_valid_ = false, raster_depth_ = false;
+  std::array<std::array<uint32_t, 5>, 4> sampler_cache_{};
+  std::array<bool, 4> sampler_valid_{};
+  Program::Uniform &uniform(Program &p, const std::string &name) {
     auto found = p.uniforms.find(name);
     if (found != p.uniforms.end())
       return found->second;
-    return p.uniforms.emplace(name, GetUniformLocation(p.id, name.c_str()))
+    return p.uniforms
+        .emplace(name,
+                 Program::Uniform{GetUniformLocation(p.id, name.c_str()), {}})
         .first->second;
+  }
+  bool changed(Program::Uniform &u, const void *data, size_t bytes) {
+    if (u.location < 0)
+      return false;
+    if (u.value.size() == bytes && !std::memcmp(u.value.data(), data, bytes)) {
+      ++uniform_skips_;
+      return false;
+    }
+    u.value.assign(static_cast<const uint8_t *>(data),
+                   static_cast<const uint8_t *>(data) + bytes);
+    ++uniform_updates_;
+    uniform_bytes_ += bytes;
+    return true;
+  }
+  void uniform4f(Program &p, const std::string &name, GLsizei count,
+                 const float *v) {
+    auto &u = uniform(p, name);
+    if (u.location < 0)
+      return;
+    // GL basic uniform arrays have consecutive locations. Upload only the
+    // enclosing changed vec4 range, retaining each program's own constants.
+    if (!u.active_count) {
+      size_t lo = 1, hi = size_t(count);
+      while (lo < hi) {
+        const size_t mid = (lo + hi + 1) / 2;
+        const auto element = name + "[" + std::to_string(mid - 1) + "]";
+        if (GetUniformLocation(p.id, element.c_str()) >= 0)
+          lo = mid;
+        else
+          hi = mid - 1;
+      }
+      u.active_count = lo;
+    }
+    size_t first = 0, last = u.active_count, bytes = size_t(count) * 16;
+    if (u.value.size() == bytes) {
+      while (first < last &&
+             !std::memcmp(u.value.data() + first * 16, v + first * 4, 16))
+        ++first;
+      while (last > first && !std::memcmp(u.value.data() + (last - 1) * 16,
+                                          v + (last - 1) * 4, 16))
+        --last;
+    }
+    if (first == last) {
+      ++uniform_skips_;
+      return;
+    }
+    u.value.resize(bytes);
+    std::memcpy(u.value.data(), v, bytes);
+    ++uniform_updates_;
+    uniform_bytes_ += (last - first) * 16;
+    Uniform4fv(u.location + GLint(first), GLsizei(last - first), v + first * 4);
+  }
+  void uniform4i(Program &p, const std::string &n, GLsizei count,
+                 const int *v) {
+    auto &u = uniform(p, n);
+    if (changed(u, v, size_t(count) * 16))
+      Uniform4iv(u.location, count, v);
+  }
+  void uniform1i(Program &p, const std::string &n, int v) {
+    auto &u = uniform(p, n);
+    if (changed(u, &v, sizeof(v)))
+      Uniform1i(u.location, v);
+  }
+  void uniform1f(Program &p, const std::string &n, float v) {
+    auto &u = uniform(p, n);
+    if (changed(u, &v, sizeof(v)))
+      Uniform1f(u.location, v);
+  }
+  void uniform2i(Program &p, const std::string &n, int a, int b) {
+    int v[]{a, b};
+    auto &u = uniform(p, n);
+    if (changed(u, v, sizeof(v)))
+      Uniform2i(u.location, a, b);
+  }
+  void uniform2f(Program &p, const std::string &n, float a, float b) {
+    float v[]{a, b};
+    auto &u = uniform(p, n);
+    if (changed(u, v, sizeof(v)))
+      Uniform2f(u.location, a, b);
   }
   GLuint compile(GLenum type, const std::string &source) {
     GLuint id = CreateShader(type);
@@ -712,6 +806,14 @@ gl_PointSize=max(oPts.x,1.0);
 
 public:
   ~HleRenderer() override {
+    std::printf(
+        "[hle-state] uniforms-updated=%llu skipped=%llu bytes=%llu "
+        "raster-updated=%llu skipped=%llu sampler-updated=%llu skipped=%llu\n",
+        (unsigned long long)uniform_updates_,
+        (unsigned long long)uniform_skips_, (unsigned long long)uniform_bytes_,
+        (unsigned long long)raster_updates_, (unsigned long long)raster_skips_,
+        (unsigned long long)sampler_updates_,
+        (unsigned long long)sampler_skips_);
     if (context_) {
       SDL_GL_MakeCurrent(window_, context_);
       for (auto &p : planes_)
@@ -915,6 +1017,7 @@ public:
                              GL_TEXTURE_2D, d->texture, 0);
       glDrawBuffer(cc ? GL_COLOR_ATTACHMENT0 : GL_NONE);
       glReadBuffer(cc ? GL_COLOR_ATTACHMENT0 : GL_NONE);
+      raster_valid_ = false; // Clear mutates masks/scissor outside draw state.
       glDisable(GL_SCISSOR_TEST);
       GLbitfield mask = 0;
       fill = (cc && !c->dirty) || (cd && !d->dirty);
@@ -983,10 +1086,9 @@ public:
       auto &prog = program(p);
       UseProgram(prog.id);
       if (p.raw_vertex_count) {
-        Uniform4iv(uniform(prog, "vertexLayout"), 16,
-                   p.vertex_layout[0].data());
-        Uniform4fv(uniform(prog, "defaultAttributes"), 16,
-                   p.default_attributes[0].data());
+        uniform4i(prog, "vertexLayout", 16, p.vertex_layout[0].data());
+        uniform4f(prog, "defaultAttributes", 16,
+                  p.default_attributes[0].data());
       }
       ensure_plane(p.color);
       if (p.depth.width)
@@ -1014,81 +1116,91 @@ public:
         throw std::runtime_error("incomplete framebuffer");
       const auto &r = p.state;
       const unsigned enables = r[N::kRasterEnables];
-      glViewport(0, 0, p.color.width, p.color.height);
-      glEnable(GL_SCISSOR_TEST);
-      int x = r[N::kRasterSurfaceClipHorizontal] & 65535,
-          y = r[N::kRasterSurfaceClipVertical] & 65535;
-      int right = x + (r[N::kRasterSurfaceClipHorizontal] >> 16),
-          bottom = y + (r[N::kRasterSurfaceClipVertical] >> 16);
-      x = std::max(x, int(r[N::kRasterWindowClipHorizontal] & 4095));
-      y = std::max(y, int(r[N::kRasterWindowClipVertical] & 4095));
-      right = std::min(
-          right, int((r[N::kRasterWindowClipHorizontal] >> 16) & 4095) + 1);
-      bottom = std::min(
-          bottom, int((r[N::kRasterWindowClipVertical] >> 16) & 4095) + 1);
-      glScissor(x, y, std::max(0, right - x), std::max(0, bottom - y));
-      if (enables & 4) {
-        glEnable(GL_CULL_FACE);
-        glCullFace(r[N::kRasterCullFace]);
-      } else
-        glDisable(GL_CULL_FACE);
-      glFrontFace(r[N::kRasterFrontFace] == GL_CW ? GL_CCW : GL_CW);
-      if (enables & 2) {
-        glEnable(GL_BLEND);
-        glBlendFunc(r[N::kRasterBlendSrc], r[N::kRasterBlendDst]);
-        BlendEquation(r[N::kRasterBlendEquation]);
-        auto b = argb(r[N::kRasterBlendColor]);
-        BlendColor(b[0], b[1], b[2], b[3]);
-      } else
-        glDisable(GL_BLEND);
-      if (d && (enables & 8)) {
-        glEnable(GL_DEPTH_TEST);
-        glDepthFunc(r[N::kRasterDepthFunc]);
-      } else
-        glDisable(GL_DEPTH_TEST);
-      glDepthMask(d && r[N::kRasterDepthMask]);
-      if (d && (enables & 32)) {
-        glEnable(GL_STENCIL_TEST);
-        glStencilFunc(r[N::kRasterStencilFunc], r[N::kRasterStencilRef],
-                      r[N::kRasterStencilFuncMask]);
-        glStencilMask(r[N::kRasterStencilWriteMask]);
-        glStencilOp(r[N::kRasterStencilOpFail], r[N::kRasterStencilOpZFail],
-                    r[N::kRasterStencilOpZPass]);
-      } else
-        glDisable(GL_STENCIL_TEST);
-      if (enables & 64) {
-        glEnable(GL_COLOR_LOGIC_OP);
-        glLogicOp(r[N::kRasterLogicOp]);
-      } else
-        glDisable(GL_COLOR_LOGIC_OP);
+        int x = r[N::kRasterSurfaceClipHorizontal] & 65535,
+            y = r[N::kRasterSurfaceClipVertical] & 65535;
+        int right = x + (r[N::kRasterSurfaceClipHorizontal] >> 16),
+            bottom = y + (r[N::kRasterSurfaceClipVertical] >> 16);
+        x = std::max(x, int(r[N::kRasterWindowClipHorizontal] & 4095));
+        y = std::max(y, int(r[N::kRasterWindowClipVertical] & 4095));
+        right = std::min(
+            right, int((r[N::kRasterWindowClipHorizontal] >> 16) & 4095) + 1);
+        bottom = std::min(
+            bottom, int((r[N::kRasterWindowClipVertical] >> 16) & 4095) + 1);
       const unsigned mask = r[N::kRasterColorMask];
-      glColorMask((mask & 0x10000) != 0, (mask & 0x100) != 0, (mask & 1) != 0,
-                  (mask & 0x1000000) != 0);
-      Uniform4fv(uniform(prog, "c"), 192, p.constants[0].data());
-      Uniform4fv(uniform(prog, "ambientColor"), 1, p.ambient_color.data());
-      Uniform1i(uniform(prog, "ambientLighting"), p.ambient_lighting);
-      Uniform1i(uniform(prog, "specularAlphaFromVertex"),
-                p.specular_alpha_from_vertex);
-      Uniform2f(uniform(prog, "surfaceSize"), float(p.color.width),
+      if (!raster_valid_ || raster_width_ != p.color.width ||
+          raster_height_ != p.color.height || raster_depth_ != bool(d) ||
+          raster_cache_ != r) {
+        ++raster_updates_;
+        raster_valid_ = true;
+        raster_width_ = p.color.width;
+        raster_height_ = p.color.height;
+        raster_depth_ = bool(d);
+        raster_cache_ = r;
+        glViewport(0, 0, p.color.width, p.color.height);
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(x, y, std::max(0, right - x), std::max(0, bottom - y));
+        if (enables & 4) {
+          glEnable(GL_CULL_FACE);
+          glCullFace(r[N::kRasterCullFace]);
+        } else
+          glDisable(GL_CULL_FACE);
+        glFrontFace(r[N::kRasterFrontFace] == GL_CW ? GL_CCW : GL_CW);
+        if (enables & 2) {
+          glEnable(GL_BLEND);
+          glBlendFunc(r[N::kRasterBlendSrc], r[N::kRasterBlendDst]);
+          BlendEquation(r[N::kRasterBlendEquation]);
+          auto b = argb(r[N::kRasterBlendColor]);
+          BlendColor(b[0], b[1], b[2], b[3]);
+        } else
+          glDisable(GL_BLEND);
+        if (d && (enables & 8)) {
+          glEnable(GL_DEPTH_TEST);
+          glDepthFunc(r[N::kRasterDepthFunc]);
+        } else
+          glDisable(GL_DEPTH_TEST);
+        glDepthMask(d && r[N::kRasterDepthMask]);
+        if (d && (enables & 32)) {
+          glEnable(GL_STENCIL_TEST);
+          glStencilFunc(r[N::kRasterStencilFunc], r[N::kRasterStencilRef],
+                        r[N::kRasterStencilFuncMask]);
+          glStencilMask(r[N::kRasterStencilWriteMask]);
+          glStencilOp(r[N::kRasterStencilOpFail], r[N::kRasterStencilOpZFail],
+                      r[N::kRasterStencilOpZPass]);
+        } else
+          glDisable(GL_STENCIL_TEST);
+        if (enables & 64) {
+          glEnable(GL_COLOR_LOGIC_OP);
+          glLogicOp(r[N::kRasterLogicOp]);
+        } else
+          glDisable(GL_COLOR_LOGIC_OP);
+        glColorMask((mask & 0x10000) != 0, (mask & 0x100) != 0, (mask & 1) != 0,
+                    (mask & 0x1000000) != 0);
+      } else
+        ++raster_skips_;
+      uniform4f(prog, "c", 192, p.constants[0].data());
+      uniform4f(prog, "ambientColor", 1, p.ambient_color.data());
+      uniform1i(prog, "ambientLighting", p.ambient_lighting);
+      uniform1i(prog, "specularAlphaFromVertex", p.specular_alpha_from_vertex);
+      uniform2f(prog, "surfaceSize", float(p.color.width),
                 float(p.color.height));
       const float max_depth =
           ((p.color.format >> 4) & 15) == 1 ? 65535.f : 16777215.f;
       float range[4]{0, max_depth, as_float(r[N::kRasterClipMin]),
                      as_float(r[N::kRasterClipMax])};
-      Uniform4fv(uniform(prog, "clipRange"), 1, range);
-      Uniform2i(uniform(prog, "surfaceScale"), 1, 1);
+      uniform4f(prog, "clipRange", 1, range);
+      uniform2i(prog, "surfaceScale", 1, 1);
       int clip[32]{};
       for (unsigned i = 0; i < 8; ++i) {
         clip[i * 4 + 2] = p.color.width;
         clip[i * 4 + 3] = p.color.height;
       }
-      Uniform4iv(uniform(prog, "clipRegion"), 8, clip);
-      Uniform1i(uniform(prog, "alphaRef"), r[N::kRasterAlphaRef] & 255);
-      Uniform1f(uniform(prog, "depthOffset"),
+      uniform4i(prog, "clipRegion", 8, clip);
+      uniform1i(prog, "alphaRef", r[N::kRasterAlphaRef] & 255);
+      uniform1f(prog, "depthOffset",
                 (enables & (1u << 13))
                     ? as_float(r[N::kRasterPolygonOffsetBias])
                     : 0.f);
-      Uniform1f(uniform(prog, "depthFactor"),
+      uniform1f(prog, "depthFactor",
                 (enables & (1u << 13))
                     ? as_float(r[N::kRasterPolygonOffsetScale])
                     : 0.f);
@@ -1105,7 +1217,7 @@ public:
            b = argb(r[N::kRasterCombinerFinalFactor1]);
       std::memcpy(constants[16], a.data(), 16);
       std::memcpy(constants[17], b.data(), 16);
-      Uniform4fv(uniform(prog, "consts"), 18, constants[0]);
+      uniform4f(prog, "consts", 18, constants[0]);
       std::vector<GLuint> feedback;
       for (unsigned i = 0; i < 4; ++i) {
         const auto &t = p.textures[i];
@@ -1129,57 +1241,66 @@ public:
         }
         ActiveTexture(GL_TEXTURE0 + i);
         glBindTexture(target, id);
-        SamplerParameteri(samplers_[i], GL_TEXTURE_WRAP_S,
-                          wrap(t.address_mode & 15));
-        SamplerParameteri(samplers_[i], GL_TEXTURE_WRAP_T,
-                          wrap((t.address_mode >> 8) & 15));
-        if (t.cubemap || t.dimensions == 3)
-          SamplerParameteri(samplers_[i], GL_TEXTURE_WRAP_R,
-                            wrap((t.address_mode >> 16) & 15));
-        const unsigned min = (t.filter >> 16) & 255,
-                       mag = (t.filter >> 24) & 15;
-        GLint min_filter = GL_NEAREST;
-        switch (min) {
-        case 0:
-        case 1:
-          break;
-        case 2:
-          min_filter = GL_LINEAR;
-          break;
-        case 3:
-          min_filter = GL_NEAREST_MIPMAP_NEAREST;
-          break;
-        case 4:
-          min_filter = GL_LINEAR_MIPMAP_NEAREST;
-          break;
-        case 5:
-          min_filter = GL_NEAREST_MIPMAP_LINEAR;
-          break;
-        case 6:
-          min_filter = GL_LINEAR_MIPMAP_LINEAR;
-          break;
-        case 7:
-          min_filter = GL_LINEAR;
-          break;
-        default:
-          throw std::runtime_error("unsupported texture minification " +
-                                   std::to_string(min));
-        }
-        SamplerParameteri(samplers_[i], GL_TEXTURE_MIN_FILTER, min_filter);
-        SamplerParameteri(samplers_[i], GL_TEXTURE_MAG_FILTER,
-                          mag == 1 ? GL_NEAREST : GL_LINEAR);
+        const std::array<uint32_t, 5> sampler{t.address_mode, t.filter,
+                                              t.border, uint32_t(t.cubemap),
+                                              t.dimensions};
+        if (!sampler_valid_[i] || sampler_cache_[i] != sampler) {
+          sampler_valid_[i] = true;
+          sampler_cache_[i] = sampler;
+          ++sampler_updates_;
+          SamplerParameteri(samplers_[i], GL_TEXTURE_WRAP_S,
+                            wrap(t.address_mode & 15));
+          SamplerParameteri(samplers_[i], GL_TEXTURE_WRAP_T,
+                            wrap((t.address_mode >> 8) & 15));
+          if (t.cubemap || t.dimensions == 3)
+            SamplerParameteri(samplers_[i], GL_TEXTURE_WRAP_R,
+                              wrap((t.address_mode >> 16) & 15));
+          const unsigned min = (t.filter >> 16) & 255,
+                         mag = (t.filter >> 24) & 15;
+          GLint min_filter = GL_NEAREST;
+          switch (min) {
+          case 0:
+          case 1:
+            break;
+          case 2:
+            min_filter = GL_LINEAR;
+            break;
+          case 3:
+            min_filter = GL_NEAREST_MIPMAP_NEAREST;
+            break;
+          case 4:
+            min_filter = GL_LINEAR_MIPMAP_NEAREST;
+            break;
+          case 5:
+            min_filter = GL_NEAREST_MIPMAP_LINEAR;
+            break;
+          case 6:
+            min_filter = GL_LINEAR_MIPMAP_LINEAR;
+            break;
+          case 7:
+            min_filter = GL_LINEAR;
+            break;
+          default:
+            throw std::runtime_error("unsupported texture minification " +
+                                     std::to_string(min));
+          }
+          SamplerParameteri(samplers_[i], GL_TEXTURE_MIN_FILTER, min_filter);
+          SamplerParameteri(samplers_[i], GL_TEXTURE_MAG_FILTER,
+                            mag == 1 ? GL_NEAREST : GL_LINEAR);
+          auto border = argb(t.border);
+          SamplerParameterfv(samplers_[i], GL_TEXTURE_BORDER_COLOR,
+                             border.data());
+        } else
+          ++sampler_skips_;
         glTexParameteri(target, GL_TEXTURE_MAX_LEVEL, t.levels - 1);
         if (t.resident && (t.format == 0x30 || t.format == 0x2e)) {
           GLint swiz[4]{GL_RED, t.format == 0x2e ? GL_ONE : GL_ZERO, GL_ZERO,
                         GL_ZERO};
           glTexParameteriv(target, GL_TEXTURE_SWIZZLE_RGBA, swiz);
         }
-        auto border = argb(t.border);
-        SamplerParameterfv(samplers_[i], GL_TEXTURE_BORDER_COLOR,
-                           border.data());
         BindSampler(i, samplers_[i]);
-        Uniform1i(uniform(prog, "texSamp" + std::to_string(i)), i);
-        Uniform1f(uniform(prog, "texScale[" + std::to_string(i) + "]"), 1.f);
+        uniform1i(prog, "texSamp" + std::to_string(i), i);
+        uniform1f(prog, "texScale[" + std::to_string(i) + "]", 1.f);
       }
       ActiveTexture(GL_TEXTURE0);
       std::vector<uint32_t> indices;
