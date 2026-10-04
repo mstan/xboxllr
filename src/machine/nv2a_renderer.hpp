@@ -574,6 +574,16 @@ public:
         return false;
     }
 #endif
+    // Present an already-resident scanout without returning it to guest RAM.
+    // False with an empty error means non-resident: upload actual guest bytes.
+    // The host window is opaque so the LLE/device interface stays SDL-free.
+    virtual bool present_resident_scanout(void*, uint32_t, uint32_t, uint32_t,
+                                          uint32_t, uint32_t, bool, std::string& error,
+                                          std::vector<uint8_t>* witness = nullptr) {
+        (void)witness;
+        error.clear();
+        return false;
+    }
     virtual bool submit_hle_draw(const Nv2aHleDraw&, std::string& error) {
         error = "This renderer does not implement the complete HLE draw interface";
         return false;

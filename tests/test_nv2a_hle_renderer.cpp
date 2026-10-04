@@ -2,6 +2,7 @@
 #include "machine/nv2a.hpp"
 #include "machine/nv2a_hle_draw.hpp"
 #include <cstdio>
+#include <SDL3/SDL.h>
 #include <cstring>
 #include <stdexcept>
 using namespace xlle;
@@ -166,6 +167,33 @@ int main() {
     if (!r->resolve_resident_color_surface(0x300000, 1024, out, error))
       throw std::runtime_error(error);
     require(out.data.empty(), "freed allocation wrote stale GPU data");
+    // Real window-buffer output, with SDL's GL upload renderer sharing the
+    // destination window. Check orientation and refusal of a missing surface.
+    SDL_Window *window =
+        SDL_CreateWindow("native scanout contract", 32, 32,
+                         SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN);
+    require(window != nullptr, SDL_GetError());
+    SDL_Renderer *shell = SDL_CreateRenderer(window, "opengl");
+    require(shell != nullptr, SDL_GetError());
+    require(r->submit_hle_draw(opaque, error), error);
+    std::vector<uint8_t> witness;
+    require(r->present_resident_scanout(window, 0x300000, 64, 16, 16, 32, false,
+                                        error, &witness),
+            error);
+    int w = 0, h = 0;
+    require(SDL_GetWindowSizeInPixels(window, &w, &h), SDL_GetError());
+    require(witness.size() == size_t(w) * h * 4, "window witness dimensions");
+    const size_t top = (size_t(h - 1 - h / 4) * w + w / 4) * 4;
+    const size_t bottom = (size_t(h - 1 - 7 * h / 8) * w + w / 4) * 4;
+    require(witness[top] == 255 && witness[top + 1] == 0 &&
+                witness[bottom] == 0,
+            "resident presentation missing or vertically inverted");
+    require(!r->present_resident_scanout(window, 0x700000, 64, 16, 16, 32,
+                                         false, error) &&
+                error.empty(),
+            "nonresident scanout claimed a successful present");
+    SDL_DestroyRenderer(shell);
+    SDL_DestroyWindow(window);
     p.state[N::kRasterShaderStageProgram] =
         8; // unsupported mode, no fake success
     require(!r->submit_hle_draw(p, error),

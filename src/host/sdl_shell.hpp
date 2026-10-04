@@ -33,6 +33,7 @@ enum class PresentFormat { kUnknown = 0, kXrgb8888, kRgb565, kXrgb1555, kRgba32 
 // exports the count, including pacing and reporting reads.
 struct PresentStats {
     uint64_t clock_reads = 0;
+    uint64_t resident_presents = 0;
 
     // Input service, once per guest millisecond through XboxMachine's host poll.
     uint64_t input_polls = 0;
@@ -81,7 +82,9 @@ public:
     SdlKeyboardInput(const SdlKeyboardInput&) = delete;
     SdlKeyboardInput& operator=(const SdlKeyboardInput&) = delete;
 
-    bool open(const char* title);
+    bool open(const char* title, bool native_gpu_window = false);
+    void* native_window() const;
+    void note_resident_present(uint64_t start_ns);
     uint64_t now_ns();  // counted host clock read; never fed into guest state
     // `legacy_throttle_ms` restores the pre-beads-xbox.1.15.8 wall-clock present
     // throttle on the SAME binary (arm A of the interactive A/B). 0 -- the default --

@@ -3593,7 +3593,7 @@ int main(int argc, char** argv) {
             // Keep this opt-in SDL input window alive for the whole emulation run instead.
             SdlKeyboardInput host_input;
             if (interactive) {
-                if (!host_input.open("xboxlle input — arrows=D-pad, Z=A, X=B, Enter=Start, Backspace=Back"))
+                if (!host_input.open("xboxlle input — arrows=D-pad, Z=A, X=B, Enter=Start, Backspace=Back", XLLE_RENDERER_HLE))
                     return 1;
                 host_input.set_legacy_throttle_ms(
                     interactive_present_legacy ? interactive_legacy_throttle_ms : 0);
@@ -4940,7 +4940,22 @@ int main(int argc, char** argv) {
                         if (mach.nv2a() && host_input.frame_due(mach.nv2a()->vblanks())) {
                             const uint64_t cap_t0 = host_input.now_ns();
                             bool presented = false;
-                            if (!interactive_present_legacy) {
+#if XLLE_RENDERER_HLE
+                            live_scanout = mach.nv2a()->scanout_info();
+                            live_scanout_error.clear();
+                            if (nv2a_renderer) {
+                                presented = nv2a_renderer->present_resident_scanout(
+                                    host_input.native_window(), live_scanout.start, live_scanout.pitch,
+                                    live_scanout.width, live_scanout.height, live_scanout.bits_per_pixel,
+                                    live_scanout.rgb565, live_scanout_error);
+                                if (presented) host_input.note_resident_present(cap_t0);
+                                else if (!live_scanout_error.empty()) {
+                                    mach.cpu().request_stop("HLE presentation: " + live_scanout_error);
+                                    return;
+                                }
+                            }
+#endif
+                            if (!presented && !interactive_present_legacy) {
                                 // Zero copy, zero conversion: the guest's own bytes go
                                 // straight into the SDL texture in the guest's own
                                 // format (little-endian A8R8G8B8 == SDL BGRX32).
