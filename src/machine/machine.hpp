@@ -293,6 +293,10 @@ public:
 private:
     void install_hle_allocation_observers();
     bool hle_allocation_observers_installed_ = false;
+#if XLLE_MATRIX_HLE
+    void install_hle_matrix();
+    bool hle_matrix_installed_ = false;
+#endif
 #if XLLE_XDK_DRAW_SPIKE
     void install_hle_xdk_draw();
     bool hle_xdk_draw_installed_ = false;
