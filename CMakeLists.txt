@@ -181,6 +181,15 @@ add_library(xlle_host STATIC src/host/sdl_shell.cpp src/host/xid_input.cpp
 if(XLLE_RENDERER STREQUAL "HLE")
   target_sources(xlle_machine PRIVATE src/machine/nv2a_hle.cpp)
   target_sources(xlle_machine PRIVATE src/machine/hle_allocation_observers.cpp)
+  set(XLLE_XDK_DRAW_PROFILE "" CACHE FILEPATH "Private byte-pinned native XDK draw ABI header")
+  if(XLLE_XDK_DRAW_PROFILE)
+    if(NOT EXISTS "${XLLE_XDK_DRAW_PROFILE}")
+      message(FATAL_ERROR "Private XDK profile header does not exist")
+    endif()
+    target_sources(xlle_machine PRIVATE src/machine/hle_xdk_draw.cpp)
+    target_compile_definitions(xlle_machine PUBLIC XLLE_XDK_DRAW_SPIKE=1)
+    target_compile_definitions(xlle_machine PRIVATE XLLE_XDK_DRAW_PROFILE_HEADER="${XLLE_XDK_DRAW_PROFILE}")
+  endif()
   target_sources(xlle_host PRIVATE src/host/nv2a_hle_renderer.cpp
     src/third_party/xemu/vsh-prog.c src/third_party/xemu/hle_psh.c src/third_party/xemu/swizzle.c
     src/third_party/norain/d3d_texture_model.c)

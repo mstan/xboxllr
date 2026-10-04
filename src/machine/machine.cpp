@@ -636,6 +636,9 @@ uint64_t XboxMachine::run(uint32_t start, uint64_t max, std::string& err) {
 #if XLLE_RENDERER_HLE
         if (!hle_allocation_observers_installed_)
             install_hle_allocation_observers();
+#if XLLE_XDK_DRAW_SPIKE
+        if (!hle_xdk_draw_installed_) install_hle_xdk_draw();
+#endif
 #endif
         // ONE exclusive region per slice for the whole loop body (beads-xbox.1.14.3).
         // TCG_EXEC is opened inside cpu_->run(), which stops this clock and resumes it on

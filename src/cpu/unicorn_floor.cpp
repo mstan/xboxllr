@@ -277,6 +277,12 @@ bool UnicornFloor::observe_entry(uint32_t address, std::function<void()> callbac
     return true;
 }
 
+void UnicornFloor::redirect_native_service(const X86Regs& regs) {
+    set_regs(regs);
+    native_service_redirect_ = true;
+    uc_emu_stop(reinterpret_cast<uc_engine*>(uc_));
+}
+
 void UnicornFloor::notify_entry(uint32_t pc) {
     for (const auto& entry : entry_observers_) if (entry->address == pc) {
         try { entry->callback(); }
@@ -689,6 +695,7 @@ uint64_t UnicornFloor::run_unicorn(uint32_t start_eip, uint64_t max_insns, std::
     uc_err e;
     do {
         deadline_tail_ = 0;
+        native_service_redirect_ = false;
         // TCG_EXEC: the SELF time of this region is translated code, Unicorn's internals
         // and the block (or, on the instruction path, UC_HOOK_CODE) trampoline. Everything
         // the guest reaches synchronously from inside uc_emu_start -- MMIO, I/O ports, IDT
@@ -711,6 +718,11 @@ uint64_t UnicornFloor::run_unicorn(uint32_t start_eip, uint64_t max_insns, std::
             e = uc_emu_start(uc, start_eip, 0, /*timeout=*/0, /*count=*/0);
         } else {
             e = uc_emu_start(uc, start_eip, 0, /*timeout=*/0, /*count=*/0);
+        }
+        if (e == UC_ERR_OK && stop_reason_.empty() && native_service_redirect_) {
+            start_eip = get_regs().eip;
+            native_service_redirect_ = false;
+            if (seq_ < run_deadline_) continue;
         }
         if (e != UC_ERR_OK || !stop_reason_.empty() || !deadline_tail_) break;
         if (!xlle_unicorn_limit_next_tb(uc_, deadline_tail_)) {
@@ -796,7 +808,7 @@ void UnicornFloor::code_trampoline(uc_struct* uc, uint64_t addr, uint32_t size, 
     }
     if (addr >= self->entry_observer_min_ && addr <= self->entry_observer_max_) {
         self->notify_entry(static_cast<uint32_t>(addr));
-        if (!self->stop_reason_.empty()) return;
+        if (!self->stop_reason_.empty() || self->native_service_redirect_) return;
     }
     xlle_guest_tsc_ticks = self->seq_;
     RetiredInsn ev{self->seq_++, static_cast<uint32_t>(addr), size};
@@ -910,7 +922,7 @@ void UnicornFloor::block_trampoline(uc_struct* uc, uint64_t addr, uint32_t size,
 
     if (pc >= self->entry_observer_min_ && pc <= self->entry_observer_max_) {
         self->notify_entry(pc);
-        if (!self->stop_reason_.empty()) return;
+        if (!self->stop_reason_.empty() || self->native_service_redirect_) return;
     }
 
     // Publish the guest time-stamp counter as of this block's first instruction. The
