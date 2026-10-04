@@ -65,6 +65,9 @@ public:
     // Observe a real guest function entry; the original function still runs.
     // Used by the HLE renderer to retire resources at allocator boundaries.
     bool observe_entry(uint32_t address, std::function<void()> callback);
+    // A build-selected native service may complete work at an observed boundary
+    // and resume guest code elsewhere. No skipped instructions are reported as AOT.
+    void redirect_native_service(const X86Regs& regs);
     void set_aot_profile(uint32_t profile);
     // Configure after registration, between runs; false retains the public API.
     void set_aot_bulk_registers(bool enabled);
@@ -129,6 +132,7 @@ private:
     bool aot_handoff_ = false;
     uint64_t aot_fallback_start_ = 0;
     bool restore_charge_active_ = false;
+    bool native_service_redirect_ = false;
     static void restore_clock(void*, const xlle_unicorn_restore_record*);
     // C-ABI trampolines Unicorn calls; they recover `this` from user_data.
     static void code_trampoline(uc_struct*, uint64_t addr, uint32_t size, void* user);

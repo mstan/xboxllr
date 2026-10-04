@@ -491,10 +491,31 @@ static void connected_regions(bool observe, bool modify) {
                  "connected native execution actually retained state across regions");
 }
 
+static void native_service_redirect() {
+    XboxMachine m;
+    prepare(m, xlle_aot_loop);
+    require(m.register_aot_region(xlle_aot_loop), "native service region");
+    auto& cpu = static_cast<UnicornFloor&>(m.cpu());
+    unsigned calls = 0;
+    require(cpu.observe_entry(0x1000, [&] {
+        auto regs = cpu.get_regs();
+        regs.eax += 7;
+        regs.eip = 0x1001; // retain the real loop branch; replace INC with native work
+        ++calls;
+        cpu.redirect_native_service(regs);
+    }), "native service entry");
+    run_exact(m, 0xf00, 101);
+    require(calls == 100 && cpu.get_regs().eax == 700 && cpu.get_regs().eip == 0x1000,
+            "native service resumes without executing the replaced block");
+    require(m.aot_stats().retired == 0 && m.total_insns() == 101,
+            "native service work is not fabricated AOT retirement");
+}
+
 int main() {
     connected_regions(false, false);
     connected_regions(true, false);
     connected_regions(true, true);
+    native_service_redirect();
     observed_entry();
     loop(false);
     loop(true);
