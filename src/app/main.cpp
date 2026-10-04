@@ -3741,7 +3741,7 @@ int main(int argc, char** argv) {
                 std::printf("[aot] scope=%s deadline=%llu total_insns=%llu native_insns=%llu "
                     "fallback_insns=%llu idle_insns=%llu attempts=%llu invocations=%llu "
                     "fallback_runs=%llu handoffs=%llu context_declines=%llu code_tlb_declines=%llu "
-                    "memory_reads=%llu memory_writes=%llu memory_declines=%llu\n",
+                    "memory_reads=%llu memory_writes=%llu memory_declines=%llu chained_entries=%llu\n",
                     scope, deadline, (unsigned long long)delta(mach.total_insns(), aot_total_prev),
                     aot_delta(&AotExecutionStats::retired),
                     (unsigned long long)delta(bs.tb_insns, bsw.tb_insns),
@@ -3750,7 +3750,7 @@ int main(int argc, char** argv) {
                     aot_delta(&AotExecutionStats::fallback_runs), aot_delta(&AotExecutionStats::handoffs),
                     aot_delta(&AotExecutionStats::context_declines), aot_delta(&AotExecutionStats::code_tlb_declines),
                     aot_delta(&AotExecutionStats::memory_reads), aot_delta(&AotExecutionStats::memory_writes),
-                    aot_delta(&AotExecutionStats::memory_declines));
+                    aot_delta(&AotExecutionStats::memory_declines), aot_delta(&AotExecutionStats::chained_entries));
                 const auto aot_regions_now = mach.aot_region_stats();
                 aot_regions_prev.resize(aot_regions_now.size());
                 for (size_t i = 0; i < aot_regions_now.size(); ++i) {

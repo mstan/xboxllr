@@ -468,7 +468,33 @@ static void observed_entry() {
     require(machine.aot_stats().retired == 0, "observed entry cannot be bypassed by AOT");
 }
 
+static void connected_regions(bool observe, bool modify) {
+    XboxMachine m;
+    prepare(m, xlle_aot_chain_a);
+    require(m.cpu().write_mem(0x1100, xlle_aot_chain_b.code, xlle_aot_chain_b.code_size), "chain B code");
+    require(m.register_aot_region(xlle_aot_chain_a) && m.register_aot_region(xlle_aot_chain_b), "chain regions");
+    unsigned seen = 0;
+    if (observe) {
+        auto& cpu = static_cast<UnicornFloor&>(m.cpu());
+        require(cpu.observe_entry(0x1100, [&] {
+            if (++seen == 1 && modify) {
+                const uint8_t dec_eax = 0x48;
+                require(cpu.write_mem(0x1000, &dec_eax, 1), "modify chained code");
+            }
+        }), "chain observation");
+    }
+    run_exact(m, 0xf00, 201);
+    require(m.cpu().get_regs().eax == (modify ? 2u : 100u) && m.cpu().get_regs().eip == 0x1000,
+            "connected native regions preserve register and code-write effects");
+    if (observe) require(seen == 50 && m.aot_stats().chained_entries == 0, "chain cannot bypass observer");
+    else require(m.aot_stats().chained_entries >= 90 && m.aot_stats().retired == 200,
+                 "connected native execution actually retained state across regions");
+}
+
 int main() {
+    connected_regions(false, false);
+    connected_regions(true, false);
+    connected_regions(true, true);
     observed_entry();
     loop(false);
     loop(true);
