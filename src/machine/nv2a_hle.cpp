@@ -2,8 +2,19 @@
 #include "machine/nv2a_hle_draw.hpp"
 #include <algorithm>
 #include <cstring>
+#include <stdexcept>
 
 namespace xlle {
+void Nv2a::queue_hle_indexed_draw(uint32_t address, uint32_t primitive,
+                                 std::vector<uint16_t> indices) {
+  if (address >= 64u * 1024 * 1024 || (address & 3) || !primitive ||
+      primitive > 10 || indices.size() > (1u << 24))
+    throw std::runtime_error("native indexed submission: invalid descriptor");
+  if (!hle_indexed_draws_.emplace(address, HleIndexedDraw{primitive, std::move(indices)}).second)
+    throw std::runtime_error("native indexed submission: pending ring address reused");
+  ++hle_indexed_queued_;
+}
+
 bool Nv2a::submit_hle_vertex_batch() {
   auto fail = [&](const std::string &why) {
     fault_(("HLE renderer: " + why).c_str());

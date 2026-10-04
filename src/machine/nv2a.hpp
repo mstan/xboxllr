@@ -105,6 +105,14 @@ public:
     ~Nv2a() override;
 
     void set_renderer(Nv2aRenderer* renderer) { renderer_ = renderer; }
+#if XLLE_RENDERER_HLE
+    // Owned native payload, retired only at its ordered BEGIN command. The
+    // address is physical RAM, so ring wrap/reuse cannot alias a pending job.
+    void queue_hle_indexed_draw(uint32_t parameter_address, uint32_t primitive,
+                                std::vector<uint16_t> indices);
+    uint64_t hle_indexed_consumed() const { return hle_indexed_consumed_; }
+    size_t hle_indexed_pending() const { return hle_indexed_draws_.size(); }
+#endif
 #if XLLE_VSH_GPU_RESIDENT
     void set_vsh_gpu_resident_mode(uint32_t mode) { vsh_gpu_resident_mode_ = mode; }
     Nv2aRenderer::VshGpuResidentStats vsh_gpu_resident_stats() const {
@@ -271,6 +279,9 @@ public:
         // Snapshot when PFIFO decoded this parameter, before deferred PGRAPH dispatch.
         uint32_t parser_get = 0;
         uint32_t parser_put = 0;
+#if XLLE_RENDERER_HLE
+        uint32_t parameter_physical = UINT32_MAX;
+#endif
     };
     uint64_t push_methods() const { return methods_.total(); }
     uint64_t method_count(uint32_t method) const {
@@ -2459,6 +2470,11 @@ private:
     // +0x44 DMA_GET). The channel state below is the synchronous pusher/recorder state.
     std::unordered_map<uint32_t, uint32_t> user_regs_;
     std::unordered_map<uint32_t, uint32_t> pfifo_regs_;
+#if XLLE_RENDERER_HLE
+    struct HleIndexedDraw { uint32_t primitive; std::vector<uint16_t> indices; };
+    std::unordered_map<uint32_t, HleIndexedDraw> hle_indexed_draws_;
+    uint64_t hle_indexed_queued_ = 0, hle_indexed_consumed_ = 0;
+#endif
     int pb_logged_ = 0;
 
     struct ChannelState {

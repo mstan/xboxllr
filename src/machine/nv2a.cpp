@@ -2774,6 +2774,12 @@ std::vector<vsh_capture::Op> Nv2a::capture_vsh_ops() const {
 #endif
 
 Nv2a::~Nv2a() {
+#if XLLE_RENDERER_HLE
+    if (hle_indexed_queued_)
+        std::printf("[hle-indexed] queued=%llu consumed=%llu pending=%zu\n",
+                    (unsigned long long)hle_indexed_queued_,
+                    (unsigned long long)hle_indexed_consumed_, hle_indexed_draws_.size());
+#endif
     // Worker lifetime is tied to the device. Stop it and JOIN before any member
     // it reads -- the slot ring, the job vectors, the direct pointers into guest
     // RAM -- is destroyed. The worker finishes whatever is already published
@@ -16830,6 +16836,18 @@ void Nv2a::dispatch_method(PushMethod push) {
             inline_array_words_.clear();
             inline_vertices_.clear();
             immediate_vertices_.clear();
+#if XLLE_RENDERER_HLE
+            const auto native = hle_indexed_draws_.find(push.parameter_physical);
+            if (native != hle_indexed_draws_.end()) {
+                if (native->second.primitive != parameter) {
+                    fault_("native indexed submission: BEGIN was modified before consumption");
+                    return;
+                }
+                vertex_indices_.assign(native->second.indices.begin(), native->second.indices.end());
+                hle_indexed_draws_.erase(native);
+                ++hle_indexed_consumed_;
+            }
+#endif
         }
         break;
     }
@@ -17238,6 +17256,9 @@ uint32_t Nv2a::drain_method_run(ChannelState& ch, uint8_t channel, uint32_t max_
         push.parameter = word;
         push.parser_get = ch.get;
         push.parser_put = ch.put;
+#if XLLE_RENDERER_HLE
+        push.parameter_physical = first + 4u * (consumed - 1u);
+#endif
         if (!ch.non_incrementing) ch.method += 4;
         --ch.method_count;
         perf::record_pfifo_queue_push();
@@ -17375,7 +17396,11 @@ void Nv2a::process_pushbuffer(uint8_t channel) {
         if (ch.method_count) {
             pull_queue_.push_back(PushMethod{
                 0, channel, ch.subchannel, 0,
-                static_cast<uint16_t>(ch.method), word, ch.get, ch.put});
+                static_cast<uint16_t>(ch.method), word, ch.get, ch.put
+#if XLLE_RENDERER_HLE
+                , fetch
+#endif
+            });
             perf::record_pfifo_queue_push();
             if (!ch.non_incrementing) ch.method += 4;
             --ch.method_count;

@@ -45,6 +45,7 @@ struct Draw {
   std::vector<uint16_t> indices;
 };
 struct NativeDraws {
+  Nv2a *gpu = nullptr;
   std::map<uint32_t, Draw> frames;
   uint64_t calls = 0, indices = 0, refills = 0;
   ~NativeDraws() {
@@ -57,6 +58,36 @@ struct NativeDraws {
     auto regs = cpu.get_regs();
     if (!regs.ebp || regs.esp != regs.ebp - 16 || (regs.eflags & 0x400))
       throw std::runtime_error("native XDK: unexpected prepared call frame");
+#if XLLE_XDK_DIRECT_DRAW
+    const auto device = read(cpu, P::device);
+    const auto primitive = read(cpu, regs.ebp + 8);
+    const auto count = read(cpu, regs.ebp + 12);
+    const auto data = read(cpu, regs.ebp + 16);
+    const auto cursor = regs.eax;
+    if (device != read(cpu, regs.ebp - 8) || !primitive || primitive > 10 ||
+        count > (1u << 24))
+      throw std::runtime_error("native XDK: invalid indexed call");
+    if (uint64_t(cursor) + 16 > uint64_t(read(cpu, device + 4)) + 0x200)
+      throw std::runtime_error(
+          "native XDK: prepared ring has no command space");
+    std::vector<uint16_t> owned(count);
+    transfer(cpu, data, owned.data(), owned.size() * 2, false);
+    uint32_t parameter_address;
+    if (!cpu.translate(cursor + 4, parameter_address))
+      throw std::runtime_error("native XDK: unmapped submission address");
+    gpu->queue_hle_indexed_draw(parameter_address, primitive, std::move(owned));
+    write(cpu, cursor, 0x417fc);
+    write(cpu, cursor + 4, primitive);
+    write(cpu, cursor + 8, 0x417fc);
+    write(cpu, cursor + 12, 0);
+    regs.ecx = device;
+    regs.ebx = cursor + 8;
+    regs.eip = P::cleanup;
+    ++calls;
+    indices += count;
+    cpu.redirect_native_service(regs);
+    return;
+#else
     auto it = frames.find(regs.ebp);
     uint32_t cursor = regs.eax;
     if (it == frames.end()) {
@@ -122,6 +153,7 @@ struct NativeDraws {
     regs.eip = P::cleanup;
     frames.erase(it);
     cpu.redirect_native_service(regs);
+#endif
   }
 };
 } // namespace
@@ -139,6 +171,7 @@ void XboxMachine::install_hle_xdk_draw() {
   if (std::memcmp(code.data(), P::code, code.size()))
     return;
   auto native = std::make_shared<NativeDraws>();
+  native->gpu = nv2a();
   if (!cpu.observe_entry(P::prepared, [native, &cpu] { native->resume(cpu); }))
     throw std::runtime_error("native XDK: cannot install draw boundary");
   hle_xdk_draw_installed_ = true;
