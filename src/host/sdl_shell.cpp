@@ -3,6 +3,7 @@
 #include "host/xid_input.hpp"
 
 #include <chrono>
+#include <algorithm>
 #include <cstdio>
 
 namespace xlle {
@@ -49,7 +50,7 @@ void format_present_line(char* out, size_t out_size, const char* label, uint64_t
         "zero_copy=%llu converted=%llu capture_MB=%.1f input_polls=%llu "
         "input_poll_hz=%.1f input_us_avg=%.2f frame_checks=%llu skip_same_frame=%llu "
         "skip_refresh_cap=%llu skip_legacy_throttle=%llu present_fail=%llu "
-        "refresh_hz=%.2f refresh_cap_ms=%.2f vsync=%d clock_reads=%llu",
+        "refresh_hz=%.2f refresh_cap_ms=%.2f vsync=%d clock_reads=%llu resident_presents=%llu",
         label, static_cast<double>(wall_ns) / 1e6, (unsigned long long)presents,
         per_second(presents, wall_ns), (unsigned long long)guest_vblanks,
         per_second(guest_vblanks, wall_ns), (unsigned long long)guest_flips,
@@ -72,7 +73,8 @@ void format_present_line(char* out, size_t out_size, const char* label, uint64_t
         (unsigned long long)(now.present_failures - prev.present_failures),
         static_cast<double>(now.display_refresh_hz),
         static_cast<double>(now.refresh_cap_ns) / 1e6, now.vsync,
-        (unsigned long long)(now.clock_reads - prev.clock_reads));
+        (unsigned long long)(now.clock_reads - prev.clock_reads),
+        (unsigned long long)(now.resident_presents - prev.resident_presents));
 }
 }  // namespace xlle
 
@@ -119,7 +121,7 @@ public:
 SdlKeyboardInput::SdlKeyboardInput() : impl_(std::make_unique<Impl>()) {}
 SdlKeyboardInput::~SdlKeyboardInput() { close(); }
 
-bool SdlKeyboardInput::open(const char* title) {
+bool SdlKeyboardInput::open(const char* title, bool native_gpu_window) {
     if (impl_->window) return true;
     impl_->owns_video = (SDL_WasInit(SDL_INIT_VIDEO) & SDL_INIT_VIDEO) == 0;
     if (impl_->owns_video && !SDL_InitSubSystem(SDL_INIT_VIDEO)) {
@@ -127,8 +129,12 @@ bool SdlKeyboardInput::open(const char* title) {
         impl_->owns_video = false;
         return false;
     }
-    impl_->window = SDL_CreateWindow(title, 640, 480, SDL_WINDOW_RESIZABLE);
-    impl_->renderer = impl_->window ? SDL_CreateRenderer(impl_->window, nullptr) : nullptr;
+    // The native renderer may bind its GL context to this window. SDL's GL
+    // renderer remains the real upload path for CPU-produced startup frames.
+    impl_->window = SDL_CreateWindow(title, 640, 480, SDL_WINDOW_RESIZABLE |
+                                    (native_gpu_window ? SDL_WINDOW_OPENGL : 0));
+    impl_->renderer = impl_->window ? SDL_CreateRenderer(impl_->window,
+                                    native_gpu_window ? "opengl" : nullptr) : nullptr;
     if (!impl_->window || !impl_->renderer) {
         std::fprintf(stderr, "[input] SDL window/renderer failed: %s\n", SDL_GetError());
         if (impl_->renderer) SDL_DestroyRenderer(impl_->renderer);
@@ -300,6 +306,20 @@ bool SdlKeyboardInput::present_pixels(const void* pixels, PresentFormat format, 
     return true;
 }
 
+void* SdlKeyboardInput::native_window() const { return impl_->window; }
+void SdlKeyboardInput::note_resident_present(uint64_t start_ns) {
+    const uint64_t now = now_ns();
+    ++impl_->stats.presents;
+    ++impl_->stats.resident_presents;
+    impl_->last_present_ns = now;
+    if (now > start_ns) {
+        const uint64_t elapsed = now - start_ns;
+        impl_->stats.latency_ns += elapsed;
+        impl_->stats.draw_ns += elapsed;
+        impl_->stats.latency_max_ns = std::max(impl_->stats.latency_max_ns, elapsed);
+    }
+}
+
 bool SdlKeyboardInput::present_rgba(const uint8_t* rgba, int width, int height, size_t pitch,
                                     uint64_t capture_start_ns) {
     return present_pixels(rgba, PresentFormat::kRgba32, width, height, pitch,
@@ -427,7 +447,7 @@ public:
 };
 SdlKeyboardInput::SdlKeyboardInput() : impl_(std::make_unique<Impl>()) {}
 SdlKeyboardInput::~SdlKeyboardInput() = default;
-bool SdlKeyboardInput::open(const char*) {
+bool SdlKeyboardInput::open(const char*, bool) {
     std::fprintf(stderr, "[input] built without SDL (XLLE_WITH_SDL off)\n");
     return false;
 }
@@ -436,6 +456,8 @@ uint64_t SdlKeyboardInput::now_ns() {
     ++impl_->stats.clock_reads;
     return present_now_ns();
 }
+void* SdlKeyboardInput::native_window() const { return nullptr; }
+void SdlKeyboardInput::note_resident_present(uint64_t) {}
 void SdlKeyboardInput::poll() {}
 bool SdlKeyboardInput::frame_due(uint64_t) { return false; }
 bool SdlKeyboardInput::present_pixels(const void*, PresentFormat, int, int, size_t, uint64_t) {

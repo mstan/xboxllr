@@ -104,6 +104,9 @@ class HleRenderer final : public Nv2aRenderer {
 #define DECL(type, name) type name = nullptr;
   HLE_GL_PROCS(DECL)
 #undef DECL
+  PFNGLBLITFRAMEBUFFERPROC BlitFramebuffer = nullptr;
+  SDL_Window *present_window_ = nullptr;
+  uint64_t resident_presents_ = 0;
   GLuint vao_ = 0, vbo_ = 0, ibo_ = 0, fbo_ = 0;
   GLuint samplers_[4]{};
   struct Plane {
@@ -666,6 +669,7 @@ public:
       SDL_DestroyWindow(window_);
     if (owns_video_)
       SDL_QuitSubSystem(SDL_INIT_VIDEO);
+    std::printf("[hle-present] resident-presents=%llu\n", (unsigned long long)resident_presents_);
     std::printf("[hle-renderer] draws=%llu vertices=%llu shaders=%zu "
                 "uploads=%llu resolves=%llu resident-texture-samples=%llu\n",
                 (unsigned long long)draws_, (unsigned long long)vertices_,
@@ -704,6 +708,7 @@ public:
     return false;                                                              \
   }
     HLE_GL_PROCS(LOAD)
+    LOAD(PFNGLBLITFRAMEBUFFERPROC, BlitFramebuffer)
 #undef LOAD
     GenVertexArrays(1, &vao_);
     GenBuffers(1, &vbo_);
@@ -872,6 +877,116 @@ public:
       error = e.what();
       return false;
     }
+  }
+  bool present_resident_scanout(void *native_window, uint32_t address,
+                                uint32_t pitch, uint32_t width, uint32_t height,
+                                uint32_t bpp, bool rgb565, std::string &error,
+                                std::vector<uint8_t> *witness) override {
+    error.clear();
+    auto *window = static_cast<SDL_Window *>(native_window);
+    if (!window || !width || !height || width > 8192 || height > 8192)
+      return false;
+    Plane *source = nullptr;
+    for (auto &p : planes_) {
+      if (!p.valid || !p.dirty || p.desc.depth || p.desc.address != address ||
+          p.desc.pitch != pitch || p.desc.width < width ||
+          p.desc.height < height)
+        continue;
+      const auto format = surface_gl(p.desc);
+      if (format.bpp * 8 != bpp ||
+          (bpp == 16 && ((p.desc.format & 15) == 3) != rgb565))
+        continue;
+      source = &p;
+      break;
+    }
+    if (!source)
+      return false;
+    auto *old_window = SDL_GL_GetCurrentWindow();
+    auto old_context = SDL_GL_GetCurrentContext();
+    struct Restore {
+      SDL_Window *window;
+      SDL_GLContext context;
+      ~Restore() {
+        if (context)
+          SDL_GL_MakeCurrent(window, context);
+      }
+    } restore{old_window, old_context};
+    if (!SDL_GL_MakeCurrent(window, context_)) {
+      error = SDL_GetError();
+      return false;
+    }
+    if (present_window_ != window) {
+      if (!SDL_GL_SetSwapInterval(0)) {
+        error = SDL_GetError();
+        return false;
+      }
+      present_window_ = window;
+    }
+    int output_width = 0, output_height = 0;
+    if (!SDL_GetWindowSizeInPixels(window, &output_width, &output_height)) {
+      error = SDL_GetError();
+      return false;
+    }
+    BindFramebuffer(GL_READ_FRAMEBUFFER, fbo_);
+    FramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                         GL_TEXTURE_2D, source->texture, 0);
+    FramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+                         GL_TEXTURE_2D, 0, 0);
+    FramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                         GL_TEXTURE_2D, 0, 0);
+    glReadBuffer(GL_COLOR_ATTACHMENT0);
+    if (CheckFramebufferStatus(GL_READ_FRAMEBUFFER) !=
+        GL_FRAMEBUFFER_COMPLETE) {
+      error = "scanout source framebuffer incomplete";
+      return false;
+    }
+    BindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    glDrawBuffer(GL_BACK);
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_FRAMEBUFFER_SRGB);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glClearColor(0, 0, 0, 1);
+    glClear(GL_COLOR_BUFFER_BIT);
+    const double scale =
+        std::min(double(output_width) / width, double(output_height) / height);
+    const int w = int(width * scale), h = int(height * scale);
+    const int x = (output_width - w) / 2, y = (output_height - h) / 2;
+    // Guest row zero is GL texture row zero, but the window's top is at +Y.
+    BlitFramebuffer(0, 0, width, height, x, y + h, x + w, y,
+                    GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    const GLenum status = glGetError();
+    if (status != GL_NO_ERROR) {
+      error = "scanout GL error " + std::to_string(status);
+      return false;
+    }
+    if (witness) {
+      // Explicit diagnostic capture of the actual window backbuffer. Normal
+      // presentation never performs this readback or stalls to compare pixels.
+      BindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+      glReadBuffer(GL_BACK);
+      witness->resize(size_t(output_width) * output_height * 4);
+      glReadPixels(0, 0, output_width, output_height, GL_RGBA, GL_UNSIGNED_BYTE,
+                   witness->data());
+      if (glGetError() != GL_NO_ERROR) {
+        error = "window witness readback failed";
+        return false;
+      }
+    }
+    if (!SDL_GL_SwapWindow(window)) {
+      error = SDL_GetError();
+      return false;
+    }
+    // Keep the native context current between frames. SDL activates its own
+    // context when a CPU-produced frame actually needs its upload path;
+    // restoring it here would force two context switches for every subsequent
+    // guest draw.
+    if (!SDL_GL_MakeCurrent(window_, context_)) {
+      error = SDL_GetError();
+      return false;
+    }
+    restore.context = nullptr;
+    ++resident_presents_;
+    return true;
   }
   bool submit_hle_draw(const Nv2aHleDraw &p, std::string &error) override {
     try {
