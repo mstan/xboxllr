@@ -6,7 +6,36 @@ It is outside the normal xboxlle build. **The generated executable is a private
 GPL-dependent reference artifact, not the intended non-GPL shipping product.**
 See [license scope](../../LICENSE-SCOPE.md). There is no install/package target.
 
-## Current checkpoint - bounded visibility contract (2026-10-07)
+## Current checkpoint - ordered GPU callbacks (2026-10-07)
+
+`beads-xbox.1.64`: original NTSC Blinx now executes its WRITE callback through
+real GPU completion and advances to an unowned texture-header guard. The title
+copies `GetBackBuffer2(-1)` storage into its own texture header; shared surface
+aliases are the next resource family (`beads-xbox.1.65`). The observed callback
+is generated original title code, with its context intact. No title audio,
+movies, menu or attract completion has been reached.
+
+The bounded LLE floor implements WAIT_FOR_IDLE before WRITE callbacks and tests
+the PARAMETER_A/B, trap 6/7, IRQ acknowledgement and following-command ordering.
+Two complete original-x86 InsertCallback fast paths establish the packet/ABI
+shape; refill allocation is not part of that oracle. Native uses a dynamic FIFO,
+real D3D11 completion for WRITE and the existing serialized DPC worker. READ
+follows host consumption of prior work. Delivery needs neither Swap nor another
+graphics call; later caller graphics operations wait for pending callbacks.
+The bounded adapter allows callback graphics queries without holding its host
+lock. Poll latency is up to the 1 ms service interval plus host scheduling;
+exact interrupt latency and arbitrary DPC rendering are not qualified.
+
+All 30 CTests pass (13.04 s) and the NV2A regression passes. Native tests cover
+70 queued mixed READ/WRITE callbacks, actual prior red GPU pixels/completion,
+FIFO contexts, asynchronous delivery while the caller runs, cdecl/TLS and
+reentrant queries; a final queued callback drains before device teardown.
+Private evidence: `build/blinx/gpu-callback-original-oracle.aot-private.json`,
+`run-gpu-callback.log`, `build/gpu-callback-all-tests.log`. Phobos's immediate
+callback and Cxbx's missing-query bypass are not adopted. No donor bodies were
+copied; see attribution. This remains a private donor-linked reference pilot.
+
+## Earlier checkpoint - bounded visibility contract (2026-10-07)
 
 `beads-xbox.1.63`: a small software NV2A reference now informs real native GPU
 queries. Fresh/repeated NTSC Blinx launches pass visibility Begin and End and

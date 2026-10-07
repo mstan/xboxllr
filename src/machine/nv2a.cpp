@@ -15737,7 +15737,7 @@ enum Nv097Handler : uint8_t {
     kNv097M01A4,                // method == 0x01A4
     kNv097M1D6C,                // method == 0x1D6C
     kNv097M1D70,                // method == 0x1D70
-    kNv097M01A8, kNv097M17C8, kNv097M17CC, kNv097M17D0,
+    kNv097M01A8, kNv097M17C8, kNv097M17CC, kNv097M17D0, kNv097M0110,
 };
 
 constexpr uint32_t kNv097MethodLimit = 0x2000;
@@ -15881,6 +15881,7 @@ constexpr Nv097Arm kNv097Arms[] = {
     {0x17C8, 0x17CC, kNv097M17C8},
     {0x17CC, 0x17D0, kNv097M17CC},
     {0x17D0, 0x17D4, kNv097M17D0},
+    {0x0110, 0x0114, kNv097M0110},
 };
 
 struct Nv097Table {
@@ -16089,6 +16090,11 @@ void Nv2a::dispatch_method(PushMethod push) {
     // body of the arm it came from, so the diff is the arm headers only.
     if (method >= kNv097MethodLimit || (method & 3u) != 0) return;
     switch (kNv097Table.handler[method >> 2]) {
+    // WAIT_FOR_IDLE precedes WRITE software callbacks in the original XDK.
+    // The software floor completes all older raster jobs before the IRQ trap.
+    case kNv097M0110:
+        draw_order_fence();
+        break;
     // NV097 flip queue. FLIP_INCREMENT_WRITE advances the producer modulo; FLIP_STALL
     // blocks PFIFO only when the producer has caught the display/vblank consumer. The
     // kernel advances READ_3D through NV_PGRAPH_INCREMENT in its vblank ISR.

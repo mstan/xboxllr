@@ -34,6 +34,11 @@ rediscover every borrowed algorithm. A pinned external LLE reference runner may
 provide evidence while the in-tree reference catches up. Shared implementation
 ancestry is not independent corroboration, and stubs remain excluded.
 
+Owner workflow clarification, 2026-10-07: for each newly encountered issue,
+ensure bounded runnable LLE scaffolding for the observable contract, inspect
+Phobos for reusable implementation, adapt compatible donor services, then
+validate the contract and actual title progress. Build only the missing pieces.
+
 Owner distribution constraint, 2026-10-06: GPL projects may be external research
 and execution references, but GPL code must not enter the intended non-GPL
 shipping product. A source port, linked runtime or copied generated-code helper

@@ -12,6 +12,7 @@ static void test_memory(void);
 static void test_scheduler_worker(void);
 #ifdef PILOT_D3D_NATIVE
 static void test_vblank_callback(void);
+static void test_gpu_callback(void);
 #endif
 
 static void test_worker(void)
@@ -33,6 +34,7 @@ static void test_worker(void)
 recomp_func_t recomp_lookup(uint32_t va) {
 #ifdef PILOT_D3D_NATIVE
     if(va==0x12300 || va==0x12320)return test_vblank_callback;
+    if(va==0x12360)return test_gpu_callback;
 #endif
     return va==test_worker_address ? test_worker : va==0x12100 ? test_dpc : va==0x12200 ? test_scheduler_worker : NULL;
 }

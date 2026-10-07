@@ -1,5 +1,19 @@
 # STATUS
 
+## 2026-10-07 - Blinx executes its ordered GPU callback
+
+Original NTSC Blinx passes InsertCallback and executes its generated WRITE
+callback after real GPU completion (context `0x12c`, serial 1401). It advances
+to a guest-created texture header aliasing front-buffer storage; that resource
+family is now tracked as `beads-xbox.1.65`. No title-address workaround is added.
+
+The bounded LLE idle/IRQ/parameter/ack fixture and original-x86 READ/WRITE packet
+oracle establish the contract. Native delivery reuses GPU event queries and
+the serialized DPC worker, preserving every FIFO callback. All 30 native tests
+and the LLE NV2A regression pass. The [pilot README](pilots/native-title/README.md)
+records tested behavior and timing limits. Actual audio/movies/menu/attract and
+original-speed cadence remain pending; the full goal stays active.
+
 ## 2026-10-07 - Bounded LLE visibility floor and native queries
 
 Visibility now follows the owner's bounded-reference policy: actual software

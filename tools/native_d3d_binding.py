@@ -83,6 +83,11 @@ def bind(xbe: Path, output: Path, symbols: Path):
             raise ValueError('unreviewed visibility boundary: '+name)
         visibility[name]=dict(stack_bytes=stack,function_sha256=digest)
     state_defaults['visibility_binding']=visibility
+    callback=next(s for s in identified if s['name']=='D3DDevice_InsertCallback')
+    callback_digest='211618541a98c764ab3699e33ac78aaedcb903cb4dcea35798aca404c492f84c'
+    if callback['stack_bytes']!=12 or context.digest(functions[callback['address']])!=callback_digest:
+        raise ValueError('unreviewed GPU callback boundary')
+    state_defaults['gpu_callback_binding']=dict(stack_bytes=12,function_sha256=callback_digest)
     # Reviewed programmable-shader load/select path. Cache offsets stay in the
     # revision binding; native code owns GPU programs and never emits packets.
     load=next(s for s in identified if s['name']=='D3DDevice_LoadVertexShader')

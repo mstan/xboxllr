@@ -19,6 +19,11 @@ static uint64_t dispatch_pulse_origin,dispatch_pulse_frame,dispatch_pulse_deadli
 static unsigned dispatch_pulse_hz;
 static int dispatch_pulse_running,dispatch_worker_ready;
 static CONDITION_VARIABLE dispatch_pulse_idle=CONDITION_VARIABLE_INIT;
+/* GPU callbacks share the existing DPC context, but are independent of
+ * display refresh. Poll only while an actual submitted queue needs service. */
+static int (*dispatch_gpu_routine)(void);
+static uint64_t dispatch_gpu_deadline,dispatch_gpu_generation;
+static int dispatch_gpu_running;
 static uint64_t dispatch_pulse_time(uint64_t frame)
 {return dispatch_pulse_origin+(frame/dispatch_pulse_hz)*10000000+((frame%dispatch_pulse_hz)*10000000+dispatch_pulse_hz-1)/dispatch_pulse_hz;}
 
@@ -136,8 +141,25 @@ static DWORD WINAPI dispatch_worker(void *unused)
             ReleaseSRWLockExclusive(&dispatch_lock);
             continue;
         }
+        if(dispatch_gpu_routine && dispatch_gpu_deadline<=mono) {
+            int (*routine)(void)=dispatch_gpu_routine;
+            uint64_t generation=dispatch_gpu_generation;dispatch_gpu_running=1;
+            ReleaseSRWLockExclusive(&dispatch_lock);
+            MEM8(base+0x24)=2;dispatch_in_dpc=1;
+            int pending=routine();
+            dispatch_in_dpc=0;MEM8(base+0x24)=0;
+            AcquireSRWLockExclusive(&dispatch_lock);
+            if(generation==dispatch_gpu_generation) {
+                if(pending)dispatch_gpu_deadline=dispatch_monotonic()+10000;
+                else dispatch_gpu_routine=NULL;
+            }
+            dispatch_gpu_running=0;WakeAllConditionVariable(&dispatch_pulse_idle);
+            ReleaseSRWLockExclusive(&dispatch_lock);
+            continue;
+        }
         uint64_t absolute=UINT64_MAX,relative=UINT64_MAX;
         if(dispatch_pulse_routine)relative=dispatch_pulse_deadline;
+        if(dispatch_gpu_routine && dispatch_gpu_deadline<relative)relative=dispatch_gpu_deadline;
         for (unsigned i=0;i<128;++i) if (dispatch_timers[i].va) {
             struct PilotTimer *t=&dispatch_timers[i];
             uint64_t *next=t->absolute ? &absolute : &relative;
@@ -199,6 +221,20 @@ static void dispatch_pulse_quiesce(void)
     AcquireSRWLockExclusive(&dispatch_lock);
     while(dispatch_pulse_running)
         if(!SleepConditionVariableSRW(&dispatch_pulse_idle,&dispatch_lock,INFINITE,0))stop("display callback join failed",GetLastError());
+    ReleaseSRWLockExclusive(&dispatch_lock);
+}
+static void dispatch_gpu_schedule(int (*routine)(void))
+{
+    dispatch_ensure();AcquireSRWLockExclusive(&dispatch_lock);
+    dispatch_gpu_routine=routine;dispatch_gpu_deadline=0;++dispatch_gpu_generation;
+    SetEvent(dispatch_changed);ReleaseSRWLockExclusive(&dispatch_lock);
+}
+static void dispatch_gpu_quiesce(void)
+{
+    if(dispatch_in_dpc)stop("GPU callback shutdown from DPC",0);
+    AcquireSRWLockExclusive(&dispatch_lock);
+    while(dispatch_gpu_running || dispatch_gpu_routine)
+        if(!SleepConditionVariableSRW(&dispatch_pulse_idle,&dispatch_lock,INFINITE,0))stop("GPU callback join failed",GetLastError());
     ReleaseSRWLockExclusive(&dispatch_lock);
 }
 static void dispatch_initialize(uint32_t va,unsigned type)

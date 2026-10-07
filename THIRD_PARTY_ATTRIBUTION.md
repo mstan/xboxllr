@@ -15,6 +15,19 @@ notices. Preparation/build steps must report missing required notices.
 
 ## Private native-title reference pilot
 
+### Ordered GPU callbacks - 2026-10-07
+
+`graphics_gpu_callback.inc` and its dispatcher integration are independently
+authored. Original NTSC XDK execution establishes the packet/cdecl boundary;
+the existing NV2A software-method floor supplies runnable IRQ/parameter/ack
+behavior. Cxbx-Reloaded `Direct3D9.cpp` at `585c49a50af1255ab155099e06f24505f9c5a800`
+was a behavior reference for FIFO callbacks and WRITE completion. Phobos
+`hle_d3d8.c` at `bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0` supplied the donor
+comparison; its immediate-call policy was not adopted. No donor bodies copied.
+[XboxDev/nxdk pbkit](https://github.com/XboxDev/nxdk/blob/master/lib/pbkit/pbkit.c)
+(reviewed 2026-10-07; Guillaume Lamonoca and nxdk contributors) corroborates
+GPU interrupt processing on a serialized DPC. Its source is not incorporated.
+
 ### Visibility reference and native query contract - 2026-10-07
 
 The new `src/machine/nv2a.cpp` report/counter handling, visibility fixtures and

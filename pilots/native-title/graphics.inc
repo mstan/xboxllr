@@ -65,6 +65,7 @@ static void *graphics_pointer(uint32_t address,uint32_t bytes)
 static void graphics_target_prepare(uint32_t header);
 #include "graphics_draw.inc"
 #include "graphics_completion.inc"
+#include "graphics_gpu_callback.inc"
 static void graphics_resource_bindings_close(void)
 {
     for(unsigned i=0;i<4;++i)graphics_texture_bind(i,0);
@@ -125,8 +126,11 @@ void pilot_d3d_dispatch(unsigned entry)
     AcquireSRWLockExclusive(&graphics_lock);
     if (entry!=PILOT_D3D_Direct3D_CreateDevice && !graphics_active)
         stop("graphics entry before native creation",pilot_d3d_calls[entry].address);
+    if(entry!=PILOT_D3D_D3DDevice_InsertCallback)graphics_gpu_barrier();
     switch(entry) {
     case PILOT_D3D_D3DDevice_SetTransform:graphics_transform_set(arguments[0],arguments[1]);break;
+    case PILOT_D3D_D3DDevice_InsertCallback:
+        graphics_gpu_insert(arguments[0],arguments[1],arguments[2]);break;
     case PILOT_D3D_D3D_UpdateProjectionViewportTransform:graphics_projection_viewport();break;
     case PILOT_D3D_D3DDevice_GetViewportOffsetAndScale: {
         float offset[4],scale[4];graphics_viewport_offset_scale(offset,scale);
@@ -282,6 +286,7 @@ void pilot_d3d_dispatch(unsigned entry)
     case PILOT_D3D_D3DDevice_Release: {
         if(graphics_clock_waiters)stop("device release with active vertical-blank waits",entry);
         graphics_clock_close();
+        graphics_gpu_close();
         if(graphics_target!=graphics_headers || (graphics_depth && graphics_depth!=graphics_headers+64))
             graphics_set_targets(graphics_headers,graphics_headers+64);
         if (graphics_surface_refs[0] || graphics_surface_refs[1] || graphics_surface_refs[2])

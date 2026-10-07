@@ -1116,6 +1116,29 @@ int main() {
     CHECK(get32(ram, 0x3040) == 0x0BADF00Du);
     CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x800044, 4) == 0x4C);
 
+    // Original InsertCallback packets: PARAMETER_A/B, optional WAIT_FOR_IDLE,
+    // then software trap 6 (READ) or 7 (WRITE). Later commands wait for IRQ ack.
+    uint32_t callback_cursor=0x4c;
+    for(unsigned type=0;type<2;++type) {
+        auto callback_emit=[&](uint32_t method,uint32_t value){
+            put32(ram,pb+callback_cursor,(1u<<18)|method);
+            put32(ram,pb+callback_cursor+4,value);callback_cursor+=8;
+        };
+        callback_emit(0x1d8c,0x12345678+type);
+        callback_emit(0x1d90,0xabcdef00+type);
+        if(type)callback_emit(0x0110,0);
+        callback_emit(0x0100,6+type);
+        callback_emit(0x1d90,0xdeadbeef);
+        gpu.mmio_write(xlle::Nv2a::kBase+0x800040,4,callback_cursor);
+        CHECK(irq && fault.empty());
+        CHECK(gpu.mmio_read(xlle::Nv2a::kBase+0x400708,4)==6+type);
+        CHECK(gpu.mmio_read(xlle::Nv2a::kBase+0x401a88,4)==0x12345678+type);
+        CHECK(gpu.mmio_read(xlle::Nv2a::kBase+0x40186c,4)==0xabcdef00+type);
+        gpu.mmio_write(xlle::Nv2a::kBase+0x400100,4,1u<<20);
+        CHECK(!irq && gpu.mmio_read(xlle::Nv2a::kBase+0x40186c,4)==0xdeadbeef);
+    }
+    CHECK(gpu.method_count(0x0110)==1);
+
     // The D3D runtime disables CACHE1_PUSH0 before rebuilding a channel. PUT is cleared
     // before GET; that transient mismatch must not execute stale pushbuffer data.
     const uint64_t methods_before_reset = gpu.push_methods();

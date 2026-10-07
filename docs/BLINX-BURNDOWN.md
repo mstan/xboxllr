@@ -4,9 +4,11 @@
 The borrowed Phobos renderer now presents actual game frames. The prior disc
 error is traced and fixed: local VM/texture ownership caps returned out of memory
 while real guest RAM remained available. Blinx now loads 420 textures, passes
-visibility Begin/End and stops at `D3DDevice_InsertCallback` (`0x138a40`).
-Fresh and repeat launches reach that same boundary (12.95/7.33 s) with zero
-error-dialog entries or memory failures. The 64 MiB guest limit remains enforced. No title error condition is bypassed.
+visibility Begin/End, and executes its ordered GPU WRITE callback. The latest
+run stops while binding a guest-authored texture header that aliases the front
+buffer. Earlier fresh/repeat runs reached the callback boundary in 12.95/7.33 s
+with zero error-dialog entries or memory failures. The 64 MiB guest limit remains
+enforced. No title error condition is bypassed.
 
 | Milestone | Evidence / remaining work |
 | --- | --- |
@@ -16,13 +18,14 @@ error-dialog entries or memory failures. The 64 MiB guest limit remains enforced
 | Movie service readiness | Original NTSC Sofdec roots compiled; YUY2/UYVY upload, pitch, coordinates and changing GPU frames tested; actual playback/sync/interruption pending |
 | Disc-error diagnosis | Actual caller returns E_OUTOFMEMORY from local 512-reservation/256-texture caps; growing ownership fixes progression to 420 textures, with real memory budget retained |
 | Visibility queries | Bounded software NV2A sample/report floor, original-x86 ABI and real native GPU fixtures pass; title Begin/End progress validated, title Get not yet reached |
-| Next graphics family | Ordered GPU callbacks: reuse real GPU completion and guest callback machinery after verifying original ordering/ABI |
+| Ordered GPU callbacks | Original READ/WRITE packets, bounded LLE idle/IRQ floor and native FIFO/real completion tests pass; Blinx executes its WRITE callback |
+| Next graphics family | Shared GPU surface/texture aliases; match guest storage identity and ownership using donor resource services |
 | Input | Physical XInput and startup-selected keyboard available; actual menu/movie interruption still unvalidated |
 | Attract startup/loading/render/audio/movies/gameplay | Partial startup/rendering only; no complete attract sequence yet |
 | Repeat loops, interruption/menu return, original cadence | Pending actual title integration measurements |
 | JSRF | Deferred until Blinx completes; shared services and separate revision bindings |
 
-All 30 CTests pass in the isolated run (15.08 s), plus the LLE NV2A regression and
+All 30 CTests pass in the isolated run (13.04 s), plus the LLE NV2A regression and
 ten Python generation tests. Visibility fixtures cover real samples, masks,
 clipping, index reuse, pending outputs, timestamps and teardown. Capacity tests cover
 600 simultaneous reservations and 520 GPU textures with repeat cleanup and real
