@@ -17,8 +17,9 @@ FILES = "d3d8_device.c d3d8_gamma.c d3d8_resources.c d3d8_shaders.c d3d8_states.
 # All other COM methods terminate explicitly, including upstream success-only
 # caps/display/reset/pixel-constant/priority bodies. Qualify more as reached.
 COM = set("dev_AddRef dev_Release dev_BeginScene dev_EndScene dev_Clear dev_SetViewport dev_GetViewport dev_SetTransform dev_GetTransform dev_SetRenderState dev_GetRenderState dev_SetTextureStageState dev_GetTextureStageState dev_SetVertexShader dev_GetVertexShader dev_DrawPrimitiveUP dev_Swap d3d8_AddRef d3d8_Release d3d8_CreateDevice".split())
-COM.update("tex_AddRef tex_Release tex_LockRect tex_UnlockRect".split())
+COM.update("tex_AddRef tex_Release tex_LockRect tex_UnlockRect tex_GetType".split())
 COM.update("vb_AddRef vb_Release vb_Lock vb_Unlock".split())
+COM.add("dev_SetTexture")
 
 
 def lexical(code):
@@ -101,6 +102,14 @@ def prepare(donor: Path, output: Path, vsh_reference: Path):
                     '        g_cur_rt=NULL; g_cur_ds=NULL;\n        /* Cleanup D3D11 resources */')
                 code = code.replace('        if (converted) draw_data = converted;',
                     '        if (!converted) return E_OUTOFMEMORY;\n        draw_data = converted;')
+                # Xbox SetTexture changes resource binding, not COLOROP.
+                # Keep the donor's actual SRV and stage metadata integration.
+                code = code.replace('        /* Mark texture stage as active */\n'
+                    '        if (g_device_state.tss[Stage][D3DTSS_COLOROP] == D3DTOP_DISABLE)\n'
+                    '            g_device_state.tss[Stage][D3DTSS_COLOROP] = D3DTOP_MODULATE;','')
+                code = code.replace('        g_device_state.tss[Stage][D3DTSS_COLOROP] = D3DTOP_DISABLE;','')
+                code = code.replace('        if (srv) {',
+                    '        if (!srv) pilot_d3d_backend_stop("texture has no native sampling view");\n        if (srv) {')
             if name == "d3d8_states.c":
                 code,count = re.subn(r'    if \(min_linear && mag_linear && mip_linear\).*?    return D3D11_FILTER_MIN_MAG_MIP_POINT;',
                     '    return (D3D11_FILTER)((min_linear ? 0x10 : 0) | (mag_linear ? 4 : 0) | (mip_linear ? 1 : 0));',

@@ -47,8 +47,9 @@ views and queries the current color/depth surfaces. It reaches 96 compiled
 vertex shaders and 37 owned pixel definitions. It now captures its real ALL
 state block and registers its vertical-blank callback, which executes and
 returns repeatedly. After loading five menu textures, it now binds its compiled
-vertex shader and the donor's fixed-function pixel shader, then stops at
-`D3DDevice_SetTexture`. No title target binding or draw occurs yet.
+vertex shader and the donor's fixed-function pixel shader. It binds a real
+stage-0 texture and updates two vertex constants, then stops at
+`D3DDevice_SetTransform`. No title stream/target binding or draw occurs yet.
 No title buffer Play or audible game output is established by those runs.
 `PILOT_AUDIO=ORIGINAL` still executes the original sound-object allocations and
 contiguous-page setup, stopping at `KfRaiseIrql` (ordinal 160) in audio-driver
@@ -108,6 +109,62 @@ the other title's XBE to the Blinx artifact is rejected before guest execution.
 The main LLE build's runtime source and build selection are untouched.
 
 ## Reuse and scope
+
+### Resource binding checkpoint (2026-10-07)
+
+The shared adapter binds four texture stages and sixteen vertex streams to real
+D3D11 views/buffers. It reuses the pinned MIT donor's resource allocation,
+uploads, texture metadata and SRV binding. The donor's texture COLOROP mutation
+is removed because the original Xbox binder preserves texture-stage state.
+Its type getter now participates in the bounded 2D texture path. All three
+recomp variants were checked: their stream setters accept but ignore nonzero
+streams. That body stays excluded; the adapter binds the donor-owned buffers
+to each actual native input slot and explicitly clears null bindings.
+
+Common's low sixteen public-reference bits and bits 19..22 for binding
+references remain independent. Public release to zero does not free a bound
+resource; another AddRef is valid while that binding retains it. Replacement
+moves the native binding before collecting the old object. Registered vertex
+buffers retain their caller-owned physical backing until the last reference
+goes away. Device teardown drops bindings and collects internal-only objects.
+As a documented HLE lifetime extension, texture self-rebinding with only a
+binding reference preserves the object, avoiding the original release-before-
+acquire hazard. Ordinary defined reference/cache behavior is retained.
+
+CPU sample textures and vertex buffers upload changed contents at binding.
+GPU-written render/depth textures retain their actual GPU contents and upload
+only when newly initialized or explicitly exposed CPU writes require it. No
+production readback is introduced for sampling. Future draw submission must
+also prepare live CPU-backed inputs to observe writes through retained pointers.
+Simultaneous sampling and output on the same texture remains guarded; native
+D3D11 must not silently remove an expected SRV. Existing target-alias and raw
+CPU-pointer limitations still apply.
+
+Validation: all 29 CTests pass. The GPU fixture samples actual texture colors,
+observes changed uploaded bytes, samples a GPU-written render target and checks
+native stream slots/strides and null unbinding across three device lifetimes.
+Guest fixtures cover public release while bound, AddRef from that state,
+multiple binding references, self-rebind, changed vertex bytes, caller-owned
+backing and twelve consecutive replacement cycles without residual allocations.
+The offline original-x86 audit runs thirteen binding cases. Eleven complete
+and verify cache/header state; two stop at the original destruction entry to
+verify its trigger rather than pretending to execute the original allocator.
+Native resource destruction and real backing reclamation are covered separately.
+
+Fresh/repeated NTSC Blinx now passes four SetTexture calls, including the actual
+stage-0 texture, followed by two SetVertexShaderConstant1 calls. It stops at
+`D3DDevice_SetTransform` at `0x00131eb0`, requesting the view transform. Entries
+are 22252367/22252275 and completed consecutive callbacks are 20/17. No title
+stream/target binding, draw/frame, Play, movie, menu or attract/cadence yet.
+Next: the transform family and vertex-to-raster interface before actual draws.
+
+Private evidence: `build/blinx/audit_resource_bindings.py`,
+`build/blinx/resource-binding-oracle.aot-private.json`,
+`build/blinx/resource-binding-validation.aot-private.json`,
+`build/blinx/run-resource-binding-{fresh,repeat}.log`,
+`build/resource-binding-gpu.log`, `build/resource-binding-contract.log` and
+`build/resource-binding-all-contract-tests.log`. The CPU artifact remains
+private and GPL-dependent; no GPL implementation was imported by this change.
 
 ### Shader binding checkpoint (2026-10-07)
 
@@ -420,7 +477,7 @@ Device release with outstanding resources, reset, partial-channel/rectangle
 clear, front/back-buffer locks, and unimplemented state/draw methods stop explicitly.
 
 The MIT donor provides the D3D11 device/state/shader/resource code, not the Xbox
-32-bit guest ABI. Preparation excludes 112 unqualified COM bodies, including
+32-bit guest ABI. Preparation excludes unqualified COM bodies, including
 upstream success-only implementations, and hardens reached failures. Its direct
 backend smoke test draws a triangle with explicit no-texture state and validates
 actual readback pixels. Guest tests check success/failure stack cleanup, callee

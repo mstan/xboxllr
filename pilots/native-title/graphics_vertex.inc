@@ -3,7 +3,7 @@
  * writes this storage, so Lock2 needs no emulated FIFO fence or CPU/GPU wait.
  * Physical/cache aliases use one canonical guest VA, as for native textures. */
 #define GRAPHICS_VERTEX_OBJECTS 256
-struct GraphicsVertexObject { uint32_t header,data,bytes,refs,native,external; };
+struct GraphicsVertexObject { uint32_t header,data,bytes,refs,native,external,bindings; };
 static struct GraphicsVertexObject graphics_vertices[GRAPHICS_VERTEX_OBJECTS];
 static int graphics_vertex_find(uint32_t header)
 {
@@ -44,26 +44,56 @@ static uint32_t graphics_vertex_allocate(uint32_t length)
     fprintf(stderr,"[VERTEX CREATE] header=%08x data=%08x bytes=%u\n",vertex.header,vertex.data,length);
     return vertex.header;
 }
-static uint32_t graphics_vertex_ref(uint32_t header,int acquire)
+static void graphics_vertex_collect(struct GraphicsVertexObject *vertex)
 {
-    struct GraphicsVertexObject *vertex=graphics_vertex(header);
-    if(!vertex->refs || (acquire && vertex->refs==0xffff))stop("invalid vertex reference lifetime",header);
-    if(acquire)++vertex->refs;else --vertex->refs;
-    MEM32(header)=(vertex->external?0:0x01000000u)|vertex->refs;
-    if(vertex->refs)return vertex->refs;
+    if(vertex->refs || vertex->bindings)return;
     pilot_gfx_vertex_destroy(vertex->native);
     if(vertex->external) {
         AcquireSRWLockExclusive(&vm_lock);
         struct PhysicalAllocation *allocation=physical_find(vertex->data,vertex->bytes);
         if(!allocation || !allocation->borrowers)stop("lost registered vertex backing",vertex->data);
         --allocation->borrowers;ReleaseSRWLockExclusive(&vm_lock);
-        memset(vertex,0,sizeof(*vertex));return 0;
+        memset(vertex,0,sizeof(*vertex));return;
     }
     uint32_t bytes=0;
     if(vm_free(&vertex->data,&bytes,MEM_RELEASE))stop("vertex data release failed",vertex->data);
     bytes=0;
     if(vm_free(&vertex->header,&bytes,MEM_RELEASE))stop("vertex header release failed",vertex->header);
-    memset(vertex,0,sizeof(*vertex)); return 0;
+    memset(vertex,0,sizeof(*vertex));
+}
+static uint32_t graphics_vertex_ref(uint32_t header,int acquire)
+{
+    struct GraphicsVertexObject *vertex=graphics_vertex(header);
+    if((!vertex->refs && (!acquire || !vertex->bindings)) || (acquire && vertex->refs==0xffff))stop("invalid vertex reference lifetime",header);
+    if(acquire)++vertex->refs;else --vertex->refs;
+    uint32_t refs=vertex->refs;
+    MEM32(header)=(MEM32(header)&~0xffffu)|refs;
+    graphics_vertex_collect(vertex);return refs;
+}
+static void graphics_vertex_binding_ref(uint32_t header,int acquire)
+{
+    struct GraphicsVertexObject *vertex=graphics_vertex(header);
+    if(acquire?vertex->bindings==15:!vertex->bindings)stop("invalid vertex binding ownership",header);
+    if(acquire)++vertex->bindings;
+    else {--vertex->bindings;MEM32(header+8)=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_RESOURCE_FENCE);}
+    MEM32(header)=(MEM32(header)&~0x780000u)|(vertex->bindings<<19);
+    graphics_vertex_collect(vertex);
+}
+static void graphics_vertex_bind(unsigned stream,uint32_t header,uint32_t stride)
+{
+    if(stream>=16 || stride>2048)stop("unqualified vertex stream/stride",stream);
+    uint32_t cache=PILOT_D3D_STREAMS+stream*12,old=MEM32(cache+8),native=0;
+    if(header) {
+        struct GraphicsVertexObject *vertex=graphics_vertex(header);native=vertex->native;
+        pilot_gfx_vertex_upload(native,memory+vertex->data,vertex->bytes);
+    }
+    pilot_gfx_vertex_bind(stream,native,stride);
+    if(header!=old) {
+        if(header)graphics_vertex_binding_ref(header,1);
+        MEM32(cache+8)=header;
+        if(old)graphics_vertex_binding_ref(old,0);
+    } else if(old)MEM32(old+8)=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_RESOURCE_FENCE);
+    MEM32(cache)=stride;
 }
 static uint32_t graphics_vertex_lock(uint32_t header,uint32_t flags)
 {

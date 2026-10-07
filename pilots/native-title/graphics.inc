@@ -61,6 +61,11 @@ static void *graphics_pointer(uint32_t address,uint32_t bytes)
 #include "graphics_shader.inc"
 #include "graphics_pixel.inc"
 #include "graphics_stateblock.inc"
+static void graphics_resource_bindings_close(void)
+{
+    for(unsigned i=0;i<4;++i)graphics_texture_bind(i,0);
+    for(unsigned i=0;i<16;++i)graphics_vertex_bind(i,0,0);
+}
 static void graphics_target_ref(uint32_t header,int acquire)
 {
     if(!header)return;
@@ -126,6 +131,8 @@ void pilot_d3d_dispatch(unsigned entry)
     case PILOT_D3D_D3DDevice_BlockUntilVerticalBlank:graphics_wait_vblank();break;
     case PILOT_D3D_D3DDevice_CreatePixelShader:g_eax=graphics_pixel_create(arguments);break;
     case PILOT_D3D_D3DDevice_SetPixelShader:graphics_pixel_bind(arguments[0]);break;
+    case PILOT_D3D_D3DDevice_SetTexture:graphics_texture_bind(arguments[0],arguments[1]);break;
+    case PILOT_D3D_D3DDevice_SetStreamSource:graphics_vertex_bind(arguments[0],arguments[1],arguments[2]);break;
     case PILOT_D3D_D3DDevice_CreateVertexShader:g_eax=graphics_shader_create(arguments);break;
     case PILOT_D3D_D3DDevice_SetVertexShader:graphics_shader_bind(arguments[0]);break;
     case PILOT_D3D_D3DDevice_GetVertexShader:
@@ -236,7 +243,7 @@ void pilot_d3d_dispatch(unsigned entry)
             graphics_set_targets(graphics_headers,graphics_headers+64);
         if (graphics_surface_refs[0] || graphics_surface_refs[1] || graphics_surface_refs[2])
             stop("device release with outstanding surface ownership",entry);
-        graphics_blocks_release();graphics_shaders_release();graphics_pixels_release();pilot_gfx_close(); graphics_active=0;
+        graphics_resource_bindings_close();graphics_blocks_release();graphics_shaders_release();graphics_pixels_release();pilot_gfx_close(); graphics_active=0;
         uint32_t bytes;
         for (unsigned i=0;i<3;++i) {
             bytes=0;

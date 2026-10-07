@@ -89,6 +89,16 @@ def bind(xbe: Path, output: Path, symbols: Path):
         raise ValueError('unreviewed vertex cache layout')
     state_defaults['vertex_binding']=dict(program_cache=program_offsets[0],start=start_offsets[0],
         record_flags=flag_offsets[0],record_disable=0x10,recorder_sha256=context.digest(record_helper))
+    # Original resource binders use a separate four-bit count at Common[22:19].
+    # Retired binding fences and texture-type caches belong to this revision.
+    texture_bind=next(s for s in identified if s['name']=='D3DDevice_SetTexture')
+    texture_code=list(Cs(CS_ARCH_X86,CS_MODE_32).disasm(data(texture_bind['address'],functions[texture_bind['address']]['size']),texture_bind['address']))
+    fences=[int(m[1],0) for i in texture_code if i.mnemonic=='mov' and
+        (m:=re.fullmatch(r'ecx, dword ptr \[ebp \+ (0x[0-9a-f]+|[0-9]+)\]',i.op_str))]
+    modes=[int(m[1],0) for i in texture_code if i.mnemonic=='mov' and
+        (m:=re.fullmatch(r'dword ptr \[ebp \+ esi\*4 \+ (0x[0-9a-f]+|[0-9]+)\], 0x80000000',i.op_str))]
+    if len(fences)!=1 or len(modes)!=1:raise ValueError('unreviewed resource binding cache layout')
+    state_defaults['resource_binding']=dict(fence=fences[0],texture_mode=modes[0])
     caps=next(s for s in identified if s['name']=='D3DDevice_GetDeviceCaps')
     if caps['stack_bytes']!=4 or context.digest(functions[caps['address']])!=CAPS:
         raise ValueError('unreviewed capability query')
@@ -164,6 +174,7 @@ def bind(xbe: Path, output: Path, symbols: Path):
     header += [f'#define PILOT_D3D_STREAMS 0x{block["streams"]:x}u']
     header += [f'#define PILOT_D3D_VERTEX_{name.upper()} {binding["vertex_binding"][name]}u'
                for name in ('program_cache','start','record_flags','record_disable')]
+    header += [f'#define PILOT_D3D_RESOURCE_{name.upper()} {offset}u' for name,offset in binding['resource_binding'].items()]
     header += [f'#define PILOT_D3D_SNAPSHOT_{name.upper()} {offset}u' for name,offset in block['fields'].items()]
     header += ['static const uint8_t pilot_d3d_block_'+name+'[] = {'+', '.join(str(x) for x in block[name])+'};'
                for name in ('pixel_render','pixel_texture','vertex_render','vertex_texture')]

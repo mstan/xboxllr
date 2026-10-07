@@ -4,6 +4,60 @@
 #include <stdlib.h>
 #include <math.h>
 #define CHECK(c) do { if (!(c)) { fprintf(stderr,"FAIL graphics line %d: %s\n",__LINE__,#c); return 1; } } while (0)
+static int test_resource_bindings(void)
+{
+    uint32_t texture=0;CHECK(pilot_gfx_texture_create(2,2,1,0x12,&texture)==0);
+    uint32_t data[32];for(unsigned i=0;i<32;++i)data[i]=0xff123456;
+    pilot_gfx_texture_prepare_sample(texture,0,data,sizeof(data),1);
+    pilot_gfx_set_texture_state(0,D3DTSS_COLOROP,D3DTOP_SELECTARG1);
+    pilot_gfx_set_texture_state(0,D3DTSS_COLORARG1,D3DTA_TEXTURE);
+    pilot_gfx_set_texture_state(0,D3DTSS_ALPHAOP,D3DTOP_SELECTARG1);
+    pilot_gfx_set_texture_state(0,D3DTSS_ALPHAARG1,D3DTA_TEXTURE);
+    pilot_gfx_set_texture_state(1,D3DTSS_COLOROP,D3DTOP_DISABLE);
+    pilot_gfx_set_texture_state(3,D3DTSS_COLOROP,D3DTOP_DISABLE);
+    pilot_gfx_set_texture_state(0,D3DTSS_TEXCOORDINDEX,0);
+    pilot_gfx_set_texture_state(0,D3DTSS_MAXMIPLEVEL,0);
+    pilot_gfx_texture_bind(0,texture);pilot_gfx_texture_bind(3,texture);
+    CHECK(d3d8_GetTSS(0)[D3DTSS_COLOROP]==D3DTOP_SELECTARG1 && d3d8_GetTSS(3)[D3DTSS_COLOROP]==D3DTOP_DISABLE);
+    ID3D11ShaderResourceView *views[4]={0};ID3D11DeviceContext *ctx=d3d8_GetD3D11Context();
+    ID3D11DeviceContext_PSGetShaderResources(ctx,0,4,views);CHECK(views[0] && views[3]==views[0] && !views[1] && !views[2]);
+    ID3D11ShaderResourceView_Release(views[0]);ID3D11ShaderResourceView_Release(views[3]);
+    struct {float x,y,z,w;uint32_t color;float u,v;} vertices[]={
+        {8,8,.5f,1,0xffffffff,.5f,.5f},{56,8,.5f,1,0xffffffff,.5f,.5f},{32,56,.5f,1,0xffffffff,.5f,.5f}};
+    unsigned char pixels[64*64*4];unsigned center=(24*64+32)*4;
+    CHECK(pilot_gfx_draw_up(D3DPT_TRIANGLELIST,1,vertices,sizeof(vertices[0]),0x144)==0);
+    CHECK(pilot_gfx_readback(pixels,sizeof(pixels))==0);
+    CHECK(pixels[center]==0x12 && pixels[center+1]==0x34 && pixels[center+2]==0x56);
+    for(unsigned i=0;i<32;++i)data[i]=0xff987654;
+    pilot_gfx_texture_prepare_sample(texture,0,data,sizeof(data),1);
+    CHECK(pilot_gfx_draw_up(D3DPT_TRIANGLELIST,1,vertices,sizeof(vertices[0]),0x144)==0);
+    CHECK(pilot_gfx_readback(pixels,sizeof(pixels))==0);
+    CHECK(pixels[center]==0x98 && pixels[center+1]==0x76 && pixels[center+2]==0x54);
+    pilot_gfx_texture_bind(0,0);pilot_gfx_texture_bind(3,0);
+    CHECK(d3d8_GetTSS(0)[D3DTSS_COLOROP]==D3DTOP_SELECTARG1);
+    ID3D11DeviceContext_PSGetShaderResources(ctx,0,4,views);CHECK(!views[0] && !views[1] && !views[2] && !views[3]);
+    pilot_gfx_texture_destroy(texture);
+    uint32_t target=0;CHECK(pilot_gfx_texture_create_usage(4,4,1,0x12,1,&target)==0);
+    CHECK(pilot_gfx_texture_clear(target,0xff336699)==0);pilot_gfx_texture_bind(0,target);
+    CHECK(pilot_gfx_targets(target,0)==E_INVALIDARG); /* no silent SRV removal */
+    CHECK(pilot_gfx_draw_up(D3DPT_TRIANGLELIST,1,vertices,sizeof(vertices[0]),0x144)==0);
+    CHECK(pilot_gfx_readback(pixels,sizeof(pixels))==0);
+    CHECK(pixels[center]==0x33 && pixels[center+1]==0x66 && pixels[center+2]==0x99);
+    pilot_gfx_texture_bind(0,0);pilot_gfx_texture_destroy(target);
+    uint32_t a=0,b=0;CHECK(pilot_gfx_vertex_create(64,&a)==0 && pilot_gfx_vertex_create(128,&b)==0);
+    pilot_gfx_vertex_bind(0,a,16);pilot_gfx_vertex_bind(15,a,0);pilot_gfx_vertex_bind(0,b,32);
+    ID3D11Buffer *buffers[16]={0};UINT strides[16]={0},offsets[16]={0};
+    ID3D11DeviceContext_IAGetVertexBuffers(ctx,0,16,buffers,strides,offsets);
+    CHECK(buffers[0] && buffers[15] && buffers[0]!=buffers[15]);
+    CHECK(strides[0]==32 && strides[15]==0 && offsets[0]==0 && offsets[15]==0);
+    D3D11_BUFFER_DESC desc;ID3D11Buffer_GetDesc(buffers[0],&desc);CHECK(desc.ByteWidth==128);
+    ID3D11Buffer_GetDesc(buffers[15],&desc);CHECK(desc.ByteWidth==64);
+    ID3D11Buffer_Release(buffers[0]);ID3D11Buffer_Release(buffers[15]);
+    pilot_gfx_vertex_bind(0,0,0);pilot_gfx_vertex_bind(15,0,0);
+    ID3D11DeviceContext_IAGetVertexBuffers(ctx,0,16,buffers,strides,offsets);CHECK(!buffers[0] && !buffers[15]);
+    pilot_gfx_vertex_destroy(a);pilot_gfx_vertex_destroy(b);
+    fprintf(stderr,"PASS: actual sampled GPU pixels and changes, preserved texture state, SRV unbind and independent native vertex streams\n");return 0;
+}
 int main(void)
 {
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
@@ -49,6 +103,7 @@ int main(void)
         CHECK(pixels[center]>240 && pixels[center+1]<10 && pixels[center+2]<10);
         CHECK(pixels[0]==0 && pixels[1]==0 && pixels[2]==255);
         CHECK(pilot_gfx_present()>=0);
+        CHECK(test_resource_bindings()==0);
         pilot_gfx_close();
     }
     fprintf(stderr,"PASS: actual donor D3D11 create/clear/triangle/pixel-readback/present/recreate\n"); return 0;

@@ -16,6 +16,7 @@ static ID3D11DepthStencilView *pilot_default_depth;
 static uint32_t pilot_color_target,pilot_depth_target;
 static struct { IDirect3DTexture8 *object; ID3D11RenderTargetView *rtv; ID3D11DepthStencilView *dsv; uint32_t uploaded,gpu_written; } pilot_textures[256];
 static struct { IDirect3DVertexBuffer8 *object; int uploaded; } pilot_vertices[256];
+static uint32_t pilot_bound_textures[4],pilot_bound_vertices[16];
 
 void pilot_gfx_pixel_fixed(void)
 {
@@ -173,9 +174,17 @@ int32_t pilot_gfx_vertex_create(uint32_t bytes,uint32_t *handle)
 void pilot_gfx_vertex_destroy(uint32_t handle)
 {
     D3D8VertexBuffer *vertex=pilot_vertex(handle);
+    for(unsigned i=0;i<16;++i)if(pilot_bound_vertices[i]==handle)pilot_d3d_backend_stop("destroying a bound vertex buffer");
     if(vertex->iface.lpVtbl->Release(&vertex->iface)!=0)
         pilot_d3d_backend_stop("native vertex buffer still referenced at destruction");
     memset(&pilot_vertices[handle-1],0,sizeof(pilot_vertices[0]));
+}
+void pilot_gfx_vertex_bind(unsigned stream,uint32_t handle,uint32_t stride)
+{
+    if(!pilot_device || stream>=16 || stride>2048)pilot_d3d_backend_stop("invalid native vertex binding");
+    ID3D11Buffer *buffer=handle?pilot_vertex(handle)->d3d11_buffer:NULL;UINT offset=0;
+    ID3D11DeviceContext_IASetVertexBuffers(d3d8_GetD3D11Context(),stream,1,&buffer,&stride,&offset);
+    pilot_bound_vertices[stream]=handle;
 }
 void pilot_gfx_vertex_upload(uint32_t handle,const void *data,uint32_t bytes)
 {
@@ -214,8 +223,25 @@ static D3D8Texture *pilot_texture(uint32_t handle)
         pilot_d3d_backend_stop("unowned native texture");
     return (D3D8Texture*)pilot_textures[handle-1].object;
 }
+void pilot_gfx_texture_bind(unsigned stage,uint32_t handle)
+{
+    if(!pilot_device || stage>=4)pilot_d3d_backend_stop("invalid native texture binding");
+    D3D8Texture *texture=handle?pilot_texture(handle):NULL;
+    if(handle && (handle==pilot_color_target || handle==pilot_depth_target))
+        pilot_d3d_backend_stop("simultaneous texture sampling and render/depth output is unqualified");
+    pilot_d3d_require(pilot_device->lpVtbl->SetTexture(pilot_device,stage,(IDirect3DBaseTexture8*)texture),__FILE__,__LINE__);
+    pilot_bound_textures[stage]=handle;
+}
+void pilot_gfx_texture_prepare_sample(uint32_t handle,uint32_t level,const void *data,uint32_t bytes,int cpu_exposed)
+{
+    D3D8Texture *texture=pilot_texture(handle);
+    if(level>=texture->levels)pilot_d3d_backend_stop("invalid sampled texture level");
+    if(cpu_exposed || !(pilot_textures[handle-1].uploaded&(1u<<level)))pilot_gfx_texture_upload(handle,level,data,bytes);
+}
 int32_t pilot_gfx_targets(uint32_t color,uint32_t depth)
 {
+    for(unsigned i=0;i<4;++i)if(pilot_bound_textures[i] &&
+        (pilot_bound_textures[i]==color || pilot_bound_textures[i]==depth))return E_INVALIDARG;
     ID3D11RenderTargetView *rtv=d3d8_GetDefaultRTV();
     ID3D11DepthStencilView *dsv=depth==UINT32_MAX?pilot_default_depth:NULL;
     unsigned width=pilot_gfx_width(),height=pilot_gfx_height();
@@ -261,6 +287,7 @@ void pilot_gfx_texture_destroy(uint32_t handle)
 {
     D3D8Texture *texture=pilot_texture(handle);
     if(handle==pilot_color_target || handle==pilot_depth_target)pilot_d3d_backend_stop("destroying a bound target");
+    for(unsigned i=0;i<4;++i)if(pilot_bound_textures[i]==handle)pilot_d3d_backend_stop("destroying a sampled texture");
     if(pilot_textures[handle-1].rtv)ID3D11RenderTargetView_Release(pilot_textures[handle-1].rtv);
     if(pilot_textures[handle-1].dsv)ID3D11DepthStencilView_Release(pilot_textures[handle-1].dsv);
     if(texture->iface.lpVtbl->Release(&texture->iface)!=0)

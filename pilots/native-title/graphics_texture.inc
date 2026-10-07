@@ -6,6 +6,7 @@
 struct GraphicsTextureObject {
     uint32_t header,data,bytes,width,height,levels,format,refs,native,usage,cpu_exposed;
     unsigned parent,level; /* parent is slot+1 for a surface view, zero for texture */
+    unsigned bindings;
 };
 static struct GraphicsTextureObject graphics_textures[GRAPHICS_TEXTURE_OBJECTS];
 
@@ -109,14 +110,11 @@ static void graphics_texture_upload(struct GraphicsTextureObject *texture,unsign
     uint32_t offset=graphics_level_offset(texture,level);
     pilot_gfx_texture_upload(texture->native,level,memory+texture->data+offset,graphics_level_bytes(texture,level));
 }
-static uint32_t graphics_texture_ref(unsigned slot,int acquire)
+static uint32_t graphics_texture_ref(unsigned slot,int acquire);
+static void graphics_texture_collect(unsigned slot)
 {
     struct GraphicsTextureObject *object=&graphics_textures[slot];
-    if(!object->header || !object->refs || (acquire && object->refs==0xffff))
-        stop("invalid texture reference lifetime",object->header);
-    if(acquire)++object->refs; else --object->refs;
-    MEM32(object->header)=(MEM32(object->header)&~0xffffu)|object->refs;
-    if(object->refs)return object->refs;
+    if(object->refs || object->bindings)return;
     unsigned parent=object->parent;
     if(parent) {
         if(!object->usage || object->cpu_exposed)graphics_texture_upload(&graphics_textures[parent-1],object->level);
@@ -129,7 +127,55 @@ static uint32_t graphics_texture_ref(unsigned slot,int acquire)
     if(vm_free(&object->header,&bytes,MEM_RELEASE))stop("texture header release failed",object->header);
     memset(object,0,sizeof(*object));
     if(parent)graphics_texture_ref(parent-1,0);
-    return 0;
+}
+static uint32_t graphics_texture_ref(unsigned slot,int acquire)
+{
+    struct GraphicsTextureObject *object=&graphics_textures[slot];
+    if(!object->header || (!object->refs && (!acquire || !object->bindings)) || (acquire && object->refs==0xffff))
+        stop("invalid texture reference lifetime",object->header);
+    if(acquire)++object->refs; else --object->refs;
+    uint32_t refs=object->refs;
+    MEM32(object->header)=(MEM32(object->header)&~0xffffu)|refs;
+    graphics_texture_collect(slot);return refs;
+}
+static void graphics_texture_binding_ref(uint32_t header,int acquire)
+{
+    unsigned slot=graphics_texture_slot(header);struct GraphicsTextureObject *object=&graphics_textures[slot];
+    if(object->parent || (acquire?object->bindings==15:!object->bindings))stop("invalid texture binding ownership",header);
+    if(acquire)++object->bindings;
+    else {--object->bindings;MEM32(header+8)=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_RESOURCE_FENCE);}
+    MEM32(header)=(MEM32(header)&~0x780000u)|(object->bindings<<19);
+    graphics_texture_collect(slot);
+}
+static void graphics_texture_sample_prepare(unsigned slot)
+{
+    struct GraphicsTextureObject *texture=&graphics_textures[slot];int exposed=!texture->usage || texture->cpu_exposed;
+    for(unsigned i=0;i<GRAPHICS_TEXTURE_OBJECTS;++i)if(graphics_textures[i].parent==slot+1)exposed|=graphics_textures[i].cpu_exposed;
+    for(unsigned level=0;level<texture->levels;++level)
+        pilot_gfx_texture_prepare_sample(texture->native,level,memory+texture->data+graphics_level_offset(texture,level),
+            graphics_level_bytes(texture,level),exposed);
+    if(texture->usage)for(unsigned i=0;i<GRAPHICS_TEXTURE_OBJECTS;++i)
+        if(i==slot || graphics_textures[i].parent==slot+1)graphics_textures[i].cpu_exposed=0;
+}
+static void graphics_texture_bind(unsigned stage,uint32_t header)
+{
+    if(stage>=4)stop("invalid texture stage",stage);
+    uint32_t cache=PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_TEXTURES+stage*4,old=MEM32(cache),native=0,mode=0x80000000u;
+    if(header) {
+        unsigned slot=graphics_texture_slot(header);struct GraphicsTextureObject *texture=&graphics_textures[slot];
+        if(texture->parent)stop("texture binding requires a texture",header);
+        graphics_texture_sample_prepare(slot);native=texture->native;
+        mode=MEM32(header+12)&0x20f4u;
+        if((mode&0x2000u) && texture->format>=0x2a && texture->format<=0x31)mode=(mode&~0x2000u)|0x40000000u;
+    }
+    pilot_gfx_texture_bind(stage,native);
+    /* Acquire first so an internal-only self-rebind remains alive. */
+    if(header!=old) {
+        if(header)graphics_texture_binding_ref(header,1);
+        MEM32(cache)=header;
+        if(old)graphics_texture_binding_ref(old,0);
+    } else if(old)MEM32(old+8)=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_RESOURCE_FENCE);
+    MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_RESOURCE_TEXTURE_MODE+stage*4)=mode;
 }
 static uint32_t graphics_texture_surface(uint32_t header,unsigned level)
 {

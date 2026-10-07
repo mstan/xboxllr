@@ -1,5 +1,31 @@
 # STATUS
 
+## 2026-10-07 - Blinx samples resources and reaches transform setup
+
+`beads-xbox.1.62`: fresh/repeated NTSC Blinx now passes four texture-binding
+calls, including a real stage-0 texture, and two vertex-constant updates. Both
+stop at `D3DDevice_SetTransform` (view transform), after 22252367/22252275
+entries and 20/17 consecutive title callbacks. No title draw, frame or Play yet.
+
+The resource family now binds four texture stages and all sixteen vertex
+streams using real native views/buffers. Xbox binding references are separate
+from public references: release while bound, replacement, self-rebind,
+caller-owned backing and device teardown retain and collect the right objects.
+The MIT donor's actual texture binding is reused with its unwanted COLOROP
+mutation removed; its stream-0-only success path remains excluded. GPU-written
+targets can be sampled without stale CPU uploads or production readback.
+
+All 29 CTests pass. Fixtures verify actual sampled pixels and CPU updates,
+sampling GPU-written targets, native stream slots, null unbinding and twelve
+resource replacement cycles without residual guest allocations. Thirteen
+original-x86 cases establish the binding reference/cache rules (two deliberately
+stop at the original destruction boundary; native destruction is tested
+separately). Next: transform setup and the vertex-to-raster interface, then real
+title draws. No title throughput claim; the private CPU artifact remains
+GPL-dependent and JSRF remains deferred.
+
+See [resource binding evidence and limits](pilots/native-title/README.md#resource-binding-checkpoint-2026-10-07).
+
 ## 2026-10-07 - Blinx binds native shaders and reaches texture binding
 
 `beads-xbox.1.62`: fresh/repeated NTSC Blinx now binds its compiled vertex
