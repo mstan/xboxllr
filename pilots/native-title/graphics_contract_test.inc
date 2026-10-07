@@ -11,6 +11,7 @@ static uint32_t call_graphics(unsigned entry,const uint32_t *args)
 }
 #include "graphics_state_contract_test.inc"
 #include "graphics_texture_contract_test.inc"
+#include "graphics_vertex_contract_test.inc"
 static void test_graphics(void)
 {
     vm_ensure();
@@ -70,7 +71,7 @@ static void test_graphics(void)
         CHECK(pixels[0]==255 && pixels[1]==0 && pixels[2]==0);
         CHECK(pilot_gfx_surface_readback(0,pixels,sizeof(pixels))>=0);
         CHECK(pixels[0]==0 && pixels[1]==0 && pixels[2]==255);
-        if(!pass) { test_graphics_states(); test_graphics_textures(); }
+        if(!pass) { test_graphics_states(); test_graphics_textures(); test_graphics_vertices(); }
         CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&front)==0);
         CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&back)==0);
         CHECK(call_graphics(PILOT_D3D_D3DDevice_Release,NULL)==0);

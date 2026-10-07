@@ -21,4 +21,8 @@ int32_t pilot_gfx_texture_create(uint32_t width,uint32_t height,uint32_t levels,
 void pilot_gfx_texture_destroy(uint32_t handle);
 void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,uint32_t bytes);
 int32_t pilot_gfx_texture_readback(uint32_t handle,uint32_t level,void *data,uint32_t capacity);
+int32_t pilot_gfx_vertex_create(uint32_t bytes,uint32_t *handle);
+void pilot_gfx_vertex_destroy(uint32_t handle);
+void pilot_gfx_vertex_upload(uint32_t handle,const void *data,uint32_t bytes);
+int32_t pilot_gfx_vertex_readback(uint32_t handle,void *data,uint32_t capacity);
 #endif

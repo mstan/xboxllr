@@ -55,6 +55,7 @@ static void *graphics_pointer(uint32_t address,uint32_t bytes)
     return memory+address;
 }
 #include "graphics_texture.inc"
+#include "graphics_vertex.inc"
 
 void pilot_d3d_dispatch(unsigned entry)
 {
@@ -67,6 +68,9 @@ void pilot_d3d_dispatch(unsigned entry)
     if (entry!=PILOT_D3D_Direct3D_CreateDevice && !graphics_active)
         stop("graphics entry before native creation",pilot_d3d_calls[entry].address);
     switch(entry) {
+    case PILOT_D3D_D3DDevice_CreateVertexBuffer2:g_eax=graphics_vertex_allocate(arguments[0]);break;
+    case PILOT_D3D_D3DVertexBuffer_Lock2:g_eax=graphics_vertex_lock(arguments[0],arguments[1]);break;
+    case PILOT_D3D_D3DResource_Register:graphics_vertex_register(arguments[0],arguments[1]);break;
     case PILOT_D3D_D3DDevice_CreateTexture2:g_eax=graphics_texture_allocate(arguments);break;
     case PILOT_D3D_D3DBaseTexture_GetLevelCount:
         g_eax=graphics_textures[graphics_texture_slot(arguments[0])].levels;break;
@@ -147,6 +151,8 @@ void pilot_d3d_dispatch(unsigned entry)
     case PILOT_D3D_D3DResource_Release:
         if(arguments[0]==graphics_headers || arguments[0]==graphics_headers+32)
             g_eax=graphics_surface_ref(graphics_surface_index(arguments[0]),entry==PILOT_D3D_D3DResource_AddRef);
+        else if(graphics_vertex_find(arguments[0])>=0)
+            g_eax=graphics_vertex_ref(arguments[0],entry==PILOT_D3D_D3DResource_AddRef);
         else g_eax=graphics_texture_ref(graphics_texture_slot(arguments[0]),entry==PILOT_D3D_D3DResource_AddRef);
         break;
     case PILOT_D3D_D3DDevice_Release: {

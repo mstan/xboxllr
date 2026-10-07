@@ -26,9 +26,12 @@ The decoder now performs real native/guest nonlocal recovery after the JPEG
 probe rejects the TGA, creates the real 128x256 A4R4G4B4 font texture and uploads
 all nine mip levels. Native GPU readback shows the font atlas; the top level
 matches the TGA within its four-bit quantization (maximum 16/255 channel error).
-Blinx reads/parses the 2332-byte font metrics and reaches
-`D3DDevice_CreateVertexBuffer2`. Title draws are not yet qualified.
-The ORIGINAL renderer still reaches `MmAllocateContiguousMemoryEx`.
+Blinx reads/parses the 2332-byte font metrics, creates two 112 KiB vertex
+buffers and registers six caller-owned buffers against real contiguous CPU
+storage. It then reads `sys_black.dds` and `sys_white.dds`, and reaches its first
+`D3DDevice_CreateVertexShader`. Title draws are not yet qualified.
+The last ORIGINAL-renderer measurement, before the contiguous-memory service,
+stopped at `MmAllocateContiguousMemoryEx`; it has not been remeasured since.
 The OPTICAL build retains
 and executes the original verification helper, stopping on unsupported raw
 optical access. No Blinx draws, movies, menu or level yet. Function-entry counts
@@ -53,6 +56,8 @@ native utility-drive persistence, formatting, eviction and failure handling;
 real read-through file-cache sizing, coherence, position and budget handling;
 real donor GPU clear/triangle/present pixels, guest graphics ABI and ownership;
 texture GPU pixels/mips, shared views, changed-data upload and parent lifetimes;
+created/registered vertex resources, actual GPU buffer readback, external
+header/backing ownership and bounded contiguous-memory allocation/release;
 native nonlocal recovery, frame lifetime and deliberate failure conditions;
 plus explicit instruction, indirect-call and
 kernel-call failure paths. Passing
@@ -90,7 +95,7 @@ The main LLE build's runtime source and build selection are untouched.
 - Compilation disables host optimization for short bring-up cycles. No FPS,
   full AOT coverage, or D3D8 HLE performance claim follows from this result.
 
-The next Blinx family is vertex buffers, texture binding and draw submission.
+The next Blinx family is vertex shaders, followed by binding and draw submission.
 The native texture adapter must synchronize changed guest bytes at binding/draw
 boundaries too, because Xbox unlock can be inline and guest pointers persist.
 The whole native renderer now owns graphics creation and front/back resources.
@@ -140,7 +145,7 @@ Device release with outstanding resources, reset, partial-channel/rectangle
 clear, front/back-buffer locks, and unimplemented state/draw methods stop explicitly.
 
 The MIT donor provides the D3D11 device/state/shader/resource code, not the Xbox
-32-bit guest ABI. Preparation excludes 116 unqualified COM bodies, including
+32-bit guest ABI. Preparation excludes 112 unqualified COM bodies, including
 upstream success-only implementations, and hardens reached failures. Its direct
 backend smoke test draws a triangle with explicit no-texture state and validates
 actual readback pixels. Guest tests check success/failure stack cleanup, callee
@@ -595,6 +600,44 @@ from normal upload execution. Never commit the resulting game-derived files.
 Tests independently construct rectangular Morton images and compare GPU reads
 for all four formats and the nine-level 128x256 chain, including changed writes,
 view aliasing, parent lifetime, RAM failure cleanup and recreation.
+
+## Native vertex storage checkpoint
+
+The adapter borrows the main MIT donor's real vertex-buffer allocation,
+Lock/Unlock upload and destruction. Its ignored Lock range/flags are hardened,
+and missing upload destinations terminate. The GL `vb_Unlock` bodies found in
+Phobos and NoRain return success without uploading and are excluded. Only
+whole-buffer native uploads are used here; guest Lock2 returns actual shared
+CPU bytes, preserving repeated/persistent pointer access. Future draw submission
+must synchronize changed bytes even without a new Lock or stream rebind.
+
+Created resources own a 12-byte guest header, guest-budgeted CPU allocation and
+native D3D11 buffer. Registered vertex resources retain the caller's header and
+contiguous allocation, including nonzero offsets and shared backing. Register
+applies the original Data-address transformation; final Release destroys native
+ownership while leaving external header/storage with the caller. Contiguous
+storage cannot be freed while registered resources retain it. GPU readback
+fixtures check actual bytes before/after persistent writes, external aliases,
+reference counts, cleanup, allocation failure and device recreation.
+
+`physical_memory.inc` implements the nxdk-declared `MmAllocateContiguousMemory`
+and `MmAllocateContiguousMemoryEx` ABI plus `MmFreeContiguousMemory`. It owns
+real committed bytes at the Xbox 0x80000000 CPU alias, respects page/alignment
+and inclusive physical-address bounds, and shares the existing 64 MiB budget.
+It supports READWRITE and WRITE_COMBINE|READWRITE; cache policy is logical while
+native upload supplies the CPU/GPU handoff. This bounded physical namespace
+does not model arbitrary CPU aliases, page tables or device DMA. It makes no
+full-MMU or executed LLE-differential claim. Unsupported contracts still stop.
+
+The actual title now allocates two 114688-byte vertex buffers, registers six
+external buffers, and performs another 8192-byte contiguous allocation. The
+first vertex-shader request follows real reads of both system DDS textures.
+Main, Phobos and NoRain shader implementations remain references for the next
+family: their desktop CreateVertexShader adapters ignore the declaration, and
+the main adapter expects raw microcode whereas this Xbox call carries a
+four-byte shader header. Those adapters cannot be wired directly into the
+guest ABI. Creation must retain the declaration and real shader work, with a
+guest handle distinct from native implementation pointers/handles.
 
 ## Reproduce privately
 

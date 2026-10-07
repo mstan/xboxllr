@@ -245,6 +245,7 @@ static void query_setting(void)
 
 #include "dispatcher.inc"
 #include "virtual_memory.inc"
+#include "physical_memory.inc"
 #include "sections.inc"
 #include "media.inc"
 #include "cache.inc"
@@ -259,6 +260,7 @@ static void kernel_dispatch(void)
         if (pilot_imports[i].ordinal == next_kernel_ordinal) name=pilot_imports[i].name;
     fprintf(stderr, "[KERNEL] %u %s return=%08x\n", next_kernel_ordinal, name, MEM32(g_esp));
     switch (next_kernel_ordinal) {
+    case 165: case 166: case 171: physical_kernel(next_kernel_ordinal); return;
     case 35: case 36: case 37: fsc_kernel(next_kernel_ordinal); return;
     case 327: case 328:
         g_eax=section_change(MEM32(g_esp+4),next_kernel_ordinal==327); g_esp+=8; return;

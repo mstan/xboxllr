@@ -57,6 +57,7 @@ static int test_write_faults(uint32_t va)
 #endif
 }
 #include "sections_contract_test.inc"
+#include "physical_memory_contract_test.inc"
 static void test_memory(void)
 {
     const uint32_t bp=0x1b000,sp=0x1b004,info=0x1b020;
@@ -115,6 +116,7 @@ static void test_memory(void)
     MEM32(sp)=0; call_kernel(199,free_args,3); CHECK(g_eax==0);
     CHECK(vm_committed(0,0x100000000ull)==before);
     fprintf(stderr,"PASS: virtual reservation/commit/protection/decommit/release/query ABI, real access protection, reuse zero-fill, budget/failure preservation\n");
+    test_physical_memory();
 }
 
 static HANDLE dpc_entered,dpc_release,dpc_done;

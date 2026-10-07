@@ -11,6 +11,7 @@ static HWND pilot_window;
 static ID3D11Texture2D *pilot_surfaces[2];
 static unsigned pilot_surface_refs[2];
 static struct { IDirect3DTexture8 *object; uint32_t uploaded; } pilot_textures[256];
+static struct { IDirect3DVertexBuffer8 *object; int uploaded; } pilot_vertices[256];
 
 __declspec(noreturn) void pilot_d3d_backend_stop(const char *reason)
 {
@@ -31,6 +32,8 @@ static LRESULT CALLBACK pilot_window_proc(HWND window,UINT message,WPARAM wparam
 }
 void pilot_gfx_close(void)
 {
+    for (unsigned i=0;i<256;++i)
+        if(pilot_vertices[i].object) pilot_d3d_backend_stop("device close with outstanding vertex ownership");
     for (unsigned i=0;i<256;++i)
         if(pilot_textures[i].object) pilot_d3d_backend_stop("device close with outstanding texture ownership");
     for (unsigned i=0;i<2;++i) {
@@ -117,6 +120,62 @@ int32_t pilot_gfx_surface_ref(unsigned surface,int acquire)
         ID3D11Texture2D_Release(pilot_surfaces[surface]); --pilot_surface_refs[surface];
     }
     return (int32_t)pilot_surface_refs[surface];
+}
+static D3D8VertexBuffer *pilot_vertex(uint32_t handle)
+{
+    if(!handle || handle>256 || !pilot_vertices[handle-1].object)
+        pilot_d3d_backend_stop("unowned native vertex buffer");
+    return (D3D8VertexBuffer*)pilot_vertices[handle-1].object;
+}
+int32_t pilot_gfx_vertex_create(uint32_t bytes,uint32_t *handle)
+{
+    if(!pilot_device || !handle || !bytes || bytes>64u*1024*1024) return E_INVALIDARG;
+    unsigned slot;
+    for(slot=0;slot<256 && pilot_vertices[slot].object;++slot) {}
+    if(slot==256) return E_OUTOFMEMORY;
+    IDirect3DVertexBuffer8 *object=NULL;
+    HRESULT hr=d3d8_CreateVertexBufferImpl(bytes,0,0,&object);
+    if(FAILED(hr)) return hr;
+    pilot_vertices[slot].object=object; pilot_vertices[slot].uploaded=0;
+    *handle=slot+1; return S_OK;
+}
+void pilot_gfx_vertex_destroy(uint32_t handle)
+{
+    D3D8VertexBuffer *vertex=pilot_vertex(handle);
+    if(vertex->iface.lpVtbl->Release(&vertex->iface)!=0)
+        pilot_d3d_backend_stop("native vertex buffer still referenced at destruction");
+    memset(&pilot_vertices[handle-1],0,sizeof(pilot_vertices[0]));
+}
+void pilot_gfx_vertex_upload(uint32_t handle,const void *data,uint32_t bytes)
+{
+    D3D8VertexBuffer *vertex=pilot_vertex(handle);
+    if(!data || bytes!=vertex->size) pilot_d3d_backend_stop("invalid vertex upload range");
+    if(pilot_vertices[handle-1].uploaded && !memcmp(vertex->sys_mem,data,bytes)) return;
+    BYTE *destination=NULL;
+    pilot_d3d_require(vertex->iface.lpVtbl->Lock(&vertex->iface,0,bytes,&destination,0),__FILE__,__LINE__);
+    memcpy(destination,data,bytes);
+    pilot_d3d_require(vertex->iface.lpVtbl->Unlock(&vertex->iface),__FILE__,__LINE__);
+    pilot_vertices[handle-1].uploaded=1;
+}
+int32_t pilot_gfx_vertex_readback(uint32_t handle,void *data,uint32_t capacity)
+{
+    D3D8VertexBuffer *vertex=pilot_vertex(handle);
+    if(!data || capacity<vertex->size || !pilot_vertices[handle-1].uploaded) return E_INVALIDARG;
+    D3D11_BUFFER_DESC desc;
+    ID3D11Buffer_GetDesc(vertex->d3d11_buffer,&desc);
+    desc.Usage=D3D11_USAGE_STAGING; desc.BindFlags=0; desc.MiscFlags=0; desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
+    ID3D11Buffer *staging=NULL;
+    HRESULT hr=ID3D11Device_CreateBuffer(d3d8_GetD3D11Device(),&desc,NULL,&staging);
+    if(FAILED(hr)) return hr;
+    ID3D11DeviceContext *context=d3d8_GetD3D11Context();
+    ID3D11DeviceContext_CopyResource(context,(ID3D11Resource*)staging,(ID3D11Resource*)vertex->d3d11_buffer);
+    D3D11_MAPPED_SUBRESOURCE mapped;
+    hr=ID3D11DeviceContext_Map(context,(ID3D11Resource*)staging,0,D3D11_MAP_READ,0,&mapped);
+    if(SUCCEEDED(hr)) {
+        memcpy(data,mapped.pData,vertex->size);
+        ID3D11DeviceContext_Unmap(context,(ID3D11Resource*)staging,0);
+    }
+    ID3D11Buffer_Release(staging); return hr;
 }
 static D3D8Texture *pilot_texture(uint32_t handle)
 {

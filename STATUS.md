@@ -1,5 +1,35 @@
 # STATUS
 
+## 2026-10-07 - Blinx passes vertex storage and reaches shader creation
+
+`beads-xbox.1.62`: original NTSC Blinx now creates both 112 KiB vertex buffers,
+registers six caller-owned vertex buffers against real contiguous allocations,
+then loads the two system DDS textures. Its next explicit stop is
+`D3DDevice_CreateVertexShader`. The repeated launch advances from 7096 to
+140611 function entries. This is startup progression, not a speed or coverage
+measurement. No rendered title frame, audio, movie or attract result yet.
+JSRF remains deferred.
+
+Actual allocation/upload/destruction comes from the pinned main MIT donor;
+range/flag and missing-upload checks harden the admitted methods. Registered
+headers and their backing remain caller-owned; guest pointers never contain
+native COM objects. Contiguous allocation now respects alignment, physical
+address bounds and the shared 64 MiB budget using actual committed CPU bytes.
+Its native-consumer scope excludes arbitrary aliases, MMIO/DMA and page tables.
+READWRITE and WRITE_COMBINE|READWRITE are qualified, with logical cache policy
+and explicit graphics upload. Original driver routines remain selectable;
+the main LLE implementation is unchanged.
+
+Sixteen CTests pass with expanded real GPU buffer readbacks, changed persistent
+pointer writes, shared external backing, reference/header ownership, physical
+allocation bounds/non-overlap, memory exhaustion, real release and zeroed reuse.
+Title draw submission is still unsupported; when qualified, it must synchronize
+changed persistent texture/vertex bytes and deferred state at the draw boundary.
+The next coherent family is shader declaration/program creation and binding.
+All three donor desktop shader creators ignore declaration data; the main
+creator also expects raw microcode rather than the Xbox shader header. Keep
+their shader translators as candidates and adapt the observable Xbox contract.
+
 ## 2026-10-07 - Blinx uploads its font atlas and all nine mip levels
 
 `beads-xbox.1.62`: original NTSC Blinx passes device capability/display queries,

@@ -18,6 +18,7 @@ FILES = "d3d8_device.c d3d8_gamma.c d3d8_resources.c d3d8_shaders.c d3d8_states.
 # caps/display/reset/pixel-constant/priority bodies. Qualify more as reached.
 COM = set("dev_AddRef dev_Release dev_BeginScene dev_EndScene dev_Clear dev_SetViewport dev_GetViewport dev_SetTransform dev_GetTransform dev_SetRenderState dev_GetRenderState dev_SetTextureStageState dev_GetTextureStageState dev_SetVertexShader dev_GetVertexShader dev_DrawPrimitiveUP dev_Swap d3d8_AddRef d3d8_Release d3d8_CreateDevice".split())
 COM.update("tex_AddRef tex_Release tex_LockRect tex_UnlockRect".split())
+COM.update("vb_AddRef vb_Release vb_Lock vb_Unlock".split())
 
 
 def lexical(code):
@@ -103,6 +104,11 @@ def prepare(donor: Path, output: Path):
                     '    sd.BorderColor[2]=(border&255)/255.0f;\n'
                     '    sd.BorderColor[3]=((border>>24)&255)/255.0f;')
             if name == "d3d8_resources.c":
+                code = code.replace('    (void)SizeToLock; (void)Flags;',
+                    '    if (Flags || OffsetToLock > vb->size || SizeToLock > vb->size-OffsetToLock) return E_INVALIDARG;')
+                code = code.replace('    if (ctx && vb->d3d11_buffer) {',
+                    '    if (!ctx || !vb->d3d11_buffer) pilot_d3d_backend_stop("missing vertex upload destination");\n'
+                    '    if (ctx && vb->d3d11_buffer) {')
                 code = code.replace('    if (!ctx || !d3d11_texture) return;',
                     '    if (!ctx || !d3d11_texture) pilot_d3d_backend_stop("missing texture upload destination");')
                 code = code.replace('        if (linear) {\n            xbox_unswizzle_rect',
