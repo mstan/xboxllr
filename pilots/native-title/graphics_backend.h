@@ -54,6 +54,8 @@ unsigned pilot_gfx_shader_uploads(void);
 void pilot_gfx_shader_capture_constants(void *data);
 int32_t pilot_gfx_shader_raster(const float scale[4],const float offset[4]);
 int32_t pilot_gfx_draw_vertices(unsigned primitive,unsigned first,unsigned count);
+uint32_t pilot_gfx_fvf_extent(uint32_t fvf);
+int32_t pilot_gfx_fvf_prepare(uint32_t fvf,float screen_x,float screen_y);
 unsigned pilot_gfx_shader_streams(uint32_t extents[16]);
 void pilot_gfx_pixel_fixed(void);
 /* Diagnostic raw vertex outputs, before rasterization/viewport conversion. */

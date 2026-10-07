@@ -18,7 +18,9 @@ static struct { IDirect3DTexture8 *object; ID3D11RenderTargetView *rtv; ID3D11De
 static struct { IDirect3DVertexBuffer8 *object; int uploaded; uint64_t last_use; } pilot_vertices[256];
 static uint32_t pilot_bound_textures[4],pilot_bound_vertices[16];
 void pilot_d3d_raster_texture_mode(UINT native,const float scale[4][4]);
+void pilot_d3d_fvf_prepare(UINT fvf,const float scale[4],const float offset[4]);
 #include "graphics_completion_backend.inc"
+#include "graphics_quad_backend.inc"
 
 void pilot_gfx_pixel_fixed(void)
 {
@@ -47,6 +49,7 @@ static LRESULT CALLBACK pilot_window_proc(HWND window,UINT message,WPARAM wparam
 void pilot_gfx_close(void)
 {
     pilot_completion_close();
+    pilot_quad_close();
     pilot_gfx_shaders_close();
     for (unsigned i=0;i<256;++i)
         if(pilot_vertices[i].object) pilot_d3d_backend_stop("device close with outstanding vertex ownership");
@@ -478,12 +481,35 @@ int32_t pilot_gfx_draw_up(uint32_t primitive,uint32_t count,const void *data,uin
     }
     return status;
 }
+uint32_t pilot_gfx_fvf_extent(uint32_t fvf)
+{
+    unsigned textures=(fvf>>8)&15;
+    if((fvf&15)!=4 || (fvf&0xf030u) || textures>4)
+        pilot_d3d_backend_stop("unqualified FVF: expected XYZRHW with colors and up to four coordinates");
+    if((fvf>>16)>>(textures*2))pilot_d3d_backend_stop("FVF coordinate size without coordinate");
+    unsigned extent=16+((fvf&0x40)?4:0)+((fvf&0x80)?4:0);
+    for(unsigned i=0;i<textures;++i)extent+=((((fvf>>(16+i*2))+1)&3)+1)*4;
+    return extent;
+}
+int32_t pilot_gfx_fvf_prepare(uint32_t fvf,float screen_x,float screen_y)
+{
+    if(!pilot_device)return E_FAIL;
+    pilot_gfx_fvf_extent(fvf);
+    uint32_t viewport[6];HRESULT hr=pilot_gfx_get_viewport(viewport);if(FAILED(hr))return hr;
+    float low,high;memcpy(&low,viewport+4,4);memcpy(&high,viewport+5,4);
+    if(!viewport[2] || !viewport[3] || !(high>low))return E_INVALIDARG;
+    float scale[]={2.0f/viewport[2],-2.0f/viewport[3],1/(high-low),1};
+    float offset[]={-1+(screen_x-viewport[0])*scale[0],1+(screen_y-viewport[1])*scale[1],-low/(high-low),0};
+    pilot_d3d_fvf_prepare(fvf,scale,offset);return S_OK;
+}
 int32_t pilot_gfx_draw_vertices(unsigned primitive,unsigned first,unsigned count)
 {
     if(!pilot_device || !count || (uint64_t)first+count>UINT32_MAX)return E_INVALIDARG;
     D3D11_PRIMITIVE_TOPOLOGY topology;
     if(primitive==5 && count>=3 && count%3==0)topology=D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
     else if(primitive==6 && count>=3)topology=D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP;
+    else if(primitive==8 && count>=4 && !(count%4) && first<=INT32_MAX && count<=UINT32_MAX/6)
+        topology=D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
     else return E_NOTIMPL;
     float scale[4][4];
     for(unsigned stage=0;stage<4;++stage) {
@@ -497,7 +523,8 @@ int32_t pilot_gfx_draw_vertices(unsigned primitive,unsigned first,unsigned count
     }
     pilot_d3d_raster_texture_mode(1,scale);d3d8_shaders_prepare_pixel();d3d8_states_apply();
     ID3D11DeviceContext *context=d3d8_GetD3D11Context();
-    ID3D11DeviceContext_IASetPrimitiveTopology(context,topology);ID3D11DeviceContext_Draw(context,count,first);
+    ID3D11DeviceContext_IASetPrimitiveTopology(context,topology);
+    if(primitive==8)pilot_quad_draw(first,count);else ID3D11DeviceContext_Draw(context,count,first);
     pilot_mark_draw();
     if(pilot_color_target){pilot_textures[pilot_color_target-1].uploaded=1;pilot_textures[pilot_color_target-1].gpu_written=1;}
     if(pilot_depth_target && pilot_depth_target!=UINT32_MAX){pilot_textures[pilot_depth_target-1].uploaded=1;pilot_textures[pilot_depth_target-1].gpu_written=1;}

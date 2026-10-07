@@ -77,6 +77,10 @@ int pilot_gfx_xbox_render_state(uint32_t state,uint32_t value)
         else return 0;
         break;
     case 148:host=D3DRS_TEXTUREFACTOR; break;
+    case 151:
+        /* The admitted non-MSAA native rasterizer disables both edge modes.
+         * Enabling Xbox polygon smoothing needs a separate qualified path. */
+        if(value)return 0;host=D3DRS_EDGEANTIALIAS;break;
     default:return 0;
     }
     goto apply;

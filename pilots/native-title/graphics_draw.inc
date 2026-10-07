@@ -40,10 +40,14 @@ static void graphics_draw_vertices(const uint32_t args[3])
 {
     unsigned primitive=args[0],first=args[1],count=args[2];
     if(!count || (uint64_t)first+count>UINT32_MAX)stop("invalid draw range",count);
-    if((primitive!=5 && primitive!=6) || count<3 || (primitive==5 && count%3))stop("unqualified primitive/count",primitive);
+    if((primitive!=5 && primitive!=6 && primitive!=8) || count<3 ||
+        (primitive==5 && count%3) || (primitive==8 && count%4))stop("unqualified primitive/count",primitive);
     if(MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_PIXEL_SHADER))stop("unqualified programmable pixel draw",0);
     graphics_target_prepare(graphics_target);graphics_target_prepare(graphics_depth);
-    uint32_t extents[16];unsigned streams=pilot_gfx_shader_streams(extents);
+    uint32_t shader=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_SHADER);
+    uint32_t extents[16]={0};unsigned streams;
+    if(shader&1)streams=pilot_gfx_shader_streams(extents);
+    else {extents[0]=pilot_gfx_fvf_extent(shader);streams=1;}
     for(unsigned i=0;i<16;++i)if(streams&(1u<<i)) {
         uint32_t cache=PILOT_D3D_STREAMS+i*12,stride=MEM32(cache);
         struct GraphicsVertexObject *vertex=graphics_vertex(MEM32(cache+8));
@@ -55,6 +59,22 @@ static void graphics_draw_vertices(const uint32_t args[3])
         if(header)graphics_texture_sample_prepare(graphics_texture_slot(header));
     }
     graphics_sync_deferred();
+    if(!(shader&1)) {
+        if(MEM32(PILOT_D3D_RENDER_STATES+92*4))stop("pretransformed fog is unqualified",shader);
+        if(pilot_gfx_fvf_prepare(shader,graphics_float(TRANSFORM_FIELD(SCREEN_OFFSET)),
+            graphics_float(TRANSFORM_FIELD(SCREEN_OFFSET)+4))<0)stop("native FVF preparation failed",shader);
+        const char *capture=getenv("XLLE_PILOT_FVF_CAPTURE");
+        if(capture && *capture) {
+            struct GraphicsVertexObject *vertex=graphics_vertex(MEM32(PILOT_D3D_STREAMS+8));
+            uint32_t stride=MEM32(PILOT_D3D_STREAMS),bytes=pilot_gfx_fvf_extent(shader);
+            static unsigned sequence;char path[1024];uint32_t header[]={shader,primitive,first,count,stride,bytes};
+            if(snprintf(path,sizeof(path),"%s/fixed-draw-%u.bin",capture,++sequence)>=(int)sizeof(path))stop("FVF draw capture path",0);
+            FILE *file=fopen(path,"wb");if(!file || fwrite(header,sizeof(header),1,file)!=1)stop("FVF draw capture header",0);
+            if(fwrite(memory+PILOT_D3D_RENDER_STATES,166*4,1,file)!=1 || fwrite(memory+PILOT_D3D_TEXTURE_STATES,128*4,1,file)!=1)stop("FVF draw capture states",0);
+            for(unsigned i=0;i<count;++i)if(fwrite(memory+vertex->data+(first+i)*stride,bytes,1,file)!=1)stop("FVF draw capture vertices",0);
+            if(fclose(file))stop("FVF draw capture close",0);
+        }
+    } else {
     uint32_t viewport[6];if(pilot_gfx_get_viewport(viewport)<0)stop("missing draw viewport",0);
     float low,high;memcpy(&low,viewport+4,4);memcpy(&high,viewport+5,4);
     float depth=graphics_float(TRANSFORM_FIELD(DEPTH_SCALE));
@@ -63,6 +83,7 @@ static void graphics_draw_vertices(const uint32_t args[3])
     float offset[]={-1-viewport[0]*scale[0],1-viewport[1]*scale[1],-low/(high-low),0};
     if(pilot_gfx_shader_raster(scale,offset)<0)stop("native raster constants failed",0);
     graphics_draw_capture(args);
+    }
     int32_t result=pilot_gfx_draw_vertices(primitive,first,count);
     if(result<0)stop("native vertex draw failed",(uint32_t)result);
     fprintf(stderr,"[DRAW SUBMIT] primitive=%u first=%u count=%u\n",primitive,first,count);

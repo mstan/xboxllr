@@ -48,6 +48,10 @@ static int test_native_draw_pipeline(void)
      * interpolation, dropping Q, wrong strip/count, or ignoring first fails. */
     CHECK(pixels[sample]==32 && pixels[sample+1]==32 && pixels[sample+2]==128);
     CHECK(!pixels[(2*64+2)*4] && pixels[(50*64+50)*4+2]==128);
+    /* Fixed-function selection replaces VS/layout and b0/b1. Rebinding the
+     * same native program must restore them even when constants are unchanged. */
+    CHECK(pilot_gfx_fvf_prepare(0x44,.53125f,.53125f)==0);
+    CHECK(pilot_gfx_shader_bind(shader)==0 && pilot_gfx_shader_raster(scale,offset)==0);
     /* A farther, differently colored submission must fail the actual depth test. */
     for(unsigned i=2;i<6;++i)xyz[i][2]=12582911.25f;
     pilot_gfx_vertex_upload(positions,xyz,sizeof(xyz));CHECK(pilot_gfx_xbox_texture_state(0,14,4));

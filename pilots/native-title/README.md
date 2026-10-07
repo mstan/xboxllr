@@ -54,8 +54,11 @@ its next texture and vertex shader. Seven real `D3DDevice_DrawVertices`
 triangle strips now render the 640x480 "Warping space-time..." loading image
 into the native back buffer. Both fresh/repeated captures match. Its first
 resource query now passes for an owned, never-submitted vertex buffer. It locks
-the buffer and binds its font texture/stream, then stops at `SetVertexShader(0x144)`
-before Swap/presentation. No title target binding yet.
+the buffer, binds its font texture/stream, selects FVF `0x144` and submits a real
+quad. It restores the previous shader/state and now reaches its first `Swap`.
+The callback-completion contract guard stops before presentation. No title target
+binding yet. The font quad samples transparent atlas pixels; visible title text
+has not been established by this draw.
 No title buffer Play or audible game output is established by those runs.
 `PILOT_AUDIO=ORIGINAL` still executes the original sound-object allocations and
 contiguous-page setup, stopping at `KfRaiseIrql` (ordinal 160) in audio-driver
@@ -113,6 +116,62 @@ plus explicit instruction, indirect-call and
 kernel-call failure paths. Passing
 the other title's XBE to the Blinx artifact is rejected before guest execution.
 The main LLE build's runtime source and build selection are untouched.
+
+### Pretransformed FVF and quad checkpoint (2026-10-07)
+
+Blinx now submits eight draws: seven loading-art strips and its first font quad.
+Fresh/repeated launches reach `D3DDevice_Swap` (caller `0xaa711`, flags zero),
+where the existing callback-completion guard stops. Entries 22252480/22252388;
+25/22 consecutive callbacks. Both images retain the previous loading hash.
+Captured font vertices occupy x=95.5..97.5, y=415.5..440.5 and sample the atlas's
+transparent top-left strip. The unchanged image is expected; this is not evidence
+of visible text, presentation, interactive menu, audio, attract or cadence.
+
+The MIT sp00nznet fixed-function VS, input-layout cache, transform uploads and
+pixel/state pipeline are reused. All three pinned donors were consulted for FVF
+and quad handling. Adaptations preserve the original Xbox FVF descriptor/query
+and compiled-shader transitions, fix coordinate width encoding (2,3,4,1), honor
+texture-coordinate selection, and convert screen coordinates using the active
+viewport, original screen offset and normalized depth. The revision's shared
+FVF descriptor is discovered by the binding tool; no title address is embedded
+in the runtime. Qualified formats are XYZRHW with optional diffuse/specular and
+up to four coordinates. Normals/blend weights and pretransformed fog are guarded.
+
+Xbox quad lists use the donor's `(0,1,2),(0,2,3)` topology, also matching the
+machine LLE triangulation. A growing reusable immutable index buffer avoids
+per-draw vertex expansion. It preserves first/count, restores the previous
+native index binding and is released on device close. Edge-AA disable now updates
+the original cache and selects the existing non-antialiased native raster mode;
+enable remains guarded rather than silently approximated.
+
+All 29 CTests pass (11.07 s). Real pixels cover perspective RHW, zero-RHW 2D
+quads, nondefault viewport/depth, coordinate remapping, 1/3/4-component layout
+offsets, quad batches/nonzero first, actual disabled AA and return to the compiled
+shader with unchanged constants. Three device lifetimes pass. Ten full original
+SetVertexShader executions match all 276 descriptor bytes and query/constant/
+program-cache effects; the actual title descriptor also matches on both launches.
+The complete original edge-AA disable routine matches its cache/two-mode update.
+
+The original 12-slot pretransformed GPU program is captured only in private
+output and executed by the permissive NV2A decoder. Screen coordinates include
+the original 0.53125 offset, depth scales by 16777215, finite W is reciprocal RHW
+(2e-5 float tolerance). Actual title font vertices have RHW zero: original RCP
+produces infinite W. Native clip coordinates use a finite limiting magnitude
+of 1.8446744e19, preserving equal-zero 2D positions/interpolation in GPU fixtures.
+This is a documented HLE representation tolerance, not bit-exact hardware proof;
+mixed/extreme RHW, clipping edges, transformed texture coordinates and broader
+pretransformed fog remain unqualified. Production executes one vertex pipeline.
+
+Private evidence: `build/blinx/fvf-validation.aot-private.json`,
+`run-fvf-{fresh,repeat}.log`, `fvf-{fresh,repeat}` captures, `fvf-fixtures`,
+`audit_fvf.py`, `fvf-original-program.bin`, `build/fvf-{contract-tests,gpu,original-fixtures,original-program}.log`.
+Source-owned `pilot_shader_test --fvf-reference` reads the private original GPU
+program. EXE SHA-256:
+`1365f7834fc5728ae5c3afaac8553c6c6d30ac52ac0fad93829b0c38c2a71424`.
+The prior 28 actual programmable vertices still match the LLE decoder, and
+state-block/transform comparisons still pass. No GPL implementation added;
+the existing private CPU artifact remains outside shipping. Next: real Swap
+presentation and callback counters/flags, then validate the next title frame.
 
 ### Resource completion checkpoint (2026-10-07)
 

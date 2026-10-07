@@ -34,6 +34,37 @@ static void graphics_shader_get_constants(const uint32_t *args)
 }
 static void graphics_shader_bind(uint32_t handle)
 {
+    if(!(handle&1)) {
+        pilot_gfx_fvf_extent(handle);
+        uint32_t object=PILOT_D3D_FVF_OBJECT,flags=2,offset=16,dimensions=0;
+        FILE *capture_file=NULL;const char *capture=getenv("XLLE_PILOT_FVF_CAPTURE");
+        if(capture && *capture) {
+            static unsigned sequence;char path[1024];uint32_t metadata[]={handle,0x114};
+            if(snprintf(path,sizeof(path),"%s/fvf-%u.bin",capture,++sequence)>=(int)sizeof(path))stop("FVF capture path",0);
+            capture_file=fopen(path,"wb");
+            if(!capture_file || fwrite(metadata,sizeof(metadata),1,capture_file)!=1 ||
+                fwrite(memory+object,0x114,1,capture_file)!=1)stop("FVF capture input",0);
+        }
+        for(unsigned i=0;i<16;++i)MEM32(object+0x1c+i*16)=2;
+        MEM32(object+0x1c)=0x42;
+        for(unsigned i=0;i<2;++i)if(handle&(0x40u<<i)) {
+            flags|=0x400u<<i;MEM32(object+0x48+i*16)=offset;MEM32(object+0x4c+i*16)=0x40;offset+=4;
+        }
+        for(unsigned i=0;i<((handle>>8)&15);++i) {
+            unsigned lanes=((((handle>>(16+i*2))+1)&3)+1);
+            MEM32(object+0xa8+i*16)=offset;MEM32(object+0xac+i*16)=(lanes<<4)|2;
+            dimensions|=lanes<<(i*8);offset+=lanes*4;
+        }
+        MEM32(object+4)=flags;MEM32(object+0x10)=dimensions;
+        if(capture_file && (fwrite(memory+object,0x114,1,capture_file)!=1 || fclose(capture_file)))stop("FVF capture output",0);
+        MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_SHADER)=handle;
+        MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_OBJECT)=object;
+        MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_VERTEX_START)=0;
+        /* Native state is bound lazily at the draw; the FVF descriptor remains
+         * queryable immediately. Original programmable constant/cache data is
+         * preserved across fixed-function selection. */
+        return;
+    }
     struct GraphicsShader *shader=graphics_shader(handle);
     int32_t result=pilot_gfx_shader_bind(shader->native);
     if(result<0)stop("native vertex shader binding failed",(uint32_t)result);

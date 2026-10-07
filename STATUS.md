@@ -1,5 +1,24 @@
 # STATUS
 
+## 2026-10-07 - Blinx reaches its first Swap after native font drawing
+
+Fresh/repeated NTSC launches now pass `SetVertexShader(0x144)`, submit the font
+quad, restore their compiled shader/state and request `Swap`. Eight real draws
+execute; the loading image remains identical. The font quad samples a transparent
+atlas region, so this proves submission, not visible title text. The existing
+guard stops before presentation until swap/vblank callback data is implemented.
+Entries are 22252480/22252388 with 25/22 completed callbacks. No title Play,
+movie, interactive menu, attract loop or original cadence yet. JSRF stays deferred.
+
+The pretransformed path reuses the MIT donor's compiled fixed-function shader,
+layout cache and uploads, with Xbox descriptor/coordinate-width/selection,
+viewport/depth and screen-offset adaptations. Quad batches reuse an index buffer.
+All 29 CTests pass (11.07 s), including real FVF pixels and shader restoration.
+Ten original-x86 fixture setters plus the actual title binding match descriptor
+and cache contracts; the original GPU program verifies position/depth/reciprocal
+behavior. Native finite limiting W for zero-RHW overlays is documented separately
+from exact arithmetic. See [FVF evidence and limits](pilots/native-title/README.md#pretransformed-fvf-and-quad-checkpoint-2026-10-07).
+
 ## 2026-10-07 - Blinx passes its first resource-completion query
 
 Fresh/repeated native NTSC launches now pass `D3DResource_IsBusy` on an owned,

@@ -104,10 +104,14 @@ static int check_capture(const char *path)
     return check_program(code,header[2],elements,path);
 }
 #include "graphics_draw_reference_test.inc"
+#include "graphics_fvf_reference_test.inc"
 int main(int argc,char **argv)
 {
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
     uint32_t pp[17]={64,64,6,1,0x11,1,0,0,1,0x2a,0,0,1};CHECK(pilot_gfx_create(pp)==0);
+    if(argc==3 && !strcmp(argv[1],"--fvf-reference")) {
+        CHECK(check_fvf_reference(argv[2])==0);pilot_gfx_close();return 0;
+    }
     if(argc>2 && !strcmp(argv[1],"--draw-capture")) {
         for(int i=2;i<argc;++i)CHECK(check_draw_capture(argv[i])==0);
         pilot_gfx_close();return 0;

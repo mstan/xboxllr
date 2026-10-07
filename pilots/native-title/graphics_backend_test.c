@@ -7,6 +7,7 @@
 #include "graphics_bump_backend_test.inc"
 #include "graphics_draw_backend_test.inc"
 #include "graphics_completion_backend_test.inc"
+#include "graphics_fvf_backend_test.inc"
 static int test_transform_pipeline(void)
 {
     static const D3DTRANSFORMSTATETYPE states[]={D3DTS_VIEW,D3DTS_PROJECTION,D3DTS_TEXTURE0,D3DTS_TEXTURE1,
@@ -129,6 +130,7 @@ int main(void)
         CHECK(test_transform_pipeline()==0);
         CHECK(test_bump_pipeline()==0);
         CHECK(test_resource_bindings()==0);
+        CHECK(test_fvf_pipeline()==0);
         CHECK(test_native_draw_pipeline()==0);
         CHECK(test_resource_completion()==0);
         /* Teardown also owns queries which the caller has not retired. A fast

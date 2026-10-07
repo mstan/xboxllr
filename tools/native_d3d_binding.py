@@ -89,6 +89,13 @@ def bind(xbe: Path, output: Path, symbols: Path):
         raise ValueError('unreviewed vertex cache layout')
     state_defaults['vertex_binding']=dict(program_cache=program_offsets[0],start=start_offsets[0],
         record_flags=flag_offsets[0],record_disable=0x10,recorder_sha256=context.digest(record_helper))
+    fvf_set=next(s for s in identified if s['name']=='D3DDevice_SetVertexShader')
+    fvf_code=list(Cs(CS_ARCH_X86,CS_MODE_32).disasm(data(fvf_set['address'],functions[fvf_set['address']]['size']),fvf_set['address']))
+    fvf_objects=[int(i.op_str.split(', ')[1],0) for i in fvf_code if i.mnemonic=='mov' and i.op_str.startswith('edi, 0x')]
+    fvf_calls=[int(i.op_str,0) for i in fvf_code if i.mnemonic=='call']
+    if len(fvf_objects)!=1 or len(fvf_calls)<1:raise ValueError('unreviewed FVF descriptor binding')
+    state_defaults['fvf_binding']=dict(object=fvf_objects[0],decoder=fvf_calls[0],
+        decoder_sha256=context.digest(functions[fvf_calls[0]]))
     # Original resource binders use a separate four-bit count at Common[22:19].
     # Retired binding fences and texture-type caches belong to this revision.
     texture_bind=next(s for s in identified if s['name']=='D3DDevice_SetTexture')
@@ -182,6 +189,7 @@ def bind(xbe: Path, output: Path, symbols: Path):
         ', '.join(f'{{0x{x["format"]:x}u,0x{x["flags"]:x}u}}' for x in binding['surface_formats'])+'};']
     block=binding['stateblock']
     header += [f'#define PILOT_D3D_STREAMS 0x{block["streams"]:x}u']
+    header += [f'#define PILOT_D3D_FVF_OBJECT 0x{binding["fvf_binding"]["object"]:x}u']
     header += [f'#define PILOT_D3D_VERTEX_{name.upper()} {binding["vertex_binding"][name]}u'
                for name in ('program_cache','start','record_flags','record_disable')]
     header += [f'#define PILOT_D3D_RESOURCE_{name.upper()} {offset}u' for name,offset in binding['resource_binding'].items()]
