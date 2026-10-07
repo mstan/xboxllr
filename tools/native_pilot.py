@@ -78,6 +78,8 @@ def prepare(args):
     (out / "gen" / "pilot_cache_binding.c").unlink(missing_ok=True)
     (out / "gen" / "pilot_d3d_binding.c").unlink(missing_ok=True)
     (out / "gen" / "pilot_d3d_bindings.h").unlink(missing_ok=True)
+    (out / "gen" / "pilot_jump_bindings.h").unlink(missing_ok=True)
+    (out / "gen" / "pilot_cpu_binding.c").unlink(missing_ok=True)
     identity.write_text(json.dumps(image, indent=2) + "\n")
 
     def run(name, argv):
@@ -122,6 +124,12 @@ def prepare(args):
     if args.d3d_symbols:
         from native_d3d_binding import bind
         bind(args.xbe, out, args.d3d_symbols)
+    if args.jump_symbols:
+        from native_jump_binding import bind
+        bind(args.xbe, out, args.jump_symbols)
+    if args.cpu_symbols:
+        from native_cpu_binding import bind
+        bind(args.xbe, out, args.cpu_symbols)
     print(json.dumps({k: v for k, v in manifest.items() if k != "files"}, indent=2))
 
 
@@ -135,4 +143,6 @@ if __name__ == "__main__":
     parser.add_argument("--media-symbols", type=Path, help="Bind a reviewed media helper using this XDK symbol inventory")
     parser.add_argument("--cache-symbols", type=Path, help="Bind reviewed utility-drive service using this XDK symbol inventory")
     parser.add_argument("--d3d-symbols", type=Path, help="Bind reviewed graphics family using this XDK symbol inventory")
+    parser.add_argument("--jump-symbols", type=Path, help="Qualify original CRT nonlocal jumps against this image inventory")
+    parser.add_argument("--cpu-symbols", type=Path, help="Bind the reviewed CPU capability probe")
     prepare(parser.parse_args())

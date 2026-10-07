@@ -81,8 +81,7 @@ void recomp_cxx_throw(uint32_t object, uint32_t info) { (void)info; stop("C++ ex
 void recomp_debug_service(uint32_t service, uint32_t argument) { (void)argument; stop("debug service unsupported", service); }
 uint32_t recomp_eflags_push(void) { stop("PUSHFD arithmetic flags not exported by donor lowering", recent[(recent_pos-1)&31]); }
 void recomp_eflags_pop(uint32_t value) { (void)value; stop("POPFD arithmetic flags not imported by donor lowering", recent[(recent_pos-1)&31]); }
-jmp_buf *recomp_setjmp_slot(uint32_t buffer) { stop("guest setjmp unsupported", buffer); }
-int recomp_guest_longjmp(uint32_t buffer, uint32_t value) { (void)value; stop("guest longjmp unsupported", buffer); }
+#include "nonlocal_jump.inc"
 void recomp_trace_enter(const char *name, uint32_t va)
 {
     (void)name;
@@ -106,6 +105,17 @@ void recomp_cpuid(uint32_t leaf, uint32_t subleaf, uint32_t out[4])
     if (leaf == 0) { out[0]=2; out[1]=0x756e6547; out[2]=0x6c65746e; out[3]=0x49656e69; }
     else if (leaf == 1) { out[0]=0x68a; out[1]=0; out[2]=0; out[3]=0x0383f9ff; }
     else stop("CPUID leaf unsupported", leaf);
+}
+
+/* Whole cdecl capability-query boundary. General PUSHFD/POPFD still require
+ * flag-aware lowering. Report the configured guest CPU, not the host CPU. */
+void pilot_cpu_mmx_available(void)
+{
+    uint32_t capabilities[4];
+    recomp_cpuid(1,0,capabilities);
+    g_ecx=capabilities[2];
+    g_eax=g_edx=(capabilities[3]>>23)&1u;
+    g_esp+=4;
 }
 
 recomp_func_t recomp_lookup_manual(uint32_t va) { (void)va; return NULL; }

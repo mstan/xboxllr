@@ -1,5 +1,45 @@
 # STATUS
 
+## 2026-10-07 - Blinx recovers from the first image-format probe
+
+`beads-xbox.1.62`: original NTSC Blinx now arms native recovery, executes its
+original CRT's longjmp work when the JPEG decoder rejects `Arial_16.tga`, and
+continues into D3D texture setup. Fresh/repeated launches stop at the next
+unqualified query, `D3DDevice_GetDeviceCaps` (entries 510/418). Both read all
+131116 font-image bytes and perform the real nonlocal return. No uploaded font,
+Blinx draw, menu, movie, audio, attract completion or cadence result yet.
+JSRF remains deferred.
+
+The native stack transfer adapts the MIT main donor's thread-local jump slots.
+Its guest-unwind omission and silent slot-overwrite/missing-target fallbacks
+were not adopted. The hash-bound original CRT still performs registration,
+unwind callbacks and notification work; the bridge runs only at its final
+transfer. It checks restored guest state, invalidates younger slots and releases
+slots when their owning generated frame returns normally. Unimplemented SEH
+paths still stop; this is not a claim of general exception support. Binding also
+publishes restored EBP before the CRT helper calls, which the donor's frameless
+lowering omitted.
+
+The JPEG library's whole MMX query now reads the configured guest CPUID through
+a cdecl native service. Its original body remains selectable at build time;
+that selection was rebuilt/run to the original PUSHFD boundary, then NATIVE
+restored. General PUSHFD/POPFD remains unsupported. This boundary promises the
+capability result and caller ABI, not incidental EFLAGS mutation by the probe.
+
+Sixteen CTests pass, including real nested native jumps, zero normalization,
+full return values, callee-save restoration, thread isolation, rearming and
+normal-return cleanup. Six negative cases require the intended explicit stop,
+not any arbitrary failure. These fixtures and the actual guest CRT execution
+are bounded qualification, not an executed LLE differential. Evidence:
+`build/jump-contract-tests.log`, `build/blinx/run-jump-{fresh,repeat}.log`,
+`build/blinx/run-jump-original-probe.log`, and
+`build/blinx/jump-validation.aot-private.json`.
+
+Next: the graphics capability/texture allocation/upload family. Main MIT donor
+`dev_GetDeviceCaps` returns success without filling output and is unusable.
+The inspected original Xbox helper instead copies its actual 53-DWORD caps
+table; qualify that data contract before allocating/uploading the font texture.
+
 ## 2026-10-07 - Blinx passes graphics-state setup and reads its first font image
 
 `beads-xbox.1.62`: original NTSC Blinx now executes culling/depth setup, six raw

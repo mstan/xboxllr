@@ -22,8 +22,9 @@ pointer cell; Blinx configures real file caching (zero then 64 pages). The nativ
 renderer now creates a real 640x480 D3D11 device and supplies an owned front
 surface to `GetBackBuffer2(-1)`. Blinx now passes its initial graphics-state
 setup and reads the full 131116-byte Arial font TGA from installed content.
-The next unsupported operation is `setjmp` in the image decoder. Font image
-decoding/upload and title draws are not yet qualified.
+The decoder now performs real native/guest nonlocal recovery after the JPEG
+probe rejects the TGA, then reaches `D3DDevice_GetDeviceCaps` in texture setup.
+Font upload and title draws are not yet qualified.
 The ORIGINAL renderer still reaches `MmAllocateContiguousMemoryEx`.
 The OPTICAL build retains
 and executes the original verification helper, stopping on unsupported raw
@@ -40,7 +41,7 @@ EEPROM user-settings queries and NTSTATUS-to-DOS-error conversion. Timer arming,
 expiry and DPC delivery are implemented as described below. Callback delivery
 is exercised by the contract tests. No callbacks, draws or completions are discarded.
 
-Fourteen contract tests pass: concurrent threads with separate registers/TLS and
+Sixteen contract tests pass: concurrent threads with separate registers/TLS and
 recursive exclusion, handle closure/errors and EEPROM buffer/checksum behavior;
 timer/DPC/event-wait contracts; real VM reservation/commit/free/protection/query;
 installed-media identity and actual file I/O; writable storage and link lifetimes;
@@ -48,6 +49,7 @@ deferred section residency and shared-page ownership;
 native utility-drive persistence, formatting, eviction and failure handling;
 real read-through file-cache sizing, coherence, position and budget handling;
 real donor GPU clear/triangle/present pixels, guest graphics ABI and ownership;
+native nonlocal recovery, frame lifetime and deliberate failure conditions;
 plus explicit instruction, indirect-call and
 kernel-call failure paths. Passing
 the other title's XBE to the Blinx artifact is rejected before guest execution.
@@ -84,9 +86,9 @@ The main LLE build's runtime source and build selection are untouched.
 - Compilation disables host optimization for short bring-up cycles. No FPS,
   full AOT coverage, or D3D8 HLE performance claim follows from this result.
 
-The next Blinx family is native/guest nonlocal recovery for image decoding.
-The main MIT donor contains the matching setjmp/longjmp helper architecture;
-its exhaustion and unknown-buffer fallbacks must be hardened before adoption.
+The next Blinx family is graphics capability queries and texture allocation/upload.
+The main donor's no-work capability-query success is excluded. The original
+guest query copies a real 53-DWORD table; qualify its complete output contract.
 The whole native renderer now owns graphics creation and front/back resources.
 Utility-drive selection/mounting now
 runs through the complete native library boundary below, and file-cache control
@@ -555,6 +557,31 @@ reference. Its absolute-as-immediate handling and fixed polling approach were
 not adopted. No GPL service bodies were incorporated.
 
 ## Reproduce privately
+
+### Decoder recovery
+
+`tools/native_jump_binding.py --xbe <default.xbe> --output <repo>/build/blinx
+--symbols <default_xdk_symbols.json>` qualifies the original CRT by body and
+image hashes. It retains guest register save/restore, SEH and notification work,
+then transfers the native stack using the MIT donor's adapted jump-slot bridge.
+Generated caller returns release their slots; nonlocal transfer invalidates
+younger slots. The current bound supports three identified setjmp callers and
+two longjmp callsites. Unknown shapes, recursive jumps during unwinding,
+unmatched/corrupted buffers and capacity exhaustion stop. General guest exception
+dispatch/global unwinding is still unqualified where it reaches missing services.
+
+`tools/native_cpu_binding.py` with the same arguments binds the decoder's whole
+zero-argument cdecl MMX query. Select `-DPILOT_CPU_PROBE=NATIVE` to query the
+configured Xbox CPUID profile; `ORIGINAL` retains the original flag-toggle
+probe. Native output is the Boolean capability, with callee-save registers and
+stack cleanup preserved. Incidental EFLAGS mutation is outside that HLE API
+contract. The general arithmetic-flags lowering remains unsupported.
+
+For full regeneration, pass both `--jump-symbols` and `--cpu-symbols` to
+`tools/native_pilot.py` alongside the existing media/cache/graphics bindings.
+Runtime fixtures exercise real host jumps and failure contracts; actual Blinx
+executes the guest CRT and returns from JPEG rejection into texture setup.
+This is not a claim of an executed LLE differential or a complete SEH model.
 
 From the repository root, using your pinned donor checkout and owned inputs:
 

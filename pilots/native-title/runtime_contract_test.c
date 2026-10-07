@@ -42,6 +42,7 @@ static void call_kernel(unsigned ordinal,const uint32_t *args,unsigned argc)
 #include "storage_contract_test.inc"
 #include "cache_contract_test.inc"
 #include "file_cache_contract_test.inc"
+#include "nonlocal_jump_contract_test.inc"
 
 static int test_write_faults(uint32_t va)
 {
@@ -287,6 +288,8 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"sections")) { test_sections(); return 0; }
         if (!strcmp(argv[1],"memory")) { test_memory(); return 0; }
         if (!strcmp(argv[1],"timers")) { test_timers(); return 0; }
+        if (!strcmp(argv[1],"jumps")) { test_jumps(); return 0; }
+        if (!strncmp(argv[1],"jump-",5)) { test_jump_failure(argv[1]+5); return 1; }
         if (!strcmp(argv[1],"instruction")) recomp_unimpl("test unsupported instruction",0x12340);
         if (!strcmp(argv[1],"indirect")) recomp_icall_fail_log(0x12340);
         if (!strcmp(argv[1],"kernel")) { next_kernel_ordinal=366; kernel_dispatch(); }

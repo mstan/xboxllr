@@ -101,6 +101,18 @@ The DOS-directory pseudo-handle correction follows nxdk's
 `ObDosDevicesDirectory()` declaration and the main donor's handle-adaptation
 reference, while resolving through this pilot's existing owned namespace.
 
+The pilot's `pilots/native-title/nonlocal_jump.inc` adapts the thread-local
+native jump-slot mechanism from main MIT sp00nznet `1409a7d7801d3e931fb1074be6104209ddd9a33e`,
+`src/kernel/xbox_memory_layout.c` (non-local jumps section). Copyright (c) 2026
+sp00nz; the complete notice is retained in
+[LICENSES/sp00nznet-MIT.txt](LICENSES/sp00nznet-MIT.txt). Changes add explicit
+capacity/missing/corrupt-buffer failures, caller-frame lifetime and sequence
+tracking, and validation before native transfer. Original guest CRT code retains
+its unwind/notification work; the donor's shortcut around that work is excluded.
+The CPU capability service is independently expressed from the original guest
+probe's observable contract and the pilot's configured CPUID profile. Neither
+change clears the pre-existing GPL dependency of the combined private pilot.
+
 ## Unicorn Engine / QEMU
 
 [Unicorn Engine](https://github.com/unicorn-engine/unicorn), version `2.1.1`,
