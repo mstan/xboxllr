@@ -46,8 +46,9 @@ locks/unlocks their first four bytes, then loads the complete 15188-byte
 views and queries the current color/depth surfaces. It reaches 96 compiled
 vertex shaders and 37 owned pixel definitions. It now captures its real ALL
 state block and registers its vertical-blank callback, which executes and
-returns repeatedly. After loading five menu textures, it stops at
-`D3DDevice_SetVertexShader`. No title target binding or draw occurs yet.
+returns repeatedly. After loading five menu textures, it now binds its compiled
+vertex shader and the donor's fixed-function pixel shader, then stops at
+`D3DDevice_SetTexture`. No title target binding or draw occurs yet.
 No title buffer Play or audible game output is established by those runs.
 `PILOT_AUDIO=ORIGINAL` still executes the original sound-object allocations and
 contiguous-page setup, stopping at `KfRaiseIrql` (ordinal 160) in audio-driver
@@ -107,6 +108,59 @@ the other title's XBE to the Blinx artifact is rejected before guest execution.
 The main LLE build's runtime source and build selection are untouched.
 
 ## Reuse and scope
+
+### Shader binding checkpoint (2026-10-07)
+
+The programmable vertex selection now binds the actual compiled D3D11 shader,
+input layout and constant buffer. It publishes the original guest handle and
+descriptor, applies declaration constants and mirrors the program cache when
+the original recorder is enabled. Binding does not invent a public AddRef.
+Program/selection/cache offsets are decoded into the revision binding; shared
+runtime code contains no Blinx addresses.
+
+The qualified constant setters preserve their distinct contracts. The one- and
+four-register fastcall entries take a hardware register in ECX and data in EDX.
+The generic fastcall entries take their count in DWORDs on the stack. The fast
+variant changes GPU state without changing the queryable CPU cache; the normal
+variant obeys the original recorder-disable flag. Queries take signed logical
+registers, mapped by adding 96. Native uploads coalesce until draw submission;
+the production path performs no reference execution or GPU readback. Identical
+writes do not upload again.
+
+For `SetPixelShader(0)`, the prepared MIT sp00nznet renderer now exposes its real
+fixed-function pixel compiler/state upload separately from vertex preparation.
+This reuses the existing native pixel pipeline without substituting the donor's
+FVF vertex shader. The pinned donor and licensing scope are unchanged. Nonzero
+pixel handles still stop before returning; their definitions have been created
+but their NV2A combiner pipeline has not been qualified.
+
+Validation: twelve captured calls match execution of the original XBE routines
+for current handles, program/constant caches and query outputs. The offline
+oracle supplies captured program/declaration data in the original load packet
+format; it executes the original load/select/cache routines. Separate real GPU
+stream-output probes consume the actually bound shader/layout/constant buffer,
+verify fast writes versus cached queries, and verify that pixel selection
+preserves vertex binding. Batched writes produce one upload, unchanged writes
+produce none. All 29 CTests pass, including the retained fixed-function pixel
+readback and state tests. This is a bounded service result, not title throughput.
+
+Fresh/repeated NTSC Blinx reaches `D3DDevice_SetTexture` at `0x001329b0`
+(stage 1, null texture) with 22252334/22252242 entries and 20/17 consecutive
+title callbacks. It has 96 compiled vertex shaders and 37 owned pixel
+definitions. No title target bind, draw/frame, Play, movie or attract loop yet.
+Next: real texture/stream binding and the vertex-to-raster interface before
+enabling title draws. Raw vertex-output probes do not validate viewport undo,
+pixel-input semantics or rasterization. FVF transitions, independent program
+slot loading/selection, partial float4 writes and programmable pixel binding
+remain guarded, as do state application and swap/callback completion flags.
+
+Private evidence: `build/blinx/vertex-state-audit/state-*.bin`,
+`build/blinx/audit_vertex_binding.py`,
+`build/blinx/vertex-binding-oracle.aot-private.json`,
+`build/blinx/vertex-binding-validation.aot-private.json`,
+`build/blinx/run-vertex-binding-{fresh,repeat}.log` and
+`build/vertex-binding-all-contract-tests.log`. The generated CPU executable
+remains a private GPL-dependent reference artifact excluded from shipping.
 
 ### State capture and vblank callback checkpoint (2026-10-07)
 

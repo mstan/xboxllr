@@ -148,6 +148,14 @@ def prepare(donor: Path, output: Path, vsh_reference: Path):
                 checks += ["D3DCompile", "ID3D11Device_CreateBlendState", "ID3D11Device_CreateDepthStencilState", "ID3D11Device_CreateRasterizerState", "ID3D11Device_CreateSamplerState"]
             code = checked_calls(code, checks)
             if name == "d3d8_shaders.c":
+                # Reuse the real fixed-function pixel compiler/state upload
+                # without replacing an independently owned NV2A vertex shader.
+                signature='void d3d8_shaders_prepare_draw(DWORD handle)'
+                vertex='    if (!d3d8_vsh_prepare_draw(handle))\n        ff_vs_prepare_draw(handle);'
+                if code.count(signature)!=1 or code.count(vertex)!=1:
+                    raise ValueError('unreviewed combined shader preparation')
+                code=code.replace(signature,'void d3d8_shaders_prepare_pixel(void)').replace(vertex,'')
+                code+='\nvoid d3d8_shaders_prepare_draw(DWORD handle)\n{\n'+vertex+'\n    d3d8_shaders_prepare_pixel();\n}\n'
                 # DIFFUSE is argument zero, not an absent state/default.
                 for field,default in (("COLORARG1","TEXTURE"),("COLORARG2","CURRENT"),("ALPHAARG1","TEXTURE"),("ALPHAARG2","CURRENT")):
                     code = code.replace(f'tss[D3DTSS_{field}] ? tss[D3DTSS_{field}] : D3DTA_{default}',f'tss[D3DTSS_{field}]')
@@ -160,6 +168,9 @@ def prepare(donor: Path, output: Path, vsh_reference: Path):
                 code = code.replace('    if (layout)\n',
                     '    if (!layout) pilot_d3d_backend_stop("input layout allocation failed");\n    if (layout)\n')
             code = '#include "pilot_d3d_checks.h"\n' + code
+        if name == "d3d8_internal.h":
+            code=code.replace('void    d3d8_shaders_prepare_draw(DWORD handle);',
+                'void    d3d8_shaders_prepare_draw(DWORD handle);\nvoid    d3d8_shaders_prepare_pixel(void);')
         (output/name).write_text(code, encoding="utf-8", newline="\n")
         changes[name] = dict(excluded_com_bodies=sorted(omitted), sha256=hashlib.sha256((output/name).read_bytes()).hexdigest())
     platform = output / "platform"; platform.mkdir(exist_ok=True)

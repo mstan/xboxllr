@@ -1,5 +1,26 @@
 # STATUS
 
+## 2026-10-07 - Blinx binds native shaders and reaches texture binding
+
+`beads-xbox.1.62`: fresh/repeated NTSC Blinx now binds its compiled vertex
+shader and selects the real fixed-function pixel shader. The latter reuses
+sp00nznet's MIT pixel compiler and state upload, separated from vertex setup
+so it preserves the independently owned NV2A shader. Both launches stop at
+`D3DDevice_SetTexture`, after 22252334/22252242 entries and 20/17 consecutive
+title callbacks. No title draw, frame, Play or attract result yet.
+
+The vertex family includes the original fastcall constant setters, signed
+queries, declaration constants and program cache. Twelve captured cases match
+original-x86 cache/query behavior; real GPU probes verify the bound shader and
+constant buffer. Fast setters preserve the original distinction between GPU
+state and queryable CPU state. Native writes batch until draw submission and
+unchanged constants cause no upload. All 29 CTests pass. This is not a measured
+title speedup. Next: texture/stream bindings and the vertex-to-raster interface,
+then actual draws. Programmable pixel binding, FVF transitions and title draws
+still stop explicitly. The private CPU artifact remains GPL-dependent.
+
+See [shader binding evidence and limits](pilots/native-title/README.md#shader-binding-checkpoint-2026-10-07).
+
 ## 2026-10-07 - Blinx captures state, runs vblank callbacks and loads menu assets
 
 `beads-xbox.1.62`: fresh/repeated NTSC Blinx now passes real state-block

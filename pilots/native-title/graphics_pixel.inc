@@ -2,6 +2,13 @@
  * 240-byte definition. It submits no GPU work. Keep that caller-visible layout;
  * native compilation is a separate operation and must succeed before binding. */
 static uint32_t graphics_pixels[256];
+static void graphics_pixel_bind(uint32_t handle)
+{
+    if(handle)stop("unqualified programmable pixel shader binding",handle);
+    graphics_sync_deferred();
+    pilot_gfx_pixel_fixed();
+    MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_PIXEL_SHADER)=0;
+}
 static uint32_t graphics_pixel_create(const uint32_t *args)
 {
     const void *definition=graphics_pointer(args[0],240);

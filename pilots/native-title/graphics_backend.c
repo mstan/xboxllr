@@ -1,7 +1,9 @@
 /* Guest-independent adapter over the prepared MIT sp00nznet D3D11 backend.
  * Native COM/window pointers stay here; the guest bridge sees only values. */
 #include "d3d8_internal.h"
+#include "d3d8_combiners.h"
 #include "graphics_backend.h"
+#include "pilot_d3d_checks.h"
 #include <stdio.h>
 static IDirect3D8 *pilot_factory;
 static IDirect3DDevice8 *pilot_device;
@@ -14,6 +16,13 @@ static ID3D11DepthStencilView *pilot_default_depth;
 static uint32_t pilot_color_target,pilot_depth_target;
 static struct { IDirect3DTexture8 *object; ID3D11RenderTargetView *rtv; ID3D11DepthStencilView *dsv; uint32_t uploaded,gpu_written; } pilot_textures[256];
 static struct { IDirect3DVertexBuffer8 *object; int uploaded; } pilot_vertices[256];
+
+void pilot_gfx_pixel_fixed(void)
+{
+    if(!pilot_device)pilot_d3d_backend_stop("pixel binding before device creation");
+    d3d8_combiners_set_pixel_shader(0);
+    d3d8_shaders_prepare_pixel();
+}
 
 __declspec(noreturn) void pilot_d3d_backend_stop(const char *reason)
 {

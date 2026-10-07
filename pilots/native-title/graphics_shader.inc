@@ -3,8 +3,52 @@
 struct GraphicsShader {
     uint32_t header,native;
     uint32_t constant_mask[6],constants[192][4];
+    uint32_t program[136][4];
 };
 static struct GraphicsShader graphics_shaders[256];
+static struct GraphicsShader *graphics_shader(uint32_t handle)
+{
+    if(handle&1)for(unsigned i=0;i<256;++i)
+        if(graphics_shaders[i].header==handle-1)return &graphics_shaders[i];
+    stop("unowned or unqualified vertex shader binding",handle);
+}
+static int graphics_shader_records(void)
+{
+    return !(MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_VERTEX_RECORD_FLAGS)&PILOT_D3D_VERTEX_RECORD_DISABLE);
+}
+static void graphics_shader_constants(uint32_t first,uint32_t data,uint32_t words,int record)
+{
+    if(first>=192 || !words || (words&3) || words/4>192-first)
+        stop("unqualified vertex constant range",first);
+    const void *source=graphics_pointer(data,words*4);
+    pilot_gfx_shader_constants(first,words/4,source);
+    if(record)memmove(memory+PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_CONSTANTS+first*16,source,words*4);
+}
+static void graphics_shader_get_constants(const uint32_t *args)
+{
+    int64_t first=(int32_t)args[0];first+=96;
+    if(first<0 || first>=192 || !args[2] || args[2]>192-(uint32_t)first)
+        stop("unqualified vertex constant query",args[0]);
+    memmove(graphics_pointer(args[1],args[2]*16),
+        memory+PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_CONSTANTS+(uint32_t)first*16,args[2]*16);
+}
+static void graphics_shader_bind(uint32_t handle)
+{
+    struct GraphicsShader *shader=graphics_shader(handle);
+    int32_t result=pilot_gfx_shader_bind(shader->native);
+    if(result<0)stop("native vertex shader binding failed",(uint32_t)result);
+    int record=graphics_shader_records();
+    for(unsigned i=0;i<192;++i)if(shader->constant_mask[i/32]&(1u<<(i%32))) {
+        pilot_gfx_shader_constants(i,1,shader->constants[i]);
+        if(record)memcpy(memory+PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_CONSTANTS+i*16,shader->constants[i],16);
+    }
+    if(record)memcpy(memory+PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_VERTEX_PROGRAM_CACHE,
+        shader->program,MEM32(shader->header+8)*16);
+    MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_SHADER)=handle;
+    MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_OBJECT)=shader->header;
+    MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_VERTEX_START)=0;
+    /* Binding has no public shader AddRef in the original load/select path. */
+}
 static uint32_t graphics_shader_create(const uint32_t *args)
 {
     if(args[3] || !args[0] || !args[1] || !args[2])stop("unqualified shader creation arguments",args[3]);
@@ -78,6 +122,7 @@ static uint32_t graphics_shader_create(const uint32_t *args)
         MEM32(shader.header+0x18+i*16)=elements[i].offset;
         MEM32(shader.header+0x1c+i*16)=elements[i].type?elements[i].type:2;
     }
+    memcpy(shader.program,code,count*16);
     graphics_shaders[slot]=shader;MEM32(args[2])=shader.header|1u;return 0;
 }
 static void graphics_shaders_release(void)

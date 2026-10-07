@@ -125,7 +125,18 @@ void pilot_d3d_dispatch(unsigned entry)
     case PILOT_D3D_D3DDevice_SetRenderTarget:graphics_set_targets(arguments[0],arguments[1]);break;
     case PILOT_D3D_D3DDevice_BlockUntilVerticalBlank:graphics_wait_vblank();break;
     case PILOT_D3D_D3DDevice_CreatePixelShader:g_eax=graphics_pixel_create(arguments);break;
+    case PILOT_D3D_D3DDevice_SetPixelShader:graphics_pixel_bind(arguments[0]);break;
     case PILOT_D3D_D3DDevice_CreateVertexShader:g_eax=graphics_shader_create(arguments);break;
+    case PILOT_D3D_D3DDevice_SetVertexShader:graphics_shader_bind(arguments[0]);break;
+    case PILOT_D3D_D3DDevice_GetVertexShader:
+        MEM32(arguments[0])=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_SHADER);break;
+    case PILOT_D3D_D3DDevice_SetVertexShaderConstant1:graphics_shader_constants(g_ecx,g_edx,4,1);break;
+    case PILOT_D3D_D3DDevice_SetVertexShaderConstant4:graphics_shader_constants(g_ecx,g_edx,16,1);break;
+    case PILOT_D3D_D3DDevice_SetVertexShaderConstantNotInlineFast:
+        graphics_shader_constants(g_ecx,g_edx,arguments[0],0);break;
+    case PILOT_D3D_D3DDevice_SetVertexShaderConstantNotInline:
+        graphics_shader_constants(g_ecx,g_edx,arguments[0],graphics_shader_records());break;
+    case PILOT_D3D_D3DDevice_GetVertexShaderConstant:graphics_shader_get_constants(arguments);break;
     case PILOT_D3D_D3DDevice_CreateVertexBuffer2:g_eax=graphics_vertex_allocate(arguments[0]);break;
     case PILOT_D3D_D3DVertexBuffer_Lock2:g_eax=graphics_vertex_lock(arguments[0],arguments[1]);break;
     case PILOT_D3D_D3DResource_Register:graphics_vertex_register(arguments[0],arguments[1]);break;

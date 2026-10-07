@@ -68,6 +68,27 @@ def bind(xbe: Path, output: Path, symbols: Path):
                  (m:=re.fullmatch(r'dword ptr \[ebx \+ (0x[0-9a-f]+)\], eax',i.op_str))]
     if len(mode_fields)!=1: raise ValueError('unreviewed shader mode field')
     state_defaults['shader_constant_mode_offset']=mode_fields[0]
+    # Reviewed programmable-shader load/select path. Cache offsets stay in the
+    # revision binding; native code owns GPU programs and never emits packets.
+    load=next(s for s in identified if s['name']=='D3DDevice_LoadVertexShader')
+    select=next(s for s in identified if s['name']=='D3DDevice_SelectVertexShader')
+    load_code=list(Cs(CS_ARCH_X86,CS_MODE_32).disasm(data(load['address'],functions[load['address']]['size']),load['address']))
+    select_code=list(Cs(CS_ARCH_X86,CS_MODE_32).disasm(data(select['address'],functions[select['address']]['size']),select['address']))
+    record_helpers=[int(i.op_str,0) for i in load_code if i.mnemonic=='call']
+    if len(record_helpers)!=2 or not any(i.mnemonic=='test' and i.op_str=='al, 0x10' for i in load_code):
+        raise ValueError('unreviewed vertex load cache policy')
+    record_helper=functions[record_helpers[0]]
+    record_code=list(Cs(CS_ARCH_X86,CS_MODE_32).disasm(data(record_helpers[0],record_helper['size']),record_helpers[0]))
+    program_offsets=[int(m[1],16) for i in record_code if i.mnemonic=='lea' and
+                     (m:=re.fullmatch(r'edx, \[ecx \+ esi \+ (0x[0-9a-f]+)\]',i.op_str))]
+    start_offsets=[int(m[1],16) for i in select_code if i.mnemonic=='mov' and
+                   (m:=re.fullmatch(r'dword ptr \[esi \+ (0x[0-9a-f]+)\], ecx',i.op_str))]
+    flag_offsets=[int(m[1],0) for i in load_code if i.mnemonic=='mov' and
+                  (m:=re.fullmatch(r'al, byte ptr \[ebx \+ (0x[0-9a-f]+|[0-9]+)\]',i.op_str))]
+    if len(program_offsets)!=1 or len(start_offsets)!=1 or len(flag_offsets)!=1:
+        raise ValueError('unreviewed vertex cache layout')
+    state_defaults['vertex_binding']=dict(program_cache=program_offsets[0],start=start_offsets[0],
+        record_flags=flag_offsets[0],record_disable=0x10,recorder_sha256=context.digest(record_helper))
     caps=next(s for s in identified if s['name']=='D3DDevice_GetDeviceCaps')
     if caps['stack_bytes']!=4 or context.digest(functions[caps['address']])!=CAPS:
         raise ValueError('unreviewed capability query')
@@ -141,6 +162,8 @@ def bind(xbe: Path, output: Path, symbols: Path):
         ', '.join(f'{{0x{x["format"]:x}u,0x{x["flags"]:x}u}}' for x in binding['surface_formats'])+'};']
     block=binding['stateblock']
     header += [f'#define PILOT_D3D_STREAMS 0x{block["streams"]:x}u']
+    header += [f'#define PILOT_D3D_VERTEX_{name.upper()} {binding["vertex_binding"][name]}u'
+               for name in ('program_cache','start','record_flags','record_disable')]
     header += [f'#define PILOT_D3D_SNAPSHOT_{name.upper()} {offset}u' for name,offset in block['fields'].items()]
     header += ['static const uint8_t pilot_d3d_block_'+name+'[] = {'+', '.join(str(x) for x in block[name])+'};'
                for name in ('pixel_render','pixel_texture','vertex_render','vertex_texture')]

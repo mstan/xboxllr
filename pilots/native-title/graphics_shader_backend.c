@@ -13,11 +13,52 @@ struct NativeShader {
     unsigned used;
 };
 static struct NativeShader native_shaders[256];
+static ID3D11Buffer *native_constants_buffer;
+static uint32_t native_constants[192][4];
+static unsigned native_constants_dirty,native_constants_uploads,native_shader_bound;
 static struct NativeShader *native_shader(uint32_t handle)
 {
     if(!handle || handle>256 || !native_shaders[handle-1].object)pilot_d3d_backend_stop("unowned native vertex shader");
     return &native_shaders[handle-1];
 }
+int32_t pilot_gfx_shader_bind(uint32_t handle)
+{
+    struct NativeShader *shader=native_shader(handle);
+    if(!native_constants_buffer) {
+        D3D11_BUFFER_DESC desc={0};
+        desc.ByteWidth=sizeof(native_constants);desc.Usage=D3D11_USAGE_DYNAMIC;
+        desc.BindFlags=D3D11_BIND_CONSTANT_BUFFER;desc.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
+        HRESULT result=ID3D11Device_CreateBuffer(d3d8_GetD3D11Device(),&desc,NULL,&native_constants_buffer);
+        if(FAILED(result))return result;
+        native_constants_dirty=1;
+    }
+    ID3D11DeviceContext *context=d3d8_GetD3D11Context();
+    ID3D11DeviceContext_VSSetShader(context,shader->object,NULL,0);
+    ID3D11DeviceContext_IASetInputLayout(context,shader->layout);
+    ID3D11DeviceContext_VSSetConstantBuffers(context,1,1,&native_constants_buffer);
+    native_shader_bound=handle;return S_OK;
+}
+void pilot_gfx_shader_constants(unsigned first,unsigned count,const void *data)
+{
+    if(first>=192 || !count || count>192-first || !data)pilot_d3d_backend_stop("vertex constant range");
+    if(memcmp(native_constants[first],data,count*16)) {
+        memcpy(native_constants[first],data,count*16);native_constants_dirty=1;
+    }
+}
+int32_t pilot_gfx_shader_flush(void)
+{
+    if(!native_constants_buffer || !native_shader_bound)return E_INVALIDARG;
+    if(native_constants_dirty) {
+        ID3D11DeviceContext *context=d3d8_GetD3D11Context();D3D11_MAPPED_SUBRESOURCE mapped;
+        HRESULT result=ID3D11DeviceContext_Map(context,(ID3D11Resource*)native_constants_buffer,0,D3D11_MAP_WRITE_DISCARD,0,&mapped);
+        if(FAILED(result))return result;
+        memcpy(mapped.pData,native_constants,sizeof(native_constants));
+        ID3D11DeviceContext_Unmap(context,(ID3D11Resource*)native_constants_buffer,0);
+        native_constants_dirty=0;++native_constants_uploads;
+    }
+    return S_OK;
+}
+unsigned pilot_gfx_shader_uploads(void) {return native_constants_uploads;}
 int32_t pilot_gfx_shader_create(const uint32_t *code,unsigned count,const struct PilotVertexElement elements[16],uint32_t *handle)
 {
     if(!code || !elements || !handle || !count || count>136 || !d3d8_GetD3D11Device())return E_INVALIDARG;
@@ -62,12 +103,23 @@ int32_t pilot_gfx_shader_create(const uint32_t *code,unsigned count,const struct
 void pilot_gfx_shader_destroy(uint32_t handle)
 {
     struct NativeShader *shader=native_shader(handle);
+    if(native_shader_bound==handle) {
+        ID3D11DeviceContext_VSSetShader(d3d8_GetD3D11Context(),NULL,NULL,0);
+        ID3D11DeviceContext_IASetInputLayout(d3d8_GetD3D11Context(),NULL);
+        native_shader_bound=0;
+    }
     if(shader->layout)ID3D11InputLayout_Release(shader->layout);
     ID3D11VertexShader_Release(shader->object);ID3D10Blob_Release(shader->code);memset(shader,0,sizeof(*shader));
 }
 void pilot_gfx_shaders_close(void)
 {
     for(unsigned i=0;i<256;++i)if(native_shaders[i].object)pilot_gfx_shader_destroy(i+1);
+    if(native_constants_buffer) {
+        ID3D11Buffer *empty=NULL;
+        ID3D11DeviceContext_VSSetConstantBuffers(d3d8_GetD3D11Context(),1,1,&empty);
+        ID3D11Buffer_Release(native_constants_buffer);native_constants_buffer=NULL;
+    }
+    memset(native_constants,0,sizeof(native_constants));native_constants_dirty=native_constants_uploads=0;
 }
 /* Diagnostic only: execute the actual compiled vertex shader and read its
  * stream output, without rasterization or a duplicate production execution.
@@ -76,7 +128,7 @@ int32_t pilot_gfx_shader_probe(uint32_t handle,const struct PilotVertexProbeStre
                               const float constants[192][4],float *outputs)
 {
     struct NativeShader *shader=native_shader(handle);
-    if(!streams || !outputs || !constants || !count || count>65536)return E_INVALIDARG;
+    if(!streams || !outputs || !count || count>65536)return E_INVALIDARG;
     unsigned stream_mask=0;
     for(unsigned i=0;i<16;++i)if(shader->used&(1u<<i)) {
         unsigned stream=shader->elements[i].stream;stream_mask|=1u<<stream;
@@ -111,8 +163,24 @@ int32_t pilot_gfx_shader_probe(uint32_t handle,const struct PilotVertexProbeStre
         result=ID3D11Device_CreateBuffer(device,&desc,&initial,&vb[i]);if(FAILED(result))goto cleanup;
         ID3D11DeviceContext_IASetVertexBuffers(context,i,1,&vb[i],&streams[i].stride,&zero);
     }
-    desc.ByteWidth=192*16;desc.BindFlags=D3D11_BIND_CONSTANT_BUFFER;initial.pSysMem=constants;
-    result=ID3D11Device_CreateBuffer(device,&desc,&initial,&cb);if(FAILED(result))goto cleanup;
+    if(constants) {
+        desc.ByteWidth=192*16;desc.BindFlags=D3D11_BIND_CONSTANT_BUFFER;initial.pSysMem=constants;
+        result=ID3D11Device_CreateBuffer(device,&desc,&initial,&cb);if(FAILED(result))goto cleanup;
+    } else {
+        /* Assert the real binding, then execute with its actual GPU buffer.
+         * This diagnostic never substitutes a copy of the expected values. */
+        if(native_shader_bound!=handle){result=E_INVALIDARG;goto cleanup;}
+        result=pilot_gfx_shader_flush();if(FAILED(result))goto cleanup;
+        ID3D11DeviceContext *immediate=d3d8_GetD3D11Context();
+        ID3D11VertexShader *bound=NULL;ID3D11InputLayout *layout=NULL;
+        ID3D11DeviceContext_VSGetShader(immediate,&bound,NULL,NULL);
+        ID3D11DeviceContext_IAGetInputLayout(immediate,&layout);
+        int matches=bound==shader->object && layout==shader->layout;
+        if(bound)ID3D11VertexShader_Release(bound);if(layout)ID3D11InputLayout_Release(layout);
+        if(!matches){result=E_INVALIDARG;goto cleanup;}
+        ID3D11DeviceContext_VSGetConstantBuffers(immediate,1,1,&cb);
+        if(cb!=native_constants_buffer){result=E_INVALIDARG;goto cleanup;}
+    }
     desc.ByteWidth=count*output_stride;desc.BindFlags=D3D11_BIND_STREAM_OUTPUT;desc.Usage=D3D11_USAGE_DEFAULT;
     result=ID3D11Device_CreateBuffer(device,&desc,NULL,&output);if(FAILED(result))goto cleanup;
     desc.BindFlags=0;desc.Usage=D3D11_USAGE_STAGING;desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;

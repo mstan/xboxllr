@@ -37,8 +37,15 @@ uint32_t pilot_gfx_vertex_type_size(uint32_t type);
 int32_t pilot_gfx_shader_create(const uint32_t *code,unsigned count,const struct PilotVertexElement elements[16],uint32_t *handle);
 void pilot_gfx_shader_destroy(uint32_t handle);
 void pilot_gfx_shaders_close(void);
+int32_t pilot_gfx_shader_bind(uint32_t handle);
+void pilot_gfx_shader_constants(unsigned first,unsigned count,const void *data);
+/* Constant writes coalesce until draw submission. */
+int32_t pilot_gfx_shader_flush(void);
+unsigned pilot_gfx_shader_uploads(void);
+void pilot_gfx_pixel_fixed(void);
 /* Diagnostic raw vertex outputs, before rasterization/viewport conversion. */
 struct PilotVertexProbeStream { const void *data; unsigned stride; };
 int32_t pilot_gfx_shader_probe(uint32_t handle,const struct PilotVertexProbeStream streams[16],unsigned count,
                               const float constants[192][4],float *outputs);
+/* NULL constants probes the actually bound shader/layout/constant buffer. */
 #endif

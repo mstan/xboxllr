@@ -1,13 +1,98 @@
+static void graphics_test_shader_call(unsigned entry,const uint32_t *args)
+{
+    /* Offline original-x86 oracle inputs. Never enabled by title execution. */
+    const char *capture=getenv("XLLE_PILOT_VERTEX_STATE_CAPTURE");FILE *file=NULL;
+    uint32_t bytes=PILOT_D3D_VERTEX_PROGRAM_CACHE+136*16;
+    if(capture && *capture) {
+        static unsigned sequence;char path[1024];
+        CHECK(snprintf(path,sizeof(path),"%s/state-%u.bin",capture,++sequence)<sizeof(path));
+        file=fopen(path,"wb");CHECK(file);
+        uint32_t header[]={0x56534c58,2,pilot_d3d_calls[entry].address,g_ecx,g_edx,bytes,
+            args?args[0]:0,args && pilot_d3d_calls[entry].stack_bytes>=8?args[1]:0,
+            args && pilot_d3d_calls[entry].stack_bytes>=12?args[2]:0,
+            graphics_shaders[0].header,MEM32(graphics_shaders[0].header+8),0};
+        CHECK(fwrite(header,sizeof(header),1,file)==1);
+        CHECK(fwrite(memory+PILOT_D3D_DEVICE_OBJECT,bytes,1,file)==1);
+        CHECK(fwrite(memory+0x19800,0x900,1,file)==1);
+        CHECK(fwrite(&graphics_shaders[0],sizeof(graphics_shaders[0]),1,file)==1);
+    }
+    call_graphics(entry,args);
+    if(file) {
+        CHECK(fwrite(memory+PILOT_D3D_DEVICE_OBJECT,bytes,1,file)==1);
+        CHECK(fwrite(memory+0x19800,0x900,1,file)==1);CHECK(fclose(file)==0);
+    }
+}
+static void test_graphics_shader_binding(uint32_t handle,const struct PilotVertexProbeStream streams[16])
+{
+    uint32_t base=handle-1,cache=PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_CONSTANTS;
+    uint32_t flags=PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_VERTEX_RECORD_FLAGS;
+    uint32_t original_flags=MEM32(flags);MEM32(flags)&=~PILOT_D3D_VERTEX_RECORD_DISABLE;
+    graphics_test_shader_call(PILOT_D3D_D3DDevice_SetVertexShader,&handle);
+    CHECK(MEM32(base)==1 && MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_OBJECT)==base);
+    uint32_t output=0x198d0;MEM32(output-4)=MEM32(output+4)=0xaabbccdd;
+    graphics_test_shader_call(PILOT_D3D_D3DDevice_GetVertexShader,&output);
+    CHECK(MEM32(output)==handle && MEM32(output-4)==0xaabbccdd && MEM32(output+4)==0xaabbccdd);
+    CHECK(!memcmp(memory+cache+100*16,graphics_shaders[0].constants[100],16));
+    CHECK(!memcmp(memory+PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_VERTEX_PROGRAM_CACHE,graphics_shaders[0].program,32));
+    float values[20];for(unsigned i=0;i<20;++i)values[i]=.125f*(i+1);
+    memcpy(memory+0x19a00,values,sizeof(values));
+    unsigned uploads=pilot_gfx_shader_uploads();
+    g_ecx=0;g_edx=0x19a00;graphics_test_shader_call(PILOT_D3D_D3DDevice_SetVertexShaderConstant1,NULL);
+    CHECK(!memcmp(memory+cache,values,16));
+    g_ecx=188;g_edx=0x19a00;graphics_test_shader_call(PILOT_D3D_D3DDevice_SetVertexShaderConstant4,NULL);
+    CHECK(!memcmp(memory+cache+188*16,values,64));
+    uint32_t words=20;g_ecx=96;g_edx=0x19a00;
+    graphics_test_shader_call(PILOT_D3D_D3DDevice_SetVertexShaderConstantNotInline,&words);
+    CHECK(!memcmp(memory+cache+96*16,values,80));
+    uint32_t query[]={0,0x19b00,5};graphics_test_shader_call(PILOT_D3D_D3DDevice_GetVertexShaderConstant,query);
+    CHECK(!memcmp(memory+query[1],values,80));
+    query[0]=(uint32_t)-96;query[2]=1;graphics_test_shader_call(PILOT_D3D_D3DDevice_GetVertexShaderConstant,query);
+    CHECK(!memcmp(memory+query[1],values,16));
+    CHECK(pilot_gfx_shader_uploads()==uploads); /* all writes still batched */
+    float gpu[2][13][4];
+    CHECK(pilot_gfx_shader_probe(graphics_shaders[0].native,streams,2,NULL,&gpu[0][0][0])==0);
+    CHECK(!memcmp(gpu[0][3],values+16,16) && pilot_gfx_shader_uploads()==uploads+1);
+    words=4;g_ecx=100;g_edx=0x19a00;
+    graphics_test_shader_call(PILOT_D3D_D3DDevice_SetVertexShaderConstantNotInlineFast,&words);
+    CHECK(!memcmp(memory+cache+100*16,values+16,16)); /* fast skips CPU cache */
+    CHECK(pilot_gfx_shader_probe(graphics_shaders[0].native,streams,2,NULL,&gpu[0][0][0])==0);
+    CHECK(!memcmp(gpu[1][3],values,16) && pilot_gfx_shader_uploads()==uploads+2);
+    MEM32(flags)|=PILOT_D3D_VERTEX_RECORD_DISABLE;
+    g_ecx=100;g_edx=0x19a10;graphics_test_shader_call(PILOT_D3D_D3DDevice_SetVertexShaderConstantNotInline,&words);
+    CHECK(!memcmp(memory+cache+100*16,values+16,16));
+    CHECK(pilot_gfx_shader_probe(graphics_shaders[0].native,streams,2,NULL,&gpu[0][0][0])==0);
+    CHECK(!memcmp(gpu[0][3],values+4,16));
+    /* The fixed-size setter records even when the generic recorder is off. */
+    g_ecx=100;g_edx=0x19a20;graphics_test_shader_call(PILOT_D3D_D3DDevice_SetVertexShaderConstant1,NULL);
+    CHECK(!memcmp(memory+cache+100*16,values+8,16));
+    graphics_test_shader_call(PILOT_D3D_D3DDevice_SetVertexShader,&handle);
+    CHECK(!memcmp(memory+cache+100*16,values+8,16));
+    CHECK(pilot_gfx_shader_probe(graphics_shaders[0].native,streams,2,NULL,&gpu[0][0][0])==0);
+    CHECK(!memcmp(gpu[0][3],graphics_shaders[0].constants[100],16));
+    MEM32(flags)&=~PILOT_D3D_VERTEX_RECORD_DISABLE;
+    graphics_test_shader_call(PILOT_D3D_D3DDevice_SetVertexShader,&handle);
+    CHECK(!memcmp(memory+cache+100*16,graphics_shaders[0].constants[100],16));
+    uploads=pilot_gfx_shader_uploads();
+    CHECK(pilot_gfx_shader_probe(graphics_shaders[0].native,streams,2,NULL,&gpu[0][0][0])==0);
+    CHECK(pilot_gfx_shader_uploads()==uploads && MEM32(base)==1); /* unchanged data, no upload */
+    uint32_t pixel=0;call_graphics(PILOT_D3D_D3DDevice_SetPixelShader,&pixel);
+    CHECK(MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_PIXEL_SHADER)==0);
+    CHECK(pilot_gfx_shader_probe(graphics_shaders[0].native,streams,2,NULL,&gpu[0][0][0])==0);
+    CHECK(!memcmp(gpu[0][3],graphics_shaders[0].constants[100],16)); /* pixel bind preserves VS */
+    MEM32(flags)=original_flags;
+    fprintf(stderr,"PASS: bound GPU shader, program/declaration cache, fastcall constants, signed queries, recorder policy and batched native uploads\n");
+}
 static void test_graphics_shaders(void)
 {
     uint32_t declaration[]={0x12345,0x20000000,0x40420000,0x82000064,0x3f800000,0x40000000,0x40400000,0x40800000,0xffffffffu};
-    uint32_t program[]={0x00012078,0,0x0020001b,0x08000000,0x0000f801};
+    /* MOV oPos,v0; MOV oD0,c[100], encoded against the NV2A ISA. */
+    uint32_t program[]={0x00022078,0,0x0020001b,0x08000000,0x0000f800,0,0x002c801b,0x0c000000,0x0000f819};
     memcpy(memory+0x19800,declaration,sizeof(declaration));memcpy(memory+0x19840,program,sizeof(program));
     uint32_t args[]={0x19800,0x19840,0x198c4,0};
     MEM32(0x198c0)=MEM32(0x198c4)=MEM32(0x198c8)=0xcdcdcdcdu;
     CHECK(call_graphics(PILOT_D3D_D3DDevice_CreateVertexShader,args)==0);
     uint32_t handle=MEM32(0x198c4),base=handle&~1u;
-    CHECK((handle&1) && base && MEM32(base)==1 && MEM32(base+4)==0x10 && MEM32(base+8)==1);
+    CHECK((handle&1) && base && MEM32(base)==1 && MEM32(base+4)==0x10 && MEM32(base+8)==2);
     CHECK(MEM32(0x198c0)==0xcdcdcdcdu && MEM32(0x198c8)==0xcdcdcdcdu);
     CHECK(MEM32(base+0x14)==0 && MEM32(base+0x18)==0 && MEM32(base+0x1c)==0x42);
     CHECK(graphics_shaders[0].header==base && graphics_shaders[0].constant_mask[3]==16);
@@ -16,6 +101,7 @@ static void test_graphics_shaders(void)
     struct PilotVertexProbeStream streams[16]={0};streams[0]=(struct PilotVertexProbeStream){vertices,16};
     CHECK(pilot_gfx_shader_probe(graphics_shaders[0].native,streams,2,constants,&outputs[0][0][0])==0);
     CHECK(!memcmp(vertices[0],outputs[0][0],16) && !memcmp(vertices[1],outputs[1][0],16));
+    test_graphics_shader_binding(handle,streams);
     uint64_t resident=vm_committed(0,0x100000000ull),service=vm_service_bytes;
     vm_service_bytes=64u*1024*1024;MEM32(0x198c4)=0xdeadbeefu;
     CHECK(call_graphics(PILOT_D3D_D3DDevice_CreateVertexShader,args)==0x8007000eu);
