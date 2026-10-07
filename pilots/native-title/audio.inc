@@ -4,6 +4,16 @@
 #include <math.h>
 #include "audio_backend.h"
 #include "pilot_audio_bindings.h"
+#ifdef PILOT_AUDIO_DSP
+#include "audio_dsp.h"
+static PilotDsp *audio_effects;
+static uint32_t audio_effects_storage,audio_effects_location[2];
+static void audio_effects_free(void)
+{
+    pilot_dsp_destroy(audio_effects);audio_effects=NULL;
+    if(audio_effects_storage){uint32_t zero=0;if(vm_free(&audio_effects_storage,&zero,MEM_RELEASE))stop("effects storage release failed",audio_effects_storage);audio_effects_storage=0;}
+}
+#endif
 static SRWLOCK audio_lock=SRWLOCK_INIT;
 static uint32_t audio_device;
 struct PilotAudioBuffer {
@@ -41,7 +51,13 @@ static uint32_t audio_ref(uint32_t base,int acquire)
         pilot_audio_buffer_destroy(b->host);
         if(b->owned){uint32_t bytes=0;if(vm_free(&b->data,&bytes,MEM_RELEASE))stop("audio data release failed",base);}
         pool_free(base);memset(b,0,sizeof(*b));audio_ref(audio_device,0);
-    } else {pilot_audio_close();pool_free(audio_device);audio_device=0;}
+    } else {
+        pilot_audio_close();
+#ifdef PILOT_AUDIO_DSP
+        audio_effects_free();
+#endif
+        pool_free(audio_device);audio_device=0;
+    }
     return 0;
 }
 static int32_t audio_gain(struct PilotAudioBuffer *b)
@@ -108,6 +124,34 @@ static int32_t audio_create_buffer(uint32_t descriptor,uint32_t output)
     fprintf(stderr,"[AUDIO BUFFER] iface=%08x bytes=%u format=PCM%u channels=%u rate=%u\n",buffer.base+28,desc[2],bits,channels,rate);
     return 0;
 }
+#ifdef PILOT_AUDIO_DSP
+static int32_t audio_download_effects(const uint32_t *a)
+{
+    audio_device_check(a[0]);
+    if(a[4])audio_pointer(a[4],4);
+    const char *error=NULL;
+    PilotDspImage *image=pilot_dsp_decode(audio_pointer(a[1],a[2]),a[2],PILOT_AUDIO_DSP_SEED,&error);
+    if(!image)stop(error?error:"DSP image decode failed",a[2]);
+    uint32_t location[2]={UINT32_MAX,UINT32_MAX};
+    if(a[3])memcpy(location,audio_pointer(a[3],8),8);
+    fprintf(stderr,"[AUDIO EFFECTS LOCATION] reverb=%08x crosstalk=%08x\n",location[0],location[1]);
+    uint32_t storage=0,bytes=pilot_dsp_storage_bytes(image),offset=pilot_dsp_descriptor_offset(image);
+    if(vm_allocate(&storage,0,&bytes,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE)){pilot_dsp_image_destroy(image);return (int32_t)0x8007000e;}
+    PilotDsp *graph=pilot_dsp_create(image,memory+storage,storage);pilot_dsp_image_destroy(image);
+    uint32_t count=MEM32(storage+offset);
+    /* Original location setter stores both values verbatim (or -1 for NULL).
+     * These select subsequent parameter services, not execution of the graph.
+     * Validate them when such a consuming service is qualified, not on upload. */
+    int32_t hr=graph?pilot_audio_effects_install(graph):(int32_t)0x8007000e;
+    if(hr<0){pilot_dsp_destroy(graph);uint32_t zero=0;if(vm_free(&storage,&zero,MEM_RELEASE))stop("effects install rollback failed",storage);return hr;}
+    /* The audio thread now owns graph execution; the previous graph has no
+     * remaining processing reader. Its descriptor lifetime ends on replacement. */
+    audio_effects_free();audio_effects=graph;audio_effects_storage=storage;
+    memcpy(audio_effects_location,location,8);if(a[4])MEM32(a[4])=storage+offset;
+    fprintf(stderr,"[AUDIO EFFECTS] installed real GP graph: effects=%u storage=%u descriptor=%08x\n",count,bytes,storage+offset);
+    return 0;
+}
+#endif
 void pilot_audio_dispatch(unsigned entry)
 {
     if(entry>=PILOT_AUDIO_COUNT)stop("unknown audio entry",entry);
@@ -130,7 +174,7 @@ void pilot_audio_dispatch(unsigned entry)
                 else {audio_device=base;memset(memory+base,0,44);MEM32(base)=PILOT_AUDIO_DEVICE_VTABLE;MEM32(base+4)=1;}
             }
         }
-        if(result>=0){MEM32(a[1])=audio_device+8;fprintf(stderr,"[AUDIO DEVICE] real DirectSound output; 48000 Hz stereo PCM\n");}
+        if(result>=0){MEM32(a[1])=audio_device+8;fprintf(stderr,"[AUDIO DEVICE] real native output; 48000 Hz stereo PCM\n");}
     } else if(entry==PILOT_AUDIO_IDirectSound_Release) {
         audio_device_check(a[0]);result=audio_ref(audio_device,0);
     } else if(entry==PILOT_AUDIO_ObjectAddRef)result=audio_ref(a[0],1);
@@ -138,7 +182,11 @@ void pilot_audio_dispatch(unsigned entry)
         audio_device_check(a[0]);if(a[3])stop("audio buffer aggregation is unqualified",a[3]);
         result=audio_create_buffer(a[1],a[2]);
     } else if(entry==PILOT_AUDIO_IDirectSound_DownloadEffectsImage) {
+#ifdef PILOT_AUDIO_DSP
+        result=audio_download_effects(a);
+#else
         stop("Xbox DSP effects image needs a real native effect implementation",a[2]);
+#endif
     } else {
         struct PilotAudioBuffer *b=audio_buffer(a[0]);
         if(entry==PILOT_AUDIO_IDirectSoundBuffer_Release)result=audio_ref(b->base,0);

@@ -296,6 +296,9 @@ int main(int argc,char **argv)
     commit(0x10000,0x10000);
     g_esp=0x18000; MEM32(g_esp)=0x12340;
     image_size=0x200; image_bytes=calloc(1,image_size); CHECK(image_bytes!=NULL);
+#ifdef PILOT_AUDIO_DSP
+    if(argc==3 && !strcmp(argv[1],"audio-effects")){test_audio_effects(argv[2]);return 0;}
+#endif
     if (argc==2) {
 #ifdef PILOT_AUDIO_NATIVE
         if (!strcmp(argv[1],"audio")) { test_audio(); return 0; }

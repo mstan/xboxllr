@@ -197,3 +197,16 @@ its design and implementation comments. Those comments are not an assertion
 that all referenced source was copied or that all implementation is original.
 Any incorporated code must retain its upstream terms and notices. The remaining
 file-level provenance review is part of `beads-xbox.1.21`.
+
+## Native-pilot DSP processor
+
+[mborgerson/dsp56300](https://github.com/mborgerson/dsp56300/tree/c60aeedb6a6014850204c71e53bc0cf5b3104222)
+is MIT-licensed. `tools/native_dsp_donor.py` copies its pinned tracked source
+into private build output, preserves LICENSE, records source/patch hashes and
+locked Cargo dependency metadata, and adds explicit unsupported-feature stops.
+The C FFI static library supplies actual instruction execution. Xbox image,
+DMA and XAudio2 adapters are independently authored; no GPL audio implementation
+was imported. The dependency record includes the MPL-2.0 cbindgen build tool;
+the MIT root license does not replace dependencies' own terms. See the
+[DSP audit](docs/NATIVE-DSP-DONOR-2026-10-07.md) and existing
+[private CPU pilot distribution limits](LICENSE-SCOPE.md).

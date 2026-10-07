@@ -41,7 +41,9 @@ Windows audio device through `DirectSoundCreate`, and starts its three media
 workers. Guest vertical-blank waits now complete at the configured nominal
 60 Hz. Blinx creates three 65536-byte stereo PCM16 buffers at 44100 Hz and
 locks/unlocks their first four bytes, then loads the complete 15188-byte
-`media/dsp.bin`. Fresh and repeated launches stop at `DownloadEffectsImage`.
+`media/dsp.bin`. It now installs the real DSP graph through XAudio2, creates
+two more pixel definitions (32 total), and stops at a 640x480 render-target
+texture, format `0x12` and usage `1`.
 No title buffer Play or audible game output is established by those runs.
 `PILOT_AUDIO=ORIGINAL` still executes the original sound-object allocations and
 contiguous-page setup, stopping at `KfRaiseIrql` (ordinal 160) in audio-driver
@@ -66,7 +68,7 @@ EEPROM user-settings queries and NTSTATUS-to-DOS-error conversion. Timer arming,
 expiry and DPC delivery are implemented as described below. Callback delivery
 is exercised by the contract tests. No callbacks, draws or completions are discarded.
 
-Twenty-seven contract tests pass: concurrent threads with separate registers/TLS and
+Twenty-nine contract tests pass: concurrent threads with separate registers/TLS and
 recursive exclusion, handle closure/errors and EEPROM buffer/checksum behavior;
 timer/DPC/event-wait contracts; real VM reservation/commit/free/protection/query;
 installed-media identity and actual file I/O; writable storage and link lifetimes;
@@ -821,9 +823,8 @@ pass. Private evidence is `build/vblank-contract-tests.log`,
 `build/blinx/vblank-validation.aot-private.json` and
 `build/blinx/run-vblank-{fresh,repeat}.log`.
 
-The next title stop is real effects-image installation. A separately validated
-[MIT DSP donor and original-image probe](../../docs/NATIVE-DSP-DONOR-2026-10-07.md)
-provide the next implementation route; they are not yet linked into the title.
+That checkpoint's effects-image stop is now passed by the integrated
+[MIT DSP core and native transport](../../docs/NATIVE-DSP-DONOR-2026-10-07.md).
 
 ### Native audio and media-worker checkpoint
 
@@ -834,7 +835,7 @@ body, verifies stdcall cleanup and derives the object vtables from reviewed
 constructor bytes. Its 21 entries retain the original bodies for `ORIGINAL`.
 Runtime service code contains no title function addresses.
 
-The adapter reuses the actual Windows DirectSound8 engine for 2D PCM storage,
+The initial adapter reuses the actual Windows DirectSound8 engine for 2D PCM storage,
 mixing, rate conversion, looping and device-paced cursors. It supports mono or
 stereo, 8/16-bit PCM, shared device ownership, guest-owned or caller-owned data,
 contiguous/wrapped lock uploads, play/stop/seek, volume/headroom and
@@ -853,7 +854,7 @@ Current bounded differences and missing coverage:
 - Borrowed data is uploaded on attachment and Play; writes through Lock/Unlock
   upload their real spans. Arbitrary concurrent writes through a retained raw
   data pointer are not qualified as coherent streaming. Detached zero-length
-  storage, partial loop regions, Xbox ADPCM, streams, DSP images, mix-bin routing
+  storage, partial loop regions, Xbox ADPCM, streams, mix-bin routing
   and 3D remain unqualified. Reached unsupported API/format requests stop.
 - The LLE APU currently proves bounded voice/idle/IRQ behavior, not full PCM
   output. These tests establish ABI, ownership and actual host playback; they
@@ -869,6 +870,32 @@ independently authored. Microsoft documents the
 [buffer creation](https://learn.microsoft.com/en-us/previous-versions/windows/desktop/ee418039(v=vs.85))
 and [actual play/write cursor contract](https://learn.microsoft.com/en-us/previous-versions/windows/desktop/ee418062(v=vs.85)).
 Xbox IMA ADPCM must not be passed to XAudio2 as Microsoft ADPCM.
+
+### Integrated effects transport
+
+`PILOT_AUDIO_BACKEND=DSOUND` retains the first backend. Build-time `XAUDIO2_DSP`
+selects actual XAudio2 voices and the pinned guarded MIT processor for downloaded
+effects. Prepare the donor and build its locked library:
+
+```powershell
+py -3 tools/native_dsp_donor.py --donor <pinned-donor> --output build/dsp-donor
+& "$env:USERPROFILE/.cargo/bin/cargo.exe" build --release --locked -p dsp56300-emu-ffi --manifest-path build/dsp-donor/Cargo.toml --target-dir build/dsp56300
+```
+
+Set `PILOT_DSP_SOURCE` to the prepared directory and `PILOT_DSP_LIBRARY` to
+`build/dsp56300/release/dsp56300_emu_ffi.lib`. Rerun `native_audio_binding.py`
+to add reviewed decoder/location metadata to an existing generation. Whole
+`PILOT_AUDIO=ORIGINAL` remains available; backends never switch during execution.
+Replacing an effects image changes owned graph data at the native processing
+boundary. The DSP audit records transport latency, first-use compilation,
+output mapping and remaining hardware qualification.
+
+Private actual-asset qualification uses `pilot_dsp_test <encrypted-image>
+<generated-seed-hex> <private-original-decoder-output>` and
+`pilot_contract_test audio-effects <encrypted-image>`. These test real graph
+execution/native output, optional arguments and replacement/lifetime behavior.
+No title asset or key is committed. The shared adapter is independently authored;
+the private CPU pilot retains its existing GPL dependency and release limits.
 
 Media-worker startup now uses real thread-object references, priority/boost
 controls and suspend/resume counts. A reference owns a duplicated native handle

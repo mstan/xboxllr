@@ -1,5 +1,8 @@
 #pragma once
 #include <stdint.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
 /* Native OS audio engine. All failures propagate; no silent clock/output fallback. */
 int32_t pilot_audio_open(void);
 void pilot_audio_close(void);
@@ -13,3 +16,10 @@ int32_t pilot_audio_buffer_position(void *buffer,uint32_t *play,uint32_t *write)
 int32_t pilot_audio_buffer_seek(void *buffer,uint32_t position);
 int32_t pilot_audio_buffer_volume(void *buffer,int32_t volume);
 int32_t pilot_audio_buffer_frequency(void *buffer,uint32_t frequency);
+#ifdef PILOT_AUDIO_DSP
+struct PilotDsp;
+int32_t pilot_audio_effects_install(struct PilotDsp *graph);
+#endif
+#ifdef __cplusplus
+}
+#endif

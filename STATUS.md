@@ -1,5 +1,24 @@
 # STATUS
 
+## 2026-10-07 - Blinx passes real DSP installation and reaches render targets
+
+`beads-xbox.1.62`: fresh/repeated NTSC Blinx now installs its actual three-effect
+graph and creates two more pixel definitions (32 total). It stops at a 640x480
+render-target texture, format `0x12`, usage `1`, type `3`, at 20536004/20535912
+entries. No title Play, frame, attract or cadence yet. JSRF remains deferred.
+
+The pinned MIT DSP core executes real program/state/DMA work behind the new
+build-selected XAudio2 mixing/resampling/output path. Original audio and the
+prior DirectSound backend remain selectable. 29 CTests pass, plus actual-image
+decode/execution, native playback and four concurrent installation/replacement
+tests with stable guest allocation totals and complete release. The retained
+DirectSound tests pass separately. Warm graph-only throughput is 39.017 ms per
+48000 samples; first-use compilation, hardware equivalence and title audio are
+still unqualified. The existing CPU pilot remains private and GPL-dependent.
+
+See [DSP evidence and limits](docs/NATIVE-DSP-DONOR-2026-10-07.md) and
+[current burndown](docs/BLINX-BURNDOWN.md). Next: render-target textures.
+
 ## 2026-10-07 - Blinx compiles all 91 vertex shaders
 
 `beads-xbox.1.62`: fresh/repeated original NTSC Blinx creates all 91 vertex

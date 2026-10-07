@@ -93,9 +93,38 @@ static void test_audio(void)
     CHECK(vm_committed(0,0x100000000ull)==committed);
     puts("audio contract: actual PCM storage/playback/end/cursor/loop/stop, Xbox ABI, wrapped locks, settings and ownership passed");
 }
+#ifdef PILOT_AUDIO_DSP
+static void test_audio_effects(const char *path)
+{
+    vm_ensure();uint64_t before=vm_committed(0,0x100000000ull);
+    FILE *f=fopen(path,"rb");CHECK(f);CHECK(!fseek(f,0,SEEK_END));long n=ftell(f);CHECK(n>0 && n<1024*1024);rewind(f);
+    uint32_t source=0,bytes=(uint32_t)n;CHECK(!vm_allocate(&source,0,&bytes,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
+    CHECK(fread(memory+source,1,n,f)==(size_t)n);fclose(f);
+    uint8_t *original=malloc(n);CHECK(original);memcpy(original,memory+source,n);
+    uint32_t device=audio_test_device(),buffer=audio_test_buffer(device,9600),a[8]={buffer,0,0,1};
+    CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_Play,a)==0);
+    uint64_t installed=0;
+    for(unsigned iteration=0;iteration<4;++iteration) {
+        MEM32(0x19320)=0x653470;MEM32(0x19324)=0x100;MEM32(0x19330)=0xcccccccc;
+        a[0]=device;a[1]=source;a[2]=(uint32_t)n;a[3]=iteration==3?0:0x19320;a[4]=iteration==2?0:0x19330;
+        CHECK(audio_test_call(PILOT_AUDIO_IDirectSound_DownloadEffectsImage,a)==0);
+        CHECK(!memcmp(original,memory+source,n));
+        CHECK(audio_effects && audio_effects_storage);
+        CHECK(audio_effects_location[0]==(iteration==3?UINT32_MAX:0x653470) && audio_effects_location[1]==(iteration==3?UINT32_MAX:0x100));
+        if(a[4]){uint32_t desc=MEM32(a[4]);CHECK(desc>=audio_effects_storage && MEM32(desc)==3);}
+        uint64_t now=vm_committed(0,0x100000000ull);if(iteration)CHECK(now==installed);installed=now;
+        Sleep(120); /* Real processing overlaps replacement; no duplicate run. */
+    }
+    a[0]=buffer;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_Release,a)==0);
+    a[0]=device;CHECK(audio_test_call(PILOT_AUDIO_IDirectSound_Release,a)==0);
+    CHECK(!audio_effects && !audio_effects_storage);bytes=0;CHECK(!vm_free(&source,&bytes,MEM_RELEASE));free(original);
+    CHECK(vm_committed(0,0x100000000ull)==before);
+    puts("actual effects ABI: input preserved, opaque locations, nullable output, concurrent processing/replacement and complete ownership release passed");
+}
+#endif
 static void test_audio_failure(const char *kind)
 {
-    uint32_t device=audio_test_device(),a[8]={device,0x19300,1,0,0};
+    uint32_t device=audio_test_device(),a[8]={device,0x19300,1,0,0x19310};
     if(!strcmp(kind,"effects"))audio_test_call(PILOT_AUDIO_IDirectSound_DownloadEffectsImage,a);
     else {
         uint32_t b=audio_test_buffer(device,9600);a[0]=b;

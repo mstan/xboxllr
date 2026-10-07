@@ -15,6 +15,12 @@ CONSTRUCTORS={
     'BUFFER':'745bf616d305cc7d2d37072af4cf998c7268047dda66a0f6571a7b3deb968d7d',
 }
 ADDREF='e683ffe809612832ed3454d2c9b13c8f2172e58e9c2a076c640b08c7caa8ff70'
+DSP_HELPERS={
+    'step':(121,'e8b808e809a4166ce0b51bae7d5acb29e2f105eaeb00f4424a6f37d7c76dcc29'),
+    'seed':(45,'d6fbcf36fd435ef8992eb4c8a025a6037604441f2acca02094e056fd5a6831c7'),
+    'decode':(207,'68bb004f6f6e3425b301652056b1e62eec935a43d1adab4c5cf61cc0a0000ba2'),
+    'location':(34,'fdbfe8d8b720fe60daf1f383e0145206c7628364a40514e141374ded3cb1f84d'),
+}
 
 def bind(xbe,output,symbols):
     context=Binding(xbe,output,symbols)
@@ -48,11 +54,22 @@ def bind(xbe,output,symbols):
                    (m:=re.fullmatch(r'dword ptr \[(?:eax|esi)\], (0x[0-9a-f]+)',i.op_str))]
         if len(addresses)!=1:raise ValueError('ambiguous audio object vtable')
         tables[kind]=dict(address=addresses[0],entries=list(struct.unpack('<III',data(addresses[0],12))),constructor_sha256=digest)
-    binding=dict(xbe_sha256=IMAGE,calls=calls,tables=tables,device_interface_offset=8,buffer_interface_offset=28,buffer_descriptor_bytes=24)
+    dsp={}
+    for kind,(size,digest) in DSP_HELPERS.items():
+        matches=[f for f in context.functions if f['size']==size and context.digest(f)==digest]
+        if len(matches)!=1:raise ValueError('missing reviewed DSP helper: '+kind)
+        f=matches[0];dsp[kind]=dict(sha256=digest)
+        if kind=='seed':
+            code=list(Cs(CS_ARCH_X86,CS_MODE_32).disasm(data(int(f['start'],16),size),int(f['start'],16)))
+            pushes=[int(i.op_str,0) for i in code if i.mnemonic=='push' and re.fullmatch('0x[0-9a-f]+|[0-9]+',i.op_str)]
+            if len(pushes)!=8 or pushes[:2]!=[0,0] or pushes[4:]!=[80,8,0,0]:raise ValueError('unreviewed DSP seed ABI')
+            dsp['seed']['value']=(pushes[2]<<32)|pushes[3]
+    binding=dict(xbe_sha256=IMAGE,calls=calls,tables=tables,device_interface_offset=8,buffer_interface_offset=28,buffer_descriptor_bytes=24,dsp_helpers=dsp)
     header=['#pragma once','enum PilotAudioEntry {']+[f'    PILOT_AUDIO_{c["name"]},' for c in calls]
     header+=['    PILOT_AUDIO_COUNT','};','static const struct { const char *name; unsigned stack_bytes; } pilot_audio_calls[] = {']
     header+=[f'    {{"{c["name"]}",{c["stack_bytes"]}}},' for c in calls]+['};']
     header+=[f'#define PILOT_AUDIO_{kind}_VTABLE 0x{v["address"]:08x}u' for kind,v in tables.items()]
+    header+=[f'#define PILOT_AUDIO_DSP_SEED UINT64_C(0x{dsp["seed"]["value"]:016x})']
     wrapper=['#include "pilot_audio_bindings.h"','extern void pilot_audio_dispatch(unsigned);']
     for c in calls:
         wrapper += [f'extern void pilot_original_audio_{c["name"]}(void);',f'void {c["symbol"]}(void) {{',
@@ -61,8 +78,15 @@ def bind(xbe,output,symbols):
     texts={'pilot_audio_bindings.h':'\n'.join(header)+'\n','pilot_audio_binding.c':'\n'.join(wrapper)+'\n'}
     record=output/'audio-binding.aot-private.json'
     if (context.generated/'pilot_audio_binding.c').exists():
-        if json.loads(record.read_text())!=binding or any((context.generated/n).read_text()!=s for n,s in texts.items()):
+        old=json.loads(record.read_text())
+        if any(k not in binding or (binding[k]!=v if k!='dsp_helpers' else any(binding[k].get(n)!=d for n,d in v.items())) for k,v in old.items()) or (context.generated/'pilot_audio_binding.c').read_text()!=texts['pilot_audio_binding.c']:
             raise ValueError('existing audio binding differs')
+        if old!=binding or (context.generated/'pilot_audio_bindings.h').read_text()!=texts['pilot_audio_bindings.h']:
+            (context.generated/'pilot_audio_bindings.h').write_text(texts['pilot_audio_bindings.h'],newline='\n')
+            record.write_text(json.dumps(binding,indent=2)+'\n',newline='\n')
+            context.manifest['audio_binding']=binding
+            context.manifest['files']={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(context.generated.iterdir()) if p.is_file()}
+            context.manifest_path.write_text(json.dumps(context.manifest,indent=2)+'\n',newline='\n')
         return binding
     replacements={c['symbol']:'pilot_original_audio_'+c['name'] for c in calls};found=set();edits={}
     def rename(m):

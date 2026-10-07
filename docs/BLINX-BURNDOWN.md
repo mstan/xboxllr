@@ -4,26 +4,27 @@
 attract sequence before resuming JSRF. Dashboard speed and full AOT remain
 continuing goals. The native pilot executes actual title startup with the
 authorized installed-media contract, passes input initialization, opens real
-native audio and starts the media workers. Vertical-blank waiting now advances
-to three real PCM buffers and loading `media/dsp.bin`. The next stop is
-`IDirectSound_DownloadEffectsImage`.
+native audio and starts the media workers. It now installs the real three-effect
+`media/dsp.bin` graph through the MIT core and XAudio2 processing path. The next
+stop is a 640x480 render-target texture, format `0x12`.
 Use the [native pilot evidence and scope](../pilots/native-title/README.md)
 for current progress; the optical-route ledger below is historical and separate.
 
 | Native milestone | Current evidence / remaining work |
 | --- | --- |
 | Launch, real files and writable storage | Passed bounded startup; original optical verifier remains selectable |
-| Graphics resource preparation | Real font/textures, buffers, 91 compiled vertex shaders and 30 owned pixel definitions; actual title draws still pending |
+| Graphics resource preparation | Real font/textures, buffers, 91 compiled vertex shaders and 32 owned pixel definitions; render-target creation and title draws still pending |
 | Input initialization | Native host input family passes contracts and actual title enumeration; hardware interaction remains unvalidated (no attached host pad in measured runs) |
-| Sound startup | Three actual 65536-byte stereo PCM16 buffers at 44100 Hz, real lock/unlock; effects installation, playback, streams and routing remain pending |
+| Sound startup | Three actual 65536-byte stereo PCM16 buffers at 44100 Hz, real lock/unlock and effects installation; title playback, streams and routing remain pending |
 | Media worker scheduling | Real references/priority/boost and safe suspend/resume; phase-locked vertical-blank waits pass and permit title progress |
-| DSP reuse | MIT core builds; offline original three-effect graph runs with real DMA. Production integration remains pending; see [audit](NATIVE-DSP-DONOR-2026-10-07.md) |
+| DSP reuse | Guarded MIT core integrated; real graph/DMA/tails and XAudio2 playback pass fixtures. Cold compilation and hardware comparison remain open; see [audit](NATIVE-DSP-DONOR-2026-10-07.md) |
 | Menu, movies and gameplay in attract | Pending; no title frame or audible output yet |
 | Complete repeat loops, interruption/menu return, original cadence | Pending actual end-to-end measurement |
 | JSRF | Deferred until Blinx success; shared services and separate bindings remain the architecture |
 
-Fresh and repeated native launches stop at the same effects-image boundary;
-27 contract tests and ten generation/extent tests pass. Original audio remains
+Fresh and repeated native launches stop at the same render-target boundary;
+29 contract tests plus actual-asset effects and retained DirectSound tests pass.
+The ten generation/extent tests passed at the earlier checkpoint. Original audio remains
 selectable and still stops at the original audio-driver `KfRaiseIrql` boundary.
 These are completed service checkpoints, not a percent
 complete or a date forecast. No throughput/velocity estimate supports an ETA.

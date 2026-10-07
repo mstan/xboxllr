@@ -21,7 +21,8 @@ register facts and the [XboxDev DSP interface description](https://xboxdevwiki.n
 were behavioral references for an independent private probe. Those references
 contain incomplete/uncertain DMA behavior; passing this probe does not establish
 an exhaustive hardware model. Source and dependency licensing must accompany
-any eventual vendoring; the core is not yet linked into the title executable.
+any eventual vendoring. The guarded core is now linked into the private title
+pilot; the original whole-audio selection remains available.
 
 The existing three recomp donors do not supply a usable complete DSP engine:
 their APU paths include passthrough and command-acknowledgement shortcuts.
@@ -71,7 +72,60 @@ The private JSON reports retain asset hashes, per-program hashes and original
 decoder comparison evidence. `probe.c` and its build definition remain an
 investigation prototype, not production-quality input validation.
 
-## Next integration steps and retained limits
+## Integrated checkpoint
+
+The implementation is now `audio_dsp.c` plus the build-selected
+`audio_xaudio2.cpp` transport. `native_dsp_donor.py` preserves the pinned MIT
+license and records source/guard/dependency hashes. Unsupported SA/SC/DM/SEN/MS
+modes, RESET, DEBUG/DEBUGcc and WAIT stop; executable tests exercise these guards.
+Cargo metadata includes the MPL-2.0 build tool cbindgen and non-GPL runtime
+license alternatives. This does not clear the GPL-dependent CPU pilot for release.
+
+Image decoding, descriptor relocation, program/state/Y/scratch ownership and
+real DMA are shared services. Revision bindings derive the decoder seed from
+qualified original helpers; shared code contains no title key or address.
+XAudio2 mixes/resamples voices into 32 bins. The processor seeds six direct
+speaker outputs from their bins, runs the actual graph, then sends six-channel
+output to the native stereo master. Source chunks own their bytes until real
+completion callbacks. Roughly 40 ms of queued PCM plus a 32-frame (0.667 ms)
+carry introduces documented transport latency. Arbitrary quantum remainders
+and silent-input effect tails are retained. The real-time processor takes no
+owner lock. First-use DSP JIT compilation still occurs on that thread and can
+stall about 50 ms; glitch-free playback is not yet established.
+
+Download returns an actual owned descriptor after installing this processing
+path. Replacement stops the native engine at a processing boundary, swaps the
+graph and releases old storage; it does not change backends or replay a floor.
+Original routines establish optional descriptor output and verbatim storage
+of effect locations, including Blinx's observed `00653470/00000100`; a null
+location sets both to `ffffffff`. Consuming parameter services remain unqualified.
+Arbitrary concurrent guest writes through effect pointers are also unqualified.
+The GP output shell, host resampling/downmix and DMA timing need whole-audio
+hardware comparison; this is a bounded floor, not complete audio equivalence.
+
+Validation:
+
+- **29 CTests pass**, including actual DSP output, malformed images, linked
+  unsupported-mode guards and real native PCM/cursor/lifetime tests.
+- Real Blinx program bytes match the private original-x86 decoder oracle.
+  1501 blocks execute **73549 DMA nodes**, producing 90 nonzero impulse samples
+  and 191988 nonzero tail samples. The warm 1500 blocks (48000 samples) took
+  **39.017 ms**, excluding voice mix/output and cold compilation. Real XAudio2
+  looping playback executed 315 blocks in 250 ms including cold compilation.
+- Four API replacements during playback preserve the input image, accept
+  nullable outputs/locations, retain stable guest allocation totals and release
+  all storage. The retained DirectSound backend passes its two audio tests.
+- Actual fresh/repeated NTSC Blinx now creates **32 pixel definitions** and
+  stops at a **640x480 render-target texture, format `0x12`, usage `1`, type `3`**
+  after 20536004/20535912 entries. No title Play, frame, attract or cadence yet.
+
+Evidence is in `build/dsp-all-contract-tests.log`, `build/dsound-regression.log`,
+`build/blinx/dsp-audit/{runtime-graph,effects-abi}.log`, and
+`build/blinx/dsp-validation.aot-private.json`. The next family is the reached
+render-target texture path. Broader audio routing/ADPCM/streams remain pending;
+JSRF remains deferred until Blinx succeeds.
+
+## Original integration plan and retained limits
 
 1. Prepare a pinned donor build with license/dependency records and explicit
    rejection of unimplemented modes. Upstream `docs/LIMITATIONS.md` includes
