@@ -1,6 +1,6 @@
 # STATUS
 
-## 2026-10-07 - Blinx samples resources and reaches transform setup
+## 2026-10-07 - Blinx binds textures and reaches transform setup
 
 `beads-xbox.1.62`: fresh/repeated NTSC Blinx now passes four texture-binding
 calls, including a real stage-0 texture, and two vertex-constant updates. Both
