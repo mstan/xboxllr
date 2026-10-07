@@ -9,6 +9,10 @@ struct NativeShader {
     ID3D11VertexShader *object;
     ID3D11InputLayout *layout;
     ID3DBlob *code;
+    ID3D11VertexShader *raw_object;
+    ID3D11InputLayout *raw_layout;
+    ID3DBlob *raw_code;
+    char *source;
     struct PilotVertexElement elements[16];
     unsigned used;
 };
@@ -16,6 +20,8 @@ static struct NativeShader native_shaders[256];
 static ID3D11Buffer *native_constants_buffer;
 static uint32_t native_constants[192][4];
 static unsigned native_constants_dirty,native_constants_uploads,native_shader_bound;
+static ID3D11Buffer *native_raster_buffer;
+static float native_raster_values[8];
 static struct NativeShader *native_shader(uint32_t handle)
 {
     if(!handle || handle>256 || !native_shaders[handle-1].object)pilot_d3d_backend_stop("unowned native vertex shader");
@@ -59,6 +65,17 @@ int32_t pilot_gfx_shader_flush(void)
     return S_OK;
 }
 unsigned pilot_gfx_shader_uploads(void) {return native_constants_uploads;}
+unsigned pilot_gfx_shader_streams(uint32_t extents[16])
+{
+    struct NativeShader *shader=native_shader(native_shader_bound);unsigned mask=0;memset(extents,0,16*4);
+    for(unsigned i=0;i<16;++i)if(shader->used&(1u<<i)) {
+        struct PilotVertexElement *element=&shader->elements[i];unsigned stream=element->stream;
+        uint32_t end=element->offset+shader_format(element->type)->bytes;
+        if(end>extents[stream])extents[stream]=end;mask|=1u<<stream;
+    }
+    return mask;
+}
+void pilot_gfx_shader_capture_constants(void *data) {memcpy(data,native_constants,sizeof(native_constants));}
 int32_t pilot_gfx_shader_create(const uint32_t *code,unsigned count,const struct PilotVertexElement elements[16],uint32_t *handle)
 {
     if(!code || !elements || !handle || !count || count>136 || !d3d8_GetD3D11Device())return E_INVALIDARG;
@@ -69,7 +86,7 @@ int32_t pilot_gfx_shader_create(const uint32_t *code,unsigned count,const struct
     char *source=shader_source(code,count,elements,&shader.used);
     if(!source)return E_OUTOFMEMORY;
     ID3DBlob *errors=NULL;
-    HRESULT result=D3DCompile(source,strlen(source),"xlle-nv2a",NULL,NULL,"main","vs_5_0",
+    HRESULT result=D3DCompile(source,strlen(source),"xlle-nv2a",NULL,NULL,"raster_main","vs_5_0",
         D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&shader.code,&errors);
     if(FAILED(result))fprintf(stderr,"[SHADER COMPILE] %s\n",errors?(const char*)ID3D10Blob_GetBufferPointer(errors):"no compiler diagnostic");
     const char *capture=getenv("XLLE_PILOT_SHADER_CAPTURE");
@@ -79,8 +96,9 @@ int32_t pilot_gfx_shader_create(const uint32_t *code,unsigned count,const struct
         FILE *file=fopen(path,"wb");
         if(!file || fwrite(source,strlen(source),1,file)!=1 || fclose(file))pilot_d3d_backend_stop("shader capture failed");
     }
-    free(source);if(errors)ID3D10Blob_Release(errors);
-    if(FAILED(result))return result;
+    if(errors)ID3D10Blob_Release(errors);
+    if(FAILED(result)){free(source);return result;}
+    shader.source=source;
     result=ID3D11Device_CreateVertexShader(d3d8_GetD3D11Device(),ID3D10Blob_GetBufferPointer(shader.code),ID3D10Blob_GetBufferSize(shader.code),NULL,&shader.object);
     D3D11_INPUT_ELEMENT_DESC layout[16]={0};unsigned n=0;
     for(unsigned i=0;i<16;++i)if(shader.used&(1u<<i)) {
@@ -94,7 +112,7 @@ int32_t pilot_gfx_shader_create(const uint32_t *code,unsigned count,const struct
         ID3D10Blob_GetBufferPointer(shader.code),ID3D10Blob_GetBufferSize(shader.code),&shader.layout);
     if(FAILED(result)) {
         if(shader.object)ID3D11VertexShader_Release(shader.object);
-        ID3D10Blob_Release(shader.code);return result;
+        ID3D10Blob_Release(shader.code);free(source);return result;
     }
     memcpy(shader.elements,elements,sizeof(shader.elements));native_shaders[slot]=shader;*handle=slot+1;
     fprintf(stderr,"[SHADER CREATE] native=%u instructions=%u inputs=%04x bytecode=%zu\n",*handle,count,shader.used,ID3D10Blob_GetBufferSize(shader.code));
@@ -109,6 +127,10 @@ void pilot_gfx_shader_destroy(uint32_t handle)
         native_shader_bound=0;
     }
     if(shader->layout)ID3D11InputLayout_Release(shader->layout);
+    if(shader->raw_layout)ID3D11InputLayout_Release(shader->raw_layout);
+    if(shader->raw_object)ID3D11VertexShader_Release(shader->raw_object);
+    if(shader->raw_code)ID3D10Blob_Release(shader->raw_code);
+    free(shader->source);
     ID3D11VertexShader_Release(shader->object);ID3D10Blob_Release(shader->code);memset(shader,0,sizeof(*shader));
 }
 void pilot_gfx_shaders_close(void)
@@ -120,6 +142,48 @@ void pilot_gfx_shaders_close(void)
         ID3D11Buffer_Release(native_constants_buffer);native_constants_buffer=NULL;
     }
     memset(native_constants,0,sizeof(native_constants));native_constants_dirty=native_constants_uploads=0;
+    if(native_raster_buffer){ID3D11Buffer *empty=NULL;ID3D11DeviceContext_VSSetConstantBuffers(d3d8_GetD3D11Context(),0,1,&empty);ID3D11Buffer_Release(native_raster_buffer);native_raster_buffer=NULL;}
+    memset(native_raster_values,0,sizeof(native_raster_values));
+}
+int32_t pilot_gfx_shader_raster(const float scale[4],const float offset[4])
+{
+    float values[8];memcpy(values,scale,16);memcpy(values+4,offset,16);
+    ID3D11Device *device=d3d8_GetD3D11Device();ID3D11DeviceContext *context=d3d8_GetD3D11Context();
+    if(!native_raster_buffer) {
+        D3D11_BUFFER_DESC desc={0};desc.ByteWidth=sizeof(values);desc.Usage=D3D11_USAGE_DEFAULT;desc.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
+        D3D11_SUBRESOURCE_DATA initial={values,0,0};HRESULT hr=ID3D11Device_CreateBuffer(device,&desc,&initial,&native_raster_buffer);
+        if(FAILED(hr))return hr;memcpy(native_raster_values,values,sizeof(values));
+    } else if(memcmp(native_raster_values,values,sizeof(values))) {
+        ID3D11DeviceContext_UpdateSubresource(context,(ID3D11Resource*)native_raster_buffer,0,NULL,values,0,0);
+        memcpy(native_raster_values,values,sizeof(values));
+    }
+    ID3D11DeviceContext_VSSetConstantBuffers(context,0,1,&native_raster_buffer);
+    return pilot_gfx_shader_flush();
+}
+static int32_t shader_raw_prepare(struct NativeShader *shader)
+{
+    if(shader->raw_object)return S_OK;
+    ID3DBlob *errors=NULL;
+    HRESULT hr=D3DCompile(shader->source,strlen(shader->source),"xlle-nv2a-reference",NULL,NULL,"main","vs_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&shader->raw_code,&errors);
+    if(errors)ID3D10Blob_Release(errors);if(FAILED(hr))goto failure;
+    hr=ID3D11Device_CreateVertexShader(d3d8_GetD3D11Device(),ID3D10Blob_GetBufferPointer(shader->raw_code),ID3D10Blob_GetBufferSize(shader->raw_code),NULL,&shader->raw_object);
+    if(FAILED(hr))goto failure;
+    D3D11_INPUT_ELEMENT_DESC layout[16]={0};unsigned n=0;
+    for(unsigned i=0;i<16;++i)if(shader->used&(1u<<i)) {
+        layout[n].SemanticName="ATTR";layout[n].SemanticIndex=i;
+        layout[n].Format=shader_format(shader->elements[i].type)->native;
+        layout[n].InputSlot=shader->elements[i].stream;layout[n].AlignedByteOffset=shader->elements[i].offset;
+        layout[n++].InputSlotClass=D3D11_INPUT_PER_VERTEX_DATA;
+    }
+    if(n)hr=ID3D11Device_CreateInputLayout(d3d8_GetD3D11Device(),layout,n,
+        ID3D10Blob_GetBufferPointer(shader->raw_code),ID3D10Blob_GetBufferSize(shader->raw_code),&shader->raw_layout);
+    if(FAILED(hr))goto failure;
+    return hr;
+failure:
+    if(shader->raw_layout){ID3D11InputLayout_Release(shader->raw_layout);shader->raw_layout=NULL;}
+    if(shader->raw_object){ID3D11VertexShader_Release(shader->raw_object);shader->raw_object=NULL;}
+    if(shader->raw_code){ID3D10Blob_Release(shader->raw_code);shader->raw_code=NULL;}
+    return hr;
 }
 /* Diagnostic only: execute the actual compiled vertex shader and read its
  * stream output, without rasterization or a duplicate production execution.
@@ -129,6 +193,7 @@ int32_t pilot_gfx_shader_probe(uint32_t handle,const struct PilotVertexProbeStre
 {
     struct NativeShader *shader=native_shader(handle);
     if(!streams || !outputs || !count || count>65536)return E_INVALIDARG;
+    HRESULT raw_result=shader_raw_prepare(shader);if(FAILED(raw_result))return raw_result;
     unsigned stream_mask=0;
     for(unsigned i=0;i<16;++i)if(shader->used&(1u<<i)) {
         unsigned stream=shader->elements[i].stream;stream_mask|=1u<<stream;
@@ -152,8 +217,8 @@ int32_t pilot_gfx_shader_probe(uint32_t handle,const struct PilotVertexProbeStre
         if(width<4)entries[n++].ComponentCount=(BYTE)(4-width);
     }
     UINT output_stride=13*16;
-    result=ID3D11Device_CreateGeometryShaderWithStreamOutput(device,ID3D10Blob_GetBufferPointer(shader->code),
-        ID3D10Blob_GetBufferSize(shader->code),entries,n,&output_stride,1,D3D11_SO_NO_RASTERIZED_STREAM,NULL,&geometry);
+    result=ID3D11Device_CreateGeometryShaderWithStreamOutput(device,ID3D10Blob_GetBufferPointer(shader->raw_code),
+        ID3D10Blob_GetBufferSize(shader->raw_code),entries,n,&output_stride,1,D3D11_SO_NO_RASTERIZED_STREAM,NULL,&geometry);
     if(FAILED(result))goto cleanup;
     D3D11_BUFFER_DESC desc={0};D3D11_SUBRESOURCE_DATA initial={0};
     UINT zero=0;
@@ -185,9 +250,9 @@ int32_t pilot_gfx_shader_probe(uint32_t handle,const struct PilotVertexProbeStre
     result=ID3D11Device_CreateBuffer(device,&desc,NULL,&output);if(FAILED(result))goto cleanup;
     desc.BindFlags=0;desc.Usage=D3D11_USAGE_STAGING;desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
     result=ID3D11Device_CreateBuffer(device,&desc,NULL,&staging);if(FAILED(result))goto cleanup;
-    ID3D11DeviceContext_IASetInputLayout(context,shader->layout);
+    ID3D11DeviceContext_IASetInputLayout(context,shader->raw_layout);
     ID3D11DeviceContext_IASetPrimitiveTopology(context,D3D11_PRIMITIVE_TOPOLOGY_POINTLIST);
-    ID3D11DeviceContext_VSSetShader(context,shader->object,NULL,0);
+    ID3D11DeviceContext_VSSetShader(context,shader->raw_object,NULL,0);
     ID3D11DeviceContext_VSSetConstantBuffers(context,1,1,&cb);
     ID3D11DeviceContext_GSSetShader(context,geometry,NULL,0);
     ID3D11DeviceContext_SOSetTargets(context,1,&output,&zero);

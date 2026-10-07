@@ -47,6 +47,10 @@ void pilot_gfx_shader_constants(unsigned first,unsigned count,const void *data);
 /* Constant writes coalesce until draw submission. */
 int32_t pilot_gfx_shader_flush(void);
 unsigned pilot_gfx_shader_uploads(void);
+void pilot_gfx_shader_capture_constants(void *data);
+int32_t pilot_gfx_shader_raster(const float scale[4],const float offset[4]);
+int32_t pilot_gfx_draw_vertices(unsigned primitive,unsigned first,unsigned count);
+unsigned pilot_gfx_shader_streams(uint32_t extents[16]);
 void pilot_gfx_pixel_fixed(void);
 /* Diagnostic raw vertex outputs, before rasterization/viewport conversion. */
 struct PilotVertexProbeStream { const void *data; unsigned stride; };

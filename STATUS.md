@@ -1,10 +1,34 @@
 # STATUS
 
+## 2026-10-07 - Blinx renders its loading screen
+
+`beads-xbox.1.62`: fresh/repeated NTSC Blinx submits seven real triangle-strip
+draws and renders the 640x480 "Warping space-time..." loading image. Both
+captures have the same pixel hash. It then stops at `D3DResource_IsBusy`
+(`0x00136d40`), entries 22252475/22252383, with 23/21 consecutive callbacks.
+No Swap/presentation, title Play, movie, interactive menu or attract/cadence yet.
+
+Native shaders now convert Xbox pixel/depth output to clip space, preserve
+perspective W/Q and supply the MIT donor's real pixel/state/sampler pipeline.
+Draw submission consumes live owned streams/textures and uploads changed data.
+The production shader executes once; raw reference compilation/execution and
+GPU readback occur only in explicitly enabled diagnostics. All 28 captured
+vertices from each launch match the permissive LLE decoder (observed scaled
+error zero; tolerance 2e-4). All 29 CTests pass (10.42 seconds), including real
+native raster pixels, multistream/first-vertex behavior, projected linear
+textures, viewport/depth and specular selection across three device lifetimes.
+
+Correction to the previous checkpoint: Xbox primitive 6 is a triangle strip,
+not desktop D3D's triangle fan. The adapter uses Xbox numbering. Next: real
+resource ownership/completion queries, then presentation and its callbacks.
+JSRF remains deferred; the private GPL-dependent CPU artifact remains outside
+shipping. See [draw evidence and limits](pilots/native-title/README.md#native-draw-checkpoint-2026-10-07).
+
 ## 2026-10-07 - Blinx reaches its first draw request
 
 `beads-xbox.1.62`: fresh/repeated NTSC Blinx passes all four bump-matrix
 updates, binds stream 0 (stride 28), selects its next texture/shader, and reaches
-`D3DDevice_DrawVertices`: triangle fan, first vertex 0, count 4. Both stop before
+`D3DDevice_DrawVertices`: triangle strip, first vertex 0, count 4. Both stop before
 submitting the draw, after 22252454/22252362 entries and 20/17 consecutive
 callbacks. No title frame, Play, movie, menu, attract or cadence result yet.
 

@@ -5,6 +5,7 @@
 #include <math.h>
 #define CHECK(c) do { if (!(c)) { fprintf(stderr,"FAIL graphics line %d: %s\n",__LINE__,#c); return 1; } } while (0)
 #include "graphics_bump_backend_test.inc"
+#include "graphics_draw_backend_test.inc"
 static int test_transform_pipeline(void)
 {
     static const D3DTRANSFORMSTATETYPE states[]={D3DTS_VIEW,D3DTS_PROJECTION,D3DTS_TEXTURE0,D3DTS_TEXTURE1,
@@ -125,6 +126,7 @@ int main(void)
         CHECK(test_transform_pipeline()==0);
         CHECK(test_bump_pipeline()==0);
         CHECK(test_resource_bindings()==0);
+        CHECK(test_native_draw_pipeline()==0);
         pilot_gfx_close();
     }
     fprintf(stderr,"PASS: actual donor D3D11 create/clear/triangle/pixel-readback/present/recreate\n"); return 0;

@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import subprocess
 from native_d3d_bump import prepare_bump
+from native_d3d_raster import prepare_raster
 
 PIN = "1409a7d7801d3e931fb1074be6104209ddd9a33e"
 FILES = "d3d8_device.c d3d8_gamma.c d3d8_resources.c d3d8_shaders.c d3d8_states.c d3d8_combiners.c d3d8_vsh.c d3d8_xbox.h d3d8_internal.h d3d8_swizzle.h d3d8_fvf.h d3d8_combiners.h d3d8_vsh.h".split()
@@ -159,6 +160,7 @@ def prepare(donor: Path, output: Path, vsh_reference: Path):
             code = checked_calls(code, checks)
             if name == "d3d8_shaders.c":
                 code=prepare_bump(code)
+                code=prepare_raster(code)
                 # Reuse the real fixed-function pixel compiler/state upload
                 # without replacing an independently owned NV2A vertex shader.
                 signature='void d3d8_shaders_prepare_draw(DWORD handle)'

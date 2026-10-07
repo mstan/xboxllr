@@ -11,16 +11,18 @@ callback and loads five menu textures. It binds its compiled vertex shader,
 the donor's real fixed-function pixel shader and a real stage-0 texture, then
 updates vertex constants and passes view/projection setup. It now passes four
 bump-matrix updates and binds its first vertex stream and next texture/shader.
-The next stop is its first `D3DDevice_DrawVertices` request (four-vertex fan).
+Seven real triangle-strip draws now render its "Warping space-time..." loading
+image. The next stop is `D3DResource_IsBusy`, before presentation.
 Use the [native pilot evidence and scope](../pilots/native-title/README.md)
 for current progress; the optical-route ledger below is historical and separate.
 
 | Native milestone | Current evidence / remaining work |
 | --- | --- |
 | Launch, real files and writable storage | Passed bounded startup; original optical verifier remains selectable |
-| Graphics resource preparation | Real font/textures, buffers, 96 compiled vertex shaders, 37 owned pixel definitions and three color/depth targets; title bindings, view/projection and bump setup now pass. First draw request reached; raster interface and actual draw submission remain pending |
+| Graphics resource preparation | Real font/textures, buffers, 96 compiled vertex shaders, 37 owned pixel definitions and three color/depth targets; title setup and seven real draws now pass. Resource completion queries and presentation remain pending |
+| Native raster/draw contract | Actual loading image captured identically on fresh/repeated launches. All 28 captured vertices match the LLE decoder; real GPU fixtures cover W/Q, multiple streams, start index, viewport/depth and texture coordinates. No presentation/cadence proof yet |
 | Bump-environment contract | Six cached states and real native dependent sampling/luminance; original-x86 setter and GPU pixel fixtures pass. Blinx has configured its matrix; no title bump rendering claimed |
-| Transform and viewport contract | Ten native matrix slots, viewport queries and projection caches pass fixtures and original-x86 comparisons; real GPU fixture verifies transformed pixels. Actual title view/projection calls pass; no title draw yet |
+| Transform and viewport contract | Ten native matrix slots, viewport queries and projection caches pass fixtures and original-x86 comparisons; real GPU fixture verifies transformed pixels. Actual title view/projection calls and initial draw conversion pass |
 | Resource binding and lifetime | Four texture stages and sixteen native vertex streams; GPU sampling, updates, internal/public references, replacement and cleanup pass fixtures. Blinx now exercises textures and stream 0 binding (stride 28) |
 | Vertex constant contract | Real GPU bindings and batched constant uploads; 12 original-x86 cache/query comparisons pass, including GPU-only fast writes and declaration constants. No title speed claim |
 | State capture | ALL/PIXEL/VERTEX snapshots and retained references match original-x86 fixtures; actual title's ALL capture passes. Application remains unqualified |
@@ -29,12 +31,12 @@ for current progress; the optical-route ledger below is historical and separate.
 | Sound startup | Three actual 65536-byte stereo PCM16 buffers at 44100 Hz, real lock/unlock and effects installation; title playback, streams and routing remain pending |
 | Media worker scheduling | Real references/priority/boost and safe suspend/resume; phase-locked vblank waits and real title callbacks run. Swap/callback completion flags remain pending |
 | DSP reuse | Guarded MIT core integrated; real graph/DMA/tails and XAudio2 playback pass fixtures. Cold compilation and hardware comparison remain open; see [audit](NATIVE-DSP-DONOR-2026-10-07.md) |
-| Menu, movies and gameplay in attract | Pending; no title frame or audible output yet |
+| Menu, movies and gameplay in attract | Loading image rendered into native back buffer; presentation, interactive menu, movies, audible output and gameplay remain pending |
 | Complete repeat loops, interruption/menu return, original cadence | Pending actual end-to-end measurement |
 | JSRF | Deferred until Blinx success; shared services and separate bindings remain the architecture |
 
-Fresh and repeated native launches stop at the same first-draw boundary
-after 20/17 actual title callbacks and 22252454/22252362 function entries;
+Fresh and repeated native launches stop at the same resource-busy boundary
+after 23/21 actual title callbacks, seven draws and 22252475/22252383 function entries;
 29 contract tests plus actual-asset effects and retained DirectSound tests pass.
 The ten generation/extent tests passed at the earlier checkpoint. Original audio remains
 selectable and still stops at the original audio-driver `KfRaiseIrql` boundary.

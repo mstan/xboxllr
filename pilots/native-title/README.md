@@ -50,21 +50,22 @@ returns repeatedly. After loading five menu textures, it now binds its compiled
 vertex shader and the donor's fixed-function pixel shader. It binds a real
 stage-0 texture, updates vertex constants and passes view/projection setup.
 It now passes four bump-matrix updates, binds stream 0 (stride 28), and selects
-its next texture and vertex shader. It reaches `D3DDevice_DrawVertices`, a
-four-vertex triangle fan, but stops before submitting it. No title target
-binding or completed draw occurs yet.
+its next texture and vertex shader. Seven real `D3DDevice_DrawVertices`
+triangle strips now render the 640x480 "Warping space-time..." loading image
+into the native back buffer. Both fresh/repeated captures match. It next stops
+at `D3DResource_IsBusy`, before Swap/presentation. No title target binding yet.
 No title buffer Play or audible game output is established by those runs.
 `PILOT_AUDIO=ORIGINAL` still executes the original sound-object allocations and
 contiguous-page setup, stopping at `KfRaiseIrql` (ordinal 160) in audio-driver
 initialization. `HalBootSMCVideoMode` is a real data export with
 the same composite-cable value as the LLE SMC. The `PILOT_INPUT=ORIGINAL`
 selection still executes original USB initialization and stops at
-`IoCreateDevice` (ordinal 65). Title draws and audible output are unqualified.
+`IoCreateDevice` (ordinal 65). Broader title drawing and audible output remain unqualified.
 The last ORIGINAL-renderer measurement, before the contiguous-memory service,
 stopped at `MmAllocateContiguousMemoryEx`; it has not been remeasured since.
 The OPTICAL build retains
 and executes the original verification helper, stopping on unsupported raw
-optical access. No Blinx draws, movies, menu or level yet. Function-entry counts
+optical access. No Blinx movie, interactive menu or level yet. Function-entry counts
 are diagnostics, not coverage or performance measurements.
 
 The owner's current goal is serial: complete Blinx before further JSRF work.
@@ -111,6 +112,70 @@ kernel-call failure paths. Passing
 the other title's XBE to the Blinx artifact is rejected before guest execution.
 The main LLE build's runtime source and build selection are untouched.
 
+### Native draw checkpoint (2026-10-07)
+
+Seven real title triangle strips render the 640x480 "Warping space-time..."
+loading image into the native back buffer. Fresh/repeated launches stop next
+at `D3DResource_IsBusy`, `0x00136d40`, resource `0x036a0000`, caller
+`0x000f1643`, after 22252475/22252383 entries and 23/21 consecutive callbacks.
+The final PPM pixel captures match (SHA-256
+`f0666140650234d4092a603a21d5a814a6db07c9ae3a238e236666042b370ce0`).
+These are actual rendered title pixels, not a diagnostic replacement scene.
+No Swap/presentation, title Play/audio, movie, interactive menu, level, attract
+loop or cadence is proven yet. JSRF remains deferred.
+
+The adapter converts Xbox pixel XY and 24-bit integer depth into native clip
+coordinates for the active viewport, retaining authored W for perspective
+interpolation. It passes full four-component texture coordinates; the donor
+pixel shader divides by Q after interpolation and normalizes linear textures
+by their dimensions. Undeclared homogeneous components use 1 and unwritten fog
+uses 1 at this raster boundary; the raw decoder diagnostic retains its prior
+zero initialization. Colors clamp at the native interface. Native subpixel
+precision and rounding are allowed, not forced to repeat original arithmetic.
+
+Phobos's screen-space conversion was inspected as a behavioral reference.
+The conversion here is independently implemented against the existing LLE
+screen/clip handling and captured title outputs. The MIT donor supplies actual
+texture sampling, state objects, pixel compilation/cache and constant upload;
+its desktop DrawPrimitive body is excluded because its primitive numbering,
+count convention and vertex preparation do not match the Xbox entry. The new
+submission uses the already owned native shaders and buffers. Xbox types 5/6
+are triangle list/strip; the previous checkpoint's type-6 "fan" description
+was incorrect and has been corrected. Other topologies remain guarded.
+
+Draws validate used stream extents/start/count, upload live changed vertex and
+texture bytes, prepare CPU-exposed render targets, batch vertex constants,
+apply actual native state and submit work. The compiled raster shader executes
+once in ordinary production. Raw shader compilation is lazy and occurs only
+when a diagnostic probe requests it; captures/readback are opt-in. No GPL
+implementation was added; the pre-existing CPU pilot remains a private
+GPL-dependent artifact outside shipping.
+
+All 29 CTests pass (10.42 seconds). Native GPU fixtures cover nonzero first
+vertex, streams 0/7, triangle-strip coverage, perspective W/Q, linear texture
+coordinates, a nondefault viewport/depth range, real depth rejection, changed
+buffer uploads and specular argument selection across three device lifetimes.
+All 28 actual vertices from each title launch match the pinned permissive LLE
+decoder: 1064 scalar comparisons per launch, observed maximum scaled error 0,
+tolerance 2e-4. Actual transform/state-block captures still match their earlier
+original-x86 oracles. The screenshot is evidence of initial rendering, not full
+raster equivalence or a hardware image comparison.
+
+Remaining boundaries include resource ownership/completion queries, Swap and
+callback completion, other topologies, programmable pixel selection, broader
+FVF/state application and zero/negative homogeneous edge cases. The admitted
+profile still uses non-MSAA 24-bit depth. Next: implement IsBusy with real
+binding ownership and native completion, then validate the next title step.
+
+Private evidence: `build/blinx/draw-validation.aot-private.json`,
+`run-draw-{fresh,repeat}.log`, `draw-{fresh,repeat}/draw-*.bin`,
+`draw-{fresh,repeat}/draw-*.ppm`, `draw-{fresh,repeat}/loading-screen.png`,
+`build/draw-gpu.log`, `build/draw-title-validation.log` and
+`build/draw-all-contract-tests.log`. The source-owned `pilot_shader_test
+--draw-capture <files...>` compares captured original inputs/constants with the
+LLE decoder. Executable SHA-256:
+`a5e37c7abcb42fcc2ea69d29ed259cc4e7c5dc2ee24d48a98cb66da1ec3cc012`.
+
 ### Bump-environment checkpoint (2026-10-07)
 
 Six real bump states preserve the original three-argument callee-cleaned ABI
@@ -145,7 +210,7 @@ its internals do not reproduce the driver's physical stage remap.
 
 Fresh/repeated Blinx passes all four matrix updates (stage 1, diagonal 4.0,
 off-diagonal zero), binds stream 0, and reaches its first DrawVertices request
-at `0x00136040`, caller `0x00033811`: type 6 (triangle fan), first 0, count 4.
+at `0x00136040`, caller `0x00033811`: type 6 (triangle strip), first 0, count 4.
 Entries 22252454/22252362; 20/17 consecutive callbacks; 96 vertex shaders,
 37 pixel definitions and five menu assets retained. The actual transform and
 5460-byte state-block captures still match their original-x86 oracles. The

@@ -17,6 +17,7 @@ static uint32_t pilot_color_target,pilot_depth_target;
 static struct { IDirect3DTexture8 *object; ID3D11RenderTargetView *rtv; ID3D11DepthStencilView *dsv; uint32_t uploaded,gpu_written; } pilot_textures[256];
 static struct { IDirect3DVertexBuffer8 *object; int uploaded; } pilot_vertices[256];
 static uint32_t pilot_bound_textures[4],pilot_bound_vertices[16];
+void pilot_d3d_raster_texture_mode(UINT native,const float scale[4][4]);
 
 void pilot_gfx_pixel_fixed(void)
 {
@@ -443,6 +444,7 @@ void pilot_gfx_set_texture_state(uint32_t stage,uint32_t state,uint32_t value)
 int32_t pilot_gfx_draw_up(uint32_t primitive,uint32_t count,const void *data,uint32_t stride,uint32_t fvf)
 {
     if (!pilot_device) return E_FAIL;
+    pilot_d3d_raster_texture_mode(0,NULL);
     HRESULT status=pilot_device->lpVtbl->SetVertexShader(pilot_device,fvf);
     if (SUCCEEDED(status)) status=pilot_device->lpVtbl->DrawPrimitiveUP(pilot_device,(D3DPRIMITIVETYPE)primitive,count,data,stride);
     if(SUCCEEDED(status)) {
@@ -450,6 +452,30 @@ int32_t pilot_gfx_draw_up(uint32_t primitive,uint32_t count,const void *data,uin
         if(pilot_depth_target && pilot_depth_target!=UINT32_MAX){pilot_textures[pilot_depth_target-1].uploaded=1;pilot_textures[pilot_depth_target-1].gpu_written=1;}
     }
     return status;
+}
+int32_t pilot_gfx_draw_vertices(unsigned primitive,unsigned first,unsigned count)
+{
+    if(!pilot_device || !count || (uint64_t)first+count>UINT32_MAX)return E_INVALIDARG;
+    D3D11_PRIMITIVE_TOPOLOGY topology;
+    if(primitive==5 && count>=3 && count%3==0)topology=D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+    else if(primitive==6 && count>=3)topology=D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP;
+    else return E_NOTIMPL;
+    float scale[4][4];
+    for(unsigned stage=0;stage<4;++stage) {
+        scale[stage][0]=scale[stage][1]=scale[stage][2]=scale[stage][3]=1;
+        if(pilot_bound_textures[stage]) {
+            D3D8Texture *texture=pilot_texture(pilot_bound_textures[stage]);
+            if(texture->d3d8_format==0x12 || texture->d3d8_format==0x1e || texture->d3d8_format==0x2e) {
+                scale[stage][0]=1.0f/texture->width;scale[stage][1]=1.0f/texture->height;
+            }
+        }
+    }
+    pilot_d3d_raster_texture_mode(1,scale);d3d8_shaders_prepare_pixel();d3d8_states_apply();
+    ID3D11DeviceContext *context=d3d8_GetD3D11Context();
+    ID3D11DeviceContext_IASetPrimitiveTopology(context,topology);ID3D11DeviceContext_Draw(context,count,first);
+    if(pilot_color_target){pilot_textures[pilot_color_target-1].uploaded=1;pilot_textures[pilot_color_target-1].gpu_written=1;}
+    if(pilot_depth_target && pilot_depth_target!=UINT32_MAX){pilot_textures[pilot_depth_target-1].uploaded=1;pilot_textures[pilot_depth_target-1].gpu_written=1;}
+    return S_OK;
 }
 uint32_t pilot_gfx_width(void) { return d3d8_GetBackbufferWidth(); }
 uint32_t pilot_gfx_height(void) { return d3d8_GetBackbufferHeight(); }
