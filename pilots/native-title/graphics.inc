@@ -61,6 +61,7 @@ static void *graphics_pointer(uint32_t address,uint32_t bytes)
 #include "graphics_shader.inc"
 #include "graphics_pixel.inc"
 #include "graphics_stateblock.inc"
+#include "graphics_transform.inc"
 static void graphics_resource_bindings_close(void)
 {
     for(unsigned i=0;i<4;++i)graphics_texture_bind(i,0);
@@ -108,6 +109,7 @@ static void graphics_set_targets(uint32_t color,uint32_t depth)
     graphics_target=color;graphics_depth=depth;
     uint32_t viewport[]={0,0,width,height,0,0x3f800000};
     if(pilot_gfx_viewport(viewport)<0)stop("target viewport reset failed",color);
+    graphics_transform_viewport(viewport);
 }
 
 void pilot_d3d_dispatch(unsigned entry)
@@ -121,6 +123,12 @@ void pilot_d3d_dispatch(unsigned entry)
     if (entry!=PILOT_D3D_Direct3D_CreateDevice && !graphics_active)
         stop("graphics entry before native creation",pilot_d3d_calls[entry].address);
     switch(entry) {
+    case PILOT_D3D_D3DDevice_SetTransform:graphics_transform_set(arguments[0],arguments[1]);break;
+    case PILOT_D3D_D3D_UpdateProjectionViewportTransform:graphics_projection_viewport();break;
+    case PILOT_D3D_D3DDevice_GetViewportOffsetAndScale: {
+        float offset[4],scale[4];graphics_viewport_offset_scale(offset,scale);
+        memcpy(graphics_pointer(arguments[0],16),offset,16);memcpy(graphics_pointer(arguments[1],16),scale,16);break;
+    }
     case PILOT_D3D_D3DDevice_CreateStateBlock:g_eax=graphics_block_create(arguments);break;
     case PILOT_D3D_D3DDevice_SetVerticalBlankCallback:graphics_set_vblank_callback(arguments[0]);break;
     case PILOT_D3D_D3DDevice_GetRenderTarget2:
@@ -189,6 +197,7 @@ void pilot_d3d_dispatch(unsigned entry)
             graphics_state_init();
             graphics_surfaces_create();
             graphics_snapshot_init();
+            graphics_transform_init();
             MEM32(PILOT_D3D_DEVICE_GLOBAL)=PILOT_D3D_DEVICE_OBJECT;
             if (arguments[5]) MEM32(arguments[5])=PILOT_D3D_DEVICE_OBJECT;
         } else {
@@ -275,7 +284,8 @@ void pilot_d3d_dispatch(unsigned entry)
         if (!viewport[2] || !viewport[3] || (uint64_t)viewport[0]+viewport[2]>width ||
             (uint64_t)viewport[1]+viewport[3]>height || !(low>=0 && high<=1 && low<=high))
             stop("unqualified viewport bounds",arguments[0]);
-        g_eax=(uint32_t)pilot_gfx_viewport(viewport); break;
+        g_eax=(uint32_t)pilot_gfx_viewport(viewport);
+        if(!(g_eax&0x80000000u))graphics_transform_viewport(viewport);break;
     }
     case PILOT_D3D_D3DDevice_Swap:
         if (arguments[0]) stop("unqualified graphics swap flags",arguments[0]);

@@ -4,6 +4,24 @@
 #include <stdlib.h>
 #include <math.h>
 #define CHECK(c) do { if (!(c)) { fprintf(stderr,"FAIL graphics line %d: %s\n",__LINE__,#c); return 1; } } while (0)
+static int test_transform_pipeline(void)
+{
+    static const D3DTRANSFORMSTATETYPE states[]={D3DTS_VIEW,D3DTS_PROJECTION,D3DTS_TEXTURE0,D3DTS_TEXTURE1,
+        D3DTS_TEXTURE2,D3DTS_TEXTURE3,D3DTS_WORLD,D3DTS_WORLD1,D3DTS_WORLD2,D3DTS_WORLD3};
+    float matrix[16]={0};for(unsigned i=0;i<4;++i)matrix[i*5]=1;
+    for(unsigned i=0;i<10;++i){matrix[12]=i*.125f;CHECK(pilot_gfx_transform(i,matrix)==0);CHECK(!memcmp(d3d8_GetTransform(states[i]),matrix,64));}
+    matrix[12]=.5f;CHECK(pilot_gfx_transform(6,matrix)==0);
+    matrix[12]=-.25f;CHECK(pilot_gfx_transform(0,matrix)==0);
+    matrix[12]=0;matrix[0]=.5f;CHECK(pilot_gfx_transform(1,matrix)==0);
+    pilot_gfx_set_texture_state(0,D3DTSS_COLOROP,D3DTOP_DISABLE);
+    struct {float x,y,z;uint32_t color;} vertices[]={{-.5f,.5f,.5f,0xffff0000},{.5f,.5f,.5f,0xffff0000},{0,-.5f,.5f,0xffff0000}};
+    CHECK(pilot_gfx_clear(D3DCLEAR_TARGET,0xff0000ff,1,0)==0);
+    CHECK(pilot_gfx_draw_up(D3DPT_TRIANGLELIST,1,vertices,sizeof(vertices[0]),0x42)==0);
+    unsigned char pixels[64*64*4];CHECK(pilot_gfx_readback(pixels,sizeof(pixels))==0);
+    unsigned inside=(24*64+36)*4,outside=(20*64+20)*4;
+    CHECK(pixels[inside]==255 && pixels[inside+2]==0 && pixels[outside]==0 && pixels[outside+2]==255);
+    fprintf(stderr,"PASS: Xbox transform enum mapping and real donor world/view/projection GPU pixels\n");return 0;
+}
 static int test_resource_bindings(void)
 {
     uint32_t texture=0;CHECK(pilot_gfx_texture_create(2,2,1,0x12,&texture)==0);
@@ -103,6 +121,7 @@ int main(void)
         CHECK(pixels[center]>240 && pixels[center+1]<10 && pixels[center+2]<10);
         CHECK(pixels[0]==0 && pixels[1]==0 && pixels[2]==255);
         CHECK(pilot_gfx_present()>=0);
+        CHECK(test_transform_pipeline()==0);
         CHECK(test_resource_bindings()==0);
         pilot_gfx_close();
     }

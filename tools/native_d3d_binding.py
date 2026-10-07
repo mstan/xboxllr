@@ -99,6 +99,16 @@ def bind(xbe: Path, output: Path, symbols: Path):
         (m:=re.fullmatch(r'dword ptr \[ebp \+ esi\*4 \+ (0x[0-9a-f]+|[0-9]+)\], 0x80000000',i.op_str))]
     if len(fences)!=1 or len(modes)!=1:raise ValueError('unreviewed resource binding cache layout')
     state_defaults['resource_binding']=dict(fence=fences[0],texture_mode=modes[0])
+    transform=next(s for s in identified if s['name']=='D3DDevice_SetTransform')
+    screen=next(s for s in identified if s['name']=='D3DDevice_SetScreenSpaceOffset')
+    screen_code=list(Cs(CS_ARCH_X86,CS_MODE_32).disasm(data(screen['address'],functions[screen['address']]['size']),screen['address']))
+    bias=[int(m[1],16) for i in screen_code if i.mnemonic=='fld' and
+          (m:=re.fullmatch(r'dword ptr \[(0x[0-9a-f]+)\]',i.op_str))]
+    if len(bias)!=2 or bias[0]!=bias[1]:raise ValueError('unreviewed screen-space bias')
+    state_defaults['transform_binding']=dict(setter_sha256=context.digest(functions[transform['address']]),
+        fields=dict(projection_depth=0x504,depth_scale=0x510,pixel_scale=0x518,
+                    projection_viewport=0x530,screen_offset=0xaa8),
+        screen_bias=struct.unpack('<I',data(bias[0],4))[0])
     caps=next(s for s in identified if s['name']=='D3DDevice_GetDeviceCaps')
     if caps['stack_bytes']!=4 or context.digest(functions[caps['address']])!=CAPS:
         raise ValueError('unreviewed capability query')
@@ -175,6 +185,8 @@ def bind(xbe: Path, output: Path, symbols: Path):
     header += [f'#define PILOT_D3D_VERTEX_{name.upper()} {binding["vertex_binding"][name]}u'
                for name in ('program_cache','start','record_flags','record_disable')]
     header += [f'#define PILOT_D3D_RESOURCE_{name.upper()} {offset}u' for name,offset in binding['resource_binding'].items()]
+    header += [f'#define PILOT_D3D_TRANSFORM_{name.upper()} {offset}u' for name,offset in binding['transform_binding']['fields'].items()]
+    header += [f'#define PILOT_D3D_SCREEN_BIAS 0x{binding["transform_binding"]["screen_bias"]:x}u']
     header += [f'#define PILOT_D3D_SNAPSHOT_{name.upper()} {offset}u' for name,offset in block['fields'].items()]
     header += ['static const uint8_t pilot_d3d_block_'+name+'[] = {'+', '.join(str(x) for x in block[name])+'};'
                for name in ('pixel_render','pixel_texture','vertex_render','vertex_texture')]

@@ -165,6 +165,7 @@ def prepare(donor: Path, output: Path, vsh_reference: Path):
                     raise ValueError('unreviewed combined shader preparation')
                 code=code.replace(signature,'void d3d8_shaders_prepare_pixel(void)').replace(vertex,'')
                 code+='\nvoid d3d8_shaders_prepare_draw(DWORD handle)\n{\n'+vertex+'\n    d3d8_shaders_prepare_pixel();\n}\n'
+                code+='\nvoid pilot_gfx_matrix_multiply(float *out,const float *a,const float *b) { mat4_mul(out,a,b); }\n'
                 # DIFFUSE is argument zero, not an absent state/default.
                 for field,default in (("COLORARG1","TEXTURE"),("COLORARG2","CURRENT"),("ALPHAARG1","TEXTURE"),("ALPHAARG2","CURRENT")):
                     code = code.replace(f'tss[D3DTSS_{field}] ? tss[D3DTSS_{field}] : D3DTA_{default}',f'tss[D3DTSS_{field}]')

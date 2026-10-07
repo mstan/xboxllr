@@ -136,6 +136,14 @@ int32_t pilot_gfx_get_viewport(uint32_t viewport[6])
     memcpy(viewport+4,&current.MinDepth,4); memcpy(viewport+5,&current.MaxDepth,4);
     return S_OK;
 }
+int32_t pilot_gfx_transform(unsigned state,const float matrix[16])
+{
+    static const D3DTRANSFORMSTATETYPE states[]={D3DTS_VIEW,D3DTS_PROJECTION,
+        D3DTS_TEXTURE0,D3DTS_TEXTURE1,D3DTS_TEXTURE2,D3DTS_TEXTURE3,
+        D3DTS_WORLD,D3DTS_WORLD1,D3DTS_WORLD2,D3DTS_WORLD3};
+    if(!pilot_device || state>=10 || !matrix)return E_INVALIDARG;
+    return pilot_device->lpVtbl->SetTransform(pilot_device,states[state],(const D3DMATRIX*)matrix);
+}
 int32_t pilot_gfx_present(void)
 {
     if (!pilot_device) return E_FAIL;

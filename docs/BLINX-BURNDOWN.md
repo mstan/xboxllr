@@ -9,14 +9,16 @@ native audio and starts the media workers. It now installs the real three-effect
 creates its color/depth targets, captures its real state block, runs its vblank
 callback and loads five menu textures. It binds its compiled vertex shader,
 the donor's real fixed-function pixel shader and a real stage-0 texture, then
-updates two vertex constants. The next stop is `D3DDevice_SetTransform`.
+updates vertex constants and passes view/projection setup. The next stop is
+`D3DDevice_SetTextureState_BumpEnv`.
 Use the [native pilot evidence and scope](../pilots/native-title/README.md)
 for current progress; the optical-route ledger below is historical and separate.
 
 | Native milestone | Current evidence / remaining work |
 | --- | --- |
 | Launch, real files and writable storage | Passed bounded startup; original optical verifier remains selectable |
-| Graphics resource preparation | Real font/textures, buffers, 96 compiled vertex shaders, 37 owned pixel definitions and three color/depth targets; title vertex, fixed-function pixel and texture binding now pass. Transform setup and title draws remain pending |
+| Graphics resource preparation | Real font/textures, buffers, 96 compiled vertex shaders, 37 owned pixel definitions and three color/depth targets; title vertex, fixed-function pixel, texture binding and view/projection setup now pass. Bump state/effect, raster interface and title draws remain pending |
+| Transform and viewport contract | Ten native matrix slots, viewport queries and projection caches pass fixtures and original-x86 comparisons; real GPU fixture verifies transformed pixels. Actual title view/projection calls pass; no title draw yet |
 | Resource binding and lifetime | Four texture stages and sixteen native vertex streams; GPU sampling, updates, internal/public references, replacement and cleanup pass fixtures. Blinx has exercised textures but has not reached stream binding yet |
 | Vertex constant contract | Real GPU bindings and batched constant uploads; 12 original-x86 cache/query comparisons pass, including GPU-only fast writes and declaration constants. No title speed claim |
 | State capture | ALL/PIXEL/VERTEX snapshots and retained references match original-x86 fixtures; actual title's ALL capture passes. Application remains unqualified |
@@ -29,8 +31,8 @@ for current progress; the optical-route ledger below is historical and separate.
 | Complete repeat loops, interruption/menu return, original cadence | Pending actual end-to-end measurement |
 | JSRF | Deferred until Blinx success; shared services and separate bindings remain the architecture |
 
-Fresh and repeated native launches stop at the same transform boundary
-after 20/17 actual title callbacks and 22252367/22252275 function entries;
+Fresh and repeated native launches stop at the same bump-environment boundary
+after 21/17 actual title callbacks and 22252371/22252279 function entries;
 29 contract tests plus actual-asset effects and retained DirectSound tests pass.
 The ten generation/extent tests passed at the earlier checkpoint. Original audio remains
 selectable and still stops at the original audio-driver `KfRaiseIrql` boundary.

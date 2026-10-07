@@ -48,8 +48,9 @@ vertex shaders and 37 owned pixel definitions. It now captures its real ALL
 state block and registers its vertical-blank callback, which executes and
 returns repeatedly. After loading five menu textures, it now binds its compiled
 vertex shader and the donor's fixed-function pixel shader. It binds a real
-stage-0 texture and updates two vertex constants, then stops at
-`D3DDevice_SetTransform`. No title stream/target binding or draw occurs yet.
+stage-0 texture, updates vertex constants and passes view/projection setup,
+then stops at `D3DDevice_SetTextureState_BumpEnv`. No title stream/target
+binding or draw occurs yet.
 No title buffer Play or audible game output is established by those runs.
 `PILOT_AUDIO=ORIGINAL` still executes the original sound-object allocations and
 contiguous-page setup, stopping at `KfRaiseIrql` (ordinal 160) in audio-driver
@@ -107,6 +108,49 @@ plus explicit instruction, indirect-call and
 kernel-call failure paths. Passing
 the other title's XBE to the Blinx artifact is rejected before guest execution.
 The main LLE build's runtime source and build selection are untouched.
+
+### Transform checkpoint (2026-10-07)
+
+The adapter maps all ten Xbox view/projection/texture/world matrices to the
+MIT donor's real native matrix storage. The donor's existing matrix multiply
+also supplies the queryable combined projection/viewport cache. Native float
+math is independent of the original x87 implementation. The original matrix
+bytes, projection depth/affine flag, viewport query and derived cache remain
+observable; their offsets and default screen bias are image-qualified binding
+metadata, not shared-runtime title addresses. Successful viewport/target changes
+refresh the guest viewport and combined cache.
+
+Twenty-four captured fixture calls match the original complete SetTransform
+execution; derived float values allow scaled error 2e-5 (observed zero for
+these fixtures). Matrix storage and query output bits match. The original
+viewport query independently confirms a nondefault viewport, depth interval
+and the 0.53125 screen bias. Actual GPU pixels verify world, view and projection
+effects using the donor's fixed-function vertex path, across three device
+lifetimes. All 29 CTests pass (10.35 seconds).
+
+Fresh/repeated Blinx passes its two actual view/projection calls and subsequent
+constant writes. Both stop at `D3DDevice_SetTextureState_BumpEnv`, address
+`0x00133aa0`, stage 1, state 22 (BUMPENVMAT00), value 4.0, caller `0x0002c9a4`.
+Entries are 22252371/22252279, callbacks 21/17. The two actual matrices from each
+launch also match original-x86 execution, and the title's 5460-byte state-block
+capture still matches. No title stream/target binding, draw/frame, Play, movie,
+menu, attract or cadence is established. Next: bump state/effect support and
+the vertex-to-raster interface before qualifying title draws.
+
+The admitted initial profile has no MSAA, unit pixel scaling and 24-bit integer
+depth. W-buffer activation and custom screen-space offset calls still stop.
+The original pretransformed-program projection helper and programmable shader
+output conversion to the native rasterizer remain unqualified; the diagnostic
+fixed-function triangle does not validate that interface. No GPL implementation
+was imported, and the pre-existing private generated CPU artifact remains
+outside shipping.
+
+Private evidence: `build/blinx/transform-validation.aot-private.json`,
+`run-transform-{fresh,repeat}.log`, `transform-{fresh,repeat}/transform-*.bin`,
+`transform-fixtures/transform-*.bin`, `audit_transforms.py` and associated oracle
+JSON, plus `build/transform-{all-contract-tests,contract,gpu,oracle}.log`.
+Executable SHA-256:
+`b5b3fde6c0e9a4a92d514cf89c45dcd8ff07dd82e3ab3c67294ebd9a33141d49`.
 
 ## Reuse and scope
 

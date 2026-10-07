@@ -1,5 +1,28 @@
 # STATUS
 
+## 2026-10-07 - Blinx passes view and projection setup
+
+`beads-xbox.1.62`: fresh/repeated NTSC Blinx now passes its view and projection
+transforms and subsequent shader constants. Both stop at
+`D3DDevice_SetTextureState_BumpEnv` (stage 1, BUMPENVMAT00, 4.0), after
+22252371/22252279 entries and 21/17 consecutive callbacks. No title draw,
+frame, Play, menu or attract result yet; JSRF remains deferred.
+
+The native adapter reuses the MIT donor's matrix storage and multiplication,
+preserves the ten Xbox matrix slots, and maintains queryable viewport,
+projection-depth and combined-matrix state. Twenty-four fixture calls and the
+two actual title matrices from each launch match original-x86 execution within
+the documented float tolerance. A GPU fixture confirms world/view/projection
+changes affect rendered pixels. All 29 CTests pass. These diagnostic triangles
+are not title frames or title performance measurements.
+
+Next: real bump-environment state/effect support, then the vertex-to-raster
+interface and title draws. W-buffer/MSAA, custom screen-space offsets and
+pretransformed-program rasterization remain unqualified. The private generated
+CPU artifact remains GPL-dependent and outside shipping.
+
+See [transform evidence and limits](pilots/native-title/README.md#transform-checkpoint-2026-10-07).
+
 ## 2026-10-07 - Blinx binds textures and reaches transform setup
 
 `beads-xbox.1.62`: fresh/repeated NTSC Blinx now passes four texture-binding
