@@ -14,9 +14,11 @@ static uint32_t call_graphics(unsigned entry,const uint32_t *args)
 #include "graphics_vertex_contract_test.inc"
 #include "graphics_shader_contract_test.inc"
 #include "graphics_clock_contract_test.inc"
+#include "graphics_stateblock_contract_test.inc"
 static void test_graphics(void)
 {
     vm_ensure();
+    dispatch_ensure(); /* Persistent shared callback stack precedes allocation baseline. */
     uint32_t global_page=PILOT_D3D_DEVICE_GLOBAL&~4095u;
     uint32_t state_bytes=((PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SHADER_CONSTANT_MODE_OFFSET+4+4095)&~4095u)-global_page;
     commit(global_page,state_bytes); vm_fixed_region(global_page,state_bytes);
@@ -37,7 +39,13 @@ static void test_graphics(void)
         create[5]=pass==1?0:0x19100; /* Original Create permits a null output. */
         CHECK(call_graphics(PILOT_D3D_Direct3D_CreateDevice,create)==0);
         CHECK(graphics_active && MEM32(PILOT_D3D_DEVICE_GLOBAL)==PILOT_D3D_DEVICE_OBJECT);
-        if(!pass)test_graphics_clock();
+        if(pass==2) {
+            test_graphics_callback_close();
+            CHECK(!graphics_active && !graphics_headers && !MEM32(PILOT_D3D_DEVICE_GLOBAL));
+            CHECK(vm_committed(0,0x100000000ull)==resident);
+            continue;
+        }
+        if(!pass){test_graphics_clock();test_graphics_callbacks();}
         CHECK(MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SHADER_CONSTANT_MODE_OFFSET)==0);
         if (create[5]) CHECK(MEM32(create[5])==PILOT_D3D_DEVICE_OBJECT);
         uint32_t caps=0x19304;
@@ -79,7 +87,7 @@ static void test_graphics(void)
         CHECK(pixels[0]==255 && pixels[1]==0 && pixels[2]==0);
         CHECK(pilot_gfx_surface_readback(0,pixels,sizeof(pixels))>=0);
         CHECK(pixels[0]==0 && pixels[1]==0 && pixels[2]==255);
-        if(!pass) { test_graphics_states(); test_graphics_textures(); test_graphics_vertices(); test_graphics_shaders(); test_graphics_pixels(); }
+        if(!pass) { test_graphics_states(); test_graphics_textures(); test_graphics_vertices(); test_graphics_shaders(); test_graphics_pixels(); test_graphics_blocks(); }
         CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&front)==0);
         CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&back)==0);
         CHECK(call_graphics(PILOT_D3D_D3DDevice_Release,NULL)==0);

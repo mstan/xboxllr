@@ -60,6 +60,7 @@ static void *graphics_pointer(uint32_t address,uint32_t bytes)
 #include "graphics_vertex.inc"
 #include "graphics_shader.inc"
 #include "graphics_pixel.inc"
+#include "graphics_stateblock.inc"
 static void graphics_target_ref(uint32_t header,int acquire)
 {
     if(!header)return;
@@ -115,6 +116,8 @@ void pilot_d3d_dispatch(unsigned entry)
     if (entry!=PILOT_D3D_Direct3D_CreateDevice && !graphics_active)
         stop("graphics entry before native creation",pilot_d3d_calls[entry].address);
     switch(entry) {
+    case PILOT_D3D_D3DDevice_CreateStateBlock:g_eax=graphics_block_create(arguments);break;
+    case PILOT_D3D_D3DDevice_SetVerticalBlankCallback:graphics_set_vblank_callback(arguments[0]);break;
     case PILOT_D3D_D3DDevice_GetRenderTarget2:
         graphics_target_ref(graphics_target,1);g_eax=graphics_target;break;
     case PILOT_D3D_D3DDevice_GetDepthStencilSurface2:
@@ -164,8 +167,10 @@ void pilot_d3d_dispatch(unsigned entry)
             graphics_active=1; memcpy(graphics_parameters,staged,sizeof(staged));
             graphics_clock_origin=dispatch_monotonic();
             graphics_clock_hz=staged[11]?staged[11]:60;
+            graphics_clock_closing=graphics_clock_presented=0;
             graphics_state_init();
             graphics_surfaces_create();
+            graphics_snapshot_init();
             MEM32(PILOT_D3D_DEVICE_GLOBAL)=PILOT_D3D_DEVICE_OBJECT;
             if (arguments[5]) MEM32(arguments[5])=PILOT_D3D_DEVICE_OBJECT;
         } else {
@@ -215,11 +220,12 @@ void pilot_d3d_dispatch(unsigned entry)
         break;
     case PILOT_D3D_D3DDevice_Release: {
         if(graphics_clock_waiters)stop("device release with active vertical-blank waits",entry);
+        graphics_clock_close();
         if(graphics_target!=graphics_headers || (graphics_depth && graphics_depth!=graphics_headers+64))
             graphics_set_targets(graphics_headers,graphics_headers+64);
         if (graphics_surface_refs[0] || graphics_surface_refs[1] || graphics_surface_refs[2])
             stop("device release with outstanding surface ownership",entry);
-        graphics_shaders_release();graphics_pixels_release();pilot_gfx_close(); graphics_active=0;
+        graphics_blocks_release();graphics_shaders_release();graphics_pixels_release();pilot_gfx_close(); graphics_active=0;
         uint32_t bytes;
         for (unsigned i=0;i<3;++i) {
             bytes=0;
@@ -255,7 +261,10 @@ void pilot_d3d_dispatch(unsigned entry)
     }
     case PILOT_D3D_D3DDevice_Swap:
         if (arguments[0]) stop("unqualified graphics swap flags",arguments[0]);
-        g_eax=(uint32_t)pilot_gfx_present(); break;
+        if(graphics_callback)stop("swap/vblank callback completion contract unqualified",entry);
+        g_eax=(uint32_t)pilot_gfx_present();
+        if(!(g_eax&0x80000000u))graphics_clock_presented=1;
+        break;
     default:
         stop(pilot_d3d_calls[entry].name,pilot_d3d_calls[entry].address);
     }

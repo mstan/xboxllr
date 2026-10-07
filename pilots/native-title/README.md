@@ -44,8 +44,10 @@ locks/unlocks their first four bytes, then loads the complete 15188-byte
 `media/dsp.bin`. It now installs the real DSP graph through XAudio2, creates
 640x480 color/depth textures and a 320x240 color texture, obtains their surface
 views and queries the current color/depth surfaces. It reaches 96 compiled
-vertex shaders and 37 owned pixel definitions, then stops at
-`D3DDevice_CreateStateBlock` (ALL). No title target binding or draw occurs yet.
+vertex shaders and 37 owned pixel definitions. It now captures its real ALL
+state block and registers its vertical-blank callback, which executes and
+returns repeatedly. After loading five menu textures, it stops at
+`D3DDevice_SetVertexShader`. No title target binding or draw occurs yet.
 No title buffer Play or audible game output is established by those runs.
 `PILOT_AUDIO=ORIGINAL` still executes the original sound-object allocations and
 contiguous-page setup, stopping at `KfRaiseIrql` (ordinal 160) in audio-driver
@@ -81,6 +83,8 @@ real donor GPU clear/triangle/present pixels, guest graphics ABI and ownership;
 texture GPU pixels/mips, shared views, changed-data upload and parent lifetimes;
 linear color/depth target layouts, actual GPU clears/readback, CPU edits,
 partial depth/stencil updates, retained bindings and safe self-rebinding;
+owned state snapshots, membership, independent bytes and retained resources;
+actual cdecl vblank callbacks, replacement/removal, reentrancy and joined teardown;
 DXT1/3/5 compressed blocks and mip tails, texture/surface descriptions,
 pixel-definition ownership/copy/HRESULT/OOM, and real `MEM_NOZERO` commitment;
 memory-statistics changes with actual commitment, reservation, image, stack,
@@ -103,6 +107,68 @@ the other title's XBE to the Blinx artifact is rejected before guest execution.
 The main LLE build's runtime source and build selection are untouched.
 
 ## Reuse and scope
+
+### State capture and vblank callback checkpoint (2026-10-07)
+
+All three pinned recomp donors were checked; none has a state-block
+implementation to adopt. The independently authored native capture uses the
+reviewed original recorder's CPU-only contract. ALL, PIXEL and VERTEX membership
+tables and device-field offsets stay in image-qualified generated bindings.
+The block contains actual cached state, constants, transforms, viewport,
+materials and resource bindings in the original record layout. It owns its
+storage and retains texture, stream and shader references. An allocation
+failure clears the output token without acquiring references, as the original
+does. Device teardown releases owned blocks and their retained resources.
+
+Creation now exposes original initial state needed by the snapshot: ten
+identity transforms, FVF XYZ, empty bindings and zero-initialized CPU constant/
+material storage. Six empty/populated fixtures produce the same complete
+bytes and reference increments as executing the original x86 recorder with
+real emulated allocation: ALL 5460/6244 bytes, PIXEL 1936 bytes, VERTEX 2344
+bytes. The actual title's 5460-byte snapshot also matches. This is an offline
+ABI check, not duplicate production execution. Capture with an unqualified
+light binding stops; state application, recapture and independent guest delete
+entry points are not qualified by these creation tests.
+
+The vblank service uses the existing display epoch and serialized DPC worker.
+It invokes actual generated title code with its own guest stack/TLS, IRQL 2,
+one cdecl pointer argument and checked stack cleanup. The argument contains
+three DWORDs (vblank count, swap count, flags). The public shape is also
+documented by the [Cxbx type declarations](https://github.com/Cxbx-Reloaded/Cxbx-Reloaded/blob/585c49a50af1255ab155099e06f24505f9c5a800/src/core/hle/D3D8/XbD3D8Types.h#L650);
+no GPL callback implementation is copied. Phobos's original-kernel interrupt
+acknowledgement fix was a useful behavioral reminder: registering a callback
+without delivering it leaves real title work blocked.
+
+The pulse runs at the configured nominal 60 Hz independently of draw calls,
+retains absolute phase and delivers pending ticks serially rather than
+discarding callback work. Replacement retains phase; removal permits an
+already executing callback to return. No graphics/dispatcher lock is held
+across guest execution. Device release disables future delivery and joins
+in-flight execution before freeing its callback data. Tests cover real timing,
+register isolation, ABI/data, replacement, in-flight removal, self-removal and
+release while a callback is running. Warm repeated registrations keep the
+host handle count stable; the shared dispatcher stack is persistent process
+infrastructure and is included before device allocation baselines.
+
+The admitted callback path currently precedes presentation: swap count/flags
+are zero because no swap has occurred with callback delivery enabled. Swap
+with a registered callback, or callback registration after a presentation,
+explicitly stops until completion flags and present timing are qualified.
+This is not a physical NTSC 59.94 Hz qualification or a
+claim that loading executes at original speed.
+
+All 29 CTests pass. Fresh/repeated Blinx reaches shader binding at
+22252332/22252240 entries, with 22/17 consecutive completed title callbacks.
+Both load `h_kidougamen_haikei01.dds`, `h_kidougamen_hari01.dds`, `h_tc_bar.dds`,
+`h_kidougamen_tp_us.dds` and `h_kidougamen_pw_us.dds`. No title frame, buffer
+Play, audible game output, movie, menu or attract loop yet. Next: shader and
+draw-input binding. JSRF remains deferred.
+
+Private evidence: `build/stateblock-all-contract-tests.log`,
+`build/blinx/stateblock-audit/state-*.bin`, `build/blinx/audit_stateblocks.py`,
+`build/blinx/state-callback-{fresh,repeat}/state-1.bin`,
+`build/blinx/state-callback-validation.aot-private.json` and
+`build/blinx/run-state-callback-{fresh,repeat}.log`.
 
 ### Native render-target checkpoint (2026-10-07)
 

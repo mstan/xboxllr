@@ -1,5 +1,26 @@
 # STATUS
 
+## 2026-10-07 - Blinx captures state, runs vblank callbacks and loads menu assets
+
+`beads-xbox.1.62`: fresh/repeated NTSC Blinx now passes real state-block
+creation and vertical-blank callback registration/delivery. It loads five menu
+textures and stops at `D3DDevice_SetVertexShader`, with 22252332/22252240
+function entries. The runs complete 22/17 consecutive title callbacks. They
+still have no title target binding, draw, Play, menu frame or attract result.
+Next: bind the already compiled shaders and their real draw inputs.
+
+Six snapshot fixtures across ALL/PIXEL/VERTEX types match original-x86
+execution byte for byte, including retained resource counts. The actual title's
+5460-byte snapshot matches too. No pinned recomp donor implements this family;
+the native capture uses the original bounded CPU contract. Callback execution
+shares the native DPC worker and the display epoch, with actual cdecl delivery,
+safe replacement/removal, reentrancy and device teardown that joins in-flight
+work. All 29 CTests pass. State application and swap/callback completion flags
+remain unqualified; the latter explicitly stops before presenting. The private
+CPU artifact remains GPL-dependent; no GPL implementation was added.
+
+See [capture/callback evidence and limits](pilots/native-title/README.md#state-capture-and-vblank-callback-checkpoint-2026-10-07).
+
 ## 2026-10-07 - Blinx creates color/depth targets and reaches state blocks
 
 `beads-xbox.1.62`: fresh/repeated NTSC Blinx creates 640x480 color and depth

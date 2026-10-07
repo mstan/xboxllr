@@ -12,6 +12,15 @@ static INIT_ONCE dispatch_once=INIT_ONCE_STATIC_INIT;
 static HANDLE dispatch_changed, dispatch_absolute, dispatch_relative, dispatch_worker_handle;
 static RECOMP_TLS int dispatch_in_dpc;
 static uint64_t dispatch_clock_origin;
+/* A display pulse shares the serialized DPC execution context. Its absolute
+ * phase is independent of callback duration and ordinary timer rearming. */
+static void (*dispatch_pulse_routine)(uint64_t);
+static uint64_t dispatch_pulse_origin,dispatch_pulse_frame,dispatch_pulse_deadline;
+static unsigned dispatch_pulse_hz;
+static int dispatch_pulse_running,dispatch_worker_ready;
+static CONDITION_VARIABLE dispatch_pulse_idle=CONDITION_VARIABLE_INIT;
+static uint64_t dispatch_pulse_time(uint64_t frame)
+{return dispatch_pulse_origin+(frame/dispatch_pulse_hz)*10000000+((frame%dispatch_pulse_hz)*10000000+dispatch_pulse_hz-1)/dispatch_pulse_hz;}
 
 static uint64_t dispatch_wall_time(void)
 {
@@ -90,6 +99,9 @@ static DWORD WINAPI dispatch_worker(void *unused)
     MEM32(base)=0xffffffffu; MEM32(base+4)=top; MEM32(base+8)=base+0x2000;
     MEM32(base+0x18)=base; MEM32(base+0x1c)=base; MEM32(base+0x20)=base+0x28;
     MEM32(base+0x28)=base+0x1000; MEM32(base+0x1000+0x12c)=GetCurrentThreadId();
+    AcquireSRWLockExclusive(&dispatch_lock);
+    dispatch_worker_ready=1;WakeAllConditionVariable(&dispatch_pulse_idle);
+    ReleaseSRWLockExclusive(&dispatch_lock);
     HANDLE waits[]={dispatch_changed,dispatch_absolute,dispatch_relative};
     for (;;) {
         AcquireSRWLockExclusive(&dispatch_lock);
@@ -110,7 +122,22 @@ static DWORD WINAPI dispatch_worker(void *unused)
             dispatch_in_dpc=0; MEM8(base+0x24)=0;
             continue;
         }
+        if(dispatch_pulse_routine && dispatch_pulse_deadline<=mono) {
+            void (*routine)(uint64_t)=dispatch_pulse_routine;
+            uint64_t frame=dispatch_pulse_frame++;
+            dispatch_pulse_deadline=dispatch_pulse_time(dispatch_pulse_frame);
+            dispatch_pulse_running=1;
+            ReleaseSRWLockExclusive(&dispatch_lock);
+            MEM8(base+0x24)=2;dispatch_in_dpc=1;
+            routine(frame);
+            dispatch_in_dpc=0;MEM8(base+0x24)=0;
+            AcquireSRWLockExclusive(&dispatch_lock);
+            dispatch_pulse_running=0;WakeAllConditionVariable(&dispatch_pulse_idle);
+            ReleaseSRWLockExclusive(&dispatch_lock);
+            continue;
+        }
         uint64_t absolute=UINT64_MAX,relative=UINT64_MAX;
+        if(dispatch_pulse_routine)relative=dispatch_pulse_deadline;
         for (unsigned i=0;i<128;++i) if (dispatch_timers[i].va) {
             struct PilotTimer *t=&dispatch_timers[i];
             uint64_t *next=t->absolute ? &absolute : &relative;
@@ -141,11 +168,38 @@ static BOOL CALLBACK dispatch_start(PINIT_ONCE once,void *parameter,void **conte
     if (!dispatch_changed || !dispatch_absolute || !dispatch_relative) stop("dispatcher allocation failed",GetLastError());
     dispatch_worker_handle=CreateThread(NULL,0,dispatch_worker,NULL,0,NULL);
     if (!dispatch_worker_handle) stop("dispatcher thread creation failed",GetLastError());
+    AcquireSRWLockExclusive(&dispatch_lock);
+    while(!dispatch_worker_ready)
+        if(!SleepConditionVariableSRW(&dispatch_pulse_idle,&dispatch_lock,INFINITE,0))stop("dispatcher startup wait failed",GetLastError());
+    ReleaseSRWLockExclusive(&dispatch_lock);
     return TRUE;
 }
 static void dispatch_ensure(void)
 {
     if (!InitOnceExecuteOnce(&dispatch_once,dispatch_start,NULL,NULL)) stop("dispatcher initialization failed",GetLastError());
+}
+static void dispatch_pulse_set(uint64_t origin,unsigned hz,void (*routine)(uint64_t))
+{
+    dispatch_ensure();
+    AcquireSRWLockExclusive(&dispatch_lock);
+    if(routine) {
+        uint64_t now=dispatch_monotonic();
+        if(!hz || hz>1000 || now<origin)stop("invalid display pulse clock",hz);
+        uint64_t elapsed=now-origin;
+        dispatch_pulse_origin=origin;dispatch_pulse_hz=hz;
+        dispatch_pulse_frame=elapsed/10000000*hz+(elapsed%10000000)*hz/10000000+1;
+        dispatch_pulse_deadline=dispatch_pulse_time(dispatch_pulse_frame);
+    }
+    dispatch_pulse_routine=routine;SetEvent(dispatch_changed);
+    ReleaseSRWLockExclusive(&dispatch_lock);
+}
+static void dispatch_pulse_quiesce(void)
+{
+    if(dispatch_in_dpc)stop("display shutdown from its callback",0);
+    AcquireSRWLockExclusive(&dispatch_lock);
+    while(dispatch_pulse_running)
+        if(!SleepConditionVariableSRW(&dispatch_pulse_idle,&dispatch_lock,INFINITE,0))stop("display callback join failed",GetLastError());
+    ReleaseSRWLockExclusive(&dispatch_lock);
 }
 static void dispatch_initialize(uint32_t va,unsigned type)
 {

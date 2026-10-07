@@ -1,4 +1,82 @@
 struct ClockWaitTest { HANDLE ready,go; uint64_t deadline,returned; };
+static LONG vblank_test_count;
+static uint32_t vblank_test_previous;
+static int vblank_test_mode;
+static HANDLE vblank_test_done,vblank_test_entered,vblank_test_release;
+static void test_vblank_callback(void)
+{
+    CHECK(dispatch_in_dpc && MEM8(g_fs_base+0x24)==2);
+    uint32_t data=MEM32(g_esp+4),frame=MEM32(data);
+    CHECK(data==graphics_headers+96 && !MEM32(data+4) && !MEM32(data+8));
+    if(vblank_test_previous)CHECK(frame==vblank_test_previous+1);
+    vblank_test_previous=frame;
+    LONG count=InterlockedIncrement(&vblank_test_count);
+    if(vblank_test_mode==1 && count==1) {
+        CHECK(SetEvent(vblank_test_entered));
+        CHECK(WaitForSingleObject(vblank_test_release,2000)==WAIT_OBJECT_0);
+    }
+    if(vblank_test_mode==2 && count==3) {
+        /* Reentrant self-unregister through the actual guest stdcall ABI. */
+        uint32_t saved=g_esp;g_esp-=8;MEM32(g_esp)=0x12340;MEM32(g_esp+4)=0;
+        pilot_d3d_dispatch(PILOT_D3D_D3DDevice_SetVerticalBlankCallback);CHECK(g_esp==saved);
+    }
+    if(count>=6 || (vblank_test_mode==2 && count==3))CHECK(SetEvent(vblank_test_done));
+    g_eax=0xbadc0de;g_esp+=4; /* cdecl: caller removes the one argument */
+}
+static void test_graphics_callbacks(void)
+{
+    dispatch_ensure();DWORD before,after;
+    vblank_test_done=CreateEventW(NULL,TRUE,FALSE,NULL);
+    vblank_test_entered=CreateEventW(NULL,TRUE,FALSE,NULL);
+    vblank_test_release=CreateEventW(NULL,TRUE,FALSE,NULL);
+    CHECK(vblank_test_done && vblank_test_entered && vblank_test_release);
+    uint32_t callback=0x12300;vblank_test_count=0;vblank_test_previous=0;vblank_test_mode=0;
+    uint64_t begin=dispatch_monotonic();g_eax=0x1234567;
+    call_graphics(PILOT_D3D_D3DDevice_SetVerticalBlankCallback,&callback);
+    CHECK(MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_VBLANK_CALLBACK_OFFSET)==callback);
+    CHECK(WaitForSingleObject(vblank_test_done,2000)==WAIT_OBJECT_0);
+    CHECK(g_eax==0x1234567 && vblank_test_count>=6 && dispatch_monotonic()-begin>=5*10000000/60);
+    /* Replacement retains phase and does not enqueue a second clock. */
+    callback=0x12320;call_graphics(PILOT_D3D_D3DDevice_SetVerticalBlankCallback,&callback);
+    callback=0;call_graphics(PILOT_D3D_D3DDevice_SetVerticalBlankCallback,&callback);dispatch_pulse_quiesce();
+    LONG stopped=vblank_test_count;Sleep(40);CHECK(vblank_test_count==stopped);
+    /* Warm the worker's CRT/host state before measuring repeated lifetimes. */
+    CHECK(GetProcessHandleCount(GetCurrentProcess(),&before));
+
+    /* A callback can be removed while in flight; only that invocation finishes. */
+    ResetEvent(vblank_test_done);vblank_test_count=0;vblank_test_previous=0;vblank_test_mode=1;
+    callback=0x12300;call_graphics(PILOT_D3D_D3DDevice_SetVerticalBlankCallback,&callback);
+    CHECK(WaitForSingleObject(vblank_test_entered,2000)==WAIT_OBJECT_0);
+    callback=0;call_graphics(PILOT_D3D_D3DDevice_SetVerticalBlankCallback,&callback);
+    CHECK(SetEvent(vblank_test_release));dispatch_pulse_quiesce();Sleep(40);CHECK(vblank_test_count==1);
+    /* Callback execution may call graphics services without a host lock cycle. */
+    vblank_test_mode=2;vblank_test_count=0;vblank_test_previous=0;
+    callback=0x12300;call_graphics(PILOT_D3D_D3DDevice_SetVerticalBlankCallback,&callback);
+    CHECK(WaitForSingleObject(vblank_test_done,2000)==WAIT_OBJECT_0);dispatch_pulse_quiesce();
+    CHECK(vblank_test_count==3 && !graphics_callback);
+    CHECK(GetProcessHandleCount(GetCurrentProcess(),&after));
+    fprintf(stderr,"[VBLANK HANDLES] before=%lu after=%lu\n",before,after);
+    CHECK(before==after);
+    CHECK(CloseHandle(vblank_test_done) && CloseHandle(vblank_test_entered) && CloseHandle(vblank_test_release));
+    fprintf(stderr,"PASS: real phased vblank callbacks, cdecl data/TLS/IRQL, replacement, in-flight removal and reentrant unregister\n");
+}
+static DWORD WINAPI test_callback_release(void *unused)
+{(void)unused;Sleep(30);CHECK(SetEvent(vblank_test_release));return 0;}
+static void test_graphics_callback_close(void)
+{
+    vblank_test_mode=1;vblank_test_count=0;vblank_test_previous=0;
+    vblank_test_entered=CreateEventW(NULL,TRUE,FALSE,NULL);
+    vblank_test_release=CreateEventW(NULL,TRUE,FALSE,NULL);
+    CHECK(vblank_test_entered && vblank_test_release);
+    uint32_t callback=0x12300;
+    call_graphics(PILOT_D3D_D3DDevice_SetVerticalBlankCallback,&callback);
+    CHECK(WaitForSingleObject(vblank_test_entered,2000)==WAIT_OBJECT_0);
+    HANDLE release=CreateThread(NULL,0,test_callback_release,NULL,0,NULL);CHECK(release);
+    CHECK(call_graphics(PILOT_D3D_D3DDevice_Release,NULL)==0);
+    CHECK(WaitForSingleObject(release,2000)==WAIT_OBJECT_0 && vblank_test_count==1 && !graphics_callback);
+    CHECK(CloseHandle(release) && CloseHandle(vblank_test_entered) && CloseHandle(vblank_test_release));
+    fprintf(stderr,"PASS: device teardown waits for the actual in-flight callback before freeing its data\n");
+}
 static DWORD WINAPI test_clock_waiter(void *context)
 {
     struct ClockWaitTest *t=context;

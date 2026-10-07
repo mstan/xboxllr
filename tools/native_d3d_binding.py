@@ -19,6 +19,8 @@ CREATE = "4111b2a1ca25c2bf8e4cc1cad05ab2142ec17d48b54f2f7457951977d5bce564"
 DEFAULTS = "ab0f752eebe3bb6ce6296909b6f90b604f58eafe877032f64006f6c33f21ccb8"
 CAPS = "a2e598588a3b18aff4ac64b396716e58ca211384f86f5ef757c7ce3aec3caa22"
 VBLANK = "3671f3eb0feef60a9001693f28fbd102d209e1c072a2a486aa34f60429a7eaf0"
+STATEBLOCK = "9a3cc11b88c617614da8725cfb996ab8c30ad3ae9e5477b3ae9734753afc5a31"
+CREATE_STATEBLOCK = "63f71d88c14fae20c1ca8bcee60ab04a308b8bae93ae75d56527d44881cc2dce"
 
 
 def bind(xbe: Path, output: Path, symbols: Path):
@@ -78,6 +80,13 @@ def bind(xbe: Path, output: Path, symbols: Path):
     if vblank['stack_bytes']!=0 or context.digest(functions[vblank['address']])!=VBLANK:
         raise ValueError('unreviewed vertical-blank wait')
     state_defaults['vblank_wait']=dict(sha256=VBLANK,contract='clear notification event; nonalertable indefinite wait; no GPU submission')
+    callback=next(s for s in identified if s['name']=='D3DDevice_SetVerticalBlankCallback')
+    callback_code=list(Cs(CS_ARCH_X86,CS_MODE_32).disasm(data(callback['address'],functions[callback['address']]['size']),callback['address']))
+    offsets=[int(m[1],16) for i in callback_code if i.mnemonic=='mov' and
+        (m:=re.fullmatch(r'dword ptr \[ecx \+ (0x[0-9a-f]+)\], eax',i.op_str))]
+    if len(callback_code)!=4 or len(offsets)!=1 or callback_code[-1].mnemonic!='ret' or callback_code[-1].op_str!='4':
+        raise ValueError('unreviewed vblank callback registration')
+    state_defaults['vblank_callback_offset']=offsets[0]
     # Get2DSurfaceDesc derives usage from its format-capability table even for
     # sampled texture surfaces. Keep the reviewed image's facts in the binding.
     desc=next(s for s in identified if s['name']=='Get2DSurfaceDesc')
@@ -87,6 +96,24 @@ def bind(xbe: Path, output: Path, symbols: Path):
     if len(format_tables)!=1: raise ValueError('unreviewed surface format table')
     state_defaults['surface_formats']=[dict(format=x,flags=data(format_tables[0]+x,1)[0])
         for x in (4,5,6,7,0xc,0xe,0xf,0x12,0x1e,0x2e)]
+    # CPU snapshot layout from the complete reviewed recorder, independently
+    # checked against original-x86 execution. These offsets belong to this
+    # revision's binding, never to shared native service code.
+    record=next(s for s in identified if s['name']=='D3D_RecordStateBlock')
+    create_block=next(s for s in identified if s['name']=='D3DDevice_CreateStateBlock')
+    if context.digest(functions[record['address']])!=STATEBLOCK or context.digest(functions[create_block['address']])!=CREATE_STATEBLOCK:
+        raise ValueError('unreviewed state-block layout')
+    block_code=list(Cs(CS_ARCH_X86,CS_MODE_32).disasm(data(create_block['address'],299),create_block['address']))
+    block_tables=[int(m[1],16) for i in block_code if i.mnemonic=='movzx' and
+        (m:=re.fullmatch(r'(?:ecx|edx), byte ptr \[eax \+ (0x[0-9a-f]+)\]',i.op_str))]
+    if len(block_tables)!=4: raise ValueError('unreviewed state-block membership tables')
+    state_defaults['stateblock']=dict(recorder_sha256=STATEBLOCK,create_sha256=CREATE_STATEBLOCK,
+        streams=variables['D3D_g_Stream'],
+        fields=dict(textures=0xb38,pixel_shader=0x370,vertex_shader=0x384,vertex_object=0x380,
+                    indices=0x38c,base_vertex=0x1c,pixel_constants=0xb58,vertex_constants=0xc58,
+                    transforms=0x810,viewport=0xa90,materials=0xab0,lights=0x390,light_count=0x394),
+        pixel_render=list(data(block_tables[0],32)),pixel_texture=list(data(block_tables[1],27)),
+        vertex_render=list(data(block_tables[2],33)),vertex_texture=list(data(block_tables[3],2)))
     calls=[]
     for symbol in identified:
         if not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*",symbol["name"]): raise ValueError("invalid symbol")
@@ -105,12 +132,18 @@ def bind(xbe: Path, output: Path, symbols: Path):
                f'#define PILOT_D3D_VERTEX_SHADER_OFFSET {binding["vertex_shader_offset"]}u']
     header += [f'#define PILOT_D3D_RENDER_STATES 0x{binding["render_states"]:x}u',
                f'#define PILOT_D3D_TEXTURE_STATES 0x{binding["texture_states"]:x}u',
+               f'#define PILOT_D3D_VBLANK_CALLBACK_OFFSET {binding["vblank_callback_offset"]}u',
                f'#define PILOT_D3D_SHADER_CONSTANT_MODE_OFFSET 0x{binding["shader_constant_mode_offset"]:x}u',
                'static const uint32_t pilot_d3d_render_defaults[] = {'+', '.join(f'0x{x:x}u' for x in binding['render_defaults'])+'};',
                'static const uint32_t pilot_d3d_texture_defaults[] = {'+', '.join(str(x)+'u' for x in binding['texture_defaults'])+'};']
     header += ['static const uint32_t pilot_d3d_device_caps[] = {'+', '.join(f'0x{x:x}u' for x in binding['device_caps'])+'};']
     header += ['static const struct { uint32_t format,flags; } pilot_d3d_surface_formats[] = {'+
         ', '.join(f'{{0x{x["format"]:x}u,0x{x["flags"]:x}u}}' for x in binding['surface_formats'])+'};']
+    block=binding['stateblock']
+    header += [f'#define PILOT_D3D_STREAMS 0x{block["streams"]:x}u']
+    header += [f'#define PILOT_D3D_SNAPSHOT_{name.upper()} {offset}u' for name,offset in block['fields'].items()]
+    header += ['static const uint8_t pilot_d3d_block_'+name+'[] = {'+', '.join(str(x) for x in block[name])+'};'
+               for name in ('pixel_render','pixel_texture','vertex_render','vertex_texture')]
     wrapper=['#include "pilot_d3d_bindings.h"', 'extern void pilot_d3d_dispatch(unsigned);']
     for c in calls:
         wrapper += [f'extern void pilot_original_d3d_{c["name"]}(void);',f'void {c["symbol"]}(void) {{',
