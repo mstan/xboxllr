@@ -85,7 +85,26 @@ static void test_graphics(void)
         CHECK(call_graphics(PILOT_D3D_D3DDevice_Clear,clear)==0);
         CHECK(pilot_gfx_readback(pixels,sizeof(pixels))>=0);
         CHECK(pixels[0]==255 && pixels[1]==0 && pixels[2]==0);
-        arg=0; CHECK(!(call_graphics(PILOT_D3D_D3DDevice_Swap,&arg)&0x80000000u));
+        arg=0;uint32_t submitted=call_graphics(PILOT_D3D_D3DDevice_Swap,&arg);
+        CHECK(submitted==1 && MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SWAP_COUNTER)==submitted);
+        DWORD wait_start=GetTickCount();uint32_t completed=0;
+        do {
+            AcquireSRWLockShared(&graphics_lock);completed=graphics_swap_completed;ReleaseSRWLockShared(&graphics_lock);
+            if(completed==submitted)break;Sleep(1);
+        } while(GetTickCount()-wait_start<2000);
+        CHECK(completed==submitted);
+        if(!pass) {
+            uint32_t first_fence=0,last_fence=0;
+            for(unsigned n=0;n<70;++n) {
+                CHECK(call_graphics(PILOT_D3D_D3DDevice_Clear,clear)==0);
+                uint32_t fence=call_graphics(PILOT_D3D_D3DDevice_InsertFence,NULL);
+                if(!first_fence)first_fence=fence;
+                CHECK(fence>last_fence);last_fence=fence;
+            }
+            call_graphics(PILOT_D3D_D3DDevice_BlockOnFence,&last_fence);
+            CHECK(graphics_fence_done>=last_fence);
+            call_graphics(PILOT_D3D_D3DDevice_BlockOnFence,&first_fence);
+        }
         clear[3]=0xff0000ff; CHECK(call_graphics(PILOT_D3D_D3DDevice_Clear,clear)==0);
         CHECK(pilot_gfx_surface_readback(1,pixels,sizeof(pixels))>=0);
         CHECK(pixels[0]==255 && pixels[1]==0 && pixels[2]==0);

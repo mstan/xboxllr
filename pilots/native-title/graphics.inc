@@ -82,9 +82,9 @@ static void graphics_target_prepare(uint32_t header)
     struct GraphicsTextureObject *s=&graphics_textures[graphics_texture_slot(header)];
     if(!s->parent)stop("target preparation requires a surface",header);
     struct GraphicsTextureObject *t=&graphics_textures[s->parent-1];unsigned exposed=t->cpu_exposed;
-    for(unsigned i=0;i<GRAPHICS_TEXTURE_OBJECTS;++i)if(graphics_textures[i].parent==s->parent)exposed|=graphics_textures[i].cpu_exposed;
+    for(unsigned i=0;i<graphics_texture_capacity;++i)if(graphics_textures[i].parent==s->parent)exposed|=graphics_textures[i].cpu_exposed;
     if(exposed)graphics_texture_upload(t,0);
-    for(unsigned i=0;i<GRAPHICS_TEXTURE_OBJECTS;++i)if(&graphics_textures[i]==t || graphics_textures[i].parent==s->parent)graphics_textures[i].cpu_exposed=0;
+    for(unsigned i=0;i<graphics_texture_capacity;++i)if(&graphics_textures[i]==t || graphics_textures[i].parent==s->parent)graphics_textures[i].cpu_exposed=0;
 }
 static void graphics_set_targets(uint32_t color,uint32_t depth)
 {
@@ -197,6 +197,8 @@ void pilot_d3d_dispatch(unsigned entry)
             graphics_clock_origin=dispatch_monotonic();
             graphics_clock_hz=staged[11]?staged[11]:60;
             graphics_clock_closing=graphics_clock_presented=0;
+            graphics_present_count=0;graphics_swap_submitted=graphics_swap_completed=0;graphics_swap_deadline=0;
+            MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SWAP_COUNTER)=0;
             graphics_state_init();
             graphics_surfaces_create();
             graphics_snapshot_init();
@@ -228,8 +230,14 @@ void pilot_d3d_dispatch(unsigned entry)
         if(arguments[1]<22 || arguments[1]>27)stop("invalid bump state index",arguments[1]);
         graphics_texture_state(arguments[0],arguments[1],arguments[2],1);break;
     case PILOT_D3D_D3DDevice_DrawVertices:
-        graphics_draw_vertices(arguments);break;
+        graphics_draw_common(arguments,0,0);break;
+    case PILOT_D3D_D3DDevice_DrawVerticesUP: {
+        uint32_t draw[]={arguments[0],0,arguments[1]};
+        graphics_draw_common(draw,arguments[2],arguments[3]);break;
+    }
     case PILOT_D3D_D3DResource_IsBusy:g_eax=graphics_resource_busy(arguments[0]);break;
+    case PILOT_D3D_D3DDevice_InsertFence:g_eax=graphics_fence_insert();break;
+    case PILOT_D3D_D3DDevice_BlockOnFence:graphics_fence_wait(arguments[0]);break;
     case PILOT_D3D_D3DDevice_SetTextureStageStateNotInline:
         graphics_texture_state(arguments[0],arguments[1],arguments[2],1);break;
     case PILOT_D3D_D3DDevice_SetShaderConstantMode:
@@ -263,6 +271,7 @@ void pilot_d3d_dispatch(unsigned entry)
         if (graphics_surface_refs[0] || graphics_surface_refs[1] || graphics_surface_refs[2])
             stop("device release with outstanding surface ownership",entry);
         graphics_resource_bindings_close();graphics_blocks_release();graphics_shaders_release();graphics_pixels_release();pilot_gfx_close(); graphics_active=0;
+        graphics_fence_next=1;graphics_fence_done=0;memset(graphics_fences,0,sizeof(graphics_fences));
         uint32_t bytes;
         for (unsigned i=0;i<3;++i) {
             bytes=0;
@@ -299,9 +308,7 @@ void pilot_d3d_dispatch(unsigned entry)
     }
     case PILOT_D3D_D3DDevice_Swap:
         if (arguments[0]) stop("unqualified graphics swap flags",arguments[0]);
-        if(graphics_callback)stop("swap/vblank callback completion contract unqualified",entry);
-        g_eax=(uint32_t)pilot_gfx_present();
-        if(!(g_eax&0x80000000u))graphics_clock_presented=1;
+        g_eax=graphics_present();
         break;
     default:
         stop(pilot_d3d_calls[entry].name,pilot_d3d_calls[entry].address);

@@ -22,6 +22,8 @@ enum PilotResourceKind {PILOT_GFX_DEVICE,PILOT_GFX_SURFACE,PILOT_GFX_TEXTURE,PIL
 int pilot_gfx_resource_busy(unsigned kind,uint32_t handle);
 struct PilotGpuProgress {uint64_t submitted,completed;unsigned pending_queries,created_queries;};
 void pilot_gfx_completion_stats(struct PilotGpuProgress *progress);
+uint64_t pilot_gfx_checkpoint(void);
+int pilot_gfx_checkpoint_busy(uint64_t serial);
 int32_t pilot_gfx_surface_readback(unsigned surface,unsigned char *rgba,uint32_t capacity);
 int32_t pilot_gfx_texture_create(uint32_t width,uint32_t height,uint32_t levels,uint32_t format,uint32_t *handle);
 int32_t pilot_gfx_texture_create_usage(uint32_t width,uint32_t height,uint32_t levels,uint32_t format,uint32_t usage,uint32_t *handle);
@@ -54,10 +56,12 @@ unsigned pilot_gfx_shader_uploads(void);
 void pilot_gfx_shader_capture_constants(void *data);
 int32_t pilot_gfx_shader_raster(const float scale[4],const float offset[4]);
 int32_t pilot_gfx_draw_vertices(unsigned primitive,unsigned first,unsigned count);
+int32_t pilot_gfx_draw_memory(unsigned primitive,unsigned count,const void *vertices,unsigned stride);
 uint32_t pilot_gfx_fvf_extent(uint32_t fvf);
 int32_t pilot_gfx_fvf_prepare(uint32_t fvf,float screen_x,float screen_y);
 unsigned pilot_gfx_shader_streams(uint32_t extents[16]);
 void pilot_gfx_pixel_fixed(void);
+int32_t pilot_gfx_pixel_program(const uint32_t states[57],uint32_t texture_modes);
 /* Diagnostic raw vertex outputs, before rasterization/viewport conversion. */
 struct PilotVertexProbeStream { const void *data; unsigned stride; };
 int32_t pilot_gfx_shader_probe(uint32_t handle,const struct PilotVertexProbeStream streams[16],unsigned count,

@@ -44,6 +44,7 @@ static void test_media(void)
     uint32_t handle=MEM32(out);
     uint32_t read[]={handle,0,0,0,iosb,buffer,8,offset};
     MEM64(offset)=3; memset(memory+buffer,0xcc,32);
+    read[3]=iosb; /* ReadFile OVERLAPPED context without APC/port registration. */
     call_kernel(219,read,8);
     CHECK(!g_eax && MEM32(iosb+4)==8 && !memcmp(memory+buffer,content+3,8) && MEM8(buffer+8)==0xcc);
     uint32_t query[]={handle,iosb,info,8,14};

@@ -1,4 +1,4 @@
-#include "d3d8_internal.h"
+#include "graphics_donor.h"
 #include "graphics_backend.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,6 +8,8 @@
 #include "graphics_draw_backend_test.inc"
 #include "graphics_completion_backend_test.inc"
 #include "graphics_fvf_backend_test.inc"
+#include "graphics_pixel_backend_test.inc"
+#include "graphics_movie_backend_test.inc"
 static int test_transform_pipeline(void)
 {
     static const D3DTRANSFORMSTATETYPE states[]={D3DTS_VIEW,D3DTS_PROJECTION,D3DTS_TEXTURE0,D3DTS_TEXTURE1,
@@ -42,8 +44,11 @@ static int test_resource_bindings(void)
     pilot_gfx_texture_bind(0,texture);pilot_gfx_texture_bind(3,texture);
     CHECK(d3d8_GetTSS(0)[D3DTSS_COLOROP]==D3DTOP_SELECTARG1 && d3d8_GetTSS(3)[D3DTSS_COLOROP]==D3DTOP_DISABLE);
     ID3D11ShaderResourceView *views[4]={0};ID3D11DeviceContext *ctx=d3d8_GetD3D11Context();
-    ID3D11DeviceContext_PSGetShaderResources(ctx,0,4,views);CHECK(views[0] && views[3]==views[0] && !views[1] && !views[2]);
-    ID3D11ShaderResourceView_Release(views[0]);ID3D11ShaderResourceView_Release(views[3]);
+    ID3D11DeviceContext_PSGetShaderResources(ctx,0,4,views);
+    CHECK(views[0] && views[3]==views[0] && !d3d8_GetStageTexture(1) && !d3d8_GetStageTexture(2));
+    /* A renderer may bind an internal neutral sampling view for an empty
+     * logical stage. Assert guest state and pixels, not that implementation. */
+    for(unsigned i=0;i<4;++i)if(views[i])ID3D11ShaderResourceView_Release(views[i]);
     struct {float x,y,z,w;uint32_t color;float u,v;} vertices[]={
         {8,8,.5f,1,0xffffffff,.5f,.5f},{56,8,.5f,1,0xffffffff,.5f,.5f},{32,56,.5f,1,0xffffffff,.5f,.5f}};
     unsigned char pixels[64*64*4];unsigned center=(24*64+32)*4;
@@ -57,7 +62,7 @@ static int test_resource_bindings(void)
     CHECK(pixels[center]==0x98 && pixels[center+1]==0x76 && pixels[center+2]==0x54);
     pilot_gfx_texture_bind(0,0);pilot_gfx_texture_bind(3,0);
     CHECK(d3d8_GetTSS(0)[D3DTSS_COLOROP]==D3DTOP_SELECTARG1);
-    ID3D11DeviceContext_PSGetShaderResources(ctx,0,4,views);CHECK(!views[0] && !views[1] && !views[2] && !views[3]);
+    for(unsigned i=0;i<4;++i)CHECK(!d3d8_GetStageTexture(i));
     pilot_gfx_texture_destroy(texture);
     uint32_t target=0;CHECK(pilot_gfx_texture_create_usage(4,4,1,0x12,1,&target)==0);
     CHECK(pilot_gfx_texture_clear(target,0xff336699)==0);pilot_gfx_texture_bind(0,target);
@@ -133,6 +138,10 @@ int main(void)
         CHECK(test_fvf_pipeline()==0);
         CHECK(test_native_draw_pipeline()==0);
         CHECK(test_resource_completion()==0);
+#ifdef PILOT_D3D_PHOBOS
+        CHECK(test_combiner_memory_draw()==0);
+        CHECK(test_movie_textures()==0);
+#endif
         /* Teardown also owns queries which the caller has not retired. A fast
          * GPU may finish immediately, so pending=true is not required. */
         CHECK(pilot_gfx_clear(1,0xff123456,1,0)==0);

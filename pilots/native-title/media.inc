@@ -265,7 +265,11 @@ static uint32_t media_open(uint32_t *args,int create)
         fprintf(stderr,"[FILE OPEN] root=%08x name=%.*s access=%08x options=%08x\n",
                 MEM32(attr),(int)(length>1024?1024:length),(char*)(memory+MEM32(name+4)),access,options);
     }
-    if (!(options&0x20) || (options&~0x805867u)) stop("file open requires unsupported IO mode/options",options);
+    /* Delete/metadata handles need no synchronous data-transfer mode. Preserve
+     * that NT contract; data handles still require our synchronous transport. */
+    if ((options&~0x805867u) || (!(options&0x20) &&
+        (access&(FILE_READ_DATA|FILE_WRITE_DATA|FILE_APPEND_DATA|GENERIC_READ|GENERIC_WRITE|GENERIC_ALL))))
+        stop("file open requires unsupported IO mode/options",options);
     if (share&~7u) return MEDIA_INVALID;
     WCHAR path[1024]; HANDLE parent=NULL,handle=NULL; IO_STATUS_BLOCK io={0};
     unsigned partition=0;
@@ -314,7 +318,13 @@ static void media_kernel(unsigned ordinal)
         else if (file) {
             AcquireSRWLockExclusive(&owned->io_lock);
             if (transfer) {
-                if (a[1] || a[2] || a[3]) stop("file event/APC delivery unsupported",ordinal);
+                /* A context alone requests no callback. XAPI ReadFile passes
+                 * its OVERLAPPED pointer here even with no APC routine/event.
+                 * Completion ports cannot be associated with our file owner. */
+                if (a[1] || a[2]) {
+                    fprintf(stderr,"[FILE DELIVERY] event=%08x routine=%08x context=%08x\n",a[1],a[2],a[3]);
+                    stop("file event/APC delivery unsupported",ordinal);
+                }
                 LARGE_INTEGER offset; if (a[7]) offset.QuadPart=(int64_t)MEM64(a[7]);
                 if (ordinal==219) g_eax=fsc_read(owned,&io,memory+a[5],a[6],a[7]?&offset:NULL);
                 else {

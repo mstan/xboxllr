@@ -89,6 +89,11 @@ def prepare(donor: Path, output: Path, vsh_reference: Path):
                     code = code[:start] + '{ pilot_d3d_backend_stop("unqualified backend method: ' + method + '"); }' + code[end:]
                     omitted.append(method)
             if name == "d3d8_device.c":
+                # The Xbox display epoch paces whole Swap calls. Do not add a
+                # second, host-monitor-rate wait inside the native present.
+                present='IDXGISwapChain_Present(g_device_state.swap_chain, 1, 0)'
+                if code.count(present)!=1:raise ValueError('unreviewed present interval')
+                code=code.replace(present,'IDXGISwapChain_Present(g_device_state.swap_chain, 0, 0)')
                 # Cleanup real partial initialization; do not mask shader init
                 # failure with an unrelated fixed-function substitute.
                 name_map = {n:(a,b) for n,a,b in bodies(code)}

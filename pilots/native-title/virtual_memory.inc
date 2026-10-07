@@ -9,7 +9,27 @@
 #define VM_CONFLICT 0xc0000018u
 #define VM_NOT_ALLOCATED 0xc00000a0u
 struct PilotRegion { uint32_t base,size,protect; int fixed; };
-static struct PilotRegion vm_regions[512];
+/* Host ownership records are not Xbox RAM. Grow independently of the real
+ * 64 MiB commitment budget: hundreds of small GPU objects must not turn a
+ * bookkeeping limit into a guest out-of-memory failure. Pointers into this
+ * table are used only while vm_lock is held (or during one-time setup). */
+static struct PilotRegion vm_initial_regions[512];
+static struct PilotRegion *vm_regions=vm_initial_regions;
+static unsigned vm_region_capacity=512;
+static struct PilotRegion *vm_grow_regions(void)
+{
+    unsigned old=vm_region_capacity;
+    /* Every reservation starts at a distinct 64 KiB boundary. */
+    unsigned maximum=(VM_END+0xffffu)/0x10000u;
+    if(old>=maximum)return NULL;
+    unsigned capacity=old*2;if(capacity>maximum)capacity=maximum;
+    struct PilotRegion *next=calloc(capacity,sizeof(*next));
+    if(!next)return NULL;
+    memcpy(next,vm_regions,old*sizeof(*next));
+    if(vm_regions!=vm_initial_regions)free(vm_regions);
+    vm_regions=next;vm_region_capacity=capacity;
+    return &vm_regions[old];
+}
 static uint64_t vm_service_bytes; /* real native service buffers; guarded by vm_lock */
 static INIT_ONCE vm_once=INIT_ONCE_STATIC_INIT;
 typedef LONG (NTAPI *PilotNtAllocate)(HANDLE,PVOID*,ULONG_PTR,PSIZE_T,ULONG,ULONG);
@@ -22,10 +42,12 @@ static PilotNtProtect vm_native_protect;
 static void vm_fixed_region(uint32_t base,uint32_t size)
 {
     if (!size || (uint64_t)base+size>VM_END) stop("invalid fixed VM reservation",base);
-    for (unsigned i=0;i<512;++i) if (!vm_regions[i].size) {
+    for (unsigned i=0;i<vm_region_capacity;++i) if (!vm_regions[i].size) {
         vm_regions[i]=(struct PilotRegion){base,size,PAGE_READWRITE,1}; return;
     }
-    stop("fixed VM region table exhausted",base);
+    struct PilotRegion *region=vm_grow_regions();
+    if(!region)stop("fixed VM ownership allocation failed",base);
+    *region=(struct PilotRegion){base,size,PAGE_READWRITE,1};
 }
 static BOOL CALLBACK vm_start(PINIT_ONCE once,void *parameter,void **context)
 {
@@ -53,7 +75,7 @@ static void vm_ensure(void)
 }
 static struct PilotRegion *vm_find(uint32_t base,uint32_t size)
 {
-    for (unsigned i=0;i<512;++i) {
+    for (unsigned i=0;i<vm_region_capacity;++i) {
         struct PilotRegion *r=&vm_regions[i];
         if (r->size && base>=r->base && (uint64_t)base+size<=(uint64_t)r->base+r->size) return r;
     }
@@ -86,7 +108,7 @@ static uint32_t vm_choose(uint32_t size,uint32_t limit,int topdown)
     uint32_t at=topdown ? (limit-size)&~0xffffu : 0x10000;
     for (;;) {
         int conflict=0;
-        for (unsigned i=0;i<512;++i) {
+        for (unsigned i=0;i<vm_region_capacity;++i) {
             struct PilotRegion *r=&vm_regions[i];
             if (!r->size || (uint64_t)at+size<=r->base || at>=(uint64_t)r->base+r->size) continue;
             if (topdown) {
@@ -130,19 +152,19 @@ static uint32_t vm_allocate(uint32_t *base,uint32_t zero_bits,uint32_t *size,uin
             if (!low) { result=VM_NOMEM; goto done; }
         }
         if (low<0x10000) { result=VM_CONFLICT; goto done; }
-        for (unsigned i=0;i<512;++i) {
+        for (unsigned i=0;i<vm_region_capacity;++i) {
             struct PilotRegion *r=&vm_regions[i];
             if (!r->size) region=r;
             else if ((uint64_t)low+bytes>r->base && low<(uint64_t)r->base+r->size) { result=VM_CONFLICT; goto done; }
         }
-        if (!region) { result=VM_NOMEM; goto done; }
+        if (!region && !(region=vm_grow_regions())) { fprintf(stderr,"[VM FAILURE] host reservation ledger allocation failed: records=%u\n",vm_region_capacity); result=VM_NOMEM; goto done; }
     } else {
         region=vm_find(low,bytes);
         if (!region || region->fixed) { result=VM_CONFLICT; goto done; }
     }
     if (type&MEM_COMMIT) {
         uint64_t additional=bytes-vm_committed(low,bytes);
-        if (vm_committed(0,0x100000000ull)+vm_service_bytes+additional>64ull*1024*1024) { result=VM_NOMEM; goto done; }
+        if (vm_committed(0,0x100000000ull)+vm_service_bytes+additional>64ull*1024*1024) { fprintf(stderr,"[VM FAILURE] guest memory budget: requested=%llu resident=%llu service=%llu\n",(unsigned long long)additional,(unsigned long long)vm_committed(0,0x100000000ull),(unsigned long long)vm_service_bytes); result=VM_NOMEM; goto done; }
         PVOID host=memory+low; SIZE_T span=bytes;
         result=(uint32_t)vm_native_allocate(GetCurrentProcess(),&host,0,&span,MEM_COMMIT,protect);
         if (result) goto done;
@@ -197,7 +219,7 @@ static uint32_t vm_query(uint32_t base,uint32_t out[7])
     memset(out,0,28); out[0]=low;
     if (!r) {
         uint32_t end=VM_END;
-        for (unsigned i=0;i<512;++i) if (vm_regions[i].size && vm_regions[i].base>low && vm_regions[i].base<end) end=vm_regions[i].base;
+        for (unsigned i=0;i<vm_region_capacity;++i) if (vm_regions[i].size && vm_regions[i].base>low && vm_regions[i].base<end) end=vm_regions[i].base;
         out[3]=end-low; out[4]=MEM_FREE;
     } else {
         MEMORY_BASIC_INFORMATION host;

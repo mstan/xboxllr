@@ -70,6 +70,8 @@ def prepare(donor, output, cargo):
                   dependencies=dependencies,
                   policy='Unsupported arithmetic/memory modes and RESET/DEBUG/WAIT stop; cache/bus timing is outside the batch effects contract.')
     (output / 'donor.json').write_text(json.dumps(record, indent=2)+'\n', newline='\n')
+    from native_dsp_notices import prepare as prepare_notices
+    prepare_notices(output, cargo)
     return dict(revision=PIN, copied=len(hashes), guarded=len(patched), dependencies=len(dependencies))
 
 

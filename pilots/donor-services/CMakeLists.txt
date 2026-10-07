@@ -29,6 +29,31 @@ target_link_libraries(donor_renderer_probe PRIVATE xbox_d3d8 user32)
 add_executable(donor_audio_probe audio.cpp "${PHOBOS_SOURCE}/src/hle/audio_output_xaudio2.cpp")
 target_include_directories(donor_audio_probe PRIVATE "${PHOBOS_SOURCE}/src/hle")
 target_link_libraries(donor_audio_probe PRIVATE xaudio2 ole32)
+
+# Preserve upstream credits, including notice-only rebuilds.
+add_custom_target(donor_notices ALL)
+add_dependencies(donor_renderer_probe donor_notices)
+add_dependencies(donor_audio_probe donor_notices)
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/donor-provenance.txt"
+  "Source: https://github.com/phobos665/xboxrecomp\nRevision: ${donor_head}\nPrivate renderer/audio probes; original upstream source files and notices retained.\n")
+foreach(probe donor_renderer_probe donor_audio_probe)
+  foreach(notice LICENSE LICENSE.upstream-MIT NOTICE)
+    if(NOT EXISTS "${PHOBOS_SOURCE}/${notice}")
+      message(FATAL_ERROR "Phobos donor is missing required ${notice}")
+    endif()
+    add_custom_command(TARGET donor_notices POST_BUILD
+      COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:${probe}>/third_party/phobos-xboxrecomp"
+      COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${PHOBOS_SOURCE}/${notice}"
+        "$<TARGET_FILE_DIR:${probe}>/third_party/phobos-xboxrecomp/${notice}")
+  endforeach()
+  add_custom_command(TARGET donor_notices POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory "${PHOBOS_SOURCE}/LICENSES"
+      "$<TARGET_FILE_DIR:${probe}>/third_party/phobos-xboxrecomp/LICENSES"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_BINARY_DIR}/donor-provenance.txt"
+      "$<TARGET_FILE_DIR:${probe}>/third_party/phobos-xboxrecomp/PROVENANCE.txt"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/../../THIRD_PARTY_ATTRIBUTION.md"
+      "$<TARGET_FILE_DIR:${probe}>/THIRD_PARTY_ATTRIBUTION.md")
+endforeach()
 enable_testing()
 add_test(NAME donor_renderer_pixels COMMAND donor_renderer_probe)
 add_test(NAME donor_audio_consumption COMMAND donor_audio_probe)

@@ -4,10 +4,23 @@
 static uint32_t graphics_pixels[256];
 static void graphics_pixel_bind(uint32_t handle)
 {
-    if(handle)stop("unqualified programmable pixel shader binding",handle);
     graphics_sync_deferred();
-    pilot_gfx_pixel_fixed();
-    MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_PIXEL_SHADER)=0;
+    if(handle) {
+        unsigned slot=0;while(slot<256 && graphics_pixels[slot]!=handle)++slot;
+        if(slot==256 || MEM32(handle+8)!=handle+12)stop("unowned pixel shader",handle);
+        const uint32_t *definition=graphics_pointer(handle+12,240);
+        if(pilot_gfx_pixel_program(definition,definition[54])<0)
+            stop("unsupported native pixel program",handle);
+        /* Original XDK SetPixelShader publishes these 57 DWORDs plus the
+         * complex texture-mode slot; inline setters can change them later. */
+        memcpy(memory+PILOT_D3D_RENDER_STATES,definition,57*4);
+        MEM32(PILOT_D3D_RENDER_STATES+136*4)=definition[54];
+        uint32_t snapshot=PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_PIXEL_SHADER;
+        MEM32(snapshot+4)=definition[8]|definition[9];
+        MEM32(snapshot+8)=definition[59]&0x100;
+        MEM32(snapshot+12)=definition[54];
+    } else pilot_gfx_pixel_fixed();
+    MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_PIXEL_SHADER)=handle;
 }
 static uint32_t graphics_pixel_create(const uint32_t *args)
 {

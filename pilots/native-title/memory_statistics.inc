@@ -17,7 +17,7 @@ static uint32_t memory_statistics(uint32_t destination)
         image=vm_committed(low,reserved);
     }
     committed=image;
-    for(unsigned i=0;i<512;++i)if(vm_regions[i].size && !vm_regions[i].fixed) {
+    for(unsigned i=0;i<vm_region_capacity;++i)if(vm_regions[i].size && !vm_regions[i].fixed) {
         reserved+=vm_regions[i].size;
         committed+=vm_committed(vm_regions[i].base,vm_regions[i].size);
     }

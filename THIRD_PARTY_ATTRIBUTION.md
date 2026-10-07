@@ -6,7 +6,54 @@ dependencies and the EEPROM port; transitive and incorporated-source provenance
 review remains open. [LICENSE-SCOPE.md](LICENSE-SCOPE.md) explains the unresolved
 GPL/PolyForm combined-executable conflict.
 
+For each new import, record the upstream repository, exact revision, imported
+files and local changes here or in a linked component inventory. Preserve
+copyright headers and full applicable license/NOTICE files with the source and
+build artifacts. Identify behavioral references separately from copied or
+adapted implementations; a root repository license never replaces component
+notices. Preparation/build steps must report missing required notices.
+
 ## Private native-title reference pilot
+
+### Renderer, audio, input and movie adoption — 2026-10-07
+
+This batch adds actual Phobos renderer implementation to the **private** title
+pilot. Earlier checkpoint descriptions below are historical; their “no Phobos
+graphics implementation” statement does not apply to the new PHOBOS build.
+
+| Source and revision | Use here | Retained credit and terms |
+| --- | --- | --- |
+| [phobos665/xboxrecomp](https://github.com/phobos665/xboxrecomp/tree/bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0), `bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0` | Prepared `src/d3d` D3D11/RHI renderer, resources/conversions, state/shader caches, combiner compiler, display resolve and UP upload ring; config, platform vocabulary and pure `src/kernel/nv2a_vsh` helper. Source copies stay in ignored build output. Vulkan files may be retained in the source set but are not compiled here. | Fork GPL-3.0; original LICENSE, NOTICE, LICENSE.upstream-MIT, LICENSES and per-file comments preserved. Adaptations and source/prepared hashes recorded beside the copies. |
+| [sp00nznet/xboxrecomp](https://github.com/sp00nznet/xboxrecomp/tree/1409a7d7801d3e931fb1074be6104209ddd9a33e), `1409a7d7801d3e931fb1074be6104209ddd9a33e` | Existing selectable renderer and adapted physical XInput conversion; also the upstream foundation of Phobos. | MIT, Copyright (c) 2026 sp00nz; original license/NOTICE with prepared renderer and [input MIT notice](pilots/native-title/input-sp00nz-MIT.txt). |
+| Phobos `src/input/input_bindings.c`, `bcccf8c` | Design reference for the independently implemented startup-selected keyboard controller. | Credit in `input_host.c`; no donor parser/sampler body copied. |
+| Phobos `src/hle/audio_output_xaudio2.cpp` and `dsound_buffer_model.c`, `bcccf8c`; upstream [NoRain211/doaxbv-re](https://github.com/NoRain211/doaxbv-re/tree/aa1d3c8afcd8d063171d819e27307070b63f056b), `aa1d3c8afcd8d063171d819e27307070b63f056b` | Actual donor XAudio2 transport compiled by the separate donor probe. Queue ownership and loop-span behavior referenced by the independently implemented title transport, retaining real device completion and DSP processing. | Donor files declare GPL-3.0 and credit doaxbv-re. Probe uses the external checkout with notices. No source bodies copied into the title transport; credit in `audio_xaudio2.cpp`. This is not wholesale Phobos audio adoption. |
+| Phobos `config/seeds/4D530013.json` and `53450036.json`, `bcccf8c` | Sofdec discovery strategy: recover the actual NTSC XBE section entries/pointer table, avoiding imported PAL addresses. Original title decoder remains private. | Source and pin in `native_movie_seeds.py` and generated contract manifest. No donor movie decoder or title binary bytes added to the repository. |
+
+The movie texture adapter now exercises Phobos's packed YUY2/UYVY conversion
+and its documented empty-texture-stage behavior. No decoder implementation is
+copied: the selected decoder is generated from the owner's private NTSC XBE.
+Audio mix-bin routing was independently implemented using original XDK setter
+behavior, [xemu MCPX voice processing](https://github.com/xemu-project/xemu/blob/482088490c2d5983ed5e1eafbd09906157c1eca0/hw/xbox/mcpx/apu/vp/vp.c)
+(`482088490c2d5983ed5e1eafbd09906157c1eca0`) and Cxbx Xbox sound type definitions
+(`585c49a50af1255ab155099e06f24505f9c5a800`) as behavioral references. No xemu or
+Cxbx implementation body was incorporated. External FFmpeg validates private
+movie assets only; it is not linked or bundled by the title pilot.
+
+`tools/native_phobos_d3d.py` retains license/notice bytes, checks the pinned
+source, records original/prepared hashes and adds provenance comments to
+adapted C files. Its `MODIFICATIONS.md` identifies local changes.
+`tools/native_pilot.py` retains the Phobos notices beside generated CPU helpers.
+The existing MIT DSP56300 implementation and permissive NV2A decoder remain
+credited below; no Phobos APU or NV2A device implementation replaces them.
+These are private reference artifacts, not additions to the intended non-GPL
+shipping product. Owner-authored adapters retain this repository's terms;
+those terms do not replace upstream licenses.
+
+The private title build copies this inventory, repository scope/notice, donor
+licenses and modification manifests beside the executable in `third_party/`.
+That includes the sp00nz MIT notice covering input and non-local jumps, the
+NV2A reference license, and DSP core plus Cargo dependency notices. Credit
+retention does not change the private pilot's distribution status.
 
 `tools/native_pilot.py` invokes Phobos xboxrecomp at
 `63f18f0334fbd8c00313c4bb565accf00627a4fd` from an external checkout. Its
@@ -198,12 +245,31 @@ that all referenced source was copied or that all implementation is original.
 Any incorporated code must retain its upstream terms and notices. The remaining
 file-level provenance review is part of `beads-xbox.1.21`.
 
+## NoRain texture layout implementation
+
+[NoRain211/doaxbv-re](https://github.com/NoRain211/doaxbv-re/tree/aa1d3c8afcd8d063171d819e27307070b63f056b),
+revision `aa1d3c8afcd8d063171d819e27307070b63f056b`, supplies the unmodified
+`recomp-runtime/d3d_texture_model.c` and `.h` used by the experimental machine
+HLE renderer's texture layout/unswizzling. See the
+[component inventory](src/third_party/norain/README.md) and retained
+[GPL-3.0 text](LICENSES/GPL-3.0.txt). This earlier direct implementation import
+is distinct from the native pilot's audio design references and remains within
+the research dependencies described in LICENSE-SCOPE.md.
+
 ## Native-pilot DSP processor
 
 [mborgerson/dsp56300](https://github.com/mborgerson/dsp56300/tree/c60aeedb6a6014850204c71e53bc0cf5b3104222)
 is MIT-licensed. `tools/native_dsp_donor.py` copies its pinned tracked source
 into private build output, preserves LICENSE, records source/patch hashes and
 locked Cargo dependency metadata, and adds explicit unsupported-feature stops.
+`tools/native_dsp_notices.py` also collects verbatim notices for the Windows
+FFI's normal dependency closure and the Rust standard library. Its inventory
+records package versions, authors, source URLs, notice origins and hashes.
+For Cranelift crates whose published archive omits the monorepo LICENSE, it
+retains that file from a sibling at the identical source commit with identical
+declared terms. Cargo feature unification can make this inventory conservative;
+it is not a claim that all listed code is linked. Build/dev tools remain in the
+separate full dependency record. These notices accompany the private executable.
 The C FFI static library supplies actual instruction execution. Xbox image,
 DMA and XAudio2 adapters are independently authored; no GPL audio implementation
 was imported. The dependency record includes the MPL-2.0 cbindgen build tool;

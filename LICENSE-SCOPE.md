@@ -25,7 +25,9 @@ In addition to Unicorn below, the current renderer imports GPL xemu shader
 translation and a GPL NoRain texture model (`src/third_party/`). These remain
 research dependencies with their notices; they have not been cleared for the
 intended shipping configuration. The Phobos native-title pilot also copies its
-GPL-fork runtime header into private generated output. It is an external
+GPL-fork runtime header into private generated output. Its selectable PHOBOS
+renderer now compiles the fork's D3D11/RHI implementation from a pinned,
+notice-preserving prepared source tree (see THIRD_PARTY_ATTRIBUTION.md). It is an external
 reference experiment, excluded from the normal build, and is not a non-GPL
 product implementation. No executable release is authorized by that experiment.
 

@@ -2,25 +2,32 @@
  * texture storage. Original XDK routines and XbD3D8Types supply layout facts.
  * Addresses are guest allocations; no native pointer enters a resource header.
  */
-#define GRAPHICS_TEXTURE_OBJECTS 512
 struct GraphicsTextureObject {
     uint32_t header,data,bytes,width,height,levels,format,refs,native,usage,cpu_exposed;
     unsigned parent,level; /* parent is slot+1 for a surface view, zero for texture */
     unsigned bindings;
 };
-static struct GraphicsTextureObject graphics_textures[GRAPHICS_TEXTURE_OBJECTS];
+static struct GraphicsTextureObject *graphics_textures;
+static unsigned graphics_texture_capacity;
 
 static unsigned graphics_texture_slot(uint32_t header)
 {
-    for(unsigned i=0;i<GRAPHICS_TEXTURE_OBJECTS;++i)
+    for(unsigned i=0;i<graphics_texture_capacity;++i)
         if(graphics_textures[i].header==header && header) return i;
     stop("unowned texture resource",header);
 }
 static unsigned graphics_texture_unused(void)
 {
-    for(unsigned i=0;i<GRAPHICS_TEXTURE_OBJECTS;++i)
+    for(unsigned i=0;i<graphics_texture_capacity;++i)
         if(!graphics_textures[i].header) return i;
-    stop("texture resource slots exhausted",GRAPHICS_TEXTURE_OBJECTS);
+    unsigned old=graphics_texture_capacity;
+    if(old>0xffffffffu/2/sizeof(*graphics_textures))stop("texture ownership capacity overflow",old);
+    unsigned capacity=old?old*2:512;
+    struct GraphicsTextureObject *next=realloc(graphics_textures,capacity*sizeof(*next));
+    if(!next)stop("texture ownership allocation failed",capacity);
+    memset(next+old,0,(capacity-old)*sizeof(*next));
+    graphics_textures=next;graphics_texture_capacity=capacity;
+    return old;
 }
 static uint32_t graphics_log2(uint32_t value)
 {
@@ -28,14 +35,14 @@ static uint32_t graphics_log2(uint32_t value)
 }
 static uint32_t graphics_texture_bpp(const struct GraphicsTextureObject *texture)
 {
-    return texture->format<=5?2:4;
+    return texture->format<=5 || texture->format==0x24 || texture->format==0x25?2:4;
 }
 static uint32_t graphics_texture_block(const struct GraphicsTextureObject *texture)
 {
     return texture->format==0xc?8:(texture->format==0xe || texture->format==0xf?16:0);
 }
 static int graphics_texture_linear(const struct GraphicsTextureObject *texture)
-{return texture->format==0x12 || texture->format==0x1e || texture->format==0x2e;}
+{return texture->format==0x12 || texture->format==0x1e || texture->format==0x2e || texture->format==0x24 || texture->format==0x25;}
 static uint32_t graphics_level_width(const struct GraphicsTextureObject *texture,unsigned level)
 {
     uint32_t width=texture->width>>level; return width?width:1;
@@ -62,7 +69,7 @@ static void graphics_texture_header(struct GraphicsTextureObject *object)
     MEM32(object->header+4)=object->data; MEM32(object->header+8)=0;
     MEM32(object->header+12)=0x29u|(object->format<<8)|(object->levels<<16);
     if(graphics_texture_linear(object)) {
-        uint32_t pitch=(object->width*4+63)&~63u;
+        uint32_t pitch=(object->width*graphics_texture_bpp(object)+63)&~63u;
         MEM32(object->header+16)=(object->width-1)|((object->height-1)<<12)|((pitch/64-1)<<24);
     } else {
         MEM32(object->header+12)|=(graphics_log2(object->width)<<20)|(graphics_log2(object->height)<<24);
@@ -73,7 +80,9 @@ static void graphics_texture_header(struct GraphicsTextureObject *object)
 static uint32_t graphics_texture_allocate(const uint32_t *args)
 {
     uint32_t width=args[0],height=args[1],levels=args[3],format=args[5],usage=args[4];
-    int linear=format==0x12 || format==0x1e || format==0x2e;
+    int yuv=format==0x24 || format==0x25;
+    int linear=format==0x12 || format==0x1e || format==0x2e || yuv;
+    if(yuv && (usage || (width&1)))stop("unqualified packed YUV texture dimensions/usage",width);
     if(args[2]!=1 || (format==0x2e?usage!=2:(usage && (usage!=1 || !linear))) || args[6]!=3 || !(linear || (format>=4 && format<=7) || format==0xc || format==0xe || format==0xf))
         stop("unqualified texture type/usage/format",format);
     if(!width || !height || width>4096 || height>4096 || (!linear && ((width&(width-1)) || (height&(height-1)))))
@@ -150,11 +159,11 @@ static void graphics_texture_binding_ref(uint32_t header,int acquire)
 static void graphics_texture_sample_prepare(unsigned slot)
 {
     struct GraphicsTextureObject *texture=&graphics_textures[slot];int exposed=!texture->usage || texture->cpu_exposed;
-    for(unsigned i=0;i<GRAPHICS_TEXTURE_OBJECTS;++i)if(graphics_textures[i].parent==slot+1)exposed|=graphics_textures[i].cpu_exposed;
+    for(unsigned i=0;i<graphics_texture_capacity;++i)if(graphics_textures[i].parent==slot+1)exposed|=graphics_textures[i].cpu_exposed;
     for(unsigned level=0;level<texture->levels;++level)
         pilot_gfx_texture_prepare_sample(texture->native,level,memory+texture->data+graphics_level_offset(texture,level),
             graphics_level_bytes(texture,level),exposed);
-    if(texture->usage)for(unsigned i=0;i<GRAPHICS_TEXTURE_OBJECTS;++i)
+    if(texture->usage)for(unsigned i=0;i<graphics_texture_capacity;++i)
         if(i==slot || graphics_textures[i].parent==slot+1)graphics_textures[i].cpu_exposed=0;
 }
 static void graphics_texture_bind(unsigned stage,uint32_t header)

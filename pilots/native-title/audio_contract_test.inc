@@ -17,24 +17,29 @@ static uint32_t audio_test_device(void)
     uint32_t iface=MEM32(0x19000);CHECK(iface==audio_device+8 && MEM32(audio_device+4)==1);
     return iface;
 }
-static uint32_t audio_test_buffer(uint32_t device,uint32_t bytes)
+static uint32_t audio_test_buffer_format(uint32_t device,uint32_t bytes,unsigned channels,unsigned bits,unsigned rate,uint32_t mixbins)
 {
     uint32_t desc=0x19100,fmt=0x19200,out=0x19010;
     memset(memory+desc,0,24);MEM32(desc)=24;MEM32(desc+4)=0xa0;MEM32(desc+8)=bytes;MEM32(desc+12)=fmt;
-    memset(memory+fmt,0,18);MEM16(fmt)=1;MEM16(fmt+2)=1;MEM32(fmt+4)=48000;
-    MEM32(fmt+8)=96000;MEM16(fmt+12)=2;MEM16(fmt+14)=16;
+    MEM32(desc+16)=mixbins;
+    memset(memory+fmt,0,18);MEM16(fmt)=1;MEM16(fmt+2)=(uint16_t)channels;MEM32(fmt+4)=rate;
+    MEM32(fmt+8)=rate*channels*(bits/8);MEM16(fmt+12)=(uint16_t)(channels*(bits/8));MEM16(fmt+14)=(uint16_t)bits;
     MEM32(out-4)=0xaabbccdd;MEM32(out)=0;MEM32(out+4)=0x11223344;
     uint32_t args[]={device,desc,out,0};
     CHECK(audio_test_call(PILOT_AUDIO_IDirectSound_CreateSoundBuffer,args)==0);
     CHECK(MEM32(out) && MEM32(out-4)==0xaabbccdd && MEM32(out+4)==0x11223344);
     return MEM32(out);
 }
+static uint32_t audio_test_buffer(uint32_t device,uint32_t bytes)
+{return audio_test_buffer_format(device,bytes,1,16,48000,0);}
 static void test_audio(void)
 {
     vm_ensure();uint64_t committed=vm_committed(0,0x100000000ull);
     uint32_t device=audio_test_device(),buffer=audio_test_buffer(device,9600);
     struct PilotAudioBuffer *b=audio_buffer(buffer);
     CHECK(b->owned && b->bytes==9600 && b->headroom==600 && MEM32(audio_device+4)==2);
+    uint32_t ref_args[]={b->base};CHECK(audio_test_call(PILOT_AUDIO_ObjectAddRef,ref_args)==2);
+    ref_args[0]=buffer;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_Release,ref_args)==1);
     for(unsigned i=0;i<4800;++i)MEM16(b->data+2*i)=(uint16_t)(int16_t)(1500.0*sin(6.283185307179586*440*i/48000));
     uint32_t a[8]={buffer,0,9600,0x19300,0x19304,0x19308,0x1930c,0};
     CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_Lock,a)==0);
@@ -69,6 +74,20 @@ static void test_audio(void)
     Sleep(250);a[1]=0x19300;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_GetStatus,a)==0 && MEM32(a[1])==5);
     CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_Stop,a)==0);
     CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_GetStatus,a)==0 && !(MEM32(a[1])&1));
+#ifdef PILOT_AUDIO_DSP
+    a[1]=2400;a[2]=2400;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetLoopRegion,a)==0);
+    a[1]=1;CHECK((int32_t)audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetLoopRegion,a)<0);
+    a[1]=0;a[2]=0;a[3]=3;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_Play,a)==0);
+    /* Multiple real device wraps must stay in the requested middle quarter. */
+    Sleep(160);
+    for(unsigned i=0;i<12;++i) {
+        a[1]=0x19304;a[2]=0x19308;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_GetCurrentPosition,a)==0);
+        CHECK(MEM32(a[1])>=2400 && MEM32(a[1])<4800 && MEM32(a[2])>=2400 && MEM32(a[2])<4800);
+        Sleep(7);
+    }
+    CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_Stop,a)==0);
+    a[1]=0;a[2]=0;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetLoopRegion,a)==0);
+#endif
     a[1]=(uint32_t)-1800;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetVolume,a)==0 && b->volume==-1800);
     a[1]=300;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetHeadroom,a)==0 && b->headroom==300);
     a[1]=1;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetVolume,a)==0x88780032 && b->volume==-1800);
@@ -102,6 +121,8 @@ static void test_audio_effects(const char *path)
     CHECK(fread(memory+source,1,n,f)==(size_t)n);fclose(f);
     uint8_t *original=malloc(n);CHECK(original);memcpy(original,memory+source,n);
     uint32_t device=audio_test_device(),buffer=audio_test_buffer(device,9600),a[8]={buffer,0,0,1};
+    struct PilotAudioBuffer *voice=audio_buffer(buffer);
+    for(unsigned i=0;i<4800;++i)MEM16(voice->data+i*2)=(uint16_t)(int16_t)(2000.0*sin(6.283185307179586*440*i/48000));
     CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_Play,a)==0);
     uint64_t installed=0;
     for(unsigned iteration=0;iteration<4;++iteration) {
@@ -113,7 +134,12 @@ static void test_audio_effects(const char *path)
         CHECK(audio_effects_location[0]==(iteration==3?UINT32_MAX:0x653470) && audio_effects_location[1]==(iteration==3?UINT32_MAX:0x100));
         if(a[4]){uint32_t desc=MEM32(a[4]);CHECK(desc>=audio_effects_storage && MEM32(desc)==3);}
         uint64_t now=vm_committed(0,0x100000000ull);if(iteration)CHECK(now==installed);installed=now;
-        Sleep(120); /* Real processing overlaps replacement; no duplicate run. */
+        float *samples=calloc(4096*6,sizeof(float));CHECK(samples);
+        CHECK(pilot_audio_capture_begin(samples,4096,1)==0);Sleep(180);
+        unsigned frames=pilot_audio_capture_end();CHECK(frames==4096);
+        double energy=0;for(unsigned i=0;i<frames*6;++i){CHECK(isfinite(samples[i]));energy+=samples[i]*samples[i];}
+        CHECK(energy>0.01);free(samples);
+        fprintf(stderr,"[AUDIO EFFECTS OUTPUT] replacement=%u real output frames=%u energy=%.6f\n",iteration,frames,energy);
     }
     a[0]=buffer;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_Release,a)==0);
     a[0]=device;CHECK(audio_test_call(PILOT_AUDIO_IDirectSound_Release,a)==0);

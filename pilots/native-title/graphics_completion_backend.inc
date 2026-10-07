@@ -54,6 +54,15 @@ static void pilot_completion_close(void)
     pilot_completion_tail=NULL;pilot_submitted=pilot_completed=0;pilot_query_count=pilot_query_created=0;
     memset(pilot_surface_use,0,sizeof(pilot_surface_use));
 }
+uint64_t pilot_gfx_checkpoint(void)
+{
+    uint64_t serial=pilot_submitted;(void)pilot_serial_busy(serial);return serial;
+}
+int pilot_gfx_checkpoint_busy(uint64_t serial)
+{
+    if(serial>pilot_submitted)pilot_d3d_backend_stop("completion checkpoint beyond submitted work");
+    return pilot_serial_busy(serial);
+}
 void pilot_gfx_completion_stats(struct PilotGpuProgress *progress)
 {*progress=(struct PilotGpuProgress){pilot_submitted,pilot_completed,pilot_query_count,pilot_query_created};}
 static void pilot_mark_targets(unsigned flags,uint64_t serial)

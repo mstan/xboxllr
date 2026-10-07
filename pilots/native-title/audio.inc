@@ -21,6 +21,8 @@ struct PilotAudioBuffer {
     int32_t volume;
     void *host;
     uint32_t lock_offset,lock_first,lock_second;
+    uint32_t mix_count,mix_bins[8];
+    int32_t mix_volumes[32];
     int locked;
 };
 static struct PilotAudioBuffer audio_buffers[256];
@@ -72,6 +74,42 @@ static int32_t audio_frequency(struct PilotAudioBuffer *b,uint32_t value)
     if(hr>=0)b->frequency=value;
     return hr;
 }
+static int32_t audio_route_host(struct PilotAudioBuffer *b,void *host)
+{
+#ifdef PILOT_AUDIO_DSP
+    int32_t volumes[8];
+    for(unsigned i=0;i<b->mix_count;++i)volumes[i]=b->mix_volumes[b->mix_bins[i]];
+    return host?pilot_audio_buffer_mixbins(host,b->mix_count,b->mix_bins,volumes):0;
+#else
+    (void)b;(void)host;return 0; /* DSOUND mode admits default routing only. */
+#endif
+}
+static int32_t audio_set_mix(struct PilotAudioBuffer *b,uint32_t address,int volumes_only)
+{
+#ifdef PILOT_AUDIO_DSP
+    struct PilotAudioBuffer updated=*b;
+    if(!address) {
+        if(volumes_only)return (int32_t)0x88780032;
+        updated.mix_count=2;updated.mix_bins[0]=0;updated.mix_bins[1]=1;
+        updated.mix_volumes[0]=updated.mix_volumes[1]=0;
+    } else {
+        const uint32_t *desc=audio_pointer(address,8);unsigned count=desc[0];
+        if(count>(volumes_only?32u:8u))return (int32_t)0x88780032;
+        const uint32_t *pairs=count?audio_pointer(desc[1],count*8):NULL;
+        if(!volumes_only)updated.mix_count=count;
+        for(unsigned i=0;i<count;++i) {
+            uint32_t bin=pairs[i*2];int32_t volume=(int32_t)pairs[i*2+1];
+            if(bin>=32 || volume>0 || volume< -10000)return (int32_t)0x88780032;
+            if(!volumes_only)updated.mix_bins[i]=bin;
+            updated.mix_volumes[bin]=volume;
+        }
+    }
+    int32_t hr=audio_route_host(&updated,b->host);
+    if(hr>=0)*b=updated;return hr;
+#else
+    stop("custom mix bins require the native DSP mixer",address);
+#endif
+}
 static int32_t audio_set_data(struct PilotAudioBuffer *b,uint32_t source,uint32_t bytes)
 {
     if(b->locked)stop("replacing locked audio data",b->base);
@@ -90,6 +128,7 @@ static int32_t audio_set_data(struct PilotAudioBuffer *b,uint32_t source,uint32_
         hr=pilot_audio_buffer_volume(host,(int32_t)(gain< -10000?-10000:gain));
     }
     if(hr>=0)hr=pilot_audio_buffer_frequency(host,b->frequency);
+    if(hr>=0)hr=audio_route_host(b,host);
     if(hr<0) {
         pilot_audio_buffer_destroy(host);
         if(!source){uint32_t zero=0;if(vm_free(&data,&zero,MEM_RELEASE))stop("audio allocation cleanup failed",data);}
@@ -103,7 +142,7 @@ static int32_t audio_set_data(struct PilotAudioBuffer *b,uint32_t source,uint32_
 static int32_t audio_create_buffer(uint32_t descriptor,uint32_t output)
 {
     const uint32_t *desc=audio_pointer(descriptor,24);audio_pointer(output,4);
-    if(desc[0]!=24 || desc[1]&~(0x20u|0x80u|0x40000u) || desc[4] || desc[5])
+    if(desc[0]!=24 || desc[1]&~(0x20u|0x80u|0x40000u) || desc[5])
         stop("unqualified sound buffer flags/mix bins",desc[1]);
     uint32_t format=desc[3];audio_pointer(format,18);
     unsigned channels=MEM16(format+2),rate=MEM32(format+4),bits=MEM16(format+14),align=channels*(bits/8);
@@ -113,6 +152,8 @@ static int32_t audio_create_buffer(uint32_t descriptor,uint32_t output)
     unsigned slot;for(slot=0;slot<256 && audio_buffers[slot].base;++slot){}
     if(slot==256)return (int32_t)0x8007000e;
     struct PilotAudioBuffer buffer={0};buffer.channels=channels;buffer.rate=rate;buffer.bits=bits;buffer.frequency=rate;
+    buffer.mix_count=2;buffer.mix_bins[1]=1;
+    if(desc[4]) {int32_t hr=audio_set_mix(&buffer,desc[4],0);if(hr<0)return hr;}
     buffer.headroom=600; /* Original 2D voice default, hundredths of dB. */
     buffer.base=pool_allocate(36,0x626f5344);
     if(!buffer.base)return (int32_t)0x8007000e;
@@ -191,14 +232,17 @@ void pilot_audio_dispatch(unsigned entry)
         struct PilotAudioBuffer *b=audio_buffer(a[0]);
         if(entry==PILOT_AUDIO_IDirectSoundBuffer_Release)result=audio_ref(b->base,0);
         else if(entry==PILOT_AUDIO_IDirectSoundBuffer_SetBufferData)result=audio_set_data(b,a[1],a[2]);
+        else if(entry==PILOT_AUDIO_IDirectSoundBuffer_SetMixBins)result=audio_set_mix(b,a[1],0);
+        else if(entry==PILOT_AUDIO_IDirectSoundBuffer_SetMixBinVolumes_8)result=audio_set_mix(b,a[1],1);
         else {
             if(!b->host && entry!=PILOT_AUDIO_IDirectSoundBuffer_SetVolume &&
                entry!=PILOT_AUDIO_IDirectSoundBuffer_SetHeadroom && entry!=PILOT_AUDIO_IDirectSoundBuffer_SetFrequency &&
                entry!=PILOT_AUDIO_IDirectSoundBuffer_SetPitch)stop("audio operation requires buffer storage",a[0]);
             switch(entry) {
             case PILOT_AUDIO_IDirectSoundBuffer_Play:
-                if(a[1] || a[2] || (a[3]&~1u) || b->locked)stop("unqualified sound play arguments",a[3]);
+                if(a[1] || a[2] || (a[3]&~3u) || b->locked)stop("unqualified sound play arguments",a[3]);
                 result=pilot_audio_buffer_copy(b->host,0,memory+b->data,b->bytes,0);
+                if(result>=0 && (a[3]&2))result=pilot_audio_buffer_seek(b->host,0);
                 if(result>=0)result=pilot_audio_buffer_play(b->host,a[3]&1);break;
             case PILOT_AUDIO_IDirectSoundBuffer_Stop:result=pilot_audio_buffer_stop(b->host);break;
             case PILOT_AUDIO_IDirectSoundBuffer_GetStatus: {
@@ -223,8 +267,12 @@ void pilot_audio_dispatch(unsigned entry)
                 else result=audio_frequency(b,(uint32_t)(48000.0*pow(2.0,pitch/4096.0)+0.5));break;
             }
             case PILOT_AUDIO_IDirectSoundBuffer_SetLoopRegion:
+#ifdef PILOT_AUDIO_DSP
+                result=pilot_audio_buffer_loop_region(b->host,a[1],a[2]);
+#else
                 if(a[1] || (a[2] && a[2]!=b->bytes))stop("partial audio loop regions are unqualified",a[1]);
                 /* Full-buffer region is enforced by native Play's looping flag. */
+#endif
                 break;
             case PILOT_AUDIO_IDirectSoundBuffer_Lock: {
                 uint32_t offset=a[1],bytes=a[2];

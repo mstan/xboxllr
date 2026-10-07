@@ -2,6 +2,31 @@
  * Surface views share their parent's GPU work and fence cache, as in the
  * original Resource_IsBusy entry. Native serials are private implementation
  * state: guest fence words are cleared only after actual completion. */
+static uint64_t graphics_fences[64];
+static uint32_t graphics_fence_next=1,graphics_fence_done;
+static void graphics_fence_poll(void)
+{
+    while(graphics_fence_done+1<graphics_fence_next &&
+          !pilot_gfx_checkpoint_busy(graphics_fences[(graphics_fence_done+1)%64]))++graphics_fence_done;
+}
+static void graphics_fence_wait(uint32_t token)
+{
+    if(!token || token>=graphics_fence_next)stop("unowned GPU fence",token);
+    for(;;) {
+        graphics_fence_poll();if(token<=graphics_fence_done)return;
+        ++graphics_clock_waiters;ReleaseSRWLockExclusive(&graphics_lock);
+        Sleep(1);
+        AcquireSRWLockExclusive(&graphics_lock);--graphics_clock_waiters;
+    }
+}
+static uint32_t graphics_fence_insert(void)
+{
+    graphics_fence_poll();
+    if(graphics_fence_next-graphics_fence_done>=64)graphics_fence_wait(graphics_fence_done+1);
+    if(graphics_fence_next==UINT32_MAX)stop("GPU fence identity exhausted",graphics_fence_next);
+    uint32_t token=graphics_fence_next++;
+    graphics_fences[token%64]=pilot_gfx_checkpoint();return token;
+}
 static uint32_t graphics_resource_busy(uint32_t header)
 {
     uint32_t canonical=header,handle;unsigned kind;

@@ -50,6 +50,17 @@ static uint32_t input_test_call(unsigned entry,uint32_t a,uint32_t b,uint32_t c,
 }
 static void input_test_setup(void)
 {
+    /* Deterministic XInput provider independent of the user's launch choice. */
+    input_host_is_keyboard();input_host_keyboard=0;
+    uint8_t keys[256]={0},packed[18];XINPUT_GAMEPAD keyboard;
+    keys[VK_RETURN]=keys[VK_SPACE]=keys['W']=keys['D']=keys['Z']=1;
+    input_host_keyboard_convert(keys,&keyboard);input_host_convert(&keyboard,packed);
+    CHECK((packed[0]&0x10) && packed[2]==255 && packed[8]==255);
+    CHECK(keyboard.sThumbLX==32767 && keyboard.sThumbLY==32767);
+    keys['A']=keys['S']=1;input_host_keyboard_convert(keys,&keyboard);
+    CHECK(!keyboard.sThumbLX && !keyboard.sThumbLY);
+    memset(keys,0,sizeof(keys));input_host_keyboard_convert(keys,&keyboard);
+    CHECK(!keyboard.wButtons && !keyboard.bLeftTrigger);
     commit(PILOT_INPUT_g_DeviceType_Gamepad&~4095u,4096);
     commit(PILOT_INPUT_g_DeviceType_MU&~4095u,4096);
     commit(PILOT_INPUT_g_DeviceType_IRDongle&~4095u,4096);

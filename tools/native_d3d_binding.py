@@ -96,6 +96,12 @@ def bind(xbe: Path, output: Path, symbols: Path):
     if len(fvf_objects)!=1 or len(fvf_calls)<1:raise ValueError('unreviewed FVF descriptor binding')
     state_defaults['fvf_binding']=dict(object=fvf_objects[0],decoder=fvf_calls[0],
         decoder_sha256=context.digest(functions[fvf_calls[0]]))
+    swap=next(s for s in identified if s['name']=='D3DDevice_Swap')
+    swap_code=list(Cs(CS_ARCH_X86,CS_MODE_32).disasm(data(swap['address'],functions[swap['address']]['size']),swap['address']))
+    swap_fields=[int(m[1],16) for i in swap_code if i.mnemonic=='mov' and
+        (m:=re.fullmatch(r'eax, dword ptr \[esi \+ (0x[0-9a-f]+)\]',i.op_str))]
+    if not swap_fields or swap_code[-1].mnemonic!='ret':raise ValueError('unreviewed swap counter return')
+    state_defaults['swap_binding']=dict(counter=swap_fields[-1],setter_sha256=context.digest(functions[swap['address']]))
     # Original resource binders use a separate four-bit count at Common[22:19].
     # Retired binding fences and texture-type caches belong to this revision.
     texture_bind=next(s for s in identified if s['name']=='D3DDevice_SetTexture')
@@ -143,7 +149,7 @@ def bind(xbe: Path, output: Path, symbols: Path):
         (m:=re.fullmatch(r'al, byte ptr \[edx \+ (0x[0-9a-f]+)\]',i.op_str))]
     if len(format_tables)!=1: raise ValueError('unreviewed surface format table')
     state_defaults['surface_formats']=[dict(format=x,flags=data(format_tables[0]+x,1)[0])
-        for x in (4,5,6,7,0xc,0xe,0xf,0x12,0x1e,0x2e)]
+        for x in (4,5,6,7,0xc,0xe,0xf,0x12,0x1e,0x2e,0x24,0x25)]
     # CPU snapshot layout from the complete reviewed recorder, independently
     # checked against original-x86 execution. These offsets belong to this
     # revision's binding, never to shared native service code.
@@ -190,6 +196,7 @@ def bind(xbe: Path, output: Path, symbols: Path):
     block=binding['stateblock']
     header += [f'#define PILOT_D3D_STREAMS 0x{block["streams"]:x}u']
     header += [f'#define PILOT_D3D_FVF_OBJECT 0x{binding["fvf_binding"]["object"]:x}u']
+    header += [f'#define PILOT_D3D_SWAP_COUNTER 0x{binding["swap_binding"]["counter"]:x}u']
     header += [f'#define PILOT_D3D_VERTEX_{name.upper()} {binding["vertex_binding"][name]}u'
                for name in ('program_cache','start','record_flags','record_disable')]
     header += [f'#define PILOT_D3D_RESOURCE_{name.upper()} {offset}u' for name,offset in binding['resource_binding'].items()]

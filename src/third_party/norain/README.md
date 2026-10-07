@@ -1,6 +1,6 @@
 # NoRain texture layout implementation
 
-Source: https://github.com/NoRain211/doaxvb-re
+Source: https://github.com/NoRain211/doaxbv-re
 Revision: `aa1d3c8afcd8d063171d819e27307070b63f056b`.
 
 `d3d_texture_model.c` and `.h` are unmodified files from `recomp-runtime/`.

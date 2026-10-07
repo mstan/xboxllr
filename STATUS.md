@@ -1,5 +1,31 @@
 # STATUS
 
+## 2026-10-07 - Audio/movie readiness and Blinx disc-error root cause
+
+The private native pilot now uses the borrowed Phobos renderer for actual
+presentation. Audio's 21 identified Blinx bindings pass service fixtures,
+including real DSP output and ordered mix-bin routing. Original NTSC Sofdec
+entry points are compiled; borrowed YUY2/UYVY conversion and movie texture
+contracts pass real GPU tests. These services are ready for title integration;
+actual game sound and movie playback have not yet occurred.
+
+Blinx passes the prior disc-error screen. It was caused by local ownership-table
+limits (512 VM reservations, then 256 native textures), not a failed disc read.
+Growing those tables preserves the actual 64 MiB guest budget. Blinx now creates
+420 textures and reaches the explicit `D3DDevice_BeginVisibilityTest` guard
+on both fresh and repeat launches (13.87/7.55 s), with no error-dialog entry.
+No error bypass, invented success or title-address patch was added. All 30 CTests
+pass in the isolated run; 600-reservation and 520-texture regression cases cover
+growth, real contents and repeat cleanup. A concurrent run exposed the existing
+vblank test's intermittent process-wide handle-count assertion.
+
+See the [current pilot evidence](pilots/native-title/README.md#current-checkpoint---audio-movies-and-disc-error-fix-2026-10-07)
+and [burndown](docs/BLINX-BURNDOWN.md). Attribution is retained with source and
+build artifacts. The Phobos-dependent pilot remains private; this does not
+qualify a non-GPL shipping build. Menu, actual movies/audio, attract, input
+interruption and original cadence remain open. JSRF stays deferred.
+
+
 ## 2026-10-07 - Whole-service donor adoption pass
 
 Owner direction now prioritizes a combined renderer/audio adoption batch over

@@ -1,59 +1,35 @@
 # Blinx: serial attract-sequence bring-up
 
-**Current adoption priority:** the owner requested a broad donor pass rather
-than another single-service refinement loop. The [2026-10-07 adoption map](DONOR-SERVICE-ADOPTION-2026-10-07.md)
-recommends a combined whole-renderer/native-audio batch, current console
-services and original Sofdec decoding. Independent donor probes establish real
-audio consumption and a concrete renderer readback mismatch; they do not move
-the title checkpoint. Presentation work remains an uncommitted experiment.
+**Current, 2026-10-07 (`beads-xbox.1.62`):** serial NTSC Blinx bring-up.
+The borrowed Phobos renderer now presents actual game frames. The prior disc
+error is traced and fixed: local VM/texture ownership caps returned out of memory
+while real guest RAM remained available. Blinx now loads 420 textures and stops
+at the next explicit graphics contract, `D3DDevice_BeginVisibilityTest`.
+Fresh and repeat launches reach that same boundary (13.87/7.55 s) with zero
+error-dialog entries or memory failures. The 64 MiB guest limit remains enforced. No title error condition is bypassed.
 
-**Current, 2026-10-07 (`beads-xbox.1.62`):** complete original NTSC Blinx's
-attract sequence before resuming JSRF. Dashboard speed and full AOT remain
-continuing goals. The native pilot executes actual title startup with the
-authorized installed-media contract, passes input initialization, opens real
-native audio and starts the media workers. It now installs the real three-effect
-`media/dsp.bin` graph through the MIT core and XAudio2 processing path. It now
-creates its color/depth targets, captures its real state block, runs its vblank
-callback and loads five menu textures. It binds its compiled vertex shader,
-the donor's real fixed-function pixel shader and a real stage-0 texture, then
-updates vertex constants and passes view/projection setup. It now passes four
-bump-matrix updates and binds its first vertex stream and next texture/shader.
-Seven real triangle-strip draws now render its "Warping space-time..." loading
-image. Its first resource-completion query now passes, followed by locking its
-font vertex buffer and binding the font texture/stream. Its pretransformed FVF
-and font quad now run, restoring the prior shader and reaching the first `Swap`.
-The next stop is the presentation/vblank callback completion contract.
-Use the [native pilot evidence and scope](../pilots/native-title/README.md)
-for current progress; the optical-route ledger below is historical and separate.
-
-| Native milestone | Current evidence / remaining work |
+| Milestone | Evidence / remaining work |
 | --- | --- |
-| Launch, real files and writable storage | Passed bounded startup; original optical verifier remains selectable |
-| Graphics resource preparation | Real font/textures, buffers, 96 compiled vertex shaders, 37 owned pixel definitions and three color/depth targets; title setup, eight real draws and first resource query pass. Presentation remains pending |
-| Pretransformed FVF and quads | Borrowed fixed-function pipeline adapted to Xbox descriptor/coordinates/viewport; real GPU fixtures and original setter/program reference pass. Actual transparent font quad submits and title reaches Swap. Broader fog/extreme-RHW behavior remains unqualified |
-| Resource completion | Real batched D3D11 events with nonblocking polls, bound-input busy rules and canonical parent fences; 40 original-x86 cases and GPU/lifetime fixtures pass. Device-wide fences/waits remain pending |
-| Native raster/draw contract | Actual loading image captured identically on fresh/repeated launches. All 28 captured vertices match the LLE decoder; real GPU fixtures cover W/Q, multiple streams, start index, viewport/depth and texture coordinates. No presentation/cadence proof yet |
-| Bump-environment contract | Six cached states and real native dependent sampling/luminance; original-x86 setter and GPU pixel fixtures pass. Blinx has configured its matrix; no title bump rendering claimed |
-| Transform and viewport contract | Ten native matrix slots, viewport queries and projection caches pass fixtures and original-x86 comparisons; real GPU fixture verifies transformed pixels. Actual title view/projection calls and initial draw conversion pass |
-| Resource binding and lifetime | Four texture stages and sixteen native vertex streams; GPU sampling, updates, internal/public references, replacement and cleanup pass fixtures. Blinx now exercises textures and stream 0 binding (stride 28) |
-| Vertex constant contract | Real GPU bindings and batched constant uploads; 12 original-x86 cache/query comparisons pass, including GPU-only fast writes and declaration constants. No title speed claim |
-| State capture | ALL/PIXEL/VERTEX snapshots and retained references match original-x86 fixtures; actual title's ALL capture passes. Application remains unqualified |
-| Render-target contract | Real GPU binding, clears, padded readback, CPU edits and ownership pass fixtures; title has created/queried targets but has not bound or drawn to them yet |
-| Input initialization | Native host input family passes contracts and actual title enumeration; hardware interaction remains unvalidated (no attached host pad in measured runs) |
-| Sound startup | Three actual 65536-byte stereo PCM16 buffers at 44100 Hz, real lock/unlock and effects installation; title playback, streams and routing remain pending |
-| Media worker scheduling | Real references/priority/boost and safe suspend/resume; phase-locked vblank waits and real title callbacks run. Swap/callback completion flags remain pending |
-| DSP reuse | Guarded MIT core integrated; real graph/DMA/tails and XAudio2 playback pass fixtures. Cold compilation and hardware comparison remain open; see [audit](NATIVE-DSP-DONOR-2026-10-07.md) |
-| Menu, movies and gameplay in attract | Loading image rendered into native back buffer; presentation, interactive menu, movies, audible output and gameplay remain pending |
-| Complete repeat loops, interruption/menu return, original cadence | Pending actual end-to-end measurement |
-| JSRF | Deferred until Blinx success; shared services and separate bindings remain the architecture |
+| Native launch, files, writable storage | Real startup, installed-media contract, persistent title files/cache; original optical reference retained |
+| Renderer adoption and presentation | Phobos D3D11/RHI, conversions, shader/state caches and combiner pipeline integrated; real loading/error frames, Swap callbacks and GPU fences exercised |
+| Audio service readiness | 21 identified Blinx entries exercised; real XAudio2/GP output, routing, gains, loops, updates and cleanup; actual title playback still pending |
+| Movie service readiness | Original NTSC Sofdec roots compiled; YUY2/UYVY upload, pitch, coordinates and changing GPU frames tested; actual playback/sync/interruption pending |
+| Disc-error diagnosis | Actual caller returns E_OUTOFMEMORY from local 512-reservation/256-texture caps; growing ownership fixes progression to 420 textures, with real memory budget retained |
+| Next graphics family | Visibility queries: use real GPU samples/completion behind the Xbox ABI; no fabricated visibility |
+| Input | Physical XInput and startup-selected keyboard available; actual menu/movie interruption still unvalidated |
+| Attract startup/loading/render/audio/movies/gameplay | Partial startup/rendering only; no complete attract sequence yet |
+| Repeat loops, interruption/menu return, original cadence | Pending actual title integration measurements |
+| JSRF | Deferred until Blinx completes; shared services and separate revision bindings |
 
-Fresh and repeated native launches stop at the same Swap/callback boundary
-after 25/22 actual title callbacks, eight draws and 22252480/22252388 function entries;
-29 contract tests plus actual-asset effects and retained DirectSound tests pass.
-The ten generation/extent tests passed at the earlier checkpoint. Original audio remains
-selectable and still stops at the original audio-driver `KfRaiseIrql` boundary.
-These are completed service checkpoints, not a percent
-complete or a date forecast. No throughput/velocity estimate supports an ETA.
+All 30 CTests pass in the isolated run (10.56 s). Capacity regression tests cover
+600 simultaneous reservations and 520 GPU textures with repeat cleanup and real
+contents. The concurrent validation run encountered the existing vblank test's
+intermittent process-wide handle-count assertion. Private title evidence and
+bounded correctness qualifications are listed in the
+[pilot README](../pilots/native-title/README.md#current-checkpoint---audio-movies-and-disc-error-fix-2026-10-07).
+Attribution is preserved in the [inventory](../THIRD_PARTY_ATTRIBUTION.md).
+These are service milestones, not percentage-complete or an ETA. Full AOT and
+dashboard performance continue without blocking title bring-up.
 
 ## Earlier optical launch investigation
 

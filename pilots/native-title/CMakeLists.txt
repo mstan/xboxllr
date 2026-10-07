@@ -45,6 +45,31 @@ endif()
 target_include_directories(xlle_native_title PRIVATE "${PILOT_GENERATED}")
 target_compile_definitions(xlle_native_title PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(xlle_native_title PRIVATE bcrypt)
+# Keep credits current even when only a notice changes and no relink occurs.
+add_custom_target(pilot_notices ALL
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:xlle_native_title>")
+add_dependencies(xlle_native_title pilot_notices)
+add_custom_command(TARGET pilot_notices POST_BUILD
+  COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../THIRD_PARTY_ATTRIBUTION.md"
+    "$<TARGET_FILE_DIR:xlle_native_title>/THIRD_PARTY_ATTRIBUTION.md")
+foreach(notice LICENSE LICENSE-SCOPE.md NOTICE)
+  add_custom_command(TARGET pilot_notices POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/../../${notice}"
+      "$<TARGET_FILE_DIR:xlle_native_title>/${notice}")
+endforeach()
+add_custom_command(TARGET pilot_notices POST_BUILD
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:xlle_native_title>/third_party/sp00nznet"
+  COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/../../LICENSES/sp00nznet-MIT.txt"
+    "$<TARGET_FILE_DIR:xlle_native_title>/third_party/sp00nznet/LICENSE")
+if(NOT EXISTS "${PILOT_GENERATED}/third_party/phobos-xboxrecomp/LICENSE")
+  message(FATAL_ERROR "Regenerate private CPU helpers with native_pilot.py to retain their donor notices")
+endif()
+if(EXISTS "${PILOT_GENERATED}/third_party")
+  add_custom_command(TARGET pilot_notices POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory "${PILOT_GENERATED}/third_party"
+      "$<TARGET_FILE_DIR:xlle_native_title>/third_party")
+endif()
 enable_testing()
 add_executable(pilot_contract_test runtime_contract_test.c)
 target_include_directories(pilot_contract_test PRIVATE "${PILOT_GENERATED}")
@@ -60,6 +85,15 @@ if(PILOT_AUDIO_BACKEND STREQUAL "XAUDIO2_DSP")
   if(NOT EXISTS "${PILOT_DSP_SOURCE}/donor.json" OR NOT EXISTS "${PILOT_DSP_LIBRARY}")
     message(FATAL_ERROR "Prepare native_dsp_donor.py and build its locked Rust FFI library")
   endif()
+  if(NOT EXISTS "${PILOT_DSP_SOURCE}/third_party/inventory.json")
+    message(FATAL_ERROR "Run tools/native_dsp_notices.py --source ${PILOT_DSP_SOURCE} to retain dependency notices")
+  endif()
+  add_custom_command(TARGET pilot_notices POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:xlle_native_title>/third_party/dsp56300"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${PILOT_DSP_SOURCE}/LICENSE" "${PILOT_DSP_SOURCE}/donor.json"
+      "$<TARGET_FILE_DIR:xlle_native_title>/third_party/dsp56300"
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory "${PILOT_DSP_SOURCE}/third_party"
+      "$<TARGET_FILE_DIR:xlle_native_title>/third_party/dsp56300/dependencies")
   add_library(pilot_dsp STATIC audio_dsp.c)
   target_include_directories(pilot_dsp PRIVATE "${PILOT_DSP_SOURCE}/crates/emu-ffi/include")
   target_link_libraries(pilot_dsp PUBLIC "${PILOT_DSP_LIBRARY}" ntdll userenv ws2_32 bcrypt)
@@ -105,6 +139,10 @@ if(EXISTS "${PILOT_GENERATED}/pilot_audio_bindings.h")
     target_compile_definitions(pilot_contract_test PRIVATE PILOT_AUDIO_DSP)
   endif()
   add_test(NAME pilot_audio_contract COMMAND pilot_contract_test audio)
+  if(PILOT_AUDIO_BACKEND STREQUAL "XAUDIO2_DSP")
+    add_test(NAME pilot_audio_mix_contract COMMAND pilot_contract_test audio-mix)
+    set_tests_properties(pilot_audio_mix_contract PROPERTIES TIMEOUT 20)
+  endif()
   set_tests_properties(pilot_audio_contract PROPERTIES TIMEOUT 20)
   add_test(NAME pilot_audio_failures COMMAND "${CMAKE_COMMAND}"
     "-DPROGRAM=$<TARGET_FILE:pilot_contract_test>" "-DDSP=$<STREQUAL:${PILOT_AUDIO_BACKEND},XAUDIO2_DSP>" -P "${CMAKE_CURRENT_SOURCE_DIR}/audio_failures.cmake")
@@ -134,7 +172,9 @@ if(EXISTS "${PILOT_GENERATED}/pilot_input_bindings.h")
     set_tests_properties(pilot_input_stops_${kind} PROPERTIES TIMEOUT 10)
   endforeach()
 endif()
-set(PILOT_D3D_SOURCE "" CACHE PATH "Prepared pinned MIT D3D11 donor directory")
+set(PILOT_D3D_SOURCE "" CACHE PATH "Prepared pinned D3D11 donor directory")
+set(PILOT_D3D_DONOR "SPOON" CACHE STRING "Whole renderer donor: SPOON or PHOBOS")
+set_property(CACHE PILOT_D3D_DONOR PROPERTY STRINGS SPOON PHOBOS)
 if(PILOT_D3D_SOURCE)
   if(NOT EXISTS "${PILOT_D3D_SOURCE}/donor.json")
     message(FATAL_ERROR "Run tools/native_d3d_donor.py to prepare the backend")
@@ -145,15 +185,68 @@ if(PILOT_D3D_SOURCE)
     "${PILOT_D3D_SOURCE}/nv2a-reference/nv2a_vsh_emulator.c"
     "${PILOT_D3D_SOURCE}/nv2a-reference/nv2a_vsh_emulator_execution_state.c")
   target_include_directories(pilot_vsh_reference PUBLIC "${PILOT_D3D_SOURCE}/nv2a-reference")
-  add_library(pilot_d3d_backend STATIC graphics_backend.c graphics_states.c graphics_shader_backend.c
+  if(PILOT_D3D_DONOR STREQUAL "PHOBOS")
+    file(READ "${PILOT_D3D_SOURCE}/donor.json" donor_manifest)
+    string(JSON donor_backend GET "${donor_manifest}" backend)
+    if(NOT donor_backend STREQUAL "PHOBOS")
+      message(FATAL_ERROR "PHOBOS requires native_phobos_d3d.py preparation")
+    endif()
+    set(phobos_sources)
+    foreach(name d3d8_device d3d8_resources d3d8_shaders d3d8_states d3d8_combiners
+        d3d8_vsh d3d8_overlay d3d8_movie d3d8_screencopy d3d8_display d3d8_compile
+        rhi rhi_shader_cache rhi_d3d11)
+      list(APPEND phobos_sources "${PILOT_D3D_SOURCE}/src/d3d/${name}.c")
+    endforeach()
+    add_library(pilot_d3d_backend STATIC graphics_backend.c graphics_states.c graphics_shader_backend.c
+      ${phobos_sources} "${PILOT_D3D_SOURCE}/src/config/recomp_config.c"
+      "${PILOT_D3D_SOURCE}/src/kernel/nv2a_vsh.c")
+    target_include_directories(pilot_d3d_backend PUBLIC "${PILOT_D3D_SOURCE}/src/d3d"
+      "${PILOT_D3D_SOURCE}/src" "${PILOT_D3D_SOURCE}/src/config")
+    target_compile_definitions(pilot_d3d_backend PRIVATE PILOT_D3D_PHOBOS)
+    target_compile_definitions(pilot_contract_test PRIVATE PILOT_D3D_PHOBOS)
+    target_link_libraries(pilot_d3d_backend PUBLIC gdi32)
+  elseif(PILOT_D3D_DONOR STREQUAL "SPOON")
+    add_library(pilot_d3d_backend STATIC graphics_backend.c graphics_states.c graphics_shader_backend.c
     "${PILOT_D3D_SOURCE}/d3d8_device.c" "${PILOT_D3D_SOURCE}/d3d8_gamma.c"
     "${PILOT_D3D_SOURCE}/d3d8_resources.c" "${PILOT_D3D_SOURCE}/d3d8_shaders.c"
     "${PILOT_D3D_SOURCE}/d3d8_states.c" "${PILOT_D3D_SOURCE}/d3d8_combiners.c"
-    "${PILOT_D3D_SOURCE}/d3d8_vsh.c")
+      "${PILOT_D3D_SOURCE}/d3d8_vsh.c")
+  else()
+    message(FATAL_ERROR "PILOT_D3D_DONOR must be SPOON or PHOBOS")
+  endif()
   target_include_directories(pilot_d3d_backend PUBLIC "${PILOT_D3D_SOURCE}")
+  set(renderer_required_notices LICENSE NOTICE donor.json)
+  if(PILOT_D3D_DONOR STREQUAL "PHOBOS")
+    list(APPEND renderer_required_notices LICENSE.upstream-MIT MODIFICATIONS.md LICENSES/LGPL-2.1.txt)
+  endif()
+  foreach(notice IN LISTS renderer_required_notices)
+    if(NOT EXISTS "${PILOT_D3D_SOURCE}/${notice}")
+      message(FATAL_ERROR "Prepared renderer is missing its ${notice}; rerun the donor preparation tool")
+    endif()
+  endforeach()
+  foreach(notice LICENSE LICENSE.upstream-MIT NOTICE MODIFICATIONS.md donor.json)
+    if(EXISTS "${PILOT_D3D_SOURCE}/${notice}")
+      add_custom_command(TARGET pilot_notices POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:xlle_native_title>/third_party/renderer"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${PILOT_D3D_SOURCE}/${notice}"
+          "$<TARGET_FILE_DIR:xlle_native_title>/third_party/renderer/${notice}")
+    endif()
+  endforeach()
+  if(EXISTS "${PILOT_D3D_SOURCE}/LICENSES")
+    add_custom_command(TARGET pilot_notices POST_BUILD
+      COMMAND "${CMAKE_COMMAND}" -E copy_directory "${PILOT_D3D_SOURCE}/LICENSES"
+        "$<TARGET_FILE_DIR:xlle_native_title>/third_party/renderer/LICENSES")
+  endif()
+  add_custom_command(TARGET pilot_notices POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:xlle_native_title>/third_party/nv2a-reference"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${PILOT_D3D_SOURCE}/nv2a-reference/LICENSE"
+      "$<TARGET_FILE_DIR:xlle_native_title>/third_party/nv2a-reference/LICENSE")
   target_compile_definitions(pilot_d3d_backend PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
   target_link_libraries(pilot_d3d_backend PUBLIC d3d11 dxgi dxguid d3dcompiler pilot_vsh_reference)
   add_executable(pilot_graphics_test graphics_backend_test.c)
+  if(PILOT_D3D_DONOR STREQUAL "PHOBOS")
+    target_compile_definitions(pilot_graphics_test PRIVATE PILOT_D3D_PHOBOS)
+  endif()
   target_link_libraries(pilot_graphics_test PRIVATE pilot_d3d_backend)
   add_executable(pilot_shader_test graphics_shader_test.c)
   target_link_libraries(pilot_shader_test PRIVATE pilot_d3d_backend)

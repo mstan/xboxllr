@@ -61,7 +61,15 @@ static void test_storage(void)
     set[2]=info+4; MEM32(info+60)=0xfeed1234;
     call_kernel(211,set,5); CHECK(!g_eax && MEM64(info+44)==17 && MEM32(info+60)==0xfeed1234);
     call_kernel(187,&file,1); CHECK(!g_eax);
-    CHECK(DeleteFileA(path));
+    /* Blinx deletes its utility recording with DELETE-only + BACKUP_INTENT,
+     * without FILE_SYNCHRONOUS_IO_NONALERT. Exercise a real host deletion. */
+    open[1]=DELETE; open[5]=0x4040;
+    call_kernel(202,open,6); CHECK(!g_eax); file=MEM32(out);
+    write[0]=file; call_kernel(219,write,8); CHECK(g_eax==0xc0000022u);
+    set[0]=file; set[2]=info; set[3]=1; set[4]=13; MEM8(info)=1;
+    call_kernel(226,set,5); CHECK(!g_eax);
+    call_kernel(187,&file,1); CHECK(!g_eax);
+    CHECK(GetFileAttributesA(path)==INVALID_FILE_ATTRIBUTES && GetLastError()==ERROR_FILE_NOT_FOUND);
 
     test_string(0x1c000,0x1c100,"\\??\\T:");
     test_string(0x1c010,0x1c200,"\\Device\\Harddisk0\\Partition1");
@@ -81,7 +89,7 @@ static void test_storage(void)
     CHECK(g_eax==0xc0000023u && MEM32(0x1c040)==28 && MEM32(0x1c300)==0xcccccccc && MEM16(0x1c030)==0xbeef);
     MEM16(0x1c032)=28; call_kernel(215,query,3);
     CHECK(!g_eax && MEM16(0x1c030)==28 && !memcmp(memory+0x1c300,memory+0x1c200,28));
-    test_media_name("T:\\",0); open[5]=0x21;
+    test_media_name("T:\\",0); open[1]=FILE_LIST_DIRECTORY|SYNCHRONIZE; open[5]=0x21;
     call_kernel(202,open,6); CHECK(!g_eax); uint32_t through=MEM32(out);
     call_kernel(187,&through,1); CHECK(!g_eax);
     call_kernel(69,link,1); CHECK(!g_eax);

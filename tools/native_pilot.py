@@ -20,6 +20,23 @@ DONOR_PIN = "63f18f0334fbd8c00313c4bb565accf00627a4fd"
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def validate_seeds(seeds, image, discovery=None):
+    roots=set()
+    for seed in seeds:
+        contract=seed.with_suffix('.contract.json')
+        if contract.exists():
+            proof=json.loads(contract.read_text())
+            if proof['xbe_sha256']!=image['sha256'] or proof['seed_sha256']!=hashlib.sha256(seed.read_bytes()).hexdigest():
+                raise ValueError('seed evidence belongs to another image or changed seed file')
+        for entry in json.loads(seed.read_text()):
+            value=entry['start'] if isinstance(entry,dict) else entry
+            roots.add(int(value,0) if isinstance(value,str) else int(value))
+    if discovery is not None:
+        starts={int(f['start'],16) for f in json.loads(discovery.read_text())}
+        if roots-starts:raise ValueError('discovery omits requested seed roots: '+str(sorted(roots-starts)))
+    return sorted(roots)
+
+
 def harden_generated(directory):
     """Replace donor missing-body success with nonreturning unsupported faults."""
     counts = dict(missing_targets=0, failed_translations=0)
@@ -65,13 +82,24 @@ def prepare(args):
     if pin != DONOR_PIN:
         raise ValueError(f"expected donor {DONOR_PIN}, got {pin}")
     subprocess.run([git, "-C", str(donor), "diff", "--exit-code", "HEAD", "--",
-                    "tools", "templates/runtime"], check=True, stdout=subprocess.DEVNULL)
+                    "tools", "templates/runtime", "LICENSE", "LICENSE.upstream-MIT",
+                    "NOTICE", "LICENSES"], check=True, stdout=subprocess.DEVNULL)
     image = parse_xbe(args.xbe.read_bytes())
     out = args.output.resolve()
     # Title-derived generated C contains proprietary code; keep it out of Git.
     if "build" not in out.parts:
         raise ValueError("pilot output must be under a private build/ directory")
+    seed_roots=validate_seeds(args.seed_functions,image,out/'disasm/functions.json' if args.reuse_discovery else None)
     out.mkdir(parents=True, exist_ok=True)
+    notices=out/'gen'/'third_party'/'phobos-xboxrecomp'
+    notices.mkdir(parents=True,exist_ok=True)
+    notice_paths=[donor/name for name in ('LICENSE','LICENSE.upstream-MIT','NOTICE')]
+    notice_paths += [p for p in (donor/'LICENSES').rglob('*') if p.is_file()]
+    for path in notice_paths:
+        target=notices/path.relative_to(donor);target.parent.mkdir(parents=True,exist_ok=True)
+        target.write_bytes(path.read_bytes())
+    (notices/'PROVENANCE.txt').write_text('https://github.com/phobos665/xboxrecomp\nRevision '+pin+
+        '\nGenerated CPU code/helper reference pilot. Changes: explicit unsupported\nfaults, TLS diagnostics, guest-thread checkpoints and reviewed ABI bindings.\n')
     identity = out / "identity.aot-private.json"
     if identity.exists() and json.loads(identity.read_text())["sha256"] != image["sha256"]:
         raise ValueError("output belongs to a different XBE; use a separate directory")
@@ -98,7 +126,10 @@ def prepare(args):
         cmd = ["-m", "tools.disasm", xbe, "-o", str(out / "disasm")]
         if args.data_sections:
             cmd += ["--data-sections", args.data_sections]
+        for seed in args.seed_functions:
+            cmd += ['--seed-functions',str(seed.resolve())]
         run("discover", cmd)
+        validate_seeds(args.seed_functions,image,out/'disasm/functions.json')
     extents=out/'function-extents.aot-private.json'
     extent_records=[]
     if extents.exists():
@@ -126,7 +157,7 @@ def prepare(args):
     (out / "gen" / "pilot_image.h").write_text("\n".join(header) + "\n")
     manifest = dict(donor=pin, sha256=image["sha256"], entry=image["entry"],
                     function_extents=extent_records,
-                    data_sections=args.data_sections, **counts,
+                    data_sections=args.data_sections, seeds=[str(p.resolve()) for p in args.seed_functions], seed_roots=seed_roots, **counts,
                     files={p.name: hashlib.sha256(p.read_bytes()).hexdigest()
                            for p in sorted((out / "gen").iterdir()) if p.is_file()})
     (out / "generation.aot-private.json").write_text(json.dumps(manifest, indent=2) + "\n")
@@ -161,6 +192,7 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--data-sections", default="")
     parser.add_argument("--reuse-discovery", action="store_true")
+    parser.add_argument("--seed-functions", type=Path, action="append", default=[], help="Measured/recovered indirect roots for this title revision")
     parser.add_argument("--media-symbols", type=Path, help="Bind a reviewed media helper using this XDK symbol inventory")
     parser.add_argument("--cache-symbols", type=Path, help="Bind reviewed utility-drive service using this XDK symbol inventory")
     parser.add_argument("--d3d-symbols", type=Path, help="Bind reviewed graphics family using this XDK symbol inventory")

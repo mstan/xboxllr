@@ -1,6 +1,13 @@
 /* Independent native transport: XAudio2 mixes/resamples voices into 32 Xbox
  * bins; a whole GP graph produces six speaker channels. Backend selection is
  * a build option. There is no reference/native switching or duplicate run. */
+/* Behavioral references for queue ownership/loop spans: Phobos xboxrecomp
+ * bcccf8c, src/hle/audio_output_xaudio2.cpp and dsound_buffer_model.c, credited
+ * upstream to NoRain211/doaxbv-re. No GPL source body is copied into this
+ * independently implemented DSP transport. See THIRD_PARTY_ATTRIBUTION.md. */
+/* Ordered send-to-source-channel routing was checked against xemu MCPX VP
+ * 482088490c2d5983ed5e1eafbd09906157c1eca0 and original XDK setter behavior.
+ * Behavioral reference only; implementation and real output matrix are local. */
 #include <windows.h>
 #include <xaudio2.h>
 #include <xapo.h>
@@ -32,6 +39,9 @@ class Effects final:public IXAPO {
     uint32_t bins[1024]{},speakers[192]{};
 public:
     PilotDsp *graph=nullptr; // Changed only while XAudio2's engine is stopped.
+    float *capture=nullptr;
+    UINT32 capture_capacity=0,capture_frames=0;
+    bool capture_output=false;
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id,void **out) override {
         if(!out)return E_POINTER;*out=nullptr;
         if(id==__uuidof(IUnknown) || id==__uuidof(IXAPO)){*out=static_cast<IXAPO*>(this);AddRef();return S_OK;}
@@ -89,6 +99,13 @@ public:
                 double q=sample*8388608.0;
                 bins[c*32+offset]=(uint32_t)(int32_t)(q>8388607?8388607:q< -8388608?-8388608:q)&0xffffff;
             }
+            if(capture && capture_frames<capture_capacity) {
+                unsigned channels=capture_output?6:32;
+                float *destination=capture+(size_t)capture_frames++*channels;
+                if(capture_output)memcpy(destination,dst+frame*6,channels*sizeof(float));
+                else if(in->BufferFlags==XAPO_BUFFER_SILENT)memset(destination,0,channels*sizeof(float));
+                else memcpy(destination,src+frame*32,channels*sizeof(float));
+            }
             if(++offset==32) {
                 if(graph && enabled)pilot_dsp_process(graph,bins,speakers);
                 else memcpy(speakers,bins,sizeof(speakers));
@@ -120,6 +137,7 @@ struct Buffer final:public IXAudio2VoiceCallback {
     IXAudio2SourceVoice *voice=nullptr;
     BYTE *data=nullptr;
     UINT32 bytes=0,align=0,channels=0,rate=0,frequency=0,origin=0,next=0;
+    UINT32 loop_start=0,loop_end=0;
     UINT64 baseline=0;
     bool playing=false,looping=false,submitted_end=false;
     std::atomic<HRESULT> error{S_OK};
@@ -138,8 +156,10 @@ static UINT32 position(Buffer *b,XAUDIO2_VOICE_STATE *state=nullptr)
     XAUDIO2_VOICE_STATE s;b->voice->GetState(&s);
     UINT64 cursor=(UINT64)b->origin+(s.SamplesPlayed-b->baseline)*b->align;
     if(state)*state=s;
-    if(!b->looping && cursor>=b->bytes)return 0; // DirectSound wraps end cursor.
-    return (UINT32)(cursor%b->bytes);
+    if(!b->looping)return cursor>=b->bytes?0:(UINT32)cursor;
+    UINT32 end=b->origin<b->loop_end?b->loop_end:b->bytes;
+    if(cursor<end)return (UINT32)cursor;
+    return b->loop_start+(UINT32)((cursor-end)%(b->loop_end-b->loop_start));
 }
 static HRESULT fill(Buffer *b)
 {
@@ -157,8 +177,10 @@ static HRESULT fill(Buffer *b)
         UINT32 n=frames*b->align;if(!b->looping && n>b->bytes-b->next)n=b->bytes-b->next;
         UINT32 copied=0,cursor=b->next;
         while(copied<n) {
-            UINT32 part=n-copied;if(part>b->bytes-cursor)part=b->bytes-cursor;
-            memcpy(chunk.data+copied,b->data+cursor,part);copied+=part;cursor=(cursor+part)%b->bytes;
+            UINT32 end=b->looping && cursor<b->loop_end?b->loop_end:b->bytes;
+            UINT32 part=n-copied;if(part>end-cursor)part=end-cursor;
+            memcpy(chunk.data+copied,b->data+cursor,part);copied+=part;cursor+=part;
+            if(cursor==end)cursor=b->looping?b->loop_start:0;
         }
         XAUDIO2_BUFFER submit{};submit.AudioBytes=n;submit.pAudioData=chunk.data;submit.pContext=&chunk;
         HRESULT hr=b->voice->SubmitSourceBuffer(&submit);
@@ -222,13 +244,39 @@ int32_t pilot_audio_effects_install(PilotDsp *graph)
     HRESULT hr=engine->StartEngine();if(FAILED(hr))effects->graph=old;
     return hr;
 }
+int32_t pilot_audio_capture_begin(float *samples,uint32_t frames,int after_effects)
+{
+    if(!engine || !effects || !samples || !frames || effects->capture)return E_INVALIDARG;
+    Guard guard;engine->StopEngine();effects->capture=samples;effects->capture_capacity=frames;
+    effects->capture_frames=0;effects->capture_output=!!after_effects;
+    HRESULT hr=engine->StartEngine();if(FAILED(hr))effects->capture=nullptr;return hr;
+}
+uint32_t pilot_audio_capture_end(void)
+{
+    if(!engine || !effects)return 0;
+    Guard guard;engine->StopEngine();UINT32 frames=effects->capture_frames;effects->capture=nullptr;
+    HRESULT hr=engine->StartEngine();if(FAILED(hr))fail("audio capture restart",hr);return frames;
+}
+int32_t pilot_audio_buffer_mixbins(void *opaque,unsigned count,const uint32_t *bins,const int32_t *volumes)
+{
+    auto *b=static_cast<Buffer*>(opaque);
+    if(!b || count>8 || (count && (!bins || !volumes)))return E_INVALIDARG;
+    float matrix[64]{};
+    for(unsigned slot=0;slot<count;++slot) {
+        if(bins[slot]>=32 || volumes[slot]>0 || volumes[slot]<-10000)return E_INVALIDARG;
+        // MCPX routes successive mix-bin slots from successive source channels.
+        // Repeated destination bins accumulate, rather than overwriting a send.
+        matrix[bins[slot]*b->channels+slot%b->channels]+=volumes[slot]==-10000?0.0f:powf(10.0f,volumes[slot]/2000.0f);
+    }
+    Guard guard;return b->voice->SetOutputMatrix(mixer,b->channels,32,matrix);
+}
 int32_t pilot_audio_buffer_create(uint32_t bytes,unsigned channels,unsigned rate,unsigned bits,void **out)
 {
     if(!engine || !out || !bytes || (channels!=1 && channels!=2) || (bits!=8 && bits!=16) ||
        rate<100 || rate>200000 || bytes%(channels*(bits/8)))return E_INVALIDARG;
     Buffer *b=new(std::nothrow) Buffer();if(!b)return E_OUTOFMEMORY;
     b->data=new(std::nothrow) BYTE[bytes];if(!b->data){delete b;return E_OUTOFMEMORY;}
-    b->bytes=bytes;b->channels=channels;b->align=channels*bits/8;b->rate=b->frequency=rate;
+    b->bytes=b->loop_end=bytes;b->channels=channels;b->align=channels*bits/8;b->rate=b->frequency=rate;
     memset(b->data,bits==8?128:0,bytes);
     // Declared source rate 48 kHz plus the native ratio covers Xbox 100..200000
     // Hz; SamplesPlayed still counts the original PCM frames, not output frames.
@@ -301,6 +349,18 @@ int32_t pilot_audio_buffer_position(void *opaque,uint32_t *play,uint32_t *write)
 {auto *b=static_cast<Buffer*>(opaque);Guard guard;refresh(b);if(play)*play=position(b);if(write)*write=b->next;return b->error;}
 int32_t pilot_audio_buffer_seek(void *opaque,uint32_t at)
 {auto *b=static_cast<Buffer*>(opaque);if(at>=b->bytes || at%b->align)return E_INVALIDARG;Guard guard;return seek(b,at,b->playing);}
+int32_t pilot_audio_buffer_loop_region(void *opaque,uint32_t start,uint32_t bytes)
+{
+    auto *b=static_cast<Buffer*>(opaque);
+    if(!b || start>=b->bytes || start%b->align)return E_INVALIDARG;
+    if(!bytes)bytes=b->bytes-start;
+    if(bytes>b->bytes-start || bytes%b->align)return E_INVALIDARG;
+    Guard guard;UINT32 at=position(b);
+    b->loop_start=start;b->loop_end=start+bytes;
+    /* Rebuild queued owned PCM at the actual device cursor; no elapsed-time
+     * completion. This extends the donor's loop-start/span model to loop end. */
+    return seek(b,at,b->playing);
+}
 int32_t pilot_audio_buffer_volume(void *opaque,int32_t volume)
 {auto *b=static_cast<Buffer*>(opaque);if(volume>0 || volume< -10000)return E_INVALIDARG;Guard guard;return b->voice->SetVolume(volume==-10000?0.0f:powf(10.0f,volume/2000.0f));}
 int32_t pilot_audio_buffer_frequency(void *opaque,uint32_t frequency)

@@ -95,9 +95,64 @@ static void test_graphics_targets(void)
     fprintf(stderr,"PASS: actual linear render-target GPU writes, original header/pitch/size, readback/CPU edits, aliases and lifetime\n");
     test_graphics_target_binding();
 }
+#ifdef PILOT_D3D_PHOBOS
+static void test_graphics_movie_surfaces(void)
+{
+    uint64_t resident=vm_committed(0,0x100000000ull);
+    for(unsigned format=0x24;format<=0x25;++format) {
+        uint32_t create[]={34,18,1,1,0,format,3};
+        uint32_t texture=call_graphics(PILOT_D3D_D3DDevice_CreateTexture2,create);
+        CHECK(texture && MEM32(texture+12)==(0x10029|(format<<8)) && MEM32(texture+16)==0x01011021);
+        struct GraphicsTextureObject *t=&graphics_textures[graphics_texture_slot(texture)];
+        CHECK(t->bytes==128*18);
+        uint32_t view_args[]={texture,0},view=call_graphics(PILOT_D3D_D3DTexture_GetSurfaceLevel2,view_args);
+        uint32_t desc[]={view,0x19504},expected[]={format,1,0,128*18,0x11,34,18};
+        call_graphics(PILOT_D3D_D3DSurface_GetDesc,desc);CHECK(!memcmp(memory+desc[1],expected,sizeof(expected)));
+        uint32_t lock[]={view,0x19540,0,0};call_graphics(PILOT_D3D_D3DSurface_LockRect,lock);
+        CHECK(MEM32(0x19540)==128 && MEM32(0x19544)==t->data);
+        for(unsigned y=0;y<18;++y)for(unsigned x=0;x<34;x+=2)
+            MEM32(t->data+y*128+x*2)=format==0x24?0x80518051:0x51805180; // neutral Y=81
+        uint32_t rectangle[]={2,3,32,16};memcpy(memory+0x19560,rectangle,sizeof(rectangle));lock[2]=0x19560;
+        call_graphics(PILOT_D3D_D3DSurface_LockRect,lock);
+        CHECK(MEM32(0x19540)==128 && MEM32(0x19544)==t->data+3*128+4);
+        CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&view)==0);
+        uint32_t pixels[34*18];CHECK(pilot_gfx_texture_readback(t->native,0,pixels,sizeof(pixels))==0);
+        CHECK(pixels[0]==0xff4c4c4c && pixels[34*18-1]==0xff4c4c4c);
+        CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&texture)==0);
+        CHECK(vm_committed(0,0x100000000ull)==resident);
+    }
+    fprintf(stderr,"PASS: movie texture guest header, pitch/description, whole/subrect locks, native conversion and ownership\n");
+}
+#endif
+/* Blinx exhausted adapter tables, not guest RAM. Exercise both ownership
+ * tables with actual uploads, readbacks and complete resource lifetimes. */
+static void test_graphics_texture_capacity(void)
+{
+    uint64_t resident=vm_committed(0,0x100000000ull);
+    uint32_t headers[520],create[]={4,4,1,1,0,6,3};
+    for(unsigned pass=0;pass<2;++pass) {
+        for(unsigned i=0;i<520;++i) {
+            headers[i]=call_graphics(PILOT_D3D_D3DDevice_CreateTexture2,create);CHECK(headers[i]);
+            for(unsigned p=0;p<16;++p)MEM32(MEM32(headers[i]+4)+p*4)=0xff000000u+i;
+        }
+        for(unsigned i=0;i<520;++i) {
+            unsigned slot=graphics_texture_slot(headers[i]);uint32_t pixels[16];
+            graphics_texture_upload(&graphics_textures[slot],0);
+            CHECK(!pilot_gfx_texture_readback(graphics_textures[slot].native,0,pixels,sizeof(pixels)));
+            for(unsigned p=0;p<16;++p)CHECK(pixels[p]==0xff000000u+i);
+            CHECK(!call_graphics(PILOT_D3D_D3DResource_Release,headers+i));
+        }
+        CHECK(vm_committed(0,0x100000000ull)==resident);
+    }
+    fprintf(stderr,"PASS: 520 concurrent textures retain pixels across table growth, two full release/reuse cycles\n");
+}
 static void test_graphics_textures(void)
 {
+    test_graphics_texture_capacity();
     test_graphics_targets();
+#ifdef PILOT_D3D_PHOBOS
+    test_graphics_movie_surfaces();
+#endif
     uint64_t resident=vm_committed(0,0x100000000ull);
     uint32_t create[]={4096,4096,1,1,0,6,3};
     CHECK(call_graphics(PILOT_D3D_D3DDevice_CreateTexture2,create)==0); /* guest RAM admission fails */

@@ -1,7 +1,7 @@
 """Adapt the pinned MIT fixed-function VS to Xbox pretransformed vertices."""
 
 
-def prepare_fvf(code: str) -> str:
+def prepare_fvf(code: str, *, phobos: bool = False) -> str:
     def replace(old, new):
         nonlocal code
         if code.count(old) != 1:
@@ -9,7 +9,11 @@ def prepare_fvf(code: str) -> str:
         code=code.replace(old,new)
 
     # The original Xbox table and public FVF encoding both use 2,3,4,1.
-    replace('return field == 0 ? 2 : field;', 'return ((field + 1) & 3) + 1;')
+    if phobos:
+        if 'static const UINT floats[4] = { 2, 3, 4, 1 };' not in code:
+            raise ValueError('unreviewed Phobos FVF coordinate dimensions')
+    else:
+        replace('return field == 0 ? 2 : field;', 'return ((field + 1) & 3) + 1;')
     replace('    "    uint4    TexCoordIndex;\\n"',
             '    "    float4 NativePositionScale;\\n"\n'
             '    "    float4 NativePositionOffset;\\n"\n'

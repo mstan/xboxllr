@@ -1,4 +1,4 @@
-#include "d3d8_internal.h"
+#include "graphics_donor.h"
 #include "graphics_backend.h"
 #include "pilot_d3d_checks.h"
 #include <d3dcompiler.h>

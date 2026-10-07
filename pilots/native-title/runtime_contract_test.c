@@ -71,6 +71,7 @@ static int test_write_faults(uint32_t va)
 #include "memory_statistics_contract_test.inc"
 #ifdef PILOT_AUDIO_NATIVE
 #include "audio_contract_test.inc"
+#include "audio_mix_contract_test.inc"
 #endif
 #ifdef PILOT_INPUT_NATIVE
 #include "input_contract_test.inc"
@@ -145,6 +146,24 @@ static void test_memory(void)
     MEM32(sp)=0; call_kernel(199,free_args,3); CHECK(g_eax==0);
     CHECK(vm_committed(0,0x100000000ull)==before);
     fprintf(stderr,"PASS: virtual reservation/commit/protection/decommit/release/query ABI, NOZERO commitment/recommit, real access protection, reuse zero-fill, budget/failure preservation\n");
+    /* Exercise the actual failure shape: >512 independent small resources,
+     * all within the console budget, then verify contents/query and reuse. */
+    uint32_t small[600];
+    for(unsigned pass=0;pass<2;++pass) {
+        for(unsigned i=0;i<600;++i) {
+            uint32_t span=4096;small[i]=0;
+            CHECK(!vm_allocate(&small[i],0,&span,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
+            CHECK(MEM32(small[i])==0);MEM32(small[i])=0xa5500000u+i;
+        }
+        for(unsigned i=0;i<600;++i) {
+            CHECK(MEM32(small[i])==0xa5500000u+i);
+            query[0]=small[i];call_kernel(217,query,2);
+            CHECK(g_eax==0 && MEM32(info+4)==small[i] && MEM32(info+16)==MEM_COMMIT);
+        }
+        for(unsigned i=0;i<600;++i) {uint32_t span=0;CHECK(!vm_free(&small[i],&span,MEM_RELEASE));}
+        CHECK(vm_committed(0,0x100000000ull)==before);
+    }
+    fprintf(stderr,"PASS: 600 simultaneous small reservations, preserved contents/query, two complete cleanup/reuse cycles within the 64 MiB budget\n");
     test_physical_memory();
 }
 
@@ -298,6 +317,9 @@ static void test_timers(void)
 int main(int argc,char **argv)
 {
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
+    EXCEPTION_RECORD diagnostic={0};EXCEPTION_POINTERS pointers={&diagnostic,NULL};
+    diagnostic.ExceptionCode=0x406d1388u;
+    CHECK(fault_handler(&pointers)==EXCEPTION_CONTINUE_SEARCH);
     memory=VirtualAlloc(NULL,(SIZE_T)0x100000000ull,MEM_RESERVE,PAGE_NOACCESS);
     CHECK(memory!=NULL);
     g_xbox_mem_offset=(ptrdiff_t)memory;
@@ -306,6 +328,7 @@ int main(int argc,char **argv)
     image_size=0x200; image_bytes=calloc(1,image_size); CHECK(image_bytes!=NULL);
 #ifdef PILOT_AUDIO_DSP
     if(argc==3 && !strcmp(argv[1],"audio-effects")){test_audio_effects(argv[2]);return 0;}
+    if(argc==2 && !strcmp(argv[1],"audio-mix")){test_audio_mix();return 0;}
 #endif
     if (argc==2) {
 #ifdef PILOT_AUDIO_NATIVE

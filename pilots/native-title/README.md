@@ -6,7 +6,69 @@ It is outside the normal xboxlle build. **The generated executable is a private
 GPL-dependent reference artifact, not the intended non-GPL shipping product.**
 See [license scope](../../LICENSE-SCOPE.md). There is no install/package target.
 
-## Observed result
+## Current checkpoint - audio, movies and disc-error fix (2026-10-07)
+
+The private PHOBOS/D3D11 build presents real Blinx frames and now passes the
+previous disc-error screen, loading 420 textures before the explicit
+`D3DDevice_BeginVisibilityTest` guard. This is the next graphics service family;
+it must return actual GPU visibility results. Fresh and repeated launches both reach this boundary (13.87/7.55 s),
+with zero error-dialog entries and no allocation failures. The title has not yet reached
+buffer Play, movie playback, an interactive menu or an attract loop. JSRF remains
+serially deferred. Earlier checkpoints below describe historical stops.
+
+**Audio is ready for title integration within the identified Blinx interface.**
+All 21 bound public/object entries are exercised, including real playback,
+ring-buffer updates, cursor/status/looping, pitch/frequency/volume/headroom,
+reference lifetime, effects replacement and now ordered mix-bin routing and
+per-bin volume updates. XAudio2 feeds the real MIT DSP56300 graph; captures
+measure actual 32-bin mixer input and six-channel graph output. Four graph
+replacements with Blinx's real `dsp.bin` produce nonzero output and release their
+resources. Six complete original-x86 setter cases verify routing/volume/ABI;
+invalid requests preserve prior settings. This is service evidence, not proof
+that Blinx's audio plays correctly end to end. No native DirectSoundStream
+interface is identified in this revision; broader stream/codec support is not
+claimed. The legacy DirectSound backend explicitly rejects custom routing.
+
+**Movies are ready for integration, with the original compiled Sofdec decoder.**
+The two NTSC PSGSFD section entries are derived from this XBE and included in the
+selected generation. Seed/image hashes and reused discovery coverage are checked.
+YUY2/UYVY textures use the borrowed Phobos converter, correct guest pitch and
+linear texel coordinates. GPU fixtures exercise both formats, padded rows,
+changing frames and the empty texture-stage case documented by Phobos. Original
+XDK allocation-prefix probes corroborate six size/header layouts; these are not
+full device executions. The 31 installed SFD files are inventoried; three
+representative files decode completely with external FFmpeg (with timestamp
+warnings). FFmpeg is a validation reference, not the production movie path.
+Actual Sofdec output, audio/video synchronization, interruption and looping remain
+unvalidated until startup reaches them.
+
+**The disc message was an allocation failure.** Original NTSC code called its
+error UI after texture creation returned E_OUTOFMEMORY. The VM ledger exhausted
+512 records with 53,927,936 resident bytes and 262,144 cache bytes, leaving about
+12.3 MiB of the 64 MiB budget. After removing that artificial limit, the native
+texture table exhausted 256 slots. Both ownership tables now grow independently
+of guest RAM; actual commitment still obeys the 64 MiB budget. No game address,
+file result or error-dialog condition is patched. Tests exercise 600 simultaneous
+small reservations and 520 actual GPU textures, preserved contents/readback and
+two complete release/reuse cycles. Phobos's PAL memory/asset notes guided the
+investigation; the specific table limits were local adapter defects.
+
+Validation: all 30 CTests pass (10.56 s) with the title stopped. A concurrent run
+exposed an intermittent process-wide handle-count assertion in the existing
+vblank test; the isolated full run passes. This does not establish game cadence.
+Private evidence remains under `build/blinx/`: `audio-readiness.aot-private.json`,
+`audio-routing-oracle.aot-private.json`, `movie-texture-oracle.aot-private.json`,
+`movie-assets.aot-private.json`, `movie-reference-decode.aot-private.json` and
+`capacity-validation.aot-private.json`. Do not commit title assets or generated
+code. Attribution and retained donor notices are in
+[the inventory](../../THIRD_PARTY_ATTRIBUTION.md).
+
+`XLLE_PILOT_TRACE_FUNCTION=0x...` enables up to eight entry/register/stack/recent
+function diagnostics for one selected address. It is disabled by default and
+changes no title behavior. `XLLE_PILOT_VISIBLE=1` shows the native window;
+`XLLE_PILOT_INPUT=keyboard` selects real foreground keyboard input at startup.
+
+## Earlier observed result
 
 The original NTSC Blinx XDK 4831 and JSRF XDK 4134 both execute their own XBE
 entries, create real host-backed title threads, and run early XAPI startup.
