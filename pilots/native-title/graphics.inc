@@ -64,6 +64,7 @@ static void *graphics_pointer(uint32_t address,uint32_t bytes)
 #include "graphics_transform.inc"
 static void graphics_target_prepare(uint32_t header);
 #include "graphics_draw.inc"
+#include "graphics_completion.inc"
 static void graphics_resource_bindings_close(void)
 {
     for(unsigned i=0;i<4;++i)graphics_texture_bind(i,0);
@@ -227,6 +228,7 @@ void pilot_d3d_dispatch(unsigned entry)
         graphics_texture_state(arguments[0],arguments[1],arguments[2],1);break;
     case PILOT_D3D_D3DDevice_DrawVertices:
         graphics_draw_vertices(arguments);break;
+    case PILOT_D3D_D3DResource_IsBusy:g_eax=graphics_resource_busy(arguments[0]);break;
     case PILOT_D3D_D3DDevice_SetTextureStageStateNotInline:
         graphics_texture_state(arguments[0],arguments[1],arguments[2],1);break;
     case PILOT_D3D_D3DDevice_SetShaderConstantMode:

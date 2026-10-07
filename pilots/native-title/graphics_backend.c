@@ -14,10 +14,11 @@ static ID3D11Texture2D *pilot_surfaces[3];
 static unsigned pilot_surface_refs[3];
 static ID3D11DepthStencilView *pilot_default_depth;
 static uint32_t pilot_color_target,pilot_depth_target;
-static struct { IDirect3DTexture8 *object; ID3D11RenderTargetView *rtv; ID3D11DepthStencilView *dsv; uint32_t uploaded,gpu_written; } pilot_textures[256];
-static struct { IDirect3DVertexBuffer8 *object; int uploaded; } pilot_vertices[256];
+static struct { IDirect3DTexture8 *object; ID3D11RenderTargetView *rtv; ID3D11DepthStencilView *dsv; uint32_t uploaded,gpu_written; uint64_t last_use; } pilot_textures[256];
+static struct { IDirect3DVertexBuffer8 *object; int uploaded; uint64_t last_use; } pilot_vertices[256];
 static uint32_t pilot_bound_textures[4],pilot_bound_vertices[16];
 void pilot_d3d_raster_texture_mode(UINT native,const float scale[4][4]);
+#include "graphics_completion_backend.inc"
 
 void pilot_gfx_pixel_fixed(void)
 {
@@ -45,6 +46,7 @@ static LRESULT CALLBACK pilot_window_proc(HWND window,UINT message,WPARAM wparam
 }
 void pilot_gfx_close(void)
 {
+    pilot_completion_close();
     pilot_gfx_shaders_close();
     for (unsigned i=0;i<256;++i)
         if(pilot_vertices[i].object) pilot_d3d_backend_stop("device close with outstanding vertex ownership");
@@ -119,6 +121,7 @@ int32_t pilot_gfx_clear(uint32_t flags,uint32_t color,float depth,uint32_t stenc
         if((flags&1) && pilot_color_target){pilot_textures[pilot_color_target-1].uploaded=1;pilot_textures[pilot_color_target-1].gpu_written=1;}
         if((flags&6) && pilot_depth_target && pilot_depth_target!=UINT32_MAX){pilot_textures[pilot_depth_target-1].uploaded=1;pilot_textures[pilot_depth_target-1].gpu_written=1;}
     }
+    if(SUCCEEDED(hr) && flags)pilot_mark_targets(flags,pilot_mark_work());
     if(rtv)ID3D11RenderTargetView_Release(rtv);if(dsv)ID3D11DepthStencilView_Release(dsv);return hr;
 }
 int32_t pilot_gfx_viewport(const void *viewport)
@@ -149,6 +152,7 @@ int32_t pilot_gfx_present(void)
 {
     if (!pilot_device) return E_FAIL;
     ID3D11DeviceContext_CopyResource(d3d8_GetD3D11Context(),(ID3D11Resource*)pilot_surfaces[1],(ID3D11Resource*)pilot_surfaces[0]);
+    pilot_surface_use[0]=pilot_surface_use[1]=pilot_mark_work();
     return pilot_device->lpVtbl->Swap(pilot_device,0);
 }
 int32_t pilot_gfx_surface_ref(unsigned surface,int acquire)
@@ -205,6 +209,7 @@ void pilot_gfx_vertex_upload(uint32_t handle,const void *data,uint32_t bytes)
     memcpy(destination,data,bytes);
     pilot_d3d_require(vertex->iface.lpVtbl->Unlock(&vertex->iface),__FILE__,__LINE__);
     pilot_vertices[handle-1].uploaded=1;
+    pilot_vertices[handle-1].last_use=pilot_mark_work();
 }
 int32_t pilot_gfx_vertex_readback(uint32_t handle,void *data,uint32_t capacity)
 {
@@ -231,6 +236,21 @@ static D3D8Texture *pilot_texture(uint32_t handle)
     if(!handle || handle>256 || !pilot_textures[handle-1].object)
         pilot_d3d_backend_stop("unowned native texture");
     return (D3D8Texture*)pilot_textures[handle-1].object;
+}
+int pilot_gfx_resource_busy(unsigned kind,uint32_t handle)
+{
+    if(!pilot_device)pilot_d3d_backend_stop("completion query before device creation");
+    uint64_t serial;
+    switch(kind) {
+    case PILOT_GFX_DEVICE:serial=pilot_submitted;break;
+    case PILOT_GFX_SURFACE:
+        if(handle>=3 || !pilot_surfaces[handle])pilot_d3d_backend_stop("unowned surface completion query");
+        serial=pilot_surface_use[handle];break;
+    case PILOT_GFX_TEXTURE:pilot_texture(handle);serial=pilot_textures[handle-1].last_use;break;
+    case PILOT_GFX_VERTEX:pilot_vertex(handle);serial=pilot_vertices[handle-1].last_use;break;
+    default:pilot_d3d_backend_stop("invalid completion resource kind");
+    }
+    return pilot_serial_busy(serial);
 }
 void pilot_gfx_texture_bind(unsigned stage,uint32_t handle)
 {
@@ -335,7 +355,8 @@ void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,ui
         ID3D11DeviceContext_Unmap(ctx,(ID3D11Resource*)staging,0);
         ID3D11DeviceContext_CopyResource(ctx,(ID3D11Resource*)texture->d3d11_texture,(ID3D11Resource*)staging);
         for(UINT row=0;row<rows;++row)memcpy(texture->sys_mem+row*pitch,(const BYTE*)data+row*guest_pitch,pitch);
-        ID3D11Texture2D_Release(staging);pilot_textures[handle-1].uploaded=1;pilot_textures[handle-1].gpu_written=0;return;
+        ID3D11Texture2D_Release(staging);pilot_textures[handle-1].uploaded=1;pilot_textures[handle-1].gpu_written=0;
+        pilot_textures[handle-1].last_use=pilot_mark_work();return;
     }
     D3DLOCKED_RECT lock;
     pilot_d3d_require(texture->iface.lpVtbl->LockRect(&texture->iface,level,&lock,NULL,0),__FILE__,__LINE__);
@@ -348,6 +369,7 @@ void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,ui
     pilot_d3d_require(texture->iface.lpVtbl->UnlockRect(&texture->iface,level),__FILE__,__LINE__);
     pilot_textures[handle-1].uploaded|=1u<<level;
     pilot_textures[handle-1].gpu_written=0;
+    pilot_textures[handle-1].last_use=pilot_mark_work();
     fprintf(stderr,"[TEXTURE UPLOAD] native=%u level=%u %ux%u bytes=%u\n",handle,level,width,height,bytes);
     /* Diagnostic readback is opt-in and absent from production upload work. */
     const char *capture=getenv("XLLE_PILOT_TEXTURE_CAPTURE");
@@ -373,6 +395,7 @@ int32_t pilot_gfx_texture_clear(uint32_t handle,uint32_t color)
     ID3D11DeviceContext_ClearRenderTargetView(d3d8_GetD3D11Context(),rtv,rgba);
     pilot_textures[handle-1].uploaded=1;
     pilot_textures[handle-1].gpu_written=1;
+    pilot_textures[handle-1].last_use=pilot_mark_work();
     return S_OK;
 }
 void pilot_gfx_texture_download(uint32_t handle,void *data,uint32_t bytes)
@@ -397,7 +420,8 @@ int32_t pilot_gfx_texture_clear_depth(uint32_t handle,uint32_t flags,float depth
     pilot_texture(handle);ID3D11DepthStencilView *dsv=pilot_textures[handle-1].dsv;
     if(!dsv || !(flags&3) || (flags&~3u) || !(depth>=0 && depth<=1) || stencil>255)return E_INVALIDARG;
     ID3D11DeviceContext_ClearDepthStencilView(d3d8_GetD3D11Context(),dsv,flags,depth,(UINT8)stencil);
-    pilot_textures[handle-1].uploaded=1;pilot_textures[handle-1].gpu_written=1;return S_OK;
+    pilot_textures[handle-1].uploaded=1;pilot_textures[handle-1].gpu_written=1;
+    pilot_textures[handle-1].last_use=pilot_mark_work();return S_OK;
 }
 int32_t pilot_gfx_texture_readback(uint32_t handle,uint32_t level,void *data,uint32_t capacity)
 {
@@ -448,6 +472,7 @@ int32_t pilot_gfx_draw_up(uint32_t primitive,uint32_t count,const void *data,uin
     HRESULT status=pilot_device->lpVtbl->SetVertexShader(pilot_device,fvf);
     if (SUCCEEDED(status)) status=pilot_device->lpVtbl->DrawPrimitiveUP(pilot_device,(D3DPRIMITIVETYPE)primitive,count,data,stride);
     if(SUCCEEDED(status)) {
+        pilot_mark_draw();
         if(pilot_color_target){pilot_textures[pilot_color_target-1].uploaded=1;pilot_textures[pilot_color_target-1].gpu_written=1;}
         if(pilot_depth_target && pilot_depth_target!=UINT32_MAX){pilot_textures[pilot_depth_target-1].uploaded=1;pilot_textures[pilot_depth_target-1].gpu_written=1;}
     }
@@ -473,6 +498,7 @@ int32_t pilot_gfx_draw_vertices(unsigned primitive,unsigned first,unsigned count
     pilot_d3d_raster_texture_mode(1,scale);d3d8_shaders_prepare_pixel();d3d8_states_apply();
     ID3D11DeviceContext *context=d3d8_GetD3D11Context();
     ID3D11DeviceContext_IASetPrimitiveTopology(context,topology);ID3D11DeviceContext_Draw(context,count,first);
+    pilot_mark_draw();
     if(pilot_color_target){pilot_textures[pilot_color_target-1].uploaded=1;pilot_textures[pilot_color_target-1].gpu_written=1;}
     if(pilot_depth_target && pilot_depth_target!=UINT32_MAX){pilot_textures[pilot_depth_target-1].uploaded=1;pilot_textures[pilot_depth_target-1].gpu_written=1;}
     return S_OK;

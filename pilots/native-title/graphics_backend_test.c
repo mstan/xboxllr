@@ -6,6 +6,7 @@
 #define CHECK(c) do { if (!(c)) { fprintf(stderr,"FAIL graphics line %d: %s\n",__LINE__,#c); return 1; } } while (0)
 #include "graphics_bump_backend_test.inc"
 #include "graphics_draw_backend_test.inc"
+#include "graphics_completion_backend_test.inc"
 static int test_transform_pipeline(void)
 {
     static const D3DTRANSFORMSTATETYPE states[]={D3DTS_VIEW,D3DTS_PROJECTION,D3DTS_TEXTURE0,D3DTS_TEXTURE1,
@@ -85,6 +86,8 @@ int main(void)
     unsigned char pixels[64*64*4];
     for (unsigned pass=0;pass<3;++pass) {
         CHECK(pilot_gfx_create(pp)>=0);
+        struct PilotGpuProgress progress;pilot_gfx_completion_stats(&progress);
+        CHECK(!progress.submitted && !progress.completed && !progress.pending_queries && !progress.created_queries);
         CHECK(pilot_gfx_width()==64 && pilot_gfx_height()==64);
         CHECK(pilot_gfx_clear(D3DCLEAR_TARGET|D3DCLEAR_ZBUFFER,0xff0000ff,1,0)>=0);
         CHECK(pilot_gfx_readback(pixels,sizeof(pixels))>=0);
@@ -127,7 +130,14 @@ int main(void)
         CHECK(test_bump_pipeline()==0);
         CHECK(test_resource_bindings()==0);
         CHECK(test_native_draw_pipeline()==0);
+        CHECK(test_resource_completion()==0);
+        /* Teardown also owns queries which the caller has not retired. A fast
+         * GPU may finish immediately, so pending=true is not required. */
+        CHECK(pilot_gfx_clear(1,0xff123456,1,0)==0);
+        pilot_gfx_resource_busy(PILOT_GFX_SURFACE,0);
         pilot_gfx_close();
+        pilot_gfx_completion_stats(&progress);
+        CHECK(!progress.submitted && !progress.completed && !progress.pending_queries && !progress.created_queries);
     }
     fprintf(stderr,"PASS: actual donor D3D11 create/clear/triangle/pixel-readback/present/recreate\n"); return 0;
 }

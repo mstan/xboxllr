@@ -52,8 +52,10 @@ stage-0 texture, updates vertex constants and passes view/projection setup.
 It now passes four bump-matrix updates, binds stream 0 (stride 28), and selects
 its next texture and vertex shader. Seven real `D3DDevice_DrawVertices`
 triangle strips now render the 640x480 "Warping space-time..." loading image
-into the native back buffer. Both fresh/repeated captures match. It next stops
-at `D3DResource_IsBusy`, before Swap/presentation. No title target binding yet.
+into the native back buffer. Both fresh/repeated captures match. Its first
+resource query now passes for an owned, never-submitted vertex buffer. It locks
+the buffer and binds its font texture/stream, then stops at `SetVertexShader(0x144)`
+before Swap/presentation. No title target binding yet.
 No title buffer Play or audible game output is established by those runs.
 `PILOT_AUDIO=ORIGINAL` still executes the original sound-object allocations and
 contiguous-page setup, stopping at `KfRaiseIrql` (ordinal 160) in audio-driver
@@ -111,6 +113,49 @@ plus explicit instruction, indirect-call and
 kernel-call failure paths. Passing
 the other title's XBE to the Blinx artifact is rejected before guest execution.
 The main LLE build's runtime source and build selection are untouched.
+
+### Resource completion checkpoint (2026-10-07)
+
+The first `D3DResource_IsBusy` call now passes for the owned 114688-byte vertex
+buffer which has never been submitted. Blinx locks it, binds its font texture
+and stream 0 (stride 28), then reaches `SetVertexShader(0x144)`: XYZRHW, diffuse,
+one texture coordinate. That FVF transition remains guarded pending real native
+pipeline qualification. Fresh/repeat entries are 22252476/22252384, with 25/21
+consecutive completed callbacks. The seven loading draws remain pixel-identical.
+No Swap, Play, movie, menu, attract or cadence result follows from this checkpoint.
+
+The three pinned recomp renderers provide no usable completion-query service.
+The independent implementation uses D3D11 EVENT queries for real submitted
+resource work. Uploads, clears, draws and present copies record private serials;
+they create no per-command query or wait. The first query needing a checkpoint
+issues one event and flush, and subsequent polls use DONOTFLUSH. Queries retire
+only on actual completion. A checkpoint covers all preceding submissions, so
+unrelated later work can delay an idle result; reporting completion early is
+never allowed. Bound streams/textures remain busy independently of GPU progress.
+Surface aliases use their parent's work and clear only its canonical fence word.
+Built-in swap surfaces retain their existing internal reference and remain busy.
+Draw bookkeeping conservatively includes all bound inputs and outputs.
+
+All 29 CTests pass (11.04 s). Native fixtures verify real uploads/clear/present,
+changed data, idle slot reuse, shared checkpoints, no repeated idle queries and
+cleanup across three device lifetimes. They do not require a fast GPU to expose
+an intermediate busy result. Guest fixtures verify stdcall/nonvolatile registers,
+bound resources, surface-parent identity, canonical fence clearing and lifetime.
+Forty complete original-x86 executions independently check binding bits, parent
+aliases, unsigned fence ordering including wrap, and cache side effects. The
+native serial representation intentionally differs from original fence arithmetic.
+
+Private evidence: `build/blinx/completion-validation.aot-private.json`,
+`run-completion-{fresh,repeat}.log`, `completion-{fresh,repeat}` captures,
+`audit_completion.py`, `completion-oracle.aot-private.json`, and
+`build/completion-contract-tests.log`. EXE SHA-256:
+`973d0477d5003f469b984e0c955161e8914f37d985b2f613016539ccc1e0c787`.
+All 28 actual shader vertices per launch still match the permissive LLE decoder;
+state-block and transform comparisons also pass. No GPL implementation added.
+
+Device-wide busy/fence insertion/waits remain unqualified: their whole-device
+ordering contract includes work outside this resource family. The next title
+boundary is the pretransformed FVF renderer, followed by presentation/callbacks.
 
 ### Native draw checkpoint (2026-10-07)
 

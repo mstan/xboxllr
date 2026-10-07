@@ -12,14 +12,17 @@ the donor's real fixed-function pixel shader and a real stage-0 texture, then
 updates vertex constants and passes view/projection setup. It now passes four
 bump-matrix updates and binds its first vertex stream and next texture/shader.
 Seven real triangle-strip draws now render its "Warping space-time..." loading
-image. The next stop is `D3DResource_IsBusy`, before presentation.
+image. Its first resource-completion query now passes, followed by locking its
+font vertex buffer and binding the font texture/stream. The next stop is
+`SetVertexShader(0x144)`, the pretransformed FVF renderer, before presentation.
 Use the [native pilot evidence and scope](../pilots/native-title/README.md)
 for current progress; the optical-route ledger below is historical and separate.
 
 | Native milestone | Current evidence / remaining work |
 | --- | --- |
 | Launch, real files and writable storage | Passed bounded startup; original optical verifier remains selectable |
-| Graphics resource preparation | Real font/textures, buffers, 96 compiled vertex shaders, 37 owned pixel definitions and three color/depth targets; title setup and seven real draws now pass. Resource completion queries and presentation remain pending |
+| Graphics resource preparation | Real font/textures, buffers, 96 compiled vertex shaders, 37 owned pixel definitions and three color/depth targets; title setup, seven real draws and first resource query pass. FVF rendering and presentation remain pending |
+| Resource completion | Real batched D3D11 events with nonblocking polls, bound-input busy rules and canonical parent fences; 40 original-x86 cases and GPU/lifetime fixtures pass. Device-wide fences/waits remain pending |
 | Native raster/draw contract | Actual loading image captured identically on fresh/repeated launches. All 28 captured vertices match the LLE decoder; real GPU fixtures cover W/Q, multiple streams, start index, viewport/depth and texture coordinates. No presentation/cadence proof yet |
 | Bump-environment contract | Six cached states and real native dependent sampling/luminance; original-x86 setter and GPU pixel fixtures pass. Blinx has configured its matrix; no title bump rendering claimed |
 | Transform and viewport contract | Ten native matrix slots, viewport queries and projection caches pass fixtures and original-x86 comparisons; real GPU fixture verifies transformed pixels. Actual title view/projection calls and initial draw conversion pass |
@@ -35,8 +38,8 @@ for current progress; the optical-route ledger below is historical and separate.
 | Complete repeat loops, interruption/menu return, original cadence | Pending actual end-to-end measurement |
 | JSRF | Deferred until Blinx success; shared services and separate bindings remain the architecture |
 
-Fresh and repeated native launches stop at the same resource-busy boundary
-after 23/21 actual title callbacks, seven draws and 22252475/22252383 function entries;
+Fresh and repeated native launches stop at the same FVF binding boundary
+after 25/21 actual title callbacks, seven draws and 22252476/22252384 function entries;
 29 contract tests plus actual-asset effects and retained DirectSound tests pass.
 The ten generation/extent tests passed at the earlier checkpoint. Original audio remains
 selectable and still stops at the original audio-driver `KfRaiseIrql` boundary.

@@ -1,5 +1,22 @@
 # STATUS
 
+## 2026-10-07 - Blinx passes its first resource-completion query
+
+Fresh/repeated native NTSC launches now pass `D3DResource_IsBusy` on an owned,
+never-submitted vertex buffer, lock it, bind the font texture and stream 0, then
+reach `SetVertexShader(0x144)`. This pretransformed FVF path is the next rendering
+boundary. The seven loading-image draws remain identical; presentation, audible
+output, menu/attract and original cadence remain unvalidated. JSRF stays deferred.
+
+Native resource completion uses actual D3D11 event queries, issued only when
+requested, with batching and nonblocking polling. Bound inputs remain busy;
+surface views share their parent's work and fence cache. Completion may be
+conservative when a checkpoint includes later work; it never invents completion.
+All 29 CTests pass (11.04 s). Forty complete original-x86 cases verify resource
+binding, aliases, fence order/wrap, cache clearing and ABI. Real GPU tests cover
+changed uploads, clear/present results, checkpoint reuse and device teardown.
+See [completion evidence and limits](pilots/native-title/README.md#resource-completion-checkpoint-2026-10-07).
+
 ## 2026-10-07 - Blinx renders its loading screen
 
 `beads-xbox.1.62`: fresh/repeated NTSC Blinx submits seven real triangle-strip
