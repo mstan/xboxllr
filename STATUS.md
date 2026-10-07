@@ -1,5 +1,32 @@
 # STATUS
 
+## 2026-10-07 - Blinx compiles all 91 vertex shaders
+
+`beads-xbox.1.62`: fresh/repeated original NTSC Blinx creates all 91 vertex
+programs and stops at `D3DDevice_CreatePixelShader`, with 19818529/19818437
+function entries. No title frame, audio, movie, attract or cadence result yet.
+JSRF remains deferred. The next family is pixel shaders, then binding/drawing.
+
+This shader path uses the existing LLE floor's permissive NV2A decoder and
+adapts the main MIT donor's HLSL register/operation approach. The main/NoRain
+HLSL decoder's instruction fields are incorrect for the observed programs;
+they are not used for native shader creation. Phobos's HLE declaration/header
+handling remains a behavioral reference; no GPL implementation is imported.
+The adapter retains typed streams/offsets, packed normals, ARGB colors,
+signed-short coordinates, separate write masks and paired read-before-write
+behavior. It creates actual native shaders/layouts and owned odd guest handles.
+Shader binding and constant application remain unqualified, so the title stops
+before any unimplemented rendering work could be reported complete.
+
+All 91 captured programs (11..135 slots) passed native GPU stream-output versus
+LLE CPU comparisons: eight vertices each, 27664 finite components, maximum
+scaled error `5.96046448e-08` under an allowed `2e-4`. This is an offline bounded
+vertex-output comparison, with no duplicate production execution or requirement
+for exact HLE arithmetic. It does not yet validate whole rendered frames.
+Eighteen CTests pass, including independent typed/multistream/paired GPU
+expectations, guest ABI/ownership/OOM cleanup, and exact malformed-program stops.
+Private evidence is recorded in `build/blinx/shader-validation.aot-private.json`.
+
 ## 2026-10-07 - Blinx passes vertex storage and reaches shader creation
 
 `beads-xbox.1.62`: original NTSC Blinx now creates both 112 KiB vertex buffers,

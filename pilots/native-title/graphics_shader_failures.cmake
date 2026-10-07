@@ -1,0 +1,6 @@
+foreach(mode bad-opcode early-end)
+  execute_process(COMMAND "${PROGRAM}" "--${mode}" RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error TIMEOUT 10)
+  if(NOT result EQUAL 2 OR NOT error MATCHES "invalid shader opcode/end boundary")
+    message(FATAL_ERROR "Shader failure ${mode} did not stop at its contract boundary: ${result}\n${output}\n${error}")
+  endif()
+endforeach()

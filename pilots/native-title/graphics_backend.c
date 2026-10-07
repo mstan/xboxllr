@@ -32,6 +32,7 @@ static LRESULT CALLBACK pilot_window_proc(HWND window,UINT message,WPARAM wparam
 }
 void pilot_gfx_close(void)
 {
+    pilot_gfx_shaders_close();
     for (unsigned i=0;i<256;++i)
         if(pilot_vertices[i].object) pilot_d3d_backend_stop("device close with outstanding vertex ownership");
     for (unsigned i=0;i<256;++i)

@@ -54,16 +54,29 @@ if(PILOT_D3D_SOURCE)
   if(NOT EXISTS "${PILOT_D3D_SOURCE}/donor.json")
     message(FATAL_ERROR "Run tools/native_d3d_donor.py to prepare the backend")
   endif()
-  add_library(pilot_d3d_backend STATIC graphics_backend.c graphics_states.c
+  add_library(pilot_vsh_reference STATIC
+    "${PILOT_D3D_SOURCE}/nv2a-reference/nv2a_vsh_disassembler.c"
+    "${PILOT_D3D_SOURCE}/nv2a-reference/nv2a_vsh_cpu.c"
+    "${PILOT_D3D_SOURCE}/nv2a-reference/nv2a_vsh_emulator.c"
+    "${PILOT_D3D_SOURCE}/nv2a-reference/nv2a_vsh_emulator_execution_state.c")
+  target_include_directories(pilot_vsh_reference PUBLIC "${PILOT_D3D_SOURCE}/nv2a-reference")
+  add_library(pilot_d3d_backend STATIC graphics_backend.c graphics_states.c graphics_shader_backend.c
     "${PILOT_D3D_SOURCE}/d3d8_device.c" "${PILOT_D3D_SOURCE}/d3d8_gamma.c"
     "${PILOT_D3D_SOURCE}/d3d8_resources.c" "${PILOT_D3D_SOURCE}/d3d8_shaders.c"
     "${PILOT_D3D_SOURCE}/d3d8_states.c" "${PILOT_D3D_SOURCE}/d3d8_combiners.c"
     "${PILOT_D3D_SOURCE}/d3d8_vsh.c")
   target_include_directories(pilot_d3d_backend PUBLIC "${PILOT_D3D_SOURCE}")
   target_compile_definitions(pilot_d3d_backend PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
-  target_link_libraries(pilot_d3d_backend PUBLIC d3d11 dxgi dxguid d3dcompiler)
+  target_link_libraries(pilot_d3d_backend PUBLIC d3d11 dxgi dxguid d3dcompiler pilot_vsh_reference)
   add_executable(pilot_graphics_test graphics_backend_test.c)
   target_link_libraries(pilot_graphics_test PRIVATE pilot_d3d_backend)
+  add_executable(pilot_shader_test graphics_shader_test.c)
+  target_link_libraries(pilot_shader_test PRIVATE pilot_d3d_backend)
+  add_test(NAME pilot_shader_gpu_reference COMMAND pilot_shader_test)
+  set_tests_properties(pilot_shader_gpu_reference PROPERTIES TIMEOUT 30)
+  add_test(NAME pilot_shader_failures COMMAND "${CMAKE_COMMAND}"
+    "-DPROGRAM=$<TARGET_FILE:pilot_shader_test>" -P "${CMAKE_CURRENT_SOURCE_DIR}/graphics_shader_failures.cmake")
+  set_tests_properties(pilot_shader_failures PROPERTIES TIMEOUT 30)
   add_test(NAME pilot_graphics_backend COMMAND pilot_graphics_test)
   set_tests_properties(pilot_graphics_backend PROPERTIES TIMEOUT 30)
   if(EXISTS "${PILOT_GENERATED}/pilot_d3d_bindings.h")

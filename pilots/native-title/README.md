@@ -28,8 +28,9 @@ all nine mip levels. Native GPU readback shows the font atlas; the top level
 matches the TGA within its four-bit quantization (maximum 16/255 channel error).
 Blinx reads/parses the 2332-byte font metrics, creates two 112 KiB vertex
 buffers and registers six caller-owned buffers against real contiguous CPU
-storage. It then reads `sys_black.dds` and `sys_white.dds`, and reaches its first
-`D3DDevice_CreateVertexShader`. Title draws are not yet qualified.
+storage. It then reads `sys_black.dds` and `sys_white.dds`, compiles all 91
+requested vertex programs and reaches `D3DDevice_CreatePixelShader`.
+Title draws are not yet qualified.
 The last ORIGINAL-renderer measurement, before the contiguous-memory service,
 stopped at `MmAllocateContiguousMemoryEx`; it has not been remeasured since.
 The OPTICAL build retains
@@ -47,7 +48,7 @@ EEPROM user-settings queries and NTSTATUS-to-DOS-error conversion. Timer arming,
 expiry and DPC delivery are implemented as described below. Callback delivery
 is exercised by the contract tests. No callbacks, draws or completions are discarded.
 
-Sixteen contract tests pass: concurrent threads with separate registers/TLS and
+Eighteen contract tests pass: concurrent threads with separate registers/TLS and
 recursive exclusion, handle closure/errors and EEPROM buffer/checksum behavior;
 timer/DPC/event-wait contracts; real VM reservation/commit/free/protection/query;
 installed-media identity and actual file I/O; writable storage and link lifetimes;
@@ -58,6 +59,8 @@ real donor GPU clear/triangle/present pixels, guest graphics ABI and ownership;
 texture GPU pixels/mips, shared views, changed-data upload and parent lifetimes;
 created/registered vertex resources, actual GPU buffer readback, external
 header/backing ownership and bounded contiguous-memory allocation/release;
+real shader compilation, typed/multiple-stream GPU input, paired issue and
+GPU output compared against the existing LLE vertex interpreter;
 native nonlocal recovery, frame lifetime and deliberate failure conditions;
 plus explicit instruction, indirect-call and
 kernel-call failure paths. Passing
@@ -95,7 +98,7 @@ The main LLE build's runtime source and build selection are untouched.
 - Compilation disables host optimization for short bring-up cycles. No FPS,
   full AOT coverage, or D3D8 HLE performance claim follows from this result.
 
-The next Blinx family is vertex shaders, followed by binding and draw submission.
+The next Blinx family is pixel shaders, followed by binding and draw submission.
 The native texture adapter must synchronize changed guest bytes at binding/draw
 boundaries too, because Xbox unlock can be inline and guest pointers persist.
 The whole native renderer now owns graphics creation and front/back resources.
@@ -160,7 +163,7 @@ setup, but still has not drawn. The state extension below records that boundary.
 Prepare and select privately after generating the title:
 
 ```powershell
-py -3 tools/native_d3d_donor.py --donor <pinned-main-sp00nznet-checkout> --output build/sp00nz-d3d
+py -3 tools/native_d3d_donor.py --donor <pinned-main-sp00nznet-checkout> --vsh-reference <pinned-nv2a_vsh_cpu-checkout> --output build/sp00nz-d3d
 py -3 tools/native_d3d_binding.py --xbe <original-NTSC-default.xbe> --symbols <default_xdk_symbols.json> --output build/blinx
 cmake -S pilots/native-title -B build/blinx/host -DPILOT_RENDERER=D3D11 -DPILOT_D3D_SOURCE=<absolute-path-to-build/sp00nz-d3d>
 cmake --build build/blinx/host --config Release --parallel 2
@@ -632,12 +635,63 @@ full-MMU or executed LLE-differential claim. Unsupported contracts still stop.
 The actual title now allocates two 114688-byte vertex buffers, registers six
 external buffers, and performs another 8192-byte contiguous allocation. The
 first vertex-shader request follows real reads of both system DDS textures.
-Main, Phobos and NoRain shader implementations remain references for the next
-family: their desktop CreateVertexShader adapters ignore the declaration, and
-the main adapter expects raw microcode whereas this Xbox call carries a
-four-byte shader header. Those adapters cannot be wired directly into the
-guest ABI. Creation must retain the declaration and real shader work, with a
-guest handle distinct from native implementation pointers/handles.
+All three desktop CreateVertexShader adapters ignore the declaration, and the
+main adapter expects raw microcode rather than this call's four-byte Xbox
+header. Phobos's separate HLE layer handles those differences and is a useful
+behavioral reference; its GPL implementation is not copied. The next section
+records the native contract now exercised by Blinx.
+
+## Native vertex shader checkpoint
+
+Actual Blinx now creates all 91 vertex shaders, with programs from 11 to 135
+instruction slots, and stops at pixel-shader creation. Fresh/repeated launches
+reach 19818529/19818437 entries. This is initialization progress, not a frame,
+attract-sequence or cadence result. The shaders retain real compiled D3D11
+objects and input layouts; creation does not return a placeholder handle.
+Guest handles are odd 32-bit guest addresses. The adapter preserves the
+HRESULT/stack contract, output bounds, declaration fields/constants and owned
+guest storage. Device release destroys the native objects and guest headers.
+Constant application, shader binding and title draw submission remain
+unqualified; storing a declaration constant at creation does not apply it early.
+
+The main and NoRain donor HLSL decoders extract opcodes from word zero instead
+of word one and cannot decode these actual programs correctly. This path uses
+the existing LLE floor's `nv2a_vsh_cpu` decoder instead: pin `561fe80`, equivalent
+source tree to the main build's `863fc0f` pin. Preparation checks the revision,
+retains the Unlicense and the decoder header's MIT notice, and records source
+hashes. The GPU translation adapts the main MIT donor's native HLSL operation
+and register approach, handling separate output masks and paired operations
+that read their inputs before either writes. RCC sign/range and all EXP/LOG
+components follow the bounded LLE operation contract. Production executes
+native GPU arithmetic; it does not execute the CPU reference alongside it.
+
+Declarations retain actual register/stream/offset/format data. The reached
+formats include float3/float4, packed 11/11/10 normalized normals, packed ARGB
+colors and signed-short pairs. Native input layouts handle both streams used
+by these programs. Additional admitted float/short/normalized-short formats
+are listed in `graphics_shader_source.inc`; other formats, declaration-only
+shaders and vertex-state programs still stop explicitly. Native floating-point
+rounding is permitted. Extreme numeric inputs and full hardware rasterization
+are not certified by the current comparison.
+
+`pilot_shader_test` compares actual D3D11 vertex outputs against the LLE CPU
+interpreter in a separate diagnostic process. It captures raw outputs through
+[D3D11 stream output](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11device-creategeometryshaderwithstreamoutput),
+before rasterization, using a deferred context that preserves immediate state.
+The synthetic fixture also checks independently specified packed/color/short
+input results and a paired read-before-write dependency. Malformed opcode and
+early-END fixtures must stop before the borrowed decoder's opcode table access.
+
+All 91 actual captured Blinx programs pass on eight test vertices each:
+27664 finite output components, maximum `abs(native-reference)/max(1,abs(reference))`
+of `5.96046448e-08`, against an allowed `2e-4`. This is an executed differential
+for bounded vertex-program outputs, not a full rendered-frame LLE comparison.
+Optional `XLLE_PILOT_SHADER_CAPTURE=<existing private directory>` records real
+declarations, microcode and generated HLSL for replay by `pilot_shader_test`.
+Captures remain ignored under `build/`; ordinary title execution omits capture
+and readback. Evidence: `build/shader-contract-tests.log`,
+`build/blinx/shader-reference-results.log` and
+`build/blinx/shader-validation.aot-private.json`.
 
 ## Reproduce privately
 

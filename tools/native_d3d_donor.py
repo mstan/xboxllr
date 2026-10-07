@@ -51,7 +51,7 @@ def checked_calls(code, names):
     return code
 
 
-def prepare(donor: Path, output: Path):
+def prepare(donor: Path, output: Path, vsh_reference: Path):
     git = "C:/Program Files/Git/cmd/git.exe"
     if subprocess.check_output([git, "-C", str(donor), "rev-parse", "HEAD"], text=True).strip() != PIN:
         raise ValueError("unreviewed D3D donor revision")
@@ -59,6 +59,20 @@ def prepare(donor: Path, output: Path):
     if "build" not in output.resolve().parts:
         raise ValueError("donor copies must stay in private build output")
     output.mkdir(parents=True, exist_ok=True)
+    reference_pin = subprocess.check_output([git, "-C", str(vsh_reference), "rev-parse", "HEAD"], text=True).strip()
+    if reference_pin not in ("561fe80da57a881f89000256b459440c0178a7ce", "863fc0f50aa4027af113718d2a63e45ac3be7a42"):
+        raise ValueError("unreviewed NV2A reference decoder revision")
+    subprocess.run([git, "-C", str(vsh_reference), "diff", "--exit-code", "HEAD", "--", "src", "LICENSE"], check=True)
+    reference_dir = output / "nv2a-reference"
+    reference_dir.mkdir(exist_ok=True)
+    reference_hashes = {}
+    for stem in ("nv2a_vsh_disassembler", "nv2a_vsh_cpu", "nv2a_vsh_emulator", "nv2a_vsh_emulator_execution_state"):
+        for suffix in (".c", ".h"):
+            name = stem + suffix
+            blob = (vsh_reference / "src" / name).read_bytes()
+            (reference_dir / name).write_bytes(blob)
+            reference_hashes[name] = hashlib.sha256(blob).hexdigest()
+    (reference_dir / "LICENSE").write_bytes((vsh_reference / "LICENSE").read_bytes())
     sources, changes = {}, {}
     for name in FILES:
         source = donor / "src/d3d" / name
@@ -150,6 +164,7 @@ def prepare(donor: Path, output: Path):
         '__declspec(noreturn) void pilot_d3d_backend_stop(const char *reason);\n'
         'HRESULT pilot_d3d_require(HRESULT result, const char *file, unsigned line);\n', newline="\n")
     manifest = dict(donor=PIN, license="MIT; upstream LICENSE and NOTICE retained", sources=sources, prepared=changes,
+                    nv2a_reference=dict(pin=reference_pin, files=reference_hashes, license="Unlicense; MIT header notice retained"),
                     policy="unqualified COM bodies excluded; failure cannot silently drop graphics work")
     (output/"donor.json").write_text(json.dumps(manifest, indent=2)+"\n", newline="\n")
     return manifest
@@ -159,6 +174,7 @@ if __name__ == "__main__":
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--donor", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--vsh-reference", type=Path, required=True)
     args=parser.parse_args()
-    result=prepare(args.donor,args.output)
+    result=prepare(args.donor,args.output,args.vsh_reference)
     print(json.dumps(dict(donor=result["donor"], files=len(result["sources"]), excluded=sum(len(v["excluded_com_bodies"]) for v in result["prepared"].values()))))

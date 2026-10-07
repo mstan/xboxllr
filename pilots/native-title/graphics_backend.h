@@ -25,4 +25,14 @@ int32_t pilot_gfx_vertex_create(uint32_t bytes,uint32_t *handle);
 void pilot_gfx_vertex_destroy(uint32_t handle);
 void pilot_gfx_vertex_upload(uint32_t handle,const void *data,uint32_t bytes);
 int32_t pilot_gfx_vertex_readback(uint32_t handle,void *data,uint32_t capacity);
+struct PilotVertexElement { uint32_t type,stream,offset; };
+uint32_t pilot_gfx_vertex_type_size(uint32_t type);
+/* Private ownership handles, never desktop FVF/donor shader selectors. */
+int32_t pilot_gfx_shader_create(const uint32_t *code,unsigned count,const struct PilotVertexElement elements[16],uint32_t *handle);
+void pilot_gfx_shader_destroy(uint32_t handle);
+void pilot_gfx_shaders_close(void);
+/* Diagnostic raw vertex outputs, before rasterization/viewport conversion. */
+struct PilotVertexProbeStream { const void *data; unsigned stride; };
+int32_t pilot_gfx_shader_probe(uint32_t handle,const struct PilotVertexProbeStream streams[16],unsigned count,
+                              const float constants[192][4],float *outputs);
 #endif
