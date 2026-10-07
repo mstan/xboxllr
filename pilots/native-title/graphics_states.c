@@ -101,12 +101,24 @@ int pilot_gfx_xbox_texture_state(uint32_t stage,uint32_t state,uint32_t value)
     case 6:if((value&0x7f800000u)==0x7f800000u)return 0; host=D3DTSS_MIPMAPLODBIAS; break;
     case 7:host=D3DTSS_MAXMIPLEVEL; break;
     case 8:if(!value || value>16)return 0; host=D3DTSS_MAXANISOTROPY; break;
-    case 12:host=D3DTSS_COLOROP; goto operation;
+    case 12:
+        host=D3DTSS_COLOROP;
+        if(value==25 || value==26) {
+            if(stage==3)return 0;
+            value-=3;break; /* Xbox BUMPENVMAP/LUMINANCE -> desktop 22/23. */
+        }
+        goto operation;
     case 14:host=D3DTSS_COLORARG1; goto argument;
     case 15:host=D3DTSS_COLORARG2; goto argument;
     case 16:host=D3DTSS_ALPHAOP; goto operation;
     case 18:host=D3DTSS_ALPHAARG1; goto argument;
     case 19:host=D3DTSS_ALPHAARG2; goto argument;
+    case 22:host=D3DTSS_BUMPENVMAT00; break;
+    case 23:host=D3DTSS_BUMPENVMAT01; break;
+    case 24:host=D3DTSS_BUMPENVMAT11; break; /* Xbox swaps the final two entries. */
+    case 25:host=D3DTSS_BUMPENVMAT10; break;
+    case 26:host=22; break; /* desktop BUMPENVLSCALE */
+    case 27:host=23; break; /* desktop BUMPENVLOFFSET */
     case 28:if(value>3)return 0; host=D3DTSS_TEXCOORDINDEX; break;
     case 29:host=D3DTSS_BORDERCOLOR; break;
     default:return 0;

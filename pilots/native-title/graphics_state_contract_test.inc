@@ -24,6 +24,16 @@ static void graphics_test_pixel(unsigned red,unsigned green,unsigned blue,unsign
 }
 static void test_graphics_states(void)
 {
+    /* Exercise the actual three-argument callee-cleaned setter, all stages
+     * and six coefficients. Adjacent cache words must survive unchanged. */
+    for(unsigned stage=0;stage<4;++stage)for(unsigned state=22;state<28;++state) {
+        uint32_t args[]={stage,state,0x40800000u+(stage*6+state-22)*0x10000u};
+        uint32_t address=PILOT_D3D_TEXTURE_STATES+stage*128+state*4;
+        uint32_t left=MEM32(address-4),right=MEM32(address+4),saved=MEM32(address);
+        call_graphics(PILOT_D3D_D3DDevice_SetTextureState_BumpEnv,args);
+        CHECK(MEM32(address)==args[2] && MEM32(address-4)==left && MEM32(address+4)==right);
+        args[2]=saved;call_graphics(PILOT_D3D_D3DDevice_SetTextureState_BumpEnv,args);
+    }
     uint32_t viewport[]={0,0,64,64,0,0x3f800000},arg=0x19200;
     memcpy(memory+arg,viewport,sizeof(viewport));
     call_graphics(PILOT_D3D_D3DDevice_SetViewport,&arg);

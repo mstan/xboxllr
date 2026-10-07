@@ -1,5 +1,27 @@
 # STATUS
 
+## 2026-10-07 - Blinx reaches its first draw request
+
+`beads-xbox.1.62`: fresh/repeated NTSC Blinx passes all four bump-matrix
+updates, binds stream 0 (stride 28), selects its next texture/shader, and reaches
+`D3DDevice_DrawVertices`: triangle fan, first vertex 0, count 4. Both stop before
+submitting the draw, after 22252454/22252362 entries and 20/17 consecutive
+callbacks. No title frame, Play, movie, menu, attract or cadence result yet.
+
+The six bump states preserve the original cache/ABI and feed a real dependent
+sampling/luminance extension to the MIT donor's fixed-function pixel shader.
+All three pinned recomp variants lack that fixed-function effect. The adapter
+corrects Xbox's different operation numbers and matrix order. Actual GPU pixels
+verify each matrix coefficient on three usable stages, luminance scaling,
+offset/clamping and preserved alpha, across three device lifetimes. All 29
+CTests pass (10.80 seconds); 48 complete original-x86 setter executions verify
+cache, stack/register and packet/stage rules.
+
+Next coherent family: Xbox vertex-to-raster conversion and real draw submission.
+Programmable bump modes and additional signed/luminance texture formats remain
+unqualified. The private CPU artifact remains GPL-dependent/outside shipping;
+JSRF stays deferred. See [bump checkpoint](pilots/native-title/README.md#bump-environment-checkpoint-2026-10-07).
+
 ## 2026-10-07 - Blinx passes view and projection setup
 
 `beads-xbox.1.62`: fresh/repeated NTSC Blinx now passes its view and projection

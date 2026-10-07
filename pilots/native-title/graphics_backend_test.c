@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <math.h>
 #define CHECK(c) do { if (!(c)) { fprintf(stderr,"FAIL graphics line %d: %s\n",__LINE__,#c); return 1; } } while (0)
+#include "graphics_bump_backend_test.inc"
 static int test_transform_pipeline(void)
 {
     static const D3DTRANSFORMSTATETYPE states[]={D3DTS_VIEW,D3DTS_PROJECTION,D3DTS_TEXTURE0,D3DTS_TEXTURE1,
@@ -122,6 +123,7 @@ int main(void)
         CHECK(pixels[0]==0 && pixels[1]==0 && pixels[2]==255);
         CHECK(pilot_gfx_present()>=0);
         CHECK(test_transform_pipeline()==0);
+        CHECK(test_bump_pipeline()==0);
         CHECK(test_resource_bindings()==0);
         pilot_gfx_close();
     }

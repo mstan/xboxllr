@@ -48,9 +48,11 @@ vertex shaders and 37 owned pixel definitions. It now captures its real ALL
 state block and registers its vertical-blank callback, which executes and
 returns repeatedly. After loading five menu textures, it now binds its compiled
 vertex shader and the donor's fixed-function pixel shader. It binds a real
-stage-0 texture, updates vertex constants and passes view/projection setup,
-then stops at `D3DDevice_SetTextureState_BumpEnv`. No title stream/target
-binding or draw occurs yet.
+stage-0 texture, updates vertex constants and passes view/projection setup.
+It now passes four bump-matrix updates, binds stream 0 (stride 28), and selects
+its next texture and vertex shader. It reaches `D3DDevice_DrawVertices`, a
+four-vertex triangle fan, but stops before submitting it. No title target
+binding or completed draw occurs yet.
 No title buffer Play or audible game output is established by those runs.
 `PILOT_AUDIO=ORIGINAL` still executes the original sound-object allocations and
 contiguous-page setup, stopping at `KfRaiseIrql` (ordinal 160) in audio-driver
@@ -108,6 +110,53 @@ plus explicit instruction, indirect-call and
 kernel-call failure paths. Passing
 the other title's XBE to the Blinx artifact is rejected before guest execution.
 The main LLE build's runtime source and build selection are untouched.
+
+### Bump-environment checkpoint (2026-10-07)
+
+Six real bump states preserve the original three-argument callee-cleaned ABI
+and guest texture-state cache. Xbox matrix order is 00,01,11,10; its operations
+25/26 map to desktop operations 22/23. The donor's existing state storage,
+texture resources, compiler/cache and pixel constant upload are reused. All
+three pinned recomp variants were inspected; none supplies the fixed-function
+bump effect. The independently authored extension performs dependent texture
+coordinate sampling and luminance modulation on the GPU using the public
+[Direct3D formulas](https://learn.microsoft.com/en-us/windows/win32/direct3d9/bump-mapping-formulas).
+It preserves incoming color/alpha at the bump stage. No GPL implementation
+was imported and no required sampling work is replaced by success.
+
+All 29 CTests pass (10.80 seconds). Actual GPU pixels distinguish all four
+matrix coefficients on stages 0, 1 and 2, including Xbox's swapped final two
+entries. Luminance scale, offset, lower clamping and alpha preservation pass,
+across three device lifetimes. Fixtures use admitted UNORM textures with
+explicit coordinates; additional signed/luminance formats remain guarded.
+The donor's pretransformed FVF path ignores TEXCOORDINDEX remapping; these
+fixtures provide all four coordinate sets explicitly. Guest FVF transitions
+are still unqualified and must resolve that contract before activation.
+
+The native guest fixture checks all 24 stage/state combinations, restores
+their values, and verifies adjacent words, stack cleanup and preserved
+registers. A separate oracle executes the complete original 99-byte routine
+48 times, with fixed-function and programmable-pixel selection: exact cache
+updates and real packet/stage remapping match the bounded contract. No
+original GPU-space allocator is bypassed in that test; adequate command space
+is supplied. Programmable-pixel binding/effects remain unqualified. The native
+fixed-function implementation associates the effect with its logical stage;
+its internals do not reproduce the driver's physical stage remap.
+
+Fresh/repeated Blinx passes all four matrix updates (stage 1, diagonal 4.0,
+off-diagonal zero), binds stream 0, and reaches its first DrawVertices request
+at `0x00136040`, caller `0x00033811`: type 6 (triangle fan), first 0, count 4.
+Entries 22252454/22252362; 20/17 consecutive callbacks; 96 vertex shaders,
+37 pixel definitions and five menu assets retained. The actual transform and
+5460-byte state-block captures still match their original-x86 oracles. The
+draw is not submitted yet. No title frame, Play, movie, menu, attract or cadence
+is established. Next: qualify vertex-to-raster conversion and draw submission.
+
+Private evidence: `build/blinx/bump-validation.aot-private.json`,
+`run-bump-{fresh,repeat}.log`, `bump-{fresh,repeat}/`, `audit_bump.py`,
+`bump-oracle.aot-private.json`, `build/bump-gpu.log` and
+`build/bump-all-contract-tests.log`. Executable SHA-256:
+`cdc1abd9b0f085811c5c5dfdeb999225c1c5537d1dfe2563c36a12bebc49ca67`.
 
 ### Transform checkpoint (2026-10-07)
 

@@ -220,6 +220,9 @@ void pilot_d3d_dispatch(unsigned entry)
         graphics_render_state(arguments[0],arguments[1],1);break;
     case PILOT_D3D_D3DDevice_SetTextureState_TexCoordIndex:
         graphics_texture_state(arguments[0],28,arguments[1],1);break;
+    case PILOT_D3D_D3DDevice_SetTextureState_BumpEnv:
+        if(arguments[1]<22 || arguments[1]>27)stop("invalid bump state index",arguments[1]);
+        graphics_texture_state(arguments[0],arguments[1],arguments[2],1);break;
     case PILOT_D3D_D3DDevice_SetTextureStageStateNotInline:
         graphics_texture_state(arguments[0],arguments[1],arguments[2],1);break;
     case PILOT_D3D_D3DDevice_SetShaderConstantMode:
