@@ -1,5 +1,47 @@
 # STATUS
 
+## 2026-10-07 - Blinx uploads its font atlas and all nine mip levels
+
+`beads-xbox.1.62`: original NTSC Blinx passes device capability/display queries,
+creates its 128x256 A4R4G4B4 texture, decodes the actual TGA, generates/uploads
+all nine mip levels, then reads/parses the 2332-byte font metrics file. The next
+stop is `D3DDevice_CreateVertexBuffer2`, requesting 114688 bytes. Fresh/repeated
+launches reach 7188/7096 function entries and upload all nine mips. No title draw,
+menu, audio, movie, attract or cadence result yet; JSRF remains deferred.
+
+The GPU readback contains the complete font atlas, visually inspected locally.
+Its top level differs from the original TGA by at most 16/255 in any channel
+(mean absolute difference 0.116/255), consistent with conversion to four bits
+per channel. All nine GPU subresources were captured with nonzero content.
+This is actual title data through native D3D11 allocation/upload/readback, not
+a successful-return inference. Captures and game-derived images stay private.
+
+The adapter reuses the pinned main MIT donor's real texture allocation,
+lock/upload, unswizzling and destruction. Guest objects keep 32-bit resource
+headers, mip offsets, shared CPU data and parent/view references. Header/data
+allocations count against the existing guest RAM budget; native GPU/shadow
+copies are additional host storage. Surface-view final release uploads changed
+bytes. Future binding/draw entry points must also synchronize persistent CPU
+writes; those entry points still stop, so no stale-data draw is accepted.
+
+The bounded texture family covers power-of-two 2D sample-only textures in
+A4R4G4B4/R5G6B5/A8R8G8B8/X8R8G8B8, full or partial mip chains, surface views,
+descriptions, locks and lifetime. Unsupported types/formats/usage stop. HLE
+lock pointers use canonical guest allocations for cache/tiled aliases; physical
+address aliasing is not modeled. Display-mode output describes the enhanced
+progressive presentation with the configured logical cadence and guest linear
+format. These are explicit HLE representation differences.
+
+Sixteen CTests pass with expanded real GPU checks for four formats, rectangular
+Morton layouts, nine-level chains, shared views, changed-data reupload,
+parent-before-view release, RAM exhaustion cleanup and device recreation.
+Capability output comes from the reviewed original 53-DWORD table. Main,
+Phobos and NoRain desktop query bodies return success without filling outputs;
+none is used. Original XDK code and external Xbox layouts bound the ABI; this
+is not an executed full LLE differential. Evidence: `build/texture-contract-tests.log`,
+`build/blinx/run-texture-{fresh,repeat}.log`,
+`build/blinx/texture-validation.aot-private.json`, and `build/blinx/texture-capture/`.
+
 ## 2026-10-07 - Blinx recovers from the first image-format probe
 
 `beads-xbox.1.62`: original NTSC Blinx now arms native recovery, executes its

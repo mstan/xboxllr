@@ -17,4 +17,8 @@ uint32_t pilot_gfx_width(void);
 uint32_t pilot_gfx_height(void);
 int32_t pilot_gfx_surface_ref(unsigned surface,int acquire);
 int32_t pilot_gfx_surface_readback(unsigned surface,unsigned char *rgba,uint32_t capacity);
+int32_t pilot_gfx_texture_create(uint32_t width,uint32_t height,uint32_t levels,uint32_t format,uint32_t *handle);
+void pilot_gfx_texture_destroy(uint32_t handle);
+void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,uint32_t bytes);
+int32_t pilot_gfx_texture_readback(uint32_t handle,uint32_t level,void *data,uint32_t capacity);
 #endif

@@ -23,8 +23,11 @@ renderer now creates a real 640x480 D3D11 device and supplies an owned front
 surface to `GetBackBuffer2(-1)`. Blinx now passes its initial graphics-state
 setup and reads the full 131116-byte Arial font TGA from installed content.
 The decoder now performs real native/guest nonlocal recovery after the JPEG
-probe rejects the TGA, then reaches `D3DDevice_GetDeviceCaps` in texture setup.
-Font upload and title draws are not yet qualified.
+probe rejects the TGA, creates the real 128x256 A4R4G4B4 font texture and uploads
+all nine mip levels. Native GPU readback shows the font atlas; the top level
+matches the TGA within its four-bit quantization (maximum 16/255 channel error).
+Blinx reads/parses the 2332-byte font metrics and reaches
+`D3DDevice_CreateVertexBuffer2`. Title draws are not yet qualified.
 The ORIGINAL renderer still reaches `MmAllocateContiguousMemoryEx`.
 The OPTICAL build retains
 and executes the original verification helper, stopping on unsupported raw
@@ -49,6 +52,7 @@ deferred section residency and shared-page ownership;
 native utility-drive persistence, formatting, eviction and failure handling;
 real read-through file-cache sizing, coherence, position and budget handling;
 real donor GPU clear/triangle/present pixels, guest graphics ABI and ownership;
+texture GPU pixels/mips, shared views, changed-data upload and parent lifetimes;
 native nonlocal recovery, frame lifetime and deliberate failure conditions;
 plus explicit instruction, indirect-call and
 kernel-call failure paths. Passing
@@ -86,9 +90,9 @@ The main LLE build's runtime source and build selection are untouched.
 - Compilation disables host optimization for short bring-up cycles. No FPS,
   full AOT coverage, or D3D8 HLE performance claim follows from this result.
 
-The next Blinx family is graphics capability queries and texture allocation/upload.
-The main donor's no-work capability-query success is excluded. The original
-guest query copies a real 53-DWORD table; qualify its complete output contract.
+The next Blinx family is vertex buffers, texture binding and draw submission.
+The native texture adapter must synchronize changed guest bytes at binding/draw
+boundaries too, because Xbox unlock can be inline and guest pointers persist.
 The whole native renderer now owns graphics creation and front/back resources.
 Utility-drive selection/mounting now
 runs through the complete native library boundary below, and file-cache control
@@ -132,11 +136,11 @@ Guest surface headers contain linear format/dimensions and real reference
 ownership. Their data address reserves GPU-owned residence in guest VA; direct
 CPU access faults until a real lock/readback contract is qualified. GPU resources
 are host-owned and are not yet included in the pilot's retail-memory budget.
-Device release with outstanding surfaces, reset, partial-channel/rectangle
-clear, resource locks, and unimplemented state/draw methods stop explicitly.
+Device release with outstanding resources, reset, partial-channel/rectangle
+clear, front/back-buffer locks, and unimplemented state/draw methods stop explicitly.
 
 The MIT donor provides the D3D11 device/state/shader/resource code, not the Xbox
-32-bit guest ABI. Preparation excludes 120 unqualified COM bodies, including
+32-bit guest ABI. Preparation excludes 116 unqualified COM bodies, including
 upstream success-only implementations, and hardens reached failures. Its direct
 backend smoke test draws a triangle with explicit no-texture state and validates
 actual readback pixels. Guest tests check success/failure stack cleanup, callee
@@ -555,6 +559,42 @@ Contract references: Xbox layouts/ordinals in Cxbx `585c49a` and Microsoft
 The inspected sp00nznet `1409a7d` timer bridge supplied a useful architecture
 reference. Its absolute-as-immediate handling and fixed polling approach were
 not adopted. No GPL service bodies were incorporated.
+
+## Native texture checkpoint
+
+`graphics_texture.inc` owns guest 20-byte texture/24-byte surface headers and
+shared CPU storage. Creation uses actual pinned MIT donor D3D11 textures/SRVs;
+native pointers stay private. A surface view retains its parent; final release
+uploads that mip through the donor's real unswizzle/upload path. Unchanged
+bytes avoid a redundant upload. Releasing the parent before its views preserves
+storage until the last owning view is released. Descriptors use Xbox's seven
+DWORD layout, not the donor's desktop eight-DWORD structure.
+
+The current bound accepts power-of-two 2D sample-only textures, four color
+formats (4 through 7), and valid partial/full mip chains through 4096 dimensions.
+Other usage/types/formats stop. CPU allocations count against the guest budget;
+GPU and upload-shadow copies use additional host storage. Cache/tiled lock
+aliases return a canonical CPU-accessible guest pointer, with the same raw
+swizzled bytes. Physical-address aliases, GPU-written textures, external
+registered resources and sampling draws remain unqualified. A future draw must
+synchronize persistent CPU writes even without another lock or rebind.
+
+`GetDeviceCaps` copies the reviewed original table into the full 212-byte guest
+output. Capabilities describe the emulated device; unimplemented methods still
+stop. `GetDisplayMode` writes the actual configured dimensions/logical refresh,
+the guest linear color format, and the enhanced renderer's progressive flag.
+Its five-DWORD Xbox layout differs from desktop D3D. Reporting progressive output
+and canonical lock pointers are documented HLE differences; ORIGINAL rendering
+remains a separate build selection.
+
+Set `XLLE_PILOT_TEXTURE_CAPTURE` to an existing private directory for diagnostic
+GPU readback after each changed mip upload. Each file has eight little-endian
+DWORDs (magic 0x58544558, version 1, native handle, mip, width, height, guest
+format, payload bytes), followed by linear GPU storage bytes. Capture is absent
+from normal upload execution. Never commit the resulting game-derived files.
+Tests independently construct rectangular Morton images and compare GPU reads
+for all four formats and the nine-level 128x256 chain, including changed writes,
+view aliasing, parent lifetime, RAM failure cleanup and recreation.
 
 ## Reproduce privately
 

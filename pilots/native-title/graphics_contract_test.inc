@@ -10,6 +10,7 @@ static uint32_t call_graphics(unsigned entry,const uint32_t *args)
     return g_eax;
 }
 #include "graphics_state_contract_test.inc"
+#include "graphics_texture_contract_test.inc"
 static void test_graphics(void)
 {
     vm_ensure();
@@ -35,6 +36,16 @@ static void test_graphics(void)
         CHECK(graphics_active && MEM32(PILOT_D3D_DEVICE_GLOBAL)==PILOT_D3D_DEVICE_OBJECT);
         CHECK(MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SHADER_CONSTANT_MODE_OFFSET)==0);
         if (create[5]) CHECK(MEM32(create[5])==PILOT_D3D_DEVICE_OBJECT);
+        uint32_t caps=0x19304;
+        memset(memory+caps-4,0xcd,sizeof(pilot_d3d_device_caps)+8);
+        call_graphics(PILOT_D3D_D3DDevice_GetDeviceCaps,&caps);
+        CHECK(!memcmp(memory+caps,pilot_d3d_device_caps,sizeof(pilot_d3d_device_caps)));
+        CHECK(MEM32(caps-4)==0xcdcdcdcdu && MEM32(caps+sizeof(pilot_d3d_device_caps))==0xcdcdcdcdu);
+        uint32_t mode=0x19404,expected_mode[]={64,64,60,0x40,0x12};
+        memset(memory+mode-4,0xcd,28);
+        call_graphics(PILOT_D3D_D3DDevice_GetDisplayMode,&mode);
+        CHECK(!memcmp(memory+mode,expected_mode,sizeof(expected_mode)));
+        CHECK(MEM32(mode-4)==0xcdcdcdcdu && MEM32(mode+20)==0xcdcdcdcdu);
         CHECK(!memcmp(parameters,valid,sizeof(valid)));
         uint32_t arg=0,back=call_graphics(PILOT_D3D_D3DDevice_GetBackBuffer2,&arg);
         arg=0xffffffffu; uint32_t front=call_graphics(PILOT_D3D_D3DDevice_GetBackBuffer2,&arg);
@@ -59,7 +70,7 @@ static void test_graphics(void)
         CHECK(pixels[0]==255 && pixels[1]==0 && pixels[2]==0);
         CHECK(pilot_gfx_surface_readback(0,pixels,sizeof(pixels))>=0);
         CHECK(pixels[0]==0 && pixels[1]==0 && pixels[2]==255);
-        if(!pass)test_graphics_states();
+        if(!pass) { test_graphics_states(); test_graphics_textures(); }
         CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&front)==0);
         CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&back)==0);
         CHECK(call_graphics(PILOT_D3D_D3DDevice_Release,NULL)==0);

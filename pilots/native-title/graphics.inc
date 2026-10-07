@@ -54,6 +54,7 @@ static void *graphics_pointer(uint32_t address,uint32_t bytes)
     /* Actual committed/protected memory is enforced by host page access. */
     return memory+address;
 }
+#include "graphics_texture.inc"
 
 void pilot_d3d_dispatch(unsigned entry)
 {
@@ -66,6 +67,30 @@ void pilot_d3d_dispatch(unsigned entry)
     if (entry!=PILOT_D3D_Direct3D_CreateDevice && !graphics_active)
         stop("graphics entry before native creation",pilot_d3d_calls[entry].address);
     switch(entry) {
+    case PILOT_D3D_D3DDevice_CreateTexture2:g_eax=graphics_texture_allocate(arguments);break;
+    case PILOT_D3D_D3DBaseTexture_GetLevelCount:
+        g_eax=graphics_textures[graphics_texture_slot(arguments[0])].levels;break;
+    case PILOT_D3D_D3DTexture_GetSurfaceLevel2:
+        g_eax=graphics_texture_surface(arguments[0],arguments[1]);break;
+    case PILOT_D3D_D3DSurface_GetDesc:graphics_texture_desc(arguments[0],arguments[1]);break;
+    case PILOT_D3D_D3DSurface_LockRect:
+        graphics_texture_lock(arguments[0],0,arguments[1],arguments[2],arguments[3]);break;
+    case PILOT_D3D_D3DTexture_LockRect:
+        graphics_texture_lock(arguments[0],arguments[1],arguments[2],arguments[3],arguments[4]);break;
+    case PILOT_D3D_D3DDevice_GetDisplayMode: {
+        /* Xbox layout is Width,Height,RefreshRate,Flags,Format (20 bytes).
+         * The enhanced output is progressive; its configured logical cadence
+         * and linear guest color format do not depend on the host desktop. */
+        uint32_t mode[5]={graphics_parameters[0],graphics_parameters[1],
+            graphics_parameters[11]?graphics_parameters[11]:60,0x40,
+            (MEM32(graphics_headers+12)>>8)&255};
+        memcpy(graphics_pointer(arguments[0],sizeof(mode)),mode,sizeof(mode)); break;
+    }
+    case PILOT_D3D_D3DDevice_GetDeviceCaps:
+        /* Xbox's original void query copies its complete immutable caps table.
+         * This reports the emulated device, never the host adapter's caps. */
+        memcpy(graphics_pointer(arguments[0],sizeof(pilot_d3d_device_caps)),
+               pilot_d3d_device_caps,sizeof(pilot_d3d_device_caps)); break;
     case PILOT_D3D_Direct3D_CreateDevice: {
         if (graphics_active) stop("second native device creation",entry);
         if (arguments[0] || arguments[1]!=1 || arguments[2] || (arguments[3]&~0x40u))
@@ -120,7 +145,10 @@ void pilot_d3d_dispatch(unsigned entry)
     }
     case PILOT_D3D_D3DResource_AddRef:
     case PILOT_D3D_D3DResource_Release:
-        g_eax=graphics_surface_ref(graphics_surface_index(arguments[0]),entry==PILOT_D3D_D3DResource_AddRef); break;
+        if(arguments[0]==graphics_headers || arguments[0]==graphics_headers+32)
+            g_eax=graphics_surface_ref(graphics_surface_index(arguments[0]),entry==PILOT_D3D_D3DResource_AddRef);
+        else g_eax=graphics_texture_ref(graphics_texture_slot(arguments[0]),entry==PILOT_D3D_D3DResource_AddRef);
+        break;
     case PILOT_D3D_D3DDevice_Release: {
         if (graphics_surface_refs[0] || graphics_surface_refs[1])
             stop("device release with outstanding surface ownership",entry);

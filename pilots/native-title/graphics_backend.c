@@ -10,6 +10,7 @@ static HWND pilot_window;
  * Xbox GetBackBuffer(-1) must not alias the image currently being drawn. */
 static ID3D11Texture2D *pilot_surfaces[2];
 static unsigned pilot_surface_refs[2];
+static struct { IDirect3DTexture8 *object; uint32_t uploaded; } pilot_textures[256];
 
 __declspec(noreturn) void pilot_d3d_backend_stop(const char *reason)
 {
@@ -30,6 +31,8 @@ static LRESULT CALLBACK pilot_window_proc(HWND window,UINT message,WPARAM wparam
 }
 void pilot_gfx_close(void)
 {
+    for (unsigned i=0;i<256;++i)
+        if(pilot_textures[i].object) pilot_d3d_backend_stop("device close with outstanding texture ownership");
     for (unsigned i=0;i<2;++i) {
         if (pilot_surface_refs[i]) pilot_d3d_backend_stop("device close with outstanding surface ownership");
         if (pilot_surfaces[i]) { ID3D11Texture2D_Release(pilot_surfaces[i]); pilot_surfaces[i]=NULL; }
@@ -114,6 +117,93 @@ int32_t pilot_gfx_surface_ref(unsigned surface,int acquire)
         ID3D11Texture2D_Release(pilot_surfaces[surface]); --pilot_surface_refs[surface];
     }
     return (int32_t)pilot_surface_refs[surface];
+}
+static D3D8Texture *pilot_texture(uint32_t handle)
+{
+    if(!handle || handle>256 || !pilot_textures[handle-1].object)
+        pilot_d3d_backend_stop("unowned native texture");
+    return (D3D8Texture*)pilot_textures[handle-1].object;
+}
+int32_t pilot_gfx_texture_create(uint32_t width,uint32_t height,uint32_t levels,uint32_t format,uint32_t *handle)
+{
+    if(!pilot_device || !handle) return E_INVALIDARG;
+    if(!width || !height || width>4096 || height>4096 || (width&(width-1)) || (height&(height-1)) ||
+       !levels || levels>13 || format<4 || format>7) return E_NOTIMPL;
+    unsigned slot;
+    for(slot=0;slot<256 && pilot_textures[slot].object;++slot) {}
+    if(slot==256) return E_OUTOFMEMORY;
+    IDirect3DTexture8 *object=NULL;
+    HRESULT hr=d3d8_CreateTextureImpl(width,height,levels,0,(D3DFORMAT)format,&object);
+    if(FAILED(hr)) return hr;
+    pilot_textures[slot].object=object; pilot_textures[slot].uploaded=0;
+    *handle=slot+1;
+    return S_OK;
+}
+void pilot_gfx_texture_destroy(uint32_t handle)
+{
+    D3D8Texture *texture=pilot_texture(handle);
+    if(texture->iface.lpVtbl->Release(&texture->iface)!=0)
+        pilot_d3d_backend_stop("native texture still referenced at destruction");
+    memset(&pilot_textures[handle-1],0,sizeof(pilot_textures[0]));
+}
+void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,uint32_t bytes)
+{
+    D3D8Texture *texture=pilot_texture(handle);
+    if(level>=texture->levels || !data) pilot_d3d_backend_stop("invalid texture upload level/data");
+    UINT width=texture->width>>level,height=texture->height>>level;
+    if(!width)width=1; if(!height)height=1;
+    if(bytes!=width*height*(d3d8_format_bpp(texture->d3d8_format)/8))
+        pilot_d3d_backend_stop("texture upload size does not match subresource");
+    D3DLOCKED_RECT lock;
+    pilot_d3d_require(texture->iface.lpVtbl->LockRect(&texture->iface,level,&lock,NULL,0),__FILE__,__LINE__);
+    if((pilot_textures[handle-1].uploaded&(1u<<level)) && !memcmp(lock.pBits,data,bytes)) {
+        texture->locked=FALSE; return; /* No changed CPU work to upload. */
+    }
+    memcpy(lock.pBits,data,bytes);
+    pilot_d3d_require(texture->iface.lpVtbl->UnlockRect(&texture->iface,level),__FILE__,__LINE__);
+    pilot_textures[handle-1].uploaded|=1u<<level;
+    fprintf(stderr,"[TEXTURE UPLOAD] native=%u level=%u %ux%u bytes=%u\n",handle,level,width,height,bytes);
+    /* Diagnostic readback is opt-in and absent from production upload work. */
+    const char *capture=getenv("XLLE_PILOT_TEXTURE_CAPTURE");
+    if(capture && *capture) {
+        static unsigned sequence;
+        char path[1024]; unsigned char *pixels=malloc(bytes);
+        if(!pixels || snprintf(path,sizeof(path),"%s/texture-%u-level-%u-%u.bin",capture,handle,level,++sequence)>=(int)sizeof(path))
+            pilot_d3d_backend_stop("texture capture allocation/path failed");
+        pilot_d3d_require(pilot_gfx_texture_readback(handle,level,pixels,bytes),__FILE__,__LINE__);
+        FILE *output=fopen(path,"wb");
+        uint32_t header[]={0x58544558,1,handle,level,width,height,(uint32_t)texture->d3d8_format,bytes};
+        if(!output || fwrite(header,sizeof(header),1,output)!=1 || fwrite(pixels,bytes,1,output)!=1 || fclose(output))
+            pilot_d3d_backend_stop("texture capture write failed");
+        free(pixels);
+    }
+}
+int32_t pilot_gfx_texture_readback(uint32_t handle,uint32_t level,void *data,uint32_t capacity)
+{
+    D3D8Texture *texture=pilot_texture(handle);
+    if(level>=texture->levels || !data) return E_INVALIDARG;
+    UINT width=texture->width>>level,height=texture->height>>level;
+    if(!width)width=1; if(!height)height=1;
+    UINT pitch=width*(d3d8_format_bpp(texture->d3d8_format)/8);
+    if(capacity<pitch*height || !(pilot_textures[handle-1].uploaded&(1u<<level))) return E_INVALIDARG;
+    D3D11_TEXTURE2D_DESC desc;
+    ID3D11Texture2D_GetDesc(texture->d3d11_texture,&desc);
+    desc.Width=width; desc.Height=height; desc.MipLevels=1;
+    desc.BindFlags=0; desc.MiscFlags=0; desc.Usage=D3D11_USAGE_STAGING; desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
+    ID3D11Texture2D *staging=NULL;
+    HRESULT hr=ID3D11Device_CreateTexture2D(d3d8_GetD3D11Device(),&desc,NULL,&staging);
+    if(FAILED(hr)) return hr;
+    ID3D11DeviceContext *context=d3d8_GetD3D11Context();
+    ID3D11DeviceContext_CopySubresourceRegion(context,(ID3D11Resource*)staging,0,0,0,0,
+        (ID3D11Resource*)texture->d3d11_texture,level,NULL);
+    D3D11_MAPPED_SUBRESOURCE mapped;
+    hr=ID3D11DeviceContext_Map(context,(ID3D11Resource*)staging,0,D3D11_MAP_READ,0,&mapped);
+    if(SUCCEEDED(hr)) {
+        for(UINT row=0;row<height;++row) memcpy((char*)data+row*pitch,(char*)mapped.pData+row*mapped.RowPitch,pitch);
+        ID3D11DeviceContext_Unmap(context,(ID3D11Resource*)staging,0);
+    }
+    ID3D11Texture2D_Release(staging);
+    return hr;
 }
 void pilot_gfx_set_state(uint32_t state,uint32_t value)
 {

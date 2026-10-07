@@ -17,6 +17,7 @@ from native_binding import Binding
 IMAGE = "e6b7cd8a5527dd001e05bb3e881d9b24ffc58824ff67def394215ddbc8009249"
 CREATE = "4111b2a1ca25c2bf8e4cc1cad05ab2142ec17d48b54f2f7457951977d5bce564"
 DEFAULTS = "ab0f752eebe3bb6ce6296909b6f90b604f58eafe877032f64006f6c33f21ccb8"
+CAPS = "a2e598588a3b18aff4ac64b396716e58ca211384f86f5ef757c7ce3aec3caa22"
 
 
 def bind(xbe: Path, output: Path, symbols: Path):
@@ -64,6 +65,14 @@ def bind(xbe: Path, output: Path, symbols: Path):
                  (m:=re.fullmatch(r'dword ptr \[ebx \+ (0x[0-9a-f]+)\], eax',i.op_str))]
     if len(mode_fields)!=1: raise ValueError('unreviewed shader mode field')
     state_defaults['shader_constant_mode_offset']=mode_fields[0]
+    caps=next(s for s in identified if s['name']=='D3DDevice_GetDeviceCaps')
+    if caps['stack_bytes']!=4 or context.digest(functions[caps['address']])!=CAPS:
+        raise ValueError('unreviewed capability query')
+    caps_code=list(Cs(CS_ARCH_X86,CS_MODE_32).disasm(data(caps['address'],23),caps['address']))
+    caps_tables=[int(i.op_str.split(', ')[1],0) for i in caps_code if i.mnemonic=='mov' and i.op_str.startswith('esi, 0x')]
+    if len(caps_tables)!=1 or not any(i.mnemonic=='mov' and i.op_str=='ecx, 0x35' for i in caps_code):
+        raise ValueError('unreviewed capability table copy')
+    state_defaults['device_caps']=list(struct.unpack('<53I',data(caps_tables[0],53*4)))
     calls=[]
     for symbol in identified:
         if not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*",symbol["name"]): raise ValueError("invalid symbol")
@@ -85,6 +94,7 @@ def bind(xbe: Path, output: Path, symbols: Path):
                f'#define PILOT_D3D_SHADER_CONSTANT_MODE_OFFSET 0x{binding["shader_constant_mode_offset"]:x}u',
                'static const uint32_t pilot_d3d_render_defaults[] = {'+', '.join(f'0x{x:x}u' for x in binding['render_defaults'])+'};',
                'static const uint32_t pilot_d3d_texture_defaults[] = {'+', '.join(str(x)+'u' for x in binding['texture_defaults'])+'};']
+    header += ['static const uint32_t pilot_d3d_device_caps[] = {'+', '.join(f'0x{x:x}u' for x in binding['device_caps'])+'};']
     wrapper=['#include "pilot_d3d_bindings.h"', 'extern void pilot_d3d_dispatch(unsigned);']
     for c in calls:
         wrapper += [f'extern void pilot_original_d3d_{c["name"]}(void);',f'void {c["symbol"]}(void) {{',

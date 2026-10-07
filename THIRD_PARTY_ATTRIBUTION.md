@@ -113,6 +113,16 @@ The CPU capability service is independently expressed from the original guest
 probe's observable contract and the pilot's configured CPUID profile. Neither
 change clears the pre-existing GPL dependency of the combined private pilot.
 
+The texture adapter additionally uses the pinned main MIT donor's
+`d3d8_CreateTextureImpl`, texture lock/unlock, unswizzling and release code.
+Prepared changes make upload-allocation failures terminal. The shared guest
+adapter is expressed from original XDK routines and Xbox resource/descriptor
+layout facts in Cxbx; no Cxbx texture service implementation is imported.
+Phobos's CPU-shadow/upload boundary was reviewed as an external design reference.
+Main, Phobos and NoRain capability/display query bodies were checked and excluded
+because they report success without producing their required outputs. The
+original title's capability data remains in ignored, hash-bound generated files.
+
 ## Unicorn Engine / QEMU
 
 [Unicorn Engine](https://github.com/unicorn-engine/unicorn), version `2.1.1`,
