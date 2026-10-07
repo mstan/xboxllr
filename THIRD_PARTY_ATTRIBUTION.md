@@ -58,6 +58,13 @@ libfatx was checked as an external GPL reference for partition/header facts;
 no libfatx or GPL filesystem implementation was imported. Local LLE disk header
 inspection corroborates geometry only, not API equivalence.
 
+`pilots/native-title/sections.inc` owns a page-residency ledger over the verified
+XBE and uses host NT allocation/decommit services. nxdk declares the API;
+Cxbx `585c49a` `EmuKrnlXe.cpp` was consulted for section/boundary count and shared
+page lifetime behavior. No Cxbx loader body is incorporated. sp00nznet's
+all-resident reference-count-only routines were inspected and not adopted.
+The private Phobos CPU helper and earlier distribution limitations remain.
+
 ## Unicorn Engine / QEMU
 
 [Unicorn Engine](https://github.com/unicorn-engine/unicorn), version `2.1.1`,

@@ -53,6 +53,7 @@ static int test_write_faults(uint32_t va)
     return info.State!=MEM_COMMIT || info.Protect==PAGE_NOACCESS || info.Protect==PAGE_READONLY;
 #endif
 }
+#include "sections_contract_test.inc"
 static void test_memory(void)
 {
     const uint32_t bp=0x1b000,sp=0x1b004,info=0x1b020;
@@ -268,6 +269,7 @@ int main(int argc,char **argv)
     if (argc==2) {
         if (!strcmp(argv[1],"media")) { test_media(); return 0; }
         if (!strcmp(argv[1],"storage")) { test_storage(); return 0; }
+        if (!strcmp(argv[1],"sections")) { test_sections(); return 0; }
         if (!strcmp(argv[1],"memory")) { test_memory(); return 0; }
         if (!strcmp(argv[1],"timers")) { test_timers(); return 0; }
         if (!strcmp(argv[1],"instruction")) recomp_unimpl("test unsupported instruction",0x12340);

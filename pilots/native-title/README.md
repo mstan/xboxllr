@@ -13,9 +13,11 @@ entries, create real host-backed title threads, and run early XAPI startup.
 Blinx now passes timer arming, its initial CRT heap reservation/commit, and
 installed-media verification against the actual NAS content. It passes the HDD
 allocation-unit check, creates per-title TDATA/UDATA and persists 72 bytes of
-`TitleMeta.xbx`. Fresh and repeated process launches reach `XeLoadSection` for
-the deferred title-image section (55, 10240 bytes, flags 0x38); the opened
-`TitleImage.xbx` remains empty until that work is implemented. The OPTICAL build retains
+`TitleMeta.xbx`. A fresh launch now loads the deferred title-image section,
+writes `TitleImage.xbx` byte-for-byte equal to its original 10240-byte payload,
+and unloads the section. A repeated launch preserves the file and skips that
+copy through the title's own code. Both now reach raw HDD partition 0 during
+utility-drive setup. The OPTICAL build retains
 and executes the original verification helper, stopping on unsupported raw
 optical access. No graphics, movies, menu or level yet. Function-entry counts
 are diagnostics, not coverage or performance measurements.
@@ -30,10 +32,11 @@ EEPROM user-settings queries and NTSTATUS-to-DOS-error conversion. Timer arming,
 expiry and DPC delivery are implemented as described below. Callback delivery
 is exercised by the contract tests. No callbacks, draws or completions are discarded.
 
-Eight contract tests pass: concurrent threads with separate registers/TLS and
+Nine contract tests pass: concurrent threads with separate registers/TLS and
 recursive exclusion, handle closure/errors and EEPROM buffer/checksum behavior;
 timer/DPC/event-wait contracts; real VM reservation/commit/free/protection/query;
 installed-media identity and actual file I/O; writable storage and link lifetimes;
+deferred section residency and shared-page ownership;
 plus explicit instruction, indirect-call and
 kernel-call failure paths. Passing
 the other title's XBE to the Blinx artifact is rejected before guest execution.
@@ -51,10 +54,10 @@ The main LLE build's runtime source and build selection are untouched.
   `RTL_CRITICAL_SECTION`, `KDPC`, `KTIMER` and EEPROM field contracts. For example,
   the Xbox critical section is 28 bytes; the timer header size is ten DWORDs.
   Host Windows structs are not written over guest structs.
-- Only preload XBE sections are committed, with payload copy and zero-fill;
-  Blinx's 42 deferred sections and JSRF's two are not loaded ahead of time.
-  Shared boundary pages can already be committed. Deferred section lifecycle
-  remains unsupported and is not claimed complete.
+- Only preload XBE sections are committed initially; Blinx's 42 deferred
+  sections and JSRF's two are not loaded ahead of time. Shared boundary pages
+  can already be committed. Explicit section load/unload now owns deferred
+  residency as described below. JSRF has not been run against this new service.
 - Each created thread receives its own stack, TLS template/zero-fill, KPCR,
   thread identity and CPU register state. Diagnostics are thread-local too.
   The bootstrap may close its thread handle and return while the title runs.
@@ -70,7 +73,9 @@ The main LLE build's runtime source and build selection are untouched.
 - Compilation disables host optimization for short bring-up cycles. No FPS,
   full AOT coverage, or D3D8 HLE performance claim follows from this result.
 
-The next Blinx dependency is deferred XBE section loading/unloading.
+The next Blinx dependency is utility-drive cache selection/mounting. Its
+symbol-identified XapiSelectCachePartition currently opens raw HDD partition 0;
+a genuine native cache service is the next natural library boundary.
 The native installed-media contract below replaces the earlier optical check
 with the owner's explicit authorization. The original check requests SCSI MODE
 SENSE page 0x3e through IOCTL 0x4d014; that IOCTL has not executed locally. The NAS
@@ -217,6 +222,47 @@ NT services; no GPL service bodies or libfatx implementation are imported.
 [NtQueryVolumeInformationFile](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntqueryvolumeinformationfile)
 and [FILE_FS_SIZE_INFORMATION](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntddk/ns-ntddk-_file_fs_size_information)
 document the host contract; nxdk declares the Xbox structures and ordinals.
+
+## Deferred section residency
+
+`sections.inc` maintains per-section references and a separate page-ownership
+ledger for the immutable, identity-checked XBE. Initial preload sections and
+header pages own their actual page ranges; exported 16-bit boundary counters
+are initialized accordingly. The old loader had set section references without
+initializing those boundary counters. Deferred sections gain ownership only on
+their first successful load. The same API handles any discovered section; no
+title-specific addresses or section IDs appear in its implementation.
+
+On the first load, real host pages are committed, raw bytes are copied from the
+verified input, and the virtual tail is zero-filled. Additional references do
+not overwrite modified bytes or add physical ownership. Final unload decommits
+only pages without another section/header owner. Fragments on still-shared pages
+remain unchanged, including the unloading section's fragment. A subsequent
+load restores the original payload and zero-fill. Guest section and boundary
+counts track successful state changes; failed admission preserves them.
+
+The adapter shares the existing 64 MiB commitment admission check with native
+VM operations. That remains a bounded host-commit count, not complete retail
+physical accounting. Image pages retain the pilot's RW backing; XBE read-only/
+execute permission enforcement, loaded-code invalidation and full guest fault
+delivery are not qualified. External edits to section reference fields stop
+explicitly. The API is bounded to original validated image descriptors and
+non-overlapping section byte ranges, while page overlap is supported.
+
+Nine CTests pass. The section test covers real data, zero-fill, repeated-reference
+preservation, reload, shared head/tail pages, aliased boundary counters, actual
+decommit faults, concurrent load/unload ownership, invalid descriptors, overflow
+and memory-budget failure preservation. Actual Blinx performs a load, a real
+file write and an unload; a separate host comparison proves all 10240 output
+bytes equal the original section. A second process run keeps the same file.
+This does not yet validate executable-overlay use or the full attract sequence.
+
+nxdk supplies the function declarations. Cxbx's section implementation was an
+external behavioral reference for exported counters and shared-page lifetime;
+its implementation is not imported. The inspected sp00nznet section routines
+only change counts under an all-resident loader assumption, so they were not
+adopted. Whole-image identity verification protects the immutable byte source;
+the pilot does not separately emulate retail section-signature verification.
 
 ## Native virtual-memory checkpoint
 

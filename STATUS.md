@@ -1,5 +1,38 @@
 # STATUS
 
+## 2026-10-06 - Blinx loads/unloads its deferred image and writes exact asset bytes
+
+`beads-xbox.1.62`: real `XeLoadSection`/`XeUnloadSection` now advance Blinx past
+section 55. A fresh-state launch loads the 10240-byte payload, writes
+`TitleImage.xbx`, unloads the section and continues. Independent comparison of
+the resulting file against the original XBE section matches every byte. A
+second launch preserves that file and skips the already-completed copy through
+the title's own code. Both reach the next utility-drive setup request: raw HDD
+partition 0, read/write access and alertable synchronous I/O. No graphics yet.
+
+Nine CTests pass. The section adapter owns page residency separately from
+guest reference counts, initializes preload/shared-boundary ownership, restores
+original bytes/zero-fill on a first load, preserves modifications on repeated
+references, and decommits only unshared pages on final unload. Shared fragments
+are not erased. Tests include head/tail sharing, aliased counters, real faults
+after decommit, concurrent callers, overflow and 64 MiB budget failure without
+changing guest state. Permission/exception fidelity and complete physical RAM
+accounting remain limited by the private pilot; page backing remains RW.
+
+The next request belongs to symbol-identified `XapiSelectCachePartition`
+(three stack arguments) called by `XMountUtilityDrive` (one argument). Static
+inspection shows a 512-byte cache table at raw offset 0x800 plus the kernel's
+cache-partition count. Prefer a real persistent native cache service at its
+bounded library contract over fabricated raw sectors; no cache HLE is claimed
+implemented by this checkpoint. Donor all-resident section-count shortcuts are
+not imported. Cxbx/nxdk remain external behavior/ABI references, not shipped GPL
+loader bodies. The normal LLE implementation remains unchanged.
+
+Evidence: `build/section-contract-tests.log`, `build/blinx/run-sections-*.log`,
+`build/blinx/sections-runs.aot-private.json`, and
+`build/blinx/sections-validation.aot-private.json`. Full attract/audio/movies/
+gameplay/input/cadence and JSRF remain outstanding.
+
 ## 2026-10-06 - Blinx persists title metadata; deferred image section is next
 
 `beads-xbox.1.62`: native HDD mounts, volume queries, create/write/flush/truncate,

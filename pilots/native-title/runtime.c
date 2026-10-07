@@ -235,6 +235,7 @@ static void query_setting(void)
 
 #include "dispatcher.inc"
 #include "virtual_memory.inc"
+#include "sections.inc"
 #include "media.inc"
 
 static void kernel_dispatch(void)
@@ -244,15 +245,8 @@ static void kernel_dispatch(void)
         if (pilot_imports[i].ordinal == next_kernel_ordinal) name=pilot_imports[i].name;
     fprintf(stderr, "[KERNEL] %u %s return=%08x\n", next_kernel_ordinal, name, MEM32(g_esp));
     switch (next_kernel_ordinal) {
-    case 327: {
-        uint32_t section=MEM32(g_esp+4);
-        if (section>=section_table && (section-section_table)%56==0 && (section-section_table)/56<section_count) {
-            unsigned index=(section-section_table)/56; size_t off=section_table-image_base+index*56;
-            fprintf(stderr,"[SECTION REQUEST] load index=%u flags=%08x address=%08x size=%u refs=%u\n",
-                    index,file32(off),file32(off+4),file32(off+8),MEM32(section+24));
-        }
-        break;
-    }
+    case 327: case 328:
+        g_eax=section_change(MEM32(g_esp+4),next_kernel_ordinal==327); g_esp+=8; return;
     case 279: {
         typedef BOOLEAN (NTAPI *EqualAnsi)(const ANSI_STRING*,const ANSI_STRING*,BOOLEAN);
         EqualAnsi equal=(EqualAnsi)(void*)GetProcAddress(GetModuleHandleW(L"ntdll.dll"),"RtlEqualString");
@@ -433,6 +427,7 @@ static void load_image(const char *path)
         }
     }
     fprintf(stderr,"[LOAD] %u preload sections; %u deferred sections\n",preloaded,section_count-preloaded);
+    sections_initialize();
 
     /* Post-loader bootstrap thread. Xbox TLS is below NtTib.StackBase;
      * the original XAPI entry computes and writes its negative TLS index. */
