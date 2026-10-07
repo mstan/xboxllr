@@ -86,7 +86,7 @@ def bind(xbe: Path, output: Path, symbols: Path):
         (m:=re.fullmatch(r'al, byte ptr \[edx \+ (0x[0-9a-f]+)\]',i.op_str))]
     if len(format_tables)!=1: raise ValueError('unreviewed surface format table')
     state_defaults['surface_formats']=[dict(format=x,flags=data(format_tables[0]+x,1)[0])
-        for x in (4,5,6,7,0xc,0xe,0xf,0x12,0x1e)]
+        for x in (4,5,6,7,0xc,0xe,0xf,0x12,0x1e,0x2e)]
     calls=[]
     for symbol in identified:
         if not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*",symbol["name"]): raise ValueError("invalid symbol")
@@ -120,7 +120,7 @@ def bind(xbe: Path, output: Path, symbols: Path):
     texts={"pilot_d3d_bindings.h":"\n".join(header)+"\n", "pilot_d3d_binding.c":"\n".join(wrapper)+"\n"}
     if (generated/"pilot_d3d_binding.c").exists():
         old=json.loads(record.read_text())
-        if any(k not in binding or binding[k]!=v for k,v in old.items()) or (generated/'pilot_d3d_binding.c').read_text()!=texts['pilot_d3d_binding.c']:
+        if any(k not in binding or (binding[k][:len(v)]!=v if k=='surface_formats' else binding[k]!=v) for k,v in old.items()) or (generated/'pilot_d3d_binding.c').read_text()!=texts['pilot_d3d_binding.c']:
             raise ValueError("existing graphics binding differs")
         if old==binding and (generated/'pilot_d3d_bindings.h').read_text()==texts['pilot_d3d_bindings.h']:
             return binding

@@ -4,7 +4,7 @@
  */
 #define GRAPHICS_TEXTURE_OBJECTS 512
 struct GraphicsTextureObject {
-    uint32_t header,data,bytes,width,height,levels,format,refs,native;
+    uint32_t header,data,bytes,width,height,levels,format,refs,native,usage,cpu_exposed;
     unsigned parent,level; /* parent is slot+1 for a surface view, zero for texture */
 };
 static struct GraphicsTextureObject graphics_textures[GRAPHICS_TEXTURE_OBJECTS];
@@ -33,6 +33,8 @@ static uint32_t graphics_texture_block(const struct GraphicsTextureObject *textu
 {
     return texture->format==0xc?8:(texture->format==0xe || texture->format==0xf?16:0);
 }
+static int graphics_texture_linear(const struct GraphicsTextureObject *texture)
+{return texture->format==0x12 || texture->format==0x1e || texture->format==0x2e;}
 static uint32_t graphics_level_width(const struct GraphicsTextureObject *texture,unsigned level)
 {
     uint32_t width=texture->width>>level; return width?width:1;
@@ -45,7 +47,9 @@ static uint32_t graphics_level_bytes(const struct GraphicsTextureObject *texture
 {
     uint32_t block=graphics_texture_block(texture);
     if(block)return ((graphics_level_width(texture,level)+3)/4)*((graphics_level_height(texture,level)+3)/4)*block;
-    return graphics_level_width(texture,level)*graphics_level_height(texture,level)*graphics_texture_bpp(texture);
+    uint32_t pitch=graphics_level_width(texture,level)*graphics_texture_bpp(texture);
+    if(graphics_texture_linear(texture))pitch=(pitch+63)&~63u;
+    return pitch*graphics_level_height(texture,level);
 }
 static uint32_t graphics_level_offset(const struct GraphicsTextureObject *texture,unsigned level)
 {
@@ -55,24 +59,30 @@ static void graphics_texture_header(struct GraphicsTextureObject *object)
 {
     MEM32(object->header)=(object->parent?0x01050000u:0x01040000u)|object->refs;
     MEM32(object->header+4)=object->data; MEM32(object->header+8)=0;
-    MEM32(object->header+12)=0x29u|(object->format<<8)|(object->levels<<16)|
-        (graphics_log2(object->width)<<20)|(graphics_log2(object->height)<<24);
-    MEM32(object->header+16)=0;
+    MEM32(object->header+12)=0x29u|(object->format<<8)|(object->levels<<16);
+    if(graphics_texture_linear(object)) {
+        uint32_t pitch=(object->width*4+63)&~63u;
+        MEM32(object->header+16)=(object->width-1)|((object->height-1)<<12)|((pitch/64-1)<<24);
+    } else {
+        MEM32(object->header+12)|=(graphics_log2(object->width)<<20)|(graphics_log2(object->height)<<24);
+        MEM32(object->header+16)=0;
+    }
     if(object->parent) MEM32(object->header+20)=graphics_textures[object->parent-1].header;
 }
 static uint32_t graphics_texture_allocate(const uint32_t *args)
 {
-    uint32_t width=args[0],height=args[1],levels=args[3],format=args[5];
-    if(args[2]!=1 || args[4] || args[6]!=3 || !((format>=4 && format<=7) || format==0xc || format==0xe || format==0xf))
+    uint32_t width=args[0],height=args[1],levels=args[3],format=args[5],usage=args[4];
+    int linear=format==0x12 || format==0x1e || format==0x2e;
+    if(args[2]!=1 || (format==0x2e?usage!=2:(usage && (usage!=1 || !linear))) || args[6]!=3 || !(linear || (format>=4 && format<=7) || format==0xc || format==0xe || format==0xf))
         stop("unqualified texture type/usage/format",format);
-    if(!width || !height || width>4096 || height>4096 || (width&(width-1)) || (height&(height-1)))
+    if(!width || !height || width>4096 || height>4096 || (!linear && ((width&(width-1)) || (height&(height-1)))))
         stop("unqualified texture dimensions",width);
-    if(format>=0xc && (width<4 || height<4))stop("compressed texture base below native block size",width);
-    unsigned max_levels=graphics_log2(width>height?width:height)+1;
+    if(!linear && format>=0xc && (width<4 || height<4))stop("compressed texture base below native block size",width);
+    unsigned max_levels=linear?1:graphics_log2(width>height?width:height)+1;
     if(!levels)levels=max_levels;
     if(levels>max_levels)stop("texture mip chain exceeds dimensions",levels);
     struct GraphicsTextureObject texture={0};
-    texture.width=width; texture.height=height; texture.levels=levels; texture.format=format; texture.refs=1;
+    texture.width=width; texture.height=height; texture.levels=levels; texture.format=format; texture.refs=1;texture.usage=usage;
     texture.bytes=graphics_level_offset(&texture,levels);
     unsigned slot=graphics_texture_unused(); uint32_t bytes=4096;
     if(vm_allocate(&texture.header,0,&bytes,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE)) return 0;
@@ -81,7 +91,7 @@ static uint32_t graphics_texture_allocate(const uint32_t *args)
         bytes=0; if(vm_free(&texture.header,&bytes,MEM_RELEASE))stop("texture header cleanup failed",texture.header);
         return 0;
     }
-    int32_t result=pilot_gfx_texture_create(width,height,levels,format,&texture.native);
+    int32_t result=pilot_gfx_texture_create_usage(width,height,levels,format,usage,&texture.native);
     if(result<0) {
         bytes=0; if(vm_free(&texture.data,&bytes,MEM_RELEASE))stop("texture data cleanup failed",texture.data);
         bytes=0; if(vm_free(&texture.header,&bytes,MEM_RELEASE))stop("texture header cleanup failed",texture.header);
@@ -108,7 +118,9 @@ static uint32_t graphics_texture_ref(unsigned slot,int acquire)
     MEM32(object->header)=(MEM32(object->header)&~0xffffu)|object->refs;
     if(object->refs)return object->refs;
     unsigned parent=object->parent;
-    if(parent)graphics_texture_upload(&graphics_textures[parent-1],object->level);
+    if(parent) {
+        if(!object->usage || object->cpu_exposed)graphics_texture_upload(&graphics_textures[parent-1],object->level);
+    }
     else {
         pilot_gfx_texture_destroy(object->native);
         uint32_t bytes=0; if(vm_free(&object->data,&bytes,MEM_RELEASE))stop("texture data release failed",object->data);
@@ -130,19 +142,20 @@ static uint32_t graphics_texture_surface(uint32_t header,unsigned level)
     surface.width=graphics_level_width(texture,level); surface.height=graphics_level_height(texture,level);
     surface.format=texture->format; surface.data=texture->data+graphics_level_offset(texture,level);
     surface.bytes=graphics_level_bytes(texture,level);
+    surface.usage=texture->usage;
     graphics_texture_ref(parent,1); graphics_texture_header(&surface); graphics_textures[slot]=surface;
     return surface.header;
 }
 static void graphics_texture_desc(uint32_t header,unsigned level,uint32_t destination)
 {
     uint32_t format,flags=0;int known=0;
-    if(header==graphics_headers || header==graphics_headers+32)format=(MEM32(header+12)>>8)&255;
+    if(header==graphics_headers || header==graphics_headers+32 || header==graphics_headers+64)format=(MEM32(header+12)>>8)&255;
     else format=graphics_textures[graphics_texture_slot(header)].format;
     for(unsigned i=0;i<sizeof(pilot_d3d_surface_formats)/sizeof(pilot_d3d_surface_formats[0]);++i)
         if(pilot_d3d_surface_formats[i].format==format) {flags=pilot_d3d_surface_formats[i].flags;known=1;break;}
     if(!known)stop("unqualified surface description format",format);
     uint32_t usage=level?0:((flags&0x80)?1:((flags&0x40)?2:0));
-    if(header==graphics_headers || header==graphics_headers+32) {
+    if(header==graphics_headers || header==graphics_headers+32 || header==graphics_headers+64) {
         if(level)stop("display surface has no mip levels",level);
         uint32_t size=MEM32(header+16),width=(size&0xfff)+1,height=((size>>12)&0xfff)+1,pitch=((size>>24)+1)*64;
         uint32_t description[]={format,1,usage,pitch*height,graphics_parameters[4],width,height};
@@ -160,6 +173,12 @@ static void graphics_texture_lock(uint32_t header,unsigned level,uint32_t destin
     if(level>=object->levels || (flags&~0xf0u))stop("unqualified texture lock flags/level",flags);
     uint32_t width=graphics_level_width(object,level),height=graphics_level_height(object,level);
     uint32_t pitch=width*graphics_texture_bpp(object),data=object->data+graphics_level_offset(object,level);
+    if(graphics_texture_linear(object))pitch=(pitch+63)&~63u;
+    if(object->usage) {
+        struct GraphicsTextureObject *texture=object->parent?&graphics_textures[object->parent-1]:object;
+        pilot_gfx_texture_download(texture->native,memory+texture->data,texture->bytes);
+        object->cpu_exposed=1;
+    }
     uint32_t block=graphics_texture_block(object);
     if(block)pitch=((width+3)/4)*block;
     if(rectangle) {

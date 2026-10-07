@@ -1,5 +1,23 @@
 # STATUS
 
+## 2026-10-07 - Blinx creates color/depth targets and reaches state blocks
+
+`beads-xbox.1.62`: fresh/repeated NTSC Blinx creates 640x480 color and depth
+textures plus a 320x240 color texture, obtains their surface views and queries
+the current color/depth surfaces. It reaches 96 compiled vertex shaders and
+37 owned pixel definitions, then stops at `D3DDevice_CreateStateBlock` (ALL).
+Entries: 20607051/20606959. No title target binding, draw or buffer Play yet;
+JSRF remains deferred. Next coherent family: state capture/application.
+
+The native path reuses the main MIT donor's actual texture allocation with
+typed color/depth views over compatible storage. Guest layout, ownership,
+binding, padded CPU transfers and Xbox Z24S8 conversion are independently
+adapted. All 29 CTests pass, including real GPU clears/readbacks, partial
+depth/stencil updates, aliases, self-rebinding and lifetime cleanup. Original
+XDK helper execution independently confirms the admitted linear layouts.
+These are bounded contract fixtures, not title frames or full GPU equivalence.
+See [target contract and evidence](pilots/native-title/README.md#native-render-target-checkpoint-2026-10-07).
+
 ## 2026-10-07 - Blinx passes real DSP installation and reaches render targets
 
 `beads-xbox.1.62`: fresh/repeated NTSC Blinx now installs its actual three-effect

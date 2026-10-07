@@ -118,6 +118,15 @@ def prepare(donor: Path, output: Path, vsh_reference: Path):
                     '    sd.BorderColor[2]=(border&255)/255.0f;\n'
                     '    sd.BorderColor[3]=((border>>24)&255)/255.0f;')
             if name == "d3d8_resources.c":
+                # D24S8 render/depth sampling requires typeless storage with
+                # separately typed views. The original typed DSV+SRV allocation
+                # is rejected by D3D11. Only this bounded depth format is used.
+                code = code.replace('    td.Format = tex->dxgi_format;',
+                    '    td.Format = tex->dxgi_format == DXGI_FORMAT_D24_UNORM_S8_UINT ? DXGI_FORMAT_R24G8_TYPELESS : tex->dxgi_format;')
+                code = code.replace('    want_srv = !d3d8_format_is_depth(Format);',
+                    '    want_srv = !d3d8_format_is_depth(Format) || tex->dxgi_format == DXGI_FORMAT_D24_UNORM_S8_UINT;')
+                code = code.replace('        srvd.Format = tex->dxgi_format;',
+                    '        srvd.Format = tex->dxgi_format == DXGI_FORMAT_D24_UNORM_S8_UINT ? DXGI_FORMAT_R24_UNORM_X8_TYPELESS : tex->dxgi_format;')
                 code = code.replace('    (void)SizeToLock; (void)Flags;',
                     '    if (Flags || OffsetToLock > vb->size || SizeToLock > vb->size-OffsetToLock) return E_INVALIDARG;')
                 code = code.replace('    if (ctx && vb->d3d11_buffer) {',

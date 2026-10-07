@@ -42,8 +42,10 @@ workers. Guest vertical-blank waits now complete at the configured nominal
 60 Hz. Blinx creates three 65536-byte stereo PCM16 buffers at 44100 Hz and
 locks/unlocks their first four bytes, then loads the complete 15188-byte
 `media/dsp.bin`. It now installs the real DSP graph through XAudio2, creates
-two more pixel definitions (32 total), and stops at a 640x480 render-target
-texture, format `0x12` and usage `1`.
+640x480 color/depth textures and a 320x240 color texture, obtains their surface
+views and queries the current color/depth surfaces. It reaches 96 compiled
+vertex shaders and 37 owned pixel definitions, then stops at
+`D3DDevice_CreateStateBlock` (ALL). No title target binding or draw occurs yet.
 No title buffer Play or audible game output is established by those runs.
 `PILOT_AUDIO=ORIGINAL` still executes the original sound-object allocations and
 contiguous-page setup, stopping at `KfRaiseIrql` (ordinal 160) in audio-driver
@@ -77,6 +79,8 @@ native utility-drive persistence, formatting, eviction and failure handling;
 real read-through file-cache sizing, coherence, position and budget handling;
 real donor GPU clear/triangle/present pixels, guest graphics ABI and ownership;
 texture GPU pixels/mips, shared views, changed-data upload and parent lifetimes;
+linear color/depth target layouts, actual GPU clears/readback, CPU edits,
+partial depth/stencil updates, retained bindings and safe self-rebinding;
 DXT1/3/5 compressed blocks and mip tails, texture/surface descriptions,
 pixel-definition ownership/copy/HRESULT/OOM, and real `MEM_NOZERO` commitment;
 memory-statistics changes with actual commitment, reservation, image, stack,
@@ -99,6 +103,55 @@ the other title's XBE to the Blinx artifact is rejected before guest execution.
 The main LLE build's runtime source and build selection are untouched.
 
 ## Reuse and scope
+
+### Native render-target checkpoint (2026-10-07)
+
+The reached family admits single-level linear ARGB/XRGB color targets
+(`0x12`/`0x1e`, usage 1) and linear D24S8 depth targets (`0x2e`, usage 2).
+Original XDK helper execution confirms headers, 64-byte-aligned pitch and
+allocation extent for 640x480 and odd 37x19 fixtures, including depth. Guest
+surface views share the actual parent storage and retain it. Binding retains
+both views, acquires new references before releasing old ones, resets the
+viewport, preserves the color target for a null color argument and disables
+depth for null depth. Queries return the current owned surfaces with AddRef.
+
+Actual texture allocation/SRV handling comes from pinned MIT sp00nznet
+`1409a7d`. The adapter creates real D3D11 render/depth views, using typeless
+depth storage with separately typed views. Phobos `63f18f0` was inspected for
+ownership/viewport behavior; its GPL implementation is not imported. NoRain
+`7adaf21`'s incomplete target methods were excluded. The main donor's target
+binding method also required different ownership/error handling, so binding
+is independently adapted from the original routines. The existing private
+CPU pilot's GPL restriction remains unchanged.
+
+GPU output is copied back only when an admitted CPU lock requires it. CPU
+writes are uploaded before binding/clearing or exposed-view release; pending
+alias writes survive additional locks, and untouched view release does not
+overwrite GPU output. Depth transfers convert the existing LLE floor's
+Z24S8 layout (depth high 24 bits, stencil low 8) to/from native D24S8. This
+does not require duplicate production execution or matching native storage.
+
+All 29 CTests pass. Target fixtures check actual color/depth pixels, padded
+rows, XRGB's unspecified alpha, partial depth/stencil updates, CPU edits
+through aliases, safe self-rebinding, client release while bound, parent/view
+lifetimes and restoration of the guest allocation baseline. Fresh and repeat
+Blinx launches stop at state-block creation after 20607051/20606959 entries.
+Private evidence: `build/target-all-contract-tests.log`,
+`build/blinx/linear-texture-oracle.aot-private.json`,
+`build/blinx/target-validation.aot-private.json` and
+`build/blinx/run-target-{fresh,repeat}.log`.
+
+The default depth surface is represented as canonical linear `0x2e`, as the
+existing default color surface uses canonical linear `0x12`; Blinx requested
+swizzled `0x2a`/`0x06`. These are explicit HLE representation differences,
+not a claim of identical hardware layout. Direct/default-depth CPU access,
+retained CPU writes across GPU operations, other target formats, multisampling,
+render-target mip chains and inline private device-field access remain
+unqualified. Texture sampling and shader application to title draws still
+need their own boundary validation. The title has created and queried targets;
+binding/clear/readback evidence currently comes from GPU contract fixtures.
+The next family is real state-block capture/application, not extra formats
+unrelated to the observed stop. No title frame, menu or attract result yet.
 
 ### Native input checkpoint (2026-10-07)
 
