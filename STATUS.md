@@ -1,5 +1,50 @@
 # STATUS
 
+## 2026-10-07 - Blinx passes graphics-state setup and reads its first font image
+
+`beads-xbox.1.62`: original NTSC Blinx now executes culling/depth setup, six raw
+NV2A state writes, four texture-coordinate setters, shader constant mode 1 and
+viewport setup. It then opens both Arial font assets and reads all 131116 bytes
+of `media/Fonts/Arial_16.tga` from the actual installed title. Fresh/repeated
+launches reach the image decoder's **guest setjmp unsupported** boundary
+(entries 417/325). There is still no Blinx draw, decoded/uploaded font texture,
+menu, audio, movie, attract completion or speed measurement. JSRF remains deferred.
+
+The renderer adapter translates Xbox depth/comparison/blend/stencil/cull/color
+encodings to the borrowed MIT D3D11 backend. Raw fastcall packets update native
+state without overwriting the guest cache, matching the inspected helper;
+named setters maintain their guest-visible fields. Initial state tables are
+decoded from the hash-pinned original initializer into private bindings. The
+batch hook consumes direct deferred-array writes; it is exercised by GPU draw
+fixtures and must be used by the still-unimplemented guest draw entry points.
+
+The reviewed `SetShaderConstantMode(1)` branch changes only device mode and
+reservation fields; creation already owns the donor's actual 192-float4 buffer.
+Mode-zero reset work and other mode transitions remain explicit unsupported
+operations. This does not claim programmable shader execution is integrated.
+
+Reached file access exposed the Xbox DOS-directory pseudo handle `-3`. It now
+resolves relative names through real guest namespace links, including the `D:`
+link created by the title. No new drive-name fallback or fabricated read was
+added. Tests read real bytes through this handle and retain missing-link,
+traversal, output-preservation and ordinary relative-file-handle behavior.
+
+Fourteen CTests pass with expanded actual GPU evidence: depth rejection and
+disable, channel write mask, alpha blend/test, winding culling, inline diffuse
+argument zero, and actual bound sampler fields. Donor fixes preserve argument
+zero, W addressing, border color, LOD limits/bias and all basic filter choices.
+Blend tolerance is two UNORM levels; these fixtures are not an LLE differential.
+Full lighting/material parity, arbitrary texture operations and guest draws
+remain unqualified. Evidence: `build/graphics-states-tests.log`,
+`build/graphics-states-pixels.log`, `build/blinx/run-graphics-state-*.log`,
+`build/blinx/graphics-state-validation.aot-private.json`.
+
+Next reuse candidate is the MIT main donor's thread-local native setjmp/longjmp
+bridge (`src/kernel/xbox_memory_layout.c` at `1409a7d`). Qualify real frame and
+guest-register/SEH restoration; replace its slot-overwrite/missing-target
+fallbacks with explicit failures. Returning zero without arming recovery would
+not implement the image decoder's contract.
+
 ## 2026-10-07 - Blinx creates the borrowed D3D11 device and acquires a real surface
 
 `beads-xbox.1.62`: the private native pilot now replaces the whole identified

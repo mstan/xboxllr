@@ -209,12 +209,19 @@ static uint32_t media_path(uint32_t attributes,WCHAR path[1024],HANDLE *parent,u
     if (strlen(name)!=length) return 0xc0000033u;
     uint32_t root=MEM32(attributes);
     char resolved[1024]; const char *part=name;
-    if (root) {
+    if (root && root!=0xfffffffdu) {
         *parent=media_handle(root);
         if (!*parent) return MEDIA_BAD_HANDLE;
         *partition=media_partition(root);
     } else {
-        uint32_t status=namespace_resolve(name,resolved);
+        /* nxdk ObDosDevicesDirectory() is the object-directory pseudo handle
+         * -3, not a file handle. Resolve relative names inside guest \??. */
+        char dos_name[1024]; const char *input=name;
+        if(root==0xfffffffdu) {
+            if(name[0]=='\\' || length+4>=sizeof(dos_name))return 0xc0000033u;
+            snprintf(dos_name,sizeof(dos_name),"\\??\\%s",name);input=dos_name;
+        }
+        uint32_t status=namespace_resolve(input,resolved);
         if (status) return status;
         part=resolved;
         *parent=media_root;
@@ -353,6 +360,8 @@ static void media_kernel(unsigned ordinal)
             ReleaseSRWLockExclusive(&owned->io_lock);
         }
         if (iosb) media_iosb(iosb,g_eax,io.Information);
+        if (transfer) fprintf(stderr,"[FILE TRANSFER] ordinal=%u handle=%08x requested=%u completed=%llu status=%08x\n",
+                              ordinal,a[0],a[6],(unsigned long long)io.Information,g_eax);
     }
     if (opening) ReleaseSRWLockExclusive(&media_lock);
     else ReleaseSRWLockShared(&media_lock);

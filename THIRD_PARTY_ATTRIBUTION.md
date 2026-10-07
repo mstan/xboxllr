@@ -92,6 +92,15 @@ facts as external references; no Cxbx/Phobos graphics service body is imported.
 The already existing Phobos CPU helper still makes the combined executable a
 private GPL-dependent reference artifact, not a cleared shipping product.
 
+The graphics state extension uses original XDK instruction/table inspection,
+nxdk NV2A constant declarations and Cxbx Xbox state/layout declarations as ABI
+facts; no external GPL conversion bodies are imported. Pinned MIT donor state
+and shader files receive prepared changes for diffuse argument zero and sampler
+W/border/LOD/filter behavior. Source/prepared hashes retain that provenance.
+The DOS-directory pseudo-handle correction follows nxdk's
+`ObDosDevicesDirectory()` declaration and the main donor's handle-adaptation
+reference, while resolving through this pilot's existing owned namespace.
+
 ## Unicorn Engine / QEMU
 
 [Unicorn Engine](https://github.com/unicorn-engine/unicorn), version `2.1.1`,

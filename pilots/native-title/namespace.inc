@@ -74,6 +74,7 @@ static void namespace_kernel(unsigned ordinal)
         if (!status && ordinal==67) {
             status=namespace_string(b,target,sizeof(target));
             if (!status) status=namespace_create(name,target);
+            if (!status) fprintf(stderr,"[NAMESPACE] %s -> %s\n",name,target);
         } else if (!status) {
             int at=namespace_find(name);
             if (at<0) status=0xc0000034u;

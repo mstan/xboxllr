@@ -89,6 +89,15 @@ static void test_media(void)
     uint32_t create[]={out,GENERIC_READ|SYNCHRONIZE,0x1a000,iosb,0,0,1,1,0x60};
     call_kernel(190,create,9); CHECK(!g_eax);
     child=MEM32(out); call_kernel(187,&child,1); CHECK(!g_eax);
+    test_media_name("d:\\ASSET.BIN",0xfffffffdu);
+    call_kernel(190,create,9); CHECK(!g_eax);
+    child=MEM32(out);read[0]=child;read[6]=sizeof(content);read[7]=offset;MEM64(offset)=0;
+    call_kernel(219,read,8);CHECK(!g_eax && MEM32(iosb+4)==sizeof(content) && !memcmp(memory+buffer,content,sizeof(content)));
+    call_kernel(187,&child,1);CHECK(!g_eax);
+    test_media_name("Q:\\asset.bin",0xfffffffdu);MEM32(out)=0xfeed1234;
+    call_kernel(190,create,9);CHECK(g_eax==0xc000003au && MEM32(out)==0xfeed1234);
+    test_media_name("D:\\..\\asset.bin",0xfffffffdu);
+    call_kernel(190,create,9);CHECK(g_eax==0xc0000033u);
     CloseHandle(media_identity); CloseHandle(media_root); media_identity=media_root=NULL;
     sprintf(path,"%s\\asset.bin",directory); CHECK(DeleteFileA(path));
     sprintf(path,"%s\\default.xbe",directory); CHECK(DeleteFileA(path));

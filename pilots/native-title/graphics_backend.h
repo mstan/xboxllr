@@ -11,6 +11,8 @@ int32_t pilot_gfx_draw_up(uint32_t primitive,uint32_t count,const void *data,uin
 int32_t pilot_gfx_readback(unsigned char *rgba,uint32_t capacity);
 void pilot_gfx_set_state(uint32_t state,uint32_t value);
 void pilot_gfx_set_texture_state(uint32_t stage,uint32_t state,uint32_t value);
+int pilot_gfx_xbox_render_state(uint32_t state,uint32_t value);
+int pilot_gfx_xbox_texture_state(uint32_t stage,uint32_t state,uint32_t value);
 uint32_t pilot_gfx_width(void);
 uint32_t pilot_gfx_height(void);
 int32_t pilot_gfx_surface_ref(unsigned surface,int acquire);

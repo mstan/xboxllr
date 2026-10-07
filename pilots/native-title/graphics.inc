@@ -8,6 +8,7 @@ static int graphics_active;
 static uint32_t graphics_parameters[17];
 static uint32_t graphics_headers,graphics_data[2];
 static unsigned graphics_surface_refs[2];
+#include "graphics_state.inc"
 
 static void graphics_surfaces_create(void)
 {
@@ -76,6 +77,7 @@ void pilot_d3d_dispatch(unsigned entry)
         g_eax=(uint32_t)pilot_gfx_create(staged);
         if (!(g_eax&0x80000000u)) {
             graphics_active=1; memcpy(graphics_parameters,staged,sizeof(staged));
+            graphics_state_init();
             graphics_surfaces_create();
             MEM32(PILOT_D3D_DEVICE_GLOBAL)=PILOT_D3D_DEVICE_OBJECT;
             if (arguments[5]) MEM32(arguments[5])=PILOT_D3D_DEVICE_OBJECT;
@@ -85,6 +87,31 @@ void pilot_d3d_dispatch(unsigned entry)
         }
         break;
     }
+    case PILOT_D3D_D3DDevice_SetRenderState_Simple:
+        fprintf(stderr,"[D3D SIMPLE] method=%08x value=%08x\n",g_ecx,g_edx);
+        graphics_simple_state(g_ecx,g_edx); break;
+    case PILOT_D3D_D3DDevice_SetRenderState_CullMode:graphics_render_state(147,arguments[0],1);break;
+    case PILOT_D3D_D3DDevice_SetRenderState_ZEnable:graphics_render_state(143,arguments[0],1);break;
+    case PILOT_D3D_D3DDevice_SetRenderState_StencilEnable:graphics_render_state(144,arguments[0],1);break;
+    case PILOT_D3D_D3DDevice_SetRenderState_StencilFail:graphics_render_state(145,arguments[0],1);break;
+    case PILOT_D3D_D3DDevice_SetRenderState_FogColor:graphics_render_state(138,arguments[0],1);break;
+    case PILOT_D3D_D3DDevice_SetRenderState_TextureFactor:graphics_render_state(148,arguments[0],1);break;
+    case PILOT_D3D_D3DDevice_SetRenderState_FillMode:graphics_render_state(139,arguments[0],1);break;
+    case PILOT_D3D_D3DDevice_SetRenderStateNotInline:
+        graphics_render_state(arguments[0],arguments[1],1);break;
+    case PILOT_D3D_D3DDevice_SetTextureState_TexCoordIndex:
+        graphics_texture_state(arguments[0],28,arguments[1],1);break;
+    case PILOT_D3D_D3DDevice_SetTextureStageStateNotInline:
+        graphics_texture_state(arguments[0],arguments[1],arguments[2],1);break;
+    case PILOT_D3D_D3DDevice_SetShaderConstantMode:
+        /* The reviewed mode-1 branch only records mode/reservation flags; it
+         * issues no GPU commands. Creation already allocated the donor's real
+         * 192-float4 buffer. Mode zero has fixed-pipeline reset work and remains
+         * unsupported until that whole transition is qualified. */
+        if(arguments[0]!=1)stop("unqualified shader constant mode transition",arguments[0]);
+        MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SHADER_CONSTANT_MODE_OFFSET)=1;
+        MEM32(PILOT_D3D_DEVICE_OBJECT+8)&=~0x200u;
+        g_eax=1;break;
     case PILOT_D3D_D3DDevice_GetBackBuffer2: {
         if (arguments[0]!=0 && arguments[0]!=0xffffffffu)
             stop("back buffer index outside single-buffer presentation",arguments[0]);

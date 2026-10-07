@@ -43,7 +43,7 @@ if(PILOT_D3D_SOURCE)
   if(NOT EXISTS "${PILOT_D3D_SOURCE}/donor.json")
     message(FATAL_ERROR "Run tools/native_d3d_donor.py to prepare the backend")
   endif()
-  add_library(pilot_d3d_backend STATIC graphics_backend.c
+  add_library(pilot_d3d_backend STATIC graphics_backend.c graphics_states.c
     "${PILOT_D3D_SOURCE}/d3d8_device.c" "${PILOT_D3D_SOURCE}/d3d8_gamma.c"
     "${PILOT_D3D_SOURCE}/d3d8_resources.c" "${PILOT_D3D_SOURCE}/d3d8_shaders.c"
     "${PILOT_D3D_SOURCE}/d3d8_states.c" "${PILOT_D3D_SOURCE}/d3d8_combiners.c"

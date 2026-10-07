@@ -9,11 +9,13 @@ static uint32_t call_graphics(unsigned entry,const uint32_t *args)
     CHECK(g_ebx==0x12345678 && g_esi==0x23456789 && g_edi==0x3456789a && g_ebp==0x456789ab);
     return g_eax;
 }
+#include "graphics_state_contract_test.inc"
 static void test_graphics(void)
 {
     vm_ensure();
     uint32_t global_page=PILOT_D3D_DEVICE_GLOBAL&~4095u;
-    commit(global_page,4096); vm_fixed_region(global_page,4096);
+    uint32_t state_bytes=((PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SHADER_CONSTANT_MODE_OFFSET+4+4095)&~4095u)-global_page;
+    commit(global_page,state_bytes); vm_fixed_region(global_page,state_bytes);
     uint32_t *parameters=(uint32_t*)(memory+0x19000);
     const uint32_t valid[17]={64,64,6,1,0x11,1,0,0,1,0x2a,0,0,1};
     uint32_t create[]={0,1,0,0x40,0x19000,0x19100};
@@ -31,6 +33,7 @@ static void test_graphics(void)
         create[5]=pass==1?0:0x19100; /* Original Create permits a null output. */
         CHECK(call_graphics(PILOT_D3D_Direct3D_CreateDevice,create)==0);
         CHECK(graphics_active && MEM32(PILOT_D3D_DEVICE_GLOBAL)==PILOT_D3D_DEVICE_OBJECT);
+        CHECK(MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SHADER_CONSTANT_MODE_OFFSET)==0);
         if (create[5]) CHECK(MEM32(create[5])==PILOT_D3D_DEVICE_OBJECT);
         CHECK(!memcmp(parameters,valid,sizeof(valid)));
         uint32_t arg=0,back=call_graphics(PILOT_D3D_D3DDevice_GetBackBuffer2,&arg);
@@ -56,6 +59,7 @@ static void test_graphics(void)
         CHECK(pixels[0]==255 && pixels[1]==0 && pixels[2]==0);
         CHECK(pilot_gfx_surface_readback(0,pixels,sizeof(pixels))>=0);
         CHECK(pixels[0]==0 && pixels[1]==0 && pixels[2]==255);
+        if(!pass)test_graphics_states();
         CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&front)==0);
         CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&back)==0);
         CHECK(call_graphics(PILOT_D3D_D3DDevice_Release,NULL)==0);

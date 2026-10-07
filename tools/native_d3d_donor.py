@@ -85,6 +85,22 @@ def prepare(donor: Path, output: Path):
                     '        g_cur_rt=NULL; g_cur_ds=NULL;\n        /* Cleanup D3D11 resources */')
                 code = code.replace('        if (converted) draw_data = converted;',
                     '        if (!converted) return E_OUTOFMEMORY;\n        draw_data = converted;')
+            if name == "d3d8_states.c":
+                code,count = re.subn(r'    if \(min_linear && mag_linear && mip_linear\).*?    return D3D11_FILTER_MIN_MAG_MIP_POINT;',
+                    '    return (D3D11_FILTER)((min_linear ? 0x10 : 0) | (mag_linear ? 4 : 0) | (mip_linear ? 1 : 0));',
+                    code,flags=re.S)
+                if count!=1: raise ValueError('unreviewed basic-filter conversion')
+                code = code.replace('sd.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;',
+                                    'sd.AddressW = d3d8_to_d3d11_address(tss[31]);')
+                code = code.replace('    sd.MaxLOD = D3D11_FLOAT32_MAX;',
+                    '    memcpy(&sd.MipLODBias,&tss[D3DTSS_MIPMAPLODBIAS],4);\n'
+                    '    sd.MinLOD=(FLOAT)tss[D3DTSS_MAXMIPLEVEL];\n'
+                    '    sd.MaxLOD=tss[D3DTSS_MIPFILTER] ? D3D11_FLOAT32_MAX : sd.MinLOD;\n'
+                    '    DWORD border=tss[D3DTSS_BORDERCOLOR];\n'
+                    '    sd.BorderColor[0]=((border>>16)&255)/255.0f;\n'
+                    '    sd.BorderColor[1]=((border>>8)&255)/255.0f;\n'
+                    '    sd.BorderColor[2]=(border&255)/255.0f;\n'
+                    '    sd.BorderColor[3]=((border>>24)&255)/255.0f;')
             # These paths otherwise continue drawing with stale/uninitialized
             # buffers/states when a host allocation, map or compilation fails.
             checks = ["ID3D11DeviceContext_Map", "ID3D11Device_CreateInputLayout",
@@ -93,6 +109,9 @@ def prepare(donor: Path, output: Path):
                 checks += ["D3DCompile", "ID3D11Device_CreateBlendState", "ID3D11Device_CreateDepthStencilState", "ID3D11Device_CreateRasterizerState", "ID3D11Device_CreateSamplerState"]
             code = checked_calls(code, checks)
             if name == "d3d8_shaders.c":
+                # DIFFUSE is argument zero, not an absent state/default.
+                for field,default in (("COLORARG1","TEXTURE"),("COLORARG2","CURRENT"),("ALPHAARG1","TEXTURE"),("ALPHAARG2","CURRENT")):
+                    code = code.replace(f'tss[D3DTSS_{field}] ? tss[D3DTSS_{field}] : D3DTA_{default}',f'tss[D3DTSS_{field}]')
                 code = code.replace('    if (!ctx || !g_vs) return;',
                     '    if (!ctx || !g_vs) pilot_d3d_backend_stop("missing vertex pipeline");')
                 code = code.replace('    if (!g_ps_cb) return;',

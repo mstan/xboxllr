@@ -20,8 +20,10 @@ copy through the title's own code. Native utility-drive setup now mounts a
 persistent `Z:` cache on partition 3. Cold launch has a real null LaunchDataPage
 pointer cell; Blinx configures real file caching (zero then 64 pages). The native
 renderer now creates a real 640x480 D3D11 device and supplies an owned front
-surface to `GetBackBuffer2(-1)`. The next unsupported call is
-`D3DDevice_SetRenderState_CullMode(0)` during render-state initialization.
+surface to `GetBackBuffer2(-1)`. Blinx now passes its initial graphics-state
+setup and reads the full 131116-byte Arial font TGA from installed content.
+The next unsupported operation is `setjmp` in the image decoder. Font image
+decoding/upload and title draws are not yet qualified.
 The ORIGINAL renderer still reaches `MmAllocateContiguousMemoryEx`.
 The OPTICAL build retains
 and executes the original verification helper, stopping on unsupported raw
@@ -82,8 +84,9 @@ The main LLE build's runtime source and build selection are untouched.
 - Compilation disables host optimization for short bring-up cycles. No FPS,
   full AOT coverage, or D3D8 HLE performance claim follows from this result.
 
-The next Blinx family is render-state translation, including NV2A method/value
-setters and inlined writes to deferred globals that must reach actual draws.
+The next Blinx family is native/guest nonlocal recovery for image decoding.
+The main MIT donor contains the matching setjmp/longjmp helper architecture;
+its exhaustion and unknown-buffer fallbacks must be hardened before adoption.
 The whole native renderer now owns graphics creation and front/back resources.
 Utility-drive selection/mounting now
 runs through the complete native library boundary below, and file-cache control
@@ -140,7 +143,8 @@ pixels, references and three release/recreate cycles with no retained guest
 allocations. These are native API/GPU tests plus static original-routine and
 external layout references, **not an executed LLE differential**. Full driver
 state, default-state parity and arbitrary inline driver access remain unqualified.
-Blinx stops on its first cull-state call, before any title drawing.
+Blinx has since passed its initial cull/depth/blend/texture-coordinate/viewport
+setup, but still has not drawn. The state extension below records that boundary.
 
 Prepare and select privately after generating the title:
 
@@ -157,6 +161,47 @@ are cleared before lifting. Preserve the existing installed-media/native-cache
 selections for Blinx. Donor source/prepared hashes and licenses are retained in
 `build/sp00nz-d3d`; logs and repeat/reference-selection evidence are under
 `build/blinx/graphics-runs.aot-private.json` and `build/graphics-contract-tests.log`.
+
+### Native render-state and sampler extension
+
+`graphics_states.c` translates Xbox state values to the donor's host-facing
+state interface. `graphics_state.inc` owns guest state publication and the
+deferred-array batch hook. The original initializer's two immutable default
+tables are found through a reviewed function hash and decoded table references;
+their contents and guest addresses stay in private generated bindings. The
+three slots explicitly skipped by the original initialization loop remain
+skipped. The native depth-enable default follows the actual allocated depth
+target. Recreating the device resets the owned mode fields.
+
+Qualified mappings cover the reached cull/depth/blend/color states, comparison
+and stencil encodings, supported fog/ambient fields and bounded texture/sampler
+states. Raw `SetRenderState_Simple` takes ECX/EDX packet/value arguments and
+does not update the guest render-state cache; named setters do. The batch hook
+samples deferred arrays before fixture draws and rejects changed unqualified
+fields. **Guest draw entry points remain unsupported** and must call this hook
+when integrated. Full lighting/material/default-pipeline equivalence is not
+asserted merely because a donor shader accepts these state values.
+
+The reached shader constant mode is `1`. Its reviewed original branch only
+records the mode and clears the no-reserved-constants flag, with no GPU packet.
+The native device already owns a real 192-float4 constant buffer. This bounded
+branch preserves those guest fields; mode zero's fixed-pipeline resets, other
+transitions, constant upload and programmable shader execution are unqualified
+and stop at their respective unimplemented entry points.
+
+Prepared donor fixes preserve diffuse argument zero (previously replaced with
+TEXTURE/CURRENT defaults), implement W addressing in private donor slot 31
+without colliding with its COLORSIGN slot, apply border/LOD values, and retain
+all basic min/mag/mip filtering combinations. They reuse the donor's real D3D11
+state/shader implementation. Pixel fixtures check depth rejection/disable,
+channel masking, alpha blend/test, winding culling and direct guest texture
+state changes; GPU sampler descriptors check actual applied settings. Alpha
+blend tolerates two 8-bit UNORM levels; border float tolerance is 1e-6. These
+are bounded native fixtures, not an executed hardware/LLE image comparison.
+
+Evidence: `build/graphics-states-tests.log`, `build/graphics-states-pixels.log`,
+`build/blinx/graphics-state-validation.aot-private.json`. Fresh/repeat Blinx
+runs now complete the real font-file read and stop at guest setjmp recovery.
 
 ## Native file-cache contract
 
