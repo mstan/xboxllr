@@ -11,6 +11,7 @@
 struct PilotRegion { uint32_t base,size,protect; int fixed; };
 static struct PilotRegion vm_regions[512];
 static SRWLOCK vm_lock=SRWLOCK_INIT;
+static uint64_t vm_service_bytes; /* real native service buffers; guarded by vm_lock */
 static INIT_ONCE vm_once=INIT_ONCE_STATIC_INIT;
 typedef LONG (NTAPI *PilotNtAllocate)(HANDLE,PVOID*,ULONG_PTR,PSIZE_T,ULONG,ULONG);
 typedef LONG (NTAPI *PilotNtFree)(HANDLE,PVOID*,PSIZE_T,ULONG);
@@ -138,7 +139,7 @@ static uint32_t vm_allocate(uint32_t *base,uint32_t zero_bits,uint32_t *size,uin
     }
     if (type&MEM_COMMIT) {
         uint64_t additional=bytes-vm_committed(low,bytes);
-        if (vm_committed(0,0x100000000ull)+additional>64ull*1024*1024) { result=VM_NOMEM; goto done; }
+        if (vm_committed(0,0x100000000ull)+vm_service_bytes+additional>64ull*1024*1024) { result=VM_NOMEM; goto done; }
         PVOID host=memory+low; SIZE_T span=bytes;
         result=(uint32_t)vm_native_allocate(GetCurrentProcess(),&host,0,&span,MEM_COMMIT,protect);
         if (result) goto done;

@@ -1,5 +1,39 @@
 # STATUS
 
+## 2026-10-06 - Blinx configures real file caching and reaches Direct3D device creation
+
+`beads-xbox.1.62`: native `FscGetCacheSize`, `FscSetCacheSize` and
+`FscInvalidateIdleBlocks` now control an actual read-through cache. Blinx reads
+the initial size, disables caching, then allocates 64 pages (256 KiB) and
+continues. Its next stop is `MmAllocateContiguousMemoryEx` inside the original
+symbol-identified `Direct3D_CreateDevice`. This is the next whole-service
+renderer boundary to integrate; no device, frame or attract playback yet.
+
+The shared native cache uses real 4 KiB buffers, with native I/O on misses and
+cached bytes on hits. File position and partial/EOF results are preserved.
+Writes, truncation and closure invalidate affected entries; files permitting
+external writers bypass caching. Per-file locks serialize cursor operations;
+host reads execute outside the global cache lock. Resize/invalidation are
+synchronized with cached-byte access. Allocated cache bytes participate in the
+pilot's existing 64 MiB VM/section admission budget. This remains a bounded
+native resource model, not complete retail physical-memory accounting.
+
+Eleven CTests pass. New tests verify actual committed/released storage, native
+read-call avoidance with correct bytes/cursor, invalidation, zero-size bypass,
+allocation failure preserving size and data, shared VM budget, concurrent
+reads/resizes, write/truncate/EOF coherence and an external writer. Real Blinx
+fresh/repeat logs and file identities are retained under `build/blinx/`.
+
+Main sp00nznet and Phobos store only a page count; Cxbx also leaves allocation
+unimplemented. Their service bodies were not imported. nxdk supplies ABI units;
+Cxbx supplies the bounded 16/2048 default/maximum facts. Microsoft native-I/O
+documentation supplies host seek/read behavior. There is no executed LLE
+differential or performance claim. JSRF remains deferred.
+
+Evidence: `build/file-cache-contract-tests.log`, `build/blinx/run-fsc-*.log`,
+`build/blinx/file-cache-runs.aot-private.json` and
+`build/blinx/file-cache-validation.aot-private.json`.
+
 ## 2026-10-06 - Blinx mounts persistent native utility storage and advances into initialization
 
 `beads-xbox.1.62`: the reviewed whole `XMountUtilityDrive` boundary now has a

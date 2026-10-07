@@ -18,8 +18,9 @@ writes `TitleImage.xbx` byte-for-byte equal to its original 10240-byte payload,
 and unloads the section. A repeated launch preserves the file and skips that
 copy through the title's own code. Native utility-drive setup now mounts a
 persistent `Z:` cache on partition 3. Cold launch has a real null LaunchDataPage
-pointer cell; Blinx proceeds through further initialization to `FscGetCacheSize`,
-the next unsupported service. The OPTICAL build retains
+pointer cell; Blinx configures real file caching (zero then 64 pages) and
+proceeds into its original `Direct3D_CreateDevice`. The next unsupported call
+is `MmAllocateContiguousMemoryEx` inside graphics initialization. The OPTICAL build retains
 and executes the original verification helper, stopping on unsupported raw
 optical access. No graphics, movies, menu or level yet. Function-entry counts
 are diagnostics, not coverage or performance measurements.
@@ -34,12 +35,13 @@ EEPROM user-settings queries and NTSTATUS-to-DOS-error conversion. Timer arming,
 expiry and DPC delivery are implemented as described below. Callback delivery
 is exercised by the contract tests. No callbacks, draws or completions are discarded.
 
-Ten contract tests pass: concurrent threads with separate registers/TLS and
+Eleven contract tests pass: concurrent threads with separate registers/TLS and
 recursive exclusion, handle closure/errors and EEPROM buffer/checksum behavior;
 timer/DPC/event-wait contracts; real VM reservation/commit/free/protection/query;
 installed-media identity and actual file I/O; writable storage and link lifetimes;
 deferred section residency and shared-page ownership;
 native utility-drive persistence, formatting, eviction and failure handling;
+real read-through file-cache sizing, coherence, position and budget handling;
 plus explicit instruction, indirect-call and
 kernel-call failure paths. Passing
 the other title's XBE to the Blinx artifact is rejected before guest execution.
@@ -76,9 +78,12 @@ The main LLE build's runtime source and build selection are untouched.
 - Compilation disables host optimization for short bring-up cycles. No FPS,
   full AOT coverage, or D3D8 HLE performance claim follows from this result.
 
-The next Blinx dependency is filesystem-cache control (`FscGetCacheSize`).
-Utility-drive selection/mounting now runs through the complete native library
-boundary below. The original cache routine remains available at build time.
+The next Blinx boundary is the original `Direct3D_CreateDevice`, which reaches
+contiguous GPU-memory allocation. Integrating the donor native renderer here
+can replace the whole graphics service. Utility-drive selection/mounting now
+runs through the complete native library boundary below, and file-cache control
+has actual storage/read behavior. The original utility routine remains available
+at build time.
 The native installed-media contract below replaces the earlier optical check
 with the owner's explicit authorization. The original check requests SCSI MODE
 SENSE page 0x3e through IOCTL 0x4d014; that IOCTL has not executed locally. The NAS
@@ -89,6 +94,46 @@ after file provenance checks. D3D8 remains the performance target; first-scene
 bindings still need Blinx's local indexed draws and JSRF's older GetBackBuffer
 out-pointer ABI. A complete reference machine is not a prerequisite to those
 HLE implementations, and dashboard speed does not gate title work.
+
+## Native file-cache contract
+
+`file_cache.inc` implements `FscGetCacheSize` (35), `FscSetCacheSize` (37) and
+`FscInvalidateIdleBlocks` (36). Size is in 4096-byte pages: default 16, maximum
+2048. Resize allocates/releases real buffers; successful zero size disables the
+native cache. Invalid sizes and allocation/budget exhaustion return failures
+without changing the existing pool or cached bytes. The cache is read-through
+and write-through: no dirty data or invented disk completion exists.
+
+Cached file ranges carry handle identity and valid byte intervals. A hit copies
+actual previously read bytes and advances the synchronous file position; a miss
+uses one native read even for large requests, then retains a bounded trailing
+range. No rounded read can hide EOF/partial/error results. Per-file locks cover
+cursor-dependent operations. The cache lock protects buffers and resizing, and
+is released during native reads. Invalidation discards all currently idle data;
+no cached pointer escapes a call. Writes, size/disposition changes and close
+invalidate the affected handle. Cache only handles that deny write sharing;
+files permitting an external writer use native reads so host changes stay visible.
+Unbuffered/unsupported I/O modes retain the existing explicit scope limits.
+
+Cache bytes are charged to the same 64 MiB admission budget as guest VM and
+section commits. Host metadata and temporary old/new buffers during replacement
+are outside that guest budget; complete retail physical/MMU accounting remains
+unqualified. The replacement algorithm and host filesystem caching differ from
+FATX/XDVDFS kernel internals. No cache-size tuning is applied to the host OS.
+
+The new contract test uses real file bytes and an instrumented native read entry
+to verify hits actually avoid reads. It checks cursor/subrange/EOF behavior,
+real commit/release, zero-size bypass, invalidation, failure preservation,
+shared VM budget, concurrent reads/resizes, writes/truncation, and an actual
+external writer. Eleven total CTests pass. Blinx itself now disables caching,
+requests 64 pages successfully, and reaches graphics device creation. No title
+cache-hit rate, rendered frame or FPS claim follows from the fixtures.
+
+ABI/default/maximum references: nxdk and external Cxbx `EmuKrnlFs.cpp`.
+Main sp00nznet/Phobos `kernel_bridge.c` only retain a size, and Cxbx's allocator
+is unimplemented; those bodies are not adopted. Host behavior follows
+[NtReadFile](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntreadfile).
+These are API/native tests, not a full executed LLE differential.
 
 ## Native utility-drive contract
 

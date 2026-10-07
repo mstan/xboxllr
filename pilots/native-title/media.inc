@@ -11,7 +11,8 @@ static const char *media_content_path;
 static HANDLE media_root,media_identity,storage_roots[6],storage_parent;
 static WCHAR storage_path[32768];
 static SRWLOCK media_lock=SRWLOCK_INIT;
-static struct { HANDLE host; uint32_t id; unsigned partition; } media_files[256];
+struct MediaFile { HANDLE host; uint32_t id; unsigned partition,cacheable; SRWLOCK io_lock; };
+static struct MediaFile media_files[256];
 static uint32_t media_next_id=0x50000001u;
 typedef LONG (NTAPI *MediaOpen)(PHANDLE,ACCESS_MASK,POBJECT_ATTRIBUTES,PIO_STATUS_BLOCK,ULONG,ULONG);
 typedef LONG (NTAPI *MediaRead)(HANDLE,HANDLE,PVOID,PVOID,PIO_STATUS_BLOCK,PVOID,ULONG,PLARGE_INTEGER,PULONG);
@@ -24,6 +25,7 @@ static MediaInfo media_nt_query,media_nt_set,media_nt_volume;
 static MediaCreate media_nt_create;
 static MediaFlush media_nt_flush;
 static INIT_ONCE media_once=INIT_ONCE_STATIC_INIT;
+#include "file_cache.inc"
 
 static BOOL CALLBACK media_start(PINIT_ONCE once,void *parameter,void **context)
 {
@@ -164,10 +166,14 @@ static void media_verify_abi(const char *expected)
     g_esp+=4; /* original no-argument RET; all nonvolatile guest registers intact */
 }
 void pilot_verify_installed_media(void) { media_verify_abi(PILOT_XBE_SHA256); }
+static struct MediaFile *media_owned(uint32_t id)
+{
+    for (unsigned i=0;i<256;++i) if (media_files[i].host && media_files[i].id==id) return &media_files[i];
+    return NULL;
+}
 static HANDLE media_handle(uint32_t id)
 {
-    for (unsigned i=0;i<256;++i) if (media_files[i].host && media_files[i].id==id) return media_files[i].host;
-    return NULL;
+    struct MediaFile *file=media_owned(id); return file ? file->host : NULL;
 }
 static unsigned media_partition(uint32_t id)
 {
@@ -180,6 +186,7 @@ static uint32_t media_close(uint32_t id)
     AcquireSRWLockExclusive(&media_lock);
     for (unsigned i=0;i<256;++i) if (media_files[i].host && media_files[i].id==id) {
         if (!CloseHandle(media_files[i].host)) stop("owned media handle close failed",id);
+        fsc_forget(id);
         media_files[i].host=NULL; status=0; break;
     }
     ReleaseSRWLockExclusive(&media_lock);
@@ -273,6 +280,9 @@ static uint32_t media_open(uint32_t *args,int create)
     if (!status) {
         media_files[slot].host=handle; media_files[slot].id=media_next_id++;
         media_files[slot].partition=partition;
+        media_files[slot].cacheable=!(share&FILE_SHARE_WRITE) && !(options&8) &&
+            !!(access&(FILE_READ_DATA|GENERIC_READ|GENERIC_ALL));
+        InitializeSRWLock(&media_files[slot].io_lock);
         MEM32(out)=media_files[slot].id;
     }
     media_iosb(iosb,status,status ? 0 : io.Information);
@@ -280,6 +290,7 @@ static uint32_t media_open(uint32_t *args,int create)
 }
 static void media_kernel(unsigned ordinal)
 {
+    fsc_ensure();
     int transfer=ordinal==219 || ordinal==236;
     unsigned count=ordinal==190 ? 9 : ordinal==202 ? 6 : transfer ? 8 : ordinal==198 ? 2 : 5;
     uint32_t a[9]; for (unsigned i=0;i<count;++i) a[i]=MEM32(g_esp+4+i*4);
@@ -288,15 +299,21 @@ static void media_kernel(unsigned ordinal)
     else AcquireSRWLockShared(&media_lock);
     if (opening) g_eax=media_open(a,ordinal==190);
     else {
-        HANDLE file=media_handle(a[0]); IO_STATUS_BLOCK io={0};
+        struct MediaFile *owned=media_owned(a[0]);
+        HANDLE file=owned ? owned->host : NULL; IO_STATUS_BLOCK io={0};
         uint32_t iosb=transfer ? a[4] : a[1];
         g_eax=MEDIA_BAD_HANDLE;
         if (!iosb) g_eax=MEDIA_INVALID;
         else if (file) {
+            AcquireSRWLockExclusive(&owned->io_lock);
             if (transfer) {
                 if (a[1] || a[2] || a[3]) stop("file event/APC delivery unsupported",ordinal);
                 LARGE_INTEGER offset; if (a[7]) offset.QuadPart=(int64_t)MEM64(a[7]);
-                g_eax=(uint32_t)(ordinal==236 ? media_nt_write : media_nt_read)(file,NULL,NULL,NULL,&io,memory+a[5],a[6],a[7]?&offset:NULL,NULL);
+                if (ordinal==219) g_eax=fsc_read(owned,&io,memory+a[5],a[6],a[7]?&offset:NULL);
+                else {
+                    fsc_forget(owned->id);
+                    g_eax=(uint32_t)media_nt_write(file,NULL,NULL,NULL,&io,memory+a[5],a[6],a[7]?&offset:NULL,NULL);
+                }
             } else if (ordinal==198) g_eax=(uint32_t)media_nt_flush(file,&io);
             else if (ordinal==218) {
                 if (!media_partition(a[0]) || a[4]!=3) stop("volume information class/mount unsupported",a[4]);
@@ -326,12 +343,14 @@ static void media_kernel(unsigned ordinal)
                      * guarantee 4. Never pass the guest's stack struct as a
                      * native ABI struct, even when the field offsets match. */
                     union { uint64_t alignment; unsigned char bytes[56]; } stage={0};
+                    if (ordinal==226 && a[4]!=14) fsc_forget(owned->id);
                     if (ordinal==226) memcpy(stage.bytes,memory+a[2],size);
                     g_eax=(uint32_t)(ordinal==226 ? media_nt_set : media_nt_query)(file,&io,stage.bytes,size,a[4]);
                     if (ordinal==211 && !g_eax) memcpy(memory+a[2],stage.bytes,size);
                 }
             }
             if (g_eax==0x103u) stop("synchronous file operation unexpectedly pending",ordinal);
+            ReleaseSRWLockExclusive(&owned->io_lock);
         }
         if (iosb) media_iosb(iosb,g_eax,io.Information);
     }

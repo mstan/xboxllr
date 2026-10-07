@@ -73,6 +73,13 @@ nxdk's LaunchDataPage declaration and Cxbx's null cold-launch initialization
 were consulted as ABI/initial-state facts; no GPL cache/launch service body is
 incorporated. The existing GPL-dependent CPU-helper restriction is unchanged.
 
+The native read-through file cache independently allocates real buffers and
+uses the existing host NT read path. nxdk supplies its page-count signatures;
+Cxbx `EmuKrnlFs.cpp` supplies default/maximum count facts. Main sp00nznet and
+Phobos's size-only bridges were inspected but not incorporated. Microsoft's
+NtReadFile documentation supplies synchronous cursor and EOF contracts. This
+adds no GPL service body and does not change the private CPU-helper restriction.
+
 ## Unicorn Engine / QEMU
 
 [Unicorn Engine](https://github.com/unicorn-engine/unicorn), version `2.1.1`,

@@ -246,6 +246,7 @@ static void kernel_dispatch(void)
         if (pilot_imports[i].ordinal == next_kernel_ordinal) name=pilot_imports[i].name;
     fprintf(stderr, "[KERNEL] %u %s return=%08x\n", next_kernel_ordinal, name, MEM32(g_esp));
     switch (next_kernel_ordinal) {
+    case 35: case 36: case 37: fsc_kernel(next_kernel_ordinal); return;
     case 327: case 328:
         g_eax=section_change(MEM32(g_esp+4),next_kernel_ordinal==327); g_esp+=8; return;
     case 279: {
@@ -482,6 +483,7 @@ int main(int argc,char **argv)
     load_image(argv[1]);
     if (argc>=4) media_content_path=argv[3];
     if (argc==5) storage_mount(argv[4]);
+    fsc_ensure();
 #ifdef PILOT_MEDIA_INSTALLED
     fprintf(stderr,"[MEDIA POLICY] installed-title HLE; optical authentication is not asserted\n");
 #else

@@ -41,6 +41,7 @@ static void call_kernel(unsigned ordinal,const uint32_t *args,unsigned argc)
 #include "media_contract_test.inc"
 #include "storage_contract_test.inc"
 #include "cache_contract_test.inc"
+#include "file_cache_contract_test.inc"
 
 static int test_write_faults(uint32_t va)
 {
@@ -271,6 +272,7 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"media")) { test_media(); return 0; }
         if (!strcmp(argv[1],"storage")) { test_storage(); return 0; }
         if (!strcmp(argv[1],"cache")) { test_cache(); return 0; }
+        if (!strcmp(argv[1],"file-cache")) { test_file_cache(); return 0; }
         if (!strcmp(argv[1],"sections")) { test_sections(); return 0; }
         if (!strcmp(argv[1],"memory")) { test_memory(); return 0; }
         if (!strcmp(argv[1],"timers")) { test_timers(); return 0; }

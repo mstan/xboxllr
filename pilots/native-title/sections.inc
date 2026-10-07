@@ -72,7 +72,7 @@ static uint32_t section_change(uint32_t descriptor,int load)
         uint32_t base=section_page_base+first*4096,bytes=(end-first)*4096;
         if (load) {
             uint64_t additional=bytes-vm_committed(base,bytes);
-            if (vm_committed(0,0x100000000ull)+additional>64ull*1024*1024) status=VM_NOMEM;
+            if (vm_committed(0,0x100000000ull)+vm_service_bytes+additional>64ull*1024*1024) status=VM_NOMEM;
             else {
                 PVOID host=memory+base; SIZE_T span=bytes;
                 status=(uint32_t)vm_native_allocate(GetCurrentProcess(),&host,0,&span,MEM_COMMIT,PAGE_READWRITE);
