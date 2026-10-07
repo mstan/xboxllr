@@ -13,6 +13,7 @@ static uint32_t call_graphics(unsigned entry,const uint32_t *args)
 #include "graphics_texture_contract_test.inc"
 #include "graphics_vertex_contract_test.inc"
 #include "graphics_shader_contract_test.inc"
+#include "graphics_clock_contract_test.inc"
 static void test_graphics(void)
 {
     vm_ensure();
@@ -36,6 +37,7 @@ static void test_graphics(void)
         create[5]=pass==1?0:0x19100; /* Original Create permits a null output. */
         CHECK(call_graphics(PILOT_D3D_Direct3D_CreateDevice,create)==0);
         CHECK(graphics_active && MEM32(PILOT_D3D_DEVICE_GLOBAL)==PILOT_D3D_DEVICE_OBJECT);
+        if(!pass)test_graphics_clock();
         CHECK(MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SHADER_CONSTANT_MODE_OFFSET)==0);
         if (create[5]) CHECK(MEM32(create[5])==PILOT_D3D_DEVICE_OBJECT);
         uint32_t caps=0x19304;

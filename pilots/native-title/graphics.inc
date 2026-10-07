@@ -8,6 +8,7 @@ static int graphics_active;
 static uint32_t graphics_parameters[17];
 static uint32_t graphics_headers,graphics_data[2];
 static unsigned graphics_surface_refs[2];
+#include "graphics_clock.inc"
 #include "graphics_state.inc"
 
 static void graphics_surfaces_create(void)
@@ -70,6 +71,7 @@ void pilot_d3d_dispatch(unsigned entry)
     if (entry!=PILOT_D3D_Direct3D_CreateDevice && !graphics_active)
         stop("graphics entry before native creation",pilot_d3d_calls[entry].address);
     switch(entry) {
+    case PILOT_D3D_D3DDevice_BlockUntilVerticalBlank:graphics_wait_vblank();break;
     case PILOT_D3D_D3DDevice_CreatePixelShader:g_eax=graphics_pixel_create(arguments);break;
     case PILOT_D3D_D3DDevice_CreateVertexShader:g_eax=graphics_shader_create(arguments);break;
     case PILOT_D3D_D3DDevice_CreateVertexBuffer2:g_eax=graphics_vertex_allocate(arguments[0]);break;
@@ -111,6 +113,8 @@ void pilot_d3d_dispatch(unsigned entry)
         g_eax=(uint32_t)pilot_gfx_create(staged);
         if (!(g_eax&0x80000000u)) {
             graphics_active=1; memcpy(graphics_parameters,staged,sizeof(staged));
+            graphics_clock_origin=dispatch_monotonic();
+            graphics_clock_hz=staged[11]?staged[11]:60;
             graphics_state_init();
             graphics_surfaces_create();
             MEM32(PILOT_D3D_DEVICE_GLOBAL)=PILOT_D3D_DEVICE_OBJECT;
@@ -161,6 +165,7 @@ void pilot_d3d_dispatch(unsigned entry)
         else g_eax=graphics_texture_ref(graphics_texture_slot(arguments[0]),entry==PILOT_D3D_D3DResource_AddRef);
         break;
     case PILOT_D3D_D3DDevice_Release: {
+        if(graphics_clock_waiters)stop("device release with active vertical-blank waits",entry);
         if (graphics_surface_refs[0] || graphics_surface_refs[1])
             stop("device release with outstanding surface ownership",entry);
         graphics_shaders_release();graphics_pixels_release();pilot_gfx_close(); graphics_active=0;

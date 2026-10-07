@@ -38,8 +38,11 @@ The real memory-statistics query and front-surface descriptor now pass. A
 truncated initializer has been recovered and re-lifted from the original bytes;
 Blinx now passes native `XInitDevices` and device enumeration, opens the real
 Windows audio device through `DirectSoundCreate`, and starts its three media
-workers. Fresh and repeated launches stop at `D3DDevice_BlockUntilVerticalBlank`
-in a worker. No title sound buffer or game audio is established by those runs.
+workers. Guest vertical-blank waits now complete at the configured nominal
+60 Hz. Blinx creates three 65536-byte stereo PCM16 buffers at 44100 Hz and
+locks/unlocks their first four bytes, then loads the complete 15188-byte
+`media/dsp.bin`. Fresh and repeated launches stop at `DownloadEffectsImage`.
+No title buffer Play or audible game output is established by those runs.
 `PILOT_AUDIO=ORIGINAL` still executes the original sound-object allocations and
 contiguous-page setup, stopping at `KfRaiseIrql` (ordinal 160) in audio-driver
 initialization. `HalBootSMCVideoMode` is a real data export with
@@ -789,6 +792,39 @@ and readback. Evidence: `build/shader-contract-tests.log`,
 
 ## Reproduce privately
 
+### Vertical blank and actual sound-buffer progress
+
+`D3DDevice_BlockUntilVerticalBlank` is qualified by the original 36-byte body:
+it clears a notification event and calls the nonalertable, indefinite
+`KeWaitForSingleObject`. It submits no graphics work. The native whole-API
+implementation waits for the next edge of a common monotonic display epoch,
+using [Windows waitable timers](https://learn.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-createwaitabletimerexw).
+It releases the graphics ownership lock while waiting. Each waiter retains its
+own deadline, so one thread cannot consume another's wakeup by immediately
+waiting again. Integer deadline calculation avoids repeated rounded sleeps and
+accumulated phase drift. Host failures stop; success follows elapsed time.
+
+The nominal 60 Hz matches the current machine LLE clock in
+`src/machine/machine.cpp`. This is not physical NTSC field timing or measured
+game cadence; interlace, PAL, callbacks and mode changes remain unqualified.
+Callback registration still stops explicitly. Device release with active waits
+also stops. Ordinary native presentation has not yet been unified with this
+clock; that remains necessary before making an original-speed claim.
+
+Phobos's multi-waiter notification-event findings informed the contract.
+Its implementation was not copied. The main sp00nz donor's fixed 16 ms IRQ
+path was also inspected; the native API does not use it. NoRain supplied no
+additional whole-API wait implementation. Existing graphics tests now cover
+deadline boundaries, long uptime, concurrent waiters, actual timed guest calls,
+register/stack preservation and exact timer-handle reclamation. All 27 CTests
+pass. Private evidence is `build/vblank-contract-tests.log`,
+`build/blinx/vblank-validation.aot-private.json` and
+`build/blinx/run-vblank-{fresh,repeat}.log`.
+
+The next title stop is real effects-image installation. A separately validated
+[MIT DSP donor and original-image probe](../../docs/NATIVE-DSP-DONOR-2026-10-07.md)
+provide the next implementation route; they are not yet linked into the title.
+
 ### Native audio and media-worker checkpoint
 
 Select `-DPILOT_AUDIO=NATIVE` after running `tools/native_audio_binding.py`
@@ -859,8 +895,9 @@ Evidence: `build/audio-family-contract-tests.log`,
 directory. The PCM fixture copies exact bytes through real host buffers, plays
 a one-shot to completion, observes advancing cursors, loops/stops and returns
 guest storage to its baseline. It does not establish audible game output.
-The next observed title boundary is real guest-cadence vertical-blank waiting;
-title draws, sound buffers, movies and attract remain pending.
+That earlier checkpoint stopped at vertical-blank waiting. The newer checkpoint
+above establishes actual title buffer creation, with effects installation still
+pending. Title draws, playback, movies and attract remain unvalidated.
 
 ### Memory accounting and input-startup checkpoint
 

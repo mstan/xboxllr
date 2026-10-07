@@ -4,8 +4,9 @@
 attract sequence before resuming JSRF. Dashboard speed and full AOT remain
 continuing goals. The native pilot executes actual title startup with the
 authorized installed-media contract, passes input initialization, opens real
-native audio and starts the media workers. The next stop is
-`D3DDevice_BlockUntilVerticalBlank` in a worker.
+native audio and starts the media workers. Vertical-blank waiting now advances
+to three real PCM buffers and loading `media/dsp.bin`. The next stop is
+`IDirectSound_DownloadEffectsImage`.
 Use the [native pilot evidence and scope](../pilots/native-title/README.md)
 for current progress; the optical-route ledger below is historical and separate.
 
@@ -14,13 +15,14 @@ for current progress; the optical-route ledger below is historical and separate.
 | Launch, real files and writable storage | Passed bounded startup; original optical verifier remains selectable |
 | Graphics resource preparation | Real font/textures, buffers, 91 compiled vertex shaders and 30 owned pixel definitions; actual title draws still pending |
 | Input initialization | Native host input family passes contracts and actual title enumeration; hardware interaction remains unvalidated (no attached host pad in measured runs) |
-| Sound startup | Real native device opens; PCM backend/ABI fixtures pass. Actual title buffers/output, streams and effects remain unqualified |
-| Media worker scheduling | Real references/priority/boost and safe suspend/resume pass; title workers reach vertical-blank waiting |
+| Sound startup | Three actual 65536-byte stereo PCM16 buffers at 44100 Hz, real lock/unlock; effects installation, playback, streams and routing remain pending |
+| Media worker scheduling | Real references/priority/boost and safe suspend/resume; phase-locked vertical-blank waits pass and permit title progress |
+| DSP reuse | MIT core builds; offline original three-effect graph runs with real DMA. Production integration remains pending; see [audit](NATIVE-DSP-DONOR-2026-10-07.md) |
 | Menu, movies and gameplay in attract | Pending; no title frame or audible output yet |
 | Complete repeat loops, interruption/menu return, original cadence | Pending actual end-to-end measurement |
 | JSRF | Deferred until Blinx success; shared services and separate bindings remain the architecture |
 
-Fresh and repeated native launches stop at the same vertical-blank boundary;
+Fresh and repeated native launches stop at the same effects-image boundary;
 27 contract tests and ten generation/extent tests pass. Original audio remains
 selectable and still stops at the original audio-driver `KfRaiseIrql` boundary.
 These are completed service checkpoints, not a percent

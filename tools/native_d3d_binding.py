@@ -18,6 +18,7 @@ IMAGE = "e6b7cd8a5527dd001e05bb3e881d9b24ffc58824ff67def394215ddbc8009249"
 CREATE = "4111b2a1ca25c2bf8e4cc1cad05ab2142ec17d48b54f2f7457951977d5bce564"
 DEFAULTS = "ab0f752eebe3bb6ce6296909b6f90b604f58eafe877032f64006f6c33f21ccb8"
 CAPS = "a2e598588a3b18aff4ac64b396716e58ca211384f86f5ef757c7ce3aec3caa22"
+VBLANK = "3671f3eb0feef60a9001693f28fbd102d209e1c072a2a486aa34f60429a7eaf0"
 
 
 def bind(xbe: Path, output: Path, symbols: Path):
@@ -73,6 +74,10 @@ def bind(xbe: Path, output: Path, symbols: Path):
     if len(caps_tables)!=1 or not any(i.mnemonic=='mov' and i.op_str=='ecx, 0x35' for i in caps_code):
         raise ValueError('unreviewed capability table copy')
     state_defaults['device_caps']=list(struct.unpack('<53I',data(caps_tables[0],53*4)))
+    vblank=next(s for s in identified if s['name']=='D3DDevice_BlockUntilVerticalBlank')
+    if vblank['stack_bytes']!=0 or context.digest(functions[vblank['address']])!=VBLANK:
+        raise ValueError('unreviewed vertical-blank wait')
+    state_defaults['vblank_wait']=dict(sha256=VBLANK,contract='clear notification event; nonalertable indefinite wait; no GPU submission')
     # Get2DSurfaceDesc derives usage from its format-capability table even for
     # sampled texture surfaces. Keep the reviewed image's facts in the binding.
     desc=next(s for s in identified if s['name']=='Get2DSurfaceDesc')

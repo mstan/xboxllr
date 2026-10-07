@@ -6,9 +6,10 @@ validate JSRF afterward, using shared services and separate revision bindings.
 Maintain the machine LLE build and continue
 dashboard performance work without making it a title-launch prerequisite.
 See [the audited alternatives and next steps](PHOBOS-DEEP-AUDIT-2026-10-06.md).
-Latest native checkpoint: Blinx opens actual audio and starts media workers;
-fresh/repeat launches reach vertical-blank waiting. Native PCM and thread
-contracts pass; title frames, game audio and attract remain pending. See the
+Latest native checkpoint: Blinx opens actual audio, advances media workers
+through vertical blank and creates three real PCM buffers. Fresh/repeat launches
+reach DSP effects installation. An MIT DSP core runs the actual effects graph
+in an offline probe; native integration, game audio and attract remain pending. See the
 [current service ledger](BLINX-BURNDOWN.md).
 
 Two arcs. Terse by design (the gcnrecomp shape): each milestone has a one-line intent, an
