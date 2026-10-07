@@ -8,7 +8,8 @@
 #define MEDIA_WRONG_VOLUME 0xc0000012u
 #define MEDIA_NO_MEDIA 0xc0000013u
 static const char *media_content_path;
-static HANDLE media_root,media_identity,storage_roots[6];
+static HANDLE media_root,media_identity,storage_roots[6],storage_parent;
+static WCHAR storage_path[32768];
 static SRWLOCK media_lock=SRWLOCK_INIT;
 static struct { HANDLE host; uint32_t id; unsigned partition; } media_files[256];
 static uint32_t media_next_id=0x50000001u;
@@ -62,7 +63,7 @@ static void storage_mount(const char *directory)
 {
     WCHAR path[32768];
     if (!MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,directory,-1,path,32768)) stop("invalid storage directory",0);
-    HANDLE root=CreateFileW(path,FILE_LIST_DIRECTORY|FILE_ADD_SUBDIRECTORY|SYNCHRONIZE,
+    HANDLE root=CreateFileW(path,FILE_LIST_DIRECTORY|FILE_ADD_SUBDIRECTORY|FILE_READ_ATTRIBUTES|SYNCHRONIZE,
         FILE_SHARE_READ|FILE_SHARE_WRITE,NULL,OPEN_EXISTING,FILE_FLAG_BACKUP_SEMANTICS|FILE_FLAG_OPEN_REPARSE_POINT,NULL);
     if (root==INVALID_HANDLE_VALUE) stop("cannot open local storage directory",GetLastError());
     BY_HANDLE_FILE_INFORMATION info;
@@ -93,7 +94,7 @@ static void storage_mount(const char *directory)
              FILE_SHARE_READ|FILE_SHARE_WRITE,0x21,3,FILE_ATTRIBUTE_DIRECTORY,NULL,&storage_roots[i],&io);
         if (status) stop("cannot mount native HDD partition",status);
     }
-    CloseHandle(root);
+    storage_parent=root; wcscpy(storage_path,resolved);
     fprintf(stderr,"[STORAGE] five local native partitions; host-backed capacity in 16 KiB logical units\n");
 }
 static uint32_t media_hash(HANDLE file,char hex[65])

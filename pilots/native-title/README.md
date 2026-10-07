@@ -16,8 +16,10 @@ allocation-unit check, creates per-title TDATA/UDATA and persists 72 bytes of
 `TitleMeta.xbx`. A fresh launch now loads the deferred title-image section,
 writes `TitleImage.xbx` byte-for-byte equal to its original 10240-byte payload,
 and unloads the section. A repeated launch preserves the file and skips that
-copy through the title's own code. Both now reach raw HDD partition 0 during
-utility-drive setup. The OPTICAL build retains
+copy through the title's own code. Native utility-drive setup now mounts a
+persistent `Z:` cache on partition 3. Cold launch has a real null LaunchDataPage
+pointer cell; Blinx proceeds through further initialization to `FscGetCacheSize`,
+the next unsupported service. The OPTICAL build retains
 and executes the original verification helper, stopping on unsupported raw
 optical access. No graphics, movies, menu or level yet. Function-entry counts
 are diagnostics, not coverage or performance measurements.
@@ -32,11 +34,12 @@ EEPROM user-settings queries and NTSTATUS-to-DOS-error conversion. Timer arming,
 expiry and DPC delivery are implemented as described below. Callback delivery
 is exercised by the contract tests. No callbacks, draws or completions are discarded.
 
-Nine contract tests pass: concurrent threads with separate registers/TLS and
+Ten contract tests pass: concurrent threads with separate registers/TLS and
 recursive exclusion, handle closure/errors and EEPROM buffer/checksum behavior;
 timer/DPC/event-wait contracts; real VM reservation/commit/free/protection/query;
 installed-media identity and actual file I/O; writable storage and link lifetimes;
 deferred section residency and shared-page ownership;
+native utility-drive persistence, formatting, eviction and failure handling;
 plus explicit instruction, indirect-call and
 kernel-call failure paths. Passing
 the other title's XBE to the Blinx artifact is rejected before guest execution.
@@ -73,9 +76,9 @@ The main LLE build's runtime source and build selection are untouched.
 - Compilation disables host optimization for short bring-up cycles. No FPS,
   full AOT coverage, or D3D8 HLE performance claim follows from this result.
 
-The next Blinx dependency is utility-drive cache selection/mounting. Its
-symbol-identified XapiSelectCachePartition currently opens raw HDD partition 0;
-a genuine native cache service is the next natural library boundary.
+The next Blinx dependency is filesystem-cache control (`FscGetCacheSize`).
+Utility-drive selection/mounting now runs through the complete native library
+boundary below. The original cache routine remains available at build time.
 The native installed-media contract below replaces the earlier optical check
 with the owner's explicit authorization. The original check requests SCSI MODE
 SENSE page 0x3e through IOCTL 0x4d014; that IOCTL has not executed locally. The NAS
@@ -86,6 +89,65 @@ after file provenance checks. D3D8 remains the performance target; first-scene
 bindings still need Blinx's local indexed draws and JSRF's older GetBackBuffer
 out-pointer ABI. A complete reference machine is not a prerequisite to those
 HLE implementations, and dashboard speed does not gate title work.
+
+## Native utility-drive contract
+
+`cache.inc` implements the complete reviewed `XMountUtilityDrive(BOOL)` boundary:
+EAX is BOOL, the return consumes eight guest stack bytes, EBX/ESI/EDI/EBP are
+preserved, success leaves LastError alone, and failures call the title's actual
+`XapiSetLastNTError`. The existing error helper supplies its own TLS layout and
+NTSTATUS conversion. There is no duplicate execution of the original mount.
+
+Three real cache directories (partitions 3–5) retain title ownership across
+processes in `native-cache-v1.bin` under the supplied local state directory.
+Existing-title mounts preserve bytes; clean requests and eviction remove the
+selected directory's contents and create a real `\\??\\Z:` namespace entry.
+Empty slots precede least-recently-used eviction. A checksummed, versioned
+manifest is held exclusively. Formatting first flushes an invalid-slot record,
+so failed/interrupted cleanup cannot later be accepted as a valid cache. An
+existing corrupt manifest fails rather than silently erasing storage.
+
+Recursive cleanup validates the exact absolute resolved partition path, then
+uses pinned directory handles, relative native opens and no-reparse traversal.
+Read-only child attributes are cleared for actual deletion. Open guest handles,
+host sharing errors and namespace collisions report failure. Namespace collision
+is checked before formatting. Only the chosen partition is cleared; installed
+content and user-data partitions are retained. Native partitions share host
+capacity and advertise 16 KiB logical allocation units; other cache units fail
+explicitly. The native ownership format and LRU policy do not promise retail
+raw-sector layout, exact FATX replacement order, quotas or physical timings.
+
+`tools/native_cache_binding.py` uses the shared `native_binding.py` integrity/
+wrapper machinery, with a reviewed whole-XBE/body hash and identified stdcall
+symbol. The error helper is independently hash-checked. No title addresses
+appear in the shared service. Generate the wrapper with
+`--cache-symbols <default_xdk_symbols.json>` in `native_pilot.py`, or run:
+
+```powershell
+py -3 tools/native_cache_binding.py --xbe <default.xbe> --output build/blinx --symbols <default_xdk_symbols.json>
+cmake -S pilots/native-title -B build/blinx/host -DPILOT_CACHE=NATIVE
+```
+
+`PILOT_CACHE=ORIGINAL` selects the original generated routine. That selection
+was rebuilt and executed, reaching raw HDD partition 0; its raw I/O/FATX path
+is not yet implemented in this private pilot. The normal LLE machine remains
+unchanged. There is no live switching or executed LLE differential claim.
+
+Ten CTests include actual Z: byte routing, independent persisted-byte reads,
+reopen, recursive/read-only/many-entry cleanup, eviction isolation, locked-file
+failure/recovery, corruption rejection, LastError callback/ABI and stable host
+handle counts. Symlink creation is unavailable without privilege on this host;
+that fixture reports a skip. A real Blinx run with its manifest locked executes
+the original error helper and returns failure. Fresh/repeated native launches
+pass utility mounting; restoring a true cold-launch `LaunchDataPage == NULL`
+export advances further to filesystem-cache control. Warm launch data and
+`HalReturnToFirmware` remain unsupported. A null pointer describes absence of
+a previous launch, rather than a fabricated launch packet.
+
+Contract sources: the original owned XBE's complete routine, nxdk's data-export
+declaration, Cxbx's external cold-launch pointer initialization, and Microsoft's
+[NtQueryDirectoryFile](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntquerydirectoryfile)
+and file-information contracts. No GPL filesystem implementation is imported.
 
 ## Installed-media contract
 

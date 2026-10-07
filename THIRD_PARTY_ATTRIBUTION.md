@@ -65,6 +65,14 @@ page lifetime behavior. No Cxbx loader body is incorporated. sp00nznet's
 all-resident reference-count-only routines were inspected and not adopted.
 The private Phobos CPU helper and earlier distribution limitations remain.
 
+The utility-drive service is independently implemented with host NT file APIs
+and a native ownership manifest. Its caller boundary was reviewed from the
+owner's original XBE; generated original bodies remain ignored private output.
+Microsoft directory/file-information documentation supplies host API contracts.
+nxdk's LaunchDataPage declaration and Cxbx's null cold-launch initialization
+were consulted as ABI/initial-state facts; no GPL cache/launch service body is
+incorporated. The existing GPL-dependent CPU-helper restriction is unchanged.
+
 ## Unicorn Engine / QEMU
 
 [Unicorn Engine](https://github.com/unicorn-engine/unicorn), version `2.1.1`,

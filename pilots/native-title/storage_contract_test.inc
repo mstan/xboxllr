@@ -112,6 +112,7 @@ static void test_storage(void)
         CHECK(CloseHandle(storage_roots[i])); storage_roots[i]=NULL;
         sprintf(path,"%s\\Partition%u",directory,i); CHECK(RemoveDirectoryA(path));
     }
+    CHECK(CloseHandle(storage_parent)); storage_parent=NULL;
     CHECK(RemoveDirectoryA(directory));
     fprintf(stderr,"PASS: actual mounted volume capacity, HDD persistence/flush/truncate, create collisions, dynamic links, deletion/open-handle lifetime and cycle rejection\n");
 }

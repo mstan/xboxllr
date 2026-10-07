@@ -75,6 +75,7 @@ def prepare(args):
         raise ValueError("output belongs to a different XBE; use a separate directory")
     (out / "gen" / "pilot_image.h").unlink(missing_ok=True)
     (out / "gen" / "pilot_media_binding.c").unlink(missing_ok=True)
+    (out / "gen" / "pilot_cache_binding.c").unlink(missing_ok=True)
     identity.write_text(json.dumps(image, indent=2) + "\n")
 
     def run(name, argv):
@@ -113,6 +114,9 @@ def prepare(args):
     if args.media_symbols:
         from native_media_binding import bind
         bind(args.xbe, out, args.media_symbols)
+    if args.cache_symbols:
+        from native_cache_binding import bind
+        bind(args.xbe, out, args.cache_symbols)
     print(json.dumps({k: v for k, v in manifest.items() if k != "files"}, indent=2))
 
 
@@ -124,4 +128,5 @@ if __name__ == "__main__":
     parser.add_argument("--data-sections", default="")
     parser.add_argument("--reuse-discovery", action="store_true")
     parser.add_argument("--media-symbols", type=Path, help="Bind a reviewed media helper using this XDK symbol inventory")
+    parser.add_argument("--cache-symbols", type=Path, help="Bind reviewed utility-drive service using this XDK symbol inventory")
     prepare(parser.parse_args())

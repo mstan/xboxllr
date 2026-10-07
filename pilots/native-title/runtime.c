@@ -237,6 +237,7 @@ static void query_setting(void)
 #include "virtual_memory.inc"
 #include "sections.inc"
 #include "media.inc"
+#include "cache.inc"
 
 static void kernel_dispatch(void)
 {
@@ -413,6 +414,16 @@ static void load_image(const char *path)
     }
     for (size_t i=0;i<sizeof(pilot_imports)/sizeof(pilot_imports[0]);++i) {
         MEM32(pilot_imports[i].address)=0xfe000000u+4*pilot_imports[i].ordinal;
+        if (pilot_imports[i].ordinal==164) {
+            /* LaunchDataPage is an exported pointer, not a function. This
+             * process is a cold launch with no previous title's sticky page.
+             * nxdk declares PLAUNCH_DATA_PAGE; Cxbx EmuKrnlMm starts it null.
+             * Preserve a writable guest pointer cell; warm launch/persistence
+             * is not advertised and HalReturnToFirmware still stops. */
+            const uint32_t data=0xfd003000u;
+            commit(data,4096); MEM32(data)=0;
+            MEM32(pilot_imports[i].address)=data;
+        }
         if (pilot_imports[i].ordinal==322 || pilot_imports[i].ordinal==324) {
             const uint32_t data=0xfd000000u+0x1000u*(pilot_imports[i].ordinal-322);
             commit(data,4096);

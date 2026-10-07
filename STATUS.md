@@ -1,5 +1,43 @@
 # STATUS
 
+## 2026-10-06 - Blinx mounts persistent native utility storage and advances into initialization
+
+`beads-xbox.1.62`: the reviewed whole `XMountUtilityDrive` boundary now has a
+build-selected native implementation. Actual original NTSC Blinx creates `Z:`
+on partition 3 on fresh and repeated launches. The service preserves real
+files between calls/processes, clears actual files for clean format/eviction,
+and durably records ownership in a private checksummed native manifest. It
+does not fabricate the raw HDD cache-table sector. The original routine is
+still generated; `PILOT_CACHE=ORIGINAL` was rebuilt and executed, reproducing
+the raw partition-0 stop. The native build was restored afterward.
+
+Ten CTests pass, covering guest Z: read/write routing, persistence, recursive
+format including read-only/numerous entries, three-slot eviction, locked-file
+failure and recovery, manifest corruption, ABI/nonvolatile registers, LastError
+callback, and 100 mounts without handle growth. The symlink fixture is explicitly
+skipped on this host because its creation requires a Windows privilege; exact
+resolved-root rejection and handle-relative no-reparse traversal remain in
+the implementation. A real Blinx run with the manifest locked reports
+STATUS_SHARING_VIOLATION and executes its original NTSTATUS/LastError helper.
+
+The subsequent unmapped export was `LaunchDataPage` (164), an exported pointer.
+The private cold launcher now exposes its real initial null pointer cell; it
+does not invent a previous-title launch packet or implement warm relaunch.
+Blinx advances through further CRT/title initialization to the next explicit
+stop, `FscGetCacheSize` (35). No graphics, audio, movies, menu/gameplay, attract
+completion or cadence is claimed. JSRF remains deferred.
+
+Contract limits: native three-slot LRU policy, 16 KiB logical units, shared host
+capacity, native file metadata and explicit corruption/busy failures; raw FATX
+layout/retail replacement order and physical storage timing are not reproduced.
+This is static original-routine/API reference plus executed native tests, not
+an executed full LLE differential. No new GPL service implementation is imported;
+the existing Phobos CPU helper still confines this pilot to private reference use.
+
+Evidence: `build/cache-contract-tests.log`, `build/blinx/run-cache-*.log`,
+`build/blinx/cache-final-runs.aot-private.json`, `cache-binding-validation.aot-private.json`,
+and `cache-validation.aot-private.json` in that same private output directory.
+
 ## 2026-10-06 - Blinx loads/unloads its deferred image and writes exact asset bytes
 
 `beads-xbox.1.62`: real `XeLoadSection`/`XeUnloadSection` now advance Blinx past
