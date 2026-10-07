@@ -3,8 +3,9 @@
 **Current, 2026-10-07 (`beads-xbox.1.62`):** complete original NTSC Blinx's
 attract sequence before resuming JSRF. Dashboard speed and full AOT remain
 continuing goals. The native pilot executes actual title startup with the
-authorized installed-media contract and now passes input initialization into
-`DirectSoundCreate`. The next stop is `KfRaiseIrql` in the original audio driver.
+authorized installed-media contract, passes input initialization, opens real
+native audio and starts the media workers. The next stop is
+`D3DDevice_BlockUntilVerticalBlank` in a worker.
 Use the [native pilot evidence and scope](../pilots/native-title/README.md)
 for current progress; the optical-route ledger below is historical and separate.
 
@@ -13,13 +14,16 @@ for current progress; the optical-route ledger below is historical and separate.
 | Launch, real files and writable storage | Passed bounded startup; original optical verifier remains selectable |
 | Graphics resource preparation | Real font/textures, buffers, 91 compiled vertex shaders and 30 owned pixel definitions; actual title draws still pending |
 | Input initialization | Native host input family passes contracts and actual title enumeration; hardware interaction remains unvalidated (no attached host pad in measured runs) |
-| Sound startup | Enters original `DirectSoundCreate`; next family is real native audio services |
+| Sound startup | Real native device opens; PCM backend/ABI fixtures pass. Actual title buffers/output, streams and effects remain unqualified |
+| Media worker scheduling | Real references/priority/boost and safe suspend/resume pass; title workers reach vertical-blank waiting |
 | Menu, movies and gameplay in attract | Pending; no title frame or audible output yet |
 | Complete repeat loops, interruption/menu return, original cadence | Pending actual end-to-end measurement |
 | JSRF | Deferred until Blinx success; shared services and separate bindings remain the architecture |
 
-Fresh and repeated native launches stop at the same audio-driver boundary;
-24 contract tests pass. These are completed service checkpoints, not a percent
+Fresh and repeated native launches stop at the same vertical-blank boundary;
+27 contract tests and ten generation/extent tests pass. Original audio remains
+selectable and still stops at the original audio-driver `KfRaiseIrql` boundary.
+These are completed service checkpoints, not a percent
 complete or a date forecast. No throughput/velocity estimate supports an ETA.
 
 ## Earlier optical launch investigation

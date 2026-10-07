@@ -36,11 +36,13 @@ textures reach all nine levels, including 2x2 and 1x1 tails. Actual GPU readback
 of `pika.dds` level zero matches the complete original compressed DDS payload.
 The real memory-statistics query and front-surface descriptor now pass. A
 truncated initializer has been recovered and re-lifted from the original bytes;
-Blinx now passes native `XInitDevices` and device enumeration, then enters
-`DirectSoundCreate`. It performs three real sound-object pool allocations
-(44, 172 and 2020 requested bytes), allocates a contiguous page and queries
-its actual size. Its current stop is `KfRaiseIrql` (ordinal 160) in original
-audio-driver initialization. `HalBootSMCVideoMode` is a real data export with
+Blinx now passes native `XInitDevices` and device enumeration, opens the real
+Windows audio device through `DirectSoundCreate`, and starts its three media
+workers. Fresh and repeated launches stop at `D3DDevice_BlockUntilVerticalBlank`
+in a worker. No title sound buffer or game audio is established by those runs.
+`PILOT_AUDIO=ORIGINAL` still executes the original sound-object allocations and
+contiguous-page setup, stopping at `KfRaiseIrql` (ordinal 160) in audio-driver
+initialization. `HalBootSMCVideoMode` is a real data export with
 the same composite-cable value as the LLE SMC. The `PILOT_INPUT=ORIGINAL`
 selection still executes original USB initialization and stops at
 `IoCreateDevice` (ordinal 65). Title draws and audible output are unqualified.
@@ -61,7 +63,7 @@ EEPROM user-settings queries and NTSTATUS-to-DOS-error conversion. Timer arming,
 expiry and DPC delivery are implemented as described below. Callback delivery
 is exercised by the contract tests. No callbacks, draws or completions are discarded.
 
-Twenty-four contract tests pass: concurrent threads with separate registers/TLS and
+Twenty-seven contract tests pass: concurrent threads with separate registers/TLS and
 recursive exclusion, handle closure/errors and EEPROM buffer/checksum behavior;
 timer/DPC/event-wait contracts; real VM reservation/commit/free/protection/query;
 installed-media identity and actual file I/O; writable storage and link lifetimes;
@@ -77,6 +79,10 @@ cache and pool lifetimes, including shared-page small pool blocks;
 native input packing, real Windows control mapping, connection transitions,
 stale-handle rejection, polling cache, rumble error propagation and 100 open/close
 cycles with a test-only host provider; exact reasons for unsupported input stops;
+real Windows PCM buffer storage/playback/cursors/looping, wrapped locks,
+properties, ownership and explicit unsupported-audio failures;
+initial/nested/self thread suspension, repeated pause/resume, priority/boost
+controls and retained object references surviving guest handle closure;
 created/registered vertex resources, actual GPU buffer readback, external
 header/backing ownership and bounded contiguous-memory allocation/release;
 real shader compilation, typed/multiple-stream GPU input, paired issue and
@@ -782,6 +788,79 @@ and readback. Evidence: `build/shader-contract-tests.log`,
 `build/blinx/shader-validation.aot-private.json`.
 
 ## Reproduce privately
+
+### Native audio and media-worker checkpoint
+
+Select `-DPILOT_AUDIO=NATIVE` after running `tools/native_audio_binding.py`
+with `--xbe`, `--output` and `--symbols`; full preparation accepts
+`--audio-symbols`. The binding checks the full NTSC image and each original
+body, verifies stdcall cleanup and derives the object vtables from reviewed
+constructor bytes. Its 21 entries retain the original bodies for `ORIGINAL`.
+Runtime service code contains no title function addresses.
+
+The adapter reuses the actual Windows DirectSound8 engine for 2D PCM storage,
+mixing, rate conversion, looping and device-paced cursors. It supports mono or
+stereo, 8/16-bit PCM, shared device ownership, guest-owned or caller-owned data,
+contiguous/wrapped lock uploads, play/stop/seek, volume/headroom and
+frequency/pitch. Errors propagate from real allocations and device operations.
+There is no silent output/clock fallback. Native COM pointers stay outside
+guest memory. Xbox descriptors are **24 bytes**, not the desktop descriptor
+or the donor's 28-byte declaration. The device interface is at object +8 and
+the buffer interface at +28; original bytes establish the reference-count,
+vtable and public-call shapes.
+
+Current bounded differences and missing coverage:
+
+- Host mixing/resampling and output latency can differ from the Xbox APU.
+  Buffers use the original default 600-hundredths-dB 2D headroom. LOCDEFER may
+  allocate native storage earlier. Cursors reflect actual host audio progress.
+- Borrowed data is uploaded on attachment and Play; writes through Lock/Unlock
+  upload their real spans. Arbitrary concurrent writes through a retained raw
+  data pointer are not qualified as coherent streaming. Detached zero-length
+  storage, partial loop regions, Xbox ADPCM, streams, DSP images, mix-bin routing
+  and 3D remain unqualified. Reached unsupported API/format requests stop.
+- The LLE APU currently proves bounded voice/idle/IRQ behavior, not full PCM
+  output. These tests establish ABI, ownership and actual host playback; they
+  are **not** a full hardware/LLE audio differential. Game-audio equivalence
+  and perceptual tolerances remain open until title audio is exercised.
+
+All three donors were inspected for this family. MIT sp00nznet `1409a7d` and
+NoRain `7adaf21` have useful API organization but also success stubs and missing
+stream/effect work. Phobos `63f18f0` has device-clock/buffer/packet architecture,
+but its GPL implementations and silent unsupported paths were not imported.
+Windows DirectSound provides the reusable engine here; the Xbox adapter is
+independently authored. Microsoft documents the
+[buffer creation](https://learn.microsoft.com/en-us/previous-versions/windows/desktop/ee418039(v=vs.85))
+and [actual play/write cursor contract](https://learn.microsoft.com/en-us/previous-versions/windows/desktop/ee418062(v=vs.85)).
+Xbox IMA ADPCM must not be passed to XAudio2 as Microsoft ADPCM.
+
+Media-worker startup now uses real thread-object references, priority/boost
+controls and suspend/resume counts. A reference owns a duplicated native handle
+and survives `NtClose`; `PsThreadObjectType` is an opaque type identity, with
+unqualified private layout access faulting. Windows priority classes approximate
+guest relative priorities; exact retail scheduling order is not claimed.
+Suspension takes effect at generated function entries and backward-branch
+targets, after any in-flight native service returns. It never freezes a host
+thread inside an allocator, I/O or runtime lock. Self-suspension waits without
+holding the ownership lock. The existing 63 lifetime thread-slot bound remains;
+thread-slot reclamation and broader object types are still open.
+
+`tools/native_thread_checkpoints.py --output <repo>/build/blinx` upgrades an
+existing hash-verified generation; full preparation and extent recovery retain
+the pass. This image has 7354 loop targets. Four synthetic tests verify scope,
+conditional branches, missing-target rejection and idempotence; six extent
+tests also pass. Normal checkpoints perform a TLS/count read, with a blocking
+wait only when suspension is requested. This is not instruction-history
+comparison or duplicate guest execution.
+
+Evidence: `build/audio-family-contract-tests.log`,
+`build/blinx/audio-family-validation.aot-private.json`,
+`run-audio-family-{fresh,repeat}.log` and `run-audio-original.log` in that private
+directory. The PCM fixture copies exact bytes through real host buffers, plays
+a one-shot to completion, observes advancing cursors, loops/stops and returns
+guest storage to its baseline. It does not establish audible game output.
+The next observed title boundary is real guest-cadence vertical-blank waiting;
+title draws, sound buffers, movies and attract remain pending.
 
 ### Memory accounting and input-startup checkpoint
 

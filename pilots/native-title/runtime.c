@@ -33,8 +33,17 @@ static uint32_t image_base, header_bytes, section_table, section_count;
 static RECOMP_TLS uint32_t next_kernel_ordinal;
 static RECOMP_TLS unsigned current_thread_slot;
 static SRWLOCK thread_lock = SRWLOCK_INIT;
+static CONDITION_VARIABLE thread_condition = CONDITION_VARIABLE_INIT;
+RECOMP_TLS volatile uint32_t *g_pilot_suspend_count;
 static SRWLOCK vm_lock=SRWLOCK_INIT;
-struct PilotThread { HANDLE handle; uint32_t routine, context1, context2, tls_size, stack_size, extra, tid; };
+#define PILOT_THREAD_OBJECT_TYPE 0xfd005000u
+struct PilotThread {
+    HANDLE handle,reference_handle;
+    uint32_t routine,context1,context2,tls_size,stack_size,extra,tid,object,object_refs;
+    int32_t priority;
+    volatile uint32_t suspend_count;
+    int finished;
+};
 static struct PilotThread threads[64];
 static unsigned thread_count;
 static unsigned char eeprom[256];
@@ -85,8 +94,25 @@ void recomp_debug_service(uint32_t service, uint32_t argument) { (void)argument;
 uint32_t recomp_eflags_push(void) { stop("PUSHFD arithmetic flags not exported by donor lowering", recent[(recent_pos-1)&31]); }
 void recomp_eflags_pop(uint32_t value) { (void)value; stop("POPFD arithmetic flags not imported by donor lowering", recent[(recent_pos-1)&31]); }
 #include "nonlocal_jump.inc"
+void pilot_thread_checkpoint(void)
+{
+    if (!current_thread_slot) return;
+    AcquireSRWLockExclusive(&thread_lock);
+    while (threads[current_thread_slot].suspend_count) {
+        if (!SleepConditionVariableSRW(&thread_condition,&thread_lock,INFINITE,0))
+            stop("guest suspension wait failed",GetLastError());
+    }
+    ReleaseSRWLockExclusive(&thread_lock);
+}
+static void thread_finished(void)
+{
+    AcquireSRWLockExclusive(&thread_lock);
+    threads[current_thread_slot].finished=1;
+    ReleaseSRWLockExclusive(&thread_lock);
+}
 void recomp_trace_enter(const char *name, uint32_t va)
 {
+    PILOT_THREAD_CHECKPOINT();
     (void)name;
     recent[recent_pos++ & 31] = va;
     ++entries;
@@ -127,6 +153,8 @@ static DWORD WINAPI title_thread(void *argument)
     unsigned slot=(unsigned)(uintptr_t)argument;
     struct PilotThread *thread=&threads[slot];
     current_thread_slot=slot;
+    g_pilot_suspend_count=&thread->suspend_count;
+    PILOT_THREAD_CHECKPOINT();
     uint32_t base=0x60000000u+slot*0x100000u;
     uint32_t stack_top=base+0x100000u;
     uint32_t tls=stack_top-thread->tls_size;
@@ -158,6 +186,7 @@ static DWORD WINAPI title_thread(void *argument)
             thread->tid,thread->routine,thread->context1,thread->context2,thread->tls_size);
     fn();
     /* A returned system routine ends this actual host thread. */
+    thread_finished();
     return g_eax;
 }
 
@@ -177,13 +206,22 @@ static void create_thread(void)
     struct PilotThread *thread=&threads[slot];
     thread->routine=args[9]; thread->context1=args[5]; thread->context2=args[6];
     thread->tls_size=args[3]; thread->stack_size=(stack+4095)&~4095u; thread->extra=args[1];
+    thread->suspend_count=args[7]!=0;
+    /* The object exists while the new host thread is still suspended. Native
+     * reference/priority services must not wait for its guest entry to run. */
+    uint32_t context_base=0x60000000u+slot*0x100000u;
+    commit(context_base,0x2000+thread->extra);thread->object=context_base+0x1000;
     DWORD tid;
     thread->handle=CreateThread(NULL,0,title_thread,(void*)(uintptr_t)slot,CREATE_SUSPENDED,&tid);
     if (!thread->handle) { --thread_count; ReleaseSRWLockExclusive(&thread_lock); g_eax=0xc000009au; return; }
     thread->tid=tid;
+    MEM32(thread->object+0x28)=context_base+0x100000u-thread->tls_size;
+    MEM32(thread->object+0x12c)=tid;
     MEM32(args[0])=0x40000000u+slot;
     if (args[4]) MEM32(args[4])=tid;
-    if (!args[7] && ResumeThread(thread->handle)==(DWORD)-1) stop("cannot resume created thread",tid);
+    /* OS suspension is used only before entry, to publish metadata. Guest
+     * suspension thereafter waits at generated-code points with no host locks. */
+    if (ResumeThread(thread->handle)==(DWORD)-1) stop("cannot start created thread",tid);
     ReleaseSRWLockExclusive(&thread_lock);
     g_eax=0;
 }
@@ -254,6 +292,10 @@ static void query_setting(void)
 #include "media.inc"
 #include "cache.inc"
 #include "memory_statistics.inc"
+#include "thread_objects.inc"
+#ifdef PILOT_AUDIO_NATIVE
+#include "audio.inc"
+#endif
 #ifdef PILOT_INPUT_NATIVE
 #include "input.inc"
 #endif
@@ -268,6 +310,8 @@ static void kernel_dispatch(void)
         if (pilot_imports[i].ordinal == next_kernel_ordinal) name=pilot_imports[i].name;
     fprintf(stderr, "[KERNEL] %u %s return=%08x\n", next_kernel_ordinal, name, MEM32(g_esp));
     switch (next_kernel_ordinal) {
+    case 124: case 143: case 144: case 224: case 231: case 246: case 250:
+        thread_object_kernel(next_kernel_ordinal);return;
     case 14:case 15:case 17:case 23:pool_kernel(next_kernel_ordinal);return;
     case 181:g_eax=memory_statistics(MEM32(g_esp+4));g_esp+=8;return;
     case 165: case 166: case 171: case 180: physical_kernel(next_kernel_ordinal); return;
@@ -350,6 +394,7 @@ static void kernel_dispatch(void)
     case 255: create_thread(); g_esp+=44; return;
     case 258:
         if (!current_thread_slot) stop("bootstrap thread termination",next_kernel_ordinal);
+        thread_finished();
         ExitThread(MEM32(g_esp+4));
     case 187: {
         uint32_t handle=MEM32(g_esp+4),slot=handle-0x40000000u;
@@ -440,6 +485,11 @@ static void load_image(const char *path)
     }
     for (size_t i=0;i<sizeof(pilot_imports)/sizeof(pilot_imports[0]);++i) {
         MEM32(pilot_imports[i].address)=0xfe000000u+4*pilot_imports[i].ordinal;
+        if (pilot_imports[i].ordinal==259) {
+            /* Native object-type identity, used by ObReferenceObjectByHandle.
+             * Guest inspection of unqualified OBJECT_TYPE internals faults. */
+            MEM32(pilot_imports[i].address)=PILOT_THREAD_OBJECT_TYPE;
+        }
         if (pilot_imports[i].ordinal==164) {
             /* LaunchDataPage is an exported pointer, not a function. This
              * process is a cold launch with no previous title's sticky page.

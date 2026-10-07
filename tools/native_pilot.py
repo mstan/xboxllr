@@ -53,6 +53,8 @@ def harden_generated(directory):
     header = re.sub(r"extern volatile (uint(?:32|64)_t g_icall_(?:trace(?:_idx)?|count)\b)",
                     r"extern RECOMP_TLS volatile \1", header)
     types.write_text(header, encoding="utf-8")
+    from native_thread_checkpoints import apply
+    counts['thread_checkpoints'] = apply(directory)
     return counts
 
 
@@ -80,6 +82,9 @@ def prepare(args):
     (out / "gen" / "pilot_d3d_bindings.h").unlink(missing_ok=True)
     (out / "gen" / "pilot_jump_bindings.h").unlink(missing_ok=True)
     (out / "gen" / "pilot_cpu_binding.c").unlink(missing_ok=True)
+    for family in ('input', 'audio'):
+        (out / 'gen' / f'pilot_{family}_binding.c').unlink(missing_ok=True)
+        (out / 'gen' / f'pilot_{family}_bindings.h').unlink(missing_ok=True)
     identity.write_text(json.dumps(image, indent=2) + "\n")
 
     def run(name, argv):
@@ -143,6 +148,9 @@ def prepare(args):
     if args.input_symbols:
         from native_input_binding import bind
         bind(args.xbe, out, args.input_symbols)
+    if args.audio_symbols:
+        from native_audio_binding import bind
+        bind(args.xbe, out, args.audio_symbols)
     print(json.dumps({k: v for k, v in manifest.items() if k != "files"}, indent=2))
 
 
@@ -159,4 +167,5 @@ if __name__ == "__main__":
     parser.add_argument("--jump-symbols", type=Path, help="Qualify original CRT nonlocal jumps against this image inventory")
     parser.add_argument("--cpu-symbols", type=Path, help="Bind the reviewed CPU capability probe")
     parser.add_argument("--input-symbols", type=Path, help="Bind the reviewed whole XAPI input family")
+    parser.add_argument("--audio-symbols", type=Path, help="Bind the reviewed whole DirectSound API")
     prepare(parser.parse_args())

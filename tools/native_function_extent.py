@@ -76,6 +76,9 @@ def recover(args):
     bodies=pattern.findall(result.stdout)
     if len(bodies)!=1 or 'RECOMP_UNIMPL' in bodies[0] or 'recomp_stub_missing' in bodies[0]:
         raise ValueError('recovered lowering incomplete')
+    if manifest.get('thread_checkpoints'):
+        from native_thread_checkpoints import instrument
+        bodies[0], unused = instrument(bodies[0])
     matches=[(p,p.read_text()) for p in generated.glob('recomp_*.c')]
     matches=[(p,c) for p,c in matches if pattern.search(c)]
     if len(matches)!=1: raise ValueError('expected one original generated body')
@@ -90,6 +93,9 @@ def recover(args):
     path.write_text(code,newline='\n');functions_path.write_text(json.dumps(updated,indent=2)+'\n',newline='\n')
     record_path.write_text(json.dumps(records,indent=2)+'\n',newline='\n')
     manifest['function_extents']=records['extents']
+    if manifest.get('thread_checkpoints'):
+        from native_thread_checkpoints import apply
+        manifest['thread_checkpoints']=apply(generated)
     manifest['files']={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(generated.iterdir()) if p.is_file()}
     manifest_path.write_text(json.dumps(manifest,indent=2)+'\n',newline='\n')
     return record

@@ -6,6 +6,10 @@ validate JSRF afterward, using shared services and separate revision bindings.
 Maintain the machine LLE build and continue
 dashboard performance work without making it a title-launch prerequisite.
 See [the audited alternatives and next steps](PHOBOS-DEEP-AUDIT-2026-10-06.md).
+Latest native checkpoint: Blinx opens actual audio and starts media workers;
+fresh/repeat launches reach vertical-blank waiting. Native PCM and thread
+contracts pass; title frames, game audio and attract remain pending. See the
+[current service ledger](BLINX-BURNDOWN.md).
 
 Two arcs. Terse by design (the gcnrecomp shape): each milestone has a one-line intent, an
 explicit **Deliverable**, and — once closed — a dated **DONE** stamp with the

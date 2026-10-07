@@ -9,6 +9,7 @@ static uint32_t test_lock=0x14000, test_worker_address=0x12000;
 static void test_dpc(void);
 static void test_timers(void);
 static void test_memory(void);
+static void test_scheduler_worker(void);
 
 static void test_worker(void)
 {
@@ -26,7 +27,7 @@ static void test_worker(void)
     }
 }
 
-recomp_func_t recomp_lookup(uint32_t va) { return va==test_worker_address ? test_worker : va==0x12100 ? test_dpc : NULL; }
+recomp_func_t recomp_lookup(uint32_t va) { return va==test_worker_address ? test_worker : va==0x12100 ? test_dpc : va==0x12200 ? test_scheduler_worker : NULL; }
 
 static void call_kernel(unsigned ordinal,const uint32_t *args,unsigned argc)
 {
@@ -43,6 +44,7 @@ static void call_kernel(unsigned ordinal,const uint32_t *args,unsigned argc)
 #include "cache_contract_test.inc"
 #include "file_cache_contract_test.inc"
 #include "nonlocal_jump_contract_test.inc"
+#include "thread_objects_contract_test.inc"
 
 static int test_write_faults(uint32_t va)
 {
@@ -59,6 +61,9 @@ static int test_write_faults(uint32_t va)
 #include "sections_contract_test.inc"
 #include "physical_memory_contract_test.inc"
 #include "memory_statistics_contract_test.inc"
+#ifdef PILOT_AUDIO_NATIVE
+#include "audio_contract_test.inc"
+#endif
 #ifdef PILOT_INPUT_NATIVE
 #include "input_contract_test.inc"
 #endif
@@ -292,6 +297,10 @@ int main(int argc,char **argv)
     g_esp=0x18000; MEM32(g_esp)=0x12340;
     image_size=0x200; image_bytes=calloc(1,image_size); CHECK(image_bytes!=NULL);
     if (argc==2) {
+#ifdef PILOT_AUDIO_NATIVE
+        if (!strcmp(argv[1],"audio")) { test_audio(); return 0; }
+        if (!strncmp(argv[1],"audio-",6)) { test_audio_failure(argv[1]+6); return 0; }
+#endif
 #ifdef PILOT_INPUT_NATIVE
         if (!strcmp(argv[1],"input")) { test_input(); return 0; }
         if (!strncmp(argv[1],"input-",6)) { test_input_failure(argv[1]+6); return 0; }
@@ -311,6 +320,7 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"memory")) { test_memory(); return 0; }
         if (!strcmp(argv[1],"memory-statistics")) { test_memory_statistics(); return 0; }
         if (!strcmp(argv[1],"timers")) { test_timers(); return 0; }
+        if (!strcmp(argv[1],"threads")) { test_thread_objects(); return 0; }
         if (!strcmp(argv[1],"jumps")) { test_jumps(); return 0; }
         if (!strncmp(argv[1],"jump-",5)) { test_jump_failure(argv[1]+5); return 1; }
         if (!strcmp(argv[1],"instruction")) recomp_unimpl("test unsupported instruction",0x12340);
@@ -328,8 +338,11 @@ int main(int argc,char **argv)
     call_kernel(255,args,10); CHECK(g_eax==0);
     HANDLE host2=threads[2].handle;
     CHECK(MEM32(0x19000)!=handle1 && MEM32(0x19004)!=tid1);
+    uint32_t resume[]={handle1,0x19008};
+    call_kernel(224,resume,2); CHECK(g_eax==0 && MEM32(0x19008)==1);
+    resume[0]=MEM32(0x19000);
+    call_kernel(224,resume,2); CHECK(g_eax==0 && MEM32(0x19008)==1);
     g_eax=42;
-    CHECK(ResumeThread(host1)==1 && ResumeThread(host2)==1);
     CHECK(WaitForSingleObject(host1,5000)==WAIT_OBJECT_0);
     CHECK(WaitForSingleObject(host2,5000)==WAIT_OBJECT_0);
     CHECK(test_counter==20000 && g_eax==42);
