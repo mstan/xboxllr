@@ -1,5 +1,12 @@
 # Goal: faithful Xbox floor, enhanced native execution and playable games
 
+**Execution priority, 2026-10-06:** Blinx launch and a repeatable scene come
+first, using the latest Phobos work beyond just its graphics backend. Check
+JSRF alongside shared API/loader changes. Keep dashboard original speed as an
+active goal, not a prerequisite. The [Phobos audit and next steps](PHOBOS-DEEP-AUDIT-2026-10-06.md)
+supersede the older work ordering below; the maintained LLE floor, build-selected
+HLE, no-stub requirements and final full-AOT goal remain in force.
+
 Owner clarification, 2026-10-04. Central tracker: `beads-xbox.1.25.5`;
 planning decision: `beads-xbox.1.40`; active menu gate: `beads-xbox.1.17`.
 The owner targets original Xbox execution speed and content cadence. Exploratory

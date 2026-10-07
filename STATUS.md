@@ -1,5 +1,27 @@
 # STATUS
 
+## 2026-10-06 - Latest Phobos audited against local Blinx and JSRF
+
+Fetched Phobos `63f18f0` into an isolated donor worktree. Upstream reports
+Blinx XDK 4831 reaching a rendered first level with movies. This is a native
+title runtime; no local gameplay or speed claim follows. The next priority is
+Blinx launch with JSRF checking shared boundaries early. Dashboard original
+speed remains active and does not gate either title.
+
+Actual source-share inputs differ from the donor title scaffolds. A donor
+Blinx seed documented as a Sofdec section base lands in a different section
+in our NA copy; profiles must be bound to XBE hashes. Live signature scans
+found 129/131 D3D8 functions for Blinx/JSRF, 41 common resolving HLE names and
+110 shared kernel imports. Blinx's indexed-draw functions were not named;
+JSRF uses a different GetBackBuffer ABI. BeginPush use remains unmeasured.
+
+105 focused donor tests and 14 subtests pass. Local discovery and binding
+analysis are private artifacts; no donor runtime stubs were integrated.
+Whole D3D8 service reuse is the next useful boundary, beyond another backend
+swap. The existing retail-kernel optical authentication blocker remains open.
+
+[Deep audit, architecture alternatives, inputs and concrete next steps](docs/PHOBOS-DEEP-AUDIT-2026-10-06.md).
+
 ## 2026-10-04 - Blinx exploration active; optical authentication is the first blocker
 
 The owner relaxed dashboard speed as a hard prerequisite to exploratory Blinx

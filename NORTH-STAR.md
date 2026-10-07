@@ -1,7 +1,7 @@
 # NORTH-STAR
 
-> Updated by the owner on 2026-10-04.
-> Explore Blinx while investigating dashboard slowness; full AOT remains a final gate.
+> Updated by the owner on 2026-10-06.
+> Prioritize Blinx, use JSRF early to generalize, and continue dashboard performance work.
 
 ## The project
 
@@ -26,13 +26,15 @@ See the [all-donor assessment](docs/RENDERER-REUSE-2026-10-02.md).
 
 ## Current goal
 
-Reach original guest speed and content cadence in the animated stock dashboard
-main menu, with working selection/input. Exploratory Blinx launch proceeds
-alongside this investigation; dashboard speed no longer blocks that work.
+Prioritize entering Blinx and reaching a repeatable scene, with Phobos as the
+primary current donor for native title launch and whole D3D8 services. Check
+JSRF alongside changed interfaces to avoid assuming one title's layout or XDK.
+Continue pursuing original guest speed and content cadence in the animated
+stock dashboard with working selection/input; it does not gate title work.
 Use enhanced rendering, compatible native/HLE replacements and the existing
 hybrid CPU path to get there. Complete dashboard navigation remains a product
 requirement; every menu interior is not part of this immediate performance gate.
-Blinx supplies the first game workload; JSRF is the next generalization target.
+Blinx supplies the primary game workload; JSRF is an early generalization check.
 
 Full portable AOT remains the final CPU goal: prepare native artifacts before
 launch and remove dynarec/interpreter dependence from the declared supported
@@ -47,8 +49,14 @@ stand in for an absent reference contract.
 
 ## Next milestone
 
-**Real Blinx kernel launch and the first concrete blocker, followed by a
-repeatable scene. Dashboard cost attribution remains an active workstream.**
+**A qualified Blinx launch path and repeatable scene, using donor services
+where useful. Keep the machine LLE path maintained and dashboard speed open.**
+
+The [latest Phobos audit](docs/PHOBOS-DEEP-AUDIT-2026-10-06.md) compares native
+title launch with grafting the full machine into the donor. It records actual
+Blinx/JSRF symbol coverage, revision mismatches, missing indexed-draw bindings,
+and the next bounded work. Shared names and contracts do not make the donor's
+unchecked completion or missing-function paths acceptable implementations.
 
 The paragraphs below retain earlier renderer evidence; the latest five trials
 and retry conditions are in [the donor results](docs/RESULTS-REMAINING-DONOR-SPIKES-2026-10-04.md).

@@ -1,5 +1,11 @@
 # ROADMAP — xboxlle
 
+**2026-10-06 priority:** focus on Blinx launch with the latest Phobos native
+runtime/compiler and whole-service work as the primary donor investigation;
+use JSRF early to check generality. Maintain the machine LLE build and continue
+dashboard performance work without making it a title-launch prerequisite.
+See [the audited alternatives and next steps](PHOBOS-DEEP-AUDIT-2026-10-06.md).
+
 Two arcs. Terse by design (the gcnrecomp shape): each milestone has a one-line intent, an
 explicit **Deliverable**, and — once closed — a dated **DONE** stamp with the
 machine-verifiable evidence that closed it.

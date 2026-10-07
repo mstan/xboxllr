@@ -1,5 +1,13 @@
 # Blinx: path to the first faithful boot attempt
 
+**2026-10-06 native-path investigation:** the latest Phobos audit now compares
+a donor-led native title build with the machine boot route tracked below.
+Blinx is the primary workload and JSRF checks shared interfaces early. Neither
+requires dashboard performance qualification first. The four-package accounting
+below describes the retail-kernel optical path, not a complete estimate for the
+native route. No local Blinx entry is claimed. See the [measured binding gaps,
+launch contracts and next steps](PHOBOS-DEEP-AUDIT-2026-10-06.md).
+
 Updated 2026-10-04. This is a milestone burndown, not a measured calendar
 forecast. Packages differ in size; counts are not percent completion.
 Central Beads is the issue source of truth.
