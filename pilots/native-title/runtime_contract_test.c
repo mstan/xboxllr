@@ -8,6 +8,7 @@ static LONG test_counter;
 static uint32_t test_lock=0x14000, test_worker_address=0x12000;
 static void test_dpc(void);
 static void test_timers(void);
+static void test_memory(void);
 
 static void test_worker(void)
 {
@@ -35,6 +36,78 @@ static void call_kernel(unsigned ordinal,const uint32_t *args,unsigned argc)
     next_kernel_ordinal=ordinal;
     kernel_dispatch();
     CHECK(g_esp==0x18000+4+argc*4);
+}
+
+static int test_write_faults(uint32_t va)
+{
+#ifdef _MSC_VER
+    __try { *(volatile unsigned char*)(memory+va)=0x5a; }
+    __except(GetExceptionCode()==EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) { return 1; }
+    return 0;
+#else
+    MEMORY_BASIC_INFORMATION info;
+    CHECK(VirtualQuery(memory+va,&info,sizeof(info))==sizeof(info));
+    return info.State!=MEM_COMMIT || info.Protect==PAGE_NOACCESS || info.Protect==PAGE_READONLY;
+#endif
+}
+static void test_memory(void)
+{
+    const uint32_t bp=0x1b000,sp=0x1b004,info=0x1b020;
+    uint32_t args[]={bp,0,sp,MEM_RESERVE,PAGE_READWRITE};
+    MEM32(bp)=0; MEM32(sp)=128*1024*1024;
+    uint64_t before=vm_committed(0,0x100000000ull);
+    call_kernel(184,args,5); CHECK(g_eax==0);
+    uint32_t base=MEM32(bp),reserved=MEM32(sp);
+    CHECK(base>=0x20000 && !(base&0xffff) && reserved==128*1024*1024);
+    CHECK(vm_committed(0,0x100000000ull)==before && test_write_faults(base));
+    uint32_t query[]={base,info}; call_kernel(217,query,2);
+    CHECK(g_eax==0 && MEM32(info)==base && MEM32(info+4)==base && MEM32(info+12)==reserved && MEM32(info+16)==MEM_RESERVE);
+
+    MEM32(bp)=base+4095; MEM32(sp)=2; args[3]=MEM_COMMIT;
+    call_kernel(184,args,5); CHECK(g_eax==0 && MEM32(bp)==base && MEM32(sp)==8192);
+    CHECK(MEM32(base)==0 && MEM32(base+4096)==0);
+    MEM32(base)=0x12345678; MEM32(base+4096)=0x87654321;
+    call_kernel(184,args,5); CHECK(g_eax==0 && MEM32(base)==0x12345678);
+    call_kernel(217,query,2); CHECK(g_eax==0 && MEM32(info+12)==8192 && MEM32(info+16)==MEM_COMMIT);
+    query[0]=base+8192; call_kernel(217,query,2);
+    CHECK(g_eax==0 && MEM32(info+12)==reserved-8192 && MEM32(info+16)==MEM_RESERVE);
+
+    MEM32(bp)=base+1; MEM32(sp)=1;
+    uint32_t protection[]={bp,sp,PAGE_READONLY,0x1b008};
+    call_kernel(204,protection,4);
+    CHECK(g_eax==0 && MEM32(bp)==base && MEM32(sp)==4096 && MEM32(0x1b008)==PAGE_READWRITE);
+    CHECK(MEM32(base)==0x12345678 && test_write_faults(base));
+    CHECK(!test_write_faults(base+4096));
+    MEM32(base+4096)=0x87654321;
+    protection[2]=PAGE_READWRITE; call_kernel(204,protection,4);
+    CHECK(g_eax==0 && MEM32(0x1b008)==PAGE_READONLY);
+
+    uint32_t free_args[]={bp,sp,MEM_DECOMMIT};
+    call_kernel(199,free_args,3); CHECK(g_eax==0 && test_write_faults(base));
+    call_kernel(184,args,5); CHECK(g_eax==0 && MEM32(base)==0);
+    CHECK(MEM32(base+4096)==0x87654321); /* neighboring committed page retained */
+    MEM32(bp)=base+reserved-1; MEM32(sp)=2;
+    call_kernel(184,args,5); CHECK(g_eax==VM_CONFLICT && MEM32(bp)==base+reserved-1 && MEM32(sp)==2);
+    MEM32(bp)=base; MEM32(sp)=4096; args[3]=MEM_RESERVE;
+    call_kernel(184,args,5); CHECK(g_eax==VM_CONFLICT);
+    MEM32(sp)=64*1024*1024; args[3]=MEM_COMMIT;
+    call_kernel(184,args,5); CHECK(g_eax==VM_NOMEM && MEM32(sp)==64*1024*1024);
+    query[0]=base+8192; call_kernel(217,query,2); CHECK(MEM32(info+16)==MEM_RESERVE);
+    MEM32(sp)=0; free_args[2]=MEM_RELEASE;
+    call_kernel(199,free_args,3); CHECK(g_eax==0 && MEM32(sp)==reserved && test_write_faults(base));
+    query[0]=base; call_kernel(217,query,2); CHECK(g_eax==0 && MEM32(info+16)==MEM_FREE);
+    MEM32(sp)=0; call_kernel(199,free_args,3); CHECK(g_eax==VM_NOT_ALLOCATED);
+
+    /* Whole-range reuse must not retain old bytes or reservation metadata. */
+    MEM32(bp)=base; MEM32(sp)=8192; args[3]=MEM_RESERVE|MEM_COMMIT;
+    call_kernel(184,args,5); CHECK(g_eax==0 && MEM32(base)==0 && MEM32(base+4096)==0);
+    MEM32(sp)=0; call_kernel(199,free_args,3); CHECK(g_eax==0);
+    MEM32(bp)=0; MEM32(sp)=4096; args[1]=16; args[3]=MEM_RESERVE|MEM_TOP_DOWN;
+    call_kernel(184,args,5); CHECK(g_eax==VM_NOMEM); /* all usable low 64 KiB excluded */
+    args[1]=0; call_kernel(184,args,5); CHECK(g_eax==0 && MEM32(bp)==0x7ffe0000);
+    MEM32(sp)=0; call_kernel(199,free_args,3); CHECK(g_eax==0);
+    CHECK(vm_committed(0,0x100000000ull)==before);
+    fprintf(stderr,"PASS: virtual reservation/commit/protection/decommit/release/query ABI, real access protection, reuse zero-fill, budget/failure preservation\n");
 }
 
 static HANDLE dpc_entered,dpc_release,dpc_done;
@@ -190,6 +263,7 @@ int main(int argc,char **argv)
     g_esp=0x18000; MEM32(g_esp)=0x12340;
     image_size=0x200; image_bytes=calloc(1,image_size); CHECK(image_bytes!=NULL);
     if (argc==2) {
+        if (!strcmp(argv[1],"memory")) { test_memory(); return 0; }
         if (!strcmp(argv[1],"timers")) { test_timers(); return 0; }
         if (!strcmp(argv[1],"instruction")) recomp_unimpl("test unsupported instruction",0x12340);
         if (!strcmp(argv[1],"indirect")) recomp_icall_fail_log(0x12340);

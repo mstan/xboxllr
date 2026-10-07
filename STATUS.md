@@ -1,5 +1,28 @@
 # STATUS
 
+## 2026-10-06 - Serial attract goal; Blinx passes initial CRT heap creation
+
+The owner's new objective is `beads-xbox.1.62`: complete original NTSC Blinx's
+full repeatable attract sequence at original speed, then JSRF's. No further
+JSRF work until Blinx meets its acceptance criteria. The runtime goal controller
+rejected replacing the old unfinished paused dashboard goal; it was not falsely
+marked complete. NORTH-STAR and central tracking record the new serial scope.
+
+The native pilot now implements guest VM reserve/commit/decommit/release,
+protection and query with real host NT page services. Six focused tests pass,
+including actual access protection, reservation without commitment, failure
+preservation and zero-fill on reuse. Original Blinx advances through two VM
+calls and heap initialization to `NtOpenFile` on `\Device\CdRom0`, 19
+title-thread function entries. Static inspection identifies a subsequent XAPI
+SCSI MODE SENSE page 0x3e verification; that IOCTL has not executed locally.
+Media/file ownership is the next dependency; an open handle alone will not
+satisfy that contract. No media-authentication success was fabricated.
+
+No graphics, attract sequence, speed win, full MMU or executed LLE differential
+qualification is claimed. The pilot remains private GPL-dependent reference
+material; new VM service code adds no donor implementation. Normal LLE remains
+unchanged. [Reproduction and bounded scope](pilots/native-title/README.md).
+
 ## 2026-10-06 - Native timers advance both titles to CRT memory allocation
 
 `beads-xbox.1.61`: on `spike/native-timers-20261006`, the shared native pilot now

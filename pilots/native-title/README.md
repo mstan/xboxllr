@@ -10,12 +10,15 @@ See [license scope](../../LICENSE-SCOPE.md). There is no install/package target.
 
 The original NTSC Blinx XDK 4831 and JSRF XDK 4134 both execute their own XBE
 entries, create real host-backed title threads, and run early XAPI startup.
-Both now pass timer arming and stop explicitly at kernel ordinal 184,
-`NtAllocateVirtualMemory`. Blinx reaches 13 function entries on its title thread;
-JSRF reaches 12 (previously 10/9 at `KeSetTimer`). These counts are startup
-diagnostics, not game coverage or performance measurements. Neither has reached
-completed CRT heap initialization, graphics, movies, a menu or a level in this
-pilot. The first heap-allocation request is reached; it is not serviced yet.
+Blinx now passes timer arming and its initial CRT heap reservation/commit, then
+stops at kernel ordinal 202, `NtOpenFile`, opening `\Device\CdRom0` for XAPI
+media verification. It reaches 19 title-thread function entries (previously 13
+at allocation, 10 at timer arming). No graphics, movies, menu or level yet.
+These counts are diagnostics, not coverage or performance measurements.
+
+The owner's current goal is serial: complete Blinx before further JSRF work.
+JSRF's last measured result remains 12 title-thread entries at
+`NtAllocateVirtualMemory`; it has not been rebuilt/run against the new VM code.
 
 The native implementations reached so far cover thread creation, thread-handle
 closure, recursive critical sections, DPC/timer structure initialization,
@@ -24,9 +27,10 @@ expiry and DPC delivery are implemented as described below. The title runs reach
 the allocation stop before their own timer callback executes; callback delivery
 is exercised by the contract tests. No callbacks, draws or completions are discarded.
 
-Five contract tests pass: concurrent threads with separate registers/TLS and
+Six contract tests pass: concurrent threads with separate registers/TLS and
 recursive exclusion, handle closure/errors and EEPROM buffer/checksum behavior;
-timer/DPC/event-wait contracts; plus explicit instruction, indirect-call and
+timer/DPC/event-wait contracts; real VM reservation/commit/free/protection/query;
+plus explicit instruction, indirect-call and
 kernel-call failure paths. Passing
 the other title's XBE to the Blinx artifact is rejected before guest execution.
 The main LLE build's runtime source and build selection are untouched.
@@ -54,23 +58,61 @@ The main LLE build's runtime source and build selection are untouched.
   NV2A A1/MCPX B1 identity. This does not certify every export of that kernel.
   User settings come from the supplied 256-byte EEPROM with checksum handling.
   Encrypted/factory queries and other data exports remain unsupported.
-- Host allocations are bounded by the pilot's tables, but retail physical RAM
-  accounting, general virtual allocation, scheduling/IRQL and exceptions are
-  not yet qualified. Donor double-backed x87 and other CPU limits remain.
+- Native VM reservation/commit/free/protection/query is bounded as described
+  below. Complete retail physical RAM accounting, scheduling/IRQL and exceptions
+  are not yet qualified. Donor double-backed x87 and other CPU limits remain.
   PUSHFD/POPFD stop because arithmetic flags are not exported/imported by the
   current donor helpers. This is not a faithful replacement for the CPU floor.
 - Compilation disables host optimization for short bring-up cycles. No FPS,
   full AOT coverage, or D3D8 HLE performance claim follows from this result.
 
-The next shared execution dependency is real virtual-memory allocation for the
-CRT heap. Qualify reserve/commit/decommit/release, alignment, returned ranges,
-protection and failure behavior as a family before extending section loading.
-Use existing emulator behavior and tests to define it, keeping GPL implementations external.
+The next Blinx dependency is the media/file boundary. The actual next open is
+`\Device\CdRom0`; static inspection of its caller shows a following SCSI
+MODE SENSE page 0x3e request through IOCTL 0x4d014. That IOCTL has not executed
+locally yet. Returning a file handle alone does not solve media verification.
+Keep physical-drive authentication distinct from a supported native installed-
+title media contract; do not fabricate authenticated mode-page bytes. The NAS
+contains both the original extracted title and ISO, plus a separate Rev 1 ISO;
+pin the original input, not Rev 1. Use existing references, keeping GPL bodies external.
 The inspected MIT sp00nznet code is a candidate shipping implementation source
 after file provenance checks. D3D8 remains the performance target; first-scene
 bindings still need Blinx's local indexed draws and JSRF's older GetBackBuffer
 out-pointer ABI. A complete reference machine is not a prerequisite to those
 HLE implementations, and dashboard speed does not gate title work.
+
+## Native virtual-memory checkpoint
+
+`virtual_memory.inc` owns guest reservation ranges, delegating real page
+commitment, protection and decommit to the host NT services. Xbox NT functions
+have fewer arguments than desktop NT; the adapter marshals guest 32-bit fields
+and returns a 28-byte memory-query structure. Successful reservation does not
+commit or clear its pages. Recommit preserves existing bytes; decommit followed
+by recommit zero-fills. Release removes guest ownership and allows safe reuse.
+Reservations use 64 KiB alignment, commitment uses 4 KiB pages, and ZeroBits /
+top-down allocation constrain guest VA selection. Failed calls retain outputs.
+
+The XBE image range, including deferred sections, and the synthetic execution
+contexts are excluded from heap allocation. A 64 MiB ceiling counts observed
+host-committed guest pages, including loaded image/stack pages, when admitting
+VM commits. This is **not complete retail physical-page accounting**: kernel
+residency, page tables, physical contiguity and concurrent synthetic context
+allocations are not modeled by it. Reservations may exceed physical RAM; tests
+reserve 128 MiB without committing it. At most 512 reservation records exist.
+
+Tests check real inaccessible/read-only access faults under MSVC, page rounding,
+query boundaries, retained neighbors, decommit/recommit zero-fill, release/reuse,
+allocation conflicts, address limits, budget failure and ABI stack cleanup.
+Guard/cache protections and reset/nozero/large-page allocations stop explicitly;
+image/synthetic-context protection and lifecycle are outside this heap scope.
+This is API/host-backed qualification, not an executed LLE differential test or
+a complete guest MMU. The existing private CPU helper limitations still apply.
+
+References: nxdk Xbox prototypes/flags, Cxbx guest ranges/alignment, and Microsoft
+[NtAllocateVirtualMemory](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntallocatevirtualmemory),
+[NtFreeVirtualMemory](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntfreevirtualmemory),
+[NtQueryVirtualMemory](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntqueryvirtualmemory).
+The sp00nznet `1409a7d` memory bridge was inspected; its commit-as-no-op and
+reservation-clamping behavior were not adopted. No donor memory bodies imported.
 
 ## Native timer/DPC checkpoint
 
@@ -135,6 +177,8 @@ runtime patch or a universal rule. Unknown transfers remain visible failures.
 Local evidence: `build/blinx/run-timers.log`, `build/jsrf/run-timers.log`,
 `build/timer-contract-tests.log`, and each `timer-validation.aot-private.json`.
 The earlier `run-final.log` and `generation.aot-private.json` retain the previous
-startup/generation evidence. No source-share writes
+startup/generation evidence. The newer Blinx VM evidence is
+`build/blinx/run-memory-final.log`, `build/memory-contract-tests.log` and
+`build/blinx/memory-validation.aot-private.json`. No source-share writes
 or game patches were needed. This pilot never executes the donor's fake DVD
 authentication or unconditional GPU acknowledgement paths.

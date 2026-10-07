@@ -1,7 +1,7 @@
 # NORTH-STAR
 
 > Updated by the owner on 2026-10-06.
-> Prioritize Blinx, use JSRF early to generalize, and continue dashboard performance work.
+> Complete Blinx's attract sequence first, then JSRF. Continue dashboard performance work.
 
 ## The project
 
@@ -45,15 +45,22 @@ shipping target, not a claim that they have been removed. See
 
 ## Current goal
 
-Prioritize entering Blinx and reaching a repeatable scene, with Phobos as the
-primary current donor for native title launch and whole D3D8 services. Check
-JSRF alongside changed interfaces to avoid assuming one title's layout or XDK.
+Complete original NTSC Blinx's full attract sequence, then JSRF's. Work serially:
+finish and validate Blinx before beginning further JSRF work. This supersedes
+the earlier parallel title-check policy. Use Phobos as the primary current
+behavioral reference for native title launch and whole D3D8 services; retain
+shared implementations and isolate title/XDK bindings for later JSRF validation.
 Continue pursuing original guest speed and content cadence in the animated
 stock dashboard with working selection/input; it does not gate title work.
 Use enhanced rendering, compatible native/HLE replacements and the existing
 hybrid CPU path to get there. Complete dashboard navigation remains a product
 requirement; every menu interior is not part of this immediate performance gate.
-Blinx supplies the primary game workload; JSRF is an early generalization check.
+Blinx supplies the first game workload; JSRF is the subsequent generalization gate.
+Success requires real startup/loading/rendering/audio and movies/gameplay where
+exercised, input interruption and return to menu, repeatable attract loops
+without crashes/hangs/resource growth, and measured original-speed cadence.
+The central objective is `beads-xbox.1.62`. The goal controller could not replace
+the unfinished paused dashboard objective; it has not been falsely completed.
 
 Full portable AOT remains the final CPU goal: prepare native artifacts before
 launch and remove dynarec/interpreter dependence from the declared supported
@@ -70,8 +77,8 @@ required work and fabricated completion remain unacceptable.
 
 ## Next milestone
 
-**A qualified Blinx launch path and repeatable scene, using donor services
-where useful. Keep the machine LLE path maintained and dashboard speed open.**
+**Original NTSC Blinx's complete repeatable attract sequence at original speed,
+then JSRF's. Keep the bounded LLE reference maintained and dashboard speed open.**
 
 The [latest Phobos audit](docs/PHOBOS-DEEP-AUDIT-2026-10-06.md) compares native
 title launch with grafting the full machine into the donor. It records actual

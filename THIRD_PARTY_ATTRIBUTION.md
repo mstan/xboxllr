@@ -32,6 +32,13 @@ architecture and known gaps; no donor timer service bodies were imported.
 Links, exercised behavior and remaining qualification limits are recorded in
 the pilot README. Its overall reference-only distribution status is unchanged.
 
+The native VM adapter uses host NT services for page backing and independently
+tracks guest reservation ownership. nxdk prototypes/flags, Cxbx address-range
+constants and Microsoft NT memory documentation supplied ABI references.
+sp00nznet `1409a7d` memory/file bridges were inspected for useful mechanisms and
+limitations. No donor memory/file service bodies were incorporated by this
+checkpoint; private CPU-header licensing remains unchanged.
+
 ## Unicorn Engine / QEMU
 
 [Unicorn Engine](https://github.com/unicorn-engine/unicorn), version `2.1.1`,

@@ -233,6 +233,7 @@ static void query_setting(void)
 }
 
 #include "dispatcher.inc"
+#include "virtual_memory.inc"
 
 static void kernel_dispatch(void)
 {
@@ -241,6 +242,17 @@ static void kernel_dispatch(void)
         if (pilot_imports[i].ordinal == next_kernel_ordinal) name=pilot_imports[i].name;
     fprintf(stderr, "[KERNEL] %u %s return=%08x\n", next_kernel_ordinal, name, MEM32(g_esp));
     switch (next_kernel_ordinal) {
+    case 184: case 199: case 204: case 217: vm_kernel(next_kernel_ordinal); return;
+    case 202: {
+        uint32_t attributes=MEM32(g_esp+12);
+        if (attributes && MEM32(attributes+4)) {
+            uint32_t string=MEM32(attributes+4),length=MEM16(string);
+            if (length>1024) length=1024;
+            fprintf(stderr,"[OPEN REQUEST] root=%08x name=%.*s access=%08x options=%08x\n",
+                    MEM32(attributes),(int)length,(char*)(memory+MEM32(string+4)),MEM32(g_esp+8),MEM32(g_esp+24));
+        }
+        break;
+    }
     case 97: g_eax=dispatch_cancel_timer(MEM32(g_esp+4)); g_esp+=8; return;
     case 108: {
         uint32_t va=MEM32(g_esp+4),type=MEM32(g_esp+8),state=MEM32(g_esp+12);
