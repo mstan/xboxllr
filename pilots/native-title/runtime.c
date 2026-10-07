@@ -33,6 +33,7 @@ static uint32_t image_base, header_bytes, section_table, section_count;
 static RECOMP_TLS uint32_t next_kernel_ordinal;
 static RECOMP_TLS unsigned current_thread_slot;
 static SRWLOCK thread_lock = SRWLOCK_INIT;
+static SRWLOCK vm_lock=SRWLOCK_INIT;
 struct PilotThread { HANDLE handle; uint32_t routine, context1, context2, tls_size, stack_size, extra, tid; };
 static struct PilotThread threads[64];
 static unsigned thread_count;
@@ -69,8 +70,10 @@ static void commit(uint32_t address, uint32_t size)
 {
     if (!size || (uint64_t)address + size > 0x100000000ull)
         stop("invalid guest allocation", address);
+    AcquireSRWLockExclusive(&vm_lock);
     if (!VirtualAlloc(memory + address, size, MEM_COMMIT, PAGE_READWRITE))
         stop("host memory commit failed", address);
+    ReleaseSRWLockExclusive(&vm_lock);
 }
 
 void recomp_unimpl(const char *text, uint32_t va) { stop(text, va); }
@@ -246,9 +249,11 @@ static void query_setting(void)
 #include "dispatcher.inc"
 #include "virtual_memory.inc"
 #include "physical_memory.inc"
+#include "pool_memory.inc"
 #include "sections.inc"
 #include "media.inc"
 #include "cache.inc"
+#include "memory_statistics.inc"
 #ifdef PILOT_D3D_NATIVE
 #include "graphics.inc"
 #endif
@@ -260,6 +265,8 @@ static void kernel_dispatch(void)
         if (pilot_imports[i].ordinal == next_kernel_ordinal) name=pilot_imports[i].name;
     fprintf(stderr, "[KERNEL] %u %s return=%08x\n", next_kernel_ordinal, name, MEM32(g_esp));
     switch (next_kernel_ordinal) {
+    case 14:case 15:case 17:case 23:pool_kernel(next_kernel_ordinal);return;
+    case 181:g_eax=memory_statistics(MEM32(g_esp+4));g_esp+=8;return;
     case 165: case 166: case 171: physical_kernel(next_kernel_ordinal); return;
     case 35: case 36: case 37: fsc_kernel(next_kernel_ordinal); return;
     case 327: case 328:

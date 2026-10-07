@@ -135,9 +135,22 @@ static uint32_t graphics_texture_surface(uint32_t header,unsigned level)
 }
 static void graphics_texture_desc(uint32_t header,unsigned level,uint32_t destination)
 {
+    uint32_t format,flags=0;int known=0;
+    if(header==graphics_headers || header==graphics_headers+32)format=(MEM32(header+12)>>8)&255;
+    else format=graphics_textures[graphics_texture_slot(header)].format;
+    for(unsigned i=0;i<sizeof(pilot_d3d_surface_formats)/sizeof(pilot_d3d_surface_formats[0]);++i)
+        if(pilot_d3d_surface_formats[i].format==format) {flags=pilot_d3d_surface_formats[i].flags;known=1;break;}
+    if(!known)stop("unqualified surface description format",format);
+    uint32_t usage=level?0:((flags&0x80)?1:((flags&0x40)?2:0));
+    if(header==graphics_headers || header==graphics_headers+32) {
+        if(level)stop("display surface has no mip levels",level);
+        uint32_t size=MEM32(header+16),width=(size&0xfff)+1,height=((size>>12)&0xfff)+1,pitch=((size>>24)+1)*64;
+        uint32_t description[]={format,1,usage,pitch*height,graphics_parameters[4],width,height};
+        memcpy(graphics_pointer(destination,sizeof(description)),description,sizeof(description));return;
+    }
     struct GraphicsTextureObject *object=&graphics_textures[graphics_texture_slot(header)];
     if(level>=object->levels)stop("texture description level out of range",level);
-    uint32_t description[]={object->format,object->parent?1:3,0,graphics_level_bytes(object,level),0x11,
+    uint32_t description[]={object->format,object->parent?1:3,usage,graphics_level_bytes(object,level),0x11,
         graphics_level_width(object,level),graphics_level_height(object,level)};
     memcpy(graphics_pointer(destination,sizeof(description)),description,sizeof(description));
 }

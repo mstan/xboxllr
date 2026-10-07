@@ -94,6 +94,15 @@ def prepare(args):
         if args.data_sections:
             cmd += ["--data-sections", args.data_sections]
         run("discover", cmd)
+    extents=out/'function-extents.aot-private.json'
+    extent_records=[]
+    if extents.exists():
+        from native_function_extent import apply_extents
+        record=json.loads(extents.read_text())
+        if record['sha256']!=image['sha256']: raise ValueError('function extents belong to a different image')
+        extent_records=record['extents'];functions_path=out/'disasm/functions.json'
+        updated=apply_extents(args.xbe.read_bytes(),image,json.loads(functions_path.read_text()),extent_records)
+        functions_path.write_text(json.dumps(updated,indent=2)+'\n',newline='\n')
     run("parse", ["-m", "tools.xbe_parser", xbe, "--json", str(out / "analysis.aot-private.json")])
     run("lift", ["-m", "tools.recomp", xbe, "--all", "--split", "250",
                  "--disasm-dir", str(out / "disasm"), "--func-id-dir", str(out / "classification"),
@@ -111,6 +120,7 @@ def prepare(args):
     header += ["};"]
     (out / "gen" / "pilot_image.h").write_text("\n".join(header) + "\n")
     manifest = dict(donor=pin, sha256=image["sha256"], entry=image["entry"],
+                    function_extents=extent_records,
                     data_sections=args.data_sections, **counts,
                     files={p.name: hashlib.sha256(p.read_bytes()).hexdigest()
                            for p in sorted((out / "gen").iterdir()) if p.is_file()})

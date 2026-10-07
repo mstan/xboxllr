@@ -10,7 +10,6 @@
 #define VM_NOT_ALLOCATED 0xc00000a0u
 struct PilotRegion { uint32_t base,size,protect; int fixed; };
 static struct PilotRegion vm_regions[512];
-static SRWLOCK vm_lock=SRWLOCK_INIT;
 static uint64_t vm_service_bytes; /* real native service buffers; guarded by vm_lock */
 static INIT_ONCE vm_once=INIT_ONCE_STATIC_INIT;
 typedef LONG (NTAPI *PilotNtAllocate)(HANDLE,PVOID*,ULONG_PTR,PSIZE_T,ULONG,ULONG);

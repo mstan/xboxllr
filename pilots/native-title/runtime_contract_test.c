@@ -58,6 +58,7 @@ static int test_write_faults(uint32_t va)
 }
 #include "sections_contract_test.inc"
 #include "physical_memory_contract_test.inc"
+#include "memory_statistics_contract_test.inc"
 static void test_memory(void)
 {
     const uint32_t bp=0x1b000,sp=0x1b004,info=0x1b020;
@@ -301,6 +302,7 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"file-cache")) { test_file_cache(); return 0; }
         if (!strcmp(argv[1],"sections")) { test_sections(); return 0; }
         if (!strcmp(argv[1],"memory")) { test_memory(); return 0; }
+        if (!strcmp(argv[1],"memory-statistics")) { test_memory_statistics(); return 0; }
         if (!strcmp(argv[1],"timers")) { test_timers(); return 0; }
         if (!strcmp(argv[1],"jumps")) { test_jumps(); return 0; }
         if (!strncmp(argv[1],"jump-",5)) { test_jump_failure(argv[1]+5); return 1; }

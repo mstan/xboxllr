@@ -34,8 +34,10 @@ It now passes its `MEM_NOZERO` heap commitment, loads `pika.dds`, three flare
 textures and `font_cgothic_bold.dds`, and uploads their mip chains. Both DXT5
 textures reach all nine levels, including 2x2 and 1x1 tails. Actual GPU readback
 of `pika.dds` level zero matches the complete original compressed DDS payload.
-The current stop is `MmQueryStatistics` (ordinal 181); title draws are not yet
-qualified.
+The real memory-statistics query and front-surface descriptor now pass. A
+truncated initializer has been recovered and re-lifted from the original bytes;
+Blinx reaches `XInitDevices`, performs two real kernel-pool allocations and
+stops at `IoCreateDevice` (ordinal 65). Title draws are not yet qualified.
 The last ORIGINAL-renderer measurement, before the contiguous-memory service,
 stopped at `MmAllocateContiguousMemoryEx`; it has not been remeasured since.
 The OPTICAL build retains
@@ -53,7 +55,7 @@ EEPROM user-settings queries and NTSTATUS-to-DOS-error conversion. Timer arming,
 expiry and DPC delivery are implemented as described below. Callback delivery
 is exercised by the contract tests. No callbacks, draws or completions are discarded.
 
-Eighteen contract tests pass: concurrent threads with separate registers/TLS and
+Nineteen contract tests pass: concurrent threads with separate registers/TLS and
 recursive exclusion, handle closure/errors and EEPROM buffer/checksum behavior;
 timer/DPC/event-wait contracts; real VM reservation/commit/free/protection/query;
 installed-media identity and actual file I/O; writable storage and link lifetimes;
@@ -64,6 +66,8 @@ real donor GPU clear/triangle/present pixels, guest graphics ABI and ownership;
 texture GPU pixels/mips, shared views, changed-data upload and parent lifetimes;
 DXT1/3/5 compressed blocks and mip tails, texture/surface descriptions,
 pixel-definition ownership/copy/HRESULT/OOM, and real `MEM_NOZERO` commitment;
+memory-statistics changes with actual commitment, reservation, image, stack,
+cache and pool lifetimes, including shared-page small pool blocks;
 created/registered vertex resources, actual GPU buffer readback, external
 header/backing ownership and bounded contiguous-memory allocation/release;
 real shader compilation, typed/multiple-stream GPU input, paired issue and
@@ -702,6 +706,51 @@ and readback. Evidence: `build/shader-contract-tests.log`,
 
 ## Reproduce privately
 
+### Memory accounting and input-startup checkpoint
+
+`MmQueryStatistics` follows the nine-DWORD, 36-byte
+[nxdk ABI](https://github.com/XboxDev/nxdk/blob/master/lib/xboxkrnl/xboxkrnl.h).
+It reports this runtime's actual committed guest pages and reservation ledger,
+including image residence, contiguous allocations, kernel/context backing,
+thread/dispatcher stacks and the real file cache. Host graphics storage and
+implementation overhead remain outside the guest 64 MiB budget. Cxbx's external
+field semantics informed the mapping; its implementation is not incorporated.
+The values are not retail-kernel allocator overhead or host free-memory values.
+Snapshot locks cover concurrent guest commitment and allocation metadata.
+
+The pool service implements `ExAllocatePool`, `ExAllocatePoolWithTag`,
+`ExQueryPoolBlockSize` and `ExFreePool` with real guest memory and ownership.
+Small allocations share committed pages; large allocations are page-aligned.
+Guest payload sizes follow the reviewed 32-byte block/eight-byte overhead
+contract below the 4056-byte boundary. An independent host ledger replaces
+private kernel allocator structures. Final page owners decommit storage; budget
+failure returns null without disturbing live allocations. Unknown/double frees
+and zero-sized allocations stop. Pool pages participate in the same admission
+and statistics model; no allocation success is fabricated.
+
+Original `Get2DSurfaceDesc` also revealed a prior descriptor error: usage is
+derived from format capability flags at level zero, even for sampled textures.
+Those flags now come from the hash-bound image's table in the generated binding.
+Display surfaces report their actual configured dimensions, pitch, format and
+multisampling. Tests check output guards and the texture-versus-surface cases.
+
+`tools/native_function_extent.py` incrementally re-lifts a reviewed extended
+function using the pinned Phobos translator. It verifies image/source hashes,
+rejects overlaps/non-executable ranges/incomplete decode, and changes no game
+bytes. In this image, initializer `0x000e8c30` actually ends at `0x000e8c69`:
+the old discovery stopped before the loop reached by its forward jump.
+`build/blinx/function-extents.aot-private.json` retains the reviewed correction;
+full `native_pilot.py` preparation replays it. Six synthetic tests exercise the
+extent guards and metadata replay. This remains the private GPL-dependent CPU
+pilot; the recovery tool does not change its distribution status.
+
+Evidence: `build/blinx/memory-family-validation.aot-private.json`,
+`build/memory-family-contract-tests.log` and `build/blinx/extent-recovery/`.
+The next coherent boundary is native input initialization/enumeration at the
+Xbox API, with actual host controller state, while retaining original USB
+driver execution in the reference path. Returning success from `IoCreateDevice`
+without a functioning device is not an input implementation.
+
 ### Pixel definitions and compressed texture progress
 
 The original NTSC `CreatePixelShader` at `0x00136200` allocates 252 bytes,
@@ -734,7 +783,7 @@ physical-RAM remnants.
 Private evidence: `build/blinx/run-pixel-dxt-desc.log`,
 `build/blinx/dxt-capture/`, `build/blinx/pixel-capture/` and
 `build/blinx/pixel-texture-validation.aot-private.json`. Fresh/repeated runs
-must reach the same `MmQueryStatistics` barrier. No frame, attract loop or
+reached the same `MmQueryStatistics` barrier at that revision. No frame, attract loop or
 original-speed result follows from this startup checkpoint.
 
 ### Decoder recovery

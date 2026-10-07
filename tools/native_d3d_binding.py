@@ -73,6 +73,15 @@ def bind(xbe: Path, output: Path, symbols: Path):
     if len(caps_tables)!=1 or not any(i.mnemonic=='mov' and i.op_str=='ecx, 0x35' for i in caps_code):
         raise ValueError('unreviewed capability table copy')
     state_defaults['device_caps']=list(struct.unpack('<53I',data(caps_tables[0],53*4)))
+    # Get2DSurfaceDesc derives usage from its format-capability table even for
+    # sampled texture surfaces. Keep the reviewed image's facts in the binding.
+    desc=next(s for s in identified if s['name']=='Get2DSurfaceDesc')
+    desc_code=list(Cs(CS_ARCH_X86,CS_MODE_32).disasm(data(desc['address'],functions[desc['address']]['size']),desc['address']))
+    format_tables=[int(m[1],16) for i in desc_code if i.mnemonic=='mov' and
+        (m:=re.fullmatch(r'al, byte ptr \[edx \+ (0x[0-9a-f]+)\]',i.op_str))]
+    if len(format_tables)!=1: raise ValueError('unreviewed surface format table')
+    state_defaults['surface_formats']=[dict(format=x,flags=data(format_tables[0]+x,1)[0])
+        for x in (4,5,6,7,0xc,0xe,0xf,0x12,0x1e)]
     calls=[]
     for symbol in identified:
         if not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*",symbol["name"]): raise ValueError("invalid symbol")
@@ -95,6 +104,8 @@ def bind(xbe: Path, output: Path, symbols: Path):
                'static const uint32_t pilot_d3d_render_defaults[] = {'+', '.join(f'0x{x:x}u' for x in binding['render_defaults'])+'};',
                'static const uint32_t pilot_d3d_texture_defaults[] = {'+', '.join(str(x)+'u' for x in binding['texture_defaults'])+'};']
     header += ['static const uint32_t pilot_d3d_device_caps[] = {'+', '.join(f'0x{x:x}u' for x in binding['device_caps'])+'};']
+    header += ['static const struct { uint32_t format,flags; } pilot_d3d_surface_formats[] = {'+
+        ', '.join(f'{{0x{x["format"]:x}u,0x{x["flags"]:x}u}}' for x in binding['surface_formats'])+'};']
     wrapper=['#include "pilot_d3d_bindings.h"', 'extern void pilot_d3d_dispatch(unsigned);']
     for c in calls:
         wrapper += [f'extern void pilot_original_d3d_{c["name"]}(void);',f'void {c["symbol"]}(void) {{',

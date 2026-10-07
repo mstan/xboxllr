@@ -42,12 +42,13 @@ static void test_graphics_textures(void)
             uint32_t alias=call_graphics(PILOT_D3D_D3DTexture_GetSurfaceLevel2,args);
             CHECK(surface && alias && surface!=alias && MEM32(surface)==0x01050001u && MEM32(texture)==0x01040003u);
             CHECK(MEM32(surface+20)==texture && MEM32(surface+4)==MEM32(texture+4)+offset);
-            uint32_t desc[]={surface,0x19504},expected[]={format,1,0,bytes,0x11,w,h};
+            uint32_t desc[]={surface,0x19504},expected[]={format,1,(format>=5 && format<=7)?1:0,bytes,0x11,w,h};
             memset(memory+0x19500,0xcd,36);
             call_graphics(PILOT_D3D_D3DSurface_GetDesc,desc);
             CHECK(!memcmp(memory+0x19504,expected,sizeof(expected)));
             CHECK(MEM32(0x19500)==0xcdcdcdcdu && MEM32(0x19520)==0xcdcdcdcdu);
             uint32_t texture_desc[]={texture,level,0x19504};expected[1]=3;
+            if(level)expected[2]=0;
             call_graphics(PILOT_D3D_Get2DSurfaceDesc,texture_desc);
             CHECK(!memcmp(memory+0x19504,expected,sizeof(expected)));
             CHECK(MEM32(0x19500)==0xcdcdcdcdu && MEM32(0x19520)==0xcdcdcdcdu);

@@ -54,6 +54,11 @@ static void test_graphics(void)
         CHECK(back!=front && back==graphics_headers && front==graphics_headers+32);
         CHECK(MEM32(back)==0x010d0001u && MEM32(front)==0x010d0001u);
         CHECK(MEM32(back+12)==0x11221 && MEM32(back+16)==(63u|(63u<<12)|(3u<<24)));
+        uint32_t surface_desc[]={front,0x19444},expected_desc[]={0x12,1,1,64*64*4,0x11,64,64};
+        memset(memory+0x19440,0xcd,36);
+        call_graphics(PILOT_D3D_D3DSurface_GetDesc,surface_desc);
+        CHECK(!memcmp(memory+0x19444,expected_desc,28));
+        CHECK(MEM32(0x19440)==0xcdcdcdcdu && MEM32(0x19460)==0xcdcdcdcdu);
         MEMORY_BASIC_INFORMATION info;
         CHECK(VirtualQuery(memory+MEM32(back+4),&info,sizeof(info)) && info.State==MEM_RESERVE);
         CHECK(call_graphics(PILOT_D3D_D3DResource_AddRef,&back)==2);
