@@ -259,6 +259,10 @@ static void test_timers(void)
     fprintf(stderr,"PASS: relative/absolute/periodic timers, cancellation, wait state, queued DPC arguments/lifetime, isolated callback registers\n");
 }
 
+#ifdef PILOT_D3D_NATIVE
+#include "graphics_contract_test.inc"
+#endif
+
 int main(int argc,char **argv)
 {
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
@@ -269,6 +273,13 @@ int main(int argc,char **argv)
     g_esp=0x18000; MEM32(g_esp)=0x12340;
     image_size=0x200; image_bytes=calloc(1,image_size); CHECK(image_bytes!=NULL);
     if (argc==2) {
+#ifdef PILOT_D3D_NATIVE
+        if (!strcmp(argv[1],"graphics")) { test_graphics(); return 0; }
+        if (!strcmp(argv[1],"graphics-unsupported")) {
+            graphics_active=1; /* Exercise the unsupported-family guard. */
+            pilot_d3d_dispatch(PILOT_D3D_D3DDevice_Reset); return 1;
+        }
+#endif
         if (!strcmp(argv[1],"media")) { test_media(); return 0; }
         if (!strcmp(argv[1],"storage")) { test_storage(); return 0; }
         if (!strcmp(argv[1],"cache")) { test_cache(); return 0; }

@@ -1,5 +1,45 @@
 # STATUS
 
+## 2026-10-07 - Blinx creates the borrowed D3D11 device and acquires a real surface
+
+`beads-xbox.1.62`: the private native pilot now replaces the whole identified
+D3D8 family at build time. Original NTSC Blinx creates its requested 640x480
+device and acquires the front surface through `GetBackBuffer2(-1)`. Fresh and
+repeated launches reach `D3DDevice_SetRenderState_CullMode(0)`, the next explicit
+unsupported boundary. There is **no Blinx draw, menu, audio, attract or cadence
+result yet**. JSRF remains deferred.
+
+The backend is actual MIT sp00nznet `1409a7d` D3D11 code, prepared from the pinned
+external checkout with upstream LICENSE/NOTICE retained. Preparation excludes
+120 unqualified COM method bodies (including upstream no-work success paths)
+and makes allocation/map/shader failures explicit. No new GPL renderer bodies
+are incorporated; the existing Phobos CPU helper still restricts the combined
+pilot to private reference use.
+
+The guest bridge stages the 17-DWORD Xbox presentation structure, preserves
+32-bit guest device/surface identities and stdcall cleanup, and translates
+Xbox clear flags. Native COM pointers remain private. Surface references own
+real GPU resources; front capture and drawable back buffer remain distinct.
+CPU access to GPU residence and unimplemented resource/state methods stop.
+This first presentation contract accepts a single non-MSAA 32-bit color buffer,
+D24S8 depth and default/60Hz interval-one output, rendered to a hidden RGBA8
+window. Analog scanout and complete original driver internals are not reproduced.
+
+Fourteen CTests pass, including actual clear/triangle pixel readback, real
+present, distinct front/back contents, failed creation/null output, stack and
+callee-saved registers, reference counts and three release/recreate cycles.
+The graphics lifetime test caught and fixed a VM size-output reuse bug.
+`PILOT_RENDERER=ORIGINAL` retains all original generated graphics bodies;
+reference selection validation and logs are recorded with this checkpoint.
+This is bounded native/API and original-routine inspection evidence, not an
+executed hardware/LLE image differential or a performance claim.
+
+Next coherent family: translate simple NV2A method/value render states and
+consume title-written deferred state before draws. Blinx directly writes those
+globals, so forwarding only named setters would miss required work. Evidence:
+`build/graphics-contract-tests.log`, `build/blinx/run-d3d-*.log`,
+`build/blinx/graphics-runs.aot-private.json`, `build/sp00nz-d3d/donor.json`.
+
 ## 2026-10-06 - Blinx configures real file caching and reaches Direct3D device creation
 
 `beads-xbox.1.62`: native `FscGetCacheSize`, `FscSetCacheSize` and

@@ -238,6 +238,9 @@ static void query_setting(void)
 #include "sections.inc"
 #include "media.inc"
 #include "cache.inc"
+#ifdef PILOT_D3D_NATIVE
+#include "graphics.inc"
+#endif
 
 static void kernel_dispatch(void)
 {

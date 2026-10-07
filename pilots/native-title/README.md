@@ -18,11 +18,14 @@ writes `TitleImage.xbx` byte-for-byte equal to its original 10240-byte payload,
 and unloads the section. A repeated launch preserves the file and skips that
 copy through the title's own code. Native utility-drive setup now mounts a
 persistent `Z:` cache on partition 3. Cold launch has a real null LaunchDataPage
-pointer cell; Blinx configures real file caching (zero then 64 pages) and
-proceeds into its original `Direct3D_CreateDevice`. The next unsupported call
-is `MmAllocateContiguousMemoryEx` inside graphics initialization. The OPTICAL build retains
+pointer cell; Blinx configures real file caching (zero then 64 pages). The native
+renderer now creates a real 640x480 D3D11 device and supplies an owned front
+surface to `GetBackBuffer2(-1)`. The next unsupported call is
+`D3DDevice_SetRenderState_CullMode(0)` during render-state initialization.
+The ORIGINAL renderer still reaches `MmAllocateContiguousMemoryEx`.
+The OPTICAL build retains
 and executes the original verification helper, stopping on unsupported raw
-optical access. No graphics, movies, menu or level yet. Function-entry counts
+optical access. No Blinx draws, movies, menu or level yet. Function-entry counts
 are diagnostics, not coverage or performance measurements.
 
 The owner's current goal is serial: complete Blinx before further JSRF work.
@@ -35,13 +38,14 @@ EEPROM user-settings queries and NTSTATUS-to-DOS-error conversion. Timer arming,
 expiry and DPC delivery are implemented as described below. Callback delivery
 is exercised by the contract tests. No callbacks, draws or completions are discarded.
 
-Eleven contract tests pass: concurrent threads with separate registers/TLS and
+Fourteen contract tests pass: concurrent threads with separate registers/TLS and
 recursive exclusion, handle closure/errors and EEPROM buffer/checksum behavior;
 timer/DPC/event-wait contracts; real VM reservation/commit/free/protection/query;
 installed-media identity and actual file I/O; writable storage and link lifetimes;
 deferred section residency and shared-page ownership;
 native utility-drive persistence, formatting, eviction and failure handling;
 real read-through file-cache sizing, coherence, position and budget handling;
+real donor GPU clear/triangle/present pixels, guest graphics ABI and ownership;
 plus explicit instruction, indirect-call and
 kernel-call failure paths. Passing
 the other title's XBE to the Blinx artifact is rejected before guest execution.
@@ -78,9 +82,10 @@ The main LLE build's runtime source and build selection are untouched.
 - Compilation disables host optimization for short bring-up cycles. No FPS,
   full AOT coverage, or D3D8 HLE performance claim follows from this result.
 
-The next Blinx boundary is the original `Direct3D_CreateDevice`, which reaches
-contiguous GPU-memory allocation. Integrating the donor native renderer here
-can replace the whole graphics service. Utility-drive selection/mounting now
+The next Blinx family is render-state translation, including NV2A method/value
+setters and inlined writes to deferred globals that must reach actual draws.
+The whole native renderer now owns graphics creation and front/back resources.
+Utility-drive selection/mounting now
 runs through the complete native library boundary below, and file-cache control
 has actual storage/read behavior. The original utility routine remains available
 at build time.
@@ -94,6 +99,64 @@ after file provenance checks. D3D8 remains the performance target; first-scene
 bindings still need Blinx's local indexed draws and JSRF's older GetBackBuffer
 out-pointer ABI. A complete reference machine is not a prerequisite to those
 HLE implementations, and dashboard speed does not gate title work.
+
+## Native graphics checkpoint
+
+The optional `PILOT_RENDERER=D3D11` replaces all 129 identified D3D8 entry
+points with the shared adapter. Only qualified methods return; the rest stop.
+`ORIGINAL` executes the preserved generated bodies. This is a build-time choice,
+with no live switch or duplicate production execution. Revision addresses come
+from a private whole-XBE/hash-bound symbol manifest; original device publication
+is decoded from the reviewed CreateDevice body, not embedded in shared services.
+
+The first qualified subset is device creation, full-target clear, viewport,
+interval-one swap, front/back surface acquisition/reference ownership and
+release with no outstanding surface references. Creation supports adapter zero,
+hardware device, flags zero/hardware vertex processing, one non-MSAA A/X8R8G8B8
+buffer, D24S8 automatic depth, default/60Hz refresh, interval one and no supplied
+surfaces. Unsupported presentation configurations return failure before creating
+anything. Native output uses a hidden window, RGBA8 target and progressive host
+presentation; it is not analog scanout/timing qualification. The window remains
+hidden until title scene qualification. No game frame rate is measured here.
+
+Guest presentation parameters are 17 DWORDs; native HWND/COM pointers are never
+cast into guest structures. Xbox clear flags are translated explicitly. Front
+surface captures retain the actual image submitted at present; subsequent back
+buffer draws do not change it. Pre-first-present contents remain undefined.
+Guest surface headers contain linear format/dimensions and real reference
+ownership. Their data address reserves GPU-owned residence in guest VA; direct
+CPU access faults until a real lock/readback contract is qualified. GPU resources
+are host-owned and are not yet included in the pilot's retail-memory budget.
+Device release with outstanding surfaces, reset, partial-channel/rectangle
+clear, resource locks, and unimplemented state/draw methods stop explicitly.
+
+The MIT donor provides the D3D11 device/state/shader/resource code, not the Xbox
+32-bit guest ABI. Preparation excludes 120 unqualified COM bodies, including
+upstream success-only implementations, and hardens reached failures. Its direct
+backend smoke test draws a triangle with explicit no-texture state and validates
+actual readback pixels. Guest tests check success/failure stack cleanup, callee
+registers, null output support, clear flag translation, distinct front/back
+pixels, references and three release/recreate cycles with no retained guest
+allocations. These are native API/GPU tests plus static original-routine and
+external layout references, **not an executed LLE differential**. Full driver
+state, default-state parity and arbitrary inline driver access remain unqualified.
+Blinx stops on its first cull-state call, before any title drawing.
+
+Prepare and select privately after generating the title:
+
+```powershell
+py -3 tools/native_d3d_donor.py --donor <pinned-main-sp00nznet-checkout> --output build/sp00nz-d3d
+py -3 tools/native_d3d_binding.py --xbe <original-NTSC-default.xbe> --symbols <default_xdk_symbols.json> --output build/blinx
+cmake -S pilots/native-title -B build/blinx/host -DPILOT_RENDERER=D3D11 -DPILOT_D3D_SOURCE=<absolute-path-to-build/sp00nz-d3d>
+cmake --build build/blinx/host --config Release --parallel 2
+ctest --test-dir build/blinx/host -C Release --output-on-failure
+```
+
+Fresh regeneration can supply `--d3d-symbols` to `native_pilot.py`; stale wrappers
+are cleared before lifting. Preserve the existing installed-media/native-cache
+selections for Blinx. Donor source/prepared hashes and licenses are retained in
+`build/sp00nz-d3d`; logs and repeat/reference-selection evidence are under
+`build/blinx/graphics-runs.aot-private.json` and `build/graphics-contract-tests.log`.
 
 ## Native file-cache contract
 

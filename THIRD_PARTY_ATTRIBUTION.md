@@ -80,6 +80,18 @@ Phobos's size-only bridges were inspected but not incorporated. Microsoft's
 NtReadFile documentation supplies synchronous cursor and EOF contracts. This
 adds no GPL service body and does not change the private CPU-helper restriction.
 
+`tools/native_d3d_donor.py` prepares the Windows D3D backend from MIT sp00nznet
+`1409a7d7801d3e931fb1074be6104209ddd9a33e`: seven `src/d3d/*.c` files,
+their six headers, and `src/platform/xbox_winnt.h`. Original LICENSE/NOTICE and
+per-file notices remain with the ignored build-tree copies. The manifest records
+source/prepared hashes and excluded methods. Changes remove unqualified COM
+bodies, make failures explicit and clean up partial device creation. No APU,
+kernel, NV2A device model or LGPL `nv2a_regs.h` is imported. The guest adapter
+uses original XBE ABI inspection and Cxbx resource-layout/constant/front-buffer
+facts as external references; no Cxbx/Phobos graphics service body is imported.
+The already existing Phobos CPU helper still makes the combined executable a
+private GPL-dependent reference artifact, not a cleared shipping product.
+
 ## Unicorn Engine / QEMU
 
 [Unicorn Engine](https://github.com/unicorn-engine/unicorn), version `2.1.1`,
