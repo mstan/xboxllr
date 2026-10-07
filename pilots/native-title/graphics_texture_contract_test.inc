@@ -20,9 +20,11 @@ static void test_graphics_textures(void)
     uint32_t create[]={4096,4096,1,1,0,6,3};
     CHECK(call_graphics(PILOT_D3D_D3DDevice_CreateTexture2,create)==0); /* guest RAM admission fails */
     CHECK(vm_committed(0,0x100000000ull)==resident);
-    for(unsigned test=0;test<5;++test) {
-        unsigned format=test<4?test+4:4,width=test==4?128:(test&1?4:8),height=test==4?256:(test&1?8:4);
+    const unsigned formats[]={4,5,6,7,4,0xc,0xe,0xf};
+    for(unsigned test=0;test<8;++test) {
+        unsigned format=formats[test],width=test==4?128:(test&1?4:8),height=test==4?256:(test&1?8:4);
         unsigned bpp=format<=5?2:4,levels=test==4?9:4;
+        unsigned block=test>=5?(format==0xc?8:16):0;
         create[0]=width;create[1]=height;create[3]=0;create[5]=format;
         uint32_t texture=call_graphics(PILOT_D3D_D3DDevice_CreateTexture2,create);
         CHECK(texture && MEM32(texture)==0x01040001u && MEM32(texture+16)==0);
@@ -33,7 +35,7 @@ static void test_graphics_textures(void)
         unsigned offset=0;
         for(unsigned level=0;level<levels;++level) {
             unsigned w=width>>level,h=height>>level;if(!w)w=1;if(!h)h=1;
-            unsigned bytes=w*h*bpp;
+            unsigned bytes=block?((w+3)/4)*((h+3)/4)*block:w*h*bpp;
             for(unsigned i=0;i<bytes;++i)linear[i]=(unsigned char)(i*37+level*53+test*19);
             uint32_t args[]={texture,level};
             uint32_t surface=call_graphics(PILOT_D3D_D3DTexture_GetSurfaceLevel2,args);
@@ -45,12 +47,19 @@ static void test_graphics_textures(void)
             call_graphics(PILOT_D3D_D3DSurface_GetDesc,desc);
             CHECK(!memcmp(memory+0x19504,expected,sizeof(expected)));
             CHECK(MEM32(0x19500)==0xcdcdcdcdu && MEM32(0x19520)==0xcdcdcdcdu);
+            uint32_t texture_desc[]={texture,level,0x19504};expected[1]=3;
+            call_graphics(PILOT_D3D_Get2DSurfaceDesc,texture_desc);
+            CHECK(!memcmp(memory+0x19504,expected,sizeof(expected)));
+            CHECK(MEM32(0x19500)==0xcdcdcdcdu && MEM32(0x19520)==0xcdcdcdcdu);
             uint32_t lock[]={surface,0x19540,0,0x40};
             call_graphics(PILOT_D3D_D3DSurface_LockRect,lock);
             uint32_t data=MEM32(0x19544);
-            CHECK(MEM32(0x19540)==w*bpp && data==MEM32(surface+4));
-            unsigned cursor=0;texture_test_swizzle(memory+data,linear,w,bpp,0,0,w,h,&cursor);
-            CHECK(cursor==bytes);
+            CHECK(MEM32(0x19540)==(block?((w+3)/4)*block:w*bpp) && data==MEM32(surface+4));
+            if(block)memcpy(memory+data,linear,bytes);
+            else {
+                unsigned cursor=0;texture_test_swizzle(memory+data,linear,w,bpp,0,0,w,h,&cursor);
+                CHECK(cursor==bytes);
+            }
             lock[0]=alias;lock[3]=0xc0;call_graphics(PILOT_D3D_D3DSurface_LockRect,lock);
             CHECK(MEM32(0x19544)==data);
             CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&surface)==0 && MEM32(texture)==0x01040002u);
@@ -73,5 +82,5 @@ static void test_graphics_textures(void)
         CHECK(vm_committed(0,0x100000000ull)==resident);
         free(pixels);free(linear);
     }
-    fprintf(stderr,"PASS: four texture formats, rectangular/full nine-level Morton chains, actual GPU readback, shared CPU views, changed-data reupload, parent/view lifetime and RAM failure cleanup\n");
+    fprintf(stderr,"PASS: four color and three DXT formats, rectangular/full nine-level chains including BC 1x1 tails, actual GPU readback, shared CPU views, changed-data reupload, parent/view lifetime and RAM failure cleanup\n");
 }

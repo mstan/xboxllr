@@ -26,3 +26,25 @@ static void test_graphics_shaders(void)
     /* The outer fixture releases/recreates the device and checks that all
      * header allocations return to baseline, exercising shader destruction. */
 }
+
+static void test_graphics_pixels(void)
+{
+    uint32_t definition[60];
+    for(unsigned i=0;i<60;++i)definition[i]=0x10203040u+i;
+    memcpy(memory+0x19800,definition,sizeof(definition));
+    MEM32(0x19900)=MEM32(0x19904)=MEM32(0x19908)=0xcdcdcdcdu;
+    uint32_t args[]={0x19800,0x19904};
+    CHECK(call_graphics(PILOT_D3D_D3DDevice_CreatePixelShader,args)==0);
+    uint32_t handle=MEM32(0x19904);
+    CHECK(handle && !(handle&3) && MEM32(handle)==1 && MEM32(handle+4)==1 && MEM32(handle+8)==handle+12);
+    CHECK(MEM32(0x19900)==0xcdcdcdcdu && MEM32(0x19908)==0xcdcdcdcdu);
+    memset(memory+0x19800,0xcc,sizeof(definition));
+    CHECK(!memcmp(memory+MEM32(handle+8),definition,sizeof(definition)));
+    uint64_t service=vm_service_bytes,resident=vm_committed(0,0x100000000ull);
+    vm_service_bytes=64u*1024*1024;MEM32(0x19904)=0xdeadbeefu;
+    CHECK(call_graphics(PILOT_D3D_D3DDevice_CreatePixelShader,args)==0x8007000eu);
+    vm_service_bytes=service;
+    CHECK(MEM32(0x19904)==0xdeadbeefu && graphics_pixels[0]==handle && !graphics_pixels[1]);
+    CHECK(vm_committed(0,0x100000000ull)==resident);
+    fprintf(stderr,"PASS: pixel definition stdcall/HRESULT, independent owned copy, guest descriptor and OOM output preservation\n");
+}

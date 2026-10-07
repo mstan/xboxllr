@@ -110,12 +110,24 @@ static void test_memory(void)
     MEM32(bp)=base; MEM32(sp)=8192; args[3]=MEM_RESERVE|MEM_COMMIT;
     call_kernel(184,args,5); CHECK(g_eax==0 && MEM32(base)==0 && MEM32(base+4096)==0);
     MEM32(sp)=0; call_kernel(199,free_args,3); CHECK(g_eax==0);
+    /* MEM_NOZERO is an initialization permission, not MEM_ROTATE. Exercise
+     * fresh commitment, writes, recommit preservation, budget and release. */
+    MEM32(bp)=base; MEM32(sp)=8192; args[3]=MEM_RESERVE|MEM_COMMIT|0x00800000u;
+    call_kernel(184,args,5); CHECK(g_eax==0 && MEM32(bp)==base && MEM32(sp)==8192);
+    MEM32(base)=0x24681357;MEM32(base+8192-4)=0x12345678;
+    args[3]=MEM_COMMIT|0x00800000u;
+    call_kernel(184,args,5); CHECK(g_eax==0 && MEM32(base)==0x24681357 && MEM32(base+8192-4)==0x12345678);
+    uint64_t service=vm_service_bytes;vm_service_bytes=64u*1024*1024;
+    MEM32(bp)=0;MEM32(sp)=4096;
+    call_kernel(184,args,5); CHECK(g_eax==VM_NOMEM && !MEM32(bp) && MEM32(sp)==4096);
+    vm_service_bytes=service;MEM32(bp)=base;MEM32(sp)=0;
+    call_kernel(199,free_args,3); CHECK(g_eax==0 && test_write_faults(base));
     MEM32(bp)=0; MEM32(sp)=4096; args[1]=16; args[3]=MEM_RESERVE|MEM_TOP_DOWN;
     call_kernel(184,args,5); CHECK(g_eax==VM_NOMEM); /* all usable low 64 KiB excluded */
     args[1]=0; call_kernel(184,args,5); CHECK(g_eax==0 && MEM32(bp)==0x7ffe0000);
     MEM32(sp)=0; call_kernel(199,free_args,3); CHECK(g_eax==0);
     CHECK(vm_committed(0,0x100000000ull)==before);
-    fprintf(stderr,"PASS: virtual reservation/commit/protection/decommit/release/query ABI, real access protection, reuse zero-fill, budget/failure preservation\n");
+    fprintf(stderr,"PASS: virtual reservation/commit/protection/decommit/release/query ABI, NOZERO commitment/recommit, real access protection, reuse zero-fill, budget/failure preservation\n");
     test_physical_memory();
 }
 

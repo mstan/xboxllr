@@ -29,8 +29,13 @@ matches the TGA within its four-bit quantization (maximum 16/255 channel error).
 Blinx reads/parses the 2332-byte font metrics, creates two 112 KiB vertex
 buffers and registers six caller-owned buffers against real contiguous CPU
 storage. It then reads `sys_black.dds` and `sys_white.dds`, compiles all 91
-requested vertex programs and reaches `D3DDevice_CreatePixelShader`.
-Title draws are not yet qualified.
+requested vertex programs and creates 30 pixel-shader definition objects.
+It now passes its `MEM_NOZERO` heap commitment, loads `pika.dds`, three flare
+textures and `font_cgothic_bold.dds`, and uploads their mip chains. Both DXT5
+textures reach all nine levels, including 2x2 and 1x1 tails. Actual GPU readback
+of `pika.dds` level zero matches the complete original compressed DDS payload.
+The current stop is `MmQueryStatistics` (ordinal 181); title draws are not yet
+qualified.
 The last ORIGINAL-renderer measurement, before the contiguous-memory service,
 stopped at `MmAllocateContiguousMemoryEx`; it has not been remeasured since.
 The OPTICAL build retains
@@ -57,6 +62,8 @@ native utility-drive persistence, formatting, eviction and failure handling;
 real read-through file-cache sizing, coherence, position and budget handling;
 real donor GPU clear/triangle/present pixels, guest graphics ABI and ownership;
 texture GPU pixels/mips, shared views, changed-data upload and parent lifetimes;
+DXT1/3/5 compressed blocks and mip tails, texture/surface descriptions,
+pixel-definition ownership/copy/HRESULT/OOM, and real `MEM_NOZERO` commitment;
 created/registered vertex resources, actual GPU buffer readback, external
 header/backing ownership and bounded contiguous-memory allocation/release;
 real shader compilation, typed/multiple-stream GPU input, paired issue and
@@ -694,6 +701,41 @@ and readback. Evidence: `build/shader-contract-tests.log`,
 `build/blinx/shader-validation.aot-private.json`.
 
 ## Reproduce privately
+
+### Pixel definitions and compressed texture progress
+
+The original NTSC `CreatePixelShader` at `0x00136200` allocates 252 bytes,
+initializes two ownership fields to one and copies the complete 240-byte
+definition behind its pointer field. It performs no GPU submission or shader
+compilation. The native adapter preserves that layout, a separately owned copy,
+the two-argument stdcall/HRESULT contract and untouched output on allocation
+failure. `XLLE_PILOT_PIXEL_CAPTURE=<existing private directory>` optionally
+records definitions. Compilation is deferred until use; unqualified binding
+still stops. These 30 creations are not 30 validated native pixel programs.
+
+The MIT donor already maps Xbox DXT1/3/5 to native BC1/2/3 and uploads compressed
+blocks directly. The adapter now preserves the original block-row lock pitch,
+at least one block per mip, logical descriptor dimensions and shared view
+ownership. Original `Get2DSurfaceDesc`, `GetSurfaceLevel2` and lock helpers
+provide the guest layout reference; native block formats follow
+[D3D11 block compression](https://learn.microsoft.com/en-us/windows/win32/direct3d11/texture-block-compression-in-direct3d-11).
+Tests read back actual GPU block bytes at every mip, including 1x1 tails, change
+data through persistent views and verify reupload and release. Compressed
+subrectangle locks and compressed base dimensions below 4 remain explicit
+unsupported cases. Ordinary uploads perform no diagnostic GPU readback.
+
+Xbox `MEM_NOZERO` (`0x00800000`, nxdk's header) permits unspecified initial
+contents. Native commitment may still provide zeroed pages; it preserves existing
+committed contents, real access protection, allocation failures and the shared
+64 MiB budget. The Xbox bit is never passed to Windows as `MEM_ROTATE`.
+This is a documented HLE initialization choice, not a promise to reproduce
+physical-RAM remnants.
+
+Private evidence: `build/blinx/run-pixel-dxt-desc.log`,
+`build/blinx/dxt-capture/`, `build/blinx/pixel-capture/` and
+`build/blinx/pixel-texture-validation.aot-private.json`. Fresh/repeated runs
+must reach the same `MmQueryStatistics` barrier. No frame, attract loop or
+original-speed result follows from this startup checkpoint.
 
 ### Decoder recovery
 

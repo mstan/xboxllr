@@ -29,6 +29,10 @@ static uint32_t graphics_texture_bpp(const struct GraphicsTextureObject *texture
 {
     return texture->format<=5?2:4;
 }
+static uint32_t graphics_texture_block(const struct GraphicsTextureObject *texture)
+{
+    return texture->format==0xc?8:(texture->format==0xe || texture->format==0xf?16:0);
+}
 static uint32_t graphics_level_width(const struct GraphicsTextureObject *texture,unsigned level)
 {
     uint32_t width=texture->width>>level; return width?width:1;
@@ -39,6 +43,8 @@ static uint32_t graphics_level_height(const struct GraphicsTextureObject *textur
 }
 static uint32_t graphics_level_bytes(const struct GraphicsTextureObject *texture,unsigned level)
 {
+    uint32_t block=graphics_texture_block(texture);
+    if(block)return ((graphics_level_width(texture,level)+3)/4)*((graphics_level_height(texture,level)+3)/4)*block;
     return graphics_level_width(texture,level)*graphics_level_height(texture,level)*graphics_texture_bpp(texture);
 }
 static uint32_t graphics_level_offset(const struct GraphicsTextureObject *texture,unsigned level)
@@ -57,10 +63,11 @@ static void graphics_texture_header(struct GraphicsTextureObject *object)
 static uint32_t graphics_texture_allocate(const uint32_t *args)
 {
     uint32_t width=args[0],height=args[1],levels=args[3],format=args[5];
-    if(args[2]!=1 || args[4] || args[6]!=3 || format<4 || format>7)
+    if(args[2]!=1 || args[4] || args[6]!=3 || !((format>=4 && format<=7) || format==0xc || format==0xe || format==0xf))
         stop("unqualified texture type/usage/format",format);
     if(!width || !height || width>4096 || height>4096 || (width&(width-1)) || (height&(height-1)))
         stop("unqualified texture dimensions",width);
+    if(format>=0xc && (width<4 || height<4))stop("compressed texture base below native block size",width);
     unsigned max_levels=graphics_log2(width>height?width:height)+1;
     if(!levels)levels=max_levels;
     if(levels>max_levels)stop("texture mip chain exceeds dimensions",levels);
@@ -126,11 +133,12 @@ static uint32_t graphics_texture_surface(uint32_t header,unsigned level)
     graphics_texture_ref(parent,1); graphics_texture_header(&surface); graphics_textures[slot]=surface;
     return surface.header;
 }
-static void graphics_texture_desc(uint32_t header,uint32_t destination)
+static void graphics_texture_desc(uint32_t header,unsigned level,uint32_t destination)
 {
     struct GraphicsTextureObject *object=&graphics_textures[graphics_texture_slot(header)];
-    if(!object->parent)stop("surface description requires a surface",header);
-    uint32_t description[]={object->format,1,0,object->bytes,0x11,object->width,object->height};
+    if(level>=object->levels)stop("texture description level out of range",level);
+    uint32_t description[]={object->format,object->parent?1:3,0,graphics_level_bytes(object,level),0x11,
+        graphics_level_width(object,level),graphics_level_height(object,level)};
     memcpy(graphics_pointer(destination,sizeof(description)),description,sizeof(description));
 }
 static void graphics_texture_lock(uint32_t header,unsigned level,uint32_t destination,uint32_t rectangle,uint32_t flags)
@@ -139,7 +147,10 @@ static void graphics_texture_lock(uint32_t header,unsigned level,uint32_t destin
     if(level>=object->levels || (flags&~0xf0u))stop("unqualified texture lock flags/level",flags);
     uint32_t width=graphics_level_width(object,level),height=graphics_level_height(object,level);
     uint32_t pitch=width*graphics_texture_bpp(object),data=object->data+graphics_level_offset(object,level);
+    uint32_t block=graphics_texture_block(object);
+    if(block)pitch=((width+3)/4)*block;
     if(rectangle) {
+        if(block)stop("compressed texture subrectangle lock outside scope",rectangle);
         uint32_t rect[4]; memcpy(rect,graphics_pointer(rectangle,16),16);
         if(rect[0]>=rect[2] || rect[1]>=rect[3] || rect[2]>width || rect[3]>height)
             stop("invalid texture lock rectangle",rectangle);

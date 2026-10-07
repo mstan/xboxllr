@@ -188,7 +188,7 @@ int32_t pilot_gfx_texture_create(uint32_t width,uint32_t height,uint32_t levels,
 {
     if(!pilot_device || !handle) return E_INVALIDARG;
     if(!width || !height || width>4096 || height>4096 || (width&(width-1)) || (height&(height-1)) ||
-       !levels || levels>13 || format<4 || format>7) return E_NOTIMPL;
+       !levels || levels>13 || !((format>=4 && format<=7) || format==0xc || format==0xe || format==0xf)) return E_NOTIMPL;
     unsigned slot;
     for(slot=0;slot<256 && pilot_textures[slot].object;++slot) {}
     if(slot==256) return E_OUTOFMEMORY;
@@ -212,7 +212,8 @@ void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,ui
     if(level>=texture->levels || !data) pilot_d3d_backend_stop("invalid texture upload level/data");
     UINT width=texture->width>>level,height=texture->height>>level;
     if(!width)width=1; if(!height)height=1;
-    if(bytes!=width*height*(d3d8_format_bpp(texture->d3d8_format)/8))
+    UINT rows=d3d8_format_is_compressed(texture->d3d8_format)?(height+3)/4:height;
+    if(bytes!=d3d8_row_pitch(texture->d3d8_format,width)*rows)
         pilot_d3d_backend_stop("texture upload size does not match subresource");
     D3DLOCKED_RECT lock;
     pilot_d3d_require(texture->iface.lpVtbl->LockRect(&texture->iface,level,&lock,NULL,0),__FILE__,__LINE__);
@@ -244,23 +245,25 @@ int32_t pilot_gfx_texture_readback(uint32_t handle,uint32_t level,void *data,uin
     if(level>=texture->levels || !data) return E_INVALIDARG;
     UINT width=texture->width>>level,height=texture->height>>level;
     if(!width)width=1; if(!height)height=1;
-    UINT pitch=width*(d3d8_format_bpp(texture->d3d8_format)/8);
-    if(capacity<pitch*height || !(pilot_textures[handle-1].uploaded&(1u<<level))) return E_INVALIDARG;
+    UINT pitch=d3d8_row_pitch(texture->d3d8_format,width);
+    UINT rows=d3d8_format_is_compressed(texture->d3d8_format)?(height+3)/4:height;
+    if(capacity<pitch*rows || !(pilot_textures[handle-1].uploaded&(1u<<level))) return E_INVALIDARG;
     D3D11_TEXTURE2D_DESC desc;
     ID3D11Texture2D_GetDesc(texture->d3d11_texture,&desc);
-    desc.Width=width; desc.Height=height; desc.MipLevels=1;
+    /* Retain the complete mip shape: a BC 1x1/2x2 tail cannot be the top
+     * level of a standalone BC texture, but is valid inside this chain. */
     desc.BindFlags=0; desc.MiscFlags=0; desc.Usage=D3D11_USAGE_STAGING; desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
     ID3D11Texture2D *staging=NULL;
     HRESULT hr=ID3D11Device_CreateTexture2D(d3d8_GetD3D11Device(),&desc,NULL,&staging);
     if(FAILED(hr)) return hr;
     ID3D11DeviceContext *context=d3d8_GetD3D11Context();
-    ID3D11DeviceContext_CopySubresourceRegion(context,(ID3D11Resource*)staging,0,0,0,0,
+    ID3D11DeviceContext_CopySubresourceRegion(context,(ID3D11Resource*)staging,level,0,0,0,
         (ID3D11Resource*)texture->d3d11_texture,level,NULL);
     D3D11_MAPPED_SUBRESOURCE mapped;
-    hr=ID3D11DeviceContext_Map(context,(ID3D11Resource*)staging,0,D3D11_MAP_READ,0,&mapped);
+    hr=ID3D11DeviceContext_Map(context,(ID3D11Resource*)staging,level,D3D11_MAP_READ,0,&mapped);
     if(SUCCEEDED(hr)) {
-        for(UINT row=0;row<height;++row) memcpy((char*)data+row*pitch,(char*)mapped.pData+row*mapped.RowPitch,pitch);
-        ID3D11DeviceContext_Unmap(context,(ID3D11Resource*)staging,0);
+        for(UINT row=0;row<rows;++row) memcpy((char*)data+row*pitch,(char*)mapped.pData+row*mapped.RowPitch,pitch);
+        ID3D11DeviceContext_Unmap(context,(ID3D11Resource*)staging,level);
     }
     ID3D11Texture2D_Release(staging);
     return hr;

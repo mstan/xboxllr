@@ -57,6 +57,7 @@ static void *graphics_pointer(uint32_t address,uint32_t bytes)
 #include "graphics_texture.inc"
 #include "graphics_vertex.inc"
 #include "graphics_shader.inc"
+#include "graphics_pixel.inc"
 
 void pilot_d3d_dispatch(unsigned entry)
 {
@@ -69,6 +70,7 @@ void pilot_d3d_dispatch(unsigned entry)
     if (entry!=PILOT_D3D_Direct3D_CreateDevice && !graphics_active)
         stop("graphics entry before native creation",pilot_d3d_calls[entry].address);
     switch(entry) {
+    case PILOT_D3D_D3DDevice_CreatePixelShader:g_eax=graphics_pixel_create(arguments);break;
     case PILOT_D3D_D3DDevice_CreateVertexShader:g_eax=graphics_shader_create(arguments);break;
     case PILOT_D3D_D3DDevice_CreateVertexBuffer2:g_eax=graphics_vertex_allocate(arguments[0]);break;
     case PILOT_D3D_D3DVertexBuffer_Lock2:g_eax=graphics_vertex_lock(arguments[0],arguments[1]);break;
@@ -78,7 +80,8 @@ void pilot_d3d_dispatch(unsigned entry)
         g_eax=graphics_textures[graphics_texture_slot(arguments[0])].levels;break;
     case PILOT_D3D_D3DTexture_GetSurfaceLevel2:
         g_eax=graphics_texture_surface(arguments[0],arguments[1]);break;
-    case PILOT_D3D_D3DSurface_GetDesc:graphics_texture_desc(arguments[0],arguments[1]);break;
+    case PILOT_D3D_D3DSurface_GetDesc:graphics_texture_desc(arguments[0],0,arguments[1]);break;
+    case PILOT_D3D_Get2DSurfaceDesc:graphics_texture_desc(arguments[0],arguments[1],arguments[2]);break;
     case PILOT_D3D_D3DSurface_LockRect:
         graphics_texture_lock(arguments[0],0,arguments[1],arguments[2],arguments[3]);break;
     case PILOT_D3D_D3DTexture_LockRect:
@@ -160,7 +163,7 @@ void pilot_d3d_dispatch(unsigned entry)
     case PILOT_D3D_D3DDevice_Release: {
         if (graphics_surface_refs[0] || graphics_surface_refs[1])
             stop("device release with outstanding surface ownership",entry);
-        graphics_shaders_release();pilot_gfx_close(); graphics_active=0;
+        graphics_shaders_release();graphics_pixels_release();pilot_gfx_close(); graphics_active=0;
         uint32_t bytes;
         for (unsigned i=0;i<2;++i) {
             bytes=0;

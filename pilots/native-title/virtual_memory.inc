@@ -105,8 +105,12 @@ static uint32_t vm_choose(uint32_t size,uint32_t limit,int topdown)
 }
 static uint32_t vm_allocate(uint32_t *base,uint32_t zero_bits,uint32_t *size,uint32_t type,uint32_t protect)
 {
-    if (type&(0x00080000u|0x00800000u|0x20000000u|0x80000000u))
-        stop("guest reset/nozero/large-page allocation outside VM scope",type);
+    /* Xbox MEM_NOZERO permits unspecified initial bytes; it does not require
+     * stale data. Host commitment may supply zeros. Existing committed pages
+     * retain their contents. Never forward this bit as Windows MEM_ROTATE. */
+    type&=~0x00800000u;
+    if (type&(0x00080000u|0x20000000u|0x80000000u))
+        stop("guest reset/large-page allocation outside VM scope",type);
     if (!*size || zero_bits>21 || (type&~(MEM_RESERVE|MEM_COMMIT|MEM_TOP_DOWN)) || !(type&(MEM_RESERVE|MEM_COMMIT))) return VM_INVALID;
     /* Guard exceptions and executable/modified code require the CPU exception
      * and invalidation contracts; do not pretend they are qualified here. */
