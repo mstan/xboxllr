@@ -140,6 +140,9 @@ def prepare(args):
     if args.cpu_symbols:
         from native_cpu_binding import bind
         bind(args.xbe, out, args.cpu_symbols)
+    if args.input_symbols:
+        from native_input_binding import bind
+        bind(args.xbe, out, args.input_symbols)
     print(json.dumps({k: v for k, v in manifest.items() if k != "files"}, indent=2))
 
 
@@ -155,4 +158,5 @@ if __name__ == "__main__":
     parser.add_argument("--d3d-symbols", type=Path, help="Bind reviewed graphics family using this XDK symbol inventory")
     parser.add_argument("--jump-symbols", type=Path, help="Qualify original CRT nonlocal jumps against this image inventory")
     parser.add_argument("--cpu-symbols", type=Path, help="Bind the reviewed CPU capability probe")
+    parser.add_argument("--input-symbols", type=Path, help="Bind the reviewed whole XAPI input family")
     prepare(parser.parse_args())

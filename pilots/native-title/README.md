@@ -36,8 +36,14 @@ textures reach all nine levels, including 2x2 and 1x1 tails. Actual GPU readback
 of `pika.dds` level zero matches the complete original compressed DDS payload.
 The real memory-statistics query and front-surface descriptor now pass. A
 truncated initializer has been recovered and re-lifted from the original bytes;
-Blinx reaches `XInitDevices`, performs two real kernel-pool allocations and
-stops at `IoCreateDevice` (ordinal 65). Title draws are not yet qualified.
+Blinx now passes native `XInitDevices` and device enumeration, then enters
+`DirectSoundCreate`. It performs three real sound-object pool allocations
+(44, 172 and 2020 requested bytes), allocates a contiguous page and queries
+its actual size. Its current stop is `KfRaiseIrql` (ordinal 160) in original
+audio-driver initialization. `HalBootSMCVideoMode` is a real data export with
+the same composite-cable value as the LLE SMC. The `PILOT_INPUT=ORIGINAL`
+selection still executes original USB initialization and stops at
+`IoCreateDevice` (ordinal 65). Title draws and audible output are unqualified.
 The last ORIGINAL-renderer measurement, before the contiguous-memory service,
 stopped at `MmAllocateContiguousMemoryEx`; it has not been remeasured since.
 The OPTICAL build retains
@@ -55,7 +61,7 @@ EEPROM user-settings queries and NTSTATUS-to-DOS-error conversion. Timer arming,
 expiry and DPC delivery are implemented as described below. Callback delivery
 is exercised by the contract tests. No callbacks, draws or completions are discarded.
 
-Nineteen contract tests pass: concurrent threads with separate registers/TLS and
+Twenty-four contract tests pass: concurrent threads with separate registers/TLS and
 recursive exclusion, handle closure/errors and EEPROM buffer/checksum behavior;
 timer/DPC/event-wait contracts; real VM reservation/commit/free/protection/query;
 installed-media identity and actual file I/O; writable storage and link lifetimes;
@@ -68,6 +74,9 @@ DXT1/3/5 compressed blocks and mip tails, texture/surface descriptions,
 pixel-definition ownership/copy/HRESULT/OOM, and real `MEM_NOZERO` commitment;
 memory-statistics changes with actual commitment, reservation, image, stack,
 cache and pool lifetimes, including shared-page small pool blocks;
+native input packing, real Windows control mapping, connection transitions,
+stale-handle rejection, polling cache, rumble error propagation and 100 open/close
+cycles with a test-only host provider; exact reasons for unsupported input stops;
 created/registered vertex resources, actual GPU buffer readback, external
 header/backing ownership and bounded contiguous-memory allocation/release;
 real shader compilation, typed/multiple-stream GPU input, paired issue and
@@ -79,6 +88,74 @@ the other title's XBE to the Blinx artifact is rejected before guest execution.
 The main LLE build's runtime source and build selection are untouched.
 
 ## Reuse and scope
+
+### Native input checkpoint (2026-10-07)
+
+Bind `tools/native_input_binding.py --xbe <default.xbe> --output <repo>/build/blinx
+--symbols <default_xdk_symbols.json>`, then select `-DPILOT_INPUT=NATIVE`.
+Full regeneration accepts `--input-symbols`. `ORIGINAL` retains all eight
+original XAPI bodies and their USB driver calls. Selection is at build time;
+neither mode executes the other in production.
+
+The host mapping adapts MIT sp00nznet `1409a7d` `src/input/xinput_device.c`;
+the notice is [input-sp00nz-MIT.txt](input-sp00nz-MIT.txt). We audited Phobos
+`63f18f0`'s XAPI/model/host split and NoRain `7adaf21`'s controller backend as
+references. No GPL input implementation is copied. The private pilot's existing
+CPU-helper license restriction still applies.
+
+The guest adapter is independently implemented from the inspected XDK4831
+routines and the maintained OHCI Controller S model. It serializes a 22-byte
+state; **25-byte capabilities** (subtype at 0, reserved WORD at 1, input payload
+at 3, rumble at 21); and 70-byte feedback (status at 0, event handle at 4,
+report header at 64, motors at 66/68). The donor's desktop-style capability
+layout and its zeroed control capabilities are unsuitable here. Capability
+controls/resolutions now come from the actual host query, using the
+[Windows capability contract](https://learn.microsoft.com/en-us/windows/win32/api/xinput/ns-xinput-xinput_capabilities).
+
+Four real Windows XInput ports feed a Controller S mapping. There are no
+configured MU/IR peripherals or automatic keyboard controller. Digital face
+buttons map to analog endpoints 0/255; shoulders map to black/white; triggers
+and axes retain their values. This does not supply pressure-sensitive face
+buttons that the host lacks. The same 18-byte control payload is used by the
+LLE XID report; full driver-vs-native differential execution is not claimed.
+
+Current/changed/previous masks remain guest-visible. Enumeration preserves
+the original insertion/removal semantics, including removal and reinsertion
+between reported snapshots. A removed device invalidates existing handles;
+reconnection requires a new handle. Preallocation limits and one live open per
+port are enforced; failed opens call the original thread `SetLastError` helper.
+
+Auto polling caches state for the requested interval (default 8 ms). Empty
+ports are sampled at most every 250 ms, bounding normal query-driven hotplug
+latency; transitions entirely between host polls are not observable. Packet
+numbers change with mapped state. Rumble completes synchronously after the real
+Windows operation and propagates its status. Close releases the handle and
+stops its live controller's rumble. USB transfer latency is not reproduced.
+Manual polling, non-gamepad host types, unknown classes, repeated initialization
+and feedback requiring event-handle resolution stop explicitly. They are
+remaining coverage, not successful no-ops.
+
+Twenty-four CTests pass, including real conversion code driven by a test-only
+host API provider, output guards, poll caching, reconnection, capability errors,
+feedback failure, 100 handle lifetimes and exact unsupported-stop reasons.
+Fresh/repeated actual Blinx launches reach the same original audio-driver
+`KfRaiseIrql` stop (20,463,434 / 20,463,342 title-thread entries). No host pad
+was attached during those runs; physical interaction/rumble and attract input
+interruption remain unvalidated. The ORIGINAL input run still reaches
+`IoCreateDevice`, confirming the preserved selection, not completed USB support.
+
+Private evidence: `build/blinx/input-family-validation.aot-private.json`,
+`run-input-family-fresh.log`, `run-input-family-repeat.log`,
+`run-input-original.log`, and `build/input-family-contract-tests.log`.
+Sound initialization now also reads a real `HalBootSMCVideoMode` ULONG at
+ordinal 356, configured to composite (6) like `machine/smbus.cpp`.
+`MmQueryAllocationSize` returns the actual rounded extent for an owned
+contiguous base; other allocation classes/addresses remain explicit stops.
+The next coherent family is native DirectSound device/buffer/stream services
+with real mixing/output and completion semantics. No audio-driver IRQ service
+is being acknowledged merely to advance startup.
+
+### Earlier service reuse
 
 - Phobos supplies the actual x86 discovery/lowering and register ABI. Both
   titles used their own entries and discoveries, with no donor address seeds.

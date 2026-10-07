@@ -254,6 +254,9 @@ static void query_setting(void)
 #include "media.inc"
 #include "cache.inc"
 #include "memory_statistics.inc"
+#ifdef PILOT_INPUT_NATIVE
+#include "input.inc"
+#endif
 #ifdef PILOT_D3D_NATIVE
 #include "graphics.inc"
 #endif
@@ -267,7 +270,7 @@ static void kernel_dispatch(void)
     switch (next_kernel_ordinal) {
     case 14:case 15:case 17:case 23:pool_kernel(next_kernel_ordinal);return;
     case 181:g_eax=memory_statistics(MEM32(g_esp+4));g_esp+=8;return;
-    case 165: case 166: case 171: physical_kernel(next_kernel_ordinal); return;
+    case 165: case 166: case 171: case 180: physical_kernel(next_kernel_ordinal); return;
     case 35: case 36: case 37: fsc_kernel(next_kernel_ordinal); return;
     case 327: case 328:
         g_eax=section_change(MEM32(g_esp+4),next_kernel_ordinal==327); g_esp+=8; return;
@@ -446,6 +449,15 @@ static void load_image(const char *path)
             const uint32_t data=0xfd003000u;
             commit(data,4096); MEM32(data)=0;
             MEM32(pilot_imports[i].address)=data;
+        }
+        if (pilot_imports[i].ordinal==356) {
+            /* HalBootSMCVideoMode is a ULONG data export, not a callable thunk.
+             * Same composite AV pack (SMC register 04 = 06) as machine/smbus.cpp.
+             * Original XGetAudioFlags uses this to mask unsupported digital audio. */
+            const uint32_t data=0xfd004000u;
+            commit(data,4096); MEM32(data)=6;
+            MEM32(pilot_imports[i].address)=data;
+            fprintf(stderr,"[CONFIG] HalBootSMCVideoMode=6 (composite AV pack)\n");
         }
         if (pilot_imports[i].ordinal==322 || pilot_imports[i].ordinal==324) {
             const uint32_t data=0xfd000000u+0x1000u*(pilot_imports[i].ordinal-322);

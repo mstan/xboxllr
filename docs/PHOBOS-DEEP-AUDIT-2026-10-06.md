@@ -2,11 +2,15 @@
 
 Audit: `beads-xbox.1.60`; native pilot: `beads-xbox.1.61`. Owner direction,
 2026-10-06: prioritize entering
-Blinx, use JSRF early to expose shared assumptions, and retain dashboard speed
+Blinx and retain dashboard speed
 as an active goal rather than a prerequisite. Follow the shared
 [HLE policy](../../../recomp-template/HLE.md): build-selected implementations,
 compatible caller behavior, freedom to remove internal work, no live handoff
 requirement and no stubs.
+
+The later owner attract goal supersedes this audit's initial parallel-title
+proposal: finish and validate Blinx end to end before beginning further JSRF
+work. Current checkpoints are in [the burndown](BLINX-BURNDOWN.md).
 
 ## Decision
 
@@ -232,7 +236,7 @@ can exercise its generator/runtime header as reference material; shipping
 implementations must use suitably licensed code or independent implementations
 of the observed contract. See [license scope](../LICENSE-SCOPE.md).
 
-1. **Blinx native-title pilot, JSRF binding check alongside it.** Use the original
+1. **Blinx native-title pilot.** Use the original
    NA XDK 4831 copy and exact hashes. Recover the missing indexed-draw binding
    and revision-specific discovery roots. Reuse donor generation where it
    produces supported semantics; unsupported code/services stop or use a real,
@@ -250,9 +254,9 @@ of the observed contract. See [license scope](../LICENSE-SCOPE.md).
    Reuse the three new Blinx rendering fixes when exercised. Preserve all
    required draws; raw push-buffer use is a real coverage item. Exit: an
    interactive scene with known visual/completion scope and measured frame cost.
-4. **Generalize with JSRF at each changed boundary.** Exercise its older XDK
-   adapters, allocation/TLS behavior and actual surface-return ABI. Do not wait
-   for Blinx completion, and do not build two independent runtimes. A confirmed
+4. **Generalize with JSRF after Blinx's attract goal is validated.** Exercise its
+   older XDK adapters, allocation/TLS behavior and actual surface-return ABI.
+   Reuse shared services; do not build two independent runtimes. A confirmed
    title-specific binding is allowed; shared code must not contain guessed
    per-game addresses or unsupported-success cases.
 5. **Recheck the dashboard after shared changes.** Keep the original-speed goal

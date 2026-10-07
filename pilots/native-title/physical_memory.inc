@@ -62,7 +62,13 @@ static void physical_free(uint32_t base)
 static void physical_kernel(unsigned ordinal)
 {
     uint32_t first=MEM32(g_esp+4);
-    if(ordinal==166) {
+    if(ordinal==180) {
+        AcquireSRWLockShared(&vm_lock);
+        struct PhysicalAllocation *a=physical_find(first,1);
+        if(!a || a->base!=first)stop("allocation-size query requires an owned contiguous base",first);
+        g_eax=a->bytes;
+        ReleaseSRWLockShared(&vm_lock);g_esp+=8;
+    } else if(ordinal==166) {
         g_eax=physical_allocate(first,MEM32(g_esp+8),MEM32(g_esp+12),MEM32(g_esp+16),MEM32(g_esp+20));
         g_esp+=24;
     } else if(ordinal==165) {

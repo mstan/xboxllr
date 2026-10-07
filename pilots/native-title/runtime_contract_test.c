@@ -59,6 +59,9 @@ static int test_write_faults(uint32_t va)
 #include "sections_contract_test.inc"
 #include "physical_memory_contract_test.inc"
 #include "memory_statistics_contract_test.inc"
+#ifdef PILOT_INPUT_NATIVE
+#include "input_contract_test.inc"
+#endif
 static void test_memory(void)
 {
     const uint32_t bp=0x1b000,sp=0x1b004,info=0x1b020;
@@ -289,6 +292,10 @@ int main(int argc,char **argv)
     g_esp=0x18000; MEM32(g_esp)=0x12340;
     image_size=0x200; image_bytes=calloc(1,image_size); CHECK(image_bytes!=NULL);
     if (argc==2) {
+#ifdef PILOT_INPUT_NATIVE
+        if (!strcmp(argv[1],"input")) { test_input(); return 0; }
+        if (!strncmp(argv[1],"input-",6)) { test_input_failure(argv[1]+6); return 0; }
+#endif
 #ifdef PILOT_D3D_NATIVE
         if (!strcmp(argv[1],"graphics")) { test_graphics(); return 0; }
         if (!strcmp(argv[1],"graphics-unsupported")) {

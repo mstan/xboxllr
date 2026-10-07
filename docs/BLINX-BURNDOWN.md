@@ -1,11 +1,35 @@
-# Blinx: path to the first faithful boot attempt
+# Blinx: serial attract-sequence bring-up
+
+**Current, 2026-10-07 (`beads-xbox.1.62`):** complete original NTSC Blinx's
+attract sequence before resuming JSRF. Dashboard speed and full AOT remain
+continuing goals. The native pilot executes actual title startup with the
+authorized installed-media contract and now passes input initialization into
+`DirectSoundCreate`. The next stop is `KfRaiseIrql` in the original audio driver.
+Use the [native pilot evidence and scope](../pilots/native-title/README.md)
+for current progress; the optical-route ledger below is historical and separate.
+
+| Native milestone | Current evidence / remaining work |
+| --- | --- |
+| Launch, real files and writable storage | Passed bounded startup; original optical verifier remains selectable |
+| Graphics resource preparation | Real font/textures, buffers, 91 compiled vertex shaders and 30 owned pixel definitions; actual title draws still pending |
+| Input initialization | Native host input family passes contracts and actual title enumeration; hardware interaction remains unvalidated (no attached host pad in measured runs) |
+| Sound startup | Enters original `DirectSoundCreate`; next family is real native audio services |
+| Menu, movies and gameplay in attract | Pending; no title frame or audible output yet |
+| Complete repeat loops, interruption/menu return, original cadence | Pending actual end-to-end measurement |
+| JSRF | Deferred until Blinx success; shared services and separate bindings remain the architecture |
+
+Fresh and repeated native launches stop at the same audio-driver boundary;
+24 contract tests pass. These are completed service checkpoints, not a percent
+complete or a date forecast. No throughput/velocity estimate supports an ETA.
+
+## Earlier optical launch investigation
 
 **2026-10-06 native-path investigation:** the latest Phobos audit now compares
 a donor-led native title build with the machine boot route tracked below.
-Blinx is the primary workload and JSRF checks shared interfaces early. Neither
+Blinx is the primary workload. Neither
 requires dashboard performance qualification first. The four-package accounting
 below describes the retail-kernel optical path, not a complete estimate for the
-native route. No local Blinx entry is claimed. See the [measured binding gaps,
+native route. See the [measured binding gaps,
 launch contracts and next steps](PHOBOS-DEEP-AUDIT-2026-10-06.md).
 
 Updated 2026-10-04. This is a milestone burndown, not a measured calendar

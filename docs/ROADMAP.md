@@ -1,8 +1,9 @@
 # ROADMAP — xboxlle
 
-**2026-10-06 priority:** focus on Blinx launch with the latest Phobos native
+**2026-10-07 priority:** complete Blinx's attract sequence with the Phobos native
 runtime/compiler and whole-service work as the primary donor investigation;
-use JSRF early to check generality. Maintain the machine LLE build and continue
+validate JSRF afterward, using shared services and separate revision bindings.
+Maintain the machine LLE build and continue
 dashboard performance work without making it a title-launch prerequisite.
 See [the audited alternatives and next steps](PHOBOS-DEEP-AUDIT-2026-10-06.md).
 
