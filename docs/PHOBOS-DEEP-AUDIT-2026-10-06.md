@@ -182,9 +182,11 @@ where necessary to remove those internal dependencies.
 
 The donor CPU is also not our faithful CPU backend: direct guest-VA pointer
 access and thread-local register state differ from our MMU/Unicorn-owned state;
-its x87 representation has documented limits. Its `popfd` flag test explicitly
-documents unresolved conditional branches being omitted. Passing its tests
-does not qualify that behavior as LLE. Borrow corrected discovery/lowering
+its x87 representation has documented limits. The current
+`recomp_eflags_push`/`recomp_eflags_pop` helpers preserve AC/ID/DF and provide
+fixed IF on push, rather than saving/restoring arithmetic flags. The flag tests
+check dependency tracking, not complete PUSHFD/POPFD equivalence. Passing those
+tests does not qualify that behavior as LLE. Borrow corrected discovery/lowering
 cases with conformance checks, rather than replacing the CPU floor wholesale.
 
 ## Is grafting our LLE into Phobos less work?
