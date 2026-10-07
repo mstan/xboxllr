@@ -1,5 +1,41 @@
 # STATUS
 
+## 2026-10-06 - Blinx persists title metadata; deferred image section is next
+
+`beads-xbox.1.62`: native HDD mounts, volume queries, create/write/flush/truncate,
+metadata queries and object-manager symbolic links now advance original NTSC
+Blinx through the partition-1 allocation-unit check and per-title TDATA/UDATA
+setup. A fresh local state directory receives a real 72-byte `TitleMeta.xbx`;
+its hash is unchanged on a second process launch. `TitleImage.xbx` is opened but
+still empty: the next explicit stop is `XeLoadSection`, section 55, flags 0x38,
+guest address 0x031c5260, size 10240, initial reference count zero. Do not count
+the empty file as a completed image write. No rendering/attract/cadence claim.
+
+Eight CTests pass. Coverage includes real persisted bytes verified through an
+independent host read, write-only metadata access without read-data access,
+4-byte guest versus 8-byte native structure alignment, short buffers, actual
+mounted-volume capacity, dynamic link resolution and 300 create/delete/close
+cycles with old link handles retaining their original targets. The actual title
+revealed STATUS_DATATYPE_MISALIGNMENT on a guest stack buffer; aligned staging
+fixes the ABI mismatch rather than suppressing the error.
+
+sp00nznet's 16 KiB geometry fix and link/path design informed this family;
+Phobos and NoRain storage implementations were also checked. Their fabricated
+capacity fallback and unconditional flush-success paths were not imported.
+Our query uses the actual caller handle's native volume and converts bytes to
+512-byte sectors / 32-sector logical units. The existing LLE HDD image's E:
+FATX header also reports 32 sectors per cluster. Header inspection is not a
+running LLE API differential. Native partitions share host capacity and metadata
+allocation/timestamps retain host semantics; this is a documented HLE storage
+policy, not a claim of complete FATX equivalence or retail partition quotas.
+
+The writable state is local under ignored build output; NAS content and the
+LLE HDD images were not written. Original media selection remains build-time,
+JSRF remains deferred, and private GPL CPU-helper restrictions remain.
+Evidence: `build/storage-contract-tests.log`, `build/blinx/run-storage-*.log`,
+`build/blinx/storage-runs.aot-private.json` and
+`build/blinx/storage-validation.aot-private.json`.
+
 ## 2026-10-06 - Installed-media HLE passes Blinx's XAPI media check
 
 The owner authorized replacing optical authentication with installed-media

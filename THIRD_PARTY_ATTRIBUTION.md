@@ -48,6 +48,16 @@ owner-authorized installed-media contract or the original generated routine.
 Original title code stays in ignored private output; the Phobos CPU helper
 continues to make that pilot a GPL-dependent reference artifact.
 
+The native HDD/namespace checkpoint also consulted all three donor file
+backends: sp00nznet `1409a7d`, Phobos `63f18f0`, and the pinned NoRain review
+checkout. sp00nznet's 16 KiB logical-volume correction and actual link/path
+mapping informed the design; host NT services implement create/write/flush,
+metadata and volume operations. Donor fixed-capacity fallbacks and ignored
+flush errors are excluded. nxdk and Microsoft supply ABI references. Existing
+libfatx was checked as an external GPL reference for partition/header facts;
+no libfatx or GPL filesystem implementation was imported. Local LLE disk header
+inspection corroborates geometry only, not API equivalence.
+
 ## Unicorn Engine / QEMU
 
 [Unicorn Engine](https://github.com/unicorn-engine/unicorn), version `2.1.1`,

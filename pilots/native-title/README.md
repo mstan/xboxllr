@@ -11,9 +11,11 @@ See [license scope](../../LICENSE-SCOPE.md). There is no install/package target.
 The original NTSC Blinx XDK 4831 and JSRF XDK 4134 both execute their own XBE
 entries, create real host-backed title threads, and run early XAPI startup.
 Blinx now passes timer arming, its initial CRT heap reservation/commit, and
-installed-media verification against the actual NAS content. It stops at kernel
-ordinal 202 opening HDD partition 1 for an allocation-unit check, options
-`0x00800021`. Two actual runs reach the same boundary. The OPTICAL build retains
+installed-media verification against the actual NAS content. It passes the HDD
+allocation-unit check, creates per-title TDATA/UDATA and persists 72 bytes of
+`TitleMeta.xbx`. Fresh and repeated process launches reach `XeLoadSection` for
+the deferred title-image section (55, 10240 bytes, flags 0x38); the opened
+`TitleImage.xbx` remains empty until that work is implemented. The OPTICAL build retains
 and executes the original verification helper, stopping on unsupported raw
 optical access. No graphics, movies, menu or level yet. Function-entry counts
 are diagnostics, not coverage or performance measurements.
@@ -28,10 +30,10 @@ EEPROM user-settings queries and NTSTATUS-to-DOS-error conversion. Timer arming,
 expiry and DPC delivery are implemented as described below. Callback delivery
 is exercised by the contract tests. No callbacks, draws or completions are discarded.
 
-Seven contract tests pass: concurrent threads with separate registers/TLS and
+Eight contract tests pass: concurrent threads with separate registers/TLS and
 recursive exclusion, handle closure/errors and EEPROM buffer/checksum behavior;
 timer/DPC/event-wait contracts; real VM reservation/commit/free/protection/query;
-installed-media identity and actual file I/O;
+installed-media identity and actual file I/O; writable storage and link lifetimes;
 plus explicit instruction, indirect-call and
 kernel-call failure paths. Passing
 the other title's XBE to the Blinx artifact is rejected before guest execution.
@@ -68,7 +70,7 @@ The main LLE build's runtime source and build selection are untouched.
 - Compilation disables host optimization for short bring-up cycles. No FPS,
   full AOT coverage, or D3D8 HLE performance claim follows from this result.
 
-The next Blinx dependency is HDD partition mounting and volume information.
+The next Blinx dependency is deferred XBE section loading/unloading.
 The native installed-media contract below replaces the earlier optical check
 with the owner's explicit authorization. The original check requests SCSI MODE
 SENSE page 0x3e through IOCTL 0x4d014; that IOCTL has not executed locally. The NAS
@@ -109,11 +111,11 @@ traversal are rejected. The byte source is the actual installed directory.
 Read-only media never becomes a save/cache directory.
 
 Pending work remains explicit: async I/O and APC/event delivery, directory
-enumeration, additional info classes, HDD/save/cache mounts, raw optical access,
+enumeration, additional info classes, raw optical access,
 and non-ASCII Xbox path mapping. Unsupported modes stop. The host filesystem
 supplies file allocation metadata; FATX/XDVDFS allocation equivalence is not
 yet qualified. Invalid guest-pointer exception recovery is not implemented.
-No host volume geometry is presented as Xbox geometry.
+HDD logical-volume geometry is explicitly translated as described below.
 
 `tools/native_media_binding.py` checks generated-artifact integrity, identifies
 the reviewed helper by its original byte hash plus whole-XBE hash, and requires
@@ -153,6 +155,68 @@ pitfalls; [nxdk's Xbox declarations](https://github.com/XboxDev/nxdk/blob/master
 and [Microsoft NtReadFile](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntreadfile)
 describe the ABI and native file-position contract. No donor service bodies were
 imported. The private Phobos CPU-helper licensing limitation is unchanged.
+
+## Native HDD and namespace contract
+
+The optional fifth argument is an **existing local writable state directory**.
+The runtime creates/opens real `Partition1` through `Partition5` directories
+there. It rejects a remote/reparse root and a root overlapping installed content.
+Use an isolated directory such as `build/blinx/storage`; no source media or LLE
+disk-image writes are required. Mounts are selected by actual guest device paths
+and inherited through relative directory handles. There are no title addresses
+or fixed title IDs in the service. For example:
+
+```powershell
+New-Item -ItemType Directory -Force build/blinx/storage | Out-Null
+& build/blinx/host/Release/xlle_native_title.exe <original-default.xbe> <eeprom.bin> <installed-content-directory> build/blinx/storage
+```
+
+Create dispositions, writes, flushes, allocation/end-of-file/disposition changes
+and file metadata operate through native NT services on owned handles. Host
+failures propagate; there is no flush-success fallback. Standard, position and
+network-open query structures use aligned host staging because the Xbox caller
+can provide a four-byte-aligned stack object while desktop NT requires eight.
+For metadata query compatibility, native handles also request READ_ATTRIBUTES;
+this does not grant READ_DATA to a guest write-only handle. Tests exercise both.
+Guest IO_STATUS_BLOCK remains eight bytes, and no native pointers escape.
+
+The HLE volume policy uses 512-byte sectors and 32-sector logical allocation
+units. Total/free byte capacities come from `NtQueryVolumeInformationFile` on
+the **actual caller's mounted handle**, converted down to 16 KiB units with
+less than one unit of rounding. Query failure stays failure. Native partitions
+share host capacity; stock partition quotas are not emulated. File allocation
+metadata and timestamps keep host semantics, so exact FATX space consumption
+and timestamps are not qualified. The existing LLE image's E: FATX header was
+read without mutation and reports 32 sectors per cluster too; this supports the
+unit choice but does not constitute a running LLE API differential. These
+policies are explicit HLE tolerances, not claims about physical host geometry.
+
+`namespace.inc` owns actual case-insensitive symbolic-link objects. Create
+detects collisions; delete removes the name; previously opened query handles
+retain the old target even when that name is recreated. Closing releases object
+ownership. Short target buffers report required length without overwriting
+the buffer. File opens resolve the current namespace, including chained links,
+with bounded cycle failure. D:, T: and U: are established by the title's actual
+calls rather than silently recreated after deletion. ASCII names and absolute
+link objects are the current bounded scope; other object types remain unsupported.
+The adapter also marshals RtlInitAnsiString/RtlEqualString through host NT RTL.
+
+Eight CTests pass, including file bytes persisted across close and independently
+read by the host, flush/truncation, volume rounding, aligned/unaligned metadata,
+access isolation, bounded writes, link handle lifetime and 300 link lifecycle
+iterations. Actual fresh and repeated Blinx launches preserve the same 72-byte
+TitleMeta content and reach the same required deferred-section load. This proves
+startup progress, not complete save-game, cache-partition or attract-loop support.
+
+Donor comparison: sp00nznet `1409a7d` and Phobos `63f18f0` encode the 16 KiB
+startup requirement; the inspected NoRain code still reports 4 KiB. All three
+have a fixed-capacity success fallback on host query failure and ignore errors
+from host flush. Those behaviors are not adopted. The useful native-volume,
+path and symbolic-link approach is adapted to the bounded ABI above using host
+NT services; no GPL service bodies or libfatx implementation are imported.
+[NtQueryVolumeInformationFile](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntqueryvolumeinformationfile)
+and [FILE_FS_SIZE_INFORMATION](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntddk/ns-ntddk-_file_fs_size_information)
+document the host contract; nxdk declares the Xbox structures and ordinals.
 
 ## Native virtual-memory checkpoint
 

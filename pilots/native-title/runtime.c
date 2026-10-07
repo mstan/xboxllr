@@ -244,8 +244,36 @@ static void kernel_dispatch(void)
         if (pilot_imports[i].ordinal == next_kernel_ordinal) name=pilot_imports[i].name;
     fprintf(stderr, "[KERNEL] %u %s return=%08x\n", next_kernel_ordinal, name, MEM32(g_esp));
     switch (next_kernel_ordinal) {
+    case 327: {
+        uint32_t section=MEM32(g_esp+4);
+        if (section>=section_table && (section-section_table)%56==0 && (section-section_table)/56<section_count) {
+            unsigned index=(section-section_table)/56; size_t off=section_table-image_base+index*56;
+            fprintf(stderr,"[SECTION REQUEST] load index=%u flags=%08x address=%08x size=%u refs=%u\n",
+                    index,file32(off),file32(off+4),file32(off+8),MEM32(section+24));
+        }
+        break;
+    }
+    case 279: {
+        typedef BOOLEAN (NTAPI *EqualAnsi)(const ANSI_STRING*,const ANSI_STRING*,BOOLEAN);
+        EqualAnsi equal=(EqualAnsi)(void*)GetProcAddress(GetModuleHandleW(L"ntdll.dll"),"RtlEqualString");
+        if (!equal) stop("native ANSI comparison unavailable",279);
+        uint32_t a=MEM32(g_esp+4),b=MEM32(g_esp+8);
+        ANSI_STRING left={MEM16(a),MEM16(a+2),(PCHAR)(memory+MEM32(a+4))};
+        ANSI_STRING right={MEM16(b),MEM16(b+2),(PCHAR)(memory+MEM32(b+4))};
+        g_eax=equal(&left,&right,(BOOLEAN)MEM8(g_esp+12)); g_esp+=16; return;
+    }
+    case 289: {
+        typedef VOID (NTAPI *InitAnsi)(PANSI_STRING,PCSTR);
+        InitAnsi init=(InitAnsi)(void*)GetProcAddress(GetModuleHandleW(L"ntdll.dll"),"RtlInitAnsiString");
+        if (!init) stop("native ANSI string initializer unavailable",289);
+        uint32_t out=MEM32(g_esp+4),source=MEM32(g_esp+8); ANSI_STRING string={0};
+        init(&string,source ? (const char*)(memory+source) : NULL);
+        MEM16(out)=string.Length; MEM16(out+2)=string.MaximumLength; MEM32(out+4)=source;
+        g_esp+=12; return;
+    }
+    case 67: case 69: case 203: case 215: namespace_kernel(next_kernel_ordinal); return;
     case 184: case 199: case 204: case 217: vm_kernel(next_kernel_ordinal); return;
-    case 190: case 202: case 211: case 219: case 226: media_kernel(next_kernel_ordinal); return;
+    case 190: case 198: case 202: case 211: case 218: case 219: case 226: case 236: media_kernel(next_kernel_ordinal); return;
     case 97: g_eax=dispatch_cancel_timer(MEM32(g_esp+4)); g_esp+=8; return;
     case 108: {
         uint32_t va=MEM32(g_esp+4),type=MEM32(g_esp+8),state=MEM32(g_esp+12);
@@ -304,6 +332,9 @@ static void kernel_dispatch(void)
         ExitThread(MEM32(g_esp+4));
     case 187: {
         uint32_t handle=MEM32(g_esp+4),slot=handle-0x40000000u;
+        if ((handle&0xf0000000u)==0x60000000u) {
+            g_eax=namespace_close(handle); g_esp+=8; return;
+        }
         if ((handle&0xf0000000u)==0x50000000u) {
             g_eax=media_close(handle); g_esp+=8; return;
         }
@@ -436,14 +467,15 @@ int main(int argc,char **argv)
 {
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
     AddVectoredExceptionHandler(1,fault_handler);
-    if (argc<2 || argc>4) { fprintf(stderr,"usage: xlle_native_title <matching.xbe> [eeprom] [installed-content-directory]\n"); return 1; }
+    if (argc<2 || argc>5) { fprintf(stderr,"usage: xlle_native_title <matching.xbe> [eeprom] [installed-content-directory] [local-storage-directory]\n"); return 1; }
     if (argc>=3) {
         FILE *input=fopen(argv[2],"rb");
         if (!input || fread(eeprom,1,256,input)!=256 || fgetc(input)!=EOF) stop("invalid EEPROM input",0);
         fclose(input); have_eeprom=1;
     }
     load_image(argv[1]);
-    if (argc==4) media_content_path=argv[3];
+    if (argc>=4) media_content_path=argv[3];
+    if (argc==5) storage_mount(argv[4]);
 #ifdef PILOT_MEDIA_INSTALLED
     fprintf(stderr,"[MEDIA POLICY] installed-title HLE; optical authentication is not asserted\n");
 #else

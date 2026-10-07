@@ -29,6 +29,7 @@ static void test_media(void)
     CHECK(!g_eax && g_esp==stack+4 && g_ebx==0x12345678 && g_esi==0x87654321 &&
           g_edi==0xaabbccdd && g_ebp==0x100000 && media_root && media_identity);
     HANDLE identity=media_identity,root=media_root;
+    CHECK(!namespace_create("\\??\\D:","\\Device\\CdRom0"));
     for (unsigned i=0;i<4;++i) CHECK(media_verify(expected)==0 && media_root==root && media_identity==identity);
     CHECK(media_verify(wrong)==MEDIA_WRONG_VOLUME); /* never return cached success for a different identity */
     sprintf(path,"%s\\default.xbe",directory);

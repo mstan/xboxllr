@@ -8,16 +8,20 @@
 #define MEDIA_WRONG_VOLUME 0xc0000012u
 #define MEDIA_NO_MEDIA 0xc0000013u
 static const char *media_content_path;
-static HANDLE media_root,media_identity;
+static HANDLE media_root,media_identity,storage_roots[6];
 static SRWLOCK media_lock=SRWLOCK_INIT;
-static struct { HANDLE host; uint32_t id; } media_files[256];
+static struct { HANDLE host; uint32_t id; unsigned partition; } media_files[256];
 static uint32_t media_next_id=0x50000001u;
 typedef LONG (NTAPI *MediaOpen)(PHANDLE,ACCESS_MASK,POBJECT_ATTRIBUTES,PIO_STATUS_BLOCK,ULONG,ULONG);
 typedef LONG (NTAPI *MediaRead)(HANDLE,HANDLE,PVOID,PVOID,PIO_STATUS_BLOCK,PVOID,ULONG,PLARGE_INTEGER,PULONG);
 typedef LONG (NTAPI *MediaInfo)(HANDLE,PIO_STATUS_BLOCK,PVOID,ULONG,ULONG);
+typedef LONG (NTAPI *MediaCreate)(PHANDLE,ACCESS_MASK,POBJECT_ATTRIBUTES,PIO_STATUS_BLOCK,PLARGE_INTEGER,ULONG,ULONG,ULONG,ULONG,PVOID,ULONG);
+typedef LONG (NTAPI *MediaFlush)(HANDLE,PIO_STATUS_BLOCK);
 static MediaOpen media_nt_open;
-static MediaRead media_nt_read;
-static MediaInfo media_nt_query,media_nt_set;
+static MediaRead media_nt_read,media_nt_write;
+static MediaInfo media_nt_query,media_nt_set,media_nt_volume;
+static MediaCreate media_nt_create;
+static MediaFlush media_nt_flush;
 static INIT_ONCE media_once=INIT_ONCE_STATIC_INIT;
 
 static BOOL CALLBACK media_start(PINIT_ONCE once,void *parameter,void **context)
@@ -28,7 +32,12 @@ static BOOL CALLBACK media_start(PINIT_ONCE once,void *parameter,void **context)
     media_nt_read=(MediaRead)(void*)GetProcAddress(nt,"NtReadFile");
     media_nt_query=(MediaInfo)(void*)GetProcAddress(nt,"NtQueryInformationFile");
     media_nt_set=(MediaInfo)(void*)GetProcAddress(nt,"NtSetInformationFile");
-    if (!media_nt_open || !media_nt_read || !media_nt_query || !media_nt_set)
+    media_nt_volume=(MediaInfo)(void*)GetProcAddress(nt,"NtQueryVolumeInformationFile");
+    media_nt_write=(MediaRead)(void*)GetProcAddress(nt,"NtWriteFile");
+    media_nt_create=(MediaCreate)(void*)GetProcAddress(nt,"NtCreateFile");
+    media_nt_flush=(MediaFlush)(void*)GetProcAddress(nt,"NtFlushBuffersFile");
+    if (!media_nt_open || !media_nt_read || !media_nt_query || !media_nt_set ||
+        !media_nt_volume || !media_nt_write || !media_nt_create || !media_nt_flush)
         stop("native file services unavailable",0);
     return TRUE;
 }
@@ -39,6 +48,53 @@ static uint32_t media_open_host(HANDLE parent,const WCHAR *path,uint32_t access,
     OBJECT_ATTRIBUTES attr={sizeof(attr),parent,&name,0x1040,NULL,NULL}; /* case-insensitive; no reparse traversal */
     InitOnceExecuteOnce(&media_once,media_start,NULL,NULL);
     return (uint32_t)media_nt_open(out,access,&attr,io,share,options);
+}
+static uint32_t storage_create_host(HANDLE parent,const WCHAR *path,uint32_t access,
+    uint32_t share,uint32_t options,uint32_t disposition,uint32_t attributes,
+    LARGE_INTEGER *allocation,HANDLE *out,IO_STATUS_BLOCK *io)
+{
+    UNICODE_STRING name={(USHORT)(wcslen(path)*2),(USHORT)(wcslen(path)*2),(PWSTR)path};
+    OBJECT_ATTRIBUTES attr={sizeof(attr),parent,&name,0x1040,NULL,NULL};
+    InitOnceExecuteOnce(&media_once,media_start,NULL,NULL);
+    return (uint32_t)media_nt_create(out,access,&attr,io,allocation,attributes,share,disposition,options,NULL,0);
+}
+static void storage_mount(const char *directory)
+{
+    WCHAR path[32768];
+    if (!MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,directory,-1,path,32768)) stop("invalid storage directory",0);
+    HANDLE root=CreateFileW(path,FILE_LIST_DIRECTORY|FILE_ADD_SUBDIRECTORY|SYNCHRONIZE,
+        FILE_SHARE_READ|FILE_SHARE_WRITE,NULL,OPEN_EXISTING,FILE_FLAG_BACKUP_SEMANTICS|FILE_FLAG_OPEN_REPARSE_POINT,NULL);
+    if (root==INVALID_HANDLE_VALUE) stop("cannot open local storage directory",GetLastError());
+    BY_HANDLE_FILE_INFORMATION info;
+    if (!GetFileInformationByHandle(root,&info) || !(info.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY) ||
+        (info.dwFileAttributes&FILE_ATTRIBUTE_REPARSE_POINT)) stop("storage root must be an ordinary directory",0);
+    WCHAR resolved[32768];
+    DWORD length=GetFinalPathNameByHandleW(root,resolved,32768,FILE_NAME_NORMALIZED);
+    if (!length || length>=32768 || !_wcsnicmp(resolved,L"\\\\?\\UNC\\",8)) stop("storage root must be local",0);
+    /* Reject using installed content as the writable root or its ancestor.
+     * Both already exist; use final handle paths rather than textual aliases. */
+    if (media_content_path) {
+        WCHAR content[32768];
+        if (!MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,media_content_path,-1,content,32768)) stop("invalid content directory",0);
+        HANDLE check=CreateFileW(content,FILE_READ_ATTRIBUTES,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,
+                                NULL,OPEN_EXISTING,FILE_FLAG_BACKUP_SEMANTICS,NULL);
+        if (check!=INVALID_HANDLE_VALUE) {
+            DWORD count=GetFinalPathNameByHandleW(check,content,32768,FILE_NAME_NORMALIZED); CloseHandle(check);
+            if (!count || count>=32768) stop("cannot resolve content directory",0);
+            size_t common=count<length ? count : length;
+            if (!_wcsnicmp(content,resolved,common) &&
+                (content[common]==0 || content[common]=='\\') && (resolved[common]==0 || resolved[common]=='\\'))
+                stop("writable storage overlaps installed content",0);
+        }
+    }
+    for (unsigned i=1;i<=5;++i) {
+        WCHAR name[16]; swprintf(name,16,L"Partition%u",i); IO_STATUS_BLOCK io={0};
+        uint32_t status=storage_create_host(root,name,FILE_LIST_DIRECTORY|FILE_TRAVERSE|SYNCHRONIZE,
+             FILE_SHARE_READ|FILE_SHARE_WRITE,0x21,3,FILE_ATTRIBUTE_DIRECTORY,NULL,&storage_roots[i],&io);
+        if (status) stop("cannot mount native HDD partition",status);
+    }
+    CloseHandle(root);
+    fprintf(stderr,"[STORAGE] five local native partitions; host-backed capacity in 16 KiB logical units\n");
 }
 static uint32_t media_hash(HANDLE file,char hex[65])
 {
@@ -112,6 +168,11 @@ static HANDLE media_handle(uint32_t id)
     for (unsigned i=0;i<256;++i) if (media_files[i].host && media_files[i].id==id) return media_files[i].host;
     return NULL;
 }
+static unsigned media_partition(uint32_t id)
+{
+    for (unsigned i=0;i<256;++i) if (media_files[i].host && media_files[i].id==id) return media_files[i].partition;
+    return 0;
+}
 static uint32_t media_close(uint32_t id)
 {
     uint32_t status=MEDIA_BAD_HANDLE;
@@ -127,9 +188,10 @@ static void media_iosb(uint32_t va,uint32_t status,ULONG_PTR count)
 {
     MEM32(va)=status; MEM32(va+4)=(uint32_t)count;
 }
+#include "namespace.inc"
 /* Returns a validated relative ASCII path. No host path, traversal, alternate
  * stream or drive-name interpretation is available to guest input. */
-static uint32_t media_path(uint32_t attributes,WCHAR path[1024],HANDLE *parent)
+static uint32_t media_path(uint32_t attributes,WCHAR path[1024],HANDLE *parent,unsigned *partition)
 {
     if (!attributes || !MEM32(attributes+4)) return MEDIA_INVALID;
     if (MEM32(attributes+8)&~0x40u) stop("file object attributes unsupported",MEM32(attributes+8));
@@ -138,15 +200,25 @@ static uint32_t media_path(uint32_t attributes,WCHAR path[1024],HANDLE *parent)
     char name[1024]; memcpy(name,memory+buffer,length); name[length]=0;
     if (strlen(name)!=length) return 0xc0000033u;
     uint32_t root=MEM32(attributes);
-    const char *part=name;
+    char resolved[1024]; const char *part=name;
     if (root) {
         *parent=media_handle(root);
         if (!*parent) return MEDIA_BAD_HANDLE;
+        *partition=media_partition(root);
     } else {
+        uint32_t status=namespace_resolve(name,resolved);
+        if (status) return status;
+        part=resolved;
         *parent=media_root;
-        if (!_strnicmp(part,"\\??\\",4)) part+=4;
-        if (!_strnicmp(part,"D:\\",3)) part+=3;
-        else if (!_strnicmp(part,"\\Device\\CdRom0\\",15)) part+=15;
+        if (!_strnicmp(part,"\\Device\\CdRom0\\",15)) part+=15;
+        else if (!_strnicmp(part,"\\Device\\Harddisk0\\Partition",27)) {
+            unsigned number=(unsigned)(part[27]-'0');
+            if (number<1 || number>5 || (part[28] && part[28]!='\\'))
+                stop("unmounted raw/extended HDD partition",202);
+            *parent=storage_roots[number]; *partition=number;
+            if (!*parent) stop("HDD access requires a mounted local storage directory",number);
+            part+=28; if (*part=='\\') ++part;
+        }
         else if (!_stricmp(part,"\\Device\\CdRom0"))
             stop("raw optical device requires optical media/authentication model",202);
         else return 0xc000003au;
@@ -178,21 +250,28 @@ static uint32_t media_open(uint32_t *args,int create)
         fprintf(stderr,"[FILE OPEN] root=%08x name=%.*s access=%08x options=%08x\n",
                 MEM32(attr),(int)(length>1024?1024:length),(char*)(memory+MEM32(name+4)),access,options);
     }
-    /* Mounted title content is immutable. Only FILE_OPEN is implemented here;
-     * saves/cache must have distinct writable mounts, never mutate the source. */
-    if ((access&(GENERIC_WRITE|GENERIC_ALL|DELETE|WRITE_DAC|WRITE_OWNER|0x116u)) ||
-        (create && args[7]!=1)) { media_iosb(iosb,0xc00000a2u,0); return 0xc00000a2u; }
-    if (!(options&0x20) || (options&~0x865u)) stop("file open requires unsupported IO mode/options",options);
-    if (create && args[4] && MEM64(args[4])) stop("allocation size on read-only FILE_OPEN",190);
+    if (!(options&0x20) || (options&~0x805867u)) stop("file open requires unsupported IO mode/options",options);
     if (share&~7u) return MEDIA_INVALID;
     WCHAR path[1024]; HANDLE parent=NULL,handle=NULL; IO_STATUS_BLOCK io={0};
-    uint32_t status=media_path(attr,path,&parent);
+    unsigned partition=0;
+    uint32_t status=media_path(attr,path,&parent,&partition);
+    if (!status && !partition && ((access&(GENERIC_WRITE|GENERIC_ALL|DELETE|WRITE_DAC|WRITE_OWNER|0x116u)) ||
+        (options&0x1000) || (create && args[7]!=1))) status=0xc00000a2u;
+    if (!status && !partition && create && args[4] && MEM64(args[4])) stop("allocation size on read-only FILE_OPEN",190);
     unsigned slot=0;
     while (slot<256 && media_files[slot].host) ++slot;
     if (!status && (slot==256 || media_next_id==0x60000000u)) status=0xc000009au;
-    if (!status) status=media_open_host(parent,path,access,share,options,&handle,&io);
+    /* Xbox startup queries network-open metadata through GENERIC_WRITE-only
+     * handles. Desktop NT requires FILE_READ_ATTRIBUTES for that operation.
+     * Supply metadata access internally, without adding FILE_READ_DATA. */
+    uint32_t host_access=access|FILE_READ_ATTRIBUTES;
+    if (!status && create) {
+        LARGE_INTEGER allocation; if (args[4]) allocation.QuadPart=(int64_t)MEM64(args[4]);
+        status=storage_create_host(parent,path,host_access,share,options,args[7],args[5],args[4]?&allocation:NULL,&handle,&io);
+    } else if (!status) status=media_open_host(parent,path,host_access,share,options,&handle,&io);
     if (!status) {
         media_files[slot].host=handle; media_files[slot].id=media_next_id++;
+        media_files[slot].partition=partition;
         MEM32(out)=media_files[slot].id;
     }
     media_iosb(iosb,status,status ? 0 : io.Information);
@@ -200,7 +279,8 @@ static uint32_t media_open(uint32_t *args,int create)
 }
 static void media_kernel(unsigned ordinal)
 {
-    unsigned count=ordinal==190 ? 9 : ordinal==202 ? 6 : ordinal==219 ? 8 : 5;
+    int transfer=ordinal==219 || ordinal==236;
+    unsigned count=ordinal==190 ? 9 : ordinal==202 ? 6 : transfer ? 8 : ordinal==198 ? 2 : 5;
     uint32_t a[9]; for (unsigned i=0;i<count;++i) a[i]=MEM32(g_esp+4+i*4);
     int opening=ordinal==190 || ordinal==202;
     if (opening) AcquireSRWLockExclusive(&media_lock);
@@ -208,21 +288,47 @@ static void media_kernel(unsigned ordinal)
     if (opening) g_eax=media_open(a,ordinal==190);
     else {
         HANDLE file=media_handle(a[0]); IO_STATUS_BLOCK io={0};
-        uint32_t iosb=ordinal==219 ? a[4] : a[1];
+        uint32_t iosb=transfer ? a[4] : a[1];
         g_eax=MEDIA_BAD_HANDLE;
         if (!iosb) g_eax=MEDIA_INVALID;
         else if (file) {
-            if (ordinal==219) {
-                if (a[1] || a[2] || a[3]) stop("file event/APC delivery unsupported",219);
+            if (transfer) {
+                if (a[1] || a[2] || a[3]) stop("file event/APC delivery unsupported",ordinal);
                 LARGE_INTEGER offset; if (a[7]) offset.QuadPart=(int64_t)MEM64(a[7]);
-                g_eax=(uint32_t)media_nt_read(file,NULL,NULL,NULL,&io,memory+a[5],a[6],a[7]?&offset:NULL,NULL);
+                g_eax=(uint32_t)(ordinal==236 ? media_nt_write : media_nt_read)(file,NULL,NULL,NULL,&io,memory+a[5],a[6],a[7]?&offset:NULL,NULL);
+            } else if (ordinal==198) g_eax=(uint32_t)media_nt_flush(file,&io);
+            else if (ordinal==218) {
+                if (!media_partition(a[0]) || a[4]!=3) stop("volume information class/mount unsupported",a[4]);
+                if (a[3]<24) g_eax=0xc0000004u;
+                else {
+                    struct { LARGE_INTEGER total,available; ULONG sectors,bytes; } geometry={0};
+                    g_eax=(uint32_t)media_nt_volume(file,&io,&geometry,sizeof(geometry),3);
+                    if (!g_eax) {
+                        uint64_t unit=(uint64_t)geometry.sectors*geometry.bytes;
+                        if (!unit || geometry.total.QuadPart<0 || geometry.available.QuadPart<0 ||
+                            (uint64_t)geometry.total.QuadPart>UINT64_MAX/unit ||
+                            (uint64_t)geometry.available.QuadPart>UINT64_MAX/unit) stop("invalid host volume capacity",218);
+                        MEM64(a[2])=(uint64_t)geometry.total.QuadPart*unit/16384;
+                        MEM64(a[2]+8)=(uint64_t)geometry.available.QuadPart*unit/16384;
+                        MEM32(a[2]+16)=32; MEM32(a[2]+20)=512; io.Information=24;
+                    }
+                }
             } else {
                 /* Fixed-layout classes shared by the Xbox and host NT ABIs:
                  * Standard=24 bytes; Position=8 bytes. No host pointers. */
-                unsigned size=a[4]==5 ? 24 : a[4]==14 ? 8 : 0;
-                if (!size || (ordinal==226 && a[4]!=14)) stop("file information class unsupported",a[4]);
+                unsigned size=a[4]==34 ? 56 : a[4]==5 ? 24 : a[4]==14 || a[4]==19 || a[4]==20 ? 8 : a[4]==13 ? 1 : 0;
+                if (!size || (ordinal==226 && a[4]!=14 && a[4]!=19 && a[4]!=20 && a[4]!=13) ||
+                    (ordinal==211 && a[4]!=5 && a[4]!=14 && a[4]!=34)) stop("file information class unsupported",a[4]);
                 if (a[3]<size) g_eax=0xc0000004u;
-                else g_eax=(uint32_t)(ordinal==226 ? media_nt_set : media_nt_query)(file,&io,memory+a[2],size,a[4]);
+                else {
+                    /* Desktop NT probes 8-byte alignment; Xbox callers only
+                     * guarantee 4. Never pass the guest's stack struct as a
+                     * native ABI struct, even when the field offsets match. */
+                    union { uint64_t alignment; unsigned char bytes[56]; } stage={0};
+                    if (ordinal==226) memcpy(stage.bytes,memory+a[2],size);
+                    g_eax=(uint32_t)(ordinal==226 ? media_nt_set : media_nt_query)(file,&io,stage.bytes,size,a[4]);
+                    if (ordinal==211 && !g_eax) memcpy(memory+a[2],stage.bytes,size);
+                }
             }
             if (g_eax==0x103u) stop("synchronous file operation unexpectedly pending",ordinal);
         }
@@ -230,5 +336,6 @@ static void media_kernel(unsigned ordinal)
     }
     if (opening) ReleaseSRWLockExclusive(&media_lock);
     else ReleaseSRWLockShared(&media_lock);
+    if (g_eax&0x80000000u) fprintf(stderr,"[FILE FAILURE] ordinal=%u status=%08x\n",ordinal,g_eax);
     g_esp+=4+count*4;
 }
