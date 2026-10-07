@@ -1,5 +1,26 @@
 # STATUS
 
+## 2026-10-06 - Native timers advance both titles to CRT memory allocation
+
+`beads-xbox.1.61`: on `spike/native-timers-20261006`, the shared native pilot now
+implements real timer/DPC delivery and timer/event waits. Original NTSC Blinx
+4831 and JSRF 4134 both pass `KeSetTimer` and reach the explicit unsupported
+`NtAllocateVirtualMemory` stop (ordinal 184), with 13/12 title-thread function
+entries versus 10/9 before. This reaches the first heap-allocation request;
+neither heap initialization nor graphics is complete. The game runs stop before
+their own timer callbacks fire; tests exercise real callback execution.
+
+Five focused tests pass, including absolute/relative/periodic expiry,
+rearm/cancellation, queued DPC ownership/arguments, callback register isolation,
+real blocked event waiters, and single/multiple wait state. New service bodies
+are independently implemented from the documented boundary and Xbox layouts.
+The pilot remains a private GPL-dependent reference artifact because of its
+existing CPU helper. No full LLE differential or performance claim follows.
+The normal LLE source/build selection is unchanged.
+
+Next: the shared virtual-memory family needed by the CRT heap, followed by
+reached loader/file dependencies and whole D3D8 HLE. [Details and scope](pilots/native-title/README.md).
+
 ## 2026-10-06 - Native Blinx/JSRF reference pilot reaches XAPI startup
 
 The [standalone pilot](pilots/native-title/README.md) now compiles and executes

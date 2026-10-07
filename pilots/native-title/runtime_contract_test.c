@@ -6,6 +6,8 @@
 #define CHECK(c) do { if (!(c)) { fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#c); ExitProcess(1); } } while (0)
 static LONG test_counter;
 static uint32_t test_lock=0x14000, test_worker_address=0x12000;
+static void test_dpc(void);
+static void test_timers(void);
 
 static void test_worker(void)
 {
@@ -23,7 +25,7 @@ static void test_worker(void)
     }
 }
 
-recomp_func_t recomp_lookup(uint32_t va) { return va==test_worker_address ? test_worker : NULL; }
+recomp_func_t recomp_lookup(uint32_t va) { return va==test_worker_address ? test_worker : va==0x12100 ? test_dpc : NULL; }
 
 static void call_kernel(unsigned ordinal,const uint32_t *args,unsigned argc)
 {
@@ -33,6 +35,149 @@ static void call_kernel(unsigned ordinal,const uint32_t *args,unsigned argc)
     next_kernel_ordinal=ordinal;
     kernel_dispatch();
     CHECK(g_esp==0x18000+4+argc*4);
+}
+
+static HANDLE dpc_entered,dpc_release,dpc_done;
+static volatile LONG dpc_calls;
+static uint32_t dpc_seen[4];
+static int dpc_mode;
+struct WaitTest { uint32_t object, status; };
+static DWORD WINAPI test_wait_worker(void *argument)
+{
+    struct WaitTest *w=argument;
+    w->status=dispatch_wait(&w->object,1,0,0,0x1a308);
+    return 0;
+}
+static void test_dpc(void)
+{
+    CHECK(dispatch_in_dpc && MEM8(g_fs_base+0x24)==2);
+    uint32_t va=MEM32(g_esp+4);
+    CHECK(!MEM8(va+2));
+    if (va==0x1a100 && dpc_mode==1) {
+        SetEvent(dpc_entered);
+        CHECK(WaitForSingleObject(dpc_release,5000)==WAIT_OBJECT_0);
+    } else {
+        for (unsigned i=0;i<4;++i) dpc_seen[i]=MEM32(g_esp+4+i*4);
+        LONG count=InterlockedIncrement(&dpc_calls);
+        if (dpc_mode==2 && count==3) CHECK(dispatch_cancel_timer(0x1a000)==1);
+        if (dpc_mode!=2 || count==3) SetEvent(dpc_done);
+    }
+    g_eax=0xdeadc0de; g_esp+=20;
+}
+static void test_timers(void)
+{
+    const uint32_t timer=0x1a000,dpc=0x1a100,second=0x1a120,timeout=0x1a300;
+    uint32_t args[8]={timer,0};
+    call_kernel(113,args,2);
+    CHECK(MEM8(timer)==8 && MEM8(timer+2)==10 && MEM32(timer+8)==timer+8);
+    int64_t relative=-500000;
+    args[1]=(uint32_t)relative; args[2]=(uint32_t)((uint64_t)relative>>32); args[3]=0;
+    call_kernel(149,args,4); CHECK(g_eax==0 && MEM8(timer+3)==1 && MEM32(timer+4)==0);
+    MEM64(timeout)=(uint64_t)-50000000ll;
+    uint32_t wait[]={timer,0,0,0,timeout};
+    call_kernel(159,wait,5); CHECK(g_eax==0 && !MEM8(timer+3));
+    MEM64(timeout)=0;
+    call_kernel(159,wait,5); CHECK(g_eax==0); /* notification remains signaled */
+
+    /* Absolute future deadlines must not become immediate success. */
+    uint64_t absolute=dispatch_wall_time()+1000000;
+    args[1]=(uint32_t)absolute; args[2]=(uint32_t)(absolute>>32);
+    call_kernel(149,args,4); CHECK(g_eax==0);
+    call_kernel(159,wait,5); CHECK(g_eax==0x102);
+    MEM64(timeout)=(uint64_t)-50000000ll;
+    call_kernel(159,wait,5); CHECK(g_eax==0);
+
+    /* Rearm replaces the old deadline; cancel preserves a previous signal. */
+    relative=-600000000;
+    args[1]=(uint32_t)relative; args[2]=(uint32_t)((uint64_t)relative>>32);
+    call_kernel(149,args,4); CHECK(g_eax==0);
+    call_kernel(149,args,4); CHECK(g_eax==1);
+    call_kernel(97,&timer,1); CHECK(g_eax==1);
+    call_kernel(97,&timer,1); CHECK(g_eax==0);
+    MEM64(timeout)=(uint64_t)-200000;
+    call_kernel(159,wait,5); CHECK(g_eax==0x102);
+    args[1]=0; args[2]=0;
+    call_kernel(149,args,4); CHECK(g_eax==0);
+    call_kernel(97,&timer,1); CHECK(g_eax==0 && MEM32(timer+4)==1);
+
+    uint32_t init[]={timer,1}; call_kernel(113,init,2);
+    call_kernel(149,args,4);
+    MEM64(timeout)=0;
+    call_kernel(159,wait,5); CHECK(g_eax==0 && MEM32(timer+4)==0);
+    call_kernel(159,wait,5); CHECK(g_eax==0x102);
+
+    /* WaitAll must not consume a synchronization event until all are ready. */
+    uint32_t event1=0x1a200,event2=0x1a220,objects[]={event1,event2};
+    dispatch_initialize(event1,1); dispatch_initialize(event2,0);
+    CHECK(dispatch_event(event1,1)==0);
+    CHECK(dispatch_wait(objects,2,1,0,timeout)==0x102 && MEM32(event1+4)==1);
+    dispatch_event(event2,1);
+    CHECK(dispatch_wait(objects,2,1,0,timeout)==0 && MEM32(event1+4)==0 && MEM32(event2+4)==1);
+    CHECK(dispatch_wait(objects,2,0,0,timeout)==1);
+
+    /* A waiting thread owns a successful signal even if reset precedes its
+     * next host timeslice. Synchronization signals reserve only one waiter. */
+    for (unsigned type=0;type<2;++type) {
+        dispatch_initialize(event1,type);
+        MEM64(0x1a308)=(uint64_t)-50000000ll;
+        struct WaitTest a={event1,0xffffffff},b={event1,0xffffffff};
+        HANDLE waiters[]={CreateThread(NULL,0,test_wait_worker,&a,0,NULL),CreateThread(NULL,0,test_wait_worker,&b,0,NULL)};
+        CHECK(waiters[0] && waiters[1]);
+        ULONGLONG limit=GetTickCount64()+2000;
+        for (;;) {
+            unsigned count=0;
+            AcquireSRWLockExclusive(&dispatch_lock);
+            for (struct PilotWaiter *w=dispatch_waiters;w;w=w->next) ++count;
+            ReleaseSRWLockExclusive(&dispatch_lock);
+            if (count==2) break;
+            CHECK(GetTickCount64()<limit); Sleep(1);
+        }
+        dispatch_event(event1,1); dispatch_event(event1,0);
+        CHECK(WaitForMultipleObjects(2,waiters,FALSE,2000)<WAIT_OBJECT_0+2);
+        if (type==1) {
+            CHECK(WaitForMultipleObjects(2,waiters,TRUE,0)==WAIT_TIMEOUT);
+            dispatch_event(event1,1);
+        }
+        CHECK(WaitForMultipleObjects(2,waiters,TRUE,2000)==WAIT_OBJECT_0);
+        CHECK(a.status==0 && b.status==0);
+        CloseHandle(waiters[0]); CloseHandle(waiters[1]);
+    }
+
+    dpc_entered=CreateEventW(NULL,FALSE,FALSE,NULL);
+    dpc_release=CreateEventW(NULL,FALSE,FALSE,NULL);
+    dpc_done=CreateEventW(NULL,FALSE,FALSE,NULL);
+    CHECK(dpc_entered && dpc_release && dpc_done);
+    uint32_t dinit[]={dpc,0x12100,0xabcdef01}; call_kernel(107,dinit,3);
+    dinit[0]=second; call_kernel(107,dinit,3);
+    dpc_mode=1;
+    uint32_t queue[]={dpc,0x12345678,0x87654321};
+    call_kernel(119,queue,3); CHECK(g_eax==1);
+    CHECK(WaitForSingleObject(dpc_entered,5000)==WAIT_OBJECT_0);
+    queue[0]=second;
+    call_kernel(119,queue,3); CHECK(g_eax==1);
+    call_kernel(119,queue,3); CHECK(g_eax==0);
+    call_kernel(137,&second,1); CHECK(g_eax==1 && !MEM8(second+2));
+    call_kernel(137,&second,1); CHECK(g_eax==0);
+    /* Timer expiry queues the callback with system time arguments; cancelling
+     * an already expired timer cannot erase that queued work. */
+    args[3]=second;
+    uint64_t before=dispatch_wall_time();
+    call_kernel(149,args,4); CHECK(g_eax==0 && MEM8(second+2));
+    call_kernel(97,&timer,1); CHECK(g_eax==0 && MEM8(second+2));
+    g_eax=42; SetEvent(dpc_release);
+    CHECK(WaitForSingleObject(dpc_done,5000)==WAIT_OBJECT_0 && g_eax==42);
+    CHECK(dpc_calls==1 && dpc_seen[0]==second && dpc_seen[1]==0xabcdef01);
+    uint64_t seen=((uint64_t)dpc_seen[3]<<32)|dpc_seen[2];
+    CHECK(seen>=before && seen<=dispatch_wall_time());
+
+    dpc_mode=2; InterlockedExchange(&dpc_calls,0);
+    relative=-100000;
+    uint32_t periodic[]={timer,(uint32_t)relative,(uint32_t)((uint64_t)relative>>32),10,second};
+    call_kernel(150,periodic,5); CHECK(g_eax==0);
+    CHECK(WaitForSingleObject(dpc_done,5000)==WAIT_OBJECT_0 && dpc_calls==3 && !MEM8(timer+3));
+    CHECK(WaitForSingleObject(dpc_done,40)==WAIT_TIMEOUT && dpc_calls==3);
+    CloseHandle(dpc_entered); CloseHandle(dpc_release); CloseHandle(dpc_done);
+    fprintf(stderr,"PASS: relative/absolute/periodic timers, cancellation, wait state, queued DPC arguments/lifetime, isolated callback registers\n");
 }
 
 int main(int argc,char **argv)
@@ -45,6 +190,7 @@ int main(int argc,char **argv)
     g_esp=0x18000; MEM32(g_esp)=0x12340;
     image_size=0x200; image_bytes=calloc(1,image_size); CHECK(image_bytes!=NULL);
     if (argc==2) {
+        if (!strcmp(argv[1],"timers")) { test_timers(); return 0; }
         if (!strcmp(argv[1],"instruction")) recomp_unimpl("test unsupported instruction",0x12340);
         if (!strcmp(argv[1],"indirect")) recomp_icall_fail_log(0x12340);
         if (!strcmp(argv[1],"kernel")) { next_kernel_ordinal=366; kernel_dispatch(); }

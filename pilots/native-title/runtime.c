@@ -232,6 +232,8 @@ static void query_setting(void)
     g_eax=0;
 }
 
+#include "dispatcher.inc"
+
 static void kernel_dispatch(void)
 {
     const char *name = "unknown ordinal";
@@ -239,6 +241,34 @@ static void kernel_dispatch(void)
         if (pilot_imports[i].ordinal == next_kernel_ordinal) name=pilot_imports[i].name;
     fprintf(stderr, "[KERNEL] %u %s return=%08x\n", next_kernel_ordinal, name, MEM32(g_esp));
     switch (next_kernel_ordinal) {
+    case 97: g_eax=dispatch_cancel_timer(MEM32(g_esp+4)); g_esp+=8; return;
+    case 108: {
+        uint32_t va=MEM32(g_esp+4),type=MEM32(g_esp+8),state=MEM32(g_esp+12);
+        if (type>1) stop("invalid event type",type);
+        dispatch_initialize(va,type); dispatch_event(va,state!=0); g_esp+=16; return;
+    }
+    case 119: g_eax=dispatch_queue(MEM32(g_esp+4),MEM32(g_esp+8),MEM32(g_esp+12),0); g_esp+=16; return;
+    case 121: g_eax=dispatch_in_dpc; g_esp+=4; return;
+    case 137: g_eax=dispatch_queue(MEM32(g_esp+4),0,0,1); g_esp+=8; return;
+    case 138: g_eax=dispatch_event(MEM32(g_esp+4),0); g_esp+=8; return;
+    case 145:
+        if (MEM32(g_esp+12)) stop("KeSetEvent Wait=TRUE requires scheduler handoff",145);
+        g_eax=dispatch_event(MEM32(g_esp+4),1); g_esp+=16; return;
+    case 149: case 150: {
+        unsigned ex=next_kernel_ordinal==150;
+        g_eax=dispatch_set_timer(MEM32(g_esp+4),(int64_t)MEM64(g_esp+8),ex ? MEM32(g_esp+16) : 0,MEM32(g_esp+(ex ? 20 : 16)));
+        g_esp+=ex ? 24 : 20; return;
+    }
+    case 158: {
+        uint32_t count=MEM32(g_esp+4),list=MEM32(g_esp+8),kind=MEM32(g_esp+12),objects[64];
+        if (!count || count>64 || kind>1) { g_eax=0xc000000du; g_esp+=36; return; }
+        for (unsigned i=0;i<count;++i) objects[i]=MEM32(list+i*4);
+        g_eax=dispatch_wait(objects,count,kind==0,MEM32(g_esp+24)!=0,MEM32(g_esp+28)); g_esp+=36; return;
+    }
+    case 159: {
+        uint32_t va=MEM32(g_esp+4);
+        g_eax=dispatch_wait(&va,1,0,MEM32(g_esp+16)!=0,MEM32(g_esp+20)); g_esp+=24; return;
+    }
     case 301: {
         /* Same native NT status table used by Phobos's RTL implementation. */
         typedef ULONG (WINAPI *StatusMap)(LONG);
@@ -249,6 +279,7 @@ static void kernel_dispatch(void)
     case 24: query_setting(); g_esp+=24; return;
     case 107: {
         uint32_t va=MEM32(g_esp+4);
+        memset(memory+va,0,28);
         MEM16(va)=0x13; MEM8(va+2)=0;
         MEM32(va+12)=MEM32(g_esp+8); MEM32(va+16)=MEM32(g_esp+12);
         g_esp+=16; return;
@@ -256,9 +287,7 @@ static void kernel_dispatch(void)
     case 113: {
         uint32_t va=MEM32(g_esp+4),type=MEM32(g_esp+8);
         if (type>1) stop("invalid timer type",type);
-        memset(memory+va,0,40);
-        MEM8(va)=(uint8_t)(8+type); MEM8(va+2)=10;
-        MEM32(va+8)=va+8; MEM32(va+12)=va+8;
+        dispatch_initialize(va,8+type);
         g_esp+=12; return;
     }
     case 277: case 291: case 294:

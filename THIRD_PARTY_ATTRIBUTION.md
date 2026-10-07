@@ -24,6 +24,14 @@ executable for non-GPL distribution. Preserve the external donor's LICENSE,
 NOTICE and per-file notices with its source; no generated game source belongs
 in this repository.
 
+The native pilot dispatcher independently implements the observed API boundary
+using host waitable timers and an owned callback queue. Microsoft's NT timer,
+DPC and wait documentation plus Cxbx's Xbox layouts/ordinals supplied contract
+references. The MIT sp00nznet `1409a7d` timer bridge was inspected for its worker
+architecture and known gaps; no donor timer service bodies were imported.
+Links, exercised behavior and remaining qualification limits are recorded in
+the pilot README. Its overall reference-only distribution status is unchanged.
+
 ## Unicorn Engine / QEMU
 
 [Unicorn Engine](https://github.com/unicorn-engine/unicorn), version `2.1.1`,
