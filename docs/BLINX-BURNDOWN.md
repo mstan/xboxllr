@@ -3,9 +3,9 @@
 **Current, 2026-10-07 (`beads-xbox.1.62`):** serial NTSC Blinx bring-up.
 The borrowed Phobos renderer now presents actual game frames. The prior disc
 error is traced and fixed: local VM/texture ownership caps returned out of memory
-while real guest RAM remained available. Blinx now loads 420 textures and stops
-at the next explicit graphics contract, `D3DDevice_BeginVisibilityTest`.
-Fresh and repeat launches reach that same boundary (13.87/7.55 s) with zero
+while real guest RAM remained available. Blinx now loads 420 textures, passes
+visibility Begin/End and stops at `D3DDevice_InsertCallback` (`0x138a40`).
+Fresh and repeat launches reach that same boundary (12.95/7.33 s) with zero
 error-dialog entries or memory failures. The 64 MiB guest limit remains enforced. No title error condition is bypassed.
 
 | Milestone | Evidence / remaining work |
@@ -15,18 +15,21 @@ error-dialog entries or memory failures. The 64 MiB guest limit remains enforced
 | Audio service readiness | 21 identified Blinx entries exercised; real XAudio2/GP output, routing, gains, loops, updates and cleanup; actual title playback still pending |
 | Movie service readiness | Original NTSC Sofdec roots compiled; YUY2/UYVY upload, pitch, coordinates and changing GPU frames tested; actual playback/sync/interruption pending |
 | Disc-error diagnosis | Actual caller returns E_OUTOFMEMORY from local 512-reservation/256-texture caps; growing ownership fixes progression to 420 textures, with real memory budget retained |
-| Next graphics family | Visibility queries: use real GPU samples/completion behind the Xbox ABI; no fabricated visibility |
+| Visibility queries | Bounded software NV2A sample/report floor, original-x86 ABI and real native GPU fixtures pass; title Begin/End progress validated, title Get not yet reached |
+| Next graphics family | Ordered GPU callbacks: reuse real GPU completion and guest callback machinery after verifying original ordering/ABI |
 | Input | Physical XInput and startup-selected keyboard available; actual menu/movie interruption still unvalidated |
 | Attract startup/loading/render/audio/movies/gameplay | Partial startup/rendering only; no complete attract sequence yet |
 | Repeat loops, interruption/menu return, original cadence | Pending actual title integration measurements |
 | JSRF | Deferred until Blinx completes; shared services and separate revision bindings |
 
-All 30 CTests pass in the isolated run (10.56 s). Capacity regression tests cover
+All 30 CTests pass in the isolated run (15.08 s), plus the LLE NV2A regression and
+ten Python generation tests. Visibility fixtures cover real samples, masks,
+clipping, index reuse, pending outputs, timestamps and teardown. Capacity tests cover
 600 simultaneous reservations and 520 GPU textures with repeat cleanup and real
 contents. The concurrent validation run encountered the existing vblank test's
 intermittent process-wide handle-count assertion. Private title evidence and
 bounded correctness qualifications are listed in the
-[pilot README](../pilots/native-title/README.md#current-checkpoint---audio-movies-and-disc-error-fix-2026-10-07).
+[pilot README](../pilots/native-title/README.md#bounded-visibility-contract).
 Attribution is preserved in the [inventory](../THIRD_PARTY_ATTRIBUTION.md).
 These are service milestones, not percentage-complete or an ETA. Full AOT and
 dashboard performance continue without blocking title bring-up.

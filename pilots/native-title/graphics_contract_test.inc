@@ -19,6 +19,7 @@ static uint32_t call_graphics(unsigned entry,const uint32_t *args)
 #include "graphics_transform_contract_test.inc"
 #include "graphics_completion_contract_test.inc"
 #include "graphics_fvf_contract_test.inc"
+#include "graphics_visibility_contract_test.inc"
 static void test_graphics(void)
 {
     vm_ensure();
@@ -112,6 +113,7 @@ static void test_graphics(void)
         CHECK(pixels[0]==0 && pixels[1]==0 && pixels[2]==255);
         if(!pass) { test_graphics_states(); test_graphics_textures(); test_graphics_vertices(); test_graphics_transforms(); test_graphics_shaders(); test_graphics_fvf(); test_graphics_pixels(); test_graphics_blocks(); test_graphics_completion(); test_graphics_resource_bindings(); }
         CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&front)==0);
+        test_graphics_visibility();
         CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&back)==0);
         CHECK(call_graphics(PILOT_D3D_D3DDevice_Release,NULL)==0);
         CHECK(!graphics_active && !graphics_headers && !MEM32(PILOT_D3D_DEVICE_GLOBAL));

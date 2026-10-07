@@ -1,5 +1,28 @@
 # STATUS
 
+## 2026-10-07 - Bounded LLE visibility floor and native queries
+
+Visibility now follows the owner's bounded-reference policy: actual software
+NV2A sample counting and ordered DMA reports establish the contract; independent
+D3D11 queries supply real native results. Original NTSC Begin/Get and slot-helper
+execution confirms the ABI. GPU fixtures match visible/hidden/partial/overdraw,
+write-mask, alpha and clipping cases; pending outputs, reuse and cleanup pass.
+No donor invented-count fallback is adopted. MSAA/stencil/exact raster edges and
+matching GPU/CPU clock epochs remain unproven, rather than blocking this scope.
+
+Fresh/repeated Blinx launches pass Begin/End and reach `D3DDevice_InsertCallback`
+at `0x138a40` in 12.95/7.33 s, with 420 textures, zero disc-error entries and no
+allocation failures. The title does not yet reach GetVisibilityTestResult.
+All 30 native CTests, the NV2A regression and ten Python tests pass. The existing
+vblank handle-count assertion flaked in the first targeted run; isolated and
+full reruns pass. No new menu, audio, movie, attract or cadence result.
+
+See the [contract and evidence](pilots/native-title/README.md#bounded-visibility-contract)
+and [burndown](docs/BLINX-BURNDOWN.md). `beads-xbox.1.63` owns this slice;
+`beads-xbox.1.62` remains the serial attract objective. Ordered GPU callbacks are
+the next integration family. The donor-linked pilot remains private reference
+software, not a qualified non-GPL product.
+
 ## 2026-10-07 - Audio/movie readiness and Blinx disc-error root cause
 
 The private native pilot now uses the borrowed Phobos renderer for actual
@@ -19,7 +42,7 @@ pass in the isolated run; 600-reservation and 520-texture regression cases cover
 growth, real contents and repeat cleanup. A concurrent run exposed the existing
 vblank test's intermittent process-wide handle-count assertion.
 
-See the [current pilot evidence](pilots/native-title/README.md#current-checkpoint---audio-movies-and-disc-error-fix-2026-10-07)
+See the [pilot evidence](pilots/native-title/README.md#earlier-checkpoint---audio-movies-and-disc-error-fix-2026-10-07)
 and [burndown](docs/BLINX-BURNDOWN.md). Attribution is retained with source and
 build artifacts. The Phobos-dependent pilot remains private; this does not
 qualify a non-GPL shipping build. Menu, actual movies/audio, attract, input

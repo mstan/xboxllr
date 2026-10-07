@@ -10,6 +10,7 @@
 #include "graphics_fvf_backend_test.inc"
 #include "graphics_pixel_backend_test.inc"
 #include "graphics_movie_backend_test.inc"
+#include "graphics_visibility_backend_test.inc"
 static int test_transform_pipeline(void)
 {
     static const D3DTRANSFORMSTATETYPE states[]={D3DTS_VIEW,D3DTS_PROJECTION,D3DTS_TEXTURE0,D3DTS_TEXTURE1,
@@ -144,6 +145,7 @@ int main(void)
 #endif
         /* Teardown also owns queries which the caller has not retired. A fast
          * GPU may finish immediately, so pending=true is not required. */
+        CHECK(test_visibility()==0);
         CHECK(pilot_gfx_clear(1,0xff123456,1,0)==0);
         pilot_gfx_resource_busy(PILOT_GFX_SURFACE,0);
         pilot_gfx_close();

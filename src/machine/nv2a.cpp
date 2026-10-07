@@ -6040,6 +6040,18 @@ bool Nv2a::rasterize_witnessed_batch(DrawJob& job, bool& executed) {
     // fallback opens NV2A_RASTER_GENERIC_SW and is carved out of this bucket.
     perf_excl::Scope region(perf_excl::kNv2aRasterWitnessed);
     executed = false;
+    if (zpass_enabled_) {
+        // Keep the reference small: use the existing software fragment tests,
+        // after draining older jobs. Count actual samples, never draw bounds.
+        draw_order_fence();
+        bool ok = rasterize_generic_combiner_batch(job, executed);
+        if (!ok || !executed) {
+            zpass_valid_ = false;
+            fault_("NV2A visibility reference encountered an unsupported draw");
+            return false;
+        }
+        return true;
+    }
     // Stage (d) seam (beads-xbox.1.15.4, DESIGN-NV2A-SEAM.md section 3.2):
     // the executor reads the LATCHED JOB, never the live members. These
     // aliases are the whole of the mechanical redirection -- every use site
@@ -11396,7 +11408,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
     bool resident_exact_this_batch = false;
     GenericResidentRejectReason resident_reject_this_batch =
         GenericResidentRejectReason::kCount;
-    if (renderer_ && effective_clip_valid) {
+    if (!zpass_enabled_ && renderer_ && effective_clip_valid) {
 #if XLLE_VSH_DRAW_OVERLAP_CENSUS
         const bool fixture_overlap = vsh_draw_overlap_enabled_ && job.vsh_overlap.valid;
         const uint64_t fixture_overlap_t0 = fixture_overlap && perf_excl::g_enabled
@@ -13317,7 +13329,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
 #if XLLE_VSH_DRAW_OVERLAP_CENSUS
     bool gpu_shader_collect_nonfinite = false;
 #endif
-    if (gpu_generic_shader_ && renderer_ && effective_clip_valid) {
+    if (!zpass_enabled_ && gpu_generic_shader_ && renderer_ && effective_clip_valid) {
         ++generic_shader_attempts_;
         GenericShaderDeclineReason decline = GenericShaderDeclineReason::kNone;
         auto& st = gpu_shader_packet.state;
@@ -14750,6 +14762,10 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                     continue;
                 }
 
+                // Coverage, depth, shader kills and alpha tests have passed.
+                // Write masks do not suppress visibility samples.
+                if (zpass_enabled_) ++zpass_count_;
+
                 std::array<float, 3> out_rgb{{
                     std::clamp(final_color[0], 0.0f, 1.0f),
                     std::clamp(final_color[1], 0.0f, 1.0f),
@@ -15721,6 +15737,7 @@ enum Nv097Handler : uint8_t {
     kNv097M01A4,                // method == 0x01A4
     kNv097M1D6C,                // method == 0x1D6C
     kNv097M1D70,                // method == 0x1D70
+    kNv097M01A8, kNv097M17C8, kNv097M17CC, kNv097M17D0,
 };
 
 constexpr uint32_t kNv097MethodLimit = 0x2000;
@@ -15860,6 +15877,10 @@ constexpr Nv097Arm kNv097Arms[] = {
     {0x01A4, 0x01A8, kNv097M01A4},
     {0x1D6C, 0x1D70, kNv097M1D6C},
     {0x1D70, 0x1D74, kNv097M1D70},
+    {0x01A8, 0x01AC, kNv097M01A8},
+    {0x17C8, 0x17CC, kNv097M17C8},
+    {0x17CC, 0x17D0, kNv097M17CC},
+    {0x17D0, 0x17D4, kNv097M17D0},
 };
 
 struct Nv097Table {
@@ -16871,6 +16892,52 @@ void Nv2a::dispatch_method(PushMethod push) {
             return;
         }
         inline_array_words_.push_back(parameter);
+        break;
+    }
+    // Register/report layout is corroborated by nxdk_pgraph_tests ZPass and
+    // xemu's public NV097 definitions; no donor implementation is incorporated.
+    case kNv097M01A8: {
+        draw_order_fence();
+        uint32_t instance = 0;
+        if (resolve_object(channel, parameter, instance)) {
+            report_dma_[subchannel] = instance;
+            report_dma_bound_[subchannel] = true;
+        }
+        break;
+    }
+    case kNv097M17C8:
+        draw_order_fence();
+        if (parameter != 1) { fault_("NV2A unsupported report clear type"); return; }
+        zpass_count_ = 0; zpass_valid_ = true;
+        break;
+    case kNv097M17CC:
+        draw_order_fence();
+#if XLLE_RENDERER_HLE
+        if (parameter) { fault_("NV2A machine HLE visibility queries are not implemented"); return; }
+#endif
+        zpass_enabled_ = parameter != 0;
+        break;
+    case kNv097M17D0: {
+        draw_order_fence();
+        uint32_t offset = parameter & 0x00ffffffu, address = 0, last = 0;
+        if ((parameter >> 24) != 1 || !zpass_valid_ || !report_dma_bound_[subchannel] ||
+            (offset & 15) || !dma_object_address(report_dma_[subchannel], offset, address) ||
+            !dma_object_address(report_dma_[subchannel], offset + 15, last) || last != address + 15) {
+            fault_("NV2A invalid or unqualified visibility report"); return;
+        }
+        // Nanoseconds from the device's existing emulated display clock.
+        // Resolution is 1/1000 display interval; exact PTIMER phase is not
+        // part of this bounded reference. GET_REPORT does not clear count.
+        uint64_t stamp = (frame_no_ / 60) * 1000000000ull +
+            ((frame_no_ % 60) * 1000 + frame_phase_) * 1000000000ull / 60000;
+        const uint32_t payload[] = {static_cast<uint32_t>(stamp),
+            static_cast<uint32_t>(stamp >> 32), zpass_count_};
+        const uint32_t done = 0;
+        // Publish the completion word last, after payload and prior draws.
+        if (!mem_write_ || !mem_write_(address, payload, sizeof(payload)) ||
+            !mem_write_(address + 12, &done, sizeof(done))) {
+            fault_("NV2A visibility report DMA write failed"); return;
+        }
         break;
     }
     // NV097 semaphore methods. AvSetDisplayMode uses RELEASE as a GPU completion fence.

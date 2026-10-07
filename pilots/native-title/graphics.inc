@@ -236,6 +236,22 @@ void pilot_d3d_dispatch(unsigned entry)
         graphics_draw_common(draw,arguments[2],arguments[3]);break;
     }
     case PILOT_D3D_D3DResource_IsBusy:g_eax=graphics_resource_busy(arguments[0]);break;
+    case PILOT_D3D_D3DDevice_BeginVisibilityTest:
+        g_eax=pilot_gfx_visibility_begin();
+        // Original Begin has no HRESULT contract: failure cannot be returned
+        // in an ignored register and later mistaken for a valid measurement.
+        if(g_eax&0x80000000u)stop("native visibility begin failed",g_eax);
+        break;
+    case PILOT_D3D_D3DDevice_EndVisibilityTest:g_eax=pilot_gfx_visibility_end(arguments[0]);break;
+    case PILOT_D3D_D3DDevice_GetVisibilityTestResult: {
+        uint32_t count;uint64_t stamp;
+        g_eax=pilot_gfx_visibility_result(arguments[0],&count,&stamp);
+        if(!g_eax) {
+            memcpy(graphics_pointer(arguments[1],4),&count,4);
+            if(arguments[2])memcpy(graphics_pointer(arguments[2],8),&stamp,8);
+        }
+        break;
+    }
     case PILOT_D3D_D3DDevice_InsertFence:g_eax=graphics_fence_insert();break;
     case PILOT_D3D_D3DDevice_BlockOnFence:graphics_fence_wait(arguments[0]);break;
     case PILOT_D3D_D3DDevice_SetTextureStageStateNotInline:

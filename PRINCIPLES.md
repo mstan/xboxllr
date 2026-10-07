@@ -39,6 +39,13 @@ must remain compatible, with documented per-contract numerical/presentation
 tolerances. Title-specific replacements require explicit image/profile identity
 and qualification. Qualified enhanced paths may ship by default; global and
 per-subsystem opt-outs select the reference. "Fake-the-answer" HLE is forbidden.
+
+Owner clarification, 2026-10-07: implement enough runnable LLE to inform the
+bounded contract, then adapt HLE and validate the exercised outcomes. Exhaustive
+or flawless hardware emulation is not a gate. Record unproven details and
+tolerances; expand the reference when an observed mismatch needs it. Neither
+instruction-history equality nor matching internal algorithms is required.
+
 No subsystem returns fake device success; a *headless* subsystem still models every
 guest-visible register, DMA, status, timing, and interrupt — only host *output* is
 suppressed.

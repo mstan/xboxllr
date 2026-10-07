@@ -67,4 +67,7 @@ struct PilotVertexProbeStream { const void *data; unsigned stride; };
 int32_t pilot_gfx_shader_probe(uint32_t handle,const struct PilotVertexProbeStream streams[16],unsigned count,
                               const float constants[192][4],float *outputs);
 /* NULL constants probes the actually bound shader/layout/constant buffer. */
+int32_t pilot_gfx_visibility_begin(void);
+int32_t pilot_gfx_visibility_end(uint32_t index);
+int32_t pilot_gfx_visibility_result(uint32_t index,uint32_t *count,uint64_t *stamp);
 #endif

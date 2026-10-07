@@ -27,6 +27,7 @@ static uint32_t pilot_bound_textures[4],pilot_bound_vertices[16];
 void pilot_d3d_raster_texture_mode(UINT native,const float scale[4][4]);
 void pilot_d3d_fvf_prepare(UINT fvf,const float scale[4],const float offset[4]);
 #include "graphics_completion_backend.inc"
+#include "graphics_visibility_backend.inc"
 #include "graphics_quad_backend.inc"
 
 void pilot_gfx_pixel_fixed(void)
@@ -86,6 +87,7 @@ static LRESULT CALLBACK pilot_window_proc(HWND window,UINT message,WPARAM wparam
 }
 void pilot_gfx_close(void)
 {
+    pilot_visibility_close();
     pilot_completion_close();
     pilot_quad_close();
     pilot_gfx_shaders_close();

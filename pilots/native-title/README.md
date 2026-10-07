@@ -6,7 +6,81 @@ It is outside the normal xboxlle build. **The generated executable is a private
 GPL-dependent reference artifact, not the intended non-GPL shipping product.**
 See [license scope](../../LICENSE-SCOPE.md). There is no install/package target.
 
-## Current checkpoint - audio, movies and disc-error fix (2026-10-07)
+## Current checkpoint - bounded visibility contract (2026-10-07)
+
+`beads-xbox.1.63`: a small software NV2A reference now informs real native GPU
+queries. Fresh/repeated NTSC Blinx launches pass visibility Begin and End and
+stop at `D3DDevice_InsertCallback` (`0x138a40`), in 12.95/7.33 s. Both load 420
+textures without entering the disc-error UI or hitting allocation failures.
+Each issues one Begin/End; neither reaches GetVisibilityTestResult before the
+callback guard. No new menu, movie, audio-playback or attract result is claimed.
+
+All 30 native CTests pass (15.08 s), including three real GPU device lifetimes,
+the new sample-count fixtures and original guest ABI shape. The complete NV2A
+test passes with the new command-level software fixtures (0.35 s); ten Python
+generation regressions pass. The existing process-wide vblank handle-count
+assertion failed once before the visibility tests, then passed in isolated and
+full reruns; this unrelated intermittent assertion remains open.
+
+Private evidence: `build/blinx/visibility-original-oracle.aot-private.json`
+(eight original-x86 cases), `visibility-validation.aot-private.json`
+(fresh/repeat launch), and `build/visibility-*-tests.log`. The binding generator
+checks the reviewed Begin/End/Get body hashes and stack sizes. No guest address
+or private XDK report-cache layout is embedded in the native query service.
+The next integration family is ordered GPU callbacks, using existing real GPU
+completion and guest callback machinery where the original contract permits.
+
+### Bounded visibility contract
+
+The floor implements `SET_CONTEXT_DMA_REPORT`, `CLEAR_REPORT_VALUE`,
+`SET_ZPASS_PIXEL_COUNT_ENABLE` and `GET_REPORT` through real PFIFO dispatch,
+DMA resolution and the existing software rasterizer. It counts samples that
+survive coverage, depth, shader kill and alpha tests. Clearing resets the count;
+enable/disable and reading a report do not. Color/depth write masks do not
+suppress measurement. Reports publish timestamp/count before the completion word.
+Unsupported reference draws stop explicitly rather than producing guessed counts.
+
+The original NTSC XDK routines establish the service ABI: Begin clears/enables
+one counter; End disables and queues an indexed report; Get returns
+`D3DERR_TESTINCOMPLETE` (`0x88760828`) without changing outputs while pending,
+then returns a 32-bit count and optional 64-bit timestamp. Reads are repeatable;
+index reuse replaces the report. Begin/Get and the preallocated report-slot
+helper were executed as original x86. End's packets/kick were reviewed, not
+executed end to end in the oracle. Begin's EAX is not a specified HRESULT;
+the adapter leaves S_OK there as an unused volatile value.
+
+The native implementation uses actual D3D11 occlusion and timestamp queries.
+It submits once at End and polls without flushing or waiting in Get. Query
+objects retain ownership across index reuse and release on device teardown.
+The LLE software path is an offline reference; it never runs alongside the
+production native renderer. Build selection chooses the original or native
+graphics family. The separate machine HLE renderer has no query implementation
+yet and stops explicitly when counting is enabled.
+
+| Qualified behavior | Reference and native evidence |
+| --- | --- |
+| Samples | 20x20 rectangle = 400; completely hidden = 0 additional; half hidden or clipped = 200; two overlapping draws with writes disabled = 800; alpha NEVER = 0 |
+| Counter lifecycle | LLE cumulative reports/enable/reset; native Begin reset, repeated End, independent retained indices, repeated reads and 70 overwrites |
+| ABI and completion | Original pending/output/stack/register behavior; real GPU readiness, untouched pending outputs, optional timestamp, payload-before-completion DMA writes |
+| Ownership | Three native device lifetimes including an active query at close; invalid LLE DMA range preserves pending status |
+
+This qualifies single-sample triangle fixtures, not exhaustive rasterization.
+MSAA, stencil interactions, exact edge precision and counter wrap are unproven.
+Timestamp units are nanoseconds: the LLE reference uses the existing display
+clock at 1/1000 interval resolution (about 16.7 microseconds at 60 Hz); native
+uses the real GPU clock and rejects disjoint/error results. Clock epochs and
+cross-clock phase are not matched. Qualification currently covers repeatable,
+ordered timestamps, not code that compares GPU time with CPU/PTIMER time.
+These explicit bounds inform HLE without requiring hardware perfection.
+
+Wire/layout references: [nxdk hardware Z-pass tests](https://github.com/abaire/nxdk_pgraph_tests/blob/main/src/tests/zpass_pixel_count_tests.cpp),
+xemu's pinned NV097 definitions and the original NTSC routine behavior.
+Host query semantics follow [Microsoft D3D11_QUERY](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/ne-d3d11-d3d11_query)
+and [GetData](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11devicecontext-getdata).
+The Phobos 64-poll invented-count fallback is deliberately excluded. Source
+provenance is recorded in [the attribution inventory](../../THIRD_PARTY_ATTRIBUTION.md).
+
+## Earlier checkpoint - audio, movies and disc-error fix (2026-10-07)
 
 The private PHOBOS/D3D11 build presents real Blinx frames and now passes the
 previous disc-error screen, loading 420 textures before the explicit

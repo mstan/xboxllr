@@ -21,6 +21,11 @@ CAPS = "a2e598588a3b18aff4ac64b396716e58ca211384f86f5ef757c7ce3aec3caa22"
 VBLANK = "3671f3eb0feef60a9001693f28fbd102d209e1c072a2a486aa34f60429a7eaf0"
 STATEBLOCK = "9a3cc11b88c617614da8725cfb996ab8c30ad3ae9e5477b3ae9734753afc5a31"
 CREATE_STATEBLOCK = "63f71d88c14fae20c1ca8bcee60ab04a308b8bae93ae75d56527d44881cc2dce"
+VISIBILITY = {
+    "D3DDevice_BeginVisibilityTest": (0, "4f540a8de4fbb9fed9c35005ac859550010a3eec200068e70c6d695b86e4cc86"),
+    "D3DDevice_EndVisibilityTest": (4, "f4fa023fa33a53bf63b4cdc5a5a53f849263bd0fca5d1ccfd7f5c96eece8b294"),
+    "D3DDevice_GetVisibilityTestResult": (12, "a0db88fb849af504b749eadc5dfa1f2979eab762209bfec592f12680156bbefc"),
+}
 
 
 def bind(xbe: Path, output: Path, symbols: Path):
@@ -68,6 +73,16 @@ def bind(xbe: Path, output: Path, symbols: Path):
                  (m:=re.fullmatch(r'dword ptr \[ebx \+ (0x[0-9a-f]+)\], eax',i.op_str))]
     if len(mode_fields)!=1: raise ValueError('unreviewed shader mode field')
     state_defaults['shader_constant_mode_offset']=mode_fields[0]
+    # Complete Begin/Get execution and End packet inspection establish this
+    # revision's reset/report/poll contract. Runtime services contain no guest
+    # addresses or guessed report-page cache layout.
+    visibility={}
+    for name,(stack,digest) in VISIBILITY.items():
+        symbol=next(s for s in identified if s['name']==name)
+        if symbol['stack_bytes']!=stack or context.digest(functions[symbol['address']])!=digest:
+            raise ValueError('unreviewed visibility boundary: '+name)
+        visibility[name]=dict(stack_bytes=stack,function_sha256=digest)
+    state_defaults['visibility_binding']=visibility
     # Reviewed programmable-shader load/select path. Cache offsets stay in the
     # revision binding; native code owns GPU programs and never emits packets.
     load=next(s for s in identified if s['name']=='D3DDevice_LoadVertexShader')

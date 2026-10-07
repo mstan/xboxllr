@@ -2519,6 +2519,13 @@ private:
     std::function<bool(uint32_t, void*, size_t)> mem_read_;
     std::function<bool(uint32_t, const void*, size_t)> mem_write_;
     std::function<uint8_t*(uint32_t, size_t)> mem_direct_;
+    // NV097 Z-pass reporting: CPU reference for the bounded single-sample
+    // generic rasterizer. Report writes follow actual ordered raster work.
+    std::array<uint32_t, 8> report_dma_{};
+    std::array<bool, 8> report_dma_bound_{};
+    bool zpass_enabled_ = false;
+    bool zpass_valid_ = true;
+    uint32_t zpass_count_ = 0;
     std::array<uint32_t, 8> semaphore_dma_{};
     std::array<uint32_t, 8> semaphore_offset_{};
     std::array<uint32_t, 8> object_instance_{};

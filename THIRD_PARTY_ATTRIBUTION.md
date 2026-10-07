@@ -15,6 +15,23 @@ notices. Preparation/build steps must report missing required notices.
 
 ## Private native-title reference pilot
 
+### Visibility reference and native query contract - 2026-10-07
+
+The new `src/machine/nv2a.cpp` report/counter handling, visibility fixtures and
+`pilots/native-title/graphics_visibility_backend.inc` are independently authored.
+Register/layout and behavior references are
+[abaire/nxdk_pgraph_tests Z-pass tests](https://github.com/abaire/nxdk_pgraph_tests/blob/main/src/tests/zpass_pixel_count_tests.cpp)
+(reviewed 2026-10-07), xemu NV097 definitions/report dispatch at
+`482088490c2d5983ed5e1eafbd09906157c1eca0`, Cxbx-Reloaded D3D visibility behavior
+at `585c49a50af1255ab155099e06f24505f9c5a800`, and the owner's original NTSC XBE
+ABI executions. No GPL donor implementation bodies are incorporated by this
+change. Phobos `bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0` was audited; its
+64-poll fabricated visibility result is not adopted. Cxbx policies that differ
+from the reviewed original routine (nesting/index reuse) are not adopted.
+The native implementation uses Microsoft D3D11 occlusion/timestamp/GetData APIs
+and the existing donor device. Existing linked-component license obligations
+remain; these new independent adapters do not make the pilot non-GPL.
+
 ### Renderer, audio, input and movie adoption — 2026-10-07
 
 This batch adds actual Phobos renderer implementation to the **private** title

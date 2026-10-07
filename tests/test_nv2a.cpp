@@ -974,7 +974,10 @@ static void test_vsh_compile_toggle_rebuilds_cached_parse() {
 #endif
 }
 
+#include "nv2a_visibility_cases.hpp"
+
 int main() {
+    test_visibility_reference();
     test_texture_conversion_cache();
     test_generated_texture_identity();
     test_generated_uniform_batching();
