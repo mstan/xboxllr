@@ -10,11 +10,13 @@ See [license scope](../../LICENSE-SCOPE.md). There is no install/package target.
 
 The original NTSC Blinx XDK 4831 and JSRF XDK 4134 both execute their own XBE
 entries, create real host-backed title threads, and run early XAPI startup.
-Blinx now passes timer arming and its initial CRT heap reservation/commit, then
-stops at kernel ordinal 202, `NtOpenFile`, opening `\Device\CdRom0` for XAPI
-media verification. It reaches 19 title-thread function entries (previously 13
-at allocation, 10 at timer arming). No graphics, movies, menu or level yet.
-These counts are diagnostics, not coverage or performance measurements.
+Blinx now passes timer arming, its initial CRT heap reservation/commit, and
+installed-media verification against the actual NAS content. It stops at kernel
+ordinal 202 opening HDD partition 1 for an allocation-unit check, options
+`0x00800021`. Two actual runs reach the same boundary. The OPTICAL build retains
+and executes the original verification helper, stopping on unsupported raw
+optical access. No graphics, movies, menu or level yet. Function-entry counts
+are diagnostics, not coverage or performance measurements.
 
 The owner's current goal is serial: complete Blinx before further JSRF work.
 JSRF's last measured result remains 12 title-thread entries at
@@ -23,13 +25,13 @@ JSRF's last measured result remains 12 title-thread entries at
 The native implementations reached so far cover thread creation, thread-handle
 closure, recursive critical sections, DPC/timer structure initialization,
 EEPROM user-settings queries and NTSTATUS-to-DOS-error conversion. Timer arming,
-expiry and DPC delivery are implemented as described below. The title runs reach
-the allocation stop before their own timer callback executes; callback delivery
+expiry and DPC delivery are implemented as described below. Callback delivery
 is exercised by the contract tests. No callbacks, draws or completions are discarded.
 
-Six contract tests pass: concurrent threads with separate registers/TLS and
+Seven contract tests pass: concurrent threads with separate registers/TLS and
 recursive exclusion, handle closure/errors and EEPROM buffer/checksum behavior;
 timer/DPC/event-wait contracts; real VM reservation/commit/free/protection/query;
+installed-media identity and actual file I/O;
 plus explicit instruction, indirect-call and
 kernel-call failure paths. Passing
 the other title's XBE to the Blinx artifact is rejected before guest execution.
@@ -66,12 +68,10 @@ The main LLE build's runtime source and build selection are untouched.
 - Compilation disables host optimization for short bring-up cycles. No FPS,
   full AOT coverage, or D3D8 HLE performance claim follows from this result.
 
-The next Blinx dependency is the media/file boundary. The actual next open is
-`\Device\CdRom0`; static inspection of its caller shows a following SCSI
-MODE SENSE page 0x3e request through IOCTL 0x4d014. That IOCTL has not executed
-locally yet. Returning a file handle alone does not solve media verification.
-Keep physical-drive authentication distinct from a supported native installed-
-title media contract; do not fabricate authenticated mode-page bytes. The NAS
+The next Blinx dependency is HDD partition mounting and volume information.
+The native installed-media contract below replaces the earlier optical check
+with the owner's explicit authorization. The original check requests SCSI MODE
+SENSE page 0x3e through IOCTL 0x4d014; that IOCTL has not executed locally. The NAS
 contains both the original extracted title and ISO, plus a separate Rev 1 ISO;
 pin the original input, not Rev 1. Use existing references, keeping GPL bodies external.
 The inspected MIT sp00nznet code is a candidate shipping implementation source
@@ -79,6 +79,80 @@ after file provenance checks. D3D8 remains the performance target; first-scene
 bindings still need Blinx's local indexed draws and JSRF's older GetBackBuffer
 out-pointer ABI. A complete reference machine is not a prerequisite to those
 HLE implementations, and dashboard speed does not gate title work.
+
+## Installed-media contract
+
+`media.inc` replaces the complete reviewed XAPI media-verification helper,
+**not** `NtDeviceIoControlFile`. The original boundary takes no arguments,
+returns NTSTATUS in EAX, consumes the four-byte return address, preserves
+EBX/ESI/EDI/EBP, and returns no guest resource. Its temporary device handle does
+not escape. The installed implementation keeps that interface and has a distinct,
+explicitly authorized policy: matching installed content is accepted without
+proving physical DVD authentication. It does not populate drive packets.
+
+The mounted directory must open, `default.xbe` must be readable, and its streamed
+SHA-256 must equal the exact image used to generate this executable. A successful
+mount retains real root/identity handles for the process lifetime, denying
+write/delete sharing on the identity. Repeat calls revalidate rather than
+allocating more handles. Missing media returns STATUS_NO_MEDIA_IN_DEVICE;
+wrong identity returns STATUS_WRONG_VOLUME; failed file access retains the host
+NT error where available. All other assets are read on demand; their presence
+and identity have **not** been certified by checking `default.xbe` alone.
+
+Native file services implement read-only synchronous `NtOpenFile`, FILE_OPEN
+through `NtCreateFile`, `NtReadFile`, standard/position query, position set and
+`NtClose`. The host NT I/O manager supplies real seek/read/EOF/share semantics;
+the adapter owns guest handles and marshals the eight-byte Xbox IO_STATUS_BLOCK.
+Directory-relative opens survive closing the parent handle. Guest paths accept
+ASCII D: and Device/CdRom0 names; traversal, alternate streams and reparse
+traversal are rejected. The byte source is the actual installed directory.
+Read-only media never becomes a save/cache directory.
+
+Pending work remains explicit: async I/O and APC/event delivery, directory
+enumeration, additional info classes, HDD/save/cache mounts, raw optical access,
+and non-ASCII Xbox path mapping. Unsupported modes stop. The host filesystem
+supplies file allocation metadata; FATX/XDVDFS allocation equivalence is not
+yet qualified. Invalid guest-pointer exception recovery is not implemented.
+No host volume geometry is presented as Xbox geometry.
+
+`tools/native_media_binding.py` checks generated-artifact integrity, identifies
+the reviewed helper by its original byte hash plus whole-XBE hash, and requires
+its discovered XapiInitProcess caller. It renames only the private generated
+definition and emits a build-selected wrapper; direct and indirect callers keep
+the same symbol. Shared service code has no revision addresses. Unknown images
+or helper bodies fail binding rather than guessing. A new revision needs a new
+contract review. Original generated code remains in the optical build.
+
+For an existing private generated Blinx tree:
+
+```powershell
+py -3 tools/native_media_binding.py --xbe <original-default.xbe> --output build/blinx --symbols <default_xdk_symbols.json>
+& 'C:\Program Files\CMake\bin\cmake.exe' -S pilots/native-title -B build/blinx/host -DPILOT_MEDIA=INSTALLED
+& 'C:\Program Files\CMake\bin\cmake.exe' --build build/blinx/host --config Release --parallel 2
+& build/blinx/host/Release/xlle_native_title.exe <original-default.xbe> <eeprom.bin> <installed-content-directory>
+```
+
+Fresh generation accepts `--media-symbols <default_xdk_symbols.json>` with the
+usual `tools/native_pilot.py` arguments. Configure `-DPILOT_MEDIA=OPTICAL` to
+select the original verification routine. Neither a launch flag nor an
+environment variable switches implementations. Only the content path is a
+launch input. Both configurations were built and run. The OPTICAL configuration
+currently stops at unsupported raw optical access: preserved executable code
+and ABI inspection are **not an executed LLE authentication equivalence proof**.
+
+Validation: seven CTests, repeated actual NAS-backed Blinx startup, missing-media
+title failure, unknown-binding rejection, and the original optical routine run.
+The media contract test covers wrong/missing identity, nonvolatile registers and
+stack, write denial, real bytes/EOF/position, bounded query writes, root-relative
+handles, stale handles and 300 opens/closes without host-handle growth. Actual
+missing-content startup returns NO_MEDIA but its subsequent error UI faults on
+an unsupported kernel data import; that UI is not validated. No FPS claim.
+
+References: MIT sp00nznet `1409a7d` file/path services supplied architecture and
+pitfalls; [nxdk's Xbox declarations](https://github.com/XboxDev/nxdk/blob/master/lib/xboxkrnl/xboxkrnl.h)
+and [Microsoft NtReadFile](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntreadfile)
+describe the ABI and native file-position contract. No donor service bodies were
+imported. The private Phobos CPU-helper licensing limitation is unchanged.
 
 ## Native virtual-memory checkpoint
 

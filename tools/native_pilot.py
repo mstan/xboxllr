@@ -74,6 +74,7 @@ def prepare(args):
     if identity.exists() and json.loads(identity.read_text())["sha256"] != image["sha256"]:
         raise ValueError("output belongs to a different XBE; use a separate directory")
     (out / "gen" / "pilot_image.h").unlink(missing_ok=True)
+    (out / "gen" / "pilot_media_binding.c").unlink(missing_ok=True)
     identity.write_text(json.dumps(image, indent=2) + "\n")
 
     def run(name, argv):
@@ -109,6 +110,9 @@ def prepare(args):
                     files={p.name: hashlib.sha256(p.read_bytes()).hexdigest()
                            for p in sorted((out / "gen").iterdir()) if p.is_file()})
     (out / "generation.aot-private.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    if args.media_symbols:
+        from native_media_binding import bind
+        bind(args.xbe, out, args.media_symbols)
     print(json.dumps({k: v for k, v in manifest.items() if k != "files"}, indent=2))
 
 
@@ -119,4 +123,5 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--data-sections", default="")
     parser.add_argument("--reuse-discovery", action="store_true")
+    parser.add_argument("--media-symbols", type=Path, help="Bind a reviewed media helper using this XDK symbol inventory")
     prepare(parser.parse_args())

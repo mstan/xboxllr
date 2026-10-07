@@ -4,6 +4,7 @@
  * Unsupported operations terminate before returning to the title.
  */
 #include <windows.h>
+#include <winternl.h>
 #include <bcrypt.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -234,6 +235,7 @@ static void query_setting(void)
 
 #include "dispatcher.inc"
 #include "virtual_memory.inc"
+#include "media.inc"
 
 static void kernel_dispatch(void)
 {
@@ -243,16 +245,7 @@ static void kernel_dispatch(void)
     fprintf(stderr, "[KERNEL] %u %s return=%08x\n", next_kernel_ordinal, name, MEM32(g_esp));
     switch (next_kernel_ordinal) {
     case 184: case 199: case 204: case 217: vm_kernel(next_kernel_ordinal); return;
-    case 202: {
-        uint32_t attributes=MEM32(g_esp+12);
-        if (attributes && MEM32(attributes+4)) {
-            uint32_t string=MEM32(attributes+4),length=MEM16(string);
-            if (length>1024) length=1024;
-            fprintf(stderr,"[OPEN REQUEST] root=%08x name=%.*s access=%08x options=%08x\n",
-                    MEM32(attributes),(int)length,(char*)(memory+MEM32(string+4)),MEM32(g_esp+8),MEM32(g_esp+24));
-        }
-        break;
-    }
+    case 190: case 202: case 211: case 219: case 226: media_kernel(next_kernel_ordinal); return;
     case 97: g_eax=dispatch_cancel_timer(MEM32(g_esp+4)); g_esp+=8; return;
     case 108: {
         uint32_t va=MEM32(g_esp+4),type=MEM32(g_esp+8),state=MEM32(g_esp+12);
@@ -311,6 +304,9 @@ static void kernel_dispatch(void)
         ExitThread(MEM32(g_esp+4));
     case 187: {
         uint32_t handle=MEM32(g_esp+4),slot=handle-0x40000000u;
+        if ((handle&0xf0000000u)==0x50000000u) {
+            g_eax=media_close(handle); g_esp+=8; return;
+        }
         AcquireSRWLockExclusive(&thread_lock);
         g_eax=0xc0000008u;
         if (slot>0 && slot<=thread_count && threads[slot].handle) {
@@ -440,13 +436,19 @@ int main(int argc,char **argv)
 {
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
     AddVectoredExceptionHandler(1,fault_handler);
-    if (argc<2 || argc>3) { fprintf(stderr,"usage: xlle_native_title <matching.xbe> [eeprom]\n"); return 1; }
-    if (argc==3) {
+    if (argc<2 || argc>4) { fprintf(stderr,"usage: xlle_native_title <matching.xbe> [eeprom] [installed-content-directory]\n"); return 1; }
+    if (argc>=3) {
         FILE *input=fopen(argv[2],"rb");
         if (!input || fread(eeprom,1,256,input)!=256 || fgetc(input)!=EOF) stop("invalid EEPROM input",0);
         fclose(input); have_eeprom=1;
     }
     load_image(argv[1]);
+    if (argc==4) media_content_path=argv[3];
+#ifdef PILOT_MEDIA_INSTALLED
+    fprintf(stderr,"[MEDIA POLICY] installed-title HLE; optical authentication is not asserted\n");
+#else
+    fprintf(stderr,"[MEDIA POLICY] original optical verification routine\n");
+#endif
     recomp_func_t entry=recomp_lookup(PILOT_ENTRY);
     if (!entry) stop("entry missing from generated dispatch", PILOT_ENTRY);
     fprintf(stderr,"[RUN] calling actual XBE entry\n");

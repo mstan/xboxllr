@@ -39,6 +39,15 @@ sp00nznet `1409a7d` memory/file bridges were inspected for useful mechanisms and
 limitations. No donor memory/file service bodies were incorporated by this
 checkpoint; private CPU-header licensing remains unchanged.
 
+The installed-media adapter uses actual host NT file services. MIT sp00nznet
+`1409a7d` `kernel_file.c` and `kernel_path.c` informed device-path/handle design;
+nxdk supplied Xbox structure/signature references and Microsoft documented the
+host I/O contract. No donor file-service bodies or drive-authentication success
+responses are incorporated. The private byte-hash-bound wrapper selects the
+owner-authorized installed-media contract or the original generated routine.
+Original title code stays in ignored private output; the Phobos CPU helper
+continues to make that pilot a GPL-dependent reference artifact.
+
 ## Unicorn Engine / QEMU
 
 [Unicorn Engine](https://github.com/unicorn-engine/unicorn), version `2.1.1`,

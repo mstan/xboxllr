@@ -59,8 +59,8 @@ Blinx supplies the first game workload; JSRF is the subsequent generalization ga
 Success requires real startup/loading/rendering/audio and movies/gameplay where
 exercised, input interruption and return to menu, repeatable attract loops
 without crashes/hangs/resource growth, and measured original-speed cadence.
-The central objective is `beads-xbox.1.62`. The goal controller could not replace
-the unfinished paused dashboard objective; it has not been falsely completed.
+The central objective is `beads-xbox.1.62`. The goal controller now contains
+this serial Blinx-then-JSRF objective; dashboard performance remains ongoing.
 
 Full portable AOT remains the final CPU goal: prepare native artifacts before
 launch and remove dynarec/interpreter dependence from the declared supported

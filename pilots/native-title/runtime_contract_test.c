@@ -38,6 +38,8 @@ static void call_kernel(unsigned ordinal,const uint32_t *args,unsigned argc)
     CHECK(g_esp==0x18000+4+argc*4);
 }
 
+#include "media_contract_test.inc"
+
 static int test_write_faults(uint32_t va)
 {
 #ifdef _MSC_VER
@@ -263,6 +265,7 @@ int main(int argc,char **argv)
     g_esp=0x18000; MEM32(g_esp)=0x12340;
     image_size=0x200; image_bytes=calloc(1,image_size); CHECK(image_bytes!=NULL);
     if (argc==2) {
+        if (!strcmp(argv[1],"media")) { test_media(); return 0; }
         if (!strcmp(argv[1],"memory")) { test_memory(); return 0; }
         if (!strcmp(argv[1],"timers")) { test_timers(); return 0; }
         if (!strcmp(argv[1],"instruction")) recomp_unimpl("test unsupported instruction",0x12340);

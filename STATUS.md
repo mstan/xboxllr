@@ -1,12 +1,40 @@
 # STATUS
 
+## 2026-10-06 - Installed-media HLE passes Blinx's XAPI media check
+
+The owner authorized replacing optical authentication with installed-media
+validation at the same complete XAPI caller boundary. The new service mounts
+the actual content directory and hashes its `default.xbe` against the generated
+image identity. It retains real directory/identity handles, denies write/delete
+sharing on the identity, reports missing/wrong/unreadable content as failure,
+and preserves the no-argument NTSTATUS/stack/nonvolatile-register contract.
+There are no fabricated SCSI mode pages or drive-authentication flags.
+
+`PILOT_MEDIA=INSTALLED|OPTICAL` selects the implementation at build time.
+Bindings pin the reviewed helper and entire original NTSC XBE by hash; no game
+addresses enter shared service code. The original generated helper remains
+buildable and was executed in the OPTICAL build, stopping explicitly at raw
+optical access. Optical authentication is still unsupported, so this is **not
+an executed LLE authentication equivalence proof**. The normal LLE tree is unchanged.
+
+Two actual Blinx runs from the authorized NAS content pass verification and
+reach the next HDD partition-1 allocation-unit check: `NtOpenFile` requests
+`FILE_OPEN_FOR_FREE_SPACE_QUERY` (options `0x00800021`). This is the next storage
+service family. Seven contract tests pass, including real file bytes, EOF,
+position/query, relative handles, identity failures and 300 leak-free open/close
+cycles. A missing-content title run receives NO_MEDIA; its later failure UI
+still faults on an unsupported kernel data import, so graceful failure UI is
+not claimed. No graphics, attract sequence or speed result yet; no JSRF work.
+Private evidence is under `build/blinx/run-media-*.log` and
+`build/blinx/media-validation.aot-private.json`. See the
+[bounded media contract and reproduction](pilots/native-title/README.md#installed-media-contract).
+
 ## 2026-10-06 - Serial attract goal; Blinx passes initial CRT heap creation
 
 The owner's new objective is `beads-xbox.1.62`: complete original NTSC Blinx's
 full repeatable attract sequence at original speed, then JSRF's. No further
-JSRF work until Blinx meets its acceptance criteria. The runtime goal controller
-rejected replacing the old unfinished paused dashboard goal; it was not falsely
-marked complete. NORTH-STAR and central tracking record the new serial scope.
+JSRF work until Blinx meets its acceptance criteria. The runtime goal controller,
+NORTH-STAR and central tracking now contain the new serial objective.
 
 The native pilot now implements guest VM reserve/commit/decommit/release,
 protection and query with real host NT page services. Six focused tests pass,
