@@ -1,5 +1,26 @@
 # STATUS
 
+## 2026-10-06 - Native Blinx/JSRF reference pilot reaches XAPI startup
+
+The [standalone pilot](pilots/native-title/README.md) now compiles and executes
+the actual original NTSC Blinx 4831 and JSRF 4134 entry points. Both create real
+title threads with separate registers/stacks/TLS, pass early lock/settings
+initialization, and stop explicitly at `KeSetTimer` (ordinal 149). Timed DPC
+delivery is the next shared execution dependency. Neither title has reached
+graphics or a menu in this pilot; no FPS claim is made. Four focused native
+contract/failure tests pass, and mismatched XBE input is rejected before entry.
+The existing LLE machine build has no runtime or build-selection changes.
+
+Latest owner scope: HLE may lead a bounded LLE reference, with compatible
+observable outcomes and reasonable differences. Prefer established emulator
+implementations/contracts over reinvention. GPL projects are external
+reference material for the intended non-GPL shipping product. The Phobos
+generator/header used here makes this a private reference experiment, not a
+shipping implementation. Existing GPL Unicorn and renderer imports also remain
+unresolved distribution dependencies; see [license scope](LICENSE-SCOPE.md).
+The inspected MIT sp00nznet revision is a direct-reuse candidate where file
+provenance permits. Tracking: `beads-xbox.1.61`, `beads-xbox.1.21`.
+
 ## 2026-10-06 - Latest Phobos audited against local Blinx and JSRF
 
 Fetched Phobos `63f18f0` into an isolated donor worktree. Upstream reports

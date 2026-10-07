@@ -219,6 +219,19 @@ documented in [the donor performance report](https://github.com/phobos665/xboxre
 
 ## Next work, with observable exits
 
+Owner clarification after this audit: HLE-first delivery is authorized. LLE is
+a bounded integration/reference implementation and can advance alongside HLE;
+exhaustive device fidelity is not a prerequisite. Scope correctness claims to
+the exercised caller contract, retain known small gaps, and fix details as they
+matter. Required operations must still execute; unsupported reached work stops.
+
+Later distribution clarification: GPL code is reference-only for the intended
+non-GPL product. This supersedes the recommendation to port Phobos's service
+bodies directly without a file-level license check. The private native pilot
+can exercise its generator/runtime header as reference material; shipping
+implementations must use suitably licensed code or independent implementations
+of the observed contract. See [license scope](../LICENSE-SCOPE.md).
+
 1. **Blinx native-title pilot, JSRF binding check alongside it.** Use the original
    NA XDK 4831 copy and exact hashes. Recover the missing indexed-draw binding
    and revision-specific discovery roots. Reuse donor generation where it

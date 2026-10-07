@@ -6,6 +6,24 @@ dependencies and the EEPROM port; transitive and incorporated-source provenance
 review remains open. [LICENSE-SCOPE.md](LICENSE-SCOPE.md) explains the unresolved
 GPL/PolyForm combined-executable conflict.
 
+## Private native-title reference pilot
+
+`tools/native_pilot.py` invokes Phobos xboxrecomp at
+`63f18f0334fbd8c00313c4bb565accf00627a4fd` from an external checkout. Its
+generated code copies `templates/runtime/recomp_types.h` from that GPL-3.0
+fork into ignored private output. The header is modified there to use
+thread-local diagnostic state; missing generated bodies become terminal
+unsupported faults. The resulting executable is reference-only and excluded
+from the normal product build. No donor kernel/GPU acknowledgement runtime is
+linked by this pilot. See [pilot scope](pilots/native-title/README.md).
+
+Phobos kernel bridge signatures/host lock mapping and Cxbx-Reloaded `585c49a`
+Xbox type/EEPROM definitions were consulted for the launch adapter's contracts.
+These references do not clear the Phobos header or the combined reference
+executable for non-GPL distribution. Preserve the external donor's LICENSE,
+NOTICE and per-file notices with its source; no generated game source belongs
+in this repository.
+
 ## Unicorn Engine / QEMU
 
 [Unicorn Engine](https://github.com/unicorn-engine/unicorn), version `2.1.1`,

@@ -24,6 +24,25 @@ performance spike records what can be borrowed or adapted from them. A stubbed
 portion excludes that behavior, not the donor's useful implementations elsewhere.
 See the [all-donor assessment](docs/RENDERER-REUSE-2026-10-02.md).
 
+For all Xbox work, prefer established emulator implementations and reference
+fixtures before writing new device or service logic. xemu is the primary LLE
+device/reference donor; Cxbx-Reloaded supplies useful kernel/D3D contracts and
+native implementations, alongside the recomp forks. Borrow complete useful
+boundaries when their ownership fits. Validate changed adapters and exercised
+caller behavior, and retain known donor limitations; do not independently
+rediscover every borrowed algorithm. A pinned external LLE reference runner may
+provide evidence while the in-tree reference catches up. Shared implementation
+ancestry is not independent corroboration, and stubs remain excluded.
+
+Owner distribution constraint, 2026-10-06: GPL projects may be external research
+and execution references, but GPL code must not enter the intended non-GPL
+shipping product. A source port, linked runtime or copied generated-code helper
+is still incorporated code. Prefer permissively licensed implementations with
+verified file provenance, or independently implement the observed contract.
+The current reference build already has GPL dependencies; this policy is a
+shipping target, not a claim that they have been removed. See
+[license scope](LICENSE-SCOPE.md), tracked by `beads-xbox.1.21`.
+
 ## Current goal
 
 Prioritize entering Blinx and reaching a repeatable scene, with Phobos as the
@@ -42,10 +61,12 @@ workflows, including reference opt-out. Partial AOT and explicit CPU fallback
 are acceptable during development. Report HLE replacement work separately from
 AOT guest instructions, dynamic fallback and proven idle skips.
 
-The LLE floor must exist for every claimed interchangeable replacement. Its
-current dashboard qualification is bounded; media, exceptions, audio and other
-known gaps still need real implementation when reached. An HLE success cannot
-stand in for an absent reference contract.
+HLE may lead delivery while the maintained LLE reference advances alongside it.
+The reference need not be exhaustive or fast: define the larger observable
+contract, validate the exercised scope, and record inaccuracies and untested
+details. Small gaps do not block a useful HLE implementation. A successful HLE
+scene proves that scene's progress, not complete hardware correctness. Missing
+required work and fabricated completion remain unacceptable.
 
 ## Next milestone
 
