@@ -1,0 +1,817 @@
+{
+  "schema": 1,
+  "symbols_sha256": "9665f2d35cc430ca24d853e606b4859fb93a107b64b2cae81b250ac866dc3f5b",
+  "scope": "Static source and exact-name inventory, not reachability, ABI compatibility, semantic completeness, or a percentage of game support.",
+  "donors": [
+    {
+      "name": "phobos",
+      "commit": "bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0",
+      "tree": "f0904620dc78fa5519ee13dcdc6d6e6a8a6ac928",
+      "families": {
+        "renderer_backend": {
+          "source_files": 31,
+          "source_bytes": 842779
+        },
+        "graphics_adapter": {
+          "source_files": 6,
+          "source_bytes": 449525
+        },
+        "audio_adapter": {
+          "source_files": 2,
+          "source_bytes": 67479
+        },
+        "audio_transport": {
+          "source_files": 2,
+          "source_bytes": 13588
+        },
+        "legacy_audio": {
+          "source_files": 2,
+          "source_bytes": 20708
+        },
+        "movies": {
+          "source_files": 8,
+          "source_bytes": 59922
+        },
+        "movie_adapter": {
+          "source_files": 2,
+          "source_bytes": 36061
+        },
+        "input": {
+          "source_files": 7,
+          "source_bytes": 57367
+        },
+        "input_adapter": {
+          "source_files": 1,
+          "source_bytes": 13574
+        },
+        "kernel": {
+          "source_files": 29,
+          "source_bytes": 1217197
+        },
+        "apu": {
+          "source_files": 12,
+          "source_bytes": 192699
+        },
+        "nv2a": {
+          "source_files": 6,
+          "source_bytes": 160251
+        },
+        "binding_and_cpu": {
+          "source_files": 89,
+          "source_bytes": 781753
+        }
+      },
+      "hle_markers": 89,
+      "blinx_exact_name_matches": 48,
+      "entries": [
+        {
+          "name": "D3DDevice_SetFlickerFilter",
+          "source": "src/hle/hle_d3d8.c",
+          "line": 90,
+          "original_body_declared_in_file": false,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "D3DDevice_SetSoftDisplayFilter",
+          "source": "src/hle/hle_d3d8.c",
+          "line": 98,
+          "original_body_declared_in_file": false,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "Direct3D_CreateDevice",
+          "source": "src/hle/hle_d3d8.c",
+          "line": 1866,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "D3DDevice_Clear",
+          "source": "src/hle/hle_d3d8.c",
+          "line": 1911,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "D3DDevice_Swap",
+          "source": "src/hle/hle_d3d8.c",
+          "line": 2231,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "D3DDevice_Present",
+          "source": "src/hle/hle_d3d8.c",
+          "line": 2284,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "D3DDevice_CreateVertexShader",
+          "source": "src/hle/hle_d3d8.c",
+          "line": 2729,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "D3DDevice_LoadVertexShaderProgram",
+          "source": "src/hle/hle_d3d8.c",
+          "line": 2884,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "D3DDevice_SetVertexShader",
+          "source": "src/hle/hle_d3d8.c",
+          "line": 2946,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "D3DDevice_SelectVertexShader",
+          "source": "src/hle/hle_d3d8.c",
+          "line": 2965,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "D3DDevice_SetPixelShader",
+          "source": "src/hle/hle_d3d8.c",
+          "line": 2987,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "D3DDevice_SetVertexDataColor",
+          "source": "src/hle/hle_d3d8.c",
+          "line": 3194,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "D3DDevice_SetVertexData2f",
+          "source": "src/hle/hle_d3d8.c",
+          "line": 3222,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "D3DDevice_Begin",
+          "source": "src/hle/hle_d3d8.c",
+          "line": 3268,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "D3DDevice_End",
+          "source": "src/hle/hle_d3d8.c",
+          "line": 3286,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "D3DDevice_EndPush",
+          "source": "src/hle/hle_d3d8.c",
+          "line": 3446,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "D3DDevice_SetVertexData4f",
+          "source": "src/hle/hle_d3d8.c",
+          "line": 3475,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "D3DDevice_SetTransform",
+          "source": "src/hle/hle_d3d8.c",
+          "line": 3503,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "D3DDevice_SetMaterial",
+          "source": "src/hle/hle_d3d8.c",
+          "line": 3539,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "D3DDevice_SetLight",
+          "source": "src/hle/hle_d3d8.c",
+          "line": 3558,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "D3DDevice_LightEnable",
+          "source": "src/hle/hle_d3d8.c",
+          "line": 3580,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "D3DDevice_SetViewport",
+          "source": "src/hle/hle_d3d8.c",
+          "line": 3600,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "D3DDevice_SetScissors",
+          "source": "src/hle/hle_d3d8.c",
+          "line": 3639,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "D3DDevice_InsertCallback",
+          "source": "src/hle/hle_d3d8.c",
+          "line": 4126,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "D3DDevice_EnableOverlay",
+          "source": "src/hle/hle_d3d8.c",
+          "line": 4175,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "D3DDevice_UpdateOverlay",
+          "source": "src/hle/hle_d3d8.c",
+          "line": 4192,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "D3DDevice_SetRenderTargetFast",
+          "source": "src/hle/hle_d3d8.c",
+          "line": 4217,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "D3DDevice_SetRenderTarget",
+          "source": "src/hle/hle_d3d8.c",
+          "line": 4237,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "D3DDevice_GetBackBuffer2",
+          "source": "src/hle/hle_d3d8.c",
+          "line": 4266,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "D3DDevice_CopyRects",
+          "source": "src/hle/hle_d3d8.c",
+          "line": 4301,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "D3DDevice_DrawVerticesUP",
+          "source": "src/hle/hle_d3d8.c",
+          "line": 4726,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "D3DDevice_DrawIndexedVerticesUP",
+          "source": "src/hle/hle_d3d8.c",
+          "line": 4748,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "D3DDevice_GetVisibilityTestResult",
+          "source": "src/hle/hle_d3d8.c",
+          "line": 4799,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "D3DDevice_SetRenderState_Simple",
+          "source": "src/hle/hle_d3d8_state.c",
+          "line": 1007,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "D3DDevice_SetTexture",
+          "source": "src/hle/hle_d3d8_texture.c",
+          "line": 1438,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "D3DDevice_SwitchTexture",
+          "source": "src/hle/hle_d3d8_texture.c",
+          "line": 1488,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "D3DDevice_SetPalette",
+          "source": "src/hle/hle_d3d8_texture.c",
+          "line": 1665,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "D3DDevice_SetStreamSource",
+          "source": "src/hle/hle_d3d8_vertex.c",
+          "line": 514,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "CDevice_SetStateVB",
+          "source": "src/hle/hle_d3d8_vertex.c",
+          "line": 541,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "D3DDevice_DrawVertices",
+          "source": "src/hle/hle_d3d8_vertex.c",
+          "line": 558,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "D3DDevice_DrawIndexedVertices",
+          "source": "src/hle/hle_d3d8_vertex.c",
+          "line": 596,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "D3DDevice_SetVertexShaderConstant1",
+          "source": "src/hle/hle_d3d8_vertex.c",
+          "line": 676,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "D3DDevice_SetVertexShaderConstant1Fast",
+          "source": "src/hle/hle_d3d8_vertex.c",
+          "line": 703,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "D3DDevice_SetVertexShaderConstant4",
+          "source": "src/hle/hle_d3d8_vertex.c",
+          "line": 723,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "D3DDevice_SetVertexShaderConstantNotInline",
+          "source": "src/hle/hle_d3d8_vertex.c",
+          "line": 748,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "D3DDevice_SetVertexShaderConstantNotInlineFast",
+          "source": "src/hle/hle_d3d8_vertex.c",
+          "line": 771,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "D3DDevice_SetVertexShaderConstant",
+          "source": "src/hle/hle_d3d8_vertex.c",
+          "line": 816,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "IDirectSoundBuffer_Play",
+          "source": "src/hle/hle_dsound.c",
+          "line": 435,
+          "original_body_declared_in_file": false,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "IDirectSoundBuffer_Stop",
+          "source": "src/hle/hle_dsound.c",
+          "line": 531,
+          "original_body_declared_in_file": false,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "IDirectSoundBuffer_StopEx",
+          "source": "src/hle/hle_dsound.c",
+          "line": 541,
+          "original_body_declared_in_file": false,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "IDirectSoundBuffer_Pause",
+          "source": "src/hle/hle_dsound.c",
+          "line": 594,
+          "original_body_declared_in_file": false,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "IDirectSoundBuffer_PauseEx",
+          "source": "src/hle/hle_dsound.c",
+          "line": 602,
+          "original_body_declared_in_file": false,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "IDirectSoundBuffer_GetStatus",
+          "source": "src/hle/hle_dsound.c",
+          "line": 610,
+          "original_body_declared_in_file": false,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "IDirectSoundBuffer_GetCurrentPosition",
+          "source": "src/hle/hle_dsound.c",
+          "line": 635,
+          "original_body_declared_in_file": false,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "IDirectSoundBuffer_SetCurrentPosition",
+          "source": "src/hle/hle_dsound.c",
+          "line": 662,
+          "original_body_declared_in_file": false,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "IDirectSoundBuffer_SetFrequency",
+          "source": "src/hle/hle_dsound.c",
+          "line": 691,
+          "original_body_declared_in_file": false,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "IDirectSoundBuffer_SetFormat",
+          "source": "src/hle/hle_dsound.c",
+          "line": 766,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "IDirectSoundBuffer_SetBufferData",
+          "source": "src/hle/hle_dsound.c",
+          "line": 819,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "DirectSoundDoWork",
+          "source": "src/hle/hle_dsound.c",
+          "line": 856,
+          "original_body_declared_in_file": false,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "CMcpxVoiceClient_SetVolume",
+          "source": "src/hle/hle_dsound.c",
+          "line": 924,
+          "original_body_declared_in_file": false,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "CMcpxVoiceClient_SetMixBins",
+          "source": "src/hle/hle_dsound.c",
+          "line": 925,
+          "original_body_declared_in_file": false,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "CMcpxVoiceClient_SetPitch",
+          "source": "src/hle/hle_dsound.c",
+          "line": 926,
+          "original_body_declared_in_file": false,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "DirectSoundCreateStream",
+          "source": "src/hle/hle_dsound_stream.c",
+          "line": 558,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "CDirectSound_CreateSoundStream",
+          "source": "src/hle/hle_dsound_stream.c",
+          "line": 574,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "CDirectSoundStream_Process",
+          "source": "src/hle/hle_dsound_stream.c",
+          "line": 592,
+          "original_body_declared_in_file": false,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "CDirectSoundStream_Flush",
+          "source": "src/hle/hle_dsound_stream.c",
+          "line": 670,
+          "original_body_declared_in_file": false,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "CDirectSoundStream_FlushEx",
+          "source": "src/hle/hle_dsound_stream.c",
+          "line": 692,
+          "original_body_declared_in_file": false,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "CDirectSoundStream_Discontinuity",
+          "source": "src/hle/hle_dsound_stream.c",
+          "line": 708,
+          "original_body_declared_in_file": false,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "CDirectSoundStream_Pause",
+          "source": "src/hle/hle_dsound_stream.c",
+          "line": 714,
+          "original_body_declared_in_file": false,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "CDirectSoundStream_GetStatus__r2",
+          "source": "src/hle/hle_dsound_stream.c",
+          "line": 769,
+          "original_body_declared_in_file": false,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "CDirectSoundStream_SetVolume",
+          "source": "src/hle/hle_dsound_stream.c",
+          "line": 802,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "XGetDevices",
+          "source": "src/hle/hle_input.c",
+          "line": 155,
+          "original_body_declared_in_file": false,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "XGetDeviceChanges",
+          "source": "src/hle/hle_input.c",
+          "line": 169,
+          "original_body_declared_in_file": false,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "XInputOpen",
+          "source": "src/hle/hle_input.c",
+          "line": 187,
+          "original_body_declared_in_file": false,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "XInputClose",
+          "source": "src/hle/hle_input.c",
+          "line": 206,
+          "original_body_declared_in_file": false,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "XInputGetCapabilities",
+          "source": "src/hle/hle_input.c",
+          "line": 215,
+          "original_body_declared_in_file": false,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "XInputGetState",
+          "source": "src/hle/hle_input.c",
+          "line": 257,
+          "original_body_declared_in_file": false,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "XInputSetState",
+          "source": "src/hle/hle_input.c",
+          "line": 324,
+          "original_body_declared_in_file": false,
+          "blinx_exact_name_found": true
+        },
+        {
+          "name": "XMVPlaybackCreate",
+          "source": "src/hle/hle_xmv.c",
+          "line": 198,
+          "original_body_declared_in_file": false,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "XMVPlaybackStart",
+          "source": "src/hle/hle_xmv.c",
+          "line": 250,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "XMVPlaybackGetStreamInfo",
+          "source": "src/hle/hle_xmv.c",
+          "line": 270,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "XMVPlaybackCreateAudioStream",
+          "source": "src/hle/hle_xmv.c",
+          "line": 303,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "XMVPlaybackGetAudioStreamInfo",
+          "source": "src/hle/hle_xmv.c",
+          "line": 327,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "XMVPlaybackGetCurrentTime",
+          "source": "src/hle/hle_xmv.c",
+          "line": 350,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "XMVPlaybackUpdate",
+          "source": "src/hle/hle_xmv.c",
+          "line": 373,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "XMVPlaybackGetAudioStream",
+          "source": "src/hle/hle_xmv.c",
+          "line": 442,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "XMVPlaybackStopAudioStreams",
+          "source": "src/hle/hle_xmv.c",
+          "line": 460,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "XMVPlaybackReleaseAudioStream",
+          "source": "src/hle/hle_xmv.c",
+          "line": 466,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": false
+        },
+        {
+          "name": "XMVPlaybackDestroy",
+          "source": "src/hle/hle_xmv.c",
+          "line": 473,
+          "original_body_declared_in_file": true,
+          "blinx_exact_name_found": false
+        }
+      ]
+    },
+    {
+      "name": "sp00nznet",
+      "commit": "b3700e1d60bcd9c3dfaad734f45149b6f0bc5cb4",
+      "tree": "74428965668790d4911b627fc8f51c13e4f8acbc",
+      "families": {
+        "renderer_backend": {
+          "source_files": 14,
+          "source_bytes": 447351
+        },
+        "graphics_adapter": {
+          "source_files": 0,
+          "source_bytes": 0
+        },
+        "audio_adapter": {
+          "source_files": 0,
+          "source_bytes": 0
+        },
+        "audio_transport": {
+          "source_files": 0,
+          "source_bytes": 0
+        },
+        "legacy_audio": {
+          "source_files": 4,
+          "source_bytes": 28994
+        },
+        "movies": {
+          "source_files": 4,
+          "source_bytes": 47302
+        },
+        "movie_adapter": {
+          "source_files": 0,
+          "source_bytes": 0
+        },
+        "input": {
+          "source_files": 2,
+          "source_bytes": 18603
+        },
+        "input_adapter": {
+          "source_files": 0,
+          "source_bytes": 0
+        },
+        "kernel": {
+          "source_files": 28,
+          "source_bytes": 1077667
+        },
+        "apu": {
+          "source_files": 12,
+          "source_bytes": 172359
+        },
+        "nv2a": {
+          "source_files": 20,
+          "source_bytes": 214019
+        },
+        "binding_and_cpu": {
+          "source_files": 80,
+          "source_bytes": 775397
+        }
+      },
+      "hle_markers": 0,
+      "blinx_exact_name_matches": 0,
+      "entries": []
+    },
+    {
+      "name": "NoRain211",
+      "commit": "74649ef5b0f023e7b878043bc6de2534c55e717e",
+      "tree": "c9611121af4429661663f3ad6f2204de39e82835",
+      "families": {
+        "renderer_backend": {
+          "source_files": 14,
+          "source_bytes": 447351
+        },
+        "graphics_adapter": {
+          "source_files": 0,
+          "source_bytes": 0
+        },
+        "audio_adapter": {
+          "source_files": 0,
+          "source_bytes": 0
+        },
+        "audio_transport": {
+          "source_files": 0,
+          "source_bytes": 0
+        },
+        "legacy_audio": {
+          "source_files": 4,
+          "source_bytes": 28994
+        },
+        "movies": {
+          "source_files": 4,
+          "source_bytes": 47302
+        },
+        "movie_adapter": {
+          "source_files": 0,
+          "source_bytes": 0
+        },
+        "input": {
+          "source_files": 2,
+          "source_bytes": 18603
+        },
+        "input_adapter": {
+          "source_files": 0,
+          "source_bytes": 0
+        },
+        "kernel": {
+          "source_files": 28,
+          "source_bytes": 1077667
+        },
+        "apu": {
+          "source_files": 12,
+          "source_bytes": 172359
+        },
+        "nv2a": {
+          "source_files": 20,
+          "source_bytes": 214019
+        },
+        "binding_and_cpu": {
+          "source_files": 83,
+          "source_bytes": 843328
+        }
+      },
+      "hle_markers": 0,
+      "blinx_exact_name_matches": 0,
+      "entries": []
+    }
+  ]
+}

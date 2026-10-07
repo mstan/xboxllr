@@ -1,5 +1,26 @@
 # STATUS
 
+## 2026-10-07 - Whole-service donor adoption pass
+
+Owner direction now prioritizes a combined renderer/audio adoption batch over
+qualifying one graphics entry at a time. All three requested donor repositories
+were refreshed. Phobos's latest `bcccf8c` has the same source tree as our previous
+pin; sp00nznet v0.13 adds VM/CPU work. The [service adoption map](docs/DONOR-SERVICE-ADOPTION-2026-10-07.md)
+covers graphics, buffer/stream audio, movies, input, files/media, VM/sections,
+threading and CPU bindings, with concrete reuse boundaries and excluded shortcuts.
+
+Separate real-donor renderer/audio probes both build. XAudio2 consumes 57,600
+PCM bytes across three voice lifetimes with no drops. The renderer creates a
+native D3D11 device, but its readback exposes RGBA bytes as X8R8G8B8; that failing
+probe is retained for adaptation, not marked successful. No title runtime was
+changed. Last validated Blinx progress remains the first loading image/Swap
+request below; the separate uncommitted presentation experiment stops on a
+Windows thread-naming diagnostic. No new menu, audio, attract or FPS result.
+
+Retain current console services, build-select whole native graphics/audio,
+and initially keep Blinx's original compiled Sofdec decoder. The LLE floor
+does not require pixel-perfect native rendering or duplicate production work.
+
 ## 2026-10-07 - Blinx reaches its first Swap after native font drawing
 
 Fresh/repeated NTSC launches now pass `SetVertexShader(0x144)`, submit the font

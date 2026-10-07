@@ -1,5 +1,12 @@
 # Blinx: serial attract-sequence bring-up
 
+**Current adoption priority:** the owner requested a broad donor pass rather
+than another single-service refinement loop. The [2026-10-07 adoption map](DONOR-SERVICE-ADOPTION-2026-10-07.md)
+recommends a combined whole-renderer/native-audio batch, current console
+services and original Sofdec decoding. Independent donor probes establish real
+audio consumption and a concrete renderer readback mismatch; they do not move
+the title checkpoint. Presentation work remains an uncommitted experiment.
+
 **Current, 2026-10-07 (`beads-xbox.1.62`):** complete original NTSC Blinx's
 attract sequence before resuming JSRF. Dashboard speed and full AOT remain
 continuing goals. The native pilot executes actual title startup with the
