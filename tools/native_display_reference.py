@@ -14,7 +14,7 @@ from pathlib import Path
 
 from aot_inventory import parse_xbe
 from unicorn import Uc, UC_ARCH_X86, UC_MODE_32
-from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_EIP, UC_X86_REG_ESP
+from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_ECX, UC_X86_REG_EIP, UC_X86_REG_ESP
 
 XBE_SHA = 'e6b7cd8a5527dd001e05bb3e881d9b24ffc58824ff67def394215ddbc8009249'
 KERNEL_SHA = '827c39fd9dea2e831c7ef9091a2a4a4b13ac6ae9f69a2075c4b12e1b9ae97b3c'
@@ -79,7 +79,51 @@ def run(xbe_path, kernel_path):
         observed = [read(pte(base + i * 4096)) for i in range(4)]
         assert observed == [value | (flag << 10) for value, flag in zip(initial, flags)]
         persistence.append(dict(arguments=args, ptes=observed))
-    return dict(xbe_sha256=XBE_SHA, kernel_sha256=KERNEL_SHA, layouts=rows, persistence=persistence)
+    # Reset's original presentation-buffer helper, exercising its supplied-
+    # surface branch. No allocation/kernel calls are intercepted. This proves
+    # parameter publication, embedded header ownership and the setup packet;
+    # full mode setting/scanout remains outside this bounded x86 fixture.
+    device, ring, parameters = 0x30001000, 0x30004000, 0x30007000
+    write(0x141b78, device)
+    resets = []
+    # Normal allocation initializes the same embedded header in place, even
+    # when its previous Common contains external references. Reset supersedes
+    # those old presentation references; they are not a precondition failure.
+    header = 0x30006000
+    write(header, 0x010d0007)
+    call(0x134b90, [header, 0x11229, 639 | (479 << 12) | (39 << 24), 0x80500000])
+    assert list(struct.unpack('<6I', u.mem_read(header, 24))) == [
+        0x01050001, 0x00500000, 0, 0x11229, 639 | (479 << 12) | (39 << 24), 0]
+    for interval in (1, 0x80000000, 1):
+        u.mem_write(device, bytes(0x3000))
+        write(device, ring); write(device + 4, ring + 0x100)
+        write(device + 0x100, 0x12345678)  # Unrelated device state retained.
+        headers = [0x30006000, 0x30006040, 0x30006080]
+        for i, header in enumerate(headers):
+            fmt = 0x2e if i == 2 else 0x12
+            words = [0x010d0000, 0x00400000 + i * 0x140000, 0,
+                     0x10021 | (fmt << 8), 639 | (479 << 12) | (39 << 24), 0]
+            u.mem_write(header, struct.pack('<6I', *words))
+        p = [640, 480, 6, 1, 0x11, 1, 0, 0, 1, 0x2a, 0, 0, interval,
+             headers[0], headers[1], 0, headers[2]]
+        u.mem_write(parameters, struct.pack('<17I', *p))
+        u.reg_write(UC_X86_REG_ECX, device)
+        assert call(0x139830, [parameters]) == 0
+        assert read(0x141f84) == interval
+        assert read(device + 0x100) == 0x12345678
+        assert read(device + 0x21bc) == 2
+        assert read(device + 0x211c) == 0x11
+        assert read(device + 0x528) == read(device + 0x52c) == 0x3f800000
+        for offset, source in zip((0x21c0, 0x21c4, 0x21cc), headers):
+            target = read(device + offset)
+            assert device <= target < device + 0x3000
+            assert read(target) == read(source) + 1
+            assert u.mem_read(target + 4, 20) == u.mem_read(source + 4, 20)
+        packet = list(struct.unpack('<4I', u.mem_read(ring, 16)))
+        assert packet == [0xc0120, 0, 1, 2] and read(device) == ring + 16
+        resets.append(dict(interval=interval, packet=packet, retained_marker=read(device + 0x100)))
+    return dict(xbe_sha256=XBE_SHA, kernel_sha256=KERNEL_SHA, layouts=rows, persistence=persistence,
+                reset_buffer_setup=resets, reset_reinitializes_embedded_header=True)
 
 
 if __name__ == '__main__':
@@ -89,4 +133,4 @@ if __name__ == '__main__':
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     args.output.write_text(json.dumps(run(args.xbe, args.kernel), indent=2) + '\n')
-    print('PASS: original surface layouts, AV saved pointer, page persistence ranges and return ABI')
+    print('PASS: original surface layouts, AV saved pointer, page persistence, reset buffer setup and return ABI')

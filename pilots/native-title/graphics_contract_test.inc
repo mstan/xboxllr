@@ -22,6 +22,7 @@ static uint32_t call_graphics(unsigned entry,const uint32_t *args)
 #include "graphics_visibility_contract_test.inc"
 #include "graphics_gpu_callback_contract_test.inc"
 #include "graphics_alias_contract_test.inc"
+#include "graphics_reset_contract_test.inc"
 static void test_graphics(void)
 {
     vm_ensure();
@@ -132,6 +133,7 @@ static void test_graphics(void)
         test_graphics_aliases();
         test_graphics_gpu_callbacks();
         CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&back)==0);
+        if(pass==1)test_graphics_reset();
         uint32_t final_gpu_callback[]={0,0x12360,71};
         call_graphics(PILOT_D3D_D3DDevice_InsertCallback,final_gpu_callback);
         CHECK(call_graphics(PILOT_D3D_D3DDevice_Release,NULL)==0);

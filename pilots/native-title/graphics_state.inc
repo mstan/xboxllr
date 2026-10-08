@@ -76,6 +76,9 @@ static void graphics_sync_deferred(void)
     }
     for(unsigned state=92;state<136;++state) {
         uint32_t value=MEM32(PILOT_D3D_RENDER_STATES+4*state);
+        if(PILOT_D3D_RENDER_STATES+4*state==PILOT_D3D_PRESENT_INTERVAL) {
+            graphics_present_interval(value);continue; /* Applied by the actual presentation queue. */
+        }
         if(!pilot_gfx_xbox_render_state(state,value) && value!=graphics_state_baseline[state])
             stop("changed unqualified deferred render state",state);
     }

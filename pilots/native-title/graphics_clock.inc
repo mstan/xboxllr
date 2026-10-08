@@ -7,6 +7,7 @@ static uint32_t graphics_callback;
 static int graphics_clock_closing,graphics_clock_presented;
 static struct GraphicsPresent {uint64_t serial,target;uint32_t swap;} graphics_presents[2];
 static unsigned graphics_present_count;
+static unsigned graphics_present_retired;
 static uint32_t graphics_swap_submitted,graphics_swap_completed;
 static uint64_t graphics_swap_deadline;
 static CONDITION_VARIABLE graphics_present_changed=CONDITION_VARIABLE_INIT;
@@ -17,6 +18,37 @@ static uint64_t graphics_frame_at(uint64_t now)
 }
 static uint32_t graphics_swap_flags(unsigned retired,int missed)
 {return retired?1u:missed?2u:0u;}
+static void graphics_present_interval(uint32_t value)
+{
+    if(value!=1 && value!=0x80000000u)stop("unqualified presentation interval",value);
+    if(graphics_parameters[12]!=value)graphics_swap_deadline=0;
+    graphics_parameters[12]=value;
+}
+/* target==0 is an immediate swap. Its real GPU event, rather than the display
+ * epoch, permits retirement. Paced swaps are retired only by the vblank path. */
+static unsigned graphics_present_retire(uint64_t frame)
+{
+    unsigned retired=0;
+    while(graphics_present_count && graphics_presents[0].target<=frame) {
+        struct GraphicsPresent *present=&graphics_presents[0];
+        if(pilot_gfx_checkpoint_busy(present->serial))break;
+        graphics_swap_completed=present->swap;++retired;
+        memmove(graphics_presents,graphics_presents+1,--graphics_present_count*sizeof(*graphics_presents));
+    }
+    if(retired)WakeAllConditionVariable(&graphics_present_changed);
+    return retired;
+}
+static void graphics_present_drain(void)
+{
+    ++graphics_clock_waiters;
+    for(;;) {
+        graphics_present_retired+=graphics_present_retire(0);
+        if(!graphics_present_count)break;
+        if(!SleepConditionVariableSRW(&graphics_present_changed,&graphics_lock,1,0) && GetLastError()!=ERROR_TIMEOUT)
+            stop("presentation drain wait failed",GetLastError());
+    }
+    --graphics_clock_waiters;
+}
 static void graphics_vblank_deliver(uint64_t frame)
 {
     AcquireSRWLockExclusive(&graphics_lock);
@@ -24,14 +56,11 @@ static void graphics_vblank_deliver(uint64_t frame)
     /* Late DPC delivery must not assign newly observed GPU completion to an
      * already elapsed historical vblank while the worker catches up. */
     uint64_t observed_frame=graphics_frame_at(dispatch_monotonic());
-    while(graphics_present_count && graphics_presents[0].target<=frame && frame>=observed_frame) {
-        struct GraphicsPresent *present=&graphics_presents[0];
-        if(pilot_gfx_checkpoint_busy(present->serial))break;
-        graphics_swap_completed=present->swap;++retired;
-        memmove(graphics_presents,graphics_presents+1,--graphics_present_count*sizeof(*graphics_presents));
+    if(frame>=observed_frame) {
+        retired=graphics_present_retired+graphics_present_retire(frame);
+        graphics_present_retired=0;
     }
-    uint32_t flags=graphics_swap_flags(retired,graphics_present_count && graphics_presents[0].target<=frame);
-    if(retired)WakeAllConditionVariable(&graphics_present_changed);
+    uint32_t flags=graphics_swap_flags(retired,graphics_present_count && graphics_presents[0].target && graphics_presents[0].target<=frame);
     uint32_t callback=graphics_callback;
     uint32_t data=graphics_headers+96;
     if(callback) {
@@ -122,33 +151,35 @@ static void graphics_capture_present(void)
     next=dispatch_monotonic()+10000000;
     fprintf(stderr,"[PRESENT CAPTURE] sequence=%u time=%llu file=%s\n",sequence,(unsigned long long)now,path);
 }
-/* One native presentation per virtual display interval; at most two actual
- * GPU checkpoints may remain outstanding. Waiting releases the graphics lock,
+/* Interval-one swaps follow the display clock; immediate swaps bypass it.
+ * At most two actual GPU checkpoints may remain outstanding. Waiting releases the graphics lock,
  * allowing the display/DPC worker to report real progress independently. */
 static uint32_t graphics_present(void)
 {
     if(graphics_clock_closing || dispatch_in_dpc)stop("swap in closing device or DPC",0);
+    graphics_present_interval(MEM32(PILOT_D3D_PRESENT_INTERVAL));
     ++graphics_clock_waiters;
     for(;;) {
+        graphics_present_retired+=graphics_present_retire(0);
         if(graphics_present_count==2) {
-            if(!SleepConditionVariableSRW(&graphics_present_changed,&graphics_lock,INFINITE,0))
+            if(!SleepConditionVariableSRW(&graphics_present_changed,&graphics_lock,1,0) && GetLastError()!=ERROR_TIMEOUT)
                 stop("presentation queue wait failed",GetLastError());
             continue;
         }
-        if(dispatch_monotonic()>=graphics_swap_deadline)break;
+        if(graphics_parameters[12]==0x80000000u || dispatch_monotonic()>=graphics_swap_deadline)break;
         uint64_t deadline=graphics_swap_deadline;
         ReleaseSRWLockExclusive(&graphics_lock);graphics_wait_until(deadline);AcquireSRWLockExclusive(&graphics_lock);
     }
     --graphics_clock_waiters;
     graphics_capture_present();
-    uint64_t submitted=dispatch_monotonic(),target=graphics_frame_at(submitted)+1;
+    uint64_t submitted=dispatch_monotonic(),target=graphics_parameters[12]==0x80000000u?0:graphics_frame_at(submitted)+1;
     int32_t hr=pilot_gfx_present();
     if(hr!=0)stop("native presentation was not accepted",(uint32_t)hr);
     uint64_t serial=pilot_gfx_checkpoint();
     uint32_t swap=++graphics_swap_submitted;
     graphics_presents[graphics_present_count++]=(struct GraphicsPresent){serial,target,swap};
     MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SWAP_COUNTER)=swap;
-    graphics_swap_deadline=graphics_next_vblank(graphics_clock_origin,submitted,graphics_clock_hz);
+    graphics_swap_deadline=target?graphics_next_vblank(graphics_clock_origin,submitted,graphics_clock_hz):0;
     if(!graphics_clock_presented) {
         graphics_clock_presented=1;
         if(!graphics_callback)dispatch_pulse_set(graphics_clock_origin,graphics_clock_hz,graphics_vblank_deliver);

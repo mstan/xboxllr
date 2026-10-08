@@ -6,7 +6,40 @@ It is outside the normal xboxlle build. **The generated executable is a private
 GPL-dependent reference artifact, not the intended non-GPL shipping product.**
 See [license scope](../../LICENSE-SCOPE.md). There is no install/package target.
 
-## Current checkpoint - actual input and title audio (2026-10-07)
+## Presentation reset: retained resources and immediate presentation
+
+`beads-xbox.1.76`: original NTSC Reset replaces presentation buffers, restores
+default targets/full viewport and clears depth/stencil while retaining the
+device and other resources. The native adapter reuses Phobos's real RHI target
+creation; its stub Reset is still guarded. The actual Blinx request keeps
+640x480 ARGB8/D24S8 without MSAA and changes interval-one to immediate.
+Immediate swaps retain real GPU completion/backpressure without a vblank wait;
+the independent 60 Hz callback clock continues. No duplicate execution occurs.
+
+`tools/native_display_reference.py` executes the original supplied-surface
+setup helper without hooks, checking interval publication, header ownership,
+pixel scale and its setup packet. A separate original initializer check proves
+that Reset overwrites prior embedded-surface reference counts. The adapter
+retires these superseded native presentation references; independently owned
+textures/vertices and state blocks survive. The common header addresses stay
+stable. This is not a full unhooked Reset or complete hardware mode-set test;
+the existing NV2A RAM-to-scanout fixture supplies the bounded display floor.
+
+Native integration exercises four resets/resizes, held back-buffer references,
+retained texture/vertex bytes and bindings, state-block ownership, changed
+presentation interval, real front-buffer pixels and stable guest allocations.
+MSAA, alternate swap modes and caller-supplied presentation surfaces remain
+explicitly unsupported in this native path. Original mode-setting remains in
+the separate reference build. Title validation results are recorded below as
+they are reached; fixture success alone is not attract completion.
+
+Actual `build/blinx/run-reset-attract-v2.log` passes Reset with a held back-buffer
+reference, loads further scene textures and sound banks (505 textures reached),
+and stops at `KeQuerySystemTime` during loading. The 122.05-second captured run
+is not a speed measurement. Final native tests pass 31/31 in 13.90 s; existing
+NV2A tests pass in 0.17 s. No complete attract/gameplay or menu-return result yet.
+
+## Earlier checkpoint - actual input and title audio (2026-10-07)
 
 `beads-xbox.1.73`: two real NTSC runs deliver Start through the host controller
 boundary at 15 seconds. Original title logic interrupts startup, enters the

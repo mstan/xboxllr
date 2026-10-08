@@ -15,6 +15,22 @@ notices. Preparation/build steps must report missing required notices.
 
 ## Private native-title reference pilot
 
+### Presentation reset - 2026-10-07
+
+The independent reset adapter reuses the already prepared Phobos
+`src/d3d/d3d8_device.c` real `create_render_targets` and RHI/surface ownership
+helpers at `bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0`. Its success-only
+`dev_Reset` remains guarded. The added adapter is recorded in the prepared
+`MODIFICATIONS.md` and source/prepared hashes. This remains the private
+GPL-dependent reference renderer; no shipping license scope changed.
+
+Original owner-provided NTSC routines establish buffer replacement, embedded
+surface-header reinitialization and retained device state. Cxbx-Reloaded
+`src/core/hle/D3D8/Direct3D9/Direct3D9.cpp` at
+`585c49a50af1255ab155099e06f24505f9c5a800` corroborates that Xbox reset
+retains the device and reuses its surface-header addresses. It was consulted
+as a behavioral reference only; its implementation was not copied.
+
 ### Input replay and persistent display references - 2026-10-07
 
 The independently authored timed host-controller source follows the approach

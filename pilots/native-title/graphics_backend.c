@@ -124,15 +124,21 @@ void pilot_gfx_close(void)
     }
     MSG message; while (PeekMessageW(&message,NULL,WM_QUIT,WM_QUIT,PM_REMOVE)) {}
 }
-int32_t pilot_gfx_create(const uint32_t p[17])
+int32_t pilot_gfx_parameters(const uint32_t p[17])
 {
-    if (pilot_device || !p || !p[0] || !p[1] || p[0]>4096 || p[1]>4096) return E_INVALIDARG;
+    if (!p || !p[0] || !p[1] || p[0]>4096 || p[1]>4096) return E_INVALIDARG;
     /* The native output is windowed, with an RGBA8 enhanced render target.
      * MSAA/preallocated surfaces need their actual resource contract first. */
     if ((p[2]!=0x06 && p[2]!=0x07 && p[2]!=0x12 && p[2]!=0x1e) ||
         p[3]!=1 || p[4]!=0x11 || p[5]!=1 || p[6] || p[7] || p[8]!=1 ||
-        (p[9]!=0x2a && p[9]!=0x2e) || p[10] || (p[11] && p[11]!=60) || p[12]!=1 ||
+        (p[9]!=0x2a && p[9]!=0x2e) || p[10] || (p[11] && p[11]!=60) || (p[12]!=1 && p[12]!=0x80000000u) ||
         p[13] || p[14] || p[15] || p[16]) return E_NOTIMPL;
+    return S_OK;
+}
+int32_t pilot_gfx_create(const uint32_t p[17])
+{
+    if(pilot_device)return E_INVALIDARG;
+    int32_t validation=pilot_gfx_parameters(p);if(validation<0)return validation;
     WNDCLASSW window_class={0}; window_class.lpfnWndProc=pilot_window_proc;
     window_class.hInstance=GetModuleHandleW(NULL); window_class.lpszClassName=L"xlle-native-reference";
     if (!RegisterClassW(&window_class) && GetLastError()!=ERROR_CLASS_ALREADY_EXISTS) return HRESULT_FROM_WIN32(GetLastError());
@@ -178,6 +184,48 @@ int32_t pilot_gfx_create(const uint32_t p[17])
     if (FAILED(result)) pilot_gfx_close();
     else {free(pilot_saved_display);pilot_saved_display=NULL;}
     return result;
+}
+int32_t pilot_gfx_reset(const uint32_t p[17])
+{
+#ifdef PILOT_D3D_PHOBOS
+    if(!pilot_device)return E_FAIL;
+    HRESULT result=pilot_gfx_parameters(p);if(FAILED(result))return result;
+    /* The original initializer overwrites the embedded presentation headers,
+     * including their old reference counts. Superseded presentation references
+     * are retired here; independent texture aliases keep their own storage. */
+    ID3D11DeviceContext *ctx=d3d8_GetD3D11Context();
+    ID3D11RenderTargetView *old_color=NULL;ID3D11DepthStencilView *old_depth=NULL;
+    ID3D11DeviceContext_OMGetRenderTargets(ctx,1,&old_color,&old_depth);
+    extern HRESULT pilot_donor_reset_display(UINT width,UINT height,DWORD format);
+    result=pilot_donor_reset_display(p[0],p[1],p[2]);
+    if(FAILED(result))ID3D11DeviceContext_OMSetRenderTargets(ctx,1,&old_color,old_depth);
+    if(old_color)ID3D11RenderTargetView_Release(old_color);
+    if(old_depth)ID3D11DepthStencilView_Release(old_depth);
+    if(FAILED(result))return result;
+    for(unsigned i=0;i<3;++i){
+        while(pilot_surface_refs[i]){ID3D11Texture2D_Release(pilot_surfaces[i]);--pilot_surface_refs[i];}
+        ID3D11Texture2D_Release(pilot_surfaces[i]);pilot_surfaces[i]=NULL;pilot_surface_use[i]=0;
+    }
+    ID3D11DepthStencilView_Release(pilot_default_depth);pilot_default_depth=NULL;
+    ID3D11DeviceContext_OMGetRenderTargets(ctx,0,NULL,&pilot_default_depth);
+    if(!pilot_default_depth)pilot_d3d_backend_stop("reset did not allocate depth storage");
+    ID3D11Resource *depth=NULL;ID3D11DepthStencilView_GetResource(pilot_default_depth,&depth);
+    pilot_d3d_require(ID3D11Resource_QueryInterface(depth,&IID_ID3D11Texture2D,(void**)&pilot_surfaces[2]),__FILE__,__LINE__);
+    ID3D11Resource_Release(depth);
+    ID3D11Resource *scene=(ID3D11Resource*)rhi_d3d11_native_image(d3d8_GetSceneImage());
+    pilot_d3d_require(ID3D11Resource_QueryInterface(scene,&IID_ID3D11Texture2D,(void**)&pilot_surfaces[0]),__FILE__,__LINE__);
+    D3D11_TEXTURE2D_DESC desc;ID3D11Texture2D_GetDesc(pilot_surfaces[0],&desc);
+    desc.BindFlags=D3D11_BIND_SHADER_RESOURCE;desc.MiscFlags=0;
+    pilot_d3d_require(ID3D11Device_CreateTexture2D(d3d8_GetD3D11Device(),&desc,NULL,&pilot_surfaces[1]),__FILE__,__LINE__);
+    pilot_color_target=0;pilot_depth_target=UINT32_MAX;
+    RECT client={0,0,(LONG)p[0],(LONG)p[1]};AdjustWindowRect(&client,WS_OVERLAPPEDWINDOW,FALSE);
+    if(!SetWindowPos(pilot_window,NULL,0,0,client.right-client.left,client.bottom-client.top,
+        SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE))pilot_d3d_backend_stop("reset window resize failed");
+    free(pilot_saved_display);pilot_saved_display=NULL;
+    return S_OK;
+#else
+    (void)p;return E_NOTIMPL;
+#endif
 }
 int32_t pilot_gfx_clear(uint32_t flags,uint32_t color,float depth,uint32_t stencil)
 {

@@ -117,6 +117,7 @@ static void graphics_set_targets(uint32_t color,uint32_t depth)
     graphics_transform_viewport(viewport);
 }
 
+#include "graphics_reset.inc"
 void pilot_d3d_dispatch(unsigned entry)
 {
     if (entry>=PILOT_D3D_COUNT) stop("invalid graphics entry",entry);
@@ -200,10 +201,11 @@ void pilot_d3d_dispatch(unsigned entry)
         if (!(g_eax&0x80000000u)) {
             graphics_persistence_clear();
             graphics_active=1; memcpy(graphics_parameters,staged,sizeof(staged));
+            MEM32(PILOT_D3D_PRESENT_INTERVAL)=staged[12];
             graphics_clock_origin=dispatch_monotonic();
             graphics_clock_hz=staged[11]?staged[11]:60;
             graphics_clock_closing=graphics_clock_presented=0;
-            graphics_present_count=0;graphics_swap_submitted=graphics_swap_completed=0;graphics_swap_deadline=0;
+            graphics_present_count=graphics_present_retired=0;graphics_swap_submitted=graphics_swap_completed=0;graphics_swap_deadline=0;
             MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SWAP_COUNTER)=0;
             graphics_state_init();
             graphics_surfaces_create();
@@ -330,6 +332,7 @@ void pilot_d3d_dispatch(unsigned entry)
         g_eax=(uint32_t)pilot_gfx_viewport(viewport);
         if(!(g_eax&0x80000000u))graphics_transform_viewport(viewport);break;
     }
+    case PILOT_D3D_D3DDevice_Reset:g_eax=graphics_reset(arguments[0]);break;
     case PILOT_D3D_D3DDevice_PersistDisplay:g_eax=graphics_persist_display();break;
     case PILOT_D3D_D3DDevice_Swap:
         if (arguments[0]) stop("unqualified graphics swap flags",arguments[0]);

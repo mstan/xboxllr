@@ -21,6 +21,8 @@ CAPS = "a2e598588a3b18aff4ac64b396716e58ca211384f86f5ef757c7ce3aec3caa22"
 VBLANK = "3671f3eb0feef60a9001693f28fbd102d209e1c072a2a486aa34f60429a7eaf0"
 STATEBLOCK = "9a3cc11b88c617614da8725cfb996ab8c30ad3ae9e5477b3ae9734753afc5a31"
 CREATE_STATEBLOCK = "63f71d88c14fae20c1ca8bcee60ab04a308b8bae93ae75d56527d44881cc2dce"
+RESET = "dc1d8ec53f1a120166e0643ecae39ec9f0fa8e3d6878cea98752df72d8377090"
+RESET_BUFFERS = "c996d86a23946bb611a75114b7e4322bfe059ab5b63d5b1da4fa03502bdea9bc"
 VISIBILITY = {
     "D3DDevice_BeginVisibilityTest": (0, "4f540a8de4fbb9fed9c35005ac859550010a3eec200068e70c6d695b86e4cc86"),
     "D3DDevice_EndVisibilityTest": (4, "f4fa023fa33a53bf63b4cdc5a5a53f849263bd0fca5d1ccfd7f5c96eece8b294"),
@@ -178,6 +180,17 @@ def bind(xbe: Path, output: Path, symbols: Path):
     if len(callback_code)!=4 or len(offsets)!=1 or callback_code[-1].mnemonic!='ret' or callback_code[-1].op_str!='4':
         raise ValueError('unreviewed vblank callback registration')
     state_defaults['vblank_callback_offset']=offsets[0]
+    reset=next(s for s in identified if s['name']=='D3DDevice_Reset')
+    if reset['stack_bytes']!=4 or context.digest(functions[reset['address']])!=RESET:
+        raise ValueError('unreviewed graphics reset boundary')
+    setup=[f for f in context.functions if f['size']==1376 and context.digest(f)==RESET_BUFFERS]
+    if len(setup)!=1: raise ValueError('missing reviewed reset buffer setup')
+    address=int(setup[0]['start'],16)
+    setup_code=list(Cs(CS_ARCH_X86,CS_MODE_32).disasm(data(address,1376),address))
+    intervals=[int(m[1],16) for i in setup_code if i.mnemonic=='mov' and
+        (m:=re.fullmatch(r'dword ptr \[(0x[0-9a-f]+)\], ecx',i.op_str))]
+    if len(intervals)!=1: raise ValueError('unreviewed reset interval publication')
+    state_defaults['reset_binding']=dict(sha256=RESET,buffers_sha256=RESET_BUFFERS,presentation_interval=intervals[0])
     # Get2DSurfaceDesc derives usage from its format-capability table even for
     # sampled texture surfaces. Keep the reviewed image's facts in the binding.
     desc=next(s for s in identified if s['name']=='Get2DSurfaceDesc')
@@ -235,6 +248,7 @@ def bind(xbe: Path, output: Path, symbols: Path):
     header += [f'#define PILOT_D3D_STREAMS 0x{block["streams"]:x}u']
     header += [f'#define PILOT_D3D_FVF_OBJECT 0x{binding["fvf_binding"]["object"]:x}u']
     header += [f'#define PILOT_D3D_SWAP_COUNTER 0x{binding["swap_binding"]["counter"]:x}u']
+    header += [f'#define PILOT_D3D_PRESENT_INTERVAL 0x{binding["reset_binding"]["presentation_interval"]:x}u']
     header += [f'#define PILOT_D3D_VERTEX_{name.upper()} {binding["vertex_binding"][name]}u'
                for name in ('program_cache','start','record_flags','record_disable')]
     header += [f'#define PILOT_D3D_RESOURCE_{name.upper()} {offset}u' for name,offset in binding['resource_binding'].items()]

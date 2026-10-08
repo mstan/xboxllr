@@ -13,11 +13,7 @@ static uint32_t graphics_persist_display(void)
 {
     graphics_persistence_clear();
     if(!graphics_clock_presented)stop("persistence before a qualified displayed frame",0);
-    ++graphics_clock_waiters;
-    while(graphics_present_count)
-        if(!SleepConditionVariableSRW(&graphics_present_changed,&graphics_lock,INFINITE,0))
-            stop("persistent display presentation wait failed",GetLastError());
-    --graphics_clock_waiters;
+    graphics_present_drain();
     uint32_t width=graphics_parameters[0],height=graphics_parameters[1],pitch=(width*4+63)&~63u;
     uint32_t bytes=pitch*height+64;
     uint32_t base=physical_allocate(bytes,0,0x07ffffff,64,PAGE_READWRITE|PAGE_WRITECOMBINE);

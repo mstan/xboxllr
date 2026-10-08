@@ -12,7 +12,9 @@ Press START screen. A 180-second guest-only one-core run continues at that
 screen; the earlier timing-sensitive thread-priority stall remains open.
 Two subsequent controller-replay runs interrupt startup, reach title music,
 idle into game-asset loading and reach PersistDisplay. Its native implementation
-now preserves the real frame and advances to D3DDevice_Reset. Captured real GP audio
+now preserves the real frame and passes D3DDevice_Reset. The subsequent actual
+run loads scene textures and sound banks, reaching 505 textures, then stops at
+the missing KeQuerySystemTime service during loading. Captured real GP audio
 matches original intro/title content at the checked sample progression.
 Full audio quality/sync and attract validation remain pending. Earlier fresh/repeat runs reached the callback boundary in 12.95/7.33 s
 with zero error-dialog entries or memory failures. The 64 MiB guest limit remains
@@ -33,7 +35,8 @@ enforced. No title error condition is bypassed.
 | Asynchronous movie IO | Real events, nonbuffered reads and completion ownership pass; Blinx executes 29 actual read completions |
 | Movie YUV state | Original enable/cache/packet oracle and bounded NV2A pixels pass; imported Phobos conversion reused |
 | Persistent display | Original layout/kernel execution, LLE retained-frame scanout and native pixels/lifetime pass; actual Blinx preserves its frame and reaches Reset (.75) |
-| Next integration work | D3DDevice_Reset and retained-resource/state contract (.76); Phobos's host Reset is a stub and cannot be adopted |
+| Display reset | Original buffer/header setup, LLE scanout and repeated native reset/resize/ownership/pixel tests pass; actual Blinx proceeds through reset into scene loading (.76) |
+| Next integration work | KeQuerySystemTime during scene loading; qualify original kernel snapshot/ABI and use the donor clock approach where compatible |
 | Input | Physical XInput, keyboard and timed host-controller replay; real startup interruption observed twice; gameplay interruption/menu return pending |
 | Attract startup/loading/render/audio/movies/gameplay | Partial startup/rendering only; no complete attract sequence yet |
 | Repeat loops, interruption/menu return, original cadence | Pending actual title integration measurements |

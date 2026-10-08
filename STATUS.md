@@ -1,5 +1,22 @@
 # STATUS
 
+## 2026-10-07 - Blinx passes display reset and loads the next scene
+
+The actual NTSC title now passes Reset with its held back-buffer reference,
+retains its native device/resources and loads additional scene textures and
+sound banks (505 textures reached). The next terminal boundary is the missing
+`KeQuerySystemTime` service during loading. This is not gameplay or completed
+attract evidence. Private run: `build/blinx/run-reset-attract-v2.log` (122.05 s,
+diagnostic captures enabled; no performance comparison).
+
+Reset reuses Phobos's real RHI allocation helpers, not its stub Reset. Original
+unhooked buffer setup/header initialization, existing LLE scanout and native
+reset/resize/ownership/pixel tests supply the bounded contract. Immediate
+presentation is implemented with real GPU completion and no vblank throttle.
+The final native suite passes 31/31 in 13.90 s; NV2A passes in 0.17 s. The known
+intermittent process-handle assertion remains open. Full attract, input/menu
+return, audio/video quality, stable loops and original cadence remain pending.
+
 ## 2026-10-07 - Startup interruption and actual audio content validated
 
 Two actual NTSC Blinx runs accept a timed Start press through the host gamepad

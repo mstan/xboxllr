@@ -126,6 +126,7 @@ def prepare(donor, output, reference):
                 code+='    UINT offset=up_ring_upload(&g_up_vertex_ring,data,bytes);\n'
                 code+='    if(offset==(UINT)-1)return E_OUTOFMEMORY;\n'
                 code+='    rhi_set_vertex_buffer(0,g_up_vertex_ring.buffer,stride,offset);return S_OK;\n}\n'
+                code+='\n'+(Path(__file__).resolve().parents[1]/'pilots/native-title/graphics_phobos_reset.inc').read_text()
                 code=once(code,'return (HRESULT)rhi_present(g_present_interval);','return (HRESULT)rhi_present(0);')
                 code=re.sub(r'/\* Non-fatal:[^*]+\*/','dev_Release(&g_device); return hr;',code)
                 # SetTexture binds a resource; it must not rewrite COLOROP.
@@ -167,6 +168,8 @@ def prepare(donor, output, reference):
         'sampler corrections are retained; combiner failures cannot fall back\n'
         'to an unrelated shader; the empty-stage RHI view is released/reset on\n'
         'device teardown. XLLE_PILOT_D3D_DEBUG enables native layer diagnostics.\n'
+        'Independent Xbox reset adapter reuses real presentation-buffer creation\n'
+        'while retaining the native device, resources, shaders and state caches.\n'
         'Original and prepared hashes are in donor.json.\n',encoding='utf-8')
     result=dict(repository='https://github.com/phobos665/xboxrecomp',donor=PIN,backend='PHOBOS',
                 license='GPL-3.0 fork; retained MIT upstream and per-file notices',
