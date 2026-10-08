@@ -1,3 +1,36 @@
+static void test_graphics_stream_consumption(void)
+{
+    uint32_t previous=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_SHADER);
+    graphics_state_init();
+    graphics_render_state(143,0,1);graphics_render_state(147,0,1);
+    graphics_render_state(60,0,1);graphics_render_state(59,0,1);
+    graphics_texture_state(0,12,2,1);graphics_texture_state(0,14,0,1);
+    graphics_texture_state(0,16,2,1);graphics_texture_state(0,18,0,1);
+    uint32_t fixed=0,fvf=0x44;
+    call_graphics(PILOT_D3D_D3DDevice_SetPixelShader,&fixed);
+    call_graphics(PILOT_D3D_D3DDevice_SetVertexShader,&fvf);
+    struct Vertex {float x,y,z,w;uint32_t color;};
+    struct Vertex source[]={{0},{8,8,.5f,1,0xffff0000},
+        {56,8,.5f,1,0xffff0000},{32,56,.5f,1,0xffff0000}};
+    uint32_t length=sizeof(source),header=call_graphics(PILOT_D3D_D3DDevice_CreateVertexBuffer2,&length);
+    uint32_t lock[]={header,0},data=call_graphics(PILOT_D3D_D3DVertexBuffer_Lock2,lock);
+    memcpy(memory+data,source,sizeof(source));
+    uint32_t bind[]={0,header,sizeof(struct Vertex)};
+    call_graphics(PILOT_D3D_D3DDevice_SetStreamSource,bind);
+    uint32_t draw[]={5,1,3};
+    for(unsigned pass=0;pass<2;++pass) {
+        /* No rebind/Lock: the original persistent CPU pointer remains live.
+         * A bind-time snapshot alone produces the wrong real GPU pixels. */
+        for(unsigned i=1;i<4;++i)MEM32(data+i*sizeof(struct Vertex)+16)=pass?0xff0000ff:0xff00ff00;
+        CHECK(pilot_gfx_clear(1,0xff000000,1,0)==0);
+        call_graphics(PILOT_D3D_D3DDevice_DrawVertices,draw);
+        graphics_test_pixel(0,pass?0:255,pass?255:0,0);
+    }
+    bind[1]=0;call_graphics(PILOT_D3D_D3DDevice_SetStreamSource,bind);
+    CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&header)==0);
+    call_graphics(PILOT_D3D_D3DDevice_SetVertexShader,&previous);
+    fprintf(stderr,"PASS: actual guest DrawVertices consumes post-bind and later CPU writes at nonzero first vertex\n");
+}
 static void test_graphics_resource_bindings(void)
 {
     uint64_t resident=vm_committed(0,0x100000000ull);
@@ -27,15 +60,15 @@ static void test_graphics_resource_bindings(void)
         CHECK(!vm_find(header,24) && !vm_find(data,1));
     }
     uint32_t length=96,header=call_graphics(PILOT_D3D_D3DDevice_CreateVertexBuffer2,&length);
-    uint32_t data=graphics_vertex(header)->data,native=graphics_vertex(header)->native;
+    uint32_t data=graphics_vertex(header)->data;
     for(unsigned i=0;i<length;++i)memory[data+i]=(unsigned char)(i*19);
     uint32_t stream[]={15,header,24};call_graphics(PILOT_D3D_D3DDevice_SetStreamSource,stream);
     CHECK(MEM32(header)==0x01080001 && MEM32(PILOT_D3D_STREAMS+15*12)==24 && MEM32(PILOT_D3D_STREAMS+15*12+8)==header);
-    unsigned char bytes[96];CHECK(pilot_gfx_vertex_readback(native,bytes,sizeof(bytes))==0 && !memcmp(bytes,memory+data,sizeof(bytes)));
+    /* Binding retains guest ownership; private GPU bytes are observed only
+     * when consumed. The actual draw/pixel test above covers that boundary. */
     CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&header)==0 && MEM32(header)==0x01080000);
     memory[data+8]^=0x55;stream[2]=0;call_graphics(PILOT_D3D_D3DDevice_SetStreamSource,stream);
     CHECK(MEM32(header+8)==0x12345678 && MEM32(PILOT_D3D_STREAMS+15*12)==0);
-    CHECK(pilot_gfx_vertex_readback(native,bytes,sizeof(bytes))==0 && !memcmp(bytes,memory+data,sizeof(bytes)));
     stream[0]=3;stream[2]=16;call_graphics(PILOT_D3D_D3DDevice_SetStreamSource,stream);CHECK(MEM32(header)==0x01100000);
     CHECK(call_graphics(PILOT_D3D_D3DResource_AddRef,&header)==1);
     CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&header)==0 && MEM32(header)==0x01100000);

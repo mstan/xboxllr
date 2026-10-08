@@ -15,6 +15,20 @@ notices. Preparation/build steps must report missing required notices.
 
 ## Private native-title reference pilot
 
+### Deferred stream upload - 2026-10-08
+
+Phobos `05040ec103dfbaca5e3daed28bbc569bd896f59f`,
+`src/hle/hle_d3d8_vertex.c`, supplies the binding/consumption strategy:
+`D3DDevice_SetStreamSource` records the resource and stride; draw submission
+consumes the vertex range. `graphics_vertex.inc` independently applies that
+strategy to the existing native draw-range transport, preserving its separate
+guest resource ownership. No new donor implementation body is copied.
+`tools/native_stream_binding_reference.py` runs the owner's original NTSC
+setter with unmapped payloads to bound the ABI, references and fence effects.
+The native fixture verifies real draw pixels after persistent-pointer writes.
+Existing renderer attribution and the private GPL-dependent pilot's shipping
+exclusion remain unchanged.
+
 ### Movie queue/stall audit - 2026-10-08
 
 The [movie stall audit](docs/BLINX-MOVIE-STALL-AUDIT-2026-10-08.md)

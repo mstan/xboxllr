@@ -1,5 +1,69 @@
 # Native title reference pilot
 
+## Deferred stream upload experiment (2026-10-08)
+
+`beads-xbox.1.100`, branch `perf/blinx-deferred-stream-upload-20261008`.
+A complete-stage profile finds 11.40 seconds in 533,337 `SetStreamSource`
+calls across 2,280 profiled frames. Binding still synchronizes whole resources,
+although each draw already synchronizes the consumed range. The candidate
+uses Phobos `05040ec`'s bind-now/consume-on-draw strategy: retain native bindings,
+guest handles, binding counts and fence side effects, and defer data copying
+to the existing draw path. The first consumption still initializes the whole
+native buffer; later draws synchronize their required spans. Required draws,
+callbacks and real GPU completion remain intact.
+
+`XLLE_PILOT_DEFER_STREAM_UPLOAD=0`, fixed at startup, retains the eager-copy
+comparison path. The candidate defaults to deferred uploads on this branch.
+This selects an internal HLE transport strategy, not LLE versus HLE fidelity.
+No live switching or duplicate rendering is performed.
+
+`tools/native_stream_binding_reference.py` executes the complete hash-bound
+NTSC setter for 80 cases across all 16 streams, including self-rebind, resource
+replacement, zero stride and unbinding, with deliberately unmapped payloads.
+It checks callee cleanup, preserved registers, binding counts and old-resource
+fence effects. Resource destruction and GPU fetching remain outside that
+specific fixture. Actual native `DrawVertices` pixels independently verify
+post-bind writes and later mutations without rebinding, at a nonzero first
+vertex. Ownership tests no longer require private GPU bytes to be populated
+before consumption; the Reset retention fixture explicitly populates the GPU
+resource it checks. Both eager/deferred paths pass the graphics ABI fixture;
+all 37 native tests pass with the candidate (17.42 seconds).
+
+Private floor evidence: `build/blinx/stream-binding-original.aot-private.json`.
+The original profile is `build/blinx/scheduler-stage-service-profile/`;
+profiling overhead means its timing is cause evidence, not a speed comparison.
+Two same-executable pairs now complete the first gameplay stage naturally:
+
+| Order | Eager whole-stage fps | Deferred whole-stage fps | Change |
+| --- | ---: | ---: | ---: |
+| Eager then deferred | 26.9980 | 28.7848 | +6.62% |
+| Deferred then eager | 27.8817 | 28.5206 | +2.29% |
+
+Each stage has 2,329 presents, 75/75 completed writes and 27,186 callbacks;
+no terminal guard/fault appears in the four timed observations. The first
+pair's p95 frame time falls 46.17 to 40.40 ms; the reverse pair falls 48.35
+to 42.54 ms. Both use executable SHA-256
+`d8aa47e8c56c807ca9e046d11408b1686209bf9abb32da7fffb060d49c61f7a7`,
+scheduler enabled, local media, no CPU affinity, no screenshots, and identical
+settings except the upload flag. Host load is uncontrolled, so these are
+observed gains, not a guaranteed percentage. Deferred stages still fall short
+of steady nominal 30 fps.
+
+Raw callback contexts differ with the rotating timing-record phase; slot
+offsets modulo 300 agree in each pair. This is limited corroboration, not
+exact raw-history equivalence. Private reports are
+`build/blinx/stream-upload-comparison.aot-private.json` and
+`build/blinx/stream-upload-repeat-comparison.aot-private.json`.
+
+An independent visible keyboard playtest on this binary reaches Press START.
+The owner then enters New Game/save, which completes save metadata/image writes
+and faults at guest `0x85BD0000`. No timed harness closed that instance. Cause
+is unproven and tracked as `beads-xbox.1.101`; the owner explicitly deferred
+New Game investigation until attract sign-off. A second visible instance is
+left running without replay or timeout for idle observation. This does not
+substitute for a measured repeated-attract/input/A-V qualification on this
+candidate. The candidate remains isolated; baseline runtime is unchanged.
+
 ## Opening audio tail qualification (2026-10-08)
 
 The exact source capture on `investigate/blinx-audio-ingress-20261008` locates

@@ -11,6 +11,10 @@ static void test_graphics_reset(void)
     uint32_t vertex=call_graphics(PILOT_D3D_D3DDevice_CreateVertexBuffer2,&length);
     for(unsigned i=0;i<length;++i)memory[graphics_vertex(vertex)->data+i]=(unsigned char)(i*19);
     uint32_t stream[]={15,vertex,16};call_graphics(PILOT_D3D_D3DDevice_SetStreamSource,stream);
+    /* This fixture verifies already-populated GPU storage survives Reset.
+     * Binding alone need not snapshot data before a draw consumes it. */
+    pilot_gfx_vertex_upload(graphics_vertex(vertex)->native,
+        memory+graphics_vertex(vertex)->data,length);
     uint32_t rs[166];memcpy(rs,memory+PILOT_D3D_RENDER_STATES,sizeof(rs));
     uint32_t block_args[]={1,0x19984};
     CHECK(call_graphics(PILOT_D3D_D3DDevice_CreateStateBlock,block_args)==0);

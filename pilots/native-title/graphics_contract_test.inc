@@ -158,7 +158,7 @@ static void test_graphics(void)
                 CHECK(vm_committed(0,0x100000000ull)==before+5*4096);
             }
         }
-        if(!pass) { test_graphics_states(); test_graphics_textures(); test_graphics_vertices(); test_graphics_transforms(); test_graphics_shaders(); test_graphics_fvf(); test_graphics_pixels(); test_graphics_blocks(); test_graphics_completion(); test_graphics_resource_bindings(); }
+        if(!pass) { test_graphics_states(); test_graphics_textures(); test_graphics_vertices(); test_graphics_transforms(); test_graphics_shaders(); test_graphics_fvf(); test_graphics_pixels(); test_graphics_stream_consumption(); test_graphics_blocks(); test_graphics_completion(); test_graphics_resource_bindings(); }
         CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&front)==0);
         test_graphics_visibility();
         test_graphics_aliases();

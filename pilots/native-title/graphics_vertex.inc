@@ -5,6 +5,15 @@
 #define GRAPHICS_VERTEX_OBJECTS 256
 struct GraphicsVertexObject { uint32_t header,data,bytes,refs,native,external,bindings; };
 static struct GraphicsVertexObject graphics_vertices[GRAPHICS_VERTEX_OBJECTS];
+static int graphics_vertex_defer_upload(void)
+{
+    static int enabled=-1;
+    if(enabled<0) {
+        const char *value=getenv("XLLE_PILOT_DEFER_STREAM_UPLOAD");
+        enabled=!value || strcmp(value,"0");
+    }
+    return enabled;
+}
 static int graphics_vertex_find(uint32_t header)
 {
     for(unsigned i=0;i<GRAPHICS_VERTEX_OBJECTS;++i)
@@ -85,7 +94,12 @@ static void graphics_vertex_bind(unsigned stream,uint32_t header,uint32_t stride
     uint32_t cache=PILOT_D3D_STREAMS+stream*12,old=MEM32(cache+8),native=0;
     if(header) {
         struct GraphicsVertexObject *vertex=graphics_vertex(header);native=vertex->native;
-        pilot_gfx_vertex_upload(native,memory+vertex->data,vertex->bytes);
+        /* Phobos hle_d3d8_vertex.c records the binding and consumes data at
+         * DrawVertices. Our draw path already snapshots every consumed range,
+         * including writes through a retained CPU pointer after this bind.
+         * Keep the eager copy as a startup-selected comparison path. */
+        if(!graphics_vertex_defer_upload())
+            pilot_gfx_vertex_upload(native,memory+vertex->data,vertex->bytes);
     }
     pilot_gfx_vertex_bind(stream,native,stride);
     if(header!=old) {

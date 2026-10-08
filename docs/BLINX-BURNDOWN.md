@@ -1,5 +1,21 @@
 # Blinx: serial attract-sequence bring-up
 
+**Deferred stream uploads (.100):** the original NTSC binding contract and
+actual GPU draw tests qualify consuming vertex data at draw time, following
+Phobos's strategy. Removing redundant whole-resource copies at stream binding
+improves complete-stage rates **27.00 -> 28.78 fps** and **27.88 -> 28.52 fps**
+in two opposite-order pairs. Each stage finishes 2,329 presents and 75 writes;
+all 37 native tests pass. Host load is uncontrolled and steady 30 fps remains
+unmet. Evidence and scope are in the [native pilot](../pilots/native-title/README.md).
+Branch `perf/blinx-deferred-stream-upload-20261008` remains isolated from the
+baseline runtime while repeated-attract/input/A-V validation continues.
+
+**Owner playtest:** the visible title screen is confirmed. New Game/save then
+faults at guest `0x85BD0000` after successful save metadata/image writes; cause
+is unproven. This is tracked in `.101` and explicitly deferred until attract
+sign-off. A separate idle instance is left open; current work remains Blinx's
+attract sequence, with JSRF still deferred.
+
 **Audio-tail finding (.98):** exact caller-write and XAudio2-submission capture
 shows that the fixed quiet-tail difference against FFmpeg already exists in
 Blinx's original decoded PCM. All 7,560 opening submissions match the ring;
