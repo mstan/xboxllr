@@ -18,7 +18,7 @@ counted as verified completed loops.
 | Startup, movies, title screen, real-time attract gameplay | Working visual milestone, including owner observation |
 | Natural repetition | Two complete natural demos and a third rendered entry captured on the preceding scheduler candidate; current runtime has complete-stage A/B runs and owner idle observation |
 | Input interruption and menu return | Captured on the preceding scheduler candidate; repeat the controlled check when qualifying the final reference/HLE contract set |
-| Intended gameplay cadence | Known shortfall: latest complete stages average 28.52/28.78 fps against nominal 30 fps, with intermittent stalls |
+| Intended gameplay cadence | Owner accepts 28.52/28.78 fps and intermittent stalls as documented performance debt (.100), not a blocker for this functional milestone; nominal 30 fps remains the target |
 | Audio/movie timing | Original PCM-to-submission transport and sampled picture/audio progression have evidence; final-frame timing and complete repeat A/V tolerance remain open |
 | Long-term resources | Bounded repeated observations exist; a slow leak is not ruled out by the existing samples |
 | New Game/save | Confirmed guest-memory fault after save creation (.101), explicitly outside this milestone and deferred |
@@ -38,8 +38,11 @@ native implementation at the boundary. Repair either implementation only when
 the evidence warrants it, and rerun actual attract behavior after changes.
 Exhaustive hardware fidelity, dashboard work and instruction-identical HLE are
 not prerequisites for this bounded phase. No live switching or duplicate
-production execution is introduced. The broader cadence/A-V goal remains open;
-JSRF remains deferred. Existing private-pilot licensing restrictions remain.
+production execution is introduced. Performance follow-up (.100) remains open with the owner-accepted current rate;
+it does not block the LLE contract phase. Intermittent stalls may expose a
+contract error or unnecessary synchronization, but that causal link is not yet
+proved. Broader A/V qualification remains open; JSRF remains deferred. Existing
+private-pilot licensing restrictions remain.
 
 **Deferred stream uploads (.100):** the original NTSC binding contract and
 actual GPU draw tests qualify consuming vertex data at draw time, following
