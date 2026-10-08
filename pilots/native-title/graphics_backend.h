@@ -1,6 +1,7 @@
 #ifndef PILOT_GRAPHICS_BACKEND_H
 #define PILOT_GRAPHICS_BACKEND_H
 #include <stdint.h>
+uint32_t pilot_gfx_feedback_mask(void);
 int32_t pilot_gfx_create(const uint32_t parameters[17]);
 int32_t pilot_gfx_parameters(const uint32_t parameters[17]);
 int32_t pilot_gfx_reset(const uint32_t parameters[17]);

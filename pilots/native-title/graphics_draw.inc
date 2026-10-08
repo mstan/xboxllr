@@ -55,6 +55,17 @@ static void graphics_draw_common(const uint32_t args[3],uint32_t up_data,uint32_
             stop("invalid user-pointer draw stream",up_stride);
         graphics_pointer(up_data,count*up_stride);
     }
+    const char *feedback_capture=getenv("XLLE_PILOT_FEEDBACK_CAPTURE");
+    if(pilot_gfx_feedback_mask() && feedback_capture && *feedback_capture && up_data) {
+        char path[1024];static unsigned sequence;
+        if(snprintf(path,sizeof(path),"%s/feedback-%u.bin",feedback_capture,++sequence)>=(int)sizeof(path))stop("feedback capture path",0);
+        FILE *file=fopen(path,"wb");if(!file)stop("feedback capture open",0);
+        uint32_t header[]={0x42464c58,1,primitive,first,count,shader,up_stride,pilot_gfx_feedback_mask(),
+            MEM32(TRANSFORM_FIELD(SCREEN_OFFSET)),MEM32(TRANSFORM_FIELD(SCREEN_OFFSET)+4)};
+        if(fwrite(header,sizeof(header),1,file)!=1 || fwrite(memory+PILOT_D3D_RENDER_STATES,166*4,1,file)!=1 ||
+            fwrite(memory+PILOT_D3D_TEXTURE_STATES,128*4,1,file)!=1 || fwrite(memory+up_data,count*up_stride,1,file)!=1 || fclose(file))
+            stop("feedback capture write",0);
+    }
     for(unsigned i=0;i<16;++i)if(!up_data && (streams&(1u<<i))) {
         uint32_t cache=PILOT_D3D_STREAMS+i*12,stride=MEM32(cache);
         struct GraphicsVertexObject *vertex=graphics_vertex(MEM32(cache+8));

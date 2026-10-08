@@ -130,17 +130,23 @@ first loading image; the separate presentation experiment remains uncommitted
 and stops at the host thread-naming diagnostic. No new menu, attract or speed
 result is claimed.
 
-## Theseus reference audit (owner follow-up, 2026-10-07)
+## Blinx render-target feedback adoption (2026-10-07)
 
-Current game-specific candidate (`beads-xbox.1.84`): Phobos
+Adopted in the private pilot (`beads-xbox.1.84`): Phobos
 [`src/d3d/d3d8_device.c`](https://github.com/phobos665/xboxrecomp/blob/bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0/src/d3d/d3d8_device.c)
 `feedback_scratch/begin/end` documents Blinx shadow compositing that samples
 the current render target. It caches a matching GPU scratch image and copies
-the target before the draw. Actual native Blinx now stops at our overlap guard
-after shader-state restoration. Confirm the reached alias/order and pixel-local
-sampling contract before enabling this existing donor implementation. Retain
-explicit errors for unsupported layouts/copy failure; the donor's black-input
-failure behavior is not acceptable here. No Theseus code is needed for this.
+the target before the draw. Actual capture confirms Blinx's aligned pixel-local
+scene pass. Bounded NV2A pixels and native copy/cache/alias/lifetime fixtures
+pass, and actual title execution advances to Xbox ADPCM buffer creation (.85).
+Our adapter keeps unsupported layouts guarded, stops failed copies and releases
+scratch on teardown. No Theseus code is used for this.
+
+The next audio candidate is Phobos `src/hle/xbox_adpcm.c` and its buffer/stream
+handling; that decoder attributes NoRain211/doaxbv-re. Track the reached format,
+LLE contract and full provenance in `.85` before enabling playback.
+
+## Theseus reference audit (owner follow-up, 2026-10-07)
 
 Tracking: `beads-xbox.1.74`. Reviewed
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965)

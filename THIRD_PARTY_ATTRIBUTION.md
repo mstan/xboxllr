@@ -433,6 +433,21 @@ the MIT root license does not replace dependencies' own terms. See the
 [DSP audit](docs/NATIVE-DSP-DONOR-2026-10-07.md) and existing
 [private CPU pilot distribution limits](LICENSE-SCOPE.md).
 
+## Borrowed render-target feedback implementation
+
+The private native pilot reuses `feedback_scratch`, `feedback_begin/end` and
+target-view rebinding from Phobos
+[`src/d3d/d3d8_device.c`](https://github.com/phobos665/xboxrecomp/blob/bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0/src/d3d/d3d8_device.c).
+That source explicitly describes Blinx's scene-alpha shadow compositing.
+`tools/native_d3d_feedback.py` exposes the existing GPU copy/cache to our target
+and draw interfaces, recognizes aliases by underlying D3D storage, makes failed
+copies terminal, and adds scratch teardown. The original implementation stays
+in ignored prepared donor output. Original notices, source/prepared hashes and
+the generated MODIFICATIONS inventory are retained by native_phobos_d3d.py.
+The established private GPL-dependent research scope applies; this is not
+imported into the intended non-GPL shipping product. The independent bounded
+NV2A RAM/pixel fixture verifies pixel-local feedback without a native renderer.
+
 ## Empty vertex-declaration binding reference
 
 The same donor metadata audit found `GetPixelShader` incorrectly described

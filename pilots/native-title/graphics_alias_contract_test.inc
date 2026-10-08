@@ -36,7 +36,8 @@ static void test_graphics_aliases(void)
     CHECK(pilot_gfx_texture_clear(target_native,0xff2468ac)==0);
     MEM32(header+4)=MEM32(target+4);MEM32(header+16)=MEM32(target+16);
     call_graphics(PILOT_D3D_D3DDevice_SetTexture,bind);alias_test_draw(0xff2468ac);
-    CHECK(pilot_gfx_targets(target_native,0)==(int32_t)0x80070057u); /* shared-image hazard */
+    CHECK(!pilot_gfx_targets(target_native,0) && pilot_gfx_feedback_mask()==1);
+    CHECK(!pilot_gfx_targets(0,UINT32_MAX) && !pilot_gfx_feedback_mask());
     CHECK(pilot_gfx_texture_clear(target_native,0xff983412)==0);alias_test_draw(0xff983412);
     uint32_t mutable_header=header;
     CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&mutable_header)==0); /* binding retains view */

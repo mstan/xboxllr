@@ -1,5 +1,24 @@
 # STATUS
 
+## 2026-10-07 - Borrowed feedback copy passes; Blinx reaches Xbox ADPCM
+
+Actual `feedback-attract` executes Phobos's real GPU feedback snapshot, passes
+the prior scene-compositing overlap stop, and opens `01_StageStart.adx`. The
+next stop is sound-buffer format 0x69 (Xbox ADPCM), tracked in `.85`.
+Private evidence: `build/blinx/run-feedback-attract.log`. No complete gameplay
+frame, attract loop, stable repeated loops or original cadence is established.
+
+The observed draw is a 640x480 single-level linear ARGB8 scene texture sampled
+by an aligned full-screen quad. Bounded software NV2A same-surface pixel tests
+pass with point/linear filtering (0.25 s). Native tests verify actual changing
+pixels, two draws/stages, scratch reuse/resize, output transitions, separately
+wrapped default-surface aliases and three device lifetimes. Full native suite:
+32/32, 13.65 s; additional default-alias test: 0.91 s. The adapter reuses donor
+copy/cache code, fixes failure/teardown behavior, and keeps depth/unsupported
+format guards. No CPU readback or second renderer runs in production (.84).
+Next donor lead: Phobos's Xbox ADPCM decoder and audio services, with NoRain
+DOAX provenance retained. Dashboard remains deferred.
+
 ## 2026-10-07 - Corrected shader query ABI; next is render-target feedback
 
 Actual `pixel-query-abi-attract` passes scene-compositing shader restoration,

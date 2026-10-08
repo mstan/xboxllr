@@ -7,6 +7,11 @@
 ID3D11Device *d3d8_GetD3D11Device(void);
 ID3D11DeviceContext *d3d8_GetD3D11Context(void);
 void d3d8_shaders_prepare_pixel(void);
+RhiImage *pilot_donor_default_depth(void);
+void pilot_donor_output_images(RhiImage *color,RhiImage *depth,int force);
+DWORD pilot_donor_feedback_begin(void);
+void pilot_donor_feedback_end(DWORD mask);
+void pilot_donor_feedback_stats(uint32_t *copies,uint32_t *allocations);
 static ID3D11RenderTargetView *d3d8_GetDefaultRTV(void)
 { return (ID3D11RenderTargetView*)rhi_d3d11_native_view(d3d8_GetDefaultTargetView()); }
 static ID3D11Texture2D *pilot_donor_texture(D3D8Texture *t)

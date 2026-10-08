@@ -12,6 +12,7 @@
 #include "graphics_pixel_backend_test.inc"
 #include "graphics_movie_backend_test.inc"
 #include "graphics_visibility_backend_test.inc"
+#include "graphics_feedback_backend_test.inc"
 static int test_transform_pipeline(void)
 {
     static const D3DTRANSFORMSTATETYPE states[]={D3DTS_VIEW,D3DTS_PROJECTION,D3DTS_TEXTURE0,D3DTS_TEXTURE1,
@@ -72,7 +73,12 @@ static int test_resource_bindings(void)
     pilot_gfx_texture_destroy(texture);
     uint32_t target=0;CHECK(pilot_gfx_texture_create_usage(4,4,1,0x12,1,&target)==0);
     CHECK(pilot_gfx_texture_clear(target,0xff336699)==0);pilot_gfx_texture_bind(0,target);
-    CHECK(pilot_gfx_targets(target,0)==E_INVALIDARG); /* no silent SRV removal */
+#ifdef PILOT_D3D_PHOBOS
+    CHECK(!pilot_gfx_targets(target,0) && pilot_gfx_feedback_mask()==1);
+    CHECK(!pilot_gfx_targets(0,UINT32_MAX) && !pilot_gfx_feedback_mask());
+#else
+    CHECK(pilot_gfx_targets(target,0)==E_INVALIDARG);
+#endif
     CHECK(pilot_gfx_draw_up(D3DPT_TRIANGLELIST,1,vertices,sizeof(vertices[0]),0x144)==0);
     CHECK(pilot_gfx_readback(pixels,sizeof(pixels))==0);
     CHECK(pixels[center]==0x33 && pixels[center+1]==0x66 && pixels[center+2]==0x99);
@@ -147,6 +153,7 @@ int main(void)
         CHECK(test_resource_completion()==0);
 #ifdef PILOT_D3D_PHOBOS
         CHECK(test_combiner_memory_draw()==0);
+        CHECK(test_feedback()==0);
         CHECK(test_movie_textures()==0);
 #endif
         /* Teardown also owns queries which the caller has not retired. A fast

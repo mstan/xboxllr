@@ -222,6 +222,9 @@ static void graphics_texture_bind(unsigned stage,uint32_t header)
         mode=MEM32(header+12)&0x20f4u;
         if((mode&0x2000u) && texture->format>=0x2a && texture->format<=0x31)mode=(mode&~0x2000u)|0x40000000u;
     }
+    if(getenv("XLLE_PILOT_FEEDBACK_TRACE"))fprintf(stderr,
+        "[TEXTURE BIND TRACE] return=%08x stage=%u header=%08x native=%u color=%08x depth=%08x\n",
+        MEM32(g_esp),stage,header,native,graphics_target,graphics_depth);
     pilot_gfx_texture_bind(stage,native);
     /* Acquire first so an internal-only self-rebind remains alive. */
     if(header!=old) {

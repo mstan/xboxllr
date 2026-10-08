@@ -186,7 +186,11 @@ int32_t pilot_gfx_create(const uint32_t p[17])
         }
     }
     if (FAILED(result)) pilot_gfx_close();
-    else {free(pilot_saved_display);pilot_saved_display=NULL;}
+    else {free(pilot_saved_display);pilot_saved_display=NULL;
+#ifdef PILOT_D3D_PHOBOS
+        pilot_donor_output_images(d3d8_GetSceneImage(),pilot_donor_default_depth(),1);
+#endif
+    }
     return result;
 }
 int32_t pilot_gfx_reset(const uint32_t p[17])
@@ -222,6 +226,7 @@ int32_t pilot_gfx_reset(const uint32_t p[17])
     desc.BindFlags=D3D11_BIND_SHADER_RESOURCE;desc.MiscFlags=0;
     pilot_d3d_require(ID3D11Device_CreateTexture2D(d3d8_GetD3D11Device(),&desc,NULL,&pilot_surfaces[1]),__FILE__,__LINE__);
     pilot_color_target=0;pilot_depth_target=UINT32_MAX;
+    pilot_donor_output_images(d3d8_GetSceneImage(),pilot_donor_default_depth(),1);
     RECT client={0,0,(LONG)p[0],(LONG)p[1]};AdjustWindowRect(&client,WS_OVERLAPPEDWINDOW,FALSE);
     if(!SetWindowPos(pilot_window,NULL,0,0,client.right-client.left,client.bottom-client.top,
         SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE))pilot_d3d_backend_stop("reset window resize failed");
@@ -395,13 +400,40 @@ int pilot_gfx_resource_busy(unsigned kind,uint32_t handle)
     }
     return pilot_serial_busy(serial);
 }
+uint32_t pilot_gfx_feedback_mask(void)
+{
+    uint32_t mask=0;
+    for(unsigned stage=0;stage<4;++stage)if(pilot_bound_textures[stage]) {
+        ID3D11Texture2D *sample=pilot_donor_texture(pilot_texture(pilot_bound_textures[stage]));
+        if(sample==(pilot_color_target?pilot_donor_texture(pilot_texture(pilot_color_target)):pilot_surfaces[0]))mask|=1u<<stage;
+        if(pilot_depth_target && sample==(pilot_depth_target==UINT32_MAX?pilot_surfaces[2]:pilot_donor_texture(pilot_texture(pilot_depth_target))))mask|=1u<<(stage+8);
+    }
+    return mask;
+}
+static uint32_t pilot_feedback_validate(void)
+{
+    uint32_t mask=pilot_gfx_feedback_mask();
+    if(mask&0xf00u)pilot_d3d_backend_stop("depth-output feedback is unqualified");
+    for(unsigned stage=0;stage<4;++stage)if(mask&(1u<<stage)) {
+        D3D8Texture *texture=pilot_texture(pilot_bound_textures[stage]);
+        if(texture->levels!=1 || texture->d3d8_format!=0x12)
+            pilot_d3d_backend_stop("feedback requires a single-level linear ARGB8 texture");
+    }
+#ifndef PILOT_D3D_PHOBOS
+    if(mask)pilot_d3d_backend_stop("selected donor lacks qualified feedback");
+#endif
+    return mask;
+}
 void pilot_gfx_texture_bind(unsigned stage,uint32_t handle)
 {
     if(!pilot_device || stage>=4)pilot_d3d_backend_stop("invalid native texture binding");
     D3D8Texture *texture=handle?pilot_texture(handle):NULL;
     if(handle && (pilot_donor_texture(texture)==(pilot_color_target?pilot_donor_texture(pilot_texture(pilot_color_target)):pilot_surfaces[0]) ||
-        (pilot_depth_target && pilot_donor_texture(texture)==(pilot_depth_target==UINT32_MAX?pilot_surfaces[2]:pilot_donor_texture(pilot_texture(pilot_depth_target))))))
-        pilot_d3d_backend_stop("simultaneous texture sampling and render/depth output is unqualified");
+        (pilot_depth_target && pilot_donor_texture(texture)==(pilot_depth_target==UINT32_MAX?pilot_surfaces[2]:pilot_donor_texture(pilot_texture(pilot_depth_target)))))) {
+        if(getenv("XLLE_PILOT_FEEDBACK_TRACE"))fprintf(stderr,"[GPU OVERLAP] stage=%u texture=%u color=%u depth=%u format=%x levels=%u size=%ux%u\n",
+            stage,handle,pilot_color_target,pilot_depth_target,texture->d3d8_format,texture->levels,texture->width,texture->height);
+        /* Binding alone performs no sampling; draw submission guards overlap. */
+    }
     pilot_d3d_require(pilot_device->lpVtbl->SetTexture(pilot_device,stage,(IDirect3DBaseTexture8*)texture),__FILE__,__LINE__);
     pilot_bound_textures[stage]=handle;
 }
@@ -413,17 +445,26 @@ void pilot_gfx_texture_prepare_sample(uint32_t handle,uint32_t level,const void 
 }
 int32_t pilot_gfx_targets(uint32_t color,uint32_t depth)
 {
+#ifndef PILOT_D3D_PHOBOS
     for(unsigned i=0;i<4;++i)if(pilot_bound_textures[i]) {
         ID3D11Texture2D *sample=pilot_donor_texture(pilot_texture(pilot_bound_textures[i]));
         if(sample==(color?pilot_donor_texture(pilot_texture(color)):pilot_surfaces[0]) ||
            (depth && sample==(depth==UINT32_MAX?pilot_surfaces[2]:pilot_donor_texture(pilot_texture(depth)))))return E_INVALIDARG;
     }
+#endif
     ID3D11RenderTargetView *rtv=d3d8_GetDefaultRTV();
     ID3D11DepthStencilView *dsv=depth==UINT32_MAX?pilot_default_depth:NULL;
     unsigned width=pilot_gfx_width(),height=pilot_gfx_height();
     if(color){D3D8Texture *t=pilot_texture(color);rtv=pilot_textures[color-1].rtv;if(!rtv)return E_INVALIDARG;width=t->width;height=t->height;}
     if(depth && depth!=UINT32_MAX){D3D8Texture *t=pilot_texture(depth);dsv=pilot_textures[depth-1].dsv;if(!dsv || t->width<width || t->height<height)return E_INVALIDARG;}
     if(depth==UINT32_MAX && (width>pilot_gfx_width() || height>pilot_gfx_height()))return E_INVALIDARG;
+#ifdef PILOT_D3D_PHOBOS
+    /* Remove old outputs before restoring their sampled views. Overlapping
+     * stages keep their real guest/donor bindings; a draw uses the snapshot. */
+    ID3D11DeviceContext_OMSetRenderTargets(d3d8_GetD3D11Context(),0,NULL,NULL);
+    pilot_donor_output_images(color?pilot_texture(color)->image:d3d8_GetSceneImage(),
+        depth==UINT32_MAX?pilot_donor_default_depth():(depth?pilot_texture(depth)->image:NULL),1);
+#endif
     ID3D11DeviceContext_OMSetRenderTargets(d3d8_GetD3D11Context(),1,&rtv,dsv);
     pilot_color_target=color;pilot_depth_target=depth;return S_OK;
 }
@@ -676,6 +717,7 @@ void pilot_gfx_set_texture_state(uint32_t stage,uint32_t state,uint32_t value)
 int32_t pilot_gfx_draw_up(uint32_t primitive,uint32_t count,const void *data,uint32_t stride,uint32_t fvf)
 {
     if (!pilot_device) return E_FAIL;
+    pilot_feedback_validate();
     pilot_d3d_raster_texture_mode(0,NULL);
     HRESULT status=pilot_device->lpVtbl->SetVertexShader(pilot_device,fvf);
     if (SUCCEEDED(status)) status=pilot_flat_prepare(primitive==4?5:primitive==5?6:0);
@@ -714,6 +756,7 @@ int32_t pilot_gfx_fvf_prepare(uint32_t fvf,float screen_x,float screen_y)
 int32_t pilot_gfx_draw_vertices(unsigned primitive,unsigned first,unsigned count)
 {
     if(!pilot_device || !count || (uint64_t)first+count>UINT32_MAX)return E_INVALIDARG;
+    uint32_t feedback=pilot_feedback_validate();
     D3D11_PRIMITIVE_TOPOLOGY topology;
     if(primitive==5 && count>=3 && count%3==0)topology=D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
     else if(primitive==6 && count>=3)topology=D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP;
@@ -737,7 +780,14 @@ int32_t pilot_gfx_draw_vertices(unsigned primitive,unsigned first,unsigned count
     int flat_quad=primitive==8 && d3d8_GetRenderStates()[D3DRS_SHADEMODE]==1;
     if(flat_quad)topology=D3D11_PRIMITIVE_TOPOLOGY_LINELIST_ADJ;
     ID3D11DeviceContext_IASetPrimitiveTopology(context,topology);
+#ifdef PILOT_D3D_PHOBOS
+    uint32_t copied=pilot_donor_feedback_begin();
+    if(copied!=feedback)pilot_d3d_backend_stop("feedback copy did not cover bound aliases");
+#endif
     if(primitive==8 && !flat_quad)pilot_quad_draw(first,count);else ID3D11DeviceContext_Draw(context,count,first);
+#ifdef PILOT_D3D_PHOBOS
+    pilot_donor_feedback_end(copied);
+#endif
     ID3D11DeviceContext_GSSetShader(context,NULL,NULL,0);
     pilot_mark_draw();
     if(pilot_color_target){pilot_textures[pilot_color_target-1].uploaded=1;pilot_textures[pilot_color_target-1].gpu_written=1;}

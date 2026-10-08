@@ -15,6 +15,7 @@ from native_d3d_donor import bodies, COM
 from native_d3d_bump import prepare_bump
 from native_d3d_raster import prepare_raster
 from native_d3d_fvf import prepare_fvf
+from native_d3d_feedback import prepare_feedback
 
 PIN = 'bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0'
 GIT = 'C:/Program Files/Git/cmd/git.exe'
@@ -102,6 +103,7 @@ def prepare(donor, output, reference):
                     '    sd.border[2]=(border&255)/255.0f;\n'
                     '    sd.border[3]=((border>>24)&255)/255.0f;')
             if path.name=='d3d8_device.c':
+                code=prepare_feedback(code)
                 # The donor's function-local empty-stage view survives device
                 # destruction. Rebinding it to a new D3D11 device corrupts the
                 # context and can leave real occlusion queries pending forever.
@@ -170,6 +172,8 @@ def prepare(donor, output, reference):
         'device teardown. XLLE_PILOT_D3D_DEBUG enables native layer diagnostics.\n'
         'Independent Xbox reset adapter reuses real presentation-buffer creation\n'
         'while retaining the native device, resources, shaders and state caches.\n'
+        'The existing feedback scratch/copy is exposed to native draws and target\n'
+        'binding. Failed copies stop; scratch resources are released on teardown.\n'
         'Original and prepared hashes are in donor.json.\n',encoding='utf-8')
     result=dict(repository='https://github.com/phobos665/xboxrecomp',donor=PIN,backend='PHOBOS',
                 license='GPL-3.0 fork; retained MIT upstream and per-file notices',

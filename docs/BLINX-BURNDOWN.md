@@ -20,10 +20,10 @@ software floor and an actual cached GPU implementation around Phobos's pipeline.
 The latest title runs pass that state and the subsequent pixel-shader query,
 submit further GPU work and pass logic COPY and mapped pixel constants,
 then exposed an incorrect GetPixelShader stack-cleanup binding. Correcting
-it restores scene-compositing state and presents the loading screen; the next
-stop is texture/render-output overlap. Phobos already implements a GPU feedback
-snapshot for Blinx's shadow compositing; applicability/contract qualification
-is next. Captured real GP audio
+it restores scene-compositing state and presents the loading screen. Phobos's
+GPU feedback snapshot now passes the texture/render-output overlap and Blinx
+opens 01_StageStart.adx. The next stop is sound-buffer format0x69, Xbox ADPCM.
+Captured real GP audio
 matches original intro/title content at the checked sample progression.
 Full audio quality/sync and attract validation remain pending. Earlier fresh/repeat runs reached the callback boundary in 12.95/7.33 s
 with zero error-dialog entries or memory failures. The 64 MiB guest limit remains
@@ -52,7 +52,8 @@ enforced. No title error condition is bypassed.
 | Mapped pixel-shader constants | Original setter/getter and native GPU fixtures pass; existing Phobos uploads reused, packed query cache updated, eye vector retained; actual title advances (.81) |
 | Shader restoration ABI | Corrected donor GetPixelShader stack8 to original RET4; all129 identified cleanup boundaries audited, independent caller-stack test passes; title advances (.83) |
 | Empty vertex binding | Complete original/native declaration state agrees for zero and restoration; empty-format drawing stays guarded (.82) |
-| Next integration work | Texture/render-output overlap: observe draw, establish bounded floor, then adopt Phobos feedback snapshot where applicable (.84) |
+| Render-target feedback | Observed aligned full-screen scene pass; bounded NV2A pixels and real native snapshot/cache/lifetime tests pass; borrowed Phobos implementation advances actual Blinx (.84) |
+| Next integration work | Xbox ADPCM buffers: establish reached format/playback contract and reuse donor audio implementation (.85) |
 | Input | Physical XInput, keyboard and timed host-controller replay; real startup interruption observed twice; gameplay interruption/menu return pending |
 | Attract startup/loading/render/audio/movies/gameplay | Partial startup/rendering only; no complete attract sequence yet |
 | Repeat loops, interruption/menu return, original cadence | Pending actual title integration measurements |

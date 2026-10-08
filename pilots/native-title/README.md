@@ -6,6 +6,38 @@ It is outside the normal xboxlle build. **The generated executable is a private
 GPL-dependent reference artifact, not the intended non-GPL shipping product.**
 See [license scope](../../LICENSE-SCOPE.md). There is no install/package target.
 
+## Render-target feedback
+
+`beads-xbox.1.84`: actual Blinx binds the 640x480, single-level linear ARGB8
+scene texture as both stage0 input and output. The private `feedback-draw`
+capture records an aligned FVF104 full-screen quad; its screen-bias correction
+and UV span map each fragment to its own texel center, including linear filter
+sampling. Binding overlap alone performs no texture sampling.
+
+The bounded NV2A software fixture samples/darkens the same RAM color surface
+twice, checking every pixel across both triangles with point/linear filtering.
+HLE borrows Phobos's `feedback_scratch`, copy and stage restore, connecting
+them to our real targets and direct draws. It copies the target once before
+each feedback draw and reuses GPU scratch storage across matching draws.
+There is no CPU readback, wait or duplicate raster execution in this path.
+Aliasing compares underlying GPU storage, including separately wrapped RHI
+images. Target transitions preserve real bindings and reinstate sampled views.
+
+Local adaptations make scratch/copy failure terminal and release/reset the
+scratch on device destruction. Drawing from the depth output remains guarded,
+as do feedback formats other than single-level linear ARGB8; the donor also
+rejects multisample/cube scratch. The qualified equivalence is pixel-local
+feedback. HLE uses a snapshot from the beginning of the draw; cross-pixel
+feedback ordering is not established as a hardware-equivalence guarantee.
+
+Native fixtures check all output pixels, repeated inputs, one copy shared by
+two stages, cached allocation/resize, both binding orders, default-surface
+aliases and three device lifetimes. Full native suite passes 32/32 in 13.65 s;
+the additional default-alias/COM-draw test passes in 0.91 s; software NV2A
+passes in 0.25 s. Actual `build/blinx/run-feedback-attract.log` confirms the
+donor copy, advances to `01_StageStart.adx` and stops on Xbox ADPCM sound-buffer
+format0x69 (.85). This is stage-startup progress, not a completed attract loop.
+
 ## Empty vertex-declaration binding
 
 The next integration run exposed a separate ABI defect (`beads-xbox.1.83`):

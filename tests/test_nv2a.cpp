@@ -7226,6 +7226,50 @@ int main() {
             CHECK(get32(gc_ram, 0x10000 + gc_b_offset) == 0xFF604830u);
         }
 
+        // Pixel-local render-target feedback: sample and darken the very same
+        // RAM color surface. Two draws must consume the immediately preceding
+        // pixels, including both sides of a triangle seam. This is the bounded
+        // reference for the native donor's per-draw GPU feedback snapshot.
+        {
+            emit_gc(0x0184,2);emit_gc(0x0188,2);
+            emit_gc(0x0304,0);emit_gc(0x0308,0);emit_gc(0x030c,0);
+            emit_gc(0x1e60,1);emit_gc(0x1e70,1);
+            emit_gc(0x0ac0,0x08010000);emit_gc(0x0260,0x18200000);
+            emit_gc(0x1e40,0xc0);emit_gc(0x0aa0,0xc0);emit_gc(0x0a60,0x80808080);
+            emit_gc(0x1b00,0x10000);emit_gc(0x1b04,0x0001122a);
+            emit_gc(0x1b08,0x00030303);emit_gc(0x1b0c,0x40000000);
+            emit_gc(0x1b10,256u<<16);emit_gc(0x1b14,0x01010000);
+            emit_gc(0x1b1c,0x00400040);emit_gc(0x1b20,0);emit_gc(0x1b24,0);
+            std::array<uint32_t,64*64> expected;
+            for(unsigned y=0;y<64;++y)for(unsigned x=0;x<64;++x) {
+                expected[y*64+x]=0x80000000u|((100+x)<<16)|((80+y)<<8)|200;
+                put32(gc_ram,0x10000+(y*64+x)*4,expected[y*64+x]);
+            }
+            for(unsigned pass=0;pass<2;++pass) {
+                auto before=gc_gpu.generic_combiner_executed_batches();
+                emit_gc(0x1b14,pass?0x02020000:0x01010000); // linear/point agree at texel centers
+                emit_gc(0x17fc,5);
+                const float xy[][2]={{0,0},{64,0},{0,64},{64,0},{64,64},{0,64}};
+                for(auto &p:xy) {
+                    emit_gc(0x1a90,gc_float_bits(p[0]));emit_gc(0x1a94,gc_float_bits(p[1]));
+                    emit_gc(0x1a98,0);emit_gc(0x1a9c,gc_float_bits(1));
+                    emit_gc(0x1518,gc_float_bits(p[0]));emit_gc(0x151c,gc_float_bits(p[1]));
+                    emit_gc(0x1520,gc_float_bits(10));emit_gc(0x1524,gc_float_bits(1));
+                }
+                emit_gc(0x17fc,0);kick_gc();CHECK(gc_fault.empty());
+                CHECK(gc_gpu.generic_combiner_executed_batches()>before);
+                unsigned mismatches=0;
+                for(unsigned i=0;i<expected.size();++i) {
+                    uint32_t value=expected[i]&0xff000000u;
+                    for(unsigned shift:{0u,8u,16u})value|=((((expected[i]>>shift)&255)*128+127)/255)<<shift;
+                    expected[i]=value;
+                    mismatches+=get32(gc_ram,0x10000+i*4)!=value;
+                }
+                CHECK(mismatches==0);
+            }
+            emit_gc(0x1b0c,0);emit_gc(0x1e70,0);kick_gc();
+        }
+
         // --- (c) Unsupported feature: same fingerprint as (a), but the final
         // combiner's D input references the FOG register (3) instead of R0. Per
         // xemu's psh.c, FOG is a real register (pFog = vec4(fogColor.rgb,
