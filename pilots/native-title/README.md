@@ -35,6 +35,42 @@ It is outside the normal xboxlle build. **The generated executable is a private
 GPL-dependent reference artifact, not the intended non-GPL shipping product.**
 See [license scope](../../LICENSE-SCOPE.md). There is no install/package target.
 
+## Audio storage detachment contract (2026-10-08)
+
+`beads-xbox.1.88`. The reached original NTSC sound-reuse path calls Stop,
+SetBufferData(NULL, 0), then Release before creating its next sound. Detachment
+now retires the real host source voice and its readers/callbacks, releases only
+internally allocated guest data, and preserves the guest object, device
+reference, format, gain, frequency and routing for a subsequent binding.
+Rebinding uses the existing real PCM/ADPCM path, with a fresh cursor and full
+play/loop extent. No successful playback of an empty buffer is substituted.
+
+Phobos `bcccf8c`, `src/hle/hle_dsound.c` SetBufferData, supplies the lifecycle
+reference, not an imported body. Its model-level stop and settings replacement
+map onto the pilot's real native transport. The bounded floor consists of the
+complete original caller-owned settings helper, original caller argument prefix
+(`tools/native_audio_detach_reference.py`), and existing MCPX VOICE_OFF
+notifier/idle-IRQ test. This does not claim an exhaustive original driver/APU or
+original kernel allocator run. Native tests independently cover eight active
+PCM lifetimes, silence after detach, caller-owned versus internal storage,
+retained settings and mono/stereo ADPCM output after rebinding. The existing
+APU test passes; the original settings fixture passes five detach/rebind cases.
+The final native suite passes all 35 tests in 17.92 s.
+References and license boundaries are recorded in the attribution inventory.
+
+Actual `audio-detach-progress` runs for the full 300-second observation and is
+then stopped by its harness (301.5 s including stack capture; exit1 is that
+termination, not successful title exit). It passes the old guard, logs at least
+eight storage detachments, completes 19 actual 1,913,856-byte writes with status
+zero, and opens `09_TimeStop.adx`. Capture is enabled; the last 60 presents
+measure 2.738 fps, median 369.696 ms. Captures still show the demo overlay/logo
+and effects over a largely black scene. Final stacks now sample the guest in
+vertex upload/draw work. This is further actual progression, not a complete
+attract sequence, rendered gameplay, stable repeated loops or original speed.
+Missing scene rendering and remaining callback retry latency are tracked by
+`beads-xbox.1.89` and `.90`. Private evidence is under
+`build/blinx/audio-detach-progress/` and `run-audio-detach-progress.log`.
+
 ## Asynchronous writes and installed HDD files
 
 `beads-xbox.1.86`: the demo-start caller submits `z:\pelon000.rec` through

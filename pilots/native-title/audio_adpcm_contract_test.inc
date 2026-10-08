@@ -84,6 +84,17 @@ static void test_audio_adpcm(void)
         a[1]=a[2]=0;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetLoopRegion,a)==0);
         a[3]=2;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_Play,a)==0);
         Sleep(100);a[1]=0x19300;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_GetStatus,a)==0 && !MEM32(a[1]));
+        a[1]=a[2]=0;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetBufferData,a)==0);
+        CHECK(!b->host && !b->bytes && !b->data && !test_write_faults(source));
+        a[1]=source;a[2]=bytes;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetBufferData,a)==0);
+        CHECK(b->format==0x69 && b->block_align==align);adpcm_test_readback(b);
+        /* Restore constant predictors after the writable-memory probe (block0)
+         * and earlier partial-block edit (block1), before full-buffer playback. */
+        MEM16(source)=MEM16(source+align)=1000;
+        a[1]=a[2]=0;a[3]=3;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_Play,a)==0);
+        audio_test_observe(average,0);
+        CHECK(fabs(average[0]-1000.0/32768)<0.00003);
+        a[1]=a[2]=0;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetBufferData,a)==0);
         a[0]=device;CHECK(audio_test_call(PILOT_AUDIO_IDirectSound_Release,a)==1);
         a[0]=iface;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_Release,a)==0 && !audio_device);
         CHECK(!test_write_faults(source));allocated=0;CHECK(!vm_free(&source,&allocated,MEM_RELEASE));

@@ -145,6 +145,18 @@ static int32_t audio_upload(struct PilotAudioBuffer *b,void *host,const void *da
 static int32_t audio_set_data(struct PilotAudioBuffer *b,uint32_t source,uint32_t bytes)
 {
     if(b->locked)stop("replacing locked audio data",b->base);
+    if(!source && !bytes) {
+        /* Original SetBufferData stops the voice before clearing storage. The
+         * native destroy joins audio readers/callbacks before freeing PCM;
+         * the guest object, format, gain and routing survive for rebinding. */
+        static unsigned reported;
+        if(reported++<8 || pilot_verbose)
+            fprintf(stderr,"[AUDIO DETACH] iface=%08x data=%08x bytes=%u owned=%u\n",b->base+28,b->data,b->bytes,b->owned);
+        pilot_audio_buffer_destroy(b->host);
+        if(b->owned){uint32_t zero=0;if(vm_free(&b->data,&zero,MEM_RELEASE))stop("audio detach release failed",b->data);}
+        b->host=NULL;b->data=b->bytes=b->owned=0;
+        return 0;
+    }
     if(source && source==b->data && bytes==b->bytes)return 0;
     unsigned align=b->block_align;
     if(!bytes || bytes>64u*1024*1024 || bytes%align)stop("unqualified audio buffer extent",bytes);

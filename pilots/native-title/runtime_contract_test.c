@@ -76,6 +76,7 @@ static int test_write_faults(uint32_t va)
 #ifdef PILOT_AUDIO_NATIVE
 #include "audio_contract_test.inc"
 #include "audio_mix_contract_test.inc"
+#include "audio_detach_contract_test.inc"
 #include "audio_adpcm_contract_test.inc"
 #endif
 #ifdef PILOT_INPUT_NATIVE
@@ -334,6 +335,7 @@ int main(int argc,char **argv)
 #ifdef PILOT_AUDIO_DSP
     if(argc==3 && !strcmp(argv[1],"audio-effects")){test_audio_effects(argv[2]);return 0;}
     if(argc==2 && !strcmp(argv[1],"audio-mix")){test_audio_mix();return 0;}
+    if(argc==2 && !strcmp(argv[1],"audio-detach")){test_audio_detach();return 0;}
 #ifdef PILOT_AUDIO_ADPCM
     if(argc==2 && !strcmp(argv[1],"audio-adpcm")){test_audio_adpcm();return 0;}
 #endif

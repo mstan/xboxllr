@@ -1,6 +1,6 @@
 # Blinx: serial attract-sequence bring-up
 
-**Current, 2026-10-07 (`beads-xbox.1.62`):** serial NTSC Blinx bring-up.
+**Current, 2026-10-08 (`beads-xbox.1.62`):** serial NTSC Blinx bring-up.
 The borrowed Phobos renderer now presents actual game frames. The prior disc
 error is traced and fixed: local VM/texture ownership caps returned out of memory
 while real guest RAM remained available. Blinx now loads 420 textures, passes
@@ -34,7 +34,13 @@ either run. Median frame time falls from 4253.97 ms to 339.97 ms. Real D3D11 eve
 completion remains required; allowing GetData to advance queued commands removes
 the 255-poll stalls. All 34 native tests pass (14.59 s). The faster run writes
 three replay files and stops after 147.11 s at an unqualified zero-byte audio
-buffer request (.88). No new gameplay-image or original-cadence claim follows.
+buffer request (.88). That request is now qualified as Stop, detach, Release,
+then create/rebind the next sound. The captured 300-second follow-up passes
+repeated detachment, completes 19 replay-file writes and opens 09_TimeStop.adx,
+with no guard/fault before the harness stops it. Its last 60 presents measure
+2.738 fps (capture enabled). Images still show a largely black scene behind
+the overlay/effects (.89). Callback retry timer latency remains a separate
+measured candidate (.90). No complete attract-loop or original-cadence claim follows.
 Captured real GP audio
 matches original intro/title content at the checked sample progression.
 Full audio quality/sync and attract validation remain pending. Earlier fresh/repeat runs reached the callback boundary in 12.95/7.33 s
@@ -68,7 +74,8 @@ enforced. No title error condition is bypassed.
 | Xbox ADPCM buffers | Borrowed Phobos/NoRain decoder agrees with APU samples; original unit helpers and real native output/storage/cursor/loop/lifetime tests pass; actual Blinx advances (.85) |
 | Async file writes | Original submission/events, LLE actual storage-before-IRQ and native write/EOF/completion/filewait/ownership pass; actual title completes two1.9MB files (.86) |
 | Callback completion progress | Real completion/FIFO retained; matched stage 0.23515 to 2.94719 fps, max polls 255 to 2; 34 native tests pass (.87) |
-| Next integration work | Qualify reached zero-byte audio-buffer request (.88); capture faster actual title; mostly black scene and original cadence remain unresolved |
+| Audio detach/rebind | Original settings/caller, LLE VOICE_OFF and real native PCM/ADPCM output/ownership validated; actual 300-second run passes old guard and repeated sound reuse (.88) |
+| Next integration work | Diagnose missing scene geometry/content (.89); isolate measured callback retry timer latency (.90); complete loop, input return and original cadence remain unresolved |
 | Input | Physical XInput, keyboard and timed host-controller replay; real startup interruption observed twice; gameplay interruption/menu return pending |
 | Attract startup/loading/render/audio/movies/gameplay | Partial startup/rendering only; no complete attract sequence yet |
 | Repeat loops, interruption/menu return, original cadence | Pending actual title integration measurements |

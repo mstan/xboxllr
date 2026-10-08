@@ -161,6 +161,8 @@ if(EXISTS "${PILOT_GENERATED}/pilot_audio_bindings.h")
   if(PILOT_AUDIO_BACKEND STREQUAL "XAUDIO2_DSP")
     add_test(NAME pilot_audio_mix_contract COMMAND pilot_contract_test audio-mix)
     set_tests_properties(pilot_audio_mix_contract PROPERTIES TIMEOUT 20)
+    add_test(NAME pilot_audio_detach_contract COMMAND pilot_contract_test audio-detach)
+    set_tests_properties(pilot_audio_detach_contract PROPERTIES TIMEOUT 20)
   endif()
   set_tests_properties(pilot_audio_contract PROPERTIES TIMEOUT 20)
   add_test(NAME pilot_audio_failures COMMAND "${CMAKE_COMMAND}"
