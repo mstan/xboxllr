@@ -18,8 +18,8 @@ and calendar services now pass their original-kernel/native fixtures; the next
 actual run passes those calls and opens round1.adx. Flat shading now has a bounded
 software floor and an actual cached GPU implementation around Phobos's pipeline.
 The latest title runs pass that state and the subsequent pixel-shader query,
-submit further GPU work and pass logic COPY, then stop at
-D3DDevice_SetPixelShaderConstant (0x1367e0). Captured real GP audio
+submit further GPU work and pass logic COPY and mapped pixel constants,
+then stop at an unqualified FVF in the adapter. Captured real GP audio
 matches original intro/title content at the checked sample progression.
 Full audio quality/sync and attract validation remain pending. Earlier fresh/repeat runs reached the callback boundary in 12.95/7.33 s
 with zero error-dialog entries or memory failures. The 64 MiB guest limit remains
@@ -45,7 +45,8 @@ enforced. No title error condition is bypassed.
 | Flat shading | Original XDK provoking packet, bounded NV2A software pixels and actual native VS/PS/quad/interpolation tests; title passes prior guard (.78) |
 | Pixel-shader query | Original full query and native real bind/unbind/rebind, output extent and ownership tests pass; actual title advances (.79) |
 | Logic COPY | Original packets/cache, corrected bounded LLE write masks and native COPY/blend restoration pixels pass; actual title advances (.80) |
-| Next integration work | Mapped pixel-shader constants: packed guest cache, combiner mapping, native uniform uploads and current diffuse color |
+| Mapped pixel-shader constants | Original setter/getter and native GPU fixtures pass; existing Phobos uploads reused, packed query cache updated, eye vector retained; actual title advances (.81) |
+| Next integration work | Observe the rejected vertex format and qualify the matching existing donor vertex path against a bounded floor |
 | Input | Physical XInput, keyboard and timed host-controller replay; real startup interruption observed twice; gameplay interruption/menu return pending |
 | Attract startup/loading/render/audio/movies/gameplay | Partial startup/rendering only; no complete attract sequence yet |
 | Repeat loops, interruption/menu return, original cadence | Pending actual title integration measurements |

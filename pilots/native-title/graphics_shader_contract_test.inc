@@ -135,6 +135,7 @@ static void test_graphics_pixels(void)
     fprintf(stderr,"PASS: pixel definition stdcall/HRESULT, independent owned copy, guest descriptor and OOM output preservation\n");
 #ifdef PILOT_D3D_PHOBOS
     memset(definition,0,sizeof(definition));definition[8]=1;definition[9]=0x1100;definition[43]=0xff204060;
+    definition[57]=0x32103210;definition[58]=0x10101010;definition[59]=0x10;
     memcpy(memory+0x19800,definition,sizeof(definition));
     CHECK(call_graphics(PILOT_D3D_D3DDevice_CreatePixelShader,args)==0);
     uint32_t bound=MEM32(args[1]),query=0x19921;
@@ -148,7 +149,37 @@ static void test_graphics_pixels(void)
         CHECK(MEM32(bound)==objects[0] && MEM32(bound+4)==objects[1]);
         CHECK(!memcmp(memory+bound+12,definition,sizeof(definition)));
     }
+    float constants[2][4]={{.25f,.5f,.75f,1},{-.2f,1.2f,0,.5f}};
+    memcpy(memory+0x19a00,constants,sizeof(constants));
+    uint32_t set[]={0,0x19a00,2};call_graphics(PILOT_D3D_D3DDevice_SetPixelShaderConstant,set);
+    uint32_t packed[]={0xff4080bf,0x8000ff00};
+    CHECK(MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_PIXEL_PACKED_CONSTANTS)==packed[0]);
+    CHECK(MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_PIXEL_PACKED_CONSTANTS+4)==packed[1]);
+    for(unsigned i=0;i<8;++i) {
+        if((i%4)<2)CHECK(MEM32(PILOT_D3D_RENDER_STATES+(10+i)*4)==packed[i%4]);
+        CHECK(MEM32(PILOT_D3D_RENDER_STATES+(18+i)*4)==packed[i%2]);
+    }
+    CHECK(MEM32(PILOT_D3D_RENDER_STATES+43*4)==packed[0] && MEM32(PILOT_D3D_RENDER_STATES+44*4)==packed[1]);
+    CHECK(!memcmp(graphics_pixel_eye_vector,constants[0],12));
+    CHECK(!memcmp(memory+bound+12,definition,sizeof(definition)) && MEM32(bound)==objects[0]);
+    uint32_t previous=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_SHADER),fvf=0x44;
+    call_graphics(PILOT_D3D_D3DDevice_SetVertexShader,&fvf);
+    graphics_render_state(143,0,1);graphics_render_state(147,0,1);graphics_render_state(60,0,1);
+    graphics_render_state(59,0,1);graphics_render_state(67,0x01010101,1);
+    struct {float x,y,z,w;uint32_t color;} v[]={{8,8,.5f,1,0xffffffff},{56,8,.5f,1,0xffffffff},{32,56,.5f,1,0xffffffff}};
+    memcpy(memory+0x19c00,v,sizeof(v));uint32_t draw[]={5,3,0x19c00,sizeof(v[0])};
+    CHECK(pilot_gfx_clear(1,0xff000000,1,0)==0);
+    call_graphics(PILOT_D3D_D3DDevice_DrawVerticesUP,draw);graphics_test_pixel(64,128,191,1);
+    MEM32(PILOT_D3D_RENDER_STATES+8*4)=2;MEM32(PILOT_D3D_RENDER_STATES+9*4)=0x1200;
+    call_graphics(PILOT_D3D_D3DDevice_DrawVerticesUP,draw);graphics_test_pixel(0,255,0,0);
+    /* A subsequent update must reach the same borrowed shader without rebinding. */
+    float changed[]={1,.25f,0,.5f};memcpy(memory+0x19a00,changed,16);set[0]=1;set[2]=1;
+    call_graphics(PILOT_D3D_D3DDevice_SetPixelShaderConstant,set);
+    call_graphics(PILOT_D3D_D3DDevice_DrawVerticesUP,draw);graphics_test_pixel(255,64,0,1);
+    CHECK(!memcmp(graphics_pixel_eye_vector,constants[0],12));
+    call_graphics(PILOT_D3D_D3DDevice_SetVertexShader,&previous);
     uint32_t fixed=0;call_graphics(PILOT_D3D_D3DDevice_SetPixelShader,&fixed);
+    fprintf(stderr,"PASS: mapped pixel constants, packed original-query cache, eye vector and changing real GPU pixels\n");
     fprintf(stderr,"PASS: pixel shader query follows real binding, zero/unbind/rebind, borrowed lifetime and four-byte output\n");
 #endif
 }

@@ -433,6 +433,20 @@ the MIT root license does not replace dependencies' own terms. See the
 [DSP audit](docs/NATIVE-DSP-DONOR-2026-10-07.md) and existing
 [private CPU pilot distribution limits](LICENSE-SCOPE.md).
 
+## Native mapped pixel-constant references
+
+The independent Xbox ABI adapter follows the complete original NTSC Blinx
+XDK setter/getter, exercised locally by `tools/native_pixel_constants_reference.py`.
+Private game bytes and generated bindings remain outside source control.
+It reuses the already attributed Phobos renderer and constant-buffer pipeline;
+Phobos's `src/hle/hle_d3d8_state.c` separates shader structure from live render
+state constants, and `src/d3d/d3d8_combiners.c` uploads them. The desktop COM
+constant setter is a stub and is not enabled. Reference pin:
+[`bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0`](https://github.com/phobos665/xboxrecomp/tree/bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0).
+NV097 register declarations identify the secondary constant-zero packet as
+EYE_VECTOR, not diffuse color. No Theseus implementation is used. The private
+pilot's existing GPL-dependent research scope remains unchanged.
+
 ## Native logic COPY contract references
 
 `beads-xbox.1.80` reuses Phobos's existing `d3d8_states.c` blend-state creation,

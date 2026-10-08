@@ -2,6 +2,40 @@
  * 240-byte definition. It submits no GPU work. Keep that caller-visible layout;
  * native compilation is a separate operation and must succeed before binding. */
 static uint32_t graphics_pixels[256];
+static float graphics_pixel_eye_vector[3];
+static void graphics_pixel_constants(const uint32_t *args)
+{
+    uint32_t first=args[0],count=args[2];
+    if(first>=16 || count>16-first)stop("pixel constant range",first);
+    uint32_t handle=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_PIXEL_SHADER);
+    unsigned slot=0;while(slot<256 && graphics_pixels[slot]!=handle)++slot;
+    if(!handle || slot==256)stop("pixel constants require an owned shader",handle);
+    if(!count)return;
+    const uint32_t *definition=graphics_pointer(MEM32(handle+8),240);
+    const float *values=graphics_pointer(args[1],count*16);
+    for(unsigned i=0;i<count;++i) {
+        uint32_t packed=0;const unsigned shifts[]={16,8,0,24};
+        for(unsigned c=0;c<4;++c) {
+            /* Native half-up quantization differs by at most one byte from
+             * the original SSE rounding mode. MINPS NaN selects its bound. */
+            float v=values[i*4+c];if(isnan(v))v=1;
+            if(v<0)v=0;if(v>1)v=1;
+            packed|=(uint32_t)floorf(v*255+.5f)<<shifts[c];
+        }
+        unsigned reg=first+i;
+        MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_PIXEL_PACKED_CONSTANTS+reg*4)=packed;
+        for(unsigned bank=0;bank<2;++bank)for(unsigned stage=0;stage<8;++stage)
+            if(((definition[57+bank]>>(4*stage))&15)==reg)
+                MEM32(PILOT_D3D_RENDER_STATES+(10+8*bank+stage)*4)=packed;
+        for(unsigned bank=0;bank<2;++bank)
+            if(((definition[59]>>(4*bank))&15)==reg)
+                MEM32(PILOT_D3D_RENDER_STATES+(43+bank)*4)=packed;
+        if(!reg)memcpy(graphics_pixel_eye_vector,values+i*4,12);
+    }
+    /* Draw submission already forwards this state to the real donor constant
+     * buffer. Constant changes need no shader recompilation or GPU wait here.
+     * Constant-eye reflection (mode0x12) remains explicitly unsupported. */
+}
 static void graphics_pixel_bind(uint32_t handle)
 {
     graphics_sync_deferred();
@@ -46,6 +80,7 @@ static uint32_t graphics_pixel_create(const uint32_t *args)
 }
 static void graphics_pixels_release(void)
 {
+    memset(graphics_pixel_eye_vector,0,sizeof(graphics_pixel_eye_vector));
     for(unsigned i=0;i<256;++i)if(graphics_pixels[i]) {
         uint32_t bytes=0;
         if(vm_free(&graphics_pixels[i],&bytes,MEM_RELEASE))stop("pixel definition release failed",i);

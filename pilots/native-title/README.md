@@ -6,6 +6,32 @@ It is outside the normal xboxlle build. **The generated executable is a private
 GPL-dependent reference artifact, not the intended non-GPL shipping product.**
 See [license scope](../../LICENSE-SCOPE.md). There is no install/package target.
 
+## Mapped pixel-shader constants
+
+`beads-xbox.1.81`: the complete original setter and getter execute unhooked in
+`tools/native_pixel_constants_reference.py`. They establish packed ARGB cache,
+both eight-stage combiner mappings, final C0/C1, output extent, zero count and
+stdcall. Register zero also emits NV097 EYE_VECTOR (0x181c). It is not diffuse
+color. Existing software NV2A stage/final-constant pixel fixtures provide the
+bounded raster reference.
+
+The adapter writes the guest packed cache and mapped render states. The cache
+offset is decoded into the private revision binding. Existing Phobos draw and
+constant-buffer uploads consume those states; updates need neither shader
+recompilation nor GPU synchronization. Phobos's stub desktop constant setter
+remains excluded. Native half-up quantization allows at most one byte per
+channel difference from original SSE rounding. Eye-vector state is retained;
+constant-eye reflection mode 0x12 remains explicitly unsupported.
+
+Native ABI tests check mappings, query-cache contents, unchanged shader
+ownership/definition and real GPU pixels, including a subsequent constant
+change without rebinding. Original setter/getter and both focused native
+graphics tests pass. Full-suite validation hit the existing intermittent
+process-wide vblank handle-count assertion (.72); its isolated retry passes.
+Actual `build/blinx/run-pixel-constants-attract.log` passes constant updates,
+submits additional GPU work and stops at an unqualified FVF (124.06 s with
+diagnostic capture). No complete gameplay/attract frame or cadence is claimed.
+
 ## Logic COPY during Blinx scene startup
 
 `beads-xbox.1.80`: the reached original caller explicitly requests COPY

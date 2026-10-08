@@ -1,5 +1,21 @@
 # STATUS
 
+## 2026-10-07 - Blinx passes mapped pixel constants; next is vertex format
+
+Actual `pixel-constants-attract` passes SetPixelShaderConstant and submits
+additional GPU work before the adapter rejects an unqualified FVF during
+scene startup (124.06 s with diagnostic capture). No complete gameplay frame,
+attract loop or original cadence is established. Dashboard remains deferred.
+
+The original setter/getter and existing software combiner floor establish
+the bounded contract. HLE reuses Phobos's live constant-buffer uploads,
+updates the original packed query cache and retains eye-vector state. It
+does not enable the donor stub constant setter. Quantization permits one
+byte per channel error; constant-eye reflection remains guarded. Focused
+graphics tests pass 2/2 (5.58 s). The full suite passes 31/32, hitting the
+known intermittent vblank handle-count assertion (.72); isolated retry
+passes (4.66 s). Evidence: `build/blinx/run-pixel-constants-attract.log`.
+
 ## 2026-10-07 - Blinx passes logic COPY; next is mapped pixel constants
 
 Actual `logic-attract` passes the former LogicOp guard and reaches

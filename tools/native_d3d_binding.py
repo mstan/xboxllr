@@ -218,6 +218,15 @@ def bind(xbe: Path, output: Path, symbols: Path):
                     transforms=0x810,viewport=0xa90,materials=0xab0,lights=0x390,light_count=0x394),
         pixel_render=list(data(block_tables[0],32)),pixel_texture=list(data(block_tables[1],27)),
         vertex_render=list(data(block_tables[2],33)),vertex_texture=list(data(block_tables[3],2)))
+    pixel_setter=next(s for s in identified if s['name']=='D3DDevice_SetPixelShaderConstant')
+    pixel_code=list(Cs(CS_ARCH_X86,CS_MODE_32).disasm(
+        data(pixel_setter['address'],functions[pixel_setter['address']]['size']),pixel_setter['address']))
+    packed_offsets=[int(m[1],16) for i in pixel_code if i.mnemonic=='mov' and
+        (m:=re.fullmatch(r'dword ptr \[edx \+ edi\*4 \+ (0x[0-9a-f]+)\], esi',i.op_str))]
+    if pixel_setter['stack_bytes']!=12 or len(packed_offsets)!=1:
+        raise ValueError('unreviewed pixel constant cache')
+    state_defaults['pixel_binding']=dict(packed_constants=packed_offsets[0],
+        setter_sha256=context.digest(functions[pixel_setter['address']]))
     calls=[]
     for symbol in identified:
         if not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*",symbol["name"]): raise ValueError("invalid symbol")
@@ -244,6 +253,7 @@ def bind(xbe: Path, output: Path, symbols: Path):
     header += ['static const struct { uint32_t format,flags; } pilot_d3d_surface_formats[] = {'+
         ', '.join(f'{{0x{x["format"]:x}u,0x{x["flags"]:x}u}}' for x in binding['surface_formats'])+'};']
     header += [f'#define PILOT_D3D_YUV_STATE {binding["yuv_state_index"]}u']
+    header += [f'#define PILOT_D3D_PIXEL_PACKED_CONSTANTS {binding["pixel_binding"]["packed_constants"]}u']
     block=binding['stateblock']
     header += [f'#define PILOT_D3D_STREAMS 0x{block["streams"]:x}u']
     header += [f'#define PILOT_D3D_FVF_OBJECT 0x{binding["fvf_binding"]["object"]:x}u']
