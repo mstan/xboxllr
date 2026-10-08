@@ -7,6 +7,26 @@ static void test_physical_memory(void)
     CHECK(vm_committed(0,0x100000000ull)==before+8192);
     call_kernel(180,&first,1); CHECK(g_eax==8192);
     MEM32(first)=0x12345678;MEM32(first+4096)=0xdeadbeef;
+    call_kernel(179,&first,1);CHECK(g_eax==0x404);
+    uint32_t protection[]={first+4095,2,0x202};
+    uint32_t saved_bx=g_ebx,saved_si=g_esi,saved_di=g_edi,saved_bp=g_ebp;
+    call_kernel(182,protection,3);
+    CHECK(g_ebx==saved_bx && g_esi==saved_si && g_edi==saved_di && g_ebp==saved_bp);
+    CHECK(test_write_faults(first) && test_write_faults(first+4096));
+    CHECK(MEM32(first)==0x12345678 && MEM32(first+4096)==0xdeadbeef);
+    call_kernel(179,&first,1);CHECK(g_eax==0x202);
+    protection[0]=first+1;protection[1]=4095;protection[2]=4;
+    call_kernel(182,protection,3);
+    CHECK(!test_write_faults(first) && test_write_faults(first+4096));
+    MEM32(first)=0x12345678;
+    call_kernel(179,&first,1);CHECK(g_eax==4);
+    uint32_t page=first+4096;call_kernel(179,&page,1);CHECK(g_eax==0x202);
+    protection[0]=first;protection[1]=8192;protection[2]=1; /* invalid for Mm, unlike Nt */
+    call_kernel(182,protection,3);call_kernel(179,&page,1);CHECK(g_eax==0x202);
+    protection[2]=0x404;call_kernel(182,protection,3);
+    CHECK(!test_write_faults(page));MEM32(page)=0xdeadbeef;
+    call_kernel(179,&page,1);CHECK(g_eax==0x404);
+    CHECK(vm_committed(0,0x100000000ull)==before+8192);
     call_kernel(166,args,5);CHECK(!g_eax && MEM32(first)==0x12345678);
     args[2]=0x7ffff;call_kernel(166,args,5);uint32_t second=g_eax;
     CHECK(second==0x80050000u && MEM32(first+4096)==0xdeadbeef);

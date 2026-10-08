@@ -6,7 +6,35 @@ It is outside the normal xboxlle build. **The generated executable is a private
 GPL-dependent reference artifact, not the intended non-GPL shipping product.**
 See [license scope](../../LICENSE-SCOPE.md). There is no install/package target.
 
-## Current checkpoint - shared GPU texture aliases (2026-10-07)
+## Current checkpoint - contiguous memory protection (2026-10-07)
+
+`beads-xbox.1.67`: actual Blinx now passes MmSetAddressProtect on its contiguous
+buffer and reaches NtQueryDirectoryFile while discovering `d:\media\movie\`.
+This is movie discovery, not playback. The adapter uses real VirtualProtect
+as Phobos does, retaining Xbox cache flags per page and checking host failures.
+It supplies Set/QueryAddressProtect for owned contiguous pages. The original
+kernel accepts read-only/read-write plus one cache modifier; invalid protection
+leaves pages unchanged. Other memory domains and zero-length requests remain
+explicitly unqualified. Host coherent caching is the documented tolerance;
+DMA/cache timing is not simulated in this native path.
+
+The runnable original kernel exports 179/182 execute without function hooks in
+a private Unicorn fixture: an unaligned two-page update, one-page restoration,
+invalid protection, and write-combined restoration. PTE physical identity and
+untouched pages survive; query outputs match native fixtures. The in-tree LLE
+`aot_machine_optimized` regression passes (0.97 s), including genuine page-fault
+and stale-write-permission behavior. Native memory, memory statistics and
+complete graphics ABI tests pass (4.86 s total). The unrelated recreated-device
+visibility timeout remains open under `beads-xbox.1.66`.
+
+Private evidence: `build/blinx/protection_oracle.py`,
+`memory-protection-oracle.aot-private.json`, `run-protect-arguments.log` and
+`run-memory-protection.log`. The actual request is 4,968,000 bytes at an owned
+physical alias, PAGE_READWRITE. Next family: real directory enumeration
+(`beads-xbox.1.68`). No audio/movie/attract or cadence result is claimed yet.
+
+## Earlier checkpoint - shared GPU texture aliases (2026-10-07)
+
 
 `beads-xbox.1.65`: Blinx passes the formerly unowned front-buffer texture header,
 executes 151 GPU callbacks and reaches MmSetAddressProtect. The adapter reuses

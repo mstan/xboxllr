@@ -1,5 +1,15 @@
 # STATUS
 
+## 2026-10-07 - Blinx reaches movie-directory discovery
+
+Real contiguous Set/QueryAddressProtect now passes original-kernel permission
+fixtures and actual host read-only/write-restoration tests. Blinx gets through
+its buffer protection call and reaches NtQueryDirectoryFile on `d:\media\movie\`.
+Next: bounded LLE directory contract and Phobos donor comparison, then actual
+host enumeration. This is startup progress, not movie playback or attract
+completion. Recreated-device query timeout `beads-xbox.1.66` remains unresolved.
+
+
 ## 2026-10-07 - Shared GPU texture aliases reach memory protection
 
 Blinx now binds its caller-owned front-buffer texture header to the real shared

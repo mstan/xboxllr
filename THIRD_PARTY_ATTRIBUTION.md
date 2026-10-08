@@ -15,6 +15,17 @@ notices. Preparation/build steps must report missing required notices.
 
 ## Private native-title reference pilot
 
+### Contiguous page protection - 2026-10-07
+
+Phobos `src/kernel/kernel_memory.c` at
+`bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0` supplies the native VirtualProtect /
+VirtualQuery approach. The adapter independently maps owned guest pages,
+checks host failures and retains per-page logical cache policy. No donor body
+is copied. Original owner-supplied kernel exports 179/182 establish permission,
+range and invalid-flag behavior by actual execution; Cxbx VMManager::Protect
+at `585c49a50af1255ab155099e06f24505f9c5a800` is a behavioral cross-check.
+No original kernel bytes or disassembly are committed.
+
 ### Shared GPU image aliases - 2026-10-07
 
 The independent adapter reuses the already imported Phobos RHI image retain,

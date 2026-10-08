@@ -7,6 +7,9 @@
  * coherent with the renderer's explicit upload boundary. */
 struct PhysicalAllocation { uint32_t base,bytes,protect,borrowers; };
 static struct PhysicalAllocation physical_allocations[256];
+/* Cache policy is logical on the coherent host; access permission is enforced
+ * by actual host pages. Track policy per page, including partial-range updates. */
+static uint16_t physical_protection[64*1024*1024/4096];
 static struct PhysicalAllocation *physical_find(uint32_t address,uint32_t bytes)
 {
     for(unsigned i=0;i<256;++i) {
@@ -46,6 +49,8 @@ static uint32_t physical_allocate(uint32_t length,uint32_t low,uint32_t high,uin
     uint32_t base=0x80000000u|(uint32_t)at;
     if(!VirtualAlloc(memory+base,bytes,MEM_COMMIT,PAGE_READWRITE))goto done;
     *slot=(struct PhysicalAllocation){base,bytes,protect,0}; result=base;
+    for(uint32_t page=(base&0x0fffffff)/4096;page<((base&0x0fffffff)+bytes)/4096;++page)
+        physical_protection[page]=(uint16_t)protect;
     fprintf(stderr,"[CONTIGUOUS CREATE] base=%08x bytes=%u alignment=%u protect=%x\n",base,bytes,alignment,protect);
 done:
     ReleaseSRWLockExclusive(&vm_lock);return result;
@@ -57,12 +62,45 @@ static void physical_free(uint32_t base)
     if(!a || a->base!=base)stop("unowned contiguous allocation release",base);
     if(a->borrowers)stop("contiguous allocation still owns registered resources",base);
     if(!VirtualFree(memory+base,a->bytes,MEM_DECOMMIT))stop("contiguous release failed",base);
+    memset(physical_protection+(base&0x0fffffff)/4096,0,a->bytes/4096*sizeof(physical_protection[0]));
     memset(a,0,sizeof(*a));ReleaseSRWLockExclusive(&vm_lock);
+}
+static void physical_protect(uint32_t base,uint32_t size,uint32_t protect)
+{
+    /* Original kernel export 182 accepts RO/RW plus one cache policy. Invalid
+     * protection leaves all PTEs unchanged. This is a void stdcall service. */
+    uint32_t access=protect&6,cache=protect&0x600;
+    if((protect&~0x606u) || (access!=2 && access!=4) || cache==0x600)return;
+    if(!size || (uint64_t)base+size>0x100000000ull)stop("unqualified contiguous protection range",base);
+    uint32_t low=base&~4095u;
+    uint64_t end=((uint64_t)base+size+4095)&~4095ull;
+    vm_ensure();AcquireSRWLockExclusive(&vm_lock);
+    if(!physical_find(low,(uint32_t)(end-low)))stop("protection requires owned contiguous pages",base);
+    DWORD old;
+    if(!VirtualProtect(memory+low,(SIZE_T)(end-low),access,&old))stop("host contiguous protection failed",GetLastError());
+    for(uint32_t page=(low&0x0fffffff)/4096;page<(end-0x80000000ull)/4096;++page)
+        physical_protection[page]=(uint16_t)protect;
+    ReleaseSRWLockExclusive(&vm_lock);
+}
+static uint32_t physical_query_protection(uint32_t address)
+{
+    AcquireSRWLockShared(&vm_lock);
+    if(!physical_find(address,1))stop("protection query requires owned contiguous storage",address);
+    MEMORY_BASIC_INFORMATION info;
+    if(!VirtualQuery(memory+address,&info,sizeof(info)) || info.State!=MEM_COMMIT)
+        stop("host contiguous protection query failed",address);
+    uint32_t protect=physical_protection[(address&0x0fffffff)/4096];
+    if(info.Protect!=(protect&6))stop("contiguous protection ownership mismatch",address);
+    ReleaseSRWLockShared(&vm_lock);return protect;
 }
 static void physical_kernel(unsigned ordinal)
 {
     uint32_t first=MEM32(g_esp+4);
-    if(ordinal==180) {
+    if(ordinal==182) {
+        physical_protect(first,MEM32(g_esp+8),MEM32(g_esp+12));g_esp+=16;
+    } else if(ordinal==179) {
+        g_eax=physical_query_protection(first);g_esp+=8;
+    } else if(ordinal==180) {
         AcquireSRWLockShared(&vm_lock);
         struct PhysicalAllocation *a=physical_find(first,1);
         if(!a || a->base!=first)stop("allocation-size query requires an owned contiguous base",first);
