@@ -11,7 +11,7 @@ static const char *media_content_path;
 static HANDLE media_root,media_identity,storage_roots[6],storage_parent;
 static WCHAR storage_path[32768];
 static SRWLOCK media_lock=SRWLOCK_INIT;
-struct MediaFile { HANDLE host,async_idle; uint32_t id,access; unsigned partition,cacheable,asynchronous,pending; SRWLOCK io_lock; };
+struct MediaFile { HANDLE host,async_idle,async_signal; uint32_t id,access; unsigned partition,cacheable,asynchronous,pending; SRWLOCK io_lock; };
 static struct MediaFile media_files[256];
 static uint32_t media_next_id=0x50000001u;
 typedef LONG (NTAPI *MediaOpen)(PHANDLE,ACCESS_MASK,POBJECT_ATTRIBUTES,PIO_STATUS_BLOCK,ULONG,ULONG);
@@ -178,6 +178,20 @@ static HANDLE media_handle(uint32_t id)
 {
     struct MediaFile *file=media_owned(id); return file ? file->host : NULL;
 }
+/* The guest file signal follows publication of its guest IOSB, not the earlier
+ * native kernel signal. It signals each completed request; idle drains all. */
+static HANDLE media_wait_duplicate(uint32_t id,uint32_t *status)
+{
+    HANDLE host=NULL;*status=MEDIA_BAD_HANDLE;AcquireSRWLockShared(&media_lock);
+    struct MediaFile *file=media_owned(id);
+    if(file) {
+        *status=0xc0000022u;
+        if(file->access&SYNCHRONIZE)
+            *status=DuplicateHandle(GetCurrentProcess(),file->asynchronous?file->async_signal:file->host,
+                GetCurrentProcess(),&host,0,FALSE,DUPLICATE_SAME_ACCESS)?0:0xc000009au;
+    }
+    ReleaseSRWLockShared(&media_lock);return host;
+}
 static unsigned media_partition(uint32_t id)
 {
     for (unsigned i=0;i<256;++i) if (media_files[i].host && media_files[i].id==id) return media_files[i].partition;
@@ -195,8 +209,8 @@ static uint32_t media_close(uint32_t id)
          * that release before closing/reusing this slot and its SRW lock. */
         AcquireSRWLockExclusive(&media_files[i].io_lock);
         if(media_files[i].async_idle) {
-            if(!CloseHandle(media_files[i].async_idle))stop("file completion idle close failed",id);
-            media_files[i].async_idle=NULL;
+            if(!CloseHandle(media_files[i].async_idle) || !CloseHandle(media_files[i].async_signal))stop("file completion event close failed",id);
+            media_files[i].async_idle=media_files[i].async_signal=NULL;
         }
         if (!CloseHandle(media_files[i].host)) stop("owned media handle close failed",id);
         fsc_forget(id);
@@ -296,10 +310,15 @@ static uint32_t media_open(uint32_t *args,int create)
      * handles. Desktop NT requires FILE_READ_ATTRIBUTES for that operation.
      * Supply metadata access internally, without adding FILE_READ_DATA. */
     uint32_t host_access=access|FILE_READ_ATTRIBUTES;
+    /* Installed HDD files use native buffering, following Phobos's mapping.
+     * The original XAPI interface submits byte-counted records with option0x48;
+     * desktop NO_BUFFERING would impose a different device's sector rules.
+     * Retain explicit write-through/flush and actual byte counts/completion. */
+    uint32_t host_options=partition && !(options&1)?options&~8u:options;
     if (!status && create) {
         LARGE_INTEGER allocation; if (args[4]) allocation.QuadPart=(int64_t)MEM64(args[4]);
-        status=storage_create_host(parent,path,host_access,share,options,args[7],args[5],args[4]?&allocation:NULL,&handle,&io);
-    } else if (!status) status=media_open_host(parent,path,host_access,share,options,&handle,&io);
+        status=storage_create_host(parent,path,host_access,share,host_options,args[7],args[5],args[4]?&allocation:NULL,&handle,&io);
+    } else if (!status) status=media_open_host(parent,path,host_access,share,host_options,&handle,&io);
     uint32_t granted_access=0;
     if(!status) {
         IO_STATUS_BLOCK access_io={0};
@@ -307,10 +326,16 @@ static uint32_t media_open(uint32_t *args,int create)
         if(status)CloseHandle(handle);
     }
     if (!status) {
-        media_files[slot].async_idle=NULL;media_files[slot].pending=0;
+        media_files[slot].async_idle=media_files[slot].async_signal=NULL;media_files[slot].pending=0;
         if(!(options&0x30)) {
             media_files[slot].async_idle=CreateEventW(NULL,TRUE,TRUE,NULL);
-            if(!media_files[slot].async_idle){CloseHandle(handle);media_iosb(iosb,0xc000009au,0);return 0xc000009au;}
+            media_files[slot].async_signal=CreateEventW(NULL,TRUE,TRUE,NULL);
+            if(!media_files[slot].async_idle || !media_files[slot].async_signal) {
+                if(media_files[slot].async_idle)CloseHandle(media_files[slot].async_idle);
+                if(media_files[slot].async_signal)CloseHandle(media_files[slot].async_signal);
+                media_files[slot].async_idle=media_files[slot].async_signal=NULL;
+                CloseHandle(handle);media_iosb(iosb,0xc000009au,0);return 0xc000009au;
+            }
         }
         media_files[slot].host=handle; media_files[slot].id=media_next_id++;media_files[slot].access=granted_access;
         media_files[slot].partition=partition;
@@ -346,9 +371,10 @@ static void media_kernel(unsigned ordinal)
             if(ordinal==207) g_eax=media_directory(file,&io,a);
             else if (transfer) {
                 if(ordinal==219 && !(owned->access&FILE_READ_DATA))g_eax=0xc0000022u;
+                else if(ordinal==236 && !(owned->access&(FILE_WRITE_DATA|FILE_APPEND_DATA)))g_eax=0xc0000022u;
                 else if(owned->asynchronous) {
-                    if(ordinal!=219)stop("asynchronous file write completion outside qualified scope",ordinal);
-                    async_delivery=1;g_eax=media_async_read(owned,a);
+                    if(ordinal==236)fsc_forget(owned->id);
+                    async_delivery=1;g_eax=media_async_transfer(owned,a,ordinal==236);
                 } else {
                 /* A context alone requests no callback. XAPI ReadFile passes
                  * its OVERLAPPED pointer here even with no APC routine/event.

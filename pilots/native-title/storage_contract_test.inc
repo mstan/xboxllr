@@ -4,12 +4,14 @@ static void test_string(uint32_t va,uint32_t buffer,const char *value)
     uint32_t args[]={va,buffer}; call_kernel(289,args,2);
     CHECK(MEM16(va)==strlen(value) && MEM16(va+2)==strlen(value)+1 && MEM32(va+4)==buffer);
 }
+#include "file_write_contract_test.inc"
 static void test_storage(void)
 {
     char temp[MAX_PATH],directory[MAX_PATH],path[MAX_PATH];
     CHECK(GetTempPathA(MAX_PATH,temp) && GetTempFileNameA(temp,"xls",0,directory));
     CHECK(DeleteFileA(directory) && CreateDirectoryA(directory,NULL));
     storage_mount(directory);
+    test_storage_async(directory);
     const uint32_t out=0x1b000,iosb=0x1b010,info=0x1b020,offset=0x1b060,buffer=0x1b100;
     uint32_t open[]={out,FILE_LIST_DIRECTORY|SYNCHRONIZE,0x1a000,iosb,3,0x800021};
     test_media_name("\\Device\\Harddisk0\\Partition1\\",0);

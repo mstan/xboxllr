@@ -24,9 +24,12 @@ it restores scene-compositing state and presents the loading screen. Phobos's
 GPU feedback snapshot now passes the texture/render-output overlap and Blinx
 opens 01_StageStart.adx. Borrowed Xbox ADPCM now passes the format0x69 stop;
 the latest run completes more stage reads and reaches the Demo play overlay.
-It then stops at asynchronous NtWriteFile completion for z:\pelon000.rec (.86).
-The underlying frame remains black; no rendered gameplay is established.
-The 246.109-second diagnostic run also leaves slow stage loading unresolved.
+Asynchronous writes now complete two actual 1,913,856-byte replay files (.86).
+The 420-second bounded run continues without a guard/crash; captures show the
+overlay and a green effect, then mostly black frames. No rendered gameplay is
+established. Tail presentation measures 0.236fps with diagnostics, far below
+the cadence goal. Live/final stacks point to callback-barrier waits (.87),
+but the proposed1ms ready-queue delay alone cannot explain4.25-second frames.
 Captured real GP audio
 matches original intro/title content at the checked sample progression.
 Full audio quality/sync and attract validation remain pending. Earlier fresh/repeat runs reached the callback boundary in 12.95/7.33 s
@@ -58,7 +61,8 @@ enforced. No title error condition is bypassed.
 | Empty vertex binding | Complete original/native declaration state agrees for zero and restoration; empty-format drawing stays guarded (.82) |
 | Render-target feedback | Observed aligned full-screen scene pass; bounded NV2A pixels and real native snapshot/cache/lifetime tests pass; borrowed Phobos implementation advances actual Blinx (.84) |
 | Xbox ADPCM buffers | Borrowed Phobos/NoRain decoder agrees with APU samples; original unit helpers and real native output/storage/cursor/loop/lifetime tests pass; actual Blinx advances (.85) |
-| Next integration work | Async writes for z:\pelon000.rec at Demo play entry; bounded completion/ownership contract, donor inspection and existing async IO reuse (.86) |
+| Async file writes | Original submission/events, LLE actual storage-before-IRQ and native write/EOF/completion/filewait/ownership pass; actual title completes two1.9MB files (.86) |
+| Next integration work | Measure callback completion and presentation stalls at Demo play;0.236fps diagnostic tail and mostly black scene remain unacceptable (.87) |
 | Input | Physical XInput, keyboard and timed host-controller replay; real startup interruption observed twice; gameplay interruption/menu return pending |
 | Attract startup/loading/render/audio/movies/gameplay | Partial startup/rendering only; no complete attract sequence yet |
 | Repeat loops, interruption/menu return, original cadence | Pending actual title integration measurements |

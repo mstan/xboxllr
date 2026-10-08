@@ -130,6 +130,15 @@ first loading image; the separate presentation experiment remains uncommitted
 and stops at the host thread-naming diagnostic. No new menu, attract or speed
 result is claimed.
 
+## Blinx asynchronous write service (2026-10-07)
+
+`.86` reuses our existing native asynchronous read/completion owner for writes.
+Phobos `kernel_file.c` supplies the host-file and buffering approach, but its
+pending/APC omissions are not adopted. Original XAPI submission and KeEvent
+fixtures plus ATA gather/write/readback form the bounded reference. This is
+behavioral reuse, with no copied donor body. See the
+[contract](../pilots/native-title/README.md#asynchronous-writes-and-installed-hdd-files).
+
 ## Blinx Xbox ADPCM adoption (2026-10-07)
 
 `.85` borrows the unchanged Phobos `src/hle/xbox_adpcm.c/.h` (NoRain DOAX

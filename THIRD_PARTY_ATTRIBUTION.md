@@ -15,6 +15,23 @@ notices. Preparation/build steps must report missing required notices.
 
 ## Private native-title reference pilot
 
+### Asynchronous writes and installed HDD buffering - 2026-10-07
+
+Phobos `src/kernel/kernel_file.c` at
+`bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0` supplies the behavioral approach:
+real host writes, truthful byte counts, optional completion events, and avoiding
+desktop no-buffering alignment rules. No donor function body was copied.
+The local implementation extends our existing native asynchronous-read owner,
+including pending completion and file-handle notification omitted by that donor.
+Installed HDD file backing may use host buffering; explicit write-through and
+flush remain real operations. The optical reference is unchanged.
+
+Original owner-provided XAPI code establishes submission layout in
+`tools/native_file_write_reference.py`; existing original event transitions
+and the in-tree ATA write/readback fixture bound completion behavior. These
+are not a complete original FATX/IRP implementation. The host behavior also
+references [Microsoft Nt/ZwWriteFile](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/nf-wdm-zwwritefile).
+
 ### Xbox ADPCM buffers - 2026-10-07
 
 `tools/native_adpcm_donor.py` prepares Phobos `src/hle/xbox_adpcm.c/.h`

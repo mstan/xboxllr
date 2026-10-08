@@ -1,5 +1,26 @@
 # STATUS
 
+## 2026-10-07 - Async writes pass; demo presentation remains very slow
+
+Actual `async-write-attract` completes two 1,913,856-byte replay-file writes
+(`pelon000.rec`, `pelon001.rec`) and continues until the 420-second observation
+limit without a guard/crash. The harness then captures stacks and terminates
+the title (427.141 s including debugger work). Captures show Demo play and a
+green effect, then mostly black frames; rendered gameplay is not established.
+The final measured presentation window is 14 intervals in59.412s, **0.236fps**
+with diagnostics. This does not meet original cadence or prove an attract loop.
+
+`.86`: original XAPI submission/KeEvent fixtures, bounded LLE disk completion
+and native byte-count/event/filewait/lifetime tests pass; native34/34 in14.77s.
+Phobos supplied the host-file/buffering approach, while existing asynchronous
+read ownership supplies actual pending writes. No donor body or stub is added.
+`.87` now tracks callback/completion profiling: both live and final stacks
+show graphics callers waiting at the callback barrier. Tail frames contain
+12 callbacks, so the source's1ms-per-callback delay alone does not explain
+4.25-second frames. Measure GPU-not-ready/polling/dispatcher waits before a fix.
+Evidence is under `build/blinx/async-write-attract` and its run log.
+Dashboard stays deferred; JSRF awaits complete Blinx validation.
+
 ## 2026-10-07 - Borrowed ADPCM passes; Blinx reaches Demo play overlay
 
 Actual `adpcm-attract` passes the prior Xbox ADPCM rejection and further stage

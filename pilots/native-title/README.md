@@ -6,6 +6,49 @@ It is outside the normal xboxlle build. **The generated executable is a private
 GPL-dependent reference artifact, not the intended non-GPL shipping product.**
 See [license scope](../../LICENSE-SCOPE.md). There is no install/package target.
 
+## Asynchronous writes and installed HDD files
+
+`beads-xbox.1.86`: the demo-start caller submits `z:\pelon000.rec` through
+XAPI WriteFile with an OVERLAPPED structure, nullable event and explicit offset.
+The actual run writes 1,913,856 bytes. `native_file_write_reference.py` executes
+the original routine up to its kernel CALL with 44/6000-byte fixture inputs
+and checks those arguments. Those fixture sizes are not the observed runtime
+write length and do not prove original FATX acceptance of every alignment. It neither
+replaces the kernel nor fabricates a completed call. Existing original KeEvent
+fixtures supply event state transitions. The bounded ATA floor now gathers
+both DMA fragments before storing and signaling, independently reads the data
+back through PIO, and rejects failed gathering without success or disk mutation.
+This does not establish the complete retail filesystem/IRP pipeline.
+
+HLE extends the existing asynchronous-read owner to real native writes. Guest
+IOSB publication precedes optional event and file signaling. The file signal
+marks each completed request; a separate idle event drains all requests before
+close/reuse. File waits check SYNCHRONIZE and retain their host reference.
+APCs and implicit async offsets remain explicit unsupported boundaries.
+
+Following Phobos's host-file mapping, installed HDD files use native buffering
+instead of imposing Windows device-sector alignment on guest byte records.
+Optical opens retain their existing mode. Guest byte contents, offsets, EOF,
+access rights and errors remain observable; explicit write-through and flush
+are preserved. Cache residency, device timing and completion interleaving are
+HLE tolerances, not claims of identical hardware behavior. Byte-sized fixture
+writes establish the installed-file HLE behavior; host buffering is not a
+claim that the original disk driver permits every host-accepted request.
+
+Validation: independent host reads confirm exact writes and EOF/gap contents;
+tests exercise optional events, file waits, two IOSBs, early event/file close,
+access rejection and 32 lifetimes. Native suite: 34/34 in 14.77 s. Original
+submission/event fixtures and LLE disk tests pass (disk 0.02 s). Actual
+`async-write-attract` completes two 1,913,856-byte replay-file writes and runs
+to the 420-second observation limit without guard/crash. The harness captures
+stacks then kills its process (427.141 s total). Independent host file size
+confirms the first write. Frames show Demo play and a green effect but no
+established rendered gameplay. Final presentation measures14 intervals over
+59.412 s (0.236fps), including diagnostic overhead. `.87` tracks the measured
+callback-barrier wait;12 callbacks per tail frame mean the1ms queue delay
+alone cannot account for the4.25-second frame interval. Full attract,
+interruption/menu return and original cadence remain unproven.
+
 ## Xbox ADPCM buffers
 
 `beads-xbox.1.85`: Blinx reaches format0x69, mono44100Hz, 36-byte blocks,

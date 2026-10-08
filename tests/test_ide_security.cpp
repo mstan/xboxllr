@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -150,6 +151,42 @@ int main() {
         d.ide.hardware_reset(); d.state(1);
         d.cmd(0xf2); require(d.faults.size() == 1, "unprovisioned disabled-drive auth stops");
         d.state(1);
+    }
+    // Bounded storage-write floor: gather both PRDs into real disk storage
+    // before completion, then read those bytes through the ATA data port.
+    for (bool fail_second : {false,true}) {
+        Config disabled;disabled.mode=Config::Mode::Disabled;
+        Drive d(path.string(),disabled);std::vector<uint8_t> ram(0x5000,0xcc);
+        auto put32=[&](unsigned at,uint32_t value){std::memcpy(ram.data()+at,&value,4);};
+        put32(0x1000,0x2000);put32(0x1004,300);
+        put32(0x1008,0x3000);put32(0x100c,0x80000000u|724);
+        std::array<uint8_t,1024> expected{};
+        for(unsigned i=0;i<expected.size();++i)expected[i]=uint8_t(i*29+(i>>8));
+        std::memcpy(ram.data()+0x2000,expected.data(),300);
+        std::memcpy(ram.data()+0x3000,expected.data()+300,724);
+        unsigned chunks=0;
+        d.ide.set_dma_mem([&](uint32_t at,void* out,size_t n){
+            require(!d.irq && !d.ide.sectors_written(),"DMA cannot signal before gathering and storing data");
+            if(at==0x2000 || at==0x3000){++chunks;if(fail_second && at==0x3000)return false;}
+            if(uint64_t(at)+n>ram.size())return false;
+            std::memcpy(out,ram.data()+at,n);return true;
+        },[](uint32_t,const void*,size_t){return false;});
+        d.lba0();d.ide.io_write(0x1f2,1,2);d.ide.io_write(0x1f3,1,2);d.cmd(0xca);
+        require(!d.irq && !d.ide.sectors_written(),"armed write is not completed");
+        d.ide.io_write(0xff64,4,0x1000);d.ide.io_write(0xff60,1,1);
+        require(chunks==2,"both scatter fragments consumed");
+        if(fail_second) {
+            require(!d.irq && !d.ide.sectors_written() && !d.ide.overlay_sectors() && d.faults.size()==1,
+                    "failed gather cannot invent success or modify media");
+        } else {
+            require(d.irq && d.ide.sectors_written()==2 && d.ide.overlay_sectors()==2 && d.faults.empty(),
+                    "write completion follows actual two-sector storage");
+            d.ack();d.ide.io_write(0xff60,1,0);
+            d.lba0();d.ide.io_write(0x1f2,1,2);d.ide.io_write(0x1f3,1,2);d.cmd(0x20);
+            for(unsigned i=0;i<512;++i)
+                require(d.ide.io_read(0x1f0,2)==(expected[2*i]|uint32_t(expected[2*i+1])<<8),"independent PIO readback of DMA write");
+            d.ack();
+        }
     }
     {
         Drive d(path.string(), Config{}); d.state(7); d.cmd(0xf2);

@@ -15,6 +15,7 @@ static EventCreate event_nt_create;
 static EventSet event_nt_set,event_nt_reset;
 static EventQuery event_nt_query;
 static EventWait event_nt_wait;
+static HANDLE media_wait_duplicate(uint32_t id,uint32_t *status);
 static BOOL CALLBACK event_start(PINIT_ONCE once,void *parameter,void **context)
 {
     (void)once;(void)parameter;(void)context;HMODULE nt=GetModuleHandleW(L"ntdll.dll");
@@ -68,7 +69,10 @@ static void event_kernel(unsigned ordinal)
         g_esp+=20;return;
     }
     uint32_t status;HANDLE host=event_duplicate(first,&status);g_eax=status;
-    if(!host && (ordinal==233 || ordinal==234) && ((first&0xf0000000u)==0x40000000u || (first&0xf0000000u)==0x50000000u))
+    if(!host && (ordinal==233 || ordinal==234) && (first&0xf0000000u)==0x50000000u) {
+        host=media_wait_duplicate(first,&status);g_eax=status;
+    }
+    if(!host && (ordinal==233 || ordinal==234) && (first&0xf0000000u)==0x40000000u)
         stop("non-event handle wait outside qualified scope",first);
     if(host) {
         if(ordinal==225 || ordinal==186) {
