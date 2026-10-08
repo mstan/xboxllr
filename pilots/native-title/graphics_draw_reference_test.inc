@@ -12,6 +12,11 @@ static int check_draw_capture(const char *path)
         streams[i]=malloc(metadata[i][1]);CHECK(streams[i] && fread(streams[i],metadata[i][1],1,file)==1);
     }
     unsigned outputs=header[4]*13*4;float *captured=malloc(outputs*4);CHECK(captured && fread(captured,outputs*4,1,file)==1 && fgetc(file)==EOF);fclose(file);
+    uint32_t replay_shader=0;float *replay=malloc(outputs*4);CHECK(replay);
+    struct PilotVertexProbeStream replay_streams[16]={0};
+    for(unsigned i=0;i<16;++i)replay_streams[i]=(struct PilotVertexProbeStream){streams[i],metadata[i][0]};
+    CHECK(pilot_gfx_shader_create(code,header[5],elements,&replay_shader)==0);
+    CHECK(pilot_gfx_shader_probe(replay_shader,replay_streams,header[4],constants,replay)==0);
     double maximum=0;unsigned comparisons=0;
     for(unsigned vertex=0;vertex<header[4];++vertex) {
         Nv2aVshCPUFullExecutionState storage={0};Nv2aVshExecutionState state=nv2a_vsh_emu_initialize_full_execution_state(&storage);
@@ -37,10 +42,16 @@ static int check_draw_capture(const char *path)
         const unsigned widths[13]={4,0,0,4,4,1,1,4,4,4,4,4,4};
         for(unsigned reg=0;reg<13;++reg)for(unsigned lane=0;lane<widths[reg];++lane) {
             float reference=storage.output_regs[reg*4+lane],native=captured[(vertex*13+reg)*4+lane];
-            CHECK(isfinite(reference) && isfinite(native));double error=fabs((double)reference-native)/fmax(1,fabs(reference));
+            float repeated=replay[(vertex*13+reg)*4+lane];
+            CHECK(isfinite(reference) && isfinite(native) && isfinite(repeated));
+            CHECK(fabs((double)native-repeated)/fmax(1,fabs(native))<=2e-4);
+            double error=fabs((double)reference-native)/fmax(1,fabs(reference));
+            if(error>2e-4)fprintf(stderr,"MISMATCH %s vertex=%u output=%u lane=%u reference=%.9g native=%.9g replay=%.9g scaled=%.9g\n",
+                path,vertex,reg,lane,reference,native,replay[(vertex*13+reg)*4+lane],error);
             CHECK(error<=2e-4);if(error>maximum)maximum=error;++comparisons;
         }
     }
+    pilot_gfx_shader_destroy(replay_shader);free(replay);
     for(unsigned i=0;i<16;++i)free(streams[i]);free(captured);
     fprintf(stderr,"PASS actual draw %s: %u vertices, %u reference outputs, maximum scaled error %.9g\n",path,header[4],comparisons,maximum);return 0;
 }

@@ -1,5 +1,43 @@
 # Native title reference pilot
 
+## Visible attract scene and scalar shader reference (2026-10-08)
+
+`beads-xbox.1.89` / `.91`, branch `investigate/blinx-scene-20261008`, base
+`ac8077e`. Actual NTSC Blinx now renders its textured 3D world and character
+in attract play. The missing handoff was reserved shader constants 58/59:
+viewport scale/offset remained zero, collapsing the scene's XYZ positions.
+Phobos's `shadow_viewport_constants` identifies the service boundary. The
+independent adapter follows the original emitter and existing LLE NV097
+registers, preserving the original pixel bias, depth interval and zero W.
+Hardware-reserved writes do not overwrite the SDK user-constant query cache.
+
+`tools/native_viewport_constants_reference.py` executes the complete original
+NTSC emitter and viewport query, including reserved/no-reserved branches,
+without replacing calls. Image-qualified addresses stay in this reference
+tool; shared runtime uses generated revision metadata. The native viewport
+fixture checks the constants uploaded to the real backend.
+
+The first actual draw comparison exposed a reference defect: the permissive
+NV2A decoder represents scalar ARL with a zero vector mask, and the borrowed
+CPU emulator discarded that write. `cmake/Nv2aVshArl.cmake` generates a corrected
+copy with source/prepared hashes and leaves the donor originals intact. The
+compiled LLE executor now stores the scalar result too. Eight signed/fractional
+indices independently select distinct constants on CPU and GPU; a real LLE
+pushbuffer test retrieves the same three positions through negative/positive
+relative addresses in interpreted and compiled modes.
+
+All 32 captured `scene-viewport` draws agree with the corrected CPU reference
+and fresh GPU replay at the existing 2e-4 scaled-output tolerance. No production
+duplicate execution or instruction-history requirement is introduced. All 35
+native tests pass (15.85 s), the bounded software NV2A test passes (0.31 s;
+OpenGL fixtures unavailable in this build), and 64 pipeline guards pass.
+Private evidence: `build/blinx/scene-viewport/`,
+`build/blinx/viewport-constants-reference.aot-private.json`,
+`build/scene-arl-draw-reference.log`, `build/scene-arl-native-tests.log`.
+The 180-second captured title run has no guard/fault before the harness stops
+it. Full attract loops, interruption/menu return and original cadence remain
+unproven; the timer measurement below predates the visible-scene correction.
+
 ## Callback retry timer checkpoint (2026-10-08)
 
 `beads-xbox.1.90`, branch `perf/blinx-callback-timer-20261008`, base `a56b056`.

@@ -336,7 +336,7 @@ check("there is no PARTIAL compile: a decline leaves vsh_cache_ops_valid_ "
       "vsh_cache_ops_valid_ = false;\n    vsh_cache_ops_.clear();" in cpp and
       "const bool use_compiled_vsh = vsh_cache_ops_valid_;" in cpp)
 check("a destination that provably stores nothing -- unused, an input "
-      "register, or ARL's zero writemask -- is resolved away at compile time",
+      "register, or a zero vector writemask -- is resolved away at compile time",
       "if (output.type == NV2ART_NONE || output.type == NV2ART_INPUT) "
       "return true;" in cpp and "if (!mask) return true;" in cpp)
 check("the compiled form is invalidated with the parse cache AND when the flag "
@@ -374,8 +374,7 @@ check("the SEVEN output registers the device reads back afterwards are added "
 check("the same seven registers are what the verifier compares, so the plan "
       "and its check cannot disagree about what is observable",
       "kConsumed[] = {0, 3, 4, 9, 10, 11, 12};" in cpp)
-check("a relative operand marks a0 for zeroing, because ARL's zero writemask "
-      "means nothing ever writes it",
+check("a relative operand conservatively marks a0 for zeroing",
       "plan.address = true;  // the fetch reads a0" in cpp)
 check("the plan is reported per program, so 'how much zeroing is left' is a "
       "measured number and not a claim",

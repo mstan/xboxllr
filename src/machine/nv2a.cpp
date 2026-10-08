@@ -102,15 +102,16 @@ bool compile_vsh_input(const Nv2aVshInput& input, VshCompiledOp& op,
 
 // Resolve ONE destination half. A slot that provably stores nothing -- unused,
 // a write to an input register (which the vendored code falls through to
-// `continue` for once asserts are off), or a zero writemask (which ARL's
-// address destination always carries) -- becomes kVshBaseNone.
+// `continue` for once asserts are off), or a zero vector writemask -- becomes
+// kVshBaseNone. ARL is a scalar address store despite its decoded zero mask.
 bool compile_vsh_output(const Nv2aVshOutput& output, VshCompiledOp& op,
                         unsigned slot) {
     op.out_base[slot] = kVshBaseNone;
     op.out_mask[slot] = 0;
     op.out_offset[slot] = 0;
     if (output.type == NV2ART_NONE || output.type == NV2ART_INPUT) return true;
-    const unsigned mask = static_cast<unsigned>(output.writemask) & 0xFu;
+    const unsigned mask = output.type == NV2ART_ADDRESS ? NV2AWM_X
+        : static_cast<unsigned>(output.writemask) & 0xFu;
     if (!mask) return true;
     switch (output.type) {
         case NV2ART_OUTPUT:

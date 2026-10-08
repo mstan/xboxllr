@@ -206,6 +206,9 @@ if(PILOT_D3D_SOURCE)
     "${PILOT_D3D_SOURCE}/nv2a-reference/nv2a_vsh_emulator.c"
     "${PILOT_D3D_SOURCE}/nv2a-reference/nv2a_vsh_emulator_execution_state.c")
   target_include_directories(pilot_vsh_reference PUBLIC "${PILOT_D3D_SOURCE}/nv2a-reference")
+  include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/Nv2aVshArl.cmake")
+  xlle_correct_vsh_arl(pilot_vsh_reference
+    "${PILOT_D3D_SOURCE}/nv2a-reference/nv2a_vsh_emulator.c")
   if(PILOT_D3D_DONOR STREQUAL "PHOBOS")
     file(READ "${PILOT_D3D_SOURCE}/donor.json" donor_manifest)
     string(JSON donor_backend GET "${donor_manifest}" backend)

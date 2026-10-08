@@ -7,6 +7,7 @@ static float graphics_float(uint32_t address)
 {float result;memcpy(&result,memory+address,4);return result;}
 static void graphics_store_float(uint32_t address,float value)
 {memcpy(memory+address,&value,4);}
+static void graphics_viewport_offset_scale(float offset[4],float scale[4]);
 static void graphics_projection_viewport(void)
 {
     if(MEM32(PILOT_D3D_RENDER_STATES+143*4)==2)stop("W-buffer projection is unqualified",2);
@@ -35,6 +36,14 @@ static void graphics_transform_depth(const float *matrix)
 static void graphics_transform_viewport(const uint32_t viewport[6])
 {
     memcpy(memory+TRANSFORM_STATE(VIEWPORT),viewport,24);graphics_projection_viewport();
+    /* NV097 viewport writes also update reserved vertex constants 58/59.
+     * Phobos's viewport bridge supplies the same missing handoff. Keep the
+     * original hardware register values, including zero W and pixel bias;
+     * these hardware writes do not change the SDK's user-constant cache. */
+    if(!(MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_VERTEX_RECORD_FLAGS)&0x200u)) {
+        float values[8];graphics_viewport_offset_scale(values+4,values);
+        pilot_gfx_shader_constants(58,2,values);
+    }
 }
 static void graphics_transform_set(uint32_t state,uint32_t pointer)
 {

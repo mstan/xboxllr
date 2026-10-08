@@ -1,6 +1,15 @@
 # Blinx: serial attract-sequence bring-up
 
-**Current, 2026-10-08 (`beads-xbox.1.62`):** serial NTSC Blinx bring-up.
+**Current, 2026-10-08 (`beads-xbox.1.62`):** actual NTSC Blinx now renders
+its textured 3D attract world and character. Reserved viewport constants 58/59
+were missing from the HLE handoff; the original emitter and LLE NV097 register
+contract qualify the correction (.89). A scalar ARL store defect in the
+borrowed CPU reference also required correction (.91); all 32 captured scene
+draws now agree at the existing tolerance, with independent CPU/GPU and compiled
+LLE address tests. All 35 native tests pass. Full loops, input return and
+original-speed cadence remain outstanding; JSRF remains deferred.
+
+Earlier progression:
 The borrowed Phobos renderer now presents actual game frames. The prior disc
 error is traced and fixed: local VM/texture ownership caps returned out of memory
 while real guest RAM remained available. Blinx now loads 420 textures, passes
@@ -78,7 +87,8 @@ enforced. No title error condition is bypassed.
 | Callback completion progress | Real completion/FIFO retained; matched stage 0.23515 to 2.94719 fps, max polls 255 to 2; 34 native tests pass (.87) |
 | Audio detach/rebind | Original settings/caller, LLE VOICE_OFF and real native PCM/ADPCM output/ownership validated; actual 300-second run passes old guard and repeated sound reuse (.88) |
 | Callback retry timer | High-resolution native relative wait with supported fallback; fresh matched stage 2.92987 to 4.16574 fps, all 35 tests pass (.90) |
-| Next integration work | Diagnose missing scene geometry/content (.89); complete loop, input return and original cadence remain unresolved |
+| Attract scene geometry | Viewport reserved-constant handoff fixed; actual world and Blinx visible; original emitter, bounded LLE and 32 real draw comparisons pass (.89/.91) |
+| Next integration work | Extend visible attract playback, exercise input return, measure cadence and resource stability |
 | Input | Physical XInput, keyboard and timed host-controller replay; real startup interruption observed twice; gameplay interruption/menu return pending |
 | Attract startup/loading/render/audio/movies/gameplay | Partial startup/rendering only; no complete attract sequence yet |
 | Repeat loops, interruption/menu return, original cadence | Pending actual title integration measurements |

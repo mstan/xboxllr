@@ -3,6 +3,13 @@
 static void graphics_draw_capture(const uint32_t args[3])
 {
     const char *capture=getenv("XLLE_PILOT_DRAW_CAPTURE");if(!capture || !*capture)return;
+    static unsigned sequence;
+    const char *trigger=getenv("XLLE_PILOT_DRAW_CAPTURE_TRIGGER");
+    if(trigger && *trigger && GetFileAttributesA(trigger)==INVALID_FILE_ATTRIBUTES)return;
+    const char *requested=getenv("XLLE_PILOT_DRAW_CAPTURE_LIMIT");
+    unsigned limit=requested?(unsigned)strtoul(requested,NULL,10):32;
+    if(!limit || limit>256)stop("draw capture limit outside range",limit);
+    if(sequence>=limit)return;
     if(!args[2] || args[2]>65536)stop("draw capture count outside range",args[2]);
     struct GraphicsShader *shader=graphics_shader(MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_SHADER));
     struct PilotVertexElement elements[16];struct PilotVertexProbeStream streams[16]={0};
@@ -22,7 +29,7 @@ static void graphics_draw_capture(const uint32_t args[3])
     if(pilot_gfx_shader_probe(shader->native,streams,args[2],NULL,outputs)<0)stop("draw capture GPU probe failed",0);
     pilot_gfx_shader_capture_constants(constants);
     uint32_t viewport[6];if(pilot_gfx_get_viewport(viewport)<0)stop("draw capture viewport failed",0);
-    static unsigned sequence;char path[1024];
+    char path[1024];
     if(snprintf(path,sizeof(path),"%s/draw-%u.bin",capture,++sequence)>=(int)sizeof(path))stop("draw capture path",0);
     FILE *file=fopen(path,"wb");if(!file)stop("draw capture open",0);
     uint32_t header[]={0x44534c58,1,args[0],args[1],args[2],MEM32(shader->header+8),shader->native,0};
@@ -35,6 +42,8 @@ static void graphics_draw_capture(const uint32_t args[3])
     DRAW_CAPTURE(outputs,args[2]*13*16);
 #undef DRAW_CAPTURE
     free(outputs);if(fclose(file))stop("draw capture close",0);
+    fprintf(stderr,"[DRAW CAPTURE] sequence=%u shader=%u primitive=%u first=%u count=%u target=%08x depth=%.9g\n",
+        sequence,shader->native,args[0],args[1],args[2],graphics_target,graphics_float(TRANSFORM_FIELD(DEPTH_SCALE)));
 }
 static void graphics_draw_common(const uint32_t args[3],uint32_t up_data,uint32_t up_stride)
 {

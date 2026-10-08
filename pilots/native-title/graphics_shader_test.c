@@ -105,6 +105,7 @@ static int check_capture(const char *path)
 }
 #include "graphics_draw_reference_test.inc"
 #include "graphics_fvf_reference_test.inc"
+#include "graphics_arl_reference_test.inc"
 int main(int argc,char **argv)
 {
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
@@ -125,6 +126,7 @@ int main(int argc,char **argv)
     }
     if(argc>1)for(int i=1;i<argc;++i){if(check_capture(argv[i]))return 1;}
     else {
+        CHECK(check_scalar_address_reference()==0);
         /* ISA-encoded moves plus paired MOV R2,v1 + MOV oD1,R2. The second
          * operation must consume R2 from before the pair's first write. */
         const uint32_t code[]={

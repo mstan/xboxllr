@@ -221,6 +221,7 @@ graphics implementation” statement does not apply to the new PHOBOS build.
 | [phobos665/xboxrecomp](https://github.com/phobos665/xboxrecomp/tree/bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0), `bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0` | Prepared `src/d3d` D3D11/RHI renderer, resources/conversions, state/shader caches, combiner compiler, display resolve and UP upload ring; config, platform vocabulary and pure `src/kernel/nv2a_vsh` helper. Source copies stay in ignored build output. Vulkan files may be retained in the source set but are not compiled here. | Fork GPL-3.0; original LICENSE, NOTICE, LICENSE.upstream-MIT, LICENSES and per-file comments preserved. Adaptations and source/prepared hashes recorded beside the copies. |
 | [sp00nznet/xboxrecomp](https://github.com/sp00nznet/xboxrecomp/tree/1409a7d7801d3e931fb1074be6104209ddd9a33e), `1409a7d7801d3e931fb1074be6104209ddd9a33e` | Existing selectable renderer and adapted physical XInput conversion; also the upstream foundation of Phobos. | MIT, Copyright (c) 2026 sp00nz; original license/NOTICE with prepared renderer and [input MIT notice](pilots/native-title/input-sp00nz-MIT.txt). |
 | Phobos `src/input/input_bindings.c`, `bcccf8c` | Design reference for the independently implemented startup-selected keyboard controller. | Credit in `input_host.c`; no donor parser/sampler body copied. |
+| Phobos `src/hle/hle_d3d8.c::shadow_viewport_constants`, `bcccf8c` | Reference for the reserved vertex-constant 58/59 handoff missing from the native adapter. Independently implemented using the original NTSC packet emitter and existing LLE NV097 registers; retains original pixel bias and zero W rather than donor approximations. | Design reference only; no GPL implementation body copied. Actual renderer remains the private integration credited above. |
 | Phobos `src/hle/audio_output_xaudio2.cpp` and `dsound_buffer_model.c`, `bcccf8c`; upstream [NoRain211/doaxbv-re](https://github.com/NoRain211/doaxbv-re/tree/aa1d3c8afcd8d063171d819e27307070b63f056b), `aa1d3c8afcd8d063171d819e27307070b63f056b` | Actual donor XAudio2 transport compiled by the separate donor probe. Queue ownership and loop-span behavior referenced by the independently implemented title transport, retaining real device completion and DSP processing. | Donor files declare GPL-3.0 and credit doaxbv-re. Probe uses the external checkout with notices. No source bodies copied into the title transport; credit in `audio_xaudio2.cpp`. This is not wholesale Phobos audio adoption. |
 | Phobos `config/seeds/4D530013.json` and `53450036.json`, `bcccf8c` | Sofdec discovery strategy: recover the actual NTSC XBE section entries/pointer table, avoiding imported PAL addresses. Original title decoder remains private. | Source and pin in `native_movie_seeds.py` and generated contract manifest. No donor movie decoder or title binary bytes added to the repository. |
 
@@ -397,6 +398,16 @@ host-FPU path is not incorporated.
 `863fc0f50aa4027af113718d2a63e45ac3be7a42`, is fetched by CMake as the NV2A VSH
 interpreter. Its upstream license is The Unlicense, copied verbatim into
 [LICENSES/nv2a_vsh_cpu-Unlicense.txt](LICENSES/nv2a_vsh_cpu-Unlicense.txt).
+
+`cmake/Nv2aVshArl.cmake` applies an independently authored scalar-address-store
+correction to a generated emulator copy, shared by LLE and private native
+reference tests. The pinned decoder gives ARL a zero vector writemask; the
+upstream emulator therefore discarded its result. The correction writes a0.x
+directly. Original donor files and notices remain intact; each build records
+original/corrected SHA-256 hashes in its `*-arl/provenance.txt`. The compiled
+LLE executor implements the same scalar destination. Signed/fractional address
+fixtures and actual Blinx captured draws qualify this bounded correction
+(`beads-xbox.1.91`); it is not an assertion of exhaustive hardware accuracy.
 
 ## SDL
 

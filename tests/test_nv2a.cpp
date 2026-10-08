@@ -722,7 +722,7 @@ static void test_generated_submit_census_gl() {
 #endif
 }
 
-static uint64_t run_mov_vertex_reference_hash(bool compile_enabled) {
+static uint64_t run_mov_vertex_reference_hash(bool compile_enabled, bool relative = false) {
     std::string fault;
     xlle::Nv2a gpu([&](const std::string& why) { fault = why; });
     std::vector<uint8_t> ram(0x4000000, 0);
@@ -799,6 +799,27 @@ static uint64_t run_mov_vertex_reference_hash(bool compile_enabled) {
     emit(0x0B04, 0x0020001B);
     emit(0x0B08, 0x0836106C);
     emit(0x0B0C, 0x2070F801);
+    if (relative) {
+        // The same three positions are fetched through distinct constants,
+        // using the signed bone-address values observed in Blinx.
+        const float indices[] = {-96.0f, -87.0f, 4.0f};
+        const uint32_t registers[] = {0, 9, 100};
+        std::memcpy(ram.data() + 0x7100, indices, sizeof(indices));
+        emit(0x1724, 0x7100);
+        emit(0x1764, 0x00000412);
+        for (unsigned vertex = 0; vertex < 3; ++vertex) {
+            emit(0x1EA4, registers[vertex]);
+            for (unsigned lane = 0; lane < 4; ++lane) {
+                const float value = lane == 3 ? 1.0f : positions[vertex * 3 + lane];
+                uint32_t bits; std::memcpy(&bits, &value, sizeof(bits));
+                emit(0x0B80 + lane * 4, bits);
+            }
+        }
+        emit(0x1E9C, 0);
+        const uint32_t program[] = {0, 0x01a00200, 0x08000000, 0,
+                                    0, 0x002c001b, 0x0c000000, 0x0000f803};
+        for (unsigned i = 0; i < 8; ++i) emit(0x0B00 + i * 4, program[i]);
+    }
     emit(0x1EA0, 0);
     emit(0x1E94, 2);
     emit(0x17FC, 5);
@@ -983,6 +1004,9 @@ int main() {
     test_generated_uniform_batching();
     test_generated_submit_census_gl();
     test_vsh_compile_toggle_rebuilds_cached_parse();
+    const auto direct_position_hash = run_mov_vertex_reference_hash(false);
+    CHECK(run_mov_vertex_reference_hash(false, true) == direct_position_hash);
+    CHECK(run_mov_vertex_reference_hash(true, true) == direct_position_hash);
     std::string fault;
     xlle::Nv2a gpu([&](const std::string& why) { fault = why; });
     // This renderer declines every accelerated route, forcing the existing

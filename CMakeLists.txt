@@ -92,6 +92,9 @@ FetchContent_Declare(nv2a_vsh_cpu
   # Source-identical reachable twin of xemu's 561fe80 pin (same parent/tree/message).
   GIT_TAG 863fc0f50aa4027af113718d2a63e45ac3be7a42)
 FetchContent_MakeAvailable(nv2a_vsh_cpu)
+include(cmake/Nv2aVshArl.cmake)
+xlle_correct_vsh_arl(nv2a_vsh_emulator
+  "${nv2a_vsh_cpu_SOURCE_DIR}/src/nv2a_vsh_emulator.c")
 
 # --- SDL3 (borrowed host layer) ---
 if(XLLE_WITH_SDL)

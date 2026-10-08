@@ -28,6 +28,8 @@ static void test_graphics_transforms(void)
     float offset[4],scale[4];memcpy(offset,memory+output[0],16);memcpy(scale,memory+output[1],16);
     CHECK(offset[0]==26.53125f && offset[1]==23.53125f && offset[2]==4194303.75f && offset[3]==0);
     CHECK(scale[0]==24 && scale[1]==-20 && scale[2]==8388607.5f && scale[3]==0);
+    float constants[192][4];pilot_gfx_shader_capture_constants(constants);
+    CHECK(!memcmp(constants[58],scale,16) && !memcmp(constants[59],offset,16));
     CHECK(MEM32(source+60)==0xaabbccdd && MEM32(source+80)==0xaabbccdd && MEM32(source+92)==0xaabbccdd && MEM32(source+112)==0xaabbccdd);
     float expected[16];memcpy(expected,memory+TRANSFORM_FIELD(PROJECTION_VIEWPORT),64);
     memset(memory+TRANSFORM_FIELD(PROJECTION_VIEWPORT),0xcc,64);
