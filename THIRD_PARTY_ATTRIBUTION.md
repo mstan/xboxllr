@@ -433,6 +433,21 @@ the MIT root license does not replace dependencies' own terms. See the
 [DSP audit](docs/NATIVE-DSP-DONOR-2026-10-07.md) and existing
 [private CPU pilot distribution limits](LICENSE-SCOPE.md).
 
+## Native flat-shading contract references
+
+Flat shading (`beads-xbox.1.78`) retains the pinned Phobos renderer, shader
+compilers and caches. Its `src/hle/hle_d3d8_state.c` explicitly documents
+SHADEMODE as forwarded but unused; no functioning flat-shading body was
+available to copy there. The new native geometry stage and software NV2A color
+broadcast are independently written. Behavioral references: original NTSC XDK
+initialization (private, SHA-pinned fixture), public NV097 method/value
+declarations, [Microsoft triangle interpolation](https://learn.microsoft.com/en-us/windows/win32/direct3d9/triangle-interpolation)
+and [triangle strips](https://learn.microsoft.com/en-us/windows/win32/direct3d9/triangle-strips),
+and xemu's `hw/xbox/nv2a/pgraph/glsl/geom.c` at the xemu revision listed above
+for provoking-vertex and quad conventions. That GPL geometry implementation
+was consulted, not copied or linked by this addition. Existing private-build
+GPL dependencies retain their existing scope and notices.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

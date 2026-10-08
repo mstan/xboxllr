@@ -15,8 +15,10 @@ idle into game-asset loading and reach PersistDisplay. Its native implementation
 now preserves the real frame and passes D3DDevice_Reset. The subsequent actual
 run loads scene textures and sound banks, reaching 505 textures. Shared clock
 and calendar services now pass their original-kernel/native fixtures; the next
-actual run passes those calls, opens round1.adx and reaches the unsupported flat
-shading state (66 = 0x1d00). Captured real GP audio
+actual run passes those calls and opens round1.adx. Flat shading now has a bounded
+software floor and an actual cached GPU implementation around Phobos's pipeline.
+The latest title run passes that state, submits further GPU work, then stops
+at D3DDevice_GetPixelShader (0x136250). Captured real GP audio
 matches original intro/title content at the checked sample progression.
 Full audio quality/sync and attract validation remain pending. Earlier fresh/repeat runs reached the callback boundary in 12.95/7.33 s
 with zero error-dialog entries or memory failures. The 64 MiB guest limit remains
@@ -39,7 +41,8 @@ enforced. No title error condition is bypassed.
 | Persistent display | Original layout/kernel execution, LLE retained-frame scanout and native pixels/lifetime pass; actual Blinx preserves its frame and reaches Reset (.75) |
 | Display reset | Original buffer/header setup, LLE scanout and repeated native reset/resize/ownership/pixel tests pass; actual Blinx proceeds through reset into scene loading (.76) |
 | Clock/calendar services | Original query/retry/calendar ABI fixtures and native real-clock/conversion tests pass; actual title proceeds to round1.adx and flat shading (.77) |
-| Next integration work | Flat shading (Xbox state 66 = 0x1d00): bounded raster contract, donor support audit, actual GPU interpolation/vertex selection |
+| Flat shading | Original XDK provoking packet, bounded NV2A software pixels and actual native VS/PS/quad/interpolation tests; title passes prior guard (.78) |
+| Next integration work | Pixel-shader query: match original bound-handle read/ownership contract and reuse current donor-backed shader storage |
 | Input | Physical XInput, keyboard and timed host-controller replay; real startup interruption observed twice; gameplay interruption/menu return pending |
 | Attract startup/loading/render/audio/movies/gameplay | Partial startup/rendering only; no complete attract sequence yet |
 | Repeat loops, interruption/menu return, original cadence | Pending actual title integration measurements |

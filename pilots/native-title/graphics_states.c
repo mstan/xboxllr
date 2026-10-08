@@ -34,8 +34,8 @@ int pilot_gfx_xbox_render_state(uint32_t state,uint32_t value)
     case 63:host=D3DRS_DESTBLEND; goto blend;
     case 64:host=D3DRS_ZWRITEENABLE; goto check_boolean;
     case 66:
-        if (value!=0x1d01) return 0; /* Flat shading needs a distinct pipeline. */
-        host=D3DRS_SHADEMODE; converted=2; break;
+        if (value!=0x1d00 && value!=0x1d01) return 0;
+        host=D3DRS_SHADEMODE; converted=value==0x1d00?1:2; break;
     case 67:
         if (value&~0x01010101u) return 0;
         host=D3DRS_COLORWRITEENABLE;

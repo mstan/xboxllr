@@ -2272,6 +2272,7 @@ public:
         kRasterCombinerSpecularFog1,
         kRasterCombinerFinalFactor0,
         kRasterCombinerFinalFactor1,
+        kRasterProvokingVertex,
         kRasterStateWords,
     };
     uint32_t debug_raster_state_word(RasterStateWord word) const {

@@ -162,6 +162,14 @@ the current source and build workflow show bgfx, so check code against docs.
 The inspected build workflow checks compilation/artifacts, not our end-to-end
 contract acceptance. We did not run Theseus or measure its cadence.
 
+Owner follow-up: dashboard correctness/performance remains deferred behind
+Blinx. Preserve this map in `beads-xbox.1.74` (audit) and `.17` (dashboard),
+then consult it only where a concrete Blinx blocker benefits. It does not
+authorize a dashboard implementation detour. `.78` demonstrates the current
+loop: establish the small NV2A flat-color contract, check Phobos (its host
+ignores this state), add the missing behavior around the borrowed renderer,
+then run the actual title. No Theseus code is used for that change.
+
 Decision: keep Theseus as a pinned, attributed behavioral reference. First use
 its audio notes to select relevant integration cases; use its dashboard map
 when dashboard profiling resumes. For each selected case, corroborate with the

@@ -10179,9 +10179,9 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                                    raster_state[kRasterControl0]);
         return true;
     }
-    // Shading: the shared per-pixel loop always interpolates diffuse/specular smoothly
-    // (Gouraud); flat shading is not implemented.
-    if (raster_state[kRasterShadeMode] != 0x1D01) {
+    const bool flat_shading = raster_state[kRasterShadeMode] == 0x1D00;
+    if ((!flat_shading && raster_state[kRasterShadeMode] != 0x1D01) ||
+        (flat_shading && raster_state[kRasterProvokingVertex] > 1)) {
         record_generic_skip_detail(GenericSkipReason::kUnsupportedShadeMode,
                                    raster_state[kRasterShadeMode]);
         return true;
@@ -11433,7 +11433,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
     bool resident_exact_this_batch = false;
     GenericResidentRejectReason resident_reject_this_batch =
         GenericResidentRejectReason::kCount;
-    if (!zpass_enabled_ && renderer_ && effective_clip_valid) {
+    if (!flat_shading && !zpass_enabled_ && renderer_ && effective_clip_valid) {
 #if XLLE_VSH_DRAW_OVERLAP_CENSUS
         const bool fixture_overlap = vsh_draw_overlap_enabled_ && job.vsh_overlap.valid;
         const uint64_t fixture_overlap_t0 = fixture_overlap && perf_excl::g_enabled
@@ -13354,7 +13354,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
 #if XLLE_VSH_DRAW_OVERLAP_CENSUS
     bool gpu_shader_collect_nonfinite = false;
 #endif
-    if (!zpass_enabled_ && gpu_generic_shader_ && renderer_ && effective_clip_valid) {
+    if (!flat_shading && !zpass_enabled_ && gpu_generic_shader_ && renderer_ && effective_clip_valid) {
         ++generic_shader_attempts_;
         GenericShaderDeclineReason decline = GenericShaderDeclineReason::kNone;
         auto& st = gpu_shader_packet.state;
@@ -14903,6 +14903,21 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
     // declined -- again rasterizing in software after the resolve it skipped.
     // It is the SAME loop in the same order both times, which is what makes
     // the fallback structurally identical to never having tried.
+    // Select before winding correction and clipping; a clipped-away provoking
+    // vertex still supplies the primitive's colors. This slow floor intentionally
+    // leaves texture coordinates/positions untouched. Native production uses GS.
+    const auto submit_shaded_triangle = [&](const TransformedVertex& a,
+                                           const TransformedVertex& b,
+                                           const TransformedVertex& c,
+                                           const TransformedVertex& provoking) {
+        if (!flat_shading) { rasterize_triangle(a, b, c); return; }
+        TransformedVertex copies[3] = {a, b, c};
+        for (auto& vertex : copies) {
+            vertex.diffuse = provoking.diffuse;
+            vertex.specular = provoking.specular;
+        }
+        rasterize_triangle(copies[0], copies[1], copies[2]);
+    };
     const auto run_primitives = [&]() {
         std::optional<perf::ScopedAdd> software_raster_timer;
         if (perf::g_enabled && !gpu_shader_collect) {
@@ -14910,27 +14925,28 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                                           perf::g_calls_generic_software_raster);
         }
         const size_t vertex_count = transformed_batch.size();
+        const bool first = raster_state[kRasterProvokingVertex] == 1;
         if (primitive_mode == 5) {
             for (size_t i = 0; i + 2 < vertex_count; i += 3)
-                rasterize_triangle(transformed_batch[i],
+                submit_shaded_triangle(transformed_batch[i],
                                   transformed_batch[i + 1],
-                                  transformed_batch[i + 2]);
+                                  transformed_batch[i + 2], transformed_batch[i + (first ? 0 : 2)]);
         } else if (primitive_mode == 6) {
             for (size_t i = 2; i < vertex_count; ++i) {
                 if ((i & 1u) == 0)
-                    rasterize_triangle(transformed_batch[i - 2],
+                    submit_shaded_triangle(transformed_batch[i - 2],
                                       transformed_batch[i - 1],
-                                      transformed_batch[i]);
+                                      transformed_batch[i], transformed_batch[first ? i - 2 : i]);
                 else
-                    rasterize_triangle(transformed_batch[i - 1],
+                    submit_shaded_triangle(transformed_batch[i - 1],
                                       transformed_batch[i - 2],
-                                      transformed_batch[i]);
+                                      transformed_batch[i], transformed_batch[first ? i - 2 : i]);
             }
         } else {
             for (size_t i = 2; i < vertex_count; ++i)
-                rasterize_triangle(transformed_batch[0],
+                submit_shaded_triangle(transformed_batch[0],
                                   transformed_batch[i - 1],
-                                  transformed_batch[i]);
+                                  transformed_batch[i], transformed_batch[first ? i - 1 : i]);
         }
     };
 #if XLLE_VSH_DRAW_OVERLAP_CENSUS
@@ -15695,6 +15711,7 @@ enum Nv097Handler : uint8_t {
     kNv097M0374,                // method == 0x0374
     kNv097M0378,                // method == 0x0378
     kNv097M037C,                // method == 0x037C
+    kNv097M09FC,
     kNv097M0384,                // method == 0x0384
     kNv097M0388,                // method == 0x0388
     kNv097M038C,                // method == 0x038C
@@ -15835,6 +15852,7 @@ constexpr Nv097Arm kNv097Arms[] = {
     {0x0374, 0x0378, kNv097M0374},
     {0x0378, 0x037C, kNv097M0378},
     {0x037C, 0x0380, kNv097M037C},
+    {0x09FC, 0x0A00, kNv097M09FC},
     {0x0384, 0x0388, kNv097M0384},
     {0x0388, 0x038C, kNv097M0388},
     {0x038C, 0x0390, kNv097M038C},
@@ -16459,6 +16477,10 @@ void Nv2a::dispatch_method(PushMethod push) {
     }
     case kNv097M0378: {
         raster_state_[kRasterStencilOpZPass] = parameter;
+        break;
+    }
+    case kNv097M09FC: {
+        raster_state_[kRasterProvokingVertex] = parameter;
         break;
     }
     case kNv097M037C: {

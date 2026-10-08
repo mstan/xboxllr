@@ -6,6 +6,35 @@ It is outside the normal xboxlle build. **The generated executable is a private
 GPL-dependent reference artifact, not the intended non-GPL shipping product.**
 See [license scope](../../LICENSE-SCOPE.md). There is no install/package target.
 
+## Flat shading for scene startup
+
+`beads-xbox.1.78`: Xbox state 66 accepts flat (0x1d00) and smooth (0x1d01).
+Phobos's state adapter forwards shade mode but its renderer does not implement
+flat colors. The native adapter keeps the borrowed vertex/pixel compilers and
+caches and adds a cached GPU geometry stage only for flat draws. It broadcasts
+diffuse/specular from the first triangle/strip vertex; quads use vertex four.
+Positions, perspective W, texture coordinates and fog remain interpolated.
+There is no per-draw CPU vertex readback, expansion or duplicate execution.
+
+`tools/native_flat_reference.py` executes the original NTSC XDK initialization
+basic block without hooks and observes NV097 method 0x09fc = FIRST. It does not
+claim a full CreateDevice run. Machine NV2A software tests exercise actual
+pushbuffer state, first/last triangle/strip selection, clipping and output RAM.
+This bounded floor supplies the interpolation contract; native GPU fixtures
+check fixed-function and programmable VS linkage, diffuse/specular, flat to
+smooth changes, clipping, quads and varying texture coordinates. The native
+backend covers its qualified triangle/strip/quad topologies; new line/fan or
+two-sided lighting needs separate qualification. The machine's generic GPU
+shortcuts remain smooth-only so they cannot silently override the flat floor.
+Shader objects are cached per device and released on teardown.
+
+Actual `build/blinx/run-flat-attract.log` passes the former shade-mode stop,
+submits additional GPU work during scene startup and stops at the unimplemented
+`D3DDevice_GetPixelShader` query (0x136250). Diagnostic duration 121.05 s;
+captures do not yet establish a gameplay frame or original-speed attract loop.
+All 32 native tests pass in 13.36 s; the final added combiner pixel cases pass
+the backend test in 0.91 s, and software NV2A passes in 0.22 s.
+
 ## Shared system-time query
 
 `beads-xbox.1.77`: `KeQuerySystemTime` writes one coherent 64-bit system time

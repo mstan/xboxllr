@@ -60,6 +60,17 @@ static int test_native_draw_pipeline(void)
     pilot_gfx_set_state(D3DRS_ZENABLE,0);
     CHECK(pilot_gfx_draw_vertices(6,2,4)==0 && pilot_gfx_readback(pixels,sizeof(pixels))==0);
     CHECK(abs((int)pixels[sample]-64)<=1 && abs((int)pixels[sample+1]-128)<=1 && abs((int)pixels[sample+2]-191)<=1);
+    /* Flat colors must survive the programmable VS -> borrowed PS linkage,
+     * including the second strip primitive with reversed vertex winding. */
+    for(unsigned i=2;i<6;++i) {
+        memset(vertex[i].specular,0,16);vertex[i].specular[(i-2)%3]=1;vertex[i].specular[3]=1;
+    }
+    pilot_gfx_vertex_upload(attributes,vertex,sizeof(vertex));
+    CHECK(pilot_gfx_xbox_render_state(66,0x1d00));
+    CHECK(pilot_gfx_draw_vertices(6,2,4)==0 && pilot_gfx_readback(pixels,sizeof(pixels))==0);
+    CHECK(pixels[sample]==255 && !pixels[sample+1] && !pixels[sample+2]);
+    CHECK(!pixels[(44*64+44)*4] && pixels[(44*64+44)*4+1]==255 && !pixels[(44*64+44)*4+2]);
+    CHECK(pilot_gfx_xbox_render_state(66,0x1d01));
     pilot_gfx_texture_bind(0,0);pilot_gfx_texture_destroy(texture);
     pilot_gfx_vertex_bind(0,0,0);pilot_gfx_vertex_bind(7,0,0);pilot_gfx_vertex_destroy(positions);pilot_gfx_vertex_destroy(attributes);
     pilot_gfx_shader_destroy(shader);viewport[0]=viewport[1]=0;viewport[2]=viewport[3]=64;viewport[4]=0;viewport[5]=0x3f800000;

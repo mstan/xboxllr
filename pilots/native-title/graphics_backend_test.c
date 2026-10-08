@@ -8,6 +8,7 @@
 #include "graphics_draw_backend_test.inc"
 #include "graphics_completion_backend_test.inc"
 #include "graphics_fvf_backend_test.inc"
+#include "graphics_flat_backend_test.inc"
 #include "graphics_pixel_backend_test.inc"
 #include "graphics_movie_backend_test.inc"
 #include "graphics_visibility_backend_test.inc"
@@ -142,6 +143,7 @@ int main(void)
         CHECK(test_resource_bindings()==0);
         CHECK(test_fvf_pipeline()==0);
         CHECK(test_native_draw_pipeline()==0);
+        CHECK(test_flat_pipeline()==0);
         CHECK(test_resource_completion()==0);
 #ifdef PILOT_D3D_PHOBOS
         CHECK(test_combiner_memory_draw()==0);

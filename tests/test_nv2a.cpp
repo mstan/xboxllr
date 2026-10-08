@@ -6413,6 +6413,40 @@ int main() {
             CHECK(get32(gc_ram, 0x20000 + gc_a_offset) == 0xFFFFFFFFu);
         }
 
+        // Bounded flat-color floor for Blinx: real pushbuffer methods, raster
+        // writes and first/last provoking selection before clipping/winding.
+        {
+            const uint32_t colors[] = {0xFF0000FF, 0xFF00FF00, 0xFFFF0000, 0xFFFFFFFF};
+            const uint32_t argb[] = {0xFFFF0000, 0xFF00FF00, 0xFF0000FF, 0xFFFFFFFF};
+            emit_gc(0x0308, 0); // both windings; odd strip winding differs
+            auto draw_flat = [&](uint32_t mode, uint32_t first, bool clipped = false) {
+                emit_gc(0x09FC, first);
+                emit_gc(0x037C, 0x1D00);
+                emit_gc(0x17FC, mode);
+                const float xy[4][2] = {{8,8},{8,56},{56,8},{56,56}};
+                for (unsigned i = 0; i < (mode == 5 ? 3u : 4u); ++i) {
+                    emit_gc(0x1518, gc_float_bits(clipped && !i ? -24.f : xy[i][0]));
+                    emit_gc(0x151C, gc_float_bits(xy[i][1]));
+                    emit_gc(0x1520, gc_float_bits(50.f));
+                    emit_gc(0x194C, colors[i]);
+                    emit_gc(0x1524, gc_float_bits(1.f));
+                }
+                emit_gc(0x17FC, 0); kick_gc();
+                CHECK(gc_fault.empty());
+                CHECK(gc_gpu.debug_raster_state_word(xlle::Nv2a::kRasterProvokingVertex) == first);
+            };
+            for (uint32_t first : {0u, 1u}) {
+                draw_flat(5, first);
+                CHECK(get32(gc_ram, 0x10000 + 20*256 + 20*4) == argb[first ? 0 : 2]);
+                draw_flat(6, first);
+                CHECK(get32(gc_ram, 0x10000 + 20*256 + 20*4) == argb[first ? 0 : 2]);
+                CHECK(get32(gc_ram, 0x10000 + 44*256 + 44*4) == argb[first ? 1 : 3]);
+            }
+            draw_flat(5, 1, true);
+            CHECK(get32(gc_ram, 0x10000 + 20*256 + 20*4) == argb[0]);
+            emit_gc(0x037C, 0x1D01); emit_gc(0x09FC, 0); emit_gc(0x0308, 1);
+        }
+
         // The same state with blend enabled must blend alpha as well as RGB. With
         // SRC_ALPHA/ONE_MINUS_SRC_ALPHA over a zero destination, 0xCC alpha becomes
         // round((0xCC/255)^2*255)=0xA3.

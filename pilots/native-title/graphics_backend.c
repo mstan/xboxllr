@@ -31,6 +31,7 @@ void pilot_d3d_fvf_prepare(UINT fvf,const float scale[4],const float offset[4]);
 #include "graphics_completion_backend.inc"
 #include "graphics_visibility_backend.inc"
 #include "graphics_quad_backend.inc"
+#include "graphics_flat_backend.inc"
 
 void pilot_gfx_pixel_fixed(void)
 {
@@ -103,6 +104,7 @@ void pilot_gfx_close(void)
     pilot_visibility_close();
     pilot_completion_close();
     pilot_quad_close();
+    pilot_flat_close();
     pilot_gfx_shaders_close();
     for (unsigned i=0;i<256;++i)
         if(pilot_vertices[i].object) pilot_d3d_backend_stop("device close with outstanding vertex ownership");
@@ -659,7 +661,9 @@ int32_t pilot_gfx_draw_up(uint32_t primitive,uint32_t count,const void *data,uin
     if (!pilot_device) return E_FAIL;
     pilot_d3d_raster_texture_mode(0,NULL);
     HRESULT status=pilot_device->lpVtbl->SetVertexShader(pilot_device,fvf);
+    if (SUCCEEDED(status)) status=pilot_flat_prepare(primitive==4?5:primitive==5?6:0);
     if (SUCCEEDED(status)) status=pilot_device->lpVtbl->DrawPrimitiveUP(pilot_device,(D3DPRIMITIVETYPE)primitive,count,data,stride);
+    ID3D11DeviceContext_GSSetShader(d3d8_GetD3D11Context(),NULL,NULL,0);
     if(SUCCEEDED(status)) {
         pilot_mark_draw();
         if(pilot_color_target){pilot_textures[pilot_color_target-1].uploaded=1;pilot_textures[pilot_color_target-1].gpu_written=1;}
@@ -710,8 +714,12 @@ int32_t pilot_gfx_draw_vertices(unsigned primitive,unsigned first,unsigned count
     }
     pilot_d3d_raster_texture_mode(1,scale);d3d8_shaders_prepare_pixel();d3d8_states_apply();
     ID3D11DeviceContext *context=d3d8_GetD3D11Context();
+    HRESULT flat_result=pilot_flat_prepare(primitive);if(FAILED(flat_result))return flat_result;
+    int flat_quad=primitive==8 && d3d8_GetRenderStates()[D3DRS_SHADEMODE]==1;
+    if(flat_quad)topology=D3D11_PRIMITIVE_TOPOLOGY_LINELIST_ADJ;
     ID3D11DeviceContext_IASetPrimitiveTopology(context,topology);
-    if(primitive==8)pilot_quad_draw(first,count);else ID3D11DeviceContext_Draw(context,count,first);
+    if(primitive==8 && !flat_quad)pilot_quad_draw(first,count);else ID3D11DeviceContext_Draw(context,count,first);
+    ID3D11DeviceContext_GSSetShader(context,NULL,NULL,0);
     pilot_mark_draw();
     if(pilot_color_target){pilot_textures[pilot_color_target-1].uploaded=1;pilot_textures[pilot_color_target-1].gpu_written=1;}
     if(pilot_depth_target && pilot_depth_target!=UINT32_MAX){pilot_textures[pilot_depth_target-1].uploaded=1;pilot_textures[pilot_depth_target-1].gpu_written=1;}

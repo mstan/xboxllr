@@ -1,5 +1,23 @@
 # STATUS
 
+## 2026-10-07 - Blinx passes flat shading; next stop is pixel-shader query
+
+Actual `flat-attract` advances beyond state66=0x1d00, submits further real GPU
+work during scene startup, then stops at `D3DDevice_GetPixelShader` (0x136250).
+Private evidence: `build/blinx/run-flat-attract.log`, 121.05 s with capture;
+no new gameplay frame, complete attract loop or cadence result is claimed.
+
+Phobos explicitly forwards but does not render flat shade mode. An independent
+cached GPU geometry stage supplies flat diffuse/specular around its existing
+vertex/pixel compilers, including strips and quads. Original NTSC XDK packet
+execution selects FIRST; the bounded software NV2A floor now implements
+provoking selection and flat colors before clipping. Native real-pixel tests
+cover both VS paths, fixed and register-combiner PS, clipping, texture
+interpolation and smooth restoration. The full native suite passes 32/32 in
+13.36 s; the added combiner cases pass in the focused backend run (0.91 s),
+and software NV2A passes in 0.22 s. Tracked in `beads-xbox.1.78`.
+Theseus remains an attributed reference; dashboard work stays deferred.
+
 ## 2026-10-07 - Blinx advances through clock/calendar services to flat shading
 
 The actual `calendar-attract` run passes the previous system-time and calendar
