@@ -1,5 +1,48 @@
 # Native title reference pilot
 
+## Compiler optimization experiment (2026-10-08)
+
+`beads-xbox.1.98`, branch `perf/blinx-optimized-title-20261008`, base `e965ca9`.
+The title target previously forced `/Od` even in Release. The experimental
+`PILOT_OPTIMIZE_TITLE=ON` builds the generated title and native runtime with
+`/O2` (or `-O2` outside MSVC), without fast math or changes to guest services.
+The option remains OFF by default while this branch is parked for follow-up.
+The optimized build passes all 35 native tests with the D3D debug layer
+(16.25 seconds).
+
+Sequential capture-disabled 200-second runs use the same generated source,
+services, media, input replay, GPU events, texture ownership hints and guest
+CPU15 affinity. Callback profiling remains enabled in both. The executables
+necessarily differ; their hashes and configuration are retained in the run
+manifests. Both complete the first stage naturally with 2329 presents and
+75/75 completed replay writes, without a guard/fault before harness termination.
+
+| Measurement | `/Od` | `/O2` |
+| --- | ---: | ---: |
+| Complete stage, 2328 intervals | 26.88565 fps | 28.04138 fps |
+| Complete stage span | 86.58895 s | 83.02015 s |
+| Median / 95th percentile interval | 33.419 / 43.450 ms | 33.344 / 34.086 ms |
+| First 300 intervals | 30.03240 fps | 27.30554 fps |
+
+This single pair shows a modest 4.30% whole-stage improvement, not a qualified
+original-speed result. Both runs still have 13 intervals above 100 ms, with
+maxima of 0.889 and 1.187 seconds. The first-window regression illustrates the
+effect of those stalls. The 2328 measured callback groups contain 27186
+callbacks in both runs, but their raw context sequences differ from the first
+group; exact callback equivalence is not established by this comparison.
+
+An independent 140-second optimized movie observation reaches opening frame
+2263 with the existing sparse-luma accuracy, but the 75.49-second source still
+takes about 86.07 seconds and the audio repeats ring cycles. Optimization alone
+does not resolve the movie blocker. Next isolate producer thread CPU time from
+wall time during the observed stalls before choosing a decoder or scheduling
+change. Do not alter cursor or completion semantics to hide missing progress.
+
+Private evidence: `build/blinx/optimized-title-comparison.aot-private.json`,
+`optimized-title-whole-stage.aot-private.json`, the two `optimized-title-*`
+run directories/logs and `movie-av-optimized/`. The successful draw-preparation
+baseline remains separate; this branch does not replace its validated default.
+
 ## Full movie validation and decoder stalls (2026-10-08)
 
 `beads-xbox.1.73` and `.98`, branch `validate/blinx-movie-av-20261008`.
@@ -37,8 +80,8 @@ ring-buffer cycle. Stream traces expose producer cursor-poll gaps exceeding a
 cycle. Two targeted stack snapshots land in generated movie coefficient/motion
 decoding; another is in the guest scheduling path. These snapshots suspend the
 process briefly, so that separate run is not a cadence measurement. The pilot
-also still forced `/Od` for Release at this checkpoint. The next experiment is
-compiler optimization before replacing a decoder or altering cursor semantics.
+also still forced `/Od` for Release at this checkpoint. The compiler experiment
+above subsequently shows that `/O2` alone does not resolve the movie repeats.
 
 Private evidence: `build/blinx/movie-av-reference/`, `movie-av-first/`,
 `movie-av-second/`, `movie-av-stream-trace/` and `movie-av-no-readback/`, their

@@ -2,10 +2,13 @@
 
 **Current A/V blocker (.73/.98):** complete opening-movie YUV samples match
 independent decoding through the final frame, but video/audio progress is too
-slow and audio repeats ring cycles. Actual producer polling gaps and decoder
-stack samples direct the next experiment to the pilot's forced unoptimized
-Release build. No complete A/V or original-speed claim follows from visible
-movie playback. See the native-pilot README for evidence and diagnostic limits.
+slow and audio repeats ring cycles. The compiler-optimization experiment
+(`perf/blinx-optimized-title-20261008`) improves one complete-stage comparison
+from 26.89 to 28.04 fps, but does not fix the movie repeats and remains parked
+with an explicit build option. Next distinguish producer CPU time from wall
+time during the observed polling gaps. No complete A/V or original-speed claim
+follows from visible movie playback. See the native-pilot README for evidence
+and diagnostic limits.
 
 **Latest measured speed (.97):** keeping CPU-exposure state on the texture
 owner removes redundant whole-table searches. Same-executable first-stage

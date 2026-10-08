@@ -327,16 +327,27 @@ foreach(kind instruction indirect kernel)
   add_test(NAME pilot_stops_${kind} COMMAND pilot_contract_test ${kind})
   set_tests_properties(pilot_stops_${kind} PROPERTIES WILL_FAIL TRUE)
 endforeach()
+option(PILOT_OPTIMIZE_TITLE "Optimize the generated title and native runtime" OFF)
 if(MSVC)
   # Runtime symbols and generated public names make a stopped title inspectable
   # without recompiling millions of generated lines with debug information.
   set_property(SOURCE runtime.c APPEND PROPERTY COMPILE_OPTIONS /Z7)
   target_link_options(xlle_native_title PRIVATE /DEBUG:FULL)
-  # Bring-up iteration: donor discovery can produce enormous overlapping
-  # functions. Qualify execution before spending minutes optimizing those.
-  target_compile_options(xlle_native_title PRIVATE /bigobj /we4013 /Od /MP4)
+  # Keep the qualified bring-up default while the optimized build is evaluated.
+  # This option covers the actual title code as well as its native runtime.
+  target_compile_options(xlle_native_title PRIVATE /bigobj /we4013 /MP2)
+  if(PILOT_OPTIMIZE_TITLE)
+    target_compile_options(xlle_native_title PRIVATE /O2)
+  else()
+    target_compile_options(xlle_native_title PRIVATE /Od)
+  endif()
   target_link_options(xlle_native_title PRIVATE /STACK:8388608)
 else()
-  target_compile_options(xlle_native_title PRIVATE -O0 -Werror=implicit-function-declaration)
+  target_compile_options(xlle_native_title PRIVATE -Werror=implicit-function-declaration)
+  if(PILOT_OPTIMIZE_TITLE)
+    target_compile_options(xlle_native_title PRIVATE -O2)
+  else()
+    target_compile_options(xlle_native_title PRIVATE -O0)
+  endif()
   target_link_options(xlle_native_title PRIVATE -Wl,--stack,8388608)
 endif()
