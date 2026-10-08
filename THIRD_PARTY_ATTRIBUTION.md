@@ -433,6 +433,21 @@ the MIT root license does not replace dependencies' own terms. See the
 [DSP audit](docs/NATIVE-DSP-DONOR-2026-10-07.md) and existing
 [private CPU pilot distribution limits](LICENSE-SCOPE.md).
 
+## Native logic COPY contract references
+
+`beads-xbox.1.80` reuses Phobos's existing `d3d8_states.c` blend-state creation,
+cache and `rhi_d3d11.c` output merger. The adapter implements Xbox logic COPY
+by disabling effective blending while retaining the requested blend state;
+color-write masks remain active. No external logic-operation body is copied.
+The original NTSC XDK setter is executed unchanged in a private input fixture.
+NV097 method/mask declarations and
+[OpenGL 1.1 sections 4.1.6 and 4.1.8](https://registry.khronos.org/OpenGL/specs/gl/glspec11.pdf)
+inform the bounded software pixel reference. In particular, logic COPY bypasses
+blending and copies source color, subject to masks. The reference fixture also
+exposed/corrected reversed red/blue mask bits in the generic software floor;
+NV097 uses red bit16, green bit8, blue bit0 and alpha bit24.
+Other bitwise logic operations remain unqualified in the native adapter.
+
 ## Native pixel-shader query reference
 
 The adjacent pixel-shader query (`beads-xbox.1.79`) references Phobos's real

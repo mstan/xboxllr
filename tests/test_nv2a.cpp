@@ -6447,6 +6447,26 @@ int main() {
             emit_gc(0x037C, 0x1D01); emit_gc(0x09FC, 0); emit_gc(0x0308, 1);
         }
 
+        // Blinx scene COPY: override blending, retain masks, restore blending
+        // on disable. The source is not synthesized and the writes reach RAM.
+        {
+            auto draw_copy = [&]() {
+                submit_triangle(0,0,40,0,0,40,50,1,gc_pack_ub4(255,0,0,128));
+                CHECK(gc_fault.empty());
+                return get32(gc_ram,0x10000+5*256+5*4);
+            };
+            emit_gc(0x0304,1);emit_gc(0x17BC,1);emit_gc(0x17C0,0x1503);
+            put32(gc_ram,0x10000+5*256+5*4,0xFF0000FF);
+            CHECK(draw_copy()==0x80FF0000);
+            emit_gc(0x0358,0x00010000);
+            put32(gc_ram,0x10000+5*256+5*4,0xFF0000FF);
+            CHECK(draw_copy()==0xFFFF00FF);
+            emit_gc(0x0358,0x01010101);emit_gc(0x17BC,0);
+            put32(gc_ram,0x10000+5*256+5*4,0xFF0000FF);
+            CHECK(draw_copy()==0xBF80007F);
+            emit_gc(0x0304,0);
+        }
+
         // The same state with blend enabled must blend alpha as well as RGB. With
         // SRC_ALPHA/ONE_MINUS_SRC_ALPHA over a zero destination, 0xCC alpha becomes
         // round((0xCC/255)^2*255)=0xA3.

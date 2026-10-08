@@ -13,6 +13,7 @@ static IDirect3D8 *pilot_factory;
 static IDirect3DDevice8 *pilot_device;
 static HWND pilot_window;
 static int pilot_visible;
+static uint32_t pilot_logic_copy,pilot_requested_blend;
 static unsigned char *pilot_saved_display;
 static uint32_t pilot_saved_width,pilot_saved_height;
 /* Slot 0 is the drawable back buffer; slot 1 retains the last presented image.
@@ -105,6 +106,7 @@ void pilot_gfx_close(void)
     pilot_completion_close();
     pilot_quad_close();
     pilot_flat_close();
+    pilot_logic_copy=pilot_requested_blend=0;
     pilot_gfx_shaders_close();
     for (unsigned i=0;i<256;++i)
         if(pilot_vertices[i].object) pilot_d3d_backend_stop("device close with outstanding vertex ownership");
@@ -649,7 +651,22 @@ int32_t pilot_gfx_texture_readback(uint32_t handle,uint32_t level,void *data,uin
 void pilot_gfx_set_state(uint32_t state,uint32_t value)
 {
     if (!pilot_device) pilot_d3d_backend_stop("state change before device creation");
+    if(state==D3DRS_ALPHABLENDENABLE) {
+        pilot_requested_blend=value;
+        if(pilot_logic_copy)value=0;
+    }
     pilot_d3d_require(pilot_device->lpVtbl->SetRenderState(pilot_device,(D3DRENDERSTATETYPE)state,value),__FILE__,__LINE__);
+}
+int pilot_gfx_logic_op(uint32_t value)
+{
+    if(value && value!=0x1503)return 0;
+    /* Logic COPY writes source color, overriding blending but retaining write
+     * masks. Reuse the donor's actual blend-state cache/creation. Keep the
+     * requested blend state so disabling logic restores it, including writes
+     * made while COPY was enabled. Other bitwise operations are not ignored. */
+    pilot_logic_copy=value!=0;
+    pilot_gfx_set_state(D3DRS_ALPHABLENDENABLE,pilot_requested_blend);
+    return 1;
 }
 void pilot_gfx_set_texture_state(uint32_t stage,uint32_t state,uint32_t value)
 {

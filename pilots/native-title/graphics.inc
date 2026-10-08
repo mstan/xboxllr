@@ -236,6 +236,7 @@ void pilot_d3d_dispatch(unsigned entry)
     case PILOT_D3D_D3DDevice_SetRenderState_TextureFactor:graphics_render_state(148,arguments[0],1);break;
     case PILOT_D3D_D3DDevice_SetRenderState_FillMode:graphics_render_state(139,arguments[0],1);break;
     case PILOT_D3D_D3DDevice_SetRenderState_EdgeAntiAlias:graphics_render_state(151,arguments[0],1);break;
+    case PILOT_D3D_D3DDevice_SetRenderState_LogicOp:graphics_render_state(150,arguments[0],1);break;
     case PILOT_D3D_D3DDevice_SetRenderState_YuvEnable:graphics_render_state(PILOT_D3D_YUV_STATE,arguments[0],1);break;
     case PILOT_D3D_D3DDevice_SetRenderStateNotInline:
         graphics_render_state(arguments[0],arguments[1],1);break;

@@ -6,6 +6,27 @@ It is outside the normal xboxlle build. **The generated executable is a private
 GPL-dependent reference artifact, not the intended non-GPL shipping product.**
 See [license scope](../../LICENSE-SCOPE.md). There is no install/package target.
 
+## Logic COPY during Blinx scene startup
+
+`beads-xbox.1.80`: the reached original caller explicitly requests COPY
+(0x1503), then restores its prior logic state. The complete original setter
+in `tools/native_logic_reference.py` proves FIFO enable/op packets, state150
+cache, output extent and calling convention with available FIFO space.
+The software NV2A floor executes COPY into real framebuffer RAM with masks,
+and bypasses blending only while logic is enabled. Its new mask fixture also
+corrects a reversed red/blue mask mapping. Native tests verify actual pixels,
+requested blend changes under COPY and restoration after disable.
+
+HLE reuses the existing Phobos blend state and cache; COPY selects source
+replacement, and disabling logic restores the requested blend state. It adds
+no GPU readback or special shader. This qualifies zero/disabled and COPY,
+not arbitrary bitwise operations: those still fail explicitly. Native tests
+pass 32/32 in 13.65 s; software NV2A passes in 0.29 s.
+The final explicit source-alpha pixel check passes the native ABI test in
+4.51 s. Actual `build/blinx/run-logic-attract.log` passes COPY and reaches
+`D3DDevice_SetPixelShaderConstant` (0x1367e0), 121.06 s with diagnostic capture.
+This is scene-compositing startup progress, not a completed gameplay frame.
+
 ## Flat shading for scene startup
 
 The subsequent `GetPixelShader` query (`beads-xbox.1.79`) reads the existing

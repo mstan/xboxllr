@@ -36,7 +36,7 @@ static void graphics_state_init(void)
     MEM32(PILOT_D3D_RENDER_STATES+143*4)=graphics_parameters[8]!=0;
     memcpy(graphics_state_baseline,memory+PILOT_D3D_RENDER_STATES,sizeof(graphics_state_baseline));
     static const uint32_t render[]={57,58,59,60,61,62,63,64,66,67,68,69,70,71,72,73,74,
-        92,93,94,95,96,97,102,103,115,138,139,143,144,145,147,148};
+        92,93,94,95,96,97,102,103,115,138,139,143,144,145,147,148,150};
     for(unsigned i=0;i<sizeof(render)/sizeof(*render);++i)
         graphics_render_state(render[i],graphics_state_baseline[render[i]],0);
     static const unsigned texture[]={0,1,2,3,4,5,6,7,8,12,14,15,16,18,19,22,23,24,25,26,27,28,29};

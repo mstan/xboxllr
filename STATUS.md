@@ -1,5 +1,19 @@
 # STATUS
 
+## 2026-10-07 - Blinx passes logic COPY; next is mapped pixel constants
+
+Actual `logic-attract` passes the former LogicOp guard and reaches
+`D3DDevice_SetPixelShaderConstant` (0x1367e0) during scene compositing.
+The reached caller uses COPY and later restores prior state. The HLE adapter
+reuses Phobos's blend-state cache to replace source color with masks intact
+and restore requested blending on disable. Other bitwise ops remain explicit.
+Original setter/FIFO/cache and software NV2A pixels establish the bounded
+contract. Its test caught/fixed reversed red/blue write-mask bits in the
+software reference. Native suite: 32/32, 13.65 s; final added alpha-byte check:
+ABI pass, 4.51 s; LLE NV2A: 0.29 s. Private run:
+`build/blinx/run-logic-attract.log`, 121.06 s with capture. No gameplay frame,
+complete attract loop or cadence proof yet. Dashboard remains deferred.
+
 ## 2026-10-07 - Blinx passes pixel-shader query; next is logic-operation state
 
 Actual `pixel-query-attract` passes `D3DDevice_GetPixelShader` and stops at

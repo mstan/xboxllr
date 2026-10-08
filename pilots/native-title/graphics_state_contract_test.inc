@@ -75,6 +75,24 @@ static void test_graphics_states(void)
     CHECK(pilot_gfx_clear(1,0xff0000ff,1,0)>=0);
     graphics_test_triangle(0.25f,0x80ff0000);
     graphics_test_pixel(128,0,127,2); /* UNORM blend rounding tolerance. */
+    arg=0x1503;call_graphics(PILOT_D3D_D3DDevice_SetRenderState_LogicOp,&arg);
+    CHECK(MEM32(PILOT_D3D_RENDER_STATES+150*4)==arg);
+    CHECK(pilot_gfx_clear(1,0xff0000ff,1,0)>=0);
+    graphics_test_triangle(.25f,0x80ff0000);graphics_test_pixel(255,0,0,0);
+    unsigned char copy_pixels[64*64*4];
+    CHECK(pilot_gfx_readback(copy_pixels,sizeof(copy_pixels))>=0 && copy_pixels[(24*64+32)*4+3]==128);
+    graphics_test_packet(0x40358,0x00010000);
+    CHECK(pilot_gfx_clear(1,0xff0000ff,1,0)>=0);
+    graphics_test_triangle(.25f,0x80ffff00);graphics_test_pixel(255,0,255,0);
+    graphics_test_packet(0x40358,0x01010101);
+    graphics_test_packet(0x40304,0);graphics_test_packet(0x40304,1);
+    CHECK(pilot_gfx_clear(1,0xff0000ff,1,0)>=0);
+    graphics_test_triangle(.25f,0x80ff0000);graphics_test_pixel(255,0,0,0);
+    CHECK(!pilot_gfx_xbox_render_state(150,0x1506)); /* XOR cannot become COPY. */
+    arg=0;call_graphics(PILOT_D3D_D3DDevice_SetRenderState_LogicOp,&arg);
+    CHECK(MEM32(PILOT_D3D_RENDER_STATES+150*4)==0);
+    CHECK(pilot_gfx_clear(1,0xff0000ff,1,0)>=0);
+    graphics_test_triangle(.25f,0x80ff0000);graphics_test_pixel(128,0,127,2);
     graphics_test_packet(0x40304,0);
     graphics_test_packet(0x4033c,0x204);graphics_test_packet(0x40340,128);
     graphics_test_packet(0x40300,1);

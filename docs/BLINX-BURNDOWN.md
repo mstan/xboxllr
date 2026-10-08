@@ -18,8 +18,8 @@ and calendar services now pass their original-kernel/native fixtures; the next
 actual run passes those calls and opens round1.adx. Flat shading now has a bounded
 software floor and an actual cached GPU implementation around Phobos's pipeline.
 The latest title runs pass that state and the subsequent pixel-shader query,
-submit further GPU work, then stop at D3DDevice_SetRenderState_LogicOp
-(0x1337c0). Captured real GP audio
+submit further GPU work and pass logic COPY, then stop at
+D3DDevice_SetPixelShaderConstant (0x1367e0). Captured real GP audio
 matches original intro/title content at the checked sample progression.
 Full audio quality/sync and attract validation remain pending. Earlier fresh/repeat runs reached the callback boundary in 12.95/7.33 s
 with zero error-dialog entries or memory failures. The 64 MiB guest limit remains
@@ -44,7 +44,8 @@ enforced. No title error condition is bypassed.
 | Clock/calendar services | Original query/retry/calendar ABI fixtures and native real-clock/conversion tests pass; actual title proceeds to round1.adx and flat shading (.77) |
 | Flat shading | Original XDK provoking packet, bounded NV2A software pixels and actual native VS/PS/quad/interpolation tests; title passes prior guard (.78) |
 | Pixel-shader query | Original full query and native real bind/unbind/rebind, output extent and ownership tests pass; actual title advances (.79) |
-| Next integration work | Logic-operation render state: observe argument, bound NV2A contract and check donor state/RHI implementation |
+| Logic COPY | Original packets/cache, corrected bounded LLE write masks and native COPY/blend restoration pixels pass; actual title advances (.80) |
+| Next integration work | Mapped pixel-shader constants: packed guest cache, combiner mapping, native uniform uploads and current diffuse color |
 | Input | Physical XInput, keyboard and timed host-controller replay; real startup interruption observed twice; gameplay interruption/menu return pending |
 | Attract startup/loading/render/audio/movies/gameplay | Partial startup/rendering only; no complete attract sequence yet |
 | Repeat loops, interruption/menu return, original cadence | Pending actual title integration measurements |

@@ -10013,7 +10013,7 @@ Nv2a::GenericShaderCensusRow* Nv2a::generic_shader_census_row(
 //   * enables bitmask: alpha test(0)/blend(1)/cull(2)/depth test(3)/polygon-offset(13)
 //     honored per-bit; dither(4)/point-line-smooth(5,9,10)/point-line-offset(11,12) are
 //     inert for this rasterizer (it never draws points or lines) and ignored; any other
-//     bit (stencil test=7, logic op=8, ...) is unimplemented and gates a skip
+//     bit gates a skip except logic COPY (bit6), which overrides blending
 //   * combiner: 1..8 general-combiner stages, per-stage ColorIcw/AlphaIcw (inputs
 //     ZERO/CONSTANT_COLOR0/CONSTANT_COLOR1/PRIMARY_COLOR/SECONDARY_COLOR/R0/R1, all 8
 //     input mappings) and ColorOcw/AlphaOcw (AB/CD/SUM destination register, AB/CD dot
@@ -10036,7 +10036,7 @@ Nv2a::GenericShaderCensusRow* Nv2a::generic_shader_census_row(
 //   * OCW scale/bias and MUX_SUM (bit 14) — see GenericSkipReason::kOcwFeature
 //   * any final-combiner signature other than the proven identity passthrough — see
 //     GenericSkipReason::kFinalCombiner
-//   * stencil test, logic op, any blend equation other than FUNC_ADD, any blend factor
+//   * stencil test, logic ops other than COPY, blend equations other than FUNC_ADD, blend factors
 //     other than ZERO/ONE/SRC_ALPHA/ONE_MINUS_SRC_ALPHA
 //
 // Bit-layout note (flagged, not silently guessed): this decoder's ICW/OCW field
@@ -10233,8 +10233,9 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
     const uint32_t color_mask_word = raster_state[kRasterColorMask];
     bool color_mask_write[4];
     bool color_mask_supported = true;
+    constexpr unsigned color_mask_shifts[] = {16, 8, 0, 24}; // R,G,B,A in NV097
     for (size_t channel = 0; channel < 4; ++channel) {
-        const uint32_t byte = (color_mask_word >> (channel * 8)) & 0xFFu;
+        const uint32_t byte = (color_mask_word >> color_mask_shifts[channel]) & 0xFFu;
         color_mask_write[channel] = byte != 0;
         if (byte != 0 && byte != 1) color_mask_supported = false;
     }
@@ -10243,7 +10244,11 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                                    color_mask_word);
         return true;
     }
-    // Enables: bits this evaluator does not implement (stencil test, logic op) must
+    const bool logic_enabled = (enables & (1u << 6)) != 0;
+    const bool logic_copy = logic_enabled && raster_state[kRasterLogicOp] == 0x1503;
+    // COPY replaces blending while preserving write masks. Other bitwise
+    // operations remain outside this bounded floor, never treated as COPY.
+    // Enables: bits this evaluator does not implement (stencil test, other logic) must
     // gate a skip if the dashboard/game actually turns them on; bits it always treats
     // as inert (dither, point/line smoothing, point/line polygon offset -- this
     // rasterizer never draws points or lines) are masked out first.
@@ -10252,7 +10257,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
     constexpr uint32_t kEnableHandledBits =
         (1u << 0) | (1u << 1) | (1u << 2) | (1u << 3) | (1u << 13);
     const uint32_t enable_unsupported_bits =
-        enables & ~(kEnableInertBits | kEnableHandledBits);
+        enables & ~(kEnableInertBits | kEnableHandledBits | (logic_copy ? (1u << 6) : 0));
     if (enable_unsupported_bits != 0) {
         record_generic_skip_detail(GenericSkipReason::kUnsupportedEnableBits,
                                    enable_unsupported_bits);
@@ -10496,7 +10501,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
     // SRC_ALPHA/ONE_MINUS_SRC_ALPHA/ADD combo plus the trivially adjacent factors
     // (ZERO/ONE/SRC_ALPHA/ONE_MINUS_SRC_ALPHA) needed to express "disabled via factors"
     // and simple additive/replace blends.
-    const bool blend_enabled = (enables & (1u << 1)) != 0;
+    const bool blend_enabled = !logic_copy && (enables & (1u << 1)) != 0;
     const uint32_t blend_src = raster_state[kRasterBlendSrc];
     const uint32_t blend_dst = raster_state[kRasterBlendDst];
     const uint32_t blend_eq = raster_state[kRasterBlendEquation];
@@ -11433,7 +11438,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
     bool resident_exact_this_batch = false;
     GenericResidentRejectReason resident_reject_this_batch =
         GenericResidentRejectReason::kCount;
-    if (!flat_shading && !zpass_enabled_ && renderer_ && effective_clip_valid) {
+    if (!logic_enabled && !flat_shading && !zpass_enabled_ && renderer_ && effective_clip_valid) {
 #if XLLE_VSH_DRAW_OVERLAP_CENSUS
         const bool fixture_overlap = vsh_draw_overlap_enabled_ && job.vsh_overlap.valid;
         const uint64_t fixture_overlap_t0 = fixture_overlap && perf_excl::g_enabled
@@ -13354,7 +13359,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
 #if XLLE_VSH_DRAW_OVERLAP_CENSUS
     bool gpu_shader_collect_nonfinite = false;
 #endif
-    if (!flat_shading && !zpass_enabled_ && gpu_generic_shader_ && renderer_ && effective_clip_valid) {
+    if (!logic_enabled && !flat_shading && !zpass_enabled_ && gpu_generic_shader_ && renderer_ && effective_clip_valid) {
         ++generic_shader_attempts_;
         GenericShaderDeclineReason decline = GenericShaderDeclineReason::kNone;
         auto& st = gpu_shader_packet.state;
