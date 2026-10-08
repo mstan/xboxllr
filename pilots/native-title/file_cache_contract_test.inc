@@ -59,11 +59,24 @@ static void test_file_cache(void)
     uint32_t base=0,available=(uint32_t)(64ull*1024*1024-vm_committed(0,0x100000000ull)-vm_service_bytes);
     uint32_t too_many=available+4096;
     CHECK(vm_allocate(&base,0,&too_many,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE)==VM_NOMEM);
+#ifdef PILOT_MEMORY_LLE
+    /* The original kernel already owns physical RAM, so allocating every
+     * nominal console byte is not a valid fixture assumption. Inject shared
+     * native-service budget pressure; original VM exhaustion is tested by the
+     * memory contract. This never alters the production cache implementation. */
+    uint64_t saved_services=vm_service_bytes;
+    vm_service_bytes=64ull*1024*1024-vm_committed(0,0x100000000ull);
+#else
     CHECK(!vm_allocate(&base,0,&available,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
+#endif
     pages=3; call_kernel(37,&pages,1); CHECK(g_eax==VM_NOMEM);
     call_kernel(35,NULL,0); CHECK(g_eax==2);
     call_kernel(219,read,8); CHECK(!g_eax && fsc_test_reads==misses+1);
+#ifdef PILOT_MEMORY_LLE
+    vm_service_bytes=saved_services;
+#else
     uint32_t release=0; CHECK(!vm_free(&base,&release,MEM_RELEASE));
+#endif
     call_kernel(37,&pages,1); CHECK(!g_eax && vm_service_bytes==12288);
     /* Resizing while real reads run cannot expose freed cache buffers. */
     fsc_test_file=media_owned(file);

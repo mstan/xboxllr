@@ -163,9 +163,31 @@ static void test_memory(void)
     vm_service_bytes=service;MEM32(bp)=base;MEM32(sp)=0;
     call_kernel(199,free_args,3); CHECK(g_eax==0 && test_write_faults(base));
     MEM32(bp)=0; MEM32(sp)=4096; args[1]=16; args[3]=MEM_RESERVE|MEM_TOP_DOWN;
+#ifndef PILOT_MEMORY_LLE
     call_kernel(184,args,5); CHECK(g_eax==VM_NOMEM); /* all usable low 64 KiB excluded */
-    args[1]=0; call_kernel(184,args,5); CHECK(g_eax==0 && MEM32(bp)==0x7ffe0000);
+#endif
+    args[1]=0; call_kernel(184,args,5); CHECK(g_eax==0 && MEM32(bp)==0x7ffd0000);
     MEM32(sp)=0; call_kernel(199,free_args,3); CHECK(g_eax==0);
+    CHECK(vm_committed(0,0x100000000ull)==before);
+    /* Original kernel fixture qualifies partial release, surviving reservation
+     * boundaries, free-page protection and rejected out-of-reservation frees. */
+    uint32_t partial=0,partial_size=5*4096,view[7];
+    CHECK(!vm_allocate(&partial,0,&partial_size,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
+    MEM32(partial)=0x12345678;MEM32(partial+8192)=0xabcdef01;
+    uint32_t hole=partial+4097,length=2;
+    CHECK(!vm_free(&hole,&length,MEM_RELEASE) && hole==partial+4096 && length==4096);
+    CHECK(test_write_faults(hole) && MEM32(partial)==0x12345678 && MEM32(partial+8192)==0xabcdef01);
+    CHECK(!vm_query(partial,view) && view[1]==partial && view[3]==4096);
+    CHECK(!vm_query(hole,view) && !view[1] && !view[2] && view[3]==4096 && view[4]==MEM_FREE && view[5]==PAGE_NOACCESS && !view[6]);
+    CHECK(!vm_query(partial+8192,view) && view[1]==partial+8192 && view[3]==3*4096);
+    hole=partial+8192;length=4*4096;CHECK(vm_free(&hole,&length,MEM_RELEASE)==0xc000001au);
+    hole=partial+3*4096;length=0;CHECK(vm_free(&hole,&length,MEM_RELEASE)==0xc000009fu);
+    hole=partial;length=4096;uint32_t old_access=0;
+    CHECK(!vm_protect(&hole,&length,PAGE_NOACCESS,&old_access) && old_access==PAGE_READWRITE);
+    CHECK(test_write_faults(hole) && !vm_query(hole,view) && view[5]==PAGE_NOACCESS);
+    hole=partial+1;length=0;CHECK(!vm_free(&hole,&length,MEM_RELEASE) && hole==partial && length==4096);
+    hole=partial+8192;length=0;CHECK(!vm_free(&hole,&length,MEM_RELEASE));
+    CHECK(vm_query(VM_END,view)==VM_INVALID);
     CHECK(vm_committed(0,0x100000000ull)==before);
     fprintf(stderr,"PASS: virtual reservation/commit/protection/decommit/release/query ABI, NOZERO commitment/recommit, real access protection, reuse zero-fill, budget/failure preservation\n");
     /* Exercise the actual failure shape: >512 independent small resources,
@@ -353,6 +375,18 @@ int main(int argc,char **argv)
      * Include that one-time host engine setup before resource baselines. */
     uint32_t boot_irql=0,unused=0;
     CHECK(!pilot_io_device_lle(103,memory,&unused,&boot_irql));
+#ifdef PILOT_MEMORY_LLE
+    /* Statistics supplies a larger authored image reservation below. Match
+     * that loader input in the original allocator before any dynamic calls. */
+    uint32_t fixture_image_size=argc==2 && !strcmp(argv[1],"memory-statistics")?0x20000:0x10000;
+#ifdef PILOT_D3D_NATIVE
+    if(argc==2 && (!strcmp(argv[1],"graphics") || !strcmp(argv[1],"graphics-scheduler"))) {
+        fixture_image_size=((PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SHADER_CONSTANT_MODE_OFFSET+4+4095)&~4095u)-0x10000;
+        image_base=0x10000;*(uint32_t*)(image_bytes+0x10c)=fixture_image_size;
+    }
+#endif
+    CHECK(!pilot_io_device_image(memory,0x10000,fixture_image_size));
+#endif
 #endif
     if(argc==2 && !strcmp(argv[1],"scheduler")){test_guest_scheduler();return 0;}
 #ifdef PILOT_AUDIO_DSP
@@ -378,7 +412,9 @@ int main(int argc,char **argv)
             Sleep(20);(void)usb_test_read(0x0c);return 1;
         }
         if (!strcmp(argv[1],"usb-dma-image-release")) {
+#ifndef PILOT_MEMORY_LLE
             CHECK(!pilot_io_device_image(memory,0x10000,0x10000));
+#endif
             uint32_t args[]={0x15000,8,0};call_kernel(175,args,3);
             const char *error=pilot_io_device_image_release(0x15000,4096);
             if(error)stop(error,0x15000);return 1;

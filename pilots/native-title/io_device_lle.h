@@ -29,4 +29,9 @@ const char *pilot_io_device_stack(unsigned char *guest,uint32_t base,uint32_t by
 const char *pilot_io_device_image_release(uint32_t base,uint32_t bytes);
 const char *pilot_io_device_release_check(uint32_t base,uint32_t bytes);
 int pilot_io_device_pinned_dma(uint32_t pa,void *buffer,uint32_t bytes,int write);
+/* Original Nt VM calls plus publication of the kernel's real allocated pages.
+ * inputs: base,size,type,protect,zero_bits. Outputs: base,size,oldProtect for
+ * mutations, or seven original MEMORY_BASIC_INFORMATION words for query. */
+const char *pilot_io_device_vm(unsigned ordinal,unsigned char *guest,
+    const uint32_t inputs[5],uint32_t outputs[7],uint32_t *status);
 #endif

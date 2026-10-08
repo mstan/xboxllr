@@ -3,7 +3,7 @@
  * Xbox signatures and 32-bit MEMORY_BASIC_INFORMATION are documented by nxdk;
  * range/alignment constants were cross-checked against Cxbx. No donor service
  * bodies are incorporated. Physical allocation is bounded, not a full MMU. */
-#define VM_END 0x7fff0000u
+#define VM_END 0x7ffe0000u /* original captured retail kernel's query/allocation bound */
 #define VM_INVALID 0xc000000du
 #define VM_NOMEM 0xc0000017u
 #define VM_CONFLICT 0xc0000018u
@@ -142,10 +142,12 @@ static uint32_t vm_allocate(uint32_t *base,uint32_t zero_bits,uint32_t *size,uin
     /* Xbox MEM_NOZERO permits unspecified initial bytes; it does not require
      * stale data. Host commitment may supply zeros. Existing committed pages
      * retain their contents. Never forward this bit as Windows MEM_ROTATE. */
+#ifndef PILOT_MEMORY_LLE
     type&=~0x00800000u;
+#endif
     if (type&(0x00080000u|0x20000000u|0x80000000u))
         stop("guest reset/large-page allocation outside VM scope",type);
-    if (!*size || zero_bits>21 || (type&~(MEM_RESERVE|MEM_COMMIT|MEM_TOP_DOWN)) || !(type&(MEM_RESERVE|MEM_COMMIT))) return VM_INVALID;
+    if (!*size || zero_bits>21 || (type&~(MEM_RESERVE|MEM_COMMIT|MEM_TOP_DOWN|0x00800000u)) || !(type&(MEM_RESERVE|MEM_COMMIT))) return VM_INVALID;
     /* Guard exceptions and executable/modified code require the CPU exception
      * and invalidation contracts; do not pretend they are qualified here. */
     if (protect&(PAGE_GUARD|PAGE_NOCACHE|PAGE_WRITECOMBINE|0x800)) stop("guest guard/cache protection outside VM scope",protect);
@@ -157,6 +159,22 @@ static uint32_t vm_allocate(uint32_t *base,uint32_t zero_bits,uint32_t *size,uin
     int reserve=(type&MEM_RESERVE)!=0 || !*base;
     if (!vm_range(*base,*size,reserve && *base ? 0x10000 : 0x1000,&low,&bytes)) { result=VM_INVALID; goto done; }
     struct PilotRegion *region=NULL;
+#ifdef PILOT_MEMORY_LLE
+    if(zero_bits)stop("original VM constrained address search unqualified",zero_bits);
+    if(reserve) {
+        for(unsigned i=0;i<vm_region_capacity;++i)if(!vm_regions[i].size){region=vm_regions+i;break;}
+        if(!region && !(region=vm_grow_regions())){result=VM_NOMEM;goto done;}
+    } else if(!(region=vm_find(low,bytes)) || region->fixed){result=VM_CONFLICT;goto done;}
+    if((type&MEM_COMMIT) && vm_committed(0,0x100000000ull)+vm_service_bytes+
+       bytes-(*base?vm_committed(low,bytes):0)>64ull*1024*1024){result=VM_NOMEM;goto done;}
+    uint32_t inputs[]={*base,*size,type,protect,zero_bits},outputs[7]={0};
+    const char *error=pilot_io_device_vm(184,memory,inputs,outputs,&result);
+    if(error)stop(error,184);
+    if(!result) {
+        if(reserve)*region=(struct PilotRegion){outputs[0],outputs[1],protect,0};
+        *base=outputs[0];*size=outputs[1];
+    }
+#else
     if (reserve) {
         if (!*base) {
             uint64_t bound=zero_bits ? (0x100000000ull>>zero_bits) : VM_END;
@@ -184,6 +202,7 @@ static uint32_t vm_allocate(uint32_t *base,uint32_t zero_bits,uint32_t *size,uin
     }
     if (reserve) *region=(struct PilotRegion){low,bytes,protect,0};
     *base=low; *size=bytes;
+#endif
 done:
     ReleaseSRWLockExclusive(&vm_lock); return result;
 }
@@ -194,17 +213,46 @@ static uint32_t vm_free(uint32_t *base,uint32_t *size,uint32_t type)
     uint32_t result=0,low,bytes;
     struct PilotRegion *r=vm_find(*base,1);
     if (!r || r->fixed) { result=VM_NOT_ALLOCATED; goto done; }
-    if (type==MEM_RELEASE) {
-        if (*size) { result=0xc000009fu; goto done; }
-        if (*base!=r->base) { result=0xc00000a1u; goto done; }
+    if (!*size) {
+        if ((*base&~4095u)!=r->base) { result=0xc000009fu; goto done; }
         low=r->base; bytes=r->size;
-    } else if (!*size) {
-        if (*base!=r->base) { result=VM_INVALID; goto done; }
-        low=r->base; bytes=r->size;
-    } else if (!vm_range(*base,*size,4096,&low,&bytes) || vm_find(low,bytes)!=r) { result=VM_CONFLICT; goto done; }
+    } else if (!vm_range(*base,*size,4096,&low,&bytes) || vm_find(low,bytes)!=r) { result=0xc000001au; goto done; }
+    /* Original Xbox NtFreeVirtualMemory accepts sized MEM_RELEASE, including
+     * a middle-page hole. Each surviving interval becomes its own reservation.
+     * Secure bookkeeping before releasing real storage; a growing table can
+     * relocate r. These effects are observed in native_memory_reference.py. */
+    unsigned index=(unsigned)(r-vm_regions),split=vm_region_capacity;
+    struct PilotRegion old=*r;
+    uint32_t end=low+bytes,old_end=old.base+old.size;
+    if(type==MEM_RELEASE && low>old.base && end<old_end) {
+        for(split=0;split<vm_region_capacity && vm_regions[split].size;++split){}
+        if(split==vm_region_capacity && !vm_grow_regions()){result=VM_NOMEM;goto done;}
+        r=vm_regions+index;
+    }
+#ifdef PILOT_MEMORY_LLE
+    const char *error=pilot_io_device_release_check(low,bytes);
+    if(error)stop(error,low);
+    /* The original code receives the equivalent resolved page range, already
+     * checked against the original zero-length and rounded-base contract. */
+    uint32_t inputs[]={low,bytes,type,0,0},outputs[7]={0};
+    error=pilot_io_device_vm(199,memory,inputs,outputs,&result);
+    if(error)stop(error,199);
+    if(!result && (outputs[0]!=low || outputs[1]!=bytes))stop("original release range differs",low);
+#else
     PVOID host=memory+low; SIZE_T span=bytes;
     result=(uint32_t)vm_native_free(GetCurrentProcess(),&host,&span,MEM_DECOMMIT);
-    if (!result) { if (type==MEM_RELEASE) memset(r,0,sizeof(*r)); *base=low; *size=bytes; }
+#endif
+    if (!result) {
+        if(type==MEM_RELEASE) {
+            if(low==old.base && end==old_end)memset(r,0,sizeof(*r));
+            else if(low==old.base){r->base=end;r->size=old_end-end;}
+            else {
+                r->size=low-old.base;
+                if(end<old_end)vm_regions[split]=(struct PilotRegion){end,old_end-end,old.protect,0};
+            }
+        }
+        *base=low; *size=bytes;
+    }
 done:
     ReleaseSRWLockExclusive(&vm_lock); return result;
 }
@@ -217,9 +265,16 @@ static uint32_t vm_protect(uint32_t *base,uint32_t *size,uint32_t protect,uint32
     if (!vm_range(*base,*size,4096,&low,&bytes)) result=VM_INVALID;
     else if (!(r=vm_find(low,bytes)) || r->fixed) result=VM_CONFLICT;
     else {
+#ifdef PILOT_MEMORY_LLE
+        uint32_t inputs[]={*base,*size,0,protect,0},outputs[7]={0};
+        const char *error=pilot_io_device_vm(204,memory,inputs,outputs,&result);
+        if(error)stop(error,204);
+        if(!result){*base=outputs[0];*size=outputs[1];*old=outputs[2];}
+#else
         PVOID host=memory+low; SIZE_T span=bytes; ULONG previous;
         result=(uint32_t)vm_native_protect(GetCurrentProcess(),&host,&span,protect,&previous);
         if (!result) { *base=low; *size=bytes; *old=previous; }
+#endif
     }
     ReleaseSRWLockExclusive(&vm_lock); return result;
 }
@@ -227,13 +282,19 @@ static uint32_t vm_query(uint32_t base,uint32_t out[7])
 {
     if (base>=VM_END) return VM_INVALID;
     vm_ensure(); AcquireSRWLockExclusive(&vm_lock);
+#ifdef PILOT_MEMORY_LLE
+    uint32_t inputs[]={base,0,0,0,0},result=0;
+    const char *error=pilot_io_device_vm(217,memory,inputs,out,&result);
+    if(error)stop(error,217);
+    ReleaseSRWLockExclusive(&vm_lock);return result;
+#else
     uint32_t low=base&~4095u;
     struct PilotRegion *r=vm_find(low,1);
     memset(out,0,28); out[0]=low;
     if (!r) {
         uint32_t end=VM_END;
         for (unsigned i=0;i<vm_region_capacity;++i) if (vm_regions[i].size && vm_regions[i].base>low && vm_regions[i].base<end) end=vm_regions[i].base;
-        out[3]=end-low; out[4]=MEM_FREE;
+        out[3]=end-low; out[4]=MEM_FREE; out[5]=PAGE_NOACCESS;
     } else {
         MEMORY_BASIC_INFORMATION host;
         if (!VirtualQuery(memory+low,&host,sizeof(host))) stop("host VM query failed",low);
@@ -243,6 +304,7 @@ static uint32_t vm_query(uint32_t base,uint32_t out[7])
         out[4]=host.State; out[5]=host.State==MEM_COMMIT ? host.Protect : 0; out[6]=MEM_PRIVATE;
     }
     ReleaseSRWLockExclusive(&vm_lock); return 0;
+#endif
 }
 static void vm_kernel(unsigned ordinal)
 {

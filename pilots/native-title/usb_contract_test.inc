@@ -35,7 +35,9 @@ static void usb_test_async_page(void)
 static void test_usb_lle(void)
 {
     install_fault_handler();
+#ifndef PILOT_MEMORY_LLE
     CHECK(!pilot_io_device_image(memory,0x10000,0x10000));
+#endif
     MEM32(0x15000)=0x78563412;MEM32(0x16000)=0xabcdef01;
     uint32_t vector_args[]={1,0x15021};MEM32(0x15020)=0xcdcdcdcd;
     call_kernel(44,vector_args,2);CHECK(g_eax==0x31 && MEM32(0x15020)==0xcdcd19cd);

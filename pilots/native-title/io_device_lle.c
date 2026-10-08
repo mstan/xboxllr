@@ -45,6 +45,9 @@ static struct {uint32_t base,bytes;} owners[MAX_PUBLISHED];
 static unsigned owner_count;
 static struct {uint32_t base,bytes,count;} pin_ranges[MAX_PUBLISHED];
 static uint32_t image_start,image_bytes;
+/* Admission window supplied only by a successful original VM commit. It does
+ * not fabricate translations: publish_range still walks the actual PTEs. */
+static uint32_t vm_publication_base,vm_publication_bytes;
 static struct {uint32_t base,bytes;} stacks[64];
 static unsigned stack_count;
 static uint32_t interrupt_objects[16],pending_callback;
@@ -254,6 +257,10 @@ static void release_publication(unsigned i)
     uint32_t va=published[i].va,pa=published[i].pa;
     /* A freed pool page may remain in the original allocator's free lists.
      * Retain those real bytes when its last native owner goes away. */
+    DWORD previous;
+    if(!VirtualProtect(guest_memory+va,4096,PAGE_READWRITE,&previous)) {
+        failure="device LLE publication retirement protection failed";return;
+    }
     memcpy(ram+pa,guest_memory+va,4096);
     shared_pages[pa/4096]=NULL;
     publication_by_va[va/4096]=0;publication_by_pa[pa/4096]=0;
@@ -292,7 +299,9 @@ static int caller_owned(uint32_t object,uint32_t bytes)
 static void publish_range(uint32_t object,uint32_t bytes)
 {
     int image=caller_owned(object,bytes);
-    if(!(image || (object>=0xd0000000u && (uint64_t)object+bytes<=0xd4000000ull) ||
+    int vm=vm_publication_bytes && object>=vm_publication_base &&
+           (uint64_t)object+bytes<=(uint64_t)vm_publication_base+vm_publication_bytes;
+    if(!(image || vm || (object>=0xd0000000u && (uint64_t)object+bytes<=0xd4000000ull) ||
          (object>=0x80000000u && (uint64_t)object+bytes<=0x84000000ull))) {
         failure="device LLE unexpected allocation namespace";return;
     }
@@ -317,7 +326,7 @@ static void publish_range(uint32_t object,uint32_t bytes)
         publication_by_va[va/4096]=(uint16_t)(published_count+1);
         publication_by_pa[pa/4096]=(uint16_t)(published_count+1);++published_count;
     }
-    if(!image) {
+    if(!image && !vm) {
         if(owner_count==MAX_PUBLISHED){failure="device LLE publication ownership capacity";return;}
         owners[owner_count].base=object;owners[owner_count++].bytes=bytes;
     }
@@ -404,7 +413,7 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
        ordinal!=44 && ordinal!=47 && ordinal!=65 && ordinal!=68 && ordinal!=107 && ordinal!=108 && ordinal!=109 && ordinal!=166 &&
        ordinal!=171 && ordinal!=173 && ordinal!=175 && ordinal!=178 && ordinal!=182 &&
        ordinal!=98 && ordinal!=100 && ordinal!=103 && ordinal!=129 && ordinal!=151 &&
-       ordinal!=160 && ordinal!=161 && ordinal!=184 && ordinal!=199) {
+       ordinal!=160 && ordinal!=161 && ordinal!=184 && ordinal!=199 && ordinal!=204 && ordinal!=217) {
         failure="device LLE unsupported ordinal";return;
     }
     if(ordinal==173 || ordinal==175) {
@@ -450,9 +459,9 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
     uint32_t base=kernel_word(exports+16),table=0x80010000u+kernel_word(exports+28);
     uint32_t entry=0x80010000u+kernel_word(table+4*(ordinal-base));
     if(failure)return;
-    unsigned count=ordinal==65?6:ordinal==109?7:(ordinal==166 || ordinal==184)?5:
+    unsigned count=ordinal==65?6:ordinal==109?7:(ordinal==166 || ordinal==184)?5:ordinal==204?4:
                    (ordinal==107 || ordinal==108 || ordinal==175 || ordinal==178 || ordinal==182 || ordinal==199)?3:
-                   (ordinal==15 || ordinal==44 || ordinal==47)?2:
+                   (ordinal==15 || ordinal==44 || ordinal==47 || ordinal==217)?2:
                    (ordinal==103 || ordinal==129 || ordinal==160 || ordinal==161)?0:1;
     if(ordinal==160 || ordinal==161) {
         uint32_t level=args[0]&255;
@@ -669,3 +678,4 @@ int pilot_io_device_pinned_dma(uint32_t pa,void *buffer,uint32_t bytes,int write
 done:
     ReleaseSRWLockExclusive(&lock);return valid;
 }
+#include "io_memory_lle.inc"

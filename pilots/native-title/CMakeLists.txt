@@ -82,6 +82,7 @@ target_compile_definitions(pilot_contract_test PRIVATE WIN32_LEAN_AND_MEAN NOMIN
 target_link_libraries(pilot_contract_test PRIVATE bcrypt)
 include(calendar.cmake)
 include(io_device.cmake)
+include(memory_lle.cmake)
 set(PILOT_AUDIO "ORIGINAL" CACHE STRING "Build-time audio: ORIGINAL or NATIVE")
 set_property(CACHE PILOT_AUDIO PROPERTY STRINGS ORIGINAL NATIVE)
 set(PILOT_AUDIO_BACKEND "DSOUND" CACHE STRING "Build-time native transport: DSOUND or XAUDIO2_DSP")
