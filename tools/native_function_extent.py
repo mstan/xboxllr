@@ -23,6 +23,14 @@ def apply_extents(blob, image, functions, records):
     for record in records:
         start,end=record['start'],record['end']
         matches=[f for f in functions if int(f['start'],16)==start]
+        new_entry=record.get('new_entry',False)
+        if not matches and new_entry:
+            section=next((s for s in image['sections'] if s['flags']&4 and s['address']<=start<end<=s['address']+s['raw_size']),None)
+            if not section:raise ValueError('entry outside executable file-backed section')
+            f=dict(start=f'0x{start:08X}',end=f'0x{start:08X}',size=0,name=f'sub_{start:08X}',
+                   section=section['name'],confidence=1.0,detection_method='observed_indirect',
+                   num_instructions=0,has_prologue=False,calls_to=[],called_by=[])
+            functions.append(f);matches=[f]
         if len(matches)!=1: raise ValueError('extent needs one existing function')
         f=matches[0]
         if int(f['end'],16) not in (record['original_end'],end): raise ValueError('original extent changed')
@@ -37,7 +45,7 @@ def apply_extents(blob, image, functions, records):
         if sum(i.size for i in instructions)!=end-start or instructions[-1].mnemonic!='ret':
             raise ValueError('reviewed extension must decode completely through a return')
         f.update(end=f'0x{end:08X}',size=end-start,num_instructions=len(instructions))
-    return functions
+    return sorted(functions,key=lambda f:int(f['start'],16))
 
 
 def recover(args):
@@ -58,11 +66,16 @@ def recover(args):
     if records['sha256']!=image['sha256']: raise ValueError('extent image identity mismatch')
     if any(r['start']==args.function for r in records['extents']): raise ValueError('extent already recovered')
     functions_path=output/'disasm/functions.json';functions=json.loads(functions_path.read_text())
-    function=next(f for f in functions if int(f['start'],16)==args.function)
+    function=next((f for f in functions if int(f['start'],16)==args.function),None)
+    if args.new_entry:
+        if function:raise ValueError('new entry already discovered')
+        function=dict(name=f'sub_{args.function:08X}',end=f'0x{args.function:08X}')
+    elif not function:raise ValueError('missing function: use --new-entry only for a measured entry point')
     section=next(s for s in image['sections'] if s['address']<=args.function<args.end<=s['address']+s['raw_size'])
     offset=section['raw_offset']+args.function-section['address']
     record=dict(start=args.function,original_end=int(function['end'],16),end=args.end,
                 sha256=hashlib.sha256(blob[offset:offset+args.end-args.function]).hexdigest(),reason=args.reason)
+    if args.new_entry:record['new_entry']=True
     records['extents'].append(record)
     updated=apply_extents(blob,image,functions,[record])
     work=output/'extent-recovery';work.mkdir(exist_ok=True)
@@ -81,9 +94,23 @@ def recover(args):
         bodies[0], unused = instrument(bodies[0])
     matches=[(p,p.read_text()) for p in generated.glob('recomp_*.c')]
     matches=[(p,c) for p,c in matches if pattern.search(c)]
-    if len(matches)!=1: raise ValueError('expected one original generated body')
-    path,code=matches[0];code,count=pattern.subn(lambda m:bodies[0],code)
-    if count!=1: raise ValueError('ambiguous replacement')
+    if args.new_entry:
+        if matches:raise ValueError('new entry already has generated code')
+        path=generated/f'recomp_entry_{args.function:08x}.c'
+        if path.exists():raise ValueError('new entry output already exists')
+        code='#define RECOMP_GENERATED_CODE\n#include "recomp_funcs.h"\n#include <math.h>\n'+bodies[0]
+        header_path=generated/'recomp_funcs.h';header=header_path.read_text(encoding='utf-8')
+        header+='\nvoid '+symbol+'(void);\n'
+        dispatch_path=generated/'recomp_dispatch.c';dispatch=dispatch_path.read_text(encoding='utf-8')
+        rows=list(re.finditer(r'^    \{ 0x([0-9A-Fa-f]{8})u, \(recomp_func_t\)sub_[0-9A-Fa-f]{8} \},$',dispatch,re.M))
+        if not rows or any(int(row[1],16)==args.function for row in rows):raise ValueError('unreviewed or duplicate dispatch table')
+        position=next((row.start() for row in rows if int(row[1],16)>args.function),rows[-1].end()+1)
+        dispatch=dispatch[:position]+f'    {{ 0x{args.function:08X}u, (recomp_func_t){symbol} }},\n'+dispatch[position:]
+        dispatch=re.sub(r'Maps \d+ Xbox VAs',f'Maps {len(rows)+1} Xbox VAs',dispatch,count=1)
+    else:
+        if len(matches)!=1: raise ValueError('expected one original generated body')
+        path,code=matches[0];code,count=pattern.subn(lambda m:bodies[0],code)
+        if count!=1: raise ValueError('ambiguous replacement')
     old_banner=re.compile(r'^ \* Original: 0x'+f'{args.function:08X}'+r' - [^\n]+$',re.M)
     new_banner=old_banner.findall(result.stdout)
     if len(new_banner)!=1: raise ValueError('missing recovered source extent')
@@ -91,6 +118,9 @@ def recover(args):
     # All validation and lowering succeed before changing authoritative output.
     (work/f'recovered-{args.function:08x}.c').write_text(result.stdout,newline='\n')
     path.write_text(code,newline='\n');functions_path.write_text(json.dumps(updated,indent=2)+'\n',newline='\n')
+    if args.new_entry:
+        header_path.write_text(header,encoding='utf-8',newline='\n')
+        dispatch_path.write_text(dispatch,encoding='utf-8',newline='\n')
     record_path.write_text(json.dumps(records,indent=2)+'\n',newline='\n')
     manifest['function_extents']=records['extents']
     if manifest.get('thread_checkpoints'):
@@ -107,4 +137,5 @@ if __name__=='__main__':
     parser.add_argument('--function',type=lambda x:int(x,0),required=True)
     parser.add_argument('--end',type=lambda x:int(x,0),required=True)
     parser.add_argument('--reason',required=True)
+    parser.add_argument('--new-entry',action='store_true',help='Recover an observed undiscovered function with a reviewed non-overlapping extent')
     print(json.dumps(recover(parser.parse_args())))

@@ -2,7 +2,12 @@
  * reference supplies 32-byte small blocks, eight-byte overhead and the 4056
  * byte/page allocation boundary. The host-side ledger is independent of the
  * original buddy lists. Guest payloads are real, shared-budget CPU storage. */
+#ifdef PILOT_IO_DEVICE_LLE
+/* Original device objects retain the kernel allocator's D0 namespace. */
+#define POOL_BASE 0xe0000000u
+#else
 #define POOL_BASE 0xd0000000u
+#endif
 #define POOL_BYTES (64u*1024*1024)
 static struct { uint32_t base,span,payload,usable,tag; } pool_blocks[4096];
 static uint16_t pool_page_refs[POOL_BYTES/4096];

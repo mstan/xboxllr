@@ -58,6 +58,9 @@ static void call_kernel(unsigned ordinal,const uint32_t *args,unsigned argc)
 #include "thread_objects_contract_test.inc"
 #include "thread_scheduler_contract_test.inc"
 #include "event_objects_contract_test.inc"
+#ifdef PILOT_IO_DEVICE_LLE
+#include "io_device_contract_test.inc"
+#endif
 
 static int test_write_faults(uint32_t va)
 {
@@ -343,6 +346,17 @@ int main(int argc,char **argv)
 #endif
 #endif
     if (argc==2) {
+#ifdef PILOT_IO_DEVICE_LLE
+        if (!strcmp(argv[1],"io-device-lle")) { test_io_device_lle(); return 0; }
+        if (!strcmp(argv[1],"io-device-oversize")) {
+            install_fault_handler();io_test_create(0x171,0x22,0,NULL);return 1;
+        }
+        if (!strcmp(argv[1],"io-device-callback")) {
+            install_fault_handler();uint32_t object=io_test_create(12,0x22,0,NULL);
+            CHECK(g_eax==0 && object);MEM32(0x19304)=0x12380;
+            call_kernel(68,&object,1);return 1;
+        }
+#endif
 #ifdef PILOT_AUDIO_NATIVE
         if (!strcmp(argv[1],"audio")) { test_audio(); return 0; }
         if (!strncmp(argv[1],"audio-",6)) { test_audio_failure(argv[1]+6); return 0; }

@@ -75,6 +75,22 @@ def harden_generated(directory):
     return counts
 
 
+def retire_recovered_entry_units(directory, records):
+    """Full regeneration owns these bodies now; avoid duplicate local units."""
+    for record in records:
+        if not record.get('new_entry'):
+            continue
+        start=record['start'];old=directory/f'recomp_entry_{start:08x}.c'
+        if not old.exists():
+            continue
+        needle=f'void sub_{start:08X}(void)\n{{'
+        count=sum(path.read_text(encoding='utf-8').count(needle)
+                  for path in directory.glob('recomp_[0-9]*.c'))
+        if count!=1:
+            raise ValueError('full regeneration did not replace recovered entry')
+        old.unlink()
+
+
 def prepare(args):
     donor = args.donor.resolve()
     git = "C:/Program Files/Git/cmd/git.exe" if sys.platform == "win32" else "git"
@@ -145,6 +161,7 @@ def prepare(args):
                  "--abi-dir", str(out / "abi"), "-o", str(out / "lift"),
                  "--hle-impl", str(ROOT / "pilots/native-title/runtime.c"),
                  "--gen-dir", str(out / "gen"), "--trace-all-entries"])
+    retire_recovered_entry_units(out/'gen',extent_records)
     counts = harden_generated(out / "gen")
     analysis = json.loads((out / "analysis.aot-private.json").read_text())
     imports = analysis["kernel_imports"]

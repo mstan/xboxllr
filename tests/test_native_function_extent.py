@@ -1,9 +1,11 @@
 import hashlib
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
 from native_function_extent import apply_extents
+from native_pilot import retire_recovered_entry_units
 
 
 class ExtentRecovery(unittest.TestCase):
@@ -43,6 +45,38 @@ class ExtentRecovery(unittest.TestCase):
         blob=self.blob[:-1]+b'\x90';self.record['sha256']=hashlib.sha256(blob).hexdigest()
         with self.assertRaisesRegex(ValueError,'through a return'):
             apply_extents(blob,self.image,self.functions,[self.record])
+
+    def test_recover_observed_entry_and_replay(self):
+        self.image['sections'][0]['name']='.text'
+        record=dict(start=0x10006,original_end=0x10006,end=0x1000a,new_entry=True,
+                    sha256=hashlib.sha256(self.blob[6:]).hexdigest())
+        result=apply_extents(self.blob,self.image,self.functions,[record])
+        self.assertEqual(result[1]['name'],'sub_00010006')
+        self.assertEqual(result[1]['num_instructions'],3)
+        self.assertEqual(len(self.functions),1)
+        self.assertEqual(apply_extents(self.blob,self.image,result,[record]),result)
+
+    def test_new_entry_cannot_split_existing_body(self):
+        self.image['sections'][0]['name']='.text'
+        existing=dict(start='0x00010004',end='0x0001000A',size=6)
+        record=dict(start=0x10006,original_end=0x10006,end=0x1000a,new_entry=True,
+                    sha256=hashlib.sha256(self.blob[6:]).hexdigest())
+        with self.assertRaisesRegex(ValueError,'overlaps'):
+            apply_extents(self.blob,self.image,[existing],[record])
+
+    def test_full_regeneration_retires_only_replaced_entry(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory=Path(temporary);old=directory/'recomp_entry_00010006.c'
+            old.write_text('original retained body',encoding='utf-8')
+            record=dict(start=0x10006,new_entry=True)
+            with self.assertRaisesRegex(ValueError,'did not replace'):
+                retire_recovered_entry_units(directory,[record])
+            self.assertTrue(old.exists())
+            (directory/'recomp_0000.c').write_text('void sub_00010006(void)\n{\n}\n',encoding='utf-8')
+            retire_recovered_entry_units(directory,[record])
+            self.assertFalse(old.exists())
+            self.assertTrue((directory/'recomp_0000.c').exists())
+            retire_recovered_entry_units(directory,[record])
 
 
 if __name__=='__main__':unittest.main()

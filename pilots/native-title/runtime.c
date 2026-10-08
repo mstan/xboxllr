@@ -309,6 +309,9 @@ static void query_setting(void)
 #include "virtual_memory.inc"
 #include "physical_memory.inc"
 #include "pool_memory.inc"
+#ifdef PILOT_IO_DEVICE_LLE
+#include "io_device_lle.h"
+#endif
 #include "sections.inc"
 #include "media.inc"
 #include "cache.inc"
@@ -331,6 +334,20 @@ static void kernel_dispatch_impl(void)
         if (pilot_imports[i].ordinal == next_kernel_ordinal) name=pilot_imports[i].name;
     if(pilot_verbose)fprintf(stderr, "[KERNEL] %u %s return=%08x\n", next_kernel_ordinal, name, MEM32(g_esp));
     switch (next_kernel_ordinal) {
+#ifdef PILOT_IO_DEVICE_LLE
+    case 65:case 68: {
+        uint32_t args[6],result=g_eax;unsigned count=next_kernel_ordinal==65?6:1;
+        for(unsigned i=0;i<count;++i)args[i]=MEM32(g_esp+4+i*4);
+        const char *error=pilot_io_device_lle(next_kernel_ordinal,memory,args,&result);
+        if(error)stop(error,next_kernel_ordinal);
+        if(next_kernel_ordinal==65) {
+            g_eax=result;
+            fprintf(stderr,"[IO DEVICE LLE CREATE] status=%08x object=%08x extension=%u type=%u\n",
+                    result,MEM32(args[5]),args[1],args[3]);
+        }
+        g_esp+=4+count*4;return;
+    }
+#endif
     case 304:case 305:system_time_fields(next_kernel_ordinal);return;
     case 124: case 143: case 144: case 224: case 231: case 246: case 250:
         thread_object_kernel(next_kernel_ordinal);return;
@@ -486,7 +503,7 @@ static LONG CALLBACK fault_handler(EXCEPTION_POINTERS *exception)
 
 static void install_fault_handler(void)
 {
-#ifdef PILOT_CALENDAR_LLE
+#if defined(PILOT_CALENDAR_LLE) || defined(PILOT_IO_DEVICE_LLE)
     /* Unicorn commits its reserved translation buffer through its own VEH.
      * Let that handler run before treating an exception as an unhandled
      * failure. Genuine faults still reach our terminating diagnostic. */

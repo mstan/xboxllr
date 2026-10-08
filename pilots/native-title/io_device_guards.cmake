@@ -1,0 +1,12 @@
+foreach(kind oversize callback)
+  execute_process(COMMAND "${PROGRAM}" "io-device-${kind}"
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE errors TIMEOUT 5)
+  if(kind STREQUAL "oversize")
+    set(reason "device LLE extension exceeds qualified scope")
+  else()
+    set(reason "device LLE driver callback requires real native interop")
+  endif()
+  if(NOT result STREQUAL "2" OR NOT errors MATCHES "${reason}")
+    message(FATAL_ERROR "Device ${kind} did not stop explicitly: ${result}\n${output}${errors}")
+  endif()
+endforeach()

@@ -713,6 +713,26 @@ limits. Neither original kernel bytes nor xemu code are incorporated. Existing
 GPL-dependent components of the private pilot remain excluded from the intended
 non-GPL shipping product.
 
+## Original device-manager reference execution (2026-10-08)
+
+`pilots/native-title/io_device_lle.c` and
+`tools/native_io_device_reference.py` are independently authored bridges executing
+the owner's original kernel over a private RAM capture from this project's
+full-system LLE. They reuse the already pinned Unicorn 2.1.4 static library and
+its retained COPYING/COPYING.LGPL2 notices. No kernel/capture bytes are committed,
+installed, or authorized for distribution by this repository.
+
+[Cxbx-Reloaded's IoCreateDevice/IoDeleteDevice](https://github.com/Cxbx-Reloaded/Cxbx-Reloaded/blob/585c49a50af1255ab155099e06f24505f9c5a800/src/core/kernel/exports/EmuKrnlIo.cpp)
+was consulted for lifecycle questions, including its stated ReactOS provenance.
+No GPL/ReactOS implementation body is copied. Differences, such as Cxbx's extra
+extension back-pointer, are resolved through original execution.
+[Phobos's kernel I/O manager](https://github.com/phobos665/xboxrecomp/blob/bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0/src/kernel/kernel_io.c)
+was inspected and its fake device/stub implementations rejected. The recovered
+original XPP initializer uses the already attributed private Phobos `63f18f0`
+CPU translator and helpers. Existing private/GPL-dependent pilot restrictions
+remain in force; this change introduces no GPL implementation into the intended
+non-GPL shipping product.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),
