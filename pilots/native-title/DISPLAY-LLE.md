@@ -1,9 +1,11 @@
 # Display clock and vblank LLE
 
-Active serial family: `beads-xbox.1.105`, following bounded input `.104`.
-**The family remains open.** Eight of nine family gates remain open. The
-original-driver component and build-selected native-title route below work.
-Full attract regression and integrated queue/lifetime qualification remain open.
+Serial family: `beads-xbox.1.105`, following bounded input `.104`.
+The original-driver component, build-selected title route, combined original
+input/display regression and integrated queue/lifetime qualification pass.
+The final game-owned native regression also passes. This closes the bounded
+display gate: seven of nine service-family gates remain open. Encoder phase,
+other modes and full LLE draws retain the explicit limits below.
 
 ## Executable component and findings
 
@@ -130,7 +132,10 @@ After that fix, actual original waits return and original callbacks/flips run.
 The 210-second `display-lle-attract-20261008` capture has no terminal guards,
 but remains in the animated title screen: **it is not an attract pass**.
 Nine matching native/scanout frame pairs have identical RGB file hashes.
-Its interaction with original input is under investigation before acceptance.
+The original-input state observer reports neutral input and the expected Start
+presses. A later captured run shows the fixed 90-second press opening the main
+menu before this slower route enters attract. A longer replay is being qualified;
+the earlier run does not establish an input/display correctness defect.
 The combined native/USB component suite passes **46/46 (19.90s)**; the display
 floor itself is exercised by the original-driver fixture and actual title run,
 not by relabeling native display unit tests as LLE tests.
@@ -144,8 +149,7 @@ Executable SHA-256:
 Reference DLL SHA-256:
 `1b5f1605e95b78288de460fdac9f87d7a0a588a2c2948b560d20800fd63b101f`.
 This proves an actual selectable display route; it is not an LLE performance
-or attract endurance claim. Original-input plus original-display selection
-has not passed the same regression yet.
+or attract endurance claim. The combined selection is qualified separately below.
 
 `PILOT_DISPLAY_QUALIFICATION=ON` is a separate test build. After actual device
 creation it runs an authored API consumer, then exits successfully without
@@ -155,6 +159,43 @@ pixels, the actual interval Reset, IRQ disconnect and owned-DMA teardown.
 `display-lle-lifetime-20261008` completed all three cycles with exit 0.
 Keep this option OFF for production and attract validation.
 
-Remaining: investigate the combined original-input/display sequence regression,
-final matching native regression, and game-profile integration.
-Do not close the family based only on a component fixture or a running menu.
+## Combined input/display qualification
+
+Runtime commit `8740525` preserves original PTE/pin/ownership checks while
+indexing the owned publication ledger. **46/46 tests pass (23.36s)**.
+With both qualification-only consumers OFF, original input and display selected,
+`display-input-lle-retimed-20261008` runs **510.328s**, with 51 native and 51
+modeled scanout captures, no guards, and deliberate harness deadline exit 1.
+Start is held at 15-16s to skip the opening and at 240-241s to interrupt Demo
+play. Inspected captures 15/26/40 show Demo play, title return, and Demo play
+reentry; capture 48 shows the subsequent opening movie. The original 90s replay
+opened the menu before attract; no runtime input workaround was needed.
+Executable SHA-256:
+`9f9f034004eb41aeaa8b181f92cfc1030e74f7be021da7a3063d20b35c5ae659`.
+The game owns this slower replay as `tests/attract-input-display-lle.txt`.
+
+The same source with `PILOT_DISPLAY_QUALIFICATION=ON` passes all three device
+lifetimes again in `display-lle-index-lifetime-20261008`, exit 0. This separately
+validates original waits/flips, expected pixels, Reset and allocation teardown
+after indexing. It is not an attract run.
+
+Host private memory rises from 768,409,600 bytes at 30s to 1,013,420,032 at 510s;
+handles are 619/614 at those samples. This run does not establish endurance or
+attribute that growth to display. The next memory/lifetime family `.106` retains
+this observation for investigation. Neither a host-memory plateau nor hardware
+field-phase accuracy is claimed by this bounded display gate.
+
+The private game's `attract` build on runtime `8740525` passes **40/40 tests
+(20.33s)** and its own launcher completes **190.656s**, 19 captures, no guards.
+Captures 8/12/17 show Demo play, title return after Start and Demo play reentry.
+Private evidence: `BlinxRecomp/local/runs/20261008-161729-attract/`.
+Executable SHA-256:
+`b9ce6dfd59751e9c601177ec8a86f1bbcb1cf09b1436292e7bb62069ea96d0d8`.
+The framework pin, display binding digest, generated inventory verification and
+`display-lle` / `input-display-lle` game modes move together. Do not infer
+full-system LLE rendering from the display transport.
+
+LLE throughput is not an acceptance requirement. Allow longer runs or targeted
+input/human observation where fixed wall-time replays cannot follow the slow
+reference. Record the input and observed transitions; do not optimize the floor
+to satisfy a production-speed replay. Performance remains an HLE requirement.
