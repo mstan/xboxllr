@@ -10,8 +10,15 @@ reentry, with 63/63 completed writes and no terminal guard/fault. The candidate
 is startup opt-in on `fix/blinx-priority-scheduler-20261008`; speed and complete
 repeat qualification remain open. No donor timeout escape is adopted. See the
 [candidate's native pilot notes](https://github.com/mstan/xboxlle/blob/fix/blinx-priority-scheduler-20261008/pilots/native-title/README.md)
-for scope and private evidence. Candidate code is `c44ce54`; this baseline
-contains the progress notes while runtime promotion awaits the stage comparison.
+for scope and private evidence. Candidate code is `1d563af`; this baseline
+contains the progress notes and retains its CPU-pinned runtime.
+The completed stage comparison measures 28.71 fps for that reference, 25.06
+for the first scheduler, and 27.87 after adapting Phobos's actual renderer-wait
+boundaries. All finish 2329 presents and 75 writes; reference and final
+candidate retain the same 27186 ordered callback contexts. The option remains
+on its remote branch for correctness and future optimization, with no speed-win
+claim. Its final 190-second controller check verifies menu return and rendered
+reentry, with 92/92 writes and no terminal guard/fault. JSRF stays deferred.
 
 **Latest investigation (.98):** bounded tracing finds a full native audio queue
 and timely cursor polling while fresh guest PCM writes stall alongside presents.
