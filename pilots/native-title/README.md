@@ -1,5 +1,64 @@
 # Native title reference pilot
 
+## Display waits independent of renderer ownership (2026-10-08)
+
+`beads-xbox.1.73/.98`, branch `fix/blinx-independent-display-wait-20261008`.
+Producer CPU-time measurements show almost no executed work during the long
+audio cursor-poll gaps. Separate wait timing then finds the display timer
+waking on time, followed by up to 694 ms acquiring `graphics_lock`. A service
+profile attributes overlapping ownership to real native texture creation,
+release, swap, fence insertion and texture binding calls. The caller can miss
+an entire 16384-frame audio-ring cycle while waiting for renderer ownership.
+
+The reviewed original 36-byte `D3DDevice_BlockUntilVerticalBlank` clears and
+waits for a display notification; it submits no GPU work. The native entry now
+uses a short, separate display-lifetime lock and the existing per-waiter timer.
+It bypasses renderer ownership and the renderer command barrier. Actual GPU
+completion, ordered GPU callbacks and presentation retirement retain their
+existing requirements. Device close still rejects an active display waiter.
+There is no live backend switching or duplicate execution.
+
+The runnable software NV2A regression now raises and acknowledges three PCRTC
+interrupts while the FIFO remains flip-stalled; the following semaphore stays
+incomplete until the real READ increment. This bounded LLE test passes
+(0.29 seconds). A native guest-ABI regression holds renderer ownership on one
+thread while another waits for the display: the old implementation times out,
+the new implementation completes. All 35 native tests pass with the D3D debug
+layer (15.66 seconds), including callback ordering and device teardown.
+
+The full `movie-independent-quiet` observation disables per-buffer/service
+logging and GPU screenshots, retaining output PCM/clock capture and sparse
+uploaded-frame grids. Its 75.49-second opening source reaches the final frame
+in 76.397 seconds of captured presentation span. Grid RMSE remains 0.146
+median / 0.224 at the 95th percentile. Audio windows at source seconds 0..70
+in two-second steps all align at the same 21.630667-second capture offset;
+the common repeating-ring drift is absent in those windows. This is stronger
+progress than the earlier 80-86-second observations, but the capture settings
+differ, so this is not a controlled percentage-speedup claim.
+
+Full A/V qualification remains open: the source-second-72 window shifts by
+84.9 ms, later low-level tail audio does not match, and sampled video stalls
+occasionally put the picture up to about 346 ms behind the mixer-aligned
+source. Mixer timestamps do not measure speaker latency. No original-speed
+or exhaustive movie-frame coverage claim follows from reaching the last frame.
+With synchronous per-buffer logging enabled, a separate run still develops
+audio pauses despite no long display waits. That diagnostic writes while
+holding audio ownership and must not be used to qualify production cadence.
+
+A separate 190-second captured controller run delivers Start at 90016 ms,
+returns from the rendered demo to the visible `Press START to begin` screen,
+then idles into another rendered demo. All 73 replay writes complete; 36 images
+and the manifest record no guard/fault before harness termination. This is
+functional validation, not an uninstrumented performance measurement.
+
+Private evidence: `build/blinx/display-wait-validation.aot-private.json`,
+`movie-producer-time/`, `movie-vblank-waits/`, `movie-render-lock/`,
+`movie-independent-display/`, `movie-independent-quiet/` and `display-wait-input/`,
+with their logs, executable hashes, PCM/clock files and frame comparisons.
+Next investigate the remaining native source-queue underrun/tail behavior with
+bounded in-memory observation, and the independent renderer stalls. Do not
+restore renderer synchronization to make audio follow those stalls.
+
 ## Full movie validation and decoder stalls (2026-10-08)
 
 `beads-xbox.1.73` and `.98`, branch `validate/blinx-movie-av-20261008`.
@@ -37,8 +96,10 @@ ring-buffer cycle. Stream traces expose producer cursor-poll gaps exceeding a
 cycle. Two targeted stack snapshots land in generated movie coefficient/motion
 decoding; another is in the guest scheduling path. These snapshots suspend the
 process briefly, so that separate run is not a cadence measurement. The pilot
-also still forced `/Od` for Release at this checkpoint. The next experiment is
-compiler optimization before replacing a decoder or altering cursor semantics.
+also still forced `/Od` for Release at this checkpoint. The separate compiler
+experiment (`412084b`, `perf/blinx-optimized-title-20261008`) subsequently finds
+only a modest gameplay improvement and does not resolve movie repeats. The
+display-wait investigation above narrows the dominant producer stall further.
 
 Private evidence: `build/blinx/movie-av-reference/`, `movie-av-first/`,
 `movie-av-second/`, `movie-av-stream-trace/` and `movie-av-no-readback/`, their

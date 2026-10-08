@@ -47,7 +47,9 @@ static int graphics_gpu_deliver(void)
     if(pending && pilot_gfx_completion_events())pending=2;
     ReleaseSRWLockExclusive(&graphics_lock);return pending;
 }
-/* Graphics methods after the software trap cannot overtake its callback.
+/* Renderer commands after the software trap cannot overtake its callback.
+ * The independent display-event wait submits no command and does not enter
+ * this renderer barrier.
  * CPU execution after Insert remains free to run; callbacks also run when the
  * caller only polls memory. Reentrant DPC calls use their own execution context. */
 static void graphics_gpu_barrier(void)

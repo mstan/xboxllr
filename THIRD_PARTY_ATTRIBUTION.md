@@ -15,6 +15,23 @@ notices. Preparation/build steps must report missing required notices.
 
 ## Private native-title reference pilot
 
+### Independent display waits - 2026-10-08
+
+The reviewed original NTSC `D3DDevice_BlockUntilVerticalBlank` body, recorded
+by `tools/native_d3d_binding.py`, clears and waits for a display notification;
+it submits no graphics command. The existing machine PCRTC implementation and
+its new stalled-FIFO interrupt regression provide the runnable LLE boundary.
+Behavioral reference: xemu `hw/xbox/nv2a/nv2a.c`,
+`nv2a_vga_gfx_update`, at `482088490c2d5983ed5e1eafbd09906157c1eca0`,
+where display updates latch the PCRTC interrupt. No xemu implementation is
+copied. Phobos `src/hle/hle_d3d8.c` at
+`bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0` was also reviewed for its separation
+of guest pacing from host swap pacing. Its `src/kernel/kernel_bridge.c`
+notification-event generation and QPC display clock were reviewed as well:
+clearing a notification after an edge must not unready existing waiters.
+The native display lifetime lock,
+waiter regression and timing diagnostics are independently authored here.
+
 ### Full-movie observation - 2026-10-08
 
 Independent diagnostics observe the existing attributed Phobos YUV renderer

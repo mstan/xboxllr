@@ -1100,6 +1100,24 @@ int main() {
     CHECK(gpu.semaphore_writes() == 1);
     CHECK(get32(ram, 0x3040) == 0x12345678u);
 
+    // Display IRQ progress is independent of the stalled graphics command
+    // stream (xemu nv2a_vga_gfx_update/PCRTC behavioral reference). Neither an
+    // edge nor its acknowledgement completes the pending semaphore or flip.
+    bool irq = false;
+    gpu.set_irq([&](int n, bool level) { CHECK(n == 3); irq = level; }, 3);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x000140, 4, 1);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x600140, 4, 1);
+    for (uint64_t frame = 1; frame <= 3; ++frame) {
+        gpu.set_frame(frame);
+        CHECK(irq && gpu.vblanks() == frame);
+        CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x600100, 4) == 1);
+        CHECK(gpu.waiting_for_flip() && gpu.semaphore_writes() == 1);
+        CHECK(get32(ram, 0x3040) == 0x12345678u);
+        gpu.mmio_write(xlle::Nv2a::kBase + 0x600100, 4, 1);
+        CHECK(!irq && gpu.waiting_for_flip());
+    }
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x600140, 4, 0);
+
     gpu.mmio_write(xlle::Nv2a::kBase + 0x40071C, 4, 2);
     CHECK(!gpu.waiting_for_flip());
     CHECK(gpu.pgraph_read_increments() == 1);
@@ -1110,7 +1128,6 @@ int main() {
 
     // A nonzero NV097 NOP is the kernel's software-method notification. It raises PGRAPH
     // ERROR, traps the parameter, and holds following methods until the ISR clears it.
-    bool irq = false;
     gpu.set_irq([&](int n, bool level) {
         CHECK(n == 3);
         irq = level;

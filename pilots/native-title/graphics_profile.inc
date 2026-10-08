@@ -24,6 +24,10 @@ static void graphics_draw_profile_step(uint64_t *previous,unsigned phase)
 
 static void graphics_service_profile_record(unsigned entry,uint64_t begin,uint64_t end)
 {
+    if(end-begin>500000)
+        fprintf(stderr,"[GRAPHICS SLOW] thread=%lu name=%s begin=%llu end=%llu elapsed_ms=%.3f\n",
+            GetCurrentThreadId(),pilot_d3d_calls[entry].name,(unsigned long long)begin,
+            (unsigned long long)end,(end-begin)/10000.0);
     if(!graphics_service_profile.start)graphics_service_profile.start=begin;
     graphics_service_profile.ticks[entry]+=end-begin;
     ++graphics_service_profile.calls[entry];

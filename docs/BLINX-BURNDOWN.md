@@ -1,11 +1,16 @@
 # Blinx: serial attract-sequence bring-up
 
-**Current A/V blocker (.73/.98):** complete opening-movie YUV samples match
-independent decoding through the final frame, but video/audio progress is too
-slow and audio repeats ring cycles. Actual producer polling gaps and decoder
-stack samples direct the next experiment to the pilot's forced unoptimized
-Release build. No complete A/V or original-speed claim follows from visible
-movie playback. See the native-pilot README for evidence and diagnostic limits.
+**Current A/V blocker (.73/.98):** the display-event wait now returns independently
+of renderer ownership, removing a measured 0.4-0.8-second lock delay from the
+audio producer. The software LLE PCRTC/FIFO test and native ABI regression
+qualify that separation; all 35 native tests pass. A full movie observation with
+per-buffer logging disabled reaches opening frame 2263 in 76.397 seconds, with
+matching sampled pixels and constant audio alignment through source second 70.
+An 84.9-ms late audio shift, unmatched low-level tail audio and intermittent
+video stalls remain. A separate captured run preserves input interruption,
+visible menu return and rendered reentry, with 73/73 writes. Full A/V and
+original-speed qualification remain open. See the native-pilot README for
+evidence and diagnostic limits; synchronous audio tracing perturbs playback.
 
 **Latest measured speed (.97):** keeping CPU-exposure state on the texture
 owner removes redundant whole-table searches. Same-executable first-stage

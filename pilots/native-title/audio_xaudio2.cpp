@@ -187,9 +187,17 @@ static void audio_stream_record(Buffer *b,const char *operation,UINT32 offset=0,
 {
     if(!audio_stream_profile())return;
     XAUDIO2_VOICE_STATE state;UINT32 play=position(b,&state);
-    fprintf(stderr,"[AUDIO STREAM] time=%llu buffer=%p operation=%s offset=%u bytes=%u play=%u write=%u samples=%llu baseline=%llu queued=%u playing=%u capacity=%u rate=%u\n",
+    FILETIME created,exited,kernel,user;
+    if(!GetThreadTimes(GetCurrentThread(),&created,&exited,&kernel,&user))
+        fail("audio diagnostic thread times",HRESULT_FROM_WIN32(GetLastError()));
+    UINT64 cpu=((UINT64)kernel.dwHighDateTime<<32)+kernel.dwLowDateTime+
+        ((UINT64)user.dwHighDateTime<<32)+user.dwLowDateTime;
+    // Both values use 100 ns units. CPU time is cumulative for this caller,
+    // so a producer gap can be separated into executed work and elapsed time.
+    fprintf(stderr,"[AUDIO STREAM] time=%llu buffer=%p operation=%s offset=%u bytes=%u play=%u write=%u samples=%llu baseline=%llu queued=%u playing=%u capacity=%u rate=%u thread=%lu cpu=%llu\n",
         (unsigned long long)capture_clock(),(void*)b,operation,offset,bytes,play,b->next,
-        (unsigned long long)state.SamplesPlayed,(unsigned long long)b->baseline,state.BuffersQueued,b->playing,b->bytes,b->frequency);
+        (unsigned long long)state.SamplesPlayed,(unsigned long long)b->baseline,state.BuffersQueued,b->playing,b->bytes,b->frequency,
+        GetCurrentThreadId(),(unsigned long long)cpu);
 }
 static HRESULT fill(Buffer *b)
 {

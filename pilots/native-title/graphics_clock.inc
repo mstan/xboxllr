@@ -3,6 +3,13 @@
  * nominal 60 Hz matches the current machine LLE clock; it is not host refresh. */
 static uint64_t graphics_clock_origin;
 static unsigned graphics_clock_hz,graphics_clock_waiters;
+/* Display-event lifetime is independent of renderer ownership. Original XDK
+ * BlockUntilVerticalBlank submits no GPU work; PCRTC IRQ progress also survives
+ * a stalled FIFO in the runnable LLE fixture. Never acquire graphics_lock while
+ * holding this lock. Creation/close take graphics_lock, then this short lock. */
+static SRWLOCK graphics_display_lock=SRWLOCK_INIT;
+static unsigned graphics_display_waiters;
+static int graphics_display_open,graphics_display_profile;
 static uint32_t graphics_callback;
 static int graphics_clock_closing,graphics_clock_presented;
 static struct GraphicsPresent {uint64_t serial,target;uint32_t swap;} graphics_presents[2];
@@ -51,7 +58,9 @@ static void graphics_present_drain(void)
 }
 static void graphics_vblank_deliver(uint64_t frame)
 {
+    uint64_t entered=graphics_service_profile_enabled()?dispatch_monotonic():0;
     AcquireSRWLockExclusive(&graphics_lock);
+    uint64_t acquired=entered?dispatch_monotonic():0;
     unsigned retired=0;
     /* Late DPC delivery must not assign newly observed GPU completion to an
      * already elapsed historical vblank while the worker catches up. */
@@ -66,7 +75,11 @@ static void graphics_vblank_deliver(uint64_t frame)
     if(callback) {
         MEM32(data)=(uint32_t)frame;MEM32(data+4)=graphics_swap_completed;MEM32(data+8)=flags;
     }
+    uint64_t released=entered?dispatch_monotonic():0;
     ReleaseSRWLockExclusive(&graphics_lock);
+    if(entered && released-entered>500000)
+        fprintf(stderr,"[VBLANK DPC SLOW] thread=%lu begin=%llu acquired=%llu end=%llu\n",
+            GetCurrentThreadId(),(unsigned long long)entered,(unsigned long long)acquired,(unsigned long long)released);
     if(!callback)return;
     uint32_t top=MEM32(g_fs_base+4);
     g_esp=top-8;MEM32(g_esp)=0;MEM32(g_esp+4)=data;
@@ -90,6 +103,10 @@ static void graphics_set_vblank_callback(uint32_t callback)
 }
 static void graphics_clock_close(void)
 {
+    AcquireSRWLockExclusive(&graphics_display_lock);
+    if(graphics_display_waiters)stop("device release with active vertical-blank waits",graphics_display_waiters);
+    graphics_display_open=0;
+    ReleaseSRWLockExclusive(&graphics_display_lock);
     graphics_clock_closing=1;graphics_callback=0;
     if(dispatch_changed) {
         dispatch_pulse_set(0,0,NULL);
@@ -120,17 +137,30 @@ static void graphics_wait_until(uint64_t deadline)
     }
     if(!CloseHandle(timer))stop("display timer close failed",GetLastError());
 }
-/* Called with graphics_lock held; returns with it held. Native rendering and
- * other waiters can proceed while this caller sleeps. No guest callback or
- * submitted work is discarded; callbacks run independently on the DPC worker. */
+/* Whole display-event API: its lifetime and deadline do not need renderer
+ * ownership or completion. Real GPU callbacks/presents retain their ordering
+ * elsewhere; this call reports only an elapsed display edge. */
 static void graphics_wait_vblank(void)
 {
-    uint64_t deadline=graphics_next_vblank(graphics_clock_origin,dispatch_monotonic(),graphics_clock_hz);
-    ++graphics_clock_waiters;
-    ReleaseSRWLockExclusive(&graphics_lock);
+    AcquireSRWLockExclusive(&graphics_display_lock);
+    if(!graphics_display_open)stop("vertical-blank wait without active display",0);
+    int profile=graphics_display_profile;
+    uint64_t started=dispatch_monotonic();
+    uint64_t deadline=graphics_next_vblank(graphics_clock_origin,started,graphics_clock_hz);
+    ++graphics_display_waiters;
+    ReleaseSRWLockExclusive(&graphics_display_lock);
     graphics_wait_until(deadline);
-    AcquireSRWLockExclusive(&graphics_lock);
-    --graphics_clock_waiters;
+    uint64_t awakened=profile?dispatch_monotonic():0;
+    AcquireSRWLockExclusive(&graphics_display_lock);
+    --graphics_display_waiters;
+    ReleaseSRWLockExclusive(&graphics_display_lock);
+    if(profile) {
+        uint64_t returned=dispatch_monotonic();
+        if(returned-started>500000)
+            fprintf(stderr,"[VBLANK WAIT] thread=%lu priority=%d start=%llu deadline=%llu awake=%llu returned=%llu\n",
+                GetCurrentThreadId(),GetThreadPriority(GetCurrentThread()),(unsigned long long)started,
+                (unsigned long long)deadline,(unsigned long long)awakened,(unsigned long long)returned);
+    }
     g_eax=0; /* Original nonalertable KeWaitForSingleObject returns STATUS_SUCCESS. */
 }
 /* Optional direct GPU capture avoids desktop occlusion. Diagnostic readback

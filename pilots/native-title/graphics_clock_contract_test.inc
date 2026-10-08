@@ -84,6 +84,12 @@ static DWORD WINAPI test_clock_waiter(void *context)
     graphics_wait_until(t->deadline);t->returned=dispatch_monotonic();
     return 0;
 }
+static DWORD WINAPI test_display_wait_without_renderer(void *context)
+{
+    HANDLE done=context;
+    CHECK(call_graphics(PILOT_D3D_D3DDevice_BlockUntilVerticalBlank,NULL)==0);
+    CHECK(SetEvent(done));return 0;
+}
 static void test_graphics_clock(void)
 {
     const uint64_t origin=100000000;
@@ -109,6 +115,15 @@ static void test_graphics_clock(void)
         CHECK(CloseHandle(workers[i]) && CloseHandle(waits[i].ready));
     }
     CHECK(CloseHandle(go));
+    /* The original entry only clears/waits for a display notification. A
+     * different thread owning the renderer must not gate that notification. */
+    HANDLE done=CreateEventW(NULL,TRUE,FALSE,NULL);CHECK(done);
+    AcquireSRWLockExclusive(&graphics_lock);
+    HANDLE independent=CreateThread(NULL,0,test_display_wait_without_renderer,done,0,NULL);CHECK(independent);
+    CHECK(WaitForSingleObject(done,2000)==WAIT_OBJECT_0);
+    ReleaseSRWLockExclusive(&graphics_lock);
+    CHECK(WaitForSingleObject(independent,2000)==WAIT_OBJECT_0);
+    CHECK(CloseHandle(independent) && CloseHandle(done));
     uint64_t start=dispatch_monotonic();
     for(unsigned i=0;i<18;++i) {
         uint64_t before=dispatch_monotonic();
@@ -118,7 +133,7 @@ static void test_graphics_clock(void)
     }
     uint64_t elapsed=dispatch_monotonic()-start;
     CHECK(elapsed>=17*10000000/60 && elapsed<20000000);
-    CHECK(!graphics_clock_waiters && GetProcessHandleCount(GetCurrentProcess(),&handles_after));
+    CHECK(!graphics_clock_waiters && !graphics_display_waiters && GetProcessHandleCount(GetCurrentProcess(),&handles_after));
     CHECK(handles_after==handles_before);
     fprintf(stderr,"[VBLANK TEST] 18 actual guest waits in %.3f ms; phase, concurrent waiters, ABI and handle lifetime passed\n",elapsed/10000.0);
 }

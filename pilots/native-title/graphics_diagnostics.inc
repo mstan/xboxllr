@@ -10,6 +10,7 @@ enum GraphicsDiagnostic {
     GRAPHICS_DIAGNOSTIC_FRAME,
     GRAPHICS_DIAGNOSTIC_FEEDBACK_TRACE,
     GRAPHICS_DIAGNOSTIC_MOVIE,
+    GRAPHICS_DIAGNOSTIC_WAIT,
     GRAPHICS_DIAGNOSTIC_COUNT
 };
 static const char *graphics_diagnostic(enum GraphicsDiagnostic which)
@@ -20,7 +21,8 @@ static const char *graphics_diagnostic(enum GraphicsDiagnostic which)
         {"XLLE_PILOT_FVF_CAPTURE",NULL,0},
         {"XLLE_PILOT_FRAME_CAPTURE",NULL,0},
         {"XLLE_PILOT_FEEDBACK_TRACE",NULL,0},
-        {"XLLE_PILOT_MOVIE_CAPTURE",NULL,0}
+        {"XLLE_PILOT_MOVIE_CAPTURE",NULL,0},
+        {"XLLE_PILOT_WAIT_PROFILE",NULL,0}
     };
     static int cache=-1;
     if(cache<0) {const char *setting=getenv("XLLE_PILOT_DIAGNOSTIC_CACHE");cache=!(setting && !strcmp(setting,"0"));}

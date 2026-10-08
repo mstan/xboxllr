@@ -132,6 +132,10 @@ static void graphics_dispatch_impl(unsigned entry)
     if(pilot_verbose){fprintf(stderr,"[D3D] %s return=%08x",pilot_d3d_calls[entry].name,MEM32(g_esp));
     for (unsigned i=0;i<pilot_d3d_calls[entry].stack_bytes/4;i++) fprintf(stderr," %08x",arguments[i]);
     fprintf(stderr,"\n");}
+    if(entry==PILOT_D3D_D3DDevice_BlockUntilVerticalBlank) {
+        graphics_wait_vblank();
+        g_esp+=4+pilot_d3d_calls[entry].stack_bytes;return;
+    }
     AcquireSRWLockExclusive(&graphics_lock);
     if (entry!=PILOT_D3D_Direct3D_CreateDevice && !graphics_active)
         stop("graphics entry before native creation",pilot_d3d_calls[entry].address);
@@ -152,7 +156,6 @@ static void graphics_dispatch_impl(unsigned entry)
     case PILOT_D3D_D3DDevice_GetDepthStencilSurface2:
         graphics_target_ref(graphics_depth,1);g_eax=graphics_depth;break;
     case PILOT_D3D_D3DDevice_SetRenderTarget:graphics_set_targets(arguments[0],arguments[1]);break;
-    case PILOT_D3D_D3DDevice_BlockUntilVerticalBlank:graphics_wait_vblank();break;
     case PILOT_D3D_D3DDevice_CreatePixelShader:g_eax=graphics_pixel_create(arguments);break;
     case PILOT_D3D_D3DDevice_SetPixelShader:graphics_pixel_bind(arguments[0]);break;
     case PILOT_D3D_D3DDevice_SetPixelShaderConstant:graphics_pixel_constants(arguments);break;
@@ -225,6 +228,10 @@ static void graphics_dispatch_impl(unsigned entry)
             graphics_surfaces_create();
             graphics_snapshot_init();
             graphics_transform_init();
+            AcquireSRWLockExclusive(&graphics_display_lock);
+            graphics_display_profile=graphics_diagnostic(GRAPHICS_DIAGNOSTIC_WAIT)!=NULL;
+            graphics_display_open=1;
+            ReleaseSRWLockExclusive(&graphics_display_lock);
             MEM32(PILOT_D3D_DEVICE_GLOBAL)=PILOT_D3D_DEVICE_OBJECT;
             if (arguments[5]) MEM32(arguments[5])=PILOT_D3D_DEVICE_OBJECT;
         } else {
