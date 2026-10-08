@@ -1,5 +1,23 @@
 # Blinx: serial attract-sequence bring-up
 
+**Audio-tail finding (.98):** exact caller-write and XAudio2-submission capture
+shows that the fixed quiet-tail difference against FFmpeg already exists in
+Blinx's original decoded PCM. All 7,560 opening submissions match the ring;
+the actual mixer output also preserves the quiet tail. No playback correction
+is justified for this comparison difference. The
+[movie audit](BLINX-MOVIE-STALL-AUDIT-2026-10-08.md) records the evidence and
+remaining video timing/cadence limits. This diagnostic work is isolated on
+`investigate/blinx-audio-ingress-20261008`; baseline runtime is unchanged.
+
+The same candidate now completes two natural demos in a 600-second neutral
+repeat and renders a third, with 193/193 writes, 60 captures and no logged
+terminal guard/fault. Whole-stage rates are **28.27 / 28.56 fps** against the
+nominal 30 fps target. Third-cycle movie memory is flat at 649.60 MiB over
+three samples; gameplay peaks still need longer comparable-phase observation.
+The [native pilot](../pilots/native-title/README.md) records limits and evidence.
+Next work remains the measured gameplay stalls and final video timing; this
+audio comparison finding does not satisfy the complete Blinx goal.
+
 **New scheduler candidate (.71):** Phobos `05040ec`'s ADX priority/resume
 analysis now informs a native single-CPU execution scheduler, bounded by
 unmodified original-kernel ready-queue/priority tests. With identical executable,

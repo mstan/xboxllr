@@ -1,5 +1,39 @@
 # Native title reference pilot
 
+## Opening audio tail qualification (2026-10-08)
+
+The exact source capture on `investigate/blinx-audio-ingress-20261008` locates
+the quiet-tail difference against independent FFmpeg ADX output in the PCM
+already produced by Blinx's original decoder. All 7,560 opening submissions
+match guest-written ring bytes. Actual post-GP output agrees closely with
+that game PCM through the tail, without changing decoder or playback semantics.
+This removes that comparison mismatch as evidence of an HLE transport defect;
+it does not declare all audio/video or attract cadence complete.
+The [movie audit](../../docs/BLINX-MOVIE-STALL-AUDIT-2026-10-08.md) records
+measurements, provenance, bounded capture options and reproduction commands.
+
+A subsequent 600-second neutral-input observation (`scheduler-full-repeat`)
+on the same executable completes two natural gameplay demos, returns through
+the publisher/opening/title movies after each, and renders a third demo.
+All 193 issued writes complete; 60 sparse captures and the complete log show
+no terminal guard/fault. The two complete stages each present 2,329 frames,
+averaging 28.27328 and 28.56388 fps (nominal target 30); p95 intervals are
+44.96/43.28 ms. Four intervals exceed 100 ms in each stage. The first stage
+exceeds a constant-30-fps budget by 4.74 seconds; its four largest stalls
+contribute 1.57 seconds of that excess. This is a measured cadence gap.
+
+Third-cycle opening-movie private memory stays at 649.60 MiB at 450/480/510
+seconds; handles are 606/606/605. Sampled gameplay peaks are 707.80/714.50/
+716.48 MiB across the three entries, with the third still in progress at the
+deadline. Sampling different scene positions and this short observation do
+not exclude slow growth. No memory/handle exhaustion is observed. Actual
+controller interruption remains separately validated by the 190-second run
+below; this neutral run contains only the zero-button input state. The harness
+terminates its own still-running title at 600 seconds, not at a natural exit.
+Evidence: `build/blinx/scheduler-full-repeat/validation.aot-private.json` and
+`validated-repeat-contact.png`. Full A/V/original-speed qualification and
+JSRF remain open. These observations do not promote the scheduler as a speed win.
+
 ## Experimental guest scheduler (.71, 2026-10-08)
 
 `XLLE_PILOT_GUEST_SCHEDULER=1` selects a shared single-CPU guest scheduler at

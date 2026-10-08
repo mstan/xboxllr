@@ -24,6 +24,13 @@ event-trace gate are independently authored. No additional donor or FFmpeg
 implementation was incorporated, and the existing private pilot shipping
 exclusion remains in force.
 
+The subsequent exact PCM ingress/submission capture and
+`tools/native_audio_ingress.py` verifier are also independently authored.
+Phobos `05040ec103dfbaca5e3daed28bbc569bd896f59f` audio transport was rechecked
+for queue ownership; no additional source body was imported. FFmpeg is run
+externally on owned media/captured PCM solely to compare decode and resampling
+output. Comparison data remains private and is not a shipped implementation.
+
 ### Independent display waits - 2026-10-08
 
 The reviewed original NTSC `D3DDevice_BlockUntilVerticalBlank` body, recorded
