@@ -36,6 +36,12 @@ all dashboard polish/performance work is not a Blinx bring-up gate. See the
 [console launch/storage contract](CONSOLE-LAUNCH-STORAGE.md) and existing
 provisioning issue `.22`; the native host-directory backend has not completed
 the shared virtual-HDD requirement.
+Owner follow-up: keep direct-to-game launch, consider an optional permissive
+open-source default dashboard, and preserve the supplied retail boot experience
+including its original logo sequence. Make console/save targets configurable
+and design for multiple recomps sharing one real save drive/profile. These are
+tracked in `.22` and the console contract; they do not restart dashboard work or
+change the next controller-input dependency batch.
 
 | Delivery order | Service | Relative work / dependencies | State |
 | --- | --- | --- | --- |
