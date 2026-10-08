@@ -35,6 +35,15 @@ static uint32_t physical_allocate(uint32_t length,uint32_t low,uint32_t high,uin
     uint32_t result=0; struct PhysicalAllocation *slot=NULL;
     for(unsigned i=0;i<256;++i)if(!physical_allocations[i].bytes){slot=&physical_allocations[i];break;}
     if(!slot || vm_committed(0,0x100000000ull)+vm_service_bytes+bytes>64ull*1024*1024)goto done;
+#ifdef PILOT_USB_LLE
+    /* The original USB driver consumes real physical addresses. Allocate with
+     * the same original kernel that owns page translation, rather than asking
+     * its captured PTEs to describe an unrelated native allocation. */
+    uint32_t args[]={length,low,high,alignment,protect},base=0;
+    const char *error=pilot_io_device_lle(166,memory,args,&base);
+    if(error)stop(error,166);
+    if(!base)goto done;
+#else
     for(;;) {
         if(at+bytes>limit)goto done;
         int conflict=0;
@@ -50,6 +59,7 @@ static uint32_t physical_allocate(uint32_t length,uint32_t low,uint32_t high,uin
     }
     uint32_t base=0x80000000u|(uint32_t)at;
     if(!VirtualAlloc(memory+base,bytes,MEM_COMMIT,PAGE_READWRITE))goto done;
+#endif
     *slot=(struct PhysicalAllocation){base,bytes,protect,0}; result=base;
     for(uint32_t page=(base&0x0fffffff)/4096;page<((base&0x0fffffff)+bytes)/4096;++page)
         physical_protection[page]=(uint16_t)protect;
@@ -63,7 +73,13 @@ static void physical_free(uint32_t base)
     struct PhysicalAllocation *a=physical_find(base,1);
     if(!a || a->base!=base)stop("unowned contiguous allocation release",base);
     if(a->borrowers)stop("contiguous allocation still owns registered resources",base);
+#ifdef PILOT_USB_LLE
+    uint32_t result=0;
+    const char *error=pilot_io_device_lle(171,memory,&base,&result);
+    if(error)stop(error,171);
+#else
     if(!VirtualFree(memory+base,a->bytes,MEM_DECOMMIT))stop("contiguous release failed",base);
+#endif
     memset(physical_protection+(base&0x0fffffff)/4096,0,a->bytes/4096*sizeof(physical_protection[0]));
     memset(physical_persistent+(base&0x0fffffff)/4096,0,a->bytes/4096);
     memset(a,0,sizeof(*a));ReleaseSRWLockExclusive(&vm_lock);
@@ -77,6 +93,11 @@ static void physical_persist(uint32_t base,uint32_t bytes,int persist)
     uint64_t end=((uint64_t)base+bytes+4095)&~4095ull;
     AcquireSRWLockExclusive(&vm_lock);
     if(!physical_find(low,(uint32_t)(end-low)))stop("persistence requires owned contiguous pages",base);
+#ifdef PILOT_USB_LLE
+    uint32_t args[]={base,bytes,(uint32_t)!!persist},result=0;
+    const char *error=pilot_io_device_lle(178,memory,args,&result);
+    if(error)stop(error,178);
+#endif
     memset(physical_persistent+(low&0x0fffffff)/4096,!!persist,(size_t)((end-low)/4096));
     ReleaseSRWLockExclusive(&vm_lock);
 }
@@ -91,6 +112,11 @@ static void physical_protect(uint32_t base,uint32_t size,uint32_t protect)
     uint64_t end=((uint64_t)base+size+4095)&~4095ull;
     vm_ensure();AcquireSRWLockExclusive(&vm_lock);
     if(!physical_find(low,(uint32_t)(end-low)))stop("protection requires owned contiguous pages",base);
+#ifdef PILOT_USB_LLE
+    uint32_t args[]={base,size,protect},result=0;
+    const char *error=pilot_io_device_lle(182,memory,args,&result);
+    if(error)stop(error,182);
+#endif
     DWORD old;
     if(!VirtualProtect(memory+low,(SIZE_T)(end-low),access,&old))stop("host contiguous protection failed",GetLastError());
     for(uint32_t page=(low&0x0fffffff)/4096;page<(end-0x80000000ull)/4096;++page)

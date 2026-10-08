@@ -307,10 +307,13 @@ static void query_setting(void)
 #include "system_time.inc"
 #include "event_objects.inc"
 #include "virtual_memory.inc"
-#include "physical_memory.inc"
-#include "pool_memory.inc"
 #ifdef PILOT_IO_DEVICE_LLE
 #include "io_device_lle.h"
+#endif
+#include "physical_memory.inc"
+#include "pool_memory.inc"
+#ifdef PILOT_USB_LLE
+#include "usb_lle.inc"
 #endif
 #include "sections.inc"
 #include "media.inc"
@@ -335,11 +338,25 @@ static void kernel_dispatch_impl(void)
     if(pilot_verbose)fprintf(stderr, "[KERNEL] %u %s return=%08x\n", next_kernel_ordinal, name, MEM32(g_esp));
     switch (next_kernel_ordinal) {
 #ifdef PILOT_IO_DEVICE_LLE
-    case 65:case 68: {
-        uint32_t args[6],result=g_eax;unsigned count=next_kernel_ordinal==65?6:1;
+    case 44:case 65:case 68:case 109:case 173:case 175: {
+        uint32_t args[7],result=g_eax;
+        unsigned count=next_kernel_ordinal==65?6:next_kernel_ordinal==109?7:
+                       next_kernel_ordinal==175?3:next_kernel_ordinal==44?2:1;
         for(unsigned i=0;i<count;++i)args[i]=MEM32(g_esp+4+i*4);
+        int page_service=next_kernel_ordinal==173 || next_kernel_ordinal==175;
+        if(page_service) {
+            AcquireSRWLockShared(&vm_lock);
+            if(args[0]>=0x80000000u && args[0]<0x90000000u &&
+               !physical_find(args[0],next_kernel_ordinal==175?args[1]:1))
+                stop("page service requires owned contiguous storage",args[0]);
+        }
         const char *error=pilot_io_device_lle(next_kernel_ordinal,memory,args,&result);
+        if(page_service)ReleaseSRWLockShared(&vm_lock);
         if(error)stop(error,next_kernel_ordinal);
+        if(next_kernel_ordinal==44 || next_kernel_ordinal==173)g_eax=result;
+        if(page_service && pilot_verbose)
+            fprintf(stderr,"[IO PAGE LLE] ordinal=%u address=%08x size=%u result=%08x\n",
+                    next_kernel_ordinal,args[0],next_kernel_ordinal==175?args[1]:1,result);
         if(next_kernel_ordinal==65) {
             g_eax=result;
             fprintf(stderr,"[IO DEVICE LLE CREATE] status=%08x object=%08x extension=%u type=%u\n",
@@ -487,6 +504,12 @@ static LONG CALLBACK fault_handler(EXCEPTION_POINTERS *exception)
      * this does not resume or hide an unhandled guest/native fault. */
     if(code==0x406d1388u)return EXCEPTION_CONTINUE_SEARCH;
     if (code == EXCEPTION_ACCESS_VIOLATION) {
+#ifdef PILOT_USB_LLE
+        const char *mmio_error=NULL;
+        int mmio=pilot_mmio_fault(exception,memory,usb_access,&mmio_error);
+        if(mmio>0)return EXCEPTION_CONTINUE_EXECUTION;
+        if(mmio<0)stop(mmio_error,0xfed00000u);
+#endif
         uintptr_t at = exception->ExceptionRecord->ExceptionInformation[1];
         HMODULE fault_module=NULL;char fault_name[MAX_PATH]={0};
         if(GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,

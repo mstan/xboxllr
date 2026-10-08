@@ -169,16 +169,81 @@ The harness terminated its child at the requested deadline (exit 1), not a crash
 This checks preserved attract behavior and native-input interruption, not LLE
 input delivery, a new endurance sign-off or original-speed qualification.
 
+## Page ownership and OHCI transport checkpoint - 2026-10-08
+
+`PILOT_USB=LLE` (default `OFF`) requires the device LLE configuration. It uses
+original contiguous allocation/release, page locking, physical translation,
+protection/persistence, interrupt vector lookup and interrupt-object
+initialization. Original routines and callees remain unchanged. Interrupt
+connection/delivery is not implied by object initialization.
+
+Original execution corrected the planning assumption: buffer locking skips the
+direct physical range but increments PFN lock counts for ordinary mappings.
+The reference exercises both, including boundary crossings and nested lock/unlock.
+Phobos's unconditional no-op and fake interrupt connection are rejected.
+Actual DMA storage lifetime remains required separately from page-lock counts.
+
+Qualification caught a real integration error: the native allocator's address
+was absent from the captured kernel PTEs, so original physical translation
+returned zero. The USB LLE build now gives allocation and translation the same
+original-kernel owner. Actual pages are published to the native caller; caller
+and DMA writes are reconciled at service boundaries. Release removes real PTEs
+and native mappings. The ordinary accelerated build retains its native allocator.
+
+`usb_lle.cpp` directly reuses our maintained `src/machine/ohci.cpp` and XID model.
+Real DMA uses owned storage, retained until controller reset discards schedules.
+Unowned DMA and premature freeing stop explicitly. No donor USB body is copied.
+
+Generated C still accesses guest memory directly. `mmio_fault.c` decodes only
+actual x64 dword MOV instructions addressing the OHCI window, verifies address
+and direction, performs one hardware-model transaction, and preserves flags and
+unrelated registers. It neither maps dummy register RAM nor skips unsupported
+instructions. Other instructions/access sizes stop. This slower transport is
+confined to the selected LLE build; native input does not pay its overhead.
+
+Qualification:
+
+- `tools/native_input_dependencies_reference.py` executes original allocation,
+  translation, pinning and interrupt setup. Private observations are in
+  `build/blinx/input-dependencies-reference.aot-private.json`.
+- `pilot_usb_lle` checks compiled MMIO and a real GET_DESCRIPTOR transfer:
+  setup/ED/TD reads, descriptor/TD/done-head writes and reset/release. This is
+  transport evidence, not input-report or CPU interrupt delivery.
+- DMA guards reject unowned access/premature release. Original physical-memory
+  checks cover alignment/bounds, translation, protection, persistence and release,
+  without assuming native allocator placement or zeroed uninitialized storage.
+- Decoder checks cover extended registers, SIB/displacements, immediates,
+  RIP-relative instruction length, flags and rejection without device access.
+- All 43 CTests pass in the original-input/USB LLE build (18.27 seconds).
+  The native-input/USB-OFF configuration also passes its full 40 tests (17.07s).
+- Actual probe `build/blinx/input-usb-final-20261008/` reaches the shared OHCI
+  model and stops at **ordinal 129, `KeRaiseIrqlToDpcLevel`**. Its executable is
+  preserved in `build/blinx/input-usb-qualified-executable/`. This is startup
+  progress beyond ordinal 175, not an attract run with LLE input.
+  Probe duration: 5.000s, explicit guard exit 2; executable SHA-256
+  `9b8feaef40aa60371926c7030a69511b7fb2662b7ea883378554ede606540251`.
+
+Configure `-DPILOT_INPUT=ORIGINAL -DPILOT_USB=LLE` with the existing calendar and
+device options. `-DPILOT_INPUT=NATIVE -DPILOT_USB=OFF` retains accelerated input
+and allocation. The Python reference and component share Unicorn; original code
+provides independent software expectations, not an independent CPU engine.
+
+Limits: DMA requires original contiguous allocations; arbitrary native VM/pool
+aliases and read-only DMA destinations remain unqualified. The captured allocator
+is not a complete shared MMU for all native services. Device time advances on
+register access here; independent ticking, IRQ delivery and original XID reports
+remain unfinished. Unsupported driver callbacks still stop explicitly.
+
 ## Next bounded step
 
-Qualify the reached page-pinning/DMA ownership boundary against the original
-kernel and existing MMU/physical-memory floor. Preserve real page lifetime and
-prevent releasing locked storage; do not turn the call into a no-op. Then wire
-the reached original USB-driver MMIO/DMA/IRQ traffic to the existing OHCI/XID
-implementation. The missing initializer is already recovered; avoid repeating
-discovery. The final gate still requires matching HLE/LLE input effects and
-actual Blinx interruption, menu return and attract reentry with LLE input.
+Implement interrupt priority/masking and delivery coherently: the reached
+`KeRaiseIrqlToDpcLevel`/lowering services, guest execution eligibility, interrupt
+connection, OHCI IRQ assertion/acknowledgement and original ISR/DPC execution.
+Reuse the maintained PIC/OHCI devices and original kernel; never substitute a
+successful connection or silently discard a raised IRQ. Resolve any newly reached
+DMA mappings with their actual memory owner.
 
-Bundle page-pinning, DMA ownership and transfer checks where they share setup,
-as requested by the owner. Keep separate observed outcomes inside that batch,
-then run the title after a coherent dependency chain is implemented.
+Closure still requires matching HLE/LLE input effects and actual Blinx Start
+interruption, menu return and attract reentry with LLE input. This transport
+checkpoint does not close the family. Bundle related checks and retain one
+actual title validation per coherent dependency batch.

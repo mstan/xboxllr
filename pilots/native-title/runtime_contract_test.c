@@ -75,6 +75,9 @@ static int test_write_faults(uint32_t va)
 #endif
 }
 #include "sections_contract_test.inc"
+#ifdef PILOT_USB_LLE
+#include "usb_contract_test.inc"
+#endif
 #include "physical_memory_contract_test.inc"
 #include "memory_statistics_contract_test.inc"
 #ifdef PILOT_AUDIO_NATIVE
@@ -346,6 +349,18 @@ int main(int argc,char **argv)
 #endif
 #endif
     if (argc==2) {
+#ifdef PILOT_USB_LLE
+        if (!strcmp(argv[1],"usb-lle")) { test_usb_lle(); return 0; }
+        if (!strcmp(argv[1],"usb-dma-release")) {
+            install_fault_handler();uint32_t bytes=4096;call_kernel(165,&bytes,1);
+            uint32_t base=g_eax;CHECK(base);uint32_t pa=base&0x03ffffffu,value;
+            CHECK(usb_dma_read(pa,&value,4));physical_free(base);return 1;
+        }
+        if (!strcmp(argv[1],"usb-dma-unowned")) {
+            install_fault_handler();usb_test_write(0x18,0x1000);usb_test_write(4,0x80);
+            Sleep(20);(void)usb_test_read(0x0c);return 1;
+        }
+#endif
 #ifdef PILOT_IO_DEVICE_LLE
         if (!strcmp(argv[1],"io-device-lle")) { test_io_device_lle(); return 0; }
         if (!strcmp(argv[1],"io-device-oversize")) {

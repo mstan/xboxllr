@@ -1,0 +1,12 @@
+foreach(kind release unowned)
+  execute_process(COMMAND "${PROGRAM}" "usb-dma-${kind}"
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE errors TIMEOUT 5)
+  if(kind STREQUAL "release")
+    set(reason "contiguous allocation still owns registered resources")
+  else()
+    set(reason "DMA write failed")
+  endif()
+  if(NOT result STREQUAL "2" OR NOT errors MATCHES "${reason}")
+    message(FATAL_ERROR "USB ${kind} did not stop explicitly: ${result}\n${output}${errors}")
+  endif()
+endforeach()

@@ -1,5 +1,8 @@
 static void test_physical_memory(void)
 {
+#ifdef PILOT_USB_LLE
+    test_original_physical_memory();
+#else
     uint64_t before=vm_committed(0,0x100000000ull);
     uint32_t args[]={4097,0x30001,0x4ffff,0x10000,0x404};
     call_kernel(166,args,5);uint32_t first=g_eax;
@@ -48,4 +51,5 @@ static void test_physical_memory(void)
     call_kernel(171,&first,1);
     CHECK(vm_committed(0,0x100000000ull)==before);
     fprintf(stderr,"PASS: contiguous allocation ABI, alignment/bounds/non-overlap, actual writes, RAM budget, release protection and zeroed reuse\n");
+#endif
 }

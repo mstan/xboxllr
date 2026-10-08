@@ -19,6 +19,18 @@ static uint32_t io_test_create(unsigned extension,unsigned kind,unsigned exclusi
 static void test_io_device_lle(void)
 {
     install_fault_handler();
+    uint32_t vector_args[]={1,0x19601};MEM32(0x19600)=0xcdcdcdcd;
+    call_kernel(44,vector_args,2);
+    CHECK(g_eax==0x31 && MEM32(0x19600)==0xcdcd19cdu);
+    vector_args[0]=27;MEM32(0x19600)=0xcdcdcdcd;
+    call_kernel(44,vector_args,2);CHECK(g_eax==0 && MEM32(0x19600)==0xcdcdcdcd);
+    memset(memory+0x19700,0xcd,0x78);
+    uint32_t interrupt_args[]={0x19704,0x11223344,0x55667788,0x31,25,0,0};
+    call_kernel(109,interrupt_args,7);
+    CHECK(MEM32(0x19700)==0xcdcdcdcd && MEM32(0x19774)==0xcdcdcdcd);
+    CHECK(MEM32(0x19704)==0x11223344 && MEM32(0x19708)==0x55667788);
+    CHECK(MEM32(0x1970c)==1 && MEM32(0x19710)==25);
+    CHECK(MEM8(0x19714)==0 && MEM8(0x19716)==0);
     uint32_t plain=io_test_create(0,0x22,0,NULL);
     CHECK(g_eax==0 && plain && MEM16(plain)==3 && MEM16(plain+2)==0x48);
     CHECK(MEM32(plain+4)==0 && MEM32(plain+8)==0x19300 && MEM32(plain+12)==plain);
@@ -27,6 +39,10 @@ static void test_io_device_lle(void)
     CHECK(g_eax==0 && MEM16(exclusive+2)==0x54 && MEM32(exclusive+0x14)==0x12);
     CHECK(MEM32(exclusive+0x18)==exclusive+0x48);
     for(unsigned i=0;i<12;++i)CHECK(MEM8(exclusive+0x48+i)==0);
+    uint32_t pins[]={exclusive+0x48,12,0};
+    call_kernel(175,pins,3);call_kernel(175,pins,3);
+    pins[2]=1;call_kernel(175,pins,3);call_kernel(175,pins,3);
+    call_kernel(173,pins,1);CHECK(g_eax && (g_eax&4095)==(pins[0]&4095));
     uint32_t nested_args[]={0x19300,0,0,0x22,0,exclusive+0x48};
     call_kernel(65,nested_args,6);CHECK(g_eax==0);
     uint32_t nested=MEM32(exclusive+0x48);CHECK(nested && MEM16(nested)==3);

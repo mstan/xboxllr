@@ -16,7 +16,7 @@
 #define STACK (SCRATCH+0x8000u)
 #define RETURN_PC (SCRATCH+0x9000u)
 #define MAX_PAGES 4096
-#define MAX_PUBLISHED 256
+#define MAX_PUBLISHED (RAM_BYTES/4096)
 static SRWLOCK lock=SRWLOCK_INIT;
 static uc_engine *cpu;
 static unsigned char *ram,*guest_memory;
@@ -147,16 +147,27 @@ static void copy_published(int into_kernel)
         if(into_kernel) {
             if(pa!=published[i].pa){failure="device LLE published alias changed between calls";return;}
             memcpy(ram+pa,guest_memory+va,4096);
-        } else {memcpy(guest_memory+va,ram+pa,4096);published[i].pa=pa;}
+        } else {
+            if(memcmp(guest_memory+va,ram+pa,4096)) {
+                MEMORY_BASIC_INFORMATION info;
+                if(!VirtualQuery(guest_memory+va,&info,sizeof(info)) ||
+                   info.Protect!=PAGE_READWRITE) {
+                    failure="device LLE changed read-only published storage";return;
+                }
+                memcpy(guest_memory+va,ram+pa,4096);
+            }
+            published[i].pa=pa;
+        }
         ++i;
     }
 }
-static void publish_object(uint32_t object,uint32_t extension)
+static void publish_range(uint32_t object,uint32_t bytes)
 {
-    if(object<0xd0000000u || (uint64_t)object+0x48+extension>0xd4000000ull) {
+    if(!((object>=0xd0000000u && (uint64_t)object+bytes<=0xd4000000ull) ||
+         (object>=0x80000000u && (uint64_t)object+bytes<=0x84000000ull))) {
         failure="device LLE unexpected allocation namespace";return;
     }
-    uint32_t end=(object+0x48+extension+4095)&~4095u;
+    uint32_t end=(object+bytes+4095)&~4095u;
     for(uint32_t va=object&~4095u;va<end;va+=4096) {
         unsigned i;for(i=0;i<published_count && published[i].va!=va;++i){}
         if(i<published_count)continue;
@@ -174,7 +185,22 @@ static void publish_object(uint32_t object,uint32_t extension)
 }
 static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
 {
-    if(ordinal!=65 && ordinal!=68){failure="device LLE unsupported ordinal";return;}
+    if(ordinal!=44 && ordinal!=65 && ordinal!=68 && ordinal!=109 && ordinal!=166 &&
+       ordinal!=171 && ordinal!=173 && ordinal!=175 && ordinal!=178 && ordinal!=182) {
+        failure="device LLE unsupported ordinal";return;
+    }
+    if(ordinal==173 || ordinal==175) {
+        uint32_t start=args[0],bytes=ordinal==175?args[1]:1;
+        if(!bytes || (uint64_t)start+bytes>0x100000000ull) {
+            failure="device LLE invalid page service range";return;
+        }
+        for(uint64_t page=start&~4095u;page<(uint64_t)start+bytes;page+=4096) {
+            /* Every caller mapping must be an actual published original-kernel
+             * allocation, not unrelated PTEs left in the bootstrap capture. */
+            unsigned i;for(i=0;i<published_count && published[i].va!=page;++i){}
+            if(i==published_count){failure="device LLE page service requires owned mapping";return;}
+        }
+    }
     /* Bound the qualified small device allocation family. Larger allocations
      * require separate original paging/allocator qualification, not guessed NTSTATUS. */
     if(ordinal==65 && args[1]>0x170){failure="device LLE extension exceeds qualified scope";return;}
@@ -183,8 +209,9 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
     uint32_t base=kernel_word(exports+16),table=0x80010000u+kernel_word(exports+28);
     uint32_t entry=0x80010000u+kernel_word(table+4*(ordinal-base));
     if(failure)return;
-    unsigned count=ordinal==65?6:1;
-    uint32_t words[7]={RETURN_PC},sp=STACK,observed,flags=0x202;
+    unsigned count=ordinal==65?6:ordinal==109?7:ordinal==166?5:
+                   (ordinal==175 || ordinal==178 || ordinal==182)?3:ordinal==44?2:1;
+    uint32_t words[8]={RETURN_PC},sp=STACK,observed,flags=0x202;
     memcpy(words+1,args,count*4);
     IO_UC(uc_mem_write(cpu,STACK,words,(count+1)*4));
     IO_UC(uc_reg_write(cpu,UC_X86_REG_ESP,&sp));
@@ -208,8 +235,9 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
         /* The output slot may itself be in an existing device extension.
          * Read the completed kernel view before publishing changed pages. */
         uint32_t object;IO_UC(uc_mem_read(cpu,args[5],&object,4));
-        publish_object(object,args[1]);if(failure)return;
+        publish_range(object,0x48+args[1]);if(failure)return;
     }
+    if(ordinal==166 && *result){publish_range(*result,args[0]);if(failure)return;}
     copy_published(0);
 }
 #undef IO_UC
