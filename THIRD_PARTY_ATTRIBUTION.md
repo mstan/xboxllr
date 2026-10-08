@@ -748,6 +748,26 @@ locking and stub interrupt connection are rejected. Cxbx `585c49a`,
 Original execution establishes the locking behavior. Existing private-pilot
 restrictions and the intended non-GPL shipping scope are unchanged.
 
+## Original input interrupt/clock bridge (2026-10-08)
+
+`io_device_lle.c`, `usb_lle.cpp` and the native scheduler reuse this repository's
+maintained `src/machine/pic.cpp`, OHCI/XID model and the architectural interrupt
+frame pattern in `src/cpu/unicorn_floor.cpp`. Their existing behavioral
+provenance remains applicable. No new xemu implementation body was copied.
+The private original-kernel capture supplies the executed interrupt gates,
+IRQL/connect/disconnect/stall and shutdown-registration routines; those bytes
+remain owner-supplied and excluded from source/publication.
+
+The actual registered ISR uses the original generated body from the already
+attributed Phobos `63f18f0334fbd8c00313c4bb565accf00627a4fd` translator.
+That checkout's `src/kernel/kernel_hal.c` IRQL transition/dispatch discussion
+was consulted for callback eligibility. Its fake interrupt connection is not
+adopted. IRQ/PIC transport, callback state preservation and idle-CPU clock glue
+are independently authored; `tools/native_input_interrupt_reference.py` runs
+the owned software for bounded expected effects. Existing private/GPL-dependent
+pilot restrictions remain; this does not authorize a non-GPL product to ship
+the interpreter, original software, or incompatible donor components.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

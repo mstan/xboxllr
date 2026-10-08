@@ -11,6 +11,11 @@ typedef void (*PilotUsbDmaRelease)(void);
 const char *pilot_usb_lle_bind(PilotUsbDmaRead, PilotUsbDmaWrite, PilotUsbDmaRelease);
 /* One real dword transaction through the shared OHCI model. */
 const char *pilot_usb_lle_access(uint32_t address,int write,uint32_t *value);
+/* PIC profile restored alongside the qualified kernel bootstrap. */
+const char *pilot_usb_pic_bootstrap(uint16_t mask,uint16_t level);
+const char *pilot_usb_pic_port(uint32_t port,int size,int write,uint32_t *value);
+int pilot_usb_pic_vector(int acknowledge);
+const char *pilot_usb_lle_tick(void);
 #ifdef __cplusplus
 }
 #endif

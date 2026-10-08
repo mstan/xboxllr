@@ -90,7 +90,20 @@ static uint64_t vm_committed(uint32_t base,uint64_t size)
         uint64_t next=(unsigned char*)info.BaseAddress-memory+info.RegionSize;
         if (next>end) next=end;
         if (next<=at) stop("invalid host VM query range",(uint32_t)at);
-        if (info.State==MEM_COMMIT) count+=next-at;
+        if (info.State==MEM_COMMIT) {
+            count+=next-at;
+#ifdef PILOT_IO_DEVICE_LLE
+            /* Like the private interpreter's RAM, shared ABI/clock backing
+             * is host implementation overhead, not a guest allocation. */
+            const uint64_t ranges[][2]={{PILOT_IO_BRIDGE_BASE,PILOT_IO_BRIDGE_BYTES},
+                {PILOT_IO_CLOCK_BASE,PILOT_IO_CLOCK_BYTES}};
+            for(unsigned i=0;i<2;++i) {
+                uint64_t lo=at>ranges[i][0]?at:ranges[i][0];
+                uint64_t hi=next<ranges[i][0]+ranges[i][1]?next:ranges[i][0]+ranges[i][1];
+                if(lo<hi)count-=hi-lo;
+            }
+#endif
+        }
         at=next;
     }
     return count;

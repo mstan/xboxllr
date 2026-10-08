@@ -31,6 +31,14 @@ static void test_io_device_lle(void)
     CHECK(MEM32(0x19704)==0x11223344 && MEM32(0x19708)==0x55667788);
     CHECK(MEM32(0x1970c)==1 && MEM32(0x19710)==25);
     CHECK(MEM8(0x19714)==0 && MEM8(0x19716)==0);
+    uint32_t notify_a[]={0x19c00,1},notify_b[]={0x19c20,1};
+    MEM32(notify_a[0])=0x12400;MEM32(notify_a[0]+4)=5;
+    MEM32(notify_b[0])=0x12400;MEM32(notify_b[0]+4)=10;
+    call_kernel(47,notify_a,2);call_kernel(47,notify_b,2);
+    CHECK(MEM32(notify_b[0]+8)==notify_a[0]+8);
+    notify_b[1]=0;call_kernel(47,notify_b,2);
+    CHECK(MEM32(notify_a[0]+12)!=notify_b[0]+8);
+    notify_a[1]=0;call_kernel(47,notify_a,2);
     uint32_t plain=io_test_create(0,0x22,0,NULL);
     CHECK(g_eax==0 && plain && MEM16(plain)==3 && MEM16(plain+2)==0x48);
     CHECK(MEM32(plain+4)==0 && MEM32(plain+8)==0x19300 && MEM32(plain+12)==plain);

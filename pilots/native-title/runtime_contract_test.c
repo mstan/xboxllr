@@ -10,6 +10,10 @@ static void test_dpc(void);
 static void test_timers(void);
 static void test_memory(void);
 static void test_scheduler_worker(void);
+#ifdef PILOT_USB_LLE
+static void test_usb_isr(void);
+static void test_usb_dpc(void);
+#endif
 #ifdef PILOT_D3D_NATIVE
 static void test_vblank_callback(void);
 static void test_gpu_callback(void);
@@ -32,6 +36,10 @@ static void test_worker(void)
 }
 
 recomp_func_t recomp_lookup(uint32_t va) {
+#ifdef PILOT_USB_LLE
+    if(va==0x12400)return test_usb_isr;
+    if(va==0x12440)return test_usb_dpc;
+#endif
 #ifdef PILOT_D3D_NATIVE
     if(va==0x12300 || va==0x12320)return test_vblank_callback;
     if(va==0x12360)return test_gpu_callback;
@@ -77,6 +85,7 @@ static int test_write_faults(uint32_t va)
 #include "sections_contract_test.inc"
 #ifdef PILOT_USB_LLE
 #include "usb_contract_test.inc"
+#include "usb_irq_contract_test.inc"
 #endif
 #include "physical_memory_contract_test.inc"
 #include "memory_statistics_contract_test.inc"
@@ -329,7 +338,6 @@ static void test_timers(void)
 
 int main(int argc,char **argv)
 {
-    if(argc==2 && !strcmp(argv[1],"scheduler")){test_guest_scheduler();return 0;}
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
     EXCEPTION_RECORD diagnostic={0};EXCEPTION_POINTERS pointers={&diagnostic,NULL};
     diagnostic.ExceptionCode=0x406d1388u;
@@ -340,6 +348,7 @@ int main(int argc,char **argv)
     commit(0x10000,0x10000);
     g_esp=0x18000; MEM32(g_esp)=0x12340;
     image_size=0x200; image_bytes=calloc(1,image_size); CHECK(image_bytes!=NULL);
+    if(argc==2 && !strcmp(argv[1],"scheduler")){test_guest_scheduler();return 0;}
 #ifdef PILOT_AUDIO_DSP
     if(argc==3 && !strcmp(argv[1],"audio-effects")){test_audio_effects(argv[2]);return 0;}
     if(argc==2 && !strcmp(argv[1],"audio-mix")){test_audio_mix();return 0;}
@@ -350,6 +359,8 @@ int main(int argc,char **argv)
 #endif
     if (argc==2) {
 #ifdef PILOT_USB_LLE
+        if (!strcmp(argv[1],"usb-irq")) { test_usb_irq(); return 0; }
+        if (!strcmp(argv[1],"usb-irq-clock")) { test_usb_irq_clock(); return 0; }
         if (!strcmp(argv[1],"usb-lle")) { test_usb_lle(); return 0; }
         if (!strcmp(argv[1],"usb-dma-release")) {
             install_fault_handler();uint32_t bytes=4096;call_kernel(165,&bytes,1);

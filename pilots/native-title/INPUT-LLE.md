@@ -4,7 +4,16 @@ Tracked in `beads-xbox.1.104`, after calendar slice `.103`. The input family
 remains **open**. This document records an actual dependency check, not a
 qualified LLE input implementation.
 
-## What runs today
+## Current checkpoint
+
+The original-input build now delivers a real OHCI/PIC interrupt through the
+original kernel to Blinx's original ISR, then reaches its original USB DPC.
+The next explicit stop is untranslated `CLI` at `0x00188a9a`. Reports, controller
+enumeration and LLE Start/menu/reentry remain unqualified. The native-input
+attract milestone remains the production path. See the interrupt checkpoint
+below for evidence and the next bounded step.
+
+## Initial boundary (retained history)
 
 The native input path has real host reports, original ABI layouts, handle and
 connection lifetimes, and demonstrated Blinx interruption/menu return. The
@@ -234,14 +243,76 @@ is not a complete shared MMU for all native services. Device time advances on
 register access here; independent ticking, IRQ delivery and original XID reports
 remain unfinished. Unsupported driver callbacks still stop explicitly.
 
+## Interrupt/clock checkpoint - 2026-10-08
+
+The USB LLE build now executes original connect/disconnect, current/raise/lower
+IRQL and stall services (98/100/103/129/151/160/161), plus the original ordered
+shutdown-notification registration (47). No callee is replaced. Registration
+qualification establishes insertion/order/removal; it does not claim a working
+console shutdown or execution of its registered shutdown callbacks.
+
+The existing `DualPic` joins OHCI. Its bounded bootstrap uses the qualified
+kernel's mask/ELCR shadows and Xbox vector/cascade configuration; it is not a
+capture of every boot peripheral. USB is the only connected interrupt source.
+Actual original port instructions update the PIC. A real asserted vector enters
+the connected original interrupt thunk, which owns IRQL deferral, pending-vector
+replay through `INT`, EOI and `IRET`. The registered ISR's existing generated body
+runs through a generic native ABI bridge; no title ISR address is hardcoded in
+the shared runtime. Nested original services preserve the suspended CPU context
+and use a separate stack. Other driver callbacks still stop.
+
+Host clock ticks request guest checkpoints, or lease the otherwise idle guest
+CPU. Device DMA and ISR execution never overlap another guest CPU. QPC-derived
+milliseconds advance OHCI even when the guest is blocked. Ordinary/DPC preemption
+waits below IRQL2; hardware IRQ25 can interrupt it. The original kernel decides
+whether a hardware request must be deferred. This is bounded USB delivery, not
+complete platform interrupt, CLI/STI, timer, nested-IRQ or cycle-timing fidelity.
+
+The test batch exposed and corrected two integration errors:
+
+- The DPC worker cleared the inserted flag before acquiring the guest CPU.
+  Dequeue now happens after acquisition, preserving duplicate rejection while
+  IRQL blocks execution. This correction also applies to the native build.
+- Sharing the interpreter's ABI stack with native callbacks initially charged
+  host bridge storage against Xbox RAM. Explicit bridge/clock ranges outside
+  guest allocators now retain their existing host-overhead classification.
+  Real title/physical allocations still consume the modeled RAM budget.
+
+Qualification:
+
+- `tools/native_input_interrupt_reference.py` executes original connect,
+  duplicate rejection, high-IRQL deferral, lowering/software-vector replay,
+  ISR fixture, EOI/IRET, disconnect and shutdown-registration order/removal.
+  Private observations: `build/blinx/input-interrupt-reference.aot-private.json`.
+  The reference records PIC writes and reflects real mask-register writes; the
+  separate C fixture supplies the actual OHCI/PIC device model and native bridge.
+- `pilot_usb_irq` exercises real port-change assertion, hardware acknowledgement,
+  both direct and deferred ISR entry, a nested original service, original EOI,
+  deferred native DPC, duplicate rejection and disconnect masking.
+- `pilot_usb_irq_clock` delivers ISR/DPC work while every guest thread is blocked,
+  without a caller performing further register reads or service calls.
+- All **45/45 CTests pass** in the original-input/USB LLE configuration (17.46s).
+  Retained logs include the initial accounting failures and corrected full pass.
+- Actual final probe `build/blinx/input-irq-final-20261008/`, **5.016s**, explicit
+  exit2: `[USB LLE ISR] call=1 entry=001889d4 irql=25`, original DPC `001890a2`,
+  then `CLI` guard at `00188a9a`. Executable preserved in
+  `build/blinx/input-irq-qualified-executable/`; SHA-256
+  `2ad6c817f9535f28d29f24c2b70b20ca5a1374df9b4dc179f9cb00d66d5114ac`.
+
+The Python and native bridges share Unicorn: original software expectations are
+independent of the native scheduler/ABI adapter, not an independent CPU engine.
+Stall execution retains original calibrated-loop code within the instruction
+budget; no cycle-accurate wall-time guarantee is claimed. Arbitrary pool/VM DMA
+aliases, full USB enumeration/reports and input interruption are still open.
+
 ## Next bounded step
 
-Implement interrupt priority/masking and delivery coherently: the reached
-`KeRaiseIrqlToDpcLevel`/lowering services, guest execution eligibility, interrupt
-connection, OHCI IRQ assertion/acknowledgement and original ISR/DPC execution.
-Reuse the maintained PIC/OHCI devices and original kernel; never substitute a
-successful connection or silently discard a raised IRQ. Resolve any newly reached
-DMA mappings with their actual memory owner.
+Qualify and implement interrupt-flag operations reached by the original USB DPC
+(`CLI`/`STI`, and flags preservation if subsequently exercised), including their
+CPU eligibility and interrupt-shadow consequences. Audit the adjacent original
+timer/device accesses as a coherent driver batch. Reuse original CPU/hardware
+behavior and donor lowering where valid; never discard the instruction or
+invent its data. Then validate actual original-input progress again.
 
 Closure still requires matching HLE/LLE input effects and actual Blinx Start
 interruption, menu return and attract reentry with LLE input. This transport

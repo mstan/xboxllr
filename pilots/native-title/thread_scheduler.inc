@@ -10,7 +10,9 @@ struct PilotScheduledThread {
     uint64_t order;
     volatile uint32_t request;
 };
-static struct PilotScheduledThread scheduled[65];
+/* Slot65 is the hardware clock's idle-CPU lease, never an ordinary ready
+ * thread. A running guest services the clock at its next checkpoint. */
+static struct PilotScheduledThread scheduled[66];
 static SRWLOCK scheduler_lock=SRWLOCK_INIT;
 static CONDITION_VARIABLE scheduler_changed=CONDITION_VARIABLE_INIT;
 static int scheduler_enabled;
@@ -18,6 +20,9 @@ static unsigned scheduler_owner; /* slot + 1, zero means no guest executing */
 static uint64_t scheduler_order,scheduler_since;
 static RECOMP_TLS unsigned scheduler_slot,scheduler_budget;
 static RECOMP_TLS int scheduler_attached;
+#ifdef PILOT_USB_LLE
+static volatile LONG scheduler_usb_pending;
+#endif
 
 static uint64_t scheduler_clock(void)
 {
@@ -46,6 +51,9 @@ static void scheduler_notify_locked(void)
     if(scheduler_owner) {
         struct PilotScheduledThread *owner=&scheduled[scheduler_owner-1];
         uint32_t request=owner->suspended?4:0;
+#ifdef PILOT_USB_LLE
+        if(scheduler_usb_pending)request|=8;
+#endif
         for(unsigned i=0;i<65;++i)if(i+1!=scheduler_owner && scheduler_ready(i)) {
             if(scheduled[i].priority>owner->priority)request|=1;
             else if(scheduled[i].priority==owner->priority)request|=2;
@@ -94,8 +102,13 @@ static void scheduler_control(unsigned slot,int suspended,int delta)
 static void scheduler_checkpoint(void)
 {
     if(!scheduler_attached)return;
+#ifdef PILOT_USB_LLE
+    /* The original kernel owns the single guest CPU's IRQL. DPC readiness
+     * cannot preempt a caller at DISPATCH_LEVEL or a hardware ISR. */
+    if(pilot_io_device_irql()>=2)return;
+#endif
     uint32_t request=scheduled[scheduler_slot].request;
-    if(!request)return;
+    if(!(request&7))return;
     /* Equal-priority quantum checks are amortized across loop/function safe
      * points; higher-priority readiness and suspension are never delayed. */
     if(!(request&5) && --scheduler_budget)return;
@@ -117,6 +130,9 @@ static void scheduler_checkpoint(void)
 static int scheduler_block_begin(void)
 {
     if(!scheduler_enabled || !scheduler_attached || scheduler_slot==SCHEDULER_CALLBACK_SLOT)return 0;
+#ifdef PILOT_USB_LLE
+    if(pilot_io_device_irql()>=2)stop("blocking service at raised IRQL",pilot_io_device_irql());
+#endif
     AcquireSRWLockExclusive(&scheduler_lock);
     /* A whole blocking service may contain a narrower renderer wait. Only
      * the outer owner restores eligibility; nested wait scopes are inert. */
@@ -135,6 +151,13 @@ static void scheduler_block_end(int blocked)
 static void scheduler_retire(void)
 {
     if(!scheduler_enabled || !scheduler_attached)return;
+#ifdef PILOT_USB_LLE
+    if(scheduler_slot==SCHEDULER_CALLBACK_SLOT) {
+        uint32_t level=0,result=0;
+        const char *error=pilot_io_device_lle(161,memory,&level,&result);
+        if(error)stop(error,161);
+    }
+#endif
     AcquireSRWLockExclusive(&scheduler_lock);
     scheduled[scheduler_slot].live=0;
     if(scheduler_owner==scheduler_slot+1)scheduler_owner=0;
@@ -147,6 +170,12 @@ static void scheduler_callback_enter(void)
     if(scheduler_attached)stop("recursive guest interrupt execution unqualified",scheduler_slot);
     scheduler_publish(SCHEDULER_CALLBACK_SLOT,0,0);
     scheduler_enter(SCHEDULER_CALLBACK_SLOT);
+#ifdef PILOT_USB_LLE
+    uint32_t level=0,result=0;
+    const char *error=pilot_io_device_lle(129,memory,&level,&result);
+    if(error)stop(error,129);
+    if((result&255)!=0)stop("DPC acquired CPU at raised IRQL",result&255);
+#endif
 }
 static int scheduler_kernel_blocks(unsigned ordinal)
 {
@@ -166,3 +195,16 @@ static void scheduler_configure(void)
     scheduler_enabled=value && !strcmp(value,"1");
     if(scheduler_enabled)fprintf(stderr,"[SCHEDULER] bounded single-CPU priority scheduler; no timeout overrides\n");
 }
+#ifdef PILOT_USB_LLE
+static int scheduler_usb_tick_request(void)
+{
+    AcquireSRWLockExclusive(&scheduler_lock);
+    InterlockedExchange(&scheduler_usb_pending,1);
+    int idle=!scheduler_owner && !scheduler_best_locked();
+    if(idle) {
+        scheduler_owner=66;scheduler_slot=65;scheduler_attached=1;
+        g_pilot_suspend_count=&scheduled[65].request;
+    }
+    scheduler_notify_locked();ReleaseSRWLockExclusive(&scheduler_lock);return idle;
+}
+#endif

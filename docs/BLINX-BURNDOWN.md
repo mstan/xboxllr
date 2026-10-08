@@ -46,7 +46,7 @@ change the next controller-input dependency batch.
 | Delivery order | Service | Relative work / dependencies | State |
 | --- | --- | --- | --- |
 | 1 | Pure calendar conversion (scheduler/time slice) | Small: two original kernel routines; no hardware, IRQ or queue state | Complete, `.103`: both builds qualified; both original routines execute in actual Blinx, with interruption/menu return and reentry; [evidence](../pilots/native-title/CALENDAR-LLE.md) |
-| 2 | Controller input and interruption | XID reports plus USB initialization, DMA and interrupt dependencies | In progress, `.104`: original allocation/page services and compiled OHCI access work; descriptor DMA/ownership checks pass. Actual original-input startup stops at interrupt priority (`KeRaiseIrqlToDpcLevel`); [evidence and remaining scope](../pilots/native-title/INPUT-LLE.md) |
+| 2 | Controller input and interruption | XID reports plus USB initialization, DMA and interrupt dependencies | In progress, `.104`: original page/USB/PIC/interrupt path reaches Blinx's original ISR and DPC. IRQ deferral/lowering, EOI, DPC eligibility and idle-clock fixtures pass. Actual startup now stops at untranslated `CLI` in the original USB DPC; reports/interruption remain open. [Evidence and remaining scope](../pilots/native-title/INPUT-LLE.md) |
 | 3 | Display clock and vblank | Bounded clock/interrupt/callback family | Open |
 | 4 | Memory and resource lifetime | Cross-cutting pointer, page, alias and ownership semantics | Open |
 | 5 | Files, cache and installed media | File bytes/errors/order plus backing storage and mount lifetime | Open |

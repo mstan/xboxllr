@@ -126,6 +126,15 @@ static DWORD WINAPI dispatch_worker(void *unused)
         dispatch_expire_locked(mono,dispatch_wall_time());
         dispatch_wake_locked();
         if (dispatch_dpc_count) {
+            /* A queued DPC stays inserted until its worker actually owns the
+             * guest CPU. Removing it while waiting for IRQL to drop would
+             * allow a second insertion before the first begins. */
+            ReleaseSRWLockExclusive(&dispatch_lock);
+            scheduler_callback_enter();
+            AcquireSRWLockExclusive(&dispatch_lock);
+            if(!dispatch_dpc_count) {
+                ReleaseSRWLockExclusive(&dispatch_lock);scheduler_retire();continue;
+            }
             struct PilotDpc d=dispatch_dpcs[0];
             memmove(dispatch_dpcs,dispatch_dpcs+1,--dispatch_dpc_count*sizeof(*dispatch_dpcs));
             MEM8(d.va+2)=0;
@@ -134,7 +143,6 @@ static DWORD WINAPI dispatch_worker(void *unused)
             MEM32(g_esp)=0; MEM32(g_esp+4)=d.va; MEM32(g_esp+8)=d.context;
             MEM32(g_esp+12)=d.arg1; MEM32(g_esp+16)=d.arg2;
             MEM8(base+0x24)=2; dispatch_in_dpc=1;
-            scheduler_callback_enter();
             recomp_lookup(d.routine)();
             scheduler_retire();
             if (g_esp!=top) stop("DPC callback stack imbalance",d.routine);

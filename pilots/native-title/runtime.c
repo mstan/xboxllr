@@ -72,6 +72,11 @@ __declspec(noreturn) static void stop(const char *reason, uint32_t va)
 }
 
 #include "thread_affinity.inc"
+#ifdef PILOT_USB_LLE
+#include "io_device_lle.h"
+static void usb_poll(void);
+static RECOMP_TLS unsigned usb_in_interrupt;
+#endif
 #include "thread_scheduler.inc"
 static uint32_t file32(size_t offset)
 {
@@ -102,6 +107,9 @@ void recomp_eflags_pop(uint32_t value) { (void)value; stop("POPFD arithmetic fla
 #include "nonlocal_jump.inc"
 void pilot_thread_checkpoint(void)
 {
+#ifdef PILOT_USB_LLE
+    usb_poll();
+#endif
     if(scheduler_enabled){scheduler_checkpoint();return;}
     if (!current_thread_slot) return;
     AcquireSRWLockExclusive(&thread_lock);
@@ -306,10 +314,10 @@ static void query_setting(void)
 #include "dispatcher.inc"
 #include "system_time.inc"
 #include "event_objects.inc"
-#include "virtual_memory.inc"
 #ifdef PILOT_IO_DEVICE_LLE
 #include "io_device_lle.h"
 #endif
+#include "virtual_memory.inc"
 #include "physical_memory.inc"
 #include "pool_memory.inc"
 #ifdef PILOT_USB_LLE
@@ -337,11 +345,25 @@ static void kernel_dispatch_impl(void)
         if (pilot_imports[i].ordinal == next_kernel_ordinal) name=pilot_imports[i].name;
     if(pilot_verbose)fprintf(stderr, "[KERNEL] %u %s return=%08x\n", next_kernel_ordinal, name, MEM32(g_esp));
     switch (next_kernel_ordinal) {
+#ifdef PILOT_USB_LLE
+    case 98:case 100:case 103:case 129:case 151:case 160:case 161: {
+        uint32_t arg=next_kernel_ordinal>=160?g_ecx:
+            (next_kernel_ordinal==98 || next_kernel_ordinal==100 || next_kernel_ordinal==151)?MEM32(g_esp+4):0;
+        uint32_t result=g_eax;
+        const char *error=pilot_io_device_lle(next_kernel_ordinal,memory,&arg,&result);
+        if(error)stop(error,next_kernel_ordinal);
+        if(next_kernel_ordinal==98 || next_kernel_ordinal==100 || next_kernel_ordinal==103 ||
+           next_kernel_ordinal==129 || next_kernel_ordinal==160)g_eax=(g_eax&~255u)|(result&255);
+        if(g_fs_base)MEM8(g_fs_base+0x24)=(uint8_t)pilot_io_device_irql();
+        g_esp+=(next_kernel_ordinal==98 || next_kernel_ordinal==100 || next_kernel_ordinal==151)?8:4;
+        return;
+    }
+#endif
 #ifdef PILOT_IO_DEVICE_LLE
-    case 44:case 65:case 68:case 109:case 173:case 175: {
+    case 44:case 47:case 65:case 68:case 109:case 173:case 175: {
         uint32_t args[7],result=g_eax;
         unsigned count=next_kernel_ordinal==65?6:next_kernel_ordinal==109?7:
-                       next_kernel_ordinal==175?3:next_kernel_ordinal==44?2:1;
+                       next_kernel_ordinal==175?3:(next_kernel_ordinal==44 || next_kernel_ordinal==47)?2:1;
         for(unsigned i=0;i<count;++i)args[i]=MEM32(g_esp+4+i*4);
         int page_service=next_kernel_ordinal==173 || next_kernel_ordinal==175;
         if(page_service) {
@@ -485,6 +507,9 @@ static void kernel_dispatch(void)
     int blocked=scheduler_kernel_blocks(next_kernel_ordinal)?scheduler_block_begin():0;
     kernel_dispatch_impl();
     scheduler_block_end(blocked);
+#ifdef PILOT_USB_LLE
+    usb_poll();
+#endif
     PILOT_THREAD_CHECKPOINT();
 }
 recomp_func_t recomp_lookup_kernel(uint32_t va)
@@ -685,6 +710,9 @@ int main(int argc,char **argv)
     recomp_func_t entry=recomp_lookup(PILOT_ENTRY);
     if (!entry) stop("entry missing from generated dispatch", PILOT_ENTRY);
     fprintf(stderr,"[RUN] calling actual XBE entry\n");
+#ifdef PILOT_USB_LLE
+    usb_clock_start();
+#endif
     thread_guest_cpu_enter();
     scheduler_publish(0,0,0);scheduler_enter(0);
     entry();
