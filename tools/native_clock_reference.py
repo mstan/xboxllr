@@ -87,8 +87,29 @@ def run(path):
         u.mem_write(target - 4, b'\xcd' * 16)
         assert convert(304, source, target) == 0
         assert bytes(u.mem_read(target - 4, 16)) == b'\xcd' * 16
+    # Independently qualify buffer aliasing before the maintained service
+    # relocates these pure routines into scratch memory. Include page crossing.
+    aliases = []
+    source = 0x30002ffd
+    stamp = 125963012967890000
+    calendar = (2000, 2, 29, 12, 34, 56, 789, 2)
+    for ordinal, value, converted, result in [
+            (305, struct.pack('<Q', stamp + 9999), struct.pack('<8h', *calendar), None),
+            (304, struct.pack('<8h', *calendar), struct.pack('<Q', stamp), 1),
+            (304, struct.pack('<8h', *invalid[0]), None, 0)]:
+        for offset in range(-16, 17):
+            initial = bytearray(b'\xcd' * 80)
+            initial[32:32 + len(value)] = value
+            expected = initial.copy()
+            if converted is not None:
+                expected[32 + offset:32 + offset + len(converted)] = converted
+            u.mem_write(source - 32, bytes(initial))
+            returned = convert(ordinal, source, source + offset)
+            assert result is None or returned == result
+            assert bytes(u.mem_read(source - 32, 80)) == expected, (ordinal, offset)
+            aliases.append(dict(ordinal=ordinal, offset=offset, valid=result))
     return dict(kernel_sha256=KERNEL_SHA, query_export=function, clock_export=clock, cases=rows,
-                conversions=conversions, invalid_fields=invalid)
+                conversions=conversions, invalid_fields=invalid, alias_cases=aliases)
 
 
 if __name__ == '__main__':

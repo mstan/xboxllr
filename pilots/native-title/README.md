@@ -1057,7 +1057,10 @@ kernel clock-data imports are outside this fixture. Native tests check the
 shared epoch, real time progression, unaligned output and neighboring bytes.
 Phobos's clock notes informed the host-resolution choice; its implementation
 body was not copied. The related `RtlTimeToTimeFields`/`RtlTimeFieldsToTime`
-services use native NT calendar conversion through local 8-short structures.
+services default to native NT calendar conversion through local 8-short structures.
+The maintained, build-selected original-kernel implementation is now documented
+in [CALENDAR-LLE.md](CALENDAR-LLE.md), including current qualification. The
+following startup-only result is historical and predates that completed slice.
 Original and native fixtures agree on the 1601/1970 epochs, leap years 2000 and
 2400, non-leap century 2100, weekdays, sub-millisecond truncation and unchanged
 output on invalid dates. No zero-filled conversion success is substituted.

@@ -1,5 +1,8 @@
 static void test_system_clock(void)
 {
+    /* Install the real title handler before the first calendar call: engine
+     * allocation and fault handling are part of integration correctness. */
+    install_fault_handler();
     uint32_t out=0x19405; /* Also exercise unaligned guest output. */
     memset(memory+out-4,0xcd,16);
     uint64_t before=dispatch_wall_time();
@@ -39,6 +42,34 @@ static void test_system_clock(void)
         call_kernel(304,args,2);CHECK(!g_eax);
         for(unsigned n=0;n<16;++n)CHECK(memory[args[1]-4+n]==0xcd);
     }
+    /* Original-kernel oracle independently qualifies these overlapping and
+     * page-crossing buffers; run the same contract in either selected build. */
+    uint32_t source=0x1affd;
+    for(unsigned kind=0;kind<3;++kind) for(int offset=-16;offset<=16;++offset) {
+        unsigned char expected[80];memset(expected,0xcd,sizeof(expected));
+        uint64_t input=cases[2].time+9999;
+        const void *value=kind==0?(const void*)&input:kind==1?(const void*)cases[2].fields:(const void*)invalid[0];
+        unsigned input_size=kind==0?8:16;
+        memcpy(expected+32,value,input_size);
+        memcpy(memory+source-32,expected,sizeof(expected));
+        if(kind==0)memcpy(expected+32+offset,cases[2].fields,16);
+        if(kind==1)memcpy(expected+32+offset,&cases[2].time,8);
+        uint32_t alias_args[]={source,(uint32_t)(source+offset)};
+        call_kernel(kind==0?305:304,alias_args,2);
+        if(kind!=0)CHECK(g_eax==(kind==1?1u:0u));
+        CHECK(!memcmp(memory+source-32,expected,sizeof(expected)));
+    }
+    /* Actual title thread stacks occupy high guest addresses. Exercise the
+     * adapter there as well as in the small contract-test allocation. */
+    CHECK(VirtualAlloc(memory+0x601f0000u,0x20000,MEM_COMMIT,PAGE_READWRITE)==memory+0x601f0000u);
+    uint32_t stack_args[]={0x601ffd38,0x601ffd28};
+    memcpy(memory+stack_args[0],&cases[2].time,8);
+    call_kernel(305,stack_args,2);
+    CHECK(!memcmp(memory+stack_args[1],cases[2].fields,16));
+    uint32_t stack_inverse[]={stack_args[1],stack_args[0]};
+    call_kernel(304,stack_inverse,2);CHECK(g_eax==1);
+    CHECK(!memcmp(memory+stack_args[0],&cases[2].time,8));
+    CHECK(VirtualFree(memory+0x601f0000u,0x20000,MEM_DECOMMIT));
     CHECK(g_ebx==0x12345678 && g_esi==0x23456789 && g_edi==0x3456789a && g_ebp==0x456789ab);
-    fprintf(stderr,"PASS: shared system clock, real progression, calendar/leap conversions, invalid dates, output bounds and stdcall ABI\n");
+    fprintf(stderr,"PASS: shared system clock, real progression, calendar/leap conversions, invalid dates, 99 overlapping/page-crossing cases, output bounds and stdcall ABI\n");
 }

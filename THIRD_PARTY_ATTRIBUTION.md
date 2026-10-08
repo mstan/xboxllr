@@ -463,6 +463,19 @@ original title's capability data remains in ignored, hash-bound generated files.
 
 ## Unicorn Engine / QEMU
 
+The private native-title calendar LLE build additionally uses the **Unicorn
+2.1.4 Windows Python package's unmodified static C library and headers**, from
+[Unicorn Engine 2.1.4](https://github.com/unicorn-engine/unicorn/tree/2.1.4).
+Its original [COPYING](https://github.com/unicorn-engine/unicorn/blob/2.1.4/COPYING)
+and `COPYING.LGPL2` are copied beside the private executable. The static library is hash-pinned in
+`pilots/native-title/calendar.cmake`; no Unicorn implementation source is copied
+into maintained project source. `PILOT_CALENDAR=HLE` does not link this library.
+The maintained LLE adapter executes owner-supplied original kernel calendar
+routines; those private bytes are generated only under ignored build output.
+This reference configuration remains GPL-dependent and excluded from the
+intended non-GPL shipping product. See
+[calendar scope and qualification](pilots/native-title/CALENDAR-LLE.md).
+
 [Unicorn Engine](https://github.com/unicorn-engine/unicorn), version `2.1.1`,
 is fetched by CMake and statically linked as the CPU floor. Preserve its authors'
 notices, `COPYING`, component licenses, and corresponding source when applicable.

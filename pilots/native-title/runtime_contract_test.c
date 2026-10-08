@@ -368,6 +368,11 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"memory-statistics")) { test_memory_statistics(); return 0; }
         if (!strcmp(argv[1],"timers")) { test_timers(); return 0; }
         if (!strcmp(argv[1],"system-clock")) { test_system_clock(); return 0; }
+        if (!strcmp(argv[1],"calendar-host-fault")) {
+            install_fault_handler();
+            *(volatile uint32_t*)(memory+0x40000000u)=1;
+            return 0;
+        }
         if (!strcmp(argv[1],"threads")) { test_thread_objects(); return 0; }
         if (!strcmp(argv[1],"events")) { test_event_objects(); return 0; }
         if (!strcmp(argv[1],"jumps")) { test_jumps(); return 0; }

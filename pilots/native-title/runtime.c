@@ -471,12 +471,29 @@ static LONG CALLBACK fault_handler(EXCEPTION_POINTERS *exception)
     if(code==0x406d1388u)return EXCEPTION_CONTINUE_SEARCH;
     if (code == EXCEPTION_ACCESS_VIOLATION) {
         uintptr_t at = exception->ExceptionRecord->ExceptionInformation[1];
+        HMODULE fault_module=NULL;char fault_name[MAX_PATH]={0};
+        if(GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            (LPCSTR)exception->ExceptionRecord->ExceptionAddress,&fault_module))
+            GetModuleFileNameA(fault_module,fault_name,MAX_PATH);
+        fprintf(stderr,"[FAULT SITE] pc=%p module=%s\n",exception->ExceptionRecord->ExceptionAddress,fault_name);
         fprintf(stderr, "[FAULT] host=%p guest=%08llx access=%llu\n", (void*)at,
                 (unsigned long long)(at - (uintptr_t)memory),
                 (unsigned long long)exception->ExceptionRecord->ExceptionInformation[0]);
         stop("unmapped guest access or native lowering fault", (uint32_t)(at-(uintptr_t)memory));
     }
     stop("native exception", code);
+}
+
+static void install_fault_handler(void)
+{
+#ifdef PILOT_CALENDAR_LLE
+    /* Unicorn commits its reserved translation buffer through its own VEH.
+     * Let that handler run before treating an exception as an unhandled
+     * failure. Genuine faults still reach our terminating diagnostic. */
+    SetUnhandledExceptionFilter(fault_handler);
+#else
+    AddVectoredExceptionHandler(1,fault_handler);
+#endif
 }
 
 static void load_image(const char *path)
@@ -600,11 +617,16 @@ int main(int argc,char **argv)
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
     thread_guest_cpu_configure();
     scheduler_configure();
+#ifdef PILOT_CALENDAR_LLE
+    fprintf(stderr,"[CALENDAR] LLE original-kernel execution; ordinals=304,305\n");
+#else
+    fprintf(stderr,"[CALENDAR] HLE native NT conversion; ordinals=304,305\n");
+#endif
     const char *verbose=getenv("XLLE_PILOT_TRACE");
     if(verbose && !strcmp(verbose,"0"))pilot_verbose=0;
     const char *trace=getenv("XLLE_PILOT_TRACE_FUNCTION");
     if(trace && *trace) {char *end;trace_function=strtoul(trace,&end,0);if(*end || !trace_function)stop("invalid trace function address",0);}
-    AddVectoredExceptionHandler(1,fault_handler);
+    install_fault_handler();
     if (argc<2 || argc>5) { fprintf(stderr,"usage: xlle_native_title <matching.xbe> [eeprom] [installed-content-directory] [local-storage-directory]\n"); return 1; }
     if (argc>=3) {
         FILE *input=fopen(argv[2],"rb");

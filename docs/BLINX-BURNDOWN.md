@@ -16,30 +16,43 @@ a complete LLE route for each native replacement. All nine remain open until
 their LLE route, independent qualification and matching HLE contract are recorded.
 This is not an estimate of missing implementation, a percentage of Xbox emulation,
 or a calendar forecast.
-The actual burndown starts at nine on 2026-10-08. Later points below are target
-checkpoints after the named groups have passed, not completed work. Update the
-actual count only when a row meets the closure rule below. Reopening or expanding
-a gate must be recorded explicitly.
+The actual family count starts at **9 open / 0 closed** on 2026-10-08.
+The owner requested **serial delivery from least complex to most complex**.
+Calendar conversion is the first small slice of the scheduling/time family;
+finishing it does not close that larger family. These ten delivery entries and
+nine acceptance gates deliberately use different granularity.
 
-```mermaid
-xychart-beta
-    title "Target remaining gates by completed phase"
-    x-axis ["Start", "Core signed", "Output signed", "Integration signed"]
-    y-axis "Open service-family gates" 0 --> 9
-    line [9, 6, 3, 0]
-```
-
-| Gate / phase | Existing evidence to retain | Required LLE route and qualification | Reference to use first |
+| Delivery order | Service | Relative work / dependencies | State |
 | --- | --- | --- | --- |
-| 1. Memory and resource lifetime / core | Native VM/physical-memory/alias/Reset tests; original stream-binding and ownership fixtures | Audit exercised pointer namespaces, protection and ownership transitions; demonstrate coherent CPU/resource access, retained lifetimes and destruction with independent expected results. Arbitrary physical aliases/DMA are currently unqualified. Do not reopen the deferred New Game bug in this phase. | Original kernel/XDK operations and existing MMU/unified-memory floor; xemu full-system execution when isolated CPU fixtures cannot cover the path |
-| 2. GPU completion, callbacks and visibility / core | Software NV2A visibility/report and FIFO tests; native 70-callback FIFO, actual pixels, pending-result and teardown tests | Trace the original command boundary through FIFO/trap/report/completion and test that required ordering holds without unnecessary CPU waits. Add pending/error/reuse cases only where the current exercised contract lacks evidence. | Original XDK packets plus xemu NV2A behavior; hardware microtest/golden result for unresolved ordering or sample-count semantics |
-| 3. Scheduling, threads, events and timers / core | Original-kernel ready-queue/base-priority fixture; native exclusive guest CPU, suspend/resume and real wait tests | Bound the title's ready/block/wake/preemption paths and callback eligibility. Separate original rules from provisional 2-ms host scheduling policy; dynamic boosts and exact interrupt/quantum timing remain unqualified. | Original kernel first; kernel execution/traces in xemu for coupled paths; hardware if actual timing affects guest-visible results |
-| 4. Display clock and vblank / output | Original display and cadence fixtures; software PCRTC/FIFO independence; native callback and unregister tests | Qualify present/vblank sequencing, callback lifetime and waits while GPU work is stalled. Preserve the original nominal cadence without requiring identical host frame times. | Original driver code plus software PCRTC and xemu; hardware capture for disputed scanout/phase behavior |
-| 5. Graphics state, shaders, textures and vertex fetch / output | Real native draw/readback fixtures; software NV2A and shader cases; 32 captured scene draws previously compared | Match the exercised register/draw cases to independent expected pixels/state; cover persistent-pointer writes, aliasing and relevant shader edges. Audit shared reference helpers so correlated errors do not count as independent agreement. | Published NV2A hardware goldens, original command emission and xemu; new hardware cases only for missing/disputed behavior |
-| 6. Audio buffers, cursor, routing and lifetime / output | ADPCM/cursor/detach references; native real output/mixer tests; all 7,560 captured opening submissions match original guest PCM | Tie cursor, stop/detach, buffer reuse and completion to bounded APU behavior; retain actual output tests and document resampling tolerance. A healthy native queue alone is not proof of original transport semantics. | Original DirectSound caller/settings plus APU/xemu behavior; hardware for disputed timing/routing. Compare original decoder PCM, not an assumed bit-identical independent ADX decoder |
-| 7. Movie/A-V sequence integration / integration | Original guest Sofdec/ADX decoding retained; sampled video progression and PCM/submission/mixer captures | Verify final-frame/transition timing, interruption and repeated A/V alignment within justified tolerances. Exercise the combined file/audio/display contracts; no separate invented hardware movie decoder is required. | Original decoded data and timestamps, xemu same-title sequence; hardware recording when authentic transition/relative timing remains ambiguous |
-| 8. Files, cache and installed media / integration | Real bytes/EOF/position/directory tests; async event/IOSB/data ordering, close/reopen lifetime and installed-media identity tests | Match exercised success/failure/short-read/close behavior to the original API; verify replay writes and repeated mount/cache lifetimes. Retain the approved installed-media authentication exception and optical reference as distinct policies. | Original kernel/XAPI in CPU fixtures or xemu; hardware only for a relevant device-specific uncertainty, not to restore waived optical authentication |
-| 9. Controller input and interruption / integration | Host conversion/ABI tests; previous real attract interruption/menu-return/reentry; owner keyboard observation | Independently qualify connected/disconnected reports, packet/button semantics and lifetimes; repeat controlled Start interruption and idle reentry on the final hardened build. Physical-controller details beyond the exercised contract remain separate. | Original XAPI/XID behavior and xemu; actual controller/hardware capture when an input-report question cannot be settled independently |
+| 1 | Pure calendar conversion (scheduler/time slice) | Small: two original kernel routines; no hardware, IRQ or queue state | Complete, `.103`: both builds qualified; both original routines execute in actual Blinx, with interruption/menu return and reentry; [evidence](../pilots/native-title/CALENDAR-LLE.md) |
+| 2 | Controller input and interruption | Smallest device family: XID reports plus USB initialization/transfer dependencies | Open |
+| 3 | Display clock and vblank | Bounded clock/interrupt/callback family | Open |
+| 4 | Memory and resource lifetime | Cross-cutting pointer, page, alias and ownership semantics | Open |
+| 5 | Files, cache and installed media | File bytes/errors/order plus backing storage and mount lifetime | Open |
+| 6 | GPU completion, callbacks and visibility | FIFO/traps/reports, pending results and lifetime; uses memory/display | Open |
+| 7 | Remaining scheduling, threads, events and timers | Coupled ready/block/wake/preemption and interrupt state | Open; calendar is only its first slice |
+| 8 | Audio buffers, cursor, routing and lifetime | APU/DSP plus DMA, scheduling, reuse and output | Open |
+| 9 | Graphics state, shaders, textures and vertex fetch | Broad NV2A draw/state/format coverage; uses memory/completion | Open |
+| 10 | Movie/A-V sequence integration | Composes the qualified file, decoder, input, audio and display paths | Open |
+
+This is a relative work ranking, not a date forecast. A newly discovered hard
+dependency can change the order, but record it explicitly rather than silently
+skipping unfinished work. Finish one entry's contract, runnable LLE route,
+independent evidence, HLE comparison and Blinx regression before starting the
+next entry. Add smaller slices only when they correspond to real service
+boundaries, not to manufacture progress in the family count.
+
+| Family gate (ordered after calendar slice) | Existing evidence to retain | Required LLE route and qualification | Reference to use first |
+| --- | --- | --- | --- |
+| 1. Controller input and interruption | Host conversion/ABI tests; previous real attract interruption/menu-return/reentry; owner keyboard observation | Independently qualify connected/disconnected reports, packet/button semantics and lifetimes; repeat controlled Start interruption and idle reentry on the final hardened build. Physical-controller details beyond the exercised contract remain separate. | Original XAPI/XID behavior and xemu; actual controller/hardware capture when an input-report question cannot be settled independently |
+| 2. Display clock and vblank | Original display and cadence fixtures; software PCRTC/FIFO independence; native callback and unregister tests | Qualify present/vblank sequencing, callback lifetime and waits while GPU work is stalled. Preserve the original nominal cadence without requiring identical host frame times. | Original driver code plus software PCRTC and xemu; hardware capture for disputed scanout/phase behavior |
+| 3. Memory and resource lifetime | Native VM/physical-memory/alias/Reset tests; original stream-binding and ownership fixtures | Audit exercised pointer namespaces, protection and ownership transitions; demonstrate coherent CPU/resource access, retained lifetimes and destruction with independent expected results. Arbitrary physical aliases/DMA are currently unqualified. Do not reopen the deferred New Game bug in this phase. | Original kernel/XDK operations and existing MMU/unified-memory floor; xemu full-system execution when isolated CPU fixtures cannot cover the path |
+| 4. Files, cache and installed media | Real bytes/EOF/position/directory tests; async event/IOSB/data ordering, close/reopen lifetime and installed-media identity tests | Match exercised success/failure/short-read/close behavior to the original API; verify replay writes and repeated mount/cache lifetimes. Retain the approved installed-media authentication exception and optical reference as distinct policies. | Original kernel/XAPI in CPU fixtures or xemu; hardware only for a relevant device-specific uncertainty, not to restore waived optical authentication |
+| 5. GPU completion, callbacks and visibility | Software NV2A visibility/report and FIFO tests; native 70-callback FIFO, actual pixels, pending-result and teardown tests | Trace the original command boundary through FIFO/trap/report/completion and test that required ordering holds without unnecessary CPU waits. Add pending/error/reuse cases only where the current exercised contract lacks evidence. | Original XDK packets plus xemu NV2A behavior; hardware microtest/golden result for unresolved ordering or sample-count semantics |
+| 6. Scheduling, threads, events and timers | Original-kernel ready-queue/base-priority fixture; native exclusive guest CPU, suspend/resume and real wait tests | Bound the title's ready/block/wake/preemption paths and callback eligibility. Separate original rules from provisional 2-ms host scheduling policy; dynamic boosts and exact interrupt/quantum timing remain unqualified. | Original kernel first; kernel execution/traces in xemu for coupled paths; hardware if actual timing affects guest-visible results |
+| 7. Audio buffers, cursor, routing and lifetime | ADPCM/cursor/detach references; native real output/mixer tests; all 7,560 captured opening submissions match original guest PCM | Tie cursor, stop/detach, buffer reuse and completion to bounded APU behavior; retain actual output tests and document resampling tolerance. A healthy native queue alone is not proof of original transport semantics. | Original DirectSound caller/settings plus APU/xemu behavior; hardware for disputed timing/routing. Compare original decoder PCM, not an assumed bit-identical independent ADX decoder |
+| 8. Graphics state, shaders, textures and vertex fetch | Real native draw/readback fixtures; software NV2A and shader cases; 32 captured scene draws previously compared | Match the exercised register/draw cases to independent expected pixels/state; cover persistent-pointer writes, aliasing and relevant shader edges. Audit shared reference helpers so correlated errors do not count as independent agreement. | Published NV2A hardware goldens, original command emission and xemu; new hardware cases only for missing/disputed behavior |
+| 9. Movie/A-V sequence integration | Original guest Sofdec/ADX decoding retained; sampled video progression and PCM/submission/mixer captures | Verify final-frame/transition timing, interruption and repeated A/V alignment within justified tolerances. Exercise the combined file/audio/display contracts; no separate invented hardware movie decoder is required. | Original decoded data and timestamps, xemu same-title sequence; hardware recording when authentic transition/relative timing remains ambiguous |
 
 For **every row**, map the HLE caller interface to an executable LLE route using
 original low-level program/device behavior. Connect and complete that route where
@@ -49,8 +62,9 @@ selects original code but stops at an unimplemented dependency is not a working
 floor. The movie row composes the real decoder, storage, audio and display routes;
 it does not invent a hardware codec absent from the original system.
 
-The core rows are first because lifetime/order errors can invalidate otherwise
-convincing output tests. Control cost by reusing existing LLE implementations and
+Work in the delivery order above. Lifetime/order errors can still invalidate
+output evidence, so downstream families remain open until their dependencies are
+qualified. Control cost by reusing existing LLE implementations and
 qualified cases, bounding the supported service inputs honestly, and avoiding
 unrelated console features. Do not optimize LLE for real-time playback. Keep both
 builds working as the shared interface evolves; select implementations at build
@@ -142,9 +156,9 @@ counted as verified completed loops.
 
 Next phase (.102) completes and qualifies the maintained LLE routes beneath the
 **already exercised** HLE families before expanding into New Game. A functioning
-HLE path still requires its LLE foundation. Start with memory/resource ownership and GPU ordering,
-then scheduling/timers and audio/movie transport, retaining existing file/input
-checks. For each family record: observable input/output and memory/completion
+HLE path still requires its LLE foundation. Follow the least-complex-first
+serial delivery order above, starting with pure calendar conversion, then input.
+Retain existing memory/GPU, file, scheduling and output checks. For each family record: observable input/output and memory/completion
 effects, current runnable floor, independent evidence, tests and remaining gaps.
 Prefer existing original-code fixtures and software LLE; use xemu behavior and
 other independent references where they resolve a concrete unknown. Phobos
