@@ -7,10 +7,23 @@ struct GraphicsTextureObject {
     unsigned parent,level; /* parent is slot+1 for a surface view, zero for texture */
     unsigned bindings;
     unsigned guest_owned,alias_kind,alias_source,alias_format,alias_size;
+    /* Conservative owner hint: a CPU lock on this texture or any surface
+     * sets it. A handoff clears it only after clearing the whole family. */
+    unsigned family_exposed;
 };
 static struct GraphicsTextureObject *graphics_textures;
 static unsigned graphics_texture_capacity;
 static unsigned graphics_texture_adopt_alias(uint32_t header);
+static int graphics_texture_exposure_cache(void)
+{
+    static int enabled=-1;
+    if(enabled<0) {
+        const char *value=getenv("XLLE_PILOT_TEXTURE_EXPOSURE_CACHE");
+        enabled=!(value && !strcmp(value,"0"));
+        fprintf(stderr,"[TEXTURE EXPOSURE] owner_cache=%u\n",enabled);
+    }
+    return enabled;
+}
 
 static unsigned graphics_texture_slot(uint32_t header)
 {
@@ -204,12 +217,19 @@ static void graphics_texture_sample_prepare(unsigned slot)
 {
     struct GraphicsTextureObject *texture=&graphics_textures[slot];int exposed=!texture->usage || texture->cpu_exposed;
     if(texture->guest_owned)return; /* donor RHI view shares the live GPU storage */
-    for(unsigned i=0;i<graphics_texture_capacity;++i)if(graphics_textures[i].parent==slot+1)exposed|=graphics_textures[i].cpu_exposed;
+    int scan=!graphics_texture_exposure_cache() || (texture->usage && texture->family_exposed);
+    /* Ordinary CPU-owned textures still compare their actual bytes at every
+     * consumption. Their exposure is unconditional; a child scan adds nothing. */
+    if(scan)for(unsigned i=0;i<graphics_texture_capacity;++i)
+        if(graphics_textures[i].parent==slot+1)exposed|=graphics_textures[i].cpu_exposed;
     for(unsigned level=0;level<texture->levels;++level)
         pilot_gfx_texture_prepare_sample(texture->native,level,memory+texture->data+graphics_level_offset(texture,level),
             graphics_level_bytes(texture,level),exposed);
-    if(texture->usage)for(unsigned i=0;i<graphics_texture_capacity;++i)
-        if(i==slot || graphics_textures[i].parent==slot+1)graphics_textures[i].cpu_exposed=0;
+    if(texture->usage && scan) {
+        for(unsigned i=0;i<graphics_texture_capacity;++i)
+            if(i==slot || graphics_textures[i].parent==slot+1)graphics_textures[i].cpu_exposed=0;
+        texture->family_exposed=0;
+    }
 }
 static void graphics_texture_bind(unsigned stage,uint32_t header)
 {
@@ -290,6 +310,7 @@ static void graphics_texture_lock(uint32_t header,unsigned level,uint32_t destin
         struct GraphicsTextureObject *texture=object->parent?&graphics_textures[object->parent-1]:object;
         pilot_gfx_texture_download(texture->native,memory+texture->data,texture->bytes);
         object->cpu_exposed=1;
+        texture->family_exposed=1;
     }
     uint32_t block=graphics_texture_block(object);
     if(block)pitch=((width+3)/4)*block;

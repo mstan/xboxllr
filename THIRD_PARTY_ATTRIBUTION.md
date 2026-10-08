@@ -15,6 +15,18 @@ notices. Preparation/build steps must report missing required notices.
 
 ## Private native-title reference pilot
 
+### Texture exposure ownership - 2026-10-08
+
+Phobos `src/hle/hle_d3d8_texture.c` at
+`bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0` was reviewed for per-resource
+rendered-storage ownership and cached texture preparation. Our independent
+`graphics_texture.inc` now carries a conservative CPU-exposure hint on each
+texture owner, set by locks on the texture or any surface view. It avoids
+repeated whole-table exposure searches until a new lock. No donor body was
+copied. In particular, this does not adopt once-per-frame checks for ordinary
+CPU-owned textures: their actual bytes are still checked at every consumption.
+The existing attributed renderer and original/LLE texture contracts remain.
+
 ### Native GPU completion notifications - 2026-10-08
 
 Phobos `src/hle/hle_d3d8.c` (`D3DDevice_InsertCallback`) and its D3D11 RHI at

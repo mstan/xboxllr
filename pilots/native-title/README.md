@@ -1,5 +1,65 @@
 # Native title reference pilot
 
+## Texture ownership preparation experiment (2026-10-08)
+
+`beads-xbox.1.97`, branch `perf/blinx-draw-preparation-20261008`, base `dba1bcc`.
+With native GPU events enabled, the next capture-disabled service profile
+covers 1350 gameplay frames in 61.260 seconds. Inclusive graphics services
+consume 46.432 seconds; draw pixel/target preparation accounts for 10.913 and
+texture preparation 6.677 seconds. The existing target preparation scans the
+entire texture table twice per draw even without CPU locks; sampling scans
+children even for textures already unconditionally CPU-owned.
+
+Following Phobos's per-resource ownership approach, a conservative hint on the
+texture records locks through the parent or any surface view. An unexposed
+family avoids the scans. A real CPU handoff still performs the existing upload
+and clears all family exposure flags before clearing the hint. Releasing an
+exposed child may leave a conservative stale hint, causing one extra scan;
+it cannot suppress needed work. Ordinary CPU-owned textures still compare
+their actual bytes at every consumption, including changes through retained
+pointers. First uploads and GPU storage aliases retain their existing paths.
+No new numerical tolerance or guest-visible behavior is introduced.
+
+`XLLE_PILOT_TEXTURE_EXPOSURE_CACHE=0`, selected before launch, retains the old
+scans for comparison. The bounded original header/lock and LLE memory/texture
+contracts are unchanged. Real native fixtures add repeated alias CPU edits,
+sampling, later GPU writes, rebinding and alias release, verifying output
+pixels and isolation from an unrelated texture. Existing tests cover target
+partial clears, sibling aliases, compressed mip tails and table growth/reuse.
+Both new and reference graphics fixtures pass with the D3D debug layer
+(3.36/3.34 seconds); all 35 native tests pass in 16.06 seconds.
+
+Two same-executable, capture/service-profile-disabled 200-second title runs
+compare the old scans with owner hints. GPU events and callback profiling are
+enabled in both; guest CPU15 affinity and the same replay controller are used.
+
+| Measurement | Previous scans | Owner hints |
+| --- | ---: | ---: |
+| First 300 gameplay intervals | 28.59988 fps | 30.00556 fps |
+| Complete first stage, 2328 intervals | 23.71334 fps | 26.41506 fps |
+| Complete stage span | 98.17258 s | 88.13155 s |
+| Median / 95th percentile interval | 36.185 / 64.171 ms | 33.441 / 44.716 ms |
+
+Both stages end naturally, contain 2329 presents and exactly the same callback
+context sequence, and complete all 75 replay writes. Neither run has a
+guard/fault before harness termination. The complete-stage improvement is
+1.114x (+11.39% cadence); its later scene still misses the nominal 30 fps target.
+The short opening window reaching 30 fps does not qualify full original speed.
+Phase boundaries use stage-audio and publisher-movie openings, not an assumed
+frame count. Configuration, executable hash and interval/context data remain
+in `build/blinx/exposure-comparison.aot-private.json` and
+`build/blinx/exposure-whole-stage.aot-private.json`.
+
+The subsequent captured `exposure-input-profile` observation samples Start
+at 90016 ms, visibly returns to `Press START to begin`, and renders another
+3D demo after idling. All 68 writes complete; 34 images and the run manifest
+record no guard/fault before harness termination (180.593 s, exit 1). This run
+is functional/attribution evidence, not part of the speed comparison. In its
+first ten complete stage reports, target/pixel preparation totals 42.633 ms
+over 1,219,968 draws; the prior profile reports 1674.881 ms over 1,194,457 draws.
+Those different draw counts/configurations limit this to cost attribution.
+The unchanged bounded NV2A regression also passes (0.20 s overall).
+
 ## GPU completion notification experiment (2026-10-08)
 
 `beads-xbox.1.95`, branch `perf/blinx-native-handoffs-20261008`, base `3730def`.

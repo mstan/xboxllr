@@ -47,6 +47,36 @@ static void test_graphics_target_binding(void)
     CHECK(vm_committed(0,0x100000000ull)==resident);
     fprintf(stderr,"PASS: real color/depth binding and clears, NULL depth, retained target, safe self-rebind and binding ownership\n");
 }
+static void test_graphics_texture_handoffs(void)
+{
+    uint64_t resident=vm_committed(0,0x100000000ull);
+    uint32_t create[]={16,8,1,1,1,0x12,3},texture[2],native[2],view[2];
+    for(unsigned i=0;i<2;++i) {
+        texture[i]=call_graphics(PILOT_D3D_D3DDevice_CreateTexture2,create);CHECK(texture[i]);
+        native[i]=graphics_textures[graphics_texture_slot(texture[i])].native;
+        uint32_t args[]={texture[i],0};view[i]=call_graphics(PILOT_D3D_D3DTexture_GetSurfaceLevel2,args);CHECK(view[i]);
+        CHECK(!pilot_gfx_texture_clear(native[i],0xff102030+i));
+    }
+    uint32_t pixels[16*8],lock[]={view[0],0x19540,0,0},binding[]={0,texture[0]};
+    for(unsigned pass=0;pass<3;++pass) {
+        /* Repeated exposure must re-arm the owner after each GPU handoff. */
+        call_graphics(PILOT_D3D_D3DSurface_LockRect,lock);
+        MEM32(MEM32(0x19544))=0xff908070+pass;
+        call_graphics(PILOT_D3D_D3DDevice_SetTexture,binding);
+        CHECK(!pilot_gfx_texture_readback(native[0],0,pixels,sizeof(pixels)) && pixels[0]==0xff908070+pass);
+        CHECK(!pilot_gfx_texture_clear(native[0],0xff304050+pass));
+        call_graphics(PILOT_D3D_D3DDevice_SetTexture,binding);
+        CHECK(!pilot_gfx_texture_readback(native[0],0,pixels,sizeof(pixels)) && pixels[0]==0xff304050+pass);
+        CHECK(!pilot_gfx_texture_readback(native[1],0,pixels,sizeof(pixels)) && pixels[0]==0xff102031);
+    }
+    CHECK(call_graphics(PILOT_D3D_D3DResource_Release,view)==0);
+    CHECK(!pilot_gfx_texture_readback(native[0],0,pixels,sizeof(pixels)) && pixels[0]==0xff304052);
+    binding[1]=0;call_graphics(PILOT_D3D_D3DDevice_SetTexture,binding);
+    CHECK(call_graphics(PILOT_D3D_D3DResource_Release,view+1)==0);
+    for(unsigned i=0;i<2;++i)CHECK(call_graphics(PILOT_D3D_D3DResource_Release,texture+i)==0);
+    CHECK(vm_committed(0,0x100000000ull)==resident);
+    fprintf(stderr,"PASS: repeated alias CPU edits reach real GPU samples, later GPU writes survive rebinding/release, unrelated owner remains intact\n");
+}
 static void test_graphics_targets(void)
 {
     uint64_t resident=vm_committed(0,0x100000000ull);
@@ -94,6 +124,7 @@ static void test_graphics_targets(void)
     }
     fprintf(stderr,"PASS: actual linear render-target GPU writes, original header/pitch/size, readback/CPU edits, aliases and lifetime\n");
     test_graphics_target_binding();
+    test_graphics_texture_handoffs();
 }
 #ifdef PILOT_D3D_PHOBOS
 static void test_graphics_movie_surfaces(void)

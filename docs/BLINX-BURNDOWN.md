@@ -1,5 +1,15 @@
 # Blinx: serial attract-sequence bring-up
 
+**Latest measured speed (.97):** keeping CPU-exposure state on the texture
+owner removes redundant whole-table searches. Same-executable first-stage
+cadence improves **23.71334 to 26.41506 fps** (+11.39%) over all 2328 intervals;
+both runs naturally finish with 2329 presents, the same callback-context sequence
+and 75/75 completed writes. The opening 300 intervals reach 30.00556 fps, but
+whole-stage original speed remains short. All 35 native tests and the bounded
+NV2A regression pass. A separate captured 180-second run preserves input
+interruption, visible menu return and rendered reentry, with 68/68 writes and
+no guard/fault. Full A/V synchronization remains open; JSRF remains deferred.
+
 **Current, 2026-10-08 (`beads-xbox.1.62`):** actual NTSC Blinx now renders
 its textured 3D attract world and character. Reserved viewport constants 58/59
 were missing from the HLE handoff; the original emitter and LLE NV097 register
