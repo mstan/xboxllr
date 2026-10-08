@@ -6,6 +6,39 @@ It is outside the normal xboxlle build. **The generated executable is a private
 GPL-dependent reference artifact, not the intended non-GPL shipping product.**
 See [license scope](../../LICENSE-SCOPE.md). There is no install/package target.
 
+## Current checkpoint - real asynchronous movie IO (2026-10-07)
+
+`beads-xbox.1.69`: Blinx opens `microsoft.sfd` with its actual asynchronous,
+nonbuffered flags and completes 29 real reads. It submits 760 presents and
+feeds its movie audio buffer before stalling in repeated thread-priority
+queries (`beads-xbox.1.71`). This does not establish correct playback, movie
+completion or an attract loop. Desktop captures were obscured by other windows
+and are not accepted as visual evidence; direct GPU capture is next.
+
+Phobos's host-file/event approach is retained. Its read implementation does
+not handle pending IO, so the independent adapter supplies persistent native
+IOSBs, real pending reads and thread-pool completion waits. Guest data and
+8-byte IOSB completion are published before signaling the retained native
+event. File close drains pending work before releasing/reusing ownership;
+guest event closure cannot destroy an outstanding operation's reference.
+Actual host access rights are retained, including rejection of reads through
+DELETE-only handles. Native metadata access grants no extra data access.
+
+Bounded reference floor: original kernel KeInitializeEvent/KeSetEvent/
+KeResetEvent execute in the private x86 oracle for both event types and
+previous-state transitions. The in-tree optical fixture checks actual PIO/
+scatter-DMA bytes before IRQ completion. This is not full retail IRP-stack
+execution. Native event type/state, NT deadlines, handle references, offsets,
+EOF, byte counts and completed-buffer ordering have executable tests. Host
+scheduling latency and completion interleaving are permitted tolerances.
+Async writes, guest APCs, file-handle waits, implicit async offsets and named
+events remain explicit guards. No pending request is treated as completed.
+
+All 31 native CTests pass (13.31 s), including 64 read/close/reopen cycles,
+nonbuffered short reads and retained completion lifetime. Private evidence:
+`build/blinx/event_oracle.py`, `run-movie-async-read.log`,
+`run-movie-visible.log`, and `build/movie-events-final-tests.log`.
+
 ## Movie YUV state contract (2026-10-07)
 
 `beads-xbox.1.70`: Blinx now passes its YUV enable state and reaches the movie
@@ -49,7 +82,7 @@ intermittent process-wide vblank handle-count assertion. No all-green claim.
 private evidence is in `build/query-debug-events.log` and
 `build/query-lifetime-all-tests.log`.
 
-## Current checkpoint - movie discovery (2026-10-07)
+## Earlier checkpoint - movie discovery (2026-10-07)
 
 `beads-xbox.1.68`: Blinx now finds `microsoft.sfd` through real directory
 enumeration, closes the search and attempts to open the movie. The next guard

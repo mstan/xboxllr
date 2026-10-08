@@ -1,5 +1,20 @@
 # STATUS
 
+## 2026-10-07 - Blinx executes its movie read/render/audio path
+
+Real native event objects and asynchronous nonbuffered reads now deliver the
+actual microsoft.sfd bytes. The title executes 29 read completions, 760 present
+submissions and movie audio-buffer updates before repeated thread-priority
+queries prevent further advancement (`beads-xbox.1.71`). This is not confirmed
+correct movie playback or attract completion. Obscured desktop screenshots are
+not accepted as evidence; direct GPU capture is being added.
+
+The YUV state adapter reuses the imported Phobos converter, checked against
+original XDK packet/cache behavior and a bounded software NV2A pixel reference.
+Original kernel event transitions and optical payload-before-IRQ tests provide
+the bounded completion floor. All 31 native tests pass in 13.31 s, including
+actual async data/EOF/event ordering, close drains and retained event lifetime.
+
 ## 2026-10-07 - Donor device-lifetime bug identified and fixed
 
 The visibility timeout came from Phobos retaining an empty-stage texture view

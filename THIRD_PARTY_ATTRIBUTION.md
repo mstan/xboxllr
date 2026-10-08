@@ -15,6 +15,20 @@ notices. Preparation/build steps must report missing required notices.
 
 ## Private native-title reference pilot
 
+### Native event objects and asynchronous movie reads - 2026-10-07
+
+Phobos `src/kernel/kernel_sync.c` and `kernel_file.c` at
+`bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0` supply the host-event/file approach.
+The new adapters are independently authored: donor read code omits pending
+handling, and donor event state shortcuts are not copied. Original supplied
+kernel routines establish event layout and transitions in a private oracle;
+the optical DMA fixture supplies work-before-completion scaffolding.
+[Microsoft NtReadFile](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntreadfile)
+defines native IO completion/buffer lifetime, while
+[CloseThreadpoolWait](https://learn.microsoft.com/en-us/windows/win32/api/threadpoolapiset/nf-threadpoolapiset-closethreadpoolwait)
+defines callback cleanup. No GPL implementation body is copied into these
+adapters; this does not alter the linked private pilot's license scope.
+
 ### Movie YUV enable and bounded pixel reference - 2026-10-07
 
 The native state adapter reuses the Phobos renderer's already imported packed

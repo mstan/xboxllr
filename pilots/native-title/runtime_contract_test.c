@@ -55,6 +55,7 @@ static void call_kernel(unsigned ordinal,const uint32_t *args,unsigned argc)
 #include "file_cache_contract_test.inc"
 #include "nonlocal_jump_contract_test.inc"
 #include "thread_objects_contract_test.inc"
+#include "event_objects_contract_test.inc"
 
 static int test_write_faults(uint32_t va)
 {
@@ -357,6 +358,7 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"memory-statistics")) { test_memory_statistics(); return 0; }
         if (!strcmp(argv[1],"timers")) { test_timers(); return 0; }
         if (!strcmp(argv[1],"threads")) { test_thread_objects(); return 0; }
+        if (!strcmp(argv[1],"events")) { test_event_objects(); return 0; }
         if (!strcmp(argv[1],"jumps")) { test_jumps(); return 0; }
         if (!strncmp(argv[1],"jump-",5)) { test_jump_failure(argv[1]+5); return 1; }
         if (!strcmp(argv[1],"instruction")) recomp_unimpl("test unsupported instruction",0x12340);

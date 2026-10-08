@@ -11,7 +11,7 @@ static const char *media_content_path;
 static HANDLE media_root,media_identity,storage_roots[6],storage_parent;
 static WCHAR storage_path[32768];
 static SRWLOCK media_lock=SRWLOCK_INIT;
-struct MediaFile { HANDLE host; uint32_t id; unsigned partition,cacheable; SRWLOCK io_lock; };
+struct MediaFile { HANDLE host,async_idle; uint32_t id,access; unsigned partition,cacheable,asynchronous,pending; SRWLOCK io_lock; };
 static struct MediaFile media_files[256];
 static uint32_t media_next_id=0x50000001u;
 typedef LONG (NTAPI *MediaOpen)(PHANDLE,ACCESS_MASK,POBJECT_ATTRIBUTES,PIO_STATUS_BLOCK,ULONG,ULONG);
@@ -188,9 +188,20 @@ static uint32_t media_close(uint32_t id)
     uint32_t status=MEDIA_BAD_HANDLE;
     AcquireSRWLockExclusive(&media_lock);
     for (unsigned i=0;i<256;++i) if (media_files[i].host && media_files[i].id==id) {
+        if(media_files[i].async_idle) {
+            if(WaitForSingleObject(media_files[i].async_idle,INFINITE)!=WAIT_OBJECT_0)stop("file close completion drain failed",id);
+        }
+        /* The final callback signals idle while still holding io_lock. Join
+         * that release before closing/reusing this slot and its SRW lock. */
+        AcquireSRWLockExclusive(&media_files[i].io_lock);
+        if(media_files[i].async_idle) {
+            if(!CloseHandle(media_files[i].async_idle))stop("file completion idle close failed",id);
+            media_files[i].async_idle=NULL;
+        }
         if (!CloseHandle(media_files[i].host)) stop("owned media handle close failed",id);
         fsc_forget(id);
-        media_files[i].host=NULL; status=0; break;
+        media_files[i].host=NULL; status=0;
+        ReleaseSRWLockExclusive(&media_files[i].io_lock);break;
     }
     ReleaseSRWLockExclusive(&media_lock);
     return status;
@@ -268,11 +279,9 @@ static uint32_t media_open(uint32_t *args,int create)
         fprintf(stderr,"[FILE OPEN] root=%08x name=%.*s access=%08x options=%08x\n",
                 MEM32(attr),(int)(length>1024?1024:length),(char*)(memory+MEM32(name+4)),access,options);
     }
-    /* Delete/metadata handles need no synchronous data-transfer mode. Preserve
-     * that NT contract; data handles still require our synchronous transport. */
-    if ((options&~0x805867u) || (!(options&0x20) &&
-        (access&(FILE_READ_DATA|FILE_WRITE_DATA|FILE_APPEND_DATA|GENERIC_READ|GENERIC_WRITE|GENERIC_ALL))))
-        stop("file open requires unsupported IO mode/options",options);
+    /* Preserve native asynchronous/nonbuffered open semantics. Reads require
+     * the separate completion-delivery contract below. */
+    if (options&~0x80586fu)stop("file open requires unsupported IO options",options);
     if (share&~7u) return MEDIA_INVALID;
     WCHAR path[1024]; HANDLE parent=NULL,handle=NULL; IO_STATUS_BLOCK io={0};
     unsigned partition=0;
@@ -291,10 +300,22 @@ static uint32_t media_open(uint32_t *args,int create)
         LARGE_INTEGER allocation; if (args[4]) allocation.QuadPart=(int64_t)MEM64(args[4]);
         status=storage_create_host(parent,path,host_access,share,options,args[7],args[5],args[4]?&allocation:NULL,&handle,&io);
     } else if (!status) status=media_open_host(parent,path,host_access,share,options,&handle,&io);
+    uint32_t granted_access=0;
+    if(!status) {
+        IO_STATUS_BLOCK access_io={0};
+        status=(uint32_t)media_nt_query(handle,&access_io,&granted_access,sizeof(granted_access),8);
+        if(status)CloseHandle(handle);
+    }
     if (!status) {
-        media_files[slot].host=handle; media_files[slot].id=media_next_id++;
+        media_files[slot].async_idle=NULL;media_files[slot].pending=0;
+        if(!(options&0x30)) {
+            media_files[slot].async_idle=CreateEventW(NULL,TRUE,TRUE,NULL);
+            if(!media_files[slot].async_idle){CloseHandle(handle);media_iosb(iosb,0xc000009au,0);return 0xc000009au;}
+        }
+        media_files[slot].host=handle; media_files[slot].id=media_next_id++;media_files[slot].access=granted_access;
         media_files[slot].partition=partition;
-        media_files[slot].cacheable=!(share&FILE_SHARE_WRITE) && !(options&8) &&
+        media_files[slot].asynchronous=!(options&0x30);
+        media_files[slot].cacheable=!media_files[slot].asynchronous && !(share&FILE_SHARE_WRITE) && !(options&8) &&
             !!(access&(FILE_READ_DATA|GENERIC_READ|GENERIC_ALL));
         InitializeSRWLock(&media_files[slot].io_lock);
         MEM32(out)=media_files[slot].id;
@@ -303,6 +324,7 @@ static uint32_t media_open(uint32_t *args,int create)
     return status;
 }
 #include "directory.inc"
+#include "file_async.inc"
 static void media_kernel(unsigned ordinal)
 {
     fsc_ensure();
@@ -316,13 +338,18 @@ static void media_kernel(unsigned ordinal)
     else {
         struct MediaFile *owned=media_owned(a[0]);
         HANDLE file=owned ? owned->host : NULL; IO_STATUS_BLOCK io={0};
-        uint32_t iosb=transfer || ordinal==207 ? a[4] : a[1];
+        uint32_t iosb=transfer || ordinal==207 ? a[4] : a[1];int async_delivery=0;
         g_eax=MEDIA_BAD_HANDLE;
         if (!iosb) g_eax=MEDIA_INVALID;
         else if (file) {
             AcquireSRWLockExclusive(&owned->io_lock);
             if(ordinal==207) g_eax=media_directory(file,&io,a);
             else if (transfer) {
+                if(ordinal==219 && !(owned->access&FILE_READ_DATA))g_eax=0xc0000022u;
+                else if(owned->asynchronous) {
+                    if(ordinal!=219)stop("asynchronous file write completion outside qualified scope",ordinal);
+                    async_delivery=1;g_eax=media_async_read(owned,a);
+                } else {
                 /* A context alone requests no callback. XAPI ReadFile passes
                  * its OVERLAPPED pointer here even with no APC routine/event.
                  * Completion ports cannot be associated with our file owner. */
@@ -335,6 +362,7 @@ static void media_kernel(unsigned ordinal)
                 else {
                     fsc_forget(owned->id);
                     g_eax=(uint32_t)media_nt_write(file,NULL,NULL,NULL,&io,memory+a[5],a[6],a[7]?&offset:NULL,NULL);
+                }
                 }
             } else if (ordinal==198) g_eax=(uint32_t)media_nt_flush(file,&io);
             else if (ordinal==218) {
@@ -371,11 +399,11 @@ static void media_kernel(unsigned ordinal)
                     if (ordinal==211 && !g_eax) memcpy(memory+a[2],stage.bytes,size);
                 }
             }
-            if (g_eax==0x103u) stop("synchronous file operation unexpectedly pending",ordinal);
+            if (g_eax==0x103u && !async_delivery) stop("synchronous file operation unexpectedly pending",ordinal);
             ReleaseSRWLockExclusive(&owned->io_lock);
         }
-        if (iosb) media_iosb(iosb,g_eax,io.Information);
-        if (transfer) fprintf(stderr,"[FILE TRANSFER] ordinal=%u handle=%08x requested=%u completed=%llu status=%08x\n",
+        if (iosb && !async_delivery) media_iosb(iosb,g_eax,io.Information);
+        if (transfer && !async_delivery) fprintf(stderr,"[FILE TRANSFER] ordinal=%u handle=%08x requested=%u completed=%llu status=%08x\n",
                               ordinal,a[0],a[6],(unsigned long long)io.Information,g_eax);
     }
     if (opening) ReleaseSRWLockExclusive(&media_lock);

@@ -6,6 +6,7 @@ static void test_media_name(const char *name,uint32_t root)
     MEM32(0x1a014)=0x1a100; memcpy(memory+0x1a100,name,length);
 }
 #include "directory_contract_test.inc"
+#include "file_async_contract_test.inc"
 static void test_media(void)
 {
     char temp[MAX_PATH],directory[MAX_PATH],path[MAX_PATH];
@@ -97,6 +98,13 @@ static void test_media(void)
     child=MEM32(out);read[0]=child;read[6]=sizeof(content);read[7]=offset;MEM64(offset)=0;
     call_kernel(219,read,8);CHECK(!g_eax && MEM32(iosb+4)==sizeof(content) && !memcmp(memory+buffer,content,sizeof(content)));
     call_kernel(187,&child,1);CHECK(!g_eax);
+    create[8]=0x848;call_kernel(190,create,9);CHECK(!g_eax);
+    child=MEM32(out);CHECK(media_owned(child)->asynchronous && !media_owned(child)->cacheable);
+    struct {uint32_t mode;} native_mode;IO_STATUS_BLOCK native_io={0};
+    CHECK(media_nt_query(media_handle(child),&native_io,&native_mode,sizeof(native_mode),16)==0);
+    CHECK(!(native_mode.mode&0x30) && (native_mode.mode&8));
+    call_kernel(187,&child,1);CHECK(!g_eax);create[8]=0x60;
+    test_media_async(content,sizeof(content));
     test_media_name("Q:\\asset.bin",0xfffffffdu);MEM32(out)=0xfeed1234;
     call_kernel(190,create,9);CHECK(g_eax==0xc000003au && MEM32(out)==0xfeed1234);
     test_media_name("D:\\..\\asset.bin",0xfffffffdu);

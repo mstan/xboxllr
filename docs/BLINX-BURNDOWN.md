@@ -6,7 +6,9 @@ error is traced and fixed: local VM/texture ownership caps returned out of memor
 while real guest RAM remained available. Blinx now loads 420 textures, passes
 visibility Begin/End, and executes its ordered GPU WRITE callback. The latest
 run passes shared front-buffer texture aliases and contiguous page protection,
-then discovers microsoft.sfd and attempts its asynchronous open. Earlier fresh/repeat runs reached the callback boundary in 12.95/7.33 s
+then reads microsoft.sfd asynchronously and executes its YUV/audio path. After
+29 real reads and 760 present submissions it stalls in thread-priority queries;
+correct visible/audible playback is still unconfirmed. Earlier fresh/repeat runs reached the callback boundary in 12.95/7.33 s
 with zero error-dialog entries or memory failures. The 64 MiB guest limit remains
 enforced. No title error condition is bypassed.
 
@@ -22,7 +24,9 @@ enforced. No title error condition is bypassed.
 | GPU texture aliases | Actual shared Phobos RHI storage; LLE clear/sample/update and native ownership/hazard fixtures pass |
 | Memory protection | Original Set/Query execution, LLE page faults and native host protection pass; actual title request succeeds |
 | Movie discovery | Real directory cursor/entries and native ABI tests pass; optical transport fixture passes; complete retail filesystem behavior remains a reference gap |
-| Next service family | Asynchronous/nonbuffered movie-file IO with actual completion |
+| Asynchronous movie IO | Real events, nonbuffered reads and completion ownership pass; Blinx executes 29 actual read completions |
+| Movie YUV state | Original enable/cache/packet oracle and bounded NV2A pixels pass; imported Phobos conversion reused |
+| Next integration blocker | Thread-priority polling stall after movie work; direct GPU visual and audio validation pending |
 | Input | Physical XInput and startup-selected keyboard available; actual menu/movie interruption still unvalidated |
 | Attract startup/loading/render/audio/movies/gameplay | Partial startup/rendering only; no complete attract sequence yet |
 | Repeat loops, interruption/menu return, original cadence | Pending actual title integration measurements |
@@ -32,7 +36,9 @@ The earlier callback checkpoint passed all 30 CTests (13.04 s). Current alias
 ABI and LLE NV2A tests passed. The later device-recreation query timeout was
 traced to a donor cached view from the destroyed device and fixed (.66). The
 three-device renderer test passes with/without D3D11 validation. The latest full
-suite is 29/30 due to the separate intermittent vblank handle-count assertion. Visibility fixtures cover real samples, masks,
+suite now passes all 31 tests in 13.31 s after the async read access-rights check
+was corrected. The earlier intermittent vblank handle-count assertion remains
+unexplained. Visibility fixtures cover real samples, masks,
 clipping, index reuse, pending outputs, timestamps and teardown. Capacity tests cover
 600 simultaneous reservations and 520 GPU textures with repeat cleanup and real
 contents. The concurrent validation run encountered the existing vblank test's
