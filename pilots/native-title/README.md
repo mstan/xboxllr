@@ -6,7 +6,69 @@ It is outside the normal xboxlle build. **The generated executable is a private
 GPL-dependent reference artifact, not the intended non-GPL shipping product.**
 See [license scope](../../LICENSE-SCOPE.md). There is no install/package target.
 
-## Current checkpoint - original movies reach the title screen (2026-10-07)
+## Current checkpoint - actual input and title audio (2026-10-07)
+
+`beads-xbox.1.73`: two real NTSC runs deliver Start through the host controller
+boundary at 15 seconds. Original title logic interrupts startup, enters the
+animated title/music, then idles into additional game-asset loading. Both reach
+`D3DDevice_PersistDisplay`; the following implementation passes that boundary
+and reaches `D3DDevice_Reset` (.76).
+This is not a completed attract sequence or validated menu return.
+
+The diagnostic GP-output tap captured 1,439,520 real frames at 48 kHz (29.99 s).
+All samples are finite; stereo peaks are 0.561/0.546. Independent FFmpeg decoding
+of the original Microsoft SFD matches four one-second source windows with
+0.99682-0.99977 correlation at exactly two-second spacings. Title ADX windows
+also align at two-second spacings, with 0.97477-0.99749 correlation and different
+gain/effects. This establishes actual content and sample-rate progress for the
+checked segments. Full audio quality, A/V synchronization, all attract content
+and title cadence remain open. Private evidence: `build/blinx/movie-audio-01.f32`,
+`movie-audio-match-01.aot-private.json`, `run-audio-interrupt.log` and
+`run-input-interrupt.log`. All eight focused input/audio tests pass.
+
+`XLLE_PILOT_INPUT=replay` with `XLLE_PILOT_INPUT_REPLAY=<file>` selects a virtual
+port-zero controller at startup. Each line is an increasing millisecond offset
+from the first host poll and 36 hex digits containing the 18-byte Xbox pad
+state. The first offset must be zero. State persists until the next row, so
+include explicit button-release rows. Other ports report disconnected; no
+rumble is advertised. This uses the real XAPI adapter and original title logic.
+
+`XLLE_PILOT_AUDIO_CAPTURE=<new .f32 file>` records up to 30 seconds of real
+six-channel GP output as interleaved little-endian float32 at 48 kHz. The log
+reports the actual frame count. It refuses an existing file. Device close
+finishes a shorter capture before teardown. No file I/O runs on the audio
+callback; the optional tap pauses the engine at attachment/detachment and must
+not be used for performance measurements.
+
+## Persistent display: bounded floor and native lifetime
+
+`beads-xbox.1.75`: the actual title saves its displayed 640x480 frame in a
+1,228,864-byte contiguous surface (including its 64-byte header area), then
+calls Reset. `tools/native_display_reference.py` executes original NTSC layout
+and kernel AV/persistence routines without hooks. It checks four surface layouts,
+saved-pointer round trips, page-spanning persistence changes, and return ABI.
+The NV2A test independently scans retained BGRA32 RAM after the drawable buffer
+changes, and confirms a subsequent PCRTC address change selects new pixels.
+
+The native implementation waits for submitted presentation, reads actual front
+pixels, creates the original surface header/data shape, and marks every owned
+page persistent. The frozen image can remain visible through graphics teardown;
+successful new-device setup consumes the old allocation. Native fixtures check
+front/back distinction, exact saved pixels, three replacements without growing
+memory, preserved bytes after release, and recreation cleanup. Final native
+suite: 31/31 passing in 14.34 s; LLE NV2A: passing in 0.30 s. The earlier
+intermittent process-handle assertion remains tracked independently in .72.
+
+Phobos's memory-persistence and host Reset methods are stubs, so neither is
+adopted. nxdk's display cleanup and Cxbx's incomplete driver discussion are
+references only. This contract is bounded to the qualified displayed formats
+and device lifecycle; firmware warm launch remains an explicit unsupported
+boundary. The original full PersistDisplay driver is not claimed executed by
+the helper fixtures. Actual runs reach Reset after 136.09/117.06 seconds; those
+instrumented elapsed times are not performance comparisons. Private evidence:
+`build/blinx/run-persist-attract.log` and `run-persist-repeat.log`.
+
+## Earlier checkpoint - original movies reach the title screen (2026-10-07)
 
 Direct GPU captures prove the Microsoft and Artoon logos, the opening movie,
 and the animated **Press START to begin** screen. A 180-second run remains

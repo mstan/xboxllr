@@ -4067,6 +4067,43 @@ int main() {
     CHECK(!gpu.capture_scanout(rgba, scanout, scanout_error));
     crtc_write(0x13, 1);
 
+    // PersistDisplay's bounded hardware floor: PCRTC scans a retained BGRA32
+    // allocation independently of later writes to the drawable buffer. The
+    // original kernel/layout oracle qualifies the allocation/header side.
+    {
+        std::string persist_fault;
+        xlle::Nv2a persist_gpu([&](const std::string& why) { persist_fault = why; });
+        std::vector<uint8_t> persist_ram(0x10000, 0);
+        persist_gpu.set_mem_access(
+            [&](uint32_t address, void* out, size_t size) {
+                if (address > persist_ram.size() || size > persist_ram.size() - address) return false;
+                std::memcpy(out, persist_ram.data() + address, size); return true;
+            },
+            [&](uint32_t address, const void* in, size_t size) {
+                if (address > persist_ram.size() || size > persist_ram.size() - address) return false;
+                std::memcpy(persist_ram.data() + address, in, size); return true;
+            });
+        auto write_crtc = [&](uint8_t index, uint8_t value) {
+            persist_gpu.mmio_write(xlle::Nv2a::kBase + 0x6013d4, 1, index);
+            persist_gpu.mmio_write(xlle::Nv2a::kBase + 0x6013d5, 1, value);
+        };
+        write_crtc(0x13, 8); write_crtc(0x28, 3); // 64-byte rows, BGRA32
+        persist_gpu.mmio_write(xlle::Nv2a::kBase + 0x680800, 4, 1);
+        persist_gpu.mmio_write(xlle::Nv2a::kBase + 0x680820, 4, 1);
+        const uint32_t colors[] = {0xffff0000, 0xff00ff00, 0xff0000ff, 0xffffffff};
+        std::memcpy(persist_ram.data() + 0x2000, colors, 8);
+        std::memcpy(persist_ram.data() + 0x2040, colors + 2, 8);
+        std::memcpy(persist_ram.data() + 0x4040, persist_ram.data() + 0x2000, 128);
+        persist_gpu.mmio_write(xlle::Nv2a::kBase + 0x600800, 4, 0x4040);
+        std::memset(persist_ram.data() + 0x2000, 0, 128);
+        CHECK(persist_gpu.capture_scanout(rgba, scanout, scanout_error));
+        CHECK(scanout.start == 0x4040 && scanout.pitch == 64 && scanout.bits_per_pixel == 32);
+        CHECK(rgba == expected_rgba && persist_fault.empty());
+        persist_gpu.mmio_write(xlle::Nv2a::kBase + 0x600800, 4, 0x2000);
+        CHECK(persist_gpu.capture_scanout(rgba, scanout, scanout_error));
+        for (size_t i = 0; i < rgba.size(); i += 4) CHECK(!rgba[i] && !rgba[i+1] && !rgba[i+2]);
+    }
+
     // The dashboard's first immediate draw is a Kelvin quad: generic texture slot 9 and
     // diffuse slot 3 are persistent state, while legacy SET_VERTEX4F position W commits
     // each vertex. Keep this fixture independent so existing absolute counters stay stable.

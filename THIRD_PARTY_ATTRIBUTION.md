@@ -15,6 +15,22 @@ notices. Preparation/build steps must report missing required notices.
 
 ## Private native-title reference pilot
 
+### Input replay and persistent display references - 2026-10-07
+
+The independently authored timed host-controller source follows the approach
+in Phobos `src/hle/input_host.c` at
+`bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0`, which credits NoRain's DOAXBV work.
+No donor replay parser or sampler body was copied. Existing physical controller
+mapping retains its separate sp00nznet MIT attribution.
+
+Display persistence was checked against original owner-provided binaries,
+nxdk `lib/hal/video.c` at `29638d0b001f179b73c3513489af10ddc2986216`, and Cxbx
+`Direct3D9.cpp` at `585c49a50af1255ab155099e06f24505f9c5a800` as a behavioral
+reference. Cxbx's incomplete implementation and Phobos's persistence stub were
+not copied. The local surface/readback/lifetime adapter and bounded reference
+fixtures are independently authored. This does not change the existing GPL
+scope of the Phobos-linked private pilot.
+
 ### Guest CPU affinity experiment - 2026-10-07
 
 Phobos `src/kernel/xbox_memory_layout.c` at

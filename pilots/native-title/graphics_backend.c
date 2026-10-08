@@ -13,6 +13,8 @@ static IDirect3D8 *pilot_factory;
 static IDirect3DDevice8 *pilot_device;
 static HWND pilot_window;
 static int pilot_visible;
+static unsigned char *pilot_saved_display;
+static uint32_t pilot_saved_width,pilot_saved_height;
 /* Slot 0 is the drawable back buffer; slot 1 retains the last presented image.
  * Xbox GetBackBuffer(-1) must not alias the image currently being drawn. */
 static ID3D11Texture2D *pilot_surfaces[3];
@@ -82,6 +84,17 @@ HRESULT pilot_d3d_require(HRESULT result,const char *file,unsigned line)
 }
 static LRESULT CALLBACK pilot_window_proc(HWND window,UINT message,WPARAM wparam,LPARAM lparam)
 {
+    if(message==WM_PAINT && !pilot_device && pilot_saved_display) {
+        PAINTSTRUCT paint;HDC dc=BeginPaint(window,&paint);RECT client;GetClientRect(window,&client);
+        BITMAPINFO info={0};info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);
+        info.bmiHeader.biWidth=(LONG)pilot_saved_width;info.bmiHeader.biHeight=-(LONG)pilot_saved_height;
+        info.bmiHeader.biPlanes=1;info.bmiHeader.biBitCount=32;info.bmiHeader.biCompression=BI_RGB;
+        int result=StretchDIBits(dc,0,0,client.right,client.bottom,0,0,pilot_saved_width,pilot_saved_height,
+            pilot_saved_display,&info,DIB_RGB_COLORS,SRCCOPY);
+        EndPaint(window,&paint);
+        if(result==GDI_ERROR)pilot_d3d_backend_stop("persisted display repaint failed");
+        return 0;
+    }
     if (message==WM_DESTROY) { PostQuitMessage(0); return 0; }
     return DefWindowProcW(window,message,wparam,lparam);
 }
@@ -104,8 +117,11 @@ void pilot_gfx_close(void)
     pilot_color_target=pilot_depth_target=0;
     if (pilot_device) { pilot_device->lpVtbl->Release(pilot_device); pilot_device=NULL; }
     if (pilot_factory) { pilot_factory->lpVtbl->Release(pilot_factory); pilot_factory=NULL; }
-    if (pilot_window) { DestroyWindow(pilot_window); pilot_window=NULL; }
-    pilot_visible=0;
+    if(pilot_window && pilot_saved_display) {InvalidateRect(pilot_window,NULL,FALSE);UpdateWindow(pilot_window);}
+    else {
+        if (pilot_window) { DestroyWindow(pilot_window); pilot_window=NULL; }
+        pilot_visible=0;
+    }
     MSG message; while (PeekMessageW(&message,NULL,WM_QUIT,WM_QUIT,PM_REMOVE)) {}
 }
 int32_t pilot_gfx_create(const uint32_t p[17])
@@ -123,9 +139,11 @@ int32_t pilot_gfx_create(const uint32_t p[17])
     RECT client={0,0,(LONG)p[0],(LONG)p[1]}; AdjustWindowRect(&client,WS_OVERLAPPEDWINDOW,FALSE);
     /* Hidden until scene qualification; a successful hidden present is not
      * treated as title cadence evidence. Tests read actual GPU output. */
-    pilot_window=CreateWindowW(window_class.lpszClassName,L"Xbox native reference",WS_OVERLAPPEDWINDOW,
+    if(!pilot_window)pilot_window=CreateWindowW(window_class.lpszClassName,L"Xbox native reference",WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT,CW_USEDEFAULT,client.right-client.left,client.bottom-client.top,NULL,NULL,window_class.hInstance,NULL);
     if (!pilot_window) return HRESULT_FROM_WIN32(GetLastError());
+    if(!SetWindowPos(pilot_window,NULL,0,0,client.right-client.left,client.bottom-client.top,
+                    SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE))return HRESULT_FROM_WIN32(GetLastError());
     pilot_factory=xbox_Direct3DCreate8(0);
     if (!pilot_factory) { pilot_gfx_close(); return E_OUTOFMEMORY; }
     D3DPRESENT_PARAMETERS pp={0};
@@ -158,6 +176,7 @@ int32_t pilot_gfx_create(const uint32_t p[17])
         }
     }
     if (FAILED(result)) pilot_gfx_close();
+    else {free(pilot_saved_display);pilot_saved_display=NULL;}
     return result;
 }
 int32_t pilot_gfx_clear(uint32_t flags,uint32_t color,float depth,uint32_t stencil)
@@ -210,6 +229,14 @@ int32_t pilot_gfx_present(void)
     ID3D11DeviceContext_CopyResource(d3d8_GetD3D11Context(),(ID3D11Resource*)pilot_surfaces[1],(ID3D11Resource*)pilot_surfaces[0]);
     pilot_surface_use[0]=pilot_surface_use[1]=pilot_mark_work();
     return pilot_device->lpVtbl->Swap(pilot_device,0);
+}
+int32_t pilot_gfx_persist_display(const unsigned char *bgra,uint32_t width,uint32_t height,uint32_t pitch)
+{
+    if(!pilot_device || !bgra || width!=pilot_gfx_width() || height!=pilot_gfx_height() || pitch<width*4)return E_INVALIDARG;
+    unsigned char *copy=malloc((size_t)width*height*4);if(!copy)return E_OUTOFMEMORY;
+    for(uint32_t y=0;y<height;++y)memcpy(copy+(size_t)y*width*4,bgra+(size_t)y*pitch,width*4);
+    free(pilot_saved_display);pilot_saved_display=copy;pilot_saved_width=width;pilot_saved_height=height;
+    return S_OK;
 }
 int32_t pilot_gfx_surface_ref(unsigned surface,int acquire)
 {

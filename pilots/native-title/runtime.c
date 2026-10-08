@@ -328,7 +328,7 @@ static void kernel_dispatch(void)
         thread_object_kernel(next_kernel_ordinal);return;
     case 14:case 15:case 17:case 23:pool_kernel(next_kernel_ordinal);return;
     case 181:g_eax=memory_statistics(MEM32(g_esp+4));g_esp+=8;return;
-    case 165: case 166: case 171: case 179: case 180: case 182: physical_kernel(next_kernel_ordinal); return;
+    case 1: case 4: case 165: case 166: case 171: case 178: case 179: case 180: case 182: physical_kernel(next_kernel_ordinal); return;
     case 35: case 36: case 37: fsc_kernel(next_kernel_ordinal); return;
     case 327: case 328:
         g_eax=section_change(MEM32(g_esp+4),next_kernel_ordinal==327); g_esp+=8; return;

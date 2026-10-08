@@ -10,7 +10,11 @@ then reads the movies asynchronously and executes their YUV/audio path. Direct
 GPU captures show both publisher logos, the opening movie and the animated
 Press START screen. A 180-second guest-only one-core run continues at that
 screen; the earlier timing-sensitive thread-priority stall remains open.
-Audio quality/sync and attract validation remain pending. Earlier fresh/repeat runs reached the callback boundary in 12.95/7.33 s
+Two subsequent controller-replay runs interrupt startup, reach title music,
+idle into game-asset loading and reach PersistDisplay. Its native implementation
+now preserves the real frame and advances to D3DDevice_Reset. Captured real GP audio
+matches original intro/title content at the checked sample progression.
+Full audio quality/sync and attract validation remain pending. Earlier fresh/repeat runs reached the callback boundary in 12.95/7.33 s
 with zero error-dialog entries or memory failures. The 64 MiB guest limit remains
 enforced. No title error condition is bypassed.
 
@@ -18,8 +22,8 @@ enforced. No title error condition is bypassed.
 | --- | --- |
 | Native launch, files, writable storage | Real startup, installed-media contract, persistent title files/cache; original optical reference retained |
 | Renderer adoption and presentation | Phobos D3D11/RHI, conversions, shader/state caches and combiner pipeline integrated; real loading/error frames, Swap callbacks and GPU fences exercised |
-| Audio service readiness | 21 identified Blinx entries exercised; real XAudio2/GP output, routing, gains, loops, updates and cleanup; actual title playback still pending |
-| Movie service readiness | Actual publisher/opening/title-screen movies render; direct GPU captures retained; audio synchronization and interruption pending |
+| Audio service readiness | Real title GP output captured; intro and title-music samples match independent source decoding; full quality/sync and all attract content pending |
+| Movie service readiness | Publisher/opening/title movies render; timed Start interrupts startup through original logic; complete movie/audio synchronization pending |
 | Disc-error diagnosis | Actual caller returns E_OUTOFMEMORY from local 512-reservation/256-texture caps; growing ownership fixes progression to 420 textures, with real memory budget retained |
 | Visibility queries | Bounded software NV2A sample/report floor, original-x86 ABI and real native GPU fixtures pass; title Begin/End progress validated, title Get not yet reached |
 | Ordered GPU callbacks | Original READ/WRITE packets, bounded LLE idle/IRQ floor and native FIFO/real completion tests pass; Blinx executes its WRITE callback |
@@ -28,8 +32,9 @@ enforced. No title error condition is bypassed.
 | Movie discovery | Real directory cursor/entries and native ABI tests pass; optical transport fixture passes; complete retail filesystem behavior remains a reference gap |
 | Asynchronous movie IO | Real events, nonbuffered reads and completion ownership pass; Blinx executes 29 actual read completions |
 | Movie YUV state | Original enable/cache/packet oracle and bounded NV2A pixels pass; imported Phobos conversion reused |
-| Next integration work | Input interruption/attract entry and actual audio validation; timing-sensitive thread-priority stall remains under investigation |
-| Input | Physical XInput and startup-selected keyboard available; actual menu/movie interruption still unvalidated |
+| Persistent display | Original layout/kernel execution, LLE retained-frame scanout and native pixels/lifetime pass; actual Blinx preserves its frame and reaches Reset (.75) |
+| Next integration work | D3DDevice_Reset and retained-resource/state contract (.76); Phobos's host Reset is a stub and cannot be adopted |
+| Input | Physical XInput, keyboard and timed host-controller replay; real startup interruption observed twice; gameplay interruption/menu return pending |
 | Attract startup/loading/render/audio/movies/gameplay | Partial startup/rendering only; no complete attract sequence yet |
 | Repeat loops, interruption/menu return, original cadence | Pending actual title integration measurements |
 | JSRF | Deferred until Blinx completes; shared services and separate revision bindings |

@@ -1,5 +1,19 @@
 # STATUS
 
+## 2026-10-07 - Startup interruption and actual audio content validated
+
+Two actual NTSC Blinx runs accept a timed Start press through the host gamepad
+adapter, reach the animated title/music, and idle into additional game-asset
+loading. The new PersistDisplay service (.75) preserves the actual frame and
+advances to `D3DDevice_Reset` (.76). Original helper/kernel execution, LLE
+retained-frame scanout and native lifetime/pixel fixtures establish its bounded
+contract; the final native suite passes all 31 tests (14.34 s).
+Actual GP-output capture matches independently decoded Microsoft intro and
+title ADX segments at the correct sample progression; full audio quality,
+A/V sync, gameplay and complete repeat attract remain open (.73/.62).
+Eight focused audio/input tests pass. See the native pilot README for the
+evidence and diagnostic controls. JSRF remains deferred.
+
 ## 2026-10-07 - Visible original movie playback reaches Press START
 
 Direct GPU captures now establish both publisher logos, the opening movie,

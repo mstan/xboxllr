@@ -46,6 +46,7 @@ static void test_graphics(void)
         create[5]=pass==1?0:0x19100; /* Original Create permits a null output. */
         CHECK(call_graphics(PILOT_D3D_Direct3D_CreateDevice,create)==0);
         CHECK(graphics_active && MEM32(PILOT_D3D_DEVICE_GLOBAL)==PILOT_D3D_DEVICE_OBJECT);
+        CHECK(!av_saved_data);
         if(pass==2) {
             test_graphics_callback_close();
             CHECK(!graphics_active && !graphics_headers && !MEM32(PILOT_D3D_DEVICE_GLOBAL));
@@ -113,6 +114,18 @@ static void test_graphics(void)
         CHECK(pixels[0]==255 && pixels[1]==0 && pixels[2]==0);
         CHECK(pilot_gfx_surface_readback(0,pixels,sizeof(pixels))>=0);
         CHECK(pixels[0]==0 && pixels[1]==0 && pixels[2]==255);
+        if(!pass) {
+            uint64_t before=vm_committed(0,0x100000000ull);
+            for(unsigned repeat=0;repeat<3;++repeat) {
+                CHECK(call_graphics(PILOT_D3D_D3DDevice_PersistDisplay,NULL)==0);
+                uint32_t saved=av_saved_data;CHECK(saved && physical_find(saved,64+64*64*4));
+                CHECK(MEM32(saved)==0x81050001 && MEM32(saved+4)==((saved+64)&0x0fffffff));
+                CHECK(MEM32(saved+12)==0x11229 && MEM32(saved+16)==0x0303f03f);
+                for(unsigned pixel=0;pixel<64*64;++pixel)CHECK(MEM32(saved+64+pixel*4)==0xffff0000);
+                for(unsigned page=0;page<5;++page)CHECK(physical_persistent[(saved&0x0fffffff)/4096+page]);
+                CHECK(vm_committed(0,0x100000000ull)==before+5*4096);
+            }
+        }
         if(!pass) { test_graphics_states(); test_graphics_textures(); test_graphics_vertices(); test_graphics_transforms(); test_graphics_shaders(); test_graphics_fvf(); test_graphics_pixels(); test_graphics_blocks(); test_graphics_completion(); test_graphics_resource_bindings(); }
         CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&front)==0);
         test_graphics_visibility();
@@ -124,7 +137,8 @@ static void test_graphics(void)
         CHECK(call_graphics(PILOT_D3D_D3DDevice_Release,NULL)==0);
         CHECK(gpu_test_count==71 && !graphics_gpu_head && !graphics_gpu_running && !dispatch_gpu_routine);
         CHECK(!graphics_active && !graphics_headers && !MEM32(PILOT_D3D_DEVICE_GLOBAL));
-        CHECK(vm_committed(0,0x100000000ull)==resident);
+        CHECK(vm_committed(0,0x100000000ull)==resident+(!pass?5*4096:0));
+        if(!pass)CHECK(av_saved_data && MEM32(av_saved_data+64)==0xffff0000);
         CHECK(!vm_find(back,24));
     }
     fprintf(stderr,"PASS: guest graphics ABI, failures/null output, real clear/present pixels, distinct front/back resources, references and release/recreate\n");

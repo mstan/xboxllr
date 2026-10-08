@@ -10,6 +10,8 @@ static struct PhysicalAllocation physical_allocations[256];
 /* Cache policy is logical on the coherent host; access permission is enforced
  * by actual host pages. Track policy per page, including partial-range updates. */
 static uint16_t physical_protection[64*1024*1024/4096];
+static uint8_t physical_persistent[64*1024*1024/4096];
+static uint32_t av_saved_data;
 static struct PhysicalAllocation *physical_find(uint32_t address,uint32_t bytes)
 {
     for(unsigned i=0;i<256;++i) {
@@ -63,7 +65,20 @@ static void physical_free(uint32_t base)
     if(a->borrowers)stop("contiguous allocation still owns registered resources",base);
     if(!VirtualFree(memory+base,a->bytes,MEM_DECOMMIT))stop("contiguous release failed",base);
     memset(physical_protection+(base&0x0fffffff)/4096,0,a->bytes/4096*sizeof(physical_protection[0]));
+    memset(physical_persistent+(base&0x0fffffff)/4096,0,a->bytes/4096);
     memset(a,0,sizeof(*a));ReleaseSRWLockExclusive(&vm_lock);
+}
+static void physical_persist(uint32_t base,uint32_t bytes,int persist)
+{
+    /* Original ordinal 178 changes PTE bit 10 on every touched page. Real
+     * allocations survive graphics teardown; firmware relaunch still stops. */
+    if(!bytes || (uint64_t)base+bytes>0x100000000ull)stop("invalid persistence range",base);
+    uint32_t low=base&~4095u;
+    uint64_t end=((uint64_t)base+bytes+4095)&~4095ull;
+    AcquireSRWLockExclusive(&vm_lock);
+    if(!physical_find(low,(uint32_t)(end-low)))stop("persistence requires owned contiguous pages",base);
+    memset(physical_persistent+(low&0x0fffffff)/4096,!!persist,(size_t)((end-low)/4096));
+    ReleaseSRWLockExclusive(&vm_lock);
 }
 static void physical_protect(uint32_t base,uint32_t size,uint32_t protect)
 {
@@ -95,8 +110,11 @@ static uint32_t physical_query_protection(uint32_t address)
 }
 static void physical_kernel(unsigned ordinal)
 {
-    uint32_t first=MEM32(g_esp+4);
-    if(ordinal==182) {
+    uint32_t first=ordinal==1?0:MEM32(g_esp+4);
+    if(ordinal==1) {g_eax=av_saved_data;g_esp+=4;}
+    else if(ordinal==4) {av_saved_data=first;g_eax=first;g_esp+=8;}
+    else if(ordinal==178) {physical_persist(first,MEM32(g_esp+8),MEM8(g_esp+12));g_esp+=16;}
+    else if(ordinal==182) {
         physical_protect(first,MEM32(g_esp+8),MEM32(g_esp+12));g_esp+=16;
     } else if(ordinal==179) {
         g_eax=physical_query_protection(first);g_esp+=8;

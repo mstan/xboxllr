@@ -9,6 +9,7 @@ int32_t pilot_gfx_get_viewport(uint32_t viewport[6]);
 int32_t pilot_gfx_transform(unsigned state,const float matrix[16]);
 void pilot_gfx_matrix_multiply(float out[16],const float a[16],const float b[16]);
 int32_t pilot_gfx_present(void);
+int32_t pilot_gfx_persist_display(const unsigned char *bgra,uint32_t width,uint32_t height,uint32_t pitch);
 int32_t pilot_gfx_draw_up(uint32_t primitive,uint32_t count,const void *data,uint32_t stride,uint32_t fvf);
 int32_t pilot_gfx_readback(unsigned char *rgba,uint32_t capacity);
 void pilot_gfx_set_state(uint32_t state,uint32_t value);

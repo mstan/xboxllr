@@ -66,6 +66,7 @@ static void graphics_target_prepare(uint32_t header);
 #include "graphics_draw.inc"
 #include "graphics_completion.inc"
 #include "graphics_gpu_callback.inc"
+#include "graphics_persistence.inc"
 static void graphics_resource_bindings_close(void)
 {
     for(unsigned i=0;i<4;++i)graphics_texture_bind(i,0);
@@ -197,6 +198,7 @@ void pilot_d3d_dispatch(unsigned entry)
         fprintf(stderr,"\n");
         g_eax=(uint32_t)pilot_gfx_create(staged);
         if (!(g_eax&0x80000000u)) {
+            graphics_persistence_clear();
             graphics_active=1; memcpy(graphics_parameters,staged,sizeof(staged));
             graphics_clock_origin=dispatch_monotonic();
             graphics_clock_hz=staged[11]?staged[11]:60;
@@ -328,6 +330,7 @@ void pilot_d3d_dispatch(unsigned entry)
         g_eax=(uint32_t)pilot_gfx_viewport(viewport);
         if(!(g_eax&0x80000000u))graphics_transform_viewport(viewport);break;
     }
+    case PILOT_D3D_D3DDevice_PersistDisplay:g_eax=graphics_persist_display();break;
     case PILOT_D3D_D3DDevice_Swap:
         if (arguments[0]) stop("unqualified graphics swap flags",arguments[0]);
         g_eax=graphics_present();
