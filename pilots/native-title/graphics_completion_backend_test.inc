@@ -74,5 +74,19 @@ static int test_resource_completion(void)
     pilot_gfx_vertex_upload_range(vertex,data,4,8); /* initialize a reused slot */
     CHECK(pilot_gfx_vertex_readback(vertex,readback,sizeof(readback))==0 && !memcmp(data,readback,sizeof(data)));
     pilot_gfx_vertex_destroy(vertex);
-    fprintf(stderr,"PASS: real resource event completion, batch sharing, changed uploads, pixel results, idle reuse and no repeated idle queries\n");return 0;
+    /* Real GPU work may finish before the caller asks for its event. When a
+     * duplicate is returned, it must outlive query retirement and still be
+     * signaled after that owner closes its original handle. */
+    unsigned event_waits=0;
+    for(unsigned i=0;i<16;++i) {
+        CHECK(pilot_gfx_clear(1,0xff102030+i,1,0)==0);
+        uint64_t serial=pilot_gfx_checkpoint();
+        HANDLE event=pilot_gfx_checkpoint_event(serial);
+        if(event){CHECK(WaitForSingleObject(event,5000)==WAIT_OBJECT_0);++event_waits;}
+        CHECK(completion_wait(PILOT_GFX_DEVICE,0)==0 && !pilot_gfx_checkpoint_busy(serial));
+        if(event){CHECK(WaitForSingleObject(event,0)==WAIT_OBJECT_0);CHECK(CloseHandle(event));}
+        unsigned char frame[64*64*4];CHECK(pilot_gfx_readback(frame,sizeof(frame))==0);
+        CHECK(frame[0]==0x10 && frame[1]==0x20 && frame[2]==0x30+i);
+    }
+    fprintf(stderr,"PASS: real resource event completion, batch sharing, changed uploads, pixel results, idle reuse, no repeated idle queries and %u owned GPU event waits\n",event_waits);return 0;
 }

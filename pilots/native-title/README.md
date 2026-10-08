@@ -1,5 +1,104 @@
 # Native title reference pilot
 
+## GPU completion notification experiment (2026-10-08)
+
+`beads-xbox.1.95`, branch `perf/blinx-native-handoffs-20261008`, base `3730def`.
+With diagnostic caching enabled, a 960-frame instrumented gameplay observation
+attributes 42.510 of 51.567 seconds to graphics services. Its first 301 presents
+include 6.146 seconds of drawing-thread callback barriers. This directs the
+next experiment toward completion notification rather than changing shaders
+or dropping draws.
+
+The existing completion owner still submits real D3D11 event queries and checks
+their results. On a renderer exposing `ID3D11DeviceContext3`, it also uses
+[`Flush1`](https://learn.microsoft.com/en-us/windows/win32/api/d3d11_3/nf-d3d11_3-id3d11devicecontext3-flush1)
+to obtain a native completion event. The DPC worker holds a duplicate event
+handle in its wait set, allowing a GPU signal to wake it before its existing
+one-millisecond fallback deadline. Only that worker replaces/closes the wait
+handle. Query ownership retains the original event through signal/retirement;
+duplicates remain valid afterward. Device teardown waits for remaining event
+owners before release. Query errors remain real failures.
+
+After delivering a callback, the worker can immediately inspect the next FIFO
+entry. Actual pending GPU work still waits; no completion is inferred from
+submission. The existing later-command barrier, callback context/ABI and
+separate DPC registers remain intact. `XLLE_PILOT_GPU_EVENTS=0`, selected before
+launch, retains the prior query/timer path including its queued-callback retry
+interval. Unsupported Context3 renderers also use that polling path.
+
+Phobos's inline callback implementation was reviewed, but its assumption of
+immediate completion does not establish our asynchronous WRITE contract. No
+donor callback body was copied. The bounded LLE WAIT_FOR_IDLE/software-trap/IRQ
+ordering regression passes (0.26 s overall, software fixture). All 35 native
+tests pass with the D3D debug layer (16.82 s). The added fixture exercised
+15/16/16 actual owned event waits across repeated backend lifecycles, checks
+real output pixels and handle validity after query retirement. Existing tests
+also cover 70 FIFO callbacks, reentrant queries and in-flight device teardown.
+Polling-fallback graphics fixtures pass (3.44 s).
+
+Private evidence: `build/blinx/cached-services-profile/`,
+`build/blinx-gpu-events-tests.log`, and the separate polling/event title runs
+and comparison under `build/blinx/gpu-events-*`.
+
+Same-executable, capture/service-profile-disabled observations measure the
+first 300 gameplay present intervals at **21.73658 fps** / 38.7344 ms median
+with polling, and **27.88042 fps** / 33.3388 ms with native events (1.283x).
+Both windows contain the same 3600 callback-context sequence. Drawing-thread
+barrier time falls from 5284.829 to 2041.884 ms; callback queue medians fall
+from 1.343 to 0.296 ms. Boundary callback groups are excluded from the matched
+sequence comparison. Both 120-second runs have no guard/fault before harness
+termination; they reach replay files 34 and 48 respectively. This establishes
+a same-stage throughput improvement, not identical entire guest executions or
+full original-speed operation. Configuration, executable hash and measurements
+are in `build/blinx/gpu-events-comparison.aot-private.json`.
+
+The same executable subsequently ran for 600 seconds with five-second GPU
+captures: two natural complete 3D demos, intervening publisher/opening/title
+sequences and a third demo entry. All 195 writes completed, 59 images were
+captured, and no guard/fault occurred before the owned harness terminated it
+(601.047 s, exit 1). Comparable gameplay samples at 120/360/570/600 seconds
+report private memory 751.39/751.65/754.81/753.70 MB and 617/611/605/605 handles.
+This is bounded resource evidence. The two full captured stage spans each have
+2329 presents and average 23.82/22.16 fps, including captures and transitions;
+the shorter uncaptured 27.88 fps result must not be generalized to whole stages.
+Evidence: `build/blinx/gpu-events-natural-loops/endurance.aot-private.json`.
+
+The separate 180-second `gpu-events-input-return` run samples Start requested
+at 90000 ms at 90016 ms, returns to the visible title screen, then loads and
+renders another 3D demo. Its 34 presentation captures include the menu return
+and reentry; no guard/fault occurs before harness termination (180.890 s).
+This retains the working input route on the completion-event implementation.
+Full audio/video synchronization and whole-sequence original speed remain open.
+
+## Original NTSC frame pacing (2026-10-08)
+
+`beads-xbox.1.96`: the original main loop masks the title state with `0x7f`.
+States 4, 9 and 10 select two display ticks; other states select one. The
+original vblank callback increments a counter, and the original frame loop
+waits for the selected count before Swap. Under the current nominal 60 Hz
+display contract this means a **30 fps target for two-tick gameplay**, with
+one-tick phases permitting 60 fps. Movie frame cadence remains a separate
+property of the decoded stream.
+
+`tools/native_blinx_cadence_reference.py` executes the original register
+initializers, selector, callback counter prefix and pre-Swap gate for all 256
+state-byte values and four counter values each (1024 gate cases). It pins the
+complete NTSC XBE hash. These are bounded fragments: execution stops before
+uncovered calls; it does not replace them or claim full main-loop/hardware
+execution. Earlier `1/30` fade constants alone do not establish frame cadence.
+
+Read-only observation of the owned native pilot verifies its guest allocation
+against 48 original code bytes, then samples state/divisor/counter without
+writing guest memory or attaching to physical hardware. During rendered attract
+gameplay it observes state 132 (masked 4) and divisor 2; subsequent movie phases
+use states 128/130 and divisor 1. Evidence is in
+`build/blinx/cadence-original.aot-private.json` and
+`build/blinx/gpu-events-natural-loops/cadence-observation.aot-private.json`.
+This establishes the application's nominal pacing selection. It does not
+establish its exact real-console drop pattern, NTSC oscillator rate, or full
+simulation/audio/video synchronization. The physical-console authorization
+boundary in `beads-xbox.1.12` remains in force.
+
 ## Native frame-service investigation (2026-10-08)
 
 `beads-xbox.1.94`, branch `perf/blinx-frame-services-20261008`, base `364fe52`.

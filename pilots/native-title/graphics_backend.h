@@ -29,6 +29,10 @@ struct PilotGpuProgress {uint64_t submitted,completed;unsigned pending_queries,c
 void pilot_gfx_completion_stats(struct PilotGpuProgress *progress);
 uint64_t pilot_gfx_checkpoint(void);
 int pilot_gfx_checkpoint_busy(uint64_t serial);
+/* Owned native event handle, or NULL for completed work/polling-only backend.
+ * Caller closes its duplicate after leaving any wait. Never a guest handle. */
+void *pilot_gfx_checkpoint_event(uint64_t serial);
+int pilot_gfx_completion_events(void);
 int32_t pilot_gfx_surface_readback(unsigned surface,unsigned char *rgba,uint32_t capacity);
 int32_t pilot_gfx_texture_create(uint32_t width,uint32_t height,uint32_t levels,uint32_t format,uint32_t *handle);
 int32_t pilot_gfx_texture_alias(unsigned kind,uint32_t source,uint32_t format,uint32_t *handle);

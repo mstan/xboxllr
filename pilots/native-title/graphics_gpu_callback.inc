@@ -16,12 +16,14 @@ static int graphics_gpu_profile(void)
 }
 static int graphics_gpu_deliver(void)
 {
+    dispatch_gpu_wait_event(NULL);
     AcquireSRWLockExclusive(&graphics_lock);
     struct GraphicsGpuCallback *c=graphics_gpu_head;
     if(!c){ReleaseSRWLockExclusive(&graphics_lock);return 0;}
     if(graphics_gpu_profile()){++c->polls;if(!c->first_poll)c->first_poll=dispatch_monotonic();}
     if(c->type && pilot_gfx_checkpoint_busy(c->serial)){
         if(graphics_gpu_profile())++c->busy_polls;
+        dispatch_gpu_wait_event(pilot_gfx_checkpoint_event(c->serial));
         ReleaseSRWLockExclusive(&graphics_lock);return 1;
     }
     uint64_t ready=graphics_gpu_profile()?dispatch_monotonic():0;
@@ -40,6 +42,9 @@ static int graphics_gpu_deliver(void)
     fprintf(stderr,"[GPU CALLBACK] type=%u routine=%08x context=%08x serial=%llu delivered=%llu\n",
         c->type,c->routine,c->context,(unsigned long long)c->serial,(unsigned long long)graphics_gpu_delivered);
     free(c);int pending=graphics_gpu_head!=NULL;WakeAllConditionVariable(&graphics_gpu_changed);
+    /* A queued callback may already be ready. Inspect it immediately; only an
+     * observed busy checkpoint needs the native event/fallback retry timer. */
+    if(pending && pilot_gfx_completion_events())pending=2;
     ReleaseSRWLockExclusive(&graphics_lock);return pending;
 }
 /* Graphics methods after the software trap cannot overtake its callback.

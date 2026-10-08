@@ -3,6 +3,7 @@
  * Sources, pinned revisions and retained terms: ../../THIRD_PARTY_ATTRIBUTION.md.
  * The Phobos variant is a private GPL-dependent reference build. */
 #include "graphics_donor.h"
+#include <d3d11_3.h>
 #include "d3d8_combiners.h"
 #include "graphics_backend.h"
 #include "pilot_d3d_checks.h"

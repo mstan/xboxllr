@@ -24,6 +24,15 @@ static CONDITION_VARIABLE dispatch_pulse_idle=CONDITION_VARIABLE_INIT;
 static int (*dispatch_gpu_routine)(void);
 static uint64_t dispatch_gpu_deadline,dispatch_gpu_generation;
 static int dispatch_gpu_running;
+/* Owned duplicate: only this worker replaces/closes it, never while waiting.
+ * The GPU can wake the worker before the bounded fallback polling deadline. */
+static HANDLE dispatch_gpu_event;
+static void dispatch_gpu_wait_event(HANDLE event)
+{
+    if(!dispatch_in_dpc)stop("GPU event replacement outside DPC worker",0);
+    if(dispatch_gpu_event)CloseHandle(dispatch_gpu_event);
+    dispatch_gpu_event=event;
+}
 static uint64_t dispatch_pulse_time(uint64_t frame)
 {return dispatch_pulse_origin+(frame/dispatch_pulse_hz)*10000000+((frame%dispatch_pulse_hz)*10000000+dispatch_pulse_hz-1)/dispatch_pulse_hz;}
 
@@ -110,7 +119,7 @@ static DWORD WINAPI dispatch_worker(void *unused)
     AcquireSRWLockExclusive(&dispatch_lock);
     dispatch_worker_ready=1;WakeAllConditionVariable(&dispatch_pulse_idle);
     ReleaseSRWLockExclusive(&dispatch_lock);
-    HANDLE waits[]={dispatch_changed,dispatch_absolute,dispatch_relative};
+    HANDLE waits[]={dispatch_changed,dispatch_absolute,dispatch_relative,NULL};
     for (;;) {
         AcquireSRWLockExclusive(&dispatch_lock);
         uint64_t mono=dispatch_monotonic();
@@ -144,7 +153,8 @@ static DWORD WINAPI dispatch_worker(void *unused)
             ReleaseSRWLockExclusive(&dispatch_lock);
             continue;
         }
-        if(dispatch_gpu_routine && dispatch_gpu_deadline<=mono) {
+        if(dispatch_gpu_routine && (dispatch_gpu_deadline<=mono ||
+            (dispatch_gpu_event && WaitForSingleObject(dispatch_gpu_event,0)==WAIT_OBJECT_0))) {
             int (*routine)(void)=dispatch_gpu_routine;
             uint64_t generation=dispatch_gpu_generation;dispatch_gpu_running=1;
             ReleaseSRWLockExclusive(&dispatch_lock);
@@ -153,7 +163,7 @@ static DWORD WINAPI dispatch_worker(void *unused)
             dispatch_in_dpc=0;MEM8(base+0x24)=0;
             AcquireSRWLockExclusive(&dispatch_lock);
             if(generation==dispatch_gpu_generation) {
-                if(pending)dispatch_gpu_deadline=dispatch_monotonic()+10000;
+                if(pending)dispatch_gpu_deadline=pending>1?0:dispatch_monotonic()+10000;
                 else dispatch_gpu_routine=NULL;
             }
             dispatch_gpu_running=0;WakeAllConditionVariable(&dispatch_pulse_idle);
@@ -179,8 +189,9 @@ static DWORD WINAPI dispatch_worker(void *unused)
             due.QuadPart=-(LONGLONG)(delay>INT64_MAX ? INT64_MAX : delay);
             if (!SetWaitableTimer(dispatch_relative,&due,0,NULL,NULL,FALSE)) stop("relative timer arm failed",GetLastError());
         } else CancelWaitableTimer(dispatch_relative);
+        waits[3]=dispatch_gpu_event;
         ReleaseSRWLockExclusive(&dispatch_lock);
-        if (WaitForMultipleObjects(3,waits,FALSE,INFINITE)==WAIT_FAILED) stop("dispatcher wait failed",GetLastError());
+        if (WaitForMultipleObjects(waits[3]?4:3,waits,FALSE,INFINITE)==WAIT_FAILED) stop("dispatcher wait failed",GetLastError());
     }
 }
 static BOOL CALLBACK dispatch_start(PINIT_ONCE once,void *parameter,void **context)

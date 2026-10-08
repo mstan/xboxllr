@@ -31,6 +31,22 @@ The same build then passes a 210-second visible interruption/menu-return/reentry
 observation, 45/45 completed replay writes and 32 actual draw comparisons at
 the existing CPU/GPU reference tolerance.
 
+Native GPU completion events (.95) now wake the callback worker without waiting
+for the next polling deadline. Actual query completion and FIFO ordering remain
+required. The same-executable first 300 gameplay intervals improve from
+21.73658 to 27.88042 fps (1.283x); all 35 native tests with the D3D debug layer
+and the bounded LLE ordering regression pass. A 600-second observation completes
+two natural demos/movie cycles and enters a third, with 195/195 completed writes,
+bounded resources and no guard/fault. A separate 180-second run validates input
+interruption, visible menu return and rendered reentry on this build. The full
+captured stages average 23.82/22.16 fps, so the cadence gap remains.
+
+Original NTSC pacing fragments (.96) and read-only observation of the running
+title establish two display ticks per attract gameplay frame: **nominal 30 fps**
+under the current 60 Hz display contract. The original-code fixture covers 256
+state values and 1024 pre-Swap gate cases. This qualifies the application target,
+not exact hardware timing or complete simulation/audio/video synchronization.
+
 Earlier progression:
 The borrowed Phobos renderer now presents actual game frames. The prior disc
 error is traced and fixed: local VM/texture ownership caps returned out of memory
@@ -114,7 +130,7 @@ enforced. No title error condition is bypassed.
 | Next integration work | Qualify full audio/frame synchronization and raise 3D cadence; preserve the validated interruption/repetition route |
 | Input | Actual timed host-controller Start interrupts 3D attract, returns to visible title screen, and idling re-enters demo (.93); physical controller operation remains separately unverified |
 | Attract startup/loading/render/audio/movies/gameplay | Two natural 3D demos and intervening movie/title phases observed; full audio/frame synchronization remains open (.73) |
-| Repeat loops, interruption/menu return, original cadence | Input return/re-entry validated (.93); bounded900s natural repetition has no guard/fault or growing handle count; original cadence still pending |
+| Repeat loops, interruption/menu return, original cadence | Input return/re-entry retained on GPU event path (.95); bounded600s repetition has no guard/fault or growing handle count; nominal30fps gameplay target established (.96), whole-stage speed still short |
 | JSRF | Deferred until Blinx completes; shared services and separate revision bindings |
 
 The earlier callback checkpoint passed all 30 CTests (13.04 s). Current alias

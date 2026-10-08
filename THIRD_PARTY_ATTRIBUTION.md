@@ -15,6 +15,18 @@ notices. Preparation/build steps must report missing required notices.
 
 ## Private native-title reference pilot
 
+### Native GPU completion notifications - 2026-10-08
+
+Phobos `src/hle/hle_d3d8.c` (`D3DDevice_InsertCallback`) and its D3D11 RHI at
+`bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0` were reviewed for the remaining
+callback cost. Its inline callback path assumes prior completion; that body
+was not copied into our asynchronous renderer. The existing attributed donor
+renderer remains in use, while our independent query/DPC ownership now uses
+[Microsoft's D3D11 Flush1 completion-event API](https://learn.microsoft.com/en-us/windows/win32/api/d3d11_3/nf-d3d11_3-id3d11devicecontext3-flush1)
+to wake the worker before a polling deadline. This adds no imported source or
+license change. Existing original-packet, bounded NV2A WAIT_FOR_IDLE/trap and
+native real-GPU callback fixtures retain the observable contract.
+
 ### Draw diagnostic configuration caching - 2026-10-08
 
 Phobos `src/hle/hle_d3d8_state.c`, specifically the cached disabled diagnostic
