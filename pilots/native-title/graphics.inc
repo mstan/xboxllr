@@ -148,6 +148,12 @@ void pilot_d3d_dispatch(unsigned entry)
     case PILOT_D3D_D3DDevice_BlockUntilVerticalBlank:graphics_wait_vblank();break;
     case PILOT_D3D_D3DDevice_CreatePixelShader:g_eax=graphics_pixel_create(arguments);break;
     case PILOT_D3D_D3DDevice_SetPixelShader:graphics_pixel_bind(arguments[0]);break;
+    case PILOT_D3D_D3DDevice_GetPixelShader: {
+        /* Query the guest handle, not the donor's private combiner selector.
+         * Original XDK returns a borrowed DWORD without a shader AddRef. */
+        uint32_t handle=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_PIXEL_SHADER);
+        memcpy(graphics_pointer(arguments[0],4),&handle,4);break;
+    }
     case PILOT_D3D_D3DDevice_SetTexture:graphics_texture_bind(arguments[0],arguments[1]);break;
     case PILOT_D3D_D3DDevice_SetStreamSource:graphics_vertex_bind(arguments[0],arguments[1],arguments[2]);break;
     case PILOT_D3D_D3DDevice_CreateVertexShader:g_eax=graphics_shader_create(arguments);break;

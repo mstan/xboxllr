@@ -133,4 +133,22 @@ static void test_graphics_pixels(void)
     CHECK(MEM32(0x19904)==0xdeadbeefu && graphics_pixels[0]==handle && !graphics_pixels[1]);
     CHECK(vm_committed(0,0x100000000ull)==resident);
     fprintf(stderr,"PASS: pixel definition stdcall/HRESULT, independent owned copy, guest descriptor and OOM output preservation\n");
+#ifdef PILOT_D3D_PHOBOS
+    memset(definition,0,sizeof(definition));definition[8]=1;definition[9]=0x1100;definition[43]=0xff204060;
+    memcpy(memory+0x19800,definition,sizeof(definition));
+    CHECK(call_graphics(PILOT_D3D_D3DDevice_CreatePixelShader,args)==0);
+    uint32_t bound=MEM32(args[1]),query=0x19921;
+    uint32_t objects[2]={MEM32(bound),MEM32(bound+4)};
+    for(unsigned i=0;i<3;++i) {
+        uint32_t select=i==1?0:bound;
+        call_graphics(PILOT_D3D_D3DDevice_SetPixelShader,&select);
+        memset(memory+query-4,0xcd,12);
+        call_graphics(PILOT_D3D_D3DDevice_GetPixelShader,&query);
+        CHECK(MEM32(query)==select && MEM32(query-4)==0xcdcdcdcdu && MEM32(query+4)==0xcdcdcdcdu);
+        CHECK(MEM32(bound)==objects[0] && MEM32(bound+4)==objects[1]);
+        CHECK(!memcmp(memory+bound+12,definition,sizeof(definition)));
+    }
+    uint32_t fixed=0;call_graphics(PILOT_D3D_D3DDevice_SetPixelShader,&fixed);
+    fprintf(stderr,"PASS: pixel shader query follows real binding, zero/unbind/rebind, borrowed lifetime and four-byte output\n");
+#endif
 }

@@ -8,6 +8,19 @@ See [license scope](../../LICENSE-SCOPE.md). There is no install/package target.
 
 ## Flat shading for scene startup
 
+The subsequent `GetPixelShader` query (`beads-xbox.1.79`) reads the existing
+bound guest handle, including zero for the fixed-function path. Its original
+20-byte XDK function runs unhooked in `tools/native_pixel_query_reference.py`;
+the fixture verifies a four-byte output, stdcall cleanup and no device/shader
+mutation. Native tests cover actual bind/unbind/rebind, unaligned output and
+unchanged shader ownership/definition. Phobos's desktop query is a real state
+read, but its private combiner selector is not an Xbox guest handle. This
+adapter reuses the existing shader storage and requires no native GPU query.
+Original query execution passes; the two native graphics backend/ABI tests
+pass in 5.46 s. Actual `build/blinx/run-pixel-query-attract.log` advances past
+the query and stops at `D3DDevice_SetRenderState_LogicOp` (0x1337c0) during
+scene startup. No complete gameplay/attract frame or cadence is claimed.
+
 `beads-xbox.1.78`: Xbox state 66 accepts flat (0x1d00) and smooth (0x1d01).
 Phobos's state adapter forwards shade mode but its renderer does not implement
 flat colors. The native adapter keeps the borrowed vertex/pixel compilers and

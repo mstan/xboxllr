@@ -17,8 +17,9 @@ run loads scene textures and sound banks, reaching 505 textures. Shared clock
 and calendar services now pass their original-kernel/native fixtures; the next
 actual run passes those calls and opens round1.adx. Flat shading now has a bounded
 software floor and an actual cached GPU implementation around Phobos's pipeline.
-The latest title run passes that state, submits further GPU work, then stops
-at D3DDevice_GetPixelShader (0x136250). Captured real GP audio
+The latest title runs pass that state and the subsequent pixel-shader query,
+submit further GPU work, then stop at D3DDevice_SetRenderState_LogicOp
+(0x1337c0). Captured real GP audio
 matches original intro/title content at the checked sample progression.
 Full audio quality/sync and attract validation remain pending. Earlier fresh/repeat runs reached the callback boundary in 12.95/7.33 s
 with zero error-dialog entries or memory failures. The 64 MiB guest limit remains
@@ -42,7 +43,8 @@ enforced. No title error condition is bypassed.
 | Display reset | Original buffer/header setup, LLE scanout and repeated native reset/resize/ownership/pixel tests pass; actual Blinx proceeds through reset into scene loading (.76) |
 | Clock/calendar services | Original query/retry/calendar ABI fixtures and native real-clock/conversion tests pass; actual title proceeds to round1.adx and flat shading (.77) |
 | Flat shading | Original XDK provoking packet, bounded NV2A software pixels and actual native VS/PS/quad/interpolation tests; title passes prior guard (.78) |
-| Next integration work | Pixel-shader query: match original bound-handle read/ownership contract and reuse current donor-backed shader storage |
+| Pixel-shader query | Original full query and native real bind/unbind/rebind, output extent and ownership tests pass; actual title advances (.79) |
+| Next integration work | Logic-operation render state: observe argument, bound NV2A contract and check donor state/RHI implementation |
 | Input | Physical XInput, keyboard and timed host-controller replay; real startup interruption observed twice; gameplay interruption/menu return pending |
 | Attract startup/loading/render/audio/movies/gameplay | Partial startup/rendering only; no complete attract sequence yet |
 | Repeat loops, interruption/menu return, original cadence | Pending actual title integration measurements |

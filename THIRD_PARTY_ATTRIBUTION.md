@@ -433,6 +433,14 @@ the MIT root license does not replace dependencies' own terms. See the
 [DSP audit](docs/NATIVE-DSP-DONOR-2026-10-07.md) and existing
 [private CPU pilot distribution limits](LICENSE-SCOPE.md).
 
+## Native pixel-shader query reference
+
+The adjacent pixel-shader query (`beads-xbox.1.79`) references Phobos's real
+`dev_GetPixelShader` in `src/d3d/d3d8_device.c` and executes the original NTSC
+XDK query in a private fixture. The independent guest adapter returns the
+existing guest handle/ownership snapshot; it does not expose the donor's
+internal combiner selector. No donor query implementation body was copied.
+
 ## Native flat-shading contract references
 
 Flat shading (`beads-xbox.1.78`) retains the pinned Phobos renderer, shader

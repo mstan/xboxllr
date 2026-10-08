@@ -1,5 +1,17 @@
 # STATUS
 
+## 2026-10-07 - Blinx passes pixel-shader query; next is logic-operation state
+
+Actual `pixel-query-attract` passes `D3DDevice_GetPixelShader` and stops at
+`D3DDevice_SetRenderState_LogicOp` (0x1337c0) during scene startup. The complete
+original query and native bind/unbind/rebind fixtures pass; graphics backend
+and ABI tests pass in 5.46 s. This is an existing guest-handle read over the
+borrowed renderer, with no new GPU query or ownership change (.79).
+Private evidence: `build/blinx/run-pixel-query-attract.log`. No gameplay frame,
+completed attract loop or intended cadence is established. Next: observe the
+actual LogicOp argument, establish its bounded NV2A contract and check donor
+state/RHI support before adding behavior. Dashboard work remains deferred.
+
 ## 2026-10-07 - Blinx passes flat shading; next stop is pixel-shader query
 
 Actual `flat-attract` advances beyond state66=0x1d00, submits further real GPU
