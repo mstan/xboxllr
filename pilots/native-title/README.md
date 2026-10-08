@@ -1,5 +1,132 @@
 # Native title reference pilot
 
+<<<<<<< HEAD
+=======
+## Opening audio tail qualification (2026-10-08)
+
+The exact source capture on `investigate/blinx-audio-ingress-20261008` locates
+the quiet-tail difference against independent FFmpeg ADX output in the PCM
+already produced by Blinx's original decoder. All 7,560 opening submissions
+match guest-written ring bytes. Actual post-GP output agrees closely with
+that game PCM through the tail, without changing decoder or playback semantics.
+This removes that comparison mismatch as evidence of an HLE transport defect;
+it does not declare all audio/video or attract cadence complete.
+The [movie audit](../../docs/BLINX-MOVIE-STALL-AUDIT-2026-10-08.md) records
+measurements, provenance, bounded capture options and reproduction commands.
+
+A subsequent 600-second neutral-input observation (`scheduler-full-repeat`)
+on the same executable completes two natural gameplay demos, returns through
+the publisher/opening/title movies after each, and renders a third demo.
+All 193 issued writes complete; 60 sparse captures and the complete log show
+no terminal guard/fault. The two complete stages each present 2,329 frames,
+averaging 28.27328 and 28.56388 fps (nominal target 30); p95 intervals are
+44.96/43.28 ms. Four intervals exceed 100 ms in each stage. The first stage
+exceeds a constant-30-fps budget by 4.74 seconds; its four largest stalls
+contribute 1.57 seconds of that excess. This is a measured cadence gap.
+
+Third-cycle opening-movie private memory stays at 649.60 MiB at 450/480/510
+seconds; handles are 606/606/605. Sampled gameplay peaks are 707.80/714.50/
+716.48 MiB across the three entries, with the third still in progress at the
+deadline. Sampling different scene positions and this short observation do
+not exclude slow growth. No memory/handle exhaustion is observed. Actual
+controller interruption remains separately validated by the 190-second run
+below; this neutral run contains only the zero-button input state. The harness
+terminates its own still-running title at 600 seconds, not at a natural exit.
+Evidence: `build/blinx/scheduler-full-repeat/validation.aot-private.json` and
+`validated-repeat-contact.png`. Full A/V/original-speed qualification and
+JSRF remain open. These observations do not promote the scheduler as a speed win.
+
+## Experimental guest scheduler (.71, 2026-10-08)
+
+`XLLE_PILOT_GUEST_SCHEDULER=1` selects a shared single-CPU guest scheduler at
+startup. It retains CPU ownership across nonblocking kernel calls, publishes
+new/resumed threads before their host workers wake, preempts at existing safe
+points, and serializes generated DPC/GPU/display callbacks. Real blocking
+services and ordered graphics waits release the guest CPU while their native
+work proceeds. Selection is fixed for the process; no live switching or
+duplicate execution is involved. The option defaults off during qualification.
+
+The bounded reference runs unmodified instructions from the owner's hash-bound
+kernel using `tools/native_scheduler_reference.py`: highest-priority selection,
+equal-priority FIFO, immediate higher-priority readiness and normal-class base
+priority saturation. xemu supplies the single-CPU hardware reference, and Phobos
+`05040ec` supplies the ADX handoff analysis and service-boundary strategy. Their
+implementation bodies are not copied. In particular, lower priorities cannot
+run through a timeout escape, and interrupts cannot execute unlocked after a
+deadline. Source provenance is in `THIRD_PARTY_ATTRIBUTION.md`.
+
+This is a bounded scheduling contract, not exhaustive kernel scheduling. The
+2-ms equal-priority quantum is provisional; dynamic boosts, exact interrupt
+latency and publishing every event/I/O wake before the native waiter returns
+remain unqualified. Host waits still perform their real operations. No wait
+completion, input, audio cursor or GPU result is synthesized. Actual title
+qualification must accompany the isolated tests before accepting the option.
+
+Qualification on `fix/blinx-priority-scheduler-20261008`: two 140-second runs
+use the same executable and local media with unrestricted host affinity; the
+only normalized configuration difference is the scheduler flag. Disabled,
+Blinx finishes the opening and stalls before opening the title SFD. Enabled,
+it reaches title-movie frame 539 and continues presenting. Evidence:
+`build/blinx/scheduler-comparison.aot-private.json`, executable SHA-256
+`42cc7a9274b5c8a6b79229e9f93abe71ffc62793f644ae841d104ace7c7e9ed7`.
+This demonstrates functional progress, not a speed improvement.
+
+A separate visible 330-second enabled run confirms textured 3D gameplay,
+Start interruption at 190031 ms, Press START return (capture 40), and rendered
+reentry (captures 55/58/62/65). All 63 issued writes complete, with 65 captures
+and no logged terminal guard/fault. The opening reaches frame 2263 in 76.3261
+seconds; sampled source audio 0..72 seconds retains one offset. Tail mismatch
+persists, and the longest picture gap is 121 ms. Resources after reentry are
+750.4/748.8 MB private and 614/616 handles at 300/330 seconds. Different phases
+and this short observation do not prove repeated-loop stability or intended
+cadence. Evidence: `build/blinx/movie-scheduler-visible/validation.aot-private.json`.
+The harness terminates at its observation deadline; this is not a crash or
+natural attract completion. Full Blinx qualification and JSRF remain open.
+All 36 native tests pass with D3D debug in a serial 16.68-second run, including
+the real-worker scheduler test. An earlier host event-timeout minimum-duration
+failure is retained separately as `.99`; five targeted repeats and the final
+suite pass do not erase that observation.
+
+The complete-stage performance check rejects the first blanket graphics-call
+handoff as a default: 28.71274 fps for the CPU15 reference versus 25.05659 fps
+for the unrestricted scheduler candidate. Reusing Phobos's
+`hle_d3d8.c`/`rhi_set_wait_hooks` strategy narrows handoff to actual ordered
+callback/fence waits and blocking lifecycle/display services. That measures
+27.86947 fps. All three complete 2329 presents and 75/75 writes naturally;
+reference and narrowed candidate also retain the same 27186 callback contexts
+grouped between presents. Reference/candidate p95 is 44.26/43.89 ms, but long
+stalls over 100 ms increase from 2 to 8. Host load is uncontrolled, and this
+comparison does not establish a speed improvement. Evidence:
+`build/blinx/scheduler-stage-{initial,final}.aot-private.json`.
+
+The narrower candidate retains the first scheduler's correctness purpose and
+stays opt-in. All 36 existing tests pass (17.77 seconds); an added real GPU test
+passes 70 ordered callbacks with pixel checks, reentrant guest queries, fence
+completion and teardown while guest CPU scheduling is enabled (0.16 seconds).
+Nested wait scopes restore CPU eligibility only once, and CPU reacquisition
+occurs without renderer ownership to avoid reversing lock order.
+
+The final wait-boundary version also passes a fresh 190-second visible input
+observation: Start at 90000 ms interrupts rendered gameplay, capture 20 shows
+Press START, and captures 30/34/37 show rendered reentry. All 92 writes complete;
+37 captures and the full log contain no terminal guard/fault. This run uses
+the original controller path to skip startup at 15 seconds solely for the
+bounded input test; it is not evidence of an uninterrupted opening. The
+separate 260-second stage run naturally returns through publisher/opening
+movies into the title movie. Full A/V and long-repeat cadence remain open.
+Private evidence: `build/blinx/scheduler-wait-hooks-input/` and
+`build/blinx/scheduler-stage-wait-hooks/`.
+
+## Movie queue/stall investigation (2026-10-08)
+
+The [movie stall audit](../../docs/BLINX-MOVIE-STALL-AUDIT-2026-10-08.md)
+records the bounded audio timeline, callback/host-call timings, logging trials
+and unsuccessful affinity removal. The native queue stays full while fresh
+guest PCM writes pause. Logging changes have not established a speed gain;
+the investigation branch remains separate from the validated baseline.
+Full A/V and original-speed qualification remain open.
+
+>>>>>>> 0e91614 (Record decoder-boundary finding and natural Blinx repeat evidence)
 ## Display waits independent of renderer ownership (2026-10-08)
 
 `beads-xbox.1.73/.98`, branch `fix/blinx-independent-display-wait-20261008`.

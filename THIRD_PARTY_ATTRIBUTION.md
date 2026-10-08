@@ -15,6 +15,25 @@ notices. Preparation/build steps must report missing required notices.
 
 ## Private native-title reference pilot
 
+<<<<<<< HEAD
+=======
+### Movie queue/stall audit - 2026-10-08
+
+The [movie stall audit](docs/BLINX-MOVIE-STALL-AUDIT-2026-10-08.md)
+records the pinned Phobos audio queue/buffer/diagnostic references and the
+independent FFmpeg ADX comparison. The new bounded timeline, sparse timings and
+event-trace gate are independently authored. No additional donor or FFmpeg
+implementation was incorporated, and the existing private pilot shipping
+exclusion remains in force.
+
+The subsequent exact PCM ingress/submission capture and
+`tools/native_audio_ingress.py` verifier are also independently authored.
+Phobos `05040ec103dfbaca5e3daed28bbc569bd896f59f` audio transport was rechecked
+for queue ownership; no additional source body was imported. FFmpeg is run
+externally on owned media/captured PCM solely to compare decode and resampling
+output. Comparison data remains private and is not a shipped implementation.
+
+>>>>>>> 0e91614 (Record decoder-boundary finding and natural Blinx repeat evidence)
 ### Independent display waits - 2026-10-08
 
 The reviewed original NTSC `D3DDevice_BlockUntilVerticalBlank` body, recorded

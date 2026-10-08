@@ -5,6 +5,66 @@ Branch: `investigate/blinx-audio-tail-20261008`, based on `57417e6`.
 These experiments do **not** establish an original-speed or complete A/V pass.
 The validated baseline retains the independent display-wait correction.
 
+## Follow-up: the quiet tail is present before HLE playback
+
+Branch `investigate/blinx-audio-ingress-20261008`, based on scheduler candidate
+`1d563af`, adds an opt-in exact PCM capture. `XLLE_PILOT_AUDIO_INGRESS=<new file>`
+requires the existing audio capture. It records caller writes and successful
+XAudio2 submissions under audio ownership into a bounded 128 MiB allocation;
+file output happens after detachment, outside that lock. Each native buffer
+has a unique capture ID so allocator reuse cannot merge lifetimes. Overflow
+is explicit. Playback, decoding, cursor and completion semantics are unchanged.
+The initial 64 MiB observation overflowed and was rejected as complete evidence.
+
+The replacement `movie-audio-ingress-full` observation stores 68,264,228 bytes
+with zero overflow. Opening voice 6 contains 3,333,960 submitted stereo frames
+at 44.1 kHz; all 7,560 submissions match the latest caller-written ring bytes
+exactly. The independently decoded ADX reference differs already in those
+guest-supplied bytes: source second 74 has half-second RMSE 57.10/64.31 PCM16
+units, including a mean difference of 50.30/57.36. This precedes the native
+resampler, mixer and GP processing. The original game decoder remains executed;
+FFmpeg's independent decode is not an exact-output oracle for that decoder.
+
+Resampling the *captured game PCM* to 48 kHz for comparison instead gives
+post-GP output RMSE 0.0000204/0.0000206 full scale at source second 74, with
+correlation 0.99775/0.99776. At second 75, RMSE is 0.0000116/0.0000111.
+The comparison uses one fixed 21.030667-second capture offset, not a new
+quiet-tail alignment. These are measured differences, not a blanket audio
+tolerance. Different resampling filters and physical speaker latency remain
+outside this comparison. No HLE correction is justified for the quiet-tail
+difference against the independently decoded reference.
+Across the entire 75.541-second source interval, the comparison against captured
+game PCM has RMSE 0.00803/0.00797 full scale and correlation 0.99943/0.99949.
+The maximum sample error is 0.189/0.151; the quiet-tail figures alone must not
+be presented as the whole movie's error bound.
+
+The same run observes four queued chunks in all 4,533 opening position samples,
+no empty queue during playback, and a maximum fresh-write gap of 17.9 ms.
+Uploaded video reaches frame 2263 with luma RMSE median 0.146/p95 0.224.
+Nonflat source seconds 2..73 have median picture lag 31.8 ms, p95 42.9 ms and
+maximum 168.1 ms relative to the mixer clock. The fitted wall/source slope is
+1.000058. Static/repeated images make nearest-frame matching ambiguous; the
+first final-frame match is still 76.176 seconds after audio starts, followed
+by 0.546 seconds of final-frame presentation. Do not turn whole-phase duration
+into a uniform slowdown estimate or claim complete A/V timing qualification.
+
+Private evidence: `build/blinx/movie-audio-ingress-full/`, executable SHA-256
+`83eecee63d6109177ac27652be86d09beb881649b60fa5eaf9eb73eec1870d8f`.
+Reports: `ingress-comparison.aot-private.json`,
+`transport-comparison.aot-private.json`, `av-timing.aot-private.json`,
+`video-comparison.aot-private.json` and `timeline-summary.aot-private.json`.
+`tools/native_audio_ingress.py` independently verifies/extracts the capture:
+
+```powershell
+py -3 tools/native_audio_ingress.py <ingress.bin> --log <run.log> --buffer 6 --report <new-report.json> --pcm <new-opening.s16>
+```
+
+The buffer ID is observation-specific, not a title binding. Select it from the
+file-open/timeline interval. The verifier rejects overflow and incomplete files;
+submission is not consumption, and a buffer can have multiple play intervals.
+Captured/extracted title data remains private. The broader resource, repetition,
+video timing and gameplay cadence requirements remain open.
+
 ## What the new observation rules out
 
 `XLLE_PILOT_AUDIO_TIMELINE=<new CSV>` accompanies the existing PCM capture.
@@ -64,9 +124,10 @@ present-log calls. These are cause diagnostics, not production timing evidence.
 The queue stays supplied with real ring contents; that does not mean the guest
 has supplied fresh contents on time. Full waveform comparisons still find
 variable alignment steps. The low-level tail difference is almost identical
-across several runs after alignment, and needs separate decoder/output
-qualification. A quiet reference tail is not permission to discard it or
-declare a tolerance without establishing its cause.
+across several runs after alignment. The subsequent exact ingress capture above
+establishes that this particular difference already exists in the game's
+decoder output; it does not establish correctness of every decoder, mixer or
+gameplay-audio path.
 
 One triggered stack snapshot lands in generated movie decoding. A separate
 snapshot of the actual multicore post-movie stall finds the main/media paths
