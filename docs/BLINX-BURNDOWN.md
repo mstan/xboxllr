@@ -29,6 +29,14 @@ Blinx regression per coherent batch. Retain explicit outcomes for each contract;
 a bundled pass does not close an unimplemented service. Reuse captured evidence
 and avoid repeating whole attract runs for documentation or test-only changes.
 
+Dashboard support and real persistent HDD/save storage remain architectural
+requirements, including a supported user choice of dashboard or accelerated
+launch. Missing dashboard assets must not remove console storage. Completion of
+all dashboard polish/performance work is not a Blinx bring-up gate. See the
+[console launch/storage contract](CONSOLE-LAUNCH-STORAGE.md) and existing
+provisioning issue `.22`; the native host-directory backend has not completed
+the shared virtual-HDD requirement.
+
 | Delivery order | Service | Relative work / dependencies | State |
 | --- | --- | --- | --- |
 | 1 | Pure calendar conversion (scheduler/time slice) | Small: two original kernel routines; no hardware, IRQ or queue state | Complete, `.103`: both builds qualified; both original routines execute in actual Blinx, with interruption/menu return and reentry; [evidence](../pilots/native-title/CALENDAR-LLE.md) |

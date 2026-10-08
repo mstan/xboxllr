@@ -15,6 +15,16 @@ and developers select implementations at build time. Both configurations remain
 buildable and runnable; LLE need not be fast. Full AOT without dynarec remains
 the final CPU goal.
 
+Game repositories sit beside this framework checkout. Original NTSC Blinx now
+has the private [BlinxRecomp](https://github.com/mstan/BlinxRecomp) repository,
+with a pinned framework submodule, title metadata and working build/launch glue.
+Shared CPU, device, renderer, audio and kernel services remain here.
+
+Dashboard support and real persistent console storage remain architectural
+requirements. Users should be able to choose a dashboard route or accelerated
+title launch; missing dashboard assets must not remove HDD/save support. See
+[console launch and storage requirements](docs/CONSOLE-LAUNCH-STORAGE.md).
+
 **This is development software.** Earlier builds rendered the dashboard with
 the tested files. HDD startup now requires independently provisioned credentials;
 the kernel must supply the correct password. An explicit unlocked-drive setting
