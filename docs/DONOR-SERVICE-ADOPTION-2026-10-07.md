@@ -129,3 +129,44 @@ This pass changes no title runtime. Blinx's last validated result remains its
 first loading image; the separate presentation experiment remains uncommitted
 and stops at the host thread-naming diagnostic. No new menu, attract or speed
 result is claimed.
+
+## Theseus reference audit (owner follow-up, 2026-10-07)
+
+Tracking: `beads-xbox.1.74`. Reviewed
+[MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965)
+at `5fc7ddddd03b4b5a7e6233769ad6a8fe46009965`, in the separate read-only
+reference checkout `../refs/Theseus-review-20261007`. No source, assets or
+executables were imported into this project, and no Theseus code was built.
+The owner's direction is behavioral reference only.
+
+Theseus reconstructs the dashboard engine for Xbox and native desktop. The
+current desktop D3D8-shaped shim uses bgfx; desktop Xbox game launches use xemu.
+Its value here is dashboard semantics and subsystem boundaries. It does not
+supply a general Xbox machine reference or establish Blinx compatibility.
+
+| Reference | Applied use | Qualification / limit |
+| --- | --- | --- |
+| `docs/decomp/README.md` and subsystem notes | Map dashboard profiles to script VM, scene traversal, animation, assets and audio families before designing another small helper optimization. | Cross-check our binary revision and original routines. Their 5960 addresses are revision bindings, not shared runtime constants. The index explicitly excludes D3DX, DirectSound mixer, MCPX, AC97 and kernel video drivers. |
+| `docs/xap-contract.md` | Inventory script-visible inputs, outputs, properties and callbacks when considering a whole native dashboard service. | XAP is an application contract above the Xbox binary ABI. Guest memory, object lifetime, errors and completion still require our own bounded reference fixtures. |
+| `docs/decomp/AudioSystem.md` | Cross-check streaming start, segment consumption/refill, drain, stop, seek and ownership cases against original caller behavior. | Useful test-case hypotheses for shared audio; confirm which apply to Blinx. Desktop SDL_mixer is not an MCPX/DSP reference, and this does not replace the original Sofdec/ADX route. |
+| `theseus/desktop/d3d8_sdl.h` | Compare persistent resources, dirty uploads and cached transforms with our existing donor backend when profiling shows relevant cost. | Many such mechanisms already exist in Phobos. No performance gain is measured by this audit; avoid repeating the parked matrix experiment on instruction counts alone. |
+| Asset/input/media notes | Use format descriptions and caller state transitions when a concrete blocker reaches them. | Desktop libmpv playback and audio-CD TOC handling do not establish Blinx movie or game-DVD authentication contracts. |
+
+The current renderer source also demonstrates exclusions: `IDirect3DSurface8`
+returns a four-byte dummy from `LockRect` (line 1238), and the render-state
+switch accepts several states without implementing them (lines 1481-1512).
+These behaviors cannot become successful implementations here. Rendering a
+dashboard with that subset is not evidence that our required game operations
+are fulfilled. The older `docs/desktop/d3d8-translation.md` describes OpenGL;
+the current source and build workflow show bgfx, so check code against docs.
+The inspected build workflow checks compilation/artifacts, not our end-to-end
+contract acceptance. We did not run Theseus or measure its cadence.
+
+Decision: keep Theseus as a pinned, attributed behavioral reference. First use
+its audio notes to select relevant integration cases; use its dashboard map
+when dashboard profiling resumes. For each selected case, corroborate with the
+original binary or hardware-oriented reference, establish the bounded LLE
+fixture, then adapt HLE. Retain Phobos as the current game-renderer donor.
+At this follow-up our native Blinx run has reached the animated title screen
+after the opening movie; full attract, input interruption, audio quality and
+intended cadence are still unvalidated. This reference audit changes no runtime.

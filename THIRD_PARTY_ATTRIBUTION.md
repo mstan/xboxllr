@@ -386,3 +386,17 @@ was imported. The dependency record includes the MPL-2.0 cbindgen build tool;
 the MIT root license does not replace dependencies' own terms. See the
 [DSP audit](docs/NATIVE-DSP-DONOR-2026-10-07.md) and existing
 [private CPU pilot distribution limits](LICENSE-SCOPE.md).
+
+## Theseus behavioral reference
+
+[MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),
+revision `5fc7ddddd03b4b5a7e6233769ad6a8fe46009965`, was inspected as a
+behavioral reference at the owner's request. Credit belongs to its authors
+and contributors. Its dashboard reverse-engineering notes, XAP interface
+inventory and desktop source informed the
+[reference assessment](docs/DONOR-SERVICE-ADOPTION-2026-10-07.md#theseus-reference-audit-owner-follow-up-2026-10-07).
+The repository declares GPL-3.0-or-later and includes separate component
+notices. No Theseus implementation, assets or linked dependency were added by
+this assessment; the external checkout is research material only. This entry
+records consultation, not permission to incorporate GPL code into the intended
+non-GPL product.
