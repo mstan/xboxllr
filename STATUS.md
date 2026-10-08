@@ -1,5 +1,21 @@
 # STATUS
 
+## 2026-10-07 - Visible original movie playback reaches Press START
+
+Direct GPU captures now establish both publisher logos, the opening movie,
+and Blinx's animated Press START screen. A 180-second guest-only one-core
+experiment continues presenting and reopening the title-screen movie without
+a guard or crash. This is startup/movie/title-screen progress, not completed
+attract validation. Audio quality/sync, input interruption, gameplay, stable
+repeat attract loops and original speed remain pending.
+
+Phobos's guest-only CPU affinity approach is startup-selectable; native workers
+remain parallel. Verbose per-call tracing can be suppressed. Original priority
+query execution and native affinity/ownership tests pass, but the earlier
+timing-sensitive poll stall is still open (.71). The independent intermittent
+vblank handle-count test failure is now tracked as .72. Capturing GPU images
+adds readback and does not establish performance.
+
 ## 2026-10-07 - Blinx executes its movie read/render/audio path
 
 Real native event objects and asynchronous nonbuffered reads now deliver the

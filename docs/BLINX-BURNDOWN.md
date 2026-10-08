@@ -6,9 +6,11 @@ error is traced and fixed: local VM/texture ownership caps returned out of memor
 while real guest RAM remained available. Blinx now loads 420 textures, passes
 visibility Begin/End, and executes its ordered GPU WRITE callback. The latest
 run passes shared front-buffer texture aliases and contiguous page protection,
-then reads microsoft.sfd asynchronously and executes its YUV/audio path. After
-29 real reads and 760 present submissions it stalls in thread-priority queries;
-correct visible/audible playback is still unconfirmed. Earlier fresh/repeat runs reached the callback boundary in 12.95/7.33 s
+then reads the movies asynchronously and executes their YUV/audio path. Direct
+GPU captures show both publisher logos, the opening movie and the animated
+Press START screen. A 180-second guest-only one-core run continues at that
+screen; the earlier timing-sensitive thread-priority stall remains open.
+Audio quality/sync and attract validation remain pending. Earlier fresh/repeat runs reached the callback boundary in 12.95/7.33 s
 with zero error-dialog entries or memory failures. The 64 MiB guest limit remains
 enforced. No title error condition is bypassed.
 
@@ -17,7 +19,7 @@ enforced. No title error condition is bypassed.
 | Native launch, files, writable storage | Real startup, installed-media contract, persistent title files/cache; original optical reference retained |
 | Renderer adoption and presentation | Phobos D3D11/RHI, conversions, shader/state caches and combiner pipeline integrated; real loading/error frames, Swap callbacks and GPU fences exercised |
 | Audio service readiness | 21 identified Blinx entries exercised; real XAudio2/GP output, routing, gains, loops, updates and cleanup; actual title playback still pending |
-| Movie service readiness | Original NTSC Sofdec roots compiled; YUY2/UYVY upload, pitch, coordinates and changing GPU frames tested; actual playback/sync/interruption pending |
+| Movie service readiness | Actual publisher/opening/title-screen movies render; direct GPU captures retained; audio synchronization and interruption pending |
 | Disc-error diagnosis | Actual caller returns E_OUTOFMEMORY from local 512-reservation/256-texture caps; growing ownership fixes progression to 420 textures, with real memory budget retained |
 | Visibility queries | Bounded software NV2A sample/report floor, original-x86 ABI and real native GPU fixtures pass; title Begin/End progress validated, title Get not yet reached |
 | Ordered GPU callbacks | Original READ/WRITE packets, bounded LLE idle/IRQ floor and native FIFO/real completion tests pass; Blinx executes its WRITE callback |
@@ -26,7 +28,7 @@ enforced. No title error condition is bypassed.
 | Movie discovery | Real directory cursor/entries and native ABI tests pass; optical transport fixture passes; complete retail filesystem behavior remains a reference gap |
 | Asynchronous movie IO | Real events, nonbuffered reads and completion ownership pass; Blinx executes 29 actual read completions |
 | Movie YUV state | Original enable/cache/packet oracle and bounded NV2A pixels pass; imported Phobos conversion reused |
-| Next integration blocker | Thread-priority polling stall after movie work; direct GPU visual and audio validation pending |
+| Next integration work | Input interruption/attract entry and actual audio validation; timing-sensitive thread-priority stall remains under investigation |
 | Input | Physical XInput and startup-selected keyboard available; actual menu/movie interruption still unvalidated |
 | Attract startup/loading/render/audio/movies/gameplay | Partial startup/rendering only; no complete attract sequence yet |
 | Repeat loops, interruption/menu return, original cadence | Pending actual title integration measurements |

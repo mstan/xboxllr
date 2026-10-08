@@ -29,6 +29,7 @@ static RECOMP_TLS uint32_t recent[32], recent_pos;
 static RECOMP_TLS uint64_t entries;
 static uint32_t trace_function;
 static volatile LONG trace_function_hits;
+static int pilot_verbose=1;
 static unsigned char *memory, *image_bytes;
 static size_t image_size;
 static uint32_t image_base, header_bytes, section_table, section_count;
@@ -69,6 +70,7 @@ __declspec(noreturn) static void stop(const char *reason, uint32_t va)
     ExitProcess(2);
 }
 
+#include "thread_affinity.inc"
 static uint32_t file32(size_t offset)
 {
     uint32_t value;
@@ -160,6 +162,7 @@ void pilot_cpu_mmx_available(void)
 recomp_func_t recomp_lookup_manual(uint32_t va) { (void)va; return NULL; }
 static DWORD WINAPI title_thread(void *argument)
 {
+    thread_guest_cpu_enter();
     unsigned slot=(unsigned)(uintptr_t)argument;
     struct PilotThread *thread=&threads[slot];
     current_thread_slot=slot;
@@ -319,7 +322,7 @@ static void kernel_dispatch(void)
     const char *name = "unknown ordinal";
     for (size_t i=0; i<sizeof(pilot_imports)/sizeof(pilot_imports[0]); ++i)
         if (pilot_imports[i].ordinal == next_kernel_ordinal) name=pilot_imports[i].name;
-    fprintf(stderr, "[KERNEL] %u %s return=%08x\n", next_kernel_ordinal, name, MEM32(g_esp));
+    if(pilot_verbose)fprintf(stderr, "[KERNEL] %u %s return=%08x\n", next_kernel_ordinal, name, MEM32(g_esp));
     switch (next_kernel_ordinal) {
     case 124: case 143: case 144: case 224: case 231: case 246: case 250:
         thread_object_kernel(next_kernel_ordinal);return;
@@ -574,6 +577,9 @@ static void load_image(const char *path)
 int main(int argc,char **argv)
 {
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
+    thread_guest_cpu_configure();
+    const char *verbose=getenv("XLLE_PILOT_TRACE");
+    if(verbose && !strcmp(verbose,"0"))pilot_verbose=0;
     const char *trace=getenv("XLLE_PILOT_TRACE_FUNCTION");
     if(trace && *trace) {char *end;trace_function=strtoul(trace,&end,0);if(*end || !trace_function)stop("invalid trace function address",0);}
     AddVectoredExceptionHandler(1,fault_handler);
@@ -595,6 +601,7 @@ int main(int argc,char **argv)
     recomp_func_t entry=recomp_lookup(PILOT_ENTRY);
     if (!entry) stop("entry missing from generated dispatch", PILOT_ENTRY);
     fprintf(stderr,"[RUN] calling actual XBE entry\n");
+    thread_guest_cpu_enter();
     entry();
     AcquireSRWLockShared(&thread_lock);
     unsigned launched=thread_count;

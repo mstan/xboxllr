@@ -36,11 +36,18 @@ static void scheduler_stopped(void)
 }
 static void test_thread_objects(void)
 {
+    GROUP_AFFINITY caller_affinity;
+    CHECK(GetThreadGroupAffinity(GetCurrentThread(),&caller_affinity));
+    guest_cpu_affinity=caller_affinity;
+    guest_cpu_affinity.Mask&=(~guest_cpu_affinity.Mask+1);guest_cpu_enabled=1;
     uint32_t args[]={0x19000,0,0x10000,20,0x19004,0,0,1,0,0x12200};
     call_kernel(255,args,10);CHECK(!g_eax);
     uint32_t handle=MEM32(0x19000),out=0x19008;
     HANDLE host=threads[1].handle;
     Sleep(20);CHECK(!scheduler_counter && WaitForSingleObject(host,0)==WAIT_TIMEOUT);
+    GROUP_AFFINITY worker_affinity;
+    CHECK(GetThreadGroupAffinity(host,&worker_affinity) && worker_affinity.Mask==guest_cpu_affinity.Mask &&
+          worker_affinity.Group==guest_cpu_affinity.Group);
     uint32_t ref[]={handle,PILOT_THREAD_OBJECT_TYPE,out};
     MEM32(out)=0xfeedface;ref[1]++;
     call_kernel(246,ref,3);CHECK(g_eax==0xc0000024u && MEM32(out)==0xfeedface);
@@ -54,6 +61,11 @@ static void test_thread_objects(void)
     BOOL boost;CHECK(GetThreadPriorityBoost(host,&boost) && boost);
     control[1]=0;call_kernel(144,control,2);CHECK(g_eax==1);
     call_kernel(143,control,2);CHECK(g_eax==2 && GetThreadPriority(host)==THREAD_PRIORITY_NORMAL);
+    control[1]=32;call_kernel(143,control,2);CHECK(!g_eax);
+    call_kernel(124,control,1);CHECK(g_eax==16);
+    control[1]=(uint32_t)-32;call_kernel(143,control,2);CHECK(g_eax==16);
+    call_kernel(124,control,1);CHECK(g_eax==(uint32_t)-16);
+    control[1]=0;call_kernel(143,control,2);CHECK(g_eax==(uint32_t)-16);
     control[0]=handle;control[1]=out;
     call_kernel(231,control,2);CHECK(!g_eax && MEM32(out)==1);
     call_kernel(224,control,2);CHECK(!g_eax && MEM32(out)==2);
@@ -94,5 +106,7 @@ static void test_thread_objects(void)
     InterlockedExchange(&scheduler_exit,1);CHECK(WaitForSingleObject(host,2000)==WAIT_OBJECT_0);
     MEM32(out)=0xfeedface;call_kernel(231,control,2);CHECK(g_eax==0xc000004bu && MEM32(out)==0xfeedface);
     call_kernel(187,control,1);CHECK(!g_eax);
-    fprintf(stderr,"PASS: real workers, initial/nested/self suspension, loop progress, count limit, priorities/boost, object references surviving handle close, error outputs\n");
+    CHECK(GetThreadGroupAffinity(GetCurrentThread(),&worker_affinity) && worker_affinity.Mask==caller_affinity.Mask &&
+          worker_affinity.Group==caller_affinity.Group);guest_cpu_enabled=0;
+    fprintf(stderr,"PASS: real workers, guest-only CPU selection, initial/nested/self suspension, loop progress, count limit, priorities/saturation/boost, object references surviving handle close, error outputs\n");
 }

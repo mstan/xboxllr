@@ -104,6 +104,24 @@ static void graphics_wait_vblank(void)
     --graphics_clock_waiters;
     g_eax=0; /* Original nonalertable KeWaitForSingleObject returns STATUS_SUCCESS. */
 }
+/* Optional direct GPU capture avoids desktop occlusion. Diagnostic readback
+ * is never enabled implicitly and is unsuitable for performance measurements. */
+static void graphics_capture_present(void)
+{
+    const char *capture=getenv("XLLE_PILOT_PRESENT_CAPTURE");
+    if(!capture || !*capture)return;
+    static uint64_t next;static unsigned sequence;
+    uint64_t now=dispatch_monotonic();if(sequence>=180 || now<next)return;
+    unsigned width=graphics_parameters[0],height=graphics_parameters[1];
+    unsigned char *pixels=malloc(width*height*4);char path[1024];
+    if(!pixels || snprintf(path,sizeof(path),"%s/present-%u.ppm",capture,++sequence)>=(int)sizeof(path))stop("present capture allocation/path",0);
+    if(pilot_gfx_readback(pixels,width*height*4)<0)stop("present capture readback",0);
+    FILE *file=fopen(path,"wb");if(!file || fprintf(file,"P6\n%u %u\n255\n",width,height)<0)stop("present capture open",0);
+    for(unsigned i=0;i<width*height;++i)if(fwrite(pixels+i*4,3,1,file)!=1)stop("present capture write",0);
+    free(pixels);if(fclose(file))stop("present capture close",0);
+    next=dispatch_monotonic()+10000000;
+    fprintf(stderr,"[PRESENT CAPTURE] sequence=%u time=%llu file=%s\n",sequence,(unsigned long long)now,path);
+}
 /* One native presentation per virtual display interval; at most two actual
  * GPU checkpoints may remain outstanding. Waiting releases the graphics lock,
  * allowing the display/DPC worker to report real progress independently. */
@@ -122,6 +140,7 @@ static uint32_t graphics_present(void)
         ReleaseSRWLockExclusive(&graphics_lock);graphics_wait_until(deadline);AcquireSRWLockExclusive(&graphics_lock);
     }
     --graphics_clock_waiters;
+    graphics_capture_present();
     uint64_t submitted=dispatch_monotonic(),target=graphics_frame_at(submitted)+1;
     int32_t hr=pilot_gfx_present();
     if(hr!=0)stop("native presentation was not accepted",(uint32_t)hr);

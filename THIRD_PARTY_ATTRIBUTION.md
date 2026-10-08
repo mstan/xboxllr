@@ -15,6 +15,16 @@ notices. Preparation/build steps must report missing required notices.
 
 ## Private native-title reference pilot
 
+### Guest CPU affinity experiment - 2026-10-07
+
+Phobos `src/kernel/xbox_memory_layout.c` at
+`bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0`, specifically
+`RECOMP_GUEST_ONE_CPU`, supplies the behavioral approach of pinning guest
+threads while leaving native workers free. `thread_affinity.inc` independently
+uses documented Windows group-affinity APIs with checked startup selection;
+no donor implementation body is copied. The original kernel priority-query
+oracle remains private. Exact host/Xbox scheduling equivalence is not asserted.
+
 ### Native event objects and asynchronous movie reads - 2026-10-07
 
 Phobos `src/kernel/kernel_sync.c` and `kernel_file.c` at

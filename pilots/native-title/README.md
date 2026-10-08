@@ -6,7 +6,35 @@ It is outside the normal xboxlle build. **The generated executable is a private
 GPL-dependent reference artifact, not the intended non-GPL shipping product.**
 See [license scope](../../LICENSE-SCOPE.md). There is no install/package target.
 
-## Current checkpoint - real asynchronous movie IO (2026-10-07)
+## Current checkpoint - original movies reach the title screen (2026-10-07)
+
+Direct GPU captures prove the Microsoft and Artoon logos, the opening movie,
+and the animated **Press START to begin** screen. A 180-second run remains
+active at that screen, repeatedly reading `h_title02a.sfd`, with no guard or
+crash. Input interruption, attract entry, actual audio quality/synchronization,
+long-run ownership and original cadence are still unqualified. JSRF remains
+deferred. Private captures/log: `build/blinx/movie-onecpu/` and
+`build/blinx/run-movie-onecpu.log`.
+
+This run selects `XLLE_PILOT_TRACE=0` to suppress per-call kernel/D3D/audio
+diagnostics and `XLLE_PILOT_GUEST_CPU=15` (a zero-based processor in the current
+group). The latter follows Phobos's guest-only one-core experiment; native
+renderer/audio workers remain unrestricted. It is optional, disabled by
+default, and does not claim exact Xbox scheduling. Original kernel priority
+query execution confirms ordinary and saturated +/-16 results. Native worker
+affinity and priority/suspension/reference tests pass. The timing-sensitive
+priority-poll stall stays open as `beads-xbox.1.71`; one successful trial does
+not establish causality or repeatability.
+
+`XLLE_PILOT_PRESENT_CAPTURE=<existing private directory>` captures the actual
+backbuffer immediately before presentation, up to 180 frames one second apart.
+This optional GPU readback affects timing and is not a performance run.
+MSVC builds retain runtime debug information and generated public symbols so
+thread/ownership state can be inspected without relifting or a full debug build.
+The latest focused graphics test again hit the intermittent process-wide
+vblank handle-count assertion (`beads-xbox.1.72`); it is not counted as passing.
+
+## Earlier checkpoint - real asynchronous movie IO (2026-10-07)
 
 `beads-xbox.1.69`: Blinx opens `microsoft.sfd` with its actual asynchronous,
 nonbuffered flags and completes 29 real reads. It submits 760 presents and

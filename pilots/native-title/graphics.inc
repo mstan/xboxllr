@@ -120,9 +120,9 @@ void pilot_d3d_dispatch(unsigned entry)
 {
     if (entry>=PILOT_D3D_COUNT) stop("invalid graphics entry",entry);
     const uint32_t *arguments=graphics_pointer(g_esp+4,pilot_d3d_calls[entry].stack_bytes);
-    fprintf(stderr,"[D3D] %s return=%08x",pilot_d3d_calls[entry].name,MEM32(g_esp));
+    if(pilot_verbose){fprintf(stderr,"[D3D] %s return=%08x",pilot_d3d_calls[entry].name,MEM32(g_esp));
     for (unsigned i=0;i<pilot_d3d_calls[entry].stack_bytes/4;i++) fprintf(stderr," %08x",arguments[i]);
-    fprintf(stderr,"\n");
+    fprintf(stderr,"\n");}
     AcquireSRWLockExclusive(&graphics_lock);
     if (entry!=PILOT_D3D_Direct3D_CreateDevice && !graphics_active)
         stop("graphics entry before native creation",pilot_d3d_calls[entry].address);
@@ -216,7 +216,7 @@ void pilot_d3d_dispatch(unsigned entry)
         break;
     }
     case PILOT_D3D_D3DDevice_SetRenderState_Simple:
-        fprintf(stderr,"[D3D SIMPLE] method=%08x value=%08x\n",g_ecx,g_edx);
+        if(pilot_verbose)fprintf(stderr,"[D3D SIMPLE] method=%08x value=%08x\n",g_ecx,g_edx);
         graphics_simple_state(g_ecx,g_edx); break;
     case PILOT_D3D_D3DDevice_SetRenderState_CullMode:graphics_render_state(147,arguments[0],1);break;
     case PILOT_D3D_D3DDevice_SetRenderState_ZEnable:graphics_render_state(143,arguments[0],1);break;

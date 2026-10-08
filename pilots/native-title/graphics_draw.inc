@@ -93,7 +93,7 @@ static void graphics_draw_common(const uint32_t args[3],uint32_t up_data,uint32_
     }
     int32_t result=up_data?pilot_gfx_draw_memory(primitive,count,memory+up_data,up_stride):pilot_gfx_draw_vertices(primitive,first,count);
     if(result<0)stop("native vertex draw failed",(uint32_t)result);
-    fprintf(stderr,"[DRAW SUBMIT] primitive=%u first=%u count=%u\n",primitive,first,count);
+    if(pilot_verbose)fprintf(stderr,"[DRAW SUBMIT] primitive=%u first=%u count=%u\n",primitive,first,count);
     const char *capture=getenv("XLLE_PILOT_FRAME_CAPTURE");
     if(capture && *capture && graphics_target==graphics_headers) {
         static unsigned sequence;

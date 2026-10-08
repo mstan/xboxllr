@@ -303,6 +303,10 @@ foreach(kind instruction indirect kernel)
   set_tests_properties(pilot_stops_${kind} PROPERTIES WILL_FAIL TRUE)
 endforeach()
 if(MSVC)
+  # Runtime symbols and generated public names make a stopped title inspectable
+  # without recompiling millions of generated lines with debug information.
+  set_property(SOURCE runtime.c APPEND PROPERTY COMPILE_OPTIONS /Z7)
+  target_link_options(xlle_native_title PRIVATE /DEBUG:FULL)
   # Bring-up iteration: donor discovery can produce enormous overlapping
   # functions. Qualify execution before spending minutes optimizing those.
   target_compile_options(xlle_native_title PRIVATE /bigobj /we4013 /Od /MP4)

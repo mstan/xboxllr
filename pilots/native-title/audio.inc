@@ -199,9 +199,9 @@ void pilot_audio_dispatch(unsigned entry)
     const uint32_t *a=audio_pointer(g_esp+4,pilot_audio_calls[entry].stack_bytes);
     int32_t result=0;
     AcquireSRWLockExclusive(&audio_lock);
-    fprintf(stderr,"[AUDIO] %s return=%08x",pilot_audio_calls[entry].name,MEM32(g_esp));
+    if(pilot_verbose){fprintf(stderr,"[AUDIO] %s return=%08x",pilot_audio_calls[entry].name,MEM32(g_esp));
     for(unsigned i=0;i<pilot_audio_calls[entry].stack_bytes/4;++i)fprintf(stderr," %08x",a[i]);
-    fprintf(stderr,"\n");
+    fprintf(stderr,"\n");}
     if(entry==PILOT_AUDIO_DirectSoundCreate) {
         audio_pointer(a[1],4);
         if(a[0] || a[2])stop("unqualified DirectSound device selection/aggregation",a[0]);
