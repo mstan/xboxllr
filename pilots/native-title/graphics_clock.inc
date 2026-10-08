@@ -14,7 +14,7 @@ static uint32_t graphics_callback;
 static int graphics_clock_closing,graphics_clock_presented;
 static struct GraphicsPresent {uint64_t serial,target;uint32_t swap;} graphics_presents[2];
 static unsigned graphics_present_count;
-static unsigned graphics_present_retired;
+static uint64_t graphics_swap_expected;
 static uint32_t graphics_swap_submitted,graphics_swap_completed;
 static uint64_t graphics_swap_deadline;
 static CONDITION_VARIABLE graphics_present_changed=CONDITION_VARIABLE_INIT;
@@ -23,8 +23,15 @@ static uint64_t graphics_frame_at(uint64_t now)
     uint64_t elapsed=now-graphics_clock_origin;
     return elapsed/10000000*graphics_clock_hz+(elapsed%10000000)*graphics_clock_hz/10000000;
 }
-static uint32_t graphics_swap_flags(unsigned retired,int missed)
-{return retired?1u:missed?2u:0u;}
+static uint32_t graphics_swap_flags(unsigned retired,uint64_t frame)
+{
+    /* Original miniport: an expected paced swap keeps reporting missed edges
+     * after the last queued flip retires. Immediate flips do not contribute
+     * to the next vblank's "swap done" count. See native_vblank_reference.py. */
+    if(retired)return 1;
+    if(graphics_swap_expected==frame){++graphics_swap_expected;return 2;}
+    return 0;
+}
 static void graphics_present_interval(uint32_t value)
 {
     if(value!=1 && value!=0x80000000u)stop("unqualified presentation interval",value);
@@ -35,21 +42,22 @@ static void graphics_present_interval(uint32_t value)
  * epoch, permits retirement. Paced swaps are retired only by the vblank path. */
 static unsigned graphics_present_retire(uint64_t frame)
 {
-    unsigned retired=0;
+    unsigned retired=0,paced=0;
     while(graphics_present_count && graphics_presents[0].target<=frame) {
         struct GraphicsPresent *present=&graphics_presents[0];
         if(pilot_gfx_checkpoint_busy(present->serial))break;
         graphics_swap_completed=present->swap;++retired;
+        if(present->target)++paced;
         memmove(graphics_presents,graphics_presents+1,--graphics_present_count*sizeof(*graphics_presents));
     }
     if(retired)WakeAllConditionVariable(&graphics_present_changed);
-    return retired;
+    return paced;
 }
 static void graphics_present_drain(void)
 {
     ++graphics_clock_waiters;
     for(;;) {
-        graphics_present_retired+=graphics_present_retire(0);
+        graphics_present_retire(0);
         if(!graphics_present_count)break;
         if(!SleepConditionVariableSRW(&graphics_present_changed,&graphics_lock,1,0) && GetLastError()!=ERROR_TIMEOUT)
             stop("presentation drain wait failed",GetLastError());
@@ -66,10 +74,9 @@ static void graphics_vblank_deliver(uint64_t frame)
      * already elapsed historical vblank while the worker catches up. */
     uint64_t observed_frame=graphics_frame_at(dispatch_monotonic());
     if(frame>=observed_frame) {
-        retired=graphics_present_retired+graphics_present_retire(frame);
-        graphics_present_retired=0;
+        retired=graphics_present_retire(frame);
     }
-    uint32_t flags=graphics_swap_flags(retired,graphics_present_count && graphics_presents[0].target && graphics_presents[0].target<=frame);
+    uint32_t flags=graphics_swap_flags(retired,frame);
     uint32_t callback=graphics_callback;
     uint32_t data=graphics_headers+96;
     if(callback) {
@@ -202,7 +209,7 @@ static uint32_t graphics_present(void)
     graphics_present_interval(MEM32(PILOT_D3D_PRESENT_INTERVAL));
     ++graphics_clock_waiters;
     for(;;) {
-        graphics_present_retired+=graphics_present_retire(0);
+        graphics_present_retire(0);
         if(graphics_present_count==2) {
             if(!SleepConditionVariableSRW(&graphics_present_changed,&graphics_lock,1,0) && GetLastError()!=ERROR_TIMEOUT)
                 stop("presentation queue wait failed",GetLastError());
@@ -221,6 +228,7 @@ static uint32_t graphics_present(void)
     uint32_t swap=++graphics_swap_submitted;
     graphics_movie_capture_present(submitted,swap,serial);
     graphics_presents[graphics_present_count++]=(struct GraphicsPresent){serial,target,swap};
+    graphics_swap_expected=target?target+1:graphics_frame_at(submitted);
     MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SWAP_COUNTER)=swap;
     graphics_swap_deadline=target?graphics_next_vblank(graphics_clock_origin,submitted,graphics_clock_hz):0;
     if(!graphics_clock_presented) {

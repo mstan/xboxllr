@@ -48,7 +48,7 @@ change the next controller-input dependency batch.
 | --- | --- | --- | --- |
 | 1 | Pure calendar conversion (scheduler/time slice) | Small: two original kernel routines; no hardware, IRQ or queue state | Complete, `.103`: both builds qualified; both original routines execute in actual Blinx, with interruption/menu return and reentry; [evidence](../pilots/native-title/CALENDAR-LLE.md) |
 | 2 | Controller input and interruption | XID reports plus USB initialization, DMA and interrupt dependencies | Complete for bounded Blinx port-0 automatic input, `.104`: actual original and HLE interruption/title/reentry, original and HLE hotplug/reopen/Start, original report/mask oracles, shared DMA lifetime and capability transport. 46/46 LLE and 40/40 HLE tests pass. Broader peripheral/timing scope remains explicit. [Evidence and limits](../pilots/native-title/INPUT-LLE.md) |
-| 3 | Display clock and vblank | Bounded clock/interrupt/callback family | Open |
+| 3 | Display clock and vblank | Bounded clock/interrupt/callback family | Active `.105`: original IRQ3/ISR/DPC/vblank/event/swap component runs against maintained NV2A/PIC; two HLE callback-flag corrections pass 40 tests and actual 190s attract regression. Native-title LLE integration remains open. [Evidence](../pilots/native-title/DISPLAY-LLE.md) |
 | 4 | Memory and resource lifetime | Cross-cutting pointer, page, alias and ownership semantics | Open |
 | 5 | Files, cache and installed media | File bytes/errors/order plus backing storage and mount lifetime | Open |
 | 6 | GPU completion, callbacks and visibility | FIFO/traps/reports, pending results and lifetime; uses memory/display | Open |

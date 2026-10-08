@@ -225,7 +225,7 @@ static void graphics_dispatch_impl(unsigned entry)
             graphics_clock_origin=dispatch_monotonic();
             graphics_clock_hz=staged[11]?staged[11]:60;
             graphics_clock_closing=graphics_clock_presented=0;
-            graphics_present_count=graphics_present_retired=0;graphics_swap_submitted=graphics_swap_completed=0;graphics_swap_deadline=0;
+            graphics_present_count=0;graphics_swap_expected=0;graphics_swap_submitted=graphics_swap_completed=0;graphics_swap_deadline=0;
             MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SWAP_COUNTER)=0;
             graphics_state_init();
             graphics_surfaces_create();

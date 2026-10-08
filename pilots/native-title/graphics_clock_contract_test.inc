@@ -25,6 +25,17 @@ static void test_vblank_callback(void)
 }
 static void test_graphics_callbacks(void)
 {
+    /* Original miniport observations from native_vblank_reference.py: the
+     * expected-swap marker survives queue drain and advances on missed edges. */
+    graphics_swap_expected=0;
+    CHECK(graphics_swap_flags(0,1)==0 && graphics_swap_flags(0,2)==0);
+    graphics_swap_expected=7;
+    CHECK(graphics_swap_flags(1,6)==1 && graphics_swap_expected==7);
+    CHECK(graphics_swap_flags(0,7)==2 && graphics_swap_expected==8);
+    CHECK(graphics_swap_flags(0,8)==2 && graphics_swap_expected==9);
+    graphics_swap_expected=8; /* Immediate swap at frame 8. */
+    CHECK(graphics_swap_flags(0,9)==0);
+    graphics_swap_expected=0;
     dispatch_ensure();DWORD before,after;
     vblank_test_done=CreateEventW(NULL,TRUE,FALSE,NULL);
     vblank_test_entered=CreateEventW(NULL,TRUE,FALSE,NULL);

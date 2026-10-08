@@ -348,6 +348,10 @@ if(XLLE_RENDERER STREQUAL "LLE")
     target_compile_options(test_nv2a PRIVATE -march=native)
   endif()
   add_test(NAME nv2a COMMAND test_nv2a)
+  # Private original-code qualification bridge. Reuses the maintained hardware
+  # implementation; it is neither installed nor part of the shipping pilot.
+  add_library(xlle_nv2a_reference SHARED EXCLUDE_FROM_ALL tools/nv2a_reference.cpp)
+  target_link_libraries(xlle_nv2a_reference PRIVATE xlle_machine xlle_host)
 endif()
 if(XLLE_RENDERER STREQUAL "HLE")
   add_executable(test_nv2a_hle_renderer tests/test_nv2a_hle_renderer.cpp)
