@@ -154,6 +154,7 @@ struct Buffer final:public IXAudio2VoiceCallback {
     UINT32 bytes=0,align=0,channels=0,rate=0,frequency=0,origin=0,next=0;
     UINT32 loop_start=0,loop_end=0;
     UINT64 baseline=0;
+    UINT64 capture_id=0;
     bool playing=false,looping=false,submitted_end=false;
     std::atomic<HRESULT> error{S_OK};
     Chunk chunks[32];
@@ -166,6 +167,7 @@ struct Buffer final:public IXAudio2VoiceCallback {
     void STDMETHODCALLTYPE OnVoiceError(void*,HRESULT hr) override {error=hr;SetEvent(wake);}
 };
 static Buffer *buffers[256];
+static LONG64 audio_capture_next_id;
 static void diagnostic_capture_start(void);
 static void diagnostic_capture_close(void);
 static UINT32 position(Buffer *b,XAUDIO2_VOICE_STATE *state=nullptr)
@@ -195,6 +197,29 @@ static AudioTimelineRecord *audio_timeline;
 static constexpr unsigned audio_timeline_capacity=100000;
 static unsigned audio_timeline_count,audio_timeline_overflow;
 static FILE *audio_timeline_file;
+/* Optional bounded, exact source bytes. One tap observes caller writes; the
+ * other observes bytes successfully queued to XAudio2. No file I/O runs under
+ * the audio owner lock, and no second decoder/mixer execution is involved. */
+struct AudioIngressHeader {
+    uint32_t magic,version,kind,header_bytes;
+    uint64_t time,id,buffer;
+    uint32_t rate,channels,bits,capacity,offset,bytes;
+};
+static_assert(sizeof(AudioIngressHeader)==64,"source capture header layout");
+static BYTE *audio_ingress;
+static constexpr uint32_t audio_ingress_capacity=128*1024*1024;
+static uint32_t audio_ingress_size,audio_ingress_overflow;
+static HANDLE audio_ingress_file;
+static void audio_ingress_record(Buffer *b,uint32_t kind,uint32_t offset,const void *data,uint32_t bytes)
+{
+    if(!audio_ingress)return;
+    if(audio_ingress_size>audio_ingress_capacity-sizeof(AudioIngressHeader) ||
+        bytes>audio_ingress_capacity-audio_ingress_size-sizeof(AudioIngressHeader)) {++audio_ingress_overflow;return;}
+    AudioIngressHeader h{0x50414c58,1,kind,sizeof(AudioIngressHeader),capture_clock(),b->capture_id,
+        (uint64_t)(uintptr_t)b,b->frequency,b->channels,b->align/b->channels*8,b->bytes,offset,bytes};
+    memcpy(audio_ingress+audio_ingress_size,&h,sizeof(h));audio_ingress_size+=sizeof(h);
+    memcpy(audio_ingress+audio_ingress_size,data,bytes);audio_ingress_size+=bytes;
+}
 static void audio_stream_record(Buffer *b,const char *operation,UINT32 offset=0,UINT32 bytes=0)
 {
     if(!audio_timeline && !audio_stream_profile())return;
@@ -243,6 +268,7 @@ static HRESULT fill(Buffer *b)
         XAUDIO2_BUFFER submit{};submit.AudioBytes=n;submit.pAudioData=chunk.data;submit.pContext=&chunk;
         HRESULT hr=b->voice->SubmitSourceBuffer(&submit);
         if(FAILED(hr)){chunk.busy=false;return hr;}
+        audio_ingress_record(b,2,b->next,chunk.data,n);
         ++s.BuffersQueued;b->next=cursor;
         if(!b->looping && !cursor)b->submitted_end=true;
     }
@@ -337,9 +363,19 @@ static DWORD WINAPI diagnostic_capture_worker(void*)
     if(wait!=WAIT_OBJECT_0 && wait!=WAIT_TIMEOUT)fail("audio capture wait");
     UINT32 frames=pilot_audio_capture_end();DWORD written=0,bytes=frames*6*sizeof(float);
     AudioTimelineRecord *timeline=nullptr;unsigned records=0,overflow=0;
+    BYTE *ingress=nullptr;uint32_t ingress_size=0,ingress_overflow=0;
     {
         Guard guard;timeline=audio_timeline;audio_timeline=nullptr;
         records=audio_timeline_count;overflow=audio_timeline_overflow;
+        ingress=audio_ingress;audio_ingress=nullptr;
+        ingress_size=audio_ingress_size;ingress_overflow=audio_ingress_overflow;
+    }
+    if(ingress) {
+        DWORD stored;
+        if(!WriteFile(audio_ingress_file,ingress,ingress_size,&stored,nullptr) || stored!=ingress_size ||
+            !CloseHandle(audio_ingress_file))fail("audio source capture write",HRESULT_FROM_WIN32(GetLastError()));
+        audio_ingress_file=nullptr;delete[] ingress;
+        fprintf(stderr,"[AUDIO INGRESS] bytes=%u overflow=%u\n",ingress_size,ingress_overflow);
     }
     if(timeline) {
         for(unsigned i=0;i<records;++i) {
@@ -387,6 +423,14 @@ static void diagnostic_capture_start(void)
     UINT32 stamp_capacity=diagnostic_seconds*10+2;
     diagnostic_stamps=new(std::nothrow) CaptureStamp[stamp_capacity];
     if(!diagnostic_stamps)fail("audio capture clock allocation",E_OUTOFMEMORY);
+    const char *ingress_path=getenv("XLLE_PILOT_AUDIO_INGRESS");
+    if(ingress_path && *ingress_path) {
+        audio_ingress_file=CreateFileA(ingress_path,GENERIC_WRITE,FILE_SHARE_READ,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
+        if(audio_ingress_file==INVALID_HANDLE_VALUE)fail("audio source capture create",HRESULT_FROM_WIN32(GetLastError()));
+        BYTE *bytes=new(std::nothrow) BYTE[audio_ingress_capacity];
+        if(!bytes)fail("audio source capture allocation",E_OUTOFMEMORY);
+        Guard guard;audio_ingress_size=audio_ingress_overflow=0;audio_ingress=bytes;
+    }
     const char *timeline_path=getenv("XLLE_PILOT_AUDIO_TIMELINE");
     if(timeline_path && *timeline_path) {
         audio_timeline_file=fopen(timeline_path,"wx");if(!audio_timeline_file)fail("audio timeline create");
@@ -430,6 +474,7 @@ int32_t pilot_audio_buffer_create(uint32_t bytes,unsigned channels,unsigned rate
     if(!engine || !out || !bytes || (channels!=1 && channels!=2) || (bits!=8 && bits!=16) ||
        rate<100 || rate>200000 || bytes%(channels*(bits/8)))return E_INVALIDARG;
     Buffer *b=new(std::nothrow) Buffer();if(!b)return E_OUTOFMEMORY;
+    b->capture_id=(UINT64)InterlockedIncrement64(&audio_capture_next_id);
     b->data=new(std::nothrow) BYTE[bytes];if(!b->data){delete b;return E_OUTOFMEMORY;}
     b->bytes=b->loop_end=bytes;b->channels=channels;b->align=channels*bits/8;b->rate=b->frequency=rate;
     memset(b->data,bits==8?128:0,bytes);
@@ -464,7 +509,8 @@ int32_t pilot_audio_buffer_copy(void *opaque,uint32_t offset,void *data,uint32_t
     if(!b || !data || !bytes || offset>=b->bytes || bytes>b->bytes)return E_INVALIDARG;
     Guard guard;UINT32 first=bytes;if(first>b->bytes-offset)first=b->bytes-offset;
     if(readback){memcpy(data,b->data+offset,first);memcpy((BYTE*)data+first,b->data,bytes-first);}
-    else {memcpy(b->data+offset,data,first);memcpy(b->data,(BYTE*)data+first,bytes-first);}
+    else {memcpy(b->data+offset,data,first);memcpy(b->data,(BYTE*)data+first,bytes-first);
+        audio_ingress_record(b,1,offset,data,bytes);}
     audio_stream_record(b,readback?"read":"write",offset,bytes);
     return b->error;
 }
