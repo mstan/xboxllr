@@ -1,5 +1,34 @@
 # Native title reference pilot
 
+## GPU completion progress checkpoint (2026-10-08)
+
+`beads-xbox.1.87`, experiment `perf/blinx-callback-latency-20261008`.
+Allow D3D11 `GetData` to advance queued commands (flags zero) while polling real
+event completion. `S_OK` and a true event result remain necessary; FIFO callback
+order and WRITE barriers are unchanged. Microsoft documents that
+[DONOTFLUSH can prevent queued commands from progressing](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/ne-d3d11-d3d11_async_getdata_flag).
+Phobos `bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0`,
+`src/hle/hle_d3d8.c` InsertCallback, suggests prompt callback delivery, but its
+immediate completion assumption and original-body execution are not adopted.
+No donor implementation is copied by this change.
+
+Matched actual NTSC Blinx runs use the same CPU15 guest affinity, startup input,
+media and opt-in `XLLE_PILOT_CALLBACK_PROFILE=1`, with image capture disabled.
+The first 28 presents after the first Xbox ADPCM allocation contain 326 callback
+records in each log. Baseline `callback-profile-baseline` measures 0.2351486 fps,
+median 4253.9725 ms/frame and maximum 255 polls/event. Candidate
+`callback-flush-progress` measures 2.9471945 fps, median 339.9738 ms/frame and
+maximum 2 polls/event: 12.53x faster. This contiguous window avoids incorrectly
+combining distinct loading phases. Logs are private under `build/blinx/run-*.log`.
+All 34 native tests pass in 14.59 s, including real GPU completion, pixels,
+callback ordering and ownership. No new LLE behavior is substituted.
+
+The candidate completes three replay-file writes and reaches the zero-byte
+audio-buffer guard after 147.11 s (`beads-xbox.1.88`). It does not establish
+rendered gameplay, complete attract playback or original speed. Ordinary
+callback retry latency remains roughly 12–15 ms; a separate timer experiment
+may address it, subject to actual-title measurement.
+
 `beads-xbox.1.61`, 2026-10-06. This standalone experiment uses Phobos
 `63f18f0334fbd8c00313c4bb565accf00627a4fd` discovery, lifting and CPU helper header.
 It is outside the normal xboxlle build. **The generated executable is a private

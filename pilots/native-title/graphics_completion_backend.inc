@@ -17,7 +17,10 @@ static void pilot_completion_poll(void)
     ID3D11DeviceContext *context=d3d8_GetD3D11Context();
     while(pilot_completion_head) {
         struct PilotCompletion *entry=pilot_completion_head;BOOL complete=FALSE;
-        HRESULT hr=ID3D11DeviceContext_GetData(context,(ID3D11Asynchronous*)entry->query,&complete,sizeof(complete),D3D11_ASYNC_GETDATA_DONOTFLUSH);
+        /* A CPU waiter may prevent further draws/presents. Let the native
+         * runtime advance command submission while checking actual completion;
+         * DONOTFLUSH can leave that waiter dependent on later API traffic. */
+        HRESULT hr=ID3D11DeviceContext_GetData(context,(ID3D11Asynchronous*)entry->query,&complete,sizeof(complete),0);
         pilot_d3d_require(hr,__FILE__,__LINE__);
         if(hr!=S_OK || !complete)break;
         pilot_completed=entry->serial;pilot_completion_head=entry->next;
@@ -39,7 +42,7 @@ static int pilot_serial_busy(uint64_t serial)
         ID3D11DeviceContext_End(context,(ID3D11Asynchronous*)entry->query);
         if(pilot_completion_tail)pilot_completion_tail->next=entry;else pilot_completion_head=entry;
         pilot_completion_tail=entry;++pilot_query_count;++pilot_query_created;
-        /* Submit once, then use DONOTFLUSH on repeated nonblocking polls. */
+        /* Submit now; subsequent nonblocking GetData may also advance work. */
         ID3D11DeviceContext_Flush(context);
         pilot_completion_poll();
     }

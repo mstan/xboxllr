@@ -28,8 +28,13 @@ Asynchronous writes now complete two actual 1,913,856-byte replay files (.86).
 The 420-second bounded run continues without a guard/crash; captures show the
 overlay and a green effect, then mostly black frames. No rendered gameplay is
 established. Tail presentation measures 0.236fps with diagnostics, far below
-the cadence goal. Live/final stacks point to callback-barrier waits (.87),
-but the proposed1ms ready-queue delay alone cannot explain4.25-second frames.
+the cadence goal. The callback-progress fix (.87) raises the matched first 28
+stage presents from 0.23515 fps to 2.94719 fps (12.53x), without image capture in
+either run. Median frame time falls from 4253.97 ms to 339.97 ms. Real D3D11 event
+completion remains required; allowing GetData to advance queued commands removes
+the 255-poll stalls. All 34 native tests pass (14.59 s). The faster run writes
+three replay files and stops after 147.11 s at an unqualified zero-byte audio
+buffer request (.88). No new gameplay-image or original-cadence claim follows.
 Captured real GP audio
 matches original intro/title content at the checked sample progression.
 Full audio quality/sync and attract validation remain pending. Earlier fresh/repeat runs reached the callback boundary in 12.95/7.33 s
@@ -62,7 +67,8 @@ enforced. No title error condition is bypassed.
 | Render-target feedback | Observed aligned full-screen scene pass; bounded NV2A pixels and real native snapshot/cache/lifetime tests pass; borrowed Phobos implementation advances actual Blinx (.84) |
 | Xbox ADPCM buffers | Borrowed Phobos/NoRain decoder agrees with APU samples; original unit helpers and real native output/storage/cursor/loop/lifetime tests pass; actual Blinx advances (.85) |
 | Async file writes | Original submission/events, LLE actual storage-before-IRQ and native write/EOF/completion/filewait/ownership pass; actual title completes two1.9MB files (.86) |
-| Next integration work | Measure callback completion and presentation stalls at Demo play;0.236fps diagnostic tail and mostly black scene remain unacceptable (.87) |
+| Callback completion progress | Real completion/FIFO retained; matched stage 0.23515 to 2.94719 fps, max polls 255 to 2; 34 native tests pass (.87) |
+| Next integration work | Qualify reached zero-byte audio-buffer request (.88); capture faster actual title; mostly black scene and original cadence remain unresolved |
 | Input | Physical XInput, keyboard and timed host-controller replay; real startup interruption observed twice; gameplay interruption/menu return pending |
 | Attract startup/loading/render/audio/movies/gameplay | Partial startup/rendering only; no complete attract sequence yet |
 | Repeat loops, interruption/menu return, original cadence | Pending actual title integration measurements |
