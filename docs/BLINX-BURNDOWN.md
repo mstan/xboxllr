@@ -25,7 +25,7 @@ nine acceptance gates deliberately use different granularity.
 | Delivery order | Service | Relative work / dependencies | State |
 | --- | --- | --- | --- |
 | 1 | Pure calendar conversion (scheduler/time slice) | Small: two original kernel routines; no hardware, IRQ or queue state | Complete, `.103`: both builds qualified; both original routines execute in actual Blinx, with interruption/menu return and reentry; [evidence](../pilots/native-title/CALENDAR-LLE.md) |
-| 2 | Controller input and interruption | Smallest device family: XID reports plus USB initialization/transfer dependencies | Open |
+| 2 | Controller input and interruption | XID reports plus USB initialization/transfer dependencies; actual original startup exposes missing device-manager plumbing | In progress, `.104`: original XAPI reaches `IoCreateDevice`; [dependency evidence](../pilots/native-title/INPUT-LLE.md) |
 | 3 | Display clock and vblank | Bounded clock/interrupt/callback family | Open |
 | 4 | Memory and resource lifetime | Cross-cutting pointer, page, alias and ownership semantics | Open |
 | 5 | Files, cache and installed media | File bytes/errors/order plus backing storage and mount lifetime | Open |
