@@ -29,8 +29,10 @@ enforced. No title error condition is bypassed.
 | JSRF | Deferred until Blinx completes; shared services and separate revision bindings |
 
 The earlier callback checkpoint passed all 30 CTests (13.04 s). Current alias
-ABI and LLE NV2A tests pass, but the native GPU fixture now times out on an
-occlusion query after device recreation (`beads-xbox.1.66`, unresolved). Visibility fixtures cover real samples, masks,
+ABI and LLE NV2A tests passed. The later device-recreation query timeout was
+traced to a donor cached view from the destroyed device and fixed (.66). The
+three-device renderer test passes with/without D3D11 validation. The latest full
+suite is 29/30 due to the separate intermittent vblank handle-count assertion. Visibility fixtures cover real samples, masks,
 clipping, index reuse, pending outputs, timestamps and teardown. Capacity tests cover
 600 simultaneous reservations and 520 GPU textures with repeat cleanup and real
 contents. The concurrent validation run encountered the existing vblank test's

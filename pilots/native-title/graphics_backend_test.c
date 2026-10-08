@@ -49,7 +49,11 @@ static int test_resource_bindings(void)
     CHECK(views[0] && views[3]==views[0] && !d3d8_GetStageTexture(1) && !d3d8_GetStageTexture(2));
     /* A renderer may bind an internal neutral sampling view for an empty
      * logical stage. Assert guest state and pixels, not that implementation. */
-    for(unsigned i=0;i<4;++i)if(views[i])ID3D11ShaderResourceView_Release(views[i]);
+    for(unsigned i=0;i<4;++i)if(views[i]) {
+        ID3D11Device *owner=NULL;ID3D11ShaderResourceView_GetDevice(views[i],&owner);
+        CHECK(owner==d3d8_GetD3D11Device());ID3D11Device_Release(owner);
+        ID3D11ShaderResourceView_Release(views[i]);
+    }
     struct {float x,y,z,w;uint32_t color;float u,v;} vertices[]={
         {8,8,.5f,1,0xffffffff,.5f,.5f},{56,8,.5f,1,0xffffffff,.5f,.5f},{32,56,.5f,1,0xffffffff,.5f,.5f}};
     unsigned char pixels[64*64*4];unsigned center=(24*64+32)*4;

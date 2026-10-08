@@ -6,6 +6,23 @@ It is outside the normal xboxlle build. **The generated executable is a private
 GPL-dependent reference artifact, not the intended non-GPL shipping product.**
 See [license scope](../../LICENSE-SCOPE.md). There is no install/package target.
 
+## Renderer lifetime correction (2026-10-07)
+
+`beads-xbox.1.66`: D3D11 validation identified the repeated-device failure as a
+Phobos empty-stage shader view cached across device destruction. Binding it to
+the replacement device produced CORRUPTED_PARAMETER3 and left later occlusion
+queries pending. The prepared donor now releases/resets this view at teardown.
+The existing resource fixture also verifies every bound view's device identity.
+No query results, flushing policy or readiness deadlines are changed.
+
+The full three-device renderer test passes with D3D11 validation (1.07 s) and
+production flags (1.31 s). Ten native-generation Python tests pass. The full
+native suite passed 29/30: the graphics ABI test encountered its separate known
+intermittent process-wide vblank handle-count assertion. No all-green claim.
+`XLLE_PILOT_D3D_DEBUG=1` enables driver-layer validation for further diagnosis;
+private evidence is in `build/query-debug-events.log` and
+`build/query-lifetime-all-tests.log`.
+
 ## Current checkpoint - movie discovery (2026-10-07)
 
 `beads-xbox.1.68`: Blinx now finds `microsoft.sfd` through real directory

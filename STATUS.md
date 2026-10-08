@@ -1,5 +1,15 @@
 # STATUS
 
+## 2026-10-07 - Donor device-lifetime bug identified and fixed
+
+The visibility timeout came from Phobos retaining an empty-stage texture view
+across D3D11 devices. Driver diagnostics identify an invalid cross-device bind.
+The donor preparation now releases/resets that view, and the renderer's three
+create/destroy cycles pass under debug and production flags. No completion
+bypass or changed polling heuristic. The full suite is 29/30 because the separate
+intermittent vblank process-handle-count assertion fired; Python tests are 10/10.
+
+
 ## 2026-10-07 - Blinx discovers its first movie
 
 Real directory enumeration finds `microsoft.sfd`; Blinx then attempts to open it

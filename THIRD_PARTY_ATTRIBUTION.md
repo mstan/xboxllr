@@ -15,6 +15,16 @@ notices. Preparation/build steps must report missing required notices.
 
 ## Private native-title reference pilot
 
+### Donor device-lifetime correction - 2026-10-07
+
+The preparation of Phobos `src/d3d/d3d8_device.c` at
+`bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0` now releases and resets its cached
+empty-stage RHI view at device destruction. D3D11 validation exposed an old
+device's view being rebound to a new device. This is an adaptation of the
+already imported private renderer; its original notices and GPL scope remain.
+Prepared source hashes and MODIFICATIONS.md record the change. Driver debug
+validation is available through XLLE_PILOT_D3D_DEBUG.
+
 ### Directory enumeration - 2026-10-07
 
 Phobos `src/kernel/kernel_file.c` at

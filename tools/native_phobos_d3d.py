@@ -102,6 +102,26 @@ def prepare(donor, output, reference):
                     '    sd.border[2]=(border&255)/255.0f;\n'
                     '    sd.border[3]=((border>>24)&255)/255.0f;')
             if path.name=='d3d8_device.c':
+                # The donor's function-local empty-stage view survives device
+                # destruction. Rebinding it to a new D3D11 device corrupts the
+                # context and can leave real occlusion queries pending forever.
+                code=once(code,'static void up_ring_shutdown(void);',
+                    'static void up_ring_shutdown(void);\nstatic void empty_stage_shutdown(void);')
+                code=once(code,'        up_ring_shutdown();',
+                    '        empty_stage_shutdown();\n        up_ring_shutdown();')
+                start=code.index('static RhiView *empty_stage_view(void)')
+                end=code.index('\nstatic HRESULT __stdcall dev_SetTexture',start)
+                body=code[start:end].replace('    static RhiView *view;\n    static int tried;\n','')
+                body=re.sub(r'\bview\b','empty_stage_cached_view',body)
+                body=re.sub(r'\btried\b','empty_stage_tried',body)
+                body=('static RhiView *empty_stage_cached_view;\nstatic int empty_stage_tried;\n'+body+
+                    '\nstatic void empty_stage_shutdown(void) {\n'
+                    '    if(empty_stage_cached_view)rhi_view_destroy(empty_stage_cached_view);\n'
+                    '    empty_stage_cached_view=NULL;empty_stage_tried=0;\n}\n')
+                code=code[:start]+body+code[end:]
+                code=once(code,'    dd.windowed = pp->Windowed ? 1 : 0;',
+                    '    dd.windowed = pp->Windowed ? 1 : 0;\n'
+                    '    dd.debug = getenv("XLLE_PILOT_D3D_DEBUG") != NULL;')
                 code+='\nHRESULT pilot_donor_upload_vertices(const void *data,UINT bytes,UINT stride) {\n'
                 code+='    UINT offset=up_ring_upload(&g_up_vertex_ring,data,bytes);\n'
                 code+='    if(offset==(UINT)-1)return E_OUTOFMEMORY;\n'
@@ -145,7 +165,9 @@ def prepare(donor, output, reference):
         'and UP-ring upload expose real owned resources; independent vertex\n'
         'translation shares the pixel compiler; existing FVF/raster/bump and\n'
         'sampler corrections are retained; combiner failures cannot fall back\n'
-        'to an unrelated shader. Original and prepared hashes are in donor.json.\n',encoding='utf-8')
+        'to an unrelated shader; the empty-stage RHI view is released/reset on\n'
+        'device teardown. XLLE_PILOT_D3D_DEBUG enables native layer diagnostics.\n'
+        'Original and prepared hashes are in donor.json.\n',encoding='utf-8')
     result=dict(repository='https://github.com/phobos665/xboxrecomp',donor=PIN,backend='PHOBOS',
                 license='GPL-3.0 fork; retained MIT upstream and per-file notices',
                 license_files=[str(p.relative_to(donor)).replace('\\','/') for p in paths if p.relative_to(donor).parts[0].startswith('LICENSE') or p.name=='NOTICE'],
