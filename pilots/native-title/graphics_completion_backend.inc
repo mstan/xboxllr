@@ -9,6 +9,23 @@ static int pilot_completion_events_checked;
 static uint64_t pilot_submitted,pilot_completed;
 static unsigned pilot_query_count,pilot_query_created;
 static uint64_t pilot_surface_use[3];
+/* Optional sparse diagnosis of native driver stalls. Report only calls over
+ * 50 ms, after the measured call returns; ordinary completion is unchanged. */
+static uint64_t pilot_gpu_call_begin(void)
+{
+    static int enabled=-1;
+    if(enabled<0){const char *v=getenv("XLLE_PILOT_GPU_CALL_PROFILE");enabled=v && !strcmp(v,"1");}
+    if(!enabled)return 0;
+    LARGE_INTEGER now;QueryPerformanceCounter(&now);return (uint64_t)now.QuadPart;
+}
+static void pilot_gpu_call_end(const char *name,uint64_t begin)
+{
+    if(!begin)return;
+    LARGE_INTEGER now,frequency;QueryPerformanceCounter(&now);QueryPerformanceFrequency(&frequency);
+    double ms=(now.QuadPart-begin)*1000.0/frequency.QuadPart;
+    if(ms>50)fprintf(stderr,"[GPU CALL SLOW] thread=%lu call=%s serial=%llu queries=%u elapsed_ms=%.3f\n",
+        GetCurrentThreadId(),name,(unsigned long long)pilot_submitted,pilot_query_count,ms);
+}
 static void pilot_completion_events_init(void)
 {
     if(pilot_completion_events_checked)return;
@@ -39,13 +56,17 @@ static void pilot_completion_poll(void)
         /* A CPU waiter may prevent further draws/presents. Let the native
          * runtime advance command submission while checking actual completion;
          * DONOTFLUSH can leave that waiter dependent on later API traffic. */
+        uint64_t started=pilot_gpu_call_begin();
         HRESULT hr=ID3D11DeviceContext_GetData(context,(ID3D11Asynchronous*)entry->query,&complete,sizeof(complete),0);
+        pilot_gpu_call_end("GetData",started);
         pilot_d3d_require(hr,__FILE__,__LINE__);
         if(hr!=S_OK || !complete)break;
         if(entry->event && !pilot_completion_event_ready(entry->event))break;
         pilot_completed=entry->serial;pilot_completion_head=entry->next;
         if(!pilot_completion_head)pilot_completion_tail=NULL;
+        started=pilot_gpu_call_begin();
         ID3D11Query_Release(entry->query);if(entry->event)CloseHandle(entry->event);free(entry);--pilot_query_count;
+        pilot_gpu_call_end("query/event release",started);
     }
 }
 static int pilot_serial_busy(uint64_t serial)
@@ -56,10 +77,14 @@ static int pilot_serial_busy(uint64_t serial)
         struct PilotCompletion *entry=calloc(1,sizeof(*entry));
         if(!entry)pilot_d3d_backend_stop("native completion allocation failed");
         D3D11_QUERY_DESC desc={D3D11_QUERY_EVENT,0};
+        uint64_t started=pilot_gpu_call_begin();
         pilot_d3d_require(ID3D11Device_CreateQuery(d3d8_GetD3D11Device(),&desc,&entry->query),__FILE__,__LINE__);
+        pilot_gpu_call_end("CreateQuery",started);
         entry->serial=pilot_submitted;
         ID3D11DeviceContext *context=d3d8_GetD3D11Context();
+        started=pilot_gpu_call_begin();
         ID3D11DeviceContext_End(context,(ID3D11Asynchronous*)entry->query);
+        pilot_gpu_call_end("EndQuery",started);
         if(pilot_completion_tail)pilot_completion_tail->next=entry;else pilot_completion_head=entry;
         pilot_completion_tail=entry;++pilot_query_count;++pilot_query_created;
         /* Submit now; subsequent nonblocking GetData may also advance work. */
@@ -67,8 +92,13 @@ static int pilot_serial_busy(uint64_t serial)
         if(pilot_completion_context) {
             entry->event=CreateEventW(NULL,TRUE,FALSE,NULL);
             if(!entry->event)pilot_d3d_backend_stop("native GPU event allocation failed");
+            started=pilot_gpu_call_begin();
             ID3D11DeviceContext3_Flush1(pilot_completion_context,D3D11_CONTEXT_TYPE_ALL,entry->event);
-        } else ID3D11DeviceContext_Flush(context);
+            pilot_gpu_call_end("Flush1",started);
+        } else {
+            started=pilot_gpu_call_begin();ID3D11DeviceContext_Flush(context);
+            pilot_gpu_call_end("Flush",started);
+        }
         pilot_completion_poll();
     }
     return serial>pilot_completed;

@@ -39,7 +39,7 @@ static int graphics_gpu_deliver(void)
     if(graphics_gpu_profile())fprintf(stderr,"[GPU CALLBACK PROFILE] serial=%llu context=%x checkpoint_ms=%.3f queued_ms=%.3f first_poll_ms=%.3f execution_ms=%.3f polls=%u busy=%u\n",
         (unsigned long long)c->serial,c->context,c->checkpoint_time/10000.0,(ready-c->queued)/10000.0,
         (c->first_poll-c->queued)/10000.0,(dispatch_monotonic()-ready)/10000.0,c->polls,c->busy_polls);
-    fprintf(stderr,"[GPU CALLBACK] type=%u routine=%08x context=%08x serial=%llu delivered=%llu\n",
+    if(pilot_event_trace_enabled())fprintf(stderr,"[GPU CALLBACK] type=%u routine=%08x context=%08x serial=%llu delivered=%llu\n",
         c->type,c->routine,c->context,(unsigned long long)c->serial,(unsigned long long)graphics_gpu_delivered);
     free(c);int pending=graphics_gpu_head!=NULL;WakeAllConditionVariable(&graphics_gpu_changed);
     /* A queued callback may already be ready. Inspect it immediately; only an

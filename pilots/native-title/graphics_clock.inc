@@ -88,7 +88,7 @@ static void graphics_vblank_deliver(uint64_t frame)
     routine();
     if(g_esp!=top-4)stop("vblank cdecl callback stack imbalance",callback);
     g_esp+=4;
-    fprintf(stderr,"[VBLANK CALLBACK] frame=%llu routine=%08x swap=%u flags=%u\n",(unsigned long long)frame,callback,MEM32(data+4),MEM32(data+8));
+    if(pilot_event_trace_enabled())fprintf(stderr,"[VBLANK CALLBACK] frame=%llu routine=%08x swap=%u flags=%u\n",(unsigned long long)frame,callback,MEM32(data+4),MEM32(data+8));
 }
 /* Caller holds graphics_lock. Registration is the original pointer-store
  * contract; a callback already running may finish after replacement/removal. */
@@ -125,6 +125,7 @@ static uint64_t graphics_next_vblank(uint64_t origin,uint64_t now,unsigned hz)
 }
 static void graphics_wait_until(uint64_t deadline)
 {
+    uint64_t started=graphics_service_profile_enabled()?dispatch_monotonic():0;
     HANDLE timer=CreateWaitableTimerExW(NULL,NULL,0x2,TIMER_ALL_ACCESS);
     if(!timer && GetLastError()==ERROR_INVALID_PARAMETER)timer=CreateWaitableTimerW(NULL,FALSE,NULL);
     if(!timer)stop("display timer creation failed",GetLastError());
@@ -136,6 +137,11 @@ static void graphics_wait_until(uint64_t deadline)
             stop("display timer wait failed",GetLastError());
     }
     if(!CloseHandle(timer))stop("display timer close failed",GetLastError());
+    if(started) {
+        uint64_t ended=dispatch_monotonic();
+        if(ended-started>500000)fprintf(stderr,"[DISPLAY TIMER SLOW] thread=%lu requested_ms=%.3f elapsed_ms=%.3f\n",
+            GetCurrentThreadId(),((int64_t)deadline-(int64_t)started)/10000.0,(ended-started)/10000.0);
+    }
 }
 /* Whole display-event API: its lifetime and deadline do not need renderer
  * ownership or completion. Real GPU callbacks/presents retain their ordering
@@ -221,7 +227,12 @@ static uint32_t graphics_present(void)
         graphics_clock_presented=1;
         if(!graphics_callback)dispatch_pulse_set(graphics_clock_origin,graphics_clock_hz,graphics_vblank_deliver);
     }
-    fprintf(stderr,"[PRESENT SUBMIT] swap=%u target=%llu serial=%llu time=%llu\n",swap,
+    uint64_t logging=graphics_service_profile_enabled()?dispatch_monotonic():0;
+    if(pilot_event_trace_enabled())fprintf(stderr,"[PRESENT SUBMIT] swap=%u target=%llu serial=%llu time=%llu\n",swap,
         (unsigned long long)target,(unsigned long long)serial,(unsigned long long)submitted);
+    if(logging) {
+        uint64_t ended=dispatch_monotonic();
+        if(ended-logging>500000)fprintf(stderr,"[PRESENT LOG SLOW] elapsed_ms=%.3f\n",(ended-logging)/10000.0);
+    }
     return swap;
 }

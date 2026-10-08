@@ -183,27 +183,47 @@ static bool audio_stream_profile(void)
     static const bool enabled=[](){const char *p=getenv("XLLE_PILOT_AUDIO_STREAM_PROFILE");return p && !strcmp(p,"1");}();
     return enabled;
 }
+/* Bounded observation under the existing owner lock; no trace-file I/O while
+ * either the guest producer or the native feeder owns audio. The PCM capture
+ * worker detaches this array once, then writes it outside the owner lock. */
+struct AudioTimelineRecord {
+    uint64_t time,buffer,samples,baseline,cpu;
+    const char *operation;
+    uint32_t offset,bytes,play,write,queued,playing,capacity,rate,thread;
+};
+static AudioTimelineRecord *audio_timeline;
+static constexpr unsigned audio_timeline_capacity=100000;
+static unsigned audio_timeline_count,audio_timeline_overflow;
+static FILE *audio_timeline_file;
 static void audio_stream_record(Buffer *b,const char *operation,UINT32 offset=0,UINT32 bytes=0)
 {
-    if(!audio_stream_profile())return;
+    if(!audio_timeline && !audio_stream_profile())return;
     XAUDIO2_VOICE_STATE state;UINT32 play=position(b,&state);
     FILETIME created,exited,kernel,user;
     if(!GetThreadTimes(GetCurrentThread(),&created,&exited,&kernel,&user))
         fail("audio diagnostic thread times",HRESULT_FROM_WIN32(GetLastError()));
     UINT64 cpu=((UINT64)kernel.dwHighDateTime<<32)+kernel.dwLowDateTime+
         ((UINT64)user.dwHighDateTime<<32)+user.dwLowDateTime;
-    // Both values use 100 ns units. CPU time is cumulative for this caller,
-    // so a producer gap can be separated into executed work and elapsed time.
+    uint64_t time=capture_clock();DWORD thread=GetCurrentThreadId();
+    if(audio_timeline) {
+        if(audio_timeline_count<audio_timeline_capacity)
+            audio_timeline[audio_timeline_count++]={time,(uint64_t)(uintptr_t)b,state.SamplesPlayed,b->baseline,cpu,
+                operation,offset,bytes,play,b->next,state.BuffersQueued,b->playing,b->bytes,b->frequency,thread};
+        else ++audio_timeline_overflow;
+    }
+    if(!audio_stream_profile())return;
+    // Synchronous text is for targeted diagnosis, not timing qualification.
     fprintf(stderr,"[AUDIO STREAM] time=%llu buffer=%p operation=%s offset=%u bytes=%u play=%u write=%u samples=%llu baseline=%llu queued=%u playing=%u capacity=%u rate=%u thread=%lu cpu=%llu\n",
-        (unsigned long long)capture_clock(),(void*)b,operation,offset,bytes,play,b->next,
+        (unsigned long long)time,(void*)b,operation,offset,bytes,play,b->next,
         (unsigned long long)state.SamplesPlayed,(unsigned long long)b->baseline,state.BuffersQueued,b->playing,b->bytes,b->frequency,
-        GetCurrentThreadId(),(unsigned long long)cpu);
+        thread,(unsigned long long)cpu);
 }
 static HRESULT fill(Buffer *b)
 {
     if(FAILED(b->error))return b->error;
     if(!b->playing || b->submitted_end)return S_OK;
     XAUDIO2_VOICE_STATE s;b->voice->GetState(&s,XAUDIO2_VOICE_NOSAMPLESPLAYED);
+    if(!s.BuffersQueued)audio_stream_record(b,"empty");
     UINT32 frames=b->frequency/100;if(!frames)frames=1;if(frames>512)frames=512;
     // Four nominal 10-ms chunks, more at high playback rates. Every queued
     // chunk owns its bytes until XAudio2's real completion callback releases it.
@@ -316,6 +336,23 @@ static DWORD WINAPI diagnostic_capture_worker(void*)
     DWORD wait=WaitForSingleObject(diagnostic_stop,diagnostic_seconds*1000);
     if(wait!=WAIT_OBJECT_0 && wait!=WAIT_TIMEOUT)fail("audio capture wait");
     UINT32 frames=pilot_audio_capture_end();DWORD written=0,bytes=frames*6*sizeof(float);
+    AudioTimelineRecord *timeline=nullptr;unsigned records=0,overflow=0;
+    {
+        Guard guard;timeline=audio_timeline;audio_timeline=nullptr;
+        records=audio_timeline_count;overflow=audio_timeline_overflow;
+    }
+    if(timeline) {
+        for(unsigned i=0;i<records;++i) {
+            const auto &r=timeline[i];
+            if(fprintf(audio_timeline_file,"%llu,%llu,%s,%u,%u,%u,%u,%llu,%llu,%u,%u,%u,%u,%u,%llu\n",
+                (unsigned long long)r.time,(unsigned long long)r.buffer,r.operation,r.offset,r.bytes,r.play,r.write,
+                (unsigned long long)r.samples,(unsigned long long)r.baseline,r.queued,r.playing,r.capacity,r.rate,r.thread,
+                (unsigned long long)r.cpu)<0)fail("audio timeline write");
+        }
+        if(fclose(audio_timeline_file))fail("audio timeline close");
+        audio_timeline_file=nullptr;delete[] timeline;
+        fprintf(stderr,"[AUDIO TIMELINE] records=%u overflow=%u\n",records,overflow);
+    }
     if(!WriteFile(diagnostic_file,diagnostic_samples,bytes,&written,nullptr) || written!=bytes ||
        !CloseHandle(diagnostic_file))fail("audio capture write",HRESULT_FROM_WIN32(GetLastError()));
     diagnostic_file=nullptr;delete[] diagnostic_samples;diagnostic_samples=nullptr;
@@ -350,6 +387,15 @@ static void diagnostic_capture_start(void)
     UINT32 stamp_capacity=diagnostic_seconds*10+2;
     diagnostic_stamps=new(std::nothrow) CaptureStamp[stamp_capacity];
     if(!diagnostic_stamps)fail("audio capture clock allocation",E_OUTOFMEMORY);
+    const char *timeline_path=getenv("XLLE_PILOT_AUDIO_TIMELINE");
+    if(timeline_path && *timeline_path) {
+        audio_timeline_file=fopen(timeline_path,"wx");if(!audio_timeline_file)fail("audio timeline create");
+        if(fprintf(audio_timeline_file,"time,buffer,operation,offset,bytes,play,write,samples,baseline,queued,playing,capacity,rate,thread,cpu\n")<0)
+            fail("audio timeline header");
+        auto *records=new(std::nothrow) AudioTimelineRecord[audio_timeline_capacity];
+        if(!records)fail("audio timeline allocation",E_OUTOFMEMORY);
+        Guard guard;audio_timeline_count=audio_timeline_overflow=0;audio_timeline=records;
+    }
     HRESULT hr=audio_capture_begin(diagnostic_samples,48000*diagnostic_seconds,1,diagnostic_stamps,stamp_capacity);
     if(FAILED(hr))fail("audio capture begin",hr);
     diagnostic_stop=CreateEventW(nullptr,TRUE,FALSE,nullptr);
@@ -409,7 +455,7 @@ int32_t pilot_audio_buffer_create(uint32_t bytes,unsigned channels,unsigned rate
 void pilot_audio_buffer_destroy(void *opaque)
 {
     auto *b=static_cast<Buffer*>(opaque);if(!b)return;
-    {Guard guard;for(auto &p:buffers)if(p==b)p=nullptr;}
+    {Guard guard;audio_stream_record(b,"destroy");for(auto &p:buffers)if(p==b)p=nullptr;}
     b->voice->DestroyVoice();delete[] b->data;delete b;
 }
 int32_t pilot_audio_buffer_copy(void *opaque,uint32_t offset,void *data,uint32_t bytes,int readback)
@@ -436,6 +482,7 @@ int32_t pilot_audio_buffer_play(void *opaque,int looping)
     if(b->playing && b->looping!=!!looping){UINT32 at=position(b);b->looping=!!looping;return seek(b,at,true);}
     b->looping=!!looping;b->playing=true;
     HRESULT hr=fill(b);if(SUCCEEDED(hr))hr=b->voice->Start();if(FAILED(hr))b->playing=false;
+    audio_stream_record(b,"play");
     SetEvent(wake);return hr;
 }
 static HRESULT seek(Buffer *b,UINT32 at,bool play)
@@ -445,6 +492,7 @@ static HRESULT seek(Buffer *b,UINT32 at,bool play)
     XAUDIO2_VOICE_STATE s;b->voice->GetState(&s);
     b->origin=b->next=at;b->baseline=s.SamplesPlayed;b->submitted_end=false;b->playing=play;
     if(play){hr=fill(b);if(SUCCEEDED(hr))hr=b->voice->Start();SetEvent(wake);}
+    audio_stream_record(b,play?"seek-playing":"seek-stopped",at);
     return hr;
 }
 int32_t pilot_audio_buffer_stop(void *opaque)

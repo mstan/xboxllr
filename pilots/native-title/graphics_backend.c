@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <limits.h>
+#include "event_trace.h"
 static IDirect3D8 *pilot_factory;
 static IDirect3DDevice8 *pilot_device;
 static HWND pilot_window;
@@ -284,9 +285,13 @@ int32_t pilot_gfx_present(void)
     if(!pilot_visible && visible && !strcmp(visible,"1")) {
         ShowWindow(pilot_window,SW_SHOWNOACTIVATE);UpdateWindow(pilot_window);pilot_visible=1;
     }
+    uint64_t started=pilot_gpu_call_begin();
     ID3D11DeviceContext_CopyResource(d3d8_GetD3D11Context(),(ID3D11Resource*)pilot_surfaces[1],(ID3D11Resource*)pilot_surfaces[0]);
+    pilot_gpu_call_end("present CopyResource",started);
     pilot_surface_use[0]=pilot_surface_use[1]=pilot_mark_work();
-    return pilot_device->lpVtbl->Swap(pilot_device,0);
+    started=pilot_gpu_call_begin();
+    int32_t result=pilot_device->lpVtbl->Swap(pilot_device,0);
+    pilot_gpu_call_end("donor Swap",started);return result;
 }
 int32_t pilot_gfx_persist_display(const unsigned char *bgra,uint32_t width,uint32_t height,uint32_t pitch)
 {
@@ -457,14 +462,18 @@ void pilot_gfx_texture_bind(unsigned stage,uint32_t handle)
             stage,handle,pilot_color_target,pilot_depth_target,texture->d3d8_format,texture->levels,texture->width,texture->height);
         /* Binding alone performs no sampling; draw submission guards overlap. */
     }
+    uint64_t started=pilot_gpu_call_begin();
     pilot_d3d_require(pilot_device->lpVtbl->SetTexture(pilot_device,stage,(IDirect3DBaseTexture8*)texture),__FILE__,__LINE__);
+    pilot_gpu_call_end("donor SetTexture",started);
     pilot_bound_textures[stage]=handle;
 }
 void pilot_gfx_texture_prepare_sample(uint32_t handle,uint32_t level,const void *data,uint32_t bytes,int cpu_exposed)
 {
     D3D8Texture *texture=pilot_texture(handle);
     if(level>=texture->levels)pilot_d3d_backend_stop("invalid sampled texture level");
+    uint64_t started=pilot_gpu_call_begin();
     if(cpu_exposed || !(pilot_textures[handle-1].uploaded&(1u<<level)))pilot_gfx_texture_upload(handle,level,data,bytes);
+    pilot_gpu_call_end("texture upload",started);
 }
 int32_t pilot_gfx_targets(uint32_t color,uint32_t depth)
 {
@@ -475,6 +484,7 @@ int32_t pilot_gfx_targets(uint32_t color,uint32_t depth)
            (depth && sample==(depth==UINT32_MAX?pilot_surfaces[2]:pilot_donor_texture(pilot_texture(depth)))))return E_INVALIDARG;
     }
 #endif
+    uint64_t started=pilot_gpu_call_begin();
     ID3D11RenderTargetView *rtv=d3d8_GetDefaultRTV();
     ID3D11DepthStencilView *dsv=depth==UINT32_MAX?pilot_default_depth:NULL;
     unsigned width=pilot_gfx_width(),height=pilot_gfx_height();
@@ -489,6 +499,7 @@ int32_t pilot_gfx_targets(uint32_t color,uint32_t depth)
         depth==UINT32_MAX?pilot_donor_default_depth():(depth?pilot_texture(depth)->image:NULL),1);
 #endif
     ID3D11DeviceContext_OMSetRenderTargets(d3d8_GetD3D11Context(),1,&rtv,dsv);
+    pilot_gpu_call_end("targets",started);
     pilot_color_target=color;pilot_depth_target=depth;return S_OK;
 }
 int32_t pilot_gfx_texture_create(uint32_t width,uint32_t height,uint32_t levels,uint32_t format,uint32_t *handle)
@@ -622,7 +633,7 @@ void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,ui
     pilot_textures[handle-1].uploaded|=1u<<level;
     pilot_textures[handle-1].gpu_written=0;
     pilot_textures[handle-1].last_use=pilot_mark_work();
-    fprintf(stderr,"[TEXTURE UPLOAD] native=%u level=%u %ux%u bytes=%u\n",handle,level,width,height,bytes);
+    if(pilot_event_trace_enabled())fprintf(stderr,"[TEXTURE UPLOAD] native=%u level=%u %ux%u bytes=%u\n",handle,level,width,height,bytes);
     /* Diagnostic readback is opt-in and absent from production upload work. */
     const char *capture=getenv("XLLE_PILOT_TEXTURE_CAPTURE");
     if(capture && *capture) {

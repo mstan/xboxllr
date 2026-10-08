@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "event_trace.h"
 #define RECOMP_GENERATED_CODE
 #include "recomp_types.h"
 #include "pilot_image.h"

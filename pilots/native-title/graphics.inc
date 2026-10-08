@@ -136,10 +136,13 @@ static void graphics_dispatch_impl(unsigned entry)
         graphics_wait_vblank();
         g_esp+=4+pilot_d3d_calls[entry].stack_bytes;return;
     }
+    uint64_t entered=graphics_service_profile_enabled()?dispatch_monotonic():0;
     AcquireSRWLockExclusive(&graphics_lock);
+    uint64_t acquired=entered?dispatch_monotonic():0;
     if (entry!=PILOT_D3D_Direct3D_CreateDevice && !graphics_active)
         stop("graphics entry before native creation",pilot_d3d_calls[entry].address);
     if(entry!=PILOT_D3D_D3DDevice_InsertCallback)graphics_gpu_barrier();
+    uint64_t barrier=entered?dispatch_monotonic():0;
     switch(entry) {
     case PILOT_D3D_D3DDevice_SetTransform:graphics_transform_set(arguments[0],arguments[1]);break;
     case PILOT_D3D_D3DDevice_InsertCallback:
@@ -363,7 +366,13 @@ static void graphics_dispatch_impl(unsigned entry)
     default:
         stop(pilot_d3d_calls[entry].name,pilot_d3d_calls[entry].address);
     }
+    uint64_t unlocking=entered?dispatch_monotonic():0;
     ReleaseSRWLockExclusive(&graphics_lock);
+    if(entered) {
+        uint64_t ended=dispatch_monotonic();
+        if(ended-entered>500000)fprintf(stderr,"[GRAPHICS PHASES] name=%s lock_ms=%.3f barrier_ms=%.3f implementation_ms=%.3f unlock_ms=%.3f\n",
+            pilot_d3d_calls[entry].name,(acquired-entered)/10000.0,(barrier-acquired)/10000.0,(unlocking-barrier)/10000.0,(ended-unlocking)/10000.0);
+    }
     g_esp+=4+pilot_d3d_calls[entry].stack_bytes;
 }
 

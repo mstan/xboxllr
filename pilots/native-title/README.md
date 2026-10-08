@@ -1,5 +1,14 @@
 # Native title reference pilot
 
+## Movie queue/stall investigation (2026-10-08)
+
+The [movie stall audit](../../docs/BLINX-MOVIE-STALL-AUDIT-2026-10-08.md)
+records the bounded audio timeline, callback/host-call timings, logging trials
+and unsuccessful affinity removal. The native queue stays full while fresh
+guest PCM writes pause. Logging changes have not established a speed gain;
+the investigation branch remains separate from the validated baseline.
+Full A/V and original-speed qualification remain open.
+
 ## Display waits independent of renderer ownership (2026-10-08)
 
 `beads-xbox.1.73/.98`, branch `fix/blinx-independent-display-wait-20261008`.
@@ -55,8 +64,8 @@ Private evidence: `build/blinx/display-wait-validation.aot-private.json`,
 `movie-producer-time/`, `movie-vblank-waits/`, `movie-render-lock/`,
 `movie-independent-display/`, `movie-independent-quiet/` and `display-wait-input/`,
 with their logs, executable hashes, PCM/clock files and frame comparisons.
-Next investigate the remaining native source-queue underrun/tail behavior with
-bounded in-memory observation, and the independent renderer stalls. Do not
+The later bounded timeline above finds no native source-queue underrun during
+the opening. Investigate fresh-data starvation and the remaining tail instead. Do not
 restore renderer synchronization to make audio follow those stalls.
 
 ## Full movie validation and decoder stalls (2026-10-08)

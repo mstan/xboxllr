@@ -22,7 +22,7 @@ static void media_async_finish(struct MediaAsyncTransfer *r)
     media_async_publish(r->iosb,status,(uint32_t)r->io.Information);
     if(r->event && event_nt_set(r->event,NULL)<0)stop("file event completion delivery failed",owner->id);
     if(!SetEvent(owner->async_signal))stop("file completion signal failed",owner->id);
-    fprintf(stderr,"[ASYNC FILE COMPLETE] handle=%08x requested=%u completed=%llu status=%08x operation=%s\n",owner->id,r->length,(unsigned long long)r->io.Information,status,r->write?"write":"read");
+    if(r->write || pilot_event_trace_enabled())fprintf(stderr,"[ASYNC FILE COMPLETE] handle=%08x requested=%u completed=%llu status=%08x operation=%s\n",owner->id,r->length,(unsigned long long)r->io.Information,status,r->write?"write":"read");
     if((r->event && !CloseHandle(r->event)) || !CloseHandle(r->done))stop("asynchronous IO handle cleanup failed",owner->id);
     CloseThreadpoolWait(r->waiter);free(r);
     if(!owner->pending)stop("asynchronous file ownership underflow",owner->id);

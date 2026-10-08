@@ -15,6 +15,15 @@ notices. Preparation/build steps must report missing required notices.
 
 ## Private native-title reference pilot
 
+### Movie queue/stall audit - 2026-10-08
+
+The [movie stall audit](docs/BLINX-MOVIE-STALL-AUDIT-2026-10-08.md)
+records the pinned Phobos audio queue/buffer/diagnostic references and the
+independent FFmpeg ADX comparison. The new bounded timeline, sparse timings and
+event-trace gate are independently authored. No additional donor or FFmpeg
+implementation was incorporated, and the existing private pilot shipping
+exclusion remains in force.
+
 ### Independent display waits - 2026-10-08
 
 The reviewed original NTSC `D3DDevice_BlockUntilVerticalBlank` body, recorded

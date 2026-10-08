@@ -290,8 +290,9 @@ static uint32_t media_open(uint32_t *args,int create)
     if (!out || !iosb) return MEDIA_INVALID;
     if (attr && MEM32(attr+4)) {
         uint32_t name=MEM32(attr+4),length=MEM16(name);
-        fprintf(stderr,"[FILE OPEN] root=%08x name=%.*s access=%08x options=%08x\n",
-                MEM32(attr),(int)(length>1024?1024:length),(char*)(memory+MEM32(name+4)),access,options);
+        fprintf(stderr,"[FILE OPEN] root=%08x name=%.*s access=%08x options=%08x time=%llu\n",
+                MEM32(attr),(int)(length>1024?1024:length),(char*)(memory+MEM32(name+4)),access,options,
+                (unsigned long long)dispatch_monotonic());
     }
     /* Preserve native asynchronous/nonbuffered open semantics. Reads require
      * the separate completion-delivery contract below. */
