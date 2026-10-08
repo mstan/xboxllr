@@ -1,5 +1,33 @@
 # Native title reference pilot
 
+## Callback retry timer checkpoint (2026-10-08)
+
+`beads-xbox.1.90`, branch `perf/blinx-callback-timer-20261008`, base `a56b056`.
+The shared relative wait uses the same high-resolution native timer already
+used by presentation waits, with the existing coarse API as a fallback when
+the flag is unsupported. Guest deadlines, timer signaling, callback ordering
+and real GPU completion conditions are unchanged. See Microsoft's
+[CreateWaitableTimerExW contract](https://learn.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-createwaitabletimerexw).
+There is no borrowed implementation or new guest ABI behavior in this change.
+
+Two fresh actual-title observations use identical CPU15 guest affinity,
+startup replay, media and callback profiling, without image capture. The
+matched first 28 stage presents contain 326 callback records each:
+
+| Run | Presented fps | Median frame ms | Median callback queue ms |
+| --- | ---: | ---: | ---: |
+| `timer-reference` | 2.929867 | 340.2453 | 11.8565 |
+| `timer-highres` | 4.165738 | 239.6022 | 1.2655 |
+
+The 42.2% cadence gain is accompanied by shorter measured native retry waits.
+Maximum polls rises from 3 to 8 because checks happen sooner; readiness is
+still determined by the real query result. Both observations reach their
+180-second bounds without guard/fault before harness termination. The faster
+run reaches the time-stop sound asset. All 35 native tests pass (15.84 s).
+Private logs and `callback-timer-comparison.aot-private.json` are under
+`build/blinx/`. These are presented-frame measurements with unresolved scene
+rendering, not original-speed or complete-attract validation.
+
 ## GPU completion progress checkpoint (2026-10-08)
 
 `beads-xbox.1.87`, experiment `perf/blinx-callback-latency-20261008`.

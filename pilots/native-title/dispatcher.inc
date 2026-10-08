@@ -189,7 +189,12 @@ static BOOL CALLBACK dispatch_start(PINIT_ONCE once,void *parameter,void **conte
     dispatch_clock_origin=dispatch_monotonic();
     dispatch_changed=CreateEventW(NULL,FALSE,FALSE,NULL);
     dispatch_absolute=CreateWaitableTimerW(NULL,FALSE,NULL);
-    dispatch_relative=CreateWaitableTimerW(NULL,FALSE,NULL);
+    /* GPU retry and display deadlines can be much shorter than the default
+     * host timer tick. Preserve their deadlines without rounding each retry
+     * up to that tick; older hosts retain the supported coarse timer path. */
+    dispatch_relative=CreateWaitableTimerExW(NULL,NULL,0x2,TIMER_ALL_ACCESS);
+    if(!dispatch_relative && GetLastError()==ERROR_INVALID_PARAMETER)
+        dispatch_relative=CreateWaitableTimerW(NULL,FALSE,NULL);
     if (!dispatch_changed || !dispatch_absolute || !dispatch_relative) stop("dispatcher allocation failed",GetLastError());
     dispatch_worker_handle=CreateThread(NULL,0,dispatch_worker,NULL,0,NULL);
     if (!dispatch_worker_handle) stop("dispatcher thread creation failed",GetLastError());

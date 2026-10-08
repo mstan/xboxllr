@@ -39,8 +39,10 @@ then create/rebind the next sound. The captured 300-second follow-up passes
 repeated detachment, completes 19 replay-file writes and opens 09_TimeStop.adx,
 with no guard/fault before the harness stops it. Its last 60 presents measure
 2.738 fps (capture enabled). Images still show a largely black scene behind
-the overlay/effects (.89). Callback retry timer latency remains a separate
-measured candidate (.90). No complete attract-loop or original-cadence claim follows.
+the overlay/effects (.89). High-resolution callback retry (.90) now improves a
+fresh matched comparison from 2.92987 to 4.16574 fps, with real completion and
+deadlines retained. Both 180-second observations remain free of guards/faults;
+all 35 native tests pass. No complete attract-loop or original-cadence claim follows.
 Captured real GP audio
 matches original intro/title content at the checked sample progression.
 Full audio quality/sync and attract validation remain pending. Earlier fresh/repeat runs reached the callback boundary in 12.95/7.33 s
@@ -75,7 +77,8 @@ enforced. No title error condition is bypassed.
 | Async file writes | Original submission/events, LLE actual storage-before-IRQ and native write/EOF/completion/filewait/ownership pass; actual title completes two1.9MB files (.86) |
 | Callback completion progress | Real completion/FIFO retained; matched stage 0.23515 to 2.94719 fps, max polls 255 to 2; 34 native tests pass (.87) |
 | Audio detach/rebind | Original settings/caller, LLE VOICE_OFF and real native PCM/ADPCM output/ownership validated; actual 300-second run passes old guard and repeated sound reuse (.88) |
-| Next integration work | Diagnose missing scene geometry/content (.89); isolate measured callback retry timer latency (.90); complete loop, input return and original cadence remain unresolved |
+| Callback retry timer | High-resolution native relative wait with supported fallback; fresh matched stage 2.92987 to 4.16574 fps, all 35 tests pass (.90) |
+| Next integration work | Diagnose missing scene geometry/content (.89); complete loop, input return and original cadence remain unresolved |
 | Input | Physical XInput, keyboard and timed host-controller replay; real startup interruption observed twice; gameplay interruption/menu return pending |
 | Attract startup/loading/render/audio/movies/gameplay | Partial startup/rendering only; no complete attract sequence yet |
 | Repeat loops, interruption/menu return, original cadence | Pending actual title integration measurements |
