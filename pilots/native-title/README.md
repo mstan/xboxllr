@@ -6,6 +6,52 @@ It is outside the normal xboxlle build. **The generated executable is a private
 GPL-dependent reference artifact, not the intended non-GPL shipping product.**
 See [license scope](../../LICENSE-SCOPE.md). There is no install/package target.
 
+## Xbox ADPCM buffers
+
+`beads-xbox.1.85`: Blinx reaches format0x69, mono44100Hz, 36-byte blocks,
+4bits, cbSize2, with its samples-per-block extension word zero. The bounded
+reference uses the complete external APU decoder and its VP's actual
+64-frame consumption rule. The existing machine APU register scaffold is
+not being represented as a full sample decoder. Complete original NTSC
+MCPX byte/frame helpers independently establish fixed64-frame block
+conversion, integer truncation and RET4; they do not prove the entire driver.
+
+Prepare `tools/native_adpcm_donor.py --donor <pinned-phobos-checkout>
+--output build/phobos-adpcm`, then configure `PILOT_ADPCM_SOURCE` to that
+absolute directory. This selects Phobos's unchanged NoRain-derived decoder
+inside the private GPL-dependent pilot. The separate APU decoder is linked
+only into `pilot_adpcm_test`. Original helper qualification is reproducible
+with `tools/native_adpcm_cursor_reference.py --xbe <NTSC-xbe> --output
+<private-json>` (Unicorn required).
+
+Guest buffers retain compressed storage. Allocation/play/unlock decode into
+the existing real native PCM engine; partial writes refresh complete affected
+blocks. Position, seek and loop boundaries convert between compressed bytes
+and PCM frames; frequency, routing, gain and downloaded DSP remain intact.
+Allocation/decoding failures propagate errors. No clock-only completion or
+silent-output fallback is imported. Observed formats allow one/two channels,
+36 bytes/channel, 4bits and 64 played frames/block. The extension word does
+not override that hardware rule. Streaming and other formats remain separate.
+
+Tolerance: ADPCM seeks/cursors use complete-block resolution. The original
+inactive driver can cache an unaligned requested byte offset; this adapter
+reports the quantized playable offset instead. The checked title descriptor
+does not establish a dependency on inactive unaligned round trips. This is
+an explicit bounded difference, not a claim of exact full-driver equivalence.
+
+Validation: 512 mono/stereo codec cases agree exactly with the APU reference
+for the played samples, including signed index clamping, nonzero reserved
+bytes and the unused final nibble. Original helpers pass block-boundary and
+PCM-control cases. Native ABI tests verify actual mono/stereo device output,
+partial/wrapped locks, source ownership, byte cursors, seek/loop/end and full
+release. Full native suite passes 34/34 in 14.54 s. Actual `adpcm-attract`
+passes the format guard and more stage reads, reaches the Demo play overlay,
+then stops at asynchronous `NtWriteFile` completion for `z:\pelon000.rec`
+(.86), after 246.109 s with capture. The scene under the overlay remains
+black; rendered gameplay, complete attract and intended cadence are unproven.
+Evidence: `build/blinx/run-adpcm-attract.log`,
+`adpcm-attract/run.aot-private.json` and `adpcm-attract/latest.png`.
+
 ## Render-target feedback
 
 `beads-xbox.1.84`: actual Blinx binds the 640x480, single-level linear ARGB8

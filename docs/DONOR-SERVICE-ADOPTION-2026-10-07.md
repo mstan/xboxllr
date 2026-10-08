@@ -130,6 +130,18 @@ first loading image; the separate presentation experiment remains uncommitted
 and stops at the host thread-naming diagnostic. No new menu, attract or speed
 result is claimed.
 
+## Blinx Xbox ADPCM adoption (2026-10-07)
+
+`.85` borrows the unchanged Phobos `src/hle/xbox_adpcm.c/.h` (NoRain DOAX
+provenance) at the same pinned revision into the private GPL-dependent pilot.
+The external APU decoder is a separate executable reference; the original
+NTSC MCPX helpers establish units and ABI. The existing device-driven
+XAudio2/DSP engine remains responsible for playback, cursors and completion.
+The adapter handles compressed storage, block-dependent partial writes and
+byte/PCM conversion. Donor clock-only and silent fallback behavior is excluded.
+See the [contract and validation](../pilots/native-title/README.md#xbox-adpcm-buffers)
+and [attribution](../THIRD_PARTY_ATTRIBUTION.md#xbox-adpcm-buffers---2026-10-07).
+
 ## Blinx render-target feedback adoption (2026-10-07)
 
 Adopted in the private pilot (`beads-xbox.1.84`): Phobos

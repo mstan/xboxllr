@@ -1,5 +1,23 @@
 # STATUS
 
+## 2026-10-07 - Borrowed ADPCM passes; Blinx reaches Demo play overlay
+
+Actual `adpcm-attract` passes the prior Xbox ADPCM rejection and further stage
+reads, reaches a black frame with the **Demo play** overlay, then stops at
+asynchronous `NtWriteFile` completion while opening `z:\pelon000.rec` (.86).
+Private evidence: `build/blinx/run-adpcm-attract.log` and
+`adpcm-attract/latest.png`, 246.109 s diagnostic run, explicit exit2.
+This is entry into demo playback, not validated rendered gameplay, a complete
+attract loop or original cadence. Stage loading is slow and remains unresolved.
+
+The unchanged Phobos/NoRain Xbox ADPCM decoder agrees with the complete
+external APU reference for 512 mono/stereo block cases. Original NTSC MCPX
+unit conversions execute unhooked. Native compressed storage, partial/wrapped
+writes, real output, byte cursors, seek/loop/end and ownership pass; full suite
+34/34, 14.54 s (.85). Attribution and private GPL boundary remain explicit.
+Next: bounded async-write completion contract, then Phobos/file-service reuse.
+Dashboard remains deferred; Theseus remains a behavioral reference.
+
 ## 2026-10-07 - Borrowed feedback copy passes; Blinx reaches Xbox ADPCM
 
 Actual `feedback-attract` executes Phobos's real GPU feedback snapshot, passes

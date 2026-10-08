@@ -15,6 +15,28 @@ notices. Preparation/build steps must report missing required notices.
 
 ## Private native-title reference pilot
 
+### Xbox ADPCM buffers - 2026-10-07
+
+`tools/native_adpcm_donor.py` prepares Phobos `src/hle/xbox_adpcm.c/.h`
+at `bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0`, retaining its
+NoRain211/doaxbv-re provenance and GPL-3.0 notice. The unchanged decoder is
+linked only in the opt-in **private GPL-dependent pilot**, not the intended
+non-GPL shipping product. Imported source stays in ignored build output.
+
+The same revision's `src/apu/apu_state.h` supplies a separate test-only full
+decoder (xemu copyrights, LGPL-2-or-later). `apu_vp.c` and `apu_regs.h`
+establish consumption of 64 frames despite the reference computing 65.
+The extraction preserves the original body/header and adds only a test entry.
+The preparation manifest records source/prepared hashes; full root GPL,
+upstream MIT and component LGPL notices accompany the prepared sources and
+private executable. No APU decoder runs alongside HLE in production.
+
+The local adapter independently translates compressed storage and byte
+positions to the existing native PCM engine. Original owner-provided NTSC
+MCPX helpers establish frame/byte conversion and calling convention in a
+private executable fixture. Donor silent-output and clock-only completion
+fallbacks were not adopted. See the [bounded contract](pilots/native-title/README.md#xbox-adpcm-buffers).
+
 ### Shared system clock - 2026-10-07
 
 Phobos `src/kernel/kernel_hal.c` at

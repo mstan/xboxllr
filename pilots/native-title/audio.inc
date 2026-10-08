@@ -4,6 +4,9 @@
 #include <math.h>
 #include "audio_backend.h"
 #include "pilot_audio_bindings.h"
+#ifdef PILOT_AUDIO_ADPCM
+#include "xbox_adpcm.h"
+#endif
 #ifdef PILOT_AUDIO_DSP
 #include "audio_dsp.h"
 static PilotDsp *audio_effects;
@@ -18,6 +21,7 @@ static SRWLOCK audio_lock=SRWLOCK_INIT;
 static uint32_t audio_device;
 struct PilotAudioBuffer {
     uint32_t base,data,bytes,owned,channels,rate,bits,headroom,frequency;
+    uint32_t format,block_align;
     int32_t volume;
     void *host;
     uint32_t lock_offset,lock_first,lock_second;
@@ -110,19 +114,47 @@ static int32_t audio_set_mix(struct PilotAudioBuffer *b,uint32_t address,int vol
     stop("custom mix bins require the native DSP mixer",address);
 #endif
 }
+static uint32_t audio_pcm_bytes(const struct PilotAudioBuffer *b,uint32_t bytes)
+{
+    return b->format==0x69 ? bytes/b->block_align*64*b->channels*2 : bytes;
+}
+static uint32_t audio_source_bytes(const struct PilotAudioBuffer *b,uint32_t bytes)
+{
+    return b->format==0x69 ? bytes/(64*b->channels*2)*b->block_align : bytes;
+}
+static int32_t audio_upload(struct PilotAudioBuffer *b,void *host,const void *data,uint32_t offset,uint32_t bytes)
+{
+    if(b->format!=0x69)return pilot_audio_buffer_copy(host,offset,(char*)data+offset,bytes,0);
+#ifdef PILOT_AUDIO_ADPCM
+    /* A partial encoded write changes decoding through the end of its block.
+     * Decode complete affected blocks, then publish one contiguous PCM update. */
+    uint32_t first=offset/b->block_align,last=(offset+bytes+b->block_align-1)/b->block_align;
+    uint32_t samples=(last-first)*64*b->channels;
+    int16_t *decoded=malloc(samples*2);if(!decoded)return (int32_t)0x8007000e;
+    for(uint32_t block=first;block<last;++block)
+        if(!xbox_adpcm_decode_block((const uint8_t*)data+block*b->block_align,b->block_align,b->channels,
+                                   decoded+(block-first)*64*b->channels,64*b->channels)) {
+            free(decoded);return (int32_t)0x88780032;
+        }
+    int32_t hr=pilot_audio_buffer_copy(host,first*64*b->channels*2,decoded,samples*2,0);
+    free(decoded);return hr;
+#else
+    stop("Xbox ADPCM decoder is not selected",b->format);
+#endif
+}
 static int32_t audio_set_data(struct PilotAudioBuffer *b,uint32_t source,uint32_t bytes)
 {
     if(b->locked)stop("replacing locked audio data",b->base);
     if(source && source==b->data && bytes==b->bytes)return 0;
-    unsigned align=b->channels*(b->bits/8);
+    unsigned align=b->block_align;
     if(!bytes || bytes>64u*1024*1024 || bytes%align)stop("unqualified audio buffer extent",bytes);
     uint32_t data=source,allocated=bytes;
     if(source)audio_pointer(source,bytes);
     else if(vm_allocate(&data,0,&allocated,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE))return (int32_t)0x8007000e;
     if(!source && b->bits==8)memset(memory+data,128,bytes);
     void *host=NULL;
-    int32_t hr=pilot_audio_buffer_create(bytes,b->channels,b->rate,b->bits,&host);
-    if(hr>=0)hr=pilot_audio_buffer_copy(host,0,memory+data,bytes,0);
+    int32_t hr=pilot_audio_buffer_create(audio_pcm_bytes(b,bytes),b->channels,b->rate,b->format==0x69?16:b->bits,&host);
+    if(hr>=0)hr=audio_upload(b,host,memory+data,0,bytes);
     if(hr>=0) {
         int64_t gain=(int64_t)b->volume-b->headroom;
         hr=pilot_audio_buffer_volume(host,(int32_t)(gain< -10000?-10000:gain));
@@ -145,13 +177,26 @@ static int32_t audio_create_buffer(uint32_t descriptor,uint32_t output)
     if(desc[0]!=24 || desc[1]&~(0x20u|0x80u|0x40000u) || desc[5])
         stop("unqualified sound buffer flags/mix bins",desc[1]);
     uint32_t format=desc[3];audio_pointer(format,18);
-    unsigned channels=MEM16(format+2),rate=MEM32(format+4),bits=MEM16(format+14),align=channels*(bits/8);
-    if(MEM16(format)!=1 || (channels!=1 && channels!=2) || (bits!=8 && bits!=16) ||
-       rate<100 || rate>200000 || MEM16(format+12)!=align || MEM32(format+8)!=rate*align || MEM16(format+16))
+    unsigned tag=MEM16(format),channels=MEM16(format+2),rate=MEM32(format+4),bits=MEM16(format+14),align=MEM16(format+12);
+    int supported=tag==1 && (bits==8 || bits==16) && align==channels*(bits/8) && MEM32(format+8)==rate*align && !MEM16(format+16);
+#ifdef PILOT_AUDIO_ADPCM
+    if(tag==0x69) {
+        audio_pointer(format,20);
+        supported=bits==4 && align==36*channels && MEM32(format+8)==rate*align/64 && MEM16(format+16)==2;
+        /* Original MCPX conversions use a fixed 64 samples/block. Blinx leaves
+         * the extension's samples-per-block word zero; it is not authoritative. */
+    }
+#endif
+    if(!supported || (channels!=1 && channels!=2) || rate<100 || rate>200000) {
+        fprintf(stderr,"[AUDIO FORMAT] return=%08x flags=%08x bytes=%u tag=%x channels=%u rate=%u average=%u align=%u bits=%u extra=%u samples=%u\n",
+            MEM32(g_esp),desc[1],desc[2],MEM16(format),channels,rate,MEM32(format+8),MEM16(format+12),bits,MEM16(format+16),
+            MEM16(format+16)==2?MEM16(format+18):0);
         stop("unqualified sound buffer format",MEM16(format));
+    }
     unsigned slot;for(slot=0;slot<256 && audio_buffers[slot].base;++slot){}
     if(slot==256)return (int32_t)0x8007000e;
     struct PilotAudioBuffer buffer={0};buffer.channels=channels;buffer.rate=rate;buffer.bits=bits;buffer.frequency=rate;
+    buffer.format=tag;buffer.block_align=align;
     buffer.mix_count=2;buffer.mix_bins[1]=1;
     if(desc[4]) {int32_t hr=audio_set_mix(&buffer,desc[4],0);if(hr<0)return hr;}
     buffer.headroom=600; /* Original 2D voice default, hundredths of dB. */
@@ -162,7 +207,7 @@ static int32_t audio_create_buffer(uint32_t descriptor,uint32_t output)
     if(desc[2])hr=audio_set_data(&buffer,0,desc[2]);
     if(hr<0){pool_free(buffer.base);return hr;}
     audio_buffers[slot]=buffer;audio_ref(audio_device,1);MEM32(output)=buffer.base+28;
-    fprintf(stderr,"[AUDIO BUFFER] iface=%08x bytes=%u format=PCM%u channels=%u rate=%u\n",buffer.base+28,desc[2],bits,channels,rate);
+    fprintf(stderr,"[AUDIO BUFFER] iface=%08x bytes=%u format=%s%u channels=%u rate=%u\n",buffer.base+28,desc[2],tag==0x69?"XBOX_ADPCM":"PCM",bits,channels,rate);
     return 0;
 }
 #ifdef PILOT_AUDIO_DSP
@@ -241,7 +286,7 @@ void pilot_audio_dispatch(unsigned entry)
             switch(entry) {
             case PILOT_AUDIO_IDirectSoundBuffer_Play:
                 if(a[1] || a[2] || (a[3]&~3u) || b->locked)stop("unqualified sound play arguments",a[3]);
-                result=pilot_audio_buffer_copy(b->host,0,memory+b->data,b->bytes,0);
+                result=audio_upload(b,b->host,memory+b->data,0,b->bytes);
                 if(result>=0 && (a[3]&2))result=pilot_audio_buffer_seek(b->host,0);
                 if(result>=0)result=pilot_audio_buffer_play(b->host,a[3]&1);break;
             case PILOT_AUDIO_IDirectSoundBuffer_Stop:result=pilot_audio_buffer_stop(b->host);break;
@@ -251,9 +296,10 @@ void pilot_audio_dispatch(unsigned entry)
             }
             case PILOT_AUDIO_IDirectSoundBuffer_GetCurrentPosition: {
                 uint32_t play,write;result=pilot_audio_buffer_position(b->host,&play,&write);
-                if(result>=0){if(a[1]){audio_pointer(a[1],4);MEM32(a[1])=play;}if(a[2]){audio_pointer(a[2],4);MEM32(a[2])=write;}}break;
+                if(result>=0){if(a[1]){audio_pointer(a[1],4);MEM32(a[1])=audio_source_bytes(b,play);}if(a[2]){audio_pointer(a[2],4);MEM32(a[2])=audio_source_bytes(b,write);}}break;
             }
-            case PILOT_AUDIO_IDirectSoundBuffer_SetCurrentPosition:result=pilot_audio_buffer_seek(b->host,a[1]);break;
+            case PILOT_AUDIO_IDirectSoundBuffer_SetCurrentPosition:
+                result=a[1]>=b->bytes?(int32_t)0x88780032:pilot_audio_buffer_seek(b->host,audio_pcm_bytes(b,a[1]));break;
             case PILOT_AUDIO_IDirectSoundBuffer_SetVolume:
                 if((int32_t)a[1]>0 || (int32_t)a[1]<-10000)result=(int32_t)0x88780032;
                 else {int32_t old=b->volume;b->volume=(int32_t)a[1];result=audio_gain(b);if(result<0)b->volume=old;}break;
@@ -268,7 +314,11 @@ void pilot_audio_dispatch(unsigned entry)
             }
             case PILOT_AUDIO_IDirectSoundBuffer_SetLoopRegion:
 #ifdef PILOT_AUDIO_DSP
-                result=pilot_audio_buffer_loop_region(b->host,a[1],a[2]);
+                if(a[1]>=b->bytes || a[2]>b->bytes-a[1])result=(int32_t)0x88780032;
+                else {
+                    uint32_t start=audio_pcm_bytes(b,a[1]),end=audio_pcm_bytes(b,a[2]?a[1]+a[2]:b->bytes);
+                    result=end<=start?(int32_t)0x88780032:pilot_audio_buffer_loop_region(b->host,start,end-start);
+                }
 #else
                 if(a[1] || (a[2] && a[2]!=b->bytes))stop("partial audio loop regions are unqualified",a[1]);
                 /* Full-buffer region is enforced by native Play's looping flag. */
@@ -280,7 +330,7 @@ void pilot_audio_dispatch(unsigned entry)
                 audio_pointer(a[3],4);audio_pointer(a[4],4);
                 if((!a[5])!=(!a[6]))stop("incomplete second audio lock output",a[5]);
                 if(a[5]){audio_pointer(a[5],4);audio_pointer(a[6],4);}
-                if(a[7]&1){uint32_t play;result=pilot_audio_buffer_position(b->host,&play,&offset);}
+                if(a[7]&1){uint32_t play;result=pilot_audio_buffer_position(b->host,&play,&offset);if(result>=0)offset=audio_source_bytes(b,offset);}
                 if(a[7]&2)bytes=b->bytes;
                 if(result<0)break;
                 if(offset>=b->bytes || bytes>b->bytes || !bytes){result=(int32_t)0x88780032;break;}
@@ -293,8 +343,8 @@ void pilot_audio_dispatch(unsigned entry)
             case PILOT_AUDIO_IDirectSoundBuffer_Unlock:
                 if(!b->locked || a[1]!=b->data+b->lock_offset || a[2]!=b->lock_first ||
                    a[3]!=(b->lock_second?b->data:0) || a[4]!=b->lock_second)stop("audio unlock differs from owned lock",a[0]);
-                result=pilot_audio_buffer_copy(b->host,b->lock_offset,memory+a[1],a[2],0);
-                if(result>=0 && a[4])result=pilot_audio_buffer_copy(b->host,0,memory+a[3],a[4],0);
+                result=audio_upload(b,b->host,memory+b->data,b->lock_offset,a[2]);
+                if(result>=0 && a[4])result=audio_upload(b,b->host,memory+b->data,0,a[4]);
                 if(result>=0)b->locked=0;break;
             default:stop("unqualified native audio service",entry);
             }
