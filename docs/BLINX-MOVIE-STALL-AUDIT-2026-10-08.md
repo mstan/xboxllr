@@ -118,6 +118,16 @@ and adapt the family without importing those behaviors. Upstream performance
 claims are not measurements of this pilot. No new donor body was imported in
 this investigation.
 
+Follow-up: `fix/blinx-priority-scheduler-20261008` implements a bounded native
+scheduler using this behavioral lead and unmodified original-kernel queue
+tests. Its matched same-executable local-media comparison reproduces the
+post-opening stall with scheduling off and advances into the title movie
+with it on, both without host CPU affinity. A separate visible 330-second run
+preserves input return and rendered reentry, with 63/63 writes. This is
+functional qualification, not a speed or complete attract-loop pass; the native
+pilot README records remaining scheduler scope and actual evidence. The fixed
+audio tail difference persists in both scheduler configurations.
+
 [FFmpeg's ADX decoder](https://github.com/FFmpeg/FFmpeg/blob/master/libavcodec/adxdec.c)
 was reviewed to distinguish the independent decoder comparison from the native
 PCM service contract. No FFmpeg decoder implementation was imported. Its

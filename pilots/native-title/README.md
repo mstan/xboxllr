@@ -1,5 +1,56 @@
 # Native title reference pilot
 
+## Experimental guest scheduler (.71, 2026-10-08)
+
+`XLLE_PILOT_GUEST_SCHEDULER=1` selects a shared single-CPU guest scheduler at
+startup. It retains CPU ownership across nonblocking kernel calls, publishes
+new/resumed threads before their host workers wake, preempts at existing safe
+points, and serializes generated DPC/GPU/display callbacks. Real blocking
+services and ordered graphics waits release the guest CPU while their native
+work proceeds. Selection is fixed for the process; no live switching or
+duplicate execution is involved. The option defaults off during qualification.
+
+The bounded reference runs unmodified instructions from the owner's hash-bound
+kernel using `tools/native_scheduler_reference.py`: highest-priority selection,
+equal-priority FIFO, immediate higher-priority readiness and normal-class base
+priority saturation. xemu supplies the single-CPU hardware reference, and Phobos
+`05040ec` supplies the ADX handoff analysis and service-boundary strategy. Their
+implementation bodies are not copied. In particular, lower priorities cannot
+run through a timeout escape, and interrupts cannot execute unlocked after a
+deadline. Source provenance is in `THIRD_PARTY_ATTRIBUTION.md`.
+
+This is a bounded scheduling contract, not exhaustive kernel scheduling. The
+2-ms equal-priority quantum is provisional; dynamic boosts, exact interrupt
+latency and publishing every event/I/O wake before the native waiter returns
+remain unqualified. Host waits still perform their real operations. No wait
+completion, input, audio cursor or GPU result is synthesized. Actual title
+qualification must accompany the isolated tests before accepting the option.
+
+Qualification on `fix/blinx-priority-scheduler-20261008`: two 140-second runs
+use the same executable and local media with unrestricted host affinity; the
+only normalized configuration difference is the scheduler flag. Disabled,
+Blinx finishes the opening and stalls before opening the title SFD. Enabled,
+it reaches title-movie frame 539 and continues presenting. Evidence:
+`build/blinx/scheduler-comparison.aot-private.json`, executable SHA-256
+`42cc7a9274b5c8a6b79229e9f93abe71ffc62793f644ae841d104ace7c7e9ed7`.
+This demonstrates functional progress, not a speed improvement.
+
+A separate visible 330-second enabled run confirms textured 3D gameplay,
+Start interruption at 190031 ms, Press START return (capture 40), and rendered
+reentry (captures 55/58/62/65). All 63 issued writes complete, with 65 captures
+and no logged terminal guard/fault. The opening reaches frame 2263 in 76.3261
+seconds; sampled source audio 0..72 seconds retains one offset. Tail mismatch
+persists, and the longest picture gap is 121 ms. Resources after reentry are
+750.4/748.8 MB private and 614/616 handles at 300/330 seconds. Different phases
+and this short observation do not prove repeated-loop stability or intended
+cadence. Evidence: `build/blinx/movie-scheduler-visible/validation.aot-private.json`.
+The harness terminates at its observation deadline; this is not a crash or
+natural attract completion. Full Blinx qualification and JSRF remain open.
+All 36 native tests pass with D3D debug in a serial 16.68-second run, including
+the real-worker scheduler test. An earlier host event-timeout minimum-duration
+failure is retained separately as `.99`; five targeted repeats and the final
+suite pass do not erase that observation.
+
 ## Movie queue/stall investigation (2026-10-08)
 
 The [movie stall audit](../../docs/BLINX-MOVIE-STALL-AUDIT-2026-10-08.md)

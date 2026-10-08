@@ -658,6 +658,24 @@ establishes when source readers/callbacks have retired and native storage may be
 freed. This is a behavioral reference and local adapter change; the private
 pilot's existing license scope is unchanged.
 
+## Guest scheduling behavioral references (2026-10-08)
+
+The private pilot's `thread_scheduler.inc` follows the service boundaries and
+ADX race analysis documented by [Phobos and contributors at
+05040ec103dfbaca5e3daed28bbc569bd896f59f](https://github.com/phobos665/xboxrecomp/blob/05040ec103dfbaca5e3daed28bbc569bd896f59f/src/kernel/xbox_memory_layout.c),
+with `kernel_bridge.c` and `kernel_thread.c` consulted for blocking calls and
+cooperative suspension. The implementation is independently authored; no donor
+scheduler body is copied. It excludes the donor's starvation escape, expiring
+CPU reservation and callback execution without exclusive ownership.
+
+[xemu 482088490c2d5983ed5e1eafbd09906157c1eca0](https://github.com/xemu-project/xemu/blob/482088490c2d5983ed5e1eafbd09906157c1eca0/hw/xbox/xbox.c)
+provides the single-CPU machine reference. The runnable bounded ordering and
+priority oracle executes the owner's original kernel using Unicorn, with no
+instruction replacement; `tools/native_scheduler_reference.py` records its
+limits. Neither original kernel bytes nor xemu code are incorporated. Existing
+GPL-dependent components of the private pilot remain excluded from the intended
+non-GPL shipping product.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

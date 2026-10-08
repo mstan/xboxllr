@@ -56,6 +56,7 @@ static void call_kernel(unsigned ordinal,const uint32_t *args,unsigned argc)
 #include "file_cache_contract_test.inc"
 #include "nonlocal_jump_contract_test.inc"
 #include "thread_objects_contract_test.inc"
+#include "thread_scheduler_contract_test.inc"
 #include "event_objects_contract_test.inc"
 
 static int test_write_faults(uint32_t va)
@@ -322,6 +323,7 @@ static void test_timers(void)
 
 int main(int argc,char **argv)
 {
+    if(argc==2 && !strcmp(argv[1],"scheduler")){test_guest_scheduler();return 0;}
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
     EXCEPTION_RECORD diagnostic={0};EXCEPTION_POINTERS pointers={&diagnostic,NULL};
     diagnostic.ExceptionCode=0x406d1388u;

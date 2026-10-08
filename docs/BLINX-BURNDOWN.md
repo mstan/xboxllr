@@ -1,5 +1,16 @@
 # Blinx: serial attract-sequence bring-up
 
+**New scheduler candidate (.71):** Phobos `05040ec`'s ADX priority/resume
+analysis now informs a native single-CPU execution scheduler, bounded by
+unmodified original-kernel ready-queue/priority tests. With identical executable,
+local media and unrestricted host affinity, scheduler-off stalls after the
+opening; scheduler-on advances through the title movie. A separate 330-second
+visible run confirms gameplay, Start interruption, Press START and rendered
+reentry, with 63/63 completed writes and no terminal guard/fault. The candidate
+is startup opt-in on `fix/blinx-priority-scheduler-20261008`; speed and complete
+repeat qualification remain open. No donor timeout escape is adopted. See the
+[native pilot](../pilots/native-title/README.md) for scope and private evidence.
+
 **Latest investigation (.98):** bounded tracing finds a full native audio queue
 and timely cursor polling while fresh guest PCM writes stall alongside presents.
 Null logging and a same-executable event-trace off/on pair do not establish a

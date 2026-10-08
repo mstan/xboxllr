@@ -72,6 +72,7 @@ __declspec(noreturn) static void stop(const char *reason, uint32_t va)
 }
 
 #include "thread_affinity.inc"
+#include "thread_scheduler.inc"
 static uint32_t file32(size_t offset)
 {
     uint32_t value;
@@ -101,6 +102,7 @@ void recomp_eflags_pop(uint32_t value) { (void)value; stop("POPFD arithmetic fla
 #include "nonlocal_jump.inc"
 void pilot_thread_checkpoint(void)
 {
+    if(scheduler_enabled){scheduler_checkpoint();return;}
     if (!current_thread_slot) return;
     AcquireSRWLockExclusive(&thread_lock);
     while (threads[current_thread_slot].suspend_count) {
@@ -111,6 +113,7 @@ void pilot_thread_checkpoint(void)
 }
 static void thread_finished(void)
 {
+    scheduler_retire();
     AcquireSRWLockExclusive(&thread_lock);
     threads[current_thread_slot].finished=1;
     ReleaseSRWLockExclusive(&thread_lock);
@@ -168,6 +171,7 @@ static DWORD WINAPI title_thread(void *argument)
     struct PilotThread *thread=&threads[slot];
     current_thread_slot=slot;
     g_pilot_suspend_count=&thread->suspend_count;
+    scheduler_enter(slot);
     PILOT_THREAD_CHECKPOINT();
     uint32_t base=0x60000000u+slot*0x100000u;
     uint32_t stack_top=base+0x100000u;
@@ -229,6 +233,7 @@ static void create_thread(void)
     thread->handle=CreateThread(NULL,0,title_thread,(void*)(uintptr_t)slot,CREATE_SUSPENDED,&tid);
     if (!thread->handle) { --thread_count; ReleaseSRWLockExclusive(&thread_lock); g_eax=0xc000009au; return; }
     thread->tid=tid;
+    scheduler_publish(slot,thread->suspend_count,thread->priority);
     MEM32(thread->object+0x28)=context_base+0x100000u-thread->tls_size;
     MEM32(thread->object+0x12c)=tid;
     MEM32(args[0])=0x40000000u+slot;
@@ -319,7 +324,7 @@ static void query_setting(void)
 #include "graphics.inc"
 #endif
 
-static void kernel_dispatch(void)
+static void kernel_dispatch_impl(void)
 {
     const char *name = "unknown ordinal";
     for (size_t i=0; i<sizeof(pilot_imports)/sizeof(pilot_imports[0]); ++i)
@@ -440,6 +445,13 @@ static void kernel_dispatch(void)
     }
     }
     stop(name, next_kernel_ordinal);
+}
+static void kernel_dispatch(void)
+{
+    int blocked=scheduler_kernel_blocks(next_kernel_ordinal)?scheduler_block_begin():0;
+    kernel_dispatch_impl();
+    scheduler_block_end(blocked);
+    PILOT_THREAD_CHECKPOINT();
 }
 recomp_func_t recomp_lookup_kernel(uint32_t va)
 {
@@ -587,6 +599,7 @@ int main(int argc,char **argv)
 {
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
     thread_guest_cpu_configure();
+    scheduler_configure();
     const char *verbose=getenv("XLLE_PILOT_TRACE");
     if(verbose && !strcmp(verbose,"0"))pilot_verbose=0;
     const char *trace=getenv("XLLE_PILOT_TRACE_FUNCTION");
@@ -611,7 +624,9 @@ int main(int argc,char **argv)
     if (!entry) stop("entry missing from generated dispatch", PILOT_ENTRY);
     fprintf(stderr,"[RUN] calling actual XBE entry\n");
     thread_guest_cpu_enter();
+    scheduler_publish(0,0,0);scheduler_enter(0);
     entry();
+    scheduler_retire();
     AcquireSRWLockShared(&thread_lock);
     unsigned launched=thread_count;
     ReleaseSRWLockShared(&thread_lock);

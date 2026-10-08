@@ -47,6 +47,7 @@ static void thread_object_kernel(unsigned ordinal)
                 if(ordinal==231)++t->suspend_count;
                 else if(previous && !--t->suspend_count)WakeAllConditionVariable(&thread_condition);
                 if(out)MEM32(out)=previous;
+                scheduler_control((unsigned)(t-threads),t->suspend_count,t->priority);
             }
         }
         ReleaseSRWLockExclusive(&thread_lock);
@@ -88,6 +89,7 @@ static void thread_object_kernel(unsigned ordinal)
             else if(delta>7)delta=7;else if(delta< -7)delta=-7;
             if(!SetThreadPriority(host,thread_host_priority(delta)))stop("native thread priority change failed",GetLastError());
             g_eax=(uint32_t)t->priority;t->priority=delta;g_esp+=12;
+            scheduler_control((unsigned)(t-threads),t->suspend_count,t->priority);
         } else if(ordinal==144) {
             BOOL previous;
             if(!GetThreadPriorityBoost(host,&previous) || !SetThreadPriorityBoost(host,MEM32(g_esp+8)!=0))

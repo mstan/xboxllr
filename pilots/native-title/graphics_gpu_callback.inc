@@ -31,7 +31,7 @@ static int graphics_gpu_deliver(void)
     graphics_gpu_running=1;ReleaseSRWLockExclusive(&graphics_lock);
     uint32_t top=MEM32(g_fs_base+4);g_esp=top-8;
     MEM32(g_esp)=0;MEM32(g_esp+4)=c->context;
-    recomp_lookup(c->routine)();
+    scheduler_callback_enter();recomp_lookup(c->routine)();scheduler_retire();
     if(g_esp!=top-4)stop("GPU cdecl callback stack imbalance",c->routine);
     g_esp+=4;
     AcquireSRWLockExclusive(&graphics_lock);

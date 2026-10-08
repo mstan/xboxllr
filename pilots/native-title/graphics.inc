@@ -378,10 +378,15 @@ static void graphics_dispatch_impl(unsigned entry)
 
 void pilot_d3d_dispatch(unsigned entry)
 {
+    /* Every command can wait for an earlier ordered GPU callback. Release
+     * CPU eligibility before renderer ownership; the independent display
+     * wait also releases it while its actual timer/event is pending. */
+    int blocked=scheduler_block_begin();
     if(!graphics_service_profile_enabled() || dispatch_in_dpc || entry>=PILOT_D3D_COUNT) {
-        graphics_dispatch_impl(entry);return;
+        graphics_dispatch_impl(entry);scheduler_block_end(blocked);return;
     }
     uint64_t begin=dispatch_monotonic();
     graphics_dispatch_impl(entry);
     graphics_service_profile_record(entry,begin,dispatch_monotonic());
+    scheduler_block_end(blocked);
 }

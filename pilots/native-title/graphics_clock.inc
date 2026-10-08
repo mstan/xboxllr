@@ -85,7 +85,7 @@ static void graphics_vblank_deliver(uint64_t frame)
     g_esp=top-8;MEM32(g_esp)=0;MEM32(g_esp+4)=data;
     recomp_func_t routine=recomp_lookup(callback);
     if(!routine)stop("vblank callback is not generated",callback);
-    routine();
+    scheduler_callback_enter();routine();scheduler_retire();
     if(g_esp!=top-4)stop("vblank cdecl callback stack imbalance",callback);
     g_esp+=4;
     if(pilot_event_trace_enabled())fprintf(stderr,"[VBLANK CALLBACK] frame=%llu routine=%08x swap=%u flags=%u\n",(unsigned long long)frame,callback,MEM32(data+4),MEM32(data+8));

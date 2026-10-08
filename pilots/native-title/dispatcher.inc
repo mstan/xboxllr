@@ -134,7 +134,9 @@ static DWORD WINAPI dispatch_worker(void *unused)
             MEM32(g_esp)=0; MEM32(g_esp+4)=d.va; MEM32(g_esp+8)=d.context;
             MEM32(g_esp+12)=d.arg1; MEM32(g_esp+16)=d.arg2;
             MEM8(base+0x24)=2; dispatch_in_dpc=1;
+            scheduler_callback_enter();
             recomp_lookup(d.routine)();
+            scheduler_retire();
             if (g_esp!=top) stop("DPC callback stack imbalance",d.routine);
             dispatch_in_dpc=0; MEM8(base+0x24)=0;
             continue;
