@@ -6,12 +6,12 @@ qualified LLE input implementation.
 
 ## Current checkpoint
 
-The original-input build now delivers a real OHCI/PIC interrupt through the
-original kernel to Blinx's original ISR, then reaches its original USB DPC.
-The next explicit stop is untranslated `CLI` at `0x00188a9a`. Reports, controller
-enumeration and LLE Start/menu/reentry remain unqualified. The native-input
-attract milestone remains the production path. See the interrupt checkpoint
-below for evidence and the next bounded step.
+The original-input build executes USB initialization, enumeration and periodic
+XID reports through the shared OHCI/PIC, original IRQ gate, ISR and DPC. Host
+keyboard/XInput/replay reports enter the peripheral and actual pinned DMA.
+Original controller input has reached rendered Blinx Demo play. Full family
+qualification is still open; the native-input attract milestone remains the
+production path. See the report checkpoint below for evidence and limits.
 
 ## Initial boundary (retained history)
 
@@ -305,14 +305,84 @@ Stall execution retains original calibrated-loop code within the instruction
 budget; no cycle-accurate wall-time guarantee is claimed. Arbitrary pool/VM DMA
 aliases, full USB enumeration/reports and input interruption are still open.
 
+## Report and shared-memory checkpoint - 2026-10-08
+
+The original DPC's CLI/STI sequence now executes with a modeled interrupt flag
+and STI shadow through its actual next MOV instruction. The generic lowering
+validates both original instruction bytes and the generated statement; other
+unqualified STI boundaries retain explicit guards. No instruction is discarded.
+The DPC's XGSCNT access uses the shared APU 48 kHz sample-clock contract, with
+read-independent progression, sub-sample behavior and wrap tests. This is not
+a claim of cycle-exact device timing.
+
+Original pool allocation, image VA reservation/commit/decommit, page translation
+and pinning now back report buffers. The kernel's real PTE/PFN state supplies
+physical addresses. DMA into ordinary pages requires a live pinned byte range;
+freeing a neighboring allocation on that page is permitted, while freeing the
+pinned allocation is rejected. Controller schedules retain their actual
+contiguous allocation until reset.
+
+Published pages have one shared backing for original kernel execution, native
+callers and DMA. This replaces whole-page copy-in/copy-out: asynchronous native
+I/O and timer completion must not lose writes during unrelated original kernel
+calls. Interpreter mappings are invalidated when their backing or ownership
+changes. A concurrent-write fixture and original output-buffer writes cover
+that boundary; loader section release retires its real original mapping.
+
+Two reached XID callbacks were recovered from the owned original bytes using
+the pinned Phobos translator. Their hash/extent records belong to the private
+game revision; no recovered title bytes or successful replacement bodies are
+committed. The existing attributed host input source now feeds both build
+selections. Physical connection changes update the OHCI root port and preserve
+the detached state across controller reset; completed XID OUT reports reach
+the host rumble provider.
+
+`tools/native_input_state_reference.py` executes original GetState, report
+filtering and report completion with authored handle/report inputs and original
+kernel callees. It observes disconnected output copying, analog values below
+32 filtered to zero, and a packet increment for each completed unchanged report.
+HLE already copied disconnected output correctly; that now has an explicit
+regression. Its analog filter and report counter are corrected to these original
+semantics. HLE polls the actual host state at its configured interval; it does
+not invent missed USB reports or emulate the driver's operations. Packet values
+and host delivery phase can differ between separate runs; report order, bytes
+and state/error effects are the comparison boundary. The reference and floor
+share Unicorn, so this does not establish independent CPU correctness.
+
+Retained intermediate evidence:
+
+- `input-lle-attract-first-20261008`: 190s; original reports and Start/menu work,
+  but movie corruption made this a failed qualification.
+- `input-lle-attract-fixed-20261008`: 240s after a targeted mapping correction;
+  black movie background/no demonstrated attract reentry. Concurrent builds and
+  component tests contaminated this run; it is not accepted.
+- `input-quiet-diagnosis-20261008`: a quiet 65s probe reached rendered Demo play
+  in captures 6/7. Its optional stack-capture helper failed after the probe;
+  no valid run manifest or complete interruption/reentry claim is made.
+- `input-shared-pages-attract-20261008`: diagnostic aborted by the agent after
+  finding a quadratic page-backing lookup that starved ordinary guest work.
+  The mapping now uses a fixed physical-page index. This run is not qualification.
+- All 46 CTests pass with indexed shared pages (`ctest-input-shared-index.log`,
+  18.95s); all **46/46 pass again after the HLE corrections**
+  (`ctest-input-report-contracts.log`, 19.31s). Four interrupt-lowering and nine
+  original-function extent Python tests also pass.
+- `input-shared-index-attract-20261008`: **190.156s**, 19 captures, no terminal
+  guard. Original reports deliver Start at 15/90s; the first Demo play is
+  interrupted, the title movie returns and loops, and Demo play reenters.
+  Captures and the actual `demoplay`/movie file transitions establish that
+  sequence. Exit1 is the harness deadline termination. Executable SHA-256:
+  `8692444dd27d1af4cccbe4bf33752a271d656824828458051fd68e5b75037b80`.
+  This qualifies bounded input interruption/reentry, not full audio fidelity,
+  long-run memory stability or performance. Process private bytes rise from
+  about 757 MB at 30s to 849 MB at 180s; different scene/cache populations make
+  that insufficient to diagnose a leak or assert stable repeated loops.
+
 ## Next bounded step
 
-Qualify and implement interrupt-flag operations reached by the original USB DPC
-(`CLI`/`STI`, and flags preservation if subsequently exercised), including their
-CPU eligibility and interrupt-shadow consequences. Audit the adjacent original
-timer/device accesses as a coherent driver batch. Reuse original CPU/hardware
-behavior and donor lowering where valid; never discard the instruction or
-invent its data. Then validate actual original-input progress again.
+Finish the native counterpart regression and game-owned reproducible pin. Qualify remaining
+connection/capability/close observations against the runnable original route.
+The currently implemented single port does not claim all Xbox peripherals,
+arbitrary VM DMA, manual polling or all interrupt instruction sequences.
 
 Closure still requires matching HLE/LLE input effects and actual Blinx Start
 interruption, menu return and attract reentry with LLE input. This transport

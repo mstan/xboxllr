@@ -4,9 +4,74 @@ __declspec(noinline) static uint32_t usb_test_read(unsigned offset)
 {return *(volatile uint32_t*)(memory+0xfed00000ull+offset);}
 __declspec(noinline) static void usb_test_write(unsigned offset,uint32_t value)
 {*(volatile uint32_t*)(memory+0xfed00000ull+offset)=value;}
+static volatile LONG usb_page_writer_running,usb_page_writer_started;
+static uint32_t usb_page_writer_count;
+static DWORD WINAPI usb_page_writer(void *unused)
+{
+    (void)unused;uint32_t count=0;
+    while(InterlockedCompareExchange(&usb_page_writer_running,0,0)) {
+        InterlockedIncrement((volatile LONG*)(memory+0x15040));++count;
+        InterlockedExchange(&usb_page_writer_started,1);
+    }
+    usb_page_writer_count=count;return 0;
+}
+static void usb_test_async_page(void)
+{
+    /* Model an asynchronous completion touching caller storage while an
+     * unrelated original kernel service runs. Whole-page copy-in/copy-out
+     * can lose these writes even with a single guest CPU. */
+    MEM32(0x15040)=0;usb_page_writer_running=1;usb_page_writer_started=0;
+    HANDLE writer=CreateThread(NULL,0,usb_page_writer,NULL,0,NULL);CHECK(writer);
+    while(!InterlockedCompareExchange(&usb_page_writer_started,0,0))Sleep(0);
+    for(unsigned i=0;i<128;++i) {
+        uint32_t unused=0,result=0;
+        CHECK(!pilot_io_device_lle(103,memory,&unused,&result));
+        CHECK((result&255)==0);
+    }
+    InterlockedExchange(&usb_page_writer_running,0);
+    CHECK(WaitForSingleObject(writer,5000)==WAIT_OBJECT_0 && CloseHandle(writer));
+    CHECK(usb_page_writer_count && MEM32(0x15040)==usb_page_writer_count);
+}
 static void test_usb_lle(void)
 {
     install_fault_handler();
+    CHECK(!pilot_io_device_image(memory,0x10000,0x10000));
+    MEM32(0x15000)=0x78563412;MEM32(0x16000)=0xabcdef01;
+    uint32_t vector_args[]={1,0x15021};MEM32(0x15020)=0xcdcdcdcd;
+    call_kernel(44,vector_args,2);CHECK(g_eax==0x31 && MEM32(0x15020)==0xcdcd19cd);
+    uint32_t image_pin[]={0x15000,8192,0};
+    call_kernel(175,image_pin,3);call_kernel(175,image_pin,3);
+    CHECK(MEM32(0x15000)==0x78563412 && MEM32(0x16000)==0xabcdef01);
+    MEM32(0x15020)=0xcdcdcdcd;
+    call_kernel(44,vector_args,2);
+    CHECK(g_eax==0x31 && MEM32(0x15020)==0xcdcd19cd);
+    uint32_t image_address=0x15000;call_kernel(173,&image_address,1);
+    uint32_t image_pa=g_eax,observed=0;
+    CHECK(image_pa && !(image_pa&4095));
+    usb_test_async_page();
+    CHECK(usb_dma_read(image_pa,&observed,4) && observed==0x78563412);
+    observed=0x11223344;CHECK(usb_dma_write(image_pa,&observed,4));
+    CHECK(MEM32(0x15000)==observed);
+    image_pin[2]=1;call_kernel(175,image_pin,3);
+    /* A report pins its own allocation, not every pool block sharing the PFN. */
+    uint32_t a=pool_allocate(20,0),b=pool_allocate(20,0);
+    CHECK(a && b && (a>>12)==(b>>12));
+    uint32_t pool_pin[]={a,20,0};call_kernel(175,pool_pin,3);
+    call_kernel(173,&a,1);uint32_t pool_pa=g_eax;
+    MEM32(a)=0x10203040;CHECK(usb_dma_read(pool_pa,&observed,4) && observed==0x10203040);
+    call_kernel(173,&b,1);CHECK(!usb_dma_read(g_eax,&observed,4));
+    pool_free(b);CHECK(MEM32(a)==0x10203040);
+    pool_pin[2]=1;call_kernel(175,pool_pin,3);CHECK(!usb_dma_read(pool_pa,&observed,4));
+    pool_free(a);
+    CHECK(usb_dma_read(image_pa,&observed,4) && observed==0x11223344);
+    call_kernel(175,image_pin,3);CHECK(!usb_dma_read(image_pa,&observed,4));
+    CHECK(!pilot_io_device_image_release(0x15000,8192));
+    CHECK(test_write_faults(0x15000) && test_write_faults(0x16000));
+    commit(0x15000,8192);MEM32(0x15000)=0x55667788;
+    image_pin[2]=0;call_kernel(175,image_pin,3);
+    call_kernel(173,&image_address,1);image_pa=g_eax;
+    CHECK(usb_dma_read(image_pa,&observed,4) && observed==0x55667788);
+    image_pin[2]=1;call_kernel(175,image_pin,3);
     CHECK(usb_test_read(0)==0x10);
     uint32_t bytes=4096;call_kernel(165,&bytes,1);uint32_t buffer=g_eax;CHECK(buffer);
     call_kernel(173,&buffer,1);uint32_t pa=g_eax;CHECK(pa==(buffer&0x03ffffffu));

@@ -107,16 +107,24 @@ static void test_input(void)
     CHECK(input_test_call(PILOT_INPUT_XInputOpen,type,4,0,0)==0 && input_test_last_error==1167);
     CHECK(input_test_call(PILOT_INPUT_XInputOpen,PILOT_INPUT_g_DeviceType_MU,0,0,0)==0 && input_test_last_error==87);
     memset(memory+out-1,0xcc,72);
+    input_ports[0].next_poll=UINT64_MAX;
+    uint32_t packet=input_ports[0].packet;
     CHECK(input_test_call(PILOT_INPUT_XInputGetState,handle,out,0,0)==0);
-    const uint8_t expected_state[22]={1,0,0,0,0x10,0,255,0,255,0,255,0,17,241,0,0x80,255,0x7f,0x2e,0xfb,0xe1,0x10};
-    CHECK(!memcmp(memory+out,expected_state,22) && MEM8(out-1)==0xcc && MEM8(out+22)==0xcc);
+    const uint8_t expected_pad[18]={0x10,0,255,0,255,0,255,0,0,241,0,0x80,255,0x7f,0x2e,0xfb,0xe1,0x10};
+    CHECK(packet && MEM32(out)==packet && !memcmp(memory+out+4,expected_pad,18) && MEM8(out-1)==0xcc && MEM8(out+22)==0xcc);
     unsigned calls=input_test_state_calls;
     input_ports[0].next_poll=UINT64_MAX;
     CHECK(input_test_call(PILOT_INPUT_XInputGetState,handle,out,0,0)==0 && input_test_state_calls==calls);
     input_test_states[0].dwPacketNumber++; input_ports[0].next_poll=0;
-    CHECK(input_test_call(PILOT_INPUT_XInputGetState,handle,out,0,0)==0 && MEM32(out)==1);
+    CHECK(input_test_call(PILOT_INPUT_XInputGetState,handle,out,0,0)==0 && MEM32(out)==++packet);
     input_test_states[0].Gamepad.wButtons|=XINPUT_GAMEPAD_B; input_ports[0].next_poll=0;
-    CHECK(input_test_call(PILOT_INPUT_XInputGetState,handle,out,0,0)==0 && MEM32(out)==2 && MEM8(out+7)==255);
+    CHECK(input_test_call(PILOT_INPUT_XInputGetState,handle,out,0,0)==0 && MEM32(out)==++packet && MEM8(out+7)==255);
+    input_test_states[0].Gamepad.bLeftTrigger=31;input_ports[0].next_poll=0;
+    CHECK(input_test_call(PILOT_INPUT_XInputGetState,handle,out,0,0)==0 && MEM8(out+12)==0);
+    input_test_states[0].Gamepad.bLeftTrigger=32;input_ports[0].next_poll=0;
+    CHECK(input_test_call(PILOT_INPUT_XInputGetState,handle,out,0,0)==0 && MEM8(out+12)==32);
+    uint8_t last_state[22];memcpy(last_state,memory+out,22);
+    input_ports[0].next_poll=UINT64_MAX;
 
     memset(memory+out-1,0xcc,28);
     CHECK(input_test_call(PILOT_INPUT_XInputGetCapabilities,handle,out,0,0)==0);
@@ -142,7 +150,8 @@ static void test_input(void)
     /* Removal/reinsertion observed between enumeration queries reports BOTH.
      * A stale handle must never silently acquire the replacement controller. */
     input_test_presence[0]=1167; input_ports[0].next_poll=0;
-    CHECK(input_test_call(PILOT_INPUT_XInputGetState,handle,out,0,0)==1167 && MEM32(out)==2);
+    memset(memory+out,0xcc,22);
+    CHECK(input_test_call(PILOT_INPUT_XInputGetState,handle,out,0,0)==1167 && !memcmp(memory+out,last_state,22));
     input_test_presence[0]=0; input_ports[0].next_poll=0;
     CHECK(input_test_call(PILOT_INPUT_XInputGetState,handle,out,0,0)==1167);
     CHECK(input_test_call(PILOT_INPUT_XGetDeviceChanges,type,out,out+4,0)==1);

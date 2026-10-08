@@ -22,7 +22,8 @@ int pilot_mmio_fault(EXCEPTION_POINTERS *exception,unsigned char *guest,
     if(record->ExceptionCode!=EXCEPTION_ACCESS_VIOLATION || record->NumberParameters<2 ||
        record->ExceptionInformation[0]>1 || !context)return 0;
     uint64_t fault=record->ExceptionInformation[1],base=(uintptr_t)guest;
-    if(fault<base+0xfed00000ull || fault>=base+0xfed01000ull)return 0;
+    if((fault<base+0xfed00000ull || fault>=base+0xfed01000ull) &&
+       fault!=base+0xfe80200cull)return 0;
     unsigned char code[15];SIZE_T read=0;
     if(!ReadProcessMemory(GetCurrentProcess(),(void*)context->Rip,code,sizeof(code),&read) ||
        read!=sizeof(code))return 0;

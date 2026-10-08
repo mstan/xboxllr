@@ -58,6 +58,19 @@ static void test_usb_irq(void)
     deadline=GetTickCount64()+2000;
     while(usb_dpc_calls<2 && GetTickCount64()<deadline){scheduler_checkpoint();Sleep(1);}
     CHECK(usb_dpc_calls==2);
+    pilot_cpu_cli();
+    call_kernel(103,NULL,0);CHECK(!cpu_interrupt_flag && (g_eax&255)==0);
+    usb_test_write(0x54,1u<<4);usb_poll();
+    CHECK(usb_isr_calls==2 && usb_dpc_calls==2 && pilot_usb_pic_vector(0)==0x31);
+    pilot_cpu_sti();usb_poll();
+    CHECK(cpu_interrupt_flag && cpu_interrupt_shadow && usb_isr_calls==2);
+    /* This store represents the actual following instruction; delivery must
+     * not occur until the recompiler emits its shadow-complete boundary. */
+    MEM32(0x19b00)=0x12345678;
+    pilot_cpu_sti_complete();CHECK(usb_isr_calls==3 && !cpu_interrupt_shadow);
+    deadline=GetTickCount64()+2000;
+    while(usb_dpc_calls<3 && GetTickCount64()<deadline){scheduler_checkpoint();Sleep(1);}
+    CHECK(usb_dpc_calls==3 && MEM32(0x19b00)==0x12345678);
     call_kernel(100,&object,1);CHECK((g_eax&255)==1 && !MEM8(object+16));
     call_kernel(100,&object,1);CHECK((g_eax&255)==0);
     usb_test_write(0x54,1u<<4);CHECK(pilot_usb_pic_vector(0)<0); // disconnected/masked

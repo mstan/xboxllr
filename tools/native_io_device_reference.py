@@ -15,7 +15,8 @@ from pathlib import Path
 from unicorn import (Uc, UC_ARCH_X86, UC_MODE_32, UC_PROT_ALL,
                      UC_HOOK_MEM_INVALID, UC_HOOK_INSN, UC_HOOK_INTR)
 from unicorn.x86_const import (UC_X86_INS_IN, UC_X86_INS_OUT, UC_X86_REG_ESP,
-                               UC_X86_REG_EAX, UC_X86_REG_EIP, UC_X86_REG_EFLAGS)
+    UC_X86_REG_EAX, UC_X86_REG_EIP, UC_X86_REG_EFLAGS, UC_X86_REG_GDTR,
+    UC_X86_REG_CS, UC_X86_REG_SS, UC_X86_REG_DS, UC_X86_REG_ES, UC_X86_REG_FS)
 
 SNAPSHOT_SHA = '31ede2a0e799243b3d39033a0127147b7631950087c05306e64b4203e6ea9ed1'
 
@@ -55,6 +56,18 @@ class Reference:
         if not pte & 1:
             raise ValueError(f'absent PTE {va:08x}')
         return (pte & 0xfffff000) + (va & 4095)
+
+    def enable_kernel_segments(self):
+        # PCR address belongs to the hash-bound captured kernel. Actual SEH,
+        # current-thread state and allocator mutexes execute in original code.
+        pcr = 0x8003da3c
+        fs = 0x00c093000000ffff | ((pcr & 0xffffff) << 16) | ((pcr >> 24) << 56)
+        self.cpu.mem_write(0x1000f000, struct.pack('<QQQQ', 0,
+            0x00cf9b000000ffff, 0x00cf93000000ffff, fs))
+        self.cpu.reg_write(UC_X86_REG_GDTR, (0, 0x1000f000, 31, 0))
+        for reg, value in ((UC_X86_REG_CS, 8), (UC_X86_REG_SS, 16),
+                           (UC_X86_REG_DS, 16), (UC_X86_REG_ES, 16), (UC_X86_REG_FS, 24)):
+            self.cpu.reg_write(reg, value)
 
     def map_page(self, cpu, access, address, size, value, user):
         try:

@@ -734,7 +734,10 @@ uint64_t XboxMachine::run(uint32_t start, uint64_t max, std::string& err) {
                 nv2a_->set_frame_phase(static_cast<uint32_t>((t60 % kCpuHz) * 1000 / kCpuHz));
             }
             // APU setup-engine frame: 256 samples / 48 kHz = 5.333 ms (187.5 Hz).
-            if (apu_) apu_->set_frame(total_insns_ * 375 / (kCpuHz * 2));
+            if (apu_) {
+                apu_->set_time(total_insns_,kCpuHz);
+                apu_->set_frame(total_insns_ * 375 / (kCpuHz * 2));
+            }
             // AC'97 PCM output consumes the same 256-sample frames, without host audio output.
             if (aci_) aci_->set_frame(total_insns_ * 375 / (kCpuHz * 2));
             // USB OHCI start-of-frame cadence is 1 kHz.

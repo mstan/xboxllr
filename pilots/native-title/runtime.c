@@ -76,6 +76,7 @@ __declspec(noreturn) static void stop(const char *reason, uint32_t va)
 #include "io_device_lle.h"
 static void usb_poll(void);
 static RECOMP_TLS unsigned usb_in_interrupt;
+static int cpu_interrupt_flag=1,cpu_interrupt_shadow;
 #endif
 #include "thread_scheduler.inc"
 static uint32_t file32(size_t offset)
@@ -104,6 +105,30 @@ void recomp_cxx_throw(uint32_t object, uint32_t info) { (void)info; stop("C++ ex
 void recomp_debug_service(uint32_t service, uint32_t argument) { (void)argument; stop("debug service unsupported", service); }
 uint32_t recomp_eflags_push(void) { stop("PUSHFD arithmetic flags not exported by donor lowering", recent[(recent_pos-1)&31]); }
 void recomp_eflags_pop(uint32_t value) { (void)value; stop("POPFD arithmetic flags not imported by donor lowering", recent[(recent_pos-1)&31]); }
+void pilot_cpu_cli(void)
+{
+#ifdef PILOT_USB_LLE
+    cpu_interrupt_flag=0;cpu_interrupt_shadow=0;pilot_io_device_set_if(0);
+#else
+    stop("CLI requires the interrupt LLE build",recent[(recent_pos-1)&31]);
+#endif
+}
+void pilot_cpu_sti(void)
+{
+#ifdef PILOT_USB_LLE
+    cpu_interrupt_shadow=!cpu_interrupt_flag;cpu_interrupt_flag=1;pilot_io_device_set_if(1);
+#else
+    stop("STI requires the interrupt LLE build",recent[(recent_pos-1)&31]);
+#endif
+}
+void pilot_cpu_sti_complete(void)
+{
+#ifdef PILOT_USB_LLE
+    cpu_interrupt_shadow=0;usb_poll();scheduler_checkpoint();
+#else
+    stop("STI completion requires the interrupt LLE build",0);
+#endif
+}
 #include "nonlocal_jump.inc"
 void pilot_thread_checkpoint(void)
 {
@@ -647,6 +672,10 @@ static void load_image(const char *path)
     }
     fprintf(stderr,"[LOAD] %u preload sections; %u deferred sections\n",preloaded,section_count-preloaded);
     sections_initialize();
+#ifdef PILOT_USB_LLE
+    const char *image_error=pilot_io_device_image(memory,image_base,(file32(0x10c)+4095)&~4095u);
+    if(image_error)stop(image_error,image_base);
+#endif
 
     /* Post-loader bootstrap thread. Xbox TLS is below NtTib.StackBase;
      * the original XAPI entry computes and writes its negative TLS index. */

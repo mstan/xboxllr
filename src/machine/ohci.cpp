@@ -69,7 +69,6 @@ void Ohci::reset() {
     regs_[17] = 0x628;       // HcLSThreshold
     regs_[18] = 0x1204;      // NOCP | NPS | four root ports
 
-    xid_attached_ = base_ == 0xFED00000u;
     xid_device_ = {};
     hub_device_ = {};
     hub_port1_status_ = topology_ == UsbTopology::kSyntheticControllerSHubForTest
@@ -88,6 +87,22 @@ uint32_t Ohci::read_reg(uint32_t index) const {
     if (index >= regs_.size()) return 0xffffffffu;
     if (index >= 21) return regs_[index] | kPortPps;
     return regs_[index];
+}
+
+void Ohci::set_xid_connected(bool connected) {
+    if (base_ != 0xfed00000u || xid_attached_ == connected) return;
+    xid_attached_ = connected;
+    if (connected) regs_[21] |= kPortCcs;
+    else {
+        if (regs_[21] & kPortPes) regs_[21] |= kPortPesc;
+        regs_[21] &= ~(kPortCcs | kPortPes | kPortPss | kPortPrs);
+        xid_device_ = {}; // A newly attached peripheral begins at address zero.
+        xid_state_ = {};
+        xid_left_rumble_ = xid_right_rumble_ = 0;
+    }
+    regs_[21] |= kPortCsc;
+    regs_[3] |= kIntrRhsc;
+    update_irq();
 }
 
 uint32_t Ohci::mmio_read(uint32_t addr, int size) {

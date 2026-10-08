@@ -44,7 +44,10 @@ static void test_memory_statistics(void)
     uint32_t size=33;call_kernel(14,&size,1);uint32_t second=g_eax;
     CHECK(second && second!=small);call_kernel(23,&second,1);CHECK(g_eax==56);
     memset(memory+second,0x5a,56);test_memory_snapshot(after);
-    CHECK(after[6]==before[6]+1 && after[2]==before[2]-1 && after[3]==before[3]);
+    /* Original buddy allocation may put the two size classes on separate
+     * pages. Placement is not promised by ExAllocatePool's caller contract. */
+    unsigned pool_pages=(small>>12)==(second>>12)?1:2;
+    CHECK(after[6]==before[6]+pool_pages && after[2]==before[2]-pool_pages && after[3]==before[3]);
     call_kernel(17,&small,1);CHECK(MEM32(second)==0x5a5a5a5au);
     test_memory_snapshot(after);CHECK(after[6]==before[6]+1 && after[2]==before[2]-1);
     uint64_t service=vm_service_bytes;vm_service_bytes=POOL_BYTES;

@@ -105,7 +105,7 @@ static void scheduler_checkpoint(void)
 #ifdef PILOT_USB_LLE
     /* The original kernel owns the single guest CPU's IRQL. DPC readiness
      * cannot preempt a caller at DISPATCH_LEVEL or a hardware ISR. */
-    if(pilot_io_device_irql()>=2)return;
+    if(!cpu_interrupt_flag || cpu_interrupt_shadow || pilot_io_device_irql()>=2)return;
 #endif
     uint32_t request=scheduled[scheduler_slot].request;
     if(!(request&7))return;
@@ -132,6 +132,7 @@ static int scheduler_block_begin(void)
     if(!scheduler_enabled || !scheduler_attached || scheduler_slot==SCHEDULER_CALLBACK_SLOT)return 0;
 #ifdef PILOT_USB_LLE
     if(pilot_io_device_irql()>=2)stop("blocking service at raised IRQL",pilot_io_device_irql());
+    if(!cpu_interrupt_flag || cpu_interrupt_shadow)stop("blocking service with interrupts inhibited",0);
 #endif
     AcquireSRWLockExclusive(&scheduler_lock);
     /* A whole blocking service may contain a narrower renderer wait. Only

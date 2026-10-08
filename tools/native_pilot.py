@@ -163,6 +163,8 @@ def prepare(args):
                  "--gen-dir", str(out / "gen"), "--trace-all-entries"])
     retire_recovered_entry_units(out/'gen',extent_records)
     counts = harden_generated(out / "gen")
+    from native_interrupt_lowering import apply as lower_interrupts
+    counts['interrupt_flags'] = lower_interrupts(out/'gen', args.xbe)
     analysis = json.loads((out / "analysis.aot-private.json").read_text())
     imports = analysis["kernel_imports"]
     header = ["/* Private input identity, regenerated from the owner's XBE. */",

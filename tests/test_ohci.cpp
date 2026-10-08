@@ -461,6 +461,28 @@ int main() {
     CHECK(hc.mmio_read(base + 0x54, 4) == 0x00010101u);
     CHECK(fault.empty());
 
+    // Physical attachment is independent of host-controller reset. Detach
+    // reports connection/enable changes, and reconnection must enumerate anew.
+    hc.mmio_write(base + 0x54, 4, 1u << 4);
+    hc.mmio_write(base + 0x54, 4, 0x1f0000);
+    hc.mmio_write(base + 0x0c, 4, 0xffffffffu);
+    hc.mmio_write(base + 0x10, 4, kIntrMie | kIntrRhsc);
+    hc.set_xid_connected(false);
+    CHECK((hc.port_status(0)&0x30003u)==0x30000u);
+    CHECK(irq.back()==std::make_pair(1,true));
+    CHECK(!hc.xid_address() && !hc.xid_configuration());
+    hc.mmio_write(base + 0x54, 4, 0x1f0000);
+    hc.mmio_write(base + 0x0c, 4, 0xffffffffu);
+    hc.set_xid_connected(false);
+    CHECK(!(hc.interrupt_status()&kIntrRhsc));
+    hc.mmio_write(base + 0x08, 4, 1);
+    CHECK(hc.port_status(0)==0x100u);
+    hc.set_xid_connected(true);
+    CHECK(hc.port_status(0)==0x10101u);
+    hc.mmio_write(base + 0x54, 4, 1u << 4);
+    CHECK((hc.port_status(0)&3)==3);
+    CHECK(fault.empty());
+
     std::printf(fails ? "test_ohci: %d checks failed\n"
                       : "test_ohci: ok\n",
                 fails);

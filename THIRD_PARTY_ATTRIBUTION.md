@@ -768,6 +768,33 @@ the owned software for bounded expected effects. Existing private/GPL-dependent
 pilot restrictions remain; this does not authorize a non-GPL product to ship
 the interpreter, original software, or incompatible donor components.
 
+## Original input reports, flags and DMA backing (2026-10-08)
+
+The input reference bridge now executes the owner's original pool and virtual
+allocator, page pinning and XID callbacks. The two recovered callback bodies
+use the previously attributed Phobos `63f18f0` translator; the private game
+repository owns their image hashes and recovery extents. No original bytes
+are committed. CLI/STI lowering, mapping synchronization and DMA ownership
+transport are independently authored. The existing MIT-attributed sp00nznet
+host controller mapping and Phobos-inspired replay source now also feed the
+LLE peripheral; they do not replace its USB transactions or original driver.
+The owned-code `native_input_state_reference.py` observes original report
+filtering, per-report packet increments and disconnected output bytes. HLE
+corrections follow those observed caller effects; no emulator or original
+instruction body is copied into the native input implementation.
+
+The shared APU sample clock uses the 48-samples/ms relationship in the original
+USB driver. [Cxbx GetAPUTime](https://github.com/Cxbx-Reloaded/Cxbx-Reloaded/blob/585c49a50af1255ab155099e06f24505f9c5a800/src/core/hle/DSOUND/DirectSound/DirectSound.cpp)
+was consulted for its 48 kHz rate. The pinned xemu and Phobos APU counter paths
+use a different rate (xemu marks its conversion uncertain); their conversion
+is not adopted. No GPL clock implementation was copied. This is software and
+source-reference evidence, not a new hardware measurement.
+
+[xemu's XID gamepad](https://github.com/xemu-project/xemu/blob/482088490c2d5983ed5e1eafbd09906157c1eca0/hw/xbox/xid-gamepad.c)
+was consulted for periodic IN-report behavior and descriptor/capability
+structure. No body is copied. Existing private-pilot/GPL dependency limits
+remain in force for the intended non-GPL shipping product.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

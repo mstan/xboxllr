@@ -1,8 +1,9 @@
-/* Guest DMA bytes remain owned by the selected original contiguous allocator. Retain an
- * allocation once hardware references it, until a real controller reset drops
- * its schedules. This bounded bridge does not alias arbitrary guest VM pages. */
+/* DMA uses the selected original allocator's actual physical pages. Retain
+ * contiguous schedules until controller reset; ordinary image/pool buffers
+ * require the driver's live pin range. Arbitrary native VM is not mapped. */
 #include "usb_lle.h"
 #include "mmio_fault.h"
+#include "input_host.h"
 static INIT_ONCE usb_once=INIT_ONCE_STATIC_INIT;
 static uint8_t usb_dma_leases[256];
 static uint64_t usb_isr_count;
@@ -21,6 +22,9 @@ static const char *usb_original_isr(uint32_t entry,uint32_t regs[8])
     RecompXmm xmm[]={g_xmm0,g_xmm1,g_xmm2,g_xmm3,g_xmm4,g_xmm5,g_xmm6,g_xmm7};
     RecompMmx mm[]={g_mm0,g_mm1,g_mm2,g_mm3,g_mm4,g_mm5,g_mm6,g_mm7};
     uint8_t irql=g_fs_base?MEM8(g_fs_base+0x24):0;
+    int saved_if=cpu_interrupt_flag,saved_shadow=cpu_interrupt_shadow;
+    /* The original gate enables interrupts before calling its registered ISR. */
+    cpu_interrupt_flag=1;cpu_interrupt_shadow=0;pilot_io_device_set_if(1);
     g_eax=regs[0];g_ecx=regs[1];g_edx=regs[2];g_ebx=regs[3];
     g_esp=regs[4];g_ebp=regs[5];g_esi=regs[6];g_edi=regs[7];
     g_df=0; /* The original interrupt thunk executed CLD. */
@@ -40,6 +44,7 @@ static const char *usb_original_isr(uint32_t entry,uint32_t regs[8])
     g_mm0=mm[0];g_mm1=mm[1];g_mm2=mm[2];g_mm3=mm[3];
     g_mm4=mm[4];g_mm5=mm[5];g_mm6=mm[6];g_mm7=mm[7];
     if(g_fs_base)MEM8(g_fs_base+0x24)=irql;
+    cpu_interrupt_flag=saved_if;cpu_interrupt_shadow=saved_shadow;pilot_io_device_set_if(saved_if);
     return NULL;
 }
 static void usb_poll(void)
@@ -50,6 +55,7 @@ static void usb_poll(void)
     ReleaseSRWLockExclusive(&scheduler_lock);
     const char *error=pilot_usb_lle_tick();
     if(error)stop(error,1);
+    if(!cpu_interrupt_flag || cpu_interrupt_shadow)return;
     int delivered=0;
     /* The device may assert while a caller is at high IRQL. Let the actual
      * kernel gate defer that interrupt and the actual lowering code resume it. */
@@ -76,6 +82,8 @@ static DWORD WINAPI usb_clock_worker(void *unused)
 static void usb_clock_start(void)
 {
     if(!scheduler_enabled)stop("USB LLE requires the single guest CPU scheduler",0);
+    const char *error=pilot_usb_lle_host_bind(pilot_input_host_state,pilot_input_host_rumble);
+    if(error)stop(error,0);
     HANDLE worker=CreateThread(NULL,0,usb_clock_worker,NULL,0,NULL);
     if(!worker)stop("USB LLE clock worker creation failed",GetLastError());
     CloseHandle(worker);
@@ -97,7 +105,9 @@ static int usb_dma_transfer(uint32_t pa,void *buffer,size_t bytes,int write)
         result=1;
     }
 done:
-    ReleaseSRWLockExclusive(&vm_lock);return result;
+    ReleaseSRWLockExclusive(&vm_lock);
+    if(!allocation)result=pilot_io_device_pinned_dma(pa,buffer,(uint32_t)bytes,write);
+    return result;
 }
 static int usb_dma_read(uint32_t pa,void *out,size_t size){return usb_dma_transfer(pa,out,size,0);}
 static int usb_dma_write(uint32_t pa,const void *in,size_t size){return usb_dma_transfer(pa,(void*)in,size,1);}

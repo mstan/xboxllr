@@ -49,6 +49,36 @@ def run(snapshot):
     for address, expected in zip(addresses, physical):
         assert ref.call(173, address + 17) == expected + 17
     ref.call(17, pointer)
+    # Image-style fixed VA reservation with independently observed original
+    # commit/PFN locking/decommit semantics. No fabricated PTEs or callbacks.
+    ref.enable_kernel_segments()
+    seh = ref.word(0x8003da3c)
+    slots = 0x10000200
+    def vm(ordinal, base, size, kind):
+        ref.cpu.mem_write(slots, struct.pack('<II', base, size))
+        args = (slots, 0, slots+4, kind, 4) if ordinal == 184 else (slots, slots+4, kind)
+        status = ref.call(ordinal, *args)
+        assert ref.word(0x8003da3c) == seh
+        return status, struct.unpack('<II', ref.cpu.mem_read(slots, 8))
+    assert vm(184, 0x400000, 0x20000, 0x2000) == (0, (0x400000, 0x20000))
+    assert ref.call(173, 0x410000) == 0
+    image_transitions = []
+    for cycle in range(2):
+        assert vm(184, 0x410000, 8192, 0x1000) == (0, (0x410000, 8192))
+        pages = [ref.physical(va) for va in (0x410000, 0x411000)]
+        words = [0x83ff0000 + (pa >> 12)*4 for pa in pages]
+        before = [ref.word(va) & 65535 for va in words]
+        for unlock, delta in ((0, 2), (0, 4), (1, 2), (1, 0)):
+            ref.call(175, 0x410fff, 2, unlock)
+            assert [ref.word(va) & 65535 for va in words] == [v+delta for v in before]
+        assert ref.map_page(ref.cpu, 0, 0x410000, 4, 0, None)
+        ref.cpu.mem_write(0x410000, b'\x12\x34\x56\x78')
+        assert bytes(ref.ram[pages[0]:pages[0]+4]) == b'\x12\x34\x56\x78'
+        assert ref.call(173, 0x410017) == pages[0]+23
+        assert vm(199, 0x410000, 8192, 0x4000) == (0, (0x410000, 8192))
+        assert ref.call(173, 0x410000) == 0
+        image_transitions.append(dict(cycle=cycle, pages=pages, initial_lock_words=before))
+    assert vm(199, 0x400000, 0, 0x8000)[0] == 0
     interrupts = []
     for irq in (0, 1, 9, 26, 27, 0xffffffff):
         ref.cpu.mem_write(0x10000400, b'\xcd' * 4)
@@ -64,7 +94,7 @@ def run(snapshot):
     assert struct.unpack_from('<IIII', body, 4) == (0x11223344, 0x55667788, 1, 25)
     assert body[4+0x10] == 0 and body[4+0x12] == 0
     return dict(snapshot_sha256=SNAPSHOT_SHA, direct=direct, pool_pointer=hex(pointer),
-                initial_lock_words=initial, pin_transitions=transitions,
+                initial_lock_words=initial, pin_transitions=transitions, image_transitions=image_transitions,
                 interrupts=interrupts, interrupt_body_private=body.hex())
 
 

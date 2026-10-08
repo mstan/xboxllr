@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "machine/mmio_device.hpp"
+#include "machine/apu_clock.hpp"
 
 namespace xlle {
 
@@ -84,6 +85,11 @@ public:
         update_irq();
     }
 
+    // Independently advance the free-running audio sample clock.
+    void set_time(uint64_t ticks,uint64_t frequency) {
+        if(!frequency || frequency>UINT64_MAX/48000u){device_fault("invalid APU clock frequency");return;}
+        xgscnt_=apu_sample_counter(ticks,frequency);
+    }
     // Advance to an absolute 5.333 ms APU-frame number.
     void set_frame(uint64_t frame) {
         while (frame_ < frame) {
@@ -95,7 +101,7 @@ public:
     uint32_t mmio_read(uint32_t addr, int size) override {
         uint32_t off = addr - base_;
         if (off == kXgscnt)
-            set_reg32(kXgscnt, static_cast<uint32_t>(xgscnt_ += 0x400));
+            set_reg32(kXgscnt, static_cast<uint32_t>(xgscnt_));
         // VP PIO_FREE: the unsimulated queue is always empty, matching xemu.
         if (off == kVpBase + 0x10) return 0x80;
         log_subregion("rd", off);

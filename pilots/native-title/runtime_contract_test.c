@@ -348,6 +348,12 @@ int main(int argc,char **argv)
     commit(0x10000,0x10000);
     g_esp=0x18000; MEM32(g_esp)=0x12340;
     image_size=0x200; image_bytes=calloc(1,image_size); CHECK(image_bytes!=NULL);
+#ifdef PILOT_USB_LLE
+    /* Production initializes the selected kernel during image reservation.
+     * Include that one-time host engine setup before resource baselines. */
+    uint32_t boot_irql=0,unused=0;
+    CHECK(!pilot_io_device_lle(103,memory,&unused,&boot_irql));
+#endif
     if(argc==2 && !strcmp(argv[1],"scheduler")){test_guest_scheduler();return 0;}
 #ifdef PILOT_AUDIO_DSP
     if(argc==3 && !strcmp(argv[1],"audio-effects")){test_audio_effects(argv[2]);return 0;}
@@ -370,6 +376,12 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"usb-dma-unowned")) {
             install_fault_handler();usb_test_write(0x18,0x1000);usb_test_write(4,0x80);
             Sleep(20);(void)usb_test_read(0x0c);return 1;
+        }
+        if (!strcmp(argv[1],"usb-dma-image-release")) {
+            CHECK(!pilot_io_device_image(memory,0x10000,0x10000));
+            uint32_t args[]={0x15000,8,0};call_kernel(175,args,3);
+            const char *error=pilot_io_device_image_release(0x15000,4096);
+            if(error)stop(error,0x15000);return 1;
         }
 #endif
 #ifdef PILOT_IO_DEVICE_LLE

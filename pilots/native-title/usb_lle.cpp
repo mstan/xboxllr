@@ -4,8 +4,11 @@
 #include <windows.h>
 #include <memory>
 #include <string>
+#include <cstring>
+#include <cstdio>
 #include "machine/ohci.hpp"
 #include "machine/pic.hpp"
+#include "machine/apu_clock.hpp"
 #include "usb_lle.h"
 
 namespace {
@@ -17,6 +20,9 @@ uint64_t start_ms;
 bool irq_level;
 xlle::DualPic pic;
 bool pic_ready;
+PilotUsbHostRead host_read;
+PilotUsbHostRumble host_rumble;
+uint64_t output_reports,input_reports;
 uint64_t clock_ms()
 {
     LARGE_INTEGER now,frequency;
@@ -24,6 +30,42 @@ uint64_t clock_ms()
     return (uint64_t)(now.QuadPart/frequency.QuadPart)*1000+
         (uint64_t)(now.QuadPart%frequency.QuadPart)*1000/frequency.QuadPart;
 }
+void advance()
+{
+    if(host_read) {
+        uint8_t report[18];uint32_t status=host_read(0,report);
+        if(status && status!=ERROR_DEVICE_NOT_CONNECTED){failure="USB LLE host input poll failed";return;}
+        controller->set_xid_connected(status==0);
+        if(!status) {
+            xlle::Ohci::XidGamepadState state;
+            std::memcpy(&state.buttons,report,2);
+            std::memcpy(state.analog.data(),report+2,8);
+            std::memcpy(&state.thumb_lx,report+10,2);std::memcpy(&state.thumb_ly,report+12,2);
+            std::memcpy(&state.thumb_rx,report+14,2);std::memcpy(&state.thumb_ry,report+16,2);
+            controller->set_xid_gamepad_state(state);
+        }
+    }
+    controller->set_frame(clock_ms()-start_ms);
+    if(host_rumble && controller->xid_output_reports()!=output_reports) {
+        uint32_t status=host_rumble(0,controller->xid_left_rumble(),controller->xid_right_rumble());
+        if(status){failure="USB LLE host cannot deliver output report";return;}
+        output_reports=controller->xid_output_reports();
+    }
+    uint64_t reports=controller->xid_endpoint2_input_reports();
+    if(reports!=input_reports && (reports<5 || reports>=input_reports+1000)) {
+        std::fprintf(stderr,"[USB LLE INPUT] endpoint2_reports=%llu configured=%u address=%u\n",
+            (unsigned long long)reports,controller->xid_configuration(),controller->xid_address());
+        input_reports=reports;
+    }
+}
+}
+extern "C" const char *pilot_usb_lle_host_bind(PilotUsbHostRead read,PilotUsbHostRumble rumble)
+{
+    AcquireSRWLockExclusive(&usb_lock);
+    const char *error=nullptr;
+    if(host_read || !read || !rumble)error="USB LLE invalid/repeated host input binding";
+    else {host_read=read;host_rumble=rumble;}
+    ReleaseSRWLockExclusive(&usb_lock);return error;
 }
 extern "C" const char *pilot_usb_lle_bind(PilotUsbDmaRead read,PilotUsbDmaWrite write,
                                           PilotUsbDmaRelease release)
@@ -74,18 +116,25 @@ extern "C" int pilot_usb_pic_vector(int acknowledge)
 extern "C" const char *pilot_usb_lle_tick(void)
 {
     AcquireSRWLockExclusive(&usb_lock);
-    if(controller && failure.empty())controller->set_frame(clock_ms()-start_ms);
+    if(controller && failure.empty())advance();
     const char *result=failure.empty()?nullptr:failure.c_str();
     ReleaseSRWLockExclusive(&usb_lock);return result;
 }
 extern "C" const char *pilot_usb_lle_access(uint32_t address,int write,uint32_t *value)
 {
+    /* XGSCNT is used by the original USB DPC for sample/frame synchronization.
+     * Share the LLE counter contract without importing an entire APU backend. */
+    if(address==0xfe80200cu && !write) {
+        LARGE_INTEGER now,frequency;QueryPerformanceCounter(&now);QueryPerformanceFrequency(&frequency);
+        *value=xlle::apu_sample_counter((uint64_t)now.QuadPart,(uint64_t)frequency.QuadPart);
+        return nullptr;
+    }
     AcquireSRWLockExclusive(&usb_lock);
     if(!controller)failure="USB LLE access before binding";
     if(address<0xfed00000u || address>=0xfed01000u || (address&3))
         failure="USB LLE unsupported register transaction";
     if(failure.empty()) {
-        controller->set_frame(clock_ms()-start_ms);
+        advance();
         if(failure.empty()) {
             if(write) {
                 uint32_t old_control=controller->control();

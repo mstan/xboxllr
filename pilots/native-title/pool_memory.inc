@@ -1,7 +1,9 @@
 /* Native nonpaged-pool ownership. nxdk defines the ABI; the external kernel
  * reference supplies 32-byte small blocks, eight-byte overhead and the 4056
  * byte/page allocation boundary. The host-side ledger is independent of the
- * original buddy lists. Guest payloads are real, shared-budget CPU storage. */
+ * original buddy lists. Guest payloads are real, shared-budget CPU storage.
+ * USB LLE selects the actual original allocator so DMA translation and pinning
+ * describe those same allocations; the native ledger still owns their lifetime. */
 #ifdef PILOT_IO_DEVICE_LLE
 /* Original device objects retain the kernel allocator's D0 namespace. */
 #define POOL_BASE 0xe0000000u
@@ -20,6 +22,30 @@ static uint32_t pool_allocate(uint32_t bytes,uint32_t tag)
 {
     if(!bytes)stop("zero-size pool allocation outside contract",0);
     if(bytes>POOL_BYTES)return 0;
+#ifdef PILOT_USB_LLE
+    AcquireSRWLockExclusive(&vm_lock);
+    unsigned slot;for(slot=0;slot<4096 && pool_blocks[slot].span;++slot){}
+    uint32_t pointer=0,usable=0;
+    if(slot<4096 && vm_committed(0,0x100000000ull)+vm_service_bytes+bytes<=POOL_BYTES) {
+        uint32_t args[]={bytes,tag};
+        const char *error=pilot_io_device_lle(15,memory,args,&pointer);
+        if(error)stop(error,15);
+        if(pointer && vm_committed(0,0x100000000ull)+vm_service_bytes>POOL_BYTES) {
+            uint32_t ignored=0;error=pilot_io_device_lle(17,memory,&pointer,&ignored);
+            if(error)stop(error,17);
+            pointer=0;
+        }
+        if(pointer) {
+            error=pilot_io_device_lle(23,memory,&pointer,&usable);
+            if(error)stop(error,23);
+            if(usable<bytes)stop("original pool returned undersized allocation",pointer);
+            pool_blocks[slot].base=pool_blocks[slot].payload=pointer;
+            pool_blocks[slot].span=pool_blocks[slot].usable=usable;pool_blocks[slot].tag=tag;
+            fprintf(stderr,"[POOL CREATE] address=%08x requested=%u usable=%u tag=%08x original=1\n",pointer,bytes,usable,tag);
+        }
+    }
+    ReleaseSRWLockExclusive(&vm_lock);return pointer;
+#else
     uint32_t large=bytes>4056,alignment=large?4096:32;
     uint32_t span=large?(bytes+4095)&~4095u:(bytes+8+31)&~31u;
     AcquireSRWLockExclusive(&vm_lock);
@@ -48,10 +74,18 @@ static uint32_t pool_allocate(uint32_t bytes,uint32_t tag)
     fprintf(stderr,"[POOL CREATE] address=%08x requested=%u usable=%u tag=%08x\n",result,bytes,pool_blocks[slot].usable,tag);
 done:
     ReleaseSRWLockExclusive(&vm_lock);return result;
+#endif
 }
 static void pool_free(uint32_t pointer)
 {
     AcquireSRWLockExclusive(&vm_lock);
+#ifdef PILOT_USB_LLE
+    unsigned slot=pool_find(pointer);uint32_t result=0;
+    const char *error=pilot_io_device_release_check(pointer,pool_blocks[slot].usable);
+    if(error)stop(error,pointer);
+    error=pilot_io_device_lle(17,memory,&pointer,&result);
+    if(error)stop(error,17);
+#else
     unsigned slot=pool_find(pointer),first=(pool_blocks[slot].base-POOL_BASE)/4096;
     unsigned last=(pool_blocks[slot].base-POOL_BASE+pool_blocks[slot].span+4095)/4096;
     for(unsigned page=first;page<last;++page) {
@@ -59,6 +93,7 @@ static void pool_free(uint32_t pointer)
         if(!--pool_page_refs[page] && !VirtualFree(memory+POOL_BASE+page*4096,4096,MEM_DECOMMIT))
             stop("pool page release failed",pointer);
     }
+#endif
     memset(&pool_blocks[slot],0,sizeof(pool_blocks[slot]));
     ReleaseSRWLockExclusive(&vm_lock);
 }

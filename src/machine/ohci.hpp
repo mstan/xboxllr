@@ -69,6 +69,7 @@ public:
     Ohci(uint32_t base, FaultFn fault,
          UsbTopology topology = UsbTopology::kDirectXid)
         : base_(base), fault_(std::move(fault)), topology_(topology) {
+        xid_attached_ = base_ == 0xFED00000u;
         reset();
     }
 
@@ -93,6 +94,7 @@ public:
     void set_xid_gamepad_state(const XidGamepadState& state) {
         xid_state_ = state;
     }
+    void set_xid_connected(bool connected);
 
     uint64_t frames() const { return frames_; }
     uint32_t control() const { return regs_[1]; }
