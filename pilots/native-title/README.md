@@ -1,5 +1,73 @@
 # Native title reference pilot
 
+## Native frame-service investigation (2026-10-08)
+
+`beads-xbox.1.94`, branch `perf/blinx-frame-services-20261008`, base `364fe52`.
+`XLLE_PILOT_SERVICE_PROFILE=1` records per-thread inclusive graphics API time
+and draw phases every 30 swaps. DPC execution is excluded from that thread's
+accounting; waits inside a graphics call remain included. The separate
+`XLLE_PILOT_CALLBACK_PROFILE` identifies callback wait costs. These diagnostics
+observe the selected implementation without duplicating guest or GPU work.
+Clock/logging overhead means these reports are attribution evidence, not an
+uninstrumented cadence claim. First reports crossing phase boundaries are
+excluded from stage totals.
+
+The capture-disabled `draw-services-profile` run covers 750 fully in-stage
+frames in 58.506 seconds: 51.978 seconds inside graphics APIs. Draw phase
+totals include 5.948 seconds in the final disabled frame-capture lookup,
+6.475 seconds in vertex preparation (also a disabled feedback lookup), and
+6.340 seconds in shader preparation (also a disabled draw-capture lookup).
+Actual submission is 1.365 seconds; deferred state forwarding is 1.599 seconds.
+This directs the next experiment toward configuration lookups before broader
+state-cache work. Phobos documents the same repeated disabled-lookup cost in
+`hle_d3d8_state.c` and caches it.
+
+`graphics_diagnostics.inc` applies that approach to draw/feedback/FVF/frame
+capture and texture-binding feedback trace settings. Each setting, including
+absence, is captured on first use and owned for the process lifetime. Set
+diagnostic environment variables before launching; the configured draw-capture
+trigger file remains live. `XLLE_PILOT_DIAGNOSTIC_CACHE=0` selects the previous
+lookup behavior for a separate-run comparison. No GPU work, guest state or
+resource synchronization is removed, so the existing LLE draw contract and
+native pixel/ordering fixtures remain applicable without a new tolerance.
+
+Private profiling evidence: `build/blinx/{frame-services-profile,draw-services-profile}/`
+and their `run-*.log` files. The first 180-second observation's final CDB stack
+collection timed out; raw logs/resources and `recovered-setup.aot-private.json`
+record that limitation. The subsequent 120-second run has a complete manifest.
+
+The same-executable cache-disabled/enabled comparison measures the first 300
+gameplay present intervals with capture/service profiling disabled, callback
+profiling enabled, guest CPU15 affinity and a real replay controller:
+
+| Configuration | Cadence | Median frame interval |
+| --- | ---: | ---: |
+| Repeated environment searches | 13.71919 fps | 65.0012 ms |
+| Cached diagnostic configuration | 21.18739 fps | 40.9403 ms |
+
+That is 1.544x cadence and 37.0% lower median frame time. Both measured windows
+contain the same sequence of 3600 GPU callback contexts. This is a same-stage
+throughput comparison, not proof of identical entire guest executions. Both
+120-second observations end by harness termination (exit 1), without an earlier
+guard/fault. The candidate reaches replay file `pelon037.rec`, the reference
+`pelon022.rec`. No draw, callback or resource handoff is bypassed by this change.
+The graphics backend/ABI tests pass (3.50 s); the initial profiler also passed
+all 35 native tests (16.70 s). Evidence and executable hash are in
+`build/blinx/diagnostic-cache-comparison.aot-private.json` and the two run folders.
+This improves one measured gameplay window; full original-speed operation
+throughout the attract sequence remains unproven.
+
+The same build's subsequent `diagnostic-cache-visible` run retains configured
+draw capture (32 real draws) and five-second presentation captures. Start at
+120000 ms is sampled at 120016 ms, followed by the visible `Press START to begin`
+screen; idling loads and renders a second 3D demo. Its 210-second observation
+has 40 presentation captures, 45 completed writes out of 45, and no guard/fault
+before harness termination (elapsed 210.422 s, exit 1). All 32 captured draws
+pass the existing independent NV2A CPU-reference/fresh-GPU comparison at the
+unchanged `2e-4` tolerance. The run manifest, images, draw inputs and comparison
+log are retained in `build/blinx/diagnostic-cache-visible/`. This diagnostic run
+is functional evidence; it is not used for the speed claim above.
+
 ## Natural attract repetition observation (2026-10-08)
 
 `beads-xbox.1.62`, executable built from the `ba89637` input/capture checkpoint.

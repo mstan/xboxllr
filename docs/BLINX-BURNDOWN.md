@@ -19,6 +19,18 @@ gameplay private memory stays around 752-753 MB and handles 607/605/605; all
 193 writes complete. Full audio/frame synchronization and original-speed
 cadence remain outstanding; JSRF remains deferred.
 
+The subsequent frame-service investigation (.94) identifies repeated disabled
+diagnostic environment lookups as a major draw cost. Applying Phobos's cached
+configuration approach improves the same-executable first 300 gameplay
+intervals from 13.71919 to 21.18739 fps (1.544x), with median intervals
+65.0012 to 40.9403 ms and the same 3600 callback-context sequence. Both
+capture-disabled 120-second observations have no guard/fault before harness
+termination. This is measured progress toward cadence, not original-speed
+qualification across the whole attract sequence.
+The same build then passes a 210-second visible interruption/menu-return/reentry
+observation, 45/45 completed replay writes and 32 actual draw comparisons at
+the existing CPU/GPU reference tolerance.
+
 Earlier progression:
 The borrowed Phobos renderer now presents actual game frames. The prior disc
 error is traced and fixed: local VM/texture ownership caps returned out of memory

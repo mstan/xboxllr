@@ -15,6 +15,17 @@ notices. Preparation/build steps must report missing required notices.
 
 ## Private native-title reference pilot
 
+### Draw diagnostic configuration caching - 2026-10-08
+
+Phobos `src/hle/hle_d3d8_state.c`, specifically the cached disabled diagnostic
+lookup in `hle_d3d8_shadow_apply_states`, at
+`bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0` supplies the performance approach.
+The local `graphics_diagnostics.inc` independently caches owned configuration
+strings, including absent values, instead of searching the process environment
+for each primitive. No donor body was copied. Draws, state, resource updates,
+GPU ordering and enabled diagnostic captures retain their implementations.
+The configured draw-capture trigger file is still checked while running.
+
 ### Asynchronous writes and installed HDD buffering - 2026-10-07
 
 Phobos `src/kernel/kernel_file.c` at

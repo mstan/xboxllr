@@ -39,7 +39,7 @@ static void graphics_shader_bind(uint32_t handle)
          * Draw submission still rejects it until a draw contract is qualified. */
         if(handle)pilot_gfx_fvf_extent(handle);
         uint32_t object=PILOT_D3D_FVF_OBJECT,flags=handle?2:0,offset=handle?16:0,dimensions=0;
-        FILE *capture_file=NULL;const char *capture=getenv("XLLE_PILOT_FVF_CAPTURE");
+        FILE *capture_file=NULL;const char *capture=graphics_diagnostic(GRAPHICS_DIAGNOSTIC_FVF);
         if(capture && *capture) {
             static unsigned sequence;char path[1024];uint32_t metadata[]={handle,0x114};
             if(snprintf(path,sizeof(path),"%s/fvf-%u.bin",capture,++sequence)>=(int)sizeof(path))stop("FVF capture path",0);

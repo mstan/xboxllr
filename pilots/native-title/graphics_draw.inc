@@ -2,7 +2,7 @@
  * submitted draw and is disabled in ordinary production execution. */
 static void graphics_draw_capture(const uint32_t args[3])
 {
-    const char *capture=getenv("XLLE_PILOT_DRAW_CAPTURE");if(!capture || !*capture)return;
+    const char *capture=graphics_diagnostic(GRAPHICS_DIAGNOSTIC_DRAW);if(!capture || !*capture)return;
     static unsigned sequence;
     const char *trigger=getenv("XLLE_PILOT_DRAW_CAPTURE_TRIGGER");
     if(trigger && *trigger && GetFileAttributesA(trigger)==INVALID_FILE_ATTRIBUTES)return;
@@ -47,6 +47,8 @@ static void graphics_draw_capture(const uint32_t args[3])
 }
 static void graphics_draw_common(const uint32_t args[3],uint32_t up_data,uint32_t up_stride)
 {
+    uint64_t profile=graphics_service_profile_enabled() && !dispatch_in_dpc?dispatch_monotonic():0;
+    if(profile)++graphics_service_profile.draw_calls;
     unsigned primitive=args[0],first=args[1],count=args[2];
     if(!count || (uint64_t)first+count>UINT32_MAX)stop("invalid draw range",count);
     if((primitive!=5 && primitive!=6 && primitive!=8) || count<3 ||
@@ -55,6 +57,7 @@ static void graphics_draw_common(const uint32_t args[3],uint32_t up_data,uint32_
         pilot_gfx_pixel_program((const uint32_t*)(memory+PILOT_D3D_RENDER_STATES),
             MEM32(PILOT_D3D_RENDER_STATES+136*4))<0)stop("unsupported native pixel draw",0);
     graphics_target_prepare(graphics_target);graphics_target_prepare(graphics_depth);
+    graphics_draw_profile_step(&profile,0);
     uint32_t shader=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_SHADER);
     uint32_t extents[16]={0};unsigned streams;
     if(shader&1)streams=pilot_gfx_shader_streams(extents);
@@ -64,7 +67,7 @@ static void graphics_draw_common(const uint32_t args[3],uint32_t up_data,uint32_
             stop("invalid user-pointer draw stream",up_stride);
         graphics_pointer(up_data,count*up_stride);
     }
-    const char *feedback_capture=getenv("XLLE_PILOT_FEEDBACK_CAPTURE");
+    const char *feedback_capture=graphics_diagnostic(GRAPHICS_DIAGNOSTIC_FEEDBACK);
     if(pilot_gfx_feedback_mask() && feedback_capture && *feedback_capture && up_data) {
         char path[1024];static unsigned sequence;
         if(snprintf(path,sizeof(path),"%s/feedback-%u.bin",feedback_capture,++sequence)>=(int)sizeof(path))stop("feedback capture path",0);
@@ -82,16 +85,19 @@ static void graphics_draw_common(const uint32_t args[3],uint32_t up_data,uint32_
         pilot_gfx_vertex_upload_range(vertex->native,memory+vertex->data,
             first*stride,(count-1)*stride+extents[i]);
     }
+    graphics_draw_profile_step(&profile,1);
     for(unsigned stage=0;stage<4;++stage) {
         uint32_t header=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_TEXTURES+stage*4);
         if(header)graphics_texture_sample_prepare(graphics_texture_slot(header));
     }
+    graphics_draw_profile_step(&profile,2);
     graphics_sync_deferred();
+    graphics_draw_profile_step(&profile,3);
     if(!(shader&1)) {
         if(MEM32(PILOT_D3D_RENDER_STATES+92*4))stop("pretransformed fog is unqualified",shader);
         if(pilot_gfx_fvf_prepare(shader,graphics_float(TRANSFORM_FIELD(SCREEN_OFFSET)),
             graphics_float(TRANSFORM_FIELD(SCREEN_OFFSET)+4))<0)stop("native FVF preparation failed",shader);
-        const char *capture=getenv("XLLE_PILOT_FVF_CAPTURE");
+        const char *capture=graphics_diagnostic(GRAPHICS_DIAGNOSTIC_FVF);
         if(capture && *capture && !up_data) {
             struct GraphicsVertexObject *vertex=graphics_vertex(MEM32(PILOT_D3D_STREAMS+8));
             uint32_t stride=MEM32(PILOT_D3D_STREAMS),bytes=pilot_gfx_fvf_extent(shader);
@@ -112,10 +118,12 @@ static void graphics_draw_common(const uint32_t args[3],uint32_t up_data,uint32_
     if(pilot_gfx_shader_raster(scale,offset)<0)stop("native raster constants failed",0);
     if(!up_data)graphics_draw_capture(args);
     }
+    graphics_draw_profile_step(&profile,4);
     int32_t result=up_data?pilot_gfx_draw_memory(primitive,count,memory+up_data,up_stride):pilot_gfx_draw_vertices(primitive,first,count);
+    graphics_draw_profile_step(&profile,5);
     if(result<0)stop("native vertex draw failed",(uint32_t)result);
     if(pilot_verbose)fprintf(stderr,"[DRAW SUBMIT] primitive=%u first=%u count=%u\n",primitive,first,count);
-    const char *capture=getenv("XLLE_PILOT_FRAME_CAPTURE");
+    const char *capture=graphics_diagnostic(GRAPHICS_DIAGNOSTIC_FRAME);
     if(capture && *capture && graphics_target==graphics_headers) {
         static unsigned sequence;
         if(sequence<32) {
@@ -128,4 +136,5 @@ static void graphics_draw_common(const uint32_t args[3],uint32_t up_data,uint32_
             free(pixels);if(fclose(file))stop("frame capture close",0);
         }
     }
+    graphics_draw_profile_step(&profile,6);
 }

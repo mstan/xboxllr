@@ -3,8 +3,10 @@
  * stop before executing against a device owned by the native renderer. */
 #include "graphics_backend.h"
 #include "pilot_d3d_bindings.h"
+#include "graphics_profile.inc"
 static SRWLOCK graphics_lock=SRWLOCK_INIT;
 static int graphics_active;
+#include "graphics_diagnostics.inc"
 static uint32_t graphics_parameters[17];
 static uint32_t graphics_headers,graphics_data[3],graphics_target,graphics_depth;
 static unsigned graphics_surface_refs[3];
@@ -118,7 +120,7 @@ static void graphics_set_targets(uint32_t color,uint32_t depth)
 }
 
 #include "graphics_reset.inc"
-void pilot_d3d_dispatch(unsigned entry)
+static void graphics_dispatch_impl(unsigned entry)
 {
     if (entry>=PILOT_D3D_COUNT) stop("invalid graphics entry",entry);
     const uint32_t *arguments=graphics_pointer(g_esp+4,pilot_d3d_calls[entry].stack_bytes);
@@ -351,4 +353,14 @@ void pilot_d3d_dispatch(unsigned entry)
     }
     ReleaseSRWLockExclusive(&graphics_lock);
     g_esp+=4+pilot_d3d_calls[entry].stack_bytes;
+}
+
+void pilot_d3d_dispatch(unsigned entry)
+{
+    if(!graphics_service_profile_enabled() || dispatch_in_dpc || entry>=PILOT_D3D_COUNT) {
+        graphics_dispatch_impl(entry);return;
+    }
+    uint64_t begin=dispatch_monotonic();
+    graphics_dispatch_impl(entry);
+    graphics_service_profile_record(entry,begin,dispatch_monotonic());
 }
