@@ -88,6 +88,23 @@ def bind(xbe: Path, output: Path, symbols: Path):
     if callback['stack_bytes']!=12 or context.digest(functions[callback['address']])!=callback_digest:
         raise ValueError('unreviewed GPU callback boundary')
     state_defaults['gpu_callback_binding']=dict(stack_bytes=12,function_sha256=callback_digest)
+    yuv=next(s for s in identified if s['name']=='D3DDevice_SetRenderState_YuvEnable')
+    yuv_digest='e5ab53bdbf1e07132159879721754c3e0ab3f1d901dff8bdd62b81e35aa0c5ed'
+    if yuv['stack_bytes']!=4 or context.digest(functions[yuv['address']])!=yuv_digest:
+        raise ValueError('unreviewed YUV enable boundary')
+    yuv_code=list(Cs(CS_ARCH_X86,CS_MODE_32).disasm(data(yuv['address'],43),yuv['address']))
+    stores=[int(m[1],16) for i in yuv_code if i.mnemonic=='mov' and
+            (m:=re.fullmatch(r'dword ptr \[0x([0-9a-f]+)\], eax',i.op_str))]
+    if len(stores)!=1 or (stores[0]-variables['D3D_g_RenderState'])%4:
+        raise ValueError('unreviewed YUV cache store')
+    yuv_index=(stores[0]-variables['D3D_g_RenderState'])//4
+    if not 0<=yuv_index<166: raise ValueError('YUV cache outside render states')
+    state_defaults['yuv_state_index']=yuv_index
+    helpers=[int(i.op_str,0) for i in yuv_code if i.mnemonic=='call']
+    if len(helpers)!=2 or \
+        context.digest(functions[helpers[1]])!='d6c4f59d3a7655450861131f02c09f18672ed84140e2604ddbab50d0c4f01322':
+        raise ValueError('unreviewed YUV cache/control packet')
+    state_defaults['yuv_enable_binding']=dict(stack_bytes=4,function_sha256=yuv_digest,state_index=yuv_index,control0_enable_bit=28)
     # Reviewed programmable-shader load/select path. Cache offsets stay in the
     # revision binding; native code owns GPU programs and never emits packets.
     load=next(s for s in identified if s['name']=='D3DDevice_LoadVertexShader')
@@ -213,6 +230,7 @@ def bind(xbe: Path, output: Path, symbols: Path):
     header += ['static const uint32_t pilot_d3d_device_caps[] = {'+', '.join(f'0x{x:x}u' for x in binding['device_caps'])+'};']
     header += ['static const struct { uint32_t format,flags; } pilot_d3d_surface_formats[] = {'+
         ', '.join(f'{{0x{x["format"]:x}u,0x{x["flags"]:x}u}}' for x in binding['surface_formats'])+'};']
+    header += [f'#define PILOT_D3D_YUV_STATE {binding["yuv_state_index"]}u']
     block=binding['stateblock']
     header += [f'#define PILOT_D3D_STREAMS 0x{block["streams"]:x}u']
     header += [f'#define PILOT_D3D_FVF_OBJECT 0x{binding["fvf_binding"]["object"]:x}u']

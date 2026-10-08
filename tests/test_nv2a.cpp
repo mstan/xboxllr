@@ -7662,6 +7662,26 @@ int main() {
             CHECK(e_gpu.dxt_decode_cache().misses() == dxt_misses + 1);
             e_gpu.set_dxt_decode_cache(true);
 
+            // Packed movie formats through real DMA + generic raster sampling.
+            // Original XDK YuvEnable writes CONTROL0 bit28. Black/white/red/blue
+            // BT.601 pairs exercise both packing orders and changing storage.
+            const std::array<std::array<uint8_t,3>,4> bars{{{16,128,128},{235,128,128},{81,90,240},{41,240,110}}};
+            const uint32_t expected_yuv[]={0xff000000,0xff305070,0xff300000,0xff000070};
+            for(uint32_t format:{0x24u,0x25u})for(unsigned bar=0;bar<bars.size();++bar) {
+                std::array<uint8_t,64> packed{};
+                for(unsigned row=0;row<4;++row)for(unsigned x=0;x<4;x+=2) {
+                    auto* p=packed.data()+row*16+x*2;unsigned yoff=format==0x24?0:1;
+                    p[yoff]=p[yoff+2]=bars[bar][0];p[1-yoff]=bars[bar][1];p[3-yoff]=bars[bar][2];
+                }
+                std::memcpy(e_ram.data()+0x20300,packed.data(),packed.size());
+                emit_e(0x0290,0x10100001);emit_e(0x1B00,0x20300);
+                emit_e(0x1B04,0x0001002a|(format<<8));emit_e(0x1B10,16u<<16);
+                const uint32_t pixel=repeat_dxt_draw();
+                for(unsigned shift:{0u,8u,16u})CHECK(std::abs(int((pixel>>shift)&255)-int((expected_yuv[bar]>>shift)&255))<=1);
+                CHECK((pixel>>24)==255 && !std::memcmp(e_ram.data()+0x20300,packed.data(),packed.size()));
+            }
+            emit_e(0x0290,0x00100001);
+
             // DXT1/A1 variant (color code 0x0c): selector 3 is transparent when
             // color0 <= color1.  This verifies the other compressed dashboard format
             // does not fall through to raw pitch-linear sampling.

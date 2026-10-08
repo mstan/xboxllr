@@ -15,6 +15,17 @@ notices. Preparation/build steps must report missing required notices.
 
 ## Private native-title reference pilot
 
+### Movie YUV enable and bounded pixel reference - 2026-10-07
+
+The native state adapter reuses the Phobos renderer's already imported packed
+YUY2/UYVY conversion at `bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0`.
+Original owner-supplied NTSC XDK execution establishes cache/packet/ABI behavior;
+Cxbx render-state definitions were a comparison only (its later YUV state index
+is not used for this revision). The new software NV2A floating-point BT.601
+reference and ABI adapter are independently authored, without copying GPL
+implementation bodies. Existing donor renderer notices and private-pilot GPL
+scope remain; original binaries and oracle output remain private.
+
 ### Donor device-lifetime correction - 2026-10-07
 
 The preparation of Phobos `src/d3d/d3d8_device.c` at

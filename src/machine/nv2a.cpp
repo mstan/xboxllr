@@ -10947,18 +10947,26 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             const bool dxt1_argb8 = color_code == 0x0Cu;
             const bool dxt23_argb8 = color_code == 0x0Eu;
             const bool compressed_argb8 = dxt1_argb8 || dxt23_argb8;
+            const bool packed_yuv = color_code == 0x24 || color_code == 0x25;
+            if(packed_yuv && (!(raster_state[kRasterControl0] & (1u<<28)))) {
+                fault_("NV2A packed YUV sampling without conversion is outside the bounded reference");
+                return false;
+            }
             // The linear PROJECT2D path is also used for pitch render targets
             // rebound as textures (e.g. the stock dashboard present path's
             // format 0x00011e29). Those were already proven as raw pitch-linear
             // words before compressed dashboard textures were encountered, so
             // preserve that behavior for every non-DXT format and specialize
             // only the compressed color codes witnessed in the dashboard.
-            const bool raw_argb8 = !compressed_argb8;
+            const bool raw_argb8 = !compressed_argb8 && !packed_yuv;
             const uint32_t rect = raster_state[kRasterTextureImageRect0 + stage];
             ts.width = rect >> 16;
             ts.height = rect & 0xFFFFu;
             ts.pitch = raster_state[kRasterTextureControl1_0 + stage] >> 16;
-            if (ts.width && ts.height && (raw_argb8 || compressed_argb8)) {
+            if (ts.width && ts.height && (raw_argb8 || compressed_argb8 || packed_yuv)) {
+                if(packed_yuv && (ts.width&1)) {
+                    fault_("NV2A packed YUV requires complete chroma pairs");return false;
+                }
                 const uint32_t address_word =
                     raster_state[kRasterTextureAddress0 + stage];
                 bool u_ok = true, v_ok = true;
@@ -10974,7 +10982,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                     return true;
                 }
                 const uint32_t min_pitch =
-                    raw_argb8 ? ts.width * static_cast<uint32_t>(sizeof(uint32_t))
+                    packed_yuv ? ts.width * 2u : raw_argb8 ? ts.width * static_cast<uint32_t>(sizeof(uint32_t))
                               : ((ts.width + 3u) / 4u) *
                                     (dxt1_argb8 ? 8u : 16u);
                 const uint32_t source_rows =
@@ -11004,7 +11012,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                 if (legacy_raw_linear) seam_texture_source_anchor(address, bytes64);
                 std::vector<uint8_t> source;
                 std::vector<uint8_t>* read_target = &ts.data;
-                if (compressed_argb8) read_target = &source;
+                if (compressed_argb8 || packed_yuv) read_target = &source;
                 read_target->resize(static_cast<size_t>(bytes64));
                 {
                     perf::ScopedAdd timer(perf::g_ns_generic_texture_resolve,
@@ -11030,7 +11038,24 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                         return false;
                     }
                 }
-                if (compressed_argb8) {
+                if(packed_yuv) {
+                    // Bounded BT.601 studio-range reference, independently
+                    // evaluated in floating point. Native uses Phobos's integer
+                    // conversion; allow one output unit of rounding difference.
+                    // DMA source stays packed and unmodified. Exact NV2A filter
+                    // order/chroma interpolation remain outside this fixture.
+                    ts.data.resize(size_t(ts.width)*ts.height*4);
+                    auto channel=[](double value){return uint32_t(std::clamp(std::lround(value),0l,255l));};
+                    const unsigned yoff=color_code==0x24?0:1;
+                    for(uint32_t row=0;row<ts.height;++row)for(uint32_t x=0;x<ts.width;++x) {
+                        const auto* pair=source.data()+size_t(row)*ts.pitch+(x&~1u)*2;
+                        const double y=1.16438356*(int(pair[yoff+2*(x&1)])-16);
+                        const int u=int(pair[1-yoff])-128,v=int(pair[3-yoff])-128;
+                        const uint32_t color=0xff000000u|(channel(y+1.59602678*v)<<16)|
+                            (channel(y-0.39176229*u-0.81296764*v)<<8)|channel(y+2.01723214*u);
+                        std::memcpy(ts.data.data()+(size_t(row)*ts.width+x)*4,&color,4);
+                    }
+                } else if (compressed_argb8) {
                     perf::ScopedAdd timer(perf::g_ns_generic_texture_decode,
                                           perf::g_calls_generic_texture_decode);
                     // Adapt sp00nznet/xboxrecomp nv2a_pb_exec.c's DXT reuse:

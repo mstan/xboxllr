@@ -118,6 +118,13 @@ static void test_graphics_movie_surfaces(void)
         CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&view)==0);
         uint32_t pixels[34*18];CHECK(pilot_gfx_texture_readback(t->native,0,pixels,sizeof(pixels))==0);
         CHECK(pixels[0]==0xff4c4c4c && pixels[34*18-1]==0xff4c4c4c);
+        uint32_t enable=2,bind[]={0,texture};
+        call_graphics(PILOT_D3D_D3DDevice_SetRenderState_YuvEnable,&enable);
+        CHECK(MEM32(PILOT_D3D_RENDER_STATES+PILOT_D3D_YUV_STATE*4)==2);
+        call_graphics(PILOT_D3D_D3DDevice_SetTexture,bind);graphics_sync_deferred();
+        bind[1]=0;call_graphics(PILOT_D3D_D3DDevice_SetTexture,bind);
+        enable=0;call_graphics(PILOT_D3D_D3DDevice_SetRenderState_YuvEnable,&enable);
+        CHECK(!MEM32(PILOT_D3D_RENDER_STATES+PILOT_D3D_YUV_STATE*4));
         CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&texture)==0);
         CHECK(vm_committed(0,0x100000000ull)==resident);
     }

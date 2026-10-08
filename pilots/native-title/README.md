@@ -6,6 +6,32 @@ It is outside the normal xboxlle build. **The generated executable is a private
 GPL-dependent reference artifact, not the intended non-GPL shipping product.**
 See [license scope](../../LICENSE-SCOPE.md). There is no install/package target.
 
+## Movie YUV state contract (2026-10-07)
+
+`beads-xbox.1.70`: Blinx now passes its YUV enable state and reaches the movie
+worker's real file reads. This reuses Phobos's already imported YUY2/UYVY upload
+conversion. The native adapter preserves the original render-state cache and
+requires enabled conversion when drawing packed movie textures. Disabled packed
+sampling remains an explicit scope guard. No alternate decoder is introduced.
+
+The original NTSC XDK routine and helper execute in a private x86 oracle: zero
+clears NV097_SET_CONTROL0 bit 28, nonzero sets it, the guest cache retains the
+exact argument, and the packet advances eight bytes. Revision binding derives
+the cache index from the checked routine; this build uses 160, unlike later
+XDK layouts. Runtime code contains no title address for this state.
+
+The bounded software NV2A reference reads actual packed DMA bytes, converts
+BT.601 studio-range color, and samples through the generic PROJECT2D raster
+path. YUY2/UYVY, padded rows, black/white/color pairs and unchanged source bytes
+pass. Native GPU upload/draw and enable/cache tests pass; one channel unit of
+rounding difference is tolerated. Exact NV2A chroma interpolation/filter order
+and disabled-conversion sampling remain outside the qualified floor.
+
+Private evidence: `build/blinx/yuv-enable-oracle.aot-private.json`,
+`run-movie-yuv-enable.log`, and `run-movie-async-read.log`. The last run submits
+movie frames and feeds real audio buffers, but visual/audio playback and the
+full attract sequence still need integration validation.
+
 ## Renderer lifetime correction (2026-10-07)
 
 `beads-xbox.1.66`: D3D11 validation identified the repeated-device failure as a

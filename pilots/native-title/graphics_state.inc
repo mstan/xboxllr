@@ -5,6 +5,10 @@ static uint32_t graphics_state_baseline[166],graphics_texture_baseline[4][32];
 
 static void graphics_render_state(uint32_t state,uint32_t value,int cache)
 {
+    /* The donor converts real packed pixels at upload. The original API's
+     * enable/cache state gates that converted sampling path at draw time.
+     * Disabled packed-YUV sampling remains unqualified, never mislabeled RGB. */
+    if(state==PILOT_D3D_YUV_STATE){if(cache)MEM32(PILOT_D3D_RENDER_STATES+4*state)=value;return;}
     if(!pilot_gfx_xbox_render_state(state,value)) {
         fprintf(stderr,"[D3D STATE] state=%u value=%08x\n",state,value);
         stop("unqualified render-state value",state);
@@ -65,6 +69,11 @@ static void graphics_simple_state(uint32_t method,uint32_t value)
 }
 static void graphics_sync_deferred(void)
 {
+    if(!MEM32(PILOT_D3D_RENDER_STATES+PILOT_D3D_YUV_STATE*4))for(unsigned stage=0;stage<4;++stage) {
+        uint32_t header=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_TEXTURES+stage*4);
+        if(header){uint32_t format=(MEM32(header+12)>>8)&255;
+            if(format==0x24 || format==0x25)stop("packed YUV sampling requires qualified conversion state",header);}
+    }
     for(unsigned state=92;state<136;++state) {
         uint32_t value=MEM32(PILOT_D3D_RENDER_STATES+4*state);
         if(!pilot_gfx_xbox_render_state(state,value) && value!=graphics_state_baseline[state])
