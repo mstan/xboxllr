@@ -1,5 +1,45 @@
 # Native title reference pilot
 
+## Natural attract repetition observation (2026-10-08)
+
+`beads-xbox.1.62`, executable built from the `ba89637` input/capture checkpoint.
+`attract-natural-loops` ran for 900 seconds with a real replay controller:
+Start at 15-16 seconds to interrupt initial startup, then no further buttons.
+Ten-second GPU captures and thirty-second process resource samples cover the
+observation. Two 3D demos end without input and restart the publisher/opening
+movies, title screen and loading sequence; a third rendered demo is underway
+when the harness stops the title (elapsed 901.531 s, harness termination exit 1).
+There are no earlier guard/fault events, three stage entries, two natural movie
+restarts, 89 captured frames and 193 completed writes out of 193 submissions.
+This is a bounded repetition result, not completion of the entire goal.
+
+The following event times use the first present as their clock origin; file
+openings identify phase boundaries rather than exact movie start/end timestamps:
+
+| Event | First pass | Second pass | Third pass |
+| --- | ---: | ---: | ---: |
+| Stage-start audio opened | 66.198 s | 430.110 s | 778.516 s |
+| Natural return to publisher movie | 281.524 s | 644.074 s | Not reached before observation ended |
+| Subsequent title audio opened | 374.577 s | 740.108 s | Not reached |
+
+Comparable gameplay process samples at 180/570/840 seconds report private
+memory 752.54/752.41/753.49 MB and 607/605/605 handles. Memory falls during the
+intervening movie/title phases. This does not establish leak freedom for an
+arbitrary run length or isolate all GPU allocations.
+
+The full opening movie runs twice. Independent FFprobe decoding of `op01.sfd`
+reports 2264 frames, average 30000/1001 fps and 75.493 seconds of video
+(the nominal header rate is 60000/1001). Observed file-open-to-next-title-audio
+intervals are 76.437 and 79.384 seconds, including transitions. Their 3669/3744
+presents are not unique decoded-frame counts; complete frame-delivery and
+audio synchronization qualification remains open under `.73`.
+
+Private evidence: `build/blinx/attract-natural-loops/endurance.aot-private.json`,
+`resources.aot-private.json`, `run.aot-private.json`, `op01-probe.json`, captured
+PPMs and `build/blinx/run-attract-natural-loops.log`. Original-speed 3D cadence
+remains unproven; the last uncaptured measured stage is 13.87 fps. JSRF remains
+deferred until Blinx meets the full goal.
+
 ## Attract input validation setup (2026-10-08)
 
 `beads-xbox.1.93`, branch `validate/blinx-attract-input-20261008`, base `0b66ab1`.
