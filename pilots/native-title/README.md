@@ -1,5 +1,40 @@
 # Native title reference pilot
 
+## Attract input validation setup (2026-10-08)
+
+`beads-xbox.1.93`, branch `validate/blinx-attract-input-20261008`, base `0b66ab1`.
+Timed host input requires **both** `XLLE_PILOT_INPUT=replay` and
+`XLLE_PILOT_INPUT_REPLAY=<existing replay file>`. Supplying a replay filename
+alone leaves the default physical XInput provider selected. The recent vertex
+range comparisons and `scene-qualified-extended` actually ran with zero
+controllers attached; their logs and measured timings remain valid, but those
+runs are automatic attract playback, not input validation. Earlier
+`timer-reference`, `timer-highres`, `scene-first` and `scene-viewport` logs do
+confirm enabled replay and one controller.
+
+`[INPUT REPLAY DELIVERED]` now reports each sampled transition with its requested
+and actual elapsed milliseconds. This drives the existing XAPI input path;
+no game state or control flow is patched. The private extended-run harness
+selects/requires the replay provider whenever a replay file is supplied and
+records startup configuration and executable hash in its run manifest.
+`XLLE_PILOT_PRESENT_CAPTURE_INTERVAL_MS` selects a capture interval from 100 to
+60000 ms (default 1000), retaining the existing 180-image bound. It permits
+visual coverage of a longer attract/menu-return run without increasing the
+capture count; diagnostic capture remains unsuitable for cadence benchmarks.
+
+Actual `attract-input-return` uses Start at 15-16 seconds to interrupt startup,
+then at 210-211 seconds during rendered 3D attract. The latter press is sampled
+at 210109 ms, release at 211062 ms. Capture 69 precedes that press; subsequent
+captures show the visible `Press START to begin` screen, while title/movie/audio
+assets reload. Idling then loads `round1.adx` / `01_StageStart.adx` a second time
+and visibly re-enters the 3D demo. The bounded 330-second observation has no
+guard/fault before harness termination. This establishes gameplay interruption,
+title-screen return and re-entry, not natural end-to-end completion or stable
+repeat loops. Private evidence is `build/blinx/attract-input-return/`,
+`build/blinx/run-attract-input-return.log` and `input-attract-return.txt`.
+The five input contract/guard tests pass; no new service implementation was
+needed for this transition.
+
 ## Draw-range vertex synchronization experiment (2026-10-08)
 
 `beads-xbox.1.92`, branch `perf/blinx-vertex-ranges-20261008`, base `bb04d2e`.
@@ -38,7 +73,7 @@ Private evidence: `build/blinx/vertex-range-comparison.aot-private.json`,
 corresponding `run-*.log`.
 
 Same-executable, capture-disabled A/B observations use identical CPU15 guest
-affinity, startup input replay, media and callback profiling. The first 28
+affinity, no connected controller, media and callback profiling. The first 28
 stage presents measure full synchronization at 3.51427 fps / 284.7463 ms median
 and range synchronization at 13.87240 fps / 71.1403 ms median: 3.95x cadence,
 75.0% lower median frame time. Each measured 27-frame interval contains 324

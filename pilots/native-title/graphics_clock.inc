@@ -139,7 +139,13 @@ static void graphics_capture_present(void)
 {
     const char *capture=getenv("XLLE_PILOT_PRESENT_CAPTURE");
     if(!capture || !*capture)return;
-    static uint64_t next;static unsigned sequence;
+    static uint64_t next,interval;static unsigned sequence;
+    if(!interval) {
+        const char *setting=getenv("XLLE_PILOT_PRESENT_CAPTURE_INTERVAL_MS");
+        unsigned milliseconds=setting?(unsigned)strtoul(setting,NULL,10):1000;
+        if(milliseconds<100 || milliseconds>60000)stop("present capture interval outside range",milliseconds);
+        interval=(uint64_t)milliseconds*10000;
+    }
     uint64_t now=dispatch_monotonic();if(sequence>=180 || now<next)return;
     unsigned width=graphics_parameters[0],height=graphics_parameters[1];
     unsigned char *pixels=malloc(width*height*4);char path[1024];
@@ -148,7 +154,7 @@ static void graphics_capture_present(void)
     FILE *file=fopen(path,"wb");if(!file || fprintf(file,"P6\n%u %u\n255\n",width,height)<0)stop("present capture open",0);
     for(unsigned i=0;i<width*height;++i)if(fwrite(pixels+i*4,3,1,file)!=1)stop("present capture write",0);
     free(pixels);if(fclose(file))stop("present capture close",0);
-    next=dispatch_monotonic()+10000000;
+    next=dispatch_monotonic()+interval;
     fprintf(stderr,"[PRESENT CAPTURE] sequence=%u time=%llu file=%s\n",sequence,(unsigned long long)now,path);
 }
 /* Interval-one swaps follow the display clock; immediate swaps bypass it.

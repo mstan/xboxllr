@@ -7,6 +7,7 @@ static struct InputReplayRow input_replay_rows[256];
 static unsigned input_replay_count;
 static ULONGLONG input_replay_start;
 static int input_replay_clock_started;
+static int input_replay_reported=-1;
 static int input_replay_load(FILE *file)
 {
     char line[160],hex[37],extra;unsigned count=0;unsigned long long at;
@@ -27,11 +28,17 @@ static int input_replay_load(FILE *file)
         input_replay_rows[count++]=row;
     }
     if(!count || ferror(file))return 0;
-    input_replay_count=count;input_replay_clock_started=0;return 1;
+    input_replay_count=count;input_replay_clock_started=0;input_replay_reported=-1;return 1;
 }
 static void input_replay_sample(uint64_t elapsed,uint8_t pad[18])
 {
     unsigned row=0;
     while(row+1<input_replay_count && input_replay_rows[row+1].at<=elapsed)++row;
+    if(input_replay_reported!=(int)row) {
+        fprintf(stderr,"[INPUT REPLAY DELIVERED] row=%u scheduled_ms=%llu elapsed_ms=%llu digital=%02x%02x\n",
+            row,(unsigned long long)input_replay_rows[row].at,(unsigned long long)elapsed,
+            input_replay_rows[row].pad[1],input_replay_rows[row].pad[0]);
+        input_replay_reported=(int)row;
+    }
     memcpy(pad,input_replay_rows[row].pad,18);
 }

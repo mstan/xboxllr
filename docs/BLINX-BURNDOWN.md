@@ -10,8 +10,11 @@ LLE address tests. Draw-range vertex synchronization now follows Phobos's
 consumed-range strategy: a same-executable uncaptured stage comparison improves
 3.51427 to 13.87240 fps (3.95x), retaining real ordered GPU updates (.92).
 The captured candidate renders the scene and completes 63 replay writes in a
-bounded five-minute run. All 35 native tests pass. Full loops, input return and
-original-speed cadence remain outstanding; JSRF remains deferred.
+bounded five-minute run. All 35 native tests pass. Actual enabled controller
+input now interrupts rendered 3D attract, returns to the visible title screen,
+and idling re-enters the demo within a bounded 330-second run (.93). Natural
+end-to-end completion, repeat-loop stability and original-speed cadence remain
+outstanding; JSRF remains deferred.
 
 Earlier progression:
 The borrowed Phobos renderer now presents actual game frames. The prior disc
@@ -93,8 +96,8 @@ enforced. No title error condition is bypassed.
 | Callback retry timer | High-resolution native relative wait with supported fallback; fresh matched stage 2.92987 to 4.16574 fps, all 35 tests pass (.90) |
 | Attract scene geometry | Viewport reserved-constant handoff fixed; actual world and Blinx visible; original emitter, bounded LLE and 32 real draw comparisons pass (.89/.91) |
 | Vertex synchronization | Phobos draw-range strategy; real partial GPU updates preserve queued contents and later mutations; uncaptured stage 3.51427 to 13.87240 fps, 35 tests pass (.92) |
-| Next integration work | Extend visible attract playback, exercise input return, measure cadence and resource stability |
-| Input | Physical XInput, keyboard and timed host-controller replay; real startup interruption observed twice; gameplay interruption/menu return pending |
+| Next integration work | Validate natural attract completion and repeated loops; measure cadence and resource stability |
+| Input | Actual timed host-controller Start interrupts 3D attract, returns to visible title screen, and idling re-enters demo (.93); physical controller operation remains separately unverified |
 | Attract startup/loading/render/audio/movies/gameplay | Partial startup/rendering only; no complete attract sequence yet |
 | Repeat loops, interruption/menu return, original cadence | Pending actual title integration measurements |
 | JSRF | Deferred until Blinx completes; shared services and separate revision bindings |
