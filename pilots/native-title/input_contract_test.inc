@@ -51,7 +51,20 @@ static uint32_t input_test_call(unsigned entry,uint32_t a,uint32_t b,uint32_t c,
 static void input_test_setup(void)
 {
     /* Deterministic XInput provider independent of the user's launch choice. */
-    input_host_is_keyboard();input_host_keyboard=0;
+    input_host_is_keyboard();input_host_keyboard=0;input_replay_count=0;
+    FILE *replay=tmpfile();CHECK(replay);
+    CHECK(fputs("0 000000000000000000000000000000000000\n20 1000ff00000000000000ff7f000000000000\n220 000000000000000000000000000000000000\n",replay)>=0);
+    rewind(replay);CHECK(input_replay_load(replay) && input_replay_count==3);CHECK(!fclose(replay));
+    uint8_t replay_pad[18];input_replay_sample(19,replay_pad);CHECK(!replay_pad[0] && !replay_pad[2]);
+    input_replay_sample(20,replay_pad);CHECK(replay_pad[0]==0x10 && replay_pad[2]==255 && replay_pad[10]==255 && replay_pad[11]==127);
+    input_replay_sample(219,replay_pad);CHECK(replay_pad[0]==0x10);
+    input_replay_sample(220,replay_pad);CHECK(!replay_pad[0] && !replay_pad[2]);
+    input_replay_sample(10000,replay_pad);CHECK(!replay_pad[0] && !replay_pad[10]);
+    uint8_t replay_caps[18],replay_rumble[4];CHECK(!pilot_input_host_caps(0,replay_caps,replay_rumble) && !memcmp(replay_rumble,"\0\0\0\0",4));
+    CHECK(replay_caps[0]==255 && replay_caps[1]==0 && replay_caps[2]==255 && replay_caps[9]==255);
+    CHECK(pilot_input_host_state(1,replay_pad)==ERROR_DEVICE_NOT_CONNECTED);
+    replay=tmpfile();CHECK(replay && fputs("0 z00000000000000000000000000000000000\n",replay)>=0);
+    rewind(replay);CHECK(!input_replay_load(replay));CHECK(!fclose(replay));input_replay_count=0;
     uint8_t keys[256]={0},packed[18];XINPUT_GAMEPAD keyboard;
     keys[VK_RETURN]=keys[VK_SPACE]=keys['W']=keys['D']=keys['Z']=1;
     input_host_keyboard_convert(keys,&keyboard);input_host_convert(&keyboard,packed);

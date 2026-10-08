@@ -16,6 +16,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <new>
 #include "audio_backend.h"
@@ -151,6 +152,8 @@ struct Buffer final:public IXAudio2VoiceCallback {
     void STDMETHODCALLTYPE OnVoiceError(void*,HRESULT hr) override {error=hr;SetEvent(wake);}
 };
 static Buffer *buffers[256];
+static void diagnostic_capture_start(void);
+static void diagnostic_capture_close(void);
 static UINT32 position(Buffer *b,XAUDIO2_VOICE_STATE *state=nullptr)
 {
     XAUDIO2_VOICE_STATE s;b->voice->GetState(&s);
@@ -220,10 +223,12 @@ int32_t pilot_audio_open(void)
     if(SUCCEEDED(hr)){wake=CreateEventW(nullptr,FALSE,FALSE,nullptr);if(!wake)hr=HRESULT_FROM_WIN32(GetLastError());}
     if(SUCCEEDED(hr)){exiting=false;feeder=CreateThread(nullptr,0,feed,nullptr,0,nullptr);if(!feeder)hr=HRESULT_FROM_WIN32(GetLastError());}
     if(FAILED(hr))pilot_audio_close();
+    else diagnostic_capture_start();
     return hr;
 }
 void pilot_audio_close(void)
 {
+    diagnostic_capture_close();
     exiting=true;if(wake)SetEvent(wake);
     if(feeder){WaitForSingleObject(feeder,INFINITE);CloseHandle(feeder);feeder=nullptr;}
     for(auto *b:buffers)if(b)fail("closing device with owned voices");
@@ -240,7 +245,7 @@ int32_t pilot_audio_effects_install(PilotDsp *graph)
     if(!engine || !effects || !graph)return E_INVALIDARG;
     // StopEngine completes its current quantum before returning; Process takes
     // no guest/owner lock. Installation replaces the graph only at this boundary.
-    engine->StopEngine();PilotDsp *old=effects->graph;effects->graph=graph;effects->Reset();
+    Guard guard;engine->StopEngine();PilotDsp *old=effects->graph;effects->graph=graph;effects->Reset();
     HRESULT hr=engine->StartEngine();if(FAILED(hr))effects->graph=old;
     return hr;
 }
@@ -256,6 +261,49 @@ uint32_t pilot_audio_capture_end(void)
     if(!engine || !effects)return 0;
     Guard guard;engine->StopEngine();UINT32 frames=effects->capture_frames;effects->capture=nullptr;
     HRESULT hr=engine->StartEngine();if(FAILED(hr))fail("audio capture restart",hr);return frames;
+}
+/* Opt-in title diagnostic through the same sample tap as the audio fixtures.
+ * Capture 30 seconds of actual six-channel GP output, float32 at 48 kHz.
+ * A separate writer keeps file I/O off both the mixer and its voice feeder.
+ * Captures are instrumentation, never cadence/performance measurements. */
+static HANDLE diagnostic_thread,diagnostic_stop,diagnostic_file;
+static float *diagnostic_samples;
+static DWORD WINAPI diagnostic_capture_worker(void*)
+{
+    DWORD wait=WaitForSingleObject(diagnostic_stop,30000);
+    if(wait!=WAIT_OBJECT_0 && wait!=WAIT_TIMEOUT)fail("audio capture wait");
+    UINT32 frames=pilot_audio_capture_end();DWORD written=0,bytes=frames*6*sizeof(float);
+    if(!WriteFile(diagnostic_file,diagnostic_samples,bytes,&written,nullptr) || written!=bytes ||
+       !CloseHandle(diagnostic_file))fail("audio capture write",HRESULT_FROM_WIN32(GetLastError()));
+    diagnostic_file=nullptr;delete[] diagnostic_samples;diagnostic_samples=nullptr;
+    fprintf(stderr,"[AUDIO CAPTURE] complete frames=%u rate=48000 channels=6 format=float32 bytes=%lu\n",frames,bytes);
+    return 0;
+}
+static void diagnostic_capture_start(void)
+{
+    static bool used=false;
+    const char *path=getenv("XLLE_PILOT_AUDIO_CAPTURE");
+    if(used || !path || !*path)return;
+    used=true;
+    diagnostic_file=CreateFileA(path,GENERIC_WRITE,FILE_SHARE_READ,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if(diagnostic_file==INVALID_HANDLE_VALUE)fail("audio capture create",HRESULT_FROM_WIN32(GetLastError()));
+    diagnostic_samples=new(std::nothrow) float[48000*30*6]{};
+    if(!diagnostic_samples)fail("audio capture allocation",E_OUTOFMEMORY);
+    HRESULT hr=pilot_audio_capture_begin(diagnostic_samples,48000*30,1);
+    if(FAILED(hr))fail("audio capture begin",hr);
+    diagnostic_stop=CreateEventW(nullptr,TRUE,FALSE,nullptr);
+    if(!diagnostic_stop)fail("audio capture stop event",HRESULT_FROM_WIN32(GetLastError()));
+    diagnostic_thread=CreateThread(nullptr,0,diagnostic_capture_worker,nullptr,0,nullptr);
+    if(!diagnostic_thread)fail("audio capture worker",HRESULT_FROM_WIN32(GetLastError()));
+    fprintf(stderr,"[AUDIO CAPTURE] armed 30-second real GP output tap\n");
+}
+static void diagnostic_capture_close(void)
+{
+    if(!diagnostic_thread)return;
+    if(!SetEvent(diagnostic_stop) || WaitForSingleObject(diagnostic_thread,INFINITE)!=WAIT_OBJECT_0)
+        fail("audio capture shutdown");
+    CloseHandle(diagnostic_thread);CloseHandle(diagnostic_stop);
+    diagnostic_thread=diagnostic_stop=nullptr;
 }
 int32_t pilot_audio_buffer_mixbins(void *opaque,unsigned count,const uint32_t *bins,const int32_t *volumes)
 {
