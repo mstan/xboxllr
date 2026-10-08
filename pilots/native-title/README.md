@@ -6,6 +6,34 @@ It is outside the normal xboxlle build. **The generated executable is a private
 GPL-dependent reference artifact, not the intended non-GPL shipping product.**
 See [license scope](../../LICENSE-SCOPE.md). There is no install/package target.
 
+## Shared system-time query
+
+`beads-xbox.1.77`: `KeQuerySystemTime` writes one coherent 64-bit system time
+through its guest pointer (stdcall, one argument). The shared native dispatcher
+uses Windows precise FILETIME: 100ns units since 1601 UTC, also used for absolute
+timer deadlines. Relative waits retain their separate monotonic clock. The
+host clock may be adjusted; the query does not synthesize elapsed time per call
+or change the host clock. This is a startup-selected native environment clock,
+not a reconstruction of the console's persisted RTC setting.
+
+`tools/native_clock_reference.py` executes the original kernel query unchanged.
+It verifies exact output extent, nonvolatile registers, return stack and retry
+when the clock's high/low words change during a read. Clock-memory values and
+the simulated interrupt are fixture inputs; full RTC initialization and direct
+kernel clock-data imports are outside this fixture. Native tests check the
+shared epoch, real time progression, unaligned output and neighboring bytes.
+Phobos's clock notes informed the host-resolution choice; its implementation
+body was not copied. The related `RtlTimeToTimeFields`/`RtlTimeFieldsToTime`
+services use native NT calendar conversion through local 8-short structures.
+Original and native fixtures agree on the 1601/1970 epochs, leap years 2000 and
+2400, non-leap century 2100, weekdays, sub-millisecond truncation and unchanged
+output on invalid dates. No zero-filled conversion success is substituted.
+Actual `build/blinx/run-calendar-attract.log` passes both prior clock guards,
+opens `media/adx/round1.adx`, continues reads/callbacks, then stops at flat
+shading (Xbox state 66 = 0x1d00). The 119.06-second diagnostic run is not a
+cadence result. All 32 native tests pass in 14.30 s. A gameplay frame, complete
+attract loop, input/menu return and intended speed remain unvalidated.
+
 ## Presentation reset: retained resources and immediate presentation
 
 `beads-xbox.1.76`: original NTSC Reset replaces presentation buffers, restores

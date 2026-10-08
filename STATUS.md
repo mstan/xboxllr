@@ -1,5 +1,22 @@
 # STATUS
 
+## 2026-10-07 - Blinx advances through clock/calendar services to flat shading
+
+The actual `calendar-attract` run passes the previous system-time and calendar
+guards, opens `media/adx/round1.adx`, performs more asynchronous reads/audio/GPU
+callbacks, then stops at Xbox render state 66 = 0x1d00 (flat shading). The native
+adapter currently qualifies only smooth shading. No render state was silently
+ignored. This is scene-startup progress; no complete gameplay frame or attract
+loop is validated. Private run: `build/blinx/run-calendar-attract.log`, 119.06 s
+with diagnostic capture enabled, not a performance measurement.
+
+Shared clock/calendar services are checked against unhooked original kernel
+queries/conversions and native tests for coherent reads, epoch, real progress,
+leap/calendar boundaries, invalid dates, output extent and calling convention.
+Phobos's host-clock/conversion approach was referenced; native NT routines do
+the work. All 32 native tests pass in 14.30 s. Next: bounded flat-shading
+contract, donor capability audit and actual raster implementation.
+
 ## 2026-10-07 - Blinx passes display reset and loads the next scene
 
 The actual NTSC title now passes Reset with its held back-buffer reference,

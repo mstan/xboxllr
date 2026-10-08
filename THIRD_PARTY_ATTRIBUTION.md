@@ -15,6 +15,20 @@ notices. Preparation/build steps must report missing required notices.
 
 ## Private native-title reference pilot
 
+### Shared system clock - 2026-10-07
+
+Phobos `src/kernel/kernel_hal.c` at
+`bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0`, specifically
+`xbox_KeQuerySystemTime` and its coarse-host-clock polling notes, was consulted
+as a behavioral/performance reference. The independent local adapter uses
+Windows' precise FILETIME API with the existing dispatcher clock; no donor
+clock body or ignored system-time setter was copied. The same revision's
+`kernel_rtl.c` calendar conversions were consulted for the host-API approach;
+the local adapter uses native NT conversion with the original Xbox field layout
+and does not copy donor bodies or its zero-fill-on-conversion-failure path.
+The original private kernel supplies the bounded snapshot/calendar/output/ABI
+reference fixtures.
+
 ### Presentation reset - 2026-10-07
 
 The independent reset adapter reuses the already prepared Phobos

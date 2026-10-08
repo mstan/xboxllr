@@ -29,7 +29,10 @@ static uint64_t dispatch_pulse_time(uint64_t frame)
 
 static uint64_t dispatch_wall_time(void)
 {
-    FILETIME ft; GetSystemTimeAsFileTime(&ft);
+    /* Phobos's system-time service identified coarse host ticks as a polling
+     * cost. Windows' precise clock supplies the same 100ns/1601 epoch directly,
+     * shared with our absolute timers; no fabricated per-call advancement. */
+    FILETIME ft; GetSystemTimePreciseAsFileTime(&ft);
     return ((uint64_t)ft.dwHighDateTime<<32)|ft.dwLowDateTime;
 }
 static uint64_t dispatch_monotonic(void)

@@ -50,6 +50,7 @@ static void call_kernel(unsigned ordinal,const uint32_t *args,unsigned argc)
 }
 
 #include "media_contract_test.inc"
+#include "clock_contract_test.inc"
 #include "storage_contract_test.inc"
 #include "cache_contract_test.inc"
 #include "file_cache_contract_test.inc"
@@ -357,6 +358,7 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"memory")) { test_memory(); return 0; }
         if (!strcmp(argv[1],"memory-statistics")) { test_memory_statistics(); return 0; }
         if (!strcmp(argv[1],"timers")) { test_timers(); return 0; }
+        if (!strcmp(argv[1],"system-clock")) { test_system_clock(); return 0; }
         if (!strcmp(argv[1],"threads")) { test_thread_objects(); return 0; }
         if (!strcmp(argv[1],"events")) { test_event_objects(); return 0; }
         if (!strcmp(argv[1],"jumps")) { test_jumps(); return 0; }

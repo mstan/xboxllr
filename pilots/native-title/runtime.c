@@ -298,6 +298,7 @@ static void query_setting(void)
 }
 
 #include "dispatcher.inc"
+#include "system_time.inc"
 #include "event_objects.inc"
 #include "virtual_memory.inc"
 #include "physical_memory.inc"
@@ -324,6 +325,7 @@ static void kernel_dispatch(void)
         if (pilot_imports[i].ordinal == next_kernel_ordinal) name=pilot_imports[i].name;
     if(pilot_verbose)fprintf(stderr, "[KERNEL] %u %s return=%08x\n", next_kernel_ordinal, name, MEM32(g_esp));
     switch (next_kernel_ordinal) {
+    case 304:case 305:system_time_fields(next_kernel_ordinal);return;
     case 124: case 143: case 144: case 224: case 231: case 246: case 250:
         thread_object_kernel(next_kernel_ordinal);return;
     case 14:case 15:case 17:case 23:pool_kernel(next_kernel_ordinal);return;
@@ -362,6 +364,12 @@ static void kernel_dispatch(void)
     }
     case 119: g_eax=dispatch_queue(MEM32(g_esp+4),MEM32(g_esp+8),MEM32(g_esp+12),0); g_esp+=16; return;
     case 121: g_eax=dispatch_in_dpc; g_esp+=4; return;
+    case 128: {
+        uint32_t out=MEM32(g_esp+4);
+        if(!out || out>UINT32_MAX-7)stop("invalid system-time output",out);
+        uint64_t now=dispatch_wall_time();memcpy(memory+out,&now,8);
+        g_esp+=8;return; /* VOID, one callee-cleaned pointer argument. */
+    }
     case 137: g_eax=dispatch_queue(MEM32(g_esp+4),0,0,1); g_esp+=8; return;
     case 138: g_eax=dispatch_event(MEM32(g_esp+4),0); g_esp+=8; return;
     case 145:
