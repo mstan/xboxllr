@@ -1,5 +1,31 @@
 # Blinx: serial attract-sequence bring-up
 
+**New scheduler candidate (.71):** Phobos `05040ec`'s ADX priority/resume
+analysis now informs a native single-CPU execution scheduler, bounded by
+unmodified original-kernel ready-queue/priority tests. With identical executable,
+local media and unrestricted host affinity, scheduler-off stalls after the
+opening; scheduler-on advances through the title movie. A separate 330-second
+visible run confirms gameplay, Start interruption, Press START and rendered
+reentry, with 63/63 completed writes and no terminal guard/fault. The candidate
+is startup opt-in on `fix/blinx-priority-scheduler-20261008`; speed and complete
+repeat qualification remain open. No donor timeout escape is adopted. See the
+[candidate's native pilot notes](https://github.com/mstan/xboxlle/blob/fix/blinx-priority-scheduler-20261008/pilots/native-title/README.md)
+for scope and private evidence. Candidate code is `c44ce54`; this baseline
+contains the progress notes while runtime promotion awaits the stage comparison.
+
+**Latest investigation (.98):** bounded tracing finds a full native audio queue
+and timely cursor polling while fresh guest PCM writes stall alongside presents.
+Null logging and a same-executable event-trace off/on pair do not establish a
+speed fix. Removing guest CPU affinity reproduces the old post-movie priority
+stall (.71). These experiments remain on `investigate/blinx-audio-tail-20261008`;
+see the [audit](BLINX-MOVIE-STALL-AUDIT-2026-10-08.md) for evidence and limits.
+Three full local-media observations retain sampled opening audio alignment
+through second 72; the latter two reduce fresh-write gaps to about 22 ms.
+The tail mismatch remains. A visible 260-second run confirms rendered gameplay
+and input return to Press START; second-demo rendering is not captured.
+Latest Phobos `05040ec` supplies a directly relevant shared priority/suspend
+scheduler candidate for `.71`, subject to removing its timeout escapes.
+
 **Current A/V blocker (.73/.98):** the display-event wait now returns independently
 of renderer ownership, removing a measured 0.4-0.8-second lock delay from the
 audio producer. The software LLE PCRTC/FIFO test and native ABI regression
