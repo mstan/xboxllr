@@ -31,6 +31,16 @@ static const char *failure;
 static struct {uint32_t va,pa;unsigned char *backing;} mapped[MAX_PAGES];
 static struct {uint32_t va,pa,pins;} published[MAX_PUBLISHED];
 static unsigned mapped_count,published_count;
+/* Exact indices into the owned publication ledger. Device allocations add
+ * hundreds of pages; scanning all of them for each cached alias or USB DMA
+ * packet turns original interrupt service into quadratic host bookkeeping.
+ * Page-table/ownership/pin checks remain in place. Zero means unpublished. */
+static uint16_t publication_by_va[1u<<20],publication_by_pa[RAM_BYTES/4096];
+static unsigned publication_slot(uint32_t page)
+{
+    unsigned entry=publication_by_va[page>>12];
+    return entry?entry-1:published_count;
+}
 static struct {uint32_t base,bytes;} owners[MAX_PUBLISHED];
 static unsigned owner_count;
 static struct {uint32_t base,bytes,count;} pin_ranges[MAX_PUBLISHED];
@@ -87,7 +97,7 @@ static bool invalid_memory(uc_engine *engine,uc_mem_type type,uint64_t address,
     if(address>UINT32_MAX){failure="device LLE non-x86 address";return false;}
     uint32_t page=(uint32_t)address&~4095u,pa;
     unsigned char *backing;
-    unsigned publication;for(publication=0;publication<published_count && published[publication].va!=page;++publication){}
+    unsigned publication=publication_slot(page);
     if(publication==published_count && (page<0x80000000u || (page>=0xe0000000u && page<0xe4000000u) ||
        (page>=PILOT_KERNEL_DATA_BASE && page<PILOT_KERNEL_DATA_BASE+PILOT_KERNEL_DATA_BYTES))) {
         if(!guest_page(page)){failure="device LLE invalid caller memory";return false;}
@@ -229,7 +239,7 @@ static void refresh_mappings(void)
         uint32_t pa;
         int stale;
         if(mapped[i].pa==UINT32_MAX) {
-            unsigned j;for(j=0;j<published_count && published[j].va!=mapped[i].va;++j){}
+            unsigned j=publication_slot(mapped[i].va);
             stale=j<published_count || !guest_page(mapped[i].va);
         } else stale=!physical(mapped[i].va,&pa) || pa!=mapped[i].pa ||
                      physical_backing(pa)!=mapped[i].backing;
@@ -246,7 +256,12 @@ static void release_publication(unsigned i)
      * Retain those real bytes when its last native owner goes away. */
     memcpy(ram+pa,guest_memory+va,4096);
     shared_pages[pa/4096]=NULL;
+    publication_by_va[va/4096]=0;publication_by_pa[pa/4096]=0;
     published[i]=published[--published_count];
+    if(i<published_count) {
+        publication_by_va[published[i].va/4096]=(uint16_t)(i+1);
+        publication_by_pa[published[i].pa/4096]=(uint16_t)(i+1);
+    }
     refresh_mappings();if(failure)return;
     if(!VirtualFree(guest_memory+va,4096,MEM_DECOMMIT))
         failure="device LLE publication release failed";
@@ -255,6 +270,9 @@ static void check_publications(int before_call)
 {
     for(unsigned i=0;i<published_count;) {
         uint32_t pa,va=published[i].va;
+        if(publication_by_va[va/4096]!=i+1 || publication_by_pa[published[i].pa/4096]!=i+1) {
+            failure="device LLE publication index mismatch";return;
+        }
         if(!physical(va,&pa)) {
             if(before_call){failure="device LLE published mapping changed between calls";return;}
             release_publication(i);if(failure)return;continue;
@@ -280,7 +298,7 @@ static void publish_range(uint32_t object,uint32_t bytes)
     }
     uint32_t end=(object+bytes+4095)&~4095u;
     for(uint32_t va=object&~4095u;va<end;va+=4096) {
-        unsigned i;for(i=0;i<published_count && published[i].va!=va;++i){}
+        unsigned i=publication_slot(va);
         if(i<published_count)continue;
         uint32_t pa;
         if(published_count==MAX_PUBLISHED || !physical(va,&pa)) {
@@ -295,7 +313,9 @@ static void publish_range(uint32_t object,uint32_t bytes)
         }
         if(!image)memcpy(guest_memory+va,ram+pa,4096);
         shared_pages[pa/4096]=guest_memory+va;
-        published[published_count].va=va;published[published_count].pins=0;published[published_count++].pa=pa;
+        published[published_count].va=va;published[published_count].pins=0;published[published_count].pa=pa;
+        publication_by_va[va/4096]=(uint16_t)(published_count+1);
+        publication_by_pa[pa/4096]=(uint16_t)(published_count+1);++published_count;
     }
     if(!image) {
         if(owner_count==MAX_PUBLISHED){failure="device LLE publication ownership capacity";return;}
@@ -404,11 +424,11 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
         for(uint64_t page=start&~4095u;page<(uint64_t)start+bytes;page+=4096) {
             /* Every caller mapping must be an actual published original-kernel
              * allocation, not unrelated PTEs left in the bootstrap capture. */
-            unsigned i;for(i=0;i<published_count && published[i].va!=page;++i){}
+            unsigned i=publication_slot((uint32_t)page);
             if(i==published_count && caller_owned((uint32_t)page,4096) && guest_page((uint32_t)page) &&
                !(ordinal==175 && args[2])) {
                 image_vm((uint32_t)page,4096,MEM_COMMIT);if(failure)return;
-                for(i=0;i<published_count && published[i].va!=page;++i){}
+                i=publication_slot((uint32_t)page);
             }
             if(i==published_count){
                 fprintf(stderr,"[IO DEVICE LLE PAGE] ordinal=%u start=%08x bytes=%u unlock=%u page=%08x\n",
@@ -623,7 +643,7 @@ int pilot_io_device_pinned_dma(uint32_t pa,void *buffer,uint32_t bytes,int write
     for(unsigned pass=0;pass<2;++pass)for(uint32_t at=pa,left=bytes;left;) {
         uint32_t page=at&~4095u,offset=at&4095,span=4096-offset;
         if(span>left)span=left;
-        unsigned i;for(i=0;i<published_count && published[i].pa!=page;++i){}
+        unsigned index=publication_by_pa[page/4096],i=index?index-1:published_count;
         if(i==published_count || !published[i].pins)goto done;
         uint64_t va=published[i].va+offset,end=va+span;
         while(va<end) {
