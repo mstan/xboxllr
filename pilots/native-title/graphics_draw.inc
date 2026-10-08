@@ -79,7 +79,8 @@ static void graphics_draw_common(const uint32_t args[3],uint32_t up_data,uint32_
         uint32_t cache=PILOT_D3D_STREAMS+i*12,stride=MEM32(cache);
         struct GraphicsVertexObject *vertex=graphics_vertex(MEM32(cache+8));
         if(((uint64_t)first+count-1)*stride+extents[i]>vertex->bytes)stop("draw reads beyond vertex resource",i);
-        pilot_gfx_vertex_upload(vertex->native,memory+vertex->data,vertex->bytes);
+        pilot_gfx_vertex_upload_range(vertex->native,memory+vertex->data,
+            first*stride,(count-1)*stride+extents[i]);
     }
     for(unsigned stage=0;stage<4;++stage) {
         uint32_t header=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_TEXTURES+stage*4);

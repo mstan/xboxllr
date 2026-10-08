@@ -1,5 +1,55 @@
 # Native title reference pilot
 
+## Draw-range vertex synchronization experiment (2026-10-08)
+
+`beads-xbox.1.92`, branch `perf/blinx-vertex-ranges-20261008`, base `bb04d2e`.
+The visible-scene run repeatedly samples the drawing thread in whole-resource
+`memcmp`; registered buffers reach multiple megabytes. Phobos's
+`src/hle/hle_d3d8_vertex.c` instead submits the vertices consumed by each draw.
+The candidate applies that range strategy to our existing multistream binding:
+one initial full upload, then compare/update only the validated
+`first * stride` through `(first + count - 1) * stride + attribute_extent` span.
+Guest CPU storage, handles, declaration, draw order and resource lifetimes
+remain the existing ABI. Later draws synchronize any newly consumed mutations.
+
+Changed spans use the borrowed renderer's DEFAULT buffers and immediate-context
+[D3D11 UpdateSubresource](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11devicecontext-updatesubresource),
+which snapshots source bytes while preserving earlier queued work. Real GPU
+serials track each update. `XLLE_PILOT_VERTEX_RANGES=0`, selected once at startup,
+retains whole-resource synchronization for an A/B reference; there is no live
+switching or duplicate execution. Existing LLE draw fetch/stride bounds remain
+the floor; no newly required hardware operation is replaced with success.
+
+The real GPU fixture checks disjoint/overlapping mutations, unchanged spans,
+an earlier queued copy observing old contents, later range use, full-sync
+interoperation and slot reuse. Actual multistream/depth/flat-shading pixel tests
+also use partial updates. Graphics tests pass with the D3D11 debug layer;
+all 35 native tests pass (16.07 s).
+
+The first captured comparison, anchored at opening `01_StageStart.adx`, has
+28 presents and 327 callback records in both runs: full uploads 3.90323 fps /
+254.8003 ms median, ranges 16.62740 fps / 59.9860 ms median (4.26x). The candidate
+still renders the world/character and reaches `pelon062.rec` during a bounded
+300-second observation; full uploads reached `pelon049.rec` in 600 seconds.
+Both were stopped by the harness, without an earlier guard/fault. This does
+not establish a complete attract loop or stable long-term resource use.
+Private evidence: `build/blinx/vertex-range-comparison.aot-private.json`,
+`build/blinx/{scene-qualified-extended,vertex-ranges-candidate}/`, and the
+corresponding `run-*.log`.
+
+Same-executable, capture-disabled A/B observations use identical CPU15 guest
+affinity, startup input replay, media and callback profiling. The first 28
+stage presents measure full synchronization at 3.51427 fps / 284.7463 ms median
+and range synchronization at 13.87240 fps / 71.1403 ms median: 3.95x cadence,
+75.0% lower median frame time. Each measured 27-frame interval contains 324
+callback records. Boundary callback groups differ at the loading transition;
+this is a same-stage throughput comparison, not a deterministic frame replay.
+Both 180-second runs have no guard/fault before harness termination
+(elapsed 181.125 / 181.156 s, title exit 1 from the harness).
+`build/blinx/vertex-ranges-nocapture.aot-private.json` retains executable hash,
+timings, callback sequences and run manifests. Cadence remains below the goal;
+complete attract playback, input return and stable loops remain unproven.
+
 ## Visible attract scene and scalar shader reference (2026-10-08)
 
 `beads-xbox.1.89` / `.91`, branch `investigate/blinx-scene-20261008`, base

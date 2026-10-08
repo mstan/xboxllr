@@ -6,7 +6,11 @@ were missing from the HLE handoff; the original emitter and LLE NV097 register
 contract qualify the correction (.89). A scalar ARL store defect in the
 borrowed CPU reference also required correction (.91); all 32 captured scene
 draws now agree at the existing tolerance, with independent CPU/GPU and compiled
-LLE address tests. All 35 native tests pass. Full loops, input return and
+LLE address tests. Draw-range vertex synchronization now follows Phobos's
+consumed-range strategy: a same-executable uncaptured stage comparison improves
+3.51427 to 13.87240 fps (3.95x), retaining real ordered GPU updates (.92).
+The captured candidate renders the scene and completes 63 replay writes in a
+bounded five-minute run. All 35 native tests pass. Full loops, input return and
 original-speed cadence remain outstanding; JSRF remains deferred.
 
 Earlier progression:
@@ -88,6 +92,7 @@ enforced. No title error condition is bypassed.
 | Audio detach/rebind | Original settings/caller, LLE VOICE_OFF and real native PCM/ADPCM output/ownership validated; actual 300-second run passes old guard and repeated sound reuse (.88) |
 | Callback retry timer | High-resolution native relative wait with supported fallback; fresh matched stage 2.92987 to 4.16574 fps, all 35 tests pass (.90) |
 | Attract scene geometry | Viewport reserved-constant handoff fixed; actual world and Blinx visible; original emitter, bounded LLE and 32 real draw comparisons pass (.89/.91) |
+| Vertex synchronization | Phobos draw-range strategy; real partial GPU updates preserve queued contents and later mutations; uncaptured stage 3.51427 to 13.87240 fps, 35 tests pass (.92) |
 | Next integration work | Extend visible attract playback, exercise input return, measure cadence and resource stability |
 | Input | Physical XInput, keyboard and timed host-controller replay; real startup interruption observed twice; gameplay interruption/menu return pending |
 | Attract startup/loading/render/audio/movies/gameplay | Partial startup/rendering only; no complete attract sequence yet |

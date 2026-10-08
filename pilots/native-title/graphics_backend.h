@@ -46,6 +46,8 @@ int32_t pilot_gfx_texture_readback(uint32_t handle,uint32_t level,void *data,uin
 int32_t pilot_gfx_vertex_create(uint32_t bytes,uint32_t *handle);
 void pilot_gfx_vertex_destroy(uint32_t handle);
 void pilot_gfx_vertex_upload(uint32_t handle,const void *data,uint32_t bytes);
+/* data addresses the whole guest resource; synchronize only this draw's span. */
+void pilot_gfx_vertex_upload_range(uint32_t handle,const void *data,uint32_t offset,uint32_t bytes);
 void pilot_gfx_vertex_bind(unsigned stream,uint32_t handle,uint32_t stride);
 int32_t pilot_gfx_vertex_readback(uint32_t handle,void *data,uint32_t capacity);
 struct PilotVertexElement { uint32_t type,stream,offset; };

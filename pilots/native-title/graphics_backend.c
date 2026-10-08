@@ -351,6 +351,28 @@ void pilot_gfx_vertex_upload(uint32_t handle,const void *data,uint32_t bytes)
     pilot_vertices[handle-1].uploaded=1;
     pilot_vertices[handle-1].last_use=pilot_mark_work();
 }
+void pilot_gfx_vertex_upload_range(uint32_t handle,const void *data,uint32_t offset,uint32_t bytes)
+{
+    D3D8VertexBuffer *vertex=pilot_vertex(handle);
+    if(!data || !bytes || offset>vertex->size || bytes>vertex->size-offset)
+        pilot_d3d_backend_stop("invalid vertex synchronization span");
+    /* Startup-only A/B selection. Phobos's HLE vertex bridge submits only
+     * draw-consumed vertices; retain our multistream bindings and ownership. */
+    static int ranges=-1;
+    if(ranges<0) {const char *setting=getenv("XLLE_PILOT_VERTEX_RANGES");ranges=!(setting && !strcmp(setting,"0"));}
+    if(!ranges || !pilot_vertices[handle-1].uploaded) {
+        pilot_gfx_vertex_upload(handle,data,vertex->size);return;
+    }
+    const BYTE *source=(const BYTE*)data+offset;
+    if(!memcmp(vertex->sys_mem+offset,source,bytes))return;
+    /* DEFAULT storage and the immediate context: UpdateSubresource snapshots
+     * source bytes and preserves earlier draws before this ordered update. */
+    D3D11_BOX box={offset,0,0,offset+bytes,1,1};
+    ID3D11DeviceContext_UpdateSubresource(d3d8_GetD3D11Context(),
+        (ID3D11Resource*)pilot_donor_vertex(vertex),0,&box,source,0,0);
+    memcpy(vertex->sys_mem+offset,source,bytes);
+    pilot_vertices[handle-1].last_use=pilot_mark_work();
+}
 int32_t pilot_gfx_vertex_readback(uint32_t handle,void *data,uint32_t capacity)
 {
     D3D8VertexBuffer *vertex=pilot_vertex(handle);

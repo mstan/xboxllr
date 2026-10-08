@@ -54,7 +54,7 @@ static int test_native_draw_pipeline(void)
     CHECK(pilot_gfx_shader_bind(shader)==0 && pilot_gfx_shader_raster(scale,offset)==0);
     /* A farther, differently colored submission must fail the actual depth test. */
     for(unsigned i=2;i<6;++i)xyz[i][2]=12582911.25f;
-    pilot_gfx_vertex_upload(positions,xyz,sizeof(xyz));CHECK(pilot_gfx_xbox_texture_state(0,14,4));
+    pilot_gfx_vertex_upload_range(positions,xyz,2*sizeof(xyz[0]),4*sizeof(xyz[0]));CHECK(pilot_gfx_xbox_texture_state(0,14,4));
     CHECK(pilot_gfx_draw_vertices(6,2,4)==0 && pilot_gfx_readback(pixels,sizeof(pixels))==0);
     CHECK(pixels[sample]==32 && pixels[sample+1]==32 && pixels[sample+2]==128);
     pilot_gfx_set_state(D3DRS_ZENABLE,0);
@@ -65,7 +65,7 @@ static int test_native_draw_pipeline(void)
     for(unsigned i=2;i<6;++i) {
         memset(vertex[i].specular,0,16);vertex[i].specular[(i-2)%3]=1;vertex[i].specular[3]=1;
     }
-    pilot_gfx_vertex_upload(attributes,vertex,sizeof(vertex));
+    pilot_gfx_vertex_upload_range(attributes,vertex,2*sizeof(vertex[0]),4*sizeof(vertex[0]));
     CHECK(pilot_gfx_xbox_render_state(66,0x1d00));
     CHECK(pilot_gfx_draw_vertices(6,2,4)==0 && pilot_gfx_readback(pixels,sizeof(pixels))==0);
     CHECK(pixels[sample]==255 && !pixels[sample+1] && !pixels[sample+2]);
