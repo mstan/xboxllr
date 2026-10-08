@@ -19,11 +19,13 @@ typedef LONG (NTAPI *MediaRead)(HANDLE,HANDLE,PVOID,PVOID,PIO_STATUS_BLOCK,PVOID
 typedef LONG (NTAPI *MediaInfo)(HANDLE,PIO_STATUS_BLOCK,PVOID,ULONG,ULONG);
 typedef LONG (NTAPI *MediaCreate)(PHANDLE,ACCESS_MASK,POBJECT_ATTRIBUTES,PIO_STATUS_BLOCK,PLARGE_INTEGER,ULONG,ULONG,ULONG,ULONG,PVOID,ULONG);
 typedef LONG (NTAPI *MediaFlush)(HANDLE,PIO_STATUS_BLOCK);
+typedef LONG (NTAPI *MediaDirectory)(HANDLE,HANDLE,PVOID,PVOID,PIO_STATUS_BLOCK,PVOID,ULONG,ULONG,BOOLEAN,PUNICODE_STRING,BOOLEAN);
 static MediaOpen media_nt_open;
 static MediaRead media_nt_read,media_nt_write;
 static MediaInfo media_nt_query,media_nt_set,media_nt_volume;
 static MediaCreate media_nt_create;
 static MediaFlush media_nt_flush;
+static MediaDirectory media_nt_directory;
 static INIT_ONCE media_once=INIT_ONCE_STATIC_INIT;
 #include "file_cache.inc"
 
@@ -39,8 +41,9 @@ static BOOL CALLBACK media_start(PINIT_ONCE once,void *parameter,void **context)
     media_nt_write=(MediaRead)(void*)GetProcAddress(nt,"NtWriteFile");
     media_nt_create=(MediaCreate)(void*)GetProcAddress(nt,"NtCreateFile");
     media_nt_flush=(MediaFlush)(void*)GetProcAddress(nt,"NtFlushBuffersFile");
+    media_nt_directory=(MediaDirectory)(void*)GetProcAddress(nt,"NtQueryDirectoryFile");
     if (!media_nt_open || !media_nt_read || !media_nt_query || !media_nt_set ||
-        !media_nt_volume || !media_nt_write || !media_nt_create || !media_nt_flush)
+        !media_nt_volume || !media_nt_write || !media_nt_create || !media_nt_flush || !media_nt_directory)
         stop("native file services unavailable",0);
     return TRUE;
 }
@@ -299,12 +302,13 @@ static uint32_t media_open(uint32_t *args,int create)
     media_iosb(iosb,status,status ? 0 : io.Information);
     return status;
 }
+#include "directory.inc"
 static void media_kernel(unsigned ordinal)
 {
     fsc_ensure();
     int transfer=ordinal==219 || ordinal==236;
-    unsigned count=ordinal==190 ? 9 : ordinal==202 ? 6 : transfer ? 8 : ordinal==198 ? 2 : 5;
-    uint32_t a[9]; for (unsigned i=0;i<count;++i) a[i]=MEM32(g_esp+4+i*4);
+    unsigned count=ordinal==207 ? 10 : ordinal==190 ? 9 : ordinal==202 ? 6 : transfer ? 8 : ordinal==198 ? 2 : 5;
+    uint32_t a[10]; for (unsigned i=0;i<count;++i) a[i]=MEM32(g_esp+4+i*4);
     int opening=ordinal==190 || ordinal==202;
     if (opening) AcquireSRWLockExclusive(&media_lock);
     else AcquireSRWLockShared(&media_lock);
@@ -312,12 +316,13 @@ static void media_kernel(unsigned ordinal)
     else {
         struct MediaFile *owned=media_owned(a[0]);
         HANDLE file=owned ? owned->host : NULL; IO_STATUS_BLOCK io={0};
-        uint32_t iosb=transfer ? a[4] : a[1];
+        uint32_t iosb=transfer || ordinal==207 ? a[4] : a[1];
         g_eax=MEDIA_BAD_HANDLE;
         if (!iosb) g_eax=MEDIA_INVALID;
         else if (file) {
             AcquireSRWLockExclusive(&owned->io_lock);
-            if (transfer) {
+            if(ordinal==207) g_eax=media_directory(file,&io,a);
+            else if (transfer) {
                 /* A context alone requests no callback. XAPI ReadFile passes
                  * its OVERLAPPED pointer here even with no APC routine/event.
                  * Completion ports cannot be associated with our file owner. */

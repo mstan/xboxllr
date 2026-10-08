@@ -1,5 +1,15 @@
 # STATUS
 
+## 2026-10-07 - Blinx discovers its first movie
+
+Real directory enumeration finds `microsoft.sfd`; Blinx then attempts to open it
+with asynchronous/nonbuffered flags. This is the next IO family (`beads-xbox.1.69`),
+not movie playback. Native directory fixtures and the LLE optical metadata/
+payload test pass. The retail filesystem enumeration state machine remains an
+explicit reference gap; installed-media host metadata/order are tolerated.
+The separate native visibility-query recreation timeout is still open.
+
+
 ## 2026-10-07 - Blinx reaches movie-directory discovery
 
 Real contiguous Set/QueryAddressProtect now passes original-kernel permission

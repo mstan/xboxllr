@@ -84,6 +84,20 @@ int main() {
         ("xlle-dvd-test-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".iso");
     std::vector<uint8_t> source(72 * 2048);
     for (size_t i = 0; i < source.size(); ++i) source[i] = uint8_t((i / 2048) ^ i ^ (i >> 8));
+    // Authored XDVDFS metadata/storage fixture (XboxDev/extract-xiso layout).
+    // This is a transport floor for installed-directory contracts, not a
+    // substitute for running the retail filesystem's enumeration state machine.
+    const uint8_t content[]={0,1,2,3,4,5,6,7,8,9,0xff,0,12,13,14,15,16,17,18,19};
+    auto put32=[&](size_t at,uint32_t v){for(unsigned i=0;i<4;++i)source[at+i]=uint8_t(v>>(i*8));};
+    std::memset(source.data()+32*2048,0,2048);
+    std::memcpy(source.data()+32*2048,"MICROSOFT*XBOX*MEDIA",20);
+    std::memcpy(source.data()+33*2048-20,"MICROSOFT*XBOX*MEDIA",20);
+    put32(32*2048+20,40);put32(32*2048+24,24);
+    std::memset(source.data()+40*2048,0,2048);
+    put32(40*2048+4,41);put32(40*2048+8,sizeof(content));
+    source[40*2048+12]=0x20;source[40*2048+13]=9;
+    std::memcpy(source.data()+40*2048+14,"asset.bin",9);
+    std::memcpy(source.data()+41*2048,content,sizeof(content));
     { std::ofstream f(path, std::ios::binary); f.write(reinterpret_cast<const char*>(source.data()), source.size()); check(bool(f), "create owned image fixture"); }
     {
         Fixture d;
@@ -133,6 +147,20 @@ int main() {
         check(!d.irq, "missing authentication does not signal success");
         smc.write_byte(0x0c, 1);
         check(d.faults.size() == 2 && d.ide.dvd_media_present(), "unmodeled SMC motor cannot pretend to eject");
+    }
+    {
+        Fixture d;check(d.ide.attach_dvd(path.string()),"mount directory metadata fixture");
+        d.packet(read(0x28,32,1));const auto descriptor=d.reply();
+        auto get32=[](const uint8_t* p){return uint32_t(p[0])|(uint32_t(p[1])<<8)|(uint32_t(p[2])<<16)|(uint32_t(p[3])<<24);};
+        check(!std::memcmp(descriptor.data(),"MICROSOFT*XBOX*MEDIA",20),"actual XDVDFS descriptor bytes");
+        check(get32(descriptor.data()+24)==24,"actual directory extent");
+        d.prd(0x1000,0x2000,2048,true);d.packet(read(0xa8,get32(descriptor.data()+20),1),true);d.dma_start();
+        const auto* record=d.ram.data()+0x2000;
+        check(record[12]==0x20 && record[13]==9 && !std::memcmp(record+14,"asset.bin",9),"DMA delivers filename and attributes");
+        check(get32(record+8)==sizeof(content),"directory reports actual file length");
+        const uint32_t extent=get32(record+4);d.ide.io_write(0xff60,1,0);
+        d.packet(read(0x28,extent,1));const auto payload=d.reply();
+        check(!std::memcmp(payload.data(),content,sizeof(content)) && d.faults.empty(),"directory extent resolves to actual payload");
     }
     {
         Fixture d; check(d.ide.attach_dvd(path.string()), "second independent drive");

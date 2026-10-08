@@ -15,6 +15,20 @@ notices. Preparation/build steps must report missing required notices.
 
 ## Private native-title reference pilot
 
+### Directory enumeration - 2026-10-07
+
+Phobos `src/kernel/kernel_file.c` at
+`bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0` supplies the real-host enumeration /
+Xbox entry-translation approach; Cxbx `EmuKrnlNt.cpp` at
+`585c49a50af1255ab155099e06f24505f9c5a800` corroborates single-entry handling and
+dot-entry exclusion. nxdk supplies the class-1 ABI. No donor service bodies are
+copied. Our adapter uses the existing host NT handle and checked bounded writes.
+[Microsoft NtQueryDirectoryFile](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntquerydirectoryfile)
+is the host cursor/completion reference.
+[XboxDev/extract-xiso](https://github.com/XboxDev/extract-xiso/blob/master/extract-xiso.c)
+(reviewed 2026-10-07) supplies XDVDFS layout facts for the authored LLE optical
+fixture; no implementation copied. Original kernel/XDK bytes remain private.
+
 ### Contiguous page protection - 2026-10-07
 
 Phobos `src/kernel/kernel_memory.c` at

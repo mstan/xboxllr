@@ -5,6 +5,7 @@ static void test_media_name(const char *name,uint32_t root)
     MEM16(0x1a010)=(uint16_t)length; MEM16(0x1a012)=(uint16_t)length;
     MEM32(0x1a014)=0x1a100; memcpy(memory+0x1a100,name,length);
 }
+#include "directory_contract_test.inc"
 static void test_media(void)
 {
     char temp[MAX_PATH],directory[MAX_PATH],path[MAX_PATH];
@@ -73,6 +74,7 @@ static void test_media(void)
     test_media_name("D:\\",0); open[5]=0x21;
     call_kernel(202,open,6); CHECK(!g_eax);
     uint32_t guest_root=MEM32(out);
+    test_directory(guest_root,iosb,buffer);
     test_media_name("asset.bin",guest_root); open[5]=0x60;
     call_kernel(202,open,6); CHECK(!g_eax);
     uint32_t child=MEM32(out);

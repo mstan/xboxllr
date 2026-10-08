@@ -6,7 +6,35 @@ It is outside the normal xboxlle build. **The generated executable is a private
 GPL-dependent reference artifact, not the intended non-GPL shipping product.**
 See [license scope](../../LICENSE-SCOPE.md). There is no install/package target.
 
-## Current checkpoint - contiguous memory protection (2026-10-07)
+## Current checkpoint - movie discovery (2026-10-07)
+
+`beads-xbox.1.68`: Blinx now finds `microsoft.sfd` through real directory
+enumeration, closes the search and attempts to open the movie. The next guard
+is its asynchronous, nonbuffered file mode (options `0x848`), tracked in
+`beads-xbox.1.69`. No movie frame/audio playback is claimed.
+
+Phobos supplies the host-enumeration/entry-translation approach. The independent
+adapter uses our already-open NT handle, preserving host cursor/filter lifetime
+and converting the fixed 64-byte class-1 header plus ASCII name into Xbox layout.
+It handles restart, exhaustion, independent searches, invalid handles/classes,
+buffer limits and actual errors. Dot entries are omitted as on Xbox; input
+masks remain untouched. Native media contract tests pass. LLE optical tests
+pass a real XDVDFS descriptor, DMA directory record and PIO linked payload.
+
+Bounded reference qualification: nxdk defines the Xbox ABI; the original kernel
+IRP boundary was inspected, and the optical transport is runnable. **The retail
+filesystem's enumeration state machine has not been executed end to end in this
+fixture.** Installed media permits host timestamps, allocation size and ordering.
+Native cursor/filter and short-buffer semantics follow host NT; exact Xbox
+filesystem edge cases remain open. Non-ASCII names, reparse entries and event/APC
+delivery remain explicit guards. No donor implementation bodies are copied.
+
+Private title evidence: `build/blinx/run-directory-enumeration.log`, 23435496
+function entries, actual `microsoft.sfd` entry (77 result bytes). Current native
+GPU query recreation failure remains tracked separately in `beads-xbox.1.66`.
+
+## Earlier checkpoint - contiguous memory protection (2026-10-07)
+
 
 `beads-xbox.1.67`: actual Blinx now passes MmSetAddressProtect on its contiguous
 buffer and reaches NtQueryDirectoryFile while discovering `d:\media\movie\`.

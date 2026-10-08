@@ -6,7 +6,7 @@ error is traced and fixed: local VM/texture ownership caps returned out of memor
 while real guest RAM remained available. Blinx now loads 420 textures, passes
 visibility Begin/End, and executes its ordered GPU WRITE callback. The latest
 run passes shared front-buffer texture aliases and contiguous page protection,
-then reaches directory enumeration for movie discovery. Earlier fresh/repeat runs reached the callback boundary in 12.95/7.33 s
+then discovers microsoft.sfd and attempts its asynchronous open. Earlier fresh/repeat runs reached the callback boundary in 12.95/7.33 s
 with zero error-dialog entries or memory failures. The 64 MiB guest limit remains
 enforced. No title error condition is bypassed.
 
@@ -21,7 +21,8 @@ enforced. No title error condition is bypassed.
 | Ordered GPU callbacks | Original READ/WRITE packets, bounded LLE idle/IRQ floor and native FIFO/real completion tests pass; Blinx executes its WRITE callback |
 | GPU texture aliases | Actual shared Phobos RHI storage; LLE clear/sample/update and native ownership/hazard fixtures pass |
 | Memory protection | Original Set/Query execution, LLE page faults and native host protection pass; actual title request succeeds |
-| Next service family | NtQueryDirectoryFile for real movie-file discovery |
+| Movie discovery | Real directory cursor/entries and native ABI tests pass; optical transport fixture passes; complete retail filesystem behavior remains a reference gap |
+| Next service family | Asynchronous/nonbuffered movie-file IO with actual completion |
 | Input | Physical XInput and startup-selected keyboard available; actual menu/movie interruption still unvalidated |
 | Attract startup/loading/render/audio/movies/gameplay | Partial startup/rendering only; no complete attract sequence yet |
 | Repeat loops, interruption/menu return, original cadence | Pending actual title integration measurements |
