@@ -23,6 +23,37 @@ static uint32_t call_graphics(unsigned entry,const uint32_t *args)
 #include "graphics_gpu_callback_contract_test.inc"
 #include "graphics_alias_contract_test.inc"
 #include "graphics_reset_contract_test.inc"
+static void test_graphics_guest_scheduler(void)
+{
+    vm_ensure();dispatch_ensure();
+    uint32_t page=PILOT_D3D_DEVICE_GLOBAL&~4095u;
+    uint32_t bytes=((PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SHADER_CONSTANT_MODE_OFFSET+4+4095)&~4095u)-page;
+    commit(page,bytes);vm_fixed_region(page,bytes);
+    const uint32_t parameters[17]={64,64,6,1,0x11,1,0,0,1,0x2a,0,0,1};
+    memcpy(memory+0x19000,parameters,sizeof(parameters));
+    scheduler_enabled=1;scheduler_publish(0,0,0);scheduler_enter(0);
+    uint32_t create[]={0,1,0,0x40,0x19000,0x19100};
+    CHECK(call_graphics(PILOT_D3D_Direct3D_CreateDevice,create)==0);
+    gpu_test_caller=GetCurrentThreadId();gpu_test_count=0;
+    gpu_test_entered=CreateEventW(NULL,TRUE,FALSE,NULL);
+    gpu_test_release=CreateEventW(NULL,TRUE,TRUE,NULL);CHECK(gpu_test_entered && gpu_test_release);
+    uint32_t clear[]={0,0,0xf1,0xffff0000,0x3f800000,0};
+    CHECK(call_graphics(PILOT_D3D_D3DDevice_Clear,clear)==0);
+    AcquireSRWLockExclusive(&graphics_lock);gpu_test_serial=pilot_gfx_checkpoint();ReleaseSRWLockExclusive(&graphics_lock);
+    for(unsigned i=1;i<=70;++i) {
+        uint32_t args[]={i&1,0x12360,i},out=0x19600;
+        call_graphics(PILOT_D3D_D3DDevice_InsertCallback,args);
+        call_graphics(PILOT_D3D_D3DDevice_GetDisplayMode,&out);
+        CHECK(gpu_test_count==(LONG)i && scheduler_owner==1);
+    }
+    uint32_t fence=call_graphics(PILOT_D3D_D3DDevice_InsertFence,NULL);
+    call_graphics(PILOT_D3D_D3DDevice_BlockOnFence,&fence);
+    CHECK(graphics_gpu_delivered==70 && !graphics_gpu_head && !graphics_gpu_running);
+    call_graphics(PILOT_D3D_D3DDevice_Release,NULL);scheduler_retire();
+    CHECK(!graphics_active && !scheduler_owner);
+    CloseHandle(gpu_test_entered);CloseHandle(gpu_test_release);
+    fprintf(stderr,"PASS: scheduled real GPU WRITE/READ callbacks, pixels, ordering waits, reentrant guest queries, fences and teardown without CPU/renderer lock inversion\n");
+}
 static void test_graphics(void)
 {
     vm_ensure();

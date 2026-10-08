@@ -44,6 +44,7 @@ static void test_guest_scheduler(void)
     while(GetTickCount64()<end){scheduler_checkpoint();Sleep(1);}
     CHECK(!scheduling_count); /* no starvation escape through priority 15 */
     int blocked=scheduler_block_begin();CHECK(blocked);
+    CHECK(!scheduler_block_begin()); /* a nested native wait cannot restore twice */
     Sleep(30);CHECK(!scheduling_count); /* lower cannot beat the delayed spinner */
     SetEvent(scheduling_gate);
     CHECK(WaitForSingleObject(scheduling_low_done,2000)==WAIT_OBJECT_0);

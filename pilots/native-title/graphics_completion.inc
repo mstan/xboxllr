@@ -15,7 +15,9 @@ static void graphics_fence_wait(uint32_t token)
     for(;;) {
         graphics_fence_poll();if(token<=graphics_fence_done)return;
         ++graphics_clock_waiters;ReleaseSRWLockExclusive(&graphics_lock);
+        int blocked=scheduler_block_begin();
         Sleep(1);
+        scheduler_block_end(blocked);
         AcquireSRWLockExclusive(&graphics_lock);--graphics_clock_waiters;
     }
 }

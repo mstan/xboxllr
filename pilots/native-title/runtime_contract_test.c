@@ -352,6 +352,7 @@ int main(int argc,char **argv)
         if (!strncmp(argv[1],"input-",6)) { test_input_failure(argv[1]+6); return 0; }
 #endif
 #ifdef PILOT_D3D_NATIVE
+        if (!strcmp(argv[1],"graphics-scheduler")) { test_graphics_guest_scheduler(); return 0; }
         if (!strcmp(argv[1],"graphics")) { test_graphics(); return 0; }
         if (!strcmp(argv[1],"graphics-unsupported")) {
             graphics_active=1; /* Exercise the unsupported-family guard. */

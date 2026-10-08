@@ -51,6 +51,36 @@ the real-worker scheduler test. An earlier host event-timeout minimum-duration
 failure is retained separately as `.99`; five targeted repeats and the final
 suite pass do not erase that observation.
 
+The complete-stage performance check rejects the first blanket graphics-call
+handoff as a default: 28.71274 fps for the CPU15 reference versus 25.05659 fps
+for the unrestricted scheduler candidate. Reusing Phobos's
+`hle_d3d8.c`/`rhi_set_wait_hooks` strategy narrows handoff to actual ordered
+callback/fence waits and blocking lifecycle/display services. That measures
+27.86947 fps. All three complete 2329 presents and 75/75 writes naturally;
+reference and narrowed candidate also retain the same 27186 callback contexts
+grouped between presents. Reference/candidate p95 is 44.26/43.89 ms, but long
+stalls over 100 ms increase from 2 to 8. Host load is uncontrolled, and this
+comparison does not establish a speed improvement. Evidence:
+`build/blinx/scheduler-stage-{initial,final}.aot-private.json`.
+
+The narrower candidate retains the first scheduler's correctness purpose and
+stays opt-in. All 36 existing tests pass (17.77 seconds); an added real GPU test
+passes 70 ordered callbacks with pixel checks, reentrant guest queries, fence
+completion and teardown while guest CPU scheduling is enabled (0.16 seconds).
+Nested wait scopes restore CPU eligibility only once, and CPU reacquisition
+occurs without renderer ownership to avoid reversing lock order.
+
+The final wait-boundary version also passes a fresh 190-second visible input
+observation: Start at 90000 ms interrupts rendered gameplay, capture 20 shows
+Press START, and captures 30/34/37 show rendered reentry. All 92 writes complete;
+37 captures and the full log contain no terminal guard/fault. This run uses
+the original controller path to skip startup at 15 seconds solely for the
+bounded input test; it is not evidence of an uninterrupted opening. The
+separate 260-second stage run naturally returns through publisher/opening
+movies into the title movie. Full A/V and long-repeat cadence remain open.
+Private evidence: `build/blinx/scheduler-wait-hooks-input/` and
+`build/blinx/scheduler-stage-wait-hooks/`.
+
 ## Movie queue/stall investigation (2026-10-08)
 
 The [movie stall audit](../../docs/BLINX-MOVIE-STALL-AUDIT-2026-10-08.md)

@@ -378,15 +378,21 @@ static void graphics_dispatch_impl(unsigned entry)
 
 void pilot_d3d_dispatch(unsigned entry)
 {
-    /* Every command can wait for an earlier ordered GPU callback. Release
-     * CPU eligibility before renderer ownership; the independent display
-     * wait also releases it while its actual timer/event is pending. */
-    int blocked=scheduler_block_begin();
+    /* Phobos 05040ec hle_d3d8.c installs RHI wait hooks instead of handing
+     * off at every state setter/draw. Here the real callback barrier/fence
+     * wait has its own hook; whole blocking lifecycle/present services keep
+     * their outer release. Native work and actual GPU completion are intact. */
+    int waits=entry==PILOT_D3D_D3DDevice_BlockUntilVerticalBlank ||
+        entry==PILOT_D3D_D3DDevice_BlockOnFence || entry==PILOT_D3D_D3DDevice_Swap ||
+        entry==PILOT_D3D_Direct3D_CreateDevice || entry==PILOT_D3D_D3DDevice_Reset ||
+        entry==PILOT_D3D_D3DDevice_Release;
+    int blocked=waits?scheduler_block_begin():0;
     if(!graphics_service_profile_enabled() || dispatch_in_dpc || entry>=PILOT_D3D_COUNT) {
-        graphics_dispatch_impl(entry);scheduler_block_end(blocked);return;
+        graphics_dispatch_impl(entry);scheduler_block_end(blocked);PILOT_THREAD_CHECKPOINT();return;
     }
     uint64_t begin=dispatch_monotonic();
     graphics_dispatch_impl(entry);
     graphics_service_profile_record(entry,begin,dispatch_monotonic());
     scheduler_block_end(blocked);
+    PILOT_THREAD_CHECKPOINT();
 }

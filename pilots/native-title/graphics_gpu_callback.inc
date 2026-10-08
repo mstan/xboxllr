@@ -56,9 +56,18 @@ static void graphics_gpu_barrier(void)
 {
     if(dispatch_in_dpc)return;
     uint64_t begin=graphics_gpu_profile() && (graphics_gpu_head || graphics_gpu_running)?dispatch_monotonic():0;
-    while(graphics_gpu_head || graphics_gpu_running)
+    while(graphics_gpu_head || graphics_gpu_running) {
+        int blocked=scheduler_block_begin();
         if(!SleepConditionVariableSRW(&graphics_gpu_changed,&graphics_lock,INFINITE,0))
             stop("GPU callback ordering wait failed",GetLastError());
+        if(blocked) {
+            /* Reacquire the guest CPU without renderer ownership: another
+             * eligible guest/DPC may need that lock before it can yield. */
+            ReleaseSRWLockExclusive(&graphics_lock);
+            scheduler_block_end(blocked);
+            AcquireSRWLockExclusive(&graphics_lock);
+        }
+    }
     if(begin)fprintf(stderr,"[GPU BARRIER PROFILE] thread=%lu wait_ms=%.3f\n",GetCurrentThreadId(),(dispatch_monotonic()-begin)/10000.0);
 }
 static void graphics_gpu_insert(uint32_t type,uint32_t routine,uint32_t context)

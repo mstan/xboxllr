@@ -10,6 +10,16 @@ reentry, with 63/63 completed writes and no terminal guard/fault. The candidate
 is startup opt-in on `fix/blinx-priority-scheduler-20261008`; speed and complete
 repeat qualification remain open. No donor timeout escape is adopted. See the
 [native pilot](../pilots/native-title/README.md) for scope and private evidence.
+The full-stage comparison measures 28.71 fps for the CPU-pinned reference,
+25.06 for the first scheduler, and 27.87 after adopting Phobos's narrower
+renderer-wait boundaries. All finish 2329 presents and 75 writes; the final
+candidate retains the reference's 27186 ordered callback contexts. This is
+a correctness option with a measured performance cost, not a speed win.
+The final narrowed version also preserves visible controller interruption,
+menu return and rendered reentry in a separate 190-second run, with 92/92
+completed writes and no terminal guard/fault. The CPU-pinned runtime remains
+the performance baseline; the scheduler branch is retained for correctness
+and future optimization. JSRF remains deferred.
 
 **Latest investigation (.98):** bounded tracing finds a full native audio queue
 and timely cursor polling while fresh guest PCM writes stall alongside presents.

@@ -667,6 +667,9 @@ with `kernel_bridge.c` and `kernel_thread.c` consulted for blocking calls and
 cooperative suspension. The implementation is independently authored; no donor
 scheduler body is copied. It excludes the donor's starvation escape, expiring
 CPU reservation and callback execution without exclusive ownership.
+The same revision's `src/hle/hle_d3d8.c` and its `rhi_set_wait_hooks` setup
+also inform the narrower renderer integration: release guest execution at real
+waits rather than every setter/draw. No RHI implementation body is copied.
 
 [xemu 482088490c2d5983ed5e1eafbd09906157c1eca0](https://github.com/xemu-project/xemu/blob/482088490c2d5983ed5e1eafbd09906157c1eca0/hw/xbox/xbox.c)
 provides the single-CPU machine reference. The runnable bounded ordering and

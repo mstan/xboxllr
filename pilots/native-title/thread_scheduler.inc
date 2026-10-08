@@ -118,6 +118,9 @@ static int scheduler_block_begin(void)
 {
     if(!scheduler_enabled || !scheduler_attached || scheduler_slot==SCHEDULER_CALLBACK_SLOT)return 0;
     AcquireSRWLockExclusive(&scheduler_lock);
+    /* A whole blocking service may contain a narrower renderer wait. Only
+     * the outer owner restores eligibility; nested wait scopes are inert. */
+    if(scheduled[scheduler_slot].blocked){ReleaseSRWLockExclusive(&scheduler_lock);return 0;}
     if(scheduler_owner!=scheduler_slot+1)stop("blocking without guest CPU",scheduler_slot);
     scheduled[scheduler_slot].blocked=1;scheduler_owner=0;scheduler_notify_locked();
     ReleaseSRWLockExclusive(&scheduler_lock);return 1;
