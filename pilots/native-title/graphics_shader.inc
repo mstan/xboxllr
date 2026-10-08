@@ -35,8 +35,10 @@ static void graphics_shader_get_constants(const uint32_t *args)
 static void graphics_shader_bind(uint32_t handle)
 {
     if(!(handle&1)) {
-        pilot_gfx_fvf_extent(handle);
-        uint32_t object=PILOT_D3D_FVF_OBJECT,flags=2,offset=16,dimensions=0;
+        /* Zero is a valid empty declaration binding in the original XDK.
+         * Draw submission still rejects it until a draw contract is qualified. */
+        if(handle)pilot_gfx_fvf_extent(handle);
+        uint32_t object=PILOT_D3D_FVF_OBJECT,flags=handle?2:0,offset=handle?16:0,dimensions=0;
         FILE *capture_file=NULL;const char *capture=getenv("XLLE_PILOT_FVF_CAPTURE");
         if(capture && *capture) {
             static unsigned sequence;char path[1024];uint32_t metadata[]={handle,0x114};
@@ -46,7 +48,7 @@ static void graphics_shader_bind(uint32_t handle)
                 fwrite(memory+object,0x114,1,capture_file)!=1)stop("FVF capture input",0);
         }
         for(unsigned i=0;i<16;++i)MEM32(object+0x1c+i*16)=2;
-        MEM32(object+0x1c)=0x42;
+        if(handle)MEM32(object+0x1c)=0x42;
         for(unsigned i=0;i<2;++i)if(handle&(0x40u<<i)) {
             flags|=0x400u<<i;MEM32(object+0x48+i*16)=offset;MEM32(object+0x4c+i*16)=0x40;offset+=4;
         }

@@ -4,14 +4,18 @@ static void test_graphics_fvf(void)
     uint32_t constants[192][4];memcpy(constants,memory+PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_CONSTANTS,sizeof(constants));
     /* Sequential calls also expose stale format/offset fields. Descriptor
      * captures are checked against the complete original decoder offline. */
-    const uint32_t formats[]={0x144,0x344,0x3c4,0x30144,0x10144,0x20144,0x444,4,0xc4,0x144};
-    const unsigned sizes[]={28,44,48,24,32,36,52,16,24,28};
+    const uint32_t formats[]={0x144,0,0x344,0x3c4,0x30144,0x10144,0x20144,0x444,4,0xc4,0,0x144};
+    const unsigned sizes[]={28,0,44,48,24,32,36,52,16,24,0,28};
     for(unsigned i=0;i<sizeof(formats)/sizeof(*formats);++i) {
         uint32_t fvf=formats[i];call_graphics(PILOT_D3D_D3DDevice_SetVertexShader,&fvf);
-        CHECK(pilot_gfx_fvf_extent(fvf)==sizes[i]);
+        if(fvf)CHECK(pilot_gfx_fvf_extent(fvf)==sizes[i]);
         uint32_t output=0x198d0;call_graphics(PILOT_D3D_D3DDevice_GetVertexShader,&output);CHECK(MEM32(output)==fvf);
         CHECK(MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_OBJECT)==PILOT_D3D_FVF_OBJECT);
-        CHECK(MEM32(PILOT_D3D_FVF_OBJECT+0x1c)==0x42);
+        CHECK(MEM32(PILOT_D3D_FVF_OBJECT+0x1c)==(fvf?0x42:2));
+        if(!fvf) {
+            CHECK(MEM32(PILOT_D3D_FVF_OBJECT+4)==0 && MEM32(PILOT_D3D_FVF_OBJECT+0x10)==0);
+            for(unsigned reg=0;reg<16;++reg)CHECK(MEM32(PILOT_D3D_FVF_OBJECT+0x1c+reg*16)==2);
+        }
         CHECK(!memcmp(constants,memory+PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_CONSTANTS,sizeof(constants)));
     }
     call_graphics(PILOT_D3D_D3DDevice_SetVertexShader,&previous);

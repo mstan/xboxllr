@@ -1,5 +1,28 @@
 # STATUS
 
+## 2026-10-07 - Corrected shader query ABI; next is render-target feedback
+
+Actual `pixel-query-abi-attract` passes scene-compositing shader restoration,
+presents the loading screen and stops at the explicit texture/render-output
+overlap guard. Private evidence: `build/blinx/run-pixel-query-abi-attract.log`
+and `pixel-query-abi-attract/latest.png` (120.06 s diagnostic run).
+No gameplay/complete attract loop or cadence is established.
+
+The original GetPixelShader takes one pointer and RET4; donor metadata said
+two parameters/stack8. Earlier native tests reused that metadata for expected
+cleanup, missing the corruption of saved caller state. The corrected binding
+now audits all 129 identified D3D return cleanups; a direct stack/canary test
+independently checks the query. Full native suite: 32/32, 13.34 s (.83).
+Empty FVF binding also matches complete original descriptor/state execution;
+empty-format drawing remains guarded (.82). The earlier zero binding was
+observed while the caller stack was corrupted, not evidence of required geometry.
+
+Next (.84): establish the reached overlap/draw contract, then reuse Phobos's
+`d3d8_device.c` GPU feedback snapshot where applicable. Its source specifically
+documents Blinx shadow compositing; copy failure must remain an explicit error
+here, not black texture input. Dashboard remains deferred; Theseus stays a
+reference with no imported implementation.
+
 ## 2026-10-07 - Blinx passes mapped pixel constants; next is vertex format
 
 Actual `pixel-constants-attract` passes SetPixelShaderConstant and submits

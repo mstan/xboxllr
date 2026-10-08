@@ -144,7 +144,12 @@ static void test_graphics_pixels(void)
         uint32_t select=i==1?0:bound;
         call_graphics(PILOT_D3D_D3DDevice_SetPixelShader,&select);
         memset(memory+query-4,0xcd,12);
-        call_graphics(PILOT_D3D_D3DDevice_GetPixelShader,&query);
+        /* Independent original RET 4 contract: do not infer the expected
+         * stack from the generated metadata that the dispatcher consumes. */
+        g_esp=0x18000;MEM32(g_esp)=0x12340;MEM32(g_esp+4)=query;
+        MEM32(g_esp+8)=0xcafebabe;
+        pilot_d3d_dispatch(PILOT_D3D_D3DDevice_GetPixelShader);
+        CHECK(g_esp==0x18008 && MEM32(g_esp)==0xcafebabe);
         CHECK(MEM32(query)==select && MEM32(query-4)==0xcdcdcdcdu && MEM32(query+4)==0xcdcdcdcdu);
         CHECK(MEM32(bound)==objects[0] && MEM32(bound+4)==objects[1]);
         CHECK(!memcmp(memory+bound+12,definition,sizeof(definition)));

@@ -6,6 +6,42 @@ It is outside the normal xboxlle build. **The generated executable is a private
 GPL-dependent reference artifact, not the intended non-GPL shipping product.**
 See [license scope](../../LICENSE-SCOPE.md). There is no install/package target.
 
+## Empty vertex-declaration binding
+
+The next integration run exposed a separate ABI defect (`beads-xbox.1.83`):
+the donor's `GetPixelShader` metadata lists two parameters/stack8, but the
+complete original function takes one output pointer and returns with RET4.
+Our earlier native test helper used the same metadata for its expected stack,
+so it missed the discrepancy. The original query fixture itself was correct.
+This corrupted Blinx's saved state and ultimately restored a code return
+address as a pixel-shader handle. The ownership guard caught it.
+
+Binding generation now corrects the SHA-qualified query and verifies original
+return cleanup for all 129 identified D3D functions, including the reviewed
+FrontFace tail transfer to CullMode. The native query fixture independently
+asserts caller-stack position and canary, without metadata-derived cleanup.
+The corrected full native suite passes 32/32 in 13.34 s. Keep empty binding
+qualification separate from drawing and from this stack-corruption fix.
+
+`beads-xbox.1.82`: the actual rejected FVF is zero. The original XDK accepts
+`SetVertexShader(0)` and creates an empty declaration: zero format flags and
+texture dimensions, all sixteen attributes disabled, cached handle zero and
+fixed-function hardware mode. It preserves programmable constants/program
+cache. `tools/native_vertex_binding_reference.py` executes the full original
+setter against native before/after captures; all 276 descriptor bytes and
+query-visible state match through nonzero/zero/nonzero transitions.
+
+The adapter reuses its existing lazy vertex binding around Phobos's pipeline.
+It accepts that real state transition; draw submission still rejects an empty
+format until an actual drawing contract is qualified. No new vertex pipeline
+or default geometry is substituted. Native graphics ABI passes in 4.79 s.
+The initial zero binding occurred under the corrupted caller stack; this is
+a separately valid binding contract, not proof that the title needs empty
+geometry. Actual `pixel-query-abi-attract` passes shader restoration, presents
+the loading screen and reaches texture/render-output overlap (120.06 s with
+capture). `beads-xbox.1.84` tracks Phobos's existing GPU feedback-snapshot path
+as the next adoption candidate. No complete attract or cadence is established.
+
 ## Mapped pixel-shader constants
 
 `beads-xbox.1.81`: the complete original setter and getter execute unhooked in
@@ -54,6 +90,9 @@ The final explicit source-alpha pixel check passes the native ABI test in
 This is scene-compositing startup progress, not a completed gameplay frame.
 
 ## Flat shading for scene startup
+
+Later integration found and corrected a stack-cleanup mismatch in the native
+query metadata (.83, above); the original query fixture remained valid.
 
 The subsequent `GetPixelShader` query (`beads-xbox.1.79`) reads the existing
 bound guest handle, including zero for the fixed-function path. Its original

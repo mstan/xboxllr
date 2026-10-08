@@ -55,6 +55,31 @@ def bind(xbe: Path, output: Path, symbols: Path):
         section=next(s for s in context.image["sections"] if s["address"]<=address and address+size<=s["address"]+s["raw_size"])
         offset=section["raw_offset"]+address-section["address"]
         return context.blob[offset:offset+size]
+    # Donor signatures are discovery hints, not authority for this revision's
+    # cleanup. Its GetPixelShader metadata includes an extra Name parameter.
+    pixel_query=next(s for s in identified if s['name']=='D3DDevice_GetPixelShader')
+    if context.digest(functions[pixel_query['address']])!='f9137db3439237176ab1427da2b24f92a2eca9a4aeb6a348a3a8955e0c0234ba':
+        raise ValueError('unreviewed pixel query boundary')
+    query_source=dict(stack_bytes=pixel_query['stack_bytes'],params=pixel_query['params'])
+    pixel_query['stack_bytes']=4
+    pixel_query['params']=[dict(type='psh',name='pHandle')]
+    abi_evidence={}
+    for symbol in identified:
+        address=symbol['address']
+        code=list(Cs(CS_ARCH_X86,CS_MODE_32).disasm(data(address,functions[address]['size']),address))
+        returns={int(i.op_str,0) if i.op_str else 0 for i in code if i.mnemonic=='ret'}
+        tail=None
+        if not returns and symbol['name']=='D3DDevice_SetRenderState_FrontFace':
+            # Reviewed tail transfer replaces its argument and calls CullMode.
+            target=next(s for s in identified if s['name']=='D3DDevice_SetRenderState_CullMode')
+            if code[-1].mnemonic!='jmp' or int(code[-1].op_str,0)!=target['address']:
+                raise ValueError('unreviewed FrontFace tail boundary')
+            tail=target['name'];address=target['address']
+            target_code=Cs(CS_ARCH_X86,CS_MODE_32).disasm(data(address,functions[address]['size']),address)
+            returns={int(i.op_str,0) if i.op_str else 0 for i in target_code if i.mnemonic=='ret'}
+        if returns!={symbol['stack_bytes']}:
+            raise ValueError('signature disagrees with original return cleanup: '+symbol['name'])
+        abi_evidence[symbol['name']]=dict(stack_bytes=symbol['stack_bytes'],tail=tail)
     # The reviewed initializer reads 109 DWORD defaults for RS57..165 and a
     # 32-byte texture-stage table. Keep these title bytes in private output.
     defaults=[f for f in context.functions if f['size']==210 and context.digest(f)==DEFAULTS]
@@ -69,6 +94,8 @@ def bind(xbe: Path, output: Path, symbols: Path):
     state_defaults=dict(render_states=variables['D3D_g_RenderState'],texture_states=variables['D3D_g_DeferredTextureState'],
         initializer_sha256=DEFAULTS,render_defaults=list(struct.unpack('<109I',data(rs_tables[0],436))),
         texture_defaults=list(data(ts_tables[0],32)))
+    state_defaults['abi_evidence']=abi_evidence
+    state_defaults['pixel_query_source_signature']=query_source
     mode=next(s for s in identified if s['name']=='D3DDevice_SetShaderConstantMode')
     mode_code=list(Cs(CS_ARCH_X86,CS_MODE_32).disasm(data(mode['address'],functions[mode['address']]['size']),mode['address']))
     mode_fields=[int(m[1],16) for i in mode_code if i.mnemonic=='mov' and
@@ -276,6 +303,11 @@ def bind(xbe: Path, output: Path, symbols: Path):
     texts={"pilot_d3d_bindings.h":"\n".join(header)+"\n", "pilot_d3d_binding.c":"\n".join(wrapper)+"\n"}
     if (generated/"pilot_d3d_binding.c").exists():
         old=json.loads(record.read_text())
+        # Migrate only the independently verified erroneous donor signature;
+        # every other recorded identity/ABI still has to match unchanged.
+        new_query=next(c for c in calls if c['name']=='D3DDevice_GetPixelShader')
+        source_query=dict(new_query,**query_source)
+        old['calls']=[new_query if c==source_query else c for c in old['calls']]
         if any(k not in binding or (binding[k][:len(v)]!=v if k=='surface_formats' else binding[k]!=v) for k,v in old.items()) or (generated/'pilot_d3d_binding.c').read_text()!=texts['pilot_d3d_binding.c']:
             raise ValueError("existing graphics binding differs")
         if old==binding and (generated/'pilot_d3d_bindings.h').read_text()==texts['pilot_d3d_bindings.h']:

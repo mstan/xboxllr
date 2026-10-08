@@ -433,6 +433,23 @@ the MIT root license does not replace dependencies' own terms. See the
 [DSP audit](docs/NATIVE-DSP-DONOR-2026-10-07.md) and existing
 [private CPU pilot distribution limits](LICENSE-SCOPE.md).
 
+## Empty vertex-declaration binding reference
+
+The same donor metadata audit found `GetPixelShader` incorrectly described
+with an extra argument. The original SHA-qualified Xbox function supplies the
+one-argument RET4 contract. `tools/native_d3d_binding.py` records that correction
+and checks all identified return cleanups, rather than treating donor metadata
+as ABI authority. This is an independent compatibility correction.
+
+`tools/native_vertex_binding_reference.py` runs the full original NTSC XDK
+setter on private captures, including an empty FVF. It qualifies descriptor,
+cached handle and retained constant/program state. Private bytes/captures are
+excluded from source control. Phobos's `dev_SetVertexShader` in
+`src/d3d/d3d8_device.c` caches the selected handle; the existing native adapter
+likewise binds the actual donor pipeline at draw. This change adds the missing
+Xbox empty-declaration state transition, not a copied implementation or empty
+drawing substitute. The existing donor pin and notices apply.
+
 ## Native mapped pixel-constant references
 
 The independent Xbox ABI adapter follows the complete original NTSC Blinx

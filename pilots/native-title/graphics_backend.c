@@ -691,8 +691,10 @@ int32_t pilot_gfx_draw_up(uint32_t primitive,uint32_t count,const void *data,uin
 uint32_t pilot_gfx_fvf_extent(uint32_t fvf)
 {
     unsigned textures=(fvf>>8)&15;
-    if((fvf&15)!=4 || (fvf&0xf030u) || textures>4)
+    if((fvf&15)!=4 || (fvf&0xf030u) || textures>4) {
+        fprintf(stderr,"[D3D FVF] rejected format=%08x\n",fvf);
         pilot_d3d_backend_stop("unqualified FVF: expected XYZRHW with colors and up to four coordinates");
+    }
     if((fvf>>16)>>(textures*2))pilot_d3d_backend_stop("FVF coordinate size without coordinate");
     unsigned extent=16+((fvf&0x40)?4:0)+((fvf&0x80)?4:0);
     for(unsigned i=0;i<textures;++i)extent+=((((fvf>>(16+i*2))+1)&3)+1)*4;
