@@ -47,6 +47,8 @@ void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,ui
 void pilot_gfx_texture_prepare_sample(uint32_t handle,uint32_t level,const void *data,uint32_t bytes,int cpu_exposed);
 void pilot_gfx_texture_bind(unsigned stage,uint32_t handle);
 int32_t pilot_gfx_texture_readback(uint32_t handle,uint32_t level,void *data,uint32_t capacity);
+/* Diagnostic luma grid from the actual uploaded packed-YUV CPU mirror. */
+int32_t pilot_gfx_movie_luma(uint32_t handle,unsigned step,unsigned char *samples,unsigned bytes);
 int32_t pilot_gfx_vertex_create(uint32_t bytes,uint32_t *handle);
 void pilot_gfx_vertex_destroy(uint32_t handle);
 void pilot_gfx_vertex_upload(uint32_t handle,const void *data,uint32_t bytes);

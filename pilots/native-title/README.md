@@ -1,5 +1,51 @@
 # Native title reference pilot
 
+## Full movie validation and decoder stalls (2026-10-08)
+
+`beads-xbox.1.73` and `.98`, branch `validate/blinx-movie-av-20261008`.
+The existing post-GP output tap now accepts
+`XLLE_PILOT_AUDIO_CAPTURE_SECONDS=1..300` (default 30). Its `.clock.csv`
+sidecar associates sample indices with the mixer's monotonic clock at about
+10 Hz; it does not measure sound-card/speaker latency. Samples and clock
+records are copied into bounded memory; file writing remains off the audio
+processing thread. `XLLE_PILOT_AUDIO_STREAM_PROFILE=1` records actual source
+cursor, queued ownership and PCM updates for diagnosing streaming gaps.
+
+`XLLE_PILOT_MOVIE_CAPTURE=<new file>` records sparse uploaded YUV luma grids
+from successful draws, associated with the next accepted native present.
+Blinx draws its movie into an intermediate render target, so the record keeps
+that target as well as the texture, source dimensions, draw/present clocks and
+GPU checkpoint. The grid comes from the actual uploaded native mirror, not a
+guest buffer that might already contain the next frame. It requires no GPU
+readback and is bounded to 36000 records; its file handle is process-owned.
+This is diagnostic observation, not a second production decoder. Sparse grids
+do not establish every output pixel or physical scan-out timing.
+
+Independent FFmpeg decoding of the owned SFD inputs yields 302 Microsoft,
+150 Artoon, 2264 opening and 540 title frames. Actual captured opening-movie
+samples match through reference frame 2263, median luma RMSE 0.146 on the
+16-pixel grid (95th percentile 0.224). Uniform/repeated frames, including the
+Artoon tail, cannot be uniquely identified by this comparison. The captured
+180-second run continues through title/loading into gameplay without a guard.
+All 35 native tests pass (15.89 s), including real YUY2/UYVY conversion and
+uploaded-mirror sampling after the caller's source bytes change.
+
+Full A/V qualification **does not pass**: the opening's 75.49 seconds of source
+video take roughly 80-86 seconds in these diagnostic observations, and waveform
+alignment finds repeated delays near 16384/44100 = 0.371519 seconds, one movie
+ring-buffer cycle. Stream traces expose producer cursor-poll gaps exceeding a
+cycle. Two targeted stack snapshots land in generated movie coefficient/motion
+decoding; another is in the guest scheduling path. These snapshots suspend the
+process briefly, so that separate run is not a cadence measurement. The pilot
+also still forced `/Od` for Release at this checkpoint. The next experiment is
+compiler optimization before replacing a decoder or altering cursor semantics.
+
+Private evidence: `build/blinx/movie-av-reference/`, `movie-av-first/`,
+`movie-av-second/`, `movie-av-stream-trace/` and `movie-av-no-readback/`, their
+manifests, PCM/clock files, frame grids, comparison JSON and three stack dumps.
+The first run's back-buffer-only tracing assumption was corrected; its audio
+and GPU captures remain valid, but it produced no movie grid records.
+
 ## Texture ownership preparation experiment (2026-10-08)
 
 `beads-xbox.1.97`, branch `perf/blinx-draw-preparation-20261008`, base `dba1bcc`.

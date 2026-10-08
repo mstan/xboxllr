@@ -15,6 +15,18 @@ notices. Preparation/build steps must report missing required notices.
 
 ## Private native-title reference pilot
 
+### Full-movie observation - 2026-10-08
+
+Independent diagnostics observe the existing attributed Phobos YUV renderer
+and native XAudio2/GP transport. Phobos `src/d3d/d3d8_movie.c`,
+`src/hle/audio_output_xaudio2.cpp`, `hle_dsound.c` and
+`dsound_buffer_model.c` at `bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0`
+were reviewed for presentation and queue/cursor ownership; no new donor body
+is imported by these diagnostics. Existing xemu MCPX VP CBO/loop behavior is a
+reference for the cursor investigation. Independently decoded local FFmpeg
+movie frames and audio are comparison data only, kept with owned media under
+ignored build directories. No FFmpeg implementation is incorporated here.
+
 ### Texture exposure ownership - 2026-10-08
 
 Phobos `src/hle/hle_d3d8_texture.c` at

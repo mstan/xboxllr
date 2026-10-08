@@ -639,6 +639,21 @@ void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,ui
         free(pixels);
     }
 }
+int32_t pilot_gfx_movie_luma(uint32_t handle,unsigned step,unsigned char *samples,unsigned bytes)
+{
+    D3D8Texture *t=pilot_texture(handle);
+    if(!step || !samples || (t->d3d8_format!=0x24 && t->d3d8_format!=0x25) ||
+       !(pilot_textures[handle-1].uploaded&1) || pilot_textures[handle-1].gpu_written)return E_INVALIDARG;
+    unsigned columns=(t->width+step-1)/step,rows=(t->height+step-1)/step;
+    if(bytes!=(uint64_t)columns*rows)return E_INVALIDARG;
+    unsigned pitch=d3d8_row_pitch(t->d3d8_format,t->width),offset=t->d3d8_format==0x25;
+    for(unsigned y=0;y<rows;++y)for(unsigned x=0;x<columns;++x) {
+        unsigned sx=x*step+step/2,sy=y*step+step/2;
+        if(sx>=t->width)sx=t->width-1;if(sy>=t->height)sy=t->height-1;
+        samples[y*columns+x]=t->sys_mem[sy*pitch+sx*2+offset];
+    }
+    return S_OK;
+}
 int32_t pilot_gfx_texture_clear(uint32_t handle,uint32_t color)
 {
     pilot_texture(handle);ID3D11RenderTargetView *rtv=pilot_textures[handle-1].rtv;

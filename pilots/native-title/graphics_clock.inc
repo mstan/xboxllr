@@ -183,6 +183,7 @@ static uint32_t graphics_present(void)
     if(hr!=0)stop("native presentation was not accepted",(uint32_t)hr);
     uint64_t serial=pilot_gfx_checkpoint();
     uint32_t swap=++graphics_swap_submitted;
+    graphics_movie_capture_present(submitted,swap,serial);
     graphics_presents[graphics_present_count++]=(struct GraphicsPresent){serial,target,swap};
     MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SWAP_COUNTER)=swap;
     graphics_swap_deadline=target?graphics_next_vblank(graphics_clock_origin,submitted,graphics_clock_hz):0;

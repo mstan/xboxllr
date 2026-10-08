@@ -46,6 +46,15 @@ static int test_movie_textures(void)
             }
             memcpy(saved,source,sizeof(saved));pilot_gfx_texture_upload(texture,0,source,sizeof(source));
             CHECK(!memcmp(source,saved,sizeof(source)));
+            unsigned char grid[6];CHECK(!pilot_gfx_movie_luma(texture,16,grid,sizeof(grid)));
+            for(unsigned gy=0;gy<2;++gy)for(unsigned gx=0;gx<3;++gx) {
+                unsigned x=gx*16+8,y=gy*16+8;if(x>=width)x=width-1;if(y>=height)y=height-1;
+                CHECK(grid[gy*3+gx]==saved[y*pitch+x*2+(format==0x25)]);
+            }
+            /* Capture observes the uploaded owner, not subsequent caller edits. */
+            memset(source,0,sizeof(source));unsigned char retained[6];
+            CHECK(!pilot_gfx_movie_luma(texture,16,retained,sizeof(retained)) && !memcmp(grid,retained,sizeof(grid)));
+            CHECK(pilot_gfx_movie_luma(texture,16,retained,5)<0);
             CHECK(pilot_gfx_texture_readback(texture,0,decoded,sizeof(decoded))==0);
             CHECK((decoded[0]&0xffffff)==(frame&1?0x0000ff:0xff0000));
             CHECK((decoded[width*height-1]&0xffffff)==0xffffff);

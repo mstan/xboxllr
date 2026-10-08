@@ -10,6 +10,7 @@ static int graphics_active;
 static uint32_t graphics_parameters[17];
 static uint32_t graphics_headers,graphics_data[3],graphics_target,graphics_depth;
 static unsigned graphics_surface_refs[3];
+static void graphics_movie_capture_present(uint64_t time,uint32_t swap,uint64_t serial);
 #include "graphics_clock.inc"
 #include "graphics_state.inc"
 
@@ -59,6 +60,7 @@ static void *graphics_pointer(uint32_t address,uint32_t bytes)
     return memory+address;
 }
 #include "graphics_texture.inc"
+#include "graphics_movie_capture.inc"
 #include "graphics_vertex.inc"
 #include "graphics_shader.inc"
 #include "graphics_pixel.inc"

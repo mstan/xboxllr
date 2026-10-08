@@ -33,6 +33,13 @@ static bool float_format(const WAVEFORMATEX *f,unsigned channels)
     const auto *e=reinterpret_cast<const WAVEFORMATEXTENSIBLE*>(f);
     return e->Samples.wValidBitsPerSample==32 && e->SubFormat==KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
 }
+struct CaptureStamp {uint64_t frame,time;};
+static uint64_t capture_clock(void)
+{
+    LARGE_INTEGER q,f;QueryPerformanceCounter(&q);QueryPerformanceFrequency(&f);
+    return (uint64_t)(q.QuadPart/f.QuadPart)*10000000ull+
+        (uint64_t)(q.QuadPart%f.QuadPart)*10000000ull/(uint64_t)f.QuadPart;
+}
 class Effects final:public IXAPO {
     std::atomic<ULONG> refs{1};
     bool locked=false;
@@ -43,6 +50,8 @@ public:
     float *capture=nullptr;
     UINT32 capture_capacity=0,capture_frames=0;
     bool capture_output=false;
+    CaptureStamp *capture_stamps=nullptr;
+    UINT32 capture_stamp_count=0,capture_stamp_capacity=0,capture_next_stamp=0;
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id,void **out) override {
         if(!out)return E_POINTER;*out=nullptr;
         if(id==__uuidof(IUnknown) || id==__uuidof(IXAPO)){*out=static_cast<IXAPO*>(this);AddRef();return S_OK;}
@@ -86,6 +95,11 @@ public:
         if(!locked || ni!=1 || no!=1 || !in || !out || in->ValidFrameCount>max_frames ||
            out->ValidFrameCount!=in->ValidFrameCount)fail("XAPO processing shape");
         const auto *src=static_cast<const float*>(in->pBuffer);auto *dst=static_cast<float*>(out->pBuffer);
+        if(capture_stamps && capture_frames<capture_capacity && capture_frames>=capture_next_stamp) {
+            if(capture_stamp_count==capture_stamp_capacity)fail("audio capture clock capacity");
+            capture_stamps[capture_stamp_count++]={capture_frames,capture_clock()};
+            capture_next_stamp=capture_frames+4800; /* ~10 Hz, no I/O in Process. */
+        }
         bool nonzero=false;
         for(UINT32 frame=0;frame<in->ValidFrameCount;++frame) {
             // Carry imposes a documented 32/48000-second transport latency and
@@ -163,6 +177,19 @@ static UINT32 position(Buffer *b,XAUDIO2_VOICE_STATE *state=nullptr)
     UINT32 end=b->origin<b->loop_end?b->loop_end:b->bytes;
     if(cursor<end)return (UINT32)cursor;
     return b->loop_start+(UINT32)((cursor-end)%(b->loop_end-b->loop_start));
+}
+static bool audio_stream_profile(void)
+{
+    static const bool enabled=[](){const char *p=getenv("XLLE_PILOT_AUDIO_STREAM_PROFILE");return p && !strcmp(p,"1");}();
+    return enabled;
+}
+static void audio_stream_record(Buffer *b,const char *operation,UINT32 offset=0,UINT32 bytes=0)
+{
+    if(!audio_stream_profile())return;
+    XAUDIO2_VOICE_STATE state;UINT32 play=position(b,&state);
+    fprintf(stderr,"[AUDIO STREAM] time=%llu buffer=%p operation=%s offset=%u bytes=%u play=%u write=%u samples=%llu baseline=%llu queued=%u playing=%u capacity=%u rate=%u\n",
+        (unsigned long long)capture_clock(),(void*)b,operation,offset,bytes,play,b->next,
+        (unsigned long long)state.SamplesPlayed,(unsigned long long)b->baseline,state.BuffersQueued,b->playing,b->bytes,b->frequency);
 }
 static HRESULT fill(Buffer *b)
 {
@@ -249,33 +276,46 @@ int32_t pilot_audio_effects_install(PilotDsp *graph)
     HRESULT hr=engine->StartEngine();if(FAILED(hr))effects->graph=old;
     return hr;
 }
-int32_t pilot_audio_capture_begin(float *samples,uint32_t frames,int after_effects)
+static int32_t audio_capture_begin(float *samples,uint32_t frames,int after_effects,
+                                  CaptureStamp *stamps,UINT32 stamp_capacity)
 {
     if(!engine || !effects || !samples || !frames || effects->capture)return E_INVALIDARG;
     Guard guard;engine->StopEngine();effects->capture=samples;effects->capture_capacity=frames;
     effects->capture_frames=0;effects->capture_output=!!after_effects;
-    HRESULT hr=engine->StartEngine();if(FAILED(hr))effects->capture=nullptr;return hr;
+    effects->capture_stamps=stamps;effects->capture_stamp_capacity=stamp_capacity;
+    effects->capture_stamp_count=effects->capture_next_stamp=0;
+    HRESULT hr=engine->StartEngine();if(FAILED(hr)){effects->capture=nullptr;effects->capture_stamps=nullptr;}return hr;
 }
+int32_t pilot_audio_capture_begin(float *samples,uint32_t frames,int after_effects)
+{return audio_capture_begin(samples,frames,after_effects,nullptr,0);}
 uint32_t pilot_audio_capture_end(void)
 {
     if(!engine || !effects)return 0;
-    Guard guard;engine->StopEngine();UINT32 frames=effects->capture_frames;effects->capture=nullptr;
+    Guard guard;engine->StopEngine();UINT32 frames=effects->capture_frames;effects->capture=nullptr;effects->capture_stamps=nullptr;
     HRESULT hr=engine->StartEngine();if(FAILED(hr))fail("audio capture restart",hr);return frames;
 }
 /* Opt-in title diagnostic through the same sample tap as the audio fixtures.
- * Capture 30 seconds of actual six-channel GP output, float32 at 48 kHz.
+ * Capture a bounded span of actual six-channel GP output, float32 at 48 kHz.
  * A separate writer keeps file I/O off both the mixer and its voice feeder.
  * Captures are instrumentation, never cadence/performance measurements. */
 static HANDLE diagnostic_thread,diagnostic_stop,diagnostic_file;
 static float *diagnostic_samples;
+static CaptureStamp *diagnostic_stamps;
+static FILE *diagnostic_clock_file;
+static unsigned diagnostic_seconds=30;
 static DWORD WINAPI diagnostic_capture_worker(void*)
 {
-    DWORD wait=WaitForSingleObject(diagnostic_stop,30000);
+    DWORD wait=WaitForSingleObject(diagnostic_stop,diagnostic_seconds*1000);
     if(wait!=WAIT_OBJECT_0 && wait!=WAIT_TIMEOUT)fail("audio capture wait");
     UINT32 frames=pilot_audio_capture_end();DWORD written=0,bytes=frames*6*sizeof(float);
     if(!WriteFile(diagnostic_file,diagnostic_samples,bytes,&written,nullptr) || written!=bytes ||
        !CloseHandle(diagnostic_file))fail("audio capture write",HRESULT_FROM_WIN32(GetLastError()));
     diagnostic_file=nullptr;delete[] diagnostic_samples;diagnostic_samples=nullptr;
+    for(UINT32 i=0;i<effects->capture_stamp_count;++i)
+        if(fprintf(diagnostic_clock_file,"%llu,%llu\n",(unsigned long long)diagnostic_stamps[i].frame,
+            (unsigned long long)diagnostic_stamps[i].time)<0)fail("audio capture clock write");
+    if(fclose(diagnostic_clock_file))fail("audio capture clock close");
+    diagnostic_clock_file=nullptr;delete[] diagnostic_stamps;diagnostic_stamps=nullptr;
     fprintf(stderr,"[AUDIO CAPTURE] complete frames=%u rate=48000 channels=6 format=float32 bytes=%lu\n",frames,bytes);
     return 0;
 }
@@ -285,17 +325,30 @@ static void diagnostic_capture_start(void)
     const char *path=getenv("XLLE_PILOT_AUDIO_CAPTURE");
     if(used || !path || !*path)return;
     used=true;
+    const char *duration=getenv("XLLE_PILOT_AUDIO_CAPTURE_SECONDS");
+    if(duration) {
+        char *end=nullptr;unsigned long seconds=strtoul(duration,&end,10);
+        if(!*duration || *end || seconds<1 || seconds>300)fail("audio capture duration outside 1..300 seconds");
+        diagnostic_seconds=(unsigned)seconds;
+    }
     diagnostic_file=CreateFileA(path,GENERIC_WRITE,FILE_SHARE_READ,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
     if(diagnostic_file==INVALID_HANDLE_VALUE)fail("audio capture create",HRESULT_FROM_WIN32(GetLastError()));
-    diagnostic_samples=new(std::nothrow) float[48000*30*6]{};
+    char clock_path[2048];
+    if(snprintf(clock_path,sizeof(clock_path),"%s.clock.csv",path)>=(int)sizeof(clock_path))fail("audio capture clock path");
+    diagnostic_clock_file=fopen(clock_path,"wx");if(!diagnostic_clock_file)fail("audio capture clock create");
+    if(fprintf(diagnostic_clock_file,"frame,time_100ns\n")<0)fail("audio capture clock header");
+    diagnostic_samples=new(std::nothrow) float[48000*diagnostic_seconds*6]{};
     if(!diagnostic_samples)fail("audio capture allocation",E_OUTOFMEMORY);
-    HRESULT hr=pilot_audio_capture_begin(diagnostic_samples,48000*30,1);
+    UINT32 stamp_capacity=diagnostic_seconds*10+2;
+    diagnostic_stamps=new(std::nothrow) CaptureStamp[stamp_capacity];
+    if(!diagnostic_stamps)fail("audio capture clock allocation",E_OUTOFMEMORY);
+    HRESULT hr=audio_capture_begin(diagnostic_samples,48000*diagnostic_seconds,1,diagnostic_stamps,stamp_capacity);
     if(FAILED(hr))fail("audio capture begin",hr);
     diagnostic_stop=CreateEventW(nullptr,TRUE,FALSE,nullptr);
     if(!diagnostic_stop)fail("audio capture stop event",HRESULT_FROM_WIN32(GetLastError()));
     diagnostic_thread=CreateThread(nullptr,0,diagnostic_capture_worker,nullptr,0,nullptr);
     if(!diagnostic_thread)fail("audio capture worker",HRESULT_FROM_WIN32(GetLastError()));
-    fprintf(stderr,"[AUDIO CAPTURE] armed 30-second real GP output tap\n");
+    fprintf(stderr,"[AUDIO CAPTURE] armed seconds=%u real GP output tap; clock is mixer processing time, not speaker latency\n",diagnostic_seconds);
 }
 static void diagnostic_capture_close(void)
 {
@@ -358,6 +411,7 @@ int32_t pilot_audio_buffer_copy(void *opaque,uint32_t offset,void *data,uint32_t
     Guard guard;UINT32 first=bytes;if(first>b->bytes-offset)first=b->bytes-offset;
     if(readback){memcpy(data,b->data+offset,first);memcpy((BYTE*)data+first,b->data,bytes-first);}
     else {memcpy(b->data+offset,data,first);memcpy(b->data,(BYTE*)data+first,bytes-first);}
+    audio_stream_record(b,readback?"read":"write",offset,bytes);
     return b->error;
 }
 static HRESULT seek(Buffer *b,UINT32 at,bool play);
@@ -394,7 +448,7 @@ int32_t pilot_audio_buffer_status(void *opaque,uint32_t *status)
     *status=b->playing?(b->looping?5:1):0;return b->error;
 }
 int32_t pilot_audio_buffer_position(void *opaque,uint32_t *play,uint32_t *write)
-{auto *b=static_cast<Buffer*>(opaque);Guard guard;refresh(b);if(play)*play=position(b);if(write)*write=b->next;return b->error;}
+{auto *b=static_cast<Buffer*>(opaque);Guard guard;refresh(b);if(play)*play=position(b);if(write)*write=b->next;audio_stream_record(b,"position");return b->error;}
 int32_t pilot_audio_buffer_seek(void *opaque,uint32_t at)
 {auto *b=static_cast<Buffer*>(opaque);if(at>=b->bytes || at%b->align)return E_INVALIDARG;Guard guard;return seek(b,at,b->playing);}
 int32_t pilot_audio_buffer_loop_region(void *opaque,uint32_t start,uint32_t bytes)
