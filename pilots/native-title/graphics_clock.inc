@@ -43,6 +43,13 @@ static void graphics_present_interval(uint32_t value)
 static unsigned graphics_present_retire(uint64_t frame)
 {
     unsigned retired=0,paced=0;
+#ifdef PILOT_DISPLAY_LLE
+    (void)frame;
+    while(graphics_present_count && graphics_presents[0].swap<=display_lle_completed()) {
+        graphics_swap_completed=graphics_presents[0].swap;++retired;
+        memmove(graphics_presents,graphics_presents+1,--graphics_present_count*sizeof(*graphics_presents));
+    }
+#else
     while(graphics_present_count && graphics_presents[0].target<=frame) {
         struct GraphicsPresent *present=&graphics_presents[0];
         if(pilot_gfx_checkpoint_busy(present->serial))break;
@@ -50,6 +57,7 @@ static unsigned graphics_present_retire(uint64_t frame)
         if(present->target)++paced;
         memmove(graphics_presents,graphics_presents+1,--graphics_present_count*sizeof(*graphics_presents));
     }
+#endif
     if(retired)WakeAllConditionVariable(&graphics_present_changed);
     return paced;
 }
@@ -222,6 +230,9 @@ static uint32_t graphics_present(void)
     --graphics_clock_waiters;
     graphics_capture_present();
     uint64_t submitted=dispatch_monotonic(),target=graphics_parameters[12]==0x80000000u?0:graphics_frame_at(submitted)+1;
+#ifdef PILOT_DISPLAY_LLE
+    display_lle_present(graphics_swap_submitted+1,graphics_parameters[12]);
+#endif
     int32_t hr=pilot_gfx_present();
     if(hr!=0)stop("native presentation was not accepted",(uint32_t)hr);
     uint64_t serial=pilot_gfx_checkpoint();
@@ -233,7 +244,9 @@ static uint32_t graphics_present(void)
     graphics_swap_deadline=target?graphics_next_vblank(graphics_clock_origin,submitted,graphics_clock_hz):0;
     if(!graphics_clock_presented) {
         graphics_clock_presented=1;
+#ifndef PILOT_DISPLAY_LLE
         if(!graphics_callback)dispatch_pulse_set(graphics_clock_origin,graphics_clock_hz,graphics_vblank_deliver);
+#endif
     }
     uint64_t logging=graphics_service_profile_enabled()?dispatch_monotonic():0;
     if(pilot_event_trace_enabled())fprintf(stderr,"[PRESENT SUBMIT] swap=%u target=%llu serial=%llu time=%llu\n",swap,

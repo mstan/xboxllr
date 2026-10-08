@@ -12,6 +12,7 @@
 #include <unicorn/unicorn.h>
 #include "io_device_lle.h"
 #include "io_device_config.h"
+#include "guest_layout.h"
 #ifdef PILOT_USB_LLE
 #include "usb_lle.h"
 #endif
@@ -87,7 +88,8 @@ static bool invalid_memory(uc_engine *engine,uc_mem_type type,uint64_t address,
     uint32_t page=(uint32_t)address&~4095u,pa;
     unsigned char *backing;
     unsigned publication;for(publication=0;publication<published_count && published[publication].va!=page;++publication){}
-    if(publication==published_count && (page<0x80000000u || (page>=0xe0000000u && page<0xe4000000u))) {
+    if(publication==published_count && (page<0x80000000u || (page>=0xe0000000u && page<0xe4000000u) ||
+       (page>=PILOT_KERNEL_DATA_BASE && page<PILOT_KERNEL_DATA_BASE+PILOT_KERNEL_DATA_BYTES))) {
         if(!guest_page(page)){failure="device LLE invalid caller memory";return false;}
         backing=guest_memory+page;pa=UINT32_MAX;
     } else {
@@ -379,7 +381,7 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
 {
     unsigned pin_slot=MAX_PUBLISHED;
     if(ordinal!=14 && ordinal!=15 && ordinal!=17 && ordinal!=23 &&
-       ordinal!=44 && ordinal!=47 && ordinal!=65 && ordinal!=68 && ordinal!=109 && ordinal!=166 &&
+       ordinal!=44 && ordinal!=47 && ordinal!=65 && ordinal!=68 && ordinal!=107 && ordinal!=108 && ordinal!=109 && ordinal!=166 &&
        ordinal!=171 && ordinal!=173 && ordinal!=175 && ordinal!=178 && ordinal!=182 &&
        ordinal!=98 && ordinal!=100 && ordinal!=103 && ordinal!=129 && ordinal!=151 &&
        ordinal!=160 && ordinal!=161 && ordinal!=184 && ordinal!=199) {
@@ -429,7 +431,7 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
     uint32_t entry=0x80010000u+kernel_word(table+4*(ordinal-base));
     if(failure)return;
     unsigned count=ordinal==65?6:ordinal==109?7:(ordinal==166 || ordinal==184)?5:
-                   (ordinal==175 || ordinal==178 || ordinal==182 || ordinal==199)?3:
+                   (ordinal==107 || ordinal==108 || ordinal==175 || ordinal==178 || ordinal==182 || ordinal==199)?3:
                    (ordinal==15 || ordinal==44 || ordinal==47)?2:
                    (ordinal==103 || ordinal==129 || ordinal==160 || ordinal==161)?0:1;
     if(ordinal==160 || ordinal==161) {

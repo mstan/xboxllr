@@ -19,6 +19,7 @@ const char *pilot_usb_lle_access(uint32_t address,int write,uint32_t *value);
 const char *pilot_usb_pic_bootstrap(uint16_t mask,uint16_t level);
 const char *pilot_usb_pic_port(uint32_t port,int size,int write,uint32_t *value);
 int pilot_usb_pic_vector(int acknowledge);
+void pilot_usb_pic_raise(int line,int level);
 const char *pilot_usb_lle_tick(void);
 #ifdef __cplusplus
 }

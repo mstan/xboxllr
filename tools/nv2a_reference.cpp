@@ -19,8 +19,12 @@ struct Reference {
     uint8_t encoder_field = 0;
     xlle::DualPic pic;
     xlle::Nv2a gpu;
+    void (*external_irq)(int, int) = nullptr;
     Reference() : gpu([this](const std::string& reason) { failure = reason; }) {
-        gpu.set_irq([this](int line, bool level) { irq = level; pic.raise(line, level); }, 3);
+        gpu.set_irq([this](int line, bool level) {
+            irq = level;
+            if (external_irq) external_irq(line, level); else pic.raise(line, level);
+        }, 3);
         gpu.on_unmodeled([this](bool write, uint32_t address, uint32_t,
                                const char*, uint32_t) {
             char message[96];
@@ -49,6 +53,18 @@ EXPORT void xlle_nv2a_reference_memory(void* instance, uint8_t* ram, uint32_t by
             std::memcpy(ram + address, input, size); return true;
         });
 }
+EXPORT void xlle_nv2a_reference_bus(void* instance,
+        int (*read)(uint32_t, void*, size_t),
+        int (*write)(uint32_t, const void*, size_t), void (*irq)(int, int)) {
+    auto& ref = *static_cast<Reference*>(instance);
+    if (!read || !write || !irq || ref.irq) {
+        ref.failure = "invalid NV2A reference bus binding"; return;
+    }
+    ref.external_irq = irq;
+    ref.gpu.set_mem_access(
+        [read](uint32_t address, void* output, size_t size) { return read(address, output, size) != 0; },
+        [write](uint32_t address, const void* input, size_t size) { return write(address, input, size) != 0; });
+}
 EXPORT const char* xlle_nv2a_reference_error(void* instance) {
     auto& ref = *static_cast<Reference*>(instance);
     return ref.failure.empty() ? nullptr : ref.failure.c_str();
@@ -67,6 +83,20 @@ EXPORT void xlle_nv2a_reference_frame(void* instance, uint64_t frame) {
 }
 EXPORT int xlle_nv2a_reference_irq(void* instance) {
     return static_cast<Reference*>(instance)->irq;
+}
+EXPORT int xlle_nv2a_reference_scanout(void* instance, uint8_t* output, uint32_t capacity,
+                                      uint32_t* width, uint32_t* height) {
+    auto& ref = *static_cast<Reference*>(instance);
+    if (!ref.failure.empty()) return 0;
+    std::vector<uint8_t> rgba;
+    xlle::Nv2a::ScanoutInfo info;
+    std::string error;
+    if (!ref.gpu.capture_scanout(rgba, info, error)) { ref.failure = error; return 0; }
+    if (!output || !width || !height || rgba.size() > capacity) {
+        ref.failure = "NV2A scanout output capacity"; return 0;
+    }
+    std::memcpy(output, rgba.data(), rgba.size());
+    *width = info.width; *height = info.height; return 1;
 }
 EXPORT void xlle_nv2a_reference_pic(void* instance, uint16_t mask, uint16_t level) {
     auto& pic = static_cast<Reference*>(instance)->pic;

@@ -63,11 +63,13 @@ def bind(xbe, output, symbols):
     symbols_by_name = {c['name']: c['symbol'] for c in calls}
     probe_declarations = ['#ifdef PILOT_INPUT_QUALIFICATION',
         'extern void pilot_input_qualify_open(void (*)(void), void (*)(void));',
+        'extern void pilot_input_qualify_state(void);',
         f'extern void {symbols_by_name["XInputGetCapabilities"]}(void);',
         f'extern void {symbols_by_name["XInputSetState"]}(void);', '#endif']
     wrapper += probe_declarations
     probe_call = ['#ifdef PILOT_INPUT_QUALIFICATION',
         f'    pilot_input_qualify_open({symbols_by_name["XInputGetCapabilities"]}, {symbols_by_name["XInputSetState"]});', '#endif']
+    state_probe = ['#ifdef PILOT_INPUT_QUALIFICATION', '    pilot_input_qualify_state();', '#endif']
     for c in calls:
         wrapper += [f'extern void pilot_original_input_{c["name"]}(void);',
                     f'void {c["symbol"]}(void) {{', '#ifdef PILOT_INPUT_NATIVE',
@@ -75,15 +77,18 @@ def bind(xbe, output, symbols):
                     '#else', f'    pilot_original_input_{c["name"]}();', '#endif']
         if c['name'] == 'XInputOpen':
             wrapper += probe_call
+        if c['name'] == 'XInputGetState':
+            wrapper += state_probe
         wrapper += ['}']
     texts = {'pilot_input_bindings.h': '\n'.join(header) + '\n',
              'pilot_input_binding.c': '\n'.join(wrapper) + '\n'}
     record = output / 'input-binding.aot-private.json'
     if (context.generated / 'pilot_input_binding.c').exists():
-        old_wrapper = texts['pilot_input_binding.c'].replace('\n'.join(probe_declarations)+'\n', '').replace('\n'.join(probe_call)+'\n', '')
+        without_state = texts['pilot_input_binding.c'].replace('extern void pilot_input_qualify_state(void);\n', '').replace('\n'.join(state_probe)+'\n', '')
+        old_wrapper = texts['pilot_input_binding.c'].replace('\n'.join(probe_declarations)+'\n', '').replace('\n'.join(probe_call)+'\n', '').replace('\n'.join(state_probe)+'\n', '')
         if json.loads(record.read_text()) != binding or any(
                 (context.generated / n).read_text() not in
-                ([s, old_wrapper] if n == 'pilot_input_binding.c' else [s]) for n, s in texts.items()):
+                ([s, without_state, old_wrapper] if n == 'pilot_input_binding.c' else [s]) for n, s in texts.items()):
             raise ValueError('existing input binding differs')
         path = context.generated / 'pilot_input_binding.c'
         if path.read_text() != texts[path.name]:

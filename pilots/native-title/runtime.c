@@ -40,7 +40,10 @@ static SRWLOCK thread_lock = SRWLOCK_INIT;
 static CONDITION_VARIABLE thread_condition = CONDITION_VARIABLE_INIT;
 RECOMP_TLS volatile uint32_t *g_pilot_suspend_count;
 static SRWLOCK vm_lock=SRWLOCK_INIT;
-#define PILOT_THREAD_OBJECT_TYPE 0xfd005000u
+/* Native-export backing is transport storage, outside hardware apertures.
+ * FD000000 is NV2A, so putting XboxHardwareInfo there masks real MMIO reads. */
+#include "guest_layout.h"
+#define PILOT_THREAD_OBJECT_TYPE (PILOT_KERNEL_DATA_BASE+0x5000u)
 struct PilotThread {
     HANDLE handle,reference_handle;
     uint32_t routine,context1,context2,tls_size,stack_size,extra,tid,object,object_refs;
@@ -74,11 +77,19 @@ __declspec(noreturn) static void stop(const char *reason, uint32_t va)
 #include "thread_affinity.inc"
 #ifdef PILOT_USB_LLE
 #include "io_device_lle.h"
+#include "usb_lle.h"
 static void usb_poll(void);
 static RECOMP_TLS unsigned usb_in_interrupt;
 static int cpu_interrupt_flag=1,cpu_interrupt_shadow;
 #endif
 #include "thread_scheduler.inc"
+#ifdef PILOT_DISPLAY_LLE
+static void display_lle_tick(void);
+static const char *display_lle_access(uint32_t address,unsigned size,int write,uint32_t *value);
+static uint8_t display_lle_field(void);
+static uint32_t display_lle_completed(void);
+static void display_lle_present(uint32_t swap,uint32_t interval);
+#endif
 static uint32_t file32(size_t offset)
 {
     uint32_t value;
@@ -127,6 +138,21 @@ void pilot_cpu_sti_complete(void)
     cpu_interrupt_shadow=0;usb_poll();scheduler_checkpoint();
 #else
     stop("STI completion requires the interrupt LLE build",0);
+#endif
+}
+uint8_t pilot_cpu_in8(uint16_t port)
+{
+#ifdef PILOT_DISPLAY_LLE
+    if(port==0x80c0)return display_lle_field();
+#endif
+#ifdef PILOT_USB_LLE
+    uint32_t value=0;
+    const char *error=pilot_usb_pic_port(port,1,0,&value);
+    if(error)stop(error,port);
+    return (uint8_t)value;
+#else
+    stop("port read requires the machine bus",port);
+    return 0; /* Unreachable after the explicit diagnostic. */
 #endif
 }
 #include "nonlocal_jump.inc"
@@ -561,6 +587,12 @@ static LONG CALLBACK fault_handler(EXCEPTION_POINTERS *exception)
      * this does not resume or hide an unhandled guest/native fault. */
     if(code==0x406d1388u)return EXCEPTION_CONTINUE_SEARCH;
     if (code == EXCEPTION_ACCESS_VIOLATION) {
+#ifdef PILOT_DISPLAY_LLE
+        const char *display_error=NULL;
+        int display=pilot_mmio_fault_range(exception,memory,0xfd000000u,0xfdffffffu,display_lle_access,&display_error);
+        if(display>0)return EXCEPTION_CONTINUE_EXECUTION;
+        if(display<0)stop(display_error,0xfd000000u);
+#endif
 #ifdef PILOT_USB_LLE
         const char *mmio_error=NULL;
         int mmio=pilot_mmio_fault(exception,memory,usb_access,&mmio_error);
@@ -651,7 +683,7 @@ static void load_image(const char *path)
              * nxdk declares PLAUNCH_DATA_PAGE; Cxbx EmuKrnlMm starts it null.
              * Preserve a writable guest pointer cell; warm launch/persistence
              * is not advertised and HalReturnToFirmware still stops. */
-            const uint32_t data=0xfd003000u;
+            const uint32_t data=PILOT_KERNEL_DATA_BASE+0x3000u;
             commit(data,4096); MEM32(data)=0;
             MEM32(pilot_imports[i].address)=data;
         }
@@ -659,13 +691,13 @@ static void load_image(const char *path)
             /* HalBootSMCVideoMode is a ULONG data export, not a callable thunk.
              * Same composite AV pack (SMC register 04 = 06) as machine/smbus.cpp.
              * Original XGetAudioFlags uses this to mask unsupported digital audio. */
-            const uint32_t data=0xfd004000u;
+            const uint32_t data=PILOT_KERNEL_DATA_BASE+0x4000u;
             commit(data,4096); MEM32(data)=6;
             MEM32(pilot_imports[i].address)=data;
             fprintf(stderr,"[CONFIG] HalBootSMCVideoMode=6 (composite AV pack)\n");
         }
         if (pilot_imports[i].ordinal==322 || pilot_imports[i].ordinal==324) {
-            const uint32_t data=0xfd000000u+0x1000u*(pilot_imports[i].ordinal-322);
+            const uint32_t data=PILOT_KERNEL_DATA_BASE+0x1000u*(pilot_imports[i].ordinal-322);
             commit(data,4096);
             if (pilot_imports[i].ordinal==322) {
                 MEM32(data)=0; /* XboxHardwareInfo: retail hardware flags */

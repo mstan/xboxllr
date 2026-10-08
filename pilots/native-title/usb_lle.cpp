@@ -92,6 +92,12 @@ extern "C" const char *pilot_usb_lle_bind(PilotUsbDmaRead read,PilotUsbDmaWrite 
     const char *result=failure.empty()?nullptr:failure.c_str();
     ReleaseSRWLockExclusive(&usb_lock);return result;
 }
+extern "C" void pilot_usb_pic_raise(int line,int level)
+{
+    AcquireSRWLockExclusive(&usb_lock);
+    pic.raise(line,level!=0);
+    ReleaseSRWLockExclusive(&usb_lock);
+}
 extern "C" const char *pilot_usb_pic_bootstrap(uint16_t mask,uint16_t level)
 {
     AcquireSRWLockExclusive(&usb_lock);

@@ -43,6 +43,8 @@ class Hardware:
                       ctypes.c_int, ctypes.c_int, ctypes.c_uint32]),
             'field': (None, [ctypes.c_void_p, ctypes.c_int]),
             'vector': (ctypes.c_int, [ctypes.c_void_p, ctypes.c_int]),
+            'scanout': (ctypes.c_int, [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32,
+                                      ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]),
         }
         self.functions = {}
         for name, (result, arguments) in signatures.items():
@@ -228,7 +230,30 @@ def run(xbe, snapshot, library):
             hardware.call('write', 0xfd000000+address, 4, value)
         assert hardware.call('read', 0xfd400710, 4) == 0x20000000
         call(0x1320d0, callback)
-        scanout = 0x400000
+        # Actual original-kernel scanout storage; use a pitch requiring the
+        # extended VGA pitch bits, independently authored nonuniform pixels.
+        surfaces = ref.call(165, 3*8192)
+        assert surfaces
+        scanout = ref.call(173, surfaces)
+        expected = []
+        for surface in range(3):
+            bgra = bytes(channel for y in range(2) for x in range(640)
+                         for channel in ((x ^ y) & 255, surface*50, 200, 255))
+            ctypes.memmove(ref.host+scanout+surface*8192, bgra, len(bgra))
+            expected.append(bytes(channel for y in range(2) for x in range(640)
+                                  for channel in (200, surface*50, (x ^ y) & 255, 255)))
+        for index, value in ((0x13, 0x40), (0x19, 0x20), (0x25, 0), (0x28, 3)):
+            hardware.call('write', 0xfd6013d4, 1, index)
+            hardware.call('write', 0xfd6013d5, 1, value)
+        hardware.call('write', 0xfd680800, 4, 1)
+        hardware.call('write', 0xfd680820, 4, 639)
+
+        def check_scanout(surface):
+            output = ctypes.create_string_buffer(640*2*4)
+            width, height = ctypes.c_uint32(), ctypes.c_uint32()
+            assert hardware.call('scanout', output, len(output), ctypes.byref(width), ctypes.byref(height))
+            assert (width.value, height.value) == (640, 2)
+            assert output.raw == expected[surface]
         call(0x13b6c0, ((scanout | 1) << 5) | 1, ecx=miniport)
         assert word(miniport+0x1c8) == 6 and word(miniport+0x1c4) == 7
         for frame, flags in ((6, 1), (7, 2), (8, 2)):
@@ -239,11 +264,13 @@ def run(xbe, snapshot, library):
             rows.append(dict(frame=frame, callback=observed,
                              event=word(miniport+0x198), after_paced_swap=True))
         assert hardware.call('read', 0xfd600800, 4) == scanout
+        check_scanout(0)
         assert hardware.call('read', 0xfd400710, 4) == 0x21000000
         # Immediate submission retires without waiting for a future edge.
-        call(0x13b6c0, (((scanout+4096) | 8) << 5) | 1, ecx=miniport)
+        call(0x13b6c0, (((scanout+8192) | 8) << 5) | 1, ecx=miniport)
         assert word(miniport+0x1bc) == 2
-        assert hardware.call('read', 0xfd600800, 4) == scanout+4096
+        assert hardware.call('read', 0xfd600800, 4) == scanout+8192
+        check_scanout(1)
         hardware.call('frame', 9)
         call(0x13b400, ecx=miniport)
         immediate = list(struct.unpack('<3I', cpu.mem_read(out, 12)))
@@ -274,13 +301,67 @@ def run(xbe, snapshot, library):
         assert hardware.call('vector', 0) == -1
         assert not hardware.call('irq')
         rows.append(dict(frame=10, callback=irq_callback, original_irq_and_dpc=True))
+        def deliver():
+            assert hardware.call('vector', 0) == 0x33
+            entry = ref.inject(0x33, 0x10009000, 0x10008000, 0x202)
+            assert hardware.call('vector', 1) == 0x33
+            ref.failure = None
+            cpu.emu_start(entry, 0x10009000, count=1000000)
+            if ref.failure or cpu.reg_read(UC_X86_REG_EIP) != 0x10009000:
+                raise RuntimeError(ref.failure or 'original display IRQ did not return')
+            assert ref.word(0x8003da60) & 255 == 0
+            assert cpu.reg_read(UC_X86_REG_ESP) == 0x10008000
+            assert cpu.reg_read(UC_X86_REG_EFLAGS) == 0x202
+            assert hardware.call('vector', 0) == -1
+            assert not hardware.call('irq')
+
+        # Submit through the real PFIFO software-method trap. The original
+        # PGRAPH ISR/DPC, rather than this fixture, decodes and queues the swap.
+        hardware.call('write', 0xfd400140, 4, 1 << 20)
+        packet = [(1 << 18) | 0x100, (((scanout+16384) | 1) << 5) | 1]
+        ctypes.memmove(ref.host+physical+24, struct.pack('<2I', *packet), 8)
+        hardware.call('write', 0xfd800040, 4, 32)
+        assert hardware.call('read', 0xfd400100, 4) == 1 << 20
+        deliver()
+        assert word(miniport+0x1bc) == 2
+        assert word(miniport+0x1c8) == 11
+        hardware.call('frame', 11)
+        deliver()
+        observed = list(struct.unpack('<3I', cpu.mem_read(out, 12)))
+        assert observed == [11, 3, 1], observed
+        assert hardware.call('read', 0xfd600800, 4) == scanout+16384
+        check_scanout(2)
+        rows.append(dict(frame=11, callback=observed, original_irq_and_dpc=True,
+                         pfifo_software_method=True))
+        # A genuinely stalled FIFO must not block display event/callback
+        # progress, nor may a vblank itself finish the waiting GPU operation.
+        packet = [(5 << 18) | 0x120, 0, 1, 2, 0, 0,
+                  (1 << 18) | 0x100, ((scanout | 8) << 5) | 1]
+        ctypes.memmove(ref.host+physical+32, struct.pack('<8I', *packet), 32)
+        hardware.call('write', 0xfd800040, 4, 64)
+        assert hardware.call('read', 0xfd400100, 4) == 0
+        for frame in (12, 13):
+            ref.call(108, miniport+0x194, 0, 0)
+            hardware.call('frame', frame)
+            deliver()
+            observed = list(struct.unpack('<3I', cpu.mem_read(out, 12)))
+            assert observed == [frame, 3, 2], observed
+            assert word(miniport+0x198) == 1
+            assert hardware.call('read', 0xfd400100, 4) == 0
+            assert hardware.call('read', 0xfd600800, 4) == scanout+16384
+            rows.append(dict(frame=frame, callback=observed, fifo_stalled=True,
+                             pending_software_method_not_completed=True))
         assert ref.call(100, miniport+0x14) & 255
+        hardware.call('write', 0xfd003220, 4, 0)
+        hardware.call('write', 0xfd003250, 4, 0)
         ref.call(171, allocation)
+        ref.call(171, surfaces)
     finally:
         hardware.close()
     return dict(xbe_sha256=IMAGE, snapshot_sha256=SNAPSHOT_SHA, cases=rows,
                 unregistration=True, mmio=accesses,
-                scope='Original full vblank and software-method swap handlers, callback registration/removal, event signaling, actual IRQ3/PIC/original gate/ISR/DPC/IRET, PCRTC acknowledgement and flip counter/PCRTC_START effects. Encoder field is an authored external pin input. Blocking waits, scanout pixels, field timing and full title integration remain outside this fixture.')
+                scanout_pixels='Three independently authored BGRA32 surfaces; extended VGA pitch; original allocated pages',
+                scope='Original full vblank and software-method swap handlers, PFIFO software-method IRQ, callback registration/removal, event signaling including stalled FIFO, actual IRQ3/PIC/original gate/ISR/DPC/IRET, PCRTC acknowledgement and flip counter/PCRTC_START effects. Encoder field is an authored external pin input. Blocking waits, field timing and full title integration remain outside this component fixture.')
 
 
 if __name__ == '__main__':

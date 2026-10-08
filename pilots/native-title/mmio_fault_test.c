@@ -6,12 +6,15 @@
 static unsigned transactions;
 static uint32_t last_address,last_value;
 static int last_write;
+static unsigned last_size;
 static const char *probe(uint32_t address,int write,uint32_t *value)
 {
     ++transactions;last_address=address;last_write=write;last_value=*value;
     if(!write)*value=0xf0123456u;
     return NULL;
 }
+static const char *probe_sized(uint32_t address,unsigned size,int write,uint32_t *value)
+{last_size=size;return probe(address,write,value);}
 int main(void)
 {
     unsigned char code[15]={0x44,0x8b,0x53,0xf8};
@@ -53,6 +56,28 @@ int main(void)
     code[0]=0x48;code[1]=0x89;code[2]=0x18;
     CHECK(pilot_mmio_fault(&exception,guest,probe,&error)==0);
     CHECK(transactions==4 && context.Rip==(uintptr_t)code && context.EFlags==0x246);
+    /* NV2A's original vblank code preserves the VGA byte index register.
+     * Exercise the actual x64 encodings, including legacy AH and REX SIL. */
+    guest=(unsigned char*)0x100000000ull;address=(uintptr_t)guest+0xfd6013d4ull;
+    record.ExceptionInformation[1]=address;record.ExceptionInformation[0]=0;
+    context.Rbx=address;context.Rax=UINT64_MAX;
+    const unsigned char byte_load[]={0x0f,0xb6,0x03};
+    memcpy(code,byte_load,sizeof(byte_load));context.Rip=(uintptr_t)code;
+    CHECK(pilot_mmio_fault_range(&exception,guest,0xfd000000,0xfdffffff,probe_sized,&error)==1);
+    CHECK(context.Rax==0x56 && last_size==1 && context.Rip==(uintptr_t)code+3);
+    code[0]=0x8a;code[1]=0x23;context.Rip=(uintptr_t)code;context.Rax=0x123456789abcdef0ull;
+    CHECK(pilot_mmio_fault_range(&exception,guest,0xfd000000,0xfdffffff,probe_sized,&error)==1);
+    CHECK(context.Rax==0x123456789abc56f0ull);
+    code[0]=0x40;code[1]=0x88;code[2]=0x33;context.Rip=(uintptr_t)code;
+    context.Rsi=0xaabbccdd;record.ExceptionInformation[0]=1;
+    CHECK(pilot_mmio_fault_range(&exception,guest,0xfd000000,0xfdffffff,probe_sized,&error)==1);
+    CHECK(last_size==1 && last_value==0xdd && context.Rip==(uintptr_t)code+3);
+    code[0]=0xc6;code[1]=0x03;code[2]=0x2a;context.Rip=(uintptr_t)code;
+    CHECK(pilot_mmio_fault_range(&exception,guest,0xfd000000,0xfdffffff,probe_sized,&error)==1);
+    CHECK(last_value==0x2a && context.EFlags==0x246 && transactions==8);
+    context.Rip=(uintptr_t)code;
+    CHECK(pilot_mmio_fault_range(&exception,guest,0xfd000000,0xfd6013d3,probe_sized,&error)==0);
+    CHECK(transactions==8 && context.Rip==(uintptr_t)code);
     puts("PASS: MMIO MOV addressing, register width, exact instruction length, preserved flags and rejection guards");
     return 0;
 }

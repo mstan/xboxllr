@@ -30,6 +30,7 @@ static const char *usb_original_isr(uint32_t entry,uint32_t regs[8])
     g_df=0; /* The original interrupt thunk executed CLD. */
     if(g_fs_base)MEM8(g_fs_base+0x24)=(uint8_t)pilot_io_device_irql();
     ++usb_in_interrupt;routine();--usb_in_interrupt;
+    if(usb_isr_count<=4)fprintf(stderr,"[MACHINE ISR RETURN] entry=%08x claimed=%u context=%08x\n",entry,g_eax&255,MEM32(regs[4]+8));
     if(g_esp!=regs[4]+12)stop("original USB ISR stdcall imbalance",entry);
     regs[0]=g_eax;regs[1]=g_ecx;regs[2]=g_edx;regs[3]=g_ebx;
     regs[4]=g_esp;regs[5]=g_ebp;regs[6]=g_esi;regs[7]=g_edi;
@@ -55,6 +56,9 @@ static void usb_poll(void)
     ReleaseSRWLockExclusive(&scheduler_lock);
     const char *error=pilot_usb_lle_tick();
     if(error)stop(error,1);
+#ifdef PILOT_DISPLAY_LLE
+    display_lle_tick();
+#endif
     if(!cpu_interrupt_flag || cpu_interrupt_shadow)return;
     int delivered=0;
     /* The device may assert while a caller is at high IRQL. Let the actual

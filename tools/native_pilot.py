@@ -189,6 +189,8 @@ def prepare(args):
     if args.d3d_symbols:
         from native_d3d_binding import bind
         bind(args.xbe, out, args.d3d_symbols)
+        from native_display_binding import bind
+        bind(args.xbe, out, args.d3d_symbols)
     if args.jump_symbols:
         from native_jump_binding import bind
         bind(args.xbe, out, args.jump_symbols)

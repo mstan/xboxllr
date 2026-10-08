@@ -12,6 +12,9 @@ static uint32_t graphics_headers,graphics_data[3],graphics_target,graphics_depth
 static unsigned graphics_surface_refs[3];
 static void graphics_movie_capture_present(uint64_t time,uint32_t swap,uint64_t serial);
 #include "graphics_clock.inc"
+#ifdef PILOT_DISPLAY_LLE
+#include "display_lle.inc"
+#endif
 #include "graphics_state.inc"
 
 static void graphics_surfaces_create(void)
@@ -376,8 +379,39 @@ static void graphics_dispatch_impl(unsigned entry)
     g_esp+=4+pilot_d3d_calls[entry].stack_bytes;
 }
 
+void pilot_d3d_dispatch(unsigned entry);
+#ifdef PILOT_DISPLAY_QUALIFICATION
+#include "display_qualification.inc"
+#endif
 void pilot_d3d_dispatch(unsigned entry)
 {
+#ifdef PILOT_DISPLAY_LLE
+    if(entry==PILOT_D3D_D3DDevice_BlockUntilVerticalBlank || entry==PILOT_D3D_D3DDevice_SetVerticalBlankCallback) {
+        if(!display_lle.active)stop("original display API without active display",entry);
+        if(entry==PILOT_D3D_D3DDevice_BlockUntilVerticalBlank) {
+            static unsigned waits;
+            ++display_lle.waiters;
+            PILOT_DISPLAY_WAIT();
+            --display_lle.waiters;
+            if(++waits<=3)fprintf(stderr,"[DISPLAY LLE WAIT] completed=%u status=%08x\n",waits,g_eax);
+        } else {
+            uint32_t callback=MEM32(g_esp+4);PILOT_DISPLAY_REGISTER();
+            fprintf(stderr,"[DISPLAY LLE CALLBACK] registered=%08x\n",callback);
+        }
+        PILOT_THREAD_CHECKPOINT();return;
+    }
+    if(entry==PILOT_D3D_D3DDevice_Reset) {
+        const uint32_t *p=graphics_pointer(MEM32(g_esp+4),17*4);
+        if(p[0]!=display_lle.width || p[1]!=display_lle.height || p[2]!=graphics_parameters[2] ||
+           (p[11]?p[11]:60)!=display_lle.hz)
+            stop("display LLE scanout mode change not yet qualified",entry);
+    }
+    if(entry==PILOT_D3D_D3DDevice_Release) {
+        int draining=scheduler_block_begin();
+        AcquireSRWLockExclusive(&graphics_lock);graphics_present_drain();ReleaseSRWLockExclusive(&graphics_lock);
+        scheduler_block_end(draining);display_lle_close();
+    }
+#endif
     /* Phobos 05040ec hle_d3d8.c installs RHI wait hooks instead of handing
      * off at every state setter/draw. Here the real callback barrier/fence
      * wait has its own hook; whole blocking lifecycle/present services keep
@@ -388,11 +422,28 @@ void pilot_d3d_dispatch(unsigned entry)
         entry==PILOT_D3D_D3DDevice_Release;
     int blocked=waits?scheduler_block_begin():0;
     if(!graphics_service_profile_enabled() || dispatch_in_dpc || entry>=PILOT_D3D_COUNT) {
-        graphics_dispatch_impl(entry);scheduler_block_end(blocked);PILOT_THREAD_CHECKPOINT();return;
+        graphics_dispatch_impl(entry);scheduler_block_end(blocked);
+#ifdef PILOT_DISPLAY_LLE
+        if(entry==PILOT_D3D_Direct3D_CreateDevice && !(g_eax&0x80000000u))
+            display_lle_open(graphics_parameters[0],graphics_parameters[1],graphics_clock_hz,graphics_clock_origin);
+        if(entry==PILOT_D3D_D3DDevice_Reset && !(g_eax&0x80000000u))display_lle_reset();
+#ifdef PILOT_DISPLAY_QUALIFICATION
+        if(entry==PILOT_D3D_Direct3D_CreateDevice && !(g_eax&0x80000000u))display_qualification();
+#endif
+#endif
+        PILOT_THREAD_CHECKPOINT();return;
     }
     uint64_t begin=dispatch_monotonic();
     graphics_dispatch_impl(entry);
     graphics_service_profile_record(entry,begin,dispatch_monotonic());
     scheduler_block_end(blocked);
+#ifdef PILOT_DISPLAY_LLE
+    if(entry==PILOT_D3D_Direct3D_CreateDevice && !(g_eax&0x80000000u))
+        display_lle_open(graphics_parameters[0],graphics_parameters[1],graphics_clock_hz,graphics_clock_origin);
+    if(entry==PILOT_D3D_D3DDevice_Reset && !(g_eax&0x80000000u))display_lle_reset();
+#ifdef PILOT_DISPLAY_QUALIFICATION
+    if(entry==PILOT_D3D_Direct3D_CreateDevice && !(g_eax&0x80000000u))display_qualification();
+#endif
+#endif
     PILOT_THREAD_CHECKPOINT();
 }

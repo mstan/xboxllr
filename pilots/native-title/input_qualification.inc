@@ -1,6 +1,22 @@
 /* Test-only caller of the selected real input implementation. Run separately
  * from production: no duplicate execution or comparison inside a shipped path.
  * Boot/title initialization and driver/device transactions remain real. */
+void pilot_input_qualify_state(void)
+{
+    /* Observe the already executed call; do not issue another input read.
+     * XInputGetState's RET 8 leaves its output argument at restored ESP-4. */
+    static uint8_t previous[18];static uint32_t last_status=UINT32_MAX;static unsigned observations,changes;
+    uint32_t output=MEM32(g_esp-4);
+    int changed=g_eax!=last_status || (!g_eax && memcmp(previous,memory+output+4,18));
+    ++observations;
+    if(changed)++changes;
+    if((changed && changes<=20) || observations%1000==0) {
+        fprintf(stderr,"[INPUT STATE OBSERVATION] calls=%u status=%08x packet=%u data=",observations,g_eax,g_eax?0:MEM32(output));
+        if(!g_eax)for(unsigned i=0;i<18;++i)fprintf(stderr,"%02x",MEM8(output+4+i));
+        fprintf(stderr,"\n");
+    }
+    last_status=g_eax;if(!g_eax)memcpy(previous,memory+output+4,18);
+}
 void pilot_input_qualify_open(recomp_func_t capabilities,recomp_func_t feedback)
 {
     if(!g_eax)return;

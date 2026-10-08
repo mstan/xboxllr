@@ -2,8 +2,8 @@
 
 Active serial family: `beads-xbox.1.105`, following bounded input `.104`.
 **The family remains open.** Eight of nine family gates remain open. The
-original-driver component below works; its build-selected native-title route
-and complete wait/present integration are still being connected.
+original-driver component and build-selected native-title route below work.
+Full attract regression and integrated queue/lifetime qualification remain open.
 
 ## Executable component and findings
 
@@ -18,8 +18,12 @@ then asserts real NV2A IRQ3. The modeled PIC acknowledges it; the original kerne
 gate calls the original ISR, which queues its original DPC. That DPC acknowledges
 PCRTC, signals the original event and invokes an authored recording callback.
 Original interrupt return restores stack, flags and IRQL. No original callee is
-replaced. Separate component cases cover callback removal and actual PFIFO flip
-configuration, software-method swap submission, PCRTC_START and flip-read effects.
+replaced. Component cases cover callback removal, PFIFO flip configuration,
+actual NOP packet/software-method IRQ submission, PCRTC_START and flip-read
+effects. Three independently authored BGRA32 surfaces in original allocated RAM
+qualify scanout pixels and extended VGA pitch bits. A stalled FIFO leaves its
+pending software method incomplete while original display events/callbacks
+continue through IRQ3 and the original ISR/DPC.
 
 The caller-visible callback is cdecl with three DWORDs: vblank count, completed
 swap count and flags. Actual original observations establish:
@@ -81,8 +85,76 @@ is claimed, and no new GPL/LGPL implementation body was copied.
 The existing private reference target inherits the repository's dependency
 scope and is excluded from default builds and installation.
 
-Next: connect the original ISR/DPC/wait/callback route to the maintained native
-title build, feed real native GPU completion through the display boundary,
-qualify blocking waits and queue/lifetime edges, and validate actual Blinx on
-that selection. Keep native rendering/audio/input selections independent.
-Do not close this family based only on the component fixture or HLE regression.
+## Selectable title route
+
+`PILOT_DISPLAY=LLE` retains the native renderer but selects the original
+miniport IRQ3/ISR/DPC, vblank callback and complete original wait/registration
+bodies. Actual D3D11 readback waits for rendered pixels; three original-kernel
+contiguous allocations provide owned BGRA32 scanout storage. Real PFIFO NOP
+packets enter the original driver's swap queue. Its completion count retires
+presents; no host timer or completed-value assignment substitutes for a flip.
+The host window still uses native presentation. Diagnostic `scanout-*.ppm`
+captures come independently through maintained NV2A's configured PCRTC/VGA
+scanout reader. This is the display transport floor, not the later LLE draw
+and shader family.
+
+The existing original-kernel interrupt bridge and PIC are shared with USB;
+the DLL's private component PIC is inactive in this title configuration.
+Native or original controller input can be selected separately. The display
+build currently requires `PILOT_USB=LLE` for this bus/interrupt floor. DMA is
+restricted to actual owned display allocations, retained until device shutdown.
+One guest CPU consumes staging pixels, submits packets and executes original
+driver work. No parallel HLE display clock delivers duplicate callbacks.
+
+Configure an existing private pilot build with:
+
+```powershell
+cmake -S pilots/native-title -B <pilot-build> -DPILOT_DISPLAY=LLE -DPILOT_USB=LLE -DPILOT_DISPLAY_LIBRARY=<absolute-libxlle_nv2a_reference.dll> -DPILOT_DISPLAY_DEPENDENCIES=<reference-DLL-runtime-directory>
+```
+
+`native_display_binding.py` generates hash-bound original entry/layout metadata
+alongside the D3D binding. The default remains `PILOT_DISPLAY=NATIVE`.
+The DLL is the existing full maintained NV2A implementation, not a simplified
+replacement. Byte/dword MMIO retains transaction width; unknown accesses stop.
+The exercised same-geometry Reset changes between interval-one and immediate
+presentation, drains real pending flips, and sends the original buffer-setup
+helper's independently qualified flip-index packet. Geometry/scanout-mode
+changes remain an explicit unqualified guard. Encoder field parity
+advances with the display epoch and is stable on repeated reads; authentic
+field phase/polarity remains outside the bounded claim.
+
+The first title integration exposed native data exports occupying FD000000,
+masking NV2A PMC_ENABLE reads with ordinary RAM. They now live outside hardware
+apertures and allocation pools at E7000000; display creation rejects any remaining aperture collision.
+After that fix, actual original waits return and original callbacks/flips run.
+The 210-second `display-lle-attract-20261008` capture has no terminal guards,
+but remains in the animated title screen: **it is not an attract pass**.
+Nine matching native/scanout frame pairs have identical RGB file hashes.
+Its interaction with original input is under investigation before acceptance.
+The combined native/USB component suite passes **46/46 (19.90s)**; the display
+floor itself is exercised by the original-driver fixture and actual title run,
+not by relabeling native display unit tests as LLE tests.
+
+With native input selected independently, `display-lle-reset-20261008` runs
+**210.172s**, with 21 native and 21 actual modeled scanout captures and no guards.
+Inspected native captures 8/10/16 show Demo play, title return after Start,
+and Demo play reentry. Same-geometry interval resets execute in both directions.
+Executable SHA-256:
+`d966dccdda4b59ec31cb4a86ce541d07e700eb6436d6e64f7be5c45722c33b54`.
+Reference DLL SHA-256:
+`1b5f1605e95b78288de460fdac9f87d7a0a588a2c2948b560d20800fd63b101f`.
+This proves an actual selectable display route; it is not an LLE performance
+or attract endurance claim. Original-input plus original-display selection
+has not passed the same regression yet.
+
+`PILOT_DISPLAY_QUALIFICATION=ON` is a separate test build. After actual device
+creation it runs an authored API consumer, then exits successfully without
+continuing the title. Three complete device lifetimes each execute original
+waits, paced and immediate flips, independently expected solid-color scanout
+pixels, the actual interval Reset, IRQ disconnect and owned-DMA teardown.
+`display-lle-lifetime-20261008` completed all three cycles with exit 0.
+Keep this option OFF for production and attract validation.
+
+Remaining: investigate the combined original-input/display sequence regression,
+final matching native regression, and game-profile integration.
+Do not close the family based only on a component fixture or a running menu.
