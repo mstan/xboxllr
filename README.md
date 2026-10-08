@@ -5,10 +5,15 @@ called **low-level emulation (LLE)**. The first goal is to run the original Xbox
 dashboard, the menu with Memory, Music, Xbox Live, and Settings.
 
 The active target is a [faithful LLE floor with interchangeable enhanced execution](docs/GOAL-AOT-DASHBOARD.md).
-The immediate priority is sustained original-speed 60 FPS in the animated dashboard
-menu with real input, before Blinx. Borrowed rendering, compatible HLE and partial
-AOT are allowed. Qualified enhanced implementations are intended shipping defaults,
-with a real reference opt-out. Full AOT without dynarec remains the final CPU goal.
+The current [Blinx milestone and burndown](docs/BLINX-BURNDOWN.md) preserves working
+FMVs and real-time attract gameplay. Next, complete and qualify the maintained LLE
+routes beneath the native services before expanding into New Game. The accepted
+28.5-28.8 fps is tracked performance debt; dashboard performance remains ongoing.
+Follow [recomp-template HLE.md](../../recomp-template/HLE.md): LLE supplies the
+correctness foundation, HLE supplies performance under the same caller contract,
+and developers select implementations at build time. Both configurations remain
+buildable and runnable; LLE need not be fast. Full AOT without dynarec remains
+the final CPU goal.
 
 **This is development software.** Earlier builds rendered the dashboard with
 the tested files. HDD startup now requires independently provisioned credentials;

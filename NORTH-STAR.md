@@ -1,6 +1,6 @@
 # NORTH-STAR
 
-> Updated by the owner on 2026-10-06.
+> Updated by the owner on 2026-10-08.
 > Complete Blinx's attract sequence first, then JSRF. Continue dashboard performance work.
 
 ## The project
@@ -9,7 +9,13 @@ Build a performant Xbox native-port ecosystem with a faithful, runnable LLE
 floor and interchangeable enhanced implementations. Any system or subsystem
 may have an HLE/native replacement with compatible observable contracts and
 explicit tolerances. Qualified enhanced paths are the intended shipping default;
-the real reference path remains selectable globally and per subsystem.
+the real reference path remains selectable at build time, globally and per
+subsystem. Follow [recomp-template HLE.md](../../recomp-template/HLE.md): keep
+both implementations maintained, buildable and runnable. LLE is the correctness
+foundation even where HLE already works. HLE may use entirely different internal
+operations/state and permitted approximations under the same caller contract.
+Real-time LLE performance, live switching and duplicate production execution are
+not requirements. An old branch or external comparison alone is not our LLE build.
 
 No stubs, fabricated device success or captured-frame substitution. Native
 internals may differ: compatible state, outputs, errors, ordering, ownership
@@ -31,13 +37,22 @@ native implementations, alongside the recomp forks. Borrow complete useful
 boundaries when their ownership fits. Validate changed adapters and exercised
 caller behavior, and retain known donor limitations; do not independently
 rediscover every borrowed algorithm. A pinned external LLE reference runner may
-provide evidence while the in-tree reference catches up. Shared implementation
+provide evidence while the in-tree reference catches up; it does not replace the
+requirement to complete and maintain our own functioning LLE route. Shared implementation
 ancestry is not independent corroboration, and stubs remain excluded.
 
 Owner workflow clarification, 2026-10-07: for each newly encountered issue,
 ensure bounded runnable LLE scaffolding for the observable contract, inspect
 Phobos for reusable implementation, adapt compatible donor services, then
-validate the contract and actual title progress. Build only the missing pieces.
+validate the contract and actual title progress. Reuse existing pieces and
+implement missing LLE counterparts even when the HLE behavior already works.
+
+Owner clarification, 2026-10-08: the working Blinx attract milestone is committed;
+28.5-28.8 fps and occasional drops are accepted performance debt (.100). Before
+expanding into New Game, complete and qualify maintained LLE routes for the
+existing native services (.102). Bound supported behavior and validation cost,
+not the requirement to retain LLE. Independent original-code/xemu/hardware
+evidence informs LLE; HLE may suggest cases but does not prove LLE correct.
 
 Owner distribution constraint, 2026-10-06: GPL projects may be external research
 and execution references, but GPL code must not enter the intended non-GPL
