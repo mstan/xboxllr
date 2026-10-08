@@ -1,7 +1,9 @@
 # Native title reference pilot
 
-<<<<<<< HEAD
-=======
+The opening-audio and scheduler sections below document their named experimental
+branches. This baseline receives their evidence and attribution only; its runtime
+still retains the independently validated display-wait implementation.
+
 ## Opening audio tail qualification (2026-10-08)
 
 The exact source capture on `investigate/blinx-audio-ingress-20261008` locates
@@ -126,7 +128,6 @@ guest PCM writes pause. Logging changes have not established a speed gain;
 the investigation branch remains separate from the validated baseline.
 Full A/V and original-speed qualification remain open.
 
->>>>>>> 0e91614 (Record decoder-boundary finding and natural Blinx repeat evidence)
 ## Display waits independent of renderer ownership (2026-10-08)
 
 `beads-xbox.1.73/.98`, branch `fix/blinx-independent-display-wait-20261008`.
