@@ -1,5 +1,46 @@
 # Blinx: serial attract-sequence bring-up
 
+## Working attract milestone - 2026-10-08
+
+Owner observation confirms the NTSC Blinx FMVs and real-time Demo play look
+correct and run end to end. Preserve this as a functional/visual milestone on
+`milestone/blinx-attract-20261008`, runtime commit `318f5ac`, rather than treating
+it as completion of every original acceptance criterion. The copied executable
+left open for the owner has SHA-256
+`d8aa47e8c56c807ca9e046d11408b1686209bf9abb32da7fffb060d49c61f7a7`.
+All 37 native tests pass on that runtime; no new source changes were made for
+this milestone record. The owner's second idle observation has no logged
+terminal guard at the recorded snapshot. Live log phase opens alone are not
+counted as verified completed loops.
+
+| Sign-off item | Current conclusion |
+| --- | --- |
+| Startup, movies, title screen, real-time attract gameplay | Working visual milestone, including owner observation |
+| Natural repetition | Two complete natural demos and a third rendered entry captured on the preceding scheduler candidate; current runtime has complete-stage A/B runs and owner idle observation |
+| Input interruption and menu return | Captured on the preceding scheduler candidate; repeat the controlled check when qualifying the final reference/HLE contract set |
+| Intended gameplay cadence | Known shortfall: latest complete stages average 28.52/28.78 fps against nominal 30 fps, with intermittent stalls |
+| Audio/movie timing | Original PCM-to-submission transport and sampled picture/audio progression have evidence; final-frame timing and complete repeat A/V tolerance remain open |
+| Long-term resources | Bounded repeated observations exist; a slow leak is not ruled out by the existing samples |
+| New Game/save | Confirmed guest-memory fault after save creation (.101), explicitly outside this milestone and deferred |
+
+Next phase (.102) strengthens the **already exercised** LLE/HLE contracts before
+expanding into New Game. Start with memory/resource ownership and GPU ordering,
+then scheduling/timers and audio/movie transport, retaining existing file/input
+checks. For each family record: observable input/output and memory/completion
+effects, current runnable floor, independent evidence, tests and remaining gaps.
+Prefer existing original-code fixtures and software LLE; use xemu behavior and
+other independent references where they resolve a concrete unknown. Phobos
+remains the HLE donor reference, with attribution retained.
+
+HLE observations identify required cases and candidate boundaries; they do not
+establish the expected answer. Establish that independently, then compare the
+native implementation at the boundary. Repair either implementation only when
+the evidence warrants it, and rerun actual attract behavior after changes.
+Exhaustive hardware fidelity, dashboard work and instruction-identical HLE are
+not prerequisites for this bounded phase. No live switching or duplicate
+production execution is introduced. The broader cadence/A-V goal remains open;
+JSRF remains deferred. Existing private-pilot licensing restrictions remain.
+
 **Deferred stream uploads (.100):** the original NTSC binding contract and
 actual GPU draw tests qualify consuming vertex data at draw time, following
 Phobos's strategy. Removing redundant whole-resource copies at stream binding

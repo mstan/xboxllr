@@ -1,5 +1,11 @@
 # Native title reference pilot
 
+**Working attract checkpoint:** `milestone/blinx-attract-20261008` preserves
+owner-observed FMVs and real-time Demo play on runtime `318f5ac`. See the
+[milestone and remaining sign-off items](../../docs/BLINX-BURNDOWN.md) before
+claiming complete original-speed/A-V qualification. Next work strengthens the
+independent LLE contracts for this exercised path; New Game is deferred.
+
 ## Deferred stream upload experiment (2026-10-08)
 
 `beads-xbox.1.100`, branch `perf/blinx-deferred-stream-upload-20261008`.
