@@ -1,5 +1,19 @@
 # STATUS
 
+## 2026-10-07 - Shared GPU texture aliases reach memory protection
+
+Blinx now binds its caller-owned front-buffer texture header to the real shared
+Phobos RHI image. The next run executes 151 GPU callbacks and reaches kernel
+MmSetAddressProtect. No per-frame texture copy or substituted image is used.
+The bounded LLE clear/sample/changed-clear fixture passes, as do the native ABI
+fixtures for changing pixels, header retargeting, binding lifetime and hazards.
+
+The separate native GPU fixture now times out on visibility queries after
+recreating the device (`beads-xbox.1.66`). Ordinary GetData flushing and restoring
+the old front-buffer flags did not fix it; both diagnostic changes were reverted.
+The earlier all-30-pass result is historical, not the current test status.
+
+
 ## 2026-10-07 - Blinx executes its ordered GPU callback
 
 Original NTSC Blinx passes InsertCallback and executes its generated WRITE

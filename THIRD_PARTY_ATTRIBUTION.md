@@ -15,6 +15,16 @@ notices. Preparation/build steps must report missing required notices.
 
 ## Private native-title reference pilot
 
+### Shared GPU image aliases - 2026-10-07
+
+The independent adapter reuses the already imported Phobos RHI image retain,
+wrap, view creation and texture ownership services at
+`bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0`. The same revision's
+`src/hle/hle_d3d8_texture.c` storage-identity logic was a behavioral reference;
+no HLE implementation body was copied. Original XDK header execution and an
+in-tree LLE shared-RAM fixture establish the bounded contract. Existing donor
+notices and the private pilot's GPL-dependent distribution scope still apply.
+
 ### Ordered GPU callbacks - 2026-10-07
 
 `graphics_gpu_callback.inc` and its dispatcher integration are independently

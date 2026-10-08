@@ -153,7 +153,7 @@ int32_t pilot_gfx_create(const uint32_t p[17])
 #endif
         if (SUCCEEDED(result)) {
             D3D11_TEXTURE2D_DESC desc; ID3D11Texture2D_GetDesc(pilot_surfaces[0],&desc);
-            desc.BindFlags=0; desc.MiscFlags=0;
+            desc.BindFlags=D3D11_BIND_SHADER_RESOURCE; desc.MiscFlags=0;
             result=ID3D11Device_CreateTexture2D(d3d8_GetD3D11Device(),&desc,NULL,&pilot_surfaces[1]);
         }
     }
@@ -302,7 +302,15 @@ int pilot_gfx_resource_busy(unsigned kind,uint32_t handle)
     case PILOT_GFX_SURFACE:
         if(handle>=3 || !pilot_surfaces[handle])pilot_d3d_backend_stop("unowned surface completion query");
         serial=pilot_surface_use[handle];break;
-    case PILOT_GFX_TEXTURE:pilot_texture(handle);serial=pilot_textures[handle-1].last_use;break;
+    case PILOT_GFX_TEXTURE: {
+        ID3D11Texture2D *storage=pilot_donor_texture(pilot_texture(handle));
+        serial=pilot_textures[handle-1].last_use;
+        for(unsigned i=0;i<pilot_texture_capacity;++i)if(pilot_textures[i].object &&
+            pilot_donor_texture((D3D8Texture*)pilot_textures[i].object)==storage && pilot_textures[i].last_use>serial)
+                serial=pilot_textures[i].last_use;
+        for(unsigned i=0;i<3;++i)if(pilot_surfaces[i]==storage && pilot_surface_use[i]>serial)serial=pilot_surface_use[i];
+        break;
+    }
     case PILOT_GFX_VERTEX:pilot_vertex(handle);serial=pilot_vertices[handle-1].last_use;break;
     default:pilot_d3d_backend_stop("invalid completion resource kind");
     }
@@ -312,7 +320,8 @@ void pilot_gfx_texture_bind(unsigned stage,uint32_t handle)
 {
     if(!pilot_device || stage>=4)pilot_d3d_backend_stop("invalid native texture binding");
     D3D8Texture *texture=handle?pilot_texture(handle):NULL;
-    if(handle && (handle==pilot_color_target || handle==pilot_depth_target))
+    if(handle && (pilot_donor_texture(texture)==(pilot_color_target?pilot_donor_texture(pilot_texture(pilot_color_target)):pilot_surfaces[0]) ||
+        (pilot_depth_target && pilot_donor_texture(texture)==(pilot_depth_target==UINT32_MAX?pilot_surfaces[2]:pilot_donor_texture(pilot_texture(pilot_depth_target))))))
         pilot_d3d_backend_stop("simultaneous texture sampling and render/depth output is unqualified");
     pilot_d3d_require(pilot_device->lpVtbl->SetTexture(pilot_device,stage,(IDirect3DBaseTexture8*)texture),__FILE__,__LINE__);
     pilot_bound_textures[stage]=handle;
@@ -325,8 +334,11 @@ void pilot_gfx_texture_prepare_sample(uint32_t handle,uint32_t level,const void 
 }
 int32_t pilot_gfx_targets(uint32_t color,uint32_t depth)
 {
-    for(unsigned i=0;i<4;++i)if(pilot_bound_textures[i] &&
-        (pilot_bound_textures[i]==color || pilot_bound_textures[i]==depth))return E_INVALIDARG;
+    for(unsigned i=0;i<4;++i)if(pilot_bound_textures[i]) {
+        ID3D11Texture2D *sample=pilot_donor_texture(pilot_texture(pilot_bound_textures[i]));
+        if(sample==(color?pilot_donor_texture(pilot_texture(color)):pilot_surfaces[0]) ||
+           (depth && sample==(depth==UINT32_MAX?pilot_surfaces[2]:pilot_donor_texture(pilot_texture(depth)))))return E_INVALIDARG;
+    }
     ID3D11RenderTargetView *rtv=d3d8_GetDefaultRTV();
     ID3D11DepthStencilView *dsv=depth==UINT32_MAX?pilot_default_depth:NULL;
     unsigned width=pilot_gfx_width(),height=pilot_gfx_height();
@@ -390,6 +402,34 @@ void pilot_gfx_texture_destroy(uint32_t handle)
     if(texture->iface.lpVtbl->Release(&texture->iface)!=0)
         pilot_d3d_backend_stop("native texture still referenced at destruction");
     memset(&pilot_textures[handle-1],0,sizeof(pilot_textures[0]));
+}
+int32_t pilot_gfx_texture_alias(unsigned kind,uint32_t source,uint32_t format,uint32_t *handle)
+{
+#ifdef PILOT_D3D_PHOBOS
+    if(!pilot_device || !handle || format!=0x12)return E_NOTIMPL;
+    ID3D11Texture2D *native=NULL;RhiImage *image=NULL;
+    if(kind==PILOT_GFX_SURFACE && source<2)native=pilot_surfaces[source];
+    else if(kind==PILOT_GFX_TEXTURE){D3D8Texture *t=pilot_texture(source);native=pilot_donor_texture(t);image=t->image;}
+    if(!native)return E_INVALIDARG;
+    D3D11_TEXTURE2D_DESC desc;ID3D11Texture2D_GetDesc(native,&desc);
+    if(desc.MipLevels!=1 || desc.ArraySize!=1 || desc.SampleDesc.Count!=1 || !(desc.BindFlags&D3D11_BIND_SHADER_RESOURCE))return E_NOTIMPL;
+    /* Borrow the donor's actual reference-counted RHI storage and sampled view.
+     * No GPU/CPU copy and no independent pixel cache: later writes stay visible. */
+    image=image?rhi_image_retain(image):rhi_d3d11_wrap_image(native);
+    if(!image)return E_OUTOFMEMORY;
+    RhiView *view=rhi_view_create(image,RHI_VIEW_SAMPLED,NULL);
+    if(!view){rhi_image_destroy(image);return E_FAIL;}
+    HRESULT hr=pilot_gfx_texture_create(desc.Width,desc.Height,1,format,handle);
+    if(FAILED(hr)){rhi_view_destroy(view);rhi_image_destroy(image);return hr;}
+    D3D8Texture *texture=pilot_texture(*handle);
+    rhi_view_destroy(texture->srv);rhi_image_destroy(texture->image);
+    texture->image=image;texture->srv=view;
+    RhiImageDesc info;rhi_image_get_desc(image,&info);texture->host_format=info.format;
+    pilot_textures[*handle-1].uploaded=1;pilot_textures[*handle-1].gpu_written=1;
+    return S_OK;
+#else
+    (void)kind;(void)source;(void)format;(void)handle;return E_NOTIMPL;
+#endif
 }
 void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,uint32_t bytes)
 {
@@ -519,6 +559,8 @@ int32_t pilot_gfx_texture_readback(uint32_t handle,uint32_t level,void *data,uin
     hr=ID3D11DeviceContext_Map(context,(ID3D11Resource*)staging,level,D3D11_MAP_READ,0,&mapped);
     if(SUCCEEDED(hr)) {
         for(UINT row=0;row<rows;++row) memcpy((char*)data+row*pitch,(char*)mapped.pData+row*mapped.RowPitch,pitch);
+        if(texture->d3d8_format==0x12 && desc.Format==DXGI_FORMAT_R8G8B8A8_UNORM)
+            for(UINT i=0;i<width*height;++i){BYTE *p=(BYTE*)data+i*4,t=p[0];p[0]=p[2];p[2]=t;}
         if(texture->d3d8_format==0x2e)for(UINT i=0;i<width*height;++i) {
             uint32_t value;memcpy(&value,(BYTE*)data+i*4,4);value=(value<<8)|(value>>24);memcpy((BYTE*)data+i*4,&value,4);
         }

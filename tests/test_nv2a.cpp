@@ -3375,6 +3375,19 @@ int main() {
           inline_blit_first_writes * 6);
     CHECK(get32(ram, 0x400000 + inline_blit_inside) == 0x80202000);
 
+    // A surface and a texture sharing a DMA address see the same storage.
+    // Produce source pixels through actual GPU clear commands, then sample;
+    // a second clear must be visible without replacing a texture object.
+    for(uint32_t color:{0xff2468acu,0xff983412u}) {
+        emit(0x0200,0x05000000);emit(0x020c,0x14001400);emit(0x0210,0x100000);
+        emit(0x1d90,color);emit(0x1d98,1u<<16);emit(0x1d9c,1u<<16);emit(0x1d94,0xf0);
+        emit(0x0200,0x02800000);emit(0x020c,0x0a000a00);emit(0x0210,0x400000);
+        emit(0x17fc,5);emit(0x1800,0x00010000);emit(0x1808,2);emit(0x17fc,0);
+        gpu.mmio_write(xlle::Nv2a::kBase+0x800040,4,cursor);
+        CHECK(fault.empty());
+        CHECK(get32(ram,0x400000+inline_blit_inside)==(0x80000000u|(color&0xffffffu)));
+    }
+
     // Inline dashboard geometry uses a distinct linear color profile:
     // PROJECT2D texture * c0, alpha GEQUAL 1, then SRC_ALPHA/ONE ADD.
     // The ALWAYS depth state must neither read nor write the zeta plane.

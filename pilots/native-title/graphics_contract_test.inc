@@ -21,6 +21,7 @@ static uint32_t call_graphics(unsigned entry,const uint32_t *args)
 #include "graphics_fvf_contract_test.inc"
 #include "graphics_visibility_contract_test.inc"
 #include "graphics_gpu_callback_contract_test.inc"
+#include "graphics_alias_contract_test.inc"
 static void test_graphics(void)
 {
     vm_ensure();
@@ -115,6 +116,7 @@ static void test_graphics(void)
         if(!pass) { test_graphics_states(); test_graphics_textures(); test_graphics_vertices(); test_graphics_transforms(); test_graphics_shaders(); test_graphics_fvf(); test_graphics_pixels(); test_graphics_blocks(); test_graphics_completion(); test_graphics_resource_bindings(); }
         CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&front)==0);
         test_graphics_visibility();
+        test_graphics_aliases();
         test_graphics_gpu_callbacks();
         CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&back)==0);
         uint32_t final_gpu_callback[]={0,0x12360,71};

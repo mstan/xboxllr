@@ -6,15 +6,17 @@ struct GraphicsTextureObject {
     uint32_t header,data,bytes,width,height,levels,format,refs,native,usage,cpu_exposed;
     unsigned parent,level; /* parent is slot+1 for a surface view, zero for texture */
     unsigned bindings;
+    unsigned guest_owned,alias_kind,alias_source,alias_format,alias_size;
 };
 static struct GraphicsTextureObject *graphics_textures;
 static unsigned graphics_texture_capacity;
+static unsigned graphics_texture_adopt_alias(uint32_t header);
 
 static unsigned graphics_texture_slot(uint32_t header)
 {
     for(unsigned i=0;i<graphics_texture_capacity;++i)
         if(graphics_textures[i].header==header && header) return i;
-    stop("unowned texture resource",header);
+    return graphics_texture_adopt_alias(header);
 }
 static unsigned graphics_texture_unused(void)
 {
@@ -120,10 +122,52 @@ static void graphics_texture_upload(struct GraphicsTextureObject *texture,unsign
     pilot_gfx_texture_upload(texture->native,level,memory+texture->data+offset,graphics_level_bytes(texture,level));
 }
 static uint32_t graphics_texture_ref(unsigned slot,int acquire);
+static unsigned graphics_texture_adopt_alias(uint32_t header)
+{
+    graphics_pointer(header,20);
+    uint32_t common=MEM32(header),data=MEM32(header+4),format=MEM32(header+12),size=MEM32(header+16);
+    unsigned kind=0,source=0;uint32_t expected_size=0,expected_format=0;
+    if(((common>>16)&7)!=4 || !(common&0xffff) || ((format>>16)&15)!=1 || (format&0xf4)!=0x20)
+        stop("unqualified caller-owned texture header",header);
+    for(unsigned i=0;i<2;++i)if(data==graphics_data[i]) {
+        kind=PILOT_GFX_SURFACE;source=i;expected_size=MEM32(graphics_headers+i*32+16);expected_format=(MEM32(graphics_headers+i*32+12)>>8)&255;
+        break;
+    }
+    if(!kind)for(unsigned i=0;i<graphics_texture_capacity;++i) {
+        struct GraphicsTextureObject *t=&graphics_textures[i];
+        if(t->header && !t->parent && !t->guest_owned && t->usage==1 && t->data==data) {
+            kind=PILOT_GFX_TEXTURE;source=t->native;expected_size=MEM32(t->header+16);expected_format=t->format;break;
+        }
+    }
+    if(!kind || size!=expected_size || ((format>>8)&255)!=expected_format || expected_format!=0x12)
+        stop("unowned or incompatible texture storage alias",header);
+    struct GraphicsTextureObject t={0};t.header=header;t.data=data;t.refs=common&0xffff;
+    t.width=(size&4095)+1;t.height=((size>>12)&4095)+1;t.format=expected_format;t.levels=1;t.usage=1;
+    t.bytes=((size>>24)+1)*64*t.height;t.guest_owned=1;t.alias_kind=kind;t.alias_source=source;
+    t.alias_format=format;t.alias_size=size;
+    if(pilot_gfx_texture_alias(kind,source,t.format,&t.native)<0)stop("native texture storage alias failed",header);
+    unsigned slot=graphics_texture_unused();graphics_textures[slot]=t;
+    fprintf(stderr,"[TEXTURE ALIAS] header=%08x data=%08x %ux%u kind=%u source=%u\n",header,data,t.width,t.height,kind,source);
+    return slot;
+}
+static unsigned graphics_texture_refresh_alias(unsigned slot)
+{
+    struct GraphicsTextureObject *t=&graphics_textures[slot];uint32_t header=t->header;
+    if(!t->guest_owned || (t->data==MEM32(header+4) && t->alias_format==MEM32(header+12) && t->alias_size==MEM32(header+16)))return slot;
+    unsigned bindings=t->bindings,stages=0;
+    for(unsigned i=0;i<4;++i)if(MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_TEXTURES+i*4)==header){
+        stages|=1u<<i;pilot_gfx_texture_bind(i,0);
+    }
+    pilot_gfx_texture_destroy(t->native);memset(t,0,sizeof(*t));
+    slot=graphics_texture_adopt_alias(header);graphics_textures[slot].bindings=bindings;
+    for(unsigned i=0;i<4;++i)if(stages&(1u<<i))pilot_gfx_texture_bind(i,graphics_textures[slot].native);
+    return slot;
+}
 static void graphics_texture_collect(unsigned slot)
 {
     struct GraphicsTextureObject *object=&graphics_textures[slot];
     if(object->refs || object->bindings)return;
+    if(object->guest_owned){pilot_gfx_texture_destroy(object->native);memset(object,0,sizeof(*object));return;}
     unsigned parent=object->parent;
     if(parent) {
         if(!object->usage || object->cpu_exposed)graphics_texture_upload(&graphics_textures[parent-1],object->level);
@@ -159,6 +203,7 @@ static void graphics_texture_binding_ref(uint32_t header,int acquire)
 static void graphics_texture_sample_prepare(unsigned slot)
 {
     struct GraphicsTextureObject *texture=&graphics_textures[slot];int exposed=!texture->usage || texture->cpu_exposed;
+    if(texture->guest_owned)return; /* donor RHI view shares the live GPU storage */
     for(unsigned i=0;i<graphics_texture_capacity;++i)if(graphics_textures[i].parent==slot+1)exposed|=graphics_textures[i].cpu_exposed;
     for(unsigned level=0;level<texture->levels;++level)
         pilot_gfx_texture_prepare_sample(texture->native,level,memory+texture->data+graphics_level_offset(texture,level),
@@ -171,7 +216,7 @@ static void graphics_texture_bind(unsigned stage,uint32_t header)
     if(stage>=4)stop("invalid texture stage",stage);
     uint32_t cache=PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_TEXTURES+stage*4,old=MEM32(cache),native=0,mode=0x80000000u;
     if(header) {
-        unsigned slot=graphics_texture_slot(header);struct GraphicsTextureObject *texture=&graphics_textures[slot];
+        unsigned slot=graphics_texture_refresh_alias(graphics_texture_slot(header));struct GraphicsTextureObject *texture=&graphics_textures[slot];
         if(texture->parent)stop("texture binding requires a texture",header);
         graphics_texture_sample_prepare(slot);native=texture->native;
         mode=MEM32(header+12)&0x20f4u;
@@ -186,10 +231,18 @@ static void graphics_texture_bind(unsigned stage,uint32_t header)
     } else if(old)MEM32(old+8)=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_RESOURCE_FENCE);
     MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_RESOURCE_TEXTURE_MODE+stage*4)=mode;
 }
+static void graphics_texture_aliases_close(void)
+{
+    for(unsigned i=0;i<graphics_texture_capacity;++i)if(graphics_textures[i].guest_owned) {
+        if(graphics_textures[i].bindings)stop("closing a bound texture alias",graphics_textures[i].header);
+        pilot_gfx_texture_destroy(graphics_textures[i].native);memset(&graphics_textures[i],0,sizeof(graphics_textures[i]));
+    }
+}
 static uint32_t graphics_texture_surface(uint32_t header,unsigned level)
 {
     unsigned parent=graphics_texture_slot(header),slot=graphics_texture_unused();
     struct GraphicsTextureObject *texture=&graphics_textures[parent];
+    if(texture->guest_owned)stop("caller-owned GPU alias surface view outside qualified scope",header);
     if(texture->parent || level>=texture->levels)stop("invalid texture surface level",level);
     struct GraphicsTextureObject surface={0}; uint32_t bytes=4096;
     if(vm_allocate(&surface.header,0,&bytes,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE))return 0;
@@ -225,6 +278,7 @@ static void graphics_texture_desc(uint32_t header,unsigned level,uint32_t destin
 static void graphics_texture_lock(uint32_t header,unsigned level,uint32_t destination,uint32_t rectangle,uint32_t flags)
 {
     struct GraphicsTextureObject *object=&graphics_textures[graphics_texture_slot(header)];
+    if(object->guest_owned)stop("caller-owned GPU alias CPU lock outside qualified scope",header);
     if(level>=object->levels || (flags&~0xf0u))stop("unqualified texture lock flags/level",flags);
     uint32_t width=graphics_level_width(object,level),height=graphics_level_height(object,level);
     uint32_t pitch=width*graphics_texture_bpp(object),data=object->data+graphics_level_offset(object,level);

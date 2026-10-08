@@ -291,7 +291,7 @@ void pilot_d3d_dispatch(unsigned entry)
             graphics_set_targets(graphics_headers,graphics_headers+64);
         if (graphics_surface_refs[0] || graphics_surface_refs[1] || graphics_surface_refs[2])
             stop("device release with outstanding surface ownership",entry);
-        graphics_resource_bindings_close();graphics_blocks_release();graphics_shaders_release();graphics_pixels_release();pilot_gfx_close(); graphics_active=0;
+        graphics_resource_bindings_close();graphics_texture_aliases_close();graphics_blocks_release();graphics_shaders_release();graphics_pixels_release();pilot_gfx_close(); graphics_active=0;
         graphics_fence_next=1;graphics_fence_done=0;memset(graphics_fences,0,sizeof(graphics_fences));
         uint32_t bytes;
         for (unsigned i=0;i<3;++i) {

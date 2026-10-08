@@ -6,7 +6,35 @@ It is outside the normal xboxlle build. **The generated executable is a private
 GPL-dependent reference artifact, not the intended non-GPL shipping product.**
 See [license scope](../../LICENSE-SCOPE.md). There is no install/package target.
 
-## Current checkpoint - ordered GPU callbacks (2026-10-07)
+## Current checkpoint - shared GPU texture aliases (2026-10-07)
+
+`beads-xbox.1.65`: Blinx passes the formerly unowned front-buffer texture header,
+executes 151 GPU callbacks and reaches MmSetAddressProtect. The adapter reuses
+Phobos RHI image/view ownership, retaining the actual storage rather than
+copying pixels at each binding. Storage identity follows Data/Format/Size,
+not a title address. Caller-owned headers are never freed by the renderer.
+
+The LLE fixture clears RAM-backed color storage, samples that same address,
+changes the clear and verifies changed sampled pixels. Native fixtures verify
+front/render-target sharing, GPU updates without rebinding, header retargeting,
+BGRA readback, binding references and shared-image render/sample hazards.
+Original XGSetTextureHeader executions cover 64x64 and 640x480 headers (body
+SHA-256 `382e01538d49f6b152dcea4ad557e2bd8e1700b3607cafbfcb0f6309a24c4ac8`).
+Scope is single-mip, single-sample linear A8R8G8B8 color storage; CPU locks and
+surface views of caller-owned aliases explicitly remain unqualified. Existing
+source ownership must remain valid. Arbitrary raw storage/depth aliases are
+not inferred from a compatible-looking header.
+
+The LLE NV2A fixture passes (0.31 s); native graphics ABI passes three repeated
+runs. The independent native backend fixture has a repeated query timeout in
+its second device lifetime, tracked as `beads-xbox.1.66`. Changing GetData flags
+or reverting the front-buffer SRV capability did not resolve it. Neither
+experiment remains in the implementation. Actual title evidence is private in
+`build/blinx/run-surface-alias.log` and
+`build/blinx/surface-alias-header-oracle.aot-private.json`.
+
+## Earlier checkpoint - ordered GPU callbacks (2026-10-07)
+
 
 `beads-xbox.1.64`: original NTSC Blinx now executes its WRITE callback through
 real GPU completion and advances to an unowned texture-header guard. The title
