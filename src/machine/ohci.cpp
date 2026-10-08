@@ -493,10 +493,14 @@ Ohci::TransferResult Ohci::prepare_control_response(
             device.control_response.assign(20, 0xff);
             device.control_response[0] = 0;
             device.control_response[1] = 20;
+            std::copy(xid_input_capabilities_.begin(),xid_input_capabilities_.end(),
+                      device.control_response.begin()+2);
         } else if (setup.value == 0x0200) {
             device.control_response.assign(6, 0xff);
             device.control_response[0] = 0;
             device.control_response[1] = 6;
+            std::copy(xid_output_capabilities_.begin(),xid_output_capabilities_.end(),
+                      device.control_response.begin()+2);
         } else {
             return TransferResult::kStall;
         }

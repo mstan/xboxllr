@@ -79,6 +79,19 @@ def run(snapshot):
         assert ref.call(173, 0x410000) == 0
         image_transitions.append(dict(cycle=cycle, pages=pages, initial_lock_words=before))
     assert vm(199, 0x400000, 0, 0x8000)[0] == 0
+    # Real caller-owned stack VA: reserve at allocation granularity, commit
+    # only the page that crosses the USB boundary, then execute real pinning.
+    assert vm(184, 0x601f0000, 0x10000, 0x2000) == (0, (0x601f0000, 0x10000))
+    assert vm(184, 0x601ff000, 4096, 0x1000) == (0, (0x601ff000, 4096))
+    stack_pa = ref.call(173, 0x601ffe63)
+    assert stack_pa and stack_pa & 4095 == 0xe63
+    stack_word = 0x83ff0000 + (stack_pa >> 12)*4
+    initial_stack = ref.word(stack_word) & 65535
+    ref.call(175, 0x601ffe63, 6, 0)
+    assert ref.word(stack_word) & 65535 == initial_stack + 2
+    ref.call(175, 0x601ffe63, 6, 1)
+    assert ref.word(stack_word) & 65535 == initial_stack
+    assert vm(199, 0x601f0000, 0, 0x8000)[0] == 0
     interrupts = []
     for irq in (0, 1, 9, 26, 27, 0xffffffff):
         ref.cpu.mem_write(0x10000400, b'\xcd' * 4)
@@ -95,6 +108,7 @@ def run(snapshot):
     assert body[4+0x10] == 0 and body[4+0x12] == 0
     return dict(snapshot_sha256=SNAPSHOT_SHA, direct=direct, pool_pointer=hex(pointer),
                 initial_lock_words=initial, pin_transitions=transitions, image_transitions=image_transitions,
+                stack_physical=stack_pa, stack_lock_word=initial_stack,
                 interrupts=interrupts, interrupt_body_private=body.hex())
 
 

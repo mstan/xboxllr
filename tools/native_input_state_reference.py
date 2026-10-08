@@ -113,9 +113,28 @@ def run(xbe, snapshot):
         packet = struct.unpack('<I', cpu.mem_read(handle+8, 4))[0]
         assert packet == expected
         packets.append(packet)
+    changes = []
+    device_type = 0x1826ec
+    for current, changed, previous in [(0, 0, 0), (1, 1, 0), (0, 1, 1),
+                                       (1, 1, 1), (3, 2, 1), (1, 2, 3),
+                                       (5, 7, 6), (15, 15, 15)]:
+        cpu.mem_write(device_type, struct.pack('<III', current, changed, previous))
+        status = call(0x18387b, device_type, out, out+4)
+        inserted, removed = struct.unpack('<II', cpu.mem_read(out, 8))
+        both = current & previous & changed
+        assert inserted == ((current & ~previous) | both)
+        assert removed == ((previous & ~current) | both)
+        assert bool(status) == bool(inserted | removed)
+        assert bytes(cpu.mem_read(device_type, 12)) == struct.pack('<III', current, 0, current)
+        changes.append(dict(current=current, changed=changed, previous=previous,
+                            inserted=inserted, removed=removed, status=status))
+    cpu.mem_write(device_type, struct.pack('<III', 5, 15, 10))
+    assert call(0x183859, device_type) == 5
+    assert bytes(cpu.mem_read(device_type, 12)) == struct.pack('<III', 5, 0, 5)
     return dict(xbe_sha256=IMAGE, snapshot_sha256=SNAPSHOT_SHA,
                 imports=imports, states=rows, invalid_type_preserves_output=True,
                 identical_report_packet_numbers=packets,
+                device_changes=changes, enumeration_acknowledges_changes=True,
                 inactive_analog_filter=dict(input=report.hex(), output=filtered.hex()),
                 limits='Authored handle/report states; transport, full initialization and active-button timer are separate qualification')
 

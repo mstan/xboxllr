@@ -34,6 +34,8 @@ static struct {uint32_t base,bytes;} owners[MAX_PUBLISHED];
 static unsigned owner_count;
 static struct {uint32_t base,bytes,count;} pin_ranges[MAX_PUBLISHED];
 static uint32_t image_start,image_bytes;
+static struct {uint32_t base,bytes;} stacks[64];
+static unsigned stack_count;
 static uint32_t interrupt_objects[16],pending_callback;
 static PilotIoIsr isr_callback;
 static volatile LONG current_irql;
@@ -259,9 +261,17 @@ static void check_publications(int before_call)
         ++i;
     }
 }
+static int caller_owned(uint32_t object,uint32_t bytes)
+{
+    uint64_t end=(uint64_t)object+bytes;
+    if(image_bytes && object>=image_start && end<=(uint64_t)image_start+image_bytes)return 1;
+    for(unsigned i=0;i<stack_count;++i)
+        if(object>=stacks[i].base && end<=(uint64_t)stacks[i].base+stacks[i].bytes)return 1;
+    return 0;
+}
 static void publish_range(uint32_t object,uint32_t bytes)
 {
-    int image=image_bytes && object>=image_start && (uint64_t)object+bytes<=(uint64_t)image_start+image_bytes;
+    int image=caller_owned(object,bytes);
     if(!(image || (object>=0xd0000000u && (uint64_t)object+bytes<=0xd4000000ull) ||
          (object>=0x80000000u && (uint64_t)object+bytes<=0x84000000ull))) {
         failure="device LLE unexpected allocation namespace";return;
@@ -276,7 +286,7 @@ static void publish_range(uint32_t object,uint32_t bytes)
         }
         if(shared_pages[pa/4096]){failure="device LLE duplicate physical publication";return;}
         if(image) {
-            if(!guest_page(va)){failure="device LLE image page is not resident";return;}
+            if(!guest_page(va)){failure="device LLE caller page is not resident";return;}
         } else if(guest_page(va)){failure="device LLE allocation collides with native memory";return;}
         else if(!VirtualAlloc(guest_memory+va,4096,MEM_COMMIT,PAGE_READWRITE)) {
             failure="device LLE publication allocation failed";return;
@@ -393,8 +403,7 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
             /* Every caller mapping must be an actual published original-kernel
              * allocation, not unrelated PTEs left in the bootstrap capture. */
             unsigned i;for(i=0;i<published_count && published[i].va!=page;++i){}
-            if(i==published_count && image_bytes && page>=image_start &&
-               page<(uint64_t)image_start+image_bytes && guest_page((uint32_t)page) &&
+            if(i==published_count && caller_owned((uint32_t)page,4096) && guest_page((uint32_t)page) &&
                !(ordinal==175 && args[2])) {
                 image_vm((uint32_t)page,4096,MEM_COMMIT);if(failure)return;
                 for(i=0;i<published_count && published[i].va!=page;++i){}
@@ -557,6 +566,28 @@ const char *pilot_io_device_image(unsigned char *guest,uint32_t base,uint32_t by
     if(!failure) {
         ++execution_depth;image_vm(base,bytes,MEM_RESERVE);--execution_depth;
         if(!failure){image_start=base;image_bytes=bytes;}
+    }
+    const char *error=failure;ReleaseSRWLockExclusive(&lock);return error;
+}
+const char *pilot_io_device_stack(unsigned char *guest,uint32_t base,uint32_t bytes)
+{
+    AcquireSRWLockExclusive(&lock);
+    if(!guest_memory)initialize(guest);
+    uint32_t reserve=base&~0xffffu;
+    uint64_t end=(uint64_t)base+bytes;
+    if(!failure && (guest_memory!=guest || !bytes || (base&4095) || (bytes&4095) ||
+                   base<0x10000 || end>0x80000000ull || stack_count==64))
+        failure="device LLE invalid owned stack reservation";
+    if(!failure && image_bytes && reserve<(uint64_t)image_start+image_bytes && end>image_start)
+        failure="device LLE stack overlaps image reservation";
+    for(unsigned i=0;!failure && i<stack_count;++i)
+        if(reserve<(uint64_t)stacks[i].base+stacks[i].bytes && end>(stacks[i].base&~0xffffu))
+            failure="device LLE overlapping stack reservations";
+    for(uint64_t page=base;!failure && page<end;page+=4096)
+        if(!guest_page((uint32_t)page))failure="device LLE owned stack is not resident";
+    if(!failure) {
+        ++execution_depth;image_vm(reserve,(uint32_t)(end-reserve),MEM_RESERVE);--execution_depth;
+        if(!failure){stacks[stack_count].base=base;stacks[stack_count++].bytes=bytes;}
     }
     const char *error=failure;ReleaseSRWLockExclusive(&lock);return error;
 }

@@ -72,7 +72,7 @@ uint32_t pilot_input_host_state(unsigned port,uint8_t gamepad[18])
     if(input_replay_count) {
         if(port)return ERROR_DEVICE_NOT_CONNECTED;
         if(!input_replay_clock_started){input_replay_start=GetTickCount64();input_replay_clock_started=1;}
-        input_replay_sample(GetTickCount64()-input_replay_start,gamepad);return ERROR_SUCCESS;
+        return input_replay_sample(GetTickCount64()-input_replay_start,gamepad);
     }
     if(input_host_keyboard) {
         if(port)return ERROR_DEVICE_NOT_CONNECTED;
@@ -94,10 +94,16 @@ uint32_t pilot_input_host_caps(unsigned port,uint8_t gamepad[18],uint8_t rumble[
 {
     if(input_host_is_keyboard() || input_replay_count) {
         if(port)return ERROR_DEVICE_NOT_CONNECTED;
+        if(input_replay_count) {
+            uint8_t state[18];uint32_t status=pilot_input_host_state(port,state);
+            if(status)return status;
+        }
         uint8_t keys[256];memset(keys,1,sizeof(keys));XINPUT_GAMEPAD pad;
         input_host_keyboard_convert(keys,&pad);
         if(input_replay_count)pad.wButtons=0xffff;
-        pad.sThumbLX=pad.sThumbLY=pad.sThumbRX=pad.sThumbRY=32767;
+        /* Capabilities encode supported bits, not a positive axis position.
+         * The virtual source can emit signed values spanning all 16 bits. */
+        pad.sThumbLX=pad.sThumbLY=pad.sThumbRX=pad.sThumbRY=(SHORT)0xffff;
         input_host_convert(&pad,gamepad);memset(rumble,0,4);return ERROR_SUCCESS;
     }
     XINPUT_CAPABILITIES caps;
@@ -114,8 +120,10 @@ uint32_t pilot_input_host_caps(unsigned port,uint8_t gamepad[18],uint8_t rumble[
 
 uint32_t pilot_input_host_rumble(unsigned port,uint16_t left,uint16_t right)
 {
-    if(input_host_is_keyboard() || input_replay_count)
-        return port?ERROR_DEVICE_NOT_CONNECTED:(left || right)?ERROR_NOT_SUPPORTED:ERROR_SUCCESS;
+    if(input_host_is_keyboard() || input_replay_count) {
+        uint8_t state[18];uint32_t status=pilot_input_host_state(port,state);
+        return status?status:(left || right)?ERROR_NOT_SUPPORTED:ERROR_SUCCESS;
+    }
     XINPUT_VIBRATION vibration={left,right};
     return XInputSetState(port,&vibration);
 }

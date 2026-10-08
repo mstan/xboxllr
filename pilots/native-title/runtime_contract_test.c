@@ -83,6 +83,9 @@ static int test_write_faults(uint32_t va)
 #endif
 }
 #include "sections_contract_test.inc"
+#ifdef PILOT_INPUT_NATIVE
+#include "input_contract_test.inc"
+#endif
 #ifdef PILOT_USB_LLE
 #include "usb_contract_test.inc"
 #include "usb_irq_contract_test.inc"
@@ -94,9 +97,6 @@ static int test_write_faults(uint32_t va)
 #include "audio_mix_contract_test.inc"
 #include "audio_detach_contract_test.inc"
 #include "audio_adpcm_contract_test.inc"
-#endif
-#ifdef PILOT_INPUT_NATIVE
-#include "input_contract_test.inc"
 #endif
 static void test_memory(void)
 {
@@ -382,6 +382,11 @@ int main(int argc,char **argv)
             uint32_t args[]={0x15000,8,0};call_kernel(175,args,3);
             const char *error=pilot_io_device_image_release(0x15000,4096);
             if(error)stop(error,0x15000);return 1;
+        }
+        if (!strcmp(argv[1],"usb-dma-unowned-stack")) {
+            commit(0x601f0000,0x10000);
+            CHECK(!pilot_io_device_stack(memory,0x601f1000,0xf000));
+            uint32_t args[]={0x601f0000,8,0};call_kernel(175,args,3);return 1;
         }
 #endif
 #ifdef PILOT_IO_DEVICE_LLE

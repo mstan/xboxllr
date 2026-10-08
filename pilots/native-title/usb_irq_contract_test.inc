@@ -79,6 +79,10 @@ static void test_usb_irq(void)
 }
 static void test_usb_irq_clock(void)
 {
+    /* This fixture's host provider is a connected gamepad. Its capability
+     * identity must be real fixture input, just like its state report. */
+    input_test_caps[0].Type=XINPUT_DEVTYPE_GAMEPAD;
+    input_test_caps[0].SubType=XINPUT_DEVSUBTYPE_GAMEPAD;
     install_fault_handler();scheduler_enabled=1;scheduler_publish(0,0,0);scheduler_enter(0);
     CHECK(usb_test_read(0)==0x10);
     uint32_t init[]={0x19800,0x12400,0x98765432,0x31,25,0,0};

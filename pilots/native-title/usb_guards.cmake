@@ -1,10 +1,12 @@
-foreach(kind release unowned image-release)
+foreach(kind release unowned image-release unowned-stack)
   execute_process(COMMAND "${PROGRAM}" "usb-dma-${kind}"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE errors TIMEOUT 5)
   if(kind STREQUAL "release")
     set(reason "contiguous allocation still owns registered resources")
   elseif(kind STREQUAL "image-release")
     set(reason "image release while DMA pinned")
+  elseif(kind STREQUAL "unowned-stack")
+    set(reason "page service requires owned mapping")
   else()
     set(reason "DMA write failed")
   endif()

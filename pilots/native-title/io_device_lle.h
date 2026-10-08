@@ -22,6 +22,10 @@ const char *pilot_io_device_irq(unsigned char *guest,int *delivered);
 /* Loader-owned image VA: real kernel reservation, on-demand original physical
  * backing for resident pages, and DMA permitted only while originally pinned. */
 const char *pilot_io_device_image(unsigned char *guest,uint32_t base,uint32_t bytes);
+/* Register a resident runtime-owned guest stack. The original VM reserves its
+ * address range; only resident owned pages can acquire original PFNs/pins.
+ * Stack allocations currently last for the title process lifetime. */
+const char *pilot_io_device_stack(unsigned char *guest,uint32_t base,uint32_t bytes);
 const char *pilot_io_device_image_release(uint32_t base,uint32_t bytes);
 const char *pilot_io_device_release_check(uint32_t base,uint32_t bytes);
 int pilot_io_device_pinned_dma(uint32_t pa,void *buffer,uint32_t bytes,int write);

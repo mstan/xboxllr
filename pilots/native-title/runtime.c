@@ -212,6 +212,10 @@ static DWORD WINAPI title_thread(void *argument)
     g_fs_base=base;
     commit(base,0x2000+thread->extra);
     commit(stack_top-thread->stack_size,thread->stack_size);
+#ifdef PILOT_USB_LLE
+    const char *stack_error=pilot_io_device_stack(memory,stack_top-thread->stack_size,thread->stack_size);
+    if(stack_error)stop(stack_error,stack_top-thread->stack_size);
+#endif
     MEM32(base)=0xffffffffu;
     MEM32(base+4)=stack_top;
     MEM32(base+8)=stack_top-thread->stack_size;
@@ -527,6 +531,9 @@ static void kernel_dispatch_impl(void)
     }
     stop(name, next_kernel_ordinal);
 }
+#ifdef PILOT_INPUT_QUALIFICATION
+#include "input_qualification.inc"
+#endif
 static void kernel_dispatch(void)
 {
     int blocked=scheduler_kernel_blocks(next_kernel_ordinal)?scheduler_block_begin():0;

@@ -70,6 +70,8 @@ public:
          UsbTopology topology = UsbTopology::kDirectXid)
         : base_(base), fault_(std::move(fault)), topology_(topology) {
         xid_attached_ = base_ == 0xFED00000u;
+        xid_input_capabilities_.fill(0xff);
+        xid_output_capabilities_.fill(0xff);
         reset();
     }
 
@@ -95,6 +97,10 @@ public:
         xid_state_ = state;
     }
     void set_xid_connected(bool connected);
+    void set_xid_capabilities(const std::array<uint8_t,18>& input,
+                              const std::array<uint8_t,4>& output) {
+        xid_input_capabilities_=input;xid_output_capabilities_=output;
+    }
 
     uint64_t frames() const { return frames_; }
     uint32_t control() const { return regs_[1]; }
@@ -266,6 +272,8 @@ private:
     UsbTopology topology_ = UsbTopology::kDirectXid;
     bool xid_attached_ = false;
     XidGamepadState xid_state_{};
+    std::array<uint8_t,18> xid_input_capabilities_{};
+    std::array<uint8_t,4> xid_output_capabilities_{};
     uint16_t xid_left_rumble_ = 0;
     uint16_t xid_right_rumble_ = 0;
     uint32_t hub_port1_status_ = 0;

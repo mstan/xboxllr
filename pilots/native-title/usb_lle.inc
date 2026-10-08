@@ -82,7 +82,7 @@ static DWORD WINAPI usb_clock_worker(void *unused)
 static void usb_clock_start(void)
 {
     if(!scheduler_enabled)stop("USB LLE requires the single guest CPU scheduler",0);
-    const char *error=pilot_usb_lle_host_bind(pilot_input_host_state,pilot_input_host_rumble);
+    const char *error=pilot_usb_lle_host_bind(pilot_input_host_state,pilot_input_host_rumble,pilot_input_host_caps);
     if(error)stop(error,0);
     HANDLE worker=CreateThread(NULL,0,usb_clock_worker,NULL,0,NULL);
     if(!worker)stop("USB LLE clock worker creation failed",GetLastError());

@@ -342,6 +342,19 @@ int main() {
     CHECK(hc.xid_input_reports() == aggregate_before_control_report + 1);
     CHECK(hc.xid_endpoint2_input_reports() == endpoint2_before_control_report);
 
+    // Configured peripheral capabilities cross the same real EP0 transport.
+    // In particular a keyboard-backed virtual pad must not advertise motors.
+    std::array<uint8_t,18> input_caps;input_caps.fill(0xff);input_caps[1]=0;
+    const std::array<uint8_t,4> output_caps{{0,0,0,0}};
+    hc.set_xid_capabilities(input_caps,output_caps);
+    response.clear();
+    submit_control(setup_packet(0xc1,0x01,0x0100,0,20),{},20,response,5);
+    CHECK(response.size()==20 && response[0]==0 && response[1]==20);
+    CHECK(std::equal(input_caps.begin(),input_caps.end(),response.begin()+2));
+    response.clear();
+    submit_control(setup_packet(0xc1,0x01,0x0200,0,6),{},6,response,5);
+    CHECK(response==std::vector<uint8_t>({0,6,0,0,0,0}));
+
     // The boot-facing diagnostic history is fixed-size: further valid EP0
     // transfers execute normally but cannot grow the trace.
     const size_t trace_before_fill = hc.ep0_trace_count();

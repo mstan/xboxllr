@@ -12,11 +12,12 @@ they do not substitute for our working LLE route.
 
 There are **nine scoped service-family acceptance gates** in this phase. Every
 family already has some implementation/test coverage, but that does not establish
-a complete LLE route for each native replacement. All nine remain open until
-their LLE route, independent qualification and matching HLE contract are recorded.
+a complete LLE route for each native replacement. Each closes only after its
+LLE route, independent qualification and matching HLE contract are recorded.
 This is not an estimate of missing implementation, a percentage of Xbox emulation,
 or a calendar forecast.
-The actual family count starts at **9 open / 0 closed** on 2026-10-08.
+The actual family count starts at **9 open / 0 closed** on 2026-10-08;
+the bounded controller-input gate now brings it to **8 open / 1 closed**.
 The owner requested **serial delivery from least complex to most complex**.
 Calendar conversion is the first small slice of the scheduling/time family;
 finishing it does not close that larger family. These ten delivery entries and
@@ -46,7 +47,7 @@ change the next controller-input dependency batch.
 | Delivery order | Service | Relative work / dependencies | State |
 | --- | --- | --- | --- |
 | 1 | Pure calendar conversion (scheduler/time slice) | Small: two original kernel routines; no hardware, IRQ or queue state | Complete, `.103`: both builds qualified; both original routines execute in actual Blinx, with interruption/menu return and reentry; [evidence](../pilots/native-title/CALENDAR-LLE.md) |
-| 2 | Controller input and interruption | XID reports plus USB initialization, DMA and interrupt dependencies | In progress, `.104`: original initialization, enumeration and XID reports execute through real pinned DMA and IRQ/DPC delivery. A quiet 190s run demonstrates Demo play, Start interruption, title return and Demo play reentry. Shared-page lifetime/concurrent-write tests pass; original observations correct HLE analog filtering and packet semantics. Native regression and remaining connection/capability/close comparison are pending. [Evidence and remaining scope](../pilots/native-title/INPUT-LLE.md) |
+| 2 | Controller input and interruption | XID reports plus USB initialization, DMA and interrupt dependencies | Complete for bounded Blinx port-0 automatic input, `.104`: actual original and HLE interruption/title/reentry, original and HLE hotplug/reopen/Start, original report/mask oracles, shared DMA lifetime and capability transport. 46/46 LLE and 40/40 HLE tests pass. Broader peripheral/timing scope remains explicit. [Evidence and limits](../pilots/native-title/INPUT-LLE.md) |
 | 3 | Display clock and vblank | Bounded clock/interrupt/callback family | Open |
 | 4 | Memory and resource lifetime | Cross-cutting pointer, page, alias and ownership semantics | Open |
 | 5 | Files, cache and installed media | File bytes/errors/order plus backing storage and mount lifetime | Open |

@@ -53,15 +53,21 @@ static void input_test_setup(void)
     /* Deterministic XInput provider independent of the user's launch choice. */
     input_host_is_keyboard();input_host_keyboard=0;input_replay_count=0;
     FILE *replay=tmpfile();CHECK(replay);
-    CHECK(fputs("0 000000000000000000000000000000000000\n20 1000ff00000000000000ff7f000000000000\n220 000000000000000000000000000000000000\n",replay)>=0);
-    rewind(replay);CHECK(input_replay_load(replay) && input_replay_count==3);CHECK(!fclose(replay));
+    CHECK(fputs("0 000000000000000000000000000000000000\n20 1000ff00000000000000ff7f000000000000\n220 000000000000000000000000000000000000\n300 disconnected\n400 000000000000000000000000000000000000\n",replay)>=0);
+    rewind(replay);CHECK(input_replay_load(replay) && input_replay_count==5);CHECK(!fclose(replay));
     uint8_t replay_pad[18];input_replay_sample(19,replay_pad);CHECK(!replay_pad[0] && !replay_pad[2]);
     input_replay_sample(20,replay_pad);CHECK(replay_pad[0]==0x10 && replay_pad[2]==255 && replay_pad[10]==255 && replay_pad[11]==127);
     input_replay_sample(219,replay_pad);CHECK(replay_pad[0]==0x10);
     input_replay_sample(220,replay_pad);CHECK(!replay_pad[0] && !replay_pad[2]);
+    memset(replay_pad,0xcc,18);
+    CHECK(input_replay_sample(300,replay_pad)==ERROR_DEVICE_NOT_CONNECTED);
+    for(unsigned i=0;i<18;++i)CHECK(replay_pad[i]==0xcc);
+    CHECK(input_replay_sample(399,replay_pad)==ERROR_DEVICE_NOT_CONNECTED);
+    CHECK(input_replay_sample(400,replay_pad)==ERROR_SUCCESS);
     input_replay_sample(10000,replay_pad);CHECK(!replay_pad[0] && !replay_pad[10]);
     uint8_t replay_caps[18],replay_rumble[4];CHECK(!pilot_input_host_caps(0,replay_caps,replay_rumble) && !memcmp(replay_rumble,"\0\0\0\0",4));
     CHECK(replay_caps[0]==255 && replay_caps[1]==0 && replay_caps[2]==255 && replay_caps[9]==255);
+    for(unsigned i=10;i<18;++i)CHECK(replay_caps[i]==255);
     CHECK(pilot_input_host_state(1,replay_pad)==ERROR_DEVICE_NOT_CONNECTED);
     replay=tmpfile();CHECK(replay && fputs("0 z00000000000000000000000000000000000\n",replay)>=0);
     rewind(replay);CHECK(!input_replay_load(replay));CHECK(!fclose(replay));input_replay_count=0;
@@ -172,6 +178,20 @@ static void test_input(void)
     input_test_presence[0]=1167; input_ports[0].next_poll=0;
     CHECK(input_test_call(PILOT_INPUT_XGetDeviceChanges,type,out,out+4,0)==1 && MEM32(out)==0 && MEM32(out+4)==1);
     CHECK(input_test_call(PILOT_INPUT_XInputOpen,type,0,0,0)==0 && input_test_last_error==1167);
+    /* Original GetDeviceChanges observations, including remove/reinsert
+     * between queries and independent changes on multiple ports. */
+    const uint32_t changes[][5]={{0,0,0,0,0},{1,1,0,1,0},{0,1,1,0,1},
+        {1,1,1,1,1},{3,2,1,2,0},{1,2,3,0,2},{5,7,6,5,6},{15,15,15,15,15}};
+    for(unsigned i=0;i<4;++i)input_ports[i].next_poll=UINT64_MAX;
+    for(unsigned i=0;i<sizeof(changes)/sizeof(changes[0]);++i) {
+        const uint32_t *row=changes[i];memcpy(memory+type,row,12);
+        CHECK(input_test_call(PILOT_INPUT_XGetDeviceChanges,type,out,out+4,0)==!!(row[3]|row[4]));
+        CHECK(MEM32(out)==row[3] && MEM32(out+4)==row[4]);
+        CHECK(MEM32(type)==row[0] && !MEM32(type+4) && MEM32(type+8)==row[0]);
+    }
+    MEM32(type)=5;MEM32(type+4)=15;MEM32(type+8)=10;
+    CHECK(input_test_call(PILOT_INPUT_XGetDevices,type,0,0,0)==5);
+    CHECK(MEM32(type)==5 && !MEM32(type+4) && MEM32(type+8)==5);
     puts("input contract: 22/25/70-byte ABI, mapping, poll cache, hotplug, stale handles, real feedback errors and 100 lifetimes passed");
 }
 static void test_input_failure(const char *kind)

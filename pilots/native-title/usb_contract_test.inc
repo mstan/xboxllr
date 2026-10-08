@@ -72,6 +72,20 @@ static void test_usb_lle(void)
     call_kernel(173,&image_address,1);image_pa=g_eax;
     CHECK(usb_dma_read(image_pa,&observed,4) && observed==0x55667788);
     image_pin[2]=1;call_kernel(175,image_pin,3);
+    /* Original capability requests use a driver-local stack buffer. Reserve
+     * the actual stack, retaining caller bytes and exact pin boundaries. */
+    commit(0x601f1000,0xf000);
+    CHECK(!pilot_io_device_stack(memory,0x601f1000,0xf000));
+    uint32_t stack_address=0x601ffe63,stack_pin[]={stack_address,6,0};
+    MEM32(stack_address)=0x87654321;
+    call_kernel(175,stack_pin,3);call_kernel(173,&stack_address,1);
+    uint32_t stack_pa=g_eax;
+    CHECK(usb_dma_read(stack_pa,&observed,4) && observed==0x87654321);
+    CHECK(!usb_dma_read(stack_pa-1,&observed,4));
+    observed=0xfedcba98;CHECK(usb_dma_write(stack_pa,&observed,4));
+    CHECK(MEM32(stack_address)==observed);
+    stack_pin[2]=1;call_kernel(175,stack_pin,3);
+    CHECK(!usb_dma_read(stack_pa,&observed,4));
     CHECK(usb_test_read(0)==0x10);
     uint32_t bytes=4096;call_kernel(165,&bytes,1);uint32_t buffer=g_eax;CHECK(buffer);
     call_kernel(173,&buffer,1);uint32_t pa=g_eax;CHECK(pa==(buffer&0x03ffffffu));

@@ -22,6 +22,8 @@ xlle::DualPic pic;
 bool pic_ready;
 PilotUsbHostRead host_read;
 PilotUsbHostRumble host_rumble;
+PilotUsbHostCaps host_caps;
+bool caps_bound;
 uint64_t output_reports,input_reports;
 uint64_t clock_ms()
 {
@@ -36,6 +38,14 @@ void advance()
         uint8_t report[18];uint32_t status=host_read(0,report);
         if(status && status!=ERROR_DEVICE_NOT_CONNECTED){failure="USB LLE host input poll failed";return;}
         controller->set_xid_connected(status==0);
+        if(status)caps_bound=false;
+        if(!status && !caps_bound) {
+            std::array<uint8_t,18> input;std::array<uint8_t,4> output;
+            status=host_caps(0,input.data(),output.data());
+            if(status==ERROR_DEVICE_NOT_CONNECTED){controller->set_xid_connected(false);return;}
+            if(status){failure="USB LLE host capabilities unavailable";return;}
+            controller->set_xid_capabilities(input,output);caps_bound=true;
+        }
         if(!status) {
             xlle::Ohci::XidGamepadState state;
             std::memcpy(&state.buttons,report,2);
@@ -59,12 +69,12 @@ void advance()
     }
 }
 }
-extern "C" const char *pilot_usb_lle_host_bind(PilotUsbHostRead read,PilotUsbHostRumble rumble)
+extern "C" const char *pilot_usb_lle_host_bind(PilotUsbHostRead read,PilotUsbHostRumble rumble,PilotUsbHostCaps caps)
 {
     AcquireSRWLockExclusive(&usb_lock);
     const char *error=nullptr;
-    if(host_read || !read || !rumble)error="USB LLE invalid/repeated host input binding";
-    else {host_read=read;host_rumble=rumble;}
+    if(host_read || !read || !rumble || !caps)error="USB LLE invalid/repeated host input binding";
+    else {host_read=read;host_rumble=rumble;host_caps=caps;}
     ReleaseSRWLockExclusive(&usb_lock);return error;
 }
 extern "C" const char *pilot_usb_lle_bind(PilotUsbDmaRead read,PilotUsbDmaWrite write,

@@ -1,17 +1,28 @@
-# Controller input LLE: active serial family
+# Controller input LLE: bounded Blinx family
 
 Tracked in `beads-xbox.1.104`, after calendar slice `.103`. The input family
-remains **open**. This document records an actual dependency check, not a
-qualified LLE input implementation.
+is **accepted for the exercised Blinx scope** below. Broader peripheral and
+timing coverage remains separate from this service-family milestone.
 
 ## Current checkpoint
 
 The original-input build executes USB initialization, enumeration and periodic
 XID reports through the shared OHCI/PIC, original IRQ gate, ISR and DPC. Host
 keyboard/XInput/replay reports enter the peripheral and actual pinned DMA.
-Original controller input has reached rendered Blinx Demo play. Full family
-qualification is still open; the native-input attract milestone remains the
-production path. See the report checkpoint below for evidence and limits.
+Original controller input reaches rendered Blinx Demo play, interruption,
+title return and reentry. Controlled unplug/replug also reaches the original
+disconnect callback, reenumerates and accepts Start afterwards. The native-input
+attract path remains the production selection. See the qualification below.
+
+Accepted scope: one Controller-S-shaped XID gamepad on port 0, automatic polling,
+the keyboard/replay input used by Blinx attract, and the shared host XInput
+conversion/capability/rumble interface under component tests. Real-device input
+is supported by that provider, but no new physical-controller observation or
+console hardware capture is claimed. Multiple attached ports, MUs/IR, manual
+polling, nonzero virtual-pad rumble, arbitrary VM DMA and exact hardware USB
+poll/NAK timing are outside this qualification. Their absence does not get a
+fabricated success. The original and native implementations are build-selected;
+no production double execution or live switching is introduced.
 
 ## Initial boundary (retained history)
 
@@ -377,14 +388,98 @@ Retained intermediate evidence:
   about 757 MB at 30s to 849 MB at 180s; different scene/cache populations make
   that insufficient to diagnose a leak or assert stable repeated loops.
 
-## Next bounded step
+## Connection/capability qualification - 2026-10-08
 
-Finish the native counterpart regression and game-owned reproducible pin. Qualify remaining
-connection/capability/close observations against the runnable original route.
-The currently implemented single port does not claim all Xbox peripherals,
-arbitrary VM DMA, manual polling or all interrupt instruction sequences.
+The original GetDevices/GetDeviceChanges oracle now covers eight authored
+connection histories, including removal/reinsertion between queries and
+independent port-mask changes. HLE matches their actual output and acknowledgement
+effects. Report/handle tests cover retained disconnected state and stale-handle
+isolation; the original title exercises real close/reopen through hotplug.
 
-Closure still requires matching HLE/LLE input effects and actual Blinx Start
-interruption, menu return and attract reentry with LLE input. This transport
-checkpoint does not close the family. Bundle related checks and retain one
-actual title validation per coherent dependency batch.
+The replay provider accepts an explicit `disconnected` sample, feeding the same
+host boundary as real device removal. Original removal first exposed an
+undiscovered XID callback; the complete original `00186866..001868a1` body was
+recovered with the pinned Phobos translator. Its hash/extent joins the private
+game revision. It is not replaced by a guessed cleanup routine.
+
+Capabilities now come from the same actual host provider in both modes. LLE
+returns those bits through real XID control transfers; its former fixed motor
+mask incorrectly advertised rumble on a keyboard-backed virtual pad. Virtual
+axis capabilities describe supported bits rather than a positive axis position.
+The original XDK remains responsible for its caller ABI; HLE retains the
+reviewed 25-byte layout. The separate live API qualification below also executes
+the original GetCapabilities and SetState bodies before and after reconnection.
+It does not qualify every capability/error combination.
+
+- LLE: `input-hotplug-recovered-20261008`, **70.094s**, seven captures, no guard.
+  Removal at 30s, reattachment at 35s, Start at 45s and rendered menu afterwards.
+  Executable SHA-256:
+  `3a4a914e9c351da63ea7e43572a2ac78379f382cfd6849897013694aaf6bca11`.
+- HLE: `input-hotplug-native-20261008`, **150.140s**, 15 captures, no guard.
+  Same replay; new handle `c5000002` after reattachment, Start opens the menu.
+  Native reconnection was observed at 35.063s. Its bounded empty-port polling
+  interval is 250ms plus caller scheduling; exact USB polling phase is not the
+  replacement contract. Executable SHA-256:
+  `244200b075583b71ebb17bc63cad7297eedf99dff29a3b0a7b352c0a6687f931`.
+- Both exits are intentional harness deadlines. The earlier separate 190s
+  LLE/HLE runs establish Demo play interruption/return/reentry; this hotplug
+  profile deliberately enters the menu and does not claim attract reentry.
+- Final suites: **46/46 LLE (19.36s)** and **40/40 HLE (17.62s)**. Both OHCI
+  tests pass, including configured capability bytes over actual EP0 transfers.
+  Original software oracle and native mask/packet/filter cases pass.
+- Game-owned regression at framework `7e47c6c`: 40/40 tests, **190.094s**,
+  19 captures, Demo play/Start/title/reentry; private game commit `267d88e`.
+
+The fixed periodic report model follows the inspected xemu behavior and the
+original driver's per-completion packet increment. Exact real-controller
+NAK/report cadence is not established by that source evidence. Neither these
+tests nor the successful attract run close long-run memory, display, audio or
+other service-family gates.
+
+### Live API and stack-DMA qualification
+
+`PILOT_INPUT_QUALIFICATION=ON` builds a separate test caller into the reviewed
+input wrapper. After the selected implementation really opens a controller, it
+calls that same implementation's capabilities and zero-rumble APIs, checks the
+25-byte output/70-byte feedback boundaries, and waits for actual completion.
+The default is OFF. Production never invokes this probe or a second input path.
+
+This caught a real missing dependency: original GetCapabilities puts a six-byte
+USB control buffer on its guest thread stack. `io_device_lle.c` now reserves
+runtime-owned stack ranges through original `NtAllocateVirtualMemory`, commits
+resident pages on demand, and runs original physical translation and page locks.
+DMA uses the same canonical native bytes as image/pool buffers. Mere host
+commitment does not confer ownership; even a neighboring committed page inside
+reservation alignment slack is rejected. Thread stacks currently persist until
+process exit; reclamation is still part of the later lifetime family.
+
+`tools/native_input_dependencies_reference.py` independently executes the
+original fixed stack reservation, commit, translation, repeated PFN pin rules
+and release without replacement callees. Native transport tests cover retained
+stack bytes, exact pinned ranges, device writes and revoked DMA after unpinning.
+The unowned-stack case must stop explicitly.
+
+- Original live API run: `input-api-stack-20261008`, **60.093s**, no guard,
+  intentional harness deadline. Both initial open and reopen return the same
+  configured 25-byte capabilities. Initial feedback returns pending (`997`)
+  and actually completes; the reconnected request completes synchronously.
+  Executable SHA-256:
+  `ad7dcc1c24d4ac9cd35123d3612364457ef775770d029b80116a34464a7ff099`.
+- The corresponding native test build returns identical capabilities and real
+  successful zero-rumble completion on both opens. This virtual peripheral has
+  zero motor capability; no physical motor observation is claimed.
+  `input-api-native-20261008`: **60.078s**, no guard, intentional deadline;
+  executable SHA-256
+  `e0e65a21e6af1ce099f72acaa5a90e962a37a9caf993ca232e87a790f5890661`.
+- After stack ownership and negative guards: **46/46 LLE tests (19.79s)**.
+
+The earlier captured production runs supply visual attract and hotplug evidence;
+these separate API probes add caller-boundary evidence, not new visual or
+endurance claims.
+
+## Next serial family
+
+Proceed to display clock/vblank using the existing PCRTC/IRQ floor and original
+display routines. Retain the input runs as regression evidence; do not repeat
+them for documentation-only changes or broaden them into exhaustive peripheral
+emulation before advancing the bounded burndown.
