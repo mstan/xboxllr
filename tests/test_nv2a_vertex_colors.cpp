@@ -343,11 +343,42 @@ static void texture_mips() {
     }
 }
 
+static void output_defaults() {
+    // All masks retain unwritten (0,0,0,1) lanes. Position W is deliberately
+    // omitted while its input is 7; each invocation must start from W=1.
+    const float value[]={.25f,.5f,.75f,.125f};
+    for(bool direct:{false,true})for(bool compiled:{false,true}) {
+        Fixture f(direct);f.gpu->set_vsh_compile_enabled(compiled);
+        for(unsigned i=1;i<4;++i)f.put(Fixture::positions+i*16+12,bits(7));
+        for(unsigned mask=0;mask<16;++mask) {
+            const uint32_t code[]={
+                0,0x0020001b,0x08000000,0x0000e800,
+                0,0x0020001b|(96u<<13),0x0c000000,(mask<<12)|0x819u};
+            f.emit(0x1e94,2);f.emit(0x1e9c,0);f.emit(0x1ea0,0);
+            for(unsigned i=0;i<8;++i)f.emit(0xb00+i*4,code[i]);
+            f.emit(0x1ea4,96);
+            for(unsigned i=0;i<4;++i)f.emit(0xb80+i*4,bits(value[i]));
+            f.emit(0x176c,0);f.draw(0);++cases;
+            CHECK(f.fault.empty());
+            const auto pixel=f.get(Fixture::frame+(16*64+16)*4);
+            const auto diffuse=f.gpu->last_transformed_diffuse();
+            for(unsigned lane=0;lane<4;++lane) {
+                const float expected=mask&(8>>lane)?value[lane]:lane==3?1.0f:0.0f;
+                CHECK(diffuse[lane]==expected);
+                const unsigned shift=lane==3?24:16-lane*8;
+                CHECK(std::abs(int((pixel>>shift)&255)-int(std::lround(expected*255)))<=1);
+            }
+            CHECK(f.get(Fixture::report+12)==0 && f.get(Fixture::frame)==0xff102030);
+        }
+    }
+}
+
 int main() {
     packed_formats(); surface_reuse(); immediate_control();
     noise_control_boundary();
     programmable_fog();
     texture_mips();
+    output_defaults();
     std::printf("nv2a_vertex_colors: %u draw cases, %u failures\n", cases, failures);
     return failures ? 1 : 0;
 }

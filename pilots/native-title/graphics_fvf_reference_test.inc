@@ -8,6 +8,7 @@ static int check_fvf_reference(const char *path)
     const float positions[][4]={{8,8,.375f,1},{8,56,.375f,.5f},{56,8,.375f,.25f},{56,56,.375f,2},{95.5f,440.5f,0,0}};
     for(unsigned sample=0;sample<5;++sample) {
         Nv2aVshCPUFullExecutionState storage={0};Nv2aVshExecutionState state=nv2a_vsh_emu_initialize_full_execution_state(&storage);
+        for(unsigned reg=0;reg<13;++reg)storage.output_regs[reg*4+3]=1;
         for(unsigned i=0;i<16;++i)storage.input_regs[i*4+3]=1;
         memcpy(storage.input_regs,positions[sample],16);memcpy(storage.context_regs,constants,sizeof(constants));
         for(unsigned i=0;i<header[0];++i) {

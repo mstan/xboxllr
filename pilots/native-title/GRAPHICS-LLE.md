@@ -635,10 +635,68 @@ Reproduction uses the existing dependency setup:
 
 This qualifies the bounded authored texture component. It does not qualify
 complete retained scene pixels: enabled DXT1 noise still has its explicit
-hardware guard, captured unwritten Q/default initialization is not assumed,
+hardware guard, complete captured combiner/raster composition remains open,
 and variable perspective footprints, broader texture layouts and complete
 combiner/raster composition need their own gates. Exact silicon LOD/rounding,
 filter crossover rules and enabled-noise error bounds stay deferred last.
+
+## Documented programmable-output defaults
+
+The maintained programmable routes now initialize result registers to
+`(0,0,0,1)`, following NVIDIA's
+[NV_vertex_program result-register specification](https://registry.khronos.org/OpenGL/extensions/NV/NV_vertex_program.txt).
+The pinned xemu `pgraph/glsl/vsh.c` independently uses this initialization for
+position, colors and texture coordinates. This establishes the maintained
+software contract; it is not a new Xbox hardware capture.
+
+LLE previously initialized every output lane to zero. Native HLE initialized
+raw outputs to zero but patched unwritten position W and texture Q at its
+raster interface. Both raw probes and rasterization now retain the documented
+defaults through masked writes, including unwritten color alpha. LLE's
+compiled read-before-write plan, interpreter, context-writing execution,
+verification reference and optional GPU program templates use the same
+initialization. Temporary/address registers remain zero. The native path
+continues using cached GPU shaders and deferred uploads; no LLE execution is
+added to title rendering.
+
+The optional `--defaults-only` corpus in
+`tools/native_shader_arithmetic_reference.py` independently authors all 16
+diffuse write masks over four input vectors. Its 64 complete original-XDK/LLE
+draws and 64 native GPU draws check color/specular defaults, position W,
+partially written texture coordinates and all four color channels in pixels.
+Native probes compare 1,536 color/texture lanes in addition to position checks.
+`tools/native_texture_reference.py --implicit-q` adds eight ARGB/XRGB/DXT1
+sampling cases with poisoned input W/Q=31 and unwritten output W/Q. Both
+routes execute 16 draws and compare 13,776 interior pixels apiece against
+authored sampling expectations. This tests the effect of the defaults on real
+texture samples rather than accepting agreement between shader implementations.
+
+Permanent C++ coverage adds 64 masked-output draws across direct/callback
+memory and compiled/interpreted execution, for 490 total vertex-color cases.
+The obsolete immediate-quad diagnostic expectation is corrected from all-zero
+outputs to `(0,0,0,1)`. Focused LLE checks pass 9/9 and native graphics checks
+pass 6/6; the audio suite is not repeated. Retained native arithmetic (1,344
+cases / 10,752 lanes), textures (258 cases / 444,276 interior pixels), and all
+96 original-submission scene shader draws / 29,424 written lanes also pass.
+Private evidence uses the `build/blinx/output-defaults-*` prefix.
+
+The shipping executable SHA-256
+`df7caa88118ffb3972809c54e771af5af9e59d6eed807997637a65aed0cb94c6`
+passes one 250.281s Blinx run with 23 captured presents and all five real input
+transitions. Inspection confirms first demo frames 9–11, title frame 13, and
+reentry/playback frames 19–23. No STOP/FAULT occurs; return code 1 is the
+harness's intentional bounded termination. Evidence is
+`output-defaults-production-reentry-20261009/run.aot-private.json` and its
+retained log/contact sheet. This checks the native title regression; it does
+not establish original timing, FPS, A/V or full scene-pixel agreement.
+
+Reproduce the new original corpora with the existing arithmetic and texture
+commands above, adding `--defaults-only` or `--implicit-q` respectively and
+fresh `--output` / `--native-cases` paths. Execute those binary expectations
+with `pilot_shader_test --shader-arithmetic-reference` and
+`pilot_shader_test --texture-reference`. Captured unwritten native lanes from
+older runs remain historical observations, not independent hardware goldens.
+Full scene pixels and the enabled-noise hardware gate remain open.
 
 ## Remaining offline work
 

@@ -23,7 +23,7 @@ static int check_shader_arithmetic_reference(const char *path)
     for(unsigned sample=0;sample<header[2];++sample) {
         uint32_t metadata[4],code[136*4];float input[4],constants[32][4],expected[8],output[13][4];
         CHECK(fread(metadata,sizeof(metadata),1,file)==1);unsigned count=metadata[0];
-        CHECK(count && count<=136 && !metadata[1] && !metadata[2] && !metadata[3]);
+        CHECK(count && count<=136 && metadata[1]<=1 && !metadata[2] && !metadata[3]);
         CHECK(fread(code,16,count,file)==count && fread(input,16,1,file)==1 &&
             fread(constants,16,32,file)==32 && fread(expected,sizeof(expected),1,file)==1);
         if(count!=previous_count || memcmp(previous,code,count*16)) {
@@ -43,6 +43,14 @@ static int check_shader_arithmetic_reference(const char *path)
         streams[0]=(struct PilotVertexProbeStream){positions+32,32};
         streams[1]=(struct PilotVertexProbeStream){attributes+32,32};
         CHECK(pilot_gfx_shader_probe(handle,streams,1,NULL,&output[0][0])==0);
+        if(metadata[1]) {
+            CHECK(output[0][0]==8 && output[0][1]==8 && output[0][2]==10 && output[0][3]==1);
+            for(unsigned lane=0;lane<4;++lane) {
+                CHECK(output[9][lane]==(lane<2?input[lane]:lane==3?1:0));
+                for(unsigned reg=10;reg<13;++reg)CHECK(output[reg][lane]==(lane==3?1:0));
+                comparisons+=4;
+            }
+        }
         for(unsigned lane=0;lane<8;++lane) {
             float actual=output[3+lane/4][lane%4];
             if(!isfinite(actual) || fabsf(actual-expected[lane])>2e-6f*fmaxf(1,fabsf(expected[lane]))) {
@@ -53,7 +61,7 @@ static int check_shader_arithmetic_reference(const char *path)
         unsigned char pixels[64*64*4];
         CHECK(pilot_gfx_clear(D3DCLEAR_TARGET,0xff102030,1,0)==0 && pilot_gfx_draw_vertices(5,1,3)==0);
         CHECK(pilot_gfx_readback(pixels,sizeof(pixels))==0);
-        for(unsigned lane=0;lane<3;++lane) {
+        for(unsigned lane=0;lane<4;++lane) {
             int want=(int)lroundf(fminf(1,fmaxf(0,expected[lane]))*255);
             CHECK(abs((int)pixels[(16*64+16)*4+lane]-want)<=1);
         }

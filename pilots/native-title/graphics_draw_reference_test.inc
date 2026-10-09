@@ -20,6 +20,7 @@ static int check_draw_capture(const char *path)
     double maximum=0;unsigned comparisons=0;
     for(unsigned vertex=0;vertex<header[4];++vertex) {
         Nv2aVshCPUFullExecutionState storage={0};Nv2aVshExecutionState state=nv2a_vsh_emu_initialize_full_execution_state(&storage);
+        for(unsigned reg=0;reg<13;++reg)storage.output_regs[reg*4+3]=1;
         memcpy(storage.context_regs,constants,sizeof(constants));
         for(unsigned reg=0;reg<16;++reg) {
             struct PilotVertexElement element=elements[reg];if(element.type==2)continue;

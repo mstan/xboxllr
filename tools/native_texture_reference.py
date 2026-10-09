@@ -20,9 +20,9 @@ def bits(value):
     return struct.unpack('<I',struct.pack('<f',value))[0]
 
 
-def program():
-    return [0,0x0020001b,0x08000000,0x0000f800,
-            0,0x0020021b,0x08000000,0x0000f849]  # oT0=v1, explicit Q=1
+def program(implicit_q=False):
+    return [0,0x0020001b,0x08000000,0x0000e800 if implicit_q else 0x0000f800,
+            0,0x0020021b,0x08000000,0x0000c849 if implicit_q else 0x0000f849]
 
 
 def image_chain(dxt,pattern,base=8):
@@ -115,7 +115,7 @@ def run(args):
         ref.put(OBJECT,1,0x10,0,0,0)
         for i in range(16):ref.put(OBJECT+0x14+i*16,0,0,2,0)
         ref.put(OBJECT+0x14,0,0,0x42);ref.put(OBJECT+0x24,0,16,0x42)
-        ref.bind_program(program())
+        ref.bind_program(program(args.implicit_q))
         surface=OBJECT+0x1c00;ref.put(surface,0x01050001,FRAME,0,0x00010c29,0x0303f03f)
         for offset in (0x21b4,0x21c0,0x21c4):ref.put(ref.device+offset,surface)
         ref.cpu.mem_write(0x141d88,bytes(166*4))
@@ -123,7 +123,13 @@ def run(args):
         state[0]=0x18200000;state[34]=0x08200000;state[26]=state[45]=0xc00;state[53]=1
         state[8]=0xc;state[9]=0x1c00;state[54]=1
         ref.put(pixel,1,1,pixel+12,*state);ref.call('D3DDevice_SetPixelShader',[pixel])
-        for row in cases():
+        samples=list(cases())
+        if args.implicit_q:
+            # A small sampling corpus tests observable default Q/W. Poisoned
+            # input W/Q must be ignored; coordinates/expectations stay authored.
+            samples=[row for row in samples if row.get('w',[1,1,1])==[1,1,1]
+                and row.get('q',[1,1,1])==[1,1,1]][::32]
+        for row in samples:
             base=row.get('base',8);log=base.bit_length()-1
             images,encoded=image_chain(row['dxt'],row['pattern'],base)
             if row.get('xrgb'):
@@ -138,8 +144,9 @@ def run(args):
                 ref.call('D3DDevice_SetTextureStageStateNotInline',[0,stage_state,value])
             for i,(x,y) in enumerate(((8,8),(56,8),(8,56)),1):
                 w=row.get('w',[1,1,1])[i-1];q=row.get('q',[1,1,1])[i-1]
-                ref.floats(STREAMS+i*32,x,y,10,w,(row['origin'][0]+(x-8)*row['rho']/base)*q,
-                    (row['origin'][1]+(y-8)*row['rho']/base)*q,0,q)
+                ref.floats(STREAMS+i*32,x,y,10,31 if args.implicit_q else w,
+                    (row['origin'][0]+(x-8)*row['rho']/base)*q,
+                    (row['origin'][1]+(y-8)*row['rho']/base)*q,0,31 if args.implicit_q else q)
             before=count(ref.gpu,1)
             try:_,methods=ref.draw(1,state_dirty=None)
             except AssertionError:
@@ -173,11 +180,12 @@ if __name__=='__main__':
     for name in ('xbe','binding','library','dependencies','output'):parser.add_argument('--'+name,type=Path,required=True)
     parser.add_argument('--inspect',action='store_true')
     parser.add_argument('--native-cases',type=Path)
+    parser.add_argument('--implicit-q',action='store_true')
     args=parser.parse_args();handles=[os.add_dll_directory(str(args.dependencies.resolve()))]
     result=run(args);args.output.write_text(json.dumps(result,indent=2)+'\n')
     if args.native_cases:
         with args.native_cases.open('wb') as file:
-            file.write(struct.pack('<4I',0x54584c58,1,len(result['cases']),0))
+            file.write(struct.pack('<4I',0x54584c58,1,len(result['cases']),int(args.implicit_q)))
             for row in result['cases']:
                 base=row.get('base',8);images,encoded=image_chain(row['dxt'],row['pattern'],base)
                 if row.get('xrgb'):

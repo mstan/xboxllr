@@ -5,8 +5,11 @@ Instruction fields follow XboxDevWiki; ordinary finite-value math follows
 NVIDIA NV_vertex_program/1_1. This does not qualify silicon rounding, exceptional
 floats, or ARL values close to integer boundaries. No shared shader decoder or
 emulator is used to produce the expected values.
+The optional defaults corpus uses the documented NVIDIA result-register
+initialization; it is software-contract evidence, not an Xbox silicon capture.
 """
 import argparse
+import ctypes
 import json
 import math
 import os
@@ -70,6 +73,18 @@ def ilu_value(op,c):
 
 
 def cases(group):
+    if group=='defaults':
+        for mask in range(16):
+            for inputs in INPUTS:
+                code=[0,0x0020001b,0x08000000,0x0000e800,  # oPos.xyz=v0
+                      0,0x0020021b,0x08000000,(mask<<12)|0x818,  # oD0 mask=v1
+                      0,0x0020021b,0x08000000,0x0000c849]  # oT0.xy=v1
+                defaults=(0,0,0,1)
+                expected=[inputs[0][lane] if mask&(8>>lane) else defaults[lane] for lane in range(4)]
+                yield dict(group=group,mac=1,ilu=0,mask=mask,modifier=MODIFIERS[0],
+                    input=list(inputs[0]),constants=[[0,0,0,0] for _ in range(32)],code=code,
+                    expected=expected+list(defaults))
+        return
     operations={'mac':[(op,0) for op in (1,2,3,4,5,6,7,9,10)],
         'ilu':[(0,op) for op in (1,2,3,4)],
         'paired':[(2,1),(5,1),(2,4),(2,3),(5,4),(2,2)],'arl':[(13,0)]}[group]
@@ -109,7 +124,8 @@ def cases(group):
 
 def run(args):
     rows=[]
-    for group in ('mac','ilu','paired','arl'):
+    groups=('defaults',) if args.defaults_only else ('mac','ilu','paired','arl')
+    for group in groups:
         ref=Reference(args)
         try:
             ref.resource(OBJECT+0x1000,STREAMS);ref.resource(OBJECT+0x1020,STREAMS+0x1000)
@@ -128,6 +144,16 @@ def run(args):
                 ref.call('D3DDevice_SetVertexShaderConstantNotInline',[32*4],
                          ((UC_X86_REG_ECX,88),(UC_X86_REG_EDX,data)))
                 output,_=ref.draw(1)
+                if group=='defaults':
+                    observe=ref.lib.xlle_nv2a_reference_vertices
+                    observe.argtypes=[ctypes.c_void_p,ctypes.POINTER(ctypes.c_float),ctypes.c_uint32]
+                    observe.restype=ctypes.c_uint32
+                    batch=(ctypes.c_float*(3*28))()
+                    assert observe(ref.gpu,batch,3)==3
+                    raw=list(batch)[-28:]
+                    assert raw[:4]==[8,56,10,1],raw
+                    assert raw[12:16]==row['input'][:2]+[0,1],raw
+                    assert raw[16:28]==[0,0,0,1]*3,raw
                 for got,want in zip(output[4:12],row['expected']):
                     assert math.isfinite(got) and abs(got-want)<=2e-6*max(1,abs(want)),(group,row['mac'],row['ilu'],row['mask'],row['modifier'],row['input'],row['expected'],output)
                 color=ref.get(FRAME+(16*64+16)*4)[0]
@@ -138,8 +164,9 @@ def run(args):
             ref.set_stream(1,0,0);ref.set_stream(0,0,0)
         finally:
             ref.close()
-    return dict(xbe_sha256=XBE_SHA,device_lifetimes=4,cases=rows,
-        scope='ordinary finite shader arithmetic, masks/swizzles/negation/paired issue/relative addressing; original submission fast paths')
+    return dict(xbe_sha256=XBE_SHA,device_lifetimes=len(groups),cases=rows,
+        scope='documented result defaults and all color masks' if args.defaults_only else
+            'ordinary finite shader arithmetic, masks/swizzles/negation/paired issue/relative addressing; original submission fast paths')
 
 
 if __name__=='__main__':
@@ -147,6 +174,7 @@ if __name__=='__main__':
     for name in ('xbe','binding','library','dependencies','output'):
         parser.add_argument('--'+name,type=Path,required=True)
     parser.add_argument('--native-cases',type=Path)
+    parser.add_argument('--defaults-only',action='store_true')
     args=parser.parse_args()
     dependency_handles=[os.add_dll_directory(str(args.dependencies.resolve()))]
     result=run(args)
@@ -155,9 +183,9 @@ if __name__=='__main__':
         with args.native_cases.open('wb') as file:
             file.write(struct.pack('<4I',0x41564c58,1,len(result['cases']),0))
             for row in result['cases']:
-                file.write(struct.pack('<4I',len(row['code'])//4,0,0,0))
+                file.write(struct.pack('<4I',len(row['code'])//4,int(args.defaults_only),0,0))
                 file.write(struct.pack('<'+'I'*len(row['code']),*row['code']))
                 file.write(struct.pack('<4f',*row['input']))
                 file.write(struct.pack('<128f',*(v for vector in row['constants'] for v in vector)))
                 file.write(struct.pack('<8f',*row['expected']))
-    print(f"PASS: {len(result['cases'])} original-submission/LLE shader arithmetic draws across four device lifetimes")
+    print(f"PASS: {len(result['cases'])} original-submission/LLE shader draws across {result['device_lifetimes']} device lifetimes")

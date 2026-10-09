@@ -37,7 +37,7 @@ void main() {
         if (code == 13u || code >= 17u) { statuses[index] = 2u; return; }
     }
     for (uint i = 0u; i < 12u; ++i) temps[i] = uvec4(0u);
-    for (uint i = 0u; i < 13u; ++i) regs[i] = uvec4(0u);
+    for (uint i = 0u; i < 13u; ++i) regs[i] = uvec4(0u, 0u, 0u, 0x3f800000u);
     bool supported = true;
     for (uint i = 0u; i < count; ++i) {
         Op op = operations[begin + i];

@@ -3,13 +3,14 @@ static int check_texture_reference(const char *path)
 {
     FILE *file=fopen(path,"rb");CHECK(file);uint32_t header[4];
     CHECK(fread(header,sizeof(header),1,file)==1);
-    CHECK(header[0]==0x54584c58 && header[1]==1 && header[2] && header[2]<=65536 && !header[3]);
+    CHECK(header[0]==0x54584c58 && header[1]==1 && header[2] && header[2]<=65536 && header[3]<=1);
     uint32_t viewport[]={0,0,64,64,0,0x3f800000};CHECK(!pilot_gfx_viewport(viewport));
     pilot_gfx_set_state(D3DRS_ZENABLE,0);pilot_gfx_set_state(D3DRS_ALPHABLENDENABLE,0);
     pilot_gfx_set_state(D3DRS_ALPHATESTENABLE,0);pilot_gfx_set_state(D3DRS_CULLMODE,D3DCULL_NONE);
     pilot_gfx_set_state(D3DRS_FOGENABLE,0);
     for(unsigned i=0;i<4;++i)pilot_gfx_texture_bind(i,0);
-    const uint32_t code[]={0,0x0020001b,0x08000000,0x0000f800,0,0x0020021b,0x08000000,0x0000f849};
+    const uint32_t code[]={0,0x0020001b,0x08000000,header[3]?0x0000e800:0x0000f800,
+        0,0x0020021b,0x08000000,header[3]?0x0000c849:0x0000f849};
     struct PilotVertexElement elements[16]={0};
     elements[0]=(struct PilotVertexElement){0x42,0,0};elements[1]=(struct PilotVertexElement){0x42,0,16};
     uint32_t handle,vertex;unsigned char bytes[4*32]={0};
@@ -40,8 +41,8 @@ static int check_texture_reference(const char *path)
         uint32_t bias;memcpy(&bias,params+1,4);pilot_gfx_set_texture_state(0,D3DTSS_MIPMAPLODBIAS,bias);
         pilot_gfx_set_texture_state(0,D3DTSS_MAXANISOTROPY,1);pilot_gfx_set_texture_state(0,D3DTSS_BORDERCOLOR,0x7f123456);
         for(unsigned i=0;i<3;++i) {
-            const float position[4]={xy[i][0],xy[i][1],10,w[i]};
-            const float texcoord[4]={(params[2]+(xy[i][0]-8)*params[0]/meta[8])*q[i],(params[3]+(xy[i][1]-8)*params[0]/meta[8])*q[i],0,q[i]};
+            const float position[4]={xy[i][0],xy[i][1],10,header[3]?31:w[i]};
+            const float texcoord[4]={(params[2]+(xy[i][0]-8)*params[0]/meta[8])*q[i],(params[3]+(xy[i][1]-8)*params[0]/meta[8])*q[i],0,header[3]?31:q[i]};
             memcpy(bytes+(i+1)*32,position,16);memcpy(bytes+(i+1)*32+16,texcoord,16);
         }
         pilot_gfx_vertex_upload(vertex,bytes,sizeof(bytes));unsigned char pixels[64*64*4];

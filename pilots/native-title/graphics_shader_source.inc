@@ -105,7 +105,7 @@ static char *shader_source(const uint32_t *code,unsigned count,const struct Pilo
 {
     struct ShaderText body={calloc(1,262144),0,262144},source={calloc(1,262144),0,262144};
     if(!body.data || !source.data) {free(body.data);free(source.data);return NULL;}
-    *used=0;unsigned written[13]={0};
+    *used=0;
     for(unsigned i=0;i<count;++i) {
         const uint32_t *slot=code+i*4;
         /* Protect the borrowed decoder's opcode lookup before it indexes. */
@@ -113,14 +113,6 @@ static char *shader_source(const uint32_t *code,unsigned count,const struct Pilo
             pilot_d3d_backend_stop("invalid shader opcode/end boundary");
         Nv2aVshStep step={0};
         if(nv2a_vsh_parse_step(&step,slot)!=NV2AVPR_SUCCESS)pilot_d3d_backend_stop("NV2A shader decode failed");
-        const Nv2aVshOperation *operations[]={&step.mac,&step.ilu};
-        for(unsigned operation=0;operation<2;++operation)if(operations[operation]->opcode)
-            for(unsigned output=0;output<2;++output) {
-                const Nv2aVshOutput *value=&operations[operation]->outputs[output];
-                if(value->type==NV2ART_OUTPUT && value->index<13)written[value->index]|=
-                    value->index==5 && value->writemask ? 8 : value->writemask;
-                if(value->type==NV2ART_TEMPORARY && value->index==12)written[0]|=value->writemask;
-            }
         shader_text(&body,"{ /* slot %u */\n",i);
         /* Both operations consume the old register values before either writes. */
         shader_value(&body,&step.mac,"mac",used);shader_value(&body,&step.ilu,"ilu",used);
@@ -140,7 +132,7 @@ static char *shader_source(const uint32_t *code,unsigned count,const struct Pilo
     for(unsigned i=0;i<13;++i)if(shader_output_widths[i])
         shader_text(&source,"%s o%u:%s%u;\n",shader_output_widths[i]==1?"float":"float4",i,shader_semantics[i],shader_semantic_indices[i]);
     shader_text(&source,"};Output main(Input input){float4 R[12];float4 O[13];int a0=0;\n"
-        "[unroll]for(int j=0;j<12;++j)R[j]=0;[unroll]for(int j=0;j<13;++j)O[j]=0;\n");
+        "[unroll]for(int j=0;j<12;++j)R[j]=0;[unroll]for(int j=0;j<13;++j)O[j]=float4(0,0,0,1);\n");
     for(unsigned i=0;i<16;++i)if(*used&(1u<<i)) {
         unsigned type=elements[i].type;
         shader_text(&source,"float4 v%u=",i);
@@ -165,15 +157,12 @@ static char *shader_source(const uint32_t *code,unsigned count,const struct Pilo
         "float4 tex0:TEXCOORD0;float4 tex1:TEXCOORD1;float4 tex2:TEXCOORD2;float4 tex3:TEXCOORD3;"
         "float fog:TEXCOORD4;float4 viewpos:TEXCOORD5;float4 back0:TEXCOORD6;float4 back1:TEXCOORD7;float point_size:PSIZE0;};\n"
         "RasterOutput raster_main(Input input){Output raw=main(input);RasterOutput result;\n");
-    /* The raw diagnostic preserves decoder initialization. At the raster
-     * interface an unwritten homogeneous component is the conventional 1;
-     * authored W/Q values are retained, including perspective interpolation. */
-    if(!(written[0]&1))shader_text(&source,"raw.o0.w=1;\n");
+    /* Raw probes and rasterization use the same result-register defaults.
+     * Masked writes retain those defaults, including color alpha and Q. */
     shader_text(&source,"result.pos=float4((raw.o0.xyz*RasterScale.xyz+RasterOffset.xyz)*raw.o0.w,raw.o0.w);\n"
         "result.diffuse=saturate(raw.o3);result.specular=saturate(raw.o4);\n");
     for(unsigned i=0;i<4;++i) {
         shader_text(&source,"result.tex%u=raw.o%u;\n",i,i+9);
-        if(!(written[i+9]&1))shader_text(&source,"result.tex%u.w=1;\n",i);
     }
     shader_text(&source,"result.fog=program_vertex_fog(raw.o5);result.viewpos=float4(0,0,-raw.o5,1);"
         "result.back0=saturate(raw.o7);result.back1=saturate(raw.o8);result.point_size=raw.o6;return result;}\n");

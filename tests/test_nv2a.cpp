@@ -4435,9 +4435,9 @@ int main() {
                                               0.0f, 1.0f}}));
                 CHECK(immediate_sample->immediate_quad_opos[vertex] == quad[vertex]);
                 CHECK(immediate_sample->immediate_quad_od0[vertex] ==
-                      (std::array<float, 4>{}));
+                      (std::array<float, 4>{{0.0f, 0.0f, 0.0f, 1.0f}}));
                 CHECK(immediate_sample->immediate_quad_ot0[vertex] ==
-                      (std::array<float, 4>{}));
+                      (std::array<float, 4>{{0.0f, 0.0f, 0.0f, 1.0f}}));
                 CHECK(immediate_sample->immediate_quad_raster_opos[vertex][0] ==
                       quad[vertex][0]);
                 CHECK(immediate_sample->immediate_quad_raster_opos[vertex][1] ==

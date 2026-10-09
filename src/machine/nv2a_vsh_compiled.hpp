@@ -154,13 +154,13 @@ inline void vsh_store_operand(const VshCompiledOp& op, unsigned o,
 }
 
 // The result of the read-before-write analysis the compiled form makes
-// possible (beads-xbox.1.15.11). The interpreter path zero-fills 13 output
+// possible (beads-xbox.1.15.11). The interpreter initializes 13 output
 // registers, 12 temporaries and a0 -- 416 bytes -- on EVERY vertex, 38 337 230
 // times per canonical run, because any of them can be read before the program
 // writes it and their initial value is then observable. A straight-line program
 // with no branches makes that question decidable exactly: walk the steps in
-// order, and a register lane needs zeroing only if some operand reads it before
-// any operation writes it. The seven output registers the DEVICE reads back
+// order, and a register lane needs initialization only if an operand reads it
+// before any operation writes it. The seven output registers the DEVICE reads back
 // afterwards -- position, diffuse, specular and the four texture coordinates --
 // are added unconditionally unless the program writes all four of their lanes.
 // The scalar fog output is also consumed, requiring its X lane to be defined.
@@ -168,14 +168,15 @@ inline void vsh_store_operand(const VshCompiledOp& op, unsigned o,
 //
 // This is a pure removal of stores whose value is never read. It cannot change
 // output, and `--nv2a-vsh-verify` checks that against the interpreter, which
-// zeroes everything, on the real programs.
+// initializes every register, on the real programs. NVIDIA result-register
+// defaults are (0,0,0,1); temporaries and the address register remain zero.
 struct VshZeroPlan {
     uint16_t temp_mask = 0xFFF;    // r0-r11
     uint16_t output_mask = 0x1FFF;  // o0-o12
     bool address = true;            // a0
 };
 
-// Zero exactly the registers the plan names. `output` is 13 * 4 floats,
+// Initialize exactly the registers the plan names. `output` is 13 * 4 floats,
 // `temp` is 12 * 4, `address` is 4.
 inline void vsh_apply_zero_plan(const VshZeroPlan& plan, float* output,
                                 float* temp, float* address) {
@@ -185,7 +186,7 @@ inline void vsh_apply_zero_plan(const VshZeroPlan& plan, float* output,
         dst[0] = 0.0f;
         dst[1] = 0.0f;
         dst[2] = 0.0f;
-        dst[3] = 0.0f;
+        dst[3] = 1.0f;
     }
     for (unsigned mask = plan.temp_mask; mask; mask &= mask - 1u) {
         const unsigned index = static_cast<unsigned>(__builtin_ctz(mask));

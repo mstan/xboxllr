@@ -18,6 +18,7 @@ static int check_scalar_address_reference(void)
     for(unsigned sample=0;sample<8;++sample) {
         Nv2aVshCPUFullExecutionState storage={0};
         Nv2aVshExecutionState state=nv2a_vsh_emu_initialize_full_execution_state(&storage);
+        for(unsigned reg=0;reg<13;++reg)storage.output_regs[reg*4+3]=1;
         memcpy(storage.context_regs,constants,sizeof(constants));
         storage.input_regs[0]=input[sample];
         for(unsigned i=0;i<2;++i) {

@@ -33,6 +33,15 @@ draws and 516 native GPU draws, with 444,276 interior pixels checked on each
 route. Mip/filter/bias/clamp state executes on LLE; HLE preserves native GPU
 sampling with a cached base-mip view for LOD0 filtering. Complete scene pixels
 remain open, including the deferred enabled-noise bound and broader composition.
+Programmable-output defaults now agree between raw probes and rasterization:
+unwritten position W, texture Q and color alpha retain `(0,0,0,1)` through
+masked writes. Independent coverage adds 64 original and native color-mask
+draws plus 16 original and native texture draws / 13,776 interior pixels on
+each route. These qualify the documented software contract; complete scene
+pixels and Xbox silicon precision remain open.
+The updated native executable passes one 250.281s attract/interruption/title/
+reentry check with 23 presents and all five real replay transitions, without
+STOP/FAULT. The bounded harness termination is intentional.
 The updated executable passes a 250.422s/23-present attract/interruption/reentry
 regression with all five real input transitions and no pilot/audio stop or fault.
 Overall qualification

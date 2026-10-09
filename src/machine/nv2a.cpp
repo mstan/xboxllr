@@ -2783,6 +2783,7 @@ void Nv2a::vsh_verify_vertex(const void* program, const float* input_regs,
     std::memcpy(context.data(), transform_constants_.data(),
                 context.size() * sizeof(float));
     std::array<float, 13 * 4> output{};
+    for (unsigned i = 0; i < 13; ++i) output[i * 4 + 3] = 1.0f;
     std::array<float, 12 * 4> temp{};
     std::array<float, 4> address{};
     Nv2aVshExecutionState state{const_cast<float*>(input_regs),
@@ -3006,6 +3007,7 @@ bool Nv2a::materialize_deferred_gpu_vsh(DrawJob& job) {
         std::array<float, 4> address_reg;
         std::memcpy(input_regs.data(), saved.words.data(), sizeof(input_regs));
         output_regs.fill(0.0f);
+        for (unsigned i = 0; i < 13; ++i) output_regs[i * 4 + 3] = 1.0f;
         temp_regs.fill(0.0f);
         address_reg.fill(0.0f);
         float* bases[kVshBaseCount] = {
@@ -4194,7 +4196,7 @@ bool Nv2a::submit_vertex_batch() {
                     continue;
                 }
 #endif
-                // beads-xbox.1.15.11: 416 bytes of zero-fill per vertex, of
+                // beads-xbox.1.15.11: 416 bytes of initialization per vertex, of
                 // which the compiled form's read-before-write analysis usually
                 // proves most dead. The interpreter arm still fills all three,
                 // because without the analysis any of them is observable.
@@ -4206,6 +4208,8 @@ bool Nv2a::submit_vertex_batch() {
                                         temp_regs.data(), address_reg.data());
                 } else {
                     output_regs_storage.fill(0.0f);
+                    for (unsigned i = 0; i < 13; ++i)
+                        output_regs_storage[i * 4 + 3] = 1.0f;
                     temp_regs.fill(0.0f);
                     address_reg.fill(0.0f);
                 }
@@ -4213,6 +4217,8 @@ bool Nv2a::submit_vertex_batch() {
                 if (program_writes_context) {
                     Nv2aVshExecutionState execution =
                         nv2a_vsh_emu_initialize_full_execution_state(&full_state);
+                    for (unsigned i = 0; i < 13; ++i)
+                        full_state.output_regs[i * 4 + 3] = 1.0f;
                     std::memcpy(full_state.context_regs, transform_constants_.data(),
                                 sizeof(full_state.context_regs));
                     for (uint32_t slot = 0; slot < vertex_attributes_.size(); ++slot) {

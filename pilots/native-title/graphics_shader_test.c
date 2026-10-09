@@ -57,6 +57,7 @@ static int check_program(const uint32_t *code,unsigned count,const struct PilotV
     double maximum=0;unsigned comparisons=0;
     for(unsigned sample=0;sample<SAMPLES;++sample) {
         Nv2aVshCPUFullExecutionState storage={0};Nv2aVshExecutionState state=nv2a_vsh_emu_initialize_full_execution_state(&storage);
+        for(unsigned reg=0;reg<13;++reg)storage.output_regs[reg*4+3]=1;
         memcpy(storage.input_regs,inputs[sample],sizeof(inputs[sample]));memcpy(storage.context_regs,constants,sizeof(constants));
         for(unsigned i=0;i<count;++i) {
             Nv2aVshStep step={0};CHECK(nv2a_vsh_parse_step(&step,code+i*4)==NV2AVPR_SUCCESS);

@@ -1537,6 +1537,13 @@ no external implementation body, game asset or specification prose is copied.
 Existing donor/library license limits remain in effect. This is an offline
 bounded qualification, not a new silicon golden.
 
+The programmable-output defaults checkpoint additionally consults NVIDIA's
+already cited `NV_vertex_program` result-register initialization and the pinned
+xemu `hw/xbox/nv2a/pgraph/glsl/vsh.c` declarations. Initialization, masked-output
+programs and default-Q sampling tests are authored here; no external code body
+or specification prose is copied. This is evidence for the maintained software
+contract, not a new Xbox silicon golden.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

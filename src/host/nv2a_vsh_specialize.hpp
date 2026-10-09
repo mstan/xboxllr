@@ -28,7 +28,7 @@ void main() {
     uint index = gl_GlobalInvocationID.x;
     if (index >= u_execution_count) return;
     for (uint i = 0u; i < 12u; ++i) temps[i] = uvec4(0u);
-    for (uint i = 0u; i < 13u; ++i) regs[i] = uvec4(0u);
+    for (uint i = 0u; i < 13u; ++i) regs[i] = uvec4(0u, 0u, 0u, 0x3f800000u);
     bool supported = true;
 )GLSL";
     const auto declare = [&](const char* name, const Op& op) {
