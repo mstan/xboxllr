@@ -33,10 +33,15 @@ void pilot_io_device_dpc_bind(PilotIoIsr callback);
  * stack/PCR. A SystemRoutine has two arguments and must request termination;
  * a PsCreateSystemThread start body has one argument and may return normally.
  * Termination is completed by the original kernel, never by the host thread.
- * Blocking/non-LIFO native continuations are not yet admitted. */
+ * Host stacks only carry native continuations; original dispatch controls
+ * which continuation resumes. This does not select a host scheduler. */
 typedef const char *(*PilotIoThread)(uint32_t entry,uint32_t regs[8],
     unsigned arguments,int *terminate,uint32_t *exit_status);
 void pilot_io_device_thread_bind(PilotIoThread callback);
+/* Called from a generated thread body's kernel-dispatch boundary. The real
+ * guest call frame is at regs[ESP]; original execution returns updated GPRs.
+ * The host call remains suspended if the original kernel switches threads. */
+const char *pilot_io_device_thread_call(unsigned ordinal,uint32_t regs[8]);
 /* Up to eight disjoint device-owned port ranges. NULL clears all bindings.
  * Bind only while the transport is idle. PIC/storage remain on their shared bus.
  * Callback returns an error on unsupported access. It must not reenter this

@@ -71,7 +71,7 @@ static void test_thread_lle(void)
             const char *error=pilot_io_device_lle(159,memory,wait,&result);
             CHECK(error && strstr(error,"continuation handoff") && result==0xcccccccc);
             CHECK(thread_lle_calls==1);
-            fprintf(stderr,"PASS: unsupported blocking native continuation fails without completing original join\n");return;
+            fprintf(stderr,"PASS: root-service API rejects a native worker without its guest call frame; original join is not completed\n");return;
         }
         CHECK(!event_lle_call(159,wait));
         CHECK(thread_lle_calls==lifetime+1 && MEM32(thread_lle_object+4)==1);

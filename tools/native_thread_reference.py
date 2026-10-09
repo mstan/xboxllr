@@ -93,18 +93,92 @@ class ThreadReference(FilesystemReference):
                              exit_status=0x12345678 if system else 0, stack_retired=True))
         return dict(snapshot_sha256=SNAPSHOT_SHA, original_statistics=baseline, cases=rows)
 
+    def handoffs(self):
+        """Two authored x86 workers perform the native fixture's same calls."""
+        entry, out, trace_count, trace = 0x10004000, 0x10002000, 0x10005000, 0x10005004
+        wait = self.base + self.word(self.export_table + 4*(233-self.ordinal_base))
+        signal = self.base + self.word(self.export_table + 4*(225-self.ordinal_base))
+        suspend = self.base + self.word(self.export_table + 4*(231-self.ordinal_base))
+        resume = self.base + self.word(self.export_table + 4*(224-self.ordinal_base))
+        code = bytearray.fromhex('568b742408')  # preserve ESI; context argument
+        code += bytes.fromhex('837e200074'); skip_suspend = len(code);code += b'\0'
+        code += bytes.fromhex('833e0075'); peer_resume = len(code);code += b'\0'
+        code += bytes.fromhex('8d4614506afeb8') + struct.pack('<I', suspend)
+        code += bytes.fromhex('ffd085c07401cc837e14007401cceb'); self_done = len(code);code += b'\0'
+        resume_at = len(code)
+        code += bytes.fromhex('8d461450ff7624b8') + struct.pack('<I', resume)
+        code += bytes.fromhex('ffd085c07401cc837e14017401cc')
+        loop = len(code)
+        code += bytes.fromhex('8b46183b460c74'); done_fix = len(code); code += b'\0'
+        code += bytes.fromhex('6a006a00ff7604b8') + struct.pack('<I', wait)
+        code += bytes.fromhex('ffd085c07401cc')  # call original wait, assert success
+        code += bytes.fromhex('8b4618d1e00b068b0d') + struct.pack('<I', trace_count)
+        code += bytes.fromhex('89048d') + struct.pack('<I', trace)
+        code += bytes.fromhex('ff05') + struct.pack('<I', trace_count)
+        code += bytes.fromhex('8d461450ff7608b8') + struct.pack('<I', signal)
+        code += bytes.fromhex('ffd085c07401ccff4618eb'); loop_fix = len(code); code += b'\0'
+        done = len(code);code += bytes.fromhex('c7461c010000005ec20400')
+        for fix, target in ((done_fix, done), (loop_fix, loop), (skip_suspend, loop),
+                            (peer_resume, resume_at), (self_done, loop)):
+            assert -128 <= target-fix-1 <= 127
+            code[fix] = (target-fix-1) & 255
+        self.cpu.mem_write(entry, bytes(code))
+        stats = 0x10002200
+        self.cpu.mem_write(stats, struct.pack('<III', 12, 0, 0))
+        assert self.call(256, stats) == 0
+        baseline = (self.value(stats+4), self.value(stats+8))
+        rows = []
+        for lifetime in range(9):
+            self.cpu.mem_write(trace_count, bytes(196))
+            contexts = [0x10006000, 0x10006040]
+            events, handles, objects = [], [], []
+            priorities = ((30, 29), (29, 30), (30, 30))[lifetime % 3]
+            for index in range(2):
+                assert self.call(189, out, 0, 1, int(index == 0)) == 0
+                events.append(self.value(out))
+            for index, context in enumerate(contexts):
+                self.cpu.mem_write(context, struct.pack('<10I', index, events[index],
+                    events[1-index], 24, 0, 0, 0, 0, int(lifetime % 3 == 0), 0))
+                assert self.call(254, out, 0, entry, context, 0) == 0
+                handles.append(self.value(out))
+                assert self.call(246, handles[-1], 0, out+4) == 0
+                objects.append(self.value(out+4))
+                assert self.call(148, objects[-1], priorities[index]) == 8
+            self.cpu.mem_write(contexts[1]+36, struct.pack('<I', handles[0]))
+            assert self.call(159, objects[0], 0, 0, 0, 0) == 0
+            first_join_count = self.value(trace_count)
+            second_body_finished = self.value(contexts[1]+28)
+            if priorities[0] > priorities[1]:
+                assert first_join_count == 47 and not second_body_finished
+            assert self.call(159, objects[1], 0, 0, 0, 0) == 0
+            assert self.value(trace_count) == 48
+            observed = list(struct.unpack('<48I', self.cpu.mem_read(trace, 48*4)))
+            assert observed == list(range(48))
+            for handle, obj, event in zip(handles, objects, events):
+                assert self.call(187, handle) == 0
+                self.cpu.reg_write(UC_X86_REG_ECX, obj);self.call(250)
+                assert self.call(187, event) == 0
+            assert self.call(256, stats) == 0
+            assert (self.value(stats+4), self.value(stats+8)) == baseline
+            rows.append(dict(priorities=priorities, trace=observed,
+                first_join_count=first_join_count, peer_finished_at_first_join=bool(second_body_finished),
+                self_suspend_and_peer_resume=lifetime % 3 == 0))
+        return dict(snapshot_sha256=SNAPSHOT_SHA, original_statistics=baseline, cases=rows)
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('snapshot', 'library', 'image', 'output'):
         parser.add_argument('--'+name, type=Path, required=True)
     parser.add_argument('--dependencies', type=Path)
+    parser.add_argument('--handoffs', action='store_true', help='Original wait/signal ordering with two live x86 bodies')
     args = parser.parse_args()
     dll_directory = os.add_dll_directory(str(args.dependencies.resolve())) if args.dependencies else None
     ref = ThreadReference(args.snapshot, args.library, args.image)
     try:
-        result = ref.run()
+        result = ref.handoffs() if args.handoffs else ref.run()
     finally:
         ref.close()
     args.output.write_text(json.dumps(result, indent=2)+'\n', encoding='utf-8')
-    print('PASS: 12 original x86 thread lifecycles, both start ABIs, TLS/stack, suspend counts, exit status, reference/close and original resource restoration')
+    print('PASS: 18 original x86 workers, 432 wait/signal rounds, three priority orderings and original resource restoration' if args.handoffs else
+          'PASS: 12 original x86 thread lifecycles, both start ABIs, TLS/stack, suspend counts, exit status, reference/close and original resource restoration')

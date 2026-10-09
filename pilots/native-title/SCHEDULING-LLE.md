@@ -351,28 +351,105 @@ imported. The original-kernel route reuses the established device/Unicorn bridge
 
 This remains a component qualification. Creation currently requires the
 priority-31 reference caller, with priority-30 workers, to exclude unrelated
-captured boot workers. Native bodies can make the supported nonblocking original
-observations and terminate. Cross-thread blocking/native continuations, full
-initial FP/NPX state, general preemption/contention and title-wide static selection
-remain open. No HLE fallback or second scheduler completes an unsupported call.
+captured boot workers. This first handoff admitted nonblocking observations and
+termination; the following batch adds cross-thread blocking continuations.
+Full initial FP/NPX state, general preemption/contention and title-wide static
+selection remain open. No HLE fallback completes an unsupported call.
 The native runtime also still uses a cumulative 63-thread creation budget;
 unlike the original lifecycle, closing/joining does not reclaim native slots.
 Correct native reuse and its memory/scheduler ownership need a separate bounded
 follow-up before claiming the whole family contract. Hardware is not needed
 for either follow-up.
 
+## Blocking native continuations under original scheduling - 2026-10-09
+
+Original threads now keep their generated C call stacks on separate host workers.
+These workers are execution transport: they wait until actual original execution
+reaches their entry or the return address of their pending kernel service. Only
+that worker then runs. Host priorities, host wait timeouts and the native HLE
+ready queue do not choose an original thread or complete its guest wait.
+
+The generated caller's real original stack holds every pending service frame,
+including its unmodified guest return address. Original wait/signal, suspend,
+resume, priority and clock/dispatcher services execute against that stack and
+PCR. The engine admits a return only for the current original thread's pending
+frame, checking stack, callee-saved registers and IF/DF before returning all GPRs,
+including EDX:EAX, to the waiting native body. Thus A can resume while B's
+SetEvent or ResumeThread call remains suspended. No C-stack unwind guesses the
+original scheduler's choice. Host transport handles retire when the native body
+finishes; original termination/reaping and object references retain their own
+separate lifetimes.
+
+The compiled `pilot_thread_wait_lle` covers **18 workers and 432 wait/signal
+rounds** across nine lifetimes, with higher/lower/equal priorities. It verifies
+actual self-suspension and peer resumption, ordered handoffs, private GPR/FP state,
+joining one thread while the peer's native call is still suspended, and cleanup.
+Both original thread/handle counts and host handle counts return to their
+respective baselines. The enclosing caller has HLE scheduling enabled, which
+does not schedule these original workers.
+
+`native_thread_reference.py --handoffs` runs the same 18-worker/432-round ordering
+through authored x86 bodies without the C transport. It independently confirms
+the three priority orderings, three self-suspend/peer-resume lifetimes, the
+partially finished peer at the first join, and original resource restoration.
+Private observations: `build/blinx/thread-handoffs-original.aot-private.json`.
+
+`pilot_thread_timeout_lle` executes **12 blocked native waits**, covering
+NtWaitForSingleObject and Ex with six relative durations. A runnable peer supplies
+102 explicit PIT clock inputs; actual PIC/IRQ0, original clock/timer expiration
+and context switching deliver every timeout and restore the peer. Expiration
+occurs at the independently observed next-tick bucket, including exact tick
+boundaries. These are controlled clock inputs, not host-speed or silicon-phase
+measurements. They do not qualify the all-threads-blocked idle path.
+
+The timeout test exposed a real transport bug: publication can invalidate a
+cached Unicorn stack alias before an interrupt arrives. Direct uc_mem_write
+does not invoke a missing-memory hook. Interrupt-frame delivery now materializes
+the actual PTE-backed aliases before writing the frame; it does not relocate
+the guest stack or invent backing memory.
+
+The earlier `pilot_thread_lle_blocked` guard now specifically verifies rejection
+of the synchronous root-service API from a native worker without its guest call
+frame. Blocking through the new generated-call boundary is supported. Unknown
+service families still fail before returning completion; allocator/file lifetime
+postconditions must be connected before those services enter this boundary.
+
+The existing 72 lifecycle cases and the combined native/LLE suite pass:
+**52/52 in 20.47s**, `build/blinx/thread-continuation-{build,full-tests}.log`.
+Existing HLE event, timeout, timer/DPC, suspend/resume and scheduler tests remain
+part of that suite. No new HLE production scheduling behavior changes in this
+batch. This resolves the blocked-native-continuation transport gap; whole-family
+qualification and static title selection remain open.
+
+The rebuilt mixed title ran **190.171s** with 18 captures and no
+stop/audio-stop/fault. Both replayed Start press/release pairs were delivered;
+captures confirm demo gameplay, interruption/loading, title return and another
+demo. Evidence: `build/blinx/scheduling-continuation-attract/{run.aot-private.json,contact.png}`
+and `build/blinx/run-scheduling-continuation-attract.log`. Title SHA-256:
+`438e3b900afe4e5a2f170c8948daf3007e556384a401f4bc3141b9d82ec845b1`.
+The harness ended a live process at its time bound. The title still selects
+native scheduling; this is a shared-transport regression, not original
+scheduling selection, a new cadence result or a long-run stability claim.
+
 ## Next offline work
 
 Use the now-executable original expiry/wakeup and native DPC callback routes to
 integrate original thread execution and static timer/DPC selection with coherent
 wait ownership. Qualify remaining priority, contention and suspend/resume cases.
-The first original thread/native body handoff now works with actual original
-identity, stack, TLS and cleanup. Continue with return ownership between blocked
-native bodies: the synchronous service bridge currently supports nested
-callbacks, not non-LIFO returns between blocked native threads. Preserve the
-original kernel's actual selection; do not add a second scheduler that guesses
-its choice. Correct the independently identified native slot-lifetime limit and
-qualify initial FP state. Reuse compatible Phobos transport where it fits.
+Original native bodies now block and resume under the actual kernel, with real
+identity, stack, TLS and cleanup. Next connect static title selection coherently:
+bootstrap identity, the remaining reached kernel-service families, callback
+context/dispatch, and clock progress when all native bodies are blocked or one
+computes without a kernel call. Retain explicit guards until each dependency
+works; a flag alone cannot connect two dispatcher namespaces. Correct the
+independently identified native slot-lifetime limit and qualify initial FP state.
+Reuse compatible Phobos transport where it fits.
+If unrelated captured boot workers become runnable, qualify their actual device
+dependencies rather than editing the ready queues. The earlier unmodeled
+`0x80cf` access is a lead for that integration: xemu's pinned ACPI GPIO window
+covers it, but its default zero response is not evidence of that register's
+contract. This does not establish a new real-console requirement; first examine
+the original caller and existing modeled GPIO/programming evidence offline.
 Retain the native implementation as the title's active scheduling backend until
 the original service route can perform those operations. Any genuinely
 silicon-only question is appended to the deferred end of the burndown; GPU

@@ -85,16 +85,11 @@ static void original_thread_kernel_dispatch(void)
         original_thread_exit.status=MEM32(g_esp+4);
         longjmp(original_thread_exit.target,1);
     }
-    unsigned count;
-    switch(next_kernel_ordinal) {
-    case 121:count=0;break;
-    case 128:case 256:count=1;break;
-    default:stop("original thread native service needs continuation integration",next_kernel_ordinal);
-    }
-    uint32_t args[1]={count?MEM32(g_esp+4):0},result;
-    const char *error=pilot_io_device_lle(next_kernel_ordinal,memory,args,&result);
+    uint32_t regs[]={g_eax,g_ecx,g_edx,g_ebx,g_esp,g_ebp,g_esi,g_edi};
+    const char *error=pilot_io_device_thread_call(next_kernel_ordinal,regs);
     if(error)stop(error,next_kernel_ordinal);
-    g_eax=result;g_esp+=(count+1)*4;
+    g_eax=regs[0];g_ecx=regs[1];g_edx=regs[2];g_ebx=regs[3];
+    g_esp=regs[4];g_ebp=regs[5];g_esi=regs[6];g_edi=regs[7];
 }
 static void usb_poll(void)
 {

@@ -41,9 +41,7 @@ static void thread_after_call(unsigned ordinal,const uint32_t *args,uint32_t res
         else if(!failure)failure="thread LLE reference returned an unqualified object";
     }
     if(ordinal==250 && !failure)--thread_object(args[0])->refs;
-    if(ordinal==187 && (int32_t)result>=0)
-        for(unsigned i=0;i<64;++i)if(original_threads[i].object && original_threads[i].handle==args[0])
-            original_threads[i].closed=1;
+    if(ordinal==187 && (int32_t)result>=0)thread_note_close(args[0]);
     for(unsigned i=0;i<64 && !failure;++i) {
         struct OriginalThread *thread=original_threads+i;
         if(!thread->object || !kernel_word(thread->object+4))continue;

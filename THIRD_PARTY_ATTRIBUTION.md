@@ -783,6 +783,20 @@ The HLE null-TLS correction follows the independent original observation.
 The existing private interpreter and donor restrictions still apply; this batch
 adds no GPL-derived implementation to the intended non-GPL shipping product.
 
+The blocking-continuation follow-up retains native C stacks/TLS with Win32 host
+threads, the same transport primitive reviewed in the pinned Phobos wrapper.
+Its event handshakes are authored here: only an actual original-kernel entry or
+service return selects a worker. No donor scheduler, thread-body implementation
+or success substitution is copied. The independently authored x86 handshake
+program corroborates original wait/signal, priority and self-suspend ordering;
+the maintained PIT/PIC supplies the controlled native-wait timeout input. The
+interrupt-frame alias correction reuses this repository's shared-PFN mapper.
+
+[xemu acpi_xbox.c](https://github.com/xemu-project/xemu/blob/482088490c2d5983ed5e1eafbd09906157c1eca0/hw/xbox/acpi_xbox.c)
+was also consulted as a reference lead for unrelated captured workers' GPIO
+access. Its default zero read does not qualify the pending `0x80cf` behavior.
+No ACPI/GPIO implementation body or fallback value is incorporated here.
+
 ## Original device-manager reference execution (2026-10-08)
 
 `pilots/native-title/io_device_lle.c` and

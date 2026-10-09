@@ -6,10 +6,16 @@ static struct OriginalThread {
     uint32_t handle,object,entry,context[2],bytes,stack,stack_bytes,refs;
     unsigned arguments;
     int closed,started,published;
+    HANDLE host_thread,request_event,resume_event;
+    uint32_t native_regs[8],call_regs[8],call_args[10],return_pc,call_return,call_flags;
+    unsigned call_ordinal,call_arguments,request;
+    int in_kernel,terminate;
+    uint32_t exit_status;
+    const char *callback_error;
 } original_threads[64];
 static PilotIoThread thread_callback;
-static struct OriginalThread *pending_thread;
-static unsigned native_thread_callback;
+static struct OriginalThread *pending_thread,*pending_thread_return;
+static __declspec(thread) struct OriginalThread *native_thread_worker;
 static int thread_pcr_published;
 static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result);
 static void thread_after_call(unsigned ordinal,const uint32_t *args,uint32_t result);
@@ -22,14 +28,6 @@ static struct OriginalThread *thread_object(uint32_t object)
 }
 static void thread_before_call(unsigned ordinal,const uint32_t *args)
 {
-    if(native_thread_callback) {
-        /* Until non-LIFO native continuations are implemented, permit only
-         * observations that cannot switch away from this native host frame.
-         * In particular, setting an event can immediately preempt the caller. */
-        if(ordinal!=121 && ordinal!=125 && ordinal!=128 && ordinal!=256)
-            failure="thread LLE native callback service requires continuation handoff";
-        return;
-    }
     if(ordinal==254 || ordinal==255) {
         uint32_t current=kernel_word(0x8003da64u);
         if(!thread_callback || ((kernel_word(current+0x30)>>16)&255)!=31) {
@@ -53,7 +51,11 @@ static int thread_admit(uc_engine *engine,uint32_t address)
 {
     if(!thread_callback || (kernel_word(0x8003da60u)&255))return 0;
     struct OriginalThread *thread=thread_object(kernel_word(0x8003da64u));
-    if(!thread || thread->started || address!=thread->entry)return 0;
+    if(!thread)return 0;
+    if(thread->in_kernel && address==thread->call_return) {
+        pending_thread_return=thread;uc_emu_stop(engine);return 1;
+    }
+    if(thread->started || address!=thread->entry)return 0;
     uint32_t sp,frame[3],flags;
     if(uc_reg_read(engine,UC_X86_REG_ESP,&sp)!=UC_ERR_OK ||
        uc_mem_read(engine,sp,frame,sizeof(frame))!=UC_ERR_OK ||
@@ -63,4 +65,36 @@ static int thread_admit(uc_engine *engine,uint32_t address)
        (flags&0x600)!=0x200)return 0;
     thread->started=1;pending_thread=thread;
     pending_callback=address;uc_emu_stop(engine);return 1;
+}
+
+enum { THREAD_REQUEST_CALL=1, THREAD_REQUEST_FINISH=2 };
+/* Only the original engine's controller runs guest work. Host workers retain
+ * C call stacks and TLS while blocked; no host priority/timeout chooses which
+ * one runs. The event handshakes transfer sole execution ownership. */
+static DWORD WINAPI original_thread_worker(void *argument)
+{
+    struct OriginalThread *thread=argument;native_thread_worker=thread;
+    if(WaitForSingleObject(thread->resume_event,INFINITE)!=WAIT_OBJECT_0)
+        thread->callback_error="thread LLE initial host handoff failed";
+    else thread->callback_error=thread_callback(thread->entry,thread->native_regs,
+        thread->arguments,&thread->terminate,&thread->exit_status);
+    thread->request=THREAD_REQUEST_FINISH;
+    if(!SetEvent(thread->request_event)) {
+        /* An OS synchronization failure cannot leave the controller waiting
+         * forever or be reported as completed original work. */
+        fprintf(stderr,"[PILOT STOP] thread LLE host handoff failed: %lu\n",GetLastError());
+        ExitProcess(2);
+    }
+    native_thread_worker=NULL;return 0;
+}
+const char *pilot_io_device_thread_call(unsigned ordinal,uint32_t regs[8])
+{
+    struct OriginalThread *thread=native_thread_worker;
+    if(!thread)return "thread LLE guest-frame call outside original native worker";
+    memcpy(thread->call_regs,regs,sizeof(thread->call_regs));
+    thread->call_ordinal=ordinal;thread->request=THREAD_REQUEST_CALL;
+    if(!SetEvent(thread->request_event) || WaitForSingleObject(thread->resume_event,INFINITE)!=WAIT_OBJECT_0)
+        return "thread LLE service host handoff failed";
+    if(thread->callback_error)return thread->callback_error;
+    memcpy(regs,thread->call_regs,sizeof(thread->call_regs));return NULL;
 }
