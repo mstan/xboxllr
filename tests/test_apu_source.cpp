@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <vector>
 #include <cstdio>
@@ -138,9 +139,9 @@ static void boundaries() {
 // At step index zero, nibbles 1/9 change the predictor by exactly +/-1 and
 // keep the index at zero. Expectations below require no decoder helper.
 static void adpcm_sources() {
-    for(unsigned channels:{1u,2u})for(bool looping:{false,true}) {
+    for(unsigned type:{1u,2u})for(unsigned channels:{1u,2u})for(bool looping:{false,true}) {
         Fixture f;const unsigned base=4093;
-        f.reg(0x20304,0x90000000|((channels-1)<<27)|((channels-1)<<16)|(looping?1u<<25:0));
+        f.reg(0x20304,0x80000000|(type<<28)|((channels-1)<<27)|((channels-1)<<16)|(looping?1u<<25:0));
         f.reg(0x203a0,base);f.reg(0x203a4,61);f.reg(0x203dc,130);
         for(unsigned block=0;block<3;++block) {
             const unsigned at=base+block*36*channels;
@@ -188,7 +189,7 @@ static void adpcm_sources() {
         CHECK(f.pull(out,1,n,ended));CHECK(n==1 && out[0]==2000/32768.0f && f.error.empty());
     }
     for(bool second_block:{false,true}) {
-        Fixture f;f.reg(0x20304,0x98010000); // stereo ADPCM
+        Fixture f;f.reg(0x20304,0xa8010000); // original stereo ADPCM encoding
         f.reg(0x203a0,second_block?4096-72:4093);f.reg(0x203dc,127);
         f.put(Fixture::sge+8,0x12000); // fail either first split block or following block
         float out[258];for(float& v:out)v=91;uint32_t n;bool ended;
@@ -198,8 +199,64 @@ static void adpcm_sources() {
     }
 }
 
+static void mix_sends() {
+    Fixture f;f.reg(0x20304,0x58010000);f.reg(0x203dc,2);
+    for(unsigned n=0;n<3;++n) {
+        f.sample(n*4,(n+1)*4096,2);f.sample(n*4+2,-int64_t(n+1)*2048,2);
+    }
+    float source[6];uint32_t count;bool ended;
+    CHECK(f.pull(source,3,count,ended));CHECK(count==3 && ended);
+    // Send stage has separate ownership from source fetching. Use a 2D slot;
+    // these frame inputs have unity upstream processing in this composition.
+    f.reg(0x202f8,71);
+    f.reg(0x20300,31|(2<<5)|(31<<10)|(6<<16)|(3<<21)|(5<<26));
+    f.reg(0x20304,0x58010024); // slots 6/7 -> bins 4/1
+    f.reg(0x20360,0x50000000); // sends 0/1: 0/-20 dB
+    f.reg(0x20364,0xfff0a000); // sends 2/3: -40 dB/mute
+    f.reg(0x20368,0x000af005); // sends 4/5/6/7: -60/0/-20/-40 dB
+    f.reg(0x20200+31*4,9); // low three bits -> one bit of submix headroom
+    float bins[1028];for(float& v:bins)v=0.25f;
+    const auto before=f.ram;
+    for(unsigned repeat=1;repeat<=2;++repeat) {
+        CHECK(f.apu.mix_2d_samples(71,source,3,bins+2));CHECK(f.ram==before);
+        for(unsigned bin=0;bin<32;++bin)for(unsigned n=0;n<32;++n) {
+            float expected=0.25f;
+            if(n<3) {
+                const float left=(n+1)*0.125f,right=-(int(n)+1)*0.0625f;
+                float gain=bin==31?left*0.505f:bin==2?right*0.1f:bin==3?left*0.001f:
+                           bin==5?right:bin==4?left*0.1f:bin==1?right*0.01f:0;
+                expected+=repeat*gain;
+            }
+            CHECK(std::fabs(bins[2+bin*32+n]-expected)<1e-7f);
+        }
+    }
+    CHECK(bins[0]==0.25f && bins[1]==0.25f && bins[1026]==0.25f && bins[1027]==0.25f);
+    CHECK(f.apu.mix_2d_samples(71,nullptr,0,nullptr));
+    // A gain write is seen on the next block; muted sends do not clear prior voices.
+    for(unsigned part=0;part<3;++part)f.reg(0x20360+part*4,0xffffffff);
+    const std::vector<float> silent_before(bins,bins+1028);
+    CHECK(f.apu.mix_2d_samples(71,source,3,bins+2));
+    CHECK(std::equal(silent_before.begin(),silent_before.end(),bins));CHECK(f.error.empty());
+    for(unsigned kind=0;kind<8;++kind) {
+        Fixture bad;float input[64]={},output[1024];for(float& v:output)v=0.5f;
+        unsigned voice=71,frames=1;const float* src=input;float* dst=output;
+        if(kind==0)voice=63; // spatial voice owner is outside the 2D stage
+        if(kind==1)voice=256;
+        if(kind==2)frames=33;
+        if(kind==3)src=nullptr;
+        if(kind==4)dst=nullptr;
+        if(kind==5) {bad.reg(0x202f8,71);bad.reg(0x20300,0x80008000);}
+        if(kind==6)input[1]=std::numeric_limits<float>::quiet_NaN();
+        if(kind==7)bad.reg(0x202c,0xffffff00);
+        const auto saved=bad.ram;
+        CHECK(!bad.apu.mix_2d_samples(uint16_t(voice),src,frames,dst));CHECK(!bad.error.empty());
+        CHECK(bad.ram==saved);for(float v:output)CHECK(v==0.5f);
+        CHECK(!bad.apu.mix_2d_samples(71,input,0,output));
+    }
+}
+
 int main() {
-    waveforms();controls();boundaries();adpcm_sources();
-    std::printf("APU source: %s (PCM/ADPCM channels, scatter DMA, exact end, loops, pause/lock/seek, faults)\n",failures?"FAILED":"PASS");
+    waveforms();controls();boundaries();adpcm_sources();mix_sends();
+    std::printf("APU source/mix: %s (PCM/ADPCM DMA, cursors, loops, 2D gain/routing/headroom/accumulation and guards)\n",failures?"FAILED":"PASS");
     return failures?1:0;
 }

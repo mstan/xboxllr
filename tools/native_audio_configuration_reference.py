@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""Original NTSC voice routing/pitch helpers -> maintained APU RAM effects.
+"""Original NTSC routing/pitch/volume helpers -> maintained APU source/send stage.
 
 No original callees are replaced. The driver helpers and the hardware method
 boundary are tested separately: this does not execute the full DirectSound
-owner, its lock protocol, sample processing, or a title-selected LLE backend.
+owner, its lock protocol, upstream resampling/envelopes, or a title LLE backend.
 """
 import argparse
 import ctypes as c
 import hashlib
 import json
+import math
 import os
 import struct
 from pathlib import Path
@@ -33,6 +34,10 @@ def run(xbe, library, dependencies):
     dll.xlle_apu_reference_error.restype=c.c_char_p
     dll.xlle_apu_reference_write.argtypes=[c.c_void_p,c.c_uint32,c.c_int,c.c_uint32]
     dll.xlle_apu_reference_write.restype=c.c_int
+    dll.xlle_apu_reference_source.argtypes=[c.c_void_p,c.c_uint32,c.POINTER(c.c_float),c.c_uint32,c.POINTER(c.c_uint32),c.POINTER(c.c_int)]
+    dll.xlle_apu_reference_source.restype=c.c_int
+    dll.xlle_apu_reference_mix.argtypes=[c.c_void_p,c.c_uint32,c.POINTER(c.c_float),c.c_uint32,c.POINTER(c.c_float)]
+    dll.xlle_apu_reference_mix.restype=c.c_int
     cpu=Uc(UC_ARCH_X86,UC_MODE_32)
     cpu.mem_map(0x10000,0x1000000)
     cpu.mem_map(0x30000000,0x10000)
@@ -63,7 +68,7 @@ def run(xbe, library, dependencies):
         assert dll.xlle_apu_reference_write(instance,0xfe800000+offset,4,value),dll.xlle_apu_reference_error(instance)
     def word(address):return struct.unpack_from('<I',ram,address)[0]
     def store(address,value):struct.pack_into('<I',ram,address,value&0xffffffff)
-    rows=[]
+    rows=[];mix_rows=[]
     try:
         write(0x202c,0x1000)
         for n,bins in enumerate([[],[0,1],[5],[31,3,7],[7,6,5,4,3,2,1,0]]):
@@ -101,6 +106,58 @@ def run(xbe, library, dependencies):
                 write(0x20000+method,value)
                 assert word(base+offset)==0xab000000|(value&0xffffff)
         assert word(0x1000+7*0x80+0x7c)==0x1fff00ff
+
+        # Complete original 2D volume packing helper, then real source DMA and
+        # maintained final send-stage output. The raw source is already at
+        # 48 kHz, unity envelope and no filtering: those upstream stages are
+        # separate contracts, not silently synthesized by the mix function.
+        for channels in (1,2):
+            for bins in ([],[0,1],[5],[31,3,7],[7,6,5,4,3,2,1,0],[7,7,31,2]):
+                for overall in (-10000,-6400,-6399,-6000,-1800,-1,0):
+                    cpu.mem_write(obj,bytes(0x100));cpu.mem_write(settings,bytes(0x100))
+                    put(obj+0x78,settings);cpu.mem_write(obj+0x64,b'\x01')
+                    put(settings+0x1c,overall);put(settings+0x24,len(bins))
+                    cpu.mem_write(settings+0x28,bytes(bins))
+                    levels={b:(-1200,-31,0,-600)[b%4] for b in bins}
+                    for b,level in levels.items():put(settings+0x30+b*4,level)
+                    put(out,0);put(out+4,0x50000000|((channels-1)<<27)|((channels-1)<<16))
+                    call(0x1789a0,[out,out+4])
+                    cpu.mem_write(out+0x100,b'\xa5'*36)
+                    call(0x178a7b,[out+0x100])
+                    packed=[get(out+0x100+i*12) for i in range(3)]
+                    attenuation=[min(4095,-(overall+levels[b])*64//100) for b in bins]+[4095]*(8-len(bins))
+                    for part in range(3):
+                        expected=(attenuation[part*2]<<4)|(attenuation[part*2+1]<<20)
+                        expected|=((attenuation[6]>>(part*4))&15)|(((attenuation[7]>>(part*4))&15)<<16)
+                        assert packed[part]==expected
+                    assert all(get(out+0x100+i*4)==0xa5a5a5a5 for i in (1,2,4,5,7,8))
+                    voice=71;base=0x1000+voice*128
+                    c.memset(c.addressof(ram)+base,0,128);store(base+0x54,1<<21)
+                    write(0x2030,0x9000);store(0x9000,0xa000)
+                    values=[]
+                    for n in range(32):
+                        pair=[(n-16)/32,(32-n)/64] if channels==2 else [(n-16)/32]*2
+                        values.append(pair)
+                        for ch in range(channels):struct.pack_into('<h',ram,0xa000+(n*channels+ch)*2,round(pair[ch]*32768))
+                    write(0x202f8,voice);write(0x20300,get(out));write(0x20304,get(out+4))
+                    write(0x203dc,31)
+                    for part,value in enumerate(packed):write(0x20360+part*4,value)
+                    headrooms=[(b%4 if overall==-1800 else 0) for b in range(32)]
+                    for b,h in enumerate(headrooms):write(0x20200+b*4,0xa5000000|h)
+                    source=(c.c_float*64)();count=c.c_uint32();ended=c.c_int()
+                    assert dll.xlle_apu_reference_source(instance,voice,source,32,c.byref(count),c.byref(ended))
+                    assert count.value==32 and ended.value==1
+                    assert list(source)==[v for pair in values for v in pair]
+                    before=bytes(ram);actual=(c.c_float*1024)()
+                    assert dll.xlle_apu_reference_mix(instance,voice,source,32,actual)
+                    assert bytes(ram)==before, 'send stage must not mutate cursor/envelope/notification state'
+                    expected=[0.0]*1024
+                    for slot,b in enumerate(bins):
+                        gain=0.0 if attenuation[slot]==4095 else 10**(-attenuation[slot]/1280)/2**headrooms[b]
+                        for n in range(32):expected[b*32+n]+=values[n][slot%channels]*gain
+                    assert all(math.isclose(v,e,rel_tol=3e-7,abs_tol=2e-8) for v,e in zip(actual,expected))
+                    mix_rows.append(dict(channels=channels,bins=bins,overall_db100=overall,
+                                         volume_words=packed,submix_headroom=headrooms))
     finally:
         dll.xlle_apu_reference_destroy(instance)
 
@@ -127,7 +184,8 @@ def run(xbe, library, dependencies):
     if dependency:dependency.close()
     return dict(xbe_sha256=IMAGE,library_sha256=hashlib.sha256(library.read_bytes()).hexdigest(),
                 original_routing_pitch_cases=rows,buffer_field_cases=16,rejected=rejected,
-                scope='complete original routing/pitch helpers and maintained APU voice-table configuration; no playback claim')
+                original_volume_mix_cases=mix_rows,
+                scope='complete original routing/pitch/volume helpers; maintained source DMA and final 2D send stage; upstream pitch/filter/envelope and whole-device output are separate')
 
 
 if __name__=='__main__':
@@ -137,4 +195,4 @@ if __name__=='__main__':
     args=parser.parse_args()
     result=run(args.xbe,args.library,args.dependencies)
     args.output.write_text(json.dumps(result,indent=2)+'\n')
-    print('PASS: 55 original routing/pitch cases, 16 buffer-field cases, 5 guarded failure cases')
+    print(f"PASS: 55 original routing/pitch cases, {len(result['original_volume_mix_cases'])} original volume -> real source/mix cases, 16 fields, 5 guards")

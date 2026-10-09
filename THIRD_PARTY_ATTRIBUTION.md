@@ -1346,6 +1346,20 @@ notifier information byte: our older literal-byte/SSLA assumption is removed,
 and the unsupported completion boundary now fails explicitly. Neither that
 placeholder nor native audible success qualifies an LLE notifier contract.
 
+The subsequent final 2D send-stage implementation consults the same pinned
+xemu register/voice references for packed routing/attenuation, channel-slot
+selection and submix headroom. It is independently authored. The owner's
+complete original format and volume helpers supply additional private evidence,
+including the S24+ADPCM format encoding absent from earlier authored fixtures.
+The native mixer implementation is reused unchanged; documented output
+tolerances permit continuous HLE gain arithmetic. See the expanded audio
+qualification for stage boundaries and missing upstream processing.
+
+[libsamplerate 0.2.2](https://github.com/libsndfile/libsamplerate/tree/0.2.2),
+copyright Erik de Castro Lopo, BSD-2-Clause, was consulted as a resampling donor
+candidate. It was not incorporated by this batch. Pinned xemu's acknowledged
+interpolation uncertainty is retained rather than relabeled as hardware proof.
+
 ## dr_wav: maintained ADPCM source decoder
 
 [dr_libs / dr_wav](https://github.com/mackron/dr_libs/tree/dfe8377631000664666519fdb83da193fd8037f4),

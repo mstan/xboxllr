@@ -22,7 +22,9 @@ arithmetic cannot wrap a bad voice-table pointer into valid RAM.
 
 `tools/apu_reference.cpp` supplies a strict C transport to this maintained
 implementation. It accepts implemented 32-bit configuration/control writes
-and explicit PCM/ADPCM source pulls.
+explicit PCM/ADPCM source pulls, submix headroom writes and final 2D send-stage
+processing. These are distinct pipeline boundaries; no missing upstream stage
+is silently supplied by the final mixer.
 Unsupported methods/widths fail persistently before successful completion or
 later RAM modification. The older broader machine register-file defaults are
 not admitted through this qualification boundary.
@@ -169,6 +171,73 @@ NTSC image> --library <reference DLL> --dependencies <DLL dependency directory>
 `pilot_audio_source_lle` CTests. These select separate diagnostic reference and
 native executions; production does not run duplicate implementations.
 
+## Original format setter and final 2D routing/gain stage
+
+Executing the complete original format setter `0x178805` exposed a gap in the
+previous hand-authored source setup: NTSC DirectSound programs ADPCM as
+**S24 + ADPCM container** (`0xa...`), while the earlier fixtures used S16 + ADPCM
+(`0x9...`). Both decode identically under the pinned emulator model, but the
+maintained source previously rejected the actual title form. It now accepts
+both. All **56 source cases** first run the original format setter and its
+unmodified IRQL helpers with the voice still unallocated and caller IRQL 2;
+then original region arithmetic and unit helpers drive the maintained DMA path.
+Stack and callee-saved registers are checked for complete helper executions.
+No MMIO availability or helper return is substituted.
+
+`McpxApu::mix_2d_samples` now implements the **final 2D send stage** using actual
+guest voice-table routing and eight packed attenuation values, plus the 32
+submix-headroom method values. Ordered send slots select left/right channels;
+repeated destinations accumulate. Attenuation has 1/64-dB units, `0xfff` mutes
+a send, and each submix headroom bit halves its contribution. The stage adds
+to the existing 32-by-32 planar bins; it does not clear other voices, advance
+CBO, change envelopes or publish completion. Spatial voices, unknown routing
+phase bits, bad DMA, non-finite inputs and invalid destination shapes fail.
+
+This is a real component of the LLE pipeline, **not a whole voice processor**.
+Its input must already have undergone resampling, filters, envelopes and voice
+scaling. The new tests compose it with real source DMA at 48 kHz, no filtering
+and unity upstream scaling. Those explicit preconditions do not implement or
+qualify the missing upstream stages for the title. General/voice headroom,
+nonstationary envelopes, spatial processing and stream ownership remain open.
+
+The complete original volume helper `0x178a7b` supplies **84 cases** across
+mono/stereo, empty/default/reordered/eight/duplicate routes and volume/mute
+boundaries. Its packed words feed maintained RAM methods and the source/send
+chain. Independent expectations check all bins and unchanged guest RAM across
+the final stage. `test_apu_source` additionally checks multi-voice accumulation,
+submix headroom masking, live gain changes, unused frame slots/output guards,
+and terminal failures. No original code bytes are committed.
+
+The real native mixer comparison now runs **24 cases**: PCM8/16 and ADPCM,
+mono/stereo, each with default, eight-bin, repeated-bin and empty routing. It
+retains actual native consumption and interior-loop cursors. The native path
+keeps continuous dB arithmetic: tolerance is 3e-5 normalized sample plus 0.2%
+of the reference amplitude for 1/64-dB quantization. A hardware-muted send
+allows at most 0.000632 times its source amplitude as quiet native output.
+This bounded difference is documented instead of forcing HLE to reproduce
+LLE internal arithmetic. Upstream silence/noise, arbitrary rates and post-GP
+output are not established by these stationary pre-GP comparisons.
+
+Validation: **84 volume/mix + 55 routing/pitch + 16 fields + 5 negative** original
+configuration cases; **56 original format/region/source cases**; root APU/source
+**2/2 in 0.06s**; actual native comparison **7.11s**; mixed suite **53/53 in 28.32s**.
+Both the maintained machine library and private native targets build. Evidence:
+`build/blinx/audio-mix-{configuration-original,source-original}.aot-private.json`
+and `audio-mix-{source-build,machine-build,native-build,full-build,full-tests}.log`.
+Reference DLL SHA-256:
+`892a6f410261ac6a541d11532b259bb3c28ebedc2d890fed3c4aa38d74c95317`.
+The title executable retains SHA `24f32feb...976a358`, so the immediately prior
+190.344s native attract regression is reused; no redundant attract run or new
+LLE-audio title qualification is claimed. **4/9** remains unchanged.
+
+Pinned xemu explicitly describes its sinc interpolation as a quality choice
+rather than a confirmed silicon algorithm. [libsamplerate 0.2.2](https://github.com/libsndfile/libsamplerate/tree/0.2.2),
+BSD-2-Clause, was reviewed as a reusable non-GPL candidate; no library code was
+imported in this batch. Keep source-rate progression and interpolation error
+as explicit contracts. Consult existing evidence before any new hardware
+measurement; if needed, exact silicon interpolation belongs at the back of
+the queue and must not block independent processing or control work.
+
 ## Withdrawn notifier assumption
 
 The audit found the older `post_voice_notifier` wrote a literal `1` into byte
@@ -190,8 +259,10 @@ needed, remain at the end of the burndown. Their necessity is not established.
 
 ## Remaining work, in order
 
-1. Advance the independent signal-processing path: connect routing, pitch,
-   gain and the existing GP donor to the maintained PCM/ADPCM source stage.
+1. Complete the upstream voice-processing path around the maintained source
+   and final 2D send stages: pitch/resampling, envelopes, voice scaling and
+   filtering, then connect the existing GP donor. Validate actual stream
+   output and transitions, not only stationary mixer comparisons.
    Existing original byte/sample conversion, detach, decoder and real native
    output tests are reusable evidence, not a completed LLE audio device.
 2. Complete original control ownership, notifier/SSL record qualification and

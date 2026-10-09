@@ -11,6 +11,7 @@
 // reference transport rejects them instead of admitting register-file defaults.
 #pragma once
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <functional>
@@ -107,6 +108,12 @@ public:
     // This does not apply pitch, envelopes, volume, mix routing or GP effects.
     bool source_frames(uint16_t voice, float* stereo, uint32_t capacity, uint32_t& count, bool& ended);
 
+    // Final 2D VP send stage: source frames must already have undergone pitch,
+    // filtering and envelope/voice scaling. Accumulate into 32 planar mix bins,
+    // each with 32 frame slots. This stage neither pulls source nor retires it.
+    // Slot order selects source channel; repeated destination bins add.
+    bool mix_2d_samples(uint16_t voice,const float* stereo,uint32_t frames,float* bins);
+
     uint32_t mmio_read(uint32_t addr, int size) override {
         uint32_t off = addr - base_;
         if (faulted_) return 0;
@@ -134,6 +141,10 @@ public:
                 return;
             }
             if (configure_voice(method, value)) return;
+            if(method>=0x200 && method<=0x27c && (method&3)==0) {
+                submix_headroom_[(method-0x200)/4]=value&7;
+                return;
+            }
             if (method == 0x140) {
                 const uint16_t voice=static_cast<uint16_t>(value);
                 uint32_t state=0;
@@ -444,8 +455,42 @@ private:
     uint64_t idle_voice_traps_ = 0;
     uint64_t xgscnt_ = 0;
     std::array<bool,kMaxVoices> voice_locked_{};
+    std::array<uint8_t,32> submix_headroom_{};
     int sub_logged_ = 0;
 };
+
+inline bool McpxApu::mix_2d_samples(uint16_t voice,const float* stereo,uint32_t frames,float* bins) {
+    if(faulted_)return false;
+    if(voice<64 || voice>=kMaxVoices || frames>32 || (frames && (!stereo || !bins))) {
+        device_fault("invalid or unqualified 2D mix-stage input");return false;
+    }
+    if(!frames)return true;
+    uint32_t route=0,format=0,packed[3];
+    if(!read_voice_word(voice,0,route) || !read_voice_word(voice,4,format) ||
+       !read_voice_word(voice,0x60,packed[0]) || !read_voice_word(voice,0x64,packed[1]) ||
+       !read_voice_word(voice,0x68,packed[2])) {
+        device_fault("mix-stage configuration DMA failed");return false;
+    }
+    if(route&0x80008000) {
+        device_fault("mix-stage phase/reserved routing bits remain unqualified");return false;
+    }
+    for(uint32_t i=0;i<frames*2;++i)if(!std::isfinite(stereo[i])) {
+        device_fault("non-finite VP mixer input");return false;
+    }
+    const unsigned channels=(format&(1u<<27))?2:1;
+    for(unsigned slot=0;slot<8;++slot) {
+        const unsigned bin=slot<6?(route>>(slot*5+(slot>=3)))&31:(format>>((slot-6)*5))&31;
+        unsigned attenuation=0;
+        if(slot<6)attenuation=(packed[slot/2]>>(slot%2?20:4))&4095;
+        else for(unsigned part=0;part<3;++part)
+            attenuation|=((packed[part]>>(slot==6?0:16))&15)<<(part*4);
+        // Hardware volume units are 1/64 dB; all ones is a muted send.
+        const float gain=attenuation==4095?0.0f:
+            static_cast<float>(std::pow(10.0,-double(attenuation)/1280.0)/double(1u<<submix_headroom_[bin]));
+        for(uint32_t n=0;n<frames;++n)bins[bin*32+n]+=stereo[n*2+(slot%channels)]*gain;
+    }
+    return true;
+}
 
 inline bool McpxApu::source_frames(uint16_t voice,float* stereo,uint32_t capacity,uint32_t& count,bool& ended) {
     count=0;ended=false;
@@ -467,7 +512,9 @@ inline bool McpxApu::source_frames(uint16_t voice,float* stereo,uint32_t capacit
     const unsigned channels=(format&(1u<<27))?2:1;
     const unsigned type=(format>>28)&3,container=(format>>30)&3;
     const unsigned stride=((format>>16)&31)+1;
-    const bool adpcm=container==2 && type==1;
+    // Original NTSC DirectSound emits S24+ADPCM; the existing S16+ADPCM
+    // reference form decodes identically. Container selects the codec.
+    const bool adpcm=container==2 && (type==1 || type==2);
     // Streaming SSL, multipass and linked-voice processing have separate
     // ownership/pipeline semantics; do not report those as consumed PCM.
     if((format&((1u<<21)|(1u<<22)|(1u<<24))) || stride!=channels ||

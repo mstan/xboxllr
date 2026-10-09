@@ -27,6 +27,7 @@ struct Reference {
     }
 };
 bool qualified_write(uint32_t offset) {
+    if(offset>=0x20200 && offset<=0x2027c && !(offset&3))return true;
     switch(offset) {
     case 0x202c:case 0x2030: // voice table and source scatter/gather physical addresses
     case 0x202f8:case 0x202fc:case 0x20140:
@@ -67,4 +68,11 @@ EXPORT int xlle_apu_reference_source(void* instance,uint32_t voice,float* sample
     bool last=false;
     const bool ok=ref.apu.source_frames(static_cast<uint16_t>(voice),samples,capacity,*count,last);
     *ended=last;return ok;
+}
+EXPORT int xlle_apu_reference_mix(void* instance,uint32_t voice,const float* samples,uint32_t frames,float* bins) {
+    if(!instance)return 0;
+    auto& ref=*static_cast<Reference*>(instance);
+    if(!ref.failure.empty())return 0;
+    if(voice>0xffff) {ref.failure="invalid APU mix transport voice";return 0;}
+    return ref.apu.mix_2d_samples(static_cast<uint16_t>(voice),samples,frames,bins);
 }

@@ -15,7 +15,7 @@ from pathlib import Path
 from aot_inventory import parse_xbe
 from unicorn import Uc,UC_ARCH_X86,UC_MODE_32
 from unicorn.x86_const import (UC_X86_REG_EAX,UC_X86_REG_EBX,UC_X86_REG_ECX,
-    UC_X86_REG_EBP,UC_X86_REG_EIP,UC_X86_REG_ESP,UC_X86_REG_GDTR,
+    UC_X86_REG_EBP,UC_X86_REG_ESI,UC_X86_REG_EDI,UC_X86_REG_EIP,UC_X86_REG_ESP,UC_X86_REG_GDTR,
     UC_X86_REG_CS,UC_X86_REG_SS,UC_X86_REG_DS,UC_X86_REG_ES,UC_X86_REG_FS)
 from native_audio_configuration_reference import IMAGE
 
@@ -44,9 +44,12 @@ def run(xbe,library,dependencies):
     def get(a):return struct.unpack('<I',cpu.mem_read(a,4))[0]
     def start(address,argument,until=end):
         put(stack,end);put(stack+4,argument)
+        preserved=[(r,cpu.reg_read(r)) for r in (UC_X86_REG_EBX,UC_X86_REG_EBP,UC_X86_REG_ESI,UC_X86_REG_EDI)]
         cpu.reg_write(UC_X86_REG_ECX,obj);cpu.reg_write(UC_X86_REG_ESP,stack)
         cpu.emu_start(address,until,count=10000);assert cpu.reg_read(UC_X86_REG_EIP)==until
-        if until==end:assert cpu.reg_read(UC_X86_REG_ESP)==stack+8
+        if until==end:
+            assert cpu.reg_read(UC_X86_REG_ESP)==stack+(4 if address==0x178805 else 8)
+            assert all(cpu.reg_read(r)==v for r,v in preserved)
         return cpu.reg_read(UC_X86_REG_EAX)
     rows=[]
     for bits in (8,16,4):
@@ -61,6 +64,13 @@ def run(xbe,library,dependencies):
                     cpu.mem_write(obj,bytes(0x100));cpu.mem_write(settings,bytes(0x100))
                     put(obj+0x78,settings);put(obj+0x90,settings)
                     put(settings+0xc,0x69 if adpcm else 1);put(settings+0x14,align)
+                    # Complete original format setter and its real IRQL helpers.
+                    # The voice is not allocated yet: no substituted PIO service.
+                    cpu.mem_write(settings+0xe,bytes([channels,4 if adpcm else bits]))
+                    assert start(0x178805,0)==0
+                    original_format=get(obj+0x14)
+                    expected_format=(0xa0000000 if adpcm else 0x50000000 if bits==16 else 0)|((channels-1)<<27)|((channels-1)<<16)
+                    assert original_format==expected_format
                     put(settings+0xc4,byte_offset(length));put(settings+0xc8,byte_offset(first));put(settings+0xcc,byte_offset(span))
                     # Execute all original region arithmetic and its real helper
                     # calls. Stop at the first MMIO poll, not at a fake return.
@@ -97,7 +107,7 @@ def run(xbe,library,dependencies):
                             a=base+byte;ram[word(sge+(a>>12)*8)+(a&4095)]=v
                         write(0x202c,table);write(0x2030,sge);write(0x202f8,voice)
                         store(table+voice*128+0x54,1<<21)
-                        format=(0x90000000 if adpcm else 0x50000000 if bits==16 else 0)|((channels-1)<<27)|((channels-1)<<16)|get(obj+0x14)
+                        format=get(obj+0x14)
                         write(0x20304,format);write(0x203a0,base);write(0x203a4,loop);write(0x203dc,last)
                         requested=length*2+13;out=(c.c_float*(requested*2))();count=c.c_uint32();ended=c.c_int()
                         assert dll.xlle_apu_reference_source(ref,voice,out,requested,c.byref(count),c.byref(ended))
@@ -112,11 +122,11 @@ def run(xbe,library,dependencies):
                         assert actual_bytes==byte_offset(cursor)
                         assert start(0x179e2c,actual_bytes)==(cursor//64*64 if adpcm else cursor)
                         rows.append(dict(bits=bits,channels=channels,length=length,loop=looping,
-                                         original_lbo=loop,original_ebo=last,frames=count.value,cursor_bytes=actual_bytes))
+                                         original_format=original_format,original_lbo=loop,original_ebo=last,frames=count.value,cursor_bytes=actual_bytes))
                     finally:dll.xlle_apu_reference_destroy(ref)
     if dependency:dependency.close()
     return dict(xbe_sha256=IMAGE,library_sha256=hashlib.sha256(library.read_bytes()).hexdigest(),cases=rows,
-        scope='original region prefix before MMIO and whole unit helpers; maintained PCM/ADPCM DMA/source handoff, not final notifier or public API completion')
+        scope='complete original format setter, region prefix before MMIO and whole unit helpers; maintained PCM/ADPCM DMA/source handoff, not final notifier or enclosing region API completion')
 
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__)
