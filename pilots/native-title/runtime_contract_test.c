@@ -71,6 +71,9 @@ static void call_kernel(unsigned ordinal,const uint32_t *args,unsigned argc)
 #include "thread_objects_contract_test.inc"
 #include "thread_scheduler_contract_test.inc"
 #include "event_objects_contract_test.inc"
+#ifdef PILOT_EVENT_TIMER_LLE
+#include "event_timer_lle_contract_test.inc"
+#endif
 #ifdef PILOT_IO_DEVICE_LLE
 #include "io_device_contract_test.inc"
 #endif
@@ -485,6 +488,9 @@ int main(int argc,char **argv)
         }
         if (!strcmp(argv[1],"threads")) { test_thread_objects(); return 0; }
         if (!strcmp(argv[1],"events")) { test_event_objects(); return 0; }
+#ifdef PILOT_EVENT_TIMER_LLE
+        if (!strcmp(argv[1],"event-timer-lle")) { test_event_timer_lle(); return 0; }
+#endif
         if (!strcmp(argv[1],"jumps")) { test_jumps(); return 0; }
         if (!strncmp(argv[1],"jump-",5)) { test_jump_failure(argv[1]+5); return 1; }
         if (!strcmp(argv[1],"instruction")) recomp_unimpl("test unsupported instruction",0x12340);

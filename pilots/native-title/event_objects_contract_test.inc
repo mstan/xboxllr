@@ -13,7 +13,15 @@ static void test_event_objects(void)
         call_kernel(233,wait,3);CHECK(g_eax==(type?0x102:0));
         call_kernel(186,&id,1);CHECK(!g_eax);
         uint32_t wait_ex[]={id,0,0,timeout};MEM64(timeout)=(uint64_t)-100000;
-        uint64_t begin=dispatch_monotonic();call_kernel(234,wait_ex,4);CHECK(g_eax==0x102 && dispatch_monotonic()>=begin+100000);
+        uint64_t begin=dispatch_monotonic();call_kernel(234,wait_ex,4);
+        uint64_t elapsed=dispatch_monotonic()-begin;
+        fprintf(stderr,"[EVENT WAIT] type=%u status=%08x requested_100ns=100000 elapsed_100ns=%llu\n",type,g_eax,(unsigned long long)elapsed);
+        /* Original KeTimeIncrement is 1 ms; original timer insertion uses
+         * the last tick, not a sub-tick performance counter. Native NT also
+         * permits early relative expiration. Retain the Xbox-sized bound,
+         * rather than silently accepting the host's potentially larger tick.
+         * Independent evidence: native_event_timer_reference.py and .99. */
+        CHECK(g_eax==0x102 && elapsed>=90000);
         /* An outstanding operation holds the real object even after the guest
          * handle is closed; a stale handle can never alias the next create. */
         uint32_t status;HANDLE retained=event_duplicate(id,&status);CHECK(retained && !status);

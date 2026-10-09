@@ -15,6 +15,9 @@ const char *pilot_io_device_lle(unsigned ordinal, unsigned char *guest,
  * work runs on the captured worker, raised through KeSetPriorityThread so
  * unrelated captured boot workers cannot preempt this bounded reference. */
 const char *pilot_io_device_files(unsigned char *guest);
+/* Original KeQueryInterruptTime returns EDX:EAX over the shared kernel clock.
+ * This observation does not advance time or manufacture timer expiration. */
+const char *pilot_io_device_interrupt_time(unsigned char *guest,uint64_t *value);
 /* Immutable boot-derived ULONG export, presently HalDiskCachePartitionCount. */
 const char *pilot_io_device_file_data(unsigned ordinal,uint32_t *value);
 /* Execute a registered original ISR body through its existing AOT binding.

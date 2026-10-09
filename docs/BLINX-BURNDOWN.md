@@ -20,6 +20,11 @@ The actual family count starts at **9 open / 0 closed** on 2026-10-08;
 the bounded controller-input, display, memory and filesystem gates now bring it
 to **5 open / 4 closed**.
 The owner requested **serial delivery from least complex to most complex**.
+On 2026-10-09 the owner explicitly moved **all work requiring a real console
+to the back of this burndown**. Continue independent LLE implementation and
+qualification offline instead of blocking the entire list on hardware access.
+Scheduling/events/timers (`.112`) is the next active family. GPU startup and
+its prepared hardware observation remain open and deferred, not waived.
 Calendar conversion is the first small slice of the scheduling/time family;
 finishing it does not close that larger family. These ten delivery entries and
 nine acceptance gates deliberately use different granularity.
@@ -50,27 +55,29 @@ change the next controller-input dependency batch.
 | 1 | Pure calendar conversion (scheduler/time slice) | Small: two original kernel routines; no hardware, IRQ or queue state | Complete, `.103`: both builds qualified; both original routines execute in actual Blinx, with interruption/menu return and reentry; [evidence](../pilots/native-title/CALENDAR-LLE.md) |
 | 2 | Controller input and interruption | XID reports plus USB initialization, DMA and interrupt dependencies | Complete for bounded Blinx port-0 automatic input, `.104`: actual original and HLE interruption/title/reentry, original and HLE hotplug/reopen/Start, original report/mask oracles, shared DMA lifetime and capability transport. 46/46 LLE and 40/40 HLE tests pass. Broader peripheral/timing scope remains explicit. [Evidence and limits](../pilots/native-title/INPUT-LLE.md) |
 | 3 | Display clock and vblank | Bounded clock/interrupt/callback family | Complete for bounded Blinx display, `.105`: original driver/NV2A/PIC route, scanout and three device lifetimes qualified; combined original input/display reaches Demo, interruption, reentry and subsequent movie in 510s; final game-owned native regression passes. Phase/other modes remain explicit. [Evidence](../pilots/native-title/DISPLAY-LLE.md) |
-| 4 | Memory and resource lifetime | Cross-cutting pointer, page, alias and ownership semantics | Complete for bounded Blinx memory, `.106`: original allocation/query/residency/relocation and shared CPU/DMA/resource lifetimes; 50 original cases, 46/46 LLE tests, 300s LLE-memory and 190s native attract regressions. Native 39/40 retains the existing event-timeout failure `.99`; long-run host retention remains `.107`. [Evidence and limits](../pilots/native-title/MEMORY-LLE.md) |
+| 4 | Memory and resource lifetime | Cross-cutting pointer, page, alias and ownership semantics | Complete for bounded Blinx memory, `.106`: original allocation/query/residency/relocation and shared CPU/DMA/resource lifetimes; 50 original cases, 46/46 LLE tests, 300s LLE-memory and 190s native attract regressions. The earlier native 39/40 event-timeout assertion `.99` is corrected by the scheduling batch below; long-run host retention remains `.107`. [Evidence and limits](../pilots/native-title/MEMORY-LLE.md) |
 | 5 | Files, cache and installed media | File bytes/errors/order plus backing storage and mount lifetime | Complete for bounded Blinx files, `.108`: actual original Nt/FATX/cache/IDE title route, whole-XBE comparison, two-process persistence, 84 original metadata/directory/error/namespace cases and 64 real lifetimes. HLE corrections pass 40/40 game tests and a 190.109s Demo/interruption/title/reentry regression. Explicit resource/metadata tolerances and guarded unqualified modes remain. [Evidence and scope](../pilots/native-title/FILES-LLE.md) |
-| 6 | GPU completion, callbacks and visibility | FIFO/traps/reports, pending results and lifetime; uses memory/display and original graphics initialization | Active `.109`: original queries/fences and 228 IRQ/DPC callbacks pass; tiled 2D commands match 140,800 hardware pixels; bounded tiled 3D surfaces and linear color textures pass independent pixel tests. Original AV/SMBus/IRQ and bounded encoder components pass. Actual LLE Blinx still stops before frames at missing encoder startup state; FP handshake/clock routing, context transfer, remaining memory clients and actual-title resource lifetime remain open. Matching HLE sampling/alpha/update tests pass. [Evidence and limits](../pilots/native-title/GPU-COMPLETION-LLE.md) |
-| 7 | Remaining scheduling, threads, events and timers | Coupled ready/block/wake/preemption and interrupt state | Open; calendar is only its first slice |
-| 8 | Audio buffers, cursor, routing and lifetime | APU/DSP plus DMA, scheduling, reuse and output | Open |
+| 6 | Remaining scheduling, threads, events and timers | Coupled ready/block/wake/preemption and interrupt state | Active `.112`: original event lifecycle/polls and timer insertion/cancellation now pass in the maintained bridge; 47/47 mixed tests and a 190.235s Blinx regression pass. Original expiry/wakeup and complete scheduling remain open. [Scope and evidence](../pilots/native-title/SCHEDULING-LLE.md) |
+| 7 | Audio buffers, cursor, routing and lifetime | APU/DSP plus DMA, scheduling, reuse and output | Open; continue executable/reference work offline, defer any unresolved hardware observations |
+| 8 | GPU completion, callbacks and visibility: independent offline work | FIFO/traps/reports, pending results and lifetime; uses memory/display | Partial `.109`: original queries/fences, 228 IRQ/DPC callbacks, hardware-referenced 2D pixels and bounded 3D/texture/encoder cases pass. Full original title startup and dependent integration remain open; their real-console observation is at the end of this list. Do not repeat that blocked startup experiment while working on independent services. [Evidence and limits](../pilots/native-title/GPU-COMPLETION-LLE.md) |
 | 9 | Graphics state, shaders, textures and vertex fetch | Broad NV2A draw/state/format coverage; uses memory/completion | Open |
 | 10 | Movie/A-V sequence integration | Composes the qualified file, decoder, input, audio and display paths | Open |
+| Last | Real-console observations and the integration they unblock | GPU startup/FD6806A0 `.111`, followed by any other specifically identified hardware-only questions | Deferred by owner. Probe `a22bb74` is prepared, not executed. Keep affected family gates open; revisit after available offline work or when the owner supplies evidence/authorization |
 
-This is a relative work ranking, not a date forecast. A newly discovered hard
-dependency can change the order, but record it explicitly rather than silently
-skipping unfinished work. Finish one entry's contract, runnable LLE route,
-independent evidence, HLE comparison and Blinx regression before starting the
-next entry. Add smaller slices only when they correspond to real service
-boundaries, not to manufacture progress in the family count.
+This is a relative work ranking, not a date forecast. Work serially through
+the available offline entries. For each, implement the executable LLE route,
+record independent evidence and HLE comparison, and regress actual Blinx where
+the changed service is connected. When an issue genuinely requires a console,
+record its exact question and dependency at the end and continue the next
+independent entry. Deferral does not count as qualification or permit guessed
+device results. The final row is a deferred-work queue, not a tenth family.
 
 GPU startup's unresolved FD6806A0 transaction now has a prepared, bounded
 hardware observation in `.111` (probe branch `feat/av-handshake-probe-20261009`,
 commit `a22bb74`). All 17 offline checks and the XBE build pass; hardware
 deployment/execution awaits explicit current-task authorization. Preparation
-does not qualify the transaction or close a family. Digital timing/control
-implementation can continue offline; details remain in the GPU evidence record.
+does not qualify the transaction or close a family. This observation is now
+deferred behind independent offline families by the owner's 2026-10-09 order.
 
 GPU callback delivery has now advanced independently of startup: original
 InsertCallback/kick, PIC/kernel interrupt gate, ISR/DPC and IRET pass 228 actual
@@ -106,7 +113,7 @@ The actual LLE title still stops before frames at the same encoder-state guard.
 This closes a timing-component limitation, not startup or the GPU family: **4/9**.
 [Evidence](../pilots/native-title/GPU-COMPLETION-LLE.md#encoder-reset-between-incoming-sync-edges---2026-10-09).
 
-| Family gate (ordered after calendar slice) | Existing evidence to retain | Required LLE route and qualification | Reference to use first |
+| Family gate (stable identifiers, not delivery order) | Existing evidence to retain | Required LLE route and qualification | Reference to use first |
 | --- | --- | --- | --- |
 | 1. Controller input and interruption | Host conversion/ABI tests; previous real attract interruption/menu-return/reentry; owner keyboard observation | Independently qualify connected/disconnected reports, packet/button semantics and lifetimes; repeat controlled Start interruption and idle reentry on the final hardened build. Physical-controller details beyond the exercised contract remain separate. | Original XAPI/XID behavior and xemu; actual controller/hardware capture when an input-report question cannot be settled independently |
 | 2. Display clock and vblank | Original display and cadence fixtures; software PCRTC/FIFO independence; native callback and unregister tests | Qualify present/vblank sequencing, callback lifetime and waits while GPU work is stalled. Preserve the original nominal cadence without requiring identical host frame times. | Original driver code plus software PCRTC and xemu; hardware capture for disputed scanout/phase behavior |
@@ -126,9 +133,9 @@ selects original code but stops at an unimplemented dependency is not a working
 floor. The movie row composes the real decoder, storage, audio and display routes;
 it does not invent a hardware codec absent from the original system.
 
-Work in the delivery order above. Lifetime/order errors can still invalidate
-output evidence, so downstream families remain open until their dependencies are
-qualified. Control cost by reusing existing LLE implementations and
+Work in the revised delivery order above. Qualify independent services while
+console-dependent questions are deferred; keep integrations open where their
+actual required dependencies remain unqualified. Control cost by reusing existing LLE implementations and
 qualified cases, bounding the supported service inputs honestly, and avoiding
 unrelated console features. Do not optimize LLE for real-time playback. Keep both
 builds working as the shared interface evolves; select implementations at build

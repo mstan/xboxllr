@@ -713,6 +713,23 @@ limits. Neither original kernel bytes nor xemu code are incorporated. Existing
 GPL-dependent components of the private pilot remain excluded from the intended
 non-GPL shipping product.
 
+## Original event/timer qualification (2026-10-09)
+
+`tools/native_event_timer_reference.py` and the corresponding compiled bridge
+tests are independently authored against the owner's hash-bound kernel capture.
+They execute original event/object-manager and timer-queue operations without
+replacing callees. No kernel bytes, disassembly or capture is incorporated.
+The existing attributed private interpreter and HLE event implementation remain
+unchanged; no new donor implementation body or dependency was imported.
+
+[Microsoft: Timer Accuracy](https://learn.microsoft.com/en-us/windows-hardware/drivers/kernel/timer-accuracy)
+is consulted for the documented clock-granularity limit of relative native
+waits. The accepted 1 ms margin comes from the original kernel's exported clock
+increment and executed deadline arithmetic, not an assumed host clock rate.
+Existing nxdk export declarations corroborate the ordinal/calling interfaces.
+These are behavioral references, not copied implementation code or proof of
+complete original timer interrupt delivery.
+
 ## Original device-manager reference execution (2026-10-08)
 
 `pilots/native-title/io_device_lle.c` and

@@ -559,10 +559,11 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
        ordinal!=98 && ordinal!=100 && ordinal!=103 && ordinal!=129 && ordinal!=151 &&
        ordinal!=160 && ordinal!=161 && ordinal!=184 && ordinal!=199 && ordinal!=204 && ordinal!=217
 #ifdef PILOT_FILES_LLE
-       && ordinal!=35 && ordinal!=36 && ordinal!=37 && ordinal!=67 && ordinal!=69 && ordinal!=148 &&
+       && ordinal!=35 && ordinal!=36 && ordinal!=37 && ordinal!=67 && ordinal!=69 &&
+       ordinal!=97 && ordinal!=113 && ordinal!=125 && ordinal!=148 && ordinal!=149 && ordinal!=150 &&
        ordinal!=186 && ordinal!=187 && ordinal!=189 && ordinal!=190 && ordinal!=196 && ordinal!=198 &&
        ordinal!=200 && ordinal!=202 && ordinal!=203 && ordinal!=207 && ordinal!=209 && ordinal!=211 &&
-       ordinal!=215 && ordinal!=218 && ordinal!=219 && ordinal!=225 && ordinal!=226 && ordinal!=233 && ordinal!=236
+       ordinal!=215 && ordinal!=218 && ordinal!=219 && ordinal!=225 && ordinal!=226 && ordinal!=233 && ordinal!=234 && ordinal!=236
 #endif
        ) {
         failure="device LLE unsupported ordinal";return;
@@ -625,11 +626,11 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
                    (ordinal==1 || ordinal==103 || ordinal==129 || ordinal==160 || ordinal==161)?0:1;
 #ifdef PILOT_FILES_LLE
     switch(ordinal) {
-    case 35:case 36:count=0;break;
-    case 67:case 148:case 198:case 203:case 209:case 225:count=2;break;
+    case 35:case 36:case 125:count=0;break;
+    case 67:case 113:case 148:case 198:case 203:case 209:case 225:count=2;break;
     case 215:case 233:count=3;break;
-    case 189:count=4;break;
-    case 211:case 218:case 226:count=5;break;
+    case 149:case 189:case 234:count=4;break;
+    case 150:case 211:case 218:case 226:count=5;break;
     case 202:count=6;break;
     case 219:case 236:count=8;break;
     case 190:count=9;break;
@@ -802,6 +803,24 @@ const char *pilot_io_device_lle(unsigned ordinal,unsigned char *guest,
 }
 
 #ifdef PILOT_FILES_LLE
+const char *pilot_io_device_interrupt_time(unsigned char *guest,uint64_t *value)
+{
+    AcquireSRWLockExclusive(&lock);
+    if(!guest_memory)initialize(guest);
+    if(!failure && (guest_memory!=guest || !value))failure="device LLE invalid clock caller";
+    if(!failure && execution_depth)failure="device LLE recursive clock query";
+    if(!failure) {
+        uint32_t low=0,high=0;++execution_depth;
+        execute(125,NULL,&low);
+        if(!failure) {
+            uc_err error=uc_reg_read(cpu,UC_X86_REG_EDX,&high);
+            if(error)failure=uc_strerror(error);
+            else *value=((uint64_t)high<<32)|low;
+        }
+        --execution_depth;
+    }
+    const char *error=failure;ReleaseSRWLockExclusive(&lock);return error;
+}
 const char *pilot_io_device_file_data(unsigned ordinal,uint32_t *value)
 {
     AcquireSRWLockExclusive(&lock);
