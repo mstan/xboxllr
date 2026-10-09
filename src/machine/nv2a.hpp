@@ -2493,12 +2493,16 @@ private:
         uint32_t dma_instance = 0;
         uint32_t method = 0, method_count = 0;
         uint32_t subroutine = 0;
+        uint32_t reference = 0;
+        uint32_t engines = 0, last_engine = 0;
         uint8_t subchannel = 0;
         bool non_incrementing = false;
         bool subroutine_active = false;
         bool get_initialized = false;
     };
     std::array<ChannelState, 32> channels_{};
+    bool pfifo_context_read(uint32_t offset, uint32_t& value);
+    bool pfifo_context_write(uint32_t offset, uint32_t value);
     std::vector<uint8_t> pramin_;
     // Scratch for software-batch resident region uploads; reused to avoid
     // per-batch allocation churn.
@@ -2574,6 +2578,25 @@ private:
     uint32_t pgraph_trapped_addr_ = 0;
     uint32_t pgraph_trapped_data_ = 0;
     uint32_t pgraph_context_table_ = 0;
+    // Original-driver control plane. Packet fixtures already own their
+    // context; writing CTX_CONTROL opts into the actual driver-managed gate.
+    bool pgraph_context_managed_ = false;
+    bool pgraph_executing_ = false;
+    uint32_t pgraph_context_control_ = 0, pgraph_context_user_ = 0;
+    uint32_t pgraph_ffintfc_ = 0, pgraph_rdi_index_ = 0;
+    std::array<uint32_t, 4> pgraph_context_switch_{};
+    std::array<uint32_t, 0xc00 / 4> pgraph_setup_{};
+    struct RamTileConfig {
+        uint32_t config0 = 0x03070003, config1 = 0, zcomp_offset = 0;
+        std::array<std::array<uint32_t, 3>, 8> tiles{};
+        std::array<uint32_t, 8> zcomp{};
+    } pfb_tiles_, pgraph_tiles_, texture_tiles_;
+    static uint32_t* ram_config_word(RamTileConfig& config, uint32_t offset);
+    bool ram_config_write(RamTileConfig& config, uint32_t offset, uint32_t value);
+    bool pgraph_setup_read(uint32_t offset, uint32_t& value);
+    bool pgraph_setup_write(uint32_t offset, uint32_t value);
+    void pgraph_reset_setup();
+    uint32_t pgraph_status() const;
     uint32_t patt_color0_ = 0;
     struct ContextSurfaces2DState {
         uint32_t object_instance = 0;
@@ -3903,7 +3926,8 @@ private:
     void record_generic_texture_modulate_reject(
         GenericTextureModulateRejectReason reason);
     bool fetch_vertex_attribute(uint32_t slot, uint32_t index);
-    bool ramht_instance(uint8_t channel, uint32_t handle, uint32_t& instance) const;
+    bool ramht_instance(uint8_t channel, uint32_t handle, uint32_t& instance,
+                        uint32_t* engine = nullptr) const;
     bool dma_object_address(uint32_t instance, uint32_t offset, uint32_t& address) const;
 
     // Interrupt state (PMC aggregation of PCRTC, xemu nv2a.c update_irq).

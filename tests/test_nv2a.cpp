@@ -1000,10 +1000,13 @@ static void test_vsh_compile_toggle_rebuilds_cached_parse() {
 #include "nv2a_visibility_cases.hpp"
 #include "nv2a_timer_cases.hpp"
 #include "nv2a_init_cases.hpp"
+#include "nv2a_setup_cases.hpp"
 
 int main() {
     test_gpu_initialization_controls();
     test_gpu_platform_bus();
+    test_pgraph_setup();
+    test_pgraph_context_admission();
     test_ptimer_reference();
     {
         std::string failure;
@@ -1117,6 +1120,7 @@ int main() {
     CHECK(gpu.flip_increments() == 1);
     CHECK(gpu.flip_stalls() == 1);
     CHECK(gpu.waiting_for_flip());
+    CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x400700, 4) != 0);
     CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x800044, 4) == 0x3C);
     CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x003244, 4) == 0x3C);
     CHECK(gpu.semaphore_writes() == 1);
@@ -1142,6 +1146,7 @@ int main() {
 
     gpu.mmio_write(xlle::Nv2a::kBase + 0x40071C, 4, 2);
     CHECK(!gpu.waiting_for_flip());
+    CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x400700, 4) == 0);
     CHECK(gpu.pgraph_read_increments() == 1);
     CHECK(gpu.semaphore_writes() == 2);
     CHECK(get32(ram, 0x3040) == 0xCAFEBABEu);

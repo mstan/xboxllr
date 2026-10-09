@@ -299,3 +299,89 @@ NV2A DLL SHA-256:
 Build/test logs use `gpu-lle-platform*`; the reference manifest records the
 same final DLL hash. No hardware contact or new xemu differential run occurred.
 The game pin remains at completed-files `439a45b`.
+
+## PGRAPH setup, context admission and FIFO state checkpoint
+
+Actual original Blinx passes the former `FD400080` guard, the complete initial
+PGRAPH setup routine, FIFO channel save/restore initialization and graphics
+object creation. The final 10.000s run stops on the original CPU write to
+`80000000`, before rendering. Symbolization identifies `sub_00139D90` at host
+RVA `09b355cd`: the original writes a jump to physical page zero, executes
+`WBINVD`, then starts the DMA pushbuffer and waits for GET to reach its head.
+nxdk `pbkit.c` has the same bootstrap sequence. This is a missing reserved-page
+publication/cache-ordering dependency, not evidence of a corrupted allocation
+or permission to substitute a successful GET value.
+The hash-bound original boot capture independently maps `80000000` to physical
+zero with write permission (PDE `03ff0067`, PTE `00000663`). Runtime admission
+must still verify the current translation and retain actual shared ownership.
+
+Implemented in maintained device code:
+
+- PGRAPH startup mode readback and pristine subengine reset; separate PFB,
+  PGRAPH and RDI `EA` RAM configuration banks; indexed access advances only
+  after a valid transfer. Active tiles, compression, other internal-memory
+  banks and live reset remain guarded. Accepted pipeline settings select the
+  existing coherent software pipeline. Register readback and successful
+  startup are **not** full qualification of every undocumented debug bit's
+  silicon effect; that remains part of the graphics-family audit. Original
+  and nxdk DEBUG7 settings differ, and arbitrary variants are not accepted.
+- Context validity/channel matching now controls real command admission.
+  A mismatch raises PGRAPH's context interrupt and retains the command; IRQ
+  acknowledgement alone cannot execute it. Device disable and FIFO hold retain
+  pending work. The existing batching path declines when original context
+  management is active so it cannot bypass these checks. Actual context
+  READ_IN/WRITE_OUT remains unimplemented and guarded; no xemu placeholder was
+  promoted into an implementation.
+- Engine status reflects active dispatch, stalls and outstanding draw jobs.
+  A prefetched FIFO can coexist with an idle engine; neither DMA_GET nor
+  STATUS=0 proves completion of a queued semaphore. This distinction lets the
+  original driver disable the puller and wait for idle before changing context.
+- CACHE1 parser state, subroutine state, reference counter, DMA pointers and
+  engine selection now expose live channel state. Restoring partial parser
+  state changes actual subsequent execution. `REF_CNT` waits for older draw
+  jobs before publishing its value, also visible through the channel's USER
+  register. RAMHT graphics-engine routing is validated. PFIFO semaphore
+  acquisition remains inactive and rejects programming/activation; this is
+  distinct from the already implemented NV097 semaphore DMA route.
+- Native fault diagnostics now record module base/RVA and guest registers,
+  allowing the next original instruction to be identified without guessing
+  from an absolute ASLR address.
+
+Validation/evidence:
+
+- Software `test_nv2a` passes, including separate RAM banks/reset, invalid
+  accesses, context hold/IRQ/retry, correct-channel release, actual semaphore
+  DMA, ordered reference publication, partial-parser restore and independent
+  channel values with batching on/off. OpenGL cases explicitly skip.
+- Nine original query/trap/fence cases pass across three fresh device
+  lifetimes; `gpu-completion-pgraph-final-original.aot-private.json` records
+  the final loaded device hash. Five GPU/device/memory integration tests pass.
+- Native-renderer title and test builds pass, along with eight relevant
+  graphics/device/memory checks in 6.20s. No fresh complete native attract run
+  is claimed for these reference/control-plane and diagnostic changes.
+- The optional historical `test_dispatch_table_guards.py` has four stale
+  catalogue assertions (126 expected handlers versus 132 present). Running it
+  against unchanged parent `2d17832` reproduces the same four failures; the
+  runnable NV2A tests pass. No assertion was loosened to mask the discrepancy.
+  Tracked separately in `beads-xbox.1.110`.
+- Actual launches: `gpu-lle-title-pgraph-setup` first reached CACHE1_REF;
+  `gpu-lle-title-pgraph-fifo` reached the physical-zero bootstrap;
+  `gpu-lle-title-object-fault` localized it; final
+  `gpu-lle-title-bootstrap-boundary` reproduces it with the final DLL. All
+  manifests/logs are under private `build/blinx/`; exit 2 is an explicit
+  incomplete route, not an attract pass. `gpu-lle-pgraph-*` logs retain checks.
+
+Final executable SHA-256:
+`602adf4dc27f46d3c740d527bb9ace69e042195440f15a909a3c4210d0c1970d`.
+Final NV2A DLL SHA-256:
+`6e60de973c87c413b4a15af729ceafacf5c9b2855c3d36351a9e3001b6dd7690`.
+
+Next: expose the original reserved bootstrap page through the existing shared
+CPU/kernel/DMA backing, verify its original translation and ownership, lower
+`WBINVD` to the coherent bus's actual publication/invalidation contract, and
+let the real PFIFO read and follow the jump. Then address actual graphics
+context loading and exercised draw/callback dependencies. Do not allocate a
+different scratch page, skip the write/flush, return a fabricated GET, or close
+the GPU family on these initialization results. The burndown stays 4/9 closed;
+the game remains on its completed-files pin. No hardware contact, new xemu
+runtime comparison or new donor/GPL implementation body is claimed.

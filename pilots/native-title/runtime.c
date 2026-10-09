@@ -663,7 +663,11 @@ static LONG CALLBACK fault_handler(EXCEPTION_POINTERS *exception)
         if(GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
             (LPCSTR)exception->ExceptionRecord->ExceptionAddress,&fault_module))
             GetModuleFileNameA(fault_module,fault_name,MAX_PATH);
-        fprintf(stderr,"[FAULT SITE] pc=%p module=%s\n",exception->ExceptionRecord->ExceptionAddress,fault_name);
+        fprintf(stderr,"[FAULT SITE] pc=%p module=%s base=%p rva=%llx\n",
+                exception->ExceptionRecord->ExceptionAddress,fault_name,(void*)fault_module,
+                (unsigned long long)((uintptr_t)exception->ExceptionRecord->ExceptionAddress-(uintptr_t)fault_module));
+        fprintf(stderr,"[FAULT GUEST] eax=%08x ebx=%08x ecx=%08x edx=%08x esi=%08x edi=%08x ebp=%08x esp=%08x\n",
+                g_eax,g_ebx,g_ecx,g_edx,g_esi,g_edi,g_ebp,g_esp);
         fprintf(stderr, "[FAULT] host=%p guest=%08llx access=%llu\n", (void*)at,
                 (unsigned long long)(at - (uintptr_t)memory),
                 (unsigned long long)exception->ExceptionRecord->ExceptionInformation[0]);

@@ -884,6 +884,9 @@ void Nv2a::invalidate_renderer_depth_overlap(uint32_t address, size_t size,
 static constexpr uint32_t kPciNv0 = 0x02A0'10DEu;  // device<<16 | vendor
 static constexpr uint32_t kPciNv2 = 0x0300'00A1u;  // class(0x030000)<<8 | revision(0xA1)
 
+#include "nv2a_setup.inc"
+#include "nv2a_fifo_context.inc"
+
 static bool pvideo_configuration_register(uint32_t offset) {
     // nxdk burst/watermark controls plus both banks' overlay parameters.
     return offset == 0x88 || offset == 0x8c || offset == 0x100 || offset == 0x140 ||
@@ -992,6 +995,8 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
             default: break;
         }
     } else if (blk->off == 0x002000) {  // PFIFO
+        uint32_t context_value=0;
+        if(size==4 && !(bo&3) && pfifo_context_read(bo,context_value))return context_value;
         switch (bo) {
             case 0x400:
                 return pull_queue_.empty() ? 1u << 4 : 0u;
@@ -1018,6 +1023,8 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
             default: break;
         }
     } else if (blk->off == 0x100000) {  // PFB
+        int ram_offset=pfb_ram_offset(bo);
+        if(ram_offset>=0 && size==4 && !(bo&3))return *ram_config_word(pfb_tiles_,uint32_t(ram_offset));
         // Captured from silicon 2026-07-16 (agent read 0xFD100200).
         if (bo == 0x200) return 0x03070003;  // NV_PFB_CFG0
         // The reference profile starts CFG1/NVM clear. This models its fixed
@@ -1038,6 +1045,8 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
         // Stage (f): what the CONSERVATIVE anchor policy would cost on top of
         // the demand-driven residency rule. Counted, never acted on.
         if (gpu_res_color_addr_ != 0) ++gpu_res_.pgraph_read_resolves;
+        uint32_t setup_value=0;
+        if(size==4 && !(bo&3) && pgraph_setup_read(bo,setup_value))return setup_value;
         switch (bo) {
             case 0x100: return pgraph_intr_;
             case 0x108: return pgraph_nsource_;
@@ -1067,6 +1076,8 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
             return value;
         }
     } else if (blk->off == 0x800000) {  // USER: per-channel PFIFO control (64 KB stride)
+        if ((bo & 0xffff) == 0x48 && size == 4)
+            return channels_[(bo >> 16) & 31].reference;
         // The kernel submits commands by bumping DMA_PUT (+0x40) and polls DMA_GET (+0x44)
         // until PFIFO consumes them. The recorder parses the stream synchronously, executes
         // the guest-visible method subset, and leaves the rest in the always-on method ring.
@@ -1175,6 +1186,7 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
             pgraph_intr_ = pgraph_intr_en_ = pgraph_nsource_ = 0;
             pgraph_trapped_addr_ = pgraph_trapped_data_ = patt_color0_ = 0;
             pgraph_context_table_ = 0;
+            pgraph_reset_setup();
             pgraph_fifo_access_ = false;
             waiting_for_nop_ = waiting_for_flip_ = false;
         }
@@ -1304,6 +1316,11 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
                 break;
         }
     }
+    if (blk->off == 0x100000 && size==4 && !(bo&3)) {
+        int ram_offset=pfb_ram_offset(bo);
+        if(ram_offset>=0){ram_config_write(pfb_tiles_,uint32_t(ram_offset),value);return;}
+    }
+    if (blk->off == 0x400000 && size==4 && !(bo&3) && pgraph_setup_write(bo,value))return;
     if (blk->off == 0x400000 && bo == 0x780) {
         // 32 channel entries in PRAMIN, pointer in 16-byte units (nxdk).
         // Loading/switching a context is a distinct trigger and remains guarded
@@ -1344,6 +1361,7 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
         return;
     }
     if (blk->off == 0x002000) {
+        if(size==4 && !(bo&3) && pfifo_context_write(bo,value))return;
         pfifo_regs_[bo] = value;
         uint8_t channel = static_cast<uint8_t>(pfifo_regs_[0x1204] & 0x1Fu);
         if (bo == 0x122C) {
@@ -1403,7 +1421,8 @@ bool Nv2a::dma_object_address(uint32_t instance, uint32_t offset, uint32_t& addr
     return true;
 }
 
-bool Nv2a::ramht_instance(uint8_t channel, uint32_t handle, uint32_t& instance) const {
+bool Nv2a::ramht_instance(uint8_t channel, uint32_t handle, uint32_t& instance,
+                          uint32_t* engine) const {
     auto it = pfifo_regs_.find(0x210);  // NV_PFIFO_RAMHT
     uint32_t ramht = it != pfifo_regs_.end() ? it->second : 0;
     uint32_t size = 1u << (((ramht & 0x00030000u) >> 16) + 12);
@@ -1426,6 +1445,7 @@ bool Nv2a::ramht_instance(uint8_t channel, uint32_t handle, uint32_t& instance) 
     if (entry_handle != handle || !(context & 0x80000000u) || entry_channel != channel)
         return false;
     instance = (context & 0x0000FFFFu) << 4;
+    if(engine)*engine=(context>>16)&3u;
     return true;
 }
 
@@ -1441,6 +1461,10 @@ bool Nv2a::resolve_object(uint8_t channel, uint32_t handle, uint32_t& instance) 
 bool Nv2a::bind_object(uint8_t channel, uint8_t subchannel, uint32_t handle) {
     uint32_t instance = 0;
     if (!resolve_object(channel, handle, instance)) return false;
+    uint32_t engine=0;
+    if(!ramht_instance(channel,handle,instance,&engine) || engine!=1) {
+        fault_("NV2A unsupported RAMHT object engine");return false;
+    }
     if (instance > pramin_.size() - 4) {
         char why[128];
         std::snprintf(why, sizeof(why),
@@ -1452,6 +1476,10 @@ bool Nv2a::bind_object(uint8_t channel, uint8_t subchannel, uint32_t handle) {
     std::memcpy(&context, pramin_.data() + instance, 4);
     object_instance_[subchannel] = instance;
     object_class_[subchannel] = static_cast<uint8_t>(context & 0xFFu);
+    // Preserve the validated RAMHT routing in the original driver's save state.
+    channels_[channel].engines=(channels_[channel].engines&~(15u<<(subchannel*4)))|
+                               (engine<<(subchannel*4));
+    channels_[channel].last_engine=engine;
     return true;
 }
 
@@ -16245,6 +16273,16 @@ void Nv2a::dispatch_method(PushMethod push) {
         }
         return;
     }
+    // Puller REF_CNT (envytools): completion of prior work precedes publication.
+    // No object binding is needed for this PFIFO builtin.
+    if(method==0x50) {
+        draw_queue_drain_all();
+        channels_[channel].reference=parameter;
+        return;
+    }
+    if(method<0x100 && pgraph_context_managed_) {
+        fault_("NV2A unsupported PFIFO builtin method");return;
+    }
     ++class_method_counts_[object_class_[subchannel]];
     if (method < 0x2000 && !(method & 3u)) {
         size_t class2d_slot = class2d_method_stats_.size();
@@ -17302,9 +17340,21 @@ void Nv2a::drain_pull_queue() {
     while (!waiting_for_flip_ && !waiting_for_nop_ && pgraph_fifo_access_ &&
            !pull_queue_.empty()) {
         PushMethod push = pull_queue_.front();
+        if(pgraph_context_managed_) {
+            if(!(pgraph_context_control_&0x10000000u) || (pgraph_ffintfc_&0x30000000u))return;
+            if(push.method!=0x50 && (!(pgraph_context_control_&0x10000u) ||
+               ((pgraph_context_user_>>24)&31)!=push.channel)) {
+                pgraph_trapped_addr_=(pgraph_trapped_addr_&~0x01f00000u)|(uint32_t(push.channel)<<20);
+                pgraph_intr_|=1u<<12;
+                pgraph_ffintfc_|=0x10000000u;
+                update_irq();return;
+            }
+        }
         pull_queue_.pop_front();
         perf::record_pfifo_queue_pop();
         dispatch_micro::mark(dispatch_micro::kDrainEnter);
+        const bool was_executing=pgraph_executing_;
+        pgraph_executing_=true;
         if (perf::g_enabled) {
             perf::ScopedAdd dispatch_timer(perf::g_ns_nv2a_dispatch_method,
                                            perf::g_calls_nv2a_dispatch_method);
@@ -17312,6 +17362,7 @@ void Nv2a::drain_pull_queue() {
         } else {
             dispatch_method(push);
         }
+        pgraph_executing_=was_executing;
         // The handler slot closes here rather than at the tail of
         // dispatch_method: the call and return are part of what a per-word
         // dispatch costs, and the tail of dispatch_method is pinned by
@@ -17415,6 +17466,10 @@ const uint8_t* Nv2a::pushbuffer_host_bytes(uint32_t addr, uint32_t bytes) {
 // still covers exactly the method-semantics time and nothing else, because the
 // only work inside it that is not a handler is the loop itself.
 uint32_t Nv2a::drain_method_run(ChannelState& ch, uint8_t channel, uint32_t max_words) {
+    // Original-driver context management must go through the queue's channel
+    // admission/interrupt checks. This batching path predates those controls;
+    // decline it rather than dispatching work past a pending context switch.
+    if (pgraph_context_managed_) return 0;
     if (!max_words) return 0;
     uint32_t first = 0;
     if (!dma_object_address(ch.dma_instance, ch.get, first)) {

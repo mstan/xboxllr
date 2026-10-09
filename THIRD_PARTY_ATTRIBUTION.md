@@ -914,6 +914,32 @@ Credit belongs to the Nouveau authors/contributors. The maintained counter
 write model and tests are authored independently; no implementation body was
 copied or linked. Envytools remains the counter-format/alarm reference.
 
+## GPU engine setup and FIFO context references
+
+The authored `nv2a_setup.inc`, `nv2a_fifo_context.inc` and corresponding tests
+consult nxdk/pbkit `29638d0b001f179b73c3513489af10ddc2986216` for the Xbox
+PGRAPH reset/context-control sequence and three RAM-configuration banks. The
+owned original NTSC driver executes privately and supplies its actual setup
+sequence; its binary and generated title bodies are not committed here.
+
+[envytools](https://github.com/envytools/envytools/tree/f102b82381f3f11cee113d16374c87091db039d9),
+commit `f102b82381f3f11cee113d16374c87091db039d9`, supplies independent field
+maps in `rnndb/fifo/nv4_pfifo.xml`, `rnndb/fifo/nv_object.xml`, internal-memory
+observations in `hwtest/pgraph_state.cc`, and the
+[PFIFO reference-counter contract](https://envytools.readthedocs.io/en/latest/hw/fifo/puller.html#syncing-with-host-reference-counter).
+Credit: Marcelina Kościelnicka, Ben Skeggs and the other envytools contributors
+(MIT). Register facts and behavioral descriptions were consulted; no
+implementation bodies were copied. NV20 observations are not automatically
+treated as NV2A silicon proof. Fixed pipeline-mode controls and their remaining
+qualification limits are recorded in `GPU-COMPLETION-LLE.md`.
+
+The pinned xemu `pgraph/pgraph.c`, `pgraph/rdi.c`, `pfifo.c` and register
+definitions inform context mismatch interrupts and parser fields. Its partial
+context READ_IN/WRITE_OUT and ignored unknown RDI writes were not adopted.
+Phobos's pinned `kernel/nv2a_pb_exec.c` was checked for applicable FIFO work;
+this checkpoint adds no Phobos or GPL implementation body. Existing private
+reference-library dependency restrictions still apply.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),
