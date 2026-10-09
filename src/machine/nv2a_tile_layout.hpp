@@ -66,6 +66,21 @@ public:
         return true;
     }
 
+    // envytools NV20 tag/partition layout. One tag describes 16 bytes across
+    // four rows. Bank XOR affects physical storage, not the tag address.
+    // This portion still needs NV2A tag-RAM hardware qualification; the blit
+    // golden above proves address interleave only.
+    bool compression_tag(uint32_t linear,uint32_t& partition,uint32_t& tag) const {
+        if(!valid_)return false;
+        const uint32_t x=linear%pitch_,y=linear/pitch_;
+        const uint32_t y2=(y>>2)&3;
+        partition=((x>>4)+((y2&1)<<1)+((y2&2)>>1))&3;
+        const uint64_t block=uint64_t(y>>4)*(pitch_>>8)+(x>>8);
+        const uint64_t result=(block<<4)|(y2<<2)|((x>>6)&3);
+        if(result>std::numeric_limits<uint32_t>::max())return false;
+        tag=uint32_t(result);return true;
+    }
+
 private:
     uint32_t pitch_ = 0, shift_ = 0, bank_ = 0;
     bool valid_ = false;

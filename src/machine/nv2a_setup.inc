@@ -47,8 +47,14 @@ bool Nv2a::ram_config_write(RamTileConfig& config,uint32_t offset,uint32_t value
     auto* word=ram_config_word(config,offset);
     if (!word) { fault_("NV2A unsupported RAM configuration word"); return false; }
     if ((offset == 0 && value != 0x03070003) || (offset == 4 && value != 0) ||
-        (offset == 12 && value != 0) || (offset >= 0x90 && value != 0)) {
+        (offset == 12 && value != 0)) {
         fault_("NV2A RAM geometry/compression mode is not implemented"); return false;
+    }
+    // Original NV2A uses NV20 ZCOMP fields. Only little-endian Z24S8 is
+    // implemented; Z16/endian/offset modes must not select a different codec.
+    if(offset>=0x90 && value && ((value&~0x8403ffc0u) ||
+                                 (value&0x84000000u)!=0x84000000u)) {
+        fault_("NV2A unsupported ZCOMP format/flags");return false;
     }
     if (offset >= 0x10 && offset < 0x30 && (value & ~0x03ffc003u)) {
         fault_("NV2A unsupported tile address/flags"); return false;
@@ -56,7 +62,7 @@ bool Nv2a::ram_config_write(RamTileConfig& config,uint32_t offset,uint32_t value
     // MMIO register programming precedes access. The driver can write base,
     // limit and pitch in either order; validate the complete configuration at
     // the memory operation. Never change the layout under an older draw job.
-    if (offset >= 0x10 && offset < 0x70 && pgraph_status()) {
+    if (offset >= 0x10 && pgraph_status()) {
         fault_("NV2A tile reconfiguration while graphics busy is unqualified");return false;
     }
     *word=value;return true;
@@ -76,6 +82,10 @@ bool Nv2a::ram_tile_configuration() {
         // Different client views need separate evidence, not implicit aliases.
         if(tile!=pfb_tiles_.tiles[i] || tile!=texture_tiles_.tiles[i]) {
             fault_("NV2A tile RAM-client banks disagree");return false;
+        }
+        if(pgraph_tiles_.zcomp[i]!=pfb_tiles_.zcomp[i] ||
+           pgraph_tiles_.zcomp[i]!=texture_tiles_.zcomp[i]) {
+            fault_("NV2A compression RAM-client banks disagree");return false;
         }
         Nv2aTileLayout layout;
         const uint32_t base=tile[0]&0x03ffc000u;
@@ -124,6 +134,21 @@ bool Nv2a::ram_tile_transfer(uint32_t address,void* data,size_t bytes,bool write
     for(size_t offset=0;offset<bytes;) {
         uint32_t linear=address-base+uint32_t(offset),physical=0;
         const size_t span=std::min(bytes-offset,size_t(16-(linear&15)));
+        if(pgraph_tiles_.zcomp[unsigned(selected)]&0x80000000u) {
+            ZetaBlock block;std::array<uint32_t,16> pixels;
+            if(!ram_zeta_block(unsigned(selected),linear,block) || !ram_zeta_read(block,pixels))
+                return false;
+            auto* pixel_bytes=reinterpret_cast<uint8_t*>(pixels.data());
+            const uint32_t in_block=((linear/tile[2])&3)*16+(linear&15);
+            auto* buffer=static_cast<uint8_t*>(data)+offset;
+            if(write) {
+                std::memcpy(pixel_bytes+in_block,buffer,span);
+                // Ordinary memory/2D writes expand the block and clear its
+                // tag. ZROP compression is selected separately below.
+                if(!ram_zeta_write(block,pixels,false))return false;
+            } else std::memcpy(buffer,pixel_bytes+in_block,span);
+            offset+=span;continue;
+        }
         if(!layout.translate(linear,physical) || uint64_t(base)+physical+span>uint64_t(tile[1])+1)
             return false;
         auto* buffer=static_cast<uint8_t*>(data)+offset;
@@ -149,6 +174,7 @@ void Nv2a::pgraph_reset_setup() {
     pgraph_executing_=false;
     pgraph_context_control_=pgraph_context_user_=pgraph_ffintfc_=pgraph_rdi_index_=0;
     pgraph_tiles_=RamTileConfig{};texture_tiles_=RamTileConfig{};
+    compress_zbuffer_=false; // controller tags are not PGRAPH context state
     invalidate_vsh_program_cache();
 }
 

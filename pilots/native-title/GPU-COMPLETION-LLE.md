@@ -605,3 +605,96 @@ candidates, followed by remaining 3D/context/CPU-aperture dependencies. Do not
 turn compression into ignored enable bits or promote the 2D/clear cases to
 whole-renderer qualification. No hardware contact or GPL implementation copy
 occurred. The family remains open and the overall count stays 4/9.
+
+## Z24S8 compression: executable memory effects, donor-qualified codec
+
+Actual original Blinx now passes `FD100304=84000000` and stops at the unbound
+kernel export `AvSendTVEncoderOption` (ordinal 2). Final run
+`build/blinx/gpu-lle-title-zcomp-final/run.aot-private.json` exits 2 after
+9.000s, with 448 original entries. This is still graphics initialization,
+before any rendered frame. The first candidate reached the same boundary in
+9.015s. No title completion/callback or whole-renderer qualification is claimed.
+
+Maintained implementation:
+
+- `nv2a_zeta_compression.hpp` adapts envytools' MIT NV20 non-MS, little-endian
+  Z24S8 decoder. Original Xbox and nxdk tile programming identify the NV20
+  register shape, including enable bit 31 and depth-format bit 26. The donor's
+  generic chipset `0x2a` selection would choose NV25 fields; it is not used.
+  A 4x4 block decodes real 8-byte or 16-byte backing, with signed gradients,
+  packed residuals and shared stencil. The 8-byte flag does not mean constant
+  depth; its gradients still apply.
+- An authored encoder represents uniform-stencil blocks when slopes/residuals
+  fit that format. Otherwise it writes all 64 bytes and publishes an
+  uncompressed tag. `SET_COMPRESS_ZBUFFER_EN` controls this choice for depth
+  clears. The representation policy is not asserted to reproduce the exact
+  silicon compressor; logical pixels and real backing/tag effects are tested.
+- `nv2a_zeta_memory.inc` connects real clear and tiled read/write clients.
+  Tags are keyed by the adapted controller partition/tag address, with the
+  configured tag base; they are not cached clear colors or tile-index state.
+  Disabling/rebinding a tile preserves tags and bytes. Raw CPU/PFIFO accesses
+  still see physical backing. Reads decode its current contents.
+- Full 4x4 overwrites initialize actual tag state. Partial/masked writes first
+  read and preserve unaffected pixels. Ordinary 2D writes expand the block and
+  clear its tag after successful backing writes. Unknown initial tags fail;
+  there is no assumed zero-filled tag RAM. Failed backing writes invalidate
+  the affected modeled tag and cannot count as successful clears/copies.
+- Separate PFB/PGRAPH/RDI compression words now retain supported state and
+  must agree at active memory operations. Invalid formats/flags preserve old
+  state; invalid RDI writes preserve its index. Reconfiguration during active
+  work is guarded. Z16, endian modes, nonzero compression offsets, tag debug
+  access, tiled 3D/texture/vertex clients and the CPU tiled aperture remain
+  unimplemented or unqualified and guarded.
+
+Independent evidence and its limits:
+
+- `native_gpu_compression_reference.py` builds the unmodified pinned envytools
+  `comp.c`, `chipset.c` and generated chipset tables, without replacement
+  functions. All **20,130 encoded blocks / 322,080 pixels** match exactly:
+  zero, all-ones, all 128 individual bits and 20,000 seeded random payloads.
+  It also passes **4,096 authored-encoder blocks** through the original donor
+  decoder: 128 eight-byte and 3,968 sixteen-byte blocks recover every input
+  pixel. Decoder result SHA-256 is
+  `f33b07f195623bac4c31c1cbdfb5ce1639413d0dcabfaa6c95e6a1c2fce88159`;
+  original-decoded encoder inputs hash to
+  `5c7836cf740250ef36b5756f373de31adb6bf79db1f318122201bfa65481f0a1`.
+- This proves adaptation/format equivalence to an external implementation,
+  **not NV2A silicon qualification**. The NV20 partition/tag mapping is an
+  explicit current hypothesis under the Xbox geometry. Tag capacity/debug
+  port, reset contents and exact compressor decisions still need matching
+  Xbox evidence. No capacity register or debug-port response is fabricated.
+  The existing uncompressed hardware golden cannot establish those details.
+- Actual PFIFO commands test compressed clears, 8-to-16-byte updates, raw
+  payload modification followed by fresh decoding, masked stencil updates
+  requiring 64-byte expansion, ordinary 2D overwrite, disabled compression,
+  all 307,200 pixels of a full-surface clear/readback, partition/row boundaries,
+  nonzero tag base, tile-index reuse, mismatched banks, unknown tags and denied
+  backing writes. Codec fixtures separately check signed/wrapping depth,
+  residual extremes and fallback instead of dropped stencil/residual data.
+- The command output for the existing Xbox `BlitBeyondWidth` comparison still
+  matches all **140,800 hardware pixels**, with the same output RGBA hash and
+  139,568 linear negative-control mismatches. Four software/layout/command/
+  codec CTests pass in 0.31s; OpenGL cases explicitly skip. The nine original
+  query/trap/fence cases pass across three device lifetimes. Five pilot
+  GPU/device/memory checks pass in 2.03s.
+
+Reproduce the donor comparison (the script only writes under `build/`):
+
+```powershell
+py -3 tools/native_gpu_compression_reference.py --envytools ../refs/envytools-review-20261008 --fixture build/visibility-lle/test_nv2a_zeta_compression.exe --cc C:/msys64/mingw64/bin/gcc.exe --git "C:/Program Files/Git/cmd/git.exe" --output build/blinx/compression-reference/decoder-encoder.aot-private.json
+```
+
+Other final manifests: `gpu-completion-zcomp-original.aot-private.json` and
+`tile-reference/commands-zcomp-hardware.aot-private.json` under `build/blinx/`.
+Final DLL SHA-256 is
+`0c9275abd717d5e9687e6470cc64893d93ac3043515a4c22210839aa9698d03f`.
+Title executable remains `4510a9e...32f9`. Native HLE runtime source and the
+stable game pin `439a45b` are unchanged; no fresh full HLE attract run is
+claimed. Attribution identifies the adapted MIT code and authored integration.
+No console was contacted and no new GPL implementation body was incorporated.
+
+Next executable dependency: connect the reached original AV kernel service,
+then continue the original graphics/context/draw path. Preserve the explicit
+Xbox compression qualification debt while collecting the relevant evidence;
+do not close the GPU family on donor equivalence or initialization progress.
+The overall burndown remains **4/9**.

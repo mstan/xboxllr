@@ -2591,6 +2591,20 @@ private:
         std::array<std::array<uint32_t, 3>, 8> tiles{};
         std::array<uint32_t, 8> zcomp{};
     } pfb_tiles_, pgraph_tiles_, texture_tiles_;
+    // Sparse, explicitly initialized compression tags, indexed by the memory
+    // controller's partition/tag address, not by tile or host surface identity.
+    // Unknown power-on contents must not be silently reported as uncompressed.
+    std::unordered_map<uint32_t,bool> zeta_compression_tags_;
+    bool compress_zbuffer_ = false;
+    struct ZetaBlock {
+        uint32_t key=0;
+        std::array<uint32_t,4> rows{};
+    };
+    bool ram_zeta_block(unsigned tile,uint32_t linear,ZetaBlock& block);
+    bool ram_zeta_read(const ZetaBlock& block,std::array<uint32_t,16>& pixels);
+    bool ram_zeta_write(const ZetaBlock& block,const std::array<uint32_t,16>& pixels,bool compress);
+    bool ram_zeta_clear(unsigned tile,uint32_t first,uint32_t pitch,uint32_t width,
+                        uint32_t height,uint32_t value,uint32_t mask);
     static uint32_t* ram_config_word(RamTileConfig& config, uint32_t offset);
     bool ram_config_write(RamTileConfig& config, uint32_t offset, uint32_t value);
     bool ram_tiles_active() const;

@@ -977,9 +977,10 @@ bounded Xbox geometry and adds checked configuration/overflow handling. The
 full MIT permission and disclaimer are retained in the source header.
 `hwtest/nv10_tile.cc` and its memory-controller field descriptions also inform
 qualification. This is distinct from the earlier reference-only consultations.
-The component now drives the software image-blit, uncompressed clear and
-scanout memory paths. Tiled 3D draw/texture/CPU-aperture clients and compression
-remain guarded pending implementation and qualification.
+The component now drives the software image-blit, clear and scanout memory
+paths. It also adapts the donor's NV20 partition/tag address calculation; that
+addition has donor-format evidence but is not qualified by the uncompressed
+Xbox blit golden. Tiled 3D draw/texture/CPU-aperture clients remain guarded.
 
 Hardware expectations come from Erik Abair and contributors'
 [nxdk_pgraph_tests_golden_results](https://github.com/abaire/nxdk_pgraph_tests_golden_results/tree/06b041d6a50c060b4974d93617405f86a03a0b8f),
@@ -1005,8 +1006,32 @@ are authored here; the translated addresses use the attributed envytools
 component above. Pinned xemu `nv2a.c:nv_clip_gpu_tile_blit` was consulted as a
 behavioral reference, while the public hardware capture supplies the clipping
 and overdraw expectations. No xemu implementation body was copied. Envytools
-`nvhw/comp.c` and nxdk_pgraph_tests depth-format cases have been identified as
-the next compression references; no compression implementation is adopted yet.
+`nvhw/comp.c` is additionally adopted in the checkpoint described below.
+
+## Adapted depth-compression decoder
+
+`src/machine/nv2a_zeta_compression.hpp` **contains adapted implementation code**
+from envytools `nvhw/comp.c` at the pinned `f102b823` revision above, copyright
+2012 Marcelina Kościelnicka. Its complete MIT notice is retained in the header.
+The adaptation specializes the NV20 non-MS, little-endian Z24S8 gradient
+decoder, including the 8-byte/16-byte payload distinction. The encoder,
+compressed-memory integration and command fixtures are authored here.
+
+The donor's `rnndb/memory/nv10_pfb.xml`, `hwtest/nv10_tile.cc` and `nvhw/tile.c`
+inform register fields, packed data, and partition/tag selection. Original
+owned driver execution and pinned nxdk's `pb_assign_tile` independently show
+that Xbox uses the NV20-style ZCOMP register fields; generic envytools chipset
+`0x2a` selects a different format family and is not used blindly.
+
+`tools/native_gpu_compression_reference.py` builds unmodified pinned envytools
+sources and their generated chipset tables under private `build/`, comparing
+the adapted decoder and checking the authored encoder with the original
+decoder. This demonstrates donor equivalence, not new NV2A hardware proof.
+The public nxdk_pgraph_tests `depth_format_tests.cpp` compression cases were
+inspected as future rendered-output references; they have not been reproduced
+by this checkpoint. Xbox tag capacity/debug access and exact compressor
+representation choices remain explicitly unqualified. No new GPL
+implementation body or game asset is incorporated.
 
 ## Theseus behavioral reference
 

@@ -49,6 +49,17 @@ struct TileFixture {
     void write(uint32_t r,uint32_t v){gpu->mmio_write(0xfd000000u+r,4,v);}
     void emit(uint32_t m,uint32_t v){put(0x1000+cursor,0x40000u|m);put(0x1004+cursor,v);cursor+=8;}
     void kick(){write(0x800040,cursor);}
+    void compression(unsigned index,uint32_t value) {
+        write(0x100300+index*4,value);write(0x400980+index*4,value);
+        write(0x400750,0xea0090+index*4);write(0x400754,value);
+    }
+    void zclear(uint32_t address,uint32_t value,uint32_t mask=3,uint32_t x0=0,
+                uint32_t x1=3,uint32_t y0=0,uint32_t y1=3,bool compress=true) {
+        write(0x700020,4);write(0x700024,0x80010022);write(0x700220,0x97);
+        emit(0,4);emit(0x198,3);emit(0x208,0x128);emit(0x20c,0x0a000a00);
+        emit(0x214,address);emit(0x1d80,compress);emit(0x1d8c,value);
+        emit(0x1d98,(x1<<16)|x0);emit(0x1d9c,(y1<<16)|y0);emit(0x1d94,mask);kick();
+    }
     void tile(unsigned index,uint32_t base,uint32_t bytes,uint32_t pitch,uint32_t flags) {
         const uint32_t words[]={base|flags,base+bytes-1,pitch};
         // Original driver programs limit/pitch before enabling the base.
@@ -174,8 +185,104 @@ static void clear_and_scanout() {
     if(!f.failure.empty())std::printf("clear/scanout failure: %s\n",f.failure.c_str());
 }
 
+static void compressed_depth() {
+    // Real methods initialize a tag and compressed bytes; raw backing is
+    // inspected, then a real IMAGE_BLIT consumes the decompressed block.
+    TileFixture f;f.tile(1,f.target,f.size,2560,3);f.compression(1,0x84000000);
+    f.zclear(f.target,0x1234567f);
+    CHECK(f.failure.empty() && f.gpu->zeta_clears()==1 && f.writes==8);
+    CHECK(f.get(f.target+4096)==0x1234567f);
+    CHECK(f.get(f.target+4100)==0x80000000 && f.get(f.target+4104)==0xcccccccc);
+    f.blit(f.target,f.display,2560,16,4,4);
+    CHECK(f.failure.empty() && f.gpu->image_blit_copies()==1);
+    for(unsigned i=0;i<16;++i)CHECK(f.get(f.display+i*4)==0x1234567f);
+
+    auto bytes_before=f.writes;
+    f.zclear(f.target,0x12345900,1,0,0,0,0);
+    CHECK(f.failure.empty() && f.writes==bytes_before+16);
+    CHECK(!(f.get(f.target+4100)&0x80000000u));
+    f.blit(f.target,f.display,2560,16,4,4);CHECK(f.failure.empty());
+    for(unsigned i=0;i<16;++i)CHECK(f.get(f.display+i*4)==(i?0x1234567f:0x1234597f));
+    f.zclear(f.target,0x1234567f);
+
+    // Change the physical compressed payload. Reads must decode current bytes,
+    // not return a cached clear color. Base=(1,1), dx=2, dy=3, 8-byte mode.
+    f.put(f.target+4100,0x80018002);
+    f.blit(f.target,f.display,2560,16,4,4);
+    CHECK(f.failure.empty());
+    for(int y=0;y<4;++y)for(int x=0;x<4;++x)
+        CHECK(f.get(f.display+(y*4+x)*4)==uint32_t((0x123456+2*(x-1)+3*(y-1))<<8|0x7f));
+
+    // A masked update preserves every unselected depth and stencil value.
+    // Different stencil values cannot use the gradient format: expand all
+    // four physical rows and publish an uncompressed tag.
+    auto writes=f.writes;
+    f.zclear(f.target,0x000000a5,2,1,1,1,1);
+    CHECK(f.failure.empty() && f.writes==writes+64);
+    f.blit(f.target,f.display,2560,16,4,4);CHECK(f.failure.empty());
+    for(int y=0;y<4;++y)for(int x=0;x<4;++x) {
+        const uint32_t stencil=x==1&&y==1?0xa5:0x7f;
+        CHECK(f.get(f.display+(y*4+x)*4)==uint32_t((0x123456+2*(x-1)+3*(y-1))<<8|stencil));
+    }
+    // Recompress and then do an ordinary 2D write. It must preserve all other
+    // pixels while expanding the block. Disabling compression exposes storage.
+    f.zclear(f.target,0x10203042);f.blit(f.source,f.target+2560+4,4096,2560,1,1);
+    f.blit(f.target,f.display,2560,16,4,4);CHECK(f.failure.empty());
+    for(unsigned i=0;i<16;++i)CHECK(f.get(f.display+i*4)==(i==5?f.get(f.source):0x10203042));
+    f.compression(1,0);f.blit(f.target,f.display,2560,16,4,4);CHECK(f.failure.empty());
+    CHECK(f.get(f.display+20)==f.get(f.source));
+    f.compression(1,0x84000000);f.zclear(f.target,0x98765432,3,0,3,0,3,false);
+    f.compression(1,0);f.blit(f.target,f.display,2560,16,4,4);CHECK(f.failure.empty());
+    for(unsigned i=0;i<16;++i)CHECK(f.get(f.display+i*4)==0x98765432);
+
+    // No invented initial tags; a complete overwrite establishes state, a
+    // partial unknown read/modify/write cannot do so.
+    TileFixture unknown;unknown.tile(1,f.target,f.size,2560,3);unknown.compression(1,0x84000000);
+    unknown.zclear(f.target,0xabcd1234,3,1,1,1,1);
+    CHECK(!unknown.failure.empty() && !unknown.writes && !unknown.gpu->zeta_clears());
+    TileFixture unread;unread.tile(1,f.target,f.size,2560,3);unread.compression(1,0x84000000);
+    unread.blit(f.target,f.display,2560,16,4,4);
+    CHECK(!unread.failure.empty() && !unread.writes && !unread.gpu->image_blit_copies());
+
+    // Each partition/tag address is distinct across row and bank boundaries.
+    TileFixture full;full.tile(1,f.target,f.size,2560,3);full.compression(1,0x84000040);
+    full.zclear(f.target,0xabcdef42,3,0,639,0,479);
+    CHECK(full.failure.empty() && full.writes==640*480/16*8);
+    full.zclear(f.target,0x10203042,1,64,64,16,16);
+    full.blit(f.target,f.display,2560,2560,640,480);CHECK(full.failure.empty());
+    for(unsigned i=0;i<640*480;++i)
+        CHECK(full.get(f.display+i*4)==(i==16*640+64?0x10203042:0xabcdef42));
+    // Same tag base re-bound to another tile index retains its state.
+    full.tile(1,0,1,0,0);full.compression(1,0);
+    full.tile(2,f.target,f.size,2560,3);full.compression(2,0x84000040);
+    full.blit(f.target,f.display,2560,16,4,4);CHECK(full.failure.empty());
+    CHECK(full.get(f.display)==0xabcdef42);
+    full.compression(2,0x84000080); // different tag base was initialized by the full clear
+    full.write(0x100308,0x840000c0); // mismatched bank is still rejected before data effects
+    auto copies=full.gpu->image_blit_copies();writes=full.writes;
+    full.blit(f.target,f.display,2560,16,4,4);
+    CHECK(full.failure.find("compression RAM-client banks")!=std::string::npos);
+    CHECK(full.writes==writes && full.gpu->image_blit_copies()==copies);
+
+    TileFixture denied;denied.tile(1,f.target,f.size,2560,3);denied.compression(1,0x84000000);
+    denied.deny_begin=f.target;denied.deny_end=f.target+f.size;
+    denied.zclear(f.target,0x12345678);
+    CHECK(denied.failure.find("backing write failed")!=std::string::npos);
+    CHECK(!denied.writes && !denied.gpu->zeta_clears());
+    denied.deny_begin=denied.deny_end=0;denied.failure.clear();
+    denied.blit(f.target,f.display,2560,16,4,4);
+    CHECK(!denied.failure.empty() && !denied.writes && !denied.gpu->image_blit_copies());
+    // Unsupported Z16 must leave the configured register and RDI cursor intact.
+    TileFixture format;format.write(0x100304,0x80000000);
+    CHECK(format.failure.find("ZCOMP format")!=std::string::npos);
+    CHECK(format.gpu->mmio_read(0xfd100304,4)==0);
+    format.write(0x400750,0xea0094);format.write(0x400754,0x80000000);
+    CHECK(format.gpu->mmio_read(0xfd400750,4)==0xea0094);
+    if(!f.failure.empty())std::printf("compression failure: %s\n",f.failure.c_str());
+}
+
 int main(int argc,char** argv) {
-    const auto output=hardware_sequence();boundaries();clear_and_scanout();
+    const auto output=hardware_sequence();boundaries();clear_and_scanout();compressed_depth();
     if(argc==3 && !std::strcmp(argv[1],"--hardware-rgba")) {
         std::ofstream file(argv[2],std::ios::binary);
         file.write(reinterpret_cast<const char*>(output.data()),output.size());CHECK(bool(file));

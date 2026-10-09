@@ -1,6 +1,7 @@
 // xlle — NV2A MMIO register shell. See nv2a.hpp for the value policy.
 #include "machine/nv2a.hpp"
 #include "machine/nv2a_tile_layout.hpp"
+#include "machine/nv2a_zeta_compression.hpp"
 
 #include <algorithm>
 #include <climits>
@@ -886,6 +887,7 @@ static constexpr uint32_t kPciNv0 = 0x02A0'10DEu;  // device<<16 | vendor
 static constexpr uint32_t kPciNv2 = 0x0300'00A1u;  // class(0x030000)<<8 | revision(0xA1)
 
 #include "nv2a_setup.inc"
+#include "nv2a_zeta_memory.inc"
 #include "nv2a_fifo_context.inc"
 
 static bool pvideo_configuration_register(uint32_t offset) {
@@ -1601,6 +1603,16 @@ bool Nv2a::clear_surface_plane(uint32_t dma_instance, bool dma_bound,
         return false;
 
     std::vector<uint8_t> row(static_cast<size_t>(row_bytes));
+    const int tile=ram_tile_at(first_address);
+    if(tile>=0 && (pgraph_tiles_.zcomp[unsigned(tile)]&0x80000000u)) {
+        if(bytes_per_pixel!=4 || std::strcmp(plane,"zeta")) {
+            fault_("NV2A compressed clear requires Z24S8 depth pixels");return false;
+        }
+        if(!ram_zeta_clear(unsigned(tile),first_address,pitch,uint32_t(width),
+                           uint32_t(height),clear_value,write_mask))return false;
+        // Active tiles are software-only; no resident host copy exists here.
+        return true;
+    }
     const uint32_t pixel_mask = bytes_per_pixel == 2 ? 0xFFFFu : 0xFFFFFFFFu;
     for (uint32_t y = ymin; y <= ymax; ++y) {
         uint32_t address = first_address + (y - ymin) * pitch;
@@ -16058,6 +16070,7 @@ enum Nv097Handler : uint8_t {
     kNv097M1D6C,                // method == 0x1D6C
     kNv097M1D70,                // method == 0x1D70
     kNv097M01A8, kNv097M17C8, kNv097M17CC, kNv097M17D0, kNv097M0110,
+    kNv097M1D80,                // appended to preserve the prior handler IDs
 };
 
 constexpr uint32_t kNv097MethodLimit = 0x2000;
@@ -16089,6 +16102,7 @@ constexpr Nv097Arm kNv097Arms[] = {
     {0x020C, 0x0210, kNv097M020C},
     {0x0210, 0x0214, kNv097M0210},
     {0x0214, 0x0218, kNv097M0214},
+    {0x1D80, 0x1D84, kNv097M1D80},
     {0x1D8C, 0x1D90, kNv097M1D8C},
     {0x1D90, 0x1D94, kNv097M1D90},
     {0x1D98, 0x1D9C, kNv097M1D98},
@@ -16567,6 +16581,11 @@ void Nv2a::dispatch_method(PushMethod push) {
         seam_anchor(kSeamAnchorSurfaceRetarget, true);
         surface_zeta_offset_ = parameter;
         raster_state_[kRasterSurfaceZetaOffset] = parameter;
+        break;
+    }
+    case kNv097M1D80: {
+        if(parameter>1)fault_("NV2A invalid depth compression enable");
+        else compress_zbuffer_=parameter!=0;
         break;
     }
     case kNv097M1D8C: {
