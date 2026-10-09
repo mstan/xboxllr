@@ -996,8 +996,25 @@ static void test_vsh_compile_toggle_rebuilds_cached_parse() {
 }
 
 #include "nv2a_visibility_cases.hpp"
+#include "nv2a_timer_cases.hpp"
 
 int main() {
+    test_ptimer_reference();
+    {
+        std::string failure;
+        xlle::Nv2a device([&](const std::string& why){failure=why;});
+        CHECK(device.mmio_read(0xfd001804,4)==0);
+        device.mmio_write(0xfd001804,4,4);
+        CHECK(device.mmio_read(0xfd001804,4)==4);
+        CHECK(device.mmio_read(0xfd001800,4)==0x02a010de);
+        CHECK(device.mmio_read(0xfd10020c,4)==64u*1024*1024);
+        device.mmio_write(0xfd001804,4,0);
+        CHECK(device.mmio_read(0xfd001804,4)==0);
+        CHECK(failure.empty());
+        device.mmio_write(0xfd001804,4,0x80000004);
+        CHECK(!failure.empty());
+        CHECK(device.mmio_read(0xfd001804,4)==0);
+    }
     test_visibility_reference();
     test_texture_conversion_cache();
     test_generated_texture_identity();

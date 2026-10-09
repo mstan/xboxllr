@@ -59,6 +59,9 @@ static void usb_poll(void)
 #ifdef PILOT_DISPLAY_LLE
     display_lle_tick();
 #endif
+#ifdef PILOT_GPU_LLE
+    gpu_lle_tick();
+#endif
     if(!cpu_interrupt_flag || cpu_interrupt_shadow)return;
     int delivered=0;
     /* The device may assert while a caller is at high IRQL. Let the actual

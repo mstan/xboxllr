@@ -2381,6 +2381,9 @@ public:
     // frame latches VBLANK into PCRTC_INTR_0; PCRTC_INTR_EN_0 and PMC_INTR_EN_0 gate the
     // line (xemu nv2a update_irq / pcrtc.c). The kernel's AV code paces on this interrupt.
     void set_frame(uint64_t frame_no);
+    // Absolute core-clock edges from the selected machine clock. PTIMER is a
+    // programmable counter; MMIO reads must not themselves advance it.
+    void set_timer_clock(uint64_t core_cycles);
     // Sub-frame phase in permille (0..999), same instruction-derived time base: drives the
     // VGA input-status-1 retrace bit (PRMCIO 0x3DA) the kernel polls for scan position.
     void set_frame_phase(uint32_t permille) { frame_phase_ = permille; }
@@ -2455,6 +2458,13 @@ private:
     bool execute_image_blit_srccopy();
 
     FaultFn fault_;
+    // PBUS command mirror. The bounded original XDK path changes only bus
+    // mastering; external PCI arbitration/decode is outside this RAM bus.
+    uint32_t pbus_command_ = 0;
+    uint64_t ptimer_source_ = 0, ptimer_ticks_ = 0, ptimer_fraction_ = 0;
+    uint32_t ptimer_div_ = 0, ptimer_mul_ = 0, ptimer_alarm_ = 0;
+    uint32_t ptimer_pending_ = 0, ptimer_enabled_ = 0;
+    bool ptimer_alarm_programmed_ = false;
     std::function<void(bool, uint32_t, uint32_t, const char*, uint32_t)> unmodeled_cb_;
     // PFIFO USER channel registers (rel 0x800000+, 64 KB per channel; +0x40 DMA_PUT,
     // +0x44 DMA_GET). The channel state below is the synchronous pusher/recorder state.

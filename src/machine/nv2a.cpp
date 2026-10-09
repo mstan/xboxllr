@@ -882,7 +882,6 @@ void Nv2a::invalidate_renderer_depth_overlap(uint32_t address, size_t size,
 // PCI identity mirror exposed through PBUS (xemu pbus.c reads d->config). NV2A = 10DE:02A0,
 // class VGA (0x030000), revision 0xA1.
 static constexpr uint32_t kPciNv0 = 0x02A0'10DEu;  // device<<16 | vendor
-static constexpr uint32_t kPciNv1 = 0x0000'0000u;  // command/status (decode off at reset)
 static constexpr uint32_t kPciNv2 = 0x0300'00A1u;  // class(0x030000)<<8 | revision(0xA1)
 
 // xemu's fixed-function shader clamps reciprocal divisors to NV2A's signed
@@ -959,7 +958,9 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
     } else if (blk->off == 0x001000) {  // PBUS
         switch (bo) {
             case 0x800: return kPciNv0;  // NV_PBUS_PCI_NV_0
-            case 0x804: return kPciNv1;  // NV_PBUS_PCI_NV_1
+            case 0x804:
+                if (size != 4) { fault_("NV2A unqualified PBUS command read size"); return 0; }
+                return pbus_command_;  // NV_PBUS_PCI_NV_1
             case 0x808: return kPciNv2;  // NV_PBUS_PCI_NV_2
             default: break;
         }
@@ -974,9 +975,24 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
         }
         auto it = pfifo_regs_.find(bo);
         if (it != pfifo_regs_.end()) return it->second;
+    } else if (blk->off == 0x009000) {  // PTIMER
+        if (size != 4) { fault_("NV2A unqualified PTIMER read size"); return 0; }
+        switch (bo) {
+            case 0x100: return ptimer_pending_;
+            case 0x140: return ptimer_enabled_;
+            case 0x200: return ptimer_div_;
+            case 0x210: return ptimer_mul_;
+            case 0x400: return static_cast<uint32_t>(ptimer_ticks_ << 5);
+            case 0x410: return static_cast<uint32_t>(ptimer_ticks_ >> 27) & 0x1fffffffu;
+            case 0x420: return ptimer_alarm_;
+            default: break;
+        }
     } else if (blk->off == 0x100000) {  // PFB
         // Captured from silicon 2026-07-16 (agent read 0xFD100200).
         if (bo == 0x200) return 0x03070003;  // NV_PFB_CFG0
+        // CSTATUS reports the installed unified RAM capacity (xemu pfb.c).
+        // Both maintained machine and title buses currently model retail 64MiB.
+        if (bo == 0x20c && size == 4) return 64u * 1024 * 1024;
         if (bo == 0x410 && size == 4) {
             // WBC FLUSH completes synchronously on the coherent shared-RAM
             // bus below. There is no deferred CPU write-combining queue.
@@ -1049,6 +1065,17 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
         if (unmodeled_cb_) unmodeled_cb_(true, addr, rel, "hole", value);
         return;
     }
+    if (blk->off == 0x001000 && bo == 0x804) {
+        // Original device initialization sets bus-master enable. xemu's PBUS
+        // mirror preserves the PCI command value. This bounded shared-RAM bus
+        // has no external PCI transactions; other command/status controls are
+        // not silently accepted as implemented.
+        if (size != 4 || (value & ~4u)) {
+            fault_("NV2A unqualified PBUS command control"); return;
+        }
+        pbus_command_ = value;
+        return;
+    }
     // Interrupt plumbing (xemu nv2a.c/pcrtc.c): PMC_INTR_EN_0 gates the PCI line; PCRTC's
     // pending register is write-1-clear, its enable register plain. Every change re-evaluates
     // the level-triggered GPU IRQ.
@@ -1056,6 +1083,29 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
         pmc_intr_en_ = value;
         update_irq();
         return;
+    }
+    if (blk->off == 0x009000) {
+        if (size != 4) { fault_("NV2A unqualified PTIMER write size"); return; }
+        switch (bo) {
+            case 0x100:
+                ptimer_pending_ &= ~value; update_irq(); return;
+            case 0x140:
+                if (value & ~1u) { fault_("NV2A unqualified PTIMER interrupt mask"); return; }
+                ptimer_enabled_ = value; update_irq(); return;
+            case 0x200:
+                if (!value || value > 0xffffu) { fault_("NV2A unqualified PTIMER divisor"); return; }
+                ptimer_div_ = value; ptimer_fraction_ = 0; return;
+            case 0x210:
+                if (value > 0xffffu) { fault_("NV2A unqualified PTIMER multiplier"); return; }
+                ptimer_mul_ = value; ptimer_fraction_ = 0; return;
+            case 0x420:
+                ptimer_alarm_ = value & ~31u;
+                ptimer_alarm_programmed_ = true;
+                if (static_cast<uint32_t>(ptimer_ticks_ << 5) == ptimer_alarm_)
+                    ptimer_pending_ |= 1;
+                update_irq(); return;
+            default: break;
+        }
     }
     if (blk->off == 0x100000 && bo == 0x410) {
         // Original XDK KickPushBuffer flushes CPU writes before publishing
@@ -17716,6 +17766,7 @@ bool Nv2a::capture_scanout(std::vector<uint8_t>& rgba, ScanoutInfo& info,
 uint32_t Nv2a::pmc_intr_status() const {
     uint32_t v = 0;
     if (pgraph_intr_ & pgraph_intr_en_) v |= 1u << 12;
+    if (ptimer_pending_ & ptimer_enabled_) v |= 1u << 20;
     if (pcrtc_intr_ & pcrtc_intr_en_) v |= 1u << 24;
     return v;
 }
@@ -17726,6 +17777,28 @@ void Nv2a::update_irq() {
         irq_asserted_ = level;
         irq_cb_(irq_num_, level);
     }
+}
+
+void Nv2a::set_timer_clock(uint64_t core_cycles) {
+    if (core_cycles < ptimer_source_) { fault_("NV2A PTIMER source clock reversed"); return; }
+    const uint64_t elapsed = core_cycles - ptimer_source_;
+    ptimer_source_ = core_cycles;
+    // Reset/unconfigured ratio has no qualified oscillator. Once configured,
+    // multiplier zero stops counting; preserve accumulated whole ticks.
+    if (!ptimer_div_ || !ptimer_mul_) return;
+    if (ptimer_mul_ > ptimer_div_) { fault_("NV2A PTIMER multiplier exceeds divisor"); return; }
+    // Split before multiplying to avoid overflowing with long running clocks.
+    const uint64_t fraction = (elapsed % ptimer_div_) * ptimer_mul_ + ptimer_fraction_;
+    const uint64_t advance = (elapsed / ptimer_div_) * ptimer_mul_ + fraction / ptimer_div_;
+    ptimer_fraction_ = fraction % ptimer_div_;
+    if (ptimer_alarm_programmed_ && advance) {
+        constexpr uint64_t period = uint64_t{1} << 27;
+        uint64_t distance = ((ptimer_alarm_ >> 5) - ptimer_ticks_) & (period - 1);
+        if (!distance) distance = period;
+        if (advance >= distance) ptimer_pending_ |= 1;
+    }
+    ptimer_ticks_ = (ptimer_ticks_ + advance) & ((uint64_t{1} << 56) - 1);
+    update_irq();
 }
 
 void Nv2a::set_frame(uint64_t frame_no) {

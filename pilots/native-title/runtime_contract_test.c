@@ -96,6 +96,9 @@ static int test_write_faults(uint32_t va)
 #include "usb_irq_contract_test.inc"
 #endif
 #include "physical_memory_contract_test.inc"
+#ifdef PILOT_GPU_LLE
+#include "gpu_lle_contract_test.inc"
+#endif
 #include "memory_statistics_contract_test.inc"
 #ifdef PILOT_AUDIO_NATIVE
 #include "audio_contract_test.inc"
@@ -404,6 +407,9 @@ int main(int argc,char **argv)
 #endif
 #endif
     if (argc==2) {
+#ifdef PILOT_GPU_LLE
+        if (!strcmp(argv[1],"gpu-lle-transport")) { test_gpu_lle_transport(); return 0; }
+#endif
 #ifdef PILOT_USB_LLE
         if (!strcmp(argv[1],"usb-irq")) { test_usb_irq(); return 0; }
         if (!strcmp(argv[1],"usb-irq-clock")) { test_usb_irq_clock(); return 0; }

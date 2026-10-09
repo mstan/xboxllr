@@ -1,8 +1,9 @@
 # GPU completion, callbacks and visibility LLE
 
 Active family `beads-xbox.1.109`, after qualified filesystem `.108`. Burndown:
-**4/9 complete, 5 open**. This checkpoint fills an original-reference execution
-gap; the selectable title route is still required before family closure.
+**4/9 complete, 5 open**. Original reference execution and the selectable title
+transport now exist. The title selection still stops during device initialization;
+it is not yet a working renderer or a qualified title completion route.
 
 ## Executed floor
 
@@ -58,12 +59,99 @@ reference. Its immediate callback and eventual invented visibility count in
 but describes skipped geometry; it cannot establish this correctness floor.
 Reuse our maintained NV2A and original command behavior. No donor body was copied.
 
-Next connect a build-selected title route with actual callback dispatch and
-resource ownership. Visibility must consume real rendered work; native counts
-cannot be relabeled as LLE evidence. Record any dependency on the broader
-graphics family instead of introducing duplicate production rendering.
+Finish original device initialization through the selected title route, then
+qualify actual callback dispatch and resource ownership. Visibility consumes
+real rendered work, so this now has an explicit dependency on the broader
+graphics family. The whole original renderer runs once; native query counts
+cannot be relabeled as LLE evidence.
 
 Then qualify pending/error/order/reuse/teardown and run Blinx. Preowned fast
 paths do not qualify allocation/refill, arbitrary IRQ latency or all resource
 busy cases. Existing display-clock timestamp resolution/epoch tolerances remain.
 These bounded geometry cases do not establish full-scene raster correctness.
+
+## Whole-renderer integration checkpoint
+
+`PILOT_RENDERER=LLE` keeps the preserved original AOT D3D bodies and connects
+their actual MMIO accesses to the maintained NV2A DLL. `gpu_lle.inc` supplies
+the shared original allocator/pinned-page DMA bus, PIC IRQ3 connection and
+elapsed clock; `mmio_fault.c` decodes actual compiled load/store faults. The
+title does not link the native D3D backend in this selection. The independent
+contract-test executable can contain both consumers, selecting one per test.
+The previously qualified native-rendered display floor is a different build
+selection and cannot be combined with this whole original renderer.
+
+The original driver owns lifetime across queued GPU work. DMA validates live
+owned contiguous ranges or originally pinned pages at access time; it does not
+take USB's controller-reset leases. This alone cannot detect every stale
+reference after address reuse: original resource-busy/fence and teardown
+qualification remains necessary.
+
+Implemented prerequisite device behavior:
+
+- PBUS command mirror preserves the original bus-master bit write/read. Other
+  command controls stop. External PCI arbitration/decode is not qualified by
+  this shared-RAM bus.
+- PFB CSTATUS reports the actual modeled retail capacity, 64 MiB.
+- PTIMER has a programmable integer clock ratio, 56-bit counter, low-counter
+  alarm with wrap/crossing detection, pending/enable masks and W1C acknowledgement
+  through PMC bit 20. Reads do not advance time. Tests use explicit source edges;
+  machine/title clocks supply actual elapsed edges. The fixed reset oscillator
+  comes from pinned xemu. PLL changes, global engine reset/enable, reset epoch,
+  ratio-change sub-tick phase and title-observed timing remain unqualified.
+  Existing visibility-report timestamp approximation remains separately scoped;
+  this checkpoint does not qualify its relation to the new timer counter.
+
+Independent timer expectations come from the
+[envytools PTIMER description](https://envytools.readthedocs.io/en/latest/hw/bus/ptimer.html).
+No implementation body was copied. xemu PBUS/PFB behavior is a source reference,
+not a new differential run or hardware measurement.
+
+Validation on the checkpoint build:
+
+- `test_nv2a` passes, including timer fractional carry, stopped/restarted count,
+  wrap, masked/later-enabled alarm, crossed deadline, acknowledgement and fresh
+  device isolation. SDL/OpenGL cases explicitly skip in this software build.
+- `pilot_gpu_lle_transport` passes in 0.12s over three independent devices.
+  Actual compiled MMIO submits a PFIFO semaphore into original-kernel storage;
+  a held PGRAPH leaves output unchanged, release writes the expected value.
+  Read-only, released and out-of-range DMA is rejected. This fixture drains its
+  work and has no registered ISR; it does not prove general title teardown.
+- All nine original query/callback-trap/fence cases pass against the new DLL.
+- Four actual original NTSC Blinx launches expose successive initialization
+  boundaries. The latest passes PBUS command, timer interrupt disable and PFB
+  capacity, then **stops at the unsupported write `FD001830=0`**, the PCI
+  expansion-ROM configuration mirror. No game frame or attract pass is claimed.
+  Next handle the original device-initialization control family from independent
+  behavior; do not turn unknown writes into success to reach a later address.
+
+Private evidence: `build/blinx/gpu-lle-title-capacity/run.aot-private.json`,
+`build/blinx/run-gpu-lle-title-capacity.log`,
+`build/blinx/host-gpu-lle/Testing/Temporary/LastTest.log`,
+`build/blinx/gpu-lle-nv2a-tests.log`, and the original-reference JSON above.
+The runtime logs the loaded DLL hash because the executable alone does not
+identify a dynamically loaded device implementation.
+
+Title executable SHA-256:
+`fe6f24982e7b1fa6d1566f052b3669e89970b6543fc4316e1e2a0e44194443dd`.
+NV2A DLL SHA-256:
+`a1e4070f403bcd10d4d282a0730c3a8f3333875124dfa245063111b324de4311`.
+
+The private build `build/blinx/host-gpu-lle` uses the qualified files/USB/memory/
+calendar configuration, with `PILOT_RENDERER=LLE`, `PILOT_DISPLAY=NATIVE`
+(the separate display adapter is off), `PILOT_GPU_LIBRARY` pointing to the
+maintained DLL and `PILOT_GPU_DEPENDENCIES=C:/msys64/mingw64/bin`.
+
+```powershell
+cmake --build build/blinx/host-gpu-lle --config Release --target xlle_native_title pilot_contract_test --parallel 4
+ctest --test-dir build/blinx/host-gpu-lle -C Release -R '^pilot_gpu_lle_transport$' --output-on-failure
+$env:XLLE_PILOT_EXECUTABLE="$PWD/build/blinx/host-gpu-lle/Release/xlle_native_title.exe"
+$env:XLLE_PILOT_GUEST_SCHEDULER='1'
+$env:XLLE_PILOT_SKIP_STACKS='1'
+$env:XLLE_PILOT_VISIBLE='0'
+$env:XLLE_PILOT_MEDIA_ROOT="$PWD/build/blinx/media-local"
+py -3 build/blinx/run_extended.py gpu-lle-title-next 40
+```
+
+The established game repo remains pinned to completed-files `439a45b`; this
+unfinished renderer is isolated on `feat/blinx-gpu-completion-lle-20261008`.

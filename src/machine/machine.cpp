@@ -730,6 +730,11 @@ uint64_t XboxMachine::run(uint32_t start, uint64_t max, std::string& err) {
             // plus the sub-frame phase for the VGA retrace status bit.
             if (nv2a_) {
                 uint64_t t60 = total_insns_ * 60;
+                // PTIMER shares this machine clock. Fixed reset oscillator;
+                // PLL reprogramming remains outside the qualified model.
+                constexpr uint64_t gpu_hz = 233333324;
+                nv2a_->set_timer_clock((total_insns_ / kCpuHz) * gpu_hz +
+                                      (total_insns_ % kCpuHz) * gpu_hz / kCpuHz);
                 nv2a_->set_frame(t60 / kCpuHz);
                 nv2a_->set_frame_phase(static_cast<uint32_t>((t60 % kCpuHz) * 1000 / kCpuHz));
             }

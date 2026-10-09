@@ -1,0 +1,25 @@
+# Whole original renderer: preserved XDK bodies drive the maintained NV2A.
+# This is a bring-up selection, not a claim of qualified title rendering.
+if(PILOT_RENDERER STREQUAL "LLE")
+  if(NOT PILOT_USB STREQUAL "LLE" OR NOT PILOT_DISPLAY STREQUAL "NATIVE")
+    message(FATAL_ERROR "Whole GPU LLE requires the shared original machine bus and excludes the separate native-rendered display floor")
+  endif()
+  set(PILOT_GPU_LIBRARY "" CACHE FILEPATH "Maintained private xlle_nv2a_reference DLL")
+  set(PILOT_GPU_DEPENDENCIES "" CACHE PATH "Reference DLL runtime dependencies")
+  if(NOT EXISTS "${PILOT_GPU_LIBRARY}" OR NOT IS_DIRECTORY "${PILOT_GPU_DEPENDENCIES}")
+    message(FATAL_ERROR "Build xlle_nv2a_reference and provide its runtime dependency directory")
+  endif()
+  file(TO_CMAKE_PATH "${PILOT_GPU_LIBRARY}" gpu_library)
+  file(TO_CMAKE_PATH "${PILOT_GPU_DEPENDENCIES}" gpu_dependencies)
+  file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/gpu-private")
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/gpu-private/gpu_lle_config.h"
+    "#define PILOT_GPU_LIBRARY L\"${gpu_library}\"\n#define PILOT_GPU_DEPENDENCIES L\"${gpu_dependencies}\"\n")
+  set_property(SOURCE runtime.c APPEND PROPERTY COMPILE_DEFINITIONS PILOT_GPU_LLE)
+  target_include_directories(xlle_native_title PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/gpu-private")
+  # The contract harness contains native and LLE consumers, selected by its
+  # test argument. The title selects exactly one renderer at compile time.
+  target_compile_definitions(pilot_contract_test PRIVATE PILOT_GPU_LLE)
+  target_include_directories(pilot_contract_test PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/gpu-private")
+  add_test(NAME pilot_gpu_lle_transport COMMAND pilot_contract_test gpu-lle-transport)
+  set_tests_properties(pilot_gpu_lle_transport PROPERTIES TIMEOUT 30)
+endif()

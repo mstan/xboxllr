@@ -81,6 +81,14 @@ EXPORT void xlle_nv2a_reference_frame(void* instance, uint64_t frame) {
     auto& ref = *static_cast<Reference*>(instance);
     if (ref.failure.empty()) ref.gpu.set_frame(frame);
 }
+EXPORT void xlle_nv2a_reference_clock(void* instance, uint64_t core_cycles, uint32_t phase) {
+    auto& ref = *static_cast<Reference*>(instance);
+    if (phase >= 1000) { ref.failure = "NV2A clock phase outside display interval"; return; }
+    if (ref.failure.empty()) {
+        ref.gpu.set_timer_clock(core_cycles);
+        ref.gpu.set_frame_phase(phase);
+    }
+}
 EXPORT int xlle_nv2a_reference_irq(void* instance) {
     return static_cast<Reference*>(instance)->irq;
 }

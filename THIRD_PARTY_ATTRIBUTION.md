@@ -874,6 +874,17 @@ synchronous coherent-RAM publication uses an authored host memory fence; no
 GPL body was copied. Existing private reference dependency restrictions remain.
 See [GPU-COMPLETION-LLE.md](pilots/native-title/GPU-COMPLETION-LLE.md).
 
+The whole original-renderer transport (`gpu_lle.inc`) reuses our maintained
+MMIO/DMA/PIC interfaces and preserved original AOT bodies. It does not copy a
+donor renderer or original title/kernel bytes into source control. The same
+pinned xemu revision's `pbus.c`, `pfb.c`, `ptimer.c` and `nv2a.c` supply PBUS
+mirror, installed-RAM size, timer wire facts and reset oscillator references.
+The [envytools PTIMER documentation](https://envytools.readthedocs.io/en/latest/hw/bus/ptimer.html)
+supplies independent counter/ratio/alarm/interrupt expectations for authored
+timer tests and implementation. Credit belongs to the respective xemu and
+envytools authors/contributors; no implementation bodies were copied. Reset,
+PLL and phase limits are recorded with the qualification evidence.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

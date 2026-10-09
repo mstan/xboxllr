@@ -90,6 +90,11 @@ static uint8_t display_lle_field(void);
 static uint32_t display_lle_completed(void);
 static void display_lle_present(uint32_t swap,uint32_t interval);
 #endif
+#ifdef PILOT_GPU_LLE
+static void gpu_lle_tick(void);
+static const char *gpu_lle_access(uint32_t address,unsigned size,int write,uint32_t *value);
+static uint8_t gpu_lle_field(void);
+#endif
 static uint32_t file32(size_t offset)
 {
     uint32_t value;
@@ -144,6 +149,9 @@ uint8_t pilot_cpu_in8(uint16_t port)
 {
 #ifdef PILOT_DISPLAY_LLE
     if(port==0x80c0)return display_lle_field();
+#endif
+#ifdef PILOT_GPU_LLE
+    if(port==0x80c0)return gpu_lle_field();
 #endif
 #ifdef PILOT_USB_LLE
     uint32_t value=0;
@@ -382,6 +390,9 @@ static void query_setting(void)
 #ifdef PILOT_USB_LLE
 #include "usb_lle.inc"
 #endif
+#ifdef PILOT_GPU_LLE
+#include "gpu_lle.inc"
+#endif
 #include "sections.inc"
 #include "media.inc"
 #include "cache.inc"
@@ -597,6 +608,12 @@ static LONG CALLBACK fault_handler(EXCEPTION_POINTERS *exception)
      * this does not resume or hide an unhandled guest/native fault. */
     if(code==0x406d1388u)return EXCEPTION_CONTINUE_SEARCH;
     if (code == EXCEPTION_ACCESS_VIOLATION) {
+#ifdef PILOT_GPU_LLE
+        const char *gpu_error=NULL;
+        int gpu=pilot_mmio_fault_range(exception,memory,0xfd000000u,0xfdffffffu,gpu_lle_access,&gpu_error);
+        if(gpu>0)return EXCEPTION_CONTINUE_EXECUTION;
+        if(gpu<0)stop(gpu_error,0xfd000000u);
+#endif
 #ifdef PILOT_DISPLAY_LLE
         const char *display_error=NULL;
         int display=pilot_mmio_fault_range(exception,memory,0xfd000000u,0xfdffffffu,display_lle_access,&display_error);
@@ -801,6 +818,9 @@ int main(int argc,char **argv)
     recomp_func_t entry=recomp_lookup(PILOT_ENTRY);
     if (!entry) stop("entry missing from generated dispatch", PILOT_ENTRY);
     fprintf(stderr,"[RUN] calling actual XBE entry\n");
+#ifdef PILOT_GPU_LLE
+    gpu_lle_open();
+#endif
 #ifdef PILOT_USB_LLE
     usb_clock_start();
 #endif
