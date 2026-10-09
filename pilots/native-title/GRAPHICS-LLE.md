@@ -228,10 +228,72 @@ bounded constant transport and software recorder semantics, not general shader
 arithmetic, exceptional floats or original title startup. Family `.116` stays
 partial; hardware questions remain at the end.
 
+## Independent finite shader arithmetic - 2026-10-09
+
+`tools/native_shader_arithmetic_reference.py` supplies independently encoded
+programs and algebraic expectations, then uses the same complete original
+load/select/constant-set/draw route to execute them on maintained NV2A. It uses
+no shared shader decoder/emulator to produce expected results. Both observed
+color outputs are explicitly initialized, so matching assumptions about
+unwritten registers cannot establish agreement.
+
+The retained 32 scene captures use MAC MOV/MUL/ADD/MAD/DP3/DPH/MIN/MAX/ARL and
+ILU MOV/RCP/RCC/RSQ. Their six paired combinations are MUL+MOV, DP3+MOV,
+MUL+RSQ, MUL+RCC, DP3+RSQ and MUL+RCP. The new corpus covers each, plus DP4:
+
+| Slice | Actual original-submission/LLE draws | Independent expectation |
+| --- | ---: | --- |
+| Vector arithmetic | 720 | Nine MAC operations; finite dyadic inputs, source swizzles/negation, full and individual output-lane masks |
+| Scalar/vector ILU | 320 | MOV and reciprocal/reciprocal-square-root results; RCC inputs within the ordinary unclamped range |
+| Paired issue | 288 | All six captured combinations consume the old temporary; a subsequent MOV separately observes the MAC's new temporary value |
+| Relative addressing | 16 | Positive/negative fractional ARL inputs away from integer boundaries select independently authored constant markers |
+| Total across four LLE device lifetimes | **1,344** | Eight explicitly written diffuse/specular output lanes and actual framebuffer RGBA |
+
+Four operand sets and four independent swizzle/negation combinations include
+asymmetric signs, scalar replication, permuted lanes and masked destination
+preservation. Persistent input storage changes without rebinding. Dyadic vector
+inputs avoid making exact hardware rounding a prerequisite for these algebraic
+cases. Ordinary finite reciprocal/RSQ inputs avoid zero, exceptional floats and
+clamp boundaries. ARL inputs deliberately avoid the unresolved near-integer
+rounding question.
+
+The primary arithmetic contracts are NVIDIA's
+[NV_vertex_program](https://registry.khronos.org/OpenGL/extensions/NV/NV_vertex_program.txt)
+and [NV_vertex_program1_1](https://registry.khronos.org/OpenGL/extensions/NV/NV_vertex_program1_1.txt).
+[XboxDevWiki instruction fields](https://xboxdevwiki.net/NV2A/Vertex_Shader)
+supply hardware encoding facts. The pinned MIT nxdk_pgraph_tests
+`vertex_shader_independence_tests.cpp` documents the old-input paired-issue
+procedure. The test and encoder are authored here; no external implementation
+body or hardware capture is imported. Existing local Image_blit goldens do not
+qualify these shader cases, and no new silicon result is claimed.
+
+The native corpus contains authored words, raw inputs, constants and expectations,
+never LLE measurements. Native `pilot_shader_test --shader-arithmetic-reference`
+matches **1,344 cases / 10,752 raw shader lanes / 1,344 actual GPU draws** through
+the compiled production shader and bound constant buffer. The relative raw
+tolerance remains `2e-6 * max(1, abs(expected))`; framebuffer RGB agrees within
+one LSB and untouched background bytes are exact. The HLE already meets these
+contracts; no production code, upload policy or title rendering cost changes.
+
+Reproduction uses the preceding dependency setup:
+
+```powershell
+& 'C:\Users\Matthew\AppData\Local\Programs\Python\Python312\python.exe' tools\native_shader_arithmetic_reference.py --xbe F:\Projects\xboxlle\xboxlle\build\phobos-audit-20261006\blinx-na\default.xbe --binding build\blinx\d3d-binding.aot-private.json --library build\visibility-lle\libxlle_nv2a_reference.dll --dependencies C:\msys64\mingw64\bin --output build\blinx\shader-arithmetic-original.aot-private.json --native-cases build\blinx\shader-arithmetic-native-cases.bin
+& .\build\blinx\host-calendar-lle\Release\pilot_shader_test.exe --shader-arithmetic-reference build\blinx\shader-arithmetic-native-cases.bin
+```
+
+Native regression passes 56/56; logs are
+`build/blinx/shader-arithmetic-{original,native,native-build,native-tests}.log`.
+LLE production code is unchanged from the 9/9 combined pass. The unchanged
+title hash retains the exact matching attract/interruption/reentry evidence.
+This does not qualify every shader instruction, exceptional numerical behavior,
+state programs, original allocation/startup or the entire graphics family.
+
 ## Remaining offline work
 
-Continue independent shader arithmetic, plus texture/state
-combinations actually used by Blinx. These bounded declaration/fetch cases do
+Connect the retained complete Blinx scene programs and their texture/state
+combinations to actual maintained command consumption and draw outcomes.
+These bounded declaration/fetch/arithmetic cases do
 not qualify all vertex slots, arbitrary aliasing, tiled vertex input or the entire
 graphics family. Retain
 existing scene-reference checks; audit shared expectations before accepting

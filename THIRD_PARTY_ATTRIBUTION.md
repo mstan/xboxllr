@@ -1482,6 +1482,17 @@ already attributed maintained/native shader implementations. Its harness and
 expected cache effects, input values and MOV-output expectations are authored
 here. It adds no donor implementation, original instruction bytes or dependency.
 
+The finite shader-arithmetic qualification additionally consults NVIDIA's
+[NV_vertex_program](https://registry.khronos.org/OpenGL/extensions/NV/NV_vertex_program.txt)
+and [NV_vertex_program1_1](https://registry.khronos.org/OpenGL/extensions/NV/NV_vertex_program1_1.txt)
+specifications (copyright NVIDIA Corporation and credited contributors),
+[XboxDevWiki shader instruction fields](https://xboxdevwiki.net/NV2A/Vertex_Shader),
+and the already pinned MIT nxdk_pgraph_tests
+`src/tests/vertex_shader_independence_tests.cpp` old-input procedure.
+Encoding, programs and algebraic expectations are independently authored;
+no specification prose, donor implementation body or new hardware golden is
+incorporated. Existing shader-library/private-pilot license limits still apply.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),
