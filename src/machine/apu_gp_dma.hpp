@@ -1,6 +1,7 @@
 // Bounded MCPX GP DMA peripheral. Authored from the descriptor/register contract
 // and published byte examples; no GPL implementation body is incorporated.
 #pragma once
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -11,8 +12,10 @@ class ApuGpDma {
 public:
     using Word=std::function<uint32_t*(uint32_t)>;
     using Bytes=std::function<bool(uint32_t,void*,uint32_t,bool)>;
+    using Fifo=std::function<bool(unsigned,void*,uint32_t,bool)>;
     using Fault=std::function<void(const std::string&)>;
-    ApuGpDma(Word word,Bytes bytes,Fault fault):word_(std::move(word)),bytes_(std::move(bytes)),fault_(std::move(fault)){}
+    ApuGpDma(Word word,Bytes bytes,Fifo fifo,Fault fault)
+        :word_(std::move(word)),bytes_(std::move(bytes)),fifo_(std::move(fifo)),fault_(std::move(fault)){}
     bool read(uint32_t address,uint32_t& value) {
         if(failed_)return false;
         switch(address) {
@@ -62,12 +65,16 @@ private:
                 if(!fields[i])return fail("GP DMA descriptor outside memory banks");
                 node[i]=*fields[i]&0xffffff;
             }
-            const uint32_t format=(node[1]>>10)&7,count=node[2];
+            const uint32_t format=(node[1]>>10)&7,count=node[2],buffer=(node[1]>>5)&15;
             const bool output=(node[1]&2)!=0;
-            // Reached effects use noninterleaved unit-stride circular scratch.
-            // Other formats/buffers/unknown bits retain explicit boundaries.
-            if((node[0]&~0x7fffu) || (node[1]&0x220d) || ((node[1]>>5)&15)!=14 ||
-               (node[1]>>14)!=1 || (format!=2 && format!=6) || !count || count>4096)
+            // Noninterleaved unit-stride scratch and FIFO transport. Output
+            // FIFOs 0..3 and input FIFOs 0..1 have independent cursor owners.
+            // Unsupported input FIFO 2/3 is guarded, never silently completed.
+            const bool scratch=buffer==14;
+            if((node[0]&~0x7fffu) || (node[1]&0x220d) ||
+               (!scratch && buffer>=(output?4u:2u)) || (node[1]>>14)!=1 ||
+               (format!=1 && format!=2 && format!=6) || !count || count>4096 ||
+               (format==1 && (count&1)))
                 return fail("unqualified GP DMA descriptor format/extent");
             uint32_t* words[4096];
             if(uint64_t(node[3])+count>bank_end(node[3]))return fail("GP DMA samples cross memory bank");
@@ -75,31 +82,37 @@ private:
                 words[i]=word_(node[3]+i);
                 if(!words[i])return fail("GP DMA sample outside memory banks");
             }
-            const uint32_t size=node[6]+1;uint32_t offset=node[4];
-            if(offset>=size)return fail("unqualified GP DMA initial circular offset");
+            const uint32_t size=node[6]+1,width=format==1?2:4;uint32_t offset=node[4];
+            if(scratch && offset>=size)return fail("unqualified GP DMA initial circular offset");
+            std::array<uint8_t,4096*4> packed{};
             for(unsigned i=0;i<count;++i) {
                 uint32_t sample=output?(*words[i]&0xffffff):0;
                 if(output && format==2)sample<<=8;
-                uint8_t bytes[4];
-                for(unsigned b=0;b<4;++b)bytes[b]=uint8_t(sample>>(b*8));
-                for(unsigned at=0;at<4;) {
-                    const unsigned n=(size-offset)<(4-at)?size-offset:4-at;
-                    if(!bytes_(node[5]+offset,bytes+at,n,output))return fail("GP scratch DMA failed");
+                if(output && format==1)sample>>=8;
+                for(unsigned b=0;b<width;++b)packed[i*width+b]=uint8_t(sample>>(b*8));
+            }
+            const unsigned length=count*width;
+            if(scratch) {
+                for(unsigned at=0;at<length;) {
+                    const unsigned n=(size-offset)<(length-at)?size-offset:length-at;
+                    if(!bytes_(node[5]+offset,packed.data()+at,n,output))return fail("GP scratch DMA failed");
                     at+=n;offset=(offset+n)%size;
                 }
-                if(!output) {
-                    sample=uint32_t(bytes[0])|(uint32_t(bytes[1])<<8)|(uint32_t(bytes[2])<<16)|(uint32_t(bytes[3])<<24);
-                    *words[i]=format==2?sample>>8:sample&0xffffff;
-                }
+            } else if(!fifo_(buffer,packed.data(),length,output))return fail("GP FIFO DMA failed");
+            if(!output)for(unsigned i=0;i<count;++i) {
+                uint32_t sample=0;
+                for(unsigned b=0;b<width;++b)sample|=uint32_t(packed[i*width+b])<<(b*8);
+                *words[i]=format==1?sample<<8:(format==2?sample>>8:sample&0xffffff);
             }
-            if(node[1]&16)*fields[4]=offset;
+            // FIFO addressing is owned by PAPU CUR, not descriptor words 4..6.
+            if(scratch && (node[1]&16))*fields[4]=offset;
             next_=node[0];++nodes_;
         }
         // End-of-list follows actual copies. Status reads never finish work or
         // stop an armed engine; STOP and interrupt acknowledgement are explicit.
         interrupts_|=0x80;return true;
     }
-    Word word_;Bytes bytes_;Fault fault_;
+    Word word_;Bytes bytes_;Fifo fifo_;Fault fault_;
     uint32_t next_=0,control_=32,interrupts_=0;
     uint64_t nodes_=0;bool failed_=false;
 };

@@ -602,6 +602,16 @@ references, not imported implementation bodies. No new GPL runtime body was
 copied or adapted. The unknown DMA control bit reached by Blinx is still
 guarded in the maintained floor. See [scope and evidence](pilots/native-title/AUDIO-LLE.md#current-gp-memorydma-batch-and-deferred-question---2026-10-09).
 
+The subsequent GP FIFO extension uses the same published DSP ring/PCM16/PCM24
+contract, the pinned xemu `hw/xbox/mcpx/apu/dsp/gp_ep.c` and `apu_regs.h` as
+behavioral register/SGE references, and private original NTSC driver setup as
+corroboration. FIFO transport, byte packing and tests are authored here; no GPL
+implementation body was copied or adapted. The original driver setup is not
+claimed to execute end to end. Phobos's pinned `src/apu/README.md` identifies
+GP effects bypass/EP passthrough; those substitutes are not reused in this floor.
+The same MIT DSP core and upstream/Cargo notices cover the real instruction
+tests. Existing private-pilot license restrictions remain unchanged.
+
 ## Borrowed render-target feedback implementation
 
 The private native pilot reuses `feedback_scratch`, `feedback_begin/end` and

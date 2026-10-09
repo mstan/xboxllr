@@ -76,7 +76,7 @@ struct Floor {
 };
 
 static void authored_dma_program() {
-    for(unsigned format:{2u,6u}) {
+    for(bool fifo:{false,true})for(unsigned format:{1u,2u,6u}) {
         std::vector<uint8_t> storage(0xc000);
         // Independently authored program: real MOVEs set NEXT and START, then
         // STOP. The CPU executes the peripheral writes; no callback is skipped.
@@ -84,22 +84,36 @@ static void authored_dma_program() {
                                   0x65f400,0xffffd2,0x44f400,1,0x021584,0x87};
         std::memcpy(storage.data(),program,sizeof(program));
         Floor floor(8192,storage.data());
-        const uint32_t control=0x4000|(format<<10)|(14<<5)|16;
-        const uint32_t nodes[]={0x40,control|2,2,0x80,0,4093,7};
-        const uint32_t input[]={0x4000,control,2,0x1880,0,4093,7};
+        const uint32_t control=0x4000|(format<<10)|16;
+        const uint32_t nodes[]={0x40,control|((fifo?1:14)<<5)|2,2,0x80,0,4093,7};
+        const uint32_t input[]={0x4000,control|((fifo?0:14)<<5),2,0x1880,0,4093,7};
         for(unsigned i=0;i<7;++i){*floor.apu.gp_word(0x20+i)=nodes[i];*floor.apu.gp_word(0x40+i)=input[i];}
+        if(fifo) {
+            floor.apu.mmio_write(0xfe802044,4,0x1000);floor.apu.mmio_write(0xfe8020d8,4,1);
+            for(unsigned reg:{0xfe803034u,0xfe803064u}) {
+                floor.apu.mmio_write(reg,4,0x100);floor.apu.mmio_write(reg+4,4,4096);
+                floor.apu.mmio_write(reg+8,4,4093);
+            }
+        }
         *floor.apu.gp_word(0x80)=0x123456;*floor.apu.gp_word(0x81)=0xabcdef;
         xlle_dsp_core_begin(floor.core,0);xlle_dsp_core_run(floor.core,10000);
         uint32_t pc,power,sp;xlle_dsp_core_result(floor.core,&pc,&power,&sp);
         CHECK(pc==11 && power==2 && !sp && floor.error.empty());
         CHECK(floor.apu.gp_dma_nodes()==2);
-        CHECK(*floor.apu.gp_word(0x1880)==0x123456 && *floor.apu.gp_word(0x1881)==0xabcdef);
+        CHECK(*floor.apu.gp_word(0x1880)==(format==1?0x123400:0x123456));
+        CHECK(*floor.apu.gp_word(0x1881)==(format==1?0xabcd00:0xabcdef));
+        const uint8_t pcm16[]={0x34,0x12,0xcd,0xab};
         const uint8_t msb[]={0,0x56,0x34,0x12,0,0xef,0xcd,0xab};
         const uint8_t lsb[]={0x56,0x34,0x12,0,0xef,0xcd,0xab,0};
-        for(unsigned i=0;i<8;++i)CHECK(floor.byte(4093+i)==(format==2?msb:lsb)[i]);
+        const unsigned length=format==1?4:8;
+        for(unsigned i=0;i<length;++i) {
+            const unsigned offset=fifo && i>=3?0x100+i-3:4093+i;
+            CHECK(floor.byte(offset)==(format==1?pcm16:format==2?msb:lsb)[i]);
+        }
+        if(fifo)for(unsigned reg:{0xfe80303cu,0xfe80306cu})CHECK(floor.apu.mmio_read(reg,4)==0x100+length-3);
         uint32_t status;CHECK(floor.apu.gp_read(0xffffc5,status) && status==0x80);
     }
-    std::puts("PASS: authored DSP program performs real GP SGE output/input in both 24-bit formats");
+    std::puts("PASS: authored DSP program performs real GP scratch/FIFO output/input in PCM16 and both PCM24 formats");
 }
 
 int main(int argc,char** argv) {

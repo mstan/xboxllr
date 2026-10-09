@@ -82,7 +82,8 @@ public:
     explicit McpxApu(FaultFn fault)
         : RegFileMmio("mcpx-apu", kBase, kSize, std::move(fault)),
           gp_dma_([this](uint32_t a){return gp_word(a);},
-                  [this](uint32_t a,void* data,uint32_t n,bool output){return gp_scratch(a,data,n,output);},
+                  [this](uint32_t a,void* data,uint32_t n,bool output){return gp_sge(0x2040,0x20d4,a,data,n,output);},
+                  [this](unsigned i,void* data,uint32_t n,bool output){return gp_fifo(i,data,n,output);},
                   [this](const std::string& why){device_fault(why);}) {}
     McpxApu(const McpxApu&)=delete;
     McpxApu& operator=(const McpxApu&)=delete;
@@ -261,20 +262,42 @@ private:
            (offset>=0xa000 && offset<0xe000))return gp_word(offset/4);
         return nullptr;
     }
-    bool gp_scratch(uint32_t linear,void* data,uint32_t bytes,bool output) {
+    bool gp_sge(uint32_t table,uint32_t maximum,uint32_t linear,void* data,uint32_t bytes,bool output) {
         auto* next=static_cast<uint8_t*>(data);
         if(uint64_t(linear)+bytes>0x100000000ull)return false;
         while(bytes) {
             const uint32_t entry=linear>>12,offset=linear&4095;
-            const uint64_t descriptor=uint64_t(reg32(0x2040))+uint64_t(entry)*8;
+            const uint64_t descriptor=uint64_t(reg32(table))+uint64_t(entry)*8;
             uint32_t page=0;
-            if(entry>reg32(0x20d4) || descriptor>UINT32_MAX-3 ||
+            if(entry>reg32(maximum) || descriptor>UINT32_MAX-3 ||
                !read_u32(static_cast<uint32_t>(descriptor),page) || (page&4095))return false;
             const uint32_t n=bytes<(4096-offset)?bytes:4096-offset;
             if(output?!write_mem(page+offset,next,n):!read_mem(page+offset,next,n))return false;
             next+=n;linear+=n;bytes-=n;
         }
         return true;
+    }
+    bool gp_fifo(unsigned index,void* data,uint32_t bytes,bool output) {
+        if(index>=(output?4u:2u))return false;
+        const uint32_t registers=(output?0x3024:0x3064)+index*16;
+        const uint32_t base=reg32(registers),end=reg32(registers+4);
+        uint32_t cursor=reg32(registers+8);
+        // Bounded low-24-bit address fields; BASE alignment is still uncertain
+        // in the published register reference. Admit 256-byte aligned rings
+        // (including original Blinx's 0..0x2000); do not guess reserved bits.
+        if((base|end|cursor)&0xff000000 || ((base|end)&255) || base>=end || cursor>=end)
+            return false;
+        if(cursor<base)cursor=base;
+        auto* next=static_cast<uint8_t*>(data);
+        while(bytes) {
+            const uint32_t n=bytes<(end-cursor)?bytes:end-cursor;
+            if(!gp_sge(0x2044,0x20d8,cursor,next,n,output))return false;
+            next+=n;bytes-=n;cursor+=n;
+            if(cursor==end)cursor=base;
+        }
+        // No fabricated progress on failed DMA. Physical writes before a later
+        // page fault can remain; the strict device then faults without EOL.
+        set_reg32(registers+8,cursor);return true;
     }
     bool resample_source_impl(uint16_t voice,float* stereo,uint32_t capacity,
                               uint32_t& count,bool& ended,double pitch_modulation);

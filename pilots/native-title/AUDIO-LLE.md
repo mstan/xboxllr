@@ -9,6 +9,50 @@ The audio LLE floor still needs remaining envelope curves/filtering, GP transpor
 whole-driver integration before it is a qualified selectable title backend. Existing
 audible HLE output does not remove that requirement.
 
+## GP FIFO transport - 2026-10-09
+
+The maintained DMA engine now transfers real bytes through GP output FIFOs
+0..3 and input FIFOs 0..1, using the separate FIFO scatter/gather table and
+each ring's own BASE/END/CUR. PCM16 truncation and both PCM24 byte layouts
+are implemented. Scratch and FIFO share packing and physical-page transport;
+FIFO transfers leave the scratch-only descriptor fields unchanged.
+
+[Published DSP research](https://xboxdevwiki.net/DSP) supplies the ring and
+sample-lane contract. Pinned xemu `dsp/gp_ep.c` and `apu_regs.h` corroborate the
+register/SGE layout; no implementation body was copied. The original NTSC
+`0x17b870` routine independently shows GPFADDR/GPFMAXSGE setup, FIFO0 bounds
+`0..0x2000`, and initialization of output cursors from their bases. That routine
+was inspected, **not qualified as a complete executable owner**: its reset and
+bootstrap accesses remain outside this transport. Phobos's audited APU README
+describes its GP effects bypass/EP passthrough, so those paths were not adopted.
+
+Validation includes **108 transport cases**, **12 guards**, and **16 device
+lifetimes / 2,064 repeated transfers**. Tests compare all physical RAM, including
+untouched scratch storage, noncontiguous page crossings, exclusive-end wrapping,
+multiple ring laps, distinct input/output cursors and real completion status.
+The reused MIT DSP core executes six authored instruction-program cases that perform
+actual scratch/FIFO output and input through these peripherals. Their expected
+sample bytes come from independent published examples, not native output.
+
+Scope remains noninterleaved unit-stride transfers, at most 4,096 words, and
+low-24-bit rings with 256-byte aligned bounds. Odd PCM16 counts, other formats,
+unknown control bits and invalid ring state stop explicitly. A later page fault
+can leave bytes already physically written; it earns neither a completed node
+nor CUR advancement. Invalid-state silicon behavior and precise DMA latency
+are not claimed. Original GP boot/framework, interleaved output, EP/AC97 and
+whole-driver audio remain open. This is a new runnable floor component, not
+qualification of the native effects shell or whole-title LLE audio.
+
+Final validation: maintained APU **8/8 in 0.22s**, complete native/contract suite
+**56/56 in 35.70s**, plus all prior original configuration/source/control and
+30 IRQ cases pass. Reference DLL SHA-256:
+`090cedf7bcaac1e5f9ff6d751ce0520781799aebd3ebc34bbf70cdd6b09e7f55`.
+Logs and private fixture output use `build/blinx/audio-fifo-*`.
+The final rebuilt native title remains exact SHA `76ff2a4e...ff12f730`, so the
+preceding **190.578s / 18-capture** Blinx regression is retained without a
+duplicate run. Stable game pin unchanged; audio stays open and the family
+count stays **4/9**. DSP bit 9 `.114` and the FE fence `.115` stay deferred.
+
 ## Original IRQ5, unlink and deferred-work queue - 2026-10-09
 
 `native_audio_interrupt_reference.py` connects the maintained APU to the
