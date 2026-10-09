@@ -67,6 +67,18 @@ static const char *gpu_lle_port(uint16_t port,int size,int write,uint32_t *value
     if(!write)*value=result;
     return gpu_lle.error(gpu_lle.device);
 }
+static const char *gpu_lle_kernel_mmio(uint32_t address,unsigned size,int write,uint32_t *value)
+{
+    if(!gpu_lle.device)return "kernel NV2A access before GPU initialization";
+    // AV register access cannot start FIFO/DMA under the kernel transport
+    // lock. Broader kernel-driven GPU engines need a reentrant bus contract.
+    if(!((address>=0xfd600000u && (uint64_t)address+size<=0xfd700000u) ||
+         (address>=0xfd0c0000u && (uint64_t)address+size<=0xfd0c1000u)))
+        return "kernel NV2A MMIO outside qualified AV engines";
+    if(write)gpu_lle.write(gpu_lle.device,address,size,*value);
+    else *value=gpu_lle.read(gpu_lle.device,address,size);
+    return gpu_lle.error(gpu_lle.device);
+}
 static void gpu_lle_tick(void)
 {
     if(!gpu_lle.device)return;
@@ -125,5 +137,9 @@ static void gpu_lle_open(void)
     gpu_lle.origin=dispatch_monotonic();
     gpu_lle.field_count=0;
     pilot_io_device_port_bind(0xcf8,0xcff,gpu_lle_port);
+    pilot_io_device_port_bind(0x80c0,0x80c0,gpu_lle_port);
+    pilot_io_device_port_bind(0xc000,0xc00f,gpu_lle_port);
+    error=pilot_io_device_mmio_bind(0xfd000000u,0x1000000u,gpu_lle_kernel_mmio);
+    if(error)stop(error,0xfd000000u);
     fprintf(stderr,"[GPU LLE] original XDK renderer; maintained NV2A; shared original RAM/PIC/ISR\n");
 }

@@ -19,6 +19,9 @@ if(PILOT_RENDERER STREQUAL "LLE")
   # The contract harness contains native and LLE consumers, selected by its
   # test argument. The title selects exactly one renderer at compile time.
   target_compile_definitions(pilot_contract_test PRIVATE PILOT_GPU_LLE)
+  if(PILOT_FILES STREQUAL "LLE")
+    target_compile_definitions(pilot_contract_test PRIVATE PILOT_GPU_FILES_WORKER)
+  endif()
   target_include_directories(pilot_contract_test PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/gpu-private")
   add_test(NAME pilot_gpu_lle_transport COMMAND pilot_contract_test gpu-lle-transport)
   set_tests_properties(pilot_gpu_lle_transport PROPERTIES TIMEOUT 30)

@@ -698,3 +698,96 @@ then continue the original graphics/context/draw path. Preserve the explicit
 Xbox compression qualification debt while collecting the relevant evidence;
 do not close the GPU family on donor equivalence or initialization progress.
 The overall burndown remains **4/9**.
+
+## Original AV kernel and SMBus control checkpoint
+
+Original `AvSendTVEncoderOption` (ordinal 2) now executes through the owned
+kernel transport. Ordinal 3's six-argument `AvSetDisplayMode` ABI is connected
+too, but its full device path remains unqualified. The bus supports disjoint
+PCI/GPIO/SMBus port ranges and an actual NV2A MMIO mapping for AV registers.
+Kernel-driven AV MMIO cannot run FIFO/DMA recursively under the transport lock.
+Other engine accesses still stop explicitly.
+
+SMBus reuses `Amd756Smbus`, IRQ11 and the shared PIC. The original kernel owns
+ISR/DPC dispatch, status acknowledgment and wait completion. Interrupt delivery
+inside original services no longer depends on an attached disk. The fixture
+uses the same original worker priority/critical-region setup as the title;
+without it, unrelated captured boot work becomes runnable. No ready queues,
+events, return values or original callees are patched to complete a transaction.
+
+This audit corrected a real controller defect inherited from the previous
+xemu-style behavior: writing zero to global status used to set host completion.
+Status now clears only the requested W1C bits, preserving unrelated errors;
+HOSTST/ABORT are command strobes. Independent register specification:
+[AMD-766 23167B, March 2001, pp84-86](https://dtsheet.com/doc/261442/amd-amd).
+MCPX compatibility remains the bounded board-model assumption, not a new
+silicon measurement or a qualification of wire timing/collision behavior.
+
+`Cx25871Control` is an authored, guarded control-plane implementation, separate
+from the old unrestricted register store. It starts with unknown warm state:
+the current kernel RAM capture does not contain encoder register state. Its
+supported reads require established standard-readback mode and previously
+programmed bytes; unknown reads preserve the data latch and stop qualification.
+Only the reached control registers and documented readback setup are admitted.
+Analog video/filter output is not implemented by this control-plane work, and
+scanout through a programmed encoder explicitly refuses to claim that output.
+Reference: [Conexant 100381B, September 2001, sections 2.3/2.4 and tables 2-1/2-5](https://datasheet.octopart.com/CX25871-15-Conexant-datasheet-180221357.pdf).
+
+Qualification retained/added:
+
+- `native_av_reference.py` executes 15 original software queries across three
+  independent captured-kernel instances: capabilities, current mode, encoder
+  type, table version and repeat query, with output sentinels and stdcall ABI.
+  Results belong to the pinned captured configuration, not every Xbox profile.
+- The compiled GPU fixture checks these queries, both external field levels,
+  six filter settings and both soften settings over three device lifetimes.
+  Fixture-only setup programs the control bytes through actual SMBus writes.
+  Original AV calls use real IRQ11/ISR/DPC completion; status and pending IRQs
+  are checked before further fixture bus operations can acknowledge anything.
+  This proves bounded software/control transport, not filtered video pixels.
+- `smbus_av` checks real control writes/readback, missing-state rejection,
+  actual absent-address NAK, retained errors, individual W1C acknowledgments,
+  command readback and no completion/IRQ from a zero status write.
+- All nine original query/trap/fence cases still pass with the changed DLL.
+  Seven software GPU/SMBus/SMC/DVD tests and eight native-renderer shared
+  device/USB/memory/graphics checks pass. OpenGL raster cases still skip.
+
+Private evidence: `build/blinx/av-reference/queries.aot-private.json` and
+`build/blinx/gpu-completion-av-original.aot-private.json`. Reproduce AV queries:
+
+```powershell
+$env:PYTHONPATH='build/reference-python;tools'
+py -3 tools/native_av_reference.py --snapshot build/blinx/io-boot-18m.ram.bin --output build/blinx/av-reference/queries.aot-private.json
+```
+
+The actual title reaches the original capability query, then filter setting 5;
+it stops at `CX25871 standard readback requires established EN_REG_RD state`,
+before rendered frames. Do not install the fixture's synthetic starting register
+values in the title. Next reconstruct/capture the encoder's actual original-boot
+programming with provenance tied to the RAM capture, then complete its required
+device effects. A RAM dump alone is insufficient evidence for device state.
+Full display-mode/blanking, context transfer, tiled draw/texture/aperture clients,
+and title callback/resource qualification remain open. Burndown stays **4/9**;
+the working game framework pin remains `439a45b`.
+
+Final validation: `gpu-lle-title-av-final` exits 2 after 9.000s at that encoder
+guard, with 899 entries and no rendered frames. Seven GPU-preset transport/
+device/USB/memory tests pass in 2.32s. The native renderer with the changed
+shared kernel transport runs `av-shared-io-native-regression` for 190.156s,
+recording 166 captures and no terminal guard/fault. Manual capture inspection
+shows opening FMV, Demo gameplay, replay Start interruption, title return and
+second Demo entry. The harness terminates it at its requested duration; this
+is a bounded regression, not new long-loop/audio-timing qualification.
+`review.png` records inspected captures 8/50/95/105/130/165 under that private
+run directory. No screenshot/game asset is committed.
+
+Final executable SHA-256 (GPU preset):
+`e635230df1aa4e38eb69b99435867ed20f3467479e980b0c1806ba0cccbba4da`.
+Device DLL:
+`278d346645ac507ee6b5cf020ebec7ec2f82166b1579e9888ef4b094ef8e470b`.
+Native regression executable:
+`2950123bbd7be21aba75f6b53a8bbe22390f103daa578e7eb115b63dbad3dd0c`.
+No new hardware contact or xemu runtime differential is claimed. Phobos's AV
+option switch was audited but not adopted: several option constants and its
+null-result early return disagree with the original kernel. Attribution records
+the donor consultation and primary specifications separately.

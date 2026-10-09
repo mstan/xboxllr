@@ -4,6 +4,7 @@
 #include "machine/pic.hpp"
 #include "machine/pci.hpp"
 #include "machine/mcpx_field.hpp"
+#include "machine/cx25871_control.hpp"
 #include <cstdio>
 #include <cstring>
 #include <new>
@@ -22,10 +23,19 @@ struct Reference {
     xlle::PciHost pci;
     xlle::DualPic pic;
     xlle::Nv2a gpu;
+    xlle::Amd756Smbus smbus;
+    xlle::Cx25871Control* encoder = nullptr;
     void (*external_irq)(int, int) = nullptr;
     Reference() : field([this](const std::string& reason) { failure = reason; }),
         pci([this](const std::string& reason) { failure = reason; }),
-        gpu([this](const std::string& reason) { failure = reason; }) {
+        gpu([this](const std::string& reason) { failure = reason; }),
+        smbus(0xc000, [this](const std::string& reason) { failure = reason; }) {
+        auto control = std::make_unique<xlle::Cx25871Control>(
+            [this](const std::string& reason) { failure = reason; });
+        encoder = control.get(); smbus.add_slave(std::move(control));
+        smbus.set_irq([this](int line, bool level) {
+            if (external_irq) external_irq(line, level); else pic.raise(line, level);
+        }, 11);
         pci.attach_function(1, 0, 0, [this](uint8_t reg, int size, bool write, uint32_t value) {
             if (write) { gpu.pci_write(reg, size, value); return 0u; }
             return gpu.pci_read(reg, size);
@@ -105,6 +115,11 @@ EXPORT int xlle_nv2a_reference_scanout(void* instance, uint8_t* output, uint32_t
                                       uint32_t* width, uint32_t* height) {
     auto& ref = *static_cast<Reference*>(instance);
     if (!ref.failure.empty()) return 0;
+    // Raw GPU fixtures observe the digital scanout before the encoder. Once
+    // AV programming occurs, do not present that as an encoded video result.
+    if (ref.encoder->programmed()) {
+        ref.failure = "CX25871 programmed video output remains unqualified"; return 0;
+    }
     std::vector<uint8_t> rgba;
     xlle::Nv2a::ScanoutInfo info;
     std::string error;
@@ -136,6 +151,12 @@ EXPORT uint32_t xlle_nv2a_reference_port(void* instance, uint16_t port, int size
     } else if (ref.pci.owns(port)) {
         if (write) ref.pci.io_write(port, size, value);
         else return ref.pci.io_read(port, size);
+    } else if (ref.smbus.owns(port) &&
+               ((size == 1 && (port == 0xc000 || port == 0xc002 || port == 0xc004 ||
+                              port == 0xc006 || port == 0xc007 || port == 0xc008)) ||
+                (size == 2 && (port == 0xc000 || port == 0xc006)))) {
+        if (write) ref.smbus.io_write(port, size, value);
+        else return ref.smbus.io_read(port, size);
     } else ref.failure = "unmodelled display reference port";
     return 0;
 }

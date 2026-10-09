@@ -212,7 +212,7 @@ uint32_t Amd756Smbus::io_read(uint16_t port, int size) {
         uint8_t b = 0;
         switch (off) {
             case SMB_GLOBAL_STATUS: b = stat_; break;
-            case SMB_GLOBAL_ENABLE: b = ctl_ & 0x1f; break;
+            case SMB_GLOBAL_ENABLE: b = ctl_; break;
             case SMB_HOST_ADDRESS:  b = addr_; break;
             case SMB_HOST_DATA:     b = data0_; break;
             case SMB_HOST_DATA + 1: b = data1_; break;
@@ -230,13 +230,15 @@ void Amd756Smbus::io_write(uint16_t port, int size, uint32_t value) {
         uint8_t val = static_cast<uint8_t>(value >> (8 * i));
         switch (off) {
             case SMB_GLOBAL_STATUS:
-                // Write-1-clear semantics (xemu amd_smbus.c). Both non-clear branches leave
-                // HCYC set; a real failure ORs in PRERR, which the firmware checks first.
-                if (val & GS_CLEAR_STS) stat_ = 0;
-                else stat_ = GS_HCYC_STS;
+                // AMD-766 23167B p84: each status is hardware-set/W1C.
+                // A zero write cannot manufacture a completed transaction,
+                // and acknowledging one condition must retain the others.
+                stat_ &= static_cast<uint8_t>(~(val & GS_CLEAR_STS));
                 break;
             case SMB_GLOBAL_ENABLE:
-                ctl_ = val;
+                // HOSTST/ABORT are command strobes, not readable enables
+                // (23167B pp85-86). Keep only the supported RW controls.
+                ctl_ = val & (GE_CYC_TYPE_MASK | GE_HCYC_EN);
                 if (val & GE_ABORT) stat_ |= GS_ABRT_STS;
                 if (val & GE_HOST_STC) transaction();
                 break;

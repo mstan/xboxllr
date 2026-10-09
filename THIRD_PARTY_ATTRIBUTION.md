@@ -1033,6 +1033,30 @@ by this checkpoint. Xbox tag capacity/debug access and exact compressor
 representation choices remain explicitly unqualified. No new GPL
 implementation body or game asset is incorporated.
 
+## Original AV / encoder-control reference audit
+
+The GPU LLE AV bridge reuses this repository's maintained SMBus/PIC transport.
+`src/machine/cx25871_control.hpp` and its tests are authored from register facts
+in [Conexant CX25870/871, 100381B, September 2001](https://datasheet.octopart.com/CX25871-15-Conexant-datasheet-180221357.pdf),
+sections 2.3/2.4 and tables 2-1/2-5. The document is a behavioral specification;
+neither its document contents nor vendor software is redistributed. Its
+readback-enable requirement prevents assuming an all-zero captured encoder.
+
+[AMD-766 23167B, March 2001](https://dtsheet.com/doc/261442/amd-amd), pp84-86,
+informs the corrected status W1C and command-strobe behavior in `smbus.cpp`.
+Pinned xemu `482088490c2d5983ed5e1eafbd09906157c1eca0`,
+`hw/xbox/amd_smbus.c` and `smbus_cx25871.c`, were inspected for behavioral
+comparison; these individual source files carry espes's MIT notices. No new
+implementation bodies were copied. Their unrestricted encoder storage and
+zero-write completion behavior are not qualification evidence and were not
+adopted for the strict AV floor.
+
+Pinned Phobos `63f18f0334fbd8c00313c4bb565accf00627a4fd`,
+`src/kernel/kernel_hal.c`, was inspected. Its option numbering/null-output
+handling differs from the owned original kernel and nxdk's video definitions;
+that AV switch was not incorporated. Original kernel binaries and generated
+observations remain private. This checkpoint does not qualify analog output.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

@@ -9,7 +9,6 @@ static struct {
     HANDLE exclusion;
     int ready;
 } storage;
-static int storage_irq_pending;
 static int storage_dma(uint32_t address,void *buffer,size_t bytes,int write)
 {
     if(address>RAM_BYTES || bytes>RAM_BYTES-address)return 0;

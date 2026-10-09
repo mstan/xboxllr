@@ -456,6 +456,16 @@ static void kernel_dispatch_impl(void)
     if(pilot_verbose)fprintf(stderr, "[KERNEL] %u %s return=%08x\n", next_kernel_ordinal, name, MEM32(g_esp));
     switch (next_kernel_ordinal) {
 #ifdef PILOT_GPU_LLE
+    case 2:case 3: {
+        uint32_t args[6],result=g_eax;unsigned count=next_kernel_ordinal==2?4:6;
+        for(unsigned i=0;i<count;++i)args[i]=MEM32(g_esp+4+i*4);
+        gpu_lle_tick();
+        fprintf(stderr,"[AV KERNEL LLE] ordinal=%u option/step=%08x param/mode=%08x\n",
+                next_kernel_ordinal,args[1],args[2]);
+        const char *error=pilot_io_device_lle(next_kernel_ordinal,memory,args,&result);
+        if(error)stop(error,next_kernel_ordinal);
+        g_eax=result;g_esp+=4+count*4;return;
+    }
     case 168: {
         uint32_t args[]={MEM32(g_esp+4),MEM32(g_esp+8)},result=0;
         const char *error=pilot_io_device_lle(168,memory,args,&result);

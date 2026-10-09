@@ -53,11 +53,15 @@ static struct {uint32_t base,bytes;} stacks[64];
 static unsigned stack_count;
 static uint32_t interrupt_objects[16],pending_callback;
 static PilotIoIsr isr_callback;
-static PilotIoPort device_port;
-static uint16_t device_port_first,device_port_last;
+static struct {uint16_t first,last;PilotIoPort callback;} device_ports[8];
+static PilotIoMmio device_mmio;
+static uint32_t device_mmio_first,device_mmio_bytes;
 static volatile LONG current_irql;
 static volatile LONG caller_if=1;
 static unsigned execution_depth;
+#ifdef PILOT_USB_LLE
+static int device_irq_pending;
+#endif
 static const int general_regs[]={UC_X86_REG_EAX,UC_X86_REG_ECX,UC_X86_REG_EDX,
     UC_X86_REG_EBX,UC_X86_REG_ESP,UC_X86_REG_EBP,UC_X86_REG_ESI,UC_X86_REG_EDI};
 
@@ -121,6 +125,25 @@ static bool invalid_memory(uc_engine *engine,uc_mem_type type,uint64_t address,
 }
 static void forbidden(uc_engine *engine,const char *reason)
 {failure=reason;uc_emu_stop(engine);}
+static uint64_t device_mmio_read(uc_engine *engine,uint64_t offset,unsigned size,void *data)
+{
+    (void)data;uint32_t value=0;
+    if(!device_mmio || (size!=1 && size!=2 && size!=4) || offset+size>device_mmio_bytes) {
+        forbidden(engine,"device LLE unqualified MMIO read");return 0;
+    }
+    const char *error=device_mmio(device_mmio_first+(uint32_t)offset,size,0,&value);
+    if(error)forbidden(engine,error);
+    return value;
+}
+static void device_mmio_write(uc_engine *engine,uint64_t offset,unsigned size,uint64_t value,void *data)
+{
+    (void)data;uint32_t word=(uint32_t)value;
+    if(!device_mmio || (size!=1 && size!=2 && size!=4) || offset+size>device_mmio_bytes) {
+        forbidden(engine,"device LLE unqualified MMIO write");return;
+    }
+    const char *error=device_mmio(device_mmio_first+(uint32_t)offset,size,1,&word);
+    if(error)forbidden(engine,error);
+}
 #ifdef PILOT_FILES_LLE
 #include "io_storage_lle.inc"
 #endif
@@ -128,8 +151,8 @@ static uint32_t port_in(uc_engine *engine,uint32_t port,int size,void *data)
 {
 #ifdef PILOT_USB_LLE
     uint32_t value=0;(void)data;
-    if(device_port && port>=device_port_first && port<=device_port_last) {
-        const char *error=device_port((uint16_t)port,size,0,&value);
+    for(unsigned i=0;i<8;++i)if(device_ports[i].callback && port>=device_ports[i].first && port<=device_ports[i].last) {
+        const char *error=device_ports[i].callback((uint16_t)port,size,0,&value);
         if(error)forbidden(engine,error);
         return value;
     }
@@ -140,7 +163,11 @@ static uint32_t port_in(uc_engine *engine,uint32_t port,int size,void *data)
     }
 #endif
     const char *error=pilot_usb_pic_port(port,size,0,&value);
-    if(error)forbidden(engine,error);
+    if(error) {
+        uint32_t pc=0;uc_reg_read(engine,UC_X86_REG_EIP,&pc);
+        fprintf(stderr,"[IO DEVICE PORT] read port=%04x size=%d pc=%08x\n",port,size,pc);
+        forbidden(engine,error);
+    }
     return value;
 #else
     (void)port;(void)size;(void)data;
@@ -151,8 +178,8 @@ static uint32_t port_in(uc_engine *engine,uint32_t port,int size,void *data)
 static void port_out(uc_engine *engine,uint32_t port,int size,uint32_t value,void *data)
 {
 #ifdef PILOT_USB_LLE
-    if(device_port && port>=device_port_first && port<=device_port_last) {
-        const char *error=device_port((uint16_t)port,size,1,&value);
+    for(unsigned i=0;i<8;++i)if(device_ports[i].callback && port>=device_ports[i].first && port<=device_ports[i].last) {
+        const char *error=device_ports[i].callback((uint16_t)port,size,1,&value);
         if(error)forbidden(engine,error);
         return;
     }
@@ -163,7 +190,11 @@ static void port_out(uc_engine *engine,uint32_t port,int size,uint32_t value,voi
     }
 #endif
     (void)data;const char *error=pilot_usb_pic_port(port,size,1,&value);
-    if(error)forbidden(engine,error);
+    if(error) {
+        uint32_t pc=0;uc_reg_read(engine,UC_X86_REG_EIP,&pc);
+        fprintf(stderr,"[IO DEVICE PORT] write port=%04x size=%d value=%08x pc=%08x\n",port,size,value,pc);
+        forbidden(engine,error);
+    }
 #else
     (void)port;(void)size;(void)value;(void)data;forbidden(engine,"device LLE unmodelled port write");
 #endif
@@ -171,8 +202,8 @@ static void port_out(uc_engine *engine,uint32_t port,int size,uint32_t value,voi
 static void interrupt(uc_engine *engine,uint32_t number,void *data)
 {
     (void)data;
-#ifdef PILOT_FILES_LLE
-    if(storage.instance && number>=0x20 && number<0x40) {
+#ifdef PILOT_USB_LLE
+    if(number>=0x20 && number<0x40) {
         uint32_t gate=0x8003dcc0u+number*8,low=kernel_word(gate),high=kernel_word(gate+4);
         if((low>>16)==8 && (high&65535)==0x8e00) {
             uint32_t sp,frame[3],flags,entry=(low&65535)|(high&0xffff0000u);
@@ -219,10 +250,10 @@ static void interrupt(uc_engine *engine,uint32_t number,void *data)
 static void code_block(uc_engine *engine,uint64_t address,uint32_t size,void *data)
 {
     (void)size;(void)data;
-#ifdef PILOT_FILES_LLE
-    if(storage.instance && pilot_usb_pic_vector(0)>=0) {
+#ifdef PILOT_USB_LLE
+    if(pilot_usb_pic_vector(0)>=0) {
         uint32_t flags=0;uc_reg_read(engine,UC_X86_REG_EFLAGS,&flags);
-        if(flags&0x200){storage_irq_pending=1;uc_emu_stop(engine);return;}
+        if(flags&0x200){device_irq_pending=1;uc_emu_stop(engine);return;}
     }
 #endif
     if(address>=0x80010000u && address<0x80080000u)return;
@@ -441,16 +472,16 @@ static void run_original(uint32_t entry,size_t instruction_limit)
      * nested original service has its own stack and saved engine context. */
     for(unsigned calls=0;calls<8192;++calls) {
         pending_callback=0;
-#ifdef PILOT_FILES_LLE
-        storage_irq_pending=0;
+#ifdef PILOT_USB_LLE
+        device_irq_pending=0;
 #endif
         uc_err error=uc_emu_start(cpu,entry,RETURN_PC,0,instruction_limit);
         if(failure)return;
         if(error){failure=uc_strerror(error);return;}
-#ifdef PILOT_FILES_LLE
-        if(storage_irq_pending) {
+#ifdef PILOT_USB_LLE
+        if(device_irq_pending) {
             int vector=pilot_usb_pic_vector(1);
-            if(vector<0){failure="storage LLE PIC changed before INTA";return;}
+            if(vector<0){failure="device LLE PIC changed before INTA";return;}
             interrupt(cpu,(uint32_t)vector,NULL);if(failure)return;
             IO_UC(uc_reg_read(cpu,UC_X86_REG_EIP,&entry));continue;
         }
@@ -522,7 +553,7 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
         }
     }
 #endif
-    if(ordinal!=1 && ordinal!=4 && ordinal!=14 && ordinal!=15 && ordinal!=17 && ordinal!=23 &&
+    if(ordinal!=1 && ordinal!=2 && ordinal!=3 && ordinal!=4 && ordinal!=14 && ordinal!=15 && ordinal!=17 && ordinal!=23 &&
        ordinal!=44 && ordinal!=46 && ordinal!=47 && ordinal!=65 && ordinal!=68 && ordinal!=107 && ordinal!=108 && ordinal!=109 && ordinal!=166 &&
        ordinal!=168 && ordinal!=171 && ordinal!=173 && ordinal!=175 && ordinal!=178 && ordinal!=179 && ordinal!=180 && ordinal!=181 && ordinal!=182 &&
        ordinal!=98 && ordinal!=100 && ordinal!=103 && ordinal!=129 && ordinal!=151 &&
@@ -588,7 +619,7 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
     uint32_t base=kernel_word(exports+16),table=0x80010000u+kernel_word(exports+28);
     uint32_t entry=0x80010000u+kernel_word(table+4*(ordinal-base));
     if(failure)return;
-    unsigned count=(ordinal==46 || ordinal==65)?6:ordinal==109?7:(ordinal==166 || ordinal==184)?5:ordinal==204?4:
+    unsigned count=(ordinal==3 || ordinal==46 || ordinal==65)?6:ordinal==109?7:(ordinal==166 || ordinal==184)?5:(ordinal==2 || ordinal==204)?4:
                    (ordinal==107 || ordinal==108 || ordinal==175 || ordinal==178 || ordinal==182 || ordinal==199)?3:
                    (ordinal==15 || ordinal==44 || ordinal==47 || ordinal==168 || ordinal==217)?2:
                    (ordinal==1 || ordinal==103 || ordinal==129 || ordinal==160 || ordinal==161)?0:1;
@@ -714,7 +745,37 @@ static void deliver_irq(int *delivered)
 void pilot_io_device_isr_bind(PilotIoIsr callback){isr_callback=callback;}
 void pilot_io_device_port_bind(uint16_t first,uint16_t last,PilotIoPort callback)
 {
-    device_port_first=first;device_port_last=last;device_port=callback;
+    AcquireSRWLockExclusive(&lock);
+    if(execution_depth){failure="device LLE port binding during execution";goto done;}
+    if(!callback){memset(device_ports,0,sizeof(device_ports));goto done;}
+    if(first>last){failure="device LLE invalid port binding";goto done;}
+    unsigned empty=8;
+    for(unsigned i=0;i<8;++i) {
+        if(!device_ports[i].callback){if(empty==8)empty=i;continue;}
+        if(first<=device_ports[i].last && last>=device_ports[i].first) {
+            failure="device LLE overlapping port binding";goto done;
+        }
+    }
+    if(empty==8){failure="device LLE port binding capacity";goto done;}
+    device_ports[empty].first=first;device_ports[empty].last=last;device_ports[empty].callback=callback;
+done:
+    ReleaseSRWLockExclusive(&lock);
+}
+const char *pilot_io_device_mmio_bind(uint32_t first,uint32_t bytes,PilotIoMmio callback)
+{
+    AcquireSRWLockExclusive(&lock);
+    if(!cpu || execution_depth)failure="device LLE MMIO binding outside idle initialized transport";
+    if(!failure && callback && (!bytes || (first&4095) || (bytes&4095) ||
+        (uint64_t)first+bytes>0x100000000ull || device_mmio))
+        failure="device LLE invalid/duplicate MMIO binding";
+    if(!failure) {
+        uc_err error=UC_ERR_OK;
+        if(callback)error=uc_mmio_map(cpu,first,bytes,device_mmio_read,NULL,device_mmio_write,NULL);
+        else if(device_mmio)error=uc_mem_unmap(cpu,device_mmio_first,device_mmio_bytes);
+        if(error)failure=uc_strerror(error);
+        else {device_mmio=callback;device_mmio_first=callback?first:0;device_mmio_bytes=callback?bytes:0;}
+    }
+    const char *error=failure;ReleaseSRWLockExclusive(&lock);return error;
 }
 void pilot_io_device_set_if(int enabled){InterlockedExchange(&caller_if,enabled!=0);}
 unsigned pilot_io_device_irql(void){return (unsigned)InterlockedCompareExchange(&current_irql,0,0);}

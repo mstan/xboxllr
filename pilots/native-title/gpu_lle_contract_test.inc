@@ -4,9 +4,76 @@ __declspec(noinline) static uint32_t gpu_test_read(uint32_t offset)
 {return *(volatile uint32_t*)(memory+0xfd000000ull+offset);}
 __declspec(noinline) static void gpu_test_write(uint32_t offset,uint32_t value)
 {*(volatile uint32_t*)(memory+0xfd000000ull+offset)=value;}
+static uint32_t gpu_test_smb_port(uint16_t port,int write,uint32_t value)
+{
+    CHECK(!gpu_lle_port(port,1,write,&value));return value;
+}
+static void gpu_test_encoder_write(uint8_t reg,uint8_t value)
+{
+    gpu_test_smb_port(0xc000,1,0x3f);
+    gpu_test_smb_port(0xc004,1,0x8a);
+    gpu_test_smb_port(0xc008,1,reg);
+    gpu_test_smb_port(0xc006,1,value);
+    gpu_test_smb_port(0xc002,1,0x0a); // byte-data, polled; actual device operation
+    CHECK(gpu_test_smb_port(0xc000,0,0)==0x10);
+    gpu_test_smb_port(0xc000,1,0x10);
+}
+static uint8_t gpu_test_encoder_read(uint8_t reg)
+{
+    gpu_test_smb_port(0xc000,1,0x3f);
+    gpu_test_smb_port(0xc004,1,0x8b);
+    gpu_test_smb_port(0xc008,1,reg);
+    gpu_test_smb_port(0xc002,1,0x0a);
+    CHECK(gpu_test_smb_port(0xc000,0,0)==0x10);
+    uint8_t result=(uint8_t)gpu_test_smb_port(0xc006,0,0);
+    gpu_test_smb_port(0xc000,1,0x10);return result;
+}
+static void gpu_test_av(void)
+{
+    const uint32_t cases[][2]={{6,0x004e0101},{13,0},{16,0},{17,0}};
+    for(unsigned i=0;i<sizeof(cases)/sizeof(cases[0]);++i) {
+        MEM32(0x15000)=0x11223344;MEM32(0x15004)=0xcdcdcdcd;MEM32(0x15008)=0x55667788;
+        uint32_t args[]={0,cases[i][0],0,0x15004};call_kernel(2,args,4);
+        CHECK(MEM32(0x15004)==cases[i][1]);
+        CHECK(MEM32(0x15000)==0x11223344 && MEM32(0x15008)==0x55667788);
+    }
+    for(unsigned level=0;level<2;++level) {
+        gpu_lle.field(gpu_lle.device,level);
+        uint32_t args[]={0,15,0,0x15004},result=0;
+        // No host tick between driving this external pin and sampling it.
+        CHECK(!pilot_io_device_lle(2,memory,args,&result));
+        CHECK(MEM32(0x15004)==(level^1));
+    }
+#ifdef PILOT_GPU_FILES_WORKER
+    // Establish actual control state through SMBus, rather than pretending a
+    // RAM snapshot contains encoder state. This setup is fixture-only.
+    gpu_test_encoder_write(0x6c,0x46);
+    const uint8_t expected[]={0xf5,0x89,0x92,0x9b,0x80,0x80};
+    for(unsigned filter=0;filter<6;++filter) {
+        gpu_test_encoder_write(0xc8,0xb5);gpu_test_encoder_write(0x34,0x80);
+        uint32_t args[]={0,11,filter,0};call_kernel(2,args,4);
+        CHECK(gpu_test_smb_port(0xc000,0,0)==0 && pilot_usb_pic_vector(0)<0);
+        CHECK(gpu_test_encoder_read(0xc8)==expected[filter]);
+        CHECK(gpu_test_encoder_read(0x34)==((filter==0 || filter==5)?0x80:0));
+        CHECK(pilot_usb_pic_vector(0)<0); // original ISR cleared device status/EOI
+    }
+    for(unsigned soften=0;soften<2;++soften) {
+        gpu_test_encoder_write(0x96,0xcd);
+        uint32_t args[]={0,14,soften,0};call_kernel(2,args,4);
+        CHECK(gpu_test_smb_port(0xc000,0,0)==0 && pilot_usb_pic_vector(0)<0);
+        CHECK(gpu_test_encoder_read(0x96)==(soften?0x1d:0x0d));
+        CHECK(pilot_usb_pic_vector(0)<0);
+    }
+#endif
+}
 static void test_gpu_lle_transport(void)
 {
     install_fault_handler();
+#ifdef PILOT_GPU_FILES_WORKER
+    // Same captured original worker setup as the actual title: original
+    // priority/critical-region calls keep unrelated boot workers suspended.
+    CHECK(!pilot_io_device_files(memory));
+#endif
     uint32_t query[]={UINT32_MAX,0x15000};MEM32(0x15000)=0xcdcdcdcd;
     call_kernel(168,query,2);uint32_t top=g_eax;
     CHECK(top==0x83ff0000 && MEM32(0x15000)==0x10000);
@@ -18,6 +85,7 @@ static void test_gpu_lle_transport(void)
     call_kernel(168,query,2);CHECK(g_eax==top && MEM32(0x15000)==0x10000);
     for(unsigned lifetime=0;lifetime<3;++lifetime) {
         gpu_lle_open();
+        gpu_test_av();
         uint32_t bootstrap_va=0x80000000u,bootstrap_pa=UINT32_MAX;
         CHECK(!pilot_io_device_lle(173,memory,&bootstrap_va,&bootstrap_pa) && bootstrap_pa==0);
         if(lifetime)CHECK(MEM32(bootstrap_va)==0xdeadbeef); // console lifetime, not GPU lifetime
@@ -87,6 +155,7 @@ static void test_gpu_lle_transport(void)
         /* This fixture has consumed its entire FIFO, no connected ISR and no
          * enabled interrupt. It does not claim general title teardown proof. */
         gpu_lle.destroy(gpu_lle.device);gpu_lle.device=NULL;
+        CHECK(!pilot_io_device_mmio_bind(0,0,NULL));
         pilot_io_device_port_bind(0,0,NULL);
         CHECK(FreeLibrary(gpu_lle.library));gpu_lle.library=NULL;
     }
