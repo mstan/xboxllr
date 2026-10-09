@@ -9,6 +9,74 @@ The audio LLE floor still needs remaining envelope curves/filtering, GP transpor
 whole-driver integration before it is a qualified selectable title backend. Existing
 audible HLE output does not remove that requirement.
 
+## Finite-buffer processing and original completion - 2026-10-09
+
+The current hash-bound native audio bindings expose DirectSound buffers and
+effects, with no stream-object API. Original nonspatial initialization uses
+`DATA_TYPE=buffer`; movie audio also rewrites real buffer storage. This makes
+finite-buffer completion a more immediate integration step than SSL breadth.
+SSL remains required wherever reached; it has not been waived for the console
+or later titles.
+
+`McpxApu::process_2d_voice` now connects real SGE source consumption, persistent
+rate conversion, bounded envelopes and final 2D sends to static retirement.
+The admitted original ordinary defaults are filter bypass and format headroom
+7. Unknown filter/headroom, spatial, linked, multipass, SSL and phase-inversion
+modes fail explicitly before source consumption. Pause/lock/inactive voices
+remain stationary. Final samples reach the actual 32-bin destination before
+ACTIVE clears, the real status byte changes and notification IRQ is raised.
+Natural retirement does not invent a `VOICE_OFF` method or pad the destination.
+
+**Timing scope:** this nominal reference retires after the converter's actual
+finite output is drained, at a 32-sample processing boundary. Detecting drain
+can take a final zero-output call. Pinned xemu retires while fetching the last
+source samples; it does not establish our chosen drain/IRQ latency as silicon
+behavior. Exact prefetch, interpolation and completion phase remain explicit
+unqualified timing questions, deferred behind offline work. This batch proves
+finite data/ownership and observable eventual completion, not sample-exact IRQ
+timing, downstream GP drain, all-voice scheduling or complete title audio.
+
+Validation connects independent original and native observations:
+
+- Root `apu_completion`: **72 PCM/ADPCM mono/stereo finite cases**, 1..129
+  source frames at half/unity/double rate. Exact nominal frame counts, final
+  CBO, state/status/IRQ ordering, untouched unused output, no repeated
+  completion, looping/pause/lock and unsupported-stage guards pass.
+- Original control fixture `--kernel ... --natural`: **eight complete original
+  initialization/start cases** consume 128 real samples and retire without a
+  command-stop. The actual inactive-frame trap precedes original unlink worker
+  `0x178d7c`; original derived consumer `0x17a34b` reads and resets the
+  software completion record published by that worker. Stack/callee-saved
+  registers and real guest/device list ownership are checked. No callee or
+  result is substituted. Full ISR/DPC dispatch remains to be connected, and
+  notifier payload accesses remain guarded to the qualified status byte.
+- Native `pilot_audio_completion_lle`: **six actual XAudio2 captures**, mono/
+  stereo at 24/48/96 kHz with 1,057 finite source frames and a distinctive
+  final 32-frame tail. Integrated per-channel output agrees within three peak
+  sample-frames plus 0.2% of LLE integrated output. Maximum measured area
+  difference was 0.386 normalized sample-frames. Both outputs retain the tail;
+  native status stops, unused bins stay silent, and a subsequent capture
+  contains no repeated audio. Different finite-edge interpolation is permitted;
+  this is not a waveform-exact comparison or host-time completion simulation.
+
+Both maintained-machine and native builds succeed. Maintained APU tests:
+**7/7 in 0.27s**; complete native/contract suite: **56/56 in 37.06s**. Earlier
+original configuration/source/command-stop/settings fixtures also pass.
+Reference DLL SHA-256:
+`faed837429f0f553dedcb843d5a21dcb45ac1aca5e47f7f22c1b6d32b9a3c5d5`.
+Evidence: `build/blinx/audio-completion-{configuration,source,stop,control,detach}-original.aot-private.json`
+and `audio-completion-{machine-build,root-tests,full-build,full-tests}.log`.
+The rebuilt native title SHA-256 is
+`76ff2a4e836246508dac2992a77972aa552cfb8ff8ceb87950196530ff12f730`.
+Fresh native regression `audio-completion-floor-attract` ran **190.578s**;
+all **18 captures** were inspected: movie/title progression, demo gameplay,
+Start interruption/loading, title return and demo reentry. Both scheduled
+Start press/release pairs were delivered, with no logged STOP or audio fault.
+The harness terminated the still-live process at its time limit; return code 1
+is not a crash. This protects native playback and is not whole-title LLE audio,
+cadence or endurance qualification. The stable private game pin stays unchanged.
+The full family remains open: **4/9**. No new donor bodies or licenses are added.
+
 ## Original static-buffer stop and unlink - 2026-10-09
 
 `McpxApu::voice_off` now implements the bounded ordinary-buffer stop route.
@@ -61,8 +129,8 @@ run, new whole-title LLE audio qualification or family closure is claimed.
 Evidence: `build/blinx/audio-stop-{configuration,source,control,detach}-original.aot-private.json`
 and `audio-stop-{machine-build,native-build,full-tests,final-native-build}.log`.
 
-Next: actual SSL descriptor/source ownership and notification delivery, followed
-by the remaining processing and whole-driver integration. `.88` and `.113`
+The next integration step was updated by the reachability audit above:
+finite-buffer processing/completion precedes SSL breadth. `.88` and `.113`
 remain open; **4/9** families remain qualified. Hardware-only questions stay last.
 
 ## Current GP memory/DMA batch and deferred question - 2026-10-09
@@ -527,10 +595,12 @@ needed, remain at the end of the burndown. Their necessity is not established.
 
 ## Remaining work, in order
 
-1. Complete original control ownership, SSL descriptor/source consumption and
-   notification delivery, stop/restart and pipeline timing. Retain the qualified
-   static-stop route above while completing stream ownership. Unknown payload
-   fields remain explicit; do not block known offline source/control work on them.
+1. Connect the remaining original control/ISR/DPC ownership to the real
+   finite-buffer processing and stop/restart route. Preserve the new natural
+   completion and command-stop evidence. Unknown notifier payload fields stay
+   explicit; do not block known offline source/control work on them. SSL
+   descriptor/source ownership remains open, behind the currently reached
+   buffer path rather than ahead of it.
 2. Complete the remaining voice-processing path around the maintained source,
    rate/envelope quantum and final 2D send stages: remaining envelope curves, voice
    scaling and filtering, then connect the existing GP donor. Validate actual stream

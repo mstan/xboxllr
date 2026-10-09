@@ -1417,6 +1417,14 @@ instruction bytes are committed. xemu's provisional notifier payload write is
 not copied. No new GPL implementation body is incorporated; the existing
 private-pilot license limits remain. [Contract and evidence](pilots/native-title/AUDIO-LLE.md#original-static-buffer-stop-and-unlink---2026-10-09).
 
+The subsequent finite-buffer composition and original completion fixture reuse
+these references plus the already attributed dr_wav/libsamplerate components.
+Its source/rate/envelope/send wiring, output comparison and retirement adapter
+are authored here. Original unlink and completion routines are executed only
+from the owned private XBE. xemu's source-fetch retirement timing is explicitly
+distinguished from the nominal converter-drain model; neither is claimed as a
+new hardware timing observation. [Scope and tests](pilots/native-title/AUDIO-LLE.md#finite-buffer-processing-and-original-completion---2026-10-09).
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

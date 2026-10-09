@@ -118,3 +118,11 @@ EXPORT int xlle_apu_reference_quantum(void* instance,uint32_t voice,float* sampl
     bool last=false;const bool ok=ref.apu.source_envelope_quantum(static_cast<uint16_t>(voice),samples,*count,last);
     *ended=last;return ok;
 }
+EXPORT int xlle_apu_reference_process(void* instance,uint32_t voice,float* bins,uint32_t* count,int* completed) {
+    if(!instance)return 0;
+    auto& ref=*static_cast<Reference*>(instance);
+    if(!ref.failure.empty())return 0;
+    if(voice>0xffff || !count || !completed) {ref.failure="invalid APU processing transport shape";return 0;}
+    bool last=false;const bool ok=ref.apu.process_2d_voice(static_cast<uint16_t>(voice),bins,*count,last);
+    *completed=last;return ok;
+}

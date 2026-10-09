@@ -71,4 +71,31 @@ bool McpxApu::source_envelope_quantum(uint16_t voice,float* stereo,uint32_t& cou
     for(unsigned i=0;i<count*2;++i)stereo[i]*=envelope.amplitude;
     return true;
 }
+
+bool McpxApu::process_2d_voice(uint16_t voice,float* bins,uint32_t& count,bool& completed) {
+    count=0;completed=false;
+    if(faulted_)return false;
+    if(voice<64 || voice>=kMaxVoices || !bins) {
+        device_fault("invalid 2D processing voice/output");return false;
+    }
+    uint32_t state=0,format=0,misc=0,route=0;
+    if(!read_voice_word(voice,0x54,state) || !read_voice_word(voice,4,format) ||
+       !read_voice_word(voice,0x18,misc) || !read_voice_word(voice,0,route)) {
+        device_fault("2D processing configuration DMA failed");return false;
+    }
+    if(!(state&kVoiceActive) || (state&(1u<<18)) || voice_locked_[voice])return true;
+    // This executable composition covers the ordinary original 2D defaults.
+    // Other filter/headroom/spatial modes must acquire their real stages first.
+    if((misc&0x30000) || ((format>>13)&7)!=7 ||
+       (format&((1u<<21)|(1u<<22)|(1u<<24))) || (route&0x80008000)) {
+        device_fault("2D filter/headroom/owner mode remains unqualified");return false;
+    }
+    float samples[64];bool ended=false;
+    if(!source_envelope_quantum(voice,samples,count,ended))return false;
+    if(!mix_2d_samples(voice,samples,count,bins))return false;
+    // The real final samples reach the destination before its completion/IRQ.
+    // Never free buffered rate output merely because source DMA reached EBO.
+    if(ended) {if(!retire_buffer(voice))return false;completed=true;}
+    return true;
+}
 } // namespace xlle

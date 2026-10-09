@@ -4,9 +4,11 @@
 Explicit precondition: allocated mono/stereo voice, empty original owner list,
 DISPATCH_LEVEL, no spatial/output-buffer owner. Optional owned kernel enables
 complete original static-buffer stop, status polling and unlink-worker cases.
+With --natural, actual finite source processing retires the voice, followed by
+the complete original unlink and derived completion owners.
 No callee or return is replaced.
 The synchronous method model executes every admitted write before reporting free
-PIO capacity. This does not qualify interrupt/SSL/completion or the full driver.
+PIO capacity. This does not qualify full ISR dispatch/SSL or the full driver.
 """
 import argparse
 import ctypes as c
@@ -23,7 +25,8 @@ from unicorn.x86_const import (UC_X86_REG_EAX,UC_X86_REG_EBX,UC_X86_REG_ECX,UC_X
     UC_X86_REG_CS,UC_X86_REG_SS,UC_X86_REG_DS,UC_X86_REG_ES,UC_X86_REG_FS)
 
 
-def run(xbe,library,dependencies,kernel=None):
+def run(xbe,library,dependencies,kernel=None,natural=False):
+    assert not natural or kernel, 'natural completion requires the original kernel/driver owner'
     blob=xbe.read_bytes();assert hashlib.sha256(blob).hexdigest()==IMAGE
     dependency=os.add_dll_directory(str(dependencies.resolve())) if dependencies else None
     dll=c.CDLL(str(library.resolve()))
@@ -34,6 +37,7 @@ def run(xbe,library,dependencies,kernel=None):
     dll.xlle_apu_reference_read.argtypes=[c.c_void_p,c.c_uint32,c.POINTER(c.c_uint32)]
     dll.xlle_apu_reference_quantum.argtypes=[c.c_void_p,c.c_uint32,c.POINTER(c.c_float),c.POINTER(c.c_uint32),c.POINTER(c.c_int)]
     dll.xlle_apu_reference_frame.argtypes=[c.c_void_p,c.c_uint64]
+    dll.xlle_apu_reference_process.argtypes=[c.c_void_p,c.c_uint32,c.POINTER(c.c_float),c.POINTER(c.c_uint32),c.POINTER(c.c_int)]
     cpu=Uc(UC_ARCH_X86,UC_MODE_32);cpu.mem_map(0x10000,0x1000000);cpu.mem_map(0x30000000,0x10000)
     cpu.mem_map(0xfe800000,0x80000);cpu.mem_map(0x31000000,0x10000)
     for section in parse_xbe(blob)['sections']:
@@ -104,7 +108,7 @@ def run(xbe,library,dependencies,kernel=None):
             assert call(0x179283,[0])==0 # original 2D filter defaults stay bypass
             voice=71;base=0x1000+voice*128
             cpu.mem_write(obj+0xc,struct.pack('<H',voice));cpu.mem_write(obj+0x12,b'\x01\x00')
-            put(obj+0x40,(amplitude<<28)|(filter_phase<<24));put(obj+0x14,get(obj+0x14)|(1<<25))
+            put(obj+0x40,(amplitude<<28)|(filter_phase<<24));put(obj+0x14,get(obj+0x14)|(0 if natural else 1<<25))
             put(obj+0x68,notifiers);put(obj+0x6c,4);cpu.mem_write(notifiers,b'\xa5'*64)
             owner=device+0x728;put(owner,owner);put(owner+4,owner)
             ram=(c.c_ubyte*0x10000)();instance=dll.xlle_apu_reference_create(ram,len(ram));assert instance
@@ -132,12 +136,12 @@ def run(xbe,library,dependencies,kernel=None):
                 ca=(0,16,0,32)[amplitude];cf=(0,48,0,64)[filter_phase]
                 assert word(base+0x34)==ca|(cf<<16)
                 samples=(c.c_float*64)();count=c.c_uint32();ended=c.c_int()
-                for _ in range(4):
+                for _ in range(0 if natural else 4):
                     assert dll.xlle_apu_reference_quantum(instance,voice,samples,c.byref(count),c.byref(ended)),dll.xlle_apu_reference_error(instance)
                     assert count.value==32 and not ended.value
-                if amplitude==0:
+                if amplitude==0 and not natural:
                     assert all(abs(samples[n*2+channel]-(0.25 if channels==2 and channel else 0.125))<0.00003 for n in range(32) for channel in (0,1))
-                elif amplitude==1:assert all(v==0 for v in samples)
+                elif amplitude==1 and not natural:assert all(v==0 for v in samples)
                 assert bytes(cpu.mem_read(notifiers,64))==record, 'source work cannot invent completed notifiers'
                 rows.append(dict(channels=channels,amplitude_start=amplitude,filter_start=filter_phase,
                                  commands=commands,counters_after_start=ca|(cf<<16),frames=128))
@@ -147,16 +151,28 @@ def run(xbe,library,dependencies,kernel=None):
                     notifier_accesses.clear()
                     assert call(0x179e0e,[0],obj+0x68)==0
                     before=bytes(ram[notify_physical:notify_physical+64]);state=word(base+0x54);cursor=word(base+0x58)
-                    write(0x1004,0x71);transactions.clear();call(0x179a44,[0])
+                    write(0x1004,0x71);transactions.clear()
+                    if natural:
+                        total=0;done=c.c_int();bins=(c.c_float*1024)()
+                        for quantum in range(32):
+                            c.memset(bins,0,c.sizeof(bins))
+                            assert dll.xlle_apu_reference_process(instance,voice,bins,c.byref(count),c.byref(done)),dll.xlle_apu_reference_error(instance)
+                            total+=count.value
+                            if done.value:break
+                            assert ram[notify_physical+15]==0x80 and word(base+0x54)&(1<<21)
+                        assert done.value and total==128
+                        cursor=word(base+0x58);assert cursor&0xffffff==127
+                    else:call(0x179a44,[0])
                     emitted=[(a,v) for op,a,v in transactions if op=='write']
-                    assert emitted==[(0xfe8202f8,voice),(0xfe820304,get(obj+0x14)),(0xfe820128,voice)]
-                    assert word(base+0x54)==state&~(1<<21) and word(base+0x58)==cursor
+                    assert emitted==([] if natural else [(0xfe8202f8,voice),(0xfe820304,get(obj+0x14)),(0xfe820128,voice)])
+                    assert not word(base+0x54)&(1<<21) and word(base+0x58)==cursor
+                    if not natural:assert word(base+0x54)==state&~(1<<21)
                     expected=bytearray(before);expected[15]=1
                     assert bytes(ram[notify_physical:notify_physical+64])==expected
                     assert call(0x179e0e,[0],obj+0x68)==1
                     assert all(call(0x179e0e,[i],obj+0x68)==0 for i in (1,2,3))
-                    assert int.from_bytes(cpu.mem_read(obj+0x80,8),'little')==clock
-                    assert int.from_bytes(cpu.mem_read(obj+0x12,2),'little')==0x8001
+                    if not natural:assert int.from_bytes(cpu.mem_read(obj+0x80,8),'little')==clock
+                    assert int.from_bytes(cpu.mem_read(obj+0x12,2),'little')==(3 if natural else 0x8001)
                     assert get(device+0x324)==0
                     count.value=99;assert dll.xlle_apu_reference_quantum(instance,voice,samples,c.byref(count),c.byref(ended))
                     assert count.value==0 and word(base+0x58)==cursor
@@ -169,6 +185,13 @@ def run(xbe,library,dependencies,kernel=None):
                     assert dll.xlle_apu_reference_read(instance,0xfe801304,c.byref(result)) and result.value==voice
                     put(0x17df28,0x31000000);call(0x178d7c,[0])
                     assert get(owner)==owner and get(owner+4)==owner
+                    if natural:
+                        # Original unlink publishes its own software notifier D;
+                        # the original derived completion consumer retires it.
+                        assert ram[notify_physical+63]==1
+                        assert call(0x17a34b,[])==1
+                        assert ram[notify_physical+63]==0x80
+                        assert int.from_bytes(cpu.mem_read(obj+0x80,8),'little')==clock
                     assert int.from_bytes(cpu.mem_read(obj+0x12,2),'little')==1
                     assert cpu.mem_read(obj+0x65,1)==b'\xff'
                     assert word(base+0x7c)&0xffff==voice
@@ -178,17 +201,18 @@ def run(xbe,library,dependencies,kernel=None):
                     assert dll.xlle_apu_reference_read(instance,0xfe801000,c.byref(result)) and result.value==0
                     assert notifier_accesses and all(a%16==15 and n==1 for op,a,n in notifier_accesses)
                     stops.append(dict(channels=channels,amplitude_start=amplitude,filter_start=filter_phase,
-                                      emitted=emitted,cursor=cursor,notifier_accesses=notifier_accesses.copy(),
+                                      natural=natural,emitted=emitted,cursor=cursor,notifier_accesses=notifier_accesses.copy(),
                                       completion='actual static-buffer status A, real inactive-frame trap, complete original unlink worker'))
             finally:dll.xlle_apu_reference_destroy(instance);instance=None
     if dependency:dependency.close()
     return dict(xbe_sha256=IMAGE,kernel_sha256=kernel_hash,library_sha256=hashlib.sha256(library.read_bytes()).hexdigest(),cases=rows,stop_cases=stops,
-                scope='whole original nonspatial init/filter-default/start; with kernel, complete static stop and unlink owners on actual device state; allocated voice, coherent clock input and synchronous PIO preconditions; no full ISR dispatch/SSL/notifier-payload/title qualification')
+                scope='whole original nonspatial init/filter-default/start; with kernel, complete static stop and unlink owners on actual device state; natural mode composes finite source/rate/envelope/send retirement and original completion consumer; allocated voice, coherent clock input and synchronous PIO preconditions; no full ISR dispatch/SSL/notifier-payload/title qualification')
 
 
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__)
     for arg in ('xbe','library','output'):p.add_argument('--'+arg,type=Path,required=True)
-    p.add_argument('--dependencies',type=Path);p.add_argument('--kernel',type=Path);args=p.parse_args()
-    result=run(args.xbe,args.library,args.dependencies,args.kernel);args.output.write_text(json.dumps(result,indent=2)+'\n')
-    print(f"PASS: {len(result['cases'])} whole original init/filter-default/start owners; {len(result['stop_cases'])} original stop/status/unlink cases on actual device state")
+    p.add_argument('--dependencies',type=Path);p.add_argument('--kernel',type=Path);p.add_argument('--natural',action='store_true');args=p.parse_args()
+    result=run(args.xbe,args.library,args.dependencies,args.kernel,args.natural);args.output.write_text(json.dumps(result,indent=2)+'\n')
+    mode='natural retirement/unlink/completion' if args.natural else 'command-stop/status/unlink'
+    print(f"PASS: {len(result['cases'])} whole original init/filter-default/start owners; {len(result['stop_cases'])} original {mode} cases on actual device state")

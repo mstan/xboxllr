@@ -138,6 +138,10 @@ public:
     // Compose source, rate and amplitude envelopes only. Filtering, voice
     // headroom, final sends, GP and completion remain subsequent stages.
     bool source_envelope_quantum(uint16_t voice,float* stereo,uint32_t& count,bool& ended);
+    // One real pre-GP voice quantum: source/rate/envelopes, bypass-filter path,
+    // final sends and finite-buffer retirement. Accumulates into 32 planar bins.
+    // The returned count owns actual output; no padding or GP output is supplied.
+    bool process_2d_voice(uint16_t voice,float* bins,uint32_t& count,bool& completed);
 
     // Stable GP RAM banks for the build-selected DSP core. Encoded addresses:
     // X, mix, Y+0x1800, P+0x2800. Unknown banks have no storage/default value.
@@ -474,17 +478,17 @@ private:
         ++voice_on_methods_;
     }
 
-    void voice_off(uint32_t voice) {
+    bool retire_buffer(uint32_t voice) {
         if (voice >= kMaxVoices) {
             device_fault("VOICE_OFF handle out of range");
-            return;
+            return false;
         }
         uint32_t state=0,format=0;
         if(!read_voice_word(voice,kVoiceState,state) || !read_voice_word(voice,4,format)) {
-            device_fault("VOICE_OFF state DMA failed");return;
+            device_fault("VOICE_OFF state DMA failed");return false;
         }
         if(format&((1u<<21)|(1u<<22)|(1u<<24))) {
-            device_fault("VOICE_OFF stream/linked/multipass ownership remains unqualified");return;
+            device_fault("VOICE_OFF stream/linked/multipass ownership remains unqualified");return false;
         }
         // Original static-buffer completion observes record A's status byte.
         // Envelope/timestamp payload fields are outside this bounded route;
@@ -492,19 +496,22 @@ private:
         const uint64_t address=uint64_t(reg32(kFenaddr))+16ull*(2+voice*4)+15;
         uint8_t prior=0;
         if(address>UINT32_MAX || !read_mem(static_cast<uint32_t>(address),&prior,1)) {
-            device_fault("VOICE_OFF notifier address DMA failed");return;
+            device_fault("VOICE_OFF notifier address DMA failed");return false;
         }
         if(!write_voice_word(voice,kVoiceState,state&~kVoiceActive)) {
-            device_fault("VOICE_OFF state write failed");return;
+            device_fault("VOICE_OFF state write failed");return false;
         }
         voice_rates_[voice].reset();
         const uint8_t done=1;
         if(!write_mem(static_cast<uint32_t>(address),&done,1)) {
-            device_fault("VOICE_OFF notifier status write failed");return;
+            device_fault("VOICE_OFF notifier status write failed");return false;
         }
-        ++voice_off_methods_;
         set_reg32(kIsts,reg32(kIsts)|kIstsFen|kIstsFev);
         update_irq();
+        return true;
+    }
+    void voice_off(uint32_t voice) {
+        if(retire_buffer(voice))++voice_off_methods_;
     }
 
     void emit_idle_voice(uint16_t voice) {
