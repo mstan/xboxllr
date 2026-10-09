@@ -1111,3 +1111,36 @@ events, the unresolved FD6806A0 transaction, then actual title startup and
 remaining graphics/context/callback/resource qualification. No new hardware
 contact, xemu runtime comparison or donor implementation body was used.
 Family count remains **4/9**; stable game pin `439a45b` is unchanged.
+
+### Board clock/sync connection: resolved topology, remaining implementation
+
+[Xbox Hardware Design Specification 1.02](https://consolemods.org/wiki/images/a/ae/Xbox_Hardware_Design_Specification_1.02.pdf)
+sections 2.4.1.5 and 2.8.1 explicitly identify the signal directions: the
+encoder supplies PIXCLK to the GPU, while the GPU supplies HSYNC/VSYNC back
+to the encoder. Consequently the next board connection must use the encoder's
+enabled CLKO rate as the external pixel source and derive sync events from
+the programmed GPU display generator. Core-clock/VPLL arithmetic or a fixed
+60-Hz FIELD toggle cannot establish this route.
+
+The existing private original-boot write journal narrows the generator to
+investigate. At 24 million instructions, it records FP_HTOTAL=00000307 and
+FP_VTOTAL=0000020C, corresponding to 776 clocks by 525 lines. These match the
+encoder input totals in the later paired encoder journal. The VGA CRTC bytes
+instead describe a 728-clock horizontal total. Do not feed a conventional VGA
+counter directly into the encoder on the assumption that both totals match.
+This is evidence of original programming and a routing question, not proof of
+the model's hardware behavior or permission to install journal state.
+
+Pinned envytools `rnndb/display/nv3_pramdac.xml` identifies the FP total/sync
+registers, PLL_CONTROL's TV_PCLK bit and FP clock power-down. The original
+routine programs PLL_CONTROL=10020000 and FP_TG_CONTROL=10100111, later changes
+FP_DEBUG_0, then resets encoder timing. Active versus programmed timing,
+the unknown FD6806A0 commit/acknowledgment transaction, clock gating and the
+phase of the first real sync after reset must therefore be qualified together.
+The current aligned-sync fixture must not silently reset GPU phase to make
+this sequence pass. Next is that bounded digital output/control family; analog
+waveform generation is not established by these register facts.
+
+No hardware was contacted. The probe repository was inspected only; its
+current-task authorization requirements remain in force if a silicon experiment
+is eventually needed. No new probe code or protocol was deployed or added.

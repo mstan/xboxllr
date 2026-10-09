@@ -1136,6 +1136,14 @@ a further display-timing reference lead. No pictured implementation or tables
 were copied, no proprietary source was obtained, and the article does not
 qualify the unresolved FD6806A0 handshake.
 
+The follow-up board-clock audit uses Xbox Hardware Design Specification 1.02
+sections 2.4.1.5 and 2.8.1 for encoder-to-GPU PIXCLK and GPU-to-encoder sync
+direction, plus the already pinned envytools `rnndb/display/nv3_pramdac.xml`
+for FP timing/control register names and fields. Existing private original-boot
+write records supply exercised values only. No new implementation is imported;
+these facts do not qualify active timing-bank selection or the undocumented
+FD6806A0 transaction. Public documents and private captures are not redistributed.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),
