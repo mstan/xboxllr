@@ -295,10 +295,10 @@ static DWORD WINAPI title_thread(void *argument)
     MEM32(base+0x1c)=base;
     MEM32(base+0x20)=base+0x28;
     MEM32(base+0x28)=base+0x1000;
-    MEM32(base+0x1000+0x28)=tls;
+    MEM32(base+0x1000+0x28)=thread->tls_size?tls:0;
     MEM32(base+0x1000+0x12c)=thread->tid;
     uint32_t directory=file32(0x12c);
-    if (directory) {
+    if (directory && thread->tls_size) {
         uint32_t start=MEM32(directory),end=MEM32(directory+4);
         if (end<start || end-start>thread->tls_size) stop("thread TLS template does not fit",directory);
         memcpy(memory+tls,memory+start,end-start);
@@ -343,7 +343,7 @@ static void create_thread(void)
     if (!thread->handle) { --thread_count; ReleaseSRWLockExclusive(&thread_lock); g_eax=0xc000009au; return; }
     thread->tid=tid;
     scheduler_publish(slot,thread->suspend_count,thread->priority);
-    MEM32(thread->object+0x28)=context_base+0x100000u-thread->tls_size;
+    MEM32(thread->object+0x28)=thread->tls_size?context_base+0x100000u-thread->tls_size:0;
     MEM32(thread->object+0x12c)=tid;
     MEM32(args[0])=0x40000000u+slot;
     if (args[4]) MEM32(args[4])=tid;
@@ -636,6 +636,9 @@ static void kernel_dispatch_impl(void)
 #endif
 static void kernel_dispatch(void)
 {
+#ifdef PILOT_USB_LLE
+    if(original_thread_exit.active){original_thread_kernel_dispatch();return;}
+#endif
     int blocked=scheduler_kernel_blocks(next_kernel_ordinal)?scheduler_block_begin():0;
     kernel_dispatch_impl();
     scheduler_block_end(blocked);

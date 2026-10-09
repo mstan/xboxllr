@@ -286,17 +286,93 @@ ownership rules coherently, alongside original thread execution, rather than
 letting two schedulers mutate the same queues. This is offline integration work;
 it does not depend on GPU startup or new real-console evidence.
 
+## Original thread to native body handoff - 2026-10-09
+
+The shared bridge now executes original PsCreateSystemThread/Ex, initial
+suspension/resumption, ready selection, context switch, exit, join and object
+cleanup while invoking the created thread's generated native body. Admission
+checks the successful original creation, current original ETHREAD, arguments,
+IRQL/flags and the two hash-bound original entry call sites. Both start forms
+are exercised: a one-argument start returning to the original system wrapper,
+and a two-argument SystemRoutine calling original PsTerminateSystemThread.
+
+The native body uses the original stack, TLS, PCR and thread extension through
+shared physical backing. The bridge retains an actual original object reference
+and retires publication ownership after original termination and final handle/
+reference release. A native termination request unwinds its host callback, then
+resumes the actual kernel termination routine on the original stack; it never
+terminates the host thread carrying the blocked original join.
+
+`pilot_thread_lle` passes **72 lifecycles**, exceeding the bridge's 64 concurrent
+ownership slots to check reuse. Cases cover both ABIs, zero/64/8,192-byte TLS,
+default/explicit stacks, a writable thread extension, nested suspend counts,
+close-before/after-join, explicit object references, exit status, native caller
+register/FP restoration and original stack decommit. Original thread/handle
+statistics return to baseline after every lifecycle. This is bounded lifetime
+evidence, not general host or guest memory endurance.
+
+`pilot_thread_lle_blocked` verifies that an unsupported blocking native callback
+fails without writing a success result or completing the waiting original call.
+The independent `tools/native_thread_reference.py` executes **12 lifecycles**
+with authored x86 bodies, observing the same start ABI, TLS/stack, suspension,
+exit, cleanup and statistics without the C callback transport. Neither fixture
+replaces any original thread or scheduler implementation.
+
+```powershell
+$env:PYTHONPATH='build/reference-python;tools'
+py -3 tools/native_thread_reference.py --snapshot build/blinx/io-boot-18m.ram.bin --library build/visibility-lle/libxlle_storage_reference.dll --dependencies C:/msys64/mingw64/bin --image build/blinx/files-lle-installed-hdd-v3.img --output build/blinx/thread-native-original.aot-private.json
+```
+
+This evidence found a concrete HLE mismatch: zero TLS size must publish a null
+KTHREAD.TlsData, including before the suspended worker starts. The native
+runtime now does so, while retaining its real host thread and stack. The native
+thread test verifies that value both before start and inside the generated body.
+The combined suite passes **50/50 in 20.57s**; logs are
+`build/blinx/thread-native-{bridge-build,full-tests}.log`.
+Final termination-frame bounds tightening passes both original thread checks
+again in 0.19s; it affects the component route, not the title's selected backend.
+
+The rebuilt mixed title ran **190.125s**, producing 18 captures with no
+stop/audio-stop/fault. Both replayed Start presses/releases were delivered;
+the images show gameplay, interruption/loading, title return and another demo.
+The harness terminated the live process at its time bound; this is not a
+natural-exit, cadence or long-run resource-stability qualification. Evidence:
+`build/blinx/scheduling-thread-attract/{run.aot-private.json,contact.png}` and
+`build/blinx/run-scheduling-thread-attract.log`. Title SHA-256:
+`77023b73fb7559d33d9289200b2de7f46d12839fe170f05e9783711371cc9094`.
+The title still uses native scheduling. This run regresses the shared bridge
+and null-TLS correction; it does not claim title-wide original thread selection.
+
+Phobos `kernel_thread.c` at the existing `bcccf8c` pin was reviewed again. Its
+host wrapper is useful for native execution, but ignores TLS/extension size and
+the second start context. Those omissions cannot implement this original
+contract; our existing HLE already carries both contexts. No new donor body is
+imported. The original-kernel route reuses the established device/Unicorn bridge.
+
+This remains a component qualification. Creation currently requires the
+priority-31 reference caller, with priority-30 workers, to exclude unrelated
+captured boot workers. Native bodies can make the supported nonblocking original
+observations and terminate. Cross-thread blocking/native continuations, full
+initial FP/NPX state, general preemption/contention and title-wide static selection
+remain open. No HLE fallback or second scheduler completes an unsupported call.
+The native runtime also still uses a cumulative 63-thread creation budget;
+unlike the original lifecycle, closing/joining does not reclaim native slots.
+Correct native reuse and its memory/scheduler ownership need a separate bounded
+follow-up before claiming the whole family contract. Hardware is not needed
+for either follow-up.
+
 ## Next offline work
 
 Use the now-executable original expiry/wakeup and native DPC callback routes to
 integrate original thread execution and static timer/DPC selection with coherent
 wait ownership. Qualify remaining priority, contention and suspend/resume cases.
-Start with one original thread/native body handoff using the existing bridge
-and worker fixture. The synchronous service bridge currently supports nested
-callbacks, not non-LIFO returns between blocked native threads. Establish real
-thread identity, original stack and return-boundary ownership before enabling
-title-wide selection; do not add a second scheduler that guesses the original
-kernel's choice. Reuse compatible Phobos thread transport where it fits.
+The first original thread/native body handoff now works with actual original
+identity, stack, TLS and cleanup. Continue with return ownership between blocked
+native bodies: the synchronous service bridge currently supports nested
+callbacks, not non-LIFO returns between blocked native threads. Preserve the
+original kernel's actual selection; do not add a second scheduler that guesses
+its choice. Correct the independently identified native slot-lifetime limit and
+qualify initial FP state. Reuse compatible Phobos transport where it fits.
 Retain the native implementation as the title's active scheduling backend until
 the original service route can perform those operations. Any genuinely
 silicon-only question is appended to the deferred end of the burndown; GPU

@@ -3,6 +3,10 @@ static volatile LONG scheduler_counter,scheduler_exit,scheduler_stage;
 static void test_scheduler_worker(void)
 {
     uint32_t mode=MEM32(g_esp+4);
+    if(mode==2) {
+        CHECK(!MEM32(MEM32(g_fs_base+0x28)+0x28));
+        InterlockedExchange(&scheduler_stage,3);return;
+    }
     if(mode) {
         InterlockedExchange(&scheduler_stage,1);
         uint32_t sp=g_esp;g_esp-=12;
@@ -105,6 +109,14 @@ static void test_thread_objects(void)
     call_kernel(224,control,2);CHECK(!g_eax && MEM32(out)==1);scheduler_progress();CHECK(scheduler_stage==2);
     InterlockedExchange(&scheduler_exit,1);CHECK(WaitForSingleObject(host,2000)==WAIT_OBJECT_0);
     MEM32(out)=0xfeedface;call_kernel(231,control,2);CHECK(g_eax==0xc000004bu && MEM32(out)==0xfeedface);
+    call_kernel(187,control,1);CHECK(!g_eax);
+    /* Original PsCreateSystemThreadEx publishes NULL TlsData for size zero,
+     * both before start and in the actual generated body. */
+    args[3]=0;args[5]=2;args[7]=1;call_kernel(255,args,10);CHECK(!g_eax);
+    CHECK(!MEM32(threads[3].object+0x28));
+    control[0]=MEM32(0x19000);host=threads[3].handle;
+    call_kernel(224,control,2);CHECK(!g_eax && MEM32(out)==1);
+    CHECK(WaitForSingleObject(host,2000)==WAIT_OBJECT_0 && scheduler_stage==3);
     call_kernel(187,control,1);CHECK(!g_eax);
     CHECK(GetThreadGroupAffinity(GetCurrentThread(),&worker_affinity) && worker_affinity.Mask==caller_affinity.Mask &&
           worker_affinity.Group==caller_affinity.Group);guest_cpu_enabled=0;

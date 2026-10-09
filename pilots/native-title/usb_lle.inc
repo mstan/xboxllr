@@ -7,12 +7,18 @@
 static INIT_ONCE usb_once=INIT_ONCE_STATIC_INIT;
 static uint8_t usb_dma_leases[256];
 static uint64_t usb_isr_count;
-static const char *usb_original_callback(uint32_t entry,uint32_t regs[8],int is_dpc)
+static RECOMP_TLS struct OriginalThreadExit {
+    jmp_buf target;
+    uint32_t status;
+    int active;
+} original_thread_exit;
+static const char *usb_original_callback(uint32_t entry,uint32_t regs[8],int is_dpc,
+    unsigned thread_arguments,int *terminate,uint32_t *exit_status)
 {
     recomp_func_t routine=recomp_lookup(entry);
     if(!routine)return "original kernel callback has no AOT binding";
     if(++usb_isr_count<=4)
-        fprintf(stderr,"[%s] call=%llu entry=%08x irql=%u\n",is_dpc?"KERNEL LLE DPC":"USB LLE ISR",
+        fprintf(stderr,"[%s] call=%llu entry=%08x irql=%u\n",thread_arguments?"KERNEL LLE THREAD":is_dpc?"KERNEL LLE DPC":"USB LLE ISR",
                 (unsigned long long)usb_isr_count,entry,pilot_io_device_irql());
     uint32_t saved[]={g_eax,g_ecx,g_edx,g_ebx,g_esp,g_ebp,g_esi,g_edi,
         next_kernel_ordinal,g_icall_saved_esp,g_icall_dispatch_form,g_seh_ebp};
@@ -21,6 +27,7 @@ static const char *usb_original_callback(uint32_t entry,uint32_t regs[8],int is_
     uint16_t fp_control=g_fp_control_word,fp_cc=g_fp_cc;
     RecompXmm xmm[]={g_xmm0,g_xmm1,g_xmm2,g_xmm3,g_xmm4,g_xmm5,g_xmm6,g_xmm7};
     RecompMmx mm[]={g_mm0,g_mm1,g_mm2,g_mm3,g_mm4,g_mm5,g_mm6,g_mm7};
+    uint32_t saved_fs=g_fs_base;
     uint8_t irql=g_fs_base?MEM8(g_fs_base+0x24):0;
     int saved_if=cpu_interrupt_flag,saved_shadow=cpu_interrupt_shadow;
     int saved_in_dpc=dispatch_in_dpc;
@@ -29,13 +36,25 @@ static const char *usb_original_callback(uint32_t entry,uint32_t regs[8],int is_
     cpu_interrupt_flag=1;cpu_interrupt_shadow=0;pilot_io_device_set_if(1);
     g_eax=regs[0];g_ecx=regs[1];g_edx=regs[2];g_ebx=regs[3];
     g_esp=regs[4];g_ebp=regs[5];g_esi=regs[6];g_edi=regs[7];
+    if(thread_arguments)g_fs_base=0x8003da3cu;
     g_df=0; /* The original interrupt thunk executed CLD. */
     if(g_fs_base)MEM8(g_fs_base+0x24)=(uint8_t)pilot_io_device_irql();
     if(is_dpc)dispatch_in_dpc=1;
-    ++usb_in_interrupt;routine();--usb_in_interrupt;
+    ++usb_in_interrupt;
+    if(thread_arguments) {
+        if(original_thread_exit.active)stop("nested original native thread continuation",entry);
+        original_thread_exit.active=1;
+        if(!setjmp(original_thread_exit.target))routine();
+        else {*terminate=1;*exit_status=original_thread_exit.status;}
+        original_thread_exit.active=0;
+    } else routine();
+    --usb_in_interrupt;
     dispatch_in_dpc=saved_in_dpc;
     if(usb_isr_count<=4)fprintf(stderr,"[MACHINE CALLBACK RETURN] entry=%08x dpc=%d context=%08x\n",entry,is_dpc,MEM32(regs[4]+8));
-    if(g_esp!=regs[4]+(is_dpc?20:12))stop("original callback stdcall imbalance",entry);
+    if(!(thread_arguments && *terminate) && g_esp!=regs[4]+(thread_arguments?(thread_arguments+1)*4:(is_dpc?20:12)))
+        stop("original callback stdcall imbalance",entry);
+    if(thread_arguments && !*terminate && (g_ebx!=regs[3] || g_ebp!=regs[5] || g_esi!=regs[6] || g_edi!=regs[7]))
+        stop("original thread callback preserved register changed",entry);
     regs[0]=g_eax;regs[1]=g_ecx;regs[2]=g_edx;regs[3]=g_ebx;
     regs[4]=g_esp;regs[5]=g_ebp;regs[6]=g_esi;regs[7]=g_edi;
     g_eax=saved[0];g_ecx=saved[1];g_edx=saved[2];g_ebx=saved[3];
@@ -48,14 +67,35 @@ static const char *usb_original_callback(uint32_t entry,uint32_t regs[8],int is_
     g_xmm4=xmm[4];g_xmm5=xmm[5];g_xmm6=xmm[6];g_xmm7=xmm[7];
     g_mm0=mm[0];g_mm1=mm[1];g_mm2=mm[2];g_mm3=mm[3];
     g_mm4=mm[4];g_mm5=mm[5];g_mm6=mm[6];g_mm7=mm[7];
+    g_fs_base=saved_fs;
     if(g_fs_base)MEM8(g_fs_base+0x24)=irql;
     cpu_interrupt_flag=saved_if;cpu_interrupt_shadow=saved_shadow;pilot_io_device_set_if(saved_if);
     return NULL;
 }
 static const char *usb_original_isr(uint32_t entry,uint32_t regs[8])
-{return usb_original_callback(entry,regs,0);}
+{return usb_original_callback(entry,regs,0,0,NULL,NULL);}
 static const char *usb_original_dpc(uint32_t entry,uint32_t regs[8])
-{return usb_original_callback(entry,regs,1);}
+{return usb_original_callback(entry,regs,1,0,NULL,NULL);}
+static const char *usb_original_thread(uint32_t entry,uint32_t regs[8],unsigned arguments,
+    int *terminate,uint32_t *status)
+{return usb_original_callback(entry,regs,0,arguments,terminate,status);}
+static void original_thread_kernel_dispatch(void)
+{
+    if(next_kernel_ordinal==258) {
+        original_thread_exit.status=MEM32(g_esp+4);
+        longjmp(original_thread_exit.target,1);
+    }
+    unsigned count;
+    switch(next_kernel_ordinal) {
+    case 121:count=0;break;
+    case 128:case 256:count=1;break;
+    default:stop("original thread native service needs continuation integration",next_kernel_ordinal);
+    }
+    uint32_t args[1]={count?MEM32(g_esp+4):0},result;
+    const char *error=pilot_io_device_lle(next_kernel_ordinal,memory,args,&result);
+    if(error)stop(error,next_kernel_ordinal);
+    g_eax=result;g_esp+=(count+1)*4;
+}
 static void usb_poll(void)
 {
     if(usb_in_interrupt)return;
@@ -143,6 +183,7 @@ static BOOL CALLBACK usb_start(PINIT_ONCE once,void *parameter,void **context)
     if(error)stop(error,0);
     pilot_io_device_isr_bind(usb_original_isr);
     pilot_io_device_dpc_bind(usb_original_dpc);
+    pilot_io_device_thread_bind(usb_original_thread);
     fprintf(stderr,"[USB LLE] shared OHCI/XID/PIC; original interrupt dispatch; owned DMA\n");
     return TRUE;
 }

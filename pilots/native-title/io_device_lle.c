@@ -249,6 +249,7 @@ static void interrupt(uc_engine *engine,uint32_t number,void *data)
     fprintf(stderr,"[IO DEVICE LLE INTERRUPT] vector=%u pc=%08x\n",number,pc);
     forbidden(engine,"device LLE unmodelled interrupt");
 }
+#include "io_thread_lle.inc"
 static void code_block(uc_engine *engine,uint64_t address,uint32_t size,void *data)
 {
     (void)size;(void)data;
@@ -279,6 +280,7 @@ static void code_block(uc_engine *engine,uint64_t address,uint32_t size,void *da
             pending_callback=(uint32_t)address;pending_dpc=1;uc_emu_stop(engine);return;
         }
     }
+    if(thread_admit(engine,(uint32_t)address))return;
     uint32_t sp=0,frame[5]={0};uc_reg_read(engine,UC_X86_REG_ESP,&sp);
     uc_mem_read(engine,sp,frame,sizeof(frame));
     fprintf(stderr,"[IO CALLBACK GUARD] pc=%08x sp=%08x return=%08x object=%08x irql=%u active=%08x\n",
@@ -490,7 +492,7 @@ static void run_original(uint32_t entry,size_t instruction_limit)
      * run its generated body over shared bytes, then restore this CPU. A
      * nested original service has its own stack and saved engine context. */
     for(unsigned calls=0;calls<8192;++calls) {
-        pending_callback=0;pending_dpc=0;
+        pending_callback=0;pending_dpc=0;pending_thread=NULL;
 #ifdef PILOT_USB_LLE
         device_irq_pending=0;
 #endif
@@ -507,7 +509,8 @@ static void run_original(uint32_t entry,size_t instruction_limit)
 #endif
         if(!pending_callback)return;
         uint32_t routine=pending_callback,regs[8],return_pc;
-        int is_dpc=pending_dpc;
+        int is_dpc=pending_dpc,terminate=0;uint32_t exit_status=0;
+        struct OriginalThread *thread=pending_thread;
         for(unsigned i=0;i<8;++i)IO_UC(uc_reg_read(cpu,general_regs[i],regs+i));
         IO_UC(uc_mem_read(cpu,regs[4],&return_pc,4));
         if(is_dpc) {
@@ -523,15 +526,32 @@ static void run_original(uint32_t entry,size_t instruction_limit)
             }
             if(!dpc_stack_top){publish_range(top-0x3000u,0x3000u);if(failure)return;dpc_stack_top=top;}
         }
+        if(thread) {
+            uint32_t top=kernel_word(thread->object+0x1c),base=kernel_word(thread->object+0x20);
+            uint32_t tls=kernel_word(thread->object+0x28),unused;
+            if((top&4095) || (base&4095) || base<0xd0001000u || top>0xd4000000u ||
+               top<=base || top-base>0x100000u || regs[4]<base || regs[4]+12ull>top ||
+               physical(base-4096,&unused) || (tls && (tls<base || tls>=top))) {
+                failure="thread LLE unqualified original stack/TLS";return;
+            }
+            thread->stack=base;thread->stack_bytes=top-base;
+            publish_range(base,top-base);if(failure)return;
+            thread->published=1;
+        }
         uc_context *context=NULL;IO_UC(uc_context_alloc(cpu,&context));
         error=uc_context_save(cpu,context);
         if(error){uc_context_free(context);failure=uc_strerror(error);return;}
         check_publications(0);
         InterlockedExchange(&current_irql,(LONG)(kernel_word(0x8003da60u)&255));
         if(!failure) {
+            if(thread)++native_thread_callback;
             ReleaseSRWLockExclusive(&lock);
-            const char *callback_error=(is_dpc?dpc_callback:isr_callback)(routine,regs);
+            const char *callback_error;
+            if(thread) {
+                callback_error=thread_callback(routine,regs,thread->arguments,&terminate,&exit_status);
+            } else callback_error=(is_dpc?dpc_callback:isr_callback)(routine,regs);
             AcquireSRWLockExclusive(&lock);
+            if(thread)--native_thread_callback;
             if(callback_error)failure=callback_error;
         }
         error=uc_context_restore(cpu,context);uc_context_free(context);
@@ -540,6 +560,22 @@ static void run_original(uint32_t entry,size_t instruction_limit)
         check_publications(1);if(failure)return;
         for(unsigned i=0;i<8;++i)IO_UC(uc_reg_write(cpu,general_regs[i],regs+i));
         entry=return_pc;
+        if(thread && terminate) {
+            /* Real termination switches to the blocked original waiter,
+             * signals the object and reclaims the stack. Never ExitThread
+             * on the host thread transporting this synchronous callback. */
+            uint32_t pe=kernel_word(0x8001003cu),exports=0x80010000u+kernel_word(0x80010000u+pe+120);
+            uint32_t first=kernel_word(exports+16),table=0x80010000u+kernel_word(exports+28);
+            entry=0x80010000u+kernel_word(table+4*(258-first));
+            uint32_t sp=regs[4]-8,frame[]={0,exit_status};
+            if(sp<thread->stack || (uint64_t)sp+sizeof(frame)>(uint64_t)thread->stack+thread->stack_bytes) {
+                failure="thread LLE termination frame outside original stack";return;
+            }
+            /* Publication can invalidate the cached interpreter alias; the
+             * owned native view is already the actual original PFN backing. */
+            memcpy(guest_memory+sp,frame,sizeof(frame));
+            IO_UC(uc_reg_write(cpu,UC_X86_REG_ESP,&sp));
+        }
     }
     failure="device LLE callback budget exhausted";
 }
@@ -596,7 +632,8 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
        ordinal!=97 && ordinal!=113 && ordinal!=125 && ordinal!=148 && ordinal!=149 && ordinal!=150 && ordinal!=159 &&
        ordinal!=186 && ordinal!=187 && ordinal!=189 && ordinal!=190 && ordinal!=196 && ordinal!=198 &&
        ordinal!=200 && ordinal!=202 && ordinal!=203 && ordinal!=207 && ordinal!=209 && ordinal!=211 &&
-       ordinal!=215 && ordinal!=218 && ordinal!=219 && ordinal!=225 && ordinal!=226 && ordinal!=233 && ordinal!=234 && ordinal!=236
+       ordinal!=215 && ordinal!=218 && ordinal!=219 && ordinal!=224 && ordinal!=225 && ordinal!=226 && ordinal!=231 && ordinal!=233 && ordinal!=234 && ordinal!=236 &&
+       ordinal!=246 && ordinal!=250 && ordinal!=254 && ordinal!=255 && ordinal!=256
 #endif
        ) {
         failure="device LLE unsupported ordinal";return;
@@ -659,15 +696,15 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
                    (ordinal==1 || ordinal==103 || ordinal==121 || ordinal==129 || ordinal==160 || ordinal==161)?0:1;
 #ifdef PILOT_FILES_LLE
     switch(ordinal) {
-    case 35:case 36:case 125:count=0;break;
-    case 67:case 113:case 148:case 198:case 203:case 209:case 225:count=2;break;
-    case 215:case 233:count=3;break;
+    case 35:case 36:case 125:case 250:count=0;break;
+    case 67:case 113:case 148:case 198:case 203:case 209:case 224:case 225:case 231:count=2;break;
+    case 215:case 233:case 246:count=3;break;
     case 149:case 189:case 234:count=4;break;
-    case 150:case 159:case 211:case 218:case 226:count=5;break;
+    case 150:case 159:case 211:case 218:case 226:case 254:count=5;break;
     case 202:count=6;break;
     case 219:case 236:count=8;break;
     case 190:count=9;break;
-    case 196:case 200:case 207:count=10;break;
+    case 196:case 200:case 207:case 255:count=10;break;
     }
 #endif
     if(ordinal==160 || ordinal==161) {
@@ -675,6 +712,7 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
         if(level>31){failure="device LLE IRQL out of range";return;}
         IO_UC(uc_reg_write(cpu,UC_X86_REG_ECX,&level));
     }
+    if(ordinal==250)IO_UC(uc_reg_write(cpu,UC_X86_REG_ECX,args));
     uint32_t words[11]={RETURN_PC},stack=STACK+(execution_depth-1)*0x4000u;
     uint32_t sp=stack,observed,flags=2u|(caller_if?0x200u:0);
     memcpy(words+1,args,count*4);
@@ -739,6 +777,7 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
     InterlockedExchange(&current_irql,(LONG)(kernel_word(0x8003da60u)&255));
 }
 
+#include "io_thread_lifetime_lle.inc"
 static void deliver_irq(int *delivered)
 {
 #ifdef PILOT_USB_LLE
@@ -781,6 +820,7 @@ static void deliver_irq(int *delivered)
 #undef IO_UC
 void pilot_io_device_isr_bind(PilotIoIsr callback){isr_callback=callback;}
 void pilot_io_device_dpc_bind(PilotIoIsr callback){dpc_callback=callback;}
+void pilot_io_device_thread_bind(PilotIoThread callback){thread_callback=callback;}
 void pilot_io_device_port_bind(uint16_t first,uint16_t last,PilotIoPort callback)
 {
     AcquireSRWLockExclusive(&lock);
@@ -834,7 +874,12 @@ const char *pilot_io_device_lle(unsigned ordinal,unsigned char *guest,
     if(!guest_memory)initialize(guest);
     if(!failure && guest_memory!=guest)failure="device LLE guest address space changed";
     if(!failure && execution_depth>=2)failure="device LLE nested service stack limit";
-    if(!failure){++execution_depth;execute(ordinal,args,result);--execution_depth;}
+    if(!failure)thread_before_call(ordinal,args);
+    if(!failure) {
+        ++execution_depth;execute(ordinal,args,result);
+        if(!failure)thread_after_call(ordinal,args,*result);
+        --execution_depth;
+    }
     const char *error=failure; /* An incomplete service poisons this context. */
     ReleaseSRWLockExclusive(&lock);return error;
 }

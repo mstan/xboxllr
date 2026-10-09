@@ -763,6 +763,26 @@ observations; Phobos's timer-queue implementation is not copied. Test callback
 instruction bodies are authored fixture programs. No kernel instructions,
 disassembly, private images or GPL implementation bodies are added to the source.
 
+## Original thread/native body qualification (2026-10-09)
+
+The new thread transport, lifetime bookkeeping and test programs are authored
+here against the owner's hash-bound original kernel capture. Original execution
+establishes start call sites, actual stack/TLS/PCR identity, suspend counts,
+termination status and reclamation. No original bytes, disassembly or captures
+are incorporated into the repository.
+
+- [nxdk declarations](https://github.com/XboxDev/nxdk/blob/29638d0b001f179b73c3513489af10ddc2986216/lib/xboxkrnl/xboxkrnl.h)
+  provide KTHREAD/ETHREAD/PS_STATISTICS layout and thread-service declarations;
+  existing nxdk attribution applies. Layout facts are checked by original execution.
+- [Phobos kernel_thread.c](https://github.com/phobos665/xboxrecomp/blob/bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0/src/kernel/kernel_thread.c)
+  was reviewed for host callback/termination transport. It does not retain all
+  required original TLS/extension/second-context behavior, so no additional
+  implementation body is copied or adapted for this batch.
+
+The HLE null-TLS correction follows the independent original observation.
+The existing private interpreter and donor restrictions still apply; this batch
+adds no GPL-derived implementation to the intended non-GPL shipping product.
+
 ## Original device-manager reference execution (2026-10-08)
 
 `pilots/native-title/io_device_lle.c` and

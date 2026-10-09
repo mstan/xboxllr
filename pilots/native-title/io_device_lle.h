@@ -29,6 +29,14 @@ void pilot_io_device_isr_bind(PilotIoIsr callback);
  * Admission requires the captured kernel dispatcher, active IRQL2 and the
  * real dequeued DPC object. Its original stack pages share native backing. */
 void pilot_io_device_dpc_bind(PilotIoIsr callback);
+/* An original created thread invokes its generated body on the original
+ * stack/PCR. A SystemRoutine has two arguments and must request termination;
+ * a PsCreateSystemThread start body has one argument and may return normally.
+ * Termination is completed by the original kernel, never by the host thread.
+ * Blocking/non-LIFO native continuations are not yet admitted. */
+typedef const char *(*PilotIoThread)(uint32_t entry,uint32_t regs[8],
+    unsigned arguments,int *terminate,uint32_t *exit_status);
+void pilot_io_device_thread_bind(PilotIoThread callback);
 /* Up to eight disjoint device-owned port ranges. NULL clears all bindings.
  * Bind only while the transport is idle. PIC/storage remain on their shared bus.
  * Callback returns an error on unsupported access. It must not reenter this
