@@ -1052,3 +1052,62 @@ Sections 1.3.26/27 additionally require the subcarrier accumulator and its
 four/eight-field reset policy (unless disabled), not merely a stored reset bit.
 No new hardware access, donor bodies, full attract claim or family closure;
 burndown remains **4/9**, stable game pin `439a45b`.
+
+## Running encoder timing, reset and FIELD transport
+
+The maintained `Cx25871Timing` now consumes explicit common-clock events for
+the bounded synchronous progressive-input/interlaced-output profile. Timing
+reset establishes real counter and subcarrier origins before its strobe
+self-clears. Full-frame output coordinates retain the half-line even-field
+phase. The DTO advances with the programmed increment and resets every four
+NTSC/eight PAL fields unless DIS_SCRST is set. FIELD follows the documented
+odd/even sequence, two-CLKI delay, FIELDI polarity and EN_OUT gating.
+
+Slave mode requires actual, aligned HSYNC/VSYNC events. Missing, duplicate,
+wrong-phase and inconsistent syncs fail; they are not inferred from nominal
+host frames. Software reset invalidates timing knowledge rather than pretending
+to establish a counter origin. Once programmed timing has been selected in a
+device lifetime, the old nominal FIELD injection cannot regain authority,
+including after reset. A GPIO read of an unknown or undriven FIELD pin fails
+without manufacturing a caller output. Batched master clock events retain an
+intervening active level in the MCPX latch even if the final level is low.
+
+The source is authored from Conexant 100381B sections 1.3.4, 1.3.26/27 and
+1.3.31. The settled rate query validates clock controls, but the timing engine
+advances in explicitly supplied clock ticks: no wall-time conversion or actual
+NV2A clock/sync provider is connected to the title yet. Supported slave phases
+are aligned; arbitrary startup phase/resynchronization, asynchronous/fractional
+timing, PLL settling, external reset-pin behavior, pixel filtering and analog
+output remain open. Changing relevant timing controls invalidates this bounded
+model until reset; that is a qualification limit, not a claim that real silicon
+stops its counters on every such write.
+
+Validation:
+
+- Software NV2A/SMBus suites pass 2/2 in 0.26s; twelve PAL/NTSC master/slave
+  lifetimes exercise counter/half-line phase, full color-frame reset periods,
+  polarity, output gating, repeated resets and rejected syncs/clock overflow.
+  SDL/OpenGL cases remain explicitly skipped in this software build.
+- Original HAL/IRQ transport and mode-entry guard checks pass 2/2 in 0.30s.
+  The additional original timing fixture passes in 0.10s across six lifetimes:
+  real HAL writes, original AV FIELD reads, both sides of the two-clock
+  transition, phase/reset/polarity/gating and batched GPIO latching. Five
+  lifetimes tear down cleanly; the sixth deliberately rejects an undriven FIELD
+  read and exits without further mutations of the terminally faulted machine.
+- All nine original query/trap/fence cases pass across three lifetimes with
+  this DLL: `gpu-completion-encoder-timing-original.aot-private.json`.
+- Rebuilt native-renderer preset passes eight shared IO/USB/memory/graphics
+  checks in 6.56s. No fresh full attract or audio/video sign-off is claimed.
+- Actual `gpu-lle-title-encoder-timing` exits 2 after 10.000s, 895 entries,
+  before frames, at the existing missing EN_REG_RD startup-state guard.
+  The clock/sync fixture does not establish original title initialization.
+
+DLL: `014ba56ff7de60ee8f7639e9e88b706e92ef877ac303c0baf663d37ba070c9e5`.
+GPU executable: `43f3dbd21d2eef1ccd027e36eee47cdb5358c4be8550b44ee652d402aef75f32`.
+Native executable: `b7abf1a26dc8873d6ba7e2c34e86ecd0d5a5473fa2bcb0fdc0571883d0348670`.
+
+Next: original mode-setting controls and coherent NV2A-to-encoder clock/sync
+events, the unresolved FD6806A0 transaction, then actual title startup and
+remaining graphics/context/callback/resource qualification. No new hardware
+contact, xemu runtime comparison or donor implementation body was used.
+Family count remains **4/9**; stable game pin `439a45b` is unchanged.

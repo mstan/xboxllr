@@ -7,6 +7,84 @@
 static int fails;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n", __LINE__, #c); ++fails; } } while (0)
 
+static void encoder_timing() {
+    using State=xlle::Cx25871Timing::State;
+    // These expectations use the independent table C-1 totals and the
+    // datasheet's odd/even/two-clock FIELD and color-frame reset rules.
+    for(bool pal:{false,true}) for(bool slave:{false,true}) for(unsigned lifetime=0;lifetime<3;++lifetime) {
+        std::string fault;
+        xlle::Cx25871Control encoder([&](const std::string& why){fault=why;},pal);
+        State state;state.clocks=99;
+        CHECK(!encoder.timing_state(state) && state.clocks==99 && encoder.field_signal()==-1);
+        auto write=[&](uint8_t r,uint8_t v){CHECK(encoder.write_byte(r,v));};
+        write(0xba,0x80);write(0xba,slave?0x20:0);write(0xc6,0x9c);write(0x6c,0x46);
+        CHECK(encoder.field_signal()==-2);
+        write(0x6c,0xc6);
+        uint8_t control=0;CHECK(encoder.read_byte(0x6c,control) && control==0x46);
+        CHECK(encoder.timing_state(state) && state.clocks==0 && state.subcarrier_phase==0);
+        write(0xc4,1);CHECK(encoder.field_signal()==0);
+        const uint32_t h=pal?944:784, v=pal?625:600, hout=pal?1888:1792;
+        const uint64_t field=uint64_t(h)*v;
+        const uint32_t increment=pal?0x26798c0c:0x20800000;
+        uint32_t spent=0;
+        for(unsigned frame=1;frame<=(pal?8u:4u);++frame) {
+            if(slave) {
+                for(unsigned line=1;line<=v;++line) {
+                    CHECK(encoder.advance_timing(h-spent));spent=0;
+                    CHECK(encoder.input_sync(line==v));
+                }
+            } else CHECK(encoder.advance_timing(field-spent));
+            CHECK(encoder.timing_state(state) && state.clocks==field*frame);
+            CHECK(state.input_x==0 && state.input_y==0);
+            CHECK(state.output_x==((frame&1)?hout/2:0));
+            CHECK(state.output_y==((frame&1)?(pal?312u:262u):0));
+            CHECK(encoder.field_signal()==int((frame-1)&1)); // two-clock delay
+            if(frame==(pal?8u:4u))CHECK(state.subcarrier_phase==0);
+            else CHECK(state.subcarrier_phase==uint32_t(uint64_t(uint32_t(field*frame))*increment));
+            CHECK(encoder.advance_timing(1));CHECK(encoder.field_signal()==int((frame-1)&1));
+            CHECK(encoder.advance_timing(1));CHECK(encoder.field_signal()==int(frame&1));spent=2;
+        }
+        write(0xc6,0xbc);CHECK(encoder.field_signal()==1); // invert odd, no time advance
+        write(0xc4,0);CHECK(encoder.field_signal()==-2);
+        write(0xc4,1);CHECK(encoder.field_signal()==1);
+        write(0x6c,0xc6);CHECK(encoder.timing_state(state));
+        CHECK(state.clocks==0 && state.input_x==0 && state.input_y==0 &&
+              state.output_x==0 && state.output_y==0 && state.subcarrier_phase==0);
+        CHECK(encoder.field_signal()==1); // reset keeps FIELDI, selects odd
+        CHECK(encoder.advance_timing(1));
+        CHECK(!encoder.advance_timing(UINT64_MAX) && !fault.empty());fault.clear();
+        CHECK(encoder.timing_state(state) && state.clocks==1);
+        write(0x6c,0xc6);
+        if(slave) {
+            CHECK(!encoder.advance_timing(h+1) && !fault.empty());fault.clear();
+            CHECK(encoder.timing_state(state) && state.clocks==0);
+            CHECK(!encoder.input_sync(false) && !fault.empty());fault.clear();
+            CHECK(encoder.advance_timing(h));
+            CHECK(!encoder.input_sync(true) && !fault.empty());fault.clear();
+            CHECK(encoder.input_sync(false)); // rejected edge did not consume it
+        }
+        write(0xba,0x80);
+        CHECK(!encoder.timing_state(state) && encoder.field_signal()==-2);
+        CHECK(fault.empty());
+    }
+    {
+        std::string fault;
+        xlle::Cx25871Control encoder([&](const std::string& why){fault=why;});
+        auto write=[&](uint8_t r,uint8_t v){CHECK(encoder.write_byte(r,v));};
+        write(0xba,0x80);write(0xba,0);write(0xc6,0x9c);
+        write(0xa2,0x1a); // disable automatic color-frame subcarrier reset
+        write(0xae,1); // deliberate phase residue distinguishes reset/no-reset
+        write(0x6c,0xc6);
+        CHECK(encoder.advance_timing(4ull*784*600));State state;
+        CHECK(encoder.timing_state(state) && state.subcarrier_phase!=0);
+        const uint32_t phase=state.subcarrier_phase;
+        write(0x6c,0xc6);CHECK(encoder.timing_state(state) && state.subcarrier_phase==0 && phase!=0);
+        write(0x88,1);CHECK(!encoder.timing_state(state)); // unsupported fractional line
+        CHECK(!encoder.write_byte(0x6c,0xc6) && !fault.empty());fault.clear();
+        CHECK(!encoder.timing_state(state));
+    }
+}
+
 static void encoder_clocks() {
     using Encoder=xlle::Cx25871Control;
     const auto equals=[](Encoder::Rate r,uint64_t n,uint64_t d=1) {
@@ -142,6 +220,7 @@ static void reset_and_configuration() {
 }
 
 int main() {
+    encoder_timing();
     encoder_clocks();
     av_output_pins();
     reset_and_configuration();

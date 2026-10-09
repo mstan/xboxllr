@@ -272,3 +272,77 @@ static void test_gpu_lle_av_mode_guard(void)
     CHECK(result==0xcccccccc); // failed initialization cannot publish success
     fprintf(stderr,"PASS: original mode setup drives GPIO19, then rejects unqualified PRAMDAC handshake\n");
 }
+
+#ifdef PILOT_GPU_FILES_WORKER
+static void gpu_test_timing_hal_write(uint8_t reg,uint8_t value)
+{
+    // Clock events are controlled by this board fixture. Calling the original
+    // HAL directly avoids the pilot's still-unqualified nominal field source.
+    uint32_t args[]={0x8a,reg,0,value},result=0xcccccccc;
+    CHECK(!pilot_io_device_lle(50,memory,args,&result) && result==0);
+    CHECK(gpu_test_smb_port(0xc000,0,0)==0 && pilot_usb_pic_vector(0)<0);
+}
+static void gpu_test_timing_field(uint32_t expected)
+{
+    MEM32(0x15000)=0x11223344;MEM32(0x15004)=0xcccccccc;MEM32(0x15008)=0x55667788;
+    uint32_t args[]={0,15,0,0x15004},result=0;
+    CHECK(!pilot_io_device_lle(2,memory,args,&result));
+    CHECK(MEM32(0x15004)==expected && MEM32(0x15000)==0x11223344 && MEM32(0x15008)==0x55667788);
+}
+static void test_gpu_lle_encoder_timing(void)
+{
+    install_fault_handler();CHECK(!pilot_io_device_files(memory));
+    for(unsigned slave=0;slave<2;++slave) for(unsigned lifetime=0;lifetime<3;++lifetime) {
+        gpu_lle_open();
+        gpu_test_timing_hal_write(0xba,0x80);
+        gpu_test_timing_hal_write(0xba,slave?0x20:0);
+        gpu_test_timing_hal_write(0xc6,0x9c);
+        gpu_test_timing_hal_write(0xc4,1);
+        gpu_test_timing_hal_write(0x6c,0xc6);
+        CHECK(gpu_test_encoder_read(0x6c)==0x46);
+        uint64_t state[7];int signal=-99;
+        CHECK(gpu_lle.encoder_timing(gpu_lle.device,state,&signal));
+        CHECK(state[0]==0 && state[5]==0 && signal==0);
+        gpu_test_timing_field(1); // original AV API inverts physical FIELD
+        for(unsigned frame=1;frame<=2;++frame) {
+            if(slave) {
+                for(unsigned line=1;line<=600;++line)
+                    CHECK(gpu_lle.encoder_advance(gpu_lle.device,784-((frame==2 && line==1)?2:0),line==600?2:1));
+            } else CHECK(gpu_lle.encoder_advance(gpu_lle.device,470400-(frame==2?2:0),0));
+            CHECK(gpu_lle.encoder_timing(gpu_lle.device,state,&signal));
+            CHECK(state[0]==470400ull*frame && state[3]==((frame&1)?896:0) && state[4]==((frame&1)?262:0));
+            gpu_test_timing_field(frame&1); // before the two-CLKI transition
+            CHECK(gpu_lle.encoder_advance(gpu_lle.device,1,0));gpu_test_timing_field(frame&1);
+            CHECK(gpu_lle.encoder_advance(gpu_lle.device,1,0));gpu_test_timing_field((frame&1)^1);
+        }
+        if(!slave) {
+            // An intervening high FIELD still sets the MCPX latch when a
+            // batched board advance ends back at low. The guest observes it.
+            pilot_cpu_out8(0x80c0,0x43);
+            CHECK(gpu_lle.encoder_advance(gpu_lle.device,940800,0));
+            CHECK((pilot_cpu_in8(0x80c0)&0x60)==0x40);
+        }
+        gpu_test_timing_hal_write(0xc6,0xbc);gpu_test_timing_field(0);
+        gpu_test_timing_hal_write(0x6c,0xc6);gpu_test_timing_field(0);
+        CHECK(gpu_lle.encoder_timing(gpu_lle.device,state,&signal));
+        CHECK(state[0]==0 && state[1]==0 && state[2]==0 && state[3]==0 && state[4]==0 && state[5]==0 && signal==1);
+        gpu_test_timing_hal_write(0xc4,0);
+        CHECK(gpu_lle.encoder_timing(gpu_lle.device,state,&signal) && signal==-2);
+        CHECK(!gpu_lle.error(gpu_lle.device));
+        if(slave && lifetime==2) {
+            MEM32(0x15004)=0xcccccccc;
+            uint32_t args[]={0,15,0,0x15004},result=0;
+            const char *error=pilot_io_device_lle(2,memory,args,&result);
+            CHECK(error && strstr(error,"unknown/high-impedance board level"));
+            CHECK(MEM32(0x15004)==0xcccccccc);
+            // The original machine deliberately keeps a terminal device fault.
+            // No further kernel mutations/unbinds are valid in this process.
+            fprintf(stderr,"PASS: original HAL timing reset, actual clocks/slave sync, original AV FIELD reads, phase/polarity/gating; five clean teardowns and sixth lifetime rejects undriven FIELD\n");
+            return;
+        }
+        gpu_lle.destroy(gpu_lle.device);gpu_lle.device=NULL;
+        CHECK(!pilot_io_device_mmio_bind(0,0,NULL));pilot_io_device_port_bind(0,0,NULL);
+        CHECK(FreeLibrary(gpu_lle.library));gpu_lle.library=NULL;
+    }
+}
+#endif

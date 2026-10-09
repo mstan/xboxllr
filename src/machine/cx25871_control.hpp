@@ -5,6 +5,7 @@
 // does not capture the encoder. Never infer its programmed state from zeros.
 #pragma once
 #include "machine/smbus.hpp"
+#include "machine/cx25871_timing.hpp"
 #include <array>
 #include <numeric>
 
@@ -25,8 +26,8 @@ public:
     };
     // PAL is an explicit board strap, not inferred from the game's region.
     // Construction still represents unknown warm state, not a reset event.
-    explicit Cx25871Control(FaultFn fault, bool pal_pin=false)
-        : fault_(std::move(fault)), pal_pin_(pal_pin) {}
+    explicit Cx25871Control(FaultFn fault, bool pal_pin=false, bool slave_pin=false)
+        : fault_(std::move(fault)), timing_(fault_), pal_pin_(pal_pin),slave_pin_(slave_pin) {}
     // Explicit board input. Zero means no known CLKI source, not a stopped
     // oscillator. No title rate is inferred from the game's intended cadence.
     void set_clki_hz(uint32_t hz) { clki_hz_=hz; }
@@ -99,14 +100,26 @@ public:
             return reject("CX25871 alternate crystal/clock configuration remains unqualified");
         if (reg == 0xc4 && (value & ~1u))
             return reject("CX25871 non-enable output/status controls remain unqualified");
-        // 6C=46 is the datasheet's standard-readback setup, without reset,
-        // color bars or SCART. Broader timing/output modes remain unqualified.
-        if (reg == 0x6c && value != 0x46)
+        if (reg == 0xc6 && value!=0x9c && value!=0xbc)
+            return reject("CX25871 digital interface control outside qualified timing profile");
+        // 6C=46 selects standard readback; C6 additionally strobes timing reset.
+        // Color bars, SCART and other field-detection modes remain unqualified.
+        if (reg == 0x6c && value != 0x46 && value != 0xc6)
             return reject("CX25871 timing/reset/output control outside qualified transport");
         if (reg == 0x34 && (value & 0x64))
             return reject("CX25871 reserved adaptive-filter control bits");
         if ((reg == 0x38 && (value & 0x80)) || (reg == 0x8e && (value & 0xe0)))
             return reject("CX25871 reserved timing control bits");
+        if(reg==0x6c && value==0xc6) {
+            if(!reset_timing())return false;
+            value=0x46; // strobe self-clears only after real counter/phase reset
+        } else if(timing_.known() && reg!=0xc4 && reg!=0xc6 && reg!=0x6c &&
+                  reg!=0x34 && reg!=0x36 && reg!=0xc8 &&
+                  registers_[reg]!=value) {
+            // Timing changes need the documented reset before this bounded
+            // route can expose output again; no old phase is silently reused.
+            timing_.invalidate();
+        }
         registers_[reg] = value; known_[reg] = 0xff; programmed_ = true;
         // Conexant table 2-5: DIV2 is one latch exposed through two registers.
         if (reg == 0x38) mirror_div2(value & 0x10);
@@ -121,17 +134,53 @@ public:
     bool receive_byte(uint8_t&) override { return reject("CX25871 legacy/stream read outside qualified transport"); }
     bool quick(bool) override { return reject("CX25871 quick command outside qualified transport"); }
     bool programmed() const { return programmed_; }
+    bool timing_known() const { return timing_.known(); }
+    bool timing_selected() const { return timing_selected_; }
+    bool advance_timing(uint64_t clocks) { return timing_.advance(clocks); }
+    bool input_sync(bool vertical) { return timing_.sync(vertical); }
+    bool timing_state(Cx25871Timing::State& state) const { return timing_.state(state); }
+    // -1 unknown; -2 high impedance; otherwise physical FIELD low/high.
+    int field_signal() const {
+        if(!(known_[0xc4]&1))return -1;
+        if(!(registers_[0xc4]&1))return -2;
+        Cx25871Timing::State state;
+        if(!(known_[0xc6]&0x20) || !timing_.state(state))return -1;
+        return int(state.field_even ^ bool(registers_[0xc6]&0x20));
+    }
 private:
+    bool reset_timing() {
+        Clocks rates;
+        if(!clocks(rates))return false;
+        for(uint8_t reg:{0x76,0x86,0x88,0x8a,0x8e,0x90,0x96,0xa2,0xae,0xb0,0xb2,0xb4})
+            if(known_[reg]!=0xff)return reject("CX25871 timing reset has unknown counters");
+        if(!(known_[0xba]&0x20) || !(known_[0xc6]&0x20))
+            return reject("CX25871 timing reset has unknown interface");
+        if((registers_[0x38]&0x30) || (registers_[0xd4]&0xe0) || registers_[0x3a] ||
+           (registers_[0xa0]&0xc0) || registers_[0x88] || (registers_[0xa2]&0x81))
+            return reject("CX25871 timing reset outside synchronous interlaced-output profile");
+        Cx25871Timing::Config config;
+        config.input_clocks=registers_[0x8a] | ((registers_[0x8e]&7u)<<8);
+        config.input_lines=registers_[0x90] | ((registers_[0x96]&3u)<<8) | ((registers_[0x38]&2u)<<9);
+        config.output_clocks=registers_[0x76] | ((registers_[0x86]&15u)<<8);
+        config.output_lines=(registers_[0xa2]&4)?625:525;
+        config.subcarrier_increment=uint32_t(registers_[0xae]) | (uint32_t(registers_[0xb0])<<8) |
+            (uint32_t(registers_[0xb2])<<16) | (uint32_t(registers_[0xb4])<<24);
+        config.pal=registers_[0xa2]&0x20;config.disable_subcarrier_reset=registers_[0xa2]&0x10;
+        config.slave=slave_pin_ || (registers_[0xba]&0x20);
+        if(!timing_.reset(config))return false;
+        timing_selected_=true;return true;
+    }
     static bool supported(uint8_t reg) {
         return reg == 0x34 || reg == 0x36 || reg == 0x38 || reg == 0x3a || reg == 0x6c ||
                (reg >= 0x76 && reg <= 0xb4 && !(reg & 1)) ||
-               reg == 0xb8 || reg == 0xba || reg == 0xc4 || reg == 0xc8 || reg == 0xd4;
+               reg == 0xb8 || reg == 0xba || reg == 0xc4 || reg == 0xc6 || reg == 0xc8 || reg == 0xd4;
     }
     void mirror_div2(bool enabled) {
         registers_[0xd4] = (registers_[0xd4] & ~0x40) | (enabled ? 0x40 : 0);
         known_[0xd4] |= 0x40;
     }
     void autoconfigure(unsigned mode) {
+        timing_.invalidate();
         // Factual ROM values from Conexant 100381B table C-1, modes 0/1,
         // 13.500 MHz crystal. Register 38 and even registers 76..B4 only.
         // All other control latches survive this command, including readback,
@@ -159,17 +208,21 @@ private:
         registers_[0x6c] = 2; known_[0x6c] = 0xfb;
         known_[0xba] = 0xbf; // SRESET itself is documented self-clearing.
         known_[0xc4] = 1; // EN_OUT=0: digital timing pins are three-stated.
+        known_[0xc6] = 0x20; // FIELDI=0; other interface fields stay unknown.
         known_[0xd4] = 0xe0; // MODE2X=EN_ASYNC=DIV2=0; caption fields unknown.
         clock_defaults_known_=true;
         autoconfigure(pal_pin_ ? 1 : 0);
     }
     bool reject(const char* reason) { if (fault_) fault_(reason); return false; }
     FaultFn fault_;
+    Cx25871Timing timing_;
     std::array<uint8_t, 256> registers_{};
     std::array<uint8_t, 256> known_{};
     bool pal_pin_ = false;
+    bool slave_pin_ = false;
     bool programmed_ = false;
     bool clock_defaults_known_=false;
+    bool timing_selected_=false;
     uint32_t clki_hz_=0;
 };
 } // namespace xlle

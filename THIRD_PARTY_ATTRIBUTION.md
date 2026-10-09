@@ -1087,9 +1087,19 @@ The encoder's settled clock-rate contract additionally uses Conexant 100381B
 sections 1.3.6/1.3.6.1 and table 2-5 for the PLL equation, input/encoder clock
 separation, 3:2 mode, DIV2, HALF_CLKO, asynchronous input and EN_OUT/external
 clock pin gating. Exact rational calculations and tests are authored here;
-no vendor programming-example code is incorporated. PLL settling, timing
-generators/reset, FIELD waveforms and analog output remain separate unfinished
-dependencies. This contract does not assert them through a frequency query.
+no vendor programming-example code is incorporated. This frequency query does
+not assert PLL settling, timing-generator execution or analog output.
+
+`src/machine/cx25871_timing.hpp` and its control/transport tests additionally
+implement the bounded synchronous timing contract from sections 1.3.4,
+1.3.26/27 and 1.3.31: odd-field reset origin, horizontal/vertical progression,
+subcarrier accumulation and four/eight-field phase reset, progressive slave
+HSYNC/VSYNC synchronization, two-CLKI FIELD delay, polarity and output gating.
+Table C-1 supplies independent PAL/NTSC counter and increment expectations.
+This is an authored event-driven model, not copied vendor or emulator code.
+Tests supply explicit board clock/sync events; connection to the title's
+actual NV2A timing source, arbitrary slave phases, asynchronous/fractional
+timing, PLL settling, filtering and analog waveforms remain unqualified.
 
 ## AV GPIO and digital screen-off behavioral references
 
