@@ -1072,6 +1072,17 @@ last-write bytes as a hardware snapshot. The newly recorded boot write journal
 is software-execution evidence only; its private contents are not shipped or
 silently installed as title state.
 
+The bounded encoder reset/autoconfiguration implementation additionally uses
+sections 1.3.4/1.3.8 and table C-1's factual 13.500-MHz mode 0/1 register values.
+Table 2-5 establishes the shared DIV2 latch. Conflicting EACTIVE/CHECK_STAT
+descriptions remain unknown until explicit driver programming. This code was
+authored from hardware facts; no donor implementation body, vendor source,
+private kernel table or game asset was copied. Pinned nxdk's
+`lib/xboxkrnl/xboxkrnl.exe.def` corroborates original HAL export ordinals 45/50
+and their four-argument stdcall interface; the actual owned routines execute in
+private qualification fixtures. Timing reset and encoded output are not
+qualified by software-register reset/readback.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

@@ -456,8 +456,8 @@ static void kernel_dispatch_impl(void)
     if(pilot_verbose)fprintf(stderr, "[KERNEL] %u %s return=%08x\n", next_kernel_ordinal, name, MEM32(g_esp));
     switch (next_kernel_ordinal) {
 #ifdef PILOT_GPU_LLE
-    case 2:case 3: {
-        uint32_t args[6],result=g_eax;unsigned count=next_kernel_ordinal==2?4:6;
+    case 2:case 3:case 45:case 50: {
+        uint32_t args[6],result=g_eax;unsigned count=next_kernel_ordinal==3?6:4;
         for(unsigned i=0;i<count;++i)args[i]=MEM32(g_esp+4+i*4);
         gpu_lle_tick();
         fprintf(stderr,"[AV KERNEL LLE] ordinal=%u option/step=%08x param/mode=%08x\n",

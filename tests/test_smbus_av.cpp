@@ -5,7 +5,56 @@
 
 static int fails;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n", __LINE__, #c); ++fails; } } while (0)
+
+static void reset_and_configuration() {
+    for(bool pal : {false,true}) for(unsigned lifetime=0;lifetime<3;++lifetime) {
+        std::string fault;
+        xlle::Cx25871Control encoder([&](const std::string& why){fault=why;},pal);
+        uint8_t value=0;
+        auto read=[&](uint8_t reg) {
+            value=0xa5;CHECK(encoder.read_byte(reg,value));return value;
+        };
+        auto write=[&](uint8_t reg,uint8_t data){CHECK(encoder.write_byte(reg,data));};
+        write(0x6c,0x46);write(0x34,0x80);write(0x36,0xa4);write(0xc8,0x9b);
+        write(0x96,0xcd);write(0xd4,0xff);write(0xba,0x3f);
+        for(unsigned reset=0;reset<2;++reset) {
+            write(0xba,0x80);
+            value=0xa5;
+            CHECK(!encoder.read_byte(0xc8,value) && value==0xa5); // readback disabled
+            fault.clear();write(0x6c,0x46);
+            CHECK(read(0x34)==0 && read(0x36)==0 && read(0xc8)==0);
+            CHECK(read(0x96)==0x36 && read(0xb8)==unsigned(pal));
+            // Independent table C-1 dimensions: 640x480 input, with the
+            // specified total clocks/lines. Decode separate split registers.
+            CHECK((unsigned(read(0x8a)) | ((read(0x8e)&7u)<<8))==(pal?944u:784u));
+            CHECK((unsigned(read(0x90)) | ((read(0x96)&3u)<<8) | ((read(0x38)&2u)<<9))==(pal?625u:600u));
+            CHECK((unsigned(read(0x94)) | ((read(0x96)&12u)<<6))==480);
+            // Neither a disputed monitor-command default nor unknown caption
+            // fields may be laundered into a successful read by software reset.
+            value=0xa5;CHECK(!encoder.read_byte(0xba,value) && value==0xa5);fault.clear();
+            CHECK(!encoder.read_byte(0xd4,value) && value==0xa5);fault.clear();
+            write(0xba,0x3f);CHECK(read(0xba)==0x3f);
+            write(0x34,0x80);write(0x36,0xa4);write(0xc8,0x9b);
+            write(0xd4,0x95);write(0x38,0x13);CHECK(read(0xd4)==0xd5);
+            write(0xd4,0x95);CHECK(read(0x38)==3); // preserve unrelated bits
+            write(0x38,0x13);
+            write(0xb8,pal?0:1);
+            CHECK(read(0xb8)==unsigned(!pal) && read(0x38)==0 && read(0xd4)==0x95);
+            CHECK(read(0x34)==0x80 && read(0x36)==0xa4 && read(0xc8)==0x9b);
+            CHECK(read(0x6c)==0x46 && read(0xba)==0x3f); // autoconfig is not reset
+            CHECK((unsigned(read(0x8a)) | ((read(0x8e)&7u)<<8))==(pal?784u:944u));
+            CHECK(!encoder.write_byte(0xb8,2));fault.clear();
+            CHECK(!encoder.write_byte(0x3a,0x10));fault.clear();
+            CHECK(!encoder.write_byte(0xba,0xbf));fault.clear();
+            CHECK(!encoder.write_byte(0x6c,0xc6));fault.clear(); // timing still guarded
+            CHECK(read(0xb8)==unsigned(!pal) && read(0x3a)==0 && read(0xba)==0x3f);
+            CHECK(read(0x6c)==0x46 && read(0xc8)==0x9b && fault.empty());
+        }
+    }
+}
+
 int main() {
+    reset_and_configuration();
     for (unsigned lifetime=0; lifetime<3; ++lifetime) {
         std::string fault;
         std::vector<bool> edges;

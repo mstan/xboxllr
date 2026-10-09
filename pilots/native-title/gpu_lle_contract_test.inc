@@ -28,6 +28,41 @@ static uint8_t gpu_test_encoder_read(uint8_t reg)
     uint8_t result=(uint8_t)gpu_test_smb_port(0xc006,0,0);
     gpu_test_smb_port(0xc000,1,0x10);return result;
 }
+#ifdef PILOT_GPU_FILES_WORKER
+static void gpu_test_encoder_hal_write(uint8_t reg,uint8_t value)
+{
+    uint32_t args[]={0x8a,reg,0,value};call_kernel(50,args,4);
+    CHECK(g_eax==0 && gpu_test_smb_port(0xc000,0,0)==0 && pilot_usb_pic_vector(0)<0);
+}
+static uint32_t gpu_test_encoder_hal_read(uint8_t reg)
+{
+    MEM32(0x15000)=0x11223344;MEM32(0x15004)=0xcccccccc;MEM32(0x15008)=0x55667788;
+    uint32_t args[]={0x8a,reg,0,0x15004};call_kernel(45,args,4);
+    CHECK(g_eax==0 && gpu_test_smb_port(0xc000,0,0)==0 && pilot_usb_pic_vector(0)<0);
+    CHECK(MEM32(0x15000)==0x11223344 && MEM32(0x15008)==0x55667788);
+    return MEM32(0x15004);
+}
+static void gpu_test_encoder_reset(void)
+{
+    // Original kernel HAL routines, IRQ11, ISR and DPC execute end to end.
+    // These are explicit fixture inputs, never a title warm-state shortcut.
+    for(unsigned reset=0;reset<2;++reset) {
+        gpu_test_encoder_hal_write(0xba,0x80);
+        gpu_test_encoder_hal_write(0xba,0x3f);
+        gpu_test_encoder_hal_write(0x6c,0x46);
+        CHECK(gpu_test_encoder_hal_read(0xba)==0x3f);
+        CHECK(gpu_test_encoder_hal_read(0x34)==0 && gpu_test_encoder_hal_read(0xc8)==0);
+        CHECK(gpu_test_encoder_hal_read(0x8a)==0x10 && gpu_test_encoder_hal_read(0x96)==0x36);
+        gpu_test_encoder_hal_write(0xc8,0x9b);
+        gpu_test_encoder_hal_write(0xd4,0x95);
+        gpu_test_encoder_hal_write(0x38,0x10);
+        CHECK(gpu_test_encoder_hal_read(0xd4)==0xd5);
+        gpu_test_encoder_hal_write(0xb8,1);
+        CHECK(gpu_test_encoder_hal_read(0x8a)==0xb0 && gpu_test_encoder_hal_read(0xa2)==0x24);
+        CHECK(gpu_test_encoder_hal_read(0xc8)==0x9b && gpu_test_encoder_hal_read(0xd4)==0x95);
+    }
+}
+#endif
 static void gpu_test_av(void)
 {
     const uint32_t cases[][2]={{6,0x004e0101},{13,0},{16,0},{17,0}};
@@ -45,6 +80,7 @@ static void gpu_test_av(void)
         CHECK(MEM32(0x15004)==(level^1));
     }
 #ifdef PILOT_GPU_FILES_WORKER
+    gpu_test_encoder_reset();
     // Establish actual control state through SMBus, rather than pretending a
     // RAM snapshot contains encoder state. This setup is fixture-only.
     gpu_test_encoder_write(0x6c,0x46);

@@ -10,25 +10,50 @@
 namespace xlle {
 class Cx25871Control final : public SmbusSlave {
 public:
-    explicit Cx25871Control(FaultFn fault) : fault_(std::move(fault)) {}
+    // PAL is an explicit board strap, not inferred from the game's region.
+    // Construction still represents unknown warm state, not a reset event.
+    explicit Cx25871Control(FaultFn fault, bool pal_pin=false)
+        : fault_(std::move(fault)), pal_pin_(pal_pin) {}
     const char* name() const override { return "cx25871-control"; }
     uint8_t address() const override { return 0x45; }
     bool read_byte(uint8_t reg, uint8_t& value) override {
-        if (!known_[0x6c] || !(registers_[0x6c] & 0x40))
+        if (!(known_[0x6c] & 0x40) || !(registers_[0x6c] & 0x40))
             return reject("CX25871 standard readback requires established EN_REG_RD state");
-        if (!supported(reg) || !known_[reg])
+        if (!supported(reg) || known_[reg] != 0xff)
             return reject("CX25871 read of uncaptured/unprogrammed control register");
         value = registers_[reg]; return true;
     }
     bool write_byte(uint8_t reg, uint8_t value) override {
         if (!supported(reg)) return reject("CX25871 control register outside qualified transport");
+        if (reg == 0xba && (value & 0x80)) {
+            // Only the original driver's isolated reset strobe is qualified.
+            if (value != 0x80) return reject("CX25871 combined reset/control write is unqualified");
+            software_reset(); programmed_ = true; return true;
+        }
+        if (reg == 0xba && (value & 0x40))
+            return reject("CX25871 monitor-check command remains unqualified");
+        if (reg == 0xb8) {
+            if (value > 1 || known_[0x3a] != 0xff || registers_[0x3a] != 0)
+                return reject("CX25871 autoconfiguration mode/clock remains unqualified");
+            autoconfigure(value); programmed_ = true; return true;
+        }
+        if (reg == 0x3a && value)
+            return reject("CX25871 alternate crystal/clock configuration remains unqualified");
         // 6C=46 is the datasheet's standard-readback setup, without reset,
         // color bars or SCART. Broader timing/output modes remain unqualified.
         if (reg == 0x6c && value != 0x46)
             return reject("CX25871 timing/reset/output control outside qualified transport");
         if (reg == 0x34 && (value & 0x64))
             return reject("CX25871 reserved adaptive-filter control bits");
-        registers_[reg] = value; known_[reg] = true; programmed_ = true;
+        if ((reg == 0x38 && (value & 0x80)) || (reg == 0x8e && (value & 0xe0)))
+            return reject("CX25871 reserved timing control bits");
+        registers_[reg] = value; known_[reg] = 0xff; programmed_ = true;
+        // Conexant table 2-5: DIV2 is one latch exposed through two registers.
+        if (reg == 0x38) mirror_div2(value & 0x10);
+        if (reg == 0xd4) {
+            registers_[0x38] = (registers_[0x38] & ~0x10) | ((value & 0x40) >> 2);
+            known_[0x38] |= 0x10;
+        }
         return true;
     }
     bool read_word(uint8_t, uint16_t&) override { return reject("CX25871 word read outside qualified transport"); }
@@ -38,12 +63,48 @@ public:
     bool programmed() const { return programmed_; }
 private:
     static bool supported(uint8_t reg) {
-        return reg == 0x34 || reg == 0x36 || reg == 0x6c || reg == 0x96 || reg == 0xc8;
+        return reg == 0x34 || reg == 0x36 || reg == 0x38 || reg == 0x3a || reg == 0x6c ||
+               (reg >= 0x76 && reg <= 0xb4 && !(reg & 1)) ||
+               reg == 0xb8 || reg == 0xba || reg == 0xc8 || reg == 0xd4;
+    }
+    void mirror_div2(bool enabled) {
+        registers_[0xd4] = (registers_[0xd4] & ~0x40) | (enabled ? 0x40 : 0);
+        known_[0xd4] |= 0x40;
+    }
+    void autoconfigure(unsigned mode) {
+        // Factual ROM values from Conexant 100381B table C-1, modes 0/1,
+        // 13.500 MHz crystal. Register 38 and even registers 76..B4 only.
+        // All other control latches survive this command, including readback,
+        // DAC/slave controls and the unrelated fields of DIV2's second view.
+        static constexpr uint8_t timing[2][32] = {
+            {0x00,0x80,0x84,0x96,0x60,0x7d,0x22,0xd4,0x27,0x00,0x10,0x7e,0x03,0x58,0x4b,0xe0,
+             0x36,0x92,0x54,0x0e,0x88,0x0c,0x0a,0xe5,0x76,0x79,0x44,0x85,0x00,0x00,0x80,0x20},
+            {0x60,0x80,0x8a,0xa6,0x68,0xc1,0x2e,0xf2,0x27,0x00,0xb0,0x0a,0x0b,0x71,0x5a,0xe0,
+             0x36,0x00,0x50,0x72,0x1c,0x0d,0x24,0xf0,0x58,0x81,0x49,0x8c,0x0c,0x8c,0x79,0x26}
+        };
+        for (unsigned i=0;i<32;++i) {
+            registers_[0x76+2*i] = timing[mode][i]; known_[0x76+2*i] = 0xff;
+        }
+        registers_[0x38] = 0; known_[0x38] = 0xff; mirror_div2(false);
+        registers_[0xb8] = uint8_t(mode); known_[0xb8] = 0xff;
+    }
+    void software_reset() {
+        // Invalidating all old knowledge is essential: a warm-state byte
+        // cannot survive reset merely because its default is unqualified.
+        registers_.fill(0); known_.fill(0);
+        for (uint8_t reg : {0x34,0x36,0x3a,0xc8}) known_[reg] = 0xff;
+        // Table 2-5 says EACTIVE defaults to 1; section 2.1 says to enable it.
+        // Likewise CHECK_STAT's auto-clear description conflicts with its
+        // manual-clear description. Neither disputed bit is manufactured.
+        registers_[0x6c] = 2; known_[0x6c] = 0xfb;
+        known_[0xba] = 0xbf; // SRESET itself is documented self-clearing.
+        autoconfigure(pal_pin_ ? 1 : 0);
     }
     bool reject(const char* reason) { if (fault_) fault_(reason); return false; }
     FaultFn fault_;
     std::array<uint8_t, 256> registers_{};
-    std::array<bool, 256> known_{};
+    std::array<uint8_t, 256> known_{};
+    bool pal_pin_ = false;
     bool programmed_ = false;
 };
 } // namespace xlle

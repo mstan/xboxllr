@@ -864,3 +864,60 @@ initialization to the LLE launch route. GPIO/PRAMDAC dependencies must have
 their actual effects; do not transplant the legacy register store, replace
 original callees, or replay a guessed warm state. Subsequent GPU context/draw
 dependencies and the family acceptance criteria remain open. Burndown: **4/9**.
+
+## Encoder software reset and original HAL transport
+
+The maintained encoder now executes bounded software reset (`BA=80`) and
+autoconfiguration modes 0/1 using Conexant 100381B sections 1.3.4/1.3.8,
+table 2-5 and table C-1's 13.500-MHz register facts. Reset invalidates prior
+warm-state knowledge, disables standard readback and loads the configuration
+selected by an explicit PAL board strap. Construction still means unknown warm
+state; it does not silently perform a reset. The title has no new startup seed.
+
+Autoconfiguration changes register 38 and even registers 76..B4, retaining
+unrelated control state. DIV2's two views (38 bit 4 and D4 bit 6) share one
+latch. The supported register set now admits the reached timing/control writes,
+but does not claim their full output behavior. Alternate clocks/configuration
+modes, combined reset commands, monitor sensing and timing reset still stop.
+Timing reset is not implemented by clearing its command bit alone.
+
+Known-state masks preserve two specification ambiguities: EACTIVE's default
+and CHECK_STAT's clearing behavior. Reset does not turn either ambiguity into
+a manufactured byte read. The original driver's explicit subsequent writes
+establish the values it needs. Reads with remaining unknown bits fail without
+changing the caller's data. Analog/filter/timing output remains unqualified.
+
+Original kernel exports 45/50 (HalReadSMBusValue/HalWriteSMBusValue) are now
+available through the compiled GPU dispatch and shared original-kernel
+transport. The fixture executes their four-argument ABI, real SMBus accesses,
+IRQ11, original ISR and DPC. It checks status acknowledgment, interrupt
+retirement, bounded DWORD output and surrounding memory sentinels. Across
+three GPU lifetimes, six original-HAL reset/configuration cycles pass, alongside
+the prior original AV filter/softening cases. Fixture setup is never installed
+as title device state.
+
+Validation:
+
+- `smbus_av`: both PAL straps, three device lifetimes each, two resets each;
+  independent split-register totals, retained controls, paired DIV2 writes,
+  unknown-state and unsupported-command rejection; pass in 0.21s.
+- Five compiled GPU-preset device/USB/GPU/memory checks pass in 2.39s.
+- All nine original query/trap/fence cases pass with the changed DLL, across
+  three lifetimes; private `gpu-completion-encoder-reset-original.aot-private.json`.
+- Native-renderer preset rebuilt; eight shared device/USB/memory/shader/graphics
+  tests pass in 5.83s. No new long-attract or A/V qualification is claimed.
+- Actual `gpu-lle-title-encoder-reset` exits 2 after 11.016s, 891 entries,
+  at the same missing EN_REG_RD startup-state guard, before frames. The passing
+  HAL fixture does not close original video initialization or the GPU family.
+
+Final DLL SHA-256:
+`b0f74d666eb1e7efa0fbe514a1a4b727c5b9f40cc6bb2c5317eee50fe7d12997`.
+GPU title executable:
+`c032ba46091038c26209f400a71005aaa15c199c5df55e48325cbfd5b7a260b4`.
+Native-renderer executable:
+`d091b5081d3f6511c61f333571114a71bd5d7c05d741e3dc4ab1d7012659dc26`.
+
+Next remains original startup initialization with actual timing/GPIO/PRAMDAC
+effects, then the remaining GPU execution/context dependencies. No console
+contact or new xemu runtime comparison occurred. Family count remains **4/9**;
+the game-owned stable framework pin remains `439a45b`.
