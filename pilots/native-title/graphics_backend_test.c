@@ -154,6 +154,7 @@ int main(void)
 #ifdef PILOT_D3D_PHOBOS
         CHECK(test_combiner_memory_draw()==0);
         CHECK(test_feedback()==0);
+        CHECK(test_linear_texture_contract()==0);
         CHECK(test_movie_textures()==0);
 #endif
         /* Teardown also owns queries which the caller has not retired. A fast

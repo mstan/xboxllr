@@ -1326,3 +1326,70 @@ every NV2A format or a complete scene. Original startup/FP handshake, object
 context transfer, tiled texture/vertex/CPU-aperture clients and title resource
 lifetime remain open. No hardware contact or new external implementation body
 was added. Stable Blinx pin remains `439a45b`; family count remains **4/9**.
+
+## Tiled color textures and matching native sampling - 2026-10-09
+
+Pitch-linear A8R8G8B8/X8R8G8B8 texture reads now consume the existing translated
+surface memory. Admission requires matching PFB/PGRAPH/RDI banks, a single-level
+2D color format, DMA A or B, an uncompressed tile and a read wholly within that
+tile. The sampler receives logical bytes from the same maintained mapper used
+by the 2D and 3D clients; it never bypasses that mapping through a direct pointer.
+This composes the existing memory and sampler models. The mirror programming
+and format fields have external source evidence; **there is no new Xbox tiled
+texture golden or hardware measurement**. Exact texture-client silicon behavior
+and broader formats remain part of the open graphics qualification.
+
+The new tests exposed two generic sampler errors, now corrected for linear
+images regardless of tiling:
+
+- Raw image reads retained guest row padding, but setup replaced their pitch
+  with `width * 4`. Sampling therefore read the wrong row after the first one.
+  Only decoded DXT/YUV output now adopts a tightly packed pitch.
+- X8R8G8B8 incorrectly sampled the stored X byte as alpha. Its private sampling
+  snapshot now supplies alpha one; guest memory is unchanged.
+
+`test_nv2a_tile_commands` runs 32 configurations: tiled/untiled, both tile-bank
+selectors, direct RAM access present/absent, DMA A/B, and ARGB/XRGB. Real blits
+populate a padded image; the texture client samples an offset subimage across
+tile boundaries; a 3D draw changes that image; a second texture draw must see
+the change. Independent coordinate formulas check both images, alpha and the
+untouched background. A held puller withholds the final report until actual
+sampling completes, yielding 4,608 samples. Seven additional rejection cases
+cover Morton, DXT, cube, mip-chain, depth, partial-entry and compressed storage;
+each leaves output/report untouched. The prior partial-exit case also passes.
+Initial wrong-row evidence is retained in `build/blinx/tiled-texture-before.log`.
+
+The Phobos-backed HLE receives an equivalent caller-visible test in
+`graphics_feedback_backend_test.inc`: padded 37x19 ARGB/XRGB uploads, actual GPU
+sampling, then GPU writes followed by sampling again. It passes across all three
+device lifetimes. Existing native row repacking and native XRGB image format
+already satisfy this contract; no HLE production change or physical tiling is
+needed. This validates the shared color/stride/update outcome without requiring
+matching internal operations.
+
+Validation:
+
+- Software NV2A/tile/compression suites: **4/4, 0.62s**. Final test-only rejection
+  additions: tile-command suite passes again in **0.23s**. Existing OpenGL skips
+  remain explicit in the software build.
+- Original query/trap/fence: nine cases in each of three lifetimes; original
+  IRQ/DPC callback fixture: **228 callbacks**, no errors. Results are
+  `gpu-completion-tiled-textures.aot-private.json` and
+  `gpu-callback-tiled-textures.aot-private.json` under `build/blinx/`.
+- Existing Xbox 2D blit golden: **140,800 exact pixels**, with 139,568 mismatches
+  for the linear negative control. This is still 2D evidence, not texture proof.
+- Native graphics ABI/scheduler and GPU transport/AV/encoder checks: **5/5,
+  3.15s**. Extended native backend test: **1/1, 1.03s**, three new contract passes.
+- Actual LLE Blinx launch: **9.531s**, exit 2, no timeout, same
+  `CX25871 standard readback requires established EN_REG_RD state` guard before
+  frames. Evidence: `build/blinx/gpu-lle-title-tiled-textures/run.aot-private.json`.
+
+Reference DLL SHA-256:
+`2e4310fef468ff272341a96076be75e1bbbacf06678c68330ae0c6e256b8b767`.
+Native backend test SHA-256:
+`9d03cfb8b4c9a47b846b4c99a4b9b6453d3e87642504ec0203bad1f3054144c9`.
+The title executable and stable game pin are unchanged. Startup/FP handshake,
+context transfer, remaining texture layouts, vertex/CPU aperture clients and
+actual-title resource lifetime stay open. Texel-center comparisons do not claim
+complete point/bilinear/mipmap behavior or asynchronous texture-cache timing.
+No console access occurred; the family count remains **4/9**.

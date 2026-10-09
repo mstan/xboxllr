@@ -65,4 +65,46 @@ static int test_feedback(void)
     fprintf(stderr,"PASS: donor GPU feedback pixels, repeat draws, bilinear texel centers, shared-stage copy, resize cache and binding order\n");
     return 0;
 }
+
+static int test_linear_texture_contract(void)
+{
+    /* Same observable color contract as the LLE tiled-texture cases: guest
+     * row padding survives upload, XRGB samples alpha one, and a later GPU
+     * write replaces an earlier sampled image. HLE needs no physical tiling. */
+    enum { width=37,height=19,stride=48 };
+    uint32_t ps[57]={0};ps[0]=0x18200000;ps[26]=0xc00;ps[34]=0x08200000;
+    ps[45]=0xc00;ps[8]=0xc;ps[9]=0x1c00;ps[53]=1;ps[54]=1;
+    CHECK(!pilot_gfx_pixel_program(ps,1));
+    uint32_t viewport[]={0,0,width,height,0,0x3f800000};CHECK(!pilot_gfx_viewport(viewport));
+    CHECK(!pilot_gfx_fvf_prepare(0x104,.53125f,.53125f));
+    struct {float x,y,z,w,u,v;} quad[]={
+        {-.53125f,-.53125f,0,1,0,0},{width-.53125f,-.53125f,0,1,width,0},
+        {width-.53125f,height-.53125f,0,1,width,height},{-.53125f,height-.53125f,0,1,0,height}};
+    uint32_t target;CHECK(!pilot_gfx_texture_create_usage(width,height,1,0x12,1,&target));
+    CHECK(!pilot_gfx_targets(target,0));
+    for(unsigned xrgb=0;xrgb<2;++xrgb) {
+        uint32_t texture;CHECK(!pilot_gfx_texture_create_usage(width,height,1,xrgb?0x1e:0x12,1,&texture));
+        uint32_t data[stride*height],observed[width*height];
+        for(unsigned i=0;i<stride*height;++i)data[i]=0xcdcdcdcd;
+        for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x)
+            data[y*stride+x]=((0x40+x+y)<<24)|(x<<16)|(y<<8)|((3*x+7*y)&255);
+        pilot_gfx_texture_prepare_sample(texture,0,data,sizeof(data),1);
+        pilot_gfx_texture_bind(0,texture);
+        for(unsigned pass=0;pass<2;++pass) {
+            if(pass)CHECK(!pilot_gfx_texture_clear(texture,0x23456789));
+            CHECK(!pilot_gfx_draw_memory(8,4,quad,sizeof(quad[0])));
+            CHECK(!pilot_gfx_texture_readback(target,0,observed,sizeof(observed)));
+            for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x) {
+                uint32_t expected=pass?0x23456789:data[y*stride+x];
+                if(xrgb)expected|=0xff000000;
+                CHECK(observed[y*width+x]==expected);
+            }
+        }
+        pilot_gfx_texture_bind(0,0);pilot_gfx_texture_destroy(texture);
+    }
+    CHECK(!pilot_gfx_targets(0,UINT32_MAX));pilot_gfx_texture_destroy(target);
+    viewport[2]=viewport[3]=64;CHECK(!pilot_gfx_viewport(viewport));pilot_gfx_pixel_fixed();
+    fprintf(stderr,"PASS: donor padded linear texture sampling, ARGB/XRGB alpha and subsequent GPU writes\n");
+    return 0;
+}
 #endif

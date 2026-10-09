@@ -390,8 +390,133 @@ static void tiled_triangles() {
     }
 }
 
+static void tiled_textures() {
+    // Render-target reuse: IMAGE_BLIT and 3D write a surface, then the texture
+    // client samples its pixels. Expected colors use logical coordinates only;
+    // no tile helper computes the expected memory or image. Untiled controls
+    // use the same padded pitch so a stride bug cannot hide behind tiling.
+    constexpr uint32_t pitch=2560,depth=0x680000,report=0x9000;
+    constexpr unsigned left=63,top=15,width=96,height=48;
+    auto pattern=[](unsigned x,unsigned y) {
+        return ((0x40u+(x+y)%160)<<24)|((x&255)<<16)|((y&255)<<8)|((3*x+7*y)&255);
+    };
+    auto bits=[](float v){uint32_t n;std::memcpy(&n,&v,4);return n;};
+    for(bool tiled:{false,true})for(unsigned bank=0;bank<2;++bank)
+    for(bool direct:{false,true})for(bool dma_b:{false,true})for(bool xrgb:{false,true}) {
+        TileFixture f(direct);
+        if(tiled) {
+            f.tile(0,f.target,f.size,pitch,1|(bank<<1));
+            f.tile(1,f.display,f.size,pitch,1|((bank^1)<<1));
+        }
+        for(unsigned y=0;y<128;++y)for(unsigned x=0;x<256;++x)
+            f.put(f.source+(y*1024+x)*4,pattern(x,y));
+        f.blit(f.source,f.target,4096,pitch,256,128);
+        f.write(0x700020,4);f.write(0x700024,0x80010022);f.write(0x700220,0x97);
+        f.emit(0,4);f.emit(0x194,3);f.emit(0x198,3);f.emit(0x1a8,3);
+        f.emit(0x184,3);f.emit(0x188,3);f.emit(0x208,0x128);
+        f.emit(0x20c,(pitch<<16)|pitch);f.emit(0x210,f.display);f.emit(0x214,depth);
+        f.emit(0x1d90,0xff102030);f.emit(0x1d98,639u<<16);f.emit(0x1d9c,479u<<16);
+        f.emit(0x1d94,0xf0);
+        for(unsigned i=0;i<16;++i)f.emit(0x0680+i*4,(i%5)==0?0x3f800000:0);
+        const uint32_t state[][2]={
+            {0x0294,0x00020001},{0x1e94,0},{0x0200,640u<<16},{0x0204,480u<<16},
+            {0x0290,0x00100001},{0x02c0,639u<<16},{0x02e0,479u<<16},
+            {0x033c,0x207},{0x0350,0x8006},{0x0354,0x201},{0x0358,0x01010101},
+            {0x035c,0},{0x030c,0},{0x037c,0x1d01},{0x038c,0x1b02},{0x0390,0x1b02},
+            {0x0394,0},{0x0398,0x4b7fffff},{0x039c,0x405},{0x03a0,0x900},{0x1d78,1},
+            {0x1e78,0x00210000},{0x1e60,1},{0x0ac0,0x08200000},{0x0260,0x18200000},
+            {0x1e40,0xc00},{0x0aa0,0xc00},{0x0288,0xc},{0x028c,0x1c80},
+            {0x17c8,1},{0x17cc,1}};
+        for(const auto& pair:state)f.emit(pair[0],pair[1]);
+        auto quad=[&](float x,float y,float w,float h,uint32_t color) {
+            f.emit(0x17fc,5);
+            for(auto uv:{std::pair{0.f,0.f},std::pair{w,0.f},std::pair{0.f,h},
+                         std::pair{w,0.f},std::pair{w,h},std::pair{0.f,h}}) {
+                f.emit(0x1a90,bits(uv.first));f.emit(0x1a94,bits(uv.second));
+                f.emit(0x1a98,0);f.emit(0x1a9c,0x3f800000);
+                f.emit(0x1518,bits(x+uv.first));f.emit(0x151c,bits(y+uv.second));
+                f.emit(0x1520,bits(10));
+                f.emit(0x194c,(color&0xff00ff00u)|((color&255)<<16)|((color>>16)&255));
+                f.emit(0x1524,0x3f800000);
+            }
+            f.emit(0x17fc,0);
+        };
+        const auto texture_address=f.target+top*pitch+left*4;
+        auto bind_texture=[&] {
+            f.emit(0x210,f.display);f.emit(0x1b00,texture_address);
+            f.emit(0x1b04,(xrgb?0x00011e28:0x00011228)|(dma_b?2:1));f.emit(0x1b08,0x00030303);
+            f.emit(0x1b0c,0x40000000);f.emit(0x1b10,pitch<<16);
+            f.emit(0x1b14,0x01010000);f.emit(0x1b1c,(width<<16)|height);
+            f.emit(0x1e70,1);f.emit(0x0ac0,0x08200000);f.emit(0x0260,0x18200000);
+        };
+        bind_texture();quad(20,10,width,height,0xffffffff);f.kick();
+        if(!f.failure.empty()) {
+            std::printf("texture client tiled=%u bank=%u direct=%u dma_b=%u: %s\n",
+                        tiled,bank,direct,dma_b,f.failure.c_str());
+            CHECK(f.failure.empty());continue;
+        }
+        // Change the already sampled image through the 3D surface client and
+        // sample again without rebinding the allocation or clearing a cache.
+        f.emit(0x210,f.target);f.emit(0x1b0c,0);f.emit(0x1e70,0);
+        f.emit(0x0ac0,0x04200000);f.emit(0x0260,0x14200000);
+        quad(64,16,32,16,0x7fe02040);
+        bind_texture();f.emit(0x17c8,1);
+        f.put(report+12,0xffffffff);f.write(0x400720,0);
+        quad(20,70,width,height,0xffffffff);f.emit(0x17d0,0x01000000|report);f.kick();
+        CHECK(f.get(report+12)==0xffffffff);
+        f.write(0x400720,1);
+        CHECK(f.failure.empty() && f.get(report+12)==0 && f.get(report+8)==width*height);
+        if(tiled)CHECK(f.direct_surface_calls==0);
+        // Readback is an actual surface transfer, not a call into the mapper.
+        constexpr uint32_t readback=0x240000;
+        f.blit(f.display,readback,pitch,pitch,640,128);
+        unsigned mismatches=0;
+        for(unsigned y=0;y<128;++y)for(unsigned x=0;x<640;++x) {
+            uint32_t expected=0xff102030;
+            for(unsigned pass=0;pass<2;++pass) {
+                const unsigned y0=10+pass*60;
+                if(x<20 || x>=20+width || y<y0 || y>=y0+height)continue;
+                const unsigned sx=left+x-20,sy=top+y-y0;
+                expected=pattern(sx,sy);
+                if(pass && sx>=64 && sx<96 && sy>=16 && sy<32)expected=0x7fe02040;
+                if(xrgb)expected|=0xff000000u;
+            }
+            const uint32_t actual=f.get(readback+(y*640+x)*4);
+            if(actual!=expected && !mismatches++)
+                std::printf("texture pixel tiled=%u at %u,%u: %08x expected %08x\n",
+                            tiled,x,y,actual,expected);
+        }
+        CHECK(!mismatches && f.failure.empty());
+        CHECK(f.get(f.target+f.size)==0xcccccccc && f.get(f.display+f.size)==0xcccccccc);
+        if(tiled && bank==0 && !direct && !dma_b && !xrgb) {
+            // Color reuse does not establish different layout/decode contracts.
+            // Each rejected draw must preserve output and withhold its report.
+            for(uint32_t format:{0x00010629u,0x00010c29u,0x0001122du,0x00021229u,0x00012e29u}) {
+                f.failure.clear();f.emit(0,4);bind_texture();
+                f.emit(0x1b04,format);f.emit(0x17c8,1);
+                const auto writes=f.writes;f.put(report+12,0xffffffff);
+                quad(20,130,width,height,0xffffffff);
+                f.emit(0x17d0,0x01000000|report);f.kick();
+                CHECK(f.failure.find("tiled texture fetch layout/extent")!=std::string::npos);
+                CHECK(f.writes==writes && f.get(report+12)==0xffffffff);
+            }
+            f.failure.clear();bind_texture();f.emit(0x1b00,f.target-4);f.emit(0x17c8,1);
+            const auto writes=f.writes;f.put(report+12,0xffffffff);
+            quad(20,130,width,height,0xffffffff);f.emit(0x17d0,0x01000000|report);f.kick();
+            CHECK(f.failure.find("tiled texture fetch layout/extent")!=std::string::npos);
+            CHECK(f.writes==writes && f.get(report+12)==0xffffffff);
+            // Even an ARGB view cannot reinterpret compressed Z24S8 storage as
+            // a color texture under this bounded client admission.
+            f.failure.clear();f.compression(0,0x84000000);bind_texture();f.emit(0x17c8,1);
+            quad(20,130,width,height,0xffffffff);f.emit(0x17d0,0x01000000|report);f.kick();
+            CHECK(f.failure.find("tiled texture fetch layout/extent")!=std::string::npos);
+            CHECK(f.writes==writes && f.get(report+12)==0xffffffff);
+        }
+    }
+}
+
 int main(int argc,char** argv) {
-    const auto output=hardware_sequence();boundaries();clear_and_scanout();compressed_depth();tiled_triangles();
+    const auto output=hardware_sequence();boundaries();clear_and_scanout();compressed_depth();tiled_triangles();tiled_textures();
     if(argc==3 && !std::strcmp(argv[1],"--hardware-rgba")) {
         std::ofstream file(argv[2],std::ios::binary);
         file.write(reinterpret_cast<const char*>(output.data()),output.size());CHECK(bool(file));

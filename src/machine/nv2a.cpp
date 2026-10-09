@@ -11350,13 +11350,34 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                     perf::ScopedAdd timer(perf::g_ns_generic_texture_dma_read,
                                           perf::g_calls_generic_texture_dma_read);
                     if(tiled_memory && ram_tile_overlap(address,read_target->size())) {
-                        fault_("NV2A tiled texture fetch is not qualified");return false;
+                        // Pitch-linear color textures consume the same logical
+                        // surface bytes as the 2D/3D clients. Matching PGRAPH,
+                        // PFB and RDI banks were checked before this draw. Keep
+                        // Morton/DXT/depth/cube layouts outside this admission;
+                        // their interpretation cannot follow from color reuse.
+                        const int tile=ram_tile_at(address);
+                        const uint32_t shape=format&~0x0000ff03u;
+                        const uint32_t dma=format&3u;
+                        if(shape!=0x00010028u || (dma!=1 && dma!=2) ||
+                           (color_code!=0x12 && color_code!=0x1e) ||
+                           raster_state[kRasterTexturePalette0+stage] || tile<0 ||
+                           pgraph_tiles_.zcomp[unsigned(tile)] ||
+                           uint64_t(address)+read_target->size()>
+                               uint64_t(pgraph_tiles_.tiles[unsigned(tile)][1])+1) {
+                            fault_("NV2A tiled texture fetch layout/extent is not qualified");return false;
+                        }
                     }
                     if (!mem_read_ ||
                         !mem_read_(address, read_target->data(), read_target->size())) {
                         fault_("NV2A generic-combiner texture DMA read failed");
                         return false;
                     }
+                }
+                if(color_code==0x1e) {
+                    // X8R8G8B8 samples have alpha one; the X byte in backing
+                    // storage is not an alpha channel. Only edit our snapshot.
+                    for(uint32_t y=0;y<ts.height;++y)for(uint32_t x=0;x<ts.width;++x)
+                        ts.data[size_t(y)*ts.pitch+x*4+3]=0xff;
                 }
                 if(packed_yuv) {
                     // Bounded BT.601 studio-range reference, independently
@@ -11405,7 +11426,10 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                                 true, false, ts.data, 0, 0, ts.pitch, color_code);
                     }
                 }
-                ts.pitch = ts.width * static_cast<uint32_t>(sizeof(uint32_t));
+                // Decoders produce tightly packed ARGB. Raw linear images
+                // retain their guest pitch, including padding and subimages.
+                if(compressed_argb8 || packed_yuv)
+                    ts.pitch = ts.width * static_cast<uint32_t>(sizeof(uint32_t));
                 ts.address_u = address_u;
                 ts.address_v = address_v;
                 ts.border = raster_state[kRasterTextureBorderColor0 + stage];

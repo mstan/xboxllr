@@ -1168,6 +1168,34 @@ encoding evidence, not NV2A silicon phase or activation semantics. The component
 requires an explicitly established active mode/origin; it does not implement
 FD6806A0, timing-bank readback, pixel scaling/serialization or board clock routing.
 
+## Tiled color texture integration and sampling contract
+
+The linear color client in `src/machine/nv2a.cpp` reuses this repository's
+already attributed tile mapper and software sampler. The new command and
+native-backend cases are independently authored; no external implementation
+body is imported by this change.
+
+- [nxdk/pbkit](https://github.com/XboxDev/nxdk/tree/29638d0b001f179b73c3513489af10ddc2986216/lib/pbkit),
+  revision `29638d0b001f179b73c3513489af10ddc2986216`: `pbkit.c` supplies the
+  PFB/PGRAPH/RDI mirror programming reference; `nv_regs.h` identifies linear
+  color formats, DMA selection and texture shape fields. Existing notices apply.
+- [nxdk_pgraph_tests](https://github.com/abaire/nxdk_pgraph_tests/tree/706a41e61188d3b08e5b1bb2a32b74ad062a883d),
+  MIT, copyright nxdk_pgraph_tests contributors: `texture_render_target_tests.cpp`
+  informed the render/write/sample-again scenario. Its shadow-comparator tests
+  redirect depth writes to separate texture memory and do not establish active
+  tiled-texture behavior. Existing CC0 blit goldens remain 2D evidence only.
+- [Phobos texture resources](https://github.com/phobos665/xboxrecomp/blob/bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0/src/d3d/d3d8_resources.c)
+  were consulted for native XRGB storage selection. The test exercises our
+  already attributed pinned private donor build; no new Phobos body is copied.
+- [XboxDev nv2a-trace Texture.py](https://github.com/XboxDev/nv2a-trace/blob/master/Texture.py)
+  was inspected on 2026-10-09 as a memory-layout reference lead. Its CPU aperture
+  comments do not establish GPU texture-client semantics, and no code is reused.
+
+The bounded integration composes existing modeled surface/texture behavior;
+these references do not replace a missing hardware texture capture. Existing
+private-pilot/GPL dependency restrictions remain in force for the intended
+non-GPL shipping product.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),
