@@ -1,6 +1,7 @@
 // Private original-kernel filesystem qualification transport. Reuses our
 // maintained IDE/PIC models; no filesystem or completion is replaced here.
-// Backing images are always read-only with the controller's real COW overlay.
+// The default is read-only/COW; the explicit writable constructor is reserved
+// for separately provisioned runtime HDDs and persistence qualification.
 #include "machine/ide.hpp"
 #include "machine/pic.hpp"
 #include <cstring>
@@ -17,11 +18,12 @@ struct Reference {
     std::string failure;
     xlle::DualPic pic;
     xlle::IdeController ide;
+    void (*external_irq)(int,int)=nullptr;
     Reference() : ide([this](const std::string& why) { if (failure.empty()) failure=why; }) {}
 };
 }
-EXPORT void* xlle_storage_create(const char* path, uint8_t* ram, uint32_t bytes,
-                                 uint16_t mask, uint16_t level) {
+static void* create_storage(const char* path,uint8_t* ram,uint32_t bytes,
+                            uint16_t mask,uint16_t level,bool writeback) {
     if (!path || !ram || bytes!=64u*1024*1024) return nullptr;
     try {
         auto owned=std::make_unique<Reference>();
@@ -30,7 +32,7 @@ EXPORT void* xlle_storage_create(const char* path, uint8_t* ram, uint32_t bytes,
         // is an explicit provisioned policy, never a fabricated unlock reply.
         xlle::HddSecurityConfig security;
         security.mode=xlle::HddSecurityConfig::Mode::Disabled;
-        if (!ref->ide.configure_hdd_security(security) || !ref->ide.attach_hdd(path, false)) {
+        if (!ref->ide.configure_hdd_security(security) || !ref->ide.attach_hdd(path, writeback)) {
             return nullptr;
         }
         auto& pic=ref->pic;
@@ -40,7 +42,9 @@ EXPORT void* xlle_storage_create(const char* path, uint8_t* ram, uint32_t bytes,
         pic.io_write(0x21,1,1); pic.io_write(0xa1,1,1);
         pic.io_write(0x4d0,1,level&255); pic.io_write(0x4d1,1,level>>8);
         pic.io_write(0x21,1,mask&255); pic.io_write(0xa1,1,mask>>8);
-        ref->ide.set_irq([ref](int irq,bool high) {ref->pic.raise(irq,high);},14);
+        ref->ide.set_irq([ref](int irq,bool high) {
+            if(ref->external_irq)ref->external_irq(irq,high);else ref->pic.raise(irq,high);
+        },14);
         ref->ide.set_dma_mem(
             [ram,bytes](uint32_t address,void* out,size_t size) {
                 if (address>bytes || size>bytes-address) return false;
@@ -52,6 +56,23 @@ EXPORT void* xlle_storage_create(const char* path, uint8_t* ram, uint32_t bytes,
             });
         return owned.release();
     } catch (...) { return nullptr; }
+}
+EXPORT void* xlle_storage_create(const char* path,uint8_t* ram,uint32_t bytes,uint16_t mask,uint16_t level) {
+    return create_storage(path,ram,bytes,mask,level,false);
+}
+EXPORT void* xlle_storage_create_writable(const char* path,uint8_t* ram,uint32_t bytes,uint16_t mask,uint16_t level) {
+    return create_storage(path,ram,bytes,mask,level,true);
+}
+EXPORT void xlle_storage_bus(void* instance,int(*read)(uint32_t,void*,size_t),
+                            int(*write)(uint32_t,const void*,size_t),void(*irq)(int,int)) {
+    auto& ref=*static_cast<Reference*>(instance);
+    if(!read || !write || !irq || ref.ide.irq_pulses()) {
+        ref.failure="invalid/late storage bus binding";return;
+    }
+    ref.external_irq=irq;
+    ref.ide.set_dma_mem(
+        [read](uint32_t a,void* b,size_t n){return read(a,b,n)!=0;},
+        [write](uint32_t a,const void* b,size_t n){return write(a,b,n)!=0;});
 }
 EXPORT void xlle_storage_destroy(void* instance) { delete static_cast<Reference*>(instance); }
 EXPORT const char* xlle_storage_error(void* instance) {

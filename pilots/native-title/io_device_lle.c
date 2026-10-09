@@ -118,10 +118,19 @@ static bool invalid_memory(uc_engine *engine,uc_mem_type type,uint64_t address,
 }
 static void forbidden(uc_engine *engine,const char *reason)
 {failure=reason;uc_emu_stop(engine);}
+#ifdef PILOT_FILES_LLE
+#include "io_storage_lle.inc"
+#endif
 static uint32_t port_in(uc_engine *engine,uint32_t port,int size,void *data)
 {
 #ifdef PILOT_USB_LLE
     uint32_t value=0;(void)data;
+#ifdef PILOT_FILES_LLE
+    if(storage.instance && storage_owns_port(port)) {
+        if(!storage.port(storage.instance,port,size,0,&value))forbidden(engine,storage.error(storage.instance));
+        return value;
+    }
+#endif
     const char *error=pilot_usb_pic_port(port,size,0,&value);
     if(error)forbidden(engine,error);
     return value;
@@ -134,6 +143,12 @@ static uint32_t port_in(uc_engine *engine,uint32_t port,int size,void *data)
 static void port_out(uc_engine *engine,uint32_t port,int size,uint32_t value,void *data)
 {
 #ifdef PILOT_USB_LLE
+#ifdef PILOT_FILES_LLE
+    if(storage.instance && storage_owns_port(port)) {
+        if(!storage.port(storage.instance,port,size,1,&value))forbidden(engine,storage.error(storage.instance));
+        return;
+    }
+#endif
     (void)data;const char *error=pilot_usb_pic_port(port,size,1,&value);
     if(error)forbidden(engine,error);
 #else
@@ -143,6 +158,25 @@ static void port_out(uc_engine *engine,uint32_t port,int size,uint32_t value,voi
 static void interrupt(uc_engine *engine,uint32_t number,void *data)
 {
     (void)data;
+#ifdef PILOT_FILES_LLE
+    if(storage.instance && number>=0x20 && number<0x40) {
+        uint32_t gate=0x8003dcc0u+number*8,low=kernel_word(gate),high=kernel_word(gate+4);
+        if((low>>16)==8 && (high&65535)==0x8e00) {
+            uint32_t sp,frame[3],flags,entry=(low&65535)|(high&0xffff0000u);
+            uc_err e=uc_reg_read(engine,UC_X86_REG_ESP,&sp);
+            if(!e)e=uc_reg_read(engine,UC_X86_REG_EIP,frame);
+            if(!e)e=uc_reg_read(engine,UC_X86_REG_CS,frame+1);
+            if(!e)e=uc_reg_read(engine,UC_X86_REG_EFLAGS,frame+2);
+            sp-=12;flags=frame[2]&~(0x100u|0x200u|0x4000u|0x10000u|0x20000u);
+            if(!e)e=uc_mem_write(engine,sp,frame,sizeof(frame));
+            if(!e)e=uc_reg_write(engine,UC_X86_REG_ESP,&sp);
+            if(!e)e=uc_reg_write(engine,UC_X86_REG_EFLAGS,&flags);
+            if(!e)e=uc_reg_write(engine,UC_X86_REG_EIP,&entry);
+            if(e)forbidden(engine,uc_strerror(e));
+            return;
+        }
+    }
+#endif
     /* The original lower-IRQL routine replays a deferred hardware vector
      * through INT n. Deliver through its actual IDT; do not acknowledge the
      * PIC a second time. Unicorn delegates INT to this hook. */
@@ -172,6 +206,12 @@ static void interrupt(uc_engine *engine,uint32_t number,void *data)
 static void code_block(uc_engine *engine,uint64_t address,uint32_t size,void *data)
 {
     (void)size;(void)data;
+#ifdef PILOT_FILES_LLE
+    if(storage.instance && pilot_usb_pic_vector(0)>=0) {
+        uint32_t flags=0;uc_reg_read(engine,UC_X86_REG_EFLAGS,&flags);
+        if(flags&0x200){storage_irq_pending=1;uc_emu_stop(engine);return;}
+    }
+#endif
     if(address>=0x80010000u && address<0x80080000u)return;
     for(unsigned i=0;i<16;++i)if(interrupt_objects[i]) {
         uint32_t object=interrupt_objects[i],routine=0;
@@ -386,11 +426,22 @@ static void run_original(uint32_t entry,size_t instruction_limit)
     /* Never re-enter uc_emu_start from a hook. At an actual ISR call, stop,
      * run its generated body over shared bytes, then restore this CPU. A
      * nested original service has its own stack and saved engine context. */
-    for(unsigned calls=0;calls<1024;++calls) {
+    for(unsigned calls=0;calls<8192;++calls) {
         pending_callback=0;
+#ifdef PILOT_FILES_LLE
+        storage_irq_pending=0;
+#endif
         uc_err error=uc_emu_start(cpu,entry,RETURN_PC,0,instruction_limit);
         if(failure)return;
         if(error){failure=uc_strerror(error);return;}
+#ifdef PILOT_FILES_LLE
+        if(storage_irq_pending) {
+            int vector=pilot_usb_pic_vector(1);
+            if(vector<0){failure="storage LLE PIC changed before INTA";return;}
+            interrupt(cpu,(uint32_t)vector,NULL);if(failure)return;
+            IO_UC(uc_reg_read(cpu,UC_X86_REG_EIP,&entry));continue;
+        }
+#endif
         if(!pending_callback)return;
         uint32_t routine=pending_callback,regs[8],return_pc;
         for(unsigned i=0;i<8;++i)IO_UC(uc_reg_read(cpu,general_regs[i],regs+i));
@@ -439,11 +490,34 @@ static void image_vm(uint32_t base,uint32_t bytes,uint32_t type)
 static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
 {
     unsigned pin_slot=MAX_PUBLISHED;
+#ifdef PILOT_FILES_LLE
+    /* File-driver DMA can pin loader/stack pages internally, without a title
+     * MmLockUnlockBufferPages call. Materialize only owned resident pages via
+     * the real VM before the driver walks those PTEs. Heap pages are already
+     * published by the original allocator. */
+    if(ordinal==219 || ordinal==236 || ordinal==196 || ordinal==200) {
+        uint32_t base=ordinal==219 || ordinal==236?args[5]:args[8];
+        uint32_t bytes=ordinal==219 || ordinal==236?args[6]:args[9];
+        if((uint64_t)base+bytes>0x100000000ull){failure="storage LLE buffer wraps guest RAM";return;}
+        for(uint64_t page=base&~4095u;bytes && page<(uint64_t)base+bytes;page+=4096) {
+            if(publication_slot((uint32_t)page)==published_count && caller_owned((uint32_t)page,4096) && guest_page((uint32_t)page)) {
+                image_vm((uint32_t)page,4096,MEM_COMMIT);if(failure)return;
+            }
+        }
+    }
+#endif
     if(ordinal!=1 && ordinal!=4 && ordinal!=14 && ordinal!=15 && ordinal!=17 && ordinal!=23 &&
        ordinal!=44 && ordinal!=47 && ordinal!=65 && ordinal!=68 && ordinal!=107 && ordinal!=108 && ordinal!=109 && ordinal!=166 &&
        ordinal!=171 && ordinal!=173 && ordinal!=175 && ordinal!=178 && ordinal!=179 && ordinal!=180 && ordinal!=181 && ordinal!=182 &&
        ordinal!=98 && ordinal!=100 && ordinal!=103 && ordinal!=129 && ordinal!=151 &&
-       ordinal!=160 && ordinal!=161 && ordinal!=184 && ordinal!=199 && ordinal!=204 && ordinal!=217) {
+       ordinal!=160 && ordinal!=161 && ordinal!=184 && ordinal!=199 && ordinal!=204 && ordinal!=217
+#ifdef PILOT_FILES_LLE
+       && ordinal!=35 && ordinal!=36 && ordinal!=37 && ordinal!=67 && ordinal!=69 && ordinal!=148 &&
+       ordinal!=186 && ordinal!=187 && ordinal!=189 && ordinal!=190 && ordinal!=196 && ordinal!=198 &&
+       ordinal!=200 && ordinal!=202 && ordinal!=203 && ordinal!=207 && ordinal!=209 && ordinal!=211 &&
+       ordinal!=215 && ordinal!=218 && ordinal!=219 && ordinal!=225 && ordinal!=226 && ordinal!=233 && ordinal!=236
+#endif
+       ) {
         failure="device LLE unsupported ordinal";return;
     }
     if(ordinal==173 || ordinal==175) {
@@ -493,12 +567,25 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
                    (ordinal==107 || ordinal==108 || ordinal==175 || ordinal==178 || ordinal==182 || ordinal==199)?3:
                    (ordinal==15 || ordinal==44 || ordinal==47 || ordinal==217)?2:
                    (ordinal==1 || ordinal==103 || ordinal==129 || ordinal==160 || ordinal==161)?0:1;
+#ifdef PILOT_FILES_LLE
+    switch(ordinal) {
+    case 35:case 36:count=0;break;
+    case 67:case 148:case 198:case 203:case 209:case 225:count=2;break;
+    case 215:case 233:count=3;break;
+    case 189:count=4;break;
+    case 211:case 218:case 226:count=5;break;
+    case 202:count=6;break;
+    case 219:case 236:count=8;break;
+    case 190:count=9;break;
+    case 196:case 200:case 207:count=10;break;
+    }
+#endif
     if(ordinal==160 || ordinal==161) {
         uint32_t level=args[0]&255;
         if(level>31){failure="device LLE IRQL out of range";return;}
         IO_UC(uc_reg_write(cpu,UC_X86_REG_ECX,&level));
     }
-    uint32_t words[8]={RETURN_PC},stack=STACK+(execution_depth-1)*0x4000u;
+    uint32_t words[11]={RETURN_PC},stack=STACK+(execution_depth-1)*0x4000u;
     uint32_t sp=stack,observed,flags=2u|(caller_if?0x200u:0);
     memcpy(words+1,args,count*4);
     IO_UC(uc_mem_write(cpu,stack,words,(count+1)*4));
@@ -623,6 +710,39 @@ const char *pilot_io_device_lle(unsigned ordinal,unsigned char *guest,
     const char *error=failure; /* An incomplete service poisons this context. */
     ReleaseSRWLockExclusive(&lock);return error;
 }
+
+#ifdef PILOT_FILES_LLE
+const char *pilot_io_device_file_data(unsigned ordinal,uint32_t *value)
+{
+    AcquireSRWLockExclusive(&lock);
+    if(!guest_memory || ordinal!=40 || !value)failure="storage LLE unsupported data export";
+    if(!failure) {
+        uint32_t pe=kernel_word(0x8001003cu),exports=0x80010000u+kernel_word(0x80010000u+pe+120);
+        uint32_t base=kernel_word(exports+16),table=0x80010000u+kernel_word(exports+28);
+        uint32_t address=0x80010000u+kernel_word(table+4*(ordinal-base));
+        if(!failure)*value=kernel_word(address);
+    }
+    const char *error=failure;ReleaseSRWLockExclusive(&lock);return error;
+}
+const char *pilot_io_device_files(unsigned char *guest)
+{
+    AcquireSRWLockExclusive(&lock);
+    if(!guest_memory)initialize(guest);
+    if(!failure && guest_memory!=guest)failure="storage LLE guest address space changed";
+    if(!failure && !storage.ready) {
+        storage_initialize();
+        if(!failure) {
+            uint32_t args[]={kernel_word(0x8003da64u),31},result=0;
+            ++execution_depth;
+            if(!failure)execute(148,args,&result);
+            if(!failure)execute(36,args,&result);
+            --execution_depth;
+            if(!failure)storage.ready=1;
+        }
+    }
+    const char *error=failure;ReleaseSRWLockExclusive(&lock);return error;
+}
+#endif
 
 const char *pilot_io_device_image(unsigned char *guest,uint32_t base,uint32_t bytes)
 {

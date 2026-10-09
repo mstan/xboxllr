@@ -180,6 +180,18 @@ static void scheduler_callback_enter(void)
 }
 static int scheduler_kernel_blocks(unsigned ordinal)
 {
+#ifdef PILOT_FILES_LLE
+    /* These calls execute a real console CPU over shared original RAM/PTEs.
+     * Keep the native guest CPU parked until that bounded original call has
+     * returned. Native host I/O below still yields while the OS does its work. */
+    switch(ordinal) {
+    case 190:case 196:case 198:case 200:case 202:case 207:case 211:case 218:case 219:case 226:case 236:
+        return 0;
+    case 233:case 234:
+        if(MEM32(g_esp+4)<0x30000000u)return 0;
+        break;
+    }
+#endif
     switch(ordinal) {
     case 190:case 198:case 202:case 207:case 211:case 218:case 219:case 226:case 236:
     case 158:case 159:case 233:case 234:case 277:case 327:case 328:

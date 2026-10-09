@@ -831,6 +831,21 @@ and field descriptions; original execution, rather than those implementations,
 establishes the recorded return/memory/notification effects. See
 [FILES-LLE.md](pilots/native-title/FILES-LLE.md) for exact inputs and limits.
 
+The original-files runtime adapter additionally consults Phobos's
+`kernel_hal.c` and `kernel_thunks.c` at that revision for the ordinal 40 data
+export shape. Its value is read from the owned original kernel; the donor's
+virtual-disk constant is not substituted. Shared RAM/PIC, file/event ABI
+transport and tests are authored here.
+
+The external [mborgerson/fatx](https://github.com/mborgerson/fatx) preparation
+tool at `baed16e3a2d62fc247f2bd6a3ed5deffe75da150` (Matt Borgerson and
+contributors, GPL-2.0-or-later) prepares a private installed-title HDD. A local
+directory-boundary repair and its source identity remain in private preparation
+artifacts. `native_hdd_install.py` is an authored orchestration/readback script.
+No libfatx implementation body, binary or patch is linked/copied into the
+intended non-GPL shipping product. FATX at runtime executes the owned original
+kernel over the previously maintained private reference hardware dependency.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

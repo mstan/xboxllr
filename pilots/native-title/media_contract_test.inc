@@ -53,7 +53,8 @@ static void test_media(void)
     call_kernel(211,query,5); CHECK(!g_eax && MEM64(info)==11 && MEM32(iosb+4)==8);
     read[7]=0; read[6]=16;
     call_kernel(219,read,8); CHECK(!g_eax && MEM32(iosb+4)==9 && !memcmp(memory+buffer,content+11,9));
-    call_kernel(219,read,8); CHECK(g_eax==0xc0000011u && MEM32(iosb)==g_eax && MEM32(iosb+4)==0);
+    MEM32(iosb)=0xdeadbeef;MEM32(iosb+4)=0x12345678;
+    call_kernel(219,read,8); CHECK(g_eax==0xc0000011u && MEM32(iosb)==0xdeadbeef && MEM32(iosb+4)==0x12345678);
     MEM64(info)=5;
     call_kernel(226,query,5); CHECK(!g_eax);
     read[6]=2; call_kernel(219,read,8); CHECK(!g_eax && !memcmp(memory+buffer,content+5,2));
@@ -66,7 +67,9 @@ static void test_media(void)
     call_kernel(219,read,8); CHECK(g_eax==MEDIA_BAD_HANDLE && MEM32(iosb)==g_eax);
 
     test_media_name("D:\\absent",0); MEM32(out)=0xfeed1234;
-    call_kernel(202,open,6); CHECK(g_eax==0xc0000034u && MEM32(out)==0xfeed1234 && MEM32(iosb)==g_eax);
+    MEM32(iosb)=0xdeadbeef;MEM32(iosb+4)=0x12345678;
+    call_kernel(202,open,6); CHECK(g_eax==0xc0000034u && MEM32(out)==0xfeed1234 &&
+                                MEM32(iosb)==0xdeadbeef && MEM32(iosb+4)==0x12345678);
     test_media_name("D:\\..\\asset.bin",0);
     call_kernel(202,open,6); CHECK(g_eax==0xc0000033u && MEM32(out)==0xfeed1234);
     test_media_name("D:\\asset.bin",0); open[1]=GENERIC_WRITE|SYNCHRONIZE;

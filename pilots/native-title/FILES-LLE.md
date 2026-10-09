@@ -3,8 +3,9 @@
 Active serial family `beads-xbox.1.108`, after memory `.106`. Six of nine family
 gates remain open. This checkpoint executes original filesystem operations in
 a maintained reference runner and corrects native asynchronous notification.
-**The title-selected LLE file route is not integrated yet.** Reference cases
-alone do not close this family.
+The title-selected original file/cache route now reaches Demo play, Start/title
+return and Demo reentry. Cross-process persistence passes. Remaining contract
+qualification is still open; this milestone alone does not close the family.
 
 ## Executable floor and independent evidence
 
@@ -94,12 +95,11 @@ title run, new cadence measurement or endurance plateau.
 
 ## Remaining family work and observed differences
 
-Connect original file/cache execution to the title-selected service boundary,
-including installed-media identity/mounts, namespace/handle ownership, actual
-title read/write modes, directories, completion transport and repeated lifetime.
-Use a separate writable reference image for persistence qualification. Preserve
-the approved installed-media authentication policy and the optical reference;
-no fake drive authentication response is introduced here.
+Qualify the connected original route across the actual attract sequence,
+namespace/handle ownership, title read/write modes, directories, completion
+transport, repeated lifetime and persistence. Preserve the approved installed-
+media authentication policy and the optical reference; no fake drive
+authentication response is introduced here.
 
 Further independently observed differences await the broader contract pass:
 
@@ -110,15 +110,112 @@ Further independently observed differences await the broader contract pass:
   one cache page suffices. Native can directly read without an internal cache
   allocation. Different implementation resource costs require explicit contract
   treatment, not artificial HLE allocation failure solely to mimic internals.
-- Synchronous EOF and missing opens also preserve the tested IOSB. The native
-  synchronous/general-open error publication has not yet been reconciled.
+- Synchronous EOF and rejected opens preserve the tested IOSB. Native open
+  rejection and synchronous EOF now preserve it too; sentinel tests cover the
+  returned status, untouched output handle and both IOSB words. All four
+  focused media/storage/cache tests pass (1.29s). Broader error/metadata
+  publication remains part of the unfinished contract pass.
 - Broader directory enumeration, mount/repeated teardown, cross-run durability,
-  pending error timing, cancellation and the title-selected original route
-  remain open. Blinx's extracted 3,197 files total 2,235,000,402 bytes and have
-  no file names over FATX's 42-byte component limit in the current audit. A
-  title-specific installation on a separate HDD image is not yet provisioned.
+  pending error timing, cancellation and final title-route qualification remain
+  open beyond the qualified two-process write/read/delete check below. The
+  separate HDD installation now contains all 3,197 extracted files,
+  totaling 2,235,000,402 bytes, verified after image close/reopen.
 
 Phobos remains the native file/path donor reference. Its current Fsc bridge
 only stores a page count and cannot provide this executable cache floor; its
 host-file strategies remain useful after qualifying their observable boundary.
 No new donor implementation body is copied by this checkpoint.
+
+## Original files in the title runtime
+
+`PILOT_FILES=LLE` selects `files_lle.inc` plus the shared original kernel/RAM/PIC
+transport in `io_device_lle.c`. It requires original memory/device services,
+`PILOT_CACHE=ORIGINAL` and the approved `PILOT_MEDIA=INSTALLED` policy. Renderer,
+audio and input may remain native. All selections are made at build time.
+
+The disk library is loaded from explicit private paths. Its writable constructor
+opens a separately provisioned HDD; the existing reference constructor remains
+read-only/COW. DMA follows the same original physical pages and native aliases
+as the allocator. Original IDT gates, ISR/DPC routines and completion code run.
+The captured worker uses original priority 31, as in the independent fixture;
+this is not qualification of whole-console scheduling under contention.
+
+Actual original handles cross the file/namespace boundary. Native event handles
+belong to the separately selected scheduling family. The adapter queries their
+real state, uses actual original events during I/O, then transfers the observed
+completion state. The current controller completes DMA within the original
+call. Unfinished pending requests and guest APC callbacks explicitly stop;
+their broader transport remains unqualified. No IOSB, completed count or
+notification is manufactured. The original kernel owns byte copying and file
+position. Guest CPU scheduling stays exclusive during original CPU execution.
+
+Installed-media policy mounts `D:` on the configured HDD title root and maps an
+original `CdRom0` link request to that root. Identity verification reads/hashes
+the actual installed `default.xbe` through original Nt/FATX/IDE. This remains
+the approved installed-media exception, not optical drive authentication.
+Original `XMountUtilityDrive` executes its actual disk/cache work. Its ordinal
+40 dependency is a data export: Phobos independently confirms that ABI shape,
+and this route takes the value from the original initialized kernel.
+
+Private configuration additions to the existing memory-LLE build:
+
+```text
+PILOT_FILES=LLE
+PILOT_CACHE=ORIGINAL
+PILOT_FILES_LIBRARY=<private build>/libxlle_storage_reference.dll
+PILOT_FILES_DEPENDENCIES=C:/msys64/mingw64/bin
+PILOT_FILES_HDD=<separate writable installed-title HDD>
+PILOT_FILES_TITLE_ROOT=\Device\Harddisk0\Partition1\Titles\4D530013
+```
+
+The shared transport test `pilot_files_lle_test <extracted default.xbe>` reads
+all 44,724,224 XBE bytes through original FATX/cache/IDE and compares them with
+the independent extracted input. The existing COW fixture still passes with
+756 original interrupt deliveries, 6,544 read sectors and 24 overlay writes.
+The combined existing contract suite passes 46/46 in 22.44s; its file tests
+exercise native files, while the new standalone test exercises original files.
+Do not conflate those two test selections.
+
+Actual title evidence: `files-lle-attract-qualification` ran **360.203s**, with
+35 captures and no guards, reaching Demo play, later movies and another cycle.
+Review then retained guest CPU ownership during original file execution.
+The final `files-lle-final-attract` run passed **240.157s**, 23 captures, no
+guards. Inspected captures 8/13/18/23 show Demo, title after Start, Demo reentry
+and continued gameplay. Final executable SHA-256:
+`f0f5058b563c88758550525a97e21af7a9487abe050e6a58a41535d990450be3`.
+Both exit codes 1 are intentional harness deadline termination. This is
+correctness-route progress, not a new cadence measurement or endurance plateau;
+host retention remains `.107`. The native standalone suite passes 38/38 in
+17.32s; game-owned native adoption/regression is recorded separately.
+
+Cross-process persistence is also exercised through that same runtime bridge:
+
+```text
+pilot_files_lle_test <extracted default.xbe> write
+pilot_files_lle_test <extracted default.xbe> verify-delete
+```
+
+The first process creates a new fixture, writes/flushes/closes 9,001 deterministic
+bytes. An independent offline FATX read matches them. The second process reads
+the exact persisted bytes, applies original delete disposition, closes and
+confirms the name is missing. Both processes independently repeat the complete
+XBE comparison. This qualifies ordinary cross-process durability, not host
+power-loss guarantees. The image must not be in use by a title during these
+tests. Existing fixtures are never silently overwritten.
+
+`tools/native_hdd_install.py` uses externally prepared pyfatx solely as an asset
+tool. It refuses existing outputs, verifies the selected XBE and all file
+hashes, writes actual FATX entries, then closes/reopens and verifies every file.
+The qualified private v3 image initially hashes to
+`0fe3e1985c3bf31130838705ebca90bc1d0ef3fef17f7cdf680664e7dbc46b9f`.
+Runtime writes legitimately change that hash.
+
+The external `mborgerson/fatx` checkout is pinned to
+`baed16e3a2d62fc247f2bd6a3ed5deffe75da150`. Its directory allocator mishandles
+the last slot/end marker at a cluster boundary, first observed at the 257th
+entry in Blinx's media directory. A local preparation-only repair advances the
+entry and end marker into the next cluster correctly. A 600-file directory
+survives close/reopen before the full installation is attempted. Rebuilding
+the static library also requires relinking the cached CFFI extension. Modified
+source identity is retained in the private image manifest. Neither that GPL
+implementation nor its patch is incorporated into the shipping runtime.

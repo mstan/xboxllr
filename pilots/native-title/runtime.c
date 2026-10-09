@@ -385,6 +385,9 @@ static void query_setting(void)
 #include "sections.inc"
 #include "media.inc"
 #include "cache.inc"
+#ifdef PILOT_FILES_LLE
+#include "files_lle.inc"
+#endif
 #include "memory_statistics.inc"
 #include "thread_objects.inc"
 #ifdef PILOT_AUDIO_NATIVE
@@ -399,6 +402,9 @@ static void query_setting(void)
 
 static void kernel_dispatch_impl(void)
 {
+#ifdef PILOT_FILES_LLE
+    if(files_lle_kernel(next_kernel_ordinal))return;
+#endif
     const char *name = "unknown ordinal";
     for (size_t i=0; i<sizeof(pilot_imports)/sizeof(pilot_imports[0]); ++i)
         if (pilot_imports[i].ordinal == next_kernel_ordinal) name=pilot_imports[i].name;
@@ -780,9 +786,13 @@ int main(int argc,char **argv)
         fclose(input); have_eeprom=1;
     }
     load_image(argv[1]);
+#ifdef PILOT_FILES_LLE
+    files_lle_start();
+#else
     if (argc>=4) media_content_path=argv[3];
     if (argc==5) storage_mount(argv[4]);
     fsc_ensure();
+#endif
 #ifdef PILOT_MEDIA_INSTALLED
     fprintf(stderr,"[MEDIA POLICY] installed-title HLE; optical authentication is not asserted\n");
 #else

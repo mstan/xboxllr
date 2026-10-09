@@ -11,6 +11,12 @@
  * unsupported execution; it never substitutes successful completion. */
 const char *pilot_io_device_lle(unsigned ordinal, unsigned char *guest,
                                const uint32_t *args, uint32_t *result);
+/* Attach the explicitly selected private writable HDD. Original file/cache
+ * work runs on the captured worker, raised through KeSetPriorityThread so
+ * unrelated captured boot workers cannot preempt this bounded reference. */
+const char *pilot_io_device_files(unsigned char *guest);
+/* Immutable boot-derived ULONG export, presently HalDiskCachePartitionCount. */
+const char *pilot_io_device_file_data(unsigned ordinal,uint32_t *value);
 /* Execute a registered original ISR body through its existing AOT binding.
  * Registers are x86 EAX,ECX,EDX,EBX,ESP,EBP,ESI,EDI. The kernel owns the
  * interrupt frame, priority transitions and EOI; callback owns its real body. */

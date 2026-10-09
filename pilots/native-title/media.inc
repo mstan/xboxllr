@@ -168,7 +168,12 @@ static void media_verify_abi(const char *expected)
     fprintf(stderr,"[MEDIA VERIFY] installed default.xbe identity/status=%08x\n",g_eax);
     g_esp+=4; /* original no-argument RET; all nonvolatile guest registers intact */
 }
+#ifdef PILOT_FILES_LLE
+static void files_verify_abi(const char *expected);
+void pilot_verify_installed_media(void) { files_verify_abi(PILOT_XBE_SHA256); }
+#else
 void pilot_verify_installed_media(void) { media_verify_abi(PILOT_XBE_SHA256); }
+#endif
 static struct MediaFile *media_owned(uint32_t id)
 {
     for (unsigned i=0;i<256;++i) if (media_files[i].host && media_files[i].id==id) return &media_files[i];
@@ -335,7 +340,7 @@ static uint32_t media_open(uint32_t *args,int create)
                 if(media_files[slot].async_idle)CloseHandle(media_files[slot].async_idle);
                 if(media_files[slot].async_signal)CloseHandle(media_files[slot].async_signal);
                 media_files[slot].async_idle=media_files[slot].async_signal=NULL;
-                CloseHandle(handle);media_iosb(iosb,0xc000009au,0);return 0xc000009au;
+                CloseHandle(handle);return 0xc000009au;
             }
         }
         media_files[slot].host=handle; media_files[slot].id=media_next_id++;media_files[slot].access=granted_access;
@@ -346,7 +351,9 @@ static uint32_t media_open(uint32_t *args,int create)
         InitializeSRWLock(&media_files[slot].io_lock);
         MEM32(out)=media_files[slot].id;
     }
-    media_iosb(iosb,status,status ? 0 : io.Information);
+    /* Original Nt open/create rejection preserves caller IOSB and output
+     * handle. Only publish after a real file object has been acquired. */
+    if(!status)media_iosb(iosb,0,io.Information);
     return status;
 }
 #include "directory.inc"
@@ -429,7 +436,10 @@ static void media_kernel(unsigned ordinal)
             if (g_eax==0x103u && !async_delivery) stop("synchronous file operation unexpectedly pending",ordinal);
             ReleaseSRWLockExclusive(&owned->io_lock);
         }
-        if (iosb && !async_delivery) media_iosb(iosb,g_eax,io.Information);
+        /* Original synchronous FATX EOF is immediate rejection, not a new
+         * zero-byte completion. Preserve the caller's existing IOSB. */
+        if (iosb && !async_delivery && !(transfer && g_eax==0xc0000011u))
+            media_iosb(iosb,g_eax,io.Information);
         if (transfer && !async_delivery) fprintf(stderr,"[FILE TRANSFER] ordinal=%u handle=%08x requested=%u completed=%llu status=%08x\n",
                               ordinal,a[0],a[6],(unsigned long long)io.Information,g_eax);
     }

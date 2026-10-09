@@ -93,7 +93,9 @@ static void test_file_cache(void)
     CHECK(!g_eax && fsc_test_reads==misses+1 && !memcmp(memory+buffer,"updated",7));
     MEM64(info)=5; query[4]=20; call_kernel(226,query,5); CHECK(!g_eax);
     call_kernel(219,read,8); CHECK(!g_eax && MEM32(iosb+4)==5 && !memcmp(memory+buffer,"updat",5));
-    read[7]=0; call_kernel(219,read,8); CHECK(g_eax==0xc0000011u && !MEM32(iosb+4));
+    MEM32(iosb)=0xdeadbeef;MEM32(iosb+4)=0x12345678;
+    read[7]=0; call_kernel(219,read,8);
+    CHECK(g_eax==0xc0000011u && MEM32(iosb)==0xdeadbeef && MEM32(iosb+4)==0x12345678);
     MEM64(info)=20; call_kernel(226,query,5); CHECK(!g_eax);
     read[7]=offset; MEM64(offset)=5; read[6]=15; memset(memory+buffer,0xcc,16);
     call_kernel(219,read,8); CHECK(!g_eax && MEM32(iosb+4)==15 && MEM8(buffer+15)==0xcc);
