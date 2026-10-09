@@ -41,9 +41,15 @@ static void test_pgraph_setup() {
     CHECK(read(0x400904)==0 && read(0x100244)==0x1000 && read(0x7110a0)==0x12345678);
     write(0x200,0xffffffff);
     CHECK(failure.empty());
-    write(0x100240,2);CHECK(!failure.empty() && read(0x100240)==0);failure.clear();
-    write(0x400750,0xea0010);write(0x400754,2);
-    CHECK(!failure.empty() && read(0x400750)==0xea0010);failure.clear();
+    for(uint32_t flags : {1u,2u,3u}) {
+        write(0x100240,0x10000|flags);
+        CHECK(!failure.empty() && read(0x100240)==0);failure.clear();
+        write(0x400900,0x10000|flags);
+        CHECK(!failure.empty() && read(0x400900)==0);failure.clear();
+        write(0x400750,0xea0010);write(0x400754,0x10000|flags);
+        CHECK(!failure.empty() && read(0x400750)==0xea0010);failure.clear();
+        CHECK(read(0x400754)==0);
+    }
     write(0x40008c,0);CHECK(!failure.empty() && !read(0x40008c));failure.clear();
     write(0x400750,0xea0008);read(0x400754);CHECK(!failure.empty());
 }

@@ -967,6 +967,36 @@ investigation leads with unresolved client-specific behavior, not claimed
 hardware qualification. No tile implementation was incorporated in this
 checkpoint; existing GPL code remains external reference material.
 
+## Adapted envytools tile address layout and public hardware evidence
+
+`src/machine/nv2a_tile_layout.hpp` **contains adapted implementation code** from
+envytools `nvhw/tile.c` at
+`f102b82381f3f11cee113d16374c87091db039d9`, copyright 2012 Marcelina
+Kościelnicka. It specializes the NV20 uncompressed address interleave for the
+bounded Xbox geometry and adds checked configuration/overflow handling. The
+full MIT permission and disclaimer are retained in the source header.
+`hwtest/nv10_tile.cc` and its memory-controller field descriptions also inform
+qualification. This is distinct from the earlier reference-only consultations.
+The component has not yet been connected to the production RAM clients.
+
+Hardware expectations come from Erik Abair and contributors'
+[nxdk_pgraph_tests_golden_results](https://github.com/abaire/nxdk_pgraph_tests_golden_results/tree/06b041d6a50c060b4974d93617405f86a03a0b8f),
+`results/Image_blit/BlitBeyondWidth.png` (CC0-1.0). The capture remains unchanged
+under private `build/`; maintained tests contain a small set of its expected
+pixel values and the verifier checks its pinned hash. No game assets are used.
+
+The authored fixture follows the hardware procedure in
+[nxdk_pgraph_tests](https://github.com/abaire/nxdk_pgraph_tests/tree/706a41e61188d3b08e5b1bb2a32b74ad062a883d),
+`src/tests/image_blit_tests.cpp:TestBlitPastWidth` (MIT, copyright 2023
+nxdk_pgraph_tests contributors). Its RGB source-pattern definition comes from
+pbkitplusplus `72600fab67a9972fe2d3a1c6937f64e99dfa5290`,
+`src/texture_generator.cpp:GenerateRGBTestPattern`; credit belongs to Erik
+Abair and the pbkitplusplus contributors. No donor test implementation body is
+copied. The test's pinned nxdk/pbkit at
+`e22ab118fe9afbf5a3f51c47d70e9d3a5c516d6d` supplies the historical tile-flag
+sequence. Hardware qualification and its limits are recorded in
+`GPU-COMPLETION-LLE.md`; no GPL implementation body is incorporated here.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

@@ -448,3 +448,77 @@ client/address distinction before adopting either representation. A successful
 register write alone must not silently enable identity-addressed rendering.
 No tile guard was relaxed, new hardware contacted, or GPL implementation body
 copied during this investigation. Family count remains 4/9 qualified.
+
+## Tile enable correction and hardware-qualified address-layout component
+
+Further inspection of original `sub_0013C3DF` establishes that it writes
+`base|1` for color tiles and `base|3` for depth tiles. Our earlier `value&2`
+guard mistakenly allowed active color tiles. All three banks now reject both
+low flag bits until their memory clients are connected. Tests cover flags
+1/2/3 through PFB, PGRAPH and RDI, preserving rejected state and RDI index.
+Final actual run `gpu-lle-title-tile-enable-contract` exits 2 after 18.641s at
+`FD400900=036BC001`, immediately after the 2,457,600-byte color allocation.
+The earlier stop at depth-tile setup was not proof of working color tiling.
+Bootstrap/graphics interrupts still execute; there are no rendered frames.
+
+Reuse now supplies a concrete address-layout component:
+
+- `src/machine/nv2a_tile_layout.hpp` adapts the MIT-licensed envytools NV20
+  address translation, with its complete notice retained. The scoped Xbox
+  layout uses two partition bits, 4-KiB banks and the selected bank XOR.
+  This is tile memory addressing, distinct from Morton-swizzled textures.
+- The generic envytools IGP setup clears the memory-controller configuration,
+  which does not reproduce the Xbox capture. The NV20 two-partition-bit layout
+  does; original PFB config `03070003` also selects two partition bits under
+  envytools' NV20 field description. This selection was made using the public
+  hardware result, not an independent blind/holdout test. It does not establish
+  every NV2A memory-controller mode.
+- The independent expectation is `Image_blit/BlitBeyondWidth.png` from
+  [Xbox 1.0 hardware results](https://github.com/abaire/nxdk_pgraph_tests_golden_results/blob/06b041d6a50c060b4974d93617405f86a03a0b8f/results/Image_blit/BlitBeyondWidth.png),
+  repository revision `06b041d6a50c060b4974d93617405f86a03a0b8f` (CC0), PNG
+  SHA-256 `d5e8cfbd7cd6c8a229236c38fd50c4decafef145391f3f0bdc6c34018051a513`.
+  The image visibly records successful tile guard preservation and overdraw
+  into the untiled guard, plus the raw tile-swizzled image.
+- The corresponding test procedure is `TestBlitPastWidth` in
+  `nxdk_pgraph_tests` revision `706a41e61188d3b08e5b1bb2a32b74ad062a883d`.
+  It explicitly calls pbkit's historical framebuffer flags incorrect, resolving
+  why that sequence differed from the original driver. Its pinned nxdk is
+  `e22ab118fe9afbf5a3f51c47d70e9d3a5c516d6d`; source-pattern helper is
+  pbkitplusplus `72600fab67a9972fe2d3a1c6937f64e99dfa5290`.
+  The capture has no embedded test-executable identity; source/capture pins are
+  recorded separately rather than claiming an exact matching historical build.
+- `test_nv2a_tile_layout` reproduces the tile write and raw readback with the
+  maintained mapper. It also checks both banks, nine pitches, full two-row-group
+  byte bijections, byte preservation, invalid configuration and address overflow.
+  These properties test the broader algorithm but do not extend hardware
+  qualification beyond the captured pitch-2560/bank-1 case.
+- `native_gpu_tile_reference.py` verifies the original PNG hash, executes the
+  compiled fixture and compares RGBA exactly in two fixed rectangles outside
+  the explanatory text. All **140,800 pixels match**, including all 1,024 guard
+  pixels. Linear storage fails at **139,568** of those pixels. Expected pixels
+  are read from the capture; no expected image is regenerated from our code.
+
+Reproduce with the downloaded, unmodified pinned PNG:
+
+```powershell
+cmake --build build/visibility-lle --target test_nv2a_tile_layout
+$env:PATH='C:/msys64/mingw64/bin;'+$env:PATH
+py -3 tools/native_gpu_tile_reference.py --fixture build/visibility-lle/test_nv2a_tile_layout.exe --golden build/blinx/tile-reference/BlitBeyondWidth.png --output build/blinx/tile-reference/layout-hardware.aot-private.json
+```
+
+The mapper is **not yet connected to production GPU/CPU memory clients**;
+active tiles remain guarded. The fixture models the observed clipping/copy
+sequence; it is not a test of our IMAGE_BLIT command engine. Next connect tile
+selection, base/limit clipping and translated reads/writes to actual clients,
+keeping PFIFO and physical CPU storage distinct from tiled surface/aperture
+access. Then qualify compression and other reached draw/context dependencies.
+Do not close this family on a standalone layout comparison.
+
+Validation: software NV2A suite and the new layout CTest pass; OpenGL fixtures
+explicitly skip. Nine original query/trap/fence cases again pass across three
+lifetimes with the changed DLL; five GPU/device/memory CTests pass in 2.22s.
+The tile-enabled guard is shared across all memory banks. DLL SHA-256 is
+`ae5dfca388d9b287531762cfe3dff5cb777e5f3af8de0b8d03fdbd4306c8cefc`;
+the unchanged title executable remains `4510a9e...32f9`. HLE runtime code and
+the game pin are unchanged; no new full HLE attract pass is claimed. No console
+was contacted and no GPL implementation was copied. The burndown stays 4/9.

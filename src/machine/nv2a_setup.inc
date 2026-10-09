@@ -50,7 +50,11 @@ bool Nv2a::ram_config_write(RamTileConfig& config,uint32_t offset,uint32_t value
         (offset == 12 && value != 0) || (offset >= 0x90 && value != 0)) {
         fault_("NV2A RAM geometry/compression mode is not implemented"); return false;
     }
-    if (offset >= 0x10 && offset < 0x30 && (value & 2)) {
+    // The original Xbox driver uses base|1 for color and base|3 for depth.
+    // nxdk's historical base|2 setup is not an enable-bit specification.
+    // Until memory-client translation is connected, neither flag variant
+    // may silently admit identity-addressed access to a tiled surface.
+    if (offset >= 0x10 && offset < 0x30 && (value & 3)) {
         fault_("NV2A active tile addressing needs RAM-client qualification"); return false;
     }
     *word=value;return true;
