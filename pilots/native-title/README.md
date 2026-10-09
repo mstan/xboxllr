@@ -28,6 +28,13 @@ pixels. Scalar masks, per-vertex formulas and late clamping are corrected while
 retaining native shaders, cached uniforms and deferred vertex uploads. The
 updated 210.157s attract/interruption/reentry run passes; full scene texture/state
 composition and broader raster outcomes remain open.
+Finite normalized 2D sampling now passes 258 authored cases / 516 original
+draws and 516 native GPU draws, with 444,276 interior pixels checked on each
+route. Mip/filter/bias/clamp state executes on LLE; HLE preserves native GPU
+sampling with a cached base-mip view for LOD0 filtering. Complete scene pixels
+remain open, including the deferred enabled-noise bound and broader composition.
+The updated executable passes a 250.422s/23-present attract/interruption/reentry
+regression with all five real input transitions and no pilot/audio stop or fault.
 Overall qualification
 remains 4/9; see [graphics evidence and remaining scope](GRAPHICS-LLE.md).
 
@@ -770,7 +777,7 @@ callback ordering and ownership. No new LLE behavior is substituted.
 The candidate completes three replay-file writes and reaches the zero-byte
 audio-buffer guard after 147.11 s (`beads-xbox.1.88`). It does not establish
 rendered gameplay, complete attract playback or original speed. Ordinary
-callback retry latency remains roughly 12–15 ms; a separate timer experiment
+callback retry latency remains roughly 12â€“15 ms; a separate timer experiment
 may address it, subject to actual-title measurement.
 
 `beads-xbox.1.61`, 2026-10-06. This standalone experiment uses Phobos
@@ -2396,7 +2403,7 @@ preserved, success leaves LastError alone, and failures call the title's actual
 `XapiSetLastNTError`. The existing error helper supplies its own TLS layout and
 NTSTATUS conversion. There is no duplicate execution of the original mount.
 
-Three real cache directories (partitions 3–5) retain title ownership across
+Three real cache directories (partitions 3â€“5) retain title ownership across
 processes in `native-cache-v1.bin` under the supplied local state directory.
 Existing-title mounts preserve bytes; clean requests and eviction remove the
 selected directory's contents and create a real `\\??\\Z:` namespace entry.

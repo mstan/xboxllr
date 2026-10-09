@@ -1524,6 +1524,19 @@ transport, original runner and native cache admission are authored here; no
 pbkit implementation body or original bytes are incorporated. The enabled
 noise pixel algorithm/error bound remains unqualified and deferred.
 
+The finite normalized 2D texture component consults the existing nxdk public
+NV097 register definitions and the original owned XDK's emitted filter/control
+words. The already referenced xemu checkout
+`482088490c2d5983ed5e1eafbd09906157c1eca0` (GPL-2.0-or-later) was inspected for
+filter names, LOD-bias sign/scale and mip-layout cross-checks. Khronos's
+[OpenGL 1.3 specification](https://registry.khronos.org/OpenGL/specs/gl/glspec13.pdf)
+provides texture footprint/filter equations and identifies crossover precision
+questions for later hardware probing. Texture bytes, sampling implementation,
+native resource-view cache and mathematical expectations are authored here;
+no external implementation body, game asset or specification prose is copied.
+Existing donor/library license limits remain in effect. This is an offline
+bounded qualification, not a new silicon golden.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

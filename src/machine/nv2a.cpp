@@ -11076,20 +11076,12 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
     // PROJECT2D, 3 = CUBEMAP are the ones implemented below (cross-checked against
     // psh_regs.h's PS_TEXTUREMODES enum); BUMPENVMAP/DOT_ST/DOT_STR/BRDF/PASSTHRU/
     // CLIPPLANE/PROJECT3D and any other mode is a named census, not a guess.
-    //   * PROJECT2D (any stage, mode==1): the exact witnessed dashboard fingerprint
-    //     (ShaderStageProgram==0x00000001, a single active stage0) is
-    //     kInlineLinearBlitColor's own linear/pitch layout -- kept as that exact,
-    //     narrowly-proven special case. Every other PROJECT2D stage (including
-    //     multi-stage chains like 0x00008421, four independent PROJECT2D stages) is
-    //     sampled exactly like kSwizzledTexturedColor/kPitchSingleTextureColor/
-    //     kTex7FanColor's own textures -- format log2 width/height, SwizzleLookup
-    //     addressing, normalized 0..1 UV. COLOR codes 6/7 (already cross-checked
-    //     against those pinned profiles, both raw 32-bit ARGB8) plus 0x19/SZ_A8 (a
-    //     swizzled 1-byte-per-texel alpha-only format, production-witnessed on the
-    //     menu scene's T1-T3: format word 0x0881192a) are accepted; texel format
-    //     itself is decoupled from texture *mode* -- both are independent register
-    //     fields on real hardware. Any other COLOR code (DXT-compressed or other
-    //     SZ_*/LU_* variants) stays a named kUnsupportedTextureFormat census.
+    //   * PROJECT2D: format decides pitch/texel-space versus normalized 2D,
+    //     independently of the number of active texture/combiner stages.
+    //     The finite normalized route owns every mip, decodes DXT1/DXT23 or
+    //     indexes swizzled ARGB/A8, and evaluates min/mag/mip filters, signed
+    //     bias and unsigned Q8 LOD clamps. The existing pitch dashboard route
+    //     remains separate. Other formats/programs retain explicit limits.
     //   * CUBEMAP (mode==3, e.g. ShaderStageProgram==0x00000063's two active stages):
     //     sampled with the exact same major-axis direction-to-UV algorithm as
     //     kSwizzledTexturedColor/kSwizzledProjectedColor's own sample_cube_texture
@@ -11097,6 +11089,11 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
     //     against the same swizzled 2D texture data/format whitelist as PROJECT2D.
     enum class TextureAddressMode { kRepeat, kClampToEdge, kBorder };
     struct TextureStage {
+        struct Mip {
+            uint32_t width = 0, height = 0;
+            size_t offset = 0;
+            std::unique_ptr<SwizzleLookup> swizzle;
+        };
         bool valid = false;
         bool linear = false;
         bool project2d = false;
@@ -11108,8 +11105,13 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
         TextureAddressMode address_u = TextureAddressMode::kRepeat;
         TextureAddressMode address_v = TextureAddressMode::kRepeat;
         uint32_t border = 0;
+        std::vector<Mip> mips;
+        uint32_t min_filter = 2, mag_filter = 2;
+        float lod_bias = 0, min_lod = 0, max_lod = 0;
+        bool accurate_sampling = false;
     };
     std::array<TextureStage, 4> texture_stages;
+    bool accurate_texture_sampling = false;
     size_t generic_texture_bytes_this_batch = 0;
     const uint32_t shader_stage_program = raster_state[kRasterShaderStageProgram];
     auto decode_address_mode = [](uint32_t byte, bool& supported) {
@@ -11330,7 +11332,12 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             (raster_state[kRasterTextureFormat0 + stage] & (1u << 2)) == 0;
         ts.project2d = stage_mode == 1;
         bool handled_linear_project2d = false;
-        if (single_stage_project2d) {
+        const uint32_t stage_format = raster_state[kRasterTextureFormat0 + stage];
+        const uint32_t stage_color = (stage_format >> 8) & 255u;
+        const bool normalized_format = stage_color == 6 || stage_color == 7 ||
+            stage_color == 0x19 || ((stage_color == 0xc || stage_color == 0xe) &&
+                                  ((stage_format >> 16) & 15u));
+        if (single_stage_project2d && !normalized_format) {
             const uint32_t format = raster_state[kRasterTextureFormat0 + stage];
             const uint32_t color_code = (format >> 8) & 0xFFu;
             const bool legacy_raw_linear = format == 0;
@@ -11535,12 +11542,15 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             // COLOR_SZ_A8 (production-witnessed: T1-T3 of the menu scene's PROJECT2D
             // texture chain, format word 0x0881192a) -- a swizzled, 1-byte-per-texel,
             // alpha-only format (see sample_swizzled's alpha8 branch above). Anything
-            // else (DXT-compressed, other SZ_*/LU_* codes) stays a named census rather
-            // than a guess at a new pixel decode.
+            // DXT1/DXT23 mips use tightly packed block rows, including a complete
+            // block for dimensions below four. Other SZ_*/LU_* codes stay bounded.
             const bool alpha8 = color_code == 0x19;
+            const bool dxt1 = color_code == 0xc;
+            const bool dxt23 = color_code == 0xe;
+            const bool compressed = dxt1 || dxt23;
             const uint32_t dma_selector = format & 3u;
             if ((dma_selector != 1u && dma_selector != 2u) ||
-                (color_code != 6 && color_code != 7 && !alpha8)) {
+                (color_code != 6 && color_code != 7 && !alpha8 && !compressed)) {
                 record_generic_skip_detail(GenericSkipReason::kUnsupportedTextureFormat,
                                            format);
                 return true;
@@ -11564,8 +11574,26 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             ts.width = 1u << ((format >> 20) & 0xFu);
             ts.height = 1u << ((format >> 24) & 0xFu);
             const uint32_t bytes_per_texel = alpha8 ? 1u : 4u;
-            const uint64_t bytes64 =
-                static_cast<uint64_t>(ts.width) * ts.height * bytes_per_texel;
+            const uint32_t levels = std::max(1u, (format >> 16) & 15u);
+            if (levels > 1u + std::max((format >> 20) & 15u, (format >> 24) & 15u) ||
+                ((format >> 28) & 15u) || (stage_mode == 3 && levels > 1)) {
+                fault_("NV2A generic texture mip shape is outside the finite 2D reference");
+                return false;
+            }
+            uint64_t bytes64 = 0;
+            for (uint32_t level = 0; level < levels; ++level) {
+                TextureStage::Mip mip;
+                mip.width = std::max(1u, ts.width >> level);
+                mip.height = std::max(1u, ts.height >> level);
+                mip.offset = static_cast<size_t>(bytes64);
+                bytes64 += compressed
+                    ? static_cast<uint64_t>((mip.width + 3u) / 4u) *
+                          ((mip.height + 3u) / 4u) * (dxt1 ? 8u : 16u)
+                    : static_cast<uint64_t>(mip.width) * mip.height * bytes_per_texel;
+                if (!compressed)
+                    mip.swizzle = std::make_unique<SwizzleLookup>(mip.width, mip.height);
+                ts.mips.push_back(std::move(mip));
+            }
             uint32_t address = 0;
             if (bytes64 > SIZE_MAX ||
                 !resolve_texture_surface(
@@ -11596,7 +11624,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                 perf::ScopedAdd timer(perf::g_ns_generic_texture_dma_read,
                                       perf::g_calls_generic_texture_dma_read);
                 if(tiled_memory && ram_tile_overlap(address,ts.data.size())) {
-                    fault_("NV2A tiled texture fetch is not qualified");return false;
+                    fault_("NV2A tiled texture fetch layout/extent is not qualified");return false;
                 }
                 if (!mem_read_ || !mem_read_(address, ts.data.data(), ts.data.size())) {
                     fault_("NV2A generic-combiner texture DMA read failed");
@@ -11611,6 +11639,30 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                                       perf::g_calls_generic_texture_swizzle_lookup);
                 ts.swizzle = std::make_unique<SwizzleLookup>(ts.width, ts.height);
             }
+            if (compressed) {
+                std::vector<uint8_t> decoded;
+                for (auto& mip : ts.mips) {
+                    const uint32_t compressed_pitch = ((mip.width + 3u) / 4u) *
+                                                       (dxt1 ? 8u : 16u);
+                    const size_t length = compressed_pitch * ((mip.height + 3u) / 4u);
+                    std::vector<uint8_t> source(ts.data.begin() + mip.offset,
+                                               ts.data.begin() + mip.offset + length), rgba;
+                    if (!(dxt1 ? decode_dxt1_argb(source, mip.width, mip.height,
+                                                  compressed_pitch, rgba)
+                               : decode_dxt23_argb(source, mip.width, mip.height,
+                                                   compressed_pitch, rgba))) {
+                        fault_("NV2A generic texture mip decode failed");return false;
+                    }
+                    mip.offset = decoded.size();
+                    decoded.insert(decoded.end(), rgba.begin(), rgba.end());
+                }
+                ts.data = std::move(decoded);
+            }
+            if (color_code == 7) {
+                // SZ_X8R8G8B8 stores X, not alpha, at every owned mip.
+                for (size_t offset = 3; offset < ts.data.size(); offset += 4)
+                    ts.data[offset] = 255;
+            }
             ts.address_u = address_u;
             ts.address_v = address_v;
             ts.border = raster_state[kRasterTextureBorderColor0 + stage];
@@ -11618,6 +11670,39 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             ts.cubemap = (stage_mode == 3);
             ts.alpha8 = alpha8;
             ts.valid = true;
+            const uint32_t filter = raster_state[kRasterTextureFilter0 + stage];
+            const uint32_t control = raster_state[kRasterTextureControl0_0 + stage];
+            ts.accurate_sampling = !ts.cubemap &&
+                (filter != 0 || levels > 1 || compressed);
+            if (ts.accurate_sampling) {
+                ts.min_filter = (filter >> 16) & 255u;
+                ts.mag_filter = (filter >> 24) & 15u;
+                // Zero is the legacy fixture's unspecified bilinear default.
+                if (!filter) ts.min_filter = ts.mag_filter = 2;
+                if (ts.min_filter < 1 || ts.min_filter > 6 ||
+                    ts.mag_filter < 1 || ts.mag_filter > 2 || (filter & 0xf0000000u) ||
+                    (control & 0x30u)) {
+                    fault_("NV2A generic texture filter is outside point/bilinear finite sampling");
+                    return false;
+                }
+                int bias = filter & 0x1fffu;
+                if (bias & 0x1000) bias -= 0x2000;
+                ts.lod_bias = float(bias) / 256;
+                // Original MAXMIPLEVEL=2 emits 0x08000000: both 12-bit
+                // clamps contain eight fractional bits, unlike a mip index.
+                ts.min_lod = float((control >> 18) & 4095u) / 256;
+                ts.max_lod = float((control >> 6) & 4095u) / 256;
+                if (ts.min_lod > ts.max_lod) {
+                    fault_("NV2A generic texture LOD clamps are inverted");return false;
+                }
+                // Existing host executors consume only a base bilinear image.
+                // Admit their proven case; keep all new sampling effects here.
+                accurate_texture_sampling |= (levels > 1 && ts.min_filter >= 3) || compressed ||
+                    ts.min_filter != 2 || ts.mag_filter != 2 ||
+                    ts.lod_bias != 0 || ts.min_lod != 0;
+                if (ts.min_filter <= 2 && !compressed)
+                    ts.data.resize(static_cast<size_t>(ts.width) * ts.height * bytes_per_texel);
+            }
         } else {
             record_generic_skip_detail(
                 GenericSkipReason::kUnsupportedTextureShaderProgram,
@@ -11853,7 +11938,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
     bool resident_exact_this_batch = false;
     GenericResidentRejectReason resident_reject_this_batch =
         GenericResidentRejectReason::kCount;
-    if (!needs_fog && !logic_enabled && !flat_shading && !zpass_enabled_ && renderer_ && effective_clip_valid) {
+    if (!accurate_texture_sampling && !needs_fog && !logic_enabled && !flat_shading && !zpass_enabled_ && renderer_ && effective_clip_valid) {
 #if XLLE_VSH_DRAW_OVERLAP_CENSUS
         const bool fixture_overlap = vsh_draw_overlap_enabled_ && job.vsh_overlap.valid;
         const uint64_t fixture_overlap_t0 = fixture_overlap && perf_excl::g_enabled
@@ -13774,7 +13859,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
 #if XLLE_VSH_DRAW_OVERLAP_CENSUS
     bool gpu_shader_collect_nonfinite = false;
 #endif
-    if (!needs_fog && !logic_enabled && !flat_shading && !zpass_enabled_ && gpu_generic_shader_ && renderer_ && effective_clip_valid) {
+    if (!accurate_texture_sampling && !needs_fog && !logic_enabled && !flat_shading && !zpass_enabled_ && gpu_generic_shader_ && renderer_ && effective_clip_valid) {
         ++generic_shader_attempts_;
         GenericShaderDeclineReason decline = GenericShaderDeclineReason::kNone;
         auto& st = gpu_shader_packet.state;
@@ -14443,6 +14528,72 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
         return apply_mapping(in.mapping, base);
     };
 
+    auto sample_mip_chain = [&unpack_argb8](const TextureStage& ts, double u,
+                                            double v, double rho,
+                                            std::array<float, 4>& color) {
+        if (!std::isfinite(u) || !std::isfinite(v) || !std::isfinite(rho)) return false;
+        double lod = rho > 0 ? std::log2(rho) + ts.lod_bias : -1000;
+        lod = std::clamp(lod, double(ts.min_lod), double(ts.max_lod));
+        const bool magnify = lod <= 0;
+        const uint32_t filter = magnify ? ts.mag_filter : ts.min_filter;
+        const bool linear = magnify ? filter == 2 : (filter & 1u) == 0;
+        const uint32_t last = static_cast<uint32_t>(ts.mips.size() - 1);
+        const double mip_lod = std::clamp(lod, 0.0, double(last));
+        uint32_t first = 0, second = 0;
+        double mix = 0;
+        if (!magnify && filter >= 3) {
+            if (filter <= 4) first = second = static_cast<uint32_t>(std::floor(mip_lod + .5));
+            else {
+                first = static_cast<uint32_t>(std::floor(mip_lod));
+                second = std::min(last, first + 1);
+                mix = mip_lod - first;
+            }
+        }
+        auto sample = [&](uint32_t level) {
+            const auto& mip = ts.mips[level];
+            auto bounded = [](double value, TextureAddressMode mode) {
+                if (mode == TextureAddressMode::kRepeat) return value - std::floor(value);
+                return std::clamp(value, mode == TextureAddressMode::kBorder ? -1.0 : 0.0,
+                                  mode == TextureAddressMode::kBorder ? 2.0 : 1.0);
+            };
+            const double x = bounded(u, ts.address_u) * mip.width - (linear ? .5 : 0);
+            const double y = bounded(v, ts.address_v) * mip.height - (linear ? .5 : 0);
+            const int ix = static_cast<int>(std::floor(x)), iy = static_cast<int>(std::floor(y));
+            auto texel = [&](int tx, int ty) {
+                if ((ts.address_u == TextureAddressMode::kBorder && (tx < 0 || tx >= int(mip.width))) ||
+                    (ts.address_v == TextureAddressMode::kBorder && (ty < 0 || ty >= int(mip.height))))
+                    return unpack_argb8(ts.border);
+                auto coordinate = [](int value, uint32_t size, TextureAddressMode mode) {
+                    return mode == TextureAddressMode::kRepeat
+                        ? static_cast<uint32_t>((value % int(size) + int(size)) % int(size))
+                        : static_cast<uint32_t>(std::clamp(value, 0, int(size) - 1));
+                };
+                const uint32_t cx = coordinate(tx, mip.width, ts.address_u);
+                const uint32_t cy = coordinate(ty, mip.height, ts.address_v);
+                const size_t index = mip.swizzle ? mip.swizzle->index(cx, cy) : cy * mip.width + cx;
+                const size_t offset = mip.offset + index * (ts.alpha8 ? 1 : 4);
+                if (ts.alpha8) return std::array<float, 4>{1,1,1,float(ts.data[offset]) / 255};
+                uint32_t word = 0;std::memcpy(&word, ts.data.data() + offset, 4);
+                return unpack_argb8(word);
+            };
+            auto result = texel(ix, iy);
+            if (linear) {
+                const auto right = texel(ix + 1, iy), down = texel(ix, iy + 1), diagonal = texel(ix + 1, iy + 1);
+                const double fx = x - ix, fy = y - iy;
+                for (size_t lane = 0; lane < 4; ++lane)
+                    result[lane] = float((result[lane] * (1-fx) + right[lane] * fx) * (1-fy) +
+                                         (down[lane] * (1-fx) + diagonal[lane] * fx) * fy);
+            }
+            return result;
+        };
+        color = sample(first);
+        if (mix > 0) {
+            const auto other = sample(second);
+            for (size_t lane = 0; lane < 4; ++lane) color[lane] += float((other[lane] - color[lane]) * mix);
+        }
+        return true;
+    };
+
     bool raster_failed = false;
     std::function<void(const TransformedVertex&, const TransformedVertex&,
                        const TransformedVertex&)>
@@ -14988,7 +15139,42 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                     if (texf_projected_black_alpha_one) continue;
                     std::array<float, 4> sampled{};
                     bool sample_ok = false;
-                    if (ts.linear) {
+                    if (ts.accurate_sampling) {
+                        // Projected coordinates are rational planes. Differentiate
+                        // numerator/denominator after perspective interpolation;
+                        // vertex W cancels the common interpolation denominator.
+                        const double weights[3] = {q0, q1, q2};
+                        const double inv_w[3] = {1.0/a->position[3], 1.0/b->position[3], 1.0/c->position[3]};
+                        const double dbdx = y20/determinant, dcdx = -y10/determinant;
+                        const double dbdy = -x20/determinant, dcdy = x10/determinant;
+                        const double dx[3] = {-dbdx-dcdx, dbdx, dcdx};
+                        const double dy[3] = {-dbdy-dcdy, dbdy, dcdy};
+                        double numerator[2]{}, ndx[2]{}, ndy[2]{}, denominator=0, ddx=0, ddy=0;
+                        for (size_t vertex=0;vertex<3;++vertex) {
+                            const double q = ts.project2d ? texture_values[stage][vertex][3] : 1;
+                            denominator += weights[vertex]*q;
+                            ddx += dx[vertex]*inv_w[vertex]*q;
+                            ddy += dy[vertex]*inv_w[vertex]*q;
+                            for (size_t axis=0;axis<2;++axis) {
+                                const double t=texture_values[stage][vertex][axis];
+                                numerator[axis] += weights[vertex]*t;
+                                ndx[axis] += dx[vertex]*inv_w[vertex]*t;
+                                ndy[axis] += dy[vertex]*inv_w[vertex]*t;
+                            }
+                        }
+                        if (!std::isfinite(denominator) || denominator == 0) {
+                            fault_("NV2A generic-combiner PROJECT2D Q is zero or non-finite");
+                            raster_failed=true;return;
+                        }
+                        double gx[2],gy[2];
+                        for (size_t axis=0;axis<2;++axis) {
+                            const double extent=axis ? ts.height : ts.width;
+                            gx[axis]=(ndx[axis]*denominator-numerator[axis]*ddx)/(denominator*denominator)*extent;
+                            gy[axis]=(ndy[axis]*denominator-numerator[axis]*ddy)/(denominator*denominator)*extent;
+                        }
+                        const double rho=std::max(std::hypot(gx[0],gx[1]),std::hypot(gy[0],gy[1]));
+                        sample_ok=sample_mip_chain(ts,numerator[0]/denominator,numerator[1]/denominator,rho,sampled);
+                    } else if (ts.linear) {
                         if (texcoord[3] == 0.0f) {
                             fault_("NV2A generic-combiner texture Q is zero");
                             raster_failed = true;

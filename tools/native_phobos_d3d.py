@@ -16,6 +16,7 @@ from native_d3d_bump import prepare_bump
 from native_d3d_raster import prepare_raster
 from native_d3d_fvf import prepare_fvf
 from native_d3d_feedback import prepare_feedback
+from native_d3d_texture import prepare_texture_views
 
 PIN = 'bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0'
 GIT = 'C:/Program Files/Git/cmd/git.exe'
@@ -89,6 +90,7 @@ def prepare(donor, output, reference):
                 code=code[:start]+code[start:].replace('return FALSE;','pilot_d3d_backend_stop("combiner shader could not execute");')
                 code=code.replace('    if (mapped) {','    if (!mapped) pilot_d3d_backend_stop("combiner constants upload failed");\n    if (mapped) {')
             if path.name=='d3d8_states.c':
+                code=prepare_texture_views(code)
                 code,count=re.subn(r'    if \(min_linear && mag_linear && mip_linear\).*?    return RHI_FILTER_POINT;',
                     '    return (min_linear ? 0x10u : 0u) | (mag_linear ? 4u : 0u) | (mip_linear ? 1u : 0u);',code,flags=re.S)
                 if count!=1:raise ValueError('unreviewed Phobos filter mapping')
@@ -96,7 +98,7 @@ def prepare(donor, output, reference):
                 code=once(code,'    sd.max_lod = 3.402823466e+38f;',
                     '    memcpy(&sd.mip_lod_bias,&tss[D3DTSS_MIPMAPLODBIAS],4);\n'
                     '    sd.min_lod=(FLOAT)tss[D3DTSS_MAXMIPLEVEL];\n'
-                    '    sd.max_lod=tss[D3DTSS_MIPFILTER] ? 3.402823466e+38f : sd.min_lod;\n'
+                    '    sd.max_lod=3.402823466e+38f;\n'
                     '    DWORD border=tss[D3DTSS_BORDERCOLOR];\n'
                     '    sd.border[0]=((border>>16)&255)/255.0f;\n'
                     '    sd.border[1]=((border>>8)&255)/255.0f;\n'

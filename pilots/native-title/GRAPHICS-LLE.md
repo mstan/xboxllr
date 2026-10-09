@@ -395,7 +395,7 @@ The ordinary production-path attract check omits per-draw capture:
 `build/blinx/scene-composition-production-attract-20261009/run.aot-private.json`
 records **210.140s / 20 presents** with no fault/stop. Its contact sheet shows
 demo playback at present 9, the input interruption/pause and title return at
-10–13, then demo re-entry at 18 and continued playback at 20. Both final runs
+10Ã¢â‚¬â€œ13, then demo re-entry at 18 and continued playback at 20. Both final runs
 use title SHA-256
 `02b7917222f2f1725954512a241d9942db4e8d6d2c9062d4e48e01c6fa7352d4`.
 The harness intentionally terminates at the requested duration; its exit code
@@ -456,7 +456,7 @@ The final ordinary-path run is
 `ac2aa89f9507a1022f94d6c7b9347be76c7e8805be1ef0876e0008d27d0f6708`.
 All five real input transitions are delivered. The inspected contact sheet shows
 demo playback at 9, input interruption/pause at 10, title return at 13 and demo
-re-entry at 18–20. The retained title log has no pilot/audio stop or fault.
+re-entry at 18Ã¢â‚¬â€œ20. The retained title log has no pilot/audio stop or fault.
 As above, the harness intentionally terminates at its time bound; this confirms
 observed attract/input behavior and does not establish a new speed/A-V bound.
 
@@ -558,9 +558,92 @@ code as a semantic cross-check. No new hardware output or GPL implementation
 copy establishes these assertions. Exact silicon exponential/interpolation
 precision remains deferred alongside the other hardware questions.
 
+## Finite normalized 2D texture sampling - 2026-10-09
+
+Retained first-world draws use DXT1 128-to-1 eight-level chains; retained final
+draws also use swizzled ARGB8 chains. Their texture states request independent
+min/mag linear filters, trilinear mip filtering and a -1.2 bias. The maintained
+generic route previously read only the base image and always sampled bilinearly.
+
+The LLE route now owns the full finite 2D mip chain, decodes each compressed
+level with complete blocks below 4x4, and samples normalized PROJECT2D according
+to the actual filter registers. It implements point/bilinear minification and
+magnification, nearest/trilinear mip selection, signed Q8 bias, unsigned 12-bit
+Q8 LOD clamps, repeat/edge/border addressing and rational projected derivatives.
+Format chooses normalized versus pitch coordinates even for a single stage;
+the earlier generated-layout fixture now explicitly binds LIN_ARGB8 for its
+linear pass. New sampler effects execute on the CPU floor; optional executors
+keep their previously supported base-bilinear case. Unsupported filter modes,
+signed-channel sampling, anisotropy and inverted clamps reject before color
+writes or successful reports.
+
+`tools/native_texture_reference.py` executes the unmodified original texture,
+texture-state, pixel-shader, stream, shader and draw callees with preowned
+resources and texture DMA contexts. Authored Morton/block bytes and independent
+image/filter equations supply expectations; neither texture decoder generates
+expected pixels. Explicit Q/W values avoid assuming unwritten shader outputs.
+The corpus contains **258 cases / 516 original draws / 444,276 non-edge interior
+pixels**. It covers all six basic min-filter encodings, both mag filters,
+constant and nonuniform images, XRGB forced alpha despite arbitrary X bytes,
+8x8/four-level and 128x128/eight-level chains,
+the captured -1.2 bias, all retained levels, minimum LOD clamps, mixed address
+axes and persistent draws. Non-unit Q and unequal W cases have independently
+authored affine projected footprints. RGBA differs from the ideal mathematical
+oracle by at most one byte per channel in every asserted pixel.
+
+The real native D3D11 backend passes the same **258 cases / 516 GPU draws /
+444,276 interior pixels** within one byte per channel. These exposed an HLE
+defect: clamping a multi-level sampler to a single LOD also changed min/mag
+filter selection. A cached one-level native resource view now enforces the
+original LOD0 filter while preserving the sampler's bias/clamps and min/mag
+choice. The view shares texture storage, allocates once when needed, rebinds
+only on a view/binding change and releases with the owning texture. The sampler,
+pixel shader and uploads remain native/cached; no CPU pixel loop, production
+LLE shadow or per-state shader compilation is added. Both donor preparation
+boundaries carry the correction; this pixel qualification uses pinned Phobos.
+
+The maintained C++ suite adds **88 texture draws** across direct/callback
+memory and interpreted/compiled shaders, including persistent byte mutation and fractional maximum LOD clamps;
+the previous 338 color/fog draws remain (**426 total**). Four actual rejected
+sampler submissions preserve every color pixel and pending report. Final related
+LLE checks pass **9/9 in 2.52s** and native checks **56/56 in 38.88s**. An earlier
+full pass exposed an obsolete sampler-description expectation and a transient
+process-wide vblank handle-count failure; the sampler assertion was updated,
+the isolated vblank test passed, and the final complete suite passed. Audio
+checks are retained from that complete pass; further graphics work uses focused
+checks unless a change requires another audio regression.
+
+Private evidence: `build/blinx/texture-original.aot-private.json`,
+`texture-native.aot-private.bin`, `texture-{original,native,lle-tests,native-tests}.log`.
+The two independently observed routes check **888,552 interior pixels** in total.
+Actual shipping SHA-256
+`c71f4c896da56dc433daf8740e586198b474c459c4b98f9a215925e6d6e1d452`
+passes `build/blinx/texture-production-reentry-20261009/run.aot-private.json`:
+**250.422s / 23 presents**, all five real input transitions, demo at 10-11,
+title return at 13 and reentry/playback at 20-23. The inspected contact sheet
+retains actual frame observations; no pilot/audio stop or fault occurred. The
+preceding 210.265s/19-present run also showed demo, interruption/pause and title
+return, but ended before reentry; it is retained without claiming that outcome.
+Both harnesses intentionally terminate at their bounds. This is a rendering/input
+regression, not a new original-speed/FPS or A/V timing qualification.
+Reproduction uses the existing dependency setup:
+
+```powershell
+& 'C:\Users\Matthew\AppData\Local\Programs\Python\Python312\python.exe' tools\native_texture_reference.py --xbe F:\Projects\xboxlle\xboxlle\build\phobos-audit-20261006\blinx-na\default.xbe --binding build\blinx\d3d-binding.aot-private.json --library build\visibility-lle\libxlle_nv2a_reference.dll --dependencies C:\msys64\mingw64\bin --output build\blinx\texture-original.aot-private.json --native-cases build\blinx\texture-native.aot-private.bin
+& .\build\blinx\host-calendar-lle\Release\pilot_shader_test.exe --texture-reference build\blinx\texture-native.aot-private.bin
+```
+
+This qualifies the bounded authored texture component. It does not qualify
+complete retained scene pixels: enabled DXT1 noise still has its explicit
+hardware guard, captured unwritten Q/default initialization is not assumed,
+and variable perspective footprints, broader texture layouts and complete
+combiner/raster composition need their own gates. Exact silicon LOD/rounding,
+filter crossover rules and enabled-noise error bounds stay deferred last.
+
 ## Remaining offline work
 
-Continue independently exercised texture mip/filter and raster outcomes.
+Continue variable projected footprints, broader exercised texture/state layouts
+and raster outcomes toward complete scene composition.
 The original DXT1-noise control transport is implemented and independently
 qualified above; its enabled pixel effect remains in the deferred hardware queue.
 The two earlier corpora contain 64 programs writing `oFog.x` with fog enabled;

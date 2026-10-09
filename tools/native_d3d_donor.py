@@ -119,6 +119,8 @@ def prepare(donor: Path, output: Path, vsh_reference: Path):
                 code = code.replace('        if (srv) {',
                     '        if (!srv) pilot_d3d_backend_stop("texture has no native sampling view");\n        if (srv) {')
             if name == "d3d8_states.c":
+                from native_d3d_texture import prepare_texture_views
+                code = prepare_texture_views(code)
                 code,count = re.subn(r'    if \(min_linear && mag_linear && mip_linear\).*?    return D3D11_FILTER_MIN_MAG_MIP_POINT;',
                     '    return (D3D11_FILTER)((min_linear ? 0x10 : 0) | (mag_linear ? 4 : 0) | (mip_linear ? 1 : 0));',
                     code,flags=re.S)
@@ -128,7 +130,7 @@ def prepare(donor: Path, output: Path, vsh_reference: Path):
                 code = code.replace('    sd.MaxLOD = D3D11_FLOAT32_MAX;',
                     '    memcpy(&sd.MipLODBias,&tss[D3DTSS_MIPMAPLODBIAS],4);\n'
                     '    sd.MinLOD=(FLOAT)tss[D3DTSS_MAXMIPLEVEL];\n'
-                    '    sd.MaxLOD=tss[D3DTSS_MIPFILTER] ? D3D11_FLOAT32_MAX : sd.MinLOD;\n'
+                    '    sd.MaxLOD=D3D11_FLOAT32_MAX;\n'
                     '    DWORD border=tss[D3DTSS_BORDERCOLOR];\n'
                     '    sd.BorderColor[0]=((border>>16)&255)/255.0f;\n'
                     '    sd.BorderColor[1]=((border>>8)&255)/255.0f;\n'

@@ -270,10 +270,84 @@ static void programmable_fog() {
     }
 }
 
+static void texture_mips() {
+    constexpr uint32_t texture=0x40000;
+    const uint32_t colors[]={0xffff0000,0xff00ff00,0xff0000ff,0xffffffff};
+    for(bool direct:{false,true})for(bool compiled:{false,true})for(bool dxt:{false,true}) {
+        Fixture f(direct);f.gpu->set_vsh_compile_enabled(compiled);
+        f.emit(0x184,2);f.emit(0x188,2);
+        const uint32_t code[]={0,0x0020001b,0x08000000,0x0000f800,
+                              0,0x0020021b,0x08000000,0x0000f849};
+        f.emit(0x1e94,2);f.emit(0x1e9c,0);f.emit(0x1ea0,0);
+        for(unsigned i=0;i<8;++i)f.emit(0xb00+i*4,code[i]);
+        f.emit(0x1724,Fixture::colors);f.emit(0x1764,0x1042);f.emit(0x176c,0);
+        f.emit(0x1e70,1);f.emit(0xac0,0x08200000);f.emit(0x260,0x18200000);
+        f.emit(0x28c,0x1c00);f.emit(0x1b00,texture);
+        f.emit(0x1b04,0x03340029|((dxt?0xc:6)<<8));f.emit(0x1b08,0x00010101);
+        uint32_t cursor=texture;
+        const uint16_t endpoints[]={0xf800,0x07e0,0x001f,0xffff};
+        for(unsigned mip=0;mip<4;++mip) {
+            const unsigned size=8u>>mip;
+            const unsigned bytes=dxt?((size+3)/4)*((size+3)/4)*8:size*size*4;
+            for(unsigned offset=0;offset<bytes;offset+=dxt?8:4) {
+                f.put(cursor+offset,dxt?uint32_t(endpoints[mip]):colors[mip]);
+                if(dxt)f.put(cursor+offset+4,0);
+            }
+            cursor+=bytes;
+        }
+        for(unsigned sample=0;sample<8;++sample) {
+            const unsigned filter=sample&1?6:4;
+            const float rho=sample<4?4:2;
+            const float bias=sample==2||sample==3?-.5f:0;
+            const unsigned clamp=sample>=6?3:0;
+            f.emit(0x1b0c,0x4003ffc0|(clamp<<26));
+            const int fixed_bias=int(bias*256);
+            f.emit(0x1b14,0x02002000|(filter<<16)|(uint32_t(fixed_bias)&0x1fff));
+            const float xy[3][2]={{8,8},{56,8},{8,56}};
+            for(unsigned i=1;i<4;++i) {
+                f.put(Fixture::colors+i*16,bits(.09375f+(xy[i-1][0]-8)*rho/8));
+                f.put(Fixture::colors+i*16+4,bits(.34375f+(xy[i-1][1]-8)*rho/8));
+                f.put(Fixture::colors+i*16+8,0);f.put(Fixture::colors+i*16+12,bits(1));
+            }
+            f.draw(0);++cases;CHECK(f.fault.empty());
+            const uint32_t want=clamp?colors[3]:(sample==3?0xff008080:sample<4?colors[2]:colors[1]);
+            const uint32_t actual=f.get(Fixture::frame+(16*64+16)*4);
+            for(unsigned shift:{0,8,16,24})CHECK(std::abs(int((actual>>shift)&255)-int((want>>shift)&255))<=1);
+            CHECK(f.get(Fixture::report+12)==0 && f.gpu->generic_combiner_writes()>0);
+        }
+        // The upper clamp has eight fractional bits as well: force a
+        // fractional mip blend below the unconstrained two-texel footprint.
+        for(unsigned fixed_max:{192u,64u}) {
+            f.emit(0x1b0c,0x40000000|(fixed_max<<6));f.emit(0x1b14,0x02062000);
+            f.draw(0);++cases;CHECK(f.fault.empty() && f.get(Fixture::report+12)==0);
+            const auto actual=f.get(Fixture::frame+(16*64+16)*4);
+            const auto want=fixed_max==192?0xff40bf00u:0xffbf4000u;
+            for(unsigned shift:{0,8,16,24})CHECK(std::abs(int((actual>>shift)&255)-int((want>>shift)&255))<=1);
+        }
+        f.emit(0x1b0c,0x4003ffc0);f.emit(0x1b14,0x02012000);
+        for(unsigned offset=0;offset<(dxt?32u:256u);offset+=dxt?8:4)
+            f.put(texture+offset,dxt?0x001f:0xff0000ff);
+        f.draw(0);++cases;
+        CHECK(f.fault.empty() && f.get(Fixture::report+12)==0);
+        CHECK(f.get(Fixture::frame+(16*64+16)*4)==0xff0000ff);
+    }
+    for(unsigned invalid=0;invalid<4;++invalid) {
+        Fixture f(false);f.emit(0x184,2);f.emit(0x1b00,texture);f.emit(0x1b04,0x03340629);
+        f.emit(0x1b08,0x10101);f.emit(0x1b0c,invalid==3?0x4003fff0:0x4003ffc0);
+        f.emit(0x1b14,invalid==0?0x02072000:invalid==1?0x13022000:0x02022000);
+        f.emit(0x1e70,1);f.emit(0xac0,0x08200000);f.emit(0x260,0x18200000);f.emit(0x28c,0x1c00);
+        if(invalid==2)f.emit(0x1b0c,0x70000000);
+        f.draw(0);CHECK(!f.fault.empty() && !f.gpu->generic_combiner_writes());
+        CHECK(f.get(Fixture::report+12)==0xffffffff);
+        for(unsigned i=0;i<4096;++i)CHECK(f.get(Fixture::frame+i*4)==0xff102030);
+    }
+}
+
 int main() {
     packed_formats(); surface_reuse(); immediate_control();
     noise_control_boundary();
     programmable_fog();
+    texture_mips();
     std::printf("nv2a_vertex_colors: %u draw cases, %u failures\n", cases, failures);
     return failures ? 1 : 0;
 }

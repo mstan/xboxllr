@@ -145,7 +145,7 @@ int main(void)
         D3D11_SAMPLER_DESC desc; ID3D11SamplerState_GetDesc(sampler,&desc);
         ID3D11SamplerState_Release(sampler);
         CHECK(desc.AddressW==D3D11_TEXTURE_ADDRESS_CLAMP && desc.MipLODBias==0.5f);
-        CHECK(desc.MinLOD==2 && desc.MaxLOD==2);
+        CHECK(desc.MinLOD==2 && desc.MaxLOD>100); /* LOD0 uses a cached one-level view. */
         fprintf(stderr,"SAMPLER border=%g,%g,%g,%g\n",desc.BorderColor[0],desc.BorderColor[1],desc.BorderColor[2],desc.BorderColor[3]);
         CHECK(fabsf(desc.BorderColor[0]-18.0f/255)<1e-6f && fabsf(desc.BorderColor[1]-52.0f/255)<1e-6f &&
               fabsf(desc.BorderColor[2]-86.0f/255)<1e-6f && desc.BorderColor[3]==1);

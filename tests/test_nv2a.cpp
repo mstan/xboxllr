@@ -3859,6 +3859,7 @@ int main() {
     fault.clear();
     emit(0x033C, 0x0206);
     for (float q : {0.5f, 2.0f}) {
+        emit(0x1B04, 0x0888062A); // restore swizzled source after the linear pass
         std::memcpy(ram.data() + rs0_color, rs0_initial_color.data(), rs0_initial_color.size());
         for (uint32_t y = 0; y < 256; ++y)
             for (uint32_t x = 0; x < 256; ++x)
@@ -3927,7 +3928,8 @@ int main() {
         CHECK(std::memcmp(ram.data() + rs0_depth, rs0_expected_depth.data(), rs0_expected_depth.size()) == 0);
         // The single PROJECT2D program selects the tight linear setup funnel.
         // Both paths must upload the same rows; layout is part of the cache key.
-        emit(0x1E70, 1); emit(0x1B1C, 0x01000100); emit(0x1B10, 0x04000000);
+        emit(0x1E70, 1); emit(0x1B04, 0x0001122A); // explicit LIN_A8R8G8B8
+        emit(0x1B1C, 0x01000100); emit(0x1B10, 0x04000000);
         generic_cpu_reroute(1u << 5);
         draw();
         const auto linear_texture = generic_cpu_renderer.last_generated_packet.textures[0];
