@@ -1,7 +1,8 @@
 // xlle — MCPX APU (audio processing unit) at 0xFE800000 (512 KB, PCI 00:05.0 BAR0).
 //
 // Harvested from xemu/hw/xbox/mcpx/apu. The top level is a RAM-backed register file with
-// special handling for interrupt status, FEMEMDATA, and XGSCNT. The 5.333 ms APU
+// special handling for interrupt status and XGSCNT. The FE fence/control route
+// remains guarded until its ordering contract is independently qualified. The 5.333 ms APU
 // frame walker encounters inactive voices in the 2D/3D/MP list and emits
 // SE2FE_IDLE_VOICE. With FETFORCE1 enabled,
 // that publishes the front-end trap and drives the APU's level IRQ according to IEN/ISTS.
@@ -175,6 +176,13 @@ public:
     void mmio_write(uint32_t addr, int size, uint32_t value) override {
         uint32_t off = addr - base_;
         if (faulted_) return;
+        // Original audio deferred work synchronizes notifications through this
+        // control/address/data sequence. The old immediate FEMEMDATA write
+        // assumed the fence's prerequisite work was complete. Keep it explicit
+        // until that ownership/ordering contract is independently established.
+        if(off==0x1510 || off==kFememaddr || off==kFememdata) {
+            device_fault("FE notification fence/control remains unqualified");return;
+        }
         if(off>=0x30000 && off<0x40000) {
             uint32_t* word=gp_host_word(off,size);
             if(!word){device_fault("unqualified GP host write/reset");return;}
@@ -239,10 +247,6 @@ public:
         RegFileMmio::mmio_write(addr, size, value);
         if(size==4 && (off==kVpvaddr || off==kVpsgeaddr))
             for(auto& rate:voice_rates_)rate.reset();
-        if (off == kFememdata && size == 4) {
-            uint32_t dst = reg32(kFememaddr);
-            if (!write_mem(dst, &value, 4)) device_fault("FEMEMDATA guest write failed");
-        }
         if ((off == kIen || off == kFectl) && size == 4) update_irq();
     }
 

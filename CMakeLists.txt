@@ -402,7 +402,7 @@ add_executable(test_apu_completion tests/test_apu_completion.cpp)
 target_link_libraries(test_apu_completion PRIVATE xlle_apu_rate)
 add_test(NAME apu_completion COMMAND test_apu_completion)
 
-add_library(xlle_apu_reference SHARED EXCLUDE_FROM_ALL tools/apu_reference.cpp)
+add_library(xlle_apu_reference SHARED EXCLUDE_FROM_ALL tools/apu_reference.cpp src/machine/pic.cpp)
 target_include_directories(xlle_apu_reference PRIVATE ${XLLE_INCLUDES})
 target_link_libraries(xlle_apu_reference PRIVATE xlle_apu_adpcm)
 target_link_libraries(xlle_apu_reference PRIVATE xlle_apu_rate)

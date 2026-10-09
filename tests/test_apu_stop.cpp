@@ -73,5 +73,12 @@ int main() {
         if(kind!=6)CHECK(f.ram==configured);
         else CHECK(!(f.word(f.v+0x54)&(1u<<21))); // real stop preceded failed status publication
     }
-    std::puts("PASS: static VOICE_OFF ordered state/status/IRQ, retained caller data, 32 stop/rebind lifetimes and DMA/ownership failures");
+    // A legacy immediate fence write must not certify unknown notification
+    // work or overwrite caller memory. Reject before any device/RAM mutation.
+    for(unsigned offset:{0x1510u,0x1324u,0x1334u}) {
+        Fixture f;const auto before=f.ram;
+        f.command(offset,0x12345678);
+        CHECK(!f.error.empty() && f.ram==before && !f.irq_edges);
+    }
+    std::puts("PASS: static VOICE_OFF ordered state/status/IRQ, retained caller data, 32 stop/rebind lifetimes and DMA/ownership/fence guards");
 }

@@ -9,6 +9,68 @@ The audio LLE floor still needs remaining envelope curves/filtering, GP transpor
 whole-driver integration before it is a qualified selectable title backend. Existing
 audible HLE output does not remove that requirement.
 
+## Original IRQ5, unlink and deferred-work queue - 2026-10-09
+
+`native_audio_interrupt_reference.py` connects the maintained APU to the
+maintained dual PIC and reuses the display family's captured-kernel mappings,
+interrupt entry and port transport. Original kernel allocation, interrupt
+initialization/connection and actual Blinx ISR `0x17856e` execute unchanged.
+The ISR handles the actual inactive-voice trap, invokes original unlink worker
+`0x178d7c`, publishes its software status and queues original deferred work.
+The fixture does not call that worker or manufacture its completion record.
+
+**30 cases / 66 ISR deliveries / 30 original unlinks** pass: mono/stereo,
+three fresh device lifetimes for each of combined notification/trap,
+notification-before-frame, device-IRQ masking, original disconnect/reconnect
+and command-stop cases. Interrupted registers/stack/flags and IRQL are restored;
+acknowledging the reasserted trap causes no duplicate unlink. A second original
+queue request is rejected while the real DPC is pending. Original cancellation
+removes it once, and original allocation statistics return to baseline.
+
+This intentionally validates delivery with the interrupted caller at
+DISPATCH_LEVEL. **Deferred completion remains pending**, with its original
+status/list state checked before teardown. Cancelling the DPC for fixture
+teardown is not successful execution of that deferred work. Original derived
+completion is still independently exercised by the earlier control fixture.
+
+The `--barrier-audit` run lowers IRQL through the original kernel, enters the
+real DPC `0x17838e` and reaches fence helper `0x177df0`. It stops at the strict
+`0xfe801510` read, before the completion consumer executes. The helper toggles
+that register's bit 0, writes FEMEMADDR/FEMEMDATA and polls actual RAM. Pinned
+xemu describes its immediate FEMEMDATA write as provisional; Phobos, sp00nznet
+and NoRain's audited APU cores share that assumption. They are not independent
+proof of the fence's ordering or control ownership.
+
+The maintained APU's older unconditional FEMEMDATA guest write is now removed.
+The control/address/data writes fail before mutation, and the strict reference
+continues to reject the control read. No guessed memory completion is admitted.
+Root negative cases verify caller RAM and interrupt state remain unchanged.
+The precise unresolved question is **`beads-xbox.1.115`**, deferred alongside
+other silicon questions. Independent GP/FIFO and graphics work can continue;
+do not repeatedly rerun this guarded DPC or the parked title startup.
+
+Reproduction (owned private inputs):
+
+```powershell
+py -3 tools/native_audio_interrupt_reference.py --xbe <owned-default.xbe> --snapshot build/blinx/io-boot-18m.ram.bin --library build/visibility-lle/libxlle_apu_reference.dll --output build/blinx/audio-irq-original.aot-private.json
+```
+
+Add `--barrier-audit` with a separate output to reproduce the expected nonzero
+guard result. This is a bounded IRQ/queue qualification, not whole audio-device
+initialization, working deferred completion, timing fidelity or LLE title audio.
+The audio family remains open and the count remains **4/9**.
+
+Final validation: maintained APU **7/7 in 0.28s**, complete native/contract
+suite **56/56 in 35.71s**, the 30 new original IRQ cases, and all prior original
+configuration/source/natural-completion/command-stop fixtures pass. The guarded
+DPC reproducer still stops before the completion consumer. Reference DLL SHA-256:
+`00f4382e6be49b83c9fe2b6bb0dffbc3b2b83368d31c3f647722797d671a2266`.
+Evidence: `build/blinx/audio-irq-{original,barrier-guard,configuration-original,source-original,natural-original,stop-original}.aot-private.json`
+and `audio-irq-{machine-build,root-tests,full-build,full-tests}.log`.
+The fully rebuilt native title retains SHA `76ff2a4e...ff12f730`; its exact
+**190.578s / 18-capture** regression from the preceding batch remains valid.
+No duplicate title run or new LLE-title claim is made. Stable game pin unchanged.
+
 ## Finite-buffer processing and original completion - 2026-10-09
 
 The current hash-bound native audio bindings expose DirectSound buffers and
@@ -595,12 +657,11 @@ needed, remain at the end of the burndown. Their necessity is not established.
 
 ## Remaining work, in order
 
-1. Connect the remaining original control/ISR/DPC ownership to the real
-   finite-buffer processing and stop/restart route. Preserve the new natural
-   completion and command-stop evidence. Unknown notifier payload fields stay
-   explicit; do not block known offline source/control work on them. SSL
-   descriptor/source ownership remains open, behind the currently reached
-   buffer path rather than ahead of it.
+1. Preserve the now-connected original IRQ/PIC/ISR/unlink and DPC-queue route.
+   Completing the deferred consumer through the original fence is `.115` and
+   stays behind independent offline work. Unknown notifier payload fields stay
+   explicit. SSL descriptor/source ownership remains open, behind the currently
+   reached buffer path rather than ahead of it.
 2. Complete the remaining voice-processing path around the maintained source,
    rate/envelope quantum and final 2D send stages: remaining envelope curves, voice
    scaling and filtering, then connect the existing GP donor. Validate actual stream

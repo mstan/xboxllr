@@ -1,6 +1,7 @@
 // Strict C transport for the maintained APU configuration/source floor. No register
 // defaults, sample progress or completion are substituted by this adapter.
 #include "machine/apu.hpp"
+#include "machine/pic.hpp"
 #include <cstring>
 #include <new>
 #include <string>
@@ -12,9 +13,12 @@
 namespace {
 struct Reference {
     std::string failure;
+    xlle::DualPic pic;
+    bool irq=false;
     xlle::McpxApu apu;
     Reference(void* memory, uint32_t bytes)
         : apu([this](const std::string& why) { failure=why; }) {
+        apu.set_irq([this](int line,bool high){irq=high;pic.raise(line,high);},5);
         apu.set_mem_access(
             [memory,bytes](uint32_t address,void* dst,size_t n) {
                 if(uint64_t(address)+n>bytes)return false;
@@ -126,3 +130,25 @@ EXPORT int xlle_apu_reference_process(void* instance,uint32_t voice,float* bins,
     bool last=false;const bool ok=ref.apu.process_2d_voice(static_cast<uint16_t>(voice),bins,*count,last);
     *completed=last;return ok;
 }
+EXPORT void xlle_apu_reference_pic(void* instance,uint16_t mask,uint16_t level) {
+    auto& pic=static_cast<Reference*>(instance)->pic;
+    // Same captured Xbox PIC bootstrap as the qualified USB/display transport.
+    pic.io_write(0x20,1,0x11);pic.io_write(0xa0,1,0x11);
+    pic.io_write(0x21,1,0x30);pic.io_write(0xa1,1,0x38);
+    pic.io_write(0x21,1,4);pic.io_write(0xa1,1,2);
+    pic.io_write(0x21,1,1);pic.io_write(0xa1,1,1);
+    pic.io_write(0x4d0,1,level&255);pic.io_write(0x4d1,1,level>>8);
+    pic.io_write(0x21,1,mask&255);pic.io_write(0xa1,1,mask>>8);
+}
+EXPORT uint32_t xlle_apu_reference_port(void* instance,uint16_t port,int size,int write,uint32_t value) {
+    auto& ref=*static_cast<Reference*>(instance);
+    if(!ref.failure.empty())return 0;
+    if(size!=1 || !ref.pic.owns(port)) {ref.failure="unqualified APU/PIC port transaction";return 0;}
+    if(write){ref.pic.io_write(port,size,value);return 0;}
+    return ref.pic.io_read(port,size);
+}
+EXPORT int xlle_apu_reference_vector(void* instance,int acknowledge) {
+    auto& pic=static_cast<Reference*>(instance)->pic;
+    return acknowledge?pic.acknowledge():pic.peek();
+}
+EXPORT int xlle_apu_reference_irq(void* instance) {return static_cast<Reference*>(instance)->irq;}

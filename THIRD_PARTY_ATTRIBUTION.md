@@ -1425,6 +1425,18 @@ from the owned private XBE. xemu's source-fetch retirement timing is explicitly
 distinguished from the nominal converter-drain model; neither is claimed as a
 new hardware timing observation. [Scope and tests](pilots/native-title/AUDIO-LLE.md#finite-buffer-processing-and-original-completion---2026-10-09).
 
+The original audio IRQ/queue batch also reuses this repository's maintained PIC
+and existing display-family private kernel transport. Its Python harness and
+APU/PIC adapter are authored here. Original kernel/XDK bytes remain private
+qualification inputs. Pinned xemu's `apu.c` FEMEMDATA comment and the audited
+Phobos/sp00nznet/NoRain APU cores were compared for the fence question; their
+shared provisional immediate-write behavior is not accepted as independent
+qualification or copied into this batch. The older immediate write in the
+maintained APU was removed and the unresolved boundary guarded. [Scope](pilots/native-title/AUDIO-LLE.md#original-irq5-unlink-and-deferred-work-queue---2026-10-09).
+Audited APU-core pins: Phobos `bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0`,
+sp00nznet `b3700e1d60bcd9c3dfaad734f45149b6f0bc5cb4`, and NoRain211
+`74649ef5b0f023e7b878043bc6de2534c55e717e`.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),
