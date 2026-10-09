@@ -378,6 +378,12 @@ add_executable(test_ide_dvd tests/test_ide_dvd.cpp src/machine/ide.cpp src/machi
 target_include_directories(test_ide_dvd PRIVATE ${XLLE_INCLUDES})
 add_test(NAME ide_dvd COMMAND test_ide_dvd)
 
+# Private original-filesystem qualification, using the existing disk/PIC floor.
+# Kept out of installed/shipping targets; owned images are opened read-only.
+add_library(xlle_storage_reference SHARED EXCLUDE_FROM_ALL
+  tools/storage_reference.cpp src/machine/ide.cpp src/machine/pic.cpp)
+target_include_directories(xlle_storage_reference PRIVATE ${XLLE_INCLUDES})
+
 add_executable(test_smc tests/test_smc.cpp src/machine/smbus.cpp)
 target_include_directories(test_smc PRIVATE ${XLLE_INCLUDES})
 add_test(NAME smc COMMAND test_smc)

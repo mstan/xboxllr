@@ -21,6 +21,7 @@ static void test_storage_async(const char *directory)
         call_kernel(236,write,8);CHECK(!g_eax || g_eax==0x103);
         uint32_t wait[]={write[1]?event:file,0,timeout};
         call_kernel(233,wait,3);CHECK(!g_eax && !MEM32(iosb) && MEM32(iosb+4)==length);
+        if(write[1])CHECK(WaitForSingleObject(owner->async_signal,0)==WAIT_TIMEOUT);
         CHECK(MEM32(iosb-4)==0xaabbccdd && MEM32(iosb+8)==0x11223344 && !memcmp(memory+buffer,expected,sizeof(expected)));
         /* Explicit non-sector offset, extending EOF with a zero-filled gap. */
         MEM64(offset)=7003;write[1]=0;write[5]=buffer+7003;write[6]=37;

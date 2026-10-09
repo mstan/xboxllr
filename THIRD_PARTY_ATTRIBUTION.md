@@ -813,6 +813,24 @@ copied. Existing private-pilot dependency restrictions still apply. See the
 limits, including the distinction between actual Nt-backed residency and the
 later loader/cache/thread family qualification.
 
+## Original filesystem and asynchronous notification qualification
+
+`tools/native_filesystem_reference.py` and `tools/storage_reference.cpp` are
+authored qualification transports. They execute the owner's original Nt/FATX
+and cache code as private input over the existing IDE/PIC implementations, whose
+xemu references and license restrictions remain recorded with those components.
+No new xemu/GPL implementation body is imported. This private reference target
+is excluded from install/default shipping targets and is not a new non-GPL
+distribution claim.
+
+Phobos `63f18f0334fbd8c00313c4bb565accf00627a4fd`, `src/kernel/kernel_file.c`
+and the Fsc bridges in `kernel_bridge.c`, were consulted for native-file
+implementation strategy. Their service bodies are not copied. Cxbx
+`585c49a50af1255ab155099e06f24505f9c5a800` kernel declarations supply ABI names
+and field descriptions; original execution, rather than those implementations,
+establishes the recorded return/memory/notification effects. See
+[FILES-LLE.md](pilots/native-title/FILES-LLE.md) for exact inputs and limits.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

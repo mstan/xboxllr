@@ -16,8 +16,28 @@ static void test_media_async(const unsigned char *content,unsigned length)
         call_kernel(233,wait,3);CHECK(!g_eax);
         CHECK(!MEM32(iosb) && MEM32(iosb+4)==8 && !memcmp(memory+buffer,content+3,8) && MEM8(buffer+8)==0xcc);
         if(!(cycle&1)) {
+            CHECK(WaitForSingleObject(owner->async_signal,0)==WAIT_TIMEOUT);
+            /* An immediate rejection is not a completed request. Original
+             * NtReadFile/FATX preserves IOSB and clears event/file signals;
+             * an accepted pending EOF must still publish its real completion. */
+            uint32_t set_event[]={event,0};call_kernel(225,set_event,2);CHECK(!g_eax);
+            MEM32(iosb)=0xdeadbeef;MEM32(iosb+4)=0x12345678;
             MEM64(offset)=length;call_kernel(219,read,8);CHECK(g_eax==0xc0000011u || g_eax==0x103);
-            call_kernel(233,wait,3);CHECK(!g_eax && MEM32(iosb)==0xc0000011u && !MEM32(iosb+4));
+            if(g_eax==0x103) {
+                call_kernel(233,wait,3);CHECK(!g_eax && MEM32(iosb)==0xc0000011u && !MEM32(iosb+4));
+            } else {
+                CHECK(MEM32(iosb)==0xdeadbeef && MEM32(iosb+4)==0x12345678);
+                MEM64(timeout)=0;call_kernel(233,wait,3);CHECK(g_eax==0x102);
+                CHECK(WaitForSingleObject(owner->async_signal,0)==WAIT_TIMEOUT);
+                MEM64(timeout)=(uint64_t)-50000000;
+            }
+            call_kernel(225,set_event,2);CHECK(!g_eax);
+            MEM32(iosb)=0xdeadbeef;MEM32(iosb+4)=0x12345678;MEM64(offset)=(uint64_t)-1;
+            call_kernel(219,read,8);CHECK(g_eax==MEDIA_INVALID);
+            CHECK(MEM32(iosb)==0xdeadbeef && MEM32(iosb+4)==0x12345678);
+            MEM64(timeout)=0;call_kernel(233,wait,3);CHECK(g_eax==0x102);
+            CHECK(WaitForSingleObject(owner->async_signal,0)==WAIT_TIMEOUT && !owner->pending);
+            MEM64(timeout)=(uint64_t)-50000000;
             call_kernel(187,&file,1);CHECK(!g_eax);
         }
         CHECK(!owner->host && !owner->async_idle && !owner->pending);
