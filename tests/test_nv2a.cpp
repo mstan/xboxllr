@@ -997,8 +997,10 @@ static void test_vsh_compile_toggle_rebuilds_cached_parse() {
 
 #include "nv2a_visibility_cases.hpp"
 #include "nv2a_timer_cases.hpp"
+#include "nv2a_init_cases.hpp"
 
 int main() {
+    test_gpu_initialization_controls();
     test_ptimer_reference();
     {
         std::string failure;

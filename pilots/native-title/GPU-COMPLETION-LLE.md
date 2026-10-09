@@ -155,3 +155,79 @@ py -3 build/blinx/run_extended.py gpu-lle-title-next 40
 
 The established game repo remains pinned to completed-files `439a45b`; this
 unfinished renderer is isolated on `feat/blinx-gpu-completion-lle-20261008`.
+
+## Initialization controls and original GPU reservation
+
+The next actual-title checkpoint passes the former PCI-ROM stop, PLL/timer
+setup, GPU instance reservation, PRAMIN clearing, inactive overlay configuration,
+context-table setup and initial FIFO configuration. It now stops at the real
+**GPIO byte write to port `80C0`**. The following original routine uses
+`HalReadWritePCISpace` (ordinal 46); GPIO/PCI bus integration is the next coherent
+dependency. No LLE frame or attract completion is claimed; the family stays open.
+
+Maintained changes and scope:
+
+- Disabled PCI ROM-address selection and latency configuration retain real
+  register state; enabling ROM decode requires a real ROM provider and stops.
+- PLL reads support actual byte/word/dword extraction. The pinned xemu boot
+  coefficients and nxdk crystal formula yield the existing 233333324-Hz core
+  source. Memory-clock zero, CFG1 zero and ROM_VERSION zero belong to the bounded
+  xemu-compatible board profile, not new silicon measurements. Changing RAM/NVM
+  geometry stops. These assumptions still need independent silicon evidence if
+  a title-visible outcome depends on them.
+- PMC represents the component's existing ready engines, not a cold-reset mask.
+  Pristine PGRAPH disable clears modeled control/interrupt state while preserving
+  PRAMIN; resets after command submission or of other engines stop. Context-table
+  configuration is maintained; context loading/switching is not yet qualified.
+- PVIDEO retains both banks' inactive configuration and supports idle stop/W1C.
+  Overlay activation stops until actual overlay pixels/scanout are implemented.
+  PCRTC retains the bounded HSYNC address-latch profile; existing display phase
+  limits remain. This does not claim general video-mode or overlay support.
+- `MmClaimGpuInstanceMemory` executes the original kernel routine. It returns
+  the original top/padding, releases actual surplus pages, and handles repeat
+  and query calls. Growth/empty claims stop before mutating the original state.
+  Revision-specific reservation metadata lives with the hash-bound capture
+  configuration. PRAMIN/physical-alias equivalence remains unqualified; the
+  current NV2A instance store follows the separate-memory reference model.
+- Verified `OUT DX,AL` lowering calls the actual machine port interface without
+  changing guest registers. PIC byte writes are tested; unsupported GPIO writes
+  stop. Instruction bytes and generated statement both must match, with no
+  title-address special case. Generated private manifests advance to version 3.
+
+References: nxdk/pbkit `29638d0b001f179b73c3513489af10ddc2986216` for control
+names, initialization order and PLL decoding; the previously pinned xemu
+PBUS/PFB/PRAMDAC/PVIDEO behavior; original owned kernel execution for reservation
+effects; [envytools PMC documentation](https://envytools.readthedocs.io/en/latest/hw/bus/pmc.html)
+for engine reset semantics. xemu's blanket ignored accesses, context WRITE_OUT
+placeholder and read-driven GPIO toggling were not adopted. No new hardware or
+xemu differential run is asserted.
+
+Validation:
+
+- `test_nv2a` passes with initialization/control cases; software-build OpenGL
+  cases explicitly skip. All nine original query/trap/fence cases still pass.
+- `tools/native_gpu_instance_reference.py` passes nine query/shrink/repeat cases
+  across three fresh kernel contexts, checking original protection `0x204 -> 0`
+  on released pages and preservation of the retained window.
+- Five integration checks pass in 2.52s: GPU transport (including original
+  reservation effects and real PIC writes), original device service/guards,
+  memory contract and memory statistics. Eight CPU-lowering tests pass.
+- Actual title evidence is `build/blinx/gpu-lle-title-port-boundary/` and
+  `build/blinx/run-gpu-lle-title-port-boundary.log`. Exit 2 is the explicit
+  unsupported GPIO transaction, before rendering. Earlier iteration logs use
+  suffixes `controls`, `instance`, `video-config` and `context-table`.
+
+Current executable SHA-256:
+`31f949897d8d7a7e7d37f6a7482ece46e1732fbc0689332d4ec538728b0b7294`.
+Current NV2A DLL SHA-256:
+`27dc45af8fa393f44d90ea77c54d772ee2ed2502a936c9a0206f6d89889630b5`.
+Private additional evidence: `build/blinx/gpu-instance-original.aot-private.json`,
+`build/blinx/gpu-completion-init-original.aot-private.json`,
+`build/blinx/gpu-lle-init-nv2a-tests.log`, and the build's CTest last log.
+
+```powershell
+$env:PYTHONPATH='build/reference-python;tools'
+py -3 tools/native_gpu_instance_reference.py --snapshot build/blinx/io-boot-18m.ram.bin --output build/blinx/gpu-instance-original.aot-private.json
+py -3 -m unittest discover -s tests -p test_native_interrupt_lowering.py
+ctest --test-dir build/blinx/host-gpu-lle -C Release -R '^pilot_(gpu_lle_transport|io_device_lle|io_device_lle_guards|memory_contract|memory_statistics)$' --output-on-failure
+```

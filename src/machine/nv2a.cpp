@@ -884,6 +884,13 @@ void Nv2a::invalidate_renderer_depth_overlap(uint32_t address, size_t size,
 static constexpr uint32_t kPciNv0 = 0x02A0'10DEu;  // device<<16 | vendor
 static constexpr uint32_t kPciNv2 = 0x0300'00A1u;  // class(0x030000)<<8 | revision(0xA1)
 
+static bool pvideo_configuration_register(uint32_t offset) {
+    // nxdk burst/watermark controls plus both banks' overlay parameters.
+    return offset == 0x88 || offset == 0x8c || offset == 0x100 || offset == 0x140 ||
+           offset == 0x700 || offset == 0x704 || offset == 0xb00 ||
+           (offset >= 0x900 && offset <= 0x95c && !(offset & 3u));
+}
+
 // xemu's fixed-function shader clamps reciprocal divisors to NV2A's signed
 // [2^-64, 2^64] range, preserving the sign of zero, then truncates screen
 // coordinates to four fractional bits.
@@ -929,6 +936,7 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
             case 0x000: return 0x02A000A3;  // PMC_BOOT_0: NV2A, A03 (matches captured silicon)
             case 0x100: return pmc_intr_status();  // PMC_INTR_0 (aggregates PCRTC, bit 24)
             case 0x140: return pmc_intr_en_;       // PMC_INTR_EN_0
+            case 0x200: return pmc_enable_;         // bounded engine enables
             default: break;
         }
     } else if (blk->off == 0x600000) {  // PCRTC
@@ -936,6 +944,9 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
             case 0x100: return pcrtc_intr_;     // NV_PCRTC_INTR_0 (bit0 VBLANK)
             case 0x140: return pcrtc_intr_en_;  // NV_PCRTC_INTR_EN_0
             case 0x800: return pcrtc_start_;    // NV_PCRTC_START
+            // The maintained scanout consumes explicit surface starts; this
+            // profile uses HSYNC address latching, with documented phase limits.
+            case 0x804: return 2;
             default: break;
         }
     } else if (blk->off == 0x601000) {  // PRMCIO (VGA CRTC/attribute mirror)
@@ -949,6 +960,16 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
         if (bo == 0x3D4) return crtc_index_;
         if (bo == 0x3D5) return crtc_regs_[crtc_index_];
     } else if (blk->off == 0x680000) {  // PRAMDAC
+        const uint32_t reg = bo & ~3u;
+        if (reg == 0x500 || reg == 0x504 || reg == 0x508) {
+            if ((size != 1 && size != 2 && size != 4) || (bo & (size - 1))) {
+                fault_("NV2A unqualified PLL read size/alignment"); return 0;
+            }
+            const uint32_t value = reg == 0x500 ? pramdac_nvpll_ :
+                                   reg == 0x504 ? pramdac_mpll_ : pramdac_vpll_;
+            return (value >> ((bo & 3u) * 8)) &
+                   (size == 4 ? 0xffffffffu : ((1u << (size * 8)) - 1));
+        }
         switch (bo & ~3u) {
             case 0x600: return pramdac_general_control_;
             case 0x800: return pramdac_fp_vdisplay_end_;
@@ -957,11 +978,16 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
         }
     } else if (blk->off == 0x001000) {  // PBUS
         switch (bo) {
+            // Bounded xemu board profile. nxdk identifies bit 8 as ROM_VERSION;
+            // silicon/other-board strap values remain outside this profile.
+            case 0x218: return 0;
             case 0x800: return kPciNv0;  // NV_PBUS_PCI_NV_0
             case 0x804:
                 if (size != 4) { fault_("NV2A unqualified PBUS command read size"); return 0; }
                 return pbus_command_;  // NV_PBUS_PCI_NV_1
             case 0x808: return kPciNv2;  // NV_PBUS_PCI_NV_2
+            case 0x80c: return pbus_latency_;
+            case 0x830: return pbus_rom_;
             default: break;
         }
     } else if (blk->off == 0x002000) {  // PFIFO
@@ -975,6 +1001,9 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
         }
         auto it = pfifo_regs_.find(bo);
         if (it != pfifo_regs_.end()) return it->second;
+    } else if (blk->off == 0x008000 && pvideo_configuration_register(bo)) {
+        if (size != 4) { fault_("NV2A unqualified PVIDEO register size"); return 0; }
+        return bo == 0x704 ? 0 : pvideo_regs_[bo / 4];
     } else if (blk->off == 0x009000) {  // PTIMER
         if (size != 4) { fault_("NV2A unqualified PTIMER read size"); return 0; }
         switch (bo) {
@@ -990,6 +1019,9 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
     } else if (blk->off == 0x100000) {  // PFB
         // Captured from silicon 2026-07-16 (agent read 0xFD100200).
         if (bo == 0x200) return 0x03070003;  // NV_PFB_CFG0
+        // The reference profile starts CFG1/NVM clear. This models its fixed
+        // RAM configuration; writes that would change it are guarded below.
+        if ((bo == 0x204 || bo == 0x214) && size == 4) return 0;
         // CSTATUS reports the installed unified RAM capacity (xemu pfb.c).
         // Both maintained machine and title buses currently model retail 64MiB.
         if (bo == 0x20c && size == 4) return 64u * 1024 * 1024;
@@ -1014,6 +1046,7 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
             case 0x710: return pgraph_surface();
             case 0x71C: return 0;  // NV_PGRAPH_INCREMENT (write-only)
             case 0x720: return pgraph_fifo_access_ ? 1u : 0u;
+            case 0x780: return pgraph_context_table_;
             case 0xB10: return patt_color0_;  // NV_PGRAPH_PATT_COLOR0
             // Kelvin's clear-value methods also feed the two PGRAPH parameter shadows.
             // The retail kernel reads PARAMETER_A after a trapped NOP 0x304 and queues it
@@ -1076,12 +1109,60 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
         pbus_command_ = value;
         return;
     }
+    if (blk->off == 0x001000 && bo == 0x80c) {
+        // PCI latency timer field. Local unified RAM has no external PCI bus
+        // arbitration to delay; preserve the caller-visible configured budget.
+        if (size != 4 || (value & ~0xff00u)) {
+            fault_("NV2A unqualified PCI latency/header control"); return;
+        }
+        pbus_latency_ = value; return;
+    }
+    if (blk->off == 0x001000 && bo == 0x830) {
+        // PCI ROM BAR: disabled address configuration is supported. Enabling
+        // decode requires an actual ROM/mapping provider, so never fake it.
+        if (size != 4 || (value & 0x7ffu)) {
+            fault_("NV2A ROM decode needs a ROM bus provider"); return;
+        }
+        pbus_rom_ = value; return;
+    }
+    if (blk->off == 0x000000 && bo == 0x200) {
+        const uint32_t changed = value ^ pmc_enable_;
+        // Initial engine availability and pristine PGRAPH reset are the
+        // currently qualified control family. An in-flight or previously
+        // used engine needs broader reset/resource qualification.
+        if (size != 4 || (changed & ~(1u << 12)) ||
+            ((changed & (1u << 12)) && (methods_.total() || !pull_queue_.empty()))) {
+            fault_("NV2A unqualified engine reset transition"); return;
+        }
+        if ((changed & (1u << 12)) && !(value & (1u << 12))) {
+            pgraph_intr_ = pgraph_intr_en_ = pgraph_nsource_ = 0;
+            pgraph_trapped_addr_ = pgraph_trapped_data_ = patt_color0_ = 0;
+            pgraph_context_table_ = 0;
+            pgraph_fifo_access_ = false;
+            waiting_for_nop_ = waiting_for_flip_ = false;
+        }
+        pmc_enable_ = value; update_irq(); return;
+    }
     // Interrupt plumbing (xemu nv2a.c/pcrtc.c): PMC_INTR_EN_0 gates the PCI line; PCRTC's
     // pending register is write-1-clear, its enable register plain. Every change re-evaluates
     // the level-triggered GPU IRQ.
     if (blk->off == 0x000000 && bo == 0x140) {
         pmc_intr_en_ = value;
         update_irq();
+        return;
+    }
+    if (blk->off == 0x008000 && pvideo_configuration_register(bo)) {
+        if (size != 4) { fault_("NV2A unqualified PVIDEO register size"); return; }
+        if (bo == 0x700 && value) {
+            fault_("NV2A overlay activation requires qualified pixel/scanout implementation"); return;
+        }
+        if (bo == 0x140 && (value & ~0x11u)) {
+            fault_("NV2A unqualified overlay interrupt mask"); return;
+        }
+        if (bo == 0x100) pvideo_regs_[bo / 4] &= ~value;
+        else if (bo == 0x704) {
+            if (value & 1u) pvideo_regs_[0x700 / 4] = 0;
+        } else pvideo_regs_[bo / 4] = value;
         return;
     }
     if (blk->off == 0x009000) {
@@ -1119,6 +1200,12 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
         std::atomic_thread_fence(std::memory_order_seq_cst);
         return;
     }
+    if (blk->off == 0x100000 && (bo == 0x200 || bo == 0x204 || bo == 0x214)) {
+        const uint32_t configured = bo == 0x200 ? 0x03070003 : 0;
+        if (size != 4 || value != configured)
+            fault_("NV2A framebuffer configuration change outside fixed RAM profile");
+        return;
+    }
     if (blk->off == 0x600000 && bo == 0x100) {
         pcrtc_intr_ &= ~value;
         update_irq();
@@ -1137,6 +1224,11 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
             last_nonzero_scanout_start_ = pcrtc_start_;
         }
         scanout_starts_.push(pcrtc_start_);
+        return;
+    }
+    if (blk->off == 0x600000 && bo == 0x804) {
+        if (size != 4 || value != 2)
+            fault_("NV2A unqualified scanout address latch mode");
         return;
     }
     if (blk->off == 0x601000) {
@@ -1163,6 +1255,15 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
             default:
                 break;
         }
+    }
+    if (blk->off == 0x400000 && bo == 0x780) {
+        // 32 channel entries in PRAMIN, pointer in 16-byte units (nxdk).
+        // Loading/switching a context is a distinct trigger and remains guarded
+        // until its real state transfer is implemented.
+        if (size != 4 || value > 0xffffu || (uint64_t(value) << 4) + 128 > pramin_.size()) {
+            fault_("NV2A channel context table outside instance RAM"); return;
+        }
+        pgraph_context_table_ = value; return;
     }
     if (blk->off == 0x400000 && bo == 0x71C) {
         // NV_PGRAPH_INCREMENT_READ_3D is written by the kernel's vblank ISR. It retires
@@ -17134,7 +17235,7 @@ void Nv2a::resume_pushbuffers() {
 }
 
 void Nv2a::drain_pull_queue() {
-    if (waiting_for_flip_ || waiting_for_nop_ || !pgraph_fifo_access_ ||
+    if (!(pmc_enable_ & (1u << 12)) || waiting_for_flip_ || waiting_for_nop_ || !pgraph_fifo_access_ ||
         pull_queue_.empty()) {
         return;
     }

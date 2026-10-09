@@ -2461,6 +2461,18 @@ private:
     // PBUS command mirror. The bounded original XDK path changes only bus
     // mastering; external PCI arbitration/decode is outside this RAM bus.
     uint32_t pbus_command_ = 0;
+    uint32_t pbus_latency_ = 0, pbus_rom_ = 0;
+    // This component starts with its engines available, as its existing
+    // packet/scanout consumers require. This is not a silicon cold-reset mask.
+    uint32_t pmc_enable_ = 0xffffffffu;
+    // Boot PLL coefficients from the pinned xemu NV2A configuration. Original
+    // XDK/pbkit decode these using the Xbox 16,666,666-Hz crystal.
+    uint32_t pramdac_nvpll_ = 0x00011c01u;
+    uint32_t pramdac_mpll_ = 0;
+    uint32_t pramdac_vpll_ = 0x0003c20du;
+    // Inactive overlay configuration. Enabling an overlay requires the real
+    // overlay pixel/scanout path, which this bounded route explicitly rejects.
+    std::array<uint32_t, 0x1000 / 4> pvideo_regs_{};
     uint64_t ptimer_source_ = 0, ptimer_ticks_ = 0, ptimer_fraction_ = 0;
     uint32_t ptimer_div_ = 0, ptimer_mul_ = 0, ptimer_alarm_ = 0;
     uint32_t ptimer_pending_ = 0, ptimer_enabled_ = 0;
@@ -2557,6 +2569,7 @@ private:
     uint32_t pgraph_nsource_ = 0;
     uint32_t pgraph_trapped_addr_ = 0;
     uint32_t pgraph_trapped_data_ = 0;
+    uint32_t pgraph_context_table_ = 0;
     uint32_t patt_color0_ = 0;
     struct ContextSurfaces2DState {
         uint32_t object_instance = 0;

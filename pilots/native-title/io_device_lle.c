@@ -508,7 +508,7 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
 #endif
     if(ordinal!=1 && ordinal!=4 && ordinal!=14 && ordinal!=15 && ordinal!=17 && ordinal!=23 &&
        ordinal!=44 && ordinal!=47 && ordinal!=65 && ordinal!=68 && ordinal!=107 && ordinal!=108 && ordinal!=109 && ordinal!=166 &&
-       ordinal!=171 && ordinal!=173 && ordinal!=175 && ordinal!=178 && ordinal!=179 && ordinal!=180 && ordinal!=181 && ordinal!=182 &&
+       ordinal!=168 && ordinal!=171 && ordinal!=173 && ordinal!=175 && ordinal!=178 && ordinal!=179 && ordinal!=180 && ordinal!=181 && ordinal!=182 &&
        ordinal!=98 && ordinal!=100 && ordinal!=103 && ordinal!=129 && ordinal!=151 &&
        ordinal!=160 && ordinal!=161 && ordinal!=184 && ordinal!=199 && ordinal!=204 && ordinal!=217
 #ifdef PILOT_FILES_LLE
@@ -554,6 +554,15 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
             }
         }
     }
+    if(ordinal==168 && args[0]!=UINT32_MAX) {
+        // This owned kernel capture has an existing GPU reservation. Original
+        // MmClaimGpuInstanceMemory releases surplus pages; it does not grow
+        // an already reduced reservation. Reject that unqualified lifecycle.
+        uint32_t current=kernel_word(PILOT_IO_GPU_RESERVATION_BYTES);
+        if(!args[0] || args[0]>current) {
+            failure="device LLE GPU instance reservation growth/empty claim";return;
+        }
+    }
     /* Bound the qualified small device allocation family. Larger allocations
      * require separate original paging/allocator qualification, not guessed NTSTATUS. */
     if(ordinal==65 && args[1]>0x170){failure="device LLE extension exceeds qualified scope";return;}
@@ -565,7 +574,7 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
     if(failure)return;
     unsigned count=ordinal==65?6:ordinal==109?7:(ordinal==166 || ordinal==184)?5:ordinal==204?4:
                    (ordinal==107 || ordinal==108 || ordinal==175 || ordinal==178 || ordinal==182 || ordinal==199)?3:
-                   (ordinal==15 || ordinal==44 || ordinal==47 || ordinal==217)?2:
+                   (ordinal==15 || ordinal==44 || ordinal==47 || ordinal==168 || ordinal==217)?2:
                    (ordinal==1 || ordinal==103 || ordinal==129 || ordinal==160 || ordinal==161)?0:1;
 #ifdef PILOT_FILES_LLE
     switch(ordinal) {

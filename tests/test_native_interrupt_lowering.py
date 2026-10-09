@@ -10,6 +10,17 @@ def marker(op, address):
 
 
 class InterruptLoweringTests(unittest.TestCase):
+    def test_byte_port_write_uses_dx_al_without_register_assignment(self):
+        code,rows=lower(marker('out dx, al',0x1000),lambda *args:b'\xee'+bytes(15))
+        self.assertEqual(code,'pilot_cpu_out8(LO16(edx), LO8(eax));')
+        self.assertTrue(rows[0]['supported'])
+        self.assertEqual(lower(code,lambda *args:b'')[0],code)
+
+    def test_output_width_or_direction_mismatch_is_rejected(self):
+        for opcode in (b'\xef',b'\xec'):
+            with self.assertRaisesRegex(ValueError,'differs from original'):
+                lower(marker('out dx, al',0x1000),lambda *args:opcode+bytes(15))
+
     def test_byte_port_read_keeps_upper_eax_and_uses_dx(self):
         source=marker('in al, dx',0x1000)
         code,rows=lower(source,lambda *args:b'\xec'+bytes(15))

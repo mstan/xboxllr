@@ -885,6 +885,16 @@ timer tests and implementation. Credit belongs to the respective xemu and
 envytools authors/contributors; no implementation bodies were copied. Reset,
 PLL and phase limits are recorded with the qualification evidence.
 
+Initialization-control qualification additionally consults nxdk/pbkit commit
+`29638d0b001f179b73c3513489af10ddc2986216`, `lib/pbkit/outer.h` and `pbkit.c`:
+PCI/ROM/latency controls, inactive overlay parameters, context-table addressing
+and the Xbox PLL formula. Credit: Guillaume Lamonoca, espes, Jannik Vogel,
+Stefan Schmidt, Lucas Jansson, Erik Abair and other nxdk contributors (MIT).
+Only behavior/register facts are used here; no additional implementation body
+was copied. The authored original-GPU-reservation probe executes owned kernel
+bytes privately and records actual page effects. Envytools PMC documentation
+informs the bounded pristine-engine reset; broader lifecycle remains guarded.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

@@ -164,6 +164,16 @@ uint8_t pilot_cpu_in8(uint16_t port)
 #endif
 }
 #include "nonlocal_jump.inc"
+void pilot_cpu_out8(uint16_t port,uint8_t byte)
+{
+#ifdef PILOT_USB_LLE
+    uint32_t value=byte;
+    const char *error=pilot_usb_pic_port(port,1,1,&value);
+    if(error)stop(error,port);
+#else
+    stop("port write requires the machine bus",port);
+#endif
+}
 void pilot_thread_checkpoint(void)
 {
 #ifdef PILOT_USB_LLE
@@ -421,6 +431,15 @@ static void kernel_dispatch_impl(void)
         if (pilot_imports[i].ordinal == next_kernel_ordinal) name=pilot_imports[i].name;
     if(pilot_verbose)fprintf(stderr, "[KERNEL] %u %s return=%08x\n", next_kernel_ordinal, name, MEM32(g_esp));
     switch (next_kernel_ordinal) {
+#ifdef PILOT_GPU_LLE
+    case 168: {
+        uint32_t args[]={MEM32(g_esp+4),MEM32(g_esp+8)},result=0;
+        const char *error=pilot_io_device_lle(168,memory,args,&result);
+        if(error)stop(error,168);
+        fprintf(stderr,"[GPU INSTANCE LLE] bytes=%08x top=%08x padding=%08x\n",args[0],result,MEM32(args[1]));
+        g_eax=result;g_esp+=12;return;
+    }
+#endif
 #ifdef PILOT_USB_LLE
     case 98:case 100:case 103:case 129:case 151:case 160:case 161: {
         uint32_t arg=next_kernel_ordinal>=160?g_ecx:

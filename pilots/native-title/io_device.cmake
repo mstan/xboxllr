@@ -17,7 +17,7 @@ if(PILOT_IO_DEVICE STREQUAL "LLE")
   file(TO_CMAKE_PATH "${PILOT_IO_DEVICE_SNAPSHOT}" io_snapshot_path)
   file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/io-device-private")
   file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/io-device-private/io_device_config.h"
-    "#define PILOT_IO_DEVICE_SNAPSHOT \"${io_snapshot_path}\"\n#define PILOT_IO_DEVICE_SNAPSHOT_SHA \"${io_snapshot_sha}\"\n")
+    "#define PILOT_IO_DEVICE_SNAPSHOT \"${io_snapshot_path}\"\n#define PILOT_IO_DEVICE_SNAPSHOT_SHA \"${io_snapshot_sha}\"\n#define PILOT_IO_GPU_RESERVATION_BYTES 0x8003df30u\n")
   add_library(pilot_io_device_lle STATIC io_device_lle.c)
   target_include_directories(pilot_io_device_lle PRIVATE "${PILOT_CALENDAR_UNICORN}/include"
     "${CMAKE_CURRENT_BINARY_DIR}/io-device-private")

@@ -7,8 +7,21 @@ __declspec(noinline) static void gpu_test_write(uint32_t offset,uint32_t value)
 static void test_gpu_lle_transport(void)
 {
     install_fault_handler();
+    uint32_t query[]={UINT32_MAX,0x15000};MEM32(0x15000)=0xcdcdcdcd;
+    call_kernel(168,query,2);uint32_t top=g_eax;
+    CHECK(top==0x83ff0000 && MEM32(0x15000)==0x10000);
+    uint32_t first=top-0x10000,keep=top-0x5000,protect=0;
+    CHECK(!pilot_io_device_lle(179,memory,&first,&protect) && protect==0x204);
+    query[0]=0x5000;call_kernel(168,query,2);CHECK(g_eax==top);
+    CHECK(!pilot_io_device_lle(179,memory,&first,&protect) && protect==0);
+    CHECK(!pilot_io_device_lle(179,memory,&keep,&protect) && protect==0x204);
+    call_kernel(168,query,2);CHECK(g_eax==top && MEM32(0x15000)==0x10000);
     for(unsigned lifetime=0;lifetime<3;++lifetime) {
         gpu_lle_open();
+        uint8_t mask=pilot_cpu_in8(0xa1);
+        pilot_cpu_out8(0xa1,(uint8_t)(mask^0x80));
+        CHECK(pilot_cpu_in8(0xa1)==(uint8_t)(mask^0x80));
+        pilot_cpu_out8(0xa1,mask);CHECK(pilot_cpu_in8(0xa1)==mask);
         gpu_test_write(0x1804,4);CHECK(gpu_test_read(0x1804)==4);
         uint32_t base=physical_allocate(8192,0,0x03ffffff,4096,PAGE_READWRITE);
         CHECK(base);uint32_t pa=base&0x03ffffff;
@@ -40,5 +53,5 @@ static void test_gpu_lle_transport(void)
         gpu_lle.destroy(gpu_lle.device);gpu_lle.device=NULL;
         CHECK(FreeLibrary(gpu_lle.library));gpu_lle.library=NULL;
     }
-    fprintf(stderr,"PASS: GPU compiled MMIO, original owned DMA, held/released semaphore, protection/release rejection, three transport lifetimes\n");
+    fprintf(stderr,"PASS: original GPU reservation/query/repeat/page release; compiled MMIO, owned DMA, held/released semaphore, protection/release rejection, three transport lifetimes\n");
 }
