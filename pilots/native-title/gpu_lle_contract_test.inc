@@ -86,6 +86,25 @@ static void gpu_test_encoder_reset(void)
         gpu_test_encoder_hal_write(0xba,0x80);
         gpu_test_encoder_hal_write(0xba,0x3f);
         gpu_test_encoder_hal_write(0x6c,0x46);
+        uint64_t rates[6];uint32_t driven=0xcccccccc;
+        CHECK(gpu_lle.encoder_clocks(gpu_lle.device,rates,&driven));
+        CHECK(!driven && rates[0]==57744984375ull && rates[1]==2048);
+        CHECK(rates[2]==rates[0] && rates[3]==rates[1]);
+        gpu_test_encoder_hal_write(0xc4,1);
+        CHECK(gpu_test_encoder_hal_read(0xc4)==1);
+        CHECK(gpu_lle.encoder_clocks(gpu_lle.device,rates,&driven) && driven==1);
+        gpu_test_encoder_hal_write(0x3a,8); // only the physical CLKO pin divides
+        CHECK(gpu_lle.encoder_clocks(gpu_lle.device,rates,&driven));
+        CHECK(rates[0]==57744984375ull && rates[1]==2048);
+        CHECK(rates[4]==57744984375ull && rates[5]==4096);
+        gpu_test_encoder_hal_write(0x3a,0);
+        gpu_test_encoder_hal_write(0x9c,0x68);
+        gpu_test_encoder_hal_write(0x9e,0xda);
+        gpu_test_encoder_hal_write(0xa0,0x0a);
+        CHECK(gpu_lle.encoder_clocks(gpu_lle.device,rates,&driven));
+        CHECK(rates[0]==12502828125ull && rates[1]==512);
+        gpu_test_encoder_hal_write(0xc4,0);
+        CHECK(gpu_lle.encoder_clocks(gpu_lle.device,rates,&driven) && !driven);
         CHECK(gpu_test_encoder_hal_read(0xba)==0x3f);
         CHECK(gpu_test_encoder_hal_read(0x34)==0 && gpu_test_encoder_hal_read(0xc8)==0);
         CHECK(gpu_test_encoder_hal_read(0x8a)==0x10 && gpu_test_encoder_hal_read(0x96)==0x36);

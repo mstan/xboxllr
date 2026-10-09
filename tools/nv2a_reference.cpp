@@ -169,6 +169,19 @@ EXPORT uint32_t xlle_nv2a_reference_port(void* instance, uint16_t port, int size
 EXPORT void xlle_nv2a_reference_field(void* instance, int level) {
     static_cast<Reference*>(instance)->field.set_level(level != 0);
 }
+// Settled clock rates at the encoder boundary, not a PLL-lock assertion or
+// generated sync/pixels. Six integers: encoder, input, CLKO numerator/denominator.
+EXPORT int xlle_nv2a_reference_encoder_clocks(void* instance,uint64_t* rates,uint32_t* driven) {
+    auto& ref=*static_cast<Reference*>(instance);
+    if(!rates || !driven) { ref.failure="encoder clock observation has no destination";return 0; }
+    if(!ref.failure.empty())return 0;
+    xlle::Cx25871Control::Clocks clocks;
+    if(!ref.encoder->clocks(clocks))return 0;
+    rates[0]=clocks.encoder.numerator;rates[1]=clocks.encoder.denominator;
+    rates[2]=clocks.input.numerator;rates[3]=clocks.input.denominator;
+    rates[4]=clocks.clko.numerator;rates[5]=clocks.clko.denominator;
+    *driven=clocks.clko_driven?1:0;return 1;
+}
 // Pin-level observation for AV integration. These are physical pin masks,
 // not guest register values. Undefined/unknown SCART states stay distinguishable.
 EXPORT int xlle_nv2a_reference_av_outputs(void* instance, uint32_t* known, uint32_t* high) {

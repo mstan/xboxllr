@@ -1008,3 +1008,47 @@ Keep this guard while qualifying the separately documented Conexant timing
 generator/reset and remaining mode-setting controls. If no matching public
 hardware evidence resolves the transaction, a bounded hardware probe will
 need separate authorization under `.12`; none was performed here.
+
+## Encoder clock-source prerequisite
+
+The next timing/reset dependency now has an explicit maintained clock-rate
+contract in `Cx25871Control::clocks`: encoder, input-timing and CLKO pin rates
+are separate exact rational values. The supported 13.5-MHz board profile derives
+them from PLL_INT/FRACT and divisor 6/10, crystal bypass, an explicitly supplied
+external CLKI, the 3:2 encoder divider, asynchronous input and DIV2. HALF_CLKO
+divides only the output pin; EN_OUT and external-clock selection determine
+whether that pin is driven. Unknown warm controls or a missing required CLKI
+source fail without overwriting the observation. No nominal game FPS is used.
+
+Software reset establishes the documented disabled output/clock-control bits;
+unrelated caption/status bits remain unknown. C4 only accepts EN_OUT here.
+MODE2X, external PLL reference, other crystal/power controls and combined
+bypass/external pin gating remain unqualified. The rate query describes settled
+frequencies, not PLL lock time or a generated waveform. It does not yet drive
+the GPU, FIELD GPIO, encoder pixel/counter timeline or analog output. Timing
+reset stays guarded; no command is admitted by merely clearing its bit.
+
+Independent reference: Conexant 100381B sections 1.3.6/1.3.6.1 and table 2-5.
+Tests check independent rational evaluations, divider isolation, missing source,
+output gating and reset across six device lifetimes. Software NV2A/SMBus tests
+pass 2/2 (0.29s). Original HAL/IRQ transport and mode-entry guard tests pass
+2/2 (0.21s); six original-HAL cycles verify CLKO enable/division and changed
+fractional PLL values. Existing original query/trap/fence cases remain 9/9
+across three lifetimes. Native-renderer shared regression checks pass 8/8
+(5.84s); the native binary remains unchanged.
+
+Actual `gpu-lle-title-encoder-clocks` remains exit 2 after 10.015s, 898 entries,
+at missing EN_REG_RD startup state, before frames. Manifest:
+`build/blinx/gpu-lle-title-encoder-clocks/run.aot-private.json`.
+Original GPU cases: `gpu-completion-encoder-clocks-original.aot-private.json`.
+DLL: `cbab0e16962f3dbca74c10154455a49e8400bffba2a1ee89a011ce1401885042`.
+GPU executable: `af4cab4652bb6e6f72087d0d60bfac1209323df0594f92b493f9a3a3579bb0c6`.
+
+Next remains actual timing-generator progression/reset and FIELD behavior,
+then original mode-setting/handshake and coherent title startup. Specification
+sections 1.3.4 and 1.3.31 require odd-field counter origin after timing reset,
+with slave HSYNC/VSYNC synchronization and a two-CLKI FIELD transition delay.
+Sections 1.3.26/27 additionally require the subcarrier accumulator and its
+four/eight-field reset policy (unless disabled), not merely a stored reset bit.
+No new hardware access, donor bodies, full attract claim or family closure;
+burndown remains **4/9**, stable game pin `439a45b`.

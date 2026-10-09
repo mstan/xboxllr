@@ -7,6 +7,60 @@
 static int fails;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n", __LINE__, #c); ++fails; } } while (0)
 
+static void encoder_clocks() {
+    using Encoder=xlle::Cx25871Control;
+    const auto equals=[](Encoder::Rate r,uint64_t n,uint64_t d=1) {
+        return r.numerator*d==n*r.denominator;
+    };
+    for(bool pal:{false,true}) for(unsigned lifetime=0;lifetime<3;++lifetime) {
+        std::string fault;
+        Encoder encoder([&](const std::string& why){fault=why;},pal);
+        Encoder::Clocks clocks;
+        clocks.encoder={123,7};
+        CHECK(!encoder.clocks(clocks) && !fault.empty());fault.clear();
+        CHECK(equals(clocks.encoder,123,7)); // unknown warm state is not zero Hz
+        const auto write=[&](uint8_t reg,uint8_t value){CHECK(encoder.write_byte(reg,value));};
+        write(0xba,0x80);
+        CHECK(encoder.clocks(clocks) && !clocks.clko_driven);
+        // Independent rational evaluation of table C-1's PLL equation, not
+        // rates obtained from this model. PAL ~29.500 MHz; NTSC ~28.196 MHz.
+        const uint64_t numerator=pal?60416015625ull:57744984375ull;
+        CHECK(equals(clocks.encoder,numerator,2048));
+        CHECK(equals(clocks.input,numerator,2048) && equals(clocks.clko,numerator,2048));
+        write(0xc4,1);CHECK(encoder.clocks(clocks) && clocks.clko_driven);
+        write(0x3a,8);CHECK(encoder.clocks(clocks)); // HALF_CLKO is pin-only
+        CHECK(equals(clocks.clko,numerator,4096) && equals(clocks.input,numerator,2048));
+        write(0x3a,4);CHECK(encoder.clocks(clocks)); // PLL divisor 6 -> 10
+        CHECK(equals(clocks.encoder,numerator*3,10240));
+        write(0x3a,0);write(0x38,0x10);CHECK(encoder.clocks(clocks));
+        CHECK(equals(clocks.input,numerator,4096) && equals(clocks.encoder,numerator,2048));
+        write(0x38,0x20);CHECK(encoder.clocks(clocks)); // 3:2 input/output clocks
+        CHECK(equals(clocks.encoder,numerator,3072));
+        CHECK(equals(clocks.input,numerator,2048) && equals(clocks.clko,numerator,2048));
+        write(0x38,0);write(0xa0,0x40);CHECK(encoder.clocks(clocks));
+        CHECK(equals(clocks.encoder,13500000) && clocks.clko_driven); // BY_PLL
+        write(0xa0,0x80);
+        CHECK(!encoder.clocks(clocks) && !fault.empty());fault.clear();
+        CHECK(equals(clocks.encoder,13500000)); // failed query leaves output intact
+        encoder.set_clki_hz(27000000);CHECK(encoder.clocks(clocks));
+        CHECK(equals(clocks.encoder,27000000) && equals(clocks.input,27000000));
+        CHECK(!clocks.clko_driven); // EN_XCLK disables CLKO regardless of EN_OUT
+        write(0xa0,0x40);write(0xd4,0x20);CHECK(encoder.clocks(clocks));
+        CHECK(equals(clocks.encoder,13500000) && equals(clocks.input,27000000));
+        write(0xd4,0x60);CHECK(encoder.clocks(clocks));
+        CHECK(equals(clocks.input,13500000)); // DIV2 aliases D4 bit 6
+        write(0xd4,0x80);CHECK(!encoder.clocks(clocks) && !fault.empty());fault.clear();
+        write(0xd4,0);write(0xa0,0xc0);
+        CHECK(!encoder.clocks(clocks) && !fault.empty());fault.clear();
+        write(0xa0,0);write(0x9c,0);write(0x9e,0);
+        CHECK(!encoder.clocks(clocks) && !fault.empty());fault.clear();
+        CHECK(!encoder.write_byte(0xc4,0x40) && !fault.empty());fault.clear();
+        write(0xba,0x80);CHECK(encoder.clocks(clocks));
+        CHECK(!clocks.clko_driven && equals(clocks.encoder,numerator,2048));
+        CHECK(fault.empty());
+    }
+}
+
 static void av_output_pins() {
     using Status=xlle::McpxAvOutputs::ScartStatus;
     for(unsigned lifetime=0;lifetime<3;++lifetime) {
@@ -88,6 +142,7 @@ static void reset_and_configuration() {
 }
 
 int main() {
+    encoder_clocks();
     av_output_pins();
     reset_and_configuration();
     for (unsigned lifetime=0; lifetime<3; ++lifetime) {

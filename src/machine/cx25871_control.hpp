@@ -6,14 +6,72 @@
 #pragma once
 #include "machine/smbus.hpp"
 #include <array>
+#include <numeric>
 
 namespace xlle {
 class Cx25871Control final : public SmbusSlave {
 public:
+    struct Rate {
+        uint64_t numerator=0, denominator=1;
+        Rate scaled(uint64_t n,uint64_t d) const {
+            Rate result{numerator*n,denominator*d};
+            const auto factor=std::gcd(result.numerator,result.denominator);
+            result.numerator/=factor;result.denominator/=factor;return result;
+        }
+    };
+    struct Clocks {
+        Rate encoder, input, clko;
+        bool clko_driven=false;
+    };
     // PAL is an explicit board strap, not inferred from the game's region.
     // Construction still represents unknown warm state, not a reset event.
     explicit Cx25871Control(FaultFn fault, bool pal_pin=false)
         : fault_(std::move(fault)), pal_pin_(pal_pin) {}
+    // Explicit board input. Zero means no known CLKI source, not a stopped
+    // oscillator. No title rate is inferred from the game's intended cadence.
+    void set_clki_hz(uint32_t hz) { clki_hz_=hz; }
+    bool clocks(Clocks& output) {
+        // Software reset establishes the power/oscillator control defaults.
+        // A RAM-only warm capture does not establish those pins/registers.
+        if(!clock_defaults_known_ || known_[0x3a]!=0xff ||
+           known_[0xa0]!=0xff || known_[0x9c]!=0xff || known_[0x9e]!=0xff ||
+           known_[0x38]!=0xff || (known_[0xd4]&0xe0)!=0xe0 || !(known_[0xc4]&1))
+            return reject("CX25871 clock tree has unknown control state");
+        // Conexant 100381B sections 1.3.6/1.3.6.1 and table 2-5. This
+        // bounded profile uses the same 13.5-MHz crystal as autoconfig 0/1.
+        // PLL lock time, sleep, external PLL reference and MODE2X remain open.
+        if(registers_[0xd4]&0x80)
+            return reject("CX25871 MODE2X input clock remains unqualified");
+        const bool bypass=registers_[0xa0]&0x40;
+        const bool external=!bypass && (registers_[0xa0]&0x80);
+        const bool async=registers_[0xd4]&0x20;
+        if(bypass && (registers_[0xa0]&0x80))
+            return reject("CX25871 combined PLL bypass/external pin gating remains unqualified");
+        if((external || async) && !clki_hz_)
+            return reject("CX25871 clock tree requires a real CLKI source");
+        Rate source{13500000,1};
+        if(external) source={clki_hz_,1};
+        else if(!bypass) {
+            const uint32_t multiplier=((registers_[0xa0]&0x3fu)<<16) |
+                (uint32_t(registers_[0x9e])<<8) | registers_[0x9c];
+            if(!multiplier)return reject("CX25871 zero PLL multiplier is unqualified");
+            source=source.scaled(multiplier,65536u*((registers_[0x3a]&4)?10u:6u));
+        }
+        Clocks result;
+        result.encoder=source;
+        result.input=async ? Rate{clki_hz_,1} : source;
+        if(registers_[0x38]&0x20) {
+            if(bypass || external)
+                return reject("CX25871 3:2 clocking requires the qualified internal PLL");
+            result.encoder=source.scaled(2,3);
+        }
+        if(registers_[0x38]&0x10)result.input=result.input.scaled(1,2);
+        result.clko=source.scaled(1,(registers_[0x3a]&8)?2:1);
+        // EN_XCLK three-states CLKO even with EN_OUT set. Combined bypass
+        // and external-clock pin gating is deliberately not inferred here.
+        result.clko_driven=(registers_[0xc4]&1) && !(registers_[0xa0]&0x80);
+        output=result;return true;
+    }
     const char* name() const override { return "cx25871-control"; }
     uint8_t address() const override { return 0x45; }
     bool read_byte(uint8_t reg, uint8_t& value) override {
@@ -37,8 +95,10 @@ public:
                 return reject("CX25871 autoconfiguration mode/clock remains unqualified");
             autoconfigure(value); programmed_ = true; return true;
         }
-        if (reg == 0x3a && value)
+        if (reg == 0x3a && (value & ~0x0c))
             return reject("CX25871 alternate crystal/clock configuration remains unqualified");
+        if (reg == 0xc4 && (value & ~1u))
+            return reject("CX25871 non-enable output/status controls remain unqualified");
         // 6C=46 is the datasheet's standard-readback setup, without reset,
         // color bars or SCART. Broader timing/output modes remain unqualified.
         if (reg == 0x6c && value != 0x46)
@@ -65,7 +125,7 @@ private:
     static bool supported(uint8_t reg) {
         return reg == 0x34 || reg == 0x36 || reg == 0x38 || reg == 0x3a || reg == 0x6c ||
                (reg >= 0x76 && reg <= 0xb4 && !(reg & 1)) ||
-               reg == 0xb8 || reg == 0xba || reg == 0xc8 || reg == 0xd4;
+               reg == 0xb8 || reg == 0xba || reg == 0xc4 || reg == 0xc8 || reg == 0xd4;
     }
     void mirror_div2(bool enabled) {
         registers_[0xd4] = (registers_[0xd4] & ~0x40) | (enabled ? 0x40 : 0);
@@ -98,6 +158,9 @@ private:
         // manual-clear description. Neither disputed bit is manufactured.
         registers_[0x6c] = 2; known_[0x6c] = 0xfb;
         known_[0xba] = 0xbf; // SRESET itself is documented self-clearing.
+        known_[0xc4] = 1; // EN_OUT=0: digital timing pins are three-stated.
+        known_[0xd4] = 0xe0; // MODE2X=EN_ASYNC=DIV2=0; caption fields unknown.
+        clock_defaults_known_=true;
         autoconfigure(pal_pin_ ? 1 : 0);
     }
     bool reject(const char* reason) { if (fault_) fault_(reason); return false; }
@@ -106,5 +169,7 @@ private:
     std::array<uint8_t, 256> known_{};
     bool pal_pin_ = false;
     bool programmed_ = false;
+    bool clock_defaults_known_=false;
+    uint32_t clki_hz_=0;
 };
 } // namespace xlle

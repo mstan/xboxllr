@@ -1083,6 +1083,14 @@ and their four-argument stdcall interface; the actual owned routines execute in
 private qualification fixtures. Timing reset and encoded output are not
 qualified by software-register reset/readback.
 
+The encoder's settled clock-rate contract additionally uses Conexant 100381B
+sections 1.3.6/1.3.6.1 and table 2-5 for the PLL equation, input/encoder clock
+separation, 3:2 mode, DIV2, HALF_CLKO, asynchronous input and EN_OUT/external
+clock pin gating. Exact rational calculations and tests are authored here;
+no vendor programming-example code is incorporated. PLL settling, timing
+generators/reset, FIELD waveforms and analog output remain separate unfinished
+dependencies. This contract does not assert them through a frequency query.
+
 ## AV GPIO and digital screen-off behavioral references
 
 `src/machine/mcpx_av_outputs.hpp`, the NV2A sequencer screen-off behavior and
