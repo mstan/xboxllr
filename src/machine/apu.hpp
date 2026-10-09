@@ -26,6 +26,10 @@
 namespace xlle {
 
 struct ApuRateState;
+struct ApuEnvelopeStep {
+    bool running=false;
+    float amplitude=0,filter=0;
+};
 
 // A RAM-backed MMIO register file: reads return the last written value (reset 0).
 class RegFileMmio : public MmioDevice {
@@ -124,12 +128,21 @@ public:
     // Amplitude envelopes/filtering and notifier delivery remain downstream.
     bool resample_source(uint16_t voice,float* stereo,uint32_t capacity,uint32_t& count,bool& ended);
 
+    // One 32-output-sample VP quantum. Envelopes run at 1500 Hz independently
+    // of source pitch. Unsupported curves fail before either envelope changes.
+    bool step_envelopes(uint16_t voice,ApuEnvelopeStep& result);
+    // Compose source, rate and amplitude envelopes only. Filtering, voice
+    // headroom, final sends, GP and completion remain subsequent stages.
+    bool source_envelope_quantum(uint16_t voice,float* stereo,uint32_t& count,bool& ended);
+
     uint32_t mmio_read(uint32_t addr, int size) override {
         uint32_t off = addr - base_;
         if (faulted_) return 0;
         if (off == kXgscnt)
             set_reg32(kXgscnt, static_cast<uint32_t>(xgscnt_));
-        // VP PIO_FREE: the unsimulated queue is always empty, matching xemu.
+        // Synchronous FE model: the strict reference admits only implemented
+        // methods whose effects precede this capacity read. Queue latency is
+        // unqualified; this does not acknowledge unknown work as completed.
         if (off == kVpBase + 0x10) return 0x80;
         log_subregion("rd", off);
         return RegFileMmio::mmio_read(addr, size);
@@ -208,6 +221,8 @@ public:
     uint64_t idle_voice_traps() const { return idle_voice_traps_; }
 
 private:
+    bool resample_source_impl(uint16_t voice,float* stereo,uint32_t capacity,
+                              uint32_t& count,bool& ended,double pitch_modulation);
     // Top-level PAPU registers.
     static constexpr uint32_t kIsts = 0x1000, kIen = 0x1004;
     static constexpr uint32_t kFectl = 0x1100, kFecv = 0x1110, kFeav = 0x1118;
@@ -351,6 +366,30 @@ private:
             return;
         }
 
+        // The command supplies both initial envelope phases. Only the four
+        // documented start phases are admitted; no guessed phase/cursor reset.
+        const unsigned amplitude=argument>>28,filter=(argument>>24)&15;
+        uint32_t state=0,counters=0,cursor=0,configuration[4]{};
+        if(amplitude>3 || filter>3 || (argument&0x00ff0000)) {
+            device_fault("VOICE_ON unsupported initial envelope/flags");return;
+        }
+        if(!read_voice_word(voice,kVoiceState,state) || !read_voice_word(voice,0x34,counters) ||
+           !read_voice_word(voice,0x58,cursor)) {
+            device_fault("VOICE_ON envelope state DMA failed");return;
+        }
+        if(cursor&0xffffff) {
+            device_fault("VOICE_ON nonzero initial cursor reset remains unqualified");return;
+        }
+        for(unsigned i=0;i<4;++i)if(!read_voice_word(voice,8+i*4,configuration[i])) {
+            device_fault("VOICE_ON envelope configuration DMA failed");return;
+        }
+        for(unsigned i=0;i<2;++i) {
+            const unsigned phase=i?filter:amplitude,shift=i*16;
+            if(!phase)continue; // disabled counter is owned by the processing step
+            const uint32_t count=phase==2?0:((configuration[i*2+(phase==3)]>>12)&0xfff)*16;
+            counters=(counters&~(0xffffu<<shift))|(count<<shift);
+        }
+
         uint32_t antecedent = reg32(kFeav);
         uint32_t list = (antecedent >> 16) & 3;
         if (list != 0) {
@@ -376,9 +415,9 @@ private:
             }
         }
 
-        uint32_t state = 0;
-        if (!read_voice_word(voice, kVoiceState, state) ||
-            !write_voice_word(voice, kVoiceState, state | kVoiceActive)) {
+        state=(state&0x00ffffff)|(argument&0xff000000)|kVoiceActive;
+        if (!write_voice_word(voice,0x34,counters) ||
+            !write_voice_word(voice, kVoiceState, state)) {
             device_fault("VOICE_ON guest state update failed");
             return;
         }

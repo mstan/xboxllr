@@ -19,11 +19,23 @@ struct ApuRateState {
 bool McpxApu::resample_source(uint16_t voice,float* stereo,uint32_t capacity,uint32_t& count,bool& ended) {
     count=0;ended=false;
     if(faulted_)return false;
+    uint32_t env=0;
+    if(voice>=kMaxVoices || !read_voice_word(voice,8,env)) {
+        device_fault("source-rate envelope configuration DMA failed");return false;
+    }
+    if(env>>24) {device_fault("pitch modulation requires the envelope stage");return false;}
+    return resample_source_impl(voice,stereo,capacity,count,ended,0);
+}
+
+bool McpxApu::resample_source_impl(uint16_t voice,float* stereo,uint32_t capacity,uint32_t& count,bool& ended,
+                                  double pitch_modulation) {
+    count=0;ended=false;
+    if(faulted_)return false;
     if(voice>=kMaxVoices || capacity>65536 || (capacity && !stereo)) {
         device_fault("invalid source-rate destination/voice/extent");return false;
     }
     if(!capacity)return true;
-    uint32_t state=0,pitch=0,env=0;
+    uint32_t state=0,pitch=0;
     if(!read_voice_word(voice,0x54,state)) {device_fault("source-rate state DMA failed");return false;}
     if(!(state&kVoiceActive) || (state&(1u<<18)) || voice_locked_[voice])return true;
     std::array<uint32_t,5> binding;
@@ -32,12 +44,11 @@ bool McpxApu::resample_source(uint16_t voice,float* stereo,uint32_t capacity,uin
         if(!read_voice_word(voice,fields[i],binding[i])) {device_fault("source-rate binding DMA failed");return false;}
     binding[0]&=0xfffffc00; // final-send routing does not change source history
     for(unsigned i=1;i<binding.size();++i)binding[i]&=0xffffff;
-    if(!read_voice_word(voice,0x7c,pitch) || !read_voice_word(voice,8,env)) {
+    if(!read_voice_word(voice,0x7c,pitch)) {
         device_fault("source-rate pitch DMA failed");return false;
     }
-    if(env>>24) {device_fault("pitch modulation requires the envelope stage");return false;}
     const int signed_pitch=int(pitch>>16)-((pitch&0x80000000)?65536:0);
-    const double ratio=std::exp2(-double(signed_pitch)/4096.0); // output frames per source frame
+    const double ratio=std::exp2(-(double(signed_pitch)+pitch_modulation)/4096.0); // output frames per source frame
     auto& owned=voice_rates_[voice];
     if(owned && owned->binding!=binding)owned.reset();
     if(!owned) {

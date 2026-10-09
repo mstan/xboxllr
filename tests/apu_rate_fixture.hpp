@@ -57,6 +57,16 @@ struct ApuRateFixture {
         }
         out.resize(at*2);return out;
     }
+    std::vector<float> render_enveloped(unsigned quanta) {
+        std::vector<float> out;out.reserve(quanta*64);
+        for(unsigned i=0;i<quanta;++i) {
+            float samples[64];uint32_t n=0;bool ended=false;
+            CHECK(apu.source_envelope_quantum(voice,samples,n,ended));
+            out.insert(out.end(),samples,samples+n*2);
+            if(ended)break;CHECK(n==32);
+        }
+        return out;
+    }
 };
 
 struct ApuToneFit {double amplitude,error;};

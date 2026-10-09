@@ -5,7 +5,7 @@ the original-scheduler/GPU startup experiments are not prerequisites. The family
 remains **open**, and the overall burndown remains **4/9 qualified**.
 
 The native title continues to select its real XAudio2/DSP implementation.
-The audio LLE floor still needs envelopes/filtering, GP transport/completion and
+The audio LLE floor still needs remaining envelope curves/filtering, GP transport/completion and
 whole-driver integration before it is a qualified selectable title backend. Existing
 audible HLE output does not remove that requirement.
 
@@ -309,6 +309,75 @@ comparison is pilot CTest `pilot_audio_rate_lle`. The original-code fixture is
 arguments already documented above. No production backend switching or duplicate
 execution is introduced.
 
+## Original voice start and bounded envelope processing
+
+`src/machine/apu_envelope.cpp` adds an executable source/envelope quantum. Each
+call processes one 32-output-sample interval; the envelope clock is independent
+of source pitch. It composes real source DMA, persistent rate conversion,
+signed pitch modulation and amplitude scaling. Filtering, voice scaling,
+final sends, GP and completion remain separately owned stages.
+
+The authored envelope model supports disabled, delay, ordinary nonzero-rate
+attack, hold and sustain. It writes actual counter/phase/level fields while
+preserving the neighboring source offsets. Both envelopes are evaluated before
+either is changed; unsupported decay/release/forced-release and zero-rate or
+overflowing attack stop without silently advancing the other envelope. Hold
+can enter decay, but the next processing call stops at that unqualified curve.
+Pause/lock/inactive voices consume no source or envelope time.
+
+`VOICE_ON` previously ignored both envelope-start fields. It now initializes
+their independent phases/counters before playback. Unknown start states/flags
+and nonzero initial CBO are guarded before list mutation. The latter preserves
+the unresolved cursor-reset question instead of adopting xemu's FIXME as fact.
+No envelope or source operation clears ACTIVE or fabricates a notifier.
+
+Independent evidence and its scope:
+
+- [XboxDevWiki's APU observations](https://xboxdevwiki.net/APU#Envelopes)
+  describe the phase/counter interface, sustain updates and pitch modulation.
+  Pinned xemu remains a behavioral cross-check. Some transition details and
+  curves are explicitly uncertain in these sources; this is a documented
+  reference model, not a new silicon trace. No GPL implementation body is
+  copied. New console observations, if needed, stay behind offline work.
+- `native_audio_control_reference.py` executes **eight complete original NTSC
+  init/filter-default/start cases**: `0x178705`, its actual original vtable
+  format callee, `0x179283`, and `0x179c4b`, without replacing callees or returns.
+  Preconditions are an allocated nonspatial voice, empty original owner list,
+  DISPATCH_LEVEL and synchronous method consumption. Real method writes update
+  the maintained voice table; original linked-list writes, notifier IN_PROGRESS
+  initialization, phase/counters and 128 actual output frames per case are
+  checked. Only admitted methods can report free PIO capacity after processing;
+  unsupported transactions stop. This does not emulate queue latency or qualify
+  full allocation/interrupt/SSL/completion ownership.
+- Root `apu_envelope` tests cover all **16 start-phase pairs**, disabled sample
+  identity, delay/attack/hold sequences at two source pitches, stable gain and
+  modulation spectra, live sustain updates, pause/lock/inactive state and guards.
+  They assert real memory/source effects, including preservation of source
+  offsets and refusal to invent downstream completion.
+- Native `pilot_audio_rate_lle` now has **18 source/rate/envelope/send cases**.
+  Real XAudio2 gain/frequency reproduce stable envelope effects within the
+  existing spectral/amplitude tolerances. Integer-Hz and hundredth-dB rounding
+  are explicit; mute is compared against the native -100 dB floor. This does
+  not claim native time-varying envelope API support.
+
+The original-control fixture uses the same owned-XBE/reference-DLL arguments
+as the earlier fixtures, writing
+`build/blinx/audio-envelope-control-original.aot-private.json`. Root CTest is
+`apu_envelope`. Earlier original configuration/source fixtures still pass.
+The full machine/native builds pass; root APU/source/rate/envelope **4/4 in
+0.15s**, combined native/contract **54/54 in 33.29s**. The reference DLL SHA-256
+is `4222dd53882ee9165208665d529b1fdecf99ff3263940a7ce922d0a7ea5d38b6`.
+Logs are `build/blinx/audio-envelope-{build,native-build,machine-build,full-build,
+full-tests}.log`; the control, source and configuration original fixtures retain
+private JSON under the same batch prefix. The rebuilt native executable SHA-256
+is `995adc6fd3982ed97115f9996a16dd74299691e6954e0f8905de37f1267c3b35`.
+Fresh `audio-envelope-floor-attract` ran **190.156s**; 18 inspected captures
+show demo gameplay, Start interruption/loading, title return and demo reentry.
+Both scheduled Start press/release pairs arrived; no STOP/audio fault was logged.
+The harness terminated the live process at its limit. This is a default-native
+regression, not whole-title LLE audio, cadence or endurance qualification.
+Family **4/9** stays unchanged: this does not close audio.
+
 ## Withdrawn notifier assumption
 
 The audit found the older `post_voice_notifier` wrote a literal `1` into byte
@@ -331,7 +400,7 @@ needed, remain at the end of the burndown. Their necessity is not established.
 ## Remaining work, in order
 
 1. Complete the remaining voice-processing path around the maintained source,
-   nominal-rate and final 2D send stages: envelopes/pitch modulation, voice
+   rate/envelope quantum and final 2D send stages: remaining envelope curves, voice
    scaling and filtering, then connect the existing GP donor. Validate actual stream
    output and transitions, not only stationary mixer comparisons.
    Existing original byte/sample conversion, detach, decoder and real native

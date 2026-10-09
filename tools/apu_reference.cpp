@@ -30,6 +30,8 @@ bool qualified_write(uint32_t offset) {
     if(offset>=0x20200 && offset<=0x2027c && !(offset&3))return true;
     switch(offset) {
     case 0x202c:case 0x2030: // voice table and source scatter/gather physical addresses
+    case 0x2054:case 0x2060:case 0x206c: // actual list heads
+    case 0x20120:case 0x20124: // antecedent and bounded VOICE_ON
     case 0x202f8:case 0x202fc:case 0x20140:
     case 0x20300:case 0x20304:case 0x20308:case 0x2030c:
     case 0x20310:case 0x20314:case 0x20318:
@@ -47,6 +49,15 @@ EXPORT void* xlle_apu_reference_create(void* ram,uint32_t bytes) {
 EXPORT void xlle_apu_reference_destroy(void* instance) {delete static_cast<Reference*>(instance);}
 EXPORT const char* xlle_apu_reference_error(void* instance) {
     return instance?static_cast<Reference*>(instance)->failure.c_str():"APU reference missing instance";
+}
+EXPORT int xlle_apu_reference_read(void* instance,uint32_t address,uint32_t* value) {
+    if(!instance)return 0;
+    auto& ref=*static_cast<Reference*>(instance);
+    if(!ref.failure.empty())return 0;
+    if(!value || address!=0xfe820010) {ref.failure="unqualified APU read transaction";return 0;}
+    // This bounded model consumes every admitted command synchronously. Thus
+    // its PIO queue is empty after actual work; unknown methods stop on write.
+    *value=ref.apu.mmio_read(address,4);return ref.failure.empty();
 }
 EXPORT int xlle_apu_reference_write(void* instance,uint32_t address,int size,uint32_t value) {
     if(!instance)return 0;
@@ -84,5 +95,13 @@ EXPORT int xlle_apu_reference_rate(void* instance,uint32_t voice,float* samples,
     if(voice>0xffff || !count || !ended) {ref.failure="invalid APU rate transport shape";return 0;}
     bool last=false;
     const bool ok=ref.apu.resample_source(static_cast<uint16_t>(voice),samples,capacity,*count,last);
+    *ended=last;return ok;
+}
+EXPORT int xlle_apu_reference_quantum(void* instance,uint32_t voice,float* samples,uint32_t* count,int* ended) {
+    if(!instance)return 0;
+    auto& ref=*static_cast<Reference*>(instance);
+    if(!ref.failure.empty())return 0;
+    if(voice>0xffff || !count || !ended) {ref.failure="invalid APU quantum transport shape";return 0;}
+    bool last=false;const bool ok=ref.apu.source_envelope_quantum(static_cast<uint16_t>(voice),samples,*count,last);
     *ended=last;return ok;
 }

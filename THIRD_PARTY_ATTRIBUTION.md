@@ -1367,6 +1367,16 @@ packaged. The Xbox DMA/lifecycle adapter is authored here; no xemu resampler
 wrapper or starvation-silence body is incorporated. Pinned xemu's acknowledged
 interpolation uncertainty is retained rather than relabeled as hardware proof.
 
+The maintained envelope/control stage additionally consults
+[XboxDevWiki's APU research](https://xboxdevwiki.net/APU#Envelopes), credit to
+the XboxDevWiki contributors, and the same pinned xemu register/phase reference.
+The new quantum processor and original-code control fixture are authored here;
+no wiki prose or GPL function body is incorporated into runtime code. Reference
+uncertainties about decay/release and exceptional attack behavior remain explicit
+unsupported boundaries. Phobos's stated incomplete envelope handling is not
+adopted as an implementation. Complete original NTSC initialization/start code
+supplies private command/owner evidence; its bytes are not committed.
+
 ## dr_wav: maintained ADPCM source decoder
 
 [dr_libs / dr_wav](https://github.com/mackron/dr_libs/tree/dfe8377631000664666519fdb83da193fd8037f4),
