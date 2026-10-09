@@ -4,6 +4,7 @@
 // for separately provisioned runtime HDDs and persistence qualification.
 #include "machine/ide.hpp"
 #include "machine/pic.hpp"
+#include "machine/pit.hpp"
 #include <cstring>
 #include <memory>
 #include <string>
@@ -17,6 +18,8 @@ namespace {
 struct Reference {
     std::string failure;
     xlle::DualPic pic;
+    xlle::Pit8254 pit;
+    uint64_t ticks=0;
     xlle::IdeController ide;
     void (*external_irq)(int,int)=nullptr;
     Reference() : ide([this](const std::string& why) { if (failure.empty()) failure=why; }) {}
@@ -42,6 +45,10 @@ static void* create_storage(const char* path,uint8_t* ram,uint32_t bytes,
         pic.io_write(0x21,1,1); pic.io_write(0xa1,1,1);
         pic.io_write(0x4d0,1,level&255); pic.io_write(0x4d1,1,level>>8);
         pic.io_write(0x21,1,mask&255); pic.io_write(0xa1,1,mask>>8);
+        ref->pit.set_irq0([ref]() {
+            if(ref->external_irq) { ref->external_irq(0,1);ref->external_irq(0,0); }
+            else { ref->pic.raise(0,true);ref->pic.raise(0,false); }
+        });
         ref->ide.set_irq([ref](int irq,bool high) {
             if(ref->external_irq)ref->external_irq(irq,high);else ref->pic.raise(irq,high);
         },14);
@@ -84,6 +91,7 @@ EXPORT int xlle_storage_port(void* instance,uint32_t port,int size,int write,uin
     if (!ref.failure.empty()) return 0;
     xlle::IoPortDevice* device=nullptr;
     if (port<=65535 && ref.pic.owns(static_cast<uint16_t>(port)) && size==1) device=&ref.pic;
+    else if (port>=0x40 && port<=0x43 && size==1) device=&ref.pit;
     else if (port<=65535 && ref.ide.owns(static_cast<uint16_t>(port)) &&
              (size==1 || size==2 || size==4)) device=&ref.ide;
     if (!device || !value) { ref.failure="unmodelled storage port transaction"; return 0; }
@@ -94,6 +102,16 @@ EXPORT int xlle_storage_port(void* instance,uint32_t port,int size,int write,uin
 EXPORT int xlle_storage_vector(void* instance,int acknowledge) {
     auto& pic=static_cast<Reference*>(instance)->pic;
     return acknowledge?pic.acknowledge():pic.peek();
+}
+// Explicit clock input for private original-kernel qualification. No implicit
+// wall clock or kernel-memory update; IRQ0 must traverse the original handler.
+EXPORT int xlle_storage_clock(void* instance,uint64_t ticks) {
+    auto& ref=*static_cast<Reference*>(instance);
+    if(ticks<ref.ticks) { ref.failure="reference clock moved backwards";return 0; }
+    ref.ticks=ticks;ref.pit.set_time(ticks);return ref.failure.empty();
+}
+EXPORT uint64_t xlle_storage_deadline(void* instance) {
+    return static_cast<Reference*>(instance)->pit.next_irq0_tick();
 }
 EXPORT uint64_t xlle_storage_reads(void* instance) { return static_cast<Reference*>(instance)->ide.sectors_read(); }
 EXPORT uint64_t xlle_storage_writes(void* instance) { return static_cast<Reference*>(instance)->ide.sectors_written(); }

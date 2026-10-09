@@ -724,11 +724,35 @@ unchanged; no new donor implementation body or dependency was imported.
 
 [Microsoft: Timer Accuracy](https://learn.microsoft.com/en-us/windows-hardware/drivers/kernel/timer-accuracy)
 is consulted for the documented clock-granularity limit of relative native
-waits. The accepted 1 ms margin comes from the original kernel's exported clock
-increment and executed deadline arithmetic, not an assumed host clock rate.
+waits. The accepted 1 ms HLE tolerance matches the original exported clock
+resolution; it is not evidence that original Xbox waits return early.
 Existing nxdk export declarations corroborate the ordinal/calling interfaces.
 These are behavioral references, not copied implementation code or proof of
 complete original timer interrupt delivery.
+
+The follow-up `tools/native_timer_expiry_reference.py` executes the original
+clock programming, IRQ0, timer expiration/DPC dispatch and real thread
+creation/block/wake/exit. Its test worker/DPC and transport changes are authored
+here. Owned INIT bytes are loaded privately at runtime, never redistributed.
+
+- Intel **8254 datasheet 231164-005 (September 1993)**, pages 5-11,
+  [university-hosted copy](https://www.scs.stanford.edu/23wi-cs212/pintos/specs/8254.pdf):
+  binary counter programming, access order, latch retention, mode aliases and
+  one-shot versus periodic behavior inform the bounded PIT corrections.
+- xemu **482088490c2d5983ed5e1eafbd09906157c1eca0**, `hw/timer/i8254_common.c`
+  and `include/hw/timer/i8254.h`: consulted for clock/transition comparison.
+  Those files carry permissive notices crediting Fabrice Bellard and, for the
+  common implementation, Jan Kiszka/Siemens. No new bodies are copied/adapted.
+  Its Xbox +1 Hz workaround is not adopted as a physical-clock fact.
+- nxdk **29638d0b001f179b73c3513489af10ddc2986216**, `lib/xboxkrnl/xboxkrnl.h`
+  and `.exe.def`: original thread/wait/DPC/fastcall interface declarations.
+- Phobos **bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0**,
+  [kernel_sync.c](https://github.com/phobos665/xboxrecomp/blob/bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0/src/kernel/kernel_sync.c):
+  timer-queue approach reviewed against original DPC argument and execution
+  contracts. No new donor implementation is incorporated by this batch.
+
+Existing private-pilot dependency restrictions remain unchanged. This batch
+adds no GPL-derived implementation to the intended non-GPL shipping product.
 
 ## Original device-manager reference execution (2026-10-08)
 

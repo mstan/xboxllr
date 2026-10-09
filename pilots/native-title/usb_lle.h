@@ -15,11 +15,15 @@ const char *pilot_usb_lle_host_bind(PilotUsbHostRead,PilotUsbHostRumble,PilotUsb
 const char *pilot_usb_lle_bind(PilotUsbDmaRead, PilotUsbDmaWrite, PilotUsbDmaRelease);
 /* One real dword transaction through the shared OHCI model. */
 const char *pilot_usb_lle_access(uint32_t address,int write,uint32_t *value);
-/* PIC profile restored alongside the qualified kernel bootstrap. */
+/* PIC profile restored alongside the qualified kernel bootstrap. The shared
+ * port bus also owns PIT ports 40..43; PIT stays unprogrammed until selected. */
 const char *pilot_usb_pic_bootstrap(uint16_t mask,uint16_t level);
 const char *pilot_usb_pic_port(uint32_t port,int size,int write,uint32_t *value);
 int pilot_usb_pic_vector(int acknowledge);
 void pilot_usb_pic_raise(int line,int level);
+/* Explicit device clock input, in 1,125,000-Hz PIT ticks. Does not dispatch
+ * interrupts or alter kernel time. Qualification must service actual IRQ0. */
+const char *pilot_usb_pit_time(uint64_t ticks);
 const char *pilot_usb_lle_tick(void);
 #ifdef __cplusplus
 }

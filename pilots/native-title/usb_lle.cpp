@@ -8,6 +8,7 @@
 #include <cstdio>
 #include "machine/ohci.hpp"
 #include "machine/pic.hpp"
+#include "machine/pit.hpp"
 #include "machine/apu_clock.hpp"
 #include "usb_lle.h"
 
@@ -19,6 +20,8 @@ PilotUsbDmaRelease release_dma;
 uint64_t start_ms;
 bool irq_level;
 xlle::DualPic pic;
+xlle::Pit8254 pit;
+uint64_t pit_ticks;
 bool pic_ready;
 PilotUsbHostRead host_read;
 PilotUsbHostRumble host_rumble;
@@ -110,6 +113,7 @@ extern "C" const char *pilot_usb_pic_bootstrap(uint16_t mask,uint16_t level)
         pic.io_write(0x4d0,1,level&255);pic.io_write(0x4d1,1,level>>8);
         pic.io_write(0x21,1,mask&255);pic.io_write(0xa1,1,mask>>8);
         pic.raise(1,irq_level);pic_ready=true;
+        pit.set_irq0([]{pic.raise(0,true);pic.raise(0,false);});
     }
     ReleaseSRWLockExclusive(&usb_lock);return nullptr;
 }
@@ -117,10 +121,20 @@ extern "C" const char *pilot_usb_pic_port(uint32_t port,int size,int write,uint3
 {
     AcquireSRWLockExclusive(&usb_lock);
     const char *error=nullptr;
-    if(!pic_ready || port>65535 || !pic.owns((uint16_t)port) || size!=1)
+    xlle::IoPortDevice *device=port<=65535 && pic.owns((uint16_t)port)?
+        static_cast<xlle::IoPortDevice*>(&pic):port>=0x40 && port<=0x43?&pit:nullptr;
+    if(!pic_ready || !device || size!=1 || !value)
         error="USB LLE unsupported PIC port transaction";
-    else if(write)pic.io_write((uint16_t)port,size,*value);
-    else *value=pic.io_read((uint16_t)port,size);
+    else if(write)device->io_write((uint16_t)port,size,*value);
+    else *value=device->io_read((uint16_t)port,size);
+    ReleaseSRWLockExclusive(&usb_lock);return error;
+}
+extern "C" const char *pilot_usb_pit_time(uint64_t ticks)
+{
+    AcquireSRWLockExclusive(&usb_lock);
+    const char *error=nullptr;
+    if(!pic_ready || ticks<pit_ticks)error="PIT LLE uninitialized/backwards clock";
+    else {pit_ticks=ticks;pit.set_time(ticks);}
     ReleaseSRWLockExclusive(&usb_lock);return error;
 }
 extern "C" int pilot_usb_pic_vector(int acknowledge)

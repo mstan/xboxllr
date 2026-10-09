@@ -1,12 +1,13 @@
-// xlle — i8254 PIT (A2e system tick), faithful to xemu/hw/timer/i8254.c.
+// xlle — bounded i8254 PIT system-clock model. See SCHEDULING-LLE.md.
 //
 // Ports 0x40-0x43. Channel 0's output drives IRQ0 (the system tick). The Xbox PIT input clock
-// is 1,125,000 Hz (xemu i8254.h PIT_FREQ, an Xbox-specific value, NOT the PC's 1,193,182).
+// is 1,125,000 Hz. xemu uses a +1 Hz workaround; that workaround is not used here.
 //
 // Time base: we have no cycle counter, so "PIT ticks" are derived from retired instructions by
 // the machine (retired * PIT_FREQ / CPU_HZ) and pushed in via set_time(). Channel 0 pulses
 // IRQ0 once per programmed reload period. The exact instructions-per-tick ratio is an
-// approximation (calibratable); boot only requires that ticks occur at a plausible cadence.
+// approximation. Native qualification instead supplies explicit PIT ticks. This model
+// qualifies the steady mode-2 clock, not every gate, waveform or programming-edge phase.
 #pragma once
 #include <cstdint>
 #include <functional>
@@ -29,8 +30,9 @@ public:
     uint32_t io_read(uint16_t port, int size) override;
     void io_write(uint16_t port, int size, uint32_t value) override;
 
-    // Advance the PIT clock to absolute tick `now`; pulses IRQ0 for each channel-0 reload
-    // period crossed since the last call.
+    // Advance monotonically to `now`. A late caller gets one pending edge, just as an
+    // edge-triggered PIC retains one request. Service each next_irq0_tick() to preserve
+    // distinct interrupts; a large jump cannot recover intervening CPU/EOI activity.
     void set_time(uint64_t now);
 
     // Absolute tick of the next channel-0 IRQ0 edge, or 0 when the programmed mode raises
@@ -38,8 +40,7 @@ public:
     // ticks 1725x more often; the machine's slice loop uses it to bound a slice so no
     // interrupt edge can be stepped over (see XboxMachine::next_device_deadline).
     uint64_t next_irq0_tick() const {
-        const uint8_t m = ch_[0].mode;
-        return (m == 0 || m == 2 || m == 3) ? ch0_next_irq_ : 0;
+        return ch0_next_irq_;
     }
 
 private:

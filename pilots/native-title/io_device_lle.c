@@ -560,7 +560,7 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
        ordinal!=160 && ordinal!=161 && ordinal!=184 && ordinal!=199 && ordinal!=204 && ordinal!=217
 #ifdef PILOT_FILES_LLE
        && ordinal!=35 && ordinal!=36 && ordinal!=37 && ordinal!=67 && ordinal!=69 &&
-       ordinal!=97 && ordinal!=113 && ordinal!=125 && ordinal!=148 && ordinal!=149 && ordinal!=150 &&
+       ordinal!=97 && ordinal!=113 && ordinal!=125 && ordinal!=148 && ordinal!=149 && ordinal!=150 && ordinal!=159 &&
        ordinal!=186 && ordinal!=187 && ordinal!=189 && ordinal!=190 && ordinal!=196 && ordinal!=198 &&
        ordinal!=200 && ordinal!=202 && ordinal!=203 && ordinal!=207 && ordinal!=209 && ordinal!=211 &&
        ordinal!=215 && ordinal!=218 && ordinal!=219 && ordinal!=225 && ordinal!=226 && ordinal!=233 && ordinal!=234 && ordinal!=236
@@ -630,7 +630,7 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
     case 67:case 113:case 148:case 198:case 203:case 209:case 225:count=2;break;
     case 215:case 233:count=3;break;
     case 149:case 189:case 234:count=4;break;
-    case 150:case 211:case 218:case 226:count=5;break;
+    case 150:case 159:case 211:case 218:case 226:count=5;break;
     case 202:count=6;break;
     case 219:case 236:count=8;break;
     case 190:count=9;break;
@@ -715,7 +715,10 @@ static void deliver_irq(int *delivered)
     uint32_t gate=0x8003de40u+(vector-0x30)*8;
     uint32_t low=kernel_word(gate),high=kernel_word(gate+4);
     uint32_t entry=(low&65535)|(high&0xffff0000u),object=interrupt_objects[vector-0x30];
-    if(!object || entry!=object+0x18 || (low>>16)!=8 || (high&0xffff)!=0x8e00) {
+    /* IRQ0 is a kernel-owned gate, not an IoConnectInterrupt driver object.
+     * This binding belongs to the already hash-checked initialized capture. */
+    int clock_gate=vector==0x30 && entry==0x800355f0u;
+    if((!clock_gate && (!object || entry!=object+0x18)) || (low>>16)!=8 || (high&0xffff)!=0x8e00) {
         failure="device LLE IRQ has no qualified connected handler";return;
     }
     check_publications(1);if(failure)return;

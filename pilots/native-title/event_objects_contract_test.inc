@@ -16,11 +16,10 @@ static void test_event_objects(void)
         uint64_t begin=dispatch_monotonic();call_kernel(234,wait_ex,4);
         uint64_t elapsed=dispatch_monotonic()-begin;
         fprintf(stderr,"[EVENT WAIT] type=%u status=%08x requested_100ns=100000 elapsed_100ns=%llu\n",type,g_eax,(unsigned long long)elapsed);
-        /* Original KeTimeIncrement is 1 ms; original timer insertion uses
-         * the last tick, not a sub-tick performance counter. Native NT also
-         * permits early relative expiration. Retain the Xbox-sized bound,
-         * rather than silently accepting the host's potentially larger tick.
-         * Independent evidence: native_event_timer_reference.py and .99. */
+        /* Explicit native timing tolerance: at most one Xbox-sized tick early.
+         * Native NT early expiration was independently measured (.99). The
+         * original IRQ0 expiry fixture establishes 1 ms resolution, not that
+         * the Xbox actually returns early. See SCHEDULING-LLE.md. */
         CHECK(g_eax==0x102 && elapsed>=90000);
         /* An outstanding operation holds the real object even after the guest
          * handle is closed; a stale handle can never alias the next create. */

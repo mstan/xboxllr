@@ -92,8 +92,8 @@ Title executable SHA-256:
 ## Relative wait tolerance and issue .99
 
 The old native test required a 10 ms relative wait to consume at least 10 ms
-of performance-counter time. That assertion was stronger than the bounded
-original contract: timer insertion starts from the last 1 ms clock tick.
+of performance-counter time. Native NT can return earlier; the original
+timer-insertion fixture alone did not prove that the Xbox also does so.
 [Microsoft's Timer Accuracy documentation](https://learn.microsoft.com/en-us/windows-hardware/drivers/kernel/timer-accuracy)
 also allows native relative expiration up to one system-clock period early;
 that host allowance must not silently enlarge the Xbox contract.
@@ -105,8 +105,10 @@ STATUS_TIMEOUT. Private evidence: `event-host-deadlines.aot-private.json` and
 `event-host-phase-deadlines.aot-private.json` under `build/blinx/`. This explains
 why repeated passing runs alone did not settle the previous failure.
 
-The regression now permits at most the independently established **1 ms**
-early margin and logs requested duration, actual elapsed time and status.
+The regression permits an explicit HLE timing tolerance of at most **1 ms**
+early, matching the independently established Xbox clock resolution, and logs
+requested duration, actual elapsed time and status. This is a tolerance for
+native NT, not an assertion that original Xbox expiration behaves identically.
 It still fails a timeout earlier than 9 ms; it does not accept an arbitrary
 host clock period. No native wait implementation or production deadline was
 changed. Late scheduling under host load is not assigned an invented upper
@@ -119,10 +121,106 @@ Log: `build/blinx/event-tolerance-repetition.log`. These repeats validate the
 changed assertion; the separately captured early returns and original deadline
 arithmetic provide its rationale.
 
+## PIT-driven expiration and real thread wakeup - 2026-10-09
+
+`tools/native_timer_expiry_reference.py` executes the original kernel's clock
+initialization from its owned, hash-bound image: command `0x34`, count `0x0465`
+on ports `0x43/0x40`. This establishes binary mode 2, 1,125 input ticks per
+interrupt. INIT was retired before the RAM capture, so its unmodified page runs
+at its original address on a separate initialization CPU. Every OUT reaches our
+maintained PIT; no clock register, timer queue or kernel function is patched.
+
+The maintained PIT/PIC then drives the captured original IRQ0 gate, EOI, clock
+update, timer expiration and DPC dispatcher. Explicit clock inputs make this a
+slow-capable correctness route. They do not claim instruction/cycle calibration
+or wall-clock performance. The compiled shared-RAM bridge now accepts that
+kernel-owned IRQ0 gate and executes the same 12 expiration cases, including
+original KeWaitForSingleObject consuming synchronization timers while leaving
+notification timers signaled. Its IRQ wrapper verifies interrupted registers,
+stack and flags. The existing native backend remains selected for title timers.
+
+Independent observations:
+
+| Contract | Original result |
+| --- | --- |
+| Relative durations 1, 9,999, 10,000, 10,001, 100,000 and 330,000 in 100 ns units; both timer types | Expire after 1, 1, 2, 2, 11 and 34 supplied clock interrupts respectively; no early signal, Inserted clears |
+| Periodic timer, 3 ms requested | Five actual DPC callbacks at ticks 1, 5, 9, 13 and 17 in the fixture; original reinsertion remains live until cancellation |
+| DPC arguments/eligibility | Actual timer DPC receives its object/context and sampled system-time halves at IRQL 2; cancellation prevents later callbacks |
+| Eight event lifetimes, both reset types | Original wait blocks and a real lower-priority thread runs; timeout returns STATUS_TIMEOUT; worker signal wakes the caller with STATUS_SUCCESS and proper consumption |
+| Delay and thread lifetime | Original KeDelayExecutionThread yields/resumes; original PsCreateSystemThread/start/context-switch/termination and wait/join/close execute successfully |
+
+The original fixture executes **260 interrupts and 17 blocking waits**, including
+eight timeout/signal pairs and one delay. Its authored worker and DPC are ordinary
+test programs: their instruction bodies do real counting, signaling and recording;
+they do not replace any original implementation or fabricate completion. The
+worker is created at the original default priority 8, raised through the original
+API to 30, and competes with the priority-31 fixture caller. This bounds unrelated
+captured boot-worker interference; it does not qualify arbitrary contention,
+equal-priority fairness, suspend/resume or dynamic boosts.
+
+The block-driven fixture's 12-13 ms observed elapsed values for a requested
+10 ms wait include execution time assigned to kernel blocks. They are not a
+host-speed or real-console latency measurement. The separate single-step timer
+observations expose the bucket boundary: even an exact 1 ms relative deadline
+expires on the second supplied tick. Consequently the earlier queue-arithmetic
+evidence must not be cited as proof of early original expiration.
+
+### HLE comparison and remaining integration
+
+Our existing native tests cover the same state, wait status, signal consumption,
+cancel/rearm, periodic callback and system-time argument contracts. They pass in
+the combined suite. `dispatcher.inc` uses host deadlines and serial guest DPC
+ownership; it need not replay IRQ0 internally. **Periodic cadence still needs
+an explicit comparison/tolerance decision before family closure:** the original
+3 ms case has a 4 ms interval, while native reinsertion requests 3 ms after its
+own expiry. A per-deadline margin does not automatically justify accumulating
+phase or callback-count differences.
+
+Phobos `bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0`, `kernel_sync.c`, was
+rechecked for reusable timer services. Its Win32 timer-queue approach is a useful
+native reference, but its callback forwards existing DPC argument fields, while
+the original timer passes sampled system time. Our already implemented dispatcher
+passes the original argument shape and preserves serialized guest execution.
+No new donor implementation is imported for this batch.
+
+PIT hardening removes the unprogrammed periodic edge, fixes first LSB/MSB read
+ordering and unread latch retention, normalizes mode aliases and stops mode-0
+repetition. The mode-2 test includes 64 individually serviced interrupts, masking,
+coalescing and terminal-count behavior. Initial load phase/gates/BCD/read-back
+commands and mode-3 count readback are outside this bounded qualification; this
+is not exhaustive 8254 emulation. Exact board phase questions, if needed, join
+the deferred hardware queue rather than blocking other families.
+
+```powershell
+$env:PYTHONPATH='build/reference-python;tools'
+py -3 tools/native_timer_expiry_reference.py --snapshot build/blinx/io-boot-18m.ram.bin --library build/visibility-lle/libxlle_storage_reference.dll --dependencies C:/msys64/mingw64/bin --image build/blinx/files-lle-installed-hdd-v3.img --kernel ../xboxlle/build/kernel-live.bin --output build/blinx/timer-expiry-original.aot-private.json
+```
+
+The rebuilt mixed native/LLE suite passes **47/47 in 20.88s**. Evidence:
+`build/blinx/timer-expiry-{bridge-build,full-tests,title-build}.log` and the
+private JSON above. Original-code/RAM inputs and generated observations remain
+private. No console is needed for this batch, and family count remains **4/9**.
+
+The shared machine/PIT change also passes **4/4 in 2.11s**: PIT, optimized AOT
+machine/interrupt state, idle fast-forward and block-hook guards. Logs:
+`build/blinx/pit-regression-{build,tests}.log`.
+
+The rebuilt title ran **190.171s**, with 18 captures and no stop/audio-stop/fault.
+The contact sheet shows demo gameplay, Start interruption/loading, return to
+the title and another demo entry. All four replayed press/release transitions
+were delivered. The bounded harness terminated the live process; this is not
+a natural exit or long-run resource-stability qualification. Evidence:
+`build/blinx/scheduling-expiry-attract/{run.aot-private.json,contact.png}` and
+`build/blinx/run-scheduling-expiry-attract.log`. Title SHA-256:
+`16769cd2799915daea1fc2a2ba1b109d90f406f8523f1a05fce590ac1ba3146d`.
+This regresses the existing mixed title configuration, not original scheduler
+selection in production; the PIT is unprogrammed there until explicitly selected.
+
 ## Next offline work
 
-Connect the maintained clock/PIC route to original expiration and blocked-thread
-wakeup, then qualify thread ready/block/wake, priority and callback eligibility.
+Use the now-executable original expiry/wakeup route to integrate original
+thread execution and DPC callbacks into the native bridge. Resolve periodic
+cadence, then qualify remaining priority, contention and suspend/resume cases.
 Retain the native implementation as the title's active scheduling backend until
 the original service route can perform those operations. Any genuinely
 silicon-only question is appended to the deferred end of the burndown; GPU

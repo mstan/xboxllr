@@ -1,6 +1,7 @@
 /* Run the original object manager and timer queue through the maintained
  * shared-RAM bridge. Independent expectations: native_event_timer_reference.py.
- * No elapsed clock, sleeping-thread wakeup or full scheduler claim. */
+ * Clock expiration executes original IRQ0/DPC work. Blocking thread/context
+ * switches remain a separate qualification from these timer observations. */
 static uint32_t event_lle_call(unsigned ordinal,const uint32_t *args)
 {
     uint32_t result=0xcccccccc;
@@ -50,5 +51,35 @@ static void test_event_timer_lle(void)
         CHECK((event_lle_call(149,past)&255)==0 && !MEM8(timer+3) && MEM32(timer+4)==1);
         CHECK((event_lle_call(97,&timer)&255)==0);
     }
-    fprintf(stderr,"PASS: 32 original event lifetimes/polls, complete 64-bit interrupt-time return, 24 original timer insert/rearm/cancel cases and past deadlines; no clock/wakeup qualification\n");
+    /* Actual OUTs from the independent original INIT execution, not a host
+     * mutation of KeInterruptTime or the timer queue. Explicit ticks let this
+     * correctness floor run as slowly as necessary. */
+    uint32_t command=0x34,low=0x65,high=4;
+    CHECK(!pilot_usb_pic_port(0x43,1,1,&command));
+    CHECK(!pilot_usb_pic_port(0x40,1,1,&low));
+    CHECK(!pilot_usb_pic_port(0x40,1,1,&high));
+    uint64_t ticks=0,clock=now;
+    const uint32_t durations[]={1,9999,10000,10001,100000,330000};
+    for(unsigned type=0;type<2;++type)for(unsigned i=0;i<sizeof(durations)/sizeof(durations[0]);++i) {
+        uint32_t init[]={timer,type};event_lle_call(113,init);
+        uint64_t relative=0ull-durations[i];
+        uint32_t set[]={timer,(uint32_t)relative,(uint32_t)(relative>>32),0};
+        CHECK((event_lle_call(149,set)&255)==0);
+        unsigned expiry=1+durations[i]/10000;
+        for(unsigned tick=1;tick<=expiry;++tick) {
+            CHECK(!MEM32(timer+4));int delivered=0;
+            ticks+=1125;CHECK(!pilot_usb_pit_time(ticks));
+            const char *error=pilot_io_device_irq(memory,&delivered);
+            if(error)fprintf(stderr,"original clock IRQ: %s\n",error);
+            CHECK(!error && delivered==1);
+            CHECK(!pilot_io_device_interrupt_time(memory,&clock));
+            CHECK(clock==now+(ticks/1125)*10000);
+        }
+        CHECK(MEM32(timer+4)==1 && !MEM8(timer+3));
+        uint32_t wait[]={timer,0,0,0,timeout};MEM64(timeout)=0;
+        CHECK(!event_lle_call(159,wait));
+        CHECK(event_lle_call(159,wait)==(type?0x102:0));
+        CHECK((event_lle_call(97,&timer)&255)==0);
+    }
+    fprintf(stderr,"PASS: 32 original event lifetimes, 24 insert/rearm/cancel cases, 12 IRQ0-driven expirations, real notification/synchronization timer consumption; blocking-thread qualification remains open\n");
 }
