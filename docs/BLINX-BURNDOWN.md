@@ -65,6 +65,13 @@ independent evidence, HLE comparison and Blinx regression before starting the
 next entry. Add smaller slices only when they correspond to real service
 boundaries, not to manufacture progress in the family count.
 
+GPU startup's unresolved FD6806A0 transaction now has a prepared, bounded
+hardware observation in `.111` (probe branch `feat/av-handshake-probe-20261009`,
+commit `a22bb74`). All 17 offline checks and the XBE build pass; hardware
+deployment/execution awaits explicit current-task authorization. Preparation
+does not qualify the transaction or close a family. Digital timing/control
+implementation can continue offline; details remain in the GPU evidence record.
+
 | Family gate (ordered after calendar slice) | Existing evidence to retain | Required LLE route and qualification | Reference to use first |
 | --- | --- | --- | --- |
 | 1. Controller input and interruption | Host conversion/ABI tests; previous real attract interruption/menu-return/reentry; owner keyboard observation | Independently qualify connected/disconnected reports, packet/button semantics and lifetimes; repeat controlled Start interruption and idle reentry on the final hardened build. Physical-controller details beyond the exercised contract remain separate. | Original XAPI/XID behavior and xemu; actual controller/hardware capture when an input-report question cannot be settled independently |

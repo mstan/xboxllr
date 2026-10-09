@@ -1144,3 +1144,27 @@ waveform generation is not established by these register facts.
 No hardware was contacted. The probe repository was inspected only; its
 current-task authorization requirements remain in force if a silicon experiment
 is eventually needed. No new probe code or protocol was deployed or added.
+
+### Prepared silicon observation for FD6806A0
+
+Follow-up `beads-xbox.1.111` now has a concrete, offline-tested experiment in
+[`xboxlle-probe` commit a22bb74](https://github.com/mstan/xboxlle-probe/blob/a22bb74/docs/AV-HANDSHAKE.md),
+branch `feat/av-handshake-probe-20261009`. The armed command reads one fixed
+register, requires a stable idle precondition, writes the original caller's
+request encoding once and records actual read values/timing brackets. It stops
+on unexpected state, 50 ms or 100,000 post-write polls, and consumes its single
+attempt even on failure. There is no automatic retry or restoring write.
+
+All 17 offline tests pass, including the actual C control loop with mocked
+MMIO/clock callbacks and loopback client tests. The pinned-nxdk XBE builds;
+SHA-256 `421405527c8e1d80ed70a7da04d682b3637fcebd7cd9518f8d0f29b317b4cc96`.
+No hardware connection, deployment or execution occurred. The owner has been
+asked for the exact target and current-task authorization required by that
+repository's AGENTS.md, or may run the prepared experiment manually.
+
+This first observation can establish sampled request/acknowledgment behavior
+and elapsed-time bounds, not reset defaults, timing-bank contents or the exact
+sync edge that causes acknowledgment. Keep the LLE guard until evidence supports
+the reached transaction; do not install immediate success or a captured idle
+value. Known digital timing/control work can continue offline while the hardware
+question is pending. Blinx runtime and stable game pin are unchanged, **4/9**.
