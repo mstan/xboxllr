@@ -9,6 +9,78 @@ The audio LLE floor still needs remaining envelope curves/filtering, GP transpor
 whole-driver integration before it is a qualified selectable title backend. Existing
 audible HLE output does not remove that requirement.
 
+## Current GP memory/DMA batch and deferred question - 2026-10-09
+
+The maintained APU now owns real 24-bit GP X, MIX, Y and P banks shared by
+host MMIO and the DSP core. `apu_gp_dma.hpp` performs actual circular scratch
+transfers through GPSADDR/GPSMAXSGE and physical 4-KiB SGE pages. The bounded
+contract covers noninterleaved unit-stride formats 2 and 6, linked descriptors,
+offset writeback, freeze/unfreeze, explicit STOP and end-of-list acknowledgement.
+No status read invents completion; unknown registers, formats and modes stop.
+Mid-transfer DMA faults can leave actual earlier bytes written but cannot
+publish completed nodes or end-of-list. GP reset/bootstrap remains guarded.
+
+The independently authored `apu_dsp_core.c` bridge reuses the already pinned
+MIT mborgerson DSP core (`c60aeedb6a6014850204c71e53bc0cf5b3104222`). The new
+`pilot_gp_lle_contract` executes an authored program whose real MOVEs start
+linked output/input DMA, crossing nonadjacent physical pages in both formats.
+The root `apu_gp_dma` test also covers circular wrap, four banks, frozen work,
+invalid descriptors/pages, MMIO ownership and 64 lifetimes. This is executable
+CPU/device integration, not retail GP firmware or a whole audio backend.
+
+[Published DSP byte examples](https://xboxdevwiki.net/DSP) distinguish format 2
+(24-bit sample in the high bytes of a 32-bit container) from format 6 (low
+bytes). They exposed a native adapter error: format 2 previously used the
+low-byte layout. Both directions are corrected in `audio_dsp.c`; a literal
+byte assertion now tests the native adapter independently of round-trip output.
+Pinned xemu treats these formats alike and labels the interpretation uncertain;
+its implementation body is not imported. The current native original-graph
+probe passes **1,501 blocks / 73,549 real DMA nodes**, with real impulse/tail
+output and program bytes matched to the original-x86-decoded private image.
+That checks retained native execution, not independent whole-graph correctness.
+
+The separate maintained-LLE original-graph probe **does not pass**: its first
+descriptor has transfer control `0x004bd0`, including unknown bit 9. The published
+reference leaves that bit undocumented; xemu and the current native adapter
+ignore it. Their agreement cannot qualify it. The floor rejects the descriptor
+before data transfer. This question is **deferred as `beads-xbox.1.114`** behind
+available offline work; preserve the reproducer instead of repeatedly rerunning
+it or weakening the guard. No console interaction occurred. Existing hardware
+evidence is preferred before any separately authorized measurement.
+
+Build/run the root `test_apu_gp_dma`, and the native CTest
+`pilot_gp_lle_contract`. To reproduce the open original-graph boundary, run
+`pilot_gp_lle_test <owned dsp.bin> <private seed in hex> <original-decoded image>`;
+it currently fails explicitly at that descriptor. This diagnostic's existing
+six-output graph shell also does not qualify GP bootstrap, frame signalling,
+output FIFO or EP. Its prospective exact native comparisons share the CPU core,
+so they would not be independent proof of DSP instructions.
+
+Focused APU/source/rate/envelope/GP tests pass **5/5 in 0.25s**; the complete
+native/contract suite passes **55/55 in 33.55s**. Original configuration,
+source and whole init/start-owner fixtures all pass again. Full maintained
+machine and native builds pass. The fresh default-native Blinx regression runs
+**190.141s**, with 18 inspected captures showing Demo, interruption/loading,
+title return and Demo reentry. Both Start press/release pairs were delivered;
+no STOP/audio-stop/fault was logged. The harness terminated the still-running
+title at its budget, so this is neither an exit failure nor endurance/cadence
+sign-off. No LLE-audio title run is claimed; family count remains **4/9**.
+
+Private evidence: `build/blinx/audio-gp-*-original.aot-private.json`,
+`audio-gp-{machine-build,native-build,full-tests,native-original-graph}.log`,
+and `audio-gp-floor-attract/{run.aot-private.json,contact.png}`. The explicitly
+failing graph probe is preserved in `audio-gp-original-graph.log`.
+Reference DLL SHA-256:
+`7eb8bd120ef77ffe412d03a0698545f4710342a2fe217df4deb19f73fe9224c1`;
+native executable SHA-256:
+`67b1af858416c4ed25876eb0002fd373605321212044e4cdba13423505a8e600`.
+The stable private Blinx repository pin remains unchanged.
+
+Continue offline with original control/SSL/notifier ownership and remaining
+voice scaling/filter processing. GP bootstrap/FIFO/EP remain implementation work; only
+the specifically unresolved bit and other silicon-only observations go last.
+Do not make the unknown bit a prerequisite for these independent services.
+
 ## Executable configuration floor
 
 `src/machine/apu.hpp` now applies selected-voice configuration methods to the

@@ -591,6 +591,17 @@ the MIT root license does not replace dependencies' own terms. See the
 [DSP audit](docs/NATIVE-DSP-DONOR-2026-10-07.md) and existing
 [private CPU pilot distribution limits](LICENSE-SCOPE.md).
 
+The maintained GP path additionally uses this same pinned MIT core through
+`src/machine/apu_dsp_core.c`, an independently authored C/C++ bridge. Its real
+memory banks and physical scratch-DMA transport are authored in `apu.hpp` and
+`apu_gp_dma.hpp`. The GP test target retains the same upstream/Cargo notices.
+[XboxDevWiki DSP research](https://xboxdevwiki.net/DSP) supplies the independent
+format-2/format-6 byte examples used to correct native packing; xemu
+`482088490c2d5983ed5e1eafbd09906157c1eca0` supplies behavioral register/SGE
+references, not imported implementation bodies. No new GPL runtime body was
+copied or adapted. The unknown DMA control bit reached by Blinx is still
+guarded in the maintained floor. See [scope and evidence](pilots/native-title/AUDIO-LLE.md#current-gp-memorydma-batch-and-deferred-question---2026-10-09).
+
 ## Borrowed render-target feedback implementation
 
 The private native pilot reuses `feedback_scratch`, `feedback_begin/end` and

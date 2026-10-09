@@ -121,13 +121,13 @@ static void transfer(PilotDsp *d)
         /* Validate the entire descriptor before a single byte is transferred. */
         for(unsigned i=0;i<count;++i)dma_word(d,n[3]+i);
         for(unsigned i=0;i<count;++i) {
-            uint32_t *dst=dma_word(d,n[3]+i),sample=(control&2)?*dst&0xffffff:0;
+            uint32_t *dst=dma_word(d,n[3]+i),sample=(control&2)?(*dst&0xffffff)<<8:0;
             for(unsigned b=0;b<4;++b) {
                 uint8_t *byte=d->scratch+n[5]+offset;
                 if(control&2)*byte=(uint8_t)(sample>>(8*b));else sample|=(uint32_t)*byte<<(8*b);
                 if(++offset==size)offset=0;
             }
-            if(!(control&2))*dst=sample&0xffffff;
+            if(!(control&2))*dst=sample>>8;
         }
         if(control&16)*dma_word(d,at+4)=offset;
         d->next=n[0];++d->nodes;

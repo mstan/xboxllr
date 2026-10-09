@@ -55,6 +55,24 @@ int main(int argc,char **argv)
     CHECK(pilot_dsp_blocks(d)==100 && pilot_dsp_dma_nodes(d)==0);
     for(unsigned i=0;i<16;++i)CHECK(storage[storage_bytes+i]==0x5a);
     pilot_dsp_destroy(d);pilot_dsp_image_destroy(image);free(storage);
+    // Native circular format-2 transport must match the hardware's literal
+    // MSB-aligned byte examples, not just round-trip its own wrong packing.
+    image=pilot_dsp_decode(data,bytes,123,&error);CHECK(image && !error);
+    storage=malloc(pilot_dsp_storage_bytes(image));CHECK(storage);
+    d=pilot_dsp_create(image,storage,0x10000000);CHECK(d);
+    const uint32_t dma_code[]={0x65f400,0xffffd0,0x44f400,0x20,0x021584,
+                               0x65f400,0xffffd2,0x44f400,1,0x021584,0x0c};
+    memcpy(storage+0x1000,dma_code,sizeof(dma_code));
+    uint32_t *x=(uint32_t*)(storage+0x4000);
+    const uint32_t output_node[]={0x40,0x49d2,2,0x80,0,0,7};
+    const uint32_t input_node[]={0x4000,0x49d0,2,0x90,0,0,7};
+    memcpy(x+0x20,output_node,sizeof(output_node));memcpy(x+0x40,input_node,sizeof(input_node));
+    x[0x80]=0x123456;x[0x81]=0xabcdef;
+    memset(in,0,sizeof(in));pilot_dsp_process(d,in,out);
+    const uint8_t packed[]={0,0x56,0x34,0x12,0,0xef,0xcd,0xab};
+    CHECK(!memcmp(storage+0xa000,packed,sizeof(packed)));
+    CHECK(x[0x90]==0x123456 && x[0x91]==0xabcdef && pilot_dsp_dma_nodes(d)==2);
+    pilot_dsp_destroy(d);pilot_dsp_image_destroy(image);free(storage);
     for(unsigned cut=0;cut<bytes;++cut){image=pilot_dsp_decode(data,cut,123,&error);CHECK(!image && error);}
     image=pilot_dsp_decode(data,bytes,124,&error);CHECK(!image);
     unsigned offsets[]={0x800,0x804,0x808,0x80c,0x810,0x814,0x84c,0x850,0x854,0x858,0x85c,0x860,0x864,0x868,0x86c,0x870};

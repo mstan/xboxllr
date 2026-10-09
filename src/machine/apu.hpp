@@ -22,6 +22,7 @@
 #include "machine/mmio_device.hpp"
 #include "machine/apu_clock.hpp"
 #include "machine/apu_adpcm.h"
+#include "machine/apu_gp_dma.hpp"
 
 namespace xlle {
 
@@ -78,7 +79,10 @@ public:
     static constexpr uint32_t kSize = 0x80000u;
 
     explicit McpxApu(FaultFn fault)
-        : RegFileMmio("mcpx-apu", kBase, kSize, std::move(fault)) {}
+        : RegFileMmio("mcpx-apu", kBase, kSize, std::move(fault)),
+          gp_dma_([this](uint32_t a){return gp_word(a);},
+                  [this](uint32_t a,void* data,uint32_t n,bool output){return gp_scratch(a,data,n,output);},
+                  [this](const std::string& why){device_fault(why);}) {}
     McpxApu(const McpxApu&)=delete;
     McpxApu& operator=(const McpxApu&)=delete;
 
@@ -135,9 +139,25 @@ public:
     // headroom, final sends, GP and completion remain subsequent stages.
     bool source_envelope_quantum(uint16_t voice,float* stereo,uint32_t& count,bool& ended);
 
+    // Stable GP RAM banks for the build-selected DSP core. Encoded addresses:
+    // X, mix, Y+0x1800, P+0x2800. Unknown banks have no storage/default value.
+    uint32_t* gp_word(uint32_t address) {
+        if(address<0x1000 || (address>=0x1400 && address<0x2000) ||
+           (address>=0x2800 && address<0x3800))return gp_words_.data()+address;
+        return nullptr;
+    }
+    bool gp_read(uint32_t address,uint32_t& value) {return !faulted_ && gp_dma_.read(address,value);}
+    bool gp_write(uint32_t address,uint32_t value) {return !faulted_ && gp_dma_.write(address,value);}
+    uint64_t gp_dma_nodes()const{return gp_dma_.nodes();}
+
     uint32_t mmio_read(uint32_t addr, int size) override {
         uint32_t off = addr - base_;
         if (faulted_) return 0;
+        if(off>=0x30000 && off<0x40000) {
+            uint32_t* word=gp_host_word(off,size);
+            if(!word){device_fault("unqualified GP host read");return 0;}
+            return *word&0xffffff;
+        }
         if (off == kXgscnt)
             set_reg32(kXgscnt, static_cast<uint32_t>(xgscnt_));
         // Synchronous FE model: the strict reference admits only implemented
@@ -151,6 +171,11 @@ public:
     void mmio_write(uint32_t addr, int size, uint32_t value) override {
         uint32_t off = addr - base_;
         if (faulted_) return;
+        if(off>=0x30000 && off<0x40000) {
+            uint32_t* word=gp_host_word(off,size);
+            if(!word){device_fault("unqualified GP host write/reset");return;}
+            *word=value&0xffffff;return;
+        }
         if (off == kIsts && size == 4) {
             set_reg32(kIsts, reg32(kIsts) & ~value);  // W1C
             update_irq();
@@ -221,6 +246,28 @@ public:
     uint64_t idle_voice_traps() const { return idle_voice_traps_; }
 
 private:
+    uint32_t* gp_host_word(uint32_t offset,int size) {
+        if(size!=4 || (offset&3))return nullptr;
+        offset-=0x30000;
+        if(offset<0x4000 || (offset>=0x5000 && offset<0x8000) ||
+           (offset>=0xa000 && offset<0xe000))return gp_word(offset/4);
+        return nullptr;
+    }
+    bool gp_scratch(uint32_t linear,void* data,uint32_t bytes,bool output) {
+        auto* next=static_cast<uint8_t*>(data);
+        if(uint64_t(linear)+bytes>0x100000000ull)return false;
+        while(bytes) {
+            const uint32_t entry=linear>>12,offset=linear&4095;
+            const uint64_t descriptor=uint64_t(reg32(0x2040))+uint64_t(entry)*8;
+            uint32_t page=0;
+            if(entry>reg32(0x20d4) || descriptor>UINT32_MAX-3 ||
+               !read_u32(static_cast<uint32_t>(descriptor),page) || (page&4095))return false;
+            const uint32_t n=bytes<(4096-offset)?bytes:4096-offset;
+            if(output?!write_mem(page+offset,next,n):!read_mem(page+offset,next,n))return false;
+            next+=n;linear+=n;bytes-=n;
+        }
+        return true;
+    }
     bool resample_source_impl(uint16_t voice,float* stereo,uint32_t capacity,
                               uint32_t& count,bool& ended,double pitch_modulation);
     // Top-level PAPU registers.
@@ -512,6 +559,8 @@ private:
     std::array<bool,kMaxVoices> voice_locked_{};
     std::array<std::shared_ptr<ApuRateState>,kMaxVoices> voice_rates_{};
     std::array<uint8_t,32> submix_headroom_{};
+    std::array<uint32_t,0x3800> gp_words_{};
+    ApuGpDma gp_dma_;
     int sub_logged_ = 0;
 };
 
