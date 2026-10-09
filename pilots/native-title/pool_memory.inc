@@ -106,6 +106,13 @@ static void pool_kernel(unsigned ordinal)
     } else if(ordinal==17) {pool_free(argument);g_esp+=8;}
     else {
         AcquireSRWLockShared(&vm_lock);g_eax=pool_blocks[pool_find(argument)].usable;
+#ifdef PILOT_USB_LLE
+        uint32_t original=0;
+        const char *error=pilot_io_device_lle(23,memory,&argument,&original);
+        if(error)stop(error,23);
+        if(original!=g_eax)stop("original pool size differs from owned extent",argument);
+        g_eax=original;
+#endif
         ReleaseSRWLockShared(&vm_lock);g_esp+=8;
     }
 }

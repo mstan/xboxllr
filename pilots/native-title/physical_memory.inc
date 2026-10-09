@@ -132,11 +132,26 @@ static uint32_t physical_query_protection(uint32_t address)
         stop("host contiguous protection query failed",address);
     uint32_t protect=physical_protection[(address&0x0fffffff)/4096];
     if(info.Protect!=(protect&6))stop("contiguous protection ownership mismatch",address);
+#ifdef PILOT_USB_LLE
+    uint32_t original=0;
+    const char *error=pilot_io_device_lle(179,memory,&address,&original);
+    if(error)stop(error,179);
+    if(original!=protect)stop("original contiguous protection differs from published policy",address);
+    protect=original;
+#endif
     ReleaseSRWLockShared(&vm_lock);return protect;
 }
 static void physical_kernel(unsigned ordinal)
 {
     uint32_t first=ordinal==1?0:MEM32(g_esp+4);
+#ifdef PILOT_USB_LLE
+    if(ordinal==1 || ordinal==4) {
+        uint32_t original=0;
+        const char *error=pilot_io_device_lle(ordinal,memory,&first,&original);
+        if(error)stop(error,ordinal);
+        av_saved_data=original;g_eax=original;g_esp+=ordinal==1?4:8;return;
+    }
+#endif
     if(ordinal==1) {g_eax=av_saved_data;g_esp+=4;}
     else if(ordinal==4) {av_saved_data=first;g_eax=first;g_esp+=8;}
     else if(ordinal==178) {physical_persist(first,MEM32(g_esp+8),MEM8(g_esp+12));g_esp+=16;}
@@ -149,6 +164,13 @@ static void physical_kernel(unsigned ordinal)
         struct PhysicalAllocation *a=physical_find(first,1);
         if(!a || a->base!=first)stop("allocation-size query requires an owned contiguous base",first);
         g_eax=a->bytes;
+#ifdef PILOT_USB_LLE
+        uint32_t original=0;
+        const char *error=pilot_io_device_lle(180,memory,&first,&original);
+        if(error)stop(error,180);
+        if(original!=a->bytes)stop("original contiguous size differs from owned extent",first);
+        g_eax=original;
+#endif
         ReleaseSRWLockShared(&vm_lock);g_esp+=8;
     } else if(ordinal==166) {
         g_eax=physical_allocate(first,MEM32(g_esp+8),MEM32(g_esp+12),MEM32(g_esp+16),MEM32(g_esp+20));

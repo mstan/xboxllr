@@ -23,6 +23,9 @@ static void test_sections(void)
     memcpy(memory+image_base,image_bytes,header_bytes);
     commit(0x20000,0x1800); memcpy(memory+0x20000,image_bytes+0x2000,0x1800);
     sections_initialize();
+#ifdef PILOT_MEMORY_LLE
+    CHECK(!pilot_io_device_resident(0x20000,0x2000));
+#endif
     const uint32_t a=section_table,b=section_table+56,c=section_table+112;
     CHECK(MEM32(a+24)==1 && MEM16(0x10700)==1 && MEM16(0x10702)==1 && !MEM16(0x10704));
     CHECK(test_write_faults(0x22000));

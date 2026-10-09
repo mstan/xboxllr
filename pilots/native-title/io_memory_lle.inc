@@ -47,6 +47,20 @@ const char *pilot_io_device_vm(unsigned ordinal,unsigned char *guest,
         error=uc_mem_read(cpu,ordinal==217?slots+32:slots,outputs,ordinal==217?28:12);
         if(error)failure=uc_strerror(error);
     }
+    if(!failure && *status==0xc0000017u) {
+        /* Record real original counters on allocation failure, after saving
+         * caller outputs. This diagnostic cannot change the returned status. */
+        uint32_t statistics[9]={36},address=slots+64,queried=0;
+        error=uc_mem_write(cpu,address,statistics,sizeof(statistics));
+        if(error)failure=uc_strerror(error);
+        else execute(181,&address,&queried);
+        if(!failure && !queried) {
+            error=uc_mem_read(cpu,address,statistics,sizeof(statistics));
+            if(error)failure=uc_strerror(error);
+            else fprintf(stderr,"[MEMORY LLE EXHAUSTED] available=%u committed=%u reserved=%u cache=%u pool=%u stack=%u image=%u published=%u\n",
+                statistics[2],statistics[3],statistics[4],statistics[5],statistics[6],statistics[7],statistics[8],published_count);
+        }
+    }
 restore:
     for(unsigned i=0;i<lift_count;++i)if(publication_slot(lifted[i])<published_count) {
         DWORD previous;

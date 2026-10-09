@@ -141,6 +141,8 @@ static void test_original_physical_memory(void)
     uint32_t persist[]={base,8192,1};call_kernel(178,persist,3);
     CHECK(MEM32(base)==0x12345678 && MEM32(base+4096)==0xabcdef01);
     persist[2]=0;call_kernel(178,persist,3);
+    call_kernel(4,&base,1);call_kernel(1,NULL,0);CHECK(g_eax==base && av_saved_data==base);
+    uint32_t no_saved_data=0;call_kernel(4,&no_saved_data,1);call_kernel(1,NULL,0);CHECK(!g_eax && !av_saved_data);
     protect[2]=4;call_kernel(182,protect,3);
     CHECK(!test_write_faults(base));
     call_kernel(166,args,5);uint32_t second=g_eax;

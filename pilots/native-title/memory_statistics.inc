@@ -6,6 +6,17 @@
 static uint32_t memory_statistics(uint32_t destination)
 {
     if(!destination || (uint64_t)destination+36>0x100000000ull || MEM32(destination)!=36)return VM_INVALID;
+#ifdef PILOT_MEMORY_LLE
+    uint32_t result=0;
+    const char *error=pilot_io_device_lle(181,memory,&destination,&result);
+    if(error)stop(error,181);
+    if(!result) {
+        uint32_t values[9];memcpy(values,memory+destination,sizeof(values));
+        fprintf(stderr,"[MEMORY STATISTICS LLE] available=%u committed=%u reserved=%u cache=%u pool=%u stack=%u image=%u\n",
+            values[2],values[3],values[4],values[5],values[6],values[7],values[8]);
+    }
+    return result;
+#else
     vm_ensure();
     AcquireSRWLockShared(&thread_lock);
     AcquireSRWLockShared(&vm_lock);
@@ -40,4 +51,5 @@ static uint32_t memory_statistics(uint32_t destination)
     fprintf(stderr,"[MEMORY STATISTICS] available=%u committed=%u reserved=%u cache=%u pool=%u stack=%u image=%u\n",
         values[2],values[3],values[4],values[5],values[6],values[7],values[8]);
     return 0;
+#endif
 }

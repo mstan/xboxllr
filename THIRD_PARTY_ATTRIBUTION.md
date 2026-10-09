@@ -795,6 +795,24 @@ was consulted for periodic IN-report behavior and descriptor/capability
 structure. No body is copied. Existing private-pilot/GPL dependency limits
 remain in force for the intended non-GPL shipping product.
 
+## Original memory and residency qualification
+
+`tools/native_memory_reference.py` and the maintained memory selection execute
+the owner's hash-bound original kernel as private input. No kernel bytes or
+implementation bodies are shipped. Original execution establishes partial
+release, protection/query effects, statistics, pool/contiguous extents and
+relocation of unpinned virtual pages during constrained contiguous allocation.
+The transport and regression tests are authored here.
+
+Phobos revision `63f18f0334fbd8c00313c4bb565accf00627a4fd` memory services were
+consulted for native namespace/allocator design. Its coarse query and no-op
+decommit implementations were not adopted. The existing pinned Cxbx memory
+manager was consulted for allocator structure; no GPL implementation body was
+copied. Existing private-pilot dependency restrictions still apply. See the
+[bounded memory contract](pilots/native-title/MEMORY-LLE.md) for evidence and
+limits, including the distinction between actual Nt-backed residency and the
+later loader/cache/thread family qualification.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

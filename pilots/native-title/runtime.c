@@ -241,6 +241,10 @@ static DWORD WINAPI title_thread(void *argument)
 #ifdef PILOT_USB_LLE
     const char *stack_error=pilot_io_device_stack(memory,stack_top-thread->stack_size,thread->stack_size);
     if(stack_error)stop(stack_error,stack_top-thread->stack_size);
+#ifdef PILOT_MEMORY_LLE
+    stack_error=pilot_io_device_resident(stack_top-thread->stack_size,thread->stack_size);
+    if(stack_error)stop(stack_error,stack_top-thread->stack_size);
+#endif
 #endif
     MEM32(base)=0xffffffffu;
     MEM32(base+4)=stack_top;
@@ -714,6 +718,10 @@ static void load_image(const char *path)
 #ifdef PILOT_USB_LLE
     const char *image_error=pilot_io_device_image(memory,image_base,(file32(0x10c)+4095)&~4095u);
     if(image_error)stop(image_error,image_base);
+#ifdef PILOT_MEMORY_LLE
+    image_error=pilot_io_device_resident(image_base,(file32(0x10c)+4095)&~4095u);
+    if(image_error)stop(image_error,image_base);
+#endif
 #endif
 
     /* Post-loader bootstrap thread. Xbox TLS is below NtTib.StackBase;
@@ -722,6 +730,11 @@ static void load_image(const char *path)
     const uint32_t thread=0x71001000u, tls=0x71002000u;
     commit(stack_bottom,stack_top-stack_bottom);
     commit(0x71000000u,0x10000u);
+#ifdef PILOT_MEMORY_LLE
+    const char *bootstrap_error=pilot_io_device_stack(memory,stack_bottom,stack_top-stack_bottom);
+    if(!bootstrap_error)bootstrap_error=pilot_io_device_resident(stack_bottom,stack_top-stack_bottom);
+    if(bootstrap_error)stop(bootstrap_error,stack_bottom);
+#endif
     g_fs_base=0x71000000u;
     MEM32(g_fs_base)=0xffffffffu;
     MEM32(g_fs_base+4)=stack_top;

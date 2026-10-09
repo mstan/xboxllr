@@ -79,6 +79,10 @@ static uint32_t section_change(uint32_t descriptor,int load)
                 if (!status) {
                     memcpy(memory+s->address,image_bytes+s->raw,s->bytes);
                     memset(memory+s->address+s->bytes,0,s->size-s->bytes);
+#ifdef PILOT_MEMORY_LLE
+                    const char *error=pilot_io_device_resident(base,bytes);
+                    if(error)stop(error,base);
+#endif
                     for (uint32_t page=first;page<end;++page) ++section_pages[page];
                     section_counter(s->head,1); section_counter(s->tail,1);
                     s->refs=1; MEM32(descriptor+24)=1;

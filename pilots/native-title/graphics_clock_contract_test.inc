@@ -145,6 +145,7 @@ static void test_graphics_clock(void)
     uint64_t elapsed=dispatch_monotonic()-start;
     CHECK(elapsed>=17*10000000/60 && elapsed<20000000);
     CHECK(!graphics_clock_waiters && !graphics_display_waiters && GetProcessHandleCount(GetCurrentProcess(),&handles_after));
+    if(handles_after!=handles_before)fprintf(stderr,"[VBLANK TEST HANDLES] before=%lu after=%lu\n",handles_before,handles_after);
     CHECK(handles_after==handles_before);
     fprintf(stderr,"[VBLANK TEST] 18 actual guest waits in %.3f ms; phase, concurrent waiters, ABI and handle lifetime passed\n",elapsed/10000.0);
 }

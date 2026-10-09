@@ -98,7 +98,66 @@ def run(snapshot):
     assert vm('topdown_reserve', 184, 0, 4096, 0x102000)[1][0] == 0x7ffd0000
     vm('topdown_release', 199, 0x7ffd0000, 0, 0x8000)
     assert query('above_user_space', 0x7ffe0000)[0] == 0xc000000d
-    return dict(snapshot_sha256=SNAPSHOT_SHA, scope='original virtual-memory API effects',
+
+    def statistics(label):
+        ref.cpu.mem_write(slots, struct.pack('<11I', 0xdeadbeef, 36, *([0]*8), 0xaabbccdd))
+        assert ref.call(181, slots+4) == 0
+        values = struct.unpack('<11I', ref.cpu.mem_read(slots, 44))
+        assert values[0] == 0xdeadbeef and values[-1] == 0xaabbccdd
+        assert values[1:3] == (36, 16384)
+        rows.append(dict(case=label, ordinal=181, status=0, output=list(values[1:-1])))
+        return values[1:-1]
+
+    baseline = statistics('statistics_baseline')
+    assert vm('statistics_reserve', 184, base, 65536, 0x2000)[0] == 0
+    reserved = statistics('statistics_reserved')
+    assert reserved[2:4] == baseline[2:4] and reserved[4] == baseline[4]+65536
+    assert vm('statistics_commit', 184, base, 8192, 0x1000)[0] == 0
+    committed = statistics('statistics_committed')
+    # This PDE was empty: two caller pages plus one real page-table page.
+    assert committed[2] == baseline[2]-3 and committed[3] == baseline[3]+8192
+    assert committed[4] == baseline[4]+65536
+    assert vm('statistics_release', 199, base, 0, 0x8000)[0] == 0
+    assert statistics('statistics_released') == baseline
+
+    physical = ref.call(166, 8193, 0, 0x03ffffff, 0x10000, 0x404)
+    assert physical and not physical & 0xffff
+    size = ref.call(180, physical)
+    assert size == 12288 and ref.call(179, physical) == 0x404
+    ref.call(182, physical+4095, 2, 0x202)
+    assert ref.call(179, physical) == ref.call(179, physical+4096) == 0x202
+    assert ref.call(179, physical+8192) == 0x404
+    ref.call(178, physical, 12288, 1)
+    assert ref.call(180, physical) == size and ref.call(179, physical) == 0x202
+    assert ref.call(1) == 0
+    assert ref.call(4, physical) == physical and ref.call(1) == physical
+    assert ref.call(4, 0) == 0 and ref.call(1) == 0
+    ref.call(178, physical, 12288, 0)
+    ref.call(171, physical)
+    rows.append(dict(case='contiguous_queries', ordinal=[166, 179, 180, 182, 178, 1, 4, 171],
+                     allocation=physical, bytes=size, first_protect=0x202, last_protect=0x404))
+    pool = ref.call(15, 180, 0x74736554)
+    assert pool and ref.call(23, pool) == 184
+    ref.call(17, pool)
+    rows.append(dict(case='pool_query', ordinal=[15, 23, 17], requested=180, usable=184))
+    assert vm('relocation_allocate', 184, base, 8192, 0x3000)[0] == 0
+    old_pa = ref.physical(base)
+    ref.ram[old_pa:old_pa+4096] = bytes([0x5a])*4096
+    # Constrain a contiguous request to a PFN occupied by a movable VM page.
+    # The original allocator copies the live bytes and changes the real PTE.
+    contiguous = ref.call(166, 4096, old_pa, old_pa+4095, 4096, 4)
+    new_pa = ref.physical(base)
+    assert contiguous == 0x80000000+old_pa and new_pa != old_pa
+    assert bytes(ref.ram[new_pa:new_pa+4096]) == bytes([0x5a])*4096
+    ref.call(175, base, 4096, 0)
+    assert ref.call(166, 4096, new_pa, new_pa+4095, 4096, 4) == 0
+    assert ref.physical(base) == new_pa
+    ref.call(175, base, 4096, 1)
+    ref.call(171, contiguous)
+    rows.append(dict(case='contiguous_relocates_unpinned_vm', ordinal=[166, 175, 171],
+                     old_pa=old_pa, new_pa=new_pa, pinned_allocation_result=0))
+    assert vm('relocation_release', 199, base, 0, 0x8000)[0] == 0
+    return dict(snapshot_sha256=SNAPSHOT_SHA, scope='original VM, pool/contiguous queries, statistics and relocation effects',
                 rows=rows, initial_physical_pages=pages)
 
 

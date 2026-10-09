@@ -284,7 +284,31 @@ static void check_publications(int before_call)
             if(before_call){failure="device LLE published mapping changed between calls";return;}
             release_publication(i);if(failure)return;continue;
         }
-        if(pa!=published[i].pa){failure="device LLE published alias changed between calls";return;}
+        if(pa!=published[i].pa) {
+            if(before_call){failure="device LLE published alias changed between calls";return;}
+            /* Original MmAllocateContiguousMemory can relocate an unpinned
+             * virtual page into a free PFN. The original copy/PTE update has
+             * already happened. Preserve both resulting physical contents,
+             * then publish the new PFN behind the same caller VA. Do not pin
+             * every page just to prevent the original allocator doing this. */
+            uint32_t old_pa=published[i].pa;
+            if(published[i].pins || shared_pages[pa/4096]) {
+                failure="device LLE relocation into pinned or aliased storage";return;
+            }
+            DWORD protection,previous;
+            if(!VirtualProtect(guest_memory+va,4096,PAGE_READWRITE,&protection)) {
+                failure="device LLE relocation access failed";return;
+            }
+            memcpy(ram+old_pa,guest_memory+va,4096);
+            memcpy(guest_memory+va,ram+pa,4096);
+            shared_pages[old_pa/4096]=NULL;publication_by_pa[old_pa/4096]=0;
+            shared_pages[pa/4096]=guest_memory+va;publication_by_pa[pa/4096]=(uint16_t)(i+1);
+            published[i].pa=pa;
+            if(!VirtualProtect(guest_memory+va,4096,protection,&previous)) {
+                failure="device LLE relocation protection restore failed";return;
+            }
+            refresh_mappings();if(failure)return;
+        }
         ++i;
     }
 }
@@ -313,7 +337,13 @@ static void publish_range(uint32_t object,uint32_t bytes)
         if(published_count==MAX_PUBLISHED || !physical(va,&pa)) {
             failure="device LLE invalid publication";return;
         }
-        if(shared_pages[pa/4096]){failure="device LLE duplicate physical publication";return;}
+        if(shared_pages[pa/4096]) {
+            unsigned other=publication_by_pa[pa/4096];uint32_t actual=UINT32_MAX;
+            if(other)physical(published[other-1].va,&actual);
+            fprintf(stderr,"[IO PAGE COLLISION] new=%08x pa=%08x old=%08x old-current-pa=%08x\n",
+                    va,pa,other?published[other-1].va:0,actual);
+            failure="device LLE duplicate physical publication";return;
+        }
         if(image) {
             if(!guest_page(va)){failure="device LLE caller page is not resident";return;}
         } else if(guest_page(va)){failure="device LLE allocation collides with native memory";return;}
@@ -351,14 +381,14 @@ static void retire_owner(uint32_t object)
         release_publication(i);if(failure)return;
     }
 }
-static void run_original(uint32_t entry)
+static void run_original(uint32_t entry,size_t instruction_limit)
 {
     /* Never re-enter uc_emu_start from a hook. At an actual ISR call, stop,
      * run its generated body over shared bytes, then restore this CPU. A
      * nested original service has its own stack and saved engine context. */
     for(unsigned calls=0;calls<1024;++calls) {
         pending_callback=0;
-        uc_err error=uc_emu_start(cpu,entry,RETURN_PC,0,1000000);
+        uc_err error=uc_emu_start(cpu,entry,RETURN_PC,0,instruction_limit);
         if(failure)return;
         if(error){failure=uc_strerror(error);return;}
         if(!pending_callback)return;
@@ -409,9 +439,9 @@ static void image_vm(uint32_t base,uint32_t bytes,uint32_t type)
 static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
 {
     unsigned pin_slot=MAX_PUBLISHED;
-    if(ordinal!=14 && ordinal!=15 && ordinal!=17 && ordinal!=23 &&
+    if(ordinal!=1 && ordinal!=4 && ordinal!=14 && ordinal!=15 && ordinal!=17 && ordinal!=23 &&
        ordinal!=44 && ordinal!=47 && ordinal!=65 && ordinal!=68 && ordinal!=107 && ordinal!=108 && ordinal!=109 && ordinal!=166 &&
-       ordinal!=171 && ordinal!=173 && ordinal!=175 && ordinal!=178 && ordinal!=182 &&
+       ordinal!=171 && ordinal!=173 && ordinal!=175 && ordinal!=178 && ordinal!=179 && ordinal!=180 && ordinal!=181 && ordinal!=182 &&
        ordinal!=98 && ordinal!=100 && ordinal!=103 && ordinal!=129 && ordinal!=151 &&
        ordinal!=160 && ordinal!=161 && ordinal!=184 && ordinal!=199 && ordinal!=204 && ordinal!=217) {
         failure="device LLE unsupported ordinal";return;
@@ -462,7 +492,7 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
     unsigned count=ordinal==65?6:ordinal==109?7:(ordinal==166 || ordinal==184)?5:ordinal==204?4:
                    (ordinal==107 || ordinal==108 || ordinal==175 || ordinal==178 || ordinal==182 || ordinal==199)?3:
                    (ordinal==15 || ordinal==44 || ordinal==47 || ordinal==217)?2:
-                   (ordinal==103 || ordinal==129 || ordinal==160 || ordinal==161)?0:1;
+                   (ordinal==1 || ordinal==103 || ordinal==129 || ordinal==160 || ordinal==161)?0:1;
     if(ordinal==160 || ordinal==161) {
         uint32_t level=args[0]&255;
         if(level>31){failure="device LLE IRQL out of range";return;}
@@ -476,7 +506,11 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
     IO_UC(uc_reg_write(cpu,UC_X86_REG_EFLAGS,&flags));
     int saved[]={UC_X86_REG_EBX,UC_X86_REG_ESI,UC_X86_REG_EDI,UC_X86_REG_EBP};
     for(unsigned i=0;i<4;++i){uint32_t value=0x12345678u+i;IO_UC(uc_reg_write(cpu,saved[i],&value));}
-    run_original(entry);
+    /* Bulk original allocation really zeroes the requested RAM. Unicorn
+     * counts REP iterations; a megabyte-scale loader commit can legitimately
+     * exceed the small device-call budget. Permit bounded console-sized work
+     * without replacing its zeroing or declaring an unfinished call complete. */
+    run_original(entry,ordinal==184?64u*1024*1024:1000000);
     if(failure)return;
     IO_UC(uc_reg_read(cpu,UC_X86_REG_EIP,&observed));
     if(observed!=RETURN_PC){failure="device LLE instruction limit without return";return;}
@@ -490,6 +524,9 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
     }
     IO_UC(uc_reg_read(cpu,UC_X86_REG_EAX,result));
     refresh_mappings();if(failure)return;
+    /* Retire/remap existing publications before exposing a new contiguous
+     * allocation that may occupy their former physical pages. */
+    check_publications(0);if(failure)return;
     if(ordinal==65 && (int32_t)*result>=0) {
         /* The output slot may itself be in an existing device extension.
          * Read the completed kernel view before publishing changed pages. */
@@ -543,7 +580,7 @@ static void deliver_irq(int *delivered)
     for(unsigned i=0;i<8;++i){uint32_t v=i==4?sp:0x12345000u+i;IO_UC(uc_reg_write(cpu,general_regs[i],&v));}
     IO_UC(uc_reg_write(cpu,UC_X86_REG_EFLAGS,&flags));
     if(pilot_usb_pic_vector(1)!=vector){failure="device LLE PIC changed before INTA";return;}
-    run_original(entry);if(failure)return;
+    run_original(entry,1000000);if(failure)return;
     uint32_t observed;IO_UC(uc_reg_read(cpu,UC_X86_REG_EIP,&observed));
     if(observed!=RETURN_PC){failure="device LLE IRQ failed to return";return;}
     for(unsigned i=0;i<8;++i) {
@@ -631,6 +668,30 @@ const char *pilot_io_device_image_release(uint32_t base,uint32_t bytes)
         found=1;if(published[i].pins)failure="device LLE image release while DMA pinned";
     }
     if(!failure && found){++execution_depth;image_vm(base,bytes,MEM_DECOMMIT);--execution_depth;}
+    const char *error=failure;ReleaseSRWLockExclusive(&lock);return error;
+}
+const char *pilot_io_device_resident(uint32_t base,uint32_t bytes)
+{
+    AcquireSRWLockExclusive(&lock);
+    if(!failure && (!guest_memory || execution_depth || !bytes || (base&4095) ||
+       (bytes&4095) || !caller_owned(base,bytes)))failure="memory LLE residency requires an owned page range";
+    if(!failure) {
+        ++execution_depth;
+        uint64_t end=(uint64_t)base+bytes;
+        for(uint64_t at=base;!failure && at<end;) {
+            MEMORY_BASIC_INFORMATION info;
+            if(!VirtualQuery(guest_memory+at,&info,sizeof(info))) {failure="memory LLE caller residency query failed";break;}
+            uint64_t next=(unsigned char*)info.BaseAddress-guest_memory+info.RegionSize;
+            if(next>end)next=end;
+            if(next<=at || (next&4095)){failure="memory LLE invalid host residency extent";break;}
+            if(info.State==MEM_COMMIT) {
+                if(info.Protect&(PAGE_GUARD|PAGE_NOACCESS)){failure="memory LLE protected loader range unqualified";break;}
+                image_vm((uint32_t)at,(uint32_t)(next-at),MEM_COMMIT);
+            }
+            at=next;
+        }
+        --execution_depth;
+    }
     const char *error=failure;ReleaseSRWLockExclusive(&lock);return error;
 }
 const char *pilot_io_device_release_check(uint32_t base,uint32_t bytes)

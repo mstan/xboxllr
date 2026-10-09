@@ -379,6 +379,7 @@ int main(int argc,char **argv)
     /* Statistics supplies a larger authored image reservation below. Match
      * that loader input in the original allocator before any dynamic calls. */
     uint32_t fixture_image_size=argc==2 && !strcmp(argv[1],"memory-statistics")?0x20000:0x10000;
+    if(argc==2 && !strcmp(argv[1],"sections"))fixture_image_size=0x16000;
 #ifdef PILOT_D3D_NATIVE
     if(argc==2 && (!strcmp(argv[1],"graphics") || !strcmp(argv[1],"graphics-scheduler"))) {
         fixture_image_size=((PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SHADER_CONSTANT_MODE_OFFSET+4+4095)&~4095u)-0x10000;
