@@ -1,12 +1,11 @@
 # Files, cache and installed-media LLE
 
-Active serial family `beads-xbox.1.108`, after memory `.106`. Six of nine family
-gates remain open. This checkpoint executes original filesystem operations in
-a maintained reference runner and corrects native asynchronous notification.
-The title-selected original file/cache route now reaches Demo play, Start/title
-return and Demo reentry. Cross-process persistence passes. Remaining contract
-qualification now includes the metadata/directory/error/namespace bundle below.
-Final native title regression is pending for that correction batch.
+Bounded serial family `beads-xbox.1.108` is qualified, after memory `.106`.
+Four of nine family gates are complete; five remain open. The maintained
+original file/cache route reaches Demo play, Start/title return and Demo reentry.
+Independent original contract cases, cross-process persistence and the final
+native correction regression pass. Scope and remaining tolerances are explicit
+below; this is not exhaustive Xbox filesystem qualification.
 
 ## Executable floor and independent evidence
 
@@ -119,6 +118,16 @@ output bounds, metadata/volume layouts, directory cursor/filter effects,
 namespace ownership and repeated lifetimes. The combined native suite passes
 **37/38 (17.61s)**; all file tests pass. The sole failure is the existing `.99`
 minimum event-wait-duration assertion; its tolerance is unchanged.
+
+Final game-owned adoption of runtime `52bdfed8f549d19986b9513c55584b8fd2c165a7`
+passes doctor/build and **40/40 tests (17.84s)**. Actual
+`BlinxRecomp/local/runs/20261008-192931-attract/` runs **190.109s**, with 19
+captures and no guards. Inspected captures 8/12/17/19 show Demo play, title after
+Start, Demo reentry and continued gameplay. The child is intentionally stopped
+at the harness deadline (exit 1), not reported as a crash. Executable SHA-256:
+`7649af349ff879e8d2e899654b353f421d94d85c78da68262a4a15cdc63b08b8`.
+This completes the bounded family alongside the original-route and persistence
+evidence below. No new speed or host-memory plateau claim is made (`.100/.107`).
 
 ## Bounded contract and explicit tolerances
 
