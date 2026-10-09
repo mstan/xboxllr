@@ -1,14 +1,14 @@
 // xlle — MCPX APU (audio processing unit) at 0xFE800000 (512 KB, PCI 00:05.0 BAR0).
 //
 // Harvested from xemu/hw/xbox/mcpx/apu. The top level is a RAM-backed register file with
-// special handling for interrupt status, FEMEMDATA, and XGSCNT. The first load-bearing VP
-// method is implemented end-to-end: VOICE_OFF clears ACTIVE in the guest-resident voice
-// structure and posts its notifier; the 5.333 ms APU frame walker later encounters that
-// inactive voice in the 2D/3D/MP list and emits SE2FE_IDLE_VOICE. With FETFORCE1 enabled,
+// special handling for interrupt status, FEMEMDATA, and XGSCNT. The 5.333 ms APU
+// frame walker encounters inactive voices in the 2D/3D/MP list and emits
+// SE2FE_IDLE_VOICE. With FETFORCE1 enabled,
 // that publishes the front-end trap and drives the APU's level IRQ according to IEN/ISTS.
 //
-// Other VP/GP/EP subregion accesses remain logged so the next load-bearing method is
-// characterized rather than silently treated as implemented. No audio is produced yet.
+// Bounded PCM source consumption is executable before resampling/mixing/GP effects.
+// Whole device output and other VP/GP/EP accesses remain unqualified; the strict
+// reference transport rejects them instead of admitting register-file defaults.
 #pragma once
 #include <array>
 #include <cstdint>
@@ -98,6 +98,14 @@ public:
         }
     }
 
+    // Source-side pull for the VP's resampler. A frame is one source sample per
+    // channel; output is stereo normalized PCM (mono duplicated). Count reports
+    // frames actually fetched, not elapsed host time or padded silence.
+    // ended is a pipeline handoff after the final real sample, not a guest
+    // completion notification. The VP owner must retire it before pulling again.
+    // This does not apply pitch, envelopes, volume, mix routing or GP effects.
+    bool source_frames(uint16_t voice, float* stereo, uint32_t capacity, uint32_t& count, bool& ended);
+
     uint32_t mmio_read(uint32_t addr, int size) override {
         uint32_t off = addr - base_;
         if (faulted_) return 0;
@@ -125,6 +133,20 @@ public:
                 return;
             }
             if (configure_voice(method, value)) return;
+            if (method == 0x140) {
+                const uint16_t voice=static_cast<uint16_t>(value);
+                uint32_t state=0;
+                if(voice>=kMaxVoices || !read_voice_word(voice,kVoiceState,state) ||
+                   !write_voice_word(voice,kVoiceState,(state&~(1u<<18))|(value&(1u<<18))))
+                    device_fault("VOICE_PAUSE guest state update failed");
+                return;
+            }
+            if (method == 0x2fc) {
+                const uint32_t voice=reg32(kFecv);
+                if(voice>=kMaxVoices)device_fault("VOICE_LOCK handle out of range");
+                else voice_locked_[voice]=(value&1)!=0;
+                return;
+            }
             if (method == kSetAntecedent) {
                 set_reg32(kFeav, value);
                 set_reg32(kFedecmeth, method);
@@ -170,6 +192,7 @@ private:
     static constexpr uint32_t kFememaddr = 0x1324, kFememdata = 0x1334;
     static constexpr uint32_t kFetforce1 = 0x1504;
     static constexpr uint32_t kSectl = 0x2000, kXgscnt = 0x200c, kVpvaddr = 0x202c;
+    static constexpr uint32_t kVpsgeaddr = 0x2030;
     static constexpr std::array<uint32_t, 3> kVoiceTop = {0x2054, 0x2060, 0x206c};
     static constexpr std::array<uint32_t, 3> kVoiceCurrent = {0x2058, 0x2064, 0x2070};
     static constexpr std::array<uint32_t, 3> kVoiceNext = {0x205c, 0x2068, 0x2074};
@@ -205,6 +228,20 @@ private:
     bool write_u32(uint32_t addr, uint32_t value) {
         return write_mem(addr, &value, sizeof(value));
     }
+    bool source_read(uint64_t linear, void* output, uint32_t bytes) {
+        if(linear+bytes>0x100000000ull)return false;
+        auto* next=static_cast<uint8_t*>(output);
+        while(bytes) {
+            const uint64_t descriptor=uint64_t(reg32(kVpsgeaddr))+(linear>>12)*8;
+            uint32_t page=0;
+            if(descriptor>UINT32_MAX-3 || !read_u32(static_cast<uint32_t>(descriptor),page) || (page&4095))return false;
+            const uint32_t offset=static_cast<uint32_t>(linear)&4095;
+            const uint32_t part=bytes<4096-offset?bytes:4096-offset;
+            if(!read_mem(page+offset,next,part))return false;
+            next+=part;linear+=part;bytes-=part;
+        }
+        return true;
+    }
 
     void device_fault(const std::string& why) {
         if (!faulted_) {
@@ -231,25 +268,6 @@ private:
             irq_level_ = level;
             if (irq_fn_) irq_fn_(irq_num_, level);
         }
-    }
-
-    void post_voice_notifier(uint16_t voice, bool stream) {
-        // 16-byte records: two hardware records first, then four per voice. Byte 14 is
-        // envelope state and byte 15 is completion status. The initial SSL index is A/zero.
-        constexpr uint32_t kNotifierBaseOffset = 2;
-        constexpr uint32_t kNotifiersPerVoice = 4;
-        constexpr uint8_t kDoneSuccess = 1;
-        uint32_t notifier = 0;  // SSLA_DONE
-        (void)stream;
-        uint32_t addr = reg32(kFenaddr) +
-                        16u * (kNotifierBaseOffset + voice * kNotifiersPerVoice + notifier);
-        uint8_t envelope = 1;
-        if (!write_mem(addr + 14, &envelope, 1) ||
-            !write_mem(addr + 15, &kDoneSuccess, 1)) {
-            device_fault("voice notifier guest write failed");
-            return;
-        }
-        set_reg32(kIsts, reg32(kIsts) | kIstsFev | kIstsFen);
     }
 
     bool read_voice_word(uint16_t voice, uint32_t field, uint32_t& value) {
@@ -347,25 +365,11 @@ private:
             device_fault("VOICE_OFF handle out of range");
             return;
         }
-        uint32_t base = reg32(kVpvaddr) + voice * kVoiceSize;
-        uint32_t state = 0, format = 0;
-        if (!read_u32(base + kVoiceState, state) ||
-            !read_u32(base + kVoiceCfgFmt, format)) {
-            device_fault("VOICE_OFF guest voice read failed");
-            return;
-        }
-        if (!write_u32(base + kVoiceState, state & ~kVoiceActive)) {
-            device_fault("VOICE_OFF guest voice write failed");
-            return;
-        }
-
-        set_reg32(kFedecmeth, kVoiceOff);
-        set_reg32(kFedecparam, voice);
-        post_voice_notifier(voice, (format & kVoiceStream) != 0);
-        ++voice_off_methods_;
-        // xemu defers IRQ aggregation to the APU worker/frame thread. This matters: the
-        // next frame also publishes IDLE_VOICE, so the kernel observes FET + notifier causes
-        // together and services the voice-idle completion before notifier teardown.
+        // The old xemu-derived route wrote a literal 1 into notifier byte 14
+        // and assumed SSLA even for streams. Upstream itself marks the envelope
+        // byte provisional. Do not publish completion from that placeholder.
+        // Qualify the notifier record/SSL owner before restoring this method.
+        device_fault("VOICE_OFF notifier metadata/ownership remains unqualified");
     }
 
     void emit_idle_voice(uint16_t voice) {
@@ -438,7 +442,71 @@ private:
     uint64_t voice_off_methods_ = 0;
     uint64_t idle_voice_traps_ = 0;
     uint64_t xgscnt_ = 0;
+    std::array<bool,kMaxVoices> voice_locked_{};
     int sub_logged_ = 0;
 };
+
+inline bool McpxApu::source_frames(uint16_t voice,float* stereo,uint32_t capacity,uint32_t& count,bool& ended) {
+    count=0;ended=false;
+    if(faulted_)return false;
+    if(voice>=kMaxVoices || (capacity && !stereo)) {
+        device_fault("invalid source pull destination/voice");return false;
+    }
+    if(!capacity)return true;
+    uint32_t state=0,format=0,base=0,current=0,last=0,loop=0;
+    if(!read_voice_word(voice,0x54,state)) {
+        device_fault("source voice state DMA failed");return false;
+    }
+    if(!(state&kVoiceActive) || (state&(1u<<18)) || voice_locked_[voice])return true;
+    if(!read_voice_word(voice,0x04,format) || !read_voice_word(voice,0x20,base) ||
+       !read_voice_word(voice,0x24,loop) || !read_voice_word(voice,0x58,current) ||
+       !read_voice_word(voice,0x5c,last)) {
+        device_fault("source voice parameters DMA failed");return false;
+    }
+    const unsigned channels=(format&(1u<<27))?2:1;
+    const unsigned type=(format>>28)&3,container=(format>>30)&3;
+    const unsigned stride=((format>>16)&31)+1;
+    // Streaming SSL, multipass and linked-voice processing have separate
+    // ownership/pipeline semantics; do not report those as consumed PCM.
+    if((format&((1u<<21)|(1u<<22)|(1u<<24))) || stride!=channels ||
+       !((type==0 && container==0) || (type==1 && container==1) || (type>=2 && container==3))) {
+        device_fault("source processing format remains unqualified");return false;
+    }
+    const unsigned width=type==0?1:type==1?2:4;
+    uint32_t cursor=current&0xffffff,end=last&0xffffff,start=loop&0xffffff;
+    base&=0xffffff;
+    const bool looping=(format&(1u<<25))!=0;
+    if(cursor>end || (looping && start>end)) {
+        device_fault("source buffer extent remains unqualified");return false;
+    }
+    while(count<capacity) {
+        uint8_t data[8];
+        if(!source_read(uint64_t(base)+uint64_t(cursor)*width*channels,data,width*channels)) {
+            device_fault("source sample scatter/gather DMA failed");return false;
+        }
+        float sample[2];
+        for(unsigned channel=0;channel<channels;++channel) {
+            uint32_t raw=0;
+            for(unsigned byte=0;byte<width;++byte)raw|=uint32_t(data[channel*width+byte])<<(byte*8);
+            if(type==0)sample[channel]=float(int(raw)-128)*(1.0f/128);
+            else {
+                const unsigned bits=type==1?16:type==2?24:32;
+                const uint64_t mask=(uint64_t(1)<<bits)-1,sign=uint64_t(1)<<(bits-1);
+                const int64_t value=int64_t(raw&mask)-((raw&sign)?int64_t(uint64_t(1)<<bits):0);
+                sample[channel]=static_cast<float>(double(value)/double(sign));
+            }
+        }
+        if(channels==1)sample[1]=sample[0];
+        // Publish the consumed position only after both channels were fetched.
+        const bool finished=cursor==end && !looping;
+        cursor=cursor==end?(looping?start:end):cursor+1;
+        if(!write_voice_word(voice,0x58,(current&0xff000000)|cursor)) {
+            device_fault("source cursor DMA failed");return false;
+        }
+        stereo[count*2]=sample[0];stereo[count*2+1]=sample[1];++count;
+        if(finished){ended=true;return true;}
+    }
+    return true;
+}
 
 }  // namespace xlle

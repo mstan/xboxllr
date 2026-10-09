@@ -1,4 +1,4 @@
-// xlle — focused MCPX APU VOICE_OFF -> timed idle-voice trap/IRQ lifecycle test.
+// xlle — MCPX APU idle-voice IRQ, configuration and unsupported-completion guard.
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -60,21 +60,13 @@ int main() {
     CHECK(apu.mmio_read(base + 0x2054, 4) == voice);
     CHECK((get32(ram, voice_addr + 0x54) & (1u << 21)) != 0);
 
-    apu.mmio_write(base + 0x20000 + 0x128, 4, voice);   // VP VOICE_OFF
-    CHECK(fault.empty());
-    CHECK((get32(ram, voice_addr + 0x54) & (1u << 21)) == 0);
-    CHECK(apu.voice_off_methods() == 1);
+    // Independent frame-walker precondition: an inactive voice remains linked.
+    // This does not pretend the unqualified VOICE_OFF notifier ran successfully.
+    put32(ram,voice_addr+0x54,get32(ram,voice_addr+0x54)&~(1u<<21));
     CHECK(apu.idle_voice_traps() == 0);
-    CHECK(apu.mmio_read(base + 0x1300, 4) == 0x128);
-    CHECK(apu.mmio_read(base + 0x1304, 4) == voice);
-
-    // VOICE_OFF posts SSLA_DONE immediately: byte 14 is envelope state, byte 15 status.
     uint32_t notify = notifier_table + 16 * (2 + voice * 4);
-    CHECK(ram[notify + 14] == 1);
-    CHECK(ram[notify + 15] == 1);
-    CHECK((apu.mmio_read(base + 0x1000, 4) & ((1u << 5) | (1u << 6))) ==
-          ((1u << 5) | (1u << 6)));
-    CHECK(irq.empty());  // notification IRQ aggregation is deferred to the APU frame
+    std::memset(ram.data()+notify,0xa5,16);
+    CHECK(irq.empty());
 
     // No synchronous escape hatch: completion appears only at the next APU frame.
     apu.set_frame(1);
@@ -86,6 +78,8 @@ int main() {
     CHECK((apu.mmio_read(base + 0x1100, 4) & 0x00000fe0) == 0x00000fe0);
     CHECK((apu.mmio_read(base + 0x1000, 4) & ((1u << 0) | (1u << 4))) ==
           ((1u << 0) | (1u << 4)));
+    CHECK((apu.mmio_read(base+0x1000,4)&((1u<<5)|(1u<<6)))==0);
+    for(unsigned i=0;i<16;++i)CHECK(ram[notify+i]==0xa5);
     CHECK(irq.size() == 1 && irq[0] == std::make_pair(5, true));
 
     // FET is level-owned by trapped FECTL: W1C alone reasserts it.
@@ -136,6 +130,15 @@ int main() {
     CHECK(!fault.empty());
     apu.mmio_write(base+0x20300,4,0);
     CHECK(ram==before_failure); // terminal DMA failure cannot mutate later work
+
+    std::string completion_error;unsigned writes=0;
+    xlle::McpxApu completion([&](const std::string& why){completion_error=why;});
+    completion.set_mem_access(
+        [&](uint32_t,void*,size_t){return false;},
+        [&](uint32_t,const void*,size_t){++writes;return false;});
+    completion.mmio_write(base+0x20128,4,voice);
+    CHECK(completion_error.find("notifier metadata/ownership")!=std::string::npos);
+    CHECK(!writes); // no constant envelope byte, SSLA guess or fake success
 
     std::printf(fails ? "test_apu: %d checks failed\n" : "test_apu: ok\n", fails);
     return fails ? 1 : 0;

@@ -1,4 +1,4 @@
-// Strict C transport for the maintained APU configuration floor. No register
+// Strict C transport for the maintained APU configuration/source floor. No register
 // defaults, sample progress or completion are substituted by this adapter.
 #include "machine/apu.hpp"
 #include <cstring>
@@ -28,8 +28,8 @@ struct Reference {
 };
 bool qualified_write(uint32_t offset) {
     switch(offset) {
-    case 0x202c: // actual voice table physical address
-    case 0x202f8:
+    case 0x202c:case 0x2030: // voice table and source scatter/gather physical addresses
+    case 0x202f8:case 0x202fc:case 0x20140:
     case 0x20300:case 0x20304:case 0x20308:case 0x2030c:
     case 0x20310:case 0x20314:case 0x20318:
     case 0x20360:case 0x20364:case 0x20368:case 0x2036c:
@@ -55,4 +55,16 @@ EXPORT int xlle_apu_reference_write(void* instance,uint32_t address,int size,uin
         ref.failure="APU reference outside qualified configuration transaction";return 0;
     }
     ref.apu.mmio_write(address,size,value);return ref.failure.empty();
+}
+EXPORT int xlle_apu_reference_source(void* instance,uint32_t voice,float* samples,uint32_t capacity,
+                                    uint32_t* count,int* ended) {
+    if(!instance)return 0;
+    auto& ref=*static_cast<Reference*>(instance);
+    if(!ref.failure.empty())return 0;
+    if(voice>0xffff || !count || !ended || capacity>65536) {
+        ref.failure="invalid APU source transport shape";return 0;
+    }
+    bool last=false;
+    const bool ok=ref.apu.source_frames(static_cast<uint16_t>(voice),samples,capacity,*count,last);
+    *ended=last;return ok;
 }

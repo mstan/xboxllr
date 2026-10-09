@@ -21,7 +21,8 @@ or raise an IRQ. Invalid voice ownership/DMA stops the reference; address
 arithmetic cannot wrap a bad voice-table pointer into valid RAM.
 
 `tools/apu_reference.cpp` supplies a strict C transport to this maintained
-implementation. It accepts only the implemented 32-bit configuration writes.
+implementation. It accepts implemented 32-bit configuration/control writes
+and explicit PCM source pulls.
 Unsupported methods/widths fail persistently before successful completion or
 later RAM modification. The older broader machine register-file defaults are
 not admitted through this qualification boundary.
@@ -45,8 +46,8 @@ cases** reject unknown methods, wrong widths, bad voice IDs, out-of-RAM DMA and
 
 The expanded `test_apu` checks all thirteen full-word configuration methods,
 pitch/link separation, buffer/envelope separation, whole-RAM write isolation
-and terminal-fault behavior, retaining the existing VOICE_OFF/notifier/IRQ
-lifecycle tests. It passes in 0.01s. The private original/model fixture passes;
+and terminal-fault behavior. Its earlier VOICE_OFF/notifier claim is corrected
+below; the independently specified inactive-voice IRQ case remains. The private original/model fixture passes;
 evidence: `build/blinx/audio-configuration-original.aot-private.json`, reference
 DLL SHA-256 `41d8fdcea694dd1107f7f73d909773ab55382a97aff3b7f1816b3d3393e2e3df`.
 
@@ -54,12 +55,81 @@ This is original-helper plus real device-configuration evidence. It does not
 execute the enclosing DirectSound lock/command emission path end to end, nor
 qualify every declared parameter's downstream signal-processing behavior.
 
+## PCM source consumption and native comparison
+
+The maintained APU now fetches PCM8/16/24/32 mono/stereo through its actual
+scatter/gather table and guest RAM. It handles nonadjacent pages, including a
+single sample or stereo pair straddling a page boundary. Each consumed frame
+advances the guest CBO while preserving its envelope byte. Interior loops wrap
+to LBO only after consuming the inclusive EBO sample. Pause and voice-lock
+prevent reads/advancement; a later seek or caller data write is visible on the
+next pull. Unsupported SSL/ADPCM/multipass/linked processing fails explicitly.
+No host clock estimates samples, and no silence is invented to fill a request.
+
+This is the source stage before resampling, envelopes, routing and GP effects.
+Its `ended` output hands the real final sample to the pipeline owner; it does
+**not** retire the guest voice or publish a notifier. The owner must handle
+that event before requesting more source data. Stop/restart state is currently
+an input to this stage, not a newly qualified whole control/notification path.
+
+`test_apu_source` checks eight PCM format/channel combinations, splits requests
+around 31/32/64-frame boundaries, and verifies the last sample, one-frame buffers,
+interior/repeated loops, pause/lock/seek and inactive ownership. Fault cases cover
+unsupported formats, out-of-range cursors, descriptor wrap, invalid/misaligned
+SGEs and a failed second-channel page read without cursor advancement.
+
+`native_audio_source_reference.py` executes the original region-setting routine
+from entry `0x179efd` through its calculations, stopping at its first PIO poll
+`0x179f9b`. All reached helper calls execute unchanged, with an explicit IRQL-2
+caller precondition; no FIFO capacity or enclosing return is substituted.
+The original subtracts one from the converted end, corroborating inclusive EBO.
+Its resulting LBO/EBO then drive our real source consumption. **40 cases** cover
+PCM8/16 mono/stereo, lengths 1/31/32/33/65 and one-shot/interior loops. Complete
+original byte/sample helpers independently round-trip the consumed cursor.
+The emitted PCM samples and cursor units match the independently authored input.
+
+`pilot_audio_source_lle` compares that source stage with actual XAudio2 mixer
+samples for PCM8/16 mono/stereo at 48 kHz, unity gain and interior loops.
+All four cases pass with a **3e-5 normalized-sample tolerance**; actual native
+play/write cursors stay in the chosen loop. These are sequential test runs,
+never duplicate production execution. Other rates, pitch interpolation and
+downstream envelopes/mixing/GP behavior remain separate work.
+
+Validation: source and APU tests **2/2 in 0.03s**; mixed suite **53/53 in 21.69s**.
+After removal of the notifier placeholder below, both original fixtures and
+the native-source test pass again (the latter in 1.21s). Private evidence:
+`build/blinx/audio-source-{original,configuration}.aot-private.json`,
+`audio-source-{build,native-build,full-tests}.log`. The title executable hash
+still matches the recorded 190.141s regression, so it was not rerun for this
+device-stage/test-only addition; no new actual audio-LLE title run is claimed.
+Final reference DLL SHA-256:
+`c4498668be4949a07821fd0006f480355fab3a5fb50bfa1667d80f4e37147cac`.
+
+## Withdrawn notifier assumption
+
+The audit found the older `post_voice_notifier` wrote a literal `1` into byte
+14 and selected SSLA even for streaming voices. Pinned xemu explicitly marks
+its envelope-information byte provisional. That is not independent correctness
+evidence. The placeholder is removed; VOICE_OFF now fails before writing a
+completion record or changing voice state. The strict audio reference never
+admitted that unqualified method. The inactive-voice trap/IRQ implementation
+remains executable and tested with its own stated input state.
+
+This intentionally withdraws the old LLE notifier qualification. The default
+native audio/title route is unaffected, but the broader legacy LLE machine now
+stops at VOICE_OFF until its record/SSL ownership contract is implemented.
+Original settings and real native detach/rebind evidence still stand. Before
+closing audio, establish the actual notifier byte/record meaning and delivery
+through original caller evidence and independent documentation/observations;
+do not restore a fixed envelope value. New console observations, if actually
+needed, remain at the end of the burndown. Their necessity is not established.
+
 ## Remaining work, in order
 
-1. Buffer DMA/sample consumption and current/end/loop transitions, including
-   stop, seek, pause, restart and ownership. Use original XDK programming/cursor
-   helpers and xemu APU behavior; compare native output/cursors after the LLE
-   route works. Retain explicit guards for unsupported processing modes.
+1. Complete the buffer pipeline around the new source stage: original control
+   ownership, notifier/SSL record qualification and delivery, stop/restart and
+   pipeline timing. Reuse the now-executable DMA/sample/loop floor and native
+   output comparison; retain guards for unsupported processing modes.
 2. Connect routing, pitch, gain, ADPCM and the GP graph to that transport.
    Existing original byte/sample conversion, detach, decoder and real native
    output tests are reusable evidence, not a completed LLE audio device.
@@ -79,6 +149,8 @@ That run protects the existing title route; it is not a new audio-LLE title run.
 - Original NTSC private input: full helpers at `0x1789a0` and `0x178c97`;
   original command emitter also uses the selected-voice/routing/format/volume/
   pitch method addresses. Bindings are isolated in the reference fixture.
+  Region-prefix and complete unit-conversion bindings are isolated separately
+  in `native_audio_source_reference.py`; no original bytes are committed.
 - xemu `482088490c2d5983ed5e1eafbd09906157c1eca0`,
   `hw/xbox/mcpx/apu/{apu_regs.h,vp/vp.c}`: register locations, field widths and
   memory-side effects. No new GPL implementation body is copied or adapted.

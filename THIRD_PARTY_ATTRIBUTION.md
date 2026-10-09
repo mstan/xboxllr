@@ -1329,6 +1329,23 @@ Register programming is not a sample-processing or whole-title qualification.
 Existing older APU/dependency attribution and distribution restrictions are
 unchanged; this batch does not certify the entire machine as non-GPL.
 
+The subsequent PCM source stage consults those same xemu files for scatter/gather
+addressing, format fields and source-cursor behavior, plus `fpconv.h` (LGPL-2.0-
+or-later, copyright Matt Borgerson 2020-2025) for normalized PCM conventions.
+The implementation, page-splitting checks, waveform/index expectations and
+real native-mixer comparison are authored here; no source-processing body is
+copied or adapted. Original region arithmetic and byte/sample helpers execute
+from the owner's private NTSC image. The independently observed inclusive end
+index drives per-sample handling instead of inheriting xemu's chunk-dependent
+end comparison. This is not a new hardware timing or interpolation measurement.
+
+Phobos's `audio_output_xaudio2.cpp` at `bcccf8c` was revisited for its actual
+`SamplesPlayed` cursor observation. Our already attributed native transport is
+reused unchanged. The audit also identified xemu's explicitly provisional
+notifier information byte: our older literal-byte/SSLA assumption is removed,
+and the unsupported completion boundary now fails explicitly. Neither that
+placeholder nor native audible success qualifies an LLE notifier contract.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),
