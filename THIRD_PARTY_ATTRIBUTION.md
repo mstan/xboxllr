@@ -1144,6 +1144,26 @@ write records supply exercised values only. No new implementation is imported;
 these facts do not qualify active timing-bank selection or the undocumented
 FD6806A0 transaction. Public documents and private captures are not redistributed.
 
+## Isolated NV2A digital timing component
+
+`src/machine/nv2a_fp_timing.hpp` uses factual FP total/sync/valid-region encodings
+and polarity fields from envytools `f102b82381f3f11cee113d16374c87091db039d9`,
+`rnndb/display/nv3_pramdac.xml`, corroborated by Nouveau at Linux **v6.12**:
+
+- [dfp.c](https://github.com/torvalds/linux/blob/v6.12/drivers/gpu/drm/nouveau/dispnv04/dfp.c),
+  individually MIT-noticed, copyright NVIDIA (2003), Dave Airlie (2006), Maarten
+  Maathuis (2007), Stuart Bennett (2007-2009). SHA-256 of consulted file:
+  `aeae4c211be96acf03aec4a8a6603898970ba5d19ff1863672a17448c2f9fe90`.
+- [nvreg.h](https://github.com/torvalds/linux/blob/v6.12/drivers/gpu/drm/nouveau/dispnv04/nvreg.h),
+  individually MIT-noticed, copyright David J. McKay (1996-1997). SHA-256:
+  `c2c46c2f5a2d4e1039074d42e32e1354f8388ae17011e7360c95bd9b3ae91921`.
+
+The event traversal and independent dense-clock test are authored here; no
+driver function bodies are copied or adapted. PC driver programming establishes
+encoding evidence, not NV2A silicon phase or activation semantics. The component
+requires an explicitly established active mode/origin; it does not implement
+FD6806A0, timing-bank readback, pixel scaling/serialization or board clock routing.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

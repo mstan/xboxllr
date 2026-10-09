@@ -1168,3 +1168,42 @@ sync edge that causes acknowledgment. Keep the LLE guard until evidence supports
 the reached transaction; do not install immediate success or a captured idle
 value. Known digital timing/control work can continue offline while the hardware
 question is pending. Blinx runtime and stable game pin are unchanged, **4/9**.
+
+### Digital sync generator component while hardware observation is pending
+
+`src/machine/nv2a_fp_timing.hpp` now provides the bounded output-counter and
+signal component needed downstream of an established active FP mode. Given
+active horizontal/vertical timing and an explicit counter origin, pixel clocks
+advance horizontal/vertical position and complete-frame count, and produce
+HSYNC, VSYNC and display-enable transitions with independently selected
+polarities. Valid-region cropping, line/frame wrap and batched clock advances
+have real effects. Zero clock edges preserve state; invalid configuration or
+clock overflow fails before mutation. Disabled electrical outputs, wrapping
+sync intervals and unsupported controls are rejected rather than inferred.
+
+The board must establish the active mode and counter origin. This API does
+not choose a reset phase, reset an encoder to align clocks, perform live HLE
+switching, activate programmed guest writes or acknowledge FD6806A0. It is an
+isolated component and **is not yet connected to the GPU/title route**. The
+existing programmable/active-bank and clock-source guards must remain until
+their actual effects are qualified. FP_CRTC upstream triggers, pixel scaling,
+serialization and physical pixel-clock selection/division are separate work.
+
+Nouveau v6.12 `dfp.c` and `nvreg.h`, plus pinned envytools, corroborate count
+encoding and polarity. The original boot FP profile is one exercised input;
+it is not a hardware golden. An independent dense pixel-by-pixel traversal
+checks every sparse output edge across three profiles and all eight polarity
+combinations (24 lifetimes), including the reached centered-output profile,
+nonzero initial phase, clipped valid regions, immediate boundaries, overflow
+and rejected configurations preserving prior state. This validates the component
+algorithm under that stated model, not the unknown NV2A activation event.
+
+Validation: `nv2a_fp_timing`, `nv2a` and `smbus_av` pass 3/3 in 0.33s. The final
+test-only extension exercising the centered profile passes in 0.05s. Existing
+software-suite OpenGL skips remain. The title EXE and reference DLL hashes are
+unchanged from the encoder-timing checkpoint above; no redundant title run or
+new original-mode/attract success is claimed for this unconnected component.
+
+Next remains active FP control/clock routing and the first encoder sync phase,
+with the FD6806A0 question tracked in `.111`. Hardware authorization is still
+pending; no console contact or additional family closure occurred. **4/9**.
