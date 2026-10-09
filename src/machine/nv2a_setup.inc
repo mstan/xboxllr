@@ -74,6 +74,14 @@ bool Nv2a::ram_tiles_active() const {
     return false;
 }
 
+bool Nv2a::ram_tile_overlap(uint32_t address,size_t bytes) const {
+    if(!bytes)return false;
+    for(const auto& tile:pgraph_tiles_.tiles)
+        if((tile[0]&1) && address<=tile[1] &&
+           uint64_t(address)+bytes>(tile[0]&0x03ffc000u))return true;
+    return false;
+}
+
 bool Nv2a::ram_tile_configuration() {
     for (unsigned i=0;i<8;++i) {
         const auto& tile=pgraph_tiles_.tiles[i];

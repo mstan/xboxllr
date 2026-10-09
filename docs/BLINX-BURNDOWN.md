@@ -81,6 +81,14 @@ closes the standalone callback-delivery gap, not the original title startup or
 full GPU-family gate; no production changes or fresh attract run are claimed.
 See the [GPU evidence and remaining limits](../pilots/native-title/GPU-COMPLETION-LLE.md#original-interrupt-driven-callback-qualification---2026-10-09).
 
+The maintained LLE renderer now connects bounded 3D color/depth surfaces to the
+existing tile/compression memory path. Eight configurations check actual pixels,
+depth, masks, 696 visibility samples and physical FIFO/report DMA; unsupported
+tiled texture/vertex inputs still stop. A newly reproduced failed-fetch bug is
+fixed: later reports cannot publish the old sample count as completed work.
+The actual LLE Blinx launch still stops before frames at encoder startup state;
+this does not close the GPU family. [Latest evidence](../pilots/native-title/GPU-COMPLETION-LLE.md#tiled-3d-surface-clients---2026-10-09).
+
 | Family gate (ordered after calendar slice) | Existing evidence to retain | Required LLE route and qualification | Reference to use first |
 | --- | --- | --- | --- |
 | 1. Controller input and interruption | Host conversion/ABI tests; previous real attract interruption/menu-return/reentry; owner keyboard observation | Independently qualify connected/disconnected reports, packet/button semantics and lifetimes; repeat controlled Start interruption and idle reentry on the final hardened build. Physical-controller details beyond the exercised contract remain separate. | Original XAPI/XID behavior and xemu; actual controller/hardware capture when an input-report question cannot be settled independently |

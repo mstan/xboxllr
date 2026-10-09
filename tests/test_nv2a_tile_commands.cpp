@@ -2,6 +2,8 @@
 // BlitBeyondWidth sequence. No tile-layout helper is called by this fixture.
 // Source procedure: nxdk_pgraph_tests (MIT); hardware expectations: CC0
 // Xbox 1.0 golden. Revisions/notices are in THIRD_PARTY_ATTRIBUTION.md.
+// The separate 3D cases use independently authored screen-space expectations;
+// they compose the existing raster and tile floors, not a new hardware capture.
 #include "machine/nv2a.hpp"
 #include <algorithm>
 #include <cstdio>
@@ -10,6 +12,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <utility>
 
 static int failures;
 #define CHECK(c) do { if(!(c)){std::printf("FAIL line %d: %s\n",__LINE__,#c);++failures;} } while(0)
@@ -18,10 +21,10 @@ struct TileFixture {
     static constexpr uint32_t size=640*480*4;
     std::vector<uint8_t> ram=std::vector<uint8_t>(8*1024*1024,0xcc);
     std::string failure;
-    uint64_t writes=0;
+    uint64_t writes=0,direct_surface_calls=0;
     uint32_t cursor=0,deny_begin=0,deny_end=0;
     std::unique_ptr<xlle::Nv2a> gpu;
-    TileFixture() : gpu(std::make_unique<xlle::Nv2a>([this](const std::string& why){failure=why;})) {
+    TileFixture(bool direct=false) : gpu(std::make_unique<xlle::Nv2a>([this](const std::string& why){if(failure.empty())failure=why;})) {
         gpu->set_mem_access(
             [this](uint32_t a,void* p,size_t n) {
                 if(uint64_t(a)+n>ram.size())return false;
@@ -30,7 +33,12 @@ struct TileFixture {
             [this](uint32_t a,const void* p,size_t n) {
                 if(uint64_t(a)+n>ram.size() || (a<deny_end && uint64_t(a)+n>deny_begin))return false;
                 std::memcpy(ram.data()+a,p,n);writes+=n;return true;
-            });
+            },direct ? std::function<uint8_t*(uint32_t,size_t)>([this](uint32_t a,size_t n) {
+                if(uint64_t(a)+n>ram.size())return static_cast<uint8_t*>(nullptr);
+                if((a<target+size && uint64_t(a)+n>target) ||
+                   (a<0x680000+size && uint64_t(a)+n>0x680000))++direct_surface_calls;
+                return ram.data()+a;
+            }) : std::function<uint8_t*(uint32_t,size_t)>{});
         for(uint32_t y=0;y<512;++y)for(uint32_t x=0;x<1024;++x)
             put(source+(y*1024+x)*4,0xff000000u|((255-y*255/512)<<16)|((x*255/1024)<<8)|(y*255/512));
         const uint32_t setup[][2]={
@@ -134,9 +142,10 @@ static void boundaries() {
 
     TileFixture unsupported;
     unsupported.tile(0,f.target,f.size,2560,1); // color-tile enable is bit 0
+    unsupported.write(0x100248,1280); // an inconsistent bank cannot begin 3D
     unsupported.write(0x700200,0x97);
     unsupported.emit(0,1);unsupported.emit(0x17fc,5);unsupported.kick();
-    CHECK(unsupported.failure.find("3D primitive")!=std::string::npos);
+    CHECK(unsupported.failure.find("banks disagree")!=std::string::npos);
     CHECK(!unsupported.writes);
 }
 
@@ -281,8 +290,108 @@ static void compressed_depth() {
     if(!f.failure.empty())std::printf("compression failure: %s\n",f.failure.c_str());
 }
 
+static void tiled_triangles() {
+    constexpr uint32_t depth=0x680000,report=0x9000;
+    for(unsigned bank=0;bank<2;++bank)for(bool direct:{false,true})for(bool compressed:{false,true}) {
+        TileFixture f(direct);
+        f.tile(0,f.target,f.size,2560,1|(bank<<1));
+        f.tile(1,depth,f.size,2560,3);
+        // PFIFO and reports remain physical even when their storage addresses
+        // lie in a tile range. Only surface clients select translated access.
+        f.tile(2,0,0xc000,512,1);
+        if(compressed)f.compression(1,0x84000000);
+        f.zclear(depth,0xffffffaa,3,0,639,0,479,compressed);
+        f.emit(0x194,3);f.emit(0x1a8,3);f.emit(0x210,f.target);
+        f.emit(0x1d90,0xff102030);f.emit(0x1d94,0xf0);f.kick();
+        CHECK(f.failure.empty());
+        for(unsigned i=0;i<16;++i)f.emit(0x0680+i*4,(i%5)==0?0x3f800000:0);
+        const uint32_t state[][2]={
+            {0x0294,0x00020001},{0x1e94,0},{0x0200,640u<<16},{0x0204,480u<<16},
+            {0x0290,0x00100001},{0x02c0,639u<<16},{0x02e0,479u<<16},
+            {0x033c,0x207},{0x0350,0x8006},{0x0354,0x201},{0x0358,0x01010101},
+            {0x035c,1},{0x030c,1},{0x037c,0x1d01},{0x038c,0x1b02},{0x0390,0x1b02},
+            {0x0394,0},{0x0398,0x4b7fffff},{0x039c,0x405},{0x03a0,0x900},{0x1d78,1},
+            {0x1e78,0x00210000},{0x1e60,1},{0x0ac0,0x04200000},{0x0260,0x14200000},
+            {0x1e40,0xc00},{0x0aa0,0xc00},{0x0288,0xc},{0x028c,0x1c80},
+            {0x17c8,1},{0x17cc,1}};
+        for(const auto& pair:state)f.emit(pair[0],pair[1]);
+        auto bits=[](float v){uint32_t n;std::memcpy(&n,&v,4);return n;};
+        auto quad=[&](float left,float top,float right,float bottom,float z,uint32_t color) {
+            f.emit(0x17fc,5);
+            for(auto xy:{std::pair{left,top},std::pair{right,top},std::pair{left,bottom},
+                         std::pair{right,top},std::pair{right,bottom},std::pair{left,bottom}}) {
+                f.emit(0x1518,bits(xy.first));f.emit(0x151c,bits(xy.second));f.emit(0x1520,bits(z));
+                // SET_VERTEX_DATA4UB packs R,G,B,A from low to high byte;
+                // the expected framebuffer DWORD is A8R8G8B8.
+                const uint32_t rgba=(color&0xff00ff00u)|((color&255)<<16)|((color>>16)&255);
+                f.emit(0x194c,rgba);f.emit(0x1524,0x3f800000);
+            }
+            f.emit(0x17fc,0);
+        };
+        f.put(report+12,0xffffffff);f.write(0x400720,0);
+        quad(60,14,84,34,50,0xff204060);
+        quad(70,14,94,34,60,0xff80a0c0);
+        f.emit(0x0358,0x00010000);f.emit(0x035c,0);
+        quad(64,16,68,20,40,0xffeeffff);
+        f.emit(0x17d0,0x01000000|report);f.kick();
+        CHECK(f.get(report+12)==0xffffffff);
+        f.write(0x400720,1);
+        if(!f.failure.empty())std::printf("tiled triangle failure: %s\n",f.failure.c_str());
+        CHECK(f.failure.empty() && f.get(report+12)==0 && f.get(report+8)==696);
+        CHECK(f.direct_surface_calls==0);
+        // Independent screen-space expectations, no tile-layout helper or
+        // rasterizer is used to compute the expected image or visibility.
+        f.blit(f.target,f.display,2560,2560,640,480);
+        bool colors=true;
+        for(unsigned y=0;y<480;++y)for(unsigned x=0;x<640;++x) {
+            uint32_t expected=0xff102030;
+            if(y>=14 && y<34 && x>=60 && x<94)expected=x<84?0xff204060:0xff80a0c0;
+            if(y>=16 && y<20 && x>=64 && x<68)expected=0xffee4060;
+            const uint32_t observed=f.get(f.display+(y*640+x)*4);
+            if(colors && observed!=expected)
+                std::printf("tiled color at %u,%u: %08x expected %08x\n",x,y,observed,expected);
+            colors &= observed==expected;
+        }
+        CHECK(colors);
+        f.blit(depth,f.display,2560,2560,640,480);
+        bool depths=true;
+        for(unsigned y=0;y<480;++y)for(unsigned x=0;x<640;++x) {
+            uint32_t expected=0xffffffaa;
+            if(y>=14 && y<34 && x>=60 && x<94)expected=((x<84?50u:60u)<<8)|0xaa;
+            depths &= f.get(f.display+(y*640+x)*4)==expected;
+        }
+        CHECK(depths && f.failure.empty());
+        CHECK(f.get(f.target+f.size)==0xcccccccc && f.get(depth+f.size)==0xcccccccc);
+        if(bank==0 && !direct) {
+            const auto writes=f.writes;
+            f.emit(0,4);
+            if(!compressed) {
+                // First byte outside the tile, remaining attribute inside:
+                // reject the whole fetch before a raw pointer can bypass it.
+                f.emit(0x019c,3);f.emit(0x1720,f.target-4);f.emit(0x1760,0x00000c32);
+                f.emit(0x17fc,5);f.emit(0x1800,0x00010000);f.emit(0x1808,2);f.emit(0x17fc,0);
+                f.kick();CHECK(f.failure.find("tiled vertex fetch")!=std::string::npos);
+            } else {
+                f.emit(0x0188,3);f.emit(0x1b00,f.target+f.size-8);
+                f.emit(0x1b04,0x0001122a);f.emit(0x1b08,0x00030303);
+                f.emit(0x1b0c,0x4003ffc0);f.emit(0x1b10,0x00100000);
+                f.emit(0x1b14,0x01010000);f.emit(0x1b1c,0x00040002);
+                f.emit(0x1e70,1);f.emit(0x0ac0,0x08200000);
+                quad(60,14,84,34,10,0xffffffff);f.kick();
+                if(f.failure.find("tiled texture fetch")==std::string::npos)
+                    std::printf("texture rejection: %s\n",f.failure.c_str());
+                CHECK(f.failure.find("tiled texture fetch")!=std::string::npos);
+            }
+            CHECK(f.writes==writes && f.get(report+8)==696);
+            f.put(report+12,0xffffffff);
+            f.emit(0x17d0,0x01000000|report);f.kick();
+            CHECK(f.get(report+12)==0xffffffff && f.writes==writes);
+        }
+    }
+}
+
 int main(int argc,char** argv) {
-    const auto output=hardware_sequence();boundaries();clear_and_scanout();compressed_depth();
+    const auto output=hardware_sequence();boundaries();clear_and_scanout();compressed_depth();tiled_triangles();
     if(argc==3 && !std::strcmp(argv[1],"--hardware-rgba")) {
         std::ofstream file(argv[2],std::ios::binary);
         file.write(reinterpret_cast<const char*>(output.data()),output.size());CHECK(bool(file));

@@ -1986,6 +1986,9 @@ bool Nv2a::fetch_vertex_attribute(uint32_t slot, uint32_t index) {
         return false;
     }
 
+    if(ram_tile_overlap(first_address,static_cast<size_t>(element_bytes))) {
+        fault_("NV2A tiled vertex fetch is not qualified");return false;
+    }
     std::array<uint8_t, 16> data{};
     const uint8_t* source = nullptr;
     if (mem_direct_) {
@@ -3504,10 +3507,14 @@ bool Nv2a::execute_draw_spans(DrawJob& job) {
 }
 
 bool Nv2a::submit_vertex_batch() {
-    if(ram_tiles_active()) {
-        fault_("NV2A tiled 3D draw clients are not connected");return false;
+    if(!ram_tile_configuration())return false;
+    if(ram_tiles_active() && renderer_) {
+        fault_("NV2A tiled 3D requires the software RAM path");return false;
     }
 #if XLLE_RENDERER_HLE
+    if(ram_tiles_active()) {
+        fault_("NV2A HLE tiled 3D is not qualified");return false;
+    }
     return submit_hle_vertex_batch();
 #else
     // NV2A_VERTEX: attribute fetch, vertex-shader/fixed-function transform and batch
@@ -6326,14 +6333,17 @@ bool Nv2a::rasterize_witnessed_batch(DrawJob& job, bool& executed) {
     // fallback opens NV2A_RASTER_GENERIC_SW and is carved out of this bucket.
     perf_excl::Scope region(perf_excl::kNv2aRasterWitnessed);
     executed = false;
-    if (zpass_enabled_) {
+    if (zpass_enabled_ || ram_tiles_active()) {
         // Keep the reference small: use the existing software fragment tests,
         // after draining older jobs. Count actual samples, never draw bounds.
         draw_order_fence();
         bool ok = rasterize_generic_combiner_batch(job, executed);
         if (!ok || !executed) {
-            zpass_valid_ = false;
-            fault_("NV2A visibility reference encountered an unsupported draw");
+            if(zpass_enabled_)zpass_valid_ = false;
+            // Preserve an explicit DMA/format failure from the generic path.
+            // Only a declined draw needs a new unsupported-work diagnostic.
+            if(ok)fault_(ram_tiles_active() ? "NV2A tiled 3D encountered an unsupported draw"
+                                           : "NV2A visibility reference encountered an unsupported draw");
             return false;
         }
         return true;
@@ -10337,6 +10347,22 @@ Nv2a::GenericShaderCensusRow* Nv2a::generic_shader_census_row(
 // are exactly the two things gated behind GenericSkipReason so a wrong guess there
 // cannot silently mis-render — it skips instead.
 bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
+    // Tiled surfaces use the existing bounded memory-controller path. This
+    // local adapter cannot affect physical PFIFO/report DMA or CPU backing.
+    // No raw surface pointer, resident renderer or queued worker may bypass
+    // translation. Tile reconfiguration is guarded while work is pending.
+    const bool tiled_memory=ram_tiles_active();
+    const std::function<bool(uint32_t,void*,size_t)> tiled_read=
+        [this](uint32_t address,void* data,size_t bytes) {
+            return ram_tile_transfer(address,data,bytes,false);
+        };
+    const std::function<bool(uint32_t,const void*,size_t)> tiled_write=
+        [this](uint32_t address,const void* data,size_t bytes) {
+            return ram_tile_transfer(address,const_cast<void*>(data),bytes,true);
+        };
+    const auto& mem_read_=tiled_memory ? tiled_read : this->mem_read_;
+    const auto& mem_write_=tiled_memory ? tiled_write : this->mem_write_;
+    const auto mem_direct_=tiled_memory ? decltype(this->mem_direct_){} : this->mem_direct_;
     // NV2A_RASTER_GENERIC_SW: generic-combiner decode and software raster. Texture setup,
     // GL submission and resident-surface resolves each open their own region below.
     perf_excl::Scope region(perf_excl::kNv2aRasterGenericSw);
@@ -11323,6 +11349,9 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                 {
                     perf::ScopedAdd timer(perf::g_ns_generic_texture_dma_read,
                                           perf::g_calls_generic_texture_dma_read);
+                    if(tiled_memory && ram_tile_overlap(address,read_target->size())) {
+                        fault_("NV2A tiled texture fetch is not qualified");return false;
+                    }
                     if (!mem_read_ ||
                         !mem_read_(address, read_target->data(), read_target->size())) {
                         fault_("NV2A generic-combiner texture DMA read failed");
@@ -11469,6 +11498,9 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             {
                 perf::ScopedAdd timer(perf::g_ns_generic_texture_dma_read,
                                       perf::g_calls_generic_texture_dma_read);
+                if(tiled_memory && ram_tile_overlap(address,ts.data.size())) {
+                    fault_("NV2A tiled texture fetch is not qualified");return false;
+                }
                 if (!mem_read_ || !mem_read_(address, ts.data.data(), ts.data.size())) {
                     fault_("NV2A generic-combiner texture DMA read failed");
                     return false;
@@ -16449,7 +16481,11 @@ void Nv2a::dispatch_method(PushMethod push) {
     }
     if (object_class_[subchannel] != 0x97) return;
     if(ram_tiles_active() && method==0x17fc && parameter) {
-        fault_("NV2A tiled 3D primitive clients are not connected");return;
+        if(!ram_tile_configuration())return;
+        if(renderer_) {fault_("NV2A tiled 3D requires the software RAM path");return;}
+#if XLLE_RENDERER_HLE
+        fault_("NV2A HLE tiled 3D is not qualified");return;
+#endif
     }
     dispatch_micro::mark(dispatch_micro::kDmClass);
 
@@ -17221,8 +17257,11 @@ void Nv2a::dispatch_method(PushMethod push) {
     case kNv097M17FC: {
         if (parameter == 0) {
             if (primitive_mode_ != 0 &&
-                decode_inline_array()) {
-                submit_vertex_batch();
+                (!decode_inline_array() || !submit_vertex_batch())) {
+                // A rejected fetch/transform is not completed geometry. Do
+                // not publish a prior count as a successful visibility result
+                // if a caller continues after the explicit device fault.
+                zpass_valid_ = false;
             }
             primitive_mode_ = 0;
             vertex_indices_.clear();

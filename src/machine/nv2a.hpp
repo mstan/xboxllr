@@ -2608,6 +2608,7 @@ private:
     static uint32_t* ram_config_word(RamTileConfig& config, uint32_t offset);
     bool ram_config_write(RamTileConfig& config, uint32_t offset, uint32_t value);
     bool ram_tiles_active() const;
+    bool ram_tile_overlap(uint32_t address, size_t bytes) const;
     bool ram_tile_configuration();
     int ram_tile_at(uint32_t address) const;
     bool ram_tile_transfer(uint32_t address, void* data, size_t bytes, bool write);

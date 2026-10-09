@@ -977,10 +977,14 @@ bounded Xbox geometry and adds checked configuration/overflow handling. The
 full MIT permission and disclaimer are retained in the source header.
 `hwtest/nv10_tile.cc` and its memory-controller field descriptions also inform
 qualification. This is distinct from the earlier reference-only consultations.
-The component now drives the software image-blit, clear and scanout memory
+The component now drives the software image-blit, clear, scanout and bounded
+3D color/depth surface memory
 paths. It also adapts the donor's NV20 partition/tag address calculation; that
 addition has donor-format evidence but is not qualified by the uncompressed
-Xbox blit golden. Tiled 3D draw/texture/CPU-aperture clients remain guarded.
+Xbox blit golden. Tiled texture/vertex fetch and CPU-aperture clients remain
+guarded. The 3D integration and rectangle/depth/visibility tests are authored
+here using the existing rasterizer; they do not add a donor body or extend the
+public capture into a new 3D hardware qualification.
 
 Hardware expectations come from Erik Abair and contributors'
 [nxdk_pgraph_tests_golden_results](https://github.com/abaire/nxdk_pgraph_tests_golden_results/tree/06b041d6a50c060b4974d93617405f86a03a0b8f),

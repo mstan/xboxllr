@@ -1264,3 +1264,65 @@ new original-mode/attract success is claimed for this unconnected component.
 Next remains active FP control/clock routing and the first encoder sync phase,
 with the FD6806A0 question tracked in `.111`. Hardware authorization is still
 pending; no console contact or additional family closure occurred. **4/9**.
+
+## Tiled 3D surface clients - 2026-10-09
+
+The maintained software renderer now uses `ram_tile_transfer` for 3D color
+and depth surfaces. This reuses the attributed envytools layout and existing
+Z24S8 decoding/tag lifetime; it does not invent another tile mapper or rasterizer.
+Tiled draws select the existing strict generic software raster path, with
+translated reads/writes and no raw surface pointers, resident host renderer or
+worker queue. Invalid tile-bank configuration and unsupported draws remain
+explicit failures. Texture and vertex reads that touch any tile, including a
+span crossing into one, remain guarded until those client contracts are qualified.
+Physical PFIFO fetches, report DMA and CPU backing retain their own addresses.
+
+Eight cases combine both color-bank selectors, available/unavailable direct RAM
+pointers, and uncompressed/previously compressed Z24S8 depth. Real PFIFO commands
+clear, draw three overlapping rectangles, publish visibility, and blit both
+planes out for inspection. Independent screen-space formulas check every pixel
+and depth DWORD in eight 640x480 color/depth pairs (**4,915,200 values**), including
+tile-row/partition boundaries, occlusion, red-only masks, disabled depth writes,
+preserved stencil and allocation guards. All cases count **696** actual passing
+samples. An intentionally active tile contains the FIFO and report storage;
+their bytes still travel physically. A direct-pointer observer confirms no
+tiled surface bypass. Existing compressed blocks are read correctly and writes
+expand them with valid tag updates; this does not qualify hardware ZROP
+compression decisions or compressed physical-byte equivalence.
+
+The failure cases exposed a separate completion bug: END discarded a failed
+vertex fetch, allowing GET_REPORT to publish the previous count. A recorded
+negative test fails on that behavior. END now invalidates visibility after
+failed inline decoding or batch submission; both rejected vertex and texture
+cases leave the report sentinel and RAM write count untouched. Generic-path
+errors retain their original diagnostic instead of being overwritten by a
+second unsupported-draw message.
+
+Validation on the final device library:
+
+- `nv2a_tile_layout`, `nv2a_tile_commands`, `nv2a_zeta_compression`, and `nv2a`:
+  **4/4 pass in 0.44s**. Existing software-build OpenGL skips remain explicit.
+- Pinned Xbox blit golden: **140,800 pixels match exactly**, with 139,568
+  mismatches under the linear negative control. This rechecks the existing 2D
+  hardware evidence; it is not a newly captured 3D reference.
+- Original query/trap/fence fixture: all nine cases across three lifetimes pass.
+  Original interrupt/callback fixture: all 228 callbacks across three lifetimes
+  pass. Their result files are `gpu-completion-tiled-surfaces.aot-private.json`
+  and `gpu-callback-tiled-surfaces.aot-private.json` under `build/blinx/`.
+- Shared GPU transport, original AV guard, encoder timing and native graphics
+  ABI/scheduler: **5/5 pass in 3.34s**.
+- Actual selected LLE Blinx launch: **9.921s**, explicit exit 2 at
+  `CX25871 standard readback requires established EN_REG_RD state`, before
+  frames. No timeout, new title-rendering result or full native attract run is
+  claimed. Evidence: `build/blinx/gpu-lle-title-tiled-surfaces/run.aot-private.json`
+  and `build/blinx/run-gpu-lle-title-tiled-surfaces.log`.
+
+Library SHA-256:
+`099401b86303ff6947eeb496e856c2bd820d6e132be59f9881969d66f622f726`.
+Title executable remains
+`43f3dbd21d2eef1ccd027e36eee47cdb5358c4be8550b44ee652d402aef75f32`.
+The independent analytic cases qualify the bounded client integration, not
+every NV2A format or a complete scene. Original startup/FP handshake, object
+context transfer, tiled texture/vertex/CPU-aperture clients and title resource
+lifetime remain open. No hardware contact or new external implementation body
+was added. Stable Blinx pin remains `439a45b`; family count remains **4/9**.
