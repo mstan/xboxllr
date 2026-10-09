@@ -51,6 +51,62 @@ Reference library SHA-256:
 The private result retains function hashes, MMIO and all lifetimes. The NV2A
 suite passes; SDL-dependent OpenGL cases explicitly skip in this software build.
 
+## Original interrupt-driven callback qualification - 2026-10-09
+
+`tools/native_gpu_callback_reference.py` now closes the component fixture's
+previous callback-delivery gap. It reuses the qualified display reference's
+PIC/original-kernel transport and executes original NTSC `InsertCallback`, kick,
+interrupt gate, ISR, DPC, software-method handler and IRET over maintained NV2A.
+All original callees run; an authored cdecl consumer records the context,
+preceding semaphore DMA value, actual kernel IRQL and PGRAPH puller state.
+It neither acknowledges interrupts nor substitutes completion.
+
+Four batches pass in each of three independent device/kernel lifetimes:
+
+| Case | Observed original behavior |
+| --- | --- |
+| PGRAPH puller held | Neither queued semaphore nor callback completes; releasing the puller raises the real interrupt and delivers both callback types |
+| Device interrupt masked | The real trap stays pending with no callback delivery; unmasking permits original dispatch |
+| Original disconnect/reconnect | Disconnection masks PIC delivery without completing the pending callback; reconnecting the original interrupt object permits delivery |
+| Mixed 70-callback burst | Both types preserve FIFO context order, each callback sees its preceding semaphore value, and later DMA remains held until its callback returns |
+
+Across these batches, **228 actual callbacks** pass (76 per lifetime), including
+zero and high-bit DWORD contexts. The original callback executes at IRQL 2
+with PGRAPH held, and original return restores all seven interrupted general
+registers, ESP, EFLAGS and IRQL. Repeated kick/kernel calls do not replay
+callbacks. Original interrupt disconnect and allocation frees succeed; all
+nine original `MmQueryStatistics` words return exactly to their initial values.
+Recorded entry counters prove 76 InsertCallback/graph/software-method executions
+and four original ISR/DPC executions per lifetime.
+
+Private result: `build/blinx/gpu-callback-original.aot-private.json`, plus
+`build/blinx/gpu-callback-original.log`; the result retains original routine
+hashes, snapshot/XBE identities, MMIO and individual callback records. DLL SHA-256
+is `014ba56ff7de60ee8f7639e9e88b706e92ef877ac303c0baf663d37ba070c9e5`.
+
+```powershell
+$env:PYTHONPATH='build/reference-python;tools'
+py -3 tools/native_gpu_callback_reference.py --xbe <owned-default.xbe> --snapshot build/blinx/io-boot-18m.ram.bin --library build/visibility-lle/libxlle_nv2a_reference.dll --functions build/blinx/disasm/functions.json --output build/blinx/gpu-callback-original.aot-private.json
+ctest --test-dir build/blinx/host-gpu-lle -C Release -R '^pilot_graphics_(abi|scheduler)$' --output-on-failure
+```
+
+The existing HLE tests pass **2/2 in 3.17s**, retaining actual GPU WRITE
+completion/pixels, 70 FIFO callbacks, cdecl context, IRQL 2, reentrant queries,
+ordering barriers, fences and teardown. No accelerated implementation change
+was required by this comparison. HLE does not reproduce PIC/MMIO mechanics.
+Test executable SHA-256:
+`dfee8abfc18167b1e427547a68d9e69e654a67d5af4fd3c8ee027c8f9e43882c`.
+
+Scope remains bounded: the miniport is explicitly preowned fixture state,
+not successful original device initialization. These tests do not qualify
+title startup, arbitrary callback bodies, refill/teardown while work is pending,
+or READ-versus-WRITE behavior under asynchronous raster work. The local raster
+model completes work synchronously; semaphore ordering is not a silicon latency
+measurement. No new console access, xemu runtime comparison, original binary
+redistribution or external implementation import occurred. Production source
+and binaries are unchanged, so no redundant full attract run is claimed.
+The family remains open and the burndown stays **4/9 qualified**.
+
 ## Donor decision and remaining work
 
 Phobos `63f18f0334fbd8c00313c4bb565accf00627a4fd` remains the native strategy
@@ -60,8 +116,9 @@ but describes skipped geometry; it cannot establish this correctness floor.
 Reuse our maintained NV2A and original command behavior. No donor body was copied.
 
 Finish original device initialization through the selected title route, then
-qualify actual callback dispatch and resource ownership. Visibility consumes
-real rendered work, so this now has an explicit dependency on the broader
+qualify callback dispatch and resource ownership in actual Blinx. The bounded
+original interrupt/callback component above does not replace that run.
+Visibility consumes real rendered work, so this now has an explicit dependency on the broader
 graphics family. The whole original renderer runs once; native query counts
 cannot be relabeled as LLE evidence.
 

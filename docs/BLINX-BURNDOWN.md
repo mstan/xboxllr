@@ -72,6 +72,15 @@ deployment/execution awaits explicit current-task authorization. Preparation
 does not qualify the transaction or close a family. Digital timing/control
 implementation can continue offline; details remain in the GPU evidence record.
 
+GPU callback delivery has now advanced independently of startup: original
+InsertCallback/kick, PIC/kernel interrupt gate, ISR/DPC and IRET pass 228 actual
+callbacks across three lifetimes. Held work, interrupt masking, original
+disconnect/reconnect, 70-callback bursts, context/order/IRQL and final allocation
+statistics are checked. Matching HLE graphics/scheduler checks pass 2/2. This
+closes the standalone callback-delivery gap, not the original title startup or
+full GPU-family gate; no production changes or fresh attract run are claimed.
+See the [GPU evidence and remaining limits](../pilots/native-title/GPU-COMPLETION-LLE.md#original-interrupt-driven-callback-qualification---2026-10-09).
+
 | Family gate (ordered after calendar slice) | Existing evidence to retain | Required LLE route and qualification | Reference to use first |
 | --- | --- | --- | --- |
 | 1. Controller input and interruption | Host conversion/ABI tests; previous real attract interruption/menu-return/reentry; owner keyboard observation | Independently qualify connected/disconnected reports, packet/button semantics and lifetimes; repeat controlled Start interruption and idle reentry on the final hardened build. Physical-controller details beyond the exercised contract remain separate. | Original XAPI/XID behavior and xemu; actual controller/hardware capture when an input-report question cannot be settled independently |
