@@ -12,6 +12,8 @@
 #include <vector>
 
 #include "machine/nv2a.hpp"
+#include "machine/pci.hpp"
+#include "machine/mcpx_field.hpp"
 #include "machine/perf_accounting.hpp"
 #include "machine/perf_excl.hpp"
 #include "host/nv2a_opengl_renderer.hpp"
@@ -1001,6 +1003,7 @@ static void test_vsh_compile_toggle_rebuilds_cached_parse() {
 
 int main() {
     test_gpu_initialization_controls();
+    test_gpu_platform_bus();
     test_ptimer_reference();
     {
         std::string failure;

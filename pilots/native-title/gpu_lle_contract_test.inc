@@ -22,6 +22,23 @@ static void test_gpu_lle_transport(void)
         pilot_cpu_out8(0xa1,(uint8_t)(mask^0x80));
         CHECK(pilot_cpu_in8(0xa1)==(uint8_t)(mask^0x80));
         pilot_cpu_out8(0xa1,mask);CHECK(pilot_cpu_in8(0xa1)==mask);
+        pilot_cpu_out8(0x80c0,1);
+        CHECK((pilot_cpu_in8(0x80c0)&0x1f)==1);
+        /* Actual original HalReadWritePCISpace, including its CF8/CFC IN/OUT
+         * and partial-buffer handling. Both config routes own the same state. */
+        uint32_t config[]={1,0,0,0x15010,4,0};
+        MEM32(0x15010)=0;MEM32(0x15014)=0xaabbccdd;
+        call_kernel(46,config,6);
+        CHECK(MEM32(0x15010)==0x02a010de && MEM32(0x15014)==0xaabbccdd);
+        config[2]=0x4c;MEM32(0x15010)=0x1f000000;config[5]=1;
+        call_kernel(46,config,6);CHECK(gpu_test_read(0x184c)==0x1f000000);
+        gpu_test_write(0x184c,0x07000000);
+        config[2]=0x4f;config[4]=1;config[5]=0;MEM32(0x15010)=0xabcdef00;
+        call_kernel(46,config,6);CHECK(MEM32(0x15010)==0xabcdef07);
+        config[2]=0x0d;config[5]=1;MEM8(0x15010)=0xf8;
+        call_kernel(46,config,6);CHECK(gpu_test_read(0x180c)==0xf800);
+        config[0]=2;config[2]=0;config[4]=4;config[5]=0;
+        call_kernel(46,config,6);CHECK(MEM32(0x15010)==0xffffffff);
         gpu_test_write(0x1804,4);CHECK(gpu_test_read(0x1804)==4);
         uint32_t base=physical_allocate(8192,0,0x03ffffff,4096,PAGE_READWRITE);
         CHECK(base);uint32_t pa=base&0x03ffffff;
@@ -51,6 +68,7 @@ static void test_gpu_lle_transport(void)
         /* This fixture has consumed its entire FIFO, no connected ISR and no
          * enabled interrupt. It does not claim general title teardown proof. */
         gpu_lle.destroy(gpu_lle.device);gpu_lle.device=NULL;
+        pilot_io_device_port_bind(0,0,NULL);
         CHECK(FreeLibrary(gpu_lle.library));gpu_lle.library=NULL;
     }
     fprintf(stderr,"PASS: original GPU reservation/query/repeat/page release; compiled MMIO, owned DMA, held/released semaphore, protection/release rejection, three transport lifetimes\n");

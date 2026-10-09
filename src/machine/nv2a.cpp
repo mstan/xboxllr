@@ -988,6 +988,7 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
             case 0x808: return kPciNv2;  // NV_PBUS_PCI_NV_2
             case 0x80c: return pbus_latency_;
             case 0x830: return pbus_rom_;
+            case 0x84c: return pbus_agp_command_;
             default: break;
         }
     } else if (blk->off == 0x002000) {  // PFIFO
@@ -1090,6 +1091,32 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
     return 0;
 }
 
+uint32_t Nv2a::pci_read(uint8_t reg, int size) {
+    if ((size != 1 && size != 2 && size != 4) || (reg & 3) + size > 4) {
+        fault_("NV2A invalid PCI config read width"); return 0;
+    }
+    uint32_t value = mmio_read(kBase + 0x1800 + (reg & ~3u), 4);
+    return (value >> ((reg & 3) * 8)) &
+           (size == 4 ? 0xffffffffu : ((1u << (size * 8)) - 1));
+}
+
+void Nv2a::pci_write(uint8_t reg, int size, uint32_t value) {
+    if ((size != 1 && size != 2 && size != 4) || (reg & 3) + size > 4) {
+        fault_("NV2A invalid PCI config write width"); return;
+    }
+    uint32_t aligned = reg & ~3u;
+    // Vendor/device and class/revision are read-only PCI header fields.
+    if (aligned == 0 || aligned == 8) return;
+    if (aligned != 4 && aligned != 12 && aligned != 0x30 && aligned != 0x4c) {
+        fault_("NV2A unsupported PCI config write"); return;
+    }
+    uint32_t mask = size == 4 ? 0xffffffffu : ((1u << (size * 8)) - 1);
+    uint32_t shift = (reg & 3) * 8;
+    uint32_t previous = pci_read(static_cast<uint8_t>(aligned), 4);
+    uint32_t merged = (previous & ~(mask << shift)) | ((value & mask) << shift);
+    mmio_write(kBase + 0x1800 + aligned, 4, merged);
+}
+
 void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
     uint32_t rel = addr - kBase;
     uint32_t bo = 0;
@@ -1124,6 +1151,16 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
             fault_("NV2A ROM decode needs a ROM bus provider"); return;
         }
         pbus_rom_ = value; return;
+    }
+    if (blk->off == 0x001000 && bo == 0x84c) {
+        // AGP RQ depth is the permitted number of outstanding requests minus
+        // one. Our synchronous unified-RAM bus has at most one request, so
+        // every encoded depth is respected. Link/rate/SBA changes need an
+        // external AGP provider and are not modeled by storing their bits.
+        if (size != 4 || (value & 0x00ffffffu)) {
+            fault_("NV2A unsupported AGP link control"); return;
+        }
+        pbus_agp_command_ = value; return;
     }
     if (blk->off == 0x000000 && bo == 0x200) {
         const uint32_t changed = value ^ pmc_enable_;
@@ -1179,6 +1216,17 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
             case 0x210:
                 if (value > 0xffffu) { fault_("NV2A unqualified PTIMER multiplier"); return; }
                 ptimer_mul_ = value; ptimer_fraction_ = 0; return;
+            case 0x400:
+                // Counter writes rebase time, not the source clock or ratio.
+                // TIME_LOW reserves bits 0..4; the other half is unchanged.
+                ptimer_ticks_ = (ptimer_ticks_ & ~((uint64_t{1} << 27) - 1)) | (value >> 5);
+                if (ptimer_alarm_programmed_ && (value & ~31u) == ptimer_alarm_)
+                    ptimer_pending_ |= 1;
+                update_irq(); return;
+            case 0x410:
+                ptimer_ticks_ = (ptimer_ticks_ & ((uint64_t{1} << 27) - 1)) |
+                                (uint64_t(value & 0x1fffffffu) << 27);
+                return;
             case 0x420:
                 ptimer_alarm_ = value & ~31u;
                 ptimer_alarm_programmed_ = true;

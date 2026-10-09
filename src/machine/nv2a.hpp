@@ -144,6 +144,9 @@ public:
     uint32_t mmio_size() const override { return kSize; }
     uint32_t mmio_read(uint32_t addr, int size) override;
     void mmio_write(uint32_t addr, int size, uint32_t value) override;
+    // Bounded PCI config access shares the actual PBUS register state.
+    uint32_t pci_read(uint8_t reg, int size);
+    void pci_write(uint8_t reg, int size, uint32_t value);
 
     // One engine block within the aperture (offset/size relative to kBase).
     struct Block { uint32_t off, size; const char* name; };
@@ -2462,6 +2465,7 @@ private:
     // mastering; external PCI arbitration/decode is outside this RAM bus.
     uint32_t pbus_command_ = 0;
     uint32_t pbus_latency_ = 0, pbus_rom_ = 0;
+    uint32_t pbus_agp_command_ = 0;
     // This component starts with its engines available, as its existing
     // packet/scanout consumers require. This is not a silicon cold-reset mask.
     uint32_t pmc_enable_ = 0xffffffffu;

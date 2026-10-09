@@ -334,7 +334,7 @@ add_test(NAME generated_submit_perf COMMAND test_generated_submit_perf)
 
 # These tests exercise the CPU renderer directly without a host GPU backend.
 if(XLLE_RENDERER STREQUAL "LLE")
-  add_executable(test_nv2a tests/test_nv2a.cpp src/machine/nv2a.cpp)
+  add_executable(test_nv2a tests/test_nv2a.cpp src/machine/nv2a.cpp src/machine/pci.cpp)
   target_include_directories(test_nv2a PRIVATE ${XLLE_INCLUDES})
   target_link_libraries(test_nv2a PRIVATE nv2a_vsh_emulator xlle_host)
   if(XLLE_VERTEX_REUSE_DIAGNOSTICS)

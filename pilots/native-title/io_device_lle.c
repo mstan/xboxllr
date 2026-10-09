@@ -52,6 +52,8 @@ static struct {uint32_t base,bytes;} stacks[64];
 static unsigned stack_count;
 static uint32_t interrupt_objects[16],pending_callback;
 static PilotIoIsr isr_callback;
+static PilotIoPort device_port;
+static uint16_t device_port_first,device_port_last;
 static volatile LONG current_irql;
 static volatile LONG caller_if=1;
 static unsigned execution_depth;
@@ -125,6 +127,11 @@ static uint32_t port_in(uc_engine *engine,uint32_t port,int size,void *data)
 {
 #ifdef PILOT_USB_LLE
     uint32_t value=0;(void)data;
+    if(device_port && port>=device_port_first && port<=device_port_last) {
+        const char *error=device_port((uint16_t)port,size,0,&value);
+        if(error)forbidden(engine,error);
+        return value;
+    }
 #ifdef PILOT_FILES_LLE
     if(storage.instance && storage_owns_port(port)) {
         if(!storage.port(storage.instance,port,size,0,&value))forbidden(engine,storage.error(storage.instance));
@@ -143,6 +150,11 @@ static uint32_t port_in(uc_engine *engine,uint32_t port,int size,void *data)
 static void port_out(uc_engine *engine,uint32_t port,int size,uint32_t value,void *data)
 {
 #ifdef PILOT_USB_LLE
+    if(device_port && port>=device_port_first && port<=device_port_last) {
+        const char *error=device_port((uint16_t)port,size,1,&value);
+        if(error)forbidden(engine,error);
+        return;
+    }
 #ifdef PILOT_FILES_LLE
     if(storage.instance && storage_owns_port(port)) {
         if(!storage.port(storage.instance,port,size,1,&value))forbidden(engine,storage.error(storage.instance));
@@ -507,7 +519,7 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
     }
 #endif
     if(ordinal!=1 && ordinal!=4 && ordinal!=14 && ordinal!=15 && ordinal!=17 && ordinal!=23 &&
-       ordinal!=44 && ordinal!=47 && ordinal!=65 && ordinal!=68 && ordinal!=107 && ordinal!=108 && ordinal!=109 && ordinal!=166 &&
+       ordinal!=44 && ordinal!=46 && ordinal!=47 && ordinal!=65 && ordinal!=68 && ordinal!=107 && ordinal!=108 && ordinal!=109 && ordinal!=166 &&
        ordinal!=168 && ordinal!=171 && ordinal!=173 && ordinal!=175 && ordinal!=178 && ordinal!=179 && ordinal!=180 && ordinal!=181 && ordinal!=182 &&
        ordinal!=98 && ordinal!=100 && ordinal!=103 && ordinal!=129 && ordinal!=151 &&
        ordinal!=160 && ordinal!=161 && ordinal!=184 && ordinal!=199 && ordinal!=204 && ordinal!=217
@@ -572,7 +584,7 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
     uint32_t base=kernel_word(exports+16),table=0x80010000u+kernel_word(exports+28);
     uint32_t entry=0x80010000u+kernel_word(table+4*(ordinal-base));
     if(failure)return;
-    unsigned count=ordinal==65?6:ordinal==109?7:(ordinal==166 || ordinal==184)?5:ordinal==204?4:
+    unsigned count=(ordinal==46 || ordinal==65)?6:ordinal==109?7:(ordinal==166 || ordinal==184)?5:ordinal==204?4:
                    (ordinal==107 || ordinal==108 || ordinal==175 || ordinal==178 || ordinal==182 || ordinal==199)?3:
                    (ordinal==15 || ordinal==44 || ordinal==47 || ordinal==168 || ordinal==217)?2:
                    (ordinal==1 || ordinal==103 || ordinal==129 || ordinal==160 || ordinal==161)?0:1;
@@ -696,6 +708,10 @@ static void deliver_irq(int *delivered)
 }
 #undef IO_UC
 void pilot_io_device_isr_bind(PilotIoIsr callback){isr_callback=callback;}
+void pilot_io_device_port_bind(uint16_t first,uint16_t last,PilotIoPort callback)
+{
+    device_port_first=first;device_port_last=last;device_port=callback;
+}
 void pilot_io_device_set_if(int enabled){InterlockedExchange(&caller_if,enabled!=0);}
 unsigned pilot_io_device_irql(void){return (unsigned)InterlockedCompareExchange(&current_irql,0,0);}
 const char *pilot_io_device_irq(unsigned char *guest,int *delivered)

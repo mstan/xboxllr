@@ -92,7 +92,19 @@ PciFunction* PciHost::find(uint8_t bus, uint8_t dev, uint8_t fn) {
     return nullptr;
 }
 
+bool PciHost::attach_function(uint8_t bus, uint8_t dev, uint8_t fn, CfgAccessFn access) {
+    if (dev > 31 || fn > 7 || !access || find(bus, dev, fn)) return false;
+    for (const auto& f : attached_)
+        if (f.bus == bus && f.dev == dev && f.fn == fn) return false;
+    attached_.push_back({bus, dev, fn, std::move(access)});
+    return true;
+}
+
 uint32_t PciHost::io_read(uint16_t port, int size) {
+    if ((size != 1 && size != 2 && size != 4) || port < 0xcf8 ||
+        (port & 3) + size > 4 || port >= 0xd00) {
+        fault_("PCI invalid configuration port read"); return 0;
+    }
     // CONFIG_ADDRESS (0xCF8..0xCFB): return the latched address.
     if (port < 0xCFC) {
         uint32_t shift = (port - 0xCF8) * 8;
@@ -105,6 +117,9 @@ uint32_t PciHost::io_read(uint16_t port, int size) {
     uint8_t dev = (config_addr_ >> 11) & 0x1F;
     uint8_t fn  = (config_addr_ >> 8) & 0x07;
     uint8_t reg = (config_addr_ & 0xFC) | ((port - 0xCFC) & 0x3);
+    for (auto& attached : attached_)
+        if (attached.bus == bus && attached.dev == dev && attached.fn == fn)
+            return attached.access(reg, size, false, 0);
     PciFunction* f = find(bus, dev, fn);
     if (!f) return 0xFFFFFFFFu;  // absent function — enumeration relies on all-ones
     uint32_t v = 0;
@@ -116,6 +131,10 @@ uint32_t PciHost::io_read(uint16_t port, int size) {
 }
 
 void PciHost::io_write(uint16_t port, int size, uint32_t value) {
+    if ((size != 1 && size != 2 && size != 4) || port < 0xcf8 ||
+        (port & 3) + size > 4 || port >= 0xd00) {
+        fault_("PCI invalid configuration port write"); return;
+    }
     // CONFIG_ADDRESS latch.
     if (port < 0xCFC) {
         uint32_t shift = (port - 0xCF8) * 8;
@@ -129,6 +148,10 @@ void PciHost::io_write(uint16_t port, int size, uint32_t value) {
     uint8_t dev = (config_addr_ >> 11) & 0x1F;
     uint8_t fn  = (config_addr_ >> 8) & 0x07;
     uint8_t reg = (config_addr_ & 0xFC) | ((port - 0xCFC) & 0x3);
+    for (auto& attached : attached_)
+        if (attached.bus == bus && attached.dev == dev && attached.fn == fn) {
+            attached.access(reg, size, true, value); return;
+        }
     PciFunction* f = find(bus, dev, fn);
     if (!f) return;
     for (int i = 0; i < size; ++i) {

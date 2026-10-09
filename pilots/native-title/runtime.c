@@ -93,7 +93,7 @@ static void display_lle_present(uint32_t swap,uint32_t interval);
 #ifdef PILOT_GPU_LLE
 static void gpu_lle_tick(void);
 static const char *gpu_lle_access(uint32_t address,unsigned size,int write,uint32_t *value);
-static uint8_t gpu_lle_field(void);
+static const char *gpu_lle_port(uint16_t port,int size,int write,uint32_t *value);
 #endif
 static uint32_t file32(size_t offset)
 {
@@ -151,7 +151,12 @@ uint8_t pilot_cpu_in8(uint16_t port)
     if(port==0x80c0)return display_lle_field();
 #endif
 #ifdef PILOT_GPU_LLE
-    if(port==0x80c0)return gpu_lle_field();
+    if(port==0x80c0 || (port>=0xcf8 && port<=0xcff)) {
+        uint32_t value=0;
+        const char *error=gpu_lle_port(port,1,0,&value);
+        if(error)stop(error,port);
+        return (uint8_t)value;
+    }
 #endif
 #ifdef PILOT_USB_LLE
     uint32_t value=0;
@@ -166,6 +171,14 @@ uint8_t pilot_cpu_in8(uint16_t port)
 #include "nonlocal_jump.inc"
 void pilot_cpu_out8(uint16_t port,uint8_t byte)
 {
+#ifdef PILOT_GPU_LLE
+    if(port==0x80c0 || (port>=0xcf8 && port<=0xcff)) {
+        uint32_t value=byte;
+        const char *error=gpu_lle_port(port,1,1,&value);
+        if(error)stop(error,port);
+        return;
+    }
+#endif
 #ifdef PILOT_USB_LLE
     uint32_t value=byte;
     const char *error=pilot_usb_pic_port(port,1,1,&value);
@@ -455,9 +468,9 @@ static void kernel_dispatch_impl(void)
     }
 #endif
 #ifdef PILOT_IO_DEVICE_LLE
-    case 44:case 47:case 65:case 68:case 109:case 173:case 175: {
+    case 44:case 46:case 47:case 65:case 68:case 109:case 173:case 175: {
         uint32_t args[7],result=g_eax;
-        unsigned count=next_kernel_ordinal==65?6:next_kernel_ordinal==109?7:
+        unsigned count=(next_kernel_ordinal==46 || next_kernel_ordinal==65)?6:next_kernel_ordinal==109?7:
                        next_kernel_ordinal==175?3:(next_kernel_ordinal==44 || next_kernel_ordinal==47)?2:1;
         for(unsigned i=0;i<count;++i)args[i]=MEM32(g_esp+4+i*4);
         int page_service=next_kernel_ordinal==173 || next_kernel_ordinal==175;

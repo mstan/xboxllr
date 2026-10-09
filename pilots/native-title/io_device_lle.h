@@ -22,6 +22,11 @@ const char *pilot_io_device_file_data(unsigned ordinal,uint32_t *value);
  * interrupt frame, priority transitions and EOI; callback owns its real body. */
 typedef const char *(*PilotIoIsr)(uint32_t entry,uint32_t regs[8]);
 void pilot_io_device_isr_bind(PilotIoIsr callback);
+/* Optional device-owned port range. PIC/storage remain on their shared bus.
+ * Callback returns an error on unsupported access. It must not reenter this
+ * kernel transport; original port instructions execute with its lock held. */
+typedef const char *(*PilotIoPort)(uint16_t port,int size,int write,uint32_t *value);
+void pilot_io_device_port_bind(uint16_t first,uint16_t last,PilotIoPort callback);
 unsigned pilot_io_device_irql(void);
 void pilot_io_device_set_if(int enabled);
 const char *pilot_io_device_irq(unsigned char *guest,int *delivered);

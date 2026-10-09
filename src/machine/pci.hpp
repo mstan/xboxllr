@@ -53,6 +53,11 @@ public:
                            uint32_t value)>;
     void on_cfg_write(CfgWriteFn cb) { cfg_write_observers_.push_back(std::move(cb)); }
 
+    // Device-owned config space, shared with any MMIO mirror. It takes part
+    // in the same CF8/CFC decode as the built-in functions; no shadow copy.
+    using CfgAccessFn = std::function<uint32_t(uint8_t, int, bool, uint32_t)>;
+    bool attach_function(uint8_t bus, uint8_t dev, uint8_t fn, CfgAccessFn access);
+
 private:
     PciFunction* find(uint8_t bus, uint8_t dev, uint8_t fn);
 
@@ -61,6 +66,8 @@ private:
     bool mcpx_rom_disabled_ = false;
     std::vector<PciFunction> funcs_;
     std::vector<CfgWriteFn> cfg_write_observers_;
+    struct Attached { uint8_t bus, dev, fn; CfgAccessFn access; };
+    std::vector<Attached> attached_;
 };
 
 }  // namespace xlle

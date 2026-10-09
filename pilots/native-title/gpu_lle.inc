@@ -14,7 +14,9 @@ static struct {
     void (*write)(void*,uint32_t,int,uint32_t);
     void (*frame)(void*,uint64_t);
     void (*clock)(void*,uint64_t,uint32_t);
-    uint64_t origin,field;
+    uint32_t (*port)(void*,uint16_t,int,int,uint32_t);
+    void (*field)(void*,int);
+    uint64_t origin,field_count;
 } gpu_lle;
 
 static int gpu_lle_dma(uint32_t pa,void *buffer,size_t bytes,int write)
@@ -53,7 +55,15 @@ static const char *gpu_lle_access(uint32_t address,unsigned size,int write,uint3
         fprintf(stderr,"[GPU LLE MMIO] %s%u %08x=%08x%s\n",write?"W":"R",size,address,*value,error?" failed":"");
     return error;
 }
-static uint8_t gpu_lle_field(void){return (uint8_t)((gpu_lle.field&1u)<<5);}
+static const char *gpu_lle_port(uint16_t port,int size,int write,uint32_t *value)
+{
+    if(!gpu_lle.device)return "GPU platform port before initialization";
+    /* Called from original kernel PCI instructions with its lock held.
+     * No tick/DMA/kernel reentry belongs inside configuration transport. */
+    uint32_t result=gpu_lle.port(gpu_lle.device,port,size,write,*value);
+    if(!write)*value=result;
+    return gpu_lle.error(gpu_lle.device);
+}
 static void gpu_lle_tick(void)
 {
     if(!gpu_lle.device)return;
@@ -66,8 +76,9 @@ static void gpu_lle_tick(void)
     const uint64_t hz=233333324;
     gpu_lle.clock(gpu_lle.device,(elapsed/10000000)*hz+(elapsed%10000000)*hz/10000000,
                   (uint32_t)(((elapsed%10000000)*60%10000000)*1000/10000000));
-    if(field>gpu_lle.field) {
-        gpu_lle.field=field;gpu_lle.frame(gpu_lle.device,field);
+    if(field>gpu_lle.field_count) {
+        gpu_lle.field_count=field;gpu_lle.field(gpu_lle.device,(int)(field&1));
+        gpu_lle.frame(gpu_lle.device,field);
     }
     const char *error=gpu_lle.error(gpu_lle.device);
     if(error)stop(error,0xfd000000u);
@@ -99,7 +110,7 @@ static void gpu_lle_open(void)
     RemoveDllDirectory(dependency);
     if(!gpu_lle.library)stop("maintained NV2A reference DLL unavailable",GetLastError());
 #define GPU_LOAD(member) do {*(FARPROC*)&gpu_lle.member=GetProcAddress(gpu_lle.library,"xlle_nv2a_reference_" #member);if(!gpu_lle.member)stop("GPU DLL ABI missing: " #member,0);} while(0)
-    GPU_LOAD(create);GPU_LOAD(destroy);GPU_LOAD(error);GPU_LOAD(bus);GPU_LOAD(read);GPU_LOAD(write);GPU_LOAD(frame);GPU_LOAD(clock);
+    GPU_LOAD(create);GPU_LOAD(destroy);GPU_LOAD(error);GPU_LOAD(bus);GPU_LOAD(read);GPU_LOAD(write);GPU_LOAD(frame);GPU_LOAD(clock);GPU_LOAD(port);GPU_LOAD(field);
 #undef GPU_LOAD
     gpu_lle.device=gpu_lle.create();
     if(!gpu_lle.device)stop("NV2A reference allocation failed",0);
@@ -107,6 +118,7 @@ static void gpu_lle_open(void)
     const char *error=gpu_lle.error(gpu_lle.device);
     if(error)stop(error,0xfd000000u);
     gpu_lle.origin=dispatch_monotonic();
-    gpu_lle.field=0;
+    gpu_lle.field_count=0;
+    pilot_io_device_port_bind(0xcf8,0xcff,gpu_lle_port);
     fprintf(stderr,"[GPU LLE] original XDK renderer; maintained NV2A; shared original RAM/PIC/ISR\n");
 }

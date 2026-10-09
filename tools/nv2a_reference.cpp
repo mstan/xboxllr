@@ -2,6 +2,8 @@
 // This contains transport only. Unmodelled accesses fail the caller's run.
 #include "machine/nv2a.hpp"
 #include "machine/pic.hpp"
+#include "machine/pci.hpp"
+#include "machine/mcpx_field.hpp"
 #include <cstdio>
 #include <cstring>
 #include <new>
@@ -16,11 +18,18 @@ namespace {
 struct Reference {
     std::string failure;
     bool irq = false;
-    uint8_t encoder_field = 0;
+    xlle::McpxFieldInput field;
+    xlle::PciHost pci;
     xlle::DualPic pic;
     xlle::Nv2a gpu;
     void (*external_irq)(int, int) = nullptr;
-    Reference() : gpu([this](const std::string& reason) { failure = reason; }) {
+    Reference() : field([this](const std::string& reason) { failure = reason; }),
+        pci([this](const std::string& reason) { failure = reason; }),
+        gpu([this](const std::string& reason) { failure = reason; }) {
+        pci.attach_function(1, 0, 0, [this](uint8_t reg, int size, bool write, uint32_t value) {
+            if (write) { gpu.pci_write(reg, size, value); return 0u; }
+            return gpu.pci_read(reg, size);
+        });
         gpu.set_irq([this](int line, bool level) {
             irq = level;
             if (external_irq) external_irq(line, level); else pic.raise(line, level);
@@ -118,18 +127,20 @@ EXPORT void xlle_nv2a_reference_pic(void* instance, uint16_t mask, uint16_t leve
 }
 EXPORT uint32_t xlle_nv2a_reference_port(void* instance, uint16_t port, int size, int write, uint32_t value) {
     auto& ref = *static_cast<Reference*>(instance);
+    if (!ref.failure.empty()) return 0;
     if (ref.pic.owns(port) && size == 1) {
         if (write) ref.pic.io_write(port,size,value);
         else return ref.pic.io_read(port,size);
-    } else if (port == 0x80c0 && size == 1 && !write) {
-        // External encoder field input supplied by this component's caller.
-        // Reading a pin cannot itself advance the display clock.
-        return uint32_t(ref.encoder_field) << 5;
+    } else if (port == 0x80c0 && size == 1) {
+        if (write) ref.field.write(value); else return ref.field.read();
+    } else if (ref.pci.owns(port)) {
+        if (write) ref.pci.io_write(port, size, value);
+        else return ref.pci.io_read(port, size);
     } else ref.failure = "unmodelled display reference port";
     return 0;
 }
 EXPORT void xlle_nv2a_reference_field(void* instance, int level) {
-    static_cast<Reference*>(instance)->encoder_field = level != 0;
+    static_cast<Reference*>(instance)->field.set_level(level != 0);
 }
 EXPORT int xlle_nv2a_reference_vector(void* instance, int acknowledge) {
     auto& pic = static_cast<Reference*>(instance)->pic;

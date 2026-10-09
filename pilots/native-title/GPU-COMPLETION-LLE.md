@@ -158,7 +158,7 @@ unfinished renderer is isolated on `feat/blinx-gpu-completion-lle-20261008`.
 
 ## Initialization controls and original GPU reservation
 
-The next actual-title checkpoint passes the former PCI-ROM stop, PLL/timer
+The `74b6277` actual-title checkpoint passes the former PCI-ROM stop, PLL/timer
 setup, GPU instance reservation, PRAMIN clearing, inactive overlay configuration,
 context-table setup and initial FIFO configuration. It now stops at the real
 **GPIO byte write to port `80C0`**. The following original routine uses
@@ -217,9 +217,9 @@ Validation:
   unsupported GPIO transaction, before rendering. Earlier iteration logs use
   suffixes `controls`, `instance`, `video-config` and `context-table`.
 
-Current executable SHA-256:
+Executable SHA-256 at `74b6277`:
 `31f949897d8d7a7e7d37f6a7482ece46e1732fbc0689332d4ec538728b0b7294`.
-Current NV2A DLL SHA-256:
+NV2A DLL SHA-256 at `74b6277`:
 `27dc45af8fa393f44d90ea77c54d772ee2ed2502a936c9a0206f6d89889630b5`.
 Private additional evidence: `build/blinx/gpu-instance-original.aot-private.json`,
 `build/blinx/gpu-completion-init-original.aot-private.json`,
@@ -231,3 +231,71 @@ py -3 tools/native_gpu_instance_reference.py --snapshot build/blinx/io-boot-18m.
 py -3 -m unittest discover -s tests -p test_native_interrupt_lowering.py
 ctest --test-dir build/blinx/host-gpu-lle -C Release -R '^pilot_(gpu_lle_transport|io_device_lle|io_device_lle_guards|memory_contract|memory_statistics)$' --output-on-failure
 ```
+
+## GPIO, original PCI transport and timer epoch checkpoint
+
+Actual Blinx now passes the `80C0` byte write, both original
+`HalReadWritePCISpace` calls, and subsequent timer counter initialization.
+The current stop is **`FD400080=0`, PGRAPH_DEBUG_0**, during the next original
+engine-reset/setup routine (`sub_0013FDF0`). No LLE frame has been produced.
+Next work is the coherent PGRAPH initialization/context family, followed by
+actual callback and resource-lifetime execution; `.109` stays open.
+
+- `McpxFieldInput` implements a stateful encoder input: control readback,
+  raw pin level, polarity, latch selection and W1C latch status. The external
+  field clock drives it; repeated reads cannot advance time. Output, alternate
+  function and debounce modes stop. Original XDK writes `1` and samples bit 5;
+  xemu supplies the Xbox field-pin wiring. AMD's **AMD-766 Peripheral Bus
+  Controller Data Sheet, 23167B (March 2001), p82** supplies the independently
+  documented compatible control layout. **Applying that layout to MCPX is a
+  board-profile inference**, supported by these observations, not a silicon
+  measurement. Full control/latch readback correspondence and phase remain a
+  hardware-evidence question if observable behavior depends on them. The older
+  full-machine `XboxPm` read-driven field/timer shortcuts are not used here and
+  are not newly qualified by this work. SCI/SMI and other GPIO pins are outside
+  this component's scope.
+- The maintained `PciHost` now accepts device-owned config functions. NV2A at
+  `01:00.0` shares its PBUS register state with CF8/CFC access; no second config
+  store is synchronized after the fact. Identity fields remain read-only.
+  Byte/word/dword selection, absent functions and disabled config cycles retain
+  their bus behavior. Invalid widths and unimplemented GPU config controls stop.
+  The AGP request-depth field is retained and respected by the synchronous
+  unified-RAM bus, which has at most one outstanding request. External link,
+  transfer-rate and sideband reconfiguration are guarded, not declared modeled.
+- Ordinal 46 executes the owned original kernel, including its IN/OUT
+  instructions, caller-buffer effects and preserved-register/stack/IF checks.
+  The interpreter port adapter reaches the same PCI device as compiled code.
+  Configuration callbacks do not tick the GPU or reenter locked kernel/DMA work.
+- PTIMER low/high writes update the actual 56-bit counter while retaining the
+  other half and source-clock progress. Reserved bits are masked, future ticks
+  advance from the new epoch, and alarm equality remains observable. Envytools
+  supplies counter/alarm wire facts; Nouveau's `nv04_timer_time` independently
+  demonstrates counter programming. Subcycle write/compare timing remains
+  outside this bounded model; ignoring counter writes was not adopted.
+
+Validation on the final NV2A DLL:
+
+- Software NV2A suite passes, including GPIO state/guards, PCI mirror coherence,
+  read-only identity, absent devices and timer rebase/rollover/alarm cases.
+  OpenGL cases explicitly skip in this software build.
+- All nine original query/trap/fence cases pass across three device lifetimes:
+  `build/blinx/gpu-completion-platform-original.aot-private.json`.
+- Five focused GPU/device/memory CTests pass in 2.89s. GPU transport includes
+  fifteen actual original PCI calls across three device lifetimes, byte-buffer
+  sentinels, real bus readback and the existing held/released semaphore tests.
+- The native-renderer title and contract executable also rebuild successfully.
+  Eight focused native graphics/device/memory checks pass in 8.99s. This
+  checkpoint does not claim a fresh complete native attract run; the preserved
+  game milestone remains the previously qualified pinned build.
+- Actual title run `build/blinx/gpu-lle-title-platform-timer/` exits 2 at the
+  explicit PGRAPH guard after 11.172s. This is initialization progress, not
+  rendering or attract qualification. The earlier `gpu-lle-title-platform`
+  run established the timer-write dependency after GPIO/PCI succeeded.
+
+Executable SHA-256:
+`5911978b4617210426b60dc0f516ca780080d9833b8bd90f1d37a5a70ff2c642`.
+NV2A DLL SHA-256:
+`847aa2216e5b4d2c3b0d18433d8fb42f4663e9bdd1aabad7e6af09634cc8c7d5`.
+Build/test logs use `gpu-lle-platform*`; the reference manifest records the
+same final DLL hash. No hardware contact or new xemu differential run occurred.
+The game pin remains at completed-files `439a45b`.

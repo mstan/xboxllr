@@ -38,3 +38,45 @@ static void test_gpu_initialization_controls() {
     failure.clear();write(0x8700,1);CHECK(!failure.empty() && read(0x8700)==0);
     failure.clear();write(0x100214,1);CHECK(!failure.empty() && read(0x100214)==0);
 }
+
+static void test_gpu_platform_bus() {
+    std::string failure;
+    auto fault=[&](const std::string& why){failure=why;};
+    xlle::Nv2a gpu(fault);
+    xlle::PciHost pci(fault);
+    auto attach=[&](uint8_t reg,int size,bool write,uint32_t value) {
+        if(write){gpu.pci_write(reg,size,value);return 0u;}
+        return gpu.pci_read(reg,size);
+    };
+    CHECK(pci.attach_function(1,0,0,attach));
+    CHECK(!pci.attach_function(1,0,0,attach) && !pci.attach_function(0,0,0,attach));
+    pci.io_write(0xcf8,4,0x80010000);
+    CHECK(pci.io_read(0xcfc,4)==0x02a010de);
+    CHECK(pci.io_read(0xcfc,2)==0x10de && pci.io_read(0xcfe,2)==0x02a0);
+    pci.io_write(0xcfc,4,0);CHECK(pci.io_read(0xcfc,4)==0x02a010de);
+    pci.io_write(0xcf8,4,0x80010004);pci.io_write(0xcfc,1,4);
+    CHECK(gpu.mmio_read(0xfd001804,4)==4);
+    gpu.mmio_write(0xfd001804,4,0);CHECK(pci.io_read(0xcfc,4)==0);
+    pci.io_write(0xcf8,4,0x8001000c);pci.io_write(0xcfd,1,0xf8);
+    CHECK(gpu.mmio_read(0xfd00180c,4)==0xf800);
+    pci.io_write(0xcf8,4,0x8001004c);pci.io_write(0xcff,1,0x1f);
+    CHECK(gpu.mmio_read(0xfd00184c,4)==0x1f000000);
+    gpu.mmio_write(0xfd00184c,4,0x07000000);
+    CHECK(pci.io_read(0xcff,1)==7 && pci.io_read(0xcfc,4)==0x07000000);
+    pci.io_write(0xcf8,4,0x80010800);CHECK(pci.io_read(0xcfc,4)==0xffffffff);
+    pci.io_write(0xcf8,4,0x00010000);CHECK(pci.io_read(0xcfc,4)==0xffffffff);
+    CHECK(failure.empty());
+    pci.io_read(0xcff,2);CHECK(!failure.empty());failure.clear();
+    gpu.mmio_write(0xfd00184c,4,0x100);CHECK(!failure.empty());failure.clear();
+    CHECK(gpu.mmio_read(0xfd00184c,4)==0x07000000);
+    xlle::McpxFieldInput field(fault);
+    field.write(1);field.set_level(false);CHECK(field.read()==1 && !field.input());
+    field.set_level(true);CHECK(field.read()==0x61 && field.input());
+    for(unsigned i=0;i<50;++i)CHECK(field.read()==0x61); // reads never toggle
+    field.set_level(false);CHECK(field.read()==0x41 && !field.input());
+    field.write(3);CHECK(field.input()); // selected stored latch outlives pad
+    field.write(0x43);CHECK(field.read()==3 && !field.input());
+    field.write(0);field.set_level(false);CHECK(field.input()); // active low
+    field.write(0x41);CHECK(field.read()==1);
+    field.write(5);CHECK(!failure.empty() && field.read()==1);
+}

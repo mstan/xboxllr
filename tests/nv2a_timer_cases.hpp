@@ -38,6 +38,17 @@ static void test_ptimer_reference() {
     gpu.set_timer_clock(300+period*2+2);
     CHECK(read(0x100)==1); // repeating low-counter alarm after wrap
     CHECK(failure.empty());
+    // Nouveau sets a real counter epoch through TIME_HIGH/TIME_LOW. Write
+    // halves independently, preserving the other half and the source phase.
+    write(0x210,0);write(0x100,1);
+    write(0x410,0xe1234567);write(0x400,0xffffffef);
+    CHECK(read(0x410)==0x01234567 && read(0x400)==0xffffffe0);
+    gpu.set_timer_clock(300+period*2+9);
+    CHECK(read(0x400)==0xffffffe0 && !read(0x100));
+    write(0x210,1);gpu.set_timer_clock(300+period*2+10);
+    CHECK(read(0x400)==0 && read(0x410)==0x01234568);
+    write(0x410,0);CHECK(read(0x400)==0 && read(0x410)==0);
+    write(0x400,64);CHECK(read(0x100)==1); // actual equality, not skipped time
     write(0x200,0);CHECK(!failure.empty() && read(0x200)==1);
 
     // Independent fresh device lifetimes do not retain another device's time.

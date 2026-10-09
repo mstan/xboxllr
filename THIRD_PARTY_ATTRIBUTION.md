@@ -895,6 +895,25 @@ was copied. The authored original-GPU-reservation probe executes owned kernel
 bytes privately and records actual page effects. Envytools PMC documentation
 informs the bounded pristine-engine reset; broader lifecycle remains guarded.
 
+## GPU platform behavioral references
+
+GPU platform qualification additionally uses **Advanced Micro Devices,
+AMD-766 Peripheral Bus Controller Data Sheet, publication 23167B, March 2001,
+page 82** ([document transcription](https://dtsheet.com/doc/261442/amd-amd))
+for GPIO register behavior. Applying this compatible-chip layout to MCPX is
+explicitly an inference, supported by original Xbox input setup and xemu field
+wiring, rather than a new hardware observation. `mcpx_field.hpp` and its tests
+are authored here; no document prose or donor implementation was copied.
+The pinned xemu PCI register definitions and nxdk/pbkit AGP command names inform
+PCI/PBUS coherence and request-depth control.
+
+Nouveau's `nv04_timer_time` in
+[Linux commit 9aad54d5c7ae9c0b24ba28d367f5b3b00e751cc5](https://github.com/torvalds/linux/blob/9aad54d5c7ae9c0b24ba28d367f5b3b00e751cc5/drivers/gpu/drm/nouveau/nvkm/subdev/timer/nv04.c)
+is a behavioral reference for programming the two timer-counter halves.
+Credit belongs to the Nouveau authors/contributors. The maintained counter
+write model and tests are authored independently; no implementation body was
+copied or linked. Envytools remains the counter-format/alarm reference.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),
