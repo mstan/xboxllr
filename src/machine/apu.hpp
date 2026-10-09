@@ -6,7 +6,7 @@
 // SE2FE_IDLE_VOICE. With FETFORCE1 enabled,
 // that publishes the front-end trap and drives the APU's level IRQ according to IEN/ISTS.
 //
-// Bounded PCM source consumption is executable before resampling/mixing/GP effects.
+// Bounded PCM/ADPCM source consumption precedes resampling/mixing/GP effects.
 // Whole device output and other VP/GP/EP accesses remain unqualified; the strict
 // reference transport rejects them instead of admitting register-file defaults.
 #pragma once
@@ -19,6 +19,7 @@
 
 #include "machine/mmio_device.hpp"
 #include "machine/apu_clock.hpp"
+#include "machine/apu_adpcm.h"
 
 namespace xlle {
 
@@ -466,10 +467,11 @@ inline bool McpxApu::source_frames(uint16_t voice,float* stereo,uint32_t capacit
     const unsigned channels=(format&(1u<<27))?2:1;
     const unsigned type=(format>>28)&3,container=(format>>30)&3;
     const unsigned stride=((format>>16)&31)+1;
+    const bool adpcm=container==2 && type==1;
     // Streaming SSL, multipass and linked-voice processing have separate
     // ownership/pipeline semantics; do not report those as consumed PCM.
     if((format&((1u<<21)|(1u<<22)|(1u<<24))) || stride!=channels ||
-       !((type==0 && container==0) || (type==1 && container==1) || (type>=2 && container==3))) {
+       !(adpcm || (type==0 && container==0) || (type==1 && container==1) || (type>=2 && container==3))) {
         device_fault("source processing format remains unqualified");return false;
     }
     const unsigned width=type==0?1:type==1?2:4;
@@ -479,21 +481,39 @@ inline bool McpxApu::source_frames(uint16_t voice,float* stereo,uint32_t capacit
     if(cursor>end || (looping && start>end)) {
         device_fault("source buffer extent remains unqualified");return false;
     }
+    // Block decode state lives only for this pull. A later guest seek/write or
+    // SGE remap is observed on the next pull, without a stale host-side cache.
+    uint32_t decoded_block=UINT32_MAX;
+    int16_t decoded[128];
     while(count<capacity) {
-        uint8_t data[8];
-        if(!source_read(uint64_t(base)+uint64_t(cursor)*width*channels,data,width*channels)) {
-            device_fault("source sample scatter/gather DMA failed");return false;
-        }
         float sample[2];
-        for(unsigned channel=0;channel<channels;++channel) {
-            uint32_t raw=0;
-            for(unsigned byte=0;byte<width;++byte)raw|=uint32_t(data[channel*width+byte])<<(byte*8);
-            if(type==0)sample[channel]=float(int(raw)-128)*(1.0f/128);
-            else {
-                const unsigned bits=type==1?16:type==2?24:32;
-                const uint64_t mask=(uint64_t(1)<<bits)-1,sign=uint64_t(1)<<(bits-1);
-                const int64_t value=int64_t(raw&mask)-((raw&sign)?int64_t(uint64_t(1)<<bits):0);
-                sample[channel]=static_cast<float>(double(value)/double(sign));
+        if(adpcm) {
+            const uint32_t block=cursor/64;
+            if(decoded_block!=block) {
+                uint8_t encoded[72];
+                if(!source_read(uint64_t(base)+uint64_t(block)*36*channels,encoded,36*channels) ||
+                   !xlle_apu_decode_adpcm(encoded,36*channels,channels,decoded,128)) {
+                    device_fault("source ADPCM block DMA/decode failed");return false;
+                }
+                decoded_block=block;
+            }
+            for(unsigned channel=0;channel<channels;++channel)
+                sample[channel]=decoded[(cursor%64)*channels+channel]*(1.0f/32768);
+        } else {
+            uint8_t data[8];
+            if(!source_read(uint64_t(base)+uint64_t(cursor)*width*channels,data,width*channels)) {
+                device_fault("source sample scatter/gather DMA failed");return false;
+            }
+            for(unsigned channel=0;channel<channels;++channel) {
+                uint32_t raw=0;
+                for(unsigned byte=0;byte<width;++byte)raw|=uint32_t(data[channel*width+byte])<<(byte*8);
+                if(type==0)sample[channel]=float(int(raw)-128)*(1.0f/128);
+                else {
+                    const unsigned bits=type==1?16:type==2?24:32;
+                    const uint64_t mask=(uint64_t(1)<<bits)-1,sign=uint64_t(1)<<(bits-1);
+                    const int64_t value=int64_t(raw&mask)-((raw&sign)?int64_t(uint64_t(1)<<bits):0);
+                    sample[channel]=static_cast<float>(double(value)/double(sign));
+                }
             }
         }
         if(channels==1)sample[1]=sample[0];

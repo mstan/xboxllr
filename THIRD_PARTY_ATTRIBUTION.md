@@ -1346,6 +1346,24 @@ notifier information byte: our older literal-byte/SSLA assumption is removed,
 and the unsupported completion boundary now fails explicitly. Neither that
 placeholder nor native audible success qualifies an LLE notifier contract.
 
+## dr_wav: maintained ADPCM source decoder
+
+[dr_libs / dr_wav](https://github.com/mackron/dr_libs/tree/dfe8377631000664666519fdb83da193fd8037f4),
+by David Reid (mackron), revision `dfe8377631000664666519fdb83da193fd8037f4`:
+`src/third_party/dr_wav/dr_wav.h` and `LICENSE` are unmodified upstream files.
+We use the offered **MIT No Attribution (MIT-0)** option while retaining full
+credit and license. Exact file hashes are in the adjacent README. The separate
+authored `src/machine/apu_adpcm.c` adapter uses the public memory WAV interface
+for Xbox blocks; the donor implements the codec. Native-pilot artifact notices
+include this donor's license and provenance.
+
+Xbox block consumption and header policy consult the already pinned xemu/Phobos
+behavioral references. The existing GPL/LGPL private decoders are separately
+linked into comparison tests only; no body from them is incorporated into this
+new adapter or vendored donor. These references are not independent hardware
+measurements. The combined pilot's earlier licensing restrictions still apply.
+See [audio qualification](pilots/native-title/AUDIO-LLE.md) for exact scope.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

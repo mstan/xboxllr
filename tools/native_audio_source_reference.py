@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Original buffer-region arithmetic and conversion -> actual maintained PCM DMA.
+"""Original buffer-region arithmetic/conversion -> maintained PCM/ADPCM DMA.
 
 The region routine executes up to its first PIO wait, without replaced calls.
 No enclosing API completion or FIFO availability is fabricated. Original whole
@@ -49,16 +49,19 @@ def run(xbe,library,dependencies):
         if until==end:assert cpu.reg_read(UC_X86_REG_ESP)==stack+8
         return cpu.reg_read(UC_X86_REG_EAX)
     rows=[]
-    for bits in (8,16):
+    for bits in (8,16,4):
         for channels in (1,2):
-            align=bits//8*channels
-            for length in (1,31,32,33,65):
+            adpcm=bits==4
+            align=36*channels if adpcm else bits//8*channels
+            def byte_offset(frames):return frames//64*align if adpcm else frames*align
+            for length in ((64,128,192,256) if adpcm else (1,31,32,33,65)):
                 for looping in (False,True):
                     first=length//3;span=max(1,length//2)
+                    if adpcm:first=first//64*64;span=max(64,span//64*64)
                     cpu.mem_write(obj,bytes(0x100));cpu.mem_write(settings,bytes(0x100))
                     put(obj+0x78,settings);put(obj+0x90,settings)
-                    put(settings+0xc,1);put(settings+0x14,align)
-                    put(settings+0xc4,length*align);put(settings+0xc8,first*align);put(settings+0xcc,span*align)
+                    put(settings+0xc,0x69 if adpcm else 1);put(settings+0x14,align)
+                    put(settings+0xc4,byte_offset(length));put(settings+0xc8,byte_offset(first));put(settings+0xcc,byte_offset(span))
                     # Execute all original region arithmetic and its real helper
                     # calls. Stop at the first MMIO poll, not at a fake return.
                     start(0x179efd,int(looping),0x179f9b)
@@ -74,20 +77,27 @@ def run(xbe,library,dependencies):
                     try:
                         table,voice,sge,base=0x1000,7,0x3000,4089
                         store(sge,0x8000);store(sge+8,0x5000)
-                        values=[]
+                        values=[];data=bytearray()
+                        if adpcm:
+                            for block in range(length//64):
+                                for channel in range(channels):data+=struct.pack('<hBB',block*1000+channel*100,0,0xff)
+                                for group in range(8):
+                                    for channel in range(channels):
+                                        data+=bytes([0x99 if channel else 0x11])*3
+                                        data.append((0x19 if channel else 0x91) if group==7 else (0x99 if channel else 0x11))
                         for n in range(length):
                             pair=[]
                             for channel in range(channels):
-                                value=(n*7+channel*13)%128-64 if bits==8 else (n*613+channel*357)%60000-30000
+                                if adpcm:value=(n//64)*1000+channel*100+(-(n%64) if channel else n%64)
+                                else:value=(n*7+channel*13)%128-64 if bits==8 else (n*613+channel*357)%60000-30000
                                 pair.append(value/(128 if bits==8 else 32768))
-                                encoded=struct.pack('<B',value+128) if bits==8 else struct.pack('<h',value)
-                                for byte,v in enumerate(encoded):
-                                    a=base+(n*channels+channel)*(bits//8)+byte
-                                    ram[word(sge+(a>>12)*8)+(a&4095)]=v
+                                if not adpcm:data+=struct.pack('<B',value+128) if bits==8 else struct.pack('<h',value)
                             values.append(pair if channels==2 else pair*2)
+                        for byte,v in enumerate(data):
+                            a=base+byte;ram[word(sge+(a>>12)*8)+(a&4095)]=v
                         write(0x202c,table);write(0x2030,sge);write(0x202f8,voice)
                         store(table+voice*128+0x54,1<<21)
-                        format=(0x50000000 if bits==16 else 0)|((channels-1)<<27)|((channels-1)<<16)|get(obj+0x14)
+                        format=(0x90000000 if adpcm else 0x50000000 if bits==16 else 0)|((channels-1)<<27)|((channels-1)<<16)|get(obj+0x14)
                         write(0x20304,format);write(0x203a0,base);write(0x203a4,loop);write(0x203dc,last)
                         requested=length*2+13;out=(c.c_float*(requested*2))();count=c.c_uint32();ended=c.c_int()
                         assert dll.xlle_apu_reference_source(ref,voice,out,requested,c.byref(count),c.byref(ended))
@@ -99,18 +109,18 @@ def run(xbe,library,dependencies):
                             cursor=(loop if looping else last) if cursor==last else cursor+1
                         actual=word(table+voice*128+0x58)&0xffffff;assert actual==cursor
                         actual_bytes=start(0x1786e4,actual)
-                        assert actual_bytes==cursor*align
-                        assert start(0x179e2c,actual_bytes)==cursor
+                        assert actual_bytes==byte_offset(cursor)
+                        assert start(0x179e2c,actual_bytes)==(cursor//64*64 if adpcm else cursor)
                         rows.append(dict(bits=bits,channels=channels,length=length,loop=looping,
                                          original_lbo=loop,original_ebo=last,frames=count.value,cursor_bytes=actual_bytes))
                     finally:dll.xlle_apu_reference_destroy(ref)
     if dependency:dependency.close()
     return dict(xbe_sha256=IMAGE,library_sha256=hashlib.sha256(library.read_bytes()).hexdigest(),cases=rows,
-        scope='original region prefix before MMIO and whole unit helpers; actual maintained PCM DMA/source end handoff, not final notifier or public API completion')
+        scope='original region prefix before MMIO and whole unit helpers; maintained PCM/ADPCM DMA/source handoff, not final notifier or public API completion')
 
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__)
     for name in ('xbe','library','output'):p.add_argument('--'+name,type=Path,required=True)
     p.add_argument('--dependencies',type=Path);a=p.parse_args()
     result=run(a.xbe,a.library,a.dependencies);a.output.write_text(json.dumps(result,indent=2)+'\n')
-    print('PASS: 40 original region -> maintained PCM source cases, exact samples and original cursor unit round trips')
+    print(f"PASS: {len(result['cases'])} original region -> maintained PCM/ADPCM source cases, exact samples and original cursor units")

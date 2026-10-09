@@ -76,6 +76,13 @@ if(EXISTS "${PILOT_GENERATED}/third_party")
       "$<TARGET_FILE_DIR:xlle_native_title>/third_party")
 endif()
 enable_testing()
+include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/ApuAdpcm.cmake")
+add_custom_command(TARGET pilot_notices POST_BUILD
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:xlle_native_title>/third_party/dr_wav"
+  COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../src/third_party/dr_wav/LICENSE"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../src/third_party/dr_wav/README.md"
+    "$<TARGET_FILE_DIR:xlle_native_title>/third_party/dr_wav")
 add_executable(pilot_contract_test runtime_contract_test.c)
 target_include_directories(pilot_contract_test PRIVATE "${PILOT_GENERATED}")
 target_compile_definitions(pilot_contract_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
@@ -127,7 +134,7 @@ if(PILOT_AUDIO_BACKEND STREQUAL "XAUDIO2_DSP")
   add_executable(pilot_audio_source_test audio_source_test.cpp)
   target_include_directories(pilot_audio_source_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
   target_compile_definitions(pilot_audio_source_test PRIVATE PILOT_AUDIO_DSP WIN32_LEAN_AND_MEAN NOMINMAX)
-  target_link_libraries(pilot_audio_source_test PRIVATE pilot_audio_backend)
+  target_link_libraries(pilot_audio_source_test PRIVATE pilot_audio_backend xlle_apu_adpcm)
   add_test(NAME pilot_audio_source_lle COMMAND pilot_audio_source_test)
   set_tests_properties(pilot_audio_source_lle PROPERTIES TIMEOUT 20)
 endif()
@@ -141,7 +148,7 @@ if(PILOT_ADPCM_SOURCE)
   target_compile_definitions(pilot_adpcm PUBLIC PILOT_AUDIO_ADPCM)
   target_link_libraries(pilot_audio_backend PUBLIC pilot_adpcm)
   add_executable(pilot_adpcm_test audio_adpcm_test.c "${PILOT_ADPCM_SOURCE}/adpcm_lle_reference.c")
-  target_link_libraries(pilot_adpcm_test PRIVATE pilot_adpcm)
+  target_link_libraries(pilot_adpcm_test PRIVATE pilot_adpcm xlle_apu_adpcm)
   add_test(NAME pilot_adpcm_reference COMMAND pilot_adpcm_test)
   add_custom_command(TARGET pilot_notices POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E copy_directory "${PILOT_ADPCM_SOURCE}" "$<TARGET_FILE_DIR:xlle_native_title>/third_party/xbox-adpcm")

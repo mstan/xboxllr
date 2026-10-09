@@ -110,6 +110,7 @@ if(XLLE_WITH_SDL)
 endif()
 
 set(XLLE_INCLUDES ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/src)
+include(cmake/ApuAdpcm.cmake)
 
 # --- observability (rings + jsonl are header-only; debug server is the .cpp) ---
 add_library(xlle_obs STATIC src/obs/debug_server.cpp)
@@ -151,6 +152,7 @@ add_library(xlle_machine STATIC
 target_include_directories(xlle_machine PUBLIC ${XLLE_INCLUDES})
 target_compile_definitions(xlle_machine PUBLIC XLLE_NATIVE_DRAW=$<BOOL:${XLLE_NATIVE_DRAW}>)
 target_link_libraries(xlle_machine PUBLIC xlle_cpu nv2a_vsh_emulator)
+target_link_libraries(xlle_machine PUBLIC xlle_apu_adpcm)
 if(XLLE_DISPATCH_MICRO)
   target_compile_definitions(xlle_machine PUBLIC XLLE_DISPATCH_MICRO=1)
 endif()
@@ -380,10 +382,12 @@ target_include_directories(test_apu PRIVATE ${XLLE_INCLUDES})
 add_test(NAME apu COMMAND test_apu)
 add_executable(test_apu_source tests/test_apu_source.cpp)
 target_include_directories(test_apu_source PRIVATE ${XLLE_INCLUDES})
+target_link_libraries(test_apu_source PRIVATE xlle_apu_adpcm)
 add_test(NAME apu_source COMMAND test_apu_source)
 
 add_library(xlle_apu_reference SHARED EXCLUDE_FROM_ALL tools/apu_reference.cpp)
 target_include_directories(xlle_apu_reference PRIVATE ${XLLE_INCLUDES})
+target_link_libraries(xlle_apu_reference PRIVATE xlle_apu_adpcm)
 
 add_executable(test_aci tests/test_aci.cpp)
 target_include_directories(test_aci PRIVATE ${XLLE_INCLUDES})

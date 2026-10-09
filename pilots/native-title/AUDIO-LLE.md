@@ -22,7 +22,7 @@ arithmetic cannot wrap a bad voice-table pointer into valid RAM.
 
 `tools/apu_reference.cpp` supplies a strict C transport to this maintained
 implementation. It accepts implemented 32-bit configuration/control writes
-and explicit PCM source pulls.
+and explicit PCM/ADPCM source pulls.
 Unsupported methods/widths fail persistently before successful completion or
 later RAM modification. The older broader machine register-file defaults are
 not admitted through this qualification boundary.
@@ -63,7 +63,8 @@ single sample or stereo pair straddling a page boundary. Each consumed frame
 advances the guest CBO while preserving its envelope byte. Interior loops wrap
 to LBO only after consuming the inclusive EBO sample. Pause and voice-lock
 prevent reads/advancement; a later seek or caller data write is visible on the
-next pull. Unsupported SSL/ADPCM/multipass/linked processing fails explicitly.
+next pull. Unsupported SSL/multipass/linked processing fails explicitly;
+ADPCM is added by the subsequent batch below.
 No host clock estimates samples, and no silence is invented to fill a request.
 
 This is the source stage before resampling, envelopes, routing and GP effects.
@@ -105,6 +106,69 @@ device-stage/test-only addition; no new actual audio-LLE title run is claimed.
 Final reference DLL SHA-256:
 `c4498668be4949a07821fd0006f480355fab3a5fb50bfa1667d80f4e37147cac`.
 
+## ADPCM source consumption using an independent permissive decoder
+
+The same maintained source stage now fetches complete Xbox ADPCM blocks through
+the real SGE/RAM path, decodes them and advances CBO in source frames. Each
+36-byte/channel block supplies 64 played frames, including the header predictor.
+Mono/stereo, mid-block pulls/seeks, inclusive end, loops across block boundaries,
+pause/lock and a fresh guest-data/page-map read on each new pull are covered.
+A failed block fetch does not advance CBO or invent output for that block;
+already consumed earlier blocks remain correctly reported. This still hands
+source end to the unfinished downstream owner rather than publishing completion.
+
+The codec is David Reid's unmodified **dr_wav**, pinned at
+`dfe8377631000664666519fdb83da193fd8037f4`, using its offered MIT-0 license.
+Our separate `apu_adpcm.c` adapter presents one block through the public IMA WAV
+memory API and consumes the first 64 frames. Its signed header-index clamping
+and ignored reserved byte follow the pinned emulator reference; unusual-header
+behavior is not a new hardware measurement. No GPL decoder body is added to
+this maintained implementation. Full upstream source, license, hash and credit
+are retained under `src/third_party/dr_wav`; pilot notices accompany test output.
+
+Qualification is bundled with the existing source fixtures:
+
+- **512 blocks** compare maintained dr_wav output with the separately linked
+  private Phobos HLE and xemu-derived APU reference. All 256 header-index byte
+  values, mono/stereo, saturation, reserved bytes, the unused final high nibble
+  and output guards are covered. These two older donor references share
+  provenance and are not counted as two independent silicon observations.
+- Authored +/-1 ramps independently test channel interleave, cross-page blocks,
+  requests around the 64-frame boundary, loops starting/ending inside blocks,
+  seek/write/remap visibility and partial DMA failure. PCM cases remain intact.
+- **56 original region/unit cases** now include 16 ADPCM cases. Original NTSC
+  region arithmetic and complete conversion helpers supply the real LBO/EBO
+  and the 64-frame byte-position quantization; no enclosing API/MMIO completion
+  is substituted. Exact source samples are checked independently.
+- **Six actual native mixer cases** compare PCM8/16 and ADPCM mono/stereo
+  interior loops at 48 kHz, unity gain, with the existing 3e-5 normalized-sample
+  tolerance. ADPCM uses the existing private HLE decoder into the actual native
+  PCM transport, independently of the maintained APU decoder. This comparison
+  covers that decode/transport boundary, not an original whole-driver run.
+
+APU/source tests pass **2/2 in 0.02s**, native source comparison in **1.85s**,
+and the combined native/contract suite **53/53 in 23.88s**. Evidence:
+`build/blinx/audio-adpcm-{decoder-build,source-build,native-build,full-build,full-tests}.log`
+and `audio-adpcm-source-original.aot-private.json`. Reference DLL SHA-256:
+`34862b33c0a9f44c7d3a5eeed8131becc5da69420b7326f605ae8975dcbac5ec`.
+The complete rebuild changed the native executable identity. A fresh
+**190.344s** default-native Blinx regression captured 18 frames: actual Demo,
+replayed interruption, loading/title return and Demo reentry. Both Start
+press/release pairs were delivered; no STOP/audio-stop/fault was logged.
+Evidence is `build/blinx/audio-adpcm-floor-attract/{run.aot-private.json,contact.png}`
+and `build/blinx/run-audio-adpcm-floor-attract.log`. Executable SHA-256:
+`24f32feb2c5bcfea8aa0818b19c674b12096649decc769f20389059ef976a358`.
+The harness terminated the still-running process at its budget; this is not
+natural-exit, endurance or cadence sign-off. No LLE-audio title run or family
+closure is claimed. The stable private Blinx repository pin remains unchanged.
+
+Reproduce the maintained-device checks with the root `test_apu_source` and
+`xlle_apu_reference` targets. Run `native_audio_source_reference.py --xbe <owned
+NTSC image> --library <reference DLL> --dependencies <DLL dependency directory>
+--output <private JSON>` and the pilot's `pilot_adpcm_reference` /
+`pilot_audio_source_lle` CTests. These select separate diagnostic reference and
+native executions; production does not run duplicate implementations.
+
 ## Withdrawn notifier assumption
 
 The audit found the older `post_voice_notifier` wrote a literal `1` into byte
@@ -126,13 +190,14 @@ needed, remain at the end of the burndown. Their necessity is not established.
 
 ## Remaining work, in order
 
-1. Complete the buffer pipeline around the new source stage: original control
-   ownership, notifier/SSL record qualification and delivery, stop/restart and
-   pipeline timing. Reuse the now-executable DMA/sample/loop floor and native
-   output comparison; retain guards for unsupported processing modes.
-2. Connect routing, pitch, gain, ADPCM and the GP graph to that transport.
+1. Advance the independent signal-processing path: connect routing, pitch,
+   gain and the existing GP donor to the maintained PCM/ADPCM source stage.
    Existing original byte/sample conversion, detach, decoder and real native
    output tests are reusable evidence, not a completed LLE audio device.
+2. Complete original control ownership, notifier/SSL record qualification and
+   delivery, stop/restart and pipeline timing. Keep the unqualified boundary
+   guarded while independent processing work advances; its need for a new
+   console observation has not been established.
 3. Execute the original DirectSound owner over maintained DMA/interrupt/memory
    services; integrate static title selection and validate actual Blinx audio,
    resource reuse and movie-relative timing against documented tolerances.

@@ -1,6 +1,7 @@
 // VP source/DMA boundary before pitch, envelopes, mixing and completion delivery.
 // Expected waveforms and index sequences are independent of the implementation.
 #include "machine/apu.hpp"
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <string>
@@ -116,7 +117,7 @@ static void boundaries() {
     }
     for(unsigned kind=0;kind<6;++kind) {
         Fixture f;f.reg(0x20304,0x50000000);f.reg(0x203dc,2);
-        if(kind==0)f.reg(0x20304,0x90000000); // ADPCM not admitted as PCM
+        if(kind==0)f.reg(0x20304,0x80000000); // unqualified ADPCM sample type
         if(kind==1)f.reg(0x20304,0x51000000); // SSL stream
         if(kind==2)f.reg(0x203d8,3);         // cursor outside source extent
         if(kind==3)f.reg(0x2030,0xfffffff8),f.reg(0x203a0,4096); // descriptor wrap
@@ -134,8 +135,71 @@ static void boundaries() {
     CHECK(!f.pull(out,1,n,end));CHECK(!n && !end && out[0]==42 && f.ram==before);
 }
 
+// At step index zero, nibbles 1/9 change the predictor by exactly +/-1 and
+// keep the index at zero. Expectations below require no decoder helper.
+static void adpcm_sources() {
+    for(unsigned channels:{1u,2u})for(bool looping:{false,true}) {
+        Fixture f;const unsigned base=4093;
+        f.reg(0x20304,0x90000000|((channels-1)<<27)|((channels-1)<<16)|(looping?1u<<25:0));
+        f.reg(0x203a0,base);f.reg(0x203a4,61);f.reg(0x203dc,130);
+        for(unsigned block=0;block<3;++block) {
+            const unsigned at=base+block*36*channels;
+            for(unsigned ch=0;ch<channels;++ch) {
+                f.sample(at+ch*4,int64_t(block*1000+ch*100),2);
+                f.sample(at+ch*4+2,0,1);f.sample(at+ch*4+3,0xff,1);
+                for(unsigned group=0;group<8;++group)for(unsigned byte=0;byte<4;++byte)
+                    f.sample(at+4*channels+group*4*channels+ch*4+byte,ch?0x99:0x11,1);
+                // Last high nibble is deliberately unlike the played ramp.
+                f.sample(at+32*channels+ch*4+3,ch?0x19:0x91,1);
+            }
+        }
+        const auto before=f.ram;
+        unsigned cursor=0,total=0;
+        for(unsigned request:{1u,30u,32u,1u,1u,63u,5u,137u}) {
+            if(!looping && total==131)break;
+            float out[276];for(float& v:out)v=91;
+            uint32_t n;bool ended;
+            CHECK(f.pull(out,request,n,ended));
+            CHECK(n==(looping?request:std::min(request,131-total)));
+            for(unsigned i=0;i<n;++i) {
+                for(unsigned ch=0;ch<2;++ch) {
+                    const unsigned c=channels==2?ch:0;
+                    const int expected=int(cursor/64)*1000+int(c)*100+(c?-int(cursor%64):int(cursor%64));
+                    CHECK(out[i*2+ch]==expected/32768.0f);
+                }
+                cursor=cursor==130?(looping?61:130):cursor+1;
+            }
+            total+=n;CHECK(ended==(!looping && total==131));
+            CHECK(out[n*2]==91 && f.word(Fixture::object+0x58)==(0xa5000000|cursor));
+        }
+        for(unsigned i=0;i<f.ram.size();++i)
+            if(i<Fixture::object+0x58 || i>=Fixture::object+0x5c)CHECK(f.ram[i]==before[i]);
+        // No cached decode may survive a new call, a seek or a page remap.
+        f.reg(0x203d8,39);f.sample(base,-1000,2);
+        float out[4];uint32_t n;bool ended;
+        CHECK(f.pull(out,1,n,ended));CHECK(n==1 && out[0]==-961/32768.0f);
+        f.reg(0x20140,Fixture::voice|(1u<<18));const unsigned reads=f.reads;
+        out[0]=91;CHECK(f.pull(out,1,n,ended));CHECK(!n && out[0]==91 && f.reads==reads+1);
+        f.reg(0x20140,Fixture::voice);f.reg(0x202fc,1);
+        CHECK(f.pull(out,1,n,ended));CHECK(!n);
+        f.reg(0x202fc,0);f.reg(0x203d8,0);
+        std::memcpy(f.ram.data()+0xe000,f.ram.data()+0x8000,4096);f.put(Fixture::sge,0xe000);
+        f.sample(base,2000,2);
+        CHECK(f.pull(out,1,n,ended));CHECK(n==1 && out[0]==2000/32768.0f && f.error.empty());
+    }
+    for(bool second_block:{false,true}) {
+        Fixture f;f.reg(0x20304,0x98010000); // stereo ADPCM
+        f.reg(0x203a0,second_block?4096-72:4093);f.reg(0x203dc,127);
+        f.put(Fixture::sge+8,0x12000); // fail either first split block or following block
+        float out[258];for(float& v:out)v=91;uint32_t n;bool ended;
+        CHECK(!f.pull(out,128,n,ended));CHECK(n==(second_block?64u:0u) && !ended);
+        CHECK(f.word(Fixture::object+0x58)==(0xa5000000|n));
+        CHECK(out[n*2]==91 && !f.error.empty());
+    }
+}
+
 int main() {
-    waveforms();controls();boundaries();
-    std::printf("APU source: %s (PCM formats/channels, scatter DMA, exact end, loops, pause/lock/seek, faults)\n",failures?"FAILED":"PASS");
+    waveforms();controls();boundaries();adpcm_sources();
+    std::printf("APU source: %s (PCM/ADPCM channels, scatter DMA, exact end, loops, pause/lock/seek, faults)\n",failures?"FAILED":"PASS");
     return failures?1:0;
 }
