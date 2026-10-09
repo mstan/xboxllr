@@ -9,6 +9,62 @@ The audio LLE floor still needs remaining envelope curves/filtering, GP transpor
 whole-driver integration before it is a qualified selectable title backend. Existing
 audible HLE output does not remove that requirement.
 
+## Original static-buffer stop and unlink - 2026-10-09
+
+`McpxApu::voice_off` now implements the bounded ordinary-buffer stop route.
+It reads the real voice state, clears ACTIVE, discards owned resampler history,
+then writes record A's DONE status and raises the actual notification IRQ.
+The voice remains linked until the original driver removes it. Source data,
+format/routing, cursor and other voices are retained. Failed state/status DMA
+does not publish a successful interrupt; a status-write failure can follow a
+real stop and is reported as a terminal partial operation. SSL, linked and
+multipass owners still stop at explicit guards instead of assuming record A.
+
+The supported notifier contract is **status only**. The original exercised
+reader tests byte 15 for value 1. Bytes 0..14 are preserved by this model and
+are **not qualified hardware payload values or hardware preservation claims**.
+The original-code fixture rejects any attempted access to those payload bytes.
+This restores real static stop work without reinstating the withdrawn constant
+envelope-information byte. Timestamp/envelope payload semantics remain open.
+
+With `--kernel <owned kernel-live.bin>`, `native_audio_control_reference.py`
+now executes the actual derived `CMcpxBuffer` vtable and **complete original
+stop owner `0x179a44`**, including the original kernel ordinal-128 time read
+and original command-submission callees. The time routine reads a coherent
+fixed shared-clock input; this does not qualify clock generation. Original
+`0x179e0e` observes pending/done through the device's actual shared notifier
+RAM. A maintained setup frame emits the inactive-voice trap; complete original
+unlink worker `0x178d7c` then updates the real list registers/voice memory,
+software list and pending-stop flag. No callee, result or notifier is replaced.
+The worker is invoked explicitly after verifying the real trap; the intervening
+full ISR/DPC dispatch is still an integration requirement.
+
+All **eight mono/stereo/envelope cases** pass, preserving ABI registers and
+stack on every complete original call. Root `apu_stop` verifies state-before-
+status-before-IRQ ordering, guarded failures, retained caller storage and
+**32 stop/rebind lifetimes** without stale resampler output. The native audio
+test additionally verifies both cursors freeze after a real Stop. Existing
+native detach/rebind tests retain eight output/silence/storage lifetimes and
+mono/stereo ADPCM rebinding; original settings detach/rebind remains five cases.
+Phobos `bcccf8c` stop/lifecycle behavior was rechecked. Its host-time cursor
+does not replace this sample/state evidence; existing native XAudio2 Stop,
+FlushSourceBuffers and destruction already provide the matching host operations.
+
+Validation: maintained APU tests **6/6 in 0.23s**, native suite **55/55 in
+35.31s**, followed by the expanded native Stop test **1/1 in 0.89s**. All
+earlier original configuration/source cases and the eight new stop cases pass.
+Both maintained-machine and native builds succeed. Reference DLL SHA-256:
+`a09888c9a13fd8915dd7eb3269aabd0127eeb1ba2f8231d2528f0105f675e968`.
+The native title executable is unchanged at `67b1af85...05a8e600`, preserving
+the previous **190.141s / 18-capture** Blinx regression. No redundant title
+run, new whole-title LLE audio qualification or family closure is claimed.
+Evidence: `build/blinx/audio-stop-{configuration,source,control,detach}-original.aot-private.json`
+and `audio-stop-{machine-build,native-build,full-tests,final-native-build}.log`.
+
+Next: actual SSL descriptor/source ownership and notification delivery, followed
+by the remaining processing and whole-driver integration. `.88` and `.113`
+remain open; **4/9** families remain qualified. Hardware-only questions stay last.
+
 ## Current GP memory/DMA batch and deferred question - 2026-10-09
 
 The maintained APU now owns real 24-bit GP X, MIX, Y and P banks shared by
@@ -455,14 +511,14 @@ Family **4/9** stays unchanged: this does not close audio.
 The audit found the older `post_voice_notifier` wrote a literal `1` into byte
 14 and selected SSLA even for streaming voices. Pinned xemu explicitly marks
 its envelope-information byte provisional. That is not independent correctness
-evidence. The placeholder is removed; VOICE_OFF now fails before writing a
-completion record or changing voice state. The strict audio reference never
-admitted that unqualified method. The inactive-voice trap/IRQ implementation
-remains executable and tested with its own stated input state.
+evidence. That placeholder was removed, initially guarding all VOICE_OFF work.
+The subsequent static-stop batch above restores only the independently bounded
+status/stop/idle/unlink route. Unknown payload bytes and SSL owners remain
+unqualified. The strict reference rejects payload reads and unsupported owners.
 
 This intentionally withdraws the old LLE notifier qualification. The default
-native audio/title route is unaffected, but the broader legacy LLE machine now
-stops at VOICE_OFF until its record/SSL ownership contract is implemented.
+native audio/title route is unaffected. The broader LLE machine still stops on
+unqualified stream/linked/multipass VOICE_OFF ownership.
 Original settings and real native detach/rebind evidence still stand. Before
 closing audio, establish the actual notifier byte/record meaning and delivery
 through original caller evidence and independent documentation/observations;
@@ -471,16 +527,16 @@ needed, remain at the end of the burndown. Their necessity is not established.
 
 ## Remaining work, in order
 
-1. Complete the remaining voice-processing path around the maintained source,
+1. Complete original control ownership, SSL descriptor/source consumption and
+   notification delivery, stop/restart and pipeline timing. Retain the qualified
+   static-stop route above while completing stream ownership. Unknown payload
+   fields remain explicit; do not block known offline source/control work on them.
+2. Complete the remaining voice-processing path around the maintained source,
    rate/envelope quantum and final 2D send stages: remaining envelope curves, voice
    scaling and filtering, then connect the existing GP donor. Validate actual stream
    output and transitions, not only stationary mixer comparisons.
    Existing original byte/sample conversion, detach, decoder and real native
    output tests are reusable evidence, not a completed LLE audio device.
-2. Complete original control ownership, notifier/SSL record qualification and
-   delivery, stop/restart and pipeline timing. Keep the unqualified boundary
-   guarded while independent processing work advances; its need for a new
-   console observation has not been established.
 3. Execute the original DirectSound owner over maintained DMA/interrupt/memory
    services; integrate static title selection and validate actual Blinx audio,
    resource reuse and movie-relative timing against documented tolerances.

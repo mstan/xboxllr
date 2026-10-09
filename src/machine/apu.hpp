@@ -218,7 +218,7 @@ public:
                 return;
             }
             if (method == kVoiceOff) {
-                voice_off(static_cast<uint16_t>(value & 0xffff));
+                voice_off(value);
                 return;
             }
         }
@@ -474,16 +474,37 @@ private:
         ++voice_on_methods_;
     }
 
-    void voice_off(uint16_t voice) {
+    void voice_off(uint32_t voice) {
         if (voice >= kMaxVoices) {
             device_fault("VOICE_OFF handle out of range");
             return;
         }
-        // The old xemu-derived route wrote a literal 1 into notifier byte 14
-        // and assumed SSLA even for streams. Upstream itself marks the envelope
-        // byte provisional. Do not publish completion from that placeholder.
-        // Qualify the notifier record/SSL owner before restoring this method.
-        device_fault("VOICE_OFF notifier metadata/ownership remains unqualified");
+        uint32_t state=0,format=0;
+        if(!read_voice_word(voice,kVoiceState,state) || !read_voice_word(voice,4,format)) {
+            device_fault("VOICE_OFF state DMA failed");return;
+        }
+        if(format&((1u<<21)|(1u<<22)|(1u<<24))) {
+            device_fault("VOICE_OFF stream/linked/multipass ownership remains unqualified");return;
+        }
+        // Original static-buffer completion observes record A's status byte.
+        // Envelope/timestamp payload fields are outside this bounded route;
+        // preserve them, never invent the former literal envelope-info byte.
+        const uint64_t address=uint64_t(reg32(kFenaddr))+16ull*(2+voice*4)+15;
+        uint8_t prior=0;
+        if(address>UINT32_MAX || !read_mem(static_cast<uint32_t>(address),&prior,1)) {
+            device_fault("VOICE_OFF notifier address DMA failed");return;
+        }
+        if(!write_voice_word(voice,kVoiceState,state&~kVoiceActive)) {
+            device_fault("VOICE_OFF state write failed");return;
+        }
+        voice_rates_[voice].reset();
+        const uint8_t done=1;
+        if(!write_mem(static_cast<uint32_t>(address),&done,1)) {
+            device_fault("VOICE_OFF notifier status write failed");return;
+        }
+        ++voice_off_methods_;
+        set_reg32(kIsts,reg32(kIsts)|kIstsFen|kIstsFev);
+        update_irq();
     }
 
     void emit_idle_voice(uint16_t voice) {

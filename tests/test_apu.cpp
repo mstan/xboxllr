@@ -137,7 +137,7 @@ int main() {
         [&](uint32_t,void*,size_t){return false;},
         [&](uint32_t,const void*,size_t){++writes;return false;});
     completion.mmio_write(base+0x20128,4,voice);
-    CHECK(completion_error.find("notifier metadata/ownership")!=std::string::npos);
+    CHECK(completion_error.find("state DMA failed")!=std::string::npos);
     CHECK(!writes); // no constant envelope byte, SSLA guess or fake success
 
     std::printf(fails ? "test_apu: %d checks failed\n" : "test_apu: ok\n", fails);

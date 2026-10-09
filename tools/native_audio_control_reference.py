@@ -2,7 +2,9 @@
 """Whole original 2D initialization/start owner -> real maintained APU methods.
 
 Explicit precondition: allocated mono/stereo voice, empty original owner list,
-DISPATCH_LEVEL, no spatial/output-buffer owner. No callee or return is replaced.
+DISPATCH_LEVEL, no spatial/output-buffer owner. Optional owned kernel enables
+complete original static-buffer stop, status polling and unlink-worker cases.
+No callee or return is replaced.
 The synchronous method model executes every admitted write before reporting free
 PIO capacity. This does not qualify interrupt/SSL/completion or the full driver.
 """
@@ -21,7 +23,7 @@ from unicorn.x86_const import (UC_X86_REG_EAX,UC_X86_REG_EBX,UC_X86_REG_ECX,UC_X
     UC_X86_REG_CS,UC_X86_REG_SS,UC_X86_REG_DS,UC_X86_REG_ES,UC_X86_REG_FS)
 
 
-def run(xbe,library,dependencies):
+def run(xbe,library,dependencies,kernel=None):
     blob=xbe.read_bytes();assert hashlib.sha256(blob).hexdigest()==IMAGE
     dependency=os.add_dll_directory(str(dependencies.resolve())) if dependencies else None
     dll=c.CDLL(str(library.resolve()))
@@ -31,8 +33,9 @@ def run(xbe,library,dependencies):
     dll.xlle_apu_reference_write.argtypes=[c.c_void_p,c.c_uint32,c.c_int,c.c_uint32]
     dll.xlle_apu_reference_read.argtypes=[c.c_void_p,c.c_uint32,c.POINTER(c.c_uint32)]
     dll.xlle_apu_reference_quantum.argtypes=[c.c_void_p,c.c_uint32,c.POINTER(c.c_float),c.POINTER(c.c_uint32),c.POINTER(c.c_int)]
+    dll.xlle_apu_reference_frame.argtypes=[c.c_void_p,c.c_uint64]
     cpu=Uc(UC_ARCH_X86,UC_MODE_32);cpu.mem_map(0x10000,0x1000000);cpu.mem_map(0x30000000,0x10000)
-    cpu.mem_map(0xfe820000,0x1000)
+    cpu.mem_map(0xfe800000,0x80000);cpu.mem_map(0x31000000,0x10000)
     for section in parse_xbe(blob)['sections']:
         if section['raw_size'] and section['address']+section['raw_size']<=0x1010000:
             cpu.mem_write(section['address'],blob[section['raw_offset']:section['raw_offset']+section['raw_size']])
@@ -44,12 +47,21 @@ def run(xbe,library,dependencies):
     cpu.mem_write(pcr+0x24,b'\x02')
     def put(a,v):cpu.mem_write(a,struct.pack('<I',v&0xffffffff))
     def get(a):return struct.unpack('<I',cpu.mem_read(a,4))[0]
-    def call(address,args):
+    kernel_hash=None;clock=0x0102030405060708
+    if kernel:
+        data=kernel.read_bytes();kernel_hash=hashlib.sha256(data).hexdigest()
+        assert kernel_hash=='827c39fd9dea2e831c7ef9091a2a4a4b13ac6ae9f69a2075c4b12e1b9ae97b3c'
+        word=lambda off:struct.unpack_from('<I',data,off)[0]
+        exports=word(word(0x3c)+120);entry=0x80010000+word(word(exports+28)+4*(128-word(exports+16)))
+        cpu.mem_map(0x80010000,0x70000);cpu.mem_write(0x80010000,data)
+        assert get(0x189e88)==0x80000080;put(0x189e88,entry) # bind real original kernel export
+        put(0x80042ec0,clock);put(0x80042ec4,clock>>32);put(0x80042ec8,clock>>32)
+    def call(address,args,context=None):
         put(stack,end)
         for n,arg in enumerate(args):put(stack+4+n*4,arg)
         put(stack+4+len(args)*4,0xabcdef01)
         saved=[(r,cpu.reg_read(r)) for r in (UC_X86_REG_EBX,UC_X86_REG_EBP,UC_X86_REG_ESI,UC_X86_REG_EDI)]
-        cpu.reg_write(UC_X86_REG_ECX,obj);cpu.reg_write(UC_X86_REG_ESP,stack)
+        cpu.reg_write(UC_X86_REG_ECX,obj if context is None else context);cpu.reg_write(UC_X86_REG_ESP,stack)
         cpu.emu_start(address,end,count=100000)
         assert cpu.reg_read(UC_X86_REG_EIP)==end and cpu.reg_read(UC_X86_REG_ESP)==stack+4+len(args)*4
         assert get(stack+4+len(args)*4)==0xabcdef01 and all(cpu.reg_read(r)==v for r,v in saved)
@@ -65,13 +77,26 @@ def run(xbe,library,dependencies):
         else:
             assert dll.xlle_apu_reference_write(instance,address,size,value),dll.xlle_apu_reference_error(instance)
             transactions.append(('write',address,value))
-    cpu.hook_add(UC_HOOK_MEM_READ|UC_HOOK_MEM_WRITE,transaction,begin=0xfe820000,end=0xfe820fff)
-    rows=[]
+    cpu.hook_add(UC_HOOK_MEM_READ|UC_HOOK_MEM_WRITE,transaction,begin=0xfe800000,end=0xfe87ffff)
+    # Two virtual mappings of real device-visible RAM. Original guest stores
+    # and device DMA share these bytes; no completion record is synthesized.
+    notify_physical=0x4000+16*(2+71*4);notifier_accesses=[]
+    def shared(uc,access,address,size,value,_):
+        assert instance
+        offset=notify_physical+address-notifiers if address<0x31000000 else 0x1000+address-0x31000000
+        if address<0x31000000:
+            assert (address-notifiers)%16==15 and size==1, 'notifier payload access outside qualified status contract'
+            notifier_accesses.append((access,address-notifiers,size))
+        if access==UC_MEM_READ:cpu.mem_write(address,bytes(ram[offset:offset+size]))
+        else:ram[offset:offset+size]=value.to_bytes(size,'little')
+    cpu.hook_add(UC_HOOK_MEM_READ|UC_HOOK_MEM_WRITE,shared,begin=notifiers,end=notifiers+63)
+    cpu.hook_add(UC_HOOK_MEM_READ|UC_HOOK_MEM_WRITE,shared,begin=0x31000000,end=0x31007fff)
+    rows=[];stops=[]
     for channels in (1,2):
         for amplitude,filter_phase in ((0,0),(1,3),(2,1),(3,2)):
-            cpu.mem_write(obj,bytes(0x100));cpu.mem_write(settings,bytes(0x100));cpu.mem_write(device,bytes(0x1000))
+            cpu.mem_write(obj,bytes(0x200));cpu.mem_write(settings,bytes(0x100));cpu.mem_write(device,bytes(0x1000))
             # Actual original class vtable, including the original format callee.
-            put(obj,0x1cbfc8);put(obj+0x78,settings);put(obj+8,device)
+            put(obj,0x1cbfec if kernel else 0x1cbfc8);put(obj+0x78,settings);put(obj+0x90,settings);put(obj+8,device)
             put(settings+0xc,1|(channels<<16)|(16<<24));put(settings+0x14,channels*2)
             assert call(0x178705,[0])==0
             assert get(obj+0x14)==0x5000e000|((channels-1)<<27)|((channels-1)<<16)
@@ -83,11 +108,12 @@ def run(xbe,library,dependencies):
             put(obj+0x68,notifiers);put(obj+0x6c,4);cpu.mem_write(notifiers,b'\xa5'*64)
             owner=device+0x728;put(owner,owner);put(owner+4,owner)
             ram=(c.c_ubyte*0x10000)();instance=dll.xlle_apu_reference_create(ram,len(ram));assert instance
+            ram[notify_physical:notify_physical+64]=b'\xa5'*64
             def word(a):return struct.unpack_from('<I',ram,a)[0]
             def store(a,v):struct.pack_into('<I',ram,a,v)
             def write(a,v):assert dll.xlle_apu_reference_write(instance,0xfe800000+a,4,v),dll.xlle_apu_reference_error(instance)
             try:
-                write(0x202c,0x1000);write(0x2030,0x9000);store(0x9000,0xa000)
+                write(0x202c,0x1000);write(0x2030,0x9000);write(0x115c,0x4000);store(0x9000,0xa000)
                 for n in range(128):
                     for channel in range(channels):struct.pack_into('<h',ram,0xa000+(n*channels+channel)*2,4096*(channel+1))
                 write(0x2054,0xffff);write(0x2060,0xffff);write(0x206c,0xffff);write(0x202f8,voice)
@@ -115,15 +141,54 @@ def run(xbe,library,dependencies):
                 assert bytes(cpu.mem_read(notifiers,64))==record, 'source work cannot invent completed notifiers'
                 rows.append(dict(channels=channels,amplitude_start=amplitude,filter_start=filter_phase,
                                  commands=commands,counters_after_start=ca|(cf<<16),frames=128))
+                if kernel:
+                    # Complete original stop owner, real kernel time read and
+                    # actual derived-vtable command submission (no replaced calls).
+                    notifier_accesses.clear()
+                    assert call(0x179e0e,[0],obj+0x68)==0
+                    before=bytes(ram[notify_physical:notify_physical+64]);state=word(base+0x54);cursor=word(base+0x58)
+                    write(0x1004,0x71);transactions.clear();call(0x179a44,[0])
+                    emitted=[(a,v) for op,a,v in transactions if op=='write']
+                    assert emitted==[(0xfe8202f8,voice),(0xfe820304,get(obj+0x14)),(0xfe820128,voice)]
+                    assert word(base+0x54)==state&~(1<<21) and word(base+0x58)==cursor
+                    expected=bytearray(before);expected[15]=1
+                    assert bytes(ram[notify_physical:notify_physical+64])==expected
+                    assert call(0x179e0e,[0],obj+0x68)==1
+                    assert all(call(0x179e0e,[i],obj+0x68)==0 for i in (1,2,3))
+                    assert int.from_bytes(cpu.mem_read(obj+0x80,8),'little')==clock
+                    assert int.from_bytes(cpu.mem_read(obj+0x12,2),'little')==0x8001
+                    assert get(device+0x324)==0
+                    count.value=99;assert dll.xlle_apu_reference_quantum(instance,voice,samples,c.byref(count),c.byref(ended))
+                    assert count.value==0 and word(base+0x58)==cursor
+                    # A real setup frame reports the inactive list entry. Run
+                    # the original unlink worker on those actual list registers.
+                    write(0x1504,1<<15);write(0x2000,8)
+                    assert dll.xlle_apu_reference_frame(instance,1),dll.xlle_apu_reference_error(instance)
+                    result=c.c_uint32()
+                    assert dll.xlle_apu_reference_read(instance,0xfe801300,c.byref(result)) and result.value==0x8000
+                    assert dll.xlle_apu_reference_read(instance,0xfe801304,c.byref(result)) and result.value==voice
+                    put(0x17df28,0x31000000);call(0x178d7c,[0])
+                    assert get(owner)==owner and get(owner+4)==owner
+                    assert int.from_bytes(cpu.mem_read(obj+0x12,2),'little')==1
+                    assert cpu.mem_read(obj+0x65,1)==b'\xff'
+                    assert word(base+0x7c)&0xffff==voice
+                    assert dll.xlle_apu_reference_read(instance,0xfe802054,c.byref(result)) and result.value==0xffff
+                    write(0x1100,0);write(0x1000,0xffffffff)
+                    assert dll.xlle_apu_reference_frame(instance,2)
+                    assert dll.xlle_apu_reference_read(instance,0xfe801000,c.byref(result)) and result.value==0
+                    assert notifier_accesses and all(a%16==15 and n==1 for op,a,n in notifier_accesses)
+                    stops.append(dict(channels=channels,amplitude_start=amplitude,filter_start=filter_phase,
+                                      emitted=emitted,cursor=cursor,notifier_accesses=notifier_accesses.copy(),
+                                      completion='actual static-buffer status A, real inactive-frame trap, complete original unlink worker'))
             finally:dll.xlle_apu_reference_destroy(instance);instance=None
     if dependency:dependency.close()
-    return dict(xbe_sha256=IMAGE,library_sha256=hashlib.sha256(library.read_bytes()).hexdigest(),cases=rows,
-                scope='whole original nonspatial init/filter-default/start routines, actual PIO/list/envelope/source effects; allocated voice and synchronous PIO preconditions; no full driver/completion/title qualification')
+    return dict(xbe_sha256=IMAGE,kernel_sha256=kernel_hash,library_sha256=hashlib.sha256(library.read_bytes()).hexdigest(),cases=rows,stop_cases=stops,
+                scope='whole original nonspatial init/filter-default/start; with kernel, complete static stop and unlink owners on actual device state; allocated voice, coherent clock input and synchronous PIO preconditions; no full ISR dispatch/SSL/notifier-payload/title qualification')
 
 
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__)
     for arg in ('xbe','library','output'):p.add_argument('--'+arg,type=Path,required=True)
-    p.add_argument('--dependencies',type=Path);args=p.parse_args()
-    result=run(args.xbe,args.library,args.dependencies);args.output.write_text(json.dumps(result,indent=2)+'\n')
-    print(f"PASS: {len(result['cases'])} whole original init/filter-default/start owners -> real PIO, list, counters and source/envelope output")
+    p.add_argument('--dependencies',type=Path);p.add_argument('--kernel',type=Path);args=p.parse_args()
+    result=run(args.xbe,args.library,args.dependencies,args.kernel);args.output.write_text(json.dumps(result,indent=2)+'\n')
+    print(f"PASS: {len(result['cases'])} whole original init/filter-default/start owners; {len(result['stop_cases'])} original stop/status/unlink cases on actual device state")

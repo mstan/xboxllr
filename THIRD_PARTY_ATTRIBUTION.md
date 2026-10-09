@@ -1406,6 +1406,17 @@ new adapter or vendored donor. These references are not independent hardware
 measurements. The combined pilot's earlier licensing restrictions still apply.
 See [audio qualification](pilots/native-title/AUDIO-LLE.md) for exact scope.
 
+## Original audio stop and notifier reference
+
+The 2026-10-09 static audio stop/status/unlink batch also consults pinned xemu
+`482088490c2d5983ed5e1eafbd09906157c1eca0` for voice/notifier register layout,
+and Phobos `bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0` for stop/detach lifecycle
+behavior. The device handler and fixtures are independently authored. Owned
+original XDK/kernel routines execute as private qualification inputs; no original
+instruction bytes are committed. xemu's provisional notifier payload write is
+not copied. No new GPL implementation body is incorporated; the existing
+private-pilot license limits remain. [Contract and evidence](pilots/native-title/AUDIO-LLE.md#original-static-buffer-stop-and-unlink---2026-10-09).
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

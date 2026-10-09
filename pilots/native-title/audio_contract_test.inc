@@ -74,6 +74,12 @@ static void test_audio(void)
     Sleep(250);a[1]=0x19300;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_GetStatus,a)==0 && MEM32(a[1])==5);
     CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_Stop,a)==0);
     CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_GetStatus,a)==0 && !(MEM32(a[1])&1));
+    a[1]=0x19304;a[2]=0x19308;
+    CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_GetCurrentPosition,a)==0);
+    uint32_t stopped_cursor=MEM32(a[1]),stopped_write=MEM32(a[2]);
+    Sleep(40);
+    CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_GetCurrentPosition,a)==0);
+    CHECK(MEM32(a[1])==stopped_cursor && MEM32(a[2])==stopped_write);
 #ifdef PILOT_AUDIO_DSP
     a[1]=2400;a[2]=2400;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetLoopRegion,a)==0);
     a[1]=1;CHECK((int32_t)audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetLoopRegion,a)<0);

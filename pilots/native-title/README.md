@@ -768,9 +768,12 @@ Phobos `bcccf8c`, `src/hle/hle_dsound.c` SetBufferData, supplies the lifecycle
 reference, not an imported body. Its model-level stop and settings replacement
 map onto the pilot's real native transport. The bounded floor consists of the
 complete original caller-owned settings helper, original caller argument prefix
-(`tools/native_audio_detach_reference.py`), and existing MCPX VOICE_OFF
-notifier/idle-IRQ test. This does not claim an exhaustive original driver/APU or
-original kernel allocator run. Native tests independently cover eight active
+(`tools/native_audio_detach_reference.py`), and the maintained static-buffer
+stop/status/idle-trap route with complete original stop and unlink owners.
+The old constant notifier-envelope claim was withdrawn; payload fields, SSL
+and full ISR dispatch remain open. See [current scope](AUDIO-LLE.md#original-static-buffer-stop-and-unlink---2026-10-09).
+This does not claim an exhaustive original driver/APU or original kernel
+allocator run. Native tests independently cover eight active
 PCM lifetimes, silence after detach, caller-owned versus internal storage,
 retained settings and mono/stereo ADPCM output after rebinding. The existing
 APU test passes; the original settings fixture passes five detach/rebind cases.

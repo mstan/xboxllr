@@ -2,7 +2,8 @@
 """Run original NTSC buffer settings detach/rebind with no substituted calls.
 
 The settings fixture uses caller-owned storage. Kernel allocation/free and an
-active hardware voice are outside this fixture; test_apu covers VOICE_OFF and
+active hardware voice are outside this fixture. The separate stop-reference
+fixture covers original completion polling over actual maintained VOICE_OFF;
 native device tests cover stop/drain/free and real output after rebinding.
 """
 import argparse

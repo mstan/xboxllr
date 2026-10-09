@@ -30,8 +30,11 @@ bool qualified_write(uint32_t offset) {
     if(offset>=0x20200 && offset<=0x2027c && !(offset&3))return true;
     switch(offset) {
     case 0x202c:case 0x2030: // voice table and source scatter/gather physical addresses
+    case 0x115c:case 0x1000:case 0x1004: // notifier table and real interrupt ownership
+    case 0x1100:case 0x1504:case 0x2000: // FE trap ownership and setup frame enable
     case 0x2054:case 0x2060:case 0x206c: // actual list heads
-    case 0x20120:case 0x20124: // antecedent and bounded VOICE_ON
+    case 0x2058:case 0x205c:case 0x2064:case 0x2068:case 0x2070:case 0x2074:
+    case 0x20120:case 0x20124:case 0x20128: // antecedent and bounded static-voice control
     case 0x202f8:case 0x202fc:case 0x20140:
     case 0x20300:case 0x20304:case 0x20308:case 0x2030c:
     case 0x20310:case 0x20314:case 0x20318:
@@ -54,10 +57,20 @@ EXPORT int xlle_apu_reference_read(void* instance,uint32_t address,uint32_t* val
     if(!instance)return 0;
     auto& ref=*static_cast<Reference*>(instance);
     if(!ref.failure.empty())return 0;
-    if(!value || address!=0xfe820010) {ref.failure="unqualified APU read transaction";return 0;}
+    const bool list=address>=0xfe802054 && address<=0xfe802074 && !(address&3);
+    const bool trap=address==0xfe801100 || address==0xfe801110 || address==0xfe801300 || address==0xfe801304;
+    if(!value || (!list && !trap && address!=0xfe820010 && address!=0xfe801000)) {
+        ref.failure="unqualified APU read transaction";return 0;
+    }
     // This bounded model consumes every admitted command synchronously. Thus
     // its PIO queue is empty after actual work; unknown methods stop on write.
     *value=ref.apu.mmio_read(address,4);return ref.failure.empty();
+}
+EXPORT int xlle_apu_reference_frame(void* instance,uint64_t frame) {
+    if(!instance)return 0;
+    auto& ref=*static_cast<Reference*>(instance);
+    if(!ref.failure.empty())return 0;
+    ref.apu.set_frame(frame);return ref.failure.empty();
 }
 EXPORT int xlle_apu_reference_write(void* instance,uint32_t address,int size,uint32_t value) {
     if(!instance)return 0;
