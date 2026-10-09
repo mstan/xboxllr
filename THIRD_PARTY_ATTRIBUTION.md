@@ -1112,6 +1112,12 @@ complete original display-mode initialization. The existing Phobos AV switch
 audit remains applicable; no donor shortcut replaces the original option 9
 execution used here.
 
+MakeMHz/Dustin Holden's [Project Stellar 1.8.0 hardware investigation](https://makemhz.com/blogs/news/project-stellar-firmware-update-1-8)
+(April 28, 2025), including its public notes/code screenshots, was inspected as
+a further display-timing reference lead. No pictured implementation or tables
+were copied, no proprietary source was obtained, and the article does not
+qualify the unresolved FD6806A0 handshake.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

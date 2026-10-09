@@ -985,3 +985,26 @@ GPU/title callback/resource and wider rendering acceptance remain open;
 burndown stays **4/9**, stable game pin `439a45b`. No hardware contact, new
 xemu runtime comparison, donor implementation copy or new HLE AV completion
 claim belongs to this batch.
+
+### Next initialization boundary: reference audit
+
+The owned original AvSetDisplayMode polls FD6806A0 until bits 0 and 4 agree,
+retains that value, programs the mode, then writes the inverse of the saved
+bit 0. It subsequently waits three real vblanks. This suggests a request/ack
+transaction, but original caller code alone does not identify the latched
+state, acknowledgment event or register reset state. No matching behavior is
+asserted or implemented from this hypothesis.
+
+Pinned xemu `pramdac.c` has no case for offset 6A0: its default read is zero
+and writes have no effect. That lets the caller's initial poll finish but
+does not qualify the transaction. Scoped nxdk, envytools display register,
+Cxbx and Phobos AV audits did not supply the missing device semantics.
+[MakeMHz's hardware investigation](https://makemhz.com/blogs/news/project-stellar-firmware-update-1-8)
+is a further behavioral lead: the public notes/code screenshots describe
+display timing work but do not expose this handshake. No private spreadsheet
+access, external contact or incorporation of the pictured source occurred.
+
+Keep this guard while qualifying the separately documented Conexant timing
+generator/reset and remaining mode-setting controls. If no matching public
+hardware evidence resolves the transaction, a bounded hardware probe will
+need separate authorization under `.12`; none was performed here.
