@@ -1,8 +1,9 @@
 ﻿# Memory and resource lifetime LLE
 
-Active serial family `beads-xbox.1.106`, after display `.105`. The family remains
-open: seven of nine gates remain. General virtual memory now has a selectable
-original-kernel route; this is one coherent part of the memory/lifetime family.
+Bounded serial family `beads-xbox.1.106`, after display `.105`, is qualified
+on runtime `4a5dd48`: six of nine gates remain after its integration. Original
+virtual memory, pool/contiguous queries, residency, physical-page relocation
+and resource ownership run through the maintained kernel/page bridge.
 LLE performance is not an acceptance requirement.
 
 ## Shared virtual-memory contract
@@ -74,9 +75,9 @@ Input/display remain native while virtual memory, pool/contiguous allocation
 and the existing page bridge are selected original services. This checks title
 progress, not a new speed or endurance claim.
 
-## Limits and remaining family work
+## Residency, queries and resource qualification
 
-The next memory batch also executes original ExQueryPoolBlockSize,
+The completed memory batch also executes original ExQueryPoolBlockSize,
 MmQueryAddressProtect, MmQueryAllocationSize, MmQueryStatistics and saved-display
 pointer get/set. Native ownership records are checked against actual returned
 extents/policy; they do not replace these original queries. Original statistics
@@ -131,7 +132,36 @@ the additional footprint assertions pass the focused graphics test (2.31s).
 An initial title probe reaches visible Demo play and then the subsequent movie,
 with real deferred-section unload. It was interrupted before the harness wrote
 its final manifest, so its 15 captures are progress evidence, not a completed
-qualification run. A controlled interruption/reentry run remains in progress.
+qualification run.
+
+The completed `memory-header-pool-qualified-20261008` run records **300.390s**,
+29 captures and no guards, with intentional deadline termination (exit 1).
+Captures 8/11/14 show Demo play, title return after Start and Demo reentry;
+19 retains Demo play, and 22/24/27/29 show the subsequent movie sequence.
+Executable SHA-256:
+`927ae08ec987f06254655439df02b177f8b2516be873e1771711f560023598cc`.
+Original memory, pool/contiguous/page services and calendar are selected;
+input, display, renderer and audio remain their native selections. No LLE
+speed requirement was imposed. Private host memory is 755,793,920 bytes at 30s
+and 823,959,552 at 300s; handles are 615 at both samples. This is a bounded
+regression, not proof of a long-run host-memory plateau.
+
+Game-owned native build/doctor pass on `4a5dd48`. The native suite passes
+**39/40 (16.19s)**: the unchanged event wait minimum-duration assertion fails
+at `event_objects_contract_test.inc:16`, matching existing issue `.99`.
+Memory, graphics ownership and all other tests pass. Preserve that failure
+for the scheduling/time family; no wait semantics or tolerance were altered.
+Actual game-owned native regression `local/runs/20261008-174209-attract/`
+completes **190.125s**, 19 captures and no guards. Captures 8/12/17 show Demo
+play, title return after Start and Demo reentry. Exit 1 is intentional deadline
+termination. Executable SHA-256:
+`aadec0a35ea9d9e488bd2addad5a4cba579a0498f006e6133da3999ac359d0d9`.
+The native 520-live-texture footprint is 2,150,400 bytes; differing pool packing
+is permitted. These final runtime results qualify the bounded memory gate.
+The game adopts this runtime with this documentation-only follow-up; the
+recorded executable identities remain those of `4a5dd48`.
+
+## Explicit boundaries and retained debt
 
 This is the memory boundary of the existing native loader and thread provider.
 It does not claim original Xe loader, filesystem-cache or thread-construction
@@ -149,21 +179,23 @@ must not be mistaken for exhaustive original memory statistics across providers.
   claimed as original evidence. No such request has been qualified for Blinx.
 - Guard/cache policies, dynamic executable-code invalidation and arbitrary CPU
   physical aliases remain outside the declared VM slice. Unknown behavior stops.
-- Pool/contiguous queries, statistics and residency now have original execution
-  and focused tests. Actual title qualification and the consolidated resource
-  lifetime audit remain pending for this next batch. Existing USB pinning and
-  graphics alias/lifetime evidence must be retained.
+- Pool/contiguous queries, statistics and residency have original execution,
+  focused tests and the completed actual-title qualification above. Existing
+  USB pinning and graphics alias/lifetime evidence is retained. Later thread,
+  file-cache and GPU completion providers still require their own qualification.
 - The slow combined input/display run recorded private host memory growing from
   768,409,600 bytes at 30s to 1,013,420,032 at 510s. Its cause and eventual bound
   are not established; it is not proof of a guest allocation leak. Keep this
-  observation separate from any production HLE endurance claim.
+  observation separate from any production HLE endurance claim. Issue `.107`
+  retains both runs' host-memory observations and the outstanding attribution
+  and plateau requirement; bounded guest ownership tests do not close it.
 - VM checkpoint `c65629b` is integrated by private Blinx commit `98eb899`.
   Its native title run reaches Demo/interruption/reentry in 190.125s with no
   guards. Native tests initially pass 39/40: the graphics clock's process-wide
   handle equality fails once, then passes three unchanged focused reruns.
   That failure remains recorded, and the assertion now prints both counts on
-  failure; its cause is not yet established. Do not close the family based on
-  VM fixtures alone.
+  failure; its cause is not yet established. Final runtime `4a5dd48` passes this
+  graphics test, but that result does not diagnose the earlier transient.
 
 Phobos `63f18f0334fbd8c00313c4bb565accf00627a4fd` memory services were inspected.
 Its guest/host namespace separation informs comparison, but its coarse query
