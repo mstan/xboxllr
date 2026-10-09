@@ -44,7 +44,7 @@ $env:PYTHONPATH='build/reference-python;tools'
 py -3 tools/native_filesystem_reference.py --snapshot build/blinx/io-boot-18m.ram.bin --library build/visibility-lle/libxlle_storage_reference.dll --dependencies C:/msys64/mingw64/bin --hdd ../machine/xbox-hdd-stockdash.img --expected ../machine/hdd/C/xboxdash.xbe --output build/blinx/filesystem-qualified.aot-private.json
 ```
 
-The completed run records 754 original interrupt deliveries, 6,540 sectors read
+The completed run records 756 original interrupt deliveries, 6,544 sectors read
 and 24 sectors written to the overlay. Qualified cases include:
 
 - Complete original file reads matching the independent file hash, explicit
@@ -56,6 +56,8 @@ and 24 sectors written to the overlay. Qualified cases include:
   immediate EOF/invalid-offset/alignment rejection and zero-length success.
 - A 9,001-byte FATX create/write/flush/close/reopen/read/delete sequence with
   generated independent payload bytes and a short-read count check.
+- Filtered directory enumeration of that real file, its actual length and the
+  end-of-enumeration status; async file notification when no event is supplied.
 
 ## Native correction from the floor
 
@@ -79,8 +81,16 @@ retained ownership, EOF and invalid-offset rejection across repeated lifetimes.
 The combined original-memory selection builds and passes **45/46 tests (21.24s)**.
 All file/media/storage tests pass. The sole failure is the unchanged minimum
 event-wait-duration assertion in existing `.99`; no timing tolerance is altered.
-Native game integration and actual attract regression are pending for this
-checkpoint; it is not yet an adopted game runtime.
+The game-owned native build/doctor pass and **40/40 tests pass (16.52s)** on
+runtime `9f151c6`. Actual `local/runs/20261008-182422-attract/` records **190.094s**,
+19 captures and no guards. Inspected captures 8/12/17 show Demo play, title
+return after Start and Demo reentry. Exit 1 is intentional deadline termination.
+Executable SHA-256:
+`e04263c4697cf244cad361b4f86ea28cd8b50f882e4f32a559d3c87f189d9f77`.
+The game adopts this runtime and the subsequent reference-test/documentation
+update; that update does not change the runtime or require another title replay.
+This validates the native notification correction, not an original-filesystem
+title run, new cadence measurement or endurance plateau.
 
 ## Remaining family work and observed differences
 
@@ -102,8 +112,11 @@ Further independently observed differences await the broader contract pass:
   treatment, not artificial HLE allocation failure solely to mimic internals.
 - Synchronous EOF and missing opens also preserve the tested IOSB. The native
   synchronous/general-open error publication has not yet been reconciled.
-- Directory enumeration, mount/repeated teardown, cross-run durability, pending
-  error timing, cancellation and the title-selected original route remain open.
+- Broader directory enumeration, mount/repeated teardown, cross-run durability,
+  pending error timing, cancellation and the title-selected original route
+  remain open. Blinx's extracted 3,197 files total 2,235,000,402 bytes and have
+  no file names over FATX's 42-byte component limit in the current audit. A
+  title-specific installation on a separate HDD image is not yet provisioned.
 
 Phobos remains the native file/path donor reference. Its current Fsc bridge
 only stores a page count and cannot provide this executable cache floor; its

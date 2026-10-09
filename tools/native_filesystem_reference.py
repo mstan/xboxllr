@@ -316,6 +316,17 @@ def main():
             async_cases.append(dict(offset=offset,length=amount,status=f'{status:08x}',
                                     iosb=list(iosb),event=signaled,file_wait=f'{file_wait:08x}'))
         result['async_completion_and_rejection']=async_cases
+        no_event=[]
+        for offset,wanted in ((0,0x103),(length,0xc0000011)):
+            ref.cpu.mem_write(0x10000330,struct.pack('<q',offset))
+            ref.cpu.mem_write(0x10000310,b'\xcd'*8)
+            status=ref.call(219,handle,0,0,0,0x10000310,buffer,2048,0x10000330)
+            iosb=struct.unpack('<II',ref.cpu.mem_read(0x10000310,8))
+            file_wait=ref.call(233,handle,0,0x100003f0)
+            assert status == wanted and file_wait == (0 if status == 0x103 else 0x102)
+            assert iosb == ((0,2048) if status == 0x103 else (0xcdcdcdcd,0xcdcdcdcd))
+            no_event.append(dict(offset=offset,status=f'{status:08x}',iosb=list(iosb),file_wait=f'{file_wait:08x}'))
+        result['async_file_notification']=no_event
         assert ref.call(187,event) == 0 and ref.call(187,handle) == 0
         ref.release(buffer)
         # Writable FATX work changes only the IDE controller's overlay.
@@ -338,6 +349,21 @@ def main():
         handle=reopened['handle']
         status,iosb,data=ref.read(handle,buffer,len(payload)+10,0)
         assert status == 0 and iosb == (0,len(payload)) and data == payload, 'reopen bytes/short read'
+        root=ref.open('\\Device\\Harddisk0\\Partition1\\',0x100001,0x21)
+        assert root['status'] == '00000000', root
+        mask=path.rsplit('\\',1)[1].encode('ascii')
+        ref.cpu.mem_write(0x10000600,struct.pack('<HHI',len(mask),len(mask)+1,0x10000620))
+        ref.cpu.mem_write(0x10000620,mask+b'\0')
+        status=ref.call(207,root['handle'],0,0,0,0x10000310,buffer,256,1,0x10000600,1)
+        assert status == 0, f'filtered directory: {status:08x}'
+        entry=bytes(ref.cpu.mem_read(buffer,256))
+        name_length=struct.unpack_from('<I',entry,60)[0]
+        file_length=struct.unpack_from('<Q',entry,40)[0]
+        assert entry[64:64+name_length] == mask and file_length == len(payload), 'directory name/size'
+        status=ref.call(207,root['handle'],0,0,0,0x10000310,buffer,256,1,0x10000600,0)
+        assert status == 0x80000006, f'directory end: {status:08x}'
+        result['filtered_directory']=dict(name=mask.decode(),bytes=file_length,end_status=f'{status:08x}')
+        assert ref.call(187,root['handle']) == 0
         collision,_=ref.create(path)
         assert collision == 0xc0000035, f'create collision: {collision:08x}'
         ref.cpu.mem_write(0x10000340,b'\x01')
