@@ -295,22 +295,27 @@ static void texture_mips() {
             }
             cursor+=bytes;
         }
-        for(unsigned sample=0;sample<8;++sample) {
-            const unsigned filter=sample&1?6:4;
-            const float rho=sample<4?4:2;
-            const float bias=sample==2||sample==3?-.5f:0;
-            const unsigned clamp=sample>=6?3:0;
+        for(unsigned sample=0;sample<12;++sample) {
+            const unsigned filter=(sample&1)||sample==10?6:4;
+            const float rho=sample<4||sample>=8?4:2;
+            const float bias=sample==2||sample==3||sample==10?-.5f:0;
+            const unsigned clamp=(sample==6||sample==7||sample==11)?3:0;
             f.emit(0x1b0c,0x4003ffc0|(clamp<<26));
             const int fixed_bias=int(bias*256);
             f.emit(0x1b14,0x02002000|(filter<<16)|(uint32_t(fixed_bias)&0x1fff));
             const float xy[3][2]={{8,8},{56,8},{8,56}};
             for(unsigned i=1;i<4;++i) {
+                f.put(Fixture::positions+i*16+12,bits(sample>=8?float(1u<<(i-1)):1.0f));
                 f.put(Fixture::colors+i*16,bits(.09375f+(xy[i-1][0]-8)*rho/8));
                 f.put(Fixture::colors+i*16+4,bits(.34375f+(xy[i-1][1]-8)*rho/8));
                 f.put(Fixture::colors+i*16+8,0);f.put(Fixture::colors+i*16+12,bits(1));
             }
             f.draw(0);++cases;CHECK(f.fault.empty());
-            const uint32_t want=clamp?colors[3]:(sample==3?0xff008080:sample<4?colors[2]:colors[1]);
+            // At (16.5,16.5), varying W=(1,2,4), Q=1 gives rho=2.86436443
+            // and LOD=1.51821506. These literal colors follow that independent
+            // rational-plane calculation; they are not LLE observations.
+            const uint32_t want=clamp?colors[3]:sample==8?colors[2]:sample==9?0xff007b84:
+                sample==10?0xff00fa05:(sample==3?0xff008080:sample<4?colors[2]:colors[1]);
             const uint32_t actual=f.get(Fixture::frame+(16*64+16)*4);
             for(unsigned shift:{0,8,16,24})CHECK(std::abs(int((actual>>shift)&255)-int((want>>shift)&255))<=1);
             CHECK(f.get(Fixture::report+12)==0 && f.gpu->generic_combiner_writes()>0);

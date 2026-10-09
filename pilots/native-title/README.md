@@ -39,11 +39,20 @@ masked writes. Independent coverage adds 64 original and native color-mask
 draws plus 16 original and native texture draws / 13,776 interior pixels on
 each route. These qualify the documented software contract; complete scene
 pixels and Xbox silicon precision remain open.
-The updated native executable passes one 250.281s attract/interruption/title/
-reentry check with 23 presents and all five real replay transitions, without
-STOP/FAULT. The bounded harness termination is intentional.
-The updated executable passes a 250.422s/23-present attract/interruption/reentry
-regression with all five real input transitions and no pilot/audio stop or fault.
+Variable projected sampling additionally passes 432 independent cases / 864
+draws / 743,904 interior pixels on each route: LLE within one channel step and
+native GPU within two. HLE uses an authored GPU quotient-footprint adapter and
+preserves normalized XRGB border alpha through cached upload preparation.
+The retained affine bound stays one; default-Q cases remain exact. Permanent
+LLE vertex-color coverage now passes 522 draws, and focused native graphics
+passes 6/6. Broader formats/raster/whole-scene pixels remain open.
+Set `XLLE_PILOT_AUDIO_OUTPUT_MUTE=1` for silent XAudio2 title checks; source,
+mixer and DSP processing continue with only mastering output gain suppressed.
+The final muted native check passes 340.204s / 33 presents with all five real
+input transitions, demo/pause, title return, reentry, continued demo movement
+and subsequent movie playback, without STOP/FAULT. A preceding 250s check
+missed a short startup pulse and is retained without claiming replay success;
+the corrective fixture shifts the two one-second pulses to 45s and 140s.
 Overall qualification
 remains 4/9; see [graphics evidence and remaining scope](GRAPHICS-LLE.md).
 

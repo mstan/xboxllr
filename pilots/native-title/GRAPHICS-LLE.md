@@ -636,7 +636,7 @@ Reproduction uses the existing dependency setup:
 This qualifies the bounded authored texture component. It does not qualify
 complete retained scene pixels: enabled DXT1 noise still has its explicit
 hardware guard, complete captured combiner/raster composition remains open,
-and variable perspective footprints, broader texture layouts and complete
+and additional perspective fields, broader texture layouts and complete
 combiner/raster composition need their own gates. Exact silicon LOD/rounding,
 filter crossover rules and enabled-noise error bounds stay deferred last.
 
@@ -698,10 +698,109 @@ with `pilot_shader_test --shader-arithmetic-reference` and
 older runs remain historical observations, not independent hardware goldens.
 Full scene pixels and the enabled-noise hardware gate remain open.
 
+## Variable projected texture footprints
+
+`tools/native_texture_reference.py --projected-only` independently derives
+texture coordinates and their quotient derivatives from affine homogeneous
+planes. Four positive W/Q fields exercise ARGB, normalized XRGB and DXT1,
+nearest/linear MIN and MAG, disabled/nearest/linear mip selection, LOD bias,
+base-level clamps and mixed-axis repeat/edge/border addressing. Deliberately
+offset texel coordinates and nearest-mip bias avoid exact rounding ties.
+The oracle does not read either renderer's results to construct expectations.
+
+Both routes pass **432 cases / 864 draws / 743,904 interior pixels** each.
+Original owned XDK execution submits complete draws to maintained LLE, which
+meets the existing one-channel-step bound without a production sampler change.
+Native Phobos GPU results meet a two-channel-step bound for this variable
+corpus. The retained 258-case affine corpus still meets its one-step bound;
+eight default-Q cases remain exact. Repeated complete frame readbacks must
+agree, including edges, and background pixels remain exact. These are finite
+corpus bounds, not universal NV2A precision guarantees.
+
+The initial 72-case native subset differed by up to 137 channel steps. The
+native implicit LOD calculation uses coarse differences and an orthogonalized
+footprint, as described in the
+[D3D11.3 functional specification](https://microsoft.github.io/DirectX-Specs/d3d/archive/D3D11_3_FunctionalSpec.htm).
+The authored adapter reconstructs homogeneous planes using `tc / SV_POSITION.w`
+under the documented
+[DirectX position-W convention](https://github.com/microsoft/DirectXShaderCompiler/blob/main/docs/SPIR-V.rst),
+differentiates the quotient at the fragment, and supplies orthogonal
+`SampleGrad` gradients with the maintained isotropic footprint. Native GPU
+filtering, bias, clamps, resources and shader caching remain in use. Single-level
+views with equal MIN/MAG retain ordinary `Sample`. One-level views with different
+MIN/MAG preserve an ideal positive-LOD MIN choice across native LOD quantization
+by raising only that footprint to at least 1.0078125; their view cannot select a
+different mip. Existing constant-buffer lanes carry the requested bias and the
+MIN/MAG flag without an additional upload or shader-cache key.
+
+XRGB border cases expose a separate native storage mismatch. The pinned
+[nxdk border-color procedure](https://github.com/abaire/nxdk_pgraph_tests/blob/706a41e61188d3b08e5b1bb2a32b74ad062a883d/src/tests/texture_border_color_tests.cpp)
+documents NV2A border RGBA independently of texture format. Native BGRX storage
+forces alpha to one even for a border sample. Normalized XRGB now uses BGRA
+native storage with opaque texels filled in the existing unswizzle scratch on
+dirty upload. Original guest format, queries and raw shadow bytes remain XRGB;
+unchanged payloads still skip preparation/upload. No additional allocation or
+copy is introduced, and scratch allocation failure stops explicitly. Linear or
+renderable XRGB is outside this correction's qualified scope.
+
+Permanent C++ coverage adds 32 projected mip/bias/clamp draws across direct and
+callback memory, compiled and interpreted shaders, and both DXT1 mode settings:
+**522 vertex-color draws / zero failures**. Focused native graphics checks pass
+**6/6**. Retained native affine/default-Q references pass, as do 196 fog cases
+with 294 draws / 331,632 interior pixels. The audio suite is not repeated. Private evidence uses `build/blinx/projected-texture-*`, including
+`projected-texture-lle.aot-private.json`, the native binary expectations and
+`projected-texture-qualified-native.log`. Reproduce with the texture command
+above plus `--projected-only` and fresh output paths, then execute
+`pilot_shader_test --texture-reference` against that binary.
+
+The HLE changes retain cached native rendering and dirty-upload coalescing;
+they do not invoke LLE or CPU pixel rendering during title execution. This
+structural check does not establish an FPS bound. Exact silicon LOD precision,
+texel/mip ties, filter crossover and enabled-noise pixels remain deferred last.
+Broader formats/layouts, other projected fields and complete scene
+combiner/raster composition still need qualification. Graphics remains partial,
+with **4/9 service families qualified**.
+
+For silent graphics regressions, `XLLE_PILOT_AUDIO_OUTPUT_MUTE=1` sets only the
+XAudio2 mastering voice gain to zero before source voices are created. The
+source queues, mixer, DSP and guest audio route continue executing. The default
+audio behavior is unchanged. This option is output suppression for validation,
+not an audio-correctness qualification.
+
+The final native executable SHA-256
+`aa24c67e00b5a51e9c14ca1f94c32ba643ca731b57180a42cdc19af3f3fcb1aa`
+passes `projected-texture-delayed-reentry-20261009/run.aot-private.json`:
+**340.204s / 33 presents**, all five real input transitions, and no pilot,
+audio or input stop or fault. The reviewed frames show first demo/pause at
+13-14, title return at 16-17, reentry at 22-23, continued demo movement at
+24-30, and subsequent movie playback at 31-33. Both source audio buffers and
+DSP/mixer processing execute with mastering output muted. The harness's return
+code 1 is intentional bounded termination. This confirms the observed native
+rendering/input sequence; original speed, A/V timing and complete scene-pixel
+agreement remain separate gates.
+
+The preceding 250.157s / 20-present run is retained as a limited observation:
+it has no STOP/FAULT and confirms output mute, but delayed startup polling
+missed the short Start pulse at 15-16s. It does not pass the complete replay
+sequence. The corrective fixture uses one-second Start pulses at 45-46s and
+140-141s, with initial release at zero and a 340s bound. This changes only test
+stimulus timing; title/input implementation is unchanged. The earlier rebuild
+also encountered Windows commit-limit exhaustion and passed on a serial retry.
+
+Owner visual review can flag missing objects, wrong textures/lighting/fog,
+flicker and transition defects using the retained `scene-review.png` and its
+full-resolution `review-frame-*.png` files. Report the frame number and visible
+difference. A controlled listening run can similarly identify distortion,
+wrong pitch, clicks, missing sound and obvious sync drift. Human acceptance
+records the experience in those observed scenes; exact pixel/channel values,
+shader/state semantics and timing bounds still require independent measured
+evidence. Automated graphics regressions use output mute; listening checks are
+owner initiated.
+
 ## Remaining offline work
 
-Continue variable projected footprints, broader exercised texture/state layouts
-and raster outcomes toward complete scene composition.
+Continue broader exercised texture/state layouts and raster outcomes toward
+complete scene composition, retaining the bounded projected-footprint gates.
 The original DXT1-noise control transport is implemented and independently
 qualified above; its enabled pixel effect remains in the deferred hardware queue.
 The two earlier corpora contain 64 programs writing `oFog.x` with fog enabled;

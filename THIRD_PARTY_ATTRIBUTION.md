@@ -1544,6 +1544,23 @@ programs and default-Q sampling tests are authored here; no external code body
 or specification prose is copied. This is evidence for the maintained software
 contract, not a new Xbox silicon golden.
 
+The projected-texture follow-up additionally consults Microsoft's
+[D3D11.3 functional specification](https://microsoft.github.io/DirectX-Specs/d3d/archive/D3D11_3_FunctionalSpec.htm)
+for native footprint/filter behavior and the
+[DirectXShaderCompiler position-W documentation](https://github.com/microsoft/DirectXShaderCompiler/blob/main/docs/SPIR-V.rst)
+for the DirectX pixel-input convention. The independently authored quotient
+oracle, cached GPU gradient adapter and mixed MIN/MAG handling implement the
+maintained software contract; no Microsoft implementation body or prose is
+incorporated. This does not supply new Xbox silicon precision evidence.
+
+The normalized-XRGB preparation correction consults the MIT
+[nxdk texture-border procedure](https://github.com/abaire/nxdk_pgraph_tests/blob/706a41e61188d3b08e5b1bb2a32b74ad062a883d/src/tests/texture_border_color_tests.cpp),
+pinned at `706a41e61188d3b08e5b1bb2a32b74ad062a883d`, for format-independent
+NV2A border RGBA. The BGRA native storage mapping and opaque-X fill in existing
+dirty-upload scratch are authored here; no nxdk implementation body is copied.
+The original format/shadow and existing cache remain owned by this adapter.
+Existing Phobos/private donor license limits remain unchanged.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

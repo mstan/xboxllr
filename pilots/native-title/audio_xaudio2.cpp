@@ -292,6 +292,11 @@ int32_t pilot_audio_open(void)
     if(FAILED(hr))fprintf(stderr,"[AUDIO INIT] XAudio2Create=%08x\n",(unsigned)hr);
     if(SUCCEEDED(hr))hr=engine->RegisterForCallbacks(&engine_events);
     if(SUCCEEDED(hr))hr=engine->CreateMasteringVoice(&master,2,48000);
+    char output_mute[2]{};
+    if(SUCCEEDED(hr) && GetEnvironmentVariableA("XLLE_PILOT_AUDIO_OUTPUT_MUTE",output_mute,sizeof(output_mute))==1 && output_mute[0]=='1') {
+        hr=master->SetVolume(0.0f);
+        if(SUCCEEDED(hr))fprintf(stderr,"[AUDIO OUTPUT] mastering voice muted; source/mixer/DSP remain active\n");
+    }
     if(FAILED(hr))fprintf(stderr,"[AUDIO INIT] mastering=%08x\n",(unsigned)hr);
     if(SUCCEEDED(hr)) {
         effects=new(std::nothrow) Effects();if(!effects)hr=E_OUTOFMEMORY;

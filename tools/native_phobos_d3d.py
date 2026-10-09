@@ -16,7 +16,7 @@ from native_d3d_bump import prepare_bump
 from native_d3d_raster import prepare_raster
 from native_d3d_fvf import prepare_fvf
 from native_d3d_feedback import prepare_feedback
-from native_d3d_texture import prepare_texture_views
+from native_d3d_texture import prepare_texture_views, prepare_projected_mips, prepare_xrgb_border
 
 PIN = 'bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0'
 GIT = 'C:/Program Files/Git/cmd/git.exe'
@@ -82,7 +82,9 @@ def prepare(donor, output, reference):
                 if name not in PHOBOS_COM:
                     code=code[:start]+'{ pilot_d3d_backend_stop("unqualified backend method: '+name+'"); }'+code[end:]
             if path.name=='d3d8_shaders.c': code=shaders(code)
+            if path.name=='d3d8_resources.c': code=prepare_xrgb_border(code)
             if path.name=='d3d8_combiners.c':
+                code=prepare_projected_mips(code)
                 # A zero-stage final combiner is real work, not FFP. The
                 # adapter's nonzero selector distinguishes it from PS disable.
                 code=code.replace('    if (state->num_stages < 1) state->num_stages = 1;','')

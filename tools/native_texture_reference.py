@@ -65,19 +65,39 @@ def sample_level(image,u,v,linear,address_u,address_v,border):
                 for dy in (0,1) for dx in (0,1)) for c in range(4)]
 
 
+def projected_field(row,x,y):
+    # Closed-form field for the authored right triangle. Q/W weights project
+    # its two independent coordinate axes; no shader/triangle decoder is used.
+    r=[q/w for q,w in zip(row['q'],row['w'])]
+    dx=x-8;dy=y-8;hx=(r[1]-r[0])/48;hy=(r[2]-r[0])/48
+    denominator=r[0]+hx*dx+hy*dy
+    scale=row['rho']/row.get('base',8)
+    u=row['origin'][0]+scale*r[1]*dx/denominator
+    v=row['origin'][1]+scale*r[2]*dy/denominator
+    ux=scale*r[1]*(denominator-dx*hx)/denominator**2
+    uy=-scale*r[1]*dx*hy/denominator**2
+    vx=-scale*r[2]*dy*hx/denominator**2
+    vy=scale*r[2]*(denominator-dy*hy)/denominator**2
+    rho=row.get('base',8)*max(math.hypot(ux,vx),math.hypot(uy,vy))
+    return u,v,rho
+
+
 def expected_pixels(row,images):
-    # Uniform dyadic derivative: exact analytic footprint, independent of ISA.
-    lod=max(row['maxlevel'],math.log2(row['rho'])+row['bias'])
-    last=len(images)-1;lod=min(last,lod);linear=row['mag']==2 if lod<=0 else row['min']==2
-    if lod<=0 or row['mip']==0:levels=[(0,1)]
-    elif row['mip']==1:levels=[(min(last,math.floor(lod+.5)),1)]
-    else:levels=[(math.floor(lod),1-(lod%1)),(min(last,math.floor(lod)+1),lod%1)]
     result=[]
     for y in range(10,54):
         for x in range(10,54):
             if x+y+1>=62:continue
-            u=row['origin'][0]+(x+.5-8)*row['rho']/row.get('base',8)
-            v=row['origin'][1]+(y+.5-8)*row['rho']/row.get('base',8)
+            if row.get('projected'):
+                u,v,rho=projected_field(row,x+.5,y+.5)
+            else:
+                u=row['origin'][0]+(x+.5-8)*row['rho']/row.get('base',8)
+                v=row['origin'][1]+(y+.5-8)*row['rho']/row.get('base',8)
+                rho=row['rho']
+            lod=max(row['maxlevel'],math.log2(rho)+row['bias'])
+            last=len(images)-1;lod=min(last,lod);linear=row['mag']==2 if lod<=0 else row['min']==2
+            if lod<=0 or row['mip']==0:levels=[(0,1)]
+            elif row['mip']==1:levels=[(min(last,math.floor(lod+.5)),1)]
+            else:levels=[(math.floor(lod),1-(lod%1)),(min(last,math.floor(lod)+1),lod%1)]
             colors=[(sample_level(images[l],u,v,linear,row['u'],row['v'],(18,52,86,127)),weight) for l,weight in levels]
             result.append((y*64+x,[round(sum(color[c]*weight for color,weight in colors)) for c in range(4)]))
     return result
@@ -105,6 +125,26 @@ def cases():
                 yield dict(dxt=dxt,pattern=True,mag=2,min=2,mip=2,rho=rho,bias=0,maxlevel=0,u=1,v=1,origin=[.09375,.34375],w=w,q=q)
 
 
+def projected_cases():
+    for w,q in (([1,1,1],[1,2,4]),([1,2,4],[1,1,1]),
+                ([1,2,4],[4,1,2]),([2,4,8],[.5,1,1])):
+        for fmt in ('argb','xrgb','dxt'):
+            for mag,minf,mip in ((1,1,0),(2,2,0),(1,2,0),(2,1,0),
+                                (1,1,1),(2,2,1),(1,1,2),(2,2,2)):
+                for rho in (.25,2,8):
+                    yield dict(dxt=fmt=='dxt',xrgb=fmt=='xrgb',pattern=True,
+                        mag=mag,min=minf,mip=mip,rho=rho,bias=.125 if mip==1 else 0,maxlevel=0,
+                        # Offset exact nearest-texel ties; silicon boundary
+                        # rounding remains a separate deferred question.
+                        u=1,v=1,origin=[.09423828125,.34423828125],w=w,q=q,projected=True)
+            for u,v in ((1,3),(3,1),(4,1),(1,4),(4,3),(3,4)):
+                for mip in (0,2):
+                    yield dict(dxt=fmt=='dxt',xrgb=fmt=='xrgb',pattern=True,
+                        mag=2,min=2,mip=mip,rho=2,bias=.25 if mip else -.25,
+                        maxlevel=1 if mip else 0,u=u,v=v,
+                        origin=[-.34326171875,.90673828125],w=w,q=q,projected=True)
+
+
 def run(args):
     ref=Reference(args);rows=[];compared=0
     count=ref.lib.xlle_nv2a_reference_draw_count
@@ -123,7 +163,7 @@ def run(args):
         state[0]=0x18200000;state[34]=0x08200000;state[26]=state[45]=0xc00;state[53]=1
         state[8]=0xc;state[9]=0x1c00;state[54]=1
         ref.put(pixel,1,1,pixel+12,*state);ref.call('D3DDevice_SetPixelShader',[pixel])
-        samples=list(cases())
+        samples=list(projected_cases() if args.projected_only else cases())
         if args.implicit_q:
             # A small sampling corpus tests observable default Q/W. Poisoned
             # input W/Q must be ignored; coordinates/expectations stay authored.
@@ -172,7 +212,8 @@ def run(args):
             rows.append(dict(**row,methods={hex(k):hex(v) for k,v in methods.items() if 0x1b00<=k<0x1b40}))
         ref.set_stream(0,0,0)
     finally:ref.close()
-    return dict(xbe_sha256=XBE_SHA,cases=rows,original_draws=2*len(rows),interior_pixels=compared)
+    return dict(xbe_sha256=XBE_SHA,cases=rows,original_draws=2*len(rows),interior_pixels=compared,
+        reference_mode='projected' if args.projected_only else 'implicit-q' if args.implicit_q else 'affine')
 
 
 if __name__=='__main__':
@@ -180,12 +221,15 @@ if __name__=='__main__':
     for name in ('xbe','binding','library','dependencies','output'):parser.add_argument('--'+name,type=Path,required=True)
     parser.add_argument('--inspect',action='store_true')
     parser.add_argument('--native-cases',type=Path)
-    parser.add_argument('--implicit-q',action='store_true')
+    modes=parser.add_mutually_exclusive_group()
+    modes.add_argument('--implicit-q',action='store_true')
+    modes.add_argument('--projected-only',action='store_true')
     args=parser.parse_args();handles=[os.add_dll_directory(str(args.dependencies.resolve()))]
     result=run(args);args.output.write_text(json.dumps(result,indent=2)+'\n')
     if args.native_cases:
         with args.native_cases.open('wb') as file:
-            file.write(struct.pack('<4I',0x54584c58,1,len(result['cases']),int(args.implicit_q)))
+            file.write(struct.pack('<4I',0x54584c58,1,len(result['cases']),
+                1 if args.implicit_q else 2 if args.projected_only else 0))
             for row in result['cases']:
                 base=row.get('base',8);images,encoded=image_chain(row['dxt'],row['pattern'],base)
                 if row.get('xrgb'):
