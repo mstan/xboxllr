@@ -28,6 +28,42 @@ static uint8_t gpu_test_encoder_read(uint8_t reg)
     uint8_t result=(uint8_t)gpu_test_smb_port(0xc006,0,0);
     gpu_test_smb_port(0xc000,1,0x10);return result;
 }
+static void gpu_test_av_blanking(void)
+{
+    uint32_t known=0,high=0;
+    CHECK(gpu_lle.av_outputs(gpu_lle.device,&known,&high)==-1 && known==0);
+    // This fixture starts before encoder programming and observes raw digital
+    // output. It does not equate raw scanout with filtered/encoded TV output.
+    uint32_t base=physical_allocate(4096,0,0x03ffffff,4096,PAGE_READWRITE);
+    CHECK(base);MEM32(base)=0xff302010;MEM32(base+4)=0xff605040;
+    gpu_test_write(0x600800,base&0x03ffffff);
+    gpu_test_write(0x680820,1);gpu_test_write(0x680800,0);
+    gpu_lle.write(gpu_lle.device,0xfd6013d4,1,0x13);
+    gpu_lle.write(gpu_lle.device,0xfd6013d5,1,1);
+    gpu_lle.write(gpu_lle.device,0xfd6013d4,1,0x28);
+    gpu_lle.write(gpu_lle.device,0xfd6013d5,1,3);
+    for(unsigned wide=0;wide<2;++wide) {
+        pilot_cpu_out8(0x80d6,(uint8_t)(4+wide));
+        pilot_cpu_out8(0x80d3,5);pilot_cpu_out8(0x80d8,4);
+        CHECK(gpu_lle.av_outputs(gpu_lle.device,&known,&high)==(wide?0:-2));
+        for(unsigned repeat=0;repeat<2;++repeat) {
+            uint32_t args[]={0,9,1,0};call_kernel(2,args,4);
+            uint8_t pixels[8];uint32_t width=0,height=0;
+            CHECK(gpu_lle.scanout(gpu_lle.device,pixels,sizeof(pixels),&width,&height));
+            const uint8_t black[]={0,0,0,255,0,0,0,255};
+            CHECK(width==2 && height==1 && !memcmp(pixels,black,8));
+            CHECK(MEM32(base)==0xff302010 && MEM32(base+4)==0xff605040);
+            args[2]=0;call_kernel(2,args,4);
+            CHECK(gpu_lle.scanout(gpu_lle.device,pixels,sizeof(pixels),&width,&height));
+            const uint8_t expected[]={0x30,0x20,0x10,255,0x60,0x50,0x40,255};
+            CHECK(!memcmp(pixels,expected,8));
+            CHECK(gpu_lle.av_outputs(gpu_lle.device,&known,&high)==(wide?1:2));
+            CHECK(known==((1u<<19)|(1u<<22)|(1u<<24)) && high==(wide<<22));
+        }
+    }
+    gpu_test_write(0x600800,0);physical_free(base);
+    CHECK(!gpu_lle.error(gpu_lle.device));
+}
 #ifdef PILOT_GPU_FILES_WORKER
 static void gpu_test_encoder_hal_write(uint8_t reg,uint8_t value)
 {
@@ -65,6 +101,7 @@ static void gpu_test_encoder_reset(void)
 #endif
 static void gpu_test_av(void)
 {
+    gpu_test_av_blanking();
     const uint32_t cases[][2]={{6,0x004e0101},{13,0},{16,0},{17,0}};
     for(unsigned i=0;i<sizeof(cases)/sizeof(cases[0]);++i) {
         MEM32(0x15000)=0x11223344;MEM32(0x15004)=0xcdcdcdcd;MEM32(0x15008)=0x55667788;
@@ -196,4 +233,23 @@ static void test_gpu_lle_transport(void)
         CHECK(FreeLibrary(gpu_lle.library));gpu_lle.library=NULL;
     }
     fprintf(stderr,"PASS: original GPU reservation and physical-zero translation; real shared bootstrap jump/cache publication; compiled MMIO, owned DMA, held/released semaphore, protection/release rejection, three transport lifetimes\n");
+}
+
+static void test_gpu_lle_av_mode_guard(void)
+{
+    install_fault_handler();
+#ifdef PILOT_GPU_FILES_WORKER
+    CHECK(!pilot_io_device_files(memory));
+#endif
+    gpu_lle_open();
+    // Original AvSetDisplayMode starts the real cold-mode sequence. Do not
+    // replace its callees or manufacture the next hardware handshake result.
+    uint32_t args[]={0xfd000000,0,0,0x12,2560,0},result=0xcccccccc;
+    const char *error=pilot_io_device_lle(3,memory,args,&result);
+    CHECK(error && strstr(error,"unmodelled NV2A read at fd6806a0"));
+    uint32_t known=0,high=0;
+    CHECK(gpu_lle.av_outputs(gpu_lle.device,&known,&high)==-1);
+    CHECK(known==(1u<<19) && high==(1u<<19));
+    CHECK(result==0xcccccccc); // failed initialization cannot publish success
+    fprintf(stderr,"PASS: original mode setup drives GPIO19, then rejects unqualified PRAMDAC handshake\n");
 }

@@ -955,6 +955,13 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
             case 0x804: return 2;
             default: break;
         }
+    } else if (blk->off == 0x0c0000 && (bo==0x3c4 || bo==0x3c5)) {
+        if(size!=1) { fault_("NV2A sequencer read width is unqualified");return 0; }
+        if(bo==0x3c4)return sequencer_index_;
+        if(sequencer_index_!=1 || !sequencer_clock_programmed_) {
+            fault_("NV2A unprogrammed/unsupported sequencer read");return 0;
+        }
+        return sequencer_clock_;
     } else if (blk->off == 0x601000) {  // PRMCIO (VGA CRTC/attribute mirror)
         // Input status 1 (0x3DA): bit3 = vertical retrace in progress, bit0 = blanking.
         // Driven from the instruction-derived frame phase (last ~5% of each frame is the
@@ -1293,6 +1300,20 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
         if (size != 4 || value != 2)
             fault_("NV2A unqualified scanout address latch mode");
         return;
+    }
+    if (blk->off == 0x0c0000 && (bo==0x3c4 || bo==0x3c5)) {
+        // IBM VGA reference, Clocking Mode bit 5: blank picture generation,
+        // preserving synchronization. Other clock/serializer modes remain guarded.
+        if(size!=1) { fault_("NV2A sequencer write width is unqualified");return; }
+        if(bo==0x3c4) {
+            if(value!=1) { fault_("NV2A sequencer index is unqualified");return; }
+            sequencer_index_=1;return;
+        }
+        if(sequencer_index_!=1 || (value!=1 && value!=0x21)) {
+            fault_("NV2A sequencer clock/serializer mode is unqualified");return;
+        }
+        sequencer_clock_=static_cast<uint8_t>(value);
+        sequencer_clock_programmed_=true;return;
     }
     if (blk->off == 0x601000) {
         if (bo == 0x3D4) {
@@ -17912,6 +17933,14 @@ Nv2a::ScanoutInfo Nv2a::scanout_info() const {
 // drain, the geometry validation and the resident-surface
 // resolve. Extracted verbatim from capture_scanout, which keeps calling it first.
 bool Nv2a::prepare_scanout(ScanoutInfo& info, uint64_t& source_size, std::string& error) {
+    info=scanout_info();
+    if (!info.width || !info.height || info.width > 1920 || info.height > 1080) {
+        error = "NV2A scanout dimensions are unset or outside Xbox limits";
+        return false;
+    }
+    // Screen Off disables display fetches. It neither drains queued GPU work
+    // nor reads/resolves the framebuffer. Digital sync/IRQ clocks still run.
+    if(sequencer_clock_&0x20) { source_size=0;return true; }
     // Seam anchor 3 (F5): scanout reads the whole visible framebuffer out
     // of guest RAM. Guest-anchored gate point.
     seam_anchor(kSeamAnchorScanout, true);
@@ -17921,13 +17950,8 @@ bool Nv2a::prepare_scanout(ScanoutInfo& info, uint64_t& source_size, std::string
     if(ram_tiles_active() && renderer_) {
         error="NV2A tiled scanout requires the software RAM path";return false;
     }
-    info = scanout_info();
     if (!mem_read_) {
         error = "NV2A scanout has no guest-memory reader";
-        return false;
-    }
-    if (!info.width || !info.height || info.width > 1920 || info.height > 1080) {
-        error = "NV2A scanout dimensions are unset or outside Xbox limits";
         return false;
     }
     if (info.bits_per_pixel != 16 && info.bits_per_pixel != 32) {
@@ -17959,6 +17983,9 @@ const uint8_t* Nv2a::scanout_direct_bytes(ScanoutInfo& info, size_t& size,
     size = 0;
     uint64_t source_size = 0;
     if (!prepare_scanout(info, source_size, error)) return nullptr;
+    if(sequencer_clock_&0x20) {
+        error="NV2A blanked scanout requires converted capture, not framebuffer bytes";return nullptr;
+    }
     if(ram_tiles_active()) {
         error="NV2A tiled scanout requires translated capture, not a raw pointer";return nullptr;
     }
@@ -17982,6 +18009,11 @@ bool Nv2a::capture_scanout(std::vector<uint8_t>& rgba, ScanoutInfo& info,
     perf_excl::Scope region(perf_excl::kNv2aScanout);
     uint64_t source_size = 0;
     if (!prepare_scanout(info, source_size, error)) return false;
+    if(sequencer_clock_&0x20) {
+        rgba.assign(static_cast<size_t>(info.width)*info.height*4,0);
+        for(size_t i=3;i<rgba.size();i+=4)rgba[i]=255;
+        error.clear();return true;
+    }
     const uint32_t bytes_per_pixel = info.bits_per_pixel / 8;
 
     std::vector<uint8_t> source(static_cast<size_t>(source_size));

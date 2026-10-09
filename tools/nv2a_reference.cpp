@@ -4,6 +4,7 @@
 #include "machine/pic.hpp"
 #include "machine/pci.hpp"
 #include "machine/mcpx_field.hpp"
+#include "machine/mcpx_av_outputs.hpp"
 #include "machine/cx25871_control.hpp"
 #include <cstdio>
 #include <cstring>
@@ -20,6 +21,7 @@ struct Reference {
     std::string failure;
     bool irq = false;
     xlle::McpxFieldInput field;
+    xlle::McpxAvOutputs av_outputs;
     xlle::PciHost pci;
     xlle::DualPic pic;
     xlle::Nv2a gpu;
@@ -27,6 +29,7 @@ struct Reference {
     xlle::Cx25871Control* encoder = nullptr;
     void (*external_irq)(int, int) = nullptr;
     Reference() : field([this](const std::string& reason) { failure = reason; }),
+        av_outputs([this](const std::string& reason) { failure = reason; }),
         pci([this](const std::string& reason) { failure = reason; }),
         gpu([this](const std::string& reason) { failure = reason; }),
         smbus(0xc000, [this](const std::string& reason) { failure = reason; }) {
@@ -148,6 +151,9 @@ EXPORT uint32_t xlle_nv2a_reference_port(void* instance, uint16_t port, int size
         else return ref.pic.io_read(port,size);
     } else if (port == 0x80c0 && size == 1) {
         if (write) ref.field.write(value); else return ref.field.read();
+    } else if (xlle::McpxAvOutputs::owns(port)) {
+        if(write && size==1)ref.av_outputs.write(port,value);
+        else ref.failure="MCPX AV GPIO readback/width remains unqualified";
     } else if (ref.pci.owns(port)) {
         if (write) ref.pci.io_write(port, size, value);
         else return ref.pci.io_read(port, size);
@@ -162,6 +168,14 @@ EXPORT uint32_t xlle_nv2a_reference_port(void* instance, uint16_t port, int size
 }
 EXPORT void xlle_nv2a_reference_field(void* instance, int level) {
     static_cast<Reference*>(instance)->field.set_level(level != 0);
+}
+// Pin-level observation for AV integration. These are physical pin masks,
+// not guest register values. Undefined/unknown SCART states stay distinguishable.
+EXPORT int xlle_nv2a_reference_av_outputs(void* instance, uint32_t* known, uint32_t* high) {
+    auto& ref=*static_cast<Reference*>(instance);
+    if(!known || !high) { ref.failure="AV GPIO output observation has no destination";return -1; }
+    *known=ref.av_outputs.known();*high=ref.av_outputs.levels();
+    return static_cast<int>(ref.av_outputs.scart_status());
 }
 EXPORT int xlle_nv2a_reference_vector(void* instance, int acknowledge) {
     auto& pic = static_cast<Reference*>(instance)->pic;

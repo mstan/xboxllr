@@ -1134,16 +1134,33 @@ int main() {
     gpu.set_irq([&](int n, bool level) { CHECK(n == 3); irq = level; }, 3);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x000140, 4, 1);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x600140, 4, 1);
+    // VGA Screen Off stops picture fetches, not display sync or FIFO work.
+    // Observe black output while a real flip and following semaphore remain
+    // pending; scanout must not accidentally retire either command.
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x680800, 4, 1);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x680820, 4, 1);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0xc03c4, 1, 1);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0xc03c5, 1, 0x21);
+    const auto scanout_hits_before_blank = gpu.seam_anchor_hits(xlle::Nv2a::kSeamAnchorScanout);
     for (uint64_t frame = 1; frame <= 3; ++frame) {
         gpu.set_frame(frame);
         CHECK(irq && gpu.vblanks() == frame);
         CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x600100, 4) == 1);
+        std::vector<uint8_t> black_pixels;
+        xlle::Nv2a::ScanoutInfo blank_info;
+        std::string blank_error;
+        CHECK(gpu.capture_scanout(black_pixels, blank_info, blank_error));
+        CHECK(blank_info.width == 2 && blank_info.height == 2);
+        CHECK(black_pixels == std::vector<uint8_t>({0,0,0,255,0,0,0,255,0,0,0,255,0,0,0,255}));
+        CHECK(gpu.seam_anchor_hits(xlle::Nv2a::kSeamAnchorScanout) == scanout_hits_before_blank);
         CHECK(gpu.waiting_for_flip() && gpu.semaphore_writes() == 1);
         CHECK(get32(ram, 0x3040) == 0x12345678u);
         gpu.mmio_write(xlle::Nv2a::kBase + 0x600100, 4, 1);
         CHECK(!irq && gpu.waiting_for_flip());
     }
     gpu.mmio_write(xlle::Nv2a::kBase + 0x600140, 4, 0);
+    gpu.mmio_write(xlle::Nv2a::kBase + 0xc03c5, 1, 1);
+    CHECK(fault.empty() && gpu.waiting_for_flip() && gpu.semaphore_writes() == 1);
 
     gpu.mmio_write(xlle::Nv2a::kBase + 0x40071C, 4, 2);
     CHECK(!gpu.waiting_for_flip());
@@ -4093,6 +4110,45 @@ int main() {
     std::vector<uint32_t> starts;
     CHECK(gpu.recent_scanout_starts(4, starts) == 1);
     CHECK(starts.size() == 1 && starts[0] == 0x4000);
+    {
+        // Original AV blanking sequence must blank the real digital output,
+        // preserve sync/IRQ timing, and leave framebuffer bytes untouched.
+        for(unsigned repeat=0;repeat<3;++repeat) {
+            gpu.mmio_write(xlle::Nv2a::kBase+0xc03c4,1,1);
+            gpu.mmio_write(xlle::Nv2a::kBase+0xc03c5,1,0x21);
+            CHECK(gpu.mmio_read(xlle::Nv2a::kBase+0xc03c4,1)==1);
+            CHECK(gpu.mmio_read(xlle::Nv2a::kBase+0xc03c5,1)==0x21);
+            CHECK(gpu.capture_scanout(rgba,scanout,scanout_error));
+            CHECK(rgba==std::vector<uint8_t>({0,0,0,255,0,0,0,255,0,0,0,255,0,0,0,255}));
+            CHECK(!gpu.scanout_direct_bytes(scanout,direct_size,scanout_error) && direct_size==0);
+            CHECK(std::memcmp(ram.data()+0x4000,scanout_pixels,sizeof(scanout_pixels))==0);
+            gpu.set_frame_phase(0);
+            CHECK((gpu.mmio_read(xlle::Nv2a::kBase+0x6013da,1)&8)==0);
+            gpu.set_frame_phase(975);
+            CHECK((gpu.mmio_read(xlle::Nv2a::kBase+0x6013da,1)&8)==8);
+            gpu.mmio_write(xlle::Nv2a::kBase+0xc03c5,1,1);
+            CHECK(gpu.capture_scanout(rgba,scanout,scanout_error) && rgba==expected_rgba);
+        }
+        CHECK(fault.empty());
+        gpu.mmio_write(xlle::Nv2a::kBase+0xc03c5,1,9); // unqualified clock divide
+        CHECK(!fault.empty());fault.clear();
+        CHECK(gpu.mmio_read(xlle::Nv2a::kBase+0xc03c5,1)==1);
+        gpu.mmio_write(xlle::Nv2a::kBase+0xc03c4,2,0x2101);
+        CHECK(!fault.empty());fault.clear();
+        CHECK(gpu.mmio_read(xlle::Nv2a::kBase+0xc03c5,1)==1);
+        gpu.set_frame_phase(0);
+        // No reader or valid framebuffer is necessary while picture fetches
+        // are disabled. Re-enabling immediately restores real fetch checks.
+        xlle::Nv2a blank([&](const std::string& why){fault=why;});
+        blank.mmio_write(xlle::Nv2a::kBase+0x680800,4,1);
+        blank.mmio_write(xlle::Nv2a::kBase+0x680820,4,1);
+        blank.mmio_write(xlle::Nv2a::kBase+0xc03c4,1,1);
+        blank.mmio_write(xlle::Nv2a::kBase+0xc03c5,1,0x21);
+        CHECK(blank.capture_scanout(rgba,scanout,scanout_error));
+        CHECK(rgba==std::vector<uint8_t>({0,0,0,255,0,0,0,255,0,0,0,255,0,0,0,255}));
+        blank.mmio_write(xlle::Nv2a::kBase+0xc03c5,1,1);
+        CHECK(!blank.capture_scanout(rgba,scanout,scanout_error));
+    }
     {
         FakeNv2aRenderer resident_fake;
         resident_fake.resident_resolve_address = 0x4000;

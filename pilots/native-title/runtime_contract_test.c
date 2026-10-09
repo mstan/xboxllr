@@ -409,6 +409,7 @@ int main(int argc,char **argv)
     if (argc==2) {
 #ifdef PILOT_GPU_LLE
         if (!strcmp(argv[1],"gpu-lle-transport")) { test_gpu_lle_transport(); return 0; }
+        if (!strcmp(argv[1],"gpu-lle-av-mode-guard")) { test_gpu_lle_av_mode_guard(); return 0; }
 #endif
 #ifdef PILOT_USB_LLE
         if (!strcmp(argv[1],"usb-irq")) { test_usb_irq(); return 0; }

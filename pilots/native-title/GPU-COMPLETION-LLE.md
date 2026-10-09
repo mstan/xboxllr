@@ -921,3 +921,67 @@ Next remains original startup initialization with actual timing/GPIO/PRAMDAC
 effects, then the remaining GPU execution/context dependencies. No console
 contact or new xemu runtime comparison occurred. Family count remains **4/9**;
 the game-owned stable framework pin remains `439a45b`.
+
+## AV connector outputs and digital screen blanking
+
+The original AV service's byte OUT instructions now reach a bounded MCPX
+output-pin model through the same compiled/original-kernel transport. NVIDIA
+MCP-1 0.15 section 5.15 establishes the contiguous GPIO port map: GPIO19 at
+80D3, GPIO22 at 80D6 and GPIO24 at 80D8. Xbox hardware specification 1.02
+figures 16/55 identifies GPIO22/19 as LVLCNT0/1. Their combinations select
+4:3 (00), 16:9 (10), TV internal tuner (11), or an explicitly undefined state
+(01). GPIO19 is not an encoder-reset pin. The retail launch schematic's GPIO
+table identifies GPIO24 as an unused test point; it retains a real pin level
+without changing SCART selection. Sources are linked in the attribution record.
+
+Only static-output low/high commands 04/05 are qualified. Unknown warm state
+remains unknown until programming. Unsupported commands, guest readback and
+widths stop; observation of the electrical output does not invent whole GPIO
+register readback. Analog voltages, rise times, other pins and output modes
+are outside this bounded connector contract.
+
+PRMVIO sequencer index 1 now implements the original screen-off sequence:
+21 disables picture fetches, 01 restores the existing eight-dot digital
+scanout profile. Blanked capture returns black pixels without reading or
+resolving a framebuffer or draining GPU work. Direct framebuffer presentation
+declines the blanked case so the existing caller uses converted black output.
+Sync/vblank and pending command lifetimes continue independently. Other
+clock/serializer modes remain guarded. IBM VGA/XGA May 1992 p2-49 supplies
+the screen-off semantics; Nouveau v6.12 corroborates the NV register mirrors
+and screen-off bit. This is a digital pre-encoder contract, not qualification
+of the analog encoder/filter/output route, which remains guarded.
+
+Validation of the final batch:
+
+- Software NV2A and AV-pin/SMBus tests pass, 2/2 in 0.25s. Tests include
+  all SCART states across three lifetimes, rejected writes without mutation,
+  repeated blank/unblank pixel capture, absent-framebuffer blanking, continued
+  vblank IRQs while a real flip/semaphore remains pending, and no scanout drain.
+  OpenGL cases remain explicitly skipped in this software build.
+- Compiled original AV/transport and mode-entry guard fixtures pass, 2/2 in
+  0.19s. Original AvSendTVEncoderOption option 9 performs twelve blank/unblank
+  cycles across three device lifetimes, preserving framebuffer bytes and
+  restoring actual colored pixels and connector selection.
+- Original AvSetDisplayMode drives GPIO19 high and then reaches the explicit
+  unmodelled FD6806A0 read. The guard fixture verifies no success return is
+  published; it does not claim complete original display initialization.
+- All nine original query/trap/fence cases remain passing across three
+  lifetimes with this DLL: `gpu-completion-av-pins-original.aot-private.json`.
+- Rebuilt native-renderer preset passes eight shared IO/USB/memory/graphics
+  checks in 5.81s. No fresh full HLE attract or A/V sign-off is claimed.
+- Actual `gpu-lle-title-av-output-pins` exits 2 after 10.016s, 892 entries,
+  before frames, at the existing missing EN_REG_RD startup-state guard.
+  The original mode-entry fixture is further ahead than the actual title;
+  its advancement must not be reported as Blinx startup advancement.
+
+Final DLL: `40c024238766c99b428ab6d69d017874c296b8e03341d8316c32cf444e756e5c`.
+GPU executable: `0a0068a5e8e858ea3798b7164dc981a0cbbfe3b41b576d75a480998ae30ce20e`.
+Native executable: `234d5f2db3c38d11ba5d5d3d5f1d43c644a9f719773f8a7d8f2233f3cf074d5c`.
+
+Next: identify the original FD6806A0 handshake and qualify encoder timing
+and remaining original mode-setting device effects, then establish actual
+startup state through that execution. No guessed encoder state is installed.
+GPU/title callback/resource and wider rendering acceptance remain open;
+burndown stays **4/9**, stable game pin `439a45b`. No hardware contact, new
+xemu runtime comparison, donor implementation copy or new HLE AV completion
+claim belongs to this batch.

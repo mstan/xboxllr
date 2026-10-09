@@ -162,7 +162,7 @@ uint8_t pilot_cpu_in8(uint16_t port)
     if(port==0x80c0)return display_lle_field();
 #endif
 #ifdef PILOT_GPU_LLE
-    if(port==0x80c0 || (port>=0xcf8 && port<=0xcff)) {
+    if(port==0x80c0 || port==0x80d3 || port==0x80d6 || port==0x80d8 || (port>=0xcf8 && port<=0xcff)) {
         uint32_t value=0;
         const char *error=gpu_lle_port(port,1,0,&value);
         if(error)stop(error,port);
@@ -183,7 +183,7 @@ uint8_t pilot_cpu_in8(uint16_t port)
 void pilot_cpu_out8(uint16_t port,uint8_t byte)
 {
 #ifdef PILOT_GPU_LLE
-    if(port==0x80c0 || (port>=0xcf8 && port<=0xcff)) {
+    if(port==0x80c0 || port==0x80d3 || port==0x80d6 || port==0x80d8 || (port>=0xcf8 && port<=0xcff)) {
         uint32_t value=byte;
         const char *error=gpu_lle_port(port,1,1,&value);
         if(error)stop(error,port);

@@ -16,6 +16,8 @@ static struct {
     void (*clock)(void*,uint64_t,uint32_t);
     uint32_t (*port)(void*,uint16_t,int,int,uint32_t);
     void (*field)(void*,int);
+    int (*av_outputs)(void*,uint32_t*,uint32_t*);
+    int (*scanout)(void*,uint8_t*,uint32_t,uint32_t*,uint32_t*);
     uint64_t origin,field_count;
 } gpu_lle;
 
@@ -127,7 +129,7 @@ static void gpu_lle_open(void)
     RemoveDllDirectory(dependency);
     if(!gpu_lle.library)stop("maintained NV2A reference DLL unavailable",GetLastError());
 #define GPU_LOAD(member) do {*(FARPROC*)&gpu_lle.member=GetProcAddress(gpu_lle.library,"xlle_nv2a_reference_" #member);if(!gpu_lle.member)stop("GPU DLL ABI missing: " #member,0);} while(0)
-    GPU_LOAD(create);GPU_LOAD(destroy);GPU_LOAD(error);GPU_LOAD(bus);GPU_LOAD(read);GPU_LOAD(write);GPU_LOAD(frame);GPU_LOAD(clock);GPU_LOAD(port);GPU_LOAD(field);
+    GPU_LOAD(create);GPU_LOAD(destroy);GPU_LOAD(error);GPU_LOAD(bus);GPU_LOAD(read);GPU_LOAD(write);GPU_LOAD(frame);GPU_LOAD(clock);GPU_LOAD(port);GPU_LOAD(field);GPU_LOAD(av_outputs);GPU_LOAD(scanout);
 #undef GPU_LOAD
     gpu_lle.device=gpu_lle.create();
     if(!gpu_lle.device)stop("NV2A reference allocation failed",0);
@@ -138,6 +140,9 @@ static void gpu_lle_open(void)
     gpu_lle.field_count=0;
     pilot_io_device_port_bind(0xcf8,0xcff,gpu_lle_port);
     pilot_io_device_port_bind(0x80c0,0x80c0,gpu_lle_port);
+    pilot_io_device_port_bind(0x80d3,0x80d3,gpu_lle_port);
+    pilot_io_device_port_bind(0x80d6,0x80d6,gpu_lle_port);
+    pilot_io_device_port_bind(0x80d8,0x80d8,gpu_lle_port);
     pilot_io_device_port_bind(0xc000,0xc00f,gpu_lle_port);
     error=pilot_io_device_mmio_bind(0xfd000000u,0x1000000u,gpu_lle_kernel_mmio);
     if(error)stop(error,0xfd000000u);

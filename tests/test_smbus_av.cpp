@@ -1,10 +1,44 @@
 #include "machine/cx25871_control.hpp"
+#include "machine/mcpx_av_outputs.hpp"
 #include <cstdio>
 #include <string>
 #include <vector>
 
 static int fails;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n", __LINE__, #c); ++fails; } } while (0)
+
+static void av_output_pins() {
+    using Status=xlle::McpxAvOutputs::ScartStatus;
+    for(unsigned lifetime=0;lifetime<3;++lifetime) {
+        std::string fault;
+        xlle::McpxAvOutputs outputs([&](const std::string& why){fault=why;});
+        CHECK(outputs.known()==0 && outputs.scart_status()==Status::Unknown);
+        CHECK(outputs.write(0x80d3,5));
+        CHECK(outputs.known()==(1u<<19) && outputs.scart_status()==Status::Unknown);
+        // Independently enumerated connector truth table, specification fig55.
+        const struct {unsigned pin22,pin19;Status status;} rows[]={
+            {0,0,Status::Standard},{1,0,Status::Widescreen},
+            {1,1,Status::Television},{0,1,Status::Undefined}};
+        for(unsigned repeat=0;repeat<3;++repeat) for(const auto& row:rows) {
+            CHECK(outputs.write(0x80d6,4+row.pin22));
+            CHECK(outputs.write(0x80d3,4+row.pin19));
+            CHECK(outputs.scart_status()==row.status);
+            for(unsigned unused=0;unused<2;++unused) {
+                CHECK(outputs.write(0x80d8,4+unused));
+                CHECK(outputs.scart_status()==row.status);
+                CHECK(outputs.known()==((1u<<19)|(1u<<22)|(1u<<24)));
+                CHECK(outputs.levels()==((row.pin19<<19)|(row.pin22<<22)|(unused<<24)));
+            }
+        }
+        const auto known=outputs.known(),high=outputs.levels();
+        for(unsigned value:{0u,1u,6u,7u,0x45u,0x105u}) {
+            CHECK(!outputs.write(0x80d3,value) && !fault.empty());fault.clear();
+            CHECK(outputs.known()==known && outputs.levels()==high);
+        }
+        CHECK(!outputs.write(0x80d5,4) && !fault.empty());
+        CHECK(outputs.known()==known && outputs.levels()==high);
+    }
+}
 
 static void reset_and_configuration() {
     for(bool pal : {false,true}) for(unsigned lifetime=0;lifetime<3;++lifetime) {
@@ -54,6 +88,7 @@ static void reset_and_configuration() {
 }
 
 int main() {
+    av_output_pins();
     reset_and_configuration();
     for (unsigned lifetime=0; lifetime<3; ++lifetime) {
         std::string fault;

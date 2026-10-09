@@ -3819,6 +3819,9 @@ private:
     // programs CRTC pitch/depth there, PRAMDAC display extents, then PCRTC_START.
     std::array<uint8_t, 256> crtc_regs_{};
     uint8_t crtc_index_ = 0;
+    uint8_t sequencer_index_ = 0;
+    uint8_t sequencer_clock_ = 1; // existing eight-dot digital scanout profile
+    bool sequencer_clock_programmed_ = false;
     uint32_t pcrtc_start_ = 0;
     uint32_t pramdac_general_control_ = 0;
     uint32_t pramdac_fp_vdisplay_end_ = 0;

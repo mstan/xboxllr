@@ -1083,6 +1083,35 @@ and their four-argument stdcall interface; the actual owned routines execute in
 private qualification fixtures. Timing reset and encoded output are not
 qualified by software-register reset/readback.
 
+## AV GPIO and digital screen-off behavioral references
+
+`src/machine/mcpx_av_outputs.hpp`, the NV2A sequencer screen-off behavior and
+their transport/tests are authored from the following hardware facts:
+
+- [NVIDIA MCP-1 0.15, August 2000, section 5.15](https://consolemods.org/wiki/images/1/14/MCP_1x_DS_015.PDF-1.PDF):
+  contiguous GPIO19/22/24 port locations. AMD-766 23167B p82 and original AV
+  programming corroborate 04/05 static-output encoding; AMD's different port
+  map is not used for these Xbox pins.
+- [Xbox Hardware Design Specification 1.02, figures 16/55](https://consolemods.org/wiki/images/a/ae/Xbox_Hardware_Design_Specification_1.02.pdf):
+  GPIO19/22 SCART wiring and LVLCNT truth table.
+- [Retail launch schematics, indexed GPIO table](https://consolemods.org/wiki/images/e/e5/Launch_Schematics.pdf):
+  GPIO24 unused test point. This is document evidence, not a new board probe.
+- [IBM VGA/XGA Technical Reference, May 1992, p2-49](https://bitsavers.trailing-edge.com/pdf/ibm/pc/cards/IBM_VGA_XGA_Technical_Reference_Manual_May92.pdf):
+  sequencer Clocking Mode bit 5 stops picture fetches while sync continues.
+- Nouveau at Linux **v6.12**:
+  [hw.h, NVVgaProtect](https://github.com/torvalds/linux/blob/v6.12/drivers/gpu/drm/nouveau/dispnv04/hw.h),
+  copyright 2008 Stuart Bennett, and
+  [nvreg.h, NV_PRMVIO_SRX/SR](https://github.com/torvalds/linux/blob/v6.12/drivers/gpu/drm/nouveau/dispnv04/nvreg.h),
+  copyright 1996-1997 David J. McKay. These individually MIT-noticed files
+  corroborate the screen-off control and NV register addresses. No function
+  bodies were copied or adapted.
+
+Documents, vendor code and original kernel bytes are not redistributed. The
+implementation does not claim analog output, whole GPIO register semantics or
+complete original display-mode initialization. The existing Phobos AV switch
+audit remains applicable; no donor shortcut replaces the original option 9
+execution used here.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),
