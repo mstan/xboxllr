@@ -202,10 +202,79 @@ static int check_vertex_fetch_reference(const char *path)
     fprintf(stderr,"PASS: %u independently specified native vertex fetch cases, %u output lanes and persistent-buffer draws\n",header[2],comparisons);
     return 0;
 }
+static int check_shader_constant_reference(const char *path)
+{
+    FILE *file=fopen(path,"rb");CHECK(file);uint32_t header[4];
+    CHECK(fread(header,sizeof(header),1,file)==1);
+    CHECK(header[0]==0x43564c58 && header[1]==1 && header[2] && header[2]<=65536);
+    unsigned char positions[4*32]={0};
+    const float triangle[4][4]={{-200,-200,10,1},{8,8,10,1},{56,8,10,1},{8,56,10,1}};
+    for(unsigned i=0;i<4;++i)memcpy(positions+i*32,triangle[i],16);
+    uint32_t vertex,handle=0;unsigned previous=192,comparisons=0;
+    CHECK(pilot_gfx_vertex_create(sizeof(positions),&vertex)==0);
+    pilot_gfx_vertex_upload(vertex,positions,sizeof(positions));pilot_gfx_vertex_bind(0,vertex,32);
+    pilot_gfx_set_state(D3DRS_CULLMODE,D3DCULL_NONE);pilot_gfx_set_state(D3DRS_ZENABLE,0);
+    pilot_gfx_set_state(D3DRS_ZWRITEENABLE,0);pilot_gfx_set_state(D3DRS_ALPHABLENDENABLE,0);
+    pilot_gfx_set_state(D3DRS_ALPHATESTENABLE,0);pilot_gfx_set_state(D3DRS_SPECULARENABLE,0);
+    pilot_gfx_set_texture_state(0,D3DTSS_COLOROP,D3DTOP_SELECTARG1);
+    pilot_gfx_set_texture_state(0,D3DTSS_COLORARG1,D3DTA_DIFFUSE);
+    pilot_gfx_set_texture_state(0,D3DTSS_ALPHAOP,D3DTOP_SELECTARG1);
+    pilot_gfx_set_texture_state(0,D3DTSS_ALPHAARG1,D3DTA_DIFFUSE);
+    pilot_gfx_set_texture_state(1,D3DTSS_COLOROP,D3DTOP_DISABLE);pilot_gfx_pixel_fixed();
+    for(unsigned sample=0;sample<header[2];++sample) {
+        uint32_t metadata[4];float preliminary[32][4],values[32][4],expected[4],output[13][4];
+        CHECK(fread(metadata,sizeof(metadata),1,file)==1);
+        unsigned first=metadata[0],count=metadata[1],observed=metadata[2];
+        CHECK(first<192 && count && count<=32 && count<=192-first && observed>=first && observed<first+count && !metadata[3]);
+        CHECK(fread(preliminary,16,count,file)==count && fread(values,16,count,file)==count && fread(expected,16,1,file)==1);
+        if(observed!=previous) {
+            if(handle)pilot_gfx_shader_destroy(handle);
+            struct PilotVertexElement elements[16]={0};elements[0]=(struct PilotVertexElement){0x42,0,0};
+            const uint32_t code[]={0,0x0020001b,0x08000000,0x0000f800,
+                0,0x0020001b|(observed<<13),0x0c000000,0x0000f819};
+            CHECK(pilot_gfx_shader_create(code,2,elements,&handle)==0 && pilot_gfx_shader_bind(handle)==0);
+            const float scale[]={1.0f/32,-1.0f/32,1.0f/16777215,1},offset[]={-1,1,0,0};
+            CHECK(pilot_gfx_shader_raster(scale,offset)==0);previous=observed;
+        }
+        unsigned uploads=pilot_gfx_shader_uploads();
+        pilot_gfx_shader_constants(first,count,preliminary);
+        pilot_gfx_shader_constants(first,count,values);
+        pilot_gfx_shader_constants(first,count,values);
+        CHECK(pilot_gfx_shader_uploads()==uploads);
+        struct PilotVertexProbeStream streams[16]={0};
+        streams[0]=(struct PilotVertexProbeStream){positions+32,32};
+        /* NULL probes the actually bound production constant buffer. */
+        CHECK(pilot_gfx_shader_probe(handle,streams,1,NULL,&output[0][0])==0);
+        CHECK(pilot_gfx_shader_uploads()==uploads+1);
+        for(unsigned lane=0;lane<4;++lane) {
+            if(!isfinite(output[3][lane]) || fabsf(output[3][lane]-expected[lane])>2e-6f*fmaxf(1,fabsf(expected[lane]))) {
+                fprintf(stderr,"CONSTANT mismatch sample=%u register=%u lane=%u actual=%g expected=%g\n",
+                    sample,observed,lane,output[3][lane],expected[lane]);CHECK(0);
+            }
+            ++comparisons;
+        }
+        unsigned char pixels[64*64*4];
+        CHECK(pilot_gfx_clear(D3DCLEAR_TARGET,0xff102030,1,0)==0 && pilot_gfx_draw_vertices(5,1,3)==0);
+        CHECK(pilot_gfx_readback(pixels,sizeof(pixels))==0);
+        CHECK(pilot_gfx_shader_uploads()==uploads+1); /* draw reuses the upload */
+        for(unsigned lane=0;lane<3;++lane) {
+            int want=(int)lroundf(fminf(1,fmaxf(0,expected[lane]))*255);
+            CHECK(abs((int)pixels[(16*64+16)*4+lane]-want)<=1);
+        }
+        CHECK(pixels[0]==0x10 && pixels[1]==0x20 && pixels[2]==0x30);
+    }
+    CHECK(fgetc(file)==EOF);fclose(file);pilot_gfx_shader_destroy(handle);
+    pilot_gfx_vertex_bind(0,0,0);pilot_gfx_vertex_destroy(vertex);
+    fprintf(stderr,"PASS: %u native constant cases, %u raw output lanes and GPU draws; three writes coalesce to one upload per case\n",header[2],comparisons);
+    return 0;
+}
 int main(int argc,char **argv)
 {
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
     uint32_t pp[17]={64,64,6,1,0x11,1,0,0,1,0x2a,0,0,1};CHECK(pilot_gfx_create(pp)==0);
+    if(argc==3 && !strcmp(argv[1],"--shader-constant-reference")) {
+        CHECK(check_shader_constant_reference(argv[2])==0);pilot_gfx_close();return 0;
+    }
     if(argc==3 && !strcmp(argv[1],"--vertex-fetch-reference")) {
         CHECK(check_vertex_fetch_reference(argv[2])==0);pilot_gfx_close();return 0;
     }

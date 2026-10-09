@@ -166,9 +166,71 @@ The rebuilt title retains the exact executable hash recorded above. Reuse its
 only diagnostic tools/tests. No fresh title run or original whole-title LLE
 integration is claimed. Family `.116` remains partial and the total is **4/9**.
 
+## Original constant transport and native coalescing - 2026-10-09
+
+`tools/native_shader_constants_reference.py` reuses that original submission
+fixture to execute complete original `SetVertexShaderConstant1`,
+`SetVertexShaderConstant4`, `SetVertexShaderConstantNotInline`,
+`SetVertexShaderConstantNotInlineFast` and `GetVertexShaderConstant` routines.
+The source XBE identity and preowned-resource limits are unchanged. Their actual
+constant-upload packets reach maintained NV2A constant memory and programmable
+transform execution; no constant packet is supplied in place of an original
+setter. Authored `MOV oD0,c[index]` programs observe the uploaded values through
+actual shader output and framebuffer RGBA.
+
+**1,116 cases / 3,348 original setter calls / 1,116 LLE draws** cover all
+192 constant slots, one/four-register setters and generic ranges of
+1/2/3/4/5/8/17/32 registers. The generic original argument is a DWORD count;
+the fixture supplies four DWORDs per register. Ranges include starts 0/1/58/96
+and the last valid span, exercising both short and bulk packet paths. Each case
+queues preliminary data, overwrites it, repeats the final data and then draws.
+
+The entire CPU constant cache is independently checked after every call.
+Fixed-size setters record even when the generic recorder is disabled. The
+generic setter records only when enabled; the fast setter leaves the CPU cache
+unchanged while still updating actual GPU constants. Both recorder states and
+repeated payload revisions pass. Source bytes and surrounding canaries survive;
+the original ABI preserves saved registers and cleans its stack. **2,232
+original query calls** check the complete 192-slot cache and individual slots
+in its signed [-96,95] namespace, including endpoints and output canaries.
+Query values can deliberately differ from current GPU values in the fast or
+recorder-disabled cases; these are distinct caller-visible effects.
+
+The private corpus again contains authored inputs/expected values, never
+measured LLE output. Native `pilot_shader_test --shader-constant-reference`
+passes **1,116 cases / 4,464 raw output lanes / 1,116 GPU draws**. Its raw probe
+uses the actually bound production constant buffer, layout and shader rather
+than a supplied diagnostic constant copy. RGB pixels agree within one LSB;
+raw values use the preceding relative tolerance. The existing native caller
+fixture retains its original-cache/query/recorder comparison and exercises these
+policies through the native XDK interface.
+
+The native backend coalesces each case's three writes into **one GPU upload**;
+the subsequent draw reuses it. Upload counters verify no eager upload and no
+second draw upload. This preserves the existing performant strategy without
+reproducing the original packet traffic. No production HLE correction, added
+title cost or new external dependency is needed.
+
+Reproduce with the same dependency setup as the preceding section:
+
+```powershell
+& 'C:\Users\Matthew\AppData\Local\Programs\Python\Python312\python.exe' tools\native_shader_constants_reference.py --xbe F:\Projects\xboxlle\xboxlle\build\phobos-audit-20261006\blinx-na\default.xbe --binding build\blinx\d3d-binding.aot-private.json --library build\visibility-lle\libxlle_nv2a_reference.dll --dependencies C:\msys64\mingw64\bin --output build\blinx\shader-constants-original.aot-private.json --native-cases build\blinx\shader-constants-native-cases.bin
+& .\build\blinx\host-calendar-lle\Release\pilot_shader_test.exe --shader-constant-reference build\blinx\shader-constants-native-cases.bin
+```
+
+The preceding 720 original fetch and native raw/pixel cases still pass after
+sharing the program-binding helper. Related LLE code is unchanged from its
+9/9 combined pass. The native suite passes 56/56 again. Logs are
+`build/blinx/shader-constants-{original,native,native-build,native-tests,
+fetch-original,fetch-native}.log`. The title executable hash remains identical,
+so its matching 190.578s / 18-capture regression is retained. This qualifies
+bounded constant transport and software recorder semantics, not general shader
+arithmetic, exceptional floats or original title startup. Family `.116` stays
+partial; hardware questions remain at the end.
+
 ## Remaining offline work
 
-Continue original shader constants and arithmetic, plus texture/state
+Continue independent shader arithmetic, plus texture/state
 combinations actually used by Blinx. These bounded declaration/fetch cases do
 not qualify all vertex slots, arbitrary aliasing, tiled vertex input or the entire
 graphics family. Retain

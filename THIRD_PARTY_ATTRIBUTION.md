@@ -1477,6 +1477,11 @@ XDK functions execute from the owned private Blinx XBE; their instruction bytes
 and generated captures are not committed. The new native checks reuse the
 already attributed renderer and shader translator without a new dependency.
 
+The original constant/cache/query follow-up uses the same owned XDK input and
+already attributed maintained/native shader implementations. Its harness and
+expected cache effects, input values and MOV-output expectations are authored
+here. It adds no donor implementation, original instruction bytes or dependency.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

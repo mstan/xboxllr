@@ -97,13 +97,15 @@ class Reference:
     def kick(self):
         self.write(0x800040, self.get(self.device)[0])
 
-    def call(self, name, values):
+    def call(self, name, values, registers=()):
         canaries = ((UC_X86_REG_EBX, 123), (UC_X86_REG_ESI, 456),
                     (UC_X86_REG_EDI, 789), (UC_X86_REG_EBP, 876))
         self.put(STACK, STOP, *values)
         self.cpu.reg_write(UC_X86_REG_ESP, STACK)
         self.cpu.reg_write(UC_X86_REG_ECX, self.device)
         for reg, value in canaries:
+            self.cpu.reg_write(reg, value)
+        for reg, value in registers:
             self.cpu.reg_write(reg, value)
         self.cpu.emu_start(self.calls[name], STOP, count=1000000)
         assert self.cpu.reg_read(UC_X86_REG_EIP) == STOP, name
@@ -145,7 +147,12 @@ class Reference:
         self.put(OBJECT+0x14+slot*16,stream,offset,fmt)
         code = [0,0x0020001b,0x08000000,0x0000f800,
                 0,0x0020001b|(slot<<9),0x08000000,0x0000f819]
-        self.put(OBJECT+0x114,0x200b00,*code)
+        self.bind_program(code)
+
+    def bind_program(self, code):
+        assert len(code)%4==0 and 0<len(code)//4<=136
+        self.put(OBJECT+8,len(code)//4,len(code)+1)
+        self.put(OBJECT+0x114,(len(code)<<18)|0xb00,*code)
         self.call('D3DDevice_LoadVertexShader',[OBJECT|1,0])
         self.call('D3DDevice_SelectVertexShader',[OBJECT|1,0])
         self.kick()

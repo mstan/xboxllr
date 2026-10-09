@@ -9,7 +9,9 @@ independent LLE contracts for this exercised path; New Game is deferred.
 The current graphics-family checkpoint corrects LLE packed BGRA vertex colors
 and connects original XDK declarations/stream ownership to maintained fetch and
 shader execution. Its 720 format cases pass actual LLE/native draws and independent
-raw-output checks, alongside the previous 140 color draws. Overall qualification
+raw-output checks; another 1,116 original constant cases pass LLE/native output,
+CPU recorder/query semantics and native upload coalescing. These retain the
+previous 140 color draws. Overall qualification
 remains 4/9; see [graphics evidence and remaining scope](GRAPHICS-LLE.md).
 
 ## Deferred stream upload experiment (2026-10-08)
