@@ -315,6 +315,7 @@ elseif(NOT PILOT_RENDERER STREQUAL "ORIGINAL" AND NOT PILOT_RENDERER STREQUAL "L
 endif()
 include(display_lle.cmake)
 include(gpu_lle.cmake)
+include(scheduling_lle.cmake)
 add_test(NAME pilot_native_contract COMMAND pilot_contract_test)
 add_test(NAME pilot_timer_contract COMMAND pilot_contract_test timers)
 add_test(NAME pilot_system_clock COMMAND pilot_contract_test system-clock)

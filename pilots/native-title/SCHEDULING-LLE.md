@@ -431,7 +431,47 @@ The harness ended a live process at its time bound. The title still selects
 native scheduling; this is a shared-transport regression, not original
 scheduling selection, a new cadence result or a long-run stability claim.
 
-## Next offline work
+## Guarded title selection and deferred startup dependency
+
+`PILOT_SCHEDULING=LLE` now builds a separate experimental title selection.
+`NATIVE` remains the default. Original scheduling requires original files,
+memory and USB/PIC; the native dispatcher cannot start under this selection.
+The private loader creates a real original bootstrap thread with the XBE's
+stack/TLS sizes, keeps its original default priority, and waits through the
+original kernel. It publishes the original thread-type object instead of the
+native identity token. The loader adapter is not a retail XBE-loader claim.
+
+The first actual launch (`build/blinx/scheduling-selection-startup/`) creates
+thread ID 20, handle `0x18`, then fails before executing any generated title
+body. Original execution reaches `OUT 0x80cf,5` at `0x8003512f`. Inspection of
+the captured original routine shows a high/low GPIO pulse with two calls to
+the original delay routine; a nearby caller enters another kernel routine.
+That observation establishes programming, not its board-level effect. No
+constant readback, ignored write, priority boost or queue edit is substituted.
+The prepared build SHA-256 is
+`3428791343ba208e5f0a6726c8d35be607bfe00adfd26fc4ad4e126c81b28b21`.
+
+This identifies an independent device dependency; it does **not** establish
+that new console evidence is necessary. Preserve the guarded experiment and
+investigate existing hardware documentation/reference evidence when returning
+to scheduling. Do not repeat this startup experiment as a prerequisite for
+audio or other independent families. Any part ultimately requiring console
+observation belongs at the end of the burndown.
+
+The bootstrap body, remaining reached service families, original clock progress
+and callback integration are still unqualified. The mixed component executable
+does not inherit the title's selection macro. Its **52/52** tests pass in
+**20.95s**; this is not evidence that the experimental title can run Blinx.
+The rebuilt default selection ran **190.141s**, with 18 captures, no
+stop/audio-stop/fault and both replayed Start press/release pairs delivered.
+Captures verify demo gameplay, interruption/loading, title return and another
+demo. Evidence is `build/blinx/scheduling-selection-default-attract/` plus its
+run log; executable SHA-256:
+`c3b8b74abb7bb75802a82948f019dd1858b25a45d52a088f034f39a5ce92bb7c`.
+The harness ended a live process, so this is neither natural termination nor
+new cadence/endurance qualification. Stable Blinx pin `439a45b` is unchanged.
+
+## Remaining offline work
 
 Use the now-executable original expiry/wakeup and native DPC callback routes to
 integrate original thread execution and static timer/DPC selection with coherent

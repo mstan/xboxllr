@@ -16,6 +16,9 @@ static const char *usb_original_callback(uint32_t entry,uint32_t regs[8],int is_
     unsigned thread_arguments,int *terminate,uint32_t *exit_status)
 {
     recomp_func_t routine=recomp_lookup(entry);
+#ifdef PILOT_SCHEDULING_LLE
+    if(thread_arguments==2 && entry==PILOT_IO_BOOTSTRAP_ENTRY)routine=scheduling_lle_bootstrap;
+#endif
     if(!routine)return "original kernel callback has no AOT binding";
     if(++usb_isr_count<=4)
         fprintf(stderr,"[%s] call=%llu entry=%08x irql=%u\n",thread_arguments?"KERNEL LLE THREAD":is_dpc?"KERNEL LLE DPC":"USB LLE ISR",

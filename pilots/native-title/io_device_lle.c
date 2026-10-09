@@ -824,6 +824,28 @@ static void deliver_irq(int *delivered)
 void pilot_io_device_isr_bind(PilotIoIsr callback){isr_callback=callback;}
 void pilot_io_device_dpc_bind(PilotIoIsr callback){dpc_callback=callback;}
 void pilot_io_device_thread_bind(PilotIoThread callback){thread_callback=callback;}
+const char *pilot_io_device_thread_type(uint32_t *address)
+{
+    AcquireSRWLockExclusive(&lock);
+    if(!cpu || execution_depth || !address)failure="thread LLE type observation outside initialized idle transport";
+    if(!failure) {
+        *address=original_export(259);
+        if(!failure)publish_range(*address,0x1cu);
+    }
+    const char *error=failure;ReleaseSRWLockExclusive(&lock);return error;
+}
+const char *pilot_io_device_next_thread(uint32_t *object)
+{
+    AcquireSRWLockExclusive(&lock);
+    if(!cpu || execution_depth || !object)failure="thread LLE lifetime observation outside initialized idle transport";
+    if(!failure) {
+        *object=0;
+        for(unsigned i=0;i<64;++i)if(original_threads[i].object && !kernel_word(original_threads[i].object+4)) {
+            *object=original_threads[i].object;break;
+        }
+    }
+    const char *error=failure;ReleaseSRWLockExclusive(&lock);return error;
+}
 void pilot_io_device_port_bind(uint16_t first,uint16_t last,PilotIoPort callback)
 {
     AcquireSRWLockExclusive(&lock);

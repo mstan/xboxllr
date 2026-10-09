@@ -212,6 +212,9 @@ static DWORD WINAPI dispatch_worker(void *unused)
 }
 static BOOL CALLBACK dispatch_start(PINIT_ONCE once,void *parameter,void **context)
 {
+#ifdef PILOT_SCHEDULING_LLE
+    stop("native dispatcher unavailable with original scheduling selected",0);
+#endif
     (void)once; (void)parameter; (void)context;
     dispatch_clock_origin=dispatch_monotonic();
     dispatch_changed=CreateEventW(NULL,FALSE,FALSE,NULL);

@@ -7,6 +7,8 @@
 #define PILOT_IO_BRIDGE_BYTES 0x10000u
 #define PILOT_IO_CLOCK_BASE 0xe6000000u
 #define PILOT_IO_CLOCK_BYTES 0x20000u
+/* Private loader-to-SystemRoutine transport, outside title address ranges. */
+#define PILOT_IO_BOOTSTRAP_ENTRY (PILOT_IO_BRIDGE_BASE+0x9800u)
 /* Private original-kernel device and owned-page implementation. Returns an explicit diagnostic on
  * unsupported execution; it never substitutes successful completion. */
 const char *pilot_io_device_lle(unsigned ordinal, unsigned char *guest,
@@ -42,6 +44,10 @@ void pilot_io_device_thread_bind(PilotIoThread callback);
  * guest call frame is at regs[ESP]; original execution returns updated GPRs.
  * The host call remains suspended if the original kernel switches threads. */
 const char *pilot_io_device_thread_call(unsigned ordinal,uint32_t regs[8]);
+/* Publish the original thread-type data and observe managed live threads.
+ * Neither operation changes readiness, priority or completion state. */
+const char *pilot_io_device_thread_type(uint32_t *address);
+const char *pilot_io_device_next_thread(uint32_t *object);
 /* Up to eight disjoint device-owned port ranges. NULL clears all bindings.
  * Bind only while the transport is idle. PIC/storage remain on their shared bus.
  * Callback returns an error on unsupported access. It must not reenter this

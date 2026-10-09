@@ -1295,6 +1295,16 @@ these references do not replace a missing hardware texture capture. Existing
 private-pilot/GPL dependency restrictions remain in force for the intended
 non-GPL shipping product.
 
+## Original-scheduling title bootstrap
+
+The experimental original-scheduling bootstrap additionally consults nxdk
+`lib/xboxkrnl/xboxkrnl.h` at the already pinned revision for `OBJECT_TYPE`'s
+28-byte shape. The original export, object, thread and GPIO programming execute
+from private owned inputs. The loader and handoff adapter are authored here;
+no donor kernel or loader body is incorporated. See
+[SCHEDULING-LLE.md](pilots/native-title/SCHEDULING-LLE.md) for the guarded
+startup result and remaining integration limits.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

@@ -44,9 +44,8 @@ static void thread_before_call(unsigned ordinal,const uint32_t *args)
     }
 }
 
-/* Called only at an original kernel start call site, before executing any
- * generated instruction. The object must belong to a successful original
- * create request, and its arguments must match that request. */
+/* Admit an original start or a pending service's actual return. Starts must
+ * belong to a successful creation and retain that request's arguments. */
 static int thread_admit(uc_engine *engine,uint32_t address)
 {
     if(!thread_callback || (kernel_word(0x8003da60u)&255))return 0;

@@ -421,6 +421,9 @@ static void query_setting(void)
 #include "virtual_memory.inc"
 #include "physical_memory.inc"
 #include "pool_memory.inc"
+#ifdef PILOT_SCHEDULING_LLE
+static void scheduling_lle_bootstrap(void);
+#endif
 #ifdef PILOT_USB_LLE
 #include "usb_lle.inc"
 #endif
@@ -432,6 +435,9 @@ static void query_setting(void)
 #include "cache.inc"
 #ifdef PILOT_FILES_LLE
 #include "files_lle.inc"
+#endif
+#ifdef PILOT_SCHEDULING_LLE
+#include "scheduling_lle.inc"
 #endif
 #include "memory_statistics.inc"
 #include "thread_objects.inc"
@@ -807,6 +813,7 @@ static void load_image(const char *path)
 #endif
 #endif
 
+#ifndef PILOT_SCHEDULING_LLE
     /* Post-loader bootstrap thread. Xbox TLS is below NtTib.StackBase;
      * the original XAPI entry computes and writes its negative TLS index. */
     const uint32_t stack_top=0x70010000u, stack_bottom=0x70000000u;
@@ -839,6 +846,7 @@ static void load_image(const char *path)
     }
     g_esp=stack_top-4;
     MEM32(g_esp)=0;
+#endif
 }
 
 int main(int argc,char **argv)
@@ -846,6 +854,9 @@ int main(int argc,char **argv)
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
     thread_guest_cpu_configure();
     scheduler_configure();
+#ifdef PILOT_SCHEDULING_LLE
+    scheduler_enabled=0; /* Original kernel owns readiness and preemption. */
+#endif
 #ifdef PILOT_CALENDAR_LLE
     fprintf(stderr,"[CALENDAR] LLE original-kernel execution; ordinals=304,305\n");
 #else
@@ -882,7 +893,15 @@ int main(int argc,char **argv)
     gpu_lle_open();
 #endif
 #ifdef PILOT_USB_LLE
+#ifndef PILOT_SCHEDULING_LLE
     usb_clock_start();
+#else
+    uint32_t revision=0;const char *usb_error=usb_access(0xfed00000u,0,&revision);
+    if(usb_error)stop(usb_error,0xfed00000u);
+#endif
+#endif
+#ifdef PILOT_SCHEDULING_LLE
+    scheduling_lle_run();return 0;
 #endif
     thread_guest_cpu_enter();
     scheduler_publish(0,0,0);scheduler_enter(0);

@@ -15,7 +15,9 @@ static unsigned thread_service_arguments(unsigned ordinal)
     case 107:case 108:case 119:case 233:return 3;
     case 149:case 189:case 234:return 4;
     case 150:case 159:return 5;
-    default:failure="thread LLE service family requires continuation integration";return 0;
+    default:
+        fprintf(stderr,"[THREAD LLE SERVICE GUARD] ordinal=%u thread=%08x\n",ordinal,kernel_word(0x8003da64u));
+        failure="thread LLE service family requires continuation integration";return 0;
     }
 }
 static void thread_note_close(uint32_t handle)
