@@ -15,6 +15,9 @@ static void test_dpc(void);
 static void test_timers(void);
 static void test_memory(void);
 static void test_scheduler_worker(void);
+#ifdef PILOT_EVENT_TIMER_LLE
+static void test_timer_lle_dpc(void);
+#endif
 #ifdef PILOT_USB_LLE
 static void test_usb_isr(void);
 static void test_usb_dpc(void);
@@ -41,6 +44,9 @@ static void test_worker(void)
 }
 
 recomp_func_t recomp_lookup(uint32_t va) {
+#ifdef PILOT_EVENT_TIMER_LLE
+    if(va==0x12480)return test_timer_lle_dpc;
+#endif
 #ifdef PILOT_USB_LLE
     if(va==0x12400)return test_usb_isr;
     if(va==0x12440)return test_usb_dpc;
@@ -73,6 +79,7 @@ static void call_kernel(unsigned ordinal,const uint32_t *args,unsigned argc)
 #include "event_objects_contract_test.inc"
 #ifdef PILOT_EVENT_TIMER_LLE
 #include "event_timer_lle_contract_test.inc"
+#include "timer_dpc_lle_contract_test.inc"
 #endif
 #ifdef PILOT_IO_DEVICE_LLE
 #include "io_device_contract_test.inc"
@@ -251,6 +258,23 @@ static void test_dpc(void)
 }
 static void test_timers(void)
 {
+    dispatch_ensure();
+    /* Independent original IRQ0 observations, not host wakeup precision.
+     * Five callbacks at each period must preserve the original logical cadence. */
+    const unsigned periods[]={1,2,3,10,16,31,32,33,100};
+    const unsigned intervals[]={2,3,4,11,17,32,33,34,101};
+    for(unsigned i=0;i<sizeof(periods)/sizeof(periods[0]);++i) {
+        uint64_t start=dispatch_clock_origin+50000,at=start;
+        for(unsigned n=1;n<=5;++n) {
+            at=dispatch_relative_deadline(at,(uint64_t)periods[i]*10000);
+            CHECK(at==start+(uint64_t)n*intervals[i]*10000);
+        }
+        CHECK(dispatch_relative_deadline(start+9999,(uint64_t)periods[i]*10000)==start+(uint64_t)intervals[i]*10000);
+    }
+    const uint64_t durations[]={1,9999,10000,10001,100000,330000};
+    const unsigned ticks[]={1,1,2,2,11,34};
+    for(unsigned i=0;i<sizeof(ticks)/sizeof(ticks[0]);++i)
+        CHECK(dispatch_relative_deadline(dispatch_clock_origin+50000,durations[i])==dispatch_clock_origin+50000+10000ull*ticks[i]);
     const uint32_t timer=0x1a000,dpc=0x1a100,second=0x1a120,timeout=0x1a300;
     uint32_t args[8]={timer,0};
     call_kernel(113,args,2);
@@ -490,6 +514,7 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"events")) { test_event_objects(); return 0; }
 #ifdef PILOT_EVENT_TIMER_LLE
         if (!strcmp(argv[1],"event-timer-lle")) { test_event_timer_lle(); return 0; }
+        if (!strcmp(argv[1],"timer-dpc-lle")) { test_timer_dpc_lle(); return 0; }
 #endif
         if (!strcmp(argv[1],"jumps")) { test_jumps(); return 0; }
         if (!strncmp(argv[1],"jump-",5)) { test_jump_failure(argv[1]+5); return 1; }

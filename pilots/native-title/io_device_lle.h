@@ -25,6 +25,10 @@ const char *pilot_io_device_file_data(unsigned ordinal,uint32_t *value);
  * interrupt frame, priority transitions and EOI; callback owns its real body. */
 typedef const char *(*PilotIoIsr)(uint32_t entry,uint32_t regs[8]);
 void pilot_io_device_isr_bind(PilotIoIsr callback);
+/* Original DPC dispatch uses four stdcall arguments, not the ISR's two.
+ * Admission requires the captured kernel dispatcher, active IRQL2 and the
+ * real dequeued DPC object. Its original stack pages share native backing. */
+void pilot_io_device_dpc_bind(PilotIoIsr callback);
 /* Up to eight disjoint device-owned port ranges. NULL clears all bindings.
  * Bind only while the transport is idle. PIC/storage remain on their shared bus.
  * Callback returns an error on unsupported access. It must not reenter this

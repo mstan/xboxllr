@@ -7,12 +7,12 @@
 static INIT_ONCE usb_once=INIT_ONCE_STATIC_INIT;
 static uint8_t usb_dma_leases[256];
 static uint64_t usb_isr_count;
-static const char *usb_original_isr(uint32_t entry,uint32_t regs[8])
+static const char *usb_original_callback(uint32_t entry,uint32_t regs[8],int is_dpc)
 {
     recomp_func_t routine=recomp_lookup(entry);
-    if(!routine)return "original USB ISR has no AOT binding";
+    if(!routine)return "original kernel callback has no AOT binding";
     if(++usb_isr_count<=4)
-        fprintf(stderr,"[USB LLE ISR] call=%llu entry=%08x irql=%u\n",
+        fprintf(stderr,"[%s] call=%llu entry=%08x irql=%u\n",is_dpc?"KERNEL LLE DPC":"USB LLE ISR",
                 (unsigned long long)usb_isr_count,entry,pilot_io_device_irql());
     uint32_t saved[]={g_eax,g_ecx,g_edx,g_ebx,g_esp,g_ebp,g_esi,g_edi,
         next_kernel_ordinal,g_icall_saved_esp,g_icall_dispatch_form,g_seh_ebp};
@@ -23,15 +23,19 @@ static const char *usb_original_isr(uint32_t entry,uint32_t regs[8])
     RecompMmx mm[]={g_mm0,g_mm1,g_mm2,g_mm3,g_mm4,g_mm5,g_mm6,g_mm7};
     uint8_t irql=g_fs_base?MEM8(g_fs_base+0x24):0;
     int saved_if=cpu_interrupt_flag,saved_shadow=cpu_interrupt_shadow;
-    /* The original gate enables interrupts before calling its registered ISR. */
+    int saved_in_dpc=dispatch_in_dpc;
+    /* The qualified original ISR/DPC dispatchers enable interrupts before
+     * calling generated code. Their actual IRQL remains authoritative. */
     cpu_interrupt_flag=1;cpu_interrupt_shadow=0;pilot_io_device_set_if(1);
     g_eax=regs[0];g_ecx=regs[1];g_edx=regs[2];g_ebx=regs[3];
     g_esp=regs[4];g_ebp=regs[5];g_esi=regs[6];g_edi=regs[7];
     g_df=0; /* The original interrupt thunk executed CLD. */
     if(g_fs_base)MEM8(g_fs_base+0x24)=(uint8_t)pilot_io_device_irql();
+    if(is_dpc)dispatch_in_dpc=1;
     ++usb_in_interrupt;routine();--usb_in_interrupt;
-    if(usb_isr_count<=4)fprintf(stderr,"[MACHINE ISR RETURN] entry=%08x claimed=%u context=%08x\n",entry,g_eax&255,MEM32(regs[4]+8));
-    if(g_esp!=regs[4]+12)stop("original USB ISR stdcall imbalance",entry);
+    dispatch_in_dpc=saved_in_dpc;
+    if(usb_isr_count<=4)fprintf(stderr,"[MACHINE CALLBACK RETURN] entry=%08x dpc=%d context=%08x\n",entry,is_dpc,MEM32(regs[4]+8));
+    if(g_esp!=regs[4]+(is_dpc?20:12))stop("original callback stdcall imbalance",entry);
     regs[0]=g_eax;regs[1]=g_ecx;regs[2]=g_edx;regs[3]=g_ebx;
     regs[4]=g_esp;regs[5]=g_ebp;regs[6]=g_esi;regs[7]=g_edi;
     g_eax=saved[0];g_ecx=saved[1];g_edx=saved[2];g_ebx=saved[3];
@@ -48,6 +52,10 @@ static const char *usb_original_isr(uint32_t entry,uint32_t regs[8])
     cpu_interrupt_flag=saved_if;cpu_interrupt_shadow=saved_shadow;pilot_io_device_set_if(saved_if);
     return NULL;
 }
+static const char *usb_original_isr(uint32_t entry,uint32_t regs[8])
+{return usb_original_callback(entry,regs,0);}
+static const char *usb_original_dpc(uint32_t entry,uint32_t regs[8])
+{return usb_original_callback(entry,regs,1);}
 static void usb_poll(void)
 {
     if(usb_in_interrupt)return;
@@ -134,6 +142,7 @@ static BOOL CALLBACK usb_start(PINIT_ONCE once,void *parameter,void **context)
     const char *error=pilot_usb_lle_bind(usb_dma_read,usb_dma_write,usb_dma_release);
     if(error)stop(error,0);
     pilot_io_device_isr_bind(usb_original_isr);
+    pilot_io_device_dpc_bind(usb_original_dpc);
     fprintf(stderr,"[USB LLE] shared OHCI/XID/PIC; original interrupt dispatch; owned DMA\n");
     return TRUE;
 }

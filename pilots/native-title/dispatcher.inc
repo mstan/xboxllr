@@ -50,11 +50,17 @@ static uint64_t dispatch_monotonic(void)
     return (uint64_t)(q.QuadPart/f.QuadPart)*10000000ull+
            (uint64_t)(q.QuadPart%f.QuadPart)*10000000ull/(uint64_t)f.QuadPart;
 }
-static uint64_t dispatch_deadline(int64_t due)
+static uint64_t dispatch_relative_deadline(uint64_t now,uint64_t delta)
 {
-    if (due>=0) return (uint64_t)due;
-    uint64_t now=dispatch_monotonic(), delta=0-(uint64_t)due;
-    return UINT64_MAX-now<delta ? UINT64_MAX : now+delta;
+    /* Original IRQ0 checks the previous timer bucket. Expiration is on the
+     * tick strictly following the queued relative deadline, including exact
+     * tick boundaries. Preserve that cadence using one native host deadline,
+     * without running a 1kHz HLE interrupt loop. Independent period matrix:
+     * native_timer_expiry_reference.py --cadence. */
+    uint64_t base=now-(now-dispatch_clock_origin)%10000;
+    if(delta>UINT64_MAX-10000)return UINT64_MAX;
+    uint64_t rounded=(delta/10000+1)*10000;
+    return UINT64_MAX-base<rounded?UINT64_MAX:base+rounded;
 }
 static int dispatch_queue_locked(uint32_t va,uint32_t arg1,uint32_t arg2)
 {
@@ -78,9 +84,9 @@ static void dispatch_expire_locked(uint64_t mono,uint64_t wall)
         MEM32(va+4)=1;
         if (t->dpc) dispatch_queue_locked(t->dpc,(uint32_t)wall,(uint32_t)(wall>>32));
         if (t->period) {
-            t->absolute=0; t->deadline=mono+(uint64_t)t->period*10000;
+            t->absolute=0; t->deadline=dispatch_relative_deadline(mono,(uint64_t)t->period*10000);
             MEM8(va+1)=0;
-            MEM64(va+16)=t->deadline-dispatch_clock_origin;
+            MEM64(va+16)=((mono-dispatch_clock_origin)/10000+t->period)*10000;
         } else { MEM8(va+3)=0; t->va=0; }
     }
 }
@@ -291,11 +297,14 @@ static unsigned dispatch_set_timer(uint32_t va,int64_t due,uint32_t period,uint3
         if (!dispatch_timers[i].va) slot=&dispatch_timers[i];
     }
     if (!slot) stop("active timer table exhausted",va);
-    slot->va=va; slot->dpc=dpc; slot->period=period; slot->absolute=due>=0; slot->deadline=dispatch_deadline(due);
+    uint64_t mono=dispatch_monotonic(),wall=dispatch_wall_time();
+    slot->va=va; slot->dpc=dpc; slot->period=period; slot->absolute=due>=0;
+    slot->deadline=due>=0?(uint64_t)due:dispatch_relative_deadline(mono,0-(uint64_t)due);
     MEM8(va+1)=(uint8_t)slot->absolute; MEM8(va+3)=1; MEM32(va+4)=0;
-    uint64_t clock=slot->absolute ? dispatch_wall_time() : dispatch_monotonic();
+    uint64_t clock=slot->absolute ? wall : mono;
     uint64_t remaining=slot->deadline>clock ? slot->deadline-clock : 0;
-    MEM64(va+16)=dispatch_monotonic()-dispatch_clock_origin+remaining;
+    MEM64(va+16)=slot->absolute?mono-dispatch_clock_origin+remaining:
+        ((mono-dispatch_clock_origin)/10000)*10000+(0-(uint64_t)due);
     MEM32(va+32)=dpc; MEM32(va+36)=period;
     dispatch_expire_locked(dispatch_monotonic(),dispatch_wall_time());
     dispatch_wake_locked(); SetEvent(dispatch_changed);

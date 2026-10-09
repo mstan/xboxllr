@@ -754,6 +754,15 @@ here. Owned INIT bytes are loaded privately at runtime, never redistributed.
 Existing private-pilot dependency restrictions remain unchanged. This batch
 adds no GPL-derived implementation to the intended non-GPL shipping product.
 
+The subsequent original-DPC/native bridge and HLE cadence correction reuse those
+same references and the existing native callback transport. The owner's original
+kernel independently establishes both dispatch call sites, actual DPC stack
+ownership, four-argument callback semantics and the nine-period/45-callback
+timing observations. Native deadline arithmetic is authored here against those
+observations; Phobos's timer-queue implementation is not copied. Test callback
+instruction bodies are authored fixture programs. No kernel instructions,
+disassembly, private images or GPL implementation bodies are added to the source.
+
 ## Original device-manager reference execution (2026-10-08)
 
 `pilots/native-title/io_device_lle.c` and

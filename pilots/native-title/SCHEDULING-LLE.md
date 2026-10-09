@@ -170,11 +170,11 @@ evidence must not be cited as proof of early original expiration.
 Our existing native tests cover the same state, wait status, signal consumption,
 cancel/rearm, periodic callback and system-time argument contracts. They pass in
 the combined suite. `dispatcher.inc` uses host deadlines and serial guest DPC
-ownership; it need not replay IRQ0 internally. **Periodic cadence still needs
-an explicit comparison/tolerance decision before family closure:** the original
+ownership; it need not replay IRQ0 internally. The first expiry batch exposed
+a periodic-cadence difference, resolved by the follow-up below: the original
 3 ms case has a 4 ms interval, while native reinsertion requests 3 ms after its
 own expiry. A per-deadline margin does not automatically justify accumulating
-phase or callback-count differences.
+phase or callback-count differences; the follow-up fixes the native deadline.
 
 Phobos `bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0`, `kernel_sync.c`, was
 rechecked for reusable timer services. Its Win32 timer-queue approach is a useful
@@ -216,11 +216,87 @@ a natural exit or long-run resource-stability qualification. Evidence:
 This regresses the existing mixed title configuration, not original scheduler
 selection in production; the PIT is unprogrammed there until explicitly selected.
 
+## Original DPC/native callback bridge and HLE cadence correction
+
+The maintained bridge now runs timer and ordinarily queued DPC callbacks through
+their generated native bodies. The original kernel remains responsible for
+expiration, queue insertion/removal, dispatch eligibility and actual invocation.
+Admission checks the hash-bound original call sites, active DPC dispatch at
+IRQL 2, the dequeued object's routine/context, and enabled interrupts/clear DF.
+An unknown callback or state stops explicitly.
+
+The original DPC stack is separate from the interrupted stack. The bridge checks
+its three resident pages and surrounding guards, then publishes those actual
+pages through the existing shared-PFN mechanism. The callback sees the original
+VA and argument storage; no stack relocation, private copy or guest allocation
+substitutes for it. Kernel-session ownership keeps this stack live. Existing
+native callback state preservation now handles the DPC's four stdcall arguments
+and `KeIsExecutingDpc` state, in addition to the ISR's two-argument ABI.
+
+`pilot_timer_dpc_lle` executes actual original timer expiry into a native callback,
+then nested original queue/duplicate/remove/requeue and cancel calls. It verifies
+system-time arguments, original-stack identity, delayed invocation at raised
+IRQL, cancellation preserving already queued work, and native GPR/FP restoration.
+The independent Python fixture also executes ordinary queue/dequeue and IRQL
+lowering, recording the second original callback call site and stack. The original
+`KeIsExecutingDpc` returns a nonzero active-stack value while executing a DPC;
+the contract is truth/nontruth, not the exact integer `1` used by native HLE.
+
+### Cadence settled without an HLE interrupt loop
+
+`native_timer_expiry_reference.py --cadence` records nine separate original
+clock/kernel lifetimes and **45 actual periodic callbacks**. Requested periods
+`1,2,3,10,16,31,32,33,100` ms produce intervals
+`2,3,4,11,17,32,33,34,101` clock ticks respectively. Every case checks cancellation,
+the original callback arguments, IRQL and interrupted-register preservation.
+Evidence: `build/blinx/timer-periodic-cadence.aot-private.json`.
+
+The native dispatcher now schedules relative expiration on the tick strictly
+following the queued deadline, using its established clock origin. Periodic
+reinsertion follows that same rule. The guest-visible DueTime retains the queued
+deadline, not the later expiration bucket. Host waitable timers still perform
+the wait; there is no 1 kHz HLE IRQ loop and no duplicate original execution.
+Native tests check the independent six-duration and nine-period observations,
+including phase within a tick, then execute real host waits and periodic callbacks.
+Host scheduling may delay callback delivery; no exact wall-clock latency bound
+is inferred from the instruction-driven reference. Absolute host deadlines and
+the separately documented native NT event-wait tolerance are unchanged.
+
+The combined suite passes **48/48 in 20.72s** including the new original/native
+DPC bridge. Logs: `build/blinx/timer-dpc-{bridge-build,full-tests,title-build}.log`.
+The expanded independent fixture passes 12 expiration cases, five periodic plus
+one ordinarily queued callback, **257 interrupts**, 17 blocking waits and the
+original worker join. `build/blinx/timer-dpc-original.aot-private.json` records
+this run; the earlier 260-interrupt result used a longer fixed observation window.
+
+The rebuilt mixed title passes a **190.141s** regression with 18 captures and no
+stop/audio-stop/fault. Both replayed Start presses/releases are delivered;
+images show demo gameplay, interruption/loading, title return and another demo
+entry. As before, the harness ends a live process after its bounded observation,
+so this is not a natural exit or long-run resource-stability claim. Evidence:
+`build/blinx/scheduling-dpc-attract/{run.aot-private.json,contact.png}` and
+`build/blinx/run-scheduling-dpc-attract.log`. Executable SHA-256:
+`3ddf453577df3bc69b80462087ed18a223b48592beba6ae248cf77705342f83a`.
+
+This closes the callback transport and observed cadence differences. It does
+**not** select original timers for the whole title yet or close scheduling.
+Native host waiters currently consume native dispatcher state while releasing
+the guest CPU. A static original timer/DPC selection must connect those wait
+ownership rules coherently, alongside original thread execution, rather than
+letting two schedulers mutate the same queues. This is offline integration work;
+it does not depend on GPU startup or new real-console evidence.
+
 ## Next offline work
 
-Use the now-executable original expiry/wakeup route to integrate original
-thread execution and DPC callbacks into the native bridge. Resolve periodic
-cadence, then qualify remaining priority, contention and suspend/resume cases.
+Use the now-executable original expiry/wakeup and native DPC callback routes to
+integrate original thread execution and static timer/DPC selection with coherent
+wait ownership. Qualify remaining priority, contention and suspend/resume cases.
+Start with one original thread/native body handoff using the existing bridge
+and worker fixture. The synchronous service bridge currently supports nested
+callbacks, not non-LIFO returns between blocked native threads. Establish real
+thread identity, original stack and return-boundary ownership before enabling
+title-wide selection; do not add a second scheduler that guesses the original
+kernel's choice. Reuse compatible Phobos thread transport where it fits.
 Retain the native implementation as the title's active scheduling backend until
 the original service route can perform those operations. Any genuinely
 silicon-only question is appended to the deferred end of the burndown; GPU

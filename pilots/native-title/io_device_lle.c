@@ -52,7 +52,9 @@ static uint32_t vm_publication_base,vm_publication_bytes;
 static struct {uint32_t base,bytes;} stacks[64];
 static unsigned stack_count;
 static uint32_t interrupt_objects[16],pending_callback;
-static PilotIoIsr isr_callback;
+static PilotIoIsr isr_callback,dpc_callback;
+static int pending_dpc;
+static uint32_t dpc_stack_top;
 static struct {uint16_t first,last;PilotIoPort callback;} device_ports[8];
 static PilotIoMmio device_mmio;
 static uint32_t device_mmio_first,device_mmio_bytes;
@@ -264,6 +266,23 @@ static void code_block(uc_engine *engine,uint64_t address,uint32_t size,void *da
             pending_callback=routine;uc_emu_stop(engine);return;
         }
     }
+    if(dpc_callback && (kernel_word(0x8003da60u)&255)==2 && kernel_word(0x8003da94u)) {
+        uint32_t sp,frame[5],object[7],flags;
+        if(uc_reg_read(engine,UC_X86_REG_ESP,&sp)==UC_ERR_OK &&
+           uc_mem_read(engine,sp,frame,sizeof(frame))==UC_ERR_OK &&
+           uc_mem_read(engine,frame[1],object,sizeof(object))==UC_ERR_OK &&
+           uc_reg_read(engine,UC_X86_REG_EFLAGS,&flags)==UC_ERR_OK &&
+           (frame[0]==0x8001f68fu || frame[0]==0x8001e461u) && (object[0]&0xffffff)==0x13 &&
+           object[3]==address && object[4]==frame[2] && (flags&0x600)==0x200) {
+            /* Hash-bound timer-expiry and ordinary DPC call sites. Only the
+             * original dispatchers invoke callbacks; no poll fabricates one. */
+            pending_callback=(uint32_t)address;pending_dpc=1;uc_emu_stop(engine);return;
+        }
+    }
+    uint32_t sp=0,frame[5]={0};uc_reg_read(engine,UC_X86_REG_ESP,&sp);
+    uc_mem_read(engine,sp,frame,sizeof(frame));
+    fprintf(stderr,"[IO CALLBACK GUARD] pc=%08x sp=%08x return=%08x object=%08x irql=%u active=%08x\n",
+            (uint32_t)address,sp,frame[0],frame[1],kernel_word(0x8003da60u)&255,kernel_word(0x8003da94u));
     forbidden(engine,"device LLE driver callback requires real native interop");
 }
 
@@ -471,7 +490,7 @@ static void run_original(uint32_t entry,size_t instruction_limit)
      * run its generated body over shared bytes, then restore this CPU. A
      * nested original service has its own stack and saved engine context. */
     for(unsigned calls=0;calls<8192;++calls) {
-        pending_callback=0;
+        pending_callback=0;pending_dpc=0;
 #ifdef PILOT_USB_LLE
         device_irq_pending=0;
 #endif
@@ -488,8 +507,22 @@ static void run_original(uint32_t entry,size_t instruction_limit)
 #endif
         if(!pending_callback)return;
         uint32_t routine=pending_callback,regs[8],return_pc;
+        int is_dpc=pending_dpc;
         for(unsigned i=0;i<8;++i)IO_UC(uc_reg_read(cpu,general_regs[i],regs+i));
         IO_UC(uc_mem_read(cpu,regs[4],&return_pc,4));
+        if(is_dpc) {
+            uint32_t top=kernel_word(0x8003da98u),unused;
+            /* The captured original DPC stack is three resident pages with
+             * guard pages on both sides. Keep the original VA/PTE identity,
+             * including escaped argument pointers; never relocate the frame. */
+            if((top&4095) || top<0xd0003000u || top>0xd4000000u ||
+               regs[4]<top-0x3000u || regs[4]>top-20 ||
+               physical(top,&unused) || physical(top-0x4000u,&unused) ||
+               (dpc_stack_top && dpc_stack_top!=top)) {
+                failure="device LLE unqualified original DPC stack";return;
+            }
+            if(!dpc_stack_top){publish_range(top-0x3000u,0x3000u);if(failure)return;dpc_stack_top=top;}
+        }
         uc_context *context=NULL;IO_UC(uc_context_alloc(cpu,&context));
         error=uc_context_save(cpu,context);
         if(error){uc_context_free(context);failure=uc_strerror(error);return;}
@@ -497,7 +530,7 @@ static void run_original(uint32_t entry,size_t instruction_limit)
         InterlockedExchange(&current_irql,(LONG)(kernel_word(0x8003da60u)&255));
         if(!failure) {
             ReleaseSRWLockExclusive(&lock);
-            const char *callback_error=isr_callback(routine,regs);
+            const char *callback_error=(is_dpc?dpc_callback:isr_callback)(routine,regs);
             AcquireSRWLockExclusive(&lock);
             if(callback_error)failure=callback_error;
         }
@@ -508,7 +541,7 @@ static void run_original(uint32_t entry,size_t instruction_limit)
         for(unsigned i=0;i<8;++i)IO_UC(uc_reg_write(cpu,general_regs[i],regs+i));
         entry=return_pc;
     }
-    failure="device LLE ISR callback budget exhausted";
+    failure="device LLE callback budget exhausted";
 }
 static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result);
 static void image_vm(uint32_t base,uint32_t bytes,uint32_t type)
@@ -556,7 +589,7 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
     if(ordinal!=1 && ordinal!=2 && ordinal!=3 && ordinal!=4 && ordinal!=14 && ordinal!=15 && ordinal!=17 && ordinal!=23 &&
        ordinal!=44 && ordinal!=45 && ordinal!=46 && ordinal!=47 && ordinal!=50 && ordinal!=65 && ordinal!=68 && ordinal!=107 && ordinal!=108 && ordinal!=109 && ordinal!=166 &&
        ordinal!=168 && ordinal!=171 && ordinal!=173 && ordinal!=175 && ordinal!=178 && ordinal!=179 && ordinal!=180 && ordinal!=181 && ordinal!=182 &&
-       ordinal!=98 && ordinal!=100 && ordinal!=103 && ordinal!=129 && ordinal!=151 &&
+       ordinal!=98 && ordinal!=100 && ordinal!=103 && ordinal!=119 && ordinal!=121 && ordinal!=128 && ordinal!=129 && ordinal!=137 && ordinal!=151 &&
        ordinal!=160 && ordinal!=161 && ordinal!=184 && ordinal!=199 && ordinal!=204 && ordinal!=217
 #ifdef PILOT_FILES_LLE
        && ordinal!=35 && ordinal!=36 && ordinal!=37 && ordinal!=67 && ordinal!=69 &&
@@ -621,9 +654,9 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
     uint32_t entry=0x80010000u+kernel_word(table+4*(ordinal-base));
     if(failure)return;
     unsigned count=(ordinal==3 || ordinal==46 || ordinal==65)?6:ordinal==109?7:(ordinal==166 || ordinal==184)?5:(ordinal==2 || ordinal==45 || ordinal==50 || ordinal==204)?4:
-                   (ordinal==107 || ordinal==108 || ordinal==175 || ordinal==178 || ordinal==182 || ordinal==199)?3:
+                   (ordinal==107 || ordinal==108 || ordinal==119 || ordinal==175 || ordinal==178 || ordinal==182 || ordinal==199)?3:
                    (ordinal==15 || ordinal==44 || ordinal==47 || ordinal==168 || ordinal==217)?2:
-                   (ordinal==1 || ordinal==103 || ordinal==129 || ordinal==160 || ordinal==161)?0:1;
+                   (ordinal==1 || ordinal==103 || ordinal==121 || ordinal==129 || ordinal==160 || ordinal==161)?0:1;
 #ifdef PILOT_FILES_LLE
     switch(ordinal) {
     case 35:case 36:case 125:count=0;break;
@@ -747,6 +780,7 @@ static void deliver_irq(int *delivered)
 }
 #undef IO_UC
 void pilot_io_device_isr_bind(PilotIoIsr callback){isr_callback=callback;}
+void pilot_io_device_dpc_bind(PilotIoIsr callback){dpc_callback=callback;}
 void pilot_io_device_port_bind(uint16_t first,uint16_t last,PilotIoPort callback)
 {
     AcquireSRWLockExclusive(&lock);

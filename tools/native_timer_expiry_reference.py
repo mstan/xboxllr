@@ -154,36 +154,60 @@ class TimerReference(FilesystemReference):
         assert self.call(187, handle) == 0
         return dict(waits=rows, joined=True, blocks=self.clock_blocks)
 
-    def periodic_dpc(self):
+    def periodic_dpc(self, period=3):
         timer, dpc, callback, context = 0x10001000, 0x10001100, 0x10004000, 0x10004100
         # Authored DPC records all arguments and the actual PCR IRQL. No host
         # hook increments completion or substitutes for kernel DPC dispatch.
         self.cpu.mem_write(callback, bytes.fromhex(
             '8b4c2408ff018b4424048941048b44240c8941088b44241089410c'
-            '640fb60524000000894110c21000'))
+            '640fb605240000008941108b042489411489e0894118c21000'))
         self.call(107, dpc, callback, context)
         self.call(113, timer, 1)
-        assert self.call(150, timer, 0xffffffff, 0xffffffff, 3, dpc) & 255 == 0
+        assert self.call(150, timer, 0xffffffff, 0xffffffff, period, dpc) & 255 == 0
         callbacks = []
         previous = 0
-        for tick in range(1, 20):
+        for tick in range(1, 4*(period+1)+2):
             self.advance()
             count = self.value(context)
             if count != previous:
                 assert count == previous+1
                 assert self.value(context+4) == dpc and self.value(context+16) == 2
+                assert self.value(context+20) == 0x8001f68f
+                assert 0xd001e000 <= self.value(context+24) < 0xd0021000
                 # Original KeTimerExpiration supplies its sampled system time.
                 callback_time = self.value(context+8, '<Q')
                 assert callback_time == self.word(self.system_time) + (self.word(self.system_time+4) << 32)
                 assert self.value(timer+3, '<B') == 1, 'periodic timer not reinserted'
                 callbacks.append(dict(tick=tick, system_time=callback_time))
                 previous = count
-        assert len(callbacks) >= 4
+        assert [row['tick'] for row in callbacks] == [1+n*(period+1) for n in range(5)]
         assert self.call(97, timer) & 255 == 1
-        for _ in range(6):
+        for _ in range(period+2):
             self.advance()
         assert self.value(context) == previous, 'canceled periodic timer called again'
-        return dict(callbacks=callbacks, canceled=True)
+        return dict(period=period, callbacks=callbacks, canceled=True)
+
+    def queued_dpc(self):
+        dpc, callback, context = 0x10001100, 0x10004000, 0x10004100
+        self.cpu.mem_write(context, bytes(32))
+        self.call(107, dpc, callback, context)  # reuse the authored recording program
+        assert self.call(129) & 255 == 0
+        assert self.call(121) == 0  # raised IRQL alone does not mean executing a DPC
+        assert self.call(119, dpc, 0x12345678, 0x87654321) & 255 == 1
+        assert self.call(119, dpc, 0, 0) & 255 == 0
+        assert self.call(137, dpc) & 255 == 1
+        assert self.call(137, dpc) & 255 == 0
+        assert self.call(119, dpc, 0x12345678, 0x87654321) & 255 == 1
+        assert self.value(context) == 0 and self.value(dpc+2, '<B') == 1
+        self.cpu.reg_write(UC_X86_REG_ECX, 0)
+        self.call(161)
+        assert self.value(context) == 1 and self.value(context+4) == dpc
+        assert self.value(context+8) == 0x12345678 and self.value(context+12) == 0x87654321
+        assert self.value(context+16) == 2 and self.value(context+20) == 0x8001e461
+        assert 0xd001e000 <= self.value(context+24) < 0xd0021000
+        assert self.value(dpc+2, '<B') == 0 and self.call(121) == 0
+        return dict(callbacks=1, return_pc=self.value(context+20), deferred=True,
+                    duplicate_rejected=True, removed_and_requeued=True)
 
 
 def run(snapshot, library, image, kernel):
@@ -214,11 +238,12 @@ def run(snapshot, library, image, kernel):
                 assert ref.call(97, timer) & 255 == 0
                 rows.append(dict(type=kind, duration_100ns=duration, expiry_ticks=tick))
         dpc = ref.periodic_dpc()
+        queued_dpc = ref.queued_dpc()
         workers = ref.workers()
         return dict(snapshot_sha256=SNAPSHOT_SHA, kernel_sha256=KERNEL_SHA,
                     clock_programming=ref.programming, clock_ticks=ref.ticks,
                     initial_interrupt_time=now, cases=rows, interrupts=ref.interrupts,
-                    periodic_dpc=dpc, workers=workers)
+                    periodic_dpc=dpc, queued_dpc=queued_dpc, workers=workers)
     finally:
         ref.close()
 
@@ -228,10 +253,24 @@ if __name__ == '__main__':
     for name in ('snapshot', 'library', 'image', 'kernel', 'output'):
         parser.add_argument('--'+name, type=Path, required=True)
     parser.add_argument('--dependencies', type=Path)
+    parser.add_argument('--cadence', action='store_true', help='Nine independent original periodic-timer lifetimes')
     args = parser.parse_args()
     dll_directory = os.add_dll_directory(str(args.dependencies.resolve())) if args.dependencies else None
-    result = run(args.snapshot, args.library, args.image, args.kernel)
+    if args.cadence:
+        rows = []
+        for period in (1, 2, 3, 10, 16, 31, 32, 33, 100):
+            ref = TimerReference(args.snapshot, args.library, args.image, args.kernel)
+            try:
+                rows.append(ref.periodic_dpc(period))
+            finally:
+                ref.close()
+        result = dict(kernel_sha256=KERNEL_SHA, snapshot_sha256=SNAPSHOT_SHA, cases=rows)
+    else:
+        result = run(args.snapshot, args.library, args.image, args.kernel)
     args.output.write_text(json.dumps(result, indent=2)+'\n', encoding='utf-8')
-    print(json.dumps(dict(expiry_cases=len(result['cases']), interrupts=result['interrupts'],
+    if args.cadence:
+        print('PASS: nine original periodic lifetimes, 45 actual callbacks, cancellation and register preservation')
+    else:
+        print(json.dumps(dict(expiry_cases=len(result['cases']), interrupts=result['interrupts'],
                          dpc_callbacks=len(result['periodic_dpc']['callbacks']),
                          worker_waits=len(result['workers']['waits']), joined=result['workers']['joined'])))
