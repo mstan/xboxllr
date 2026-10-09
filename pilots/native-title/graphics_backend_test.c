@@ -97,6 +97,21 @@ static int test_resource_bindings(void)
     pilot_gfx_vertex_destroy(a);pilot_gfx_vertex_destroy(b);
     fprintf(stderr,"PASS: actual sampled GPU pixels and changes, preserved texture state, SRV unbind and independent native vertex streams\n");return 0;
 }
+static int test_scene_target_readback(void)
+{
+    CHECK(pilot_gfx_clear(D3DCLEAR_TARGET|D3DCLEAR_ZBUFFER|D3DCLEAR_STENCIL,0xff123456,.25f,0x5a)==0);
+    uint32_t metadata[3],color[64*64],depth[64*64];
+    CHECK(pilot_gfx_reference_target_readback(0,NULL,0,metadata)==0);
+    CHECK(metadata[0]==64 && metadata[1]==64 && metadata[2]==DXGI_FORMAT_R8G8B8A8_UNORM);
+    CHECK(pilot_gfx_reference_target_readback(0,color,sizeof(color),metadata)==0);
+    for(unsigned i=0;i<64*64;++i)CHECK(color[i]==0xff563412);
+    CHECK(pilot_gfx_reference_target_readback(1,NULL,0,metadata)==0);
+    CHECK(metadata[0]==64 && metadata[1]==64 &&
+        (metadata[2]==DXGI_FORMAT_R24G8_TYPELESS || metadata[2]==DXGI_FORMAT_D24_UNORM_S8_UINT));
+    CHECK(pilot_gfx_reference_target_readback(1,depth,sizeof(depth),metadata)==0);
+    for(unsigned i=0;i<64*64;++i)CHECK((depth[i]>>24)==0x5a && abs((int)(depth[i]&0xffffff)-0x400000)<=1);
+    fprintf(stderr,"PASS: diagnostic live-target raw RGBA/depth/stencil readback and exact cleared contents\n");return 0;
+}
 int main(void)
 {
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
@@ -107,6 +122,7 @@ int main(void)
         struct PilotGpuProgress progress;pilot_gfx_completion_stats(&progress);
         CHECK(!progress.submitted && !progress.completed && !progress.pending_queries && !progress.created_queries);
         CHECK(pilot_gfx_width()==64 && pilot_gfx_height()==64);
+        CHECK(test_scene_target_readback()==0);
         CHECK(pilot_gfx_clear(D3DCLEAR_TARGET|D3DCLEAR_ZBUFFER,0xff0000ff,1,0)>=0);
         CHECK(pilot_gfx_readback(pixels,sizeof(pixels))>=0);
         CHECK(pixels[0]==0 && pixels[1]==0 && pixels[2]==255);

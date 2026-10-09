@@ -1132,6 +1132,11 @@ public:
         return transformed_batch_.empty()
                    ? std::array<float, 4>{} : transformed_batch_.back().specular;
     }
+    // Read-only diagnostic observation. The reference expires on submission;
+    // retaining it must never replace command consumption or actual draws.
+    const std::vector<Nv2aGenericCombinerVertex>& last_transformed_batch() const {
+        return transformed_batch_;
+    }
     uint64_t fixed_skin_batches(uint32_t mode) const {
         return mode < fixed_skin_batches_.size() ? fixed_skin_batches_[mode] : 0;
     }

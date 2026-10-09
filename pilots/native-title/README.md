@@ -13,6 +13,11 @@ raw-output checks; another 1,116 original constant cases pass LLE/native output,
 CPU recorder/query semantics and native upload coalescing. These retain the
 previous 140 color draws. Another 1,344 LLE/native draws independently qualify
 finite shader math, masks/swizzles, captured paired issue and relative addressing.
+Complete original submission now also replays 96 retained scene shader draws
+(3,008 vertices / 28,936 written lanes). Bounded companion captures retain live
+GPU texture mips and before/after color/depth targets. Original complete-draw
+state replay reaches the DXT1-noise graphics-service RDI write and explicitly
+guards there; matching vertex output does not close pixel qualification.
 Overall qualification
 remains 4/9; see [graphics evidence and remaining scope](GRAPHICS-LLE.md).
 

@@ -151,8 +151,14 @@ class Reference:
 
     def bind_program(self, code):
         assert len(code)%4==0 and 0<len(code)//4<=136
-        self.put(OBJECT+8,len(code)//4,len(code)+1)
-        self.put(OBJECT+0x114,(len(code)<<18)|0xb00,*code)
+        # The hardware upload-method array holds eight instructions. The
+        # preowned driver descriptor repeats that array for longer programs.
+        packets=[]
+        for first in range(0,len(code),32):
+            chunk=code[first:first+32]
+            packets.extend([(len(chunk)<<18)|0xb00,*chunk])
+        self.put(OBJECT+8,len(code)//4,len(packets))
+        self.put(OBJECT+0x114,*packets)
         self.call('D3DDevice_LoadVertexShader',[OBJECT|1,0])
         self.call('D3DDevice_SelectVertexShader',[OBJECT|1,0])
         self.kick()
@@ -175,14 +181,15 @@ class Reference:
             assert self.get(resource+4)[0] == data
         self.transitions.append(dict(stream=stream, old_header=old, header=header, stride=stride))
 
-    def draw(self, first):
-        self.emit(0x1d90,0xff102030)
-        self.emit(0x1d98,63<<16); self.emit(0x1d9c,63<<16); self.emit(0x1d94,0xf0)
-        # Only stream/declaration dirty bits: the original submission routine
-        # executes its full relevant path without unrelated render-state work.
-        self.put(0x141b84,0x50)
+    def draw(self, first, primitive=5, count=3, *, clear=True, state_dirty=0x50):
+        if clear:
+            self.emit(0x1d90,0xff102030)
+            self.emit(0x1d98,63<<16); self.emit(0x1d9c,63<<16); self.emit(0x1d94,0xf0)
+        # The default bounds the original submission to declaration/streams.
+        # Scene replay passes None to retain all dirty bits set by real setters.
+        self.put(0x141b84,0x50|self.get(0x141b84)[0] if state_dirty is None else state_dirty)
         begin=self.get(self.device)[0]
-        self.call('D3DDevice_DrawVertices',[5,first,3])
+        self.call('D3DDevice_DrawVertices',[primitive,first,count])
         packets=self.get(begin,(self.get(self.device)[0]-begin)//4)
         methods={}
         cursor=0

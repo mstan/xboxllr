@@ -1493,6 +1493,15 @@ Encoding, programs and algebraic expectations are independently authored;
 no specification prose, donor implementation body or new hardware golden is
 incorporated. Existing shader-library/private-pilot license limits still apply.
 
+The captured-scene composition/audit tools are authored here. They execute
+complete original submission and graphics/software-method functions from the
+hash-bound owned private XBE, and read actual maintained/native GPU observations.
+No original instruction bytes, game textures or captured frames are committed.
+The existing pinned xemu RDI implementation and MIT envytools internal-bundle
+observations were consulted to assess the newly exposed DXT1-noise control gap;
+unknown or ignored controls are not treated as independently qualified pixels.
+No external implementation body, dependency or new hardware golden is added.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

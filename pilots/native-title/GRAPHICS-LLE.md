@@ -289,10 +289,125 @@ title hash retains the exact matching attract/interruption/reentry evidence.
 This does not qualify every shader instruction, exceptional numerical behavior,
 state programs, original allocation/startup or the entire graphics family.
 
+## Captured scene composition and full-draw audit - 2026-10-09
+
+`tools/native_scene_reference.py` now replays complete captured programs through
+the original LoadVertexShader, SelectVertexShader, constant setter,
+SetStreamSource and DrawVertices routines and their original callees. It observes
+actual maintained transformed vertices through the private reference DLL. A
+separate destination-field decoder excludes unwritten lanes; no shared shader
+implementation supplies the expected outputs.
+Observation covers raster position, diffuse/specular and four texture vectors;
+fog, back colors and point size are outside this output comparison.
+
+| Corpus | Actual original-submission/LLE draws | Vertices | Compared written lanes |
+| --- | ---: | ---: | ---: |
+| Retained `scene-viewport`, including 99-instruction programs | 32 | 184 | 3,304 |
+| Captured first-world draw range, 49-instruction programs | 32 | 304 | 5,472 |
+| Final bounded scene capture, 11-instruction programs | 32 | 2,520 | 20,160 |
+| Total | **96** | **3,008** | **28,936** |
+
+Long programs required a correction to the preowned shader fixture: repeat the
+32-DWORD hardware upload-method array, rather than extending one packet into
+the constant-upload methods. The original routines remain unmodified. Captured
+nonzero first-vertex ranges now determine bounded stream allocation, including
+bound streams not read by the current declaration. Streams are unbound through
+the original setter and their ownership counts return to the initial values.
+
+The expected XY values independently apply four-fractional-bit truncation to
+the native raw output before comparison, since observation occurs after LLE
+raster preparation. This replaces the earlier guessed half-unit allowance.
+The relative tolerance is `2e-4 * max(1, abs(expected))`; maximum scaled errors
+in the three corpora are approximately `9.35e-7`, `2.39e-7` and `4.96e-7`.
+This checks composition against retained native execution, supported by the
+preceding independent format/algebra cases. It is not a new silicon golden or
+complete pixel proof.
+
+The old `draw-N.bin` records contain declarations, constants, streams, state and
+raw vertex output but omit bound textures and initial/final targets. The bounded
+opt-in draw diagnostic now also writes `scene-N.bin` companions with:
+
+- Original color/depth resource metadata, viewport depth scale, pixel definition
+  and packed constant cache.
+- Actual before/after GPU color and D24/stencil bytes, with explicit DXGI format
+  metadata; target readback admits one 2D image with one mip and one sample.
+- Each bound texture's original metadata, accessible owned CPU bytes and actual
+  GPU contents for every mip, retaining compressed blocks and explicit layout
+  information. Aliased GPU-only storage never receives an invented CPU mirror.
+
+The raw-target readback test checks exact RGBA and depth/stencil clears over
+three native device lifetimes. Capture-only GPU copies and allocations occur
+only when the existing diagnostic is enabled; ordinary rendering retains its
+cached disabled branch and native deferred uploads. The maintained reference
+DLL adds observation only, and is not linked into the title.
+
+Private evidence is in `build/blinx/scene-inputs-firstworld-20261009/`. Its 32
+companions include DXT1 resources with seven/eight mip levels. The owned CPU
+blocks equal the live GPU readback across all levels. Five captured draws change
+the real color/depth targets; unchanged targets alone cannot establish execution.
+Capturing was armed after observed present 9: the earlier replay-write log
+trigger belongs to the native-files backend and never fires on the current
+original-files selection.
+
+`tools/native_scene_draw_reference.py` imports the captured initial targets,
+relocates preowned resources, then executes actual original texture, pixel,
+render-state, texture-stage, viewport and draw routines. Disabled auxiliary modes
+154/163/164/165 remain explicit initialized fixture state; their separate
+software-control setters are not claimed. The audit services the real graphics
+notification with the complete original graphics/software-method routine.
+It never acknowledges the device in the transport or substitutes a function
+return.
+
+All 32 audited captures currently stop at **`NV2A unsupported RDI write bank`**:
+the original DXT1-noise setter emits software method `0x28`; its original service
+attempts RDI index `0x00e00050`, value `1`, followed by `0x00df0008` in the same
+original handler. The first write is not implemented, so the service does not
+return and the queued draw is not qualified. The report records actual MMIO,
+dispatched commands, guards and color/depth differences. `--require-qualified`
+returns failure for this result, including draws whose after-image happens to
+match because they touched no pixels. No native/LLE no-op agreement is counted.
+
+Reproduction, using the dependency setup above:
+
+```powershell
+& 'C:\Users\Matthew\AppData\Local\Programs\Python\Python312\python.exe' tools\native_scene_reference.py --xbe F:\Projects\xboxlle\xboxlle\build\phobos-audit-20261006\blinx-na\default.xbe --binding build\blinx\d3d-binding.aot-private.json --library build\visibility-lle\libxlle_nv2a_reference.dll --dependencies C:\msys64\mingw64\bin --captures build\blinx\scene-viewport --output build\blinx\scene-vertex-original.aot-private.json
+& 'C:\Users\Matthew\AppData\Local\Programs\Python\Python312\python.exe' tools\native_scene_draw_reference.py --xbe F:\Projects\xboxlle\xboxlle\build\phobos-audit-20261006\blinx-na\default.xbe --binding build\blinx\d3d-binding.aot-private.json --library build\visibility-lle\libxlle_nv2a_reference.dll --dependencies C:\msys64\mingw64\bin --captures build\blinx\scene-inputs-firstworld-20261009 --output build\blinx\scene-firstworld-draw-audit.aot-private.json --require-qualified
+```
+
+The second command intentionally fails qualification. It is the retained concrete
+offline work item, not evidence that every remaining graphics question needs a
+console. Pinned envytools and xemu RDI sources were inspected; their unknown or
+ignored controls are not an independent pixel oracle. Control/state implementation
+comes first; any unresolved silicon noise/precision question stays at the end.
+
+The combined qualification retains all 720 fetch, 1,116 constant and 1,344
+arithmetic cases on LLE and native paths. LLE tests pass 9/9; native tests pass
+56/56. Logs are `build/blinx/scene-composition-{lle,native}-{build,tests}.log`
+and `scene-composition-{fetch,constants,arithmetic}-{original,native}.log`.
+The final native regression passes **56/56 in 36.50s**, recorded in
+`build/blinx/scene-composition-native-final-tests.log`. The capture manifest is
+`build/blinx/scene-composition-final-attract-20261009/run.aot-private.json`;
+it runs 190.140s / 18 presents / 32 complete draw companions with no fault/stop,
+and repeats the same RDI guard in full-draw replay.
+
+The ordinary production-path attract check omits per-draw capture:
+`build/blinx/scene-composition-production-attract-20261009/run.aot-private.json`
+records **210.140s / 20 presents** with no fault/stop. Its contact sheet shows
+demo playback at present 9, the input interruption/pause and title return at
+10–13, then demo re-entry at 18 and continued playback at 20. Both final runs
+use title SHA-256
+`02b7917222f2f1725954512a241d9942db4e8d6d2c9062d4e48e01c6fa7352d4`.
+The harness intentionally terminates at the requested duration; its exit code
+1 is not a title fault. This preserves the observed attract/input behavior;
+it is not a new frame-rate or full A/V qualification. Graphics `.116` remains
+partial and the family count remains **4/9**.
+
 ## Remaining offline work
 
-Connect the retained complete Blinx scene programs and their texture/state
-combinations to actual maintained command consumption and draw outcomes.
+Implement and qualify the original DXT1-noise RDI control path exposed by the
+complete-draw audit, then continue its fog, texture mip/filter and raster outcomes.
+The captured scene vertex programs now execute on maintained LLE; complete
+state/texture/pixel composition still needs qualification.
 These bounded declaration/fetch/arithmetic cases do
 not qualify all vertex slots, arbitrary aliasing, tiled vertex input or the entire
 graphics family. Retain

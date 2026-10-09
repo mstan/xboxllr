@@ -1,15 +1,16 @@
 /* Optional private draw inputs/output capture. It never substitutes for a
  * submitted draw and is disabled in ordinary production execution. */
-static void graphics_draw_capture(const uint32_t args[3])
+#include "graphics_scene_capture.inc"
+static FILE *graphics_draw_capture(const uint32_t args[3])
 {
-    const char *capture=graphics_diagnostic(GRAPHICS_DIAGNOSTIC_DRAW);if(!capture || !*capture)return;
+    const char *capture=graphics_diagnostic(GRAPHICS_DIAGNOSTIC_DRAW);if(!capture || !*capture)return NULL;
     static unsigned sequence;
     const char *trigger=getenv("XLLE_PILOT_DRAW_CAPTURE_TRIGGER");
-    if(trigger && *trigger && GetFileAttributesA(trigger)==INVALID_FILE_ATTRIBUTES)return;
+    if(trigger && *trigger && GetFileAttributesA(trigger)==INVALID_FILE_ATTRIBUTES)return NULL;
     const char *requested=getenv("XLLE_PILOT_DRAW_CAPTURE_LIMIT");
     unsigned limit=requested?(unsigned)strtoul(requested,NULL,10):32;
     if(!limit || limit>256)stop("draw capture limit outside range",limit);
-    if(sequence>=limit)return;
+    if(sequence>=limit)return NULL;
     if(!args[2] || args[2]>65536)stop("draw capture count outside range",args[2]);
     struct GraphicsShader *shader=graphics_shader(MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_SHADER));
     struct PilotVertexElement elements[16];struct PilotVertexProbeStream streams[16]={0};
@@ -44,6 +45,7 @@ static void graphics_draw_capture(const uint32_t args[3])
     free(outputs);if(fclose(file))stop("draw capture close",0);
     fprintf(stderr,"[DRAW CAPTURE] sequence=%u shader=%u primitive=%u first=%u count=%u target=%08x depth=%.9g\n",
         sequence,shader->native,args[0],args[1],args[2],graphics_target,graphics_float(TRANSFORM_FIELD(DEPTH_SCALE)));
+    return graphics_scene_begin(capture,sequence,args);
 }
 static void graphics_draw_common(const uint32_t args[3],uint32_t up_data,uint32_t up_stride)
 {
@@ -59,6 +61,7 @@ static void graphics_draw_common(const uint32_t args[3],uint32_t up_data,uint32_
     graphics_target_prepare(graphics_target);graphics_target_prepare(graphics_depth);
     graphics_draw_profile_step(&profile,0);
     uint32_t shader=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_SHADER);
+    FILE *scene_reference=NULL;
     uint32_t extents[16]={0};unsigned streams;
     if(shader&1)streams=pilot_gfx_shader_streams(extents);
     else {extents[0]=pilot_gfx_fvf_extent(shader);streams=1;}
@@ -116,12 +119,13 @@ static void graphics_draw_common(const uint32_t args[3],uint32_t up_data,uint32_
     float scale[]={2.0f/viewport[2],-2.0f/viewport[3],1/((high-low)*depth),1};
     float offset[]={-1-viewport[0]*scale[0],1-viewport[1]*scale[1],-low/(high-low),0};
     if(pilot_gfx_shader_raster(scale,offset)<0)stop("native raster constants failed",0);
-    if(!up_data)graphics_draw_capture(args);
+    if(!up_data)scene_reference=graphics_draw_capture(args);
     }
     graphics_draw_profile_step(&profile,4);
     int32_t result=up_data?pilot_gfx_draw_memory(primitive,count,memory+up_data,up_stride):pilot_gfx_draw_vertices(primitive,first,count);
     graphics_draw_profile_step(&profile,5);
     if(result<0)stop("native vertex draw failed",(uint32_t)result);
+    if(scene_reference)graphics_scene_finish(scene_reference);
     if(graphics_diagnostic(GRAPHICS_DIAGNOSTIC_MOVIE))graphics_movie_capture_draw();
     if(pilot_verbose)fprintf(stderr,"[DRAW SUBMIT] primitive=%u first=%u count=%u\n",primitive,first,count);
     const char *capture=graphics_diagnostic(GRAPHICS_DIAGNOSTIC_FRAME);

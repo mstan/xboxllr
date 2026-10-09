@@ -886,3 +886,45 @@ int32_t pilot_gfx_surface_readback(unsigned surface,unsigned char *rgba,uint32_t
     }
     ID3D11Texture2D_Release(back); return status;
 }
+int32_t pilot_gfx_reference_target_readback(unsigned depth,void *data,uint32_t capacity,uint32_t metadata[3])
+{
+    if(!pilot_device || depth>1 || !metadata)return E_INVALIDARG;
+    memset(metadata,0,3*sizeof(*metadata));
+    ID3D11DeviceContext *context=d3d8_GetD3D11Context();
+    ID3D11RenderTargetView *color=NULL;ID3D11DepthStencilView *zeta=NULL;
+    ID3D11DeviceContext_OMGetRenderTargets(context,1,&color,&zeta);
+    ID3D11Resource *resource=NULL;
+    if(depth && zeta)ID3D11DepthStencilView_GetResource(zeta,&resource);
+    if(!depth && color)ID3D11RenderTargetView_GetResource(color,&resource);
+    if(color)ID3D11RenderTargetView_Release(color);if(zeta)ID3D11DepthStencilView_Release(zeta);
+    if(!resource)return S_FALSE;
+    ID3D11Texture2D *source=NULL,*staging=NULL;
+    HRESULT status=ID3D11Resource_QueryInterface(resource,&IID_ID3D11Texture2D,(void**)&source);
+    ID3D11Resource_Release(resource);if(FAILED(status))return status;
+    D3D11_TEXTURE2D_DESC desc;ID3D11Texture2D_GetDesc(source,&desc);
+    /* The captured Blinx targets are one 2D image. Reject other views before
+     * returning a base-level shape that might describe the wrong subresource. */
+    if(desc.MipLevels!=1 || desc.ArraySize!=1 || desc.SampleDesc.Count!=1 ||
+        (desc.Format!=DXGI_FORMAT_R8G8B8A8_UNORM && desc.Format!=DXGI_FORMAT_B8G8R8A8_UNORM &&
+         desc.Format!=DXGI_FORMAT_R24G8_TYPELESS && desc.Format!=DXGI_FORMAT_D24_UNORM_S8_UINT)) {
+        ID3D11Texture2D_Release(source);return E_INVALIDARG;
+    }
+    metadata[0]=desc.Width;metadata[1]=desc.Height;metadata[2]=desc.Format;
+    if(!data && !capacity){ID3D11Texture2D_Release(source);return S_OK;}
+    if(!data || capacity<(uint64_t)desc.Width*desc.Height*4) {
+        ID3D11Texture2D_Release(source);return E_INVALIDARG;
+    }
+    desc.Usage=D3D11_USAGE_STAGING;desc.BindFlags=0;desc.MiscFlags=0;desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
+    status=ID3D11Device_CreateTexture2D(d3d8_GetD3D11Device(),&desc,NULL,&staging);
+    if(SUCCEEDED(status)) {
+        ID3D11DeviceContext_CopySubresourceRegion(context,(ID3D11Resource*)staging,0,0,0,0,(ID3D11Resource*)source,0,NULL);
+        D3D11_MAPPED_SUBRESOURCE mapped;
+        status=ID3D11DeviceContext_Map(context,(ID3D11Resource*)staging,0,D3D11_MAP_READ,0,&mapped);
+        if(SUCCEEDED(status)) {
+            for(UINT y=0;y<desc.Height;++y)memcpy((BYTE*)data+y*desc.Width*4,(BYTE*)mapped.pData+y*mapped.RowPitch,desc.Width*4);
+            ID3D11DeviceContext_Unmap(context,(ID3D11Resource*)staging,0);
+        }
+        ID3D11Texture2D_Release(staging);
+    }
+    ID3D11Texture2D_Release(source);return status;
+}

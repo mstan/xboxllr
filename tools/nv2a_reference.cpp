@@ -126,6 +126,48 @@ EXPORT void xlle_nv2a_reference_vertex(void* instance, float* output) {
     std::memcpy(output + 4, diffuse.data(), 16);
     std::memcpy(output + 8, specular.data(), 16);
 }
+// Seven vec4s per actually transformed vertex: raster position, diffuse,
+// specular and four texture coordinates. Positions include NV2A raster rounding.
+EXPORT uint32_t xlle_nv2a_reference_vertices(void* instance, float* output, uint32_t capacity) {
+    auto& ref = *static_cast<Reference*>(instance);
+    if (!ref.failure.empty()) return 0;
+    const auto& vertices = ref.gpu.last_transformed_batch();
+    if (!output && !capacity) return static_cast<uint32_t>(vertices.size());
+    if (!output || capacity < vertices.size()) {
+        ref.failure = "NV2A transformed observation capacity"; return 0;
+    }
+    for (const auto& vertex : vertices) {
+        std::memcpy(output, vertex.position.data(), 16);
+        std::memcpy(output + 4, vertex.diffuse.data(), 16);
+        std::memcpy(output + 8, vertex.specular.data(), 16);
+        std::memcpy(output + 12, vertex.texture.data(), 64);
+        output += 28;
+    }
+    return static_cast<uint32_t>(vertices.size());
+}
+// Diagnostic census prevents a guarded/omitted draw from being called qualified.
+// Index 0..2 observes attempts, executions and actual color writes; later indices
+// observe named generic skip reasons without changing device behavior.
+EXPORT uint64_t xlle_nv2a_reference_draw_count(void* instance, uint32_t index) {
+    const auto& gpu = static_cast<Reference*>(instance)->gpu;
+    if (index == 0) return gpu.generic_combiner_attempted_batches();
+    if (index == 1) return gpu.generic_combiner_executed_batches();
+    if (index == 2) return gpu.generic_combiner_writes();
+    return gpu.generic_skip_reason_batches(index - 3);
+}
+EXPORT const char* xlle_nv2a_reference_draw_count_name(uint32_t index) {
+    if (index == 0) return "attempts";
+    if (index == 1) return "executions";
+    if (index == 2) return "color-writes";
+    return xlle::Nv2a::generic_skip_reason_name(index - 3);
+}
+EXPORT uint32_t xlle_nv2a_reference_method_value(void* instance, uint32_t method) {
+    std::vector<xlle::Nv2a::PushMethod> recent;
+    static_cast<Reference*>(instance)->gpu.recent_methods(4096, recent);
+    for (auto item = recent.rbegin(); item != recent.rend(); ++item)
+        if (item->method == method) return item->parameter;
+    return 0;
+}
 EXPORT void xlle_nv2a_reference_clock(void* instance, uint64_t core_cycles, uint32_t phase) {
     auto& ref = *static_cast<Reference*>(instance);
     if (phase >= 1000) { ref.failure = "NV2A clock phase outside display interval"; return; }
