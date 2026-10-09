@@ -2010,7 +2010,12 @@ bool Nv2a::fetch_vertex_attribute(uint32_t slot, uint32_t index) {
 
     attr.value = {{0.0f, 0.0f, 0.0f, 1.0f}};
     switch (attr.format) {
-    case 0:
+    case 0: // UB_D3D stores B,G,R,A; shader inputs are R,G,B,A.
+        attr.value = {{static_cast<float>(data[2]) / 255.0f,
+                       static_cast<float>(data[1]) / 255.0f,
+                       static_cast<float>(data[0]) / 255.0f,
+                       static_cast<float>(data[3]) / 255.0f}};
+        break;
     case 4:
         for (uint32_t i = 0; i < attr.count; ++i)
             attr.value[i] = static_cast<float>(data[i]) / 255.0f;
@@ -2136,7 +2141,12 @@ bool Nv2a::decode_inline_array() {
             auto& value = inputs[slot];
             value = {{0.0f, 0.0f, 0.0f, 1.0f}};
             switch (attr.format) {
-            case 0:
+            case 0: // Inline UB_D3D uses the same BGRA array format.
+                value = {{static_cast<float>(data[2]) / 255.0f,
+                          static_cast<float>(data[1]) / 255.0f,
+                          static_cast<float>(data[0]) / 255.0f,
+                          static_cast<float>(data[3]) / 255.0f}};
+                break;
             case 4:
                 for (uint32_t component = 0; component < attr.count;
                      ++component) {

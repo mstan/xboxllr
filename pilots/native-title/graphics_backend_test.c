@@ -148,6 +148,7 @@ int main(void)
         CHECK(test_bump_pipeline()==0);
         CHECK(test_resource_bindings()==0);
         CHECK(test_fvf_pipeline()==0);
+        CHECK(test_packed_vertex_colors()==0);
         CHECK(test_native_draw_pipeline()==0);
         CHECK(test_flat_pipeline()==0);
         CHECK(test_resource_completion()==0);

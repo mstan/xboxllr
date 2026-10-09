@@ -1447,6 +1447,26 @@ Audited APU-core pins: Phobos `bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0`,
 sp00nznet `b3700e1d60bcd9c3dfaad734f45149b6f0bc5cb4`, and NoRain211
 `74649ef5b0f023e7b878043bc6de2534c55e717e`.
 
+## Packed vertex color qualification
+
+The BGRA correction in `src/machine/nv2a.cpp` and tests in
+`tests/test_nv2a_vertex_colors.cpp` and the native graphics fixture are authored
+here. No new external implementation or dependency is imported.
+
+- MIT [nxdk_pgraph_tests](https://github.com/abaire/nxdk_pgraph_tests/tree/706a41e61188d3b08e5b1bb2a32b74ad062a883d),
+  copyright its contributors: `src/tests/surface_as_vertex_array_tests.cpp`
+  informed the rendered-surface-as-diffuse and successive-update scenarios.
+  The independent fixture uses bounded GPU clears and locally authored packets.
+- GPL-2.0-or-later xemu `482088490c2d5983ed5e1eafbd09906157c1eca0`,
+  `hw/xbox/nv2a/pgraph/{gl,vk}/vertex.c`, was consulted only for the distinct
+  BGRA/RGBA input-format behavior. No implementation body is copied or linked
+  by this correction; source inspection is not a new runtime comparison.
+- Existing CC0 Image_blit captures do not cover this vertex-color procedure.
+  No matching hardware golden is newly incorporated or claimed.
+
+Exact qualification and limits are in
+[GRAPHICS-LLE.md](pilots/native-title/GRAPHICS-LLE.md).
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

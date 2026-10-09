@@ -1,3 +1,50 @@
+static int test_packed_vertex_colors(void)
+{
+    /* Same independent A8R8G8B8 inputs as the LLE PFIFO fixture. Exercise
+     * persistent native storage at first=1 and UP submissions separately. */
+    struct ColorVertex {float x,y,z,rhw;uint32_t color,padding;} vertices[4]={
+        {-200,-200,.5f,1,0,0xcccccccc}, {8,8,.5f,1,0,0xcccccccc},
+        {56,8,.5f,1,0,0xcccccccc}, {8,56,.5f,1,0,0xcccccccc}};
+    const uint32_t colors[]={0xffff0000,0xff0000ff,0x7f123456,0x019be327};
+    pilot_gfx_set_state(D3DRS_CULLMODE,D3DCULL_NONE);
+    pilot_gfx_set_state(D3DRS_ZENABLE,0);pilot_gfx_set_state(D3DRS_LIGHTING,0);
+    pilot_gfx_set_state(D3DRS_ALPHABLENDENABLE,0);pilot_gfx_set_state(D3DRS_ALPHATESTENABLE,0);
+    pilot_gfx_set_state(D3DRS_SPECULARENABLE,0);
+    for(unsigned stage=0;stage<4;++stage) {
+        pilot_gfx_texture_bind(stage,0);CHECK(pilot_gfx_xbox_texture_state(stage,12,1));
+    }
+    CHECK(pilot_gfx_xbox_texture_state(0,14,0));
+    uint32_t vertex=0;CHECK(pilot_gfx_vertex_create(sizeof(vertices),&vertex)==0);
+    pilot_gfx_vertex_bind(0,vertex,sizeof(vertices[0]));
+    unsigned char pixels[64*64*4];const unsigned sample=(16*64+16)*4;
+    for(unsigned route=0;route<2;++route)for(unsigned c=0;c<4;++c) {
+        uint32_t color=colors[c];for(unsigned i=1;i<=3;++i)vertices[i].color=color;
+        CHECK(pilot_gfx_clear(3,0xff102030,1,0)==0);
+        if(!route) {
+            pilot_gfx_vertex_upload(vertex,vertices,sizeof(vertices));
+            CHECK(pilot_gfx_fvf_prepare(0x44,0,0)==0);
+            CHECK(pilot_gfx_draw_vertices(5,1,3)==0);
+        } else CHECK(pilot_gfx_draw_up(D3DPT_TRIANGLELIST,1,vertices+1,sizeof(vertices[0]),0x44)==0);
+        CHECK(pilot_gfx_readback(pixels,sizeof(pixels))==0);
+        CHECK(pixels[sample]==((color>>16)&255) && pixels[sample+1]==((color>>8)&255) && pixels[sample+2]==(color&255));
+        CHECK(pixels[0]==0x10 && pixels[1]==0x20 && pixels[2]==0x30);
+    }
+    /* Observe the packed alpha through blending, since the XRGB target does
+     * not promise to retain alpha in readback. Allow one output LSB. */
+    for(unsigned i=1;i<=3;++i)vertices[i].color=0x7f123456;
+    pilot_gfx_set_state(D3DRS_ALPHABLENDENABLE,1);
+    pilot_gfx_set_state(D3DRS_SRCBLEND,D3DBLEND_SRCALPHA);
+    pilot_gfx_set_state(D3DRS_DESTBLEND,D3DBLEND_INVSRCALPHA);
+    CHECK(pilot_gfx_clear(3,0xff000000,1,0)==0);
+    CHECK(pilot_gfx_draw_up(D3DPT_TRIANGLELIST,1,vertices+1,sizeof(vertices[0]),0x44)==0);
+    CHECK(pilot_gfx_readback(pixels,sizeof(pixels))==0);
+    CHECK(abs((int)pixels[sample]-9)<=1 && abs((int)pixels[sample+1]-26)<=1 && abs((int)pixels[sample+2]-43)<=1);
+    pilot_gfx_set_state(D3DRS_ALPHABLENDENABLE,0);
+    pilot_gfx_vertex_bind(0,0,0);pilot_gfx_vertex_destroy(vertex);
+    fprintf(stderr,"PASS: packed BGRA native vertex/UP colors, persistent binding, padded stride/nonzero first and alpha blending\n");
+    return 0;
+}
+
 static int test_fvf_pipeline(void)
 {
     struct FvfVertex {float x,y,z,rhw;uint32_t color;float uv0[2],uv1[2];};

@@ -6,6 +6,10 @@ owner-observed FMVs and real-time Demo play on runtime `318f5ac`. See the
 claiming complete original-speed/A-V qualification. Next work strengthens the
 independent LLE contracts for this exercised path; New Game is deferred.
 
+The current graphics-family checkpoint corrects LLE packed BGRA vertex colors,
+with 140 real LLE draws and matching native HLE checks. Overall qualification
+remains 4/9; see [graphics evidence and remaining scope](GRAPHICS-LLE.md).
+
 ## Deferred stream upload experiment (2026-10-08)
 
 `beads-xbox.1.100`, branch `perf/blinx-deferred-stream-upload-20261008`.

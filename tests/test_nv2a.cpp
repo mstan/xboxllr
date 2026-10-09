@@ -1592,7 +1592,7 @@ int main() {
     CHECK(gpu.fixed_light_control_batches(5) == 1);
     CHECK(gpu.transformed_vertices() == 75);
     const std::array<float, 4> unlit_diffuse =
-        {0.0f, 0.0f, 1.0f, 1.0f};
+        {1.0f, 0.0f, 0.0f, 1.0f}; // Last UB_D3D DWORD is opaque red.
     CHECK(gpu.last_transformed_diffuse() == unlit_diffuse);
     CHECK(gpu.last_transformed_specular() == fixed_specular);
 
@@ -1781,7 +1781,7 @@ int main() {
         swizzled_pixel_index(20, 25, 64, 64) * 4;
     const uint32_t outside_swizzled =
         swizzled_pixel_index(5, 5, 64, 64) * 4;
-    CHECK(get32(ram, 0xA000 + inside_swizzled) == 0xFF512E10u);
+    CHECK(get32(ram, 0xA000 + inside_swizzled) == 0xFF102E51u);
     CHECK(get32(ram, 0xE000 + inside_swizzled) == 0x0000645Au);
     CHECK(get32(ram, 0xA000 + outside_swizzled) == 0);
     CHECK(get32(ram, 0xE000 + outside_swizzled) == 0xFFFFFF5Au);
@@ -1806,7 +1806,7 @@ int main() {
     CHECK(gpu.radial_color_batches() == 2);
     CHECK(gpu.radial_color_triangles() == 2);
     CHECK(gpu.radial_color_writes() == radial_writes);
-    CHECK(get32(ram, 0xA000 + inside_swizzled) == 0xFF512E10u);
+    CHECK(get32(ram, 0xA000 + inside_swizzled) == 0xFF102E51u);
     CHECK(get32(ram, 0xE000 + inside_swizzled) == 0x0000645Au);
 
     // High-volume textured profile: stages 1 and 2 cube-remap distinct
@@ -3246,7 +3246,7 @@ int main() {
           gpu.pitch_tex5_color_writes());
     CHECK(gpu.pitch_tex5_samples() == pitch_tex5_samples);
     CHECK(get32(ram, pitch_three_color + pitch_three_inside) ==
-          0x80102040u);
+          0x80402010u);
     CHECK(get32(ram, pitch_three_depth + pitch_three_inside) ==
           0x0000645Au);
 
