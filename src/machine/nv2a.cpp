@@ -3517,6 +3517,18 @@ bool Nv2a::execute_draw_spans(DrawJob& job) {
 }
 
 bool Nv2a::submit_vertex_batch() {
+    // Preserve the original software handler's control writes and ordering,
+    // but never silently draw using an unimplemented enabled noise mode.
+    // This conservative boundary covers every raster/backend path before
+    // geometry, pixels or successful visibility completion are published.
+    if(!vertex_indices_.empty() || !inline_vertices_.empty() || !immediate_vertices_.empty()) {
+        if(dxt1_noise_control_[0]!=dxt1_noise_control_[1]) {
+            fault_("NV2A DXT1 noise control banks disagree");return false;
+        }
+        if(dxt1_noise_control_[0]) {
+            fault_("NV2A DXT1 noise pixel behavior remains unqualified");return false;
+        }
+    }
     if(!ram_tile_configuration())return false;
     if(ram_tiles_active() && renderer_) {
         fault_("NV2A tiled 3D requires the software RAM path");return false;

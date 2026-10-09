@@ -36,9 +36,20 @@ static void test_pgraph_setup() {
     write(0x400144,0x10000100);write(0x400148,0x03000000);write(0x400764,0x08000000);
     CHECK(read(0x400144)==0x10000100 && read(0x400148)==0x03000000);
     write(0x400080,0x70000);CHECK(read(0x400080)==0x70000);write(0x400080,0);
+    for(uint32_t address : {0xe00050u,0xdf0008u}) {
+        write(0x400750,address);write(0x400754,1);
+        CHECK(read(0x400750)==address+4);
+        write(0x400750,address);CHECK(read(0x400754)==1);
+        write(0x400750,address);write(0x400754,2);
+        CHECK(failure=="NV2A unsupported DXT1 noise control transition");failure.clear();
+        CHECK(read(0x400750)==address && read(0x400754)==1);
+    }
     write(0x7110a0,0x12345678);write(0x200,0xffffefff);
     CHECK(read(0x400084)==0 && read(0x400144)==0 && read(0x400750)==0);
     CHECK(read(0x400904)==0 && read(0x100244)==0x1000 && read(0x7110a0)==0x12345678);
+    for(uint32_t address : {0xe00050u,0xdf0008u}) {
+        write(0x400750,address);CHECK(read(0x400754)==0);
+    }
     write(0x200,0xffffffff);
     CHECK(failure.empty());
     for(uint32_t flags : {4u,8u,0x04000000u}) {

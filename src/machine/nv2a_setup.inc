@@ -181,9 +181,18 @@ void Nv2a::pgraph_reset_setup() {
     pgraph_context_managed_=false;
     pgraph_executing_=false;
     pgraph_context_control_=pgraph_context_user_=pgraph_ffintfc_=pgraph_rdi_index_=0;
+    dxt1_noise_control_.fill(0);
     pgraph_tiles_=RamTileConfig{};texture_tiles_=RamTileConfig{};
     compress_zbuffer_=false; // controller tags are not PGRAPH context state
     invalidate_vsh_program_cache();
+}
+
+uint32_t* Nv2a::dxt1_noise_control_word(uint32_t select,uint32_t address) {
+    // Corroborated by nxdk pbkit PB_SETNOISE and the unmodified original
+    // XDK handler. Other words in these banks are not generic register RAM.
+    if(select==0xe0 && address==0x50)return &dxt1_noise_control_[0];
+    if(select==0xdf && address==8)return &dxt1_noise_control_[1];
+    return nullptr;
 }
 
 bool Nv2a::pgraph_setup_read(uint32_t offset,uint32_t& value) {
@@ -199,7 +208,8 @@ bool Nv2a::pgraph_setup_read(uint32_t offset,uint32_t& value) {
     case 0x750:value=pgraph_rdi_index_;return true;
     case 0x754: {
         uint32_t select=(pgraph_rdi_index_>>16)&0x1ff,address=pgraph_rdi_index_&0x1ffc;
-        auto* word=select==0xea?ram_config_word(texture_tiles_,address):nullptr;
+        auto* word=select==0xea?ram_config_word(texture_tiles_,address)
+                             :dxt1_noise_control_word(select,address);
         if(!word){fault_("NV2A unsupported RDI read bank/address");value=0;return true;}
         value=*word;pgraph_rdi_index_=(pgraph_rdi_index_&~0x1ffcu)|((address+4)&0x1ffc);return true;
     }
@@ -257,6 +267,14 @@ bool Nv2a::pgraph_setup_write(uint32_t offset,uint32_t value) {
         pgraph_rdi_index_=value;return true;
     case 0x754: {
         uint32_t select=(pgraph_rdi_index_>>16)&0x1ff,address=pgraph_rdi_index_&0x1ffc;
+        if(auto* word=dxt1_noise_control_word(select,address)) {
+            if(value>1 || pgraph_status()) {
+                fault_("NV2A unsupported DXT1 noise control transition");return true;
+            }
+            *word=value;
+            pgraph_rdi_index_=(pgraph_rdi_index_&~0x1ffcu)|((address+4)&0x1ffc);
+            return true;
+        }
         if(select!=0xea){fault_("NV2A unsupported RDI write bank");return true;}
         if(ram_config_write(texture_tiles_,address,value))
             pgraph_rdi_index_=(pgraph_rdi_index_&~0x1ffcu)|((address+4)&0x1ffc);

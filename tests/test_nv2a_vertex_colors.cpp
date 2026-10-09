@@ -155,8 +155,32 @@ static void immediate_control() {
     }
 }
 
+static void noise_control_boundary() {
+    for(bool direct : {false,true}) {
+        // The controls have a real disabled route after enable/disable, not
+        // a fabricated success. Actual immediate pixels retain their oracle.
+        Fixture disabled(direct);
+        for(uint32_t value : {1u,0u})for(uint32_t address : {0xe00050u,0xdf0008u}) {
+            disabled.write(0x400750,address);disabled.write(0x400754,value);
+        }
+        disabled.draw(3,0x7f563412);disabled.expect(0x7f123456);
+        for(bool complete : {false,true})for(unsigned route=0;route<4;++route) {
+            Fixture f(direct);
+            f.write(0x400750,0xe00050);f.write(0x400754,1);
+            if(complete){f.write(0x400750,0xdf0008);f.write(0x400754,1);}
+            f.draw(route,0x7f563412);
+            CHECK(f.fault==(complete?"NV2A DXT1 noise pixel behavior remains unqualified"
+                                   :"NV2A DXT1 noise control banks disagree"));
+            CHECK(!f.gpu->generic_combiner_executed_batches() && !f.gpu->generic_combiner_writes());
+            for(unsigned i=0;i<64*64;++i)CHECK(f.get(Fixture::frame+i*4)==0xff102030);
+            CHECK(f.get(Fixture::report+12)==0xffffffff);
+        }
+    }
+}
+
 int main() {
     packed_formats(); surface_reuse(); immediate_control();
+    noise_control_boundary();
     std::printf("nv2a_vertex_colors: %u draw cases, %u failures\n", cases, failures);
     return failures ? 1 : 0;
 }

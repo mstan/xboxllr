@@ -2589,6 +2589,10 @@ private:
     bool pgraph_executing_ = false;
     uint32_t pgraph_context_control_ = 0, pgraph_context_user_ = 0;
     uint32_t pgraph_ffintfc_ = 0, pgraph_rdi_index_ = 0;
+    // Original/nxdk DXT1-noise controls in RDI E0:50 and DF:08. Transport
+    // is modeled separately; enabled pixel behavior remains guarded.
+    std::array<uint32_t, 2> dxt1_noise_control_{};
+    uint32_t* dxt1_noise_control_word(uint32_t select, uint32_t address);
     std::array<uint32_t, 4> pgraph_context_switch_{};
     std::array<uint32_t, 0xc00 / 4> pgraph_setup_{};
     struct RamTileConfig {

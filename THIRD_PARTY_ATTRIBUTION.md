@@ -1502,6 +1502,15 @@ observations were consulted to assess the newly exposed DXT1-noise control gap;
 unknown or ignored controls are not treated as independently qualified pixels.
 No external implementation body, dependency or new hardware golden is added.
 
+The DXT1-noise control follow-up additionally uses nxdk pbkit at
+`29638d0b001f179b73c3513489af10ddc2986216`, `PB_SETNOISE`, as independent
+corroboration of the two RDI locations and parameter transfer. Original XDK
+execution establishes target-format conditioning, requested cache/effective
+state and the complete graphics-service path. The maintained boolean control
+transport, original runner and native cache admission are authored here; no
+pbkit implementation body or original bytes are incorporated. The enabled
+noise pixel algorithm/error bound remains unqualified and deferred.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

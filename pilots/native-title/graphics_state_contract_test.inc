@@ -110,5 +110,17 @@ static void test_graphics_states(void)
     CHECK(!pilot_gfx_xbox_render_state(143,2)); /* W-buffer cannot silently become Z. */
     CHECK(!pilot_gfx_xbox_render_state(139,0x1b00)); /* Point fill cannot become wireframe. */
     CHECK(!pilot_gfx_xbox_texture_state(0,12,99));
+    /* Original setter/cache qualification distinguishes the requested value
+     * from target-conditioned hardware enable. HLE owns its native sampling;
+     * both boolean requests retain a readable cache and real draw completion. */
+    const uint32_t noise_values[]={0,1,1,0};
+    for(unsigned i=0;i<4;++i) {
+        uint32_t noise_args[]={159,noise_values[i]};
+        call_graphics(PILOT_D3D_D3DDevice_SetRenderStateNotInline,noise_args);
+        CHECK(MEM32(PILOT_D3D_RENDER_STATES+159*4)==noise_values[i]);
+        CHECK(pilot_gfx_clear(3,0xff0000ff,1,0)>=0);
+        graphics_test_triangle(.25f,0xff2468ac);graphics_test_pixel(36,104,172,0);
+    }
+    CHECK(!pilot_gfx_xbox_render_state(159,2));
     fprintf(stderr,"PASS: actual depth rejection, write masks, blend, alpha test, culling and inline diffuse texture-stage selection\n");
 }

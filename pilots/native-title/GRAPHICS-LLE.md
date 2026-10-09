@@ -358,11 +358,12 @@ notification with the complete original graphics/software-method routine.
 It never acknowledges the device in the transport or substitutes a function
 return.
 
-All 32 audited captures currently stop at **`NV2A unsupported RDI write bank`**:
+The initial 32 audited captures stopped at **`NV2A unsupported RDI write bank`**:
 the original DXT1-noise setter emits software method `0x28`; its original service
 attempts RDI index `0x00e00050`, value `1`, followed by `0x00df0008` in the same
-original handler. The first write is not implemented, so the service does not
-return and the queued draw is not qualified. The report records actual MMIO,
+original handler. That initial missing write prevented the service from returning
+and left the queued draw unqualified. The follow-up below implements this control
+transport; enabled noise pixels remain guarded. The report records actual MMIO,
 dispatched commands, guards and color/depth differences. `--require-qualified`
 returns failure for this result, including draws whose after-image happens to
 match because they touched no pixels. No native/LLE no-op agreement is counted.
@@ -377,8 +378,8 @@ Reproduction, using the dependency setup above:
 The second command intentionally fails qualification. It is the retained concrete
 offline work item, not evidence that every remaining graphics question needs a
 console. Pinned envytools and xemu RDI sources were inspected; their unknown or
-ignored controls are not an independent pixel oracle. Control/state implementation
-comes first; any unresolved silicon noise/precision question stays at the end.
+ignored controls are not an independent pixel oracle. The implemented control
+route and remaining silicon noise question are recorded below.
 
 The combined qualification retains all 720 fetch, 1,116 constant and 1,344
 arithmetic cases on LLE and native paths. LLE tests pass 9/9; native tests pass
@@ -402,10 +403,85 @@ The harness intentionally terminates at the requested duration; its exit code
 it is not a new frame-rate or full A/V qualification. Graphics `.116` remains
 partial and the family count remains **4/9**.
 
+## Original DXT1-noise control transport - 2026-10-09
+
+`tools/native_noise_control_reference.py` executes the original generic setter,
+its complete DXT1-noise callee and complete graph/software-method service against
+maintained NV2A. Preowned device, target metadata and pushbuffer are explicit
+fixture conditions; no original callee or return is replaced. The public
+[nxdk PB_SETNOISE procedure](https://github.com/XboxDev/nxdk/blob/29638d0b001f179b73c3513489af10ddc2986216/lib/pbkit/pbkit.c)
+independently corroborates the two RDI addresses and copied parameter.
+
+**128 setter calls / 40 complete graphics-service returns across eight device
+lifetimes pass.** The requested cache value is checked separately from effective
+device state: LIN_A8R8G8B8 permits enable; LIN_R5G6B5 suppresses it. Unchanged
+effective state emits no packet. Changes emit the actual WAIT_IDLE/software NOP,
+then stop at the real device notification. Before the original service, both
+device controls retain their preceding values; afterward both hold the requested
+effective value, the original service has acknowledged the real trap and FIFO
+has retired. ABI return/stack/canaries are checked by the shared original runner.
+This is graphics-service delivery, not a new kernel ISR/DPC qualification.
+
+The maintained device implements only boolean words at RDI `E0:50` and `DF:08`,
+with separate bank state, normal cursor advancement and the admitted pristine
+PGRAPH reset. Other addresses/modes stay unsupported. Actual 3D submission
+rejects disagreeing banks or enabled noise before geometry/pixels/successful
+visibility completion; storing controls never stands in for their visual effect.
+Sixteen real array/indexed/inline/immediate guard cases check untouched pixels
+and pending reports. Two actual disabled-after-enable draws check independent
+color output. The prior 140 color draws are retained.
+
+The first-world full-draw audit now consumes both original RDI writes and queued
+state/draw methods through submission, then deliberately fails at
+**`NV2A DXT1 noise pixel behavior remains unqualified`** on all 32 draws.
+`--require-qualified` still exits 1; no unchanged target is accepted as a draw.
+All 96 captured shader draws / 28,936 written lanes pass again with the controls
+disabled. LLE combined tests pass **9/9 in 0.78s**. Logs and private results are
+`build/blinx/noise-control-{lle-build,lle-tests,original,scene-draw-audit}.log`,
+`noise-control-original.aot-private.json` and
+`noise-control-{scene,firstworld,final}-vertex-original.aot-private.json`.
+
+HLE now accepts both boolean setter requests and retains the caller-readable
+requested cache. Four real native draws check setter/cache/deferred-state behavior
+and independently expected color; nonboolean requests remain rejected. Native
+compressed sampling retains the existing pilot approximation, with no per-pixel
+CPU noise generation or LLE dual execution. The enabled-noise pixel error bound
+is still open; this cache/control contract does not qualify that visual bound.
+Native tests pass **56/56 in 37.24s**, recorded in
+`build/blinx/noise-control-native-tests.log`.
+
+The final ordinary-path run is
+`build/blinx/noise-control-production-attract-20261009/run.aot-private.json`:
+**210.172s / 20 presents**, title SHA-256
+`ac2aa89f9507a1022f94d6c7b9347be76c7e8805be1ef0876e0008d27d0f6708`.
+All five real input transitions are delivered. The inspected contact sheet shows
+demo playback at 9, input interruption/pause at 10, title return at 13 and demo
+re-entry at 18–20. The retained title log has no pilot/audio stop or fault.
+As above, the harness intentionally terminates at its time bound; this confirms
+observed attract/input behavior and does not establish a new speed/A-V bound.
+
+Reproduction, using the dependency setup above:
+
+```powershell
+& 'C:\Users\Matthew\AppData\Local\Programs\Python\Python312\python.exe' tools\native_noise_control_reference.py --xbe F:\Projects\xboxlle\xboxlle\build\phobos-audit-20261006\blinx-na\default.xbe --binding build\blinx\d3d-binding.aot-private.json --library build\visibility-lle\libxlle_nv2a_reference.dll --dependencies C:\msys64\mingw64\bin --output build\blinx\noise-control-original.aot-private.json
+```
+
+Deferred hardware question: determine the actual enabled DXT1-noise pixel effect
+and its error relative to the native compressed sampler, including target-format
+conditioning. Public driver control evidence does not establish that algorithm
+or an acceptable pixel bound. Keep this specific question at the end while
+qualifying independent fog/texture/raster routes offline.
+
 ## Remaining offline work
 
-Implement and qualify the original DXT1-noise RDI control path exposed by the
-complete-draw audit, then continue its fog, texture mip/filter and raster outcomes.
+Continue independently exercised fog, texture mip/filter and raster outcomes.
+The original DXT1-noise control transport is implemented and independently
+qualified above; its enabled pixel effect remains in the deferred hardware queue.
+The two earlier corpora contain 64 programs writing `oFog.x` with fog enabled;
+their original submitted state selects EXP/planar fog. The current maintained
+vertex snapshot omits fog and its generic combiner rejects register 3. Bound
+that route with independent fog/color/alpha expectations before accepting scene
+agreement; the preceding shader-output comparison explicitly excluded fog.
 The captured scene vertex programs now execute on maintained LLE; complete
 state/texture/pixel composition still needs qualification.
 These bounded declaration/fetch/arithmetic cases do

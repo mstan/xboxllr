@@ -16,8 +16,12 @@ finite shader math, masks/swizzles, captured paired issue and relative addressin
 Complete original submission now also replays 96 retained scene shader draws
 (3,008 vertices / 28,936 written lanes). Bounded companion captures retain live
 GPU texture mips and before/after color/depth targets. Original complete-draw
-state replay reaches the DXT1-noise graphics-service RDI write and explicitly
-guards there; matching vertex output does not close pixel qualification.
+state replay now consumes the original DXT1-noise RDI writes, then guards the
+unqualified enabled-noise pixels. Another 128 original setter calls / 40 complete
+graphics-service returns qualify bounded control delivery and target-format
+conditioning; HLE accepts boolean setter/cache requests using native sampling.
+The enabled pixel bound stays deferred; matching vertex output does not close
+pixel qualification.
 Overall qualification
 remains 4/9; see [graphics evidence and remaining scope](GRAPHICS-LLE.md).
 
