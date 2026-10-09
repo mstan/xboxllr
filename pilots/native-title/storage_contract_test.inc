@@ -27,8 +27,11 @@ static void test_storage(void)
     CHECK(!media_nt_volume(media_handle(root),&io,&host,sizeof(host),3));
     uint64_t native_bytes=(uint64_t)host.total.QuadPart*host.sectors*host.bytes;
     CHECK(MEM64(info)*16384<=native_bytes && native_bytes-MEM64(info)*16384<16384);
-    volume[3]=23; MEM64(info)=0xaabbccdd;
-    call_kernel(218,volume,5); CHECK(g_eax==0xc0000004u && MEM64(info)==0xaabbccdd && !MEM32(iosb+4));
+    volume[3]=64;memset(memory+info,0xcc,68);call_kernel(218,volume,5);
+    CHECK(!g_eax && MEM32(iosb+4)==24 && MEM32(info+64)==0xcccccccc);
+    for(unsigned i=24;i<64;++i)CHECK(!MEM8(info+i));
+    volume[3]=23; MEM64(info)=0xaabbccdd;MEM32(iosb)=0xdeadbeef;MEM32(iosb+4)=0x12345678;
+    call_kernel(218,volume,5); CHECK(g_eax==0xc0000004u && MEM64(info)==0xaabbccdd && MEM32(iosb)==0xdeadbeef && MEM32(iosb+4)==0x12345678);
     uint32_t create[]={out,GENERIC_READ|GENERIC_WRITE|DELETE|SYNCHRONIZE,0x1a000,iosb,0,0,3,2,0x60};
     test_media_name("payload.bin",root);
     call_kernel(190,create,9); CHECK(!g_eax && MEM32(iosb+4)==2);
@@ -53,13 +56,13 @@ static void test_storage(void)
     CHECK(CloseHandle(only_write));
     create[7]=1; create[1]=GENERIC_WRITE|SYNCHRONIZE;
     call_kernel(190,create,9); CHECK(!g_eax); file=MEM32(out);
-    write[0]=file; call_kernel(219,write,8); CHECK(g_eax==0xc0000022u); /* metadata access is not READ_DATA */
+    MEM32(iosb)=0xdeadbeef;MEM32(iosb+4)=0x12345678;
+    write[0]=file; call_kernel(219,write,8); CHECK(g_eax==0xc0000022u && MEM32(iosb)==0xdeadbeef && MEM32(iosb+4)==0x12345678); /* metadata access is not READ_DATA */
     uint32_t set[]={file,iosb,info+4,8,20}; MEM64(info+4)=17;
     call_kernel(226,set,5); CHECK(!g_eax);
     set[2]=info;
-    set[3]=24; set[4]=5; call_kernel(211,set,5); CHECK(!g_eax && MEM64(info+8)==17);
     set[3]=56; set[4]=34; MEM32(info+56)=0xfeed1234;
-    call_kernel(211,set,5); CHECK(!g_eax && MEM64(info+40)==17 && MEM32(iosb+4)==56 && MEM32(info+56)==0xfeed1234);
+    call_kernel(211,set,5); CHECK(!g_eax && MEM64(info+32)==17 && MEM64(info+40)==17 && MEM32(iosb+4)==56 && MEM32(info+56)==0xfeed1234);
     set[2]=info+4; MEM32(info+60)=0xfeed1234;
     call_kernel(211,set,5); CHECK(!g_eax && MEM64(info+44)==17 && MEM32(info+60)==0xfeed1234);
     call_kernel(187,&file,1); CHECK(!g_eax);
@@ -88,7 +91,10 @@ static void test_storage(void)
     MEM16(0x1c030)=0xbeef; MEM16(0x1c032)=2; MEM32(0x1c034)=0x1c300;
     MEM32(0x1c300)=0xcccccccc;
     uint32_t query[]={handle,0x1c030,0x1c040}; call_kernel(215,query,3);
-    CHECK(g_eax==0xc0000023u && MEM32(0x1c040)==28 && MEM32(0x1c300)==0xcccccccc && MEM16(0x1c030)==0xbeef);
+    CHECK(g_eax==0xc0000023u && MEM32(0x1c040)==28 && MEM16(0x1c302)==0xcccc && MEM16(0x1c030)==2);
+    CHECK(!memcmp(memory+0x1c300,memory+0x1c200,2));
+    MEM16(0x1c032)=0;call_kernel(215,query,3);
+    CHECK(g_eax==0xc0000023u && MEM16(0x1c030)==0 && MEM32(0x1c040)==28);
     MEM16(0x1c032)=28; call_kernel(215,query,3);
     CHECK(!g_eax && MEM16(0x1c030)==28 && !memcmp(memory+0x1c300,memory+0x1c200,28));
     test_media_name("T:\\",0); open[1]=FILE_LIST_DIRECTORY|SYNCHRONIZE; open[5]=0x21;

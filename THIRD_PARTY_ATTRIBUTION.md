@@ -831,6 +831,15 @@ and field descriptions; original execution, rather than those implementations,
 establishes the recorded return/memory/notification effects. See
 [FILES-LLE.md](pilots/native-title/FILES-LLE.md) for exact inputs and limits.
 
+`tools/native_filesystem_contract_reference.py` extends that authored transport
+with asserted original metadata/directory/error/namespace observations and real
+FATX lifetimes. Phobos's same pinned `kernel_file.c` was reviewed again for its
+host-enumeration strategy. Native corrections follow the independently executed
+original output/status contract; neither donor nor original implementation
+bodies are copied. nxdk declarations supply the counted-string and information
+class layouts. The original undersized-directory overflow is recorded as
+evidence, with a documented safe native rejection instead of reproducing it.
+
 The original-files runtime adapter additionally consults Phobos's
 `kernel_hal.c` and `kernel_thunks.c` at that revision for the ordinal 40 data
 export shape. Its value is read from the owned original kernel; the donor's

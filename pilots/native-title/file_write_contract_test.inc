@@ -48,7 +48,8 @@ static void test_storage_async(const char *directory)
     CHECK(!memcmp(actual,expected,sizeof(actual)));
     create[1]=FILE_READ_DATA;create[7]=1;
     call_kernel(190,create,9);CHECK(!g_eax);file=MEM32(out);write[0]=file;write[4]=iosb;MEM64(offset)=0;
-    call_kernel(236,write,8);CHECK(g_eax==0xc0000022u && MEM32(iosb)==g_eax && !MEM32(iosb+4));
+    MEM32(iosb)=0xdeadbeef;MEM32(iosb+4)=0x12345678;
+    call_kernel(236,write,8);CHECK(g_eax==0xc0000022u && MEM32(iosb)==0xdeadbeef && MEM32(iosb+4)==0x12345678);
     uint32_t wait[]={file,0,timeout};call_kernel(233,wait,3);CHECK(g_eax==0xc0000022u); /* no SYNCHRONIZE */
     call_kernel(187,&file,1);CHECK(!g_eax);CHECK(DeleteFileA(path));
     for(unsigned i=0;i<256;++i)CHECK(!media_files[i].host && !media_files[i].pending && !media_files[i].async_idle && !media_files[i].async_signal);

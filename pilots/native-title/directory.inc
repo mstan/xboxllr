@@ -2,7 +2,8 @@
  * approach; use our existing handle-relative NT service rather than reopen a
  * path. No donor bodies copied. A handle owns its host search cursor/mask.
  * Installed-media tolerance: host metadata/order, synchronous ASCII entries.
- * Full retail filesystem enumeration remains a reference qualification gap. */
+ * Original Nt/FATX evidence: native_filesystem_contract_reference.py.
+ * Reject sub-header buffers instead of reproducing the original overflow. */
 static uint32_t media_directory(HANDLE file,IO_STATUS_BLOCK *io,const uint32_t a[10])
 {
     if(a[1] || a[2])stop("directory event/APC delivery outside qualified scope",207);
@@ -42,7 +43,9 @@ static uint32_t media_directory(HANDLE file,IO_STATUS_BLOCK *io,const uint32_t a
     if(attrs&FILE_ATTRIBUTE_REPARSE_POINT)stop("directory reparse entry outside installed-media contract",207);
     for(unsigned i=0;i<length;++i)if(!name[i] || name[i]>=128)stop("directory entry needs Xbox character mapping",207);
     unsigned copied=length<a[6]-64?length:a[6]-64;
-    memcpy(memory+a[5],result.bytes,64);MEM32(a[5])=0;MEM32(a[5]+60)=length;
+    memcpy(memory+a[5],result.bytes,64);MEM32(a[5])=0;MEM32(a[5]+4)=0;
+    MEM64(a[5]+48)=MEM64(a[5]+40); /* FATX reports EOF as AllocationSize. */
+    MEM32(a[5]+60)=length;
     for(unsigned i=0;i<copied;++i)MEM8(a[5]+64+i)=(unsigned char)name[i];
     io->Information=64+copied;
     status=copied==length?0:0x80000005u;

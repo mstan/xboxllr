@@ -18,6 +18,8 @@ static void test_media(void)
     FILE *file=fopen(path,"wb"); CHECK(file && fwrite(content,1,sizeof(content),file)==sizeof(content)); fclose(file);
     sprintf(path,"%s\\asset.bin",directory);
     file=fopen(path,"wb"); CHECK(file && fwrite(content,1,sizeof(content),file)==sizeof(content)); fclose(file);
+    sprintf(path,"%s\\Plain",directory);
+    file=fopen(path,"wb"); CHECK(file && fwrite(content,1,sizeof(content),file)==sizeof(content)); fclose(file);
     unsigned char digest[32]; char expected[65];
     CHECK(BCryptHash(BCRYPT_SHA256_ALG_HANDLE,NULL,0,(PUCHAR)content,sizeof(content),digest,32)>=0);
     for (unsigned i=0;i<32;++i) sprintf(expected+2*i,"%02x",digest[i]);
@@ -58,13 +60,33 @@ static void test_media(void)
     MEM64(info)=5;
     call_kernel(226,query,5); CHECK(!g_eax);
     read[6]=2; call_kernel(219,read,8); CHECK(!g_eax && !memcmp(memory+buffer,content+5,2));
-    query[3]=24; query[4]=5;
-    call_kernel(211,query,5); CHECK(!g_eax && MEM64(info+8)==sizeof(content) && !MEM8(info+21));
+    query[3]=64; query[4]=34;memset(memory+info,0xcc,68);
+    call_kernel(211,query,5); CHECK(!g_eax && MEM64(info+32)==sizeof(content) && MEM64(info+40)==sizeof(content));
+    CHECK(MEM32(iosb+4)==56 && !MEM64(info+56) && MEM32(info+64)==0xcccccccc);
+    MEM32(iosb)=0xdeadbeef;MEM32(iosb+4)=0x12345678;
+    for(unsigned kind=4;kind<=5;++kind) {
+        query[3]=64;query[4]=kind;memset(memory+info,0xcc,68);
+        call_kernel(211,query,5);CHECK(g_eax==MEDIA_INVALID);
+        for(unsigned i=0;i<64;++i)CHECK(!MEM8(info+i));
+        CHECK(MEM32(info+64)==0xcccccccc && MEM32(iosb)==0xdeadbeef && MEM32(iosb+4)==0x12345678);
+    }
+    query[4]=999;memset(memory+info,0xcc,64);
+    call_kernel(211,query,5);CHECK(g_eax==0xc0000003u && MEM32(info)==0xcccccccc);
+    query[4]=5;
     query[3]=23; MEM64(info)=0xaabbccdd;
-    call_kernel(211,query,5); CHECK(g_eax==0xc0000004u && MEM64(info)==0xaabbccdd && !MEM32(iosb+4));
+    call_kernel(211,query,5); CHECK(g_eax==0xc0000004u && MEM64(info)==0xaabbccdd && MEM32(iosb)==0xdeadbeef && MEM32(iosb+4)==0x12345678);
+    query[3]=55;query[4]=34;
+    call_kernel(211,query,5);CHECK(g_eax==0xc0000004u && MEM64(info)==0xaabbccdd);
+    query[3]=7;query[4]=14;
+    call_kernel(226,query,5);CHECK(g_eax==0xc0000004u && MEM64(info)==0xaabbccdd);
+    query[3]=8;MEM64(info)=UINT64_MAX;
+    call_kernel(226,query,5);CHECK(g_eax==MEDIA_INVALID && MEM64(info)==UINT64_MAX);
+    read[7]=offset;MEM64(offset)=UINT64_MAX;memset(memory+buffer,0xcc,32);
+    call_kernel(219,read,8);CHECK(g_eax==MEDIA_INVALID && MEM8(buffer)==0xcc);
+    CHECK(MEM32(iosb)==0xdeadbeef && MEM32(iosb+4)==0x12345678);
     call_kernel(187,&handle,1); CHECK(!g_eax);
     call_kernel(187,&handle,1); CHECK(g_eax==MEDIA_BAD_HANDLE);
-    call_kernel(219,read,8); CHECK(g_eax==MEDIA_BAD_HANDLE && MEM32(iosb)==g_eax);
+    call_kernel(219,read,8); CHECK(g_eax==MEDIA_BAD_HANDLE && MEM32(iosb)==0xdeadbeef && MEM32(iosb+4)==0x12345678);
 
     test_media_name("D:\\absent",0); MEM32(out)=0xfeed1234;
     MEM32(iosb)=0xdeadbeef;MEM32(iosb+4)=0x12345678;
@@ -114,6 +136,7 @@ static void test_media(void)
     call_kernel(190,create,9);CHECK(g_eax==0xc0000033u);
     CloseHandle(media_identity); CloseHandle(media_root); media_identity=media_root=NULL;
     sprintf(path,"%s\\asset.bin",directory); CHECK(DeleteFileA(path));
+    sprintf(path,"%s\\Plain",directory); CHECK(DeleteFileA(path));
     sprintf(path,"%s\\default.xbe",directory); CHECK(DeleteFileA(path));
     CHECK(media_verify(expected)==0xc0000034u && !media_root && !media_identity);
     CHECK(RemoveDirectoryA(directory)); media_content_path=NULL;

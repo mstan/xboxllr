@@ -410,18 +410,23 @@ static void media_kernel(unsigned ordinal)
                         if (!unit || geometry.total.QuadPart<0 || geometry.available.QuadPart<0 ||
                             (uint64_t)geometry.total.QuadPart>UINT64_MAX/unit ||
                             (uint64_t)geometry.available.QuadPart>UINT64_MAX/unit) stop("invalid host volume capacity",218);
+                        memset(memory+a[2],0,a[3]);
                         MEM64(a[2])=(uint64_t)geometry.total.QuadPart*unit/16384;
                         MEM64(a[2]+8)=(uint64_t)geometry.available.QuadPart*unit/16384;
                         MEM32(a[2]+16)=32; MEM32(a[2]+20)=512; io.Information=24;
                     }
                 }
             } else {
-                /* Fixed-layout classes shared by the Xbox and host NT ABIs:
-                 * Standard=24 bytes; Position=8 bytes. No host pointers. */
-                unsigned size=a[4]==34 ? 56 : a[4]==5 ? 24 : a[4]==14 || a[4]==19 || a[4]==20 ? 8 : a[4]==13 ? 1 : 0;
-                if (!size || (ordinal==226 && a[4]!=14 && a[4]!=19 && a[4]!=20 && a[4]!=13) ||
-                    (ordinal==211 && a[4]!=5 && a[4]!=14 && a[4]!=34)) stop("file information class unsupported",a[4]);
-                if (a[3]<size) g_eax=0xc0000004u;
+                /* Original Nt/FATX qualification, not desktop NT behavior.
+                 * In-range unqualified classes retain an explicit guard. */
+                unsigned size=a[4]==34 ? 56 : a[4]==4 ? 40 : a[4]==5 ? 24 : a[4]==14 || a[4]==19 || a[4]==20 ? 8 : a[4]==13 ? 1 : 0;
+                if (a[4]==0 || a[4]>=37) g_eax=0xc0000003u;
+                else if (!size || (ordinal==226 && a[4]!=14 && a[4]!=19 && a[4]!=20 && a[4]!=13) ||
+                    (ordinal==211 && a[4]!=4 && a[4]!=5 && a[4]!=14 && a[4]!=34)) stop("file information class unsupported",a[4]);
+                else if (a[3]<size) g_eax=0xc0000004u;
+                else if (ordinal==211 && (a[4]==4 || a[4]==5)) {
+                    memset(memory+a[2],0,a[3]);g_eax=MEDIA_INVALID;
+                }
                 else {
                     /* Desktop NT probes 8-byte alignment; Xbox callers only
                      * guarantee 4. Never pass the guest's stack struct as a
@@ -430,15 +435,22 @@ static void media_kernel(unsigned ordinal)
                     if (ordinal==226 && a[4]!=14) fsc_forget(owned->id);
                     if (ordinal==226) memcpy(stage.bytes,memory+a[2],size);
                     g_eax=(uint32_t)(ordinal==226 ? media_nt_set : media_nt_query)(file,&io,stage.bytes,size,a[4]);
-                    if (ordinal==211 && !g_eax) memcpy(memory+a[2],stage.bytes,size);
+                    if (ordinal==211 && !g_eax) {
+                        if(a[4]==34) {
+                            memcpy(stage.bytes+32,stage.bytes+40,8);
+                            memset(memory+a[2],0,a[3]);
+                        }
+                        memcpy(memory+a[2],stage.bytes,size);
+                    }
                 }
             }
             if (g_eax==0x103u && !async_delivery) stop("synchronous file operation unexpectedly pending",ordinal);
             ReleaseSRWLockExclusive(&owned->io_lock);
         }
-        /* Original synchronous FATX EOF is immediate rejection, not a new
-         * zero-byte completion. Preserve the caller's existing IOSB. */
-        if (iosb && !async_delivery && !(transfer && g_eax==0xc0000011u))
+        /* Original immediate errors preserve IOSB. Warning completions
+         * (directory overflow/exhaustion) publish it. Accepted asynchronous
+         * requests own their later success/failure publication separately. */
+        if (iosb && !async_delivery && (g_eax&0xc0000000u)!=0xc0000000u)
             media_iosb(iosb,g_eax,io.Information);
         if (transfer && !async_delivery) fprintf(stderr,"[FILE TRANSFER] ordinal=%u handle=%08x requested=%u completed=%llu status=%08x\n",
                               ordinal,a[0],a[6],(unsigned long long)io.Information,g_eax);

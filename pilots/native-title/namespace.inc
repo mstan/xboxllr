@@ -103,8 +103,10 @@ static void namespace_kernel(unsigned ordinal)
             unsigned length=(unsigned)strlen(namespace_links[at].target);
             uint32_t required=MEM32(g_esp+12);
             if (required) MEM32(required)=length;
-            if (length>MEM16(b+2)) status=0xc0000023u;
-            else { memcpy(memory+MEM32(b+4),namespace_links[at].target,length); MEM16(b)=(uint16_t)length; }
+            unsigned copied=length<MEM16(b+2)?length:MEM16(b+2);
+            if(copied)memcpy(memory+MEM32(b+4),namespace_links[at].target,copied);
+            MEM16(b)=(uint16_t)copied;
+            if(copied<length)status=0xc0000023u;
         }
     }
     ReleaseSRWLockExclusive(&media_lock);

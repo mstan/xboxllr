@@ -5,7 +5,8 @@ gates remain open. This checkpoint executes original filesystem operations in
 a maintained reference runner and corrects native asynchronous notification.
 The title-selected original file/cache route now reaches Demo play, Start/title
 return and Demo reentry. Cross-process persistence passes. Remaining contract
-qualification is still open; this milestone alone does not close the family.
+qualification now includes the metadata/directory/error/namespace bundle below.
+Final native title regression is pending for that correction batch.
 
 ## Executable floor and independent evidence
 
@@ -93,38 +94,74 @@ update; that update does not change the runtime or require another title replay.
 This validates the native notification correction, not an original-filesystem
 title run, new cadence measurement or endurance plateau.
 
-## Remaining family work and observed differences
+## Metadata, directory, rejection and namespace bundle
 
-Qualify the connected original route across the actual attract sequence,
-namespace/handle ownership, title read/write modes, directories, completion
-transport, repeated lifetime and persistence. Preserve the approved installed-
-media authentication policy and the optical reference; no fake drive
-authentication response is introduced here.
+`tools/native_filesystem_contract_reference.py` reuses the same owned original
+kernel and read-only/COW HDD. It creates three actual FATX files and asserts
+**84 cases plus 64 mount/open/exact-read/close/unlink lifetimes**. The run delivers
+666 original interrupts, reads 2,480 sectors and writes 102 overlay sectors.
+Every request records output bytes and sentinel IOSBs; expected results are
+asserted, not inferred from a successful title run. Run it with the reference
+command above, replacing the script name and omitting `--expected`.
 
-Further independently observed differences await the broader contract pass:
+| Original Nt/FATX observation | Shared native correction |
+| --- | --- |
+| Network-open class 34 reports actual EOF for both length fields | Derive both from the actual host file's EOF; do the same for directory entries |
+| Adequately sized basic/standard queries (4/5) zero the supplied output then return invalid parameter | Preserve that rejection and zeroing; remove the desktop-only success assumption |
+| Bad length/class/handle/access/offset and synchronous EOF preserve IOSB | Keep both caller words intact on immediate errors; accepted asynchronous completion retains its own publication path |
+| Class 34 and volume query zero excess supplied space; position query writes only 8 bytes | Match those byte effects and preserve the canary beyond the supplied buffer |
+| Directory enumeration returns one ASCII entry, zero next-offset/index, filtered/case-insensitive names, short-buffer overflow with cursor advance | Retain real host cursor/filter work and normalize only the Xbox-visible fields |
+| First absent-name query returns `C000000F` without an IOSB update; exhaustion/restart thereafter publishes `80000006,0` | Preserve the distinction, including `*.*` matching extensionless files |
+| Truncated symbolic-link query copies the prefix that fits, sets Length to bytes copied and reports full required length | Copy real target bytes even on buffer-too-small; retain open object after unlink |
 
-- Original FATX supports `FileNetworkOpenInformation` (34), while the tested
-  `FileStandardInformation` (5) request returns `C000000D`. Native currently
-  accepts class 5; its desktop query test is not original-correctness evidence.
-- A zero-page original cache makes the tested unaligned read fail `C0000017`;
-  one cache page suffices. Native can directly read without an internal cache
-  allocation. Different implementation resource costs require explicit contract
-  treatment, not artificial HLE allocation failure solely to mimic internals.
-- Synchronous EOF and rejected opens preserve the tested IOSB. Native open
-  rejection and synchronous EOF now preserve it too; sentinel tests cover the
-  returned status, untouched output handle and both IOSB words. All four
-  focused media/storage/cache tests pass (1.29s). Broader error/metadata
-  publication remains part of the unfinished contract pass.
-- Broader directory enumeration, mount/repeated teardown, cross-run durability,
-  pending error timing, cancellation and final title-route qualification remain
-  open beyond the qualified two-process write/read/delete check below. The
-  separate HDD installation now contains all 3,197 extracted files,
-  totaling 2,235,000,402 bytes, verified after image close/reopen.
+The native fixture independently checks actual persisted bytes, access denial,
+output bounds, metadata/volume layouts, directory cursor/filter effects,
+namespace ownership and repeated lifetimes. The combined native suite passes
+**37/38 (17.61s)**; all file tests pass. The sole failure is the existing `.99`
+minimum event-wait-duration assertion; its tolerance is unchanged.
+
+## Bounded contract and explicit tolerances
+
+The selectable reference actually runs original file/cache/namespace/utility
+operations in Blinx, with DMA, ISR/DPC and completion work. The installed title
+contains all 3,197 files (2,235,000,402 bytes), independently verified after image
+close/reopen. The original title route and cross-process durability evidence
+below remain valid; this batch changes the native replacement, not that route.
+
+- Installed-media authentication is the approved title-identity/mount policy,
+  backed by real matching files. The optical reference remains separate; no
+  fabricated drive-authentication response is returned.
+- Native storage uses actual host capacity, timestamps and directory order.
+  Data bytes, EOF, case-insensitive lookup, transfer counts and ownership remain
+  contract requirements. This does not make host cluster allocation the Xbox's
+  reported file AllocationSize.
+- A zero-page original cache cannot perform the tested unaligned read
+  (`C0000017`); native may read without allocating that internal cache. Host
+  resource use and available capacity differ; HLE does not manufacture resource
+  failure merely to reproduce a less efficient implementation's allocation.
+- Original successful EOF/allocation changes report IOSB Information 512 when
+  they write metadata and 0 on repeated no-ops. Native retains its actual
+  metadata-operation count; this field is not a file-data transfer count here.
+  Real read/write byte counts and the resulting file length remain exact.
+- Original directory length 63 underflows its header calculation and writes a
+  full entry beyond the supplied length. The fixture retains this evidence.
+  Native rejects lengths below the 64-byte header with length mismatch and
+  untouched output/IOSB. Reproducing that malformed-input overflow is excluded.
+- Async accepted completion versus immediate rejection, event/file selection,
+  close/drain and exercised replay writes are qualified. APC delivery, true
+  outstanding LLE requests at the native bridge, cancellation, injected disk
+  faults and arbitrary pending-error timing remain unqualified. Existing guards
+  stay explicit; no failure-completion or cancellation behavior is fabricated.
+- Original route performance is unrestricted. Full-console scheduling under
+  contention, crash/power-loss durability, optical authentication and unrelated
+  filesystem classes are outside this bounded attract-family qualification.
 
 Phobos remains the native file/path donor reference. Its current Fsc bridge
 only stores a page count and cannot provide this executable cache floor; its
 host-file strategies remain useful after qualifying their observable boundary.
-No new donor implementation body is copied by this checkpoint.
+No new donor implementation body is copied by this checkpoint. The latest
+directory/metadata review specifically avoids treating Phobos's desktop class
+4/5 acceptance or rounded allocation sizes as an original correctness oracle.
 
 ## Original files in the title runtime
 
