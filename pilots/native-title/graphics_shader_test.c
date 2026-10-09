@@ -1,6 +1,7 @@
 /* Outcome comparison only: real native GPU vertex output versus the bounded
  * LLE CPU reference. This executable is never part of title execution. */
 #include "graphics_backend.h"
+#include "d3d8_xbox.h"
 #include "nv2a_vsh_emulator.h"
 #include <windows.h>
 #include <stdio.h>
@@ -106,10 +107,108 @@ static int check_capture(const char *path)
 #include "graphics_draw_reference_test.inc"
 #include "graphics_fvf_reference_test.inc"
 #include "graphics_arl_reference_test.inc"
+static int check_vertex_fetch_reference(const char *path)
+{
+    /* The file carries authored byte inputs and mathematical expectations,
+     * never normalized values derived from the maintained LLE decoder. */
+    FILE *file=fopen(path,"rb");CHECK(file);
+    uint32_t header[4];CHECK(fread(header,sizeof(header),1,file)==1);
+    CHECK(header[0]==0x46564c58 && header[1]==2 && header[2] && header[2]<=65536);
+    uint32_t previous[4]={0},handle=0;unsigned comparisons=0;
+    uint32_t vertices[3];
+    for(unsigned i=0;i<3;++i)CHECK(pilot_gfx_vertex_create(i?6*48:6*32,&vertices[i])==0);
+    pilot_gfx_vertex_bind(0,vertices[0],32);
+    pilot_gfx_set_state(D3DRS_CULLMODE,D3DCULL_NONE);pilot_gfx_set_state(D3DRS_ZENABLE,0);
+    pilot_gfx_set_state(D3DRS_ZWRITEENABLE,0);pilot_gfx_set_state(D3DRS_ALPHABLENDENABLE,0);
+    pilot_gfx_set_state(D3DRS_ALPHATESTENABLE,0);pilot_gfx_set_state(D3DRS_SPECULARENABLE,0);
+    pilot_gfx_set_texture_state(0,D3DTSS_COLOROP,D3DTOP_SELECTARG1);
+    pilot_gfx_set_texture_state(0,D3DTSS_COLORARG1,D3DTA_DIFFUSE);
+    pilot_gfx_set_texture_state(0,D3DTSS_ALPHAOP,D3DTOP_SELECTARG1);
+    pilot_gfx_set_texture_state(0,D3DTSS_ALPHAARG1,D3DTA_DIFFUSE);
+    pilot_gfx_set_texture_state(1,D3DTSS_COLOROP,D3DTOP_DISABLE);pilot_gfx_pixel_fixed();
+    unsigned bound_stream=0,bound_buffer=0,bound_stride=0;
+    for(unsigned sample=0;sample<header[2];++sample) {
+        uint32_t metadata[8];unsigned char payload[16];float expected[4],output[13][4];
+        CHECK(fread(metadata,sizeof(metadata),1,file)==1 && fread(payload,sizeof(payload),1,file)==1 && fread(expected,sizeof(expected),1,file)==1);
+        unsigned type=metadata[0],slot=metadata[1],stream=metadata[2],offset=metadata[3];
+        unsigned stride=metadata[4],first=metadata[5],buffer=metadata[6],persistent=metadata[7];
+        CHECK(slot>0 && slot<16 && stream>0 && stream<16 && offset+pilot_gfx_vertex_type_size(type)<=32);
+        CHECK((stride==32 || stride==48) && first>0 && first+3<=6 && buffer<2 && persistent<=1);
+        if(!handle || memcmp(previous,metadata,sizeof(previous))) {
+            if(handle)pilot_gfx_shader_destroy(handle);
+            struct PilotVertexElement elements[16]={0};
+            elements[0]=(struct PilotVertexElement){0x42,0,0};
+            elements[slot]=(struct PilotVertexElement){type,stream,offset};
+            const uint32_t code[]={0,0x0020001b,0x08000000,0x0000f800,
+                0,0x0020001b|(slot<<9),0x08000000,0x0000f819};
+            CHECK(pilot_gfx_shader_create(code,2,elements,&handle)==0);
+            memcpy(previous,metadata,sizeof(previous));
+            CHECK(pilot_gfx_shader_bind(handle)==0);
+            const float scale[]={1.0f/32,-1.0f/32,1.0f/16777215,1},raster_offset[]={-1,1,0,0};
+            CHECK(pilot_gfx_shader_raster(scale,raster_offset)==0);
+        }
+        unsigned char positions[32]={0},attributes[32];memset(attributes,0xcc,sizeof(attributes));
+        const float xyzw[]={8,8,10,1};memcpy(positions,xyzw,sizeof(xyzw));
+        memcpy(attributes+offset,payload,pilot_gfx_vertex_type_size(type));
+        struct PilotVertexProbeStream streams[16]={0};
+        streams[0]=(struct PilotVertexProbeStream){positions,32};
+        streams[stream]=(struct PilotVertexProbeStream){attributes,32};
+        float constants[192][4]={0};
+        CHECK(pilot_gfx_shader_probe(handle,streams,1,constants,&output[0][0])==0);
+        for(unsigned lane=0;lane<4;++lane) {
+            float actual=output[3][lane];
+            if(!isfinite(actual) || fabsf(actual-expected[lane])>2e-6f*fmaxf(1,fabsf(expected[lane]))) {
+                fprintf(stderr,"FETCH mismatch sample=%u format=%x slot=%u stream=%u lane=%u actual=%g expected=%g\n",
+                    sample,type,slot,stream,lane,actual,expected[lane]);
+                CHECK(0);
+            }
+            ++comparisons;
+        }
+        /* Exercise the shipping draw backend with persistent buffers too.
+         * The raw probe preserves the immediate bindings used by this draw. */
+        unsigned char draw_positions[6*32],draw_attributes[2][6*48],pixels[64*64*4];
+        memset(draw_positions,0xcc,sizeof(draw_positions));memset(draw_attributes,0xcc,sizeof(draw_attributes));
+        for(unsigned i=0;i<6;++i) {
+            const float sentinel[]={-200,-200,10,1};memcpy(draw_positions+i*32,sentinel,16);
+        }
+        const float triangle[3][4]={{8,8,10,1},{56,8,10,1},{8,56,10,1}};
+        for(unsigned i=0;i<3;++i) {
+            memcpy(draw_positions+(first+i)*32,triangle[i],16);
+            memcpy(draw_attributes[buffer]+(first+i)*stride+offset,payload,pilot_gfx_vertex_type_size(type));
+        }
+        pilot_gfx_vertex_upload(vertices[0],draw_positions,sizeof(draw_positions));
+        for(unsigned i=0;i<2;++i)pilot_gfx_vertex_upload(vertices[i+1],draw_attributes[i],sizeof(draw_attributes[i]));
+        if(persistent)CHECK(bound_stream==stream && bound_buffer==buffer && bound_stride==stride);
+        else {
+            if(bound_stream && bound_stream!=stream)pilot_gfx_vertex_bind(bound_stream,0,0);
+            pilot_gfx_vertex_bind(stream,vertices[buffer+1],stride);
+            bound_stream=stream;bound_buffer=buffer;bound_stride=stride;
+        }
+        CHECK(pilot_gfx_clear(D3DCLEAR_TARGET,0xff102030,1,0)==0);
+        CHECK(pilot_gfx_draw_vertices(5,first,3)==0 && pilot_gfx_readback(pixels,sizeof(pixels))==0);
+        unsigned pixel=(16*64+16)*4;
+        for(unsigned lane=0;lane<3;++lane) {
+            int want=(int)lroundf(fminf(1,fmaxf(0,expected[lane]))*255);
+            if(abs((int)pixels[pixel+lane]-want)>1) {
+                fprintf(stderr,"FETCH pixel mismatch sample=%u format=%x lane=%u actual=%u expected=%d\n",
+                    sample,type,lane,pixels[pixel+lane],want);CHECK(0);
+            }
+        }
+        CHECK(pixels[0]==0x10 && pixels[1]==0x20 && pixels[2]==0x30);
+    }
+    CHECK(fgetc(file)==EOF);fclose(file);pilot_gfx_shader_destroy(handle);
+    pilot_gfx_vertex_bind(0,0,0);pilot_gfx_vertex_bind(bound_stream,0,0);
+    for(unsigned i=0;i<3;++i)pilot_gfx_vertex_destroy(vertices[i]);
+    fprintf(stderr,"PASS: %u independently specified native vertex fetch cases, %u output lanes and persistent-buffer draws\n",header[2],comparisons);
+    return 0;
+}
 int main(int argc,char **argv)
 {
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
     uint32_t pp[17]={64,64,6,1,0x11,1,0,0,1,0x2a,0,0,1};CHECK(pilot_gfx_create(pp)==0);
+    if(argc==3 && !strcmp(argv[1],"--vertex-fetch-reference")) {
+        CHECK(check_vertex_fetch_reference(argv[2])==0);pilot_gfx_close();return 0;
+    }
     if(argc==3 && !strcmp(argv[1],"--fvf-reference")) {
         CHECK(check_fvf_reference(argv[2])==0);pilot_gfx_close();return 0;
     }

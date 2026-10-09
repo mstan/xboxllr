@@ -115,6 +115,17 @@ EXPORT void xlle_nv2a_reference_frame(void* instance, uint64_t frame) {
     auto& ref = *static_cast<Reference*>(instance);
     if (ref.failure.empty()) ref.gpu.set_frame(frame);
 }
+// Qualification-only observation of the maintained transform output. No
+// shader/fetch implementation is substituted, and this bridge is not shipped.
+EXPORT void xlle_nv2a_reference_vertex(void* instance, float* output) {
+    auto& ref = *static_cast<Reference*>(instance);
+    const auto position = ref.gpu.last_transformed_position();
+    const auto diffuse = ref.gpu.last_transformed_diffuse();
+    const auto specular = ref.gpu.last_transformed_specular();
+    std::memcpy(output, position.data(), 16);
+    std::memcpy(output + 4, diffuse.data(), 16);
+    std::memcpy(output + 8, specular.data(), 16);
+}
 EXPORT void xlle_nv2a_reference_clock(void* instance, uint64_t core_cycles, uint32_t phase) {
     auto& ref = *static_cast<Reference*>(instance);
     if (phase >= 1000) { ref.failure = "NV2A clock phase outside display interval"; return; }

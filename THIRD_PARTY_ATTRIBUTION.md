@@ -1467,6 +1467,16 @@ here. No new external implementation or dependency is imported.
 Exact qualification and limits are in
 [GRAPHICS-LLE.md](pilots/native-title/GRAPHICS-LLE.md).
 
+The subsequent original declaration/fetch qualification additionally consults
+[XboxDevWiki vertex attributes](https://xboxdevwiki.net/NV2A/Vertex_attributes),
+credit to its contributors, and the same pinned xemu vertex-format conversions
+for signed/normalized short and CMP inputs. Only behavioral facts are used;
+no wiki prose or GPL implementation body is copied into the harness or runtime.
+Raw input corpus and mathematical expectations are authored here. Original
+XDK functions execute from the owned private Blinx XBE; their instruction bytes
+and generated captures are not committed. The new native checks reuse the
+already attributed renderer and shader translator without a new dependency.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

@@ -6,8 +6,10 @@ owner-observed FMVs and real-time Demo play on runtime `318f5ac`. See the
 claiming complete original-speed/A-V qualification. Next work strengthens the
 independent LLE contracts for this exercised path; New Game is deferred.
 
-The current graphics-family checkpoint corrects LLE packed BGRA vertex colors,
-with 140 real LLE draws and matching native HLE checks. Overall qualification
+The current graphics-family checkpoint corrects LLE packed BGRA vertex colors
+and connects original XDK declarations/stream ownership to maintained fetch and
+shader execution. Its 720 format cases pass actual LLE/native draws and independent
+raw-output checks, alongside the previous 140 color draws. Overall qualification
 remains 4/9; see [graphics evidence and remaining scope](GRAPHICS-LLE.md).
 
 ## Deferred stream upload experiment (2026-10-08)

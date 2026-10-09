@@ -88,12 +88,90 @@ dependency; no new title-startup qualification is asserted.
 Private logs are `build/blinx/graphics-color-{before,lle-build,lle-tests,
 native-full-build,native-tests}.log`. None are shipping inputs.
 
+## Original declarations, fetch and stream ownership - 2026-10-09
+
+`tools/native_vertex_fetch_reference.py` connects complete original NTSC
+`SetStreamSource`, `LoadVertexShader`, `SelectVertexShader` and `DrawVertices`
+to the maintained PFIFO/NV2A route. It loads the owned XBE with SHA-256
+`e6b7cd8a5527dd001e05bb3e881d9b24ffc58824ff67def394215ddbc8009249` into
+Unicorn and shares its actual RAM with NV2A. The original functions and their
+callees execute unmodified, including declaration format/address emission and
+draw submission. The fixture checks callee-cleaned stack and saved registers.
+There are no instruction hooks, substituted return values or replacement XDK
+command emitters.
+
+This is a preowned-resource component fixture: shader descriptors, resource
+headers, initialized viewport and a bounded pushbuffer are supplied. Only the
+relevant declaration/stream dirty bits are set for submission. Original device
+creation, shader/resource allocation, pushbuffer exhaustion, whole-title startup
+and unrelated render-state updates are outside this qualification.
+
+**720 real LLE draws** cover 48 independently authored payloads across input
+slots 1/2/3/4/15 and streams 1/7/15. The twelve formats are FLOAT1/2/3/4,
+UB_D3D, CMP, SHORT1/2/4 and normalized SHORT1/2/4. The five formats seen in
+the retained 32 Blinx scene captures are included. Cases cover signed endpoints,
+asymmetric values, missing-lane defaults, normalized clamping, nontrivial alpha,
+padded offset, strides 32/48 and nonzero first indices 1/2.
+
+Every format group binds buffer A, changes its bytes without binding, replaces
+it with B, then changes B without binding. Inactive storage and unsubmitted
+vertices are poisoned. **360 persistent writes without rebinding** establish
+that current storage is fetched, rather than a cached earlier value. **545
+original stream transitions** check binding counts, fence side effects, data
+pointers, same-header rebinding and final unbinding. All seven preowned resource
+headers return to their initial ownership count. The emitted NV2A array formats,
+addresses and draw range are checked before actual device consumption.
+
+Expected lane values are authored directly from float/byte/short inputs and
+signed 11/11/10 normalization math. They are not derived from our LLE decoder,
+the HLE shader translator or shared CPU shader helpers. A diagnostic-only bridge
+observes the actual maintained shader output; each draw also checks framebuffer
+RGBA after clamping, within one LSB.
+
+The generated private corpus carries those same raw inputs and mathematical
+expectations, not measured LLE output. Native `pilot_shader_test
+--vertex-fetch-reference` independently passes all **720 cases / 2,880 raw
+shader lanes**, with relative tolerance `2e-6 * max(1, abs(expected))`, on actual
+D3D11. It additionally renders **720 matching persistent-buffer draws** through
+the shipping native draw backend, replacing buffers and changing bytes without
+rebinding. RGB pixels agree within one LSB and the untouched background is exact.
+Native XRGB readback does not qualify stored alpha; raw shader output covers the
+alpha lane, and the preceding packed-color batch retains actual blending checks.
+This batch needs no production HLE correction and adds no title rendering cost.
+
+Independent format provenance is the published
+[XboxDevWiki vertex-attribute description](https://xboxdevwiki.net/NV2A/Vertex_attributes)
+and pinned xemu `482088490c2d5983ed5e1eafbd09906157c1eca0` vertex-format
+conversion. Source inspection corroborates the normalization contract; neither
+source inspection nor matching native output constitutes a new silicon golden.
+The harness and expected-value calculations are authored here. Owned original
+instructions and all generated corpus/evidence files remain private.
+
+Reproduce after building the reference DLL and native shader test:
+
+```powershell
+$env:PYTHONPATH = 'F:\Projects\xboxlle\wt-native-title-pilot\build\reference-python'
+& 'C:\Users\Matthew\AppData\Local\Programs\Python\Python312\python.exe' tools\native_vertex_fetch_reference.py --xbe F:\Projects\xboxlle\xboxlle\build\phobos-audit-20261006\blinx-na\default.xbe --binding build\blinx\d3d-binding.aot-private.json --library build\visibility-lle\libxlle_nv2a_reference.dll --dependencies C:\msys64\mingw64\bin --output build\blinx\vertex-fetch-original.aot-private.json --native-cases build\blinx\vertex-fetch-native-cases.bin
+& .\build\blinx\host-calendar-lle\Release\pilot_shader_test.exe --vertex-fetch-reference build\blinx\vertex-fetch-native-cases.bin
+```
+
+The combined commands from the preceding section pass **9/9 LLE checks (0.99s)**
+and **56/56 native checks (39.16s)**. Logs are
+`build/blinx/vertex-fetch-{original,native,lle-build,lle-tests,native-build,
+native-full-build,native-tests}.log`; private original evidence includes function
+addresses/hashes and every draw/stream transition.
+
+The rebuilt title retains the exact executable hash recorded above. Reuse its
+190.578s / 18-capture attract/interruption/reentry regression: this batch changes
+only diagnostic tools/tests. No fresh title run or original whole-title LLE
+integration is claimed. Family `.116` remains partial and the total is **4/9**.
+
 ## Remaining offline work
 
-Continue the original vertex-declaration/command boundary and packed signed
-formats, persistent shader inputs and texture/state combinations actually used
-by Blinx. These color cases do not qualify all vertex slots, arbitrary aliasing,
-tiled vertex input, shader arithmetic or the entire graphics family. Retain
+Continue original shader constants and arithmetic, plus texture/state
+combinations actually used by Blinx. These bounded declaration/fetch cases do
+not qualify all vertex slots, arbitrary aliasing, tiled vertex input or the entire
+graphics family. Retain
 existing scene-reference checks; audit shared expectations before accepting
 agreement. Console-dependent startup and disputed hardware timing stay at the
 back of the burndown. LLE performance is not an acceptance gate; preserve HLE
