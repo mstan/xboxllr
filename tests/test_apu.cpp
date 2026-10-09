@@ -102,6 +102,41 @@ int main() {
     CHECK(apu.mmio_read(base + 0x1000, 4) == 0);
     CHECK(irq.size() == 2 && irq[1] == std::make_pair(5, false));
 
+    // Real selected-voice DMA, not an inert PIO register-file echo. Surrounding
+    // voice words and the adjacent voice must survive all parameter writes.
+    apu.mmio_write(base+0x202f8,4,voice);
+    const std::pair<uint32_t,uint32_t> whole_words[] = {
+        {0x300,0x00},{0x304,0x04},{0x308,0x08},{0x30c,0x0c},
+        {0x310,0x10},{0x314,0x14},{0x318,0x18},
+        {0x360,0x60},{0x364,0x64},{0x368,0x68},{0x36c,0x6c},
+        {0x374,0x74},{0x378,0x78},
+    };
+    for(const auto& field:whole_words) {
+        for(uint32_t value:{0u,0xffffffffu,0x96ab375du}) {
+            auto expected=ram;
+            put32(expected,voice_addr+field.second,value);
+            apu.mmio_write(base+0x20000+field.first,4,value);
+            CHECK(fault.empty());CHECK(ram==expected);
+        }
+    }
+    put32(ram,voice_addr+0x7c,0x12340009);
+    apu.mmio_write(base+0x2037c,4,0x8765ffff);
+    CHECK(get32(ram,voice_addr+0x7c)==0x87650009); // pitch retains list ownership
+    const std::pair<uint32_t,uint32_t> offsets[] = {
+        {0x3a0,0x20},{0x3a4,0x24},{0x3d8,0x58},{0x3dc,0x5c},
+    };
+    for(const auto& field:offsets) {
+        put32(ram,voice_addr+field.second,0xaaffffff);
+        apu.mmio_write(base+0x20000+field.first,4,0xff123456);
+        CHECK(get32(ram,voice_addr+field.second)==0xaa123456);
+    }
+    CHECK(fault.empty());CHECK(irq.size()==2); // configuration posts no completion
+    auto before_failure=ram;
+    apu.mmio_write(base+0x202f8,4,256);
+    CHECK(!fault.empty());
+    apu.mmio_write(base+0x20300,4,0);
+    CHECK(ram==before_failure); // terminal DMA failure cannot mutate later work
+
     std::printf(fails ? "test_apu: %d checks failed\n" : "test_apu: ok\n", fails);
     return fails ? 1 : 0;
 }

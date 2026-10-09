@@ -100,6 +100,7 @@ public:
 
     uint32_t mmio_read(uint32_t addr, int size) override {
         uint32_t off = addr - base_;
+        if (faulted_) return 0;
         if (off == kXgscnt)
             set_reg32(kXgscnt, static_cast<uint32_t>(xgscnt_));
         // VP PIO_FREE: the unsimulated queue is always empty, matching xemu.
@@ -110,6 +111,7 @@ public:
 
     void mmio_write(uint32_t addr, int size, uint32_t value) override {
         uint32_t off = addr - base_;
+        if (faulted_) return;
         if (off == kIsts && size == 4) {
             set_reg32(kIsts, reg32(kIsts) & ~value);  // W1C
             update_irq();
@@ -117,6 +119,12 @@ public:
         }
         if (size == 4 && off >= kVpBase) {
             uint32_t method = off - kVpBase;
+            if (method == 0x2f8) {
+                if (value >= kMaxVoices) device_fault("selected voice out of range");
+                else set_reg32(kFecv, value);
+                return;
+            }
+            if (configure_voice(method, value)) return;
             if (method == kSetAntecedent) {
                 set_reg32(kFeav, value);
                 set_reg32(kFedecmeth, method);
@@ -245,15 +253,50 @@ private:
     }
 
     bool read_voice_word(uint16_t voice, uint32_t field, uint32_t& value) {
-        return read_u32(reg32(kVpvaddr) + voice * kVoiceSize + field, value);
+        const uint64_t address=uint64_t(reg32(kVpvaddr))+voice*kVoiceSize+field;
+        return address<=UINT32_MAX-3 && read_u32(static_cast<uint32_t>(address),value);
     }
     bool write_voice_word(uint16_t voice, uint32_t field, uint32_t value) {
-        return write_u32(reg32(kVpvaddr) + voice * kVoiceSize + field, value);
+        const uint64_t address=uint64_t(reg32(kVpvaddr))+voice*kVoiceSize+field;
+        return address<=UINT32_MAX-3 && write_u32(static_cast<uint32_t>(address),value);
     }
     bool set_voice_next(uint16_t voice, uint16_t next) {
         uint32_t link = 0;
         return read_voice_word(voice, kVoicePitchLink, link) &&
                write_voice_word(voice, kVoicePitchLink, (link & 0xffff0000u) | next);
+    }
+
+    // MCPX method/register encodings cross-checked against the original XDK
+    // emitter and xemu apu_regs.h/vp.c (see AUDIO-LLE.md). This updates real
+    // voice-table RAM; it does not assert playback or sample consumption.
+    bool configure_voice(uint32_t method, uint32_t value) {
+        struct Field { uint32_t method, offset, mask; };
+        static constexpr Field fields[] = {
+            {0x300,0x00,0xffffffff}, {0x304,0x04,0xffffffff},
+            {0x308,0x08,0xffffffff}, {0x30c,0x0c,0xffffffff},
+            {0x310,0x10,0xffffffff}, {0x314,0x14,0xffffffff},
+            {0x318,0x18,0xffffffff},
+            {0x360,0x60,0xffffffff}, {0x364,0x64,0xffffffff},
+            {0x368,0x68,0xffffffff}, {0x36c,0x6c,0xffffffff},
+            {0x374,0x74,0xffffffff}, {0x378,0x78,0xffffffff},
+            {0x37c,0x7c,0xffff0000},
+            {0x3a0,0x20,0x00ffffff}, {0x3a4,0x24,0x00ffffff},
+            {0x3d8,0x58,0x00ffffff}, {0x3dc,0x5c,0x00ffffff},
+        };
+        for (const auto& field : fields) {
+            if (method != field.method) continue;
+            const uint32_t voice = reg32(kFecv);
+            if (voice >= kMaxVoices) {
+                device_fault("voice configuration handle out of range");return true;
+            }
+            uint32_t previous = 0;
+            if (!read_voice_word(static_cast<uint16_t>(voice), field.offset, previous) ||
+                !write_voice_word(static_cast<uint16_t>(voice), field.offset,
+                                  (previous & ~field.mask) | (value & field.mask)))
+                device_fault("voice configuration DMA failed");
+            return true;
+        }
+        return false;
     }
 
     void voice_on(uint32_t argument) {

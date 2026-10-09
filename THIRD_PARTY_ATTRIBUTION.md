@@ -1305,6 +1305,30 @@ no donor kernel or loader body is incorporated. See
 [SCHEDULING-LLE.md](pilots/native-title/SCHEDULING-LLE.md) for the guarded
 startup result and remaining integration limits.
 
+## Bounded APU configuration floor
+
+The selected-voice configuration handler, strict `tools/apu_reference.cpp`
+transport and original-code fixture are authored here. They consult:
+
+- [xemu APU register definitions](https://github.com/xemu-project/xemu/blob/482088490c2d5983ed5e1eafbd09906157c1eca0/hw/xbox/mcpx/apu/apu_regs.h)
+  and [voice processor](https://github.com/xemu-project/xemu/blob/482088490c2d5983ed5e1eafbd09906157c1eca0/hw/xbox/mcpx/apu/vp/vp.c)
+  for factual method locations, masks and guest-memory effects. These files
+  credit espes (2012), Jannik Vogel (2018-2019) and Matt Borgerson (2019-2025;
+  the register header ends at 2021), under LGPL-2.0-or-later notices. No
+  implementation body is copied or adapted by this batch.
+- [Phobos buffer model](https://github.com/phobos665/xboxrecomp/blob/bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0/src/hle/dsound_buffer_model.c),
+  which credits NoRain211's `doaxbv-re` buffer model and carries GPL-3.0
+  provenance. Its position/frequency/host-clock strategy was reviewed;
+  no new body is incorporated.
+- The owner's hash-bound original NTSC DirectSound helpers and command emitter,
+  executed/inspected privately. No original bytes or generated private output
+  are committed or distributed.
+
+See [AUDIO-LLE.md](pilots/native-title/AUDIO-LLE.md) for the bounded evidence.
+Register programming is not a sample-processing or whole-title qualification.
+Existing older APU/dependency attribution and distribution restrictions are
+unchanged; this batch does not certify the entire machine as non-GPL.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

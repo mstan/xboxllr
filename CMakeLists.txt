@@ -379,6 +379,9 @@ add_executable(test_apu tests/test_apu.cpp)
 target_include_directories(test_apu PRIVATE ${XLLE_INCLUDES})
 add_test(NAME apu COMMAND test_apu)
 
+add_library(xlle_apu_reference SHARED EXCLUDE_FROM_ALL tools/apu_reference.cpp)
+target_include_directories(xlle_apu_reference PRIVATE ${XLLE_INCLUDES})
+
 add_executable(test_aci tests/test_aci.cpp)
 target_include_directories(test_aci PRIVATE ${XLLE_INCLUDES})
 add_test(NAME aci COMMAND test_aci)
