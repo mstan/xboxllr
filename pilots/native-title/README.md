@@ -14,7 +14,7 @@ CPU recorder/query semantics and native upload coalescing. These retain the
 previous 140 color draws. Another 1,344 LLE/native draws independently qualify
 finite shader math, masks/swizzles, captured paired issue and relative addressing.
 Complete original submission now also replays 96 retained scene shader draws
-(3,008 vertices / 28,936 written lanes). Bounded companion captures retain live
+(3,008 vertices / 29,424 written lanes, now including fog). Bounded companion captures retain live
 GPU texture mips and before/after color/depth targets. Original complete-draw
 state replay now consumes the original DXT1-noise RDI writes, then guards the
 unqualified enabled-noise pixels. Another 128 original setter calls / 40 complete
@@ -22,6 +22,12 @@ graphics-service returns qualify bounded control delivery and target-format
 conditioning; HLE accepts boolean setter/cache requests using native sampling.
 The enabled pixel bound stays deferred; matching vertex output does not close
 pixel qualification.
+Programmable fog now passes 196 independent cases / 392 original-XDK draws
+with 442,176 interior pixels, and 294 native GPU draws with 331,632 interior
+pixels. Scalar masks, per-vertex formulas and late clamping are corrected while
+retaining native shaders, cached uniforms and deferred vertex uploads. The
+updated 210.157s attract/interruption/reentry run passes; full scene texture/state
+composition and broader raster outcomes remain open.
 Overall qualification
 remains 4/9; see [graphics evidence and remaining scope](GRAPHICS-LLE.md).
 

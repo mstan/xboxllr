@@ -2281,6 +2281,13 @@ public:
         kRasterCombinerFinalFactor0,
         kRasterCombinerFinalFactor1,
         kRasterProvokingVertex,
+        kRasterFogEnable,
+        kRasterFogMode,
+        kRasterFogGeneration,
+        kRasterFogColor,
+        kRasterFogParams0,
+        kRasterFogParams1,
+        kRasterFogParams2,
         kRasterStateWords,
     };
     uint32_t debug_raster_state_word(RasterStateWord word) const {

@@ -172,6 +172,8 @@ def prepare(donor, output, reference):
         'device teardown. XLLE_PILOT_D3D_DEBUG enables native layer diagnostics.\n'
         'Independent Xbox reset adapter reuses real presentation-buffer creation\n'
         'while retaining the native device, resources, shaders and state caches.\n'
+        'Programmable fog is evaluated per vertex in the native translator;\n'
+        'the pixel adapter consumes its interpolated, late-clamped factor.\n'
         'The existing feedback scratch/copy is exposed to native draws and target\n'
         'binding. Failed copies stop; scratch resources are released on teardown.\n'
         'Original and prepared hashes are in donor.json.\n',encoding='utf-8')

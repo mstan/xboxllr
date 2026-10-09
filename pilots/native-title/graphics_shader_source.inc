@@ -84,6 +84,11 @@ static void shader_store(struct ShaderText *text,const Nv2aVshOperation *op,cons
         if(out->type==NV2ART_NONE)continue;
         if(out->type==NV2ART_ADDRESS) {shader_text(text,"a0=(int)%s.x;\n",name);continue;}
         if(!out->writemask)continue;
+        if(out->type==NV2ART_OUTPUT && out->index==5) {
+            unsigned lane=0;while(!(out->writemask&(8u>>lane)))++lane;
+            shader_text(text,"O[5].x=%s.%c;\n",name,"xyzw"[lane]);
+            continue;
+        }
         if(out->type==NV2ART_OUTPUT) {
             if(out->index>=13 || !shader_output_widths[out->index])pilot_d3d_backend_stop("invalid shader output register");
             shader_text(text,"O[%u]",out->index);
@@ -112,7 +117,8 @@ static char *shader_source(const uint32_t *code,unsigned count,const struct Pilo
         for(unsigned operation=0;operation<2;++operation)if(operations[operation]->opcode)
             for(unsigned output=0;output<2;++output) {
                 const Nv2aVshOutput *value=&operations[operation]->outputs[output];
-                if(value->type==NV2ART_OUTPUT && value->index<13)written[value->index]|=value->writemask;
+                if(value->type==NV2ART_OUTPUT && value->index<13)written[value->index]|=
+                    value->index==5 && value->writemask ? 8 : value->writemask;
                 if(value->type==NV2ART_TEMPORARY && value->index==12)written[0]|=value->writemask;
             }
         shader_text(&body,"{ /* slot %u */\n",i);
@@ -151,7 +157,10 @@ static char *shader_source(const uint32_t *code,unsigned count,const struct Pilo
     for(unsigned i=0;i<13;++i)if(shader_output_widths[i])
         shader_text(&source,"result.o%u=O[%u]%s;\n",i,i,shader_output_widths[i]==1?".x":"");
     shader_text(&source,"return result;}\n"
-        "cbuffer Raster:register(b0){float4 RasterScale;float4 RasterOffset;};\n"
+        "cbuffer Raster:register(b0){float4 RasterScale;float4 RasterOffset;float4 FogParams;};\n"
+        "float program_vertex_fog(float d){if(FogParams.x==0)return 1;"
+        "if(FogParams.x==3)return (FogParams.z-d)/(FogParams.z-FogParams.y);"
+        "float v=FogParams.w*d;return exp(FogParams.x==2?-v*v:-v);}\n"
         "struct RasterOutput{float4 pos:SV_POSITION;float4 diffuse:COLOR0;float4 specular:COLOR1;"
         "float4 tex0:TEXCOORD0;float4 tex1:TEXCOORD1;float4 tex2:TEXCOORD2;float4 tex3:TEXCOORD3;"
         "float fog:TEXCOORD4;float4 viewpos:TEXCOORD5;float4 back0:TEXCOORD6;float4 back1:TEXCOORD7;float point_size:PSIZE0;};\n"
@@ -166,8 +175,7 @@ static char *shader_source(const uint32_t *code,unsigned count,const struct Pilo
         shader_text(&source,"result.tex%u=raw.o%u;\n",i,i+9);
         if(!(written[i+9]&1))shader_text(&source,"result.tex%u.w=1;\n",i);
     }
-    shader_text(&source,"result.fog=%s;result.viewpos=float4(0,0,-raw.o5,1);"
-        "result.back0=saturate(raw.o7);result.back1=saturate(raw.o8);result.point_size=raw.o6;return result;}\n",
-        (written[5]&8)?"raw.o5":"1");
+    shader_text(&source,"result.fog=program_vertex_fog(raw.o5);result.viewpos=float4(0,0,-raw.o5,1);"
+        "result.back0=saturate(raw.o7);result.back1=saturate(raw.o8);result.point_size=raw.o6;return result;}\n");
     free(body.data);return source.data;
 }

@@ -145,6 +145,16 @@ EXPORT uint32_t xlle_nv2a_reference_vertices(void* instance, float* output, uint
     }
     return static_cast<uint32_t>(vertices.size());
 }
+// Separate scalar observation preserves the existing seven-vec4 diagnostic ABI.
+EXPORT uint32_t xlle_nv2a_reference_fog(void* instance, float* output, uint32_t capacity) {
+    const auto& ref = *static_cast<Reference*>(instance);
+    if (!ref.failure.empty()) return 0;
+    const auto& vertices = ref.gpu.last_transformed_batch();
+    if (!output || !capacity) return static_cast<uint32_t>(vertices.size());
+    if (capacity < vertices.size()) return 0;
+    for (size_t i = 0; i < vertices.size(); ++i) output[i] = vertices[i].fog;
+    return static_cast<uint32_t>(vertices.size());
+}
 // Diagnostic census prevents a guarded/omitted draw from being called qualified.
 // Index 0..2 observes attempts, executions and actual color writes; later indices
 // observe named generic skip reasons without changing device behavior.

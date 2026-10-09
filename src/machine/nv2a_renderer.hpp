@@ -23,6 +23,8 @@ struct Nv2aGenericCombinerVertex {
     std::array<float, 4> diffuse{};
     std::array<float, 4> specular{};
     std::array<std::array<float, 4>, 4> texture{};
+    float fog = 0.0f;  // raw scalar oFog; the owned raster job computes its factor
+    float fog_factor = 1.0f;
 };
 
 struct Nv2aGenericCombinerPacket {

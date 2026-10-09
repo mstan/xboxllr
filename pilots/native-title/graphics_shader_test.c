@@ -203,6 +203,7 @@ static int check_vertex_fetch_reference(const char *path)
     return 0;
 }
 #include "graphics_arithmetic_reference_test.inc"
+#include "graphics_fog_reference_test.inc"
 static int check_shader_constant_reference(const char *path)
 {
     FILE *file=fopen(path,"rb");CHECK(file);uint32_t header[4];
@@ -273,6 +274,9 @@ int main(int argc,char **argv)
 {
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
     uint32_t pp[17]={64,64,6,1,0x11,1,0,0,1,0x2a,0,0,1};CHECK(pilot_gfx_create(pp)==0);
+    if(argc==3 && !strcmp(argv[1],"--fog-reference")) {
+        CHECK(check_fog_reference(argv[2])==0);pilot_gfx_close();return 0;
+    }
     if(argc==3 && !strcmp(argv[1],"--shader-arithmetic-reference")) {
         CHECK(check_shader_arithmetic_reference(argv[2])==0);pilot_gfx_close();return 0;
     }

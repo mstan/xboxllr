@@ -472,16 +472,101 @@ conditioning. Public driver control evidence does not establish that algorithm
 or an acceptable pixel bound. Keep this specific question at the end while
 qualifying independent fog/texture/raster routes offline.
 
+## Programmable fog: original state, scalar output and real pixels
+
+The maintained programmable route now carries `oFog` through interpreted and
+compiled shader execution, owned transform-cache/draw snapshots and clipping.
+All 15 nonzero masks select the first masked source lane for the scalar X
+destination. The compiled opcode remains 32 bytes. Original raw fog coordinates
+and derived raster factors have separate fields, so a raster-state change cannot
+corrupt a cached shader result or diagnostic observation.
+
+NV097 fog enable/mode/generation/color/three coefficient methods are latched.
+Finite LINEAR, EXP, EXP2 and their ABS mode variants evaluate a factor at each
+original vertex; clipping and perspective interpolation carry that factor
+without clamping it. The actual combiner reads register 3 as ABGR fog RGB plus
+the interpolated factor clamped to [0,1]. Fog color's stored alpha is ignored.
+Disabled fog supplies factor 1. Unestablished mode/coefficient/nonfinite cases
+fault before pixel writes or successful reports. Fixed-function fog remains an
+explicitly unsupported vertex route. Optional LLE GPU executors retain their
+existing no-fog ABI and decline fog; the maintained software route executes it.
+
+The independently authored original-XDK fixture passes **196 cases / 392 real
+draws / 442,176 interior pixel comparisons**. It executes unmodified
+SetRenderState, SetPixelShader, Load/SelectVertexShader, constant/stream setters
+and DrawVertices/callees over preowned objects/resources/target state. It checks
+all 15 MAC and ILU masks, LINEAR/EXP/EXP2, enabled/disabled and zero-density
+states, unequal homogeneous W, unclamped-factor interpolation and repeated
+draws with persistent resources. Expected ISA inputs, scalar values and
+mathematical RGBA are authored independently of both shader implementations.
+Every non-edge interior pixel is compared within one byte per channel; exact
+diagonal coverage belongs to the separate raster gate. Original XDK logarithm
+constants are approximate: retained emitted coefficients agree with the public
+formulas within 2e-6, alongside the independent pixel bound. These are finite
+component assertions, not a silicon precision golden or full-title GPU startup.
+
+Maintained C++ checks cover **196 additional fog draws** over direct/callback
+memory and interpreted/compiled shaders, including clipped geometry, persistent
+payload mutation and all six coefficient modes. The existing 142 color draws
+remain, for 338 total asserted draws. Three extra actual fog guard submissions
+leave all color pixels and pending reports untouched. The 96 retained scene
+shader draws now compare **29,424 written lanes**, including 488 previously
+excluded fog coordinates; back colors and point size remain outside that
+observation. Enabled-noise full-draw audits retain their explicit pixel guard.
+
+HLE now translates scalar fog masks correctly and evaluates the factor in the
+native vertex shader, using the existing cached raster-uniform buffer extended
+from 32 to 48 bytes. Native combiner and fixed-pixel paths consume the
+interpolated factor with late clamping. No CPU pixel loop, shadow LLE execution,
+per-state shader compilation or new vertex-upload policy is introduced.
+The native fixture matches all **196 cases / 588 raw scalar lanes / 294 real
+GPU draws / 331,632 interior pixel comparisons**, including both pixel paths.
+The correction fixes lost Y/Z/W writes, per-pixel formula evaluation and
+extrapolation from factors outside [0,1]. The native state interface admits
+the exercised finite modes 1..3; enabled NONE/degenerate linear ranges remain
+guarded. More Xbox state modes remain a separate qualification scope.
+
+Combined validation passes **9/9 LLE in 0.73s** and **56/56 native in 36.12s**.
+The dispatch-table guard inventory now includes the six fog methods and earlier
+visibility/control additions, accepting 804 distinct methods without losing
+any original arm. Logs/results are `build/blinx/fog-{lle-build,lle-tests,
+native-build,native-tests,original,native,dispatch-guards}.log`,
+`fog-original.aot-private.json`, `fog-native.aot-private.bin` and
+`fog-{scene,firstworld,final}-vertex-original.aot-private.json`.
+
+Actual shipping regression:
+`build/blinx/fog-production-attract-20261009/run.aot-private.json`,
+**210.157s / 20 presents**, executable SHA-256
+`1fded5e542385d47dfa933761e61afe04a51f0f08051de2bd13e2c431b9b34d7`.
+All five real replay input transitions arrived. The inspected contact sheet
+shows demo at 9, pause at 10, title return at 13 and reentry/playback at 18-20;
+there is no pilot/audio stop or fault. The bounded harness intentionally
+terminates the process. This retains attract/input behavior; it does not
+establish a new FPS or A/V timing bound.
+
+Reproduction, after the dependency setup above:
+
+```powershell
+& 'C:\Users\Matthew\AppData\Local\Programs\Python\Python312\python.exe' tools\native_fog_reference.py --xbe F:\Projects\xboxlle\xboxlle\build\phobos-audit-20261006\blinx-na\default.xbe --binding build\blinx\d3d-binding.aot-private.json --library build\visibility-lle\libxlle_nv2a_reference.dll --dependencies C:\msys64\mingw64\bin --output build\blinx\fog-original.aot-private.json --native-cases build\blinx\fog-native.aot-private.bin
+& .\build\blinx\host-calendar-lle\Release\pilot_shader_test.exe --fog-reference build\blinx\fog-native.aot-private.bin
+```
+
+Procedure sources: pinned MIT `nxdk_pgraph_tests` `fog_tests.cpp` for scalar masks,
+ABGR and NV097 coefficients; Microsoft's [finite fog formulas](https://learn.microsoft.com/en-us/windows/win32/direct3d9/fog-formulas)
+for independent expected factors/blending; existing pinned xemu vertex/pixel
+code as a semantic cross-check. No new hardware output or GPL implementation
+copy establishes these assertions. Exact silicon exponential/interpolation
+precision remains deferred alongside the other hardware questions.
+
 ## Remaining offline work
 
-Continue independently exercised fog, texture mip/filter and raster outcomes.
+Continue independently exercised texture mip/filter and raster outcomes.
 The original DXT1-noise control transport is implemented and independently
 qualified above; its enabled pixel effect remains in the deferred hardware queue.
 The two earlier corpora contain 64 programs writing `oFog.x` with fog enabled;
-their original submitted state selects EXP/planar fog. The current maintained
-vertex snapshot omits fog and its generic combiner rejects register 3. Bound
-that route with independent fog/color/alpha expectations before accepting scene
-agreement; the preceding shader-output comparison explicitly excluded fog.
+their original submitted state selects EXP/planar fog. The preceding fog batch
+qualifies the finite programmable route and now observes those raw coordinates.
+Full scene texture/state/pixel agreement still needs its independent gate.
 The captured scene vertex programs now execute on maintained LLE; complete
 state/texture/pixel composition still needs qualification.
 These bounded declaration/fetch/arithmetic cases do

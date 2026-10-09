@@ -4,12 +4,14 @@
 // pinned sources and the absence of a matching hardware golden are documented
 // in pilots/native-title/GRAPHICS-LLE.md. No reference decoder computes output.
 #include "machine/nv2a.hpp"
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <functional>
 #include <memory>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -178,9 +180,100 @@ static void noise_control_boundary() {
     }
 }
 
+static void fog_program(Fixture& f, unsigned mask, bool varying=false) {
+    // Authored MOV ISA fields, without asking either shader implementation
+    // to encode or compute the expected scalar destination.
+    const uint32_t code[]={
+        0,0x0020001b,0x08000000,0x0000f800, // oPos = v0
+        0,0x0020001b|(96u<<13),0x0c000000,0x0000f818, // oD0 = c96
+        0,varying?0x0020021bu:(0x0020001b|(97u<<13)),
+        varying?0x08000000u:0x0c000000u,(mask<<12)|0x828u|1u}; // oFog
+    f.emit(0x1e94,2);f.emit(0x1e9c,0);f.emit(0x1ea0,0);
+    for(unsigned i=0;i<12;++i)f.emit(0xb00+i*4,code[i]);
+    f.emit(0x1ea4,96);
+    const float constants[]={.8f,.2f,.1f,.6f,.2f,.4f,.6f,.8f};
+    for(unsigned i=0;i<8;++i)f.emit(0xb80+i*4,bits(constants[i]));
+    f.emit(0x176c,0); // no diffuse fetch: the shader supplies it
+    if(varying){f.emit(0x1724,Fixture::colors);f.emit(0x1764,0x1042);}
+    f.emit(0x2a0,2);f.emit(0x2a8,0x99563412); // ABGR; color alpha is ignored
+    f.emit(0xac0,0x03200000);f.emit(0x260,0x13200000); // FOG RGB/alpha * ONE
+    f.emit(0x288,0xc);f.emit(0x28c,0x1c80);
+}
+
+static void expect_fog(Fixture& f,double factor,bool blend=false) {
+    ++cases;
+    if(!f.fault.empty())std::printf("fog fault: %s\n",f.fault.c_str());
+    CHECK(f.fault.empty());
+    const auto pixel=f.get(Fixture::frame+(16*64+16)*4);
+    const double color[]={18.0/255,52.0/255,86.0/255};
+    const double diffuse[]={.8,.2,.1};
+    factor=std::clamp(factor,0.0,1.0);
+    for(unsigned i=0;i<4;++i) {
+        double value=i==3?(blend?.6:factor):(blend?factor*diffuse[i]+(1-factor)*color[i]:color[i]);
+        unsigned shift=i==3?24:16-i*8;
+        CHECK(std::abs(int((pixel>>shift)&255)-int(std::lround(value*255)))<=1);
+    }
+    CHECK(f.gpu->generic_combiner_executed_batches()>0 && f.get(Fixture::report+12)==0);
+    CHECK(f.get(Fixture::frame)==0xff102030);
+}
+
+static void programmable_fog() {
+    for(bool direct:{false,true})for(bool compiled:{false,true}) {
+        Fixture f(direct);f.gpu->set_vsh_compile_enabled(compiled);
+        for(unsigned mask=1;mask<16;++mask) {
+            fog_program(f,mask);f.emit(0x2a4,1);f.emit(0x29c,0x2601);
+            f.emit(0x9c0,bits(2));f.emit(0x9c4,bits(-1));f.emit(0x9c8,0);
+            f.draw(0);unsigned lane=0;while(!(mask&(8u>>lane)))++lane;
+            const double value[]={.2,.4,.6,.8};expect_fog(f,1-value[lane]);
+            CHECK(std::abs(f.gpu->last_transformed_batch()[0].fog-value[lane])<1e-6);
+        }
+        for(unsigned mode:{0x2601u,0x800u,0x801u,0x802u,0x803u,0x804u}) {
+            fog_program(f,8);
+            const float multiplier=mode==0x2601||mode==0x804?-.5f:
+                (mode==0x800||mode==0x802?float(-.75/(2*std::log(256.0))):float(-.75/(2*std::sqrt(std::log(256.0)))));
+            f.emit(0x29c,mode);f.emit(0x9c0,bits(mode==0x2601||mode==0x804?2.5f:1.5f));
+            f.emit(0x9c4,bits(multiplier));f.emit(0x9c8,0);
+            for(float distance:{-2.0f,0.0f,.5f,1.5f,3.0f}) {
+                f.emit(0x1ea4,97);f.emit(0xb80,bits(distance));
+                f.emit(0x288,0x13040300);f.emit(0x28c,0x1480); // f*diffuse+(1-f)*fog
+                f.draw(0);
+                double expected=mode==0x2601||mode==0x804?(3-distance)/2:
+                    (mode==0x800||mode==0x802?std::exp(-.75*distance):std::exp(-std::pow(.75*distance,2)));
+                if(mode>=0x802&&mode<=0x804)expected=std::abs(expected);
+                expect_fog(f,expected,true);
+            }
+        }
+        // Clamp after perspective interpolation, not at each vertex. State
+        // changes reuse the same input/program cache; no rebinding occurs.
+        fog_program(f,1,true);f.emit(0x29c,0x2601);f.emit(0x2a4,1);
+        f.emit(0x9c0,bits(2));f.emit(0x9c4,bits(-1));f.emit(0x9c8,0);
+        const float distances[]={-1,3,0};const float w[]={1,2,4};
+        for(unsigned i=1;i<4;++i){f.put(Fixture::colors+i*16+12,bits(distances[i-1]));f.put(Fixture::positions+i*16+12,bits(w[i-1]));}
+        f.draw(0);
+        // Sample center (16.5,16.5) in triangle (8,8),(56,8),(8,56).
+        const double b=8.5/48,a=1-2*b;
+        expect_fog(f,(a*2+b/2*(-2)+b/4)/(a+b/2+b/4));
+        f.put(Fixture::positions+16,bits(-8));f.draw(0);
+        const double clip_b=(24.5-16*b)/64,clip_a=1-b-clip_b;
+        expect_fog(f,(clip_a*2-clip_b+b/4)/(clip_a+clip_b/2+b/4));
+        f.emit(0x2a4,0);f.draw(0);expect_fog(f,1);
+        for(unsigned i=1;i<4;++i)f.put(Fixture::colors+i*16+12,bits(1));
+        f.emit(0x2a4,1);f.draw(0);expect_fog(f,0); // persistent payload mutation
+    }
+    for(unsigned invalid=0;invalid<3;++invalid) {
+        Fixture f(false);fog_program(f,8);f.emit(0x2a4,1);f.emit(0x29c,invalid==0?0x999:0x800);
+        f.emit(0x9c0,bits(1.5f));f.emit(0x9c4,bits(-.1f));f.emit(0x9c8,invalid==1?bits(1):0);
+        if(invalid==2){f.emit(0x1ea4,97);f.emit(0xb80,bits(std::numeric_limits<float>::infinity()));}
+        f.draw(0);CHECK(!f.fault.empty());CHECK(!f.gpu->generic_combiner_writes());
+        CHECK(f.get(Fixture::report+12)==0xffffffff);
+        for(unsigned i=0;i<64*64;++i)CHECK(f.get(Fixture::frame+i*4)==0xff102030);
+    }
+}
+
 int main() {
     packed_formats(); surface_reuse(); immediate_control();
     noise_control_boundary();
+    programmable_fog();
     std::printf("nv2a_vertex_colors: %u draw cases, %u failures\n", cases, failures);
     return failures ? 1 : 0;
 }

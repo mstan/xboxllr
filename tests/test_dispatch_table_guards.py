@@ -70,12 +70,14 @@ NV2A_CPP = ROOT / "src/machine/nv2a.cpp"
 # `method >= A && method < B` is (A, B).  Order is the semantics: the chain was
 # first-match-wins and the table replay is too, so this list must stay in the
 # order the arms appeared.
+# Includes subsequently qualified visibility/control and programmable fog arms.
+# Table order is audited independently of appended, stable enum identifiers.
 ARMS = [
     (0x0100, 0x0104), (0x0120, 0x0124), (0x0124, 0x0128), (0x0128, 0x012C),
     (0x012C, 0x0130), (0x0130, 0x0134), (0x0184, 0x0188), (0x0188, 0x018C),
     (0x0194, 0x0198), (0x0198, 0x019C), (0x019C, 0x01A0), (0x01A0, 0x01A4),
     (0x0200, 0x0204), (0x0204, 0x0208), (0x0208, 0x020C), (0x020C, 0x0210),
-    (0x0210, 0x0214), (0x0214, 0x0218), (0x1D8C, 0x1D90), (0x1D90, 0x1D94),
+    (0x0210, 0x0214), (0x0214, 0x0218), (0x1D80, 0x1D84), (0x1D8C, 0x1D90), (0x1D90, 0x1D94),
     (0x1D98, 0x1D9C), (0x1D9C, 0x1DA0), (0x1D94, 0x1D98), (0x0260, 0x0280),
     (0x0288, 0x028C), (0x028C, 0x0290), (0x0290, 0x0294), (0x02C0, 0x02C4),
     (0x02E0, 0x02E4), (0x0300, 0x0304), (0x0304, 0x0308), (0x0308, 0x030C),
@@ -85,13 +87,15 @@ ARMS = [
     (0x0344, 0x0348), (0x0348, 0x034C), (0x034C, 0x0350), (0x0350, 0x0354),
     (0x0354, 0x0358), (0x0358, 0x035C), (0x035C, 0x0360), (0x0360, 0x0364),
     (0x0364, 0x0368), (0x0368, 0x036C), (0x036C, 0x0370), (0x0370, 0x0374),
-    (0x0374, 0x0378), (0x0378, 0x037C), (0x037C, 0x0380), (0x0384, 0x0388),
+    (0x0374, 0x0378), (0x0378, 0x037C), (0x037C, 0x0380), (0x09FC, 0x0A00), (0x0384, 0x0388),
     (0x0388, 0x038C), (0x038C, 0x0390), (0x0390, 0x0394), (0x0394, 0x0398),
     (0x0398, 0x039C), (0x039C, 0x03A0), (0x03A0, 0x03A4), (0x17BC, 0x17C0),
     (0x17C0, 0x17C4), (0x1D78, 0x1D7C), (0x1E20, 0x1E24), (0x1E24, 0x1E28),
     (0x1E40, 0x1E60), (0x1E60, 0x1E64), (0x1E6C, 0x1E70), (0x1E70, 0x1E74),
     (0x1E74, 0x1E78), (0x1E78, 0x1E7C), (0x1B00, 0x1C00), (0x0294, 0x0298),
-    (0x0298, 0x029C), (0x02A4, 0x02A8), (0x0314, 0x0318), (0x0328, 0x032C),
+    (0x0298, 0x029C), (0x029C, 0x02A0), (0x02A0, 0x02A4),
+    (0x02A4, 0x02A8), (0x02A8, 0x02AC), (0x09C0, 0x09CC),
+    (0x0314, 0x0318), (0x0328, 0x032C),
     (0x03A4, 0x03A8), (0x03A8, 0x03B4), (0x03B4, 0x03B8), (0x03B8, 0x03BC),
     (0x03BC, 0x03C0), (0x03C0, 0x0400), (0x0420, 0x0430), (0x0440, 0x0480),
     (0x0480, 0x0580), (0x0580, 0x0680), (0x0680, 0x06C0), (0x06C0, 0x07C0),
@@ -103,6 +107,8 @@ ARMS = [
     (0x1720, 0x1760), (0x1760, 0x17A0), (0x17FC, 0x1800), (0x1800, 0x1804),
     (0x1808, 0x180C), (0x1810, 0x1814), (0x1818, 0x181C), (0x01A4, 0x01A8),
     (0x1D6C, 0x1D70), (0x1D70, 0x1D74),
+    (0x01A8, 0x01AC), (0x17C8, 0x17CC), (0x17CC, 0x17D0),
+    (0x17D0, 0x17D4), (0x0110, 0x0114),
 ]
 
 # ── Overlapping predicates (the risk this change carries) ───────────────────
@@ -215,19 +221,19 @@ check("every arm keeps its index, its method range and its handler",
 
 enum_body = re.search(r"enum Nv097Handler : uint8_t \{(.*?)\n\};", src, re.S)
 check("Nv097Handler is a uint8_t enum", enum_body is not None)
-enum_names = re.findall(r"^    (kNv097[A-Za-z0-9_]+),", enum_body.group(1), re.M) \
+enum_names = re.findall(r"\b(kNv097[A-Za-z0-9_]+),", enum_body.group(1), re.M) \
     if enum_body else []
 check("the enum starts at kNv097None = 0 (the unhandled-method id)",
       bool(enum_body) and "kNv097None = 0" in enum_body.group(1))
-check("the enum declares the arms in chain order",
-      enum_names == [handler_name(b, e) for b, e in ARMS],
-      "enum order must mirror the chain so the table replay order is visible")
+check("the enum declares each maintained handler once",
+      len(enum_names) == len(ARMS) and set(enum_names) == {handler_name(b, e) for b, e in ARMS},
+      "appended handlers retain prior IDs; table arm order is checked separately")
 check("the handler ids fit the uint8_t table",
       len(ARMS) + 1 <= 256,
       "%d handlers + kNv097None exceeds a byte" % len(ARMS))
 
 missing_cases = [handler_name(b, e) for b, e in ARMS
-                 if dispatch.count("    case %s: {\n" % handler_name(b, e)) != 1]
+                 if dispatch.count("    case %s:" % handler_name(b, e)) != 1]
 check("every handler has exactly one case label in dispatch_method",
       not missing_cases,
       "missing or duplicated: %s" % ", ".join(missing_cases[:6]))
@@ -273,9 +279,9 @@ check("the documented overlap list matches the arms",
       sorted(computed_overlaps) == sorted(OVERLAPPING_ARMS),
       "undocumented overlapping arm pairs %s -- add them to OVERLAPPING_ARMS "
       "with the precedence argument" % computed_overlaps)
-check("the arms accept 791 distinct methods",
-      len(owner) == 791,
-      "%d methods accepted; the pre-change chain accepted 791" % len(owner))
+check("the maintained arms accept 804 distinct methods",
+      len(owner) == 804,
+      "%d methods accepted; original 791 plus seven visibility/control and six fog methods" % len(owner))
 check("every accepted method is a multiple of four below 0x2000",
       all(m % 4 == 0 and m < 0x2000 for m in owner),
       "the table is indexed by method >> 2 over a 0x2000-byte method space")

@@ -4,6 +4,7 @@
 #include <d3dcompiler.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 #include "graphics_shader_source.inc"
 struct NativeShader {
     ID3D11VertexShader *object;
@@ -21,7 +22,7 @@ static ID3D11Buffer *native_constants_buffer;
 static uint32_t native_constants[192][4];
 static unsigned native_constants_dirty,native_constants_uploads,native_shader_bound;
 static ID3D11Buffer *native_raster_buffer;
-static float native_raster_values[8];
+static float native_raster_values[12];
 static struct NativeShader *native_shader(uint32_t handle)
 {
     if(!handle || handle>256 || !native_shaders[handle-1].object)pilot_d3d_backend_stop("unowned native vertex shader");
@@ -42,7 +43,7 @@ int32_t pilot_gfx_shader_bind(uint32_t handle)
     ID3D11DeviceContext_VSSetShader(context,shader->object,NULL,0);
     ID3D11DeviceContext_IASetInputLayout(context,shader->layout);
     ID3D11DeviceContext_VSSetConstantBuffers(context,1,1,&native_constants_buffer);
-    native_shader_bound=handle;return S_OK;
+    native_shader_bound=handle;pilot_d3d_program_fog_mode(1);return S_OK;
 }
 void pilot_gfx_shader_constants(unsigned first,unsigned count,const void *data)
 {
@@ -147,7 +148,16 @@ void pilot_gfx_shaders_close(void)
 }
 int32_t pilot_gfx_shader_raster(const float scale[4],const float offset[4])
 {
-    float values[8];memcpy(values,scale,16);memcpy(values+4,offset,16);
+    float values[12]={0};memcpy(values,scale,16);memcpy(values+4,offset,16);
+    const DWORD *states=d3d8_GetRenderStates();
+    if(states[D3DRS_FOGENABLE]) {
+        values[8]=(float)states[D3DRS_FOGTABLEMODE];
+        memcpy(values+9,states+D3DRS_FOGSTART,4);
+        memcpy(values+10,states+D3DRS_FOGEND,4);
+        memcpy(values+11,states+D3DRS_FOGDENSITY,4);
+        if(values[8]<1 || values[8]>3 || !isfinite(values[9]) || !isfinite(values[10]) ||
+           !isfinite(values[11]) || (values[8]==3 && values[9]==values[10]))return E_INVALIDARG;
+    }
     ID3D11Device *device=d3d8_GetD3D11Device();ID3D11DeviceContext *context=d3d8_GetD3D11Context();
     if(!native_raster_buffer) {
         D3D11_BUFFER_DESC desc={0};desc.ByteWidth=sizeof(values);desc.Usage=D3D11_USAGE_DEFAULT;desc.BindFlags=D3D11_BIND_CONSTANT_BUFFER;

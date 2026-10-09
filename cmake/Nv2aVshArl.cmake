@@ -1,5 +1,5 @@
 # The pinned Unlicense/MIT decoder represents scalar ARL with writemask=0.
-# Correct the emulator's scalar destination, retaining the original donor file.
+# Correct scalar ARL and oFog destinations, retaining the original donor file.
 # Both the LLE floor and the private native test oracle use this exact patch.
 function(xlle_correct_vsh_arl target donor_source)
   file(READ "${donor_source}" original)
@@ -12,6 +12,14 @@ function(xlle_correct_vsh_arl target donor_source)
   string(REPLACE "${anchor}"
     "      case NV2ART_ADDRESS:\n        /* xlle: a0 is scalar; ARL has no vector destination mask. */\n        state->address_reg[0] = result[0];\n        continue;"
     corrected "${original}")
+  set(fog_anchor "        outreg = &state->output_regs[out->index * 4];\n        break;")
+  string(FIND "${corrected}" "${fog_anchor}" fog_found)
+  if(fog_found EQUAL -1)
+    message(FATAL_ERROR "NV2A scalar fog patch anchor changed; requalify the donor")
+  endif()
+  string(REPLACE "${fog_anchor}"
+    "        outreg = &state->output_regs[out->index * 4];\n        /* xlle: oFog is scalar; the first masked result lane writes X. */\n        if (out->index == 5) {\n          for (unsigned lane = 0; lane < 4; ++lane) {\n            if (out->writemask & (8u >> lane)) {\n              outreg[0] = result[lane];\n              break;\n            }\n          }\n          continue;\n        }\n        break;"
+    corrected "${corrected}")
   set(output "${CMAKE_CURRENT_BINARY_DIR}/${target}-arl/nv2a_vsh_emulator.c")
   if(EXISTS "${output}")
     file(READ "${output}" previous)
@@ -22,7 +30,7 @@ function(xlle_correct_vsh_arl target donor_source)
   file(SHA256 "${donor_source}" original_hash)
   string(SHA256 corrected_hash "${corrected}")
   file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${target}-arl/provenance.txt"
-    CONTENT "Source: ${donor_source}\nOriginal SHA256: ${original_hash}\nCorrected SHA256: ${corrected_hash}\nPatch: cmake/Nv2aVshArl.cmake; scalar address store (beads-xbox.1.91)\nLicense: original nv2a_vsh_cpu Unlicense and MIT notices retained\n")
+    CONTENT "Source: ${donor_source}\nOriginal SHA256: ${original_hash}\nCorrected SHA256: ${corrected_hash}\nPatch: cmake/Nv2aVshArl.cmake; scalar address and fog stores (beads-xbox.1.91, beads-xbox.1.116)\nLicense: original nv2a_vsh_cpu Unlicense and MIT notices retained\n")
   get_target_property(sources ${target} SOURCES)
   get_target_property(source_dir ${target} SOURCE_DIR)
   set(replaced)

@@ -139,6 +139,11 @@ bool compile_vsh_output(const Nv2aVshOutput& output, VshCompiledOp& op,
             return false;
     }
     op.out_mask[slot] = static_cast<uint8_t>(mask);
+    if (output.type == NV2ART_OUTPUT && output.index == 5) {
+        unsigned lane = 0;
+        while (!(mask & (8u >> lane))) ++lane;
+        op.out_mask[slot] = static_cast<uint8_t>(0x80u | (lane << 4) | 8u);
+    }
     return true;
 }
 
@@ -2916,6 +2921,8 @@ bool Nv2a::compile_vsh_program(const void* steps, uint32_t slots,
     for (unsigned index : kConsumedOutputs)
         if (0xFu & ~static_cast<unsigned>(output_written[index]))
             plan.output_mask |= static_cast<uint16_t>(1u << index);
+    // oFog is scalar: only its X lane is consumed by rasterization.
+    if (!(output_written[5] & 1u)) plan.output_mask |= 1u << 5;
     vsh_cache_zero_plan_ = plan;
     if (row) {
         row->zero_outputs =
@@ -3878,7 +3885,7 @@ bool Nv2a::submit_vertex_batch() {
     vsh_gpu_deferred_diagnostics_safe =
         vsh_gpu_deferred_diagnostics_safe && !vertex_reuse_shadow_;
 #endif
-    if (vsh_gpu_resident_mode_ && renderer_ && program_parsed && vsh_cache_ops_valid_ &&
+    if (!fixed_fog_ && vsh_gpu_resident_mode_ && renderer_ && program_parsed && vsh_cache_ops_valid_ &&
         !program_writes_context && !vsh_unsafe_probe_ && vsh_capture_plan_supported_ &&
         !vsh_cache_ops_.empty() && vsh_cache_ops_.size() <= vsh_gpu_batch::kMaxOps &&
         vertex_count >= 3 && vertex_count <= vsh_gpu_batch::kMaxReferences &&
@@ -4312,6 +4319,7 @@ bool Nv2a::submit_vertex_batch() {
                             4 * sizeof(float));
                 std::memcpy(vertex.specular.data(), &output_regs[4 * 4],
                             4 * sizeof(float));
+                vertex.fog = output_regs[5 * 4];
                 for (uint32_t texture = 0; texture < 4; ++texture) {
                     std::memcpy(vertex.texture[texture].data(),
                                 &output_regs[(9 + texture) * 4],
@@ -10612,7 +10620,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
         return in;
     };
     // Register ids match real NV2A/xemu PS_REGISTER exactly: 0 ZERO/DISCARD,
-    // 1 CONSTANT_COLOR0, 2 CONSTANT_COLOR1, 3 FOG (unsupported), 4 PRIMARY_COLOR,
+    // 1 CONSTANT_COLOR0, 2 CONSTANT_COLOR1, 3 FOG, 4 PRIMARY_COLOR,
     // 5 SECONDARY_COLOR, 6/7 reserved (unsupported), 8-11 TEXTURE0-3 (sampled below,
     // subject to the per-stage texture-shader-program/format/address checks),
     // 12 R0/spare0, 13 R1/spare1, 14 V1R0_SUM (specular+R0, final-combiner flags),
@@ -10620,11 +10628,12 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
     auto register_supported = [](uint32_t reg, bool& is_texture) {
         is_texture = reg >= 8 && reg <= 11;
         if (is_texture) return true;
-        return reg == 0 || reg == 1 || reg == 2 || reg == 4 || reg == 5 ||
+        return reg == 0 || reg == 1 || reg == 2 || reg == 3 || reg == 4 || reg == 5 ||
                reg == 12 || reg == 13 || reg == 14 || reg == 15;
     };
     // Which of TEXTURE0-3 a stage's color/alpha inputs actually read.
     bool texture_referenced[4] = {false, false, false, false};
+    bool needs_fog = false;
 
     const uint32_t stage_count_raw = raster_state[kRasterCombinerControl] & 0xFFu;
     if (stage_count_raw == 0) {
@@ -10674,6 +10683,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                 return true;
             }
             if (is_texture) texture_referenced[in.reg - 8] = true;
+            needs_fog |= in.reg == 3;
         }
         for (const DecodedInput& in : s.alpha) {
             bool is_texture = false;
@@ -10682,6 +10692,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                 return true;
             }
             if (is_texture) texture_referenced[in.reg - 8] = true;
+            needs_fog |= in.reg == 3;
         }
         // OCW layout (matching xemu's parse_combiner_output()): bits[3:0]=cd dest,
         // [7:4]=ab dest, [11:8]=muxsum dest, [12]=cd dot-product, [13]=ab dot-product,
@@ -10763,6 +10774,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                 return true;
             }
             if (is_texture) texture_referenced[in->reg - 8] = true;
+            needs_fog |= in->reg == 3;
         }
     }
     // NV097_SET_SPECULAR_FOG_FACTOR (FinalFactor0/1) is NOT a fog enable flag -- per
@@ -10775,11 +10787,50 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
     // below (regs[1]/regs[2] are reloaded from FinalFactor0/1 right before evaluating
     // the final combiner, once every stage that needed the per-stage constants is
     // done with them) rather than treated as an unconditional "fog, unsupported" skip.
-    // True fog (register 3, FOG_COLOR + the per-vertex fog coordinate) is a separate,
-    // still-unimplemented register -- already gated by register_supported() above,
-    // which never allows reg==3 through, so a final combiner that genuinely
-    // references FOG still lands in the kFinalCombiner census, just for that reason
-    // specifically instead of a blanket nonzero-factor guess.
+    // FOG is a distinct register: ABGR fog RGB plus the interpolated factor.
+    // Evaluate the factor at original vertices before clipping. In particular,
+    // neither linear factors outside [0,1] nor exponential distances may be
+    // clamped/interpolated first; the combiner clamps the interpolated factor.
+    if (needs_fog) {
+        const bool enabled = raster_state[kRasterFogEnable] != 0;
+        const uint32_t mode = raster_state[kRasterFogMode];
+        float p[3];
+        for (unsigned i = 0; i < 3; ++i) {
+            const uint32_t word = raster_state[kRasterFogParams0 + i];
+            std::memcpy(&p[i], &word, sizeof(float));
+        }
+        if (enabled && (!std::isfinite(p[0]) || !std::isfinite(p[1]) ||
+                        p[2] != 0.0f ||
+                        (mode != 0x2601 && (mode < 0x800 || mode > 0x804)))) {
+            fault_("NV2A fog mode or coefficients remain unqualified");
+            return false;
+        }
+        for (auto& vertex : job.vertices) {
+            double factor = 1.0;
+            if (enabled) {
+                const double distance = vertex.fog;
+                if (!std::isfinite(distance)) {
+                    fault_("NV2A nonfinite fog coordinate remains unqualified");
+                    return false;
+                }
+                if (mode == 0x2601 || mode == 0x804) {
+                    factor = p[0] + distance * p[1] - 1.0;
+                } else if (mode == 0x800 || mode == 0x802) {
+                    factor = p[0] + std::exp2(distance * p[1] * 16.0) - 1.5;
+                } else {
+                    factor = p[0] + std::exp2(-distance * distance *
+                                              double(p[1]) * p[1] * 32.0) - 1.5;
+                }
+                if (mode >= 0x802 && mode <= 0x804) factor = std::abs(factor);
+            }
+            if (!std::isfinite(factor) ||
+                std::abs(factor) > std::numeric_limits<float>::max()) {
+                fault_("NV2A nonfinite fog factor remains unqualified");
+                return false;
+            }
+            vertex.fog_factor = static_cast<float>(factor);
+        }
+    }
     const bool no_texture_inputs =
         !texture_referenced[0] && !texture_referenced[1] &&
         !texture_referenced[2] && !texture_referenced[3];
@@ -11802,7 +11853,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
     bool resident_exact_this_batch = false;
     GenericResidentRejectReason resident_reject_this_batch =
         GenericResidentRejectReason::kCount;
-    if (!logic_enabled && !flat_shading && !zpass_enabled_ && renderer_ && effective_clip_valid) {
+    if (!needs_fog && !logic_enabled && !flat_shading && !zpass_enabled_ && renderer_ && effective_clip_valid) {
 #if XLLE_VSH_DRAW_OVERLAP_CENSUS
         const bool fixture_overlap = vsh_draw_overlap_enabled_ && job.vsh_overlap.valid;
         const uint64_t fixture_overlap_t0 = fixture_overlap && perf_excl::g_enabled
@@ -13723,7 +13774,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
 #if XLLE_VSH_DRAW_OVERLAP_CENSUS
     bool gpu_shader_collect_nonfinite = false;
 #endif
-    if (!logic_enabled && !flat_shading && !zpass_enabled_ && gpu_generic_shader_ && renderer_ && effective_clip_valid) {
+    if (!needs_fog && !logic_enabled && !flat_shading && !zpass_enabled_ && gpu_generic_shader_ && renderer_ && effective_clip_valid) {
         ++generic_shader_attempts_;
         GenericShaderDeclineReason decline = GenericShaderDeclineReason::kNone;
         auto& st = gpu_shader_packet.state;
@@ -14432,6 +14483,9 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
         auto lerp_clip_vertex = [](const ClipVertex& v0, const ClipVertex& v1,
                                    float t) {
             ClipVertex out{};
+            out.vertex.fog = v0.vertex.fog + (v1.vertex.fog - v0.vertex.fog) * t;
+            out.vertex.fog_factor = v0.vertex.fog_factor +
+                (v1.vertex.fog_factor - v0.vertex.fog_factor) * t;
             out.clip_x = v0.clip_x + (v1.clip_x - v0.clip_x) * t;
             out.clip_y = v0.clip_y + (v1.clip_y - v0.clip_y) * t;
             out.clip_w = v0.clip_w + (v1.clip_w - v0.clip_w) * t;
@@ -14889,6 +14943,15 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                 std::array<std::array<float, 4>, 16> regs{};
                 if (needs_diffuse) regs[4] = diffuse;
                 if (needs_specular) regs[5] = specular;
+                if (needs_fog) {
+                    const uint32_t color = raster_state[kRasterFogColor];
+                    const double factor = (q0 * a->fog_factor + q1 * b->fog_factor +
+                                           q2 * c->fog_factor) / qsum;
+                    regs[3] = {float(color & 255u) / 255.0f,
+                               float((color >> 8) & 255u) / 255.0f,
+                               float((color >> 16) & 255u) / 255.0f,
+                               float(std::clamp(factor, 0.0, 1.0))};
+                }
 
                 // Texture stages: interpolate texcoords the exact same way every
                 // witnessed textured profile does (perspective-correct via the
@@ -16170,6 +16233,7 @@ enum Nv097Handler : uint8_t {
     kNv097M1D70,                // method == 0x1D70
     kNv097M01A8, kNv097M17C8, kNv097M17CC, kNv097M17D0, kNv097M0110,
     kNv097M1D80,                // appended to preserve the prior handler IDs
+    kNv097M029C, kNv097M02A0, kNv097M02A8, kNv097R09C0_09CC, // fog
 };
 
 constexpr uint32_t kNv097MethodLimit = 0x2000;
@@ -16266,7 +16330,11 @@ constexpr Nv097Arm kNv097Arms[] = {
     {0x1B00, 0x1C00, kNv097R1B00_1C00},
     {0x0294, 0x0298, kNv097M0294},
     {0x0298, 0x029C, kNv097M0298},
+    {0x029C, 0x02A0, kNv097M029C},
+    {0x02A0, 0x02A4, kNv097M02A0},
     {0x02A4, 0x02A8, kNv097M02A4},
+    {0x02A8, 0x02AC, kNv097M02A8},
+    {0x09C0, 0x09CC, kNv097R09C0_09CC},
     {0x0314, 0x0318, kNv097M0314},
     {0x0328, 0x032C, kNv097M0328},
     {0x03A4, 0x03A8, kNv097M03A4},
@@ -17021,7 +17089,28 @@ void Nv2a::dispatch_method(PushMethod push) {
         break;
     }
     case kNv097M02A4: {
+        if (parameter > 1) {
+            fault_("NV2A fog enable is not boolean");
+            return;
+        }
         fixed_fog_ = parameter != 0;
+        raster_state_[kRasterFogEnable] = parameter;
+        break;
+    }
+    case kNv097M029C: {
+        raster_state_[kRasterFogMode] = parameter;
+        break;
+    }
+    case kNv097M02A0: {
+        raster_state_[kRasterFogGeneration] = parameter;
+        break;
+    }
+    case kNv097M02A8: {
+        raster_state_[kRasterFogColor] = parameter;
+        break;
+    }
+    case kNv097R09C0_09CC: {
+        raster_state_[kRasterFogParams0 + (method - 0x09C0) / 4] = parameter;
         break;
     }
     case kNv097M0314: {

@@ -1,5 +1,6 @@
 #pragma once
 #include "d3d8_internal.h"
+void pilot_d3d_program_fog_mode(unsigned program);
 #ifdef PILOT_D3D_PHOBOS
 #include <d3d11.h>
 /* Borrowed references owned by the selected renderer. These accessors are

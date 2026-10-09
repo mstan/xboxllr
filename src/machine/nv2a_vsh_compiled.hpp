@@ -97,7 +97,7 @@ struct VshCompiledOp {
     // fetched BEFORE this op executes.
     uint8_t paired = 0;
     uint8_t out_base[2] = {kVshBaseNone, kVshBaseNone};
-    uint8_t out_mask[2] = {0, 0};  // NV2AWM_X=8, Y=4, Z=2, W=1
+    uint8_t out_mask[2] = {0, 0};  // low bits: XYZW; bit7: scalar fog, bits5:4: source lane
     uint16_t out_offset[2] = {0, 0};
 };
 
@@ -143,6 +143,10 @@ inline void vsh_store_operand(const VshCompiledOp& op, unsigned o,
     if (base == kVshBaseNone) return;
     float* dst = bases[base] + op.out_offset[o];
     const unsigned mask = op.out_mask[o];
+    if (mask & 0x80u) {
+        dst[0] = result[(mask >> 4) & 3u];
+        return;
+    }
     if (mask & 8u) dst[0] = result[0];
     if (mask & 4u) dst[1] = result[1];
     if (mask & 2u) dst[2] = result[2];
@@ -158,8 +162,9 @@ inline void vsh_store_operand(const VshCompiledOp& op, unsigned o,
 // order, and a register lane needs zeroing only if some operand reads it before
 // any operation writes it. The seven output registers the DEVICE reads back
 // afterwards -- position, diffuse, specular and the four texture coordinates --
-// are added unconditionally unless the program writes all four of their lanes,
-// because the device's read is a read like any other.
+// are added unconditionally unless the program writes all four of their lanes.
+// The scalar fog output is also consumed, requiring its X lane to be defined.
+// The device's read is a read like any other.
 //
 // This is a pure removal of stores whose value is never read. It cannot change
 // output, and `--nv2a-vsh-verify` checks that against the interpreter, which
@@ -207,6 +212,7 @@ inline unsigned vsh_swizzle_lane_mask(uint8_t swizzle) {
 // The lanes a destination writes, as a 4-bit mask, from its NV2A writemask
 // (X = 8 is lane 0 ... W = 1 is lane 3).
 inline unsigned vsh_writemask_lane_mask(uint8_t mask) {
+    if (mask & 0x80u) return 1u;
     return ((mask >> 3) & 1u) | (((mask >> 2) & 1u) << 1) |
            (((mask >> 1) & 1u) << 2) | ((mask & 1u) << 3);
 }

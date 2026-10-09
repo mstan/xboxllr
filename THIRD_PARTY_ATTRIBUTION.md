@@ -517,6 +517,19 @@ LLE executor implements the same scalar destination. Signed/fractional address
 fixtures and actual Blinx captured draws qualify this bounded correction
 (`beads-xbox.1.91`); it is not an assertion of exhaustive hardware accuracy.
 
+The same authored patch now corrects scalar `oFog` stores: the first masked
+result component writes the scalar X destination. The compiled LLE form and
+native translator retain that behavior without enlarging the compiled opcode.
+Public procedure evidence is pinned `nxdk_pgraph_tests` `fog_tests.cpp` at
+`706a41e61188d3b08e5b1bb2a32b74ad062a883d` (MIT); finite fog expectations also
+use Microsoft's [fog formulas](https://learn.microsoft.com/en-us/windows/win32/direct3d9/fog-formulas).
+The existing pinned xemu GLSL vertex/pixel implementations are semantic
+cross-checks for coefficient interpretation and FOG register placement; no
+additional GPL implementation body was copied into LLE. Independently authored
+ISA/mathematical cases and real original-XDK/native draws qualify the bounded
+finite programmable route (`beads-xbox.1.116`); exact silicon precision remains
+separate. Generated emulator copies retain original notices and source hashes.
+
 ## SDL
 
 [SDL](https://github.com/libsdl-org/SDL), tag `release-3.2.0`, is fetched by

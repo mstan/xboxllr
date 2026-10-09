@@ -768,6 +768,7 @@ int32_t pilot_gfx_draw_up(uint32_t primitive,uint32_t count,const void *data,uin
     if (!pilot_device) return E_FAIL;
     pilot_feedback_validate();
     pilot_d3d_raster_texture_mode(0,NULL);
+    pilot_d3d_program_fog_mode(0);
     HRESULT status=pilot_device->lpVtbl->SetVertexShader(pilot_device,fvf);
     if (SUCCEEDED(status)) status=pilot_flat_prepare(primitive==4?5:primitive==5?6:0);
     if (SUCCEEDED(status)) status=pilot_device->lpVtbl->DrawPrimitiveUP(pilot_device,(D3DPRIMITIVETYPE)primitive,count,data,stride);
@@ -800,6 +801,7 @@ int32_t pilot_gfx_fvf_prepare(uint32_t fvf,float screen_x,float screen_y)
     if(!viewport[2] || !viewport[3] || !(high>low))return E_INVALIDARG;
     float scale[]={2.0f/viewport[2],-2.0f/viewport[3],1/(high-low),1};
     float offset[]={-1+(screen_x-viewport[0])*scale[0],1+(screen_y-viewport[1])*scale[1],-low/(high-low),0};
+    pilot_d3d_program_fog_mode(0);
     pilot_d3d_fvf_prepare(fvf,scale,offset);return S_OK;
 }
 int32_t pilot_gfx_draw_vertices(unsigned primitive,unsigned first,unsigned count)

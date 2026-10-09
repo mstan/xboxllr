@@ -55,4 +55,15 @@ def prepare_fvf(code: str, *, phobos: bool = False) -> str:
     code+='\nvoid pilot_d3d_fvf_prepare(UINT fvf,const float scale[4],const float offset[4]) {\n'
     code+='    pilot_native_fvf=1;memcpy(pilot_fvf_scale,scale,16);memcpy(pilot_fvf_offset,offset,16);\n'
     code+='    ff_vs_prepare_draw(fvf);pilot_native_fvf=0;\n}\n'
+    # Our programmable VS now supplies a fog factor before interpolation.
+    # Preserve the donor's own FVF/table-fog path for its other callers.
+    code='static unsigned pilot_native_program_fog;\n'+code
+    replace('            if (rs[D3DRS_FOGTABLEMODE] != D3DFOG_NONE) {\n'
+            '                /* Table fog: compute the factor per-pixel from view-space depth */',
+            '            if (pilot_native_program_fog) { pc->ps_flags |= 2; }\n'
+            '            else if (rs[D3DRS_FOGTABLEMODE] != D3DFOG_NONE) {\n'
+            '                /* Table fog: compute the factor per-pixel from view-space depth */')
+    replace('    "        current.rgb = lerp(FogColor.rgb, current.rgb, input.fog);\\n"',
+            '    "        current.rgb = lerp(FogColor.rgb, current.rgb, saturate(input.fog));\\n"')
+    code+='\nvoid pilot_d3d_program_fog_mode(unsigned program) { pilot_native_program_fog=program; }\n'
     return code

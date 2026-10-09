@@ -95,6 +95,9 @@ def run(args):
     observe=ref.lib.xlle_nv2a_reference_vertices
     observe.restype=ctypes.c_uint32
     observe.argtypes=[ctypes.c_void_p,ctypes.POINTER(ctypes.c_float),ctypes.c_uint32]
+    observe_fog=ref.lib.xlle_nv2a_reference_fog
+    observe_fog.restype=ctypes.c_uint32
+    observe_fog.argtypes=[ctypes.c_void_p,ctypes.POINTER(ctypes.c_float),ctypes.c_uint32]
     captures=[(path,read_capture(path)) for path in sorted(args.captures.glob('draw-*.bin'),key=lambda p:int(p.stem.split('-')[1]))]
     addresses=[];cursor=STREAMS
     for stream in range(16):
@@ -126,6 +129,8 @@ def run(args):
             count=observe(ref.gpu,None,0);assert count==h[4],(path,count,h[4])
             actual=(ctypes.c_float*(count*28))()
             assert observe(ref.gpu,actual,count)==count;ref.check()
+            fog_values=(ctypes.c_float*count)()
+            assert observe_fog(ref.gpu,fog_values,count)==count;ref.check()
             masks=written_masks(capture['code']);compared=0;maximum=0
             for vertex in range(count):
                 for group,reg in enumerate((0,3,4,9,10,11,12)):
@@ -143,6 +148,11 @@ def run(args):
                         error=abs(got-want)
                         assert error<=tolerance,(path,vertex,reg,lane,got,want,error,tolerance)
                         maximum=max(maximum,error/max(1,abs(want)));compared+=1
+                if masks[5]:
+                    got=fog_values[vertex];want=capture['outputs'][vertex*52+20]
+                    assert math.isfinite(got) and math.isfinite(want),(path,vertex,'fog',got,want)
+                    error=abs(got-want);assert error<=2e-4*max(1,abs(want)),(path,vertex,'fog',got,want)
+                    maximum=max(maximum,error/max(1,abs(want)));compared+=1
             for slot,(fmt,stream,offset) in enumerate(capture['elements']):
                 if fmt==2:continue
                 assert methods[0x1760+slot*4]==(capture['metadata'][stream][0]<<8)|fmt

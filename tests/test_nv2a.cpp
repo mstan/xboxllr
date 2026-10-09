@@ -7395,18 +7395,8 @@ int main() {
             emit_gc(0x1b0c,0);emit_gc(0x1e70,0);kick_gc();
         }
 
-        // --- (c) Unsupported feature: same fingerprint as (a), but the final
-        // combiner's D input references the FOG register (3) instead of R0. Per
-        // xemu's psh.c, FOG is a real register (pFog = vec4(fogColor.rgb,
-        // clamp(vtxFog,0,1))) that this evaluator does not implement -- no witnessed
-        // profile above implements fog either, and this evaluator has no FOG_COLOR
-        // latch or per-vertex fog coordinate. register_supported() already rejects
-        // register 3 unconditionally, so a final combiner that references it must
-        // land in the kFinalCombiner skip-reason census, not silently drop: no
-        // fragment/color writes, executed stays false, and the skip counter advances
-        // by exactly one. (NV097_SET_SPECULAR_FOG_FACTOR / FinalFactor0/1 is NOT fog
-        // by itself -- it is the final combiner's own CONSTANT_COLOR0/1 source, now
-        // implemented and exercised by test (k) below.) ---
+        // --- (c) Reserved register 6 remains unsupported. Fog register 3
+        // now has independent shader/state/pixel tests in vertex_colors. ---
         {
             emit_gc(0x0200, 0x00400000);
             emit_gc(0x0204, 0x00400000);
@@ -7441,7 +7431,7 @@ int main() {
             emit_gc(0x0260, 0x14200000);
             emit_gc(0x1E40, 0x00000C00);
             emit_gc(0x0AA0, 0x00000C00);
-            emit_gc(0x0288, 0x00000003);  // SpecularFogCW0: D=FOG (register 3, unsupported)
+            emit_gc(0x0288, 0x00000006);  // SpecularFogCW0: D=reserved register 6
             emit_gc(0x028C, 0x00001C80);  // SpecularFogCW1: G=R0.alpha (unused: skips first)
             emit_gc(0x1E20, 0);
             emit_gc(0x1E24, 0);

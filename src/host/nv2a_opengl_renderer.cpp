@@ -2807,10 +2807,13 @@ public:
         size_t count = packet.triangles.size();
 #if XLLE_NATIVE_DRAW
         if (native) {
-            static_assert(sizeof(Nv2aGenericCombinerVertex) == 7 * 4 * sizeof(float));
+            // This optional no-fog executor retains its seven-vec4 GPU ABI.
+            static_assert(offsetof(Nv2aGenericCombinerVertex, fog) == 7 * 4 * sizeof(float));
             count = native_draw_triangle_count(packet.native_primitive, packet.native_vertices.size());
-            generated_records_.resize(packet.native_vertices.size() * sizeof(Nv2aGenericCombinerVertex));
-            std::memcpy(generated_records_.data(), packet.native_vertices.data(), generated_records_.size());
+            constexpr size_t bytes = 7 * 4 * sizeof(float);
+            generated_records_.resize(packet.native_vertices.size() * bytes);
+            for (size_t i = 0; i < packet.native_vertices.size(); ++i)
+                std::memcpy(generated_records_.data() + i * bytes, &packet.native_vertices[i], bytes);
         } else
 #endif
         {
