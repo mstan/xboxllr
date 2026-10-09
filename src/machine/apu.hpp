@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -23,6 +24,8 @@
 #include "machine/apu_adpcm.h"
 
 namespace xlle {
+
+struct ApuRateState;
 
 // A RAM-backed MMIO register file: reads return the last written value (reset 0).
 class RegFileMmio : public MmioDevice {
@@ -72,6 +75,8 @@ public:
 
     explicit McpxApu(FaultFn fault)
         : RegFileMmio("mcpx-apu", kBase, kSize, std::move(fault)) {}
+    McpxApu(const McpxApu&)=delete;
+    McpxApu& operator=(const McpxApu&)=delete;
 
     using MemReadFn = std::function<bool(uint32_t, void*, size_t)>;
     using MemWriteFn = std::function<bool(uint32_t, const void*, size_t)>;
@@ -113,6 +118,11 @@ public:
     // each with 32 frame slots. This stage neither pulls source nor retires it.
     // Slot order selects source channel; repeated destination bins add.
     bool mix_2d_samples(uint16_t voice,const float* stereo,uint32_t frames,float* bins);
+
+    // Source -> nominal pitch conversion, with persistent interpolation history.
+    // Real source end drains the filter; no silence is substituted for starvation.
+    // Amplitude envelopes/filtering and notifier delivery remain downstream.
+    bool resample_source(uint16_t voice,float* stereo,uint32_t capacity,uint32_t& count,bool& ended);
 
     uint32_t mmio_read(uint32_t addr, int size) override {
         uint32_t off = addr - base_;
@@ -185,6 +195,8 @@ public:
 
         log_subregion("wr", off);
         RegFileMmio::mmio_write(addr, size, value);
+        if(size==4 && (off==kVpvaddr || off==kVpsgeaddr))
+            for(auto& rate:voice_rates_)rate.reset();
         if (off == kFememdata && size == 4) {
             uint32_t dst = reg32(kFememaddr);
             if (!write_mem(dst, &value, 4)) device_fault("FEMEMDATA guest write failed");
@@ -324,6 +336,9 @@ private:
                 !write_voice_word(static_cast<uint16_t>(voice), field.offset,
                                   (previous & ~field.mask) | (value & field.mask)))
                 device_fault("voice configuration DMA failed");
+            else if((method==0x304 && ((previous^value)&0xfffffc00)) ||
+                    method==0x3a0 || method==0x3a4 || method==0x3d8 || method==0x3dc)
+                voice_rates_[voice].reset();
             return true;
         }
         return false;
@@ -369,6 +384,7 @@ private:
         }
         set_reg32(kFedecmeth, kVoiceOn);
         set_reg32(kFedecparam, argument);
+        voice_rates_[voice].reset();
         ++voice_on_methods_;
     }
 
@@ -455,6 +471,7 @@ private:
     uint64_t idle_voice_traps_ = 0;
     uint64_t xgscnt_ = 0;
     std::array<bool,kMaxVoices> voice_locked_{};
+    std::array<std::shared_ptr<ApuRateState>,kMaxVoices> voice_rates_{};
     std::array<uint8_t,32> submix_headroom_{};
     int sub_logged_ = 0;
 };

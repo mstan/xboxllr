@@ -1356,8 +1356,15 @@ tolerances permit continuous HLE gain arithmetic. See the expanded audio
 qualification for stage boundaries and missing upstream processing.
 
 [libsamplerate 0.2.2](https://github.com/libsndfile/libsamplerate/tree/0.2.2),
-copyright Erik de Castro Lopo, BSD-2-Clause, was consulted as a resampling donor
-candidate. It was not incorporated by this batch. Pinned xemu's acknowledged
+copyright Erik de Castro Lopo and upstream contributors, was initially consulted
+as a resampling candidate. The subsequent source-rate stage now links its
+unmodified **BSD-2-Clause library** at commit
+`c96f5e3de9c4488f4e6c97f59f5245f22fda22f7`. Full license text is retained in
+`LICENSES/libsamplerate-BSD.txt`; pin/hash/build scope are recorded in
+`src/third_party/libsamplerate/README.md`, and both accompany built adapter
+artifacts. Its GPL developer-only `src/check_asm.sh` is neither built nor
+packaged. The Xbox DMA/lifecycle adapter is authored here; no xemu resampler
+wrapper or starvation-silence body is incorporated. Pinned xemu's acknowledged
 interpolation uncertainty is retained rather than relabeled as hardware proof.
 
 ## dr_wav: maintained ADPCM source decoder

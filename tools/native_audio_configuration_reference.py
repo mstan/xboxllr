@@ -16,7 +16,7 @@ from pathlib import Path
 
 from aot_inventory import parse_xbe
 from unicorn import Uc, UC_ARCH_X86, UC_MODE_32
-from unicorn.x86_const import (UC_X86_REG_EBX, UC_X86_REG_ECX, UC_X86_REG_ESI,
+from unicorn.x86_const import (UC_X86_REG_EAX, UC_X86_REG_EBX, UC_X86_REG_ECX, UC_X86_REG_ESI,
     UC_X86_REG_EDI, UC_X86_REG_EBP, UC_X86_REG_EIP, UC_X86_REG_ESP)
 
 IMAGE = 'e6b7cd8a5527dd001e05bb3e881d9b24ffc58824ff67def394215ddbc8009249'
@@ -38,6 +38,8 @@ def run(xbe, library, dependencies):
     dll.xlle_apu_reference_source.restype=c.c_int
     dll.xlle_apu_reference_mix.argtypes=[c.c_void_p,c.c_uint32,c.POINTER(c.c_float),c.c_uint32,c.POINTER(c.c_float)]
     dll.xlle_apu_reference_mix.restype=c.c_int
+    dll.xlle_apu_reference_rate.argtypes=dll.xlle_apu_reference_source.argtypes
+    dll.xlle_apu_reference_rate.restype=c.c_int
     cpu=Uc(UC_ARCH_X86,UC_MODE_32)
     cpu.mem_map(0x10000,0x1000000)
     cpu.mem_map(0x30000000,0x10000)
@@ -61,6 +63,7 @@ def run(xbe, library, dependencies):
         assert cpu.reg_read(UC_X86_REG_ESP)==stack+4+len(args)*4
         assert get(stack+4+len(args)*4)==0x1234abcd
         assert all(cpu.reg_read(reg)==value for reg,value in saved)
+        return cpu.reg_read(UC_X86_REG_EAX)
 
     ram=(c.c_ubyte*0x10000)()
     instance=dll.xlle_apu_reference_create(ram,len(ram));assert instance
@@ -68,7 +71,7 @@ def run(xbe, library, dependencies):
         assert dll.xlle_apu_reference_write(instance,0xfe800000+offset,4,value),dll.xlle_apu_reference_error(instance)
     def word(address):return struct.unpack_from('<I',ram,address)[0]
     def store(address,value):struct.pack_into('<I',ram,address,value&0xffffffff)
-    rows=[];mix_rows=[]
+    rows=[];mix_rows=[];rate_rows=[]
     try:
         write(0x202c,0x1000)
         for n,bins in enumerate([[],[0,1],[5],[31,3,7],[7,6,5,4,3,2,1,0]]):
@@ -158,6 +161,43 @@ def run(xbe, library, dependencies):
                     assert all(math.isclose(v,e,rel_tol=3e-7,abs_tol=2e-8) for v,e in zip(actual,expected))
                     mix_rows.append(dict(channels=channels,bins=bins,overall_db100=overall,
                                          volume_words=packed,submix_headroom=headrooms))
+
+        # Whole original pitch helper drives actual rate conversion. The source
+        # tone is authored independently; neither donor resampler nor HLE output
+        # supplies the expected frequency or amplitude.
+        for channels in (1,2):
+            for pitch in (-8192,-4096,-501,0,4096,8191):
+                cpu.mem_write(settings,bytes(0x100));put(settings+0x18,pitch)
+                put(settings+0xc,1);put(settings+0x14,channels*2)
+                call(0x178c97,[out+8])
+                c.memset(c.addressof(ram)+base,0,128);store(base+0x54,1<<21)
+                write(0x202f8,71);write(0x20304,0x52000000|((channels-1)<<27)|((channels-1)<<16))
+                write(0x203a0,0);write(0x203a4,0);write(0x203d8,0);write(0x203dc,127)
+                write(0x2037c,get(out+8))
+                for n in range(128):
+                    for channel in range(channels):
+                        value=round(0.2*32768*math.sin(math.tau*n/64+channel*math.pi/2))
+                        struct.pack_into('<h',ram,0xa000+(n*channels+channel)*2,value)
+                samples=(c.c_float*8192)();count=c.c_uint32();ended=c.c_int()
+                assert dll.xlle_apu_reference_rate(instance,71,samples,4096,c.byref(count),c.byref(ended))
+                assert count.value==4096 and not ended.value
+                hz=48000*2**(pitch/4096)/64
+                sines=[math.sin(math.tau*hz*n/48000) for n in range(3584)]
+                cosines=[math.cos(math.tau*hz*n/48000) for n in range(3584)]
+                ss=sum(v*v for v in sines);cc=sum(v*v for v in cosines);sc=sum(s*v for s,v in zip(sines,cosines))
+                fits=[]
+                for channel in (0,1):
+                    data=list(samples[1024+channel::2]);ys=sum(y*s for y,s in zip(data,sines));yc=sum(y*v for y,v in zip(data,cosines))
+                    a=(ys*cc-yc*sc)/(ss*cc-sc*sc);b=(yc*ss-ys*sc)/(ss*cc-sc*sc)
+                    amplitude=math.hypot(a,b)
+                    rms=math.sqrt(sum((y-a*s-b*v)**2 for y,s,v in zip(data,sines,cosines))/len(data))
+                    assert abs(amplitude-0.2)<0.001 and rms<0.0003
+                    fits.append(dict(amplitude=amplitude,rms_residual=rms))
+                cursor=word(base+0x58)&0xffffff
+                byte_cursor=call(0x1786e4,[cursor]);assert byte_cursor==cursor*channels*2
+                assert call(0x179e2c,[byte_cursor])==cursor
+                rate_rows.append(dict(channels=channels,pitch=pitch,original_word=get(out+8),
+                                      tone_hz=hz,fits=fits,original_cursor_bytes=byte_cursor))
     finally:
         dll.xlle_apu_reference_destroy(instance)
 
@@ -185,7 +225,8 @@ def run(xbe, library, dependencies):
     return dict(xbe_sha256=IMAGE,library_sha256=hashlib.sha256(library.read_bytes()).hexdigest(),
                 original_routing_pitch_cases=rows,buffer_field_cases=16,rejected=rejected,
                 original_volume_mix_cases=mix_rows,
-                scope='complete original routing/pitch/volume helpers; maintained source DMA and final 2D send stage; upstream pitch/filter/envelope and whole-device output are separate')
+                original_pitch_rate_cases=rate_rows,
+                scope='complete original routing/pitch/volume helpers; maintained source DMA, nominal rate and final 2D send stage; modulation/filter/envelope and whole-device output are separate')
 
 
 if __name__=='__main__':
@@ -195,4 +236,4 @@ if __name__=='__main__':
     args=parser.parse_args()
     result=run(args.xbe,args.library,args.dependencies)
     args.output.write_text(json.dumps(result,indent=2)+'\n')
-    print(f"PASS: 55 original routing/pitch cases, {len(result['original_volume_mix_cases'])} original volume -> real source/mix cases, 16 fields, 5 guards")
+    print(f"PASS: 55 original routing/pitch cases, {len(result['original_volume_mix_cases'])} volume/mix cases, {len(result['original_pitch_rate_cases'])} original pitch/rate spectra, 16 fields, 5 guards")

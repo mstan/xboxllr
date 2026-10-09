@@ -76,3 +76,13 @@ EXPORT int xlle_apu_reference_mix(void* instance,uint32_t voice,const float* sam
     if(voice>0xffff) {ref.failure="invalid APU mix transport voice";return 0;}
     return ref.apu.mix_2d_samples(static_cast<uint16_t>(voice),samples,frames,bins);
 }
+EXPORT int xlle_apu_reference_rate(void* instance,uint32_t voice,float* samples,uint32_t capacity,
+                                  uint32_t* count,int* ended) {
+    if(!instance)return 0;
+    auto& ref=*static_cast<Reference*>(instance);
+    if(!ref.failure.empty())return 0;
+    if(voice>0xffff || !count || !ended) {ref.failure="invalid APU rate transport shape";return 0;}
+    bool last=false;
+    const bool ok=ref.apu.resample_source(static_cast<uint16_t>(voice),samples,capacity,*count,last);
+    *ended=last;return ok;
+}

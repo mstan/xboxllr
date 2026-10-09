@@ -5,8 +5,8 @@ the original-scheduler/GPU startup experiments are not prerequisites. The family
 remains **open**, and the overall burndown remains **4/9 qualified**.
 
 The native title continues to select its real XAudio2/DSP implementation.
-The audio LLE floor still needs sample processing, cursor/completion and whole
-driver integration before it is a qualified selectable title backend. Existing
+The audio LLE floor still needs envelopes/filtering, GP transport/completion and
+whole-driver integration before it is a qualified selectable title backend. Existing
 audible HLE output does not remove that requirement.
 
 ## Executable configuration floor
@@ -22,7 +22,7 @@ arithmetic cannot wrap a bad voice-table pointer into valid RAM.
 
 `tools/apu_reference.cpp` supplies a strict C transport to this maintained
 implementation. It accepts implemented 32-bit configuration/control writes
-explicit PCM/ADPCM source pulls, submix headroom writes and final 2D send-stage
+explicit PCM/ADPCM source pulls, nominal rate conversion, submix headroom writes and final 2D send-stage
 processing. These are distinct pipeline boundaries; no missing upstream stage
 is silently supplied by the final mixer.
 Unsupported methods/widths fail persistently before successful completion or
@@ -238,6 +238,77 @@ as explicit contracts. Consult existing evidence before any new hardware
 measurement; if needed, exact silicon interpolation belongs at the back of
 the queue and must not block independent processing or control work.
 
+## Persistent nominal source-rate processing
+
+`src/machine/apu_rate.cpp` connects the real PCM/ADPCM source stage to a
+persistent converter per voice. The actual signed pitch word determines source
+consumption versus the 48-kHz output clock. Source pulls perform the existing
+SGE DMA and CBO writes; filter-buffered output is consumed before requesting
+more guest input. An initial test exposed premature prefetch that made CBO
+depend on request partition. That is corrected: bulk and seven-frame requests
+now agree on samples and fetched source frames in the tested cases.
+
+Pause/lock freeze both history and source consumption. A seek, source binding
+change or new voice activation discards obsolete history; pitch changes retain
+it. A finite buffer is fetched exactly once, then the converter drains and
+reports no further frames. It never repeats the final source sample, fills a
+request with invented silence or publishes a guest notifier. Required DMA
+failure and unsupported SSL/modulated-pitch requests stop. The caller still
+owns amplitude envelopes, filtering, GP submission and completion delivery.
+
+The actual converter is unmodified **libsamplerate 0.2.2**, commit
+`c96f5e3de9c4488f4e6c97f59f5245f22fda22f7`, with BSD-2-Clause library sources.
+`SRC_SINC_FASTEST` follows pinned xemu's reference choice; its acknowledged
+uncertainty about the silicon interpolation kernel remains. This establishes
+an executable nominal-rate floor and explicit numerical behavior, not a new
+hardware golden for interpolation, prefetch latency or pitch-transition shape.
+The upstream developer-only GPL assembly-check script is not built or packaged.
+The adapter, lifecycle rules and tests are authored here; xemu's wrapper and
+starvation-silence workaround are not copied. Attribution and license are
+retained beside the build artifacts and in the repository.
+
+Validation is bundled around actual source consumption:
+
+- Root tests verify commanded tone frequency/amplitude/residual, persistent
+  chunking, 36 finite PCM/ADPCM cases with untouched output guards, pause/lock,
+  seek, pitch changes, explicit failures and 64 independent lifetimes. Finite
+  source counts and CBO remain exact even while output is filtered/resampled.
+- **12 complete original pitch-helper cases** drive maintained rate conversion
+  and independent tone fits, with original byte/frame helpers reading the
+  resulting CBO. The earlier 55 configuration, 84 volume/mix and 56
+  format/region/source cases remain green. Public SetPitch/SetFrequency range
+  handling is not inferred solely from these internal-helper cases.
+- **12 actual native comparisons** compose our maintained source, rate and 2D
+  send stages, then compare with real XAudio2 capture at nominal source rates
+  from 12 kHz to approximately 192 kHz, mono/stereo. Tests fit phase-independent
+  tones at the commanded frequency, check amplitude/residual and unused bins,
+  and read real native cursors. LLE amplitude error is below 0.001 normalized
+  and RMS residual below 0.0003; native amplitude error/difference is below
+  0.002 and residual below 0.001. Native integer-Hz rate rounding is explicit.
+  These are bounded steady-tone checks, not transient or whole-title A/V proof.
+
+The full machine and native builds pass. Root APU/source/rate **3/3 in 0.11s**;
+combined native/contract suite **54/54 in 32.45s**. Evidence:
+`build/blinx/audio-rate-{configuration-original,source-original}.aot-private.json`
+and `audio-rate-{build,test-build,machine-build,native-build,full-build,full-tests}.log`.
+Reference DLL SHA-256:
+`b26e54f73adc27dbf343f16377d14e650f0f1e115fdb5d5677ab51fb77daea25`.
+The rebuilt native executable SHA-256 is
+`c5ff3de946b93d17c4ec83697443244c8cfbb0c931f10b0ce975d0a727009cfa`.
+Its fresh default-native regression `audio-rate-floor-attract` ran **190.329s**:
+18 inspected captures show demo gameplay, Start interruption/loading, title
+return and demo reentry. Both scheduled Start press/release pairs were delivered;
+there was no logged STOP or audio fault. The harness terminated the still-live
+process at its time limit; its return code is not a crash or natural-exit claim.
+This protects the native path, not whole-title LLE audio or endurance/cadence.
+The family stays open: **4/9**.
+
+Build root target `test_apu_rate` and run CTest `apu_rate`; the real native
+comparison is pilot CTest `pilot_audio_rate_lle`. The original-code fixture is
+`native_audio_configuration_reference.py` with the same owned-XBE/reference-DLL
+arguments already documented above. No production backend switching or duplicate
+execution is introduced.
+
 ## Withdrawn notifier assumption
 
 The audit found the older `post_voice_notifier` wrote a literal `1` into byte
@@ -259,9 +330,9 @@ needed, remain at the end of the burndown. Their necessity is not established.
 
 ## Remaining work, in order
 
-1. Complete the upstream voice-processing path around the maintained source
-   and final 2D send stages: pitch/resampling, envelopes, voice scaling and
-   filtering, then connect the existing GP donor. Validate actual stream
+1. Complete the remaining voice-processing path around the maintained source,
+   nominal-rate and final 2D send stages: envelopes/pitch modulation, voice
+   scaling and filtering, then connect the existing GP donor. Validate actual stream
    output and transitions, not only stationary mixer comparisons.
    Existing original byte/sample conversion, detach, decoder and real native
    output tests are reusable evidence, not a completed LLE audio device.
