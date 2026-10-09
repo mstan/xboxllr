@@ -977,6 +977,11 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
     } else if (blk->off == 0x100000) {  // PFB
         // Captured from silicon 2026-07-16 (agent read 0xFD100200).
         if (bo == 0x200) return 0x03070003;  // NV_PFB_CFG0
+        if (bo == 0x410 && size == 4) {
+            // WBC FLUSH completes synchronously on the coherent shared-RAM
+            // bus below. There is no deferred CPU write-combining queue.
+            return 0;
+        }
     } else if (blk->off == 0x400000) {  // PGRAPH
         // Seam anchor 7: conservative catch-all for guest status polling of
         // PGRAPH. Cannot detect a bare framebuffer read (F7, measurement M1).
@@ -1050,6 +1055,18 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
     if (blk->off == 0x000000 && bo == 0x140) {
         pmc_intr_en_ = value;
         update_irq();
+        return;
+    }
+    if (blk->off == 0x100000 && bo == 0x410) {
+        // Original XDK KickPushBuffer flushes CPU writes before publishing
+        // PUT. Our CPU/DMA memory callbacks commit synchronously to shared
+        // RAM; publish those writes before returning flush-complete. This is
+        // not a GPU draw-completion fence. Other WBC controls are unqualified.
+        // Wire/status reference: pinned xemu pfb.c and NV_PFB_WBC_FLUSH.
+        if (size != 4 || (value & ~0x10000u)) {
+            fault_("NV2A unqualified PFB write-buffer control"); return;
+        }
+        std::atomic_thread_fence(std::memory_order_seq_cst);
         return;
     }
     if (blk->off == 0x600000 && bo == 0x100) {

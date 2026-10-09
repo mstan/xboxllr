@@ -855,6 +855,25 @@ No libfatx implementation body, binary or patch is linked/copied into the
 intended non-GPL shipping product. FATX at runtime executes the owned original
 kernel over the previously maintained private reference hardware dependency.
 
+## Original GPU completion qualification
+
+`tools/native_gpu_completion_reference.py` is an authored transport executing
+owned original XDK routines over the maintained NV2A software reference. It
+copies no original code into the repository. Existing nxdk Z-pass wire facts
+and authored software-raster fixtures supply geometry/report setup; original
+End/kick, callbacks and fence waits supply independent command/ABI observations.
+
+Phobos `63f18f0334fbd8c00313c4bb565accf00627a4fd`, `hle_d3d8.c` and
+`kernel/nv2a_pb_exec.c`, were reviewed for reuse. Its fabricated visibility
+fallback, immediate callback and skipped-geometry behavior were not adopted.
+No donor implementation body was copied in this checkpoint.
+
+xemu `482088490c2d5983ed5e1eafbd09906157c1eca0`, `hw/xbox/nv2a/pfb.c` and
+`nv2a_regs.h`, provide the PFB write-buffer flush-bit/status reference. Our
+synchronous coherent-RAM publication uses an authored host memory fence; no
+GPL body was copied. Existing private reference dependency restrictions remain.
+See [GPU-COMPLETION-LLE.md](pilots/native-title/GPU-COMPLETION-LLE.md).
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),
