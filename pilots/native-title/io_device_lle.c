@@ -43,6 +43,7 @@ static unsigned publication_slot(uint32_t page)
 }
 static struct {uint32_t base,bytes;} owners[MAX_PUBLISHED];
 static unsigned owner_count;
+static int gpu_bootstrap_published;
 static struct {uint32_t base,bytes,count;} pin_ranges[MAX_PUBLISHED];
 static uint32_t image_start,image_bytes;
 /* Admission window supplied only by a successful original VM commit. It does
@@ -502,6 +503,9 @@ static void image_vm(uint32_t base,uint32_t bytes,uint32_t type)
 static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
 {
     unsigned pin_slot=MAX_PUBLISHED;
+    if(gpu_bootstrap_published && (ordinal==17 || ordinal==171) && args[0]==0x80000000u) {
+        failure="device LLE console bootstrap page is not a caller allocation";return;
+    }
 #ifdef PILOT_FILES_LLE
     /* File-driver DMA can pin loader/stack pages internally, without a title
      * MmLockUnlockBufferPages call. Materialize only owned resident pages via
@@ -880,6 +884,48 @@ int pilot_io_device_pinned_dma(uint32_t pa,void *buffer,uint32_t bytes,int write
         }
         at+=span;left-=span;
     }
+    valid=1;
+done:
+    ReleaseSRWLockExclusive(&lock);return valid;
+}
+
+static int gpu_bootstrap_mapping(void)
+{
+    // Original Xbox direct mapping of physical page zero. Its PTE is checked
+    // at admission and access, never manufactured from a requested address.
+    uint32_t pde=ram_word(0xf000u+(0x80000000u>>22)*4);
+    if((pde&3)!=3 || (pde&128))return 0;
+    uint32_t pte=ram_word(pde&0xfffff000u),pa;
+    return (pte&3)==3 && physical(0x80000000u,&pa) && pa==0;
+}
+
+const char *pilot_io_device_gpu_bootstrap(unsigned char *guest)
+{
+    AcquireSRWLockExclusive(&lock);
+    if(!guest_memory)initialize(guest);
+    if(!failure && (guest_memory!=guest || execution_depth || !gpu_bootstrap_mapping()))
+        failure="device LLE original GPU bootstrap mapping is not writable physical zero";
+    if(!failure && !gpu_bootstrap_published) {
+        publish_range(0x80000000u,4096);
+        if(!failure){gpu_bootstrap_published=1;refresh_mappings();}
+    }
+    const char *error=failure;ReleaseSRWLockExclusive(&lock);return error;
+}
+
+int pilot_io_device_bootstrap_dma(uint32_t pa,void *buffer,uint32_t bytes,int write)
+{
+    int valid=0;
+    AcquireSRWLockExclusive(&lock);
+    if(failure || !gpu_bootstrap_published || !bytes || (uint64_t)pa+bytes>4096 ||
+       !gpu_bootstrap_mapping())goto done;
+    unsigned i=publication_slot(0x80000000u);
+    if(i==published_count || published[i].pa || shared_pages[0]!=guest_memory+0x80000000ull)goto done;
+    MEMORY_BASIC_INFORMATION info;
+    if(!VirtualQuery(guest_memory+0x80000000ull,&info,sizeof(info)) ||
+       info.State!=MEM_COMMIT || (info.Protect&(PAGE_GUARD|PAGE_NOACCESS)) ||
+       (write && info.Protect!=PAGE_READWRITE))goto done;
+    if(write)memcpy(physical_backing(pa),buffer,bytes);
+    else memcpy(buffer,physical_backing(pa),bytes);
     valid=1;
 done:
     ReleaseSRWLockExclusive(&lock);return valid;

@@ -145,6 +145,17 @@ void pilot_cpu_sti_complete(void)
     stop("STI completion requires the interrupt LLE build",0);
 #endif
 }
+void pilot_cpu_wbinvd(void)
+{
+    /* The selected CPU/device bus has one coherent backing and no deferred
+     * CPU data-cache/write-combining store. Earlier guest stores are already
+     * in that backing; order them before any later MMIO/DMA publication.
+     * There are no private emulated CPU cache lines left to invalidate.
+     * This is not a GPU completion wait or permission to flush guest work.
+     * EFLAGS and guest register TLS are untouched. Native privilege/cache
+     * timing and modified executable-code translation are separate contracts. */
+    MemoryBarrier();
+}
 uint8_t pilot_cpu_in8(uint16_t port)
 {
 #ifdef PILOT_DISPLAY_LLE

@@ -10,6 +10,18 @@ def marker(op, address):
 
 
 class InterruptLoweringTests(unittest.TestCase):
+    def test_wbinvd_uses_verified_two_byte_opcode_and_preserves_following_code(self):
+        source=marker('wbinvd',0x1000)+'\n    eax = ebx;'
+        code,rows=lower(source,lambda *args:bytes.fromhex('0f0989d8')+bytes(12))
+        self.assertEqual(code,'pilot_cpu_wbinvd();\n    eax = ebx;')
+        self.assertEqual(rows,[dict(address=0x1000,opcode='wbinvd',supported=True)])
+        self.assertEqual(lower(code,lambda *args:b''),(code,[]))
+
+    def test_cache_opcode_or_prefixed_variant_mismatch_fails(self):
+        for raw in ('0f08','660f09','f30f09','90'):
+            with self.assertRaisesRegex(ValueError,'differs from original'):
+                lower(marker('wbinvd',0x1000),lambda *args:bytes.fromhex(raw)+bytes(16))
+
     def test_byte_port_write_uses_dx_al_without_register_assignment(self):
         code,rows=lower(marker('out dx, al',0x1000),lambda *args:b'\xee'+bytes(15))
         self.assertEqual(code,'pilot_cpu_out8(LO16(edx), LO8(eax));')

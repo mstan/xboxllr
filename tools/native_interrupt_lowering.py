@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Lower verified CLI/STI/shadow and byte port I/O through the machine bus.
+"""Lower verified interrupt, byte port and cache-publication instructions.
 
 Only reviewed straight-line MOV/PUSH/NOP shadow instructions are supported.
 Other STI sites retain the explicit unsupported fault. No address is singled
@@ -13,7 +13,7 @@ import re
 from aot_inventory import parse_xbe
 from capstone import Cs, CS_ARCH_X86, CS_MODE_32
 
-SITE = re.compile(r'RECOMP_UNIMPL\("(cli|sti|in al, dx|out dx, al)", (0x[0-9A-Fa-f]+)u\); /\* TODO: \1 \*/')
+SITE = re.compile(r'RECOMP_UNIMPL\("(cli|sti|in al, dx|out dx, al|wbinvd)", (0x[0-9A-Fa-f]+)u\); /\* TODO: \1 \*/')
 REGS = {'eax', 'ecx', 'edx', 'ebx', 'esi', 'edi'}
 HEADER = '''
 /* Original CPU interrupt flag effects, including STI's following instruction. */
@@ -42,7 +42,8 @@ def lower(code, read):
         kind, address = site[1], int(site[2], 16)
         instructions = list(disassembler.disasm(read(address, 16), address))
         expected=kind.split(' ',1)[0]
-        if not instructions or instructions[0].mnemonic != expected or instructions[0].size != 1 or (
+        expected_size = 2 if kind == 'wbinvd' else 1
+        if not instructions or instructions[0].mnemonic != expected or instructions[0].size != expected_size or (
                 expected in ('in','out') and instructions[0].op_str!=kind.split(' ',1)[1]):
             raise ValueError('interrupt instruction differs from original bytes')
         end = site.end()
@@ -52,6 +53,8 @@ def lower(code, read):
             replacement = 'pilot_cpu_out8(LO16(edx), LO8(eax));'
         elif kind == 'cli':
             replacement = 'pilot_cpu_cli();'
+        elif kind == 'wbinvd':
+            replacement = 'pilot_cpu_wbinvd();'
         else:
             following = instructions[1] if len(instructions) > 1 else None
             statement = shadow_statement(following) if following else None
@@ -96,11 +99,13 @@ def apply(directory, xbe):
         text += '\n/* Real byte port read; unsupported ports stop explicitly. */\nuint8_t pilot_cpu_in8(uint16_t port);\n'
     if 'void pilot_cpu_out8(uint16_t port, uint8_t value);' not in text:
         text += '\n/* Real byte port write; unsupported ports stop explicitly. */\nvoid pilot_cpu_out8(uint16_t port, uint8_t value);\n'
+    if 'void pilot_cpu_wbinvd(void);' not in text:
+        text += '\n/* Publish prior stores on the coherent CPU/device memory bus. */\nvoid pilot_cpu_wbinvd(void);\n'
     if text != header.read_text(encoding='utf-8'):
         changes.append((header, text))
     for path, code in changes:
         path.write_text(code, encoding='utf-8', newline='\n')
-    return dict(version=3, xbe_sha256=image['sha256'], sites=rows)
+    return dict(version=4, xbe_sha256=image['sha256'], sites=rows)
 
 
 def upgrade(xbe, output):

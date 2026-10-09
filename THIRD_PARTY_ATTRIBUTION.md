@@ -940,6 +940,33 @@ Phobos's pinned `kernel/nv2a_pb_exec.c` was checked for applicable FIFO work;
 this checkpoint adds no Phobos or GPL implementation body. Existing private
 reference-library dependency restrictions still apply.
 
+## GPU bootstrap and tile-boundary references
+
+The physical-zero bootstrap/cache-publication contract uses the pinned nxdk
+`pbkit.c` bootstrap sequence and the owned original title/kernel mapping as
+independent evidence. Phobos
+`63f18f0334fbd8c00313c4bb565accf00627a4fd`, `src/kernel/kernel.h` and
+`kernel_bridge.c`, documents the low-physical-page reservation hazard and
+physical alias convention. We retain original kernel ownership rather than
+copying its fixed bump-allocator reservation. Credit belongs to the respective
+nxdk and Phobos authors/contributors; no new implementation body was copied.
+
+Intel's [Software Developer's Manual, Volume 2D, WBINVD entry](https://cdrdv2-public.intel.com/789589/334569-sdm-vol-2d.pdf)
+provides instruction/ordering and unchanged-flags behavior. Pinned xemu's
+`target/i386/tcg/decode-new.c.inc` was consulted for coherent-emulator treatment.
+Our authored lowering verifies original opcode bytes and invokes an actual host
+memory fence; it does not copy Intel prose or xemu implementation code.
+
+Tile-boundary research consults pinned envytools `nvhw/tile.c`,
+`nvhw/chipset.c` and `hwtest/nv10_tile.cc`; nxdk `pb_assign_tile`; and xemu PFB
+and surface handling. XboxDev contributors' [nv2a-trace Texture.py](https://github.com/XboxDev/nv2a-trace/blob/master/Texture.py)
+documents use of the linear readback aperture. Cxbx-Reloaded contributors'
+`src/common/AddressRanges.h` at `585c49a50af1255ab155099e06f24505f9c5a800`
+provide the tiled/write-combined aperture naming reference. These are
+investigation leads with unresolved client-specific behavior, not claimed
+hardware qualification. No tile implementation was incorporated in this
+checkpoint; existing GPL code remains external reference material.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

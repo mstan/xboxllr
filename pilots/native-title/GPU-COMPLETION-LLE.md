@@ -385,3 +385,66 @@ different scratch page, skip the write/flush, return a fabricated GET, or close
 the GPU family on these initialization results. The burndown stays 4/9 closed;
 the game remains on its completed-files pin. No hardware contact, new xemu
 runtime comparison or new donor/GPL implementation body is claimed.
+
+## Physical-zero bootstrap and coherent cache publication checkpoint
+
+The original DMA bootstrap now executes. Final actual title run
+`build/blinx/gpu-lle-title-real-bootstrap/run.aot-private.json` exits 2 after
+11.047s at `FD400910=03590003`: the first reached active render-surface tile
+configuration. Before that stop the original driver follows its physical-zero
+jump, services its real graphics ISR and allocates 2,457,600-byte and
+1,228,800-byte render-surface storage. FIFO GET/PUT both reach `03914000`.
+There are still no rendered frames on this original-GPU route. This advances
+initialization; it does not close the completion or graphics family.
+
+Implemented contract:
+
+- The console owns physical page zero independently of each GPU lifetime.
+  Admission verifies the original writable PDE/PTE mapping of `80000000` to
+  physical zero and publishes its actual captured contents through the existing
+  shared CPU/kernel/DMA backing. It is not a new allocator result or substitute
+  scratch page. GPU recreation retains its bytes; allocation-free calls cannot
+  retire it. The original kernel still controls other low physical pages.
+- DMA resolves the same published page and checks its current translation,
+  bounds and host protection. Access does not expose unrelated captured RAM.
+  CPU writes become actual FIFO input; device writes are visible to the CPU.
+- Hash-verified original `WBINVD` is lowered to a host publication fence for
+  the coherent bus. This bus has no deferred emulated CPU cache contents to
+  write back or invalidate. The operation orders prior stores before subsequent
+  device access and does not wait for GPU completion. This is a bounded cache
+  model, not a claim about cache timing, arbitrary privilege levels or modified
+  executable AOT translation. Other opcodes/prefixed variants remain rejected.
+
+Qualification:
+
+- The transport test passes across three GPU lifetimes with an actual FIFO jump
+  from physical zero, original `MmGetPhysicalAddress`, shared CPU/device writes,
+  protected/out-of-range/released DMA rejection and retained console contents.
+  A held graphics engine leaves the semaphore pending until work really runs.
+- Four other GPU-build device/memory checks pass in 2.30s; the transport test
+  passes in 0.14s. Ten interrupt/cache lowering tests pass, including exact
+  opcode verification, preserved following code and rejection of `INVD` and
+  prefixed variants. No generated title body was manually patched.
+- Both title builds succeed. Eight native-renderer device/memory/graphics
+  checks pass in 5.68s. No fresh complete HLE attract run is claimed: the
+  preserved game build remains pinned to qualified-files `439a45b`.
+- Executable SHA-256:
+  `4510a9e07d2817cca90afafdda501fae23bcc9022ed72637c80dd1fe2ea032f9`.
+  Device DLL remains
+  `6e60de973c87c413b4a15af729ceafacf5c9b2855c3d36351a9e3001b6dd7690`;
+  no NV2A device-model source changed in this checkpoint. The previous nine
+  original query/trap/fence cases therefore remain evidence for that same DLL.
+
+Next dependency is the **tile memory-client contract**, before further context
+and draw qualification. nxdk `pb_assign_tile` programs separate PFB, PGRAPH and
+RDI banks with base/limit/pitch and optional compression. The current xemu PFB
+model stores those registers and uses linear host rendering; this is not proof
+of LLE tiled-memory behavior. Envytools `nvhw/tile.c` and `hwtest/nv10_tile.cc`
+provide useful translation/test mechanisms, but its generic IGP enable/bank-bit
+programming differs from Xbox pbkit's sequence and cannot be assumed equivalent.
+XboxDev's `nv2a-trace/Texture.py` uses the `F0000000` aperture for linear surface
+readback; Cxbx calls that aperture tiled/write-combined. Establish the actual
+client/address distinction before adopting either representation. A successful
+register write alone must not silently enable identity-addressed rendering.
+No tile guard was relaxed, new hardware contacted, or GPL implementation body
+copied during this investigation. Family count remains 4/9 qualified.

@@ -38,7 +38,10 @@ static int gpu_lle_dma(uint32_t pa,void *buffer,size_t bytes,int write)
     }
 done:
     ReleaseSRWLockShared(&vm_lock);
-    if(!allocation)result=pilot_io_device_pinned_dma(pa,buffer,(uint32_t)bytes,write);
+    if(!allocation) {
+        result=pilot_io_device_bootstrap_dma(pa,buffer,(uint32_t)bytes,write);
+        if(!result)result=pilot_io_device_pinned_dma(pa,buffer,(uint32_t)bytes,write);
+    }
     return result;
 }
 static int gpu_lle_dma_read(uint32_t a,void *b,size_t n){return gpu_lle_dma(a,b,n,0);}
@@ -87,6 +90,8 @@ static void gpu_lle_open(void)
 {
     if(gpu_lle.device)stop("GPU device already owned",0);
     if(!InitOnceExecuteOnce(&usb_once,usb_start,NULL,NULL))stop("shared GPU machine bus initialization failed",0);
+    const char *bootstrap_error=pilot_io_device_gpu_bootstrap(memory);
+    if(bootstrap_error)stop(bootstrap_error,0x80000000u);
     for(uint64_t address=0xfd000000u;address<0xfe000000u;) {
         MEMORY_BASIC_INFORMATION info;
         if(!VirtualQuery(memory+address,&info,sizeof(info)) || info.State!=MEM_RESERVE)

@@ -44,6 +44,11 @@ const char *pilot_io_device_resident(uint32_t base,uint32_t bytes);
 const char *pilot_io_device_image_release(uint32_t base,uint32_t bytes);
 const char *pilot_io_device_release_check(uint32_t base,uint32_t bytes);
 int pilot_io_device_pinned_dma(uint32_t pa,void *buffer,uint32_t bytes,int write);
+/* Publish the original console-owned page-zero DMA bootstrap mapping. This
+ * page lasts for the console session, independent of GPU/ordinary allocation
+ * lifetimes. Admission verifies current original PTE identity and writability. */
+const char *pilot_io_device_gpu_bootstrap(unsigned char *guest);
+int pilot_io_device_bootstrap_dma(uint32_t pa,void *buffer,uint32_t bytes,int write);
 /* Original Nt VM calls plus publication of the kernel's real allocated pages.
  * inputs: base,size,type,protect,zero_bits. Outputs: base,size,oldProtect for
  * mutations, or seven original MEMORY_BASIC_INFORMATION words for query. */

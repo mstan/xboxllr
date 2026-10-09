@@ -18,6 +18,9 @@ static void test_gpu_lle_transport(void)
     call_kernel(168,query,2);CHECK(g_eax==top && MEM32(0x15000)==0x10000);
     for(unsigned lifetime=0;lifetime<3;++lifetime) {
         gpu_lle_open();
+        uint32_t bootstrap_va=0x80000000u,bootstrap_pa=UINT32_MAX;
+        CHECK(!pilot_io_device_lle(173,memory,&bootstrap_va,&bootstrap_pa) && bootstrap_pa==0);
+        if(lifetime)CHECK(MEM32(bootstrap_va)==0xdeadbeef); // console lifetime, not GPU lifetime
         uint8_t mask=pilot_cpu_in8(0xa1);
         pilot_cpu_out8(0xa1,(uint8_t)(mask^0x80));
         CHECK(pilot_cpu_in8(0xa1)==(uint8_t)(mask^0x80));
@@ -44,19 +47,35 @@ static void test_gpu_lle_transport(void)
         CHECK(base);uint32_t pa=base&0x03ffffff;
         const uint32_t packet[]={0x40000,1,0x401a4,2,0x81d6c,4096,0x12345678};
         memcpy(memory+base,packet,sizeof(packet));MEM32(base+4096)=0xabcdef01;
+        // Original/nxdk bootstrap: the pusher starts at physical zero and
+        // follows a real jump into owned contiguous command storage.
+        MEM32(bootstrap_va)=pa|1u;
+        uint32_t saved_eax=g_eax,saved_edx=g_edx;
+        pilot_cpu_wbinvd();
+        CHECK(g_eax==saved_eax && g_edx==saved_edx);
+        uint32_t bootstrap_word=0;
+        CHECK(gpu_lle_dma_read(0,&bootstrap_word,4) && bootstrap_word==(pa|1u));
+        CHECK(!gpu_lle_dma_read(4094,&bootstrap_word,4));
         const uint32_t setup[][2]={
             {0x700008,1},{0x70000c,0x80010020},{0x700200,0x97},
             {0x700010,2},{0x700014,0x80010030},
             {0x700300,0x3d},{0x700304,8191},{0x700308,pa},
-            {0x700180,0x3d},{0x700184,8191},{0x700188,pa},
+            {0x700180,0x3d},{0x700184,0x03ffffff},{0x700188,0},
             {0x002504,1},{0x003204,0x100},{0x00322c,0x18},{0x003244,0},
             {0x003220,1},{0x003250,1},{0x003200,1},{0x400720,0}};
         for(unsigned i=0;i<sizeof(setup)/sizeof(setup[0]);++i)gpu_test_write(setup[i][0],setup[i][1]);
-        gpu_test_write(0x800040,sizeof(packet));
+        gpu_test_write(0x800040,pa+sizeof(packet));
         CHECK(MEM32(base+4096)==0xabcdef01); // held PGRAPH cannot complete DMA
         gpu_test_write(0x400720,1);
         CHECK(MEM32(base+4096)==0x12345678);
-        CHECK(gpu_test_read(0x800044)==sizeof(packet));
+        CHECK(gpu_test_read(0x800044)==pa+sizeof(packet));
+        bootstrap_word=0xdeadbeef;
+        CHECK(gpu_lle_dma_write(0,&bootstrap_word,4) && MEM32(bootstrap_va)==bootstrap_word);
+        DWORD bootstrap_protection=0;
+        CHECK(VirtualProtect(memory+bootstrap_va,4096,PAGE_READONLY,&bootstrap_protection));
+        bootstrap_word=0x11111111;
+        CHECK(!gpu_lle_dma_write(0,&bootstrap_word,4) && MEM32(bootstrap_va)==0xdeadbeef);
+        CHECK(VirtualProtect(memory+bootstrap_va,4096,bootstrap_protection,&bootstrap_protection));
         uint32_t observed=0;
         CHECK(gpu_lle_dma_read(pa+4096,&observed,4) && observed==0x12345678);
         CHECK(!gpu_lle_dma_write(0x04000000,&observed,4));
@@ -71,5 +90,5 @@ static void test_gpu_lle_transport(void)
         pilot_io_device_port_bind(0,0,NULL);
         CHECK(FreeLibrary(gpu_lle.library));gpu_lle.library=NULL;
     }
-    fprintf(stderr,"PASS: original GPU reservation/query/repeat/page release; compiled MMIO, owned DMA, held/released semaphore, protection/release rejection, three transport lifetimes\n");
+    fprintf(stderr,"PASS: original GPU reservation and physical-zero translation; real shared bootstrap jump/cache publication; compiled MMIO, owned DMA, held/released semaphore, protection/release rejection, three transport lifetimes\n");
 }
