@@ -98,6 +98,14 @@ this is modeled composition, not a new hardware texture golden. Actual title
 startup still stops at the encoder-state guard and the count remains **4/9**.
 [Latest texture evidence](../pilots/native-title/GPU-COMPLETION-LLE.md#tiled-color-textures-and-matching-native-sampling---2026-10-09).
 
+Encoder reset no longer requires an artificially aligned GPU sync phase. Actual
+incoming HSYNC/VSYNC drives FIELD with the documented two-clock delay, including
+VSYNC preceding HSYNC. Scheduled events, the existing GPU timing component and
+original kernel FIELD calls pass; uncertain transient color phase stays unknown.
+The actual LLE title still stops before frames at the same encoder-state guard.
+This closes a timing-component limitation, not startup or the GPU family: **4/9**.
+[Evidence](../pilots/native-title/GPU-COMPLETION-LLE.md#encoder-reset-between-incoming-sync-edges---2026-10-09).
+
 | Family gate (ordered after calendar slice) | Existing evidence to retain | Required LLE route and qualification | Reference to use first |
 | --- | --- | --- | --- |
 | 1. Controller input and interruption | Host conversion/ABI tests; previous real attract interruption/menu-return/reentry; owner keyboard observation | Independently qualify connected/disconnected reports, packet/button semantics and lifetimes; repeat controlled Start interruption and idle reentry on the final hardened build. Physical-controller details beyond the exercised contract remain separate. | Original XAPI/XID behavior and xemu; actual controller/hardware capture when an input-report question cannot be settled independently |

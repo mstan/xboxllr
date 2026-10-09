@@ -198,15 +198,16 @@ EXPORT void xlle_nv2a_reference_field(void* instance, int level) {
     ref.field.set_level(level != 0);
 }
 // Real board clock/sync events for the bounded synchronous profile. sync=0:
-// clocks only; 1: leading HSYNC; 2: coincident leading HSYNC/VSYNC.
+// clocks only; 1: leading HSYNC; 2: coincident leading HSYNC/VSYNC;
+// 3: leading VSYNC before its associated HSYNC.
 EXPORT int xlle_nv2a_reference_encoder_advance(void* instance,uint64_t clocks,unsigned sync) {
     auto& ref=*static_cast<Reference*>(instance);
     if(!ref.failure.empty())return 0;
-    if(sync>2) { ref.failure="invalid encoder sync event";return 0; }
+    if(sync>3) { ref.failure="invalid encoder sync event";return 0; }
     xlle::Cx25871Timing::State before;
     const bool known=ref.encoder->timing_state(before);
     if(!ref.encoder->advance_timing(clocks))return 0;
-    if(sync && !ref.encoder->input_sync(sync==2))return 0;
+    if(sync==3 ? !ref.encoder->input_vsync() : sync && !ref.encoder->input_sync(sync==2))return 0;
     ref.sample_encoder_field(known?&before:nullptr);return 1;
 }
 EXPORT int xlle_nv2a_reference_encoder_timing(void* instance,uint64_t* values,int* signal) {
@@ -215,6 +216,9 @@ EXPORT int xlle_nv2a_reference_encoder_timing(void* instance,uint64_t* values,in
     xlle::Cx25871Timing::State state;
     if(!values || !signal || !ref.encoder->timing_state(state)) {
         ref.failure="encoder timing observation lacks established state/destination";return 0;
+    }
+    if(!state.output_phase_known || !state.subcarrier_phase_known) {
+        ref.failure="encoder full timing observation requires qualified raster/color phase";return 0;
     }
     values[0]=state.clocks;values[1]=state.input_x;values[2]=state.input_y;
     values[3]=state.output_x;values[4]=state.output_y;values[5]=state.subcarrier_phase;

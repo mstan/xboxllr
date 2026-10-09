@@ -1393,3 +1393,54 @@ context transfer, remaining texture layouts, vertex/CPU aperture clients and
 actual-title resource lifetime stay open. Texel-center comparisons do not claim
 complete point/bilinear/mipmap behavior or asynchronous texture-cache timing.
 No console access occurred; the family count remains **4/9**.
+
+## Encoder reset between incoming sync edges - 2026-10-09
+
+Conexant 100381B sections 1.3.4, 1.3.14/15 and 1.3.31 establish that a slave
+timing reset need not align with the GPU's incoming sync. The first actual
+HSYNC/VSYNC combination selects even FIELD; the second resynchronizes odd.
+For progressive input, VSYNC can precede the associated HSYNC. FIELD changes
+two CLKI cycles after that horizontal edge. The maintained timing component now
+accepts this sequence without resetting the GPU or inventing missing edges.
+
+The first nonaligned frame leaves transient analog raster phase unknown; the
+second establishes the odd raster origin. Automatic color-frame phase after
+nonaligned resynchronization remains unknown until explicit timing reset.
+DIS_SCRST retains a qualified free-running subcarrier accumulator. Observation
+flags distinguish these cases; the exported full-timing query rejects unknown
+phase before changing any caller output. Original FIELD queries still execute
+against their independently established digital signal.
+
+Validation on the final reference DLL:
+
+- Software NV2A, FP timing, tile commands and SMBus/encoder suites: **4/4,
+  0.52s**. Encoder tests cover 48 PAL/NTSC, color-reset, first-edge and VSYNC-lead
+  configurations, each with two resets (96 lifetimes). Six additional runs
+  connect the real FP timing component to the encoder across three explicit
+  GPU origins, resetting only the encoder. Active-mode fixture inputs do not
+  establish guest register activation or the missing handshake.
+- Native GPU transport, AV guard, original HAL/FIELD timing, unknown-phase
+  output preservation and existing HLE graphics ABI/scheduler: **6/6, 3.03s**.
+  Three slave-device lifetimes run the shifted reset through original kernel
+  calls, retaining the existing master/polarity/high-impedance cases.
+- Original query/trap/fence: nine cases across three lifetimes; original IRQ/DPC
+  callback fixture: 228 callbacks across three lifetimes, no errors. Private
+  results: `build/blinx/gpu-{completion,callback}-encoder-phase.aot-private.json`.
+- Actual LLE Blinx: **9.297s**, exit 2, no timeout; unchanged
+  `CX25871 standard readback requires established EN_REG_RD state` stop before
+  frames. Manifest: `build/blinx/gpu-lle-title-encoder-phase/run.aot-private.json`.
+
+Reference DLL SHA-256:
+`4d6425e456173442e346fa02893837e6bc1f121bfd34696a704cf495639171ed`.
+Native contract executable SHA-256:
+`3bb801ce2c4c8372a2df7c487542b773b40a006ae367cf268af39331532a66a5`.
+The title executable and stable HLE game pin `439a45b` are unchanged. No HLE
+production change, full analog waveform claim or new hardware observation.
+
+Cromwell revision `86f547387184d1001d377cce97d3756c8acf91cc` was inspected as a
+reference for GPU programming followed by encoder setup and TIMING_RST. It
+does not supply the missing FD6806A0 semantics; no GPL implementation body was
+copied. Attribution records the exact files. Startup state, timing activation,
+board clock routing, context transfer and remaining GPU clients stay open.
+The prepared hardware observation remains unexecuted pending authorization.
+The family count remains **4/9**.

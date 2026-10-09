@@ -289,6 +289,29 @@ static void gpu_test_timing_field(uint32_t expected)
     CHECK(!pilot_io_device_lle(2,memory,args,&result));
     CHECK(MEM32(0x15004)==expected && MEM32(0x15000)==0x11223344 && MEM32(0x15008)==0x55667788);
 }
+static void test_gpu_lle_encoder_phase_guard(void)
+{
+    install_fault_handler();CHECK(!pilot_io_device_files(memory));
+    gpu_lle_open();
+    gpu_test_timing_hal_write(0xba,0x80);
+    gpu_test_timing_hal_write(0xba,0x20);
+    gpu_test_timing_hal_write(0xc6,0x9c);
+    gpu_test_timing_hal_write(0xc4,1);
+    gpu_test_timing_hal_write(0x6c,0xc6);
+    CHECK(gpu_lle.encoder_advance(gpu_lle.device,13,3));
+    CHECK(gpu_lle.encoder_advance(gpu_lle.device,7,1));
+    CHECK(gpu_lle.encoder_advance(gpu_lle.device,2,0));
+    gpu_test_timing_field(0); // FIELD is established independently of color phase
+    uint64_t state[7];int signal=-99;
+    for(unsigned i=0;i<7;++i)state[i]=0x123456789abcdef0ull+i;
+    CHECK(!gpu_lle.encoder_timing(gpu_lle.device,state,&signal));
+    const char *error=gpu_lle.error(gpu_lle.device);
+    CHECK(error && strstr(error,"qualified raster/color phase"));
+    for(unsigned i=0;i<7;++i)CHECK(state[i]==0x123456789abcdef0ull+i);
+    CHECK(signal==-99);
+    // The rejected observation is terminal; it publishes no partial state.
+    fprintf(stderr,"PASS: original AV FIELD works after shifted reset; full timing rejects unknown color/raster phase without changing caller output\n");
+}
 static void test_gpu_lle_encoder_timing(void)
 {
     install_fault_handler();CHECK(!pilot_io_device_files(memory));
@@ -322,6 +345,25 @@ static void test_gpu_lle_encoder_timing(void)
             CHECK(gpu_lle.encoder_advance(gpu_lle.device,940800,0));
             CHECK((pilot_cpu_in8(0x80c0)&0x60)==0x40);
         }
+        if(slave) {
+            // Original HAL reset between external sync edges. VSYNC precedes
+            // HSYNC by seven actual CLKI cycles, with no GPU phase reset.
+            gpu_test_timing_hal_write(0x6c,0xc6);gpu_test_timing_field(1);
+            CHECK(gpu_lle.encoder_advance(gpu_lle.device,13,3));gpu_test_timing_field(1);
+            CHECK(gpu_lle.encoder_advance(gpu_lle.device,7,1));gpu_test_timing_field(1);
+            CHECK(gpu_lle.encoder_advance(gpu_lle.device,1,0));gpu_test_timing_field(1);
+            CHECK(gpu_lle.encoder_advance(gpu_lle.device,1,0));gpu_test_timing_field(0);
+            for(unsigned line=1;line<=600;++line) {
+                unsigned clocks=784-(line==1?2:0);
+                if(line==600) {
+                    CHECK(gpu_lle.encoder_advance(gpu_lle.device,clocks-7,3));gpu_test_timing_field(0);
+                    CHECK(gpu_lle.encoder_advance(gpu_lle.device,7,1));
+                } else CHECK(gpu_lle.encoder_advance(gpu_lle.device,clocks,1));
+            }
+            gpu_test_timing_field(0);
+            CHECK(gpu_lle.encoder_advance(gpu_lle.device,1,0));gpu_test_timing_field(0);
+            CHECK(gpu_lle.encoder_advance(gpu_lle.device,1,0));gpu_test_timing_field(1);
+        }
         gpu_test_timing_hal_write(0xc6,0xbc);gpu_test_timing_field(0);
         gpu_test_timing_hal_write(0x6c,0xc6);gpu_test_timing_field(0);
         CHECK(gpu_lle.encoder_timing(gpu_lle.device,state,&signal));
@@ -337,7 +379,7 @@ static void test_gpu_lle_encoder_timing(void)
             CHECK(MEM32(0x15004)==0xcccccccc);
             // The original machine deliberately keeps a terminal device fault.
             // No further kernel mutations/unbinds are valid in this process.
-            fprintf(stderr,"PASS: original HAL timing reset, actual clocks/slave sync, original AV FIELD reads, phase/polarity/gating; five clean teardowns and sixth lifetime rejects undriven FIELD\n");
+            fprintf(stderr,"PASS: original HAL timing reset, actual aligned/shifted slave sync and separated VSYNC, original AV FIELD reads, polarity/gating; five clean teardowns and sixth lifetime rejects undriven FIELD\n");
             return;
         }
         gpu_lle.destroy(gpu_lle.device);gpu_lle.device=NULL;

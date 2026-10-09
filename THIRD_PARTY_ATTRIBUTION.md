@@ -1102,8 +1102,23 @@ HSYNC/VSYNC synchronization, two-CLKI FIELD delay, polarity and output gating.
 Table C-1 supplies independent PAL/NTSC counter and increment expectations.
 This is an authored event-driven model, not copied vendor or emulator code.
 Tests supply explicit board clock/sync events; connection to the title's
-actual NV2A timing source, arbitrary slave phases, asynchronous/fractional
+actual NV2A timing source, asynchronous/fractional
 timing, PLL settling, filtering and analog waveforms remain unqualified.
+
+The subsequent slave-phase extension additionally uses sections 1.3.14/15:
+VSYNC precedes or coincides with the HSYNC starting the progressive frame.
+Independently authored tests connect the existing FP timing component at
+explicit active-mode origins and exercise the original HAL/AV caller boundary.
+Unspecified transient raster/color phase is tracked as unknown, not inferred
+from FIELD. This does not establish the guest mode-activation transaction.
+
+[XboxDev Cromwell](https://github.com/XboxDev/cromwell/tree/86f547387184d1001d377cce97d3756c8acf91cc),
+revision `86f547387184d1001d377cce97d3756c8acf91cc`, was inspected on 2026-10-09:
+`drivers/video/BootVgaInitialization.c` and `drivers/video/VideoInitialization.c`
+show GPU programming followed by encoder configuration, timing reset and
+output enable. Credit belongs to the Cromwell authors and contributors.
+Its GPL-2.0 source remains an external behavioral reference; no code bodies,
+tables or linked dependencies were incorporated. It did not resolve FD6806A0.
 
 ## AV GPIO and digital screen-off behavioral references
 

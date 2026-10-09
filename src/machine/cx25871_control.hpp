@@ -138,6 +138,7 @@ public:
     bool timing_selected() const { return timing_selected_; }
     bool advance_timing(uint64_t clocks) { return timing_.advance(clocks); }
     bool input_sync(bool vertical) { return timing_.sync(vertical); }
+    bool input_vsync() { return timing_.vertical_sync(); }
     bool timing_state(Cx25871Timing::State& state) const { return timing_.state(state); }
     // -1 unknown; -2 high impedance; otherwise physical FIELD low/high.
     int field_signal() const {

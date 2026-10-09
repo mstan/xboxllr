@@ -1,5 +1,6 @@
 #include "machine/cx25871_control.hpp"
 #include "machine/mcpx_av_outputs.hpp"
+#include "machine/nv2a_fp_timing.hpp"
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -58,6 +59,7 @@ static void encoder_timing() {
         if(slave) {
             CHECK(!encoder.advance_timing(h+1) && !fault.empty());fault.clear();
             CHECK(encoder.timing_state(state) && state.clocks==0);
+            CHECK(encoder.input_sync(true)); // a real first edge can coincide with reset
             CHECK(!encoder.input_sync(false) && !fault.empty());fault.clear();
             CHECK(encoder.advance_timing(h));
             CHECK(!encoder.input_sync(true) && !fault.empty());fault.clear();
@@ -82,6 +84,88 @@ static void encoder_timing() {
         write(0x88,1);CHECK(!encoder.timing_state(state)); // unsupported fractional line
         CHECK(!encoder.write_byte(0x6c,0xc6) && !fault.empty());fault.clear();
         CHECK(!encoder.timing_state(state));
+    }
+}
+
+static void encoder_slave_phase() {
+    using Timing=xlle::Cx25871Timing;
+    // Specification-derived event schedules, independent of the model's
+    // counters: reset can occur between HSYNCs and before any input line.
+    for(bool pal:{false,true})for(bool free_color:{false,true}) {
+        const uint32_t h=pal?944:784,v=pal?625:600,hout=pal?1888:1792;
+        for(uint32_t first_h:{0u,1u,h/2,h-1})for(uint32_t lead:{0u,2u,h-2}) {
+            std::string fault;Timing timing([&](const std::string& why){fault=why;});
+            Timing::Config config{h,v,hout,pal?625u:525u,0x20800001,pal,free_color,true};
+            for(unsigned lifetime=0;lifetime<2;++lifetime) {
+                CHECK(timing.reset(config));uint64_t now=0;
+                auto advance_to=[&](uint64_t target) {
+                    CHECK(target>=now && timing.advance(target-now));now=target;
+                };
+                unsigned frames=0;
+                for(unsigned line=0;line<=7+3*v;++line) {
+                    const uint64_t edge=first_h+uint64_t(line)*h;
+                    const bool frame=line>=7 && (line-7)%v==0;
+                    if(frame && lead) {
+                        advance_to(edge-lead);CHECK(timing.vertical_sync());
+                        Timing::State before;CHECK(timing.state(before));
+                        CHECK(before.field_even==bool(frames&1));
+                    }
+                    advance_to(edge);CHECK(timing.sync(frame && !lead));
+                    Timing::State state;CHECK(timing.state(state));
+                    CHECK(state.input_x==0 && state.input_y==(line<7?line+1:(line-7)%v));
+                    CHECK(state.field_even==bool(frames&1));
+                    if(frame) {
+                        ++frames;
+                        CHECK(state.output_phase_known==(frames>=2));
+                        CHECK(state.subcarrier_phase_known==free_color);
+                        if(frames>=2) {
+                            CHECK(state.output_x==((frames&1)?hout/2:0));
+                            CHECK(state.output_y==((frames&1)?(pal?312u:262u):0));
+                        }
+                        CHECK(timing.advance(1));++now;CHECK(timing.state(state));
+                        CHECK(state.field_even==bool((frames-1)&1));
+                        CHECK(timing.advance(1));++now;CHECK(timing.state(state));
+                        CHECK(state.field_even==bool(frames&1) && state.field_transitions==frames);
+                        if(free_color)CHECK(state.subcarrier_phase==uint32_t(uint32_t(now)*config.subcarrier_increment));
+                    }
+                }
+                CHECK(frames==4 && fault.empty());
+            }
+        }
+    }
+    // Two real components connected without resetting the GPU to align the
+    // encoder. These are explicit active-mode fixture origins, not inferred
+    // guest mode-activation/FD6806A0 semantics or a replacement title seed.
+    for(unsigned origin:{0u,123u,776u*500+700}) {
+        std::string fault;auto fail=[&](const std::string& why){fault=why;};
+        xlle::Nv2aFpTiming gpu(fail);Timing encoder(fail);
+        xlle::Nv2aFpTiming::Mode mode{{639,775,653,685,0,639},{479,524,490,493,0,479},0x10100111};
+        CHECK(gpu.establish(mode,origin%776,origin/776));
+        const Timing::Config config{776,525,1552,525,0x12345678,false,true,true};
+        xlle::Nv2aFpTiming::State prior;CHECK(gpu.state(prior));
+        for(unsigned reset=0;reset<2;++reset) {
+            CHECK(encoder.reset(config));
+            uint64_t last_clock=prior.clocks;unsigned frames=0;
+            bool vertical_pending=false;
+            auto edge=[&](const xlle::Nv2aFpTiming::State& next) {
+                CHECK(encoder.advance(next.clocks-last_clock));last_clock=next.clocks;
+                if(next.vsync_active && !prior.vsync_active) {
+                    CHECK(encoder.vertical_sync());vertical_pending=true;
+                }
+                if(next.hsync_active && !prior.hsync_active) {
+                    CHECK(encoder.sync(false));
+                    if(vertical_pending) { ++frames;vertical_pending=false; }
+                }
+                prior=next;
+            };
+            CHECK(gpu.advance(4ull*776*525+37,edge));
+            xlle::Nv2aFpTiming::State end;CHECK(gpu.state(end));
+            CHECK(encoder.advance(end.clocks-last_clock));prior=end;
+            Timing::State state;CHECK(encoder.state(state));
+            CHECK(frames>=4 && state.field_transitions==frames &&
+                  state.field_even==bool(frames&1) && state.output_phase_known && state.subcarrier_phase_known);
+            CHECK(fault.empty());
+        }
     }
 }
 
@@ -221,6 +305,7 @@ static void reset_and_configuration() {
 
 int main() {
     encoder_timing();
+    encoder_slave_phase();
     encoder_clocks();
     av_output_pins();
     reset_and_configuration();
