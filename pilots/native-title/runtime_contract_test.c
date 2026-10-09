@@ -4,6 +4,11 @@
 #undef main
 
 #define CHECK(c) do { if (!(c)) { fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#c); ExitProcess(1); } } while (0)
+static int test_pool_owned(uint32_t pointer)
+{
+    for(unsigned i=0;i<4096;++i)if(pool_blocks[i].span && pool_blocks[i].payload==pointer)return 1;
+    return 0;
+}
 static LONG test_counter;
 static uint32_t test_lock=0x14000, test_worker_address=0x12000;
 static void test_dpc(void);

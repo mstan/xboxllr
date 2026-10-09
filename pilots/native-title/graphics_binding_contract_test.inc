@@ -57,7 +57,7 @@ static void test_graphics_resource_bindings(void)
         bind[0]=2;call_graphics(PILOT_D3D_D3DDevice_SetTexture,bind);CHECK(MEM32(header)==0x01140000);
         bind[0]=0;bind[1]=0;call_graphics(PILOT_D3D_D3DDevice_SetTexture,bind);CHECK(MEM32(header)==0x010c0000);
         bind[0]=2;call_graphics(PILOT_D3D_D3DDevice_SetTexture,bind);
-        CHECK(!vm_find(header,24) && !vm_find(data,1));
+        CHECK(!test_pool_owned(header) && !vm_find(data,1));
     }
     uint32_t length=96,header=call_graphics(PILOT_D3D_D3DDevice_CreateVertexBuffer2,&length);
     uint32_t data=graphics_vertex(header)->data;
@@ -90,7 +90,7 @@ static void test_graphics_resource_bindings(void)
         uint32_t create[]={4,4,1,1,0,6,3};header=call_graphics(PILOT_D3D_D3DDevice_CreateTexture2,create);
         uint32_t bind[]={0,header};call_graphics(PILOT_D3D_D3DDevice_SetTexture,bind);
         CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&header)==0);
-        if(previous_texture)CHECK(!vm_find(previous_texture,24));previous_texture=header;
+        if(previous_texture)CHECK(!test_pool_owned(previous_texture));previous_texture=header;
         header=call_graphics(PILOT_D3D_D3DDevice_CreateVertexBuffer2,&length);
         stream[0]=15;stream[1]=header;stream[2]=16;call_graphics(PILOT_D3D_D3DDevice_SetStreamSource,stream);
         CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&header)==0);

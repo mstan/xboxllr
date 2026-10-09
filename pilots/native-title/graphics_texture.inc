@@ -109,17 +109,19 @@ static uint32_t graphics_texture_allocate(const uint32_t *args)
     struct GraphicsTextureObject texture={0};
     texture.width=width; texture.height=height; texture.levels=levels; texture.format=format; texture.refs=1;texture.usage=usage;
     texture.bytes=graphics_level_offset(&texture,levels);
-    unsigned slot=graphics_texture_unused(); uint32_t bytes=4096;
-    if(vm_allocate(&texture.header,0,&bytes,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE)) return 0;
-    bytes=texture.bytes;
+    /* Headers are small guest objects, not private 4 KiB allocations. Reuse
+     * the maintained pool service, including its original-kernel selection,
+     * without changing header bytes or caller/binding ownership. */
+    unsigned slot=graphics_texture_unused();uint32_t bytes=texture.bytes;
+    texture.header=pool_allocate(24,0x48584554u);if(!texture.header)return 0;
     if(vm_allocate(&texture.data,0,&bytes,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE)) {
-        bytes=0; if(vm_free(&texture.header,&bytes,MEM_RELEASE))stop("texture header cleanup failed",texture.header);
+        pool_free(texture.header);
         return 0;
     }
     int32_t result=pilot_gfx_texture_create_usage(width,height,levels,format,usage,&texture.native);
     if(result<0) {
         bytes=0; if(vm_free(&texture.data,&bytes,MEM_RELEASE))stop("texture data cleanup failed",texture.data);
-        bytes=0; if(vm_free(&texture.header,&bytes,MEM_RELEASE))stop("texture header cleanup failed",texture.header);
+        pool_free(texture.header);
         if((uint32_t)result!=0x8007000eu)stop("native texture creation failed",(uint32_t)result);
         return 0;
     }
@@ -189,8 +191,7 @@ static void graphics_texture_collect(unsigned slot)
         pilot_gfx_texture_destroy(object->native);
         uint32_t bytes=0; if(vm_free(&object->data,&bytes,MEM_RELEASE))stop("texture data release failed",object->data);
     }
-    uint32_t bytes=0;
-    if(vm_free(&object->header,&bytes,MEM_RELEASE))stop("texture header release failed",object->header);
+    pool_free(object->header);
     memset(object,0,sizeof(*object));
     if(parent)graphics_texture_ref(parent-1,0);
 }
@@ -267,8 +268,8 @@ static uint32_t graphics_texture_surface(uint32_t header,unsigned level)
     struct GraphicsTextureObject *texture=&graphics_textures[parent];
     if(texture->guest_owned)stop("caller-owned GPU alias surface view outside qualified scope",header);
     if(texture->parent || level>=texture->levels)stop("invalid texture surface level",level);
-    struct GraphicsTextureObject surface={0}; uint32_t bytes=4096;
-    if(vm_allocate(&surface.header,0,&bytes,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE))return 0;
+    struct GraphicsTextureObject surface={0};
+    surface.header=pool_allocate(24,0x48584554u);if(!surface.header)return 0;
     surface.parent=parent+1; surface.level=level; surface.levels=1; surface.refs=1;
     surface.width=graphics_level_width(texture,level); surface.height=graphics_level_height(texture,level);
     surface.format=texture->format; surface.data=texture->data+graphics_level_offset(texture,level);

@@ -40,8 +40,8 @@ static void test_graphics_target_binding(void)
     CHECK(pilot_gfx_texture_readback(graphics_textures[graphics_texture_slot(textures[1])].native,0,pixels,sizeof(pixels))==0 && pixels[0]==0x12345657 && pixels[1]==0xffffff57);
     uint32_t disabled[]={0,0};call_graphics(PILOT_D3D_D3DDevice_SetRenderTarget,disabled);
     CHECK(graphics_target==views[0] && !call_graphics(PILOT_D3D_D3DDevice_GetDepthStencilSurface2,NULL));
-    CHECK(!vm_find(views[1],24));
-    uint32_t restored[]={back,depth};call_graphics(PILOT_D3D_D3DDevice_SetRenderTarget,restored);CHECK(!vm_find(views[0],24));
+    CHECK(!test_pool_owned(views[1]));
+    uint32_t restored[]={back,depth};call_graphics(PILOT_D3D_D3DDevice_SetRenderTarget,restored);CHECK(!test_pool_owned(views[0]));
     for(unsigned i=0;i<2;++i)CHECK(call_graphics(PILOT_D3D_D3DResource_Release,textures+i)==0);
     CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&back)==back_refs && call_graphics(PILOT_D3D_D3DResource_Release,&depth)==depth_refs);
     CHECK(vm_committed(0,0x100000000ull)==resident);
@@ -170,15 +170,21 @@ static void test_graphics_texture_capacity(void)
     uint32_t headers[520],create[]={4,4,1,1,0,6,3};
     for(unsigned pass=0;pass<2;++pass) {
         for(unsigned i=0;i<520;++i) {
-            headers[i]=call_graphics(PILOT_D3D_D3DDevice_CreateTexture2,create);CHECK(headers[i]);
+            headers[i]=call_graphics(PILOT_D3D_D3DDevice_CreateTexture2,create);CHECK(headers[i] && test_pool_owned(headers[i]));
             for(unsigned p=0;p<16;++p)MEM32(MEM32(headers[i]+4)+p*4)=0xff000000u+i;
         }
+        uint64_t used=vm_committed(0,0x100000000ull)-resident;
+        /* Payloads still own their real pages. Small guest headers must fit
+         * in shared pool pages instead of costing a second page per texture. */
+        CHECK(used<=520ull*4096+16*4096);
+        fprintf(stderr,"[TEXTURE MEMORY] 520 live textures: %llu guest bytes including headers\n",(unsigned long long)used);
         for(unsigned i=0;i<520;++i) {
             unsigned slot=graphics_texture_slot(headers[i]);uint32_t pixels[16];
             graphics_texture_upload(&graphics_textures[slot],0);
             CHECK(!pilot_gfx_texture_readback(graphics_textures[slot].native,0,pixels,sizeof(pixels)));
             for(unsigned p=0;p<16;++p)CHECK(pixels[p]==0xff000000u+i);
             CHECK(!call_graphics(PILOT_D3D_D3DResource_Release,headers+i));
+            CHECK(!test_pool_owned(headers[i]));
         }
         CHECK(vm_committed(0,0x100000000ull)==resident);
     }
@@ -202,7 +208,7 @@ static void test_graphics_textures(void)
         unsigned block=test>=5?(format==0xc?8:16):0;
         create[0]=width;create[1]=height;create[3]=0;create[5]=format;
         uint32_t texture=call_graphics(PILOT_D3D_D3DDevice_CreateTexture2,create);
-        CHECK(texture && MEM32(texture)==0x01040001u && MEM32(texture+16)==0);
+        CHECK(texture && test_pool_owned(texture) && MEM32(texture)==0x01040001u && MEM32(texture+16)==0);
         CHECK(call_graphics(PILOT_D3D_D3DBaseTexture_GetLevelCount,&texture)==levels);
         unsigned native=graphics_textures[graphics_texture_slot(texture)].native;
         unsigned char *linear=malloc(width*height*bpp),*pixels=malloc(width*height*bpp);
@@ -216,6 +222,7 @@ static void test_graphics_textures(void)
             uint32_t surface=call_graphics(PILOT_D3D_D3DTexture_GetSurfaceLevel2,args);
             uint32_t alias=call_graphics(PILOT_D3D_D3DTexture_GetSurfaceLevel2,args);
             CHECK(surface && alias && surface!=alias && MEM32(surface)==0x01050001u && MEM32(texture)==0x01040003u);
+            CHECK(test_pool_owned(surface) && test_pool_owned(alias));
             CHECK(MEM32(surface+20)==texture && MEM32(surface+4)==MEM32(texture+4)+offset);
             uint32_t desc[]={surface,0x19504},expected[]={format,1,(format>=5 && format<=7)?1:0,bytes,0x11,w,h};
             memset(memory+0x19500,0xcd,36);
@@ -244,7 +251,7 @@ static void test_graphics_textures(void)
             MEM8(data)^=0x5a;linear[0]^=0x5a;
             CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&alias)==0 && MEM32(texture)==0x01040001u);
             CHECK(pilot_gfx_texture_readback(native,level,pixels,bytes)==0 && !memcmp(pixels,linear,bytes));
-            CHECK(!vm_find(surface,24) && !vm_find(alias,24));
+            CHECK(!test_pool_owned(surface) && !test_pool_owned(alias) && test_pool_owned(texture));
             offset+=bytes;
         }
         uint32_t args[]={texture,0};
@@ -254,7 +261,7 @@ static void test_graphics_textures(void)
         CHECK(call_graphics(PILOT_D3D_D3DResource_AddRef,&view)==2);
         CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&view)==1);
         CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&view)==0);
-        CHECK(!vm_find(texture,20) && !vm_find(data,offset));
+        CHECK(!test_pool_owned(texture) && !test_pool_owned(view) && !vm_find(data,offset));
         CHECK(vm_committed(0,0x100000000ull)==resident);
         free(pixels);free(linear);
     }

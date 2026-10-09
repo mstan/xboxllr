@@ -104,21 +104,34 @@ contiguous allocation, pin protection and allocation-counter restoration. This
 was discovered by actual Blinx execution after materializing all loaded pages;
 preventing compaction by pinning all resident pages would not satisfy the floor.
 
-Qualification of this next batch is **not complete**. The 50 original cases and
+At checkpoint `55dddc9`, qualification of this next batch was **not complete**. The 50 original cases and
 46/46 shared tests (24.21s) pass. Actual `memory-relocation-retimed-20261008`
 gets through startup and movie/title rendering, then reaches the disc-error
 screen during attract loading. `memory-residency-accounting-20261008` identifies
 a genuine original `C0000017` allocation failure: six available pages,
 48,848,896 committed VM bytes, 88,186,880 reserved bytes, 14,500 published pages.
 The old small-VM checkpoint's attract result does not qualify full residency.
-The latter remains an experimental branch and is not adopted by the game pin.
+That checkpoint was not adopted by the game pin.
 
-The HLE texture allocator currently allocates a separate 4 KiB page per header.
+The HLE texture allocator previously allocated a separate 4 KiB page per header.
 The failed run's 500 texture creations total 12,701,788 payload bytes but
 2,641,828 additional bytes of header pages/data rounding (creation totals, not
-a live-allocation census). Reusing the maintained small-pool allocator for
-headers is the next bounded hypothesis. Preserve actual kernel allocations,
-errors, ownership and the 64 MiB limit; no capacity inflation or false success.
+a live-allocation census). Texture and surface-view headers now reuse the
+maintained small-pool service: original pool allocation in the selected floor,
+native pool allocation in HLE. Header layout, references and binding ownership
+are preserved; allocation addresses may differ. Payloads still own their real
+pages. No capacity inflation or false success is introduced.
+
+The 520-live-texture test now measures **2,170,880 committed guest bytes** on
+the original allocator selection, versus the old layout's 4,259,840-byte page
+cost. Both complete release/reuse cycles retain actual uploaded/readback pixels
+and restore the starting commitment. Pool ownership assertions replace the old
+VM-reservation assertions for headers. Combined tests pass **46/46 (20.36s)**;
+the additional footprint assertions pass the focused graphics test (2.31s).
+An initial title probe reaches visible Demo play and then the subsequent movie,
+with real deferred-section unload. It was interrupted before the harness wrote
+its final manifest, so its 15 captures are progress evidence, not a completed
+qualification run. A controlled interruption/reentry run remains in progress.
 
 This is the memory boundary of the existing native loader and thread provider.
 It does not claim original Xe loader, filesystem-cache or thread-construction
