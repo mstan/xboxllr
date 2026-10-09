@@ -67,6 +67,9 @@ private:
 // AvSetDisplayMode; an absent encoder wedges the boot in an error-retry loop.
 class Cx25871 : public SmbusSlave {
 public:
+    // Optional private-capture observation of actual guest writes. This does
+    // not claim that this legacy register store models all encoder effects.
+    void observe_writes(std::function<void(uint8_t,uint8_t)> callback) { write_observer_=std::move(callback); }
     const char* name() const override { return "cx25871"; }
     uint8_t address() const override { return 0x45; }
 
@@ -79,11 +82,16 @@ public:
         return true;
     }
     bool write_byte(uint8_t cmd, uint8_t val) override {
+        if (write_observer_) write_observer_(cmd,val);
         regs_[cmd] = val;
         cmd_ = cmd;
         return true;
     }
     bool write_word(uint8_t cmd, uint16_t val) override {
+        if (write_observer_) {
+            write_observer_(cmd,static_cast<uint8_t>(val));
+            write_observer_(static_cast<uint8_t>(cmd+1),static_cast<uint8_t>(val>>8));
+        }
         regs_[cmd] = static_cast<uint8_t>(val);
         regs_[static_cast<uint8_t>(cmd + 1)] = static_cast<uint8_t>(val >> 8);
         cmd_ = cmd;
@@ -96,6 +104,7 @@ public:
     bool quick(bool) override { return true; }
 
 private:
+    std::function<void(uint8_t,uint8_t)> write_observer_;
     uint8_t regs_[256] = {0};
     uint8_t cmd_ = 0;
 };

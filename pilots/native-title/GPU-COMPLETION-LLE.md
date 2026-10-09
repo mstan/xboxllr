@@ -791,3 +791,76 @@ No new hardware contact or xemu runtime differential is claimed. Phobos's AV
 option switch was audited but not adopted: several option constants and its
 null-result early return disagree with the original kernel. Attribution records
 the donor consultation and primary specifications separately.
+
+## Encoder boot provenance and guarded boot configuration
+
+The existing kernel capture is now reproducible from the maintained machine.
+At 18,000,223 retired instructions, RAM SHA-256 is exactly
+`31ede2a0e799243b3d39033a0127147b7631950087c05306e64b4203e6ea9ed1`,
+matching `io-boot-18m.ram.bin`. The paired encoder write journal is empty and
+the original current-video-mode global is zero. The capture predates software
+encoder initialization; it did not merely lose an already programmed device.
+
+`--det-ram-dump` now emits `<ram-path>.encoder.aot-private.json` at the same
+stopped-CPU boundary, recording actual byte/word writes to the legacy boot
+encoder while captures are pending. The bounded journal stops the machine on
+overflow. RAM/sidecar open, write and close failures also stop instead of
+printing a successful capture. This is observation, not new qualification of
+the legacy encoder model. Register all capture requests before boot.
+
+The next original boot write was `FD400880=0008CFFF` (PGRAPH DEBUG_7), also
+programmed by pinned nxdk. The maintained GPU now retains and reads back this
+known configuration. Its command behavior remains unqualified: both the
+ordinary FIFO and batched route stop before consuming any GPU command under
+it. Tests verify preserved semaphore memory/counters and retained pending work,
+successful execution after fixture selection of the previously supported mode,
+rejection of unknown values, pristine reset, and rejection of live reset.
+This does not assert that `0008CFFF` and the title's `0028C3FF` draw alike.
+
+That transport change lets the original boot reach video programming:
+
+| Actual capture boundary | Encoder writes observed | Original published video mode |
+| --- | ---: | --- |
+| 18,000,223 instructions | 0 | 0 |
+| 24,000,010 instructions | 89 | 0 |
+| 36,000,406 instructions | 89 | 0 |
+| 48,500,352 instructions | 94 | `04010101` |
+
+The later boot attempt stops at 48,534,340 instructions when commands are
+submitted under the unqualified boot DEBUG_7 mode. The guard is effective in
+actual execution, not just the fixture. No boot-mode draw completion is claimed.
+An older executable (`ee1d72f9...e656c`) was used first to locate the sequence;
+the final observations above come from the rebuilt maintained source.
+
+This uses the existing approximate `--run2bl` handoff, not an authenticated MCPX
+cold boot. Source HDD writes are copy-on-write; provisioned locked-drive
+authentication is retained. Other legacy boot devices are not newly qualified.
+In particular, Conexant's specification says timing-reset commands clear
+themselves. The legacy register store retains their written bit, so a last-write
+journal is **not** a valid encoder snapshot. Neither these bytes nor the later
+RAM capture are installed in the title. The original 18m title capture and
+stable game pin remain unchanged.
+
+Reproduction from this worktree (owned inputs stay private):
+
+```powershell
+$env:PATH='C:/msys64/mingw64/bin;'+$env:PATH
+& ./build/visibility-lle/xlle.exe --boot ../machine/flash-dump-ff000000.bin --run2bl ../machine/bios-extract/bldr.bin --hdd ../machine/xbox-hdd-stockdash.img --hdd-security-file ../xboxlle/build/aot-20261002/hdd-security.key --eeprom ../machine/eeprom.bin --net-disconnected --reduced-retire-diag --machine-chunk-insns 512 --idle-fast-forward --max-insns 48500512 --det-ram-dump build/blinx/av-reference/boot-debug7-18m.ram.bin 18000000 --det-ram-dump build/blinx/av-reference/boot-debug7-48500k.ram.bin 48500000
+```
+
+Private manifest `build/blinx/av-reference/boot-provenance.aot-private.json`
+records RAM/journal hashes and the interpretation limits. Capture executable:
+`5e7adcb1d65ee510a175ef0c6d83d1f0014027c3dfe3accc6afeb08642a3ab6b`;
+GPU DLL: `79a978e96e563379c357a8ce7fed2fdc0802deaf1afb8cf22b4d2d49fe222e88`.
+Five focused software GPU/tile/compression/SMBus tests pass (0.63s), all nine
+original query/trap/fence cases across three lifetimes pass, and the compiled
+GPU transport/AV fixture passes (0.22s). OpenGL cases still skip explicitly.
+Actual `gpu-lle-title-encoder-provenance` still exits 2 at the missing encoder
+readback-state guard, 884 entries, before frames. No fresh HLE attract claim.
+
+Next: qualify original AV initialization's reached reset/timing/control effects
+against the specification and independent references, then connect that real
+initialization to the LLE launch route. GPIO/PRAMDAC dependencies must have
+their actual effects; do not transplant the legacy register store, replace
+original callees, or replay a guessed warm state. Subsequent GPU context/draw
+dependencies and the family acceptance criteria remain open. Burndown: **4/9**.

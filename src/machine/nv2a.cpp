@@ -17389,6 +17389,9 @@ void Nv2a::drain_pull_queue() {
     }
     while (!waiting_for_flip_ && !waiting_for_nop_ && pgraph_fifo_access_ &&
            !pull_queue_.empty()) {
+        if(pgraph_setup_[0x880/4]==0x0008cfffu) {
+            fault_("NV2A boot DEBUG_7 command execution remains unqualified");return;
+        }
         PushMethod push = pull_queue_.front();
         if(pgraph_context_managed_) {
             if(!(pgraph_context_control_&0x10000000u) || (pgraph_ffintfc_&0x30000000u))return;
@@ -17519,7 +17522,8 @@ uint32_t Nv2a::drain_method_run(ChannelState& ch, uint8_t channel, uint32_t max_
     // Original-driver context management must go through the queue's channel
     // admission/interrupt checks. This batching path predates those controls;
     // decline it rather than dispatching work past a pending context switch.
-    if (pgraph_context_managed_ || ram_tiles_active()) return 0;
+    if (pgraph_context_managed_ || ram_tiles_active() ||
+        pgraph_setup_[0x880/4]==0x0008cfffu) return 0;
     if (!max_words) return 0;
     uint32_t first = 0;
     if (!dma_object_address(ch.dma_instance, ch.get, first)) {

@@ -1057,6 +1057,21 @@ handling differs from the owned original kernel and nxdk's video definitions;
 that AV switch was not incorporated. Original kernel binaries and generated
 observations remain private. This checkpoint does not qualify analog output.
 
+The encoder-boot provenance follow-up consults nxdk `29638d0`'s
+`lib/pbkit/outer.h` and `pbkit.c` for the boot DEBUG_7 value `0008CFFF`.
+Pinned xemu `hw/xbox/nv2a/pgraph/gl/draw.c` documents a fragment-limit check
+controlled by bit 11. That behavior is not implemented by this checkpoint:
+only the known register value's transport is admitted, and GPU command
+execution under it stops explicitly. The existing title configuration remains
+separate. No xemu implementation body was copied.
+
+Conexant 100381B section 1.3.4 and the `SRESET`/`TIMING_RST` descriptions in
+table 2-5 distinguish software-register reset from timing reset and specify
+self-clearing commands. This prevents treating the legacy encoder's stored
+last-write bytes as a hardware snapshot. The newly recorded boot write journal
+is software-execution evidence only; its private contents are not shipped or
+silently installed as title state.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

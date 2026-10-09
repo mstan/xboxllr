@@ -204,7 +204,16 @@ bool Nv2a::pgraph_setup_write(uint32_t offset,uint32_t value) {
     for(const auto& mode:pgraph_modes)if(offset==mode.offset) {
         // DEBUG_1 cache-invalidate is a command bit, not persistent state.
         uint32_t configured=offset==0x084?value&~0x01000000u:value;
-        if(configured!=mode.value){fault_("NV2A unsupported PGRAPH pipeline configuration");return true;}
+        // The original boot driver and nxdk program DEBUG_7=0008CFFF.
+        // Preserve its register state, but do not execute commands using it:
+        // it changes fragment limit checks (among other unqualified bits).
+        // drain_pull_queue and its batching path enforce that boundary. This is
+        // transport support, not an assertion that both modes draw alike.
+        const bool boot_debug7=offset==0x880 && configured==0x0008cfffu;
+        if(configured!=mode.value && !boot_debug7){fault_("NV2A unsupported PGRAPH pipeline configuration");return true;}
+        if(offset==0x880 && configured!=pgraph_setup_[offset/4] && pgraph_status()) {
+            fault_("NV2A DEBUG_7 change while graphics busy is unqualified");return true;
+        }
         if(offset==0x084 && (value&0x01000000u))invalidate_vsh_program_cache();
         pgraph_setup_[offset/4]=configured;return true;
     }

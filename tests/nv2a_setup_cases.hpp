@@ -64,6 +64,48 @@ static void test_pgraph_setup() {
     write(0x400750,0xea0008);read(0x400754);CHECK(!failure.empty());
 }
 
+static void test_pgraph_boot_configuration() {
+    for(bool batching : {false,true}) for(bool held : {false,true}) {
+        std::string failure;
+        xlle::Nv2a gpu([&](const std::string& why){failure=why;});
+        std::vector<uint8_t> ram(8192);
+        gpu.set_pfifo_run_batching(batching);
+        gpu.set_mem_access(
+            [&](uint32_t a,void* p,size_t n){if(uint64_t(a)+n>ram.size())return false;std::memcpy(p,ram.data()+a,n);return true;},
+            [&](uint32_t a,const void* p,size_t n){if(uint64_t(a)+n>ram.size())return false;std::memcpy(ram.data()+a,p,n);return true;},
+            [&](uint32_t a,size_t n)->uint8_t*{return uint64_t(a)+n<=ram.size()?ram.data()+a:nullptr;});
+        auto read=[&](uint32_t reg){return gpu.mmio_read(0xfd000000u+reg,4);};
+        auto write=[&](uint32_t reg,uint32_t value){gpu.mmio_write(0xfd000000u+reg,4,value);};
+        write(0x400880,0x0008cfff);CHECK(failure.empty() && read(0x400880)==0x0008cfff);
+        write(0x400880,0x0008cffe);CHECK(!failure.empty() && read(0x400880)==0x0008cfff);
+        failure.clear();
+        write(0x200,0xffffefff);CHECK(failure.empty() && read(0x400880)==0);
+        write(0x200,0xffffffff);write(0x400880,0x0008cfff);
+        const uint32_t packet[]={0x40000,1,0x401a4,2,0x81d6c,4096,0x12345678};
+        std::memcpy(ram.data(),packet,sizeof(packet));put32(ram,4096,0xabcdef01);
+        const uint32_t setup[][2]={
+            {0x700008,1},{0x70000c,0x80010020},{0x700200,0x97},
+            {0x700010,2},{0x700014,0x80010030},
+            {0x700300,0x3d},{0x700304,8191},{0x700308,0},
+            {0x700180,0x3d},{0x700184,8191},{0x700188,0},
+            {0x002504,1},{0x003204,0x100},{0x00322c,0x18},{0x003244,0},
+            {0x003220,1},{0x003250,1},{0x003200,1},{0x400720,held?0u:1u}};
+        for(auto& r:setup)write(r[0],r[1]);
+        write(0x800040,sizeof(packet));
+        if(held) {CHECK(failure.empty());write(0x400720,1);}
+        CHECK(failure=="NV2A boot DEBUG_7 command execution remains unqualified");
+        CHECK(get32(ram,4096)==0xabcdef01 && gpu.push_methods()==0 && gpu.semaphore_writes()==0);
+        // A rejected command was retained, not silently completed or lost.
+        // Clearing the test's error string is not a production fallback.
+        failure.clear();write(0x400880,0x0028c3ff);write(0x400720,1);
+        CHECK(failure.empty() && read(0x400880)==0x0028c3ff);
+        CHECK(get32(ram,4096)==0x12345678 && gpu.push_methods()==4 && gpu.semaphore_writes()==1);
+        // Live reset remains outside the qualified contract; it cannot erase
+        // state and appear successful after commands have executed.
+        write(0x200,0xffffefff);CHECK(!failure.empty() && read(0x400880)==0x0028c3ff);
+    }
+}
+
 static void test_pgraph_context_admission() {
     // Exercise both parser selections with directly addressable memory: the
     // run/bulk optimization must not bypass an original-driver context hold.

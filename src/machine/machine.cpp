@@ -98,7 +98,17 @@ void XboxMachine::init_devices() {
     // retain the captured 0x00 empty-drive reset state for the dashboard.
     smc->set_tray_state_reader([this]() { return ide_ ? ide_->dvd_tray_state() : 0; });
     smbus->add_slave(std::move(smc));
-    smbus->add_slave(std::make_unique<Cx25871>());  // TV encoder (board is Conexant, silicon)
+    auto encoder=std::make_unique<Cx25871>();
+    encoder->observe_writes([this](uint8_t reg,uint8_t value) {
+        bool pending=false;
+        for(const auto& dump:det_ram_dumps_)pending|=!dump.done;
+        if(!pending)return;
+        if(captured_encoder_writes_.size()>=65536) {
+            cpu_->request_stop("encoder write capture capacity exhausted");return;
+        }
+        captured_encoder_writes_.emplace_back(reg,value);
+    });
+    smbus->add_slave(std::move(encoder));
     Amd756Smbus* smbus_raw = smbus.get();
     smbus_ = smbus_raw;
     io_devices_.push_back(std::move(smbus));
@@ -589,10 +599,28 @@ void XboxMachine::det_record_slice(const DetSlice& s) {
     for (auto& dump : det_ram_dumps_) {
         if (dump.done || total_insns_ < dump.at_insns) continue;
         dump.done = true;
-        if (std::FILE* f = std::fopen(dump.path.c_str(), "wb")) {
-            std::fwrite(ram_.data(), 1, ram_.size(), f);
-            std::fclose(f);
+        std::FILE* ram_file=std::fopen(dump.path.c_str(),"wb");
+        if(!ram_file){cpu_->request_stop("RAM capture could not be opened");return;}
+        const size_t written=std::fwrite(ram_.data(),1,ram_.size(),ram_file);
+        const int closed=std::fclose(ram_file);
+        if(written!=ram_.size() || closed) {
+            cpu_->request_stop("RAM capture could not be completed");return;
         }
+        // Same stopped CPU boundary as RAM, but recorded as actual writes,
+        // not an allegedly faithful snapshot of the legacy encoder model.
+        const std::string encoder_path=dump.path+".encoder.aot-private.json";
+        if(std::FILE* f=std::fopen(encoder_path.c_str(),"wb")) {
+            std::fprintf(f,"{\"schema\":1,\"retired\":%llu,\"writes\":[",
+                         static_cast<unsigned long long>(total_insns_));
+            for(size_t i=0;i<captured_encoder_writes_.size();++i) {
+                const auto& write=captured_encoder_writes_[i];
+                std::fprintf(f,"%s[%u,%u]",i?",":"",unsigned(write.first),unsigned(write.second));
+            }
+            std::fputs("]}\n",f);
+            bool failed=std::ferror(f)!=0;
+            if(std::fclose(f))failed=true;
+            if(failed){cpu_->request_stop("encoder write capture could not be completed");return;}
+        } else {cpu_->request_stop("encoder write capture could not be opened");return;}
         std::printf("[det] ram dump %s at insns=%llu slices=%llu digest=%016llx\n",
                     dump.path.c_str(),
                     static_cast<unsigned long long>(total_insns_),

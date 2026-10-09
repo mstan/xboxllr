@@ -323,6 +323,7 @@ private:
     Pit8254* pit_ = nullptr;
     IdeController* ide_ = nullptr;
     Amd756Smbus* smbus_ = nullptr;
+    std::vector<std::pair<uint8_t,uint8_t>> captured_encoder_writes_;
     Nv2a* nv2a_ = nullptr;
     NvNet* nvnet_ = nullptr;
     McpxApu* apu_ = nullptr;
