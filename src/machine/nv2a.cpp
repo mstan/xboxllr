@@ -1,5 +1,6 @@
 // xlle — NV2A MMIO register shell. See nv2a.hpp for the value policy.
 #include "machine/nv2a.hpp"
+#include "machine/nv2a_tile_layout.hpp"
 
 #include <algorithm>
 #include <climits>
@@ -1604,7 +1605,7 @@ bool Nv2a::clear_surface_plane(uint32_t dma_instance, bool dma_bound,
     for (uint32_t y = ymin; y <= ymax; ++y) {
         uint32_t address = first_address + (y - ymin) * pitch;
         if (write_mask != pixel_mask) {
-            if (!mem_read_ || !mem_read_(address, row.data(), row.size())) {
+            if (!ram_tile_transfer(address,row.data(),row.size(),false)) {
                 char why[128];
                 std::snprintf(why, sizeof(why),
                               "NV2A CLEAR_SURFACE %s DMA read failed at 0x%08x",
@@ -1621,7 +1622,7 @@ bool Nv2a::clear_surface_plane(uint32_t dma_instance, bool dma_bound,
                                    (clear_value & write_mask);
             std::memcpy(row.data() + x, &pixel, bytes_per_pixel);
         }
-        if (!mem_write_ || !mem_write_(address, row.data(), row.size())) {
+        if (!ram_tile_transfer(address,row.data(),row.size(),true)) {
             char why[128];
             std::snprintf(why, sizeof(why),
                           "NV2A CLEAR_SURFACE %s DMA write failed at 0x%08x",
@@ -1650,6 +1651,10 @@ bool Nv2a::clear_surface(uint32_t parameter) {
     // Seam anchor 2 (F4): a clear is a read-modify-write over the same
     // destination range as pending jobs and is ordered against them.
     seam_anchor(kSeamAnchorClearSurface, true);
+    if(!ram_tile_configuration())return false;
+    if(ram_tiles_active() && renderer_) {
+        fault_("NV2A tiled clear requires the software RAM path");return false;
+    }
     // NV2A_CLEAR: the plane fills reached from the CLEAR_SURFACE method, exclusive of the
     // resident-surface resolves they drive (those open NV2A_GL_RESOLVE).
     perf_excl::Scope region(perf_excl::kNv2aClear);
@@ -3466,6 +3471,9 @@ bool Nv2a::execute_draw_spans(DrawJob& job) {
 }
 
 bool Nv2a::submit_vertex_batch() {
+    if(ram_tiles_active()) {
+        fault_("NV2A tiled 3D draw clients are not connected");return false;
+    }
 #if XLLE_RENDERER_HLE
     return submit_hle_vertex_batch();
 #else
@@ -15649,10 +15657,16 @@ bool Nv2a::execute_image_blit_srccopy() {
         return false;
     }
     const uint32_t row_bytes = static_cast<uint32_t>(row_bytes64);
-    if (row_bytes > context_surfaces_2d_.source_pitch ||
-        row_bytes > context_surfaces_2d_.dest_pitch) {
-        fault_("NV2A IMAGE_BLIT SRCCOPY row exceeds source/dest pitch");
+    if (!context_surfaces_2d_.dest_pitch || row_bytes > context_surfaces_2d_.source_pitch) {
+        fault_("NV2A IMAGE_BLIT SRCCOPY invalid destination/source pitch");
         return false;
+    }
+    // Hardware BlitBeyondWidth permits a row wider than the destination
+    // stride. Later rows overwrite the overflow, with a tile limiting the
+    // destination extent. This is not an ordinary rectangular memcpy.
+    if(!ram_tile_configuration())return false;
+    if(ram_tiles_active() && renderer_) {
+        fault_("NV2A tiled IMAGE_BLIT requires the software RAM path");return false;
     }
     const uint64_t source_offset64 = static_cast<uint64_t>(
         context_surfaces_2d_.source_offset) +
@@ -15665,7 +15679,7 @@ bool Nv2a::execute_image_blit_srccopy() {
     const uint64_t source_span64 =
         static_cast<uint64_t>(image_blit_.height - 1) *
             context_surfaces_2d_.source_pitch + row_bytes;
-    const uint64_t dest_span64 =
+    uint64_t dest_span64 =
         static_cast<uint64_t>(image_blit_.height - 1) *
             context_surfaces_2d_.dest_pitch + row_bytes;
     if (source_offset64 > std::numeric_limits<uint32_t>::max() ||
@@ -15677,6 +15691,15 @@ bool Nv2a::execute_image_blit_srccopy() {
     }
     uint32_t source_address = 0, source_last = 0;
     uint32_t dest_address = 0, dest_last = 0;
+    if(!dma_object_address(context_surfaces_2d_.dma_dest,
+                           static_cast<uint32_t>(dest_offset64),dest_address)) {
+        fault_("NV2A IMAGE_BLIT SRCCOPY destination DMA start is invalid");return false;
+    }
+    const int dest_tile=ram_tile_at(dest_address);
+    if(dest_tile>=0) {
+        const auto& tile=pgraph_tiles_.tiles[unsigned(dest_tile)];
+        dest_span64=std::min(dest_span64,uint64_t(tile[1])+1-dest_address);
+    }
     if (!dma_object_address(context_surfaces_2d_.dma_source,
                             static_cast<uint32_t>(source_offset64),
                             source_address) ||
@@ -15711,23 +15734,28 @@ bool Nv2a::execute_image_blit_srccopy() {
         return false;
     }
     std::vector<uint8_t> row(row_bytes);
+    uint64_t written_bytes=0;
     for (uint32_t y = 0; y < image_blit_.height; ++y) {
+        const uint64_t displacement=uint64_t(y)*context_surfaces_2d_.dest_pitch;
+        if(displacement>=dest_span64)break;
+        const size_t bytes=static_cast<size_t>(std::min(uint64_t(row_bytes),dest_span64-displacement));
         const uint32_t src = source_address + y * context_surfaces_2d_.source_pitch;
         const uint32_t dst = dest_address + y * context_surfaces_2d_.dest_pitch;
-        if (!mem_read_ || !mem_read_(src, row.data(), row.size())) {
+        if (!ram_tile_transfer(src,row.data(),bytes,false)) {
             char why[128];
             std::snprintf(why, sizeof(why),
                           "NV2A IMAGE_BLIT SRCCOPY read failed at 0x%08x", src);
             fault_(why);
             return false;
         }
-        if (!mem_write_ || !mem_write_(dst, row.data(), row.size())) {
+        if (!ram_tile_transfer(dst,row.data(),bytes,true)) {
             char why[128];
             std::snprintf(why, sizeof(why),
                           "NV2A IMAGE_BLIT SRCCOPY write failed at 0x%08x", dst);
             fault_(why);
             return false;
         }
+        written_bytes+=bytes;
     }
     invalidate_renderer_color_overlap(
         dest_address, static_cast<size_t>(dest_span64),
@@ -15736,7 +15764,7 @@ bool Nv2a::execute_image_blit_srccopy() {
         dest_address, static_cast<size_t>(dest_span64),
         nv2a_invalidate_token(kNv2aInvalidateImageBlit));
     ++image_blit_copies_;
-    image_blit_bytes_ += static_cast<uint64_t>(row_bytes) * image_blit_.height;
+    image_blit_bytes_ += written_bytes;
     last_image_blit_source_ = source_address;
     last_image_blit_dest_ = dest_address;
     last_image_blit_size_ =
@@ -16385,6 +16413,9 @@ void Nv2a::dispatch_method(PushMethod push) {
         return;
     }
     if (object_class_[subchannel] != 0x97) return;
+    if(ram_tiles_active() && method==0x17fc && parameter) {
+        fault_("NV2A tiled 3D primitive clients are not connected");return;
+    }
     dispatch_micro::mark(dispatch_micro::kDmClass);
 
     // beads-xbox.1.15.1 stage (a): the 126-arm if/else-if chain that used to
@@ -17469,7 +17500,7 @@ uint32_t Nv2a::drain_method_run(ChannelState& ch, uint8_t channel, uint32_t max_
     // Original-driver context management must go through the queue's channel
     // admission/interrupt checks. This batching path predates those controls;
     // decline it rather than dispatching work past a pending context switch.
-    if (pgraph_context_managed_) return 0;
+    if (pgraph_context_managed_ || ram_tiles_active()) return 0;
     if (!max_words) return 0;
     uint32_t first = 0;
     if (!dma_object_address(ch.dma_instance, ch.get, first)) {
@@ -17861,6 +17892,12 @@ bool Nv2a::prepare_scanout(ScanoutInfo& info, uint64_t& source_size, std::string
     // Seam anchor 3 (F5): scanout reads the whole visible framebuffer out
     // of guest RAM. Guest-anchored gate point.
     seam_anchor(kSeamAnchorScanout, true);
+    if(!ram_tile_configuration()) {
+        error="NV2A scanout tile configuration is unqualified";return false;
+    }
+    if(ram_tiles_active() && renderer_) {
+        error="NV2A tiled scanout requires the software RAM path";return false;
+    }
     info = scanout_info();
     if (!mem_read_) {
         error = "NV2A scanout has no guest-memory reader";
@@ -17899,6 +17936,9 @@ const uint8_t* Nv2a::scanout_direct_bytes(ScanoutInfo& info, size_t& size,
     size = 0;
     uint64_t source_size = 0;
     if (!prepare_scanout(info, source_size, error)) return nullptr;
+    if(ram_tiles_active()) {
+        error="NV2A tiled scanout requires translated capture, not a raw pointer";return nullptr;
+    }
     if (!mem_direct_) {
         error = "NV2A scanout has no direct guest-memory pointer";
         return nullptr;
@@ -17922,7 +17962,7 @@ bool Nv2a::capture_scanout(std::vector<uint8_t>& rgba, ScanoutInfo& info,
     const uint32_t bytes_per_pixel = info.bits_per_pixel / 8;
 
     std::vector<uint8_t> source(static_cast<size_t>(source_size));
-    if (!mem_read_(info.start, source.data(), source.size())) {
+    if (!ram_tile_transfer(info.start,source.data(),source.size(),false)) {
         error = "NV2A scanout guest-memory read failed";
         return false;
     }

@@ -522,3 +522,86 @@ The tile-enabled guard is shared across all memory banks. DLL SHA-256 is
 the unchanged title executable remains `4510a9e...32f9`. HLE runtime code and
 the game pin are unchanged; no new full HLE attract pass is claimed. No console
 was contacted and no GPL implementation was copied. The burndown stays 4/9.
+
+## Tile memory clients: real blits, uncompressed clears and scanout
+
+The maintained mapper now handles actual GPU memory transfers. Original Blinx
+passes both color and depth base/limit/pitch setup; final title run
+`gpu-lle-title-tile-clients-final` stops at `FD100304=84000000`, the depth tile's
+compression configuration, after 9.000s. Both render-surface allocations and
+the real bootstrap/ISR remain present. The earlier `gpu-lle-title-tile-clients`
+run reached the same boundary before clear/scanout were added. Neither run
+renders a frame or qualifies the title's completion/callback family.
+
+Implemented behavior:
+
+- Separate PFB, PGRAPH and RDI tile banks retain programmed state. Base, limit
+  and pitch can be written in driver order; actual memory clients validate the
+  finished configuration. Unsupported flag bits, active-job reconfiguration,
+  invalid pitch/extents and overlapping tiles fail explicitly. The bounded
+  supported profile requires matching active banks; differing client views
+  remain unqualified. Enabling a tile now changes real memory behavior.
+- Image-blit source and destination transfers resolve the selected tile and
+  use the adapted layout to access physical backing in contiguous 16-byte runs.
+  Unaligned and smaller transfers retain their byte positions. Raw CPU storage
+  and PFIFO command fetch remain physical; enabling/disabling a tile does not
+  rearrange the backing bytes. Actual bus callbacks retain ownership/protection
+  checks. Cross-tile/partly tiled spans outside the tested profile fail.
+- `IMAGE_BLIT SRCCOPY` accepts rows wider than destination stride, as the
+  hardware test requires. A destination starting inside a tile clips to its
+  inclusive limit; an untiled destination can overdraw its nominal rectangle.
+  Copy counters advance only after successful memory operations. There is no
+  fabricated completion, omitted byte transfer or native renderer substitute.
+- Uncompressed color and depth/stencil clears perform translated writes and
+  masked read/modify/write. Software scanout reads through the same qualified
+  matching-bank layout and applies the existing pixel conversion. Direct
+  raw-pointer scanout declines active tiles so callers use translated capture.
+- Tiled triangle/texture/vertex draw clients and the native CPU tiled aperture
+  remain unimplemented and guarded. Primitive submission and the batching path
+  cannot bypass the draw guard. Tiled host-renderer residency remains outside
+  this software reference profile. Compression still faults at configuration;
+  no tag or compression success is invented.
+
+Qualification:
+
+- `test_nv2a_tile_commands` executes the source pattern through real
+  PFIFO/RAMHT, class `0x62` surfaces and class `0x9F` copy commands. It verifies
+  the hardware test's preserved tiled guard (`CCCCCCCC`) and overwritten
+  untiled guard (`FFC0003F`), removes the tile, and performs the final raw-memory
+  readback with another real GPU command. It does not call the layout helper
+  directly. Final captured RGBA again matches **all 140,800** pixels in the
+  pinned public hardware comparison rectangles, including the entire guard.
+- Additional executed-command cases cover tiled-source recovery, inclusive
+  last-pixel clipping, bank mismatch with no output/copy completion, denied bus
+  writes, both tile bank settings, uncompressed color/Z24S8/stencil clears,
+  red-only masked updates across partition/row boundaries, translated scanout
+  and rejected raw-pointer/unfinished primitive paths. Clear/scanout checks
+  compose existing supported method/pixel semantics with the layout; they are
+  not an additional independent hardware golden for bank 0 or every format.
+- The layout, command and existing software NV2A CTests pass together in
+  1.00s. Existing OpenGL cases explicitly skip. Nine original query/trap/fence
+  cases pass across three device lifetimes on the final DLL. Five pilot
+  GPU/device/memory checks pass in 6.31s. No native-runtime source changed and
+  no new full HLE attract pass is claimed; the stable game pin remains `439a45b`.
+
+Reproduce the actual-command hardware comparison:
+
+```powershell
+cmake --build build/visibility-lle --target test_nv2a_tile_commands
+$env:PATH='C:/msys64/mingw64/bin;'+$env:PATH
+py -3 tools/native_gpu_tile_reference.py --mode commands --fixture build/visibility-lle/test_nv2a_tile_commands.exe --golden build/blinx/tile-reference/BlitBeyondWidth.png --output build/blinx/tile-reference/commands-final-hardware.aot-private.json
+```
+
+Final DLL SHA-256:
+`67e48157079f0f3d28d2f81b5e6de6cf8100bf68d30b9a79461b16ab320b05f0`.
+Title executable remains
+`4510a9e07d2817cca90afafdda501fae23bcc9022ed72637c80dd1fe2ea032f9`.
+The command reference RGBA hash equals the preceding layout-only result;
+the new proof additionally covers actual controller selection and memory I/O.
+
+Next: the reached depth-compression configuration and tag/data contract, using
+envytools' MIT `nvhw/comp.c` and public depth-format hardware cases as reuse
+candidates, followed by remaining 3D/context/CPU-aperture dependencies. Do not
+turn compression into ignored enable bits or promote the 2D/clear cases to
+whole-renderer qualification. No hardware contact or GPL implementation copy
+occurred. The family remains open and the overall count stays 4/9.

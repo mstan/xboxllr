@@ -977,7 +977,9 @@ bounded Xbox geometry and adds checked configuration/overflow handling. The
 full MIT permission and disclaimer are retained in the source header.
 `hwtest/nv10_tile.cc` and its memory-controller field descriptions also inform
 qualification. This is distinct from the earlier reference-only consultations.
-The component has not yet been connected to the production RAM clients.
+The component now drives the software image-blit, uncompressed clear and
+scanout memory paths. Tiled 3D draw/texture/CPU-aperture clients and compression
+remain guarded pending implementation and qualification.
 
 Hardware expectations come from Erik Abair and contributors'
 [nxdk_pgraph_tests_golden_results](https://github.com/abaire/nxdk_pgraph_tests_golden_results/tree/06b041d6a50c060b4974d93617405f86a03a0b8f),
@@ -996,6 +998,15 @@ copied. The test's pinned nxdk/pbkit at
 `e22ab118fe9afbf5a3f51c47d70e9d3a5c516d6d` supplies the historical tile-flag
 sequence. Hardware qualification and its limits are recorded in
 `GPU-COMPLETION-LLE.md`; no GPL implementation body is incorporated here.
+
+`test_nv2a_tile_commands.cpp` additionally executes the hardware test procedure
+through the maintained PFIFO and 2D engines. The client integration and tests
+are authored here; the translated addresses use the attributed envytools
+component above. Pinned xemu `nv2a.c:nv_clip_gpu_tile_blit` was consulted as a
+behavioral reference, while the public hardware capture supplies the clipping
+and overdraw expectations. No xemu implementation body was copied. Envytools
+`nvhw/comp.c` and nxdk_pgraph_tests depth-format cases have been identified as
+the next compression references; no compression implementation is adopted yet.
 
 ## Theseus behavioral reference
 

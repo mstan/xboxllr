@@ -50,14 +50,88 @@ bool Nv2a::ram_config_write(RamTileConfig& config,uint32_t offset,uint32_t value
         (offset == 12 && value != 0) || (offset >= 0x90 && value != 0)) {
         fault_("NV2A RAM geometry/compression mode is not implemented"); return false;
     }
-    // The original Xbox driver uses base|1 for color and base|3 for depth.
-    // nxdk's historical base|2 setup is not an enable-bit specification.
-    // Until memory-client translation is connected, neither flag variant
-    // may silently admit identity-addressed access to a tiled surface.
-    if (offset >= 0x10 && offset < 0x30 && (value & 3)) {
-        fault_("NV2A active tile addressing needs RAM-client qualification"); return false;
+    if (offset >= 0x10 && offset < 0x30 && (value & ~0x03ffc003u)) {
+        fault_("NV2A unsupported tile address/flags"); return false;
+    }
+    // MMIO register programming precedes access. The driver can write base,
+    // limit and pitch in either order; validate the complete configuration at
+    // the memory operation. Never change the layout under an older draw job.
+    if (offset >= 0x10 && offset < 0x70 && pgraph_status()) {
+        fault_("NV2A tile reconfiguration while graphics busy is unqualified");return false;
     }
     *word=value;return true;
+}
+
+bool Nv2a::ram_tiles_active() const {
+    for (const auto* config : {&pfb_tiles_,&pgraph_tiles_,&texture_tiles_})
+        for (const auto& tile : config->tiles) if (tile[0]&1) return true;
+    return false;
+}
+
+bool Nv2a::ram_tile_configuration() {
+    for (unsigned i=0;i<8;++i) {
+        const auto& tile=pgraph_tiles_.tiles[i];
+        if (!((tile[0]|pfb_tiles_.tiles[i][0]|texture_tiles_.tiles[i][0])&1))continue;
+        // The qualified original/hardware-test path programs matching banks.
+        // Different client views need separate evidence, not implicit aliases.
+        if(tile!=pfb_tiles_.tiles[i] || tile!=texture_tiles_.tiles[i]) {
+            fault_("NV2A tile RAM-client banks disagree");return false;
+        }
+        Nv2aTileLayout layout;
+        const uint32_t base=tile[0]&0x03ffc000u;
+        if(tile[1]<base || tile[1]>=0x04000000u ||
+           !layout.configure(tile[2],(tile[0]>>1)&1)) {
+            fault_("NV2A invalid active tile extent/pitch");return false;
+        }
+        for(unsigned j=0;j<i;++j) {
+            const auto& other=pgraph_tiles_.tiles[j];
+            if((other[0]&1) && base<=other[1] && (other[0]&0x03ffc000u)<=tile[1]) {
+                fault_("NV2A overlapping active tiles are unqualified");return false;
+            }
+        }
+    }
+    return true;
+}
+
+int Nv2a::ram_tile_at(uint32_t address) const {
+    for(unsigned i=0;i<8;++i) {
+        const auto& tile=pgraph_tiles_.tiles[i];
+        if((tile[0]&1) && address>=(tile[0]&0x03ffc000u) && address<=tile[1])return int(i);
+    }
+    return -1;
+}
+
+bool Nv2a::ram_tile_transfer(uint32_t address,void* data,size_t bytes,bool write) {
+    if(!bytes)return true;
+    if(uint64_t(address)+bytes>0x04000000u)return false;
+    const int selected=ram_tile_at(address);
+    if(selected<0) {
+        // Entering another tile partway through a transfer is not covered by
+        // the hardware fixture. Do not silently treat those bytes as linear.
+        for(const auto& tile:pgraph_tiles_.tiles)
+            if((tile[0]&1) && address<(tile[0]&0x03ffc000u) &&
+               uint64_t(address)+bytes>(tile[0]&0x03ffc000u))return false;
+        return write ? mem_write_ && mem_write_(address,data,bytes)
+                     : mem_read_ && mem_read_(address,data,bytes);
+    }
+    const auto& tile=pgraph_tiles_.tiles[unsigned(selected)];
+    const uint32_t base=tile[0]&0x03ffc000u;
+    if(uint64_t(address)+bytes>uint64_t(tile[1])+1)return false;
+    Nv2aTileLayout layout;
+    if(!layout.configure(tile[2],(tile[0]>>1)&1))return false;
+    // Physical storage stays unchanged. Translate each naturally contiguous
+    // 16-byte run; this also handles unaligned and subpixel transfers.
+    for(size_t offset=0;offset<bytes;) {
+        uint32_t linear=address-base+uint32_t(offset),physical=0;
+        const size_t span=std::min(bytes-offset,size_t(16-(linear&15)));
+        if(!layout.translate(linear,physical) || uint64_t(base)+physical+span>uint64_t(tile[1])+1)
+            return false;
+        auto* buffer=static_cast<uint8_t*>(data)+offset;
+        if(write ? !mem_write_ || !mem_write_(base+physical,buffer,span)
+                 : !mem_read_ || !mem_read_(base+physical,buffer,span))return false;
+        offset+=span;
+    }
+    return true;
 }
 
 uint32_t Nv2a::pgraph_status() const {

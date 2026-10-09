@@ -1,7 +1,8 @@
 """Compare the maintained tile layout with a pinned public Xbox hardware capture.
 
-This is address-layout evidence, not a full GPU/CPU-aperture integration pass.
-The source fixture reproduces BlitBeyondWidth's copy/clip/readback sequence.
+The layout fixture models BlitBeyondWidth's copy/clip/readback sequence.
+The command fixture executes it through PFIFO and the 2D command engine.
+Neither is a full GPU/CPU-aperture integration pass.
 No console is contacted, expected pixels generated, or capture modified.
 """
 import argparse
@@ -28,6 +29,7 @@ def main():
     parser.add_argument('--fixture', type=Path, required=True)
     parser.add_argument('--golden', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--mode', choices=('layout', 'commands'), default='layout')
     args = parser.parse_args()
     if digest(args.golden) != GOLDEN_SHA256:
         raise ValueError('hardware capture differs from the pinned original PNG')
@@ -68,7 +70,10 @@ def main():
                 identity_mismatches += linear != wanted
                 count += 1
     manifest = dict(
-        version=1, scope='uncompressed pitch-2560 bank-1 tile layout; not complete GPU integration',
+        version=2, mode=args.mode,
+        scope=('uncompressed pitch-2560 bank-1 ' +
+               ('PFIFO/2D copy, clipping and tile read/write' if args.mode == 'commands' else 'tile layout') +
+               '; not complete GPU integration'),
         golden_url=GOLDEN_URL, golden_revision=GOLDEN_REVISION, golden_sha256=GOLDEN_SHA256,
         test_source_revision=TEST_REVISION,
         test_source='src/tests/image_blit_tests.cpp:TestBlitPastWidth',
