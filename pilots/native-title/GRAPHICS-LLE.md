@@ -1602,3 +1602,40 @@ programs, a third packed cache and mixed target dimensions. These require
 independent state and composition work; the census is not a pass. Full-frame
 state, target/texture composition, production raster output, enabled noise and
 original startup/lifetime remain open. **4/9** and the full goal remain active.
+
+## Multiple linear PROJECT2D textures - 2026-10-10
+
+Original setter/draw replay of all41 sampled state profiles in the complete
+input corpus exposed a default LLE raster limitation. Three draws using
+multiple pitch-linear textures reached `unsupported-texture-format`; only38
+completed. The existing linear sampler now admits explicit LU A8R8G8B8 and
+X8R8G8B8 on independent PROJECT2D stages. Unknown formats, insufficient row
+pitches and unqualified depth layouts retain their guards. This correctness
+fix applies by default and reuses the existing sampler implementation.
+
+The independent test uses authored endpoint colors on two/four textures with
+different sizes and padded pitches. It checks projected S/Q,T/Q coordinates,
+ARGB/XRGB alpha, exact interior pixels, unchanged background and live texture
+updates without rebinding. These follow the published
+[rectangle texture coordinates](https://registry.khronos.org/OpenGL/extensions/NV/NV_texture_rectangle.txt)
+and [independent texture stages](https://registry.khronos.org/OpenGL/extensions/NV/NV_texture_shader.txt).
+Both direct and callback memory paths run. Six negative draws require the
+named format guard and no target writes. Before the fix, the new positive
+cases produced1,072 failed assertions; afterward all956 vertex-color draw
+cases and the five NV2A/tile/zeta regression suites pass.
+
+With the rebuilt CPU reference, all41 original sampled profile draws now
+return, consume their FIFO and produce their expected vertex counts without
+LLE guards. These are representative raw state-cache profiles, not proof of
+state delivery for all4,331 draws. The input-only fixture uses retained CPU
+texture storage and fresh preowned target roots; sampled GPU bytes and native
+after-images never supply expected pixels. Noise remains explicitly disabled.
+Delivered state, target continuity, scene pixels and original resource lifetime
+remain unqualified. The family count remains **4/9**.
+
+Private evidence adds `state-profile-original.aot-private.json` and
+`state-profile-linear-fixed-original.aot-private.json` beneath
+`build/blinx/frame-inputs-firstworld-20261010/`, plus the
+`multistage-linear-*-20261010.aot-private.log` build/test logs. One focused CPU
+rebuild was needed; no new title, audio, host GPU or Xbox run occurred. Shipping
+HLE shaders and capture defaults are unchanged.

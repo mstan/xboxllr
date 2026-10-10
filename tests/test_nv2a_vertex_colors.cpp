@@ -517,6 +517,84 @@ static void alpha_volume_blend() {
     }
 }
 
+static void multistage_linear_project2d() {
+    // Independent rectangle-texture contract: S/Q,T/Q are texel coordinates,
+    // rows have explicit pitches, and X8 alpha is one. Register combiners add
+    // T0+T1 or T0*T1+T2*T3. Binary endpoint colors give exact byte expectations.
+    for (bool direct : {false,true}) for (unsigned stages : {2u,4u})
+    for (uint32_t color_code : {0x12u,0x1eu}) {
+        Fixture f(direct);f.emit(0x184,2);f.emit(0x188,2);
+        uint32_t program=0;
+        for (unsigned stage=0;stage<stages;++stage) {
+            const uint32_t base=0x1b00+stage*64,address=0xb000+stage*0x100;
+            const unsigned width=stage%2 ? 4 : 2,pitch=width*4+8;
+            // Every texel except (1,1) is blue; padding is magenta. Ignoring
+            // Q, using normalized coordinates, or tight rows changes the result.
+            for (unsigned y=0;y<2;++y)for(unsigned x=0;x<pitch/4;++x)
+                f.put(address+y*pitch+x*4,x<width ? 0x000000ff : 0x00ff00ff);
+            f.emit(base,address);f.emit(base+4,0x00010029|(color_code<<8));
+            f.emit(base+8,0x00030303);f.emit(base+12,0x4003ffc0);
+            f.emit(base+16,pitch<<16);f.emit(base+20,0x02022000);
+            f.emit(base+28,(width<<16)|2);program|=1u<<(stage*5);
+            const uint32_t coordinates=0x7000+stage*0x40;
+            for (unsigned vertex=0;vertex<4;++vertex) {
+                f.put(coordinates+vertex*16,bits(3));f.put(coordinates+vertex*16+4,bits(3));
+                f.put(coordinates+vertex*16+8,bits(0));f.put(coordinates+vertex*16+12,bits(2));
+            }
+            f.emit(0x1720+(9+stage)*4,coordinates);
+            f.emit(0x1760+(9+stage)*4,0x1042);
+        }
+        f.emit(0x1e70,program);f.emit(0x1e60,1);
+        const uint32_t color=stages==2 ? 0x08200920 : 0x08090a0b;
+        const uint32_t alpha=stages==2 ? 0x18201920 : 0x18191a1b;
+        f.emit(0xac0,color);f.emit(0x260,alpha);f.emit(0x1e40,0xc00);f.emit(0xaa0,0xc00);
+        f.emit(0x288,0xc);f.emit(0x28c,0x1c80);
+        for (unsigned pass=0;pass<2;++pass) {
+            // Mutate live storage with no texture/attribute rebind. Four-stage
+            // white multiplicands leave the authored two-color sum unchanged.
+            for (unsigned stage=0;stage<stages;++stage) {
+                const unsigned width=stage%2 ? 4 : 2,pitch=width*4+8;
+                const uint32_t color=stages==4 && stage%2 ? 0x00ffffff :
+                    (stage==0 ? (pass?0x000000ff:0x00ff0000) : 0x0000ff00);
+                f.put(0xb000+stage*0x100+pitch+4,color);
+            }
+            f.draw(0);++cases;CHECK(f.fault.empty());
+            CHECK(f.gpu->generic_combiner_executed_batches()==pass+1);
+            CHECK(f.gpu->generic_combiner_writes()>0 && f.get(Fixture::report+12)==0);
+            const uint32_t expected=(color_code==0x1e?0xff000000:0)|(pass?0x0000ffff:0x00ffff00);
+            for(unsigned y=12;y<20;++y)for(unsigned x=12;x<20;++x)
+                CHECK(f.get(Fixture::frame+(y*64+x)*4)==expected);
+            CHECK(f.get(Fixture::frame)==0xff102030);
+        }
+    }
+    // Additional stages must retain format/layout guards: a supported color
+    // with insufficient pitch and unqualified LU depth/packed formats cannot
+    // enter the legacy raw-word compatibility path.
+    for(bool direct:{false,true})for(uint32_t code:{0x12u,0x1du,0x2eu}) {
+        Fixture f(direct);f.emit(0x184,2);f.emit(0x188,2);
+        for(unsigned stage=0;stage<2;++stage) {
+            const uint32_t base=0x1b00+stage*64;
+            f.emit(base,0xb000+stage*0x100);f.emit(base+4,0x00010029|(code<<8));
+            f.emit(base+8,0x00030303);f.emit(base+12,0x4003ffc0);
+            f.emit(base+16,(code==0x12?4:16)<<16);f.emit(base+20,0x02022000);
+            f.emit(base+28,0x00020002);
+        }
+        f.emit(0x1e70,0x21);f.emit(0x1e60,1);f.emit(0xac0,0x08200920);
+        f.emit(0x260,0x18201920);f.emit(0x1e40,0xc00);f.emit(0xaa0,0xc00);
+        f.draw(0);++cases;CHECK(!f.fault.empty());
+        CHECK(!f.gpu->generic_combiner_executed_batches() && !f.gpu->generic_combiner_writes());
+        CHECK(f.get(Fixture::frame+(16*64+16)*4)==0xff102030);
+        bool format_guard=false;
+        for(size_t reason=0;reason<xlle::Nv2a::generic_skip_reason_count();++reason) {
+            const bool format=std::strcmp(xlle::Nv2a::generic_skip_reason_name(reason),
+                                          "unsupported-texture-format")==0;
+            if(format)format_guard=true;
+            CHECK(f.gpu->generic_skip_reason_batches(reason)==(format?1u:0u));
+        }
+        CHECK(format_guard);
+    }
+}
+
 int main() {
     packed_formats(); surface_reuse(); immediate_control();
     noise_control_boundary();
@@ -525,7 +603,7 @@ int main() {
     texture_packed_formats();
     output_defaults();
     homogeneous_clip_depth();
-    alpha_volume_blend();
+    alpha_volume_blend();multistage_linear_project2d();
     std::printf("nv2a_vertex_colors: %u draw cases, %u failures\n", cases, failures);
     return failures ? 1 : 0;
 }

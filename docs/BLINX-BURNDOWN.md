@@ -862,3 +862,14 @@ remain open; the state census records concrete newly exposed combinations.
 [FVF component details](../pilots/native-title/GRAPHICS-LLE.md#complete-frame-vertex-components-including-fvf---2026-10-10).
 No shipping code, rebuild, GPU, title, audio or hardware request changed;
 **4/9** and the full LLE goal remain active.
+
+Original full-state replay then exposed three guarded multi-stage linear
+texture draws among41 sampled raw state profiles. A default LLE correction
+reuses the existing linear sampler for explicit A8R8G8B8/X8R8G8B8 PROJECT2D
+stages, preserving format/layout guards. All956 authored vertex-color draw
+cases and five NV2A/tile/zeta regression suites pass; original sampled draws
+now complete41/41. [Correction and limits](../pilots/native-title/GRAPHICS-LLE.md#multiple-linear-project2d-textures---2026-10-10).
+The independent full-state comparison, frame target/texture composition,
+enabled noise, scene pixels and startup/lifetime remain open. A focused CPU
+rebuild was required; no title, audio, host GPU or hardware request occurred.
+The full goal remains active with **4/9** families qualified.

@@ -11361,7 +11361,13 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
         const bool normalized_format = stage_color == 4 || stage_color == 6 || stage_color == 7 ||
             stage_color == 0x19 || ((stage_color == 0xc || stage_color == 0xe || stage_color == 0xf) &&
                                   ((stage_format >> 16) & 15u));
-        if (single_stage_project2d && !normalized_format) {
+        // Independent PROJECT2D stages can each sample their own pitch-linear
+        // rectangle. Keep the legacy single-stage format admission unchanged;
+        // additional stages require explicit LU A8R8G8B8/X8R8G8B8, so unknown
+        // formats cannot become raw ARGB by falling through this branch.
+        const bool explicit_linear_argb8 = stage_color == 0x12 || stage_color == 0x1e;
+        if ((single_stage_project2d || (independent_project2d && explicit_linear_argb8)) &&
+            !normalized_format) {
             const uint32_t format = raster_state[kRasterTextureFormat0 + stage];
             const uint32_t color_code = (format >> 8) & 0xFFu;
             const bool legacy_raw_linear = format == 0;
