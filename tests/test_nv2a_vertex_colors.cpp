@@ -455,6 +455,144 @@ static void output_defaults() {
     }
 }
 
+static void colors_before_attribute_clip() {
+    // A=(-16,8), B=(48,8), C=(48,56), W=1 crosses the left viewport plane.
+    // Its intersections are (0,20)/(0,8), producing two distinct fan leaves.
+    // Clamp A=(1.5,-.5,.25,1.5), B/C=(0,1,.25,0) before clipping:
+    // at x=8.5, R/A=79/128, G=49/128, B=1/4 -> 0x9d9d6240.
+    // Clamp AFTER clipping instead: 0xd2d22d40 at both interior samples.
+    // These literal hand-computed bytes do not use any maintained decoder or
+    // clipping helper. Reflection/transposition covers all four viewport sides.
+    using Colors = std::array<std::array<float,4>,3>;
+    const Colors finite{{{{1.5f,-.5f,.25f,1.5f}},{{0,1,.25f,0}},{{0,1,.25f,0}}}};
+    const float infinity=std::numeric_limits<float>::infinity();
+    const float nan=std::numeric_limits<float>::quiet_NaN();
+    // Existing defaults are RGB NaN=0/A NaN=1, with +/-Inf saturated to 1/0.
+    // Normalized A=(1,0,0,1), B/C=(0,1,1,0) -> 0x9d9d6262.
+    // Post-clip normalization would propagate NaNs and give 0xd2002d2d.
+    const Colors nonfinite{{{{infinity,-infinity,nan,nan}},{{0,1,1,0}},{{0,1,1,0}}}};
+    const std::array<float,4> unused{{nan,infinity,-infinity,nan}};
+    auto setup = [&](Fixture& f,bool dma_b,bool specular,unsigned side,bool clipped,
+                     const Colors& colors,bool unused_specular=false) {
+        const float clipped_xy[][2]={{-16,8},{48,8},{48,56}};
+        const float interior_xy[][2]={{8,8},{56,8},{8,56}};
+        for(unsigned i=0;i<3;++i) {
+            const float u=(clipped?clipped_xy:interior_xy)[i][0];
+            const float v=(clipped?clipped_xy:interior_xy)[i][1];
+            const float x=side==0?u:side==1?64-u:v;
+            const float y=side<2?v:side==2?u:64-u;
+            const float position[]={x,y,10,1};
+            for(unsigned lane=0;lane<4;++lane) {
+                f.put(Fixture::positions+(i+1)*16+lane*4,bits(position[lane]));
+                f.put(Fixture::colors+(i+1)*16+lane*4,bits(colors[i][lane]));
+                if(unused_specular)
+                    f.put(Fixture::colors+0x100+(i+1)*16+lane*4,bits(unused[lane]));
+            }
+        }
+        const uint32_t dma=dma_b?0x80000000u:0;
+        f.emit(0x1720,Fixture::positions|dma);f.emit(0x1760,0x1042);
+        f.emit(0x1724,Fixture::colors|dma);f.emit(0x1764,0x1042);f.emit(0x176c,0);
+        // Authored MOV v0->oPos, v1->oD0/oD1. The unused-secondary control
+        // adds MOV v2->oD1; it must remain raw and unconsumed in primary mode.
+        const uint32_t code[]={0,0x0020001b,0x08000000,0x0000f800,
+            0,0x0020021b,0x08000000,specular?0x0000f821u:unused_specular?0x0000f818u:0x0000f819u,
+            0,0x0020041b,0x08000000,0x0000f821};
+        f.emit(0x1e94,2);f.emit(0x1e9c,0);f.emit(0x1ea0,0);
+        for(unsigned i=0;i<(unused_specular?12u:8u);++i)f.emit(0xb00+i*4,code[i]);
+        if(unused_specular) {
+            f.emit(0x1728,(Fixture::colors+0x100)|dma);f.emit(0x1768,0x1042);
+        }
+        if(specular) {
+            f.emit(0xac0,0x05200000);f.emit(0x260,0x15200000); // V1 * ONE
+        }
+    };
+    auto verify = [&](Fixture& f,bool specular,unsigned side,bool clipped,
+                      const Colors& colors,const std::array<uint32_t,2>& expected,
+                      bool unused_specular=false) {
+        ++cases;
+        if(!f.fault.empty())std::printf("clip-color fault: %s\n",f.fault.c_str());
+        CHECK(f.fault.empty());
+        CHECK(f.gpu->generic_combiner_attempted_batches()==1);
+        CHECK(f.gpu->generic_combiner_executed_batches()==1);
+        CHECK(f.get(Fixture::report+12)==0 && f.get(Fixture::report+8)>0);
+        if(clipped)CHECK(f.get(Fixture::report+8)==1440);
+        CHECK(f.gpu->generic_combiner_writes()==f.get(Fixture::report+8));
+        for(size_t reason=0;reason<xlle::Nv2a::generic_skip_reason_count();++reason)
+            CHECK(f.gpu->generic_skip_reason_batches(reason)==0);
+        const unsigned clip_samples[][2]={{8,12},{8,24}};
+        const unsigned interior_samples[][2]={{16,16},{20,16}};
+        for(unsigned sample=0;sample<2;++sample) {
+            const unsigned u=(clipped?clip_samples:interior_samples)[sample][0];
+            const unsigned v=(clipped?clip_samples:interior_samples)[sample][1];
+            const unsigned x=side==0?u:side==1?63-u:v;
+            const unsigned y=side<2?v:side==2?u:63-u;
+            const uint32_t actual=f.get(Fixture::frame+(y*64+x)*4);
+            if(actual!=expected[sample])std::printf(
+                "clip-color specular=%u side=%u clipped=%u sample=%u actual=%08x expected=%08x\n",
+                unsigned(specular),side,unsigned(clipped),sample,actual,expected[sample]);
+            CHECK(actual==expected[sample]);
+            CHECK(f.get(0x18000+(y*64+x)*4)==0xcccccccc); // depth remains disabled
+        }
+        CHECK(f.get(Fixture::frame)==0xff102030);
+        CHECK(f.get(Fixture::frame+(63*64+63)*4)==0xff102030);
+        const auto& raw=f.gpu->last_transformed_batch();
+        CHECK(raw.size()==3);
+        if(raw.size()==3)for(unsigned vertex=0;vertex<3;++vertex) {
+            const auto& color=specular?raw[vertex].specular:raw[vertex].diffuse;
+            for(unsigned lane=0;lane<4;++lane) {
+                if(std::isnan(colors[vertex][lane]))CHECK(std::isnan(color[lane]));
+                else CHECK(bits(color[lane])==bits(colors[vertex][lane]));
+                if(unused_specular) {
+                    if(std::isnan(unused[lane]))CHECK(std::isnan(raw[vertex].specular[lane]));
+                    else CHECK(bits(raw[vertex].specular[lane])==bits(unused[lane]));
+                }
+            }
+            // Original shader positions and W also survive the local raster
+            // copies: a clipped-away vertex remains in this raw observer.
+            for(unsigned lane=0;lane<4;++lane)
+                CHECK(bits(raw[vertex].position[lane])==f.get(Fixture::positions+(vertex+1)*16+lane*4));
+        }
+    };
+    for(bool direct:{false,true})for(bool compiled:{false,true})for(bool dma_b:{false,true}) {
+        for(bool specular:{false,true}) {
+            for(unsigned side=0;side<4;++side) {
+                Fixture f(direct);f.gpu->set_vsh_compile_enabled(compiled);
+                setup(f,dma_b,specular,side,true,finite);f.draw(0);
+                verify(f,specular,side,true,finite,{{0x9d9d6240,0x9d9d6240}});
+            }
+            // Without clipping, barycentric A is 31/48 at (16.5,16.5), 27/48
+            // at (20.5,16.5). Normalization must retain the old smooth result.
+            {
+                Fixture f(direct);f.gpu->set_vsh_compile_enabled(compiled);
+                setup(f,dma_b,specular,0,false,finite);f.draw(0);
+                verify(f,specular,0,false,finite,{{0xa5a55a40,0x8f8f7040}});
+            }
+            for(bool clipped:{false,true}) {
+                Fixture f(direct);f.gpu->set_vsh_compile_enabled(compiled);
+                setup(f,dma_b,specular,0,clipped,nonfinite);f.draw(0);
+                verify(f,specular,0,clipped,nonfinite,clipped
+                    ?std::array<uint32_t,2>{{0x9d9d6262,0x9d9d6262}}
+                    :std::array<uint32_t,2>{{0xa5a55a5a,0x8f8f7070}});
+            }
+            // The first provoking vertex is outside the viewport. Both fan
+            // leaves must receive its normalized color, or the last vertex's
+            // color, even though neither raw observer is rewritten.
+            for(bool first:{false,true}) {
+                Fixture f(direct);f.gpu->set_vsh_compile_enabled(compiled);
+                setup(f,dma_b,specular,0,true,finite);
+                f.emit(0x37c,0x1d00);f.emit(0x9fc,first?1:0);f.draw(0);
+                const uint32_t word=first?0xffff0040:0x0000ff40;
+                verify(f,specular,0,true,finite,{{word,word}});
+            }
+        }
+        {
+            Fixture f(direct);f.gpu->set_vsh_compile_enabled(compiled);
+            setup(f,dma_b,false,0,true,finite,true);f.draw(0);
+            verify(f,false,0,true,finite,{{0x9d9d6240,0x9d9d6240}},true);
+        }
+    }
+}
+
 static void homogeneous_clip_depth() {
     // Authored window-space depth plane Z=100+8*(u-8), with varying W.
     // Reflect/transpose it across all four viewport sides. Interior samples
@@ -786,6 +924,7 @@ int main() {
     texture_mips();
     texture_packed_formats();
     output_defaults();
+    colors_before_attribute_clip();
     homogeneous_clip_depth();
     alpha_volume_blend();multistage_linear_project2d();
     stencil_pixels();

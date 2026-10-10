@@ -11,9 +11,64 @@ from native_scene_rejection_reference import W_EPSILON
 from test_native_scene_diffuse_reference import vertex,methods
 from test_native_scene_clamp_reference import texture
 from test_native_frame_target_reference import target
+from native_scene_clamp_reference import texture_error_bound,precision_domain,clamp_vertices
 
 
 class MixedClipControls(unittest.TestCase):
+    def unused_palette_inputs(self):
+        vertices=[vertex(16,2,-1),vertex(-16,0,1),vertex(-16,4,1)]
+        for v in vertices:v[4:7]=[1.,1.,1.]
+        scene={'before':[{'shape':[16,1,87]},{'shape':[16,1,44]}],
+               'textures':[texture((31 << 11)|(13 << 5),15 << 5,3)],
+               'frame_resource_plan':{'target_ids':[1,2]}}
+        targets={1:target(1,width=16,height=1),2:target(2,1,width=16,height=1,fmt=44)}
+        before={1:bytes(range(64)),2:bytes(reversed(range(64))),3:b'independent other root'}
+        m=methods();m.update({0x38c:0x1b02,0x390:0x1b02,0x308:1,0x39c:0x404})
+        return vertices,scene,targets,before,m
+
+    def test_unused_palette_error_cannot_reject_a_proven_empty_draw(self):
+        v,scene,targets,before,m=self.unused_palette_inputs()
+        # Exact rational green: (255*13/63+2*255*15/63)/3 =3655/63.
+        # The maintained palette's selected green is57, giving64/63 codes.
+        errors=texture_error_bound(scene['textures'][0])
+        self.assertEqual(errors,[Fraction(0),Fraction(64,63),Fraction(0)])
+        with self.assertRaisesRegex(ValueError,'one-code bound'):
+            precision_domain(errors,clamp_vertices(v))
+        with patch('native_scene_mixed_clip_reference.expected_delivery',return_value=(m,{},{})):
+            storage,writes,row=expected_empty_mixed_draw({'header':[0,0,6]},scene,v,[0]*3,
+                                                       targets,before,'fma-b-first','fma')
+        self.assertEqual(storage,before);self.assertIsNot(storage,before);self.assertFalse(writes)
+        self.assertEqual(row['expanded_triangles'],0);self.assertEqual(row['tested_fragments'],0)
+        self.assertEqual(row['input_prequantization_codec_error_codes'],['0','64/63','0'])
+        self.assertTrue(row['codec_precision_unconsumed_because_no_raster_leaves'])
+
+    def test_unused_palette_exception_cannot_admit_surviving_geometry(self):
+        v,scene,targets,before,m=self.unused_palette_inputs()
+        v=[vertex(16,2,-1),vertex(0,0,1),vertex(16,0,1)]
+        for p in v:p[4:7]=[1.,1.,1.]
+        with patch('native_scene_mixed_clip_reference.expected_delivery',
+                   side_effect=AssertionError('state reached before emptiness proof')):
+            with self.assertRaisesRegex(ValueError,'Surviving mixed-W'):
+                expected_empty_mixed_draw({'header':[0,0,6]},scene,v,[0]*3,
+                                         targets,before,'fma-b-first','fma')
+        with self.assertRaisesRegex(ValueError,'one-code bound'):
+            precision_domain(texture_error_bound(scene['textures'][0]),clamp_vertices(v))
+
+    def test_empty_draw_still_requires_complete_encoded_texture(self):
+        v,scene,targets,before,m=self.unused_palette_inputs()
+        scene['textures'][0]['cpu']=b'incomplete'
+        with patch('native_scene_mixed_clip_reference.expected_delivery',return_value=(m,{},{})):
+            with self.assertRaisesRegex(ValueError,'complete supplied BC1'):
+                expected_empty_mixed_draw({'header':[0,0,6]},scene,v,[0]*3,
+                                         targets,before,'fma-b-first','fma')
+
+    def test_empty_draw_still_requires_complete_owned_target_storage(self):
+        v,scene,targets,before,m=self.unused_palette_inputs();before[2]=before[2][:-4]
+        with patch('native_scene_mixed_clip_reference.expected_delivery',return_value=(m,{},{})):
+            with self.assertRaisesRegex(ValueError,'target representation'):
+                expected_empty_mixed_draw({'header':[0,0,6]},scene,v,[0]*3,
+                                         targets,before,'fma-b-first','fma')
+
     def test_w_plane_uses_positive_threshold_before_xy(self):
         v = [Fraction(0),Fraction(0),Fraction(3),Fraction(0)]+[Fraction(0)]*24
         self.assertEqual(distance(v,0),-W_EPSILON)

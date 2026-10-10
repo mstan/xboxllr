@@ -14693,6 +14693,10 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
         return true;
     };
 
+    auto sanitize_color_component = [](float value, size_t component) {
+        if (std::isnan(value)) value = component == 3 ? 1.0f : 0.0f;
+        return std::clamp(value, 0.0f, 1.0f);
+    };
     bool raster_failed = false;
     std::function<void(const TransformedVertex&, const TransformedVertex&,
                        const TransformedVertex&)>
@@ -14958,10 +14962,6 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
         std::array<std::array<float, 4>, 3> specular_values{};
         std::array<std::array<std::array<float, 4>, 3>, 4> texture_values{};
         std::array<uint8_t, 4> texture_component_masks{};
-        auto sanitize_color_component = [](float value, size_t component) {
-            if (std::isnan(value)) value = component == 3 ? 1.0f : 0.0f;
-            return std::clamp(value, 0.0f, 1.0f);
-        };
         if (needs_diffuse) {
             for (size_t vertex = 0; vertex < triangle_vertices.size(); ++vertex) {
                 for (size_t component = 0; component < 4; ++component) {
@@ -15673,11 +15673,29 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                                            const TransformedVertex& b,
                                            const TransformedVertex& c,
                                            const TransformedVertex& provoking) {
-        if (!flat_shading) { rasterize_triangle(a, b, c); return; }
+        if (!flat_shading && !needs_diffuse && !needs_specular) {
+            rasterize_triangle(a, b, c);
+            return;
+        }
         TransformedVertex copies[3] = {a, b, c};
         for (auto& vertex : copies) {
-            vertex.diffuse = provoking.diffuse;
-            vertex.specular = provoking.specular;
+            if (flat_shading) {
+                vertex.diffuse = provoking.diffuse;
+                vertex.specular = provoking.specular;
+            }
+            // Color normalization precedes homogeneous attribute clipping.
+            // Work on original primitive copies so shader observations retain
+            // their raw output, and recursive fan leaves interpolate normalized
+            // endpoints. Preserve the existing consumed-attribute gates and
+            // NaN RGB=0/alpha=1 defaults; the later leaf clamp remains defensive.
+            for (size_t component = 0; component < 4; ++component) {
+                if (needs_diffuse)
+                    vertex.diffuse[component] = sanitize_color_component(
+                        vertex.diffuse[component], component);
+                if (needs_specular)
+                    vertex.specular[component] = sanitize_color_component(
+                        vertex.specular[component], component);
+            }
         }
         rasterize_triangle(copies[0], copies[1], copies[2]);
     };

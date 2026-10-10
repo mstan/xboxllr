@@ -14,7 +14,7 @@ import struct
 from native_frame_inputs import require
 from native_scene_pixel_reference import binary32
 from native_scene_rejection_reference import W_EPSILON,retained_software_evidence,pe_bytes,expected_rejection_draw
-from native_scene_clamp_reference import clamp_vertices,texture_error_bound,precision_domain,CLAMP_ORDER
+from native_scene_clamp_reference import clamp_vertices,texture_error_bound,CLAMP_ORDER
 from native_scene_diffuse_reference import consumed_profile
 from native_frame_state_delivery import expected_delivery
 from native_frame_target_reference import layout
@@ -169,7 +169,13 @@ def expected_empty_mixed_draw(capture,scene,vertices,fog,targets,before,
     require(len(fog) == len(vertices) and all(math.isfinite(x) for x in fog),
             'Incomplete finite input fog')
     clamped = clamp_vertices(vertices)
-    errors = texture_error_bound(scene['textures'][0]);bounds = precision_domain(errors,clamped)
+    errors = texture_error_bound(scene['textures'][0])
+    # Complete clipping above proves that no raster leaf can sample this
+    # texture or consume a primary color. Keep validating encoded storage and
+    # recording its exact errors; a sampled-color error bound is unnecessary
+    # for an empty draw. Surviving draws retain their separate precision gate.
+    bounds = [e*Fraction(max(v[c] for v in clamped))
+              for e,c in zip(errors,(4,5,6))]
     for slot,target_id in enumerate(scene['frame_resource_plan']['target_ids']):
         width,height,pitch = layout(targets[target_id])
         require(pitch == width*4 and scene['before'][slot]['shape'][2] in
@@ -185,4 +191,5 @@ def expected_empty_mixed_draw(capture,scene,vertices,fog,targets,before,
         input_prequantization_codec_error_codes=list(map(str,bounds)),
         clamped_input_components=sum(a[c] != b[c] for a,b in zip(vertices,clamped) for c in (4,5,6)),
         rgb_channel_bound=1,mixed_clip_all_primitives_empty=True,
+        codec_precision_unconsumed_because_no_raster_leaves=True,
         surviving_mixed_w_pixels_qualified=False)

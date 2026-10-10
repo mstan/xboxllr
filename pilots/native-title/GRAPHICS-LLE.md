@@ -2736,3 +2736,49 @@ Frozen private failure handoff is
 Root independently verified all 2031 original observation hashes, the ten
 failed expected/actual target buffers and the red-only error counts. Complete
 scene pixels and the graphics family remain open; **4/9** stands.
+
+## Generic LLE colors normalized before clipping - 2026-10-10
+
+The maintained generic primitive dispatcher now normalizes consumed diffuse
+and specular colors on local original-primitive copies, after selecting flat
+provoking colors and before homogeneous attribute clipping. The existing
+sanitizer is reused: RGB NaN becomes zero, alpha NaN becomes one, and all
+components clamp to [0,1]. The late leaf clamp remains defensive. Raw shader
+observations, consumed-attribute gates, positions, textures and fog retain
+their prior behavior. Recursive clipped fans receive normalized endpoints.
+
+An independently authored triangle crosses the viewport and creates two fan
+leaves. Its input colors give R/alpha=79/128, G=49/128 and B=1/4 at both
+interior samples: exact packed **0x9d9d6240**. The old post-clip order gives
+**0xd2d22d40**. The preserved old DLL reproduces the latter in eight authored
+draws across diffuse/specular and all four viewport sides; a separately linked
+new DLL produces the declared pre-clip result with the identical harness and
+inputs. Raw out-of-range original shader values remain observable in both.
+
+The permanent vertex-color suite passes **1,844 authored draw cases**, including
+**152 new cases** across compiled/interpreted shaders, direct/callback memory,
+DMA A/B, all four clip sides, diffuse/specular/alpha, unclipped controls,
+nonfinite defaults, unconsumed secondary colors and clipped-away first/last
+flat provoking vertices. Depth and outside color bytes are preserved. Three
+focused CPU CTests pass; the OpenGL-only test and embedded GL fixtures are
+explicitly unavailable in this no-SDL3 build, so no new GPU-collection claim
+is made by those tests.
+
+The independent empty mixed-W routine also no longer rejects an unused
+palette precision bound after proving zero raster leaves. It still validates
+complete encoded texture, finite/profile inputs and owned target storage;
+surviving geometry retains the existing one-code precision gate. Four new
+controls use an exact **64/63** green-code palette error, reject changed visible
+geometry and incomplete texture/target storage, and preserve all independent
+roots for the empty case. All **76 scene-reference tests** pass. Clipping and
+projection equations are unchanged. This does not qualify original draw 2121.
+
+Private source/test handoff is
+`frame-inputs-firstworld-20261010/producer-color-clamp-correction-handoff.aot-private.json`
+(SHA-256 `cc46a62a702a0c292d499a8a5e55e6063bc3ef1293daee3806fe9e5f5bc5786a`).
+The side DLL in `producer-color-clamp-reference-20261010` has SHA-256
+`bf0c9c51224e9fa593d83dc525bc7c588a9af02738bce35f96749df57b357e19`;
+the old `9fdec518...` DLL and failed draw-2031 evidence remain unchanged.
+New compiled clipping/depth evidence must be reviewed before another original
+prefix replay. The reference equation and tolerance are unchanged; producer
+qualification remains **1943** and the full family remains partial **4/9**.
