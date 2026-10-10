@@ -144,7 +144,7 @@ def contract(capture, scene, observation):
     assert all(m[k]==0 for k in (0x314,0x320,0x324,0x328,0x32c,0x330,0x334,0x338))
     assert m[0x344]==0x302 and m[0x348]==0x303 and m[0x350]==0x8006
     assert m[0x2a4]==1 and m[0x29c]==0x800
-    # This retained linear fog is >=1 everywhere: p0=1.5, p1=-0.
+    # Retained EXP fog has zero density: p0=1.5, p1=-0, factor saturates to 1.
     assert m[0x9c0]==0x3fc00000 and m[0x9c4]==0x80000000 and m[0x9c8]==0
     assert capture['header'][2]==6 and not scene['header'][8]
     assert scene['textures'][0] and not any(scene['textures'][1:])
@@ -242,14 +242,18 @@ def expected_targets(capture, scene, observation, arithmetic):
         maximum_affine_depth_error=ideal_depth_error)
 
 
-def audit(captures, diagnostics, number, arithmetic):
+def audit(captures, diagnostics, number, arithmetic, expected_inputs=None):
     path=captures/f'draw-{number}.bin';capture=read_capture(path)
     scene=read_scene(captures/f'scene-{number}.bin')
     observation_path=diagnostics/f'draw-{number}.aot-private.json'
     observation=json.loads(observation_path.read_text())
-    before_color,before_depth,colors,depths,covered,stats=expected_targets(capture,scene,observation,arithmetic)
-    actual_color=list(struct.unpack('<'+'I'*len(before_color),(diagnostics/f'draw-{number}-color.bin').read_bytes()))
-    actual_depth=list(struct.unpack('<'+'I'*len(before_depth),(diagnostics/f'draw-{number}-depth.bin').read_bytes()))
+    before_color,before_depth,colors,depths,covered,stats=expected_targets(capture,scene,
+        observation if expected_inputs is None else expected_inputs,arithmetic)
+    color_bytes=(diagnostics/f'draw-{number}-color.bin').read_bytes()
+    depth_bytes=(diagnostics/f'draw-{number}-depth.bin').read_bytes()
+    assert len(color_bytes)==4*len(before_color) and len(depth_bytes)==4*len(before_depth),'Incomplete target observation'
+    actual_color=list(struct.unpack('<'+'I'*len(before_color),color_bytes))
+    actual_depth=list(struct.unpack('<'+'I'*len(before_depth),depth_bytes))
     failures=[];maximum_color=0;maximum_depth=0;coverage_failures=0
     for i,(color,depth) in enumerate(zip(actual_color,actual_depth)):
         if i not in colors:

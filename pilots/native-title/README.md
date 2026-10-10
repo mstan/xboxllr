@@ -65,11 +65,15 @@ native affine/default-Q/projected bounds pass unchanged. Exact Xbox compressed
 decoder precision stays hardware-last. CPU work uses Idle priority and one
 logical processor; GPU fixtures run only with Marvel Rivals absent. No title
 or audio rerun occurs, and this batch changes no native HLE production code.
-An explicit noise-disabled fixture now executes all 32 retained scene draws
-without guards/skips. The five changed-target captures retain color/depth
-differences for independent raster/combiner checks; no scene-pixel pass is claimed.
-Overall qualification
-remains 4/9; see [graphics evidence and remaining scope](GRAPHICS-LLE.md).
+An explicit noise-disabled fixture executes all 32 retained scene draws without
+guards/skips. The five changed-target draws now pass independent captured-input
+shader/state-to-pixel composition: 870 shader values, 385 state values, 8,025
+written and 1,527,975 untouched pixels. All 23 corrupted-case controls fail;
+two independence controls exclude native outputs/after-images from expectations.
+Comparable native HLE scenes, whole-frame/title composition and original
+enabled-noise scenes remain open. This CPU-only continuation changed no HLE
+runtime code and required no GPU/title/audio run or rebuild. Overall family
+qualification remains 4/9; see [graphics evidence and next work](GRAPHICS-LLE.md#independent-captured-input-scene-composition-2026-10-09-continuation).
 
 ## Deferred stream upload experiment (2026-10-08)
 

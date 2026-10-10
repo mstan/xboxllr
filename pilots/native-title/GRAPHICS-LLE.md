@@ -980,14 +980,82 @@ Reproduction under the owner's existing Idle/one-processor wrapper:
 & 'C:\Users\Matthew\AppData\Local\Programs\Python\Python312\python.exe' build\blinx\run_idle.py 'C:\Users\Matthew\AppData\Local\Programs\Python\Python312\python.exe' tools\native_scene_pixel_reference.py --captures build\blinx\scene-inputs-firstworld-20261009 --diagnostics build\blinx\scene-five-bias-fixed --depth-arithmetic fma-b-first --output build\blinx\scene-five-pixel-component.aot-private.json
 ```
 
-`post_transform_pixel_qualified` is now true for the five exercised draws.
-**`complete_scene_pixel_qualified` remains false**: shader/setter-to-pixel
-composition needs an independent input contract rather than using observed
-vertices/state as expected whole-scene results. The original enabled-noise
-route remains guarded, and `--require-qualified` still fails complete-scene
-qualification. Next, close that composition gap using the existing captures
-and retain native HLE comparison as a separate gate. No GPU, title/audio run,
+At this component milestone, `post_transform_pixel_qualified` is true for the
+five exercised draws while shader/setter composition remains open. The next
+continuation below closes that input gap for the same noise-off fixtures.
+The original enabled-noise route remains guarded, and `--require-qualified`
+still fails complete original-scene qualification. No GPU, title/audio run,
 recompile or HLE runtime/performance change was required for this milestone.
+
+### Independent captured-input scene composition (2026-10-09 continuation)
+
+`tools/native_scene_shader_reference.py` derives expected vertices and fog
+directly from captured stream bytes, elements, constants and the 49-instruction
+program. Its instruction reader uses the published
+[Kelvin XF bit layout](https://envytools.readthedocs.io/en/latest/hw/graph/xf/isa.html)
+as one flat integer, without importing the maintained disassembler/interpreter.
+Finite arithmetic uses exact rational binary32 nearest/even rounding; square
+root candidates must satisfy exact midpoint-square intervals. Unimplemented
+opcodes, indexed constants, nonfinite math and incomplete observations fail.
+All **30 vertices / 870 output values** match the retained software route
+exactly, including independently derived four-bit setup positions and fog.
+Native raw outputs remain diagnostics and cannot supply or widen expectations.
+
+`tools/native_scene_composed_reference.py` independently derives the consumed
+state from the captured render/texture arrays, resource/mip metadata, viewport
+and declared preowned fixture conditions. Closed API assertions admit the
+single MODULATE texture stage, smooth shading, LESS depth, masked RGB/depth
+writes, saturated source alpha, zero specular and EXP fog with zero density.
+Cull selection follows requested versus front-face winding. The
+[published NV097 fields](https://github.com/XboxDev/nxdk/blob/master/lib/pbkit/nv_regs.h)
+and [NVIDIA combiner equations](https://registry.khronos.org/OpenGL/extensions/NV/NV_register_combiners.txt)
+supply numeric/state semantics. Reserved viewport constants must match the
+captured viewport and previously qualified XDK screen bias.
+
+The original sampler helper at `0x13cbc0` adds device bias, multiplies by 256,
+adds 0.5, stores binary32 and calls `CVTTSS2SI` at `0x13a460`, then clamps and
+masks the signed bias. This reviewed instruction evidence supplies the packing
+equation; observed packets do not determine it. In this fixture device bias
+is zero. In particular, negative biases are truncated after adding 0.5, rather
+than rounded to nearest. The independently constructed state matches all
+**77 consumed method values per draw / 385 total**.
+
+Those expected vertices/fog and expected state now feed the independent pixel
+equations above. All five draw fixtures pass **captured inputs through final
+noise-disabled software pixels**: 8,025 written pixels and 1,527,975 untouched
+pixels, exact coverage/depth/preserved alpha/stencil and RGB within one step.
+The tolerance and compiled depth graph are unchanged. These are five isolated
+draws with supplied initial targets, not a composed whole frame or whole title.
+
+`tools/native_scene_composed_controls.py` passes **26 controls**: one baseline,
+23 deliberate failures and two independence controls. Missing/incorrect vertex
+and fog observations, changed vertex/constant/program inputs, API/method state
+corruption, enabled-noise admission, no-op/omitted/stray writes, wrong color,
+depth, stencil, masked alpha and truncated target files are rejected. Input
+mutations refresh capture hashes so stale provenance cannot explain rejection.
+Changing the native raw vertex outputs or native after-image leaves the
+software-fixture gate passing, proving those observations do not supply its
+expectations. This does not qualify the native after-image itself.
+
+Reproduce using the retained private inputs and device observations, without a
+GPU, title run or rebuild:
+
+```powershell
+& 'C:\Users\Matthew\AppData\Local\Programs\Python\Python312\python.exe' tools\native_scene_shader_reference.py --captures build\blinx\scene-inputs-firstworld-20261009 --diagnostics build\blinx\scene-five-bias-fixed --output build\blinx\scene-five-shader-independent.aot-private.json
+& 'C:\Users\Matthew\AppData\Local\Programs\Python\Python312\python.exe' tools\native_scene_composed_reference.py --captures build\blinx\scene-inputs-firstworld-20261009 --diagnostics build\blinx\scene-five-bias-fixed --depth-arithmetic fma-b-first --output build\blinx\scene-five-composed-independent.aot-private.json
+& 'C:\Users\Matthew\AppData\Local\Programs\Python\Python312\python.exe' tools\native_scene_composed_controls.py --captures build\blinx\scene-inputs-firstworld-20261009 --diagnostics build\blinx\scene-five-bias-fixed --depth-arithmetic fma-b-first --output build\blinx\scene-composed-independent-controls.aot-private.json
+```
+
+`captured_input_to_fixture_pixel_qualified` is true for these five fixtures.
+**`complete_scene_pixel_qualified`, `original_noise_enabled_scene_qualified`
+and `native_hle_scene_qualified` remain false.** This closes the supplied
+vertex/state input gap only within the declared noise-disabled software scope.
+Next, establish a comparable noise-off native HLE scene check and continue
+broader offline raster/state/lifetime coverage. Original enabled DXT1 noise,
+exact NV2A precision and dependent startup stay in the hardware-last queue.
+Graphics remains partial; overall family qualification remains **4/9**.
+This batch changes no HLE runtime code or performance path and reuses retained
+title evidence without another compile, GPU, title or audio run.
 
 Continue broader exercised texture/state layouts and raster outcomes toward
 complete scene composition, retaining the bounded projected-footprint gates.

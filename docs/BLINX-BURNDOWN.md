@@ -86,6 +86,18 @@ graphics remains partial and the family count remains 4/9. HLE runtime code is
 unchanged; CPU-only Idle/one-processor checks reused the retained inputs.
 See [the pixel contract and remaining composition gap](../pilots/native-title/GRAPHICS-LLE.md#independent-post-transform-scene-pixels-2026-10-09-continuation).
 
+2026-10-09 captured-input continuation: the five noise-off draw fixtures now
+pass independently from stream/constant/program and API state inputs through
+their final pixels. This closes their supplied-vertex/state composition gap:
+30 vertices / 870 shader values, 385 consumed state values, 8,025 written and
+1,527,975 untouched pixels. All 23 deliberately corrupted cases fail, and two
+additional controls prove native raw outputs/after-images do not supply
+expectations. Comparable native HLE scenes, broader raster/state/lifetime and
+original enabled-noise scenes remain open; exact silicon questions stay last.
+Graphics remains partial, **5 open / 4 closed**. No runtime HLE changes, builds,
+GPU or title/audio runs were needed; the performance path remains unchanged.
+See [the composition gate and next work](../pilots/native-title/GRAPHICS-LLE.md#independent-captured-input-scene-composition-2026-10-09-continuation).
+
 GPU startup's unresolved FD6806A0 transaction now has a prepared, bounded
 hardware observation in `.111` (probe branch `feat/av-handshake-probe-20261009`,
 commit `a22bb74`). All 17 offline checks and the XBE build pass; hardware
