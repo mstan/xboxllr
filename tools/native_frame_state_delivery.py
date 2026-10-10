@@ -72,6 +72,20 @@ def expected_delivery(capture,scene):
     fixture={0x200:width<<16,0x204:height<<16,0x208:0x128,
         0x20c:(width*4)|((dw*4)<<16),0x210:0x600000,0x214:0x800000,
         0x2c0:(width-1)<<16,0x2e0:(height-1)<<16}
+    plan=scene.get('frame_resource_plan')
+    if plan is not None:
+        from native_frame_storage import validate,target_layouts
+        validate(plan,scene)
+        fixture[0x210],fixture[0x214]=plan['target_addresses']
+        layouts=target_layouts(scene);fixture[0x20c]=layouts[0][2]|(layouts[1][2]<<16)
+    # Original LineWidth consumes the fixture's minimum multisample scale at
+    # device+0x520. The older fresh draw fixture leaves it zero; original target
+    # binding on unit-scale retained roots establishes one. This field is not
+    # consumed by the admitted filled triangles/quads, but its delivered value
+    # still follows the declared fixture and the active API float.
+    line=struct.unpack('<f',struct.pack('<I',r[157]))[0]
+    require(math.isfinite(line) and 0<=line<=64,'Unmodelled line width')
+    methods[0x380]=min(511,math.trunc(binary32(Fraction(line)*(8 if plan is not None else 0)+Fraction(1,2))))
     cursor=0x3000000
     for stage,texture in enumerate(scene['textures']):
         ts=t[stage*32:(stage+1)*32];base=0x1b00+stage*64
@@ -92,8 +106,8 @@ def expected_delivery(capture,scene):
         require(fmt&3==1 and not fmt&4 and (fmt>>4)&15==2 and texture['cpu'],
                 'Unmodelled texture DMA/dimension/storage')
         require(code in (4,6,7,12,14,15,0x12,0x1e),'Unmodelled texture format')
-        methods[base]=cursor;methods[base+4]=fmt
-        cursor+=(len(texture['cpu'])+0xffff)&~0xffff
+        methods[base]=cursor if plan is None else plan['texture_addresses'][stage];methods[base+4]=fmt
+        if plan is None:cursor+=(len(texture['cpu'])+0xffff)&~0xffff
         if code in (0x12,0x1e):
             size=resource[4];w=(size&0xfff)+1;h=((size>>12)&0xfff)+1
             pitch=((size>>24)+1)*64
@@ -102,7 +116,10 @@ def expected_delivery(capture,scene):
             methods[base+16]=pitch<<16;methods[base+28]=(w<<16)|h
         else:
             require(resource[4]==0,'Unmodelled normalized texture size')
-            methods[base+16]=0;methods[base+28]=0
+            # Original normalized bind does not clear the previous linear
+            # pitch/rectangle words, and normalized sampling does not consume
+            # them. The old fresh fixture explicitly has their reset zeros.
+            if plan is None:fixture[base+16]=0;fixture[base+28]=0
     pixel={}
     if scene['header'][8]:
         require(scene['pixel'] is not None and len(scene['pixel'])==60,'Missing custom pixel definition')
@@ -128,6 +145,7 @@ def qualify(capture,scene,actual,library_sha=None):
     methods,fixture,pixel=expected_delivery(capture,scene)
     require(actual['vertex_capture_sha256']==capture['sha256'] and
             actual['scene_capture_sha256']==scene['sha256'],'Input provenance mismatch')
+    require(actual.get('frame_resource_plan')==scene.get('frame_resource_plan'),'Frame placement provenance mismatch')
     require(actual['input_only_capture'] is True and actual['input_sequence']==capture['input_sequence'] and
             type(actual['input_sequence']) is int,'Wrong input observation')
     require(actual['xbe_sha256']==XBE_SHA,'Another original XBE')

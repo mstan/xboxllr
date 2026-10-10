@@ -171,9 +171,17 @@ class TargetReference(Reference):
         read=self.lib.xlle_nv2a_reference_read
         read.restype=ctypes.c_uint32;read.argtypes=[ctypes.c_void_p,ctypes.c_uint32,ctypes.c_int]
         self.read=read
-        def rd(cpu,offset,size,data):return read(self.gpu,0xfd000000+offset,size)
-        def wr(cpu,offset,size,value,data):self.lib.xlle_nv2a_reference_write(self.gpu,0xfd000000+offset,size,value)
+        self.scene_mmio=[]
+        def rd(cpu,offset,size,data):
+            value=read(self.gpu,0xfd000000+offset,size);self.scene_mmio.append(['read',hex(offset),size,hex(value)])
+            if self.lib.xlle_nv2a_reference_error(self.gpu):cpu.emu_stop()
+            return value
+        def wr(cpu,offset,size,value,data):
+            self.scene_mmio.append(['write',hex(offset),size,hex(value)])
+            self.lib.xlle_nv2a_reference_write(self.gpu,0xfd000000+offset,size,value)
+            if self.lib.xlle_nv2a_reference_error(self.gpu):cpu.emu_stop()
         self.cpu.mmio_map(0xfd000000,0x1000000,rd,None,wr,None)
+        self.scene_mmio_mapped=True
         require(self.calls['D3DDevice_SetRenderTarget']==0x131e90 and self.calls['D3DDevice_Clear']==0x135a60,
                 'Binding does not select the reviewed original entry points')
         self.targets=targets;self.headers,self.storage=placement(targets);self.sizes={}

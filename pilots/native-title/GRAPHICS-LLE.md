@@ -1788,3 +1788,60 @@ The next integration must preserve producer-backed storage through the draws
 and resolve the live initial clear viewport. No runtime/HLE code, rebuild,
 title/audio, host GPU or Xbox request changed. **4/9** and the full goal remain
 active; hardware is still at its existing inspection gate.
+
+## Retained original frame composition - 2026-10-10
+
+`tools/native_frame_composition_reference.py` now executes the captured root
+bind, clears, target switches and **all4,331 original draws /29,396 vertices**
+in their recorded order on one reference device. Five preowned roots survive
+the complete sequence. All10 producer-backed sampler bindings point at the
+actual retained color/depth storage, including two self-feedback bindings and
+the four-stage downsampled producer. Sampled native GPU bytes never replace
+these producer inputs. The same actual draws pass **852,468 independent vertex
+values and462,399 consumed/setup words**.
+
+`tools/native_frame_storage.py` validates each role's dimensions, pitch,
+addresses and producer identity. Unrelated CPU textures retain separate
+storage; producer-backed textures use the captured linear resource layout.
+Original SetRenderTarget establishes the device context, including its unit
+minimum line scale. Consequently LineWidth derives from the original API
+float and that context rather than the older zero-scale fixture. Normalized
+texture bindings leave prior linear rectangle pitch/size words untouched;
+those two words are unconsumed by normalized sampling. Omitting these stale
+fixture fields explains the8,548-word difference from the fresh-device audit,
+without narrowing its active sampler contract.
+
+The first complete attempt exposed a **reference observation bug**, after
+draw4304: the six still-bound surface parameters had aged out of the4096-entry
+method recorder. `tools/nv2a_reference.cpp` now retains last decoded parameters
+across bounded transport advances and explicitly rejects an observation gap.
+These remain decoded packet observations, not a new semantic-register oracle.
+No NV2A core or shipping renderer change was needed. The actual ABI regression
+fails against the preserved older DLL and passes against the new DLL: retained
+parameters after6141 later methods, live updates, independent instances,
+untouched target bytes and rejection of history overflow. All123 focused
+authored Python tests also pass.
+
+The successful full run uses34 explicit drained-PFIFO fixture jumps to recycle
+its preowned pushbuffer while retaining PGRAPH and target state. This does not
+qualify original ring rollover/allocation. Both reference DLLs are preserved
+for their corresponding reports. Private evidence adds
+`composed-all-v2-qualified.aot-private.json`, `composed-all-v2-observed/` and the
+native/LLE diagnostic images beneath the complete-input directory. Replay with
+`native_frame_composition_reference.py --captures <private-directory>
+--diagnostics <private-observations> --output <private-report> --xbe <private-xbe>
+--binding <private-binding> --library <reference-dll>
+--dependencies <mingw-directory> --all-draws`.
+
+This proves executable retained submission and its shader/state components,
+**not complete-scene pixels**. The composed image differs materially from the
+native capture in sky color and blur. Sky differences already exist before the
+first feedback quad. Additionally, the generic triangle rasterizer treats
+stencil enable as inert: retained LLE stencil is all zero, while the native
+producer has7300 pixels with stencil128. Independent stencil/raster
+qualification is next; a plausible image does not qualify either route.
+Noise remains disabled in the LLE fixture, the initial clear viewport remains
+explicit, and original startup/lifetime, feedback caching, production HLE
+pixels and hardware precision remain open. No new title/audio/host GPU/Xbox
+run occurred; only the reference observation wrapper was rebuilt, at Idle
+priority on one logical processor. **4/9** and the full goal remain active.

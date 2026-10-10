@@ -35,13 +35,18 @@ def target_bytes(target,depth=False):
     return bytes(result)
 
 
-def replay(args,path,reference=None,initialize_targets=True,*,capture=None,scene=None):
+def replay(args,path,reference=None,initialize_targets=True,*,capture=None,scene=None,resource_plan=None):
     state_only=getattr(args,'observe_shader_state_only',False)
     assert not (state_only and getattr(args,'retain_targets',False)), 'Target continuity requires target observations'
     assert (capture is None)==(scene is None),'Supply both in-memory input objects'
     if capture is None:
         capture=read_capture(path);scene=read_scene(path.with_name(path.name.replace('draw','scene')))
     input_only=bool(scene.get('input_only',False))
+    if resource_plan is not None:
+        from native_frame_storage import validate
+        validate(resource_plan,scene)
+        assert reference is not None and not initialize_targets and state_only and input_only, 'Frame placement needs a retained input-only fixture'
+        assert scene.get('frame_resource_plan')==resource_plan,'Another declared frame placement'
     assert not input_only or state_only,'Input-only replay cannot qualify or compare native after-pixels'
     assert scene['header'][3:6]==capture['header'][2:5]
     ref=Reference(args) if reference is None else reference
@@ -126,29 +131,36 @@ def replay(args,path,reference=None,initialize_targets=True,*,capture=None,scene
             ref.call('D3DDevice_SetVertexShader',[h[6]])
 
         width,height,_=scene['before'][0]['shape'];assert width and height
-        color=target_bytes(scene['before'][0]);depth=target_bytes(scene['before'][1],True)
-        if initialize_targets:
-            ref.cpu.mem_write(FRAME,color)
-            if depth:ref.cpu.mem_write(FRAME+0x200000,depth)
-        color_header=OBJECT+0x1c00;depth_header=OBJECT+0x1c20
-        ref.put(color_header,*scene['color_header']);ref.put(color_header+4,FRAME)
-        ref.put(depth_header,*scene['depth_header']);ref.put(depth_header+4,FRAME+0x200000)
-        # Honest preinitialized target metadata for the original viewport/state
-        # callees; no function body or command emitter is intercepted.
-        for offset,value in ((0x21b4,color_header),(0x21b8,depth_header if depth else 0),
-                (0x21c0,color_header),(0x21c4,color_header),(0x510,scene['header'][9])):
-            ref.put(ref.device+offset,value)
+        if resource_plan is None:
+            color=target_bytes(scene['before'][0]);depth=target_bytes(scene['before'][1],True)
+            if initialize_targets:
+                ref.cpu.mem_write(FRAME,color)
+                if depth:ref.cpu.mem_write(FRAME+0x200000,depth)
+            color_header=OBJECT+0x1c00;depth_header=OBJECT+0x1c20
+            ref.put(color_header,*scene['color_header']);ref.put(color_header+4,FRAME)
+            ref.put(depth_header,*scene['depth_header']);ref.put(depth_header+4,FRAME+0x200000)
+            # Honest preinitialized target metadata for the original viewport/state
+            # callees; no function body or command emitter is intercepted.
+            for offset,value in ((0x21b4,color_header),(0x21b8,depth_header if depth else 0),
+                    (0x21c0,color_header),(0x21c4,color_header),(0x510,scene['header'][9])):
+                ref.put(ref.device+offset,value)
+        else:
+            # Original SetRenderTarget already bound these retained roots.
+            # Do not rewrite headers, target bytes or emit replacement binds.
+            assert ref.get(ref.device+0x21b4,2)==resource_plan['target_headers'],'Original target binding differs from frame plan'
+            ref.put(ref.device+0x510,scene['header'][9])
         # SetViewport consumes the preinitialized device's screen offset when
         # it writes reserved constants 58/59. Zeroing this field silently
         # changes the captured program inputs by the SDK's half-pixel bias.
         transform=ref.binding['transform_binding']
         ref.put(ref.device+transform['fields']['screen_offset'],
             transform['screen_bias'],transform['screen_bias'])
-        depth_width=scene['before'][1]['shape'][0] if depth else width
-        for method,value in ((0x208,0x128),(0x20c,(width*4)|(depth_width*4)<<16),
-                (0x210,FRAME),(0x214,FRAME+0x200000),(0x200,width<<16),
-                (0x204,height<<16),(0x2c0,(width-1)<<16),(0x2e0,(height-1)<<16)):
-            ref.emit(method,value)
+        if resource_plan is None:
+            depth_width=scene['before'][1]['shape'][0] if depth else width
+            for method,value in ((0x208,0x128),(0x20c,(width*4)|(depth_width*4)<<16),
+                    (0x210,FRAME),(0x214,FRAME+0x200000),(0x200,width<<16),
+                    (0x204,height<<16),(0x2c0,(width-1)<<16),(0x2e0,(height-1)<<16)):
+                ref.emit(method,value)
         ref.cpu.mem_write(0x141d88,struct.pack('<166I',*capture['render']))
         ref.cpu.mem_write(0x141b88,struct.pack('<128I',*capture['texture']))
         ref.cpu.mem_write(ref.device+0xb58,struct.pack('<16I',*scene['packed']))
@@ -163,10 +175,13 @@ def replay(args,path,reference=None,initialize_targets=True,*,capture=None,scene
                 assert texture['cpu']==b''.join(m['data'] for m in texture['mips']),path
             header=OBJECT+0x2000+stage*32;resource=list(texture['resource'])
             resource[0]=(resource[0]&~0x00f80000)|1
-            resource[1]=cursor;resource[2]=0
-            assert cursor+len(texture['cpu'])<=len(ref.ram)
-            ref.put(header,*resource);ref.cpu.mem_write(cursor,texture['cpu'])
-            cursor+=(len(texture['cpu'])+0xffff)&~0xffff
+            address=cursor if resource_plan is None else resource_plan['texture_addresses'][stage]
+            producer=0 if resource_plan is None else resource_plan['texture_producers'][stage]
+            resource[1]=address;resource[2]=0
+            assert address+len(texture['cpu'])<=len(ref.ram)
+            ref.put(header,*resource)
+            if not producer:ref.cpu.mem_write(address,texture['cpu'])
+            if resource_plan is None:cursor+=(len(texture['cpu'])+0xffff)&~0xffff
             ref.call('D3DDevice_SetTexture',[stage,header])
         if scene['header'][8]:
             pixel=OBJECT+0x2800;ref.put(pixel,1,1,pixel+12,*scene['pixel'])
@@ -240,6 +255,7 @@ def replay(args,path,reference=None,initialize_targets=True,*,capture=None,scene
                 complete_draw_executed=bool(get==put and vertex_count==h[4] and
                     (census['executions'] or input_only and h[2]==8) and not any(list(census.values())[3:])),
                 input_only_capture=input_only,input_sequence=capture.get('input_sequence'),
+                frame_resource_plan=resource_plan,
                 submission='original DrawVerticesUP' if capture.get('submission_kind',0)&1 else 'original DrawVertices',
                 xbe_sha256=XBE_SHA,draw_counters=list(census.values()),
                 fifo_get=get,fifo_put=put,original_draw_returned=not guard,

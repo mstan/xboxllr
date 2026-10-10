@@ -8,6 +8,7 @@
 #include "machine/cx25871_control.hpp"
 #include <cstdio>
 #include <cstring>
+#include <array>
 #include <new>
 #include <string>
 
@@ -28,6 +29,35 @@ struct Reference {
     xlle::Amd756Smbus smbus;
     xlle::Cx25871Control* encoder = nullptr;
     void (*external_irq)(int, int) = nullptr;
+    // Qualification observes the last decoded parameter, not merely a recent
+    // recorder window. A target bind can remain active across thousands of
+    // subsequent methods. Collect each bounded transport advance before its
+    // records age out; never invent a parameter for missing observation history.
+    std::array<uint32_t, 0x2000 / 4> observed_methods{};
+    uint64_t observed_method_count = 0;
+    std::vector<xlle::Nv2a::PushMethod> observed_window;
+    void observe_methods() {
+        const uint64_t total = gpu.push_methods();
+        if (total < observed_method_count) {
+            observed_methods.fill(0); observed_method_count = 0;
+        }
+        const uint64_t delta = total - observed_method_count;
+        if (!delta) return;
+        if (delta > 4096) {
+            failure = "NV2A reference method observation history overflow";
+            return;
+        }
+        gpu.recent_methods(static_cast<size_t>(delta), observed_window);
+        if (observed_window.size() != delta || observed_window.front().seq != observed_method_count ||
+            observed_window.back().seq + 1 != total) {
+            failure = "NV2A reference method observation sequence gap";
+            return;
+        }
+        for (const auto& item : observed_window)
+            if ((item.method & 3) == 0 && item.method < 0x2000)
+                observed_methods[item.method / 4] = item.parameter;
+        observed_method_count = total;
+    }
     void sample_encoder_field(const xlle::Cx25871Timing::State* before=nullptr) {
         const int signal=encoder->field_signal();
         if(signal<0)return; // unresolved/high-Z pins cannot supply a guessed level
@@ -105,11 +135,15 @@ EXPORT const char* xlle_nv2a_reference_error(void* instance) {
 }
 EXPORT uint32_t xlle_nv2a_reference_read(void* instance, uint32_t address, int size) {
     auto& ref = *static_cast<Reference*>(instance);
-    return ref.failure.empty() ? ref.gpu.mmio_read(address, size) : 0;
+    if (!ref.failure.empty()) return 0;
+    const uint32_t result = ref.gpu.mmio_read(address, size);
+    ref.observe_methods(); return result;
 }
 EXPORT void xlle_nv2a_reference_write(void* instance, uint32_t address, int size, uint32_t value) {
     auto& ref = *static_cast<Reference*>(instance);
-    if (ref.failure.empty()) ref.gpu.mmio_write(address, size, value);
+    if (ref.failure.empty()) {
+        ref.gpu.mmio_write(address, size, value); ref.observe_methods();
+    }
 }
 EXPORT void xlle_nv2a_reference_frame(void* instance, uint64_t frame) {
     auto& ref = *static_cast<Reference*>(instance);
@@ -172,11 +206,9 @@ EXPORT const char* xlle_nv2a_reference_draw_count_name(uint32_t index) {
     return xlle::Nv2a::generic_skip_reason_name(index - 3);
 }
 EXPORT uint32_t xlle_nv2a_reference_method_value(void* instance, uint32_t method) {
-    std::vector<xlle::Nv2a::PushMethod> recent;
-    static_cast<Reference*>(instance)->gpu.recent_methods(4096, recent);
-    for (auto item = recent.rbegin(); item != recent.rend(); ++item)
-        if (item->method == method) return item->parameter;
-    return 0;
+    auto& ref = *static_cast<Reference*>(instance); ref.observe_methods();
+    if (!ref.failure.empty() || (method & 3) || method >= 0x2000) return 0;
+    return ref.observed_methods[method / 4];
 }
 EXPORT void xlle_nv2a_reference_clock(void* instance, uint64_t core_cycles, uint32_t phase) {
     auto& ref = *static_cast<Reference*>(instance);

@@ -907,3 +907,20 @@ the compact capture lacks the live clear viewport. Producer-backed draw
 composition, that initial viewport input and complete-scene pixels remain next.
 No shipping change, rebuild/title/audio/host GPU/Xbox request occurred. The full
 goal stays active with **4/9** families qualified.
+
+Retained original frame composition now executes all **4,331 draws /29,396
+vertices** on one device through the captured clears and target switches.
+All10 producer sampler bindings use actual retained root storage; the same
+draws match852,468 independent vertex values and462,399 consumed/setup words.
+The smaller word count excludes unconsumed stale linear fields on normalized
+bindings. All123 focused Python tests and the real reference-observer ABI
+regression pass; the older DLL remains preserved. The34 pushbuffer recycling
+jumps are explicit fixture operations.
+[Evidence and remaining limits](../pilots/native-title/GRAPHICS-LLE.md#retained-original-frame-composition---2026-10-10).
+Complete-scene pixels remain open: composed/native images differ in sky and
+blur, and the LLE generic triangle rasterizer currently ignores enabled
+stencil. Independent stencil/raster qualification is next. Noise, initial
+viewport, feedback caching, production HLE pixels and original startup/lifetime
+remain separate. Only the reference observation wrapper was rebuilt; no new
+title/audio/host GPU/Xbox run occurred. The full goal stays active at **4/9**,
+with hardware at its existing inspection gate.

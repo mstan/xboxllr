@@ -55,7 +55,7 @@ class Inputs:
                 # These are captured sampled inputs. Original state delivery
                 # consumes the CPU storage fixture; equality/texture pixels
                 # are separate qualifications and are never silently inferred.
-                mips.append(dict(shape=m[1:7],data=self.asset(m[7])))
+                mips.append(dict(shape=m[1:7],data=self.asset(m[7]),producer_target=m[8]))
             textures.append(dict(info=w[:18],resource=list(r.words(w[12],20)),
                                  cpu=self.asset(w[13]),mips=mips))
         identity=dict(draw=d,assets={n:r.assets[n]['sha256'] for n in assets})
