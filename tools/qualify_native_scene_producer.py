@@ -27,8 +27,8 @@ from native_scene_producer_reference import expected_draw,compare_storage
 from native_frame_composition_reference import recycle
 
 
-def run(args, expectation=expected_draw, scope=__doc__, prefix_limit=512):
-    require(type(prefix_limit) is int and prefix_limit in (512,768,1536,1943,1969,2120), 'Unsupported bounded prefix limit')
+def run(args, expectation=expected_draw, scope=__doc__, prefix_limit=512, source_transition=None):
+    require(type(prefix_limit) is int and prefix_limit in (512,768,1536,1943,1969,2120,2129), 'Unsupported bounded prefix limit')
     require(type(args.last_draw) is int and 1 <= args.last_draw <= prefix_limit,
             f'Choose a bounded prefix <={prefix_limit}')
     coverage = audit(args.captures/'frame.jsonl')
@@ -37,8 +37,14 @@ def run(args, expectation=expected_draw, scope=__doc__, prefix_limit=512):
     library_sha = hashlib.sha256(args.library.read_bytes()).hexdigest()
     source = json.loads(args.source_report.read_text())
     require(source['passed'] and source['original_composed_all_draws_executed'] and
-            source['inputs_sha256'] == coverage['inputs_sha256'] and
-            source['library_sha256'] == library_sha, 'Wrong source composition/build')
+            source['inputs_sha256'] == coverage['inputs_sha256'], 'Wrong source composition/build')
+    generation_transition = None
+    if source['library_sha256'] != library_sha:
+        require(source_transition is not None, 'Wrong source composition/build')
+        generation_transition = source_transition(args, source, coverage)
+        require(generation_transition['current_library_sha256'] == library_sha and
+                generation_transition['current_state_validation_required_for_every_prefix_row'] is True,
+                'Wrong source generation transition')
     expected = {n:initial_storage(t,reader.asset_bytes(t['initial_asset'])) for n,t in reader.targets.items()}
     args.observe_shader_state_only = True
     args.noise_disabled_fixture = True
@@ -104,6 +110,10 @@ def run(args, expectation=expected_draw, scope=__doc__, prefix_limit=512):
                   exact_hardware_rounding_qualified=False,original_startup_lifetime_qualified=False)
     report.update(fixture_pushbuffer_recycles=fixture_recycles,original_ring_rollover_qualified=False)
     report['requested_prefix_limit'] = prefix_limit
+    if generation_transition is not None:
+        require(all(r['shader_state_components_qualified'] for r in rows),
+                'Current source-generation state validation failed')
+        report['source_generation_transition'] = generation_transition
     report['final_written_pixels'] = {str(n):sorted(indices) for n,indices in written.items()}
     report['expected_target_sha256'] = {str(n):hashlib.sha256(data).hexdigest() for n,data in expected.items()}
     args.output.write_text(json.dumps(report,indent=2)+'\n')

@@ -2874,10 +2874,31 @@ tolerance changes.
 One input-only continuation covers draws **2121-2128**: all 37 source
 primitives leave zero raster writes and all five independently expected
 roots remain unchanged from draw 2120. This prepares a prefix replay through
-2128; it does not qualify that original execution. Draw 2129 is visible and
-remains guarded. Its conservative all-mip sampled-set palette component is
-proved separately, but complete interpolation/filter-weight/LOD agreement
-needs the additional compiled/runtime evidence before admission.
+2128; it does not qualify that original execution. Draw 2129 is visible. Its
+conservative sampled set includes 808 texels across all ten mips and possible
+address/filter neighbors. The complete source-derived proof binds the
+interpolation, filtering, normalization and packing graph, the actual loaded
+MSVCRT `_hypot` code and constant, and the AMD x87 accuracy premise. A broad
+logarithm bound proves base-mip selection without claiming exact logarithms.
+Palette plus arithmetic bounds are below one code in every RGB channel
+(approximately 0.74212/0.85733/0.74212). Both root and an independent reviewer
+accept this proof; the original draw still needs a corrected-generation replay.
+
+The bounded sampled-precision admission preserves every nominal pixel equation
+and the existing tolerance. All five independent predecessor roots and complete
+current input fingerprints must match before the draw is admitted. The live
+source, input frame, host and loaded CRT checks precede reference creation.
+All 24 focused admission/migration controls pass against the installed code.
+The retained full-frame vertex/state report keeps its old generation identity;
+a narrowly pinned source/PE transition requires fresh original state validation
+for every row in the new prefix. It does not transfer the old 4,331-row pass to
+the corrected DLL. The default exact-library precondition remains enforced.
+
+The first input-only continuation admits draw 2129 with 582 independent writes,
+then stops at draw 2130's global palette guard. All its primitive W values are
+strictly negative, so no palette value can be sampled. The zero-sample validation
+ordering remains a separate pending correction; no original draw was executed
+by this continuation. Full scene, noise and startup/lifetime stay open.
 
 Root reviewed handoffs are
 `frame-inputs-firstworld-20261010/producer-color-clamp-generation-root-review.aot-private.json`
