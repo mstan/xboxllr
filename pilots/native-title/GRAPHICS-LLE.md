@@ -2432,3 +2432,43 @@ capture directory. Run `tools/qualify_native_scene_empty_depth.py` with the
 preceding fixture paths, `--last-draw 768 --depth-arithmetic fma-b-first
 --clip-arithmetic fma`. Full scene/HLE pixels, enabled noise, original
 startup/lifetime and exact silicon remain open. Family count stays **4/9**.
+
+## Independent producer continuation through 1,536 draws - 2026-10-10
+
+The independently expected producer chain now qualifies **1,536 unchanged
+original whole draws /2,005,401,600 owned-pixel comparisons**, with 199,934
+expected written fragments. An input-only preflight admitted draws 769-1536
+using the existing equations before original execution. This continuation
+adds 73,512 expected writes across 148 draws; every final expected root hash
+matches the preflight. Written RGB stays within one code, with exact depth,
+stencil, alpha and untouched bytes.
+
+Cumulative empty domains cover 447 whole-negative-W draws /1,477 primitives,
+39 mixed-W draws /203 primitives, and three positive-W draws with out-of-range
+vertex depth /16 primitives. Mixed W and negative vertex depth alone never
+establish rejection. Each empty primitive completes the input-derived clip
+proof; surviving mixed-W/depth boundaries and near/zero W remain guarded.
+
+All 21 retained artifact controls, ten continuation-write fault controls and
+14 default/cap/delegation assertions pass. New fault locations come solely
+from differences between the independently expected 768- and 1536-draw roots;
+observed images are used only for comparison and deliberately damaged copies.
+The controls reject missing new color/depth writes, restored predecessor
+roots, wrong depth/stencil/alpha and a two-code RGB error while accepting the
+declared one-code RGB bound. Twelve drained fixture pushbuffer jumps preserve
+expected storage; original ring rollover remains unqualified.
+
+The new `tools/qualify_native_scene_empty_depth_continuation.py` explicitly
+selects the reviewed 1536 limit. Shared/default/public producer admission
+remains 512, and the existing empty-depth CLI remains 768. Use the preceding
+fixture paths with `--last-draw 1536 --depth-arithmetic fma-b-first
+--clip-arithmetic fma`. Private evidence under the complete-frame capture
+directory is `empty-depth-prefix1536-qualified.aot-private.json` (SHA-256
+`aa145155a6cf59e3be3a328be046318a0d871c775a1348faa3a50ba6a6cc2663`),
+`empty-depth-prefix1536-controls.aot-private.json`
+(`36615f16d658ae42709eeb0da7bfe46ae9f2abcd21773e2db41f53a83fb39937`),
+`empty-depth-prefix1536-continuation-controls.aot-private.json`
+(`4f4786f90782170a34fa91c796150b459290ab4e08ab5be3570a9140a1b577db`),
+and `empty-depth-prefix1536-handoff.aot-private.json`. No later original draw
+was inspected or executed for this milestone. Complete scene/HLE pixels,
+enabled noise, startup/lifetime and exact silicon remain open; **4/9** stands.

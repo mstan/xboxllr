@@ -28,7 +28,7 @@ from native_frame_composition_reference import recycle
 
 
 def run(args, expectation=expected_draw, scope=__doc__, prefix_limit=512):
-    require(type(prefix_limit) is int and prefix_limit in (512,768), 'Unsupported bounded prefix limit')
+    require(type(prefix_limit) is int and prefix_limit in (512,768,1536), 'Unsupported bounded prefix limit')
     require(type(args.last_draw) is int and 1 <= args.last_draw <= prefix_limit,
             f'Choose a bounded prefix <={prefix_limit}')
     coverage = audit(args.captures/'frame.jsonl')

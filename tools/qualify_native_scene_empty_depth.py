@@ -21,7 +21,7 @@ from native_scene_mixed_clip_reference import mixed_software_evidence,CLIP_PLANE
 from qualify_native_scene_producer import run as original_prefix
 
 
-def run(args):
+def run(args, prefix_limit=768, scope=__doc__):
     evidence = json.loads(args.clip_evidence.read_text())
     require(evidence['library_sha256'] == hashlib.sha256(args.library.read_bytes()).hexdigest() and
             evidence['clip_arithmetic'] == args.clip_arithmetic == 'fma' and
@@ -34,7 +34,7 @@ def run(args):
     def expectation(capture,scene,vertices,fog,targets,before,depth_arithmetic):
         return expected_empty_depth_draw(capture,scene,vertices,fog,targets,before,
                                          depth_arithmetic,args.clip_arithmetic)
-    report = original_prefix(args,expectation=expectation,scope=__doc__,prefix_limit=768)
+    report = original_prefix(args,expectation=expectation,scope=scope,prefix_limit=prefix_limit)
     empty_depth = [row for row in report['rows'] if row.get('positive_w_depth_domain_all_primitives_empty')]
     mixed = [row for row in report['rows'] if row.get('mixed_clip_all_primitives_empty')]
     rejected = [row for row in report['rows'] if 'behind_camera_rejection' in row]
