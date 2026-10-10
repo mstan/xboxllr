@@ -147,6 +147,9 @@ static void graphics_dispatch_impl(unsigned entry)
         stop("graphics entry before native creation",pilot_d3d_calls[entry].address);
     if(entry!=PILOT_D3D_D3DDevice_InsertCallback)graphics_gpu_barrier();
     uint64_t barrier=entered?dispatch_monotonic():0;
+#ifdef PILOT_GRAPHICS_FRAME_AUDIT
+    graphics_frame_inputs_before(entry,arguments);
+#endif
     switch(entry) {
     case PILOT_D3D_D3DDevice_SetTransform:graphics_transform_set(arguments[0],arguments[1]);break;
     case PILOT_D3D_D3DDevice_InsertCallback:

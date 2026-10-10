@@ -89,6 +89,10 @@ add_custom_command(TARGET pilot_notices POST_BUILD
     "${CMAKE_CURRENT_SOURCE_DIR}/../../src/third_party/dr_wav/README.md"
     "$<TARGET_FILE_DIR:xlle_native_title>/third_party/dr_wav")
 add_executable(pilot_contract_test runtime_contract_test.c)
+add_executable(pilot_frame_inputs_test frame_inputs_contract_test.c)
+target_compile_definitions(pilot_frame_inputs_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_link_libraries(pilot_frame_inputs_test PRIVATE bcrypt)
+add_test(NAME pilot_frame_inputs_writer COMMAND pilot_frame_inputs_test)
 target_include_directories(pilot_contract_test PRIVATE "${PILOT_GENERATED}")
 target_compile_definitions(pilot_contract_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(pilot_contract_test PRIVATE bcrypt)

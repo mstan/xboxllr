@@ -9,6 +9,7 @@ static struct {
     uint32_t after_swap,calls,draws,captured,clears,target_sets,capture_sequence;
     HANDLE file;
 } graphics_frame_audit;
+#include "graphics_frame_inputs.inc"
 
 static void graphics_frame_audit_configure(void)
 {
@@ -45,9 +46,10 @@ static void graphics_frame_audit_call(unsigned entry,const uint32_t *arguments)
     if(!graphics_frame_audit.enabled || graphics_frame_audit.finished)return;
     if(entry==PILOT_D3D_D3DDevice_Swap) {
         if(graphics_frame_audit.file) {
-            graphics_frame_audit_line("{\"event\":\"end\",\"swap\":%u,\"calls\":%u,\"draws\":%u,\"captured\":%u,\"clears\":%u,\"target_sets\":%u}\n",
+            graphics_frame_inputs_close();
+            graphics_frame_audit_line("{\"event\":\"end\",\"swap\":%u,\"calls\":%u,\"draws\":%u,\"captured\":%u,\"clears\":%u,\"target_sets\":%u,\"inputs\":%u}\n",
                 graphics_swap_submitted,graphics_frame_audit.calls,graphics_frame_audit.draws,
-                graphics_frame_audit.captured,graphics_frame_audit.clears,graphics_frame_audit.target_sets);
+                graphics_frame_audit.captured,graphics_frame_audit.clears,graphics_frame_audit.target_sets,graphics_frame_inputs.draws);
             if(!FlushFileBuffers(graphics_frame_audit.file) || !CloseHandle(graphics_frame_audit.file))
                 stop("frame audit close",GetLastError());
             graphics_frame_audit.file=NULL;graphics_frame_audit.finished=1;
@@ -66,6 +68,7 @@ static void graphics_frame_audit_call(unsigned entry,const uint32_t *arguments)
         if(graphics_frame_audit.file==INVALID_HANDLE_VALUE)stop("frame audit create",GetLastError());
         graphics_frame_audit_line("{\"event\":\"begin\",\"schema\":1,\"swap\":%u,\"width\":%u,\"height\":%u,\"target\":%u,\"depth\":%u}\n",
             graphics_swap_submitted,graphics_parameters[0],graphics_parameters[1],graphics_target,graphics_depth);
+        graphics_frame_inputs_open(graphics_swap_submitted);
         fprintf(stderr,"[FRAME AUDIT] begin after_swap=%u\n",graphics_swap_submitted);
         return;
     }
@@ -87,9 +90,10 @@ static void graphics_frame_audit_call(unsigned entry,const uint32_t *arguments)
         used+=(size_t)bytes;
     }
     args[used]=0;
-    graphics_frame_audit_line("{\"event\":\"call\",\"sequence\":%u,\"name\":\"%s\",\"args\":[%s],\"shader\":%u,\"target\":%u,\"depth\":%u,\"capture_sequence\":%u,\"return_eax\":%u}\n",
-        ++graphics_frame_audit.calls,pilot_d3d_calls[entry].name,args,
+    ++graphics_frame_audit.calls;graphics_frame_inputs_after(entry);
+    graphics_frame_audit_line("{\"event\":\"call\",\"sequence\":%u,\"name\":\"%s\",\"args\":[%s],\"shader\":%u,\"target\":%u,\"depth\":%u,\"capture_sequence\":%u,\"return_eax\":%u,\"input_sequence\":%u}\n",
+        graphics_frame_audit.calls,pilot_d3d_calls[entry].name,args,
         graphics_active?MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_SHADER):0,
-        graphics_target,graphics_depth,draw?graphics_frame_audit.capture_sequence:0,g_eax);
+        graphics_target,graphics_depth,draw?graphics_frame_audit.capture_sequence:0,g_eax,draw?graphics_frame_inputs.input_sequence:0);
 }
 #endif

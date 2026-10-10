@@ -1419,3 +1419,76 @@ Additional private evidence is `frame-256-state-{original,qualified}.aot-private
 `frame-256-host-raw-shader-{qualified,controls}.aot-private.json`. This reuses
 retained inputs and GPU observations; no host GPU/title/audio run, rebuild or
 shipping HLE change occurs. **4/9** remains unchanged.
+
+## Complete-frame input capture - 2026-10-10
+
+The diagnostic build now records every admitted draw inside one accepted-swap
+interval. Enable the existing `PILOT_GRAPHICS_FRAME_AUDIT` build option and set
+`XLLE_PILOT_FRAME_AUDIT=<private-directory>`, `XLLE_PILOT_FRAME_INPUTS=1` and an
+optional `XLLE_PILOT_DRAW_CAPTURE_TRIGGER=<private-file>`. The ordinary build
+compiles out this writer and its environment options; the shipping HLE draw,
+shader, texture upload and cache paths acquire no capture cost. The default
+build was restored and its binary checked for absent diagnostic markers.
+
+`frame-inputs.bin` is a bounded, little-endian version-2 container. SHA-256
+assets store declarations, programs, constants, states, consumed stream bytes,
+FVF descriptors, CPU texture inputs and actual sampled GPU mips without
+repeating identical bytes. Every programmable/FVF bound/UP draw names its
+returned ledger call and input sequence. A bound stream supplies exactly
+`(count-1)*stride+consumed_extent` bytes, including stride-zero broadcasts and
+resources without unused final stride padding. These diagnostic snapshots do
+not adopt aliases or change guest texture ownership/exposure.
+
+Each color/depth subresource supplies its initial target once. Observations
+are taken before target switches and before the terminal Swap, when the old
+buffers still identify this frame. Samplers explicitly link to prior target
+producers, including native texture aliases. Back/front storage remains
+distinct from depth storage. Later observations cannot replace supplied roots
+or expected outputs from earlier draws. Storage creation, device reset/release
+and CPU target locks inside the interval stop this scoped capture explicitly.
+Original allocation/startup and arbitrary resource mutation remain open.
+
+One new hidden, muted title run at Idle priority on logical processor 15
+completed in 101.797 seconds. Its guard checked for Marvel Rivals before and
+during execution, and terminated the owned title after the completed frame.
+The independently verified interval is swaps **2033 to 2034**:
+
+| Captured input coverage | Count |
+| --- | ---: |
+| Returned graphics calls | 8,718 |
+| Draws / vertices | 4,331 / 29,396 |
+| Programmable bound / UP draws | 4,325 / 2 |
+| FVF bound / UP draws | 1 / 3 |
+| Clears / target switches | 2 / 3 |
+| Initial target subresources | 5 |
+| Sampler references to target producers | 10 |
+| Unique assets | 4,863 |
+| Container bytes | 20,334,984 |
+
+This is a new complete interval, rather than an assertion that it is the
+earlier swaps1970-1971 interval. The new inputs reveal **20 programs, 41 state
+profiles, five declaration layouts and three packed caches**. The earlier
+256-draw shader/state gates cover only a subset. Newly exposed inputs include
+multiple streams, additional shader operations, alpha/state combinations,
+depth sampling, fixed-function draws and target-produced textures. These now
+have concrete inputs for offline qualification; they are not newly qualified
+shader/state or pixel results.
+
+Run `tools/native_frame_inputs.py <private-directory>/frame.jsonl --output
+<private-directory>/coverage.aot-private.json`. It verifies asset checksums and
+extents, exact returned draw linkage, root/bind/observation continuity, mip
+encodings and producer identities. It rejects missing pre-bind observations,
+missing draws even with adjusted footer counts, corrupt/truncated/forward
+assets, changed target identities, missing producer links and unsupported
+lifecycle scope. All **24 independent authored parser tests**, the existing
+**18 ledger tests**, and the actual C writer fixture pass. The latter includes
+all four draw kinds, minimal bound spans, back/front aliases and a deliberately
+failed readback that cannot produce a complete input capture.
+
+Private evidence is `build/blinx/frame-inputs-firstworld-20261010/`, including
+the container, ledger, `coverage.aot-private.json`,
+`profile-census.aot-private.json` and run metadata. The diagnostic executable
+and default-build exclusion check are retained privately. Complete input
+coverage is now established for this interval; independent complete-frame
+shader/state/pixel qualification, original resource lifetime/startup, enabled
+noise and exact silicon questions remain. **4/9** remains unchanged.

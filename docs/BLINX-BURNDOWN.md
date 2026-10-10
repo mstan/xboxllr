@@ -819,3 +819,21 @@ raw shader probes separately pass 64,486 input-derived host interval checks;
 30 host corruption/independence controls pass. This qualifies raw diagnostic
 shader math, not production raster bytecode or frame pixels. HLE production
 code and numerical bounds remain unchanged; **4/9** stays open.
+
+The next continuation removes the bounded-capture input gap with a new
+complete interval (swaps2033-2034): all **4,331 draws / 29,396 vertices** have
+linked inputs, including four FVF draws and two programmable UP draws. The
+20.3MB content-addressed container supplies five target roots, two clears,
+three target switches and ten sampler-to-target producer links. One new muted,
+hidden, resource-guarded title run collected it; the title then stopped. All24
+parser tests, 18 ledger tests and the real C writer/failure fixture pass.
+Capture code is compiled out of the restored default executable, preserving
+HLE performance. [Capture and evidence](../pilots/native-title/GRAPHICS-LLE.md#complete-frame-input-capture---2026-10-10).
+
+The complete input census exposes20 programs, 41 state profiles, five
+declaration layouts and three packed caches. Qualify these offline before
+complete-frame pixels: the earlier256-draw component checks cover a subset.
+Full-frame target/texture composition, resource startup/lifetime, enabled noise
+and exact hardware remain open. The full goal and **4/9** family count are
+unchanged; Xbox probing still awaits the previously requested screen inspection
+after the unexpected GP SG-address readback.

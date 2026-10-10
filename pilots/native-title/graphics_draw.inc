@@ -5,6 +5,7 @@ static FILE *graphics_draw_capture(const uint32_t args[3])
 {
     const char *capture=graphics_diagnostic(GRAPHICS_DIAGNOSTIC_DRAW);if(!capture || !*capture)return NULL;
 #ifdef PILOT_GRAPHICS_FRAME_AUDIT
+    if(graphics_frame_inputs.file)return NULL;
     if(!graphics_frame_audit_capture_active())return NULL;
 #endif
     static unsigned sequence;
@@ -132,6 +133,9 @@ static void graphics_draw_common(const uint32_t args[3],uint32_t up_data,uint32_
     if(!up_data)scene_reference=graphics_draw_capture(args);
     }
     graphics_draw_profile_step(&profile,4);
+#ifdef PILOT_GRAPHICS_FRAME_AUDIT
+    graphics_frame_inputs_draw(args,up_data,up_stride,streams,extents);
+#endif
     int32_t result=up_data?pilot_gfx_draw_memory(primitive,count,memory+up_data,up_stride):pilot_gfx_draw_vertices(primitive,first,count);
     graphics_draw_profile_step(&profile,5);
     if(result<0)stop("native vertex draw failed",(uint32_t)result);
