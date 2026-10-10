@@ -2305,3 +2305,33 @@ the bounded run. It is muted/hidden, with frame auditing off and four shared
 logical processors at Normal priority. The second Start again falls during
 movie playback, so this adds no new Demo-interruption or performance claim.
 All 39 prepared donor source files reproduce exactly. Full graphics stays open.
+
+## Independent whole-primitive behind-camera rejection - 2026-10-10
+
+The original producer chain now passes **481 whole draws /627,993,600 owned
+pixels**, retaining 126,422 independently expected written fragments. Draw481's
+ten primitives have strictly negative W at every vertex. Affine convex W
+cannot reach the positive clip volume; each primitive is empty before raster
+setup, regardless of its window XY/depth values. The exact retained software
+DLL hash and ten PE code/data sites independently bind its first `W-epsilon`
+plane, no-transition/no-append path and empty-polygon return before comparison.
+The threshold is the declared binary32 `1e-6` software value, not a claim about
+NV2A silicon clipping.
+
+All original shader/state and owned-storage checks pass. Written RGB remains
+within one code; depth/stencil/alpha/untouched bytes are exact. Seven authored
+rejection controls and 21 retained artifact controls pass. Existing XY/clamp
+equations are unchanged. Private evidence is
+`rejection-prefix481-qualified.aot-private.json`
+(SHA-256 `3f65db9b5bedae6d3d54841d6b17bb43789dfbf03bd7b63b5061307cb4c6f26b`)
+and `rejection-prefix481-controls.aot-private.json`
+(`5bf0565701a48b20d9997febfa09c23380b4ec1e17675fd91d1b913b21539183`).
+Use `tools/qualify_native_scene_rejection.py` with the preceding fixture paths,
+`--last-draw 481 --depth-arithmetic fma-b-first --clip-arithmetic fma`.
+
+Draw **482** is the next guarded domain: three whole negative-W primitives and
+eight mixed-W primitives. A strip containing any positive W cannot inherit the
+whole-strip rejection proof. Mixed-W and surviving depth-plane clipping remain
+unqualified, alongside complete scene/HLE pixels, enabled noise, original
+startup/lifetime, ring rollover and exact silicon. No new title/audio/GPU/Xbox
+run is needed for this CPU-only extension; family count stays **4/9**.
