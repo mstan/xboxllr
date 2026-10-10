@@ -108,7 +108,7 @@ class Reference:
         for reg, value in registers:
             self.cpu.reg_write(reg, value)
         self.cpu.emu_start(self.calls[name], STOP, count=1000000)
-        assert self.cpu.reg_read(UC_X86_REG_EIP) == STOP, name
+        assert self.cpu.reg_read(UC_X86_REG_EIP) == STOP, (name,'Original call did not return',hex(self.cpu.reg_read(UC_X86_REG_EIP)))
         assert self.cpu.reg_read(UC_X86_REG_ESP) == STACK+4+4*len(values), name
         assert all(self.cpu.reg_read(reg) == value for reg, value in canaries), name
         return self.cpu.reg_read(UC_X86_REG_EAX)
@@ -181,7 +181,7 @@ class Reference:
             assert self.get(resource+4)[0] == data
         self.transitions.append(dict(stream=stream, old_header=old, header=header, stride=stride))
 
-    def draw(self, first, primitive=5, count=3, *, clear=True, state_dirty=0x50):
+    def draw(self, first, primitive=5, count=3, *, clear=True, state_dirty=0x50,up_data=None,up_stride=0):
         if clear:
             self.emit(0x1d90,0xff102030)
             self.emit(0x1d98,63<<16); self.emit(0x1d9c,63<<16); self.emit(0x1d94,0xf0)
@@ -189,7 +189,10 @@ class Reference:
         # Scene replay passes None to retain all dirty bits set by real setters.
         self.put(0x141b84,0x50|self.get(0x141b84)[0] if state_dirty is None else state_dirty)
         begin=self.get(self.device)[0]
-        self.call('D3DDevice_DrawVertices',[primitive,first,count])
+        if up_data is None:self.call('D3DDevice_DrawVertices',[primitive,first,count])
+        else:
+            assert first==0 and up_data and up_stride
+            self.call('D3DDevice_DrawVerticesUP',[primitive,count,up_data,up_stride])
         packets=self.get(begin,(self.get(self.device)[0]-begin)//4)
         methods={}
         cursor=0

@@ -13,7 +13,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
-from native_frame_inputs import audit, MAGIC, fvf_extent
+from native_frame_inputs import audit, MAGIC, fvf_extent, Reader
 
 
 def words(values):
@@ -108,6 +108,17 @@ class FrameInputs(unittest.TestCase):
         result=self.run_capture()
         self.assertEqual(result['draws_detail'][0]['streams'][0][:2],[24,64])
         self.assertEqual(result['draws_detail'][2]['streams'][0][:2],[32,120])
+
+    def test_programmable_adapter_keeps_inputs_and_absent_observations(self):
+        self.run_capture();reader=Reader(self.binary).read()
+        bound=reader.shader_capture(1);up=reader.shader_capture(2)
+        self.assertIsNone(bound['outputs']);self.assertIsNone(up['outputs'])
+        self.assertEqual(bound['header'][3:5],[1,3]);self.assertEqual(bound['metadata'][0],[24,64])
+        self.assertEqual(len(bound['streams'][0]),64)
+        self.assertEqual(up['submission_kind'],1);self.assertEqual(up['up_stride'],16)
+        self.assertNotEqual(bound['sha256'],up['sha256'])
+        with self.assertRaises(ValueError):reader.shader_capture(3)
+        with self.assertRaises(ValueError):reader.shader_capture(0)
 
     def test_zero_bound_stride_broadcast_is_complete(self):
         sixteen=next(struct.unpack_from('<I',data)[0] for k,data in self.records

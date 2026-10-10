@@ -49,6 +49,38 @@ class Reader:
         require(number in self.small and size%4==0,'Metadata asset is not bounded DWORDs')
         return struct.unpack('<'+'I'*(size//4),self.small[number])
 
+    def asset_bytes(self,number):
+        metadata=self.asset(number)
+        if number in self.small:return self.small[number]
+        with self.path.open('rb') as file:
+            file.seek(metadata['offset']);data=file.read(metadata['bytes'])
+        require(len(data)==metadata['bytes'] and hashlib.sha256(data).hexdigest()==metadata['sha256'],
+                'Asset changed since capture validation')
+        return data
+
+    def shader_capture(self,number):
+        """Input-only programmable draw; never invent a raw GPU observation."""
+        require(type(number) is int and 0<number<=len(self.draws),'Unknown input sequence')
+        draw=self.draws[number-1]
+        require(draw['kind']<2,'FVF has no programmable shader capture')
+        elements=self.words(draw['element_asset'],192)
+        used=[draw[key] for key in ('code_asset','constant_asset','element_asset','render_asset',
+                                   'texture_state_asset','packed_asset')]
+        used.extend(s[2] for s in draw['streams'] if s[2])
+        identity=dict(input=draw,assets={n:self.assets[n]['sha256'] for n in used})
+        digest=hashlib.sha256(json.dumps(identity,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+        return dict(header=[MAGIC,2,draw['primitive'],draw['first'],draw['count'],
+                            draw['program_instructions'],draw['shader'],0],
+                    viewport=draw['viewport'],render=list(self.words(draw['render_asset'],664)),
+                    texture=list(self.words(draw['texture_state_asset'],512)),
+                    elements=[list(elements[i:i+3]) for i in range(0,48,3)],
+                    constants=self.asset_bytes(draw['constant_asset']),
+                    code=list(self.words(draw['code_asset'],draw['program_instructions']*16)),
+                    metadata=[s[:2] for s in draw['streams']],
+                    streams=[self.asset_bytes(s[2]) if s[2] else b'' for s in draw['streams']],
+                    outputs=None,sha256=digest,input_sequence=number,submission_kind=draw['kind'],
+                    up_stride=draw['up_stride'],complete_scene_pixel_qualified=False)
+
     def target(self,number,role):
         if not number:return None
         require(number in self.targets and self.targets[number]['role']==role,'Unknown/wrong target role')

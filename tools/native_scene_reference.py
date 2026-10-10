@@ -109,7 +109,8 @@ def run_captures(args,captures):
     addresses=[];cursor=STREAMS
     for stream in range(16):
         addresses.append(cursor)
-        extent=max([(c['header'][3]+c['header'][4])*c['metadata'][stream][0] for _,c in captures]+[16])
+        extent=max([c['header'][3]*c['metadata'][stream][0]+c['metadata'][stream][1]
+                    for _,c in captures]+[16])
         cursor+=(extent+0xffff)&~0xffff
     assert cursor<=0x3000000,'Captured stream ranges exceed the bounded scene arena'
     try:
@@ -122,7 +123,7 @@ def run_captures(args,captures):
                 if not size: continue
                 address=addresses[stream]
                 ref.set_stream(stream,OBJECT+0x1000+stream*16,stride)
-                ref.cpu.mem_write(address,bytes([0xcc])*((h[3]+h[4])*stride))
+                ref.cpu.mem_write(address,bytes([0xcc])*(h[3]*stride+size))
                 ref.cpu.mem_write(address+h[3]*stride,capture['streams'][stream])
             ref.put(OBJECT,1,0x10,0,0,0)
             for slot,(fmt,stream,offset) in enumerate(capture['elements']):
@@ -132,7 +133,13 @@ def run_captures(args,captures):
             ref.call('D3DDevice_SetVertexShaderConstantNotInline',[192*4],
                 ((UC_X86_REG_ECX,0),(UC_X86_REG_EDX,data)))
             before_counts=[draw_count(ref.gpu,i) for i in range(26)]
-            _,methods=ref.draw(h[3],h[2],h[4])
+            up=capture.get('submission_kind',0)==1
+            # Original DrawVerticesUP needs its inline declaration/copy plan,
+            # built by original helper0x13de90 from dirty bit0x20. Bound draws
+            # use array declaration/stream bits0x50. Do not fabricate the plan.
+            _,methods=ref.draw(h[3],h[2],h[4],state_dirty=0x20 if up else 0x50,
+                             up_data=addresses[0] if up else None,
+                             up_stride=capture.get('up_stride',0))
             ref.check()
             count=observe(ref.gpu,None,0);assert count==h[4],(path,count,h[4])
             actual=(ctypes.c_float*(count*28))()
@@ -152,11 +159,14 @@ def run_captures(args,captures):
                     vertices=[list(actual[i*28:(i+1)*28]) for i in range(count)],
                     fog=list(fog_values),complete_draw_executed=True,
                     draw_counters=counts,
+                    input_sequence=capture.get('input_sequence'),
+                    submission='original DrawVerticesUP' if up else 'original DrawVertices',
+                    input_only_capture=capture['outputs'] is None,
                     fixture='Preowned streams/program/pushbuffer and supplied viewport; shader/fetch only',
                     complete_scene_pixel_qualified=False)
                 (diagnostics/f'{path.stem}.aot-private.json').write_text(json.dumps(observation,indent=2)+'\n')
             masks=written_masks(capture['code']);compared=0;maximum=0
-            for vertex in range(count):
+            for vertex in range(count) if capture['outputs'] is not None else ():
                 for group,reg in enumerate((0,3,4,9,10,11,12)):
                     for lane in range(4):
                         if not masks[reg]&(8>>lane):continue
@@ -179,12 +189,14 @@ def run_captures(args,captures):
                     maximum=max(maximum,error/max(1,abs(want)));compared+=1
             for slot,(fmt,stream,offset) in enumerate(capture['elements']):
                 if fmt==2:continue
-                assert methods[0x1760+slot*4]==(capture['metadata'][stream][0]<<8)|fmt
-                assert methods[0x1720+slot*4]==addresses[stream]+offset
-            assert methods[0x1810]==((h[4]-1)<<24)|h[3]
+                assert methods[0x1760+slot*4]==((0 if up else capture['metadata'][stream][0])<<8)|fmt
+                if not up:assert methods[0x1720+slot*4]==addresses[stream]+offset
+            if not up:assert methods[0x1810]==((h[4]-1)<<24)|h[3]
             rows.append(dict(capture=path.name,sha256=capture['sha256'],primitive=h[2],first=h[3],
                 vertices=count,instructions=h[5],written_masks=masks,compared_lanes=compared,
-                maximum_scaled_error=maximum))
+                maximum_scaled_error=maximum,submission='original DrawVerticesUP' if up else 'original DrawVertices',
+                input_only_capture=capture['outputs'] is None,
+                shader_input_to_output_qualified=False))
         for stream in range(16):
             if ref.get(ref.stream_table+stream*12+8)[0]:ref.set_stream(stream,0,0)
         assert all(ref.get(header)[0]==0x01000001 for header in ref.resources)

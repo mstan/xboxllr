@@ -1492,3 +1492,62 @@ and default-build exclusion check are retained privately. Complete input
 coverage is now established for this interval; independent complete-frame
 shader/state/pixel qualification, original resource lifetime/startup, enabled
 noise and exact silicon questions remain. **4/9** remains unchanged.
+
+## Complete-frame programmable shader component - 2026-10-10
+
+All **4,327 programmable draws / 29,380 vertices / 852,020 output values**
+in the swaps2033-2034 input corpus now pass exact independent software
+shader/fetch checks. This covers all20 programs and both bound and
+user-pointer submission. Each draw executes the unmodified original XDK
+Load/Select/SetConstant/SetStream/Draw path on fresh preowned reference
+resources. The independent evaluator computes expectations from captured
+inputs before inspecting the actual LLE outputs. The input adapter leaves
+native outputs absent; they cannot become expected values.
+
+The evaluator now admits FLOAT1/2/3/4 defaults, multiple streams, signed ARL
+floor and relative constants within the192-entry context, paired old-address
+operand reads, and fractional positive LIT powers. ARL values where a small
+positive donor bias could change the floor remain guarded. Published fields
+come from [the Kelvin ISA](https://envytools.readthedocs.io/en/latest/hw/graph/xf/isa.html);
+ARL/LIT semantics come from
+[NV_vertex_program](https://registry.khronos.org/OpenGL/extensions/NV/NV_vertex_program.txt).
+Nearest/even binary32 is the selected software contract, rather than a claim
+about NV approximation accuracy or exact silicon results.
+
+Fractional LIT uses the independent interval arithmetic in **mpmath1.3.0**,
+with successively higher precision. Both outward interval endpoints must round
+to the same binary32 value. Exact polynomial midpoint tests independently
+check representative roots. This is an offline reference dependency; install
+`mpmath==1.3.0` in the Python environment already used by the original-XDK
+reference tools. Shipping HLE shaders and their performance are unchanged.
+
+The first two UP fixtures stopped in the original copy loop because the
+fixture requested bound-buffer dirty bits. Original helper0x13DE90 builds the
+inline declaration/copy plan when bit0x20 is dirty. Correcting that input makes
+both original DrawVerticesUP calls return and match232 independently computed
+values. No copy plan, instruction hook or successful return is fabricated.
+The retained union includes4,325 bound observations from the full batch and
+these two corrected UP observations; conflicting observations are rejected.
+
+The new admission and input/math suites pass65 authored tests. All70 retained
+corruption/independence controls pass, including changed live inputs with
+refreshed provenance, missing/guarded draws, wrong submission routes and
+ignored native-output fields. Rechecking the previous256 captures preserves
+their49,213 exact software values,64,486 raw native interval checks and30
+native controls, without new title/GPU/audio runs.
+
+Private evidence is `build/blinx/frame-inputs-firstworld-20261010/`, chiefly
+`shader-all-retained-qualified.aot-private.json`, `shader-all-observed/`,
+`shader-up-corrected/` and the two controls reports. Run
+`tools/native_frame_shader_reference.py --captures <private-directory>
+--diagnostics <bound-observations> --additional-diagnostics <up-observations>
+--output <private-report> --all-draws --audit-existing --library <reference-dll>`
+to re-audit retained observations against independently recalculated inputs.
+The report keeps full-scene pixels, state delivery and resource lifetime false.
+
+Four FVF draws, all41 full-frame state profiles, clears/target-produced texture
+composition, production raster bytecode, enabled noise and original resource
+startup/lifetime remain open. No shipping change, rebuild, host GPU, title or
+audio run was needed for this milestone. **4/9** remains unchanged; the entire
+LLE checklist remains active. Xbox access still awaits the earlier requested
+screen inspection after the unexpected GP SG-address readback.

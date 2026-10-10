@@ -837,3 +837,16 @@ Full-frame target/texture composition, resource startup/lifetime, enabled noise
 and exact hardware remain open. The full goal and **4/9** family count are
 unchanged; Xbox probing still awaits the previously requested screen inspection
 after the unexpected GP SG-address readback.
+
+All4,327 programmable draws in the new complete input interval now pass actual
+original bound/UP submission against independent software shader/fetch
+expectations:29,380 vertices and852,020 values across20 programs. The evaluator
+adds multistream FLOAT1/2/3/4, bounded signed ARL/relative constants and
+independently certified fractional LIT. The two UP fixtures needed the original
+inline-declaration dirty bit; their original copy-plan builder now runs without
+substituting code or outputs. All65 authored tests and70 retained controls pass;
+the earlier256-draw software/raw-native gates still pass unchanged.
+[Component evidence and limits](../pilots/native-title/GRAPHICS-LLE.md#complete-frame-programmable-shader-component---2026-10-10).
+Four FVF draws, all41 frame state profiles, target/texture composition, full
+scene pixels and original startup/lifetime remain open. This is a component
+milestone with **4/9** families qualified; the full goal remains active.

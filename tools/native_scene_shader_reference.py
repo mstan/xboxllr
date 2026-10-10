@@ -5,10 +5,11 @@ Kelvin fields are read from the published 92-bit instruction layout as one
 integer, not through the maintained disassembler. Captured stream bytes and
 constant inputs supply all values. Observed native/LLE vertices are compared
 only AFTER evaluating expectations. This fixture does not qualify unimplemented
-opcodes, indexed constants, nonfinite math or exact silicon approximations.
+opcodes, ambiguous ARL boundaries, nonfinite math or exact silicon approximations.
 """
 import argparse
 from fractions import Fraction
+from functools import lru_cache
 import hashlib
 import json
 import math
@@ -20,6 +21,7 @@ from native_scene_pixel_reference import binary32
 
 
 ISA_SOURCE='https://envytools.readthedocs.io/en/latest/hw/graph/xf/isa.html'
+MATH_SOURCE='https://registry.khronos.org/OpenGL/extensions/NV/NV_vertex_program.txt'
 
 
 def field(instruction, start, count):
@@ -27,15 +29,22 @@ def field(instruction, start, count):
 
 
 def fetch(capture, vertex):
+    assert type(vertex) is int and vertex>=0
     inputs=[[Fraction(0),Fraction(0),Fraction(0),Fraction(1)] for _ in range(16)]
     for slot,(fmt,stream,offset) in enumerate(capture['elements']):
         if fmt==2:continue
-        stride,size=capture['metadata'][stream];data=capture['streams'][stream]
+        assert 0<=stream<16 and 0<=offset<=0xffffffff
+        stride,extent=capture['metadata'][stream];data=capture['streams'][stream]
+        assert 0<=stride<=2048 and extent==len(data)
         start=vertex*stride+offset
-        size=4 if fmt in (0x16,0x40,0x25) else 12 if fmt==0x32 else 0
-        assert size and offset+size<=stride and start+size<=len(data),(slot,fmt)
-        if fmt==0x32:
-            values=list(struct.unpack_from('<3f',data,start))+[1]
+        floating=fmt in (0x12,0x22,0x32,0x42)
+        size=(fmt>>4)*4 if floating else 4 if fmt in (0x16,0x40,0x25) else 0
+        # Fetches can overlap, broadcast with stride zero, or omit unused final
+        # stride padding. Only consumed bytes need to exist in the input span.
+        assert size and start+size<=extent,(slot,fmt)
+        if floating:
+            count=fmt>>4
+            values=list(struct.unpack_from('<'+'f'*count,data,start))+[0]*(3-count)+([1] if count<4 else [])
         elif fmt==0x25:
             values=list(struct.unpack_from('<2h',data,start))+[0,1]
         else:
@@ -87,9 +96,49 @@ def vector_op(op, a, b, c):
     return [result]*4
 
 
+@lru_cache(maxsize=8192)
+def power32(base,exponent):
+    """Unique nearest/even binary32 from outward arbitrary-precision bounds.
+
+    Fractional positive powers use mpmath's independent interval log/multiply/
+    exp implementation, not host libm or either shader implementation. Accept
+    only when both exact rational endpoints round to the same binary32 value.
+    This is ideal software math; NV approximation and silicon remain separate.
+    """
+    assert base>0
+    if exponent.denominator==1:return binary32(base**int(exponent))
+    from mpmath.ctx_iv import MPIntervalContext
+    def rational(endpoint):
+        sign,mantissa,exponent,bits=endpoint
+        assert bits>=0,'Nonfinite power endpoint'
+        return (-1 if sign else 1)*Fraction(mantissa)*Fraction(2)**exponent
+    context=MPIntervalContext()
+    for precision in (96,192,384,768):
+        context.prec=precision
+        value=context.power(context.mpf(base.numerator)/base.denominator,
+                            context.mpf(exponent.numerator)/exponent.denominator)
+        lo,hi=map(rational,value._mpi_)
+        lower,upper=binary32(lo),binary32(hi)
+        if lower==upper:return lower
+    raise AssertionError('No unique binary32 power rounding proved')
+
+
 def scalar_op(op, c):
     if not op:return None
     if op==1:return c
+    if op==7:
+        # NV_vertex_program 2.14.1.10.17: x/y clamp at zero, exponent s8.8
+        # endpoints excluded. Approximation accuracy is a separate contract;
+        # ideal powers below are certified independently of either shader.
+        exponent=max(Fraction(-32767,256),min(Fraction(32767,256),c[3]))
+        diffuse=max(Fraction(0),c[0]);base=max(Fraction(0),c[1]);specular=Fraction(0)
+        if diffuse:
+            if not exponent or base==1:specular=Fraction(1)
+            elif not base:
+                assert exponent>0,'Nonfinite LIT power needs a separate contract'
+            else:
+                specular=power32(base,exponent)
+        return [Fraction(1),diffuse,specular,Fraction(1)]
     assert op in (2,3,4) and c[0],(op,c)
     value=binary32(1/sqrt32(abs(c[0]))) if op==4 else binary32(1/c[0])
     if op==3:
@@ -98,7 +147,7 @@ def scalar_op(op, c):
     return [value]*4
 
 
-def evaluate(capture, vertex, arithmetic=None):
+def evaluate(capture, vertex, arithmetic=None,trace=None):
     inputs=fetch(capture,vertex)
     constants=[list(map(Fraction,v)) for v in struct.iter_unpack('<4f',capture['constants'])]
     assert all(math.isfinite(v) for vector in constants for v in vector)
@@ -108,6 +157,7 @@ def evaluate(capture, vertex, arithmetic=None):
     temps=[[Fraction(0)]*4 for _ in range(12)]
     outputs=[[Fraction(0),Fraction(0),Fraction(0),Fraction(1)] for _ in range(13)]
     masks=[0]*13
+    address=0
     def store(index,mask,value):
         assert value is not None and 0<=index<13
         masks[index]|=mask
@@ -126,15 +176,19 @@ def evaluate(capture, vertex, arithmetic=None):
     for pc in range(0,len(code),4):
         w0,w1,w2,w3=code[pc:pc+4]
         instruction=(w1<<64)|(w2<<32)|w3
-        assert not w0 and instruction<1<<92 and not field(instruction,1,1)
+        assert not w0 and instruction<1<<92
         mac=field(instruction,85,4);ilu=field(instruction,89,3)
-        assert mac in (0,1,2,3,4,5,6,7,9,10) and ilu in (0,1,2,3,4)
+        assert mac in (0,1,2,3,4,5,6,7,9,10,13) and ilu in (0,1,2,3,4,7)
         def source(slot):
             packed=field(instruction,(58,43,28)[slot],15)
             mux=packed&3;index=field(packed,2,4)
             if mux==1:base=outputs[0] if index==12 else temps[index]
             elif mux==2:base=inputs[field(instruction,73,4)]
-            elif mux==3:base=constants[field(instruction,77,8)]
+            elif mux==3:
+                constant=field(instruction,77,8)+(address if field(instruction,1,1) else 0)
+                assert 0<=constant<192,'Relative constant outside captured context'
+                if trace is not None and field(instruction,1,1):trace.append(dict(op='relative',pc=pc//4,constant=constant))
+                base=constants[constant]
             else:raise AssertionError(('Unsupported source mux',pc,slot,mux))
             negate=-1 if packed&(1<<14) else 1
             return [negate*base[field(packed,shift,2)] for shift in (12,10,8,6)]
@@ -142,10 +196,23 @@ def evaluate(capture, vertex, arithmetic=None):
         a=source(0) if mac else None
         b=source(1) if mac in (2,4,5,6,7,9,10) else None
         c=source(2) if ilu or mac in (3,4) else None
-        vector=(vector_op if arithmetic is None else arithmetic.vector)(mac,a,b,c)
+        if trace is not None and ilu==7:trace.append(dict(op='LIT',pc=pc//4,operand=list(map(float,c))))
+        if mac==13:
+            assert arithmetic is None,'Address intervals need a separate indexing contract'
+            # Published ARL is floor, with no vector temporary store. Reject
+            # values where the maintained donor's <=1/512 positive bias could
+            # change that index; do not infer a hardware rounding rule from it.
+            value=math.floor(a[0])
+            assert value==math.floor(binary32(a[0]+Fraction(1,512))), 'Ambiguous near-integer ARL'
+            vector=None
+        else:vector=(vector_op if arithmetic is None else arithmetic.vector)(mac,a,b,c)
         scalar=(scalar_op if arithmetic is None else arithmetic.scalar)(ilu,c)
         destination=field(instruction,20,4)
-        if mac and not (ilu and destination==1):temporary(destination,field(instruction,24,4),vector)
+        if mac==13:
+            assert not field(instruction,24,4),'ARL has no masked temporary destination'
+            address=value
+            if trace is not None:trace.append(dict(op='ARL',pc=pc//4,operand=float(a[0]),address=address))
+        elif mac and not (ilu and destination==1):temporary(destination,field(instruction,24,4),vector)
         if ilu:temporary(1 if mac else destination,field(instruction,16,4),scalar)
         mask=field(instruction,12,4)
         if mask:
