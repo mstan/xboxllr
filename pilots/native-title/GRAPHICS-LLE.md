@@ -2965,11 +2965,11 @@ DLL. Private evidence is
 `producer-persistent-session-proposal/root-review.aot-private.json`, all under
 `frame-inputs-firstworld-20261010`. Full graphics and **4/9** stay open.
 
-## Corrected original producer prefix 2138 - 2026-10-10
+## Corrected original producer prefix 2142 - 2026-10-10
 
 The continuous current-generation original prefix now qualifies draws
-**1-2138**, with **340,776 independently expected written fragments** and
-**2,791,372,800 owned-pixel comparisons**. Every row passes current original
+**1-2142**, with **361,948 independently expected written fragments** and
+**2,796,595,200 owned-pixel comparisons**. Every row passes current original
 shader/state and unchanged pixel/storage checks. Draw 2031 now passes its 663
 writes after the generic pre-clip consumed-color correction. The retained
 4,331-draw state baseline keeps its earlier DLL identity; current-generation
@@ -2986,11 +2986,21 @@ The prior strict prequantization proof remains failed at 161 fragments; this
 new integer-output proof neither changes the nominal equation nor widens its
 comparison. Depth/stencil/alpha/padding/untouched roots remain exact.
 
+The same frozen arithmetic graph separately proves draw 2139's 21,172 writing
+fragments across five writing leaves. Two leaves have no writing fragments and
+consume no sampled-color precision. Every compact possible-byte set is bound
+to the independently classified geometry/depth footprint and unchanged
+nominal RGB. The original draw passes; the earlier coarse proof and 136
+weighted prequantization failures remain false. Its 24 source-first admission
+controls and 30 additional actual-artifact fault controls pass.
+
 The corrected replay reuses one reference for reviewed extensions, including
-draws 2134-2138 whose independent expectations prove zero writes. All **87
+draws 2134-2138 and 2140-2142 whose independent expectations prove zero writes.
+All **117
 actual-artifact fault controls** pass: 21 general pixel/state controls, 28
 omitted-leaf controls at original draws 1943/1969/1983, 28 at the seven leaves
-of draw 2133, and 10 continuation controls. Expectations and selected fault
+of draw 2133, 20 at draw 2139's five writing leaves, and 20 continuation
+controls. Expectations and selected fault
 sites come from independently derived before/after bytes, never observed
 after-images. The exact encoded-input palette cache records 28 misses and
 2,110 hits through 2132, with every cached draw result matched to the full
@@ -2998,11 +3008,15 @@ uncached input preflight before original submission; this establishes
 equivalence, not a title-performance measurement.
 
 Private evidence under `frame-inputs-firstworld-20261010` includes
-`producer-prefix2138-final-qualified.aot-private.json`
-(`b5adf744f00e28371d8f2ab4d49eac45a28419ad47187a703d777a9af230b293`),
+`producer-prefix2142-final-qualified.aot-private.json`
+(`0493ad6cf962a2a0624f3b13f3645c3add1771568011d6f7b76ff68874c2c6bd`),
 the frozen original checkpoints, separate expected/actual snapshots, all four
-artifact-control reports, and `producer2133-packed-complete-handoff.aot-private.json`.
-The next unqualified draw is 2139, stopped by the sampled-precision admission
-guard before original execution. Its separate source-only proof is underway.
+inherited and two new artifact-control reports, and the separate frozen
+`producer2133-packed-complete-handoff.aot-private.json` and
+`producer2139-packed-complete-handoff.aot-private.json`.
+The next unqualified draw is 2143, stopped by the sampled-precision admission
+guard before original execution. A reusable source-first same-profile batch
+through at most 2200 is being prepared; each new geometry/UV/LOD/depth and
+complete packed-byte result still requires its own proof before original use.
 Full producer/frame and native HLE scene pixels, enabled noise, original
 startup/lifetime, ring rollover and exact silicon remain open; **4/9** stands.
