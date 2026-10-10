@@ -26,7 +26,7 @@ from native_scene_draw_reference import replay
 from native_scene_producer_reference import expected_draw,compare_storage
 
 
-def run(args):
+def run(args, expectation=expected_draw, scope=__doc__):
     require(type(args.last_draw) is int and 1 <= args.last_draw <= 256, 'Choose a bounded prefix <=256')
     coverage = audit(args.captures/'frame.jsonl')
     reader = Reader(args.captures/'frame-inputs.bin').read()
@@ -64,7 +64,7 @@ def run(args):
                 require(plan['texture_producers'] == [0]*4, 'Prior scene textures outside BC1 producer contract')
                 scene['frame_resource_plan'] = plan
                 prepared = Prepared(capture,scene)
-                expected,changed,stats = expected_draw(capture,scene,prepared.vertices,prepared.fog,
+                expected,changed,stats = expectation(capture,scene,prepared.vertices,prepared.fog,
                                                       reader.targets,expected,args.depth_arithmetic)
                 written.setdefault(plan['target_ids'][0],set()).update(changed)
                 replay(args,Path(f'input-{number}'),ref,initialize_targets=False,
@@ -86,7 +86,7 @@ def run(args):
         for n,data in expected.items():(args.diagnostics/f'final-expected-{n}.aot-private.bin').write_bytes(data)
         for n,data in ref.images().items():(args.diagnostics/f'final-actual-{n}.aot-private.bin').write_bytes(data)
     finally:ref.close()
-    report = dict(passed=True,rows=rows,target_operations=operations,scope=__doc__,
+    report = dict(passed=True,rows=rows,target_operations=operations,scope=scope,
                   inputs_sha256=coverage['inputs_sha256'],ledger_sha256=coverage['ledger_sha256'],
                   library_sha256=library_sha,source_report_sha256=hashlib.sha256(args.source_report.read_bytes()).hexdigest(),
                   draws=len(rows),expected_written_fragments=sum(r['expected_written_pixels'] for r in rows),

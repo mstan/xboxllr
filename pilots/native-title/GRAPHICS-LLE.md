@@ -2147,3 +2147,46 @@ Complete-scene/native/enabled-noise/silicon/startup/lifetime qualification
 remains false. This CPU-only component is tracked in `.117` and keeps **4/9**.
 The owner authorized two workers alongside the primary agent; all share
 LP12-15 at Normal priority, lowering priority when a game is running.
+
+## Independent viewport-clipped producer prefix - 2026-10-10
+
+The independent expected-image chain now covers original draws **1-28**,
+including draw14's XY viewport boundary. Input-derived homogeneous plane
+intersections, perspective division, viewport reconstruction, and fan
+decomposition supply expected geometry. The actual submission still executes
+each whole original draw unchanged; observed vertices and after-images never
+supply expected clip vertices or predecessor images.
+
+The geometric equations follow [D3D11.3 sections 15.4-15.6](https://microsoft.github.io/DirectX-Specs/d3d/archive/D3D11_3_FunctionalSpec.htm).
+The numeric graph is explicitly declared from the exact retained DLL's
+disassembly before pixel comparison: binary32 reconstruction/division,
+rounded differences followed by fused multiply/add for intersections, and
+four-bit XY snapping with half ties away from zero. Four-bit snapping is this
+software contract; D3D11's eight-bit native raster precision and NV2A silicon
+precision are separate. Positive W, in-range Z, and intersections safely beyond
+the software clip early-out tolerance are admitted. Near-W/depth-plane and
+near-tolerance clipping remain guarded.
+
+All **28 original draws /16 clipped source triangles /117 expanded triangles**
+pass, with **27,655 written fragments /36,556,800 target-pixel comparisons**.
+Written RGB stays within one UNORM8 code; every depth/stencil byte, masked
+alpha byte, untouched color byte, and all five owned roots remain exact.
+All four original target/clear operations and the complete original shader/
+state components pass. Nine authored clipping tests pass alongside the ten
+producer tests; all **21 artifact controls** pass through the public CLI.
+
+Private evidence is `viewport-prefix28-public-qualified.aot-private.json`
+(SHA-256 `f899361238a3dabfe580d8a6a40e1961f7e2b98db509d18079e0c152e5a0037c`)
+and `viewport-prefix28-public-controls.aot-private.json`
+(`c0143e1cc79af0fd21005d79b648a657dbd25e7726f48ab6b10681df46fed959`)
+under the complete-input directory. The source frame and reference DLL hashes
+are unchanged. The public runner now accepts an explicit expectation/scope;
+`native_scene_viewport_reference.py` and `qualify_native_scene_viewport.py`
+extend its admitted equation domain without changing guest submission.
+
+Draw **29** is the next guarded boundary: one diffuse color exceeds the earlier
+`[0,0.5]` profile. Deriving its consumed combiner and decoder error bound is next.
+This CPU-only component changes no shipping HLE/core code and requires no new
+title/audio/GPU/Xbox run. Complete scene pixels, production HLE equivalence,
+enabled noise, original startup/lifetime, and exact silicon remain open; **4/9**
+families are qualified.
