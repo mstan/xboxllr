@@ -16,6 +16,7 @@ from native_d3d_bump import prepare_bump
 from native_d3d_raster import prepare_raster
 from native_d3d_fvf import prepare_fvf
 from native_d3d_feedback import prepare_feedback
+from native_d3d_explicit_blend import prepare_blend_combiners
 from native_d3d_texture import prepare_texture_views, prepare_projected_mips, prepare_xrgb_border
 
 PIN = 'bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0'
@@ -111,6 +112,7 @@ def prepare(donor, output, reference):
                 start=code.index('    if (!rhi_device_ready() || !g_combiner_cb)',code.index('BOOL d3d8_combiners_prepare_draw(void)'))
                 code=code[:start]+code[start:].replace('return FALSE;','pilot_d3d_backend_stop("combiner shader could not execute");')
                 code=code.replace('    if (mapped) {','    if (!mapped) pilot_d3d_backend_stop("combiner constants upload failed");\n    if (mapped) {')
+                code=prepare_blend_combiners(code)
             if path.name=='d3d8_states.c':
                 code=prepare_texture_views(code)
                 code,count=re.subn(r'    if \(min_linear && mag_linear && mip_linear\).*?    return RHI_FILTER_POINT;',
@@ -207,6 +209,11 @@ def prepare(donor, output, reference):
         'the pixel adapter consumes its interpolated, late-clamped factor.\n'
         'The existing feedback scratch/copy is exposed to native draws and target\n'
         'binding. Failed copies stop; scratch resources are released on teardown.\n'
+        'A parsed four-tap combiner and current vertex/state proof select GPU\n'
+        'float destination blending before final byte packing by default. Its\n'
+        'dedicated snapshot and shader survive ordinary feedback/cache churn\n'
+        'and are released with their owning device. Source color is not packed\n'
+        'before blending; unsupported geometry retains the ordinary draw route.\n'
         'Original and prepared hashes are in donor.json.\n',encoding='utf-8')
     result=dict(repository='https://github.com/phobos665/xboxrecomp',donor=PIN,backend='PHOBOS',
                 license='GPL-3.0 fork; retained MIT upstream and per-file notices',

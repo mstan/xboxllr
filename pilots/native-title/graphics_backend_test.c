@@ -16,6 +16,7 @@
 #include "graphics_depth_texture_backend_test.inc"
 #include "graphics_depth_texture_selector_test.inc"
 #include "graphics_fvf_snap_backend_test.inc"
+#include "graphics_blend_backend_test.inc"
 static int test_transform_pipeline(void)
 {
     static const D3DTRANSFORMSTATETYPE states[]={D3DTS_VIEW,D3DTS_PROJECTION,D3DTS_TEXTURE0,D3DTS_TEXTURE1,
@@ -119,10 +120,18 @@ int main(int argc,char **argv)
 {
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
     uint32_t pp[17]={64,64,D3DFMT_X8R8G8B8,1,0x11,1,0,0,1,D3DFMT_D24S8,0,60,1};
+    if(argc==2 && !strcmp(argv[1],"--float-blend")){pp[0]=640;pp[1]=480;}
     unsigned char pixels[64*64*4];
     for (unsigned pass=0;pass<3;++pass) {
         CHECK(pilot_gfx_create(pp)>=0);
 #ifdef PILOT_D3D_PHOBOS
+        if(argc==2 && !strcmp(argv[1],"--float-blend")) {
+            CHECK(!test_float_blend(pp));pilot_gfx_close();
+            struct PilotBlendStats stats;pilot_gfx_blend_stats(&stats);
+            CHECK(!stats.draws && !stats.copies && !stats.allocations &&
+                  !stats.shader_compilations && !stats.original_compilations);
+            continue;
+        }
         if(argc==2 && !strcmp(argv[1],"--fvf-snap")) {
             CHECK(test_fvf_screen_snap()==0);pilot_gfx_close();continue;
         }

@@ -30,7 +30,7 @@ int pilot_gfx_xbox_render_state(uint32_t state,uint32_t value)
         /* Preserve the caller's boolean cache contract using native compressed
          * sampling. Exact console noise pixels remain a documented open bound;
          * this retains the pilot's existing native sampling approximation. */
-        return value<=1;
+        if(value>1)return 0;pilot_gfx_noise_state(value);return 1;
     case 57:host=D3DRS_ZFUNC; goto compare;
     case 58:host=D3DRS_ALPHAFUNC; goto compare;
     case 59:host=D3DRS_ALPHABLENDENABLE; goto check_boolean;

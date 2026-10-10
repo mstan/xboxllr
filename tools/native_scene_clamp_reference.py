@@ -18,8 +18,9 @@ import numpy as np
 from native_frame_inputs import require
 from native_frame_state_delivery import expected_delivery
 from native_scene_diffuse_reference import consumed_profile,promote
-from native_scene_pixel_reference import bc1_images,plane,sample
-from native_scene_producer_reference import expected_draw
+from native_frame_target_reference import layout
+from native_scene_pixel_reference import bc1_images,plane,sample,contract
+from native_scene_producer_reference import expected_draw,native_depth
 from native_scene_viewport_reference import clipped_triangles
 
 CLAMP_SOURCE = 'https://registry.khronos.org/OpenGL/extensions/ARB/ARB_vertex_program.txt'
@@ -73,6 +74,42 @@ def precision_domain(errors,vertices):
     return bounds
 
 
+def validate_empty_inputs(capture,scene,vertices,fog,targets,before,methods):
+    """Keep the original input/storage/profile contract when no leaf can sample."""
+    require(set(before) == set(targets), 'Missing independently owned producer roots')
+    for target_id,target in targets.items():
+        _,height,pitch = layout(target)
+        require(len(before[target_id]) == pitch*height, 'Incomplete independently owned producer storage')
+    pair = scene['frame_resource_plan']['target_ids']
+    require(len(pair) == 2 and len(set(pair)) == 2 and
+            [targets[n]['role'] for n in pair] == [0,1] and len(scene['before']) == 2,
+            'Wrong active producer target pair')
+    pixel_scene = copy.deepcopy(scene)
+    for slot,target_id in enumerate(pair):
+        width,height,pitch = layout(targets[target_id])
+        require(pitch == width*4 and scene['before'][slot]['shape'] ==
+                [width,height,targets[target_id]['format']] and
+                targets[target_id]['format'] in ((44,45) if slot else (87,)),
+                'Producer target representation outside contract')
+        pixel_scene['before'][slot]['data'] = native_depth(before[target_id]) if slot else before[target_id]
+    require(len(vertices) == capture['header'][4] == scene['header'][5] and
+            len(fog) == len(vertices) and all(math.isfinite(x) for x in fog),
+            'Incomplete original producer vertex/fog count')
+    require(type(methods[0x380]) is int and 0 <= methods[0x380] <= 511,
+            'Incomplete input-derived line width')
+    # Match the existing producer validation: filled triangles consume no line
+    # width, and half primary RGB satisfies the reused closed pixel contract.
+    # These local inputs only validate the contract; no raster output is made.
+    normalized = dict(methods);normalized[0x380] = 0
+    half = [list(v) for v in vertices]
+    for v in half:
+        for lane in (4,5,6):v[lane] /= 2
+    supplied = dict(noise_disabled_fixture=True,complete_draw_executed=True,
+        vertex_capture_sha256=capture['sha256'],scene_capture_sha256=scene['sha256'],
+        vertices=half,fog=fog,methods={hex(k):v for k,v in normalized.items()})
+    contract(capture,pixel_scene,supplied,allow_empty=True)
+
+
 def triangle_colors(vertices,images,methods,width,written,metrics):
     """Perspective primary/UV planes, gradients and the guarded MODULATE equation."""
     require(len(vertices) == 3 and all(0 <= v[c] <= 1 for v in vertices for c in (4,5,6)),
@@ -112,11 +149,17 @@ def triangle_colors(vertices,images,methods,width,written,metrics):
 
 def expected_clamp_draw(capture,scene,vertices,fog,targets,before,depth_arithmetic,clip_arithmetic):
     clamped = clamp_vertices(vertices)
+    triangles,stats = clipped_triangles(clamped,*scene['before'][0]['shape'][:2],clip_arithmetic)
     errors = texture_error_bound(scene['textures'][0])
-    bounds = precision_domain(errors,clamped)
+    if triangles:
+        bounds = precision_domain(errors,clamped)
+    else:
+        # Complete clipping proves that no primary color or palette error is
+        # consumed. Retain exact input errors without imposing a sampled bound.
+        bounds = [e*Fraction(max(v[c] for v in clamped)) for e,c in zip(errors,(4,5,6))]
     methods,fixture,pixel = expected_delivery(capture,scene)
     methods = {**methods,**fixture,**pixel};consumed_profile(methods)
-    triangles,stats = clipped_triangles(clamped,*scene['before'][0]['shape'][:2],clip_arithmetic)
+    if not triangles:validate_empty_inputs(capture,scene,clamped,fog,targets,before,methods)
     images = bc1_images(scene['textures'][0])
     storage = dict(before);changed = set();covered = tested = rejected = counted = 0;error = 0
     metrics = {'maximum_consumed_diffuse':0}
@@ -141,5 +184,6 @@ def expected_clamp_draw(capture,scene,vertices,fog,targets,before,depth_arithmet
                                covered_pixels=covered,expected_written_pixels=len(changed),**metrics,
                                clamp_order=CLAMP_ORDER,input_codec_error_codes=list(map(str,errors)),
                                input_prequantization_codec_error_codes=list(map(str,bounds)),
+                               codec_precision_unconsumed_because_no_raster_leaves=not triangles,
                                clamped_input_components=sum(a[c] != b[c] for a,b in zip(vertices,clamped) for c in (4,5,6)),
                                rgb_channel_bound=1)

@@ -25,6 +25,15 @@ from native_scene_viewport_reference import snap
 
 CAPTURE_1943_SHA256 = '3c7da6fc564c57ceec1db134615d0bee45bd28ef84e2168795dc04f089872165'
 SCENE_1943_SHA256 = '9c9280e8fb94e5a663518ceb87f05f0abc5ea40fb8b6acdf04f1f9db7041c644'
+CAPTURE_1969_SHA256 = '9396f9f543470062a6ff5620b9a6fc6daa8fbfc8fa3480956bda7bcdf59610b2'
+SCENE_1969_SHA256 = 'fba0c91b532fef2c8c4d718fa79f2422bfa434849a9e0a9cf5b3a02118f7bd80'
+CAPTURE_1983_SHA256 = '760b08a25b5b828d4d3c784af236923a7567f6d00126c31c921017d05052f53a'
+SCENE_1983_SHA256 = '1045596a8e051402cdaf752a8ae56e2e56826bf9493d21178916b8d7c5ff1e90'
+SURVIVING_INPUT_SHA256 = {
+    1943:(CAPTURE_1943_SHA256,SCENE_1943_SHA256),
+    1969:(CAPTURE_1969_SHA256,SCENE_1969_SHA256),
+    1983:(CAPTURE_1983_SHA256,SCENE_1983_SHA256),
+}
 SOURCE_SHA256 = '24669d0fc03643e001373314d03258059777f441865ecfa846e4435b67b9af86'
 # Inspected in the pinned DLL before original draw1943 pixel observation.
 SURVIVING_CODE_SITES = {
@@ -50,6 +59,10 @@ SURVIVING_CODE_SITES = {
 
 
 def surviving_software_evidence(library,source):
+    if library is not None:
+        from native_scene_software_evidence import CORRECTED_LIBRARY_SHA256,software_evidence
+        if hashlib.sha256(library.read_bytes()).hexdigest() == CORRECTED_LIBRARY_SHA256:
+            return software_evidence(library,source)
     evidence = mixed_software_evidence(library)
     require(hashlib.sha256(source.read_bytes()).hexdigest() == SOURCE_SHA256,
             'Surviving mixed proof requires the pinned retained source')
@@ -144,9 +157,11 @@ def expected_surviving_mixed_draw(capture,scene,vertices,fog,targets,before,
 
 def expected_bounded_surviving_draw(capture,scene,vertices,fog,targets,before,
                                    depth_arithmetic,clip_arithmetic):
-    if capture.get('input_sequence') == 1943:
-        require(capture['sha256'] == CAPTURE_1943_SHA256 and scene['sha256'] == SCENE_1943_SHA256,
-                'Wrong original draw1943 capture/scene inputs')
+    number = capture.get('input_sequence')
+    if number in SURVIVING_INPUT_SHA256:
+        capture_sha,scene_sha = SURVIVING_INPUT_SHA256[number]
+        require(capture['sha256'] == capture_sha and scene['sha256'] == scene_sha,
+                f'Wrong original draw{number} capture/scene inputs')
         return expected_surviving_mixed_draw(capture,scene,vertices,fog,targets,before,
                                             depth_arithmetic,clip_arithmetic)
     return expected_empty_depth_draw(capture,scene,vertices,fog,targets,before,

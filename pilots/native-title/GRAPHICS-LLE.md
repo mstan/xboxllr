@@ -2782,3 +2782,106 @@ the old `9fdec518...` DLL and failed draw-2031 evidence remain unchanged.
 New compiled clipping/depth evidence must be reviewed before another original
 prefix replay. The reference equation and tolerance are unchanged; producer
 qualification remains **1943** and the full family remains partial **4/9**.
+
+## Default native float blending - 2026-10-10
+
+The default draw route now selects GPU float source clamping, source-alpha
+blending and final byte packing when the decoded vertex/combiner semantics,
+current uploaded constants, rectangle geometry, state and owned allocation
+shapes prove the supported case. Selection uses no capture hash, input ID,
+shader override or opt-in setting. Ordinary draws retain their existing route.
+
+The proof checks a six-instruction programmable vertex shader, four disjoint
+rectangle-strip vertices and the parsed four-tap pixel program. All four taps
+refer to the same owned, single-level, single-array, single-sample, noncube
+allocation. Supported sources are ordinary linear ARGB8 with an actual
+BGRA8/RGBA8 UNORM image, or D24S8 interpreted as ARGB8 through the existing
+FLOAT conversion cache. Output aliases, invalid geometry, dirty constants,
+unsupported state and enabled noise are rejected. The output-only default
+D24S8 allocation can be typed; sampled depth storage stays strictly typeless.
+Relative-address checks apply only to context operands because the decoder
+leaves that field unspecified for ordinary input registers. Fixed-function
+texture-coordinate selectors do not affect the proved programmable shader.
+
+One dedicated cached destination snapshot and one cached shader variant
+implement the selected draw. A warmed draw adds one GPU copy, with no new
+scratch allocation, variant compilation, CPU framebuffer transfer or extra
+draw. Allocation descriptors are checked and retained at resource creation.
+The original output-merger object, factors and mask are restored, the snapshot
+view is unbound, and ordinary feedback/completion/content lifetime remains
+connected. The 640x480 RGBA8 snapshot uses approximately 1.2 MiB. The previous
+private A/B/B/A measurements establish the bounded algorithm cost; automatic
+admission overhead has not been separately measured, so no title FPS claim
+is made.
+
+The default authored GPU test passes across three device lifetimes. Both
+ordinary ARGB8 and D24 reinterpretation use independent Fraction-derived
+quarter-tap inputs whose final colors distinguish source packing from final
+packing. Bound and UP draws, current constants, duplicate/folded geometry,
+wrong vertex/pixel semantics, noise/state rejection, allocation aliases,
+ordinary feedback interleaves, warm reuse, exact OM restoration, close and
+failed/successful reset are checked. Depth bits are preserved exactly; masked
+stencil REPLACE is checked independently. Ordinary UNORM sampling retains
+its existing precision: these exact authored observations do not establish
+a general FLOAT-filter precision bound for UNORM textures.
+
+All **14 focused native CTests** pass. A fresh default replay of the five
+original consumers **2767, 2820, 4300, 4301 and 4302** passes the unchanged
+strict gate across three lifetimes, with predecessor continuity, raw and
+production raster-shader intervals, exact untouched/depth/stencil storage and
+no lifetime byte drift. The former two-code blue residual is cleared. Original
+inputs and independently supplied producer roots precede the observation;
+measured after-images are never expected-image goldens. The failure and
+private diagnostic observations remain retained.
+
+Default source freeze is
+`postprocess-native-20261010/default-blend-runtime-frozen-v7.aot-private.json`
+(SHA-256 `1edbeab27f8cde25187c5af9f836df8b901a96e486ce7594cdba469442a01f4f`).
+Strict default qualification report is
+`postprocess-native-20261010/default-native-v7/qualified.aot-private.json`
+(SHA-256 `f1640b4b601ecb36601474710c7c5b9972d71efe5f711e785b09b7f3fdaa5af7`).
+The single combined muted hidden **330.235s** title regression passes: all 33
+captures are reviewed, title/Demo/pause-overlay/movie/title-return/reentry and
+a subsequent movie are visible, all five controller-state transitions are
+delivered, and no stop/fault guard appears. The run ends at its requested
+duration; its forced termination is not a natural title-exit qualification.
+The measured native title SHA-256 is
+`096a8437a729642cbb902b6bfdf961d537a039a3f9c9e6371109f049f88a62d0`.
+The same production code also passes added relative-context and unsupported
+linear-mip controls. Complete scene pixels,
+enabled noise and original resource startup/lifetime remain open; **4/9** stands.
+
+## Corrected producer generation and empty continuation - 2026-10-10
+
+The independently selected compiled evidence now binds the corrected source
+and side DLL to **65 code sites**, including the new local-copy, flat-provoking,
+consumed-attribute, nonfinite and pre-clip clamp operations. The preserved
+old generation reproduces its original **40 sites**; crossed source/DLL pairs
+fail closed. Existing clipping, snap, cull, top-left and depth arithmetic
+are unchanged. The producer admission dispatch selects this evidence by the
+actual DLL digest and verifies the matching source generation before replay.
+
+A positive-W triangle whose complete viewport clipping leaves no raster leaf
+now validates every original input/profile and independently owned root
+without requiring a precision bound for a texture it cannot sample. Surviving
+geometry retains the existing strict one-code gate. Root review passes
+**69 authored controls**, including a 64/63 green-code texture error, changed
+visible geometry, malformed texture storage, missing/short/inactive roots,
+vertex/fog counts, raster state and target roles/shapes. Four existing numeric
+functions are AST-identical to the previous version; no expected pixel or
+tolerance changes.
+
+One input-only continuation covers draws **2121-2128**: all 37 source
+primitives leave zero raster writes and all five independently expected
+roots remain unchanged from draw 2120. This prepares a prefix replay through
+2128; it does not qualify that original execution. Draw 2129 is visible and
+remains guarded. Its conservative all-mip sampled-set palette component is
+proved separately, but complete interpolation/filter-weight/LOD agreement
+needs the additional compiled/runtime evidence before admission.
+
+Root reviewed handoffs are
+`frame-inputs-firstworld-20261010/producer-color-clamp-generation-root-review.aot-private.json`
+and `positive-w-empty-root-review.aot-private.json`. The latter binds 12 source
+files and 21 artifacts to the frozen input-only continuation. Published
+original producer qualification remains **1943** until the corrected replay
+and dependent controls pass. Full graphics remains partial **4/9**.

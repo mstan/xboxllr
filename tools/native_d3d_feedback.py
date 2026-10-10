@@ -40,6 +40,30 @@ def prepare_feedback(code):
     once('else if (d3d8_base_resource(g_cur_textures[stage]) != target)',
          'else if (!pilot_feedback_alias(d3d8_base_resource(g_cur_textures[stage]),target) &&\n'
          '                 !pilot_feedback_alias(d3d8_base_resource(g_cur_textures[stage]),pilot_output_depth))')
+    # Share the existing allocator while retaining a distinct destination slot.
+    # Ordinary feedback may change size/format between corrected draws.
+    once('''static struct {
+    RhiImage     *img;
+    RhiView      *srv;
+    RhiImageDesc  desc;
+} g_feedback;''', '''typedef struct PilotFeedbackScratch {
+    RhiImage     *img;
+    RhiView      *srv;
+    RhiImageDesc  desc;
+} PilotFeedbackScratch;
+static PilotFeedbackScratch g_feedback,pilot_blend_destination;
+static unsigned long pilot_blend_copies,pilot_blend_allocations;''')
+    start=code.index('static int feedback_scratch(RhiImage *target)')
+    end=code.index('\n/* Bind the copy on every stage',start)
+    allocator=code[start:end].replace('static int feedback_scratch(RhiImage *target)',
+        'static int feedback_scratch_for(PilotFeedbackScratch *scratch,RhiImage *target,unsigned long *allocations)')
+    allocator=allocator.replace('g_feedback.', 'scratch->').replace('++pilot_feedback_allocations;', '++(*allocations);')
+    allocator+='''
+static int feedback_scratch(RhiImage *target) {
+    return feedback_scratch_for(&g_feedback,target,&pilot_feedback_allocations);
+}
+'''
+    code=code[:start]+allocator+code[end:]
     code+='''
 /* Native adapter access; resources remain owned by the donor/backend. */
 RhiImage *pilot_donor_default_depth(void) { return g_device_state.depth_image; }
@@ -52,7 +76,28 @@ void pilot_donor_feedback_end(DWORD mask) { feedback_end(mask); }
 void pilot_donor_feedback_stats(uint32_t *copies,uint32_t *allocations) {
     *copies=g_feedback_copies;*allocations=pilot_feedback_allocations;
 }
+/* Borrowed single-level snapshot. The adapter has proved current target shape,
+ * state and single coverage before requesting it; never retain its source. */
+RhiView *pilot_donor_blend_destination(void) {
+    RhiImage *target=pilot_output_color;
+    if (!target || !pilot_feedback_alias(target,g_device_state.rhi_scene_image) ||
+        !feedback_scratch_for(&pilot_blend_destination,target,&pilot_blend_allocations) ||
+        rhi_image_copy(pilot_blend_destination.img,target)!=0)
+        pilot_d3d_backend_stop("explicit blend destination allocation/copy failed");
+    ++pilot_blend_copies;
+    return pilot_blend_destination.srv;
+}
+void pilot_donor_blend_destination_stats(uint32_t *copies,uint32_t *allocations) {
+    *copies=pilot_blend_copies;*allocations=pilot_blend_allocations;
+}
 static void pilot_feedback_shutdown(void) {
+    if(pilot_blend_destination.srv) {
+        RhiView *none=NULL;rhi_set_textures(4,1,&none);
+        rhi_view_destroy(pilot_blend_destination.srv);
+    }
+    if(pilot_blend_destination.img)rhi_image_destroy(pilot_blend_destination.img);
+    memset(&pilot_blend_destination,0,sizeof(pilot_blend_destination));
+    pilot_blend_copies=pilot_blend_allocations=0;
     if(g_feedback.srv)rhi_view_destroy(g_feedback.srv);
     if(g_feedback.img)rhi_image_destroy(g_feedback.img);
     memset(&g_feedback,0,sizeof(g_feedback));

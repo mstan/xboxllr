@@ -36,11 +36,36 @@ struct PilotNativeTexture {
     ID3D11UnorderedAccessView *argb_uav;
     uint64_t argb_serial;
     unsigned argb_initialized;
+    unsigned blend_depth_shape,blend_color_shape;
 };
 static struct PilotNativeTexture *pilot_textures;
 static unsigned pilot_texture_capacity;
 static struct { IDirect3DVertexBuffer8 *object; int uploaded; uint64_t last_use; } pilot_vertices[256];
 static uint32_t pilot_bound_textures[4],pilot_bound_vertices[16];
+static uint32_t pilot_bound_strides[16];
+static unsigned pilot_blend_default_shape,pilot_blend_transient,pilot_blend_transient_proof,pilot_blend_draws;
+static unsigned pilot_blend_noise;
+static unsigned pilot_blend_default_depth_shape;
+void pilot_gfx_noise_state(unsigned enabled) {pilot_blend_noise=enabled;}
+static int pilot_blend_depth_shape(ID3D11Texture2D *image,unsigned sampled)
+{
+    D3D11_TEXTURE2D_DESC desc;ID3D11Texture2D_GetDesc(image,&desc);
+    /* GetDesc copies immutable CPU-owned descriptor fields; no GPU work or
+     * framebuffer readback. Retain this proof with the owning allocation.
+     * Output-only D24S8 can be typed; sampling its depth/stencil channels
+     * requires the typeless allocation used by the conversion cache. */
+    return desc.MipLevels==1 && desc.ArraySize==1 && desc.SampleDesc.Count==1 &&
+        !desc.SampleDesc.Quality && !(desc.MiscFlags&D3D11_RESOURCE_MISC_TEXTURECUBE) &&
+        (desc.Format==DXGI_FORMAT_R24G8_TYPELESS ||
+         (!sampled && desc.Format==DXGI_FORMAT_D24_UNORM_S8_UINT));
+}
+static int pilot_blend_color_shape(ID3D11Texture2D *image)
+{
+    D3D11_TEXTURE2D_DESC desc;ID3D11Texture2D_GetDesc(image,&desc);
+    return desc.MipLevels==1 && desc.ArraySize==1 && desc.SampleDesc.Count==1 &&
+        !desc.SampleDesc.Quality && !(desc.MiscFlags&D3D11_RESOURCE_MISC_TEXTURECUBE) &&
+        (desc.Format==DXGI_FORMAT_B8G8R8A8_UNORM || desc.Format==DXGI_FORMAT_R8G8B8A8_UNORM);
+}
 static uint32_t pilot_sampling_formats[4];
 static ID3D11ShaderResourceView *pilot_sampling_views[4];
 static unsigned pilot_sampling_views_dirty=15;
@@ -120,6 +145,10 @@ static LRESULT CALLBACK pilot_window_proc(HWND window,UINT message,WPARAM wparam
 }
 void pilot_gfx_close(void)
 {
+    pilot_blend_default_shape=pilot_blend_transient=pilot_blend_transient_proof=pilot_blend_draws=0;
+    pilot_blend_noise=0;
+    pilot_blend_default_depth_shape=0;
+    memset(pilot_bound_strides,0,sizeof(pilot_bound_strides));
     pilot_visibility_close();
     pilot_completion_close();
     pilot_quad_close();
@@ -202,6 +231,10 @@ int32_t pilot_gfx_create(const uint32_t p[17])
 #endif
         if (SUCCEEDED(result)) {
             D3D11_TEXTURE2D_DESC desc; ID3D11Texture2D_GetDesc(pilot_surfaces[0],&desc);
+            pilot_blend_default_shape=desc.Width==640 && desc.Height==480 && desc.MipLevels==1 &&
+                desc.ArraySize==1 && desc.SampleDesc.Count==1 && !desc.SampleDesc.Quality &&
+                !(desc.MiscFlags&D3D11_RESOURCE_MISC_TEXTURECUBE) && desc.Format==DXGI_FORMAT_R8G8B8A8_UNORM;
+            pilot_blend_default_depth_shape=pilot_blend_depth_shape(pilot_surfaces[2],0);
             desc.BindFlags=D3D11_BIND_SHADER_RESOURCE; desc.MiscFlags=0;
             result=ID3D11Device_CreateTexture2D(d3d8_GetD3D11Device(),&desc,NULL,&pilot_surfaces[1]);
         }
@@ -244,6 +277,11 @@ int32_t pilot_gfx_reset(const uint32_t p[17])
     ID3D11Resource *scene=(ID3D11Resource*)rhi_d3d11_native_image(d3d8_GetSceneImage());
     pilot_d3d_require(ID3D11Resource_QueryInterface(scene,&IID_ID3D11Texture2D,(void**)&pilot_surfaces[0]),__FILE__,__LINE__);
     D3D11_TEXTURE2D_DESC desc;ID3D11Texture2D_GetDesc(pilot_surfaces[0],&desc);
+    pilot_blend_default_shape=desc.Width==640 && desc.Height==480 && desc.MipLevels==1 &&
+        desc.ArraySize==1 && desc.SampleDesc.Count==1 && !desc.SampleDesc.Quality &&
+        !(desc.MiscFlags&D3D11_RESOURCE_MISC_TEXTURECUBE) && desc.Format==DXGI_FORMAT_R8G8B8A8_UNORM;
+    pilot_blend_default_depth_shape=pilot_blend_depth_shape(pilot_surfaces[2],0);
+    pilot_blend_transient=pilot_blend_transient_proof=0;
     desc.BindFlags=D3D11_BIND_SHADER_RESOURCE;desc.MiscFlags=0;
     pilot_d3d_require(ID3D11Device_CreateTexture2D(d3d8_GetD3D11Device(),&desc,NULL,&pilot_surfaces[1]),__FILE__,__LINE__);
     pilot_color_target=0;pilot_depth_target=UINT32_MAX;
@@ -363,6 +401,7 @@ void pilot_gfx_vertex_bind(unsigned stream,uint32_t handle,uint32_t stride)
     ID3D11Buffer *buffer=handle?pilot_donor_vertex(pilot_vertex(handle)):NULL;UINT offset=0;
     ID3D11DeviceContext_IASetVertexBuffers(d3d8_GetD3D11Context(),stream,1,&buffer,&stride,&offset);
     pilot_bound_vertices[stream]=handle;
+    pilot_bound_strides[stream]=handle?stride:0;
 }
 void pilot_gfx_vertex_upload(uint32_t handle,const void *data,uint32_t bytes)
 {
@@ -614,6 +653,8 @@ int32_t pilot_gfx_texture_create_usage(uint32_t width,uint32_t height,uint32_t l
     pilot_textures[slot].rtv=rtv;
     pilot_textures[slot].dsv=dsv;
     pilot_textures[slot].object=object; pilot_textures[slot].uploaded=0;
+    pilot_textures[slot].blend_depth_shape=pilot_blend_depth_shape(pilot_donor_texture((D3D8Texture*)object),1);
+    pilot_textures[slot].blend_color_shape=pilot_blend_color_shape(pilot_donor_texture((D3D8Texture*)object));
     *handle=slot+1;
     return S_OK;
 }
@@ -839,6 +880,10 @@ void pilot_gfx_set_texture_state(uint32_t stage,uint32_t state,uint32_t value)
 int32_t pilot_gfx_draw_up(uint32_t primitive,uint32_t count,const void *data,uint32_t stride,uint32_t fvf)
 {
     if (!pilot_device) return E_FAIL;
+    pilot_gfx_shader_fixed_binding();
+#ifdef PILOT_D3D_PHOBOS
+    pilot_donor_blend_candidate(0);
+#endif
     pilot_feedback_validate();
     pilot_d3d_raster_texture_mode(0,NULL);
     pilot_d3d_program_fog_mode(0);
@@ -868,6 +913,7 @@ uint32_t pilot_gfx_fvf_extent(uint32_t fvf)
 int32_t pilot_gfx_fvf_prepare(uint32_t fvf,float screen_x,float screen_y)
 {
     if(!pilot_device)return E_FAIL;
+    pilot_gfx_shader_fixed_binding();
     pilot_gfx_fvf_extent(fvf);
     uint32_t viewport[6];HRESULT hr=pilot_gfx_get_viewport(viewport);if(FAILED(hr))return hr;
     float low,high;memcpy(&low,viewport+4,4);memcpy(&high,viewport+5,4);
@@ -879,8 +925,12 @@ int32_t pilot_gfx_fvf_prepare(uint32_t fvf,float screen_x,float screen_y)
     pilot_d3d_program_fog_mode(0);
     pilot_d3d_fvf_prepare(fvf,scale,offset);return S_OK;
 }
+#include "graphics_blend_backend.inc"
 int32_t pilot_gfx_draw_vertices(unsigned primitive,unsigned first,unsigned count)
 {
+#ifdef PILOT_D3D_PHOBOS
+    pilot_donor_blend_candidate(0);
+#endif
     if(!pilot_device || !count || (uint64_t)first+count>UINT32_MAX)return E_INVALIDARG;
     uint32_t feedback=pilot_feedback_validate();
     D3D11_PRIMITIVE_TOPOLOGY topology;
@@ -900,18 +950,44 @@ int32_t pilot_gfx_draw_vertices(unsigned primitive,unsigned first,unsigned count
             }
         }
     }
+#ifdef PILOT_D3D_PHOBOS
+    pilot_donor_blend_candidate(pilot_gfx_blend_candidate_geometry(primitive,first,count));
+#endif
     pilot_d3d_raster_texture_mode(1,scale);d3d8_shaders_prepare_pixel();d3d8_states_apply();
     ID3D11DeviceContext *context=d3d8_GetD3D11Context();
-    HRESULT flat_result=pilot_flat_prepare(primitive);if(FAILED(flat_result))return flat_result;
+    HRESULT flat_result=pilot_flat_prepare(primitive);if(FAILED(flat_result)) {
+#ifdef PILOT_D3D_PHOBOS
+        pilot_donor_blend_candidate(0);
+#endif
+        return flat_result;
+    }
     int flat_quad=primitive==8 && d3d8_GetRenderStates()[D3DRS_SHADEMODE]==1;
     if(flat_quad)topology=D3D11_PRIMITIVE_TOPOLOGY_LINELIST_ADJ;
     ID3D11DeviceContext_IASetPrimitiveTopology(context,topology);
 #ifdef PILOT_D3D_PHOBOS
     uint32_t copied=pilot_donor_feedback_begin();
     if(copied!=feedback)pilot_d3d_backend_stop("feedback copy did not cover bound aliases");
+    ID3D11BlendState *saved_blend=NULL;FLOAT saved_factors[4]={0};UINT saved_mask=0;
+    int explicit_blend=pilot_donor_blend_active();
+    if(explicit_blend) {
+        if(copied)pilot_d3d_backend_stop("explicit blend cannot share an aliased sampling draw");
+        RhiView *view=pilot_donor_blend_destination();
+        ID3D11ShaderResourceView *native=(ID3D11ShaderResourceView*)rhi_d3d11_native_view(view);
+        ID3D11DeviceContext_PSSetShaderResources(context,4,1,&native);
+        ID3D11DeviceContext_OMGetBlendState(context,&saved_blend,saved_factors,&saved_mask);
+        ID3D11DeviceContext_OMSetBlendState(context,NULL,NULL,saved_mask);
+    }
 #endif
     if(primitive==8 && !flat_quad)pilot_quad_draw(first,count);else ID3D11DeviceContext_Draw(context,count,first);
 #ifdef PILOT_D3D_PHOBOS
+    if(explicit_blend) {
+        ID3D11ShaderResourceView *none=NULL;
+        ID3D11DeviceContext_PSSetShaderResources(context,4,1,&none);
+        ID3D11DeviceContext_OMSetBlendState(context,saved_blend,saved_factors,saved_mask);
+        if(saved_blend)ID3D11BlendState_Release(saved_blend);
+        ++pilot_blend_draws;
+    }
+    pilot_donor_blend_candidate(0);
     pilot_donor_feedback_end(copied);
 #endif
     ID3D11DeviceContext_GSSetShader(context,NULL,NULL,0);
@@ -925,13 +1001,19 @@ int32_t pilot_gfx_draw_memory(unsigned primitive,unsigned count,const void *vert
 {
 #ifdef PILOT_D3D_PHOBOS
     HRESULT pilot_donor_upload_vertices(const void*,UINT,UINT);
+    if(!pilot_device)return E_FAIL;
     if(!vertices || !stride || !count || (uint64_t)count*stride>UINT32_MAX)return E_INVALIDARG;
+    if(pilot_blend_transient)return E_INVALIDARG;
+    pilot_blend_transient=1;
+    pilot_blend_transient_proof=pilot_gfx_shader_blend_rectangle(vertices,count*stride,stride,primitive,count);
     ID3D11DeviceContext *ctx=d3d8_GetD3D11Context();ID3D11Buffer *saved=NULL;UINT old_stride=0,offset=0;
     ID3D11DeviceContext_IAGetVertexBuffers(ctx,0,1,&saved,&old_stride,&offset);
     HRESULT hr=pilot_donor_upload_vertices(vertices,count*stride,stride);
     if(SUCCEEDED(hr))hr=pilot_gfx_draw_vertices(primitive,0,count);
     ID3D11DeviceContext_IASetVertexBuffers(ctx,0,1,&saved,&old_stride,&offset);
     if(saved)ID3D11Buffer_Release(saved);
+    pilot_blend_transient=pilot_blend_transient_proof=0;
+    pilot_donor_blend_candidate(0);
     return hr;
 #else
     (void)primitive;(void)count;(void)vertices;(void)stride;return E_NOTIMPL;

@@ -75,6 +75,15 @@ void pilot_gfx_shader_constants(unsigned first,unsigned count,const void *data);
 int32_t pilot_gfx_shader_flush(void);
 unsigned pilot_gfx_shader_uploads(void);
 void pilot_gfx_shader_capture_constants(void *data);
+/* Internal semantic admission; no GPU/CPU framebuffer access or draw override. */
+void pilot_gfx_shader_fixed_binding(void);
+/* Preserve the accepted Xbox noise state for bounded semantic admission. */
+void pilot_gfx_noise_state(unsigned enabled);
+int pilot_gfx_shader_blend_rectangle(const void *vertices,uint32_t bytes,unsigned stride,unsigned primitive,unsigned count);
+/* Read-only partial admission hook; the donor separately proves PS semantics. */
+int pilot_gfx_blend_candidate_geometry(unsigned primitive,unsigned first,unsigned count);
+struct PilotBlendStats {uint32_t draws,copies,allocations,shader_compilations,original_compilations;};
+void pilot_gfx_blend_stats(struct PilotBlendStats *stats);
 int32_t pilot_gfx_shader_raster(const float scale[4],const float offset[4]);
 int32_t pilot_gfx_draw_vertices(unsigned primitive,unsigned first,unsigned count);
 int32_t pilot_gfx_draw_memory(unsigned primitive,unsigned count,const void *vertices,unsigned stride);

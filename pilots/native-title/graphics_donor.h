@@ -13,6 +13,11 @@ void pilot_donor_output_images(RhiImage *color,RhiImage *depth,int force);
 DWORD pilot_donor_feedback_begin(void);
 void pilot_donor_feedback_end(DWORD mask);
 void pilot_donor_feedback_stats(uint32_t *copies,uint32_t *allocations);
+void pilot_donor_blend_candidate(int admitted);
+int pilot_donor_blend_active(void);
+RhiView *pilot_donor_blend_destination(void);
+void pilot_donor_blend_destination_stats(uint32_t *copies,uint32_t *allocations);
+void pilot_donor_blend_shader_stats(uint32_t *variants,uint32_t *originals);
 static ID3D11RenderTargetView *d3d8_GetDefaultRTV(void)
 { return (ID3D11RenderTargetView*)rhi_d3d11_native_view(d3d8_GetDefaultTargetView()); }
 static ID3D11Texture2D *pilot_donor_texture(D3D8Texture *t)

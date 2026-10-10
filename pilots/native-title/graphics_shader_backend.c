@@ -16,6 +16,7 @@ struct NativeShader {
     char *source;
     struct PilotVertexElement elements[16];
     unsigned used;
+    unsigned blend_recipe;
 };
 static struct NativeShader native_shaders[256];
 static ID3D11Buffer *native_constants_buffer;
@@ -23,13 +24,16 @@ static uint32_t native_constants[192][4];
 static unsigned native_constants_dirty,native_constants_uploads,native_shader_bound;
 static ID3D11Buffer *native_raster_buffer;
 static float native_raster_values[12];
+static unsigned native_shader_active,native_constants_bound,native_raster_bound;
 static struct NativeShader *native_shader(uint32_t handle)
 {
     if(!handle || handle>256 || !native_shaders[handle-1].object)pilot_d3d_backend_stop("unowned native vertex shader");
     return &native_shaders[handle-1];
 }
+#include "graphics_blend_admission_backend.inc"
 int32_t pilot_gfx_shader_bind(uint32_t handle)
 {
+    native_shader_active=0;
     struct NativeShader *shader=native_shader(handle);
     if(!native_constants_buffer) {
         D3D11_BUFFER_DESC desc={0};
@@ -43,7 +47,8 @@ int32_t pilot_gfx_shader_bind(uint32_t handle)
     ID3D11DeviceContext_VSSetShader(context,shader->object,NULL,0);
     ID3D11DeviceContext_IASetInputLayout(context,shader->layout);
     ID3D11DeviceContext_VSSetConstantBuffers(context,1,1,&native_constants_buffer);
-    native_shader_bound=handle;pilot_d3d_program_fog_mode(1);return S_OK;
+    native_shader_bound=handle;native_shader_active=native_constants_bound=1;
+    pilot_d3d_program_fog_mode(1);return S_OK;
 }
 void pilot_gfx_shader_constants(unsigned first,unsigned count,const void *data)
 {
@@ -84,6 +89,7 @@ int32_t pilot_gfx_shader_create(const uint32_t *code,unsigned count,const struct
     for(slot=0;slot<256 && native_shaders[slot].object;++slot){}
     if(slot==256)return E_OUTOFMEMORY;
     struct NativeShader shader={0};
+    shader.blend_recipe=shader_blend_recipe(code,count,elements);
     char *source=shader_source(code,count,elements,&shader.used);
     if(!source)return E_OUTOFMEMORY;
     ID3DBlob *errors=NULL;
@@ -126,6 +132,7 @@ void pilot_gfx_shader_destroy(uint32_t handle)
         ID3D11DeviceContext_VSSetShader(d3d8_GetD3D11Context(),NULL,NULL,0);
         ID3D11DeviceContext_IASetInputLayout(d3d8_GetD3D11Context(),NULL);
         native_shader_bound=0;
+        pilot_gfx_shader_fixed_binding();
     }
     if(shader->layout)ID3D11InputLayout_Release(shader->layout);
     if(shader->raw_layout)ID3D11InputLayout_Release(shader->raw_layout);
@@ -145,6 +152,7 @@ void pilot_gfx_shaders_close(void)
     memset(native_constants,0,sizeof(native_constants));native_constants_dirty=native_constants_uploads=0;
     if(native_raster_buffer){ID3D11Buffer *empty=NULL;ID3D11DeviceContext_VSSetConstantBuffers(d3d8_GetD3D11Context(),0,1,&empty);ID3D11Buffer_Release(native_raster_buffer);native_raster_buffer=NULL;}
     memset(native_raster_values,0,sizeof(native_raster_values));
+    pilot_gfx_shader_fixed_binding();
 }
 int32_t pilot_gfx_shader_raster(const float scale[4],const float offset[4])
 {
@@ -168,6 +176,7 @@ int32_t pilot_gfx_shader_raster(const float scale[4],const float offset[4])
         memcpy(native_raster_values,values,sizeof(values));
     }
     ID3D11DeviceContext_VSSetConstantBuffers(context,0,1,&native_raster_buffer);
+    native_raster_bound=1;
     return pilot_gfx_shader_flush();
 }
 static int32_t shader_raw_prepare(struct NativeShader *shader)
