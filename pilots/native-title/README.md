@@ -65,6 +65,9 @@ native affine/default-Q/projected bounds pass unchanged. Exact Xbox compressed
 decoder precision stays hardware-last. CPU work uses Idle priority and one
 logical processor; GPU fixtures run only with Marvel Rivals absent. No title
 or audio rerun occurs, and this batch changes no native HLE production code.
+An explicit noise-disabled fixture now executes all 32 retained scene draws
+without guards/skips. The five changed-target captures retain color/depth
+differences for independent raster/combiner checks; no scene-pixel pass is claimed.
 Overall qualification
 remains 4/9; see [graphics evidence and remaining scope](GRAPHICS-LLE.md).
 

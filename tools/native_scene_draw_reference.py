@@ -5,6 +5,9 @@ Preowned resources and initial render targets are explicit fixture conditions;
 allocation and whole-title startup are not replaced or claimed here. Reports
 retain guarded draws as missing qualification, rather than treating no-op draws
 as agreement with the native after-image.
+
+The optional noise-disabled fixture calls the original setter with zero and
+records the captured value separately. It does not qualify enabled-noise scenes.
 """
 import argparse
 import ctypes
@@ -75,6 +78,7 @@ def replay(args,path):
     name_fn=ref.lib.xlle_nv2a_reference_draw_count_name
     name_fn.restype=ctypes.c_char_p;name_fn.argtypes=[ctypes.c_uint32]
     try:
+        ref.emit(0x184,2);ref.emit(0x188,2)  # explicit preowned texture DMA contexts
         h=capture['header'];cursor=STREAMS
         for stream,(stride,size) in enumerate(capture['metadata']):
             if not size:continue
@@ -139,7 +143,8 @@ def replay(args,path):
                 # are not part of replaying this already initialized draw.
                 assert capture['render'][state]==0,(path,state)
                 continue
-            ref.call('D3DDevice_SetRenderStateNotInline',[state,capture['render'][state]])
+            value=0 if args.noise_disabled_fixture and state==159 else capture['render'][state]
+            ref.call('D3DDevice_SetRenderStateNotInline',[state,value])
         if scene['header'][8]:
             for state in range(57):
                 ref.call('D3DDevice_SetRenderStateNotInline',[state,capture['render'][state]])
@@ -147,9 +152,14 @@ def replay(args,path):
             for state in range(30):
                 ref.call('D3DDevice_SetTextureStageStateNotInline',[stage,state,capture['texture'][stage*32+state]])
         ref.put(data,*capture['viewport']);ref.call('D3DDevice_SetViewport',[data])
-        _,methods=ref.draw(h[3],h[2],h[4],clear=False,state_dirty=None);ref.check()
-        graph_services=0;guard=None
-        while read(ref.gpu,0xfd400100,4):
+        guard=None;methods={};graph_services=0
+        try:
+            _,methods=ref.draw(h[3],h[2],h[4],clear=False,state_dirty=None);ref.check()
+        except AssertionError:
+            raw=ref.lib.xlle_nv2a_reference_error(ref.gpu)
+            if not raw:raise
+            guard=raw.decode()
+        while not guard and read(ref.gpu,0xfd400100,4):
             assert graph_services<32,'Original graphics service made no bounded progress'
             try:ref.call('original_graphics_service',[],((UC_X86_REG_ECX,ref.device+0x23c0),))
             except AssertionError:
@@ -181,6 +191,9 @@ def replay(args,path):
             assert len(after[i])==len(expected)
             differences.append(sum(a!=b for a,b in zip(struct.iter_unpack('<I',after[i]),struct.iter_unpack('<I',expected))))
         return dict(capture=path.name,vertex_sha256=capture['sha256'],scene_sha256=scene['sha256'],
+            fixture_render_overrides=[dict(state=159,captured_value=capture['render'][159],fixture_value=0,
+                reason='noise-disabled offline scene fixture; enabled-noise pixels remain deferred')]
+                if args.noise_disabled_fixture else [],
             census=census,color_depth_differing_words=differences,
             emitted_draw_methods={hex(k):hex(v) for k,v in methods.items()},
             fifo_get=hex(get) if get is not None else None,fifo_put=hex(put),pending_words=[hex(v) for v in pending_words],
@@ -200,6 +213,7 @@ if __name__=='__main__':
     for name in ('xbe','binding','library','dependencies','output','captures'):
         parser.add_argument('--'+name,type=Path,required=True)
     parser.add_argument('--limit',type=int,default=32)
+    parser.add_argument('--noise-disabled-fixture',action='store_true',help='Explicitly set render state 159 to zero via the original setter; does not qualify enabled-noise scenes')
     parser.add_argument('--require-qualified',action='store_true',help='Fail if any draw remains guarded or lacks independent pixel qualification')
     args=parser.parse_args();dependency_handles=[os.add_dll_directory(str(args.dependencies.resolve()))]
     rows=[]
@@ -207,7 +221,9 @@ if __name__=='__main__':
         row=replay(args,path);rows.append(row);print(json.dumps(row),flush=True)
     assert rows
     args.output.write_text(json.dumps(dict(xbe_sha256=XBE_SHA,draws=rows,
-        scope='draw-state audit with captured initial targets and preowned resources; guards and mismatches remain unqualified'),indent=2)+'\n')
+        noise_disabled_fixture=args.noise_disabled_fixture,
+        scope=('noise-disabled scene fixture: original setter 159 receives zero, captured enabled value is retained; original enabled scenes and pixel agreement remain unqualified'
+            if args.noise_disabled_fixture else 'draw-state audit with captured initial targets and preowned resources; guards and mismatches remain unqualified')),indent=2)+'\n')
     qualified=sum(row['pixel_qualified'] for row in rows)
     print(f'AUDIT: {len(rows)} captured draws, {qualified} independently pixel-qualified',flush=True)
     if args.require_qualified and qualified!=len(rows):raise SystemExit(1)

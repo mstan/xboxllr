@@ -892,10 +892,31 @@ still needs its independent pixel gate. Graphics remains partial, with
 The latest 32-capture original scene-state audit now advances past the old RDI
 transport failure and stops at `NV2A DXT1 noise pixel behavior remains
 unqualified`. Evidence is `scene-firstworld-formats-followup.aot-private.json`.
-No complete draw or scene pixel is qualified by that result. Keep enabled-noise
-silicon questions last; a separately declared noise-disabled scene fixture can
-exercise the remaining captured raster/combiner contracts offline without
-claiming the original enabled-noise scenes as qualified.
+No complete draw or scene pixel is qualified by that enabled-noise result.
+Keep enabled-noise silicon questions last.
+
+`native_scene_draw_reference.py --noise-disabled-fixture` now explicitly calls
+the original render-state setter 159 with zero and records the captured value
+one in each row's `fixture_render_overrides`. Both texture DMA contexts are
+explicit preowned fixture state, as in the qualified texture references; their
+missing setup was previously masked by the earlier guard. Immediate draw
+faults are now recorded rather than terminating the audit before a report.
+All **32 captured draws execute completely**, with no guard or skip census,
+under this declared noise-off condition. It does not qualify the original
+enabled-noise scenes. Default replay retains the enabled guard, and
+`--require-qualified` still rejects execution without independent pixel proof.
+
+The five captures with changed targets remain the concrete next pixel checks:
+draws 2/3/4/5/6 differ from retained native after-images by respectively
+33/129/67/3,401/4,334 color words and 33/129/68/3,490/4,479 depth words.
+These differences remain diagnostic; native enabled-state captures are not a
+new noise-off or Xbox golden. Zero differences for unchanged targets do not
+establish pixel qualification. Private evidence uses
+`scene-firstworld-noise-disabled.aot-private.json`,
+`scene-noise-enabled-control.aot-private.json` and
+`scene-noise-disabled-require-qualified.aot-private.json`. Next, establish
+independent coverage/depth/combiner expectations for these actual owned inputs
+and classify the observed differences against declared precision bounds.
 
 Continue broader exercised texture/state layouts and raster outcomes toward
 complete scene composition, retaining the bounded projected-footprint gates.
