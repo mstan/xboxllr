@@ -850,3 +850,15 @@ the earlier256-draw software/raw-native gates still pass unchanged.
 Four FVF draws, all41 frame state profiles, target/texture composition, full
 scene pixels and original startup/lifetime remain open. This is a component
 milestone with **4/9** families qualified; the full goal remains active.
+
+The four FVF draws subsequently pass their original format setter and bound/UP
+calls against464 independent values. All **4,331 draws / 29,396 vertices /
+852,484 values** in the new frame now have qualified software vertex-output
+components. The zero-RHW reciprocal limit uses NVIDIA's published special
+case; remaining signed-zero/depth/fixed-transform cases stay guarded. All75
+focused authored tests and130 programmable/FVF controls pass. Full41-profile
+state delivery, target/texture composition, pixels and original startup/lifetime
+remain open; the state census records concrete newly exposed combinations.
+[FVF component details](../pilots/native-title/GRAPHICS-LLE.md#complete-frame-vertex-components-including-fvf---2026-10-10).
+No shipping code, rebuild, GPU, title, audio or hardware request changed;
+**4/9** and the full LLE goal remain active.

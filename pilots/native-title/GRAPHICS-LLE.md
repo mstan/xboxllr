@@ -1551,3 +1551,54 @@ startup/lifetime remain open. No shipping change, rebuild, host GPU, title or
 audio run was needed for this milestone. **4/9** remains unchanged; the entire
 LLE checklist remains active. Xbox access still awaits the earlier requested
 screen inspection after the unexpected GP SG-address readback.
+
+## Complete-frame vertex components including FVF - 2026-10-10
+
+The remaining four FVF draws now pass an independent pretransformed component
+check: **16 vertices / 464 values**, with original SetVertexShader and actual
+bound/UP draws. Together with the programmable results, all **4,331 draws /
+29,396 vertices / 852,484 values** in this captured frame have qualified
+software vertex-output components. State, raster and full-scene pixels remain
+separate; this does not turn the family count into5/9.
+
+The FVF oracle derives active declarations from XYZ(RHW), TEX1 and optional
+D3DCOLOR diffuse, using the
+[published FVF fields](https://learn.microsoft.com/en-us/windows/win32/direct3d9/d3dfvf).
+It admits the captured zero-depth, disabled-fog profile, unit fixture pixel
+scale, captured screen bias and RHW0/1. The independently checked XDK screen
+offset and software1/16-pixel truncation determine X/Y. The final bound quad
+has positive zero RHW; the finite reciprocal limit comes from the special-case
+rule in [NV_vertex_program2](https://registry.khronos.org/OpenGL/extensions/NV/NV_vertex_program2.txt),
+not an observed output or an invented divide-by-zero success. Negative zero,
+other RHW/depth profiles and arbitrary fixed-function transforms remain
+guarded. Exact silicon precision remains separate.
+
+Original FVF declaration generation runs from an empty preowned descriptor.
+Active formats, stream numbers and offsets must agree with independent fields
+and the captured input descriptor. Unconsumed offsets in disabled slots may
+retain stale bytes and cannot become fetched inputs. Original calls return,
+FIFO GET reaches PUT and the observed vertex count is exact. QUADS use the
+separate LLE quad path, whose triangle execution counters remain zero; guarded
+service counters still reject the draw. The triangle-strip FVF case requires
+its actual triangle execution as well.
+
+All10 authored FVF tests and60 retained failure controls pass. The complete
+focused Python suites pass75 tests; combined programmable/FVF controls total
+130. The FVF controls reject changed live inputs with refreshed identities,
+wrong screen bias, missing vertices/fog, pending FIFO, wrong routes,
+non-returned calls and active declaration corruption. No production code,
+shader bounds, rebuild, host GPU, title, audio or Xbox request changed.
+
+Private evidence adds `fvf-observed/`, `fvf-retained-qualified.aot-private.json`
+and `fvf-controls.aot-private.json` under the complete-frame input directory.
+Use `tools/native_frame_fvf_reference.py --captures <private-directory>
+--diagnostics <fvf-observations> --output <private-report> --audit-existing
+--library <reference-dll>` to repeat the retained check. The report explicitly
+leaves state delivery, resource lifetime and complete-scene pixels false.
+
+The41-profile state admission census also records concrete differences from
+the earlier closed model: additional blend/mask/fog settings, custom pixel
+programs, a third packed cache and mixed target dimensions. These require
+independent state and composition work; the census is not a pass. Full-frame
+state, target/texture composition, production raster output, enabled noise and
+original startup/lifetime remain open. **4/9** and the full goal remain active.
