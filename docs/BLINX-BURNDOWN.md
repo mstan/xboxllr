@@ -873,3 +873,12 @@ The independent full-state comparison, frame target/texture composition,
 enabled noise, scene pixels and startup/lifetime remain open. A focused CPU
 rebuild was required; no title, audio, host GPU or hardware request occurred.
 The full goal remains active with **4/9** families qualified.
+
+The41 sampled raw state profiles also pass3,251 input-derived state/setup words
+and575 retained failure/independence controls. All96 focused Python tests pass;
+the older eight original shader/state representatives and30 controls still pass
+under the rebuilt CPU reference. [State-word scope and remaining work](../pilots/native-title/GRAPHICS-LLE.md#complete-frame-sampled-state-word-components---2026-10-10).
+This adds scalar/sampler/custom-pixel components. Fixed-function combiner
+compilation, complete4,331-draw combined state admission, original clears/target
+continuity, pixels and startup/lifetime remain open. The entire goal remains
+active at **4/9**; Xbox access still awaits its existing screen inspection.

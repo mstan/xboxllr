@@ -35,10 +35,14 @@ def target_bytes(target,depth=False):
     return bytes(result)
 
 
-def replay(args,path,reference=None,initialize_targets=True):
+def replay(args,path,reference=None,initialize_targets=True,*,capture=None,scene=None):
     state_only=getattr(args,'observe_shader_state_only',False)
     assert not (state_only and getattr(args,'retain_targets',False)), 'Target continuity requires target observations'
-    capture=read_capture(path);scene=read_scene(path.with_name(path.name.replace('draw','scene')))
+    assert (capture is None)==(scene is None),'Supply both in-memory input objects'
+    if capture is None:
+        capture=read_capture(path);scene=read_scene(path.with_name(path.name.replace('draw','scene')))
+    input_only=bool(scene.get('input_only',False))
+    assert not input_only or state_only,'Input-only replay cannot qualify or compare native after-pixels'
     assert scene['header'][3:6]==capture['header'][2:5]
     ref=Reference(args) if reference is None else reference
     read=ref.lib.xlle_nv2a_reference_read
@@ -96,19 +100,30 @@ def replay(args,path,reference=None,initialize_targets=True):
         h=capture['header'];cursor=STREAMS
         for stream,(stride,size) in enumerate(capture['metadata']):
             if not size:continue
-            extent=(h[3]+h[4])*stride;assert cursor+extent<0x3000000
+            extent=h[3]*stride+size;assert cursor+extent<0x3000000
             ref.resource(OBJECT+0x1000+stream*16,cursor)
             ref.set_stream(stream,OBJECT+0x1000+stream*16,stride)
             ref.cpu.mem_write(cursor,bytes([0xcc])*extent)
             ref.cpu.mem_write(cursor+h[3]*stride,capture['streams'][stream])
             cursor+=(extent+0xffff)&~0xffff
         ref.put(OBJECT,1,0x10,0,0,0)
-        for slot,(fmt,stream,offset) in enumerate(capture['elements']):
-            ref.put(OBJECT+0x14+slot*16,stream,offset,fmt,0)
-        ref.bind_program(capture['code'])
-        data=OBJECT+0x3000;ref.cpu.mem_write(data,capture['constants'])
-        ref.call('D3DDevice_SetVertexShaderConstantNotInline',[192*4],
-            ((UC_X86_REG_ECX,0),(UC_X86_REG_EDX,data)))
+        data=OBJECT+0x3000
+        if capture.get('submission_kind',0)<2:
+            for slot,(fmt,stream,offset) in enumerate(capture['elements']):
+                ref.put(OBJECT+0x14+slot*16,stream,offset,fmt,0)
+            ref.bind_program(capture['code'])
+            ref.cpu.mem_write(data,capture['constants'])
+            ref.call('D3DDevice_SetVertexShaderConstantNotInline',[192*4],
+                ((UC_X86_REG_ECX,0),(UC_X86_REG_EDX,data)))
+        else:
+            ref.put(ref.device+ref.binding['stateblock']['fields']['vertex_object'],OBJECT)
+            ref.put(ref.device+0xa90,*capture['viewport'][:4]);ref.put(ref.device+0xaa0,*capture['viewport'][4:])
+            fields=ref.binding['transform_binding']['fields']
+            ref.put(ref.device+fields['screen_offset'],*scene['screen'])
+            ref.put(ref.device+fields['depth_scale'],scene['header'][9]);ref.floats(ref.device+fields['pixel_scale'],1,1)
+            for state in (92,143):ref.put(ref.binding['render_states']+state*4,capture['render'][state])
+            ref.cpu.mem_write(ref.binding['fvf_binding']['object'],bytes(0x114))
+            ref.call('D3DDevice_SetVertexShader',[h[6]])
 
         width,height,_=scene['before'][0]['shape'];assert width and height
         color=target_bytes(scene['before'][0]);depth=target_bytes(scene['before'][1],True)
@@ -129,7 +144,8 @@ def replay(args,path,reference=None,initialize_targets=True):
         transform=ref.binding['transform_binding']
         ref.put(ref.device+transform['fields']['screen_offset'],
             transform['screen_bias'],transform['screen_bias'])
-        for method,value in ((0x208,0x128),(0x20c,(width*4)*0x10001),
+        depth_width=scene['before'][1]['shape'][0] if depth else width
+        for method,value in ((0x208,0x128),(0x20c,(width*4)|(depth_width*4)<<16),
                 (0x210,FRAME),(0x214,FRAME+0x200000),(0x200,width<<16),
                 (0x204,height<<16),(0x2c0,(width-1)<<16),(0x2e0,(height-1)<<16)):
             ref.emit(method,value)
@@ -142,7 +158,9 @@ def replay(args,path,reference=None,initialize_targets=True):
                 ref.call('D3DDevice_SetTexture',[stage,0]);continue
             # Readback verifies owned compressed CPU bytes are the live GPU
             # input. Other layouts/aliases require explicit reconstruction.
-            assert texture['cpu'] and texture['cpu']==b''.join(m['data'] for m in texture['mips']),path
+            assert texture['cpu'],path
+            if not input_only:
+                assert texture['cpu']==b''.join(m['data'] for m in texture['mips']),path
             header=OBJECT+0x2000+stage*32;resource=list(texture['resource'])
             resource[0]=(resource[0]&~0x00f80000)|1
             resource[1]=cursor;resource[2]=0
@@ -176,7 +194,9 @@ def replay(args,path,reference=None,initialize_targets=True):
         before=None if state_only else [bytes(ref.cpu.mem_read(FRAME,len(color))),bytes(ref.cpu.mem_read(FRAME+0x200000,len(depth)))]
         guard=None;methods={};graph_services=0
         try:
-            _,methods=ref.draw(h[3],h[2],h[4],clear=False,state_dirty=None);ref.check()
+            up=bool(capture.get('submission_kind',0)&1)
+            _,methods=ref.draw(h[3],h[2],h[4],clear=False,state_dirty=None,
+                up_data=STREAMS if up else None,up_stride=capture.get('up_stride',0));ref.check()
         except AssertionError:
             raw=ref.lib.xlle_nv2a_reference_error(ref.gpu)
             if not raw:raise
@@ -217,10 +237,16 @@ def replay(args,path,reference=None,initialize_targets=True):
                 noise_disabled_fixture=args.noise_disabled_fixture,
                 pixel_targets_observed=not state_only,
                 retained_targets=getattr(args,'retain_targets',False),
-                complete_draw_executed=bool(get==put and vertex_count==h[4] and census['executions'] and not any(list(census.values())[3:])),
+                complete_draw_executed=bool(get==put and vertex_count==h[4] and
+                    (census['executions'] or input_only and h[2]==8) and not any(list(census.values())[3:])),
+                input_only_capture=input_only,input_sequence=capture.get('input_sequence'),
+                submission='original DrawVerticesUP' if capture.get('submission_kind',0)&1 else 'original DrawVertices',
+                xbe_sha256=XBE_SHA,draw_counters=list(census.values()),
+                fifo_get=get,fifo_put=put,original_draw_returned=not guard,
                 methods={hex(i):method_value(ref.gpu,i) for i in
                     list(range(0x200,0x400,4))+list(range(0x1b00,0x1c00,4))+
-                    list(range(0xa60,0xae0,4))+list(range(0x1e40,0x1e80,4))+[0x9c0,0x9c4,0x9c8]})
+                    list(range(0xa60,0xae0,4))+list(range(0x1e40,0x1e80,4))+
+                    [0x9c0,0x9c4,0x9c8,0x17bc,0x17c0,0x17f8,0x1e20,0x1e24]})
         packets=ref.get(initial_put,(put-initial_put)//4);bindings=[];software_methods=[];offset=0
         while offset<len(packets):
             command=packets[offset];size=(command>>18)&0x7ff
@@ -256,7 +282,8 @@ def replay(args,path,reference=None,initialize_targets=True):
             software_calls=software_calls,
             graph_services=graph_services,guard=guard,original_service_mmio=mmio,
             disabled_auxiliary_setters_not_replayed=[154,163,164,165],
-            complete_draw_executed=bool(not guard and get==put and vertex_count==h[4] and census['executions'] and not any(list(census.values())[3:])),
+            complete_draw_executed=bool(not guard and get==put and vertex_count==h[4] and
+                (census['executions'] or input_only and h[2]==8) and not any(list(census.values())[3:])),
             pixel_targets_observed=not state_only,
             pixel_qualified=False)  # independent pixel tolerance/oracles are still required
     finally:

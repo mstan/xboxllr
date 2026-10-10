@@ -1639,3 +1639,60 @@ Private evidence adds `state-profile-original.aot-private.json` and
 `multistage-linear-*-20261010.aot-private.log` build/test logs. One focused CPU
 rebuild was needed; no new title, audio, host GPU or Xbox run occurred. Shipping
 HLE shaders and capture defaults are unchanged.
+
+## Complete-frame sampled state-word components - 2026-10-10
+
+The41 sampled raw cache profiles now pass **3,251 independently derived
+delivered/setup words** against actual original calls with the corrected CPU
+reference. This includes2,648 scalar/sampler/default-final words,285 custom
+pixel-state words and328 explicit fixture target-setup words, with10 overlaps
+between default/custom final fields. These are state-word components; fixed
+function combiner compilation and complete-frame state admission remain false.
+
+`tools/native_frame_state_reference.py` adapts the content-addressed container
+to original bound/UP and programmable/FVF replay. It preserves minimal consumed
+stream spans and each target role's own dimensions/pitch. CPU texture storage,
+sampled GPU inputs and target roots stay distinct. The adapter has no native
+shader outputs or after-image. GPU aliases/views require a separate fixture.
+Input-only replay rejects pixel comparisons and retained-target claims before
+creating a reference device. The shared replay now reports original draw
+return, FIFO, route, guards, input identity and additional logic/final words.
+
+`tools/native_frame_state_delivery.py` computes expected words before opening
+observations. The admitted scalar/sampler equations cover the new blend,
+mask, fog, cull, logic, filter and pitch-linear resource combinations. Disabled
+fog/cull/resource words are unconsumed. Custom pixel constants come from the
+active API cache, preserving its mapped updates rather than substituting
+definition defaults. The reviewed original SetPixelShader helper0x1365E0
+records whether definition words8/9 supply a final combiner; helper0x13CDB0
+supplies the fog/specular final when absent. The register identities and fields
+are published in
+[the pinned nxdk definitions](https://github.com/XboxDev/nxdk/blob/29638d0b001f179b73c3513489af10ddc2986216/lib/pbkit/nv_regs.h).
+Fixture target words verify separate color/zeta pitches and do not qualify
+original SetRenderTarget or allocator behavior.
+
+All21 new authored input/state tests pass, bringing the focused Python total
+to96. All575 retained controls pass, including changed live API/resource inputs
+with refreshed provenance, mapped custom constants, wrong/missing methods,
+pending FIFO, guarded draws, wrong original routes/builds and ignored native
+outputs/sampled GPU bytes. The older eight original scene representatives
+still pass616 state words and4,060 shader values with the rebuilt reference;
+their30 retained controls also pass. No further rebuild, title, audio, host GPU
+or hardware request was needed for these checks.
+
+Private results are `state-profile-delivery-original.aot-private.json`,
+`state-profile-delivery-observed/`, `state-profile-delivery-qualified.aot-private.json`
+and `state-profile-delivery-controls.aot-private.json` in the complete-input
+directory. Replay with `native_frame_state_reference.py --captures <directory>
+--diagnostics <observations> --output <report> --xbe <private-xbe> --binding
+<private-binding> --library <reference-dll> --dependencies <mingw-directory>`.
+Then audit with `native_frame_state_delivery.py --captures <directory>
+--diagnostics <observations> --output <report> --library <reference-dll>`;
+add `--controls` for failure checks. Both tools select one draw per raw state
+cache profile by default; `--all-draws` explicitly selects the entire interval.
+
+All4,331 draws still need complete combined state admission, including fixed
+function combiners, followed by original clear/target/texture composition and
+pixels. Production HLE raster bytecode, enabled noise, original startup/lifetime
+and hardware precision remain separate. **4/9** and the full goal stay active;
+the earlier Xbox screen inspection is still pending.

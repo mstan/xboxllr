@@ -187,7 +187,8 @@ class Reference:
             self.emit(0x1d98,63<<16); self.emit(0x1d9c,63<<16); self.emit(0x1d94,0xf0)
         # The default bounds the original submission to declaration/streams.
         # Scene replay passes None to retain all dirty bits set by real setters.
-        self.put(0x141b84,0x50|self.get(0x141b84)[0] if state_dirty is None else state_dirty)
+        self.put(0x141b84,(0x70 if up_data is not None else 0x50)|self.get(0x141b84)[0]
+                 if state_dirty is None else state_dirty)
         begin=self.get(self.device)[0]
         if up_data is None:self.call('D3DDevice_DrawVertices',[primitive,first,count])
         else:
