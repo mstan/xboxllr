@@ -198,12 +198,12 @@ failure:
 /* Diagnostic only: execute the actual compiled vertex shader and read its
  * stream output, without rasterization or a duplicate production execution.
  * A deferred context preserves the caller's immediate graphics state. */
-int32_t pilot_gfx_shader_probe(uint32_t handle,const struct PilotVertexProbeStream streams[16],unsigned count,
-                              const float constants[192][4],float *outputs)
+static int32_t shader_probe(uint32_t handle,const struct PilotVertexProbeStream streams[16],unsigned count,
+                           const float constants[192][4],float *outputs,int raster)
 {
     struct NativeShader *shader=native_shader(handle);
     if(!streams || !outputs || !count || count>65536)return E_INVALIDARG;
-    HRESULT raw_result=shader_raw_prepare(shader);if(FAILED(raw_result))return raw_result;
+    HRESULT raw_result=raster?S_OK:shader_raw_prepare(shader);if(FAILED(raw_result))return raw_result;
     unsigned stream_mask=0;
     for(unsigned i=0;i<16;++i)if(shader->used&(1u<<i)) {
         unsigned stream=shader->elements[i].stream;stream_mask|=1u<<stream;
@@ -213,22 +213,26 @@ int32_t pilot_gfx_shader_probe(uint32_t handle,const struct PilotVertexProbeStre
     ID3D11Device *device=d3d8_GetD3D11Device();
     ID3D11DeviceContext *context=NULL;
     ID3D11GeometryShader *geometry=NULL;
-    ID3D11Buffer *vb[16]={0},*cb=NULL,*output=NULL,*staging=NULL;
+    ID3D11Buffer *vb[16]={0},*cb=NULL,*raster_cb=NULL,*output=NULL,*staging=NULL;
     ID3D11CommandList *commands=NULL;
     HRESULT result=ID3D11Device_CreateDeferredContext(device,0,&context);
     if(FAILED(result))goto cleanup;
     D3D11_SO_DECLARATION_ENTRY entries[17]={0};unsigned n=0;
+    static const char *raster_semantics[13]={"SV_POSITION",NULL,NULL,"COLOR","COLOR","TEXCOORD","PSIZE","TEXCOORD","TEXCOORD","TEXCOORD","TEXCOORD","TEXCOORD","TEXCOORD"};
+    static const unsigned raster_indices[13]={0,0,0,0,1,4,0,6,7,0,1,2,3};
     for(unsigned i=0;i<13;++i) {
-        unsigned width=shader_output_widths[i];
+        unsigned width=raster && (i==7 || i==8)?4:shader_output_widths[i];
         if(width) {
-            entries[n].SemanticName=shader_semantics[i];entries[n].SemanticIndex=shader_semantic_indices[i];
+            entries[n].SemanticName=raster?raster_semantics[i]:shader_semantics[i];
+            entries[n].SemanticIndex=raster?raster_indices[i]:shader_semantic_indices[i];
             entries[n++].ComponentCount=(BYTE)width;
         }
         if(width<4)entries[n++].ComponentCount=(BYTE)(4-width);
     }
     UINT output_stride=13*16;
-    result=ID3D11Device_CreateGeometryShaderWithStreamOutput(device,ID3D10Blob_GetBufferPointer(shader->raw_code),
-        ID3D10Blob_GetBufferSize(shader->raw_code),entries,n,&output_stride,1,D3D11_SO_NO_RASTERIZED_STREAM,NULL,&geometry);
+    ID3DBlob *probe_code=raster?shader->code:shader->raw_code;
+    result=ID3D11Device_CreateGeometryShaderWithStreamOutput(device,ID3D10Blob_GetBufferPointer(probe_code),
+        ID3D10Blob_GetBufferSize(probe_code),entries,n,&output_stride,1,D3D11_SO_NO_RASTERIZED_STREAM,NULL,&geometry);
     if(FAILED(result))goto cleanup;
     D3D11_BUFFER_DESC desc={0};D3D11_SUBRESOURCE_DATA initial={0};
     UINT zero=0;
@@ -260,9 +264,15 @@ int32_t pilot_gfx_shader_probe(uint32_t handle,const struct PilotVertexProbeStre
     result=ID3D11Device_CreateBuffer(device,&desc,NULL,&output);if(FAILED(result))goto cleanup;
     desc.BindFlags=0;desc.Usage=D3D11_USAGE_STAGING;desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
     result=ID3D11Device_CreateBuffer(device,&desc,NULL,&staging);if(FAILED(result))goto cleanup;
-    ID3D11DeviceContext_IASetInputLayout(context,shader->raw_layout);
+    if(raster) {
+        if(native_shader_bound!=handle || !native_raster_buffer){result=E_INVALIDARG;goto cleanup;}
+        ID3D11DeviceContext_VSGetConstantBuffers(d3d8_GetD3D11Context(),0,1,&raster_cb);
+        if(raster_cb!=native_raster_buffer){result=E_INVALIDARG;goto cleanup;}
+        ID3D11DeviceContext_VSSetConstantBuffers(context,0,1,&raster_cb);
+    }
+    ID3D11DeviceContext_IASetInputLayout(context,raster?shader->layout:shader->raw_layout);
     ID3D11DeviceContext_IASetPrimitiveTopology(context,D3D11_PRIMITIVE_TOPOLOGY_POINTLIST);
-    ID3D11DeviceContext_VSSetShader(context,shader->raw_object,NULL,0);
+    ID3D11DeviceContext_VSSetShader(context,raster?shader->object:shader->raw_object,NULL,0);
     ID3D11DeviceContext_VSSetConstantBuffers(context,1,1,&cb);
     ID3D11DeviceContext_GSSetShader(context,geometry,NULL,0);
     ID3D11DeviceContext_SOSetTargets(context,1,&output,&zero);
@@ -278,7 +288,17 @@ int32_t pilot_gfx_shader_probe(uint32_t handle,const struct PilotVertexProbeStre
 cleanup:
     if(commands)ID3D11CommandList_Release(commands);
     if(staging)ID3D11Buffer_Release(staging);if(output)ID3D11Buffer_Release(output);
+    if(raster_cb)ID3D11Buffer_Release(raster_cb);
     if(cb)ID3D11Buffer_Release(cb);for(unsigned i=0;i<16;++i)if(vb[i])ID3D11Buffer_Release(vb[i]);
     if(geometry)ID3D11GeometryShader_Release(geometry);if(context)ID3D11DeviceContext_Release(context);
     return result;
 }
+int32_t pilot_gfx_shader_probe(uint32_t handle,const struct PilotVertexProbeStream streams[16],unsigned count,
+                              const float constants[192][4],float *outputs)
+{return shader_probe(handle,streams,count,constants,outputs,0);}
+/* Diagnostic stream output of the exact production raster_main bytecode.
+ * Its observations become raster inputs only after independent shader bounds
+ * pass. The shipping draw path never calls this function. */
+int32_t pilot_gfx_shader_raster_probe(uint32_t handle,const struct PilotVertexProbeStream streams[16],unsigned count,
+                                     const float constants[192][4],float *outputs)
+{return shader_probe(handle,streams,count,constants,outputs,1);}

@@ -70,10 +70,18 @@ guards/skips. The five changed-target draws now pass independent captured-input
 shader/state-to-pixel composition: 870 shader values, 385 state values, 8,025
 written and 1,527,975 untouched pixels. All 23 corrupted-case controls fail;
 two independence controls exclude native outputs/after-images from expectations.
-Comparable native HLE scenes, whole-frame/title composition and original
-enabled-noise scenes remain open. This CPU-only continuation changed no HLE
-runtime code and required no GPU/title/audio run or rebuild. Overall family
-qualification remains 4/9; see [graphics evidence and next work](GRAPHICS-LLE.md#independent-captured-input-scene-composition-2026-10-09-continuation).
+The next continuation extends independent qualification to all 32 retained
+draws on both LLE and native HLE, then repeats them as an uninterrupted sequence
+with targets initialized once. All 9,830,400 target pixels per sequence are
+checked; shader inputs, original methods, preserved channels and every written
+or untouched pixel pass. Native production shader observations satisfy derived
+intervals, eight-bit native setup has no missing/stray pixels, and three device
+lifetimes agree exactly. All 28 new native controls and 26 software controls
+pass. This finishes the retained noise-off section, while whole-frame/title
+composition, broader raster/combiner states and original enabled-noise scenes
+remain open. Diagnostic probes add no work to shipping draw/cache/upload paths;
+focused builds/GPU checks replace repeated title/audio runs. Overall family
+qualification remains 4/9; see [graphics evidence and next work](GRAPHICS-LLE.md#independent-native-scenes-and-retained-target-sequence-2026-10-09-continuation).
 
 ## Deferred stream upload experiment (2026-10-08)
 

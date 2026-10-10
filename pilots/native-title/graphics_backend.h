@@ -83,6 +83,9 @@ int32_t pilot_gfx_pixel_program(const uint32_t states[57],uint32_t texture_modes
 struct PilotVertexProbeStream { const void *data; unsigned stride; };
 int32_t pilot_gfx_shader_probe(uint32_t handle,const struct PilotVertexProbeStream streams[16],unsigned count,
                               const float constants[192][4],float *outputs);
+/* Exact compiled raster_main stream output; diagnostic only, same 13*float4 layout. */
+int32_t pilot_gfx_shader_raster_probe(uint32_t handle,const struct PilotVertexProbeStream streams[16],unsigned count,
+                                     const float constants[192][4],float *outputs);
 /* NULL constants probes the actually bound shader/layout/constant buffer. */
 int32_t pilot_gfx_visibility_begin(void);
 int32_t pilot_gfx_visibility_end(uint32_t index);

@@ -112,16 +112,24 @@ def expected_state(capture,scene):
     return m
 
 
-def audit(captures,diagnostics,number,arithmetic):
+def audit(captures,diagnostics,number,arithmetic,allow_empty=False,chain=False,previous=None):
     capture=read_capture(captures/f'draw-{number}.bin');scene=read_scene(captures/f'scene-{number}.bin')
     m=expected_state(capture,scene)
     shader=shader_audit(captures,diagnostics,number)
     actual=json.loads((diagnostics/f'draw-{number}.aot-private.json').read_text())
+    if chain:
+        assert actual['retained_targets'],'Expected a retained-target observation'
+        before={kind:(diagnostics/f'draw-{number}-before-{kind}.bin').read_bytes() for kind in ('color','depth')}
+        expected_before=previous if previous is not None else {'color':scene['before'][0]['data'],
+            'depth':b''.join(struct.pack('<I',((v&0xffffff)<<8)|(v>>24)) for (v,) in struct.iter_unpack('<I',scene['before'][1]['data']))}
+        assert all(before[k]==expected_before[k] for k in before),'Broken LLE retained-target sequence'
+        scene['before'][0]['data']=before['color']
+        scene['before'][1]['data']=b''.join(struct.pack('<I',((v>>8)&0xffffff)|((v&255)<<24)) for (v,) in struct.iter_unpack('<I',before['depth']))
     observed={int(k,16):v for k,v in actual['methods'].items()}
     failures=[[hex(k),observed.get(k),v] for k,v in m.items() if observed.get(k)!=v]
     inputs={**actual,'methods':{hex(k):v for k,v in m.items()},
         'vertices':shader['expected_vertices'],'fog':shader['expected_fog']}
-    pixels=pixel_audit(captures,diagnostics,number,arithmetic,expected_inputs=inputs)
+    pixels=pixel_audit(captures,diagnostics,number,arithmetic,expected_inputs=inputs,allow_empty=allow_empty,scene_inputs=scene)
     return dict(**pixels,shader_compared_lanes=shader['compared_lanes'],
         shader_failure_count=shader['failure_count'],shader_first_failures=shader['first_failures'],
         state_methods_compared=len(m),state_failure_count=len(failures),state_first_failures=failures[:12],
@@ -136,9 +144,18 @@ if __name__=='__main__':
     for name in ('captures','diagnostics','output'):parser.add_argument('--'+name,type=Path,required=True)
     parser.add_argument('--draws',type=int,nargs='+',default=[2,3,4,5,6])
     parser.add_argument('--depth-arithmetic',required=True,choices=('separate','fma-b-first'))
+    parser.add_argument('--include-noop',action='store_true',help='Also admit target-preservation draws; aggregate must still contain exercised writes')
+    parser.add_argument('--retain-targets',action='store_true',help='Qualify the uninterrupted sequence, requiring each actual before-target to equal its qualified predecessor')
     args=parser.parse_args()
-    rows=[audit(args.captures,args.diagnostics,n,args.depth_arithmetic) for n in args.draws]
-    args.output.write_text(json.dumps(dict(draws=rows,
+    rows=[];previous=None
+    for n in args.draws:
+        row=audit(args.captures,args.diagnostics,n,args.depth_arithmetic,allow_empty=args.include_noop,
+            chain=args.retain_targets,previous=previous);rows.append(row)
+        if args.retain_targets:
+            assert row['captured_input_to_fixture_pixel_qualified'],'A failed prefix cannot qualify a later chained draw'
+            previous={kind:(args.diagnostics/f'draw-{n}-{kind}.bin').read_bytes() for kind in ('color','depth')}
+    assert sum(r['expected_written_pixels'] for r in rows),'All-noop inputs cannot qualify an exercised scene corpus'
+    args.output.write_text(json.dumps(dict(draws=rows,retained_targets=args.retain_targets,
         scope='Independent captured-input to noise-disabled software fixture pixels; original enabled-noise, native HLE and silicon gates remain separate'),indent=2)+'\n')
     for row in rows:print(json.dumps(row),flush=True)
     raise SystemExit(0 if rows and all(r['captured_input_to_fixture_pixel_qualified'] for r in rows) else 1)

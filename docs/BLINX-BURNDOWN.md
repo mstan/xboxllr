@@ -98,6 +98,23 @@ Graphics remains partial, **5 open / 4 closed**. No runtime HLE changes, builds,
 GPU or title/audio runs were needed; the performance path remains unchanged.
 See [the composition gate and next work](../pilots/native-title/GRAPHICS-LLE.md#independent-captured-input-scene-composition-2026-10-09-continuation).
 
+2026-10-09 native scene continuation: all **32/32 noise-off retained draws** now
+pass independent LLE and native qualification, both individually and as an
+uninterrupted sequence with targets initialized once. LLE checks 304 vertices /
+8,816 shader values and 2,464 original method values; native checks the actual
+production shader and repeats all 32 submissions across three device lifetimes.
+Every sequence checks 9,830,400 target pixels. LLE observes 8,025 writes;
+the independent eight-bit native setup observes 8,021, with no omitted/stray
+writes or preserved-channel failures. Native depth differs by at most two
+24-bit steps under its declared numerical contract. All 28 new native controls
+and 26 retained software controls pass, including broken target continuity.
+This closes the comparable native scene and retained-target section gaps.
+A complete frame/all title graphics states, broader raster/combiner layouts and
+enabled-noise/hardware questions remain open. **Graphics stays partial; 4/9
+families are qualified.** HLE draw/cache/upload performance remains unchanged;
+focused GPU tests replace repeated title/audio runs. See
+[the native and sequential scene evidence](../pilots/native-title/GRAPHICS-LLE.md#independent-native-scenes-and-retained-target-sequence-2026-10-09-continuation).
+
 GPU startup's unresolved FD6806A0 transaction now has a prepared, bounded
 hardware observation in `.111` (probe branch `feat/av-handshake-probe-20261009`,
 commit `a22bb74`). All 17 offline checks and the XBE build pass; hardware

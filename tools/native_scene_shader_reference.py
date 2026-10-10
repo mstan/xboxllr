@@ -98,10 +98,13 @@ def scalar_op(op, c):
     return [value]*4
 
 
-def evaluate(capture, vertex):
+def evaluate(capture, vertex, arithmetic=None):
     inputs=fetch(capture,vertex)
     constants=[list(map(Fraction,v)) for v in struct.iter_unpack('<4f',capture['constants'])]
     assert all(math.isfinite(v) for vector in constants for v in vector)
+    if arithmetic is not None:
+        inputs=arithmetic.inputs(capture,inputs)
+        constants=[[arithmetic.exact(v) for v in row] for row in constants]
     temps=[[Fraction(0)]*4 for _ in range(12)]
     outputs=[[Fraction(0),Fraction(0),Fraction(0),Fraction(1)] for _ in range(13)]
     masks=[0]*13
@@ -139,7 +142,8 @@ def evaluate(capture, vertex):
         a=source(0) if mac else None
         b=source(1) if mac in (2,4,5,6,7,9,10) else None
         c=source(2) if ilu or mac in (3,4) else None
-        vector=vector_op(mac,a,b,c);scalar=scalar_op(ilu,c)
+        vector=(vector_op if arithmetic is None else arithmetic.vector)(mac,a,b,c)
+        scalar=(scalar_op if arithmetic is None else arithmetic.scalar)(ilu,c)
         destination=field(instruction,20,4)
         if mac and not (ilu and destination==1):temporary(destination,field(instruction,24,4),vector)
         if ilu:temporary(1 if mac else destination,field(instruction,16,4),scalar)

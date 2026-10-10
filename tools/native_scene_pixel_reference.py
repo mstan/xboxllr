@@ -125,7 +125,7 @@ def sample(images, u, v, lod):
     return [(1-mix)*x+mix*y for x,y in zip(a,b)]
 
 
-def contract(capture, scene, observation):
+def contract(capture, scene, observation,allow_empty=False):
     assert observation['noise_disabled_fixture'] and observation['complete_draw_executed']
     assert observation['vertex_capture_sha256']==capture['sha256']
     assert observation['scene_capture_sha256']==scene['sha256']
@@ -154,7 +154,7 @@ def contract(capture, scene, observation):
     assert all(all(math.isfinite(x) for x in v) and v[3]>0 and
         0<=v[2]<=16777215 and v[2].is_integer() and v[7]>=1 and
         v[8:12]==[0,0,0,0] and v[15]==1 for v in vertices)
-    assert all(0<=v[c]<=.5 for v in vertices for c in (4,5,6))
+    bounded_diffuse=all(0<=v[c]<=.5 for v in vertices for c in (4,5,6))
     assert all(v[c]*16==math.trunc(v[c]*16) for v in vertices for c in (0,1))
     filter_word=m[0x1b14];control=m[0x1b0c]
     assert filter_word>>24==2 and (filter_word>>16)&255==6 and not control&0x30
@@ -162,6 +162,12 @@ def contract(capture, scene, observation):
     min_lod=((control>>18)&4095)/256;max_lod=((control>>6)&4095)/256
     assert min_lod<=max_lod
     width,height,_=scene['before'][0]['shape']
+    # Off-viewport preservation is a separately exercised outcome. It does
+    # not qualify sampling higher diffuse values: every primitive must be
+    # mathematically incapable of reaching a target sample on one common side.
+    off_viewport=(all(v[0]>=width for v in vertices) or all(v[0]<=0 for v in vertices)
+        or all(v[1]>=height for v in vertices) or all(v[1]<=0 for v in vertices))
+    assert bounded_diffuse or (allow_empty and off_viewport)
     assert scene['before'][1]['shape'][:2]==[width,height]
     assert m[0x200]==width<<16 and m[0x204]==height<<16
     assert m[0x2c0]==(width-1)<<16 and m[0x2e0]==(height-1)<<16
@@ -169,8 +175,8 @@ def contract(capture, scene, observation):
     return m,vertices,bias,min_lod,max_lod
 
 
-def expected_targets(capture, scene, observation, arithmetic):
-    m,vertices,bias,min_lod,max_lod=contract(capture,scene,observation)
+def expected_targets(capture, scene, observation, arithmetic,allow_empty=False):
+    m,vertices,bias,min_lod,max_lod=contract(capture,scene,observation,allow_empty=allow_empty)
     images=bc1_images(scene['textures'][0]);width,height,_=scene['before'][0]['shape']
     before_color=words(scene['before'][0]);before_depth=words(scene['before'][1],True)
     colors={};depths={};covered=set();triangles=0;depth_tested=depth_rejected=0
@@ -236,19 +242,19 @@ def expected_targets(capture, scene, observation, arithmetic):
                 # RGB write mask 0x00010101 leaves target alpha untouched.
                 colors[index]=[math.floor(t*d+.5) for t,d in zip(texel,diffuse)]+[before_color[index]>>24]
                 depths[index]=(z,z)
-    assert triangles and colors,'No-op captures cannot qualify this exercised component'
+    assert allow_empty or (triangles and colors),'No-op captures cannot qualify this exercised component'
     return before_color,before_depth,colors,depths,covered,dict(triangles=triangles,
         tested_fragments=depth_tested,rejected_depth_fragments=depth_rejected,
         maximum_affine_depth_error=ideal_depth_error)
 
 
-def audit(captures, diagnostics, number, arithmetic, expected_inputs=None):
+def audit(captures, diagnostics, number, arithmetic, expected_inputs=None,allow_empty=False,scene_inputs=None):
     path=captures/f'draw-{number}.bin';capture=read_capture(path)
-    scene=read_scene(captures/f'scene-{number}.bin')
+    scene=read_scene(captures/f'scene-{number}.bin') if scene_inputs is None else scene_inputs
     observation_path=diagnostics/f'draw-{number}.aot-private.json'
     observation=json.loads(observation_path.read_text())
     before_color,before_depth,colors,depths,covered,stats=expected_targets(capture,scene,
-        observation if expected_inputs is None else expected_inputs,arithmetic)
+        observation if expected_inputs is None else expected_inputs,arithmetic,allow_empty=allow_empty)
     color_bytes=(diagnostics/f'draw-{number}-color.bin').read_bytes()
     depth_bytes=(diagnostics/f'draw-{number}-depth.bin').read_bytes()
     assert len(color_bytes)==4*len(before_color) and len(depth_bytes)==4*len(before_depth),'Incomplete target observation'

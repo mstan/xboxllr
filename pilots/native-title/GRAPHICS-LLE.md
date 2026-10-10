@@ -1050,12 +1050,120 @@ GPU, title run or rebuild:
 **`complete_scene_pixel_qualified`, `original_noise_enabled_scene_qualified`
 and `native_hle_scene_qualified` remain false.** This closes the supplied
 vertex/state input gap only within the declared noise-disabled software scope.
-Next, establish a comparable noise-off native HLE scene check and continue
-broader offline raster/state/lifetime coverage. Original enabled DXT1 noise,
+The following continuation establishes the comparable native HLE scene check
+and retained-target sequence. Continue broader offline raster/state coverage. Original enabled DXT1 noise,
 exact NV2A precision and dependent startup stay in the hardware-last queue.
 Graphics remains partial; overall family qualification remains **4/9**.
 This batch changes no HLE runtime code or performance path and reuses retained
 title evidence without another compile, GPU, title or audio run.
+
+### Independent native scenes and retained-target sequence (2026-10-09 continuation)
+
+The first-world corpus now passes **32/32 independently qualified noise-off
+draws on both routes**, including a second run as an uninterrupted sequence.
+The original XDK/LLE sequence initializes its targets once, retains its device
+and target memory through all 32 original submissions, and completes every
+draw without a guard or skip. Input resources are recycled through actual
+original unbind calls. Cumulative device counters are differenced per draw;
+an earlier successful draw cannot hide an omitted later submission.
+
+The native observer executes the maintained HLE API with captured first-vertex
+indices, declarations, streams, constants, programs, state and mip bytes. It
+uploads the initial color/depth targets once in sequence mode, then performs
+all 32 real GPU draws without replacing those targets. It repeats the sequence
+across **three independent device lifetimes / 96 GPU submissions**. The common
+shader remains cached; unchanged constants produce one upload per lifetime.
+The input fixture contains neither native raw shader outputs nor after-images.
+
+| Qualification | Independent LLE | Native HLE |
+| --- | ---: | ---: |
+| Retained input vertices | 304 | 304 per lifetime |
+| Shader values checked | 8,816 exact software values | 11,552 raw plus 11,552 production shader values per lifetime |
+| Consumed original method values | 2,464 | Captured API profile admitted before the pixel check |
+| Written pixel observations per sequence | 8,025 | 8,021 |
+| Untouched pixel observations per sequence | 9,822,375 | 9,822,379 |
+| Target pixels checked per sequence | 9,830,400 | 9,830,400 |
+| Missing/stray writes, alpha or stencil failures | 0 | 0 |
+
+Only five draws write pixels. Draw 1 is culled; the remaining 26 are wholly
+outside the viewport. Their exact preservation is checked rather than skipped.
+The native mathematical model independently rejects 218 wholly clipped
+triangles. Higher diffuse values in off-viewport LLE draws are admitted only
+after a common-side proof establishes that they cannot reach a target sample;
+they do not expand the qualified on-screen sampler profile.
+
+`tools/native_scene_host_precision.py` propagates rational intervals through
+the independent Kelvin decoder. Published D3D11 binary32 add/multiply and
+reciprocal/root bounds supply each allowance, including every serial dot-product
+ordering and the packed-normal divide. These intervals are generated before
+observations are read. The backend's diagnostic raster probe executes the
+**exact production `raster_main` bytecode, input layout and bound constant
+buffers**, separately from the raw `main` probe. Both pass. Stream-output gaps
+are excluded; all declared outputs and defaults are checked.
+
+`tools/native_scene_host_pixels.py` admits those production shader outputs only
+after their captured-input intervals pass, then evaluates the native raster
+contract. D3D11 uses exactly eight fractional setup bits, nearest/even snapping
+and top-left ownership; the software floor retains its declared four-bit setup.
+The first strict cross-route diagnostic therefore had a few edge/depth decisions
+that could not serve as a native golden. The independent eight-bit model has
+**zero coverage/visibility errors**, without dropping edge or near-depth pixels.
+See [D3D11.3 rasterizer precision and floating-point rules](https://microsoft.github.io/DirectX-Specs/d3d/archive/D3D11_3_FunctionalSpec.htm).
+
+Native depth uses a declared affine numerical acceptance interval `gamma(8)`
+plus 0.6 integer steps for UNORM conversion. This is our bounded HLE contract,
+not proof of an implementation-specific interpolator graph or an Xbox silicon
+result. The largest observed deviation is **two 24-bit depth steps**. RGB uses
+per-texel/channel BC1 endpoint-promotion and palette budgets, convex sampling,
+the four coarse-derivative pairings on aligned 2x2 quads, eight-bit sampler
+weight costs and fixed-point filtering/output rounding. Original sampler-bias
+packet quantization and the native float bias remain separate. The largest
+derived RGB interval radius in this corpus is **3.782 byte steps**; observed
+maxima never select or widen the allowances. Exact NV2A decoder/interpolation
+precision remains deferred. These checks establish this finite host acceptance
+model, rather than universal behavior across arbitrary geometry or adapters.
+
+Each sequence draw's actual before-target must exactly equal the previous
+qualified draw's output; the root must equal the supplied captured initial
+targets. A failed prefix cannot admit later draws. Native raw/raster/target
+observations and before-targets agree bit-for-bit across all three lifetimes.
+Final LLE color/depth hashes are `ed38d13d9ab6d75a6c56173965bd9fa8a98739baf833e3e620f0996ccc677212`
+and `bc320bb82854f9943f538eb9ffcee8c097331f87122c3b4b4cc4344aed79b2ff`;
+native hashes are `4878dc3ea2947731073979ada27ee6b8fa654a6e57e9fca1639ae1c3b8260657`
+and `a16bc81ef692d6fd57f145661788b2fbd0cac8e3df41dcbc02a224e2e6d90322`.
+Their different grids/precision contracts do not require matching hashes.
+
+The new native gate passes **28 controls**: two baselines, 24 deliberate
+failures and two independence controls. Changed shader/fetch/constants/program,
+cull/bias/texture inputs, missing/stray pixels, wrong RGB/depth/preserved channels,
+truncated observations and broken sequence/device continuity are rejected.
+Captured raw outputs and captured after-images remain unused expectations.
+The preceding software gate's 26 controls still pass, and the existing native
+shader regression passes after adding the diagnostic probe.
+
+Private evidence is `build/blinx/scene-32-{composed-independent,hle-qualified}.aot-private.json`,
+`scene-32-chain-{lle,hle}-qualified.aot-private.json`, actual observations in
+`scene-32-chain-{lle,hle}-observed/`, and `scene-hle-independent-controls.aot-private.json`.
+Replay the retained sequence with:
+
+```powershell
+& 'C:\Users\Matthew\AppData\Local\Programs\Python\Python312\python.exe' tools\native_scene_hle_reference.py --captures build\blinx\scene-inputs-firstworld-20261009 --draws (1..32) --retain-targets --native-input build\blinx\scene-32-chain-hle-inputs.aot-private.bin --output build\blinx\scene-32-chain-hle-inputs.aot-private.json
+& 'C:\Users\Matthew\AppData\Local\Programs\Python\Python312\python.exe' build\blinx\run_idle.py --guard-rivals build\blinx\host-calendar-lle\Release\pilot_shader_test.exe --scene-reference-observe build\blinx\scene-32-chain-hle-inputs.aot-private.bin build\blinx\scene-32-chain-hle-observed
+& 'C:\Users\Matthew\AppData\Local\Programs\Python\Python312\python.exe' tools\native_scene_hle_reference.py --captures build\blinx\scene-inputs-firstworld-20261009 --draws (1..32) --retain-targets --observations build\blinx\scene-32-chain-hle-observed --output build\blinx\scene-32-chain-hle-qualified.aot-private.json
+& 'C:\Users\Matthew\AppData\Local\Programs\Python\Python312\python.exe' build\blinx\run_idle.py 'C:\Users\Matthew\AppData\Local\Programs\Python\Python312\python.exe' tools\native_scene_draw_reference.py --xbe F:\Projects\xboxlle\xboxlle\build\phobos-audit-20261006\blinx-na\default.xbe --binding build\blinx\d3d-binding.aot-private.json --library build\visibility-lle\libxlle_nv2a_reference.dll --dependencies C:\msys64\mingw64\bin --captures build\blinx\scene-inputs-firstworld-20261009 --noise-disabled-fixture --retain-targets --diagnostics build\blinx\scene-32-chain-lle-observed --output build\blinx\scene-32-chain-lle-observed.aot-private.json
+& 'C:\Users\Matthew\AppData\Local\Programs\Python\Python312\python.exe' tools\native_scene_composed_reference.py --captures build\blinx\scene-inputs-firstworld-20261009 --draws (1..32) --diagnostics build\blinx\scene-32-chain-lle-observed --depth-arithmetic fma-b-first --include-noop --retain-targets --output build\blinx\scene-32-chain-lle-qualified.aot-private.json
+& 'C:\Users\Matthew\AppData\Local\Programs\Python\Python312\python.exe' tools\native_scene_hle_controls.py --captures build\blinx\scene-inputs-firstworld-20261009 --observations build\blinx\scene-32-hle-observed --chain-observations build\blinx\scene-32-chain-hle-observed --output build\blinx\scene-hle-independent-controls.aot-private.json
+```
+
+This qualifies the retained noise-off **32-draw section with supplied starting
+targets**, including its sequential target lifetime. It does not establish a
+complete newly rendered frame, all attract/title graphics states or original
+enabled-noise behavior. Partial clipping, broader shader/raster/combiner layouts,
+whole-frame/title resource integration and the deferred silicon questions remain
+open. Graphics `.116` remains in progress and the family count remains **4/9**.
+This batch changes diagnostic tooling and probes only; no shipping draw, shader,
+upload or cache path gains work. Focused builds/GPU fixtures were authorized;
+no full title or audio run was repeated.
 
 Continue broader exercised texture/state layouts and raster outcomes toward
 complete scene composition, retaining the bounded projected-footprint gates.

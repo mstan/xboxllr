@@ -35,22 +35,24 @@ def target_bytes(target,depth=False):
     return bytes(result)
 
 
-def replay(args,path):
+def replay(args,path,reference=None,initialize_targets=True):
     capture=read_capture(path);scene=read_scene(path.with_name(path.name.replace('draw','scene')))
     assert scene['header'][3:6]==capture['header'][2:5]
-    ref=Reference(args)
+    ref=Reference(args) if reference is None else reference
     read=ref.lib.xlle_nv2a_reference_read
     read.restype=ctypes.c_uint32;read.argtypes=[ctypes.c_void_p,ctypes.c_uint32,ctypes.c_int]
-    mmio=[]
+    mmio=[];ref.scene_mmio=mmio
     def mmio_read(cpu,offset,size,data):
-        value=read(ref.gpu,0xfd000000+offset,size);mmio.append(['read',hex(offset),size,hex(value)])
+        value=read(ref.gpu,0xfd000000+offset,size);ref.scene_mmio.append(['read',hex(offset),size,hex(value)])
         if ref.lib.xlle_nv2a_reference_error(ref.gpu):cpu.emu_stop()
         return value
     def mmio_write(cpu,offset,size,value,data):
-        mmio.append(['write',hex(offset),size,hex(value)])
+        ref.scene_mmio.append(['write',hex(offset),size,hex(value)])
         ref.lib.xlle_nv2a_reference_write(ref.gpu,0xfd000000+offset,size,value)
         if ref.lib.xlle_nv2a_reference_error(ref.gpu):cpu.emu_stop()
-    ref.cpu.mmio_map(0xfd000000,0x1000000,mmio_read,None,mmio_write,None)
+    if not getattr(ref,'scene_mmio_mapped',False):
+        ref.cpu.mmio_map(0xfd000000,0x1000000,mmio_read,None,mmio_write,None)
+        ref.scene_mmio_mapped=True
     # Complete original graphics/software-method service, as used by the
     # already qualified callback fixture. This is service of a real device
     # notification; transport does not acknowledge it or fabricate a return.
@@ -78,7 +80,16 @@ def replay(args,path):
     count_fn.restype=ctypes.c_uint64;count_fn.argtypes=[ctypes.c_void_p,ctypes.c_uint32]
     name_fn=ref.lib.xlle_nv2a_reference_draw_count_name
     name_fn.restype=ctypes.c_char_p;name_fn.argtypes=[ctypes.c_uint32]
+    initial_counts=[count_fn(ref.gpu,i) for i in range(26)]
+    initial_put=ref.get(ref.device)[0]
     try:
+        if not initialize_targets:
+            # Recycle the fixture's preowned input buffers through real
+            # unbind calls before reinitializing their resource headers.
+            # The color/depth targets remain bound and are never rewritten.
+            for stream in range(16):
+                if ref.get(ref.stream_table+stream*12+8)[0]:ref.set_stream(stream,0,0)
+            for stage in range(4):ref.call('D3DDevice_SetTexture',[stage,0])
         ref.emit(0x184,2);ref.emit(0x188,2)  # explicit preowned texture DMA contexts
         h=capture['header'];cursor=STREAMS
         for stream,(stride,size) in enumerate(capture['metadata']):
@@ -99,8 +110,9 @@ def replay(args,path):
 
         width,height,_=scene['before'][0]['shape'];assert width and height
         color=target_bytes(scene['before'][0]);depth=target_bytes(scene['before'][1],True)
-        ref.cpu.mem_write(FRAME,color)
-        if depth:ref.cpu.mem_write(FRAME+0x200000,depth)
+        if initialize_targets:
+            ref.cpu.mem_write(FRAME,color)
+            if depth:ref.cpu.mem_write(FRAME+0x200000,depth)
         color_header=OBJECT+0x1c00;depth_header=OBJECT+0x1c20
         ref.put(color_header,*scene['color_header']);ref.put(color_header+4,FRAME)
         ref.put(depth_header,*scene['depth_header']);ref.put(depth_header+4,FRAME+0x200000)
@@ -159,6 +171,7 @@ def replay(args,path):
             for state in range(30):
                 ref.call('D3DDevice_SetTextureStageStateNotInline',[stage,state,capture['texture'][stage*32+state]])
         ref.put(data,*capture['viewport']);ref.call('D3DDevice_SetViewport',[data])
+        before=[bytes(ref.cpu.mem_read(FRAME,len(color))),bytes(ref.cpu.mem_read(FRAME+0x200000,len(depth)))]
         guard=None;methods={};graph_services=0
         try:
             _,methods=ref.draw(h[3],h[2],h[4],clear=False,state_dirty=None);ref.check()
@@ -174,7 +187,7 @@ def replay(args,path):
                 if not raw:raise
                 guard=raw.decode();break
             graph_services+=1
-        census={name_fn(i).decode():count_fn(ref.gpu,i) for i in range(26)}
+        census={name_fn(i).decode():count_fn(ref.gpu,i)-initial_counts[i] for i in range(26)}
         get=None if guard else read(ref.gpu,0xfd800044,4);put=ref.get(ref.device)[0]
         pending_words=ref.get(get,min(20,(put-get)//4)) if get is not None and get<=put else []
         if not guard:ref.check()
@@ -200,11 +213,12 @@ def replay(args,path):
                 vertex_capture_sha256=capture['sha256'],scene_capture_sha256=scene['sha256'],
                 library_sha256=hashlib.sha256(args.library.read_bytes()).hexdigest(),
                 noise_disabled_fixture=args.noise_disabled_fixture,
+                retained_targets=getattr(args,'retain_targets',False),
                 complete_draw_executed=bool(get==put and vertex_count==h[4] and census['executions'] and not any(list(census.values())[3:])),
                 methods={hex(i):method_value(ref.gpu,i) for i in
                     list(range(0x200,0x400,4))+list(range(0x1b00,0x1c00,4))+
                     list(range(0xa60,0xae0,4))+list(range(0x1e40,0x1e80,4))+[0x9c0,0x9c4,0x9c8]})
-        packets=ref.get(0x2100000,(put-0x2100000)//4);bindings=[];software_methods=[];offset=0
+        packets=ref.get(initial_put,(put-initial_put)//4);bindings=[];software_methods=[];offset=0
         while offset<len(packets):
             command=packets[offset];size=(command>>18)&0x7ff
             assert size and offset+size+1<=len(packets)
@@ -216,6 +230,9 @@ def replay(args,path):
             args.diagnostics.mkdir(parents=True,exist_ok=True)
             for name,data in zip(('color','depth'),after):
                 (args.diagnostics/f'{path.stem}-{name}.bin').write_bytes(data)
+            if getattr(args,'retain_targets',False):
+                for name,data in zip(('color','depth'),before):
+                    (args.diagnostics/f'{path.stem}-before-{name}.bin').write_bytes(data)
             (args.diagnostics/f'{path.stem}.aot-private.json').write_text(json.dumps(diagnostics,indent=2)+'\n')
         differences=[]
         for i in range(2):
@@ -237,7 +254,9 @@ def replay(args,path):
             disabled_auxiliary_setters_not_replayed=[154,163,164,165],
             complete_draw_executed=bool(not guard and get==put and vertex_count==h[4] and census['executions'] and not any(list(census.values())[3:])),
             pixel_qualified=False)  # independent pixel tolerance/oracles are still required
-    finally:ref.close()
+    finally:
+        ref.call=original_call
+        if reference is None:ref.close()
 
 
 if __name__=='__main__':
@@ -248,6 +267,7 @@ if __name__=='__main__':
     parser.add_argument('--draws',type=int,nargs='+',help='Replay only these retained draw numbers')
     parser.add_argument('--diagnostics',type=Path,help='Save actual target bytes and device observations; does not supply expected pixels')
     parser.add_argument('--noise-disabled-fixture',action='store_true',help='Explicitly set render state 159 to zero via the original setter; does not qualify enabled-noise scenes')
+    parser.add_argument('--retain-targets',action='store_true',help='Execute the captured draw sequence on one device with targets initialized once')
     parser.add_argument('--require-qualified',action='store_true',help='Fail if any draw remains guarded or lacks independent pixel qualification')
     args=parser.parse_args();dependency_handles=[os.add_dll_directory(str(args.dependencies.resolve()))]
     rows=[]
@@ -256,11 +276,17 @@ if __name__=='__main__':
         requested=set(args.draws)
         paths=[p for p in paths if int(p.stem.split('-')[1]) in requested]
         assert {int(p.stem.split('-')[1]) for p in paths}==requested,'Missing requested draw'
-    for path in paths[:args.limit]:
-        row=replay(args,path);rows.append(row);print(json.dumps(row),flush=True)
+    shared=Reference(args) if args.retain_targets else None
+    try:
+        for index,path in enumerate(paths[:args.limit]):
+            row=replay(args,path,shared,initialize_targets=not args.retain_targets or index==0)
+            rows.append(row);print(json.dumps(row),flush=True)
+    finally:
+        if shared is not None:shared.close()
     assert rows
     args.output.write_text(json.dumps(dict(xbe_sha256=XBE_SHA,draws=rows,
         noise_disabled_fixture=args.noise_disabled_fixture,
+        retained_targets=args.retain_targets,
         scope=('noise-disabled scene fixture: original setter 159 receives zero, captured enabled value is retained; original enabled scenes and pixel agreement remain unqualified'
             if args.noise_disabled_fixture else 'draw-state audit with captured initial targets and preowned resources; guards and mismatches remain unqualified')),indent=2)+'\n')
     qualified=sum(row['pixel_qualified'] for row in rows)
