@@ -118,9 +118,23 @@ class StateDelivery(unittest.TestCase):
     def test_quads_require_returned_submission_and_exact_vertex_count(self):
         capture,scene,observation=fixture();capture['header'][2]=scene['header'][3]=8
         observation['draw_counters']=[0]*26
+        with self.assertRaisesRegex(ValueError,'Guarded or missing draw'):qualify(capture,scene,observation)
+        observation['draw_counters'][1]=1
         self.assertTrue(qualify(capture,scene,observation)['state_word_components_qualified'])
         observation['vertices'].pop()
         with self.assertRaisesRegex(ValueError,'Incomplete original'):qualify(capture,scene,observation)
+
+    def test_current_stencil_skip_census_is_complete_and_checked(self):
+        for count in (26,28):
+            capture,scene,observation=fixture();observation['draw_counters']=[0]*count
+            observation['draw_counters'][1]=1
+            self.assertTrue(qualify(capture,scene,observation)['state_word_components_qualified'])
+            observation['draw_counters'][-1]=1
+            with self.assertRaisesRegex(ValueError,'Guarded or missing draw'):qualify(capture,scene,observation)
+        for count in (25,27,29):
+            capture,scene,observation=fixture();observation['draw_counters']=[0]*count
+            observation['draw_counters'][1]=1
+            with self.assertRaisesRegex(ValueError,'Guarded or missing draw'):qualify(capture,scene,observation)
 
 
 if __name__=='__main__':unittest.main()

@@ -702,6 +702,83 @@ static void stencil_pixels() {
     }
 }
 
+static void generic_quads() {
+    auto setup = [](Fixture& f,uint32_t color) {
+        const float xy[8][2]={{8,8},{32,8},{32,32},{8,32},{40,8},{56,8},{56,24},{40,24}};
+        for(unsigned i=1;i<=8;++i) {
+            f.put(Fixture::positions+i*16,bits(xy[i-1][0]));
+            f.put(Fixture::positions+i*16+4,bits(xy[i-1][1]));
+            f.put(Fixture::positions+i*16+8,bits(10));f.put(Fixture::positions+i*16+12,bits(1));
+            f.put(Fixture::colors+i*4,color);
+        }
+        f.emit(0x172c,Fixture::colors);f.emit(0x176c,0x440);
+    };
+    auto draw = [](Fixture& f,unsigned route,unsigned count,uint32_t background,bool visibility=true) {
+        f.clear(background);
+        if(visibility){f.emit(0x17c8,1);f.emit(0x17cc,1);f.put(Fixture::report+12,0xffffffff);}
+        f.emit(0x17fc,8);
+        if(route==0)f.emit(0x1810,1|((count-1)<<24));
+        else if(route==1)for(unsigned i=1;i<=count;++i)f.emit(0x1808,i);
+        else if(route==2)for(unsigned i=1;i<=count;++i) {
+            for(unsigned lane=0;lane<4;++lane)f.emit(0x1818,f.get(Fixture::positions+i*16+lane*4));
+            f.emit(0x1818,f.get(Fixture::colors+i*4));
+        } else for(unsigned i=1;i<=count;++i) {
+            for(unsigned lane=0;lane<3;++lane)f.emit(0x1518+lane*4,f.get(Fixture::positions+i*16+lane*4));
+            const uint32_t c=f.get(Fixture::colors+i*4);
+            f.emit(0x194c,(c&0xff00ff00)|((c&255)<<16)|((c>>16)&255));
+            f.emit(0x1524,bits(1));
+        }
+        f.emit(0x17fc,0);if(visibility)f.emit(0x17d0,0x01000000|Fixture::report);f.kick();
+    };
+    auto verify = [](Fixture& f,unsigned count,uint32_t color,uint32_t background,bool visibility=true) {
+        ++cases;CHECK(f.fault.empty());CHECK(f.gpu->generic_combiner_executed_batches()==1);
+        for(unsigned y=0;y<64;++y)for(unsigned x=0;x<64;++x) {
+            const bool covered=(x>=8&&x<32&&y>=8&&y<32)||
+                (count==8&&x>=40&&x<56&&y>=8&&y<24);
+            CHECK(f.get(Fixture::frame+(y*64+x)*4)==(covered?color:background));
+        }
+        if(visibility){CHECK(f.get(Fixture::report+12)==0);CHECK(f.get(Fixture::report+8)==(count==8?832u:576u));}
+    };
+    for(bool direct:{false,true})for(unsigned route=0;route<4;++route)for(unsigned count:{4u,8u}) {
+        Fixture f(direct);setup(f,0xff36a5c7);draw(f,route,count,0xff102030);
+        verify(f,count,0xff36a5c7,0xff102030);
+    }
+    // Exercise the ordinary no-query route as well as the visibility floor.
+    for(bool direct:{false,true}) {
+        Fixture f(direct);setup(f,0xff36a5c7);draw(f,0,4,0xff102030,false);
+        verify(f,4,0xff36a5c7,0xff102030,false);
+    }
+    // A blended rectangle must hit its shared diagonal exactly once.
+    for(bool direct:{false,true})for(unsigned route:{0u,2u}) {
+        Fixture f(direct);setup(f,0x80400000);f.emit(0x304,1);
+        f.emit(0x344,0x302);f.emit(0x348,0x303);draw(f,route,4,0xff000040);
+        verify(f,4,0xbf200020,0xff000040);
+    }
+    // Flat shading uses one provoking vertex for the entire quad, including
+    // the triangle that does not otherwise contain the last quad vertex.
+    for(bool direct:{false,true})for(bool first:{false,true}) {
+        Fixture f(direct);setup(f,0xff36a5c7);
+        f.put(Fixture::colors+4,0xff204080);f.put(Fixture::colors+16,0xffa0b0c0);
+        f.emit(0x37c,0x1d00);f.emit(0x9fc,first?1:0);draw(f,0,4,0xff102030);
+        if(!first)verify(f,4,0xffa0b0c0,0xff102030);
+        else {
+            // First-vertex QUADS behavior is implementation dependent in the
+            // specification; keep this silicon question guarded.
+            ++cases;CHECK(!f.fault.empty());CHECK(!f.gpu->generic_combiner_executed_batches());
+            for(unsigned y=0;y<64;++y)for(unsigned x=0;x<64;++x)
+                CHECK(f.get(Fixture::frame+(y*64+x)*4)==0xff102030);
+        }
+    }
+    // Incomplete groups are outside this admitted QUADS contract; reject the
+    // entire draw before writing a partial rectangle.
+    for(bool direct:{false,true})for(unsigned count:{3u,5u}) {
+        Fixture f(direct);setup(f,0xff36a5c7);draw(f,0,count,0xff102030);++cases;
+        CHECK(!f.fault.empty());CHECK(!f.gpu->generic_combiner_executed_batches());
+        for(unsigned y=0;y<64;++y)for(unsigned x=0;x<64;++x)
+            CHECK(f.get(Fixture::frame+(y*64+x)*4)==0xff102030);
+    }
+}
+
 int main() {
     packed_formats(); surface_reuse(); immediate_control();
     noise_control_boundary();
@@ -712,6 +789,7 @@ int main() {
     homogeneous_clip_depth();
     alpha_volume_blend();multistage_linear_project2d();
     stencil_pixels();
+    generic_quads();
     std::printf("nv2a_vertex_colors: %u draw cases, %u failures\n", cases, failures);
     return failures ? 1 : 0;
 }

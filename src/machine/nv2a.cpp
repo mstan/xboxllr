@@ -6404,7 +6404,11 @@ bool Nv2a::rasterize_witnessed_batch(DrawJob& job, bool& executed) {
         // emulation thread. It writes the same colour surfaces queued jobs
         // write, and it must not overtake them.
         draw_order_fence();
-        return rasterize_witnessed_immediate_quad(job, executed);
+        const bool ok = rasterize_witnessed_immediate_quad(job, executed);
+        if (!ok || executed) return ok;
+        // An unrecognized witnessed profile is not an executed draw. Use the
+        // general semantic floor instead of leaving ordinary QUADS recorder-only.
+        return rasterize_generic_combiner_batch(job, executed);
     }
     const uint32_t enables = raster_state[kRasterEnables];
     const uint32_t color_format = surface_format & 0xFu;
@@ -10478,9 +10482,13 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
     uint64_t generic_batch_software_raster_ns = 0;
     uint64_t generic_batch_flush_ns = 0;
     const bool supported_primitive =
-        primitive_mode == 5 || primitive_mode == 6 || primitive_mode == 7;
+        primitive_mode == 5 || primitive_mode == 6 || primitive_mode == 7 || primitive_mode == 8;
     if (!supported_primitive) {
         record_generic_skip(GenericSkipReason::kUnsupportedPrimitive);
+        return true;
+    }
+    if (primitive_mode == 8 && (transformed_batch.empty() || transformed_batch.size() % 4)) {
+        record_generic_skip_detail(GenericSkipReason::kUnsupportedPrimitive, transformed_batch.size());
         return true;
     }
     const uint32_t color_format = surface_format & 0xFu;
@@ -10532,6 +10540,14 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
         (flat_shading && raster_state[kRasterProvokingVertex] > 1)) {
         record_generic_skip_detail(GenericSkipReason::kUnsupportedShadeMode,
                                    raster_state[kRasterShadeMode]);
+        return true;
+    }
+    // The last-vertex QUADS convention is specified; whether this older chip
+    // honors a requested first vertex for QUADS still needs silicon evidence.
+    // Do not infer it from triangle behavior or newer GPU implementations.
+    if (flat_shading && primitive_mode == 8 && raster_state[kRasterProvokingVertex] != 0) {
+        record_generic_skip_detail(GenericSkipReason::kUnsupportedShadeMode,
+            (uint64_t(primitive_mode) << 32) | raster_state[kRasterProvokingVertex]);
         return true;
     }
     // Polygon mode: the shared rasterizer only ever fills triangles (no line/point
@@ -12016,9 +12032,9 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
         GenericResidentRejectReason::kCount;
     // Accelerated packets currently carry neither stencil state nor an
     // independent zeta pitch. Keep these draws on the maintained CPU floor.
-    const bool accelerated_zeta_supported = !stencil_test_enabled &&
-                                            (!uses_depth || zeta_pitch == pitch);
-    if (accelerated_zeta_supported && !accurate_texture_sampling && !needs_fog && !logic_enabled && !flat_shading && !zpass_enabled_ && renderer_ && effective_clip_valid) {
+    const bool accelerated_raster_supported = primitive_mode != 8 && !stencil_test_enabled &&
+                                              (!uses_depth || zeta_pitch == pitch);
+    if (accelerated_raster_supported && !accurate_texture_sampling && !needs_fog && !logic_enabled && !flat_shading && !zpass_enabled_ && renderer_ && effective_clip_valid) {
 #if XLLE_VSH_DRAW_OVERLAP_CENSUS
         const bool fixture_overlap = vsh_draw_overlap_enabled_ && job.vsh_overlap.valid;
         const uint64_t fixture_overlap_t0 = fixture_overlap && perf_excl::g_enabled
@@ -13942,7 +13958,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
 #endif
     // Generated shader packets carry factors but no blend equation. Only ADD
     // can enter that executor; reverse subtraction stays on the faithful floor.
-    if (accelerated_zeta_supported && (!blend_enabled || blend_eq == 0x8006) && !accurate_texture_sampling && !needs_fog && !logic_enabled && !flat_shading && !zpass_enabled_ && gpu_generic_shader_ && renderer_ && effective_clip_valid) {
+    if (accelerated_raster_supported && (!blend_enabled || blend_eq == 0x8006) && !accurate_texture_sampling && !needs_fog && !logic_enabled && !flat_shading && !zpass_enabled_ && gpu_generic_shader_ && renderer_ && effective_clip_valid) {
         ++generic_shader_attempts_;
         GenericShaderDeclineReason decline = GenericShaderDeclineReason::kNone;
         auto& st = gpu_shader_packet.state;
@@ -15688,6 +15704,16 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                     submit_shaded_triangle(transformed_batch[i - 1],
                                       transformed_batch[i - 2],
                                       transformed_batch[i], transformed_batch[first ? i - 2 : i]);
+            }
+        } else if (primitive_mode == 8) {
+            // Two triangles per independent quad, with one provoking vertex
+            // for both. Do not connect adjacent groups as a triangle fan.
+            for (size_t i = 0; i + 3 < vertex_count; i += 4) {
+                const auto& provoking = transformed_batch[i + (first ? 0 : 3)];
+                submit_shaded_triangle(transformed_batch[i + 1], transformed_batch[i + 2],
+                                       transformed_batch[i], provoking);
+                submit_shaded_triangle(transformed_batch[i + 2], transformed_batch[i + 3],
+                                       transformed_batch[i], provoking);
             }
         } else {
             for (size_t i = 2; i < vertex_count; ++i)

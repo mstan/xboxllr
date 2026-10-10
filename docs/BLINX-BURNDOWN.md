@@ -939,3 +939,18 @@ contents are sampled. No additional title capture is needed for that dependency.
 Shipping HLE shaders/caches remain unchanged. Complete-scene pixels, production
 HLE equivalence, feedback/noise and original startup/lifetime stay open. The
 full goal remains active at **4/9**; hardware inspection is still pending.
+
+Three previously recorder-only Blinx QUADS now use the default general LLE
+rasterizer. Qualification now requires actual raster execution and observes
+all28 counters, removing the earlier overly broad QUADS completion exception.
+All1,692 authored draw cases, five core suites and137 focused Python tests
+pass. The final retained frame executes all4,331 draws and matches852,468
+vertex values /462,399 consumed/setup words; the two full-screen quads each
+write307,200 pixels. First-vertex flat QUADS and incomplete groups stay guarded
+outside the captured smooth four-vertex contract.
+[Correction and evidence](../pilots/native-title/GRAPHICS-LLE.md#complete-quads-raster-execution---2026-10-10).
+Complete-scene pixels and native equivalence still need independent pixel
+qualification, especially the residual blur/depth consumer. Noise, original
+startup/lifetime and exact hardware questions remain separate. Shipping HLE
+shaders/caches remain unchanged; no title/audio/host GPU/Xbox run occurred.
+The full goal stays active at **4/9**, with hardware inspection pending.

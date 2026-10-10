@@ -159,8 +159,10 @@ def qualify(capture,scene,actual,library_sha=None):
     route='original DrawVerticesUP' if capture['submission_kind']&1 else 'original DrawVertices'
     require(actual['submission']==route,'Wrong original submission route')
     counts=actual['draw_counters']
-    require(len(counts)==26 and all(type(v) is int and v>=0 for v in counts) and
-        not any(counts[3:]) and (counts[1]>0 or capture['header'][2]==8),'Guarded or missing draw')
+    # Admit the retained 23-reason ABI and current 25-reason ABI explicitly.
+    # QUADS need actual raster execution just as other complete draws do.
+    require(len(counts) in (26,28) and all(type(v) is int and v>=0 for v in counts) and
+        not any(counts[3:]) and counts[1]>0,'Guarded or missing draw')
     expected={**methods,**fixture,**pixel};observed=actual['methods']
     failures=[[hex(m),observed.get(hex(m)),v] for m,v in expected.items()
               if type(observed.get(hex(m))) is not int or observed.get(hex(m))!=v]

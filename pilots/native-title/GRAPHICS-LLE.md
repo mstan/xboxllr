@@ -1908,3 +1908,52 @@ Complete-scene pixels, production HLE raster equivalence, feedback caching,
 enabled noise, original startup/lifetime and exact hardware questions remain
 open. CPU builds/checks used Idle priority on one logical processor; no new
 title/audio/host GPU/Xbox run occurred. **4/9** and the full goal stay active.
+
+## Complete QUADS raster execution - 2026-10-10
+
+The three captured QUADS calls2767,2820 and4331 returned with independently
+qualified vertices/state, but the old witnessed-quad route did not recognize
+their state and left them recorder-only. The earlier input-only qualification
+exception allowed these zero-execution draws to carry a `complete_draw_executed`
+flag. That flag was too broad: returned calls and transformed vertices did
+not establish raster execution. The replay and independent state audit now
+require a recorded raster execution for QUADS as for other complete draws.
+Historical vertex/state evidence remains component evidence, not a pixel pass.
+
+Unrecognized witnessed QUADS now enter the default general software rasterizer,
+using two triangles per independent four-vertex group and one flat-shading
+provoking vertex per quad. Recognized legacy profiles retain their route.
+Authored cases check every64x64 target pixel for array/indexed/inline/immediate
+submissions, one/two independent quads, visibility/no-query routes and exact
+single coverage of a blended shared diagonal. Last-vertex flat shading follows
+[the published quad convention](https://registry.khronos.org/OpenGL/specs/gl/glspec13.pdf).
+The [provoking-vertex extension](https://registry.khronos.org/OpenGL/extensions/EXT/EXT_provoking_vertex.txt)
+makes first-vertex behavior for quads implementation dependent; that request
+remains explicitly guarded pending silicon evidence. Incomplete groups are
+also outside this admitted contract and stop before raster writes. Neither
+guard affects the captured smooth four-vertex Blinx quads. General QUADS use
+the software floor; shipping native HLE code and caches are unchanged.
+
+The first26 new cases reproduce17,122 failed assertions before the fix.
+All **1,692 authored draw cases**, including30 new QUADS positive/guard cases,
+now pass. Five NV2A/tile/zeta suites and137 focused Python tests also pass.
+The actual original seven-draw smoke passes all10 producer bindings. Replay
+discovers counter names from the reference ABI, including its two added
+stencil guard reasons; the independent audit explicitly admits the retained
+26-counter and current28-counter layouts and checks every guard value.
+
+The final corrected frame executes **all4,331 original draws /29,396 vertices**
+with852,468 independent vertex values and462,399 consumed/setup words. Each
+full-screen QUADS call now records one raster execution and307,200 color
+writes; the glyph records one execution and zero writes after pixel tests.
+All28 counters are observed. The final build keeps the unqualified first-flat
+convention guarded. Private evidence adds `composed-quads-final-observed/`,
+`composed-quads-final-qualified.aot-private.json` and the diagnostic image under
+the complete-input directory; previous DLLs/reports remain preserved.
+
+Complete-scene pixels remain false. Residual native/LLE blur and raster
+differences need independent pixel/consumer qualification, with enabled noise
+and exact silicon behavior still separate. The initial-clear dependency proof
+remains valid; no new title capture is needed. This batch used CPU-only Idle
+work on one logical processor, with no title/audio/host GPU/Xbox run.
+**4/9** and the full goal remain active; hardware stays at its inspection gate.

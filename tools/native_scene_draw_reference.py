@@ -35,6 +35,27 @@ def target_bytes(target,depth=False):
     return bytes(result)
 
 
+def counter_fields(name_fn):
+    """Discover all bounded ABI skip fields, including newly added reasons."""
+    names=[]
+    for index in range(64):
+        raw=name_fn(index);assert isinstance(raw,bytes),'Missing reference counter name'
+        name=raw.decode('ascii')
+        if name=='unknown':
+            assert names[:3]==['attempts','executions','color-writes'],'Incomplete draw census'
+            return names
+        assert name and name not in names,'Duplicate reference counter name'
+        names.append(name)
+    raise AssertionError('Unbounded reference draw census')
+
+
+def complete_submission(get,put,vertex_count,count,census):
+    # Returned commands and correct vertices do not imply raster execution.
+    # Zero writes may be valid after clipping/tests; a missing execution is not.
+    return bool(get==put and vertex_count==count and census['executions'] and
+                not any(list(census.values())[3:]))
+
+
 def replay(args,path,reference=None,initialize_targets=True,*,capture=None,scene=None,resource_plan=None):
     state_only=getattr(args,'observe_shader_state_only',False)
     assert not (state_only and getattr(args,'retain_targets',False)), 'Target continuity requires target observations'
@@ -91,7 +112,8 @@ def replay(args,path,reference=None,initialize_targets=True,*,capture=None,scene
     count_fn.restype=ctypes.c_uint64;count_fn.argtypes=[ctypes.c_void_p,ctypes.c_uint32]
     name_fn=ref.lib.xlle_nv2a_reference_draw_count_name
     name_fn.restype=ctypes.c_char_p;name_fn.argtypes=[ctypes.c_uint32]
-    initial_counts=[count_fn(ref.gpu,i) for i in range(26)]
+    names=counter_fields(name_fn)
+    initial_counts=[count_fn(ref.gpu,i) for i in range(len(names))]
     initial_put=ref.get(ref.device)[0]
     try:
         if not initialize_targets:
@@ -224,7 +246,7 @@ def replay(args,path,reference=None,initialize_targets=True,*,capture=None,scene
                 if not raw:raise
                 guard=raw.decode();break
             graph_services+=1
-        census={name_fn(i).decode():count_fn(ref.gpu,i)-initial_counts[i] for i in range(26)}
+        census={name:count_fn(ref.gpu,i)-initial_counts[i] for i,name in enumerate(names)}
         get=None if guard else read(ref.gpu,0xfd800044,4);put=ref.get(ref.device)[0]
         pending_words=ref.get(get,min(20,(put-get)//4)) if get is not None and get<=put else []
         if not guard:ref.check()
@@ -252,8 +274,7 @@ def replay(args,path,reference=None,initialize_targets=True,*,capture=None,scene
                 noise_disabled_fixture=args.noise_disabled_fixture,
                 pixel_targets_observed=not state_only,
                 retained_targets=getattr(args,'retain_targets',False),
-                complete_draw_executed=bool(get==put and vertex_count==h[4] and
-                    (census['executions'] or input_only and h[2]==8) and not any(list(census.values())[3:])),
+                complete_draw_executed=complete_submission(get,put,vertex_count,h[4],census),
                 input_only_capture=input_only,input_sequence=capture.get('input_sequence'),
                 frame_resource_plan=resource_plan,
                 submission='original DrawVerticesUP' if capture.get('submission_kind',0)&1 else 'original DrawVertices',
