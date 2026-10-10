@@ -2572,3 +2572,78 @@ Historical wrong-premise and failed native reports remain intact. Earlier
 scene producers are supplied inputs to these consumer components; complete
 scene/HLE, enabled noise, startup/lifetime, ring rollover and exact silicon
 remain open. Family count stays **4/9**.
+
+## Native fixed-format blend precision discriminator - 2026-10-10
+
+The two authored Fraction cases now run as a private direct-D3D diagnostic:
+two source formats, two blended target formats and an unblended FLOAT32
+readback, repeated across three fresh devices (**36 tiny draws**). Constant
+quarter-grid UVs remove varying-coordinate and snapping ambiguity. The same
+passthrough pixel bytecode, texture inputs and production-matched RGB/alpha
+SRC_ALPHA/INV_SRC_ALPHA ADD factors are used throughout.
+
+Both UNORM8 and FLOAT32 source textures give `[1,1,1,207]` and `[21,21,21,244]`
+on the UNORM8 target, matching the independently prepared prepacked-source
+counterfactual rather than the maintained LLE float-blend equation. FLOAT32
+targets satisfy the rational floating controls; FLOAT32 raw source error is
+at most 2.97e-8 and UNORM raw source error is at most 3.82e-6. The predeclared
+floating guard cannot cross either decisive output-code boundary. All pixels
+are uniform and lifetime byte drift is zero. This isolates a fixed-target
+output-merger precision effect in these authored cases; it does not establish
+the exact algorithm for every GPU or the NV2A silicon rule.
+
+The hardware diagnostic finishes in 0.484 seconds, without a window, audio,
+title or Xbox operation. Production executables and shader generation remain
+unchanged. Private evidence is
+`postprocess-native-20261010/quarter-grid-blend-diagnostic/diagnostic.aot-private.json`
+(SHA-256 `bad2c3200eeff13c84081efe28187f07ffa43ebec459fce7d087edbb29b9dfce`).
+An explicit floating blend in the shader, reading a GPU destination snapshot
+and retaining the UNORM target/storage, is the next bounded original-consumer
+diagnostic. Its copies, allocations, cache behavior and GPU cost must be
+validated before a default production correction. The canonical oracle and
+strict native-chain failure remain unchanged; **4/9** stands.
+
+## Original scene producer through draw 1943 - 2026-10-10
+
+The independent expected-image chain now passes **1,943 original draws**,
+**227,679 expected writes /2,536,780,800 owned-pixel comparisons**. The newly
+admitted continuation contributes 27,745 expected writes. Written RGB keeps
+the existing one-code bound; depth, stencil, alpha and untouched bytes stay
+exact. All five final expected roots match hashes frozen before execution.
+Observed predecessor or after images never supply expected pixels.
+
+Original input 1943 exercises a narrowly admitted surviving mixed-W strip.
+Its eight source triangles independently clip to seven empty results and one
+surviving triangle, which writes all **160** expected pixels with no depth
+rejections. The homogeneous W/XY clipping and fan sequence are source-derived;
+40 exact retained DLL code/constant sites bind clipping, snapping, culling,
+coverage and depth to the maintained LLE route before observation. Its
+surviving leaf has positive W, integer in-range vertex depth and the already
+admitted color/texture domain. Other original mixed survivors, near-zero W,
+signed or depth-boundary leaves remain guarded. This is a qualified captured
+component, not general mixed-W pixel or exact silicon qualification.
+
+All **14 authored tests** and **35 replay controls** pass. The new controls
+independently identify all 160 pixels as changing both color and depth from
+the draw-1942 expected roots. Restoring old color, old depth or both at
+(613,474) is rejected. Retained controls continue to reject wrong state,
+shader delivery, alpha/stencil/untouched changes, missing roots and a two-code
+RGB error. Fifteen drained fixture pushbuffer jumps preserve expected storage;
+original ring rollover remains unqualified.
+
+`tools/qualify_native_scene_surviving_mixed.py` requires explicit original
+`--last-draw 1943`, the reviewed capture/scene hashes and the source/DLL-bound
+`--depth-arithmetic fma-b-first --clip-arithmetic fma` declarations. The
+shared runner admits only reviewed limits 512/768/1536/1943. Its default stays
+512 and the existing empty-depth CLI default stays 768; this new component
+cannot admit a later or differently hashed original draw.
+
+Private evidence in `frame-inputs-firstworld-20261010` is
+`surviving-mixed-prefix1943-qualified.aot-private.json` (SHA-256
+`5ed2038b267ad81bd569ed6c5e49607da33f7315a9460765a74c22024662ee00`),
+`surviving-mixed-prefix1943-replay-handoff.aot-private.json`
+(`35782527d038ff9b907a52cce560505a9b121ce70c942e651ad41dcffecb4ee0`),
+and its retained, continuation and final-leaf control reports. No later draw
+was inspected or replayed for this milestone. The next input-only continuation
+starts at 1944. Complete scene/HLE pixels, enabled noise, original
+startup/lifetime, ring rollover and exact silicon remain open; **4/9** stands.
