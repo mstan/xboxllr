@@ -111,6 +111,17 @@ ordering remains open. All 53 offline tests pass; two owned scratch pages
 (8192 bytes total) are retained until restart. `.115` remains open and the
 family count stays **4/9**.
 
+Four further AV/display sessions completed: reverse request captured pending
+`1` then ack `11`; two reversible one-pixel window experiments restored all
+state but observed alternate HVALID_START `0`, both immediately and after at
+least 50 ms per acknowledged phase. A ten-read/no-write follow-up observed
+DEBUG_1/2 both `0`, with restored window, selector and AV endpoints unchanged.
+Thus ack alone is not evidence of this field's activation in the current mode.
+All **76 offline probe tests pass**. No clock/sync/total/enable, GPIO, storage,
+boot or shipping HLE change occurred. The original one-shot latch and LLE
+guards remain; `.111`, original startup and the **4/9** family count stay open.
+See [the observations and limits](../pilots/native-title/GPU-COMPLETION-LLE.md#reverse-av-and-valid-window-observations---2026-10-10).
+
 2026-10-09 scene-pixel continuation: corrected the offline scene fixture's
 missing initialized XDK screen bias before the original viewport setter.
 An independent post-transform mathematical pixel contract now passes all five

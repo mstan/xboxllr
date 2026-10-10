@@ -1551,3 +1551,53 @@ state, opposite request direction, commit event, first-sync phase, PLL lock
 delay or coherent original startup. FE control `1` does not establish audio
 completion ordering. Keep `.111`, `.109`, `.112` and `.115` open; the LLE AV
 guard remains. This checkpoint changes no shipping HLE path or family count.
+
+## Reverse AV and valid-window observations - 2026-10-10
+
+Four distinct follow-ups completed under the owner's standing read-only and
+benign-write authorization, using the existing v0.4.0 ARM/EXEC route. The
+original AV_HANDSHAKE one-attempt latch remains consumed and unchanged. No
+new XBE, launch, audio playback, GPIO, clock/sync/total/enable or storage write
+occurred. Every session completed successfully without a retry.
+
+| Experiment | Actual observation | Device stores |
+| --- | --- | ---: |
+| Reverse request from stable AV `0` | Request `1`; first post-write read `1` (pending), second `11` (acknowledged). Phase remains `11` | 1 |
+| Reversible one-pixel HVALID_START | Programmed `1` read back; alternate start remained `0` before request and immediately after ack. Both AV directions sampled pending; four combined post-write AV reads. Restored programmed/alternate start `0`, selector `10100111`, AV `11` | 12 |
+| Same field with measured waits | Same result after at least 50 ms following **each** ack, including restoration. Actual kernel counter frequency 3,375,000 Hz; waits require 168,750 ticks and have finite call budgets | 12 |
+| Read-only mode context | Ten DWORD reads: DEBUG_1=`0`, DEBUG_2=`0`, DEBUG_0=`21101100`, horizontal programmed start/end/display `0/639/639`; selector and AV endpoints match the restored state | 0 |
+
+Each successful field experiment uses eight read-selector stores, two
+one-pixel field/restoration stores and two planned AV phase stores. These
+are separate successful transactions; no recovery or retry follows a failed
+operation. The measured-wait variant validates the actual counter exports and
+frequency before any selector or crop store. Fresh selector words are checked
+before restoration; unexpected values cannot become whole-word writes.
+
+The reverse result establishes the opposite request direction and a sampled
+pending state. Poll counts do not measure elapsed hardware latency. The window
+experiments reject the assumption that acknowledgment necessarily publishes
+this field in the current mode, even within the measured 50 ms window. They
+do not establish later activation, other fields, reset state, electrical edges
+or original-title startup. The nonzero-word override hypothesis is absent in
+the subsequent snapshot; the exact NV2A mode/automatic-window rule remains
+unknown. Sequential samples do not atomically exclude other kernel writers.
+
+Tooling, closed payload sources and limits are recorded in
+[AV-REVERSE.md](https://github.com/mstan/xboxlle-probe/blob/feat/av-handshake-probe-20261009/docs/AV-REVERSE.md)
+and [FP-ACTIVATION.md](https://github.com/mstan/xboxlle-probe/blob/feat/av-handshake-probe-20261009/docs/FP-ACTIVATION.md).
+The factual extra register offsets come from
+[Linux v6.12 nvreg.h](https://github.com/torvalds/linux/blob/v6.12/drivers/gpu/drm/nouveau/dispnv04/nvreg.h);
+[DFP setup](https://github.com/torvalds/linux/blob/v6.12/drivers/gpu/drm/nouveau/dispnv04/dfp.c)
+motivates the scaling/override context reads, without proving NV2A behavior.
+
+All **76 offline probe tests pass in 46.868 s**, CPU-only at Idle on one logical
+processor. Actual compiled bytecode is tested with independent bank policies,
+pending transactions, delayed restoration, invalid PE/frequency, backwards and
+stopped clocks, unexpected selectors and finite failure limits. Current source
+reproduces the exact observed payload hashes: reverse 204 bytes, immediate
+window 712 bytes and timed window 1516 bytes. The extracted shared compiler and
+PE32 resolver also preserve both prior FE payloads byte-for-byte (888/968 bytes).
+Raw evidence and source/payload hashes remain private on G. `.111` and startup
+stay open; no guessed commit rule is added, HLE rendering performance is
+unchanged, and the service-family count stays **4/9**.
