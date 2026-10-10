@@ -2190,3 +2190,47 @@ This CPU-only component changes no shipping HLE/core code and requires no new
 title/audio/GPU/Xbox run. Complete scene pixels, production HLE equivalence,
 enabled noise, original startup/lifetime, and exact silicon remain open; **4/9**
 families are qualified.
+
+## Independent diffuse/clamped producer prefix - 2026-10-10
+
+The original expected-image chain now passes through **480 whole draws**.
+The intermediate 61-draw proof exhausts encoded five/six-bit channel pairs
+before observing pixels. MSB-expanded endpoints, nearest thirds and floored
+halves bound the software BC1 error by 35/31 and 23/21 codes. Diffuse at most
+3/4 leaves at most 105/124 code before quantization; convex spatial/mip
+filtering preserves that bound. All eight authored diffuse tests pass.
+
+The 65-draw extension admits full clamped diffuse using an exact rational
+precision proof for each supplied texture's selected palette entries.
+Every consumed channel must independently prove error below one code before
+execution. Primary colors clamp before attribute clipping, following the
+declared [ARB vertex-program pipeline, section 2.14.4.4](https://registry.khronos.org/OpenGL/extensions/ARB/ARB_vertex_program.txt).
+An agreeing software result does not establish NV2A silicon ordering.
+Nine authored clamp tests reject incorrect clamp order, insufficient precision,
+transparent/incomplete storage and unsupported primary/alpha inputs.
+
+The same frozen equations admit the 256- and 480-draw extensions. The final
+480-draw run compares **126,422 independently expected written fragments /
+626,688,000 owned pixels**, including 387 clipped source faces. Written RGB
+differs by at most one code; depth, stencil, destination alpha and every
+untouched owned byte remain exact. Complete original shader/state components
+and all **21 artifact controls** pass. Observed predecessors never supply the
+expected chain.
+
+Three drained fixture pushbuffer jumps preserve independently expected
+storage. They recycle the test allocation explicitly; **original ring rollover
+is unqualified**. The runner checks all owned storage at each recycle and
+records that limitation. Draw **481** is the first unmodelled input: all twelve
+vertices have negative W and window Z outside D24 range. The run stops before
+that original draw; a behind-camera rejection proof is the next software
+oracle domain, requiring no new hardware assumption.
+
+Private final evidence is `clamp-prefix480-qualified.aot-private.json`
+(SHA-256 `daa7c1fa395d9acaf63894f26cdffb4c235db36f5435a20860ea75f0cc57d6ce`)
+and `clamp-prefix480-controls.aot-private.json`
+(`4bd2455e16e4277f9b0884cad9cdd6156264de162f83f8fb505380264c467e87`).
+The public CLI is `tools/qualify_native_scene_clamp.py` with the preceding
+fixture paths, `--last-draw 480 --depth-arithmetic fma-b-first
+--clip-arithmetic fma`. This CPU-only milestone changes no shipping renderer.
+Complete scene/HLE pixels, enabled noise, startup/lifetime and exact silicon
+remain open; the service-family count stays **4/9**.

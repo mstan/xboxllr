@@ -24,10 +24,11 @@ from native_frame_storage import draw_plan
 from native_frame_shader_state_reference import Prepared
 from native_scene_draw_reference import replay
 from native_scene_producer_reference import expected_draw,compare_storage
+from native_frame_composition_reference import recycle
 
 
 def run(args, expectation=expected_draw, scope=__doc__):
-    require(type(args.last_draw) is int and 1 <= args.last_draw <= 256, 'Choose a bounded prefix <=256')
+    require(type(args.last_draw) is int and 1 <= args.last_draw <= 512, 'Choose a bounded prefix <=512')
     coverage = audit(args.captures/'frame.jsonl')
     reader = Reader(args.captures/'frame-inputs.bin').read()
     inputs = Inputs(reader)
@@ -42,10 +43,14 @@ def run(args, expectation=expected_draw, scope=__doc__):
     args.retain_targets = False
     args.diagnostics.mkdir(parents=True,exist_ok=True)
     ref = TargetReference(args,reader.targets,expected,reader.root)
-    written = {}; rows = []; operations = []
+    written = {}; rows = []; operations = []; fixture_recycles = 0
     try:
         for event in reader.events:
             if event['type'] == 'draw' and event['input'] > args.last_draw:break
+            if event['type'] in ('root','bind','clear','draw') and recycle(ref):
+                fixture_recycles += 1
+                require(compare_storage(reader.targets,expected,ref.images(),written)['qualified'],
+                        'Fixture PFIFO recycling changed independently expected storage')
             if event['type'] in ('root','bind','clear'):
                 if event['type'] == 'clear':
                     require(event['args'][2] == 0xf3, 'Only full RGBA/depth/stencil clears admitted')
@@ -95,6 +100,7 @@ def run(args, expectation=expected_draw, scope=__doc__):
                   noise_disabled_fixture=True,depth_arithmetic=args.depth_arithmetic,
                   complete_scene_pixel_qualified=False,production_hle_pixels_qualified=False,
                   exact_hardware_rounding_qualified=False,original_startup_lifetime_qualified=False)
+    report.update(fixture_pushbuffer_recycles=fixture_recycles,original_ring_rollover_qualified=False)
     report['final_written_pixels'] = {str(n):sorted(indices) for n,indices in written.items()}
     report['expected_target_sha256'] = {str(n):hashlib.sha256(data).hexdigest() for n,data in expected.items()}
     args.output.write_text(json.dumps(report,indent=2)+'\n')
