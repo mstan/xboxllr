@@ -122,6 +122,16 @@ boot or shipping HLE change occurred. The original one-shot latch and LLE
 guards remain; `.111`, original startup and the **4/9** family count stay open.
 See [the observations and limits](../pilots/native-title/GPU-COMPLETION-LLE.md#reverse-av-and-valid-window-observations---2026-10-10).
 
+Two read-only GP context batches then completed, eight DWORDs each with zero
+device stores. Reset remained held; factual masks indicate the global audio
+IRQ gate was off, the setup counter mode OFF and frontend HALTED. Existing SG
+pointers remain configured. This supports preparing a separately owned boot/
+scratch transfer instead of starting GP with inherited DMA addresses. The
+8192-byte reference bootstrap dependency is now explicit. Seven focused GP
+tests pass separately after the 76-test combined pass. No DSP write, playback,
+bit9 guard removal or family closure occurred; next is the bounded input-only
+owned-memory stimulus, with [scope and limits](../pilots/native-title/AUDIO-LLE.md#read-only-gp-takeover-context---2026-10-10).
+
 2026-10-09 scene-pixel continuation: corrected the offline scene fixture's
 missing initialized XDK screen bias before the original viewport setter.
 An independent post-transform mathematical pixel contract now passes all five

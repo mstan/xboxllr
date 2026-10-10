@@ -761,6 +761,34 @@ through original caller evidence and independent documentation/observations;
 do not restore a fixed envelope value. New console observations, if actually
 needed, remain at the end of the burndown. Their necessity is not established.
 
+## Read-only GP takeover context - 2026-10-10
+
+Under the owner's standing read-only authorization, two fixed eight-DWORD
+batches completed through the unchanged v0.4.0 ARM/EXEC route. Both observed
+GP reset `0` at their endpoints and AV `11` unchanged. Scratch/FIFO SG addresses
+were already nonzero, with maximum fields 1544/1; no pointed-to memory was read.
+The second batch observed IEN=`AFA`, SECTL=`7`, FECTL=`71F8F`, ISTS=`0`. Under
+the factual register masks, the global IRQ-enable bit was clear, XCNTMODE OFF
+and FE method mode HALTED. This is current application state, not reset-state
+qualification or an atomic exclusion of other CPU writers.
+
+No DSP reset/start, SG, program/data, DMA/FIFO, IRQ, playback or storage write
+occurred. Seven hardware-free GP context tests pass, executing every fixed
+load and proving zero stores, exact closed lists, endpoint checks and no retry.
+They follow the 76-test combined probe pass; these seven changed/new GP tests
+were run separately, without repeating the unchanged two-million-call clock
+test. The underlying data movement and bit9 guard remain unchanged.
+
+Preparation found a necessary boot dependency: xemu's GP bootstrap model loads
+8192 scratch bytes into P. A one-page SG setup with direct P writes would not
+supply that boot source. The next design must own the full boot/SG/sample
+extent, initialize descriptors through the authored DSP after bootstrap, observe
+completion before restoring shared pointers and preserve the observed quiet
+device conditions. No such takeover has run. See
+[the fixed context](https://github.com/mstan/xboxlle-probe/blob/feat/av-handshake-probe-20261009/docs/GP-CONTEXT.md)
+and [owned-memory design constraints](https://github.com/mstan/xboxlle-probe/blob/feat/av-handshake-probe-20261009/docs/GP-BIT9-PLAN.md).
+`.114` and the broader audio family remain open; **4/9** stays unchanged.
+
 ## Remaining work, in order
 
 1. Preserve the now-connected original IRQ/PIC/ISR/unlink and DPC-queue route.
