@@ -18,7 +18,7 @@ from native_frame_state_delivery import expected_delivery
 from native_scene_clamp_reference import (expected_clamp_draw,clamp_vertices,
     texture_error_bound,precision_domain)
 from native_scene_diffuse_reference import consumed_profile
-from native_scene_empty_depth_reference import expected_empty_depth_draw
+from native_scene_positive_xy_empty_reference import expected_positive_w_xy_empty_draw as expected_empty_depth_draw
 from native_scene_mixed_clip_reference import mixed_triangles,mixed_software_evidence
 from native_scene_rejection_reference import pe_bytes
 from native_scene_viewport_reference import snap

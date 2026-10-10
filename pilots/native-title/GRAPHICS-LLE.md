@@ -2938,12 +2938,71 @@ uses blocking terminal input between batches; no idle worker or polling starts.
 Real idle CPU/performance and serialized restart are not qualified by these
 authored controls.
 
-The corrected original replay through 2132 is in progress, with selected draw
-snapshots reserved for dependent controls. Its source/input/loaded-CRT guards
-precede reference creation. This preparation does not extend the published
-1943-pixel prefix, transfer the old full-frame state result to the corrected
-DLL, or close full scene/noise/startup/lifetime. Private evidence is
+The first corrected original replay passed rows 1-1144, then stopped before
+submitting draw 1145. Its positive-W geometry leaves four empty polygons at
+the X+W clipping plane; a validation-only integer-depth restriction rejected
+one original fractional depth. The captured pixels did not choose a new
+expectation. The reviewed complete input-only preflight now passes all
+2,132 draws, with 321,921 expected written fragments and all five independently
+frozen point roots unchanged. The new positive-W XY-empty helper first derives
+every original strip primitive's complete clip/fan result; only when all leaves
+are absent does it use a local XYZ/W proxy for complete input/storage validation.
+Visible draws retain their previous precision and raster equations. Its 49
+authored controls include fractional depth, intersected empty clipping,
+invalid attributes/storage and independently calculated visible pixels; the
+combined scene-reference suite passes 87 tests.
+
+A fresh corrected original replay passes through 2132. Exact encoded-input
+palette bounds are memoized, with every original draw's input/predecessor/result
+hashes and write count checked against the full uncached preflight before
+submission. The final write footprint also matches. Selected draw snapshots
+pass dependent controls below. Source/input/loaded-CRT guards precede reference
+creation. These preparation results alone did not extend the then-published
+1943-pixel prefix or transfer the old full-frame state result to the corrected
+DLL. Private evidence is
 `producer-zero-sample-root-source-review.aot-private.json`,
 `producer-zero-sample-final-handoff.aot-private.json` and
 `producer-persistent-session-proposal/root-review.aot-private.json`, all under
 `frame-inputs-firstworld-20261010`. Full graphics and **4/9** stay open.
+
+## Corrected original producer prefix 2138 - 2026-10-10
+
+The continuous current-generation original prefix now qualifies draws
+**1-2138**, with **340,776 independently expected written fragments** and
+**2,791,372,800 owned-pixel comparisons**. Every row passes current original
+shader/state and unchanged pixel/storage checks. Draw 2031 now passes its 663
+writes after the generic pre-clip consumed-color correction. The retained
+4,331-draw state baseline keeps its earlier DLL identity; current-generation
+state qualification covers this new prefix, not the whole frame.
+
+Draw 2133's seven leaves contribute 18,855 writes and 62,587 LESS-depth
+rejections. A separate source-bound packed-byte proof encloses encoded BC1
+filtering, actual primary interpolation and floating modulation, then applies
+the independently selected finite RGB saturation/FMA/floor/conversion graph.
+All possible integer outputs stay within the existing one-code RGB contract
+of unchanged nominal pixels. All 22 packing sites, inherited sampler/CRT
+premises, 34 authored packing controls and 24 admission controls are reviewed.
+The prior strict prequantization proof remains failed at 161 fragments; this
+new integer-output proof neither changes the nominal equation nor widens its
+comparison. Depth/stencil/alpha/padding/untouched roots remain exact.
+
+The corrected replay reuses one reference for reviewed extensions, including
+draws 2134-2138 whose independent expectations prove zero writes. All **87
+actual-artifact fault controls** pass: 21 general pixel/state controls, 28
+omitted-leaf controls at original draws 1943/1969/1983, 28 at the seven leaves
+of draw 2133, and 10 continuation controls. Expectations and selected fault
+sites come from independently derived before/after bytes, never observed
+after-images. The exact encoded-input palette cache records 28 misses and
+2,110 hits through 2132, with every cached draw result matched to the full
+uncached input preflight before original submission; this establishes
+equivalence, not a title-performance measurement.
+
+Private evidence under `frame-inputs-firstworld-20261010` includes
+`producer-prefix2138-final-qualified.aot-private.json`
+(`b5adf744f00e28371d8f2ab4d49eac45a28419ad47187a703d777a9af230b293`),
+the frozen original checkpoints, separate expected/actual snapshots, all four
+artifact-control reports, and `producer2133-packed-complete-handoff.aot-private.json`.
+The next unqualified draw is 2139, stopped by the sampled-precision admission
+guard before original execution. Its separate source-only proof is underway.
+Full producer/frame and native HLE scene pixels, enabled noise, original
+startup/lifetime, ring rollover and exact silicon remain open; **4/9** stands.

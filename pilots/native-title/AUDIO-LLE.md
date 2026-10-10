@@ -841,6 +841,25 @@ device writes, stable reset/AV endpoints, and the same SG maxima. The agent
 is available again. No failed RAM load or SG write has been repeated; screen
 freeze and the RAM timeout's cause remain unestablished.
 
+## Read-only inherited GP mapping observation - 2026-10-10
+
+A distinct fixed batch uses kernel exports 173/174, first calibrating their
+BOOLEAN/physical-address interpretation against the known kernel image base
+and a fixed invalid address. All four current inherited scratch-table direct
+CPU-alias pages are reported unmapped. Its eight device reads preserve GP
+reset, AV phase, SG address and maximum; zero device stores, candidate-RAM loads,
+allocations, frees, DSP starts or audio output occur. No physical query follows
+an invalid-page result. The earlier failed SG write and RAM load are not retried.
+
+This rejects treating those current aliases as mapped RAM. It establishes
+neither the previous context's timeout cause nor SG ownership/encoding, GP boot
+or bit9 semantics. Future experiments need independently owned, verified
+mappings. The fixed payload and 13 authored x86/host controls are published at
+probe commit `5107573`; the combined hardware-free suite passes 105 tests with
+one separately retained optional DSP checker skipped in this invocation.
+See [the exact query and limits](https://github.com/mstan/xboxlle-probe/blob/5107573/docs/GP-MAPPING.md).
+Audio `.113`, bit9 `.114` and the **4/9** family count remain open.
+
 ## Remaining work, in order
 
 1. Preserve the now-connected original IRQ/PIC/ISR/unlink and DPC-queue route.
