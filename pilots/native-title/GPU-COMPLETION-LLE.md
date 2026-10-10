@@ -5,12 +5,14 @@ Family `beads-xbox.1.109`, after qualified filesystem `.108`. Burndown:
 transport now exist. The title selection still stops during device initialization;
 it is not yet a working renderer or a qualified title completion route.
 
-**Owner reprioritization, 2026-10-09:** real-console-dependent work now goes at
-the end of the shared burndown. Preserve this partial GPU floor and defer `.111`
-and its dependent startup/integration; continue independent scheduling `.112`,
-audio and available graphics work offline. The historical next-step entries
-below describe GPU dependencies, not a requirement to block those other services.
-No deferred question is waived or counted as qualified.
+**Owner reprioritization:** the earlier 2026-10-09 real-console deferral was
+superseded when the owner made the Xbox available and requested probing now,
+followed by completion of the entire LLE checklist. Read-only checks and benign
+volatile writes are authorized without repeated prompts; avoid dangerous work.
+The hardware observations below preserve this partial floor and open startup
+guard; they do not close dependent integration. Historical next-step entries
+describe GPU dependencies. Independent scheduling/audio/graphics work remains
+available; no unobserved behavior is waived or counted as qualified.
 
 ## Executed floor
 
