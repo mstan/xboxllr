@@ -1696,3 +1696,55 @@ function combiners, followed by original clear/target/texture composition and
 pixels. Production HLE raster bytecode, enabled noise, original startup/lifetime
 and hardware precision remain separate. **4/9** and the full goal stay active;
 the earlier Xbox screen inspection is still pending.
+
+## Complete-frame joint shader and state components - 2026-10-10
+
+All **4,331 original full-state draw replays** in swaps2033-2034 now return,
+consume their FIFO and execute without guards using the corrected CPU reference.
+The independent joint audit compares the same actual calls against captured
+inputs: **29,396 vertices, 852,468 vertex values and 470,947 delivered/setup
+words**, covering programmable/FVF and bound/UP submissions. This closes the
+sampled-profile gap for these components. Each draw still uses fresh preowned
+resources; original target binding, interdraw continuity and pixels remain open.
+
+`tools/native_frame_combiner_reference.py` derives fixed-function source routing,
+complement/alpha replication and SELECTARG1/SELECTARG2/MODULATE/ADD words from
+the [published Direct3D operations](https://learn.microsoft.com/en-us/windows/win32/direct3d9/d3dtextureop),
+[arguments](https://learn.microsoft.com/en-us/windows/win32/direct3d9/d3dta)
+and [NV register-combiner equations](https://registry.khronos.org/OpenGL/extensions/NV/NV_register_combiners.txt).
+Reviewed original helpers0x140070/0x140110 establish the consumed-argument
+missing-texture fallback and unused-slot clearing. Neither the maintained
+compiler/renderer nor observed packets supply an expected word. Unsupported
+operations, factor/TEMP inputs and transforms remain guarded. All36 sampled
+fixed-function profiles pass1,260 added words; the combined41-profile audit
+passes4,511 words and755 failure/independence controls.
+
+`tools/native_frame_shader_state_reference.py` prepares independent shader and
+state expectations before opening the actual observation. Full original FVF
+dirty state requests TEXCOORDINDEX0 on all four stages, so the sole TEX1 input
+is independently replicated to each requested output. Fog is disabled in the
+admitted FVF profile: its16 raw fog coordinates are explicitly unconsumed and
+their scalar values are not qualified. This explains the difference from the
+historical852,484-value bare vertex-component audit; the joint audit compares
+852,468 values. Enabled FVF fog and other unadmitted FVF profiles remain guarded.
+
+All115 focused authored Python tests pass, including eight new combiner tests
+and11 joint tests. The joint41-profile controls pass455 cases, rejecting changed
+live inputs with refreshed identities, missing/corrupt components, wrong builds,
+pending FIFO and guarded/nonreturned calls. Ignored native after-images and
+disabled FVF fog cannot supply expected values or cause a false rejection.
+
+Private evidence adds `fixed-function-first-audit.aot-private.json`,
+`state-profile-combined-delivery-qualified.aot-private.json`,
+`state-profile-combined-delivery-controls.aot-private.json`, `all-state-observed/`,
+`all-state-original.aot-private.json`, `all-shader-state-qualified.aot-private.json`
+and the joint profile/control reports under the complete-frame input directory.
+Use `tools/native_frame_shader_state_reference.py --captures <private-directory>
+--diagnostics <all-state-observations> --output <private-report>
+--library <reference-dll> --all-draws` for the retained complete-frame comparison.
+
+Next are original clears, target switches and linked texture producers, followed
+by complete-scene pixels. Production HLE raster bytecode, enabled noise,
+original startup/lifetime and hardware precision remain separate. This batch
+needed no rebuild, title, audio, host GPU or Xbox request and changes no shipping
+HLE code or capture defaults. **4/9** families and the full goal remain active.

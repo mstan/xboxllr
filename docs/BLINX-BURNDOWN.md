@@ -882,3 +882,17 @@ This adds scalar/sampler/custom-pixel components. Fixed-function combiner
 compilation, complete4,331-draw combined state admission, original clears/target
 continuity, pixels and startup/lifetime remain open. The entire goal remains
 active at **4/9**; Xbox access still awaits its existing screen inspection.
+
+The subsequent complete-frame joint audit passes all **4,331 actual original
+full-state draws /29,396 vertices**, comparing852,468 vertex values and470,947
+delivered/setup words from the same calls. Independent fixed-function combiner
+compilation closes the previous sampled-state gap; all115 authored Python tests,
+755 state controls and455 joint controls pass. Sixteen disabled FVF raw fog
+coordinates are explicitly unconsumed, explaining the comparison count's
+difference from the historical bare vertex audit.
+[Evidence and scope](../pilots/native-title/GRAPHICS-LLE.md#complete-frame-joint-shader-and-state-components---2026-10-10).
+Original clears/target switches, producer-linked texture composition and complete
+scene pixels are next. Production raster, enabled noise and original startup/
+lifetime remain open. This batch changes no shipping HLE code and requires no
+new rebuild/title/audio/host GPU/Xbox request. The full goal stays active at
+**4/9**; hardware remains paused at the existing inspection gate.

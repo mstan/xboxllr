@@ -17,6 +17,7 @@ def fixture(custom=False):
     texture=[]
     for stage in range(4):
         states=[0]*32;states[:9]=[1,1,1,2,2,2,0xbf99999a,0,1]
+        states[12:22]=[4 if stage==0 else 1,1,2,0,4,1,2,0,1,0]
         texture.extend(states)
     capture=dict(header=[0,2,6,0,4,0,1,0],render=render,texture=texture,
         viewport=[0,0,2,2,0,0x3f800000],outputs=None,sha256='authored',
@@ -80,6 +81,7 @@ class StateDelivery(unittest.TestCase):
         capture,scene,_=fixture();texture=scene['textures'][0]
         texture['resource'][3:]=[0x00011229,1|(1<<12)]
         texture['cpu']=bytes(128);scene['textures'][1]=copy.deepcopy(texture)
+        capture['texture'][32+12]=capture['texture'][32+16]=2
         methods,_,_=expected_delivery(capture,scene)
         self.assertEqual(methods[0x1b10],64<<16);self.assertEqual(methods[0x1b1c],0x20002)
         self.assertEqual(methods[0x1b40],0x3010000)

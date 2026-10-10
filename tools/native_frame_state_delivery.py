@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Independent scalar/sampler and custom-pixel state words for compact inputs.
+"""Independent scalar/sampler, fixed-function and custom-pixel state words.
 
 Expectations use API values and declared preowned fixture storage before any
-device observation is inspected. Fixed-function combiner compilation, original
-target binding/startup, vertex state and scene pixels remain separate gates.
+device observation is inspected. Original target binding/startup, vertex state
+and scene pixels remain separate gates.
 """
 import argparse
 import copy
@@ -18,6 +18,7 @@ from native_frame_inputs import Reader,audit as input_audit,require
 from native_frame_state_reference import Inputs,selected
 from native_scene_pixel_reference import binary32
 from native_vertex_fetch_reference import XBE_SHA
+from native_frame_combiner_reference import expected_fixed_function
 
 STATE_SOURCE='https://github.com/XboxDev/nxdk/blob/29638d0b001f179b73c3513489af10ddc2986216/lib/pbkit/nv_regs.h'
 DIRECT={0x300:60,0x304:59,0x30c:143,0x310:65,0x314:102,0x32c:144,
@@ -119,6 +120,7 @@ def expected_delivery(capture,scene):
         pixel[0x17f8]=0;pixel[0x1e74]=0
         require(all(((r[54]>>(stage*5))&31) in (0,1) for stage in range(4)) and
                 r[54]&~0xfffff==0,'Unmodelled custom texture program')
+    else:pixel=expected_fixed_function(capture,scene)
     return methods,fixture,pixel
 
 
@@ -126,12 +128,13 @@ def qualify(capture,scene,actual,library_sha=None):
     methods,fixture,pixel=expected_delivery(capture,scene)
     require(actual['vertex_capture_sha256']==capture['sha256'] and
             actual['scene_capture_sha256']==scene['sha256'],'Input provenance mismatch')
-    require(actual['input_only_capture'] and actual['input_sequence']==capture['input_sequence'] and
+    require(actual['input_only_capture'] is True and actual['input_sequence']==capture['input_sequence'] and
             type(actual['input_sequence']) is int,'Wrong input observation')
     require(actual['xbe_sha256']==XBE_SHA,'Another original XBE')
     if library_sha:require(actual['library_sha256']==library_sha,'Another LLE build')
-    require(actual['noise_disabled_fixture'] and actual['complete_draw_executed'] and actual['original_draw_returned'] and
-            not actual['pixel_targets_observed'],'Not a complete noise-disabled input-only replay')
+    require(actual['noise_disabled_fixture'] is True and actual['complete_draw_executed'] is True and
+            actual['original_draw_returned'] is True and actual['pixel_targets_observed'] is False,
+            'Not a complete noise-disabled input-only replay')
     require(type(actual['fifo_get']) is int and type(actual['fifo_put']) is int and
             actual['fifo_get']==actual['fifo_put'] and len(actual['vertices'])==capture['header'][4],
             'Incomplete original submission')
@@ -143,10 +146,13 @@ def qualify(capture,scene,actual,library_sha=None):
     expected={**methods,**fixture,**pixel};observed=actual['methods']
     failures=[[hex(m),observed.get(hex(m)),v] for m,v in expected.items()
               if type(observed.get(hex(m))) is not int or observed.get(hex(m))!=v]
+    custom=bool(scene['header'][8])
     return dict(input=capture['input_sequence'],api_words=len(methods),fixture_words=len(fixture),
-        custom_pixel_words=len(pixel),compared_words=len(expected),failure_count=len(failures),
+        custom_pixel_words=len(pixel) if custom else 0,fixed_function_words=0 if custom else len(pixel),
+        compared_words=len(expected),failure_count=len(failures),
         first_failures=failures[:12],state_word_components_qualified=not failures,
-        fixed_function_combiner_delivery_qualified=False,captured_input_to_full_state_qualified=False,
+        fixed_function_combiner_delivery_qualified=not custom and not failures,
+        custom_pixel_delivery_qualified=custom and not failures,captured_input_to_full_state_qualified=False,
         complete_scene_pixel_qualified=False,resource_lifetime_integration_qualified=False)
 
 
@@ -158,12 +164,19 @@ def controls(capture,scene,actual,library_sha):
     bound=next((i for i,t in enumerate(scene['textures']) if t),None)
     if bound is not None:names.extend(('changed-format','ignored-sampled-gpu-bytes'))
     if scene['header'][8]:names.append('changed-pixel-constant')
+    else:names.extend(('changed-fixed-color-arg','wrong-fixed-slot','wrong-inactive-slot',
+                       'ignored-unused-arg0','ignored-inactive-stage'))
     for name in names:
         cap,sc,obs=copy.deepcopy((capture,scene,actual))
         if name=='changed-render':cap['render'][57]^=1
         elif name=='changed-sampler':cap['texture'][6]=0
         elif name=='changed-format':sc['textures'][bound]['resource'][3]^=0x100
         elif name=='changed-pixel-constant':cap['render'][10]^=1
+        elif name=='changed-fixed-color-arg':cap['texture'][14]=0
+        elif name=='wrong-fixed-slot':obs['methods']['0xac0']^=1
+        elif name=='wrong-inactive-slot':obs['methods']['0xadc']=1
+        elif name=='ignored-unused-arg0':cap['texture'][13]=3
+        elif name=='ignored-inactive-stage':cap['texture'][3*32+12]=24
         elif name=='wrong-method':obs['methods']['0x354']^=1
         elif name=='missing-method':obs['methods'].pop('0x354')
         elif name=='bool-method':obs['methods']['0x354']=True
@@ -178,7 +191,8 @@ def controls(capture,scene,actual,library_sha):
         # cannot be the only reason a semantic rejection control succeeds.
         cap['sha256']=obs['vertex_capture_sha256']='refreshed-control'
         sc['sha256']=obs['scene_capture_sha256']='refreshed-control'
-        want=name in ('baseline','ignored-native-output','ignored-sampled-gpu-bytes')
+        want=name in ('baseline','ignored-native-output','ignored-sampled-gpu-bytes',
+                      'ignored-unused-arg0','ignored-inactive-stage')
         try:got=qualify(cap,sc,obs,library_sha)['state_word_components_qualified']
         except (ValueError,AssertionError):got=False
         rows.append(dict(input=cap['input_sequence'],control=name,expected_qualified=want,
