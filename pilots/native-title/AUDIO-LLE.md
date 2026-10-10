@@ -789,6 +789,26 @@ device conditions. No such takeover has run. See
 and [owned-memory design constraints](https://github.com/mstan/xboxlle-probe/blob/feat/av-handshake-probe-20261009/docs/GP-BIT9-PLAN.md).
 `.114` and the broader audio family remain open; **4/9** stays unchanged.
 
+## Owned GP bootstrap prerequisite - 2026-10-10
+
+The fixed probe implements a wholly owned 28KB SG/boot/guard allocation and an
+authored six-word GP program that writes X100 and stops. Nine focused offline
+tests pass, including real execution on the pinned MIT DSP CPU. No retail
+firmware, agent rebuild, audio/FE/setup enable, descriptor DMA or storage write
+is involved. Source and the stopped observation are published in probe commits
+`0f9a4ae` and `a509e700bdd592da48db9b896f396fde1dfee4c8`; see
+[GP-BOOT](https://github.com/mstan/xboxlle-probe/blob/a509e700bdd592da48db9b896f396fde1dfee4c8/docs/GP-BOOT.md).
+
+The first hardware attempt returned `DF000008`, immediately after its first
+SG-address store failed readback. It stopped before SG-maximum programming
+or GP start. The allocation remains retained and the current SG base is
+unknown. The return does not encode the requested address or actual readback;
+neither bootstrap behavior nor the mismatch cause is established. No retry,
+restoration payload or further hardware request followed. Human screen
+inspection is pending under probe AGENTS.md rule8. Once inspected, a distinct
+read-only context can characterize the stopped state; do not restart the write
+experiment automatically. GP bootstrap/bit9 and full audio remain open.
+
 ## Remaining work, in order
 
 1. Preserve the now-connected original IRQ/PIC/ISR/unlink and DPC-queue route.

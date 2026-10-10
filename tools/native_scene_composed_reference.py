@@ -21,12 +21,16 @@ from native_scene_pixel_reference import audit as pixel_audit,binary32
 
 STATE_SOURCE='https://github.com/XboxDev/nxdk/blob/master/lib/pbkit/nv_regs.h'
 COMBINER_SOURCE='https://registry.khronos.org/OpenGL/extensions/NV/NV_register_combiners.txt'
+PACKED_PROFILES={
+    'firstworld':[0,0,0xff000000,0x05000000]+[0]*12,
+    'frame-firstworld':[0,0xff000000,0,0x39000000]+[0]*12,
+}
 
 
 def number(word):return Fraction(struct.unpack('<f',struct.pack('<I',word))[0])
 
 
-def expected_state(capture,scene):
+def expected_state(capture,scene,packed_profile='firstworld'):
     """Closed API profile to methods, without any observed method input.
 
     Render indices follow the reviewed Blinx build (its noise slot is 159).
@@ -56,7 +60,7 @@ def expected_state(capture,scene):
         163:0,164:0,165:0}
     assert all(r[k]==v for k,v in required.items()),'Unsupported captured render profile'
     assert r[147] in (0x900,0x901) and r[159] in (0,1)
-    assert scene['packed']==[0,0,0xff000000,0x05000000]+[0]*12,'Unsupported packed cache profile'
+    assert scene['packed']==PACKED_PROFILES[packed_profile],'Unsupported packed cache profile'
     # All scalar methods below carry their native API numeric value unchanged.
     direct={0x300:60,0x304:59,0x30c:143,0x310:65,0x314:102,0x32c:144,
         0x330:79,0x334:80,0x338:81,0x33c:58,0x340:61,0x344:62,0x348:63,

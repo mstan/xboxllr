@@ -1329,3 +1329,66 @@ per-draw target dumps with bounded complete-frame input capture. The full frame
 and broader graphics family remain open; existing qualified sections and the
 **4/9** family count are retained. Shipping HLE rendering caches and uploads
 are unchanged.
+
+## Selected-frame shader and state census - 2026-10-10
+
+All **256 retained draws / 1,697 vertices / 49,213 output values** now pass
+the independent captured-input software shader/fetch gate. Expectations were
+generated before observations from stream bytes, declarations, constants and
+instruction words. The three nonindexed programs use already admitted finite
+opcodes: 214 draws with 69 instructions, two with 21 and 40 with 49. Native raw
+outputs remain diagnostics, never expectations or tolerance selection.
+
+`native_scene_reference.py --diagnostics --isolated-draws` executes the original
+load/select/stream/constant/draw functions without instruction hooks, using a
+fresh preowned driver/device fixture per draw. Actual queue completion, vertex
+count and executed/unguarded draw counters are required. The shared fixture
+stalled in the original constant setter after eight draws; allocator/ring
+rollover remains an integration gap. These positive isolated draws do not
+qualify resource lifetime or sequential targets.
+
+`native_scene_shader_controls.py` passes **39 controls** across one draw from
+each program: three baselines, 33 deliberate shape/provenance/observation/live
+stream/constant/program/unsupported-opcode failures, and three corrupted-native
+raw-output independence controls. Live input hashes are refreshed, so the
+mathematical failures cannot rely on stale provenance.
+
+The 256 inputs group into **eight state profiles**, with121, 38, 34, 31, 24, 4, 2, 2
+draws. All have one MODULATE DXT1 stage, triangle fans, RGB/depth writes,
+disabled blending/alpha test, enabled zero-density fog and captured noise 1.
+Their packed driver cache differs from the previous closed firstworld section;
+texture dimensions and programs also differ. Grouping establishes additional
+input scope, not texture samples or pixels. One representative of each profile
+now passes **616 independently derived state words** and complete shader
+output through the original setters and maintained reference. The two exact
+initial cache patterns are named in `PACKED_PROFILES`; unknown patterns still
+fail. The existing firstworld pixel gate keeps its original cache requirement.
+`native_scene_state_reference.py` separates shader/state admission from pixel
+qualification. Its **30 controls** across the three programs pass: three
+baselines, 24 deliberate state/method/cache/provenance-context failures, and
+three ignored native-after-image controls. No state expectation comes from
+observed packets. The
+3,533 uncaptured draw inputs and the frame's clears/target transitions remain
+open alongside original enabled-noise and exact silicon questions.
+
+The broader inputs also reach diffuse RGB above the previous closed pixel
+range: the 69-instruction program reaches 1.1443374156951904, the 21-instruction
+program produces 1, and the 49-instruction program reaches 0.5267830491065979.
+Specular remains zero. Existing pixel guards stay in place; wider interpolation,
+clamping and decoder-error contracts need independent equations and controls.
+
+Private evidence: `build/blinx/frame-256-shader-{expectations,isolated-original,independent,controls}.aot-private.json`,
+actual observations in `frame-256-shader-isolated-observed/`, and
+`frame-256-state-profile-census.aot-private.json`. CPU work stays Idle on one
+logical processor. No GPU/title/audio run, rebuild or shipping HLE change was
+needed. Graphics remains partial; family count remains **4/9**.
+
+The representative setter evidence is in
+`frame-eight-state-{original,qualified,controls}.aot-private.json` and actual
+observations in `frame-eight-state-observed/`. Replay the captured input
+directory with `native_scene_draw_reference.py --draws 1 2 40 44 71 73 75 111
+--noise-disabled-fixture --diagnostics <private-directory>` using the existing
+original XBE/binding/reference-library arguments. Then run
+`native_scene_state_reference.py --draws 1 2 40 44 71 73 75 111 --packed-profile
+frame-firstworld`, supplying that capture and observation directory. Controls
+use `--draws 1 71 73 --controls` with the same profile and observations.

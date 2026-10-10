@@ -90,7 +90,7 @@ def read_scene(path):
         sha256=hashlib.sha256(blob).hexdigest())
 
 
-def run(args):
+def run_captures(args,captures):
     ref=Reference(args);rows=[]
     observe=ref.lib.xlle_nv2a_reference_vertices
     observe.restype=ctypes.c_uint32
@@ -98,7 +98,14 @@ def run(args):
     observe_fog=ref.lib.xlle_nv2a_reference_fog
     observe_fog.restype=ctypes.c_uint32
     observe_fog.argtypes=[ctypes.c_void_p,ctypes.POINTER(ctypes.c_float),ctypes.c_uint32]
-    captures=[(path,read_capture(path)) for path in sorted(args.captures.glob('draw-*.bin'),key=lambda p:int(p.stem.split('-')[1]))]
+    read=ref.lib.xlle_nv2a_reference_read
+    read.restype=ctypes.c_uint32
+    read.argtypes=[ctypes.c_void_p,ctypes.c_uint32,ctypes.c_int]
+    draw_count=ref.lib.xlle_nv2a_reference_draw_count
+    draw_count.restype=ctypes.c_uint64
+    draw_count.argtypes=[ctypes.c_void_p,ctypes.c_uint32]
+    diagnostics=getattr(args,'diagnostics',None)
+    library_sha256=hashlib.sha256(args.library.read_bytes()).hexdigest()
     addresses=[];cursor=STREAMS
     for stream in range(16):
         addresses.append(cursor)
@@ -124,6 +131,7 @@ def run(args):
             data=OBJECT+0x3000;ref.cpu.mem_write(data,capture['constants'])
             ref.call('D3DDevice_SetVertexShaderConstantNotInline',[192*4],
                 ((UC_X86_REG_ECX,0),(UC_X86_REG_EDX,data)))
+            before_counts=[draw_count(ref.gpu,i) for i in range(26)]
             _,methods=ref.draw(h[3],h[2],h[4])
             ref.check()
             count=observe(ref.gpu,None,0);assert count==h[4],(path,count,h[4])
@@ -131,6 +139,22 @@ def run(args):
             assert observe(ref.gpu,actual,count)==count;ref.check()
             fog_values=(ctypes.c_float*count)()
             assert observe_fog(ref.gpu,fog_values,count)==count;ref.check()
+            # Save actual observations independently of captured native outputs.
+            # The shader oracle derives expectations from the supplied inputs.
+            get=read(ref.gpu,0xfd800044,4);put=ref.get(ref.device)[0]
+            ref.check();assert get==put,(path,'Unconsumed original draw',get,put)
+            counts=[draw_count(ref.gpu,i)-before_counts[i] for i in range(26)]
+            assert counts[1] and not any(counts[3:]),(path,'Guarded or missing draw',counts)
+            if diagnostics:
+                diagnostics.mkdir(parents=True,exist_ok=True)
+                observation=dict(vertex_capture_sha256=capture['sha256'],
+                    library_sha256=library_sha256,xbe_sha256=XBE_SHA,
+                    vertices=[list(actual[i*28:(i+1)*28]) for i in range(count)],
+                    fog=list(fog_values),complete_draw_executed=True,
+                    draw_counters=counts,
+                    fixture='Preowned streams/program/pushbuffer and supplied viewport; shader/fetch only',
+                    complete_scene_pixel_qualified=False)
+                (diagnostics/f'{path.stem}.aot-private.json').write_text(json.dumps(observation,indent=2)+'\n')
             masks=written_masks(capture['code']);compared=0;maximum=0
             for vertex in range(count):
                 for group,reg in enumerate((0,3,4,9,10,11,12)):
@@ -167,13 +191,35 @@ def run(args):
     finally:ref.close()
     assert rows
     return dict(xbe_sha256=XBE_SHA,captures=str(args.captures),draws=rows,
+        library_sha256=library_sha256,
         scope='retained written shader/declaration/stream composition through original submission; raw vertex capture alone does not qualify complete pixels')
+
+
+def run(args):
+    captures=[(path,read_capture(path)) for path in sorted(args.captures.glob('draw-*.bin'),key=lambda p:int(p.stem.split('-')[1]))]
+    assert captures
+    if not getattr(args,'isolated_draws',False):return run_captures(args,captures)
+    # A fresh preowned driver/device lifetime per draw avoids assuming the
+    # original allocator/ring rollover path, which this fixture does not own.
+    # Every original setter/load/select/draw still executes without hooks.
+    rows=[]
+    for index,capture in enumerate(captures,1):
+        result=run_captures(args,[capture]);rows.extend(result['draws'])
+        if index%64==0:print(f'Original isolated shader draws: {index}',flush=True)
+    result['draws']=rows
+    result['isolated_draw_fixtures']=True
+    result['resource_lifetime_integration_qualified']=False
+    return result
 
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     for name in ('xbe','binding','library','dependencies','output','captures'):
         parser.add_argument('--'+name,type=Path,required=True)
+    parser.add_argument('--diagnostics',type=Path,
+        help='Save actual shader/fetch observations for the independent input oracle; does not qualify scene pixels')
+    parser.add_argument('--isolated-draws',action='store_true',
+        help='Use a fresh preowned driver/device fixture per draw; does not qualify allocator/ring rollover or target continuity')
     args=parser.parse_args()
     dependency_handles=[os.add_dll_directory(str(args.dependencies.resolve()))]
     result=run(args)
