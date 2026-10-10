@@ -348,6 +348,83 @@ static void texture_mips() {
     }
 }
 
+static void texture_packed_formats() {
+    // Authored 4x4 blocks and literal palettes exercise every packed nibble,
+    // all DXT alpha selectors, both alpha endpoint orders and equal endpoints.
+    // The expected pixels never come from the maintained texture decoder.
+    constexpr uint32_t texture=0x40000;
+    const uint32_t packed[]={0x81e810f3,0x45acd4b7,0x63c2f2dd,0x2786b691,
+                             0x0960987b,0xcd245c3f,0xeb4a7a55,0xaf0e3e19};
+    const uint32_t packed_pixels[]={
+        0x1100ff33,0x8811ee88,0xff22dddd,0x6633cc22,
+        0xdd44bb77,0x4455aacc,0xbb669911,0x22778866,
+        0x998877bb,0x00996600,0x77aa5555,0xeebb44aa,
+        0x55cc33ff,0xccdd2244,0x33ee1199,0xaaff00ee};
+    const uint32_t rgb[][4]={{0xff0000,0x00ff00,0xaa5500,0x55aa00},
+                              {0x00ff00,0xff0000,0x55aa00,0xaa5500}};
+    const unsigned color_index[]={0,1,2,3,2,3,0,1,0,1,2,3,2,3,0,1};
+    const unsigned alpha_index[]={0,1,2,3,2,3,4,5,4,5,6,7,6,7,0,1};
+    const unsigned alpha[][8]={{231,14,200,169,138,107,76,45},
+                               {14,231,57,101,144,188,0,255},
+                               {128,128,128,128,128,128,0,255}};
+    for(bool direct:{false,true})for(bool compiled:{false,true}) {
+        for(unsigned profile=0;profile<5;++profile) {
+            Fixture f(direct);f.gpu->set_vsh_compile_enabled(compiled);
+            f.emit(0x184,2);f.emit(0x188,2);
+            const uint32_t code[]={0,0x0020001b,0x08000000,0x0000f800,
+                                  0,0x0020021b,0x08000000,0x0000f849};
+            f.emit(0x1e94,2);f.emit(0x1e9c,0);f.emit(0x1ea0,0);
+            for(unsigned i=0;i<8;++i)f.emit(0xb00+i*4,code[i]);
+            f.emit(0x1724,Fixture::colors);f.emit(0x1764,0x1042);f.emit(0x176c,0);
+            f.emit(0x1e70,1);f.emit(0xac0,0x08200000);f.emit(0x260,0x18200000);
+            f.emit(0x28c,0x1c00);f.emit(0x1b00,texture);
+            const unsigned format=profile==0?4:profile==1?0xe:0xf;
+            f.emit(0x1b04,0x02210029|(format<<8));f.emit(0x1b08,0x00030303);
+            f.emit(0x1b0c,0x4003ffc0);f.emit(0x1b14,0x01012000);
+            // A previous linear binding may leave valid rectangle/pitch state.
+            // Explicit normalized formats must ignore it for layout selection.
+            f.emit(0x1b10,16u<<16);f.emit(0x1b1c,0x00040004);
+            if(profile==0)for(unsigned i=0;i<8;++i)f.put(texture+i*4,packed[i]);
+            else {
+                f.put(texture,profile==1?0x76543210:profile==2?0xa6880ee7:
+                              profile==3?0xa688e70e:0xa6888080);
+                f.put(texture+4,profile==1?0xfedcba98:0x23efacb1);
+                f.put(texture+8,profile>=3?0xf80007e0:0x07e0f800);
+                f.put(texture+12,0x4ee44ee4);
+            }
+            for(unsigned sample=0;sample<16;++sample) {
+                for(unsigned i=1;i<4;++i) {
+                    f.put(Fixture::colors+i*16,bits((float(sample%4)+.5f)/4));
+                    f.put(Fixture::colors+i*16+4,bits((float(sample/4)+.5f)/4));
+                    f.put(Fixture::colors+i*16+8,0);f.put(Fixture::colors+i*16+12,bits(1));
+                }
+                f.draw(0);++cases;CHECK(f.fault.empty());
+                const uint32_t want=profile==0?packed_pixels[sample]:
+                    rgb[profile>=3][color_index[sample]] |
+                    ((profile==1?sample*17:alpha[profile-2][alpha_index[sample]])<<24);
+                const uint32_t actual=f.get(Fixture::frame+(16*64+16)*4);
+                if(actual!=want)std::printf("texture profile=%u texel=%u pixel=%08x expected=%08x\n",
+                                           profile,sample,actual,want);
+                CHECK(actual==want);
+                CHECK(f.get(Fixture::report+12)==0 && f.gpu->generic_combiner_writes()>0);
+                CHECK(f.get(Fixture::frame)==0xff102030);
+            }
+        }
+        for(unsigned invalid=0;invalid<3;++invalid) {
+            Fixture f(direct);f.gpu->set_vsh_compile_enabled(compiled);
+            const unsigned format=invalid==0?4:0xf;
+            f.emit(0x184,2);f.emit(0x1b00,texture);
+            f.emit(0x1b04,(invalid==2?0x02200029:0x0221002d)|(format<<8));
+            f.emit(0x1b08,0x30303);f.emit(0x1b0c,0x4003ffc0);f.emit(0x1b14,0x01012000);
+            f.emit(0x1b10,16u<<16);f.emit(0x1b1c,0x00040004);
+            f.emit(0x1e70,invalid==2?1:3);f.emit(0xac0,0x08200000);f.emit(0x260,0x18200000);f.emit(0x28c,0x1c00);
+            f.draw(0);++cases;CHECK(!f.fault.empty() && !f.gpu->generic_combiner_writes());
+            CHECK(f.get(Fixture::report+12)==0xffffffff);
+            for(unsigned i=0;i<4096;++i)CHECK(f.get(Fixture::frame+i*4)==0xff102030);
+        }
+    }
+}
+
 static void output_defaults() {
     // All masks retain unwritten (0,0,0,1) lanes. Position W is deliberately
     // omitted while its input is 7; each invocation must start from W=1.
@@ -383,6 +460,7 @@ int main() {
     noise_control_boundary();
     programmable_fog();
     texture_mips();
+    texture_packed_formats();
     output_defaults();
     std::printf("nv2a_vertex_colors: %u draw cases, %u failures\n", cases, failures);
     return failures ? 1 : 0;

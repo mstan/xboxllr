@@ -744,7 +744,7 @@ copy is introduced, and scratch allocation failure stops explicitly. Linear or
 renderable XRGB is outside this correction's qualified scope.
 
 Permanent C++ coverage adds 32 projected mip/bias/clamp draws across direct and
-callback memory, compiled and interpreted shaders, and both DXT1 mode settings:
+callback memory, compiled and interpreted shaders, and ARGB8/DXT1 textures:
 **522 vertex-color draws / zero failures**. Focused native graphics checks pass
 **6/6**. Retained native affine/default-Q references pass, as do 196 fog cases
 with 294 draws / 331,632 interior pixels. The audio suite is not repeated. Private evidence uses `build/blinx/projected-texture-*`, including
@@ -797,7 +797,105 @@ shader/state semantics and timing bounds still require independent measured
 evidence. Automated graphics regressions use output mute; listening checks are
 owner initiated.
 
+The owner reviewed the retained sheet and reported: "Nothing observably looks
+wrong at a glance." Record this as a visual sanity pass for the observed scenes;
+the independent pixel and timing gates remain open. Reuse this observation for
+documentation and LLE-only changes without repeating the title or listening run.
+
+## Packed/compressed normalized 2D formats: LLE and host-precision bounds
+
+The retained title resource census includes 21 A4R4G4B4 (`04`), 157 DXT3 (`0e`)
+and 75 DXT5 (`0f`) textures. DXT5 is not L8; these format identities come from
+the original Xbox D3D declarations and the pinned
+[nxdk DXT format procedure](https://github.com/abaire/nxdk_pgraph_tests/blob/706a41e61188d3b08e5b1bb2a32b74ad062a883d/src/tests/texture_format_dxt_tests.cpp).
+The new authored `tools/native_texture_formats.py` builds packed Morton texels,
+compressed blocks and independent mathematical images. Expectations do not use
+the maintained decoder. Block alpha/color equations follow the public
+[S3TC specification](https://registry.khronos.org/OpenGL/extensions/EXT/EXT_texture_compression_s3tc.txt)
+and [Microsoft block-compression documentation](https://learn.microsoft.com/en-us/windows/win32/direct3d10/d3d10-graphics-programming-guide-resources-block-compression).
+This establishes a finite software contract, without new Xbox silicon evidence.
+
+Before the decoder changes, the original-XDK/LLE fixture stops at its first
+ARGB4444 draw because the format is unsupported. After adding two-byte swizzled
+nibble expansion and DXT5 alpha interpolation, the new corpus passes **972
+cases / 1,944 original-XDK draws / 1,673,784 interior pixels**, within one channel
+step. Complete repeated frames agree exactly. The corpus covers 8x8, 8x16 and
+16x8 chains, compressed tails below 4x4, both alpha endpoint orders, ascending
+and descending color endpoints, positive variable W/Q, basic MIN/MAG/MIP
+combinations, bias, clamps and mixed repeat/edge/border addressing. DXT3/5
+always use four color entries; DXT5 separately selects its eight-entry alpha
+palette. Resources remain preowned and original callees execute without hooks.
+
+Private retained evidence is `build/blinx/texture-formats-lle.aot-private.json`,
+`texture-formats-native.aot-private.bin`, `texture-formats-lle.log` and
+`formats-before-lle.log`. The native fixture now accepts a version-2 record
+with direct format and separate width/height, while preserving legacy version-1
+inputs. These first artifacts retain the strict two-step native comparison:
+ARGB4444 passes all 324 cases, but 570 DXT3/DXT5 cases exceed that bound, with
+maximum channel error six. Do not report this strict comparison as a pass.
+
+Subsequent review fixes layout selection: normalized ARGB4444 and mip-owned
+DXT5 must ignore stale linear rectangle/pitch state. Newly admitted packed/DXT5
+cubemaps and DXT5 without an owned normalized mip layout stop explicitly.
+Legacy linear DXT1/DXT3 behavior is retained. The latest serial rebuild and
+permanent suite pass **854 cases / zero failures**. Coverage adds 320 texel draws across callback
+and direct memory, interpreted and compiled shaders, all packed channel nibbles,
+all DXT5 alpha selectors, equal alpha endpoints and both color endpoint orders;
+12 rejection cases check the new layout bounds. Core NV2A, tile-command,
+vertex-triangle and generic-scratch regressions also pass **4/4**.
+
+The latest DLL rerun passes the same 972 format cases within one channel step.
+Another **192 isolated texel cases / 384 original draws / 330,624 interior
+pixels** pass LLE within one step. Point sampling at texel centers with a tiny
+positive footprint isolates decoding from spatial/mip filtering. The native
+strict comparison still fails 68 of these cases, with maximum error five.
+This reproduces palette differences without a projected-footprint ambiguity.
+
+The [Direct3D 11.3 specification, section 19.5.2](https://microsoft.github.io/DirectX-Specs/d3d/archive/D3D11_3_FunctionalSpec.htm#19.5.2%20Error%20Tolerance)
+independently allows BC2/3 decoder error dependent on each channel's endpoint
+span. A separate, explicit `--native-bc-precision` comparison propagates those
+texel bounds through the authored positive filter/mip weights, then adds the
+retained two-step sampling budget. Zero/one values, authored exact endpoints,
+explicit DXT3 alpha and uncompressed texels add no decoder allowance; border
+samples add none either. It does not change the LLE one-step bound or the
+retained native gates. Version-3 binary records retain ideal RGBA expectations
+and add independent per-pixel/channel limits; they do not use observed maxima
+as limits. This is a host-API precision comparison, not an Xbox decoder golden.
+
+The real native GPU passes **972 format cases / 1,944 draws / 1,673,784 pixels**
+and **192 texel cases / 384 draws / 330,624 pixels** against those intervals,
+with maximum errors six and five respectively. Complete repeated frames agree
+exactly. Retained native affine cases pass their original one-step bound,
+default-Q pixels stay exact, and projected cases pass their original two-step
+bound; latest LLE also passes all three references. Private latest evidence uses
+`texture-formats-layout-*`, `texture-formats-retained-*`,
+`texture-formats-host-precision-*`, `texture-codec-host-precision-*` and
+`texture-codec-strict-*`. Reproduce with the texture command above plus
+`--formats-only --native-bc-precision` or `--codec-only --native-bc-precision`,
+then give the emitted binary to `pilot_shader_test --texture-reference`.
+Omitting the precision flag retains the strict native comparison and its
+recorded failure for interpolated compressed palettes.
+
+Owner resource constraints remain in force: CPU work runs at Idle priority on
+one logical processor; small GPU fixtures run only with Marvel Rivals absent
+and stop our own fixture if it starts. No title or audio rerun occurs here.
+No native HLE production code changed in this batch; reuse the muted 340s title
+check and owner review unless a new HLE change warrants another regression.
+Native compressed storage, decoding, sampling and existing caches remain in
+use; no CPU decode/upload expansion is added to title execution. Exact NV2A
+DXT color/alpha precision joins the hardware-last queue. Full scene composition
+still needs its independent pixel gate. Graphics remains partial, with
+**4/9 service families qualified**.
+
 ## Remaining offline work
+
+The latest 32-capture original scene-state audit now advances past the old RDI
+transport failure and stops at `NV2A DXT1 noise pixel behavior remains
+unqualified`. Evidence is `scene-firstworld-formats-followup.aot-private.json`.
+No complete draw or scene pixel is qualified by that result. Keep enabled-noise
+silicon questions last; a separately declared noise-disabled scene fixture can
+exercise the remaining captured raster/combiner contracts offline without
+claiming the original enabled-noise scenes as qualified.
 
 Continue broader exercised texture/state layouts and raster outcomes toward
 complete scene composition, retaining the bounded projected-footprint gates.

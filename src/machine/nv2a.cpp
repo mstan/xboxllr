@@ -11152,10 +11152,10 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             static_cast<uint8_t>((b5 << 3) | (b5 >> 2)),
         }};
     };
-    auto decode_dxt23_argb = [&](const std::vector<uint8_t>& compressed,
+    auto decode_dxt_alpha_argb = [&](const std::vector<uint8_t>& compressed,
                                  uint32_t width, uint32_t height,
                                  uint32_t compressed_pitch,
-                                 std::vector<uint8_t>& argb) {
+                                 std::vector<uint8_t>& argb, bool interpolated_alpha) {
         if (!width || !height) return false;
         const uint32_t block_cols = (width + 3u) / 4u;
         const uint32_t block_rows = (height + 3u) / 4u;
@@ -11175,6 +11175,20 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                 uint64_t alpha_bits = 0;
                 for (uint32_t byte = 0; byte < 8; ++byte)
                     alpha_bits |= static_cast<uint64_t>(block[byte]) << (byte * 8);
+                std::array<uint8_t, 8> alphas{};
+                if (interpolated_alpha) {
+                    alphas[0] = block[0]; alphas[1] = block[1];
+                    if (alphas[0] > alphas[1]) {
+                        for (uint32_t i = 1; i <= 6; ++i)
+                            alphas[i + 1] = static_cast<uint8_t>(
+                                ((7u - i) * alphas[0] + i * alphas[1] + 3u) / 7u);
+                    } else {
+                        for (uint32_t i = 1; i <= 4; ++i)
+                            alphas[i + 1] = static_cast<uint8_t>(
+                                ((5u - i) * alphas[0] + i * alphas[1] + 2u) / 5u);
+                        alphas[6] = 0; alphas[7] = 255;
+                    }
+                }
                 const uint16_t c0 =
                     static_cast<uint16_t>(block[8] | (block[9] << 8));
                 const uint16_t c1 =
@@ -11200,10 +11214,9 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                         const uint32_t x = bx * 4u + px;
                         if (x >= width) continue;
                         const uint32_t texel = py * 4u + px;
-                        const uint8_t alpha4 =
-                            static_cast<uint8_t>((alpha_bits >> (texel * 4u)) & 0xFu);
-                        const uint8_t alpha8 =
-                            static_cast<uint8_t>((alpha4 << 4) | alpha4);
+                        const uint8_t alpha8 = interpolated_alpha
+                            ? alphas[(alpha_bits >> (16u + texel * 3u)) & 7u]
+                            : static_cast<uint8_t>(((alpha_bits >> (texel * 4u)) & 15u) * 17u);
                         const uint32_t color_index =
                             (color_bits >> (texel * 2u)) & 0x3u;
                         const auto& rgb = colors[color_index];
@@ -11340,8 +11353,12 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
         bool handled_linear_project2d = false;
         const uint32_t stage_format = raster_state[kRasterTextureFormat0 + stage];
         const uint32_t stage_color = (stage_format >> 8) & 255u;
-        const bool normalized_format = stage_color == 6 || stage_color == 7 ||
-            stage_color == 0x19 || ((stage_color == 0xc || stage_color == 0xe) &&
+        if (stage_mode == 3 && (stage_color == 4 || stage_color == 0xf)) {
+            fault_("NV2A packed/DXT45 cubemap sampling is outside the finite 2D reference");
+            return false;
+        }
+        const bool normalized_format = stage_color == 4 || stage_color == 6 || stage_color == 7 ||
+            stage_color == 0x19 || ((stage_color == 0xc || stage_color == 0xe || stage_color == 0xf) &&
                                   ((stage_format >> 16) & 15u));
         if (single_stage_project2d && !normalized_format) {
             const uint32_t format = raster_state[kRasterTextureFormat0 + stage];
@@ -11350,6 +11367,10 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             const bool dxt1_argb8 = color_code == 0x0Cu;
             const bool dxt23_argb8 = color_code == 0x0Eu;
             const bool compressed_argb8 = dxt1_argb8 || dxt23_argb8;
+            if (color_code == 0x0Fu) {
+                fault_("NV2A DXT45 without an owned normalized mip layout is outside the finite reference");
+                return false;
+            }
             const bool packed_yuv = color_code == 0x24 || color_code == 0x25;
             if(packed_yuv && (!(raster_state[kRasterControl0] & (1u<<28)))) {
                 fault_("NV2A packed YUV sampling without conversion is outside the bounded reference");
@@ -11500,8 +11521,8 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                         const bool decoded = dxt1_argb8
                             ? decode_dxt1_argb(source, ts.width, ts.height,
                                                ts.pitch, ts.data)
-                            : decode_dxt23_argb(source, ts.width, ts.height,
-                                                ts.pitch, ts.data);
+                            : decode_dxt_alpha_argb(source, ts.width, ts.height,
+                                                ts.pitch, ts.data, false);
                         if (!decoded) {
                             record_generic_skip_detail(
                                 GenericSkipReason::kUnsupportedTextureFormat, format);
@@ -11547,16 +11568,19 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             // the pinned profiles' own textures; 0x19 is NV097_SET_TEXTURE_FORMAT_
             // COLOR_SZ_A8 (production-witnessed: T1-T3 of the menu scene's PROJECT2D
             // texture chain, format word 0x0881192a) -- a swizzled, 1-byte-per-texel,
-            // alpha-only format (see sample_swizzled's alpha8 branch above). Anything
-            // DXT1/DXT23 mips use tightly packed block rows, including a complete
+            // alpha-only format (see sample_swizzled's alpha8 branch above).
+            // Color code 4 stores swizzled A4R4G4B4 nibbles.
+            // DXT1/DXT23/DXT45 mips use tightly packed block rows, including a complete
             // block for dimensions below four. Other SZ_*/LU_* codes stay bounded.
             const bool alpha8 = color_code == 0x19;
+            const bool rgba4 = color_code == 4;
             const bool dxt1 = color_code == 0xc;
             const bool dxt23 = color_code == 0xe;
-            const bool compressed = dxt1 || dxt23;
+            const bool dxt45 = color_code == 0xf;
+            const bool compressed = dxt1 || dxt23 || dxt45;
             const uint32_t dma_selector = format & 3u;
             if ((dma_selector != 1u && dma_selector != 2u) ||
-                (color_code != 6 && color_code != 7 && !alpha8 && !compressed)) {
+                (color_code != 6 && color_code != 7 && !alpha8 && !rgba4 && !compressed)) {
                 record_generic_skip_detail(GenericSkipReason::kUnsupportedTextureFormat,
                                            format);
                 return true;
@@ -11579,7 +11603,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             }
             ts.width = 1u << ((format >> 20) & 0xFu);
             ts.height = 1u << ((format >> 24) & 0xFu);
-            const uint32_t bytes_per_texel = alpha8 ? 1u : 4u;
+            const uint32_t bytes_per_texel = alpha8 ? 1u : rgba4 ? 2u : 4u;
             const uint32_t levels = std::max(1u, (format >> 16) & 15u);
             if (levels > 1u + std::max((format >> 20) & 15u, (format >> 24) & 15u) ||
                 ((format >> 28) & 15u) || (stage_mode == 3 && levels > 1)) {
@@ -11655,12 +11679,29 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                                                ts.data.begin() + mip.offset + length), rgba;
                     if (!(dxt1 ? decode_dxt1_argb(source, mip.width, mip.height,
                                                   compressed_pitch, rgba)
-                               : decode_dxt23_argb(source, mip.width, mip.height,
-                                                   compressed_pitch, rgba))) {
+                               : decode_dxt_alpha_argb(source, mip.width, mip.height,
+                                                   compressed_pitch, rgba, dxt45))) {
                         fault_("NV2A generic texture mip decode failed");return false;
                     }
                     mip.offset = decoded.size();
                     decoded.insert(decoded.end(), rgba.begin(), rgba.end());
+                }
+                ts.data = std::move(decoded);
+            }
+            if (rgba4) {
+                std::vector<uint8_t> decoded;
+                for (auto& mip : ts.mips) {
+                    const size_t begin = mip.offset;
+                    mip.offset = decoded.size();
+                    // Preserve Morton order while expanding each stored nibble.
+                    for (size_t pixel = 0; pixel < static_cast<size_t>(mip.width) * mip.height; ++pixel) {
+                        const uint8_t lo = ts.data[begin + pixel * 2];
+                        const uint8_t hi = ts.data[begin + pixel * 2 + 1];
+                        decoded.push_back(static_cast<uint8_t>((lo & 15u) * 17u));
+                        decoded.push_back(static_cast<uint8_t>((lo >> 4) * 17u));
+                        decoded.push_back(static_cast<uint8_t>((hi & 15u) * 17u));
+                        decoded.push_back(static_cast<uint8_t>((hi >> 4) * 17u));
+                    }
                 }
                 ts.data = std::move(decoded);
             }
@@ -11679,7 +11720,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             const uint32_t filter = raster_state[kRasterTextureFilter0 + stage];
             const uint32_t control = raster_state[kRasterTextureControl0_0 + stage];
             ts.accurate_sampling = !ts.cubemap &&
-                (filter != 0 || levels > 1 || compressed);
+                (filter != 0 || levels > 1 || compressed || rgba4);
             if (ts.accurate_sampling) {
                 ts.min_filter = (filter >> 16) & 255u;
                 ts.mag_filter = (filter >> 24) & 15u;
@@ -11703,11 +11744,11 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                 }
                 // Existing host executors consume only a base bilinear image.
                 // Admit their proven case; keep all new sampling effects here.
-                accurate_texture_sampling |= (levels > 1 && ts.min_filter >= 3) || compressed ||
+                accurate_texture_sampling |= (levels > 1 && ts.min_filter >= 3) || compressed || rgba4 ||
                     ts.min_filter != 2 || ts.mag_filter != 2 ||
                     ts.lod_bias != 0 || ts.min_lod != 0;
                 if (ts.min_filter <= 2 && !compressed)
-                    ts.data.resize(static_cast<size_t>(ts.width) * ts.height * bytes_per_texel);
+                    ts.data.resize(static_cast<size_t>(ts.width) * ts.height * (alpha8 ? 1u : 4u));
             }
         } else {
             record_generic_skip_detail(

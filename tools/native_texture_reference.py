@@ -14,6 +14,7 @@ from pathlib import Path
 import struct
 
 from native_vertex_fetch_reference import Reference, OBJECT, STREAMS, FRAME, XBE_SHA
+import native_texture_formats
 
 
 def bits(value):
@@ -53,14 +54,16 @@ def image_chain(dxt,pattern,base=8):
 
 
 def sample_level(image,u,v,linear,address_u,address_v,border):
-    size,pixels=image
+    if len(image)==2:
+        width,pixels=image;height=width
+    else:width,height,pixels=image
     def texel(x,y):
-        if (address_u==4 and not 0<=x<size) or (address_v==4 and not 0<=y<size):return border
-        x=x%size if address_u==1 else max(0,min(size-1,x))
-        y=y%size if address_v==1 else max(0,min(size-1,y))
-        return pixels[y*size+x]
-    if not linear:return texel(math.floor(u*size),math.floor(v*size))
-    x=u*size-.5;y=v*size-.5;ix=math.floor(x);iy=math.floor(y);fx=x-ix;fy=y-iy
+        if (address_u==4 and not 0<=x<width) or (address_v==4 and not 0<=y<height):return border
+        x=x%width if address_u==1 else max(0,min(width-1,x))
+        y=y%height if address_v==1 else max(0,min(height-1,y))
+        return pixels[y*width+x]
+    if not linear:return texel(math.floor(u*width),math.floor(v*height))
+    x=u*width-.5;y=v*height-.5;ix=math.floor(x);iy=math.floor(y);fx=x-ix;fy=y-iy
     return [sum(texel(ix+dx,iy+dy)[c]*(fx if dx else 1-fx)*(fy if dy else 1-fy)
                 for dy in (0,1) for dx in (0,1)) for c in range(4)]
 
@@ -71,18 +74,19 @@ def projected_field(row,x,y):
     r=[q/w for q,w in zip(row['q'],row['w'])]
     dx=x-8;dy=y-8;hx=(r[1]-r[0])/48;hy=(r[2]-r[0])/48
     denominator=r[0]+hx*dx+hy*dy
-    scale=row['rho']/row.get('base',8)
+    width=row.get('base',8);height=row.get('height',width)
+    scale=row['rho']/width;scale_v=row['rho']/height
     u=row['origin'][0]+scale*r[1]*dx/denominator
-    v=row['origin'][1]+scale*r[2]*dy/denominator
+    v=row['origin'][1]+scale_v*r[2]*dy/denominator
     ux=scale*r[1]*(denominator-dx*hx)/denominator**2
     uy=-scale*r[1]*dx*hy/denominator**2
-    vx=-scale*r[2]*dy*hx/denominator**2
-    vy=scale*r[2]*(denominator-dy*hy)/denominator**2
-    rho=row.get('base',8)*max(math.hypot(ux,vx),math.hypot(uy,vy))
+    vx=-scale_v*r[2]*dy*hx/denominator**2
+    vy=scale_v*r[2]*(denominator-dy*hy)/denominator**2
+    rho=max(math.hypot(ux*width,vx*height),math.hypot(uy*width,vy*height))
     return u,v,rho
 
 
-def expected_pixels(row,images):
+def expected_pixels(row,images,decoder_budgets=False):
     result=[]
     for y in range(10,54):
         for x in range(10,54):
@@ -98,8 +102,10 @@ def expected_pixels(row,images):
             if lod<=0 or row['mip']==0:levels=[(0,1)]
             elif row['mip']==1:levels=[(min(last,math.floor(lod+.5)),1)]
             else:levels=[(math.floor(lod),1-(lod%1)),(min(last,math.floor(lod)+1),lod%1)]
-            colors=[(sample_level(images[l],u,v,linear,row['u'],row['v'],(18,52,86,127)),weight) for l,weight in levels]
-            result.append((y*64+x,[round(sum(color[c]*weight for color,weight in colors)) for c in range(4)]))
+            border=(0,0,0,0) if decoder_budgets else (18,52,86,127)
+            colors=[(sample_level(images[l],u,v,linear,row['u'],row['v'],border),weight) for l,weight in levels]
+            values=[sum(color[c]*weight for color,weight in colors) for c in range(4)]
+            result.append((y*64+x,[2+math.ceil(v) for v in values] if decoder_budgets else [round(v) for v in values]))
     return result
 
 
@@ -163,20 +169,22 @@ def run(args):
         state[0]=0x18200000;state[34]=0x08200000;state[26]=state[45]=0xc00;state[53]=1
         state[8]=0xc;state[9]=0x1c00;state[54]=1
         ref.put(pixel,1,1,pixel+12,*state);ref.call('D3DDevice_SetPixelShader',[pixel])
-        samples=list(projected_cases() if args.projected_only else cases())
+        samples=list(native_texture_formats.codec_cases() if args.codec_only else
+                     native_texture_formats.cases() if args.formats_only else
+                     projected_cases() if args.projected_only else cases())
         if args.implicit_q:
             # A small sampling corpus tests observable default Q/W. Poisoned
             # input W/Q must be ignored; coordinates/expectations stay authored.
             samples=[row for row in samples if row.get('w',[1,1,1])==[1,1,1]
                 and row.get('q',[1,1,1])==[1,1,1]][::32]
         for row in samples:
-            base=row.get('base',8);log=base.bit_length()-1
-            images,encoded=image_chain(row['dxt'],row['pattern'],base)
+            base=row.get('base',8);height=row.get('height',base);log=base.bit_length()-1
+            images,encoded=case_images(row)
             if row.get('xrgb'):
                 encoded=bytearray(encoded);encoded[3::4]=bytes([23])*(len(encoded)//4);encoded=bytes(encoded)
             data=0x3000000;ref.cpu.mem_write(data,encoded)
-            color=0xc if row['dxt'] else 7 if row.get('xrgb') else 6
-            header=OBJECT+0x2000;fmt=(log<<24)|(log<<20)|((log+1)<<16)|0x29|(color<<8)
+            color=row.get('format',0xc if row['dxt'] else 7 if row.get('xrgb') else 6)
+            header=OBJECT+0x2000;fmt=((height.bit_length()-1)<<24)|(log<<20)|(len(images)<<16)|0x29|(color<<8)
             ref.put(header,0x010c0001,data,0,fmt,0)
             ref.call('D3DDevice_SetTexture',[0,header])
             for stage_state,value in ((0,row['u']),(1,row['v']),(2,1),(3,row['mag']),(4,row['min']),
@@ -186,7 +194,7 @@ def run(args):
                 w=row.get('w',[1,1,1])[i-1];q=row.get('q',[1,1,1])[i-1]
                 ref.floats(STREAMS+i*32,x,y,10,31 if args.implicit_q else w,
                     (row['origin'][0]+(x-8)*row['rho']/base)*q,
-                    (row['origin'][1]+(y-8)*row['rho']/base)*q,0,31 if args.implicit_q else q)
+                    (row['origin'][1]+(y-8)*row['rho']/height)*q,0,31 if args.implicit_q else q)
             before=count(ref.gpu,1)
             try:_,methods=ref.draw(1,state_dirty=None)
             except AssertionError:
@@ -213,7 +221,13 @@ def run(args):
         ref.set_stream(0,0,0)
     finally:ref.close()
     return dict(xbe_sha256=XBE_SHA,cases=rows,original_draws=2*len(rows),interior_pixels=compared,
-        reference_mode='projected' if args.projected_only else 'implicit-q' if args.implicit_q else 'affine')
+        reference_mode='codec' if args.codec_only else 'formats' if args.formats_only else 'projected' if args.projected_only else 'implicit-q' if args.implicit_q else 'affine')
+
+
+def case_images(row):
+    if 'format' in row:
+        return native_texture_formats.image_chain(row['format'],row['base'],row['height'])
+    return image_chain(row['dxt'],row['pattern'],row.get('base',8))
 
 
 if __name__=='__main__':
@@ -224,24 +238,39 @@ if __name__=='__main__':
     modes=parser.add_mutually_exclusive_group()
     modes.add_argument('--implicit-q',action='store_true')
     modes.add_argument('--projected-only',action='store_true')
+    modes.add_argument('--formats-only',action='store_true')
+    modes.add_argument('--codec-only',action='store_true')
+    parser.add_argument('--native-bc-precision',action='store_true',help='Separate host-API BC2/3 decode intervals; does not change the LLE pixel bound')
     args=parser.parse_args();handles=[os.add_dll_directory(str(args.dependencies.resolve()))]
+    format_mode=args.formats_only or args.codec_only
+    if args.native_bc_precision and not format_mode:parser.error('--native-bc-precision requires --formats-only or --codec-only')
     result=run(args);args.output.write_text(json.dumps(result,indent=2)+'\n')
     if args.native_cases:
         with args.native_cases.open('wb') as file:
-            file.write(struct.pack('<4I',0x54584c58,1,len(result['cases']),
-                1 if args.implicit_q else 2 if args.projected_only else 0))
+            file.write(struct.pack('<4I',0x54584c58,3 if args.native_bc_precision else 2 if format_mode else 1,len(result['cases']),
+                1 if args.implicit_q else 2 if args.projected_only or format_mode else 0))
             for row in result['cases']:
-                base=row.get('base',8);images,encoded=image_chain(row['dxt'],row['pattern'],base)
+                base=row.get('base',8);images,encoded=case_images(row)
                 if row.get('xrgb'):
                     encoded=bytearray(encoded);encoded[3::4]=bytes([23])*(len(encoded)//4);encoded=bytes(encoded)
                 expected=expected_pixels(row,images)
-                file.write(struct.pack('<10I',2 if row.get('xrgb') else row['dxt'],row['mag'],row['min'],row['mip'],row['maxlevel'],row['u'],row['v'],len(expected),base,len(images)))
+                if args.native_bc_precision:
+                    budgets=native_texture_formats.precision_chain(row['format'],base,row['height'])
+                    limits=expected_pixels(row,budgets,decoder_budgets=True)
+                meta=[row.get('format',2 if row.get('xrgb') else row['dxt']),row['mag'],row['min'],row['mip'],row['maxlevel'],row['u'],row['v'],len(expected),base,len(images)]
+                if format_mode:meta.append(row['height'])
+                file.write(struct.pack('<'+'I'*len(meta),*meta))
                 file.write(struct.pack('<4f',row['rho'],row['bias'],*row['origin']))
                 file.write(struct.pack('<6f',*row.get('w',[1,1,1]),*row.get('q',[1,1,1])))
                 cursor=0
-                for level,(size,image) in enumerate(images):
-                    length=((size+3)//4)**2*8 if row['dxt'] else size*size*4
+                for level,image in enumerate(images):
+                    size=image[0]
+                    length=native_texture_formats.mip_bytes(row['format'],image[0],image[1]) if format_mode else ((size+3)//4)**2*8 if row['dxt'] else size*size*4
                     data=encoded[cursor:cursor+length];cursor+=length
                     file.write(struct.pack('<I',len(data)));file.write(data)
-                for index,rgba in expected:file.write(struct.pack('<I4B',index,*rgba))
+                for pixel,(index,rgba) in enumerate(expected):
+                    file.write(struct.pack('<I4B',index,*rgba))
+                    if args.native_bc_precision:
+                        assert limits[pixel][0]==index
+                        file.write(struct.pack('<4B',*limits[pixel][1]))
     print(f"PASS: {len(result['cases'])} independent texture cases / {result['interior_pixels']} interior pixels")

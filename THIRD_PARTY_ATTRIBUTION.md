@@ -1561,6 +1561,23 @@ dirty-upload scratch are authored here; no nxdk implementation body is copied.
 The original format/shadow and existing cache remain owned by this adapter.
 Existing Phobos/private donor license limits remain unchanged.
 
+The packed/compressed-texture follow-up consults the public
+[S3TC specification](https://registry.khronos.org/OpenGL/extensions/EXT/EXT_texture_compression_s3tc.txt),
+[Microsoft block-compression documentation](https://learn.microsoft.com/en-us/windows/win32/direct3d10/d3d10-graphics-programming-guide-resources-block-compression),
+and the MIT
+[nxdk DXT format procedure](https://github.com/abaire/nxdk_pgraph_tests/blob/706a41e61188d3b08e5b1bb2a32b74ad062a883d/src/tests/texture_format_dxt_tests.cpp)
+at the existing `706a41e61188d3b08e5b1bb2a32b74ad062a883d` pin. The authored
+ARGB4444/DXT3/DXT5 block generator, rational pixel expectations, C++ literal
+palette tests and maintained LLE decoding changes incorporate no external
+implementation body or specification prose. Original Xbox format declarations
+remain a private reference; public format/block descriptions do not establish
+an Xbox silicon precision golden. The separate, authored per-channel native
+decoder interval comparison also consults
+[Direct3D 11.3 section 19.5.2](https://microsoft.github.io/DirectX-Specs/d3d/archive/D3D11_3_FunctionalSpec.htm#19.5.2%20Error%20Tolerance).
+It retains ideal expectations and tight legacy gates, without incorporating
+external implementation bodies or prose. Host decode variation is not new
+Xbox hardware evidence. Existing donor license limits remain.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

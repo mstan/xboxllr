@@ -53,6 +53,18 @@ input transitions, demo/pause, title return, reentry, continued demo movement
 and subsequent movie playback, without STOP/FAULT. A preceding 250s check
 missed a short startup pulse and is retained without claiming replay success;
 the corrective fixture shifts the two one-second pulses to 45s and 140s.
+The owner reports no observable defect at a glance in the retained scene sheet;
+this is a visual sanity pass, with measured scene-pixel/timing gates still open.
+Packed ARGB4444 and DXT3/DXT5 rectangular mip coverage additionally passes 972
+original-XDK/LLE cases / 1,944 draws / 1,673,784 interior pixels; 192 isolated
+texel cases pass another 330,624 pixels. Latest permanent LLE coverage passes
+854 cases, including layout selection and rejection guards. Native format and
+texel cases pass independently derived host BC decoder/filter intervals;
+compressed palettes fail the separate strict two-step comparison. Retained
+native affine/default-Q/projected bounds pass unchanged. Exact Xbox compressed
+decoder precision stays hardware-last. CPU work uses Idle priority and one
+logical processor; GPU fixtures run only with Marvel Rivals absent. No title
+or audio rerun occurs, and this batch changes no native HLE production code.
 Overall qualification
 remains 4/9; see [graphics evidence and remaining scope](GRAPHICS-LLE.md).
 
