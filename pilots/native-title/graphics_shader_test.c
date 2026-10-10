@@ -11,6 +11,7 @@
 #define CHECK(c) do {if(!(c)){fprintf(stderr,"FAIL shader line %d: %s\n",__LINE__,#c);return 1;}}while(0)
 #define SAMPLES 8
 #define STRIDE 512
+#include "graphics_clip_depth_test.inc"
 static int check_program(const uint32_t *code,unsigned count,const struct PilotVertexElement elements[16],const char *name)
 {
     uint32_t handle=0;
@@ -277,6 +278,7 @@ int main(int argc,char **argv)
 {
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
     uint32_t pp[17]={64,64,6,1,0x11,1,0,0,1,0x2a,0,0,1};CHECK(pilot_gfx_create(pp)==0);
+    if(argc==2 && !strcmp(argv[1],"--clip-depth-reference"))return check_clip_depth_reference();
     if(argc==4 && !strcmp(argv[1],"--scene-reference-observe")) {
         CHECK(observe_scene_reference(argv[2],argv[3])==0);return 0;
     }

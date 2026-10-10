@@ -18,14 +18,17 @@ from native_scene_host_precision import qualify
 from native_scene_host_pixels import audit as pixel_audit
 
 
-def prepare(captures,numbers,path,chain=False):
+def prepare(captures,numbers,path,chain=False,profile='first-world'):
+    admit=expected_state
+    if profile=='alpha-overlay':
+        from native_scene_alpha_reference import expected_state as admit
     rows=[]
     with path.open('wb') as file:
         def put(values):file.write(struct.pack('<'+'I'*len(values),*values))
         put([0x534e4c58,2,len(numbers),3,int(chain)])  # three independent device lifetimes
         for sample,n in enumerate(numbers):
             c=read_capture(captures/f'draw-{n}.bin');s=read_scene(captures/f'scene-{n}.bin')
-            expected_state(c,s)  # admit the independently specified closed profile
+            admit(c,s)  # admit the independently specified closed profile
             h=c['header'];width,height,fmt=s['before'][0]['shape']
             put([n,h[2],h[3],h[4],h[5],width,height,fmt,s['before'][1]['shape'][2],s['header'][9]])
             put(c['viewport']);put(c['render']);put(c['texture'])
@@ -41,7 +44,7 @@ def prepare(captures,numbers,path,chain=False):
                 for mip in texture['mips']:put([len(mip['data'])]);file.write(mip['data'])
             rows.append(dict(draw=n,vertex_capture_sha256=c['sha256'],scene_capture_sha256=s['sha256'],
                 captured_noise_value=c['render'][159],fixture_noise_value=0,vertices=h[4]))
-    return dict(draws=rows,retained_targets=chain,replay_input_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+    return dict(draws=rows,retained_targets=chain,profile=profile,replay_input_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
         scope='Captured inputs and supplied initial targets only; no native raw vertex or after-image expectation; noise disabled explicitly')
 
 
@@ -94,8 +97,10 @@ if __name__=='__main__':
     mode.add_argument('--observations',type=Path)
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--retain-targets',action='store_true',help='Initialize targets once, then qualify the actual retained draw sequence')
+    parser.add_argument('--profile',choices=('first-world','alpha-overlay'),default='first-world',help='Closed independently admitted input profile; alpha observations use their separate oracle')
     args=parser.parse_args()
-    result=audit(args.captures,args.draws,args.observations,args.retain_targets) if args.observations else prepare(args.captures,args.draws,args.native_input,args.retain_targets)
+    assert not args.observations or args.profile=='first-world','Alpha observations require the separate alpha oracle'
+    result=audit(args.captures,args.draws,args.observations,args.retain_targets) if args.observations else prepare(args.captures,args.draws,args.native_input,args.retain_targets,args.profile)
     args.output.write_text(json.dumps(result,indent=2)+'\n')
     if args.observations:
         passed=sum(r['native_noise_off_draw_qualified'] for r in result['draws'])

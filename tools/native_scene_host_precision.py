@@ -146,8 +146,8 @@ def expectations(capture,raster=False):
                 for lane in range(3)]+[pos[3]]
             raw[3]=[clamp(v,0,1) for v in raw[3]]
             raw[4]=[clamp(v,0,1) for v in raw[4]]
-            # The admitted captured state is EXP fog with zero density.
-            assert capture['render'][92]==1 and capture['render'][93]==1 and capture['render'][97]==0
+            # Disabled fog, or the admitted EXP fog with zero density, is one.
+            assert capture['render'][92]==0 or (capture['render'][92]==1 and capture['render'][93]==1 and capture['render'][97]==0)
             raw[5][0]=Interval(1)
         result.append(raw)
     return result

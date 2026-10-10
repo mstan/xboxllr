@@ -321,6 +321,8 @@ if(PILOT_D3D_SOURCE)
   target_link_libraries(pilot_shader_test PRIVATE pilot_d3d_backend)
   add_test(NAME pilot_shader_gpu_reference COMMAND pilot_shader_test)
   set_tests_properties(pilot_shader_gpu_reference PROPERTIES TIMEOUT 30)
+  add_test(NAME pilot_shader_clip_depth_reference COMMAND pilot_shader_test --clip-depth-reference)
+  set_tests_properties(pilot_shader_clip_depth_reference PROPERTIES TIMEOUT 30)
   add_test(NAME pilot_shader_failures COMMAND "${CMAKE_COMMAND}"
     "-DPROGRAM=$<TARGET_FILE:pilot_shader_test>" -P "${CMAKE_CURRENT_SOURCE_DIR}/graphics_shader_failures.cmake")
   set_tests_properties(pilot_shader_failures PROPERTIES TIMEOUT 30)

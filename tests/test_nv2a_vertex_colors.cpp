@@ -80,12 +80,12 @@ struct Fixture {
     void write(uint32_t r, uint32_t v) { gpu->mmio_write(xlle::Nv2a::kBase+r, 4, v); }
     void emit(uint32_t m, uint32_t v) { put(0x1000+cursor, 0x40000|m); put(0x1004+cursor, v); cursor+=8; }
     void kick() { write(0x800040, cursor); }
-    void clear() {
-        emit(0x1d90, 0xff102030); emit(0x1d98, 63u<<16); emit(0x1d9c, 63u<<16);
+    void clear(uint32_t color=0xff102030) {
+        emit(0x1d90, color); emit(0x1d98, 63u<<16); emit(0x1d9c, 63u<<16);
         emit(0x1d94, 0xf0);
     }
-    void draw(unsigned route, uint32_t packed=0) {
-        clear(); emit(0x17c8, 1); emit(0x17cc, 1);
+    void draw(unsigned route, uint32_t packed=0, uint32_t clear_color=0xff102030) {
+        clear(clear_color); emit(0x17c8, 1); emit(0x17cc, 1);
         put(report+12, 0xffffffff); emit(0x17fc, 5);
         if (route==0) emit(0x1810, 1 | (2u<<24)); // DRAW_ARRAYS, first=1
         else if (route==1) { emit(0x1800, 0x00020001); emit(0x1808, 3); }
@@ -455,6 +455,68 @@ static void output_defaults() {
     }
 }
 
+static void homogeneous_clip_depth() {
+    // Authored window-space depth plane Z=100+8*(u-8), with varying W.
+    // Reflect/transpose it across all four viewport sides. Interior samples
+    // have integer ideal Z, so one step covers binary32 interpolation/floor.
+    // Direct interpolation of divided Z with the homogeneous edge parameter
+    // breaks this plane by hundreds of depth steps.
+    for(bool direct:{false,true})for(bool compiled:{false,true})
+    for(unsigned side=0;side<4;++side) {
+        Fixture f(direct);f.gpu->set_vsh_compile_enabled(compiled);
+        const float input[][4]={{8,8,100,1},{88,8,740,4},{8,56,100,2}};
+        for(unsigned i=0;i<3;++i) {
+            const float u=input[i][0],v=input[i][1];
+            const float x=side==0?u:side==1?64-u:v;
+            const float y=side<2?v:side==2?u:64-u;
+            const float position[]={x,y,input[i][2],input[i][3]};
+            for(unsigned lane=0;lane<4;++lane)f.put(Fixture::positions+(i+1)*16+lane*4,bits(position[lane]));
+        }
+        const uint32_t code[]={0,0x0020001b,0x08000000,0x0000f800,
+            0,0x0020001b|(96u<<13),0x0c000000,0x0000f819};
+        f.emit(0x1e94,2);f.emit(0x1e9c,0);f.emit(0x1ea0,0);
+        for(unsigned i=0;i<8;++i)f.emit(0xb00+i*4,code[i]);
+        f.emit(0x1ea4,96);for(unsigned i=0;i<4;++i)f.emit(0xb80+i*4,bits(1));
+        f.emit(0x176c,0);f.emit(0x30c,1);f.emit(0x35c,1);
+        for(unsigned i=0;i<4096;++i)f.put(0x18000+i*4,0xffffff5a);
+        f.draw(0);++cases;CHECK(f.fault.empty());unsigned compared=0;
+        for(unsigned v=12;v<28;++v)for(unsigned u=12;u<60;++u) {
+            if((u+.5-8)/80+(v+.5-8)/48>=.9)continue;
+            const unsigned x=side==0?u:side==1?63-u:v;
+            const unsigned y=side<2?v:side==2?u:63-u;
+            const uint32_t word=f.get(0x18000+(y*64+x)*4),want=100+8*u+4-64;
+            CHECK(std::abs(int(word>>8)-int(want))<=1);
+            CHECK((word&255)==0x5a && f.get(Fixture::frame+(y*64+x)*4)==0xffffffff);
+            ++compared;
+        }
+        CHECK(compared==713 && f.get(Fixture::report+12)==0);
+    }
+}
+
+static void alpha_volume_blend() {
+    // Independent byte-domain ONE/ONE results: .025*255=6.375, nearest
+    // output adds/subtracts six, with saturation and exact masked RGB.
+    for(bool direct:{false,true})for(bool compiled:{false,true})
+    for(uint32_t equation:{0x8006u,0x800bu})
+    for(unsigned alpha:{0u,1u,5u,6u,7u,127u,248u,255u}) {
+        Fixture f(direct);f.gpu->set_vsh_compile_enabled(compiled);
+        const uint32_t code[]={0,0x0020001b,0x08000000,0x0000f800,
+            0,0x0020001b|(96u<<13),0x0c000000,0x0000f819};
+        f.emit(0x1e94,2);f.emit(0x1e9c,0);f.emit(0x1ea0,0);
+        for(unsigned i=0;i<8;++i)f.emit(0xb00+i*4,code[i]);
+        f.emit(0x1ea4,96);f.emit(0xb80,bits(.8f));f.emit(0xb84,bits(.3f));
+        f.emit(0xb88,bits(.5f));f.emit(0xb8c,bits(.025f));
+        f.emit(0x176c,0);f.emit(0x304,1);f.emit(0x344,1);f.emit(0x348,1);
+        f.emit(0x350,equation);f.emit(0x358,0x1000000);f.emit(0x35c,0);
+        const uint32_t before=(alpha<<24)|0x102030;
+        f.draw(0,0,before);++cases;CHECK(f.fault.empty());
+        const unsigned expected=equation==0x8006?std::min(255u,alpha+6):unsigned(std::max(0,int(alpha)-6));
+        CHECK(f.get(Fixture::frame+(16*64+16)*4)==((expected<<24)|0x102030));
+        CHECK(f.get(Fixture::frame)==before && f.get(Fixture::report+12)==0);
+        CHECK(f.gpu->generic_combiner_writes()>0);
+    }
+}
+
 int main() {
     packed_formats(); surface_reuse(); immediate_control();
     noise_control_boundary();
@@ -462,6 +524,8 @@ int main() {
     texture_mips();
     texture_packed_formats();
     output_defaults();
+    homogeneous_clip_depth();
+    alpha_volume_blend();
     std::printf("nv2a_vertex_colors: %u draw cases, %u failures\n", cases, failures);
     return failures ? 1 : 0;
 }

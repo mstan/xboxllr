@@ -115,6 +115,19 @@ families are qualified.** HLE draw/cache/upload performance remains unchanged;
 focused GPU tests replace repeated title/audio runs. See
 [the native and sequential scene evidence](../pilots/native-title/GRAPHICS-LLE.md#independent-native-scenes-and-retained-target-sequence-2026-10-09-continuation).
 
+2026-10-09 alpha-volume continuation: another **32/32 retained draws** pass
+independent original-XDK/LLE and observed-host native checks, including the
+uninterrupted add/reverse-subtract sequence and three native device lifetimes.
+Each sequence checks all 9,830,400 pixels. Two LLE defects are fixed: homogeneous
+clipping depth and missing reverse subtraction. The independent clipped-depth
+reproducer changes from 713 failures to zero; 934 permanent LLE cases, four
+core regressions, the native depth fixture and 47 new corruption/independence
+controls pass. Native near-depth portability questions stay explicit; every
+observed pixel still must match its independent prediction exactly. HLE runtime
+performance paths are unchanged. Full-frame/title composition and hardware
+questions remain open; graphics is partial and the family count stays 4/9.
+See [the alpha-volume evidence](../pilots/native-title/GRAPHICS-LLE.md#alpha-volume-composition-and-homogeneous-clip-depth-2026-10-09-continuation).
+
 GPU startup's unresolved FD6806A0 transaction now has a prepared, bounded
 hardware observation in `.111` (probe branch `feat/av-handshake-probe-20261009`,
 commit `a22bb74`). All 17 offline checks and the XBE build pass; hardware

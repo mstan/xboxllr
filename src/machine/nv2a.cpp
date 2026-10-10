@@ -10891,7 +10891,8 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
     // hold anything and must not gate a skip. When enabled, support the witnessed
     // SRC_ALPHA/ONE_MINUS_SRC_ALPHA/ADD combo plus the trivially adjacent factors
     // (ZERO/ONE/SRC_ALPHA/ONE_MINUS_SRC_ALPHA) needed to express "disabled via factors"
-    // and simple additive/replace blends.
+    // and simple additive/replace blends. The witnessed alpha-volume back-face
+    // pass uses REVERSE_SUBTRACT with ONE/ONE; retain that equation as well.
     const bool blend_enabled = !logic_copy && (enables & (1u << 1)) != 0;
     const uint32_t blend_src = raster_state[kRasterBlendSrc];
     const uint32_t blend_dst = raster_state[kRasterBlendDst];
@@ -10900,7 +10901,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
         return factor == 0 || factor == 1 || factor == 0x0302 || factor == 0x0303;
     };
     if (blend_enabled) {
-        if (blend_eq != 0x8006) {
+        if (blend_eq != 0x8006 && blend_eq != 0x800b) {
             record_generic_skip_detail(GenericSkipReason::kUnsupportedBlendEquation,
                                        blend_eq);
             return true;
@@ -13013,6 +13014,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                                 Nv2aGenericCombinerVertex vertex;
                                 float clip_x = 0.0f;
                                 float clip_y = 0.0f;
+                                float clip_z = 0.0f;
                                 float clip_w = 0.0f;
                             };
                             auto make_clip_vertex =
@@ -13020,6 +13022,9 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                                     ClipVertex out{};
                                     out.vertex = vertex;
                                     out.clip_w = vertex.position[3];
+                                    // Window depth must be made homogeneous
+                                    // before interpolation by the clip parameter.
+                                    out.clip_z = vertex.position[2] * out.clip_w;
                                     out.clip_x =
                                         (2.0f * vertex.position[0] / surface_w -
                                          1.0f) *
@@ -13036,12 +13041,8 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                                 ClipVertex out{};
                                 out.clip_x = v0.clip_x + (v1.clip_x - v0.clip_x) * t;
                                 out.clip_y = v0.clip_y + (v1.clip_y - v0.clip_y) * t;
+                                out.clip_z = v0.clip_z + (v1.clip_z - v0.clip_z) * t;
                                 out.clip_w = v0.clip_w + (v1.clip_w - v0.clip_w) * t;
-                                out.vertex.position[2] =
-                                    v0.vertex.position[2] +
-                                    (v1.vertex.position[2] -
-                                     v0.vertex.position[2]) *
-                                        t;
                                 out.vertex.position[3] = out.clip_w;
                                 for (size_t component = 0; component < 4; ++component) {
                                     out.vertex.diffuse[component] =
@@ -13125,6 +13126,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                             clipped.reserve(clip_polygon.size());
                             for (ClipVertex& vertex : clip_polygon) {
                                 if (vertex.clip_w <= 0.0f) return false;
+                                vertex.vertex.position[2] = vertex.clip_z / vertex.clip_w;
                                 vertex.vertex.position[0] =
                                     (vertex.clip_x / vertex.clip_w + 1.0f) *
                                     surface_w * 0.5f;
@@ -13906,7 +13908,9 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
 #if XLLE_VSH_DRAW_OVERLAP_CENSUS
     bool gpu_shader_collect_nonfinite = false;
 #endif
-    if (!accurate_texture_sampling && !needs_fog && !logic_enabled && !flat_shading && !zpass_enabled_ && gpu_generic_shader_ && renderer_ && effective_clip_valid) {
+    // Generated shader packets carry factors but no blend equation. Only ADD
+    // can enter that executor; reverse subtraction stays on the faithful floor.
+    if ((!blend_enabled || blend_eq == 0x8006) && !accurate_texture_sampling && !needs_fog && !logic_enabled && !flat_shading && !zpass_enabled_ && gpu_generic_shader_ && renderer_ && effective_clip_valid) {
         ++generic_shader_attempts_;
         GenericShaderDeclineReason decline = GenericShaderDeclineReason::kNone;
         auto& st = gpu_shader_packet.state;
@@ -14666,12 +14670,17 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             TransformedVertex vertex;
             float clip_x = 0.0f;
             float clip_y = 0.0f;
+            float clip_z = 0.0f;
             float clip_w = 0.0f;
         };
         auto make_clip_vertex = [&](const TransformedVertex& vertex) {
             ClipVertex out{};
             out.vertex = vertex;
             out.clip_w = vertex.position[3];
+            // XYZ is already in window space. Reconstruct homogeneous Z
+            // before interpolating along a homogeneous clipping edge; using
+            // its edge parameter directly on divided Z changes the depth plane.
+            out.clip_z = vertex.position[2] * out.clip_w;
             out.clip_x = (2.0f * vertex.position[0] / surface_w - 1.0f) *
                          out.clip_w;
             out.clip_y = (2.0f * vertex.position[1] / surface_h - 1.0f) *
@@ -14686,10 +14695,8 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                 (v1.vertex.fog_factor - v0.vertex.fog_factor) * t;
             out.clip_x = v0.clip_x + (v1.clip_x - v0.clip_x) * t;
             out.clip_y = v0.clip_y + (v1.clip_y - v0.clip_y) * t;
+            out.clip_z = v0.clip_z + (v1.clip_z - v0.clip_z) * t;
             out.clip_w = v0.clip_w + (v1.clip_w - v0.clip_w) * t;
-            out.vertex.position[2] =
-                v0.vertex.position[2] +
-                (v1.vertex.position[2] - v0.vertex.position[2]) * t;
             out.vertex.position[3] = out.clip_w;
             for (size_t component = 0; component < 4; ++component) {
                 out.vertex.diffuse[component] =
@@ -14767,6 +14774,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             clipped.reserve(clip_polygon.size());
             for (ClipVertex& vertex : clip_polygon) {
                 if (vertex.clip_w <= 0.0f) return;
+                vertex.vertex.position[2] = vertex.clip_z / vertex.clip_w;
                 vertex.vertex.position[0] =
                     (vertex.clip_x / vertex.clip_w + 1.0f) * surface_w * 0.5f;
                 vertex.vertex.position[1] =
@@ -15493,12 +15501,16 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                     };
                     const float src_weight = blend_weight(blend_src);
                     const float dst_weight = blend_weight(blend_dst);
+                    const auto blend_component = [&](float source, float destination) {
+                        const float value = blend_eq == 0x800b
+                            ? destination * dst_weight - source * src_weight
+                            : source * src_weight + destination * dst_weight;
+                        return std::clamp(value, 0.0f, 1.0f);
+                    };
                     for (size_t c3 = 0; c3 < 3; ++c3) {
-                        out_rgb[c3] = std::clamp(
-                            out_rgb[c3] * src_weight + dst[c3] * dst_weight, 0.0f, 1.0f);
+                        out_rgb[c3] = blend_component(out_rgb[c3], dst[c3]);
                     }
-                    out_alpha = std::clamp(
-                        src_alpha * src_weight + dst[3] * dst_weight, 0.0f, 1.0f);
+                    out_alpha = blend_component(src_alpha, dst[3]);
                 }
                 auto pack_unorm8 = [](float value) {
                     return static_cast<uint32_t>(

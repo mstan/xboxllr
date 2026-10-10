@@ -99,14 +99,17 @@ def software_depth(weights, area, z, arithmetic):
     # graph must be declared from compiler/disassembly evidence. The retained
     # -march=native DLL rounds the B product then fuses A and C multiply/adds;
     # a build without contraction has the separate left-associated graph.
-    assert all(w.denominator==1 and abs(w)<2**24 for w in weights)
-    products=[w*int(v) for w,v in zip(weights,z)]
+    assert all(w.denominator==1 for w in weights)
+    # Conversion from int64 edges/area to binary32 is independently rounded
+    # before interpolation. Earlier small-grid fixtures are exactly representable;
+    # long off-viewport triangles also exercise the explicit conversion.
+    products=[binary32(w)*Fraction(v) for w,v in zip(weights,z)]
     if arithmetic=='fma-b-first':
         total=binary32(products[2]+binary32(products[0]+binary32(products[1])))
     else:
         rounded=[binary32(p) for p in products]
         total=binary32(binary32(rounded[0]+rounded[1])+rounded[2])
-    return math.floor(binary32(total*binary32(Fraction(1,area))))
+    return math.floor(binary32(total*binary32(1/binary32(area))))
 
 
 def sample(images, u, v, lod):

@@ -1182,3 +1182,89 @@ existing scene-reference checks; audit shared expectations before accepting
 agreement. Console-dependent startup and disputed hardware timing stay at the
 back of the burndown. LLE performance is not an acceptance gate; preserve HLE
 shortcuts wherever they meet the observable contract.
+
+### Alpha-volume composition and homogeneous clip depth (2026-10-09 continuation)
+
+The final-attract retained corpus supplies another complete 32-draw section:
+2,520 vertices, an 11-instruction shader, uniform opaque white ARGB8 mips,
+constant diffuse alpha .025, flat shading, LESS without depth writes and an
+alpha-only write mask. Paired front/back draws use ONE/ONE addition and reverse
+subtraction respectively. This differs from the first-world BC1 strip profile;
+neither corpus represents a complete newly rendered frame.
+
+Two maintained LLE gaps surfaced. Both homogeneous viewport clippers directly
+interpolated already divided window Z using a homogeneous edge parameter,
+changing its depth plane when W varied. They now reconstruct/interpolate Z*W
+and divide by the clipped W. The software blend floor also rejected reverse
+subtraction; it now executes destination*destinationFactor-source*sourceFactor
+with saturation. Generated packets lacking a blend equation remain restricted
+to ADD. Native HLE already supports the equation and needs no runtime change.
+
+The authored independent triangle has Z=100+8*(x-8), varying W and a vertex
+beyond the right viewport edge. All 713 interior pixels failed before the fix;
+all pass afterward through original XDK submission. The permanent LLE fixture
+reflects/transposes it across four clip sides, with direct/callback DMA and
+interpreter/compiled shaders: 16 draws and 11,408 interior samples. Native checks
+713 samples in each of three fresh lifetimes. Depth is within one integer step;
+RGB/stencil are exact. Another 64 permanent draws check alpha add/subtract,
+saturation and masked RGB. The vertex-color suite now has 934 cases; four core
+LLE regressions and the new `pilot_shader_clip_depth_reference` CTest pass.
+Fresh first-world replay and its independent 32-draw retained-target gate also
+pass after the LLE changes.
+
+The alpha software oracle intersects edges in exact rational **screen space**,
+preserving affine window Z and inverse W. It does not reproduce the maintained
+homogeneous clipper or use an after-image for expectations. Four-bit raster
+setup, top-left coverage, declared binary32 depth arithmetic, LESS, overlapping
+blends and preservation are checked. Native independently admits raw and actual
+production shader observations, then applies binary32 perspective/viewport
+operations and eight-bit nearest/even setup. Missing viewport binary32 rounding
+caused two one-pixel prediction errors; the published arithmetic resolves both
+without changing HLE or widening a tolerance. Guard-band coverage is a declared
+observed-host model; exact NV2A/cross-device clipping precision stays separate.
+
+Both routes pass the uninterrupted 32-draw sequence with targets initialized
+once and each actual before-target equal to its qualified predecessor. Native
+repeats the sequence across three fresh device lifetimes; raw/production output,
+before-targets and after-targets are bit-identical.
+
+| Retained alpha sequence | Original XDK / LLE | Native HLE, per lifetime |
+| --- | ---: | ---: |
+| Draws / vertices | 32 / 2,520 | 32 / 2,520 |
+| Shader values checked | 73,080 exact | 95,760 raw + 95,760 production |
+| Original method values checked | 2,176 | Supplied native API inputs |
+| Target pixels checked | 9,830,400 | 9,830,400 |
+| Pixels receiving passing fragments | 465,121 | 465,088 |
+| Passing / rejected depth fragments | 592,651 / 193,675 | 592,531 / 193,671 |
+| Final color or depth/stencil mismatches | 0 | 0 |
+
+Three native fragments are within the declared gamma(8)+.6 depth acceptance
+radius of stored Z. They still require the exact predicted alpha byte: no
+boundary pixel is omitted or accepted merely for being close. This qualifies
+the finite observed-host model and measured outcomes, not identical comparisons
+on every permitted host interpolator or real NV2A. Cross-device/exact silicon
+precision remains an explicit question.
+
+All 23 software and 24 native corruption/independence controls pass: no-op,
+omitted/stray/wrong alpha, RGB/depth/stencil, truncation, shader/input/state and
+texture changes, plus ignored diagnostic raw/after data. The program mutation
+is DPH->MOV; DPH->DP4 was equivalent for these W=1 inputs. Private evidence
+retains the original control run and focused corrected mutation separately.
+
+Private results under `build/blinx` include
+`scene-alpha-fixed-lle-qualified.aot-private.json`,
+`scene-alpha-chain-{lle,hle}-qualified.aot-private.json`,
+`scene-alpha-{lle,hle}-controls-qualified.aot-private.json`,
+`clip-depth-{before,after}.aot-private.json`, `clip-depth-native-ctest.log`,
+`alpha-volume-lle-regressions.log` and
+`scene-firstworld-clip-regression-qualified.aot-private.json`.
+Native preparation uses `native_scene_hle_reference.py --profile alpha-overlay
+--retain-targets`, with the separate `native_scene_alpha_host_reference.py`
+gate. Software uses `native_scene_alpha_reference.py --depth-arithmetic
+fma-b-first --retain-targets`. Captures/observations remain private.
+
+The retained alpha-volume slice and its clipping/blend floor defects are closed.
+Whole-frame/title state/resource composition, broader layouts and enabled-noise
+hardware evidence remain open. Graphics stays partial; 4/9 families qualified.
+Shipping HLE shader/draw/cache/upload paths remain unchanged. Focused fixtures
+reuse retained inputs without a title/audio rerun.
