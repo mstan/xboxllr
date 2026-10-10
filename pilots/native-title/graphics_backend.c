@@ -872,8 +872,10 @@ int32_t pilot_gfx_fvf_prepare(uint32_t fvf,float screen_x,float screen_y)
     uint32_t viewport[6];HRESULT hr=pilot_gfx_get_viewport(viewport);if(FAILED(hr))return hr;
     float low,high;memcpy(&low,viewport+4,4);memcpy(&high,viewport+5,4);
     if(!viewport[2] || !viewport[3] || !(high>low))return E_INVALIDARG;
-    float scale[]={2.0f/viewport[2],-2.0f/viewport[3],1/(high-low),1};
-    float offset[]={-1+(screen_x-viewport[0])*scale[0],1+(screen_y-viewport[1])*scale[1],-low/(high-low),0};
+    /* Original pretransformed screen+bias is rounded before four-bit
+     * truncation. The VS owns that operation; spare w lanes carry the bias. */
+    float scale[]={2.0f/viewport[2],-2.0f/viewport[3],1/(high-low),screen_x};
+    float offset[]={-1-viewport[0]*scale[0],1-viewport[1]*scale[1],-low/(high-low),screen_y};
     pilot_d3d_program_fog_mode(0);
     pilot_d3d_fvf_prepare(fvf,scale,offset);return S_OK;
 }

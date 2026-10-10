@@ -22,6 +22,7 @@ static uint32_t call_graphics(unsigned entry,const uint32_t *args)
 #include "graphics_visibility_contract_test.inc"
 #include "graphics_gpu_callback_contract_test.inc"
 #include "graphics_alias_contract_test.inc"
+#include "graphics_x8_texture_contract_test.inc"
 #include "graphics_reset_contract_test.inc"
 static void test_graphics_guest_scheduler(void)
 {
@@ -54,7 +55,7 @@ static void test_graphics_guest_scheduler(void)
     CloseHandle(gpu_test_entered);CloseHandle(gpu_test_release);
     fprintf(stderr,"PASS: scheduled real GPU WRITE/READ callbacks, pixels, ordering waits, reentrant guest queries, fences and teardown without CPU/renderer lock inversion\n");
 }
-static void test_graphics(int depth_sampling_only)
+static void test_graphics(int focused_fixture)
 {
     vm_ensure();
     dispatch_ensure(); /* Persistent shared callback stack precedes allocation baseline. */
@@ -72,7 +73,7 @@ static void test_graphics(int depth_sampling_only)
     CHECK(call_graphics(PILOT_D3D_Direct3D_CreateDevice,create)==0x80004001u);
     CHECK(!graphics_active && !MEM32(PILOT_D3D_DEVICE_GLOBAL));
     parameters[4]=0x11;
-    if(depth_sampling_only) {
+    if(focused_fixture) {
         uint32_t warm=pool_allocate(24,0x48584554u);CHECK(warm);pool_free(warm);
     }
     uint64_t resident=vm_committed(0,0x100000000ull);
@@ -82,8 +83,9 @@ static void test_graphics(int depth_sampling_only)
         CHECK(call_graphics(PILOT_D3D_Direct3D_CreateDevice,create)==0);
         CHECK(graphics_active && MEM32(PILOT_D3D_DEVICE_GLOBAL)==PILOT_D3D_DEVICE_OBJECT);
         CHECK(!av_saved_data);
-        if(depth_sampling_only) {
-            test_graphics_depth_sampling_header();
+        if(focused_fixture) {
+            if(focused_fixture==1)test_graphics_depth_sampling_header();
+            else { CHECK(focused_fixture==2);test_graphics_x8_texture_lifetime(); }
             CHECK(!call_graphics(PILOT_D3D_D3DDevice_Release,NULL));
             CHECK(!graphics_active && !graphics_headers && !MEM32(PILOT_D3D_DEVICE_GLOBAL));
             CHECK(vm_committed(0,0x100000000ull)==resident);

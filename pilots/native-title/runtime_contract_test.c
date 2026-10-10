@@ -424,7 +424,7 @@ int main(int argc,char **argv)
     uint32_t fixture_image_size=argc==2 && !strcmp(argv[1],"memory-statistics")?0x20000:0x10000;
     if(argc==2 && !strcmp(argv[1],"sections"))fixture_image_size=0x16000;
 #ifdef PILOT_D3D_NATIVE
-    if(argc==2 && (!strcmp(argv[1],"graphics") || !strcmp(argv[1],"graphics-scheduler") || !strcmp(argv[1],"graphics-depth-argb"))) {
+    if(argc==2 && (!strcmp(argv[1],"graphics") || !strcmp(argv[1],"graphics-scheduler") || !strcmp(argv[1],"graphics-depth-argb") || !strcmp(argv[1],"graphics-x8-texture"))) {
         fixture_image_size=((PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SHADER_CONSTANT_MODE_OFFSET+4+4095)&~4095u)-0x10000;
         image_base=0x10000;*(uint32_t*)(image_bytes+0x10c)=fixture_image_size;
     }
@@ -500,6 +500,7 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"graphics-scheduler")) { test_graphics_guest_scheduler(); return 0; }
         if (!strcmp(argv[1],"graphics")) { test_graphics(0); return 0; }
         if (!strcmp(argv[1],"graphics-depth-argb")) { test_graphics(1); return 0; }
+        if (!strcmp(argv[1],"graphics-x8-texture")) { test_graphics(2); return 0; }
         if (!strcmp(argv[1],"graphics-unsupported")) {
             graphics_active=1; /* Exercise the unsupported-family guard. */
             pilot_d3d_dispatch(PILOT_D3D_D3DDevice_Reset); return 1;

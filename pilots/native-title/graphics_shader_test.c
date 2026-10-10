@@ -12,6 +12,7 @@
 #define SAMPLES 8
 #define STRIDE 512
 #include "graphics_clip_depth_test.inc"
+#include "graphics_shader_window_snap_test.inc"
 static int check_program(const uint32_t *code,unsigned count,const struct PilotVertexElement elements[16],const char *name)
 {
     uint32_t handle=0;
@@ -208,6 +209,7 @@ static int check_vertex_fetch_reference(const char *path)
 #include "graphics_fog_reference_test.inc"
 #include "graphics_texture_reference_test.inc"
 #include "graphics_scene_reference_test.inc"
+#include "graphics_postprocess_reference_test.inc"
 static int check_shader_constant_reference(const char *path)
 {
     FILE *file=fopen(path,"rb");CHECK(file);uint32_t header[4];
@@ -279,8 +281,12 @@ int main(int argc,char **argv)
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
     uint32_t pp[17]={64,64,6,1,0x11,1,0,0,1,0x2a,0,0,1};CHECK(pilot_gfx_create(pp)==0);
     if(argc==2 && !strcmp(argv[1],"--clip-depth-reference"))return check_clip_depth_reference();
+    if(argc==2 && !strcmp(argv[1],"--window-snap-reference"))return check_shader_window_snap();
     if(argc==4 && !strcmp(argv[1],"--scene-reference-observe")) {
         CHECK(observe_scene_reference(argv[2],argv[3])==0);return 0;
+    }
+    if(argc==4 && !strcmp(argv[1],"--postprocess-reference-observe")) {
+        CHECK(observe_postprocess_reference(argv[2],argv[3])==0);return 0;
     }
     if(argc==3 && !strcmp(argv[1],"--fog-reference")) {
         CHECK(check_fog_reference(argv[2])==0);pilot_gfx_close();return 0;

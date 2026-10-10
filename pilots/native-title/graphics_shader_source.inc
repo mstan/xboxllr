@@ -159,7 +159,10 @@ static char *shader_source(const uint32_t *code,unsigned count,const struct Pilo
         "RasterOutput raster_main(Input input){Output raw=main(input);RasterOutput result;\n");
     /* Raw probes and rasterization use the same result-register defaults.
      * Masked writes retain those defaults, including color alpha and Q. */
-    shader_text(&source,"result.pos=float4((raw.o0.xyz*RasterScale.xyz+RasterOffset.xyz)*raw.o0.w,raw.o0.w);\n"
+    /* Original post-transform window X/Y use four fractional bits, truncated
+     * toward zero. Keep main/raw outputs intact; quantize only raster inputs. */
+    shader_text(&source,"float2 window=trunc(raw.o0.xy*16.0)*0.0625;\n"
+        "result.pos=float4((float3(window,raw.o0.z)*RasterScale.xyz+RasterOffset.xyz)*raw.o0.w,raw.o0.w);\n"
         "result.diffuse=saturate(raw.o3);result.specular=saturate(raw.o4);\n");
     for(unsigned i=0;i<4;++i) {
         shader_text(&source,"result.tex%u=raw.o%u;\n",i,i+9);

@@ -2098,10 +2098,10 @@ bounded replay. The title is muted/hidden, with frame auditing off, using four
 shared logical processors at Normal priority; this is a correctness regression
 and does not establish an HLE performance benchmark.
 
-The broader graphics ABI test retains an unresolved pre-existing process-wide
-handle assertion before the new fixture. Its retained pre-change executable
-also fails there; this is not a passing broad ABI claim. Investigation is
-tracked separately in `.72`. An earlier complete backend run timed out during
+The earlier broader graphics ABI failure is resolved by the later test-fixture
+corrections below: exact process-handle and byte checks now pass. Investigation
+of the original full driver-startup handle delta remains separate. An earlier
+complete backend run timed out during
 teardown; subsequent full and focused three-lifetime checks terminate and pass.
 No reason for that earlier timeout has been established.
 
@@ -2234,3 +2234,74 @@ fixture paths, `--last-draw 480 --depth-arithmetic fma-b-first
 --clip-arithmetic fma`. This CPU-only milestone changes no shipping renderer.
 Complete scene/HLE pixels, enabled noise, startup/lifetime and exact silicon
 remain open; the service-family count stays **4/9**.
+
+## Native window-coordinate and lifetime corrections - 2026-10-10
+
+Original post-transform software vertices truncate window X/Y to four
+fractional bits before rasterization. Production native FVF and programmable
+paths previously retained a 1/32-pixel offset in the retained consumers.
+The default FVF GPU shader now rounds source XY plus screen bias before
+truncation; the programmable raster wrapper truncates its final window XY
+before viewport mapping. Raw programmable outputs remain intact. Both paths
+keep conversion on the GPU, with no CPU vertex rewrite, sampling readback,
+new draw resource or opt-in setting.
+
+Authored FVF pixel cases cover signed coordinates, bias/grid boundaries and
+RHW across three device lifetimes. Negative clipped cases qualify coverage
+using constant texel coordinates; they do not qualify high-frequency clipped
+filter interpolation. A separate programmable stream-output fixture checks
+32 signed-grid/W cases per lifetime, with exact raster positions, raw outputs
+and texture coordinates. Five interval controls derive the host shader bounds
+before reading observations, retaining both outcomes when an arithmetic
+interval crosses a truncation boundary.
+
+The retained-input native observer runs all five original postprocess
+consumers over three lifetimes. Only source streams/programs/states and supplied
+producer roots enter the GPU; expected after-images are never supplied.
+The last three draws retain actual GPU predecessors while the independent
+oracle chains only expected bytes. Native payload bytes must match the
+independently re-encoded original inputs, and both raw and production raster
+shader observations must pass input-derived arithmetic intervals.
+
+The two feedback consumers and base-copy destination pass their existing
+one-code pixel bounds. The blur mask improves from 13,279 differing channels
+to **one alpha channel** at `(x=0,y=137)`, where the independent MSB selector
+margin is only `7.689350250084104e-6`. All mask RGB channels stay within one
+code. The final blend improves from 8,706 to **40 channels outside one code**.
+An explicitly unqualified diagnostic inverts only that expected mask alpha;
+39 of the final failures disappear, leaving one RGB channel differing by two
+codes. This establishes a useful cause to investigate, not permission to
+change the oracle or tolerance. Exact near-threshold filtering/selector and
+remaining blend precision stay open. Depth/stencil/untouched bytes, retained
+root continuity and repeat-lifetime bytes are exact.
+
+The broad ABI handle baseline now starts after a no-op host worker joins and
+closes. That worker exercises driver thread attachment without executing the
+display timer path; the original exact process-handle assertions still cover
+every timer/waiter lifetime. Driver initialization accounts for part of the
+previous count increase; the entire original delta is not attributed.
+The broad texture fixture's format `0x07` is **SWIZZLED_X8R8G8B8**. Its prepared
+native BGRA alpha must be 255 while every guest byte stays unchanged; the old
+raw-X comparison was stale after the published XRGB correction. Exact expected
+bytes replace that assertion without a mask or tolerance. A focused fixture
+checks ARGB controls and both rectangular four-level XRGB mip chains, dirty
+uploads, sampled alpha, surface aliases and parent release over three lives.
+
+All **11 focused CTests** pass across the final nine-test batch and the shader
+failure/scheduler pair: broad ABI, backend, depth view/ABI, XRGB ABI, FVF/window
+snap, raw shader, clip/depth and scheduler contracts. Seven new Python interval/
+payload-binding tests pass. Private evidence lives under
+`postprocess-native-20261010`, including the intentionally failing
+`qualification-window-snap.aot-private.json` and
+`selector-causal-diagnostic.aot-private.json`.
+
+The rebuilt shipping private executable
+(`963d708cd3e20e82941a8a9d1df1d4f7100293ed6436b3ebd6d8d9a3f2b2d7a8`)
+completes a **330.188s /33-capture** regression through startup, title, Demo,
+subsequent movie, title return and Demo reentry. Both stage-start and opening
+movie file sequences occur twice, and all five replay rows are delivered.
+No stop/audio-stop/backend-stop/fault occurs; the planned harness kill ends
+the bounded run. It is muted/hidden, with frame auditing off and four shared
+logical processors at Normal priority. The second Start again falls during
+movie playback, so this adds no new Demo-interruption or performance claim.
+All 39 prepared donor source files reproduce exactly. Full graphics stays open.

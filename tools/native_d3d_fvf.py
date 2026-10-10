@@ -45,7 +45,12 @@ def prepare_fvf(code: str, *, phobos: bool = False) -> str:
             '    "}\\n"\n    "VS_OUT main(VS_IN input) {\\n"')
     replace('    "        o.pos.w = 1.0;\\n"',
             '    "        o.pos.w = 1.0;\\n"\n'
-            '    "        if (Flags & 0x20u) o.pos.xyz = input.pos.xyz * NativePositionScale.xyz + NativePositionOffset.xyz;\\n"')
+            '    "        if (Flags & 0x20u) {\\n"\n'
+            '    "            precise float2 window = input.pos.xy + float2(NativePositionScale.w,NativePositionOffset.w);\\n"\n'
+            '    "            float2 snapped = trunc(window * 16.0) * 0.0625;\\n"\n'
+            '    "            o.pos.xy = snapped * NativePositionScale.xy + NativePositionOffset.xy;\\n"\n'
+            '    "            o.pos.z = input.pos.z * NativePositionScale.z + NativePositionOffset.z;\\n"\n'
+            '    "        }\\n"')
     replace('    "        if (input.pos.w != 0.0) o.pos /= input.pos.w;\\n"',
             '    "        if (Flags & 0x20u) o.pos *= native_rcc(input.pos.w);\\n"\n'
             '    "        else if (input.pos.w != 0.0) o.pos /= input.pos.w;\\n"')

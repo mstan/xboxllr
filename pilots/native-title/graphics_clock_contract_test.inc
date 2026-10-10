@@ -101,6 +101,8 @@ static DWORD WINAPI test_display_wait_without_renderer(void *context)
     CHECK(call_graphics(PILOT_D3D_D3DDevice_BlockUntilVerticalBlank,NULL)==0);
     CHECK(SetEvent(done));return 0;
 }
+static DWORD WINAPI test_clock_worker_warmup(void *unused)
+{(void)unused;return 0;}
 static void test_graphics_clock(void)
 {
     const uint64_t origin=100000000;
@@ -110,6 +112,12 @@ static void test_graphics_clock(void)
     CHECK(graphics_next_vblank(origin,origin+9999999,60)==origin+10000000);
     CHECK(graphics_next_vblank(origin,origin+10000000,60)==origin+10166667);
     CHECK(graphics_next_vblank(origin,origin+10000000ull*86400*365,60)==origin+10000000ull*86400*365+166667);
+    /* Native driver thread-attach initialization may create persistent host
+     * resources after CreateDevice. Warm only a host worker before the count:
+     * this executes no display timer path and cannot hide a display-timer leak.
+     * The exact process count still covers every tested timer/waiter lifetime. */
+    HANDLE warmed=CreateThread(NULL,0,test_clock_worker_warmup,NULL,0,NULL);CHECK(warmed);
+    CHECK(WaitForSingleObject(warmed,2000)==WAIT_OBJECT_0 && CloseHandle(warmed));
     DWORD handles_before,handles_after;CHECK(GetProcessHandleCount(GetCurrentProcess(),&handles_before));
     struct ClockWaitTest waits[3]={0};HANDLE workers[3];
     HANDLE go=CreateEventW(NULL,TRUE,FALSE,NULL);CHECK(go!=NULL);

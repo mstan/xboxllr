@@ -14,6 +14,7 @@
 #include "graphics_visibility_backend_test.inc"
 #include "graphics_feedback_backend_test.inc"
 #include "graphics_depth_texture_backend_test.inc"
+#include "graphics_fvf_snap_backend_test.inc"
 static int test_transform_pipeline(void)
 {
     static const D3DTRANSFORMSTATETYPE states[]={D3DTS_VIEW,D3DTS_PROJECTION,D3DTS_TEXTURE0,D3DTS_TEXTURE1,
@@ -121,6 +122,9 @@ int main(int argc,char **argv)
     for (unsigned pass=0;pass<3;++pass) {
         CHECK(pilot_gfx_create(pp)>=0);
 #ifdef PILOT_D3D_PHOBOS
+        if(argc==2 && !strcmp(argv[1],"--fvf-snap")) {
+            CHECK(test_fvf_screen_snap()==0);pilot_gfx_close();continue;
+        }
         if(argc==2 && !strcmp(argv[1],"--depth-argb")) {
             CHECK(test_depth_argb_sampling()==0);
             pilot_gfx_close();

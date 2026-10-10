@@ -66,6 +66,19 @@ def clamp(value,lo,hi):
     return Interval(max(lo,min(hi,value.lo)),max(lo,min(hi,value.hi)))
 
 
+def window_snap(value):
+    """Input-derived bounds for the original four-bit window XY contract.
+
+    Scaling finite binary32 inputs by powers of two is exact in this admitted
+    normal range. Truncation is monotonic, including across zero; a shader
+    interval crossing a grid edge must retain both possible snapped results.
+    """
+    value=exact(value)
+    assert max(abs(value.lo),abs(value.hi))<2**20,'Window range needs a separate contract'
+    return Interval(Fraction(math.trunc(value.lo*16),16),
+                    Fraction(math.trunc(value.hi*16),16))
+
+
 def reciprocal(value):
     value=exact(value);assert value.lo*value.hi>0,'Reciprocal interval crosses zero'
     lo,hi=sorted((1/value.lo,1/value.hi));radius=max(abs(lo),abs(hi))*EPS
@@ -142,6 +155,7 @@ def expectations(capture,raster=False):
         raw=[[exact(v) for v in row] for row in raw]
         if raster:
             pos=raw[0][:]
+            pos[:2]=[window_snap(v) for v in pos[:2]]
             raw[0]=[multiply(add(multiply(pos[lane],scale[lane]),(-1,1,0)[lane]),pos[3])
                 for lane in range(3)]+[pos[3]]
             raw[3]=[clamp(v,0,1) for v in raw[3]]

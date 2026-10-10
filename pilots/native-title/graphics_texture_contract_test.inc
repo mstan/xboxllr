@@ -246,11 +246,26 @@ static void test_graphics_textures(void)
             lock[0]=alias;lock[3]=0xc0;call_graphics(PILOT_D3D_D3DSurface_LockRect,lock);
             CHECK(MEM32(0x19544)==data);
             CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&surface)==0 && MEM32(texture)==0x01040002u);
-            CHECK(pilot_gfx_texture_readback(native,level,pixels,bytes)==0 && !memcmp(pixels,linear,bytes));
+            CHECK(pilot_gfx_texture_readback(native,level,pixels,bytes)==0);
+            for(unsigned i=0;i<bytes;++i) {
+                unsigned char expected_byte=linear[i];
+#ifdef PILOT_D3D_PHOBOS
+                /* Prepared XRGB has opaque native BGRA alpha; guest X stays raw. */
+                if(format==7 && (i&3)==3)expected_byte=255;
+#endif
+                CHECK(pixels[i]==expected_byte);
+            }
             /* A persistent CPU pointer may be changed after an earlier upload. */
             MEM8(data)^=0x5a;linear[0]^=0x5a;
             CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&alias)==0 && MEM32(texture)==0x01040001u);
-            CHECK(pilot_gfx_texture_readback(native,level,pixels,bytes)==0 && !memcmp(pixels,linear,bytes));
+            CHECK(pilot_gfx_texture_readback(native,level,pixels,bytes)==0);
+            for(unsigned i=0;i<bytes;++i) {
+                unsigned char expected_byte=linear[i];
+#ifdef PILOT_D3D_PHOBOS
+                if(format==7 && (i&3)==3)expected_byte=255;
+#endif
+                CHECK(pixels[i]==expected_byte);
+            }
             CHECK(!test_pool_owned(surface) && !test_pool_owned(alias) && test_pool_owned(texture));
             offset+=bytes;
         }
