@@ -14,6 +14,7 @@
 #include "graphics_visibility_backend_test.inc"
 #include "graphics_feedback_backend_test.inc"
 #include "graphics_depth_texture_backend_test.inc"
+#include "graphics_depth_texture_selector_test.inc"
 #include "graphics_fvf_snap_backend_test.inc"
 static int test_transform_pipeline(void)
 {
@@ -131,6 +132,9 @@ int main(int argc,char **argv)
             fprintf(stderr,"PASS: depth ARGB device lifetime %u\n",pass+1);
             continue;
         }
+        if(argc==2 && !strcmp(argv[1],"--depth-argb-selector")) {
+            CHECK(!test_depth_argb_selector());pilot_gfx_close();continue;
+        }
 #endif
         struct PilotGpuProgress progress;pilot_gfx_completion_stats(&progress);
         CHECK(!progress.submitted && !progress.completed && !progress.pending_queries && !progress.created_queries);
@@ -185,6 +189,7 @@ int main(int argc,char **argv)
         CHECK(test_combiner_memory_draw()==0);
         CHECK(test_feedback()==0);
         CHECK(test_depth_argb_sampling()==0);
+        CHECK(!test_depth_argb_selector());
         CHECK(test_linear_texture_contract()==0);
         CHECK(test_movie_textures()==0);
 #endif

@@ -1,9 +1,13 @@
 /* Xbox Z24S8 bytes may subsequently be sampled as linear A8R8G8B8.
  * D3D11's depth-only SRV instead returns (D,0,0,1). Decode the unfiltered
- * depth/stencil texels into one cached RGBA8 GPU image, then retain the
+ * depth/stencil texels into one cached RGBA32_FLOAT GPU image, then retain the
  * renderer's ordinary sampler/filter path. No CPU readback or upload occurs.
  * A content serial, distinct from last-use/completion, avoids reconversion
  * when the same source is sampled by several stages or subsequent draws.
+ * FLOAT storage retains normalized compute output through float filtering.
+ * An authored combiner MSB threshold regression fails for the old UNORM cache.
+ * The cache uses16 bytes/texel; bounded GPU conversion/filter timings and
+ * independently authored threshold controls accompany this default fix.
  *
  * D3D11.3 functional spec 3.2.3.2/5 requires nearest-rounded UNORM loads.
  * Recover D24 with integer IEEE-754 fields: for z<.5 floor(z*2^24)=D;
@@ -56,7 +60,11 @@ static ID3D11ShaderResourceView *pilot_depth_texture_argb(uint32_t handle,ID3D11
         sd.Texture2D.MipLevels=1;
         pilot_d3d_require(ID3D11Device_CreateShaderResourceView(device,(ID3D11Resource*)storage,
             &sd,&texture->stencil_srv),__FILE__,__LINE__);
-        desc.Format=DXGI_FORMAT_R8G8B8A8_UNORM;desc.Usage=D3D11_USAGE_DEFAULT;
+        desc.Format=DXGI_FORMAT_R32G32B32A32_FLOAT;desc.Usage=D3D11_USAGE_DEFAULT;
+        UINT support=0,required=D3D11_FORMAT_SUPPORT_TEXTURE2D|D3D11_FORMAT_SUPPORT_SHADER_SAMPLE|
+            D3D11_FORMAT_SUPPORT_TYPED_UNORDERED_ACCESS_VIEW;
+        pilot_d3d_require(ID3D11Device_CheckFormatSupport(device,desc.Format,&support),__FILE__,__LINE__);
+        if((support&required)!=required)pilot_d3d_backend_stop("FLOAT ARGB depth cache unsupported by native device");
         desc.BindFlags=D3D11_BIND_SHADER_RESOURCE|D3D11_BIND_UNORDERED_ACCESS;
         desc.CPUAccessFlags=desc.MiscFlags=0;
         pilot_d3d_require(ID3D11Device_CreateTexture2D(device,&desc,NULL,&texture->argb_image),__FILE__,__LINE__);

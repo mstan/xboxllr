@@ -2472,3 +2472,51 @@ directory is `empty-depth-prefix1536-qualified.aot-private.json` (SHA-256
 and `empty-depth-prefix1536-handoff.aot-private.json`. No later original draw
 was inspected or executed for this milestone. Complete scene/HLE pixels,
 enabled noise, startup/lifetime and exact silicon remain open; **4/9** stands.
+
+## Default FLOAT depth-as-ARGB cache correction - 2026-10-10
+
+The default HLE cache now uses `R32G32B32A32_FLOAT`. Its normalized compute
+output, ordinary GPU sampler, pixel program and content-serial invalidation
+are unchanged. Repeated reads reuse the converted view; no routine CPU
+readback, upload or shader recompilation is added. Device support is checked
+once per allocation and unsupported devices stop explicitly.
+
+An independently authored five-stage bilinear/MSB selector supplies a
+meaningful regression: the previous UNORM cache chooses the wrong branch at
+`32509/65025`, below one-half by `7/130050`. The FLOAT cache passes that case
+and both threshold neighbors across three device lifetimes. The existing
+depth recovery, all-256-stencil, serial-invalidation and resource-reuse cases
+also pass. All **12 focused CTests**, including broad graphics ABI/lifetime,
+scheduler and FVF/programmable coordinate checks, pass.
+
+A private GPU timestamp A/B/B/A comparison exercises the original mask
+program with cached reads and explicitly forced reconversion. Median cached
+draw times are 0.001275/0.001285 ms for UNORM and 0.002704/0.002699 ms for
+FLOAT; conversion-plus-draw medians are 0.024544/0.033024 ms and
+0.040352/0.044640 ms respectively. These bounded measurements include possible
+CPU submission gaps and are not a title performance benchmark. A 640x480
+cache grows from 1,228,800 to 4,915,200 bytes, adding 3,686,400 bytes. The
+default correction keeps conversion and filtering on the GPU.
+
+The new default title runs **330.187 seconds /33 captures** through title,
+Demo, movie, title return and Demo reentry without stop/audio-stop/fault or
+backend-stop guards. All scheduled controller states arrive; the second Start
+occurs during a movie, so no new Demo-interruption qualification is claimed.
+The run is muted and hidden, and is not a performance benchmark or a new
+human complete-pixel approval.
+
+The original five native consumers run across three device lifetimes. Mask,
+base-copy and both feedback draws pass the existing checks. One final-blend
+RGB channel differs by two codes against the current prequantized-source
+oracle; the strict one-code gate remains failed. An isolated unchanged final
+consumer over independently authored gray roots also exposes this rounding
+order question. Exact retained LLE source/DLL route review must decide the
+oracle premise before any correction; neither expected outputs nor bounds
+are changed to match observations. Depth/stencil/untouched bytes, predecessor
+continuity, shader intervals and lifetime bytes still pass.
+
+Private evidence is under `postprocess-native-20261010/float-cache-default`,
+`cache-perf-diagnostic` and `isolated-final`, plus
+`float-cache-robust-regression-20261010`. Earlier failed UNORM and diagnostic
+reports are retained. Complete scene/native-chain, enabled noise, original
+startup/lifetime and exact silicon remain open; **4/9** stands.

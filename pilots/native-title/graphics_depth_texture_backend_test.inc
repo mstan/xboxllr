@@ -8,16 +8,21 @@ static int depth_argb_check_image(const uint32_t expected[256],unsigned border)
     ID3D11ShaderResourceView_GetResource(view,&resource);
     CHECK(!ID3D11Resource_QueryInterface(resource,&IID_ID3D11Texture2D,(void**)&image));
     D3D11_TEXTURE2D_DESC desc;ID3D11Texture2D_GetDesc(image,&desc);
-    CHECK(desc.Width==16 && desc.Height==16 && desc.Format==DXGI_FORMAT_R8G8B8A8_UNORM);
+    CHECK(desc.Width==16 && desc.Height==16 && desc.Format==DXGI_FORMAT_R32G32B32A32_FLOAT);
     desc.Usage=D3D11_USAGE_STAGING;desc.BindFlags=desc.MiscFlags=0;desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
     CHECK(!ID3D11Device_CreateTexture2D(d3d8_GetD3D11Device(),&desc,NULL,&staging));
     ID3D11DeviceContext_CopyResource(ctx,(ID3D11Resource*)staging,resource);
     D3D11_MAPPED_SUBRESOURCE mapped;CHECK(!ID3D11DeviceContext_Map(ctx,(ID3D11Resource*)staging,0,D3D11_MAP_READ,0,&mapped));
     for(unsigned y=border;y<16-border;++y)for(unsigned x=border;x<16-border;++x) {
-        const uint8_t *p=(const uint8_t*)mapped.pData+y*mapped.RowPitch+x*4;
+        const float *p=(const float*)((const uint8_t*)mapped.pData+y*mapped.RowPitch)+x*4;
         uint32_t value=expected[y*16+x];
-        CHECK(p[0]==((value>>16)&255) && p[1]==((value>>8)&255) &&
-              p[2]==(value&255) && p[3]==(value>>24));
+        const unsigned shifts[]={16,8,0,24};
+        for(unsigned c=0;c<4;++c) {
+            /* Division or reciprocal multiplication may differ by one
+             * binary32 ulp. No UNORM8 code or depth/stencil bit is excused. */
+            float wanted=((value>>shifts[c])&255)/255.0f;
+            CHECK(isfinite(p[c]) && fabsf(p[c]-wanted)<=1.1920928955078125e-7f);
+        }
     }
     ID3D11DeviceContext_Unmap(ctx,(ID3D11Resource*)staging,0);
     ID3D11Texture2D_Release(staging);ID3D11Texture2D_Release(image);
