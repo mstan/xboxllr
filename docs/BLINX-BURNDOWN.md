@@ -954,3 +954,19 @@ qualification, especially the residual blur/depth consumer. Noise, original
 startup/lifetime and exact hardware questions remain separate. Shipping HLE
 shaders/caches remain unchanged; no title/audio/host GPU/Xbox run occurred.
 The full goal stays active at **4/9**, with hardware inspection pending.
+
+Independent postprocess pixel equations now qualify both feedback quads and
+the final blur-mask/base-copy/blur-blend consumers: **1,305,600 pixels** across
+five actual original draws. Quads and the base copy match exactly; mask/blend
+stay within the declared one-code UNORM8 interval. The expected mask and copy
+feed the blend expectation, so no actual intermediate becomes a golden. All
+depth/stencil bytes, untouched roots and19 authored tests pass.
+[Evidence and precise scope](../pilots/native-title/GRAPHICS-LLE.md#independent-postprocess-consumer-pixels--2026-10-10).
+Earlier color/depth producers are supplied inputs and still need independent
+pixel qualification. A documented depth-only SRV counterfactual changes31,913
+blur-mask alpha pixels, supporting the next native view investigation; this
+is not a native GPU measurement. One near-threshold selector pixel leaves exact
+silicon rounding deferred. Shipping HLE is unchanged; no rebuild/title/audio/
+host GPU/Xbox run occurred. Full scene pixels, native equivalence, noise and
+startup/lifetime remain open. The full goal stays active at **4/9** and the
+hardware inspection gate remains intact.

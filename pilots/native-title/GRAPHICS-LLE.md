@@ -1957,3 +1957,85 @@ and exact silicon behavior still separate. The initial-clear dependency proof
 remains valid; no new title capture is needed. This batch used CPU-only Idle
 work on one logical processor, with no title/audio/host GPU/Xbox run.
 **4/9** and the full goal remain active; hardware stays at its inspection gate.
+
+### Independent postprocess consumer pixels — 2026-10-10
+
+The two self-feedback quads and the final three postprocess rectangles now pass
+an independent consumer pixel contract. `tools/native_postprocess_pixel_reference.py`
+derives rectangle coverage, PROJECT2D texel-space nearest/bilinear filtering,
+register-combiner input mapping, simultaneous stage writes, dot products,
+blue-to-alpha, constants, MSB mux, final combination and source-alpha blending.
+It imports no maintained renderer, decoder or native shader compiler. A separate
+ALWAYS/KEEP-or-REPLACE stencil equation preserves depth, unselected stencil bits,
+padding and uncovered rows.
+
+The equations come from the public
+[NV register-combiner specification](https://registry.khronos.org/OpenGL/extensions/NV/NV_register_combiners.txt),
+[per-stage constants](https://registry.khronos.org/OpenGL/extensions/NV/NV_register_combiners2.txt),
+[rectangle texture specification](https://registry.khronos.org/OpenGL/extensions/NV/NV_texture_rectangle.txt)
+and pinned [NV097 fields](https://github.com/XboxDev/nxdk/blob/29638d0b001f179b73c3513489af10ddc2986216/lib/pbkit/nv_regs.h).
+The declared software contract uses ideal floating equations and a one-code
+UNORM8 output interval. MSB mux chooses AB below 0.5 and CD at or above 0.5;
+minimum selector margin is reported. Exact NV2A fixed-point/filter rounding is
+not asserted. LSB mux, undefined register reads, other geometry, texture
+layouts, raster tests and logic operations remain guarded; unblended COPY is
+admitted. Single-level filters admit matching nearest or linear min/mag modes.
+
+`tools/qualify_native_postprocess.py` takes the retained color/depth producer
+snapshots as **supplied inputs**. Their hashes must match the completed original
+composition report and the current reference DLL. Independent input-derived
+shader vertices/state are prepared before original execution. The two feedback
+quads run as isolated components. For the final three draws, expected images
+form a chain: the expected blur mask and expected base copy feed the blend
+expectation. No actual intermediate or native after-image becomes a golden.
+All observed depth/stencil roots are compared byte-for-byte; unwritten color
+roots must remain exact and earlier color outputs stay inside their declared
+intervals. This does not qualify the earlier scene producers or feedback cache
+behavior beyond the admitted same-pixel components.
+
+All five actual original draws pass **1,305,600 pixel /5,222,400 channel**
+comparisons:
+
+| Input | Component | Pixels | Maximum channel-code difference |
+| --- | --- | ---: | ---: |
+| 2767 | First feedback quad | 307,200 | 0 |
+| 2820 | Second feedback quad | 307,200 | 0 |
+| 4300 | Half-size blur mask | 76,800 | 1 |
+| 4301 | Base scene copy | 307,200 | 0 |
+| 4302 | Blur blend using expected intermediates | 307,200 | 1 |
+
+All depth/stencil bytes and untouched roots pass. The blur-mask MSB selector
+has minimum ideal margin about `7.68935e-6`; one pixel falls within `2e-5` of
+the threshold. Its actual software result agrees with the independently chosen
+ideal decision. Silicon precision at that boundary remains a deferred question.
+All **19 authored Python tests** pass, including negative input mapping, stage
+simultaneity, dot/blue-to-alpha, selector boundaries, view interpretation,
+sampler/raster guards, blend and masked partial stencil writes.
+
+Private evidence is `postprocess-independent-qualified.aot-private.json`
+(SHA-256 `a501a41ee1f36931996eb3bc6af1d4ef0ff91cb9d20c15d3b6d049788c4d4ab8`)
+and `postprocess-independent-observed/` beneath the complete-input directory.
+The reference DLL remains
+`9fdec5189881eabf77d00a52a8442ee57f5f2fe8199d7c22335594ee28cedf95`;
+no core or shipping pilot rebuild was needed.
+
+The depth consumer points to an HLE view mismatch worth correcting next. Its
+captured sampling header declares raw ARGB while the retained producer stores
+physical Z24S8. Those bits supply A from the high depth byte, R from the middle
+depth byte, G from the low depth byte and B from stencil. The native donor's
+current `R24_UNORM_X8_TYPELESS` view instead supplies depth R, zero G/B and
+one A, as specified by
+[D3D11.3 section 19.1.3.3](https://microsoft.github.io/DirectX-Specs/d3d/archive/D3D11_3_FunctionalSpec.htm#DefaultsForMissingComponents).
+Substituting that documented typed-view equation changes **31,913** of the
+76,800 expected blur-mask alpha pixels. This is an independent counterfactual,
+**not** a native GPU measurement or complete-HLE equivalence pass. The next
+step is to verify and correct the native view while keeping conversion and
+filtering on the GPU with cached resources; routine per-draw CPU downloads are
+not required by this consumer contract.
+
+Complete-scene pixels, native equivalence, earlier producers, enabled noise,
+original startup/lifetime and exact hardware behavior remain open. This batch
+used one Idle CPU logical processor; no title/audio/host GPU/Xbox run occurred.
+The full goal stays active at **4/9**, with the existing hardware inspection
+gate intact. Standing owner authorization covers read-only/benign checks;
+dangerous operations still require explicit approval.
