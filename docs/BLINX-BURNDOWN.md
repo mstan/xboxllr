@@ -94,6 +94,23 @@ prompts; dangerous operations should be avoided. Family count remains **4/9**;
 the hardware queue and LLE guards remain open. See
 [the observations and precise limits](../pilots/native-title/GPU-COMPLETION-LLE.md#display-bank-and-board-context-observations---2026-10-10).
 
+The subsequent owned-RAM FE experiment also completed: the original fence
+sequence delivered the device token to a new uncached page on its fifth
+post-release poll, then verified original control restored. All five stores
+were confined to the three FE registers; the page is retained until restart
+to protect against late writes. No audio playback or title run was needed.
+All 50 offline probe tests pass. Basic transfer is observed, but release
+gating and required-before-publication audio/DMA work remain unresolved;
+`.115` and the LLE guard stay open. See
+[the exact FE observation and limits](../pilots/native-title/AUDIO-LLE.md#first-owned-ram-fe-observation---2026-10-10).
+
+The held-window follow-up observed the token before this payload cleared bit0,
+with actual control reads `1` around the window. This rejects an assumed
+absolute release gate for basic idle transfer. Busy audio/notification/DMA
+ordering remains open. All 53 offline tests pass; two owned scratch pages
+(8192 bytes total) are retained until restart. `.115` remains open and the
+family count stays **4/9**.
+
 2026-10-09 scene-pixel continuation: corrected the offline scene fixture's
 missing initialized XDK screen bias before the original viewport setter.
 An independent post-transform mathematical pixel contract now passes all five

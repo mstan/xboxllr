@@ -93,6 +93,68 @@ The precise unresolved question is **`beads-xbox.1.115`**, deferred alongside
 other silicon questions. Independent GP/FIFO and graphics work can continue;
 do not repeatedly rerun this guarded DPC or the parked title startup.
 
+### First owned-RAM FE observation - 2026-10-10
+
+Under the owner's standing benign-write authorization, the running v0.4.0
+agent executed one reviewed, compiled x86 payload. It allocated a fresh
+4096-byte uncached page through the actual kernel, checked physical translation
+and alignment, initialized a sentinel, and reproduced the original helper's
+SET_CONTROL_BIT0(1), FEMEMADDR, FEMEMDATA, SET_CONTROL_BIT0(0) sequence. The
+CPU did not write the token to RAM. The device token appeared on the fifth
+post-release uncached poll. Control bit0 was restored to its observed original
+value and actual readback `1` was verified.
+
+The payload made exactly five MMIO stores, all to FE801510, FE801324 or FE801334.
+The allocated page remains owned until restart, including on failure, so a
+late device write cannot target reused agent/kernel memory. It was separate
+from the EXEC code buffer. No voice, GP/DSP, GPIO, storage, flash, EEPROM,
+boot configuration, upload or launch operation occurred. This observation
+required no audio playback or emulator title run. Raw records stay private on
+the G: recovery drive.
+
+All **50 offline probe tests** pass. Eight new tests execute the actual
+compiled freestanding payload against independent PE/API/device models,
+checking exact allocation flags/arguments, bounded export reads, physical
+alias checks, authorized store addresses/order, callee state, delayed/absent
+device writes, page retention, changed controls and no host retry. The
+payload was 888 bytes, SHA-256
+`84d65df3bfbe6b3d0e457ea8886c75b7255001c6c4c3fe265b19246972edb8e4`.
+The original helper was separately inspected: it sets bit0 from its Boolean
+argument; its first call sets `1` and its second sets `0`.
+
+This qualifies an observed basic transfer only in the current application's
+context. Five polls are not a measured hardware delay. There was no observer
+between the data store and control release, so this run does not establish
+whether publication waits for that release. Nor does it establish which
+queued voice/notification/DSP work must precede publication. Keep `.115` and
+the maintained FE guard open until those admission/ordering requirements have
+independent evidence and a working implementation. Exact source/limits are in
+[`xboxlle-probe`'s FE-FENCE.md](https://github.com/mstan/xboxlle-probe/blob/feat/av-handshake-probe-20261009/docs/FE-FENCE.md).
+
+The distinct held-window follow-up also succeeded. It made the same five FE
+stores to a separate newly owned page, but sampled RAM up to 1000 times
+between FEMEMDATA and this payload's control release. Actual control reads
+were `1` before and after that window. **The token was already visible before
+this payload cleared bit0**; the first subsequent post-release poll also saw
+it. The original control was again restored and verified. Two pages, **8192
+bytes total**, now remain owned until restart.
+
+This positive observation rejects an absolute model that always defers basic
+idle token publication until this control release. The control/RAM reads are
+sequential; they do not atomically exclude other kernel writers or establish
+busy FE/notification ordering. Do not replace the current guard with that
+release-gating hypothesis. The maintained implementation still needs explicit
+admission for known completed work plus evidence for any outstanding work.
+
+All **53 offline tests** pass, including actual execution of both compiled
+variants, pre-release and post-release publication, changed controls around
+the window, finite timeout, failed restore and strict host variant decoding.
+The held-window payload was 968 bytes, SHA-256
+`ec86e06791f593803dc226b8496ec47ef47c20f3ad120bb144bd10c20ad5e062`.
+The first payload/source remains committed independently for reproduction;
+raw records and compiler/source hashes are private. No audio playback,
+title run, FE retry or storage operation occurred. `.115` remains open.
+
 Reproduction (owned private inputs):
 
 ```powershell
