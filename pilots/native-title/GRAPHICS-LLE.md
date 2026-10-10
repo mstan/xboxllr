@@ -3020,3 +3020,49 @@ through at most 2200 is being prepared; each new geometry/UV/LOD/depth and
 complete packed-byte result still requires its own proof before original use.
 Full producer/frame and native HLE scene pixels, enabled noise, original
 startup/lifetime, ring rollover and exact silicon remain open; **4/9** stands.
+
+## Batched prefix 2162 and architecture-first continuation - 2026-10-10
+
+The already-prepared next 20 draws pass one reviewed continuous original replay,
+advancing the current-generation state/pixel prefix to **1-2162**. It retains
+**361,948 independently expected writing fragments**, now with
+**2,822,707,200 owned-pixel comparisons**. The batch adds zero writes and passes
+72 hardware-free batch controls. All five expected roots remain exact; actual
+roots are separately preserved exactly from the preceding original checkpoint.
+Earlier allowed RGB differences remain confined to the independently written
+footprint under the unchanged one-code contract. Exact depth/stencil/alpha and
+untouched storage checks remain in force. The 117 actual-artifact fault controls
+are retained; the new source-only controls are a separate count.
+
+Draw2143's complete original geometry produces nine raster leaves and 23,512
+tested fragments, all rejected by independently derived LESS depth. No new
+sampled-color, LOD or CRT precision is claimed from that empty writing footprint.
+The next original input,2163, remains unqualified. A separate source-only
+empty-ARGB/stencil proposal and its105 controls are retained for later use;
+they do not extend the original prefix. The preserved2163-2458 geometry scan
+finds surviving clip leaves first at2261, without establishing storage writes.
+
+Private evidence is `producer-prefix2162-final-qualified.aot-private.json`
+(`4619d3eff2b926268fe5f39fd7191a77dc364a0b2cf83fca70fa7d127ed670be`),
+the original2162 checkpoint
+(`55e7b7c6f4bef85950b809e6caa15c6c797697cf4cde7f9977c42e819b71e13d`),
+and `producer-packed-batch2162-root-review.aot-private.json`
+(`969a60c0729977fae892f535b68cdf10d1a43ddd78889b8418d8421297dea989`).
+All are under `frame-inputs-firstworld-20261010`, with the frozen expected/actual
+snapshots and their source-first input bindings.
+
+The owner reviewed the latest corrected default-blend attract scene sheet on
+their desktop and replied **"Looks right at a glance"**. The review is bound to
+the image, reports and33 retained presents in the private immutable
+`default-blend-attract-regression-20261010/owner-scene-review-20261010.aot-private.json`.
+It establishes a still-image appearance baseline; no additional title/audio
+run occurred and motion/audio correctness is not inferred.
+
+The owner now prioritizes safe, extensible architecture and broader operation
+batches. Further exhaustive per-draw admission work has stopped. Retain the
+maintained LLE floor, current clipping correction, independent tests, captures,
+replay tooling and open qualification scopes. Address bounded resource-contract
+risks next, and append safely deferred clipping, pixel, integration or hardware
+questions with explicit reopening triggers to the
+[graphics foundation/question queue](GRAPHICS-DEFERRED-QUESTIONS.md).
+Whole graphics qualification and the **4/9** family count remain unchanged.
