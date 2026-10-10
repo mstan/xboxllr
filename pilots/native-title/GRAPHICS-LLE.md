@@ -906,17 +906,88 @@ under this declared noise-off condition. It does not qualify the original
 enabled-noise scenes. Default replay retains the enabled guard, and
 `--require-qualified` still rejects execution without independent pixel proof.
 
-The five captures with changed targets remain the concrete next pixel checks:
-draws 2/3/4/5/6 differ from retained native after-images by respectively
-33/129/67/3,401/4,334 color words and 33/129/68/3,490/4,479 depth words.
-These differences remain diagnostic; native enabled-state captures are not a
-new noise-off or Xbox golden. Zero differences for unchanged targets do not
-establish pixel qualification. Private evidence uses
+The earlier noise-off audit differed from retained native after-images by
+33/129/67/3,401/4,334 color words and 33/129/68/3,490/4,479 depth words for
+draws 2/3/4/5/6. These counts predate the viewport fixture correction below;
+they are diagnostic, not noise-off or Xbox golden results. Private evidence uses
 `scene-firstworld-noise-disabled.aot-private.json`,
 `scene-noise-enabled-control.aot-private.json` and
-`scene-noise-disabled-require-qualified.aot-private.json`. Next, establish
-independent coverage/depth/combiner expectations for these actual owned inputs
-and classify the observed differences against declared precision bounds.
+`scene-noise-disabled-require-qualified.aot-private.json`.
+
+### Independent post-transform scene pixels (2026-10-09 continuation)
+
+The complete scene fixture left the initialized XDK screen-offset fields at
+zero. Its real `SetViewport` then rewrote reserved constants 58/59 without the
+qualified SDK screen bias, shifting the captured geometry by roughly half a
+pixel. The fixture now initializes both fields from the existing original
+transform binding before the setter. Production LLE/HLE rendering is unchanged.
+All 32 noise-off captures still execute completely without a guard or skip.
+
+`tools/native_scene_draw_reference.py --diagnostics` saves actual color/depth
+bytes, transformed vertices, fog, dispatched state, input/library hashes and
+execution evidence. `--draws` selects particular retained inputs. These device
+observations are explicit **post-transform fixture inputs**, never expected
+shader results. `tools/native_scene_pixel_reference.py` computes coverage,
+LESS depth outcomes, BC1 decoding, perspective gradients, trilinear repeat
+sampling and modulated colors independently, without consuming after-images or
+calling the production rasterizer/codec. Its closed state assertions reject
+unsupported profiles, transparent BC1, constant-depth specialization and absent
+execution evidence. RGB changes; destination alpha and stencil must be exact.
+
+The mathematical inputs use exact rational planes on the four-bit subpixel
+grid and ideal 565/palette colors. The RGB bound remains **one channel step**:
+endpoint expansion plus palette rounding is below 1.2 texture channel steps,
+convex filtering preserves that bound, and the admitted diffuse channels are
+at most 0.5 before final UNORM rounding. No native mismatch maximum supplies a
+tolerance. The BC1 equations and filling convention are documented by
+[Microsoft's block-compression reference](https://learn.microsoft.com/en-us/windows/win32/direct3d10/d3d10-graphics-programming-guide-resources-block-compression)
+and [rasterization rules](https://learn.microsoft.com/en-us/windows/win32/direct3d11/d3d10-graphics-programming-guide-rasterizer-stage-rules);
+the fixture's four-bit grid remains the maintained software contract, not a
+claim that a desktop rasterizer establishes NV2A silicon precision.
+
+Depth has a separate exact rational nearest/even binary32 calculation, also
+checked against the independent affine interpolation error bound `gamma(6)`.
+The retained DLL was compiled with `-march=native`; disassembly at the depth
+expression shows a rounded B product, fused A/C multiply-adds and the rounded
+reciprocal. `--depth-arithmetic fma-b-first` declares that graph from build and
+instruction evidence. The separate arithmetic graph remains available for
+other builds; selecting a graph by observed pixel agreement is prohibited.
+This distinction resolves depth-test decisions near existing target depths
+without widening the gate. Exact NV2A arithmetic still belongs to the deferred
+hardware precision question.
+
+| Retained draw | Covered pixels | Depth-rejected fragments | Written pixels | Pixel contract |
+| --- | ---: | ---: | ---: | --- |
+| 2 | 25 | 0 | 25 | Pass |
+| 3 | 116 | 0 | 116 | Pass |
+| 4 | 164 | 106 | 58 | Pass |
+| 5 | 3,741 | 325 | 3,416 | Pass |
+| 6 | 5,425 | 1,015 | 4,410 | Pass |
+
+All five cases pass: **8,025 written pixels** and **1,527,975 untouched pixels**,
+zero coverage/depth/stencil/alpha failures and RGB error at most one step.
+Seven corrupted-output controls reject no-op execution, an omitted pixel,
+a stray write, incorrect color, depth, stencil and masked alpha, each with
+qualification failure/exit 1. Private evidence is
+`scene-firstworld-bias-fixed.aot-private.json`,
+`scene-five-pixel-component.aot-private.json` and
+`scene-pixel-oracle-negative-controls/controls.aot-private.json`.
+
+Reproduction under the owner's existing Idle/one-processor wrapper:
+
+```powershell
+& 'C:\Users\Matthew\AppData\Local\Programs\Python\Python312\python.exe' build\blinx\run_idle.py 'C:\Users\Matthew\AppData\Local\Programs\Python\Python312\python.exe' tools\native_scene_draw_reference.py --xbe F:\Projects\xboxlle\xboxlle\build\phobos-audit-20261006\blinx-na\default.xbe --binding build\blinx\d3d-binding.aot-private.json --library build\visibility-lle\libxlle_nv2a_reference.dll --dependencies C:\msys64\mingw64\bin --captures build\blinx\scene-inputs-firstworld-20261009 --noise-disabled-fixture --draws 2 3 4 5 6 --diagnostics build\blinx\scene-five-bias-fixed --output build\blinx\scene-five-bias-fixed.aot-private.json
+& 'C:\Users\Matthew\AppData\Local\Programs\Python\Python312\python.exe' build\blinx\run_idle.py 'C:\Users\Matthew\AppData\Local\Programs\Python\Python312\python.exe' tools\native_scene_pixel_reference.py --captures build\blinx\scene-inputs-firstworld-20261009 --diagnostics build\blinx\scene-five-bias-fixed --depth-arithmetic fma-b-first --output build\blinx\scene-five-pixel-component.aot-private.json
+```
+
+`post_transform_pixel_qualified` is now true for the five exercised draws.
+**`complete_scene_pixel_qualified` remains false**: shader/setter-to-pixel
+composition needs an independent input contract rather than using observed
+vertices/state as expected whole-scene results. The original enabled-noise
+route remains guarded, and `--require-qualified` still fails complete-scene
+qualification. Next, close that composition gap using the existing captures
+and retain native HLE comparison as a separate gate. No GPU, title/audio run,
+recompile or HLE runtime/performance change was required for this milestone.
 
 Continue broader exercised texture/state layouts and raster outcomes toward
 complete scene composition, retaining the bounded projected-footprint gates.

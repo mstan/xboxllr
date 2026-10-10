@@ -75,6 +75,17 @@ record its exact question and dependency at the end and continue the next
 independent entry. Deferral does not count as qualification or permit guessed
 device results. The final row is a deferred-work queue, not a tenth family.
 
+2026-10-09 scene-pixel continuation: corrected the offline scene fixture's
+missing initialized XDK screen bias before the original viewport setter.
+An independent post-transform mathematical pixel contract now passes all five
+changed-target draws: 8,025 written and 1,527,975 untouched pixels, exact
+coverage/depth/preserved alpha/stencil and RGB within one step. Seven corrupted
+outputs fail the gate. These supplied-vertex/state component results leave
+complete shader/setter-to-scene composition and enabled-noise pixels open;
+graphics remains partial and the family count remains 4/9. HLE runtime code is
+unchanged; CPU-only Idle/one-processor checks reused the retained inputs.
+See [the pixel contract and remaining composition gap](../pilots/native-title/GRAPHICS-LLE.md#independent-post-transform-scene-pixels-2026-10-09-continuation).
+
 GPU startup's unresolved FD6806A0 transaction now has a prepared, bounded
 hardware observation in `.111` (probe branch `feat/av-handshake-probe-20261009`,
 commit `a22bb74`). All 17 offline checks and the XBE build pass; hardware

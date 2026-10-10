@@ -11,6 +11,7 @@ records the captured value separately. It does not qualify enabled-noise scenes.
 """
 import argparse
 import ctypes
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -108,6 +109,12 @@ def replay(args,path):
         for offset,value in ((0x21b4,color_header),(0x21b8,depth_header if depth else 0),
                 (0x21c0,color_header),(0x21c4,color_header),(0x510,scene['header'][9])):
             ref.put(ref.device+offset,value)
+        # SetViewport consumes the preinitialized device's screen offset when
+        # it writes reserved constants 58/59. Zeroing this field silently
+        # changes the captured program inputs by the SDK's half-pixel bias.
+        transform=ref.binding['transform_binding']
+        ref.put(ref.device+transform['fields']['screen_offset'],
+            transform['screen_bias'],transform['screen_bias'])
         for method,value in ((0x208,0x128),(0x20c,(width*4)*0x10001),
                 (0x210,FRAME),(0x214,FRAME+0x200000),(0x200,width<<16),
                 (0x204,height<<16),(0x2c0,(width-1)<<16),(0x2e0,(height-1)<<16)):
@@ -177,6 +184,26 @@ def replay(args,path):
         vertices=ref.lib.xlle_nv2a_reference_vertices
         vertices.restype=ctypes.c_uint32;vertices.argtypes=[ctypes.c_void_p,ctypes.POINTER(ctypes.c_float),ctypes.c_uint32]
         vertex_count=None if guard else vertices(ref.gpu,None,0)
+        diagnostics=None
+        if args.diagnostics and not guard:
+            values=(ctypes.c_float*(vertex_count*28))()
+            assert vertices(ref.gpu,values,vertex_count)==vertex_count
+            fog=ref.lib.xlle_nv2a_reference_fog
+            fog.restype=ctypes.c_uint32
+            fog.argtypes=[ctypes.c_void_p,ctypes.POINTER(ctypes.c_float),ctypes.c_uint32]
+            fog_values=(ctypes.c_float*vertex_count)()
+            assert fog(ref.gpu,fog_values,vertex_count)==vertex_count
+            # Device observations are diagnostic inputs, never an expected
+            # shader/raster result. Keep them separate from qualification.
+            diagnostics=dict(vertices=[list(values[i*28:(i+1)*28]) for i in range(vertex_count)],
+                fog=list(fog_values),
+                vertex_capture_sha256=capture['sha256'],scene_capture_sha256=scene['sha256'],
+                library_sha256=hashlib.sha256(args.library.read_bytes()).hexdigest(),
+                noise_disabled_fixture=args.noise_disabled_fixture,
+                complete_draw_executed=bool(get==put and vertex_count==h[4] and census['executions'] and not any(list(census.values())[3:])),
+                methods={hex(i):method_value(ref.gpu,i) for i in
+                    list(range(0x200,0x400,4))+list(range(0x1b00,0x1c00,4))+
+                    list(range(0xa60,0xae0,4))+list(range(0x1e40,0x1e80,4))+[0x9c0,0x9c4,0x9c8]})
         packets=ref.get(0x2100000,(put-0x2100000)//4);bindings=[];software_methods=[];offset=0
         while offset<len(packets):
             command=packets[offset];size=(command>>18)&0x7ff
@@ -185,6 +212,11 @@ def replay(args,path):
             if command&0x1fff==0x100:software_methods.append([hex(command),hex(packets[offset+1])])
             offset+=size+1
         after=[bytes(ref.cpu.mem_read(FRAME,len(color))),bytes(ref.cpu.mem_read(FRAME+0x200000,len(depth)))]
+        if diagnostics is not None:
+            args.diagnostics.mkdir(parents=True,exist_ok=True)
+            for name,data in zip(('color','depth'),after):
+                (args.diagnostics/f'{path.stem}-{name}.bin').write_bytes(data)
+            (args.diagnostics/f'{path.stem}.aot-private.json').write_text(json.dumps(diagnostics,indent=2)+'\n')
         differences=[]
         for i in range(2):
             expected=target_bytes(scene['after'][i],bool(i))
@@ -213,11 +245,18 @@ if __name__=='__main__':
     for name in ('xbe','binding','library','dependencies','output','captures'):
         parser.add_argument('--'+name,type=Path,required=True)
     parser.add_argument('--limit',type=int,default=32)
+    parser.add_argument('--draws',type=int,nargs='+',help='Replay only these retained draw numbers')
+    parser.add_argument('--diagnostics',type=Path,help='Save actual target bytes and device observations; does not supply expected pixels')
     parser.add_argument('--noise-disabled-fixture',action='store_true',help='Explicitly set render state 159 to zero via the original setter; does not qualify enabled-noise scenes')
     parser.add_argument('--require-qualified',action='store_true',help='Fail if any draw remains guarded or lacks independent pixel qualification')
     args=parser.parse_args();dependency_handles=[os.add_dll_directory(str(args.dependencies.resolve()))]
     rows=[]
-    for path in sorted(args.captures.glob('draw-*.bin'),key=lambda p:int(p.stem.split('-')[1]))[:args.limit]:
+    paths=sorted(args.captures.glob('draw-*.bin'),key=lambda p:int(p.stem.split('-')[1]))
+    if args.draws:
+        requested=set(args.draws)
+        paths=[p for p in paths if int(p.stem.split('-')[1]) in requested]
+        assert {int(p.stem.split('-')[1]) for p in paths}==requested,'Missing requested draw'
+    for path in paths[:args.limit]:
         row=replay(args,path);rows.append(row);print(json.dumps(row),flush=True)
     assert rows
     args.output.write_text(json.dumps(dict(xbe_sha256=XBE_SHA,draws=rows,
