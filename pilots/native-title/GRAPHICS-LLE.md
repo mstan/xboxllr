@@ -2403,3 +2403,32 @@ Private evidence is `postprocess-native-20261010/float-cache-diagnostic`, with
 original/diagnostic/restored source and executable hashes, exact commands,
 observations and the intentionally failing `qualification-diagnostic` report.
 No title or Xbox run is part of this diagnostic.
+
+## Independent empty positive-W depth-domain clipping - 2026-10-10
+
+The original producer prefix now passes **768 whole draws /1,002,700,800 owned
+pixels**, with 126,422 independently expected written fragments. Positive-W
+draws 522 and 669 contain out-of-range original vertex depth, but their ten
+whole primitives independently derive empty W/XY clipping results. The proof
+precedes any bypass of fragment depth arithmetic. Negative vertex depth alone
+never establishes rejection; surviving depth/mixed-W pixels and original
+near/zero W remain guarded. The cumulative chain also derives 187 empty
+mixed-W and 753 whole-negative-W primitives with unchanged published equations.
+
+Six new authored depth/false-emptiness controls and all 21 retained pixel/state
+controls pass. Every original whole shader/state/draw executes with independent
+expected predecessors. Written RGB stays within one code;
+depth/stencil/alpha/untouched bytes stay exact. Six drained fixture pushbuffer
+jumps are counted without qualifying original ring rollover. The new wrapper
+explicitly selects the reviewed 768 limit; shared/default/public producer
+admission remains capped at 512. No later original execution is claimed.
+
+Private evidence is `empty-depth-prefix768-qualified.aot-private.json`
+(SHA-256 `be7474c9d1a8662ac27fcc06e512d6ed07dde7496de825625f1a2c14d7153a99`),
+`empty-depth-prefix768-controls.aot-private.json`
+(`16308eb69adf3a77e720f7468a6afbf4dad7f0423240121d378f0798237d98b0`)
+and `empty-depth-prefix768-handoff.aot-private.json` under the complete-frame
+capture directory. Run `tools/qualify_native_scene_empty_depth.py` with the
+preceding fixture paths, `--last-draw 768 --depth-arithmetic fma-b-first
+--clip-arithmetic fma`. Full scene/HLE pixels, enabled noise, original
+startup/lifetime and exact silicon remain open. Family count stays **4/9**.

@@ -27,8 +27,10 @@ from native_scene_producer_reference import expected_draw,compare_storage
 from native_frame_composition_reference import recycle
 
 
-def run(args, expectation=expected_draw, scope=__doc__):
-    require(type(args.last_draw) is int and 1 <= args.last_draw <= 512, 'Choose a bounded prefix <=512')
+def run(args, expectation=expected_draw, scope=__doc__, prefix_limit=512):
+    require(type(prefix_limit) is int and prefix_limit in (512,768), 'Unsupported bounded prefix limit')
+    require(type(args.last_draw) is int and 1 <= args.last_draw <= prefix_limit,
+            f'Choose a bounded prefix <={prefix_limit}')
     coverage = audit(args.captures/'frame.jsonl')
     reader = Reader(args.captures/'frame-inputs.bin').read()
     inputs = Inputs(reader)
@@ -101,6 +103,7 @@ def run(args, expectation=expected_draw, scope=__doc__):
                   complete_scene_pixel_qualified=False,production_hle_pixels_qualified=False,
                   exact_hardware_rounding_qualified=False,original_startup_lifetime_qualified=False)
     report.update(fixture_pushbuffer_recycles=fixture_recycles,original_ring_rollover_qualified=False)
+    report['requested_prefix_limit'] = prefix_limit
     report['final_written_pixels'] = {str(n):sorted(indices) for n,indices in written.items()}
     report['expected_target_sha256'] = {str(n):hashlib.sha256(data).hexdigest() for n,data in expected.items()}
     args.output.write_text(json.dumps(report,indent=2)+'\n')
