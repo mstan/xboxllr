@@ -90,3 +90,85 @@ static int test_resource_completion(void)
     }
     fprintf(stderr,"PASS: real resource event completion, batch sharing, changed uploads, pixel results, idle reuse, no repeated idle queries and %u owned GPU event waits\n",event_waits);return 0;
 }
+
+#ifdef PILOT_D3D_PHOBOS
+static int alias_completion_draw(void)
+{
+    struct {float x,y,z,w;uint32_t color;float u,v;} quad[]={
+        {16,16,.5f,1,0xffffffff,.5f,.5f},{48,16,.5f,1,0xffffffff,.5f,.5f},
+        {16,48,.5f,1,0xffffffff,.5f,.5f},{48,48,.5f,1,0xffffffff,.5f,.5f}};
+    CHECK(!pilot_gfx_draw_up(D3DPT_TRIANGLESTRIP,2,quad,sizeof(quad[0]),0x144));
+    return 0;
+}
+static int test_alias_completion(const uint32_t parameters[17])
+{
+    /* Submission ownership is exact even when a fast GPU has already completed.
+     * No timing or pixel readback determines these expected use serials. */
+    pilot_gfx_pixel_fixed();
+    pilot_gfx_set_state(D3DRS_CULLMODE,D3DCULL_NONE);
+    pilot_gfx_set_state(D3DRS_ZENABLE,0);pilot_gfx_set_state(D3DRS_LIGHTING,0);
+    pilot_gfx_set_state(D3DRS_ALPHABLENDENABLE,0);
+    for(unsigned i=0;i<4;++i)pilot_gfx_set_texture_state(i,D3DTSS_COLOROP,D3DTOP_DISABLE);
+    pilot_gfx_set_texture_state(0,D3DTSS_COLOROP,D3DTOP_SELECTARG1);
+    pilot_gfx_set_texture_state(0,D3DTSS_COLORARG1,D3DTA_TEXTURE);
+    pilot_gfx_set_texture_state(0,D3DTSS_ALPHAOP,D3DTOP_SELECTARG1);
+    pilot_gfx_set_texture_state(0,D3DTSS_ALPHAARG1,D3DTA_TEXTURE);
+    CHECK(!pilot_gfx_clear(1,0xff123456,1,0));
+    uint64_t original=pilot_gfx_resource_serial(PILOT_GFX_SURFACE,0);
+    uint32_t target=0,alias=0;
+    CHECK(!pilot_gfx_texture_create_usage(64,64,1,0x12,1,&target));
+    CHECK(!pilot_gfx_texture_alias(PILOT_GFX_SURFACE,0,0x12,&alias));
+    CHECK(!pilot_gfx_targets(target,0));pilot_gfx_texture_bind(0,alias);
+    CHECK(!alias_completion_draw());
+    struct PilotGpuProgress progress;pilot_gfx_completion_stats(&progress);
+    uint64_t sampled=progress.submitted;
+    CHECK(sampled>original && pilot_gfx_resource_serial(PILOT_GFX_TEXTURE,alias)==sampled);
+    CHECK(pilot_gfx_resource_serial(PILOT_GFX_SURFACE,0)==sampled);
+    pilot_gfx_texture_bind(0,0);pilot_gfx_texture_destroy(alias);
+    CHECK(pilot_gfx_resource_serial(PILOT_GFX_SURFACE,0)==sampled);
+    CHECK(!pilot_gfx_clear(1,0xff654321,1,0));
+    CHECK(pilot_gfx_resource_serial(PILOT_GFX_TEXTURE,target)>sampled);
+    CHECK(pilot_gfx_resource_serial(PILOT_GFX_SURFACE,0)==sampled);
+
+    /* Shared ownership also survives an alias chain and original-wrapper
+     * retirement. Allocation identity must not depend on a reusable slot. */
+    uint32_t source=0,first=0,second=0;
+    CHECK(!pilot_gfx_texture_create_usage(64,64,1,0x12,1,&source));
+    CHECK(!pilot_gfx_texture_clear(source,0xff789abc));
+    CHECK(!pilot_gfx_texture_alias(PILOT_GFX_TEXTURE,source,0x12,&first));
+    CHECK(!pilot_gfx_texture_alias(PILOT_GFX_TEXTURE,first,0x12,&second));
+    pilot_gfx_texture_bind(0,second);CHECK(!alias_completion_draw());
+    pilot_gfx_completion_stats(&progress);sampled=progress.submitted;
+    CHECK(pilot_gfx_resource_serial(PILOT_GFX_TEXTURE,source)==sampled);
+    pilot_gfx_texture_bind(0,0);pilot_gfx_texture_destroy(second);
+    CHECK(pilot_gfx_resource_serial(PILOT_GFX_TEXTURE,source)==sampled);
+    pilot_gfx_texture_destroy(source);
+    CHECK(pilot_gfx_resource_serial(PILOT_GFX_TEXTURE,first)==sampled);
+    uint32_t reused=0;CHECK(!pilot_gfx_texture_create_usage(64,64,1,0x12,1,&reused));
+    CHECK(!pilot_gfx_resource_serial(PILOT_GFX_TEXTURE,reused));
+    pilot_gfx_texture_bind(0,first);CHECK(!alias_completion_draw());
+    pilot_gfx_completion_stats(&progress);sampled=progress.submitted;
+    pilot_gfx_texture_bind(0,0);pilot_gfx_texture_destroy(first);
+    CHECK(!pilot_gfx_resource_serial(PILOT_GFX_TEXTURE,reused));
+    pilot_gfx_texture_destroy(reused);
+
+    /* Presentation replacement retires its owner but aliases retain old
+     * storage. A new presentation allocation must not inherit old reads. */
+    CHECK(!pilot_gfx_targets(0,UINT32_MAX));
+    CHECK(!pilot_gfx_texture_alias(PILOT_GFX_SURFACE,0,0x12,&alias));
+    original=pilot_gfx_resource_serial(PILOT_GFX_SURFACE,0);
+    CHECK(pilot_gfx_resource_serial(PILOT_GFX_TEXTURE,alias)==original);
+    CHECK(!pilot_gfx_reset(parameters));
+    CHECK(pilot_gfx_resource_serial(PILOT_GFX_TEXTURE,alias)==original);
+    uint64_t replacement=pilot_gfx_resource_serial(PILOT_GFX_SURFACE,0);
+    CHECK(!pilot_gfx_targets(target,0));pilot_gfx_texture_bind(0,alias);
+    CHECK(!alias_completion_draw());
+    pilot_gfx_completion_stats(&progress);
+    CHECK(pilot_gfx_resource_serial(PILOT_GFX_TEXTURE,alias)==progress.submitted);
+    CHECK(pilot_gfx_resource_serial(PILOT_GFX_SURFACE,0)==replacement);
+    pilot_gfx_texture_bind(0,0);pilot_gfx_texture_destroy(alias);
+    CHECK(!pilot_gfx_targets(0,UINT32_MAX));pilot_gfx_texture_destroy(target);
+    fprintf(stderr,"PASS: allocation use survives surface/texture alias retirement, owner retirement, slot reuse and reset; unrelated work remains separate\n");
+    return 0;
+}
+#endif

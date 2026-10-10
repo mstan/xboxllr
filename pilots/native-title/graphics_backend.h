@@ -25,6 +25,8 @@ uint32_t pilot_gfx_height(void);
 int32_t pilot_gfx_surface_ref(unsigned surface,int acquire);
 enum PilotResourceKind {PILOT_GFX_DEVICE,PILOT_GFX_SURFACE,PILOT_GFX_TEXTURE,PILOT_GFX_VERTEX};
 int pilot_gfx_resource_busy(unsigned kind,uint32_t handle);
+/* Read-only selected use serial; does not poll, submit or wait for GPU work. */
+uint64_t pilot_gfx_resource_serial(unsigned kind,uint32_t handle);
 struct PilotGpuProgress {uint64_t submitted,completed;unsigned pending_queries,created_queries;};
 void pilot_gfx_completion_stats(struct PilotGpuProgress *progress);
 uint64_t pilot_gfx_checkpoint(void);

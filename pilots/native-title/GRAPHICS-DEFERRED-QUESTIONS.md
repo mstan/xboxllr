@@ -36,6 +36,18 @@ full graphics correctness are not established by that finding.
 These are the next foundation batch. They are not treated as qualified or
 hidden among safely deferred precision questions.
 
+GFX-F01 resolution, 2026-10-10: image allocations now own a shared completion
+record retained by presentation surfaces and texture aliases. Sampling updates
+that record; alias or original-wrapper retirement cannot erase a surviving
+allocation's use. Reset gives replacement images new records while aliases
+retain the superseded image's record. Queries select the record directly rather
+than scanning texture slots. The authored regression first failed on the old
+source-surface lookup, then passed over three device lifetimes. The existing
+backend, float-blend, depth/cache, guest ABI and scheduler batch also passes
+(11 CTest entries total). No per-pixel work or routine framebuffer transfer was
+added. This resolves completion ownership within the maintained adapter;
+writable/depth alias content generations remain GFX-D07.
+
 ## Safely deferred questions
 
 All entries below are **open and deferred**, not qualified.
@@ -52,6 +64,9 @@ All entries below are **open and deferred**, not qualified.
 | GFX-D08 | How should automatic float blending handle overlapping geometry or broader blend profiles? | Current semantic admission proves nonoverlapping geometry and keeps its guard. A single pre-draw snapshot cannot represent ordered blending among overlapping fragments. Existing admitted HLE behavior stays unchanged. | Before broadening that admission, choose and test a GPU strategy that preserves the required order. |
 | GFX-D09 | Can texture comparisons and constant uploads use dirty generations? | Current CPU comparisons and unconditional constant uploads are localized costs. GPU conversion/blend caches and their performance boundaries remain intact. No performance regression is established by this audit. | Profiling identifies material cost and guest-write tracking can supply trustworthy dirty generations. |
 | GFX-D10 | How should the private reference donor be replaced for the intended product build? | The guest-independent adapter keeps native handles out of guest memory. `native_phobos_d3d.py` explicitly excludes its private GPL reference from the intended non-GPL product; this remains existing migration debt. | When selecting the product backend, preserve the adapter's semantic, ownership and completion contracts rather than copying donor internals into callers. |
+| GFX-D11 | What are the complete DMA target, page, access and coherency semantics for surface destinations? | Pinned xemu and nxdk sources establish the local class-0x3d construction but do not qualify all mapping/flag combinations. GFX-F02 has a reviewed proposal for a bounded local flat surface contract, with distinct unsupported mappings and retained raw descriptor fields. Non-surface DMA roles stay separate. | Before extending destination admission beyond the supported mapping, or when a representative supported title requires another encoding; qualify its mapper without changing unrelated DMA roles. |
+| GFX-D12 | When is an intentional physical-address-zero color/zeta destination safe and faithful? | Class-0x3d/base-zero descriptors are legitimate constructions; they do not establish destination intent. The reproduced boot regression and its low-RAM canaries remain preserved. Physical zero stays explicitly protected; nonzero offsets from base zero remain supported when their range is valid. | A bounded implementation contract and independent evidence distinguish intentional use from the reproduced boot hazard, or final hardware qualification needs that address. Do not infer a hardware valid bit from software initialization history. |
+| GFX-D13 | What is the exact hardware behavior of depth writes without a usable binding when depth/stencil tests are disabled? | The existing software floor permits optional absent zeta and protects the boot's zero-destination write-only case. GFX-F02 separates those compatibility cases from malformed bound destinations and required comparison/stencil storage. This preserves existing boot behavior without claiming hardware equivalence. | Before advertising those compatibility dispositions as hardware-correct, or if a supported title depends on their exact effects. Enabled comparison/stencil correctness remains immediate foundation work. |
 
 ## Preserved checkpoint and review
 

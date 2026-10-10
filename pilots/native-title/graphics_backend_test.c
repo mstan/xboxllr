@@ -125,6 +125,9 @@ int main(int argc,char **argv)
     for (unsigned pass=0;pass<3;++pass) {
         CHECK(pilot_gfx_create(pp)>=0);
 #ifdef PILOT_D3D_PHOBOS
+        if(argc==2 && !strcmp(argv[1],"--completion-alias")) {
+            CHECK(!test_alias_completion(pp));pilot_gfx_close();continue;
+        }
         if(argc==2 && !strcmp(argv[1],"--float-blend")) {
             CHECK(!test_float_blend(pp));pilot_gfx_close();
             struct PilotBlendStats stats;pilot_gfx_blend_stats(&stats);
@@ -195,6 +198,7 @@ int main(int argc,char **argv)
         CHECK(test_flat_pipeline()==0);
         CHECK(test_resource_completion()==0);
 #ifdef PILOT_D3D_PHOBOS
+        CHECK(!test_alias_completion(pp));
         CHECK(test_combiner_memory_draw()==0);
         CHECK(test_feedback()==0);
         CHECK(test_depth_argb_sampling()==0);

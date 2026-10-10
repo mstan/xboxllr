@@ -8,7 +8,28 @@ static ID3D11DeviceContext3 *pilot_completion_context;
 static int pilot_completion_events_checked;
 static uint64_t pilot_submitted,pilot_completed;
 static unsigned pilot_query_count,pilot_query_created;
-static uint64_t pilot_surface_use[3];
+/* Completion belongs to image storage, not a reallocatable texture slot or
+ * presentation handle. Aliases retain this small owner across retirement and
+ * reset; recording/querying use needs no search or GPU readback. */
+struct PilotImageUse {uint64_t serial;unsigned refs;};
+static struct PilotImageUse *pilot_surface_use[3];
+static struct PilotImageUse *pilot_image_use_create(void)
+{
+    struct PilotImageUse *use=calloc(1,sizeof(*use));
+    if(use)use->refs=1;
+    return use;
+}
+static void pilot_image_use_retain(struct PilotImageUse *use)
+{
+    if(!use || !use->refs || use->refs==UINT_MAX)pilot_d3d_backend_stop("invalid image completion retain");
+    ++use->refs;
+}
+static void pilot_image_use_release(struct PilotImageUse *use)
+{
+    if(!use)return;
+    if(!use->refs)pilot_d3d_backend_stop("invalid image completion release");
+    if(!--use->refs)free(use);
+}
 /* Optional sparse diagnosis of native driver stalls. Report only calls over
  * 50 ms, after the measured call returns; ordinary completion is unchanged. */
 static uint64_t pilot_gpu_call_begin(void)
@@ -114,7 +135,6 @@ static void pilot_completion_close(void)
         ID3D11Query_Release(entry->query);free(entry);
     }
     pilot_completion_tail=NULL;pilot_submitted=pilot_completed=0;pilot_query_count=pilot_query_created=0;
-    memset(pilot_surface_use,0,sizeof(pilot_surface_use));
     if(pilot_completion_context){ID3D11DeviceContext3_Release(pilot_completion_context);pilot_completion_context=NULL;}
     pilot_completion_events_checked=0;
 }
@@ -146,20 +166,20 @@ void pilot_gfx_completion_stats(struct PilotGpuProgress *progress)
 static void pilot_mark_targets(unsigned flags,uint64_t serial)
 {
     if(flags&1) {
-        if(pilot_color_target)pilot_textures[pilot_color_target-1].last_use=serial;
-        else pilot_surface_use[0]=serial;
+        if(pilot_color_target)pilot_textures[pilot_color_target-1].use->serial=serial;
+        else pilot_surface_use[0]->serial=serial;
     }
     if(flags&6) {
-        if(pilot_depth_target==UINT32_MAX)pilot_surface_use[2]=serial;
+        if(pilot_depth_target==UINT32_MAX)pilot_surface_use[2]->serial=serial;
         else if(pilot_depth_target) {
             struct PilotNativeTexture *texture=&pilot_textures[pilot_depth_target-1];
-            texture->content_serial=texture->last_use=serial;
+            texture->content_serial=texture->use->serial=serial;
         }
     }
 }
 static void pilot_mark_draw(void)
 {
     uint64_t serial=pilot_mark_work();pilot_mark_targets(7,serial);
-    for(unsigned i=0;i<4;++i)if(pilot_bound_textures[i])pilot_textures[pilot_bound_textures[i]-1].last_use=serial;
+    for(unsigned i=0;i<4;++i)if(pilot_bound_textures[i])pilot_textures[pilot_bound_textures[i]-1].use->serial=serial;
     for(unsigned i=0;i<16;++i)if(pilot_bound_vertices[i])pilot_vertices[pilot_bound_vertices[i]-1].last_use=serial;
 }

@@ -1027,3 +1027,14 @@ All 19 combined authored tests and 21 public-runner artifact controls pass.
 [Evidence and numeric limits](../pilots/native-title/GRAPHICS-LLE.md#independent-viewport-clipped-producer-prefix---2026-10-10).
 Draw29's diffuse profile is the next guarded domain. This changes no shipping
 HLE/core code; complete scene/native/noise/startup/lifetime remains open at **4/9**.
+
+The architecture-first foundation batch fixes native allocation completion
+ownership (GFX-F01). Surface/texture aliases retain a shared use record through
+sampling, retirement, slot reuse and reset; completion queries no longer scan
+alias slots. The new regression first reproduces the old failure, then passes
+alongside ten relevant existing backend/cache/guest-contract checks. No routine
+pixel work or framebuffer transfer is added. GFX-F02 DMA/depth validity remains
+in progress, with boot-memory protection retained. Newly found safe mapping,
+physical-zero and optional-write-only questions are appended to the
+[question queue](../pilots/native-title/GRAPHICS-DEFERRED-QUESTIONS.md).
+Full graphics qualification remains open and the service-family count is **4/9**.

@@ -3066,3 +3066,23 @@ risks next, and append safely deferred clipping, pixel, integration or hardware
 questions with explicit reopening triggers to the
 [graphics foundation/question queue](GRAPHICS-DEFERRED-QUESTIONS.md).
 Whole graphics qualification and the **4/9** family count remain unchanged.
+
+## Allocation completion ownership - 2026-10-10
+
+GFX-F01 is fixed in the native adapter. A stable shared allocation record now
+retains the latest submission across texture/surface alias sampling, alias and
+source-wrapper retirement, slot reuse and presentation reset. Surface and
+texture completion queries select that owner directly. Previously a surface
+query missed alias reads, and destroying a sampled alias discarded its serial.
+The new regression reproduces the old source-surface failure and passes after
+the correction over three device lifetimes. Ten relevant existing backend,
+float-blend, depth/cache and guest-contract checks also pass. There is no added
+pixel work, readback or synchronous GPU wait in the correction.
+
+Private baseline/fixed logs and source/test pins are retained in
+`frame-inputs-firstworld-20261010/gfx-f01-allocation-completion.aot-private.json`.
+The accepted appearance baseline is retained; no title/audio or Xbox run was
+needed for this bookkeeping correction. GFX-F02 descriptor/depth disposition
+work remains open. Additional mapping, physical-zero and optional-write-only
+questions are appended to the [question queue](GRAPHICS-DEFERRED-QUESTIONS.md)
+with explicit reopening triggers. The full family count stays **4/9**.

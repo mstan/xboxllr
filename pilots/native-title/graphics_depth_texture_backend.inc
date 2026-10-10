@@ -110,6 +110,6 @@ static ID3D11ShaderResourceView *pilot_depth_texture_argb(uint32_t handle,ID3D11
     if(saved_output)ID3D11UnorderedAccessView_Release(saved_output);
     for(unsigned i=0;i<2;++i)if(saved_views[i])ID3D11ShaderResourceView_Release(saved_views[i]);
     texture->argb_serial=texture->content_serial;texture->argb_initialized=1;
-    texture->last_use=pilot_mark_work();++pilot_depth_texture_counts.conversions;
+    texture->use->serial=pilot_mark_work();++pilot_depth_texture_counts.conversions;
     return texture->argb_srv;
 }
