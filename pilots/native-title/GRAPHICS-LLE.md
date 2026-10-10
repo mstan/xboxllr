@@ -1845,3 +1845,66 @@ explicit, and original startup/lifetime, feedback caching, production HLE
 pixels and hardware precision remain open. No new title/audio/host GPU/Xbox
 run occurred; only the reference observation wrapper was rebuilt, at Idle
 priority on one logical processor. **4/9** and the full goal remain active.
+
+## Generic stencil correctness and initial-clear independence - 2026-10-10
+
+The generic triangle rasterizer incorrectly classified stencil-enable bit5 as
+inert. It recorded the requested state but performed no stencil comparisons
+or operations. The first684 authored stencil draws reproduce1,122 failed
+assertions before the fix. The maintained LLE now executes masked S8
+comparisons, FAIL/ZFAIL/ZPASS operations and masked writes while preserving
+D24. Shader/alpha rejection suppresses every stencil operation; stencil
+rejection suppresses color, depth writes and visibility. Color/depth masks
+remain independent of stencil writes. This correctness fix applies by default.
+
+Expectations follow [OpenGL1.3 sections4.1.4-4.1.6](https://registry.khronos.org/OpenGL/specs/gl/glspec13.pdf),
+the [wraparound extension](https://registry.khronos.org/OpenGL/extensions/EXT/EXT_stencil_wrap.txt)
+and the [pinned NV097 stencil fields](https://github.com/XboxDev/nxdk/blob/29638d0b001f179b73c3513489af10ddc2986216/lib/pbkit/nv_regs.h).
+All eight comparisons and eight operations pass authored endpoint/mask cases,
+including saturation, wrapping, reference-vs-stored operand ordering,
+alpha-before-stencil, all three operation branches, stencil-only draws,
+visibility, a live second draw and separate padded color/zeta pitches.
+Malformed active fields, undersized pitch, Z16 and unbound zeta stop before
+raster writes; disabled stencil ignores stale fields. Linear zeta storage now
+uses its own pitch and covered-row extent. Existing unusable depth-only
+fallback behavior is unchanged. Accelerated LLE packets carry neither stencil
+state nor a separate zeta pitch, so these draws remain on the software floor.
+Shipping native HLE shaders, upload caches and capture defaults are unchanged.
+
+All **1,662 authored draw cases**, including706 new positive/guard cases, pass.
+The five NV2A/tile/zeta regression suites,131 focused Python tests and actual
+reference-observer ABI regression also pass. The corrected complete original
+frame replay still passes all **4,331 draws /29,396 vertices**,852,468
+independent vertex values and462,399 consumed/setup words. The prior reference
+DLL is preserved beside the earlier report; private new results are
+`composed-stencil-qualified.aot-private.json` and `composed-stencil-observed/`
+under the complete-input directory.
+
+The corrected composed image removes the large sky discrepancy. Its stencil
+producer has7264 marked pixels versus7300 in the native capture, with76
+differing stencil positions. Diagnostic mean absolute RGB error drops from
+12.43 to2.39 channel steps. These comparisons are **not independent pixel
+qualification**: native noise is enabled, fixture noise is disabled, and
+remaining blur/raster differences need independent explanation. Counts or
+visual plausibility cannot choose the correct route.
+
+`tools/native_frame_clear_dependency.py` separately resolves the missing live
+initial clear viewport as an input dependency for this bounded fixture. The
+supplied initial depth root already contains depth1/stencil0 at all307,200
+pixels, so that clear is idempotent for any viewport. No draw samples or renders
+the initial color root before its first draw4301, which samples other roots
+and independently derives a complete640x480 opaque strip: full RGBA writes,
+no destination blend/logic read, alpha/depth/cull rejection or shader clipping,
+and stencil ALWAYS. Positive W and unit texture Q cover all307,200 color pixel
+centers. The prior color bytes cannot reach final targets. Eight authored tests
+reject changed depth/stencil inputs, incomplete geometry, prior reads,
+destination-dependent state and discard paths. Private proof
+`initial-clear-dependency.aot-private.json` uses captured inputs and independent
+vertex/state math, never native after-images or observed LLE pixels. This does
+not observe the live viewport or qualify retail startup/lifetime, and needs
+no new title capture.
+
+Complete-scene pixels, production HLE raster equivalence, feedback caching,
+enabled noise, original startup/lifetime and exact hardware questions remain
+open. CPU builds/checks used Idle priority on one logical processor; no new
+title/audio/host GPU/Xbox run occurred. **4/9** and the full goal stay active.

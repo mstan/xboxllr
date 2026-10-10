@@ -861,6 +861,8 @@ public:
         kUnsupportedTextureFormat,
         kUnsupportedTextureWrap,
         kUnsupportedTextureShaderProgram,
+        kStencilFunc,
+        kStencilOp,
         kCount,
     };
     static size_t generic_skip_reason_count() {
@@ -880,6 +882,7 @@ public:
             "unsupported-enable-bits", "unsupported-blend-equation",
             "unsupported-texture-format", "unsupported-texture-wrap",
             "unsupported-texture-shader-program",
+            "stencil-func", "stencil-op",
         };
         return index < (sizeof(kNames) / sizeof(kNames[0])) ? kNames[index]
                                                              : "unknown";

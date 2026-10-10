@@ -10368,7 +10368,7 @@ Nv2a::GenericShaderCensusRow* Nv2a::generic_shader_census_row(
 //   * OCW scale/bias and MUX_SUM (bit 14) — see GenericSkipReason::kOcwFeature
 //   * any final-combiner signature other than the proven identity passthrough — see
 //     GenericSkipReason::kFinalCombiner
-//   * stencil test, logic ops other than COPY, blend equations other than FUNC_ADD, blend factors
+//   * logic ops other than COPY, blend equations other than FUNC_ADD, blend factors
 //     other than ZERO/ONE/SRC_ALPHA/ONE_MINUS_SRC_ALPHA
 //
 // Bit-layout note (flagged, not silently guessed): this decoder's ICW/OCW field
@@ -10596,14 +10596,14 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
     const bool logic_copy = logic_enabled && raster_state[kRasterLogicOp] == 0x1503;
     // COPY replaces blending while preserving write masks. Other bitwise
     // operations remain outside this bounded floor, never treated as COPY.
-    // Enables: bits this evaluator does not implement (stencil test, other logic) must
+    // Enables: bits this evaluator does not implement (other logic) must
     // gate a skip if the dashboard/game actually turns them on; bits it always treats
     // as inert (dither, point/line smoothing, point/line polygon offset -- this
     // rasterizer never draws points or lines) are masked out first.
     constexpr uint32_t kEnableInertBits =
-        (1u << 4) | (1u << 5) | (1u << 9) | (1u << 10) | (1u << 11) | (1u << 12);
+        (1u << 4) | (1u << 9) | (1u << 10) | (1u << 11) | (1u << 12);
     constexpr uint32_t kEnableHandledBits =
-        (1u << 0) | (1u << 1) | (1u << 2) | (1u << 3) | (1u << 13);
+        (1u << 0) | (1u << 1) | (1u << 2) | (1u << 3) | (1u << 5) | (1u << 13);
     const uint32_t enable_unsupported_bits =
         enables & ~(kEnableInertBits | kEnableHandledBits | (logic_copy ? (1u << 6) : 0));
     if (enable_unsupported_bits != 0) {
@@ -10869,6 +10869,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
     // skip no matter what stale value it holds.
     const bool alpha_test_enabled = (enables & (1u << 0)) != 0;
     const bool depth_test_enabled_bit = (enables & (1u << 3)) != 0;
+    const bool stencil_test_enabled = (enables & (1u << 5)) != 0;
     const uint32_t alpha_func = raster_state[kRasterAlphaFunc];
     const uint32_t depth_func = raster_state[kRasterDepthFunc];
     const uint32_t alpha_ref = raster_state[kRasterAlphaRef] & 0xFFu;
@@ -10886,6 +10887,25 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
     if (depth_test_enabled_bit && !compare_supported(depth_func)) {
         record_generic_skip_detail(GenericSkipReason::kDepthFunc, depth_func);
         return true;
+    }
+    const uint32_t stencil_func = raster_state[kRasterStencilFunc];
+    const uint32_t stencil_ref = raster_state[kRasterStencilRef] & 0xffu;
+    const uint32_t stencil_read_mask = raster_state[kRasterStencilFuncMask] & 0xffu;
+    const uint32_t stencil_write_mask = raster_state[kRasterStencilWriteMask] & 0xffu;
+    if (stencil_test_enabled) {
+        if (!compare_supported(stencil_func)) {
+            record_generic_skip_detail(GenericSkipReason::kStencilFunc, stencil_func);
+            return true;
+        }
+        for (size_t field : {kRasterStencilOpFail, kRasterStencilOpZFail, kRasterStencilOpZPass}) {
+            switch (raster_state[field]) {
+                case 0x1e00: case 0: case 0x1e01: case 0x1e02: case 0x1e03:
+                case 0x150a: case 0x8507: case 0x8508: break;
+                default:
+                    record_generic_skip_detail(GenericSkipReason::kStencilOp, raster_state[field]);
+                    return true;
+            }
+        }
     }
     // Blend enable (bit1) is semantic too: when disabled, BlendSrc/Dst/Equation may
     // hold anything and must not gate a skip. When enabled, support the witnessed
@@ -10928,7 +10948,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
     // pitch is required to size the color surface; the zeta pitch is validated
     // separately, and only when the zeta surface is actually touched below.
     const bool depth_write_enabled = raster_state[kRasterDepthMask] != 0;
-    const bool wants_zeta = depth_test_enabled_bit || depth_write_enabled;
+    const bool wants_zeta = depth_test_enabled_bit || depth_write_enabled || stencil_test_enabled;
     const uint32_t pitch = surface_pitch & 0xFFFFu;
     const uint32_t zeta_pitch = surface_pitch >> 16;
     uint32_t surface_width = clip_x + clip_width;
@@ -10975,23 +10995,21 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
         surface_swizzle = std::make_unique<SwizzleLookup>(surface_width,
                                                           surface_height);
     }
-    // The zeta surface only needs to be touched at all if the depth test is actually
-    // enabled (a real comparison against stored depth) or a write is requested; when
-    // depth testing is disabled, hardware treats every fragment as passing without
-    // ever reading zeta -- and the (possibly unrelated/smaller) zeta pitch never needs
-    // to be validated at all in that case.
-    // A mismatched zeta pitch (e.g. the witnessed 0x00400a00: color pitch 0xa00/2560
-    // for a 640-wide surface, zeta pitch 0x0040/64 -- clearly not describing the same
-    // 640-wide zeta buffer) or a color_format that doesn't even carry a zeta component
-    // are both treated the same way as an unresolvable zeta DMA context below: degrade
-    // to color-only rendering rather than dropping the whole batch. Every witnessed
-    // profile above requires an exact pitch/format match because their fixed pixel
-    // formulas always read zeta; this evaluator's depth path is already conditioned on
-    // wants_zeta, so "can't use this zeta" and "don't want zeta" collapse to the same
-    // uses_depth=false outcome.
+    // Depth and stencil share D24S8, but linear color and zeta pitches are
+    // independent. Resolve only the rows this draw can touch, preserving zeta
+    // row padding and any extra rows of a larger bound depth target.
+    // Retain the existing depth-only fallback for an unusable zeta layout.
+    // Active stencil cannot use that fallback: no guessed color-only execution
+    // may bypass its comparison or discard the requested stencil operation.
     bool uses_depth = zeta_format == 2 && wants_zeta &&
-                      (surface_swizzled || zeta_pitch == pitch);
-    uint64_t depth_bytes64 = uses_depth ? color_bytes64 : 0;
+                      (surface_swizzled || (zeta_pitch % 4 == 0 &&
+                       uint64_t(zeta_pitch) >= uint64_t(surface_width) * 4));
+    uint64_t depth_bytes64 = uses_depth
+        ? (surface_swizzled ? color_bytes64 : uint64_t(zeta_pitch) * surface_height) : 0;
+    if (stencil_test_enabled && !uses_depth) {
+        record_generic_skip_detail(GenericSkipReason::kUnsupportedSurface, surface_pitch);
+        return true;
+    }
 
     // BUG FIX (guest-memory-corruption regression): a raster batch can bind a DMA
     // context whose PRAMIN descriptor was never actually programmed with a real
@@ -11036,6 +11054,10 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
     if (uses_depth &&
         !resolve_surface(zeta_dma_, zeta_dma_bound_, surface_zeta_offset,
                          depth_bytes64, depth_address)) {
+        if (stencil_test_enabled) {
+            fault_("NV2A generic-combiner stencil surface is unbound or overflows");
+            return false;
+        }
         // The zeta context resolves to something this evaluator cannot safely treat
         // as a real depth buffer (unbound, out of range, or degenerate -- e.g. an
         // "identity" DMA context combined with a zero SURFACE_ZETA_OFFSET, which
@@ -11992,7 +12014,11 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
     bool resident_exact_this_batch = false;
     GenericResidentRejectReason resident_reject_this_batch =
         GenericResidentRejectReason::kCount;
-    if (!accurate_texture_sampling && !needs_fog && !logic_enabled && !flat_shading && !zpass_enabled_ && renderer_ && effective_clip_valid) {
+    // Accelerated packets currently carry neither stencil state nor an
+    // independent zeta pitch. Keep these draws on the maintained CPU floor.
+    const bool accelerated_zeta_supported = !stencil_test_enabled &&
+                                            (!uses_depth || zeta_pitch == pitch);
+    if (accelerated_zeta_supported && !accurate_texture_sampling && !needs_fog && !logic_enabled && !flat_shading && !zpass_enabled_ && renderer_ && effective_clip_valid) {
 #if XLLE_VSH_DRAW_OVERLAP_CENSUS
         const bool fixture_overlap = vsh_draw_overlap_enabled_ && job.vsh_overlap.valid;
         const uint64_t fixture_overlap_t0 = fixture_overlap && perf_excl::g_enabled
@@ -13916,7 +13942,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
 #endif
     // Generated shader packets carry factors but no blend equation. Only ADD
     // can enter that executor; reverse subtraction stays on the faithful floor.
-    if ((!blend_enabled || blend_eq == 0x8006) && !accurate_texture_sampling && !needs_fog && !logic_enabled && !flat_shading && !zpass_enabled_ && gpu_generic_shader_ && renderer_ && effective_clip_valid) {
+    if (accelerated_zeta_supported && (!blend_enabled || blend_eq == 0x8006) && !accurate_texture_sampling && !needs_fog && !logic_enabled && !flat_shading && !zpass_enabled_ && gpu_generic_shader_ && renderer_ && effective_clip_valid) {
         ++generic_shader_attempts_;
         GenericShaderDeclineReason decline = GenericShaderDeclineReason::kNone;
         auto& st = gpu_shader_packet.state;
@@ -14909,7 +14935,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             : 0u;
         const bool depth_read_required =
             uses_depth &&
-            ((raster_state[kRasterDepthMask] != 0) ||
+            (stencil_test_enabled || (raster_state[kRasterDepthMask] != 0) ||
              (depth_test_enabled_bit && depth_func != 0x0207));
         const std::array<const TransformedVertex*, 3> triangle_vertices{{a, b, c}};
         std::array<std::array<float, 4>, 3> diffuse_values{};
@@ -15094,9 +15120,12 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                     : static_cast<size_t>(y) * pitch +
                           static_cast<size_t>(x) * sizeof(uint32_t);
                 uint32_t stored_depth_stencil = 0;
+                const size_t zeta_offset = surface_swizzled ? offset
+                    : static_cast<size_t>(y) * zeta_pitch + static_cast<size_t>(x) * 4;
+                bool depth_passes = true;
                 if (depth_read_required) {
                     if (capture_generic_deltas) ++generic_combiner_depth_reads_;
-                    if (!depth_surface.read32(offset, stored_depth_stencil)) {
+                    if (!depth_surface.read32(zeta_offset, stored_depth_stencil)) {
                         fault_("NV2A generic-combiner zeta DMA read failed");
                         raster_failed = true;
                         return;
@@ -15104,13 +15133,13 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                     // Depth-test-enable (bit3) is semantic: when disabled every
                     // fragment passes, even though the surface is still touched here
                     // because depth writes are enabled.
-                    if (depth_test_enabled_bit &&
-                        !compare(depth_func, incoming_depth,
-                                stored_depth_stencil >> 8)) {
+                    depth_passes = !depth_test_enabled_bit ||
+                        compare(depth_func, incoming_depth, stored_depth_stencil >> 8);
+                    if (!depth_passes && !stencil_test_enabled) {
                         continue;
                     }
                 }
-                if (collect_diagnostics) ++generic_combiner_depth_passes_;
+                if (collect_diagnostics && depth_passes) ++generic_combiner_depth_passes_;
 
                 const double lambda0 =
                     static_cast<double>(w0) / static_cast<double>(area);
@@ -15466,6 +15495,41 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                     continue;
                 }
 
+                // OpenGL 1.3 sections4.1.4-4.1.6: shader/alpha rejection precedes
+                // stencil; compare masked reference against masked stored S8.
+                // The FAIL/ZFAIL/ZPASS operation applies even with color writes
+                // masked, and preserves D24 plus every masked stencil bit.
+                if (stencil_test_enabled) {
+                    const uint32_t old_stencil = stored_depth_stencil & 0xffu;
+                    const bool stencil_passes = compare(stencil_func,
+                        stencil_ref & stencil_read_mask, old_stencil & stencil_read_mask);
+                    const uint32_t operation = raster_state[!stencil_passes
+                        ? kRasterStencilOpFail : !depth_passes
+                        ? kRasterStencilOpZFail : kRasterStencilOpZPass];
+                    uint32_t next_stencil = old_stencil;
+                    switch (operation) {
+                        case 0: next_stencil = 0; break;
+                        case 0x1e01: next_stencil = stencil_ref; break;
+                        case 0x1e02: next_stencil = std::min(255u, old_stencil + 1); break;
+                        case 0x1e03: next_stencil = old_stencil ? old_stencil - 1 : 0; break;
+                        case 0x150a: next_stencil = old_stencil ^ 0xffu; break;
+                        case 0x8507: next_stencil = (old_stencil + 1) & 0xffu; break;
+                        case 0x8508: next_stencil = (old_stencil - 1) & 0xffu; break;
+                        default: break; // validated KEEP
+                    }
+                    const uint32_t merged = (old_stencil & ~stencil_write_mask) |
+                                            (next_stencil & stencil_write_mask);
+                    if (merged != old_stencil) {
+                        stored_depth_stencil = (stored_depth_stencil & 0xffffff00u) | merged;
+                        if (!depth_surface.write32(zeta_offset, stored_depth_stencil)) {
+                            fault_("NV2A generic-combiner stencil DMA write failed");
+                            raster_failed = true;
+                            return;
+                        }
+                    }
+                    if (!stencil_passes || !depth_passes) continue;
+                }
+
                 // Coverage, depth, shader kills and alpha tests have passed.
                 // Write masks do not suppress visibility samples.
                 if (zpass_enabled_) ++zpass_count_;
@@ -15548,7 +15612,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                 if (uses_depth && raster_state[kRasterDepthMask] != 0) {
                     const uint32_t depth_stencil =
                         (incoming_depth << 8) | (stored_depth_stencil & 0xFFu);
-                    if (!depth_surface.write32(offset, depth_stencil)) {
+                    if (!depth_surface.write32(zeta_offset, depth_stencil)) {
                         fault_("NV2A generic-combiner zeta DMA write failed");
                         raster_failed = true;
                         return;
@@ -15925,7 +15989,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                 std::chrono::steady_clock::now() - generic_flush_started_at)
                 .count());
     }
-    if (uses_depth && raster_state[kRasterDepthMask] != 0)
+    if (uses_depth && (raster_state[kRasterDepthMask] != 0 || stencil_test_enabled))
         invalidate_renderer_depth_overlap(
             depth_address, static_cast<size_t>(depth_bytes64),
             nv2a_invalidate_token(kNv2aInvalidateGenericSoftware));

@@ -924,3 +924,18 @@ viewport, feedback caching, production HLE pixels and original startup/lifetime
 remain separate. Only the reference observation wrapper was rebuilt; no new
 title/audio/host GPU/Xbox run occurred. The full goal stays active at **4/9**,
 with hardware at its existing inspection gate.
+
+The subsequent default LLE stencil fix passes **1,662 authored draw cases**,
+five NV2A/tile/zeta suites,131 focused Python tests and the real observer ABI
+regression. The corrected retained frame still passes all4,331 original draws
+and their852,468 vertex values /462,399 consumed/setup words. It removes the
+large sky discrepancy; blur and raster differences remain diagnostic work,
+with native enabled noise kept distinct from fixture disabled noise.
+An independent input-only dependency proof also establishes that the missing
+initial clear viewport cannot affect this fixture's final targets: the initial
+depth clear is idempotent and draw4301 fully overwrites color before its old
+contents are sampled. No additional title capture is needed for that dependency.
+[Correction, proof and precise limits](../pilots/native-title/GRAPHICS-LLE.md#generic-stencil-correctness-and-initial-clear-independence---2026-10-10).
+Shipping HLE shaders/caches remain unchanged. Complete-scene pixels, production
+HLE equivalence, feedback/noise and original startup/lifetime stay open. The
+full goal remains active at **4/9**; hardware inspection is still pending.

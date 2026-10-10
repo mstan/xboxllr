@@ -595,6 +595,113 @@ static void multistage_linear_project2d() {
     }
 }
 
+static void stencil_pixels() {
+    // Authored GL/NV097 stencil cases, independent of the renderer's decoder.
+    // Equal-depth endpoints avoid a tolerance oracle. Alpha rejection must
+    // suppress *all* stencil operations; stencil rejection suppresses depth,
+    // color and visibility. Zeta has its own pitch, including row padding.
+    constexpr uint32_t zeta=0x18000, background=0xff102030, source=0xff36a5c7;
+    auto setup = [&](Fixture& f,unsigned zeta_pitch,uint32_t stored) {
+        f.emit(0x172c,Fixture::colors);f.emit(0x176c,0x440);
+        for(unsigned i=1;i<=3;++i)f.put(Fixture::colors+i*4,source);
+        f.emit(0x20c,256|(zeta_pitch<<16));f.emit(0x32c,1);
+        f.emit(0x360,0xff);f.emit(0x364,0x207);f.emit(0x368,0x80);f.emit(0x36c,0xff);
+        f.emit(0x370,0x1e00);f.emit(0x374,0x1e00);f.emit(0x378,0x1e00);
+        for(unsigned y=0;y<64;++y)for(unsigned x=0;x<zeta_pitch/4;++x)
+            f.put(zeta+y*zeta_pitch+x*4,x<64?stored:0x123456ab);
+    };
+    auto check = [&](Fixture& f,unsigned zeta_pitch,uint32_t stored,uint32_t expected,
+                     bool color_pass) {
+        ++cases;CHECK(f.fault.empty());
+        CHECK(f.get(Fixture::frame+(16*64+16)*4)==(color_pass?source:background));
+        CHECK(f.get(zeta+16*zeta_pitch+16*4)==expected);
+        CHECK(f.get(zeta)==stored);CHECK(f.get(zeta+60*zeta_pitch+60*4)==stored);
+        if(zeta_pitch>256)CHECK(f.get(zeta+16*zeta_pitch+64*4)==0x123456ab);
+        CHECK(f.get(Fixture::report+12)==0);
+        CHECK((f.get(Fixture::report+8)>0)==color_pass);
+        CHECK(f.gpu->generic_combiner_executed_batches()==1);
+    };
+    // NEVER, LESS, EQUAL, LEQUAL, GREATER, NOTEQUAL, GEQUAL, ALWAYS.
+    constexpr bool comparisons[3][8]={
+        {false,true,false,true,false,true,false,true},
+        {false,false,true,true,false,false,true,true},
+        {false,false,false,false,true,true,true,true}};
+    for(bool direct:{false,true})for(unsigned pitch:{256u,320u})
+    for(unsigned relation=0;relation<3;++relation)for(unsigned function=0;function<8;++function) {
+        Fixture f(direct);const uint32_t reference=relation==0?0x20:relation==1?0x80:0xe0;
+        setup(f,pitch,0x00000a8b);f.emit(0x368,reference);f.emit(0x36c,0xfffffff0);
+        f.emit(0x364,0x200+function);f.emit(0x378,0x1e01);f.emit(0x360,0xfffffff0);
+        f.emit(0x30c,1);f.emit(0x354,0x202);f.emit(0x35c,1);f.draw(0);
+        const bool pass=comparisons[relation][function];
+        check(f,pitch,0x00000a8b,pass?(0xa00|reference|0xb):0xa8b,pass);
+    }
+    constexpr uint32_t operations[]={0x1e00,0,0x1e01,0x1e02,0x1e03,0x150a,0x8507,0x8508};
+    constexpr uint32_t old_values[]={0,1,254,255};
+    // KEEP/ZERO/REPLACE/INCRSAT/DECRSAT/INVERT/INCR/DECR, including both limits.
+    constexpr uint32_t results[4][8]={
+        {0,0,128,1,0,255,1,255}, {1,0,128,2,0,254,2,0},
+        {254,0,128,255,253,1,255,253}, {255,0,128,255,254,0,0,254}};
+    for(bool direct:{false,true})for(unsigned branch=0;branch<3;++branch)
+    for(unsigned value=0;value<4;++value)for(unsigned operation=0;operation<8;++operation)
+    for(uint32_t mask:{0u,0xf0u,0xffu}) {
+        Fixture f(direct);const uint32_t old=old_values[value],stored=0x00000a00|old;
+        setup(f,320,stored);f.emit(0x360,mask);f.emit(0x364,branch==0?0x200:0x207);
+        f.emit(branch==0?0x370:branch==1?0x374:0x378,operations[operation]);
+        f.emit(0x30c,1);f.emit(0x354,branch==1?0x200:0x207);f.emit(0x35c,1);
+        f.draw(0);
+        check(f,320,stored,0xa00|((old&~mask)|(results[value][operation]&mask)),branch==2);
+    }
+    // Alpha test precedes stencil/depth. Even a NEVER stencil/depth function
+    // must not run its FAIL/ZFAIL operation for a fragment rejected by alpha.
+    for(bool direct:{false,true})for(unsigned branch=0;branch<3;++branch) {
+        Fixture f(direct);setup(f,256,0x00000a55);f.emit(0x300,1);f.emit(0x33c,0x200);
+        f.emit(0x364,branch==0?0x200:0x207);f.emit(0x30c,1);f.emit(0x354,branch==1?0x200:0x207);
+        f.emit(0x370,0x1e01);f.emit(0x374,0x1e01);f.emit(0x378,0x1e01);f.emit(0x35c,1);
+        f.draw(0);check(f,256,0xa55,0xa55,false);
+    }
+    // Stencil-only writes with depth disabled preserve depth. Color masks do
+    // not suppress stencil or visibility. A second draw reads the live result.
+    for(bool direct:{false,true}) {
+        Fixture f(direct);setup(f,320,0x34567805);f.emit(0x378,0x1e01);f.emit(0x358,0);
+        f.emit(0x30c,0);f.emit(0x35c,0);f.draw(0);++cases;CHECK(f.fault.empty());
+        CHECK(f.get(zeta+16*320+16*4)==0x34567880);
+        CHECK(f.get(Fixture::frame+(16*64+16)*4)==background);
+        CHECK(f.get(Fixture::report+8)>0);
+        f.emit(0x358,0x01010101);f.emit(0x364,0x202);f.emit(0x378,0x1e00);f.draw(0);++cases;
+        CHECK(f.fault.empty());CHECK(f.get(Fixture::frame+(16*64+16)*4)==source);
+        CHECK(f.get(zeta+16*320+16*4)==0x34567880);
+    }
+    // Disabled stencil ignores stale unsupported fields, even without zeta.
+    for(bool direct:{false,true}) {
+        Fixture f(direct);setup(f,256,0x00000a55);f.emit(0x32c,0);f.emit(0x364,0xdead);
+        f.emit(0x370,0xdead);f.emit(0x374,0xdead);f.emit(0x378,0xdead);f.draw(0);
+        check(f,256,0xa55,0xa55,true);
+    }
+    // Depth writes and stencil masks are independent. A failed stencil test
+    // cannot change depth even when depth ALWAYS and its write mask are set.
+    for(bool direct:{false,true})for(bool stencil_pass:{false,true})for(bool depth_write:{false,true}) {
+        Fixture f(direct);setup(f,320,0x00002005);f.emit(0x364,stencil_pass?0x207:0x200);
+        f.emit(0x370,0x1e01);f.emit(0x378,0x1e01);f.emit(0x360,0xf0);
+        f.emit(0x30c,1);f.emit(0x354,0x201);f.emit(0x35c,depth_write);f.draw(0);
+        const uint32_t expected=((stencil_pass&&depth_write?10u:32u)<<8)|0x85;
+        check(f,320,0x2005,expected,stencil_pass);
+    }
+    // No invalid active stencil state may silently execute color-only or
+    // modify zeta. Every rejection happens before the raster writes.
+    for(bool direct:{false,true})for(unsigned invalid=0;invalid<7;++invalid) {
+        Fixture f(direct);setup(f,320,0x12345655);
+        if(invalid==0)f.emit(0x364,0xdead);
+        else if(invalid<=3)f.emit(0x370+4*(invalid-1),0xdead);
+        else if(invalid==4)f.emit(0x20c,256|(64u<<16));
+        else if(invalid==5)f.emit(0x208,0x118); // Z16 has no S8 component.
+        else f.emit(0x214,0); // Unbound/degenerate zeta cannot be guessed.
+        f.draw(0);++cases;CHECK(!f.fault.empty());
+        CHECK(f.get(Fixture::frame+(16*64+16)*4)==background);
+        CHECK(f.get(zeta+16*320+16*4)==0x12345655);
+        CHECK(!f.gpu->generic_combiner_executed_batches() && !f.gpu->generic_combiner_writes());
+    }
+}
+
 int main() {
     packed_formats(); surface_reuse(); immediate_control();
     noise_control_boundary();
@@ -604,6 +711,7 @@ int main() {
     output_defaults();
     homogeneous_clip_depth();
     alpha_volume_blend();multistage_linear_project2d();
+    stencil_pixels();
     std::printf("nv2a_vertex_colors: %u draw cases, %u failures\n", cases, failures);
     return failures ? 1 : 0;
 }
