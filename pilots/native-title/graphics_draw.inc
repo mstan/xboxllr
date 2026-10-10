@@ -4,6 +4,9 @@
 static FILE *graphics_draw_capture(const uint32_t args[3])
 {
     const char *capture=graphics_diagnostic(GRAPHICS_DIAGNOSTIC_DRAW);if(!capture || !*capture)return NULL;
+#ifdef PILOT_GRAPHICS_FRAME_AUDIT
+    if(!graphics_frame_audit_capture_active())return NULL;
+#endif
     static unsigned sequence;
     const char *trigger=getenv("XLLE_PILOT_DRAW_CAPTURE_TRIGGER");
     if(trigger && *trigger && GetFileAttributesA(trigger)==INVALID_FILE_ATTRIBUTES)return NULL;
@@ -45,10 +48,17 @@ static FILE *graphics_draw_capture(const uint32_t args[3])
     free(outputs);if(fclose(file))stop("draw capture close",0);
     fprintf(stderr,"[DRAW CAPTURE] sequence=%u shader=%u primitive=%u first=%u count=%u target=%08x depth=%.9g\n",
         sequence,shader->native,args[0],args[1],args[2],graphics_target,graphics_float(TRANSFORM_FIELD(DEPTH_SCALE)));
-    return graphics_scene_begin(capture,sequence,args);
+    FILE *scene=graphics_scene_begin(capture,sequence,args);
+#ifdef PILOT_GRAPHICS_FRAME_AUDIT
+    graphics_frame_audit.capture_sequence=sequence;
+#endif
+    return scene;
 }
 static void graphics_draw_common(const uint32_t args[3],uint32_t up_data,uint32_t up_stride)
 {
+#ifdef PILOT_GRAPHICS_FRAME_AUDIT
+    graphics_frame_audit.capture_sequence=0;
+#endif
     uint64_t profile=graphics_service_profile_enabled() && !dispatch_in_dpc?dispatch_monotonic():0;
     if(profile)++graphics_service_profile.draw_calls;
     unsigned primitive=args[0],first=args[1],count=args[2];

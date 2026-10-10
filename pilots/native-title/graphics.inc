@@ -70,6 +70,7 @@ static void *graphics_pointer(uint32_t address,uint32_t bytes)
 #include "graphics_stateblock.inc"
 #include "graphics_transform.inc"
 static void graphics_target_prepare(uint32_t header);
+#include "graphics_frame_audit.inc"
 #include "graphics_draw.inc"
 #include "graphics_completion.inc"
 #include "graphics_gpu_callback.inc"
@@ -370,6 +371,9 @@ static void graphics_dispatch_impl(unsigned entry)
         stop(pilot_d3d_calls[entry].name,pilot_d3d_calls[entry].address);
     }
     uint64_t unlocking=entered?dispatch_monotonic():0;
+#ifdef PILOT_GRAPHICS_FRAME_AUDIT
+    graphics_frame_audit_call(entry,arguments);
+#endif
     ReleaseSRWLockExclusive(&graphics_lock);
     if(entered) {
         uint64_t ended=dispatch_monotonic();

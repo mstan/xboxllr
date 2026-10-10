@@ -69,7 +69,7 @@ change the next controller-input dependency batch.
 | 8 | GPU completion, callbacks and visibility: independent offline work | FIFO/traps/reports, pending results and lifetime; uses memory/display | Partial `.109`: original queries/fences, 228 IRQ/DPC callbacks, hardware-referenced 2D pixels and bounded 3D/texture/encoder cases pass. Full original title startup and dependent integration remain open; their real-console observation is at the end of this list. Do not repeat that blocked startup experiment while working on independent services. [Evidence and limits](../pilots/native-title/GPU-COMPLETION-LLE.md) |
 | 9 | Graphics state, shaders, textures and vertex fetch | Broad NV2A draw/state/format coverage; uses memory/completion | Partial `.116`: 140 independent BGRA draws, 720 original fetch/ownership cases, 1,116 constant cases and 1,344 independent arithmetic cases retained. Complete original submission passes 96 scene shader draws / 29,424 written lanes including fog. Programmable fog passes 196 independent cases / 392 original draws and 294 native GPU draws with bounded interior pixels; the real updated attract/interruption/reentry regression passes. DXT1-noise control transport passes 128 original setter calls / 40 complete graphics-service returns, with matching HLE boolean cache admission; enabled noise pixels remain guarded and deferred. Finite normalized 2D textures now pass 258 independent cases / 516 original and 516 native GPU draws, with 444,276 interior pixels on each route. LLE executes mip/filter/bias/clamp state; HLE uses a cached native base-mip view to preserve LOD0 min/mag selection. Documented output defaults now pass 64 original/native mask cases and eight default-Q texture cases / 13,776 interior pixels on each route; raw probes and rasterization agree. Variable projected W/Q now passes 432 independent cases / 864 draws / 743,904 interior pixels on each route (LLE one channel step; native two); GPU footprint correction and normalized XRGB border preparation retain native shader/upload caches. Packed ARGB4444/DXT3/DXT5 rectangular mips additionally pass 972 original-XDK/LLE cases / 1,944 draws / 1,673,784 interior pixels. Latest layout/guard fixes pass 854 permanent LLE cases and four core regressions. Native format cases and 192 isolated texel cases pass independent per-channel host BC decoder/filter intervals; compressed palettes fail the separate strict two-step gate. Retained native bounds pass unchanged; exact Xbox codec precision is deferred. Owner visual review finds no observable defect at a glance. CPU work uses Idle priority on one logical processor; GPU fixtures require Marvel Rivals absent. No title/audio rerun or HLE production change occurs. Broader raster/state and full scene composition qualification remain open. Original startup remains open; native upload coalescing stays intact. [Evidence](../pilots/native-title/GRAPHICS-LLE.md) |
 | 10 | Movie/A-V sequence integration | Composes the qualified file, decoder, input, audio and display paths | Open |
-| Available now | Real-console observations and the integration they unblock | GPU startup/FD6806A0 `.111`; original scheduling GPIO `0x80cf`; DSP DMA bit 9 `.114`; FE notification fence/control `.115`; enabled DXT1-noise pixels/native error bound `.116`; exact shader rounding/near-integer ARL; exact DXT color/alpha decoder precision; any exact interpolation/curve/prefetch/completion timing requiring new silicon evidence | Owner now prioritizes console observations after recovery backups. The recovery scope is verified on G: 4,891 files / 2.08 GB, with known failed assets excluded. Owner physically confirmed a responsive dashboard after the initial read/HTTP errors. Probe `a22bb74` is separately uploaded and its readback matches the reviewed XBE. One manual dashboard launch is pending; no MMIO experiment has run. Boot configuration, EEPROM, flash and disk layout remain untouched. Keep all affected gates open |
+| Available now | Real-console observations and the integration they unblock | GPU startup/FD6806A0 `.111`; original scheduling GPIO `0x80cf`; DSP DMA bit 9 `.114`; FE notification fence/control `.115`; enabled DXT1-noise pixels/native error bound `.116`; exact shader rounding/near-integer ARL; exact DXT color/alpha decoder precision; any exact interpolation/curve/prefetch/completion timing requiring new silicon evidence | Verified recovery scope on G: 4,891 files / 2.08 GB, with known exclusions. Owner manually launched separately uploaded probe `a22bb74` / v0.4.0. Fixed CPU/NV2A reads and one armed AV observation succeeded: stable `0x11`, request `0`, next sampled `0x00`, one write, acknowledgment observed within a 7.1 microsecond instrumented upper bound. No pending state was sampled. Reset/opposite direction/timing-bank and sync-edge behavior remain unknown; retain the LLE guard and open family gates. Boot configuration, EEPROM, flash and disk layout remain untouched |
 
 This is a relative work ranking, not a date forecast. Work serially through
 the available offline entries. For each, implement the executable LLE route,
@@ -132,6 +132,21 @@ performance paths are unchanged. Full-frame/title composition and hardware
 questions remain open; graphics is partial and the family count stays 4/9.
 See [the alpha-volume evidence](../pilots/native-title/GRAPHICS-LLE.md#alpha-volume-composition-and-homogeneous-clip-depth-2026-10-09-continuation).
 
+2026-10-10 full-frame accounting: one bounded diagnostic run records an entire
+accepted-swap interval: **7,649 calls / 3,789 draws / two clears / three target
+setters**. It explicitly includes 3,783 programmable bound-stream, two
+programmable UP, one FVF bound-stream and three FVF UP submissions. The bounded
+capture preserves 256 complete programmable draw/scene pairs with matching
+submission/target headers; 3,533 other draw companions remain missing. The new
+1,697-vertex corpus contains three programs (69/21/49 instructions) outside
+the existing closed state profiles; no new complete-pixel pass is claimed. The
+18 integrity tests and diagnostic/default builds pass. The muted, Idle,
+one-processor run stops after this frame in 98.204s and guards Marvel Rivals.
+This closes operation accounting for the selected frame, not its pixel or
+resource composition. The diagnostic code is compiled out by default; no
+shipping HLE cache/upload change occurs. Graphics remains partial, **4/9**.
+See [the exact frame census and remaining inputs](../pilots/native-title/GRAPHICS-LLE.md#whole-frame-operation-accounting---2026-10-10).
+
 GPU startup's unresolved FD6806A0 transaction now has a prepared, bounded
 hardware observation in `.111` (probe branch `feat/av-handshake-probe-20261009`,
 commit `a22bb74`). All 17 offline checks and the XBE build pass. The owner now
@@ -152,13 +167,21 @@ required by the
 The authorized separate upload to
 `E:\Apps\xboxlle-probe-av-handshake\default.xbe` is complete: all 491,520 bytes
 read back with the reviewed XBE SHA-256. Boot configuration, EEPROM, flash and
-disk layout are unchanged. Manual dashboard launch is pending because the
-HTTP interface previously returned a malformed reply. The prepared host run
-checks the agent identity and fixed CPU/NV2A context before one armed AV
-experiment; it preserves raw observations privately and never retries or
-makes a restoring write. No MMIO experiment has run. Private backups/results
-stay outside source publication. Availability, recovery copies and upload
-do not qualify the transaction or close a family.
+disk layout are unchanged. The first identity check found the older v0.2 app
+and stopped before arming; that attempt is preserved separately. After the
+owner manually launched and confirmed v0.4.0, the fixed CPU/NV2A reads and
+authorized one-shot AV experiment succeeded. Two initial reads were stable
+at `0x11`; the single request write was `0`, and the first post-write sample
+was `0x00`. Three reads and one write were recorded; no pending value was
+sampled. The 3,375,000 Hz performance-counter brackets place observed
+completion within 7.1 microseconds of the write-begin timestamp, including
+probe overhead. This is an upper bound, not exact hardware latency or proof
+of instantaneous acknowledgment. There was no retry or restoring write.
+Reset defaults, opposite direction, timing-bank commit and sync-edge behavior
+remain unknown. Private backups/results stay outside source publication;
+the observation does not yet justify changing the LLE guard or closing
+`.111`, GPU startup or a service family. See the
+[observed transaction and its limits](../pilots/native-title/GPU-COMPLETION-LLE.md#first-authorized-av-handshake-observation---2026-10-09).
 
 GPU callback delivery has now advanced independently of startup: original
 InsertCallback/kick, PIC/kernel interrupt gate, ISR/DPC and IRET pass 228 actual

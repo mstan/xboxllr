@@ -1268,3 +1268,64 @@ Whole-frame/title state/resource composition, broader layouts and enabled-noise
 hardware evidence remain open. Graphics stays partial; 4/9 families qualified.
 Shipping HLE shader/draw/cache/upload paths remain unchanged. Focused fixtures
 reuse retained inputs without a title/audio rerun.
+
+## Whole-frame operation accounting - 2026-10-10
+
+The two qualified 32-draw sections start with supplied targets. To identify
+the actual composition gap, a dedicated diagnostic build now brackets one
+frame between consecutive accepted swaps. `PILOT_GRAPHICS_FRAME_AUDIT` is
+OFF by default and defines code only for `runtime.c`. Normal builds contain
+no frame-ledger calls or environment checks. This is optional observability,
+not an opt-in correctness fix; the earlier LLE clipping/blend fixes remain
+active by default.
+
+The ledger records returned graphics adapter calls under the existing graphics
+lock, including all reached draw families, clears and target setters. It starts
+after the first accepted swap satisfying the configured trigger, ends at the
+next accepted swap and never starts a second frame. Its 32,768-call bound stops
+an incomplete diagnostic rather than claiming a frame. Existing programmable
+bound-stream captures run only within this interval, still bounded at 256.
+FVF and user-pointer submissions remain explicitly uncaptured. Vertical-blank
+waits outside the graphics lock and arbitrary guest CPU resource writes are
+outside this operation census.
+
+One muted, hidden Blinx run, Idle on one logical processor, finished the
+selected frame in 98.204 seconds. The harness guarded against Marvel Rivals
+and terminated its own title process after the ledger completed. There is no
+additional audio qualification or performance estimate from this run.
+
+| Selected frame, swaps 1970 to 1971 | Count |
+| --- | ---: |
+| Returned graphics calls | 7,649 |
+| Draw submissions | 3,789 |
+| Programmable bound-stream draws | 3,783 |
+| Programmable user-pointer draws | 2 |
+| FVF bound-stream draws | 1 |
+| FVF user-pointer draws | 3 |
+| Clears / target setter calls | 2 / 3 |
+| Draws with both input/target companions | 256 |
+| Draws without those companions | 3,533 |
+| Device create/reset/release within interval | 0 |
+
+`tools/native_frame_audit.py` verifies consecutive boundaries, contiguous call
+numbering, terminal counts and the correspondence of each captured draw/scene
+header to its actual primitive, range and targets. All 256 pairs match.
+It deliberately reports `complete_pixel_qualification:false`: matching
+headers are linkage, not validation of companion contents or correct pixels.
+Its 18 hardware-free tests pass, including lost/renumbered calls, truncated
+boundaries/companions, invalid ABI inputs, wrong draw/target linkage and
+invented FVF capture rejection. Both the diagnostic and restored default title
+build pass; the default binary has no frame-audit option/marker strings.
+
+Private evidence is `build/blinx/frame-audit-firstworld-20261009/`, including
+`frame.jsonl`, `accounting.aot-private.json`, run/log metadata and 256 retained
+draw/scene pairs. The 256 draws contain 1,697 vertices and three programs:
+214 draws with 69 instructions, two with 21, and 40 with 49. None satisfy the
+two existing closed state profiles. This identifies additional scope; it is
+not evidence of 256 incorrect native draws. These complete programmable
+inputs can be inspected without another title run. Next: classify those programs and
+state profiles, qualify clear effects and FVF/UP inputs, and replace repeated
+per-draw target dumps with bounded complete-frame input capture. The full frame
+and broader graphics family remain open; existing qualified sections and the
+**4/9** family count are retained. Shipping HLE rendering caches and uploads
+are unchanged.

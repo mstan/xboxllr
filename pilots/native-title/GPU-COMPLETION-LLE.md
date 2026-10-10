@@ -1449,5 +1449,43 @@ reference for GPU programming followed by encoder setup and TIMING_RST. It
 does not supply the missing FD6806A0 semantics; no GPL implementation body was
 copied. Attribution records the exact files. Startup state, timing activation,
 board clock routing, context transfer and remaining GPU clients stay open.
-The prepared hardware observation remains unexecuted pending authorization.
+At this offline checkpoint the prepared hardware observation had not run;
+the later authorized result is recorded below.
 The family count remains **4/9**.
+
+## First authorized AV handshake observation - 2026-10-09
+
+After the verified recovery scope and separate XBE upload described in the
+[burndown](../../docs/BLINX-BURNDOWN.md), the owner manually launched the
+reviewed v0.4.0 probe. An earlier identity check saw the legacy v0.2 program
+and stopped before ARM; no experiment was sent in that attempt. The corrected
+session passed the exact new-agent identity and fixed CPU/NV2A read-only probes,
+then issued the previously authorized armed `AV_HANDSHAKE` once.
+
+| Observation | Result |
+| --- | --- |
+| Initial DWORD FD6806A0, two reads | Stable `0x11` |
+| Request written | `(~initial)&1 = 0`, exactly one DWORD write |
+| First post-write sample | `0x00`; original caller's bits-0/4 equality holds for the new request |
+| Pending state sampled | None |
+| Total reads / writes | 3 / 1 |
+| Performance-counter frequency | 3,375,000 Hz |
+| Instrumented completion bracket | 0 to 7.111111 microseconds from write-begin to completed acknowledged sample |
+| Retry / restoring write | Neither |
+
+This establishes one sampled transaction in the already active nxdk display
+mode. The upper bound includes counter calls, MMIO reads and probe overhead;
+it does not identify the acknowledgment edge. A pending interval could have
+ended before the first post-write read. The observation establishes neither
+instantaneous completion nor a particular horizontal/vertical sync dependency.
+It also does not establish reset defaults, the opposite request direction,
+or which timing-bank writes are activated. The startup mode was selected by
+nxdk before this observation; its observed idle state is not an emulator reset
+specification.
+
+Raw console context, kernel details, timing records and identifiers remain
+private with the G: recovery evidence. No EEPROM, flash, boot configuration or
+disk-layout write occurred. Keep the existing LLE guard and `.111` / `.109`
+open until the reached original-mode contract has enough evidence and passes
+implementation validation. HLE draw/cache/upload behavior is unchanged;
+graphics continues independently and the service-family count remains **4/9**.
