@@ -29,7 +29,7 @@ backup or hardware inspection is pending.
 Scheduling/events/timers (`.112`) retains its qualified slices and an explicit
 guarded title-startup dependency. Audio (`.113`) retains its qualified slices
 and deferred control questions; **graphics (`.116`) is now active offline**.
-GPU startup and its prepared hardware observation remain open. The available
+GPU startup and further hardware qualification remain open. The available
 console does not establish the missing behavior; qualification still requires
 the actual observation and justified implementation.
 Calendar conversion is the first small slice of the scheduling/time family;
@@ -78,6 +78,21 @@ the changed service is connected. When an issue genuinely requires a console,
 record its exact question and dependency at the end and continue the next
 independent entry. Deferral does not count as qualification or permit guessed
 device results. The final row is a hardware-work queue, not a tenth family.
+
+2026-10-10 hardware continuation: the separately approved 23-DWORD AV context
+batch and a five-read board-context batch completed with zero MMIO/I/O writes.
+AV endpoints stayed `0`; READ_PROG was set, PLL_CONTROL was `100A0000`, GPIO15
+was `44`, and FE fence control was `1`. A third bounded experiment changed
+only the read-bank selector and verified its restoration: six reads and two
+selector writes, with horizontal/vertical totals 935/524 in the alternate bank,
+matching the preceding programmed-bank totals (936 clocks by 525 lines).
+These current-state observations do not establish reset, commit, reverse AV
+transition or fence ordering. GPIO15 is documented as a development flash
+programming pin; no real GPIO output was tested. All 42 offline probe tests
+pass. The owner's standing read-only/benign-write authorization avoids repeated
+prompts; dangerous operations should be avoided. Family count remains **4/9**;
+the hardware queue and LLE guards remain open. See
+[the observations and precise limits](../pilots/native-title/GPU-COMPLETION-LLE.md#display-bank-and-board-context-observations---2026-10-10).
 
 2026-10-09 scene-pixel continuation: corrected the offline scene fixture's
 missing initialized XDK screen bias before the original viewport setter.

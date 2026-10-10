@@ -1489,3 +1489,65 @@ disk-layout write occurred. Keep the existing LLE guard and `.111` / `.109`
 open until the reached original-mode contract has enough evidence and passes
 implementation validation. HLE draw/cache/upload behavior is unchanged;
 graphics continues independently and the service-family count remains **4/9**.
+
+## Display-bank and board-context observations - 2026-10-10
+
+The owner separately approved the prepared 23-read batch, then authorized
+read-only checks and benign writes without further prompts while advising
+against dangerous operations. The existing v0.4.0 agent passed identity checks
+for each of three new, separately preserved private sessions. No new XBE,
+launch, AV transaction, GPIO output, audio command or storage operation occurred.
+
+The first batch completed all **23 DWORD reads** with zero MMIO writes and
+stable AV endpoints `0`. Its selected read bank had READ_PROG set. Observed
+display context:
+
+| Register/context | Observed value |
+| --- | --- |
+| NVPLL / MPLL / VPLL | `00011C01` / `00007702` / `0003C20D` |
+| GENERAL_CONTROL | `00100030` |
+| FP_TG_CONTROL / FP_DEBUG_0 | `10100111` / `21101100` |
+| Horizontal display end / total / CRTC | 639 / 935 / 599 |
+| Horizontal sync start / end | 755 / 819 |
+| Horizontal valid start / end | 0 / 639 |
+| Vertical display end / total / CRTC | 479 / 524 / 479 |
+| Vertical sync start / end | 498 / 500 |
+| Vertical valid start / end | 0 / 479 |
+| FP_DITHER | `0` |
+
+A second fixed batch completed five reads with zero MMIO or I/O writes:
+AV endpoints remained `0`, PLL_CONTROL was `100A0000`, GPIO15 control was
+`44`, and the audio FE fence control was `1`. These are current-state
+observations, not reset defaults. GPIO15's byte is not an inferred
+input/output or flash-write truth table.
+
+The third experiment temporarily cleared only FD680848's documented READ_PROG
+bit, verified that selector value, read horizontal/vertical totals, restored
+READ_PROG while preserving fresh other control bits, and verified actual
+control readback `10100111`. It returned **935 / 524** again, or **936 clocks
+by 525 lines** under the documented count-minus-one encoding. The two
+selected banks agreed on these two fields in this already active nxdk mode.
+It performed six MMIO reads and exactly two writes to the single read-selector
+control; no display timing or enable bit changed. The interpretation as
+programmed/active banks uses the pinned register definitions, not an independent
+electrical waveform measurement. Other active fields were not read.
+
+New host tools and exact payload review are in `xboxlle-probe`'s
+[`BOARD-CONTEXT.md`](https://github.com/mstan/xboxlle-probe/blob/feat/av-handshake-probe-20261009/docs/BOARD-CONTEXT.md)
+and [`FP-BANKS.md`](https://github.com/mstan/xboxlle-probe/blob/feat/av-handshake-probe-20261009/docs/FP-BANKS.md).
+All **42 offline probe tests** pass, including actual x86 execution checking
+approved MMIO/port effects, selector restoration, callee state, failed selector
+readback, bad timing widths, refused ARM and no retry after host failures.
+Raw results and timestamps remain private on the recovery drive.
+
+The hardware specification 1.02 section 2.6.5 assigns GPIO15 to development
+flash programming and leaves it unconnected in the retail design. Combined
+with MCP-1's base+C0+pin register map, this narrows the scheduler's 80CF
+dependency without experimenting with flash-related output. The owner's
+actual board wiring is not established by that design specification.
+
+Neither equal totals nor the earlier fast AV acknowledgment proves the reset
+state, opposite request direction, commit event, first-sync phase, PLL lock
+delay or coherent original startup. FE control `1` does not establish audio
+completion ordering. Keep `.111`, `.109`, `.112` and `.115` open; the LLE AV
+guard remains. This checkpoint changes no shipping HLE path or family count.
