@@ -2265,8 +2265,10 @@ shader observations must pass input-derived arithmetic intervals.
 
 The two feedback consumers and base-copy destination pass their existing
 one-code pixel bounds. The blur mask improves from 13,279 differing channels
-to **one alpha channel** at `(x=0,y=137)`, where the independent MSB selector
-margin is only `7.689350250084104e-6`. All mask RGB channels stay within one
+to **one alpha channel** at `(x=0,y=137)`. The minimum independent MSB selector
+margin over the whole mask is `7.689350250084104e-6`; the disputed pixel itself
+is below the threshold by `7/130050` (about `5.382545175e-5`). All mask RGB
+channels stay within one
 code. The final blend improves from 8,706 to **40 channels outside one code**.
 An explicitly unqualified diagnostic inverts only that expected mask alpha;
 39 of the final failures disappear, leaving one RGB channel differing by two
@@ -2329,9 +2331,75 @@ and `rejection-prefix481-controls.aot-private.json`
 Use `tools/qualify_native_scene_rejection.py` with the preceding fixture paths,
 `--last-draw 481 --depth-arithmetic fma-b-first --clip-arithmetic fma`.
 
-Draw **482** is the next guarded domain: three whole negative-W primitives and
+At that milestone, draw **482** was the next guarded domain: three whole negative-W primitives and
 eight mixed-W primitives. A strip containing any positive W cannot inherit the
 whole-strip rejection proof. Mixed-W and surviving depth-plane clipping remain
 unqualified, alongside complete scene/HLE pixels, enabled noise, original
 startup/lifetime, ring rollover and exact silicon. No new title/audio/GPU/Xbox
 run is needed for this CPU-only extension; family count stays **4/9**.
+
+## Independent empty mixed-W clipping - 2026-10-10
+
+The original producer prefix now passes **512 whole draws /668,467,200 owned
+pixels**, with 126,422 independently expected written fragments. Nine mixed-W
+draws independently derive 61 empty whole primitives and 64 homogeneous
+intersections. Nineteen polygons empty at `W-epsilon`; the other 42 empty at
+`X+W`. Nineteen whole negative-W draws separately reject 130 primitives. Mixed
+W alone never establishes emptiness: every admitted whole primitive completes
+the input-derived clip equations before original execution and comparison.
+
+The exact retained DLL and 22 code/constant sites bind the clip order
+`W-epsilon, X+W, W-X, Y+W, W-Y`. Distances, differences and division round to
+binary32; intersections use the declared FMA graph. Homogeneous Z is preserved.
+The software projects before recursive clip classification and snaps only at
+the raster leaf. It has no geometric Z clipping planes; fragment depth range
+is a separate contract, not an NV2A silicon claim. The empty-only extension
+explicitly refuses surviving mixed geometry and near/zero-W original inputs.
+
+Nine authored controls pass, including a surviving mixed triangle and an
+independent one-ulp FMA/double-rounding fault. All 21 retained pixel/state
+controls pass. Original shader/state/draw execution uses independent expected
+predecessors. Written RGB stays within one code; depth/stencil/alpha/untouched
+bytes stay exact. Four drained fixture pushbuffer jumps are recorded without
+qualifying original ring rollover. Existing positive-W/clamp and negative-W
+equations are unchanged.
+
+Private evidence is `mixed-prefix512-qualified.aot-private.json` (SHA-256
+`49dfa6e959b360114ff14e14c790549ffae76e1ecc83cbc9a95185a6f73dae86`),
+`mixed-prefix512-controls.aot-private.json`
+(`157c57115cc22d65acdf60c18b85c32b37fc71a0e60a3df2a75deb87842dab29`),
+and `mixed-prefix512-handoff.aot-private.json` under the complete-frame capture
+directory. Run `tools/qualify_native_scene_mixed_clip.py` with the preceding
+fixture paths, `--last-draw 512 --depth-arithmetic fma-b-first
+--clip-arithmetic fma`. The original replay ends at 512. Surviving mixed-W
+pixels, fragment depth boundaries, full scene/HLE pixels, enabled noise,
+original startup/lifetime and exact silicon remain open; family count is **4/9**.
+
+## Native cached-format discriminator - 2026-10-10
+
+The original native payload reconstructs byte for byte from the recorded
+composition and supplied producer roots (SHA-256
+`a90bef4eb4a4239e586cb5e8c7b8b911bdbc1d60d962015f471a688374dd628a`).
+A bounded diagnostic changes only the cached depth-as-ARGB image format from
+`R8G8B8A8_UNORM` to `R32G32B32A32_FLOAT`. The normalized compute output,
+original pixel shader, source bytes, sampler state and oracle remain unchanged.
+All five original consumers execute over three device lifetimes. The mask and
+retained base-copy now pass the existing bounds; the final blend has one RGB
+channel outside one code, differing by two. Depth/stencil/untouched roots,
+predecessor continuity, shader intervals and lifetime bytes remain qualified.
+The default source is restored exactly and rebuilt afterward.
+
+This establishes native cached-format dependence for the disputed mask, not
+the precise UNORM arithmetic mechanism or real NV2A filtering. A source-only
+UNORM16 nearest-even hypothesis flips that single mask branch; basic binary32
+variants stay below the threshold. The remaining final-blend error stays a
+failure. No expected mask bit is inverted and no bound is widened.
+
+The FLOAT cache retains GPU conversion and content-serial caching, but a
+640x480 image grows from 1,228,800 to 4,915,200 bytes. Filtering and bandwidth
+costs need measurement before adopting a default correction. Observation wall
+time includes device creation/readback and is not a performance benchmark.
+Private evidence is `postprocess-native-20261010/float-cache-diagnostic`, with
+original/diagnostic/restored source and executable hashes, exact commands,
+observations and the intentionally failing `qualification-diagnostic` report.
+No title or Xbox run is part of this diagnostic.
