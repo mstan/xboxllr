@@ -2647,3 +2647,92 @@ and its retained, continuation and final-leaf control reports. No later draw
 was inspected or replayed for this milestone. The next input-only continuation
 starts at 1944. Complete scene/HLE pixels, enabled noise, original
 startup/lifetime, ring rollover and exact silicon remain open; **4/9** stands.
+
+## Private explicit float blend correctness and cost - 2026-10-10
+
+The isolated shader variant passes all **five original postprocess consumers**
+under the unchanged strict one-code comparator. Depth/stencil/untouched roots,
+predecessor continuity, raw/raster shader intervals and all three device
+lifetimes remain qualified, with zero byte drift. It also passes **60 authored
+GPU draws**: two exact Fraction blend fixtures with both source formats and
+four final-pack boundary fixtures across three lifetimes. These produce the
+canonical `[0,0,0,207]` and `[21,21,21,243]` outputs, including their alpha
+packing, rather than selecting an alternate expected equation.
+
+All 139 source/proof/expected files were hash-verified before the private
+build and observation. Original payload/state/vertices/program/texture inputs
+are byte-exact. The actual current combiner's original generated prefix is
+preserved and independently hashed; the separate cached variant adds only a
+GPU destination load, floating source-alpha ADD blending and final output
+packing. It disables native blending during that original draw, clears t4
+and restores the exact OM state/factors/sample mask. No source prepacking,
+extra draw, FLOAT render target or routine framebuffer CPU transfer is added.
+
+Cold ownership counters record one borrowed snapshot image allocation, one
+copy and one variant compile per affected lifetime. The snapshot is 1,228,800
+bytes at 640x480 and uses the existing feedback image/SRV teardown. Warm
+batches make exactly one GPU copy per affected draw and no snapshot allocation
+or shader compilation. These cache counters do not claim to count internal
+GPU-driver allocation behavior.
+
+A/B/B/A runs each use three lifetimes and nine batches of 32 final draws.
+Canonical after-readbacks precede every timing batch and all 162 retained
+observation files stay byte-stable; that is a stability check, with independent
+correctness established by the preceding source-bound replay. GPU timestamps
+include snapshot plus draw; CPU submission includes the complete draw path.
+Median GPU times are **0.003040 /0.016672 /0.016570 /0.003001 ms per draw**;
+CPU times are **0.002641 /0.003219 /0.003141 /0.002534 ms**. One early explicit
+device median is 0.025792 ms; the remaining explicit device medians are
+0.016544-0.016671 ms. The bounded median increment is about 0.014 ms GPU and
+0.0006 ms CPU per affected final draw, with possible submission gaps in the
+GPU span. This is a component measurement, not a title FPS benchmark.
+
+Private correctness report is
+`postprocess-native-20261010/explicit-blend-private/root-correctness-qualified.aot-private.json`
+(SHA-256 `f8206d6821695e18df46e7972af090a3ee70314e61a53be7b172453ae389b86b`);
+`root-timing.aot-private.json` is
+`20e1044a2d378e66727fa881a831e3a93fe7ffc13722d672d77ddd79bec0883f`.
+Emitted original/generated HLSL hashes are
+`1a3cd938b36a601cd02cf5f530c94a52b2cc5a809539e66f5f676c8730925b03` /
+`f74b2871bf7fd0b837b489ee36ca501956f1d34378558e7bd578c3af4ba5e7ce`.
+
+Production sources, active donor and executables remain unchanged; their
+previous strict failure is preserved. The private admission is bound to the
+retained payload and nonoverlapping rectangle. Default adoption requires a
+runtime program/state/geometry proof without a capture-input switch or opt-in,
+plus focused tests and one coherent title regression. Overlapping primitives
+cannot use a single predraw snapshot. Complete scene/HLE pixels, enabled noise,
+original startup/lifetime and exact silicon remain open; **4/9** stands.
+
+## Producer continuation stopped at draw 2031 - 2026-10-10
+
+One original replay requested through draw 2120 stopped at its first mismatch,
+draw **2031** (original call 3384). No later draw or retry executed. Rows
+1-2030 pass the existing component comparisons, but the complete requested
+prefix report and its dependent controls were not produced. Published producer
+qualification remains **1943**; preserved per-draw snapshots at 1969 and 1983
+are evidence for further review, not a completed prefix qualification.
+
+Draw 2031 has **345 failing red channels**, with differences of 2-10 codes.
+Independent coverage is 771 fragments, including 108 LESS-depth rejections
+and **663 writes**, matching the original write counter. Depth, stencil,
+alpha, untouched pixels and other target roots remain exact. Shader/state
+components pass; all skip counters are zero and every original FIFO drains.
+
+Original vertex 6 carries red 1.2049747705 and green 1.0212996006; all nine
+source triangles undergo viewport clipping. The declared independent
+[ARB vertex program pipeline](https://registry.khronos.org/OpenGL/extensions/ARB/ARB_vertex_program.txt)
+clamps vertex colors before attribute clipping. The maintained generic LLE
+instead interpolates raw colors while constructing clipped vertices, then
+clamps their colors at raster setup (`src/machine/nv2a.cpp:14961`). This
+source/input distinction is the correction candidate. The reference equation
+and one-code bound remain unchanged; a small authored discriminator and
+bounded implementation review precede another original replay. The published
+pipeline contract does not establish exact NV2A silicon ordering.
+
+Frozen private failure handoff is
+`frame-inputs-firstworld-20261010/surviving-mixed-prefix2120-failure2031-handoff.aot-private.json`
+(SHA-256 `57edff3a74386abd0d5617afc7b77cd609e1154fea7becc04e436715d546cede`).
+Root independently verified all 2031 original observation hashes, the ten
+failed expected/actual target buffers and the red-only error counts. Complete
+scene pixels and the graphics family remain open; **4/9** stands.
