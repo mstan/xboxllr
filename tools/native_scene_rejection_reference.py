@@ -14,9 +14,8 @@ import struct
 
 from native_frame_inputs import require
 from native_frame_state_delivery import expected_delivery
-from native_frame_target_reference import layout
 from native_scene_clamp_reference import (expected_clamp_draw,clamp_vertices,
-    texture_error_bound,precision_domain,CLAMP_ORDER)
+    texture_error_bound,validate_empty_inputs,CLAMP_ORDER)
 from native_scene_diffuse_reference import consumed_profile
 from native_scene_pixel_reference import binary32
 
@@ -119,13 +118,19 @@ def expected_rejection_draw(capture,scene,vertices,fog,targets,before,
     require(len(fog) == len(vertices) and all(math.isfinite(x) for x in fog),
             'Incomplete finite input fog')
     clamped = clamp_vertices(vertices)
-    errors = texture_error_bound(scene['textures'][0]);bounds = precision_domain(errors,clamped)
-    pair = scene['frame_resource_plan']['target_ids']
-    for slot,target_id in enumerate(pair):
-        width,height,pitch = layout(targets[target_id])
-        require(pitch == width*4 and scene['before'][slot]['shape'][2] in
-                ((44,45) if slot else (87,)),'Producer target representation outside contract')
-        require(len(before[target_id]) == pitch*height,'Incomplete expected predecessor storage')
+    errors = texture_error_bound(scene['textures'][0])
+    # Complete original geometry rejection above proves that no sample or
+    # primary color is consumed. Inspect the complete encoded input and
+    # record its exact extrema, without requiring a sampled-color bound.
+    bounds = [e*Fraction(max(v[c] for v in clamped))
+              for e,c in zip(errors,(4,5,6))]
+    # Reuse the full input/storage/profile contract after original emptiness
+    # is proved. Its geometry-only requirements are unconsumed here; this
+    # local validation proxy changes no original attribute, fog, count,
+    # method, texture, target or expected storage and is never rasterized.
+    validation = [list(v) for v in clamped]
+    for v in validation:v[:4] = [0.,0.,1.,1.]
+    validate_empty_inputs(capture,scene,validation,fog,targets,before,methods)
     # Preserve every owned root, including target A/S/padding. Supplied
     # predecessors are the independent expected chain, not renderer images.
     return dict(before),set(),dict(source_triangles=len(vertices)-2,
@@ -136,4 +141,5 @@ def expected_rejection_draw(capture,scene,vertices,fog,targets,before,
         input_codec_error_codes=list(map(str,errors)),
         input_prequantization_codec_error_codes=list(map(str,bounds)),
         clamped_input_components=sum(a[c] != b[c] for a,b in zip(vertices,clamped) for c in (4,5,6)),
+        codec_precision_unconsumed_because_no_raster_leaves=True,
         rgb_channel_bound=1,behind_camera_rejection=proof)

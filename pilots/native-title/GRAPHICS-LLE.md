@@ -2896,9 +2896,10 @@ the corrected DLL. The default exact-library precondition remains enforced.
 
 The first input-only continuation admits draw 2129 with 582 independent writes,
 then stops at draw 2130's global palette guard. All its primitive W values are
-strictly negative, so no palette value can be sampled. The zero-sample validation
-ordering remains a separate pending correction; no original draw was executed
-by this continuation. Full scene, noise and startup/lifetime stay open.
+strictly negative, so no palette value can be sampled. No original draw was
+executed by that continuation. The subsequent empty-only correction and
+prepared replay are recorded below. Full scene, noise and startup/lifetime
+stay open.
 
 Root reviewed handoffs are
 `frame-inputs-firstworld-20261010/producer-color-clamp-generation-root-review.aot-private.json`
@@ -2906,3 +2907,43 @@ and `positive-w-empty-root-review.aot-private.json`. The latter binds 12 source
 files and 21 artifacts to the frozen input-only continuation. Published
 original producer qualification remains **1943** until the corrected replay
 and dependent controls pass. Full graphics remains partial **4/9**.
+
+## Empty-only precision admission and retained replay - 2026-10-10
+
+Complete negative-W rejection and positive-W depth rejection now validate the
+full original input, texture, state, counts and every owned root before returning
+unchanged independently expected storage. The guard omits only the precision
+requirement for sampling that the original geometry proves cannot occur. Visible
+geometry keeps the strict one-code bound. A local validation-only geometry proxy
+is used after complete original emptiness and finite-attribute checks; it never
+provides a raster expectation or an original payload. The clipping/depth proofs
+and nominal pixel equations are unchanged. The combined focused suite passes
+**79 tests**, including malformed inactive roots, texture/fog/count faults and
+visible-geometry counterexamples.
+
+The input-only continuation now admits **2130-2132**, with 14 source primitives,
+zero writes and all five independently expected roots unchanged from 2129.
+The prepared prefix has **321,921 cumulative expected writes**. Draw 2133 needs
+a tighter consumed-sample precision proof; no actual output supplies that proof.
+
+A frozen private session harness retains one original reference, independently
+expected predecessors, cumulative written indices, event cursor and qualified
+rows across explicitly reviewed batches. Every draw still executes original
+code, current-generation shader/state qualification and the unchanged storage
+comparison. Root review passes **34 hardware-free controls**, including boundary
+bind/clear ordering, a permitted observed one-code difference that must not enter
+the expected predecessor, source migration and retirement on faults. The event
+body and report equations are AST-identical to the shared runner. The driver
+uses blocking terminal input between batches; no idle worker or polling starts.
+Real idle CPU/performance and serialized restart are not qualified by these
+authored controls.
+
+The corrected original replay through 2132 is in progress, with selected draw
+snapshots reserved for dependent controls. Its source/input/loaded-CRT guards
+precede reference creation. This preparation does not extend the published
+1943-pixel prefix, transfer the old full-frame state result to the corrected
+DLL, or close full scene/noise/startup/lifetime. Private evidence is
+`producer-zero-sample-root-source-review.aot-private.json`,
+`producer-zero-sample-final-handoff.aot-private.json` and
+`producer-persistent-session-proposal/root-review.aot-private.json`, all under
+`frame-inputs-firstworld-20261010`. Full graphics and **4/9** stay open.

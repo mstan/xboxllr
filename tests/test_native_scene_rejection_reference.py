@@ -8,7 +8,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
 from native_scene_rejection_reference import behind_camera_proof,expected_rejection_draw
 from native_scene_viewport_reference import clipped_triangles
 from test_native_scene_diffuse_reference import vertex,methods
-from test_native_scene_clamp_reference import texture
+from test_native_scene_clamp_reference import empty_fixture
 from test_native_frame_target_reference import target
 
 
@@ -53,12 +53,7 @@ class RejectionControls(unittest.TestCase):
         vertices = [vertex(0,0,-1),vertex(4,0,-2),vertex(0,4,-3)]
         for v in vertices:v[2] = 18000000
         original = copy.deepcopy(vertices)
-        capture = {'header':[0,0,6]}
-        scene = {'textures':[texture(0xffff,0,2)],'frame_resource_plan':{'target_ids':[1,2]},
-                 'before':[{'shape':[16,1,87]},{'shape':[16,1,44]}]}
-        targets = {1:target(1,width=16,height=1),2:target(2,1,width=16,height=1,fmt=44)}
-        before = {1:bytes(range(64)),2:bytes(reversed(range(64))),3:b'other owned root'}
-        m = methods();m.update({0x38c:0x1b02,0x390:0x1b02,0x308:1,0x39c:0x404})
+        capture,scene,_,_,targets,before,m = empty_fixture()
         with patch('native_scene_rejection_reference.expected_delivery',return_value=(m,{},{})), \
              patch('native_scene_rejection_reference.expected_clamp_draw',side_effect=AssertionError('raster reached')):
             storage,writes,stats = expected_rejection_draw(capture,scene,vertices,[-.1,-.2,-.3],targets,before,

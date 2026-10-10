@@ -6,7 +6,7 @@ from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
 from native_scene_empty_depth_reference import empty_positive_depth_proof,expected_empty_depth_draw
 from test_native_scene_diffuse_reference import vertex,methods
-from test_native_scene_clamp_reference import texture
+from test_native_scene_clamp_reference import empty_fixture
 from test_native_frame_target_reference import target
 
 
@@ -43,13 +43,9 @@ class EmptyDepthControls(unittest.TestCase):
             with self.assertRaises(ValueError):empty_positive_depth_proof(v,4,4)
 
     def test_whole_empty_depth_domain_preserves_all_expected_owned_roots(self):
-        v=self.outside();scene={'before':[{'shape':[16,1,87]},{'shape':[16,1,44]}],
-            'textures':[texture(0xffff,0,2)],'frame_resource_plan':{'target_ids':[1,2]}}
-        targets={1:target(1,width=16,height=1),2:target(2,1,width=16,height=1,fmt=44)}
-        before={1:bytes(range(64)),2:bytes(reversed(range(64))),3:b'other independent root'}
-        m=methods();m.update({0x38c:0x1b02,0x390:0x1b02,0x308:1,0x39c:0x404})
+        capture,scene,_,_,targets,before,m=empty_fixture();v=self.outside()
         with patch('native_scene_empty_depth_reference.expected_delivery',return_value=(m,{},{})):
-            storage,writes,row=expected_empty_depth_draw({'header':[0,0,6]},scene,v,[0]*3,targets,before,'fma-b-first','fma')
+            storage,writes,row=expected_empty_depth_draw(capture,scene,v,[0]*3,targets,before,'fma-b-first','fma')
         self.assertEqual(storage,before);self.assertIsNot(storage,before);self.assertFalse(writes)
         self.assertTrue(row['positive_w_depth_domain_all_primitives_empty'])
 

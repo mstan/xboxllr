@@ -6,12 +6,12 @@ allow expected predecessor preservation. Any surviving depth-boundary geometry
 remains guarded. The original near/zero-W and existing mixed/clamp contracts
 are unchanged; no actual renderer output chooses an expectation.
 """
+from fractions import Fraction
 import math
 
 from native_frame_inputs import require
 from native_frame_state_delivery import expected_delivery
-from native_frame_target_reference import layout
-from native_scene_clamp_reference import clamp_vertices,texture_error_bound,precision_domain,CLAMP_ORDER
+from native_scene_clamp_reference import clamp_vertices,texture_error_bound,validate_empty_inputs,CLAMP_ORDER
 from native_scene_diffuse_reference import consumed_profile
 from native_scene_mixed_clip_reference import triangle_leaves,expected_empty_mixed_draw
 
@@ -55,12 +55,19 @@ def expected_empty_depth_draw(capture,scene,vertices,fog,targets,before,
     require(len(fog) == len(vertices) and all(math.isfinite(x) for x in fog),
             'Incomplete finite input fog')
     clamped = clamp_vertices(vertices)
-    errors = texture_error_bound(scene['textures'][0]);bounds = precision_domain(errors,clamped)
-    for slot,target_id in enumerate(scene['frame_resource_plan']['target_ids']):
-        width,height,pitch = layout(targets[target_id])
-        require(pitch == width*4 and scene['before'][slot]['shape'][2] in
-                ((44,45) if slot else (87,)) and len(before[target_id]) == pitch*height,
-                'Producer target representation outside contract')
+    errors = texture_error_bound(scene['textures'][0])
+    # Complete original geometry rejection above proves that no sample or
+    # primary color is consumed. Inspect the complete encoded input and
+    # record its exact extrema, without requiring a sampled-color bound.
+    bounds = [e*Fraction(max(v[c] for v in clamped))
+              for e,c in zip(errors,(4,5,6))]
+    # Reuse the full input/storage/profile contract after original emptiness
+    # is proved. Its geometry-only requirements are unconsumed here; this
+    # local validation proxy changes no original attribute, fog, count,
+    # method, texture, target or expected storage and is never rasterized.
+    validation = [list(v) for v in clamped]
+    for v in validation:v[:4] = [0.,0.,1.,1.]
+    validate_empty_inputs(capture,scene,validation,fog,targets,before,methods)
     return dict(before),set(),dict(**stats,clipped_source_triangles=stats['source_triangles'],
         generated_clipped_vertices=0,triangles=0,tested_fragments=0,rejected_depth_fragments=0,
         maximum_affine_depth_error=0,covered_pixels=0,expected_written_pixels=0,
@@ -68,5 +75,6 @@ def expected_empty_depth_draw(capture,scene,vertices,fog,targets,before,
         input_codec_error_codes=list(map(str,errors)),
         input_prequantization_codec_error_codes=list(map(str,bounds)),
         clamped_input_components=sum(a[c] != b[c] for a,b in zip(vertices,clamped) for c in (4,5,6)),
+        codec_precision_unconsumed_because_no_raster_leaves=True,
         rgb_channel_bound=1,positive_w_depth_domain_all_primitives_empty=True,
         surviving_depth_range_component_qualified=False)
