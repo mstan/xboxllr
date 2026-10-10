@@ -151,7 +151,10 @@ static void pilot_mark_targets(unsigned flags,uint64_t serial)
     }
     if(flags&6) {
         if(pilot_depth_target==UINT32_MAX)pilot_surface_use[2]=serial;
-        else if(pilot_depth_target)pilot_textures[pilot_depth_target-1].last_use=serial;
+        else if(pilot_depth_target) {
+            struct PilotNativeTexture *texture=&pilot_textures[pilot_depth_target-1];
+            texture->content_serial=texture->last_use=serial;
+        }
     }
 }
 static void pilot_mark_draw(void)

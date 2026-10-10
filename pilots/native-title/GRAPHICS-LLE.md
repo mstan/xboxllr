@@ -2039,3 +2039,111 @@ used one Idle CPU logical processor; no title/audio/host GPU/Xbox run occurred.
 The full goal stays active at **4/9**, with the existing hardware inspection
 gate intact. Standing owner authorization covers read-only/benign checks;
 dangerous operations still require explicit approval.
+
+## Default HLE depth storage sampled as ARGB - 2026-10-10
+
+The independently qualified blur-mask consumer exposes a real native mismatch:
+its allocation remains `LIN_D24S8` (`2E`), while its live sampling header is
+`LIN_A8R8G8B8` (`12`). The native adapter previously selected its allocation's
+depth SRV and the donor's automatic shadow classification. Both have to follow
+the live sampling interpretation. This correction works by default and preserves
+the original allocation, depth target, and resource ownership.
+
+The guest adapter reads the live header on binding and each draw, including
+header changes without a rebind. The prepared donor uses that interpretation
+for its shadow shader key and texture constants. An authored compute shader
+loads unfiltered depth and stencil, recovers the original D24 integer, and
+produces the equivalent RGBA8 image. Ordinary native sampling then applies
+the requested nearest or bilinear filter. A per-resource content serial
+invalidates the conversion after CPU upload, depth/stencil clear, or a target
+draw; read/completion serials do not invalidate it. Multiple stages and repeated
+draws share the cached image and shader. Ordinary sampling adds no CPU download
+or upload. Only single-level, single-sample owned D24S8 allocations reinterpreted
+as ARGB are admitted; other reinterpretations retain their guard.
+
+The integer inverse uses the IEEE-754 exponent/mantissa of a nearest-rounded
+D24 UNORM load, avoiding a shader multiplication's rounding ambiguity.
+All **16,777,216** integer inputs pass an exhaustive CPU check of the declared
+[D3D11.3 UNORM conversion contract](https://microsoft.github.io/DirectX-Specs/d3d/archive/D3D11_3_FunctionalSpec.htm).
+This check establishes that inverse under the stated conversion contract,
+not undocumented NV2A silicon arithmetic.
+
+The actual GPU fixture checks authored texel bytes, boundary depth values,
+all **256 stencil codes**, nine rational bilinear samples over 28-by-28 pixel
+interiors, and changes through CPU upload, stencil clear, and depth/stencil
+target drawing. An actual negative control observes the donor's unchanged
+depth/shadow interpretation; the ARGB interpretation instead returns the
+independently authored bytes. Two stages share the same view, identical uploads
+and repeated reads cause no reconversion, and a reused ownership slot gets
+fresh storage. Each of three device lifetimes observes **2 allocations /
+5 conversions /1 shader compilation**. A separate guest ABI fixture verifies
+live header mutation without rebind, unchanged allocation/native ownership,
+binding retention, and full device/guest-memory cleanup over three lifetimes.
+
+The six focused graphics/shader CTests pass. After the final stencil-coverage
+adjustment, both new focused GPU/ABI tests pass again. All 39 prepared donor
+files reproduce exactly from the final preparation tool. The shipping private
+title was rebuilt with frame auditing disabled. Actual title regression
+evidence is recorded with the final private qualification report.
+
+That executable (`5f117fa7866ed6cb13d742653fe2dc77bcd37c97d8ff8a4e564ad70498306139`)
+then runs for **330.360s /33 captures** through startup, title, Demo, subsequent
+movie, title return, and Demo reentry, with no stop/audio-stop/fault. All five
+scheduled controller states are delivered. The second Start occurs during the
+movie, so this is not a fresh Demo-interruption qualification. Earlier narrow
+replays remain preserved as incomplete: startup skipped an expired first pulse
+in the one-core run, and a loading interval skipped the second one-second pulse
+in the first Normal-priority run. Wider pulses resolve delivery in the final
+bounded replay. The title is muted/hidden, with frame auditing off, using four
+shared logical processors at Normal priority; this is a correctness regression
+and does not establish an HLE performance benchmark.
+
+The broader graphics ABI test retains an unresolved pre-existing process-wide
+handle assertion before the new fixture. Its retained pre-change executable
+also fails there; this is not a passing broad ABI claim. Investigation is
+tracked separately in `.72`. An earlier complete backend run timed out during
+teardown; subsequent full and focused three-lifetime checks terminate and pass.
+No reason for that earlier timeout has been established.
+
+This qualifies the authored native view/filter/cache/ownership component.
+Production HLE postprocess pixels against the retained independent equations,
+complete scene producers/composition, enabled noise, original startup/lifetime,
+and exact hardware behavior remain open. The family count stays **4/9**.
+
+## Independent scene producer prefix - 2026-10-10
+
+The first **13 original producer draws** in the complete retained frame now
+execute continuously against input-derived shader/state and pixel equations.
+The closed profile admits opaque filled strips, unclipped surviving faces,
+repeat/trilinear BC1, RGB diffuse in `[0,0.5]`, saturated alpha, density-zero fog,
+zero specular, LESS depth, and RGB/depth writes. Target alpha and stencil stay
+preserved. Positive-W fully culled faces may extend outside the XY viewport.
+Original line width remains exactly state-qualified; only that unconsumed word
+is normalized for the earlier authored filled-triangle pixel equation fixture.
+
+The expected chain starts with supplied root inputs and independent captured
+clear equations. Every draw receives expected predecessor bytes; observed
+intermediates never become goldens. All five owned roots are compared after
+each draw: **11,267 written fragments /16,972,800 target-pixel comparisons**,
+with at most one UNORM8 code for written RGB, exact depth/stencil, and exact
+unwritten color bytes. Four original target/clear operations also match.
+All **10 authored tests and 21 artifact controls** pass, including altered
+depth, stencil, masked alpha, untouched pixels, missing roots, and combined
+shader/state corruption.
+
+Private evidence is `producer-prefix13-qualified.aot-private.json`
+(SHA-256 `d36116586894e2bfd07fc61b299f4b4124ea04a712d286c77b1078e782a4cee6`)
+and `producer-prefix13-controls.aot-private.json`
+(`703df7917d5c9756942b00cd8b2089acbaf172ae6475ea0073269e1ab10dbde6`)
+under the complete-input directory. The reference DLL and source frame hashes
+remain unchanged. The authored tools are `native_scene_producer_reference.py`,
+`qualify_native_scene_producer.py`, and `native_scene_producer_controls.py`.
+
+Draw **14** is the next exact domain boundary: surviving geometry crosses the
+right viewport edge. Earlier equations without a clipping guard produced
+differences; that establishes an oracle scope gap rather than an LLE bug.
+The new contract guards that domain before applying its closed equations.
+Complete-scene/native/enabled-noise/silicon/startup/lifetime qualification
+remains false. This CPU-only component is tracked in `.117` and keeps **4/9**.
+The owner authorized two workers alongside the primary agent; all share
+LP12-15 at Normal priority, lowering priority when a game is running.

@@ -54,7 +54,7 @@ static void test_graphics_guest_scheduler(void)
     CloseHandle(gpu_test_entered);CloseHandle(gpu_test_release);
     fprintf(stderr,"PASS: scheduled real GPU WRITE/READ callbacks, pixels, ordering waits, reentrant guest queries, fences and teardown without CPU/renderer lock inversion\n");
 }
-static void test_graphics(void)
+static void test_graphics(int depth_sampling_only)
 {
     vm_ensure();
     dispatch_ensure(); /* Persistent shared callback stack precedes allocation baseline. */
@@ -72,6 +72,9 @@ static void test_graphics(void)
     CHECK(call_graphics(PILOT_D3D_Direct3D_CreateDevice,create)==0x80004001u);
     CHECK(!graphics_active && !MEM32(PILOT_D3D_DEVICE_GLOBAL));
     parameters[4]=0x11;
+    if(depth_sampling_only) {
+        uint32_t warm=pool_allocate(24,0x48584554u);CHECK(warm);pool_free(warm);
+    }
     uint64_t resident=vm_committed(0,0x100000000ull);
     unsigned char pixels[64*64*4];
     for (unsigned pass=0;pass<3;++pass) {
@@ -79,6 +82,13 @@ static void test_graphics(void)
         CHECK(call_graphics(PILOT_D3D_Direct3D_CreateDevice,create)==0);
         CHECK(graphics_active && MEM32(PILOT_D3D_DEVICE_GLOBAL)==PILOT_D3D_DEVICE_OBJECT);
         CHECK(!av_saved_data);
+        if(depth_sampling_only) {
+            test_graphics_depth_sampling_header();
+            CHECK(!call_graphics(PILOT_D3D_D3DDevice_Release,NULL));
+            CHECK(!graphics_active && !graphics_headers && !MEM32(PILOT_D3D_DEVICE_GLOBAL));
+            CHECK(vm_committed(0,0x100000000ull)==resident);
+            continue;
+        }
         if(pass==2) {
             test_graphics_callback_close();
             CHECK(!graphics_active && !graphics_headers && !MEM32(PILOT_D3D_DEVICE_GLOBAL));
@@ -162,6 +172,7 @@ static void test_graphics(void)
         CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&front)==0);
         test_graphics_visibility();
         test_graphics_aliases();
+        test_graphics_depth_sampling_header();
         test_graphics_gpu_callbacks();
         CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&back)==0);
         if(pass==1)test_graphics_reset();

@@ -29,6 +29,25 @@ def once(code, old, new):
     return code.replace(old, new)
 
 
+def prepare_sampling_format(code, combiners=False):
+    """Classify sampling from the live guest header, retaining allocation format.
+
+    A depth texture reinterpreted as ARGB must select ordinary texture sampling,
+    not the donor's automatic shadow compare. Its shader-key transitions and
+    cached constant preparation remain handled by the renderer.
+    """
+    code = once(code, '#include "d3d8_internal.h"',
+                '#include "d3d8_internal.h"\n'
+                'DWORD pilot_d3d_texture_sampling_format(UINT stage,DWORD allocation);')
+    stage = 'i' if combiners else 'stage'
+    code = once(code, 'D3DFORMAT format = d3d8_base_format(tex);',
+                'D3DFORMAT format = pilot_d3d_texture_sampling_format('+stage+',d3d8_base_format(tex));')
+    if combiners:
+        code = once(code, 'D3DFORMAT f = d3d8_base_format(d3d8_GetStageTexture(i));',
+                    'D3DFORMAT f = pilot_d3d_texture_sampling_format(i,d3d8_base_format(d3d8_GetStageTexture(i)));')
+    return code
+
+
 def shaders(code):
     # Reuse the existing dependent-bump and homogeneous-coordinate adapter.
     # Phobos already has float4 texture varyings and linear texture metadata.
@@ -81,9 +100,10 @@ def prepare(donor, output, reference):
             for name,start,end in reversed(list(bodies(code))):
                 if name not in PHOBOS_COM:
                     code=code[:start]+'{ pilot_d3d_backend_stop("unqualified backend method: '+name+'"); }'+code[end:]
-            if path.name=='d3d8_shaders.c': code=shaders(code)
+            if path.name=='d3d8_shaders.c': code=prepare_sampling_format(shaders(code))
             if path.name=='d3d8_resources.c': code=prepare_xrgb_border(code)
             if path.name=='d3d8_combiners.c':
+                code=prepare_sampling_format(code, combiners=True)
                 code=prepare_projected_mips(code)
                 # A zero-stage final combiner is real work, not FFP. The
                 # adapter's nonzero selector distinguishes it from PS disable.
@@ -171,7 +191,9 @@ def prepare(donor, output, reference):
         'presentation defers pacing to the Xbox API adapter; renderer accessors\n'
         'and UP-ring upload expose real owned resources; independent vertex\n'
         'translation shares the pixel compiler; existing FVF/raster/bump and\n'
-        'sampler corrections are retained; combiner failures cannot fall back\n'
+        'sampler corrections are retained; sampling classification uses the\n'
+        'live caller header, including depth storage reinterpreted as ARGB.\n'
+        'Combiner failures cannot fall back\n'
         'to an unrelated shader; the empty-stage RHI view is released/reset on\n'
         'device teardown. XLLE_PILOT_D3D_DEBUG enables native layer diagnostics.\n'
         'Independent Xbox reset adapter reuses real presentation-buffer creation\n'

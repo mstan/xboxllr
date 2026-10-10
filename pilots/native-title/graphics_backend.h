@@ -49,6 +49,10 @@ void pilot_gfx_texture_destroy(uint32_t handle);
 void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,uint32_t bytes);
 void pilot_gfx_texture_prepare_sample(uint32_t handle,uint32_t level,const void *data,uint32_t bytes,int cpu_exposed);
 void pilot_gfx_texture_bind(unsigned stage,uint32_t handle);
+/* Allocation format and the live guest sampling format may differ. */
+void pilot_gfx_texture_sampling_format(unsigned stage,uint32_t format);
+struct PilotDepthTextureStats {uint32_t allocations,conversions,shader_compilations;};
+void pilot_gfx_depth_texture_stats(struct PilotDepthTextureStats *stats);
 int32_t pilot_gfx_texture_readback(uint32_t handle,uint32_t level,void *data,uint32_t capacity);
 /* Diagnostic luma grid from the actual uploaded packed-YUV CPU mirror. */
 int32_t pilot_gfx_movie_luma(uint32_t handle,unsigned step,unsigned char *samples,unsigned bytes);

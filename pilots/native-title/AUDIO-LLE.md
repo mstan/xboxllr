@@ -809,6 +809,38 @@ inspection is pending under probe AGENTS.md rule8. Once inspected, a distinct
 read-only context can characterize the stopped state; do not restart the write
 experiment automatically. GP bootstrap/bit9 and full audio remain open.
 
+### Read-only post-failure context - 2026-10-10
+
+The owner subsequently authorized continued reads, including unexpected read
+outcomes, while requiring a stop after an unexpected write. A distinct fixed
+eight-DWORD context batch completed with zero device writes: GP reset remained
+zero and AV remained `11` at both endpoints; the SG maxima remained1544/1.
+The scratch SG address differs from its pre-write sample, while the other seven
+context words match. This establishes the later register observation, not the
+instantaneous value that caused `DF000008`, the requested allocation address,
+or the reason verification failed. The failed store has not been retried.
+
+A bounded attempt to identify the candidate retained RAM table then stopped.
+The generic read command rejected its CPU alias before access. A fixed
+DWORD-load/return payload was validated offline for one intended load, zero
+stores, and preserved callee state; its first hardware load timed out without
+returning a word. A subsequent distinct health PING also timed out. No SG,
+reset/start, DMA, audio, storage, or recovery store followed; possible backing
+allocations have not been freed. The agent is unavailable pending the owner's
+screen report/restart, while independent graphics work continues.
+
+The SG register alone does not establish a valid CPU mapping or owned storage.
+Future RAM probes must establish mapping validity before dereferencing a
+candidate alias. The read failure neither qualifies bootstrap nor proves its
+cause; GP bootstrap/bit9 and the complete audio family remain open. Raw pointer
+values, payloads and replies remain in private recovery records.
+
+The owner reported that the screen still looked normal, then restarted and
+relaunched v0.4.0. A fresh eight-DWORD GP context batch completes with zero
+device writes, stable reset/AV endpoints, and the same SG maxima. The agent
+is available again. No failed RAM load or SG write has been repeated; screen
+freeze and the RAM timeout's cause remain unestablished.
+
 ## Remaining work, in order
 
 1. Preserve the now-connected original IRQ/PIC/ISR/unlink and DPC-queue route.

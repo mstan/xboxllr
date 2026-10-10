@@ -67,7 +67,7 @@ change the next controller-input dependency batch.
 | 6 | Remaining scheduling, threads, events and timers | Coupled ready/block/wake/preemption and interrupt state | Partial `.112`: original blocking/wakeup, 18 workers/432 handoffs, 12 IRQ-driven waits and 72 lifecycles retained. Experimental static title selection builds but stops before entry at original GPIO `0x80cf`; preserve this dependency and advance independent services. Mixed suite 52/52; default Blinx 190.141s demo/interruption/title/reentry. Title service/callback routing, idle/compute clock progress, initial FP state and native slot reuse remain open. [Scope and evidence](../pilots/native-title/SCHEDULING-LLE.md) |
 | 7 | Audio buffers, cursor, routing and lifetime | APU/DSP plus DMA, scheduling, reuse and output | Active `.113`: PCM/ADPCM, rate/envelopes/sends, GP banks/scratch DMA, static stop/finite retirement and original IRQ5/PIC/ISR/unlink/DPC-queue ownership. GP FIFO transport now passes 108 cases, 12 guards and 2,064 repeated transfers; real MIT DSP instructions exercise scratch/FIFO PCM16/PCM24. Original GP boot/framework, interleaved output, EP/AC97, remaining processing, payload/SSL and whole-title selection stay open. Deferred completion still stops at FE fence `.115`. Continue independent work; GP bit 9 `.114`, fence `.115` and hardware-only timing stay last. [Evidence and next work](../pilots/native-title/AUDIO-LLE.md) |
 | 8 | GPU completion, callbacks and visibility: independent offline work | FIFO/traps/reports, pending results and lifetime; uses memory/display | Partial `.109`: original queries/fences, 228 IRQ/DPC callbacks, hardware-referenced 2D pixels and bounded 3D/texture/encoder cases pass. Full original title startup and dependent integration remain open; their real-console observation is at the end of this list. Do not repeat that blocked startup experiment while working on independent services. [Evidence and limits](../pilots/native-title/GPU-COMPLETION-LLE.md) |
-| 9 | Graphics state, shaders, textures and vertex fetch | Broad NV2A draw/state/format coverage; uses memory/completion | Partial `.116`: 140 independent BGRA draws, 720 original fetch/ownership cases, 1,116 constant cases and 1,344 independent arithmetic cases retained. Complete original submission passes 96 scene shader draws / 29,424 written lanes including fog. Programmable fog passes 196 independent cases / 392 original draws and 294 native GPU draws with bounded interior pixels; the real updated attract/interruption/reentry regression passes. DXT1-noise control transport passes 128 original setter calls / 40 complete graphics-service returns, with matching HLE boolean cache admission; enabled noise pixels remain guarded and deferred. Finite normalized 2D textures now pass 258 independent cases / 516 original and 516 native GPU draws, with 444,276 interior pixels on each route. LLE executes mip/filter/bias/clamp state; HLE uses a cached native base-mip view to preserve LOD0 min/mag selection. Documented output defaults now pass 64 original/native mask cases and eight default-Q texture cases / 13,776 interior pixels on each route; raw probes and rasterization agree. Variable projected W/Q now passes 432 independent cases / 864 draws / 743,904 interior pixels on each route (LLE one channel step; native two); GPU footprint correction and normalized XRGB border preparation retain native shader/upload caches. Packed ARGB4444/DXT3/DXT5 rectangular mips additionally pass 972 original-XDK/LLE cases / 1,944 draws / 1,673,784 interior pixels. Latest layout/guard fixes pass 854 permanent LLE cases and four core regressions. Native format cases and 192 isolated texel cases pass independent per-channel host BC decoder/filter intervals; compressed palettes fail the separate strict two-step gate. Retained native bounds pass unchanged; exact Xbox codec precision is deferred. Owner visual review finds no observable defect at a glance. CPU work uses Idle priority on one logical processor; GPU fixtures require Marvel Rivals absent. No title/audio rerun or HLE production change occurs. Broader raster/state and full scene composition qualification remain open. Original startup remains open; native upload coalescing stays intact. [Evidence](../pilots/native-title/GRAPHICS-LLE.md) |
+| 9 | Graphics state, shaders, textures and vertex fetch | Broad NV2A draw/state/format coverage; uses memory/completion | Partial `.116`: all4,331 retained original draws execute with independently qualified vertex/state components. Five original postprocess consumers pass1,305,600 independent pixels; original producer draws1-13 pass an expected-image chain and exact owned depth/stencil/untouched bytes (`.117`). Default HLE depth-as-ARGB sampling now passes GPU/filter/cache and guest-header ownership checks across three device lifetimes, with cached GPU conversion and no routine CPU readback; updated330s title playback/reentry passes. Full scene/HLE pixel equivalence, draw14 viewport clipping, enabled noise and original startup/lifetime remain open; pre-existing broad ABI handle count is `.72`. [Evidence and limits](../pilots/native-title/GRAPHICS-LLE.md) |
 | 10 | Movie/A-V sequence integration | Composes the qualified file, decoder, input, audio and display paths | Open |
 | Available now | Real-console observations and the integration they unblock | GPU startup/FD6806A0 `.111`; original scheduling GPIO `0x80cf`; DSP DMA bit 9 `.114`; FE notification fence/control `.115`; enabled DXT1-noise pixels/native error bound `.116`; exact shader rounding/near-integer ARL; exact DXT color/alpha decoder precision; any exact interpolation/curve/prefetch/completion timing requiring new silicon evidence | Verified recovery scope on G: 4,891 files / 2.08 GB, with known exclusions; existing v0.4.0 agent remains running. Both AV directions and actual pending states observed. One-pixel HVALID_START stayed unchanged in the alternate bank immediately and after >=50 ms per ack; all changed state restored. Idle FE token transfer observed before this payload's release; busy-work ordering remains open. Read-only GP reset/IRQ/frontend/SG context recorded. Owned GP boot attempt stopped at first SG-address readback (DF000008), before GP start; memory retained, SG base unknown, human inspection pending before a distinct read-only context. No automatic retry. Reset, activation/edge, original startup, bit9 and remaining pixel questions stay open; guards and 4/9 count remain. No boot/EEPROM/flash/disk-layout writes occurred |
 
@@ -874,6 +874,8 @@ enabled noise, scene pixels and startup/lifetime remain open. A focused CPU
 rebuild was required; no title, audio, host GPU or hardware request occurred.
 The full goal remains active with **4/9** families qualified.
 
+
+
 The41 sampled raw state profiles also pass3,251 input-derived state/setup words
 and575 retained failure/independence controls. All96 focused Python tests pass;
 the older eight original shader/state representatives and30 controls still pass
@@ -970,3 +972,38 @@ silicon rounding deferred. Shipping HLE is unchanged; no rebuild/title/audio/
 host GPU/Xbox run occurred. Full scene pixels, native equivalence, noise and
 startup/lifetime remain open. The full goal stays active at **4/9** and the
 hardware inspection gate remains intact.
+
+The native HLE now honors a live ARGB sampling header over its retained D24S8
+allocation. Unfiltered GPU depth/stencil decoding feeds a cached RGBA8 view;
+ordinary native filtering remains on the GPU, with no routine CPU readback.
+Content changes invalidate the view, while repeated reads and stages reuse it.
+All six focused graphics/shader tests pass, including authored texel/filter/
+cache and guest-header/lifetime checks over three device lifetimes. The final
+all-256-stencil fixture and guest ABI rerun pass; the integer inverse also passes
+all16,777,216 D24 inputs. [Scope and remaining work](../pilots/native-title/GRAPHICS-LLE.md#default-hle-depth-storage-sampled-as-argb---2026-10-10).
+The broad graphics ABI has a retained pre-change process-handle assertion
+failure tracked in `.72`; full-scene/native postprocess equivalence stays open.
+
+Independent producer pixels additionally qualify original complete-frame draws
+**1-13**, using expected predecessors through captured target/clear operations:
+11,267 written fragments and16,972,800 target-pixel comparisons, with exact
+depth/stencil and untouched color bytes. Ten authored tests and21 artifact
+controls pass. Draw14's viewport clipping is the next guarded producer domain.
+[Evidence and limits](../pilots/native-title/GRAPHICS-LLE.md#independent-scene-producer-prefix---2026-10-10).
+The owner now authorizes two workers plus the primary agent, sharing four
+logical CPUs at Normal priority and lowering it while a game is running.
+The full goal remains active with **4/9** families qualified.
+
+The updated default title completes330.360s /33captures through Demo, subsequent
+movie, title return and Demo reentry with no stop/audio-stop/fault. All scheduled
+controller states arrive; the second Start occurs during a movie, so no new
+Demo-interruption qualification is claimed. The owner additionally authorized
+continued read-only Xbox checks despite unexpected read outcomes. Eight GP
+context reads completed with zero device writes and exposed a changed scratch
+SG address after the earlier failed verification. A later candidate RAM load
+and health PING timed out; the agent is unavailable pending a screen report or
+restart. No failed write retry or new device write occurred.
+[Hardware observation and limits](../pilots/native-title/AUDIO-LLE.md#read-only-post-failure-context---2026-10-10).
+The owner then reported a normal-looking screen and restarted/relaunched the
+probe. Eight fresh GP context reads pass with zero device writes; the agent is
+available again. Neither the failed RAM load nor the earlier SG write is retried.

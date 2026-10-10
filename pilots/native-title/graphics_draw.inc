@@ -102,7 +102,10 @@ static void graphics_draw_common(const uint32_t args[3],uint32_t up_data,uint32_
     graphics_draw_profile_step(&profile,1);
     for(unsigned stage=0;stage<4;++stage) {
         uint32_t header=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_TEXTURES+stage*4);
-        if(header)graphics_texture_sample_prepare(graphics_texture_slot(header));
+        if(header) {
+            graphics_texture_sample_prepare(graphics_texture_slot(header));
+            pilot_gfx_texture_sampling_format(stage,(MEM32(header+12)>>8)&255);
+        }
     }
     graphics_draw_profile_step(&profile,2);
     graphics_sync_deferred();

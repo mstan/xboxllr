@@ -247,6 +247,7 @@ static void graphics_texture_bind(unsigned stage,uint32_t header)
         "[TEXTURE BIND TRACE] return=%08x stage=%u header=%08x native=%u color=%08x depth=%08x\n",
         MEM32(g_esp),stage,header,native,graphics_target,graphics_depth);
     pilot_gfx_texture_bind(stage,native);
+    if(header)pilot_gfx_texture_sampling_format(stage,(MEM32(header+12)>>8)&255);
     /* Acquire first so an internal-only self-rebind remains alive. */
     if(header!=old) {
         if(header)graphics_texture_binding_ref(header,1);

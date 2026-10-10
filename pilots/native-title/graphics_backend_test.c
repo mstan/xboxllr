@@ -13,6 +13,7 @@
 #include "graphics_movie_backend_test.inc"
 #include "graphics_visibility_backend_test.inc"
 #include "graphics_feedback_backend_test.inc"
+#include "graphics_depth_texture_backend_test.inc"
 static int test_transform_pipeline(void)
 {
     static const D3DTRANSFORMSTATETYPE states[]={D3DTS_VIEW,D3DTS_PROJECTION,D3DTS_TEXTURE0,D3DTS_TEXTURE1,
@@ -112,13 +113,21 @@ static int test_scene_target_readback(void)
     for(unsigned i=0;i<64*64;++i)CHECK((depth[i]>>24)==0x5a && abs((int)(depth[i]&0xffffff)-0x400000)<=1);
     fprintf(stderr,"PASS: diagnostic live-target raw RGBA/depth/stencil readback and exact cleared contents\n");return 0;
 }
-int main(void)
+int main(int argc,char **argv)
 {
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
     uint32_t pp[17]={64,64,D3DFMT_X8R8G8B8,1,0x11,1,0,0,1,D3DFMT_D24S8,0,60,1};
     unsigned char pixels[64*64*4];
     for (unsigned pass=0;pass<3;++pass) {
         CHECK(pilot_gfx_create(pp)>=0);
+#ifdef PILOT_D3D_PHOBOS
+        if(argc==2 && !strcmp(argv[1],"--depth-argb")) {
+            CHECK(test_depth_argb_sampling()==0);
+            pilot_gfx_close();
+            fprintf(stderr,"PASS: depth ARGB device lifetime %u\n",pass+1);
+            continue;
+        }
+#endif
         struct PilotGpuProgress progress;pilot_gfx_completion_stats(&progress);
         CHECK(!progress.submitted && !progress.completed && !progress.pending_queries && !progress.created_queries);
         CHECK(pilot_gfx_width()==64 && pilot_gfx_height()==64);
@@ -171,6 +180,7 @@ int main(void)
 #ifdef PILOT_D3D_PHOBOS
         CHECK(test_combiner_memory_draw()==0);
         CHECK(test_feedback()==0);
+        CHECK(test_depth_argb_sampling()==0);
         CHECK(test_linear_texture_contract()==0);
         CHECK(test_movie_textures()==0);
 #endif
