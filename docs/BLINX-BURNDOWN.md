@@ -69,7 +69,7 @@ change the next controller-input dependency batch.
 | 8 | GPU completion, callbacks and visibility: independent offline work | FIFO/traps/reports, pending results and lifetime; uses memory/display | Partial `.109`: original queries/fences, 228 IRQ/DPC callbacks, hardware-referenced 2D pixels and bounded 3D/texture/encoder cases pass. Full original title startup and dependent integration remain open; their real-console observation is at the end of this list. Do not repeat that blocked startup experiment while working on independent services. [Evidence and limits](../pilots/native-title/GPU-COMPLETION-LLE.md) |
 | 9 | Graphics state, shaders, textures and vertex fetch | Broad NV2A draw/state/format coverage; uses memory/completion | Partial `.116`: 140 independent BGRA draws, 720 original fetch/ownership cases, 1,116 constant cases and 1,344 independent arithmetic cases retained. Complete original submission passes 96 scene shader draws / 29,424 written lanes including fog. Programmable fog passes 196 independent cases / 392 original draws and 294 native GPU draws with bounded interior pixels; the real updated attract/interruption/reentry regression passes. DXT1-noise control transport passes 128 original setter calls / 40 complete graphics-service returns, with matching HLE boolean cache admission; enabled noise pixels remain guarded and deferred. Finite normalized 2D textures now pass 258 independent cases / 516 original and 516 native GPU draws, with 444,276 interior pixels on each route. LLE executes mip/filter/bias/clamp state; HLE uses a cached native base-mip view to preserve LOD0 min/mag selection. Documented output defaults now pass 64 original/native mask cases and eight default-Q texture cases / 13,776 interior pixels on each route; raw probes and rasterization agree. Variable projected W/Q now passes 432 independent cases / 864 draws / 743,904 interior pixels on each route (LLE one channel step; native two); GPU footprint correction and normalized XRGB border preparation retain native shader/upload caches. Packed ARGB4444/DXT3/DXT5 rectangular mips additionally pass 972 original-XDK/LLE cases / 1,944 draws / 1,673,784 interior pixels. Latest layout/guard fixes pass 854 permanent LLE cases and four core regressions. Native format cases and 192 isolated texel cases pass independent per-channel host BC decoder/filter intervals; compressed palettes fail the separate strict two-step gate. Retained native bounds pass unchanged; exact Xbox codec precision is deferred. Owner visual review finds no observable defect at a glance. CPU work uses Idle priority on one logical processor; GPU fixtures require Marvel Rivals absent. No title/audio rerun or HLE production change occurs. Broader raster/state and full scene composition qualification remain open. Original startup remains open; native upload coalescing stays intact. [Evidence](../pilots/native-title/GRAPHICS-LLE.md) |
 | 10 | Movie/A-V sequence integration | Composes the qualified file, decoder, input, audio and display paths | Open |
-| Available now | Real-console observations and the integration they unblock | GPU startup/FD6806A0 `.111`; original scheduling GPIO `0x80cf`; DSP DMA bit 9 `.114`; FE notification fence/control `.115`; enabled DXT1-noise pixels/native error bound `.116`; exact shader rounding/near-integer ARL; exact DXT color/alpha decoder precision; any exact interpolation/curve/prefetch/completion timing requiring new silicon evidence | Owner now prioritizes console observations after verified recovery backups. Probe `a22bb74` remains prepared and unexecuted. Backup is incomplete after two FTP read failures; a malformed dashboard HTTP reply also requires human inspection under probe AGENTS rules 8/9. No console writes, deployment or launch have occurred. Resume with saves/title-data first, preserving and skipping the failed sources. Keep all affected gates open |
+| Available now | Real-console observations and the integration they unblock | GPU startup/FD6806A0 `.111`; original scheduling GPIO `0x80cf`; DSP DMA bit 9 `.114`; FE notification fence/control `.115`; enabled DXT1-noise pixels/native error bound `.116`; exact shader rounding/near-integer ARL; exact DXT color/alpha decoder precision; any exact interpolation/curve/prefetch/completion timing requiring new silicon evidence | Owner now prioritizes console observations after recovery backups. The recovery scope is verified on G: 4,891 files / 2.08 GB, with known failed assets excluded. Owner physically confirmed a responsive dashboard after the initial read/HTTP errors. Probe `a22bb74` is separately uploaded and its readback matches the reviewed XBE. One manual dashboard launch is pending; no MMIO experiment has run. Boot configuration, EEPROM, flash and disk layout remain untouched. Keep all affected gates open |
 
 This is a relative work ranking, not a date forecast. Work serially through
 the available offline entries. For each, implement the executable LLE route,
@@ -136,18 +136,29 @@ GPU startup's unresolved FD6806A0 transaction now has a prepared, bounded
 hardware observation in `.111` (probe branch `feat/av-handshake-probe-20261009`,
 commit `a22bb74`). All 17 offline checks and the XBE build pass. The owner now
 authorizes its separate deployment/launch and one-shot volatile experiment,
-requiring recovery backups first. Host-only verification passes for 3,547 files
-and 1,366,249,760 bytes, including two boot/dashboard executables and four
-existing EEPROM recovery copies. Saves/title-data have not yet been copied;
-this is an incomplete FTP-visible C/E backup, not a physical HDD/flash image.
-Two incomplete FTP reads are preserved without automatic retry. A malformed
-dashboard HTTP reply also paused further hardware access pending the human
-inspection or power cycle required by the
+requiring recovery backups first. The completed recovery scope contains
+**4,891 files / 2,077,214,979 bytes** on G:, all independently rehashed locally.
+Every listed UDATA file (423), TDATA file (712), SAVES file (39) and SCREENSHOTS
+file (16) is copied, alongside C boot/dashboard files, C/E configuration files
+and four existing EEPROM recovery copies. Nine boot/EEPROM source rereads
+also match the copies. This is a checked recovery scope, not a complete C/E
+or physical HDD/flash image. The failed stock-dashboard `music2.xip` and OOTX
+application asset remain preserved as partials and explicitly excluded without
+retry; other application assets outside the recovery scope remain uncopied.
+The owner physically checked the dashboard and confirmed it responds after
+the initial read errors and malformed HTTP reply, satisfying the inspection
+required by the
 [probe operating rules](https://github.com/mstan/xboxlle-probe/blob/feat/av-handshake-probe-20261009/AGENTS.md).
-No probe deployment, launch or MMIO write has occurred. Backup resumption will
-prioritize irreplaceable saves/title-data and explicitly skip failed sources.
-Private backups/results stay outside source publication. Preparation and
-availability do not qualify the transaction or close a family.
+The authorized separate upload to
+`E:\Apps\xboxlle-probe-av-handshake\default.xbe` is complete: all 491,520 bytes
+read back with the reviewed XBE SHA-256. Boot configuration, EEPROM, flash and
+disk layout are unchanged. Manual dashboard launch is pending because the
+HTTP interface previously returned a malformed reply. The prepared host run
+checks the agent identity and fixed CPU/NV2A context before one armed AV
+experiment; it preserves raw observations privately and never retries or
+makes a restoring write. No MMIO experiment has run. Private backups/results
+stay outside source publication. Availability, recovery copies and upload
+do not qualify the transaction or close a family.
 
 GPU callback delivery has now advanced independently of startup: original
 InsertCallback/kick, PIC/kernel interrupt gate, ISR/DPC and IRET pass 228 actual
