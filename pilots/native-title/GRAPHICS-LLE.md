@@ -1748,3 +1748,43 @@ by complete-scene pixels. Production HLE raster bytecode, enabled noise,
 original startup/lifetime and hardware precision remain separate. This batch
 needed no rebuild, title, audio, host GPU or Xbox request and changes no shipping
 HLE code or capture defaults. **4/9** families and the full goal remain active.
+
+## Original target and clear components - 2026-10-10
+
+`tools/native_frame_target_reference.py` now executes the unmodified original
+SetRenderTarget0x131E90 and Clear0x135A60 entry points on one CPU reference with
+five retained preowned linear target roots. The explicit root bind, three
+captured target switches and two captured clears pass **112 delivered/setup
+words and31,334,400 target-byte comparisons**. The comparison checks all five
+roots after every call, including untouched roots. Original calls return,
+FIFO GET reaches PUT and no LLE guard occurs.
+
+Expected fields come from captured resource dimensions/pitches, declared
+fixture addresses and the
+[public NV097 surface/clear fields](https://github.com/XboxDev/nxdk/blob/29638d0b001f179b73c3513489af10ddc2986216/lib/pbkit/nv_regs.h).
+The byte model independently converts supplied RGBA/BGRA and native D24S8 root
+inputs to NV097 linear storage. Color/depth masks preserve unused channels,
+stencil/depth components, row padding and storage outside the color viewport.
+Only exact endpoint clear depths are admitted. Mixed320x240 color/640x480
+depth uses each role's own pitch. Neither emitted words, maintained renderer,
+native after-images nor later target observations supply expectations.
+
+All12 new authored tests and96 retained failure controls pass. They reject
+wrong/missing words or targets, corrupt untouched bytes, changed dimensions
+with refreshed input identity, incorrect binding/viewport, wrong builds/routes,
+pending FIFO, guards and nonreturned calls. Private evidence adds
+`target-clear-observed/`, `target-clear-qualified.aot-private.json` and
+`target-clear-controls.aot-private.json` beneath the complete-frame directory.
+The tool's `--audit-existing --controls` repeats the controls without another
+original execution; generated evidence stays private.
+
+This is an explicit **full-target viewport fixture**. The compact clear record
+does not include the live viewport, and
+[Clear operates within the viewport](https://learn.microsoft.com/en-us/windows/win32/direct3d9/viewports-and-clipping).
+Intervening draws are omitted, so retained target storage here does not qualify
+whole-frame continuity, texture producers or complete-scene pixels. Owner
+references also do not qualify original allocation/deletion or lifetime.
+The next integration must preserve producer-backed storage through the draws
+and resolve the live initial clear viewport. No runtime/HLE code, rebuild,
+title/audio, host GPU or Xbox request changed. **4/9** and the full goal remain
+active; hardware is still at its existing inspection gate.

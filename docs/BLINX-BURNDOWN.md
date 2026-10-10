@@ -896,3 +896,14 @@ scene pixels are next. Production raster, enabled noise and original startup/
 lifetime remain open. This batch changes no shipping HLE code and requires no
 new rebuild/title/audio/host GPU/Xbox request. The full goal stays active at
 **4/9**; hardware remains paused at the existing inspection gate.
+
+Original target/clear components then pass on five retained preowned roots:
+the root bind, all three captured target switches and both captured clears
+match112 delivered/setup words and31,334,400 independent byte comparisons.
+All12 new authored tests and96 retained failure controls pass.
+[Scope and evidence](../pilots/native-title/GRAPHICS-LLE.md#original-target-and-clear-components---2026-10-10).
+This omits intervening draws and uses an explicit full-target clear viewport;
+the compact capture lacks the live clear viewport. Producer-backed draw
+composition, that initial viewport input and complete-scene pixels remain next.
+No shipping change, rebuild/title/audio/host GPU/Xbox request occurred. The full
+goal stays active with **4/9** families qualified.
