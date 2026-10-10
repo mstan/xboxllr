@@ -1,5 +1,6 @@
 """Hand-authored pixel equations and guards; no title data or renderer imports."""
 from pathlib import Path
+from fractions import Fraction
 import sys
 import unittest
 import numpy as np
@@ -28,7 +29,52 @@ def corners(width=2, height=2):
                      for x,y in ((0,0),(width,0),(width,height),(0,height))], dtype=float)
 
 
+def fractional_blend(image_codes, before_codes):
+    """Authored bilinear inputs; no renderer or observed pixels supply goldens."""
+    m = shader();m.update({0x200:2<<16,0x204:2<<16,0x208:0x128,
+        0x2c0:1<<16,0x2e0:1<<16,0x314:0,0x320:0,0x38c:0x1b02,0x390:0x1b02,
+        0x300:0,0x304:1,0x308:0,0x30c:0,0x310:0,0x318:0,0x324:0,
+        0x358:0x1010101,0x35c:0,0x37c:0x1d01,0x17bc:0,
+        0x1e70:1,0x1b04:0x11229,0x1b08:0x10303,0x1b0c:0x4003ffc0,
+        0x1b14:0x02060000,0x1b1c:(2<<16)|2,
+        0x344:0x302,0x348:0x303,0x350:0x8006})
+    vertices=corners();vertices[:,12:14]=[1.25,.75]
+    image=np.array(image_codes)/255.
+    before=np.broadcast_to(np.array(before_codes)/255.,(2,2,4))
+    return pixels(m,vertices,8,2,2,[image,None,None,None],before)[0]
+
+
+def pack_fraction(value):
+    return int((value*255+Fraction(1,2))//1)
+
+
 class PostprocessEquations(unittest.TestCase):
+    def test_fractional_rgb_and_alpha_blend_before_output_pack(self):
+        # Texel weights(.75,.25) yield RGB1.75/255 and alpha64.25/255.
+        # Packing source first would turn RGB into2/255 and alpha into64/255,
+        # producing code1. Float blending then packing produces code0.
+        color=Fraction(7,1020);alpha=Fraction(257,1020)
+        expected=[pack_fraction(color*alpha)]*3+[pack_fraction(alpha*alpha+1-alpha)]
+        self.assertEqual(expected,[0,0,0,207])
+        self.assertEqual(pack_fraction(Fraction(2,255)*Fraction(64,255)),1)
+        image=[[[1,1,1,64],[2,2,2,64]],[[1,1,1,65],[2,2,2,65]]]
+        np.testing.assert_equal(fractional_blend(image,[0,0,0,255]),
+                                np.broadcast_to(expected,(2,2,4)))
+
+    def test_fractional_alpha_is_not_packed_before_blend_factor(self):
+        # RGB127/255 is exact source byte data; filtering alpha12/13 gives
+        # alpha12.25/255. With opaque gray16 destination, packing alpha first
+        # would store244. The source-decided float-alpha equation stores243.
+        color=Fraction(127,255);alpha=Fraction(49,1020);destination=Fraction(16,255)
+        expected=[pack_fraction(color*alpha+destination*(1-alpha))]*3
+        expected.append(pack_fraction(alpha*alpha+1-alpha))
+        self.assertEqual(expected,[21,21,21,243])
+        packed_alpha=Fraction(12,255)
+        self.assertEqual(pack_fraction(packed_alpha*packed_alpha+1-packed_alpha),244)
+        image=[[[127,127,127,12],[127,127,127,12]],[[127,127,127,13],[127,127,127,13]]]
+        np.testing.assert_equal(fractional_blend(image,[16,16,16,255]),
+                                np.broadcast_to(expected,(2,2,4)))
+
     def test_all_eight_documented_input_mappings_include_negative_values(self):
         values = np.array([-.75, .25, 1.])
         expected = [[0,.25,1], [1,.75,0], [-1,-.5,1], [1,.5,-1],

@@ -2507,8 +2507,8 @@ human complete-pixel approval.
 
 The original five native consumers run across three device lifetimes. Mask,
 base-copy and both feedback draws pass the existing checks. One final-blend
-RGB channel differs by two codes against the current prequantized-source
-oracle; the strict one-code gate remains failed. An isolated unchanged final
+RGB channel differs by two codes against the then-current prequantized-source
+oracle; the strict one-code gate remains failed at that milestone. An isolated unchanged final
 consumer over independently authored gray roots also exposes this rounding
 order question. Exact retained LLE source/DLL route review must decide the
 oracle premise before any correction; neither expected outputs nor bounds
@@ -2520,3 +2520,55 @@ Private evidence is under `postprocess-native-20261010/float-cache-default`,
 `float-cache-robust-regression-20261010`. Earlier failed UNORM and diagnostic
 reports are retained. Complete scene/native-chain, enabled noise, original
 startup/lifetime and exact silicon remain open; **4/9** stands.
+
+## Source-derived postprocess blend-order correction - 2026-10-10
+
+The independent oracle incorrectly packed the final combiner source to
+UNORM8 before blending. The retained DLL's selected software route clamps
+floating RGB/alpha, blends them, then packs only the output. Its earlier
+packed alpha is solely an alpha-test operand. Original draw 4302 uses
+primitive 6 and combiner control `0x11104`, excluding immediate QUADS and
+the witnessed profile fingerprints; the miss calls the generic software
+rasterizer. Source `src/machine/nv2a.cpp:15503-15620`, its host GLSL counterpart,
+the exact retained DLL hash and 15 compiled code/constant sites establish
+this order before comparison. This is a maintained LLE contract, not exact
+NV2A silicon precision.
+
+`tools/native_postprocess_pixel_reference.py` now passes clamped floating
+source values into the unchanged blend equation, with one final quantization.
+All **21 authored tests** pass. Two exact Fraction fixtures distinguish
+preblend source packing: bilinear RGB/alpha over black yields `[0,0,0,207]`
+instead of the old `[1,1,1,207]`; fractional alpha over gray yields
+`[21,21,21,243]` instead of old alpha 244. Their expectations come from
+authored input fractions, not native measurements. The one-code comparator
+and all admission guards are unchanged; no production shader is modified.
+
+Fresh original LLE execution passes all five postprocess consumers and
+**1,305,600 pixels /5,222,400 channels**, with exact depth/stencil and untouched
+roots. The native five-consumer replay over three device lifetimes passes
+both feedback draws, the mask and the base-copy. The previous residual at
+(295,257) is resolved, but the corrected chain exposes one different two-code
+blue residual at (342,322): expected 7, observed 5. The strict chain gate
+remains failed. Retained predecessors, raw/raster shader intervals and
+device-lifetime bytes pass.
+
+A fresh isolated unchanged original final consumer with the fixed supplied
+producer and independently authored gray destinations 16/0/255 passes the
+same one-code bound across all three device lifetimes: **921,600 component
+pixels**, exact untouched/depth/stencil/before bytes and zero lifetime drift.
+This supports the local consumer contract; it does not qualify arbitrary
+predecessor intervals or the complete native chain. Propagating independently
+allowed predecessor errors is the next source-derived audit, with the current
+strict failure retained until its premises are validated.
+
+Private proof is `postprocess-native-20261010/blend-order-proof.aot-private.json`
+(SHA-256 `7aa6e382fc98abaf93a0b670f24e312abea0eed724fed11161ab49776d397afb`).
+Fresh source/expected/DLL/executable bindings are in `blend-order-corrected`;
+the intentionally failed native report has SHA-256
+`059684f0d3f555764b74da97aeeaae4f97dffe1a697f008dea602384ce810582`.
+`isolated-final-source-order/qualified.aot-private.json` passes
+(`72e5f4f4eb7f38c2953ea8f6185c0dfab85b014b101a12e34ec4558423a8eed3`).
+Historical wrong-premise and failed native reports remain intact. Earlier
+scene producers are supplied inputs to these consumer components; complete
+scene/HLE, enabled noise, startup/lifetime, ring rollover and exact silicon
+remain open. Family count stays **4/9**.

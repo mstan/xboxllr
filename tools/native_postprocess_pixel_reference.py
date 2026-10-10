@@ -262,9 +262,10 @@ def pixels(methods, vertices, primitive, width, height, images, before):
     shape = (height, width, 4)
     color, margin = combiner(methods, sampled, np.broadcast_to(corners[0,4:8], shape),
                              np.broadcast_to(corners[0,8:12], shape))
-    # The bounded software contract quantizes the source before UNORM blending.
-    # Its +/- one output-code interval also covers ideal float source blending.
-    source = quantize(color)/255.
+    # The generic software LLE clamps the final combiner source, blends its
+    # floating RGB/alpha, then packs the output to UNORM8. Its preblend packed
+    # alpha is only an alpha-test operand; it is not the source blend factor.
+    source = np.clip(color, 0, 1)
     require(methods[0x304] in (0, 1), 'Unmodelled blend enable')
     if methods[0x304]:
         require(methods[0x344] == 0x302 and methods[0x348] == 0x303 and
