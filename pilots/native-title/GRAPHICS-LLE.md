@@ -1392,3 +1392,30 @@ original XBE/binding/reference-library arguments. Then run
 `native_scene_state_reference.py --draws 1 2 40 44 71 73 75 111 --packed-profile
 frame-firstworld`, supplying that capture and observation directory. Controls
 use `--draws 1 71 73 --controls` with the same profile and observations.
+
+The continuation extends original setter replay and independent shader/state
+qualification to **all 256 draws / 19,712 state words / 49,213 shader values**.
+`native_scene_draw_reference.py --observe-shader-state-only --limit 256` still
+executes each complete draw, including original software-method service. It
+omits target output files and native-after comparisons; it does not omit device
+work or claim pixel agreement. The observations occupy one small JSON per draw.
+Default target bytes remain identical to the preceding fixture; shader/fog/
+method observations agree between both modes. Retained-target sequence mode
+requires target observations and cannot combine with this option.
+
+Retained actual `pilot_gfx_shader_probe` GPU outputs also pass the existing
+input-derived host numerical interval gate: **256 draws / 1,697 vertices /
+64,486 raw values**, with zero failures. This checks raw diagnostic shader
+bytecode. Production `raster_main`, setup/interpolation, texture/combiner pixels
+and the whole frame remain separate. `native_scene_host_capture_reference.py`
+adds a hardware-free corpus entry point; **30 controls** across the three
+programs pass: three baselines, 24 deliberate output/shape/nonfinite/live input/
+program failures, and three controls proving its expectation ignores the
+capture's stored output field. Bound equations and radii are unchanged and
+never selected from observed deviations.
+
+Additional private evidence is `frame-256-state-{original,qualified}.aot-private.json`,
+`frame-256-state-observed/`, and
+`frame-256-host-raw-shader-{qualified,controls}.aot-private.json`. This reuses
+retained inputs and GPU observations; no host GPU/title/audio run, rebuild or
+shipping HLE change occurs. **4/9** remains unchanged.

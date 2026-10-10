@@ -802,7 +802,7 @@ Hardware awaits screen inspection under probe AGENTS.md rule8; independent
 offline work continues, preserving the full goal.
 
 The selected-frame corpus now passes independent software shader/fetch checks
-for all256 captured draws, 1,697 vertices and 49,213 output values. Eight state
+for all 256 captured draws, 1,697 vertices and 49,213 output values. Eight state
 representatives pass 616 API-derived delivered words; 39 shader and 30 state
 controls pass. Distinct preowned driver/device fixtures qualify components,
 while allocator/ring rollover and target continuity remain open. Broader RGB
@@ -810,3 +810,12 @@ clamping, 3,533 missing draw inputs, clears/targets, original enabled-noise and
 full-frame pixels still need work. [Graphics details](../pilots/native-title/GRAPHICS-LLE.md#selected-frame-shader-and-state-census---2026-10-10).
 No shipping HLE changes, rebuild, host GPU or title/audio run was needed. Family
 count remains **4/9**; the entire LLE checklist remains active.
+
+The same 256 captures subsequently pass complete original setter replay and
+input-derived shader/state admission: 19,712 delivered state words and 49,213
+shader values. State-only observation omits target dumps; complete draws still
+execute and default target bytes remain unchanged. Retained actual native GPU
+raw shader probes separately pass 64,486 input-derived host interval checks;
+30 host corruption/independence controls pass. This qualifies raw diagnostic
+shader math, not production raster bytecode or frame pixels. HLE production
+code and numerical bounds remain unchanged; **4/9** stays open.

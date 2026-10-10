@@ -36,6 +36,8 @@ def target_bytes(target,depth=False):
 
 
 def replay(args,path,reference=None,initialize_targets=True):
+    state_only=getattr(args,'observe_shader_state_only',False)
+    assert not (state_only and getattr(args,'retain_targets',False)), 'Target continuity requires target observations'
     capture=read_capture(path);scene=read_scene(path.with_name(path.name.replace('draw','scene')))
     assert scene['header'][3:6]==capture['header'][2:5]
     ref=Reference(args) if reference is None else reference
@@ -171,7 +173,7 @@ def replay(args,path,reference=None,initialize_targets=True):
             for state in range(30):
                 ref.call('D3DDevice_SetTextureStageStateNotInline',[stage,state,capture['texture'][stage*32+state]])
         ref.put(data,*capture['viewport']);ref.call('D3DDevice_SetViewport',[data])
-        before=[bytes(ref.cpu.mem_read(FRAME,len(color))),bytes(ref.cpu.mem_read(FRAME+0x200000,len(depth)))]
+        before=None if state_only else [bytes(ref.cpu.mem_read(FRAME,len(color))),bytes(ref.cpu.mem_read(FRAME+0x200000,len(depth)))]
         guard=None;methods={};graph_services=0
         try:
             _,methods=ref.draw(h[3],h[2],h[4],clear=False,state_dirty=None);ref.check()
@@ -213,6 +215,7 @@ def replay(args,path,reference=None,initialize_targets=True):
                 vertex_capture_sha256=capture['sha256'],scene_capture_sha256=scene['sha256'],
                 library_sha256=hashlib.sha256(args.library.read_bytes()).hexdigest(),
                 noise_disabled_fixture=args.noise_disabled_fixture,
+                pixel_targets_observed=not state_only,
                 retained_targets=getattr(args,'retain_targets',False),
                 complete_draw_executed=bool(get==put and vertex_count==h[4] and census['executions'] and not any(list(census.values())[3:])),
                 methods={hex(i):method_value(ref.gpu,i) for i in
@@ -225,7 +228,7 @@ def replay(args,path,reference=None,initialize_targets=True):
             if not command&0x1fff:bindings.append([hex(command),hex(packets[offset+1])])
             if command&0x1fff==0x100:software_methods.append([hex(command),hex(packets[offset+1])])
             offset+=size+1
-        after=[bytes(ref.cpu.mem_read(FRAME,len(color))),bytes(ref.cpu.mem_read(FRAME+0x200000,len(depth)))]
+        after=[] if state_only else [bytes(ref.cpu.mem_read(FRAME,len(color))),bytes(ref.cpu.mem_read(FRAME+0x200000,len(depth)))]
         if diagnostics is not None:
             args.diagnostics.mkdir(parents=True,exist_ok=True)
             for name,data in zip(('color','depth'),after):
@@ -234,11 +237,12 @@ def replay(args,path,reference=None,initialize_targets=True):
                 for name,data in zip(('color','depth'),before):
                     (args.diagnostics/f'{path.stem}-before-{name}.bin').write_bytes(data)
             (args.diagnostics/f'{path.stem}.aot-private.json').write_text(json.dumps(diagnostics,indent=2)+'\n')
-        differences=[]
-        for i in range(2):
-            expected=target_bytes(scene['after'][i],bool(i))
-            assert len(after[i])==len(expected)
-            differences.append(sum(a!=b for a,b in zip(struct.iter_unpack('<I',after[i]),struct.iter_unpack('<I',expected))))
+        differences=None if state_only else []
+        if not state_only:
+            for i in range(2):
+                expected=target_bytes(scene['after'][i],bool(i))
+                assert len(after[i])==len(expected)
+                differences.append(sum(a!=b for a,b in zip(struct.iter_unpack('<I',after[i]),struct.iter_unpack('<I',expected))))
         return dict(capture=path.name,vertex_sha256=capture['sha256'],scene_sha256=scene['sha256'],
             fixture_render_overrides=[dict(state=159,captured_value=capture['render'][159],fixture_value=0,
                 reason='noise-disabled offline scene fixture; enabled-noise pixels remain deferred')]
@@ -253,6 +257,7 @@ def replay(args,path,reference=None,initialize_targets=True):
             graph_services=graph_services,guard=guard,original_service_mmio=mmio,
             disabled_auxiliary_setters_not_replayed=[154,163,164,165],
             complete_draw_executed=bool(not guard and get==put and vertex_count==h[4] and census['executions'] and not any(list(census.values())[3:])),
+            pixel_targets_observed=not state_only,
             pixel_qualified=False)  # independent pixel tolerance/oracles are still required
     finally:
         ref.call=original_call
@@ -268,6 +273,8 @@ if __name__=='__main__':
     parser.add_argument('--diagnostics',type=Path,help='Save actual target bytes and device observations; does not supply expected pixels')
     parser.add_argument('--noise-disabled-fixture',action='store_true',help='Explicitly set render state 159 to zero via the original setter; does not qualify enabled-noise scenes')
     parser.add_argument('--retain-targets',action='store_true',help='Execute the captured draw sequence on one device with targets initialized once')
+    parser.add_argument('--observe-shader-state-only',action='store_true',
+        help='Execute the complete draw but omit target files and native-after comparisons; shader/state observations do not qualify pixels')
     parser.add_argument('--require-qualified',action='store_true',help='Fail if any draw remains guarded or lacks independent pixel qualification')
     args=parser.parse_args();dependency_handles=[os.add_dll_directory(str(args.dependencies.resolve()))]
     rows=[]
