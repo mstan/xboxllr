@@ -338,6 +338,9 @@ add_test(NAME generated_submit_perf COMMAND test_generated_submit_perf)
 
 # These tests exercise the CPU renderer directly without a host GPU backend.
 if(XLLE_RENDERER STREQUAL "LLE")
+  add_executable(test_nv2a_surface_dma tests/test_nv2a_surface_dma.cpp)
+  target_include_directories(test_nv2a_surface_dma PRIVATE ${XLLE_INCLUDES})
+  add_test(NAME nv2a_surface_dma COMMAND test_nv2a_surface_dma)
   add_executable(test_nv2a_fp_timing tests/test_nv2a_fp_timing.cpp)
   target_include_directories(test_nv2a_fp_timing PRIVATE ${XLLE_INCLUDES})
   add_test(NAME nv2a_fp_timing COMMAND test_nv2a_fp_timing)

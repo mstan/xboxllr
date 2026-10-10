@@ -3086,3 +3086,34 @@ needed for this bookkeeping correction. GFX-F02 descriptor/depth disposition
 work remains open. Additional mapping, physical-zero and optional-write-only
 questions are appended to the [question queue](GRAPHICS-DEFERRED-QUESTIONS.md)
 with explicit reopening triggers. The full family count stays **4/9**.
+
+## Bounded DMA destination and depth contracts - 2026-10-10
+
+GFX-F02 is resolved within the maintained generic software renderer's declared
+local class-0x3d/target-0 mapping. Destination checks now distinguish binding,
+descriptor class/target, checked offsets, inclusive limits, aperture wrapping
+and the protected-zero boot case. Invalid required comparison/stencil storage
+and invalid bound write-only storage reject before memory or renderer effects.
+Actual binding is separate from layout: truly unbound optional write-only depth
+ignores stale fields, preserving existing quad fallback behavior. Absent storage
+and protected-zero write-only behavior remain explicit compatibility cases,
+not claims about complete hardware semantics.
+
+The representative CPU batch passes **6/6** suites: 49 authored range/dependency
+cases, 38 actual generic draws over direct and paged memory, the unchanged
+boot-memory regression, existing CPU NV2A cases and 1,844 vertex-color
+draws, plus tile, shader and scratch checks. Invalid draws preserve the complete
+memory snapshot and issue no residency resolves or renderer submits. Padded
+zeta pitches remain supported. A resident-depth fixture contrasts ALWAYS with
+writes off (no storage input) against LESS (required exact resident input).
+The existing texture-source range body is preserved separately and unchanged.
+
+The final private report is
+`frame-inputs-firstworld-20261010/gfx-f02-representative-validation-v3.aot-private.json`
+(`301146edb2558a2977f36bdfc95eaddba34ae09531ca179544d7262cab261ffe`).
+No pixel equations, native HLE shader/cache costs, title/audio run or Xbox
+operation changed. The original prefix2162 stays bound to its preserved source
+and DLL generation; this new core source does not inherit that numerical proof.
+Both immediate foundation findings are addressed. Four additional safely
+deferred questions (GFX-D11-D14) are appended to the maintained queue with
+evidence and triggers. Full graphics acceptance remains open at **4/9** families.

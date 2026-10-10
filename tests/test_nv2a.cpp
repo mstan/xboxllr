@@ -1002,7 +1002,194 @@ static void test_vsh_compile_toggle_rebuilds_cached_parse() {
 #include "nv2a_init_cases.hpp"
 #include "nv2a_setup_cases.hpp"
 
+// GFX-F02 representative actual generic draws. The rejected cases must have
+// no memory or renderer effects; accepted output uses a hand-authored 8x8
+// right triangle, constant primary color and integer depth.
+static void test_generic_surface_dma_contract() {
+    struct EffectRenderer final : xlle::Nv2aRenderer {
+        uint64_t color_resolves = 0, depth_resolves = 0, submits = 0;
+        const char* name() const override { return "surface-dma-effects"; }
+        bool supports_generic_combiner(const xlle::Nv2aGenericCombinerPacket&) const override {
+            return false;
+        }
+        bool submit_generic_combiner(const xlle::Nv2aGenericCombinerPacket&,
+                xlle::Nv2aGenericCombinerResult&, std::string&) override {
+            ++submits; return false;
+        }
+        bool resolve_resident_color_surface(uint32_t, size_t,
+                xlle::Nv2aResidentColorResolve& out, std::string&) override {
+            ++color_resolves; out = {}; return true;
+        }
+        bool resolve_resident_depth_surface(uint32_t, size_t,
+                xlle::Nv2aResidentDepthResolve& out, std::string&) override {
+            ++depth_resolves; out = {}; return true;
+        }
+        bool submit_generated_shader(const xlle::Nv2aGeneratedShaderPacket&,
+                xlle::Nv2aGeneratedShaderResult&, std::string&) override {
+            ++submits; return false;
+        }
+    };
+    struct Case {
+        const char* name = "equal_pitches";
+        bool bound = true, test = true, write = true, stencil = false;
+        uint32_t function = 0x201, format = 2, zeta_pitch = 32;
+        uint32_t color_flags = 0x3d, color_limit = 0x3ffff, color_frame = 0;
+        uint32_t color_offset = 0x10000;
+        uint32_t zeta_flags = 0x3d, zeta_limit = 0x3ffff, zeta_frame = 0;
+        uint32_t zeta_offset = 0x20000, stored_zeta = 0x00002055;
+        bool reject = false, color_changes = true, depth_changes = true;
+        bool stencil_changes = false;
+    };
+    std::vector<Case> cases(1);
+    const auto add = [&](const char* name, auto configure) {
+        Case c; c.name = name; configure(c); cases.push_back(c);
+    };
+    add("independent_padded_pitch", [](Case& c) { c.zeta_pitch = 48; });
+    add("write_only_valid", [](Case& c) { c.test = false; });
+    add("unbound_optional_write_only", [](Case& c) {
+        c.bound = c.test = false; c.depth_changes = false;
+    });
+    add("unbound_write_only_stale_layout", [](Case& c) {
+        c.bound = c.test = false; c.depth_changes = false;
+        c.format = 1; c.zeta_pitch = 1;
+    });
+    add("absent_format_write_only", [](Case& c) {
+        c.test = false; c.format = 0; c.depth_changes = false;
+    });
+    add("protected_zero_write_only", [](Case& c) {
+        c.test = false; c.zeta_offset = 0; c.depth_changes = false;
+    });
+    add("always_mask0_unused_stale_zeta", [](Case& c) {
+        c.function = 0x207; c.write = false; c.zeta_flags = 0x97;
+        c.format = 1; c.zeta_pitch = 1; c.depth_changes = false;
+    });
+    add("color_class", [](Case& c) { c.color_flags = 0x97; c.reject = true; });
+    add("color_target", [](Case& c) { c.color_flags = 0x2003d; c.reject = true; });
+    add("color_zero", [](Case& c) { c.color_offset = 0; c.reject = true; });
+    add("color_limit", [](Case& c) { c.color_limit = 0x100fe; c.reject = true; });
+    add("enabled_depth_class", [](Case& c) { c.zeta_flags = 0x97; c.reject = true; });
+    add("enabled_depth_limit", [](Case& c) { c.zeta_limit = 0x200fe; c.reject = true; });
+    add("enabled_depth_unbound", [](Case& c) { c.bound = false; c.reject = true; });
+    add("enabled_depth_short_pitch", [](Case& c) { c.zeta_pitch = 28; c.reject = true; });
+    add("enabled_depth_unsupported_format", [](Case& c) { c.format = 1; c.reject = true; });
+    add("invalid_bound_write_only_class", [](Case& c) {
+        c.test = false; c.zeta_flags = 0x97; c.reject = true;
+    });
+    add("always_mask1_protected_zero", [](Case& c) {
+        c.function = 0x207; c.zeta_offset = 0; c.reject = true;
+    });
+
+    unsigned authored_cases = 0;
+    for (bool direct : {false, true}) for (const Case& c : cases) {
+        const int failures_before = fails;
+        std::vector<uint8_t> ram(0x40000, 0xcc);
+        std::string fault;
+        EffectRenderer renderer;
+        xlle::Nv2a gpu([&](const std::string& why) { if (fault.empty()) fault = why; }, &renderer);
+        gpu.set_mem_access(
+            [&](uint32_t a, void* p, size_t n) {
+                if (uint64_t(a) + n > ram.size()) return false;
+                std::memcpy(p, ram.data() + a, n); return true;
+            },
+            [&](uint32_t a, const void* p, size_t n) {
+                if (uint64_t(a) + n > ram.size()) return false;
+                std::memcpy(ram.data() + a, p, n); return true;
+            }, direct ? std::function<uint8_t*(uint32_t, size_t)>(
+                [&](uint32_t a, size_t n) {
+                    return uint64_t(a) + n <= ram.size() ? ram.data() + a : nullptr;
+                }) : std::function<uint8_t*(uint32_t, size_t)>{});
+        gpu.set_gpu_generic_shader(true);
+        gpu.set_gpu_generic_shader_witnessed(0xffffffff);
+        gpu.set_gpu_generic_shader_depth(true);
+        const auto mmio = [&](uint32_t reg, uint32_t word) {
+            gpu.mmio_write(xlle::Nv2a::kBase + reg, 4, word);
+        };
+        const uint32_t setup[][2] = {
+            {0x700008, 1}, {0x70000c, 0x80010020}, {0x700200, 0x97},
+            {0x700010, 2}, {0x700014, 0x80010030},
+            {0x700300, c.color_flags}, {0x700304, c.color_limit}, {0x700308, c.color_frame},
+            {0x700018, 3}, {0x70001c, 0x80010040},
+            {0x700400, c.zeta_flags}, {0x700404, c.zeta_limit}, {0x700408, c.zeta_frame},
+            {0x700180, 0x3d}, {0x700184, 0x7fff}, {0x700188, 0x2000},
+            {0x002504, 1}, {0x003204, 0x100}, {0x00322c, 0x18},
+            {0x003244, 0}, {0x003220, 1}, {0x003250, 1}, {0x003200, 1},
+        };
+        for (const auto& p : setup) mmio(p[0], p[1]);
+        uint32_t cursor = 0;
+        const auto emit = [&](uint32_t method, uint32_t word) {
+            put32(ram, 0x2000 + cursor, 0x40000 | method);
+            put32(ram, 0x2004 + cursor, word); cursor += 8;
+        };
+        const auto bits = [](float v) { uint32_t word; std::memcpy(&word, &v, 4); return word; };
+        emit(0, 1); emit(0x194, 2); if (c.bound) emit(0x198, 3);
+        for (unsigned i = 0; i < 16; ++i) emit(0x680 + i*4, i%5 == 0 ? bits(1) : 0);
+        const uint32_t state[][2] = {
+            {0x0a20, 0}, {0x0a24, 0}, {0x0294, 0x00020001}, {0x0314, 0},
+            {0x03b8, 0}, {0x1e94, 0}, {0x0200, 8u<<16}, {0x0204, 8u<<16},
+            {0x0208, 0x108 | (c.format<<4)}, {0x020c, 32 | (c.zeta_pitch<<16)},
+            {0x0210, c.color_offset}, {0x0214, c.zeta_offset}, {0x0290, 0x00100001},
+            {0x02c0, 7u<<16}, {0x02e0, 7u<<16}, {0x0300, 0}, {0x0304, 0},
+            {0x0308, 0}, {0x030c, c.test ? 1u : 0u}, {0x032c, c.stencil ? 1u : 0u},
+            {0x033c, 0x207}, {0x0344, 1}, {0x0348, 0}, {0x0350, 0x8006},
+            {0x0354, c.function}, {0x0358, 0x01010101}, {0x035c, c.write ? 1u : 0u},
+            {0x0360, 0xf0}, {0x0364, 0x207}, {0x0368, 0x80}, {0x036c, 0xff},
+            {0x0370, 0x1e00}, {0x0374, 0x1e00}, {0x0378, 0x1e01},
+            {0x037c, 0x1d01}, {0x038c, 0x1b02}, {0x0390, 0x1b02}, {0x0394, 0},
+            {0x0398, 0x4b7fffff}, {0x039c, 0x405}, {0x03a0, 0x900}, {0x1d78, 1},
+            {0x1e70, 0}, {0x1e74, 0}, {0x1e78, 0x00210000}, {0x1e60, 1},
+            {0x0ac0, 0x04200000}, {0x0260, 0x14200000}, {0x1e40, 0xc00},
+            {0x0aa0, 0xc00}, {0x0288, 0xc}, {0x028c, 0x1c80}, {0x1e20, 0}, {0x1e24, 0},
+        };
+        for (const auto& p : state) emit(p[0], p[1]);
+        mmio(0x800040, cursor); CHECK(fault.empty());
+        for (unsigned y = 0; y < 8; ++y) for (unsigned x = 0; x < 8; ++x) {
+            put32(ram, 0x10000 + y*32 + x*4, 0xff102030);
+            put32(ram, 0x20000 + y*48 + x*4, c.stored_zeta);
+        }
+        // For equal pitches, initialise its actual tightly packed rows too.
+        if (c.zeta_pitch == 32) for (unsigned y = 0; y < 8; ++y)
+            for (unsigned x = 0; x < 8; ++x)
+                put32(ram, 0x20000 + y*32 + x*4, c.stored_zeta);
+        emit(0x17fc, 5);
+        for (const auto& xy : {std::pair{0.f, 0.f}, std::pair{8.f, 0.f}, std::pair{0.f, 8.f}}) {
+            emit(0x1518, bits(xy.first)); emit(0x151c, bits(xy.second));
+            emit(0x1520, bits(10)); emit(0x194c, 0xff605040); emit(0x1524, bits(1));
+        }
+        emit(0x17fc, 0);
+        const auto before = ram;
+        const uint64_t color_resolves = renderer.color_resolves;
+        const uint64_t depth_resolves = renderer.depth_resolves;
+        const uint64_t submits = renderer.submits;
+        mmio(0x800040, cursor);
+        if (c.reject) {
+            CHECK(!fault.empty()); CHECK(ram == before);
+            CHECK(!gpu.generic_combiner_executed_batches());
+            CHECK(!gpu.generic_combiner_writes());
+            CHECK(renderer.color_resolves == color_resolves);
+            CHECK(renderer.depth_resolves == depth_resolves);
+            CHECK(renderer.submits == submits);
+        } else {
+            CHECK(fault.empty()); CHECK(gpu.generic_combiner_executed_batches() == 1);
+            auto expected = before;
+            // Pixel centres lie strictly inside x+y<8; the diagonal edge is
+            // excluded, hence the 28 centres with integer x+y<=6 are covered.
+            for (unsigned y = 0; y < 7; ++y) for (unsigned x = 0; x+y < 7; ++x) {
+                if (c.color_changes) put32(expected, 0x10000 + y*32 + x*4, 0xff405060);
+                if (c.depth_changes || c.stencil_changes)
+                    put32(expected, 0x20000 + y*c.zeta_pitch + x*4,
+                          c.depth_changes ? 0x00000a55 : 0x00002085);
+            }
+            CHECK(ram == expected); // Includes all padding, low RAM and other roots.
+        }
+        if (fails != failures_before)
+            std::printf("surface DMA actual fixture: %s direct=%u\n", c.name, direct ? 1u : 0u);
+        ++authored_cases;
+    }
+    std::printf("NV2A generic surface DMA: %u authored draws\n", authored_cases);
+}
+
 int main() {
+    test_generic_surface_dma_contract();
     test_gpu_initialization_controls();
     test_gpu_platform_bus();
     test_pgraph_setup();
@@ -7101,9 +7288,18 @@ int main() {
             emit_gc(0x020C, 0x01000100);
             emit_gc(0x0214, 0x00020000);
             emit_gc(0x030C, 1);           // depth test enabled.
-            emit_gc(0x0354, 0x0207);      // depth ALWAYS, but zeta is still read.
+            emit_gc(0x0354, 0x0207);      // ALWAYS with mask0 needs no zeta storage.
             emit_gc(0x035C, 0);           // depth writes off.
             const uint64_t depth_resolves_before = fake.resident_depth_resolves;
+            submit_triangle(0.0f, 0.0f, 20.0f, 0.0f, 0.0f, 20.0f, 50.0f, 1.0f,
+                            gc_pack_ub4(0x11, 0x22, 0x33, 0xCC));
+            CHECK(gc_fault.empty());
+            CHECK(fake.resident_depth_resolves == depth_resolves_before);
+            CHECK(fake.last_packet.depth_address == 0);
+            CHECK(fake.last_packet.depth_input.empty());
+            // A real comparison must resolve the resident storage and carry
+            // that exact input to the renderer even when writes are disabled.
+            emit_gc(0x0354, 0x0201);      // LESS reads existing depth.
             submit_triangle(0.0f, 0.0f, 20.0f, 0.0f, 0.0f, 20.0f, 50.0f, 1.0f,
                             gc_pack_ub4(0x11, 0x22, 0x33, 0xCC));
             CHECK(gc_fault.empty());

@@ -2,6 +2,7 @@
 #include "machine/nv2a.hpp"
 #include "machine/nv2a_tile_layout.hpp"
 #include "machine/nv2a_zeta_compression.hpp"
+#include "machine/nv2a_surface_dma.hpp"
 
 #include <algorithm>
 #include <climits>
@@ -10964,7 +10965,9 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
     // pitch is required to size the color surface; the zeta pitch is validated
     // separately, and only when the zeta surface is actually touched below.
     const bool depth_write_enabled = raster_state[kRasterDepthMask] != 0;
-    const bool wants_zeta = depth_test_enabled_bit || depth_write_enabled || stencil_test_enabled;
+    const bool wants_zeta =
+        (depth_test_enabled_bit && depth_func != 0x0207) ||
+        depth_write_enabled || stencil_test_enabled;
     const uint32_t pitch = surface_pitch & 0xFFFFu;
     const uint32_t zeta_pitch = surface_pitch >> 16;
     uint32_t surface_width = clip_x + clip_width;
@@ -10995,8 +10998,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             return true;
         }
         const uint32_t expected_pitch = surface_width * sizeof(uint32_t);
-        if (pitch != expected_pitch ||
-            (wants_zeta && zeta_pitch != expected_pitch)) {
+        if (pitch != expected_pitch) {
             record_generic_skip_detail(GenericSkipReason::kUnsupportedSurface,
                                        surface_pitch);
             return true;
@@ -11014,78 +11016,47 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
     // Depth and stencil share D24S8, but linear color and zeta pitches are
     // independent. Resolve only the rows this draw can touch, preserving zeta
     // row padding and any extra rows of a larger bound depth target.
-    // Retain the existing depth-only fallback for an unusable zeta layout.
-    // Active stencil cannot use that fallback: no guessed color-only execution
-    // may bypass its comparison or discard the requested stencil operation.
-    bool uses_depth = zeta_format == 2 && wants_zeta &&
-                      (surface_swizzled || (zeta_pitch % 4 == 0 &&
-                       uint64_t(zeta_pitch) >= uint64_t(surface_width) * 4));
-    uint64_t depth_bytes64 = uses_depth
+    using namespace nv2a_surface_dma;
+    const DepthLayout depth_layout = zeta_format == 0 ? DepthLayout::kAbsent :
+        zeta_format == 2 &&
+            (surface_swizzled ? uint64_t(zeta_pitch) == uint64_t(surface_width) * 4 :
+             (zeta_pitch % 4 == 0 && uint64_t(zeta_pitch) >= uint64_t(surface_width) * 4))
+            ? DepthLayout::kD24S8 : DepthLayout::kUnsupported;
+    uint64_t depth_bytes64 = depth_layout == DepthLayout::kD24S8 && wants_zeta
         ? (surface_swizzled ? color_bytes64 : uint64_t(zeta_pitch) * surface_height) : 0;
-    if (stencil_test_enabled && !uses_depth) {
-        record_generic_skip_detail(GenericSkipReason::kUnsupportedSurface, surface_pitch);
-        return true;
-    }
 
-    // BUG FIX (guest-memory-corruption regression): a raster batch can bind a DMA
-    // context whose PRAMIN descriptor was never actually programmed with a real
-    // frame/base (e.g. an "identity, whole-of-RAM" object reused from an unrelated
-    // purpose, or a genuinely all-zero/default descriptor) together with a zero
-    // SURFACE_*_OFFSET. dma_object_address() then resolves that -- entirely
-    // correctly, per the descriptor's own bits -- to physical address 0. Every
-    // hand-derived Profile above only ever witnessed real, deep-into-RAM color/zeta
-    // addresses, so none of them needed to guard against this; this generic path is
-    // the first to reach raster states where it actually happens (observed: a
-    // depth-mask-enabled boot-animation draw whose zeta context resolves to address
-    // 0), and writing depth data through PagedRasterSurface(address=0, size=...)
-    // corrupts the first few hundred KB of guest RAM -- exactly where 2BL is loaded,
-    // producing an "invalid instruction" fault a few thousand guest instructions
-    // later. PagedRasterSurface only bounds the OFFSET within a surface; it has no
-    // way to know the BASE address itself is bogus. Physical address 0 is never a
-    // legitimate color/zeta/texture target anywhere else in this file (every pinned
-    // profile's witnessed addresses are always deep into RAM), so treat a resolved
-    // address of exactly 0 as an invalid/unbound surface rather than writing through
-    // it.
-    auto resolve_surface = [&](uint32_t dma, bool bound, uint32_t offset,
-                               uint64_t bytes, uint32_t& address) {
-        if (!bound || !bytes ||
-            static_cast<uint64_t>(offset) + bytes - 1 > UINT32_MAX) {
-            return false;
-        }
-        uint32_t last_address = 0;
-        const uint32_t last_offset = offset + static_cast<uint32_t>(bytes - 1);
-        return dma_object_address(dma, offset, address) &&
-               dma_object_address(dma, last_offset, last_address) &&
-               last_address >= address &&
-               static_cast<uint64_t>(last_address) - address + 1 == bytes &&
-               address != 0;
-    };
-    uint32_t color_address = 0;
-    uint32_t depth_address = 0;
-    if (!resolve_surface(color_dma_, color_dma_bound_, surface_color_offset,
-                         color_bytes64, color_address)) {
-        fault_("NV2A generic-combiner color surface is unbound or overflows");
+    // Surface destinations have an explicit bounded local mapping contract.
+    // Physical zero remains a named safety disposition: the preserved boot
+    // regression writes zeta through a legitimate base-zero descriptor with
+    // its default offset. Descriptor bits alone do not establish intent.
+    // Validate required storage before any residency, texture or render effects.
+    auto reject_destination = [&](const char* kind, const char* reason) {
+        char message[192];
+        std::snprintf(message, sizeof(message),
+                      "NV2A generic-combiner %s destination rejected: %s", kind, reason);
+        fault_(message);
         return false;
-    }
-    if (uses_depth &&
-        !resolve_surface(zeta_dma_, zeta_dma_bound_, surface_zeta_offset,
-                         depth_bytes64, depth_address)) {
-        if (stencil_test_enabled) {
-            fault_("NV2A generic-combiner stencil surface is unbound or overflows");
-            return false;
-        }
-        // The zeta context resolves to something this evaluator cannot safely treat
-        // as a real depth buffer (unbound, out of range, or degenerate -- e.g. an
-        // "identity" DMA context combined with a zero SURFACE_ZETA_OFFSET, which
-        // legitimately resolves to physical address 0 and must never be written
-        // through). Render color-only rather than hard-faulting the whole draw: the
-        // color target is still valid, and treating "no usable zeta" as "no depth
-        // test/write this batch" is the safe, recoverable interpretation. The batch
-        // still executes (color-only), so this is not counted in the skip census --
-        // it is not a dropped batch, just a degraded one.
-        uses_depth = false;
+    };
+    const auto color_range = resolve_destination(pramin_.data(), pramin_.size(),
+        color_dma_bound_, color_dma_, surface_color_offset, color_bytes64);
+    if (color_range.status != RangeStatus::kReady)
+        return reject_destination("color", range_status_name(color_range.status));
+    const uint32_t color_address = color_range.address;
+    DestinationRange depth_range;
+    if (depth_bytes64)depth_range = resolve_destination(pramin_.data(), pramin_.size(),
+        zeta_dma_bound_, zeta_dma_, surface_zeta_offset, depth_bytes64);
+    const auto depth_use = depth_disposition(depth_test_enabled_bit, depth_func,
+        depth_write_enabled, stencil_test_enabled, zeta_dma_bound_,
+        depth_layout, depth_range.status);
+    if (depth_use == DepthDisposition::kReject)
+        return reject_destination("zeta", depth_layout == DepthLayout::kD24S8 ?
+            range_status_name(depth_range.status) : "unsupported or absent required layout");
+    const bool uses_depth = depth_use == DepthDisposition::kUseStorage;
+    uint32_t depth_address = uses_depth ? depth_range.address : 0;
+    if (!uses_depth) {
+        // Explicit unused/optional-absence/protected-zero write-only cases.
+        // Invalid bound storage never silently disables an enabled comparison.
         depth_bytes64 = 0;
-        depth_address = 0;
     }
     if (uses_depth) {
         const uint64_t color_end = static_cast<uint64_t>(color_address) + color_bytes64;
@@ -11168,10 +11139,26 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             default: supported = false; return TextureAddressMode::kRepeat;
         }
     };
+    // Retain the pre-existing source-role range contract independently of
+    // destination admission. Its broader descriptor semantics remain deferred.
+    auto resolve_texture_range = [&](uint32_t dma, bool bound, uint32_t offset,
+                                     uint64_t bytes, uint32_t& address) {
+        if (!bound || !bytes ||
+            static_cast<uint64_t>(offset) + bytes - 1 > UINT32_MAX) {
+            return false;
+        }
+        uint32_t last_address = 0;
+        const uint32_t last_offset = offset + static_cast<uint32_t>(bytes - 1);
+        return dma_object_address(dma, offset, address) &&
+               dma_object_address(dma, last_offset, last_address) &&
+               last_address >= address &&
+               static_cast<uint64_t>(last_address) - address + 1 == bytes &&
+               address != 0;
+    };
     auto resolve_texture_surface = [&](uint32_t format, uint32_t offset,
                                         uint64_t bytes64, uint32_t& address) {
         const bool uses_dma_b = (format & 2u) != 0;
-        if (!resolve_surface(uses_dma_b ? texture_dma_b_ : texture_dma_a_,
+        if (!resolve_texture_range(uses_dma_b ? texture_dma_b_ : texture_dma_a_,
                              uses_dma_b ? texture_dma_b_bound_
                                          : texture_dma_a_bound_,
                              offset, bytes64, address)) {
@@ -11466,7 +11453,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                 uint32_t address = 0;
                 if (bytes64 > SIZE_MAX ||
                     !(legacy_raw_linear
-                          ? resolve_surface(texture_dma_b_, texture_dma_b_bound_,
+                          ? resolve_texture_range(texture_dma_b_, texture_dma_b_bound_,
                                             raster_state[kRasterTextureOffset0 + stage],
                                             bytes64, address)
                           : resolve_texture_surface(
