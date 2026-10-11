@@ -1171,3 +1171,54 @@ Evidence is in `media-launch-trace-title-startup-20261010.aot-private.json`,
 A private validation-helper BOM decoding failure is also preserved; it did not
 run a check or change product code. No physical Xbox operation, playback or
 attract rerun was performed.
+
+### Counted-string construction and comparison - 2026-10-10
+
+Unchanged original289/290 independently execute18 null/empty/short/boundary
+cases. Xbox stores wrapping16-bit byte lengths: ANSI65535 bytes produces
+Length65535/MaximumLength0, and UTF16 byte65534 produces65534/0. Strings
+past that boundary wrap again. Desktop RTL saturates instead, disagreeing on
+six cases. The caller's Buffer pointer is retained exactly; no string storage
+is allocated or copied. The default HLE now implements those observed rules
+directly, including the previously missing Unicode initializer.
+
+The next actual import is RtlEqualString279, with three arguments; critical
+initialization is291. An independent original observation executes316 on
+all256 byte values and279 on808 counted-string cases. Xbox byte folding maps
+ASCII a-z and Latin1 E0-F6/F8-FE to their uppercase bytes, preserves the other
+observed bytes, and maps FF to3F. Desktop RtlEqualString disagrees on64 of
+these cases. The authored default HLE uses those observed rules, a direct
+memcmp for sensitive comparison, and the caller's exact16-bit Length. Embedded
+NULs remain counted bytes, MaximumLength does not limit comparison, unequal
+lengths reject before reading buffers, and only the BOOLEAN's low byte selects
+folding. No original implementation or packed character table is copied.
+
+Both initializers and279/316 now use the same original C/raw-thread import
+transport with their actual argument counts and CALL/RET frames. Eighteen
+original-thread/native initializer cases retain actual VM Buffer pointers,
+unaligned UTF16, output/source canaries and original ownership cleanup. Three
+additional lifetimes each execute808 original equality cases and256 original
+uppercase cases on real guest threads, then compare the actual native dispatch
+ABI. They include full65535-byte loops, low-byte BOOLEAN values, input-record
+and byte preservation, handle/thread baselines and original VM retirement.
+The maintained runtime clock permits long original execution across bounded
+CPU slices; no completed return is inferred from an instruction budget.
+
+The coherent CPU batch passes **68/68 in14.312s**. One rebuilt, muted original
+startup runs8.375s, passes the counted-string imports and next stops on a real
+GPU read **FD001804 at original PC0013BD90**. The GPU/MMIO owner is not yet
+connected to this actual-thread route. Original scheduling/title/GPU/audio
+integration remains required; gates stay **4/9**, with **25 safe deferrals**.
+The default HLE has no original-CPU fallback or per-call desktop RTL lookup.
+
+The reproducible authored oracle is `tools/native_counted_string_reference.py`.
+Its private output is `counted-string-comparison-original-20261010.aot-private.json`;
+the independent CPU and title evidence are
+`counted-string-comparison-qualified-20261010.aot-private.json` and
+`counted-string-comparison-title-startup-20261010.aot-private.json`.
+Earlier67-entry qualification and startup at279 retain their source identities.
+The first long oracle call exceeded its previous million-instruction fixture
+bound; that failure is preserved, and the unchanged original call returns under
+an explicit four-million bound. No failed call is counted as passing. ROM and
+EEPROM input hashes remain unchanged. No physical Xbox operation, playback or
+attract rerun was performed.

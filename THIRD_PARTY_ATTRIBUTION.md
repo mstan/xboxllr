@@ -1712,6 +1712,13 @@ are factual references only; no GPL implementation body, donor GP-sized EP map,
 monitor-speaker substitute or guessed cadence is adopted. The credited pinned
 MIT DSP core/library and samplerate cache remain the implementation dependencies.
 
+The counted-string initializers, ANSI byte comparison/folding and original-thread
+fixtures are authored here. The nxdk declarations provide public API names and
+ABI facts; unchanged private owned kernel execution establishes factual length
+and character outputs. No original instruction body or packed character table
+is copied. Desktop Windows RTL is used only as an independent comparison in the
+private observation tool, rather than as the native implementation dependency.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

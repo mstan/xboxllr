@@ -810,7 +810,7 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
        ordinal!=200 && ordinal!=202 && ordinal!=203 && ordinal!=207 && ordinal!=209 && ordinal!=211 &&
        ordinal!=215 && ordinal!=218 && ordinal!=219 && ordinal!=224 && ordinal!=225 && ordinal!=226 && ordinal!=231 && ordinal!=233 && ordinal!=234 && ordinal!=236 &&
        ordinal!=246 && ordinal!=250 && ordinal!=254 && ordinal!=255 && ordinal!=256 &&
-       ordinal!=277 && ordinal!=291 && ordinal!=294 && ordinal!=301
+       ordinal!=277 && ordinal!=279 && ordinal!=289 && ordinal!=290 && ordinal!=291 && ordinal!=294 && ordinal!=301 && ordinal!=316
 #endif
        ) {
         failure="device LLE unsupported ordinal";return;
@@ -875,8 +875,9 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
 #ifdef PILOT_FILES_LLE
     switch(ordinal) {
     case 35:case 36:case 125:case 250:count=0;break;
-    case 67:case 113:case 148:case 198:case 203:case 209:case 224:case 225:case 231:count=2;break;
-    case 215:case 233:case 246:count=3;break;
+    case 67:case 113:case 148:case 198:case 203:case 209:case 224:case 225:case 231:
+    case 289:case 290:count=2;break;
+    case 215:case 233:case 246:case 279:count=3;break;
     case 149:case 189:case 234:count=4;break;
     case 24:case 150:case 159:case 211:case 218:case 226:case 254:count=5;break;
     case 202:count=6;break;
@@ -903,7 +904,7 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
      * counts REP iterations; a megabyte-scale loader commit can legitimately
      * exceed the small device-call budget. Permit bounded console-sized work
      * without replacing its zeroing or declaring an unfinished call complete. */
-    run_original(entry,ordinal==184?64u*1024*1024:1000000);
+    run_original(entry,ordinal==184?64u*1024*1024:ordinal==279?4000000:1000000);
     if(failure)return;
     IO_UC(uc_reg_read(cpu,UC_X86_REG_EIP,&observed));
     if(observed!=RETURN_PC){failure="device LLE instruction limit without return";return;}

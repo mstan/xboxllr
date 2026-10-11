@@ -99,7 +99,7 @@ class Reference:
     def word(self, va):
         return struct.unpack_from('<I', self.ram, self.physical(va))[0]
 
-    def call(self, ordinal, *args):
+    def call(self, ordinal, *args, instruction_limit=1000000):
         cpu = self.cpu
         sp, end = 0x10008000, 0x10009000
         entry = self.base + self.word(self.export_table + 4 * (ordinal - self.ordinal_base))
@@ -107,7 +107,7 @@ class Reference:
         cpu.reg_write(UC_X86_REG_ESP, sp)
         cpu.reg_write(UC_X86_REG_EFLAGS, 0x202)
         self.failure = None
-        cpu.emu_start(entry, end, count=1000000)
+        cpu.emu_start(entry, end, count=instruction_limit)
         if self.failure or cpu.reg_read(UC_X86_REG_EIP) != end:
             raise RuntimeError(self.failure or 'original call did not return')
         if cpu.reg_read(UC_X86_REG_ESP) != sp + 4 * (len(args) + 1):

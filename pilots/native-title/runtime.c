@@ -441,6 +441,7 @@ static void critical_section(unsigned operation,uint32_t va)
 }
 
 #include "status_map.inc"
+#include "counted_string.inc"
 
 static void query_setting(void)
 {
@@ -622,21 +623,12 @@ static void kernel_dispatch_impl(void)
     case 327: case 328:
         g_eax=section_change(MEM32(g_esp+4),next_kernel_ordinal==327); g_esp+=8; return;
     case 279: {
-        typedef BOOLEAN (NTAPI *EqualAnsi)(const ANSI_STRING*,const ANSI_STRING*,BOOLEAN);
-        EqualAnsi equal=(EqualAnsi)(void*)GetProcAddress(GetModuleHandleW(L"ntdll.dll"),"RtlEqualString");
-        if (!equal) stop("native ANSI comparison unavailable",279);
-        uint32_t a=MEM32(g_esp+4),b=MEM32(g_esp+8);
-        ANSI_STRING left={MEM16(a),MEM16(a+2),(PCHAR)(memory+MEM32(a+4))};
-        ANSI_STRING right={MEM16(b),MEM16(b+2),(PCHAR)(memory+MEM32(b+4))};
-        g_eax=equal(&left,&right,(BOOLEAN)MEM8(g_esp+12)); g_esp+=16; return;
+        g_eax=counted_string_equal(MEM32(g_esp+4),MEM32(g_esp+8),MEM8(g_esp+12));
+        g_esp+=16; return;
     }
-    case 289: {
-        typedef VOID (NTAPI *InitAnsi)(PANSI_STRING,PCSTR);
-        InitAnsi init=(InitAnsi)(void*)GetProcAddress(GetModuleHandleW(L"ntdll.dll"),"RtlInitAnsiString");
-        if (!init) stop("native ANSI string initializer unavailable",289);
-        uint32_t out=MEM32(g_esp+4),source=MEM32(g_esp+8); ANSI_STRING string={0};
-        init(&string,source ? (const char*)(memory+source) : NULL);
-        MEM16(out)=string.Length; MEM16(out+2)=string.MaximumLength; MEM32(out+4)=source;
+    case 316:g_eax=counted_string_upper(MEM8(g_esp+4));g_esp+=8;return;
+    case 289:case 290: {
+        counted_string_init(next_kernel_ordinal==289?1:2,MEM32(g_esp+4),MEM32(g_esp+8));
         g_esp+=12; return;
     }
     case 67: case 69: case 203: case 215: namespace_kernel(next_kernel_ordinal); return;

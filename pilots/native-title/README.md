@@ -6,7 +6,7 @@ Original scheduling has bounded no-peer idle-clock and integer compute
 checkpoints. Its LLE thread bodies now execute original bytes on that same CPU,
 retaining flags and full FP state across original IRQs, waits and switches.
 Normal-priority child creation, explicit termination and recursive critical
-sections now use that original route; the latest combined CPU batch passes66
+sections now use that original route; the latest combined CPU batch passes68
 checks. Original settings use the shared EEPROM owner and original HAL/cache.
 The default HLE corrects settings types/error ordering/cache behavior and uses
 an authored, deterministic Xbox error mapper instead of the host Windows table.
@@ -19,9 +19,13 @@ original owner, actual GPU/USB DMA, protections and guarded USB leases.
 Six lifetimes and a borrowed-free control pass; fresh GPU FIFO/semaphore
 transport also passes with a purely original allocation. Blinx passes165 and178
 and now applies the reviewed installed-media helper on the original CPU.
-Actual HDD identity verification succeeds; startup next guards ordinal289.
+Actual HDD identity verification succeeds. Original counted-string construction
+and ANSI comparison now execute on real threads; default HLE uses observed Xbox
+length wrapping and byte folding instead of desktop RTL behavior. Eighteen
+initializer cases and three comparison lifetimes pass, each with808 equality
+and256 uppercase cases. Startup next reaches the unconnected GPU readFD001804.
 Whole title scheduling remains unqualified. See
-[the CPU route and remaining integration](SCHEDULING-LLE.md#installed-media-selection-on-the-original-cpu---2026-10-10).
+[the CPU route and remaining integration](SCHEDULING-LLE.md#counted-string-construction-and-comparison---2026-10-10).
 
 The independent GP owner now carries actual selected events, callback-safe
 yield/resume and a real VP MIX lease. Fifteen focused APU checks and two fresh
