@@ -177,7 +177,8 @@ uint8_t pilot_cpu_in8(uint16_t port)
 #endif
 #ifdef PILOT_USB_LLE
     uint32_t value=0;
-    const char *error=pilot_usb_pic_port(port,1,0,&value);
+    const char *error=port==0x80cf?pilot_usb_board_port(port,1,0,&value):
+        pilot_usb_pic_port(port,1,0,&value);
     if(error)stop(error,port);
     return (uint8_t)value;
 #else
@@ -198,7 +199,8 @@ void pilot_cpu_out8(uint16_t port,uint8_t byte)
 #endif
 #ifdef PILOT_USB_LLE
     uint32_t value=byte;
-    const char *error=pilot_usb_pic_port(port,1,1,&value);
+    const char *error=port==0x80cf?pilot_usb_board_port(port,1,1,&value):
+        pilot_usb_pic_port(port,1,1,&value);
     if(error)stop(error,port);
 #else
     stop("port write requires the machine bus",port);
@@ -206,6 +208,10 @@ void pilot_cpu_out8(uint16_t port,uint8_t byte)
 }
 void pilot_thread_checkpoint(void)
 {
+#ifdef PILOT_USB_LLE
+    if(pilot_io_device_thread_checkpoint_request())
+        stop("original native compute requires a certified PC/flags checkpoint",0);
+#endif
 #ifdef PILOT_USB_LLE
     usb_poll();
 #endif

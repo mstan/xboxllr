@@ -10,6 +10,7 @@
 #include "machine/pic.hpp"
 #include "machine/pit.hpp"
 #include "machine/apu_clock.hpp"
+#include "machine/mcpx_static_outputs.hpp"
 #include "usb_lle.h"
 
 namespace {
@@ -23,6 +24,12 @@ xlle::DualPic pic;
 xlle::Pit8254 pit;
 uint64_t pit_ticks;
 bool pic_ready;
+// Retail board profile: GPIO15/FWENB has no external termination (Xbox
+// hardware specification 1.02 section 2.6.5). Retain the actual programmed
+// output; it cannot grant flash access or mutate ROM in this profile.
+std::string board_failure;
+xlle::McpxStaticOutputs board_outputs(1u<<15,
+    [](const std::string& why){board_failure=why;});
 PilotUsbHostRead host_read;
 PilotUsbHostRumble host_rumble;
 PilotUsbHostCaps host_caps;
@@ -129,12 +136,37 @@ extern "C" const char *pilot_usb_pic_port(uint32_t port,int size,int write,uint3
     else *value=device->io_read((uint16_t)port,size);
     ReleaseSRWLockExclusive(&usb_lock);return error;
 }
+extern "C" const char *pilot_usb_board_port(uint32_t port,int size,int write,uint32_t *value)
+{
+    AcquireSRWLockExclusive(&usb_lock);
+    const char *error=nullptr;
+    if(port!=0x80cf || size!=1 || !write || !value)
+        error="MCPX retail FWENB unsupported register transaction";
+    else if(!board_outputs.write((uint16_t)port,*value))error=board_failure.c_str();
+    ReleaseSRWLockExclusive(&usb_lock);return error;
+}
+extern "C" const char *pilot_usb_board_outputs(uint32_t *known,uint32_t *levels)
+{
+    AcquireSRWLockExclusive(&usb_lock);
+    const char *error=nullptr;
+    if(!known || !levels)error="MCPX retail output observation requires destinations";
+    else {*known=board_outputs.known();*levels=board_outputs.levels();}
+    ReleaseSRWLockExclusive(&usb_lock);return error;
+}
 extern "C" const char *pilot_usb_pit_time(uint64_t ticks)
 {
     AcquireSRWLockExclusive(&usb_lock);
     const char *error=nullptr;
     if(!pic_ready || ticks<pit_ticks)error="PIT LLE uninitialized/backwards clock";
     else {pit_ticks=ticks;pit.set_time(ticks);}
+    ReleaseSRWLockExclusive(&usb_lock);return error;
+}
+extern "C" const char *pilot_usb_pit_clock(uint64_t *ticks,uint64_t *next_irq)
+{
+    AcquireSRWLockExclusive(&usb_lock);
+    const char *error=nullptr;
+    if(!pic_ready || !ticks || !next_irq)error="PIT LLE clock query outside initialized device";
+    else {*ticks=pit_ticks;*next_irq=pit.next_irq0_tick();}
     ReleaseSRWLockExclusive(&usb_lock);return error;
 }
 extern "C" int pilot_usb_pic_vector(int acknowledge)

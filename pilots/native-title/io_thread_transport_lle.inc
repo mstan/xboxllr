@@ -63,6 +63,47 @@ static void thread_service_complete(struct OriginalThread *thread)
     if(thread->call_ordinal==187 && (int32_t)regs[0]>=0)thread_note_close(thread->call_args[0]);
     thread->in_kernel=0;memcpy(thread->call_regs,regs,sizeof(regs));
 }
+static void thread_checkpoint_prepare(struct OriginalThread *thread,uint32_t *entry)
+{
+    if(thread->in_kernel || thread->in_checkpoint || kernel_word(0x8003da64u)!=thread->object) {
+        failure="thread LLE checkpoint does not own original execution";return;
+    }
+    check_publications(1);if(failure)return;
+    for(unsigned i=0;i<8;++i)IO_UC(uc_reg_write(cpu,general_regs[i],thread->call_regs+i));
+    IO_UC(uc_reg_write(cpu,UC_X86_REG_EFLAGS,&thread->checkpoint_flags));
+    thread->in_checkpoint=1;*entry=thread->checkpoint_pc;
+}
+static void thread_checkpoint_complete(struct OriginalThread *thread)
+{
+    uint32_t regs[8],flags,pc;
+    for(unsigned i=0;i<8;++i)IO_UC(uc_reg_read(cpu,general_regs[i],regs+i));
+    IO_UC(uc_reg_read(cpu,UC_X86_REG_EFLAGS,&flags));
+    IO_UC(uc_reg_read(cpu,UC_X86_REG_EIP,&pc));
+    if(!thread->in_checkpoint || thread->in_kernel || pc!=thread->checkpoint_pc ||
+       flags!=thread->checkpoint_flags || memcmp(regs,thread->call_regs,sizeof(regs))) {
+        failure="thread LLE original checkpoint returned with changed integer context";return;
+    }
+    check_publications(0);if(failure)return;
+    thread->in_checkpoint=0;
+}
+static DWORD thread_clock_wait(void)
+{
+    if(!clock_provider)return INFINITE;
+#ifdef PILOT_USB_LLE
+    uint64_t ticks=0,next=0,now=0;
+    const char *error=pilot_usb_pit_clock(&ticks,&next);
+    if(!error)error=clock_provider(clock_context,&now);
+    if(error){failure=error;return 0;}
+    if(now<ticks){failure="thread LLE backwards clock input";return 0;}
+    if(!next)return INFINITE;
+    if(now>=next)return 0;
+    uint64_t delta=next-now;
+    uint64_t ms=(delta/1125000)*1000+((delta%1125000)*1000+1124999)/1125000;
+    return ms>=INFINITE?INFINITE-1:(DWORD)ms;
+#else
+    failure="thread LLE clock without PIT/PIC";return 0;
+#endif
+}
 static void thread_handoff(struct OriginalThread *thread,int start,uint32_t *entry)
 {
     if(start) {
@@ -78,16 +119,24 @@ static void thread_handoff(struct OriginalThread *thread,int start,uint32_t *ent
         }
     }
     thread->request=0;
+    InterlockedExchange(&thread->checkpoint_requested,0);
     InterlockedExchange(&current_irql,(LONG)(kernel_word(0x8003da60u)&255));
     if(failure)return;
     if(!SetEvent(thread->resume_event)){failure="thread LLE native resume failed";return;}
-    ReleaseSRWLockExclusive(&lock);
-    DWORD wait=WaitForSingleObject(thread->request_event,INFINITE);
-    AcquireSRWLockExclusive(&lock);
+    DWORD wait=WAIT_TIMEOUT;
+    while(wait==WAIT_TIMEOUT) {
+        DWORD deadline=thread_clock_wait();if(failure)return;
+        if(!deadline)InterlockedExchange(&thread->checkpoint_requested,1);
+        ReleaseSRWLockExclusive(&lock);
+        wait=WaitForSingleObject(thread->request_event,deadline?deadline:INFINITE);
+        AcquireSRWLockExclusive(&lock);
+        if(wait==WAIT_TIMEOUT)InterlockedExchange(&thread->checkpoint_requested,1);
+    }
     if(wait!=WAIT_OBJECT_0){failure="thread LLE native request wait failed";return;}
     if(failure)return;
     if(thread->callback_error){failure=thread->callback_error;return;}
     if(thread->request==THREAD_REQUEST_CALL){thread_service_prepare(thread,entry);return;}
+    if(thread->request==THREAD_REQUEST_CHECKPOINT){thread_checkpoint_prepare(thread,entry);return;}
     if(thread->request!=THREAD_REQUEST_FINISH){failure="thread LLE missing native continuation action";return;}
     /* Native work is finished; release its transport resources independently
      * of original thread/object lifetime. Original termination still follows. */

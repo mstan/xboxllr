@@ -67,12 +67,6 @@ void xlle_unicorn_record_restore(void* engine, uint64_t pc, uint32_t size,
         xlle_restore_callback(xlle_restore_opaque, &record);
     }
 }
-int xlle_unicorn_irq_inhibited(void* engine) {
-    struct uc_struct* uc = (struct uc_struct*)engine;
-    if (!uc || !uc->cpu || !uc->cpu->env_ptr) return 1;
-    return (((CPUX86State*)uc->cpu->env_ptr)->hflags & HF_INHIBIT_IRQ_MASK) != 0;
-}
-
 int xlle_unicorn_limit_next_tb(void* engine, unsigned instructions) {
     struct uc_struct* uc = (struct uc_struct*)engine;
     if (!uc || !uc->cpu || !instructions || instructions > CF_COUNT_MASK) return 0;

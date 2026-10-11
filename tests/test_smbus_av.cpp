@@ -256,6 +256,28 @@ static void av_output_pins() {
     }
 }
 
+static void retail_fw_enable() {
+    for(unsigned lifetime=0;lifetime<3;++lifetime) {
+        std::string fault;
+        xlle::McpxStaticOutputs output(1u<<15,[&](const std::string& why){fault=why;});
+        CHECK(output.known()==0 && output.levels()==0);
+        for(unsigned repeat=0;repeat<12;++repeat) {
+            CHECK(output.write(0x80cf,5));
+            CHECK(output.known()==(1u<<15) && output.levels()==(1u<<15));
+            CHECK(output.write(0x80cf,4));
+            CHECK(output.known()==(1u<<15) && output.levels()==0);
+        }
+        for(unsigned value=0;value<256;++value)if(value!=4 && value!=5) {
+            CHECK(!output.write(0x80cf,value) && !fault.empty());fault.clear();
+            CHECK(output.known()==(1u<<15) && output.levels()==0);
+        }
+        for(unsigned port:{0x80ceu,0x80d0u,0x80d3u,0x80bfu,0x80dau,0xffffu}) {
+            CHECK(!output.write(uint16_t(port),5) && !fault.empty());fault.clear();
+            CHECK(output.known()==(1u<<15) && output.levels()==0);
+        }
+    }
+}
+
 static void reset_and_configuration() {
     for(bool pal : {false,true}) for(unsigned lifetime=0;lifetime<3;++lifetime) {
         std::string fault;
@@ -308,6 +330,7 @@ int main() {
     encoder_slave_phase();
     encoder_clocks();
     av_output_pins();
+    retail_fw_enable();
     reset_and_configuration();
     for (unsigned lifetime=0; lifetime<3; ++lifetime) {
         std::string fault;

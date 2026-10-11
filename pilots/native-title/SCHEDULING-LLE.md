@@ -550,13 +550,84 @@ The harness terminates a live process. Final evidence is
 The bounded lifetime and initial-FP tasks are validated; whole-family original
 scheduling remains open.
 
-The next clock batch must preserve one original-engine owner and the existing
-native C continuation. A compute checkpoint needs the actual guest PC, all GPRs
-and materialized EFLAGS; service-entry `2|IF` cannot substitute for that state.
-Expose the maintained PIT's next IRQ deadline and service the actual original
-idle/IRQ0/context-switch path. Kernel4983's idle loop is STI/NOP/NOP/CLI, not HLT.
-The pilot's current IF-only block hook also lacks the maintained engine's real
-STI inhibition query. Its stock Unicorn 2.1.4 package and the CPU floor's 2.1.1
-engine require a reviewed source/library binding before sharing private state.
-These are required software integration gaps, not new hardware requirements or
-safely deferred precision questions.
+## Original clock, integer checkpoints and retail GPIO15
+
+The clock batch now supplies one original-engine owner and retained native C
+continuations. The controller exposes the actual maintained PIT position and
+next deadline, requests an integer checkpoint while native work computes, and
+samples device input time between original execution slices. A checkpoint
+transfers the actual native continuation PC, eight GPRs and materialized EFLAGS;
+service-entry `2|IF` is not substituted. Original PIC acknowledge, IDT framing,
+IRQ0, DPC and context-switch/return decide which continuation resumes. Clock
+slice exhaustion cannot complete an original service. The actual captured
+idle/boot worker remains selected by the kernel, without queue or priority edits.
+
+The runtime starts the clock by executing the hash-bound original retired INIT
+PIT routine at `800786D4` on the same engine. Its three actual byte OUTs program
+mode 2/reload 1125. The temporary INIT map is retired and the complete prior
+engine context restored before binding monotonic input time. No second guest
+clock thread or scheduler is added to the original scheduling profile. Existing
+PIT edge coalescing remains explicit; this is not a new silicon-cadence result.
+
+The pilot retains Unicorn 2.1.4 through a reviewed source-built package, using
+the same small inhibition helper as the full-machine 2.1.1 engine. Each compiles
+against its own upstream private headers. The pilot's block hook now consults
+the actual engine inhibition state in addition to IF. Engine checks pass eight
+STI/block/split/context lifetimes and 338 executed CMP cases, independently
+checking arithmetic flags and retained IF/DF. See
+[package build and source identity](unicorn-engine/README.md).
+
+The earlier `OUT 80CF,5` stop is resolved for a bounded retail board profile.
+NVIDIA MCP-1 0.15 section 5.15 supplies the GPIO15 control location; Xbox
+hardware specification 1.02 section 2.6.5 leaves this development flash-enable
+pin externally unconnected on retail boards. The maintained static-output
+primitive retains each 04/05 low/high command, shared with the existing AV
+output model. It does not grant ROM access, invent register readback or admit
+alternate modes. The independent board read `44` is preserved as current state,
+not a reset value. No physical Xbox GPIO write was attempted.
+
+The combined source-bound mixed CPU qualification passes **47/47 entries** in
+10.35s, including the existing original thread/wait/timeout/DPC/USB/memory/file
+cases and three new clock cases. The no-peer blocked timeout passes both an
+explicit provider and the actual runtime INIT/monotonic provider; the selected
+original worker executes six high/low GPIO pulses. Two authored integer compute
+lifetimes resume their actual C continuation after IRQ0 wakes a higher-priority
+peer, with exact PC/GPR/FLAGS preservation. CLI checkpoints retain the pending
+interrupt until IF is enabled. Invalid PC/debug flags/stack controls are rejected
+without mutating the accepted state. Static GPIO/AV component checks also pass.
+Private evidence is
+`build/blinx/original-clock-batch-validation-20261010.aot-private.json`, with
+engine/device reports and the focused clock prototype attempts alongside it.
+
+Preserved failures include the initial unsupported GPIO stop, an upstream
+optional archive symlink build, an incorrect build-command option, missing
+unbuilt test executables, an overlapping fixture duration/deadline field and
+the mistaken unprogrammed-PIT sentinel. The sentinel is the maintained API's
+documented zero. No failed attempt is relabelled as a passed run.
+
+This qualifies the bounded clock/IRQ/integer continuation foundations. Generic
+generated title loops still need certified PC/FLAGS lowering and full FP/SIMD
+context transport; an uncertified requested native checkpoint stops explicitly.
+Service/callback publication and lifetime postconditions still need connection
+under original title scheduling. Those are required integration work and cannot
+be deferred as numeric precision. `.112.2` and the whole scheduling family
+remain open, with **4/9** service-family gates qualified.
+
+One rebuilt original scheduling startup confirms the GPIO dependency is passed
+and the runtime clock starts. It stops before generated title entry on the
+captured worker's byte `OUT 0072,10` at `800187B8`. This is the next RTC/extended
+CMOS bus dependency; it is not a qualified original title run. The maintained
+full-machine route already distinguishes standard RTC ports 70/71 from the
+absent extended 72/73 decoder, but the pilot must connect and qualify that
+contract rather than return an arbitrary byte or ignore all unknown ports.
+Private startup report is
+`build/blinx/original-clock-title-startup-20261010.aot-private.json`.
+
+The single rebuilt default HLE follow-up reaches **192.969s /18 captures**,
+with all five replay rows and no stop/audio-stop/fault. Inspected frames10/11
+show Demo gameplay/pause, frame13 title return and frame18 next Demo loading.
+No second-Demo gameplay, natural termination, audio-ear or exact-cadence claim
+is made. The harness ends a live process; no additional owner appearance review
+is needed for this service-only change. Evidence is
+`build/blinx/original-clock-qualified-followup-20261010.aot-private.json` and
+`original-clock-default-followup-20261010/run.aot-private.json`.

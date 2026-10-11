@@ -1578,6 +1578,26 @@ It retains ideal expectations and tight legacy gates, without incorporating
 external implementation bodies or prose. Host decode variation is not new
 Xbox hardware evidence. Existing donor license limits remain.
 
+## Original scheduling clock and GPIO continuation
+
+The original scheduling clock continuation additionally uses unmodified
+[Unicorn 2.1.4](https://github.com/unicorn-engine/unicorn/tree/8028ec436f2d9376525352dd38ed9ed6b9f6be10)
+source at `8028ec436f2d9376525352dd38ed9ed6b9f6be10`, retaining upstream
+`COPYING` and `COPYING.LGPL2` in the private static package. The authored
+package builder and shared inhibition helper compile against each selected
+engine's own headers; no private structure offsets cross versions. Existing
+Unicorn 2.1.1 full-machine modifications and notices remain separate.
+
+The authored shared GPIO static-output primitive also consults the already
+cited NVIDIA MCP-1 0.15 section 5.15 and
+[Xbox hardware specification 1.02 section 2.6.5](https://consolemods.org/wiki/images/a/ae/Xbox_Hardware_Design_Specification_1.02.pdf)
+for GPIO15's register location and retail/development wiring. Its 04/05
+control encoding retains the existing AMD-766-compatible board inference;
+no new silicon readback or reset claim is made. The integer CMP flag helper,
+native continuation/clock adapter and authored instruction/worker tests are
+implemented here. No specification prose or external implementation body is
+copied into these components.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

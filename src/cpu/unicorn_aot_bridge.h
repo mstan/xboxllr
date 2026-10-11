@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "unicorn_irq_boundary.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -76,7 +77,6 @@ void xlle_unicorn_invalidate_ram(void* engine, uint32_t physical, size_t size);
 // identity for TCG code lookup and invalidation, retaining separate lifetimes.
 int xlle_unicorn_share_ram_identity(void* engine, uint32_t original, uint32_t alias);
 void xlle_unicorn_protect_code_aliases(void* engine, uint64_t first, uint64_t second);
-int xlle_unicorn_irq_inhibited(void* engine);
 // Fallback scheduler only: bound the next translated block to this many real
 // instructions. Does not execute guest code or install an instruction hook.
 int xlle_unicorn_limit_next_tb(void* engine, unsigned instructions);

@@ -34,6 +34,8 @@ static const char *usb_original_callback(uint32_t entry,uint32_t regs[8],int is_
     uint8_t irql=g_fs_base?MEM8(g_fs_base+0x24):0;
     int saved_if=cpu_interrupt_flag,saved_shadow=cpu_interrupt_shadow;
     int saved_in_dpc=dispatch_in_dpc;
+    volatile uint32_t *saved_checkpoint=g_pilot_suspend_count;
+    if(thread_arguments)g_pilot_suspend_count=(volatile uint32_t*)pilot_io_device_thread_checkpoint_request();
     /* The qualified original ISR/DPC dispatchers enable interrupts before
      * calling generated code. Their actual IRQL remains authoritative. */
     cpu_interrupt_flag=1;cpu_interrupt_shadow=0;pilot_io_device_set_if(1);
@@ -71,6 +73,7 @@ static const char *usb_original_callback(uint32_t entry,uint32_t regs[8],int is_
     g_mm0=mm[0];g_mm1=mm[1];g_mm2=mm[2];g_mm3=mm[3];
     g_mm4=mm[4];g_mm5=mm[5];g_mm6=mm[6];g_mm7=mm[7];
     g_fs_base=saved_fs;
+    g_pilot_suspend_count=saved_checkpoint;
     if(g_fs_base)MEM8(g_fs_base+0x24)=irql;
     cpu_interrupt_flag=saved_if;cpu_interrupt_shadow=saved_shadow;pilot_io_device_set_if(saved_if);
     return NULL;

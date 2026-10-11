@@ -24,6 +24,8 @@ static void scheduling_lle_bootstrap(void)
 }
 static void scheduling_lle_run(void)
 {
+    const char *clock_error=pilot_io_device_clock_start();
+    if(clock_error)stop(clock_error,0);
     uint32_t directory=file32(0x12c),tls_size=0;
     if(directory) {
         uint32_t first=MEM32(directory),end=MEM32(directory+4),zero=MEM32(directory+16);

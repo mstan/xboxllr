@@ -1,5 +1,11 @@
 # Native title reference pilot
 
+USB/PIC LLE now requires the reviewed
+[source-built Unicorn IRQ-boundary package](unicorn-engine/README.md).
+Original scheduling has bounded no-peer idle-clock and integer compute
+checkpoint foundations; whole title scheduling remains unqualified. See
+[the current scheduling evidence and integration gaps](SCHEDULING-LLE.md#original-clock-integer-checkpoints-and-retail-gpio15).
+
 **Working attract checkpoint:** `milestone/blinx-attract-20261008` preserves
 owner-observed FMVs and real-time Demo play on runtime `318f5ac`. See the
 [milestone and remaining sign-off items](../../docs/BLINX-BURNDOWN.md) before

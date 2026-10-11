@@ -44,6 +44,23 @@ void pilot_io_device_thread_bind(PilotIoThread callback);
  * guest call frame is at regs[ESP]; original execution returns updated GPRs.
  * The host call remains suspended if the original kernel switches threads. */
 const char *pilot_io_device_thread_call(unsigned ordinal,uint32_t regs[8]);
+/* Sole-engine controller requests a certified native integer boundary when
+ * the real modeled clock is due. These calls retain the actual C continuation
+ * and transfer PC/all eight GPRs/materialized EFLAGS. They do not create a
+ * guest CALL frame or complete waits. Caller must account for STI inhibition
+ * and qualify its lowering; FP/SIMD compute transport is not admitted here. */
+volatile int32_t *pilot_io_device_thread_checkpoint_request(void);
+const char *pilot_io_device_thread_initial_flags(uint32_t *flags);
+const char *pilot_io_device_thread_checkpoint(uint32_t pc,uint32_t regs[8],uint32_t *flags);
+/* Input clock only, in 1,125,000-Hz PIT ticks. Called solely by the original
+ * engine owner between execution slices. The provider must not reenter this
+ * transport or complete kernel waits. NULL unbinds; bind only while idle. */
+typedef const char *(*PilotIoClock)(void *context,uint64_t *ticks);
+const char *pilot_io_device_clock_bind(PilotIoClock provider,void *context);
+/* Runtime original scheduling: execute the reviewed retired INIT PIT routine
+ * on the same engine and bind monotonic input time. Requires initialized idle
+ * transport, an unprogrammed PIT and no pending device interrupt. */
+const char *pilot_io_device_clock_start(void);
 /* Publish the original thread-type data and observe managed live threads.
  * Neither operation changes readiness, priority or completion state. */
 const char *pilot_io_device_thread_type(uint32_t *address);

@@ -76,7 +76,7 @@ FetchContent_Declare(unicorn
   GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(unicorn)
 target_sources(unicorn PRIVATE src/cpu/unicorn_metrics.c)
-target_sources(x86_64-softmmu PRIVATE src/cpu/unicorn_aot_bridge.c)
+target_sources(x86_64-softmmu PRIVATE src/cpu/unicorn_aot_bridge.c src/cpu/unicorn_irq_boundary.c)
 include(cmake/UnicornPreciseFault.cmake)
 # Guest RDTSC must not read the host TSC (beads-xbox.1.4.6): rename the pinned QEMU
 # definition out of the way so src/cpu/unicorn_metrics.c owns the symbol every RDTSC and

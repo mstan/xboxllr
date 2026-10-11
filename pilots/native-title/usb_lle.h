@@ -19,11 +19,17 @@ const char *pilot_usb_lle_access(uint32_t address,int write,uint32_t *value);
  * port bus also owns PIT ports 40..43; PIT stays unprogrammed until selected. */
 const char *pilot_usb_pic_bootstrap(uint16_t mask,uint16_t level);
 const char *pilot_usb_pic_port(uint32_t port,int size,int write,uint32_t *value);
+/* Retail GPIO15/FWENB static output only. No external ROM programming
+ * connection; readback, other modes and widths remain guarded. */
+const char *pilot_usb_board_port(uint32_t port,int size,int write,uint32_t *value);
+const char *pilot_usb_board_outputs(uint32_t *known,uint32_t *levels);
 int pilot_usb_pic_vector(int acknowledge);
 void pilot_usb_pic_raise(int line,int level);
 /* Explicit device clock input, in 1,125,000-Hz PIT ticks. Does not dispatch
  * interrupts or alter kernel time. Qualification must service actual IRQ0. */
 const char *pilot_usb_pit_time(uint64_t ticks);
+/* Read the actual maintained input-clock position and next IRQ0 deadline. */
+const char *pilot_usb_pit_clock(uint64_t *ticks,uint64_t *next_irq);
 const char *pilot_usb_lle_tick(void);
 #ifdef __cplusplus
 }

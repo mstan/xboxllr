@@ -10,11 +10,15 @@
 #include <stdio.h>
 #include <string.h>
 #include <unicorn/unicorn.h>
+#ifdef PILOT_UNICORN_IRQ_BOUNDARY
+#include <unicorn_irq_boundary.h>
+#endif
 #include "io_device_lle.h"
 #include "io_device_config.h"
 #include "guest_layout.h"
 #ifdef PILOT_USB_LLE
 #include "usb_lle.h"
+#include "calendar_kernel.h"
 #endif
 
 #define RAM_BYTES (64u*1024*1024)
@@ -61,8 +65,13 @@ static uint32_t device_mmio_first,device_mmio_bytes;
 static volatile LONG current_irql;
 static volatile LONG caller_if=1;
 static unsigned execution_depth;
+static PilotIoClock clock_provider;
+static void *clock_context;
 #ifdef PILOT_USB_LLE
 static int device_irq_pending;
+static int clock_initializing;
+static unsigned clock_initialization_writes;
+static uint32_t clock_initialization_ports[3],clock_initialization_values[3];
 #endif
 static const int general_regs[]={UC_X86_REG_EAX,UC_X86_REG_ECX,UC_X86_REG_EDX,
     UC_X86_REG_EBX,UC_X86_REG_ESP,UC_X86_REG_EBP,UC_X86_REG_ESI,UC_X86_REG_EDI};
@@ -164,7 +173,8 @@ static uint32_t port_in(uc_engine *engine,uint32_t port,int size,void *data)
         return value;
     }
 #endif
-    const char *error=pilot_usb_pic_port(port,size,0,&value);
+    const char *error=port==0x80cf?pilot_usb_board_port(port,size,0,&value):
+        pilot_usb_pic_port(port,size,0,&value);
     if(error) {
         uint32_t pc=0;uc_reg_read(engine,UC_X86_REG_EIP,&pc);
         fprintf(stderr,"[IO DEVICE PORT] read port=%04x size=%d pc=%08x\n",port,size,pc);
@@ -180,6 +190,13 @@ static uint32_t port_in(uc_engine *engine,uint32_t port,int size,void *data)
 static void port_out(uc_engine *engine,uint32_t port,int size,uint32_t value,void *data)
 {
 #ifdef PILOT_USB_LLE
+    if(clock_initializing) {
+        if(size!=1 || (port!=0x40 && port!=0x43) || clock_initialization_writes>=3) {
+            forbidden(engine,"original PIT initialization reached another device");return;
+        }
+        clock_initialization_ports[clock_initialization_writes]=port;
+        clock_initialization_values[clock_initialization_writes++]=value;
+    }
     for(unsigned i=0;i<8;++i)if(device_ports[i].callback && port>=device_ports[i].first && port<=device_ports[i].last) {
         const char *error=device_ports[i].callback((uint16_t)port,size,1,&value);
         if(error)forbidden(engine,error);
@@ -191,7 +208,8 @@ static void port_out(uc_engine *engine,uint32_t port,int size,uint32_t value,voi
         return;
     }
 #endif
-    (void)data;const char *error=pilot_usb_pic_port(port,size,1,&value);
+    (void)data;const char *error=port==0x80cf?pilot_usb_board_port(port,size,1,&value):
+        pilot_usb_pic_port(port,size,1,&value);
     if(error) {
         uint32_t pc=0;uc_reg_read(engine,UC_X86_REG_EIP,&pc);
         fprintf(stderr,"[IO DEVICE PORT] write port=%04x size=%d value=%08x pc=%08x\n",port,size,value,pc);
@@ -269,7 +287,13 @@ static void code_block(uc_engine *engine,uint64_t address,uint32_t size,void *da
 #ifdef PILOT_USB_LLE
     if(pilot_usb_pic_vector(0)>=0) {
         uint32_t flags=0;uc_reg_read(engine,UC_X86_REG_EFLAGS,&flags);
-        if(flags&0x200){device_irq_pending=1;uc_emu_stop(engine);return;}
+        if(flags&0x200) {
+#ifdef PILOT_UNICORN_IRQ_BOUNDARY
+            if(!xlle_unicorn_irq_inhibited(engine)){device_irq_pending=1;uc_emu_stop(engine);return;}
+#else
+            forbidden(engine,"device LLE IRQ requires the engine's actual inhibition state");return;
+#endif
+        }
     }
 #endif
     if(address>=0x80010000u && address<0x80080000u)return;
@@ -500,6 +524,18 @@ static void retire_owner(uint32_t object)
     }
 }
 #include "io_thread_transport_lle.inc"
+static void pump_original_clock(void)
+{
+    if(!clock_provider)return;
+#ifdef PILOT_USB_LLE
+    uint64_t ticks=0;
+    const char *error=clock_provider(clock_context,&ticks);
+    if(!error)error=pilot_usb_pit_time(ticks);
+    if(error)failure=error;
+#else
+    failure="original clock requires the maintained PIT/PIC build";
+#endif
+}
 static void run_original(uint32_t entry,size_t instruction_limit)
 {
     /* Never re-enter uc_emu_start from a hook. At an actual ISR call, stop,
@@ -510,7 +546,14 @@ static void run_original(uint32_t entry,size_t instruction_limit)
 #ifdef PILOT_USB_LLE
         device_irq_pending=0;
 #endif
-        uc_err error=uc_emu_start(cpu,entry,RETURN_PC,0,instruction_limit);
+        pump_original_clock();if(failure)return;
+        size_t slice=instruction_limit;
+        if(clock_provider) {
+            slice=4096;
+            while(instruction_limit/slice>4096)slice*=2;
+            if(slice>instruction_limit)slice=instruction_limit;
+        }
+        uc_err error=uc_emu_start(cpu,entry,RETURN_PC,0,slice);
         if(failure)return;
         if(error){failure=uc_strerror(error);return;}
 #ifdef PILOT_USB_LLE
@@ -523,11 +566,20 @@ static void run_original(uint32_t entry,size_t instruction_limit)
 #endif
         if(pending_thread_return) {
             struct OriginalThread *thread=pending_thread_return;
-            thread_service_complete(thread);if(failure)return;
+            if(thread->in_checkpoint)thread_checkpoint_complete(thread);
+            else thread_service_complete(thread);
+            if(failure)return;
             thread_handoff(thread,0,&entry);if(failure)return;
             continue;
         }
-        if(!pending_callback)return;
+        if(!pending_callback) {
+            IO_UC(uc_reg_read(cpu,UC_X86_REG_EIP,&entry));
+            if(!clock_provider || entry==RETURN_PC)return;
+            /* Exhaustion of a clock slice is not service completion. Resume
+             * the actual original context, including its selected idle or
+             * worker, after sampling the modeled device clock. */
+            continue;
+        }
         uint32_t routine=pending_callback,regs[8],return_pc;
         int is_dpc=pending_dpc;
         struct OriginalThread *thread=pending_thread;
@@ -558,6 +610,7 @@ static void run_original(uint32_t entry,size_t instruction_limit)
             publish_range(base,top-base);if(failure)return;
             thread->published=1;thread->return_pc=return_pc;
             memcpy(thread->native_regs,regs,sizeof(regs));
+            IO_UC(uc_reg_read(cpu,UC_X86_REG_EFLAGS,&thread->initial_flags));
             thread_handoff(thread,1,&entry);if(failure)return;
             continue;
         }
@@ -824,6 +877,93 @@ static void deliver_irq(int *delivered)
 void pilot_io_device_isr_bind(PilotIoIsr callback){isr_callback=callback;}
 void pilot_io_device_dpc_bind(PilotIoIsr callback){dpc_callback=callback;}
 void pilot_io_device_thread_bind(PilotIoThread callback){thread_callback=callback;}
+const char *pilot_io_device_clock_bind(PilotIoClock provider,void *context)
+{
+    AcquireSRWLockExclusive(&lock);
+    const char *error=NULL;
+    if(execution_depth)error="original clock binding during execution";
+    else {clock_provider=provider;clock_context=provider?context:NULL;}
+    ReleaseSRWLockExclusive(&lock);return error;
+}
+#ifdef PILOT_USB_LLE
+static struct OriginalClock {
+    LARGE_INTEGER origin,frequency;
+    uint64_t base;
+} original_clock;
+static const char *original_clock_input(void *context,uint64_t *ticks)
+{
+    struct OriginalClock *clock=context;LARGE_INTEGER now;
+    if(!QueryPerformanceCounter(&now) || now.QuadPart<clock->origin.QuadPart)
+        return "original runtime clock input failed/backwards";
+    uint64_t elapsed=(uint64_t)(now.QuadPart-clock->origin.QuadPart);
+    uint64_t frequency=(uint64_t)clock->frequency.QuadPart;
+    *ticks=clock->base+(elapsed/frequency)*1125000+(elapsed%frequency)*1125000/frequency;
+    return NULL;
+}
+#endif
+const char *pilot_io_device_clock_start(void)
+{
+    AcquireSRWLockExclusive(&lock);
+#ifdef PILOT_USB_LLE
+    if(failure)goto done;
+    if(!cpu || execution_depth || clock_provider || pilot_usb_pic_vector(0)>=0) {
+        failure="original runtime clock start outside idle initialized transport";goto done;
+    }
+    uint64_t ticks=0,next=0;
+    failure=pilot_usb_pit_clock(&ticks,&next);if(failure)goto done;
+    if(next){failure="original runtime clock already programmed";goto done;}
+    // INIT was retired before the owned RAM capture. Execute its reviewed
+    // supplied page at the original VA on this same engine, then retire the
+    // temporary code map and restore the caller's complete engine context.
+    uc_context *context=NULL;uc_err error=uc_context_alloc(cpu,&context);
+    if(error){failure=uc_strerror(error);goto done;}
+    error=uc_context_save(cpu,context);
+    if(error){uc_context_free(context);failure=uc_strerror(error);goto done;}
+    int mapped_init=0;
+    if(!error) {
+        error=uc_mem_map(cpu,0x80078000u,4096,UC_PROT_READ|UC_PROT_EXEC);
+        if(!error)mapped_init=1;
+    }
+    uint32_t sp=SCRATCH+0x7800u,pc=RETURN_PC,flags=0x202u;
+    if(!error)error=uc_mem_write(cpu,0x80078000u,pilot_calendar_kernel+0x68000u,4096);
+    if(!error)error=uc_mem_write(cpu,sp,&pc,4);
+    if(!error)error=uc_reg_write(cpu,UC_X86_REG_ESP,&sp);
+    if(!error)error=uc_reg_write(cpu,UC_X86_REG_EFLAGS,&flags);
+    if(!error) {
+        clock_initializing=1;clock_initialization_writes=0;++execution_depth;
+        error=uc_emu_start(cpu,0x800786d4u,RETURN_PC,0,128);
+        --execution_depth;clock_initializing=0;
+    }
+    uint32_t observed_sp=0;
+    if(!error)error=uc_reg_read(cpu,UC_X86_REG_EIP,&pc);
+    if(!error)error=uc_reg_read(cpu,UC_X86_REG_ESP,&observed_sp);
+    if(!error)error=uc_reg_read(cpu,UC_X86_REG_EFLAGS,&flags);
+    if(!failure && !error && (pc!=RETURN_PC || observed_sp!=sp+4 || flags!=0x202u ||
+       clock_initialization_writes!=3 || clock_initialization_ports[0]!=0x43 ||
+       clock_initialization_ports[1]!=0x40 || clock_initialization_ports[2]!=0x40 ||
+       clock_initialization_values[0]!=0x34 || clock_initialization_values[1]!=0x65 ||
+       clock_initialization_values[2]!=4))failure="original PIT initialization contract changed";
+    if(error && !failure)failure=uc_strerror(error);
+    if(mapped_init) {
+        uc_err unmap=uc_mem_unmap(cpu,0x80078000u,4096);
+        if(unmap && !failure)failure=uc_strerror(unmap);
+    }
+    uc_err restore=uc_context_restore(cpu,context);uc_context_free(context);
+    if(restore && !failure)failure=uc_strerror(restore);
+    if(failure)goto done;
+    failure=pilot_usb_pit_clock(&original_clock.base,&next);if(failure)goto done;
+    if(next!=ticks+1125 || !QueryPerformanceFrequency(&original_clock.frequency) ||
+       original_clock.frequency.QuadPart<=0 || !QueryPerformanceCounter(&original_clock.origin)) {
+        failure="original runtime PIT clock initialization failed";goto done;
+    }
+    clock_provider=original_clock_input;clock_context=&original_clock;
+    fprintf(stderr,"[ORIGINAL CLOCK] original INIT OUTs; PIT/PIC IRQ0; one engine owner and native checkpoint requests\n");
+#else
+    failure="original runtime clock requires PIT/PIC";
+#endif
+done:
+    const char *result=failure;ReleaseSRWLockExclusive(&lock);return result;
+}
 const char *pilot_io_device_thread_type(uint32_t *address)
 {
     AcquireSRWLockExclusive(&lock);

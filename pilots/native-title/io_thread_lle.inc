@@ -9,7 +9,9 @@ static struct OriginalThread {
     HANDLE host_thread,request_event,resume_event;
     uint32_t native_regs[8],call_regs[8],call_args[10],return_pc,call_return,call_flags;
     unsigned call_ordinal,call_arguments,request;
-    int in_kernel,terminate;
+    int in_kernel,in_checkpoint,terminate;
+    uint32_t checkpoint_pc,checkpoint_flags,initial_flags;
+    volatile LONG checkpoint_requested;
     uint32_t exit_status;
     const char *callback_error;
 } original_threads[64];
@@ -48,9 +50,13 @@ static void thread_before_call(unsigned ordinal,const uint32_t *args)
  * belong to a successful creation and retain that request's arguments. */
 static int thread_admit(uc_engine *engine,uint32_t address)
 {
-    if(!thread_callback || (kernel_word(0x8003da60u)&255))return 0;
+    if(!thread_callback)return 0;
     struct OriginalThread *thread=thread_object(kernel_word(0x8003da64u));
     if(!thread)return 0;
+    if(thread->in_checkpoint && address==thread->checkpoint_pc) {
+        pending_thread_return=thread;uc_emu_stop(engine);return 1;
+    }
+    if(kernel_word(0x8003da60u)&255)return 0;
     if(thread->in_kernel && address==thread->call_return) {
         pending_thread_return=thread;uc_emu_stop(engine);return 1;
     }
@@ -66,7 +72,7 @@ static int thread_admit(uc_engine *engine,uint32_t address)
     pending_callback=address;uc_emu_stop(engine);return 1;
 }
 
-enum { THREAD_REQUEST_CALL=1, THREAD_REQUEST_FINISH=2 };
+enum { THREAD_REQUEST_CALL=1, THREAD_REQUEST_FINISH=2, THREAD_REQUEST_CHECKPOINT=3 };
 /* Only the original engine's controller runs guest work. Host workers retain
  * C call stacks and TLS while blocked; no host priority/timeout chooses which
  * one runs. The event handshakes transfer sole execution ownership. */
@@ -96,4 +102,34 @@ const char *pilot_io_device_thread_call(unsigned ordinal,uint32_t regs[8])
         return "thread LLE service host handoff failed";
     if(thread->callback_error)return thread->callback_error;
     memcpy(regs,thread->call_regs,sizeof(thread->call_regs));return NULL;
+}
+volatile int32_t *pilot_io_device_thread_checkpoint_request(void)
+{
+    return native_thread_worker?&native_thread_worker->checkpoint_requested:NULL;
+}
+const char *pilot_io_device_thread_initial_flags(uint32_t *flags)
+{
+    if(!native_thread_worker || !flags)return "thread LLE initial flags outside native worker";
+    *flags=native_thread_worker->initial_flags;return NULL;
+}
+const char *pilot_io_device_thread_checkpoint(uint32_t pc,uint32_t regs[8],uint32_t *flags)
+{
+    struct OriginalThread *thread=native_thread_worker;
+    if(!thread || !regs || !flags)return "thread LLE checkpoint outside native worker";
+    if(!InterlockedCompareExchange(&thread->checkpoint_requested,0,0))return NULL;
+    /* Caller certifies a fully materialized integer instruction boundary.
+     * Privileged/debug/ambiguous flags and nonresident continuations stay
+     * guarded. FP/SIMD compute needs its own connected context transport. */
+    if((*flags&~0xed7u) || !(*flags&2) || pc<0x10000u || pc>=0x80000000u ||
+       !guest_page(pc&~4095u) || regs[4]<thread->stack ||
+       (uint64_t)regs[4]+4>(uint64_t)thread->stack+thread->stack_bytes)
+        return "thread LLE uncertified integer checkpoint state";
+    memcpy(thread->call_regs,regs,sizeof(thread->call_regs));
+    thread->checkpoint_pc=pc;thread->checkpoint_flags=*flags;
+    thread->request=THREAD_REQUEST_CHECKPOINT;
+    if(!SetEvent(thread->request_event) || WaitForSingleObject(thread->resume_event,INFINITE)!=WAIT_OBJECT_0)
+        return "thread LLE checkpoint host handoff failed";
+    if(thread->callback_error)return thread->callback_error;
+    memcpy(regs,thread->call_regs,sizeof(thread->call_regs));*flags=thread->checkpoint_flags;
+    return NULL;
 }

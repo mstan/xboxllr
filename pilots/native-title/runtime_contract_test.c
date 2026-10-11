@@ -40,6 +40,8 @@ static void test_timer_lle_dpc(void);
 static void test_thread_lle_body(void);
 static void test_thread_wait_body(void);
 static void test_thread_timeout_body(void);
+static void test_thread_idle_clock_body(void);
+static void test_thread_compute_body(void);
 #endif
 #ifdef PILOT_USB_LLE
 static void test_usb_isr(void);
@@ -74,6 +76,8 @@ recomp_func_t recomp_lookup(uint32_t va) {
     if(va==0x12500)return test_thread_lle_body;
     if(va==0x12540)return test_thread_wait_body;
     if(va==0x125c0)return test_thread_timeout_body;
+    if(va==0x126c0)return test_thread_idle_clock_body;
+    if(va==0x126e0)return test_thread_compute_body;
 #endif
 #ifdef PILOT_USB_LLE
     if(va==0x12400)return test_usb_isr;
@@ -112,6 +116,8 @@ static void call_kernel(unsigned ordinal,const uint32_t *args,unsigned argc)
 #include "timer_dpc_lle_contract_test.inc"
 #include "thread_lle_contract_test.inc"
 #include "thread_wait_lle_contract_test.inc"
+#include "thread_idle_clock_contract_test.inc"
+#include "thread_compute_clock_contract_test.inc"
 #endif
 #ifdef PILOT_IO_DEVICE_LLE
 #include "io_device_contract_test.inc"
@@ -560,6 +566,9 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"thread-lle")) { test_thread_lle(); return 0; }
         if (!strcmp(argv[1],"thread-wait-lle")) { test_thread_wait_lle(); return 0; }
         if (!strcmp(argv[1],"thread-timeout-lle")) { test_thread_timeout_lle(); return 0; }
+        if (!strcmp(argv[1],"thread-idle-clock-lle")) { test_thread_idle_clock_lle(); return 0; }
+        if (!strcmp(argv[1],"thread-idle-runtime-clock-lle")) { thread_idle_runtime_clock=1;test_thread_idle_clock_lle();return 0; }
+        if (!strcmp(argv[1],"thread-compute-clock-lle")) { test_thread_compute_clock_lle(); return 0; }
         if (!strcmp(argv[1],"thread-lle-blocked")) { thread_lle_reject=1;test_thread_lle();return 0; }
 #endif
         if (!strcmp(argv[1],"jumps")) { test_jumps(); return 0; }
