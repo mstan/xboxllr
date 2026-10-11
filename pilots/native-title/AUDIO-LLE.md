@@ -155,6 +155,30 @@ The first payload/source remains committed independently for reproduction;
 raw records and compiler/source hashes are private. No audio playback,
 title run, FE retry or storage operation occurred. `.115` remains open.
 
+### Direct device FE fence guard - 2026-10-11
+
+The strict reference wrapper already rejects unqualified FE fence transactions,
+but direct `McpxApu` reads previously returned register-file defaults and writes
+overlapping byte lanes could bypass the exact-offset write guard. The maintained
+device now rejects any read or write touching the control/address/data DWORDs
+at1510/1324/1334 before changing registers, RAM or IRQ state. Failure is sticky;
+the API's zero return on a rejected read is not qualified readback.
+
+The direct-component regression fails against the previous device code. Nine
+focused APU checks pass in0.15s with the corrected device, covering96 guarded
+transactions, unchanged surrounding register bytes and caller memory, no DMA
+or IRQ publication, and suppression of later voice completion after failure.
+Adjacent nonoverlapping accesses preserve ordinary transport. Existing source,
+rate, SSL, VP, DMA, FIFO and completion checks remain passing. The changed APU
+library and exact source/test/failure generations are retained privately under
+`build/blinx/audio-fe-overlap-20261011`.
+
+This closes a guard bypass, not the fence's missing publication/ordering model.
+Original DPC/consumer integration and `.115` remain open. The existing original
+barrier observation retains its prior binary identity; it was not rerun. No
+default HLE audio processing, title/attract/audio playback or hardware operation
+changes, and the qualified family count remains4/9.
+
 Reproduction (owned private inputs):
 
 ```powershell

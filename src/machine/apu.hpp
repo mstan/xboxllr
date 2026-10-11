@@ -326,6 +326,9 @@ public:
     uint32_t mmio_read(uint32_t addr, int size) override {
         uint32_t off = addr - base_;
         if (faulted_) return 0;
+        if(touches_fe_fence(off,size)) {
+            device_fault("FE notification fence/control remains unqualified");return 0;
+        }
         if(off>=0x30000 && off<0x40000) {
             uint32_t* word=gp_host_word(off,size);
             if(!word){device_fault("unqualified GP host read");return 0;}
@@ -349,6 +352,11 @@ public:
     void mmio_write(uint32_t addr, int size, uint32_t value) override {
         uint32_t off = addr - base_;
         if (faulted_) return;
+        // Guard the device itself, including partial/overlapping transactions;
+        // reference-wrapper whitelists cannot establish unknown fence behavior.
+        if(touches_fe_fence(off,size)) {
+            device_fault("FE notification fence/control remains unqualified");return;
+        }
         if(off>=kVpBase) {
             const uint32_t method=off-kVpBase;
             const bool ssl=method==0x18c || method==0x190 || method==0x320 || method==0x35c ||
@@ -356,13 +364,6 @@ public:
             if(ssl && (size!=4 || (method&3))) {
                 device_fault("SSL transaction width/alignment remains unqualified");return;
             }
-        }
-        // Original audio deferred work synchronizes notifications through this
-        // control/address/data sequence. The old immediate FEMEMDATA write
-        // assumed the fence's prerequisite work was complete. Keep it explicit
-        // until that ownership/ordering contract is independently established.
-        if(off==0x1510 || off==kFememaddr || off==kFememdata) {
-            device_fault("FE notification fence/control remains unqualified");return;
         }
         if(off>=0x30000 && off<0x40000) {
             uint32_t* word=gp_host_word(off,size);
@@ -565,6 +566,17 @@ private:
     static constexpr uint32_t kFenaddr = 0x115c;
     static constexpr uint32_t kFedecmeth = 0x1300, kFedecparam = 0x1304;
     static constexpr uint32_t kFememaddr = 0x1324, kFememdata = 0x1334;
+    static constexpr uint32_t kFeFenceControl = 0x1510;
+    static bool touches_fe_fence(uint32_t off,int size) {
+        if(size<=0 || off>=kFeFenceControl+4)return false;
+        const uint64_t end=uint64_t(off)+static_cast<unsigned>(size);
+        // Original audio deferred work uses these three DWORDs. Until its
+        // ownership/ordering is qualified, no lane may fabricate readback or
+        // bypass the fence by mutating a partial register-file value.
+        return (off<kFememaddr+4 && end>kFememaddr) ||
+               (off<kFememdata+4 && end>kFememdata) ||
+               (off<kFeFenceControl+4 && end>kFeFenceControl);
+    }
     static constexpr uint32_t kFetforce1 = 0x1504;
     static constexpr uint32_t kSectl = 0x2000, kXgscnt = 0x200c, kVpvaddr = 0x202c;
     static constexpr uint32_t kVpsgeaddr = 0x2030;

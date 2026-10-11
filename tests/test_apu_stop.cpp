@@ -73,12 +73,39 @@ int main() {
         if(kind!=6)CHECK(f.ram==configured);
         else CHECK(!(f.word(f.v+0x54)&(1u<<21))); // real stop preceded failed status publication
     }
-    // A legacy immediate fence write must not certify unknown notification
-    // work or overwrite caller memory. Reject before any device/RAM mutation.
-    for(unsigned offset:{0x1510u,0x1324u,0x1334u}) {
-        Fixture f;const auto before=f.ram;
-        f.command(offset,0x12345678);
-        CHECK(!f.error.empty() && f.ram==before && !f.irq_edges);
+    // The direct device, independently of the strict reference wrapper, must
+    // reject reads and every byte lane/crossing access to the unknown fence.
+    // Qualified base-class calls below only inspect the stored bytes in tests.
+    struct Access {int delta,size;};
+    const Access accesses[]={{-3,4},{-2,4},{-1,2},{-1,4},
+        {0,1},{0,2},{0,4},{1,1},{1,2},{1,4},
+        {2,1},{2,2},{2,4},{3,1},{3,2},{3,4}};
+    for(unsigned field:{0x1510u,0x1324u,0x1334u}) {
+        for(const auto& access:accesses)for(bool write:{false,true}) {
+            Fixture f;const auto before=f.ram;f.writes.clear();
+            const unsigned start=field-4;
+            std::array<uint32_t,3> registers{};
+            for(unsigned i=0;i<registers.size();++i)
+                registers[i]=f.apu.RegFileMmio::mmio_read(0xfe800000+start+4*i,4);
+            const unsigned address=0xfe800000+field+access.delta;
+            if(write)f.apu.mmio_write(address,access.size,0x12345678);
+            else CHECK(f.apu.mmio_read(address,access.size)==0);
+            CHECK(f.error=="mcpx-apu: FE notification fence/control remains unqualified");
+            CHECK(f.ram==before && f.writes.empty() && !f.irq_edges);
+            for(unsigned i=0;i<registers.size();++i)
+                CHECK(f.apu.RegFileMmio::mmio_read(0xfe800000+start+4*i,4)==registers[i]);
+            // A rejected fence transaction is sticky: no later voice stop can
+            // turn it into an apparently successful completion/notification.
+            f.command(0x20128,f.voice);
+            CHECK(f.ram==before && f.writes.empty() && !f.irq_edges && !f.apu.voice_off_methods());
+        }
+        // Accesses ending exactly before or starting exactly after the field
+        // retain ordinary register transport; no neighboring bytes are guarded.
+        Fixture f;
+        f.apu.mmio_write(0xfe800000+field-4,4,0xaabbccdd);
+        f.apu.mmio_write(0xfe800000+field+4,4,0x55667788);
+        CHECK(f.apu.mmio_read(0xfe800000+field-4,4)==0xaabbccdd);
+        CHECK(f.apu.mmio_read(0xfe800000+field+4,4)==0x55667788 && f.error.empty());
     }
-    std::puts("PASS: static VOICE_OFF ordered state/status/IRQ, retained caller data, 32 stop/rebind lifetimes and DMA/ownership/fence guards");
+    std::puts("PASS: static VOICE_OFF ordered state/status/IRQ, 32 stop/rebind lifetimes, DMA/ownership guards and 96 direct FE read/write overlap guards");
 }

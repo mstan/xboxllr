@@ -43,6 +43,14 @@ Blinx regression per coherent batch. Retain explicit outcomes for each contract;
 a bundled pass does not close an unimplemented service. Reuse captured evidence
 and avoid repeating whole attract runs for documentation or test-only changes.
 
+The FE fence guard now covers direct device reads and every overlapping byte
+lane in its control/address/data DWORDs. Nine focused APU checks pass, including
+96 direct read/write cases with unchanged register/RAM/IRQ state and sticky
+failure. The new regression fails against the previous device implementation.
+Actual fence ordering and original consumer integration remain required; this
+fix adds no default HLE audio work. See the
+[device boundary](../pilots/native-title/AUDIO-LLE.md#direct-device-fe-fence-guard---2026-10-11).
+
 The encoder initialization dependency now has23 more documented control latches
 and an independently reviewed guard for nonzero master HSYNC offsets. Thirteen
 component/original-owner checks pass; one muted final title startup runs8.074s
