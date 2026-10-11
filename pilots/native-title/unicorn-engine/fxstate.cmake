@@ -35,6 +35,32 @@ foreach(kind save restore)
   endif()
   string(REPLACE "${${kind}_anchor}" "${${kind}_corrected}" fpu_source "${fpu_source}")
 endforeach()
+# Legacy protected-mode environment transport and documented control effects.
+set(init_anchor "    env->fpus = 0;\n    env->fpstt = 0;\n    env->fpcs = 0;")
+set(init_corrected "    env->fpus = 0;\n    env->fpstt = 0;\n    env->fpop = 0;\n    env->fpcs = 0;")
+set(env_save_anchor "        cpu_stl_data_ra(env, ptr + 16, env->fpcs, retaddr); /* fpcs */")
+set(env_save_corrected [=[        cpu_stl_data_ra(env, ptr + 16,
+                        (env->hflags & HF_PE_MASK) && !(env->eflags & VM_MASK)
+                        ? (uint16_t)env->fpcs | ((uint32_t)(env->fpop & 0x7ff) << 16)
+                        : env->fpcs, retaddr); /* fpcs and protected-mode fop */]=])
+set(env_load_anchor "        fptag = cpu_lduw_data_ra(env, ptr + 8, retaddr);")
+set(env_load_corrected [=[        fptag = cpu_lduw_data_ra(env, ptr + 8, retaddr);
+        if ((env->hflags & HF_PE_MASK) && !(env->eflags & VM_MASK)) {
+            env->fpip = cpu_ldl_data_ra(env, ptr + 12, retaddr);
+            env->fpcs = cpu_lduw_data_ra(env, ptr + 16, retaddr);
+            env->fpop = cpu_lduw_data_ra(env, ptr + 18, retaddr) & 0x7ff;
+            env->fpdp = cpu_ldl_data_ra(env, ptr + 20, retaddr);
+            env->fpds = cpu_lduw_data_ra(env, ptr + 24, retaddr);
+        }]=])
+set(env_mask_anchor "    do_fstenv(env, ptr, data32, GETPC());\n}")
+set(env_mask_corrected "    do_fstenv(env, ptr, data32, GETPC());\n    cpu_set_fpuc(env, env->fpuc | 0x3f);\n}")
+foreach(kind init env_save env_load env_mask)
+  string(FIND "${fpu_source}" "${${kind}_anchor}" position)
+  if(position LESS 0)
+    message(FATAL_ERROR "Reviewed environment anchor is missing: ${kind}")
+  endif()
+  string(REPLACE "${${kind}_anchor}" "${${kind}_corrected}" fpu_source "${fpu_source}")
+endforeach()
 set(fpu_corrected "${CMAKE_CURRENT_BINARY_DIR}/fxstate-private/fpu_helper.c")
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/fxstate-private")
 file(WRITE "${fpu_corrected}" "${fpu_source}")
@@ -58,4 +84,47 @@ endif()
 set_property(TARGET x86_64-softmmu PROPERTY SOURCES "${x86_sources}")
 target_sources(x86_64-softmmu PRIVATE "${fpu_corrected}")
 file(SHA256 "${fpu_corrected}" fpu_corrected_sha)
+
+# P6 FOP is the last non-control x87 opcode, independent of masked exceptions.
+# Keep newer CPU models' opcode-generation policy outside this correction.
+set(translator_original "${XLLE_UNICORN_SOURCE}/qemu/target/i386/translate.c")
+file(SHA256 "${translator_original}" translator_original_sha)
+if(NOT translator_original_sha STREQUAL "2d03db9a2b9632bcafb9d7f29b5949c6eccee629c200305576ad7cf0f68fa678")
+  message(FATAL_ERROR "P6 opcode correction requires the reviewed translator")
+endif()
+file(READ "${translator_original}" translator_source)
+set(opcode_anchor "            if (update_fip) {\n                tcg_gen_ld_i32")
+set(opcode_corrected [=[            if (update_fip) {
+                if (!s->code64 && s->uc->cpu_model == UC_CPU_X86_PENTIUM3) {
+                    tcg_gen_st16_i32(tcg_ctx,
+                        tcg_const_i32(tcg_ctx, ((b & 7) << 8) | modrm),
+                        tcg_ctx->cpu_env, offsetof(CPUX86State, fpop));
+                }
+                tcg_gen_ld_i32]=])
+string(FIND "${translator_source}" "${opcode_anchor}" position)
+if(position LESS 0)
+  message(FATAL_ERROR "Reviewed P6 opcode anchor is missing")
+endif()
+string(REPLACE "${opcode_anchor}" "${opcode_corrected}" translator_source "${translator_source}")
+set(translator_corrected "${CMAKE_CURRENT_BINARY_DIR}/fxstate-private/translate.c")
+file(WRITE "${translator_corrected}" "${translator_source}")
+get_target_property(x86_sources x86_64-softmmu SOURCES)
+list(LENGTH x86_sources original_source_count)
+foreach(candidate IN LISTS x86_sources)
+  if(candidate MATCHES "(^|/)translate[.]c$")
+    get_filename_component(candidate_absolute "${candidate}" ABSOLUTE BASE_DIR "${x86_source_directory}")
+    if(NOT candidate_absolute STREQUAL translator_original)
+      message(FATAL_ERROR "Compiled translator is outside the pinned source")
+    endif()
+    list(REMOVE_ITEM x86_sources "${candidate}")
+  endif()
+endforeach()
+list(LENGTH x86_sources remaining_source_count)
+math(EXPR removed_source_count "${original_source_count}-${remaining_source_count}")
+if(NOT removed_source_count EQUAL 1)
+  message(FATAL_ERROR "Expected one actual compiled translator to replace")
+endif()
+set_property(TARGET x86_64-softmmu PROPERTY SOURCES "${x86_sources}")
+target_sources(x86_64-softmmu PRIVATE "${translator_corrected}")
+file(SHA256 "${translator_corrected}" translator_corrected_sha)
 file(SHA256 "${CMAKE_CURRENT_LIST_FILE}" fxstate_patch_sha)

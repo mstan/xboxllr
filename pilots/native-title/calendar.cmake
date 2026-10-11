@@ -30,13 +30,16 @@ if(PILOT_CALENDAR STREQUAL "LLE")
     string(JSON engine_helper_header_sha GET "${engine_identity}" helper_header_sha256)
     string(JSON engine_fxstate_sha ERROR_VARIABLE engine_fxstate_error GET "${engine_identity}" fxstate_patch_sha256)
     string(JSON engine_fpu_sha ERROR_VARIABLE engine_fpu_error GET "${engine_identity}" fpu_compiled_sha256)
+    string(JSON engine_translator_sha ERROR_VARIABLE engine_translator_error GET "${engine_identity}" translator_compiled_sha256)
     file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/unicorn-engine/fxstate.cmake" current_fxstate_sha)
-    if(engine_fxstate_error OR engine_fpu_error OR
+    if(engine_fxstate_error OR engine_fpu_error OR engine_translator_error OR
        NOT engine_fxstate_sha STREQUAL current_fxstate_sha OR
-       NOT EXISTS "${PILOT_CALENDAR_UNICORN}/source/fpu_helper.c")
+       NOT EXISTS "${PILOT_CALENDAR_UNICORN}/source/fpu_helper.c" OR
+       NOT EXISTS "${PILOT_CALENDAR_UNICORN}/source/translate.c")
       message(FATAL_ERROR "Native engine needs the reviewed FP state correction; rebuild its package")
     endif()
     file(SHA256 "${PILOT_CALENDAR_UNICORN}/source/fpu_helper.c" packaged_fpu_sha)
+    file(SHA256 "${PILOT_CALENDAR_UNICORN}/source/translate.c" packaged_translator_sha)
     file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/../../src/cpu/unicorn_irq_boundary.c" current_helper_sha)
     file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/../../src/cpu/unicorn_irq_boundary.h" current_helper_header_sha)
     file(SHA256 "${PILOT_CALENDAR_UNICORN}/include/unicorn_irq_boundary.h" packaged_helper_header_sha)
@@ -46,6 +49,7 @@ if(PILOT_CALENDAR STREQUAL "LLE")
         NOT engine_helper_sha STREQUAL current_helper_sha OR
         NOT engine_helper_header_sha STREQUAL current_helper_header_sha OR
         NOT engine_fpu_sha STREQUAL packaged_fpu_sha OR
+        NOT engine_translator_sha STREQUAL packaged_translator_sha OR
         NOT packaged_helper_header_sha STREQUAL current_helper_header_sha)
       message(FATAL_ERROR "Native engine package/source identities disagree; rebuild the reviewed engine")
     endif()

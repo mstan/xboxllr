@@ -13,6 +13,7 @@
 #define RECOMP_GENERATED_CODE
 #include "recomp_types.h"
 #include "pilot_image.h"
+#include "guest_cpu_config.h"
 
 ptrdiff_t g_xbox_mem_offset;
 int g_force_return;
@@ -285,10 +286,7 @@ uint64_t xbox_ReadTimeStampCounter(void)
 }
 void recomp_cpuid(uint32_t leaf, uint32_t subleaf, uint32_t out[4])
 {
-    (void)subleaf;
-    if (leaf == 0) { out[0]=2; out[1]=0x756e6547; out[2]=0x6c65746e; out[3]=0x49656e69; }
-    else if (leaf == 1) { out[0]=0x68a; out[1]=0; out[2]=0; out[3]=0x0383f9ff; }
-    else stop("CPUID leaf unsupported", leaf);
+    if(pilot_guest_cpuid(leaf,subleaf,out))stop("CPUID leaf unsupported",leaf);
 }
 
 /* Whole cdecl capability-query boundary. General PUSHFD/POPFD still require

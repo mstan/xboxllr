@@ -16,6 +16,7 @@
 #include "io_device_lle.h"
 #include "io_device_config.h"
 #include "guest_layout.h"
+#include "guest_cpu_config.h"
 #ifdef PILOT_USB_LLE
 #include "usb_lle.h"
 #include "calendar_kernel.h"
@@ -434,6 +435,20 @@ static void code_block(uc_engine *engine,uint64_t address,uint32_t size,void *da
 }
 
 #define IO_UC(call) do {uc_err e=(call);if(e){failure=uc_strerror(e);return;}} while(0)
+static int guest_cpuid(uc_engine *engine,void *unused)
+{
+    (void)unused;uint32_t leaf=0,subleaf=0,out[4];
+    uc_err error=uc_reg_read(engine,UC_X86_REG_EAX,&leaf);
+    if(!error)error=uc_reg_read(engine,UC_X86_REG_ECX,&subleaf);
+    if(error)failure=uc_strerror(error);
+    else if(pilot_guest_cpuid(leaf,subleaf,out))failure="original CPU CPUID leaf unsupported";
+    else {
+        const int regs[]={UC_X86_REG_EAX,UC_X86_REG_EBX,UC_X86_REG_ECX,UC_X86_REG_EDX};
+        for(unsigned i=0;i<4;++i)if((error=uc_reg_write(engine,regs[i],out+i))){failure=uc_strerror(error);break;}
+    }
+    if(failure)uc_emu_stop(engine);
+    return 1; /* handled: never execute the host/default engine CPUID */
+}
 static void initialize(unsigned char *guest)
 {
     guest_memory=guest;
@@ -483,6 +498,13 @@ static void initialize(unsigned char *guest)
 #endif
     if(guest_page(SCRATCH)){failure="device LLE private stack collides with caller";return;}
     IO_UC(uc_open(UC_ARCH_X86,UC_MODE_32,&cpu));
+    IO_UC(uc_ctl_set_cpu_model(cpu,UC_CPU_X86_PENTIUM3));
+    /* This bridge executes an initialized kernel with SSE enabled. Unicorn's
+     * P3 reset sets the SSE hflag but leaves CR4.OSFXSR clear; original CR0
+     * writes recompute that flag. Establish the configured architectural bit,
+     * rather than inheriting Haswell's OSXSAVE initialization. */
+    uint32_t control=0;IO_UC(uc_reg_read(cpu,UC_X86_REG_CR4,&control));
+    control|=1u<<9;IO_UC(uc_reg_write(cpu,UC_X86_REG_CR4,&control));
     if(!VirtualAlloc(guest+SCRATCH,0x10000,MEM_COMMIT,PAGE_READWRITE)) {
         failure="device LLE shared interrupt stack allocation failed";return;
     }
@@ -522,6 +544,7 @@ static void initialize(unsigned char *guest)
     IO_UC(uc_hook_add(cpu,&hook,UC_HOOK_INSN,port_in,NULL,1,0,UC_X86_INS_IN));
     IO_UC(uc_hook_add(cpu,&hook,UC_HOOK_INSN,port_out,NULL,1,0,UC_X86_INS_OUT));
     IO_UC(uc_hook_add(cpu,&hook,UC_HOOK_INTR,interrupt,NULL,1,0));
+    IO_UC(uc_hook_add(cpu,&hook,UC_HOOK_INSN,guest_cpuid,NULL,1,0,UC_X86_INS_CPUID));
     IO_UC(uc_hook_add(cpu,&hook,UC_HOOK_BLOCK,code_block,NULL,1,0));
     fprintf(stderr,"[IO DEVICE LLE] original kernel; initialized capture %s; no replaced callees\n",hex);
 }
@@ -755,7 +778,12 @@ static void run_original(uint32_t entry,size_t instruction_limit)
             if(failure)return;
             continue;
         }
-        if(error){failure=uc_strerror(error);return;}
+        if(error){
+            uint32_t pc=0;
+            if(!uc_reg_read(cpu,UC_X86_REG_EIP,&pc))
+                fprintf(stderr,"[ORIGINAL CPU ERROR] pc=%08x error=%s\n",pc,uc_strerror(error));
+            failure=uc_strerror(error);return;
+        }
         if(pending_cpu_birth) {
             thread_cpu_birth_prepare(pending_cpu_birth,&entry);if(failure)return;
             continue;

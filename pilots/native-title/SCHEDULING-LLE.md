@@ -5,6 +5,64 @@ explicitly deferred real-console-dependent work on 2026-10-09; this family
 proceeds independently of GPU startup `.109` / hardware observation `.111`.
 The total remains four qualified families and five open.
 
+## Original P6 instruction and legacy FP metadata - 2026-10-11
+
+The adjacent instruction audit reproduced **33 failures out of48 checks** on
+three actual Pentium III engine instances. Last x87 opcode generation was
+absent; FNINIT retained the opcode; protected-mode FLDENV/FRSTOR omitted
+instruction/data metadata; FNSTENV omitted the packed opcode. Its exception-mask
+control effect was also absent. The failed source, executable and log remain
+private. The corrected generation now passes **54 independent checks**, including
+prefixed instruction PCs, actual operand offsets/selectors, control exclusion,
+initialization, environment/save/restore and rejected SSE2 instructions.
+
+The source-bound private helper and translator now implement those documented
+contracts. Last-opcode generation applies to the explicit Pentium III model;
+other CPU generations do not inherit that P6 policy. Original selected execution
+now uses Pentium III instruction capabilities and the same configured Xbox
+CPUID0/1 values as native HLE. `guest_cpu_config.h` shares that pure policy;
+native outputs and its unsupported-leaf guard remain unchanged. Unknown
+original CPUID leaves stop rather than exposing the engine's default Haswell.
+The initialized-kernel bridge explicitly enables CR4.OSFXSR. A retained failed
+generation proves why: the engine's P3 reset set an SSE hflag with that CR4 bit
+clear, and original NPX/CR0 handling then disabled valid STMXCSR execution.
+No original kernel context switch or hardware completion is substituted.
+
+The [Intel architecture manual](https://www.intel.com/content/dam/support/us/en/documents/processors/pentium4/sb/25366521.pdf),
+sections8.1.8-8.1.10, documents the P6-era metadata/control contract and distinguishes
+the later Pentium4 opcode policy. The source-built package retains the original
+checkout, includes both compiled private sources and binds their hashes along
+with the transformation and archive. Older source-built packages must rebuild.
+The correction applies by default; no new settings or per-pixel/audio work occur.
+
+All **three engine checks and44 original-service checks** pass, taking0.04 and
+6.25 seconds respectively. The latter rebuilds the contract, dedicated callback
+and files executables against the current original CPU owner. It covers thread,
+clock, timer/DPC/idle stack, files, VM/DMA, USB, RTC/SMBus/settings and GPU/AV
+adapter contracts; existing GPU/APU binaries retain their own source generations.
+Six original FP workers across three lifetimes retain twelve live state pairs.
+Independent raw-image/disassembly audits verify every authored x87/XMM/MMX value,
+each owner's FIP/FDP/FOP/selectors, twelve actual CPUID returns and six CR4
+observations. Primary compute loops contain no service calls; both original
+peer waits return0x102, and original thread/handle baselines remain intact.
+
+Private proof: `build/blinx/cpu-p6-metadata-20261011/qualified.aot-private.json`,
+SHA-256 `a4e638b13af23b9a84d1b1ada11224c672e1ea4f89758f51838016caaf6fd736`.
+The immutable archive SHA-256 is
+`717dc2035f3d5f5e0d67475837dc9721278fc16aa90f42e38481e9b237a9462f`.
+The preceding FX-transport proof below remains evidence of its earlier generation.
+One rebuilt, muted original Blinx startup runs **7.781 seconds** and retains
+the established CX25871 EN_REG_RD activation guard. The unchanged246 source
+inputs, title executable, ROM/EEPROM/XBE/snapshot identities and log bind that
+observation in `cpu-p6-metadata-20261011/title-startup.aot-private.json`. This
+validates the reached composition after the CPU change; it does not establish
+missing AV activation or completed rendering/audio. No physical Xbox operation
+or attract/playback run occurred.
+This closes bounded `.112.2.2` when integrated. Whole original title scheduling
+still requires GPU/AV startup; **4/9** and **26 precision deferrals** remain.
+General unmasked FP exceptions,16-bit/real/VM86 environments,64-bit/XSAVE and the
+separate full-machine2.1.1 engine are not established by these scoped checks.
+
 ## Live FP compute preemption and metadata restoration - 2026-10-11
 
 An original CPU compute/preemption batch exposed a real context defect in the

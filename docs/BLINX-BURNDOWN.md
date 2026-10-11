@@ -87,6 +87,17 @@ scheduling remains open, with **4/9 families qualified** and **26 precision
 deferrals** unchanged. No title/audio run, Xbox operation or HLE change.
 See the [causal failure and corrected route](../pilots/native-title/SCHEDULING-LLE.md#live-fp-compute-preemption-and-metadata-restoration---2026-10-11).
 
+The adjacent P6 batch corrects original opcode/environment metadata and selects
+Xbox-era instruction capabilities with shared native/original CPUID policy.
+Three engine checks and44 original-service checks pass; raw audits retain all
+twelve live FP state pairs and each owner's exact opcode/instruction/data state.
+Native HLE CPUID outputs remain unchanged. This closes bounded `.112.2.2` when
+integrated; whole title/GPU/AV startup and the five open families remain required.
+One rebuilt muted startup runs7.781 seconds to the existing EN_REG_RD guard,
+with source and ROM/EEPROM/XBE/snapshot identities unchanged. No physical probe.
+The count stays4/9 with26 agreed precision deferrals. See the
+[P6 instruction and environment evidence](../pilots/native-title/SCHEDULING-LLE.md#original-p6-instruction-and-legacy-fp-metadata---2026-10-11).
+
 The encoder initialization dependency now has23 more documented control latches
 and an independently reviewed guard for nonzero master HSYNC offsets. Thirteen
 component/original-owner checks pass; one muted final title startup runs8.074s

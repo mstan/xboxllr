@@ -43,6 +43,14 @@ static unsigned thread_fp_program(uint32_t address,int peer)
 {
     struct ThreadFpCode buffer={0},*code=&buffer;
     THREAD_FP_OP(0x53,0x55,0x56,0x57,0x8b,0x7c,0x24,0x14);
+    THREAD_FP_OP(0x0f,0x20,0xe0,0x89,0x87);thread_fp_u32(code,0xb20);
+    for(unsigned leaf=0;leaf<2;++leaf) {
+        THREAD_FP_OP(0xb8);thread_fp_u32(code,leaf);THREAD_FP_OP(0x31,0xc9,0x0f,0xa2);
+        THREAD_FP_OP(0x89,0x87);thread_fp_u32(code,0xb00+leaf*16);
+        THREAD_FP_OP(0x89,0x9f);thread_fp_u32(code,0xb04+leaf*16);
+        THREAD_FP_OP(0x89,0x8f);thread_fp_u32(code,0xb08+leaf*16);
+        THREAD_FP_OP(0x89,0x97);thread_fp_u32(code,0xb0c+leaf*16);
+    }
     /* Distinct control words and all eight x87/XMM registers. */
     THREAD_FP_OP(0xd9,0xaf);thread_fp_u32(code,0x82);
     THREAD_FP_OP(0x0f,0xae,0x97);thread_fp_u32(code,0x84);
@@ -134,6 +142,13 @@ static void test_thread_fp_compute_lle(void)
             thread_fp_state_equal(context+0x200,context+0x400);
             thread_fp_state_equal(context+0x600,context+0x800);
             CHECK(MEM16(context+0x200)==(id?0x077f:0x027f));
+            CHECK(MEM16(context+0x206)==0x587); /* actual last FLD qword [EDI+disp32] */
+            CHECK(MEM32(context+0x210)==context+0xc8 && MEM16(context+0x214)==16);
+            const uint32_t cpuid0[]={2,0x756e6547,0x6c65746e,0x49656e69};
+            const uint32_t cpuid1[]={0x68a,0,0,0x0383f9ff};
+            CHECK(!memcmp(memory+context+0xb00,cpuid0,sizeof(cpuid0)));
+            CHECK(!memcmp(memory+context+0xb10,cpuid1,sizeof(cpuid1)));
+            CHECK((MEM32(context+0xb20)&(1u<<9)) && !(MEM32(context+0xb20)&(1u<<18)));
             CHECK(MEM8(context+0x204)==0xff && MEM32(context+0x218)==(id?0x3f80:0x1f80));
             CHECK(!memcmp(memory+context+0x100,memory+context+0x2a0,128));
             for(unsigned i=0;i<8;++i) {
