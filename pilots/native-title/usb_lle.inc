@@ -18,6 +18,10 @@ static const char *usb_original_callback(uint32_t entry,uint32_t regs[8],int is_
     recomp_func_t routine=recomp_lookup(entry);
 #ifdef PILOT_SCHEDULING_LLE
     if(thread_arguments==2 && entry==PILOT_IO_BOOTSTRAP_ENTRY)routine=scheduling_lle_bootstrap;
+#if defined(PILOT_D3D_NATIVE) && !defined(PILOT_DISPLAY_LLE)
+    if(is_dpc && !thread_arguments && entry==PILOT_IO_GRAPHICS_DPC_ENTRY)
+        routine=graphics_original_callback_dpc;
+#endif
     /* Original CPU execution does not require a generated discovery body. */
     if(thread_arguments && entry!=PILOT_IO_BOOTSTRAP_ENTRY)routine=NULL;
 #endif
@@ -77,8 +81,16 @@ static const char *usb_original_callback(uint32_t entry,uint32_t regs[8],int is_
         stop("original callback stdcall imbalance",entry);
     if(thread_arguments && !*terminate && (g_ebx!=regs[3] || g_ebp!=regs[5] || g_esi!=regs[6] || g_edi!=regs[7]))
         stop("original thread callback preserved register changed",entry);
+    if(!thread_arguments && (g_ebx!=regs[3] || g_esi!=regs[6] || g_edi!=regs[7]))
+        stop("original interrupt callback preserved register changed",entry);
     regs[0]=g_eax;regs[1]=g_ecx;regs[2]=g_edx;regs[3]=g_ebx;
-    regs[4]=g_esp;regs[5]=g_ebp;regs[6]=g_esi;regs[7]=g_edi;
+    regs[4]=g_esp;regs[6]=g_esi;regs[7]=g_edi;
+    /* Generated ISR/DPC functions keep EBP local. g_ebp publishes their
+     * active frame for nested generated calls, and LEAVE restores only the
+     * local value. Returning that publication would corrupt the original
+     * dispatcher's preserved queue pointer. Its incoming EBP remains the
+     * nonvolatile result. Actual CPU thread continuations transport EBP. */
+    if(thread_arguments)regs[5]=g_ebp;
     g_eax=saved[0];g_ecx=saved[1];g_edx=saved[2];g_ebx=saved[3];
     g_esp=saved[4];g_ebp=saved[5];g_esi=saved[6];g_edi=saved[7];
     next_kernel_ordinal=saved[8];g_icall_saved_esp=saved[9];
@@ -246,6 +258,11 @@ static void usb_dma_release(void)
     pilot_io_device_dma_release(PILOT_IO_DMA_USB);
 #endif
 }
+static const char *usb_original_mmio(uint32_t address,unsigned size,int write,uint32_t *value)
+{
+    if(size!=4 || (address&3))return "USB LLE original CPU requires aligned DWORD MMIO";
+    return pilot_usb_lle_access(address,write,value);
+}
 static BOOL CALLBACK usb_start(PINIT_ONCE once,void *parameter,void **context)
 {
     (void)once;(void)parameter;(void)context;
@@ -254,6 +271,10 @@ static BOOL CALLBACK usb_start(PINIT_ONCE once,void *parameter,void **context)
     pilot_io_device_isr_bind(usb_original_isr);
     pilot_io_device_dpc_bind(usb_original_dpc);
     pilot_io_device_thread_bind(usb_original_thread);
+    error=pilot_io_device_initialize(memory);
+    if(!error)error=pilot_io_device_mmio_bind_dma(0xfed00000u,4096,usb_original_mmio,PILOT_IO_DMA_USB);
+    if(!error)error=pilot_io_device_work_bind_dma(pilot_usb_lle_tick,PILOT_IO_DMA_USB);
+    if(error)stop(error,0xfed00000u);
     fprintf(stderr,"[USB LLE] shared OHCI/XID/PIC; original interrupt dispatch; owned DMA\n");
     return TRUE;
 }

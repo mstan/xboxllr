@@ -55,6 +55,9 @@ static int graphics_gpu_deliver(void)
 static void graphics_gpu_barrier(void)
 {
     if(dispatch_in_dpc)return;
+#if defined(PILOT_SCHEDULING_LLE) && !defined(PILOT_DISPLAY_LLE)
+    if(graphics_original_clock_bound){graphics_original_callback_barrier();return;}
+#endif
     uint64_t begin=graphics_gpu_profile() && (graphics_gpu_head || graphics_gpu_running)?dispatch_monotonic():0;
     while(graphics_gpu_head || graphics_gpu_running) {
         int blocked=scheduler_block_begin();
@@ -81,11 +84,18 @@ static void graphics_gpu_insert(uint32_t type,uint32_t routine,uint32_t context)
     if(type)c->serial=pilot_gfx_checkpoint();
     if(graphics_gpu_profile()){c->queued=dispatch_monotonic();c->checkpoint_time=c->queued-begin;}
     if(graphics_gpu_tail)graphics_gpu_tail->next=c;else graphics_gpu_head=c;
-    graphics_gpu_tail=c;dispatch_gpu_schedule(graphics_gpu_deliver);
+    graphics_gpu_tail=c;
+#if defined(PILOT_SCHEDULING_LLE) && !defined(PILOT_DISPLAY_LLE)
+    if(graphics_original_clock_bound)graphics_original_callback_sync();else
+#endif
+    dispatch_gpu_schedule(graphics_gpu_deliver);
 }
 static void graphics_gpu_close(void)
 {
     graphics_gpu_barrier();ReleaseSRWLockExclusive(&graphics_lock);
+#if defined(PILOT_SCHEDULING_LLE) && !defined(PILOT_DISPLAY_LLE)
+    if(!graphics_original_clock_bound)
+#endif
     dispatch_gpu_quiesce();AcquireSRWLockExclusive(&graphics_lock);
     if(graphics_gpu_head || graphics_gpu_tail || graphics_gpu_running)stop("GPU callback ownership leak",0);
     graphics_gpu_delivered=0;

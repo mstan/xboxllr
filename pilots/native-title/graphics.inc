@@ -100,6 +100,9 @@ static void graphics_target_prepare(uint32_t header);
 #include "graphics_draw.inc"
 #include "graphics_completion.inc"
 #include "graphics_gpu_callback.inc"
+#if defined(PILOT_SCHEDULING_LLE) && !defined(PILOT_DISPLAY_LLE)
+#include "graphics_original_callbacks.inc"
+#endif
 #include "graphics_persistence.inc"
 static void graphics_resource_bindings_close(void)
 {
@@ -255,7 +258,10 @@ static void graphics_dispatch_impl(unsigned entry)
             graphics_persistence_clear();
             graphics_active=1; memcpy(graphics_parameters,staged,sizeof(staged));
             MEM32(PILOT_D3D_PRESENT_INTERVAL)=staged[12];
-            graphics_clock_origin=dispatch_monotonic();
+            graphics_clock_origin=graphics_clock_now();
+#if defined(PILOT_SCHEDULING_LLE) && !defined(PILOT_DISPLAY_LLE)
+            graphics_original_pulse_frame=0;
+#endif
             graphics_clock_hz=staged[11]?staged[11]:60;
             graphics_clock_closing=graphics_clock_presented=0;
             graphics_present_count=0;graphics_swap_expected=0;graphics_swap_submitted=graphics_swap_completed=0;graphics_swap_deadline=0;
@@ -402,6 +408,9 @@ static void graphics_dispatch_impl(unsigned entry)
     uint64_t unlocking=entered?dispatch_monotonic():0;
 #ifdef PILOT_GRAPHICS_FRAME_AUDIT
     graphics_frame_audit_call(entry,arguments);
+#endif
+#if defined(PILOT_SCHEDULING_LLE) && !defined(PILOT_DISPLAY_LLE)
+    graphics_original_callback_sync();
 #endif
     ReleaseSRWLockExclusive(&graphics_lock);
     if(entered) {

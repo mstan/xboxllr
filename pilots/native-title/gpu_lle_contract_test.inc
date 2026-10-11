@@ -257,9 +257,9 @@ static void test_gpu_lle_transport(void)
         CHECK(!gpu_lle.error(gpu_lle.device));
         /* This fixture has consumed its entire FIFO, no connected ISR and no
          * enabled interrupt. It does not claim general title teardown proof. */
-        CHECK(!pilot_io_device_work_bind(NULL));
+        CHECK(!pilot_io_device_work_unbind(gpu_lle_sample));
         gpu_lle.destroy(gpu_lle.device);gpu_lle.device=NULL;
-        CHECK(!pilot_io_device_mmio_bind(0,0,NULL));
+        CHECK(!pilot_io_device_mmio_bind(0xfd000000u,0x1000000u,NULL));
         pilot_io_device_port_bind(0,0,NULL);
         CHECK(FreeLibrary(gpu_lle.library));gpu_lle.library=NULL;
     }
@@ -394,9 +394,9 @@ static void test_gpu_lle_encoder_timing(void)
             fprintf(stderr,"PASS: original HAL timing reset, actual aligned/shifted slave sync and separated VSYNC, original AV FIELD reads, polarity/gating; five clean teardowns and sixth lifetime rejects undriven FIELD\n");
             return;
         }
-        CHECK(!pilot_io_device_work_bind(NULL));
+        CHECK(!pilot_io_device_work_unbind(gpu_lle_sample));
         gpu_lle.destroy(gpu_lle.device);gpu_lle.device=NULL;
-        CHECK(!pilot_io_device_mmio_bind(0,0,NULL));pilot_io_device_port_bind(0,0,NULL);
+        CHECK(!pilot_io_device_mmio_bind(0xfd000000u,0x1000000u,NULL));pilot_io_device_port_bind(0,0,NULL);
         CHECK(FreeLibrary(gpu_lle.library));gpu_lle.library=NULL;
     }
 }

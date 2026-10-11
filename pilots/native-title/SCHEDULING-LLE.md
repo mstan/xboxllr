@@ -1688,3 +1688,111 @@ Private proof: `build/blinx/original-owner-budget-20261011/qualified-v4.aot-priv
 with112 immutable identities and all90 prior backing-proof snapshots reverified.
 The static audit is `component-wait-owner-audit-20261011/owner-static-audit.aot-private.json`
 (SHA256 `fad62166dde569728c6de867cc52ff375b4cd2019c56de9f081d86969493e06e`).
+
+### Original native pulse, fences and callback lifetimes - 2026-10-11
+
+The selected original scheduler drives native Swap/vblank time from its
+maintained PIT owner. Paced Swap and queue capacity yield through private
+original event/KWAITs; BlockUntilVerticalBlank waits for the next actual edge.
+Default HLE retains its host workers and performance path.
+
+Three real CPU/GPU lives force busy BlockOnFence and full64-slot capacity.
+Each consumes16MiB of actual GPU work. Raw KWAIT and a running integer peer
+establish blocked work and real IRQ0 progress; actual GPU completion alone
+retires fences. Tokens, return ABI, exact GPU bytes and all nine memory,
+thread and handle baselines pass. This supersedes the earlier fixture whose
+GPU had finished before the blocking branch.
+
+A real original periodic KTIMER/KDPC owns READ/WRITE and vblank delivery.
+READ follows command consumption; WRITE waits for actual GPU completion and
+holds later FIFO work. The original kernel dequeues at IRQL2 and calls the
+bridge on its actual DPC/idle stack. Source-bound cdecl user callbacks preserve
+stack/nonvolatile and enclosing FP/flag state. Three lives prove busy WRITE,
+eight FIFO callbacks, vblank replacement/removal, cancellation/removal and exact
+owner cleanup. Removing vblank retains an owner needed by pending GPU work.
+
+Raw181 MmQueryStatistics is now admitted after an actual title guard.
+Eighteen original queries across six VM lives check invalid length, all36 output
+bytes, reserve deltas and caller canaries. Original code supplies the counters.
+
+| Scheduling closure requirement | Current evidence |
+| --- | --- |
+| Ready/block/wake/preemption, finite waits, CPU/FP and execution ownership | Retained original CPU/event/clock, long-owner and passive KWAIT qualification |
+| Busy GPU dependency, full capacity and native Swap/vblank waits | Three causal original CPU/GPU lives with exact cleanup |
+| Callback FIFO, real DPC delivery, replacement/removal and owner retirement | Three original KTIMER/KDPC lives; source-bound actual title callback ABI audit |
+| Integrated original-scheduling Blinx attract regression | Open: startup passes181, then stops at unbound OHCI FED00000/PC183552 |
+
+The coherent66/66 checks pass in15.43s without skips, including default HLE
+graphics ABI/scheduler checks. One muted hidden startup exits at63.016s at that
+USB read after91 shaders and texture initialization. It is a recorded stop,
+not an attract pass. The OHCI controller is already maintained; its original
+CPU bus registration is the next dependency. A static audit distinguishes31
+absent function admissions from exercised calls. Import presence alone does
+not require admission.
+
+Independent GPU, graphics, audio and movie/A-V gates stay open. Their precision
+questions do not automatically block scheduling, but an exercised CPU
+continuation/wake dependency still does. Scheduling remains partial:4/9 families
+and26 agreed precision deferrals are unchanged. No physical Xbox operation or
+audible playback occurred.
+
+Private proof: `build/blinx/original-display-pulse-20261011/qualified-v7.aot-private.json`
+(SHA256 `95506ec032340b62d106955535084fa247cbc12682b9160973cd87528aa288dc`).
+It binds22 frozen sources, actual executables, test selection/results and immutable
+title/input identities. Earlier failed generations remain separate.
+
+### Shared USB work and generated callback ABI - 2026-10-11
+
+The original CPU and compiled accesses now use the same maintained OHCI
+controller. Eight disjoint MMIO owners and eight clock-work owners preserve
+independent devices on the sole original engine. Each owner has its explicit
+DMA capability; exact removal preserves the other devices. A real OHCI reset
+retires its own schedule leases under its existing engine ownership, fixing a
+self-deadlock without allowing an unrelated device to release USB allocations.
+
+Three raw CPU lives qualify OHCI register routing, real HCCA frame writes,
+reset/free and exact cleanup. A separate three-life original99 delay observes
+HCCA with raw RAM loads immediately before and after waiting, with no device
+poll between them. Actual KTHREAD Waiting5 and a running compute peer witness
+frame advancement during the wait. Existing allocation/PFN/pin/protection checks
+remain in force, including the cross-device lease and borrowed-free guards.
+Raw99/129/151 delay/raise/stall execution also passes both build selections.
+
+The integrated title exposed a generated-callback ABI defect. Generated code
+keeps EBP local but publishes its active frame through g_ebp for nested calls.
+Its LEAVE restores only the local register. Copying that publication back to
+the original kernel replaced its DPC queue pointer with the callback frame,
+leading to a call into stack data. The bridge now retains the incoming
+nonvolatile EBP for ISR/DPC callbacks, checks their real stdcall ESP and global
+EBX/ESI/EDI, and preserves actual CPU-thread/bootstrap EBP transport. A genuine
+idle IRQ/original queued DPC reproduces the bad returned register before the
+fix and passes afterward. The immutable original title ISR/DPC source audit
+supports this adaptation; it is not a hardware inference.
+
+The coherent72/72 checks pass in16.35s with no skips. Three maintained NV2A
+shared-bus checks pass in0.39s and retain independent GPU/USB mapping and work
+owners. Default HLE graphics ABI and scheduler regressions remain in the batch;
+the original-clock routes are selected only for original scheduling.
+
+A muted immutable title startup now runs the actual1889D4 ISR at IRQL25 and
+1890A2 DPC at IRQL2, returns without the former pool fetch guard, and creates
+its native audio device. It stops at raw service143 after62.125s. Actual
+124/143/144 base-priority query/set and boost control are the next batch, with
+referenced original thread ownership and previous-return semantics required.
+This is progress through the prior boundary, not an attract pass. Whole
+scheduling remains partial; independent GPU, graphics, audio and movie gates
+stay open. The count is4/9 with26 agreed precision deferrals. Zero physical
+Xbox operations or audible playback occurred.
+
+Private proof: `build/blinx/original-display-pulse-20261011/qualified-v20.aot-private.json`
+(SHA256 `ff2fc289e50f3978d12ecabc8d15f2da3dd74b35fb423092cdcab3fd5b773180`),
+with30 frozen sources, five executable/library identities and20 artifacts.
+The separate static ABI proof is `usb-callback-ebp-audit-20261011/qualified-static-abi.aot-private.json`
+(SHA256 `ff068eb74222112fdc255ce162ce77971c1009751ce9f1729c7bb67a47636dcd`).
+The causal red case is the v19 selected callback build and test. Earlier
+mixed-only builds reused an older selected test executable and are excluded
+from the red evidence. Failed and superseded generations remain separate.
+
+The unchanged GPU callback/barrier source dependency is additionally bound by
+`qualified-source-supplement-v20.aot-private.json` (SHA256 `34baec1fb0537a6b70e219137ea0d4222291a4b038b3b06aa68be7fcb52584bd`).
+It was omitted from the main source list; no new execution is inferred.

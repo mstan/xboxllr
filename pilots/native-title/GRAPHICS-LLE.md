@@ -3599,3 +3599,24 @@ Current source/executable/log identities, earlier failures and the separately
 failed output-collection attempt remain in
 `build/blinx/original-owner-budget-20261011/qualified-v4.aot-private.json`
 (SHA256 `148e51b4ef8520bee9fcbdd5d9d4e0b03ee044dcaf9b0371493a98d9b8908393`).
+
+### Original scheduling native GPU wait and callback transport - 2026-10-11
+
+Three actual CPU/GPU lives now force busy BlockOnFence and full64-slot capacity,
+each submitting16MiB of real GPU work. Original KWAIT/compute-peer IRQ0 progress,
+exact GPU bytes, fence identities and all nine memory/thread/handle counters pass.
+Native Swap/vblank uses the sole original clock. Real KTIMER/KDPC READ/WRITE FIFO,
+source-bound cdecl callbacks, vblank replacement/removal and owner retirement pass
+across three lives. The66/66 coherent regression passes in15.43s and retains default
+HLE callback checks. See the [scheduling record](SCHEDULING-LLE.md#original-native-pulse-fences-and-callback-lifetimes---2026-10-11).
+
+This qualifies native GPU dependencies and original CPU callback transport.
+Maintained NV2A complete scene pixels and original renderer/audio/movie acceptance
+remain separate open gates. Agreed precision deferrals are unchanged.
+
+The subsequent shared-bus batch also retains independent NV2A and USB MMIO
+and clock-work owners on that original CPU. Exact GPU teardown removes only
+its own owners; the three maintained NV2A transport/thread/AV regression checks
+pass in0.39s alongside72 combined checks. This qualifies bus composition and
+native scheduling dependencies. Full NV2A pixels/startup and the graphics gate
+remain open. See the [scheduling evidence](SCHEDULING-LLE.md#shared-usb-work-and-generated-callback-abi---2026-10-11).

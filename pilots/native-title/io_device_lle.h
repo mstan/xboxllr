@@ -14,6 +14,9 @@
 #define PILOT_IO_CLOCK_BYTES 0x20000u
 /* Private loader-to-SystemRoutine transport, outside title address ranges. */
 #define PILOT_IO_BOOTSTRAP_ENTRY (PILOT_IO_BRIDGE_BASE+0x9800u)
+/* Authored native-renderer DPC transport. Only an initialized original KDPC
+ * dequeued by the original dispatcher may invoke this private entry. */
+#define PILOT_IO_GRAPHICS_DPC_ENTRY (PILOT_IO_BRIDGE_BASE+0x9900u)
 /* Private original-kernel device and owned-page implementation. Returns an explicit diagnostic on
  * unsupported execution; it never substitutes successful completion. */
 const char *pilot_io_device_lle(unsigned ordinal, unsigned char *guest,
@@ -113,19 +116,29 @@ const char *pilot_io_device_next_thread(uint32_t *object);
  * kernel transport; original port instructions execute with its lock held. */
 typedef const char *(*PilotIoPort)(uint16_t port,int size,int write,uint32_t *value);
 void pilot_io_device_port_bind(uint16_t first,uint16_t last,PilotIoPort callback);
-/* Device-owned MMIO, shared with compiled guest accesses. Bind after the
+/* Initialize the immutable original transport without executing a service.
+ * Idempotent for the same guest address space; requires idle CPU ownership. */
+const char *pilot_io_device_initialize(unsigned char *guest);
+/* Up to eight disjoint device-owned MMIO ranges, shared with compiled guest accesses. Bind after the
  * kernel transport is initialized. Callback runs with its lock held and must
  * not execute original CPU services recursively. Synchronous bootstrap,
  * contiguous and pinned RAM DMA may borrow this callback's existing ownership;
  * every existing extent/PTE/protection/pin check still applies. Passing NULL
- * removes the owned mapping. */
+ * with its exact first/bytes removes only that owner; NULL with zero/zero
+ * clears all mappings. Invalid admission leaves existing owners unchanged. */
 typedef const char *(*PilotIoMmio)(uint32_t address,unsigned size,int write,uint32_t *value);
 const char *pilot_io_device_mmio_bind(uint32_t first,uint32_t bytes,PilotIoMmio callback);
-/* One device owner samples its external clock between original CPU slices.
- * Runs under the same synchronous RAM borrow as MMIO; no CPU reentry. Remove
- * this callback before destroying the device, while the transport is idle. */
+/* Admit one explicit RAM lease capability for this device owner. Generic
+ * mappings use synchronous DMA; only the shared OHCI owner admits USB leases. */
+const char *pilot_io_device_mmio_bind_dma(uint32_t first,uint32_t bytes,PilotIoMmio callback,unsigned dma_lease);
+/* Up to eight device owners sample external time between original CPU slices,
+ * on the sole engine under each owner's synchronous RAM/DMA capability.
+ * No CPU reentry. Remove a particular callback before destroying that device.
+ * NULL bind clears all callbacks; exact unbind preserves the other devices. */
 typedef const char *(*PilotIoDeviceWork)(void);
 const char *pilot_io_device_work_bind(PilotIoDeviceWork callback);
+const char *pilot_io_device_work_bind_dma(PilotIoDeviceWork callback,unsigned dma_lease);
+const char *pilot_io_device_work_unbind(PilotIoDeviceWork callback);
 unsigned pilot_io_device_irql(void);
 void pilot_io_device_set_if(int enabled);
 const char *pilot_io_device_irq(unsigned char *guest,int *delivered);

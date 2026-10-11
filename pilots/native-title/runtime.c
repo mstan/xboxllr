@@ -112,6 +112,10 @@ static void usb_poll(void);
 static RECOMP_TLS unsigned usb_in_interrupt;
 #ifdef PILOT_SCHEDULING_LLE
 static RECOMP_TLS unsigned usb_device_callback_depth;
+#if defined(PILOT_D3D_NATIVE) && !defined(PILOT_DISPLAY_LLE)
+static const char *graphics_original_clock_bind(void);
+static void graphics_original_callback_dpc(void);
+#endif
 #endif
 static int cpu_interrupt_flag=1,cpu_interrupt_shadow;
 #endif
@@ -564,16 +568,24 @@ static const char *native_graphics_component(uint32_t entry,uint32_t regs[8])
         return "original scheduling native graphics memory ownership requires integration";
     /* These native paths still use a generated guest callback/native pulse
      * dispatcher. Stop before queueing work against the original scheduler. */
-    if(index==PILOT_D3D_D3DDevice_InsertCallback || index==PILOT_D3D_D3DDevice_SetVerticalBlankCallback ||
+    if((index==PILOT_D3D_D3DDevice_InsertCallback || index==PILOT_D3D_D3DDevice_SetVerticalBlankCallback ||
        graphics_gpu_head || graphics_gpu_running || graphics_callback)
+#ifndef PILOT_DISPLAY_LLE
+       && !graphics_original_clock_bound
+#endif
+       )
         return "original scheduling native graphics callback ownership requires integration";
 #ifndef PILOT_DISPLAY_LLE
-    if(index==PILOT_D3D_D3DDevice_Swap)
+    if(index==PILOT_D3D_D3DDevice_Swap && !graphics_original_clock_bound)
         return "original scheduling native graphics display pulse requires integration";
 #endif
     /* Display waits have an independent pulse owner. GPU fence waits use
      * actual native completion and the original passive timed-wait route. */
-    if(index==PILOT_D3D_D3DDevice_BlockUntilVerticalBlank)
+    if(index==PILOT_D3D_D3DDevice_BlockUntilVerticalBlank
+#ifndef PILOT_DISPLAY_LLE
+       && !graphics_original_clock_bound
+#endif
+       )
         return "original scheduling native graphics wait ownership requires integration";
     const char *error=graphics_original_enter();
     if(error)return error;

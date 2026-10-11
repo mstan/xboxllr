@@ -57,9 +57,9 @@ static void test_gpu_thread_av_lle(int mode_guard)
         }
         CHECK(!event_lle_call(256,&stats));
         CHECK(MEM32(stats+4)==baseline_threads && MEM32(stats+8)==baseline_handles);
-        CHECK(!pilot_io_device_work_bind(NULL));CHECK(!gpu_lle.error(gpu_lle.device));
+        CHECK(!pilot_io_device_work_unbind(gpu_lle_sample));CHECK(!gpu_lle.error(gpu_lle.device));
         gpu_lle.destroy(gpu_lle.device);gpu_lle.device=NULL;
-        CHECK(!pilot_io_device_mmio_bind(0,0,NULL));pilot_io_device_port_bind(0,0,NULL);
+        CHECK(!pilot_io_device_mmio_bind(0xfd000000u,0x1000000u,NULL));pilot_io_device_port_bind(0,0,NULL);
         CHECK(FreeLibrary(gpu_lle.library));gpu_lle.library=NULL;
     }
     fprintf(stderr,"PASS: three original-thread AV/HAL lifetimes, 36 actual service returns, owned DWORD outputs and real SMBus IRQ completion/encoder reset\n");

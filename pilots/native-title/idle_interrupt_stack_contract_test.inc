@@ -34,12 +34,27 @@ static void test_idle_dpc_callback(void)
     CHECK(g_esp>=idle_interrupt_base+0x100 && (uint64_t)g_esp+20<=idle_interrupt_top);
     CHECK(MEM32(g_esp+4)==0x1c300 && MEM32(g_esp+8)==0x10203040);
     CHECK(MEM32(g_esp+12)==0x13579bdf && MEM32(g_esp+16)==0x2468ace0);
-    uint32_t saved=g_esp;g_esp-=0x100;MEM32(g_esp)=0x11223344;
+    /* Match the generated callback ABI: local EBP restores on LEAVE, while
+     * its global nested-call publication still names the callee's frame.
+     * The original DPC dispatcher must receive its preserved queue pointer. */
+    uint32_t saved=g_esp,incoming=g_ebp,ebp=incoming;
+    g_esp-=4;MEM32(g_esp)=ebp;ebp=g_esp;g_ebp=ebp;
+    g_esp-=0x100;MEM32(g_esp)=0x11223344;
     MEM32(g_esp+4)=0xcccccccc;MEM32(g_esp+8)=0x55667788;
     uint32_t args[]={0,6,0,g_esp+4},result=0;
     CHECK(!pilot_io_device_lle(2,memory,args,&result));
     CHECK(MEM32(g_esp)==0x11223344 && MEM32(g_esp+4)==0x004e0101 && MEM32(g_esp+8)==0x55667788);
+    g_esp=ebp;ebp=MEM32(g_esp);g_esp+=4;
+    CHECK(ebp==incoming && g_esp==saved && g_ebp==saved-4);
     ++idle_dpc_calls;g_esp=saved+20;
+}
+static const char *test_idle_dpc_adapter(uint32_t entry,uint32_t regs[8])
+{
+    uint32_t before[8];memcpy(before,regs,sizeof(before));
+    const char *error=usb_original_dpc(entry,regs);if(error)return error;
+    CHECK(regs[3]==before[3] && regs[5]==before[5] && regs[6]==before[6] && regs[7]==before[7]);
+    CHECK(regs[4]==before[4]+20);
+    return NULL;
 }
 static void test_idle_interrupt_stack_lle(int changed_bounds)
 {
@@ -50,6 +65,7 @@ static void test_idle_interrupt_stack_lle(int changed_bounds)
     CHECK(!pilot_io_device_lle(109,memory,intr,&result));
     CHECK(!pilot_io_device_lle(98,memory,intr,&result) && (result&255)==1);
     uint32_t dpc[]={0x1c300,0x12560,0x10203040};CHECK(!pilot_io_device_lle(107,memory,dpc,&result));
+    pilot_io_device_dpc_bind(test_idle_dpc_adapter);
     uint32_t out=0x19800,event_create[]={out,0,1,0};
     CHECK(!event_lle_call(189,event_create));uint32_t event=MEM32(out);
     uint32_t context=0x19900;memset(memory+context,0,96);thread_device_code();

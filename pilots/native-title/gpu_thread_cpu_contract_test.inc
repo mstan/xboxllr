@@ -53,7 +53,7 @@ static void test_gpu_thread_cpu_lle(void)
     gpu_thread_cpu_code();thread_device_code();uint32_t stats=0x19700;MEM32(stats)=12;CHECK(!event_lle_call(256,&stats));
     uint32_t baseline_threads=MEM32(stats+4),baseline_handles=MEM32(stats+8);
     for(unsigned lifetime=0;lifetime<3;++lifetime) {
-        gpu_lle_open();CHECK(!pilot_io_device_mmio_bind(0,0,NULL));
+        gpu_lle_open();CHECK(!pilot_io_device_mmio_bind(0xfd000000u,0x1000000u,NULL));
         CHECK(!pilot_io_device_mmio_bind(0xfd000000,0x1000000,gpu_cpu_checked_mmio));
         CHECK(pilot_io_device_work_bind(gpu_lle_sample)); /* duplicate does not replace owner */
         if(!lifetime)CHECK(!pilot_io_device_clock_start());
@@ -92,9 +92,9 @@ static void test_gpu_thread_cpu_lle(void)
         protect[2]=PAGE_READWRITE;CHECK(!pilot_io_device_lle(182,memory,protect,&result));
         CHECK(!pilot_io_device_lle(171,memory,&base,&result));
         CHECK(!gpu_lle_dma_read(gpu_cpu_pa+4096,&result,4));
-        CHECK(!pilot_io_device_work_bind(NULL));
+        CHECK(!pilot_io_device_work_unbind(gpu_lle_sample));
         CHECK(!gpu_lle.error(gpu_lle.device));gpu_lle.destroy(gpu_lle.device);gpu_lle.device=NULL;
-        CHECK(!pilot_io_device_mmio_bind(0,0,NULL));pilot_io_device_port_bind(0,0,NULL);
+        CHECK(!pilot_io_device_mmio_bind(0xfd000000u,0x1000000u,NULL));pilot_io_device_port_bind(0,0,NULL);
         CHECK(FreeLibrary(gpu_lle.library));gpu_lle.library=NULL;
         CHECK(!event_lle_call(256,&stats));
         CHECK(MEM32(stats+4)==baseline_threads && MEM32(stats+8)==baseline_handles);

@@ -14,11 +14,28 @@ static void vm_query_code(struct ThreadChildCode *c,uint8_t output)
 {
     child_output(c,output);child_push_field(c,0);child_call(c,217);
 }
+static void vm_statistics_code(struct ThreadChildCode *c,uint32_t output,uint32_t status)
+{
+    VM_BYTES(c,0x8d,0x87);child_word(c,output);VM_BYTES(c,0x50);child_call(c,181);
+    VM_BYTES(c,0x89,0x87);child_word(c,status);
+}
 static void thread_vm_code(int pinned_release)
 {
     struct ThreadChildCode code={0};struct ThreadChildCode *c=&code;
     VM_BYTES(c,0x53,0x55,0x56,0x57,0x8b,0x7c,0x24,0x14);
+    if(!pinned_release) {
+        vm_statistics_code(c,144,132); /* Invalid35-byte length: original status/output. */
+        VM_BYTES(c,0x57,0x8d,0xb7);child_word(c,144);
+        VM_BYTES(c,0x8d,0xbf);child_word(c,240);
+        VM_BYTES(c,0xb9,9,0,0,0,0xf3,0xa5,0x5f); /* Preserve all nine rejected output DWORDs. */
+        VM_BYTES(c,0xc7,0x87);child_word(c,144);child_word(c,36);
+        vm_statistics_code(c,144,136);
+    }
     vm_allocate_code(c,MEM_RESERVE,PAGE_READWRITE);vm_status(c,8);
+    if(!pinned_release) {
+        VM_BYTES(c,0x8b,0x47,4,0x89,0x87);child_word(c,224);
+        vm_statistics_code(c,184,228);
+    }
     vm_query_code(c,96);vm_status(c,16);
     VM_BYTES(c,0x8b,0x47,112,0x89,0x47,56);
     vm_allocate_code(c,MEM_COMMIT,PAGE_READWRITE);vm_status(c,12);
@@ -53,7 +70,7 @@ static void thread_vm_code(int pinned_release)
         0x8b,0x47,76,0x89,0x07,0xc7,0x47,4,0,0,0,0);
     child_push(c,MEM_RELEASE);child_output(c,4);child_output(c,0);child_call(c,199);vm_status(c,28);
     VM_BYTES(c,0x5f,0x5e,0x5d,0x5b,0xc2,4,0);
-    CHECK(c->size<512);memcpy(memory+THREAD_VM_CPU,c->bytes,c->size);
+    CHECK(c->size<768);memcpy(memory+THREAD_VM_CPU,c->bytes,c->size);
 }
 static void test_thread_vm_cpu_lle(void)
 {
@@ -64,8 +81,11 @@ static void test_thread_vm_cpu_lle(void)
     uint32_t baseline_threads=MEM32(stats+4),baseline_handles=MEM32(stats+8);
     for(unsigned life=0;life<6;++life) {
         const uint32_t context=0x1b000,out=0x19800;uint32_t events[2];
-        memset(memory+context,0,256);MEM32(context+4)=8192;MEM32(context+64)=THREAD_VM_CPU;
+        memset(memory+context,0,512);MEM32(context+4)=8192;MEM32(context+64)=THREAD_VM_CPU;
         MEM32(context+128)=0xa5a55a5a;
+        MEM32(context+140)=MEM32(context+180)=MEM32(context+220)=0x6a7b8c9d;
+        MEM32(context+144)=35;MEM32(context+184)=36;
+        memset(memory+context+148,0x5a,32);
         for(unsigned i=0;i<2;++i) {
             uint32_t create[]={out,0,1,0};CHECK(!event_lle_call(189,create));events[i]=MEM32(out);
             MEM32(context+80+i*4)=events[i];
@@ -77,6 +97,13 @@ static void test_thread_vm_cpu_lle(void)
         for(unsigned phase=0;phase<2;++phase) {
             uint32_t wait[]={events[0],0,0};CHECK(!event_lle_call(233,wait));
             CHECK(!MEM32(context+8) && !MEM32(context+12) && !MEM32(context+24) && !MEM32(context+28));
+            CHECK(MEM32(context+132)==VM_INVALID && !MEM32(context+136) && !MEM32(context+228));
+            CHECK(MEM32(context+240)==35);
+            for(unsigned i=1;i<9;++i)CHECK(MEM32(context+240+i*4)==0x5a5a5a5a);
+            CHECK(MEM32(context+140)==0x6a7b8c9d && MEM32(context+180)==0x6a7b8c9d && MEM32(context+220)==0x6a7b8c9d);
+            CHECK(MEM32(context+144)==36 && MEM32(context+148)==16384 && MEM32(context+184)==36 && MEM32(context+188)==16384);
+            CHECK(MEM32(context+192)==MEM32(context+152) && MEM32(context+196)==MEM32(context+156));
+            CHECK(MEM32(context+200)==MEM32(context+160)+MEM32(context+224));
             CHECK(MEM32(context+20)==PAGE_READWRITE && MEM32(context+56)==MEM_RESERVE);
             CHECK(MEM32(context+60)==PAGE_READONLY);
             if(phase)CHECK(MEM32(context+64)==PAGE_READWRITE);
@@ -108,7 +135,7 @@ static void test_thread_vm_cpu_lle(void)
         CHECK(MEM32(stats+4)==baseline_threads && MEM32(stats+8)==baseline_handles);
     }
     CHECK(thread_cpu_calls==6);
-    fprintf(stderr,"PASS: six actual-CPU VM lifetimes, reserve/commit/protect/original recommit policy/decommit/recommit/release, host protections and real pinned DMA aliases\n");
+    fprintf(stderr,"PASS: six actual-CPU VM lifetimes, eighteen original MmQueryStatistics CALL/RET8 with invalid/valid lengths/canaries and real reserve delta, reserve/commit/protect/original recommit policy/decommit/recommit/release, host protections and real pinned DMA aliases\n");
 }
 static void test_thread_vm_pinned_release_lle(void)
 {

@@ -15,7 +15,9 @@ static void test_thread_cpu_body(void)
     uint32_t invalid[8];memcpy(invalid,regs,sizeof(regs));invalid[4]=0x10000;
     CHECK(pilot_io_device_thread_execute(entry,invalid));
     CHECK(invalid[4]==0x10000 && !memcmp(regs,original,sizeof(regs)));
-    CHECK(!pilot_io_device_thread_execute(entry,regs));
+    const char *execution_error=pilot_io_device_thread_execute(entry,regs);
+    if(execution_error)fprintf(stderr,"[RAW CPU FAILURE] entry=%08x reason=%s\n",entry,execution_error);
+    CHECK(!execution_error);
     uint32_t returned[8];memcpy(returned,regs,sizeof(regs));
     CHECK(pilot_io_device_thread_execute(entry,regs));
     CHECK(!memcmp(returned,regs,sizeof(regs)));

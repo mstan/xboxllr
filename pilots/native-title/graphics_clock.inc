@@ -18,6 +18,27 @@ static uint64_t graphics_swap_expected;
 static uint32_t graphics_swap_submitted,graphics_swap_completed;
 static uint64_t graphics_swap_deadline;
 static CONDITION_VARIABLE graphics_present_changed=CONDITION_VARIABLE_INIT;
+#if defined(PILOT_SCHEDULING_LLE) && !defined(PILOT_DISPLAY_LLE)
+static int graphics_original_clock_bound;
+static uint64_t graphics_original_pulse_frame;
+static uint32_t graphics_original_pulse_flags;
+static uint64_t graphics_original_callback_frame;
+static void graphics_original_callback_sync(void);
+static void graphics_original_callback_close(void);
+static void graphics_original_callback_barrier(void);
+#endif
+static uint64_t graphics_clock_now(void)
+{
+#if defined(PILOT_SCHEDULING_LLE) && !defined(PILOT_DISPLAY_LLE)
+    uint64_t ticks=0,next=0;
+    const char *error=pilot_usb_pit_clock(&ticks,&next);
+    if(error)stop(error,0);
+    if(ticks/1125000>UINT64_MAX/10000000)stop("original display clock overflow",0);
+    return ticks/1125000*10000000+(ticks%1125000)*10000000/1125000;
+#else
+    return dispatch_monotonic();
+#endif
+}
 static uint64_t graphics_frame_at(uint64_t now)
 {
     uint64_t elapsed=now-graphics_clock_origin;
@@ -80,7 +101,7 @@ static void graphics_vblank_deliver(uint64_t frame)
     unsigned retired=0;
     /* Late DPC delivery must not assign newly observed GPU completion to an
      * already elapsed historical vblank while the worker catches up. */
-    uint64_t observed_frame=graphics_frame_at(dispatch_monotonic());
+    uint64_t observed_frame=graphics_frame_at(graphics_clock_now());
     if(frame>=observed_frame) {
         retired=graphics_present_retire(frame);
     }
@@ -110,11 +131,22 @@ static void graphics_vblank_deliver(uint64_t frame)
 static void graphics_set_vblank_callback(uint32_t callback)
 {
     if(graphics_clock_closing)stop("callback registration during device close",callback);
+#if defined(PILOT_SCHEDULING_LLE) && !defined(PILOT_DISPLAY_LLE)
+    if(callback && !graphics_original_clock_bound)
+        stop("original display callback DPC owner requires integration",callback);
+#endif
     if(callback && !recomp_lookup(callback))stop("vblank callback is not generated",callback);
     uint32_t previous=graphics_callback;graphics_callback=callback;
+#if defined(PILOT_SCHEDULING_LLE) && !defined(PILOT_DISPLAY_LLE)
+    if(!previous && callback)graphics_original_callback_frame=graphics_frame_at(graphics_clock_now());
+#endif
     MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_VBLANK_CALLBACK_OFFSET)=callback;
     if(!graphics_clock_presented && (!previous || !callback))
+#if defined(PILOT_SCHEDULING_LLE) && !defined(PILOT_DISPLAY_LLE)
+        (void)previous;
+#else
         dispatch_pulse_set(graphics_clock_origin,graphics_clock_hz,callback?graphics_vblank_deliver:NULL);
+#endif
 }
 static void graphics_clock_close(void)
 {
@@ -122,7 +154,11 @@ static void graphics_clock_close(void)
     if(graphics_display_waiters)stop("device release with active vertical-blank waits",graphics_display_waiters);
     graphics_display_open=0;
     ReleaseSRWLockExclusive(&graphics_display_lock);
-    graphics_clock_closing=1;graphics_callback=0;
+    graphics_callback=0;
+#if defined(PILOT_SCHEDULING_LLE) && !defined(PILOT_DISPLAY_LLE)
+    graphics_original_callback_close();
+#endif
+    graphics_clock_closing=1;
     if(dispatch_changed) {
         dispatch_pulse_set(0,0,NULL);
         ReleaseSRWLockExclusive(&graphics_lock);
@@ -140,6 +176,19 @@ static uint64_t graphics_next_vblank(uint64_t origin,uint64_t now,unsigned hz)
 }
 static void graphics_wait_until(uint64_t deadline)
 {
+#if defined(PILOT_SCHEDULING_LLE) && !defined(PILOT_DISPLAY_LLE)
+    struct ComponentWait wait={0};
+    for(;;) {
+        uint64_t now=graphics_clock_now();if(now>=deadline)break;
+        const char *error=wait.event?NULL:component_wait_open(&wait);
+        uint32_t status=0,duration=(uint32_t)((deadline-now)>10000?10000:deadline-now);
+        if(!error)error=component_wait_slice(&wait,duration,&status);
+        if(error)stop(error,0);
+    }
+    if(wait.event) {
+        const char *error=component_wait_close(&wait);if(error)stop(error,0);
+    }
+#else
     uint64_t started=graphics_service_profile_enabled()?dispatch_monotonic():0;
     HANDLE timer=CreateWaitableTimerExW(NULL,NULL,0x2,TIMER_ALL_ACCESS);
     if(!timer && GetLastError()==ERROR_INVALID_PARAMETER)timer=CreateWaitableTimerW(NULL,FALSE,NULL);
@@ -157,6 +206,7 @@ static void graphics_wait_until(uint64_t deadline)
         if(ended-started>500000)fprintf(stderr,"[DISPLAY TIMER SLOW] thread=%lu requested_ms=%.3f elapsed_ms=%.3f\n",
             GetCurrentThreadId(),((int64_t)deadline-(int64_t)started)/10000.0,(ended-started)/10000.0);
     }
+#endif
 }
 /* Whole display-event API: its lifetime and deadline do not need renderer
  * ownership or completion. Real GPU callbacks/presents retain their ordering
@@ -166,17 +216,17 @@ static void graphics_wait_vblank(void)
     AcquireSRWLockExclusive(&graphics_display_lock);
     if(!graphics_display_open)stop("vertical-blank wait without active display",0);
     int profile=graphics_display_profile;
-    uint64_t started=dispatch_monotonic();
+    uint64_t started=graphics_clock_now();
     uint64_t deadline=graphics_next_vblank(graphics_clock_origin,started,graphics_clock_hz);
     ++graphics_display_waiters;
     ReleaseSRWLockExclusive(&graphics_display_lock);
     graphics_wait_until(deadline);
-    uint64_t awakened=profile?dispatch_monotonic():0;
+    uint64_t awakened=profile?graphics_clock_now():0;
     AcquireSRWLockExclusive(&graphics_display_lock);
     --graphics_display_waiters;
     ReleaseSRWLockExclusive(&graphics_display_lock);
     if(profile) {
-        uint64_t returned=dispatch_monotonic();
+        uint64_t returned=graphics_clock_now();
         if(returned-started>500000)
             fprintf(stderr,"[VBLANK WAIT] thread=%lu priority=%d start=%llu deadline=%llu awake=%llu returned=%llu\n",
                 GetCurrentThreadId(),GetThreadPriority(GetCurrentThread()),(unsigned long long)started,
@@ -215,21 +265,46 @@ static uint32_t graphics_present(void)
 {
     if(graphics_clock_closing || dispatch_in_dpc)stop("swap in closing device or DPC",0);
     graphics_present_interval(MEM32(PILOT_D3D_PRESENT_INTERVAL));
+#if defined(PILOT_SCHEDULING_LLE) && !defined(PILOT_DISPLAY_LLE)
+    struct ComponentWait wait={0};
+#endif
     ++graphics_clock_waiters;
     for(;;) {
         graphics_present_retire(0);
         if(graphics_present_count==2) {
+#if defined(PILOT_SCHEDULING_LLE) && !defined(PILOT_DISPLAY_LLE)
+            ReleaseSRWLockExclusive(&graphics_lock);
+            const char *error=wait.event?NULL:component_wait_open(&wait);uint32_t status=0;
+            if(!error)error=component_wait_slice(&wait,10000,&status);
+            AcquireSRWLockExclusive(&graphics_lock);if(error)stop(error,0);
+#else
             if(!SleepConditionVariableSRW(&graphics_present_changed,&graphics_lock,1,0) && GetLastError()!=ERROR_TIMEOUT)
                 stop("presentation queue wait failed",GetLastError());
+#endif
             continue;
         }
-        if(graphics_parameters[12]==0x80000000u || dispatch_monotonic()>=graphics_swap_deadline)break;
+        if(graphics_parameters[12]==0x80000000u || graphics_clock_now()>=graphics_swap_deadline)break;
         uint64_t deadline=graphics_swap_deadline;
+#if defined(PILOT_SCHEDULING_LLE) && !defined(PILOT_DISPLAY_LLE)
+        uint64_t remaining=deadline-graphics_clock_now();
+        ReleaseSRWLockExclusive(&graphics_lock);
+        const char *error=wait.event?NULL:component_wait_open(&wait);uint32_t status=0;
+        if(!error)error=component_wait_slice(&wait,(uint32_t)(remaining>10000?10000:remaining),&status);
+        AcquireSRWLockExclusive(&graphics_lock);if(error)stop(error,0);
+#else
         ReleaseSRWLockExclusive(&graphics_lock);graphics_wait_until(deadline);AcquireSRWLockExclusive(&graphics_lock);
+#endif
     }
     --graphics_clock_waiters;
+#if defined(PILOT_SCHEDULING_LLE) && !defined(PILOT_DISPLAY_LLE)
+    if(wait.event) {
+        ReleaseSRWLockExclusive(&graphics_lock);
+        const char *error=component_wait_close(&wait);
+        AcquireSRWLockExclusive(&graphics_lock);if(error)stop(error,0);
+    }
+#endif
     graphics_capture_present();
-    uint64_t submitted=dispatch_monotonic(),target=graphics_parameters[12]==0x80000000u?0:graphics_frame_at(submitted)+1;
+    uint64_t submitted=graphics_clock_now(),target=graphics_parameters[12]==0x80000000u?0:graphics_frame_at(submitted)+1;
 #ifdef PILOT_DISPLAY_LLE
     display_lle_present(graphics_swap_submitted+1,graphics_parameters[12]);
 #endif
@@ -249,7 +324,9 @@ static uint32_t graphics_present(void)
     if(!graphics_clock_presented) {
         graphics_clock_presented=1;
 #ifndef PILOT_DISPLAY_LLE
+#ifndef PILOT_SCHEDULING_LLE
         if(!graphics_callback)dispatch_pulse_set(graphics_clock_origin,graphics_clock_hz,graphics_vblank_deliver);
+#endif
 #endif
     }
     uint64_t logging=graphics_service_profile_enabled()?dispatch_monotonic():0;
@@ -261,3 +338,36 @@ static uint32_t graphics_present(void)
     }
     return swap;
 }
+
+#if defined(PILOT_SCHEDULING_LLE) && !defined(PILOT_DISPLAY_LLE)
+/* Runs only inside the original engine's existing clock/device pump. A native
+ * component may be suspended with graphics_lock held during an original VM
+ * service; skip that sample rather than recurse or take a thread gate here.
+ * Historical display edges cannot receive newly observed GPU completion. */
+static const char *graphics_original_clock_work(void)
+{
+    if(!TryAcquireSRWLockExclusive(&graphics_lock))return NULL;
+    if(graphics_active && !graphics_clock_closing && (graphics_clock_presented || graphics_callback)) {
+        graphics_present_retire(0); /* Immediate flips still require real GPU completion. */
+        uint64_t observed=graphics_frame_at(graphics_clock_now());
+        while(graphics_original_pulse_frame<observed) {
+            uint64_t frame=++graphics_original_pulse_frame;
+            unsigned retired=frame==observed?graphics_present_retire(frame):0;
+            graphics_original_pulse_flags=graphics_swap_flags(retired,frame);
+        }
+    }
+    ReleaseSRWLockExclusive(&graphics_lock);return NULL;
+}
+static const char *graphics_original_clock_bind(void)
+{
+    if(graphics_original_clock_bound)return "original native display clock already bound";
+    if(!pilot_io_device_clock_bound())return "original native display requires bound clock";
+    uint64_t ticks=0,next=0;const char *error=pilot_usb_pit_clock(&ticks,&next);
+    if(error)return error;
+    if(!next)return "original native display requires programmed PIT";
+    error=pilot_io_device_work_bind(graphics_original_clock_work);if(error)return error;
+    const uint8_t thunk[]={0xc2,0x10,0};
+    memcpy(memory+PILOT_IO_GRAPHICS_DPC_ENTRY,thunk,sizeof(thunk));
+    graphics_original_clock_bound=1;graphics_original_pulse_frame=0;return NULL;
+}
+#endif

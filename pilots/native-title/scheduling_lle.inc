@@ -35,6 +35,10 @@ static void scheduling_lle_run(void)
 {
     const char *clock_error=pilot_io_device_clock_start();
     if(clock_error)stop(clock_error,0);
+#if defined(PILOT_D3D_NATIVE) && !defined(PILOT_DISPLAY_LLE)
+    clock_error=graphics_original_clock_bind();
+    if(clock_error)stop(clock_error,0);
+#endif
     uint32_t directory=file32(0x12c),tls_size=0;
     if(directory) {
         uint32_t first=MEM32(directory),end=MEM32(directory+4),zero=MEM32(directory+16);

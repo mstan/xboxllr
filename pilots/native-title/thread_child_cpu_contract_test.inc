@@ -3,7 +3,7 @@
 #define THREAD_CHILD_PARENT 0x12a00u
 #define THREAD_CHILD_SIMPLE 0x12c00u
 #define THREAD_CHILD_SYSTEM 0x12c80u
-struct ThreadChildCode {uint8_t bytes[512];unsigned size;};
+struct ThreadChildCode {uint8_t bytes[1024];unsigned size;};
 static void child_emit(struct ThreadChildCode *code,const uint8_t *bytes,unsigned size)
 {
     CHECK(size<=sizeof(code->bytes)-code->size);

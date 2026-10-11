@@ -55,6 +55,11 @@ static void test_usb_dpc(void);
 #ifdef PILOT_D3D_NATIVE
 static void test_vblank_callback(void);
 static void test_gpu_callback(void);
+#if defined(PILOT_SCHEDULING_LLE) && !defined(PILOT_DISPLAY_LLE)
+static void test_graphics_callback_vblank_a(void);
+static void test_graphics_callback_vblank_b(void);
+static void test_graphics_callback_gpu(void);
+#endif
 #endif
 
 static void test_worker(void)
@@ -85,7 +90,8 @@ recomp_func_t recomp_lookup(uint32_t va) {
     if(va==0x125c0)return test_thread_timeout_body;
     if(va==0x126c0)return test_thread_idle_clock_body;
     if(va==0x126e0)return test_thread_compute_body;
-    if(va==0x12740 || va==0x127a0 || va==0x12840 || va==0x12a00 || va==0x12c00 || va==0x12c80 || va==0x12d00 || va==0x12e00 || va==0x12f00 || va==0x13200 || va==0x13500 || va==0x13800 || va==0x13900 || va==0x13a00 || va==0x13b00 || va==0x13c00 || va==0x13d00 || va==0x13e00 || va==0x13f00 || va==0x15000 || va==0x16000 || va==0x16400 || va==0x16500 || va==0x16700 || va==0x16800 || va==0x17000 || va==0x17200 || va==0x17400 || va==0x17600)return test_thread_cpu_body;
+    if(va==0x12740 || va==0x127a0 || va==0x12840 || va==0x12a00 || va==0x12c00 || va==0x12c80 || va==0x12d00 || va==0x12e00 || va==0x12f00 || va==0x13200 || va==0x13500 || va==0x13800 || va==0x13900 || va==0x13a00 || va==0x13b00 || va==0x13c00 || va==0x13d00 || va==0x13e00 || va==0x13f00 || va==0x15000 || va==0x16000 || va==0x16400 || va==0x16500 || va==0x16700 || va==0x16800 || va==0x17000 || va==0x17200 || va==0x17400 || va==0x17600 || va==0x17800)return test_thread_cpu_body;
+    if(va==0x18100 || va==0x18b00 || va==0x18e00)return test_thread_cpu_body;
     if(va==0x12800)return test_thread_cpu_peer;
 #endif
 #ifdef PILOT_USB_LLE
@@ -95,6 +101,11 @@ recomp_func_t recomp_lookup(uint32_t va) {
 #ifdef PILOT_D3D_NATIVE
     if(va==0x12300 || va==0x12320)return test_vblank_callback;
     if(va==0x12360)return test_gpu_callback;
+#if defined(PILOT_SCHEDULING_LLE) && !defined(PILOT_DISPLAY_LLE)
+    if(va==0x17a00)return test_graphics_callback_vblank_a;
+    if(va==0x17a40)return test_graphics_callback_vblank_b;
+    if(va==0x17a80)return test_graphics_callback_gpu;
+#endif
 #endif
     return va==test_worker_address ? test_worker : va==0x12100 ? test_dpc : va==0x12200 ? test_scheduler_worker : NULL;
 }
@@ -145,6 +156,7 @@ static void call_kernel(unsigned ordinal,const uint32_t *args,unsigned argc)
 #include "thread_string_cpu_contract_test.inc"
 #include "thread_string_compare_cpu_contract_test.inc"
 #include "thread_device_cpu_contract_test.inc"
+#include "thread_delay_cpu_contract_test.inc"
 #include "idle_interrupt_stack_contract_test.inc"
 #include "rtc_contract_test.inc"
 #include "smbus_contract_test.inc"
@@ -467,6 +479,10 @@ static void test_timers(void)
 #include "thread_graphics_component_contract_test.inc"
 #include "thread_graphics_resource_contract_test.inc"
 #include "thread_graphics_fence_contract_test.inc"
+#ifndef PILOT_DISPLAY_LLE
+#include "thread_graphics_pulse_contract_test.inc"
+#include "thread_graphics_callback_contract_test.inc"
+#endif
 #include "thread_graphics_gate_contract_test.inc"
 #endif
 #endif
@@ -550,6 +566,10 @@ int main(int argc,char **argv)
 #if defined(PILOT_D3D_NATIVE) && defined(PILOT_SCHEDULING_LLE) && defined(PILOT_EVENT_TIMER_LLE)
         if(!strncmp(argv[1],"graphics-component-",19)) {
             CHECK(argc==3);
+#ifndef PILOT_DISPLAY_LLE
+            if(!strcmp(argv[1],"graphics-component-pulse-lle")) {test_thread_graphics_pulse_lle(argv[2]);return 0;}
+            if(!strcmp(argv[1],"graphics-component-callbacks-lle")) {test_thread_graphics_callback_lle(argv[2]);return 0;}
+#endif
             if(!strcmp(argv[1],"graphics-component-gate-lle")) {test_thread_graphics_gate_lle(argv[2]);return 0;}
             if(!strcmp(argv[1],"graphics-component-fence-lle") ||
                !strcmp(argv[1],"graphics-component-fence-zero-guard-lle") ||
@@ -674,6 +694,7 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"thread-idle-clock-lle")) { test_thread_idle_clock_lle(); return 0; }
         if (!strcmp(argv[1],"thread-idle-runtime-clock-lle")) { thread_idle_runtime_clock=1;test_thread_idle_clock_lle();return 0; }
         if (!strcmp(argv[1],"thread-compute-clock-lle")) { test_thread_compute_clock_lle(); return 0; }
+        if (!strcmp(argv[1],"thread-delay-cpu-lle")) { test_thread_delay_cpu_lle(); return 0; }
         if (!strcmp(argv[1],"thread-cpu-lle")) { test_thread_cpu_lle(); return 0; }
         if (!strcmp(argv[1],"thread-child-cpu-lle")) { test_thread_child_cpu_lle(); return 0; }
         if (!strcmp(argv[1],"thread-vm-cpu-lle")) { test_thread_vm_cpu_lle(); return 0; }
@@ -719,6 +740,8 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"thread-string-cpu-lle")) {test_thread_string_cpu_lle();return 0;}
         if (!strcmp(argv[1],"thread-string-compare-cpu-lle")) {test_thread_string_compare_cpu_lle();return 0;}
         if (!strcmp(argv[1],"thread-device-cpu-lle")) {test_thread_device_cpu_lle(0);return 0;}
+        if (!strcmp(argv[1],"thread-device-wait-dma-lle")) {test_thread_device_cpu_lle(3);return 0;}
+        if (!strcmp(argv[1],"thread-device-dma-guard-lle")) { test_thread_device_cpu_lle(2); return 0; }
         if (!strcmp(argv[1],"thread-device-pin-guard-lle")) {test_thread_device_cpu_lle(1);return 0;}
 #ifdef PILOT_SCHEDULING_LLE
         if (!strcmp(argv[1],"callback-kernel-guard-lle")) {test_callback_kernel_guard_lle();return 0;}
