@@ -43,6 +43,14 @@ Blinx regression per coherent batch. Retain explicit outcomes for each contract;
 a bundled pass does not close an unimplemented service. Reuse captured evidence
 and avoid repeating whole attract runs for documentation or test-only changes.
 
+The owned-marker bootstrap preparation adds separate preflight, one-reset-store
+and read-only observation phases:10 checks/70 compiled x86 contexts pass
+in14.77s, with351 reviewed identities and actual pinned DSP marker/STOP.
+Corrected physical calibration and bootstrap remain unobserved; the stopped
+hardware session still requires owner inspection/restart. See the
+[three-phase evidence](../pilots/native-title/AUDIO-LLE.md#owned-marker-bootstrap-preparation---2026-10-11).
+The family count stays4/9 and the26 safe precision deferrals are unchanged.
+
 Parallel qualification batches now register the shared writable pilot HDD as
 a CTest resource. File-capable runtime tests using the same image queue within
 one invocation; independent DSP/clock/frame tests remain parallel. The runtime's

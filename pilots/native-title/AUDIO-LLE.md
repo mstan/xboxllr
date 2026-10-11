@@ -1687,3 +1687,30 @@ high addresses from the stopped calibration fail that floor. No masked reuse,
 hardware runner, automatic retry or production APU change is supplied. GP/EP
 startup, timer/cadence, bit9, full output and the audio parent remain open;
 family count stays4/9 and the26 safe precision deferrals are unchanged.
+
+## Owned marker bootstrap preparation - 2026-10-11
+
+The independent `.113.17` preparation supplies separate closed read-only
+preflight, single-reset-store start and bounded read-only observation payloads.
+They require a fresh successful corrected16KiB calibration, the actual retained
+nine-page mapping/protection/physical/extent and pin record, exact provenance,
+all2048 SG entries and all4096 STOP/marker source words. The initial marker must
+differ from the token, and a genuine advancing bounded kernel counter is checked
+before RESET3. Start returns its immediate raw reset readback and performs no
+further device, kernel, time or RAM operation. Root may consider observation
+only after an actual returned3; an unexpected reply stops the session.
+
+Observation revalidates the owner and exact controls, bounds marker reads by
+100000 polls/50ms and compares all2048 reference-bootstrap P words. All10 checks
+pass across70 actual compiled x86 contexts in14.765973s; root verified351 source,
+binary, input, capture and proof identities. The pinned DSP executes the authored
+marker and STOP, with a wrong-target rejection. The hardware loader/control
+model remains an explicit offline assumption. Earlier failed relocation source,
+object and log are retained.
+
+The [three-phase plan](https://github.com/mstan/xboxlle-probe/blob/feat/av-handshake-probe-20261009/docs/GP-MARKER.md)
+is reviewable; private evidence remains under
+`build/blinx/audio-gp-marker-20261011`. No physical console, network, title or
+playback operation is part of this preparation. Original GP/EP boot, timers,
+bit9, cadence and full output remain required; the family count stays4/9 and
+the26 safe precision deferrals are unchanged.
