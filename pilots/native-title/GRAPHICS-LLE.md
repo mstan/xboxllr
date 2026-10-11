@@ -6,6 +6,56 @@ transform, rasterization, framebuffer writes and visibility-report DMA in
 `src/machine/nv2a.cpp`. This document records component qualification; full
 graphics-family acceptance remains open and the total remains **4/9**.
 
+## Original PLL access widths and complete initializer inventory - 2026-10-11
+
+Probe commit `9082110` prepares one fixed read-only comparison for the actual
+original PLL accesses. Retained Blinx startup reads each coefficient as a
+DWORD, then a byte at offset+1, then a DWORD. The maintained extraction and
+general BAR0 DWORD advice do not prove physical NV2A byte behavior. Nine planned
+loads compare only these three aliases, without a register write, new image,
+kernel call or mode change. A mismatch, changed coefficient, malformed reply
+or timeout stops immediately; received replies and the pending attempt remain
+private, with no retry or following operation. The existing ARM gate remains.
+
+All **six focused checks pass**, with no skips: actual x86 loads/caller-state
+preservation, both protocol lengths over loopback, fixed address/width and
+preconnect guards, denied identity/ARM and stopped-session evidence. This is
+prepared observation only. It neither widens the diagnostic's BAR0 access
+policy nor changes the maintained PLL model. The prior hardware stop still
+requires owner inspection/restart before any live operation. See the
+[exact fixed comparison](https://github.com/mstan/xboxlle-probe/blob/9082110c28e018201e158526fca41b923dab0261/docs/PLL-WIDTHS.md).
+Private proof:
+`build/blinx/pll-access-widths-20261011/qualified-preparation.aot-private.json`,
+SHA-256 `330c58e302e38ab8b7d3a9b12db5de19b0482d3e5b949a26a923867a1342dc42`.
+
+The independent worker inventories the complete remaining SDK initializer in
+fifteen dependency rows, reusing existing producer and runtime evidence.
+Actual original XDK startup calls export168 with0x5000; the diagnostic's pinned
+SDK calls it with query-only UINT_MAX. Existing nine original shrink/repeat
+cases across three lifetimes already establish real page release and retained
+protection. Changing the SDK query to a shrink would add a page-release effect;
+neither a successful claim nor an exclusive IRQ establishes an exclusive
+instance-memory user. Compose the actual renderer/reservation lifetime before
+admitting any aperture marker or protection transition.
+
+The requested RAMFC word00890110 and SDK comment008A0110 differ in **both**
+LARGE and UNK17. Linux's NV2A-selected NV17 FIFO supports the defined64-byte
+context layout but does not explain the high field. Its generic instance owner
+also supplies no Xbox CPU/PRAMIN alias formula. The live RAMFC write remains
+guarded. `pb_running` is set before graph/context/DMA/tile initialization;
+capture requires the genuine final successful return, not that early service
+flag. Known context, graph/tile/IRQ, actual DMA consumption and owned targets
+remain coherent implementation work; the inventory does not qualify those rows.
+
+Root verifies all five b44 source bindings and36 frozen inventory artifacts.
+Private report:
+`build/blinx/noise-initializer-chain-20261011/qualified-initializer-chain.aot-private.json`,
+SHA-256 `ad0307913bdc861776669f03285985edcd7102467946e1cb7b2cb98a1a60b433`.
+No new original execution, title/audio run or hardware request was needed for
+the inventory. The maintained instance store still uses the explicit separate
+PRAMIN reference memory; its equivalence to shared physical RAM is unqualified.
+No HLE change, family closure or new precision deferral;4/9 and26 remain.
+
 ## Idle RAMHT selection and instance ownership boundary - 2026-10-11
 
 Probe commit `b44ad87` advances the actual SDK initializer through documented
