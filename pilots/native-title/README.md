@@ -43,7 +43,11 @@ seven-store FP observation establishes the tested programmed write bank with
 verified restoration; maintained register/MMIO/scanout checks pass3/3. Alternate
 read provenance and activation remain separate required contracts. The preceding
 82-check/8.000s startup retains its prior renderer identity; no new attract or
-playback run follows from these component checks.
+playback run follows from these component checks. Fresh owned DSP RAM
+preparation/inspection now passes on hardware, but the sole SG store returns
+a different physical base. Probing stopped immediately, without starting a DSP.
+The original16KiB table alignment replaces the probe's insufficient4KiB request;
+12 corrected offline checks pass, with hardware calibration still required.
 Whole title scheduling remains unqualified. See
 [the CPU route and remaining integration](SCHEDULING-LLE.md#original-cpugpu-device-ownership---2026-10-10).
 

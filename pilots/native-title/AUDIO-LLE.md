@@ -1619,3 +1619,43 @@ B0..B3, silicon phase/rate/epoch, hardware reset/cadence, coherent EP
 C5/CA/D5 startup, bit9, real EP wake and whole original output remain open.
 The demonstrated GP producer/transport/lease route can be reused once its
 instrumentation contract is established; it does not manufacture EP readiness.
+
+## Fresh owned-RAM calibration prerequisite - 2026-10-11
+
+The independent `.113.15` preparation adds a closed three-stage probe builder:
+fresh nine-page uncached allocation with mapping/physical/protection/extent
+checks and pinning; retained ownership/table/image inspection; then one SG
+store returning the immediate raw readback. Every SG entry addresses retained
+STOP-filled input/guard pages. No inherited SG RAM is loaded, neither DSP starts,
+and no device operation follows the calibration readback. The finite authored
+B3 stimulus is checked on the pinned CPU using injected samples, exact X targets
+and STOP. It does not establish MCPX timer semantics. The frozen original
+preparation passed11/11 offline checks;93 identities were reviewed.
+
+A root-coordinated distinct hardware observation passes fresh quiet context,
+owned allocation and retained inspection. The sole GP SG-address store requested
+03E8A000 and returned03E88000. The host stops immediately, with no subsequent
+request, restoration, free/unlock or DSP start. No boot/storage operation occurs.
+This supplies the exact previously missing readback and proves the observed
+kernel mapping/physical/protection/extent/pin and owned-RAM preparation path;
+it does not prove that the changed register points to owned storage or permits
+bootstrap. Hardware probing waits for owner inspection/restart.
+
+The probe's4KiB alignment was insufficient. Independently matched original GP
+and EP allocator calls in all three retained layouts request16KiB SG-table
+alignment. The corrected preparation now requests and guards16KiB, rejecting
+the exact failed address before any owned RAM or device access. All12 focused
+checks pass in5.64s, including three preparation/inspection/calibration layouts,
+six raw unexpected readbacks and the unchanged pinned B3 instruction check.
+The old code/payload/hardware reply and an initial changed-context fixture
+expectation retain their separate source/proof identities. One cleared physical
+bit is not a complete silicon mask measurement, and exact calibration remains
+required before any start. No production APU/DSP behavior changes.
+
+The [three-stage contract](https://github.com/mstan/xboxlle-probe/blob/feat/av-handshake-probe-20261009/docs/GP-OWNED-CALIBRATION.md)
+is concrete and reviewable; original images and console data stay private.
+Private evidence is `audio-gp-owned-20261011/qualified-preparation.aot-private.json`,
+`hardware-20261011/status.aot-private.json`, `original-sg-alignment.aot-private.json`
+and `aligned16k/final-qualified.aot-private.json` under that directory. Actual
+SG encoding/calibration, GP boot, B0..B3, original EP C5/CA/D5/bit9/wake, cadence
+and whole audio output remain required. The family count stays4/9.
