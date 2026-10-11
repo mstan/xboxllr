@@ -18,6 +18,12 @@ event/byte/error/lifetime checks. Contiguous allocation165 is next.
 Whole title scheduling remains unqualified. See
 [the CPU route and remaining integration](SCHEDULING-LLE.md#actual-thread-file-transport---2026-10-10-continuation).
 
+The independent GP owner now carries actual selected events, callback-safe
+yield/resume and a real VP MIX lease. Fifteen focused APU checks and two fresh
+optional pilot frame checks pass. Unchanged original helper calls pass; whole
+firmware bootstrap stops at its next guarded timer setup, FFFFB2=FFFFFF.
+Full GP graph/output remains required. The default HLE gains no DSP work.
+
 Original ROM reads additionally require the owned256KiB flash input, configured
 with `-DPILOT_IO_DEVICE_ROM=F:/Projects/xboxlle/machine/flash-dump-ff000000.bin`.
 Its hash is checked at configuration and load; the RAM bridge's ROM backing is

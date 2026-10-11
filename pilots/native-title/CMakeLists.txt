@@ -133,6 +133,13 @@ if(PILOT_AUDIO_BACKEND STREQUAL "XAUDIO2_DSP")
     "-DPROGRAM=$<TARGET_FILE:pilot_gp_processor_test>"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/apu_gp_processor_guards.cmake")
   set_tests_properties(pilot_gp_processor_contract pilot_gp_processor_guards PROPERTIES TIMEOUT 20)
+  add_executable(pilot_gp_frame_test "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_apu_gp_frame.cpp")
+  target_link_libraries(pilot_gp_frame_test PRIVATE xlle_apu_gp_processor)
+  add_test(NAME pilot_gp_frame_contract COMMAND pilot_gp_frame_test)
+  add_test(NAME pilot_gp_frame_guards COMMAND "${CMAKE_COMMAND}"
+    "-DPROGRAM=$<TARGET_FILE:pilot_gp_frame_test>"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/apu_gp_frame_guards.cmake")
+  set_tests_properties(pilot_gp_frame_contract pilot_gp_frame_guards PROPERTIES TIMEOUT 20)
   add_executable(pilot_gp_lle_test audio_gp_lle_test.cpp)
   target_include_directories(pilot_gp_lle_test PRIVATE "${PILOT_DSP_SOURCE}/crates/emu-ffi/include")
   target_compile_definitions(pilot_gp_lle_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)

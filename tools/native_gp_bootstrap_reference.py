@@ -39,14 +39,16 @@ def check(image, processor, output):
     log.write_text(run.stdout+run.stderr, newline='\n')
     stopped = (run.returncode == 2 and
                'guarded before P/node publication' in run.stderr and
-               'unqualified GP interrupt acknowledgement' in run.stderr)
+               'unqualified GP peripheral write' in run.stderr and
+               'at ffffb2' in run.stderr)
     record = dict(image_sha256=IMAGE_SHA256, data_address=hex(address), data_size=size,
                   data_sha256=sha(boot), processor_sha256=sha(processor),
                   tool_sha256=sha(Path(__file__)), log_sha256=sha(log),
                   process_exit=run.returncode, expected_guard_observed=stopped,
                   original_boot_qualified=False,
-                  boundary='Original entry JSR0155 reaches real FFFFC5=0FFF acknowledgement; '
-                           'the maintained peripheral admits only its qualified DMA status bit80.',
+                  boundary='Original entry executes startup clear and DMA context, then '
+                           'stops at unowned FFFFB2=FFFFFF clock configuration. The earlier '
+                           'FFFFC5=0FFF guarded evidence remains bound to its previous sources.',
                   limits='Mapped 8-KiB boot profile with exact original1484-byte prefix and '
                          'authored STOP tail; not original full scratch layout, hardware '
                          'bootstrap, whole GP/graph, cadence, FIFO or EP output.')

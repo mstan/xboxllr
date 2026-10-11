@@ -40,3 +40,14 @@ void xlle_dsp_core_result(XlleDspCore* core,uint32_t* pc,uint32_t* power,uint32_
     Dsp56300State state;dsp56300_get_state(core->dsp,&state);
     *pc=state.pc;*power=state.power_state;*sp=state.registers[DSP56300_REG_SP];
 }
+void xlle_dsp_core_set_halted(XlleDspCore* core,int halted) {
+    dsp56300_set_halt_requested(core->dsp,halted!=0);
+}
+int xlle_dsp_core_halted(XlleDspCore* core){return dsp56300_halt_requested(core->dsp);}
+uint32_t xlle_dsp_core_discard_unused_budget(XlleDspCore* core) {
+    Dsp56300State state;dsp56300_get_state(core->dsp,&state);
+    if(state.cycle_budget<=0)return 0;
+    uint32_t unused=(uint32_t)state.cycle_budget;
+    state.cycle_budget=0;dsp56300_set_state(core->dsp,&state);return unused;
+}
+uint32_t xlle_dsp_core_cycles(XlleDspCore* core){return dsp56300_cycle_count(core->dsp);}

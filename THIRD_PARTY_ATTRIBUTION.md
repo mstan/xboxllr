@@ -1678,6 +1678,12 @@ The shared file-buffer preparation and original CPU file fixtures are authored
 here over the already credited private FATX/IDE/PIC/VM floor. They reuse its
 existing factual signature/metadata/error contract and independently supplied
 owned file bytes, without importing original driver bodies into source.
+The GP event/frame/yield ownership adapter and fixtures are independently
+authored here. Callback-safe halt and actual cycle-budget state reuse the
+already credited pinned MIT DSP ABI. The primary Motorola manual supplies
+peripheral-map distinctions; unchanged private original helpers establish
+MCPX polling/acknowledgement behavior. No xemu implementation body or original
+firmware bytes are incorporated into committed source.
 
 ## Theseus behavioral reference
 

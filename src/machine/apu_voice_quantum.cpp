@@ -8,6 +8,7 @@ namespace xlle {
 bool McpxApu::process_2d_quantum(ApuVoiceQuantum& result) {
     result={};
     if(faulted_)return false;
+    if(!gp_mix_publication(true))return false;
     if(processing_quantum_) {device_fault("recursive VP quantum admission");return false;}
     if(!(reg32(kSectl)&0x18) || (reg32(kFectl)&kFectlMethodMode))return true;
     if(uint16_t(reg32(kVoiceTop[1]))!=kNullVoice || uint16_t(reg32(kVoiceTop[2]))!=kNullVoice) {

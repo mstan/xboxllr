@@ -18,6 +18,13 @@ void xlle_dsp_core_invalidate_program(XlleDspCore* core);
 void xlle_dsp_core_begin(XlleDspCore* core,uint32_t pc);
 void xlle_dsp_core_run(XlleDspCore* core,uint32_t cycles);
 void xlle_dsp_core_result(XlleDspCore* core,uint32_t* pc,uint32_t* power,uint32_t* sp);
+/* Vendor frame yield is a callback-safe halt request, separate from STOP.
+ * Discard only unspent positive budget between runs; preserve instruction
+ * debt, actual elapsed cycles, registers, stack and next PC. */
+void xlle_dsp_core_set_halted(XlleDspCore* core,int halted);
+int xlle_dsp_core_halted(XlleDspCore* core);
+uint32_t xlle_dsp_core_discard_unused_budget(XlleDspCore* core);
+uint32_t xlle_dsp_core_cycles(XlleDspCore* core);
 #ifdef __cplusplus
 }
 #endif

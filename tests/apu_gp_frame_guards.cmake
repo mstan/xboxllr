@@ -1,0 +1,6 @@
+foreach(mode yield-mask startup-late)
+  execute_process(COMMAND "${PROGRAM}" "${mode}" RESULT_VARIABLE result OUTPUT_VARIABLE out ERROR_VARIABLE err TIMEOUT 20)
+  if(NOT result EQUAL 2 OR NOT "${err}" MATCHES "expected frame guard")
+    message(FATAL_ERROR "${mode}: expected bounded guard2, got ${result}; ${out}${err}")
+  endif()
+endforeach()

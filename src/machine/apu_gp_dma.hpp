@@ -15,15 +15,18 @@ public:
     using Fifo=std::function<bool(unsigned,void*,uint32_t,bool)>;
     using Fault=std::function<void(const std::string&)>;
     using ProgramWrite=std::function<bool()>;
-    ApuGpDma(Word word,Bytes bytes,Fifo fifo,Fault fault,ProgramWrite program_write={})
+    using MixWrite=std::function<bool()>;
+    ApuGpDma(Word word,Bytes bytes,Fifo fifo,Fault fault,ProgramWrite program_write={},MixWrite mix_write={})
         :word_(std::move(word)),bytes_(std::move(bytes)),fifo_(std::move(fifo)),
-         fault_(std::move(fault)),program_write_(std::move(program_write)){}
+         fault_(std::move(fault)),program_write_(std::move(program_write)),mix_write_(std::move(mix_write)){}
     bool read(uint32_t address,uint32_t& value) {
         if(failed_)return false;
         switch(address) {
         case 0xffffc5:value=interrupts_;return true;
         case 0xffffd4:value=next_;return true;
+        case 0xffffd5:value=start_;return true;
         case 0xffffd6:value=control_;return true;
+        case 0xffffd7:value=0;return true;
         default:return fail("unqualified GP peripheral read");
         }
     }
@@ -36,6 +39,12 @@ public:
         case 0xffffd4:
             if(value&~0x7fffu)return fail("invalid GP DMA node pointer");
             next_=value;return true;
+        case 0xffffd5:
+            if(value&~0x3fffu)return fail("invalid GP DMA start pointer");
+            start_=value;return true;
+        case 0xffffd7:
+            if(value)return fail("unqualified GP DMA configuration");
+            return true;
         case 0xffffd6:
             switch(value) {
             case 1:control_=(control_&8)|16;return run();
@@ -84,6 +93,11 @@ private:
                 words[i]=word_(node[3]+i);
                 if(!words[i])return fail("GP DMA sample outside memory banks");
             }
+            // The VP/host/input-DMA bank publisher cannot take a GP frame's
+            // leased MIX. Check before any physical input or FIFO cursor work.
+            if(!output && node[3]<0x1800 && uint64_t(node[3])+count>0x1400 &&
+               mix_write_ && !mix_write_())
+                return fail("GP MIX DMA publication was rejected");
             const uint32_t size=node[6]+1,width=format==1?2:4;uint32_t offset=node[4];
             if(scratch && offset>=size)return fail("unqualified GP DMA initial circular offset");
             std::array<uint8_t,4096*4> packed{};
@@ -119,8 +133,8 @@ private:
         // stop an armed engine; STOP and interrupt acknowledgement are explicit.
         interrupts_|=0x80;return true;
     }
-    Word word_;Bytes bytes_;Fifo fifo_;Fault fault_;ProgramWrite program_write_;
-    uint32_t next_=0,control_=32,interrupts_=0;
+    Word word_;Bytes bytes_;Fifo fifo_;Fault fault_;ProgramWrite program_write_;MixWrite mix_write_;
+    uint32_t next_=0,start_=0,control_=32,interrupts_=0;
     uint64_t nodes_=0;bool failed_=false;
 };
 } // namespace xlle

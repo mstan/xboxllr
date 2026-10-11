@@ -5,11 +5,13 @@
 #include "machine/apu_dsp_core.h"
 
 namespace xlle {
-enum class ApuGpPhase { Held,Ready,Running,Stopped,Failed };
+enum class ApuGpPhase { Held,Ready,Running,Yielded,Stopped,Failed };
 struct ApuGpRun {
     bool returned=false;
     uint32_t pc=0,power=0,sp=0;
     uint64_t sequence=0;
+    bool yielded=false;
+    uint32_t cycles=0,unused_cycles=0;
 };
 
 class ApuGpProcessor {
@@ -28,6 +30,10 @@ public:
     // profile remains distinct from an observed MCPX hardware bootstrap.
     bool bootstrap_from_scratch();
     bool run(uint32_t cycles,ApuGpRun& result);
+    // Caller supplies cadence, not event contents: process the actual VP and
+    // resume only after its complete bank publication. A disabled/idle quantum
+    // remains yielded and posts nothing. MIX stays leased until actual yield.
+    bool start_frame(ApuVoiceQuantum& result);
     ApuGpPhase phase()const{return phase_;}
     uint64_t bootstraps()const{return bootstraps_;}
 private:
@@ -41,6 +47,6 @@ private:
     XlleDspCore* core_=nullptr;
     ApuGpPhase phase_=ApuGpPhase::Held;
     uint64_t bootstraps_=0,runs_=0,program_revision_=0;
-    bool executing_=false,bound_=false;
+    bool executing_=false,bound_=false,frame_bound_=false,initializing_=false;
 };
 } // namespace xlle

@@ -1101,6 +1101,80 @@ and `original-gp-bootstrap-guard.aot-private.json`. No reference DLL, playback,
 whole-title run or console operation is part of this batch. The new ownership
 module and fixtures are authored here; no xemu implementation body is imported.
 
+## Owned GP events, frames and yield - 2026-10-10
+
+The reached `FFFFC5` is an MCPX polled event register. Its identity is not
+inherited from Motorola's peripheral map:
+[DSP56362UM Appendix D](https://www.nxp.com/docs/en/user-guide/DSP56362UM.pdf)
+places HBAR at this address and core interrupt priorities at FFFFFE/FFFFFF.
+The unchanged Xbox firmware instead polls bit1 before frame work and bit7
+after DMA, then writes2/80 selectively. These reached helpers do not require
+invented architectural interrupt-vector delivery. Unknown vendor event bits
+remain outside the admitted profile.
+
+The maintained APU now composes its real frame bit2 with the existing actual
+DMA EOL bit80. Reads neither post an event nor finish DMA. Selected writes clear
+selected flags; acknowledging a frame does not release its input bank. The
+exact original0FFF startup clear is admitted only while this CPU executes its
+mapped bootstrap initialization before its first actual yield. Other unknown
+masks remain guarded. Original D5 start-pointer context and D7 configuration0
+are owned separately; nonzero configuration modes do not fabricate work.
+
+`ApuGpProcessor::start_frame` first processes the actual VP quantum. Only a
+successful published bank with its real VP sequence can acquire the GP lease
+and post bit1. Disabled processing and real idle traps post nothing and leave
+the CPU yielded; an empty active list can publish a real zero MIX bank. The
+frame owner cannot accept an arbitrary caller-supplied generation or bank.
+VP, host MMIO and input-DMA publication cannot overwrite a leased MIX bank;
+the VP guard runs before source/cursor work, and input DMA is rejected before
+physical input/FIFO cursor work. GP CPU access uses the existing mapped bank.
+The publication transaction itself excludes reentrant host/DMA writers. A
+retirement callback that fails a processor entry point cannot revive that
+failed owner or post a frame when the outer transaction returns. Actual VP
+prefix work remains reported; it is not rolled back or labeled GP success.
+
+Actual `FFFFC4=1` requests the pinned core's callback-safe halt. This returns
+at the instruction's actual next PC, preserving registers/stack with power0;
+it is a vendor yield, distinct from STOP/reset. Only that returned yield
+releases the MIX lease. A frame acknowledgement alone does not release it,
+and pending unacknowledged events cannot be overwritten by another start.
+Resuming clears the actual halt after a real frame publication, without a PC
+reset. Positive unused run budget is discarded at yield; negative instruction
+debt and the actual elapsed core cycle count survive. Halted runs cannot add
+unused budget repeatedly. The reported core cycles are CPU diagnostics, not
+an implementation of the unowned MCPX B3 timer or silicon timing evidence.
+Removing an owner with outstanding work faults rather than forging a yield.
+
+One representative batch executes **30 real VP/GP/DMA frames over three
+lifetimes**, with simultaneous selected frame/EOL events and exact CPU/DMA
+copies of real MIX. The independent constant waveform retains the existing
+nominal source-rate tolerance. Cases cover lease overlap before bank/cursor
+changes, disabled/idle admission, failed retirement, reentrant publication and
+CPU failure, abandoned work, STOP versus yield, and preserved instruction debt.
+The unchanged original155, D2 and160 helpers independently clear real X/Y,
+own STOP/FREEZE/default context, spin without an event, and acknowledge the
+frame selectively while actual DMA EOL remains. Authored helper callers are
+explicitly separate from complete original firmware boot.
+
+The unchanged whole1484-byte prefix now passes its earlier C5 boundary and
+stops at actual **FFFFB2=FFFFFF clock configuration**. No timer result is
+substituted. B0..B3 identity/configuration/producer, linear buffer15 transport,
+bit9 executable reload, hardware GPRST/bootstrap/cadence and EP/output remain
+guarded requirements. Exact silicon latency can be deferred after a real
+producer exists; returning a donor's zero B3 value cannot qualify that producer.
+This batch does not close the audio family or claim full firmware/output.
+
+The earlier .113.4 reports/binaries remain unchanged at their original source
+identities. New evidence is in
+`build/blinx/audio-gp-frame-20261010/qualified-batch.aot-private.json` and
+`original-gp-frame-reference.aot-private.json`; the original bytes remain
+private. Initial fixture failures are preserved: fixed run budgets assumed an
+ack instruction had already executed, and the idle fixture omitted the required
+FETFORCE1 flag. The corrected fixtures follow actual event consumption and
+existing legal trap configuration; production guards were not relaxed. The
+default native HLE path gains no DSP work, playback or title runs. No physical
+console operations or preserved reference-DLL rebuilds are part of this batch.
+
 ## References and reuse
 
 - Original NTSC private input: full helpers at `0x1789a0` and `0x178c97`;

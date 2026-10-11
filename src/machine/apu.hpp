@@ -30,6 +30,7 @@
 namespace xlle {
 
 struct ApuRateState;
+class ApuGpProcessor;
 struct ApuEnvelopeStep {
     bool running=false;
     float amplitude=0,filter=0;
@@ -95,7 +96,8 @@ public:
                   [this](uint32_t a,void* data,uint32_t n,bool output){return gp_sge(0x2040,0x20d4,a,data,n,output);},
                   [this](unsigned i,void* data,uint32_t n,bool output){return gp_fifo(i,data,n,output);},
                   [this](const std::string& why){device_fault(why);},
-                  [this]{return gp_program_write();}) {}
+                  [this]{return gp_program_write();},
+                  [this]{return gp_mix_publication();}) {}
     McpxApu(const McpxApu&)=delete;
     McpxApu& operator=(const McpxApu&)=delete;
 
@@ -190,8 +192,21 @@ public:
            (address>=0x2800 && address<0x3800))return gp_words_.data()+address;
         return nullptr;
     }
-    bool gp_read(uint32_t address,uint32_t& value) {return !faulted_ && gp_dma_.read(address,value);}
-    bool gp_write(uint32_t address,uint32_t value) {return !faulted_ && gp_dma_.write(address,value);}
+    bool gp_read(uint32_t address,uint32_t& value) {
+        if(faulted_ || !gp_dma_.read(address,value))return false;
+        if(address==0xffffc5 && gp_frame_pending_)value|=2;
+        return true;
+    }
+    bool gp_write(uint32_t address,uint32_t value) {
+        if(faulted_)return false;
+        if(address!=0xffffc5)return gp_dma_.write(address,value);
+        if((value&~0x82u) && !(value==0xfff && gp_startup_clear_ && gp_startup_clear_())) {
+            device_fault("unqualified GP event acknowledgement mask");return false;
+        }
+        if(!gp_dma_.write(address,value&0x80))return false;
+        if(value&2)gp_frame_pending_=false;
+        return true;
+    }
     uint64_t gp_dma_nodes()const{return gp_dma_.nodes();}
     bool faulted()const{return faulted_;}
     // One serialized CPU owner observes executable host/DMA publication. This
@@ -204,6 +219,48 @@ public:
     void unbind_gp_program_owner(void* owner) {
         if(gp_program_owner_==owner){gp_program_owner_=nullptr;gp_program_guard_={};}
     }
+    // Frame flags are vendor polled events, distinct from core IPR/vector state.
+    // A successful real VP transaction owns MIX until that CPU actually yields.
+private:
+    friend class ApuGpProcessor;
+    bool bind_gp_frame_owner(void* owner,std::function<bool()> startup_clear) {
+        if(!owner || owner!=gp_program_owner_ || !startup_clear || gp_frame_owner_)return false;
+        gp_frame_owner_=owner;gp_startup_clear_=std::move(startup_clear);return true;
+    }
+    void unbind_gp_frame_owner(void* owner) {
+        if(gp_frame_owner_!=owner)return;
+        if(gp_mix_lease_ || gp_frame_pending_)device_fault("GP frame owner removed with outstanding work");
+        gp_frame_owner_=nullptr;gp_startup_clear_={};
+    }
+    bool gp_process_frame(void* owner,ApuVoiceQuantum& result) {
+        result={};
+        if(faulted_)return false;
+        if(!owner || owner!=gp_frame_owner_ || gp_mix_lease_ || gp_frame_pending_ || gp_mix_admitting_) {
+            device_fault("GP frame publication has no available owner");return false;
+        }
+        gp_mix_admitting_=true;
+        struct Scope {bool& flag;~Scope(){flag=false;}} scope{gp_mix_admitting_};
+        if(!process_2d_quantum(result))return false;
+        if(!result.published)return true;
+        if(!result.sequence){device_fault("GP frame publication lacks an actual VP sequence");return false;}
+        gp_mix_lease_=true;return true;
+    }
+    bool gp_post_frame(void* owner) {
+        if(faulted_)return false;
+        if(!owner || owner!=gp_frame_owner_ || !gp_mix_lease_ || gp_frame_pending_) {
+            device_fault("GP frame event has no published MIX owner");return false;
+        }
+        gp_frame_pending_=true;return true;
+    }
+    bool gp_yield_frame(void* owner) {
+        if(faulted_)return false;
+        if(!owner || owner!=gp_frame_owner_) {
+            device_fault("GP frame yield has no matching owner");return false;
+        }
+        gp_mix_lease_=false;return true;
+    }
+public:
+    bool gp_frame_outstanding()const{return gp_mix_lease_ || gp_frame_pending_;}
     // Explicit scratch transport for the GP bootstrap/graph owner. It uses
     // the same physical SGE mapping as descriptor DMA and never starts GP.
     bool gp_scratch(uint32_t address,void* data,uint32_t bytes,bool output) {
@@ -257,6 +314,7 @@ public:
             if(off>=0x3a000 && off<0x3e000 && !gp_program_write()) {
                 device_fault("GP executable host publication was rejected");return;
             }
+            if(off>=0x35000 && off<0x36000 && !gp_mix_publication())return;
             *word=value&0xffffff;return;
         }
         if (off == kIsts && size == 4) {
@@ -366,6 +424,10 @@ private:
     bool gp_program_write() {
         if(gp_program_guard_ && !gp_program_guard_())return false;
         ++gp_program_revision_;return true;
+    }
+    bool gp_mix_publication(bool voice_processor=false) {
+        if(!gp_mix_lease_ && (!gp_mix_admitting_ || (voice_processor && !processing_quantum_)))return true;
+        device_fault("GP MIX publication overlaps an outstanding frame");return false;
     }
     // Unamplified source/rate output and separately evaluated control permit a
     // future owned filter between rate conversion and amplitude application.
@@ -777,6 +839,9 @@ private:
     uint64_t gp_program_revision_=0;
     void* gp_program_owner_=nullptr;
     ApuGpDma::ProgramWrite gp_program_guard_;
+    void* gp_frame_owner_=nullptr;
+    std::function<bool()> gp_startup_clear_;
+    bool gp_mix_lease_=false,gp_frame_pending_=false,gp_mix_admitting_=false;
     ApuGpDma gp_dma_;
     int sub_logged_ = 0;
 };
