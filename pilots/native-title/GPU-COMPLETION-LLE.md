@@ -1693,3 +1693,24 @@ and `callback-service-frames-title-startup-20261011.aot-private.json`. Their49
 sources, ten binaries and unchanged ROM/EEPROM inputs match. Prior mixed-target
 coverage failures and the real two-frame capacity stop remain separate evidence.
 No physical Xbox, playback or repeated attract run was performed.
+
+## Raw AV and encoder services - 2026-10-11
+
+The already maintained original AV2/3 and SMBus45/50 services now accept raw
+original-thread CALL frames. Three device/thread lifetimes check36 original
+returns, independently established AV query values, output DWORD canaries,
+encoder reset/control and actual SMBus IRQ completion. A separate six-argument
+original-thread mode call reaches the genuine FD6806A0 guard without publishing
+success or changing its caller result. The combined batch passes80/80 in15.500s.
+
+One muted actual startup passes the former raw AV2 stop. After7.875s it stops
+while GPU ISR13B210 uses an unpublished original kernel stack at80041BD4.
+Original interrupt-stack ownership/publication is next; cold mode, full title
+rendering and parent qualification remain unproven. The initial test correctly
+triggered the encoder standard-read guard before EN_REG_RD programming; only
+fixture ordering changed. No fabricated hardware result, physical Xbox
+operation, playback or attract rerun was introduced. Default HLE is unchanged.
+
+Private reports: `thread-av-corrected-qualified-20261011.aot-private.json` and
+`thread-av-title-startup-20261011.aot-private.json`, with exact source/binary
+identities and unchanged ROM/EEPROM inputs. Family count remains4/9.

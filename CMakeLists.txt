@@ -428,6 +428,7 @@ target_link_libraries(xlle_apu_reference PRIVATE xlle_apu_rate)
 add_executable(test_aci tests/test_aci.cpp)
 target_include_directories(test_aci PRIVATE ${XLLE_INCLUDES})
 add_test(NAME aci COMMAND test_aci)
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/AciOutput.cmake")
 
 add_executable(test_ide_security tests/test_ide_security.cpp src/machine/ide.cpp)
 target_include_directories(test_ide_security PRIVATE ${XLLE_INCLUDES})

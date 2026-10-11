@@ -1460,3 +1460,40 @@ unmapped inherited aliases preclude retrying the existing bit-nine experiment.
 No console operation or production behavior change follows from this audit.
 
 Private proof: `build/blinx/audio-ep-startup-context-audit-20261010/investigation-plan.aot-private.json`.
+
+## Actual ACI PCM consumption foundation (2026-10-11)
+
+Bounded issue: `beads-xbox.1.113.12`. Maintained ACI formerly advanced its
+sample counter and completed descriptors without reading PCM payload RAM.
+It now reads real owned bytes, with an optional borrowed-byte observer, before
+PICB/address/completion changes. Headless operation performs the same fetch.
+Failed reads, rejected delivery and reentrant owner/register mutation preserve
+the unconsumed cursor and remain terminal. Successful old-buffer completion is
+retained if the next descriptor fetch fails. Pause/resume retains the actual
+descriptor/offset; interrupt-enable changes while RUN remains set do not skip
+data. Last-valid extension, zero-length nodes, ring wrap/remap, reset cleanup
+and completion-IRQ reentry are exercised together. Unsupported PCM rates,
+reserved formats and odd stereo counts remain guarded. Other streams retain
+their existing register behavior.
+
+The [Intel AC97 programmer reference](https://www.alsa-project.org/files/pub/manuals/intel/29802801_801_AC97.pdf),
+sections 2.2 and 2.4, supplies descriptor length, sample pairing, completion and
+pause/last-valid rules. Pinned xemu's MCPX wrapper corroborates the existing
+NAM/NABM layout. No donor implementation body or second APU/DSP owner is added.
+
+Three coherent tests pass. The exact signed-sample consumer/lifetime test and
+preserved prior ACI check accompany three actual maintained VP→GP→physical
+scratch→EP→physical FIFO→ACI lifetimes, with six complete stereo buffers and
+physical remapping. Independently expected nominal input samples differ by at
+most one PCM16 LSB through the existing resampler; this retains the precision
+deferral. Every complete consumer buffer separately matches a pre-consumption
+physical-RAM capture byte for byte. Real queued DSP transfers and accepted PCM
+bytes precede completion/IRQ. There is no host audio playback.
+
+This qualifies the supported PCM transport/consumer foundation. The DSP
+programs in the coherent fixture are authored supported stimuli. Original EP
+C5/CA/D5 startup, bit-nine effects, B0..B3/configuration, original frame
+admission/cadence, codec gain/mute/underrun output and full title audio remain
+open. Existing fast HLE selection and preserved reference libraries are intact.
+
+Private proof: `build/blinx/audio-ac97-output-20261011/qualified-batch.aot-private.json`.

@@ -1309,3 +1309,23 @@ route. The dedicated78-check generation without extra frames passed component
 checks but exposed the depth limit in its8.062s startup. Those observations are
 retained; the final guarded-frame evidence above supplies the composed proof.
 No console operation, playback or attract rerun occurred.
+
+### Raw original-thread AV routing - 2026-10-11
+
+Raw AV2/3 and SMBus45/50 now use their original four/six-argument CALL/RET
+frames and the existing maintained GPU/encoder owner. Three settled original
+thread/device lifetimes complete36 AV/HAL returns, preserve output DWORD
+canaries, perform actual encoder reset/control and retire SMBus IRQ work. A
+separate actual-thread mode call retains the cold FD6806A0 guard and leaves
+its caller incomplete. Default HLE adds no service work.
+
+The coherent batch passes **80/80 in15.500s**. The original muted title runs
+7.875s beyond the former AV service stop, then exposes an unpublished original
+kernel interrupt stack at80041BD4 while entering GPU ISR13B210. This stack
+publication is required transport work; it is not an AV success or a hardware
+blocker. Full original startup/rendering/audio and family qualification remain
+open at4/9. The initial fixture read encoder standard state before EN_REG_RD
+was established; that production guard remains, and only the corrected caller
+generation counts. Source/binary-bound reports are
+`thread-av-corrected-qualified-20261011.aot-private.json` and
+`thread-av-title-startup-20261011.aot-private.json`. ROM/EEPROM are unchanged.

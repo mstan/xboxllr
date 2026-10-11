@@ -10,6 +10,7 @@
 // register semantics until a guest-visible path needs them.
 #pragma once
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -27,6 +28,10 @@ public:
 
     using MemReadFn = std::function<bool(uint32_t, void*, size_t)>;
     using IrqFn = std::function<void(int, bool)>;
+    // Borrowed little-endian PCM16 bytes, in stereo pairs. True accepts the
+    // whole chunk; rejection must leave the consumer unchanged. Without an
+    // observer the device still fetches and consumes the actual RAM bytes.
+    using PcmOutputFn = std::function<bool(const uint8_t*, size_t)>;
 
     explicit McpxAci(FaultFn fault) : fault_(std::move(fault)) { reset(); }
 
@@ -34,19 +39,30 @@ public:
     uint32_t mmio_base() const override { return kBase; }
     uint32_t mmio_size() const override { return kSize; }
 
-    void set_mem_access(MemReadFn rd) { mem_read_ = std::move(rd); }
+    void set_mem_access(MemReadFn rd) {
+        if (pcm_inflight_) { device_fault("RAM owner changed during PCM consumption"); return; }
+        mem_read_ = std::move(rd);
+    }
+    void set_pcm_output(PcmOutputFn fn) {
+        if (pcm_inflight_) { device_fault("PCM consumer changed during consumption"); return; }
+        pcm_output_ = std::move(fn);
+    }
     void set_irq(IrqFn fn, int irq = 6) {
         irq_fn_ = std::move(fn);
         irq_num_ = irq;
         update_irq();
     }
     void set_frame(uint64_t frame) {
-        while (frame_ < frame) {
+        if (servicing_ || pcm_inflight_) { device_fault("reentrant PCM device work"); return; }
+        servicing_ = true;
+        while (!faulted_ && frame_ < frame) {
             ++frame_;
             frame_step();
         }
+        servicing_ = false;
     }
     uint64_t completed_descriptors() const { return completed_descriptors_; }
+    uint64_t consumed_pcm_words() const { return consumed_pcm_words_; }
 
     uint32_t mmio_read(uint32_t addr, int size) override {
         uint32_t off = addr - kBase;
@@ -56,6 +72,8 @@ public:
         return 0;
     }
     void mmio_write(uint32_t addr, int size, uint32_t value) override {
+        if (faulted_) return;
+        if (pcm_inflight_) { device_fault("register mutation during PCM consumption"); return; }
         uint32_t off = addr - kBase;
         if (off < 0x100) {
             nam_write(off, size, value);
@@ -222,13 +240,11 @@ private:
                 r.bdbar = value & ~3u;
                 return;
             case 0x5:
-                if ((r.cr & CR_RPBM) && (r.sr & SR_DCH)) {
-                    r.sr &= ~(SR_DCH | SR_CELV);
-                    r.civ = r.piv;
-                    r.piv = (r.piv + 1) % 32;
-                    if (!fetch_bd(r)) return;
-                }
                 r.lvi = value % 32;
+                if ((r.cr & CR_RPBM) && (r.sr & SR_CELV) && r.lvi != r.civ) {
+                    if (!advance_bd(r)) return;
+                    r.sr &= ~(SR_DCH | SR_CELV);
+                }
                 return;
             case 0x6:
                 r.sr = static_cast<uint16_t>(
@@ -242,12 +258,16 @@ private:
                     r = BmRegs{};
                     r.cr = enables;
                 } else {
+                    const bool was_running = (r.cr & CR_RPBM) != 0;
                     r.cr = static_cast<uint8_t>(value & kCrValidMask);
                     if (r.cr & CR_RPBM) {
-                        r.civ = r.piv;
-                        r.piv = (r.piv + 1) % 32;
-                        if (!fetch_bd(r)) return;
-                        r.sr &= ~SR_DCH;
+                        if (!r.bd_valid) {
+                            if (!advance_bd(r)) return;
+                        }
+                        // Pause retains the current descriptor and offset;
+                        // changing interrupt enables while RUN stays set also
+                        // must not fetch a different buffer.
+                        if (!was_running && !(r.sr & SR_CELV)) r.sr &= ~SR_DCH;
                     } else {
                         r.sr |= SR_DCH;
                     }
@@ -260,16 +280,63 @@ private:
         }
     }
 
-    bool fetch_bd(BmRegs& r) {
+    bool fetch_bd(BmRegs& r, bool pcm_output) {
         uint32_t bd[2] = {};
-        if (!mem_read_ || !mem_read_(r.bdbar + r.civ * 8, bd, sizeof(bd))) {
+        const uint64_t address = uint64_t(r.bdbar) + r.civ * 8;
+        if (address + sizeof(bd) > (uint64_t(1) << 32)) {
             device_fault("buffer descriptor read failed");
             return false;
+        }
+        pcm_inflight_ = true;
+        const bool fetched = mem_read_ && mem_read_(uint32_t(address), bd, sizeof(bd));
+        pcm_inflight_ = false;
+        if (faulted_) return false;
+        if (!fetched) { device_fault("buffer descriptor read failed"); return false; }
+        if (pcm_output && ((bd[1] & 0x3fff0000u) || (bd[1] & 1u))) {
+            device_fault("unqualified PCM descriptor format or odd stereo count");
+            return false;
+        }
+        if (uint64_t(bd[0] & ~3u) + uint16_t(bd[1]) * 2 > (uint64_t(1) << 32)) {
+            device_fault("PCM buffer address wraps"); return false;
         }
         r.bd_addr = bd[0] & ~3u;
         r.bd_ctl_len = bd[1];
         r.picb = static_cast<uint16_t>(r.bd_ctl_len);
         r.bd_valid = true;
+        return true;
+    }
+
+    bool advance_bd(BmRegs& r) {
+        BmRegs next = r;
+        next.civ = r.piv;
+        next.piv = (r.piv + 1) % 32;
+        if (!fetch_bd(next, &r == &bm_[1])) return false;
+        r = next;
+        return true;
+    }
+
+    bool consume_pcm(BmRegs& r, uint32_t words) {
+        if (!words) return true;
+        if (mixer_load(0x2c) != 48000) {
+            device_fault("unqualified PCM output sample rate"); return false;
+        }
+        const uint32_t bytes = words * 2;
+        if (uint64_t(r.bd_addr) + bytes > (uint64_t(1) << 32)) {
+            device_fault("PCM buffer address wraps"); return false;
+        }
+        std::array<uint8_t, 1024> pcm{};
+        pcm_inflight_ = true;
+        const bool fetched = mem_read_ && mem_read_(r.bd_addr, pcm.data(), bytes);
+        bool accepted = false;
+        if (fetched && !faulted_) accepted = !pcm_output_ || pcm_output_(pcm.data(), bytes);
+        pcm_inflight_ = false;
+        if (faulted_) return false;
+        if (!fetched) { device_fault("PCM buffer read failed"); return false; }
+        if (!accepted) { device_fault("PCM consumer rejected bytes"); return false; }
+        // No cursor, count, completion or interrupt precedes accepted bytes.
+        r.picb = static_cast<uint16_t>(r.picb - words);
+        r.bd_addr += bytes;
+        consumed_pcm_words_ += words;
         return true;
     }
 
@@ -304,22 +371,23 @@ private:
         uint32_t words = 512;
         while (words && !(r.sr & SR_DCH)) {
             const uint32_t consumed = std::min<uint32_t>(words, r.picb);
-            r.picb = static_cast<uint16_t>(r.picb - consumed);
-            r.bd_addr += consumed * 2;
+            if (!consume_pcm(r, consumed)) return;
             words -= consumed;
             if (r.picb) continue;
 
             uint16_t new_sr = r.sr & ~SR_CELV;
             if (r.bd_ctl_len & kBdIoc) new_sr |= SR_BCIS;
             ++completed_descriptors_;
-            if (r.civ == r.lvi) {
+            const bool last = r.civ == r.lvi;
+            if (last) {
                 new_sr |= SR_LVBCI | SR_DCH | SR_CELV;
-            } else {
-                r.civ = r.piv;
-                r.piv = (r.piv + 1) % 32;
-                if (!fetch_bd(r)) return;
             }
             r.sr = new_sr;
+            if (!last && !advance_bd(r)) {
+                // A successfully consumed old descriptor still owns its
+                // completion, even if fetching the successor fails.
+                update_irq(); return;
+            }
             update_irq();
         }
     }
@@ -340,13 +408,16 @@ private:
 
     FaultFn fault_;
     MemReadFn mem_read_;
+    PcmOutputFn pcm_output_;
     IrqFn irq_fn_;
     uint8_t mixer_[0x100] = {};
     BmRegs bm_[8];
     uint32_t glob_cnt_ = 0, glob_sta_ = 0, cas_ = 0;
     int irq_num_ = 6;
     bool irq_level_ = false, faulted_ = false;
+    bool servicing_ = false, pcm_inflight_ = false;
     uint64_t frame_ = 0, completed_descriptors_ = 0;
+    uint64_t consumed_pcm_words_ = 0;
     int unk_logged_ = 0;
 };
 

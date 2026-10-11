@@ -28,7 +28,11 @@ clock and synchronous validated DMA owner. Shared HAL/PCI/IRQ and device/pool
 services retain actual publication, pin and cleanup effects. Compiled ISR/DPC
 calls now use original queue/event/timer services over bounded guarded frames.
 Startup queues real GPU work at IRQL23, executes original DPC13BBC0 at IRQL2
-and returns from its event signal; raw AV export2 is next after8.375s.
+and returns from its event signal. Raw AV/HAL routing now passes80/80 checks;
+actual startup reaches an unpublished original kernel interrupt stack at80041BD4
+after7.875s. Full startup and rendering remain open. Maintained AC97 consumes
+real shared PCM bytes before completion; frozen3/3 output checks and top-level
+2/2 wiring checks pass, with original DSP startup/frame admission still open.
 Whole title scheduling remains unqualified. See
 [the CPU route and remaining integration](SCHEDULING-LLE.md#original-cpugpu-device-ownership---2026-10-10).
 

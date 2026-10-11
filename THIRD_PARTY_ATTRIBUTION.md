@@ -1761,3 +1761,15 @@ notices. No Theseus implementation, assets or linked dependency were added by
 this assessment; the external checkout is research material only. This entry
 records consultation, not permission to incorporate GPL code into the intended
 non-GPL product.
+
+## Actual AC97 PCM payload consumer (2026-10-11)
+
+The authored maintained ACI consumer follows the [Intel AC97 programmer
+reference](https://www.alsa-project.org/files/pub/manuals/intel/29802801_801_AC97.pdf),
+sections2.2 and2.4, for descriptor length, stereo pairing, completion and
+pause/last-valid rules. Existing pinned xemu MCPX/QEMU sources were compared
+for the existing register layout; no new implementation body was copied.
+Actual PCM bytes pass through the existing shared RAM/APU/DSP owner before
+completion. Authored coherent transport stimuli do not qualify original
+DSP startup/frame admission, codec gain/mute or full title output. Existing
+resampler/DSP attribution and dependency pins remain.

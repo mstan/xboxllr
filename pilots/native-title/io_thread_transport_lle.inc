@@ -17,9 +17,9 @@ static unsigned thread_service_arguments(unsigned ordinal)
     case 15:case 44:case 47:case 168:case 289:case 290:return 2;
     case 107:case 108:case 119:case 145:case 178:case 182:case 199:case 215:case 233:case 246:
     case 175:case 279:return 3;
-    case 149:case 189:case 204:case 234:return 4;
+    case 2:case 45:case 50:case 149:case 189:case 204:case 234:return 4;
     case 24:case 150:case 159:case 166:case 184:case 211:case 218:case 226:case 254:return 5;
-    case 46:case 65:case 202:return 6;
+    case 3:case 46:case 65:case 202:return 6;
     case 109:return 7;
     case 219:case 236:return 8;
     case 190:return 9;
