@@ -1659,3 +1659,31 @@ Private evidence is `audio-gp-owned-20261011/qualified-preparation.aot-private.j
 and `aligned16k/final-qualified.aot-private.json` under that directory. Actual
 SG encoding/calibration, GP boot, B0..B3, original EP C5/CA/D5/bit9/wake, cadence
 and whole audio output remain required. The family count stays4/9.
+
+## Finite bit9 discrimination preparation - 2026-10-11
+
+The authored [`native_gp_bit9_reference.py`](../../tools/native_gp_bit9_reference.py)
+prepares an input-only clear/set comparison without admitting either bit9
+interpretation. Six coherent contexts pass in0.451263s on the actual pinned DSP
+core and maintained DMA owner: ordinary SG consumption with four independently
+checked words; existing set-bit rejection before any source read or following
+instruction; ignored pointer publication; stale EOL; source failure before
+publication; and sixteen passive polls ending in a genuine withheld-work timeout.
+Whole X/Y/P/MIX banks and all36KiB of physical ownership are independently
+checked. The unchanged24 original builder observations are reused.
+
+Root reviewed79 source, executable, input, capture and proof identities. Private
+evidence remains under `build/blinx/audio-gp-bit9-20261011`, including
+`qualified-preparation.aot-private.json`, `root-review.aot-private.json` and the
+concrete `bit9-probe-plan.aot-private.md`. The539-word finite program ends before
+its reserved P target; it repairs no status, acknowledges no frame and performs
+no playback. This is preparation, not a physical bit9 result.
+
+A future measurement requires separately established owned bootstrap and exact
+SG calibration, then an actual16KiB-aligned physical base at or below00600000.
+Distinct owned page6/page7 signatures distinguish direct physical from ordinary
+SG source bytes without classifying a match as complete semantics. Both actual
+high addresses from the stopped calibration fail that floor. No masked reuse,
+hardware runner, automatic retry or production APU change is supplied. GP/EP
+startup, timer/cadence, bit9, full output and the audio parent remain open;
+family count stays4/9 and the26 safe precision deferrals are unchanged.
