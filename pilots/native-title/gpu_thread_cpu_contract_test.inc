@@ -50,13 +50,19 @@ static void test_gpu_thread_cpu_lle(void)
 {
     install_fault_handler();CHECK(!pilot_io_device_files(memory));
     g_fs_base=0x19000;MEM8(g_fs_base+0x24)=0;uint32_t revision=0;CHECK(!usb_access(0xfed00000,0,&revision));
-    gpu_thread_cpu_code();uint32_t stats=0x19700;MEM32(stats)=12;CHECK(!event_lle_call(256,&stats));
+    gpu_thread_cpu_code();thread_device_code();uint32_t stats=0x19700;MEM32(stats)=12;CHECK(!event_lle_call(256,&stats));
     uint32_t baseline_threads=MEM32(stats+4),baseline_handles=MEM32(stats+8);
     for(unsigned lifetime=0;lifetime<3;++lifetime) {
         gpu_lle_open();CHECK(!pilot_io_device_mmio_bind(0,0,NULL));
         CHECK(!pilot_io_device_mmio_bind(0xfd000000,0x1000000,gpu_cpu_checked_mmio));
         CHECK(pilot_io_device_work_bind(gpu_lle_sample)); /* duplicate does not replace owner */
         if(!lifetime)CHECK(!pilot_io_device_clock_start());
+        uint32_t config[]={1,0,0,0x1e400,4,0};MEM32(0x1e404)=0xaabbccdd;
+        thread_device_call(46,config,6,lifetime);
+        CHECK(MEM32(0x1e400)==0x02a010de && MEM32(0x1e404)==0xaabbccdd);
+        gpu_test_write(0x184c,0x07000000);config[2]=0x4f;config[4]=1;
+        MEM32(0x1e400)=0xabcdef00;thread_device_call(46,config,6,lifetime);
+        CHECK(MEM32(0x1e400)==0xabcdef07 && MEM32(0x1e404)==0xaabbccdd);
         uint32_t bytes=8192,base=0;CHECK(!pilot_io_device_lle(165,memory,&bytes,&base));
         CHECK(base && !physical_find(base,1));gpu_cpu_pa=base&0x03ffffff;
         const uint32_t packet[]={0x40000,1,0x401a4,2,0x81d6c,4096,0x12345678};
@@ -94,7 +100,7 @@ static void test_gpu_thread_cpu_lle(void)
         CHECK(MEM32(stats+4)==baseline_threads && MEM32(stats+8)==baseline_handles);
     }
     CHECK(!pilot_io_device_clock_bind(NULL,NULL));
-    CHECK(thread_cpu_calls==9 && gpu_cpu_mmio_calls>=3*26);
+    CHECK(thread_cpu_calls==15 && gpu_cpu_mmio_calls>=3*26);
     fprintf(stderr,"PASS: three original CPU/GPU lifetimes, same PBUS/PFIFO owner and physical-zero jump, held/released actual semaphore DMA, whole RAM checks, scoped crosspage/RO/lease/CPU-reentry/binding guards and original cleanup\n");
 }
 #else

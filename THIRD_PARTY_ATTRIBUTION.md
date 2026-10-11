@@ -1733,6 +1733,16 @@ GPL implementation body are incorporated. Silicon dispatch precision remains
 explicitly isolated. The bounded pilot graph fixture drives actual device work
 rather than inferring completion from passive reads.
 
+The shared C/raw-thread HAL, PCI, interrupt, device/pool and pin publication
+hooks and real-thread fixtures are authored here over those existing credited
+owners. nxdk supplies public service ABI and interrupt-object field facts;
+unchanged private original kernel execution supplies the actual effects.
+The EP directory producer qualification tool is authored here and executes
+unchanged private driver code over explicitly authored offline kernel allocation
+services. Its consumer uses the already credited MIT DSP core and maintained
+APU RAM/DMA owner. No original driver/firmware bytes, allocator bodies or external
+implementation are incorporated into committed source.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

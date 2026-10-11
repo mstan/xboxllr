@@ -1646,3 +1646,26 @@ The rejected second console-clock initialization, missing-target configuration,
 and old synchronous-DMA GP fixture failures remain preserved; no failed result
 is counted as a pass. The earlier7.922s startup is a dependency observation;
 the final source/binary-bound startup is the7.828s result above.
+
+## Shared HAL, PCI and original interrupt ownership - 2026-10-10
+
+Shared C/raw-thread device hooks now retain the original kernel's HAL, PCI,
+interrupt, device/pool and pin effects on the existing RAM/IRQ owners. The
+interrupt-vector guard rejects out-of-scope initialization before object writes.
+Three GPU lifetimes use fifteen actual threads; six execute full/partial PCI
+reads through original HAL instructions and the same maintained GPU bus.
+The real device and pin lifetimes, duplicate-unlock failure and existing C/USB
+contracts pass in the **76/76 coherent batch in14.750s**.
+
+One muted original Blinx startup after that pass reaches ISR13B210 at IRQL23
+and acknowledges its real GPU interrupt. The compiled ISR's DPC queue call then
+hits `native dispatcher unavailable with original scheduling selected` after
+8.297s. This establishes original interrupt delivery, not composed DPC/rendering
+qualification. The next dependency is compiled callback routing to the already
+maintained original kernel service floor. Full startup, rendering and callback
+lifecycle remain required; family count remains **4/9**.
+
+Private reports: `thread-device-qualified-20261010.aot-private.json` and
+`thread-device-title-startup-20261010.aot-private.json`. All43 source inputs and
+nine binaries match; original ROM/EEPROM hashes remain unchanged. The GPU DLL
+retains the prior identity. No physical console or attract/audio run occurred.

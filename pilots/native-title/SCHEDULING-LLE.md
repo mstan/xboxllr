@@ -1241,3 +1241,33 @@ bytes unchanged. Required interrupt/service and full GPU/audio/title integration
 remain open. The family count stays **4/9**; the queue now has **26 safe precision
 questions**, including the isolated DMA rate/phase policy AUDIO-D07. Default HLE
 performance remains unaffected by the original CPU/device-work route.
+
+### Shared original-thread device services - 2026-10-10
+
+Original-thread and C callers now reuse one device preparation/publication
+boundary. Thirteen additional raw-thread services cover HAL vector/PCI/shutdown
+notification, interrupt initialization/connect/disconnect, pool/device ownership,
+GPU instance reservation and buffer-page pinning. Actual original routines still
+perform the operation; shared hooks publish their genuine return effects rather
+than creating a second allocator, interrupt registry or pin owner.
+
+Three real-thread device lifetimes check byte outputs and canaries, original
+interrupt objects, device extensions, actual pinned DMA/unpin refusal and pool
+cleanup. Duplicate unlock stops before caller/device mutation. Three GPU
+lifetimes now use fifteen real threads, including original full and partial PCI
+reads through the same CF8/CFC/PBUS owner. Existing C/USB tests remain passing.
+
+The coherent batch passes **76/76 in14.750s**, bound to43 unchanged source inputs
+and nine binary identities. A single muted startup runs8.297s and reaches
+original GPU ISR13B210 at IRQL23, reads the actual pending interrupt and
+acknowledges it. Its compiled KeInsertQueueDpc119 call then reaches the guarded
+native dispatcher. Connecting compiled interrupt/DPC calls to the original
+service floor is the next required integration; the native dispatcher remains
+forbidden in this build. The installed HDD identity passes and ROM/EEPROM input
+hashes remain unchanged. No physical Xbox operation or playback was performed.
+
+Evidence: `thread-device-qualified-20261010.aot-private.json` and
+`thread-device-title-startup-20261010.aot-private.json`. Initial fixture failures
+for the Connected byte offset, uninitialized authored caller and pin-error
+expectation remain preserved; only corrected fixtures count. Family status stays
+**4/9**, with the same26 safe precision questions and unchanged default HLE cost.

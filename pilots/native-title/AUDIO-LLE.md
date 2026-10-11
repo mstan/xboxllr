@@ -1387,3 +1387,48 @@ The new configuration handler, strict transport and fixture are authored here.
 Existing private-pilot and older dependency restrictions remain documented in
 `LICENSE-SCOPE.md` and `THIRD_PARTY_ATTRIBUTION.md`; this is no distribution
 clearance for the current combined reference executable.
+### Original EP block/directory producer ownership (bounded offline evidence)
+
+Central child `beads-xbox.1.113.10` executes unchanged original resource/heap
+allocation, GP scratch-owner and EP staging helpers, including `17CD84` and
+`17CBD4`, against explicit offline Xbox kernel RAM services. The authored
+`tools/native_ep_directory_reference.py` checks three physical allocation
+layouts, six actual original dynamic blocks per layout, both firmware prefixes,
+the constant table and all nineteen genuine EP scratch SG entries. Original
+destructors release every allocation and restore allocation counters. Failures
+at the first, middle and last contiguous allocation return the original
+`8007000E` and release their actual partial lifetimes. Original code and firmware
+bytes remain unchanged; original contents and captures stay private under
+`build/`.
+
+The actual thirty-six-word `P100` directory establishes twenty-four slots.
+Twelve retain caller-stack contents until later setup; this evidence neither
+zeros them nor admits their consumers. Defined entries include all six dynamic
+block pointer/count pairs, the `4000/600` buffer pair, the `1CFE/18` constant
+table pair and the `1D16/2000` free workspace pair. The constant table contains
+twenty bytes of the original section's mapped zero tail, rather than additional
+file bytes.
+
+A private source-bound observer creates exactly one EP core over maintained APU
+RAM/banks/DMA. Safe authored callers leave the original static firmware/helpers
+intact. Eighty-one real known-bit P transfers include fifty-four complete block
+copies across separate caller/failure lifetimes; expected consumer words come
+from independently captured original producer RAM. Original dispatcher `180`,
+selector eleven, toggles `P116` twice and returns through its actual stack.
+Its initialization route genuinely publishes `P19E/P19F` from the free-workspace
+pair and clears thirty context words, then stops at the existing EP `C5=FFF`
+guard with its actual stack preserved. That guard prevents the following yield
+and unidentified `CA=0` write. Selector one executes unchanged `276/2E1`, emits
+the genuine `41A2/5BE0/2F2/2C00/C00` descriptor and stops on unsupported bit nine
+before dynamic P publication/copy/EOL. Revoked allocation ownership fails before
+caller publication and remains terminal.
+
+This qualifies the actual driver producer and supported memory ownership
+routes. It does not qualify original dynamic-block execution, unset directory
+entries, full initialization/boot, timer configuration, hardware reset/cadence,
+AC97 or output. Known-bit transport descriptors are authored; the original
+unknown-bit builders remain guarded. The existing maintained APU owner already
+implements the supported routes, so this batch adds source-bound qualification
+without a new production CPU, scheduler, bootstrap entry or default-HLE cost.
+
+Private proof: `build/blinx/audio-ep-directory-20261010/qualified-batch.aot-private.json`.
