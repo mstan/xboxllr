@@ -122,17 +122,17 @@ bool XboxSmc::receive_byte(uint8_t& out) {
 bool XboxEeprom::write_byte(uint8_t cmd, uint8_t val) {
     std::printf("[eeprom] write off=0x%02x val=0x%02x (in-memory only)\n", cmd, val);
     offset_ = cmd;
-    data_[offset_ % data_.size()] = val;
-    offset_ = (offset_ + 1) % data_.size();
+    uint16_t value=val;
+    if(!access_data(offset_,1,true,value))return false;
+    offset_ = (offset_ + 1) % data_size();
     return true;
 }
 
 bool XboxEeprom::write_word(uint8_t cmd, uint16_t val) {
     std::printf("[eeprom] write-word off=0x%02x val=0x%04x (in-memory only)\n", cmd, val);
     offset_ = cmd;
-    data_[offset_ % data_.size()] = static_cast<uint8_t>(val);
-    data_[(offset_ + 1) % data_.size()] = static_cast<uint8_t>(val >> 8);
-    offset_ = (offset_ + 2) % data_.size();
+    if(!access_data(offset_,2,true,val))return false;
+    offset_ = (offset_ + 2) % data_size();
     return true;
 }
 

@@ -61,6 +61,25 @@ static unsigned thread_count;
 static uint32_t thread_identity_sequence;
 static unsigned char eeprom[256];
 static int have_eeprom;
+static SRWLOCK eeprom_lock=SRWLOCK_INIT;
+#ifdef PILOT_USB_LLE
+static int shared_eeprom_access(uint8_t offset,int size,int write,uint32_t *value)
+{
+    if(!value || (size!=1 && size!=2) || (write && *value>(size==1?255u:65535u)))return 0;
+    AcquireSRWLockExclusive(&eeprom_lock);
+    int valid=have_eeprom;
+    if(valid) {
+        uint32_t data=0;
+        for(int i=0;i<size;++i) {
+            uint8_t at=(uint8_t)(offset+i);
+            if(write)eeprom[at]=(uint8_t)(*value>>(8*i));
+            else data|=(uint32_t)eeprom[at]<<(8*i);
+        }
+        if(!write)*value=data;
+    }
+    ReleaseSRWLockExclusive(&eeprom_lock);return valid;
+}
+#endif
 /* Phobos kernel_rtl.c's useful boundary: a host recursive lock keyed by guest
  * VA. Guest fields use Cxbx types.h's 28-byte Xbox layout, not Win32's layout. */
 static struct { uint32_t va; CRITICAL_SECTION host; } critical_sections[256];
@@ -429,15 +448,23 @@ static void query_setting(void)
     uint32_t size=index==0xff ? 96 : 4;
     if (result) MEM32(result)=size;
     if (length<size) { g_eax=0xc0000023u; return; }
+    AcquireSRWLockShared(&eeprom_lock);
     uint64_t checksum=0;
     for (unsigned i=0x60;i<0xc0;i+=4) {
         uint32_t part; memcpy(&part,eeprom+i,4); checksum+=part;
         checksum=(checksum&0xffffffffu)+(checksum>>32);
     }
-    if ((uint32_t)checksum!=0xffffffffu) { g_eax=0xc000009cu; return; }
+    if ((uint32_t)checksum!=0xffffffffu) {
+        ReleaseSRWLockShared(&eeprom_lock);g_eax=0xc000009cu;return;
+    }
+    unsigned char payload[96];
+    memcpy(payload,eeprom+0x60+(index==0xff ? 0 : offsets[index]),size);
+    ReleaseSRWLockShared(&eeprom_lock);
+    /* Guest output accesses may enter memory transport. Keep owner locks out
+     * of that path; payload is only this query's immutable read snapshot. */
     MEM32(type)=(index==1 || index==4 || index==0xff) ? 3 : 4;
     memset(memory+value,0,length);
-    memcpy(memory+value,eeprom+0x60+(index==0xff ? 0 : offsets[index]),size);
+    memcpy(memory+value,payload,size);
     g_eax=0;
 }
 
@@ -905,6 +932,10 @@ int main(int argc,char **argv)
         FILE *input=fopen(argv[2],"rb");
         if (!input || fread(eeprom,1,256,input)!=256 || fgetc(input)!=EOF) stop("invalid EEPROM input",0);
         fclose(input); have_eeprom=1;
+#ifdef PILOT_USB_LLE
+        const char *eeprom_error=pilot_usb_board_bind_eeprom(shared_eeprom_access);
+        if(eeprom_error)stop(eeprom_error,0);
+#endif
     }
     load_image(argv[1]);
 #ifdef PILOT_FILES_LLE

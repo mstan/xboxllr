@@ -32,7 +32,7 @@ static void test_smbus_smc_lle(void)
         uint32_t status=0;CHECK(!pilot_usb_board_port(0xc000,1,0,&status));
         CHECK(!(status&0x10) && pilot_usb_pic_vector(0)<0);
     }
-    // Admission fails before starting unconnected EEPROM/encoder work.
+    // Admission fails before starting work without its settings owner.
     uint32_t address=0xa9,command=0x1a;
     CHECK(!pilot_usb_board_port(0xc004,1,1,&address));
     CHECK(pilot_usb_board_port(0xc002,1,1,&command));
@@ -47,5 +47,42 @@ static void test_smbus_smc_lle(void)
     command=0x1b;CHECK(pilot_usb_board_port(0xc002,1,1,&command));
     uint32_t value=0x39;CHECK(pilot_usb_board_port(0xc009,1,0,&value) && value==0x39);
     CHECK(pilot_usb_board_port(0xc004,2,1,&value));
-    puts("[SMBus SMC] original HAL reads/writes, three call rounds, IRQ11 ack and endpoint guards pass");
+
+    for(unsigned i=0;i<256;++i)eeprom[i]=(uint8_t)(i^0x5a);
+    have_eeprom=1;CHECK(!pilot_usb_board_bind_eeprom(shared_eeprom_access));
+    CHECK(pilot_usb_board_bind_eeprom(shared_eeprom_access));
+    for(unsigned i=0;i<256;++i) {
+        uint32_t args[]={0xa8,i,0,output};MEM32(output)=0xdeadbeef;
+        CHECK(!pilot_io_device_lle(45,memory,args,&g_eax));
+        CHECK(!g_eax && MEM32(output)==(i^0x5a));
+    }
+    // Native-owner changes are visible to the original controller immediately.
+    eeprom[0xff]=0x31;eeprom[0]=0x72;
+    uint32_t read_wrap[]={0xa8,0xff,1,output};
+    CHECK(!pilot_io_device_lle(45,memory,read_wrap,&g_eax));
+    CHECK(!g_eax && MEM32(output)==0x7231);
+    uint32_t write_wrap[]={0xa8,0xff,1,0x5a3c};
+    CHECK(!pilot_io_device_lle(50,memory,write_wrap,&g_eax));
+    CHECK(!g_eax && eeprom[0xff]==0x3c && eeprom[0]==0x5a);
+
+    // Original SMBus writes change the actual native settings/checksum owner.
+    memset(eeprom,0,sizeof(eeprom));
+    uint32_t language=6,checksum=~language;
+    memcpy(eeprom+0x90,&language,4);memcpy(eeprom+0x60,&checksum,4);
+    uint32_t query[]={7,0x19100,0x19104,4,0x19108};call_kernel(24,query,5);
+    CHECK(!g_eax && MEM32(0x19104)==6);
+    uint32_t set_language[]={0xa8,0x90,0,7};
+    CHECK(!pilot_io_device_lle(50,memory,set_language,&g_eax));CHECK(!g_eax);
+    MEM32(0x19104)=0xdeadbeef;call_kernel(24,query,5);
+    CHECK(g_eax==0xc000009cu && MEM32(0x19104)==0xdeadbeef);
+    uint32_t set_checksum[]={0xa8,0x60,1,0xfff8};
+    CHECK(!pilot_io_device_lle(50,memory,set_checksum,&g_eax));CHECK(!g_eax);
+    set_checksum[1]=0x62;set_checksum[3]=0xffff;
+    CHECK(!pilot_io_device_lle(50,memory,set_checksum,&g_eax));CHECK(!g_eax);
+    call_kernel(24,query,5);CHECK(!g_eax && MEM32(0x19104)==7);
+    address=0xa9;command=0x19;CHECK(!pilot_usb_board_port(0xc004,1,1,&address));
+    CHECK(pilot_usb_board_port(0xc002,1,1,&command)); // RECEIVE_BYTE remains outside HAL byte/word scope.
+    CHECK(!pilot_usb_board_port(0xc000,1,0,&status));
+    CHECK(!(status&0x10) && pilot_usb_pic_vector(0)<0);
+    puts("[SMBus SMC] original HAL, IRQ11 ack, shared IDE tray and256-byte native EEPROM owner pass");
 }

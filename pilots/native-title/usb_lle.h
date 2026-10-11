@@ -13,6 +13,8 @@ typedef uint32_t (*PilotUsbHostRumble)(unsigned,uint16_t,uint16_t);
 typedef uint32_t (*PilotUsbHostCaps)(unsigned,uint8_t[18],uint8_t[4]);
 /* Read-only storage-owner telemetry. Must not reenter guest execution. */
 typedef int (*PilotUsbTrayState)(uint8_t*);
+/* Shared256-byte settings owner; atomic byte/word accesses, wrapping atFF. */
+typedef int (*PilotUsbEepromAccess)(uint8_t,int,int,uint32_t*);
 const char *pilot_usb_lle_host_bind(PilotUsbHostRead,PilotUsbHostRumble,PilotUsbHostCaps);
 const char *pilot_usb_lle_bind(PilotUsbDmaRead, PilotUsbDmaWrite, PilotUsbDmaRelease);
 /* One real dword transaction through the shared OHCI model. */
@@ -22,12 +24,13 @@ const char *pilot_usb_lle_access(uint32_t address,int write,uint32_t *value);
 const char *pilot_usb_pic_bootstrap(uint16_t mask,uint16_t level);
 const char *pilot_usb_pic_port(uint32_t port,int size,int write,uint32_t *value);
 /* Shared board bus: retail GPIO15, RTC70..73 CMOS RAM, SMBusC000..C008
- * and SMC profile with actual PIC IRQ11 completion/ack. EEPROM/encoder starts
- * require their storage/graphics owners and remain guarded in this adapter.
+ * and SMC profile with actual PIC IRQ11 completion/ack. EEPROM requires its
+ * shared settings owner; encoder starts require their graphics owner.
  * RTC clock/status/IRQ/NMI behavior remains guarded; no fixed-date response
  * qualifies those modes. GPIO readback/other modes/widths remain guarded. */
 const char *pilot_usb_board_port(uint32_t port,int size,int write,uint32_t *value);
 const char *pilot_usb_board_bind_tray(PilotUsbTrayState);
+const char *pilot_usb_board_bind_eeprom(PilotUsbEepromAccess);
 const char *pilot_usb_board_outputs(uint32_t *known,uint32_t *levels);
 int pilot_usb_pic_vector(int acknowledge);
 void pilot_usb_pic_raise(int line,int level);

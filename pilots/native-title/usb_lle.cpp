@@ -36,6 +36,15 @@ xlle::Mc146818Rtc rtc;
 std::unique_ptr<xlle::Amd756Smbus> smbus;
 std::string smbus_failure;
 PilotUsbTrayState tray_state;
+PilotUsbEepromAccess eeprom_access;
+std::unique_ptr<xlle::XboxEeprom> shared_eeprom(PilotUsbEepromAccess access)
+{
+    return std::make_unique<xlle::XboxEeprom>([access](uint8_t offset,unsigned width,bool write,uint16_t& value) {
+        uint32_t data=value;
+        if(!access(offset,(int)width,write,&data) || data>(width==1?255u:65535u))return false;
+        value=(uint16_t)data;return true;
+    });
+}
 PilotUsbHostRead host_read;
 PilotUsbHostRumble host_rumble;
 PilotUsbHostCaps host_caps;
@@ -136,6 +145,7 @@ extern "C" const char *pilot_usb_pic_bootstrap(uint16_t mask,uint16_t level)
             return value;
         });
         smbus->add_slave(std::move(smc));
+        if(eeprom_access)smbus->add_slave(shared_eeprom(eeprom_access));
         smbus->set_irq([](int irq,bool level){pic.raise(irq,level);},11);
     }
     ReleaseSRWLockExclusive(&usb_lock);return nullptr;
@@ -163,19 +173,21 @@ extern "C" const char *pilot_usb_board_port(uint32_t port,int size,int write,uin
         if(!smbus || !value || !qualified_register || (write && (size==1?*value>255:*value>65535)))
             error="SMBus unsupported register/width transaction";
         else if(!smbus_failure.empty())error=smbus_failure.c_str();
-        else if(write && offset==2 && (*value&8) &&
-                (smbus->io_read(0xc004,1)>>1)!=0x10)
-            error="SMBus endpoint outside connected SMC profile; storage/encoder owner required";
         else if(write && offset==2 && (*value&8)) {
             uint32_t address=smbus->io_read(0xc004,1),command=smbus->io_read(0xc008,1);
             bool modeled=address&1?(command==1 || (command==3 && tray_state) || command==4 || command==0x0f ||
                 command==0x10 || command==0x11 || command==0x1b):
                 (command==1 || command==6 || command==0x0e || command==0x1b);
-            if((*value&7)!=2 || !modeled) {
+            if((address>>1)==0x54 && eeprom_access) {
+                if((*value&7)!=2 && (*value&7)!=3)error="SMBus EEPROM protocol outside qualified byte/word profile";
+            } else if((address>>1)!=0x10)
+                error="SMBus endpoint requires connected storage/encoder owner";
+            else if((*value&7)!=2 || !modeled) {
                 std::fprintf(stderr,"[SMBus SMC GUARD] address=%02x command=%02x data=%02x control=%02x\n",
                     address,command,smbus->io_read(0xc006,1),*value);
                 error="SMBus SMC operation outside qualified byte-register profile";
-            } else {
+            }
+            if(!error) {
                 smbus->io_write((uint16_t)port,size,*value);
                 if(!smbus_failure.empty())error=smbus_failure.c_str();
             }
@@ -205,6 +217,17 @@ extern "C" const char *pilot_usb_board_bind_tray(PilotUsbTrayState read)
     const char *error=nullptr;
     if(!read || tray_state)error="SMC invalid/repeated storage tray binding";
     else tray_state=read;
+    ReleaseSRWLockExclusive(&usb_lock);return error;
+}
+extern "C" const char *pilot_usb_board_bind_eeprom(PilotUsbEepromAccess access)
+{
+    AcquireSRWLockExclusive(&usb_lock);
+    const char *error=nullptr;
+    if(!access || eeprom_access)error="SMBus invalid/repeated EEPROM owner binding";
+    else {
+        eeprom_access=access;
+        if(smbus)smbus->add_slave(shared_eeprom(access));
+    }
     ReleaseSRWLockExclusive(&usb_lock);return error;
 }
 extern "C" const char *pilot_usb_board_outputs(uint32_t *known,uint32_t *levels)

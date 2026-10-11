@@ -1619,6 +1619,10 @@ unqualified EEPROM backing or a new shipping HLE performance path.
 Its authored tray callback reads the existing maintained IDE owner directly;
 original HAL calls and existing independent media/open-tray cases qualify the
 bounded connection. No separate mounted-state model is introduced.
+The subsequent authored EEPROM owner callback reuses that maintained byte/word
+protocol over the native settings backing. Its atomic access, immutable query
+snapshot and original HAL/device fixtures are authored here. No external body
+or private EEPROM bytes are copied into the source or tests.
 
 ## Theseus behavioral reference
 

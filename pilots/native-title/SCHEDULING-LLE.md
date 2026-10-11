@@ -720,3 +720,54 @@ default appearance result remains its own generation's evidence. Cached HLE
 graphics and audio performance code is unchanged. `.112.2` remains open;
 EEPROM/storage ownership under `.112.4` is also open. The family count is still
 **4/9**, with **22 safely deferred questions** (14 graphics/eight cross-family).
+
+### Shared EEPROM settings owner — 2026-10-10 continuation
+
+The next coherent batch resolves `.112.4`'s remaining EEPROM ownership gap.
+The maintained EEPROM now supports an external256-byte owner as well as its
+existing owned backing. The native-title controller binds the supplied settings
+store once, before starting work. Original SMBus and native settings queries
+read and mutate that same store; there is no second mutable EEPROM copy. Each
+byte/word access is atomic under the owner lock and wraps atFF. Native settings
+queries take one coherent checksum/payload snapshot, release the owner lock,
+then write guest outputs. Guest memory transport cannot reenter while that
+owner lock is held. Changes stay in emulator RAM; the supplied private EEPROM
+file is never overwritten.
+
+The actual original HAL fixture reads **all256 authored bytes**, checks a word
+spanningFF/00, observes native-owner updates through the original bus, and
+changes native settings through original byte/word writes. A changed language
+byte makes the native checksum query fail without modifying its output; writing
+the corrected checksum through the original bus makes that query return the
+new value. Missing/null/duplicate owners and unsupported protocols remain
+guarded. The independently authored device test checks both owned and shared
+backings across **three fresh lifetimes**, including serial-offset progression,
+one complete callback per word, wrap and unavailable-owner rejection.
+
+Four focused EEPROM/SMC/AV/IDE component checks pass. The final coherent CPU
+suite passes **49/49 in10.906s**, with stable source identities. A separately
+rebuilt original startup again admits the actual bootstrap/title thread and
+stops before its first translated instruction at the existing uncertified
+native checkpoint. The private input file's before/after SHA is unchanged.
+Reports in `build/blinx/`: `eeprom-owner-focused-20261010.aot-private.json`,
+`eeprom-owner-final-validation-20261010.aot-private.json` and
+`eeprom-owner-final-title-startup-20261010.aot-private.json`. The earlier
+lock-held output version and its passing attempt remain distinct evidence;
+the final source releases the owner before touching guest outputs.
+
+This completes the bounded original board/SMBus/settings-owner task, not the
+scheduling family. The pinned generated CPU code still has function-local
+branch/carry representations rather than a complete exported architectural
+EFLAGS word. Existing zero-argument entry/backedge hooks do not carry a
+certified instruction PC or full FP/SIMD state. Connecting that generator state
+to the maintained clock/continuation boundary is still required under `.112.2`,
+along with title service/callback publication and lifetime postconditions.
+The inspected donor is the generation's actual63f18f0 pin; a newer review
+checkout is not substituted for the shipped generated source.
+
+No physical Xbox operation or extra default HLE attract/audio run was needed.
+HLE graphics/cache/audio algorithms are unchanged. Exact EEPROM write-cycle
+and acknowledgment timing is appended as LLE-D04; supported boot-persistence
+and settings-policy changes remain explicit work rather than timing deferrals.
+There are now **23 safely deferred questions** (14 graphics/nine cross-family).
+The whole goal stays active with **4/9** service-family gates qualified.

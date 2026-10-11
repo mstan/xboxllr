@@ -117,34 +117,56 @@ private:
 // in-memory only (never persisted over the oracle artifact) and logged.
 class XboxEeprom : public SmbusSlave {
 public:
+    // An external owner supplies each complete byte/word access atomically.
+    // It owns the256 bytes; this device retains only the serial offset.
+    using Access = std::function<bool(uint8_t,unsigned,bool,uint16_t&)>;
     explicit XboxEeprom(std::vector<uint8_t> data) : data_(std::move(data)) {}
+    explicit XboxEeprom(Access access) : access_(std::move(access)) {}
     const char* name() const override { return "eeprom"; }
     uint8_t address() const override { return 0x54; }
 
     bool read_byte(uint8_t cmd, uint8_t& out) override {
         offset_ = cmd;
-        out = data_[offset_ % data_.size()];
-        offset_ = (offset_ + 1) % data_.size();
+        uint16_t value=0;
+        if(!access_data(offset_,1,false,value))return false;
+        out = static_cast<uint8_t>(value);
+        offset_ = (offset_ + 1) % data_size();
         return true;
     }
     bool read_word(uint8_t cmd, uint16_t& out) override {
         offset_ = cmd;
-        uint8_t lo = data_[offset_ % data_.size()];
-        uint8_t hi = data_[(offset_ + 1) % data_.size()];
-        out = static_cast<uint16_t>(lo | (hi << 8));
-        offset_ = (offset_ + 2) % data_.size();
+        uint16_t value=0;
+        if(!access_data(offset_,2,false,value))return false;
+        out=value;
+        offset_ = (offset_ + 2) % data_size();
         return true;
     }
     bool write_byte(uint8_t cmd, uint8_t val) override;
     bool write_word(uint8_t cmd, uint16_t val) override;
     bool receive_byte(uint8_t& out) override {
-        out = data_[offset_ % data_.size()];
-        offset_ = (offset_ + 1) % data_.size();
+        uint16_t value=0;
+        if(!access_data(offset_,1,false,value))return false;
+        out = static_cast<uint8_t>(value);
+        offset_ = (offset_ + 1) % data_size();
         return true;
     }
     bool quick(bool) override { return true; }
 
 private:
+    uint32_t data_size() const { return access_?256u:static_cast<uint32_t>(data_.size()); }
+    bool access_data(uint32_t offset,unsigned width,bool write,uint16_t& value) {
+        if(access_)return access_(static_cast<uint8_t>(offset),width,write,value);
+        if(data_.empty())return false;
+        uint16_t result=0;
+        for(unsigned i=0;i<width;++i) {
+            auto& byte=data_[(offset+i)%data_.size()];
+            if(write)byte=static_cast<uint8_t>(value>>(8*i));
+            else result|=static_cast<uint16_t>(byte)<<(8*i);
+        }
+        if(!write)value=result;
+        return true;
+    }
+    Access access_;
     std::vector<uint8_t> data_;
     uint32_t offset_ = 0;
 };
