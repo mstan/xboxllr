@@ -84,6 +84,30 @@ public:
     }
     bool write_byte(uint8_t reg, uint8_t value) override {
         if (!supported(reg)) return reject("CX25871 control register outside qualified transport");
+        // Documented ordinary latches used by the original AV setup. Their
+        // readback is independent of the still-guarded analog pixel path.
+        // Commands that change unmodelled power/monitor/output modes stop
+        // before changing any latch or the established timing state.
+        if (reg == 0x2e && value)
+            return reject("CX25871 HDTV/raster output controls remain unqualified");
+        if (reg == 0x30 && value)
+            return reject("CX25871 sleep/oscillator power commands remain unqualified");
+        if (reg == 0x32 && (value & 0x80))
+            return reject("CX25871 automatic monitor-check command remains unqualified");
+        if (reg == 0x60 && (value & 0xf0))
+            return reject("CX25871 WSS enable/reserved controls remain unqualified");
+        if (reg == 0x6a && (value & 0xf0))
+            return reject("CX25871 reserved WSS increment bits");
+        if (reg == 0x70 && (value & 0x3f) < 2)
+            return reject("CX25871 disallowed master HSYNC width");
+        if (reg == 0x74 && (value & 0x38))
+            return reject("CX25871 reserved digital VSYNC controls");
+        if (reg == 0x74 && !(value & 7))
+            return reject("CX25871 disallowed master VSYNC width");
+        if ((reg == 0xca || reg == 0xcc) && (value & 0x38) == 0x38)
+            return reject("CX25871 reserved coring selection");
+        if (reg == 0xd6 && (value & 0x4c))
+            return reject("CX25871 alternate output/embedded-sync profile remains unqualified");
         if (reg == 0xba && (value & 0x80)) {
             // Only the original driver's isolated reset strobe is qualified.
             if (value != 0x80) return reject("CX25871 combined reset/control write is unqualified");
@@ -168,11 +192,30 @@ private:
             (uint32_t(registers_[0xb2])<<16) | (uint32_t(registers_[0xb4])<<24);
         config.pal=registers_[0xa2]&0x20;config.disable_subcarrier_reset=registers_[0xa2]&0x10;
         config.slave=slave_pin_ || (registers_[0xba]&0x20);
+        // Table 2-5: signed HSYNOFFSET moves the master's digital HSYNC
+        // edge. Section 1.3.31 derives FIELD from that edge, so the existing
+        // zero-offset model cannot expose its phase for a shifted master.
+        // Software reset establishes offset zero; subsequent writes are
+        // exact latches. The offset has no effect in slave interface.
+        if(!config.slave && ((known_[0x6e]==0xff && registers_[0x6e]) ||
+                            (known_[0x70]==0xff && (registers_[0x70]&0xc0))))
+            return reject("CX25871 nonzero master HSYNC offset phase remains unqualified");
         if(!timing_.reset(config))return false;
         timing_selected_=true;return true;
     }
     static bool supported(uint8_t reg) {
-        return reg == 0x34 || reg == 0x36 || reg == 0x38 || reg == 0x3a || reg == 0x6c ||
+        // Conexant 100381B table 2-1 and programming detail table 2-5:
+        // disabled HDTV/power (2E/30), drive/input (32), color compensation
+        // (3C/3E/40), luma/hue (5A/5C), disabled WSS/data/increment (60..6A),
+        // master sync/data delay (6E/70/74), subcarrier phase offset (B6), coring/attenuation
+        // (CA/CC), DAC mux (CE), output/blanking (D6) and chroma/bypass (D8).
+        // Reserved 72 and undocumented extension DA..FC remain unsupported.
+        const bool standard = reg == 0x2e || reg == 0x30 || reg == 0x32 ||
+            reg == 0x3c || reg == 0x3e || reg == 0x40 || reg == 0x5a || reg == 0x5c ||
+            (reg >= 0x60 && reg <= 0x6a && !(reg & 1)) ||
+            reg == 0x6e || reg == 0x70 || reg == 0x74 || reg == 0xb6 ||
+            reg == 0xca || reg == 0xcc || reg == 0xce || reg == 0xd6 || reg == 0xd8;
+        return standard || reg == 0x34 || reg == 0x36 || reg == 0x38 || reg == 0x3a || reg == 0x6c ||
                (reg >= 0x76 && reg <= 0xb4 && !(reg & 1)) ||
                reg == 0xb8 || reg == 0xba || reg == 0xc4 || reg == 0xc6 || reg == 0xc8 || reg == 0xd4;
     }

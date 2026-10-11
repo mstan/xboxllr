@@ -325,6 +325,81 @@ static void reset_and_configuration() {
     }
 }
 
+static void documented_encoder_controls() {
+    // Independently listed fields from Conexant 100381B tables 2-1/2-5;
+    // values are the ordinary control profile reached by original AV code.
+    // This checks register transport, not analog pixels or a warm-state seed.
+    const uint8_t controls[][2] = {
+        {0x2e,0}, {0x30,0}, {0x32,0x28}, {0x3c,0x80}, {0x3e,0x80}, {0x40,0x80},
+        {0x5a,0xff}, {0x5c,1}, {0x60,0}, {0x62,0}, {0x64,0}, {0x66,0x15},
+        {0x68,0x4b}, {0x6a,0}, {0x6e,0}, {0x70,0x0f}, {0x74,1}, {0xb6,0x5a},
+        {0xca,0xc0}, {0xcc,0xc0}, {0xce,0x19}, {0xd6,0}, {0xd8,0x40}
+    };
+    for (unsigned life=0; life<3; ++life) {
+        std::string fault;
+        xlle::Cx25871Control encoder([&](const std::string& why){fault=why;});
+        CHECK(encoder.write_byte(0x6c,0x46));
+        for (const auto& entry:controls) {
+            uint8_t value=0xa5;
+            CHECK(!encoder.read_byte(entry[0],value) && value==0xa5);
+            fault.clear();
+            CHECK(encoder.write_byte(entry[0],entry[1]));
+            CHECK(encoder.read_byte(entry[0],value) && value==entry[1]);
+        }
+        CHECK(fault.empty());
+        // Rejected commands preserve both the prior latch and destinations.
+        const uint8_t rejected[][2] = {
+            {0x2e,0x80},{0x30,1},{0x32,0x80},{0x60,0x40},{0x60,0x10},
+            {0x6a,0x10},{0x70,0},{0x70,1},{0x74,8},{0x74,0},{0xca,0x38},{0xcc,0x38},
+            {0xd6,4},{0xd6,0x40}
+        };
+        for (const auto& entry:rejected) {
+            uint8_t prior=0,after=0xa5;
+            CHECK(encoder.read_byte(entry[0],prior));
+            CHECK(!encoder.write_byte(entry[0],entry[1]) && !fault.empty());
+            fault.clear();
+            CHECK(encoder.read_byte(entry[0],after) && after==prior);
+        }
+        for (uint8_t reg:{0x00,0x31,0x72,0xda,0xfc}) {
+            uint8_t value=0xa5;
+            CHECK(!encoder.write_byte(reg,0) && !fault.empty());fault.clear();
+            CHECK(!encoder.read_byte(reg,value) && value==0xa5);fault.clear();
+        }
+        CHECK(encoder.write_byte(0xba,0x80));
+        CHECK(encoder.write_byte(0x6c,0x46));
+        // Reset discards the programmed latches. No unproved defaults survive.
+        for (const auto& entry:controls) {
+            uint8_t value=0xa5;
+            CHECK(!encoder.read_byte(entry[0],value) && value==0xa5);fault.clear();
+        }
+        CHECK(encoder.write_byte(0xba,0));CHECK(encoder.write_byte(0xc6,0x9c));
+        CHECK(encoder.write_byte(0x6c,0xc6));CHECK(encoder.advance_timing(19));
+        xlle::Cx25871Timing::State state;
+        CHECK(encoder.timing_state(state) && state.clocks==19);
+        CHECK(!encoder.write_byte(0x32,0x80));fault.clear();
+        CHECK(encoder.timing_state(state) && state.clocks==19);
+        CHECK(encoder.write_byte(0x32,0x28));
+        CHECK(!encoder.timing_state(state)); // changed profile needs a real reset
+        CHECK(encoder.write_byte(0x6c,0xc6));
+        CHECK(encoder.timing_state(state) && state.clocks==0 && fault.empty());
+        // Table 2-5 defines signed HSYNOFFSET[9:0] at 70[7:6]/6E.
+        // Section 1.3.31 relates FIELD to that digital HSYNC edge. A master
+        // offset cannot inherit the zero-offset phase; slave sync is external.
+        CHECK(encoder.write_byte(0x6e,1));CHECK(encoder.write_byte(0x70,0x0f));
+        CHECK(!encoder.write_byte(0x6c,0xc6) && !fault.empty());fault.clear();
+        CHECK(!encoder.timing_state(state));
+        CHECK(encoder.write_byte(0x6e,0));CHECK(encoder.write_byte(0x70,0x4f));
+        CHECK(!encoder.write_byte(0x6c,0xc6) && !fault.empty());fault.clear();
+        CHECK(!encoder.timing_state(state));
+        CHECK(encoder.write_byte(0x70,0x0f));CHECK(encoder.write_byte(0x6c,0xc6));
+        CHECK(encoder.timing_state(state) && state.clocks==0);
+        CHECK(encoder.write_byte(0xba,0x20));
+        CHECK(encoder.write_byte(0x6e,1));CHECK(encoder.write_byte(0x70,0x4f));
+        CHECK(encoder.write_byte(0x6c,0xc6));
+        CHECK(encoder.timing_state(state) && state.clocks==0 && fault.empty());
+    }
+}
+
 int main() {
     encoder_timing();
     encoder_slave_phase();
@@ -332,6 +407,7 @@ int main() {
     av_output_pins();
     retail_fw_enable();
     reset_and_configuration();
+    documented_encoder_controls();
     for (unsigned lifetime=0; lifetime<3; ++lifetime) {
         std::string fault;
         std::vector<bool> edges;

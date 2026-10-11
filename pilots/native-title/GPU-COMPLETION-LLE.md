@@ -1787,3 +1787,42 @@ coherent rendering and full title integration remain required. The independently
 established digital timing component supplies no missing activation event or
 cold reset state. This batch does not change the4/9 qualification count or the26
 explicit precision deferrals.
+
+## Documented encoder controls and original debug boundary - 2026-10-11
+
+The maintained encoder now transports23 additional documented ordinary controls
+used by original AV setup: input/drive configuration, compensation, luma/hue,
+disabled WSS data/increment, master sync, phase offset, coring, DAC mux and output
+configuration. Conexant100381B tables2-1/2-5 define these latches. Writes establish
+their exact readback; unknown warm state and reset discard remain explicit.
+Unsupported power/HDTV/monitor/WSS commands, reserved fields, disallowed sync
+widths and alternate output profiles reject before changing state. Reserved72
+and the undocumented DA..FC extension remain unsupported. No captured legacy
+encoder journal is imported as actual device state.
+
+Independent review found that master HSYNOFFSET moves the digital HSYNC edge
+used by FIELD. A new regression fails before the correction across three
+lifetimes. Master timing now rejects explicitly programmed nonzero6E/70 offsets;
+zero-offset timing and slave timing retain their supported admission. The exposed
+subcarrier phase is explicitly the MSC accumulator before B6/HUE/output offsets.
+Encoded video remains guarded; readback does not qualify analog pixels.
+
+Five component and eight actual original-thread/AV/encoder/idle-owner checks
+pass. A single final muted actual Blinx startup runs8.074s with the changed DLL,
+crosses its existing callbacks and stops at the established EN_REG_RD guard.
+Current binaries and the failed offset generation are retained under
+`build/blinx/encoder-controls-20261011`. No HLE rendering or per-pixel work changes.
+
+The independent original FP_DEBUG_0 audit verifies default mode0F010101 selects
+the actual table index1 containing21101100. The first21121111 write follows the
+FD6806A0 agreement wait; the later table write follows the request and three
+retrace transitions. [Nouveau's named fields](https://github.com/torvalds/linux/blob/v6.12/drivers/gpu/drm/nouveau/dispnv04/nvreg.h#L399)
+and the [pinned envytools register definition](https://github.com/envytools/envytools/blob/f102b82381f3f11cee113d16374c87091db039d9/rnndb/display/nv3_pramdac.xml#L141)
+leave bits17/29 unresolved. Their absence is not evidence of inert behavior;
+the complete control word remains guarded. Thirty source/snapshot identities
+and the original page-table translation are verified in
+`build/blinx/fp-debug-source-audit-20261011`.
+
+Original AV initialization, handshake/activation, encoder output and full title
+integration remain required. These launch dependencies are not precision
+deferrals; the family count remains4/9 with26 safe precision deferrals.

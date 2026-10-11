@@ -17,6 +17,8 @@ public:
     struct State {
         uint64_t clocks=0;
         uint64_t field_transitions=0;
+        // subcarrier_phase is the raw MSC DTO accumulator, before B6
+        // PHASE_OFF, active-video HUE_ADJ and analog output processing.
         uint32_t input_x=0,input_y=0,output_x=0,output_y=0,subcarrier_phase=0;
         bool field_even=false;
         // A nonaligned first slave frame establishes FIELD, not the otherwise

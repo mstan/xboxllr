@@ -43,6 +43,14 @@ Blinx regression per coherent batch. Retain explicit outcomes for each contract;
 a bundled pass does not close an unimplemented service. Reuse captured evidence
 and avoid repeating whole attract runs for documentation or test-only changes.
 
+The encoder initialization dependency now has23 more documented control latches
+and an independently reviewed guard for nonzero master HSYNC offsets. Thirteen
+component/original-owner checks pass; one muted final title startup runs8.074s
+and retains the EN_REG_RD guard. Original FP_DEBUG_0 bits17/29 remain unresolved
+in the examined primary sources and cannot supply an activation transition.
+See the [current initialization boundary](../pilots/native-title/GPU-COMPLETION-LLE.md#documented-encoder-controls-and-original-debug-boundary---2026-10-11).
+This changes LLE control transport, with no default HLE rendering cost.
+
 The distinct low-RAM preparation adds an exact nine-page allocation request,
 read-only inspection and one-SG-store calibration: seven checks/59 compiled
 x86 contexts pass in4.83s. All returned bytes must belong to an actual16KiB-aligned
