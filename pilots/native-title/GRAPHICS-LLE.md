@@ -6,6 +6,64 @@ transform, rasterization, framebuffer writes and visibility-report DMA in
 `src/machine/nv2a.cpp`. This document records component qualification; full
 graphics-family acceptance remains open and the total remains **4/9**.
 
+## Bounded engine, timer and instance prefix - 2026-10-11
+
+Probe commit `fc749eb` advances the actual SDK initializer beyond the corrected
+PCI controls. The diagnostic enables only the documented required engines while
+preserving existing framebuffer/display/timer and unresolved fields. It does
+not clear engine enables or issue a blanket reset. The actual original PLL
+calculation runs; owned divider/multiplier/alarm stores require unchanged
+context, immediate defined readbacks and the independent board-clock deadline.
+Pending masked alarm state remains observable without a W1C acknowledgement.
+
+The actual query-only instance API validates and pins its five-page CPU
+reservation, including post-pin page/physical/protection checks. That CPU
+reservation does not establish a PRAMIN aperture alias. Eleven checked stores
+and four real validated allocations complete; the next actual request stops
+**before RAMHT FD002210=03000100**, with neither store nor corresponding readback.
+RAMHT/RAMFC/PRAMIN ownership and the actual SDK-ready producer remain required,
+so capture refuses. This supersedes the prior generation's six-store stop at
+the blanket engine-enable request without altering that frozen evidence.
+
+Nine groups cover **79 complete command lifetimes in7.516s**, plus an independent
+elapsed/alarm check. Ordinary focused discovery passes9/9 in6.199s. Root
+independently verifies all five committed source bindings,84 compiled and30
+model artifact entries,15 pinned primary inputs and97 unique nested identities.
+The actual PE and converted XBE executable section agree across467,968 bytes.
+The nominal timer model proves software ordering; silicon fractional phase and
+the identity of a different live console clock remain outside that proof.
+
+Private proof:
+`build/blinx/noise-engine-bootstrap-20261011/qualified-engine-bootstrap.aot-private.json`,
+SHA-256 `80fcfecbaa3d6ddbf395db6c54ea211314256f1c52c2f00793ee3fa2da5a2236`.
+Independent review:
+`build/blinx/noise-engine-bootstrap-20261011/root-reviewed.aot-private.json`,
+SHA-256 `c6884227080014e405e25caeee69507e6a089677e54740dbbc4d57bd0085061e`.
+The [probe contract](https://github.com/mstan/xboxlle-probe/blob/fc749eb876c236453c3ea7d1326e22ba091a09a5/docs/NOISE-GPU-BOOTSTRAP.md)
+records exact effects and guards. No hardware, title/audio or HLE change.
+
+Probe commit `fa75438` prepares the independent live clock check required
+before timer-changing diagnostics. Every ARM-guarded EXEC payload only loads
+one aligned kernel DWORD and returns. Validated PE exports resolve complete
+counter/frequency bodies inside a restricted address window and128-read budget;
+changed metadata/code or a failed read stops without retry or a follow-on probe.
+The host identifies the complete original board-counter instruction signature,
+rather than inferring independence from the frequency alone.
+
+All nine focused offline checks pass in0.249s, including actual payload
+instruction effects, metadata escapes/budget, source identity and partial
+stopped-session evidence. The original source requires56 actual DWORD reads.
+The first draft's desktop PE alignment assumption failed against the source;
+the corrected parser accepts its actual32-byte section alignment without
+expanding the permitted read window. No kernel bytes are published.
+Private preparation proof:
+`build/blinx/live-kernel-clock-20261011/qualified-preflight.aot-private.json`,
+SHA-256 `c2101d1ce707fdc3a322feb0e6214cccba508271621a9193691a44f2d415a001`.
+The [read-only operation and limits](https://github.com/mstan/xboxlle-probe/blob/fa75438b0acc1a2205c95905054bb553f914ec44/docs/KERNEL-CLOCK.md)
+remain preparation, not a live observation. The previous unexpected SG write
+still requires owner inspection/restart under the probe's stop rules. No new
+Xbox operation or full-family qualification is claimed;4/9 and26 deferrals stay.
+
 ## Original board performance-counter provenance - 2026-10-11
 
 The GPU diagnostic's deadline cannot depend on the PTIMER ratio it is about to
