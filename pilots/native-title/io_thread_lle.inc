@@ -26,6 +26,24 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result);
 static uint32_t original_export(unsigned ordinal);
 static void thread_after_call(unsigned ordinal,const uint32_t *args,uint32_t result);
 static void thread_cpu_birth_prepare(struct OriginalThread *parent,uint32_t *entry);
+static int settings_owner_initialized;
+static void settings_before_query(const uint32_t *args)
+{
+    if(args[0]>0xff) {failure="original factory/encrypted settings require owner integration";return;}
+    if(args[0]>18 && args[0]!=0xff)return; /* Original unknown-key error needs no EEPROM. */
+    if(settings_owner_initialized)return;
+#ifdef PILOT_USB_LLE
+    if(!pilot_usb_board_eeprom_bound()) {failure="original settings require shared EEPROM owner";return;}
+    /* Retire captured boot-input validity once for this settings owner.
+     * Original code loads all256 bytes through actual HAL word transactions
+     * and owns its subsequent cache; no query result or bytes are supplied. */
+    uint32_t pa=0,invalid=0;
+    if(!physical(0x8004f920u,&pa)){failure="original settings cache flag outside RAM";return;}
+    memcpy(physical_backing(pa),&invalid,4);settings_owner_initialized=1;
+#else
+    failure="original settings require connected board owner";
+#endif
+}
 
 static struct OriginalThread *thread_object(uint32_t object)
 {
@@ -76,6 +94,7 @@ static int thread_cpu_admit(uc_engine *engine,uint32_t address)
 }
 static void thread_before_call(unsigned ordinal,const uint32_t *args)
 {
+    if(ordinal==24) {settings_before_query(args);if(failure)return;}
     if(ordinal==254 || ordinal==255) {
         uint32_t current=kernel_word(0x8003da64u);
         struct OriginalThread *parent=thread_object(current);

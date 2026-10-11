@@ -916,3 +916,68 @@ CPU, rendering/cache and audio algorithms remain unchanged. One authorized
 independent audio worker completed the raw SSL foundation concurrently in a
 separate build, sharing the four-core Normal-priority budget. `.112.2` remains
 open; family count stays **4/9**, with **24 safely deferred questions**.
+
+### Settings owner and status mapping - 2026-10-10 continuation
+
+Original ExQueryNonVolatileSetting24 now executes on the existing CPU against
+the shared EEPROM owner. On the first supported query, the adapter retires only
+the captured cache-valid flag once. Original code then loads all256 bytes through
+128 real HAL word transactions and owns its subsequent cache. The adapter neither
+copies captured settings nor supplies query outputs. Unknown user keys consume
+no EEPROM; encrypted/factory indices remain guarded until their owner is connected.
+The input ROM/EEPROM artifacts remain immutable.
+
+Three independently authored input profiles compare original and native outputs,
+including full output canaries, all19 user keys and the96-byte user block. Corrupt
+USER checksum errors precede buffer-length validation. Short buffers leave type,
+ReturnLength and values untouched. An all-FF image fails with INVALID_DEVICE_STATE
+and retries the actual bus on the next query; a bad checksum instead retains the
+loaded cache. Raw HAL storage writes do not refresh that cache. This supersedes
+the earlier assumption that direct EEPROM writes immediately change native query
+results. HLE now preserves that caller-visible behavior, corrects binary types
+for keys2/5/18, and writes optional ReturnLength only on successful queries.
+
+Actual title execution next reached RtlNtStatusToDosError301. The previous native
+Windows mapper differed on **126 of2,354** original-domain, boundary, facility,
+customer-bit and authored pseudorandom inputs: for example, status00000102 maps
+to317 on this Xbox kernel and1460 on the current Windows host. Default HLE now
+uses an authored sparse binary search over factual return mappings observed from
+unchanged original execution. It preserves customer passthrough, HRESULT/facility
+rules and unknown317 without an OS-dependent table or an LLE runtime fallback.
+No original instruction body or packed kernel lookup representation is committed.
+The private audit covers all **612 original lookup statuses** and the cases above;
+the maintained comparison additionally checks native constants and neighboring
+statuses against original execution (**2,479 comparisons**).
+
+The source-bound combined CPU batch passes **56/56 in11.687s**. Three settings
+profiles, the status mapper, existing SMBus and native contracts also pass in one
+focused six-entry batch; the complete private-domain audit matches with zero
+differences. Fresh muted original Blinx passes24 and301 in its real child, then
+stops at **NtAllocateVirtualMemory184**. That allocator already exists, but its
+successful pages/protection/lifetime must be published on the actual raw-thread
+CALL/return route before admission. Do not merely allow the import or manufacture
+page identities. Wider service/callback and GPU/audio startup integration remain
+required; no full-title scheduling qualification is claimed.
+
+Private reports in `build/blinx/`:
+`settings-status-qualified-validation-20261010.aot-private.json`,
+`settings-status-qualified-focus-20261010.aot-private.json`,
+`status-map-domain-20261010.aot-private.json`,
+`status-map-facts-20261010.aot-private.json` and
+`settings-status-title-startup-20261010.aot-private.json`.
+Earlier failed host-map and harness generations remain separate artifacts.
+The sole independent audio worker's device-owned VP/GP input quantum passes
+11/11 APU entries; nominal PCM24 conversion is separately deferred as AUDIO-D06.
+Family count stays **4/9**, with **25 safely deferred questions**. `.112.2` remains
+open. One muted native attract regression validates the default HLE corrections;
+its result is recorded with the batch rather than inferred from component tests.
+
+The final configured default-HLE regression runs **190.656s /155 captures** with
+no STOP, audio-stop or fault. Actual captures show Demo gameplay, replayed Start
+interruption and title return. This short batch does not establish second-Demo
+gameplay or audio correctness. Its first attempt omitted the required single-CPU
+scheduler setting and stopped before USB admission; that harness failure remains
+preserved and is not relabelled as a production regression or a pass. The
+configured run is `settings-status-attract-configured-20261010/run.aot-private.json`.
+The harness stopped a live process at its bound, rather than observing natural
+exit. The earlier longer scene/reentry evidence retains its original generation.

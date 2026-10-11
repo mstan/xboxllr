@@ -981,6 +981,66 @@ retained. No console probe, audio playback or title/attract run was required.
 The native HLE audio implementation has no changes. Audio stays open and the
 family count remains **4/9**, with the same deferred-question queue.
 
+## Device-owned ordinary VP to GP quantum - 2026-10-10
+
+`beads-xbox.1.113.3` connects the previously separate voice-processing stages
+to actual GP input ownership. `process_2d_quantum` reads the guest's real 2D
+list, preflights its complete links/configuration, and processes its ordinary
+voices through maintained source DMA, persistent rate conversion, envelopes
+and final sends. It writes all 32 bins by 32 sample slots into the existing
+GP mix bank at `X:0x1400..0x17ff`. Host aperture reads and descriptor DMA resolve
+those same words; no second mix buffer or host voice registry owns the device.
+
+Finite voices are retired **after** that publication. The final DONE/status
+stores and level IRQ therefore cannot precede publication of their quantum.
+A retired voice left on the real list emits the existing idle trap on the next
+admitted call; the original driver remains responsible for unlinking it. This
+batch does not replace or newly qualify that original ISR/consumer. Disabled,
+halted or trapped sequencing does not admit a quantum; paused/locked voices
+fetch no source. Empty/no-contribution quanta publish a zero mix bank without
+claiming successful stream consumption or invented starvation samples.
+
+The audit retains the reached original ordinary defaults: NTSC initialization
+`0x178705` sets voice HEADROOM=7, and the complete previously qualified filter
+helper `0x179283` supplies bypass defaults. Its nondefault path emits the real
+mode and coefficient methods; those encodings alone do not establish output.
+The current native binding has no filter API. Pinned xemu leaves ParaEQ/cutoff
+modulation incomplete and does not consume voice HEADROOM; its modified GPL
+LADSPA filter is not independent silicon evidence. DLS2/ParaEQ/spatial and other
+headroom values retain their guards and active implementation dependencies;
+[AUDIO-D04/D05](LLE-DEFERRED-QUESTIONS.md) retain their precision questions.
+Advancing the reached bypass pipeline avoids admitting guessed filter output.
+
+The isolated `apu_mix_word.hpp` policy converts normalized sums to signed
+PCM24 with declared saturation and truncation. Existing native audio uses that
+same scale, but agreement does not establish MCPX accumulator precision,
+clipping or rounding. This boundary can be replaced without changing voice,
+memory or completion ownership. Pinned [xemu GP/EP transport](https://github.com/xemu-project/xemu/blob/482088490c2d5983ed5e1eafbd09906157c1eca0/hw/xbox/mcpx/apu/dsp/gp_ep.c)
+corroborates the planar bank location. No implementation body was copied.
+
+The separate, silent APU batch passes **11/11 in 1.03s**. Three mixed-source
+lifetimes run 72 complete quanta with real mono/stereo DMA, persistent rate,
+nonunity sustain, repeated-bin gains and submix headroom. Independent constant
+and 750-Hz tone fits check the resulting PCM24 words. Known-bit GP descriptors
+then transfer those actual words through noncontiguous physical pages. Three
+finite-source lifetimes check publication-before-IRQ, real retirement, idle
+trap/list ownership, and zero replay after caller-side unlink. Negative cases
+cover complete-list preflight, unsupported later voices, physical overflow,
+source failure after a real prefix, failed final notifier stores and admission
+controls. A late source failure may leave its earlier voice state advanced;
+a late retirement failure reports that the bank was published. Both stop
+terminally without a completed-quantum sequence or falsely successful retirement.
+
+Evidence: `build/blinx/audio-vp-quantum-20261010/qualified-batch.aot-private.json`
+and `apu-tests-final.log`. The earlier first-test failure is preserved: its
+fixture attempted illegal initial SUSTAIN, and was corrected to reach sustain
+through the actual legal HOLD/DECAY lifecycle. No production guard was relaxed.
+No preserved reference DLL, native audio implementation, console state or title
+run was changed. This explicit API reserves clock/admission ownership for the
+later device scheduler; it does not guess cadence, execute GP bootstrap/graph,
+resolve original descriptor bit9, produce EP/AC97 output or qualify full title
+audio. Those remaining integration dependencies keep the family open.
+
 ## References and reuse
 
 - Original NTSC private input: full helpers at `0x1789a0` and `0x178c97`;

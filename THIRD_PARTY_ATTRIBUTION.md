@@ -1650,6 +1650,21 @@ implementation body was copied. Opaque descriptor control words and stream
 lifecycle remain unqualified. See the existing APU references above and
 `pilots/native-title/AUDIO-LLE.md` for their precise scope.
 
+The settings-cache bootstrap adapter and independent EEPROM/error/output fixtures
+are authored here. Original ExQuery24 cache/type/checksum/length behavior and
+RtlNtStatusToDosError301 API return values are factual references obtained through
+unchanged private kernel execution. The native sparse binary-search implementation
+and constants express those observed API mappings, without a copied instruction
+body or packed kernel table. This replaces the earlier host Windows mapper rather
+than importing another donor implementation. The original capture remains private.
+
+The device-owned VP/GP quantum, mixed-waveform fixtures and isolated nominal
+PCM24 conversion are authored here. The already pinned xemu GP/EP source is a
+factual reference for the planar mix-bank location; original NTSC command emission
+supplies ordinary voice-field bindings. No implementation body was copied. Exact
+accumulation/quantization remains explicit in AUDIO-D06; GP/EP/bootstrap/output
+dependencies retain their existing qualification limits and dependency notices.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

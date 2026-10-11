@@ -6,10 +6,14 @@ Original scheduling has bounded no-peer idle-clock and integer compute
 checkpoints. Its LLE thread bodies now execute original bytes on that same CPU,
 retaining flags and full FP state across original IRQs, waits and switches.
 Normal-priority child creation, explicit termination and recursive critical
-sections now use that original route; the latest combined CPU batch passes52
-checks. Original Blinx runs its child and reaches the settings-query dependency.
+sections now use that original route; the latest combined CPU batch passes56
+checks. Original settings use the shared EEPROM owner and original HAL/cache.
+The default HLE corrects settings types/error ordering/cache behavior and uses
+an authored, deterministic Xbox error mapper instead of the host Windows table.
+Original Blinx passes both services and reaches the memory-allocation publication
+dependency184.
 Whole title scheduling remains unqualified. See
-[the CPU route and remaining integration](SCHEDULING-LLE.md#early-child-admission-and-critical-sections---2026-10-10-continuation).
+[the CPU route and remaining integration](SCHEDULING-LLE.md#settings-owner-and-status-mapping---2026-10-10-continuation).
 
 Original ROM reads additionally require the owned256KiB flash input, configured
 with `-DPILOT_IO_DEVICE_ROM=F:/Projects/xboxlle/machine/flash-dump-ff000000.bin`.

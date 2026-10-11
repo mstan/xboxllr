@@ -37,6 +37,11 @@ struct ApuEnvelopeStep {
     // A filter force-release supplies zero modulation, not voice completion.
     bool force_release=false;
 };
+struct ApuVoiceQuantum {
+    uint32_t visited=0,contributed=0,completed=0;
+    bool published=false;
+    uint64_t sequence=0;
+};
 
 // A RAM-backed MMIO register file: reads return the last written value (reset 0).
 class RegFileMmio : public MmioDevice {
@@ -151,6 +156,11 @@ public:
     // final sends and finite-buffer retirement. Accumulates into 32 planar bins.
     // The returned count owns actual output; no padding or GP output is supplied.
     bool process_2d_voice(uint16_t voice,float* bins,uint32_t& count,bool& completed);
+    // One device-owned 32-sample quantum over the actual guest 2D list.
+    // Publish the real GP mix bank before retiring completed buffer owners.
+    // Caller controls admission/cadence; this neither starts nor completes GP.
+    bool process_2d_quantum(ApuVoiceQuantum& result);
+    uint64_t voice_mix_quanta()const{return voice_mix_quanta_;}
 
     // Fresh opaque descriptor reads for the later stream owner. This stages
     // real shared RAM, without consuming samples or decoding control fields.
@@ -298,6 +308,9 @@ public:
     uint64_t idle_voice_traps() const { return idle_voice_traps_; }
 
 private:
+    bool process_2d_voice_impl(uint16_t voice,float* bins,uint32_t& count,bool& completed,bool retire);
+    uint64_t voice_mix_quanta_=0;
+    bool processing_quantum_=false;
     bool configure_ssl(uint32_t method,uint32_t value) {
         if(method==0x190) {
             if(!ssl_.select(value))device_fault("SSL staging window remains unqualified");

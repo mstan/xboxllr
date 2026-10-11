@@ -75,7 +75,7 @@ static void test_smbus_smc_lle(void)
     CHECK(!pilot_io_device_lle(50,memory,write_wrap,&g_eax));
     CHECK(!g_eax && eeprom[0xff]==0x3c && eeprom[0]==0x5a);
 
-    // Original SMBus writes change the actual native settings/checksum owner.
+    // SMBus writes change storage; the settings API keeps its original cache.
     memset(eeprom,0,sizeof(eeprom));
     uint32_t language=6,checksum=~language;
     memcpy(eeprom+0x90,&language,4);memcpy(eeprom+0x60,&checksum,4);
@@ -84,12 +84,12 @@ static void test_smbus_smc_lle(void)
     uint32_t set_language[]={0xa8,0x90,0,7};
     CHECK(!pilot_io_device_lle(50,memory,set_language,&g_eax));CHECK(!g_eax);
     MEM32(0x19104)=0xdeadbeef;call_kernel(24,query,5);
-    CHECK(g_eax==0xc000009cu && MEM32(0x19104)==0xdeadbeef);
+    CHECK(!g_eax && MEM32(0x19104)==6 && eeprom[0x90]==7);
     uint32_t set_checksum[]={0xa8,0x60,1,0xfff8};
     CHECK(!pilot_io_device_lle(50,memory,set_checksum,&g_eax));CHECK(!g_eax);
     set_checksum[1]=0x62;set_checksum[3]=0xffff;
     CHECK(!pilot_io_device_lle(50,memory,set_checksum,&g_eax));CHECK(!g_eax);
-    call_kernel(24,query,5);CHECK(!g_eax && MEM32(0x19104)==7);
+    call_kernel(24,query,5);CHECK(!g_eax && MEM32(0x19104)==6);
     address=0xa9;command=0x19;CHECK(!pilot_usb_board_port(0xc004,1,1,&address));
     CHECK(pilot_usb_board_port(0xc002,1,1,&command)); // RECEIVE_BYTE remains outside HAL byte/word scope.
     CHECK(!pilot_usb_board_port(0xc000,1,0,&status));

@@ -127,6 +127,7 @@ static void call_kernel(unsigned ordinal,const uint32_t *args,unsigned argc)
 #include "thread_critical_cpu_contract_test.inc"
 #include "rtc_contract_test.inc"
 #include "smbus_contract_test.inc"
+#include "settings_lle_contract_test.inc"
 #endif
 #ifdef PILOT_IO_DEVICE_LLE
 #include "io_device_contract_test.inc"
@@ -480,7 +481,7 @@ int main(int argc,char **argv)
     if(argc==2 && !strcmp(argv[1],"audio-adpcm")){test_audio_adpcm();return 0;}
 #endif
 #endif
-    if (argc==2) {
+    if (argc>1) {
 #ifdef PILOT_GPU_LLE
         if (!strcmp(argv[1],"gpu-lle-transport")) { test_gpu_lle_transport(); return 0; }
         if (!strcmp(argv[1],"gpu-lle-av-mode-guard")) { test_gpu_lle_av_mode_guard(); return 0; }
@@ -583,6 +584,11 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"thread-critical-cpu-lle")) { test_thread_critical_cpu_lle(); return 0; }
         if (!strcmp(argv[1],"rtc-cmos-lle")) { test_rtc_cmos_lle(); return 0; }
         if (!strcmp(argv[1],"smbus-smc-lle")) { test_smbus_smc_lle(); return 0; }
+        if (!strcmp(argv[1],"settings-lle")) { test_settings_lle(0); return 0; }
+        if (!strcmp(argv[1],"settings-lle-checksum")) { test_settings_lle(1); return 0; }
+        if (!strcmp(argv[1],"settings-lle-empty")) { test_settings_lle(2); return 0; }
+        if (!strcmp(argv[1],"status-map-lle")) { test_status_map_lle(NULL); return 0; }
+        if (!strcmp(argv[1],"status-map-audit")) { CHECK(argc==3);test_status_map_lle(argv[2]);return 0; }
         if (!strcmp(argv[1],"thread-lle-blocked")) { thread_lle_reject=1;test_thread_lle();return 0; }
 #endif
         if (!strcmp(argv[1],"jumps")) { test_jumps(); return 0; }
@@ -624,7 +630,7 @@ int main(int argc,char **argv)
     query[3]=3; MEM32(0x19104)=0xaabbccdd;
     call_kernel(24,query,5); CHECK(g_eax==0xc0000023u && MEM32(0x19104)==0xaabbccdd);
     query[3]=4; eeprom[0x90]^=1;
-    call_kernel(24,query,5); CHECK(g_eax==0xc000009cu && MEM32(0x19104)==0xaabbccdd);
+    call_kernel(24,query,5); CHECK(!g_eax && MEM32(0x19104)==6); /* Raw writes retain the API cache. */
     fprintf(stderr,"PASS: isolated threads/TLS/registers, recursive exclusion, handles, EEPROM ABI\n");
     return 0;
 }

@@ -116,6 +116,10 @@ bool McpxApu::source_envelope_quantum(uint16_t voice,float* stereo,uint32_t& cou
 }
 
 bool McpxApu::process_2d_voice(uint16_t voice,float* bins,uint32_t& count,bool& completed) {
+    return process_2d_voice_impl(voice,bins,count,completed,true);
+}
+
+bool McpxApu::process_2d_voice_impl(uint16_t voice,float* bins,uint32_t& count,bool& completed,bool retire) {
     count=0;completed=false;
     if(faulted_)return false;
     if(voice<64 || voice>=kMaxVoices || !bins) {
@@ -142,7 +146,8 @@ bool McpxApu::process_2d_voice(uint16_t voice,float* bins,uint32_t& count,bool& 
     // The real final samples reach the destination before its completion/IRQ.
     // Never free buffered rate output merely because source DMA reached EBO.
     if(ended || envelope.force_release) {
-        if(!retire_buffer(voice))return false;completed=true;
+        if(retire && !retire_buffer(voice))return false;
+        completed=true;
     }
     return true;
 }

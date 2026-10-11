@@ -31,6 +31,7 @@ const char *pilot_usb_pic_port(uint32_t port,int size,int write,uint32_t *value)
 const char *pilot_usb_board_port(uint32_t port,int size,int write,uint32_t *value);
 const char *pilot_usb_board_bind_tray(PilotUsbTrayState);
 const char *pilot_usb_board_bind_eeprom(PilotUsbEepromAccess);
+int pilot_usb_board_eeprom_bound(void);
 const char *pilot_usb_board_outputs(uint32_t *known,uint32_t *levels);
 /* Observe retained LED07/08 requests, not physical phase/automatic output or
  * guest register readback. known bits0/1 denote programmed mode/sequence. */

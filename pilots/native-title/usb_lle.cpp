@@ -251,6 +251,12 @@ extern "C" const char *pilot_usb_board_outputs(uint32_t *known,uint32_t *levels)
     else {*known=board_outputs.known();*levels=board_outputs.levels();}
     ReleaseSRWLockExclusive(&usb_lock);return error;
 }
+extern "C" int pilot_usb_board_eeprom_bound(void)
+{
+    AcquireSRWLockShared(&usb_lock);
+    int bound=eeprom_access!=nullptr;
+    ReleaseSRWLockShared(&usb_lock);return bound;
+}
 extern "C" const char *pilot_usb_pit_time(uint64_t ticks)
 {
     AcquireSRWLockExclusive(&usb_lock);

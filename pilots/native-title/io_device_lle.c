@@ -797,13 +797,13 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
        ordinal!=98 && ordinal!=100 && ordinal!=103 && ordinal!=119 && ordinal!=121 && ordinal!=128 && ordinal!=129 && ordinal!=137 && ordinal!=151 &&
        ordinal!=160 && ordinal!=161 && ordinal!=184 && ordinal!=199 && ordinal!=204 && ordinal!=217
 #ifdef PILOT_FILES_LLE
-       && ordinal!=35 && ordinal!=36 && ordinal!=37 && ordinal!=67 && ordinal!=69 &&
+       && ordinal!=24 && ordinal!=35 && ordinal!=36 && ordinal!=37 && ordinal!=67 && ordinal!=69 &&
        ordinal!=97 && ordinal!=113 && ordinal!=125 && ordinal!=148 && ordinal!=149 && ordinal!=150 && ordinal!=159 &&
        ordinal!=186 && ordinal!=187 && ordinal!=189 && ordinal!=190 && ordinal!=196 && ordinal!=198 &&
        ordinal!=200 && ordinal!=202 && ordinal!=203 && ordinal!=207 && ordinal!=209 && ordinal!=211 &&
        ordinal!=215 && ordinal!=218 && ordinal!=219 && ordinal!=224 && ordinal!=225 && ordinal!=226 && ordinal!=231 && ordinal!=233 && ordinal!=234 && ordinal!=236 &&
        ordinal!=246 && ordinal!=250 && ordinal!=254 && ordinal!=255 && ordinal!=256 &&
-       ordinal!=277 && ordinal!=291 && ordinal!=294
+       ordinal!=277 && ordinal!=291 && ordinal!=294 && ordinal!=301
 #endif
        ) {
         failure="device LLE unsupported ordinal";return;
@@ -870,7 +870,7 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
     case 67:case 113:case 148:case 198:case 203:case 209:case 224:case 225:case 231:count=2;break;
     case 215:case 233:case 246:count=3;break;
     case 149:case 189:case 234:count=4;break;
-    case 150:case 159:case 211:case 218:case 226:case 254:count=5;break;
+    case 24:case 150:case 159:case 211:case 218:case 226:case 254:count=5;break;
     case 202:count=6;break;
     case 219:case 236:count=8;break;
     case 190:count=9;break;

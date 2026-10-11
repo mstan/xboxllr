@@ -62,6 +62,10 @@ static uint32_t thread_identity_sequence;
 static unsigned char eeprom[256];
 static int have_eeprom;
 static SRWLOCK eeprom_lock=SRWLOCK_INIT;
+/* Original settings retains a boot-derived cache. HAL writes alone do not
+ * refresh it; this program state is separate from the EEPROM storage owner. */
+static unsigned char settings_cache[256];
+static int settings_cache_valid;
 #ifdef PILOT_USB_LLE
 static int shared_eeprom_access(uint8_t offset,int size,int write,uint32_t *value)
 {
@@ -436,6 +440,8 @@ static void critical_section(unsigned operation,uint32_t va)
     }
 }
 
+#include "status_map.inc"
+
 static void query_setting(void)
 {
     uint32_t index=MEM32(g_esp+4),type=MEM32(g_esp+8),value=MEM32(g_esp+12);
@@ -443,26 +449,35 @@ static void query_setting(void)
     /* XC_* user-settings layout from Cxbx EmuEEPROM.h/types.h. These are
      * actual file-backed settings; encrypted/factory queries remain explicit. */
     static const unsigned char offsets[]={4,8,24,40,12,28,44,48,52,56,60,64,68,72,76,80,84,88,92};
+    if (index>0xff) stop("EEPROM index outside pilot scope",index);
+    if (index>=sizeof(offsets) && index!=0xff) { g_eax=0xc0000034u; return; }
     if (!have_eeprom) stop("console settings require EEPROM input",index);
-    if (index>=sizeof(offsets) && index!=0xff) stop("EEPROM index outside pilot scope",index);
     uint32_t size=index==0xff ? 96 : 4;
-    if (result) MEM32(result)=size;
-    if (length<size) { g_eax=0xc0000023u; return; }
-    AcquireSRWLockShared(&eeprom_lock);
+    AcquireSRWLockExclusive(&eeprom_lock);
+    if(!settings_cache_valid) {
+        memcpy(settings_cache,eeprom,sizeof(settings_cache));
+        for(unsigned i=0;i<sizeof(settings_cache);++i)
+            if(settings_cache[i]!=0xff){settings_cache_valid=1;break;}
+        if(!settings_cache_valid) {
+            ReleaseSRWLockExclusive(&eeprom_lock);g_eax=0xc0000184u;return;
+        }
+    }
     uint64_t checksum=0;
     for (unsigned i=0x60;i<0xc0;i+=4) {
-        uint32_t part; memcpy(&part,eeprom+i,4); checksum+=part;
+        uint32_t part; memcpy(&part,settings_cache+i,4); checksum+=part;
         checksum=(checksum&0xffffffffu)+(checksum>>32);
     }
     if ((uint32_t)checksum!=0xffffffffu) {
-        ReleaseSRWLockShared(&eeprom_lock);g_eax=0xc000009cu;return;
+        ReleaseSRWLockExclusive(&eeprom_lock);g_eax=0xc000009cu;return;
     }
     unsigned char payload[96];
-    memcpy(payload,eeprom+0x60+(index==0xff ? 0 : offsets[index]),size);
-    ReleaseSRWLockShared(&eeprom_lock);
+    memcpy(payload,settings_cache+0x60+(index==0xff ? 0 : offsets[index]),size);
+    ReleaseSRWLockExclusive(&eeprom_lock);
+    if (length<size) { g_eax=0xc0000023u; return; }
     /* Guest output accesses may enter memory transport. Keep owner locks out
      * of that path; payload is only this query's immutable read snapshot. */
-    MEM32(type)=(index==1 || index==4 || index==0xff) ? 3 : 4;
+    MEM32(type)=(index==1 || index==2 || index==4 || index==5 || index==18 || index==0xff) ? 3 : 4;
+    if (result) MEM32(result)=size;
     memset(memory+value,0,length);
     memcpy(memory+value,payload,size);
     g_eax=0;
@@ -645,11 +660,7 @@ static void kernel_dispatch_impl(void)
         g_eax=dispatch_wait(&va,1,0,MEM32(g_esp+16)!=0,MEM32(g_esp+20)); g_esp+=24; return;
     }
     case 301: {
-        /* Same native NT status table used by Phobos's RTL implementation. */
-        typedef ULONG (WINAPI *StatusMap)(LONG);
-        StatusMap map=(StatusMap)(void*)GetProcAddress(GetModuleHandleW(L"ntdll.dll"),"RtlNtStatusToDosError");
-        if (!map) stop("host NT status table unavailable",301);
-        g_eax=map((LONG)MEM32(g_esp+4)); g_esp+=8; return;
+        g_eax=pilot_nt_status_to_dos_error(MEM32(g_esp+4));g_esp+=8;return;
     }
     case 24: query_setting(); g_esp+=24; return;
     case 107: {

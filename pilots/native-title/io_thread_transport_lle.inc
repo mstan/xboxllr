@@ -11,11 +11,11 @@ static unsigned thread_service_arguments(unsigned ordinal)
     switch(ordinal) {
     case 121:case 125:case 250:return 0;
     case 97:case 128:case 137:case 186:case 187:case 256:case 258:
-    case 277:case 291:case 294:return 1;
+    case 277:case 291:case 294:case 301:return 1;
     case 113:case 148:case 224:case 225:case 231:return 2;
     case 107:case 108:case 119:case 233:case 246:return 3;
     case 149:case 189:case 234:return 4;
-    case 150:case 159:case 254:return 5;
+    case 24:case 150:case 159:case 254:return 5;
     case 255:return 10;
     default:
         fprintf(stderr,"[THREAD LLE SERVICE GUARD] ordinal=%u thread=%08x\n",ordinal,kernel_word(0x8003da64u));
