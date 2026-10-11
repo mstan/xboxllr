@@ -5,6 +5,52 @@ explicitly deferred real-console-dependent work on 2026-10-09; this family
 proceeds independently of GPU startup `.109` / hardware observation `.111`.
 The total remains four qualified families and five open.
 
+## Typed original-CPU graphics components and VM service ownership - 2026-10-11
+
+Original scheduling now connects reviewed whole HLE D3D entries to the sole
+original CPU owner. The sorted registry holds up to256 nonoverlapping entries,
+checks each resident original body against its reviewed SHA-256 and seals before
+CPU execution. Each entry declares its actual RET cleanup and retains register
+arguments. Only EAX/ESP may change; original flags, FP state, thread, stack and
+return address stay with the engine. The default native scheduling path excludes
+this bridge and its callback guards.
+
+The selected `build/blinx-movie` generation binds **129 original D3D entries**.
+Its binding JSON and generated guest bodies are unchanged. The selected
+GetPixelShader already had the correct RET4; an older unselected `build/blinx`
+header had RET8. The independent static audit finds70 implemented native cases
+and59 guarded identifiers; identifying an entry does not implement its service.
+Three actual CPU query lifetimes call the existing whole GetDeviceCaps and
+GetPixelShader services and verify caller state and original handle cleanup.
+Typed RET8/file and ECX/EDX RET0 fixtures also cover binding, ABI and byte guards.
+
+A selected component can now request original VM ordinals184/199/204/217 through
+its actual thread stack and the existing kernel CALL/RET, publication and
+protection owner. A64-byte lease is reused within each component and reset at
+its next entry. **39 real VM services across three CPU lifetimes** cover query,
+allocation, protection, decommit/recommit, original CPU RAM stores and release.
+An overlapping lease is rejected before VM mutation. These fixtures hold no
+native renderer/VM locks; they establish transport, not renderer lock ownership.
+
+All **20 combined focused checks pass in6.28s**, with no skips. The final proof
+freezes46 source, generated, configuration, binary and result identities:
+`build/blinx/component-abi-20261011/qualified.aot-private.json`, SHA-256
+`b1bd8c4f317aa3d567aad80019d2098cb858bbf730ef5bfef5a3262c131614ad`.
+One rebuilt, invisible, muted startup runs **7.468s**, binds129 resident entries
+and verifies the installed HDD XBE with status0. It then stops before native
+creation at `original scheduling native graphics memory ownership requires
+integration`. Immutable XBE/ROM/EEPROM/snapshot inputs remain unchanged.
+No attract/audio playback or physical Xbox operation occurred.
+
+Required renderer/VM lock ownership across original scheduler handoffs remains
+open. The existing original critical-section fixture establishes a28-byte object
+and ordinals291/277/294; the static ordering audit does not admit constructors.
+Compiled ISR/DPC graphics dispatch now stops before taking native locks.
+Original callback, display-pulse and asynchronous Reset/Release ownership also
+remain required. The native HLE service selection does not qualify the separate
+LLE GPU initializer or complete graphics route. `.112.2`, `.112` and `.116`
+remain open; **4/9 families** and **26 agreed precision deferrals** are unchanged.
+
 ## Original P6 instruction and legacy FP metadata - 2026-10-11
 
 The adjacent instruction audit reproduced **33 failures out of48 checks** on

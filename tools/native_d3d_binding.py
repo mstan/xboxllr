@@ -265,8 +265,8 @@ def bind(xbe: Path, output: Path, symbols: Path):
                  vertex_shader_offset=variables["D3DDevice__m_VertexShader_OFFSET"],calls=calls,**state_defaults)
     header=['#pragma once', '#include <stdint.h>', 'enum PilotD3DEntry {']
     header += [f'    PILOT_D3D_{c["name"]},' for c in calls]
-    header += ['    PILOT_D3D_COUNT', '};', 'static const struct { const char *name; uint32_t address, stack_bytes; } pilot_d3d_calls[] = {']
-    header += [f'    {{"{c["name"]}", {c["address"]}u, {c["stack_bytes"]}u}},' for c in calls]
+    header += ['    PILOT_D3D_COUNT', '};', 'static const struct { const char *name; uint32_t address, stack_bytes, bytes; const char *sha256; } pilot_d3d_calls[] = {']
+    header += [f'    {{"{c["name"]}", {c["address"]}u, {c["stack_bytes"]}u, {functions[int(c["address"],16)]["size"]}u, "{c["function_sha256"]}"}},' for c in calls]
     header += ['};',f'#define PILOT_D3D_DEVICE_GLOBAL 0x{binding["device_global"]:x}u',
                f'#define PILOT_D3D_DEVICE_OBJECT 0x{binding["device_object"]:x}u',
                f'#define PILOT_D3D_VERTEX_SHADER_OFFSET {binding["vertex_shader_offset"]}u']

@@ -136,6 +136,8 @@ static void call_kernel(unsigned ordinal,const uint32_t *args,unsigned argc)
 #include "thread_files_cpu_contract_test.inc"
 #include "thread_contiguous_cpu_contract_test.inc"
 #include "thread_component_cpu_contract_test.inc"
+#include "thread_component_abi_contract_test.inc"
+#include "thread_component_vm_contract_test.inc"
 #include "thread_string_cpu_contract_test.inc"
 #include "thread_string_compare_cpu_contract_test.inc"
 #include "thread_device_cpu_contract_test.inc"
@@ -456,6 +458,9 @@ static void test_timers(void)
 
 #ifdef PILOT_D3D_NATIVE
 #include "graphics_contract_test.inc"
+#if defined(PILOT_SCHEDULING_LLE) && defined(PILOT_EVENT_TIMER_LLE)
+#include "thread_graphics_component_contract_test.inc"
+#endif
 #endif
 
 int main(int argc,char **argv)
@@ -481,7 +486,7 @@ int main(int argc,char **argv)
     uint32_t fixture_image_size=argc==2 && !strcmp(argv[1],"memory-statistics")?0x20000:0x10000;
     if(argc==2 && !strcmp(argv[1],"sections"))fixture_image_size=0x16000;
 #ifdef PILOT_D3D_NATIVE
-    if(argc==2 && (!strcmp(argv[1],"graphics") || !strcmp(argv[1],"graphics-scheduler") || !strcmp(argv[1],"graphics-depth-argb") || !strcmp(argv[1],"graphics-x8-texture") || !strncmp(argv[1],"graphics-present",16))) {
+    if(argc>=2 && (!strcmp(argv[1],"graphics") || !strcmp(argv[1],"graphics-scheduler") || !strcmp(argv[1],"graphics-depth-argb") || !strcmp(argv[1],"graphics-x8-texture") || !strncmp(argv[1],"graphics-present",16) || !strncmp(argv[1],"graphics-component-",19))) {
         fixture_image_size=((PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SHADER_CONSTANT_MODE_OFFSET+4+4095)&~4095u)-0x10000;
         image_base=0x10000;*(uint32_t*)(image_bytes+0x10c)=fixture_image_size;
     }
@@ -499,6 +504,15 @@ int main(int argc,char **argv)
 #endif
 #endif
     if (argc>1) {
+#if defined(PILOT_D3D_NATIVE) && defined(PILOT_SCHEDULING_LLE) && defined(PILOT_EVENT_TIMER_LLE)
+        if(!strncmp(argv[1],"graphics-component-",19)) {
+            CHECK(argc==3);int kind=!strcmp(argv[1],"graphics-component-cpu-lle")?0:
+                !strcmp(argv[1],"graphics-component-memory-guard-lle")?1:
+                !strcmp(argv[1],"graphics-component-callback-guard-lle")?2:
+                !strcmp(argv[1],"graphics-component-pulse-guard-lle")?3:-1;
+            CHECK(kind>=0);test_thread_graphics_component_lle(argv[2],kind);return 0;
+        }
+#endif
 #ifdef PILOT_GPU_LLE
         if (!strcmp(argv[1],"gpu-lle-transport")) { test_gpu_lle_transport(); return 0; }
         if (!strcmp(argv[1],"gpu-thread-cpu-lle")) {test_gpu_thread_cpu_lle();return 0;}
@@ -606,6 +620,15 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"thread-files-cpu-lle")) { CHECK(argc==3);test_thread_files_cpu_lle(argv[2]);return 0; }
         if (!strcmp(argv[1],"thread-contiguous-cpu-lle")) { test_thread_contiguous_cpu_lle(0);return 0; }
         if (!strcmp(argv[1],"thread-contiguous-borrowed-free-lle")) { test_thread_contiguous_cpu_lle(1);return 0; }
+        if(!strcmp(argv[1],"thread-component-vm-cpu-lle") || !strcmp(argv[1],"thread-component-vm-workspace-lle")) {
+            CHECK(argc==2);test_thread_component_vm_lle(!strcmp(argv[1],"thread-component-vm-workspace-lle"));return 0;
+        }
+        if (!strncmp(argv[1],"thread-component-typed-",23)) {
+            CHECK(argc==3);int kind=!strcmp(argv[1],"thread-component-typed-cpu-lle")?0:
+                !strcmp(argv[1],"thread-component-typed-stack-lle")?1:!strcmp(argv[1],"thread-component-typed-register-lle")?2:
+                !strcmp(argv[1],"thread-component-typed-bytes-lle")?3:-1;
+            CHECK(kind>=0);test_thread_component_abi_lle(argv[2],kind);return 0;
+        }
         if (!strncmp(argv[1],"thread-component-",17)) {
             CHECK(argc==3);int kind=!strcmp(argv[1],"thread-component-cpu-lle")?0:
                 !strcmp(argv[1],"thread-component-abi-lle")?1:!strcmp(argv[1],"thread-component-bytes-lle")?2:

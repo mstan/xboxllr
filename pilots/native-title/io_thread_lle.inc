@@ -17,7 +17,7 @@ static struct OriginalThread {
     uint32_t checkpoint_pc,checkpoint_flags,initial_flags;
     uint32_t trace_return,trace_stack;
     uint32_t component_regs[8],component_before[8],component_return,component_flags;
-    uint32_t component_call_top,component_workspace;
+    uint32_t component_call_top,component_workspace,component_index,component_vm_workspace;
     int in_component,component_requested;
     volatile LONG checkpoint_requested;
     uint32_t exit_status;
@@ -30,10 +30,23 @@ static int thread_pcr_published;
 static unsigned original_cpu_threads;
 static uint32_t original_trace_entry;
 static unsigned original_trace_hits;
-static uint32_t original_component_entry;
-static uint32_t original_component_bytes;
-static unsigned char original_component_code[4096];
-static PilotIoComponent component_callback;
+enum { ORIGINAL_COMPONENT_CAPACITY=256, ORIGINAL_COMPONENT_CODE_BYTES=4096 };
+static struct OriginalComponent {
+    uint32_t entry,bytes,stack_bytes;
+    PilotIoComponent callback;
+    unsigned char code[ORIGINAL_COMPONENT_CODE_BYTES];
+} original_components[ORIGINAL_COMPONENT_CAPACITY];
+static unsigned original_component_count;
+static int original_components_sealed;
+static unsigned original_component_find(uint32_t entry)
+{
+    unsigned low=0,high=original_component_count;
+    while(low<high) {
+        unsigned mid=low+(high-low)/2;
+        if(original_components[mid].entry<entry)low=mid+1;else high=mid;
+    }
+    return low;
+}
 static struct OriginalThread *pending_component;
 static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result);
 static uint32_t original_export(unsigned ordinal);
@@ -123,9 +136,10 @@ static int thread_cpu_admit(uc_engine *engine,uint32_t address)
     if(address==thread->cpu_return) {
         pending_thread_return=thread;uc_emu_stop(engine);return 1;
     }
-    if(address==original_component_entry && !thread->in_kernel) {
+    unsigned component=original_component_find(address);
+    if(component<original_component_count && original_components[component].entry==address && !thread->in_kernel) {
         if(thread->in_component)failure="original CPU nested selected helper";
-        else pending_component=thread;
+        else {thread->component_index=component;pending_component=thread;}
         uc_emu_stop(engine);return 1;
     }
     return 0;
@@ -249,7 +263,8 @@ const char *pilot_io_device_thread_execute(uint32_t entry,uint32_t regs[8])
         if(thread->callback_error)return thread->callback_error;
         if(!thread->component_requested)break;
         thread->component_requested=0;
-        thread->callback_error=component_callback(original_component_entry,thread->component_regs);
+        const struct OriginalComponent *component=original_components+thread->component_index;
+        thread->callback_error=component->callback(component->entry,thread->component_regs);
         thread->request=THREAD_REQUEST_COMPONENT_DONE;
         if(!SetEvent(thread->request_event))return "selected helper completion handoff failed";
     }
@@ -279,7 +294,7 @@ const char *pilot_io_device_thread_component_call(unsigned ordinal,const uint32_
     if(top<thread->stack+bytes || (uint64_t)top>=(uint64_t)thread->stack+thread->stack_bytes)
         return "selected helper call frame outside original stack";
     regs[4]=top-bytes;
-    uint32_t frame[11]={original_component_entry};memcpy(frame+1,args,count*4);
+    uint32_t frame[11]={original_components[thread->component_index].entry};memcpy(frame+1,args,count*4);
     memcpy(guest_memory+regs[4],frame,bytes);
     const char *error=pilot_io_device_thread_call(ordinal,regs);
     if(!error)*result=regs[0];return error;

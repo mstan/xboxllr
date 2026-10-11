@@ -235,6 +235,12 @@ void pilot_cpu_out8(uint16_t port,uint8_t byte)
 }
 void pilot_thread_checkpoint(void)
 {
+#if defined(PILOT_SCHEDULING_LLE) && defined(PILOT_USB_LLE)
+    /* A whole selected component returns to an unchanged original PC with
+     * the engine's retained flags/FP state. Its completion is the handoff;
+     * a generated compute checkpoint cannot export this engine context. */
+    if(pilot_io_device_thread_component_active())return;
+#endif
 #ifdef PILOT_USB_LLE
     if(pilot_io_device_thread_checkpoint_request())
         stop("original native compute requires a certified PC/flags checkpoint",0);
@@ -541,6 +547,48 @@ static const char *installed_media_component(uint32_t entry,uint32_t regs[8])
 #endif
 #ifdef PILOT_D3D_NATIVE
 #include "graphics.inc"
+#endif
+#if defined(PILOT_SCHEDULING_LLE) && defined(PILOT_D3D_NATIVE)
+static const char *native_graphics_component(uint32_t entry,uint32_t regs[8])
+{
+    unsigned index;for(index=0;index<PILOT_D3D_COUNT && pilot_d3d_calls[index].address!=entry;++index){}
+    if(index==PILOT_D3D_COUNT || !pilot_io_device_thread_component_active())
+        return "unbound original CPU native graphics entry";
+    /* Creation/teardown and resource services still call direct memory
+     * transport while holding native ownership locks. Their original-stack
+     * service and lock lifetime must be connected before mutation. */
+    if(index==PILOT_D3D_Direct3D_CreateDevice || index==PILOT_D3D_D3DDevice_Reset ||
+       index==PILOT_D3D_D3DDevice_Release)
+        return "original scheduling native graphics memory ownership requires integration";
+    /* These native paths still use a generated guest callback/native pulse
+     * dispatcher. Stop before queueing work against the original scheduler. */
+    if(index==PILOT_D3D_D3DDevice_InsertCallback || index==PILOT_D3D_D3DDevice_SetVerticalBlankCallback ||
+       graphics_gpu_head || graphics_gpu_running || graphics_callback)
+        return "original scheduling native graphics callback ownership requires integration";
+#ifndef PILOT_DISPLAY_LLE
+    if(index==PILOT_D3D_D3DDevice_Swap)
+        return "original scheduling native graphics display pulse requires integration";
+#endif
+    uint32_t saved[]={g_eax,g_ecx,g_edx,g_ebx,g_esp,g_ebp,g_esi,g_edi};
+    g_eax=regs[0];g_ecx=regs[1];g_edx=regs[2];g_ebx=regs[3];
+    g_esp=regs[4];g_ebp=regs[5];g_esi=regs[6];g_edi=regs[7];
+    pilot_d3d_dispatch(index);
+    uint32_t returned[]={g_eax,g_ecx,g_edx,g_ebx,g_esp,g_ebp,g_esi,g_edi};
+    memcpy(regs,returned,sizeof(returned));
+    g_eax=saved[0];g_ecx=saved[1];g_edx=saved[2];g_ebx=saved[3];
+    g_esp=saved[4];g_ebp=saved[5];g_esi=saved[6];g_edi=saved[7];
+    return NULL;
+}
+static void native_graphics_components_bind(void)
+{
+    for(unsigned index=0;index<PILOT_D3D_COUNT;++index) {
+        const char *error=pilot_io_device_thread_component_bind_abi(pilot_d3d_calls[index].address,
+            pilot_d3d_calls[index].bytes,pilot_d3d_calls[index].sha256,
+            pilot_d3d_calls[index].stack_bytes,native_graphics_component);
+        if(error)stop(error,pilot_d3d_calls[index].address);
+    }
+    fprintf(stderr,"[GRAPHICS CPU COMPONENTS] bound=%u; original flags/FP/thread owner retained\n",PILOT_D3D_COUNT);
+}
 #endif
 
 static void kernel_dispatch_impl(void)
@@ -990,6 +1038,9 @@ int main(int argc,char **argv)
     const char *media_error=pilot_io_device_thread_component_bind(PILOT_MEDIA_CPU_ENTRY,
         PILOT_MEDIA_CPU_BYTES,PILOT_MEDIA_CPU_SHA256,installed_media_component);
     if(media_error)stop(media_error,PILOT_MEDIA_CPU_ENTRY);
+#endif
+#if defined(PILOT_SCHEDULING_LLE) && defined(PILOT_D3D_NATIVE)
+    native_graphics_components_bind();
 #endif
     recomp_func_t entry=recomp_lookup(PILOT_ENTRY);
     if (!entry) stop("entry missing from generated dispatch", PILOT_ENTRY);

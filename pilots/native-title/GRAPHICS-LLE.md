@@ -6,6 +6,24 @@ transform, rasterization, framebuffer writes and visibility-report DMA in
 `src/machine/nv2a.cpp`. This document records component qualification; full
 graphics-family acceptance remains open and the total remains **4/9**.
 
+## Original-CPU native graphics boundary - 2026-10-11
+
+Original scheduling now binds129 reviewed D3D entry bodies to whole existing
+HLE services with actual RET cleanup, register arguments and engine-owned
+flags/FP/thread state. Three original CPU query lifetimes and the composed
+original-stack VM route pass in the20-check combined batch. The selected
+binding JSON and guest bodies remain unchanged; default HLE scheduling excludes
+the new bridge. These are original scheduling/native replacement contracts,
+not a substitute for maintained LLE GPU startup, rendering or enabled-noise
+pixels. The static ABI inventory retains70 implemented cases and59 guarded
+identifiers.
+
+One muted7.468s actual startup binds all129 resident entries, verifies the HDD
+XBE and stops before renderer creation because scheduler/renderer/VM lock
+ownership is still required. Original callbacks and display pulses also stay
+guarded. See [transport, evidence and remaining integration](SCHEDULING-LLE.md#typed-original-cpu-graphics-components-and-vm-service-ownership---2026-10-11).
+Full graphics remains open with **4/9 families** and **26 precision deferrals**.
+
 ## Original PLL access widths and complete initializer inventory - 2026-10-11
 
 Probe commit `9082110` prepares one fixed read-only comparison for the actual

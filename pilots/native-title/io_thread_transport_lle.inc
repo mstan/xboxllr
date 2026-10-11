@@ -173,6 +173,7 @@ static void thread_cpu_prepare(struct OriginalThread *thread,uint32_t *entry)
     for(unsigned i=0;i<8;++i)IO_UC(uc_reg_write(cpu,general_regs[i],thread->call_regs+i));
     /* No reconstructed flags or FP initializer. The engine has not executed
      * since this original thread's admission; retain its complete CPU state. */
+    original_components_sealed=1;
     thread->in_cpu=1;++original_cpu_threads;*entry=thread->cpu_entry;
 }
 static void thread_cpu_complete(struct OriginalThread *thread)
@@ -242,7 +243,9 @@ static void thread_handoff(struct OriginalThread *thread,int start,uint32_t *ent
         uint32_t return_pc=0;
         if(!thread->in_component || thread->in_kernel || !thread->in_cpu ||
            kernel_word(0x8003da64u)!=thread->object ||
-           thread->component_regs[4]!=thread->component_before[4]+4) {
+           thread->component_index>=original_component_count ||
+           thread->component_regs[4]!=thread->component_before[4]+4+
+               original_components[thread->component_index].stack_bytes) {
             failure="selected helper completion outside its original CPU owner";return;
         }
         IO_UC(uc_mem_read(cpu,thread->component_before[4],&return_pc,4));
@@ -293,13 +296,17 @@ static void thread_component_prepare(struct OriginalThread *thread,uint32_t *ent
 {
     uint32_t sp=0,flags=0;
     IO_UC(uc_reg_read(cpu,UC_X86_REG_ESP,&sp));IO_UC(uc_reg_read(cpu,UC_X86_REG_EFLAGS,&flags));
-    if(!component_callback || thread->in_component || thread->in_kernel || !thread->in_cpu ||
+    if(thread->component_index>=original_component_count) {
+        failure="selected helper has no bound complete entry";return;
+    }
+    const struct OriginalComponent *component=original_components+thread->component_index;
+    if(thread->in_component || thread->in_kernel || !thread->in_cpu ||
        kernel_word(0x8003da64u)!=thread->object || (kernel_word(0x8003da60u)&255) ||
        (flags&0x600)!=0x200 || sp<thread->stack+44 ||
-       (uint64_t)sp+4>(uint64_t)thread->stack+thread->stack_bytes) {
+       (uint64_t)sp+4+component->stack_bytes>(uint64_t)thread->stack+thread->stack_bytes) {
         failure="selected helper lacks original thread/stack/passive context";return;
     }
-    if(memcmp(guest_memory+original_component_entry,original_component_code,original_component_bytes)) {
+    if(memcmp(guest_memory+component->entry,component->code,component->bytes)) {
         failure="selected helper original bytes changed after binding";return;
     }
     IO_UC(uc_mem_read(cpu,sp,&thread->component_return,4));
@@ -312,7 +319,7 @@ static void thread_component_prepare(struct OriginalThread *thread,uint32_t *ent
      * unchanged. A separate snapshot certifies this helper's complete ABI. */
     thread->component_flags=flags;
     memcpy(thread->component_before,thread->component_regs,sizeof(thread->component_before));
-    thread->component_call_top=sp;thread->component_workspace=0;
+    thread->component_call_top=sp;thread->component_workspace=0;thread->component_vm_workspace=0;
     check_publications(0);if(failure)return;
     thread->in_component=1;thread->component_requested=1;
     thread_handoff(thread,0,entry);

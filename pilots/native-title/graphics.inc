@@ -392,6 +392,17 @@ void pilot_d3d_dispatch(unsigned entry);
 #endif
 void pilot_d3d_dispatch(unsigned entry)
 {
+#ifdef PILOT_SCHEDULING_LLE
+    /* Generated ISR/DPC bodies bypass the raw CPU's component admission.
+     * They cannot take renderer/VM host locks held by a suspended component
+     * or enter a blocking thread gate at interrupt IRQL. */
+#ifdef PILOT_USB_LLE
+    if(usb_device_callback_depth)
+        stop("original scheduling compiled callback graphics ownership requires integration",entry);
+#endif
+    if(dispatch_in_dpc)
+        stop("original scheduling native DPC graphics ownership requires integration",entry);
+#endif
 #ifdef PILOT_DISPLAY_LLE
     if(entry==PILOT_D3D_D3DDevice_BlockUntilVerticalBlank || entry==PILOT_D3D_D3DDevice_SetVerticalBlankCallback) {
         if(!display_lle.active)stop("original display API without active display",entry);

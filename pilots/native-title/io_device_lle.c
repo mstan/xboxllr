@@ -1058,15 +1058,24 @@ const char *pilot_io_device_thread_trace(uint32_t entry)
 }
 const char *pilot_io_device_thread_component_bind(uint32_t entry,uint32_t bytes,
     const char *sha256,PilotIoComponent callback)
+{return pilot_io_device_thread_component_bind_abi(entry,bytes,sha256,0,callback);}
+const char *pilot_io_device_thread_component_bind_abi(uint32_t entry,uint32_t bytes,
+    const char *sha256,uint32_t stack_bytes,PilotIoComponent callback)
 {
     AcquireSRWLockExclusive(&lock);
     const char *error=NULL;
     if(!cpu || execution_depth || !callback || !sha256 || strlen(sha256)!=64 ||
-       !bytes || bytes>4096 || entry<image_start ||
-       (uint64_t)entry+bytes>(uint64_t)image_start+image_bytes || component_callback)
+       !bytes || bytes>ORIGINAL_COMPONENT_CODE_BYTES || entry<image_start ||
+       (uint64_t)entry+bytes>(uint64_t)image_start+image_bytes ||
+       stack_bytes>40 || (stack_bytes&3) || original_components_sealed ||
+       original_component_count==ORIGINAL_COMPONENT_CAPACITY)
         error="selected helper binding requires an idle, owned complete boundary";
     else {
         unsigned char digest[32];char actual[65];
+        unsigned index=original_component_find(entry);
+        if((index<original_component_count && (uint64_t)entry+bytes>original_components[index].entry) ||
+           (index && (uint64_t)original_components[index-1].entry+original_components[index-1].bytes>entry))
+            error="selected helper binding overlaps an existing complete entry";
         for(uint64_t page=entry&~4095u;page<(uint64_t)entry+bytes;page+=4096)
             if(!guest_page((uint32_t)page)){error="selected helper original bytes are not resident";break;}
         if(!error && BCryptHash(BCRYPT_SHA256_ALG_HANDLE,NULL,0,guest_memory+entry,bytes,digest,32)<0)
@@ -1076,8 +1085,12 @@ const char *pilot_io_device_thread_component_bind(uint32_t entry,uint32_t bytes,
             if(strcmp(actual,sha256))error="selected helper differs from reviewed original bytes";
         }
         if(!error) {
-            memcpy(original_component_code,guest_memory+entry,bytes);
-            original_component_entry=entry;original_component_bytes=bytes;component_callback=callback;
+            memmove(original_components+index+1,original_components+index,
+                (original_component_count-index)*sizeof(*original_components));
+            struct OriginalComponent *component=original_components+index;
+            component->entry=entry;component->bytes=bytes;component->stack_bytes=stack_bytes;
+            component->callback=callback;memcpy(component->code,guest_memory+entry,bytes);
+            ++original_component_count;
         }
     }
     ReleaseSRWLockExclusive(&lock);return error;

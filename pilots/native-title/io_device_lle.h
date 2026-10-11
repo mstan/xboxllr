@@ -56,6 +56,12 @@ const char *pilot_io_device_thread_trace(uint32_t entry);
 typedef const char *(*PilotIoComponent)(uint32_t entry,uint32_t regs[8]);
 const char *pilot_io_device_thread_component_bind(uint32_t entry,uint32_t bytes,
     const char *sha256,PilotIoComponent callback);
+/* Whole stdcall/fastcall entries retain register arguments and declare their
+ * actual RET cleanup. Only EAX and ESP may change. Entries are immutable,
+ * nonoverlapping and sealed before original CPU execution; callbacks cannot
+ * bind additional entries or change the engine's flags/FP ownership. */
+const char *pilot_io_device_thread_component_bind_abi(uint32_t entry,uint32_t bytes,
+    const char *sha256,uint32_t stack_bytes,PilotIoComponent callback);
 int pilot_io_device_thread_component_active(void);
 const char *pilot_io_device_thread_component_workspace(uint32_t bytes,uint32_t *base);
 const char *pilot_io_device_thread_component_call(unsigned ordinal,
