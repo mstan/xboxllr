@@ -45,6 +45,7 @@ done:
     ReleaseSRWLockShared(&vm_lock);
     if(!allocation) {
         result=pilot_io_device_bootstrap_dma(pa,buffer,(uint32_t)bytes,write);
+        if(!result)result=pilot_io_device_contiguous_dma(pa,buffer,(uint32_t)bytes,write,PILOT_IO_DMA_SYNC);
         if(!result)result=pilot_io_device_pinned_dma(pa,buffer,(uint32_t)bytes,write);
     }
     return result;

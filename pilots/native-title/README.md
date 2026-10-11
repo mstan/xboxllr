@@ -6,7 +6,7 @@ Original scheduling has bounded no-peer idle-clock and integer compute
 checkpoints. Its LLE thread bodies now execute original bytes on that same CPU,
 retaining flags and full FP state across original IRQs, waits and switches.
 Normal-priority child creation, explicit termination and recursive critical
-sections now use that original route; the latest combined CPU batch passes60
+sections now use that original route; the latest combined CPU batch passes62
 checks. Original settings use the shared EEPROM owner and original HAL/cache.
 The default HLE corrects settings types/error ordering/cache behavior and uses
 an authored, deterministic Xbox error mapper instead of the host Windows table.
@@ -14,9 +14,13 @@ Original-thread VM calls share the existing original page-publication owner,
 including protection, fresh-zero reuse and pinned-release guards. Original
 Blinx passes allocation184 and file open202. File calls now use the same
 original buffer/DMA preparation on both C and raw-thread routes, with actual
-event/byte/error/lifetime checks. Contiguous allocation165 is next.
+event/byte/error/lifetime checks. Raw contiguous allocations now share the
+original owner, actual GPU/USB DMA, protections and guarded USB leases.
+Six lifetimes and a borrowed-free control pass; fresh GPU FIFO/semaphore
+transport also passes with a purely original allocation. Blinx passes165 and178
+and next stops at guarded ordinal49.
 Whole title scheduling remains unqualified. See
-[the CPU route and remaining integration](SCHEDULING-LLE.md#actual-thread-file-transport---2026-10-10-continuation).
+[the CPU route and remaining integration](SCHEDULING-LLE.md#actual-thread-contiguous-ownership---2026-10-10-continuation).
 
 The independent GP owner now carries actual selected events, callback-safe
 yield/resume and a real VP MIX lease. Fifteen focused APU checks and two fresh

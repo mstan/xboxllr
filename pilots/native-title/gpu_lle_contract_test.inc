@@ -203,7 +203,11 @@ static void test_gpu_lle_transport(void)
         config[0]=2;config[2]=0;config[4]=4;config[5]=0;
         call_kernel(46,config,6);CHECK(MEM32(0x15010)==0xffffffff);
         gpu_test_write(0x1804,4);CHECK(gpu_test_read(0x1804)==4);
-        uint32_t base=physical_allocate(8192,0,0x03ffffff,4096,PAGE_READWRITE);
+        uint32_t base=0;
+        if(lifetime==2) {
+            uint32_t bytes=8192;CHECK(!pilot_io_device_lle(165,memory,&bytes,&base));
+            CHECK(base && !physical_find(base,1));
+        } else base=physical_allocate(8192,0,0x03ffffff,4096,PAGE_READWRITE);
         CHECK(base);uint32_t pa=base&0x03ffffff;
         const uint32_t packet[]={0x40000,1,0x401a4,2,0x81d6c,4096,0x12345678};
         memcpy(memory+base,packet,sizeof(packet));MEM32(base+4096)=0xabcdef01;
@@ -239,10 +243,17 @@ static void test_gpu_lle_transport(void)
         uint32_t observed=0;
         CHECK(gpu_lle_dma_read(pa+4096,&observed,4) && observed==0x12345678);
         CHECK(!gpu_lle_dma_write(0x04000000,&observed,4));
-        physical_protect(base+4096,4096,PAGE_READONLY);
+        if(lifetime==2) {
+            uint32_t args[]={base+4096,4096,PAGE_READONLY},result=0;
+            CHECK(!pilot_io_device_lle(182,memory,args,&result));
+        } else physical_protect(base+4096,4096,PAGE_READONLY);
         CHECK(!gpu_lle_dma_write(pa+4096,&observed,4));
-        physical_protect(base+4096,4096,PAGE_READWRITE);
-        physical_free(base);CHECK(!gpu_lle_dma_read(pa+4096,&observed,4));
+        if(lifetime==2) {
+            uint32_t args[]={base+4096,4096,PAGE_READWRITE},result=0;
+            CHECK(!pilot_io_device_lle(182,memory,args,&result));
+            CHECK(!pilot_io_device_lle(171,memory,&base,&result));
+        } else {physical_protect(base+4096,4096,PAGE_READWRITE);physical_free(base);}
+        CHECK(!gpu_lle_dma_read(pa+4096,&observed,4));
         CHECK(!gpu_lle.error(gpu_lle.device));
         /* This fixture has consumed its entire FIFO, no connected ISR and no
          * enabled interrupt. It does not claim general title teardown proof. */

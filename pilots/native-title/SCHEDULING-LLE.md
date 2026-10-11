@@ -1064,3 +1064,51 @@ No physical Xbox operation, audible playback or attract rerun occurred.
 Scheduling/title/audio/graphics gates remain open at **4/9**, with **25 safe
 deferrals**. This raw-thread connection does not substitute for the wider
 GPU/audio/startup requirements.
+
+## Actual-thread contiguous ownership - 2026-10-10 continuation
+
+Raw original165/166 allocation and171 release now share the C transport's
+publication ledger. Original code chooses the address, PTEs/PFNs and contents;
+the bridge publishes its page-rounded extent and independently checks actual
+MmQueryAllocationSize180. Original173/179 queries retain physical/cache policy.
+Allocation and182 protection changes save complete CPU state on separate nested
+query frames and publish the original per-page access policy to host bytes.
+Raw178 persistence and1/4 saved-display pointer calls use original bodies.
+This does not qualify firmware relaunch or persistent RAM across a console boot.
+
+GPU/USB consumers can now use those original contiguous owners without creating
+native allocator records. The shared DMA adapter checks the entire transaction,
+actual PTE/PFN identity and host protection before copying or acquiring a lease.
+GPU copies remain synchronous under the existing original-driver/FIFO lifetime
+contract. USB retains a lease until actual controller reset releases it;171
+refuses borrowed storage before the original free. Freed/unowned/out-of-range
+accesses fail without changing bytes. Existing user-page pinning remains its
+separate lifetime under the same publication ledger.
+
+Six authored actual-CPU lifetimes cover both allocation signatures, a valid
+impossible allocation returning NULL, non-page size5001/actual extent8192,
+high-memory alignment, ordinary and write-combined policy, metadata/persistence/
+saved-pointer calls, cross-page USB read/write, mixed RW/RO transaction rejection,
+controller reset, RW restoration, original release, real address reuse and
+settled thread/handle baselines. A separate borrowed-free control proves rejection
+before storage or output changes. No assertion assumes fresh contiguous bytes
+are zero. Three existing GPU transport lifetimes additionally execute a real
+FIFO jump, held/released semaphore and protection/free rejection; the third uses
+a solely original allocation with no native allocator record.
+
+The combined batch passes **62/62 CPU checks in13.016s** and fresh maintained
+GPU transport in0.25s. The older GPU build first failed its required IRQ-engine
+package check; the final build selects the existing reviewed source-built engine,
+and retains the reference renderer DLL unchanged. The first authored CPU fixture
+omitted test-entry registration and failed callback admission; that failure is
+preserved separately. The corrected entry uses the existing original CPU owner.
+
+Fresh rebuilt original Blinx passes allocation165 and persistence178 and now
+stops at **ordinal49**, before an unqualified service executes. Input ROM and
+EEPROM file hashes are unchanged. Reports are
+`thread-contiguous-qualified-validation-20261010.aot-private.json` and
+`thread-contiguous-final-title-startup-20261010.aot-private.json`; the earlier
+startup at178 and all earlier fixture/build failures retain their identities.
+The default HLE algorithms are unchanged; no Xbox operation, playback or attract
+rerun occurred. The nine-family goal remains active at **4/9**, with **25 safe
+deferrals**; wider service/callback/GPU/audio integration remains required.

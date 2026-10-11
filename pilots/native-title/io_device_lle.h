@@ -107,6 +107,12 @@ const char *pilot_io_device_resident(uint32_t base,uint32_t bytes);
 const char *pilot_io_device_image_release(uint32_t base,uint32_t bytes);
 const char *pilot_io_device_release_check(uint32_t base,uint32_t bytes);
 int pilot_io_device_pinned_dma(uint32_t pa,void *buffer,uint32_t bytes,int write);
+/* Original contiguous allocations are inherently physical owners. GPU bus
+ * copies are synchronous; USB retains its lease until controller release.
+ * Every transaction validates the full original mapping and host permission. */
+enum {PILOT_IO_DMA_SYNC=0,PILOT_IO_DMA_USB=1};
+int pilot_io_device_contiguous_dma(uint32_t pa,void *buffer,uint32_t bytes,int write,unsigned lease);
+void pilot_io_device_dma_release(unsigned lease);
 /* Publish the original console-owned page-zero DMA bootstrap mapping. This
  * page lasts for the console session, independent of GPU/ordinary allocation
  * lifetimes. Admission verifies current original PTE identity and writability. */

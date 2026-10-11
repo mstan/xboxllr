@@ -1684,6 +1684,10 @@ already credited pinned MIT DSP ABI. The primary Motorola manual supplies
 peripheral-map distinctions; unchanged private original helpers establish
 MCPX polling/acknowledgement behavior. No xemu implementation body or original
 firmware bytes are incorporated into committed source.
+The original-thread contiguous publication, original-policy query and shared
+GPU/USB DMA ownership adapters are authored here over the existing private
+kernel/Unicorn/device floor. The fixtures use authored x86 callers and real
+device packets, with no imported allocator/driver bodies or original bytes.
 
 ## Theseus behavioral reference
 

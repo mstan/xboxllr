@@ -173,7 +173,10 @@ static int usb_dma_transfer(uint32_t pa,void *buffer,size_t bytes,int write)
     }
 done:
     ReleaseSRWLockExclusive(&vm_lock);
-    if(!allocation)result=pilot_io_device_pinned_dma(pa,buffer,(uint32_t)bytes,write);
+    if(!allocation) {
+        result=pilot_io_device_contiguous_dma(pa,buffer,(uint32_t)bytes,write,PILOT_IO_DMA_USB);
+        if(!result)result=pilot_io_device_pinned_dma(pa,buffer,(uint32_t)bytes,write);
+    }
     return result;
 }
 static int usb_dma_read(uint32_t pa,void *out,size_t size){return usb_dma_transfer(pa,out,size,0);}
@@ -187,6 +190,7 @@ static void usb_dma_release(void)
         --physical_allocations[i].borrowers;usb_dma_leases[i]=0;
     }
     ReleaseSRWLockExclusive(&vm_lock);
+    pilot_io_device_dma_release(PILOT_IO_DMA_USB);
 }
 static BOOL CALLBACK usb_start(PINIT_ONCE once,void *parameter,void **context)
 {

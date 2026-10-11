@@ -47,7 +47,7 @@ static unsigned publication_slot(uint32_t page)
     unsigned entry=publication_by_va[page>>12];
     return entry?entry-1:published_count;
 }
-static struct {uint32_t base,bytes;} owners[MAX_PUBLISHED];
+static struct {uint32_t base,bytes,contiguous,dma_leases;} owners[MAX_PUBLISHED];
 static unsigned owner_count;
 static int gpu_bootstrap_published;
 static struct {uint32_t base,bytes,count;} pin_ranges[MAX_PUBLISHED];
@@ -62,6 +62,8 @@ struct VmCallerAccess {struct VmAccessPage *pages;unsigned count;int active;};
 static void vm_caller_prepare(unsigned ordinal,const uint32_t *args,struct VmCallerAccess *access);
 static void vm_caller_complete(unsigned ordinal,const uint32_t *args,uint32_t status,struct VmCallerAccess *access);
 static void storage_caller_prepare(unsigned ordinal,const uint32_t *args);
+static void contiguous_caller_prepare(unsigned ordinal,const uint32_t *args);
+static void contiguous_caller_complete(unsigned ordinal,const uint32_t *args,uint32_t result);
 static struct {uint32_t base,bytes;} stacks[64];
 static unsigned stack_count;
 static uint32_t interrupt_objects[16],pending_callback;
@@ -606,7 +608,8 @@ static void publish_range(uint32_t object,uint32_t bytes)
     }
     if(!image && !vm) {
         if(owner_count==MAX_PUBLISHED){failure="device LLE publication ownership capacity";return;}
-        owners[owner_count].base=object;owners[owner_count++].bytes=bytes;
+        owners[owner_count].base=object;owners[owner_count].bytes=bytes;
+        owners[owner_count].contiguous=owners[owner_count].dma_leases=0;++owner_count;
     }
     refresh_mappings();
 }
@@ -782,6 +785,7 @@ static void image_vm(uint32_t base,uint32_t bytes,uint32_t type)
     if(type==MEM_COMMIT)publish_range(base,bytes);
 }
 #include "io_storage_thread_lle.inc"
+#include "io_contiguous_thread_lle.inc"
 static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
 {
     unsigned pin_slot=MAX_PUBLISHED;
@@ -790,7 +794,7 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
     }
     storage_caller_prepare(ordinal,args);if(failure)return;
     if(ordinal!=1 && ordinal!=2 && ordinal!=3 && ordinal!=4 && ordinal!=14 && ordinal!=15 && ordinal!=17 && ordinal!=23 &&
-       ordinal!=44 && ordinal!=45 && ordinal!=46 && ordinal!=47 && ordinal!=50 && ordinal!=65 && ordinal!=68 && ordinal!=107 && ordinal!=108 && ordinal!=109 && ordinal!=166 &&
+       ordinal!=44 && ordinal!=45 && ordinal!=46 && ordinal!=47 && ordinal!=50 && ordinal!=65 && ordinal!=68 && ordinal!=107 && ordinal!=108 && ordinal!=109 && ordinal!=165 && ordinal!=166 &&
        ordinal!=168 && ordinal!=171 && ordinal!=173 && ordinal!=175 && ordinal!=178 && ordinal!=179 && ordinal!=180 && ordinal!=181 && ordinal!=182 &&
        ordinal!=98 && ordinal!=100 && ordinal!=103 && ordinal!=119 && ordinal!=121 && ordinal!=128 && ordinal!=129 && ordinal!=137 && ordinal!=151 &&
        ordinal!=160 && ordinal!=161 && ordinal!=184 && ordinal!=199 && ordinal!=204 && ordinal!=217
@@ -840,6 +844,7 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
             }
         }
     }
+    contiguous_caller_prepare(ordinal,args);if(failure)return;
     if(ordinal==168 && args[0]!=UINT32_MAX) {
         // This owned kernel capture has an existing GPU reservation. Original
         // MmClaimGpuInstanceMemory releases surplus pages; it does not grow
@@ -853,7 +858,7 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
      * require separate original paging/allocator qualification, not guessed NTSTATUS. */
     if(ordinal==65 && args[1]>0x170){failure="device LLE extension exceeds qualified scope";return;}
     check_publications(1);if(failure)return;
-    int retire=ordinal==17 || ordinal==171 || (ordinal==68 && kernel_word(args[0]+4)==0);
+    int retire=ordinal==17 || (ordinal==68 && kernel_word(args[0]+4)==0);
     uint32_t pe=kernel_word(0x8001003cu),exports=0x80010000u+kernel_word(0x80010000u+pe+120);
     uint32_t base=kernel_word(exports+16),table=0x80010000u+kernel_word(exports+28);
     uint32_t entry=0x80010000u+kernel_word(table+4*(ordinal-base));
@@ -916,7 +921,7 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
         uint32_t object;IO_UC(uc_mem_read(cpu,args[5],&object,4));
         publish_range(object,0x48+args[1]);if(failure)return;
     }
-    if(ordinal==166 && *result){publish_range(*result,args[0]);if(failure)return;}
+    contiguous_caller_complete(ordinal,args,*result);if(failure)return;
     if((ordinal==14 || ordinal==15) && *result){publish_range(*result,args[0]);if(failure)return;}
     check_publications(0);
     if(failure)return;
@@ -1330,6 +1335,45 @@ const char *pilot_io_device_release_check(uint32_t base,uint32_t bytes)
         error="device LLE allocation release while DMA pinned";break;
     }
     ReleaseSRWLockShared(&lock);return error;
+}
+int pilot_io_device_contiguous_dma(uint32_t pa,void *buffer,uint32_t bytes,int write,unsigned lease)
+{
+    int valid=0;
+    AcquireSRWLockExclusive(&lock);
+    if(failure || !buffer || !bytes || (lease&~PILOT_IO_DMA_USB) || (uint64_t)pa+bytes>RAM_BYTES)goto done;
+    unsigned entry=publication_by_pa[pa/4096];
+    if(!entry)goto done;
+    uint32_t base=published[entry-1].va+(pa&4095);
+    unsigned owner=contiguous_owner(base,bytes);
+    if(owner==owner_count)goto done;
+    /* Check the entire transaction before the first store or retained lease.
+     * The allocation's actual PTE/PFN and published bytes remain authoritative. */
+    for(unsigned pass=0;pass<2;++pass)for(uint32_t at=pa,left=bytes;left;) {
+        unsigned index=publication_by_pa[at/4096];
+        uint32_t offset=at&4095,span=4096-offset,actual;
+        if(span>left)span=left;
+        if(!index)goto done;
+        uint32_t va=published[index-1].va+offset;
+        if(va!=(uint64_t)base+at-pa || !physical(va,&actual) || actual!=at)goto done;
+        MEMORY_BASIC_INFORMATION info;
+        if(!VirtualQuery(guest_memory+va,&info,sizeof(info)) || info.State!=MEM_COMMIT ||
+           (info.Protect&(PAGE_GUARD|PAGE_NOACCESS)) || (write && info.Protect!=PAGE_READWRITE))goto done;
+        if(pass) {
+            if(write)memcpy(guest_memory+va,(unsigned char*)buffer+at-pa,span);
+            else memcpy((unsigned char*)buffer+at-pa,guest_memory+va,span);
+        }
+        at+=span;left-=span;
+    }
+    owners[owner].dma_leases|=lease;valid=1;
+done:
+    ReleaseSRWLockExclusive(&lock);return valid;
+}
+void pilot_io_device_dma_release(unsigned lease)
+{
+    AcquireSRWLockExclusive(&lock);
+    if(lease==PILOT_IO_DMA_USB)
+        for(unsigned i=0;i<owner_count;++i)owners[i].dma_leases&=~lease;
+    ReleaseSRWLockExclusive(&lock);
 }
 int pilot_io_device_pinned_dma(uint32_t pa,void *buffer,uint32_t bytes,int write)
 {

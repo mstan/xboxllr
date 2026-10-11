@@ -216,3 +216,11 @@ and next reaches the guarded file-thread integration at202. This extends the
 maintained bounded memory floor without closing the scheduling or title gates.
 See [the shared route and preserved failures](SCHEDULING-LLE.md#actual-thread-vm-publication---2026-10-10-continuation).
 
+Original-thread contiguous allocation/release now shares that same publication
+owner with C callers and GPU/USB DMA. Six real CPU lifetimes plus a borrowed-free
+control check actual original extents/PFNs, protections, USB reset leases and
+reuse; the existing GPU FIFO/semaphore test now also uses a purely original
+allocation. CPU62/62 and fresh GPU transport pass. This extends the bounded
+memory floor; wider title integration remains open at raw service49.
+See [the ownership and validation scope](SCHEDULING-LLE.md#actual-thread-contiguous-ownership---2026-10-10-continuation).
+
