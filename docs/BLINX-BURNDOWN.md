@@ -51,6 +51,14 @@ Actual enabled pixels remain unimplemented; the preserved draw2 and eight mip
 inputs define the next paired observation. No title/audio run or HLE change.
 See the [bounded route](../pilots/native-title/GRAPHICS-LLE.md#enabled-noise-with-no-assembled-primitives---2026-10-11).
 
+The paired noise capture transport now passes18 compiled execution cases and
+builds two Xbox-target objects. Review reproduced and corrected RDI write/read
+selector advancement; the former passing16-case model is explicitly superseded.
+Owned off/on/on/off draw/copy transport is prepared, with bounded exclusive GPU
+startup, the complete diagnostic XBE and physical packet/M2M/tile observations
+still required. No enabled pixel algorithm or graphics closure is claimed.
+See the [current capture boundary](../pilots/native-title/GRAPHICS-LLE.md#paired-noise-capture-transport-and-rdi-correction---2026-10-11).
+
 The observed idle FE fence now executes through Blinx's original helper and
 actual kernel-owned RAM. Nine original fences complete, including publication
 while control remains 1; three withheld-service cases prove that helper return

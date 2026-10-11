@@ -6,6 +6,48 @@ transform, rasterization, framebuffer writes and visibility-report DMA in
 `src/machine/nv2a.cpp`. This document records component qualification; full
 graphics-family acceptance remains open and the total remains **4/9**.
 
+## Paired noise capture transport and RDI correction - 2026-10-11
+
+The separate probe branch now contains a compiled post-bootstrap capture module
+in commits `ba3f5b7` and `0536c8e`. It uses actual SDK-owned ring/target resources,
+fresh retained texture/readback allocations and four identical authored draws
+with paired noise controls off/on/on/off. Each draw copies 256 raw bytes through
+class 39 M2M into a distinct owned span. Requested and observed controls and all
+four snapshots remain available; no pixel equality or noise equation is assumed.
+The module is not connected to the resident agent or a complete diagnostic XBE.
+
+Review exposed an incorrect readback assumption: RDI DATA transfers advance the
+selector in both directions. The corrected route checks the write advancement,
+explicitly reselects and checks the intended word, then reads/checks DATA and
+the read advancement. The independent compiled model now advances on writes
+and reads and keeps distinct neighboring words. The pre-fix code fails with
+wrong-word status8; that generation is retained. Primary support is the pinned
+[RDI load/dump routines](https://github.com/envytools/envytools/blob/f102b82381f3f11cee113d16374c87091db039d9/hwtest/pgraph_state.cc#L2201)
+and the SDK's consecutive DATA stores. This is source-supported transport,
+not a new physical register observation.
+
+Four compiled test groups pass **18 execution cases**, including four ordered
+producer/copy completions, invalid ownership/allocation, finite cache/GET waits,
+GPU errors and unexpected selector/DATA/cache/PUT observations. Failure latches
+before a following device operation; resources remain retained and reentry does
+no work. Two Xbox-target COFF objects compile against pinned nxdk `29638d0`.
+The model produces arbitrary tagged bytes rather than simulated noise pixels.
+
+Current private evidence is
+`build/blinx/dxt1-noise-rdi-correction-20261011/qualified-rdi-correction.aot-private.json`,
+SHA-256 `2f5185bef6515b94e1cd94671a51fdfebc71bc6e5d41e7373b495ce976501cfb`.
+Its source agrees with committed `0536c8e`; retained reports, objects, compiler,
+source snapshots and primary inputs have verified hashes. The earlier16-case
+transport generation is preserved and superseded by this correction.
+
+Bounded exclusive GPU startup, asynchronous ISR/DPC failure handling, a complete
+diagnostic XBE and actual packet/M2M/tile observations remain required under
+`.116.2.1`. The stopped Xbox session still needs owner-confirmed recovery before
+any request. No hardware/network, title/audio run or HLE change occurred. Actual
+enabled noise pixels and `.116.2` remain open; the count stays4/9 and the26 safe
+precision deferrals are unchanged. See the
+[probe contract](https://github.com/mstan/xboxlle-probe/blob/0536c8ef73b36fe13c819b7a340180bf9acf50ad/docs/NOISE-PAIR-CAPTURE.md).
+
 ## Packed colors and persistent fetch - 2026-10-09
 
 The previous session ended with a suspected packed-color mismatch. Independent
