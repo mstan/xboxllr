@@ -52,6 +52,12 @@ const char *pilot_io_device_thread_call(unsigned ordinal,uint32_t regs[8]);
 volatile int32_t *pilot_io_device_thread_checkpoint_request(void);
 const char *pilot_io_device_thread_initial_flags(uint32_t *flags);
 const char *pilot_io_device_thread_checkpoint(uint32_t pc,uint32_t regs[8],uint32_t *flags);
+/* Execute original thread bytes on the already owning CPU, starting before
+ * any generated guest instruction. The loader adapter may supply the XBE
+ * entry frame; an ordinary worker must supply its actual original entry.
+ * PC/EFLAGS/x87/MMX/SSE stay in that one engine across IRQs and switches.
+ * This is an LLE build route, not a conversion of an executing native body. */
+const char *pilot_io_device_thread_execute(uint32_t entry,uint32_t regs[8]);
 /* Input clock only, in 1,125,000-Hz PIT ticks. Called solely by the original
  * engine owner between execution slices. The provider must not reenter this
  * transport or complete kernel waits. NULL unbinds; bind only while idle. */

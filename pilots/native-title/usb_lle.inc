@@ -18,8 +18,13 @@ static const char *usb_original_callback(uint32_t entry,uint32_t regs[8],int is_
     recomp_func_t routine=recomp_lookup(entry);
 #ifdef PILOT_SCHEDULING_LLE
     if(thread_arguments==2 && entry==PILOT_IO_BOOTSTRAP_ENTRY)routine=scheduling_lle_bootstrap;
+    /* Original CPU execution does not require a generated discovery body. */
+    if(thread_arguments && entry!=PILOT_IO_BOOTSTRAP_ENTRY)routine=NULL;
 #endif
+    if(!routine && !thread_arguments)return "original kernel callback has no AOT binding";
+#ifndef PILOT_SCHEDULING_LLE
     if(!routine)return "original kernel callback has no AOT binding";
+#endif
     if(++usb_isr_count<=4)
         fprintf(stderr,"[%s] call=%llu entry=%08x irql=%u\n",thread_arguments?"KERNEL LLE THREAD":is_dpc?"KERNEL LLE DPC":"USB LLE ISR",
                 (unsigned long long)usb_isr_count,entry,pilot_io_device_irql());
@@ -49,7 +54,13 @@ static const char *usb_original_callback(uint32_t entry,uint32_t regs[8],int is_
     if(thread_arguments) {
         if(original_thread_exit.active)stop("nested original native thread continuation",entry);
         original_thread_exit.active=1;
-        if(!setjmp(original_thread_exit.target))routine();
+        if(!setjmp(original_thread_exit.target)) {
+#ifdef PILOT_SCHEDULING_LLE
+            if(entry!=PILOT_IO_BOOTSTRAP_ENTRY)scheduling_lle_execute(entry);
+            else
+#endif
+            routine();
+        }
         else {*terminate=1;*exit_status=original_thread_exit.status;}
         original_thread_exit.active=0;
     } else routine();

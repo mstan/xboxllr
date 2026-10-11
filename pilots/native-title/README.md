@@ -3,8 +3,10 @@
 USB/PIC LLE now requires the reviewed
 [source-built Unicorn IRQ-boundary package](unicorn-engine/README.md).
 Original scheduling has bounded no-peer idle-clock and integer compute
-checkpoint foundations; whole title scheduling remains unqualified. See
-[the current scheduling evidence and integration gaps](SCHEDULING-LLE.md#original-clock-integer-checkpoints-and-retail-gpio15).
+checkpoints. Its LLE thread bodies now execute original bytes on that same CPU,
+retaining flags and full FP state across original IRQs, waits and switches.
+Whole title scheduling remains unqualified. See
+[the CPU route and remaining integration](SCHEDULING-LLE.md#original-cpu-thread-execution---2026-10-10-continuation).
 
 **Working attract checkpoint:** `milestone/blinx-attract-20261008` preserves
 owner-observed FMVs and real-time Demo play on runtime `318f5ac`. See the

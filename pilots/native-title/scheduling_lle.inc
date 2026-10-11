@@ -1,6 +1,14 @@
 /* Private pilot loader policy over real Ps-created thread/stack/TLS state.
- * This adapter executes the actual generated XBE entry and real termination;
+ * This adapter executes the original XBE entry and real termination;
  * it is not a retail XBE-loader or completed scheduling-family claim. */
+static void scheduling_lle_execute(uint32_t entry)
+{
+    uint32_t regs[]={g_eax,g_ecx,g_edx,g_ebx,g_esp,g_ebp,g_esi,g_edi};
+    const char *error=pilot_io_device_thread_execute(entry,regs);
+    if(error)stop(error,entry);
+    g_eax=regs[0];g_ecx=regs[1];g_edx=regs[2];g_ebx=regs[3];
+    g_esp=regs[4];g_ebp=regs[5];g_esi=regs[6];g_edi=regs[7];
+}
 static void scheduling_lle_bootstrap(void)
 {
     uint32_t entry=MEM32(g_esp+4),directory=MEM32(g_esp+8);
@@ -14,10 +22,8 @@ static void scheduling_lle_bootstrap(void)
     }
     fprintf(stderr,"[SCHEDULING LLE ENTRY] actual thread=%08x stack=%08x..%08x tls=%08x tib-top=%08x entry=%08x\n",
         thread,MEM32(thread+0x20),MEM32(thread+0x1c),tls,MEM32(g_fs_base+4),entry);
-    recomp_func_t body=recomp_lookup(entry);
-    if(!body)stop("original bootstrap entry has no generated body",entry);
     uint32_t sp=g_esp;g_esp-=4;MEM32(g_esp)=PILOT_IO_BOOTSTRAP_ENTRY;
-    body();if(g_esp!=sp)stop("original bootstrap entry stack imbalance",entry);
+    scheduling_lle_execute(entry);if(g_esp!=sp)stop("original bootstrap entry stack imbalance",entry);
     /* SystemRoutine cannot return. The existing callback boundary resumes
      * actual PsTerminateSystemThread after unwinding this native C frame. */
     original_thread_exit.status=0;longjmp(original_thread_exit.target,1);

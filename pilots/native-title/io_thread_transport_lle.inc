@@ -15,6 +15,7 @@ static unsigned thread_service_arguments(unsigned ordinal)
     case 107:case 108:case 119:case 233:return 3;
     case 149:case 189:case 234:return 4;
     case 150:case 159:return 5;
+    case 255:return 10;
     default:
         fprintf(stderr,"[THREAD LLE SERVICE GUARD] ordinal=%u thread=%08x\n",ordinal,kernel_word(0x8003da64u));
         failure="thread LLE service family requires continuation integration";return 0;
@@ -63,6 +64,35 @@ static void thread_service_complete(struct OriginalThread *thread)
     if(thread->call_ordinal==187 && (int32_t)regs[0]>=0)thread_note_close(thread->call_args[0]);
     thread->in_kernel=0;memcpy(thread->call_regs,regs,sizeof(regs));
 }
+static void thread_cpu_service_prepare(struct OriginalThread *thread,uint32_t *entry)
+{
+    unsigned count=thread_service_arguments(thread->call_ordinal);if(failure)return;
+    uint32_t sp,return_pc,flags;
+    IO_UC(uc_reg_read(cpu,UC_X86_REG_ESP,&sp));
+    IO_UC(uc_reg_read(cpu,UC_X86_REG_EFLAGS,&flags));
+    if(!thread->in_cpu || thread->in_kernel || kernel_word(0x8003da64u)!=thread->object ||
+       sp<thread->stack || (uint64_t)sp+(count+1)*4>(uint64_t)thread->stack+thread->stack_bytes) {
+        failure="original CPU service frame outside executing original thread";return;
+    }
+    IO_UC(uc_mem_read(cpu,sp,&return_pc,4));
+    if(return_pc<0x10000u || return_pc>=0x80000000u || !guest_page(return_pc&~4095u)) {
+        failure="original CPU service return outside resident caller";return;
+    }
+    IO_UC(uc_mem_read(cpu,sp+4,thread->call_args,count*4));
+    thread_before_call(thread->call_ordinal,thread->call_args);if(failure)return;
+    /* Creation needs registration before a normal-priority child can start,
+     * and nested ownership calls need an independently retained guest frame.
+     * Keep that route guarded even for the older priority-31 fixture scope. */
+    if(thread->call_ordinal==255) {
+        failure="original CPU child creation requires admission and lifetime integration";return;
+    }
+    for(unsigned i=0;i<8;++i)IO_UC(uc_reg_read(cpu,general_regs[i],thread->call_regs+i));
+    thread->call_arguments=count;thread->call_return=return_pc;thread->call_flags=flags;
+    check_publications(1);if(failure)return;
+    /* The private import gate transfers control only. Keep actual flags,
+     * every register and FP state; the original CALL frame is already live. */
+    thread->in_kernel=1;*entry=original_export(thread->call_ordinal);
+}
 static void thread_checkpoint_prepare(struct OriginalThread *thread,uint32_t *entry)
 {
     if(thread->in_kernel || thread->in_checkpoint || kernel_word(0x8003da64u)!=thread->object) {
@@ -85,6 +115,30 @@ static void thread_checkpoint_complete(struct OriginalThread *thread)
     }
     check_publications(0);if(failure)return;
     thread->in_checkpoint=0;
+}
+static void thread_cpu_prepare(struct OriginalThread *thread,uint32_t *entry)
+{
+    uint32_t flags=0;IO_UC(uc_reg_read(cpu,UC_X86_REG_EFLAGS,&flags));
+    if(thread->in_kernel || thread->in_checkpoint || thread->in_cpu ||
+       kernel_word(0x8003da64u)!=thread->object || flags!=thread->initial_flags) {
+        failure="original CPU entry no longer owns its admitted architectural context";return;
+    }
+    check_publications(1);if(failure)return;
+    for(unsigned i=0;i<8;++i)IO_UC(uc_reg_write(cpu,general_regs[i],thread->call_regs+i));
+    /* No reconstructed flags or FP initializer. The engine has not executed
+     * since this original thread's admission; retain its complete CPU state. */
+    thread->in_cpu=1;++original_cpu_threads;*entry=thread->cpu_entry;
+}
+static void thread_cpu_complete(struct OriginalThread *thread)
+{
+    uint32_t pc=0;IO_UC(uc_reg_read(cpu,UC_X86_REG_EIP,&pc));
+    if(!thread->in_cpu || thread->in_kernel || thread->in_checkpoint ||
+       pc!=thread->cpu_return || kernel_word(0x8003da64u)!=thread->object) {
+        failure="original CPU returned outside its admitted thread";return;
+    }
+    for(unsigned i=0;i<8;++i)IO_UC(uc_reg_read(cpu,general_regs[i],thread->call_regs+i));
+    check_publications(0);if(failure)return;
+    thread->in_cpu=0;--original_cpu_threads;
 }
 static DWORD thread_clock_wait(void)
 {
@@ -137,6 +191,7 @@ static void thread_handoff(struct OriginalThread *thread,int start,uint32_t *ent
     if(thread->callback_error){failure=thread->callback_error;return;}
     if(thread->request==THREAD_REQUEST_CALL){thread_service_prepare(thread,entry);return;}
     if(thread->request==THREAD_REQUEST_CHECKPOINT){thread_checkpoint_prepare(thread,entry);return;}
+    if(thread->request==THREAD_REQUEST_CPU){thread_cpu_prepare(thread,entry);return;}
     if(thread->request!=THREAD_REQUEST_FINISH){failure="thread LLE missing native continuation action";return;}
     /* Native work is finished; release its transport resources independently
      * of original thread/object lifetime. Original termination still follows. */

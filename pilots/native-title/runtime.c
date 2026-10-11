@@ -479,6 +479,7 @@ static void query_setting(void)
 #include "pool_memory.inc"
 #ifdef PILOT_SCHEDULING_LLE
 static void scheduling_lle_bootstrap(void);
+static void scheduling_lle_execute(uint32_t entry);
 #endif
 #ifdef PILOT_USB_LLE
 #include "usb_lle.inc"

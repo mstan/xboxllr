@@ -1624,6 +1624,16 @@ protocol over the native settings backing. Its atomic access, immutable query
 snapshot and original HAL/device fixtures are authored here. No external body
 or private EEPROM bytes are copied into the source or tests.
 
+The subsequent original CPU thread adapter reuses the already credited private
+Unicorn2.1.4 engine and owned kernel capture. Thread-entry/return ownership,
+import-frame transport and authored integer/FP/preemption fixtures are written
+here. The capture's #NM IDT/handler binding is a factual execution reference;
+the original handler bytes remain private and execute unchanged. No kernel
+body or new external implementation is copied into these adapters. The default
+native HLE CPU path keeps its existing donor pin and notices. Qualification and
+the still-guarded normal-priority child creation are recorded in
+`pilots/native-title/SCHEDULING-LLE.md`.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

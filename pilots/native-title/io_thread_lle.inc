@@ -9,17 +9,20 @@ static struct OriginalThread {
     HANDLE host_thread,request_event,resume_event;
     uint32_t native_regs[8],call_regs[8],call_args[10],return_pc,call_return,call_flags;
     unsigned call_ordinal,call_arguments,request;
-    int in_kernel,in_checkpoint,terminate;
+    int in_kernel,in_checkpoint,in_cpu,cpu_used,terminate;
+    uint32_t cpu_entry,cpu_return;
     uint32_t checkpoint_pc,checkpoint_flags,initial_flags;
     volatile LONG checkpoint_requested;
     uint32_t exit_status;
     const char *callback_error;
 } original_threads[64];
 static PilotIoThread thread_callback;
-static struct OriginalThread *pending_thread,*pending_thread_return;
+static struct OriginalThread *pending_thread,*pending_thread_return,*pending_cpu_service;
 static __declspec(thread) struct OriginalThread *native_thread_worker;
 static int thread_pcr_published;
+static unsigned original_cpu_threads;
 static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result);
+static uint32_t original_export(unsigned ordinal);
 static void thread_after_call(unsigned ordinal,const uint32_t *args,uint32_t result);
 
 static struct OriginalThread *thread_object(uint32_t object)
@@ -28,11 +31,47 @@ static struct OriginalThread *thread_object(uint32_t object)
         if(original_threads[i].object==object && object)return original_threads+i;
     return NULL;
 }
+static int thread_cpu_import_fault(uc_engine *engine,uint64_t address)
+{
+    if(!original_cpu_threads || address<0xfe000004u || address>=0xfe000600u || (address&3))return 0;
+    struct OriginalThread *thread=thread_object(kernel_word(0x8003da64u));
+    if(!thread || !thread->in_cpu)return 0;
+    if(thread->in_kernel) {
+        failure="original CPU import reached during an unfinished service";
+        uc_emu_stop(engine);return 1;
+    }
+    thread->call_ordinal=(unsigned)(address-0xfe000000u)/4;
+    pending_cpu_service=thread;uc_emu_stop(engine);return 1;
+}
+static int thread_cpu_npx_owner(void)
+{
+    if(!original_cpu_threads)return 0;
+    struct OriginalThread *thread=thread_object(kernel_word(0x8003da64u));
+    return thread && thread->in_cpu;
+}
+/* Check returns before the broad kernel-code admission: an ordinary start
+ * routine returns to its actual Ps thunk, while the loader returns to its
+ * private adapter. Never execute a fake instruction at either boundary. */
+static int thread_cpu_admit(uc_engine *engine,uint32_t address)
+{
+    if(!original_cpu_threads)return 0;
+    struct OriginalThread *thread=thread_object(kernel_word(0x8003da64u));
+    if(!thread || !thread->in_cpu)return 0;
+    if(thread->in_kernel && address==thread->call_return) {
+        pending_thread_return=thread;uc_emu_stop(engine);return 1;
+    }
+    if(address==thread->cpu_return) {
+        pending_thread_return=thread;uc_emu_stop(engine);return 1;
+    }
+    return 0;
+}
 static void thread_before_call(unsigned ordinal,const uint32_t *args)
 {
     if(ordinal==254 || ordinal==255) {
         uint32_t current=kernel_word(0x8003da64u);
         if(!thread_callback || ((kernel_word(current+0x30)>>16)&255)!=31) {
+            fprintf(stderr,"[THREAD LLE CREATE GUARD] ordinal=%u current=%08x priority=%u suspended=%u entry=%08x\n",
+                ordinal,current,(kernel_word(current+0x30)>>16)&255,ordinal==255?args[7]:0,args[ordinal==254?2:9]);
             failure="thread LLE creation requires bound callback and qualified priority-31 caller";return;
         }
         unsigned i;for(i=0;i<64 && original_threads[i].object;++i){}
@@ -56,6 +95,9 @@ static int thread_admit(uc_engine *engine,uint32_t address)
     if(thread->in_checkpoint && address==thread->checkpoint_pc) {
         pending_thread_return=thread;uc_emu_stop(engine);return 1;
     }
+    /* ISR/DPC admission has already run. Ordinary original CPU instructions
+     * keep the actual thread/IRQL/FP context, including raised-IRQL callers. */
+    if(thread->in_cpu && address>=0x10000u && address<0x80000000u)return 1;
     if(kernel_word(0x8003da60u)&255)return 0;
     if(thread->in_kernel && address==thread->call_return) {
         pending_thread_return=thread;uc_emu_stop(engine);return 1;
@@ -72,7 +114,8 @@ static int thread_admit(uc_engine *engine,uint32_t address)
     pending_callback=address;uc_emu_stop(engine);return 1;
 }
 
-enum { THREAD_REQUEST_CALL=1, THREAD_REQUEST_FINISH=2, THREAD_REQUEST_CHECKPOINT=3 };
+enum { THREAD_REQUEST_CALL=1, THREAD_REQUEST_FINISH=2, THREAD_REQUEST_CHECKPOINT=3,
+       THREAD_REQUEST_CPU=4 };
 /* Only the original engine's controller runs guest work. Host workers retain
  * C call stacks and TLS while blocked; no host priority/timeout chooses which
  * one runs. The event handshakes transfer sole execution ownership. */
@@ -111,6 +154,26 @@ const char *pilot_io_device_thread_initial_flags(uint32_t *flags)
 {
     if(!native_thread_worker || !flags)return "thread LLE initial flags outside native worker";
     *flags=native_thread_worker->initial_flags;return NULL;
+}
+const char *pilot_io_device_thread_execute(uint32_t entry,uint32_t regs[8])
+{
+    struct OriginalThread *thread=native_thread_worker;
+    if(!thread || !regs)return "original CPU execution outside admitted thread";
+    if(thread->cpu_used || entry<0x10000u || entry>=0x80000000u ||
+       !guest_page(entry&~4095u) || regs[4]<thread->stack ||
+       (uint64_t)regs[4]+12>(uint64_t)thread->stack+thread->stack_bytes ||
+       (entry!=thread->entry && (thread->entry!=PILOT_IO_BOOTSTRAP_ENTRY ||
+        entry<image_start || (uint64_t)entry>=image_start+image_bytes)))
+        return "original CPU execution requires an unchanged entry or owned loader frame";
+    memcpy(thread->call_regs,regs,sizeof(thread->call_regs));thread->cpu_entry=entry;
+    memcpy(&thread->cpu_return,guest_memory+regs[4],4);
+    uint32_t expected=thread->entry==PILOT_IO_BOOTSTRAP_ENTRY?PILOT_IO_BOOTSTRAP_ENTRY:thread->return_pc;
+    if(thread->cpu_return!=expected)return "original CPU execution has an invalid entry return";
+    thread->cpu_used=1;thread->request=THREAD_REQUEST_CPU;
+    if(!SetEvent(thread->request_event) || WaitForSingleObject(thread->resume_event,INFINITE)!=WAIT_OBJECT_0)
+        return "original CPU execution host handoff failed";
+    if(thread->callback_error)return thread->callback_error;
+    memcpy(regs,thread->call_regs,sizeof(thread->call_regs));return NULL;
 }
 const char *pilot_io_device_thread_checkpoint(uint32_t pc,uint32_t regs[8],uint32_t *flags)
 {

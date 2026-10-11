@@ -75,6 +75,8 @@ static uint32_t clock_initialization_ports[3],clock_initialization_values[3];
 #endif
 static const int general_regs[]={UC_X86_REG_EAX,UC_X86_REG_ECX,UC_X86_REG_EDX,
     UC_X86_REG_EBX,UC_X86_REG_ESP,UC_X86_REG_EBP,UC_X86_REG_ESI,UC_X86_REG_EDI};
+static int thread_cpu_import_fault(uc_engine *engine,uint64_t address);
+static int thread_cpu_npx_owner(void);
 
 static unsigned char *physical_backing(uint32_t pa)
 {
@@ -116,6 +118,7 @@ static bool invalid_memory(uc_engine *engine,uc_mem_type type,uint64_t address,
 {
     (void)type;(void)size;(void)value;(void)data;
     if(address>UINT32_MAX){failure="device LLE non-x86 address";return false;}
+    if(type==UC_MEM_FETCH_UNMAPPED && thread_cpu_import_fault(engine,address))return false;
     uint32_t page=(uint32_t)address&~4095u,pa;
     unsigned char *backing;
     unsigned publication=publication_slot(page);
@@ -235,6 +238,28 @@ static uc_err write_interrupt_frame(uc_engine *engine,uint32_t sp,const uint32_t
 static void interrupt(uc_engine *engine,uint32_t number,void *data)
 {
     (void)data;
+    if(number==7 && thread_cpu_npx_owner()) {
+        /* The reviewed capture's actual #NM gate owns lazy NPX switching.
+         * Retry the faulting PC through its real FXSAVE/FXRSTOR handler, not
+         * a host FP initializer or a guessed per-thread register copy. */
+        uint32_t gate=0x8003dcc0u+7*8,low=kernel_word(gate),high=kernel_word(gate+4);
+        uint32_t entry=(low&65535)|(high&0xffff0000u),cr0=0;
+        uc_err e=uc_reg_read(engine,UC_X86_REG_CR0,&cr0);
+        if(!e && entry==0x8001e950u && (low>>16)==8 && (high&65535)==0x8e00 && (cr0&12)) {
+            uint32_t sp,frame[3],flags;
+            e=uc_reg_read(engine,UC_X86_REG_ESP,&sp);
+            if(!e)e=uc_reg_read(engine,UC_X86_REG_EIP,frame);
+            if(!e)e=uc_reg_read(engine,UC_X86_REG_CS,frame+1);
+            if(!e)e=uc_reg_read(engine,UC_X86_REG_EFLAGS,frame+2);
+            sp-=12;flags=frame[2]&~(0x100u|0x200u|0x4000u|0x10000u|0x20000u);
+            if(!e)e=write_interrupt_frame(engine,sp,frame);
+            if(!e)e=uc_reg_write(engine,UC_X86_REG_ESP,&sp);
+            if(!e)e=uc_reg_write(engine,UC_X86_REG_EFLAGS,&flags);
+            if(!e)e=uc_reg_write(engine,UC_X86_REG_EIP,&entry);
+            if(e)forbidden(engine,uc_strerror(e));
+            return;
+        }
+    }
 #ifdef PILOT_USB_LLE
     if(number>=0x20 && number<0x40) {
         uint32_t gate=0x8003dcc0u+number*8,low=kernel_word(gate),high=kernel_word(gate+4);
@@ -296,6 +321,8 @@ static void code_block(uc_engine *engine,uint64_t address,uint32_t size,void *da
         }
     }
 #endif
+    if(thread_cpu_admit(engine,(uint32_t)address))return;
+    if(thread_cpu_import_fault(engine,address))return;
     if(address>=0x80010000u && address<0x80080000u)return;
     for(unsigned i=0;i<16;++i)if(interrupt_objects[i]) {
         uint32_t object=interrupt_objects[i],routine=0;
@@ -542,7 +569,7 @@ static void run_original(uint32_t entry,size_t instruction_limit)
      * run its generated body over shared bytes, then restore this CPU. A
      * nested original service has its own stack and saved engine context. */
     for(unsigned calls=0;calls<8192;++calls) {
-        pending_callback=0;pending_dpc=0;pending_thread=NULL;pending_thread_return=NULL;
+        pending_callback=0;pending_dpc=0;pending_thread=NULL;pending_thread_return=NULL;pending_cpu_service=NULL;
 #ifdef PILOT_USB_LLE
         device_irq_pending=0;
 #endif
@@ -555,6 +582,10 @@ static void run_original(uint32_t entry,size_t instruction_limit)
         }
         uc_err error=uc_emu_start(cpu,entry,RETURN_PC,0,slice);
         if(failure)return;
+        if(pending_cpu_service && (error==UC_ERR_OK || error==UC_ERR_FETCH_UNMAPPED)) {
+            thread_cpu_service_prepare(pending_cpu_service,&entry);if(failure)return;
+            continue;
+        }
         if(error){failure=uc_strerror(error);return;}
 #ifdef PILOT_USB_LLE
         if(device_irq_pending) {
@@ -566,7 +597,14 @@ static void run_original(uint32_t entry,size_t instruction_limit)
 #endif
         if(pending_thread_return) {
             struct OriginalThread *thread=pending_thread_return;
-            if(thread->in_checkpoint)thread_checkpoint_complete(thread);
+            if(thread->in_cpu && thread->in_kernel) {
+                thread_service_complete(thread);if(failure)return;
+                thread_after_call(thread->call_ordinal,thread->call_args,thread->call_regs[0]);
+                if(failure)return;
+                entry=thread->call_return;continue;
+            }
+            if(thread->in_cpu)thread_cpu_complete(thread);
+            else if(thread->in_checkpoint)thread_checkpoint_complete(thread);
             else thread_service_complete(thread);
             if(failure)return;
             thread_handoff(thread,0,&entry);if(failure)return;

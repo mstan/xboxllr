@@ -771,3 +771,70 @@ and acknowledgment timing is appended as LLE-D04; supported boot-persistence
 and settings-policy changes remain explicit work rather than timing deferrals.
 There are now **23 safely deferred questions** (14 graphics/nine cross-family).
 The whole goal stays active with **4/9** service-family gates qualified.
+
+### Original CPU thread execution - 2026-10-10 continuation
+
+The LLE title now executes original thread bytes on the **existing single CPU
+engine**. Its original scheduling/IRQ/device/physical-memory owners remain in
+place. The native loader adapter hands over before any generated guest
+instruction, retaining the actual original admission context and entry frame.
+PC, all GPRs, EFLAGS and x87/MMX/SSE state then stay with that engine across
+original IRQ0, blocked waits and context switches. The C worker only retains
+the loader/return continuation. It does not select runnable threads or create
+completion. The default HLE build keeps its fast generated native bodies.
+
+This resolves the LLE title's need to reconstruct complete architectural flags
+from the donor's function-local branch expressions. No runtime HLE/LLE switch
+or state conversion is added. The older certified native integer-checkpoint
+fixture remains maintained, with its existing general FP/flags guards.
+
+The private import gates now transfer a qualified service's actual CALL frame
+to its original export without resetting flags or FP state. Return checks
+verify the original thread, real return PC, stack cleanup and preserved GPRs;
+the original service's resulting CPU state continues directly. Lazy NPX faults
+use the reviewed capture's actual #NM IDT gate and original FXSAVE/FXRSTOR
+handler. They do not install a host FP initializer.
+
+One coherent authored bytecode batch passes **18 ADD/ADC/PUSHFD lifetimes**, with
+independent expected result/flag tables and three original IRQ0/preemption
+lifetimes. **Six original FP workers across three lifetimes** keep live x87,
+XMM and MMX values across **12 original blocked waits**. Original startup
+CW027f/MXCSR1f80/zero status and sampled XMM startup state, plus distinct
+per-worker controls, are observed;
+results and controls remain isolated across the original scheduler/NPX route.
+Wrong entry/stack, duplicate execution and calls outside admitted workers fail
+without changing supplied registers. Each authored handle is independently
+invalid after close, and no managed thread remains. The longer first idle
+interval also lets an unrelated captured file worker close pre-existing
+handle10; its original NtClose callsites are retained in the private trace.
+Later lifetimes restore the settled global handle count exactly. This does not
+claim that the boot capture's initial handle count stays frozen during work.
+
+Final source-bound validation and original startup are recorded privately in
+`thread-cpu-qualified-validation-20261010.aot-private.json` and
+`thread-cpu-final-title-startup-20261010.aot-private.json`. Earlier arithmetic,
+FP/baseline investigation and intermediate startup attempts remain separate
+artifacts; failed assertions are not relabelled as passes.
+The combined CPU batch passes **50/50 in 11.391s**. A preceding overlapping
+title/test run failed two storage-initialization checks because both builds use
+the same exclusively locked scratch HDD. Those two checks pass sequentially;
+the final combined batch also runs without a concurrent title owner. The
+overlapping failure remains in its original private artifact.
+
+The original Blinx entry now runs and reaches **PsCreateSystemThreadEx255**:
+actual caller priority8, unsuspended creation, SystemRoutine000F835D. The route
+stops before creating that child at the existing priority/admission guard.
+Next is ownership registration before a normal-priority child can start,
+properly retained guest frames for nested ownership calls, then wider
+service/callback and termination/lifetime integration. Do not raise the title's
+priority or rewrite original queues to bypass this dependency. The diagnostic
+PC000000E9 is the outer NtWait233 adapter's stop argument, not the original
+CPU's instruction PC. Native entry-count/ESP diagnostics belong to that outer
+adapter and do not measure executed original title instructions.
+
+Whole title scheduling, selected native-helper interop and GPU/audio startup
+remain unqualified. Numerical corner cases, unconnected exception paths and
+unreached service families are not established by this representative batch.
+No physical Xbox operation, default HLE attract run or audio playback was
+needed. HLE graphics/cache/audio algorithms are unchanged. The family count
+remains **4/9**, with **23 safely deferred questions**; `.112.2` stays open.

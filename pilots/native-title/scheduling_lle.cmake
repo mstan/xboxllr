@@ -5,7 +5,8 @@ if(PILOT_SCHEDULING STREQUAL "LLE")
     message(FATAL_ERROR "Scheduling LLE requires the original file, memory and USB/PIC namespace")
   endif()
   # Select once for the title. The mixed component-test executable continues
-  # to exercise both implementations; generated title bodies are unchanged.
+  # to exercise both implementations. Original thread bodies execute on the
+  # sole original CPU; the normal title keeps its fast generated native bodies.
   set_property(SOURCE runtime.c APPEND PROPERTY COMPILE_DEFINITIONS PILOT_SCHEDULING_LLE)
 elseif(NOT PILOT_SCHEDULING STREQUAL "NATIVE")
   message(FATAL_ERROR "PILOT_SCHEDULING must be NATIVE or LLE")
