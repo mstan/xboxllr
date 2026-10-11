@@ -29,7 +29,15 @@ static void contiguous_caller_prepare(unsigned ordinal,const uint32_t *args)
        ((ordinal==171 || ordinal==180) && owners[owner].base!=args[0])) {
         failure="device LLE contiguous service requires owned allocation";return;
     }
+    if(ordinal==182 && owners[owner].resource_references &&
+       (((args[2]&6)!=PAGE_READONLY && (args[2]&6)!=PAGE_READWRITE) ||
+        (args[2]&~(PAGE_READONLY|PAGE_READWRITE|PAGE_NOCACHE|PAGE_WRITECOMBINE)))) {
+        failure="device LLE contiguous protection would invalidate resource read ownership";return;
+    }
     if(ordinal!=171)return;
+    if(owners[owner].resource_references) {
+        failure="device LLE contiguous release while resource borrowed";return;
+    }
     if(owners[owner].dma_leases) {
         failure="device LLE contiguous release while DMA borrowed";return;
     }

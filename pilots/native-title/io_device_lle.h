@@ -147,6 +147,16 @@ int pilot_io_device_pinned_dma(uint32_t pa,void *buffer,uint32_t bytes,int write
 enum {PILOT_IO_DMA_SYNC=0,PILOT_IO_DMA_USB=1};
 int pilot_io_device_contiguous_dma(uint32_t pa,void *buffer,uint32_t bytes,int write,unsigned lease);
 void pilot_io_device_dma_release(unsigned lease);
+/* Native resources retain the original contiguous allocation, independently
+ * of device DMA leases. Query/reference validate all readable published bytes
+ * from address to the actual allocation end; available is that exact extent.
+ * Each successful reference has a unique, single-release token. Rejected calls
+ * leave outputs and ownership unchanged, including stale tokens after VA reuse.
+ * These APIs do not execute guest code or acquire native graphics/VM locks. */
+int pilot_io_device_contiguous_resource_query(uint32_t address,uint32_t bytes,uint32_t *available);
+int pilot_io_device_contiguous_resource_reference(uint32_t address,uint32_t bytes,
+    uint64_t *reference,uint32_t *available);
+int pilot_io_device_contiguous_resource_release(uint64_t reference);
 /* Publish the original console-owned page-zero DMA bootstrap mapping. This
  * page lasts for the console session, independent of GPU/ordinary allocation
  * lifetimes. Admission verifies current original PTE identity and writability. */

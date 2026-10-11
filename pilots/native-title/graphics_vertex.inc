@@ -3,7 +3,7 @@
  * writes this storage, so Lock2 needs no emulated FIFO fence or CPU/GPU wait.
  * Physical/cache aliases use one canonical guest VA, as for native textures. */
 #define GRAPHICS_VERTEX_OBJECTS 256
-struct GraphicsVertexObject { uint32_t header,data,bytes,refs,native,external,bindings; };
+struct GraphicsVertexObject { uint32_t header,data,bytes,refs,native,external,bindings; uint64_t original_reference; };
 static struct GraphicsVertexObject graphics_vertices[GRAPHICS_VERTEX_OBJECTS];
 static int graphics_vertex_defer_upload(void)
 {
@@ -58,10 +58,15 @@ static void graphics_vertex_collect(struct GraphicsVertexObject *vertex)
     if(vertex->refs || vertex->bindings)return;
     pilot_gfx_vertex_destroy(vertex->native);
     if(vertex->external) {
+#ifdef PILOT_SCHEDULING_LLE
+        if(!pilot_io_device_contiguous_resource_release(vertex->original_reference))
+            stop("lost original registered vertex backing",vertex->data);
+#else
         AcquireSRWLockExclusive(&vm_lock);
         struct PhysicalAllocation *allocation=physical_find(vertex->data,vertex->bytes);
         if(!allocation || !allocation->borrowers)stop("lost registered vertex backing",vertex->data);
         --allocation->borrowers;ReleaseSRWLockExclusive(&vm_lock);
+#endif
         memset(vertex,0,sizeof(*vertex));return;
     }
     uint32_t bytes=0;
@@ -125,14 +130,31 @@ static void graphics_vertex_register(uint32_t header,uint32_t base)
     unsigned slot;
     for(slot=0;slot<GRAPHICS_VERTEX_OBJECTS && graphics_vertices[slot].header;++slot) {}
     if(slot==GRAPHICS_VERTEX_OBJECTS)stop("registered vertex resource slots exhausted",header);
+    uint32_t bytes;uint64_t original_reference=0;
+#ifdef PILOT_SCHEDULING_LLE
+    if(!pilot_io_device_contiguous_resource_query((uint32_t)address,1,&bytes))
+        stop("resource registration requires original physical backing",(uint32_t)address);
+    uint32_t available=0;
+    if(!pilot_io_device_contiguous_resource_reference((uint32_t)address,bytes,&original_reference,&available) || available!=bytes)
+        stop("resource registration lost original physical backing",(uint32_t)address);
+#else
     AcquireSRWLockExclusive(&vm_lock);
     struct PhysicalAllocation *allocation=physical_find((uint32_t)address,1);
     if(!allocation)stop("resource registration requires owned physical backing",(uint32_t)address);
-    uint32_t bytes=allocation->bytes-((uint32_t)address-allocation->base);
+    bytes=allocation->bytes-((uint32_t)address-allocation->base);
     ++allocation->borrowers;ReleaseSRWLockExclusive(&vm_lock);
-    struct GraphicsVertexObject vertex={header,(uint32_t)address,bytes,1,0,1};
+#endif
+    struct GraphicsVertexObject vertex={header,(uint32_t)address,bytes,1,0,1,0,original_reference};
     int32_t result=pilot_gfx_vertex_create(bytes,&vertex.native);
-    if(result<0)stop("registered vertex native allocation failed",(uint32_t)result);
+    if(result<0) {
+#ifdef PILOT_SCHEDULING_LLE
+        if(!pilot_io_device_contiguous_resource_release(original_reference))
+            stop("registered vertex original backing cleanup failed",(uint32_t)address);
+#else
+        AcquireSRWLockExclusive(&vm_lock);--allocation->borrowers;ReleaseSRWLockExclusive(&vm_lock);
+#endif
+        stop("registered vertex native allocation failed",(uint32_t)result);
+    }
     graphics_vertices[slot]=vertex;
     /* The original Register adds Base to Data then keeps the low 28 bits for
      * vertex resources. The header and allocation remain owned by the caller. */

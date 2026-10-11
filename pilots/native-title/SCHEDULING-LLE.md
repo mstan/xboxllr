@@ -5,6 +5,38 @@ explicitly deferred real-console-dependent work on 2026-10-09; this family
 proceeds independently of GPU startup `.109` / hardware observation `.111`.
 The total remains four qualified families and five open.
 
+## Original physical resource backing and native lifetime - 2026-10-11
+
+Actual original contiguous allocations now support counted native resource
+references on their existing owner/publication ledger. Query and reference
+validate the complete readable remaining extent against the original PTE/PFN
+sequence and shared backing; unique64-bit tokens reject duplicate/stale release.
+Original171 free and incompatible182 protection changes stop before mutation
+while any resource remains. USB DMA leases retain their separate lifetime.
+
+Original-scheduling vertex Register retains that owner before backend creation;
+reference/binding collection destroys the backend before releasing its token.
+There is no native allocation-table fallback. Three actual original CPU lives
+execute30 source-bound D3D calls, allocate/query/free real original backing and
+compare36,864 actual GPU readback bytes exactly. A stream binding retains a
+resource after its caller refs reach zero; unbind collects the last owner.
+The mixed native-scheduling regression retains its prior allocation-ledger route.
+
+The combined batch passes **46/46 checks in9.67s**, including original171 free
+and182 protection guards, protected distant-tail/overflow/stale cases and
+original memory/thread/handle/FP/flags/ESP cleanup. The private proof freezes90
+identities: `build/blinx/graphics-original-backing-20261011/qualified.aot-private.json`,
+SHA-256 `2b56c0921b897203224bf14351ad11b2b557c25ed2077cfee6024f9cd878404e`.
+
+One invisible muted **8.266s** startup registers six actual buffers, including
+`838B4000`, then stops at `device LLE callback budget exhausted` in the outer159
+wait. The loop counts clock slices/import/component transitions against8192;
+execution-owner budget separation needs investigation before another title run.
+No larger limit, completed attract, callbacks or full-family acceptance is inferred.
+There were no physical Xbox operations or audio playback. **4/9 families** and
+**26 agreed precision deferrals** remain; waits/pulses/teardown, actual GPU/audio
+startup and complete graphics behavior remain required.
+
 ## Shared original component owner, pool and whole audio calls - 2026-10-11
 
 Whole native graphics, audio and installed-media components now share one real
@@ -958,7 +990,7 @@ graphics and audio performance code is unchanged. `.112.2` remains open;
 EEPROM/storage ownership under `.112.4` is also open. The family count is still
 **4/9**, with **22 safely deferred questions** (14 graphics/eight cross-family).
 
-### Shared EEPROM settings owner — 2026-10-10 continuation
+### Shared EEPROM settings owner â€” 2026-10-10 continuation
 
 The next coherent batch resolves `.112.4`'s remaining EEPROM ownership gap.
 The maintained EEPROM now supports an external256-byte owner as well as its

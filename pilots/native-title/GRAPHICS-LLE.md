@@ -6,6 +6,38 @@ transform, rasterization, framebuffer writes and visibility-report DMA in
 `src/machine/nv2a.cpp`. This document records component qualification; full
 graphics-family acceptance remains open and the total remains **4/9**.
 
+## Original physical resource backing and native lifetime - 2026-10-11
+
+Actual original contiguous allocations now support counted native resource
+references on their existing owner/publication ledger. Query and reference
+validate the complete readable remaining extent against the original PTE/PFN
+sequence and shared backing; unique64-bit tokens reject duplicate/stale release.
+Original171 free and incompatible182 protection changes stop before mutation
+while any resource remains. USB DMA leases retain their separate lifetime.
+
+Original-scheduling vertex Register retains that owner before backend creation;
+reference/binding collection destroys the backend before releasing its token.
+There is no native allocation-table fallback. Three actual original CPU lives
+execute30 source-bound D3D calls, allocate/query/free real original backing and
+compare36,864 actual GPU readback bytes exactly. A stream binding retains a
+resource after its caller refs reach zero; unbind collects the last owner.
+The mixed native-scheduling regression retains its prior allocation-ledger route.
+
+The combined batch passes **46/46 checks in9.67s**, including original171 free
+and182 protection guards, protected distant-tail/overflow/stale cases and
+original memory/thread/handle/FP/flags/ESP cleanup. The private proof freezes90
+identities: `build/blinx/graphics-original-backing-20261011/qualified.aot-private.json`,
+SHA-256 `2b56c0921b897203224bf14351ad11b2b557c25ed2077cfee6024f9cd878404e`.
+
+One invisible muted **8.266s** startup registers six actual buffers, including
+`838B4000`, then stops at `device LLE callback budget exhausted` in the outer159
+wait. The loop counts clock slices/import/component transitions against8192;
+execution-owner budget separation needs investigation before another title run.
+No larger limit, completed attract, callbacks or full-family acceptance is inferred.
+There were no physical Xbox operations or audio playback. **4/9 families** and
+**26 agreed precision deferrals** remain; waits/pulses/teardown, actual GPU/audio
+startup and complete graphics behavior remain required.
+
 ## Shared original owner and resource-backing boundary - 2026-10-11
 
 Graphics and audio now use the same actual original RTL critical section before
@@ -745,7 +777,7 @@ The ordinary production-path attract check omits per-draw capture:
 `build/blinx/scene-composition-production-attract-20261009/run.aot-private.json`
 records **210.140s / 20 presents** with no fault/stop. Its contact sheet shows
 demo playback at present 9, the input interruption/pause and title return at
-10Ã¢â‚¬â€œ13, then demo re-entry at 18 and continued playback at 20. Both final runs
+10ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“13, then demo re-entry at 18 and continued playback at 20. Both final runs
 use title SHA-256
 `02b7917222f2f1725954512a241d9942db4e8d6d2c9062d4e48e01c6fa7352d4`.
 The harness intentionally terminates at the requested duration; its exit code
@@ -806,7 +838,7 @@ The final ordinary-path run is
 `ac2aa89f9507a1022f94d6c7b9347be76c7e8805be1ef0876e0008d27d0f6708`.
 All five real input transitions are delivered. The inspected contact sheet shows
 demo playback at 9, input interruption/pause at 10, title return at 13 and demo
-re-entry at 18Ã¢â‚¬â€œ20. The retained title log has no pilot/audio stop or fault.
+re-entry at 18ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“20. The retained title log has no pilot/audio stop or fault.
 As above, the harness intentionally terminates at its time bound; this confirms
 observed attract/input behavior and does not establish a new speed/A-V bound.
 
@@ -1033,8 +1065,8 @@ Private evidence uses the `build/blinx/output-defaults-*` prefix.
 The shipping executable SHA-256
 `df7caa88118ffb3972809c54e771af5af9e59d6eed807997637a65aed0cb94c6`
 passes one 250.281s Blinx run with 23 captured presents and all five real input
-transitions. Inspection confirms first demo frames 9–11, title frame 13, and
-reentry/playback frames 19–23. No STOP/FAULT occurs; return code 1 is the
+transitions. Inspection confirms first demo frames 9â€“11, title frame 13, and
+reentry/playback frames 19â€“23. No STOP/FAULT occurs; return code 1 is the
 harness's intentional bounded termination. Evidence is
 `output-defaults-production-reentry-20261009/run.aot-private.json` and its
 retained log/contact sheet. This checks the native title regression; it does
@@ -2308,7 +2340,7 @@ remains valid; no new title capture is needed. This batch used CPU-only Idle
 work on one logical processor, with no title/audio/host GPU/Xbox run.
 **4/9** and the full goal remain active; hardware stays at its inspection gate.
 
-### Independent postprocess consumer pixels — 2026-10-10
+### Independent postprocess consumer pixels â€” 2026-10-10
 
 The two self-feedback quads and the final three postprocess rectangles now pass
 an independent consumer pixel contract. `tools/native_postprocess_pixel_reference.py`

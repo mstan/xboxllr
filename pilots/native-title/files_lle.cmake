@@ -59,6 +59,11 @@ if(PILOT_FILES STREQUAL "LLE")
     "-DPROGRAM=$<TARGET_FILE:pilot_contract_test>" "-DCASE=thread-component-pool-pinned-lle"
     "-DREASON=device LLE allocation release while DMA pinned" -P "${CMAKE_CURRENT_SOURCE_DIR}/component_owner_guards.cmake")
   set_tests_properties(pilot_thread_component_pool_cpu_lle pilot_thread_component_pool_pinned_lle PROPERTIES TIMEOUT 30)
+  foreach(physical_case owner free-guard protect-guard)
+    pilot_add_test(NAME "pilot_thread_component_physical_${physical_case}_lle" COMMAND pilot_contract_test
+      "thread-component-physical-${physical_case}-lle")
+    set_tests_properties("pilot_thread_component_physical_${physical_case}_lle" PROPERTIES TIMEOUT 30)
+  endforeach()
   pilot_add_test(NAME pilot_timer_dpc_lle COMMAND pilot_contract_test timer-dpc-lle)
   set_tests_properties(pilot_timer_dpc_lle PROPERTIES TIMEOUT 30)
   if(PILOT_SCHEDULING STREQUAL "LLE")
@@ -93,7 +98,7 @@ if(PILOT_FILES STREQUAL "LLE")
     endif()
     if(PILOT_RENDERER STREQUAL "D3D11" AND EXISTS "${PILOT_FILES_COMPARISON}"
        AND EXISTS "${PILOT_GENERATED}/pilot_d3d_bindings.h")
-      foreach(graphics_case cpu memory-guard callback-guard pulse-guard fence-guard constructor gate)
+      foreach(graphics_case cpu memory-guard callback-guard pulse-guard fence-guard constructor gate resource resource-free-guard)
         pilot_add_test(NAME "pilot_graphics_component_${graphics_case}_lle" COMMAND pilot_callback_kernel_lle_test
           "graphics-component-${graphics_case}-lle" "${PILOT_FILES_COMPARISON}")
         set_tests_properties("pilot_graphics_component_${graphics_case}_lle" PROPERTIES TIMEOUT 30)

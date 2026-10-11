@@ -47,8 +47,12 @@ static unsigned publication_slot(uint32_t page)
     unsigned entry=publication_by_va[page>>12];
     return entry?entry-1:published_count;
 }
-static struct {uint32_t base,bytes,contiguous,dma_leases;} owners[MAX_PUBLISHED];
+static struct {uint32_t base,bytes,contiguous,dma_leases,resource_references;} owners[MAX_PUBLISHED];
 static unsigned owner_count;
+/* References carry resource lifetimes only. Allocation/PFN identity remains
+ * solely in the original allocator and existing publication owner ledger. */
+static struct {uint64_t token;uint32_t base;} resource_references[MAX_PUBLISHED];
+static uint64_t resource_reference_sequence;
 static int gpu_bootstrap_published;
 static struct {uint32_t base,bytes,count;} pin_ranges[MAX_PUBLISHED];
 static uint32_t image_start,image_bytes;
@@ -677,7 +681,8 @@ static void publish_range(uint32_t object,uint32_t bytes)
     if(!image && !vm) {
         if(owner_count==MAX_PUBLISHED){failure="device LLE publication ownership capacity";return;}
         owners[owner_count].base=object;owners[owner_count].bytes=bytes;
-        owners[owner_count].contiguous=owners[owner_count].dma_leases=0;++owner_count;
+        owners[owner_count].contiguous=owners[owner_count].dma_leases=0;
+        owners[owner_count].resource_references=0;++owner_count;
     }
     refresh_mappings();
 }
@@ -685,6 +690,9 @@ static void retire_owner(uint32_t object)
 {
     unsigned owner;for(owner=0;owner<owner_count && owners[owner].base!=object;++owner){}
     if(owner==owner_count){failure="device LLE release of unowned publication";return;}
+    if(owners[owner].resource_references) {
+        failure="device LLE retiring resource-borrowed publication";return;
+    }
     owners[owner]=owners[--owner_count];
     /* The original allocator may keep a pool page for its private objects.
      * Its native publication has a separate lifetime: retain it only while a
@@ -1449,6 +1457,71 @@ const char *pilot_io_device_release_check(uint32_t base,uint32_t bytes)
         error="device LLE allocation release while DMA pinned";break;
     }
     ReleaseSRWLockShared(&lock);return error;
+}
+static unsigned contiguous_resource_owner(uint32_t address,uint32_t bytes,uint32_t *available)
+{
+    if(!cpu || failure || !bytes || (uint64_t)address+bytes>0x100000000ull)return owner_count;
+    unsigned owner=contiguous_owner(address,bytes);
+    if(owner==owner_count)return owner_count;
+    uint32_t extent=owners[owner].bytes-(address-owners[owner].base),first;
+    if(!physical(address,&first) || (uint64_t)first+extent>RAM_BYTES)return owner_count;
+    /* available permits the caller to consume this entire tail. Validate it
+     * all before returning its extent or retaining any resource reference. */
+    for(uint64_t at=address,end=(uint64_t)address+extent;at<end;) {
+        uint32_t page=(uint32_t)at&~4095u,actual;
+        unsigned i=publication_slot(page);
+        if(i==published_count || !physical((uint32_t)at,&actual) ||
+           actual!=(uint64_t)first+at-address || actual>=RAM_BYTES ||
+           published[i].pa!=(actual&~4095u) ||
+           publication_by_pa[actual/4096]!=i+1 ||
+           shared_pages[actual/4096]!=guest_memory+page)return owner_count;
+        MEMORY_BASIC_INFORMATION info;
+        if(VirtualQuery(guest_memory+at,&info,sizeof(info))!=sizeof(info) ||
+           info.State!=MEM_COMMIT || (info.Protect!=PAGE_READONLY && info.Protect!=PAGE_READWRITE))
+            return owner_count;
+        at=(at+4096)&~4095ull;
+    }
+    *available=extent;return owner;
+}
+int pilot_io_device_contiguous_resource_query(uint32_t address,uint32_t bytes,uint32_t *available)
+{
+    if(device_bus_borrow || !available)return 0;
+    AcquireSRWLockExclusive(&lock);
+    uint32_t extent=0;int valid=contiguous_resource_owner(address,bytes,&extent)!=owner_count;
+    if(valid)*available=extent;
+    ReleaseSRWLockExclusive(&lock);return valid;
+}
+int pilot_io_device_contiguous_resource_reference(uint32_t address,uint32_t bytes,
+    uint64_t *reference,uint32_t *available)
+{
+    if(device_bus_borrow || !reference || !available)return 0;
+    AcquireSRWLockExclusive(&lock);
+    int valid=0;uint32_t extent=0;
+    unsigned owner=contiguous_resource_owner(address,bytes,&extent),slot;
+    if(owner==owner_count || owners[owner].resource_references==UINT32_MAX ||
+       resource_reference_sequence==UINT64_MAX)goto done;
+    for(slot=0;slot<MAX_PUBLISHED && resource_references[slot].token;++slot){}
+    if(slot==MAX_PUBLISHED)goto done;
+    uint64_t token=++resource_reference_sequence;
+    resource_references[slot].base=owners[owner].base;resource_references[slot].token=token;
+    ++owners[owner].resource_references;
+    *reference=token;*available=extent;valid=1;
+done:
+    ReleaseSRWLockExclusive(&lock);return valid;
+}
+int pilot_io_device_contiguous_resource_release(uint64_t reference)
+{
+    if(device_bus_borrow || !reference)return 0;
+    AcquireSRWLockExclusive(&lock);
+    int valid=0;unsigned slot,owner;
+    if(failure)goto done;
+    for(slot=0;slot<MAX_PUBLISHED && resource_references[slot].token!=reference;++slot){}
+    if(slot==MAX_PUBLISHED)goto done;
+    for(owner=0;owner<owner_count && owners[owner].base!=resource_references[slot].base;++owner){}
+    if(owner==owner_count || !owners[owner].contiguous || !owners[owner].resource_references)goto done;
+    --owners[owner].resource_references;memset(resource_references+slot,0,sizeof(*resource_references));valid=1;
+done:
+    ReleaseSRWLockExclusive(&lock);return valid;
 }
 int pilot_io_device_contiguous_dma(uint32_t pa,void *buffer,uint32_t bytes,int write,unsigned lease)
 {
