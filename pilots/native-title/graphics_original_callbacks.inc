@@ -107,8 +107,11 @@ static void graphics_original_user_callback(uint32_t routine,uint32_t context)
     uint32_t nonvol[]={g_ebx,g_ebp,g_esi,g_edi};
     g_esp=sp-8;MEM32(g_esp)=PILOT_IO_GRAPHICS_DPC_ENTRY;MEM32(g_esp+4)=context;
     body();
-    if(g_esp!=sp-4 || g_ebx!=nonvol[0] || g_ebp!=nonvol[1] || g_esi!=nonvol[2] || g_edi!=nonvol[3])
+    if(g_esp!=sp-4 || g_ebx!=nonvol[0] || g_esi!=nonvol[2] || g_edi!=nonvol[3])
         stop("original graphics cdecl callback ABI differs",routine);
+    /* EBP is local in generated code; its global value is a nested-call
+     * frame publication, not the result of the callee's LEAVE. */
+    g_ebp=nonvol[1];
     g_esp+=4;
 }
 

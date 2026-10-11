@@ -146,6 +146,12 @@ static int thread_cpu_admit(uc_engine *engine,uint32_t address)
 }
 static void thread_before_call(unsigned ordinal,const uint32_t *args)
 {
+    if(ordinal==124 || ordinal==143 || ordinal==144) {
+        struct OriginalThread *owner=thread_object(args[0]);
+        if(!owner || (!owner->refs && args[0]!=kernel_word(0x8003da64u))) {
+            failure="thread LLE priority control requires a retained original thread";return;
+        }
+    }
     if((ordinal==160 || ordinal==161) && (args[0]&255)>31) {
         failure="device LLE IRQL out of range";return;
     }

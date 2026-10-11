@@ -635,7 +635,12 @@ static void check_publications(int before_call)
             failure="device LLE publication index mismatch";return;
         }
         if(!physical(va,&pa)) {
-            if(before_call){failure="device LLE published mapping changed between calls";return;}
+            if(before_call) {
+                uint32_t pc=0;uc_reg_read(cpu,UC_X86_REG_EIP,&pc);
+                fprintf(stderr,"[PUBLICATION MAPPING GUARD] va=%08x pa=%08x pc=%08x thread=%08x pins=%u\n",
+                    va,published[i].pa,pc,kernel_word(0x8003da64u),published[i].pins);
+                failure="device LLE published mapping changed between calls";return;
+            }
             release_publication(i);if(failure)return;continue;
         }
         if(pa!=published[i].pa) {
@@ -911,6 +916,10 @@ static void run_original(uint32_t entry,size_t instruction_limit,uint32_t dispat
         }
         if(!is_dpc && !thread) {publish_idle_callback_stack(regs[4],12);if(failure)return;}
         if(thread) {
+            /* Original termination may free a previous thread's stack before
+             * selecting this entry. Reconcile that actual kernel mutation
+             * before handing the next CPU caller its strict published view. */
+            check_publications(0);if(failure)return;
             uint32_t top=kernel_word(thread->object+0x1c),base=kernel_word(thread->object+0x20);
             uint32_t tls=kernel_word(thread->object+0x28),unused;
             if((top&4095) || (base&4095) || base<0xd0001000u || top>0xd4000000u ||
@@ -1004,7 +1013,7 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
 #ifdef PILOT_FILES_LLE
     switch(ordinal) {
     case 35:case 36:case 125:case 250:count=0;break;
-    case 67:case 113:case 148:case 198:case 203:case 209:case 224:case 225:case 231:
+    case 67:case 113:case 143:case 144:case 148:case 198:case 203:case 209:case 224:case 225:case 231:
     case 289:case 290:count=2;break;
     case 215:case 233:case 246:case 279:count=3;break;
     case 149:case 189:case 234:count=4;break;

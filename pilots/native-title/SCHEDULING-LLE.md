@@ -1796,3 +1796,51 @@ from the red evidence. Failed and superseded generations remain separate.
 The unchanged GPU callback/barrier source dependency is additionally bound by
 `qualified-source-supplement-v20.aot-private.json` (SHA256 `34baec1fb0537a6b70e219137ea0d4222291a4b038b3b06aa68be7fcb52584bd`).
 It was omitted from the main source list; no new execution is inferred.
+
+### Original priority controls and terminated stack handoff - 2026-10-11
+
+Actual original124/143/144 now operate on retained original KTHREAD owners.
+The complete source bodies bind RET4/RET8, previous increment/boost returns,
+normal process base8, signed saturation and effective1..15 clamping. Two targets
+are born B then A; actual143 moves them to ready priorities14 and15. A runs
+first, each target observes the actor in real Waiting5 and its own actual PCR
+current thread, and real225 signals wake the actor. Three lifetimes in both
+build selections retain ESP/nonvolatiles, x87/XMM/control, IF/DF/IRQL, canaries
+and all nine memory/thread/handle baselines. Silicon dynamic-boost/quantum
+precision remains within the existing deferrals.
+
+The authored fixture initially used the desktop five-argument209 query form;
+the Xbox two-argument original query is required. That setup mistake is corrected,
+and its failed generation is retained separately. The corrected fixture exposed
+a genuine original termination boundary: target A's stack PTEs are gone when
+original Ps termination selects target B. The native publication view was still
+retained, so the strict next-entry check rejected D002C000 at PC0001E400.
+Reconciliation now occurs at that actual original handoff, before publishing the
+next stack. Before-call checks remain strict. The completed A host continuation
+is already joined; retained object references and later real after-call cleanup
+preserve the distinct logical owner lifetime. Earlier stack VA reuse is not
+inferred from this case.
+
+The inner graphics cdecl adapter also preserves incoming EBP across generated
+local-frame publication, following the already qualified outer ISR/DPC bridge.
+The generated-frame callback fixture passes through actual original KDPC/FIFO
+and vblank lifetimes with exact interrupted caller state and cleanup. Default
+HLE priority saturation/clamping, object references, boost controls and equal
+priority progress use their existing performant foundation; their regressions
+are included, without a new default HLE algorithm or setting.
+
+The coherent76/76 checks pass in18.08s, zero skips, plus three maintained NV2A
+shared-bus checks in0.50s. Immutable muted title v24 passes the former143 stop,
+creates native audio and reaches a later actual USB DPC175 page-pin guard at
+70.282s. That callback's memory ownership is the next coupled dependency.
+Integrated attract is still required, so scheduling remains partial,4/9 and26
+precision deferrals unchanged; independent GPU/graphics/audio/movie gates stay
+open. There were no physical Xbox operations or audible playback.
+
+Private proof: `build/blinx/original-display-pulse-20261011/qualified-v24.aot-private.json`
+(SHA256 `f949641a6e90dbc84559030155e498d8f4149159c5b024521e07388d81aa3e3a`)
+binds35 frozen sources, five executable/library identities and21 artifacts,
+including the actual v23 red executable/source/log and v24 green selection.
+The title retains that immutable executable identity. Subsequent callback page
+admission and the additional pinned-disappearance guard are excluded from this
+v24 proof and require their own validation record.

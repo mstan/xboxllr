@@ -82,8 +82,12 @@ static void test_graphics_callback_return(void)
 {
     /* Real interrupted raw CPU/compute-peer state must survive these generated
      * volatile register/FP clobbers. The cdecl callback preserves nonvolatiles. */
+    uint32_t sp=g_esp,incoming=g_ebp,ebp=incoming;
+    g_esp-=4;MEM32(g_esp)=ebp;ebp=g_esp;g_ebp=ebp;
     g_eax=0xaabbccdd;g_ecx=0x11223344;g_edx=0x55667788;
-    g_fp_top=6;g_fp_stack[0]=-7.5;memset(&g_xmm0,0x12,sizeof(g_xmm0));g_esp+=4;
+    g_fp_top=6;g_fp_stack[0]=-7.5;memset(&g_xmm0,0x12,sizeof(g_xmm0));
+    g_esp=ebp;ebp=MEM32(g_esp);g_esp+=4;
+    CHECK(ebp==incoming && g_esp==sp && g_ebp==sp-4);g_esp+=4;
 }
 static void test_graphics_callback_vblank(unsigned which)
 {
