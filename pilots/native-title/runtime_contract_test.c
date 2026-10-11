@@ -750,6 +750,7 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"callback-kernel-guard-lle")) {test_callback_kernel_guard_lle();return 0;}
         if (!strcmp(argv[1],"idle-isr-stack-lle")) {test_idle_interrupt_stack_lle(0);return 0;}
         if (!strcmp(argv[1],"idle-isr-stack-guard-lle")) {test_idle_interrupt_stack_lle(1);return 0;}
+        if (!strcmp(argv[1],"idle-dpc-page-memory-lle")) {test_idle_dpc_page_memory_lle();return 0;}
 #endif
         if (!strcmp(argv[1],"rtc-cmos-lle")) { test_rtc_cmos_lle(); return 0; }
         if (!strcmp(argv[1],"smbus-smc-lle")) { test_smbus_smc_lle(); return 0; }

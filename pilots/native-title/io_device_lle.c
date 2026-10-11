@@ -635,6 +635,9 @@ static void check_publications(int before_call)
             failure="device LLE publication index mismatch";return;
         }
         if(!physical(va,&pa)) {
+            if(published[i].pins) {
+                failure="device LLE pinned publication disappeared";return;
+            }
             if(before_call) {
                 uint32_t pc=0;uc_reg_read(cpu,UC_X86_REG_EIP,&pc);
                 fprintf(stderr,"[PUBLICATION MAPPING GUARD] va=%08x pa=%08x pc=%08x thread=%08x pins=%u\n",

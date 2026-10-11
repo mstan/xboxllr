@@ -1844,3 +1844,51 @@ including the actual v23 red executable/source/log and v24 green selection.
 The title retains that immutable executable identity. Subsequent callback page
 admission and the additional pinned-disappearance guard are excluded from this
 v24 proof and require their own validation record.
+
+### Original callback page ownership - 2026-10-11
+
+Compiled original ISR/DPC calls173/175 now reuse the maintained original page
+service floor. Actual owned PTE/PFN publications, precise ranges and pin counts
+remain authoritative; no native VM-lock fallback is introduced. Disappearance
+of a pinned publication is terminal before host decommit. The static actual XBE
+callee chain couples175 with two173 physical-address queries and the existing
+129/161 IRQL services; it does not justify broad admission of other imports.
+
+A real idle IRQ queues original KDPC work. On its actual original callback
+stack at IRQL2, the compiled body pins an unaligned two-page range twice,
+queries both physical aliases, reads/writes the real shared bytes, unpins twice
+and rejects stale DMA without changing the output canary. Actual145 signals
+an owned original108 event; original159 returns to a raw CPU caller with exact
+ESP/nonvolatiles, IF/DF, x87/XMM/control and canaries. Authored handles close,
+references dereference, both VM pages become host-reserved, and no authored
+native continuation remains.
+
+One explicit initialization lifetime precedes three exact reusable lifetimes.
+The startup delta is tightly checked: inherited file handle10 changes from
+wrong-object-type to invalid-handle with guarded outputs, the global handle
+count falls exactly one, AvailablePages falls one and PoolPages rises one;
+all other counters and the thread count are equal. The pool allocation caller
+is unproven, so this is observed cold-start retention rather than an attribution
+to the file worker. The resulting baseline is frozen once. All nine memory
+fields, threads and handles match it exactly after each measured lifetime;
+no tolerance or per-life baseline reset is used. Initial macro and PCR/work
+registration setup failures remain excluded and separately preserved.
+
+The coherent77/77 checks pass in19.70s without skips; three maintained NV2A
+bus checks pass in0.36s. Immutable muted title v32 no longer reports the prior
+callback175 guard, but reaches its180s limit (182.016s including collection),
+with last generated entry185532 and no STOP/fault recorded. Actual175 completion
+has not been observed. Bounded callback/floor phase diagnostics are required
+next, rather than inferring progress or raising the run limit. Whole scheduling
+remains partial,4/9 families and26 precision deferrals unchanged; movies and
+independent GPU/graphics/audio gates stay open. No physical Xbox operation or
+audible playback occurred.
+
+Private proof: `build/blinx/original-display-pulse-20261011/qualified-v32.aot-private.json`
+(SHA256 `048bb1d8515cafb5aef10f44f64708c19de2776e2d0457afd8c86f06a7d7f2b8`)
+binds35 frozen sources, five executable/library identities and24 artifacts.
+The static page audit is `usb-callback-pages-audit-20261011/qualified-static-pages.aot-private.json`
+(SHA256 `e71e0869e73c78b822fd8793f39fb57925f1def39240765bbf9ad09eb96e00b7`).
+All final target/build writes precede the recorded test selection and launch.
+The worker fixture is qualified; integrated timeout investigation `.15.11`
+remains open under the shared original scheduling delivery `.15`.

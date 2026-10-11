@@ -137,9 +137,9 @@ static const char *original_callback_kernel_call(unsigned ordinal)
     unsigned count;
     switch(ordinal) {
     case 103:case 121:case 129:case 160:case 161:count=0;break;
-    case 97:case 128:case 137:case 138:case 151:count=1;break;
+    case 97:case 128:case 137:case 138:case 151:case 173:count=1;break;
     case 113:count=2;break;
-    case 107:case 108:case 119:case 145:count=3;break;
+    case 107:case 108:case 119:case 145:case 175:count=3;break;
     case 149:count=4;break;
     case 150:count=5;break;
     default:return "original ISR/DPC kernel service requires qualification";

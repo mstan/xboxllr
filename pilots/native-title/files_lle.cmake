@@ -99,6 +99,8 @@ if(PILOT_FILES STREQUAL "LLE")
     pilot_add_test(NAME pilot_idle_isr_stack_lle COMMAND pilot_callback_kernel_lle_test idle-isr-stack-lle)
     pilot_add_test(NAME pilot_idle_isr_stack_guard_lle COMMAND pilot_callback_kernel_lle_test idle-isr-stack-guard-lle)
     set_tests_properties(pilot_idle_isr_stack_lle pilot_idle_isr_stack_guard_lle PROPERTIES TIMEOUT 30)
+    pilot_add_test(NAME pilot_callback_page_memory_lle COMMAND pilot_callback_kernel_lle_test idle-dpc-page-memory-lle)
+    set_tests_properties(pilot_callback_page_memory_lle PROPERTIES TIMEOUT 30)
     if(EXISTS "${PILOT_FILES_COMPARISON}" AND EXISTS "${PILOT_GENERATED}/pilot_audio_bindings.h")
       foreach(audio_case cpu gate effects-guard device-destructor-guard device-release-guard buffer-destructor-guard buffer-release-guard)
         pilot_add_test(NAME "pilot_audio_component_${audio_case}_lle" COMMAND pilot_callback_kernel_lle_test
