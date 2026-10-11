@@ -29,6 +29,8 @@ XlleDspCore* xlle_dsp_core_create(uint32_t* p,uint32_t* x,uint32_t* y,uint32_t* 
     core->dsp=dsp56300_create(&info);if(!core->dsp){free(core);return NULL;}return core;
 }
 void xlle_dsp_core_destroy(XlleDspCore* core){if(core){dsp56300_destroy(core->dsp);free(core);}}
+void xlle_dsp_core_reset(XlleDspCore* core){dsp56300_reset(core->dsp);}
+void xlle_dsp_core_invalidate_program(XlleDspCore* core){dsp56300_invalidate_cache(core->dsp);}
 void xlle_dsp_core_begin(XlleDspCore* core,uint32_t pc) {
     Dsp56300State state;dsp56300_get_state(core->dsp,&state);
     state.pc=pc;state.power_state=0;state.halt_requested=false;dsp56300_set_state(core->dsp,&state);

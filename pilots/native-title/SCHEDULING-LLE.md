@@ -981,3 +981,45 @@ preserved and is not relabelled as a production regression or a pass. The
 configured run is `settings-status-attract-configured-20261010/run.aot-private.json`.
 The harness stopped a live process at its bound, rather than observing natural
 exit. The earlier longer scene/reentry evidence retains its original generation.
+
+## Actual-thread VM publication - 2026-10-10 continuation
+
+Original-thread CALL/RET now connects NtAllocateVirtualMemory184,
+NtFreeVirtualMemory199, NtProtectVirtualMemory204 and NtQueryVirtualMemory217
+to the same original allocation/publication owner used by C callers. Original
+VADs, PTEs/PFNs, zeroing, returned ranges and protection policies remain its
+decisions. A per-call host-access lease exposes existing pages to the kernel;
+successful original RET publishes or retires the real pages and protections.
+There is no second allocator or manufactured successful return.
+
+Direct Unicorn API reads explicitly materialize the same owned lazy aliases as
+original instructions. Nested original protection queries save the complete CPU
+and use their own scratch CALL frame. Saving registers alone was insufficient:
+the first fixture exposed an overwritten outer return frame. That failure and
+the preceding unmapped-read failures remain separate private artifacts.
+
+Six actual-CPU lifetimes independently check reserve/commit, initially zero
+bytes, read-only protection and a real host write fault, original queried
+recommit policy, partial decommit/fresh-zero recommit, whole release, pinned DMA
+bytes, and original thread/handle baselines after cleanup. This kernel changes
+RO to RW on a successful RW recommit; the original query, rather than a prior
+assumption about retained protection, establishes that policy. A separate
+zero-size whole-release case pins only the second page and stops before the
+original free, retaining both pages, bytes, protections and output canary.
+The zero-size guard queries original AllocationBase instead of maintaining a
+parallel reservation table.
+
+The coherent CPU batch passes **58/58 in11.859s**, and the optional GP processor
+checks pass **2/2 in2.594s**. Rebuilt muted original Blinx passes184 and next
+stops at **NtOpenFile202**. File-service raw-thread admission and buffer/DMA
+postconditions are the next integration batch. Wider original GPU/audio/title
+startup remains open; these bounded checks do not close scheduling.
+
+Private evidence: `thread-vm-qualified-validation-20261010.aot-private.json`,
+`thread-vm-final-title-startup-20261010.aot-private.json` and retained
+`thread-vm-publication-fixture-test*-20261010.aot-private.log` generations.
+The frozen audio worker's GP owner independently passes13 APU checks; its
+original firmware prefix stops explicitly at FFFFC5=0FFF and is not a boot pass.
+No hardware write, audible playback or repeated attract run is required here.
+The prior configured HLE attract evidence retains its own executable identity.
+Family count stays **4/9**, with the same **25 safe deferrals**.

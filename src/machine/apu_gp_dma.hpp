@@ -14,8 +14,10 @@ public:
     using Bytes=std::function<bool(uint32_t,void*,uint32_t,bool)>;
     using Fifo=std::function<bool(unsigned,void*,uint32_t,bool)>;
     using Fault=std::function<void(const std::string&)>;
-    ApuGpDma(Word word,Bytes bytes,Fifo fifo,Fault fault)
-        :word_(std::move(word)),bytes_(std::move(bytes)),fifo_(std::move(fifo)),fault_(std::move(fault)){}
+    using ProgramWrite=std::function<bool()>;
+    ApuGpDma(Word word,Bytes bytes,Fifo fifo,Fault fault,ProgramWrite program_write={})
+        :word_(std::move(word)),bytes_(std::move(bytes)),fifo_(std::move(fifo)),
+         fault_(std::move(fault)),program_write_(std::move(program_write)){}
     bool read(uint32_t address,uint32_t& value) {
         if(failed_)return false;
         switch(address) {
@@ -99,6 +101,11 @@ private:
                     at+=n;offset=(offset+n)%size;
                 }
             } else if(!fifo_(buffer,packed.data(),length,output))return fail("GP FIFO DMA failed");
+            // External P publication must be admitted by the CPU owner before
+            // any executable word is stored. A blocked write cannot publish
+            // this node or end-of-list status; actual earlier work remains.
+            if(!output && node[3]>=0x2800 && program_write_ && !program_write_())
+                return fail("GP executable DMA publication was rejected");
             if(!output)for(unsigned i=0;i<count;++i) {
                 uint32_t sample=0;
                 for(unsigned b=0;b<width;++b)sample|=uint32_t(packed[i*width+b])<<(b*8);
@@ -112,7 +119,7 @@ private:
         // stop an armed engine; STOP and interrupt acknowledgement are explicit.
         interrupts_|=0x80;return true;
     }
-    Word word_;Bytes bytes_;Fifo fifo_;Fault fault_;
+    Word word_;Bytes bytes_;Fifo fifo_;Fault fault_;ProgramWrite program_write_;
     uint32_t next_=0,control_=32,interrupts_=0;
     uint64_t nodes_=0;bool failed_=false;
 };

@@ -203,3 +203,16 @@ and no-op decommit bodies are not adopted. No new donor implementation or GPL
 body was copied. Original software remains owned private input; existing private
 pilot dependency restrictions remain unchanged.
 
+## Original-thread VM continuation - 2026-10-10
+
+The existing original VM owner now shares its publication postconditions with
+actual original-thread CALL/RET. Six authored CPU lifetimes check original
+returned ranges, fresh zeroing, host RO/RW protection, queried recommit policy,
+decommit/recommit/release, pinned DMA bytes and cleanup. A zero-size whole
+release with a pinned second page rejects before freeing storage. The lease
+and original AllocationBase queries do not create another allocator/VAD owner.
+The combined CPU batch passes58 entries; original Blinx passes allocation184
+and next reaches the guarded file-thread integration at202. This extends the
+maintained bounded memory floor without closing the scheduling or title gates.
+See [the shared route and preserved failures](SCHEDULING-LLE.md#actual-thread-vm-publication---2026-10-10-continuation).
+

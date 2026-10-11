@@ -1665,6 +1665,16 @@ supplies ordinary voice-field bindings. No implementation body was copied. Exact
 accumulation/quantization remains explicit in AUDIO-D06; GP/EP/bootstrap/output
 dependencies retain their existing qualification limits and dependency notices.
 
+The subsequent GP CPU/bootstrap owner, executable-publication observer and
+fixtures are authored here. CPU reset/cache invalidation reuses the already
+credited pinned MIT DSP ABI. Pinned xemu supplies a factual mapped-bootstrap
+profile, rather than an imported implementation or hardware-boot observation.
+Original firmware-prefix bytes remain private and execute unchanged up to an
+explicit guarded peripheral boundary; that stop is not a full boot/output pass.
+The shared original-thread VM publication adapter and fixtures are also authored
+here, using the existing private kernel/capture and Unicorn references. No
+original VAD/allocator/query routine body or new external implementation is copied.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

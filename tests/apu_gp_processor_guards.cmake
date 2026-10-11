@@ -1,0 +1,13 @@
+foreach(mode IN ITEMS active-p bit9)
+  execute_process(COMMAND "${PROGRAM}" "${mode}"
+    RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE error TIMEOUT 10)
+  if(NOT status EQUAL 2 OR NOT error MATCHES "guarded before P/node publication")
+    message(FATAL_ERROR "GP ${mode} did not stop at its guard: ${status}\n${output}\n${error}")
+  endif()
+  if(mode STREQUAL "active-p" AND NOT error MATCHES "executable DMA/host writes during execution")
+    message(FATAL_ERROR "wrong active-P guard: ${error}")
+  endif()
+  if(mode STREQUAL "bit9" AND NOT error MATCHES "unqualified GP DMA descriptor format/extent")
+    message(FATAL_ERROR "unknown bit9 was not preserved: ${error}")
+  endif()
+endforeach()

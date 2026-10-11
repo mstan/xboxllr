@@ -94,7 +94,8 @@ public:
           gp_dma_([this](uint32_t a){return gp_word(a);},
                   [this](uint32_t a,void* data,uint32_t n,bool output){return gp_sge(0x2040,0x20d4,a,data,n,output);},
                   [this](unsigned i,void* data,uint32_t n,bool output){return gp_fifo(i,data,n,output);},
-                  [this](const std::string& why){device_fault(why);}) {}
+                  [this](const std::string& why){device_fault(why);},
+                  [this]{return gp_program_write();}) {}
     McpxApu(const McpxApu&)=delete;
     McpxApu& operator=(const McpxApu&)=delete;
 
@@ -192,6 +193,27 @@ public:
     bool gp_read(uint32_t address,uint32_t& value) {return !faulted_ && gp_dma_.read(address,value);}
     bool gp_write(uint32_t address,uint32_t value) {return !faulted_ && gp_dma_.write(address,value);}
     uint64_t gp_dma_nodes()const{return gp_dma_.nodes();}
+    bool faulted()const{return faulted_;}
+    // One serialized CPU owner observes executable host/DMA publication. This
+    // epoch is invalidation bookkeeping, not DSP completion or device time.
+    uint64_t gp_program_revision()const{return gp_program_revision_;}
+    bool bind_gp_program_owner(void* owner,ApuGpDma::ProgramWrite guard) {
+        if(!owner || !guard || gp_program_owner_)return false;
+        gp_program_owner_=owner;gp_program_guard_=std::move(guard);return true;
+    }
+    void unbind_gp_program_owner(void* owner) {
+        if(gp_program_owner_==owner){gp_program_owner_=nullptr;gp_program_guard_={};}
+    }
+    // Explicit scratch transport for the GP bootstrap/graph owner. It uses
+    // the same physical SGE mapping as descriptor DMA and never starts GP.
+    bool gp_scratch(uint32_t address,void* data,uint32_t bytes,bool output) {
+        if(faulted_)return false;
+        if((bytes && !data) || (reg32(0x2040)&7) ||
+           !gp_sge(0x2040,0x20d4,address,data,bytes,output)) {
+            device_fault("GP owned scratch transfer failed");return false;
+        }
+        return true;
+    }
 
     uint32_t mmio_read(uint32_t addr, int size) override {
         uint32_t off = addr - base_;
@@ -232,6 +254,9 @@ public:
         if(off>=0x30000 && off<0x40000) {
             uint32_t* word=gp_host_word(off,size);
             if(!word){device_fault("unqualified GP host write/reset");return;}
+            if(off>=0x3a000 && off<0x3e000 && !gp_program_write()) {
+                device_fault("GP executable host publication was rejected");return;
+            }
             *word=value&0xffffff;return;
         }
         if (off == kIsts && size == 4) {
@@ -338,6 +363,10 @@ private:
         return false;
     }
     ApuSsl ssl_;
+    bool gp_program_write() {
+        if(gp_program_guard_ && !gp_program_guard_())return false;
+        ++gp_program_revision_;return true;
+    }
     // Unamplified source/rate output and separately evaluated control permit a
     // future owned filter between rate conversion and amplitude application.
     bool source_signal_quantum(uint16_t voice,float* stereo,uint32_t& count,
@@ -745,6 +774,9 @@ private:
     std::array<std::array<apu_envelope_curve::ReleaseHistory,2>,kMaxVoices> voice_envelopes_{};
     std::array<uint8_t,32> submix_headroom_{};
     std::array<uint32_t,0x3800> gp_words_{};
+    uint64_t gp_program_revision_=0;
+    void* gp_program_owner_=nullptr;
+    ApuGpDma::ProgramWrite gp_program_guard_;
     ApuGpDma gp_dma_;
     int sub_logged_ = 0;
 };

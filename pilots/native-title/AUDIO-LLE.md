@@ -1041,6 +1041,66 @@ later device scheduler; it does not guess cadence, execute GP bootstrap/graph,
 resolve original descriptor bit9, produce EP/AC97 output or qualify full title
 audio. Those remaining integration dependencies keep the family open.
 
+## Owned GP CPU and mapped bootstrap - 2026-10-10
+
+`apu_gp_processor.cpp` now owns one actual guarded MIT DSP CPU over the same
+APU X/Y/P/MIX banks used by host MMIO and GP DMA. Explicit CPU reset clears
+the actual CPU state; it preserves the separately owned memory/peripheral
+banks. Only a held CPU admits a fresh mapped bootstrap. The fixed profile
+reads 8 KiB through the real GPSADDR/GPSMAXSGE mapping, loads masked 24-bit
+words into P0..2047, and invalidates translated instructions. A failed read
+does not publish a partially loaded program or claim a successful bootstrap.
+The temporary transfer buffer does not become another persistent P owner.
+
+The 2048-word profile is a factual lead from
+[pinned xemu's GP bootstrap](https://github.com/xemu-project/xemu/blob/482088490c2d5983ed5e1eafbd09906157c1eca0/hw/xbox/mcpx/apu/dsp/dsp_jit.c).
+Mapped execution is distinct from observed MCPX hardware boot. Actual
+GPRST/MMIO, DMA-device reset and automatic VP/GP scheduling remain guarded;
+this API does not supply those successes or infer physical boot latency.
+
+Executable memory has one serialized CPU owner. Host P writes and actual
+input-DMA P publication advance an invalidation epoch; the next run discards
+stale translations. A P-target DMA while translated code executes is rejected
+before its first executable word/node/status is published. Safe in-run code
+reload remains an explicit future integration boundary. External P publication
+uses these observed paths; the core retains raw bank pointers. CPU failure,
+invalid run budgets and a terminally faulted APU cannot return successful work.
+The pinned ABI's cycle budget carries real instruction-cost debt across calls;
+returned PC/power/SP come from the CPU, not from requested cycles. STOP requires
+an explicit reset before another boot/run, without guessing frame interrupts.
+
+One representative batch executes **30 mapped boots / three reused lifetimes**.
+Actual ordinary mono/stereo voice quanta feed MIX; real DSP MOVEs read 96 words
+from three planar bins and real peripheral DMA publishes those words across
+nonadjacent guest pages. CPU/DMA copies are exact. The independent constant
+signal check retains the existing 2e-6 nominal source-rate tolerance; it does
+not qualify silicon rounding. Mid-life SGE remap and program/destination changes
+are visible freshly. Already translated host and input-DMA P rewrites execute
+the new instruction immediate without a CPU reset. Separate guarded cases
+cover active-code P publication and the unresolved original descriptor bit9;
+both preserve the program and publish no completed DMA node.
+
+`tools/native_gp_bootstrap_reference.py` binds the original NTSC XBE and extracts
+the 1484-byte firmware prefix initialized by complete original helper0x17785e.
+It loads that unchanged prefix through the new mapped owner with an authored
+STOP tail and executes the actual entry. JSR0155 reaches FFFFC5=0FFF; the
+maintained interrupt acknowledgement admits only its independently qualified
+DMA status bit80 and stops explicitly. That preserved **expected failure is
+not original boot qualification**. It pinpoints another reached prerequisite
+without inventing frame/interrupt state or replacing original instructions.
+Original full scratch/graph storage, GP frame ownership, further firmware
+peripherals, bit9, FIFO/EP/AC97 and audible full-title output remain open.
+
+The optional `pilot_gp_processor_contract`/`pilot_gp_processor_guards` targets
+use the already prepared guarded DSP library. The product/native fast HLE has
+no new per-quantum CPU or validation work. Focused APU checks pass **13/13**;
+the optional pilot targets also pass independently. Source/binary/log hashes,
+earlier fixture/configuration failures and the original firmware stop are
+preserved in `build/blinx/audio-gp-bootstrap-20261010/qualified-batch.aot-private.json`
+and `original-gp-bootstrap-guard.aot-private.json`. No reference DLL, playback,
+whole-title run or console operation is part of this batch. The new ownership
+module and fixtures are authored here; no xemu implementation body is imported.
+
 ## References and reuse
 
 - Original NTSC private input: full helpers at `0x1789a0` and `0x178c97`;

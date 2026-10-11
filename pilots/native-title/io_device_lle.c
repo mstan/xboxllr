@@ -55,6 +55,12 @@ static uint32_t image_start,image_bytes;
 /* Admission window supplied only by a successful original VM commit. It does
  * not fabricate translations: publish_range still walks the actual PTEs. */
 static uint32_t vm_publication_base,vm_publication_bytes;
+/* A host-access lease belongs to one outstanding original VM call, not a VAD
+ * or another allocator. Original-thread calls may have independent leases. */
+struct VmAccessPage {uint32_t va;DWORD protection;};
+struct VmCallerAccess {struct VmAccessPage *pages;unsigned count;int active;};
+static void vm_caller_prepare(unsigned ordinal,const uint32_t *args,struct VmCallerAccess *access);
+static void vm_caller_complete(unsigned ordinal,const uint32_t *args,uint32_t status,struct VmCallerAccess *access);
 static struct {uint32_t base,bytes;} stacks[64];
 static unsigned stack_count;
 static uint32_t interrupt_objects[16],pending_callback;
@@ -132,7 +138,12 @@ static bool invalid_memory(uc_engine *engine,uc_mem_type type,uint64_t address,
     unsigned publication=publication_slot(page);
     if(publication==published_count && (page<0x80000000u || (page>=0xe0000000u && page<0xe4000000u) ||
        (page>=PILOT_KERNEL_DATA_BASE && page<PILOT_KERNEL_DATA_BASE+PILOT_KERNEL_DATA_BYTES))) {
-        if(!guest_page(page)){failure="device LLE invalid caller memory";return false;}
+        if(!guest_page(page)) {
+            uint32_t pc=0;uc_reg_read(engine,UC_X86_REG_EIP,&pc);
+            fprintf(stderr,"[IO CALLER MEMORY GUARD] access=%u address=%08x bytes=%d pc=%08x\n",
+                type,(uint32_t)address,size,pc);
+            failure="device LLE invalid caller memory";return false;
+        }
         backing=guest_memory+page;pa=UINT32_MAX;
     } else {
         if(!physical_translation(page,&pa) || (pa>=RAM_BYTES && (!rom || pa<0xff000000u))) {
