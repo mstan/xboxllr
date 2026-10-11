@@ -6,6 +6,32 @@ transform, rasterization, framebuffer writes and visibility-report DMA in
 `src/machine/nv2a.cpp`. This document records component qualification; full
 graphics-family acceptance remains open and the total remains **4/9**.
 
+## Original board performance-counter provenance - 2026-10-11
+
+The GPU diagnostic's deadline cannot depend on the PTIMER ratio it is about to
+change. Root independently resolves original kernel exports126/127 through the
+hash-bound RAM capture's actual PE export table and PDE/PTE mappings. The
+complete counter function reads board port8008 after a consistency check on its
+kernel rollover globals; the frequency function returns3375000. Neither calls
+another provider, reads GPU MMIO or executes RDTSC. The previously recorded
+physical AV-handshake frequency corroborates the constant, without establishing
+the identity of a different current console firmware.
+
+This source evidence supports an explicit independent board-counter deadline
+for the worker's coherent engine/PLL/ratio/alarm continuation. It does not
+qualify timer bit width, rollover IRQ/cadence, GPU alarm effects or a new
+native-title performance-counter service. The legacy full-machine PM timer that
+advances per read is excluded from the proof. No time is invented by a probe
+poll or an emulator register read.
+
+Private proof:
+`build/blinx/original-performance-clock-20261011/qualified-clock-source.aot-private.json`,
+SHA-256 `7cb91b4ae03a38a72214585074f9ad7d5b88fcd70684b3d5f2db9764aa4bc484`.
+It retains both complete original function bodies privately, their actual
+translations and eight source snapshots. No device execution, console request,
+title/audio run or HLE change. `.116.2.1.1` tracks this bounded audit; the larger
+bootstrap and graphics gates remain open, with4/9 qualified and26 deferrals.
+
 ## Aligned PCI controls and BAR0 width correction - 2026-10-11
 
 Probe commits `2928364` and `6277102` supersede the earlier diagnostic's PBUS
