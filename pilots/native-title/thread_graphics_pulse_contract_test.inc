@@ -33,7 +33,14 @@ static const char *test_graphics_pulse_work(void)
     CHECK(component_wait_owned_bytes(wait_block,block,sizeof(block)));
     CHECK(block[2]==graphics_pulse_thread && block[3]==resolved && waiter[0x57]==6);
     CHECK(TryAcquireSRWLockExclusive(&graphics_lock));CHECK(TryAcquireSRWLockExclusive(&vm_lock));
-    CHECK(MEM32(graphics_original_gate+20)==1 && MEM32(graphics_original_gate+24)==graphics_pulse_thread);
+    if(phase==2) {
+        /* Original BlockUntilVerticalBlank takes only the display event.
+         * A lower-priority waiter must not block a renderer/audio contender
+         * behind a shared gate while a compute thread remains runnable. */
+        uint32_t owner=MEM32(graphics_original_gate+24);
+        CHECK(!owner || owner==graphics_pulse_peer);
+        CHECK(MEM32(graphics_original_gate+20)==(owner?1u:0u));
+    } else CHECK(MEM32(graphics_original_gate+20)==1 && MEM32(graphics_original_gate+24)==graphics_pulse_thread);
     CHECK(!dispatch_changed && !dispatch_in_dpc && !graphics_callback && !graphics_gpu_head);
     ReleaseSRWLockExclusive(&vm_lock);ReleaseSRWLockExclusive(&graphics_lock);
     uint32_t counter=MEM32(GRAPHICS_PULSE_PEER_CONTEXT+4);CHECK(counter>=graphics_pulse_last_counter);
@@ -95,15 +102,31 @@ static void test_thread_graphics_pulse_lle(const char *path)
     const uint8_t helper[]={0xb8,0x10,0x32,0x54,0x76,0xc3};memcpy(memory+GRAPHICS_PULSE_HELPER,helper,sizeof(helper));
     char identity[65];test_component_hash(helper,sizeof(helper),identity);
     CHECK(!pilot_io_device_thread_component_bind_abi(GRAPHICS_PULSE_HELPER,sizeof(helper),identity,0,test_graphics_pulse_complete));
-    const uint8_t peer_code[]={0x53,0x55,0x56,0x57,0x8b,0x7c,0x24,0x14,
+    struct ThreadChildCode peer_code={0};struct ThreadChildCode *p=&peer_code;
+    GRAPHICS_PULSE_CODE(p,0x53,0x55,0x56,0x57,0x8b,0x7c,0x24,0x14,
         0x0f,0x10,0x47,16,0xdd,0x47,48,0x89,0x67,68,
         0xb9,0xdf,0x9b,0x57,0x13,0xba,0xe0,0xac,0x68,0x24,
-        0xbb,0x98,0xba,0xdc,0xfe,0xbd,0x21,0x43,0x65,0x87,0xbe,0x78,0x56,0x34,0x12,
-        0x83,0x3f,0,0x75,5,0xff,0x47,4,0xeb,0xf6,
+        0xbb,0x98,0xba,0xdc,0xfe,0xbd,0x21,0x43,0x65,0x87,0xbe,0x78,0x56,0x34,0x12);
+    unsigned loop=p->size;
+    GRAPHICS_PULSE_CODE(p,0x83,0x3f,0);unsigned done=child_branch(p,1);
+    GRAPHICS_PULSE_CODE(p,0x83,0x3d);child_word(p,GRAPHICS_PULSE_CONTEXT+132);GRAPHICS_PULSE_CODE(p,2);
+    unsigned other_phase=child_branch(p,1);
+    GRAPHICS_PULSE_CODE(p,0x83,0x7f,96,0);unsigned entered=child_branch(p,1);
+    /* Actual original 277/294 execute on this CPU peer while the whole
+     * vertical-blank API is still blocked, not on a host work callback. */
+    child_push(p,graphics_original_gate);child_call(p,277);
+    GRAPHICS_PULSE_CODE(p,0xff,0x47,96);
+    child_push(p,graphics_original_gate);child_call(p,294);
+    GRAPHICS_PULSE_CODE(p,0xb9,0xdf,0x9b,0x57,0x13,0xba,0xe0,0xac,0x68,0x24);
+    child_patch(p,other_phase);child_patch(p,entered);
+    GRAPHICS_PULSE_CODE(p,0xff,0x47,4);unsigned repeat=child_branch(p,0);
+    int32_t distance=(int32_t)loop-(int32_t)(repeat+4);memcpy(p->bytes+repeat,&distance,4);
+    child_patch(p,done);
+    GRAPHICS_PULSE_CODE(p,
         0x89,0x67,72,0x0f,0x11,0x47,32,0xdd,0x5f,56,
         0x89,0x4f,76,0x89,0x57,80,0x89,0x5f,84,0x89,0x6f,88,0x89,0x77,92,
-        0xc7,0x47,8,1,0,0,0,0x5f,0x5e,0x5d,0x5b,0xc2,4,0};
-    memcpy(memory+THREAD_COMPONENT_WAIT_PEER,peer_code,sizeof(peer_code));
+        0xc7,0x47,8,1,0,0,0,0x5f,0x5e,0x5d,0x5b,0xc2,4,0);
+    CHECK(p->size<0x200);memcpy(memory+THREAD_COMPONENT_WAIT_PEER,p->bytes,p->size);
     struct ThreadChildCode code={0};struct ThreadChildCode *c=&code;
     GRAPHICS_PULSE_CODE(c,0x53,0x55,0x56,0x57,0x8b,0x7c,0x24,0x14,
         0x0f,0x10,0x47,16,0xdd,0x47,48,0x89,0x67,68,
@@ -153,6 +176,7 @@ static void test_thread_graphics_pulse_lle(const char *path)
         CHECK(!MEM32(context+164) && MEM32(context+160)==MEM32(context+168) && MEM32(context+168)==(life+1)*2);
         CHECK(!memcmp(memory+context+16,memory+context+32,16) && !memcmp(memory+context+48,memory+context+56,8));
         CHECK(MEM32(peer+8)==1 && MEM32(peer+4) && MEM32(peer+68)==MEM32(peer+72));
+        CHECK(MEM32(peer+96)==1);
         CHECK(MEM32(peer+76)==0x13579bdf && MEM32(peer+80)==0x2468ace0 && MEM32(peer+84)==0xfedcba98 && MEM32(peer+88)==0x87654321 && MEM32(peer+92)==0x12345678);
         CHECK(!memcmp(memory+peer+16,memory+peer+32,16) && !memcmp(memory+peer+48,memory+peer+56,8));
         CHECK(graphics_pulse_wait_samples[2]>vblank && graphics_pulse_peer_progress>progress);
@@ -160,13 +184,13 @@ static void test_thread_graphics_pulse_lle(const char *path)
         CHECK(!dispatch_changed && !graphics_present_count && !graphics_callback && !graphics_gpu_head);
         CHECK(!event_lle_call(256,&stats));CHECK(MEM32(stats+4)==baseline_threads && MEM32(stats+8)==baseline_handles);
         test_memory_snapshot(after);CHECK(!memcmp(baseline,after,sizeof(baseline)));
-        CHECK(!memcmp(memory+GRAPHICS_PULSE_CPU,c->bytes,c->size) && !memcmp(memory+THREAD_COMPONENT_WAIT_PEER,peer_code,sizeof(peer_code)));
+        CHECK(!memcmp(memory+GRAPHICS_PULSE_CPU,c->bytes,c->size) && !memcmp(memory+THREAD_COMPONENT_WAIT_PEER,p->bytes,p->size));
         fprintf(stderr,"[ORIGINAL DISPLAY PULSE] life=%u interval=%s pacing_wait_samples=%u vblank_wait_samples=%u peer_progress=%u submitted/completed=%u exact_front_bytes=16384 no_host_dispatcher=1\n",
             life,life==1?"immediate":"paced",graphics_pulse_wait_samples[1]-pacing,graphics_pulse_wait_samples[2]-vblank,graphics_pulse_peer_progress-progress,graphics_swap_completed);
     }
     CHECK(!pilot_io_device_work_bind(NULL));graphics_original_clock_bound=0;
     CHECK(!call_graphics(PILOT_D3D_D3DDevice_Release,NULL) && !graphics_active);
     uint32_t gate=native_component_original_gate;graphics_original_gate=native_component_original_gate=0;pool_free(gate);
-    fprintf(stderr,"PASS: source-bound original Swap/vblank over three CPU/compute-peer lives, genuine privateevent/KWAIT/IRQ0 pacing, actual GPU retirement/front pixels, released graphics/VM locks, no host guest dispatcher and exact original cleanup\n");
+    fprintf(stderr,"PASS: source-bound original Swap/vblank over three CPU/compute-peer lives, genuine privateevent/KWAIT/IRQ0 pacing, actual GPU retirement/front pixels, released graphics/VM locks, actual CPU peer 277/294 through the unowned shared gate during vblank, no host guest dispatcher and exact original cleanup\n");
 }
 #undef GRAPHICS_PULSE_CODE

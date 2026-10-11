@@ -1892,3 +1892,55 @@ The static page audit is `usb-callback-pages-audit-20261011/qualified-static-pag
 All final target/build writes precede the recorded test selection and launch.
 The worker fixture is qualified; integrated timeout investigation `.15.11`
 remains open under the shared original scheduling delivery `.15`.
+
+### Pure vblank gate scope and integrated priority inversion - 2026-10-11
+
+Bounded actual title diagnostics supersede the unresolved v32 page phase:
+all three original USB KDPC175 pin/173 query/175 unpin chains return and publish.
+The complete original175 body changes PFN pin counts under129/161 IRQL control;
+it contains no allocator or critical-section wait. IRQ0 continues advancing
+and being acknowledged while Blinx's intended busy worker runs.
+
+Actual v37 KTHREAD snapshots expose the later inversion: busy priority10 is
+Running, main/audio priority15 is Waiting in277 on the shared component gate,
+and graphics priority9 is Ready inside the native whole vertical-blank wait,
+still holding that gate. Complete original1320F0 takes no such gate: it clears
+and waits on the device's notification event through159. The original display
+ISR/KDPC signal chain calls145 with increment1, but the graphics thread's real
+DisableBoost1 suppresses that boost. No priority increase, invented signal,
+busy-loop flag write or larger execution budget is justified.
+
+The typed pure-wait route now omits the renderer/audio gate and requires zero
+shared-gate depth on admission. Its independent display lifetime, original
+passive wait, ABI and reentrancy guards remain. Mutating renderer/audio/media
+paths retain their original critical-section ownership before host locks.
+The whole Swap/vblank fixture proves a real CPU peer executes original277/294
+while the vblank caller remains blocked, preserves FP/registers/ESP and returns
+all nine memory/thread/handle baselines exactly across three lifetimes.
+The selected pre-fix executable fails when the waiter owns the gate. A first
+post-fix assertion erroneously excluded legitimate peer ownership; that failed
+generation remains preserved. The corrected check permits only no owner or the
+actual peer, never the vblank waiter. Earlier stale-executable evidence is excluded.
+
+The final77/77 combined checks pass in17.88s with zero skips, plus three
+maintained NV2A bus checks in0.44s. Immutable muted title v39 clears the inversion
+and creates three PCM buffers, then stops at the whole DownloadEffectsImage
+ownership guard after58.266s without timing out. `.15.11` is complete; the
+coupled effects setup route is `.15.12`. Default performant HLE scheduling does
+not acquire the original component gate. Whole scheduling remains partial,
+4/9 families and26 precision deferrals unchanged; movies remain open.
+There were no physical Xbox operations or audible playback.
+
+Private gate qualification: `original-display-pulse-20261011/qualified-gate-v39.aot-private.json`
+(SHA256 `6e4dcce94e6e3cd2499636510d843b563549eea77b4dbea28e2735f7d4cf9d03`),
+36 frozen sources, five executable/library identities and17 artifacts. The
+integrated result is `qualified-title-v39.aot-private.json` (SHA256
+`3c26cccb9a675fb53df6f62ce15972a77b3304801f10169d376ef1cadb27d95b`).
+The original event/DisableBoost audit is
+`busy-worker-startup-audit-20261011/qualified-static-vblank.aot-private.json`
+(SHA256 `2920c421cdc970ca598b0f20ce66b41f216b3538c949e6b98dfbee4c30944b52`).
+The private timed wait uses a genuine original finite KernelMode233/234/159
+route, distinct from the original indefinite UserMode display-event wait;
+the scoped phase/timing precision limits are not promoted by this gate fix.
+The independent lazy image-publication fallback context/IRQL hazard was not
+reached in these diagnostics and remains an explicit investigation if reached.

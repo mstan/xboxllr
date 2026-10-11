@@ -507,8 +507,10 @@ void pilot_d3d_dispatch(unsigned entry)
 #ifdef PILOT_SCHEDULING_LLE
 void pilot_d3d_dispatch(unsigned entry)
 {
+    int display_wait=entry==PILOT_D3D_D3DDevice_BlockUntilVerticalBlank;
     if(graphics_original_dispatch_depth ||
-       (pilot_io_device_thread_component_active() && graphics_original_gate_depth!=1))
+       (pilot_io_device_thread_component_active() &&
+        (display_wait?(graphics_original_gate_depth || native_component_original_depth):graphics_original_gate_depth!=1)))
         stop("original graphics dispatch lacks nonrecursive gate ownership",entry);
     graphics_original_dispatch_depth=1;
     graphics_original_dispatch(entry);

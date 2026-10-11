@@ -587,7 +587,11 @@ static const char *native_graphics_component(uint32_t entry,uint32_t regs[8])
 #endif
        )
         return "original scheduling native graphics wait ownership requires integration";
-    const char *error=graphics_original_enter();
+    /* The original whole vblank API owns only a display-event lifetime.
+     * Holding the shared renderer/audio gate across this wait introduces
+     * priority inversion against Blinx's lower-priority display worker. */
+    int display_wait=index==PILOT_D3D_D3DDevice_BlockUntilVerticalBlank;
+    const char *error=display_wait?NULL:graphics_original_enter();
     if(error)return error;
     if(index==PILOT_D3D_D3DDevice_BlockOnFence) {
         uint32_t token=MEM32(regs[4]+4);
@@ -607,7 +611,7 @@ static const char *native_graphics_component(uint32_t entry,uint32_t regs[8])
     memcpy(regs,returned,sizeof(returned));
     g_eax=saved[0];g_ecx=saved[1];g_edx=saved[2];g_ebx=saved[3];
     g_esp=saved[4];g_ebp=saved[5];g_esi=saved[6];g_edi=saved[7];
-    return graphics_original_leave();
+    return display_wait?NULL:graphics_original_leave();
 }
 static void native_graphics_components_bind(void)
 {
