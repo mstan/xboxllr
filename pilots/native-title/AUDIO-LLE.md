@@ -1432,3 +1432,31 @@ implements the supported routes, so this batch adds source-bound qualification
 without a new production CPU, scheduler, bootstrap entry or default-HLE cost.
 
 Private proof: `build/blinx/audio-ep-directory-20261010/qualified-batch.aot-private.json`.
+
+## Original EP startup context audit (2026-10-11)
+
+Bounded issue: `beads-xbox.1.113.11`. A private observer executes unchanged
+`2EF` and records `C5=FFF`, genuine `C4=1` yield at `PC2F3/SP1`, then, after
+an explicit observation-only resume, `CA=0`, `D5=4000`, `D4=4000`, `D7=0`
+and actual RET with stack zero. Unknown writes are recorded without assigning
+device semantics. All RAM banks remain unchanged. C5 startup clear, unidentified
+CA context and the D5 end-of-list seed form one unmet startup contract: admitting
+an individual write would leave the following original behavior guarded.
+
+Twenty-four unchanged builder calls cover X/Y/P targets. EP `276/288/29A/2B1`
+all set descriptor bit nine. GP `DB/EB` clear it, while GP `133/144` set it.
+Thus it is neither an EP-only nor a P-only producer marker; these observations
+do not establish its effect. No DMA is submitted in this producer audit.
+
+The [NXP DSP56362 manual](https://www.nxp.com/docs/en/user-guide/DSP56362UM.pdf),
+table D-1, maps these aliases to different derivative-specific peripherals
+and reserves CA. It cannot supply MCPX CA semantics. Pinned xemu silently
+ignores CA and the unknown descriptor bit; that supplies no independent proof.
+Production guards remain intact. A coherent future batch must establish the
+startup seed/context, real input/event producer, preserved yield/resume stack,
+actual queued transfer and reuse/failure ownership together. Hardware work first
+needs verified owned SG mapping/bootstrap; the earlier failed SG store and
+unmapped inherited aliases preclude retrying the existing bit-nine experiment.
+No console operation or production behavior change follows from this audit.
+
+Private proof: `build/blinx/audio-ep-startup-context-audit-20261010/investigation-plan.aot-private.json`.

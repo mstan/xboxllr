@@ -24,7 +24,6 @@
 #define RAM_BYTES (64u*1024*1024)
 #define ROM_BYTES (256u*1024)
 #define SCRATCH PILOT_IO_BRIDGE_BASE
-#define STACK (SCRATCH+0x8000u)
 #define RETURN_PC (SCRATCH+0x9000u)
 #define MAX_PAGES 4096
 #define MAX_PUBLISHED (RAM_BYTES/4096)
@@ -84,6 +83,12 @@ static uint32_t device_mmio_first,device_mmio_bytes;
 static volatile LONG current_irql;
 static volatile LONG caller_if=1;
 static unsigned execution_depth;
+static int service_stack_page(uint32_t page)
+{
+    return page>=PILOT_IO_SERVICE_BASE &&
+        page<(uint64_t)PILOT_IO_SERVICE_BASE+PILOT_IO_SERVICE_FRAMES*PILOT_IO_SERVICE_STRIDE &&
+        ((page-PILOT_IO_SERVICE_BASE)%PILOT_IO_SERVICE_STRIDE)>=4096;
+}
 static PilotIoClock clock_provider;
 static void *clock_context;
 #ifdef PILOT_USB_LLE
@@ -277,6 +282,7 @@ static uc_err write_interrupt_frame(uc_engine *engine,uint32_t sp,const uint32_t
     if((uint64_t)sp+12>0x100000000ull){failure="device LLE interrupt frame wraps address space";return UC_ERR_ARG;}
     for(uint64_t page=sp&~4095u;page<(uint64_t)sp+12;page+=4096) {
         if(page>=SCRATCH && page<SCRATCH+PILOT_IO_BRIDGE_BYTES)continue;
+        if(service_stack_page((uint32_t)page))continue;
         unsigned i;for(i=0;i<mapped_count && mapped[i].va!=page;++i){}
         if(i==mapped_count && !invalid_memory(engine,UC_MEM_WRITE_UNMAPPED,page,4,0,NULL))return UC_ERR_WRITE_UNMAPPED;
     }
@@ -466,6 +472,16 @@ static void initialize(unsigned char *guest)
         failure="device LLE shared interrupt stack allocation failed";return;
     }
     IO_UC(uc_mem_map_ptr(cpu,SCRATCH,0x10000,UC_PROT_ALL,guest+SCRATCH));
+    for(unsigned i=0;i<PILOT_IO_SERVICE_FRAMES;++i) {
+        uint32_t base=PILOT_IO_SERVICE_BASE+i*PILOT_IO_SERVICE_STRIDE;
+        for(unsigned offset=0;offset<PILOT_IO_SERVICE_STRIDE;offset+=4096)
+            if(guest_page(base+offset)){failure="device LLE service stack collides with caller";return;}
+        if(!VirtualAlloc(guest+base+4096,PILOT_IO_SERVICE_STRIDE-4096,MEM_COMMIT,PAGE_READWRITE)) {
+            failure="device LLE service stack allocation failed";return;
+        }
+        IO_UC(uc_mem_map_ptr(cpu,base+4096,PILOT_IO_SERVICE_STRIDE-4096,
+                           UC_PROT_READ|UC_PROT_WRITE,guest+base+4096));
+    }
     /* Flat ring-0 segments, matching the captured IDT's selector 8. This
      * architectural frame glue follows our existing UnicornFloor injector. */
     /* FS uses the captured kernel's real PCR for SEH and allocator locks.
@@ -817,7 +833,7 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
     if(ordinal!=1 && ordinal!=2 && ordinal!=3 && ordinal!=4 && ordinal!=14 && ordinal!=15 && ordinal!=17 && ordinal!=23 &&
        ordinal!=44 && ordinal!=45 && ordinal!=46 && ordinal!=47 && ordinal!=50 && ordinal!=65 && ordinal!=68 && ordinal!=107 && ordinal!=108 && ordinal!=109 && ordinal!=165 && ordinal!=166 &&
        ordinal!=168 && ordinal!=171 && ordinal!=173 && ordinal!=175 && ordinal!=178 && ordinal!=179 && ordinal!=180 && ordinal!=181 && ordinal!=182 &&
-       ordinal!=98 && ordinal!=100 && ordinal!=103 && ordinal!=119 && ordinal!=121 && ordinal!=128 && ordinal!=129 && ordinal!=137 && ordinal!=151 &&
+       ordinal!=98 && ordinal!=100 && ordinal!=103 && ordinal!=119 && ordinal!=121 && ordinal!=128 && ordinal!=129 && ordinal!=137 && ordinal!=138 && ordinal!=145 && ordinal!=151 &&
        ordinal!=160 && ordinal!=161 && ordinal!=184 && ordinal!=199 && ordinal!=204 && ordinal!=217
 #ifdef PILOT_FILES_LLE
        && ordinal!=24 && ordinal!=35 && ordinal!=36 && ordinal!=37 && ordinal!=67 && ordinal!=69 &&
@@ -838,7 +854,7 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
     uint32_t entry=0x80010000u+kernel_word(table+4*(ordinal-base));
     if(failure)return;
     unsigned count=(ordinal==3 || ordinal==46 || ordinal==65)?6:ordinal==109?7:(ordinal==166 || ordinal==184)?5:(ordinal==2 || ordinal==45 || ordinal==50 || ordinal==204)?4:
-                   (ordinal==107 || ordinal==108 || ordinal==119 || ordinal==175 || ordinal==178 || ordinal==182 || ordinal==199)?3:
+                   (ordinal==107 || ordinal==108 || ordinal==119 || ordinal==145 || ordinal==175 || ordinal==178 || ordinal==182 || ordinal==199)?3:
                    (ordinal==15 || ordinal==44 || ordinal==47 || ordinal==168 || ordinal==217)?2:
                    (ordinal==1 || ordinal==103 || ordinal==121 || ordinal==129 || ordinal==160 || ordinal==161)?0:1;
 #ifdef PILOT_FILES_LLE
@@ -861,7 +877,13 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
         IO_UC(uc_reg_write(cpu,UC_X86_REG_ECX,&level));
     }
     if(ordinal==250)IO_UC(uc_reg_write(cpu,UC_X86_REG_ECX,args));
-    uint32_t words[11]={RETURN_PC},stack=STACK+(execution_depth-1)*0x4000u;
+    if(!execution_depth || execution_depth>PILOT_IO_SERVICE_FRAMES) {
+        failure="device LLE service frame capacity";return;
+    }
+    uint32_t words[11]={RETURN_PC};
+    uint32_t stack=PILOT_IO_SERVICE_BASE+execution_depth*PILOT_IO_SERVICE_STRIDE-0x100u;
+    if(execution_depth>2)fprintf(stderr,"[ORIGINAL SERVICE FRAME] depth=%u ordinal=%u stack=%08x\n",
+        execution_depth,ordinal,stack);
     uint32_t sp=stack,observed,flags=2u|(caller_if?0x200u:0);
     memcpy(words+1,args,count*4);
     IO_UC(uc_mem_write(cpu,stack,words,(count+1)*4));
@@ -887,6 +909,8 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
     }
     IO_UC(uc_reg_read(cpu,UC_X86_REG_EAX,result));
     device_caller_complete(ordinal,args,*result,&access);
+    if(!failure && execution_depth>2)fprintf(stderr,"[ORIGINAL SERVICE RETURN] depth=%u ordinal=%u result=%08x\n",
+        execution_depth,ordinal,*result);
 
 }
 
@@ -1144,7 +1168,7 @@ const char *pilot_io_device_lle(unsigned ordinal,unsigned char *guest,
     if(!guest_memory)initialize(guest);
     if(!failure && guest_memory!=guest)failure="device LLE guest address space changed";
     if(native_thread_worker)failure="thread LLE continuation handoff requires its real guest-call frame";
-    if(!failure && execution_depth>=2)failure="device LLE nested service stack limit";
+    if(!failure && execution_depth>=PILOT_IO_SERVICE_FRAMES)failure="device LLE nested service stack limit";
     if(!failure)thread_before_call(ordinal,args);
     if(!failure) {
         ++execution_depth;execute(ordinal,args,result);

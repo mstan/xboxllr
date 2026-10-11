@@ -1669,3 +1669,27 @@ Private reports: `thread-device-qualified-20261010.aot-private.json` and
 `thread-device-title-startup-20261010.aot-private.json`. All43 source inputs and
 nine binaries match; original ROM/EEPROM hashes remain unchanged. The GPU DLL
 retains the prior identity. No physical console or attract/audio run occurred.
+
+## Compiled callbacks and bounded service frames - 2026-10-11
+
+Compiled original ISR/DPC kernel calls now execute genuine original queue,
+event, timer and IRQL services through the maintained C owner. The native
+dispatcher remains forbidden under original scheduling. Shared raw-thread
+arities additionally connect actual event reset/set. Four separately guarded
+C-service frames permit the observed interrupt during an original ownership
+call without overlapping bridge/GDT or original thread/DPC stacks.
+
+The final batch passes **78/78 in15.969s**. Its dedicated original-scheduling
+callback executable checks real queue/remove/cancel ordering, event state,
+fastcall, caller context and unsupported-frame/handoff guards; existing device,
+GPU, DMA and mixed native checks pass. The original muted title then queues real
+GPU work at IRQL23, executes original DPC13BBC0 at IRQL2 and returns from actual
+KeSetEvent145. Its depth3 queue/event calls return through separate frames.
+After8.375s the next stop is raw AV export2. Full AV/startup/rendering and the
+larger gate remain open at **4/9**; default HLE gains no callback/device work.
+
+Private reports: `callback-service-frames-qualified-20261011.aot-private.json`
+and `callback-service-frames-title-startup-20261011.aot-private.json`. Their49
+sources, ten binaries and unchanged ROM/EEPROM inputs match. Prior mixed-target
+coverage failures and the real two-frame capacity stop remain separate evidence.
+No physical Xbox, playback or repeated attract run was performed.

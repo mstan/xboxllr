@@ -46,6 +46,23 @@ if(PILOT_FILES STREQUAL "LLE")
   set_tests_properties(pilot_event_timer_lle PROPERTIES TIMEOUT 30)
   add_test(NAME pilot_timer_dpc_lle COMMAND pilot_contract_test timer-dpc-lle)
   set_tests_properties(pilot_timer_dpc_lle PROPERTIES TIMEOUT 30)
+  if(PILOT_SCHEDULING STREQUAL "LLE")
+    # The mixed executable deliberately keeps native scheduling. Compile the
+    # same authored fixtures separately with the title's original selection;
+    # inherit its other family dependencies once, at generation time.
+    add_executable(pilot_callback_kernel_lle_test runtime_contract_test.c)
+    target_compile_definitions(pilot_callback_kernel_lle_test PRIVATE PILOT_SCHEDULING_LLE PILOT_FILES_LLE
+      "$<TARGET_PROPERTY:pilot_contract_test,COMPILE_DEFINITIONS>")
+    target_include_directories(pilot_callback_kernel_lle_test PRIVATE
+      "$<TARGET_PROPERTY:pilot_contract_test,INCLUDE_DIRECTORIES>")
+    target_compile_options(pilot_callback_kernel_lle_test PRIVATE
+      "$<TARGET_PROPERTY:pilot_contract_test,COMPILE_OPTIONS>")
+    target_link_libraries(pilot_callback_kernel_lle_test PRIVATE
+      "$<TARGET_PROPERTY:pilot_contract_test,LINK_LIBRARIES>")
+    add_test(NAME pilot_callback_kernel_guard_lle COMMAND pilot_callback_kernel_lle_test callback-kernel-guard-lle)
+    add_test(NAME pilot_callback_timer_dpc_lle COMMAND pilot_callback_kernel_lle_test timer-dpc-lle)
+    set_tests_properties(pilot_callback_kernel_guard_lle pilot_callback_timer_dpc_lle PROPERTIES TIMEOUT 30)
+  endif()
   add_test(NAME pilot_thread_lle COMMAND pilot_contract_test thread-lle)
   set_tests_properties(pilot_thread_lle PROPERTIES TIMEOUT 30)
   add_test(NAME pilot_thread_lle_blocked COMMAND pilot_contract_test thread-lle-blocked)

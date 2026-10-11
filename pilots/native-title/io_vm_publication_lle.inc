@@ -9,6 +9,7 @@ static uc_err vm_caller_read(uint32_t address,void *buffer,unsigned bytes)
     if(!bytes || (uint64_t)address+bytes>0x100000000ull)return UC_ERR_READ_UNMAPPED;
     for(uint64_t page=address&~4095u;page<(uint64_t)address+bytes;page+=4096) {
         if(page>=SCRATCH && page<(uint64_t)SCRATCH+PILOT_IO_BRIDGE_BYTES)continue;
+        if(service_stack_page((uint32_t)page))continue;
         unsigned i;for(i=0;i<mapped_count && mapped[i].va!=page;++i){}
         if(i==mapped_count && !invalid_memory(cpu,UC_MEM_READ_UNMAPPED,page,4,0,NULL)) {
             fprintf(stderr,"[VM CALLER READ GUARD] address=%08x bytes=%u page=%08x\n",address,bytes,(uint32_t)page);

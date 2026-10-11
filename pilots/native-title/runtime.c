@@ -109,6 +109,9 @@ __declspec(noreturn) static void stop(const char *reason, uint32_t va)
 #include "usb_lle.h"
 static void usb_poll(void);
 static RECOMP_TLS unsigned usb_in_interrupt;
+#ifdef PILOT_SCHEDULING_LLE
+static RECOMP_TLS unsigned usb_device_callback_depth;
+#endif
 static int cpu_interrupt_flag=1,cpu_interrupt_shadow;
 #endif
 #include "thread_scheduler.inc"
@@ -725,6 +728,13 @@ static void kernel_dispatch_impl(void)
 static void kernel_dispatch(void)
 {
 #ifdef PILOT_USB_LLE
+#ifdef PILOT_SCHEDULING_LLE
+    if(usb_device_callback_depth) {
+        const char *error=original_callback_kernel_call(next_kernel_ordinal);
+        if(error)stop(error,next_kernel_ordinal);
+        return;
+    }
+#endif
     if(original_thread_exit.active){original_thread_kernel_dispatch();return;}
 #endif
     int blocked=scheduler_kernel_blocks(next_kernel_ordinal)?scheduler_block_begin():0;

@@ -3,7 +3,7 @@
  * helper reserves the independently bounded nested frame for original code. */
 static void thread_owned_execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
 {
-    if(!execution_depth || execution_depth>=2) {
+    if(!execution_depth || execution_depth>=PILOT_IO_SERVICE_FRAMES) {
         failure="thread LLE nested ownership frame capacity";return;
     }
     ++execution_depth;execute(ordinal,args,result);--execution_depth;

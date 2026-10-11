@@ -1271,3 +1271,41 @@ Evidence: `thread-device-qualified-20261010.aot-private.json` and
 for the Connected byte offset, uninitialized authored caller and pin-error
 expectation remain preserved; only corrected fixtures count. Family status stays
 **4/9**, with the same26 safe precision questions and unchanged default HLE cost.
+
+### Compiled interrupt and DPC service frames - 2026-10-11
+
+Compiled original ISR/DPC kernel calls now use the existing original C floor for
+queue/remove, event, timer and IRQL operations. The genuine caller stdcall frame
+advances only after original RET; fastcall IRQL arguments come from ECX. Wide
+or unknown exports, wrapping frames and callback Wait=TRUE stop before mutation.
+An explicit callback marker keeps these calls separate from managed-thread
+continuations. Default HLE compiles out this marker and adapter.
+
+An interrupt during an original ownership reference exposed the old two-frame
+limit. Four bounded service frames now occupy a separate transport reservation;
+each has a low guard page, twelve resident stack KiB and no CPU execute permission.
+They cannot overlap bridge workspace/GDT, export backing or original thread/DPC
+stacks. Capacity remains guarded. Interrupt-frame and VM preparation recognize
+only the resident private pages; original RAM publication/PFN/pin rules stay
+unchanged. The original CPU context remains saved across every compiled callback.
+
+The final coherent batch passes **78/78 in15.969s**, bound to49 source inputs and
+ten binaries. The dedicated callback executable selects original scheduling and
+files; the mixed executable retains its native scheduling scope. Real timer/DPC
+calls check queue duplicates, removal, cancellation, event reset/set, fastcall,
+IRQL, stack/nonvolatile/FP preservation and forbidden-call behavior. Three raw
+thread lifetimes independently execute original event reset/set with canaries.
+
+One muted original startup runs8.375s and establishes actual depth3 original119
+returns, original GPU DPC13BBC0 at IRQL2 and actual145 event returns. It then stops
+at raw AV export2. This is a required remaining service connection, not a
+silicon-only question or completed title route. Installed HDD identity passes;
+ROM/EEPROM bytes remain unchanged. Count stays **4/9**, with26 safe deferrals.
+
+Private evidence: `callback-service-frames-qualified-20261011.aot-private.json`
+and `callback-service-frames-title-startup-20261011.aot-private.json`. Earlier
+mixed-target failures did not compile the new guard mode and do not qualify the
+route. The dedicated78-check generation without extra frames passed component
+checks but exposed the depth limit in its8.062s startup. Those observations are
+retained; the final guarded-frame evidence above supplies the composed proof.
+No console operation, playback or attract rerun occurred.

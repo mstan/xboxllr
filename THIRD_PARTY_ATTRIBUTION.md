@@ -1743,6 +1743,11 @@ services. Its consumer uses the already credited MIT DSP core and maintained
 APU RAM/DMA owner. No original driver/firmware bytes, allocator bodies or external
 implementation are incorporated into committed source.
 
+The compiled ISR/DPC original-service ABI adapter, bounded guarded service
+frames and selected callback/raw-event fixtures are authored here. They reuse
+the credited original kernel/Unicorn/RAM/IRQ owners and nxdk ABI declarations;
+no kernel instructions or additional external implementation are copied.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

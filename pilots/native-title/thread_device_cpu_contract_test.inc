@@ -46,6 +46,15 @@ static void test_thread_device_cpu_lle(int bad_pin)
         CHECK(MEM8(0x1c014)==1);
         CHECK((thread_device_call(100,interrupt,1,life)&255)==1);
         CHECK(MEM8(0x1c014)==0);
+        uint32_t event[]={0x1c100,0,1},signal[]={0x1c100,0,0};
+        MEM32(0x1c0fc)=0x12345678;MEM32(0x1c110)=0x87654321;
+        thread_device_call(108,event,3,life);
+        CHECK(thread_device_call(138,event,1,life)==1);
+        CHECK(thread_device_call(138,event,1,life)==0);
+        CHECK(thread_device_call(145,signal,3,life)==0);
+        CHECK(thread_device_call(145,signal,3,life)==1);
+        CHECK(thread_device_call(138,event,1,life)==1);
+        CHECK(MEM32(0x1c0fc)==0x12345678 && MEM32(0x1c110)==0x87654321);
         uint32_t notify[]={0x1d000,1};MEM32(notify[0])=0x12300;MEM32(notify[0]+4)=5;
         thread_device_call(47,notify,2,life);notify[1]=0;thread_device_call(47,notify,2,life);
         memset(memory+0x1e000,0,128);MEM32(0x1e400)=0xcdcdcdcd;

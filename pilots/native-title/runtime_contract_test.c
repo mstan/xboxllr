@@ -118,6 +118,7 @@ static void call_kernel(unsigned ordinal,const uint32_t *args,unsigned argc)
 #include "event_objects_contract_test.inc"
 #ifdef PILOT_EVENT_TIMER_LLE
 #include "event_timer_lle_contract_test.inc"
+#include "callback_kernel_lle_contract_test.inc"
 #include "timer_dpc_lle_contract_test.inc"
 #include "thread_lle_contract_test.inc"
 #include "thread_wait_lle_contract_test.inc"
@@ -607,6 +608,9 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"thread-string-compare-cpu-lle")) {test_thread_string_compare_cpu_lle();return 0;}
         if (!strcmp(argv[1],"thread-device-cpu-lle")) {test_thread_device_cpu_lle(0);return 0;}
         if (!strcmp(argv[1],"thread-device-pin-guard-lle")) {test_thread_device_cpu_lle(1);return 0;}
+#ifdef PILOT_SCHEDULING_LLE
+        if (!strcmp(argv[1],"callback-kernel-guard-lle")) {test_callback_kernel_guard_lle();return 0;}
+#endif
         if (!strcmp(argv[1],"rtc-cmos-lle")) { test_rtc_cmos_lle(); return 0; }
         if (!strcmp(argv[1],"smbus-smc-lle")) { test_smbus_smc_lle(); return 0; }
         if (!strcmp(argv[1],"settings-lle")) { test_settings_lle(0); return 0; }

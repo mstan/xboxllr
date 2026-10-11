@@ -51,6 +51,9 @@ static const char *usb_original_callback(uint32_t entry,uint32_t regs[8],int is_
     if(g_fs_base)MEM8(g_fs_base+0x24)=(uint8_t)pilot_io_device_irql();
     if(is_dpc)dispatch_in_dpc=1;
     ++usb_in_interrupt;
+#ifdef PILOT_SCHEDULING_LLE
+    if(!thread_arguments)++usb_device_callback_depth;
+#endif
     if(thread_arguments) {
         if(original_thread_exit.active)stop("nested original native thread continuation",entry);
         original_thread_exit.active=1;
@@ -64,6 +67,9 @@ static const char *usb_original_callback(uint32_t entry,uint32_t regs[8],int is_
         else {*terminate=1;*exit_status=original_thread_exit.status;}
         original_thread_exit.active=0;
     } else routine();
+#ifdef PILOT_SCHEDULING_LLE
+    if(!thread_arguments)--usb_device_callback_depth;
+#endif
     --usb_in_interrupt;
     dispatch_in_dpc=saved_in_dpc;
     if(usb_isr_count<=4)fprintf(stderr,"[MACHINE CALLBACK RETURN] entry=%08x dpc=%d context=%08x\n",entry,is_dpc,MEM32(regs[4]+8));
@@ -108,6 +114,38 @@ static void original_thread_kernel_dispatch(void)
     g_eax=regs[0];g_ecx=regs[1];g_edx=regs[2];g_ebx=regs[3];
     g_esp=regs[4];g_ebp=regs[5];g_esi=regs[6];g_edi=regs[7];
 }
+#ifdef PILOT_SCHEDULING_LLE
+/* Compiled ISR/DPC bodies run while the original CPU callback is suspended.
+ * Their kernel calls reuse the qualified C service floor, never the native
+ * dispatcher or the managed-thread continuation transport. Only completed
+ * original returns advance the compiled caller's real stdcall frame. */
+static const char *original_callback_kernel_call(unsigned ordinal)
+{
+    if(!usb_device_callback_depth)return "original kernel service requires an ISR/DPC callback";
+    unsigned count;
+    switch(ordinal) {
+    case 103:case 121:case 129:case 160:case 161:count=0;break;
+    case 97:case 128:case 137:case 138:case 151:count=1;break;
+    case 113:count=2;break;
+    case 107:case 108:case 119:case 145:count=3;break;
+    case 149:count=4;break;
+    case 150:count=5;break;
+    default:return "original ISR/DPC kernel service requires qualification";
+    }
+    if((uint64_t)g_esp+(count+1)*4>0xffffffffull)
+        return "original ISR/DPC kernel call frame wraps";
+    uint32_t args[5]={0},result=g_eax;
+    for(unsigned i=0;i<count;++i)args[i]=MEM32(g_esp+4+i*4);
+    if(ordinal==145 && args[2])
+        return "original ISR/DPC Wait=TRUE requires scheduler handoff";
+    if(ordinal==160 || ordinal==161)args[0]=g_ecx;
+    const char *error=pilot_io_device_lle(ordinal,memory,args,&result);
+    if(error)return error;
+    g_eax=result;g_esp+=(count+1)*4;
+    if(g_fs_base)MEM8(g_fs_base+0x24)=(uint8_t)pilot_io_device_irql();
+    return NULL;
+}
+#endif
 static void usb_poll(void)
 {
     if(usb_in_interrupt)return;

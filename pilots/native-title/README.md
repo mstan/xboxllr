@@ -7,7 +7,7 @@ checkpoints. Its LLE thread bodies now execute original bytes on that same CPU,
 retaining flags and full FP state across original IRQs, waits and switches.
 Normal-priority child creation, explicit termination and recursive critical
 sections now use that original route; the latest combined CPU/GPU and DMA
-batch passes76 checks. Original settings use the shared EEPROM owner and original HAL/cache.
+batch passes78 checks. Original settings use the shared EEPROM owner and original HAL/cache.
 The default HLE corrects settings types/error ordering/cache behavior and uses
 an authored, deterministic Xbox error mapper instead of the host Windows table.
 Original-thread VM calls share the existing original page-publication owner,
@@ -25,9 +25,10 @@ length wrapping and byte folding instead of desktop RTL behavior. Eighteen
 initializer cases and three comparison lifetimes pass, each with808 equality
 and256 uppercase cases. The original CPU now shares the maintained GPU MMIO,
 clock and synchronous validated DMA owner. Shared HAL/PCI/IRQ and device/pool
-services retain actual publication, pin and cleanup effects. Startup reaches
-the original GPU ISR at IRQL23, then guards the native dispatcher on its DPC
-queue call after8.297s; routing compiled callbacks to original services is next.
+services retain actual publication, pin and cleanup effects. Compiled ISR/DPC
+calls now use original queue/event/timer services over bounded guarded frames.
+Startup queues real GPU work at IRQL23, executes original DPC13BBC0 at IRQL2
+and returns from its event signal; raw AV export2 is next after8.375s.
 Whole title scheduling remains unqualified. See
 [the CPU route and remaining integration](SCHEDULING-LLE.md#original-cpugpu-device-ownership---2026-10-10).
 
@@ -42,7 +43,7 @@ failure prefixes and existing P/MIX guards are retained. B0..B3 identity and
 production remain unresolved requirements. Full GP graph/output remains
 required. The distinct GP/EP foundation now passes19 focused checks, with
 its optional lifecycle and existing GP graph checks also passing in the fresh
-76-entry integration batch. Thirty actual VP/GP scratch-to-EP/FIFO packets retain
+78-entry integration batch. Thirty actual VP/GP scratch-to-EP/FIFO packets retain
 exact caller RAM, separate banks/CPU/program ownership and GP MIX leases across
 three lifetimes and EP replacements. Original EP boot and descriptor bit9 remain
 guarded. Genuine queued DMA now completes and permits serialized known-bit P
@@ -882,7 +883,7 @@ callback ordering and ownership. No new LLE behavior is substituted.
 The candidate completes three replay-file writes and reaches the zero-byte
 audio-buffer guard after 147.11 s (`beads-xbox.1.88`). It does not establish
 rendered gameplay, complete attract playback or original speed. Ordinary
-callback retry latency remains roughly 12â€“15 ms; a separate timer experiment
+callback retry latency remains roughly 12ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“15 ms; a separate timer experiment
 may address it, subject to actual-title measurement.
 
 `beads-xbox.1.61`, 2026-10-06. This standalone experiment uses Phobos
@@ -2508,7 +2509,7 @@ preserved, success leaves LastError alone, and failures call the title's actual
 `XapiSetLastNTError`. The existing error helper supplies its own TLS layout and
 NTSTATUS conversion. There is no duplicate execution of the original mount.
 
-Three real cache directories (partitions 3â€“5) retain title ownership across
+Three real cache directories (partitions 3ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“5) retain title ownership across
 processes in `native-cache-v1.bin` under the supplied local state directory.
 Existing-title mounts preserve bytes; clean requests and eviction remove the
 selected directory's contents and create a real `\\??\\Z:` namespace entry.

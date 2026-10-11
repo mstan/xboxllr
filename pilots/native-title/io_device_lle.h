@@ -5,6 +5,11 @@
  * These host backing pages do not consume the modeled Xbox's 64MiB RAM. */
 #define PILOT_IO_BRIDGE_BASE 0xe5000000u
 #define PILOT_IO_BRIDGE_BYTES 0x10000u
+/* Bounded C-service frames have independent guard pages. They must not
+ * overlap bridge workspace/GDT or the original thread/DPC stacks. */
+#define PILOT_IO_SERVICE_BASE 0xe8000000u
+#define PILOT_IO_SERVICE_FRAMES 4u
+#define PILOT_IO_SERVICE_STRIDE 0x4000u
 #define PILOT_IO_CLOCK_BASE 0xe6000000u
 #define PILOT_IO_CLOCK_BYTES 0x20000u
 /* Private loader-to-SystemRoutine transport, outside title address ranges. */
