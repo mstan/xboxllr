@@ -173,7 +173,7 @@ static uint32_t port_in(uc_engine *engine,uint32_t port,int size,void *data)
         return value;
     }
 #endif
-    const char *error=port==0x80cf?pilot_usb_board_port(port,size,0,&value):
+    const char *error=(port==0x80cf || (port>=0x70 && port<=0x73) || (port>=0xc000 && port<=0xc00f))?pilot_usb_board_port(port,size,0,&value):
         pilot_usb_pic_port(port,size,0,&value);
     if(error) {
         uint32_t pc=0;uc_reg_read(engine,UC_X86_REG_EIP,&pc);
@@ -208,7 +208,7 @@ static void port_out(uc_engine *engine,uint32_t port,int size,uint32_t value,voi
         return;
     }
 #endif
-    (void)data;const char *error=port==0x80cf?pilot_usb_board_port(port,size,1,&value):
+    (void)data;const char *error=(port==0x80cf || (port>=0x70 && port<=0x73) || (port>=0xc000 && port<=0xc00f))?pilot_usb_board_port(port,size,1,&value):
         pilot_usb_pic_port(port,size,1,&value);
     if(error) {
         uint32_t pc=0;uc_reg_read(engine,UC_X86_REG_EIP,&pc);

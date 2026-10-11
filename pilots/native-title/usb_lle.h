@@ -11,6 +11,8 @@ typedef void (*PilotUsbDmaRelease)(void);
 typedef uint32_t (*PilotUsbHostRead)(unsigned,uint8_t[18]);
 typedef uint32_t (*PilotUsbHostRumble)(unsigned,uint16_t,uint16_t);
 typedef uint32_t (*PilotUsbHostCaps)(unsigned,uint8_t[18],uint8_t[4]);
+/* Read-only storage-owner telemetry. Must not reenter guest execution. */
+typedef int (*PilotUsbTrayState)(uint8_t*);
 const char *pilot_usb_lle_host_bind(PilotUsbHostRead,PilotUsbHostRumble,PilotUsbHostCaps);
 const char *pilot_usb_lle_bind(PilotUsbDmaRead, PilotUsbDmaWrite, PilotUsbDmaRelease);
 /* One real dword transaction through the shared OHCI model. */
@@ -19,9 +21,13 @@ const char *pilot_usb_lle_access(uint32_t address,int write,uint32_t *value);
  * port bus also owns PIT ports 40..43; PIT stays unprogrammed until selected. */
 const char *pilot_usb_pic_bootstrap(uint16_t mask,uint16_t level);
 const char *pilot_usb_pic_port(uint32_t port,int size,int write,uint32_t *value);
-/* Retail GPIO15/FWENB static output only. No external ROM programming
- * connection; readback, other modes and widths remain guarded. */
+/* Shared board bus: retail GPIO15, RTC70..73 CMOS RAM, SMBusC000..C008
+ * and SMC profile with actual PIC IRQ11 completion/ack. EEPROM/encoder starts
+ * require their storage/graphics owners and remain guarded in this adapter.
+ * RTC clock/status/IRQ/NMI behavior remains guarded; no fixed-date response
+ * qualifies those modes. GPIO readback/other modes/widths remain guarded. */
 const char *pilot_usb_board_port(uint32_t port,int size,int write,uint32_t *value);
+const char *pilot_usb_board_bind_tray(PilotUsbTrayState);
 const char *pilot_usb_board_outputs(uint32_t *known,uint32_t *levels);
 int pilot_usb_pic_vector(int acknowledge);
 void pilot_usb_pic_raise(int line,int level);

@@ -1,4 +1,4 @@
-// xlle — mc146818 RTC / CMOS. Faithful to xemu/hw/rtc/mc146818rtc.c (Xbox). See rtc.hpp.
+// xlle — bounded RTC / CMOS storage. See rtc.hpp for unimplemented clock scope.
 #include "machine/rtc.hpp"
 
 namespace xlle {
@@ -33,7 +33,7 @@ Mc146818Rtc::Mc146818Rtc() {
 }
 
 uint32_t Mc146818Rtc::io_read(uint16_t port, int) {
-    if (port == 0x70) return 0xFF;  // index port is write-only
+    if (port == 0x70 || port == 0x72) return 0xFF;  // write-only index ports
     uint8_t val = cmos_[index_];
     if (index_ == REG_C) {
         // Register C is read-and-clear (and would lower IRQ8). No RTC IRQ modelled yet, so just
@@ -48,6 +48,7 @@ uint32_t Mc146818Rtc::io_read(uint16_t port, int) {
 void Mc146818Rtc::io_write(uint16_t port, int, uint32_t value) {
     uint8_t v = static_cast<uint8_t>(value);
     if (port == 0x70) { index_ = v & 0x7F; return; }  // select register (NMI bit ignored)
+    if (port == 0x72) { index_ = v; return; }  // extended full-byte selector
     switch (index_) {
         case REG_C: case REG_D: return;  // read-only status registers
         default: cmos_[index_] = v; return;

@@ -138,10 +138,8 @@ void XboxMachine::init_devices() {
 
     io_devices_.push_back(std::make_unique<Port61>());
     io_devices_.push_back(std::make_unique<Mc146818Rtc>());
-    // Extended-CMOS index/data ports (0x72/0x73): not decoded by the MCPX RTC. The kernel
-    // pokes them during shutdown/century handling; xemu leaves them unmapped ISA space and
-    // boots this same retail kernel (writes discarded, reads float) — open bus, not a fault.
-    io_devices_.push_back(std::make_unique<OpenBus>(0x0072, 2, "cmos-ext (absent)"));
+    // The RTC owns70..73. Original CMOS validation/repair selects all eight
+    // index bits through72 and accesses the shared data register through71.
 
     // IDE: primary channel (HDD master, ATAPI DVD slave) + bus master at BAR4 (0xFF60,
     // silicon). Completion IRQ 14, level-triggered, same delivery shape as SMBus IRQ 11.

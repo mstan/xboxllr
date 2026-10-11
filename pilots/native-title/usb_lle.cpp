@@ -11,6 +11,8 @@
 #include "machine/pit.hpp"
 #include "machine/apu_clock.hpp"
 #include "machine/mcpx_static_outputs.hpp"
+#include "machine/rtc.hpp"
+#include "machine/smbus.hpp"
 #include "usb_lle.h"
 
 namespace {
@@ -30,6 +32,10 @@ bool pic_ready;
 std::string board_failure;
 xlle::McpxStaticOutputs board_outputs(1u<<15,
     [](const std::string& why){board_failure=why;});
+xlle::Mc146818Rtc rtc;
+std::unique_ptr<xlle::Amd756Smbus> smbus;
+std::string smbus_failure;
+PilotUsbTrayState tray_state;
 PilotUsbHostRead host_read;
 PilotUsbHostRumble host_rumble;
 PilotUsbHostCaps host_caps;
@@ -121,6 +127,16 @@ extern "C" const char *pilot_usb_pic_bootstrap(uint16_t mask,uint16_t level)
         pic.io_write(0x21,1,mask&255);pic.io_write(0xa1,1,mask>>8);
         pic.raise(1,irq_level);pic_ready=true;
         pit.set_irq0([]{pic.raise(0,true);pic.raise(0,false);});
+        auto fault=[](const std::string& why){if(smbus_failure.empty())smbus_failure=why;};
+        smbus=std::make_unique<xlle::Amd756Smbus>(0xc000,fault);
+        auto smc=std::make_unique<xlle::XboxSmc>(fault);
+        smc->set_tray_state_reader([] {
+            uint8_t value=0;
+            if(!tray_state || !tray_state(&value))smbus_failure="SMC tray state owner unavailable";
+            return value;
+        });
+        smbus->add_slave(std::move(smc));
+        smbus->set_irq([](int irq,bool level){pic.raise(irq,level);},11);
     }
     ReleaseSRWLockExclusive(&usb_lock);return nullptr;
 }
@@ -140,9 +156,55 @@ extern "C" const char *pilot_usb_board_port(uint32_t port,int size,int write,uin
 {
     AcquireSRWLockExclusive(&usb_lock);
     const char *error=nullptr;
-    if(port!=0x80cf || size!=1 || !write || !value)
+    if(port>=0xc000 && port<=0xc00f) {
+        unsigned offset=port-0xc000;
+        bool qualified_register=size==1?(offset==0 || offset==2 || offset==4 || offset==6 || offset==7 || offset==8):
+            size==2 && (offset==0 || offset==2 || offset==6);
+        if(!smbus || !value || !qualified_register || (write && (size==1?*value>255:*value>65535)))
+            error="SMBus unsupported register/width transaction";
+        else if(!smbus_failure.empty())error=smbus_failure.c_str();
+        else if(write && offset==2 && (*value&8) &&
+                (smbus->io_read(0xc004,1)>>1)!=0x10)
+            error="SMBus endpoint outside connected SMC profile; storage/encoder owner required";
+        else if(write && offset==2 && (*value&8)) {
+            uint32_t address=smbus->io_read(0xc004,1),command=smbus->io_read(0xc008,1);
+            bool modeled=address&1?(command==1 || (command==3 && tray_state) || command==4 || command==0x0f ||
+                command==0x10 || command==0x11 || command==0x1b):
+                (command==1 || command==6 || command==0x0e || command==0x1b);
+            if((*value&7)!=2 || !modeled) {
+                std::fprintf(stderr,"[SMBus SMC GUARD] address=%02x command=%02x data=%02x control=%02x\n",
+                    address,command,smbus->io_read(0xc006,1),*value);
+                error="SMBus SMC operation outside qualified byte-register profile";
+            } else {
+                smbus->io_write((uint16_t)port,size,*value);
+                if(!smbus_failure.empty())error=smbus_failure.c_str();
+            }
+        }
+        else {
+            if(write)smbus->io_write((uint16_t)port,size,*value);
+            else *value=smbus->io_read((uint16_t)port,size);
+            if(!smbus_failure.empty())error=smbus_failure.c_str();
+        }
+    } else if(port>=0x70 && port<=0x73) {
+        if(!pic_ready || size!=1 || !value || (write && *value>255))
+            error="RTC unsupported port transaction";
+        else if(port==0x70 && write && (*value&128))
+            error="RTC NMI mask programming outside qualified CMOS profile";
+        else if((port&1) && !xlle::Mc146818Rtc::signature_ram(rtc.selected_index()))
+            error="RTC clock/status access outside qualified CMOS RAM profile";
+        else if(write)rtc.io_write((uint16_t)port,size,*value);
+        else *value=rtc.io_read((uint16_t)port,size);
+    } else if(port!=0x80cf || size!=1 || !write || !value)
         error="MCPX retail FWENB unsupported register transaction";
     else if(!board_outputs.write((uint16_t)port,*value))error=board_failure.c_str();
+    ReleaseSRWLockExclusive(&usb_lock);return error;
+}
+extern "C" const char *pilot_usb_board_bind_tray(PilotUsbTrayState read)
+{
+    AcquireSRWLockExclusive(&usb_lock);
+    const char *error=nullptr;
+    if(!read || tray_state)error="SMC invalid/repeated storage tray binding";
+    else tray_state=read;
     ReleaseSRWLockExclusive(&usb_lock);return error;
 }
 extern "C" const char *pilot_usb_board_outputs(uint32_t *known,uint32_t *levels)

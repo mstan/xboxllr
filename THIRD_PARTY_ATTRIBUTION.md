@@ -1598,6 +1598,28 @@ native continuation/clock adapter and authored instruction/worker tests are
 implemented here. No specification prose or external implementation body is
 copied into these components.
 
+## RTC/SMBus original startup continuation
+
+The CMOS decoder correction consults the existing pinned
+[xemu RTC source](https://github.com/xemu-project/xemu/blob/482088490c2d5983ed5e1eafbd09906157c1eca0/hw/rtc/mc146818rtc.c)
+for its four-port region, separate index widths and shared data aliases. Its
+Xbox signature initialization is already part of our maintained CMOS model.
+The [NVIDIA MCP-1 preliminary0.15 overview/features](https://consolemods.org/wiki/images/1/14/MCP_1x_DS_015.PDF-1.PDF)
+identify a256-byte RTC RAM but do not establish this exact port contract.
+Captured original kernel checker/repair routines execute only from private
+artifacts. The new C API bridge, storage/guard fixtures and probe payloads are
+authored here; no original kernel bytes, dumps or external implementation body
+are included. Original/reference qualification and an inconclusive physical
+observation remain distinct in SCHEDULING-LLE.md.
+
+The SMBus/SMC adapter reuses our already credited AMD756/SMC controller bodies
+and their existing factual/profile limits. It connects real modeled IRQ11 to
+the shared PIC, without adding a copied implementation, host completion event,
+unqualified EEPROM backing or a new shipping HLE performance path.
+Its authored tray callback reads the existing maintained IDE owner directly;
+original HAL calls and existing independent media/open-tray cases qualify the
+bounded connection. No separate mounted-state model is introduced.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

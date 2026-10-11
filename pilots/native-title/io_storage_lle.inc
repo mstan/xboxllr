@@ -6,6 +6,7 @@ static struct {
     void *instance;
     const char *(*error)(void*);
     int (*port)(void*,uint32_t,int,int,uint32_t*);
+    int (*tray)(void*,uint8_t*);
     HANDLE exclusion;
     int ready;
 } storage;
@@ -23,6 +24,10 @@ static int storage_dma(uint32_t address,void *buffer,size_t bytes,int write)
 }
 static int storage_dma_read(uint32_t a,void *b,size_t n){return storage_dma(a,b,n,0);}
 static int storage_dma_write(uint32_t a,const void *b,size_t n){return storage_dma(a,(void*)b,n,1);}
+static int storage_tray_state(uint8_t *value)
+{
+    return storage.instance && storage.tray(storage.instance,value);
+}
 static void storage_initialize(void)
 {
     if(storage.instance)return;
@@ -47,11 +52,13 @@ static void storage_initialize(void)
         (void*)GetProcAddress(library,"xlle_storage_bus");
     storage.error=(void*)GetProcAddress(library,"xlle_storage_error");
     storage.port=(void*)GetProcAddress(library,"xlle_storage_port");
-    if(!create || !bus || !storage.error || !storage.port){failure="storage LLE reference ABI mismatch";return;}
+    storage.tray=(void*)GetProcAddress(library,"xlle_storage_tray");
+    if(!create || !bus || !storage.error || !storage.port || !storage.tray){failure="storage LLE reference ABI mismatch";return;}
     storage.instance=create(PILOT_FILES_HDD,ram,RAM_BYTES,0xffff,0);
     if(!storage.instance){failure="storage LLE HDD attach failed";return;}
     bus(storage.instance,storage_dma_read,storage_dma_write,pilot_usb_pic_raise);
     failure=storage.error(storage.instance);
+    if(!failure)failure=pilot_usb_board_bind_tray(storage_tray_state);
     if(!failure)fprintf(stderr,"[FILES LLE] actual writable HDD; original FATX/IDE/PIC, shared physical RAM\n");
 }
 static int storage_owns_port(uint32_t port)

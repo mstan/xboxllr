@@ -617,9 +617,9 @@ One rebuilt original scheduling startup confirms the GPIO dependency is passed
 and the runtime clock starts. It stops before generated title entry on the
 captured worker's byte `OUT 0072,10` at `800187B8`. This is the next RTC/extended
 CMOS bus dependency; it is not a qualified original title run. The maintained
-full-machine route already distinguishes standard RTC ports 70/71 from the
-absent extended 72/73 decoder, but the pilot must connect and qualify that
-contract rather than return an arbitrary byte or ignore all unknown ports.
+full-machine route incorrectly marked extended72/73 absent. That earlier
+assumption is corrected by the CMOS continuation below; it was not silicon
+confirmation. Unknown ports still must not return arbitrary successful values.
 Private startup report is
 `build/blinx/original-clock-title-startup-20261010.aot-private.json`.
 
@@ -631,3 +631,92 @@ is made. The harness ends a live process; no additional owner appearance review
 is needed for this service-only change. Evidence is
 `build/blinx/original-clock-qualified-followup-20261010.aot-private.json` and
 `original-clock-default-followup-20261010/run.aot-private.json`.
+
+### CMOS/SMBus board integration and original title admission
+
+The captured original CMOS checker selects full-byte indexes through72 and
+reads71. It checks96 bytes at10..6F and128 bytes at80..FF. Its original repair
+routine writes the same224-byte alternating55/AA signature. The maintained
+machine's absent72/73 decoder was therefore a real software-model dependency,
+not an operation to ignore. Pinned xemu
+[`482088490c2d5983ed5e1eafbd09906157c1eca0` RTC](https://github.com/xemu-project/xemu/blob/482088490c2d5983ed5e1eafbd09906157c1eca0/hw/rtc/mc146818rtc.c)
+maps70..73, with a seven-bit70 selector, eight-bit72 selector, and shared data
+aliases. The authored model now implements that reference profile. The main
+machine and original/compiled pilot accesses use the same maintained RTC.
+
+The private original-code bridge qualifies actual checker/repair execution
+across **three fresh RTC device lifetimes**. Each checker consumes224 bytes;
+twelve corrupted first/last low/high-bank cases fail, are repaired by224 actual
+original stores apiece, and then pass. Three actual-artifact controls recreate
+the absent extended selector and fail. Caller stack/FLAGS/callee-saved registers
+and unrelated CMOS contents are preserved. Authored full-index/data-alias checks
+and compiled high-bank/width/NMI/clock guards pass. This qualifies initialized
+CMOS RAM under the declared reference profile, not oscillator, update, IRQ8,
+NMI delivery, power-loss retention or exact silicon alias behavior. The existing
+main RTC has a deterministic date and no advancing clock. The pilot explicitly
+rejects clock/status/NMI data accesses rather than using that date as evidence.
+Private reports: `rtc-cmos-focused-20261010.aot-private.json` and
+`original-rtc-cmos-reference-20261010.aot-private.json` in `build/blinx/`.
+
+One physical selector observation passed fresh v0.4.0 identity, sent one benign
+OUT72,10, and read71/73 once each. Both returned23 rather than the expected55.
+The host stopped immediately: **one selector write, two reads, zero CMOS data
+writes**, no further selection, recovery write or retry. Equal current data is
+not proof that the selector took effect, nor that every CMOS byte has the boot
+signature. This is an inconclusive physical result, preserved separately from
+the passing original/reference evidence. The owner inspected a normal screen;
+a subsequent fresh PING returned the expected v0.4.0 identity, confirming the
+agent is responsive. No further EXEC, selector write or recovery operation was
+sent. The exact fixed payloads and all stop
+paths pass five offline tests; the combined probe suite passes **111/111**.
+Current-state/retention precision is appended as LLE-D03; required clock/state
+transport and any reached unsupported mode remain active integration work.
+
+After CMOS, one original startup reaches SMBusC004. The pilot now connects the
+maintained AMD756 controller and guarded SMC to its shared PIC, with real IRQ11
+completion and acknowledgment. Actual original HAL read/write calls pass
+**three call rounds in one controller/transport lifetime**: version reset and
+P11 reads, composite AV-pack read, scratch write/read, and retired IRQ/status.
+The fixture's initial diagnostic called these lifetimes; that label is corrected
+without changing behavior. Unconnected EEPROM/encoder transactions and reserved
+register/width accesses stop before starting work. An independent copied EEPROM
+would diverge from native settings ownership, so storage integration must supply
+one shared owner before admitting it. Existing explicit GPU device bindings
+retain their ownership precedence; this board adapter is the fallback. No host
+event or native scheduler manufactures a completed original transaction.
+
+Tightening the SMC command/protocol guard exposed a real missing owner: the
+captured worker reads tray register03. The earlier permissive run inherited
+the SMC's unbound zero response; that run cannot qualify this connection. The
+storage bridge now exports the same maintained IDE device's actual tray state,
+and the SMC reads it through one bound owner callback. There is no copied tray
+or mounted-media state. A missing owner is rejected before transaction start.
+The final original HAL fixture includes the actual installed-HDD profile's
+tray read, rejects an unbound tray owner before attachment, and confirms null
+rebinding leaves the owner intact. Unmodeled SMC commands and word protocols
+remain guarded before completion/IRQ mutation. Existing independent IDE/SMC
+media/open-tray checks and the RTC component test also pass.
+
+The final coherent batch passes **49/49 CPU entries in12.218s**, including the
+new CMOS and original HAL cases and retained clock/thread/IRQ/storage tests.
+The source hashes are stable over that run. A separately rebuilt original
+scheduling title gets through GPIO/CMOS/SMBus and admits its real bootstrap
+callback/title thread: original stackD0028000..D0038000, real TLS/TIB and
+entry000F48D5. It stops **before the first translated title instruction** on a
+requested uncertified native compute checkpoint. The reported PC00000000 is
+the unmaterialized native checkpoint diagnostic, not proof of an original
+kernel jump to zero. General generated PC/materializedFLAGS and FP/SIMD
+transport, coherent service/callback publication and lifetimes remain required.
+Private final reports: `rtc-smbus-owned-validation-20261010.aot-private.json`
+and `board-storage-context-title-startup-20261010.aot-private.json`. The earlier
+permissive and strict unbound-tray attempts remain preserved; neither is
+relabelled as the final qualified board path. The RTC-only intermediate stop
+atC004 is retained in `rtc-cmos-title-startup-20261010.aot-private.json`.
+
+No extra default HLE attract/audio run was needed: the changed board path is
+exercised by original scheduling and CPU contracts, with the final rebuilt
+original title as the applicable integration regression. The prior192.969s
+default appearance result remains its own generation's evidence. Cached HLE
+graphics and audio performance code is unchanged. `.112.2` remains open;
+EEPROM/storage ownership under `.112.4` is also open. The family count is still
+**4/9**, with **22 safely deferred questions** (14 graphics/eight cross-family).

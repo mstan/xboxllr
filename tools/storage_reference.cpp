@@ -86,6 +86,15 @@ EXPORT const char* xlle_storage_error(void* instance) {
     auto& ref=*static_cast<Reference*>(instance);
     return ref.failure.empty()?nullptr:ref.failure.c_str();
 }
+// The same IDE owner supplies SMC tray telemetry; do not copy mounted state
+// into a second device. This read never runs guest code or changes the drive.
+EXPORT int xlle_storage_tray(void* instance,uint8_t* value) {
+    if (!instance || !value) return 0;
+    auto& ref=*static_cast<Reference*>(instance);
+    if (!ref.failure.empty()) return 0;
+    *value=ref.ide.dvd_tray_state();
+    return 1;
+}
 EXPORT int xlle_storage_port(void* instance,uint32_t port,int size,int write,uint32_t* value) {
     auto& ref=*static_cast<Reference*>(instance);
     if (!ref.failure.empty()) return 0;

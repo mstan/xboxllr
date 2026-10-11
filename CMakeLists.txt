@@ -439,6 +439,12 @@ add_executable(test_pit tests/test_pit.cpp src/machine/pit.cpp src/machine/pic.c
 target_include_directories(test_pit PRIVATE ${XLLE_INCLUDES})
 add_test(NAME pit COMMAND test_pit)
 
+add_executable(test_rtc tests/test_rtc.cpp src/machine/rtc.cpp)
+target_include_directories(test_rtc PRIVATE ${XLLE_INCLUDES})
+add_test(NAME rtc COMMAND test_rtc)
+add_library(xlle_rtc_reference SHARED EXCLUDE_FROM_ALL tools/rtc_reference.cpp src/machine/rtc.cpp)
+target_include_directories(xlle_rtc_reference PRIVATE ${XLLE_INCLUDES})
+
 add_executable(test_smc tests/test_smc.cpp src/machine/smbus.cpp)
 target_include_directories(test_smc PRIVATE ${XLLE_INCLUDES})
 add_test(NAME smc COMMAND test_smc)

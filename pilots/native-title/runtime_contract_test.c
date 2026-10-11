@@ -118,6 +118,8 @@ static void call_kernel(unsigned ordinal,const uint32_t *args,unsigned argc)
 #include "thread_wait_lle_contract_test.inc"
 #include "thread_idle_clock_contract_test.inc"
 #include "thread_compute_clock_contract_test.inc"
+#include "rtc_contract_test.inc"
+#include "smbus_contract_test.inc"
 #endif
 #ifdef PILOT_IO_DEVICE_LLE
 #include "io_device_contract_test.inc"
@@ -569,6 +571,8 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"thread-idle-clock-lle")) { test_thread_idle_clock_lle(); return 0; }
         if (!strcmp(argv[1],"thread-idle-runtime-clock-lle")) { thread_idle_runtime_clock=1;test_thread_idle_clock_lle();return 0; }
         if (!strcmp(argv[1],"thread-compute-clock-lle")) { test_thread_compute_clock_lle(); return 0; }
+        if (!strcmp(argv[1],"rtc-cmos-lle")) { test_rtc_cmos_lle(); return 0; }
+        if (!strcmp(argv[1],"smbus-smc-lle")) { test_smbus_smc_lle(); return 0; }
         if (!strcmp(argv[1],"thread-lle-blocked")) { thread_lle_reject=1;test_thread_lle();return 0; }
 #endif
         if (!strcmp(argv[1],"jumps")) { test_jumps(); return 0; }
