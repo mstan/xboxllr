@@ -6,6 +6,46 @@ transform, rasterization, framebuffer writes and visibility-report DMA in
 `src/machine/nv2a.cpp`. This document records component qualification; full
 graphics-family acceptance remains open and the total remains **4/9**.
 
+## Aligned PCI controls and BAR0 width correction - 2026-10-11
+
+Probe commits `2928364` and `6277102` supersede the earlier diagnostic's PBUS
+halfword-access assumption. The retained `64261e2` PE fails at its first actual
+halfword read of FD001804 under the corrected primary-derived model, before a
+PCI write. Its earlier25 cases retain ownership/order evidence under that model
+generation; they do not establish the physical access width. The frozen prior
+proof remains unchanged.
+
+The corrected image guards narrow loads and stores before provider access.
+Only enumerated primary VGA byte aliases admit byte access; halfword accesses,
+undefined neighboring bytes and DWORD crossings remain rejected. PCI command
+updates use aligned DWORDs with zero STATUS W1C bits. ROM disable preserves its
+address; cache/latency updates preserve type-zero header/multifunction/inactive
+BIST fields. Changed context stops before a pending store; failed readback stops
+all following hardware/kernel work without retry or rollback.
+
+Six groups and **46 complete target-linked lifetimes** pass in4.701s. Ordinary
+focused discovery passes6/6 in3.531s. Root independently verifies the five
+committed source bindings, the83 compiled and30 model artifact entries,
+14 primary inputs and94 unique file identities. The separate prior repository
+suite belongs to `2928364`:154 checks,151 passes and three existing optional
+skips. It is not relabeled as a whole-suite check of `6277102`.
+
+The actual SDK prefix retains four real validated allocations, creates its
+event and completes six checked stores. Its next request stops **before
+FD000200=FFFFFFFF**, with neither store nor corresponding readback. The earlier
+PMC backup read remains a distinct observation. Engine reset/enable, timer/alarm,
+instance physical ownership and downstream bootstrap/capture remain required.
+CPU reservation provenance does not establish a PRAMIN aperture alias; that
+write admission is removed. SDK readiness and pixel success are not supplied.
+
+Private proof:
+`build/blinx/noise-pci-width-guards-20261011/qualified-pci-width-bootstrap.aot-private.json`,
+SHA-256 `1701c7cc8e82e3a2b4cc31a23b8f10b186d2f81fa85373ab1f0ee73f4c79366a`.
+The [current probe contract](https://github.com/mstan/xboxlle-probe/blob/6277102d1ac7444e172b2570b5765f6c312e6cef/docs/NOISE-GPU-BOOTSTRAP.md)
+records effects, primary sources and stop conditions. No hardware operation,
+deployment, title/audio run or HLE change. The family count remains4/9 and the
+26 agreed precision deferrals remain explicit.
+
 ## Exclusive GPU diagnostic bootstrap foundation - 2026-10-11
 
 Probe commit `64261e252be24f9e20ae366c8c03dd67be44941d` builds a separate actual
@@ -17,7 +57,9 @@ Its compiled memory accesses pass through a closed ownership/effect policy.
 An ISR readback failure stops subsequent hardware and kernel operations,
 including interleavings during connection, a command store and allocation.
 
-Four groups and **25 target-linked execution cases** pass. The probe repository
+This prior generation's BAR0-width assumption is superseded by the correction
+above; retain its original evidence with that limit. Four groups and
+**25 target-linked execution cases** pass under its prior model. The probe repository
 suite runs153 checks, with three existing optional DSP-checker skips; all
 executed checks pass. The nominal SDK prefix creates its real event, retains
 four validated allocations and completes four checked stores, then stops
