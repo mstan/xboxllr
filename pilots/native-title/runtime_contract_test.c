@@ -491,6 +491,9 @@ static void test_timers(void)
 
 #if defined(PILOT_AUDIO_NATIVE) && defined(PILOT_SCHEDULING_LLE) && defined(PILOT_EVENT_TIMER_LLE)
 #include "thread_audio_component_contract_test.inc"
+#ifdef PILOT_AUDIO_DSP
+#include "thread_audio_effects_contract_test.inc"
+#endif
 #include "thread_audio_gate_contract_test.inc"
 #endif
 
@@ -554,6 +557,11 @@ int main(int argc,char **argv)
             if(!strcmp(argv[1],"audio-component-callback-guard-lle")) {
                 usb_device_callback_depth=1;pilot_audio_dispatch(PILOT_AUDIO_DirectSoundCreate);return 1;
             }
+#ifdef PILOT_AUDIO_DSP
+            if(!strcmp(argv[1],"audio-component-effects-lle")) {
+                CHECK(argc==4);test_thread_audio_effects_lle(argv[2],argv[3]);return 0;
+            }
+#endif
             CHECK(argc==3);
             if(!strcmp(argv[1],"audio-component-gate-lle")) {test_thread_audio_gate_lle(argv[2]);return 0;}
             int kind=!strcmp(argv[1],"audio-component-cpu-lle")?0:

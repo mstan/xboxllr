@@ -1944,3 +1944,57 @@ route, distinct from the original indefinite UserMode display-event wait;
 the scoped phase/timing precision limits are not promoted by this gate fix.
 The independent lazy image-publication fallback context/IRQL hazard was not
 reached in these diagnostics and remains an explicit investigation if reached.
+
+### Whole audio effects setup on original CPU - 2026-10-11
+
+The reached original17698D DownloadEffectsImage wrapper has five DWORD arguments
+and RET20. Its sole loader reads the complete `media/dsp.bin` image, supplies
+caller-local optional location/output, then immediately frees the input. Original
+upload copies the required data into owned scratch and publishes an independently
+owned descriptor. Location values are copied verbatim, with NULL becoming two
+FFFFFFFF values; the pointers are not retained. The actual three-effect image
+is distinct from the separate nine-effect `dsstdfx.bin` asset.
+
+The existing native graph implementation now enters through the typed original
+CPU/shared audio gate route. Actual original VM calls publish graph/descriptor
+storage. A coherent fixture installs/replaces the real image four times per CPU
+lifetime, checks input preservation, opaque copied locations, nullable output,
+the three-effect descriptor, old storage retirement and final engine/device
+teardown. Actual raw CPU199 frees the borrowed image before device release;
+the live graph/descriptor remains valid with its source publication retired.
+Three lifetimes preserve nonvolatiles, ESP, x87/XMM, authored whole-call flags,
+all nine original memory counters, pool owners, threads and handles exactly.
+The actual Nt routine may change volatile condition flags; the fixture restores
+its authored flags before measuring the remaining whole audio APIs.
+
+The source audit also identifies an independent failure-state difference:
+original location changes and old descriptor retirement precede replacement
+allocation, while the native backend keeps transactional rollback. Negative
+original CPU allocation/install results stop after releasing the gate instead
+of resuming as equivalent. Matching default HLE failure postconditions remain
+under audio `.113.19`; successful setup does not qualify those failures, GP/EP
+boot/control, codec or complete audio output. Existing DSP/HLE processing remains
+the performance implementation; no new output algorithm or setting is added.
+
+The final78/78 combined checks pass in21.02s without skips, plus three maintained
+NV2A bus checks in0.44s. Immutable muted title v42 clears the prior effects guard,
+installs the copied graph and renders four presents, including Blinx's loading
+screen. It stops after96.563s without timeout at the actual original CPU327
+section-load continuation guard. `.15.12` is complete; coherent327/328 image/
+file/VM ownership is `.15.13`. Integrated attract still remains, so whole
+scheduling stays partial,4/9 families and26 precision deferrals unchanged.
+Movies remain open. No physical Xbox operation or audible playback occurred.
+
+Private qualification: `original-display-pulse-20261011/qualified-effects-v42.aot-private.json`
+(SHA256 `e2ce811f6a71ac0adccc2f56f3c88e096ff92f46efd2174e89c883f67fb996b7`),
+43 frozen sources, five executable/library identities,21 artifacts and the actual
+effects input identity. Integrated title/presents: `qualified-title-v42.aot-private.json`
+(SHA256 `aebd2c6b4c96f5e3129920c55e03f593d848bb8f5649bd5bb4db0738e5810c8d`).
+The independent audit is `native-audio-effects-audit-20261011/qualified-static-effects.aot-private.json`
+(SHA256 `80c5309693953d5f24e3c4bee7f4d905529099072527c03ba1d1d36e4b1771be`),
+15 inputs and17 complete original routines. The initial asset selection was
+corrected before any fixture execution; the failed volatile-flag assertion and
+superseded source generations remain excluded from qualification evidence.
+Set the private `PILOT_AUDIO_EFFECTS_IMAGE` CMake input to the reached `dsp.bin`
+to register the original CPU lifecycle check; the production admission is not
+controlled by this qualification input.

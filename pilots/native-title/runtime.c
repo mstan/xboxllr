@@ -636,8 +636,14 @@ static const char *native_audio_component(uint32_t entry,uint32_t regs[8])
     unsigned index;for(index=0;index<PILOT_AUDIO_COUNT && pilot_audio_calls[index].address!=entry;++index){}
     if(index==PILOT_AUDIO_COUNT || !pilot_io_device_thread_component_active())
         return "unbound original CPU native audio entry";
-    if(index==PILOT_AUDIO_IDirectSound_DownloadEffectsImage)
+    if(index==PILOT_AUDIO_IDirectSound_DownloadEffectsImage) {
+#ifdef PILOT_AUDIO_DSP
+        if(!audio_device || MEM32(regs[4]+4)!=audio_device+8)
+            return "unowned original CPU native audio effects device";
+#else
         return "original scheduling native audio effects ownership requires integration";
+#endif
+    }
     const char *error=audio_original_enter();if(error)return error;
     uint32_t saved[]={g_eax,g_ecx,g_edx,g_ebx,g_esp,g_ebp,g_esi,g_edi};
     g_eax=regs[0];g_ecx=regs[1];g_edx=regs[2];g_ebx=regs[3];
@@ -646,7 +652,15 @@ static const char *native_audio_component(uint32_t entry,uint32_t regs[8])
     uint32_t returned[]={g_eax,g_ecx,g_edx,g_ebx,g_esp,g_ebp,g_esi,g_edi};memcpy(regs,returned,sizeof(returned));
     g_eax=saved[0];g_ecx=saved[1];g_edx=saved[2];g_ebx=saved[3];
     g_esp=saved[4];g_ebp=saved[5];g_esi=saved[6];g_edi=saved[7];
-    return audio_original_leave();
+    error=audio_original_leave();if(error)return error;
+#ifdef PILOT_AUDIO_DSP
+    /* The qualified successful upload owns its copied graph/descriptor.
+     * Original allocation/install failures retire old state earlier than
+     * this backend's transactional rollback; never resume as equivalent. */
+    if(index==PILOT_AUDIO_IDirectSound_DownloadEffectsImage && (int32_t)regs[0]<0)
+        return "original audio effects failure-state semantics require qualification";
+#endif
+    return NULL;
 }
 static const char *native_audio_object_guard(uint32_t entry,uint32_t regs[8])
 {

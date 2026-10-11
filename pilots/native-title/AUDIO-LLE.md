@@ -1842,3 +1842,21 @@ allocation and ownership assumptions. Prior general-RAM and marker sources remai
 unchanged; no console, network, title, playback or DSP-start operation occurred.
 Physical availability, successful calibration, bootstrap, bit9, timers, EP and
 full output remain required. Family count stays4/9, with26 safe precision deferrals.
+
+## Effects replacement failure state question - 2026-10-11
+
+Independent complete original-source audit `.112.2.15.12.1` confirms the successful
+whole DownloadEffectsImage ABI and borrowed-input/owned-descriptor lifetimes.
+Its original CPU composition passes twelve successful installs/replacements,
+immediate original199 source release and exact cleanup across three lifetimes;
+the integrated original-scheduling title installs effects and renders its loading
+screen. See the [coupled scheduling evidence](SCHEDULING-LLE.md#whole-audio-effects-setup-on-original-cpu---2026-10-11).
+
+Original location updates and old descriptor retirement precede new allocation;
+the maintained native graph implementation retains transactional rollback until
+installation succeeds. Allocation/install failure postconditions therefore remain
+an explicit offline question in `.113.19`. The original CPU route guards negative
+results after gate release instead of claiming equivalent continuation. Default
+HLE failure-state parity, precise original processing state and causal failed
+replacement checks remain required. This is separate from the26 timing/precision
+deferrals, and does not qualify whole audio or require new console probing.

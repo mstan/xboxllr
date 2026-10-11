@@ -107,6 +107,11 @@ if(PILOT_FILES STREQUAL "LLE")
           "audio-component-${audio_case}-lle" "${PILOT_FILES_COMPARISON}")
         set_tests_properties("pilot_audio_component_${audio_case}_lle" PROPERTIES TIMEOUT 30)
       endforeach()
+      if(PILOT_AUDIO_BACKEND STREQUAL "XAUDIO2_DSP" AND EXISTS "${PILOT_AUDIO_EFFECTS_IMAGE}")
+        pilot_add_test(NAME pilot_audio_component_effects_lle COMMAND pilot_callback_kernel_lle_test
+          audio-component-effects-lle "${PILOT_FILES_COMPARISON}" "${PILOT_AUDIO_EFFECTS_IMAGE}")
+        set_tests_properties(pilot_audio_component_effects_lle PROPERTIES TIMEOUT 30)
+      endif()
       pilot_add_test(NAME pilot_audio_component_callback_guard_lle COMMAND "${CMAKE_COMMAND}"
         "-DPROGRAM=$<TARGET_FILE:pilot_callback_kernel_lle_test>" "-DCASE=audio-component-callback-guard-lle"
         "-DREASON=original callback cannot acquire native audio owner locks" -P "${CMAKE_CURRENT_SOURCE_DIR}/component_owner_guards.cmake")

@@ -165,8 +165,14 @@ static void test_thread_audio_component_lle(const char *path,int failure_case)
             uint32_t handle=MEM32(out),ref[]={handle,0,out+4};CHECK(!event_lle_call(246,ref));uint32_t object=MEM32(out+4);
             uint32_t priority[]={object,29};CHECK(event_lle_call(148,priority)==8);
             uint32_t join[]={object,0,0,0,0},result=0;const char *error=pilot_io_device_lle(159,memory,join,&result);
-            CHECK(error && !strcmp(error,failure_case==1?"original scheduling native audio effects ownership requires integration":
-                "original audio inner object destruction requires its native lifetime owner"));
+            const char *expected_error="original audio inner object destruction requires its native lifetime owner";
+            if(failure_case==1)
+#ifdef PILOT_AUDIO_DSP
+                expected_error="unowned original CPU native audio effects device";
+#else
+                expected_error="original scheduling native audio effects ownership requires integration";
+#endif
+            CHECK(error && !strcmp(error,expected_error));
             CHECK(!audio_device && !MEM32(context+76));
 #ifdef PILOT_AUDIO_DSP
             CHECK(!audio_effects && !audio_effects_storage);
