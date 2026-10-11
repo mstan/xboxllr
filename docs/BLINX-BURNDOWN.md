@@ -43,6 +43,14 @@ Blinx regression per coherent batch. Retain explicit outcomes for each contract;
 a bundled pass does not close an unimplemented service. Reuse captured evidence
 and avoid repeating whole attract runs for documentation or test-only changes.
 
+The distinct low-RAM preparation adds an exact nine-page allocation request,
+read-only inspection and one-SG-store calibration: seven checks/59 compiled
+x86 contexts pass in4.83s. All returned bytes must belong to an actual16KiB-aligned
+allocation with base at or below00600000; invalid or unavailable allocations stop.
+This prepares the finite bit9 comparison without assuming physical availability
+or retrying the stopped write. See the
+[low-RAM contract](../pilots/native-title/AUDIO-LLE.md#distinct-low-ram-calibration-preparation---2026-10-11).
+
 The owned-marker bootstrap preparation adds separate preflight, one-reset-store
 and read-only observation phases:10 checks/70 compiled x86 contexts pass
 in14.77s, with351 reviewed identities and actual pinned DSP marker/STOP.

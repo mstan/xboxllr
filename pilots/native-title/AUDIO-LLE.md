@@ -1714,3 +1714,26 @@ is reviewable; private evidence remains under
 playback operation is part of this preparation. Original GP/EP boot, timers,
 bit9, cadence and full output remain required; the family count stays4/9 and
 the26 safe precision deferrals are unchanged.
+
+## Distinct low-RAM calibration preparation - 2026-10-11
+
+The `.113.18` prerequisite adds separate closed prepare, inspect and single-SG-store
+payloads for the finite bit9 comparison. Actual kernel ordinal166 requests36864
+bytes with lowest0, inclusive highest00608FFF, alignment16384 and protection204,
+constraining the entire allocation to a base at or below00600000. High, misaligned,
+zero or wrong-alias returns fail before owned RAM access. NULL ends immediately
+without pinning, another allocation or later MMIO. Every retained page passes
+mapping, physical, protection and extent checks before owned access; prepare
+pins it and repeats mapping checks before initializing the table and marker.
+
+Seven checks pass across59 actual compiled x86 contexts in4.825409s. Root reviewed
+the source and verified217 identities. The exact600000 endpoint has distinct owned
+606000/607000 candidate pages; actual prepared bytes flow through read-only
+inspection and calibration. The sole SG store returns its immediate raw readback
+with no following device, kernel or RAM operation, including unexpected results.
+The [reviewable plan](https://github.com/mstan/xboxlle-probe/blob/feat/av-handshake-probe-20261009/docs/GP-LOWRAM.md)
+and frozen proof under `build/blinx/audio-gp-lowram-20261011` retain the exact
+allocation and ownership assumptions. Prior general-RAM and marker sources remain
+unchanged; no console, network, title, playback or DSP-start operation occurred.
+Physical availability, successful calibration, bootstrap, bit9, timers, EP and
+full output remain required. Family count stays4/9, with26 safe precision deferrals.
