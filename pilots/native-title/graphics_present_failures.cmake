@@ -1,0 +1,12 @@
+foreach(kind IN ITEMS device-removed device-reset)
+  if(kind STREQUAL "device-removed")
+    set(code "887a0005")
+  else()
+    set(code "887a0007")
+  endif()
+  execute_process(COMMAND "${PROGRAM}" "graphics-present-${kind}"
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE errors TIMEOUT 10)
+  if(NOT result STREQUAL "2" OR NOT errors MATCHES "native presentation was not accepted at ${code}")
+    message(FATAL_ERROR "Presentation ${kind} did not reach its actual status guard: ${result}\n${output}${errors}")
+  endif()
+endforeach()

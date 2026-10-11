@@ -24,6 +24,7 @@ static uint32_t call_graphics(unsigned entry,const uint32_t *args)
 #include "graphics_alias_contract_test.inc"
 #include "graphics_x8_texture_contract_test.inc"
 #include "graphics_reset_contract_test.inc"
+#include "graphics_present_contract_test.inc"
 static void test_graphics_guest_scheduler(void)
 {
     vm_ensure();dispatch_ensure();
@@ -85,7 +86,8 @@ static void test_graphics(int focused_fixture)
         CHECK(!av_saved_data);
         if(focused_fixture) {
             if(focused_fixture==1)test_graphics_depth_sampling_header();
-            else { CHECK(focused_fixture==2);test_graphics_x8_texture_lifetime(); }
+            else if(focused_fixture==2)test_graphics_x8_texture_lifetime();
+            else { CHECK(focused_fixture==3);test_graphics_present_status(); }
             CHECK(!call_graphics(PILOT_D3D_D3DDevice_Release,NULL));
             CHECK(!graphics_active && !graphics_headers && !MEM32(PILOT_D3D_DEVICE_GLOBAL));
             CHECK(vm_committed(0,0x100000000ull)==resident);

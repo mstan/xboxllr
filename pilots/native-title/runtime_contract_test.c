@@ -1,9 +1,27 @@
 /* Exercise native ownership/ABI contracts without a game executing. */
+#ifdef PILOT_D3D_NATIVE
+/* Change only the desktop return status after the real rendering/Swap. */
+#define pilot_gfx_present test_desktop_present
+#endif
 #define main pilot_unused_main
 #include "runtime.c"
 #undef main
+#ifdef PILOT_D3D_NATIVE
+#undef pilot_gfx_present
+int32_t pilot_gfx_present(void);
+static int test_desktop_override;
+static int32_t test_desktop_result;
+#endif
 
 #define CHECK(c) do { if (!(c)) { fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#c); ExitProcess(1); } } while (0)
+#ifdef PILOT_D3D_NATIVE
+int32_t test_desktop_present(void)
+{
+    int32_t result=pilot_gfx_present();
+    CHECK(result>=0);
+    return test_desktop_override?test_desktop_result:result;
+}
+#endif
 static int test_pool_owned(uint32_t pointer)
 {
     for(unsigned i=0;i<4096;++i)if(pool_blocks[i].span && pool_blocks[i].payload==pointer)return 1;
@@ -430,7 +448,7 @@ int main(int argc,char **argv)
     uint32_t fixture_image_size=argc==2 && !strcmp(argv[1],"memory-statistics")?0x20000:0x10000;
     if(argc==2 && !strcmp(argv[1],"sections"))fixture_image_size=0x16000;
 #ifdef PILOT_D3D_NATIVE
-    if(argc==2 && (!strcmp(argv[1],"graphics") || !strcmp(argv[1],"graphics-scheduler") || !strcmp(argv[1],"graphics-depth-argb") || !strcmp(argv[1],"graphics-x8-texture"))) {
+    if(argc==2 && (!strcmp(argv[1],"graphics") || !strcmp(argv[1],"graphics-scheduler") || !strcmp(argv[1],"graphics-depth-argb") || !strcmp(argv[1],"graphics-x8-texture") || !strncmp(argv[1],"graphics-present",16))) {
         fixture_image_size=((PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SHADER_CONSTANT_MODE_OFFSET+4+4095)&~4095u)-0x10000;
         image_base=0x10000;*(uint32_t*)(image_bytes+0x10c)=fixture_image_size;
     }
@@ -507,6 +525,12 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"graphics")) { test_graphics(0); return 0; }
         if (!strcmp(argv[1],"graphics-depth-argb")) { test_graphics(1); return 0; }
         if (!strcmp(argv[1],"graphics-x8-texture")) { test_graphics(2); return 0; }
+        if (!strcmp(argv[1],"graphics-present")) { test_graphics(3); return 0; }
+        if (!strcmp(argv[1],"graphics-present-device-removed") || !strcmp(argv[1],"graphics-present-device-reset")) {
+            test_desktop_override=1;
+            test_desktop_result=!strcmp(argv[1],"graphics-present-device-removed")?(int32_t)0x887a0005u:(int32_t)0x887a0007u;
+            test_graphics(3);CHECK(0);return 1;
+        }
         if (!strcmp(argv[1],"graphics-unsupported")) {
             graphics_active=1; /* Exercise the unsupported-family guard. */
             pilot_d3d_dispatch(PILOT_D3D_D3DDevice_Reset); return 1;
