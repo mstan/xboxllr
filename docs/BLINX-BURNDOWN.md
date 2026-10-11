@@ -69,6 +69,16 @@ This closes bounded `.115.1`, with parent `.115` and whole audio still open.
 No Xbox request, title/audio run or native HLE change. See the
 [working idle route](../pilots/native-title/AUDIO-LLE.md#observed-idle-fe-fence-through-original-helper---2026-10-11).
 
+Original FP compute preemption exposed and corrected a pinned engine defect:
+FXRSTOR had retained another worker's FP instruction pointer. The source-built
+pilot now transports the defined 32-bit FP metadata by default while retaining
+original IRQ0/lazy-NPX ownership. Two engine checks and five scheduling checks
+pass, including six new FP workers and twelve state pairs across three
+lifetimes. This closes bounded `.112.2.1` when integrated; whole original title
+scheduling remains open, with **4/9 families qualified** and **26 precision
+deferrals** unchanged. No title/audio run, Xbox operation or HLE change.
+See the [causal failure and corrected route](../pilots/native-title/SCHEDULING-LLE.md#live-fp-compute-preemption-and-metadata-restoration---2026-10-11).
+
 The encoder initialization dependency now has23 more documented control latches
 and an independently reviewed guard for nonzero master HSYNC offsets. Thirteen
 component/original-owner checks pass; one muted final title startup runs8.074s

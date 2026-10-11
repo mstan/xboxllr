@@ -19,6 +19,7 @@ set(UNICORN_INSTALL OFF CACHE BOOL "" FORCE)
 set(UNICORN_LEGACY_STATIC_ARCHIVE OFF CACHE BOOL "" FORCE)
 add_subdirectory("${XLLE_UNICORN_SOURCE}" unicorn)
 get_filename_component(xlle_root "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUTE)
+include(fxstate.cmake)
 target_sources(x86_64-softmmu PRIVATE "${xlle_root}/src/cpu/unicorn_irq_boundary.c")
 # Bundle the three pinned x86 components without upstream's optional .o
 # symlink, which requires an unnecessary privilege on Windows.
@@ -32,6 +33,8 @@ add_custom_command(TARGET xlle_native_unicorn_package POST_BUILD
     "-DSOURCE=${XLLE_UNICORN_SOURCE}" "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/package"
     "-DHELPER_SOURCE=${xlle_root}/src/cpu/unicorn_irq_boundary.c"
     "-DHELPER_HEADER=${xlle_root}/src/cpu/unicorn_irq_boundary.h"
+    "-DFXSTATE_PATCH_SHA=${fxstate_patch_sha}" "-DFPU_ORIGINAL_SHA=${fpu_original_sha}"
+    "-DFPU_CORRECTED_SHA=${fpu_corrected_sha}" "-DFPU_CORRECTED=${fpu_corrected}"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/package.cmake")
 add_executable(test_native_unicorn_irq "${xlle_root}/tests/test_native_unicorn_irq.c")
 target_include_directories(test_native_unicorn_irq PRIVATE "${xlle_root}/src/cpu")
@@ -39,3 +42,7 @@ target_link_libraries(test_native_unicorn_irq PRIVATE xlle_native_unicorn_packag
 enable_testing()
 add_test(NAME native_unicorn_irq_boundary COMMAND test_native_unicorn_irq)
 set_tests_properties(native_unicorn_irq_boundary PROPERTIES TIMEOUT 10)
+add_executable(test_native_unicorn_fxstate "${xlle_root}/tests/test_native_unicorn_fxstate.c")
+target_link_libraries(test_native_unicorn_fxstate PRIVATE xlle_native_unicorn_package)
+add_test(NAME native_unicorn_fxstate COMMAND test_native_unicorn_fxstate)
+set_tests_properties(native_unicorn_fxstate PROPERTIES TIMEOUT 10)

@@ -5,6 +5,51 @@ explicitly deferred real-console-dependent work on 2026-10-09; this family
 proceeds independently of GPU startup `.109` / hardware observation `.111`.
 The total remains four qualified families and five open.
 
+## Live FP compute preemption and metadata restoration - 2026-10-11
+
+An original CPU compute/preemption batch exposed a real context defect in the
+pinned Unicorn 2.1.4 engine. The peer's saved x87 instruction pointer changed
+from its own last FP instruction to the compute worker's instruction after
+original IRQ0 dispatch and lazy-NPX restoration. Register values and controls
+alone had passed; they did not establish ownership of the defined FP metadata.
+The failed generation and its raw state images remain in the private evidence.
+
+The source-built pilot package now restores and saves the defined 32-bit
+FXRSTOR/FXSAVE opcode, instruction/data pointers and selectors. The authored
+`unicorn-engine/fxstate.cmake` transformation checks the exact pinned source
+hash, compiles a private copy and retains the unmodified upstream checkout.
+The package carries that compiled source and its hashes; title configuration
+rejects an older source-built package. This correctness fix applies by default.
+Original kernel NPX handling and sole CPU ownership remain intact. The field
+contract follows [Intel's instruction manual](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-2a-manual.pdf),
+FXRSTOR page 3-410 and FXSAVE page 3-413.
+
+Two actual engine checks and five focused scheduling checks pass. The engine
+batch covers eight authored 32-bit FX state images and four saved contexts,
+including all eight x87 and XMM registers and unchanged input/output guards.
+The original CPU batch adds six FP workers across three lifetimes and twelve
+before/after state pairs. The primary executes compute loops without service
+calls while its peer performs two actual original timed waits. Real PIT/PIC,
+IRQ0 and original lazy-NPX execution preserve x87, SSE, MMX and defined metadata;
+both loop counters advance, each original timeout returns 0x102, and original
+thread/handle ownership returns to the settled baseline. Retained bytecode and
+an independent state audit check the authored inputs and each owner's FP PC.
+
+Private proof: `build/blinx/cpu-live-fp-20261011/qualified.aot-private.json`,
+SHA-256 `baf42b225ec2f0952d3db7e58bb1723a596e584b1e586415891c83995049e83a`.
+It binds the source generation, immutable engine package, executable, logs,
+raw images and preceding failures. The qualified archive SHA-256 is
+`9243e05e957f4fb714dfeaa970eda477fc534cbd57e417e939dae7b8c60fd0af`.
+The two engine checks take 0.07 seconds; the five scheduling checks take 1.40
+seconds. Earlier wider results are retained for their own source generations.
+
+This closes the bounded FP metadata task `.112.2.1` when integrated. Full
+original title scheduling remains open under `.112` / `.112.2`; the family
+count stays **4/9**, with **26 agreed precision deferrals** unchanged. Executed
+32-bit FX state transport does not qualify general exception metadata
+generation, 64-bit/XSAVE behavior or the full-machine Unicorn 2.1.1 build.
+No Xbox operation, attract/audio run or HLE behavior/performance change occurs.
+
 ## Existing evidence and required route
 
 - Calendar conversion `.103` is qualified through original kernel execution

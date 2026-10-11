@@ -85,7 +85,7 @@ recomp_func_t recomp_lookup(uint32_t va) {
     if(va==0x125c0)return test_thread_timeout_body;
     if(va==0x126c0)return test_thread_idle_clock_body;
     if(va==0x126e0)return test_thread_compute_body;
-    if(va==0x12740 || va==0x127a0 || va==0x12840 || va==0x12a00 || va==0x12c00 || va==0x12c80 || va==0x12d00 || va==0x12e00 || va==0x12f00 || va==0x13200 || va==0x13500 || va==0x13800 || va==0x13900 || va==0x13a00 || va==0x13b00 || va==0x13c00 || va==0x13d00)return test_thread_cpu_body;
+    if(va==0x12740 || va==0x127a0 || va==0x12840 || va==0x12a00 || va==0x12c00 || va==0x12c80 || va==0x12d00 || va==0x12e00 || va==0x12f00 || va==0x13200 || va==0x13500 || va==0x13800 || va==0x13900 || va==0x13a00 || va==0x13b00 || va==0x13c00 || va==0x13d00 || va==0x13e00 || va==0x15000)return test_thread_cpu_body;
     if(va==0x12800)return test_thread_cpu_peer;
 #endif
 #ifdef PILOT_USB_LLE
@@ -128,6 +128,7 @@ static void call_kernel(unsigned ordinal,const uint32_t *args,unsigned argc)
 #include "thread_wait_lle_contract_test.inc"
 #include "thread_idle_clock_contract_test.inc"
 #include "thread_compute_clock_contract_test.inc"
+#include "thread_fp_compute_contract_test.inc"
 #include "thread_cpu_lle_contract_test.inc"
 #include "thread_child_cpu_contract_test.inc"
 #include "thread_critical_cpu_contract_test.inc"

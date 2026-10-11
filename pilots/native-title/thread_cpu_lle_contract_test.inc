@@ -184,4 +184,5 @@ static void test_thread_cpu_lle(void)
     CHECK(MEM32(stats+4)==baseline_threads && MEM32(stats+8)==settled_handles);
     CHECK(thread_cpu_calls==27);
     fprintf(stderr,"PASS: 18 original CPU ADD/ADC/PUSHFD lifetimes, three clock/preemption lifetimes, six x87/XMM/MMX workers across original waits, entry/return guards and original thread/handle baselines\n");
+    test_thread_fp_compute_lle();CHECK(thread_cpu_calls==33);
 }
