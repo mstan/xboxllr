@@ -6,6 +6,46 @@ transform, rasterization, framebuffer writes and visibility-report DMA in
 `src/machine/nv2a.cpp`. This document records component qualification; full
 graphics-family acceptance remains open and the total remains **4/9**.
 
+## Idle RAMHT selection and instance ownership boundary - 2026-10-11
+
+Probe commit `b44ad87` advances the actual SDK initializer through documented
+RAMHT address/size/search selection. Every documented FIFO consumer must be
+quiet and empty, including acquire/semaphore activity. An individually checked
+PMC mask precedes the transaction; context and full preserved-field readback
+are verified before CPU interrupt restoration. RAMHT selects a4KiB table and
+search128 at the actual padding-derived address without enabling a lookup or
+context load. Thirteen checked stores complete, then the next actual request
+stops **before RAMFC FD002214=00890110**; no RAMFC/PRAMIN effect or ready/capture
+certificate has occurred.
+
+A retained preliminary image exposes a real stop-order failure: two foreground
+reads follow the interrupt handler's failed mask readback. The corrected owner
+protects the post-check before restoring CPU interrupts, and the representative
+interleaving stops at the failed read. The final batch passes **10 groups /97
+complete command lifetimes in9.121s**, including18 added owner cases and the
+separate elapsed/alarm check. Preliminary94/95-case generations retain their
+exact source and limits; they are not promoted to this final qualification.
+
+Root independently verifies five committed source bindings,87 compiled and30
+model artifact entries,18 pinned primary inputs and109 unique nested identities,
+including the causal failure and original query/clock source. Actual PE/XBE
+executable-section equality covers468,992 bytes. Private proof:
+`build/blinx/noise-instance-bootstrap-20261011/qualified-instance-bootstrap-final.aot-private.json`,
+SHA-256 `e2f94df60a82a0763d09a89c5457866612f250f5f22ff10caf6b2d1b04029778`.
+Independent review:
+`build/blinx/noise-instance-bootstrap-20261011/root-reviewed.aot-private.json`,
+SHA-256 `c111782a05b7a954d1895d39b09ac6e32bcd4d6a37b24afc6097281c39d85fb2`.
+
+Original export168 execution and complete body inspection establish an unchanged
+64KiB query-only reservation and sixteen contiguous read/write/WC CPU pages.
+They establish neither exclusive acquisition nor a PRAMIN physical alias.
+Primary PFB PRAMIN_WR_PROT adds a separate GPU restriction on CPU writes, so
+those page attributes alone cannot admit a marker. The comparison remains a
+plan with no compiled marker command or protection transition. RAMFC's unresolved
+UNK17 field, writable/exclusive ownership and aperture mapping stay required.
+See the [exact probe contract and preconditions](https://github.com/mstan/xboxlle-probe/blob/b44ad87fc09b90a036f3245b671e019e501cf705/docs/NOISE-GPU-BOOTSTRAP.md).
+No hardware, title/audio or default HLE change;4/9 and26 deferrals remain.
+
 ## Bounded engine, timer and instance prefix - 2026-10-11
 
 Probe commit `fc749eb` advances the actual SDK initializer beyond the corrected
