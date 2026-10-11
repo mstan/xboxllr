@@ -43,6 +43,16 @@ Blinx regression per coherent batch. Retain explicit outcomes for each contract;
 a bundled pass does not close an unimplemented service. Reuse captured evidence
 and avoid repeating whole attract runs for documentation or test-only changes.
 
+Parallel qualification batches now register the shared writable pilot HDD as
+a CTest resource. File-capable runtime tests using the same image queue within
+one invocation; independent DSP/clock/frame tests remain parallel. The runtime's
+exclusive storage guard remains required across separate processes/invocations.
+The observed two-test collision is corrected: eight unchanged current-GPU,
+original-thread AV/idle-stack and independent clock/frame checks pass at `-j2`
+in1.22s, with87 routed commands protected and28 independent commands unlocked.
+Native-file profiles acquire no HDD resource lock. This adds no runtime/HLE
+cost, title/attract/audio run or hardware operation; `.122` tracks the batch fix.
+
 Owner steering on 2026-10-10 prioritizes an extensible graphics foundation and
 representative behavior-family checks. The corrected HLE scenes pass the
 owner's appearance review; further exhaustive per-draw pixel/clipping work can

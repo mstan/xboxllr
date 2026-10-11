@@ -1,0 +1,38 @@
+# Central registration keeps parallel CTest batches from colliding with the
+# runtime's intentional exclusive lock on a shared writable HDD image.
+function(pilot_add_test)
+  if(NOT ARGV0 STREQUAL "NAME" OR ARGC LESS 4)
+    message(FATAL_ERROR "Pilot tests require add_test's NAME/COMMAND form")
+  endif()
+  add_test(${ARGV})
+  foreach(argument IN LISTS ARGV)
+    foreach(runtime pilot_contract_test pilot_callback_kernel_lle_test
+                    pilot_files_lle_test xlle_native_title)
+      string(FIND "${argument}" "$<TARGET_FILE:${runtime}>" target_expression)
+      if(argument STREQUAL runtime OR NOT target_expression EQUAL -1)
+        set_property(DIRECTORY APPEND PROPERTY XLLE_PILOT_HDD_TESTS "${ARGV1}")
+      endif()
+    endforeach()
+  endforeach()
+endfunction()
+
+# Run after every include has registered its tests and selected its file backend.
+# This also covers CMake scripts launching a runtime through TARGET_FILE.
+function(pilot_lock_writable_hdd_tests)
+  if(NOT PILOT_FILES STREQUAL "LLE")
+    return()
+  endif()
+  get_property(tests DIRECTORY PROPERTY XLLE_PILOT_HDD_TESTS)
+  if(NOT tests)
+    return()
+  endif()
+  list(REMOVE_DUPLICATES tests)
+  get_filename_component(image "${PILOT_FILES_HDD}" REALPATH)
+  if(WIN32)
+    string(TOLOWER "${image}" image)
+  endif()
+  string(SHA256 image_key "${image}")
+  foreach(test IN LISTS tests)
+    set_property(TEST "${test}" APPEND PROPERTY RESOURCE_LOCK "pilot_hdd_${image_key}")
+  endforeach()
+endfunction()

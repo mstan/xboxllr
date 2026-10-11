@@ -44,9 +44,9 @@ if(PILOT_IO_DEVICE STREQUAL "LLE")
     target_compile_definitions(${target} PRIVATE PILOT_IO_DEVICE_LLE)
     target_link_libraries(${target} PRIVATE pilot_io_device_lle)
   endforeach()
-  add_test(NAME pilot_io_device_lle COMMAND pilot_contract_test io-device-lle)
+  pilot_add_test(NAME pilot_io_device_lle COMMAND pilot_contract_test io-device-lle)
   set_tests_properties(pilot_io_device_lle PROPERTIES TIMEOUT 30)
-  add_test(NAME pilot_io_device_lle_guards COMMAND "${CMAKE_COMMAND}"
+  pilot_add_test(NAME pilot_io_device_lle_guards COMMAND "${CMAKE_COMMAND}"
     "-DPROGRAM=$<TARGET_FILE:pilot_contract_test>" -P "${CMAKE_CURRENT_SOURCE_DIR}/io_device_guards.cmake")
   set_tests_properties(pilot_io_device_lle_guards PROPERTIES TIMEOUT 15)
 elseif(NOT PILOT_IO_DEVICE STREQUAL "OFF")
