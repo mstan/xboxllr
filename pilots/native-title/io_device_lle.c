@@ -591,7 +591,7 @@ static void image_vm(uint32_t base,uint32_t bytes,uint32_t type)
     const uint32_t parameters=SCRATCH+0x2000;
     uint32_t input[]={base,bytes},result=0;
     IO_UC(uc_mem_write(cpu,parameters,input,sizeof(input)));
-    if(type==MEM_DECOMMIT) {
+    if(type==MEM_DECOMMIT || type==MEM_RELEASE) {
         uint32_t args[]={parameters,parameters+4,type};execute(199,args,&result);
     } else {
         uint32_t args[]={parameters,0,parameters+4,type,PAGE_READWRITE};execute(184,args,&result);
@@ -993,6 +993,44 @@ const char *pilot_io_device_stack(unsigned char *guest,uint32_t base,uint32_t by
     if(!failure) {
         ++execution_depth;image_vm(reserve,(uint32_t)(end-reserve),MEM_RESERVE);--execution_depth;
         if(!failure){stacks[stack_count].base=base;stacks[stack_count++].bytes=bytes;}
+    }
+    const char *error=failure;ReleaseSRWLockExclusive(&lock);return error;
+}
+const char *pilot_io_device_stack_release(unsigned char *guest,uint32_t base,uint32_t bytes,int *released)
+{
+    AcquireSRWLockExclusive(&lock);
+    if(released)*released=0;
+    unsigned index;for(index=0;index<stack_count;++index)
+        if(stacks[index].base==base && stacks[index].bytes==bytes)break;
+    if(!failure && (!released || guest_memory!=guest || execution_depth || index==stack_count))
+        failure="device LLE release requires an idle exact owned stack";
+    uint32_t reserve=base&~0xffffu;
+    uint64_t end=(uint64_t)base+bytes;
+    int pinned=0;
+    for(unsigned i=0;!failure && i<MAX_PUBLISHED;++i)
+        if(pin_ranges[i].count && pin_ranges[i].base<end &&
+           (uint64_t)pin_ranges[i].base+pin_ranges[i].bytes>reserve)pinned=1;
+    for(unsigned i=0;!failure && i<published_count;++i)
+        if(published[i].va>=reserve && published[i].va<end && published[i].pins)pinned=1;
+    if(!failure && !pinned) {
+        /* Original NtFreeVirtualMemory accepts a sized MEM_RELEASE. Use the
+         * exact original reservation, including its 64-KiB alignment prefix;
+         * execute() retains original status, PTE changes and PFN retirement. */
+        ++execution_depth;image_vm(reserve,(uint32_t)(end-reserve),MEM_RELEASE);--execution_depth;
+        for(unsigned i=0;!failure && i<published_count;++i)
+            if(published[i].va>=reserve && published[i].va<end)
+                failure="device LLE released stack retains published storage";
+        /* An unmaterialized stack page can have a native-pointer Unicorn
+         * alias. Host bytes are still committed here, so refresh_mappings
+         * alone cannot retire that alias before the caller decommits them. */
+        for(unsigned i=0;!failure && i<mapped_count;) {
+            if(mapped[i].va>=reserve && mapped[i].va<end) {
+                uc_err error=uc_mem_unmap(cpu,mapped[i].va,4096);
+                if(error){failure=uc_strerror(error);break;}
+                mapped[i]=mapped[--mapped_count];
+            } else ++i;
+        }
+        if(!failure){stacks[index]=stacks[--stack_count];*released=1;}
     }
     const char *error=failure;ReleaseSRWLockExclusive(&lock);return error;
 }

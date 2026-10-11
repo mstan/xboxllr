@@ -48,9 +48,11 @@ int main() {
         for(unsigned n=0;n<32;++n)f.render_enveloped(1);
         CHECK((f.word(f.object+0x54)>>28)==3 && (f.word(f.object+0x34)&0xffff)==0);
         f.render_enveloped(1);CHECK((f.word(f.object+0x54)>>28)==4);
-        const auto before=f.ram;const auto fetched=f.fetched;float out[64];uint32_t count;bool ended;
-        CHECK(!f.apu.source_envelope_quantum(f.voice,out,count,ended));
-        CHECK(f.ram==before && f.fetched==fetched && !count && !ended);
+        // Zero decay is an immediate nominal transition to its zero sustain.
+        const auto silent=f.render_enveloped(1);
+        CHECK((f.word(f.object+0x54)>>28)==5 && !(f.word(f.object+0x34)&0xffff));
+        CHECK((f.word(f.object+0x58)>>24)==0);
+        for(float sample:silent)CHECK(sample==0);
     }
     // Both stable envelopes independently respond to live level changes.
     for(unsigned a:{0u,17u,128u,255u})for(unsigned b:{0u,127u,255u}) {
@@ -80,7 +82,7 @@ int main() {
         for(float v:out)CHECK(v==42);
     }
     // Unsupported second envelope cannot partially advance the first one.
-    for(unsigned phase:{4u,6u,7u,15u}) {
+    for(unsigned phase:{8u,15u}) {
         ApuRateFixture f(1,64,true);f.put(f.object+0x54,(1u<<21)|(phase<<24)|(1u<<28));
         f.put(f.object+0x34,2);const auto before=f.ram;xlle::ApuEnvelopeStep e;
         CHECK(!f.apu.step_envelopes(f.voice,e));CHECK(!e.running && f.ram==before && !f.fetched);
@@ -97,5 +99,5 @@ int main() {
         f.reg(0x20124,f.voice|(bad==1?0:bad));CHECK(!f.error.empty());
         CHECK(f.ram==before && f.apu.mmio_read(0xfe802054,4)==0); // faulted reads stop
     }
-    std::puts("PASS: 16 start pairs, disabled identity, clocked delay/attack/hold, stable gains/modulation and no fabricated decay/release");
+    std::puts("PASS: 16 start pairs, disabled identity, clocked delay/attack/hold, nominal zero-decay sustain, stable gains/modulation and guarded invalid phases/attack");
 }

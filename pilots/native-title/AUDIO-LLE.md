@@ -884,6 +884,48 @@ The shared runtime regression for this batch uses the **default native audio**:
 reentry and no stop/audio-stop/fault. See `SCHEDULING-LLE.md` for exact evidence.
 That run protects the existing title route; it is not a new audio-LLE title run.
 
+## Nominal ordinary-envelope lifecycle and replaceable signal boundary
+
+Ordinary static 2D voices now have working decay, release and force-release
+phases. `VOICE_RELEASE` snapshots the currently stored levels and changes
+phase/counters without fetching source or publishing completion. Amplitude
+force-release retires through the existing state, notifier status and IRQ owner
+before another source fetch; filter force-release supplies zero modulation and
+does not complete the voice. Start/stop and source/table/SG rebinding clear the
+private release history and retained rate output.
+
+Curve policy is explicitly nominal: `apu_envelope_curve.hpp` isolates an
+exponential -60 dB interval, eight-bit floor and bounded zero/sustain endpoint.
+Pinned xemu itself marks the exact curve, threshold and release origin/count
+details uncertain. Functional phase support does not qualify silicon precision.
+The [deferred queue](LLE-DEFERRED-QUESTIONS.md) preserves those questions and
+reopening triggers.
+
+The unamplified source/rate quantum now returns envelope control separately,
+reserving a filter insertion point before amplitude and final sends. Existing
+`source_envelope_quantum` bypass behavior is preserved. Other filter/headroom,
+stream/linked/multipass/spatial and GP/bootstrap guards remain explicit. The
+strict original-owner reference has not yet admitted the new release method;
+its later integration is separate from the maintained device implementation.
+
+The hardware-free APU batch passes **9/9 entries**, including the new lifecycle
+fixture and existing source, rate, envelope, stop, completion, GP DMA and FIFO
+checks. Representative real PCM quanta establish current-level release, a fade
+against an independent unity source/rate clock, ordered retirement, no force-
+release source fetch, retrigger/rebind isolation and pause/lock/guard behavior.
+Evidence: `build/blinx/services-foundation-v3-20261010.aot-private.json` and
+its `apu-tests` log. No waveform playback or console probe was required.
+
+An earlier broad batch ran an old standalone realtime native mixer comparison,
+which failed without scenario/sample diagnostics. That executable predates this
+generation and does not honor the newer output-mute switch. Its failure is
+preserved for fresh-build follow-up when the game is no longer running; no
+source/tolerance correction or cause is inferred. The current 9/9 result covers
+the changed CPU stages, not that native output comparison or whole-title audio.
+Actual filters/scaling, SSL/GP/EP ownership/output and original DirectSound/title
+selection remain active implementation gaps. Existing HLE audio stays on its
+maintained output path.
+
 ## References and reuse
 
 - Original NTSC private input: full helpers at `0x1789a0` and `0x178c97`;

@@ -8,15 +8,18 @@ static struct PilotThread *thread_from_handle(uint32_t handle,HANDLE *host)
         if(!current_thread_slot)stop("non-title current-thread object is unqualified",handle);
         *host=GetCurrentThread();return &threads[current_thread_slot];
     }
-    unsigned slot=handle-0x40000000u;
-    if(slot && slot<=thread_count && threads[slot].handle){*host=threads[slot].handle;return &threads[slot];}
+    unsigned slot=handle&63u;
+    if((handle&0xf0000000u)==0x40000000u && slot && slot<=thread_count &&
+       threads[slot].identity==handle && threads[slot].handle && !threads[slot].retiring) {
+        *host=threads[slot].handle;return &threads[slot];
+    }
     if((handle&0xf0000000u)==0x50000000u || (handle&0xf0000000u)==0x60000000u)
         stop("non-thread object reference is unqualified",handle);
     return NULL;
 }
 static struct PilotThread *thread_from_object(uint32_t object,HANDLE *host)
 {
-    for(unsigned i=1;i<=thread_count;++i)if(threads[i].object==object) {
+    for(unsigned i=1;i<=thread_count;++i)if(threads[i].object==object && !threads[i].retiring) {
         struct PilotThread *t=&threads[i];
         *host=t->reference_handle?t->reference_handle:t->handle;
         if(!*host && i==current_thread_slot)*host=GetCurrentThread();
@@ -56,6 +59,7 @@ static void thread_object_kernel(unsigned ordinal)
         PILOT_THREAD_CHECKPOINT();
         g_esp+=12;return;
     }
+    unsigned reap_slot=0;
     AcquireSRWLockExclusive(&thread_lock);
     if(ordinal==250) {
         HANDLE host=NULL;struct PilotThread *t=thread_from_object(g_ecx,&host);
@@ -63,6 +67,7 @@ static void thread_object_kernel(unsigned ordinal)
         if(!--t->object_refs) {
             if(!CloseHandle(t->reference_handle))stop("thread object reference close failed",GetLastError());
             t->reference_handle=NULL;
+            reap_slot=(unsigned)(t-threads);
         }
         g_esp+=4; /* Xbox fastcall: object in ECX, no stack argument. */
     } else if(ordinal==246) {
@@ -98,4 +103,5 @@ static void thread_object_kernel(unsigned ordinal)
         } else stop("unknown thread object operation",ordinal);
     }
     ReleaseSRWLockExclusive(&thread_lock);
+    if(reap_slot)thread_reap_slot(reap_slot);
 }

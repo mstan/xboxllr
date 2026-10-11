@@ -481,8 +481,9 @@ identity, stack, TLS and cleanup. Next connect static title selection coherently
 bootstrap identity, the remaining reached kernel-service families, callback
 context/dispatch, and clock progress when all native bodies are blocked or one
 computes without a kernel call. Retain explicit guards until each dependency
-works; a flag alone cannot connect two dispatcher namespaces. Correct the
-independently identified native slot-lifetime limit and qualify initial FP state.
+works; a flag alone cannot connect two dispatcher namespaces. The native
+slot-lifetime limit and initial x87 control/status are corrected below; full
+original/native FP callback transport remains separately scoped.
 Reuse compatible Phobos transport where it fits.
 If unrelated captured boot workers become runnable, qualify their actual device
 dependencies rather than editing the ready queues. The earlier unmodeled
@@ -494,3 +495,42 @@ Retain the native implementation as the title's active scheduling backend until
 the original service route can perform those operations. Any genuinely
 silicon-only question is appended to the deferred end of the burndown; GPU
 startup is not a prerequisite for this work.
+
+## Reusable native lifetimes and original initial FP context
+
+The native runtime now retains its real execution handle independently of guest
+handle closure. A slot becomes reusable only after actual host exit, guest
+closure and final object-reference release. New guest handle generations reject
+stale close/resume/reference operations. Retained finished objects remain valid.
+Reclamation occurs at ownership teardown and creation, without a lifetime scan
+on dispatch checkpoints. The concurrent retained-slot bound remains explicit;
+cumulative creation no longer consumes the process's entire slot allowance.
+
+For mixed LLE stacks, retirement executes original `NtFreeVirtualMemory`,
+retires publications and Unicorn aliases, and only then decommits host storage.
+Live admitted DMA pins postpone retirement. `pilot_thread_lifetimes` verifies
+96 repeated lifetimes with alternating stack/TLS sizes, zeroed reused storage,
+exact committed-byte/handle baselines, retained references, and a host held after
+its finished marker. The mixed fixture also checks three real original stack
+pin/unpin/release/re-reserve lifetimes.
+
+`native_thread_fp_reference.py` reuses the original thread creator, both start
+ABIs and twelve original lifecycle/resource checks. Each fresh saved FX context
+contains CW `0x027f`, cleared status/abridged tags, MXCSR `0x1f80`, and zero
+x87/XMM storage. This resolves startup values offline. Native TLS now starts
+with CW `0x027f` and cleared condition status instead of `0x037f`/`0x4000`.
+`pilot_thread_fp` checks four actual fresh title-thread contexts and poisoned
+caller/child isolation. It does not establish empty-tag representation, full
+MXCSR/lazy-NPX transport, or extended arithmetic.
+
+The coherent CPU batch passes **44 mixed LLE entries, 30 native entries and nine
+APU entries** with stable source hashes. Private evidence is
+`build/blinx/services-foundation-v3-20261010.aot-private.json`, incorporating
+the compatible passed v2 entries without rerunning them, plus
+`thread-fp-original-contexts-20261010.aot-private.json`. Initial broader attempts
+remain preserved: one mistakenly admitted old shader test and an old realtime
+native audio comparison failed; missing native test executables were subsequently
+built and passed. Neither old failure is relabelled as qualification of this
+generation. Fresh graphics/native-audio follow-up and a representative title
+regression remain pending while Marvel Rivals is running; CPU work used two
+cores at Below Normal. Whole-family original scheduling remains open.

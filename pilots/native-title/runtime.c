@@ -21,7 +21,9 @@ RECOMP_TLS uint32_t g_eax, g_ecx, g_edx, g_esp, g_ebx, g_esi, g_edi, g_ebp;
 RECOMP_TLS uint32_t g_fs_base, g_seh_ebp, g_icall_saved_esp, g_icall_dispatch_form;
 RECOMP_TLS double g_fp_stack[8];
 RECOMP_TLS int g_fp_top, g_fp_cmp, g_df;
-RECOMP_TLS uint16_t g_fp_control_word = 0x037f, g_fp_cc = 0x4000;
+/* Original thread context initialization: CW027f, cleared status. The saved
+ * MXCSR1f80/tag state is separately scoped by native_thread_fp_reference.py. */
+RECOMP_TLS uint16_t g_fp_control_word = 0x027f, g_fp_cc = 0;
 RECOMP_TLS RecompXmm g_xmm0, g_xmm1, g_xmm2, g_xmm3, g_xmm4, g_xmm5, g_xmm6, g_xmm7;
 RECOMP_TLS RecompMmx g_mm0, g_mm1, g_mm2, g_mm3, g_mm4, g_mm5, g_mm6, g_mm7;
 RECOMP_TLS volatile uint32_t g_icall_trace[ICALL_TRACE_SIZE], g_icall_trace_idx;
@@ -45,14 +47,18 @@ static SRWLOCK vm_lock=SRWLOCK_INIT;
 #include "guest_layout.h"
 #define PILOT_THREAD_OBJECT_TYPE (PILOT_KERNEL_DATA_BASE+0x5000u)
 struct PilotThread {
-    HANDLE handle,reference_handle;
+    /* execution_handle owns the host lifetime. handle is its borrowed view
+     * while the independently identified guest handle remains open. */
+    HANDLE handle,reference_handle,execution_handle;
     uint32_t routine,context1,context2,tls_size,stack_size,extra,tid,object,object_refs;
+    uint32_t identity;
     int32_t priority;
     volatile uint32_t suspend_count;
-    int finished;
+    int finished,retiring,stack_registered;
 };
 static struct PilotThread threads[64];
 static unsigned thread_count;
+static uint32_t thread_identity_sequence;
 static unsigned char eeprom[256];
 static int have_eeprom;
 /* Phobos kernel_rtl.c's useful boundary: a host recursive lock keyed by guest
@@ -283,6 +289,7 @@ static DWORD WINAPI title_thread(void *argument)
 #ifdef PILOT_USB_LLE
     const char *stack_error=pilot_io_device_stack(memory,stack_top-thread->stack_size,thread->stack_size);
     if(stack_error)stop(stack_error,stack_top-thread->stack_size);
+    thread->stack_registered=1;
 #ifdef PILOT_MEMORY_LLE
     stack_error=pilot_io_device_resident(stack_top-thread->stack_size,thread->stack_size);
     if(stack_error)stop(stack_error,stack_top-thread->stack_size);
@@ -317,6 +324,8 @@ static DWORD WINAPI title_thread(void *argument)
     return g_eax;
 }
 
+#include "thread_lifetime.inc"
+
 static void create_thread(void)
 {
     uint32_t args[10];
@@ -327,10 +336,17 @@ static void create_thread(void)
     if (stack>0xc0000 || args[3]>0x10000 || args[1]>0x10000 || args[3]+4096>stack)
         stop("thread allocation exceeds pilot scope",args[9]);
     if (!recomp_lookup(args[9])) stop("thread entry not generated",args[9]);
+    thread_reap();
     AcquireSRWLockExclusive(&thread_lock);
-    if (thread_count==63) { ReleaseSRWLockExclusive(&thread_lock); g_eax=0xc000009au; return; }
-    unsigned slot=++thread_count;
+    unsigned slot;
+    for(slot=1;slot<=thread_count && threads[slot].object;++slot){}
+    if(slot==64 || thread_identity_sequence==0x400000u) {
+        ReleaseSRWLockExclusive(&thread_lock); g_eax=0xc000009au; return;
+    }
+    int new_slot=slot>thread_count;
+    if(new_slot)thread_count=slot;
     struct PilotThread *thread=&threads[slot];
+    thread->identity=0x40000000u|(thread_identity_sequence++<<6)|slot;
     thread->routine=args[9]; thread->context1=args[5]; thread->context2=args[6];
     thread->tls_size=args[3]; thread->stack_size=(stack+4095)&~4095u; thread->extra=args[1];
     thread->suspend_count=args[7]!=0;
@@ -339,13 +355,20 @@ static void create_thread(void)
     uint32_t context_base=0x60000000u+slot*0x100000u;
     commit(context_base,0x2000+thread->extra);thread->object=context_base+0x1000;
     DWORD tid;
-    thread->handle=CreateThread(NULL,0,title_thread,(void*)(uintptr_t)slot,CREATE_SUSPENDED,&tid);
-    if (!thread->handle) { --thread_count; ReleaseSRWLockExclusive(&thread_lock); g_eax=0xc000009au; return; }
+    thread->execution_handle=CreateThread(NULL,0,title_thread,(void*)(uintptr_t)slot,CREATE_SUSPENDED,&tid);
+    if (!thread->execution_handle) {
+        AcquireSRWLockExclusive(&vm_lock);
+        if(!VirtualFree(memory+context_base,0x100000u,MEM_DECOMMIT))stop("failed thread context retirement",context_base);
+        ReleaseSRWLockExclusive(&vm_lock);
+        memset(thread,0,sizeof(*thread));if(new_slot)--thread_count;
+        ReleaseSRWLockExclusive(&thread_lock); g_eax=0xc000009au; return;
+    }
+    thread->handle=thread->execution_handle;
     thread->tid=tid;
     scheduler_publish(slot,thread->suspend_count,thread->priority);
     MEM32(thread->object+0x28)=thread->tls_size?context_base+0x100000u-thread->tls_size:0;
     MEM32(thread->object+0x12c)=tid;
-    MEM32(args[0])=0x40000000u+slot;
+    MEM32(args[0])=thread->identity;
     if (args[4]) MEM32(args[4])=tid;
     /* OS suspension is used only before entry, to publish metadata. Guest
      * suspension thereafter waits at generated-code points with no host locks. */
@@ -617,7 +640,7 @@ static void kernel_dispatch_impl(void)
         thread_finished();
         ExitThread(MEM32(g_esp+4));
     case 187: {
-        uint32_t handle=MEM32(g_esp+4),slot=handle-0x40000000u;
+        uint32_t handle=MEM32(g_esp+4),slot=handle&63u;
         if((handle&0xf0000000u)==0x30000000u){g_eax=event_close(handle);g_esp+=8;return;}
         if ((handle&0xf0000000u)==0x60000000u) {
             g_eax=namespace_close(handle); g_esp+=8; return;
@@ -627,10 +650,14 @@ static void kernel_dispatch_impl(void)
         }
         AcquireSRWLockExclusive(&thread_lock);
         g_eax=0xc0000008u;
-        if (slot>0 && slot<=thread_count && threads[slot].handle) {
-            if (CloseHandle(threads[slot].handle)) { threads[slot].handle=NULL; g_eax=0; }
+        if ((handle&0xf0000000u)==0x40000000u && slot>0 && slot<=thread_count &&
+            threads[slot].identity==handle && threads[slot].handle && !threads[slot].retiring) {
+            /* The execution owner survives close-before-exit. No host resource
+             * is dropped until thread_reap observes its actual termination. */
+            threads[slot].handle=NULL;g_eax=0;
         }
         ReleaseSRWLockExclusive(&thread_lock);
+        if(!g_eax)thread_reap_slot(slot);
         g_esp+=8;
         return;
     }

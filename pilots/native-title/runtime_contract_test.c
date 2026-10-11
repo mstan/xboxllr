@@ -15,6 +15,8 @@ static void test_dpc(void);
 static void test_timers(void);
 static void test_memory(void);
 static void test_scheduler_worker(void);
+static void test_thread_fp_body(void);
+static void test_thread_lifetime_body(void);
 #ifdef PILOT_EVENT_TIMER_LLE
 static void test_timer_lle_dpc(void);
 static void test_thread_lle_body(void);
@@ -47,6 +49,8 @@ static void test_worker(void)
 }
 
 recomp_func_t recomp_lookup(uint32_t va) {
+    if(va==0x12640)return test_thread_fp_body;
+    if(va==0x12680)return test_thread_lifetime_body;
 #ifdef PILOT_EVENT_TIMER_LLE
     if(va==0x12480)return test_timer_lle_dpc;
     if(va==0x12500)return test_thread_lle_body;
@@ -81,6 +85,8 @@ static void call_kernel(unsigned ordinal,const uint32_t *args,unsigned argc)
 #include "file_cache_contract_test.inc"
 #include "nonlocal_jump_contract_test.inc"
 #include "thread_objects_contract_test.inc"
+#include "thread_lifetime_contract_test.inc"
+#include "thread_fp_contract_test.inc"
 #include "thread_scheduler_contract_test.inc"
 #include "event_objects_contract_test.inc"
 #ifdef PILOT_EVENT_TIMER_LLE
@@ -521,6 +527,8 @@ int main(int argc,char **argv)
             return 0;
         }
         if (!strcmp(argv[1],"threads")) { test_thread_objects(); return 0; }
+        if (!strcmp(argv[1],"thread-fp")) { test_thread_fp(); return 0; }
+        if (!strcmp(argv[1],"thread-lifetimes")) { test_thread_lifetimes(); return 0; }
         if (!strcmp(argv[1],"events")) { test_event_objects(); return 0; }
 #ifdef PILOT_EVENT_TIMER_LLE
         if (!strcmp(argv[1],"event-timer-lle")) { test_event_timer_lle(); return 0; }

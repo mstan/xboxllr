@@ -24,6 +24,7 @@
 #include "machine/apu_clock.hpp"
 #include "machine/apu_adpcm.h"
 #include "machine/apu_gp_dma.hpp"
+#include "machine/apu_envelope_curve.hpp"
 
 namespace xlle {
 
@@ -31,6 +32,9 @@ struct ApuRateState;
 struct ApuEnvelopeStep {
     bool running=false;
     float amplitude=0,filter=0;
+    // Only the owning voice processor retires an amplitude force-release.
+    // A filter force-release supplies zero modulation, not voice completion.
+    bool force_release=false;
 };
 
 // A RAM-backed MMIO register file: reads return the last written value (reset 0).
@@ -135,9 +139,11 @@ public:
     bool resample_source(uint16_t voice,float* stereo,uint32_t capacity,uint32_t& count,bool& ended);
 
     // One 32-output-sample VP quantum. Envelopes run at 1500 Hz independently
-    // of source pitch. Unsupported curves fail before either envelope changes.
+    // of source pitch. Decay/release use an explicitly nominal replaceable
+    // policy; invalid phases/rates fail before either envelope changes.
     bool step_envelopes(uint16_t voice,ApuEnvelopeStep& result);
-    // Compose source, rate and amplitude envelopes only. Filtering, voice
+    // Compose source, rate and amplitude envelopes only. Force-release returns
+    // no source output; this stage does not retire the voice. Filtering, voice
     // headroom, final sends, GP and completion remain subsequent stages.
     bool source_envelope_quantum(uint16_t voice,float* stereo,uint32_t& count,bool& ended);
     // One real pre-GP voice quantum: source/rate/envelopes, bypass-filter path,
@@ -234,6 +240,10 @@ public:
                 voice_off(value);
                 return;
             }
+            if (method == kVoiceRelease) {
+                voice_release(value);
+                return;
+            }
         }
 
         const bool releases_method_trap =
@@ -246,15 +256,22 @@ public:
 
         log_subregion("wr", off);
         RegFileMmio::mmio_write(addr, size, value);
-        if(size==4 && (off==kVpvaddr || off==kVpsgeaddr))
+        if(size==4 && (off==kVpvaddr || off==kVpsgeaddr)) {
             for(auto& rate:voice_rates_)rate.reset();
+            for(auto& envelope:voice_envelopes_)envelope={};
+        }
         if ((off == kIen || off == kFectl) && size == 4) update_irq();
     }
 
     uint64_t voice_off_methods() const { return voice_off_methods_; }
+    uint64_t voice_release_methods() const { return voice_release_methods_; }
     uint64_t idle_voice_traps() const { return idle_voice_traps_; }
 
 private:
+    // Unamplified source/rate output and separately evaluated control permit a
+    // future owned filter between rate conversion and amplitude application.
+    bool source_signal_quantum(uint16_t voice,float* stereo,uint32_t& count,
+                               bool& ended,ApuEnvelopeStep& control);
     uint32_t* gp_host_word(uint32_t offset,int size) {
         if(size!=4 || (offset&3))return nullptr;
         offset-=0x30000;
@@ -325,7 +342,8 @@ private:
 
     // VP method and guest voice structure fields.
     static constexpr uint32_t kVpBase = 0x20000, kSetAntecedent = 0x120;
-    static constexpr uint32_t kVoiceOn = 0x124, kVoiceOff = 0x128;
+    static constexpr uint32_t kVoiceOn = 0x124, kVoiceOff = 0x128,
+                              kVoiceRelease = 0x12c;
     static constexpr uint32_t kSe2feIdleVoice = 0x8000;
     static constexpr uint32_t kVoiceSize = 0x80, kVoiceCfgFmt = 0x04;
     static constexpr uint32_t kVoiceState = 0x54, kVoicePitchLink = 0x7c;
@@ -430,8 +448,10 @@ private:
                                   (previous & ~field.mask) | (value & field.mask)))
                 device_fault("voice configuration DMA failed");
             else if((method==0x304 && ((previous^value)&0xfffffc00)) ||
-                    method==0x3a0 || method==0x3a4 || method==0x3d8 || method==0x3dc)
+                    method==0x3a0 || method==0x3a4 || method==0x3d8 || method==0x3dc) {
                 voice_rates_[voice].reset();
+                voice_envelopes_[voice]={};
+            }
             return true;
         }
         return false;
@@ -502,7 +522,44 @@ private:
         set_reg32(kFedecmeth, kVoiceOn);
         set_reg32(kFedecparam, argument);
         voice_rates_[voice].reset();
+        voice_envelopes_[voice]={};
         ++voice_on_methods_;
+    }
+
+    // Ordinary 2D buffer release is control work, not a source fetch or DONE.
+    // Current readable levels are retained as the nominal release origins.
+    void voice_release(uint32_t argument) {
+        const uint32_t voice=argument&0xffff;
+        if((argument&0xffff0000) || voice<64 || voice>=kMaxVoices) {
+            device_fault("VOICE_RELEASE ordinary handle/flags remain unqualified");return;
+        }
+        uint32_t state=0,format=0,counts=0,misc=0,lfo=0,levels[2]{};
+        if(!read_voice_word(voice,kVoiceState,state) || !read_voice_word(voice,4,format)) {
+            device_fault("VOICE_RELEASE owner state DMA failed");return;
+        }
+        if(format&((1u<<21)|(1u<<22)|(1u<<24))) {
+            device_fault("VOICE_RELEASE stream/linked/multipass ownership remains unqualified");return;
+        }
+        if(!(state&kVoiceActive))return;
+        if(!read_voice_word(voice,0x34,counts) || !read_voice_word(voice,0x18,misc) ||
+           !read_voice_word(voice,0x6c,lfo) || !read_voice_word(voice,0x58,levels[0]) ||
+           !read_voice_word(voice,0x5c,levels[1])) {
+            device_fault("VOICE_RELEASE configuration DMA failed");return;
+        }
+        std::array<apu_envelope_curve::ReleaseHistory,2> released{};
+        for(unsigned i=0;i<2;++i) {
+            const uint16_t n=uint16_t(((i?misc:lfo)&0xfff)*16);
+            counts=(counts&~(0xffffu<<(i*16)))|(uint32_t(n)<<(i*16));
+            released[i]={true,uint8_t(levels[i]>>24),n,n,n};
+        }
+        state=(state&0x00ffffff)|0x66000000;
+        if(!write_voice_word(voice,0x34,counts) || !write_voice_word(voice,kVoiceState,state)) {
+            device_fault("VOICE_RELEASE state DMA failed");return;
+        }
+        voice_envelopes_[voice]=released;
+        set_reg32(kFedecmeth,kVoiceRelease);
+        set_reg32(kFedecparam,argument);
+        ++voice_release_methods_;
     }
 
     bool retire_buffer(uint32_t voice) {
@@ -529,6 +586,7 @@ private:
             device_fault("VOICE_OFF state write failed");return false;
         }
         voice_rates_[voice].reset();
+        voice_envelopes_[voice]={};
         const uint8_t done=1;
         if(!write_mem(static_cast<uint32_t>(address),&done,1)) {
             device_fault("VOICE_OFF notifier status write failed");return false;
@@ -609,10 +667,12 @@ private:
     uint64_t frame_ = 0;
     uint64_t voice_on_methods_ = 0;
     uint64_t voice_off_methods_ = 0;
+    uint64_t voice_release_methods_ = 0;
     uint64_t idle_voice_traps_ = 0;
     uint64_t xgscnt_ = 0;
     std::array<bool,kMaxVoices> voice_locked_{};
     std::array<std::shared_ptr<ApuRateState>,kMaxVoices> voice_rates_{};
+    std::array<std::array<apu_envelope_curve::ReleaseHistory,2>,kMaxVoices> voice_envelopes_{};
     std::array<uint8_t,32> submix_headroom_{};
     std::array<uint32_t,0x3800> gp_words_{};
     ApuGpDma gp_dma_;

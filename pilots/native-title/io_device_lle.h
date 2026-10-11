@@ -67,8 +67,12 @@ const char *pilot_io_device_irq(unsigned char *guest,int *delivered);
 const char *pilot_io_device_image(unsigned char *guest,uint32_t base,uint32_t bytes);
 /* Register a resident runtime-owned guest stack. The original VM reserves its
  * address range; only resident owned pages can acquire original PFNs/pins.
- * Stack allocations currently last for the title process lifetime. */
+ * Release only after native execution and all caller references retire. */
 const char *pilot_io_device_stack(unsigned char *guest,uint32_t base,uint32_t bytes);
+/* Execute the real original VM release of one exactly registered stack.
+ * Live DMA pins leave released=0 without changing storage. Otherwise retire
+ * publication and Unicorn aliases before native decommit/address reuse. */
+const char *pilot_io_device_stack_release(unsigned char *guest,uint32_t base,uint32_t bytes,int *released);
 /* Materialize original physical backing for currently resident pages in an
  * already registered image/stack range. The native loader's actual bytes are
  * retained and become the single backing for CPU, original services and DMA. */

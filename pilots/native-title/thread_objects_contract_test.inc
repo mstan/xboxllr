@@ -47,7 +47,7 @@ static void test_thread_objects(void)
     uint32_t args[]={0x19000,0,0x10000,20,0x19004,0,0,1,0,0x12200};
     call_kernel(255,args,10);CHECK(!g_eax);
     uint32_t handle=MEM32(0x19000),out=0x19008;
-    HANDLE host=threads[1].handle;
+    HANDLE host=NULL;struct PilotThread *thread=thread_from_handle(handle,&host);CHECK(thread);
     Sleep(20);CHECK(!scheduler_counter && WaitForSingleObject(host,0)==WAIT_TIMEOUT);
     GROUP_AFFINITY worker_affinity;
     CHECK(GetThreadGroupAffinity(host,&worker_affinity) && worker_affinity.Mask==guest_cpu_affinity.Mask &&
@@ -56,8 +56,8 @@ static void test_thread_objects(void)
     MEM32(out)=0xfeedface;ref[1]++;
     call_kernel(246,ref,3);CHECK(g_eax==0xc0000024u && MEM32(out)==0xfeedface);
     ref[1]=PILOT_THREAD_OBJECT_TYPE;call_kernel(246,ref,3);CHECK(!g_eax);
-    uint32_t object=MEM32(out);CHECK(object==threads[1].object && threads[1].object_refs==1);
-    call_kernel(246,ref,3);CHECK(!g_eax && threads[1].object_refs==2);
+    uint32_t object=MEM32(out);CHECK(object==thread->object && thread->object_refs==1);
+    call_kernel(246,ref,3);CHECK(!g_eax && thread->object_refs==2);
     uint32_t control[]={object,2};call_kernel(143,control,2);CHECK(!g_eax);
     CHECK(GetThreadPriority(host)==THREAD_PRIORITY_HIGHEST);
     call_kernel(124,control,1);CHECK(g_eax==2);
@@ -86,22 +86,22 @@ static void test_thread_objects(void)
     for(unsigned i=127;i>0;--i){call_kernel(224,control,2);CHECK(!g_eax && MEM32(out)==i);}
     scheduler_progress();
     /* Closing the guest handle leaves the independently retained object valid. */
-    call_kernel(187,control,1);CHECK(!g_eax && !threads[1].handle);
-    HANDLE retained=threads[1].reference_handle;CHECK(retained!=NULL);
+    call_kernel(187,control,1);CHECK(!g_eax && !thread->handle);
+    HANDLE retained=thread->reference_handle;CHECK(retained!=NULL);
     uint32_t query[]={object};call_kernel(124,query,1);CHECK(!g_eax);
     MEM32(out)=0xfeedface;call_kernel(224,control,2);CHECK(g_eax==0xc0000008u && MEM32(out)==0xfeedface);
     InterlockedExchange(&scheduler_exit,1);
     CHECK(WaitForSingleObject(retained,2000)==WAIT_OBJECT_0);
-    g_ecx=object;call_kernel(250,NULL,0);CHECK(threads[1].object_refs==1);
-    g_ecx=object;call_kernel(250,NULL,0);CHECK(!threads[1].object_refs && !threads[1].reference_handle);
+    g_ecx=object;call_kernel(250,NULL,0);CHECK(thread->object_refs==1);
+    g_ecx=object;call_kernel(250,NULL,0);CHECK(!thread->object_refs && !thread->reference_handle);
 
     /* Self-suspend must release the ownership lock before a peer resumes it. */
     InterlockedExchange(&scheduler_exit,0);InterlockedExchange(&scheduler_counter,0);
     args[5]=1;args[7]=0;call_kernel(255,args,10);CHECK(!g_eax);
-    control[0]=MEM32(0x19000);host=threads[2].handle;
+    control[0]=MEM32(0x19000);thread=thread_from_handle(control[0],&host);CHECK(thread);
     ULONGLONG deadline=GetTickCount64()+2000;
     for(;;) {
-        AcquireSRWLockShared(&thread_lock);uint32_t suspended=threads[2].suspend_count;ReleaseSRWLockShared(&thread_lock);
+        AcquireSRWLockShared(&thread_lock);uint32_t suspended=thread->suspend_count;ReleaseSRWLockShared(&thread_lock);
         if(suspended)break;
         CHECK(GetTickCount64()<deadline);Sleep(1);
     }
@@ -113,8 +113,8 @@ static void test_thread_objects(void)
     /* Original PsCreateSystemThreadEx publishes NULL TlsData for size zero,
      * both before start and in the actual generated body. */
     args[3]=0;args[5]=2;args[7]=1;call_kernel(255,args,10);CHECK(!g_eax);
-    CHECK(!MEM32(threads[3].object+0x28));
-    control[0]=MEM32(0x19000);host=threads[3].handle;
+    control[0]=MEM32(0x19000);thread=thread_from_handle(control[0],&host);CHECK(thread);
+    CHECK(!MEM32(thread->object+0x28));
     call_kernel(224,control,2);CHECK(!g_eax && MEM32(out)==1);
     CHECK(WaitForSingleObject(host,2000)==WAIT_OBJECT_0 && scheduler_stage==3);
     call_kernel(187,control,1);CHECK(!g_eax);
